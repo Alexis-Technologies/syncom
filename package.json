@@ -53,7 +53,14 @@
     "replication",
     "conflict-resolution",
     "CRDT",
-    "event-sourcing"
+    "event-sourcing",
+    "database",
+    "globalstorage",
+    "localstorage",
+    "storage",
+    "global",
+    "warehouse",
+    "distributed"
   ],
   "author": "Alex Dolid <dolid.sasha@gmail.com>",
   "license": "MIT",
