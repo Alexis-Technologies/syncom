@@ -51,12 +51,8 @@ const merge = (source, delta) => {
     }
 
     if (Array.isArray(delta[key]) || delta[key] instanceof Set) {
-      const sourceSet = new Set(
-        Array.isArray(result[key]) ? result[key] : result[key] || [],
-      );
-      const deltaSet = new Set(
-        Array.isArray(delta[key]) ? delta[key] : delta[key],
-      );
+      const sourceSet = new Set(Array.isArray(result[key]) ? result[key] : result[key] || []);
+      const deltaSet = new Set(Array.isArray(delta[key]) ? delta[key] : delta[key]);
       result[key] = Array.from(new Set([...sourceSet, ...deltaSet]));
     } else if (typeof delta[key] === 'object' && delta[key] !== null) {
       if (typeof result[key] === 'object' && result[key] !== null) {
@@ -64,10 +60,7 @@ const merge = (source, delta) => {
       } else {
         result[key] = delta[key];
       }
-    } else if (
-      typeof delta[key] === 'number' &&
-      typeof result[key] === 'number'
-    ) {
+    } else if (typeof delta[key] === 'number' && typeof result[key] === 'number') {
       result[key] += delta[key];
     } else {
       result[key] = delta[key];

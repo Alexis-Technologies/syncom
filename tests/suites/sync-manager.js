@@ -22,10 +22,7 @@ const runSyncManagerCoreTests = async (t, assert, getSync) => {
   await t.test('addNode rejects bad input', async (t2) => {
     const sync = await getSync(t2);
 
-    await assert.rejects(
-      () => sync.addNode({ type: 'uplink' }),
-      /URL is required/,
-    );
+    await assert.rejects(() => sync.addNode({ type: 'uplink' }), /URL is required/);
 
     await assert.rejects(
       () =>
@@ -53,10 +50,7 @@ const runSyncManagerCoreTests = async (t, assert, getSync) => {
 
   await t.test('removeNode throws when unknown', async (t2) => {
     const sync = await getSync(t2);
-    await assert.rejects(
-      () => sync.removeNode('http://nope.example.com:1'),
-      /not found/,
-    );
+    await assert.rejects(() => sync.removeNode('http://nope.example.com:1'), /not found/);
   });
 };
 

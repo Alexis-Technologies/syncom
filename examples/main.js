@@ -1,10 +1,10 @@
 'use strict';
 
-const globalStorage = require('../globalstorage.js');
+const syncom = require('..');
 const domain = require('./domain.js');
 
 const main = async () => {
-  const storage = await globalStorage.open();
+  const storage = await syncom.open();
   domain.init(storage);
 
   const authorId = await storage.insert({

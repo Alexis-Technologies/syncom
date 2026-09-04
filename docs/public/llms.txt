@@ -1,0 +1,32 @@
+# @alexify/syncom
+
+> Fast, zero-dependency distributed data sync engine for JavaScript. Local-first
+> storage with a hash-linked integrity log, CRDT deltas, and JavaScript smart
+> contracts — one API across Node.js and the browser.
+
+## Key facts
+
+- Package: `@alexify/syncom` (npm), MIT, source at https://github.com/Alexis-Technologies/syncom
+- Requires Node.js >= 22, or a browser with OPFS and Web Crypto (secure context)
+- **Zero runtime dependencies.** Browser bundle is ~4.7 KB min+gzip
+- CommonJS, no build step; `src/` ships as published
+- Entry points: `.` (Node `index.js` / browser `browser.js` via the `browser` export condition)
+- Exports: `open`, `Storage`, `Blockchain`, `SmartContract`, `DataReader`, `SyncManager`,
+  `diff`, `merge`, `apply`, `calculateHash`, `generateKeys`, `encrypt`, `decrypt`,
+  `loadKeys`, `read`, `write`, `exists`, `remove`
+- `Storage`, `Blockchain` and `SyncManager` initialise asynchronously: `await new Blockchain(path)`
+- In the browser `calculateHash`, `encrypt` and `decrypt` return promises; in Node.js they are synchronous
+- `merge` ADDS numbers rather than replacing them — this is the counter CRDT and is deliberate
+- **Not implemented:** `storage.sync` registers and persists peer nodes, but no
+  transport exists; `sync.start()` is a no-op
+
+## Documentation
+
+- [Getting Started](https://syncomjs.vercel.app/guide/getting-started): install, open a storage, records, validation.
+- [Storage](https://syncomjs.vercel.app/guide/storage): explicit API, compare-and-swap, records, references, schema collections, on-disk layout.
+- [CRDT deltas](https://syncomjs.vercel.app/guide/crdt): diff/merge/apply semantics, grow-only sets, the numeric-addition rule.
+- [Blockchain log](https://syncomjs.vercel.app/guide/chain): block structure, hash linking, validate cost, per-record verification.
+- [Smart contracts](https://syncomjs.vercel.app/guide/contracts): storing procedures in the chain, DataReader, the `new Function` risk, serialisation limits.
+- [Sync](https://syncomjs.vercel.app/guide/sync): the node registry and what a transport would still need.
+- [Browser](https://syncomjs.vercel.app/guide/browser): OPFS and Web Crypto, the async signature differences, bundle size.
+- [API reference](https://syncomjs.vercel.app/reference/api): every export with signatures and return types.

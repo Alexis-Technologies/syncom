@@ -2,7 +2,7 @@
 
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { between } = require('metautil');
+const { between } = require('./utils.js');
 
 class SyncManager {
   #path;
@@ -28,12 +28,10 @@ class SyncManager {
   }
 
   async start() {
-    // TODO: Implement metacom-based sync
-    // This would connect to the node using metacom protocol
-    // and exchange CRDT delta logs for sync
-    const uplinks = Array.from(this.#nodes).filter(
-      (node) => node.type === 'uplink' && node.enabled,
-    );
+    // TODO: no transport yet — start() walks the enabled uplinks and does
+    // nothing with them. A WebSocket client that exchanges CRDT delta logs
+    // goes here.
+    const uplinks = Array.from(this.#nodes).filter((node) => node.type === 'uplink' && node.enabled);
     if (uplinks.length === 0) return;
     for (const uplink of uplinks) {
       try {

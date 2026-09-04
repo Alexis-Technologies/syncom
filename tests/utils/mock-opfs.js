@@ -73,10 +73,7 @@ class MockDirectoryHandle {
 
 const installMockOpfs = () => {
   const rootMap = new Map();
-  const prevNavigator = Object.getOwnPropertyDescriptor(
-    globalThis,
-    'navigator',
-  );
+  const prevNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
 
   Object.defineProperty(globalThis, 'navigator', {
     configurable: true,

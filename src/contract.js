@@ -10,6 +10,10 @@ const deserializeFunction = (source) => {
   if (body.startsWith('{')) body = body.slice(1, -1);
   else body = `return ${body};`;
   body = `return async (${args}) => {${body}}`;
+  // This IS the feature: a smart contract is source stored in the chain and
+  // reconstituted here. See SECURITY.md — a chain you load contracts from is
+  // trusted input, because anything that can append a block can run code.
+  // oxlint-disable-next-line no-new-func
   return new Function('reader', 'args', body)();
 };
 

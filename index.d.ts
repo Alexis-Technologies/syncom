@@ -16,6 +16,11 @@ export function encrypt(data: unknown, publicKey: string): string;
 export function decrypt(data: string, privateKey: string): unknown;
 export function loadKeys(basePath: string): Promise<KeyPair>;
 
+export function read(dir: string, filename: string): Promise<string>;
+export function write(dir: string, filename: string, content: string): Promise<void>;
+export function exists(dir: string, filename: string): Promise<boolean>;
+export function remove(dir: string, filename: string): Promise<void>;
+
 export type CrdtDelta = Record<string, unknown>;
 
 export type CrdtHistoryRecord =
@@ -183,7 +188,7 @@ export interface Storage {
     options?: StorageDataOptions,
   ): Promise<void>;
   loadData(id: string): Promise<unknown | null>;
-  validate(options: { last?: number; from?: string }): Promise<boolean>;
+  validate(options?: { last?: number; from?: string }): Promise<boolean>;
   validate(id: string, data: unknown, blockHash: string): Promise<boolean>;
   insert(data: unknown): Promise<string>;
   has(id: string): Promise<boolean>;
@@ -198,7 +203,7 @@ export interface Storage {
   addUpdate(update: StorageUpdate): void;
 }
 
-export interface GsRecord {
+export interface SyncomRecord {
   readonly id: string;
   on(event: 'update', listener: (data: unknown, delta: unknown) => void): void;
   data(): Promise<unknown>;
@@ -207,33 +212,33 @@ export interface GsRecord {
   delete(): Promise<void>;
 }
 
-declare class GsCollection {
+declare class SyncomCollection {
   constructor(storage: Storage, name: string);
   readonly name: string;
-  insert(data: unknown): Promise<GsRecord>;
+  insert(data: unknown): Promise<SyncomRecord>;
   get(id: string): Promise<unknown | null>;
   delete(id: string): Promise<void>;
   update(id: string, delta: unknown): Promise<void>;
-  record(id: string): Promise<GsRecord>;
+  record(id: string): Promise<SyncomRecord>;
 }
 
-declare const GsRecordCtor: {
-  readonly prototype: GsRecord;
-  new (id: string, storage: Storage): Promise<GsRecord>;
+declare const SyncomRecordCtor: {
+  readonly prototype: SyncomRecord;
+  new (id: string, storage: Storage): Promise<SyncomRecord>;
 };
 
 export interface StorageConstructor {
   readonly prototype: Storage;
   new (options?: StorageOptions): Promise<Storage>;
-  Collection: typeof GsCollection;
-  Record: typeof GsRecordCtor;
+  Collection: typeof SyncomCollection;
+  Record: typeof SyncomRecordCtor;
 }
 
 export const Storage: StorageConstructor;
 
 export namespace Storage {
-  export type StorageRecord = GsRecord;
-  export type StorageCollection = GsCollection;
+  export type StorageRecord = SyncomRecord;
+  export type StorageCollection = SyncomCollection;
 }
 
 export function open(options?: StorageOptions): Promise<Storage>;

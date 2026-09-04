@@ -1,6 +1,6 @@
 'use strict';
 
-const { Emitter, generateUUID } = require('metautil');
+const { Emitter, generateUUID } = require('./utils.js');
 const { encrypt, decrypt, loadKeys, calculateHash } = require('./crypto.js');
 const { Blockchain } = require('./chain.js');
 const { SyncManager } = require('./sync.js');
@@ -178,7 +178,7 @@ class Storage {
   #schema = null;
 
   constructor(options = {}) {
-    this.#path = options.path || options.name || 'gs';
+    this.#path = options.path || options.name || 'syncom';
     this.#records = new Map();
     if (options.schema) this.#schema = options.schema;
     return this.#init();
@@ -247,9 +247,13 @@ class Storage {
     return decrypted;
   }
 
-  async validate(idOrOptions, data, blockHash) {
-    const isChainValidation =
-      !data && !blockHash && ('last' in idOrOptions || 'from' in idOrOptions);
+  async validate(idOrOptions = {}, data, blockHash) {
+    // Two shapes share one method: `validate(id, data, blockHash)` checks a
+    // single record against its block, anything else walks the chain. A record
+    // id is always a string, so that is the discriminator — keying off `'last'
+    // in idOrOptions` instead made the no-argument and `{}` calls fall through
+    // to the record branch, where they threw or silently returned false.
+    const isChainValidation = typeof idOrOptions !== 'string' && !data && !blockHash;
     if (isChainValidation) {
       return await this.#chain.validate(idOrOptions);
     }

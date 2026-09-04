@@ -1,11 +1,6 @@
 'use strict';
 
-const runCryptoKeysTests = async (
-  t,
-  assert,
-  cryptoMod,
-  { getKeysBase } = {},
-) => {
+const runCryptoKeysTests = async (t, assert, cryptoMod, { getKeysBase } = {}) => {
   if (typeof getKeysBase !== 'function') {
     throw new TypeError('runCryptoKeysTests requires getKeysBase');
   }
@@ -22,15 +17,11 @@ const runCryptoKeysTests = async (
     const keys = await Promise.resolve(cryptoMod.generateKeys());
     const testData = { message: 'Hello, World!', number: 42 };
 
-    const encrypted = await Promise.resolve(
-      cryptoMod.encrypt(testData, keys.publicKey),
-    );
+    const encrypted = await Promise.resolve(cryptoMod.encrypt(testData, keys.publicKey));
     assert.strictEqual(typeof encrypted, 'string');
     assert.notStrictEqual(encrypted, JSON.stringify(testData));
 
-    const decrypted = await Promise.resolve(
-      cryptoMod.decrypt(encrypted, keys.privateKey),
-    );
+    const decrypted = await Promise.resolve(cryptoMod.decrypt(encrypted, keys.privateKey));
     assert.deepStrictEqual(decrypted, testData);
   });
 

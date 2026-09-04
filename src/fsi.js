@@ -2,7 +2,7 @@
 
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { fileExists } = require('metautil');
+const { fileExists } = require('./utils.js');
 
 const read = (dir, filename) => fs.readFile(path.join(dir, filename), 'utf8');
 
