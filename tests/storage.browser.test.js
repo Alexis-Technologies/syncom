@@ -39,3 +39,22 @@ test('Storage on the browser halves', async (t) => {
     assert.deepStrictEqual(await reopened.get('s1'), secret);
   });
 });
+
+test('Storage telemetry on the browser halves', async (t) => {
+  const env = installBrowserGlobals();
+  t.after(() => env.uninstall());
+  const browser = requireBrowserBarrel();
+  const { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } = require('@opentelemetry/sdk-trace-base');
+
+  await t.test('a commit is spanned with nothing but the injected tracer', async () => {
+    const exporter = new InMemorySpanExporter();
+    const provider = new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] });
+    const storage = await browser.open({ path: 'store-telemetry', telemetry: { tracer: provider.getTracer('t') } });
+    const id = await storage.insert({ title: 'Traced' });
+    const [span] = exporter.getFinishedSpans();
+    assert.strictEqual(span.name, 'syncom.commit');
+    assert.strictEqual(span.attributes['syncom.op.type'], 'write');
+    assert.strictEqual(span.attributes['syncom.record.id'], id);
+    assert.strictEqual(span.attributes['syncom.result'], 'applied');
+  });
+});

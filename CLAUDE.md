@@ -27,6 +27,7 @@ src/log.js                OpLog — the persisted operation log over fsi
 src/sync.js               SyncManager (dialing side) + unit() (hosting side)
 src/link.js               isSyncLink — the link contract check
 src/wrpc.js               createWrpcLink — a WrpcClient as a SyncLink (no wrpc import)
+src/telemetry.js          the injected-OpenTelemetry writer (duck-typed; @opentelemetry/* only devDeps)
 src/                      ships as-is — no build step, CommonJS, 'use strict'
 tests/                    *.test.js are tests; anything else is a helper
 bench/                    one file per subject + support/harness.js
@@ -96,6 +97,16 @@ docs/                     VitePress site
   fields is not a plain patch. Do not "correct" it, and do not write docs or
   examples that assume replacement. Storage does NOT replicate through
   `merge`; the op model in `src/ops.js` is what converges.
+- **Telemetry is injected, never required.** `createTelemetry` in
+  `src/telemetry.js` duck-types whatever `open({ telemetry })` was given and
+  returns a writer; `DISABLED` is a frozen null-object whose `withSpan` still
+  runs its callback, so call sites bracket work the same way on or off (but
+  guard with `otel.enabled` before allocating attributes or reading the
+  clock). syncom never puts trace context into ops — `tp`/`ts` are wrpc's,
+  ops are durable — and its spans nest under the active context instead.
+  Never mint a metric label from a record id, an origin, a peer url or a
+  scope. Every `catch {}` in the writer has a hostile-implementation test in
+  `tests/telemetry.test.js`; keep it that way or the branch threshold drops.
 - **Encrypted records are local.** `{ encrypted: true }` seals a record for
   this node's key; it produces no op and is excluded from snapshots. Do not
   route an encrypted entry through `applyOp`.

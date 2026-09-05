@@ -12,6 +12,20 @@ section until the first publish; everything below lands there on release day.
 
 ### Added
 
+- **OpenTelemetry, injected.** `open({ telemetry: { api } })` (the
+  `@opentelemetry/api` module) or `{ tracer, meter }` — the same object wrpc's
+  `telemetry` option takes, and no dependency on either. Spans:
+  `syncom.commit`, `syncom.apply`, `syncom.replay`, `syncom.push`,
+  `syncom.bootstrap`, `syncom.log.roll`. Metrics: `syncom.commits`,
+  `syncom.write.duration`, `syncom.ops.received`, `syncom.ops.rejected`,
+  `syncom.replication.lag`, `syncom.push.ops`, `syncom.bootstraps`,
+  `syncom.log.segments`, `syncom.log.append.duration`. syncom carries no
+  trace context of its own: its spans nest under whatever is active, so with
+  wrpc telemetry on both ends a write on one node and its application on the
+  next are one trace. `includeIdentity: false` keeps record ids and peer
+  urls off spans; they are never metric labels. `storage.telemetry` exposes
+  the writer; `OpLog` takes the option directly. Browser budget raised
+  14 → 17 KB for it.
 - **Replication.** Every write is now an operation — `write` (`insert`/`set`),
   `set` (`update`/`swap`/`record.save`), `inc`, `delete` — appended to a
   persisted log (`src/log.js`) and applied through a record-level model
@@ -55,6 +69,14 @@ section until the first publish; everything below lands there on release day.
 - A VitePress documentation site under `docs/`, and `.github/workflows/ci.yml`
   running lint + format + size, the test matrix, and the docs build.
 - `CHANGELOG.md`, `SECURITY.md`, `CONTRIBUTING.md`, `CLAUDE.md`, `vercel.json`.
+
+### Fixed
+
+- A peer's op refused by the register/counter rule no longer fails the whole
+  push when nobody listens for `error`: the emit is guarded, the vector
+  advances, and the peer stops offering the same page on every hello.
+- `OpLog` now receives the storage `logger`, so an unreadable segment or open
+  file is reported rather than silently skipped.
 
 ### Fixed
 

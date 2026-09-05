@@ -15,6 +15,7 @@ expectType<unknown>(browser.merge({ a: 1 }, { a: 2 }));
 expectType<Promise<Blockchain>>(new browser.Blockchain('base'));
 expectType<Promise<Storage>>(browser.open({ path: 'data' }));
 expectType<Promise<Storage>>(browser.open({ path: 'data', getId: () => 'id' }));
+expectType<Promise<Storage>>(browser.open({ path: 'data', telemetry: { api: {} } }));
 // The id generator is not part of the async asymmetry: sync in both halves.
 expectType<string>(browser.Storage.generateId());
 expectType<Promise<string>>(browser.read('dir', 'file.json'));

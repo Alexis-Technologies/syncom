@@ -26,6 +26,7 @@ const { Emitter } = require('./utils.js');
 const { packOps, unpackOps } = require('./ops.js');
 const { vectorHas, keyScope } = require('./vector.js');
 const { isSyncLink } = require('./link.js');
+const { createTelemetry, traced } = require('./telemetry.js');
 
 const REMOTE = 'remote';
 const PROTOCOL = 1;
@@ -89,11 +90,13 @@ class SyncManager extends Emitter {
   #onChange = null;
   #started = false;
   #saving = new Map();
+  #otel;
 
   constructor(storage, options = {}) {
     super();
     this.#storage = storage;
     this.#options = options ?? {};
+    this.#otel = createTelemetry(storage.telemetry);
     this.#path = `${storage.path}/${REMOTE}`;
     return this.#init();
   }
@@ -208,7 +211,7 @@ class SyncManager extends Emitter {
     const results = [];
     for (const peer of peers) {
       if (!peer.remote) continue;
-      results.push({ url: peer.node.url, pushed: await this.#push(peer) });
+      results.push({ url: peer.node.url, pushed: await this.#push(peer, 'manual') });
     }
     return results;
   }
@@ -331,7 +334,7 @@ class SyncManager extends Emitter {
     node.remote = { id: answer.node, epoch: answer.epoch };
     await this.#saveNode(node);
     await this.emit('peer', { url: node.url, connected: true, node: answer.node });
-    await this.#push(peer);
+    await this.#push(peer, 'handshake');
     if (resubscribe && !peer.subscription) this.#subscribe(peer);
   }
 
@@ -339,7 +342,7 @@ class SyncManager extends Emitter {
   // own origin excluded (it has those by definition). A host that is behind
   // what we still retain cannot be caught up from here; it will bootstrap
   // from a node that dials it, or we from it.
-  async #push(peer) {
+  async #push(peer, reason) {
     const { node } = peer;
     const entries =
       this.#storage.log.since(undefined) ??
@@ -352,10 +355,43 @@ class SyncManager extends Emitter {
       if (!inScope(op, node.scopes)) continue;
       ops.push(op);
     }
-    return this.#send(peer, ops);
+    return this.#send(peer, ops, reason);
   }
 
-  async #send(peer, ops) {
+  // One span per push, whatever its page count: with wrpc underneath, the
+  // `syncom/push` client span of every page nests under it, and the server
+  // span on the far side under that — the link carries the context.
+  // `reason` says what caused it: a handshake, a manual sync(), or a relay
+  // of ops that just landed.
+  async #send(peer, ops, reason) {
+    const otel = this.#otel;
+    if (!otel.enabled || ops.length === 0) return this.#sendPages(peer, ops);
+    const attributes = {
+      'syncom.push.reason': reason,
+      'syncom.ops.count': ops.length,
+      'syncom.peer.url': peer.node.url,
+      'syncom.peer.node': peer.remote.id,
+    };
+    const pages = Math.ceil(ops.length / (this.#options.pageSize ?? DEFAULT_PAGE_SIZE));
+    let result = 'error';
+    try {
+      const sent = await traced(
+        otel,
+        'syncom.push',
+        attributes,
+        () => this.#sendPages(peer, ops),
+        () => ({
+          'syncom.pages': pages,
+        }),
+      );
+      result = 'ok';
+      return sent;
+    } finally {
+      otel.recordPush(reason, result, ops.length);
+    }
+  }
+
+  async #sendPages(peer, ops) {
     const pageSize = this.#options.pageSize ?? DEFAULT_PAGE_SIZE;
     let sent = 0;
     for (let index = 0; index < ops.length; index += pageSize) {
@@ -416,38 +452,63 @@ class SyncManager extends Emitter {
   async #bootstrap(peer) {
     if (peer.bootstrapping) return;
     peer.bootstrapping = true;
-    const { node, link } = peer;
     try {
-      peer.subscription?.unsubscribe?.();
-      peer.subscription = null;
-      let cursor = null;
-      let startEventId = null;
-      let startVector = null;
-      let total = 0;
-      do {
-        const page = await link.call('syncom/snapshot', { cursor, scopes: node.scopes });
-        if (peer.closed) return;
-        startEventId ??= page.eventId;
-        startVector ??= page.vector ?? null;
-        const records = page.id !== undefined ? await this.#readSnapshot(link, page) : page.records;
-        await this.#storage.mergeSnapshot(records, { via: peer, from: peer.remote.id });
-        total += records.length;
-        cursor = page.cursor ?? null;
-      } while (cursor !== null);
-      // Everything up to the host's vector at the FIRST page is inside what
-      // was joined; adopting it (for the scopes asked for) means nobody
-      // offers those ops again. Later ops replay from the cursor.
-      if (startVector) {
-        await this.#storage.adoptVector(scopedVector(startVector, node.scopes), { via: peer, from: peer.remote.id });
+      const otel = this.#otel;
+      if (!otel.enabled) return void (await this.#join(peer));
+      const attributes = { 'syncom.peer.url': peer.node.url, 'syncom.peer.node': peer.remote.id };
+      let result = 'error';
+      try {
+        await traced(
+          otel,
+          'syncom.bootstrap',
+          attributes,
+          () => this.#join(peer),
+          (stats) => ({
+            'syncom.pages': stats.pages,
+            'syncom.records': stats.records,
+          }),
+        );
+        result = 'ok';
+      } finally {
+        otel.recordBootstrap(result);
       }
-      node.cursor = startEventId;
-      node.lastSync = Date.now();
-      await this.#saveNode(node);
-      await this.emit('bootstrap', { url: node.url, records: total });
-      if (!peer.closed) this.#subscribe(peer);
     } finally {
       peer.bootstrapping = false;
     }
+  }
+
+  async #join(peer) {
+    const { node, link } = peer;
+    peer.subscription?.unsubscribe?.();
+    peer.subscription = null;
+    let cursor = null;
+    let startEventId = null;
+    let startVector = null;
+    let pages = 0;
+    let total = 0;
+    do {
+      const page = await link.call('syncom/snapshot', { cursor, scopes: node.scopes });
+      pages++;
+      if (peer.closed) return { pages, records: total };
+      startEventId ??= page.eventId;
+      startVector ??= page.vector ?? null;
+      const records = page.id !== undefined ? await this.#readSnapshot(link, page) : page.records;
+      await this.#storage.mergeSnapshot(records, { via: peer, from: peer.remote.id });
+      total += records.length;
+      cursor = page.cursor ?? null;
+    } while (cursor !== null);
+    // Everything up to the host's vector at the FIRST page is inside what
+    // was joined; adopting it (for the scopes asked for) means nobody
+    // offers those ops again. Later ops replay from the cursor.
+    if (startVector) {
+      await this.#storage.adoptVector(scopedVector(startVector, node.scopes), { via: peer, from: peer.remote.id });
+    }
+    node.cursor = startEventId;
+    node.lastSync = Date.now();
+    await this.#saveNode(node);
+    await this.emit('bootstrap', { url: node.url, records: total });
+    if (!peer.closed) this.#subscribe(peer);
+    return { pages, records: total };
   }
 
   // A streamed page: NDJSON, one `{ id, data, meta }` per line, parsed as the
@@ -497,7 +558,7 @@ class SyncManager extends Emitter {
         while (peer.outbox.length > 0 && !peer.closed && peer.connected) {
           const ops = peer.outbox;
           peer.outbox = [];
-          await this.#send(peer, ops);
+          await this.#send(peer, ops, 'relay');
         }
       })
       .catch((error) => {

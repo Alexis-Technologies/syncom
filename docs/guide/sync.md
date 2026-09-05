@@ -270,6 +270,9 @@ storage.on('error', (error) => {});     // a peer's op refused by the register/c
 | `log.rollAfter` | `64` | Appended batches per sealed segment |
 | `pageSize` | `500` | Ops per push, records per snapshot page |
 
+The `telemetry` option sits beside `sync` on `open()`, not inside it — see
+[OpenTelemetry](./telemetry) for the spans and metrics replication emits.
+
 ## Hosting
 
 The unit a wrpc server (or anything shaped like one) mounts:

@@ -303,3 +303,34 @@ test('Storage replication model', async (t) => {
     assert.deepStrictEqual((await storage.snapshot()).records, []);
   });
 });
+
+test('Storage: the seams telemetry shares', async (t) => {
+  await t.test('a refused op with no error listener is still logged and answered', async (t2) => {
+    // Emitter throws on an unheard `error`; before the guard, that throw
+    // failed the whole push and the peer offered the same page forever.
+    const { storage } = await openTemp(t2);
+    const id = await storage.insert({ hits: 'text' });
+    const result = await storage.applyRemote([remoteOp('peer', 1, 'inc', id, { key: 'hits', value: 1 })]);
+    assert.strictEqual(result.applied, 1);
+    assert.strictEqual(storage.vector.peer, 1);
+    assert.deepStrictEqual(await storage.get(id), { hits: 'text' });
+  });
+
+  await t.test('the storage logger reaches the op log', async (t2) => {
+    const events = [];
+    const logger = { warn: (entry) => events.push(entry) };
+    const { dir, storage } = await openTemp(t2, { logger, sync: { log: { rollAfter: 1 } } });
+    await storage.insert({ n: 1 });
+    await storage.close();
+    // One sealed segment on disk; corrupt it and reopen.
+    const logDir = path.join(dir, 'log');
+    const segment = (await fs.readdir(logDir)).find((name) => name.startsWith('seg-'));
+    assert.ok(segment, 'a segment was sealed');
+    await fs.writeFile(path.join(logDir, segment), '{not json');
+    await syncom.open({ path: dir, logger });
+    assert.strictEqual(
+      events.some((entry) => entry.event === 'log.segment.unreadable'),
+      true,
+    );
+  });
+});

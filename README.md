@@ -76,8 +76,8 @@ that fails the build when exceeded.
 
 | Entry | raw | min | min+gzip | budget |
 | ----- | ---:| ---:| --------:| ------:|
-| main entry — browser (@alexify/syncom) | 96.1 KB | 39.4 KB | 13.7 KB | 14.0 KB |
-| main entry — node (@alexify/syncom) | 89.0 KB | 38.5 KB | 13.4 KB | — |
+| main entry — browser (@alexify/syncom) | 114.6 KB | 46.6 KB | 16.1 KB | 17.0 KB |
+| main entry — node (@alexify/syncom) | 106.6 KB | 45.6 KB | 15.8 KB | — |
 | wrpc adapter — browser (@alexify/syncom/wrpc) | 3.3 KB | 1.4 KB | 0.7 KB | 2.0 KB |
 
 ## Quick Start
@@ -144,6 +144,7 @@ nodes converges.
 | **CRDT** | `diff` / `merge` / `apply` over plain objects — nested maps merge recursively, arrays are grow-only sets, numbers add so counters converge |
 | **Contracts** | Store a procedure in the chain by hash, load it anywhere, run it against a read-only view of storage; failures are recorded as blocks |
 | **Portability** | One API over `node:fs` + `node:crypto` on the server and OPFS + Web Crypto in the browser, chosen by the `browser` export condition |
+| **Observability** | Injected OpenTelemetry (`open({ telemetry })`): spans for local writes, applied batches, pushes, bootstraps and log rolls, plus outcome and lag metrics — nested under wrpc's spans, which carry the trace across the wire. See [OpenTelemetry](https://syncomjs.vercel.app/guide/telemetry) |
 | **Dependencies** | None. wrpc is a devDependency for one integration test and is injected at runtime |
 
 ## Browser usage

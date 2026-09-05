@@ -13,6 +13,7 @@ import type {
   SyncManager,
   SyncomCollection,
   SyncomRecord,
+  SyncomTelemetryOptions,
 } from '../index.js';
 
 // crypto — node:crypto is synchronous, unlike the browser half.
@@ -132,3 +133,21 @@ expectType<syncom.LogEntry[] | null>(log.since(undefined, { scopes: ['*'], limit
 expectType<Promise<syncom.LogEntry[]>>(log.append([]));
 expectAssignable<StorageOptions>({ logger: false, sync: { scope: () => 'docs', retention: { ops: 10 } } });
 expectError(syncom.open({ sync: { scope: 'docs' } }));
+
+// telemetry — structural, so a real SDK fits without importing @opentelemetry/api.
+expectAssignable<StorageOptions>({ telemetry: { api: {} } });
+expectAssignable<StorageOptions>({ telemetry: { tracer: { startSpan: () => ({ end() {} }) } } });
+expectAssignable<StorageOptions>({
+  telemetry: {
+    meter: { createCounter: () => ({ add() {} }), createHistogram: () => ({ record() {} }) },
+    includeIdentity: false,
+  },
+});
+expectAssignable<SyncomTelemetryOptions>({
+  api: { trace: { getTracer: () => ({ startActiveSpan: (_n, _o, fn) => fn({ end() {} }) }) } },
+});
+expectError(syncom.open({ telemetry: 'yes' }));
+expectError(syncom.open({ telemetry: { tracer: 'a tracer' } }));
+expectType<Promise<syncom.OpLog>>(new syncom.OpLog('p', { telemetry: { api: {} } }));
+declare const telemetryStorage: Storage;
+expectType<unknown>(telemetryStorage.telemetry);

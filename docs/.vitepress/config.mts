@@ -38,6 +38,8 @@ const keywords = [
   'javascript',
   'nodejs',
   'browser',
+  'opentelemetry',
+  'observability',
 ].join(', ');
 
 // schema.org structured data — helps search and AI engines understand the
@@ -155,6 +157,10 @@ export default withMermaid({
           {
             text: 'Platforms',
             items: [{ text: 'Browser', link: '/guide/browser' }],
+          },
+          {
+            text: 'Operations',
+            items: [{ text: 'OpenTelemetry', link: '/guide/telemetry' }],
           },
         ],
         '/reference/': [

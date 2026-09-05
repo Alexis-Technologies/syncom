@@ -103,6 +103,15 @@ wrpc's `WrpcReadable`.
 `syncom`. `isSyncLink()` is exported too, and `SYNC_INTROSPECTION` if you want
 to scaffold the unit yourself.
 
+## Tracing across the wire
+
+The adapter adds nothing for tracing, and needs nothing: give wrpc's `Server`
+and `WrpcClient` their `telemetry` option and syncom its own, and a write on
+the dialing node, its `syncom/push` call, the handler on the host and the
+`syncom.apply` inside it are one trace — wrpc carries the context per packet,
+syncom's spans nest under whatever is active. See
+[OpenTelemetry](./telemetry).
+
 ## Rooms and presence
 
 On `hello` the host joins the peer to `syncom:<scope>` for every scope it asked

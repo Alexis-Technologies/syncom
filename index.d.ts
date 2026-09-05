@@ -87,6 +87,7 @@ export interface OpLogOptions {
   rollAfter?: number;
   retention?: { ops?: number; days?: number };
   logger?: Logger | false;
+  telemetry?: SyncomTelemetryOptions;
 }
 
 export interface OpLog {
@@ -118,6 +119,70 @@ export interface Logger {
   info?(...args: unknown[]): void;
   warn?(...args: unknown[]): void;
   error?(...args: unknown[]): void;
+}
+
+// ---------------------------------------------------------------------------
+// OpenTelemetry
+//
+// Structural views of the OTel objects, so a real SDK is assignable without
+// syncom importing (or depending on) @opentelemetry/api. Only `Span.end` is
+// required — everything a span might not implement is optional, and syncom
+// calls it optionally. The shapes match wrpc's, so one object serves both.
+
+export interface SyncomSpan {
+  setAttribute?(key: string, value: unknown): unknown;
+  addEvent?(name: string, attributes?: Record<string, unknown>): unknown;
+  recordException?(error: unknown): void;
+  setStatus?(status: { code: number; message?: string }): unknown;
+  end(): void;
+}
+
+export interface SyncomTracer {
+  startSpan?(name: string, options?: unknown): SyncomSpan;
+  startActiveSpan?<T>(name: string, options: unknown, fn: (span: SyncomSpan) => T): T;
+}
+
+export interface SyncomCounter {
+  add(value: number, attributes?: Record<string, unknown>): void;
+}
+
+export interface SyncomHistogram {
+  record(value: number, attributes?: Record<string, unknown>): void;
+}
+
+export interface SyncomMeter {
+  createCounter(name: string, options?: unknown): SyncomCounter;
+  createHistogram(name: string, options?: unknown): SyncomHistogram;
+}
+
+export interface SyncomTelemetryApi {
+  trace?: { getTracer(name: string, version?: string): SyncomTracer };
+  metrics?: { getMeter(name: string, version?: string): SyncomMeter };
+}
+
+/**
+ * Two injection modes. `{ api }` — the `@opentelemetry/api` module, from
+ * which syncom derives its own tracer and meter so spans carry the
+ * `@alexify/syncom` instrumentation scope. `{ tracer, meter }` — pre-built
+ * instances; either alone is a supported configuration.
+ *
+ * With neither, telemetry is off and every recording path is a no-op.
+ * syncom carries no trace context of its own: its spans nest under whatever
+ * is active — wrpc's server span inside a `syncom/push` handler — through
+ * the context manager the host installed.
+ *
+ * @experimental The writer shape, span names and metric set may change in a
+ * minor release.
+ */
+export interface SyncomTelemetryOptions {
+  api?: SyncomTelemetryApi;
+  tracer?: SyncomTracer;
+  meter?: SyncomMeter;
+  /**
+   * Default true. When false, record ids and peer urls/node ids are left off
+   * spans. They are never metric labels at any setting.
+   */
+  includeIdentity?: boolean;
 }
 
 export type CrdtDelta = Record<string, unknown>;
@@ -237,6 +302,8 @@ export interface StorageOptions<S extends Schema = Schema> {
   sync?: SyncOptions;
   /** Encrypt every record at rest by default (records then stay local). */
   encrypted?: boolean;
+  /** Injected OpenTelemetry — see SyncomTelemetryOptions. */
+  telemetry?: SyncomTelemetryOptions;
 }
 
 // The collections a schema turns into properties on the storage object:
@@ -336,6 +403,12 @@ export interface Storage {
   readonly path: string;
   readonly log: OpLog;
   readonly vector: VersionVector;
+  /**
+   * The telemetry writer built from `options.telemetry`. Opaque on purpose:
+   * its shape is an implementation detail.
+   * @experimental
+   */
+  readonly telemetry: unknown;
 
   /** Every op applied here — local (`via` null) or from a peer (`via` = the link). */
   on(event: 'change', listener: (op: SyncOp, via: unknown) => void): void;

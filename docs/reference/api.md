@@ -14,7 +14,8 @@ const syncom = require('@alexify/syncom');
 
 Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 (alias for `path`), `schema`, `getId`, `logger`, `encrypted`, `sync` (see
-[Sync options](../guide/sync#options)).
+[Sync options](../guide/sync#options)), `telemetry` (see
+[OpenTelemetry](../guide/telemetry)).
 
 ### `Storage`
 
@@ -44,7 +45,8 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 | `adoptVector(vector, { via, from }?)` | `Promise<SyncOp \| null>` | Records what a joined snapshot covers (an `advance` op) |
 | `close()` | `Promise<void>` | Stops sync and seals the log; further writes are refused |
 
-Properties: `schema`, `sync`, `nodeId`, `path`, `log`, `vector`, `logger`.
+Properties: `schema`, `sync`, `nodeId`, `path`, `log`, `vector`, `logger`,
+`telemetry` (the writer built from the option — opaque).
 Statics: `Storage.Collection`, `Storage.Record`, `Storage.generateId()` — the
 default `getId`, synchronous in both halves.
 
@@ -96,8 +98,8 @@ Structural check for the [link contract](../guide/sync#the-link-contract).
 
 ### `OpLog`
 
-`await new OpLog(basePath, { rollAfter, retention, logger })` — `storage.log`
-is the one you want.
+`await new OpLog(basePath, { rollAfter, retention, logger, telemetry })` —
+`storage.log` is the one you want.
 
 | Member | Notes |
 | --- | --- |

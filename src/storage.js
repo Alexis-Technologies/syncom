@@ -8,6 +8,7 @@ const { OpLog } = require('./log.js');
 const { applyOp, isAlive, latestClock } = require('./ops.js');
 const { Clock, opKey, keyScope, vectorHas, vectorNext, vectorAdvance } = require('./vector.js');
 const fsi = require('./fsi.js');
+const { createTelemetry, traced, now } = require('./telemetry.js');
 
 const NODE_FILE = 'node.json';
 const GLOBAL_SCOPE = '*';
@@ -19,6 +20,10 @@ const COMMIT = Symbol('syncom.commit');
 const REFRESH = Symbol('syncom.refresh');
 
 const isPlainObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
+
+// What a commit came to: an op, `null` for a write that changed nothing, and
+// `undefined` for an encrypted record (saved locally, no op).
+const commitResult = (op) => (op === undefined ? 'encrypted' : op === null ? 'noop' : 'applied');
 
 class Reference {
   #id;
@@ -193,6 +198,7 @@ class Storage extends Emitter {
   #schema = null;
   #getId = null;
   #logger;
+  #otel;
   #options;
   #nodeId = null;
   #clock = new Clock();
@@ -215,6 +221,7 @@ class Storage extends Emitter {
     this.#path = options.path || options.name || 'syncom';
     this.#records = new Map();
     this.#logger = createLogger(options.logger);
+    this.#otel = createTelemetry(options.telemetry);
     if (options.schema) this.#schema = options.schema;
     // A non-function is ignored rather than rejected: the id generator is a
     // convenience seam, not a security boundary, and the default still holds.
@@ -230,7 +237,12 @@ class Storage extends Emitter {
   async #init() {
     this.#keys = await loadKeys(`${this.#path}/keys`);
     this.#chain = await new Blockchain(`${this.#path}/blockchain`);
-    this.#log = await new OpLog(this.#path, { ...this.#options.sync?.log, retention: this.#options.sync?.retention });
+    this.#log = await new OpLog(this.#path, {
+      ...this.#options.sync?.log,
+      retention: this.#options.sync?.retention,
+      logger: this.#logger,
+      telemetry: this.#otel,
+    });
     // The clock picks up where the log left off: every stamp this node ever
     // logged is below what it will stamp next, whatever the wall clock says.
     this.#clock.observe(this.#log.latestTs);
@@ -260,6 +272,25 @@ class Storage extends Emitter {
   async #replayTail() {
     const tail = this.#log.tail();
     if (tail.length === 0) return;
+    const otel = this.#otel;
+    if (!otel.enabled) return void (await this.#replay(tail));
+    const started = now();
+    try {
+      const attributes = { 'syncom.ops.count': tail.length };
+      await traced(
+        otel,
+        'syncom.replay',
+        attributes,
+        () => this.#replay(tail),
+        (records) => ({ 'syncom.records': records }),
+      );
+    } finally {
+      otel.recordReplay(now() - started);
+    }
+  }
+
+  // Returns how many records the tail touched.
+  async #replay(tail) {
     const touched = new Map();
     for (const { seq, op } of tail) {
       this.#clock.observe(op.ts);
@@ -276,8 +307,8 @@ class Storage extends Emitter {
       const { entry, changed } = applyOp(current, op);
       if (changed) touched.set(op.id, { ...entry, seq });
     }
-    if (touched.size === 0) return;
-    await this.#persistBatch(touched, tail[0].seq, tail[tail.length - 1].seq);
+    if (touched.size > 0) await this.#persistBatch(touched, tail[0].seq, tail[tail.length - 1].seq);
+    return touched.size;
   }
 
   #initCollections() {
@@ -307,6 +338,14 @@ class Storage extends Emitter {
 
   get logger() {
     return this.#logger;
+  }
+
+  /**
+   * The telemetry writer built from `options.telemetry` — what SyncManager
+   * and OpLog record through. Opaque: its shape is an implementation detail.
+   */
+  get telemetry() {
+    return this.#otel;
   }
 
   get sync() {
@@ -389,8 +428,40 @@ class Storage extends Emitter {
   // The one local write path. Builds the op, applies it, logs it (durable
   // seq), persists the entry, then announces it.
 
-  [COMMIT](type, id, payload, { source = null, via = null, from = null } = {}) {
-    return this.#run(async () => {
+  [COMMIT](type, id, payload, options = {}) {
+    return this.#run(() => {
+      const otel = this.#otel;
+      if (!otel.enabled) return this.#commit(type, id, payload, options);
+      return this.#tracedCommit(otel, type, id, payload, options);
+    });
+  }
+
+  // The span starts when the write RUNS, not when it was queued: waiting on
+  // `#run` is the caller's contention, not the write's cost. It ends after
+  // the `change` listeners, because that is what the caller awaits. A merge
+  // — one commit per snapshot record during a bootstrap — is counted but not
+  // spanned, or a bootstrap would open thousands of spans.
+  async #tracedCommit(otel, type, id, payload, options) {
+    const started = now();
+    let result = 'error';
+    try {
+      const task = () => this.#commit(type, id, payload, options);
+      const op =
+        type === 'merge'
+          ? await task()
+          : await traced(otel, 'syncom.commit', { 'syncom.op.type': type, 'syncom.record.id': id }, task, (op) => ({
+              'syncom.result': commitResult(op),
+              'syncom.scope': op ? (op.scope ?? GLOBAL_SCOPE) : undefined,
+            }));
+      result = commitResult(op);
+      return op;
+    } finally {
+      otel.recordCommit(type, result, now() - started);
+    }
+  }
+
+  async #commit(type, id, payload, { source = null, via = null, from = null } = {}) {
+    {
       const current = await this.#load(id);
       if (current?.encrypted) {
         // An encrypted record has no op log: writes to it stay local. Set
@@ -439,7 +510,7 @@ class Storage extends Emitter {
       // relay does not hand its own state straight back to it.
       await this.emit('change', op, via);
       return op;
-    });
+    }
   }
 
   // ---------------------------------------------------------------------
@@ -592,8 +663,38 @@ class Storage extends Emitter {
    * offered again; `via` names the link they arrived on, so the relay does
    * not echo them straight back.
    */
-  applyRemote(ops, { via = null, scopes = null } = {}) {
-    return this.#run(async () => {
+  applyRemote(ops, options = {}) {
+    return this.#run(() => {
+      const otel = this.#otel;
+      if (!otel.enabled) return this.#applyRemote(ops, options);
+      return this.#tracedApply(otel, ops, options);
+    });
+  }
+
+  async #tracedApply(otel, ops, options) {
+    const started = now();
+    let result = null;
+    try {
+      const attributes = { 'syncom.ops.count': ops.length };
+      result = await traced(
+        otel,
+        'syncom.apply',
+        attributes,
+        () => this.#applyRemote(ops, options),
+        (r) => ({
+          'syncom.ops.applied': r.applied,
+          'syncom.ops.duplicates': r.duplicates,
+          'syncom.ops.gaps': r.gaps,
+        }),
+      );
+      return result;
+    } finally {
+      otel.recordApply(result ?? { applied: 0, duplicates: 0, gaps: 0 }, now() - started);
+    }
+  }
+
+  async #applyRemote(ops, { via = null, scopes = null } = {}) {
+    {
       const accepted = [];
       const touched = new Map();
       const deltas = new Map();
@@ -610,6 +711,7 @@ class Storage extends Emitter {
           (!isAdvance && typeof op.id !== 'string')
         ) {
           this.#logger.warn({ event: 'sync.op.malformed', op });
+          this.#otel.recordMalformed();
           continue;
         }
         if (op.origin === this.#nodeId || vectorHas(vector, op)) {
@@ -646,10 +748,17 @@ class Storage extends Emitter {
         const { entry, changed, delta, rejected } = applyOp(current, op);
         if (rejected.length > 0) {
           this.#logger.warn({ event: 'sync.op.rejected', id: op.id, rejected });
-          await this.emit('error', Object.assign(new Error(`Refused op on ${op.id}`), { op, rejected }));
+          this.#otel.recordRejected(rejected[0].reason);
+          // Guarded: Emitter throws on an unheard `error`, and a throw here
+          // would fail the push before the vector moved — the peer would
+          // then offer the same page again on every hello, forever.
+          if (this.listenerCount('error') > 0) {
+            await this.emit('error', Object.assign(new Error(`Refused op on ${op.id}`), { op, rejected }));
+          }
         }
         vectorAdvance(vector, op);
         accepted.push(op);
+        this.#otel.recordLag(op.ts);
         if (!changed) continue;
         touched.set(op.id, entry);
         deltas.set(op.id, { ...(deltas.get(op.id) ?? {}), ...delta });
@@ -666,7 +775,7 @@ class Storage extends Emitter {
       }
       for (const op of accepted) await this.emit('change', op, via);
       return { applied: accepted.length, duplicates, gaps };
-    });
+    }
   }
 
   /**

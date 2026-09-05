@@ -25,6 +25,7 @@
 
 const fsi = require('./fsi.js');
 const { formatEventId, parseEventId, vectorAdvance } = require('./vector.js');
+const { createTelemetry, traced, now } = require('./telemetry.js');
 
 const OPEN = 'open';
 const INDEX = 'index.json';
@@ -56,6 +57,7 @@ class OpLog {
   #rollAfter;
   #retention;
   #log;
+  #otel;
   #writes = Promise.resolve();
 
   constructor(basePath, options = {}) {
@@ -64,6 +66,7 @@ class OpLog {
     this.#rollAfter = options.rollAfter ?? DEFAULT_ROLL_AFTER;
     this.#retention = { ops: DEFAULT_RETENTION_OPS, ...options.retention };
     this.#log = options.logger ?? null;
+    this.#otel = createTelemetry(options.telemetry);
     return this.#init();
   }
 
@@ -213,7 +216,9 @@ class OpLog {
       const entries = [];
       for (const op of ops) entries.push({ seq: this.#next++, op });
       const name = `${pad(entries[0].seq)}.json`;
+      const started = this.#otel.enabled ? now() : 0;
       await fsi.write(this.#openPath, name, JSON.stringify({ entries }));
+      if (started) this.#otel.recordAppend(now() - started);
       for (const entry of entries) this.#entries.push(entry);
       for (const op of ops) {
         vectorAdvance(this.#vector, op);
@@ -232,22 +237,39 @@ class OpLog {
     const sealedFrom = this.#segments.length > 0 ? this.#segments[this.#segments.length - 1].to + 1 : this.#floor;
     const entries = this.#entries.filter((entry) => entry.seq >= sealedFrom);
     if (entries.length === 0) return;
+    const otel = this.#otel;
+    if (!otel.enabled) return void (await this.#seal(entries));
+    // Spanned on its own: a roll is why one append (and so one commit) is
+    // slow every `rollAfter` writes, which a duration histogram alone hides.
+    const after = ({ dropped }) => ({
+      'syncom.log.sealed': entries.length,
+      'syncom.log.dropped': dropped,
+      'syncom.log.floor': this.#floor,
+    });
+    const { dropped } = await traced(otel, 'syncom.log.roll', {}, () => this.#seal(entries), after);
+    otel.recordLogRoll(entries.length, dropped);
+  }
+
+  async #seal(entries) {
     const from = entries[0].seq;
     const name = segmentName(from);
     await fsi.write(this.#path, name, JSON.stringify({ entries }));
     this.#segments.push({ name, from, to: entries[entries.length - 1].seq, count: entries.length });
-    await this.#compact();
+    const dropped = await this.#compact();
     await this.#writeIndex();
     const files = this.#openFiles;
     this.#openFiles = [];
     for (const file of files) await fsi.remove(this.#openPath, file);
+    return { dropped };
   }
 
   // Drops whole sealed segments from the front while the log exceeds its
   // retention; the floor moves up and `vector` keeps what was dropped.
+  // Returns how many segments went.
   async #compact() {
     const { ops, days } = this.#retention;
     const cutoff = days ? Date.now() - days * 86_400_000 : null;
+    let dropped = 0;
     while (this.#segments.length > 1) {
       const oldest = this.#segments[0];
       const overOps = ops ? this.#entries.length - oldest.count >= ops : false;
@@ -259,7 +281,9 @@ class OpLog {
       this.#entries = this.#entries.filter((entry) => entry.seq > oldest.to);
       this.#floor = oldest.to + 1;
       await fsi.remove(this.#path, oldest.name);
+      dropped++;
     }
+    return dropped;
   }
 
   async #writeIndex() {

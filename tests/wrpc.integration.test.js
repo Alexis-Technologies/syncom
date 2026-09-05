@@ -150,3 +150,87 @@ test('syncom over wrpc', { skip: wrpc ? false : '@alexify/wrpc unavailable' }, a
     assert.strictEqual(await bad.get(id), null);
   });
 });
+
+// The two packages meet in one trace: syncom opens `syncom.push` around the
+// call, wrpc's client span nests under it and carries the context across
+// the wire, wrpc's server span receives it, and `syncom.apply` runs inside
+// that. Nothing in syncom touches a traceparent.
+const otel = wrpc &&
+  optional('@opentelemetry/api') && {
+    api: require('@opentelemetry/api'),
+    ...require('@opentelemetry/sdk-trace-base'),
+    ...require('@opentelemetry/context-async-hooks'),
+    ...require('@opentelemetry/core'),
+  };
+
+test(
+  'syncom over wrpc: one trace from a write to the peer apply',
+  { skip: otel ? false : 'wrpc or otel unavailable' },
+  async (t) => {
+    const manager = new otel.AsyncLocalStorageContextManager().enable();
+    otel.api.context.setGlobalContextManager(manager);
+    otel.api.propagation.setGlobalPropagator(new otel.W3CTraceContextPropagator());
+    t.after(() => {
+      otel.api.context.disable();
+      otel.api.propagation.disable();
+    });
+    // Each side exports to its own memory, so a shared trace id proves the
+    // context crossed the socket rather than leaking within the process.
+    const tracing = (name) => {
+      const exporter = new otel.InMemorySpanExporter();
+      const provider = new otel.BasicTracerProvider({ spanProcessors: [new otel.SimpleSpanProcessor(exporter)] });
+      return { tracer: provider.getTracer(name), spans: () => exporter.getFinishedSpans() };
+    };
+    const hostSide = tracing('host');
+    const dialSide = tracing('dialer');
+    const wire = { propagation: otel.api.propagation, context: otel.api.context };
+
+    const a = await openTemp(t, { telemetry: { tracer: hostSide.tracer } });
+    const router = wrpc.defineRouter({ syncom: a.sync.unit({ access: 'public' }) });
+    const server = new wrpc.Server({
+      router,
+      host: '127.0.0.1',
+      port: 0,
+      protocol: 'http',
+      logger: false,
+      telemetry: { tracer: hostSide.tracer, ...wire },
+    });
+    await server.listen();
+    t.after(() => server.close().catch(() => {}));
+    const url = `ws://127.0.0.1:${server.address().port}${server.rpc.basePath}`;
+
+    const c = await openTemp(t, {
+      telemetry: { tracer: dialSide.tracer },
+      sync: { connect: connect({ telemetry: { tracer: dialSide.tracer, ...wire } }), autoStart: false },
+    });
+    await c.sync.addNode({ url });
+    await c.sync.start();
+    // Greeted and subscribed first: a write that lands mid-handshake rides the
+    // handshake push AND a relay, and the chain below wants exactly one push.
+    await waitUntil(() => c.sync.peers().some((peer) => peer.subscribed));
+    const id = await c.insert({ from: 'C' });
+    await settle([a, c], { timeout: 10_000 });
+    assert.deepStrictEqual(await a.get(id), { from: 'C' });
+
+    const one = (side, predicate) => {
+      const found = side.spans().filter(predicate);
+      const describe = (span) =>
+        `${span.name}(${span.attributes['syncom.push.reason'] ?? span.attributes['syncom.ops.count'] ?? ''})`;
+      assert.strictEqual(found.length, 1, `expected one span, got ${found.map(describe).join(', ')}`);
+      return found[0];
+    };
+    const commit = one(dialSide, (span) => span.name === 'syncom.commit');
+    const push = one(dialSide, (span) => span.name === 'syncom.push');
+    const clientCall = one(dialSide, (span) => span.name === 'syncom/push');
+    const serverCall = one(hostSide, (span) => span.name === 'syncom/push');
+    const apply = one(hostSide, (span) => span.name === 'syncom.apply');
+    assert.strictEqual(clientCall.kind, 2, 'CLIENT');
+    assert.strictEqual(serverCall.kind, 1, 'SERVER');
+    const chain = [commit, push, clientCall, serverCall, apply];
+    for (let i = 1; i < chain.length; i++) {
+      assert.strictEqual(chain[i].parentSpanContext?.spanId, chain[i - 1].spanContext().spanId, chain[i].name);
+      assert.strictEqual(chain[i].spanContext().traceId, commit.spanContext().traceId, chain[i].name);
+    }
+    assert.strictEqual(apply.attributes['syncom.ops.applied'], 1);
+  },
+);
