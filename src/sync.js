@@ -172,18 +172,31 @@ class SyncManager extends Emitter {
     else if (this.#started) this.#connect(node);
   }
 
-  // Registry writes are coalesced per node: cursors move on every batch.
+  // Registry writes are coalesced AND serialized per node: cursors move on
+  // every batch, so calls that land while a write is pending share it, and
+  // one that lands while a write is in flight runs after it — two writes to
+  // one file interleaving is how a reopen reads half a JSON document.
   #saveNode(node) {
-    if (!this.#nodes.has(node.url)) return Promise.resolve();
-    let pending = this.#saving.get(node.url);
-    if (pending) return pending;
-    pending = Promise.resolve().then(async () => {
-      this.#saving.delete(node.url);
-      if (!this.#nodes.has(node.url)) return;
-      await fsi.write(this.#path, fileName(node.url), JSON.stringify(node));
+    const { url } = node;
+    if (!this.#nodes.has(url)) return Promise.resolve();
+    let state = this.#saving.get(url);
+    if (!state) {
+      state = { last: Promise.resolve(), next: null };
+      this.#saving.set(url, state);
+    }
+    if (state.next) return state.next;
+    const write = state.last.then(async () => {
+      state.next = null;
+      if (!this.#nodes.has(url)) return;
+      await fsi.write(this.#path, fileName(url), JSON.stringify(node));
     });
-    this.#saving.set(node.url, pending);
-    return pending;
+    state.next = write;
+    state.last = write
+      .catch(() => {})
+      .then(() => {
+        if (state.next === null) this.#saving.delete(url);
+      });
+    return write;
   }
 
   // ---------------------------------------------------------------------
@@ -203,7 +216,7 @@ class SyncManager extends Emitter {
   async stop() {
     this.#started = false;
     for (const url of Array.from(this.#peers.keys())) this.#disconnect(url);
-    await Promise.all(Array.from(this.#saving.values()));
+    await Promise.all(Array.from(this.#saving.values(), (state) => state.last));
   }
 
   /** Pushes whatever the connected peers lack right now; resolves when done. */
@@ -401,7 +414,7 @@ class SyncManager extends Emitter {
       if (answer?.vector) peer.remote.vector = answer.vector;
       sent += page.length;
     }
-    if (sent > 0) {
+    if (sent > 0 && !peer.closed) {
       peer.node.lastSync = Date.now();
       await this.#saveNode(peer.node);
       notify(this, this.#storage.logger, 'sync', { url: peer.node.url, pushed: sent });
@@ -508,6 +521,7 @@ class SyncManager extends Emitter {
     if (startVector) {
       await this.#storage.adoptVector(scopedVector(startVector, node.scopes), { via: peer, from: peer.remote.id });
     }
+    if (peer.closed) return { pages, records: total };
     node.cursor = startEventId;
     node.lastSync = Date.now();
     await this.#saveNode(node);
