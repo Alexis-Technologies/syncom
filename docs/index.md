@@ -25,6 +25,16 @@ features:
     details: Every write appends a hash-linked block. Reading a record re-derives its hash and checks it against the block that committed it, so silent corruption surfaces as an error instead of bad data.
     link: /guide/chain
     linkText: Blockchain log
+  - icon: 🔄
+    title: Replication without a coordinator
+    details: Every write is an operation — last-writer-wins registers, per-origin counters, tombstones — logged locally and exchanged with peers over an injected transport. Any order, any number of times, same result.
+    link: /guide/sync
+    linkText: Sync
+  - icon: 🔌
+    title: wrpc as the transport
+    details: Mount storage.sync.unit() on a wrpc server and dial it with a WrpcClient. Reconnects, resumable subscriptions and binary snapshot streams come from wrpc; syncom depends on nothing.
+    link: /guide/wrpc
+    linkText: wrpc transport
   - icon: 🧩
     title: CRDT deltas
     details: diff, merge and apply operate on plain objects — nested maps merge recursively, arrays behave as grow-only sets, and numbers merge by addition, so counters converge without coordination.
@@ -47,5 +57,5 @@ features:
     linkText: Browser
   - icon: 📦
     title: Zero runtime dependencies
-    details: Nothing is installed alongside it. The browser bundle is under 5 KB min+gzip, and CI fails the build if that budget is exceeded.
+    details: Nothing is installed alongside it. The browser bundle is under 14 KB min+gzip, and CI fails the build if that budget is exceeded.
 ---

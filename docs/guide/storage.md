@@ -15,6 +15,9 @@ const storage = await open({ path: 'data' });
 | `name` | — | Alias for `path` |
 | `schema` | — | Entity definitions; each name becomes a collection (see below) |
 | `getId` | `crypto.randomUUID()` | Id generator for `insert()`; sync or async ([see below](#custom-identifiers)) |
+| `logger` | `console` | A Console or pino-shaped logger, or `false` for silence |
+| `encrypted` | `false` | Encrypt every record at rest by default ([see below](#encryption-at-rest)) |
+| `sync` | — | Replication: `connect`, `scope`, `retention`, … — see [Sync](./sync#options) |
 
 ## The explicit API
 
@@ -22,17 +25,29 @@ Every method addresses a record by its id. `insert()` generates one — a UUID b
 default, or whatever `getId` returns.
 
 ```js
-const id = await storage.insert({ title: 'Draft', hits: 0 });
+const id = await storage.insert({ title: 'Draft' });
 
 await storage.has(id);                    // true
-await storage.get(id);                    // { title: 'Draft', hits: 0 }
-await storage.update(id, { hits: 1 });    // merge a partial change
-await storage.set(id, { title: 'Final', hits: 1 }); // replace wholesale
+await storage.get(id);                    // { title: 'Draft' }
+await storage.update(id, { status: 'review' }); // set some fields
+await storage.inc(id, 'views', 1);        // add to a counter field
+await storage.set(id, { title: 'Final' }); // replace wholesale — status and views are gone
+await storage.list();                     // every live id
 await storage.delete(id);
+await storage.close();                    // stop replication, seal the log
 ```
 
-`set()` and `update()` both emit an `update` event on any live `Record` for
-that id, and append the change to the pending update log.
+Every one of these is an **operation**: applied here, written to the
+[log](./sync#the-log), announced as a `change` event, and replicated to peers
+when a transport is configured. `set()`, `update()` and `inc()` also emit an
+`update` event on any live `Record` for that id.
+
+::: tip Registers and counters
+A field written with `insert()`, `set()` or `update()` is a *register* — last
+writer wins. A field created with `inc()` is a *counter* — increments add up
+across nodes. A field cannot be both: `update()` on a counter and `inc()` on a
+register throw. See [Sync](./sync#registers-and-counters).
+:::
 
 ### Compare-and-swap
 
@@ -79,15 +94,27 @@ Two things the engine does not check for you:
 
 ### Encryption at rest
 
-`saveData()` takes an `encrypted` flag. The record is encrypted with the
-storage's own RSA public key and decrypted on read:
+Open the storage with `encrypted: true`, or pass the flag per write:
 
 ```js
-await storage.saveData(id, { ssn: '...' }, { encrypted: true });
+const vault = await open({ path: 'vault', encrypted: true });
+await vault.insert({ ssn: '...' });                       // sealed on disk
+
+await storage.insert({ ssn: '...' }, { encrypted: true }); // one record, in a plain storage
+await storage.saveData(id, data, { encrypted: true });
 ```
 
-RSA-OAEP has a hard payload ceiling (a couple of hundred bytes at 2048-bit
-keys), so this is for small secrets, not for whole documents.
+A record is sealed with a fresh AES-256-GCM key, and that key is wrapped with
+the storage's RSA-OAEP (SHA-256) public key — the same envelope on Node.js and
+in the browser, so ciphertext and keys move between the two. There is no size
+ceiling. The key pair lives in `<path>/keys/`, unprotected: whoever can read
+the directory can read the records.
+
+Encrypted records are **local**. No peer holds this node's private key, so
+they produce no operations, never appear in a snapshot, and `inc()` on one
+throws — `update()`, `set()` and `delete()` still work, they simply stay
+here. A record never changes kind: writing an encrypted record over a
+replicated one (or the reverse) is refused.
 
 ## Records
 
@@ -105,12 +132,18 @@ record.on('update', (data, delta) => {
 record.title = 'Final';        // stages the change and emits
 record.delta();                // { title: 'Final' }
 await record.save();           // writes, then clears the delta
+await record.inc('views', 1);  // a counter, through the record
 await record.data();           // the full current object
 await record.delete();
 ```
 
 Properties are defined from whatever keys the record had when it was loaded;
 `id` is reserved and never becomes a settable property.
+
+A record also follows changes made **elsewhere** — `storage.update()` in the
+same process, or an op from a peer: its properties are refreshed, `update`
+fires with the delta, and edits staged but not yet saved stay on top. A
+record deleted elsewhere reports `update` with `null` data.
 
 ### References
 
@@ -148,11 +181,15 @@ no collections and you address records by id only.
 
 ```
 data/
+├── node.json      { id } — this node's identity
 ├── keys/          public.pem, private.pem
 ├── blockchain/    <hash>.json per block, .blockchain.json holds the tail
-├── data/          <id>.json per record: { data, encrypted, timestamp, block }
-└── remote/        <host>.json per registered sync node
+├── data/          <id>.json per record: { data, meta, encrypted, timestamp, block }
+├── log/           the operation log (see Sync)
+└── remote/        <url>.json per registered sync node
 ```
 
 Every record names the block that committed it, which is what makes
-[validation](./chain) possible.
+[validation](./chain) possible. `meta` is the replication bookkeeping — per
+field clocks, the reset watermark, the tombstone, the counters — and is what
+lets two nodes' copies merge; a deleted record keeps its file as a tombstone.

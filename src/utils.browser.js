@@ -108,6 +108,16 @@ class Emitter {
 
 const generateUUID = () => crypto.randomUUID();
 
+// A duck-typed logger writer: a Console, a pino-shaped logger, or `false` to
+// go silent. Every level is a function, so callers never guard.
+const NOOP = () => {};
+const createLogger = (logger) => {
+  if (logger === false || logger === null) return { debug: NOOP, info: NOOP, warn: NOOP, error: NOOP };
+  const target = logger ?? globalThis.console;
+  const bind = (level) => (typeof target[level] === 'function' ? target[level].bind(target) : NOOP);
+  return { debug: bind('debug'), info: bind('info'), warn: bind('warn'), error: bind('error') };
+};
+
 const between = (s, prefix, suffix) => {
   let i = s.indexOf(prefix);
   if (i === -1) return '';
@@ -120,4 +130,4 @@ const between = (s, prefix, suffix) => {
   return s;
 };
 
-module.exports = { Emitter, generateUUID, between };
+module.exports = { Emitter, createLogger, generateUUID, between };

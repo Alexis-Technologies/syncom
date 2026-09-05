@@ -23,6 +23,8 @@ const keywords = [
   'p2p',
   'peer-to-peer',
   'replication',
+  'wrpc',
+  'websocket',
   'conflict-resolution',
   'CRDT',
   'event-sourcing',
@@ -144,11 +146,15 @@ export default withMermaid({
             ],
           },
           {
-            text: 'Platforms',
+            text: 'Replication',
             items: [
               { text: 'Sync', link: '/guide/sync' },
-              { text: 'Browser', link: '/guide/browser' },
+              { text: 'wrpc transport', link: '/guide/wrpc' },
             ],
+          },
+          {
+            text: 'Platforms',
+            items: [{ text: 'Browser', link: '/guide/browser' }],
           },
         ],
         '/reference/': [

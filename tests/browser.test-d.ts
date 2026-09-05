@@ -21,3 +21,6 @@ expectType<Promise<string>>(browser.read('dir', 'file.json'));
 
 declare const storage: Storage;
 expectType<SyncManager>(storage.sync);
+expectType<Promise<string[]>>(browser.list('dir'));
+expectType<Promise<void>>(storage.inc('id', 'hits'));
+expectType<boolean>(browser.isAlive(null));

@@ -75,9 +75,9 @@ or whose `type` is unrecognised, are skipped.
 
 | `type` | Effect |
 | --- | --- |
-| `write` | copies the state forward |
+| `write` | replaces the state with `record.data` — a full record write; a bare `write` without data copies the state forward |
 | `delta` | `merge(state, record.data)` |
-| `delete` | removes `record.key` |
+| `delete` | removes `record.key`; without a `key` (Storage's `{ type: 'delete', id }`) the record is gone and the state becomes `{}` |
 | `inc` | adds `record.value` to `record.key` |
 | `dec` | subtracts `record.value` from `record.key` |
 
@@ -92,7 +92,9 @@ apply({ hits: 0 }, [
 
 ## Where storage uses them
 
-`Record.save()` sends a `delta` record into the storage update log, and
-`Storage.set` / `update` / `swap` do the same for their own changes. The log
-is what a future sync transport would exchange with peers — see
-[Sync](./sync) for what is and is not implemented today.
+Storage does **not** replicate through `merge`. Its writes are typed
+operations — `write`, `set`, `inc`, `delete` — applied with last-writer-wins
+registers and per-origin counters, because a delta that *adds* numbers cannot
+tell `hits = 3` from `hits += 3`. See [Sync](./sync#operations) for that
+model. `diff`, `merge` and `apply` remain what they are here: standalone
+helpers for plain objects.

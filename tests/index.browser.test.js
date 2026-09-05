@@ -55,10 +55,8 @@ test('browser barrel', async (t) => {
     assert.strictEqual(browser.SmartContract, node.SmartContract);
   });
 
-  await t.test('SyncManager is the in-memory browser one', async () => {
-    const sync = await new browser.SyncManager();
-    assert.notStrictEqual(browser.SyncManager, node.SyncManager);
-    await sync.addNode({ url: 'ws://peer.example.com:9000', type: 'uplink' });
-    assert.strictEqual(sync.listNodes().length, 1);
+  await t.test('SyncManager is shared: one registry over fsi in both halves', () => {
+    assert.strictEqual(browser.SyncManager, node.SyncManager);
+    assert.strictEqual(browser.OpLog, node.OpLog);
   });
 });

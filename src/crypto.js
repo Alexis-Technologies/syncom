@@ -22,20 +22,47 @@ const generateKeys = () =>
     });
   });
 
+// Hybrid envelope, the same on both halves so ciphertext is portable between
+// them: the record is AES-256-GCM encrypted under a fresh random key, and
+// that key is RSA-OAEP(SHA-256) wrapped with the storage's public key. RSA
+// alone caps the payload at a couple of hundred bytes; this caps nothing.
+const ALG = 'RSA-OAEP-256+A256GCM';
+const OAEP = { padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' };
+
 const encrypt = (data, publicKey) => {
-  const buffer = Buffer.from(JSON.stringify(data));
-  return crypto.publicEncrypt(publicKey, buffer).toString('base64');
+  const key = crypto.randomBytes(32);
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const body = Buffer.concat([cipher.update(Buffer.from(JSON.stringify(data))), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  const wrapped = crypto.publicEncrypt({ key: publicKey, ...OAEP }, key);
+  return JSON.stringify({
+    v: 1,
+    alg: ALG,
+    key: wrapped.toString('base64'),
+    iv: iv.toString('base64'),
+    tag: tag.toString('base64'),
+    data: body.toString('base64'),
+  });
 };
 
-const decrypt = (data, privateKey) => {
-  const buffer = Buffer.from(data, 'base64');
-  const str = crypto.privateDecrypt(privateKey, buffer).toString();
-  return JSON.parse(str);
+const decrypt = (text, privateKey) => {
+  const envelope = JSON.parse(text);
+  if (envelope.v !== 1 || envelope.alg !== ALG) throw new Error('Unsupported ciphertext envelope');
+  const key = crypto.privateDecrypt({ key: privateKey, ...OAEP }, Buffer.from(envelope.key, 'base64'));
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(envelope.iv, 'base64'));
+  decipher.setAuthTag(Buffer.from(envelope.tag, 'base64'));
+  const plain = Buffer.concat([decipher.update(Buffer.from(envelope.data, 'base64')), decipher.final()]);
+  return JSON.parse(plain.toString());
 };
 
 const loadKeys = async (basePath) => {
   let publicKey, privateKey;
-  if (await fsi.exists(basePath, 'public.pem')) {
+  // Both halves of the pair, or neither: a public.pem left behind without
+  // its private.pem used to surface as an ENOENT from the second read.
+  const hasPublic = await fsi.exists(basePath, 'public.pem');
+  const hasPrivate = await fsi.exists(basePath, 'private.pem');
+  if (hasPublic && hasPrivate) {
     publicKey = await fsi.read(basePath, 'public.pem');
     privateKey = await fsi.read(basePath, 'private.pem');
   } else {

@@ -65,6 +65,8 @@ test('Chain module', async (t) => {
       assert.strictEqual(isValid, true);
 
       const isValidLast = await blockchain.validate({ last: 2 });
+      // An unknown starting hash is an invalid chain, not an exception.
+      assert.strictEqual(await blockchain.validate({ from: 'deadbeef' }), false);
       assert.strictEqual(isValidLast, true);
     } finally {
       await cleanupTemp(tempDir);

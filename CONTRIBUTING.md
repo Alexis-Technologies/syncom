@@ -45,8 +45,15 @@ with `node --test --test-name-pattern 'swap'`.
 - **Anything in `tests/` not named `*.test.js` is a helper** and is skipped by
   `node --test` discovery — that is why `tests/suites/`, `tests/utils/` and
   `tests/package/` work the way they do.
-- **Document what the code does, not what it will do.** `sync.start()` is a
-  no-op today and the docs say so.
+- **Document what the code does, not what it will do.** Run every example
+  before writing it down.
+- **wrpc is injected, never required.** `@alexify/wrpc` is a devDependency for
+  `tests/wrpc.integration.test.js` only, which skips when it is missing; nothing
+  under `src/` may `require` it. The adapter in `src/wrpc.js` duck-types the
+  client it is handed.
+- **A field is a register or a counter.** `set`/`update` write registers,
+  `inc` writes counters, and the two never meet on one field — do not add a
+  path that lets them.
 
 ## Tests
 
@@ -55,9 +62,14 @@ per subject, nested `await t.test(...)` per case, teardown registered with
 `t.after(...)` immediately after setup.
 
 Behaviour shared between the Node and browser halves lives in `tests/suites/`
-and is run twice — see `tests/suites/emitter.js` and `tests/suites/fsi.js`.
-The browser halves are exercised under Node using the OPFS mock in
-`tests/utils/mock-opfs.js` and `node:crypto`'s `webcrypto`.
+and is run twice — see `tests/suites/emitter.js`, `tests/suites/fsi.js` and
+`tests/suites/sync-engine.js`. The browser halves are exercised under Node.js
+using the OPFS mock in `tests/utils/mock-opfs.js` and `node:crypto`'s
+`webcrypto`; `tests/utils/browser-env.js` loads the shared modules the way a
+bundler honouring `package.json#browser` would. The sync engine is tested over
+`tests/utils/memory-link.js`, an in-process link that behaves like a wrpc
+client at the boundary (JSON across, resume from the last event id on
+reconnect), and once more over real wrpc in `tests/wrpc.integration.test.js`.
 
 `tests/package/consistency.test.js` is the machine-checked half of the release
 checklist: it fails if `exports`, `files`, the `browser` map, the `.d.ts`

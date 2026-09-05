@@ -44,4 +44,15 @@ const remove = async (dir, filename) => {
   }
 };
 
-module.exports = { read, write, exists, remove };
+// OPFS twin of the node `list`: `resolveDir` creates the directory on the way
+// down, so a directory that never existed lists as empty, like ENOENT above.
+const list = async (dir) => {
+  const dirHandle = await resolveDir(dir);
+  const names = [];
+  for await (const [name, handle] of dirHandle.entries()) {
+    if (handle.kind === 'file') names.push(name);
+  }
+  return names.sort();
+};
+
+module.exports = { read, write, exists, remove, list };

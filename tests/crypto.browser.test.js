@@ -30,8 +30,10 @@ test('crypto.browser module', async (t) => {
   }
 
   const cryptoBrowser = require('../src/crypto.browser.js');
+  const fsi = require('../src/fsi.browser.js');
 
   await runCryptoKeysTests(t, assert, cryptoBrowser, {
+    fsi,
     getKeysBase: async () => `keys-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
   });
 });

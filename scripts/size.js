@@ -27,10 +27,16 @@ const ROOT = path.join(__dirname, '..');
 // One row per package.json#exports entry — tests/package/consistency.test.js
 // fails if the two ever drift apart.
 const ENTRIES = [
-  // Budget set from the first measured run and treated as a ratchet, not a
-  // target: raise it deliberately, in the same change that earns the bytes.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 5 },
+  // A ratchet, not a target: raise it deliberately, in the same change that
+  // earns the bytes. 5 KB was the migrated storage/chain/crdt core; the
+  // replication engine (the op model, the persisted log, the sync protocol
+  // that makes `storage.sync` move data) earned the raise to 14 KB.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 14 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
+  // Platform-neutral (no node builtins, no browser-only globals): one file
+  // serves both, bundled as a browser entry so the self-contained check
+  // guards it too.
+  { label: 'wrpc adapter — browser (@alexify/syncom/wrpc)', entry: 'wrpc.js', platform: 'browser', budget: 2 },
 ];
 
 // A browser entry has to be self-contained: no node builtins, and no packages

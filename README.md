@@ -14,8 +14,11 @@ Fast, zero-dependency distributed data sync engine 🌐
 
 `syncom` is a local-first data engine for JavaScript. It stores records on
 disk — or in the browser's origin-private filesystem — commits every write to
-a hash-linked log so tampering is detectable, and produces CRDT deltas that
-peers can merge without coordination. It has no runtime dependencies.
+a hash-linked log so tampering is detectable, and replicates every write to
+peers as an operation that converges without coordination: last-writer-wins
+registers, per-origin counters, tombstones. The transport is injected —
+[wrpc](https://wrpc.vercel.app) out of the box — and the package has no
+runtime dependencies.
 
 ```js
 'use strict';
@@ -25,13 +28,14 @@ const { open } = require('@alexify/syncom');
 const main = async () => {
   const storage = await open({ path: 'data' });
 
-  const id = await storage.insert({ name: 'Ada', hits: 0 });
+  const id = await storage.insert({ name: 'Ada' });
   const record = await storage.record(id);
 
   record.on('update', (data, delta) => console.log('changed', delta));
 
-  record.hits = 1;
+  record.title = 'Ada Lovelace';
   await record.save();
+  await storage.inc(id, 'hits', 1); // a counter: increments add up across nodes
 
   console.log(await storage.validate({ last: 10 })); // true
 };
@@ -72,8 +76,9 @@ that fails the build when exceeded.
 
 | Entry | raw | min | min+gzip | budget |
 | ----- | ---:| ---:| --------:| ------:|
-| main entry — browser (@alexify/syncom) | 30.9 KB | 13.0 KB | 4.7 KB | 5.0 KB |
-| main entry — node (@alexify/syncom) | 27.7 KB | 12.6 KB | 4.5 KB | — |
+| main entry — browser (@alexify/syncom) | 96.1 KB | 39.4 KB | 13.7 KB | 14.0 KB |
+| main entry — node (@alexify/syncom) | 89.0 KB | 38.5 KB | 13.4 KB | — |
+| wrpc adapter — browser (@alexify/syncom/wrpc) | 3.3 KB | 1.4 KB | 0.7 KB | 2.0 KB |
 
 ## Quick Start
 
@@ -103,16 +108,43 @@ merge({ hits: 10 }, { hits: 1 });              // { hits: 11 }
 diff({ tags: ['a'] }, { tags: ['a', 'b'] });   // { tags: ['b'] }
 ```
 
+### Syncing between nodes
+
+Host one end on a [wrpc](https://wrpc.vercel.app) server, dial it from the
+other. wrpc is yours to install — syncom only takes the client you built:
+
+```js
+// the hub
+const { Server, defineRouter } = require('@alexify/wrpc');
+const router = defineRouter({ syncom: storage.sync.unit({ access: 'public' }) });
+await new Server({ router, host: '0.0.0.0', port: 8000, protocol: 'http' }).listen();
+
+// a node — a server, a CLI, a browser tab
+const { WrpcClient } = require('@alexify/wrpc');
+const { createWrpcLink } = require('@alexify/syncom/wrpc');
+const storage = await open({
+  path: 'data',
+  sync: { connect: async (node) => createWrpcLink(await WrpcClient.connect(node.url)) },
+});
+await storage.sync.addNode({ url: 'ws://hub.example.com:8000/api' });
+```
+
+Every node can be both, and ops relay hop by hop, so any connected graph of
+nodes converges.
+
 ## Features
 
 | Area | What you get |
 | --- | --- |
-| **Storage** | Records with live properties and per-record deltas, schema-driven collections, compare-and-swap writes, optional RSA encryption at rest |
+| **Storage** | Records with live properties and per-record deltas, schema-driven collections, compare-and-swap writes, counters, encryption at rest (AES-256-GCM under an RSA-wrapped key) |
+| **Replication** | Every write is an op in a persisted log; peers exchange ops over an injected link, resume from where they stopped, and bootstrap from a streamed snapshot when they cannot; scopes for partial replication |
+| **Convergence** | Last-writer-wins registers, per-origin counters, tombstones with revival — any order, any number of times, same result |
+| **Transport** | `@alexify/syncom/wrpc` adapts a `WrpcClient`; `storage.sync.unit()` is the router unit a wrpc server mounts. Reconnects, resumable subscriptions, binary streams and rooms come from wrpc |
 | **Integrity** | Every write appends a hash-linked block; reads re-verify the record against the block that committed it and throw on a mismatch |
 | **CRDT** | `diff` / `merge` / `apply` over plain objects — nested maps merge recursively, arrays are grow-only sets, numbers add so counters converge |
 | **Contracts** | Store a procedure in the chain by hash, load it anywhere, run it against a read-only view of storage; failures are recorded as blocks |
 | **Portability** | One API over `node:fs` + `node:crypto` on the server and OPFS + Web Crypto in the browser, chosen by the `browser` export condition |
-| **Dependencies** | None |
+| **Dependencies** | None. wrpc is a devDependency for one integration test and is injected at runtime |
 
 ## Browser usage
 
@@ -125,15 +157,16 @@ import { open, diff, merge } from '@alexify/syncom';
 
 Crypto is asynchronous there (`calculateHash`, `encrypt` and `decrypt` return
 promises), and storage lives in the origin-private filesystem. `browser.d.ts`
-declares those signatures separately. See
+declares those signatures separately. A browser node dials the mesh through
+`@alexify/syncom/wrpc` like any other. See
 [Browser](https://syncomjs.vercel.app/guide/browser).
 
 ## Status
 
-Pre-1.0, and one part of the surface is a stub worth calling out: `storage.sync`
-registers, persists and lists peer nodes, but **no transport is implemented** —
-`sync.start()` is a no-op. Everything else on this page works today. See
-[Sync](https://syncomjs.vercel.app/guide/sync).
+Pre-1.0. Everything on this page works today and is covered by the test suite,
+including replication over real wrpc WebSockets. Known limits — a counter
+straddling a concurrent reset, no op signatures, encrypted records staying
+local — are listed under [Guarantees and limits](https://syncomjs.vercel.app/guide/sync#guarantees-and-limits).
 
 ## Documentation
 
@@ -143,6 +176,7 @@ registers, persists and lists peer nodes, but **no transport is implemented** �
   [Blockchain log](https://syncomjs.vercel.app/guide/chain) ·
   [Smart contracts](https://syncomjs.vercel.app/guide/contracts)
 - [Sync](https://syncomjs.vercel.app/guide/sync) ·
+  [wrpc transport](https://syncomjs.vercel.app/guide/wrpc) ·
   [Browser](https://syncomjs.vercel.app/guide/browser)
 - [API reference](https://syncomjs.vercel.app/reference/api)
 

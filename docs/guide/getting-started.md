@@ -20,7 +20,7 @@ npm install @alexify/syncom
 ## Opening a storage
 
 `open()` is asynchronous: it generates or loads an RSA key pair, initialises
-the chain, and returns once the storage is ready to use.
+the chain and the operation log, and returns once the storage is ready to use.
 
 ```js
 'use strict';
@@ -43,11 +43,13 @@ main();
 `path` (or `name`) selects the directory; it defaults to `syncom`. Under it
 syncom creates three subdirectories:
 
-| Directory | Contents |
+| Entry | Contents |
 | --- | --- |
+| `node.json` | this node's identity — the `origin` of every op it makes |
 | `keys/` | `public.pem` / `private.pem`, generated on first open |
 | `blockchain/` | one JSON file per block, plus `.blockchain.json` holding the tail hash |
 | `data/` | one JSON file per record, each naming the block that committed it |
+| `log/` | the operation log — what peers replicate from |
 | `remote/` | one JSON file per registered sync node |
 
 ## Records
@@ -83,8 +85,21 @@ await storage.validate();             // the whole chain
 Reading a record that no longer matches its block throws rather than returning
 the modified data. See [Blockchain log](./chain).
 
-## What is not implemented yet
+## Syncing with other nodes
 
-`storage.sync` registers and persists peer nodes, but **no transport is
-implemented** — `sync.start()` is a no-op. See [Sync](./sync) for what exists
-today.
+Hand `open()` a way to reach a peer and register it; from then on writes flow
+both ways and converge without coordination:
+
+```js
+const { createWrpcLink } = require('@alexify/syncom/wrpc');
+const { WrpcClient } = require('@alexify/wrpc');
+
+const storage = await open({
+  path: 'data',
+  sync: { connect: async (node) => createWrpcLink(await WrpcClient.connect(node.url)) },
+});
+await storage.sync.addNode({ url: 'ws://hub.example.com:8000/api', token: 'secret' });
+```
+
+See [Sync](./sync) for the model — registers, counters, tombstones, the log —
+and [wrpc transport](./wrpc) for hosting the other end.

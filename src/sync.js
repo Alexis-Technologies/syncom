@@ -1,77 +1,635 @@
 'use strict';
 
-const fs = require('node:fs/promises');
-const path = require('node:path');
-const { between } = require('./utils.js');
+// Replication between nodes. Two halves live here:
+//
+//   SyncManager — the DIALING side. For every registered node it asks the
+//   injected `connect(node)` factory for a link (a duck-typed SyncLink — the
+//   `@alexify/syncom/wrpc` subpath wraps a WrpcClient into one), then runs
+//   the handshake: hello, push what the host lacks, subscribe to what the
+//   host learns from now on. Reconnecting, backing off and resuming the
+//   subscription from the last event id are the LINK's job (wrpc already
+//   does all three); on `reconnect` the manager only repeats hello + push,
+//   the outbound half a transport cannot know about.
+//
+//   unit() — the HOSTING side: a plain object of `{ access, handler }`
+//   procedures shaped for wrpc's defineRouter, with no import of wrpc.
+//   `changes` is an async generator, which wrpc treats as a subscription;
+//   its values are labelled with this node's log position through the
+//   `tracked` shape (Symbol.for('wrpc.tracked'), part of wrpc's frozen wire
+//   protocol), so a resuming subscriber replays exactly what it missed.
+//
+// Every node is both: a mesh is nodes dialing whichever nodes they can
+// reach, with ops relayed transitively and de-duplicated by version vector.
 
-class SyncManager {
+const fsi = require('./fsi.js');
+const { Emitter } = require('./utils.js');
+const { packOps, unpackOps } = require('./ops.js');
+const { vectorHas, keyScope } = require('./vector.js');
+const { isSyncLink } = require('./link.js');
+
+const REMOTE = 'remote';
+const PROTOCOL = 1;
+const GLOBAL_SCOPE = '*';
+const DEFAULT_PAGE_SIZE = 500;
+const DEFAULT_PAGE_BYTES = 4 << 20;
+const TRACKED = Symbol.for('wrpc.tracked');
+
+// Node registry entries are keyed by url; the file name is the url itself,
+// percent-encoded — unlike the old `<host>.json`, two peers on one host or a
+// url without a port cannot collide.
+const fileName = (url) => `${encodeURIComponent(url)}.json`;
+
+const coded = (message, code) => {
+  const error = new Error(message);
+  error.code = code;
+  error.expose = true;
+  return error;
+};
+
+// The part of a vector that concerns `scopes`: global keys (`origin`) and
+// the `origin@scope` keys of the scopes asked for.
+const scopedVector = (vector, scopes) => {
+  if (!scopes || scopes.includes(GLOBAL_SCOPE)) return vector;
+  const out = {};
+  for (const key in vector) {
+    const scope = keyScope(key);
+    if (scope === null || scopes.includes(scope)) out[key] = vector[key];
+  }
+  return out;
+};
+
+const inScope = (op, scopes) => {
+  const scope = op.scope ?? GLOBAL_SCOPE;
+  return !scopes || scope === GLOBAL_SCOPE || scopes.includes(GLOBAL_SCOPE) || scopes.includes(scope);
+};
+
+// Resolves on the next change (or abort). The manager keeps ONE listener on
+// the storage and wakes every waiting subscription from it, because Emitter
+// refuses more than ten listeners and a host has as many `changes` feeds as
+// it has peers.
+const waitFor = (wakers, signal) =>
+  new Promise((resolve) => {
+    if (signal?.aborted) return void resolve();
+    const done = () => {
+      wakers.delete(done);
+      signal?.removeEventListener?.('abort', done);
+      resolve();
+    };
+    wakers.add(done);
+    signal?.addEventListener?.('abort', done, { once: true });
+  });
+
+class SyncManager extends Emitter {
+  #storage;
   #path;
-  #nodes = new Set();
+  #options;
+  #nodes = new Map();
+  #peers = new Map();
+  #wakers = new Set();
+  #onChange = null;
+  #started = false;
+  #saving = new Map();
 
-  constructor(basePath) {
-    this.#path = path.join(basePath, 'remote');
+  constructor(storage, options = {}) {
+    super();
+    this.#storage = storage;
+    this.#options = options ?? {};
+    this.#path = `${storage.path}/${REMOTE}`;
     return this.#init();
   }
 
   async #init() {
-    await fs.mkdir(this.#path, { recursive: true });
-    const files = await fs.readdir(this.#path);
+    const files = await fsi.list(this.#path);
     for (const file of files) {
       if (!file.endsWith('.json')) continue;
-      const filePath = path.join(this.#path, file);
-      const raw = await fs.readFile(filePath, 'utf8');
+      const raw = await fsi.read(this.#path, file);
       const node = JSON.parse(raw);
-      this.#nodes.add(node);
+      if (node && typeof node.url === 'string') this.#nodes.set(node.url, node);
     }
-    await this.start();
+    // One listener for both halves: the dialing side's fan-out to its
+    // links, and the hosting side's wake-up of every live `changes` feed.
+    this.#onChange = (op, via) => this.#fanOut(op, via);
+    this.#storage.on('change', this.#onChange);
+    const { connect, autoStart = typeof connect === 'function' } = this.#options;
+    if (autoStart && typeof connect === 'function') await this.start();
     return this;
   }
 
+  get storage() {
+    return this.#storage;
+  }
+
+  get started() {
+    return this.#started;
+  }
+
+  // ---------------------------------------------------------------------
+  // Registry
+
+  async addNode(nodeData) {
+    const { url, token, scopes } = nodeData ?? {};
+    if (typeof url !== 'string' || url.length === 0) throw new Error('Node URL is required');
+    if (this.#nodes.has(url)) throw new Error(`Node with URL ${url} already exists`);
+    if (scopes !== undefined && !(Array.isArray(scopes) && scopes.every((s) => typeof s === 'string'))) {
+      throw new Error('Node scopes must be an array of strings');
+    }
+    const node = {
+      url,
+      token,
+      scopes: scopes ?? [GLOBAL_SCOPE],
+      enabled: true,
+      lastSync: null,
+      cursor: null,
+      remote: null,
+    };
+    this.#nodes.set(url, node);
+    await fsi.write(this.#path, fileName(url), JSON.stringify(node));
+    if (this.#started) this.#connect(node);
+  }
+
+  async removeNode(url) {
+    const node = this.#nodes.get(url);
+    if (!node) throw new Error(`Node with URL ${url} not found`);
+    this.#nodes.delete(url);
+    this.#disconnect(url);
+    await fsi.remove(this.#path, fileName(url));
+  }
+
+  listNodes() {
+    return Array.from(this.#nodes.values(), (node) => ({ ...node }));
+  }
+
+  async enableNode(url, enabled = true) {
+    const node = this.#nodes.get(url);
+    if (!node) throw new Error(`Node with URL ${url} not found`);
+    node.enabled = enabled;
+    await this.#saveNode(node);
+    if (!enabled) this.#disconnect(url);
+    else if (this.#started) this.#connect(node);
+  }
+
+  // Registry writes are coalesced per node: cursors move on every batch.
+  #saveNode(node) {
+    if (!this.#nodes.has(node.url)) return Promise.resolve();
+    let pending = this.#saving.get(node.url);
+    if (pending) return pending;
+    pending = Promise.resolve().then(async () => {
+      this.#saving.delete(node.url);
+      if (!this.#nodes.has(node.url)) return;
+      await fsi.write(this.#path, fileName(node.url), JSON.stringify(node));
+    });
+    this.#saving.set(node.url, pending);
+    return pending;
+  }
+
+  // ---------------------------------------------------------------------
+  // The dialing side
+
   async start() {
-    // TODO: no transport yet — start() walks the enabled uplinks and does
-    // nothing with them. A WebSocket client that exchanges CRDT delta logs
-    // goes here.
-    const uplinks = Array.from(this.#nodes).filter((node) => node.type === 'uplink' && node.enabled);
-    if (uplinks.length === 0) return;
-    for (const uplink of uplinks) {
+    if (this.#started) return;
+    if (typeof this.#options.connect !== 'function') {
+      throw new Error('sync.start() needs a connect(node) factory in the storage sync options');
+    }
+    this.#started = true;
+    for (const node of this.#nodes.values()) {
+      if (node.enabled) this.#connect(node);
+    }
+  }
+
+  async stop() {
+    this.#started = false;
+    for (const url of Array.from(this.#peers.keys())) this.#disconnect(url);
+    await Promise.all(Array.from(this.#saving.values()));
+  }
+
+  /** Pushes whatever the connected peers lack right now; resolves when done. */
+  async sync(url) {
+    const peers = url ? [this.#peers.get(url)].filter(Boolean) : Array.from(this.#peers.values());
+    const results = [];
+    for (const peer of peers) {
+      if (!peer.remote) continue;
+      results.push({ url: peer.node.url, pushed: await this.#push(peer) });
+    }
+    return results;
+  }
+
+  /** Live view of every dialed peer. */
+  peers() {
+    return Array.from(this.#peers.values(), (peer) => ({
+      url: peer.node.url,
+      node: peer.remote?.id ?? null,
+      connected: peer.connected,
+      subscribed: Boolean(peer.subscription),
+      cursor: peer.node.cursor,
+      lastSync: peer.node.lastSync,
+      pending: peer.outbox.length + (peer.pushing ? 1 : 0),
+    }));
+  }
+
+  #connect(node) {
+    if (this.#peers.has(node.url)) return;
+    const peer = {
+      node,
+      link: null,
+      remote: null,
+      connected: false,
+      subscription: null,
+      outbox: [],
+      pushing: null,
+      bootstrapping: false,
+      handshaking: null,
+      closed: false,
+      handlers: null,
+    };
+    this.#peers.set(node.url, peer);
+    Promise.resolve()
+      .then(() => this.#options.connect(node))
+      .then((link) => {
+        if (peer.closed) return void link?.close?.();
+        if (!isSyncLink(link)) {
+          throw new TypeError('connect(node) must return a SyncLink (call/subscribe/on/off/close)');
+        }
+        peer.link = link;
+        peer.handlers = {
+          open: () => {
+            peer.connected = true;
+          },
+          close: () => {
+            peer.connected = false;
+            peer.subscription = null;
+            void this.emit('peer', { url: node.url, connected: false });
+          },
+          reconnect: () => {
+            peer.connected = true;
+            void this.emit('peer', { url: node.url, connected: true, reconnected: true });
+            // The link restored the subscription itself (when the host still
+            // knows us); what it cannot restore is the outbound half.
+            this.#handshake(peer, { resubscribe: !peer.subscription }).catch((error) => this.#fail(peer, error));
+          },
+        };
+        for (const event in peer.handlers) link.on(event, peer.handlers[event]);
+        peer.connected = true;
+        return this.#handshake(peer, { resubscribe: true });
+      })
+      .catch((error) => this.#fail(peer, error));
+  }
+
+  #disconnect(url) {
+    const peer = this.#peers.get(url);
+    if (!peer) return;
+    peer.closed = true;
+    this.#peers.delete(url);
+    if (peer.link) {
+      if (peer.handlers) for (const event in peer.handlers) peer.link.off(event, peer.handlers[event]);
+      peer.subscription?.unsubscribe?.();
       try {
-        // Sync here
-      } catch (error) {
-        console.error(`Sync failed with ${uplink.url}:`, error.message);
+        peer.link.close();
+      } catch {
+        // A link already gone is what close() was for.
       }
     }
   }
 
-  async addNode(nodeData) {
-    const { url, type, token } = nodeData;
-    if (!url) throw new Error('Node URL is required');
-    if (type !== 'uplink' && type !== 'downlink') {
-      throw new Error('Node type must be uplink or downlink');
+  #fail(peer, error) {
+    if (peer.closed) return;
+    this.#storage.logger.warn({ event: 'sync.error', url: peer.node.url, err: error });
+    if (this.listenerCount('error') > 0) void this.emit('error', Object.assign(error, { url: peer.node.url }));
+  }
+
+  // Single-flight: a reconnect and a refused restored subscription can both
+  // ask for one in the same tick.
+  #handshake(peer, options) {
+    if (peer.handshaking) return peer.handshaking;
+    peer.handshaking = this.#hello(peer, options).finally(() => {
+      peer.handshaking = null;
+    });
+    return peer.handshaking;
+  }
+
+  async #hello(peer, { resubscribe }) {
+    const { node, link } = peer;
+    const answer = await link.call('syncom/hello', {
+      node: this.#storage.nodeId,
+      vector: this.#storage.vector,
+      version: PROTOCOL,
+      scopes: node.scopes,
+      // For `authorize(context, hello)`; a transport-level credential (a
+      // wrpc `headers`/`authenticate` option) is the other way to carry it.
+      token: node.token,
+    });
+    if (peer.closed) return;
+    if (!answer || typeof answer.node !== 'string') throw new Error(`Bad hello from ${node.url}`);
+    if (answer.duplicate) {
+      // The host already dials us; one link is enough.
+      this.#disconnect(node.url);
+      return;
     }
-    const existing = Array.from(this.#nodes).find((n) => n.url === url);
-    if (existing) throw new Error(`Node with URL ${url} already exists`);
-    const now = Date.now();
-    const node = { type, url, token, enabled: true, lastSync: now };
-    this.#nodes.add(node);
-    await fs.mkdir(this.#path, { recursive: true });
-    const domain = between(url, '://', ':');
-    const filePath = path.join(this.#path, `${domain}.json`);
-    await fs.writeFile(filePath, JSON.stringify(node));
-    await this.start();
+    // A host reinstalled since we last spoke: its log speaks another epoch,
+    // so our cursor is void and the subscription will say `bootstrap`.
+    if (node.remote && node.remote.epoch !== answer.epoch) node.cursor = null;
+    peer.remote = { id: answer.node, vector: answer.vector ?? {}, epoch: answer.epoch };
+    node.remote = { id: answer.node, epoch: answer.epoch };
+    await this.#saveNode(node);
+    await this.emit('peer', { url: node.url, connected: true, node: answer.node });
+    await this.#push(peer);
+    if (resubscribe && !peer.subscription) this.#subscribe(peer);
   }
 
-  async removeNode(url) {
-    const node = Array.from(this.#nodes).find((n) => n.url === url);
-    if (!node) throw new Error(`Node with URL ${url} not found`);
-    this.#nodes.delete(node);
-    const domain = between(url, '://', ':');
-    const filePath = path.join(this.#path, `${domain}.json`);
-    await fs.unlink(filePath);
+  // Everything in our log the host has not seen, by its vector — ops of its
+  // own origin excluded (it has those by definition). A host that is behind
+  // what we still retain cannot be caught up from here; it will bootstrap
+  // from a node that dials it, or we from it.
+  async #push(peer) {
+    const { node } = peer;
+    const entries =
+      this.#storage.log.since(undefined) ??
+      this.#storage.log.since(this.#storage.log.formatId(this.#storage.log.floor - 1)) ??
+      [];
+    const ops = [];
+    for (const { op } of entries) {
+      if (op.origin === peer.remote.id || op.from === peer.remote.id) continue;
+      if (vectorHas(peer.remote.vector, op)) continue;
+      if (!inScope(op, node.scopes)) continue;
+      ops.push(op);
+    }
+    return this.#send(peer, ops);
   }
 
-  listNodes() {
-    return Array.from(this.#nodes);
+  async #send(peer, ops) {
+    const pageSize = this.#options.pageSize ?? DEFAULT_PAGE_SIZE;
+    let sent = 0;
+    for (let index = 0; index < ops.length; index += pageSize) {
+      const page = ops.slice(index, index + pageSize);
+      const answer = await peer.link.call('syncom/push', { ops: packOps(page) });
+      if (answer?.vector) peer.remote.vector = answer.vector;
+      sent += page.length;
+    }
+    if (sent > 0) {
+      peer.node.lastSync = Date.now();
+      await this.#saveNode(peer.node);
+      await this.emit('sync', { url: peer.node.url, pushed: sent });
+    }
+    return sent;
+  }
+
+  #subscribe(peer) {
+    const { node, link } = peer;
+    peer.subscription = link.subscribe(
+      'syncom/changes',
+      { scopes: node.scopes },
+      {
+        lastEventId: node.cursor ?? undefined,
+        onData: (value, eventId) => void this.#receive(peer, value, eventId).catch((error) => this.#fail(peer, error)),
+        onError: (error) => {
+          peer.subscription = null;
+          if (peer.closed) return;
+          // 428 "say hello first": the host forgot us — on wrpc a reconnect
+          // is a new server-side client, and its restored subscription
+          // arrives before our hello does. Greet again, then subscribe.
+          if (error?.code === 428 && peer.connected) {
+            this.#handshake(peer, { resubscribe: true }).catch((e) => this.#fail(peer, e));
+            return;
+          }
+          this.#fail(peer, error);
+        },
+        onEnd: () => {
+          peer.subscription = null;
+        },
+      },
+    );
+  }
+
+  async #receive(peer, value, eventId) {
+    if (peer.closed || !value) return;
+    if (value.bootstrap) return void (await this.#bootstrap(peer));
+    const ops = unpackOps(value.ops);
+    const result = await this.#storage.applyRemote(ops, { via: peer, scopes: peer.node.scopes });
+    if (eventId) peer.node.cursor = eventId;
+    peer.node.lastSync = Date.now();
+    await this.#saveNode(peer.node);
+    await this.emit('sync', { url: peer.node.url, received: ops.length, ...result });
+  }
+
+  // Bootstrap: page through the host's whole state, joining each page, then
+  // subscribe from the position the FIRST page was taken at — anything that
+  // landed while paging is replayed and folds in as a no-op.
+  async #bootstrap(peer) {
+    if (peer.bootstrapping) return;
+    peer.bootstrapping = true;
+    const { node, link } = peer;
+    try {
+      peer.subscription?.unsubscribe?.();
+      peer.subscription = null;
+      let cursor = null;
+      let startEventId = null;
+      let startVector = null;
+      let total = 0;
+      do {
+        const page = await link.call('syncom/snapshot', { cursor, scopes: node.scopes });
+        if (peer.closed) return;
+        startEventId ??= page.eventId;
+        startVector ??= page.vector ?? null;
+        const records = page.id !== undefined ? await this.#readSnapshot(link, page) : page.records;
+        await this.#storage.mergeSnapshot(records, { via: peer, from: peer.remote.id });
+        total += records.length;
+        cursor = page.cursor ?? null;
+      } while (cursor !== null);
+      // Everything up to the host's vector at the FIRST page is inside what
+      // was joined; adopting it (for the scopes asked for) means nobody
+      // offers those ops again. Later ops replay from the cursor.
+      if (startVector) {
+        await this.#storage.adoptVector(scopedVector(startVector, node.scopes), { via: peer, from: peer.remote.id });
+      }
+      node.cursor = startEventId;
+      node.lastSync = Date.now();
+      await this.#saveNode(node);
+      await this.emit('bootstrap', { url: node.url, records: total });
+      if (!peer.closed) this.#subscribe(peer);
+    } finally {
+      peer.bootstrapping = false;
+    }
+  }
+
+  // A streamed page: NDJSON, one `{ id, data, meta }` per line, parsed as the
+  // chunks arrive so a page costs one record of memory, not one page.
+  async #readSnapshot(link, page) {
+    if (typeof link.stream !== 'function') {
+      throw new Error('The host streamed a snapshot but the link cannot read streams');
+    }
+    const decoder = new TextDecoder();
+    const records = [];
+    let rest = '';
+    for await (const chunk of link.stream(page.id)) {
+      rest += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
+      let newline = rest.indexOf('\n');
+      while (newline !== -1) {
+        const line = rest.slice(0, newline);
+        rest = rest.slice(newline + 1);
+        if (line.length > 0) records.push(JSON.parse(line));
+        newline = rest.indexOf('\n');
+      }
+    }
+    rest += decoder.decode();
+    if (rest.trim().length > 0) records.push(JSON.parse(rest));
+    return records;
+  }
+
+  // One op landed here (locally or from a peer): wake the hosting feeds, and
+  // queue it for every dialed peer except the one it came from.
+  #fanOut(op, via) {
+    for (const wake of Array.from(this.#wakers)) wake();
+    for (const peer of this.#peers.values()) {
+      if (peer === via || !peer.remote || !peer.connected) continue;
+      if (op.origin === peer.remote.id || op.from === peer.remote.id) continue;
+      if (vectorHas(peer.remote.vector, op)) continue;
+      if (!inScope(op, peer.node.scopes)) continue;
+      peer.outbox.push(op);
+      this.#scheduleFlush(peer);
+    }
+  }
+
+  // Ops that land in one tick travel as one push; pushes to a peer never
+  // overlap, so its vector answer is always the latest.
+  #scheduleFlush(peer) {
+    if (peer.pushing) return;
+    peer.pushing = Promise.resolve()
+      .then(async () => {
+        while (peer.outbox.length > 0 && !peer.closed && peer.connected) {
+          const ops = peer.outbox;
+          peer.outbox = [];
+          await this.#send(peer, ops);
+        }
+      })
+      .catch((error) => {
+        // Dropped on purpose: the next hello/push recomputes from the vector.
+        peer.outbox = [];
+        this.#fail(peer, error);
+      })
+      .finally(() => {
+        peer.pushing = null;
+        if (peer.outbox.length > 0 && !peer.closed && peer.connected) this.#scheduleFlush(peer);
+      });
+  }
+
+  // ---------------------------------------------------------------------
+  // The hosting side
+
+  /**
+   * The router unit a wrpc server (or anything shaped like one) hosts:
+   * `defineRouter({ syncom: storage.sync.unit({ access: 'public' }) })`.
+   * `access` defaults to wrpc's own default, 'session'; `authorize(context,
+   * hello)` gates a peer by whatever the transport presented.
+   */
+  unit(options = {}) {
+    const {
+      access = 'session',
+      authorize = null,
+      tracked = null,
+      pageSize = DEFAULT_PAGE_SIZE,
+      pageBytes = DEFAULT_PAGE_BYTES,
+    } = options;
+    const storage = this.#storage;
+    const wakers = this.#wakers;
+    const track = tracked ?? ((id, data) => ({ [TRACKED]: true, id: String(id), data }));
+
+    const peerOf = (context) => {
+      const state = context?.client?.data?.syncom;
+      if (!state) throw coded('Say hello first', 428);
+      return state;
+    };
+
+    return {
+      hello: {
+        access,
+        handler: async (context, args) => {
+          if (!args || typeof args.node !== 'string') throw coded('hello needs a node id', 400);
+          if (args.version !== undefined && args.version !== PROTOCOL) {
+            throw coded(`Unsupported protocol ${args.version}`, 400);
+          }
+          if (args.node === storage.nodeId) throw coded('A node cannot sync with itself (copied data directory?)', 409);
+          if (authorize && !(await authorize(context, args))) throw coded('Not authorized to sync', 403);
+          const scopes = Array.isArray(args.scopes) ? args.scopes.filter((s) => typeof s === 'string') : [GLOBAL_SCOPE];
+          if (context?.client) {
+            context.client.data ??= {};
+            context.client.data.syncom = { node: args.node, scopes, vector: args.vector ?? {} };
+            if (typeof context.client.join === 'function') {
+              for (const scope of scopes) context.client.join(`syncom:${scope}`);
+            }
+          }
+          return { node: storage.nodeId, vector: storage.vector, epoch: storage.log.epoch, version: PROTOCOL };
+        },
+      },
+
+      push: {
+        access,
+        handler: async (context, args) => {
+          const { scopes } = peerOf(context);
+          const ops = unpackOps(args?.ops);
+          const result = await storage.applyRemote(ops, { via: context.client, scopes });
+          return { vector: storage.vector, ...result };
+        },
+      },
+
+      snapshot: {
+        access,
+        handler: async (context, args) => {
+          peerOf(context);
+          const page = await storage.snapshot({
+            cursor: args?.cursor ?? null,
+            limit: pageSize,
+            scopes: args?.scopes ?? null,
+          });
+          const client = context?.client;
+          const canStream = client && client.binary !== false && typeof client.createStream === 'function';
+          if (!canStream || page.records.length === 0) return page;
+          // NDJSON, serialized first because a wrpc stream declares its size
+          // up front; a page is bounded, so that buffer is too.
+          let text = '';
+          for (const record of page.records) text += `${JSON.stringify(record)}\n`;
+          const bytes = new TextEncoder().encode(text);
+          if (bytes.length > pageBytes) return page;
+          const stream = client.createStream('syncom/snapshot', bytes.length);
+          // The opening packet is already out; writing in this tick would
+          // race the caller's chance to attach a consumer.
+          queueMicrotask(() => {
+            stream.write(bytes);
+            stream.end();
+          });
+          return { id: stream.id, size: bytes.length, cursor: page.cursor, eventId: page.eventId, vector: page.vector };
+        },
+      },
+
+      changes: {
+        access,
+        handler: async function* (context, args, subscription = {}) {
+          const { node } = peerOf(context);
+          const { lastEventId, signal } = subscription;
+          const scopes = Array.isArray(args?.scopes) ? args.scopes : null;
+          let cursor = lastEventId ?? undefined;
+          for (;;) {
+            if (signal?.aborted) return;
+            const entries = storage.log.since(cursor, { scopes, limit: pageSize });
+            if (entries === null) {
+              // Cannot resume: another epoch, or compacted past the cursor.
+              yield { bootstrap: true };
+              return;
+            }
+            if (entries.length === 0) {
+              await waitFor(wakers, signal);
+              continue;
+            }
+            const last = entries[entries.length - 1].seq;
+            const ops = [];
+            for (const { op } of entries) if (op.origin !== node && op.from !== node) ops.push(op);
+            cursor = storage.log.formatId(last);
+            // Labelled even when every op was the peer's own echo: the
+            // position still moves, and a resume must not replay it.
+            yield track(cursor, { ops: packOps(ops), eventId: cursor });
+          }
+        },
+      },
+    };
   }
 }
 
-module.exports = { SyncManager };
+module.exports = { SyncManager, isSyncLink };

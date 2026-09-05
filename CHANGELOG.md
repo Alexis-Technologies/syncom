@@ -12,6 +12,29 @@ section until the first publish; everything below lands there on release day.
 
 ### Added
 
+- **Replication.** Every write is now an operation — `write` (`insert`/`set`),
+  `set` (`update`/`swap`/`record.save`), `inc`, `delete` — appended to a
+  persisted log (`src/log.js`) and applied through a record-level model
+  (`src/ops.js`) that converges in any order: last-writer-wins registers,
+  per-origin counters, tombstones with revival. `SyncManager` dials the
+  registered nodes through an injected `sync.connect(node)` factory, pushes
+  what a peer lacks, subscribes to what it learns, relays across a mesh,
+  resumes from the last event id and bootstraps from a snapshot when it
+  cannot; `storage.sync.unit()` is the router unit a host mounts.
+- `@alexify/syncom/wrpc` — `createWrpcLink(client)` adapts a `WrpcClient`
+  (injected, never a dependency) to the link contract; `isSyncLink`,
+  `SYNC_INTROSPECTION`.
+- `Storage`: `inc()`, `list()`, `close()`, `applyRemote()`, `snapshot()`,
+  `mergeSnapshot()`, `adoptVector()`, `nodeId`, `vector`, `log`, the `change`
+  and `error` events; `Record.inc()`; live records follow remote changes and
+  keep unsaved edits on top. Options `logger`, `encrypted`, `sync`.
+- `SyncManager`: `stop()`, `sync()`, `peers()`, `enableNode()`, `unit()`, the
+  `peer`/`sync`/`bootstrap`/`error` events; scopes (`addNode({ scopes })`,
+  `sync.scope`) for partial replication.
+- Encryption at rest is a hybrid envelope (AES-256-GCM under an RSA-OAEP
+  SHA-256 wrapped key), identical in both halves, with no payload ceiling;
+  `open({ encrypted: true })` and `insert/set(…, { encrypted })`.
+- `fsi.list(dir)`; `OpLog`, `applyOp`, `mergeEntry`, `isAlive` exports.
 - `src/utils.js` and `src/utils.browser.js` — the `Emitter`, `generateUUID`,
   `between`, `fileExists` and `directoryExists` helpers the source needs,
   vendored in so the package keeps its zero-runtime-dependency promise.
@@ -35,6 +58,17 @@ section until the first publish; everything below lands there on release day.
 
 ### Fixed
 
+- `Storage.saveData()` did not await `encrypt`/`decrypt`, so encryption at
+  rest in the browser stored a serialized promise (`{}`) instead of ciphertext.
+- `apply()` ignored the data of a `write` record and only understood `delete`
+  by `key`; a full write now replaces the state and Storage's own
+  `{ type: 'delete', id }` shape empties it.
+- `Blockchain.validate({ from })` threw on an unknown hash instead of
+  answering `false`.
+- `loadKeys()` threw `ENOENT` when `public.pem` existed without `private.pem`;
+  the pair is regenerated.
+- `SyncManager` persisted nodes under `<host>.json`, so two peers on one host,
+  or a url without a port, overwrote each other.
 - `Storage.validate()` threw `Cannot use 'in' operator` when called with no
   arguments, and silently returned `false` for `validate({})`. It discriminated
   on `'last' in idOrOptions`; it now keys off whether the first argument is a
@@ -55,6 +89,17 @@ section until the first publish; everything below lands there on release day.
 
 ### Changed (breaking)
 
+- `SyncManager` is constructed as `new SyncManager(storage, options)`; nodes
+  no longer carry `type: 'uplink' | 'downlink'` — every registered node is
+  dialed, and any node can host. `src/sync.browser.js` is gone: one
+  `src/sync.js` over `fsi` serves both halves, and the browser registry is
+  persisted in OPFS.
+- The in-memory `Storage.#updates` array and `addUpdate()` are gone; the
+  operation log replaces them. `set()` on an existing record is a whole-record
+  write; `update()` on a counter field, and `inc()` on a register field, throw.
+- `delete()` leaves a tombstone on disk; `list()`, `get()` and `has()` hide it.
+- The browser bundle budget was raised from 5 KB to 14 KB min+gzip for the
+  replication engine.
 - **Node.js ≥ 22 is required** (was `>=18`).
 - Browser modules follow the `*.browser.js` pattern:
   `src/{crypto,fsi,sync}-browser.js` → `src/{crypto,fsi,sync}.browser.js`.

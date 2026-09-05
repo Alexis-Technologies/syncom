@@ -112,7 +112,20 @@ test('CRDT module', async (t) => {
     const history = [{ type: 'write', data: { c: 3, d: 4 } }];
     const result = syncom.apply(source, history);
 
-    assert.deepStrictEqual(result, { a: 1, b: 2 });
+    // A write is a full record write: the state IS the written data.
+    assert.deepStrictEqual(result, { c: 3, d: 4 });
+    assert.deepStrictEqual(source, { a: 1, b: 2 });
+
+    // A write with no data (a bare marker) copies the state forward.
+    assert.deepStrictEqual(syncom.apply(source, [{ type: 'write' }]), { a: 1, b: 2 });
+  });
+
+  await t.test('apply function - delete record vs delete key', () => {
+    const source = { a: 1, b: 2 };
+    // The deletion marker merge() understands: the key is present, set to undefined.
+    assert.deepStrictEqual(syncom.apply(source, [{ type: 'delete', key: 'a' }]), { a: undefined, b: 2 });
+    // Storage's own shape: no key means the record itself was deleted.
+    assert.deepStrictEqual(syncom.apply(source, [{ type: 'delete', id: 'r1' }]), {});
   });
 
   await t.test('apply function - delta record', () => {
@@ -162,15 +175,16 @@ test('CRDT module', async (t) => {
     assert.deepStrictEqual(result, { a: 6, b: 22, c: 3 });
   });
 
-  await t.test('apply function - write preserves state', () => {
+  await t.test('apply function - write replaces the accumulated state', () => {
     const source = { a: 1, b: 2, c: 3 };
     const history = [
       { type: 'delta', data: { d: 4 } },
       { type: 'write', data: { x: 10 } },
+      { type: 'delta', data: { x: 1 } },
     ];
     const result = syncom.apply(source, history);
 
-    assert.deepStrictEqual(result, { a: 1, b: 2, c: 3, d: 4 });
+    assert.deepStrictEqual(result, { x: 11 });
   });
 
   await t.test('apply function - invalid history', () => {

@@ -8,17 +8,17 @@ configuration:
 import { open, diff, merge } from '@alexify/syncom';
 ```
 
-Under the hood the entry resolves to `browser.js`, and four modules are
+Under the hood the entry resolves to `browser.js`, and three modules are
 swapped for their browser twins:
 
 | Node | Browser | Backed by |
 | --- | --- | --- |
 | `src/fsi.js` | `src/fsi.browser.js` | OPFS (`navigator.storage.getDirectory()`) |
 | `src/crypto.js` | `src/crypto.browser.js` | Web Crypto (`crypto.subtle`) |
-| `src/sync.js` | `src/sync.browser.js` | in-memory node registry |
 | `src/utils.js` | `src/utils.browser.js` | `crypto.randomUUID()` — the default `getId` |
 
-CRDT, contracts, the chain and storage are the same code in both halves.
+CRDT, contracts, the chain, storage, the operation log and sync are the same
+code in both halves; so is the `@alexify/syncom/wrpc` adapter.
 
 ## What differs
 
@@ -34,16 +34,17 @@ await decrypt(data, privateKey);
 `browser.d.ts` declares these signatures separately from `index.d.ts` for
 exactly this reason.
 
-The cipher differs too: Node.js uses RSA with the default padding via
-`publicEncrypt`; the browser uses RSA-OAEP with SHA-256. Keys generated on one
-platform are PEM-compatible, but ciphertext is not portable between them.
+The cipher is the same on both: AES-256-GCM under a key wrapped with
+RSA-OAEP (SHA-256). Keys and ciphertext move between the platforms.
 
 **Storage is origin-private.** `fsi.browser.js` resolves paths against
 `navigator.storage.getDirectory()`, so `open({ path: 'data' })` creates a
 `data/` directory inside the origin's OPFS rather than on disk. It is
 per-origin and the browser may evict it.
 
-**Sync nodes are not persisted.** See [Sync](./sync).
+**A browser node dials, it cannot host.** Its registry, log and cursors live
+in OPFS like everything else, so a reload resumes where it left off. See
+[Sync](./sync) and [wrpc transport](./wrpc#in-the-browser).
 
 ## Requirements
 
@@ -65,5 +66,7 @@ that sneaks into the browser bundle, so it cannot silently grow a dependency.
 ## Testing without a browser
 
 The suite exercises the browser halves under Node.js using a mock OPFS
-(`tests/utils/mock-opfs.js`) and `node:crypto`'s `webcrypto`. See
-`tests/index.browser.test.js` for the pattern.
+(`tests/utils/mock-opfs.js`) and `node:crypto`'s `webcrypto`.
+`tests/utils/browser-env.js` loads the shared modules the way a bundler
+honouring `package.json#browser` would, so storage and sync run against OPFS
+too — see `tests/storage.browser.test.js` and `tests/sync.engine.browser.test.js`.

@@ -109,7 +109,8 @@ test('Storage module', async (t) => {
       entry.data = { ok: false };
       await fs.writeFile(filePath, JSON.stringify(entry), 'utf8');
 
-      const storage2 = await syncom.open({ path: tempDir });
+      // Quiet: the reopen's log replay notices the damage and warns.
+      const storage2 = await syncom.open({ path: tempDir, logger: false });
       await assert.rejects(() => storage2.loadData('tampered'), /invalid/);
     } finally {
       await cleanupTemp(tempDir);

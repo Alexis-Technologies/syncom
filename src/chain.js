@@ -59,6 +59,10 @@ class Blockchain {
     if (!currentHash) return false;
     let count = 0;
     while (currentHash) {
+      // An unknown `from` (or a dangling `prev`) is an invalid chain, not an
+      // exception: validate() answers a boolean for every input.
+      const known = await fsi.exists(this.path, `${currentHash}.json`);
+      if (!known) return false;
       const block = await this.readBlock(currentHash);
       const expectedHash = await calculateHash(block);
       const valid = currentHash === expectedHash;

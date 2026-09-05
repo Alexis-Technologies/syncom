@@ -7,7 +7,7 @@ const os = require('node:os');
 const createTemp = async () => {
   const id = Math.random().toString(36).slice(2, 11);
   const tmpRoot = os.tmpdir();
-  const dirName = `gs-test-${Date.now()}-${id}`;
+  const dirName = `syncom-test-${Date.now()}-${id}`;
   const tempDir = path.join(tmpRoot, dirName);
   const mkdirOptions = { recursive: true };
   await fs.mkdir(tempDir, mkdirOptions);

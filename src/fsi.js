@@ -18,4 +18,17 @@ const remove = async (dir, filename) => {
   if (await fileExists(filePath)) await fs.unlink(filePath);
 };
 
-module.exports = { read, write, exists, remove };
+// The file names in a directory (no subdirectories); a missing directory is
+// an empty listing, not an error — a storage that has never written a record
+// simply has no data/ yet.
+const list = async (dir) => {
+  const entries = await fs.readdir(dir, { withFileTypes: true }).catch((error) => {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  });
+  const names = [];
+  for (const entry of entries) if (entry.isFile()) names.push(entry.name);
+  return names.sort();
+};
+
+module.exports = { read, write, exists, remove, list };

@@ -54,8 +54,15 @@ on hot paths. See `bench/chain.js` for the numbers.
 
 ## Through storage
 
-`Storage` keeps its own chain and adds a block on every `saveData`, recording
-the record id and the hash of the stored entry.
+`Storage` keeps its own chain and adds a block for every write it applies. A
+local write commits `{ id, hash, from }` — the record, the hash of its data,
+and its position in the [log](./sync#the-log); a batch of ops applied from a
+peer commits one block `{ records: { [id]: hash }, from, to }` for every record
+it touched. `validate(id, data, block)` accepts both shapes.
+
+Each node's chain is its **own** audit log: the order in which *it* applied
+things. Two nodes that hold the same records hold different chains — that is
+expected, and it is not a consensus mechanism.
 
 ```js
 await storage.validate({ last: 10 }); // delegates to the chain

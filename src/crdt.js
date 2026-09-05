@@ -74,10 +74,14 @@ const apply = (source, history) => {
   if (!Array.isArray(history)) return source;
   let result = { ...source };
 
+  // `write` is a full record write: the state becomes `record.data`. A write
+  // without data (a bare marker) copies the state forward. `delete` names a
+  // key to drop it; without one it is the record itself that was deleted,
+  // which is the shape Storage produces (`{ type: 'delete', id }`).
   const handlers = {
-    write: (record, state) => ({ ...state }),
+    write: (record, state) => (record.data && typeof record.data === 'object' ? { ...record.data } : { ...state }),
     delta: (record, state) => merge(state, record.data),
-    delete: (record, state) => ({ ...state, [record.key]: undefined }),
+    delete: (record, state) => (record.key === undefined ? {} : { ...state, [record.key]: undefined }),
     inc: (record, state) => merge(state, { [record.key]: record.value }),
     dec: (record, state) => merge(state, { [record.key]: -record.value }),
   };

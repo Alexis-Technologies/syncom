@@ -2,6 +2,7 @@
 
 class MockFileHandle {
   #entry = null;
+  kind = 'file';
 
   constructor(entry) {
     this.#entry = entry;
@@ -30,9 +31,21 @@ class MockFileHandle {
 
 class MockDirectoryHandle {
   #entries = null;
+  kind = 'directory';
 
   constructor(entries) {
     this.#entries = entries;
+  }
+
+  // The FileSystemDirectoryHandle iterator: [name, handle] pairs.
+  async *entries() {
+    for (const [name, entry] of Array.from(this.#entries.entries())) {
+      yield [name, entry.type === 'dir' ? new MockDirectoryHandle(entry.map) : new MockFileHandle(entry)];
+    }
+  }
+
+  async *keys() {
+    for (const name of Array.from(this.#entries.keys())) yield name;
   }
 
   async getDirectoryHandle(name, { create } = {}) {
