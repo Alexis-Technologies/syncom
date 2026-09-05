@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { applyOp, mergeEntry, isAlive, createEntry, isCounter } = require('../src/ops.js');
+const { applyOp, mergeEntry, isAlive, createEntry, isCounter, latestClock } = require('../src/ops.js');
 
 const op = (type, ts, origin, extra = {}) => ({ type, ts, origin, seq: extra.seq ?? ts, id: 'r', ...extra });
 
@@ -151,6 +151,25 @@ test('ops module', async (t) => {
       x: 1,
       n: 5,
     });
+  });
+
+  await t.test('latestClock is the newest stamp an entry holds, or null', () => {
+    assert.strictEqual(latestClock(null), null);
+    assert.strictEqual(latestClock(createEntry().meta), null);
+    const meta = {
+      clock: { a: [5, 'x'], b: [9, 'y'] },
+      base: [3, 'x'],
+      deleted: null,
+      counters: { hits: { x: [1, 2, 7], z: [4, 1, 9] } },
+    };
+    assert.deepStrictEqual(latestClock(meta), [9, 'z'], 'ties break by origin, like compareClock');
+    meta.deleted = [12, 'x'];
+    assert.deepStrictEqual(latestClock(meta), [12, 'x']);
+    // Peer-shaped garbage is tolerated, not trusted.
+    assert.deepStrictEqual(latestClock({ clock: { a: 'nope', b: [2, 'b'] }, counters: { c: 3, d: { o: 'x' } } }), [
+      2,
+      'b',
+    ]);
   });
 
   await t.test('mergeEntry joins two histories like replaying both', () => {

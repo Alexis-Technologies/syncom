@@ -183,6 +183,10 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     for (let i = 0; i < 12; i++) await a.inc(id, 'hits', 1);
     await a.insert({ other: true });
     assert.ok(a.log.floor > 1, 'history was compacted');
+    // A holds state stamped by a peer whose clock runs an hour ahead; it
+    // reaches B only through the snapshot, never as an op B could observe.
+    const ahead = Date.now() + 3_600_000;
+    await a.applyRemote([{ origin: 'fast', seq: 1, ts: ahead, type: 'write', id: 'skewed', data: { v: 'fast' } }]);
 
     const b = mesh.get('B');
     const events = [];
@@ -198,6 +202,10 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     await settle([a, b]);
     assert.strictEqual((await b.get(id)).hits, 13);
     assert.deepStrictEqual(await a.get(fromB), { late: true });
+    // B's write to the skew-stamped record wins over what it joined, everywhere.
+    await b.update('skewed', { v: 'B' });
+    await settle([a, b]);
+    assert.deepStrictEqual(await a.get('skewed'), { v: 'B' }, 'a local write outranks the joined state');
     // A snapshot merged into B is in B's log, so a peer of B gets it too.
     const c = await createStorage(t2, 'C', {
       sync: { connect: () => new (require('../utils/memory-link.js').MemoryLink)(b.sync.unit({ access: 'public' })) },

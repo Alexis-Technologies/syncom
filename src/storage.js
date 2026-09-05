@@ -5,7 +5,7 @@ const { encrypt, decrypt, loadKeys, calculateHash } = require('./crypto.js');
 const { Blockchain } = require('./chain.js');
 const { SyncManager } = require('./sync.js');
 const { OpLog } = require('./log.js');
-const { applyOp, isAlive } = require('./ops.js');
+const { applyOp, isAlive, latestClock } = require('./ops.js');
 const { Clock, opKey, keyScope, vectorHas, vectorNext, vectorAdvance } = require('./vector.js');
 const fsi = require('./fsi.js');
 
@@ -231,6 +231,9 @@ class Storage extends Emitter {
     this.#keys = await loadKeys(`${this.#path}/keys`);
     this.#chain = await new Blockchain(`${this.#path}/blockchain`);
     this.#log = await new OpLog(this.#path, { ...this.#options.sync?.log, retention: this.#options.sync?.retention });
+    // The clock picks up where the log left off: every stamp this node ever
+    // logged is below what it will stamp next, whatever the wall clock says.
+    this.#clock.observe(this.#log.latestTs);
     await this.#loadIdentity();
     await this.#replayTail();
     this.#sync = await new SyncManager(this, this.#options.sync);
@@ -378,6 +381,10 @@ class Storage extends Emitter {
     return blockHash;
   }
 
+  #observe(stamp) {
+    if (stamp) this.#clock.observe(stamp[0]);
+  }
+
   // ---------------------------------------------------------------------
   // The one local write path. Builds the op, applies it, logs it (durable
   // seq), persists the entry, then announces it.
@@ -395,6 +402,12 @@ class Storage extends Emitter {
       }
       const data = payload.data ?? current?.data ?? {};
       const scope = this.#scope(id, data);
+      // Stamp above everything this node already holds for the record — its
+      // entry and, for a merge, the one being joined — so a local write never
+      // sorts below state the node knows about and is silently dropped. The
+      // log seeds the clock at open; this covers what the log no longer has.
+      this.#observe(latestClock(current?.meta));
+      if (type === 'merge') this.#observe(latestClock(payload.meta));
       const op = { origin: this.#nodeId, seq: 0, ts: this.#clock.now(), type, id };
       if (scope !== GLOBAL_SCOPE) op.scope = scope;
       if (from) op.from = from;

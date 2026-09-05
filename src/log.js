@@ -49,6 +49,7 @@ class OpLog {
   #openFiles = [];
   #segments = [];
   #next = 1;
+  #latestTs = 0;
   #floor = 1;
   #epoch = null;
   #vector = {};
@@ -142,7 +143,10 @@ class OpLog {
       this.#entries.push(entry);
       added = true;
       if (entry.seq >= this.#next) this.#next = entry.seq + 1;
-      if (entry.op) vectorAdvance(this.#vector, entry.op);
+      if (entry.op) {
+        vectorAdvance(this.#vector, entry.op);
+        this.#observe(entry.op);
+      }
     }
     if (added) this.#entries.sort((a, b) => a.seq - b.seq);
   }
@@ -157,6 +161,20 @@ class OpLog {
 
   get next() {
     return this.#next;
+  }
+
+  #observe(op) {
+    if (typeof op.ts === 'number' && op.ts > this.#latestTs) this.#latestTs = op.ts;
+  }
+
+  /**
+   * The newest `ts` this log has held since it was opened, over everything
+   * still on disk at open time and everything appended since. A reopened
+   * node seeds its clock from it, so its stamps never run backwards even
+   * when the wall clock did — or when a peer's ran ahead.
+   */
+  get latestTs() {
+    return this.#latestTs;
   }
 
   /** The highest per-origin seq this log has ever held — survives compaction. */
@@ -197,7 +215,10 @@ class OpLog {
       const name = `${pad(entries[0].seq)}.json`;
       await fsi.write(this.#openPath, name, JSON.stringify({ entries }));
       for (const entry of entries) this.#entries.push(entry);
-      for (const op of ops) vectorAdvance(this.#vector, op);
+      for (const op of ops) {
+        vectorAdvance(this.#vector, op);
+        this.#observe(op);
+      }
       this.#openFiles.push(name);
       if (this.#openFiles.length >= this.#rollAfter) await this.#roll();
       return entries;

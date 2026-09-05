@@ -67,6 +67,14 @@ docs/                     VitePress site
 - **Log first, then data.** `OpLog.append` resolves before the record file is
   written and before the op is announced; a reopen replays the unsealed tail.
   A node's own seq must never repeat — it is recovered from the log's vector.
+- **Stamps come from `#clock.now()` after the clock has observed everything
+  the node holds for the record.** `[COMMIT]` in `src/storage.js` does that
+  (`latestClock` over the entry's meta, and the joined meta for a `merge`) and
+  `Storage.#init` seeds the clock from `log.latestTs`; `applyRemote` observes
+  every peer op. A stamp taken any other way can sort below state the node
+  already has, and `applyOp` then drops the write silently (`changed` false,
+  `COMMIT` returns null). Do not add a second write path; go through
+  `[COMMIT]`.
 - **Reconnect/backoff/resume belong to the link.** `SyncManager` re-runs only
   `hello` + `push` on `reconnect`; a refused restored subscription (428 "say
   hello first" — wrpc gives a reconnect a NEW server-side client) triggers a

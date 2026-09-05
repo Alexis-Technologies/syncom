@@ -45,7 +45,33 @@ in the log:
 
 `origin` is the node that made the op, `seq` its sequence number on that node,
 `ts` a millisecond stamp that never runs backwards and never falls behind a
-stamp the node has seen from a peer.
+stamp the node has seen from a peer (see [Clocks](#clocks)).
+
+### Clocks
+
+`ts` is `Date.now()`: milliseconds since the epoch, in UTC. Time zones never
+enter into it — two nodes in different zones stamp the same instant the same
+way. Whether their clocks *agree* is a different matter, and syncom is built so
+that they do not have to:
+
+- **Convergence does not depend on clocks.** Ops apply in `seq` order per
+  origin, and a register conflict is settled by the pair `(ts, origin)`, which
+  is a total order. Two nodes holding the same ops reach the same state
+  whatever their wall clocks say.
+- **A node's clock never runs backwards and never falls behind what the node
+  has seen** — a peer's op, a joined snapshot, or its own entries on disk,
+  including across a reopen (the log seeds the clock when it opens). So a write
+  that follows a read always outranks what was read, even when the peer that
+  wrote it has a clock an hour ahead: a local write can only lose to a write
+  it has not seen yet.
+- **Concurrent writes go to the faster clock.** When two nodes write the same
+  field without seeing each other, the higher `ts` wins on both sides. Skew
+  changes *who* wins, never *whether* they agree. Keep clocks NTP-synced if
+  "last writer" should mean what a human means by it; for correctness it is
+  not required.
+- `retention.days` compares stamps with this node's wall clock, so ops stamped
+  by a peer far ahead age out late and ops from a peer far behind age out
+  early. Retention by `ops` is unaffected.
 
 ### Registers and counters
 

@@ -234,6 +234,55 @@ test('Storage replication model', async (t) => {
     assert.strictEqual(await second.validate(), true);
   });
 
+  await t.test('a local write outranks a snapshot joined from a peer whose clock is ahead', async (t2) => {
+    const { storage } = await openTemp(t2);
+    const ahead = Date.now() + 3_600_000;
+    const meta = (clock, extra = {}) => ({ clock, base: null, deleted: null, counters: {}, ...extra });
+    await storage.mergeSnapshot([
+      { id: 'reg', data: { title: 'remote' }, meta: meta({ title: [ahead, 'peer'] }) },
+      { id: 'reset', data: { n: 1 }, meta: meta({ n: [ahead, 'peer'] }, { base: [ahead, 'peer'] }) },
+      { id: 'gone', data: {}, meta: meta({}, { base: [ahead, 'peer'], deleted: [ahead, 'peer'] }) },
+    ]);
+    const ops = [];
+    storage.on('change', (op) => ops.push(op));
+    await storage.update('reg', { title: 'local' });
+    assert.deepStrictEqual(await storage.get('reg'), { title: 'local' });
+    assert.ok(ops.at(-1).ts > ahead, 'stamped above the joined clock');
+    await storage.delete('reset');
+    assert.strictEqual(await storage.get('reset'), null, 'a delete lands above a joined reset');
+    await storage.inc('gone', 'hits', 1);
+    assert.deepStrictEqual(await storage.get('gone'), { hits: 1 }, 'a counter lands above a joined tombstone');
+    // Joining the same, now older, snapshot again is still a no-op.
+    const before = ops.length;
+    await storage.mergeSnapshot([{ id: 'reg', data: { title: 'remote' }, meta: meta({ title: [ahead, 'peer'] }) }]);
+    assert.strictEqual(ops.length, before);
+    assert.deepStrictEqual(await storage.get('reg'), { title: 'local' });
+  });
+
+  await t.test('the clock survives a reopen: a node never stamps below what it already holds', async (t2) => {
+    const dir = await createTemp();
+    t2.after(() => cleanupTemp(dir));
+    const ahead = Date.now() + 3_600_000;
+    // rollAfter 1 seals every append: the reopen has no tail to replay from.
+    const options = { path: dir, logger: false, sync: { log: { rollAfter: 1 } } };
+    const first = await syncom.open(options);
+    await first.applyRemote([{ origin: 'peer', seq: 1, ts: ahead, type: 'write', id: 'r', data: { n: 1 } }]);
+    await first.close();
+
+    const second = await syncom.open(options);
+    assert.strictEqual(second.log.tail().length, 0, 'everything is sealed');
+    assert.ok(second.log.latestTs >= ahead, 'the log remembers the newest stamp it holds');
+    const ops = [];
+    second.on('change', (op) => ops.push(op));
+    await second.update('r', { n: 2 });
+    assert.deepStrictEqual(await second.get('r'), { n: 2 }, 'an update to the peer-stamped record lands');
+    assert.ok(ops[0].ts > ahead);
+    // A write to an unrelated record is stamped above too: the node's own
+    // stream never runs backwards across a reopen.
+    await second.insert({ fresh: true });
+    assert.ok(ops[1].ts > ops[0].ts);
+  });
+
   await t.test('encrypted records stay local', async (t2) => {
     const { storage } = await openTemp(t2);
     const ops = [];

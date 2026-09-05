@@ -77,6 +77,28 @@ const normalizeMeta = (meta) => ({
   counters: isPlainObject(meta.counters) ? meta.counters : {},
 });
 
+// The newest stamp an entry's metadata holds, over registers, the reset
+// watermark, the tombstone and the counters — what a node must have observed
+// before it stamps a write to that record, or the write sorts below state the
+// node already has and is dropped as stale. Takes raw peer-shaped meta too.
+const latestClock = (meta) => {
+  if (!isPlainObject(meta)) return null;
+  const { clock, base, deleted, counters } = normalizeMeta(meta);
+  let latest = maxClock(base, deleted);
+  for (const field in clock) {
+    if (Array.isArray(clock[field])) latest = maxClock(latest, clock[field]);
+  }
+  for (const field in counters) {
+    const perOrigin = counters[field];
+    if (!isPlainObject(perOrigin)) continue;
+    for (const origin in perOrigin) {
+      const ts = Array.isArray(perOrigin[origin]) ? perOrigin[origin][2] : undefined;
+      if (typeof ts === 'number') latest = maxClock(latest, [ts, origin]);
+    }
+  }
+  return latest;
+};
+
 // Drops every register and counter entry that fell below the (new) base.
 const applyBase = (entry, delta) => {
   const { meta, data } = entry;
@@ -308,4 +330,4 @@ const unpackOps = (packed) => {
   return ops;
 };
 
-module.exports = { createEntry, cloneEntry, applyOp, mergeEntry, isAlive, isCounter, packOps, unpackOps };
+module.exports = { createEntry, cloneEntry, applyOp, mergeEntry, isAlive, isCounter, latestClock, packOps, unpackOps };
