@@ -93,7 +93,7 @@ test('Storage replication model', async (t) => {
     storage.on('change', (op, via) => changes.push({ op, via }));
 
     const first = await storage.applyRemote([remoteOp('peer', 1, 'write', 'r1', { data: { a: 1 } })], { via: 'L' });
-    assert.deepStrictEqual(first, { applied: 1, duplicates: 0, gaps: 0 });
+    assert.deepStrictEqual(first, { applied: 1, skipped: 0, duplicates: 0, gaps: 0 });
     assert.deepStrictEqual(await storage.get('r1'), { a: 1 });
     assert.deepStrictEqual(changes[0].via, 'L');
     assert.strictEqual(changes[0].op.origin, 'peer');
@@ -104,7 +104,7 @@ test('Storage replication model', async (t) => {
       { origin: storage.nodeId, seq: 1, ts: 1, type: 'write', id: 'x', data: {} },
       'garbage',
     ]);
-    assert.deepStrictEqual(again, { applied: 0, duplicates: 2, gaps: 1 });
+    assert.deepStrictEqual(again, { applied: 0, skipped: 0, duplicates: 2, gaps: 1 });
     assert.deepStrictEqual(await storage.get('r1'), { a: 1 });
 
     const next = await storage.applyRemote([
@@ -112,7 +112,7 @@ test('Storage replication model', async (t) => {
       remoteOp('peer', 3, 'inc', 'r1', { key: 'n', value: 4 }),
       remoteOp('peer', 4, 'delete', 'r1'),
     ]);
-    assert.deepStrictEqual(next, { applied: 3, duplicates: 0, gaps: 0 });
+    assert.deepStrictEqual(next, { applied: 3, skipped: 0, duplicates: 0, gaps: 0 });
     assert.strictEqual(await storage.get('r1'), null);
     assert.deepStrictEqual(storage.vector, { peer: 4 });
     // Accepted-but-unchanged ops still advance the vector and are logged.

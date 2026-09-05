@@ -208,13 +208,19 @@ class OpLog {
   /**
    * Appends a batch; resolves once it is on disk. Returns the entries with
    * their seqs, so the caller can announce them by id. Rolls the open files
-   * into a segment when enough have accumulated.
+   * into a segment when enough have accumulated. Ops in `skipped` were
+   * accepted but not applied here (a beforeApply hook said no): they are
+   * logged and served like any other, and flagged so a reopen's replay of
+   * the tail leaves them alone too.
    */
-  append(ops) {
+  append(ops, { skipped = null } = {}) {
     return this.#serialize(async () => {
       if (ops.length === 0) return [];
       const entries = [];
-      for (const op of ops) entries.push({ seq: this.#next++, op });
+      for (const op of ops) {
+        const seq = this.#next++;
+        entries.push(skipped?.has(op) ? { seq, op, skipped: true } : { seq, op });
+      }
       const name = `${pad(entries[0].seq)}.json`;
       const started = this.#otel.enabled ? now() : 0;
       await fsi.write(this.#openPath, name, JSON.stringify({ entries }));

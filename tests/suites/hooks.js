@@ -6,6 +6,7 @@
 
 const { createMesh, settle, waitUntil } = require('../utils/mesh.js');
 const { MemoryLink } = require('../utils/memory-link.js');
+const { packOps } = require('../../src/ops.js');
 
 const remoteOp = (origin, seq, type, id, extra = {}) => ({ origin, seq, ts: Date.now() + seq, type, id, ...extra });
 
@@ -251,6 +252,181 @@ const runHooksTests = async (t, assert, createStorage) => {
     deny = true;
     await assert.rejects(() => storage.get(id), hookError('beforeRead'));
     assert.strictEqual(await storage.has(id), true);
+  });
+
+  await t.test('beforeApply(false) skips an op here: logged, relayed, replay-safe', async (t2) => {
+    const seen = [];
+    let storage = await createStorage(t2, 'A', {
+      hooks: {
+        beforeApply: (ctx) => {
+          seen.push({ ...ctx, current: ctx.current && { ...ctx.current } });
+          if (ctx.op.data?.secret) return false;
+        },
+      },
+    });
+    const changes = [];
+    const applies = [];
+    storage.on('change', (op) => changes.push(op.seq));
+    storage.on('apply', (batch) => applies.push(batch));
+    const first = await storage.applyRemote(
+      [
+        remoteOp('peer', 1, 'write', 'r1', { data: { secret: true } }),
+        remoteOp('peer', 2, 'write', 'r2', { data: { n: 2 } }),
+      ],
+      { via: 'L', peer: { url: 'mem://peer', node: 'peer' } },
+    );
+    assert.deepStrictEqual(first, { applied: 2, skipped: 1, duplicates: 0, gaps: 0 });
+    assert.strictEqual(await storage.get('r1'), null, 'the skipped op did not touch the record');
+    assert.deepStrictEqual(await storage.get('r2'), { n: 2 });
+    assert.strictEqual(storage.vector.peer, 2, 'but moved the vector');
+    assert.strictEqual(storage.log.length, 2, 'and is in the log');
+    assert.deepStrictEqual(changes, [1, 2], 'and was announced');
+    assert.deepStrictEqual(applies.length, 1);
+    assert.deepStrictEqual(applies[0].peer, { url: 'mem://peer', node: 'peer' });
+    assert.strictEqual(applies[0].ops.length, 2);
+    assert.deepStrictEqual(
+      seen.map(({ op, via, peer, current }) => [op.seq, via, peer.node, current]),
+      [
+        [1, 'L', 'peer', null],
+        [2, 'L', 'peer', null],
+      ],
+    );
+    // The next op of that origin is not a gap.
+    const next = await storage.applyRemote([remoteOp('peer', 3, 'set', 'r2', { data: { n: 3 } })]);
+    assert.strictEqual(next.applied, 1);
+    assert.deepStrictEqual(seen.at(-1).current, { n: 2 });
+    // A reopen replays the unsealed tail — and leaves the skipped op alone.
+    await storage.close();
+    storage = await createStorage(t2, 'A');
+    assert.strictEqual(await storage.get('r1'), null);
+    assert.deepStrictEqual(await storage.get('r2'), { n: 3 });
+    assert.strictEqual(storage.vector.peer, 3);
+  });
+
+  await t.test('a throwing beforeApply aborts the batch before anything is durable', async (t2) => {
+    const storage = await createStorage(t2, 'A', {
+      hooks: {
+        beforeApply: ({ op }) => {
+          if (op.seq === 2) throw new Error('refused');
+        },
+      },
+    });
+    await assert.rejects(
+      () =>
+        storage.applyRemote([
+          remoteOp('peer', 1, 'write', 'r1', { data: { n: 1 } }),
+          remoteOp('peer', 2, 'write', 'r2', { data: { n: 2 } }),
+        ]),
+      hookError('beforeApply'),
+    );
+    assert.strictEqual(storage.log.length, 0);
+    assert.deepStrictEqual(storage.vector, {});
+    assert.strictEqual(await storage.get('r1'), null, 'the op before the throw was not persisted either');
+    assert.strictEqual(await storage.has('r1'), false);
+  });
+
+  await t.test('afterApply sees the durable batch; a throw fails the call but the batch stays', async (t2) => {
+    const batches = [];
+    const storage = await createStorage(t2, 'A', {
+      hooks: {
+        afterApply: (batch) => {
+          batches.push(batch);
+          if (batch.applied > 0) throw new Error('after boom');
+        },
+      },
+    });
+    const events = [];
+    storage.on('apply', (batch) => events.push(batch.applied));
+    await assert.rejects(
+      () => storage.applyRemote([remoteOp('peer', 1, 'write', 'r1', { data: { n: 1 } })]),
+      hookError('afterApply'),
+    );
+    assert.deepStrictEqual(await storage.get('r1'), { n: 1 }, 'the batch is committed');
+    assert.deepStrictEqual(events, [1], 'and announced');
+    const empty = await storage.applyRemote([remoteOp('peer', 1, 'write', 'r1', { data: { n: 1 } })]);
+    assert.deepStrictEqual(empty, { applied: 0, skipped: 0, duplicates: 1, gaps: 0 });
+    assert.strictEqual(batches.length, 2, 'an empty batch runs the hook too');
+    assert.deepStrictEqual(batches[1].ops, []);
+    assert.deepStrictEqual(events, [1, 0]);
+  });
+
+  await t.test('a skip is local: the op still reaches the peers behind this node', async (t2) => {
+    const mesh = await createMesh(
+      t2,
+      ['A', 'B', 'C'],
+      [
+        ['B', 'A'],
+        ['C', 'B'],
+      ],
+      createStorage,
+      { nodes: { B: { hooks: { beforeApply: ({ op }) => (op.data?.secret ? false : undefined) } } } },
+    );
+    const a = mesh.get('A');
+    const b = mesh.get('B');
+    const c = mesh.get('C');
+    const secret = await a.insert({ secret: true });
+    const plain = await a.insert({ plain: true });
+    await settle([a, b, c]);
+    assert.strictEqual(await b.get(secret), null, 'B skipped it');
+    assert.deepStrictEqual(await b.get(plain), { plain: true });
+    assert.deepStrictEqual(await c.get(secret), { secret: true }, 'C, behind B, still got it');
+    assert.deepStrictEqual(await c.get(plain), { plain: true });
+  });
+
+  await t.test('the hosting side runs beforeApply for a pushed page', async (t2) => {
+    const seen = [];
+    let refuse = false;
+    const host = await createStorage(t2, 'H', {
+      hooks: {
+        beforeApply: (ctx) => {
+          seen.push(ctx.peer);
+          if (refuse) throw new Error('not here');
+          return ctx.op.data?.secret ? false : undefined;
+        },
+      },
+    });
+    const unit = host.sync.unit({ access: 'public' });
+    const link = new MemoryLink(unit);
+    await link.call('syncom/hello', { node: 'peer', version: 1 });
+    const answer = await link.call('syncom/push', {
+      ops: packOps([remoteOp('peer', 1, 'write', 'r1', { data: { secret: true } })]),
+    });
+    assert.strictEqual(answer.applied, 1);
+    assert.strictEqual(answer.skipped, 1);
+    assert.deepStrictEqual(answer.vector, { peer: 1 });
+    assert.deepStrictEqual(seen, [{ url: null, node: 'peer' }]);
+    refuse = true;
+    await assert.rejects(
+      () => link.call('syncom/push', { ops: packOps([remoteOp('peer', 2, 'write', 'r2', { data: {} })]) }),
+      /beforeApply hook failed: not here/,
+    );
+    assert.deepStrictEqual(host.vector, { peer: 1 });
+  });
+
+  await t.test('a peer whose page is refused hears about it as an error, and recovers', async (t2) => {
+    let refuse = true;
+    const host = await createStorage(t2, 'H', {
+      hooks: {
+        beforeApply: () => {
+          if (refuse) throw new Error('not yet');
+        },
+      },
+    });
+    const unit = host.sync.unit({ access: 'public' });
+    const dialer = await createStorage(t2, 'D', { sync: { autoStart: false, connect: () => new MemoryLink(unit) } });
+    const errors = [];
+    dialer.sync.on('error', (error) => errors.push(error));
+    await dialer.sync.addNode({ url: 'mem://host' });
+    const id = await dialer.insert({ n: 1 });
+    await dialer.sync.start();
+    await waitUntil(() => errors.length > 0);
+    assert.match(errors[0].message, /beforeApply hook failed: not yet/);
+    assert.strictEqual(errors[0].url, 'mem://host');
+    assert.strictEqual(await host.get(id), null);
+    refuse = false;
+    await dialer.sync.sync();
+    await settle([host, dialer]);
+    assert.deepStrictEqual(await host.get(id), { n: 1 });
   });
 
   await t.test('the order of a local write', async (t2) => {

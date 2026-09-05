@@ -300,7 +300,9 @@ class Storage extends Emitter {
   // Returns how many records the tail touched.
   async #replay(tail) {
     const touched = new Map();
-    for (const { seq, op } of tail) {
+    for (const { seq, op, skipped } of tail) {
+      // Accepted but not applied when it arrived (beforeApply said no).
+      if (skipped) continue;
       this.#clock.observe(op.ts);
       let current;
       try {
@@ -746,23 +748,25 @@ class Storage extends Emitter {
         () => this.#applyRemote(ops, options),
         (r) => ({
           'syncom.ops.applied': r.applied,
+          'syncom.ops.skipped': r.skipped,
           'syncom.ops.duplicates': r.duplicates,
           'syncom.ops.gaps': r.gaps,
         }),
       );
       return result;
     } finally {
-      otel.recordApply(result ?? { applied: 0, duplicates: 0, gaps: 0 }, now() - started);
+      otel.recordApply(result ?? { applied: 0, skipped: 0, duplicates: 0, gaps: 0 }, now() - started);
     }
   }
 
-  async #applyRemote(ops, { via = null, scopes = null } = {}) {
+  async #applyRemote(ops, { via = null, scopes = null, peer = null } = {}) {
     {
       const accepted = [];
       const touched = new Map();
       const deltas = new Map();
       const vector = this.#log.vector;
       let adopted = null;
+      let skipped = null;
       let duplicates = 0;
       let gaps = 0;
       for (const op of ops) {
@@ -807,6 +811,19 @@ class Storage extends Emitter {
           accepted.push(op);
           continue;
         }
+        // A `false` from beforeApply skips the op HERE only: it is still
+        // logged and relayed (the vector must move, or the peer would offer
+        // it forever, and a hole in this log would be a gap for everyone
+        // resuming from it). A throw aborts the batch — nothing is durable
+        // yet, so the peer sees a failed push and offers the page again.
+        const visible = current && isAlive(current) ? current.data : null;
+        const verdict = await this.#hook('beforeApply', { op, via, peer, current: visible });
+        if (verdict === false) {
+          vectorAdvance(vector, op);
+          accepted.push(op);
+          (skipped ??= new Set()).add(op);
+          continue;
+        }
         this.#clock.observe(op.ts);
         const { entry, changed, delta, rejected } = applyOp(current, op);
         if (rejected.length > 0) {
@@ -821,18 +838,26 @@ class Storage extends Emitter {
         touched.set(op.id, entry);
         deltas.set(op.id, { ...(deltas.get(op.id) ?? {}), ...delta });
       }
-      if (accepted.length === 0) return { applied: 0, duplicates, gaps };
-
-      const entries = await this.#log.append(accepted);
-      if (adopted) await this.#log.advance(adopted);
-      if (touched.size > 0) {
-        await this.#persistBatch(touched, entries[0].seq, entries[entries.length - 1].seq);
+      const result = { applied: accepted.length, skipped: skipped?.size ?? 0, duplicates, gaps };
+      if (accepted.length > 0) {
+        const entries = await this.#log.append(accepted, { skipped });
+        if (adopted) await this.#log.advance(adopted);
+        if (touched.size > 0) {
+          await this.#persistBatch(touched, entries[0].seq, entries[entries.length - 1].seq);
+        }
+      }
+      // afterApply sees a durable batch; whatever it does, the record views
+      // and the listeners (the relay among them) hear about every op.
+      try {
+        await this.#hook('afterApply', { via, peer, ops: accepted, ...result });
+      } finally {
         for (const [id, entry] of touched) {
           this.#emitUpdate(id, isAlive(entry) ? entry.data : null, deltas.get(id));
         }
+        notify(this, this.#logger, 'apply', { via, peer, ops: accepted, ...result });
+        for (const op of accepted) notify(this, this.#logger, 'change', op, via);
       }
-      for (const op of accepted) notify(this, this.#logger, 'change', op, via);
-      return { applied: accepted.length, duplicates, gaps };
+      return result;
     }
   }
 

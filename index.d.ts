@@ -498,7 +498,10 @@ export interface SnapshotPage {
 }
 
 export interface ApplyRemoteResult {
+  /** Accepted ops — the skipped ones included; they moved the vector too. */
   applied: number;
+  /** Accepted but not applied here: a beforeApply hook returned `false`. */
+  skipped: number;
   duplicates: number;
   gaps: number;
 }
@@ -544,7 +547,7 @@ export interface Storage {
   hasRecord(id: string): boolean;
   applyRemote(
     ops: readonly SyncOp[],
-    options?: { via?: unknown; scopes?: readonly string[] | null },
+    options?: { via?: unknown; scopes?: readonly string[] | null; peer?: PeerRef | null },
   ): Promise<ApplyRemoteResult>;
   adoptVector(vector: VersionVector, options?: { via?: unknown; from?: string }): Promise<SyncOp | null>;
   snapshot(options?: { cursor?: string | null; limit?: number; scopes?: readonly string[] | null }): Promise<SnapshotPage>;

@@ -188,3 +188,5 @@ expectAssignable<StorageOptions>({
 expectError(syncom.open({ hooks: { nope: () => {} } }));
 expectError(syncom.open({ hooks: { beforeWrite: 'x' } }));
 expectError(syncom.open({ hooks: { beforeWrite: () => 'not an object' } }));
+expectType<Promise<syncom.ApplyRemoteResult>>(storage.applyRemote([], { peer: { url: null, node: 'n' } }));
+storage.applyRemote([]).then((result) => expectType<number>(result.skipped));

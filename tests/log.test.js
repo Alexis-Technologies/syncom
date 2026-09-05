@@ -181,6 +181,30 @@ test('OpLog', async (t) => {
     }
   });
 
+  await t.test('a skipped op is logged, served and flagged through a reopen', async () => {
+    const dir = await createTemp();
+    try {
+      let log = await new OpLog(dir);
+      const skip = op('A', 2);
+      const entries = await log.append([op('A', 1), skip, op('A', 3)], { skipped: new Set([skip]) });
+      assert.deepStrictEqual(
+        entries.map((entry) => entry.skipped),
+        [undefined, true, undefined],
+      );
+      assert.deepStrictEqual(log.vector, { A: 3 }, 'a skipped op moves the vector like any other');
+      assert.strictEqual(log.since(undefined).length, 3, 'and is served to resuming peers');
+      await log.close();
+      log = await new OpLog(dir);
+      assert.deepStrictEqual(
+        log.tail().map((entry) => entry.skipped),
+        [undefined, true, undefined],
+        'the flag survives a reopen, for the replay to honour',
+      );
+    } finally {
+      await cleanupTemp(dir);
+    }
+  });
+
   await t.test('flush seals the open files on demand', async () => {
     const dir = await createTemp();
     try {

@@ -453,7 +453,11 @@ class SyncManager extends Emitter {
     if (peer.closed || !value) return;
     if (value.bootstrap) return void (await this.#bootstrap(peer));
     const ops = unpackOps(value.ops);
-    const result = await this.#storage.applyRemote(ops, { via: peer, scopes: peer.node.scopes });
+    const result = await this.#storage.applyRemote(ops, {
+      via: peer,
+      scopes: peer.node.scopes,
+      peer: { url: peer.node.url, node: peer.remote.id },
+    });
     // Hung up while applying: the cursor is not saved, so a restart replays
     // this page as duplicates — better than a registry write racing whoever
     // reopens the directory next.
@@ -643,9 +647,10 @@ class SyncManager extends Emitter {
       push: {
         access,
         handler: async (context, args) => {
-          const { scopes } = peerOf(context);
+          const { node, scopes } = peerOf(context);
           const ops = unpackOps(args?.ops);
-          const result = await storage.applyRemote(ops, { via: context.client, scopes });
+          // `url` is null: a host does not dial, so it has no url for the peer.
+          const result = await storage.applyRemote(ops, { via: context.client, scopes, peer: { url: null, node } });
           return { vector: storage.vector, ...result };
         },
       },

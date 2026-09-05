@@ -18,7 +18,10 @@ const createMesh = async (t, names, edges, createStorage, options = {}) => {
     return link;
   };
   for (const name of names) {
-    const storage = await createStorage(t, name, { sync: { connect, autoStart: false, ...options.sync } });
+    const storage = await createStorage(t, name, {
+      ...options.nodes?.[name],
+      sync: { connect, autoStart: false, ...options.sync, ...options.nodes?.[name]?.sync },
+    });
     storages.set(name, storage);
     units.set(name, storage.sync.unit(options.unit ?? { access: 'public' }));
   }

@@ -461,7 +461,7 @@ test('Storage telemetry', async (t) => {
       'garbage',
       remoteOp('peer', 2, 'inc', id, { key: 'hits', value: 1 }),
     ]);
-    assert.deepStrictEqual(result, { applied: 2, duplicates: 1, gaps: 1 });
+    assert.deepStrictEqual(result, { applied: 2, skipped: 0, duplicates: 1, gaps: 1 });
     const [span] = named('syncom.apply');
     assert.strictEqual(span.attributes['syncom.ops.count'], 5);
     assert.strictEqual(span.attributes['syncom.ops.applied'], 2);
