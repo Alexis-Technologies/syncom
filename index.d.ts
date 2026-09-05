@@ -307,6 +307,97 @@ export interface SyncOptions {
   log?: { rollAfter?: number };
 }
 
+/** What a write hook sees: the op being made, and the record it lands on. */
+export interface WriteContext {
+  type: Exclude<SyncOpType, 'advance'>;
+  id: string;
+  /** The whole record for `write`, the delta for `set`, the joined data for `merge`. */
+  data?: Record<string, unknown>;
+  /** `inc` only. */
+  key?: string;
+  /** `inc` only. */
+  value?: number;
+  /** `merge` only: the metadata being joined. */
+  meta?: EntryMeta;
+  /** The record before the write — `null` when absent or deleted. Read-only. */
+  current: Record<string, unknown> | null;
+  /** Sealed for this node: the write is encrypted, or the record already is. */
+  encrypted: boolean;
+  /** The Record whose `save()` this is, or `null`. */
+  source: SyncomRecord | null;
+  /** The link a `merge` came in on; `null` for a local write. */
+  via: unknown;
+  /** The peer a `merge` came from; `null` for a local write. */
+  from: string | null;
+}
+
+export interface ReadContext {
+  id: string;
+}
+
+/** What a remote op faces before it is applied here. */
+export interface ApplyContext {
+  op: SyncOp;
+  /** The link the op arrived on. */
+  via: unknown;
+  /** Who sent it — `url` is `null` when this node is the host. */
+  peer: PeerRef | null;
+  /** The record before the op — `null` when absent or deleted. Read-only. */
+  current: Record<string, unknown> | null;
+}
+
+export interface PeerRef {
+  url: string | null;
+  node: string;
+}
+
+/** One `applyRemote` call, after its batch is durable. */
+export interface ApplyBatchContext extends ApplyRemoteResult {
+  via: unknown;
+  peer: PeerRef | null;
+  /** Every accepted op — the skipped ones included. */
+  ops: SyncOp[];
+}
+
+/**
+ * Hooks run INSIDE the storage's operations: awaited, one function per
+ * name, able to alter the operation or abort it by throwing (the operation
+ * then rejects with a HookError). They also run inside the mutation queue,
+ * so a hook that awaits holds every other write, and a write issued from a
+ * hook is refused. Events (`on`) are the contained, observe-only alternative.
+ */
+export interface StorageHooks {
+  /**
+   * Before a local write is stamped and applied. Return a plain object to
+   * replace `data` (`write` and `set` only); throw to refuse the write —
+   * nothing is stamped, logged or written.
+   */
+  beforeWrite?: (context: WriteContext) => void | Record<string, unknown> | Promise<void | Record<string, unknown>>;
+  /**
+   * After the write is durable — `op` is the op it became, `null` for an
+   * encrypted (local) write. Not called when the write changed nothing. A
+   * throw fails the call, but the op stays committed and announced.
+   */
+  afterWrite?: (context: WriteContext, op: SyncOp | null) => void | Promise<void>;
+  /** Before `get(id)` reads; throw to refuse the read. */
+  beforeRead?: (context: ReadContext) => void | Promise<void>;
+  /**
+   * After `get(id)` read. Return anything but `undefined` (including `null`)
+   * to replace what the caller sees; the record itself is untouched, and
+   * `swap`, `snapshot` and `getCachedData` keep reading the raw data.
+   */
+  afterRead?: (context: ReadContext, data: unknown) => unknown | Promise<unknown>;
+  /**
+   * Before a peer's op is applied. Return `false` to skip it: the op is
+   * still logged and relayed (the vector must move, or the peer would offer
+   * it forever), only this node's record is left alone. A throw aborts the
+   * whole batch before anything is persisted.
+   */
+  beforeApply?: (context: ApplyContext) => void | boolean | Promise<void | boolean>;
+  /** After a batch is durable; a throw fails the call, the batch stays. */
+  afterApply?: (context: ApplyBatchContext) => void | Promise<void>;
+}
+
 export interface StorageOptions<S extends Schema = Schema> {
   path?: string;
   name?: string;
@@ -318,6 +409,8 @@ export interface StorageOptions<S extends Schema = Schema> {
   encrypted?: boolean;
   /** Injected OpenTelemetry — see SyncomTelemetryOptions. */
   telemetry?: SyncomTelemetryOptions;
+  /** Lifecycle hooks — see StorageHooks. */
+  hooks?: StorageHooks;
 }
 
 // The collections a schema turns into properties on the storage object:

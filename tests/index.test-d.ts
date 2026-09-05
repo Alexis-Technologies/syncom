@@ -158,3 +158,33 @@ expectType<'HOOK_FAILED'>(hookError.code);
 expectType<string>(hookError.hook);
 expectType<unknown>(hookError.cause);
 expectAssignable<Error>(hookError);
+expectAssignable<StorageOptions>({
+  hooks: {
+    beforeWrite: async (ctx) => {
+      expectType<string>(ctx.id);
+      expectType<Record<string, unknown> | null>(ctx.current);
+      expectType<boolean>(ctx.encrypted);
+      return { ...ctx.data };
+    },
+    afterWrite: (ctx, op) => {
+      expectType<syncom.SyncOp | null>(op);
+      expectType<SyncomRecord | null>(ctx.source);
+    },
+    beforeRead: ({ id }) => {
+      expectType<string>(id);
+    },
+    afterRead: (_ctx, data) => (data === null ? null : { ...(data as object), redacted: true }),
+    beforeApply: ({ op, peer }) => {
+      expectType<syncom.SyncOp>(op);
+      expectType<syncom.PeerRef | null>(peer);
+      return false;
+    },
+    afterApply: (batch) => {
+      expectType<number>(batch.applied);
+      expectType<syncom.SyncOp[]>(batch.ops);
+    },
+  },
+});
+expectError(syncom.open({ hooks: { nope: () => {} } }));
+expectError(syncom.open({ hooks: { beforeWrite: 'x' } }));
+expectError(syncom.open({ hooks: { beforeWrite: () => 'not an object' } }));

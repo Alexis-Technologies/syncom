@@ -7,12 +7,16 @@ const { SyncManager } = require('./sync.js');
 const { OpLog } = require('./log.js');
 const { applyOp, isAlive, latestClock } = require('./ops.js');
 const { Clock, opKey, keyScope, vectorHas, vectorNext, vectorAdvance } = require('./vector.js');
-const { notify } = require('./hooks.js');
+const { notify, runHook, normalizeHooks } = require('./hooks.js');
 const fsi = require('./fsi.js');
 const { createTelemetry, traced, now } = require('./telemetry.js');
 
 const NODE_FILE = 'node.json';
 const GLOBAL_SCOPE = '*';
+
+// The hooks a storage accepts (`open({ hooks })`). Writes and reads run
+// their hooks inside this storage; the apply pair runs per peer batch.
+const STORAGE_HOOKS = ['beforeWrite', 'afterWrite', 'beforeRead', 'afterRead', 'beforeApply', 'afterApply'];
 
 // Module-private entry points between Storage and Record: a Record commits
 // through the same path every other write takes and is refreshed when the
@@ -205,6 +209,8 @@ class Storage extends Emitter {
   #clock = new Clock();
   #scopeOf;
   #encrypted = false;
+  #hooks;
+  #inHook = 0;
   #queue = Promise.resolve();
   #closed = false;
 
@@ -230,6 +236,7 @@ class Storage extends Emitter {
     // Encrypt every record at rest by default; a per-call `{ encrypted }`
     // still overrides. Encrypted records are local — see saveData().
     this.#encrypted = options.encrypted === true;
+    this.#hooks = normalizeHooks(options.hooks, STORAGE_HOOKS, 'Storage');
     const scope = options.sync?.scope;
     this.#scopeOf = typeof scope === 'function' ? scope : () => GLOBAL_SCOPE;
     return this.#init();
@@ -363,9 +370,31 @@ class Storage extends Emitter {
   // interleaved writers would race all three.
   #run(task) {
     if (this.#closed) return Promise.reject(new Error('Storage is closed'));
+    // A hook runs inside the queue (or, for a read, while a queued hook may
+    // be running); a write it issues would wait for the hook that waits for
+    // it. Refused here, where the deadlock would otherwise begin.
+    if (this.#inHook > 0) {
+      return Promise.reject(
+        new Error(
+          'Cannot write to the storage from inside a hook: the write would wait for the hook that waits for it',
+        ),
+      );
+    }
     const result = this.#queue.then(task, task);
     this.#queue = result.catch(() => {});
     return result;
+  }
+
+  // Every hook of this storage goes through here, so the guard above knows
+  // one is running. Returns what the hook returns; a throw is a HookError.
+  async #hook(name, ...args) {
+    if (!this.#hooks[name]) return undefined;
+    this.#inHook++;
+    try {
+      return await runHook(this.#hooks, name, ...args);
+    } finally {
+      this.#inHook--;
+    }
   }
 
   #emitUpdate(id, data, delta, source = null) {
@@ -461,86 +490,110 @@ class Storage extends Emitter {
     }
   }
 
-  async #commit(type, id, payload, { source = null, via = null, from = null } = {}) {
-    {
-      const current = await this.#load(id);
-      if (current?.encrypted) {
-        // An encrypted record has no op log: writes to it stay local. Set
-        // and write map onto the encrypted save; a counter needs ops.
-        if (type === 'write') return void (await this.#writeEncrypted(id, payload.data, source));
-        if (type === 'set') return void (await this.#writeEncrypted(id, { ...current.data, ...payload.data }, source));
-        if (type === 'delete') return void (await this.#removeEncrypted(id, source));
-        throw new Error(`Record ${id} is encrypted; ${type} needs a replicated record`);
+  async #commit(type, id, payload, { source = null, via = null, from = null, encrypted = false } = {}) {
+    const current = await this.#load(id);
+    if (encrypted && current && !current.encrypted) {
+      throw new Error(`Record ${id} is replicated and cannot become encrypted`);
+    }
+    // Sealed: this write is encrypted, or the record already is. An
+    // encrypted record has no op log — writes to it stay local.
+    const sealed = encrypted || current?.encrypted === true;
+    const visible = current && (current.encrypted || isAlive(current)) ? current.data : null;
+    const ctx = { type, id, ...payload, current: visible, encrypted: sealed, source, via, from };
+    const replacement = await this.#hook('beforeWrite', ctx);
+    if (replacement !== undefined) {
+      if (type !== 'write' && type !== 'set') {
+        throw new TypeError('beforeWrite may only replace data for write and set');
       }
-      const data = payload.data ?? current?.data ?? {};
-      const scope = this.#scope(id, data);
-      // Stamp above everything this node already holds for the record — its
-      // entry and, for a merge, the one being joined — so a local write never
-      // sorts below state the node knows about and is silently dropped. The
-      // log seeds the clock at open; this covers what the log no longer has.
-      this.#observe(latestClock(current?.meta));
-      if (type === 'merge') this.#observe(latestClock(payload.meta));
-      const op = { origin: this.#nodeId, seq: 0, ts: this.#clock.now(), type, id };
-      if (scope !== GLOBAL_SCOPE) op.scope = scope;
-      if (from) op.from = from;
-      // Sequence numbers run per stream (see vector.js opKey): the scope's,
-      // or the bootstrap stream for a merge.
-      op.seq = (this.#log.vector[opKey(op)] ?? 0) + 1;
-      if (payload.data !== undefined) op.data = payload.data;
-      if (payload.meta !== undefined) op.meta = payload.meta;
-      if (payload.key !== undefined) op.key = payload.key;
-      if (payload.value !== undefined) op.value = payload.value;
-
-      const { entry, changed, delta, rejected } = applyOp(current, op);
-      if (rejected.length > 0) {
-        const [{ field, reason }] = rejected;
-        const hint = reason === 'counter' ? 'a counter; use inc()' : 'a register; use update()';
-        throw new Error(`Field ${field} of record ${id} is ${hint}`);
+      if (!isPlainObject(replacement)) throw new TypeError('beforeWrite must return a plain object or undefined');
+      payload = { ...payload, data: replacement };
+      ctx.data = replacement;
+    }
+    if (sealed) {
+      // Set and write map onto the encrypted save; a counter needs ops.
+      let data;
+      if (type === 'write') data = payload.data;
+      else if (type === 'set') data = { ...(current?.data ?? {}), ...payload.data };
+      else if (type === 'delete') data = null;
+      else throw new Error(`Record ${id} is encrypted; ${type} needs a replicated record`);
+      if (data === null) await this.#removeEncrypted(id);
+      else await this.#writeEncrypted(id, data);
+      try {
+        await this.#hook('afterWrite', ctx, null);
+      } finally {
+        this.#emitUpdate(id, data, data === null ? {} : { ...data }, source);
       }
-      if (!changed) return null;
+      return undefined;
+    }
+    const data = payload.data ?? current?.data ?? {};
+    const scope = this.#scope(id, data);
+    // Stamp above everything this node already holds for the record — its
+    // entry and, for a merge, the one being joined — so a local write never
+    // sorts below state the node knows about and is silently dropped. The
+    // log seeds the clock at open; this covers what the log no longer has.
+    this.#observe(latestClock(current?.meta));
+    if (type === 'merge') this.#observe(latestClock(payload.meta));
+    const op = { origin: this.#nodeId, seq: 0, ts: this.#clock.now(), type, id };
+    if (scope !== GLOBAL_SCOPE) op.scope = scope;
+    if (from) op.from = from;
+    // Sequence numbers run per stream (see vector.js opKey): the scope's,
+    // or the bootstrap stream for a merge.
+    op.seq = (this.#log.vector[opKey(op)] ?? 0) + 1;
+    if (payload.data !== undefined) op.data = payload.data;
+    if (payload.meta !== undefined) op.meta = payload.meta;
+    if (payload.key !== undefined) op.key = payload.key;
+    if (payload.value !== undefined) op.value = payload.value;
 
-      const [{ seq: position }] = await this.#log.append([op]);
-      const hash = await calculateHash(entry.data);
-      const blockHash = await this.#chain.addBlock({ id, hash, from: this.#log.formatId(position) });
-      await this.#writeEntry(id, entry, blockHash);
+    const { entry, changed, delta, rejected } = applyOp(current, op);
+    if (rejected.length > 0) {
+      const [{ field, reason }] = rejected;
+      const hint = reason === 'counter' ? 'a counter; use inc()' : 'a register; use update()';
+      throw new Error(`Field ${field} of record ${id} is ${hint}`);
+    }
+    if (!changed) return null;
 
-      const alive = isAlive(entry);
+    const [{ seq: position }] = await this.#log.append([op]);
+    const hash = await calculateHash(entry.data);
+    const blockHash = await this.#chain.addBlock({ id, hash, from: this.#log.formatId(position) });
+    await this.#writeEntry(id, entry, blockHash);
+
+    const alive = isAlive(entry);
+    // afterWrite sees a durable op; whatever it does, the record views and
+    // the `change` listeners (the relay among them) hear about the op.
+    try {
+      await this.#hook('afterWrite', ctx, op);
+    } finally {
       this.#emitUpdate(id, alive ? entry.data : null, delta, source);
       // Announced after everything is durable. `via` is null for a local
       // write; a merge made from a peer's snapshot names that peer, so the
       // relay does not hand its own state straight back to it.
       notify(this, this.#logger, 'change', op, via);
-      return op;
     }
+    return op;
   }
 
   // ---------------------------------------------------------------------
   // Public API
 
   // Encrypted at rest for THIS node's key: written directly, outside the op
-  // log, because no peer could read it. Runs inside the mutation queue.
-  async #writeEncrypted(id, data, source = null) {
+  // log, because no peer could read it. Reached only through #commit.
+  async #writeEncrypted(id, data) {
     const record = await encrypt(data, this.#keys.publicKey);
     const hash = await calculateHash(record);
     const blockHash = await this.#chain.addBlock({ id, hash });
     const entry = { data: record, meta: null, encrypted: true, timestamp: Date.now(), block: blockHash };
     await fsi.write(`${this.#path}/data`, `${id}.json`, JSON.stringify(entry));
     this.#cache.set(id, { data, meta: null, encrypted: true, block: blockHash });
-    this.#emitUpdate(id, data, { ...data }, source);
   }
 
-  async #removeEncrypted(id, source = null) {
+  async #removeEncrypted(id) {
     await fsi.remove(`${this.#path}/data`, `${id}.json`);
     this.#cache.set(id, null);
-    this.#emitUpdate(id, null, {}, source);
   }
 
   async saveData(id, data, options = {}) {
     const { encrypted = this.#encrypted } = options;
-    if (!encrypted) return void (await this[COMMIT]('write', id, { data }));
-    const current = await this.#load(id);
-    if (current && !current.encrypted) throw new Error(`Record ${id} is replicated and cannot become encrypted`);
-    await this.#run(() => this.#writeEncrypted(id, data));
+    await this[COMMIT]('write', id, { data }, { encrypted });
   }
 
   async loadData(id) {
@@ -585,11 +638,20 @@ class Storage extends Emitter {
     return (this.#cache.has(id) && this.#cache.get(id) !== null) || this.#records.has(id);
   }
 
-  async get(id) {
+  // The raw read: what `get` returns before its hooks. `swap` compares
+  // against this, so a redacting afterRead cannot break its CAS.
+  async #read(id) {
     const entry = await this.#load(id);
     if (entry === null) return null;
     if (entry.encrypted) return entry.data;
     return isAlive(entry) ? entry.data : null;
+  }
+
+  async get(id) {
+    await this.#hook('beforeRead', { id });
+    const data = await this.#read(id);
+    const replaced = await this.#hook('afterRead', { id }, data);
+    return replaced === undefined ? data : replaced;
   }
 
   /** Every live record id — tombstones excluded, encrypted records included. */
@@ -629,7 +691,7 @@ class Storage extends Emitter {
   }
 
   async swap(id, changes, prev) {
-    const data = await this.get(id);
+    const data = await this.#read(id);
     if (!data) throw new Error(`Record ${id} not found`);
     const matches = Object.keys(prev).every((key) => data[key] === prev[key]);
     if (!matches) return false;
