@@ -53,7 +53,11 @@ expectType<Promise<syncom.SmartContract>>(syncom.SmartContract.load('hash', { st
 expectType<Promise<Storage>>(syncom.open());
 expectType<Promise<Storage>>(syncom.open({ path: 'data' }));
 expectAssignable<StorageOptions>({ path: 'data', schema: {} as Schema });
+expectAssignable<StorageOptions>({ getId: () => 'id' });
+expectAssignable<StorageOptions>({ getId: async () => 'id' });
+expectType<string>(syncom.Storage.generateId());
 expectError(syncom.open({ path: 1 }));
+expectError(syncom.open({ getId: 'nope' }));
 expectType<Promise<string>>(storage.insert({ a: 1 }));
 expectType<Promise<unknown>>(storage.get('id'));
 expectType<Promise<boolean>>(storage.has('id'));

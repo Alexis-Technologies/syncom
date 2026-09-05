@@ -126,6 +126,7 @@ export interface StorageOptions {
   path?: string;
   name?: string;
   schema?: Schema;
+  getId?: () => string | Promise<string>;
 }
 
 export interface StorageDataOptions {
@@ -232,6 +233,8 @@ export interface StorageConstructor {
   new (options?: StorageOptions): Promise<Storage>;
   Collection: typeof SyncomCollection;
   Record: typeof SyncomRecordCtor;
+  // The default `getId` — synchronous in both halves, unlike the crypto three.
+  generateId(): string;
 }
 
 export const Storage: StorageConstructor;

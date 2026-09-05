@@ -16,7 +16,7 @@ swapped for their browser twins:
 | `src/fsi.js` | `src/fsi.browser.js` | OPFS (`navigator.storage.getDirectory()`) |
 | `src/crypto.js` | `src/crypto.browser.js` | Web Crypto (`crypto.subtle`) |
 | `src/sync.js` | `src/sync.browser.js` | in-memory node registry |
-| `src/utils.js` | `src/utils.browser.js` | `crypto.randomUUID()` |
+| `src/utils.js` | `src/utils.browser.js` | `crypto.randomUUID()` — the default `getId` |
 
 CRDT, contracts, the chain and storage are the same code in both halves.
 

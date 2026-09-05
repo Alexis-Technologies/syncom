@@ -377,3 +377,97 @@ test('Collection module', async (t) => {
     }
   });
 });
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+test('Storage id generation', async (t) => {
+  await t.test('Storage.generateId returns unique UUIDs', () => {
+    const id = syncom.Storage.generateId();
+    assert.match(id, UUID);
+    assert.notStrictEqual(id, syncom.Storage.generateId());
+  });
+
+  await t.test('custom getId is used once per insert', async () => {
+    const tempDir = await createTemp();
+    try {
+      let calls = 0;
+      const getId = () => `custom-${++calls}`;
+      const storage = await syncom.open({ path: tempDir, getId });
+
+      assert.strictEqual(await storage.insert({ a: 1 }), 'custom-1');
+      assert.strictEqual(await storage.insert({ a: 2 }), 'custom-2');
+      assert.strictEqual(calls, 2);
+      assert.deepStrictEqual(await storage.get('custom-1'), { a: 1 });
+    } finally {
+      await cleanupTemp(tempDir);
+    }
+  });
+
+  await t.test('custom getId may be async', async () => {
+    const tempDir = await createTemp();
+    try {
+      const getId = async () => 'async-id';
+      const storage = await syncom.open({ path: tempDir, getId });
+
+      const id = await storage.insert({ a: 1 });
+      assert.strictEqual(id, 'async-id');
+      assert.deepStrictEqual(await storage.get(id), { a: 1 });
+    } finally {
+      await cleanupTemp(tempDir);
+    }
+  });
+
+  await t.test('custom getId reaches Collection insert', async () => {
+    const tempDir = await createTemp();
+    try {
+      let calls = 0;
+      const getId = () => `rec_${++calls}`;
+      const options = { path: tempDir, schema: mockSchema, getId };
+      const storage = await syncom.open(options);
+
+      const author = await storage.Author.insert({ name: 'John' });
+      assert.strictEqual(author.id, 'rec_1');
+
+      const data = await storage.get(author.id);
+      assert.strictEqual(data.$type, 'Author');
+      assert.strictEqual(data.name, 'John');
+    } finally {
+      await cleanupTemp(tempDir);
+    }
+  });
+
+  await t.test('a non-function getId falls back to the default', async () => {
+    const tempDir = await createTemp();
+    try {
+      const storage = await syncom.open({ path: tempDir, getId: 'nope' });
+      assert.match(await storage.insert({ a: 1 }), UUID);
+    } finally {
+      await cleanupTemp(tempDir);
+    }
+  });
+
+  await t.test('non-UUID ids survive the whole record lifecycle', async () => {
+    const tempDir = await createTemp();
+    try {
+      let calls = 0;
+      const getId = () => `01ARZ3NDEKTSV4RRFFQ69G5FA${calls++}`;
+      const storage = await syncom.open({ path: tempDir, getId });
+
+      const id = await storage.insert({ title: 'Draft', hits: 0 });
+      assert.deepStrictEqual(await storage.get(id), { title: 'Draft', hits: 0 });
+      assert.strictEqual(await storage.has(id), true);
+
+      await storage.update(id, { hits: 1 });
+      assert.strictEqual(await storage.swap(id, { hits: 2 }, { hits: 1 }), true);
+
+      const record = await storage.record(id);
+      assert.strictEqual(record.id, id);
+      assert.strictEqual(await storage.validate(), true);
+
+      await storage.delete(id);
+      assert.strictEqual(await storage.has(id), false);
+    } finally {
+      await cleanupTemp(tempDir);
+    }
+  });
+});

@@ -144,9 +144,8 @@ class Collection {
   }
 
   async insert(data) {
-    const id = generateUUID();
     const record = { ...data, $type: this.#name };
-    await this.#storage.saveData(id, record);
+    const id = await this.#storage.insert(record);
     return this.#storage.record(id);
   }
 
@@ -176,11 +175,23 @@ class Storage {
   #updates = [];
   #cache = new Map();
   #schema = null;
+  #getId = null;
+
+  // The default id generator, exposed so it stays reachable and stubbable.
+  // `generateUUID` never touches `this`, so the reference is safe to store
+  // unbound in `#getId`.
+  static generateId() {
+    return generateUUID();
+  }
 
   constructor(options = {}) {
+    this.#getId = Storage.generateId;
     this.#path = options.path || options.name || 'syncom';
     this.#records = new Map();
     if (options.schema) this.#schema = options.schema;
+    // A non-function is ignored rather than rejected: the id generator is a
+    // convenience seam, not a security boundary, and the default still holds.
+    if (typeof options.getId === 'function') this.#getId = options.getId;
     return this.#init();
   }
 
@@ -269,7 +280,8 @@ class Storage {
   }
 
   async insert(data) {
-    const id = generateUUID();
+    // `getId` may be sync or async — both call sites already await this.
+    const id = await this.#getId();
     await this.saveData(id, data);
     return id;
   }

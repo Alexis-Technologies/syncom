@@ -13,7 +13,7 @@ const syncom = require('@alexify/syncom');
 ### `open(options?)`
 
 Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
-(alias for `path`), `schema`.
+(alias for `path`), `schema`, `getId`.
 
 ### `Storage`
 
@@ -21,7 +21,7 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 
 | Method | Returns | Notes |
 | --- | --- | --- |
-| `insert(data)` | `Promise<string>` | Generates a UUID and saves |
+| `insert(data)` | `Promise<string>` | Generates an id via `getId` (a UUID by default) and saves |
 | `get(id)` | `Promise<unknown>` | `null` when absent; verifies against the chain |
 | `has(id)` | `Promise<boolean>` | Filesystem check, no read |
 | `set(id, data)` | `Promise<void>` | Replaces; emits `update` with the computed delta |
@@ -37,7 +37,8 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 | `hasRecord(id)` | `boolean` | Whether the id is known to the cache |
 | `addUpdate(update)` | `void` | Appends to the pending update log |
 
-Properties: `schema`, `sync`. Statics: `Storage.Collection`, `Storage.Record`.
+Properties: `schema`, `sync`. Statics: `Storage.Collection`, `Storage.Record`,
+`Storage.generateId()` — the default `getId`, synchronous in both halves.
 
 ### `Record`
 
