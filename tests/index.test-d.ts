@@ -209,3 +209,35 @@ expectAssignable<StorageOptions>({
 });
 expectError(syncom.open({ sync: { hooks: { nope: () => {} } } }));
 expectError(syncom.open({ sync: { hooks: { beforeBootstrap: 'nope' } } }));
+
+// events
+storage.once('apply', (batch) => {
+  expectType<number>(batch.skipped);
+  expectType<syncom.SyncOp[]>(batch.ops);
+});
+storage.on('error', (error) => {
+  expectType<syncom.SyncOp | undefined>(error.op);
+});
+storage.on('close', () => {});
+expectType<number>(storage.listenerCount('change'));
+expectError(storage.on('nope', () => {}));
+sync.on('peer', ({ url, connected, node }) => {
+  expectType<string>(url);
+  expectType<boolean>(connected);
+  expectType<string | undefined>(node);
+});
+sync.on('sync', (event) => expectType<number | undefined>(event.skipped));
+sync.on('node', ({ action }) => expectType<'add' | 'remove' | 'enable' | 'disable'>(action));
+sync.on('hello', ({ node, scopes }) => {
+  expectType<string>(node);
+  expectType<string[]>(scopes);
+});
+sync.on('error', (error) => expectType<string>(error.url));
+expectError(sync.on('nope', () => {}));
+expectType<boolean>(sync.started);
+expectType<Promise<void>>(sync.enableNode('ws://a', false));
+expectType<Promise<Array<{ url: string; pushed: number }>>>(sync.sync());
+expectType<number>(sync.peers()[0].pending);
+expectType<string | null>(sync.listNodes()[0].cursor);
+expectType<syncom.SyncUnit>(sync.unit({ access: 'public', authorize: async () => true }));
+expectType<string>(sync.unit().hello.access);

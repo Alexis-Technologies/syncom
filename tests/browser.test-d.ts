@@ -1,6 +1,6 @@
-import { expectType } from 'tsd';
+import { expectAssignable, expectType } from 'tsd';
 import * as browser from '../browser.js';
-import type { Blockchain, CrdtDelta, KeyPair, Storage, SyncManager } from '../browser.js';
+import type { Blockchain, CrdtDelta, KeyPair, Storage, StorageOptions, SyncManager } from '../browser.js';
 
 // The whole point of the split: Web Crypto is async where node:crypto is not.
 expectType<Promise<string>>(browser.calculateHash({ a: 1 }));
@@ -25,3 +25,9 @@ expectType<SyncManager>(storage.sync);
 expectType<Promise<string[]>>(browser.list('dir'));
 expectType<Promise<void>>(storage.inc('id', 'hits'));
 expectType<boolean>(browser.isAlive(null));
+
+// hooks and events reach the browser half unchanged
+expectAssignable<StorageOptions>({
+  hooks: { beforeWrite: () => undefined },
+  sync: { hooks: { beforeConnect: () => false } },
+});

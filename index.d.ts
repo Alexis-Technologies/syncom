@@ -475,6 +475,72 @@ export interface Node {
   scopes: string[];
   enabled: boolean;
   lastSync: number | null;
+  /** Where the subscription resumes from; `null` until the first page. */
+  cursor: string | null;
+  /** What the last hello learned; `null` before the first. */
+  remote: { id: string; epoch: string } | null;
+}
+
+/** One dialed peer, as `sync.peers()` reports it. */
+export interface PeerView {
+  url: string;
+  node: string | null;
+  connected: boolean;
+  subscribed: boolean;
+  cursor: string | null;
+  lastSync: number | null;
+  /** Ops waiting in the outbox, plus one while a push is in flight. */
+  pending: number;
+}
+
+export interface SyncUnitOptions {
+  /** wrpc's access level for the four procedures (default `'session'`). */
+  access?: string;
+  /** Gates a peer by whatever the transport presented. */
+  authorize?: (context: unknown, hello: { node: string; vector?: VersionVector; scopes?: string[]; token?: string }) => boolean | Promise<boolean>;
+  /** How a `changes` value is labelled with its position (wrpc's tracked shape by default). */
+  tracked?: (id: string, data: unknown) => unknown;
+  pageSize?: number;
+  pageBytes?: number;
+}
+
+export interface SyncProcedure {
+  access: string;
+  handler: (...args: any[]) => unknown;
+}
+
+/** What a host mounts: `defineRouter({ syncom: storage.sync.unit() })`. */
+export interface SyncUnit {
+  hello: SyncProcedure;
+  push: SyncProcedure;
+  snapshot: SyncProcedure;
+  changes: SyncProcedure;
+}
+
+/** The events a SyncManager emits; listeners are contained. */
+export interface SyncEvents {
+  /** A link came up (with the host's node id after hello), went down, or came back. */
+  peer: (event: { url: string; connected: boolean; node?: string; reconnected?: boolean }) => void;
+  /** A push went out (`pushed`) or a page came in (`received` and the apply result). */
+  sync: (event: {
+    url: string;
+    pushed?: number;
+    received?: number;
+    applied?: number;
+    skipped?: number;
+    duplicates?: number;
+    gaps?: number;
+  }) => void;
+  bootstrap: (event: { url: string; records: number }) => void;
+  /** A failure on the way to a peer; `url` names it. */
+  error: (error: Error & { url: string }) => void;
+  start: () => void;
+  stop: () => void;
+  node: (event: { url: string; action: 'add' | 'remove' | 'enable' | 'disable' }) => void;
+  /** A link was accepted, before hello. */
+  connect: (event: { url: string }) => void;
+  /** Hosting side: a peer greeted this node and was authorized. */
+  hello: (event: { node: string; scopes: string[] }) => void;
 }
 
 export interface NodeData {
@@ -485,11 +551,21 @@ export interface NodeData {
 
 export interface SyncManager {
   readonly storage: Storage;
+  readonly started: boolean;
+  on<E extends keyof SyncEvents>(event: E, listener: SyncEvents[E]): void;
+  once<E extends keyof SyncEvents>(event: E, listener: SyncEvents[E]): void;
+  off<E extends keyof SyncEvents>(event: E, listener?: SyncEvents[E]): void;
+  listenerCount(event: keyof SyncEvents): number;
   addNode(nodeData: NodeData): Promise<void>;
   removeNode(url: string): Promise<void>;
+  enableNode(url: string, enabled?: boolean): Promise<void>;
   listNodes(): Node[];
   start(): Promise<void>;
   stop(): Promise<void>;
+  /** Pushes whatever the connected peers (or one) lack right now. */
+  sync(url?: string): Promise<Array<{ url: string; pushed: number }>>;
+  peers(): PeerView[];
+  unit(options?: SyncUnitOptions): SyncUnit;
 }
 
 export interface SyncManagerConstructor {
@@ -542,6 +618,22 @@ export interface ApplyRemoteResult {
   gaps: number;
 }
 
+/** The events a Storage emits; listeners are contained. */
+export interface StorageEvents {
+  /** Every op applied here — local (`via` null) or from a peer (`via` = the link). */
+  change: (op: SyncOp, via: unknown) => void;
+  /** A peer's op refused by the register/counter rule. */
+  error: (error: Error & { op?: SyncOp; rejected?: Array<{ field: string; reason: 'register' | 'counter' }> }) => void;
+  /** A peer's batch is durable. */
+  apply: (batch: ApplyBatchContext) => void;
+  close: () => void;
+}
+
+export interface RecordEvents {
+  /** A staged assignment, or the record changing in storage (`null` once deleted). */
+  update: (data: unknown, delta: unknown) => void;
+}
+
 export interface Storage {
   readonly schema: Schema | null;
   readonly sync: SyncManager;
@@ -556,10 +648,10 @@ export interface Storage {
    */
   readonly telemetry: unknown;
 
-  /** Every op applied here — local (`via` null) or from a peer (`via` = the link). */
-  on(event: 'change', listener: (op: SyncOp, via: unknown) => void): void;
-  on(event: 'error', listener: (error: Error & { op?: SyncOp }) => void): void;
-  off(event: 'change' | 'error', listener?: (...args: unknown[]) => void): void;
+  on<E extends keyof StorageEvents>(event: E, listener: StorageEvents[E]): void;
+  once<E extends keyof StorageEvents>(event: E, listener: StorageEvents[E]): void;
+  off<E extends keyof StorageEvents>(event: E, listener?: StorageEvents[E]): void;
+  listenerCount(event: keyof StorageEvents): number;
 
   saveData(
     id: string,
@@ -598,9 +690,9 @@ export interface Reference {
 
 export interface SyncomRecord {
   readonly id: string;
-  on(event: 'update', listener: (data: unknown, delta: unknown) => void): void;
-  once(event: 'update', listener: (data: unknown, delta: unknown) => void): void;
-  off(event: 'update', listener?: (data: unknown, delta: unknown) => void): void;
+  on<E extends keyof RecordEvents>(event: E, listener: RecordEvents[E]): void;
+  once<E extends keyof RecordEvents>(event: E, listener: RecordEvents[E]): void;
+  off<E extends keyof RecordEvents>(event: E, listener?: RecordEvents[E]): void;
   data(): Promise<unknown>;
   delta(): Record<string, unknown>;
   save(): Promise<void>;

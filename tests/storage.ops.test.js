@@ -335,6 +335,15 @@ test('Storage: the seams telemetry shares', async (t) => {
   });
 });
 
+test('Storage announces close', async (t) => {
+  const { storage } = await openTemp(t);
+  const closed = [];
+  storage.on('close', () => closed.push(true));
+  await storage.close();
+  await storage.close();
+  assert.deepStrictEqual(closed, [true], 'once, and not again for a second close()');
+});
+
 test('Storage: events are contained', async (t) => {
   const collect = () => {
     const entries = [];

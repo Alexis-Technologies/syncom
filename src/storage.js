@@ -932,6 +932,7 @@ class Storage extends Emitter {
       await this.#log.close();
     });
     this.#closed = true;
+    notify(this, this.#logger, 'close');
   }
 }
 
