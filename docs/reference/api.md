@@ -15,7 +15,8 @@ const syncom = require('@alexify/syncom');
 Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 (alias for `path`), `schema`, `getId`, `logger`, `encrypted`, `sync` (see
 [Sync options](../guide/sync#options)), `telemetry` (see
-[OpenTelemetry](../guide/telemetry)).
+[OpenTelemetry](../guide/telemetry)), `hooks` (see
+[Hooks and events](../guide/hooks)).
 
 ### `Storage`
 
@@ -39,7 +40,7 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 | `validate(id, data, blockHash)` | `Promise<boolean>` | One record against its block |
 | `getCachedData(id)` | `unknown \| null` | Synchronous cache peek |
 | `hasRecord(id)` | `boolean` | Whether the id is known to the cache |
-| `applyRemote(ops, { via, scopes }?)` | `Promise<{ applied, duplicates, gaps }>` | Applies a peer's ops, in order per origin |
+| `applyRemote(ops, { via, scopes, peer }?)` | `Promise<{ applied, skipped, duplicates, gaps }>` | Applies a peer's ops, in order per origin; `peer` is `{ url, node }` for the hooks |
 | `snapshot({ cursor, limit, scopes }?)` | `Promise<{ records, cursor, eventId, vector }>` | One page of state, tombstones included |
 | `mergeSnapshot(records, { via, from }?)` | `Promise<void>` | Joins a page (as `merge` ops of this node) |
 | `adoptVector(vector, { via, from }?)` | `Promise<SyncOp \| null>` | Records what a joined snapshot covers (an `advance` op) |
@@ -50,9 +51,19 @@ Properties: `schema`, `sync`, `nodeId`, `path`, `log`, `vector`, `logger`,
 Statics: `Storage.Collection`, `Storage.Record`, `Storage.generateId()` — the
 default `getId`, synchronous in both halves.
 
-Events: `change` `(op, via)` for every op applied here (`via` is `null` for a
-local write, otherwise the link it came from); `error` for a peer's op refused
-by the register/counter rule.
+Events — listeners are contained, a throwing one is logged and never fails
+the operation (see [Hooks and events](../guide/hooks#events)):
+
+| Event | Payload | When |
+| --- | --- | --- |
+| `change` | `(op, via)` | Every op applied here; `via` is `null` for a local write, otherwise the link it came from |
+| `apply` | `({ via, peer, ops, applied, skipped, duplicates, gaps })` | A peer's batch is durable |
+| `error` | `(error)` with `error.op`, `error.rejected` | A peer's op refused by the register/counter rule |
+| `close` | — | After `close()` sealed the log |
+
+Hooks (`open({ hooks })`): `beforeWrite`, `afterWrite`, `beforeRead`,
+`afterRead`, `beforeApply`, `afterApply` — see
+[Hooks and events](../guide/hooks).
 
 ### `Record`
 
@@ -88,7 +99,24 @@ Extends `Emitter`. See [Sync](../guide/sync).
 | `peers()` | `Array<{ url, node, connected, subscribed, cursor, lastSync, pending }>` | Live view |
 | `unit({ access, authorize, tracked, pageSize, pageBytes }?)` | router unit | The procedures a host mounts: `hello`, `push`, `snapshot`, `changes` |
 
-Properties: `storage`, `started`. Events: `peer`, `sync`, `bootstrap`, `error`.
+Properties: `storage`, `started`.
+
+Events (contained, like the storage's): `peer` `({ url, connected, node?,
+reconnected? })`, `sync` `({ url, pushed })` after a push and `({ url,
+received, applied, skipped, duplicates, gaps })` after a received page,
+`bootstrap` `({ url, records })`, `error` (with `.url`), `start`, `stop`,
+`node` `({ url, action: 'add' | 'remove' | 'enable' | 'disable' })`, `connect`
+`({ url })` once a link is accepted (before hello), and on the hosting side
+`hello` `({ node, scopes })` once a peer is authorized.
+
+Hooks (`open({ sync: { hooks } })`): `beforeConnect`, `beforeBootstrap` — see
+[Hooks and events](../guide/hooks#sync-hooks).
+
+### `HookError`
+
+What an operation rejects with when one of its hooks threw: `name`
+`'HookError'`, `code` `'HOOK_FAILED'`, `hook` (the hook's name), `cause` (the
+original error). Exported from the package root.
 
 ### `isSyncLink(value)`
 

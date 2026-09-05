@@ -110,6 +110,19 @@ docs/                     VitePress site
 - **Encrypted records are local.** `{ encrypted: true }` seals a record for
   this node's key; it produces no op and is excluded from snapshots. Do not
   route an encrypted entry through `applyOp`.
+- **Hooks run inside the operation; events never do.** `src/hooks.js` (no
+  requires — it ships to the browser) is the whole mechanism. Storage hooks
+  go through `#hook()` inside the mutation queue, and `#run` refuses a write
+  while one is running — a write from a hook would wait for the hook that
+  waits for it. Hook calls live in `#commit`, `get`, `#applyRemote`,
+  `#connect` and `#bootstrap` only; there is deliberately no hook on the ops
+  that leave for a peer (a withheld op is a gap that stops that stream —
+  scopes are the per-peer filter). Every event leaves through `notify()`:
+  never `await this.emit(...)`, never emit `error` any other way (the Emitter
+  throws on an unheard `error`, and that throw used to fail a push before the
+  vector moved). A remote op a `beforeApply` skipped is still appended, with
+  `skipped: true` on its log entry — that flag is what keeps `#replayTail`
+  from applying it on reopen; do not strip it.
 
 ## Testing
 
@@ -137,7 +150,8 @@ running it before writing it down — several examples inherited from the legacy
 repo were wrong in exactly that way. A new page needs a sidebar entry in
 `docs/.vitepress/config.mts`; `docs/guide/sync.md` and `docs/guide/wrpc.md`
 are the two pages that describe the protocol — keep them in step with
-`src/sync.js`.
+`src/sync.js`, and `docs/guide/hooks.md` with the hook and event surface of
+`src/storage.js` and `src/sync.js`.
 
 ## Formatting
 

@@ -142,6 +142,7 @@ export default withMermaid({
             text: 'Core',
             items: [
               { text: 'Storage', link: '/guide/storage' },
+              { text: 'Hooks and events', link: '/guide/hooks' },
               { text: 'CRDT deltas', link: '/guide/crdt' },
               { text: 'Blockchain log', link: '/guide/chain' },
               { text: 'Smart contracts', link: '/guide/contracts' },

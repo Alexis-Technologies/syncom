@@ -12,6 +12,29 @@ section until the first publish; everything below lands there on release day.
 
 ### Added
 
+- **Hooks.** `open({ hooks })` — `beforeWrite` (sees the op being made and
+  the record it lands on; may replace the data of a write or a set; a throw
+  refuses the write), `afterWrite` (the durable op), `beforeRead` /
+  `afterRead` (refuse or redact what `get()` returns — `swap`, `snapshot` and
+  the cache stay raw), `beforeApply` (per remote op; `false` skips it here
+  while it is still logged and relayed, a throw aborts the batch before
+  anything is durable), `afterApply`. `open({ sync: { hooks } })` —
+  `beforeConnect` (`false` leaves a node registered but not dialled) and
+  `beforeBootstrap` (`false` refuses to join a peer's whole state). Hooks run
+  inside the operation; a throw rejects it with `HookError` (`code:
+  'HOOK_FAILED'`, `hook`, `cause`). A write issued from a hook is refused
+  rather than left to deadlock the queue. `applyRemote` reports `skipped`
+  and takes a `peer` descriptor. Browser budget raised 17 → 18 KB.
+- **Events are contained.** Every event now goes out through one path:
+  listeners are invoked at once, never awaited, and a throwing listener is
+  logged at debug instead of failing the write it observed (or, for the
+  fire-and-forget emits in `Record` and `SyncManager`, becoming an unhandled
+  rejection). A `change` listener that writes back queues behind the write.
+  New events: `apply` and `close` on the storage; `start`, `stop`, `node`,
+  `connect` and (hosting side) `hello` on the manager. Typed event maps
+  (`StorageEvents`, `SyncEvents`, `RecordEvents`) and the `SyncManager`
+  members the types were missing (`started`, `enableNode`, `sync`, `peers`,
+  `unit`).
 - **OpenTelemetry, injected.** `open({ telemetry: { api } })` (the
   `@opentelemetry/api` module) or `{ tracer, meter }` — the same object wrpc's
   `telemetry` option takes, and no dependency on either. Spans:

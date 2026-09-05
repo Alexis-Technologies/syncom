@@ -76,8 +76,8 @@ that fails the build when exceeded.
 
 | Entry | raw | min | min+gzip | budget |
 | ----- | ---:| ---:| --------:| ------:|
-| main entry — browser (@alexify/syncom) | 114.6 KB | 46.6 KB | 16.1 KB | 17.0 KB |
-| main entry — node (@alexify/syncom) | 106.6 KB | 45.6 KB | 15.8 KB | — |
+| main entry — browser (@alexify/syncom) | 122.3 KB | 49.8 KB | 17.3 KB | 18.0 KB |
+| main entry — node (@alexify/syncom) | 113.9 KB | 48.8 KB | 17.0 KB | — |
 | wrpc adapter — browser (@alexify/syncom/wrpc) | 3.3 KB | 1.4 KB | 0.7 KB | 2.0 KB |
 
 ## Quick Start
@@ -144,6 +144,7 @@ nodes converges.
 | **CRDT** | `diff` / `merge` / `apply` over plain objects — nested maps merge recursively, arrays are grow-only sets, numbers add so counters converge |
 | **Contracts** | Store a procedure in the chain by hash, load it anywhere, run it against a read-only view of storage; failures are recorded as blocks |
 | **Portability** | One API over `node:fs` + `node:crypto` on the server and OPFS + Web Crypto in the browser, chosen by the `browser` export condition |
+| **Hooks and events** | `open({ hooks })` runs your code inside a write, a read or a peer's batch — validate, stamp, redact, skip — and rejects with a typed `HookError` when it throws; `on()` events (`change`, `apply`, `peer`, `sync`, …) observe everything and can never break it. See [Hooks and events](https://syncomjs.vercel.app/guide/hooks) |
 | **Observability** | Injected OpenTelemetry (`open({ telemetry })`): spans for local writes, applied batches, pushes, bootstraps and log rolls, plus outcome and lag metrics — nested under wrpc's spans, which carry the trace across the wire. See [OpenTelemetry](https://syncomjs.vercel.app/guide/telemetry) |
 | **Dependencies** | None. wrpc is a devDependency for one integration test and is injected at runtime |
 

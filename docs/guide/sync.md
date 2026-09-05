@@ -248,13 +248,23 @@ await storage.sync.sync();  // push what the peers lack right now
 storage.sync.peers();       // [{ url, node, connected, subscribed, cursor, lastSync, pending }]
 
 storage.sync.on('peer', ({ url, connected, node, reconnected }) => {});
-storage.sync.on('sync', ({ url, pushed, received, applied, duplicates, gaps }) => {});
+storage.sync.on('sync', ({ url, pushed, received, applied, skipped, duplicates, gaps }) => {});
 storage.sync.on('bootstrap', ({ url, records }) => {});
 storage.sync.on('error', (error) => {}); // error.url names the peer
+storage.sync.on('start', () => {});
+storage.sync.on('stop', () => {});
+storage.sync.on('node', ({ url, action }) => {}); // 'add' | 'remove' | 'enable' | 'disable'
+storage.sync.on('connect', ({ url }) => {});     // a link was accepted, before hello
+storage.sync.on('hello', ({ node, scopes }) => {}); // hosting side: a peer was authorized
 
 storage.on('change', (op, via) => {});  // every op applied here; via is null for a local write
+storage.on('apply', ({ peer, applied, skipped }) => {}); // a peer's batch is durable
 storage.on('error', (error) => {});     // a peer's op refused by the register/counter rule
 ```
+
+Listeners are contained: one that throws is logged and never fails what it
+observed. To take part in an operation — refuse a write, skip a peer's op,
+decline to dial a node — use [hooks](./hooks) instead.
 
 `await storage.close()` stops sync and seals the log.
 
@@ -269,6 +279,7 @@ storage.on('error', (error) => {});     // a peer's op refused by the register/c
 | `retention.days` | — | Age after which a segment is dropped |
 | `log.rollAfter` | `64` | Appended batches per sealed segment |
 | `pageSize` | `500` | Ops per push, records per snapshot page |
+| `hooks` | — | `beforeConnect`, `beforeBootstrap` — see [Hooks and events](./hooks#sync-hooks) |
 
 The `telemetry` option sits beside `sync` on `open()`, not inside it — see
 [OpenTelemetry](./telemetry) for the spans and metrics replication emits.

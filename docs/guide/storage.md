@@ -18,6 +18,7 @@ const storage = await open({ path: 'data' });
 | `logger` | `console` | A Console or pino-shaped logger, or `false` for silence |
 | `encrypted` | `false` | Encrypt every record at rest by default ([see below](#encryption-at-rest)) |
 | `sync` | — | Replication: `connect`, `scope`, `retention`, … — see [Sync](./sync#options) |
+| `hooks` | — | `beforeWrite`, `afterRead`, `beforeApply`, … — see [Hooks and events](./hooks) |
 
 ## The explicit API
 
