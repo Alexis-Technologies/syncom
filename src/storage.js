@@ -7,6 +7,7 @@ const { SyncManager } = require('./sync.js');
 const { OpLog } = require('./log.js');
 const { applyOp, isAlive, latestClock } = require('./ops.js');
 const { Clock, opKey, keyScope, vectorHas, vectorNext, vectorAdvance } = require('./vector.js');
+const { notify } = require('./hooks.js');
 const fsi = require('./fsi.js');
 const { createTelemetry, traced, now } = require('./telemetry.js');
 
@@ -100,7 +101,7 @@ class Record extends Emitter {
           this.#data[key] = newValue;
           this.#changes[key] = newValue;
           const delta = { [key]: newValue };
-          this.emit('update', this.#data, delta);
+          notify(this, this.#storage.logger, 'update', this.#data, delta);
         },
         enumerable: true,
         configurable: true,
@@ -116,12 +117,12 @@ class Record extends Emitter {
     if (data === null) {
       this.#data = null;
       this.#changes = {};
-      if (source !== this) this.emit('update', null, delta);
+      if (source !== this) notify(this, this.#storage.logger, 'update', null, delta);
       return;
     }
     this.#adopt(data);
     for (const key in this.#changes) this.#data[key] = this.#changes[key];
-    if (source !== this) this.emit('update', this.#data, delta);
+    if (source !== this) notify(this, this.#storage.logger, 'update', this.#data, delta);
   }
 
   async data() {
@@ -508,7 +509,7 @@ class Storage extends Emitter {
       // Announced after everything is durable. `via` is null for a local
       // write; a merge made from a peer's snapshot names that peer, so the
       // relay does not hand its own state straight back to it.
-      await this.emit('change', op, via);
+      notify(this, this.#logger, 'change', op, via);
       return op;
     }
   }
@@ -749,12 +750,7 @@ class Storage extends Emitter {
         if (rejected.length > 0) {
           this.#logger.warn({ event: 'sync.op.rejected', id: op.id, rejected });
           this.#otel.recordRejected(rejected[0].reason);
-          // Guarded: Emitter throws on an unheard `error`, and a throw here
-          // would fail the push before the vector moved — the peer would
-          // then offer the same page again on every hello, forever.
-          if (this.listenerCount('error') > 0) {
-            await this.emit('error', Object.assign(new Error(`Refused op on ${op.id}`), { op, rejected }));
-          }
+          notify(this, this.#logger, 'error', Object.assign(new Error(`Refused op on ${op.id}`), { op, rejected }));
         }
         vectorAdvance(vector, op);
         accepted.push(op);
@@ -773,7 +769,7 @@ class Storage extends Emitter {
           this.#emitUpdate(id, isAlive(entry) ? entry.data : null, deltas.get(id));
         }
       }
-      for (const op of accepted) await this.emit('change', op, via);
+      for (const op of accepted) notify(this, this.#logger, 'change', op, via);
       return { applied: accepted.length, duplicates, gaps };
     }
   }
@@ -836,7 +832,7 @@ class Storage extends Emitter {
       op.seq = (known[opKey(op)] ?? 0) + 1;
       await this.#log.append([op]);
       await this.#log.advance(news);
-      await this.emit('change', op, via);
+      notify(this, this.#logger, 'change', op, via);
       return op;
     });
   }

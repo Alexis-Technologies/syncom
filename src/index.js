@@ -10,5 +10,7 @@ const sync = require('./sync.js');
 const log = require('./log.js');
 const { applyOp, mergeEntry, isAlive } = require('./ops.js');
 const ops = { applyOp, mergeEntry, isAlive };
+const { HookError } = require('./hooks.js');
+const hooks = { HookError };
 
-module.exports = { ...chain, ...contract, ...crdt, ...crypto, ...fsi, ...storage, ...sync, ...log, ...ops };
+module.exports = { ...chain, ...contract, ...crdt, ...crypto, ...fsi, ...storage, ...sync, ...log, ...ops, ...hooks };

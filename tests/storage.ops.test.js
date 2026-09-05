@@ -334,3 +334,64 @@ test('Storage: the seams telemetry shares', async (t) => {
     );
   });
 });
+
+test('Storage: events are contained', async (t) => {
+  const collect = () => {
+    const entries = [];
+    return { entries, logger: { debug: (entry) => entries.push(entry), info() {}, warn() {}, error() {} } };
+  };
+
+  await t.test('a change listener that throws does not fail the write it observed', async (t2) => {
+    const { entries, logger } = collect();
+    const { storage } = await openTemp(t2, { logger });
+    const seen = [];
+    storage.on('change', () => {
+      throw new Error('listener boom');
+    });
+    storage.on('change', (op) => seen.push(op.type));
+    const id = await storage.insert({ a: 1 });
+    assert.deepStrictEqual(await storage.get(id), { a: 1 });
+    assert.deepStrictEqual(seen, ['write']);
+    const remote = await storage.applyRemote([remoteOp('peer', 1, 'write', 'r1', { data: { b: 1 } })]);
+    assert.strictEqual(remote.applied, 1);
+    await new Promise((resolve) => setImmediate(resolve));
+    const logged = entries.filter((entry) => entry.event === 'listener.error');
+    assert.strictEqual(logged.length, 2);
+    assert.strictEqual(logged[0].name, 'change');
+    assert.strictEqual(logged[0].err.message, 'listener boom');
+  });
+
+  await t.test('a change listener that writes back queues behind the write instead of deadlocking', async (t2) => {
+    const { storage } = await openTemp(t2);
+    const id = await storage.insert({ n: 0 });
+    let echoed = null;
+    storage.once('change', (op) => {
+      echoed = storage.update(op.id, { echoed: true });
+    });
+    await storage.update(id, { n: 1 });
+    await echoed;
+    assert.deepStrictEqual(await storage.get(id), { n: 1, echoed: true });
+  });
+
+  await t.test('a record update listener that throws does not break the setter or the refresh', async (t2) => {
+    const { entries, logger } = collect();
+    const { storage } = await openTemp(t2, { logger });
+    const id = await storage.insert({ title: 'a' });
+    const record = await storage.record(id);
+    const rejections = [];
+    const onRejection = (reason) => rejections.push(reason);
+    process.on('unhandledRejection', onRejection);
+    t2.after(() => process.off('unhandledRejection', onRejection));
+    record.on('update', () => {
+      throw new Error('update boom');
+    });
+    assert.doesNotThrow(() => {
+      record.title = 'b';
+    });
+    await storage.applyRemote([remoteOp('peer', 1, 'set', id, { data: { views: 1 } })]);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.strictEqual(record.views, 1);
+    assert.deepStrictEqual(rejections, []);
+    assert.strictEqual(entries.filter((entry) => entry.event === 'listener.error').length, 2);
+  });
+});

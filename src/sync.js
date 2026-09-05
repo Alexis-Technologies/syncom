@@ -27,6 +27,7 @@ const { packOps, unpackOps } = require('./ops.js');
 const { vectorHas, keyScope } = require('./vector.js');
 const { isSyncLink } = require('./link.js');
 const { createTelemetry, traced } = require('./telemetry.js');
+const { notify } = require('./hooks.js');
 
 const REMOTE = 'remote';
 const PROTOCOL = 1;
@@ -260,11 +261,11 @@ class SyncManager extends Emitter {
           close: () => {
             peer.connected = false;
             peer.subscription = null;
-            void this.emit('peer', { url: node.url, connected: false });
+            notify(this, this.#storage.logger, 'peer', { url: node.url, connected: false });
           },
           reconnect: () => {
             peer.connected = true;
-            void this.emit('peer', { url: node.url, connected: true, reconnected: true });
+            notify(this, this.#storage.logger, 'peer', { url: node.url, connected: true, reconnected: true });
             // The link restored the subscription itself (when the host still
             // knows us); what it cannot restore is the outbound half.
             this.#handshake(peer, { resubscribe: !peer.subscription }).catch((error) => this.#fail(peer, error));
@@ -296,7 +297,7 @@ class SyncManager extends Emitter {
   #fail(peer, error) {
     if (peer.closed) return;
     this.#storage.logger.warn({ event: 'sync.error', url: peer.node.url, err: error });
-    if (this.listenerCount('error') > 0) void this.emit('error', Object.assign(error, { url: peer.node.url }));
+    notify(this, this.#storage.logger, 'error', Object.assign(error, { url: peer.node.url }));
   }
 
   // Single-flight: a reconnect and a refused restored subscription can both
@@ -333,7 +334,7 @@ class SyncManager extends Emitter {
     peer.remote = { id: answer.node, vector: answer.vector ?? {}, epoch: answer.epoch };
     node.remote = { id: answer.node, epoch: answer.epoch };
     await this.#saveNode(node);
-    await this.emit('peer', { url: node.url, connected: true, node: answer.node });
+    notify(this, this.#storage.logger, 'peer', { url: node.url, connected: true, node: answer.node });
     await this.#push(peer, 'handshake');
     if (resubscribe && !peer.subscription) this.#subscribe(peer);
   }
@@ -403,7 +404,7 @@ class SyncManager extends Emitter {
     if (sent > 0) {
       peer.node.lastSync = Date.now();
       await this.#saveNode(peer.node);
-      await this.emit('sync', { url: peer.node.url, pushed: sent });
+      notify(this, this.#storage.logger, 'sync', { url: peer.node.url, pushed: sent });
     }
     return sent;
   }
@@ -440,10 +441,14 @@ class SyncManager extends Emitter {
     if (value.bootstrap) return void (await this.#bootstrap(peer));
     const ops = unpackOps(value.ops);
     const result = await this.#storage.applyRemote(ops, { via: peer, scopes: peer.node.scopes });
+    // Hung up while applying: the cursor is not saved, so a restart replays
+    // this page as duplicates — better than a registry write racing whoever
+    // reopens the directory next.
+    if (peer.closed) return;
     if (eventId) peer.node.cursor = eventId;
     peer.node.lastSync = Date.now();
     await this.#saveNode(peer.node);
-    await this.emit('sync', { url: peer.node.url, received: ops.length, ...result });
+    notify(this, this.#storage.logger, 'sync', { url: peer.node.url, received: ops.length, ...result });
   }
 
   // Bootstrap: page through the host's whole state, joining each page, then
@@ -506,7 +511,7 @@ class SyncManager extends Emitter {
     node.cursor = startEventId;
     node.lastSync = Date.now();
     await this.#saveNode(node);
-    await this.emit('bootstrap', { url: node.url, records: total });
+    notify(this, this.#storage.logger, 'bootstrap', { url: node.url, records: total });
     if (!peer.closed) this.#subscribe(peer);
     return { pages, records: total };
   }

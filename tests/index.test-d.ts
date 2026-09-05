@@ -151,3 +151,10 @@ expectError(syncom.open({ telemetry: { tracer: 'a tracer' } }));
 expectType<Promise<syncom.OpLog>>(new syncom.OpLog('p', { telemetry: { api: {} } }));
 declare const telemetryStorage: Storage;
 expectType<unknown>(telemetryStorage.telemetry);
+
+// hooks
+const hookError = new syncom.HookError('beforeWrite', new Error('x'));
+expectType<'HOOK_FAILED'>(hookError.code);
+expectType<string>(hookError.hook);
+expectType<unknown>(hookError.cause);
+expectAssignable<Error>(hookError);

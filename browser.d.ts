@@ -82,6 +82,7 @@ export {
   isSyncLink,
   Storage,
   open,
+  HookError,
 } from './index.js';
 
 // Web Crypto: async where node:crypto is sync.

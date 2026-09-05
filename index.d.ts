@@ -74,6 +74,20 @@ export interface ApplyResult {
   rejected: Array<{ field: string; reason: 'register' | 'counter' }>;
 }
 
+/**
+ * Thrown (rejected) by the operation a hook belongs to when that hook threw.
+ * `hook` names it, `cause` is the original error; the operation itself is
+ * described by the hook's documentation — a `before*` hook aborts it, an
+ * `after*` hook fails the call while what it observed stays committed.
+ */
+export class HookError extends Error {
+  constructor(hook: string, cause: unknown);
+  readonly name: 'HookError';
+  readonly code: 'HOOK_FAILED';
+  readonly hook: string;
+  readonly cause: unknown;
+}
+
 export function applyOp(entry: Entry | null, op: SyncOp): ApplyResult;
 export function mergeEntry(a: Entry | null, b: Entry | null): Entry | null;
 export function isAlive(entry: Entry | null): boolean;

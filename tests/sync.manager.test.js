@@ -211,3 +211,26 @@ test('SyncManager edges', async (t) => {
     unit.changes.handler = original;
   });
 });
+
+test('SyncManager: events are contained', async (t) => {
+  await t.test('listeners that throw do not break the handshake or the feed', async (t2) => {
+    const entries = [];
+    const logger = { debug: (entry) => entries.push(entry), info() {}, warn() {}, error() {} };
+    const host = await openTemp(t2, { logger });
+    const unit = host.sync.unit({ access: 'public' });
+    const dialer = await openTemp(t2, { logger, sync: { autoStart: false, connect: () => new MemoryLink(unit) } });
+    for (const event of ['peer', 'sync', 'bootstrap', 'error']) {
+      dialer.sync.on(event, () => {
+        throw new Error(`${event} boom`);
+      });
+    }
+    await dialer.sync.addNode({ url: 'mem://host' });
+    await dialer.sync.start();
+    const id = await dialer.insert({ through: true });
+    await settle([host, dialer]);
+    assert.deepStrictEqual(await host.get(id), { through: true });
+    await new Promise((resolve) => setImmediate(resolve));
+    const names = new Set(entries.filter((e) => e.event === 'listener.error').map((e) => e.name));
+    assert.ok(names.has('peer') && names.has('sync'), `logged: ${[...names].join(', ')}`);
+  });
+});
