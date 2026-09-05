@@ -429,6 +429,165 @@ const runHooksTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(await host.get(id), { n: 1 });
   });
 
+  await t.test('sync hooks are refused at open like storage hooks', async (t2) => {
+    await assert.rejects(() => createStorage(t2, 'bad', { sync: { hooks: { beforeSned: () => {} } } }), {
+      name: 'TypeError',
+      message: "SyncManager: unknown hook 'beforeSned'",
+    });
+  });
+
+  await t.test('beforeConnect(false) leaves a node registered but not dialled', async (t2) => {
+    const host = await createStorage(t2, 'H');
+    const unit = host.sync.unit({ access: 'public' });
+    const seen = [];
+    let dialled = 0;
+    let refuse = true;
+    const dialer = await createStorage(t2, 'D', {
+      sync: {
+        autoStart: false,
+        connect: () => {
+          dialled++;
+          return new MemoryLink(unit);
+        },
+        hooks: {
+          beforeConnect: (node) => {
+            seen.push(node);
+            if (refuse) return false;
+          },
+        },
+      },
+    });
+    const errors = [];
+    dialer.sync.on('error', (error) => errors.push(error));
+    await dialer.sync.addNode({ url: 'mem://host', scopes: ['*'] });
+    await dialer.sync.start();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.strictEqual(dialled, 0);
+    assert.deepStrictEqual(dialer.sync.peers(), []);
+    assert.deepStrictEqual(errors, []);
+    assert.strictEqual(dialer.sync.listNodes().length, 1);
+    assert.strictEqual(seen[0].url, 'mem://host');
+    assert.deepStrictEqual(seen[0].scopes, ['*']);
+    // Enabling again re-asks; this time it is allowed.
+    refuse = false;
+    await dialer.sync.enableNode('mem://host', false);
+    await dialer.sync.enableNode('mem://host');
+    await waitUntil(() => dialer.sync.peers()[0]?.subscribed);
+    assert.strictEqual(dialled, 1);
+  });
+
+  await t.test('a throwing beforeConnect is reported as an error, not thrown', async (t2) => {
+    const errors = [];
+    const dialer = await createStorage(t2, 'D', {
+      sync: {
+        autoStart: false,
+        connect: () => assert.fail('never dialled'),
+        hooks: {
+          beforeConnect: () => {
+            throw new Error('no dialling today');
+          },
+        },
+      },
+    });
+    dialer.sync.on('error', (error) => errors.push(error));
+    await dialer.sync.addNode({ url: 'mem://host' });
+    await dialer.sync.start();
+    await waitUntil(() => errors.length > 0);
+    assert.strictEqual(errors[0].name, 'HookError');
+    assert.strictEqual(errors[0].hook, 'beforeConnect');
+    assert.strictEqual(errors[0].url, 'mem://host');
+  });
+
+  await t.test('beforeBootstrap may refuse to join a peer’s state', async (t2) => {
+    // A host whose log cannot resume a newcomer: the feed says bootstrap.
+    const host = await createStorage(t2, 'H', { sync: { log: { rollAfter: 2 }, retention: { ops: 4 } } });
+    for (let i = 0; i < 8; i++) await host.insert({ i });
+    const unit = host.sync.unit({ access: 'public' });
+    const seen = [];
+    let refuse = true;
+    const dialer = await createStorage(t2, 'D', {
+      sync: {
+        autoStart: false,
+        connect: () => new MemoryLink(unit),
+        hooks: {
+          beforeBootstrap: (peer) => {
+            seen.push(peer);
+            if (refuse === 'throw') throw new Error('not from you');
+            if (refuse) return false;
+          },
+        },
+      },
+    });
+    const bootstraps = [];
+    const errors = [];
+    dialer.sync.on('bootstrap', (event) => bootstraps.push(event));
+    dialer.sync.on('error', (error) => errors.push(error));
+    await dialer.sync.addNode({ url: 'mem://host' });
+    await dialer.sync.start();
+    await waitUntil(() => seen.length > 0);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.deepStrictEqual(seen, [{ url: 'mem://host', node: host.nodeId }]);
+    assert.deepStrictEqual(bootstraps, []);
+    assert.deepStrictEqual(await dialer.list(), [], 'nothing was joined');
+    const [peer] = dialer.sync.peers();
+    assert.strictEqual(peer.connected, true, 'still connected');
+    assert.strictEqual(peer.subscribed, false, 'but receiving nothing');
+    const mine = await dialer.insert({ mine: true });
+    await waitUntil(async () => (await host.get(mine)) !== null);
+    assert.deepStrictEqual(await host.get(mine), { mine: true }, 'pushes still flow');
+    // A throw is reported like any other failure on the way in.
+    refuse = 'throw';
+    await dialer.sync.enableNode('mem://host', false);
+    await dialer.sync.enableNode('mem://host');
+    await waitUntil(() => errors.length > 0);
+    assert.strictEqual(errors[0].name, 'HookError');
+    assert.strictEqual(errors[0].hook, 'beforeBootstrap');
+    // Allowed: the next handshake bootstraps.
+    refuse = false;
+    await dialer.sync.enableNode('mem://host', false);
+    await dialer.sync.enableNode('mem://host');
+    await waitUntil(() => bootstraps.length > 0);
+    await settle([host, dialer]);
+    assert.strictEqual((await dialer.list()).length, 9);
+  });
+
+  await t.test('the manager announces its lifecycle', async (t2) => {
+    const host = await createStorage(t2, 'H');
+    const hellos = [];
+    host.sync.on('hello', (event) => hellos.push(event));
+    const unit = host.sync.unit({ access: 'public' });
+    const dialer = await createStorage(t2, 'D', { sync: { autoStart: false, connect: () => new MemoryLink(unit) } });
+    const events = [];
+    for (const name of ['start', 'stop', 'node', 'connect', 'peer']) {
+      dialer.sync.on(name, (payload) => events.push([name, payload]));
+    }
+    await dialer.sync.addNode({ url: 'mem://host', scopes: ['docs'] });
+    await dialer.sync.start();
+    await waitUntil(() => dialer.sync.peers()[0]?.subscribed);
+    await dialer.sync.enableNode('mem://host', false);
+    await dialer.sync.enableNode('mem://host');
+    await waitUntil(() => dialer.sync.peers()[0]?.subscribed);
+    await dialer.sync.removeNode('mem://host');
+    await dialer.sync.stop();
+    assert.deepStrictEqual(
+      events.filter(([name]) => name !== 'peer'),
+      [
+        ['node', { url: 'mem://host', action: 'add' }],
+        ['start', undefined],
+        ['connect', { url: 'mem://host' }],
+        ['node', { url: 'mem://host', action: 'disable' }],
+        ['node', { url: 'mem://host', action: 'enable' }],
+        ['connect', { url: 'mem://host' }],
+        ['node', { url: 'mem://host', action: 'remove' }],
+        ['stop', undefined],
+      ],
+    );
+    assert.deepStrictEqual(hellos, [
+      { node: dialer.nodeId, scopes: ['docs'] },
+      { node: dialer.nodeId, scopes: ['docs'] },
+    ]);
+  });
+
   await t.test('the order of a local write', async (t2) => {
     const order = [];
     const storage = await createStorage(t2, 'A', {

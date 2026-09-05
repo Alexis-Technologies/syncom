@@ -32,6 +32,8 @@ export type {
   ApplyContext,
   ApplyBatchContext,
   PeerRef,
+  SyncHooks,
+  BootstrapContext,
   Collections,
   Reference,
   SyncomRecord,

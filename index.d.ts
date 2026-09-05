@@ -300,11 +300,47 @@ export interface Schema {
   readonly [key: string]: unknown;
 }
 
+/** The peer whose whole state is about to be joined. */
+export interface BootstrapContext {
+  url: string;
+  node: string;
+}
+
+/**
+ * Hooks of the sync manager (`open({ sync: { hooks } })`). Same contract as
+ * StorageHooks: awaited inside the operation, a throw becomes a HookError —
+ * reported through the manager's `error` event on the dialing side.
+ */
+export interface SyncHooks {
+  /**
+   * Before a registered node is dialled; `node` is a copy of its registry
+   * entry. Return `false` to leave it registered but not dialled.
+   */
+  beforeConnect?: (node: Node) => void | boolean | Promise<void | boolean>;
+  /**
+   * Before this node joins a peer's whole state (its log could not resume
+   * us). Return `false` to refuse: the peer stays connected for pushes but
+   * nothing is received from it until the next handshake asks again. There
+   * is deliberately no hook on the ops that leave for a peer — seqs run
+   * contiguously per origin and scope, so a withheld op is a gap that stops
+   * every later op of that stream; per-peer visibility is what scopes do.
+   */
+  beforeBootstrap?: (peer: BootstrapContext) => void | boolean | Promise<void | boolean>;
+}
+
 export interface SyncOptions {
+  /** Returns a link for a registry node; required to dial. */
+  connect?: (node: Node) => SyncLink | Promise<SyncLink>;
+  /** Dial on open — `true` when `connect` is given. */
+  autoStart?: boolean;
+  /** Ops per push page and per `changes` page (default 500). */
+  pageSize?: number;
   /** Assigns a scope to a record; unscoped (`'*'`) records reach every peer. */
   scope?: (id: string, data: Record<string, unknown>) => string;
   retention?: { ops?: number; days?: number };
   log?: { rollAfter?: number };
+  /** Lifecycle hooks — see SyncHooks. */
+  hooks?: SyncHooks;
 }
 
 /** What a write hook sees: the op being made, and the record it lands on. */

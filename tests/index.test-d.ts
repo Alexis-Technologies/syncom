@@ -190,3 +190,22 @@ expectError(syncom.open({ hooks: { beforeWrite: 'x' } }));
 expectError(syncom.open({ hooks: { beforeWrite: () => 'not an object' } }));
 expectType<Promise<syncom.ApplyRemoteResult>>(storage.applyRemote([], { peer: { url: null, node: 'n' } }));
 storage.applyRemote([]).then((result) => expectType<number>(result.skipped));
+expectAssignable<StorageOptions>({
+  sync: {
+    connect: async () => ({}) as syncom.SyncLink,
+    autoStart: false,
+    pageSize: 100,
+    hooks: {
+      beforeConnect: (node) => {
+        expectType<Node>(node);
+        return false;
+      },
+      beforeBootstrap: ({ url, node }) => {
+        expectType<string>(url);
+        expectType<string>(node);
+      },
+    },
+  },
+});
+expectError(syncom.open({ sync: { hooks: { nope: () => {} } } }));
+expectError(syncom.open({ sync: { hooks: { beforeBootstrap: 'nope' } } }));

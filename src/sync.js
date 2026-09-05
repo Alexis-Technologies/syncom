@@ -27,7 +27,7 @@ const { packOps, unpackOps } = require('./ops.js');
 const { vectorHas, keyScope } = require('./vector.js');
 const { isSyncLink } = require('./link.js');
 const { createTelemetry, traced } = require('./telemetry.js');
-const { notify } = require('./hooks.js');
+const { notify, runHook, normalizeHooks } = require('./hooks.js');
 
 const REMOTE = 'remote';
 const PROTOCOL = 1;
@@ -35,6 +35,14 @@ const GLOBAL_SCOPE = '*';
 const DEFAULT_PAGE_SIZE = 500;
 const DEFAULT_PAGE_BYTES = 4 << 20;
 const TRACKED = Symbol.for('wrpc.tracked');
+
+// The hooks a manager accepts (`open({ sync: { hooks } })`). There is no
+// hook on what leaves for a peer: seqs run contiguously per origin and
+// scope, so an op withheld from one peer is a gap that stops every later
+// op of that stream at it — per-peer visibility is what scopes are for.
+const SYNC_HOOKS = ['beforeConnect', 'beforeBootstrap'];
+// What #connect's chain carries when beforeConnect said no.
+const NOT_DIALLED = Symbol('syncom.notDialled');
 
 // Node registry entries are keyed by url; the file name is the url itself,
 // percent-encoded — unlike the old `<host>.json`, two peers on one host or a
@@ -92,11 +100,13 @@ class SyncManager extends Emitter {
   #started = false;
   #saving = new Map();
   #otel;
+  #hooks;
 
   constructor(storage, options = {}) {
     super();
     this.#storage = storage;
     this.#options = options ?? {};
+    this.#hooks = normalizeHooks(this.#options.hooks, SYNC_HOOKS, 'SyncManager');
     this.#otel = createTelemetry(storage.telemetry);
     this.#path = `${storage.path}/${REMOTE}`;
     return this.#init();
@@ -148,6 +158,7 @@ class SyncManager extends Emitter {
     };
     this.#nodes.set(url, node);
     await fsi.write(this.#path, fileName(url), JSON.stringify(node));
+    notify(this, this.#storage.logger, 'node', { url, action: 'add' });
     if (this.#started) this.#connect(node);
   }
 
@@ -157,6 +168,7 @@ class SyncManager extends Emitter {
     this.#nodes.delete(url);
     this.#disconnect(url);
     await fsi.remove(this.#path, fileName(url));
+    notify(this, this.#storage.logger, 'node', { url, action: 'remove' });
   }
 
   listNodes() {
@@ -168,6 +180,7 @@ class SyncManager extends Emitter {
     if (!node) throw new Error(`Node with URL ${url} not found`);
     node.enabled = enabled;
     await this.#saveNode(node);
+    notify(this, this.#storage.logger, 'node', { url, action: enabled ? 'enable' : 'disable' });
     if (!enabled) this.#disconnect(url);
     else if (this.#started) this.#connect(node);
   }
@@ -211,12 +224,14 @@ class SyncManager extends Emitter {
     for (const node of this.#nodes.values()) {
       if (node.enabled) this.#connect(node);
     }
+    notify(this, this.#storage.logger, 'start');
   }
 
   async stop() {
     this.#started = false;
     for (const url of Array.from(this.#peers.keys())) this.#disconnect(url);
     await Promise.all(Array.from(this.#saving.values(), (state) => state.last));
+    notify(this, this.#storage.logger, 'stop');
   }
 
   /** Pushes whatever the connected peers lack right now; resolves when done. */
@@ -260,8 +275,16 @@ class SyncManager extends Emitter {
     };
     this.#peers.set(node.url, peer);
     Promise.resolve()
-      .then(() => this.#options.connect(node))
+      // beforeConnect sees a copy of the registry entry; `false` leaves the
+      // node registered but not dialled — no peer, no error.
+      .then(() => runHook(this.#hooks, 'beforeConnect', { ...node }))
+      .then((verdict) => {
+        if (verdict !== false) return this.#options.connect(node);
+        if (this.#peers.get(node.url) === peer) this.#peers.delete(node.url);
+        return NOT_DIALLED;
+      })
       .then((link) => {
+        if (link === NOT_DIALLED) return;
         if (peer.closed) return void link?.close?.();
         if (!isSyncLink(link)) {
           throw new TypeError('connect(node) must return a SyncLink (call/subscribe/on/off/close)');
@@ -286,6 +309,7 @@ class SyncManager extends Emitter {
         };
         for (const event in peer.handlers) link.on(event, peer.handlers[event]);
         peer.connected = true;
+        notify(this, this.#storage.logger, 'connect', { url: node.url });
         return this.#handshake(peer, { resubscribe: true });
       })
       .catch((error) => this.#fail(peer, error));
@@ -475,6 +499,12 @@ class SyncManager extends Emitter {
     if (peer.bootstrapping) return;
     peer.bootstrapping = true;
     try {
+      // A bootstrap replaces this node's view of the peer's scopes wholesale;
+      // beforeBootstrap may refuse it. The feed has ended by now, so a
+      // refused peer stays connected for pushes but receives nothing until
+      // the next handshake asks again.
+      const verdict = await runHook(this.#hooks, 'beforeBootstrap', { url: peer.node.url, node: peer.remote.id });
+      if (verdict === false) return;
       const otel = this.#otel;
       if (!otel.enabled) return void (await this.#join(peer));
       const attributes = { 'syncom.peer.url': peer.node.url, 'syncom.peer.node': peer.remote.id };
@@ -640,6 +670,7 @@ class SyncManager extends Emitter {
               for (const scope of scopes) context.client.join(`syncom:${scope}`);
             }
           }
+          notify(this, storage.logger, 'hello', { node: args.node, scopes });
           return { node: storage.nodeId, vector: storage.vector, epoch: storage.log.epoch, version: PROTOCOL };
         },
       },
