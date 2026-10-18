@@ -12,6 +12,13 @@ section until the first publish; everything below lands there on release day.
 
 ### Added
 
+- **One instance per directory.** `open()` holds the directory — Web Locks
+  in the browser, `<path>/lock.json` with the pid elsewhere (stale once the
+  process is gone, or after 30 minutes without a pid) — and a second
+  `open()` of it rejects with `code: 'LOCKED'`; `lock: 'wait'` waits,
+  `lock: false` leaves the coordination to the caller. `close()` releases
+  it; an `open()` that fails releases it too. Browser budget raised
+  22 → 23 KB (with the injected backend).
 - `@alexify/syncom/idb` — `createIdbFsi({ name, store, indexedDB })`, the
   backend over IndexedDB for browsers where OPFS is unavailable or unwanted:
   one object store keyed by `[dir, name]` with an index on `dir`, opened
@@ -199,6 +206,9 @@ section until the first publish; everything below lands there on release day.
 
 ### Changed (breaking)
 
+- **`open()` is exclusive by default.** A second instance over the same
+  directory used to open silently and mint the seqs of the first; it now
+  rejects with `code: 'LOCKED'` unless `lock: 'wait'` or `lock: false`.
 - **Smart contracts moved to `@alexify/syncom/contracts`.** `SmartContract`
   and `DataReader` (and their types) are no longer on the package root:
   `SmartContract.load` runs code from the chain, and a process that never

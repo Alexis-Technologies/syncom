@@ -35,6 +35,7 @@ test('Storage on the browser halves', async (t) => {
     assert.notDeepStrictEqual(raw.data, {});
 
     // A cold read (fresh Storage, empty cache) decrypts it back.
+    await storage.close();
     const reopened = await browser.open({ path: 'store-encrypted' });
     assert.deepStrictEqual(await reopened.get('s1'), secret);
   });

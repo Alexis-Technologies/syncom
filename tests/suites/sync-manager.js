@@ -44,6 +44,7 @@ const runSyncManagerCoreTests = async (t, assert, getSync) => {
   await t.test('the registry survives a reopen', async (t2) => {
     const sync = await getSync(t2);
     await sync.addNode({ url: 'wss://persist.example.com/api', token: 'k', scopes: ['docs'] });
+    await sync.storage.close();
     const reopened = await getSync(t2, sync);
     const [node] = reopened.listNodes();
     assert.strictEqual(node.url, 'wss://persist.example.com/api');

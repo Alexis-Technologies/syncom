@@ -41,6 +41,10 @@ expectAssignable<Fsi>({
 });
 expectError(syncom.open({ fsi: {} }));
 expectError(syncom.open({ durable: 'yes' }));
+expectAssignable<StorageOptions>({ lock: 'wait' });
+expectAssignable<StorageOptions>({ lock: false });
+expectError(syncom.open({ lock: 'maybe' }));
+expectError(syncom.open({ lock: true }));
 expectType<Fsi>(storage.fsi);
 expectType<Promise<KeyPair>>(syncom.loadKeys('keys', { fsi: syncom.createMemoryFsi() }));
 expectType<Promise<Blockchain>>(new syncom.Blockchain('base', { fsi: syncom.createMemoryFsi() }));

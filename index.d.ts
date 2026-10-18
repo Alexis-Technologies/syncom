@@ -561,6 +561,13 @@ export interface StorageOptions<S extends Schema = Schema> {
   fsi?: Fsi;
   /** Call the backend's `sync` after every write (fsync). A backend without one logs at debug and is as durable as it is. */
   durable?: boolean;
+  /**
+   * One instance per directory: `'fail'` (default) rejects `open()` with
+   * `code: 'LOCKED'` while another holds it, `'wait'` waits for it, `false`
+   * leaves the coordination to the caller. Web Locks in the browser, a
+   * `lock.json` with the pid otherwise (stale when its process is gone).
+   */
+  lock?: 'fail' | 'wait' | false;
   schema?: S;
   /** Compiles entity schemas that are plain objects without `~standard`. */
   validator?: SchemaValidator;

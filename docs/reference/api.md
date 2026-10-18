@@ -15,7 +15,10 @@ const syncom = require('@alexify/syncom');
 ### `open(options?)`
 
 Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
-(alias for `path`), `schema` and `validator` (see
+(alias for `path`), `fsi` and `durable` (see [Backends](#backends)), `lock`
+(`'fail'` | `'wait'` | `false` — see
+[One instance per directory](../guide/storage#one-instance-per-directory)),
+`schema` and `validator` (see
 [Collections](../guide/storage#collections)), `getId`, `logger`, `encrypted`,
 `sync` (see [Sync options](../guide/sync#options)), `telemetry` (see
 [OpenTelemetry](../guide/telemetry)), `hooks` (see

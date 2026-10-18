@@ -62,4 +62,35 @@ const requireBrowserBarrel = () => {
   return require('../../src/index.browser.js');
 };
 
-module.exports = { installBrowserGlobals, requireBrowserBarrel };
+// A Web Locks API on the mock navigator: exclusive, by name, with the
+// `ifAvailable` answer of `null` — what src/lock.js reads of the real one.
+const installMockLocks = () => {
+  const held = new Map();
+  const request = async (name, options, callback) => {
+    if (typeof options === 'function') [options, callback] = [{}, options];
+    while (held.has(name)) {
+      if (options.ifAvailable) return callback(null);
+      await held.get(name);
+    }
+    let release = null;
+    held.set(name, new Promise((resolve) => (release = resolve)));
+    try {
+      return await callback({ name, mode: 'exclusive' });
+    } finally {
+      held.delete(name);
+      release();
+    }
+  };
+  globalThis.navigator.locks = { request, held: () => [...held.keys()] };
+  // What tells src/lock.js it is in a browser (Node has navigator.locks too).
+  const hadSelf = Object.hasOwn(globalThis, 'self');
+  if (!hadSelf) globalThis.self = globalThis;
+  return {
+    uninstall: () => {
+      delete globalThis.navigator.locks;
+      if (!hadSelf) delete globalThis.self;
+    },
+  };
+};
+
+module.exports = { installBrowserGlobals, requireBrowserBarrel, installMockLocks };

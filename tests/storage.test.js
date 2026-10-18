@@ -108,6 +108,7 @@ test('Storage module', async (t) => {
       const entry = JSON.parse(await fs.readFile(filePath, 'utf8'));
       entry.data = { ok: false };
       await fs.writeFile(filePath, JSON.stringify(entry), 'utf8');
+      await storage.close();
 
       // Quiet: the reopen's log replay notices the damage and warns.
       const storage2 = await syncom.open({ path: tempDir, logger: false });

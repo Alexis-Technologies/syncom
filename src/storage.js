@@ -11,6 +11,7 @@ const { notify, runHook, normalizeHooks } = require('./hooks.js');
 const { normalizeSchema, createLens, project, unproject, foldSet } = require('./schema.js');
 const defaultFsi = require('./fsi.js');
 const { checkFsi, withSync } = require('./backend.js');
+const { acquireLock } = require('./lock.js');
 const { createTelemetry, traced, now } = require('./telemetry.js');
 
 const NODE_FILE = 'node.json';
@@ -230,6 +231,7 @@ class Storage extends Emitter {
   #sync = null;
   #cache = new Map();
   #fsi;
+  #lock = null;
   #schema = null;
   #entities = null;
   #version = null;
@@ -272,6 +274,9 @@ class Storage extends Emitter {
     // adapter's fsync, where it has one.
     const fsi = checkFsi(options.fsi === undefined ? defaultFsi : options.fsi, 'open({ fsi })');
     this.#fsi = fsi;
+    if (options.lock !== undefined && options.lock !== false && options.lock !== 'fail' && options.lock !== 'wait') {
+      throw new TypeError("open({ lock }): lock must be 'fail', 'wait' or false");
+    }
     if (options.durable === true) {
       if (typeof fsi.sync === 'function') this.#fsi = withSync(fsi);
       else this.#logger.debug({ event: 'durable.noop' });
@@ -311,6 +316,20 @@ class Storage extends Emitter {
   }
 
   async #init() {
+    // One instance per directory, first: a second one would mint the seqs
+    // this one is about to. `lock: false` is for a caller that coordinates.
+    const { lock = 'fail' } = this.#options;
+    if (lock !== false) this.#lock = await acquireLock({ fsi: this.#fsi, path: this.#path, mode: lock });
+    try {
+      await this.#open();
+    } catch (error) {
+      await this.#lock?.release();
+      throw error;
+    }
+    return this;
+  }
+
+  async #open() {
     const fsi = this.#fsi;
     this.#keys = await loadKeys(`${this.#path}/keys`, { fsi });
     this.#chain = await new Blockchain(`${this.#path}/blockchain`, { fsi });
@@ -330,7 +349,6 @@ class Storage extends Emitter {
     await this.#replayHeld();
     this.#sync = await new SyncManager(this, this.#options.sync);
     this.#initCollections();
-    return this;
   }
 
   // `schema.json` remembers the version (and the snapshot's hash) this
@@ -1221,6 +1239,7 @@ class Storage extends Emitter {
       await this.#log.close();
     });
     this.#closed = true;
+    await this.#lock?.release();
     notify(this, this.#logger, 'close');
   }
 }

@@ -23,6 +23,7 @@ idb.js / idb.d.ts         the @alexify/syncom/idb subpath (src/idb.js) — the I
 index.d.ts                the Node type surface (hand-written)
 browser.d.ts              re-exports index.d.ts, overrides the 3 async crypto fns
 src/backend.js            the fsi contract (isFsi/checkFsi), createMemoryFsi, withSync — no requires
+src/lock.js               exclusive open: Web Locks or lock.json, stale by pid or age — no requires
 src/storage.js            Storage, Record, Collection — every write is an op
 src/schema.js             entity definitions, the injected validator (Standard Schema / ajv / compile), ValidationError
 src/ops.js                the record-level model: applyOp / mergeEntry / isAlive, packOps
@@ -114,6 +115,11 @@ docs/                     VitePress site
 - **Encrypted records are local.** `{ encrypted: true }` seals a record for
   this node's key; it produces no op and is excluded from snapshots. Do not
   route an encrypted entry through `applyOp`.
+- **`open()` is exclusive by default (`lock: 'fail'`).** A test that opens
+  the same directory twice must `close()` the first storage or pass
+  `lock: false`; `bench/storage.js` does the latter. Never weaken the
+  default to make a test pass — two instances minting the same seq is the
+  bug the lock exists for.
 - **fsi is injected.** `open({ fsi })` reaches storage, log, chain, keys and
   the registry as `this.#fsi` (or the `fsi` parameter of `loadKeys`); the
   module-level `require('./fsi.js')` is only the default. A new `fsi.` call

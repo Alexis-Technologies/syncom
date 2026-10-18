@@ -32,7 +32,7 @@ const main = async () => {
   try {
     // Key generation is RSA-2048 and happens once per Storage; keeping a
     // single instance keeps that cost out of every row below.
-    const storage = await open({ path: root });
+    const storage = await open({ path: root, lock: false });
 
     const record = { name: 'Example', email: 'example@example.com', hits: 0 };
 
@@ -44,7 +44,7 @@ const main = async () => {
     await bench(
       'get — cold (re-verifies the block)',
       async () => {
-        const cold = await open({ path: root });
+        const cold = await open({ path: root, lock: false });
         return cold.get(id);
       },
       { warmup: 3, measureMs: 500 },

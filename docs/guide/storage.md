@@ -15,6 +15,7 @@ const storage = await open({ path: 'data' });
 | `name` | — | Alias for `path` |
 | `fsi` | `node:fs` / OPFS | The backend — any object with `read`, `write`, `exists`, `remove`, `list` (see [Backends](../reference/api#backends)) |
 | `durable` | `false` | fsync after every write, where the backend can (`node:fs`); OPFS and memory are as durable as they are |
+| `lock` | `'fail'` | One instance per directory: `'fail'` rejects a second `open()` (`code: 'LOCKED'`), `'wait'` waits, `false` leaves it to you ([see below](#one-instance-per-directory)) |
 | `schema` | — | Entity definitions: collections, their validators and indexes ([see below](#collections)); `version` and `snapshot` ([see below](#schema-versions)) |
 | `validator` | — | Compiles entity schemas that are plain objects without `~standard` ([see below](#validation)) |
 | `getId` | `crypto.randomUUID()` | Id generator for `insert()`; sync or async ([see below](#custom-identifiers)) |
@@ -95,6 +96,29 @@ Two things the engine does not check for you:
 - **Ids are matched against string fields.** A `Record` turns any string field
   whose value is a known id into a [reference](#references). Short, guessable
   ids raise the odds of an accidental match; UUIDs, ULIDs and CUID2s do not.
+
+### One instance per directory
+
+Two storages over one directory would both read the log's vector and both
+mint the next sequence number — the same number for two different ops, which
+every peer drops as a duplicate. So `open()` holds the directory: through the
+Web Locks API in the browser (released when the tab dies), through
+`<path>/lock.json` with the process id elsewhere (stale once that process is
+gone, or after 30 minutes when there is no way to tell).
+
+```js
+const a = await open({ path: 'data' });
+await open({ path: 'data' });                   // Error, code 'LOCKED'
+await open({ path: 'data', lock: 'wait' });     // resolves once `a` closes
+const b = await open({ path: 'data', lock: false }); // yours to coordinate
+```
+
+Two browser tabs are two instances: with the default `'fail'` the second tab
+sees `LOCKED` and must work through the first (a SharedWorker that owns the
+storage, say) or read-only. `close()` releases the lock; a crash releases it
+in the browser and leaves a stale file elsewhere, which the next open takes
+over. The lock is per machine — on a shared network filesystem, coordinate
+yourself and pass `lock: false`.
 
 ### Encryption at rest
 
@@ -380,6 +404,7 @@ data/
 ├── node.json      { id } — this node's identity
 ├── keys/          public.pem, private.pem
 ├── blockchain/    <hash>.json per block, .blockchain.json holds the tail
+├── lock.json      { pid, id, since } — while an instance holds the directory (not with Web Locks)
 ├── schema.json    { version, migrated, hash } — the schema this directory last ran
 ├── data/          <id>.json per record: { data, meta, encrypted, timestamp, block }
 ├── log/           the operation log (see Sync)
