@@ -57,6 +57,12 @@ docs/                     VitePress site
   missed one. To run shared code against the browser halves under Node, load
   it through `tests/utils/browser-env.js` — requiring `src/index.browser.js`
   alone does NOT redirect the nested requires.
+- **WebRTC is wrpc's.** There is no transport code in `src/` and must not
+  be: a `PeerLink.remote` is a `WrpcClient`, `createWrpcLink(link.remote)`
+  takes it, and `unit()` mounts on a `PeerHost`. The integration test runs
+  over `tests/utils/fake-channel.js` (a fake data-channel pair) at the
+  raw-channel level; a full `WrpcPeer` needs an RTC adapter and is checked
+  by hand. Anything WebRTC-shaped that seems missing belongs in wrpc.
 - **wrpc is injected, never required.** Nothing under `src/` may
   `require('@alexify/wrpc')`; `scripts/size.js` fails on any bare import in a
   browser bundle anyway. `src/wrpc.js` duck-types the client it is handed, and
@@ -185,8 +191,10 @@ convergence properties over `tests/utils/memory-link.js` (an in-process link
 that mimics a wrpc client: JSON across the boundary, a reconnect re-opens the
 subscription from its last event id against a fresh server-side client) and
 `tests/utils/mesh.js` (N storages from an adjacency list, `settle()`).
-`tests/wrpc.integration.test.js` runs two real wrpc `Server`s and a dialer, and
-skips when `@alexify/wrpc` is not installed. Two things bite there: two nodes'
+`tests/wrpc.integration.test.js` runs two real wrpc `Server`s and a dialer,
+plus syncom over a fake WebRTC data channel (`tests/utils/fake-channel.js`)
+attached to an `RpcServer` and to a `PeerHost`, and skips when
+`@alexify/wrpc` (2.x) is not installed. Two things bite there: two nodes'
 clocks are independent, so "later" needs a `tick()` between writes on
 different nodes; and `settle()` ignores `@~` vector keys, because a node's
 bootstrap stream never reaches the node it bootstrapped from.

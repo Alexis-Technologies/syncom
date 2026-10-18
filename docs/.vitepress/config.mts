@@ -25,6 +25,7 @@ const keywords = [
   'replication',
   'wrpc',
   'websocket',
+  'webrtc',
   'conflict-resolution',
   'CRDT',
   'event-sourcing',
@@ -154,6 +155,7 @@ export default withMermaid({
             items: [
               { text: 'Sync', link: '/guide/sync' },
               { text: 'wrpc transport', link: '/guide/wrpc' },
+              { text: 'WebRTC', link: '/guide/webrtc' },
             ],
           },
           {

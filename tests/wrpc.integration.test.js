@@ -20,6 +20,9 @@ const optional = (name) => {
 };
 
 const wrpc = optional('@alexify/wrpc');
+// The WebRTC subpath registers `WrpcClient.transport.webrtc` when required.
+const webrtc = wrpc && optional('@alexify/wrpc/webrtc');
+const { createChannelPair } = require('./utils/fake-channel.js');
 
 const openTemp = async (t, options = {}) => {
   const dir = await createTemp();
@@ -149,6 +152,186 @@ test('syncom over wrpc', { skip: wrpc ? false : '@alexify/wrpc unavailable' }, a
     assert.match(refused[0].message, /Not authorized/);
     assert.strictEqual(await bad.get(id), null);
   });
+});
+
+// WebRTC is wrpc's: a PeerLink's `remote` is a WrpcClient, and so is a
+// client over a raw data channel, so `createWrpcLink` takes either as it is.
+// What a test can drive without ICE is the raw-channel level — a pair of
+// fake channels, one end attached to a server or a PeerHost, the other
+// dialled — which is also the level every WrpcPeer link rests on.
+test('syncom over a WebRTC data channel', { skip: webrtc ? false : '@alexify/wrpc/webrtc unavailable' }, async (t) => {
+  const dial = async (channel, clientOptions = {}) =>
+    createWrpcLink(
+      await wrpc.WrpcClient.connect('webrtc:host', {
+        transport: 'webrtc',
+        channel,
+        heartbeat: false,
+        reconnect: false,
+        logger: false,
+        ...clientOptions,
+      }),
+    );
+
+  await t.test('a raw channel attached to an RpcServer: both directions, a streamed bootstrap, a close', async (t2) => {
+    const a = await openTemp(t2, { sync: { log: { rollAfter: 2 }, retention: { ops: 4 } } });
+    const id = await a.insert({ n: 0 });
+    for (let i = 0; i < 10; i++) await a.inc(id, 'hits', 1);
+    for (let i = 0; i < 30; i++) await a.insert({ i, padding: 'x'.repeat(200) });
+    assert.ok(a.log.floor > 1, 'the dialer will have to bootstrap');
+    const hostA = await host(t2, a);
+    const [chC, chA] = createChannelPair();
+    // No session over a raw channel: the unit is `access: 'public'` (host()).
+    const attached = webrtc.attachChannel(hostA.server.rpc, chA, { peer: 'c' });
+    assert.strictEqual(attached.transportKind, 'webrtc');
+    const c = await openTemp(t2, { sync: { autoStart: false, connect: () => dial(chC) } });
+    const events = [];
+    c.sync.on('peer', (event) => events.push(event));
+    c.sync.on('bootstrap', (event) => events.push({ bootstrap: true, ...event }));
+    await c.sync.addNode({ url: 'webrtc:host' });
+    await c.sync.start();
+    await settle([a, c], { timeout: 15_000 });
+    assert.deepStrictEqual((await c.list()).sort(), (await a.list()).sort());
+    assert.strictEqual((await c.get(id)).hits, 10);
+    assert.ok(
+      events.some((event) => event.bootstrap && event.records === 31),
+      'bootstrapped — streamed over the channel',
+    );
+    assert.strictEqual(attached.binary, true, 'the channel carries binary streams');
+    const fromC = await c.insert({ from: 'C' });
+    await a.inc(id, 'hits', 1);
+    await settle([a, c], { timeout: 10_000 });
+    assert.deepStrictEqual(await a.get(fromC), { from: 'C' });
+    assert.strictEqual((await c.get(id)).hits, 11);
+    assert.strictEqual(hostA.server.rooms.count('syncom:*'), 1, 'in the scope room, like any client');
+    // The channel closes: the link is down, and with no factory stays down.
+    chC.close();
+    await waitUntil(() => c.sync.peers()[0]?.connected === false, { timeout: 5000 });
+    assert.ok(events.some((event) => event.connected === false));
+  });
+
+  await t.test(
+    'a channel factory: wrpc rebuilds the link, the subscription resumes, syncom greets again',
+    async (t2) => {
+      const a = await openTemp(t2);
+      const hostA = await host(t2, a);
+      const channels = [];
+      // Every (re)open asks for the next channel: a new pair, its far end
+      // attached to the host — what an application's own signaling does.
+      const next = async () => {
+        const [mine, theirs] = createChannelPair();
+        webrtc.attachChannel(hostA.server.rpc, theirs, { peer: 'c' });
+        channels.push(mine);
+        return mine;
+      };
+      const c = await openTemp(t2, {
+        sync: {
+          autoStart: false,
+          connect: () => dial(next, { reconnect: { minDelay: 50, maxDelay: 100, jitter: false } }),
+        },
+      });
+      const events = [];
+      c.sync.on('peer', (event) => events.push(event));
+      c.sync.on('bootstrap', (event) => events.push({ bootstrap: true, ...event }));
+      await c.sync.addNode({ url: 'webrtc:host' });
+      await c.sync.start();
+      const first = await a.insert({ n: 1 });
+      await settle([a, c], { timeout: 10_000 });
+      assert.deepStrictEqual(await c.get(first), { n: 1 });
+      // The path dies; wrpc asks the factory, restores the subscription from
+      // its lastEventId (428: a fresh server-side client), syncom says hello
+      // again and pushes what it wrote meanwhile — no snapshot.
+      channels[0].close();
+      await waitUntil(() => c.sync.peers()[0]?.connected === false, { timeout: 5000 });
+      const whileDown = await c.insert({ whileDown: true });
+      const second = await a.insert({ n: 2 });
+      await settle([a, c], { timeout: 15_000 });
+      assert.strictEqual(channels.length, 2, 'one redial');
+      assert.deepStrictEqual(await c.get(second), { n: 2 });
+      assert.deepStrictEqual(await a.get(whileDown), { whileDown: true });
+      assert.ok(
+        events.some((event) => event.reconnected),
+        'the link announced its reconnect',
+      );
+      assert.ok(!events.some((event) => event.bootstrap), 'resumed from the cursor');
+      assert.strictEqual(c.sync.peers()[0].subscribed, true);
+    },
+  );
+
+  await t.test(
+    'a raw channel attached to a PeerHost: the browser hosts, and authorize sees the pseudo-session',
+    async (t2) => {
+      const b = await openTemp(t2);
+      let c = null;
+      const greeted = [];
+      const unit = b.sync.unit({
+        access: 'session',
+        authorize: (context, hello) => {
+          greeted.push([context.session?.data?.peer, hello.node]);
+          return context.session?.data?.peer === 'c' && hello.node === c.nodeId;
+        },
+        limits: { opsPerPush: 2 },
+      });
+      // What a browser would run: no RpcServer, no sessions — a PeerHost
+      // over the host half of the transport, with `trust: 'link'` handing
+      // every client a pseudo-session naming the peer.
+      const peerHost = new webrtc.PeerHost({ router: wrpc.defineRouter({ syncom: unit }), logger: false });
+      t2.after(() => peerHost.close());
+      const attach = (channel, peer) => peerHost.attach(new webrtc.RtcPeerTransport(channel, { peer }), { peer });
+      const [chC, chB] = createChannelPair();
+      attach(chB, 'c');
+      // A redial takes whatever channel the application negotiated last.
+      let current = chC;
+      c = await openTemp(t2, { sync: { autoStart: false, pageSize: 5, connect: () => dial(current) } });
+      const errors = [];
+      c.sync.on('error', (error) => errors.push(error));
+      await c.sync.addNode({ url: 'webrtc:host' });
+      await c.sync.start();
+      const fromB = await b.insert({ from: 'B' });
+      const fromC = await c.insert({ from: 'C' });
+      await settle([b, c], { timeout: 10_000 });
+      assert.deepStrictEqual(await c.get(fromB), { from: 'B' });
+      assert.deepStrictEqual(await b.get(fromC), { from: 'C' });
+      assert.deepStrictEqual(greeted, [['c', c.nodeId]]);
+      assert.strictEqual(peerHost.clients.size, 1);
+      assert.strictEqual(peerHost.trust, 'link');
+      // The host's limits hold over a PeerHost too: three ops in one page is 413.
+      await c.sync.enableNode('webrtc:host', false);
+      for (let i = 0; i < 3; i++) await c.insert({ i });
+      const [chC2, chB2] = createChannelPair();
+      attach(chB2, 'c');
+      current = chC2;
+      await c.sync.enableNode('webrtc:host', true);
+      await waitUntil(() => errors.some((error) => error.code === 413), { timeout: 5000 });
+      // Another peer id than the one authorize expects: 403 at hello.
+      const [chX, chBx] = createChannelPair();
+      attach(chBx, 'x');
+      const x = await openTemp(t2, { sync: { autoStart: false, connect: () => dial(chX) } });
+      const refused = [];
+      x.sync.on('error', (error) => refused.push(error));
+      await x.sync.addNode({ url: 'webrtc:host' });
+      await x.sync.start();
+      await waitUntil(() => refused.length > 0, { timeout: 5000 });
+      assert.strictEqual(refused[0].code, 403);
+      assert.match(refused[0].message, /Not authorized/);
+      assert.deepStrictEqual(greeted.at(-1), ['x', x.nodeId]);
+      // `trust: 'none'`: no session at all, so `access: 'session'` is 403 before hello.
+      const none = new webrtc.PeerHost({ router: wrpc.defineRouter({ syncom: unit }), logger: false, trust: 'none' });
+      t2.after(() => none.close());
+      const [chN, chBn] = createChannelPair();
+      none.attach(new webrtc.RtcPeerTransport(chBn, { peer: 'n' }), { peer: 'n' });
+      const n = await openTemp(t2, { sync: { autoStart: false, connect: () => dial(chN) } });
+      const denied = [];
+      n.sync.on('error', (error) => denied.push(error));
+      await n.sync.addNode({ url: 'webrtc:host' });
+      await n.sync.start();
+      await waitUntil(() => denied.length > 0, { timeout: 5000 });
+      assert.strictEqual(denied[0].code, 403);
+      assert.ok(
+        !greeted.some(([, node]) => node === n.nodeId),
+        'authorize never ran: refused by access before the handler',
+      );
+    },
+  );
 });
 
 // The two packages meet in one trace: syncom opens `syncom.push` around the

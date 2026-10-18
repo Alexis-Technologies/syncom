@@ -81,9 +81,10 @@ const storage = await open({
 await storage.sync.addNode({ url: 'wss://hub.example.com/api', token });
 ```
 
-A browser node dials; it cannot host. It joins the mesh through whichever
-nodes it can reach, and a bootstrap arrives as a binary stream through
-wrpc's `WrpcReadable`.
+A browser node dials the nodes it can reach, and a bootstrap arrives as a
+binary stream through wrpc's `WrpcReadable`. It hosts too: over a WebRTC
+link its unit sits on a wrpc `PeerHost`, and a peer's `PeerLink.remote` is
+a `WrpcClient` this adapter takes as it is — see [WebRTC](./webrtc).
 
 ## What the adapter does
 

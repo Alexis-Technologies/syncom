@@ -12,6 +12,17 @@ section until the first publish; everything below lands there on release day.
 
 ### Added
 
+- **WebRTC, through wrpc 2.** No transport code in syncom: a `PeerLink`'s
+  `remote` from `@alexify/wrpc/webrtc` is a `WrpcClient`, which
+  `createWrpcLink()` takes as it is, and `storage.sync.unit()` mounts on a
+  browser's `PeerHost` as on a server — a browser node hosts. The
+  integration suite runs syncom over a raw data channel (a fake pair)
+  attached to an `RpcServer` (both directions, a streamed bootstrap, a
+  channel factory that reconnects and resumes) and to a `PeerHost`
+  (`authorize` on the pseudo-session, 403, the unit's limits). A guide,
+  [WebRTC](https://syncomjs.vercel.app/guide/webrtc), with the dial, host,
+  signaling, mesh and raw-channel recipes. devDependency `@alexify/wrpc`
+  1.0.0 → ^2.0.1.
 - **Purge.** `storage.purge(id)` forgets a record for good: a `purge` op
   (the 7th op type, `meta.purged`) that wins over every other op at any
   stamp and that nothing later revives, plus `OpLog.scrub(id)` — every entry

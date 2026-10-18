@@ -69,9 +69,11 @@ durable as IndexedDB gets (`durable: true` is a no-op here). `close()` is the
 backend's own: the storage never closes a backend it was handed, since two
 storages may share one.
 
-**A browser node dials, it cannot host.** Its registry, log and cursors live
-in OPFS like everything else, so a reload resumes where it left off. See
-[Sync](./sync) and [wrpc transport](./wrpc#in-the-browser).
+**A browser node dials a hub, and hosts for its peers over WebRTC.** Its
+registry, log and cursors live in OPFS like everything else, so a reload
+resumes where it left off; `storage.sync.unit()` mounted on a wrpc
+`PeerHost` makes it a host other browsers dial. See [Sync](./sync),
+[wrpc transport](./wrpc#in-the-browser) and [WebRTC](./webrtc).
 
 ## Requirements
 

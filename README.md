@@ -141,7 +141,7 @@ nodes converges.
 | **Storage** | Records with live properties and per-record deltas, schema-driven collections, compare-and-swap writes, counters, encryption at rest (AES-256-GCM under an RSA-wrapped key) |
 | **Replication** | Every write is an op in a persisted log; peers exchange ops over an injected link, resume from where they stopped, and bootstrap from a streamed snapshot when they cannot; scopes for partial replication |
 | **Convergence** | Last-writer-wins registers, per-origin counters, tombstones with revival — any order, any number of times, same result |
-| **Transport** | `@alexify/syncom/wrpc` adapts a `WrpcClient`; `storage.sync.unit()` is the router unit a wrpc server mounts. Reconnects, resumable subscriptions, binary streams and rooms come from wrpc |
+| **Transport** | `@alexify/syncom/wrpc` adapts a `WrpcClient` — over a WebSocket, or a WebRTC `PeerLink`'s `remote` from `@alexify/wrpc/webrtc`; `storage.sync.unit()` is the router unit a wrpc server, or a browser's `PeerHost`, mounts. Reconnects, resumable subscriptions, binary streams and rooms come from wrpc. See [WebRTC](https://syncomjs.vercel.app/guide/webrtc) |
 | **Integrity** | Every write appends a hash-linked block; reads re-verify the record against the block that committed it and throw on a mismatch |
 | **CRDT** | `diff` / `merge` / `apply` over plain objects — nested maps merge recursively, arrays are grow-only sets, numbers add so counters converge |
 | **Contracts** | `@alexify/syncom/contracts`: store a procedure in the chain by hash, load it anywhere, run it against a read-only view of storage; failures are recorded as blocks. A subpath, so the package root never runs a block's code |
@@ -163,8 +163,8 @@ Crypto is asynchronous there (`calculateHash`, `encrypt` and `decrypt` return
 promises), and storage lives in the origin-private filesystem — or in
 IndexedDB through `open({ fsi: createIdbFsi() })` from `@alexify/syncom/idb`. `browser.d.ts`
 declares those signatures separately. A browser node dials the mesh through
-`@alexify/syncom/wrpc` like any other. See
-[Browser](https://syncomjs.vercel.app/guide/browser).
+`@alexify/syncom/wrpc` like any other, and hosts for its peers over WebRTC.
+See [Browser](https://syncomjs.vercel.app/guide/browser).
 
 ## Status
 
@@ -182,6 +182,7 @@ local — are listed under [Guarantees and limits](https://syncomjs.vercel.app/g
   [Smart contracts](https://syncomjs.vercel.app/guide/contracts)
 - [Sync](https://syncomjs.vercel.app/guide/sync) ·
   [wrpc transport](https://syncomjs.vercel.app/guide/wrpc) ·
+  [WebRTC](https://syncomjs.vercel.app/guide/webrtc) ·
   [Browser](https://syncomjs.vercel.app/guide/browser)
 - [API reference](https://syncomjs.vercel.app/reference/api)
 
