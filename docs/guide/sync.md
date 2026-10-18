@@ -31,7 +31,7 @@ Every write becomes an **op** — the unit that travels between nodes and sits
 in the log:
 
 ```
-{ origin, seq, ts, type, id, scope?, data?, key?, value?, v? }
+{ origin, seq, ts, type, id, scope?, data?, key?, value?, v?, actor? }
 ```
 
 | `type` | Produced by | Effect on the record |
@@ -48,7 +48,11 @@ in the log:
 stamp the node has seen from a peer (see [Clocks](#clocks)). `v` is the
 [schema version](./storage#schema-versions) of the node that made it — absent
 on a node without a schema, and on `merge`/`advance` — and a record remembers
-the version of its last whole-record write as `meta.v`.
+the version of its last whole-record write as `meta.v`. `actor` is who made
+it: `open({ actor })` (a string, or a function asked per write — the
+signed-in user) or the write's own `{ actor }`, absent when neither says. It
+rides on the op, into every log and every `change` and `beforeApply` on the
+way, and never into the record: an audit trail is the log, not the state.
 
 ### Clocks
 
@@ -355,7 +359,10 @@ the engine's own tests run on.
 - **Chains diverge.** Each node's [chain](./chain) is its own audit log of what
   it applied, in the order it applied it. It is not a consensus.
 - **No signatures.** Trust rests on `authorize`, the token and the transport
-  (use `wss://`).
+  (use `wss://`). `op.actor` is a claim the writer made about itself: a host
+  that knows who a peer is (what `authorize` established) can hold the
+  claim to it in `beforeApply` — `({ op, peer }) => op.actor === userOf(peer.node)`
+  — and skip the op otherwise.
 - **A held op lives in the log.** With `ahead: 'hold'` an op from a newer
   [schema version](./storage#reading-across-versions) waits as a flagged
   entry; retention that drops its segment before the upgrade loses it, which

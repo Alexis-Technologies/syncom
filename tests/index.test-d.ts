@@ -150,6 +150,15 @@ expectType<'VALIDATION_FAILED'>(validationError.code);
 expectType<string | null>(validationError.entity);
 expectType<syncom.ValidationIssue[]>(validationError.issues);
 expectAssignable<Error>(validationError);
+expectAssignable<StorageOptions>({ actor: 'u1' });
+expectAssignable<StorageOptions>({ actor: async () => 'u1' });
+expectError(syncom.open({ actor: 42 }));
+expectType<Promise<void>>(storage.update('id', { a: 1 }, { actor: 'u2' }));
+expectType<Promise<void>>(storage.inc('id', 'hits', 1, { actor: 'u2' }));
+expectType<Promise<void>>(storage.delete('id', { actor: 'u2' }));
+expectType<Promise<boolean>>(storage.swap('id', { a: 2 }, { a: 1 }, { actor: 'u2' }));
+expectType<Promise<string>>(storage.insert({ a: 1 }, { actor: 'u2', encrypted: false }));
+expectType<Promise<void>>(record.save({ actor: 'u2' }));
 expectAssignable<StorageOptions>({ getId: () => 'id' });
 expectAssignable<StorageOptions>({ getId: async () => 'id' });
 expectType<string>(syncom.Storage.generateId());
@@ -206,6 +215,7 @@ expectType<Promise<syncom.SnapshotPage>>(storage.snapshot({ cursor: null, limit:
 storage.on('change', (op, via) => {
   expectType<syncom.SyncOp>(op);
   expectType<unknown>(via);
+  expectType<string | undefined>(op.actor);
 });
 declare const entry: syncom.Entry;
 const applied = syncom.applyOp(null, { origin: 'a', seq: 1, ts: 1, type: 'set', id: 'r', data: { x: 1 }, v: 2 });
@@ -253,6 +263,7 @@ expectAssignable<StorageOptions>({
       expectType<Record<string, unknown> | null>(ctx.current);
       expectType<boolean>(ctx.encrypted);
       expectType<number | null>(ctx.v);
+      expectType<string | null>(ctx.actor);
       return { ...ctx.data };
     },
     afterWrite: (ctx, op) => {

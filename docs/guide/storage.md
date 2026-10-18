@@ -19,6 +19,7 @@ const storage = await open({ path: 'data' });
 | `cache` | `{ max: 5000 }` | How many entries stay in memory; a live `Record` pins its own ([see below](#the-catalog-and-the-cache)) |
 | `integrity` | `'verify'` | `'lazy'` trusts a record file on the cold read instead of re-verifying it against its block |
 | `catalog` | `{ flushEvery: 64 }` | How often the record catalog is persisted; the log catches up the rest |
+| `actor` | — | Who writes — stamped on every op as `actor`: a string, or a function asked per write ([see Sync](./sync#operations)) |
 | `schema` | — | Entity definitions: collections, their validators and indexes ([see below](#collections)); `version` and `snapshot` ([see below](#schema-versions)) |
 | `validator` | — | Compiles entity schemas that are plain objects without `~standard` ([see below](#validation)) |
 | `getId` | `crypto.randomUUID()` | Id generator for `insert()`; sync or async ([see below](#custom-identifiers)) |
@@ -38,6 +39,7 @@ const id = await storage.insert({ title: 'Draft' });
 await storage.has(id);                    // true
 await storage.get(id);                    // { title: 'Draft' }
 await storage.update(id, { status: 'review' }); // set some fields
+await storage.update(id, { status: 'done' }, { actor: 'ada' }); // … and say who
 await storage.inc(id, 'views', 1);        // add to a counter field
 await storage.set(id, { title: 'Final' }); // replace wholesale — status and views are gone
 await storage.list();                     // every live id

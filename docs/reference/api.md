@@ -20,7 +20,7 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 [One instance per directory](../guide/storage#one-instance-per-directory)),
 `cache`, `integrity` and `catalog` (see
 [The catalog and the cache](../guide/storage#the-catalog-and-the-cache)),
-`schema` and `validator` (see
+`actor` (see [Operations](../guide/sync#operations)), `schema` and `validator` (see
 [Collections](../guide/storage#collections)), `getId`, `logger`, `encrypted`,
 `sync` (see [Sync options](../guide/sync#options)), `telemetry` (see
 [OpenTelemetry](../guide/telemetry)), `hooks` (see
@@ -39,12 +39,12 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 | `check(entity, data)` | `Promise<unknown>` | Runs the entity's validator as a write would and returns its value; rejects with `ValidationError`; writes nothing |
 | `migrate({ entities, batch }?)` | `Promise<{ migrated, counters }>` | Rewrites records of an older schema version through the lens; idempotent (see [Reading across versions](../guide/storage#reading-across-versions)) |
 | `set(id, data, options?)` | `Promise<void>` | Replaces the record (a `write` op); keeps `$type` unless the data names the same |
-| `update(id, delta)` | `Promise<void>` | Sets the listed fields (a `set` op); throws if absent, or on a counter field |
-| `inc(id, key, value = 1)` | `Promise<void>` | Adds to a counter field (an `inc` op); throws on a register field |
-| `swap(id, changes, prev)` | `Promise<boolean>` | CAS — `false`, and no write, on mismatch |
-| `delete(id)` | `Promise<void>` | Leaves a tombstone |
+| `update(id, delta, { actor }?)` | `Promise<void>` | Sets the listed fields (a `set` op); throws if absent, or on a counter field |
+| `inc(id, key, value = 1, { actor }?)` | `Promise<void>` | Adds to a counter field (an `inc` op); throws on a register field |
+| `swap(id, changes, prev, { actor }?)` | `Promise<boolean>` | CAS — `false`, and no write, on mismatch |
+| `delete(id, { actor }?)` | `Promise<void>` | Leaves a tombstone |
 | `record(id)` | `Promise<Record>` | Cached per id |
-| `saveData(id, data, options?)` | `Promise<void>` | `{ encrypted: true }` seals the record for this node only |
+| `saveData(id, data, options?)` | `Promise<void>` | `{ encrypted: true }` seals the record for this node only; `{ actor }` names the writer |
 | `loadData(id)` | `Promise<unknown>` | Alias of `get()`; throws if the record no longer matches its block |
 | `validate(options?)` | `Promise<boolean>` | `{ last, from }`; no argument walks the whole chain |
 | `validate(id, data, blockHash)` | `Promise<boolean>` | One record against its block |
@@ -84,16 +84,18 @@ Hooks (`open({ hooks })`): `beforeWrite`, `afterWrite`, `beforeRead`,
 Extends `Emitter`. Emits `update` with `(data, delta)` — on a staged
 assignment, and when the record changes in storage (`null` data once deleted).
 
-`id`, `data()`, `delta()`, `save()`, `inc(key, value?)`, `delete()`, plus a
+`id`, `data()`, `delta()`, `save({ actor }?)`, `inc(key, value?, { actor }?)`,
+`delete({ actor }?)`, plus a
 live property per field of the loaded object.
 
 ### `Collection`
 
 Created per schema entity and exposed as `storage.<EntityName>`.
 
-`name`, `insert(data)`, `get(id)`, `set(id, data, options?)` (stamped as the
-collection's), `update(id, delta)` (refuses a delta naming `$type`),
-`delete(id)`, `record(id)`, `select(query?)` → a cursor, `count(query?)`.
+`name`, `insert(data, options?)`, `get(id)`, `set(id, data, options?)`
+(stamped as the collection's), `update(id, delta, { actor }?)` (refuses a
+delta naming `$type`), `delete(id, { actor }?)`, `record(id)`,
+`select(query?)` → a cursor, `count(query?)`.
 Writes through a collection with a `schema` are validated — see
 [Validation](../guide/storage#validation); `unique` keys are refused with a
 `ValidationError` whose issue has `code: 'unique'` and `conflict`.

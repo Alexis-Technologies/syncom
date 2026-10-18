@@ -163,20 +163,20 @@ class Record extends Emitter {
     return { ...this.#changes };
   }
 
-  async save() {
+  async save(options = {}) {
     if (Object.keys(this.#changes).length === 0) return;
     const delta = this.delta();
-    await this.#storage[COMMIT]('set', this.#id, { data: delta }, { source: this });
+    await this.#storage[COMMIT]('set', this.#id, { data: delta }, { source: this, actor: options.actor });
     this.#changes = {};
   }
 
   /** Adds to a counter field; the storage-level `inc` with this record's id. */
-  async inc(key, value = 1) {
-    await this.#storage.inc(this.#id, key, value);
+  async inc(key, value = 1, options = {}) {
+    await this.#storage.inc(this.#id, key, value, options);
   }
 
-  async delete() {
-    await this.#storage.delete(this.#id);
+  async delete(options = {}) {
+    await this.#storage.delete(this.#id, options);
     this.#data = null;
     this.#changes = {};
   }
@@ -195,9 +195,9 @@ class Collection {
     return this.#name;
   }
 
-  async insert(data) {
+  async insert(data, options = {}) {
     const record = { ...data, $type: this.#name };
-    const id = await this.#storage.insert(record);
+    const id = await this.#storage.insert(record, options);
     return this.#storage.record(id);
   }
 
@@ -221,15 +221,15 @@ class Collection {
     return this.#storage.set(id, { ...data, $type: this.#name }, options);
   }
 
-  async delete(id) {
-    return this.#storage.delete(id);
+  async delete(id, options = {}) {
+    return this.#storage.delete(id, options);
   }
 
-  async update(id, delta) {
+  async update(id, delta, options = {}) {
     if (isPlainObject(delta) && Object.hasOwn(delta, '$type')) {
       throw new TypeError('$type is immutable; update() may not name it');
     }
-    return this.#storage.update(id, delta);
+    return this.#storage.update(id, delta, options);
   }
 
   async record(id) {
@@ -260,6 +260,7 @@ class Storage extends Emitter {
   #lens = null;
   #ahead = 'apply';
   #held = null;
+  #actor = null;
   #getId = null;
   #logger;
   #otel;
@@ -348,6 +349,12 @@ class Storage extends Emitter {
       if (typeof options.getId !== 'function') throw new TypeError('open({ getId }): getId must be a function');
       this.#getId = options.getId;
     }
+    // Who writes: a string, or a function asked per write (the signed-in
+    // user). It rides on the op as a claim — see `actorOf`.
+    if (options.actor !== undefined && typeof options.actor !== 'string' && typeof options.actor !== 'function') {
+      throw new TypeError('open({ actor }): actor must be a string or a function');
+    }
+    this.#actor = options.actor ?? null;
     // Encrypt every record at rest by default; a per-call `{ encrypted }`
     // still overrides. Encrypted records are local — see saveData().
     this.#encrypted = options.encrypted === true;
@@ -552,7 +559,7 @@ class Storage extends Emitter {
    * alone. `entities` limits it to those collections; `batch` is how many
    * records go between turns of the event loop.
    */
-  async migrate({ entities = null, batch = 100 } = {}) {
+  async migrate({ entities = null, batch = 100, actor } = {}) {
     if (this.#version === null) throw new TypeError('migrate() needs open({ schema })');
     if (entities !== null && !(Array.isArray(entities) && entities.every((name) => typeof name === 'string'))) {
       throw new TypeError('migrate({ entities }) takes an array of entity names');
@@ -571,9 +578,9 @@ class Storage extends Emitter {
         if (isCounter(entry.meta, key)) counters[key] = entry.data[key];
         else data[key] = view[key];
       }
-      await this[COMMIT]('write', id, { data });
+      await this[COMMIT]('write', id, { data }, { actor });
       for (const key of Object.keys(counters)) {
-        await this[COMMIT]('inc', id, { key, value: counters[key] });
+        await this[COMMIT]('inc', id, { key, value: counters[key] }, { actor });
         result.counters++;
       }
       result.migrated++;
@@ -781,6 +788,13 @@ class Storage extends Emitter {
     return typeof scope === 'string' && scope.length > 0 ? scope : GLOBAL_SCOPE;
   }
 
+  // The actor of one write: the call's own, else the storage's (asked when
+  // it is a function), else none. A string on the op, never in the record.
+  async #actorOf(given) {
+    const actor = given !== undefined ? given : typeof this.#actor === 'function' ? await this.#actor() : this.#actor;
+    return actor === null || actor === undefined ? null : String(actor);
+  }
+
   // ---------------------------------------------------------------------
   // Entries on disk: `{ data, meta, encrypted, timestamp, block }`. `meta` is
   // the replication bookkeeping (see ops.js); an encrypted entry has none —
@@ -894,7 +908,7 @@ class Storage extends Emitter {
     }
   }
 
-  async #commit(type, id, payload, { source = null, via = null, from = null, encrypted = false } = {}) {
+  async #commit(type, id, payload, { source = null, via = null, from = null, encrypted = false, actor } = {}) {
     const current = await this.#load(id);
     if (encrypted && current && !current.encrypted) {
       throw new Error(`Record ${id} is replicated and cannot become encrypted`);
@@ -903,7 +917,19 @@ class Storage extends Emitter {
     // encrypted record has no op log — writes to it stay local.
     const sealed = encrypted || current?.encrypted === true;
     const visible = current && (current.encrypted || isAlive(current)) ? current.data : null;
-    const ctx = { type, id, ...payload, current: visible, encrypted: sealed, source, via, from, v: this.#version };
+    const who = type === 'merge' ? null : await this.#actorOf(actor);
+    const ctx = {
+      type,
+      id,
+      ...payload,
+      current: visible,
+      encrypted: sealed,
+      source,
+      via,
+      from,
+      v: this.#version,
+      actor: who,
+    };
     const replacement = await this.#hook('beforeWrite', ctx);
     if (replacement !== undefined) {
       if (type !== 'write' && type !== 'set') {
@@ -948,6 +974,7 @@ class Storage extends Emitter {
     // version lenses the record through. A merge carries the joined entry's
     // own `meta.v` instead.
     if (this.#version !== null && type !== 'merge') op.v = this.#version;
+    if (who !== null) op.actor = who;
     // Sequence numbers run per stream (see vector.js opKey): the scope's,
     // or the bootstrap stream for a merge.
     op.seq = (this.#log.vector[opKey(op)] ?? 0) + 1;
@@ -1041,8 +1068,8 @@ class Storage extends Emitter {
   }
 
   async saveData(id, data, options = {}) {
-    const { encrypted = this.#encrypted } = options;
-    await this[COMMIT]('write', id, { data }, { encrypted });
+    const { encrypted = this.#encrypted, actor } = options;
+    await this[COMMIT]('write', id, { data }, { encrypted, actor });
   }
 
   async loadData(id) {
@@ -1114,30 +1141,30 @@ class Storage extends Emitter {
     await this.saveData(id, data, options);
   }
 
-  async delete(id) {
-    await this[COMMIT]('delete', id, {});
+  async delete(id, { actor } = {}) {
+    await this[COMMIT]('delete', id, {}, { actor });
     this.#records.delete(id);
   }
 
-  async update(id, delta) {
+  async update(id, delta, { actor } = {}) {
     if (!(await this.has(id))) throw new Error(`Record ${id} not found`);
     if (!isPlainObject(delta)) throw new TypeError('update() takes a plain object');
-    await this[COMMIT]('set', id, { data: delta });
+    await this[COMMIT]('set', id, { data: delta }, { actor });
   }
 
   /** Adds `value` to counter field `key` — the commutative alternative to update(). */
-  async inc(id, key, value = 1) {
+  async inc(id, key, value = 1, { actor } = {}) {
     if (typeof key !== 'string') throw new TypeError('inc() takes a field name');
     if (!Number.isFinite(value)) throw new TypeError('inc() takes a finite number');
-    await this[COMMIT]('inc', id, { key, value });
+    await this[COMMIT]('inc', id, { key, value }, { actor });
   }
 
-  async swap(id, changes, prev) {
+  async swap(id, changes, prev, { actor } = {}) {
     const data = await this.#read(id);
     if (!data) throw new Error(`Record ${id} not found`);
     const matches = Object.keys(prev).every((key) => data[key] === prev[key]);
     if (!matches) return false;
-    await this[COMMIT]('set', id, { data: changes });
+    await this[COMMIT]('set', id, { data: changes }, { actor });
     return true;
   }
 

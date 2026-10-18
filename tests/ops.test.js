@@ -242,21 +242,27 @@ test('ops module', async (t) => {
     assert.strictEqual(joined.entry.meta.v, 5);
   });
 
-  await t.test('packOps carries v in its 13th slot; older rows read without it', () => {
+  await t.test('packOps carries v and actor in its 13th and 14th slots; older rows read without them', () => {
     const ops = [
-      { origin: 'A', seq: 1, ts: 1, type: 'write', id: 'r', scope: 's', data: { x: 1 }, v: 2 },
+      { origin: 'A', seq: 1, ts: 1, type: 'write', id: 'r', scope: 's', data: { x: 1 }, v: 2, actor: 'u1' },
       { origin: 'A', seq: 2, ts: 2, type: 'inc', id: 'r', key: 'n', value: 1 },
       { origin: 'A', seq: 3, ts: 3, type: 'advance', vector: { B: 4 }, from: 'B' },
     ];
     const packed = packOps(ops);
-    assert.strictEqual(packed[0].length, 13);
+    assert.strictEqual(packed[0].length, 14);
     assert.strictEqual(packed[0][12], 2);
+    assert.strictEqual(packed[0][13], 'u1');
     assert.strictEqual(packed[1][12], null);
+    assert.strictEqual(packed[1][13], null);
     assert.deepStrictEqual(unpackOps(JSON.parse(JSON.stringify(packed))), ops);
-    // A row of the previous shape (12 slots) and a short one.
+    // Rows of the previous shapes (13 and 12 slots) and a short one.
+    assert.deepStrictEqual(
+      unpackOps([packed[0].slice(0, 13)]),
+      [ops[0]].map(({ actor, ...op }) => op),
+    );
     assert.deepStrictEqual(
       unpackOps([packed[0].slice(0, 12)]),
-      [{ ...ops[0], v: undefined }].map(({ v, ...op }) => op),
+      [ops[0]].map(({ v, actor, ...op }) => op),
     );
     assert.deepStrictEqual(unpackOps([['A', 1, 1, 'w', 'r']]), [
       { origin: 'A', seq: 1, ts: 1, type: 'write', id: 'r' },

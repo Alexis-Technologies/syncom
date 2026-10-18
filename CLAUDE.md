@@ -62,6 +62,10 @@ docs/                     VitePress site
   `unit()` builds plain `{ access, handler }` objects that `defineRouter`
   accepts without wrpc's `procedure()`. The `tracked` shape it emits is
   `Symbol.for('wrpc.tracked')` — part of wrpc's frozen wire protocol.
+- **`packOps` is 14 positional slots, both halves together.** `v` (13) and
+  `actor` (14) were appended; a reader of fewer slots ignores the rest, a
+  reader of more takes an absent slot as null. Append, never reorder — the
+  shape is in every peer's log.
 - **Every write is an op, and a field is a register OR a counter.** `insert`/
   `set` → `write`, `update`/`swap`/`record.save` → `set`, `inc` → `inc`,
   `delete` → tombstone. Registers are last-writer-wins by `(ts, origin)`;

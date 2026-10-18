@@ -84,6 +84,8 @@ export interface SyncOp {
   value?: number;
   /** The schema version of the node that made it; absent without a schema, and on `merge`/`advance`. */
   v?: number;
+  /** Who made it — `open({ actor })` or the write's own; a claim, not a signature. Absent on `merge`/`advance`. */
+  actor?: string;
 }
 
 export interface EntryMeta {
@@ -487,6 +489,8 @@ export interface WriteContext {
   from: string | null;
   /** This node's schema version, stamped on the op; `null` without a schema. */
   v: number | null;
+  /** The actor the op will carry; `null` when none. */
+  actor: string | null;
 }
 
 export interface ReadContext {
@@ -579,6 +583,8 @@ export interface StorageOptions<S extends Schema = Schema> {
   schema?: S;
   /** Compiles entity schemas that are plain objects without `~standard`. */
   validator?: SchemaValidator;
+  /** Who writes — stamped on every op as `actor`: a string, or a function asked per write. */
+  actor?: string | (() => string | Promise<string>);
   getId?: () => string | Promise<string>;
   logger?: Logger | false;
   sync?: SyncOptions;
@@ -601,6 +607,12 @@ export type Collections<S extends Schema> = S['entities'] extends Map<string, Sc
 
 export interface StorageDataOptions {
   encrypted?: boolean;
+  /** The actor of this write, over `open({ actor })`. */
+  actor?: string;
+}
+
+export interface WriteOptions {
+  actor?: string;
 }
 
 export interface StorageEntry {
@@ -842,10 +854,10 @@ export interface Storage {
   has(id: string): Promise<boolean>;
   get(id: string): Promise<unknown>;
   set(id: string, data: unknown, options?: StorageDataOptions): Promise<void>;
-  delete(id: string): Promise<void>;
-  update(id: string, delta: unknown): Promise<void>;
-  inc(id: string, key: string, value?: number): Promise<void>;
-  swap(id: string, changes: unknown, prev: unknown): Promise<boolean>;
+  delete(id: string, options?: WriteOptions): Promise<void>;
+  update(id: string, delta: unknown, options?: WriteOptions): Promise<void>;
+  inc(id: string, key: string, value?: number, options?: WriteOptions): Promise<void>;
+  swap(id: string, changes: unknown, prev: unknown, options?: WriteOptions): Promise<boolean>;
   /** Every live id, sorted — from the catalog, no I/O. */
   list(): Promise<string[]>;
   /**
@@ -859,7 +871,7 @@ export interface Storage {
    * the lens — a whole-record write of the view, the counters added back.
    * Idempotent; `entities` limits it to those collections.
    */
-  migrate(options?: { entities?: readonly string[]; batch?: number }): Promise<{ migrated: number; counters: number }>;
+  migrate(options?: { entities?: readonly string[]; batch?: number; actor?: string }): Promise<{ migrated: number; counters: number }>;
   record(id: string): Promise<Storage.StorageRecord>;
   /** The raw data of a cached entry (no lens), `null` when not cached, absent or deleted. */
   getCachedData(id: string): unknown | null;
@@ -936,9 +948,9 @@ export interface SyncomRecord {
   off<E extends keyof RecordEvents>(event: E, listener?: RecordEvents[E]): void;
   data(): Promise<unknown>;
   delta(): Record<string, unknown>;
-  save(): Promise<void>;
-  inc(key: string, value?: number): Promise<void>;
-  delete(): Promise<void>;
+  save(options?: WriteOptions): Promise<void>;
+  inc(key: string, value?: number, options?: WriteOptions): Promise<void>;
+  delete(options?: WriteOptions): Promise<void>;
   // Live properties: one getter/setter per field of the loaded object.
   [field: string]: unknown;
 }
@@ -946,16 +958,16 @@ export interface SyncomRecord {
 declare class SyncomCollection {
   constructor(storage: Storage, name: string);
   readonly name: string;
-  insert(data: unknown): Promise<SyncomRecord>;
+  insert(data: unknown, options?: StorageDataOptions): Promise<SyncomRecord>;
   get(id: string): Promise<unknown | null>;
   /** A cursor over this collection — see Cursor. */
   select(query?: MangoQuery): Cursor;
   count(query?: MangoQuery): Promise<number>;
   /** Replaces the record wholesale, stamped as this collection's. */
   set(id: string, data: unknown, options?: StorageDataOptions): Promise<void>;
-  delete(id: string): Promise<void>;
+  delete(id: string, options?: WriteOptions): Promise<void>;
   /** Sets the listed fields; `$type` may not be among them. */
-  update(id: string, delta: unknown): Promise<void>;
+  update(id: string, delta: unknown, options?: WriteOptions): Promise<void>;
   record(id: string): Promise<SyncomRecord>;
 }
 

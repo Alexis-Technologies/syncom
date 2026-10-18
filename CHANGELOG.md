@@ -12,6 +12,13 @@ section until the first publish; everything below lands there on release day.
 
 ### Added
 
+- **Who wrote it.** `open({ actor })` — a string, or a function asked per
+  write — and a per-write `{ actor }` on `insert`, `set`, `update`, `inc`,
+  `delete`, `swap`, `saveData`, `Record.save/inc/delete`, the collection's
+  methods and `migrate()` stamp the op with `actor` (the 14th packed slot;
+  older readers ignore it). It is a claim, not a signature: it rides on the
+  op into every log, `change` and `beforeApply`, never into the record.
+  `WriteContext.actor`.
 - **Queries.** `collection.select(query)` is a cursor over a Mango-shaped
   query (`{ field: value }`, `$eq` `$ne` `$in` `$nin` `$gt` `$gte` `$lt`
   `$lte` `$exists` `$regex`/`$options`, `$and` `$or` `$not`, dotted paths,

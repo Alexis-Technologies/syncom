@@ -60,12 +60,13 @@ silently never runs.
 | `afterApply(batch)` | After a peer's batch is durable, once per `applyRemote` call | Ignored | The call rejects; the batch stays and is announced |
 
 `ctx` for a write is `{ type, id, data?, key?, value?, meta?, current,
-encrypted, source, via, from }`: `type` is the op type (`write`, `set`, `inc`,
-`delete`, `merge`), `data` is the whole record for a `write` and the delta for
-a `set`, `key`/`value` belong to an `inc`, `current` is the record as it is
-now (`null` when absent or deleted — read it, do not change it), `encrypted`
-says whether the write is sealed for this node, and `source` is the `Record`
-whose `save()` this is. For a remote op it is `{ op, via, peer, current }`,
+encrypted, source, via, from, v, actor }`: `type` is the op type (`write`,
+`set`, `inc`, `delete`, `merge`), `data` is the whole record for a `write`
+and the delta for a `set`, `key`/`value` belong to an `inc`, `current` is the
+record as it is now (`null` when absent or deleted — read it, do not change
+it), `encrypted` says whether the write is sealed for this node, `source` is
+the `Record` whose `save()` this is, `v` is this node's schema version and
+`actor` who the op will say made it (`null` when nobody). For a remote op it is `{ op, via, peer, current }`,
 where `peer` is `{ url, node }` — `url` is `null` when this node is the host.
 
 The order of a local write:

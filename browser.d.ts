@@ -54,6 +54,7 @@ export type {
   SyncomRecord,
   SyncomCollection,
   StorageDataOptions,
+  WriteOptions,
   StorageEntry,
   Node,
   NodeData,

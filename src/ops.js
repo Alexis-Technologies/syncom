@@ -298,9 +298,9 @@ const mergeEntry = (a, b) => {
 
 // The wire/log shape of a batch: one positional array per op, type as a
 // single letter, absent fields as null — no key names repeated per op. A
-// slot may be appended (the writer's schema version was the 13th): a reader
-// of an older shape ignores slots it does not know, a reader of a newer one
-// takes an absent slot as null.
+// slot may be appended (the writer's schema version was the 13th, the actor
+// the 14th): a reader of an older shape ignores slots it does not know, a
+// reader of a newer one takes an absent slot as null.
 const TYPE_CODES = { write: 'w', set: 's', inc: 'i', delete: 'd', merge: 'm', advance: 'a' };
 const CODE_TYPES = { w: 'write', s: 'set', i: 'inc', d: 'delete', m: 'merge', a: 'advance' };
 
@@ -322,6 +322,7 @@ const packOps = (ops) => {
       op.vector === undefined ? null : op.vector,
       op.from === undefined ? null : op.from,
       op.v === undefined ? null : op.v,
+      op.actor === undefined ? null : op.actor,
     ];
   }
   return packed;
@@ -332,10 +333,11 @@ const unpackOps = (packed) => {
   const ops = [];
   for (const row of packed) {
     if (!Array.isArray(row) || row.length < 5) continue;
-    const [origin, seq, ts, code, id, scope, data, meta, key, value, vector, from, v] = row;
+    const [origin, seq, ts, code, id, scope, data, meta, key, value, vector, from, v, actor] = row;
     const op = { origin, seq, ts, type: CODE_TYPES[code] ?? code };
     if (id !== null && id !== undefined) op.id = id;
     if (v !== null && v !== undefined) op.v = v;
+    if (actor !== null && actor !== undefined) op.actor = actor;
     if (vector !== null && vector !== undefined) op.vector = vector;
     if (from !== null && from !== undefined) op.from = from;
     if (scope !== null && scope !== undefined) op.scope = scope;
