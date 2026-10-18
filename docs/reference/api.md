@@ -236,16 +236,27 @@ RSA-OAEP (SHA-256) — identical on both platforms. `loadKeys` reads
 `public.pem` / `private.pem` from `basePath`, generating and writing them if
 either is absent.
 
-## Filesystem interface
+## Backends
 
-Backed by `node:fs/promises` on the server and OPFS in the browser.
-
+A backend — an **fsi** — is five functions over "a directory and a file name":
 `read(dir, file)` → `Promise<string>`, `write(dir, file, content)`,
 `exists(dir, file)` → `Promise<boolean>`, `remove(dir, file)`,
 `list(dir)` → `Promise<string[]>` (file names, sorted; an absent directory is
-empty).
+empty). `write` creates the directory; `remove` is a no-op when the file is
+absent. An optional `sync(dir, file)` is fsync.
 
-`write` creates the directory; `remove` is a no-op when the file is absent.
+The package root exports the platform's own — `node:fs/promises` on the
+server, OPFS in the browser — as those five functions, and:
+
+| Export | Notes |
+| --- | --- |
+| `open({ fsi })` | Any object with the five functions; the storage, its log, chain, keys and registry all go through it. `storage.fsi` is what was given (wrapped when `durable`) |
+| `open({ durable: true })` | Every write is followed by the backend's `sync`; a backend without one (OPFS, memory) logs `durable.noop` at debug |
+| `isFsi(value)` | Whether `value` has the five functions |
+| `createMemoryFsi()` | A backend in memory: `size`, `dump()`; two storages opened over one share it |
+| `loadKeys(base, { fsi })`, `new Blockchain(base, { fsi })`, `new OpLog(base, { fsi })` | The pieces take the backend too |
+
+`@alexify/syncom/idb` is the IndexedDB backend (see [Browser](../guide/browser)).
 
 ## wrpc adapter
 

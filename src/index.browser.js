@@ -8,7 +8,10 @@
 const chain = require('./chain.js');
 const crdt = require('./crdt.js');
 const crypto = require('./crypto.browser.js');
-const fsi = require('./fsi.browser.js');
+const { read, write, exists, remove, list } = require('./fsi.browser.js');
+const fsi = { read, write, exists, remove, list };
+const { isFsi, createMemoryFsi } = require('./backend.js');
+const backend = { isFsi, createMemoryFsi };
 const storage = require('./storage.js');
 const sync = require('./sync.js');
 const log = require('./log.js');
@@ -24,6 +27,7 @@ module.exports = {
   ...crdt,
   ...crypto,
   ...fsi,
+  ...backend,
   ...storage,
   ...sync,
   ...log,

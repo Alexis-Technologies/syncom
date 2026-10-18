@@ -13,6 +13,8 @@ const storage = await open({ path: 'data' });
 | --- | --- | --- |
 | `path` | `'syncom'` | Directory (or OPFS path) holding keys, chain, data and peers |
 | `name` | — | Alias for `path` |
+| `fsi` | `node:fs` / OPFS | The backend — any object with `read`, `write`, `exists`, `remove`, `list` (see [Backends](../reference/api#backends)) |
+| `durable` | `false` | fsync after every write, where the backend can (`node:fs`); OPFS and memory are as durable as they are |
 | `schema` | — | Entity definitions: collections, their validators and indexes ([see below](#collections)); `version` and `snapshot` ([see below](#schema-versions)) |
 | `validator` | — | Compiles entity schemas that are plain objects without `~standard` ([see below](#validation)) |
 | `getId` | `crypto.randomUUID()` | Id generator for `insert()`; sync or async ([see below](#custom-identifiers)) |

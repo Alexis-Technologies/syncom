@@ -14,8 +14,37 @@ export interface KeyPair {
 export function generateKeys(): Promise<KeyPair>;
 export function encrypt(data: unknown, publicKey: string): string;
 export function decrypt(data: string, privateKey: string): unknown;
-export function loadKeys(basePath: string): Promise<KeyPair>;
+export function loadKeys(basePath: string, options?: { fsi?: Fsi }): Promise<KeyPair>;
 
+// ---------------------------------------------------------------------------
+// Backends (src/backend.js, src/fsi.js, src/fsi.browser.js)
+
+/**
+ * The storage backend: five functions over "a directory and a file name".
+ * `node:fs` and OPFS are the defaults; `@alexify/syncom/idb` and
+ * `createMemoryFsi()` are two more; anything with these functions fits
+ * `open({ fsi })`.
+ */
+export interface Fsi {
+  read(dir: string, filename: string): Promise<string>;
+  /** Creates the directory. */
+  write(dir: string, filename: string, content: string): Promise<void>;
+  exists(dir: string, filename: string): Promise<boolean>;
+  /** A no-op when the file is absent. */
+  remove(dir: string, filename: string): Promise<void>;
+  /** File names, sorted; an absent directory is an empty listing. */
+  list(dir: string): Promise<string[]>;
+  /** fsync, where the backend has one; what `open({ durable: true })` calls after every write. */
+  sync?(dir: string, filename: string): Promise<void>;
+}
+
+/** Whether `value` has the five functions of the backend contract. */
+export function isFsi(value: unknown): value is Fsi;
+
+/** A backend in memory — shared by every storage opened over it, gone with the process. */
+export function createMemoryFsi(): Fsi & { readonly size: number; dump(): Record<string, string> };
+
+// The platform's own backend, as functions.
 export function read(dir: string, filename: string): Promise<string>;
 export function write(dir: string, filename: string, content: string): Promise<void>;
 export function exists(dir: string, filename: string): Promise<boolean>;
@@ -110,6 +139,7 @@ export interface OpLogOptions {
   retention?: { ops?: number; days?: number };
   logger?: Logger | false;
   telemetry?: SyncomTelemetryOptions;
+  fsi?: Fsi;
 }
 
 export interface OpLog {
@@ -257,7 +287,7 @@ export interface Blockchain {
 
 export interface BlockchainConstructor {
   readonly prototype: Blockchain;
-  new (basePath: string): Promise<Blockchain>;
+  new (basePath: string, options?: { fsi?: Fsi }): Promise<Blockchain>;
 }
 
 export const Blockchain: BlockchainConstructor;
@@ -527,6 +557,10 @@ export interface StorageHooks {
 export interface StorageOptions<S extends Schema = Schema> {
   path?: string;
   name?: string;
+  /** The backend; the platform's (`node:fs`, OPFS) when absent. */
+  fsi?: Fsi;
+  /** Call the backend's `sync` after every write (fsync). A backend without one logs at debug and is as durable as it is. */
+  durable?: boolean;
   schema?: S;
   /** Compiles entity schemas that are plain objects without `~standard`. */
   validator?: SchemaValidator;
@@ -754,6 +788,8 @@ export interface RecordEvents {
 }
 
 export interface Storage {
+  /** The backend every file goes through — the adapter given to `open()` (wrapped when `durable`), or the platform's. */
+  readonly fsi: Fsi;
   readonly schema: Schema | null;
   /** The schema version and snapshot hash this node runs, with `previous` when `schema.json` differed; `null` without a schema. */
   readonly schemaInfo: SchemaStatus | null;

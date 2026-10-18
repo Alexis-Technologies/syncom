@@ -1,6 +1,6 @@
 'use strict';
 
-const fsi = require('./fsi.browser.js');
+const defaultFsi = require('./fsi.browser.js');
 
 const PUBLIC_KEY_HEADER = '-----BEGIN PUBLIC KEY-----';
 const PUBLIC_KEY_FOOTER = '-----END PUBLIC KEY-----';
@@ -114,7 +114,7 @@ const decrypt = async (text, privateKey) => {
   return JSON.parse(new TextDecoder().decode(plain));
 };
 
-const loadKeys = async (basePath = 'keys') => {
+const loadKeys = async (basePath = 'keys', { fsi = defaultFsi } = {}) => {
   let publicKey, privateKey;
   // Both halves of the pair, or neither: a public.pem left behind without
   // its private.pem used to surface as an ENOENT from the second read.

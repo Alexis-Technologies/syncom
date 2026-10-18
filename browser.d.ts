@@ -13,6 +13,7 @@ import type { JSONSafe as JSONSafeValue } from './index.js';
 export type {
   JSONSafe,
   KeyPair,
+  Fsi,
   CrdtDelta,
   CrdtHistoryRecord,
   Block,
@@ -86,6 +87,8 @@ export {
   exists,
   remove,
   list,
+  isFsi,
+  createMemoryFsi,
   applyOp,
   mergeEntry,
   isAlive,

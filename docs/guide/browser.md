@@ -40,7 +40,9 @@ RSA-OAEP (SHA-256). Keys and ciphertext move between the platforms.
 **Storage is origin-private.** `fsi.browser.js` resolves paths against
 `navigator.storage.getDirectory()`, so `open({ path: 'data' })` creates a
 `data/` directory inside the origin's OPFS rather than on disk. It is
-per-origin and the browser may evict it.
+per-origin and the browser may evict it. Another backend goes in through
+`open({ fsi })` — `createMemoryFsi()` for a node that must not persist, or
+IndexedDB through `@alexify/syncom/idb` (see [Backends](../reference/api#backends)).
 
 **A browser node dials, it cannot host.** Its registry, log and cursors live
 in OPFS like everything else, so a reload resumes where it left off. See

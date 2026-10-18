@@ -12,6 +12,15 @@ section until the first publish; everything below lands there on release day.
 
 ### Added
 
+- **The backend is injected.** `open({ fsi })` takes any object with the
+  five functions of the contract (`read`, `write`, `exists`, `remove`,
+  `list`) and routes the records, the log, the chain, the keys and the
+  registry through it; `storage.fsi` is what the storage uses. `isFsi()`,
+  `createMemoryFsi()` (a backend in memory, for tests, SSR and benchmarks —
+  two storages opened over one share it), and `open({ durable: true })`:
+  every write followed by the backend's `sync` (fsync on `node:fs`; a
+  backend without one logs at debug). `loadKeys`, `Blockchain` and `OpLog`
+  take `{ fsi }` too.
 - **Reading across schema versions.** A record of an older version is read
   through a lens: `schema.migrations` (keyed by the version migrated to,
   storage-wide or per entity, `up(data, { entity, id, from, to })`), then

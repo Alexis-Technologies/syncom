@@ -31,4 +31,15 @@ const list = async (dir) => {
   return names.sort();
 };
 
-module.exports = { read, write, exists, remove, list };
+// fsync: what `open({ durable: true })` calls after every write. The OPFS
+// half has none — a closed writable is durable there.
+const sync = async (dir, filename) => {
+  const handle = await fs.open(path.join(dir, filename), 'r');
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+};
+
+module.exports = { read, write, exists, remove, list, sync };

@@ -1,25 +1,29 @@
 'use strict';
 
-const fsi = require('./fsi.js');
+const defaultFsi = require('./fsi.js');
 const { calculateHash } = require('./crypto.js');
+const { checkFsi } = require('./backend.js');
 
 const BLOCKCHAIN = '.blockchain.json';
 
 class Blockchain {
-  constructor(basePath) {
+  #fsi;
+
+  constructor(basePath, { fsi = defaultFsi } = {}) {
     this.path = basePath;
     this.tailHash = null;
+    this.#fsi = checkFsi(fsi, 'Blockchain');
     return this.#init();
   }
 
   async #init() {
-    const exists = await fsi.exists(this.path, BLOCKCHAIN);
+    const exists = await this.#fsi.exists(this.path, BLOCKCHAIN);
     if (!exists) {
       const block = { prev: '0', timestamp: Date.now(), data: {} };
       this.tailHash = await this.writeBlock(block);
       await this.writeChain();
     } else {
-      const raw = await fsi.read(this.path, BLOCKCHAIN);
+      const raw = await this.#fsi.read(this.path, BLOCKCHAIN);
       const chain = JSON.parse(raw);
       this.tailHash = chain.tailHash;
     }
@@ -28,7 +32,7 @@ class Blockchain {
 
   async writeChain() {
     const chain = { tailHash: this.tailHash };
-    await fsi.write(this.path, BLOCKCHAIN, JSON.stringify(chain));
+    await this.#fsi.write(this.path, BLOCKCHAIN, JSON.stringify(chain));
   }
 
   async addBlock(data) {
@@ -43,14 +47,14 @@ class Blockchain {
 
   async writeBlock(block) {
     const hash = await calculateHash(block);
-    await fsi.write(this.path, `${hash}.json`, JSON.stringify(block));
+    await this.#fsi.write(this.path, `${hash}.json`, JSON.stringify(block));
     return hash;
   }
 
   async readBlock(hash) {
-    const exists = await fsi.exists(this.path, `${hash}.json`);
+    const exists = await this.#fsi.exists(this.path, `${hash}.json`);
     if (!exists) throw new Error(`Block not found: ${hash}`);
-    const raw = await fsi.read(this.path, `${hash}.json`);
+    const raw = await this.#fsi.read(this.path, `${hash}.json`);
     return JSON.parse(raw);
   }
 
@@ -61,7 +65,7 @@ class Blockchain {
     while (currentHash) {
       // An unknown `from` (or a dangling `prev`) is an invalid chain, not an
       // exception: validate() answers a boolean for every input.
-      const known = await fsi.exists(this.path, `${currentHash}.json`);
+      const known = await this.#fsi.exists(this.path, `${currentHash}.json`);
       if (!known) return false;
       const block = await this.readBlock(currentHash);
       const expectedHash = await calculateHash(block);

@@ -9,7 +9,8 @@ const { applyOp, isAlive, isCounter, latestClock } = require('./ops.js');
 const { Clock, opKey, keyScope, vectorHas, vectorNext, vectorAdvance } = require('./vector.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
 const { normalizeSchema, createLens, project, unproject, foldSet } = require('./schema.js');
-const fsi = require('./fsi.js');
+const defaultFsi = require('./fsi.js');
+const { checkFsi, withSync } = require('./backend.js');
 const { createTelemetry, traced, now } = require('./telemetry.js');
 
 const NODE_FILE = 'node.json';
@@ -228,6 +229,7 @@ class Storage extends Emitter {
   #records = null;
   #sync = null;
   #cache = new Map();
+  #fsi;
   #schema = null;
   #entities = null;
   #version = null;
@@ -265,6 +267,15 @@ class Storage extends Emitter {
     this.#records = new Map();
     this.#logger = createLogger(options.logger);
     this.#otel = createTelemetry(options.telemetry);
+    // The backend: node:fs or OPFS by default, anything with the five
+    // functions when injected. `durable` wraps every write with the
+    // adapter's fsync, where it has one.
+    const fsi = checkFsi(options.fsi === undefined ? defaultFsi : options.fsi, 'open({ fsi })');
+    this.#fsi = fsi;
+    if (options.durable === true) {
+      if (typeof fsi.sync === 'function') this.#fsi = withSync(fsi);
+      else this.#logger.debug({ event: 'durable.noop' });
+    }
     // The schema is kept as given (`storage.schema`) and read once into the
     // entity definitions the write path consults: validators, id fields,
     // indexes. A malformed one is refused here, not at the first write.
@@ -300,13 +311,15 @@ class Storage extends Emitter {
   }
 
   async #init() {
-    this.#keys = await loadKeys(`${this.#path}/keys`);
-    this.#chain = await new Blockchain(`${this.#path}/blockchain`);
+    const fsi = this.#fsi;
+    this.#keys = await loadKeys(`${this.#path}/keys`, { fsi });
+    this.#chain = await new Blockchain(`${this.#path}/blockchain`, { fsi });
     this.#log = await new OpLog(this.#path, {
       ...this.#options.sync?.log,
       retention: this.#options.sync?.retention,
       logger: this.#logger,
       telemetry: this.#otel,
+      fsi,
     });
     // The clock picks up where the log left off: every stamp this node ever
     // logged is below what it will stamp next, whatever the wall clock says.
@@ -332,8 +345,8 @@ class Storage extends Emitter {
     const version = this.#version;
     const hash = this.#schemaHash;
     let stored = null;
-    if (await fsi.exists(this.#path, SCHEMA_FILE)) {
-      const raw = JSON.parse(await fsi.read(this.#path, SCHEMA_FILE));
+    if (await this.#fsi.exists(this.#path, SCHEMA_FILE)) {
+      const raw = JSON.parse(await this.#fsi.read(this.#path, SCHEMA_FILE));
       if (isPlainObject(raw) && Number.isInteger(raw.version)) {
         stored = { version: raw.version, hash: typeof raw.hash === 'string' ? raw.hash : null, migrated: raw.migrated };
       }
@@ -354,7 +367,7 @@ class Storage extends Emitter {
     // `migrated`: when this version first ran here — kept across a snapshot
     // change of the same version.
     const migrated = stored?.version === version && Number.isInteger(stored.migrated) ? stored.migrated : Date.now();
-    await fsi.write(this.#path, SCHEMA_FILE, JSON.stringify({ version, migrated, hash }));
+    await this.#fsi.write(this.#path, SCHEMA_FILE, JSON.stringify({ version, migrated, hash }));
   }
 
   /**
@@ -446,12 +459,12 @@ class Storage extends Emitter {
   // (one per scope) live in the log's vector, which survives compaction — so
   // a seq is durable the moment its op is appended, before anyone hears of it.
   async #loadIdentity() {
-    if (await fsi.exists(this.#path, NODE_FILE)) {
-      const raw = await fsi.read(this.#path, NODE_FILE);
+    if (await this.#fsi.exists(this.#path, NODE_FILE)) {
+      const raw = await this.#fsi.read(this.#path, NODE_FILE);
       this.#nodeId = JSON.parse(raw).id;
     } else {
       this.#nodeId = generateUUID();
-      await fsi.write(this.#path, NODE_FILE, JSON.stringify({ id: this.#nodeId }));
+      await this.#fsi.write(this.#path, NODE_FILE, JSON.stringify({ id: this.#nodeId }));
     }
   }
 
@@ -508,6 +521,11 @@ class Storage extends Emitter {
 
   get schema() {
     return this.#schema;
+  }
+
+  /** The backend every file of this storage goes through — the adapter given to `open()`, or the platform's. */
+  get fsi() {
+    return this.#fsi;
   }
 
   // The entity definition a record belongs to, by its `$type`.
@@ -616,12 +634,12 @@ class Storage extends Emitter {
   async #load(id) {
     if (this.#cache.has(id)) return this.#cache.get(id);
     const dataDir = `${this.#path}/data`;
-    const exists = await fsi.exists(dataDir, `${id}.json`);
+    const exists = await this.#fsi.exists(dataDir, `${id}.json`);
     if (!exists) {
       this.#cache.set(id, null);
       return null;
     }
-    const raw = await fsi.read(dataDir, `${id}.json`);
+    const raw = await this.#fsi.read(dataDir, `${id}.json`);
     const { data, meta, encrypted, block } = JSON.parse(raw);
     const isValid = await this.validate(id, data, block);
     if (!isValid) throw new Error(`Storage record ${id} is invalid`);
@@ -634,7 +652,7 @@ class Storage extends Emitter {
 
   async #writeEntry(id, entry, blockHash) {
     const stored = { data: entry.data, meta: entry.meta, encrypted: false, timestamp: Date.now(), block: blockHash };
-    await fsi.write(`${this.#path}/data`, `${id}.json`, JSON.stringify(stored));
+    await this.#fsi.write(`${this.#path}/data`, `${id}.json`, JSON.stringify(stored));
     this.#cache.set(id, { data: entry.data, meta: entry.meta, encrypted: false, block: blockHash });
   }
 
@@ -829,12 +847,12 @@ class Storage extends Emitter {
     const hash = await calculateHash(record);
     const blockHash = await this.#chain.addBlock({ id, hash });
     const entry = { data: record, meta: null, encrypted: true, timestamp: Date.now(), block: blockHash };
-    await fsi.write(`${this.#path}/data`, `${id}.json`, JSON.stringify(entry));
+    await this.#fsi.write(`${this.#path}/data`, `${id}.json`, JSON.stringify(entry));
     this.#cache.set(id, { data, meta: null, encrypted: true, block: blockHash });
   }
 
   async #removeEncrypted(id) {
-    await fsi.remove(`${this.#path}/data`, `${id}.json`);
+    await this.#fsi.remove(`${this.#path}/data`, `${id}.json`);
     this.#cache.set(id, null);
   }
 
@@ -903,7 +921,7 @@ class Storage extends Emitter {
 
   /** Every live record id — tombstones excluded, encrypted records included. */
   async list() {
-    const names = await fsi.list(`${this.#path}/data`);
+    const names = await this.#fsi.list(`${this.#path}/data`);
     const ids = [];
     for (const name of names) {
       if (!name.endsWith('.json')) continue;
@@ -1138,7 +1156,7 @@ class Storage extends Emitter {
    * `cursor` is the last id of the previous page; `null` back means done.
    */
   async snapshot({ cursor = null, limit = 500, scopes = null } = {}) {
-    const names = await fsi.list(`${this.#path}/data`);
+    const names = await this.#fsi.list(`${this.#path}/data`);
     const records = [];
     let last = cursor;
     for (const name of names) {

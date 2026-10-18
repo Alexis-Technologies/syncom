@@ -18,6 +18,8 @@ expectType<Promise<Storage>>(browser.open({ path: 'data', getId: () => 'id' }));
 expectType<Promise<Storage>>(browser.open({ path: 'data', telemetry: { api: {} } }));
 // The id generator is not part of the async asymmetry: sync in both halves.
 expectType<string>(browser.Storage.generateId());
+expectType<Promise<Storage>>(browser.open({ fsi: browser.createMemoryFsi(), durable: true }));
+expectType<boolean>(browser.isFsi(browser.createMemoryFsi()));
 expectType<'VALIDATION_FAILED'>(new browser.ValidationError('Post', []).code);
 declare const browserStorage: Storage;
 expectType<Promise<unknown>>(browserStorage.check('Post', {}));

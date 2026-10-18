@@ -21,7 +21,6 @@
 // Every node is both: a mesh is nodes dialing whichever nodes they can
 // reach, with ops relayed transitively and de-duplicated by version vector.
 
-const fsi = require('./fsi.js');
 const { Emitter } = require('./utils.js');
 const { packOps, unpackOps } = require('./ops.js');
 const { vectorHas, keyScope } = require('./vector.js');
@@ -108,6 +107,7 @@ class SyncManager extends Emitter {
   #saving = new Map();
   #otel;
   #hooks;
+  #fsi;
 
   constructor(storage, options = {}) {
     super();
@@ -115,15 +115,17 @@ class SyncManager extends Emitter {
     this.#options = options ?? {};
     this.#hooks = normalizeHooks(this.#options.hooks, SYNC_HOOKS, 'SyncManager');
     this.#otel = createTelemetry(storage.telemetry);
+    // The registry lives where the storage does: over its backend.
+    this.#fsi = storage.fsi;
     this.#path = `${storage.path}/${REMOTE}`;
     return this.#init();
   }
 
   async #init() {
-    const files = await fsi.list(this.#path);
+    const files = await this.#fsi.list(this.#path);
     for (const file of files) {
       if (!file.endsWith('.json')) continue;
-      const raw = await fsi.read(this.#path, file);
+      const raw = await this.#fsi.read(this.#path, file);
       const node = JSON.parse(raw);
       if (node && typeof node.url === 'string') this.#nodes.set(node.url, node);
     }
@@ -164,7 +166,7 @@ class SyncManager extends Emitter {
       remote: null,
     };
     this.#nodes.set(url, node);
-    await fsi.write(this.#path, fileName(url), JSON.stringify(node));
+    await this.#fsi.write(this.#path, fileName(url), JSON.stringify(node));
     notify(this, this.#storage.logger, 'node', { url, action: 'add' });
     if (this.#started) this.#connect(node);
   }
@@ -174,7 +176,7 @@ class SyncManager extends Emitter {
     if (!node) throw new Error(`Node with URL ${url} not found`);
     this.#nodes.delete(url);
     this.#disconnect(url);
-    await fsi.remove(this.#path, fileName(url));
+    await this.#fsi.remove(this.#path, fileName(url));
     notify(this, this.#storage.logger, 'node', { url, action: 'remove' });
   }
 
@@ -208,7 +210,7 @@ class SyncManager extends Emitter {
     const write = state.last.then(async () => {
       state.next = null;
       if (!this.#nodes.has(url)) return;
-      await fsi.write(this.#path, fileName(url), JSON.stringify(node));
+      await this.#fsi.write(this.#path, fileName(url), JSON.stringify(node));
     });
     state.next = write;
     state.last = write

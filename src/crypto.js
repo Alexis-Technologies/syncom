@@ -1,7 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
-const fsi = require('./fsi.js');
+const defaultFsi = require('./fsi.js');
 
 const calculateHash = (data) => {
   const block = JSON.stringify(data);
@@ -56,7 +56,7 @@ const decrypt = (text, privateKey) => {
   return JSON.parse(plain.toString());
 };
 
-const loadKeys = async (basePath) => {
+const loadKeys = async (basePath, { fsi = defaultFsi } = {}) => {
   let publicKey, privateKey;
   // Both halves of the pair, or neither: a public.pem left behind without
   // its private.pem used to surface as an ENOENT from the second read.

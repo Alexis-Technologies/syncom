@@ -346,9 +346,10 @@ the engine's own tests run on.
   than once; applying it again changes nothing.
 - **A node's own sequence never repeats.** The log is written before the op is
   announced, so a crash cannot mint two different ops with one number.
-- **No fsync.** Files are written with the platform's default durability; on
-  OPFS there is no rename either, so a torn write can only affect the newest,
-  unannounced batch.
+- **fsync is opt-in.** Files are written with the platform's default
+  durability; `open({ durable: true })` adds an fsync after every write on a
+  backend that has one (`node:fs`). On OPFS there is no rename either, so a
+  torn write can only affect the newest, unannounced batch.
 - **Encrypted records do not sync.** They are sealed for this node's key alone
   — see [Storage](./storage#encryption-at-rest).
 - **Chains diverge.** Each node's [chain](./chain) is its own audit log of what

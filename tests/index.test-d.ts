@@ -5,6 +5,7 @@ import type {
   Blockchain,
   CrdtDelta,
   EntityDefinition,
+  Fsi,
   KeyPair,
   Node,
   Reference,
@@ -24,6 +25,26 @@ expectType<string>(syncom.encrypt({ a: 1 }, 'pub'));
 expectType<unknown>(syncom.decrypt('cipher', 'priv'));
 expectType<Promise<KeyPair>>(syncom.loadKeys('keys'));
 expectError(syncom.calculateHash(() => 1));
+
+// backends
+expectAssignable<Fsi>(syncom.createMemoryFsi());
+expectType<number>(syncom.createMemoryFsi().size);
+expectType<Record<string, string>>(syncom.createMemoryFsi().dump());
+expectType<boolean>(syncom.isFsi({}));
+expectAssignable<StorageOptions>({ fsi: syncom.createMemoryFsi(), durable: true });
+expectAssignable<Fsi>({
+  read: async () => '',
+  write: async () => {},
+  exists: async () => true,
+  remove: async () => {},
+  list: async () => [],
+});
+expectError(syncom.open({ fsi: {} }));
+expectError(syncom.open({ durable: 'yes' }));
+expectType<Fsi>(storage.fsi);
+expectType<Promise<KeyPair>>(syncom.loadKeys('keys', { fsi: syncom.createMemoryFsi() }));
+expectType<Promise<Blockchain>>(new syncom.Blockchain('base', { fsi: syncom.createMemoryFsi() }));
+expectType<Promise<syncom.OpLog>>(new syncom.OpLog('base', { fsi: syncom.createMemoryFsi() }));
 
 // fsi
 expectType<Promise<string>>(syncom.read('dir', 'file.json'));

@@ -21,6 +21,7 @@ wrpc.js / wrpc.d.ts       the @alexify/syncom/wrpc subpath (src/wrpc.js)
 contracts.js / .d.ts      the @alexify/syncom/contracts subpath (src/contract.js) — never back in the barrel
 index.d.ts                the Node type surface (hand-written)
 browser.d.ts              re-exports index.d.ts, overrides the 3 async crypto fns
+src/backend.js            the fsi contract (isFsi/checkFsi), createMemoryFsi, withSync — no requires
 src/storage.js            Storage, Record, Collection — every write is an op
 src/schema.js             entity definitions, the injected validator (Standard Schema / ajv / compile), ValidationError
 src/ops.js                the record-level model: applyOp / mergeEntry / isAlive, packOps
@@ -112,6 +113,10 @@ docs/                     VitePress site
 - **Encrypted records are local.** `{ encrypted: true }` seals a record for
   this node's key; it produces no op and is excluded from snapshots. Do not
   route an encrypted entry through `applyOp`.
+- **fsi is injected.** `open({ fsi })` reaches storage, log, chain, keys and
+  the registry as `this.#fsi` (or the `fsi` parameter of `loadKeys`); the
+  module-level `require('./fsi.js')` is only the default. A new `fsi.` call
+  on the module object is a bug — it bypasses the adapter the caller gave.
 - **Validation is after `applyOp`, before `#log.append`.** An entity's
   validator (`src/schema.js`, no requires — it ships to the browser) sees
   the record as the op leaves it, under `idField` and without `$type`, and

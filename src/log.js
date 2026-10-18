@@ -23,7 +23,7 @@
 // unknown epoch, `since()` answers null — "I cannot resume you, take a
 // snapshot" — never a silent gap.
 
-const fsi = require('./fsi.js');
+const defaultFsi = require('./fsi.js');
 const { formatEventId, parseEventId, vectorAdvance } = require('./vector.js');
 const { createTelemetry, traced, now } = require('./telemetry.js');
 
@@ -58,12 +58,14 @@ class OpLog {
   #retention;
   #log;
   #otel;
+  #fsi;
   #droppedHeld = 0;
   #writes = Promise.resolve();
 
   constructor(basePath, options = {}) {
     this.#path = `${basePath}/log`;
     this.#openPath = `${this.#path}/${OPEN}`;
+    this.#fsi = options.fsi ?? defaultFsi;
     this.#rollAfter = options.rollAfter ?? DEFAULT_ROLL_AFTER;
     this.#retention = { ops: DEFAULT_RETENTION_OPS, ...options.retention };
     this.#log = options.logger ?? null;
@@ -72,8 +74,8 @@ class OpLog {
   }
 
   async #init() {
-    const hasIndex = await fsi.exists(this.#path, INDEX);
-    const index = hasIndex ? parseJson(await fsi.read(this.#path, INDEX)) : null;
+    const hasIndex = await this.#fsi.exists(this.#path, INDEX);
+    const index = hasIndex ? parseJson(await this.#fsi.read(this.#path, INDEX)) : null;
     if (index) {
       this.#epoch = index.epoch;
       this.#floor = index.floor ?? 1;
@@ -94,7 +96,7 @@ class OpLog {
 
   async #loadSegments(hasIndex) {
     const known = new Set(this.#segments.map((segment) => segment.name));
-    const names = await fsi.list(this.#path);
+    const names = await this.#fsi.list(this.#path);
     for (const name of names) {
       if (!name.startsWith('seg-') || known.has(name)) continue;
       // A segment the index does not know: rolled, then crashed before the
@@ -104,7 +106,7 @@ class OpLog {
     }
     this.#segments.sort((a, b) => a.from - b.from);
     for (const segment of this.#segments) {
-      const text = await fsi.read(this.#path, segment.name).catch(() => null);
+      const text = await this.#fsi.read(this.#path, segment.name).catch(() => null);
       const parsed = text === null ? null : parseJson(text);
       if (!parsed || !Array.isArray(parsed.entries)) {
         this.#log?.warn?.({ event: 'log.segment.unreadable', segment: segment.name });
@@ -122,14 +124,14 @@ class OpLog {
   }
 
   async #loadOpen() {
-    const names = await fsi.list(this.#openPath);
+    const names = await this.#fsi.list(this.#openPath);
     for (const name of names) {
-      const text = await fsi.read(this.#openPath, name).catch(() => null);
+      const text = await this.#fsi.read(this.#openPath, name).catch(() => null);
       const parsed = text === null ? null : parseJson(text);
       if (!parsed || !Array.isArray(parsed.entries)) {
         // Torn on the way down: the batch was never announced, drop it.
         this.#log?.warn?.({ event: 'log.open.unreadable', file: name });
-        await fsi.remove(this.#openPath, name);
+        await this.#fsi.remove(this.#openPath, name);
         continue;
       }
       this.#adopt(parsed.entries);
@@ -230,7 +232,7 @@ class OpLog {
       }
       const name = `${pad(entries[0].seq)}.json`;
       const started = this.#otel.enabled ? now() : 0;
-      await fsi.write(this.#openPath, name, JSON.stringify({ entries }));
+      await this.#fsi.write(this.#openPath, name, JSON.stringify({ entries }));
       if (started) this.#otel.recordAppend(now() - started);
       for (const entry of entries) this.#entries.push(entry);
       for (const op of ops) {
@@ -266,13 +268,13 @@ class OpLog {
   async #seal(entries) {
     const from = entries[0].seq;
     const name = segmentName(from);
-    await fsi.write(this.#path, name, JSON.stringify({ entries }));
+    await this.#fsi.write(this.#path, name, JSON.stringify({ entries }));
     this.#segments.push({ name, from, to: entries[entries.length - 1].seq, count: entries.length });
     const dropped = await this.#compact();
     await this.#writeIndex();
     const files = this.#openFiles;
     this.#openFiles = [];
-    for (const file of files) await fsi.remove(this.#openPath, file);
+    for (const file of files) await this.#fsi.remove(this.#openPath, file);
     return { dropped };
   }
 
@@ -296,7 +298,7 @@ class OpLog {
       }
       this.#entries = this.#entries.filter((entry) => entry.seq > oldest.to);
       this.#floor = oldest.to + 1;
-      await fsi.remove(this.#path, oldest.name);
+      await this.#fsi.remove(this.#path, oldest.name);
       dropped++;
     }
     return dropped;
@@ -311,7 +313,7 @@ class OpLog {
       segments: this.#segments,
       droppedHeld: this.#droppedHeld,
     };
-    await fsi.write(this.#path, INDEX, JSON.stringify(index));
+    await this.#fsi.write(this.#path, INDEX, JSON.stringify(index));
   }
 
   /** The entries held for a newer schema version, oldest first. */
