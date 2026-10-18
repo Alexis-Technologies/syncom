@@ -24,6 +24,7 @@ index.d.ts                the Node type surface (hand-written)
 browser.d.ts              re-exports index.d.ts, overrides the 3 async crypto fns
 src/backend.js            the fsi contract (isFsi/checkFsi), createMemoryFsi, withSync — no requires
 src/lock.js               exclusive open: Web Locks or lock.json, stale by pid or age — no requires
+src/catalog.js            the record catalog: live ids, collections, indexed values; index/catalog.json — no requires
 src/storage.js            Storage, Record, Collection — every write is an op
 src/schema.js             entity definitions, the injected validator (Standard Schema / ajv / compile), ValidationError
 src/ops.js                the record-level model: applyOp / mergeEntry / isAlive, packOps
@@ -115,6 +116,13 @@ docs/                     VitePress site
 - **Encrypted records are local.** `{ encrypted: true }` seals a record for
   this node's key; it produces no op and is excluded from snapshots. Do not
   route an encrypted entry through `applyOp`.
+- **The catalog is derived state, kept at one seam.** `#writeEntry` (both
+  write paths go through it), `#writeEncrypted` and `#removeEncrypted` are
+  the only places that `catalog.put`; it indexes the lensed view and never
+  fails a write (a throwing lens is logged and the raw data indexed).
+  `list()`/`hasRecord()` read it, `snapshot()` still scans `data/` (it needs
+  tombstones). A new way of changing a record's file must put too, or the
+  catalog lies until the next rebuild.
 - **`open()` is exclusive by default (`lock: 'fail'`).** A test that opens
   the same directory twice must `close()` the first storage or pass
   `lock: false`; `bench/storage.js` does the latter. Never weaken the

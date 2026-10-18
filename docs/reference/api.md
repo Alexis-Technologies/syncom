@@ -18,6 +18,8 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 (alias for `path`), `fsi` and `durable` (see [Backends](#backends)), `lock`
 (`'fail'` | `'wait'` | `false` — see
 [One instance per directory](../guide/storage#one-instance-per-directory)),
+`cache`, `integrity` and `catalog` (see
+[The catalog and the cache](../guide/storage#the-catalog-and-the-cache)),
 `schema` and `validator` (see
 [Collections](../guide/storage#collections)), `getId`, `logger`, `encrypted`,
 `sync` (see [Sync options](../guide/sync#options)), `telemetry` (see
@@ -33,7 +35,7 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 | `insert(data, options?)` | `Promise<string>` | Generates an id via `getId` (a UUID by default) and writes |
 | `get(id)` | `Promise<unknown>` | `null` when absent or deleted; verifies against the chain |
 | `has(id)` | `Promise<boolean>` | `false` for a tombstone |
-| `list()` | `Promise<string[]>` | Every live id |
+| `list()` | `Promise<string[]>` | Every live id, sorted — from the catalog, no I/O |
 | `check(entity, data)` | `Promise<unknown>` | Runs the entity's validator as a write would and returns its value; rejects with `ValidationError`; writes nothing |
 | `migrate({ entities, batch }?)` | `Promise<{ migrated, counters }>` | Rewrites records of an older schema version through the lens; idempotent (see [Reading across versions](../guide/storage#reading-across-versions)) |
 | `set(id, data, options?)` | `Promise<void>` | Replaces the record (a `write` op); keeps `$type` unless the data names the same |
@@ -46,8 +48,8 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 | `loadData(id)` | `Promise<unknown>` | Alias of `get()`; throws if the record no longer matches its block |
 | `validate(options?)` | `Promise<boolean>` | `{ last, from }`; no argument walks the whole chain |
 | `validate(id, data, blockHash)` | `Promise<boolean>` | One record against its block |
-| `getCachedData(id)` | `unknown \| null` | Synchronous cache peek |
-| `hasRecord(id)` | `boolean` | Whether the id is known to the cache |
+| `getCachedData(id)` | `unknown \| null` | Synchronous cache peek, raw (no lens) |
+| `hasRecord(id)` | `boolean` | Whether the id is a live record — from the catalog, no I/O |
 | `applyRemote(ops, { via, scopes, peer }?)` | `Promise<{ applied, skipped, duplicates, gaps }>` | Applies a peer's ops, in order per origin; `peer` is `{ url, node }` for the hooks |
 | `snapshot({ cursor, limit, scopes }?)` | `Promise<{ records, cursor, eventId, vector }>` | One page of state, tombstones included |
 | `mergeSnapshot(records, { via, from }?)` | `Promise<void>` | Joins a page (as `merge` ops of this node) |

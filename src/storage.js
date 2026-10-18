@@ -12,11 +12,14 @@ const { normalizeSchema, createLens, project, unproject, foldSet } = require('./
 const defaultFsi = require('./fsi.js');
 const { checkFsi, withSync } = require('./backend.js');
 const { acquireLock } = require('./lock.js');
+const { Catalog } = require('./catalog.js');
 const { createTelemetry, traced, now } = require('./telemetry.js');
 
 const NODE_FILE = 'node.json';
 const SCHEMA_FILE = 'schema.json';
 const GLOBAL_SCOPE = '*';
+const DEFAULT_CACHE = 5000;
+const DEFAULT_FLUSH_EVERY = 64;
 
 // The ops an entity's validator sees: the ones that leave a record for the
 // application to read. A `merge` joins a peer's state as it is, a `delete`
@@ -230,6 +233,10 @@ class Storage extends Emitter {
   #records = null;
   #sync = null;
   #cache = new Map();
+  #cacheMax = DEFAULT_CACHE;
+  #verify = true;
+  #catalog = null;
+  #flushEvery = DEFAULT_FLUSH_EVERY;
   #fsi;
   #lock = null;
   #schema = null;
@@ -281,6 +288,28 @@ class Storage extends Emitter {
       if (typeof fsi.sync === 'function') this.#fsi = withSync(fsi);
       else this.#logger.debug({ event: 'durable.noop' });
     }
+    // The cache keeps the last `cache.max` entries read or written (a live
+    // Record pins its own); `integrity: 'lazy'` trusts a record file on the
+    // cold read instead of re-verifying it against its block.
+    const max = options.cache?.max;
+    if (max !== undefined) {
+      if (!Number.isInteger(max) || max < 1) {
+        throw new TypeError('open({ cache }): cache.max must be a positive integer');
+      }
+      this.#cacheMax = max;
+    }
+    const { integrity = 'verify' } = options;
+    if (integrity !== 'verify' && integrity !== 'lazy') {
+      throw new TypeError("open({ integrity }): integrity must be 'verify' or 'lazy'");
+    }
+    this.#verify = integrity === 'verify';
+    const flushEvery = options.catalog?.flushEvery;
+    if (flushEvery !== undefined) {
+      if (!Number.isInteger(flushEvery) || flushEvery < 1) {
+        throw new TypeError('open({ catalog }): catalog.flushEvery must be a positive integer');
+      }
+      this.#flushEvery = flushEvery;
+    }
     // The schema is kept as given (`storage.schema`) and read once into the
     // entity definitions the write path consults: validators, id fields,
     // indexes. A malformed one is refused here, not at the first write.
@@ -288,6 +317,7 @@ class Storage extends Emitter {
     const normalized = normalizeSchema(schema, { validator: options.validator });
     this.#entities = normalized.entities;
     this.#schema = schema;
+    this.#catalog = new Catalog({ fsi: this.#fsi, path: this.#path, entities: normalized.entities });
     // A node with a schema stamps its version on every op it makes; one
     // without stamps nothing, and nothing in hello says what it runs.
     if (schema !== null) {
@@ -345,10 +375,80 @@ class Storage extends Emitter {
     this.#clock.observe(this.#log.latestTs);
     await this.#loadIdentity();
     await this.#loadSchema();
+    await this.#loadCatalog();
     await this.#replayTail();
     await this.#replayHeld();
     this.#sync = await new SyncManager(this, this.#options.sync);
     this.#initCollections();
+  }
+
+  // The catalog is derived from the records: the persisted one is reused
+  // when the log can say what changed since it was saved (those records are
+  // re-read), rebuilt from a scan of `data/` otherwise — a first open, a
+  // stamp from another epoch or below the floor, other indexes.
+  async #loadCatalog() {
+    const saved = await this.#catalog.load();
+    const tail = saved === null ? null : this.#log.since(saved.stamp);
+    if (tail === null) {
+      this.#logger.debug({ event: 'catalog.rebuild' });
+      for (const name of await this.#fsi.list(`${this.#path}/data`)) {
+        if (name.endsWith('.json')) await this.#index(name.slice(0, -5));
+      }
+      await this.#catalog.save(this.#log.lastEventId);
+      return;
+    }
+    const touched = new Set();
+    for (const { op } of tail) if (typeof op.id === 'string') touched.add(op.id);
+    for (const id of touched) await this.#index(id);
+    if (touched.size > 0) await this.#catalog.save(this.#log.lastEventId);
+  }
+
+  // Puts what the record `id` is now; a record that fails its integrity
+  // check is left out, like a replay leaves it alone.
+  async #index(id) {
+    let entry;
+    try {
+      entry = await this.#load(id);
+    } catch (error) {
+      this.#logger.warn({ event: 'catalog.skipped', id, err: error });
+      return;
+    }
+    this.#catalog.put(id, await this.#rowOf(id, entry));
+  }
+
+  // The catalog's view of an entry: what `put` takes. Derived state never
+  // fails a write: a lens that throws (a migration returning no object)
+  // indexes the raw data here and throws on the read, where it is reported.
+  async #rowOf(id, entry) {
+    if (entry === null) return null;
+    if (entry.encrypted) return { type: entry.data?.$type, v: null, encrypted: true };
+    if (!isAlive(entry)) return null;
+    let data = entry.data;
+    try {
+      data = await this.#view(id, entry);
+    } catch (error) {
+      this.#logger.warn({ event: 'catalog.lens', id, err: error });
+    }
+    return { type: entry.data.$type, v: entry.meta.v ?? null, data };
+  }
+
+  // The persisted catalog is written every `flushEvery` puts and at close;
+  // what lands in between is caught up from the log on the next open.
+  async #flushCatalog() {
+    if (this.#catalog.dirty >= this.#flushEvery) await this.#catalog.save(this.#log.lastEventId);
+  }
+
+  // The newest entries stay; a live Record pins its own. Absent ids are
+  // never cached — the catalog knows what exists.
+  #remember(id, entry) {
+    this.#cache.delete(id);
+    this.#cache.set(id, entry);
+    if (this.#cache.size <= this.#cacheMax) return;
+    for (const key of this.#cache.keys()) {
+      if (this.#cache.size <= this.#cacheMax) break;
+      if (this.#records.has(key)) continue;
+      this.#cache.delete(key);
+    }
   }
 
   // `schema.json` remembers the version (and the snapshot's hash) this
@@ -650,28 +750,35 @@ class Storage extends Emitter {
   // replicated.
 
   async #load(id) {
-    if (this.#cache.has(id)) return this.#cache.get(id);
+    const cached = this.#cache.get(id);
+    if (cached !== undefined) {
+      this.#remember(id, cached);
+      return cached;
+    }
     const dataDir = `${this.#path}/data`;
     const exists = await this.#fsi.exists(dataDir, `${id}.json`);
-    if (!exists) {
-      this.#cache.set(id, null);
-      return null;
-    }
+    if (!exists) return null;
     const raw = await this.#fsi.read(dataDir, `${id}.json`);
     const { data, meta, encrypted, block } = JSON.parse(raw);
-    const isValid = await this.validate(id, data, block);
-    if (!isValid) throw new Error(`Storage record ${id} is invalid`);
+    if (this.#verify) {
+      const isValid = await this.validate(id, data, block);
+      if (!isValid) throw new Error(`Storage record ${id} is invalid`);
+    }
     const entry = encrypted
       ? { data: await decrypt(data, this.#keys.privateKey), meta: null, encrypted: true, block }
       : { data, meta, encrypted: false, block };
-    this.#cache.set(id, entry);
+    this.#remember(id, entry);
     return entry;
   }
 
+  // The one seam where a record's file and its cached entry change, for the
+  // local path and a peer's batch alike — so the catalog follows here.
   async #writeEntry(id, entry, blockHash) {
     const stored = { data: entry.data, meta: entry.meta, encrypted: false, timestamp: Date.now(), block: blockHash };
     await this.#fsi.write(`${this.#path}/data`, `${id}.json`, JSON.stringify(stored));
-    this.#cache.set(id, { data: entry.data, meta: entry.meta, encrypted: false, block: blockHash });
+    const cached = { data: entry.data, meta: entry.meta, encrypted: false, block: blockHash };
+    this.#remember(id, cached);
+    this.#catalog.put(id, await this.#rowOf(id, cached));
   }
 
   // One chain block per applied batch: `records` maps every touched id to
@@ -840,6 +947,8 @@ class Storage extends Emitter {
     const blockHash = await this.#chain.addBlock({ id, hash, from: this.#log.formatId(position) });
     await this.#writeEntry(id, entry, blockHash);
 
+    await this.#flushCatalog();
+
     const alive = isAlive(entry);
     // afterWrite sees a durable op; whatever it does, the record views and
     // the `change` listeners (the relay among them) hear about the op.
@@ -866,12 +975,16 @@ class Storage extends Emitter {
     const blockHash = await this.#chain.addBlock({ id, hash });
     const entry = { data: record, meta: null, encrypted: true, timestamp: Date.now(), block: blockHash };
     await this.#fsi.write(`${this.#path}/data`, `${id}.json`, JSON.stringify(entry));
-    this.#cache.set(id, { data, meta: null, encrypted: true, block: blockHash });
+    this.#remember(id, { data, meta: null, encrypted: true, block: blockHash });
+    this.#catalog.put(id, { type: data?.$type, v: null, encrypted: true });
+    await this.#flushCatalog();
   }
 
   async #removeEncrypted(id) {
     await this.#fsi.remove(`${this.#path}/data`, `${id}.json`);
-    this.#cache.set(id, null);
+    this.#cache.delete(id);
+    this.#catalog.put(id, null);
+    await this.#flushCatalog();
   }
 
   async saveData(id, data, options = {}) {
@@ -917,8 +1030,9 @@ class Storage extends Emitter {
     return entry !== null && (entry.encrypted || isAlive(entry));
   }
 
+  /** Whether `id` is a live record here — answered from the catalog, no I/O. */
   hasRecord(id) {
-    return (this.#cache.has(id) && this.#cache.get(id) !== null) || this.#records.has(id);
+    return this.#catalog.has(id) || this.#records.has(id);
   }
 
   // The raw read: what `get` returns before its hooks. `swap` compares
@@ -937,17 +1051,9 @@ class Storage extends Emitter {
     return replaced === undefined ? data : replaced;
   }
 
-  /** Every live record id — tombstones excluded, encrypted records included. */
+  /** Every live record id, sorted — tombstones excluded, encrypted records included. From the catalog: no I/O. */
   async list() {
-    const names = await this.#fsi.list(`${this.#path}/data`);
-    const ids = [];
-    for (const name of names) {
-      if (!name.endsWith('.json')) continue;
-      const id = name.slice(0, -5);
-      const entry = await this.#load(id);
-      if (entry && (entry.encrypted || isAlive(entry))) ids.push(id);
-    }
-    return ids;
+    return this.#catalog.ids();
   }
 
   async set(id, data, options = {}) {
@@ -1151,6 +1257,7 @@ class Storage extends Emitter {
         if (adopted) await this.#log.advance(adopted);
         if (touched.size > 0) {
           await this.#persistBatch(touched, entries[0].seq, entries[entries.length - 1].seq);
+          await this.#flushCatalog();
         }
       }
       // afterApply sees a durable batch; whatever it does, the record views
@@ -1236,6 +1343,7 @@ class Storage extends Emitter {
     if (this.#closed) return;
     await this.#sync.stop();
     await this.#run(async () => {
+      await this.#catalog.save(this.#log.lastEventId);
       await this.#log.close();
     });
     this.#closed = true;

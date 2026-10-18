@@ -41,8 +41,9 @@ const ENTRIES = [
   // (the lens, migrate(), held ops) the raise to 22 KB. Moving smart
   // contracts to their own subpath gave ~0.4 KB back; the injected backend
   // (src/backend.js, durable writes) and the exclusive open (src/lock.js)
-  // spent it and earned the raise to 23 KB.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 23 },
+  // spent it and earned the raise to 23 KB; the record catalog
+  // (src/catalog.js, the bounded cache, integrity) the raise to 24.5 KB.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 24.5 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check

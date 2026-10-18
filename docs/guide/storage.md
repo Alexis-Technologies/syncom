@@ -16,6 +16,9 @@ const storage = await open({ path: 'data' });
 | `fsi` | `node:fs` / OPFS | The backend — any object with `read`, `write`, `exists`, `remove`, `list` (see [Backends](../reference/api#backends)) |
 | `durable` | `false` | fsync after every write, where the backend can (`node:fs`); OPFS and memory are as durable as they are |
 | `lock` | `'fail'` | One instance per directory: `'fail'` rejects a second `open()` (`code: 'LOCKED'`), `'wait'` waits, `false` leaves it to you ([see below](#one-instance-per-directory)) |
+| `cache` | `{ max: 5000 }` | How many entries stay in memory; a live `Record` pins its own ([see below](#the-catalog-and-the-cache)) |
+| `integrity` | `'verify'` | `'lazy'` trusts a record file on the cold read instead of re-verifying it against its block |
+| `catalog` | `{ flushEvery: 64 }` | How often the record catalog is persisted; the log catches up the rest |
 | `schema` | — | Entity definitions: collections, their validators and indexes ([see below](#collections)); `version` and `snapshot` ([see below](#schema-versions)) |
 | `validator` | — | Compiles entity schemas that are plain objects without `~standard` ([see below](#validation)) |
 | `getId` | `crypto.randomUUID()` | Id generator for `insert()`; sync or async ([see below](#custom-identifiers)) |
@@ -119,6 +122,26 @@ storage, say) or read-only. `close()` releases the lock; a crash releases it
 in the browser and leaves a stale file elsewhere, which the next open takes
 over. The lock is per machine — on a shared network filesystem, coordinate
 yourself and pass `lock: false`.
+
+### The catalog and the cache
+
+`list()` and `hasRecord()` answer from the **catalog**: every live record's
+id, collection and indexed field values, in memory, kept up to date by every
+write — local or a peer's — and persisted as `index/catalog.json` stamped
+with the log position it reflects (every `catalog.flushEvery` changes, and
+at `close()`). A reopen reads it back and re-reads only the records the log
+changed since the stamp; when the log cannot say — a first open, a stamp
+from another epoch or below the retention floor, other indexes — the
+catalog is rebuilt from one scan of `data/`. It is derived state: delete the
+file and the next open rebuilds it.
+
+The **cache** holds the last `cache.max` entries read or written, evicting
+the oldest; a record with a live `Record` is never evicted. `getCachedData()`
+reads it raw. A cold read re-verifies the record against the chain block
+that committed it; `integrity: 'lazy'` trusts the file instead — the choice
+for a browser rebuilding a large catalog, where that verification is one
+hash and two reads per record. `storage.validate(id, data, block)` is still
+there for a check on demand.
 
 ### Encryption at rest
 
@@ -406,6 +429,7 @@ data/
 ├── blockchain/    <hash>.json per block, .blockchain.json holds the tail
 ├── lock.json      { pid, id, since } — while an instance holds the directory (not with Web Locks)
 ├── schema.json    { version, migrated, hash } — the schema this directory last ran
+├── index/         catalog.json — the record catalog as of a log position (derived; rebuilt when missing)
 ├── data/          <id>.json per record: { data, meta, encrypted, timestamp, block }
 ├── log/           the operation log (see Sync)
 └── remote/        <url>.json per registered sync node

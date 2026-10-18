@@ -12,6 +12,17 @@ section until the first publish; everything below lands there on release day.
 
 ### Added
 
+- **The record catalog.** Every live record's id, collection and indexed
+  field values stay in memory (`src/catalog.js`), kept by every write and
+  persisted as `<path>/index/catalog.json` stamped with the log position it
+  reflects (every `catalog.flushEvery` changes, default 64, and at close);
+  a reopen re-reads only what the log changed since, or rebuilds from one
+  scan of `data/` when it cannot say. `list()` and `hasRecord()` answer from
+  it with no I/O — `list()` used to be four reads and a hash per record.
+  `cache: { max }` bounds the entry cache (default 5000, LRU, a live
+  `Record` pins its own; absent ids are no longer cached), and
+  `integrity: 'lazy'` skips the chain check on a cold read. Browser budget
+  raised 23 → 24.5 KB.
 - **One instance per directory.** `open()` holds the directory — Web Locks
   in the browser, `<path>/lock.json` with the pid elsewhere (stale once the
   process is gone, or after 30 minutes without a pid) — and a second

@@ -568,6 +568,12 @@ export interface StorageOptions<S extends Schema = Schema> {
    * `lock.json` with the pid otherwise (stale when its process is gone).
    */
   lock?: 'fail' | 'wait' | false;
+  /** The in-memory entry cache: the last `max` records read or written (default 5000); a live Record pins its own. */
+  cache?: { max?: number };
+  /** `'verify'` (default) re-checks a record against its chain block on a cold read; `'lazy'` trusts the file. */
+  integrity?: 'verify' | 'lazy';
+  /** The record catalog is persisted every `flushEvery` changes (default 64) and at close; the log catches up the rest. */
+  catalog?: { flushEvery?: number };
   schema?: S;
   /** Compiles entity schemas that are plain objects without `~standard`. */
   validator?: SchemaValidator;
@@ -833,6 +839,7 @@ export interface Storage {
   update(id: string, delta: unknown): Promise<void>;
   inc(id: string, key: string, value?: number): Promise<void>;
   swap(id: string, changes: unknown, prev: unknown): Promise<boolean>;
+  /** Every live id, sorted — from the catalog, no I/O. */
   list(): Promise<string[]>;
   /**
    * Runs `data` through an entity's validator the way a write would and
@@ -847,7 +854,9 @@ export interface Storage {
    */
   migrate(options?: { entities?: readonly string[]; batch?: number }): Promise<{ migrated: number; counters: number }>;
   record(id: string): Promise<Storage.StorageRecord>;
+  /** The raw data of a cached entry (no lens), `null` when not cached, absent or deleted. */
   getCachedData(id: string): unknown | null;
+  /** Whether `id` is a live record here — from the catalog, no I/O. */
   hasRecord(id: string): boolean;
   applyRemote(
     ops: readonly SyncOp[],

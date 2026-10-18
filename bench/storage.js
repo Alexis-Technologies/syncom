@@ -64,6 +64,33 @@ const main = async () => {
 
     await bench('has — existing id', () => storage.has(id));
     await bench('record — cached Record instance', () => storage.record(id));
+
+    // The catalog: list() and hasRecord() answer from memory however many
+    // records there are; a rebuild is the one scan, and only on an open
+    // whose catalog cannot be caught up from the log.
+    const many = 2_000;
+    for (let i = 0; i < many; i++) await storage.insert({ ...record, i });
+    await bench(`list — ${many} ids (catalog)`, () => storage.list(), { warmup: 5 });
+    await bench(`hasRecord — ${many} ids (catalog)`, () => storage.hasRecord(id), { warmup: 5 });
+    await storage.close();
+    await bench(
+      `open — catalog caught up from the log (${many} records)`,
+      async () => {
+        const reopened = await open({ path: root, lock: false });
+        await reopened.close();
+      },
+      { warmup: 1, measureMs: 2000 },
+    );
+    await fs.rm(path.join(root, 'index'), { recursive: true, force: true });
+    await bench(
+      `open — catalog rebuilt from a scan (${many} records, integrity lazy)`,
+      async () => {
+        const rebuilt = await open({ path: root, lock: false, integrity: 'lazy' });
+        await fs.rm(path.join(root, 'index'), { recursive: true, force: true });
+        await rebuilt.close();
+      },
+      { warmup: 1, measureMs: 2000 },
+    );
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
