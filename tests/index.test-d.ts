@@ -370,3 +370,19 @@ sync.on('peer', ({ schema }) => expectType<syncom.SchemaInfo | null | undefined>
 expectType<syncom.SyncUnit>(sync.unit({ authorize: (_context, hello) => hello.schema?.version === 2 }));
 expectType<syncom.SyncUnit>(sync.unit({ access: 'public', authorize: async () => true }));
 expectType<string>(sync.unit().hello.access);
+expectType<syncom.SyncUnit>(
+  sync.unit({
+    limits: { opsPerPush: 500, bytesPerPush: 1 << 20, opsPerSecond: 200 },
+    meta: { rateLimit: { limit: 5 } },
+  }),
+);
+expectType<Record<string, unknown> | undefined>(sync.unit().push.meta);
+expectError(sync.unit({ meta: 'x' }));
+expectError(sync.unit({ limits: { opsPerMinute: 1 } }));
+expectError(syncom.open({ sync: { sharedLog: {} } }));
+expectType<boolean>(syncom.isSharedLog({}));
+expectAssignable<syncom.SharedLog>({
+  append: async () => '1.1',
+  read: () => ({ ready: Promise.resolve(), [Symbol.asyncIterator]: async function* () {} }),
+  parseId: (text) => (typeof text === 'string' ? text : null),
+});

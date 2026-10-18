@@ -321,6 +321,27 @@ const unit = storage.sync.unit({
 | `tracked` | built in | wrpc's `tracked()`; the built-in produces the same shape |
 | `pageSize` | `500` | Records per snapshot page |
 | `pageBytes` | `4 MiB` | Above this a page is sent inline rather than streamed |
+| `limits` | — | Per-peer push limits: `opsPerPush`, `bytesPerPush` (the JSON length of a page) and `opsPerSecond` — see below |
+| `meta` | — | Copied onto all four procedures, for a wrpc `onRequest` hook to read as `context.procedure.meta` |
+
+`limits` are the host's own, checked in `push` — the one place that knows the
+ops and the bytes of a page, whatever transport carried it. A page over
+`opsPerPush` or `bytesPerPush` is refused with code **413**; a peer whose ops
+exceed `opsPerSecond` — a token bucket per peer, refilled at that rate and
+holding one second's worth — with **429**. A refusal is a code, not a
+hang-up: the dialer reports it through its `error` event (`error.code`),
+drops that outbox, and offers what the host still lacks at its next
+handshake. A dialer whose `pageSize` is above the host's `opsPerPush` will
+never get a page through — keep the two in step. The `syncom.ops.limited`
+metric counts refusals by reason.
+
+```js
+const unit = storage.sync.unit({
+  access: 'session',
+  limits: { opsPerPush: 500, bytesPerPush: 1 << 20, opsPerSecond: 200 },
+  meta: { rateLimit: { limit: 200, windowMs: 1000 } }, // for the host's own onRequest hook
+});
+```
 
 See [wrpc transport](./wrpc) for mounting it.
 

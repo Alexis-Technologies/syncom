@@ -18,6 +18,8 @@ const { HookError } = require('./hooks.js');
 const hooks = { HookError };
 const { ValidationError } = require('./schema.js');
 const schema = { ValidationError };
+const { isSharedLog } = require('./shared-log.js');
+const sharedLog = { isSharedLog };
 
 module.exports = {
   ...chain,
@@ -31,4 +33,5 @@ module.exports = {
   ...ops,
   ...hooks,
   ...schema,
+  ...sharedLog,
 };

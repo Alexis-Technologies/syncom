@@ -47,6 +47,10 @@ export type {
   SyncEvents,
   PeerView,
   SyncUnitOptions,
+  SyncLimits,
+  SharedLog,
+  SharedLogEntry,
+  SharedLogRead,
   SyncProcedure,
   SyncUnit,
   Collections,
@@ -108,6 +112,7 @@ export {
   open,
   HookError,
   ValidationError,
+  isSharedLog,
 } from './index.js';
 
 // Web Crypto: async where node:crypto is sync.

@@ -43,8 +43,10 @@ const ENTRIES = [
   // (src/backend.js, durable writes) and the exclusive open (src/lock.js)
   // spent it and earned the raise to 23 KB; the record catalog
   // (src/catalog.js, the bounded cache, integrity) the raise to 24.5 KB;
-  // queries (src/query.js, unique keys, watch) the raise to 26.5 KB.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 26.5 },
+  // queries (src/query.js, unique keys, watch) the raise to 26.5 KB; the
+  // actor slot, hosting limits and the reserved shared-log contract the
+  // raise to 27.5 KB.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 27.5 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check

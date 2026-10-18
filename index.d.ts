@@ -463,6 +463,8 @@ export interface SyncOptions {
   log?: { rollAfter?: number };
   /** Lifecycle hooks — see SyncHooks. */
   hooks?: SyncHooks;
+  /** Reserved for the broker-backed hub mode; refused in this version. See SharedLog. */
+  sharedLog?: never;
 }
 
 /** What a write hook sees: the op being made, and the record it lands on. */
@@ -660,12 +662,50 @@ export interface SyncUnitOptions {
   tracked?: (id: string, data: unknown) => unknown;
   pageSize?: number;
   pageBytes?: number;
+  /** Per-peer push limits: a page over `opsPerPush`/`bytesPerPush` is refused with 413, a peer over `opsPerSecond` with 429. */
+  limits?: SyncLimits;
+  /** Copied onto all four procedures — what a wrpc `onRequest` hook reads as `context.procedure.meta`. */
+  meta?: Record<string, unknown>;
+}
+
+export interface SyncLimits {
+  opsPerPush?: number;
+  /** The JSON length of a page's `ops`. */
+  bytesPerPush?: number;
+  /** A token bucket per peer, refilled at this rate and holding one second's worth. */
+  opsPerSecond?: number;
 }
 
 export interface SyncProcedure {
   access: string;
   handler: (...args: any[]) => unknown;
+  meta?: Record<string, unknown>;
 }
+
+/**
+ * @experimental Reserved: the contract of a log shared by several hub
+ * processes, for a hub mode after this version — structurally wrpc's
+ * `BrokerLog`, so a broker's `.log` fits with no adapter.
+ */
+export interface SharedLogEntry {
+  id: string;
+  value: string;
+  headers: Record<string, string>;
+}
+
+export interface SharedLogRead extends AsyncIterable<SharedLogEntry> {
+  readonly ready: Promise<void>;
+}
+
+export interface SharedLog {
+  name?: string;
+  append(topic: string, value: string | Uint8Array, options?: { headers?: Record<string, string>; key?: string }): Promise<string>;
+  read(topic: string, options?: { after?: string | null; from?: 'latest' | 'earliest'; signal?: AbortSignal | null }): SharedLogRead;
+  parseId(text: unknown): string | null;
+}
+
+/** Whether `value` has the three functions of the shared-log contract. */
+export function isSharedLog(value: unknown): value is SharedLog;
 
 /** What a host mounts: `defineRouter({ syncom: storage.sync.unit() })`. */
 export interface SyncUnit {

@@ -55,6 +55,25 @@ const coded = (message, code) => {
   return error;
 };
 
+const LIMIT_KEYS = ['opsPerPush', 'bytesPerPush', 'opsPerSecond'];
+
+// `unit({ limits })`: each a positive number, unknown keys refused.
+const normalizeLimits = (limits) => {
+  if (limits === undefined || limits === null) return null;
+  if (typeof limits !== 'object') throw new TypeError('unit({ limits }): limits must be an object');
+  const normalized = {};
+  for (const key of Object.keys(limits)) {
+    if (!LIMIT_KEYS.includes(key)) throw new TypeError(`unit({ limits }): unknown limit '${key}'`);
+    const value = limits[key];
+    if (value === undefined) continue;
+    if (!Number.isFinite(value) || value <= 0) {
+      throw new TypeError(`unit({ limits }): ${key} must be a positive number`);
+    }
+    normalized[key] = value;
+  }
+  return normalized;
+};
+
 // The part of a vector that concerns `scopes`: global keys (`origin`) and
 // the `origin@scope` keys of the scopes asked for.
 const scopedVector = (vector, scopes) => {
@@ -115,6 +134,10 @@ class SyncManager extends Emitter {
     this.#options = options ?? {};
     this.#hooks = normalizeHooks(this.#options.hooks, SYNC_HOOKS, 'SyncManager');
     this.#otel = createTelemetry(storage.telemetry);
+    // Reserved for the broker-backed hub mode (see src/shared-log.js).
+    if (this.#options.sharedLog !== undefined) {
+      throw new TypeError('sync.sharedLog is reserved: the shared-log hub mode is not in this version');
+    }
     // The registry lives where the storage does: over its backend.
     this.#fsi = storage.fsi;
     this.#path = `${storage.path}/${REMOTE}`;
@@ -672,10 +695,19 @@ class SyncManager extends Emitter {
       tracked = null,
       pageSize = DEFAULT_PAGE_SIZE,
       pageBytes = DEFAULT_PAGE_BYTES,
+      meta,
     } = options;
+    const limits = normalizeLimits(options.limits);
+    if (meta !== undefined && (typeof meta !== 'object' || meta === null || Array.isArray(meta))) {
+      throw new TypeError('unit({ meta }): meta must be an object');
+    }
     const storage = this.#storage;
     const wakers = this.#wakers;
     const track = tracked ?? ((id, data) => ({ [TRACKED]: true, id: String(id), data }));
+    // `meta` rides on every procedure: what a wrpc `onRequest` hook reads
+    // as `context.procedure.meta` — a hub-wide policy (rate limits, audit)
+    // stays the host's, and the unit stays a plain object.
+    const procedure = (handler) => (meta === undefined ? { access, handler } : { access, handler, meta });
 
     const peerOf = (context) => {
       const state = context?.client?.data?.syncom;
@@ -684,106 +716,127 @@ class SyncManager extends Emitter {
     };
 
     return {
-      hello: {
-        access,
-        handler: async (context, args) => {
-          if (!args || typeof args.node !== 'string') throw coded('hello needs a node id', 400);
-          if (args.version !== undefined && args.version !== PROTOCOL) {
-            throw coded(`Unsupported protocol ${args.version}`, 400);
+      hello: procedure(async (context, args) => {
+        if (!args || typeof args.node !== 'string') throw coded('hello needs a node id', 400);
+        if (args.version !== undefined && args.version !== PROTOCOL) {
+          throw coded(`Unsupported protocol ${args.version}`, 400);
+        }
+        if (args.node === storage.nodeId) throw coded('A node cannot sync with itself (copied data directory?)', 409);
+        if (authorize && !(await authorize(context, args))) throw coded('Not authorized to sync', 403);
+        const scopes = Array.isArray(args.scopes) ? args.scopes.filter((s) => typeof s === 'string') : [GLOBAL_SCOPE];
+        const schema = schemaOf(args.schema);
+        if (context?.client) {
+          context.client.data ??= {};
+          context.client.data.syncom = { node: args.node, scopes, vector: args.vector ?? {}, schema };
+          if (typeof context.client.join === 'function') {
+            for (const scope of scopes) context.client.join(`syncom:${scope}`);
           }
-          if (args.node === storage.nodeId) throw coded('A node cannot sync with itself (copied data directory?)', 409);
-          if (authorize && !(await authorize(context, args))) throw coded('Not authorized to sync', 403);
-          const scopes = Array.isArray(args.scopes) ? args.scopes.filter((s) => typeof s === 'string') : [GLOBAL_SCOPE];
-          const schema = schemaOf(args.schema);
-          if (context?.client) {
-            context.client.data ??= {};
-            context.client.data.syncom = { node: args.node, scopes, vector: args.vector ?? {}, schema };
-            if (typeof context.client.join === 'function') {
-              for (const scope of scopes) context.client.join(`syncom:${scope}`);
-            }
+        }
+        notify(this, storage.logger, 'hello', { node: args.node, scopes, schema });
+        this.#drift(schema, { url: null, node: args.node });
+        return {
+          node: storage.nodeId,
+          vector: storage.vector,
+          epoch: storage.log.epoch,
+          version: PROTOCOL,
+          schema: schemaOf(storage.schemaInfo),
+        };
+      }),
+
+      push: procedure(async (context, args) => {
+        const state = peerOf(context);
+        const { node, scopes } = state;
+        const ops = unpackOps(args?.ops);
+        if (limits !== null) this.#limit(state, args, ops, limits);
+        // `url` is null: a host does not dial, so it has no url for the peer.
+        const result = await storage.applyRemote(ops, { via: context.client, scopes, peer: { url: null, node } });
+        return { vector: storage.vector, ...result };
+      }),
+
+      snapshot: procedure(async (context, args) => {
+        peerOf(context);
+        const page = await storage.snapshot({
+          cursor: args?.cursor ?? null,
+          limit: pageSize,
+          scopes: args?.scopes ?? null,
+        });
+        const client = context?.client;
+        const canStream = client && client.binary !== false && typeof client.createStream === 'function';
+        if (!canStream || page.records.length === 0) return page;
+        // NDJSON, serialized first because a wrpc stream declares its size
+        // up front; a page is bounded, so that buffer is too.
+        let text = '';
+        for (const record of page.records) text += `${JSON.stringify(record)}\n`;
+        const bytes = new TextEncoder().encode(text);
+        if (bytes.length > pageBytes) return page;
+        const stream = client.createStream('syncom/snapshot', bytes.length);
+        // The opening packet is already out; writing in this tick would
+        // race the caller's chance to attach a consumer.
+        queueMicrotask(() => {
+          stream.write(bytes);
+          stream.end();
+        });
+        return { id: stream.id, size: bytes.length, cursor: page.cursor, eventId: page.eventId, vector: page.vector };
+      }),
+
+      changes: procedure(async function* (context, args, subscription = {}) {
+        const { node } = peerOf(context);
+        const { lastEventId, signal } = subscription;
+        const scopes = Array.isArray(args?.scopes) ? args.scopes : null;
+        let cursor = lastEventId ?? undefined;
+        for (;;) {
+          if (signal?.aborted) return;
+          const entries = storage.log.since(cursor, { scopes, limit: pageSize });
+          if (entries === null) {
+            // Cannot resume: another epoch, or compacted past the cursor.
+            yield { bootstrap: true };
+            return;
           }
-          notify(this, storage.logger, 'hello', { node: args.node, scopes, schema });
-          this.#drift(schema, { url: null, node: args.node });
-          return {
-            node: storage.nodeId,
-            vector: storage.vector,
-            epoch: storage.log.epoch,
-            version: PROTOCOL,
-            schema: schemaOf(storage.schemaInfo),
-          };
-        },
-      },
-
-      push: {
-        access,
-        handler: async (context, args) => {
-          const { node, scopes } = peerOf(context);
-          const ops = unpackOps(args?.ops);
-          // `url` is null: a host does not dial, so it has no url for the peer.
-          const result = await storage.applyRemote(ops, { via: context.client, scopes, peer: { url: null, node } });
-          return { vector: storage.vector, ...result };
-        },
-      },
-
-      snapshot: {
-        access,
-        handler: async (context, args) => {
-          peerOf(context);
-          const page = await storage.snapshot({
-            cursor: args?.cursor ?? null,
-            limit: pageSize,
-            scopes: args?.scopes ?? null,
-          });
-          const client = context?.client;
-          const canStream = client && client.binary !== false && typeof client.createStream === 'function';
-          if (!canStream || page.records.length === 0) return page;
-          // NDJSON, serialized first because a wrpc stream declares its size
-          // up front; a page is bounded, so that buffer is too.
-          let text = '';
-          for (const record of page.records) text += `${JSON.stringify(record)}\n`;
-          const bytes = new TextEncoder().encode(text);
-          if (bytes.length > pageBytes) return page;
-          const stream = client.createStream('syncom/snapshot', bytes.length);
-          // The opening packet is already out; writing in this tick would
-          // race the caller's chance to attach a consumer.
-          queueMicrotask(() => {
-            stream.write(bytes);
-            stream.end();
-          });
-          return { id: stream.id, size: bytes.length, cursor: page.cursor, eventId: page.eventId, vector: page.vector };
-        },
-      },
-
-      changes: {
-        access,
-        handler: async function* (context, args, subscription = {}) {
-          const { node } = peerOf(context);
-          const { lastEventId, signal } = subscription;
-          const scopes = Array.isArray(args?.scopes) ? args.scopes : null;
-          let cursor = lastEventId ?? undefined;
-          for (;;) {
-            if (signal?.aborted) return;
-            const entries = storage.log.since(cursor, { scopes, limit: pageSize });
-            if (entries === null) {
-              // Cannot resume: another epoch, or compacted past the cursor.
-              yield { bootstrap: true };
-              return;
-            }
-            if (entries.length === 0) {
-              await waitFor(wakers, signal);
-              continue;
-            }
-            const last = entries[entries.length - 1].seq;
-            const ops = [];
-            for (const { op } of entries) if (op.origin !== node && op.from !== node) ops.push(op);
-            cursor = storage.log.formatId(last);
-            // Labelled even when every op was the peer's own echo: the
-            // position still moves, and a resume must not replay it.
-            yield track(cursor, { ops: packOps(ops), eventId: cursor });
+          if (entries.length === 0) {
+            await waitFor(wakers, signal);
+            continue;
           }
-        },
-      },
+          const last = entries[entries.length - 1].seq;
+          const ops = [];
+          for (const { op } of entries) if (op.origin !== node && op.from !== node) ops.push(op);
+          cursor = storage.log.formatId(last);
+          // Labelled even when every op was the peer's own echo: the
+          // position still moves, and a resume must not replay it.
+          yield track(cursor, { ops: packOps(ops), eventId: cursor });
+        }
+      }),
     };
+  }
+
+  // Per-peer push limits, the one place that knows the ops and the bytes:
+  // a page over `opsPerPush` or `bytesPerPush` is 413, a peer over
+  // `opsPerSecond` is 429 — a token bucket in its state, refilled at that
+  // rate, holding one second's worth. Codes, not a hang-up: the dialer
+  // reports them and recomputes from the vector at its next hello.
+  #limit(state, args, ops, limits) {
+    const { opsPerPush, bytesPerPush, opsPerSecond } = limits;
+    if (opsPerPush !== undefined && ops.length > opsPerPush) {
+      this.#otel.recordLimited('ops');
+      throw coded(`Push of ${ops.length} ops exceeds opsPerPush ${opsPerPush}`, 413);
+    }
+    if (bytesPerPush !== undefined) {
+      const bytes = JSON.stringify(args?.ops ?? null).length;
+      if (bytes > bytesPerPush) {
+        this.#otel.recordLimited('bytes');
+        throw coded(`Push of ${bytes} bytes exceeds bytesPerPush ${bytesPerPush}`, 413);
+      }
+    }
+    if (opsPerSecond !== undefined) {
+      const at = Date.now();
+      const bucket = (state.bucket ??= { tokens: opsPerSecond, at });
+      bucket.tokens = Math.min(opsPerSecond, bucket.tokens + ((at - bucket.at) / 1000) * opsPerSecond);
+      bucket.at = at;
+      if (ops.length > bucket.tokens) {
+        this.#otel.recordLimited('rate');
+        throw coded(`Rate limited: ${ops.length} ops over opsPerSecond ${opsPerSecond}`, 429);
+      }
+      bucket.tokens -= ops.length;
+    }
   }
 }
 

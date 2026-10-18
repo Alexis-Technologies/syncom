@@ -356,6 +356,7 @@ test('containment: a hostile tracer never breaks the work', async (t) => {
       otel.recordMalformed();
       otel.recordRejected('register');
       otel.recordConflict('unique');
+      otel.recordLimited('ops');
       otel.recordLag(Date.now());
       otel.recordLag('not a stamp');
       otel.recordReplay(1);
@@ -447,6 +448,20 @@ test('Storage telemetry', async (t) => {
     assert.strictEqual(named('syncom.commit').length, 1, 'only the insert has a span');
     const commits = await points('syncom.commits');
     assert.strictEqual(point(commits, { 'syncom.op.type': 'merge', 'syncom.result': 'noop' }).value, 1);
+  });
+
+  await t.test('a push a hosted unit refuses by its limits is counted', async (t2) => {
+    const { meter, points } = createMetrics();
+    const { packOps } = require('../src/ops.js');
+    const { storage } = await openTemp(t2, { telemetry: { meter } });
+    const link = new MemoryLink(storage.sync.unit({ access: 'public', limits: { opsPerPush: 1 } }));
+    await link.call('syncom/hello', { node: 'peer', version: 1 });
+    const ops = packOps([
+      remoteOp('peer', 1, 'write', 'r1', { data: {} }),
+      remoteOp('peer', 2, 'write', 'r2', { data: {} }),
+    ]);
+    await assert.rejects(() => link.call('syncom/push', { ops }), { code: 413 });
+    assert.strictEqual(point(await points('syncom.ops.limited'), { 'syncom.reason': 'ops' }).value, 1);
   });
 
   await t.test('a unique key a peer’s op leaves shared is counted', async (t2) => {

@@ -26,6 +26,7 @@ src/backend.js            the fsi contract (isFsi/checkFsi), createMemoryFsi, wi
 src/lock.js               exclusive open: Web Locks or lock.json, stale by pid or age — no requires
 src/catalog.js            the record catalog: live ids, collections, indexed values; index/catalog.json — no requires
 src/query.js              compileQuery (Mango predicate), compareRows, Cursor — reads through storage[SOURCE]
+src/shared-log.js         isSharedLog — the reserved broker-log contract (wrpc BrokerLog shape), no consumer yet
 src/storage.js            Storage, Record, Collection — every write is an op
 src/schema.js             entity definitions, the injected validator (Standard Schema / ajv / compile), ValidationError
 src/ops.js                the record-level model: applyOp / mergeEntry / isAlive, packOps

@@ -133,7 +133,7 @@ Extends `Emitter`. See [Sync](../guide/sync).
 | `stop()` | `Promise<void>` | Closes every link |
 | `sync(url?)` | `Promise<Array<{ url, pushed }>>` | Pushes what the peers lack now |
 | `peers()` | `Array<{ url, node, connected, subscribed, cursor, lastSync, pending }>` | Live view |
-| `unit({ access, authorize, tracked, pageSize, pageBytes }?)` | router unit | The procedures a host mounts: `hello`, `push`, `snapshot`, `changes` |
+| `unit({ access, authorize, tracked, pageSize, pageBytes, limits, meta }?)` | router unit | The procedures a host mounts: `hello`, `push`, `snapshot`, `changes` — see [Hosting](../guide/sync#hosting) |
 
 Properties: `storage`, `started`.
 
@@ -165,6 +165,12 @@ something of its own. Exported from the package root.
 ### `isSyncLink(value)`
 
 Structural check for the [link contract](../guide/sync#the-link-contract).
+
+### `isSharedLog(value)`
+
+Structural check for the reserved `SharedLog` contract (`append`, `read`,
+`parseId` — the shape of wrpc's `BrokerLog`): what a broker-backed hub mode
+will take after this version. `open({ sync: { sharedLog } })` is refused.
 
 ## Operation log and model
 

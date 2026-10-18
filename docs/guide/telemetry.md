@@ -93,6 +93,7 @@ appears on one.
 | `syncom.ops.received` | Counter | `{op}` | `syncom.outcome` (`applied` / `duplicate` / `gap` / `malformed`) |
 | `syncom.ops.rejected` | Counter | `{op}` | `syncom.reason` (`register` / `counter` / `validation`) |
 | `syncom.conflicts` | Counter | `{conflict}` | `syncom.kind` (`unique`) |
+| `syncom.ops.limited` | Counter | `{push}` | `syncom.reason` (`ops` / `bytes` / `rate`) |
 | `syncom.replication.lag` | Histogram | `ms` | — |
 | `syncom.push.ops` | Histogram | `{op}` | `syncom.push.reason`, `syncom.result` (`ok` / `error`) |
 | `syncom.bootstraps` | Counter | `{bootstrap}` | `syncom.result` |

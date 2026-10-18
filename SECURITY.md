@@ -58,8 +58,9 @@ These are the areas where a report matters most, roughly in order:
 - Node URLs and tokens are stored as given, in plaintext, under
   `<path>/remote/`; the RSA private key sits unprotected in `<path>/keys/`.
   Both are documented behaviour, not findings.
-- Denial of service by a peer that is allowed to sync (a flood of ops, a huge
-  snapshot): the limits are the transport's and the operator's.
+- Denial of service by a peer that is allowed to sync below the host's own
+  `unit({ limits })` (ops and bytes per push, ops per second), or through a
+  huge snapshot: those limits are the transport's and the operator's.
 - Anything requiring an attacker to already have write access to the storage
   directory, except where it defeats `validate` (see Chain integrity above).
 

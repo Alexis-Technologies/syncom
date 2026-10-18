@@ -12,6 +12,16 @@ section until the first publish; everything below lands there on release day.
 
 ### Added
 
+- **Hosting limits.** `storage.sync.unit({ limits: { opsPerPush,
+  bytesPerPush, opsPerSecond } })` refuses a page over the first two with
+  code 413 and a peer over the third (a token bucket per peer) with 429 —
+  codes the dialer reports and recovers from at its next handshake, never a
+  hang-up; the `syncom.ops.limited` metric counts them. `unit({ meta })` is
+  copied onto all four procedures for a wrpc `onRequest` hook to read.
+  `isSharedLog()` and the `SharedLog` type reserve the contract of the
+  broker-backed hub mode (the shape of wrpc's `BrokerLog`);
+  `open({ sync: { sharedLog } })` is refused until that mode exists.
+  Browser budget raised 26.5 → 27.5 KB.
 - **Who wrote it.** `open({ actor })` — a string, or a function asked per
   write — and a per-write `{ actor }` on `insert`, `set`, `update`, `inc`,
   `delete`, `swap`, `saveData`, `Record.save/inc/delete`, the collection's
