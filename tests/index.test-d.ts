@@ -46,14 +46,8 @@ expectType<Promise<Block>>(chain.readBlock('hash'));
 expectType<Promise<boolean>>(chain.validate({ last: 10 }));
 expectType<Promise<boolean>>(chain.validate());
 
-// contracts
-declare const storage: Storage;
-const reader = new syncom.DataReader(storage);
-expectType<Promise<unknown>>(reader.get('id'));
-expectType<Promise<string>>(syncom.SmartContract.save('name', chain, async () => 1));
-expectType<Promise<syncom.SmartContract>>(syncom.SmartContract.load('hash', { storage, chain }));
-
 // storage
+declare const storage: Storage;
 expectType<Promise<Storage>>(syncom.open());
 expectType<Promise<Storage>>(syncom.open({ path: 'data' }));
 // A schema turns entity names into typed collections on the storage object.

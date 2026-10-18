@@ -185,6 +185,10 @@ section until the first publish; everything below lands there on release day.
 
 ### Changed (breaking)
 
+- **Smart contracts moved to `@alexify/syncom/contracts`.** `SmartContract`
+  and `DataReader` (and their types) are no longer on the package root:
+  `SmartContract.load` runs code from the chain, and a process that never
+  imports the subpath — a hub — never does.
 - An entity definition is `{ schema?, idField?, validate?, index?, unique?,
   fields? }` and any other key is a `TypeError` at `open()`; a legacy field
   map (`Post: { title: 'string' }`) goes under `fields`. A `schema` with a

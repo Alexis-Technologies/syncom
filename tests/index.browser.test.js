@@ -48,11 +48,12 @@ test('browser barrel', async (t) => {
     return hash.then((value) => assert.match(value, /^[0-9a-f]{64}$/));
   });
 
-  await t.test('crdt and contract halves are shared, not duplicated', () => {
+  await t.test('the crdt half is shared, not duplicated; contracts are a subpath, not here', () => {
     assert.strictEqual(browser.diff, node.diff);
     assert.strictEqual(browser.merge, node.merge);
     assert.strictEqual(browser.apply, node.apply);
-    assert.strictEqual(browser.SmartContract, node.SmartContract);
+    assert.strictEqual('SmartContract' in browser, false);
+    assert.strictEqual('DataReader' in node, false);
   });
 
   await t.test('SyncManager is shared: one registry over fsi in both halves', () => {

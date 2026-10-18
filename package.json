@@ -24,6 +24,10 @@
       "types": "./wrpc.d.ts",
       "default": "./wrpc.js"
     },
+    "./contracts": {
+      "types": "./contracts.d.ts",
+      "default": "./contracts.js"
+    },
     "./package.json": "./package.json"
   },
   "directories": {
@@ -120,6 +124,8 @@
     "browser.d.ts",
     "wrpc.js",
     "wrpc.d.ts",
+    "contracts.js",
+    "contracts.d.ts",
     "src/",
     "LICENSE",
     "README.md",

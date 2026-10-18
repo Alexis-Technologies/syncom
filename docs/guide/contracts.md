@@ -5,8 +5,13 @@ loaded back by that hash, and run against a read-only view of storage. It is a
 way to make the code that produced a record as auditable as the record itself.
 
 ```js
-const { SmartContract, DataReader } = require('@alexify/syncom');
+const { SmartContract, DataReader } = require('@alexify/syncom/contracts');
 ```
+
+Contracts are a **subpath**, not part of the package root: `SmartContract.load`
+reconstructs a stored procedure with `new Function`, so a process that never
+imports `@alexify/syncom/contracts` — a hub that only replicates, say — never
+executes a block's code (see [Security](https://github.com/Alexis-Technologies/syncom/blob/main/SECURITY.md)).
 
 ## Saving
 

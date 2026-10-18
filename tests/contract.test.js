@@ -4,7 +4,8 @@ const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert');
 const syncom = require('..');
-const { SmartContract, DataReader, Blockchain } = syncom;
+const { SmartContract, DataReader } = require('../contracts.js');
+const { Blockchain } = syncom;
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 
 test('Contract module', async (t) => {
@@ -98,7 +99,7 @@ test('Contract module', async (t) => {
         result: args.input * 2,
       });
 
-      const hash = await syncom.SmartContract.save('test-contract', blockchain, testProc);
+      const hash = await SmartContract.save('test-contract', blockchain, testProc);
       assert.strictEqual(typeof hash, 'string');
       assert.strictEqual(hash.length, 64);
 

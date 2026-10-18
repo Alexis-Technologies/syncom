@@ -262,49 +262,7 @@ export interface BlockchainConstructor {
 
 export const Blockchain: BlockchainConstructor;
 
-export interface ContractContext {
-  storage: Storage;
-  chain: Blockchain;
-}
-
-export interface ContractBlock {
-  type: 'smart contract';
-  name: string;
-  source: string;
-}
-
-export interface ErrorBlock {
-  contract: string;
-  args: unknown;
-  error: string;
-  timestamp: number;
-}
-
-export type ContractExecuteArgs = { id: string } & Record<string, unknown>;
-
-export type ContractProcedure = (
-  reader: DataReader,
-  args: ContractExecuteArgs,
-) => unknown | Promise<unknown>;
-
-export class DataReader {
-  constructor(storage: Storage);
-  get(id: string): Promise<unknown>;
-}
-
-export class SmartContract {
-  constructor(name: string, proc: ContractProcedure, context: ContractContext);
-  readonly name: string;
-
-  execute(args: ContractExecuteArgs): Promise<unknown>;
-
-  static save(
-    name: string,
-    chain: Blockchain,
-    proc: ContractProcedure,
-  ): Promise<string>;
-  static load(hash: string, context: ContractContext): Promise<SmartContract>;
-}
+// Smart contracts live in the `@alexify/syncom/contracts` subpath (contracts.d.ts).
 
 // ---------------------------------------------------------------------------
 // Schema (src/schema.js)

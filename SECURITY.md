@@ -17,12 +17,15 @@ Credit is given unless you ask otherwise.
 
 These are the areas where a report matters most, roughly in order:
 
-- **Smart contracts** (`src/contract.js`). `SmartContract.load` reconstructs a
-  stored procedure with `new Function` and runs it in your process. Anything
-  that can append a `smart contract` block to a chain you load from can
-  therefore execute arbitrary code. This is the sharpest surface in the
-  library; treat a chain as trusted input, and report anything that widens the
-  gap between "can write a block" and "can run code".
+- **Smart contracts** (`src/contract.js`, the `@alexify/syncom/contracts`
+  subpath). `SmartContract.load` reconstructs a stored procedure with
+  `new Function` and runs it in your process. Anything that can append a
+  `smart contract` block to a chain you load from can therefore execute
+  arbitrary code. This is the sharpest surface in the library; treat a chain
+  as trusted input, and report anything that widens the gap between "can
+  write a block" and "can run code". The package root never imports the
+  subpath: a node that only stores and replicates — a hub — executes no
+  block's code, whatever a peer's chain holds.
 - **Chain integrity** (`src/chain.js`, `calculateHash`). The whole tamper-
   evidence claim rests on blocks hashing to what they are filed under and on
   `validate` walking `prev` honestly. A way to mutate a record or block and

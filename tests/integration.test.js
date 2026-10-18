@@ -4,6 +4,7 @@ const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert');
 const syncom = require('..');
+const { SmartContract } = require('../contracts.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 
 test('Integration tests', async (t) => {
@@ -24,7 +25,7 @@ test('Integration tests', async (t) => {
         };
       };
 
-      const contract = new syncom.SmartContract('counter-contract', contractProc, { storage, chain: blockchain });
+      const contract = new SmartContract('counter-contract', contractProc, { storage, chain: blockchain });
 
       const result1 = await contract.execute({ id: 'counter-1' });
       assert.strictEqual(result1.count, 1);

@@ -57,5 +57,5 @@ features:
     linkText: Browser
   - icon: 📦
     title: Zero runtime dependencies
-    details: Nothing is installed alongside it. The browser bundle is under 14 KB min+gzip, and CI fails the build if that budget is exceeded.
+    details: Nothing is installed alongside it. The browser bundle is under 22 KB min+gzip, and CI fails the build if that budget is exceeded.
 ---

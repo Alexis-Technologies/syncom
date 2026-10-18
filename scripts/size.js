@@ -38,13 +38,18 @@ const ENTRIES = [
   // normalized to one shape, validation in the write and apply paths) the
   // raise to 20 KB; schema versions (the `v` slot, `meta.v`, schema.json,
   // hello.schema and drift) the raise to 20.5 KB; reading across versions
-  // (the lens, migrate(), held ops) the raise to 22 KB.
+  // (the lens, migrate(), held ops) the raise to 22 KB. Moving smart
+  // contracts to their own subpath gave ~0.4 KB back; the budget stays.
   { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 22 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
   // guards it too.
   { label: 'wrpc adapter — browser (@alexify/syncom/wrpc)', entry: 'wrpc.js', platform: 'browser', budget: 2 },
+  // Smart contracts: off the main entry on purpose (a `new Function` over
+  // chain data), so a node that never imports the subpath never pays for it
+  // — in bytes or in attack surface.
+  { label: 'contracts — browser (@alexify/syncom/contracts)', entry: 'contracts.js', platform: 'browser', budget: 1 },
 ];
 
 // A browser entry has to be self-contained: no node builtins, and no packages

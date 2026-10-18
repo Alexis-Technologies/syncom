@@ -1,7 +1,8 @@
 'use strict';
 
+// Smart contracts are deliberately not here: `@alexify/syncom/contracts` is
+// the subpath, so a process that never imports it never runs a block's code.
 const chain = require('./chain.js');
-const contract = require('./contract.js');
 const crdt = require('./crdt.js');
 const crypto = require('./crypto.js');
 const fsi = require('./fsi.js');
@@ -17,7 +18,6 @@ const schema = { ValidationError };
 
 module.exports = {
   ...chain,
-  ...contract,
   ...crdt,
   ...crypto,
   ...fsi,

@@ -1,8 +1,10 @@
 # API reference
 
-Everything below is exported from the package root. The browser build exports
+Everything below is exported from the package root, except two subpaths: the
+wrpc adapter, [`@alexify/syncom/wrpc`](#wrpc-adapter), and the smart contracts,
+[`@alexify/syncom/contracts`](#contracts-subpath). The browser build exports
 the same names — see [Browser](../guide/browser) for the three signatures that
-differ. The wrpc adapter is a separate subpath, [`@alexify/syncom/wrpc`](#wrpc-adapter).
+differ.
 
 ```js
 const syncom = require('@alexify/syncom');
@@ -195,7 +197,14 @@ Properties: `path`, `tailHash`. A block is `{ prev, timestamp, data }`.
 SHA-256 over `JSON.stringify(data)`, hex-encoded. Synchronous in Node.js,
 `Promise<string>` in the browser.
 
-## Contracts
+## Contracts (subpath)
+
+```js
+const { SmartContract, DataReader } = require('@alexify/syncom/contracts');
+```
+
+Off the package root on purpose: `SmartContract.load` runs code from the
+chain, and a process that never imports the subpath never does.
 
 ### `SmartContract`
 
