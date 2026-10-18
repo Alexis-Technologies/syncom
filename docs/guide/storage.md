@@ -44,6 +44,7 @@ await storage.inc(id, 'views', 1);        // add to a counter field
 await storage.set(id, { title: 'Final' }); // replace wholesale — status and views are gone
 await storage.list();                     // every live id
 await storage.delete(id);
+await storage.purge(id);                  // forget it for good — see below
 await storage.close();                    // stop replication, seal the log
 ```
 
@@ -68,6 +69,31 @@ which is how two writers avoid clobbering each other:
 const ok = await storage.swap(id, { hits: 2 }, { hits: 1 });
 // ok === false if hits was no longer 1 — nothing was written
 ```
+
+### Purge
+
+`delete()` leaves a tombstone, and the record's history stays in the log —
+that is what lets a peer that was away catch up. `purge(id)` is the other
+thing: the record is gone for good. It is a `purge` op, which wins over
+every other op at any stamp (a later write does not revive it, nor does a
+concurrent one on another node), and a **scrub** of every entry of the id
+in this node's log — their `data`, `meta`, `key` and `value` are stripped,
+in memory and in the files, with the position, origin and stamp kept so the
+vector and a resuming peer are unaffected. A peer that receives the purge
+scrubs its own log the same way, and so does any peer that receives
+anything else about that id afterwards. The chain keeps hashes only. A
+purged record is listed nowhere, reads as `null`, and a `Record` of it reads
+`null` too.
+
+```js
+await storage.purge(id);          // nothing of it left here
+await storage.purge(id, { actor: 'dpo' });
+```
+
+Two limits. Scrubbing rewrites a log file in place — no backend has a
+rename — so a crash in the middle tears it, and a peer resuming through it
+bootstraps instead; `purge()` is idempotent, so run it again. And what a
+peer that never comes back holds is theirs.
 
 ### Custom identifiers
 

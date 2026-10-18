@@ -12,6 +12,15 @@ section until the first publish; everything below lands there on release day.
 
 ### Added
 
+- **Purge.** `storage.purge(id)` forgets a record for good: a `purge` op
+  (the 7th op type, `meta.purged`) that wins over every other op at any
+  stamp and that nothing later revives, plus `OpLog.scrub(id)` — every entry
+  of the id stripped of its payload in memory and in the files
+  (`LogEntry.scrubbed`), position and stamp kept. A peer that receives the
+  purge, or anything else about the id afterwards, scrubs its own log the
+  same way. A scrub rewrites files in place; a crash mid-way tears one,
+  which a resuming peer answers with a bootstrap. Browser budget raised
+  27.5 → 28 KB.
 - **Hosting limits.** `storage.sync.unit({ limits: { opsPerPush,
   bytesPerPush, opsPerSecond } })` refuses a page over the first two with
   code 413 and a peer over the third (a token bucket per peer) with 429 —

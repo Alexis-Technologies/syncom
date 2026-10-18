@@ -944,7 +944,7 @@ class Storage extends Emitter {
       let data;
       if (type === 'write') data = payload.data;
       else if (type === 'set') data = { ...(current?.data ?? {}), ...payload.data };
-      else if (type === 'delete') data = null;
+      else if (type === 'delete' || type === 'purge') data = null;
       else throw new Error(`Record ${id} is encrypted; ${type} needs a replicated record`);
       if (data === null) await this.#removeEncrypted(id);
       else await this.#writeEncrypted(id, data);
@@ -1146,6 +1146,17 @@ class Storage extends Emitter {
     this.#records.delete(id);
   }
 
+  /**
+   * Forgets a record for good: a `purge` op (which no later write revives)
+   * and a scrub of every entry of the id from this node's log — peers do
+   * the same when it reaches them. The chain holds hashes only. Idempotent.
+   */
+  async purge(id, { actor } = {}) {
+    await this[COMMIT]('purge', id, {}, { actor });
+    await this.#log.scrub(id);
+    this.#records.delete(id);
+  }
+
   async update(id, delta, { actor } = {}) {
     if (!(await this.has(id))) throw new Error(`Record ${id} not found`);
     if (!isPlainObject(delta)) throw new TypeError('update() takes a plain object');
@@ -1235,6 +1246,7 @@ class Storage extends Emitter {
       let adopted = null;
       let skipped = null;
       let held = null;
+      let purged = null;
       let duplicates = 0;
       let gaps = 0;
       for (const op of ops) {
@@ -1327,6 +1339,9 @@ class Storage extends Emitter {
         vectorAdvance(vector, op);
         accepted.push(op);
         this.#otel.recordLag(op.ts);
+        // A purge, and anything that lands on a purged record, is scrubbed
+        // from this log too, once the batch is durable.
+        if (entry.meta.purged) (purged ??= new Set()).add(op.id);
         if (!changed) continue;
         // A unique key the op leaves shared with another record: applied —
         // the op is in the peer's log already — and reported; the
@@ -1349,6 +1364,7 @@ class Storage extends Emitter {
           await this.#persistBatch(touched, entries[0].seq, entries[entries.length - 1].seq);
           await this.#flushCatalog();
         }
+        if (purged) for (const id of purged) await this.#log.scrub(id);
       }
       // afterApply sees a durable batch; whatever it does, the record views
       // and the listeners (the relay among them) hear about every op.

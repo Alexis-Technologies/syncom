@@ -43,6 +43,7 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 | `inc(id, key, value = 1, { actor }?)` | `Promise<void>` | Adds to a counter field (an `inc` op); throws on a register field |
 | `swap(id, changes, prev, { actor }?)` | `Promise<boolean>` | CAS — `false`, and no write, on mismatch |
 | `delete(id, { actor }?)` | `Promise<void>` | Leaves a tombstone |
+| `purge(id, { actor }?)` | `Promise<void>` | Forgets the record for good: a `purge` op and a scrub of its log entries, here and on every peer (see [Purge](../guide/storage#purge)) |
 | `record(id)` | `Promise<Record>` | Cached per id |
 | `saveData(id, data, options?)` | `Promise<void>` | `{ encrypted: true }` seals the record for this node only; `{ actor }` names the writer |
 | `loadData(id)` | `Promise<unknown>` | Alias of `get()`; throws if the record no longer matches its block |
@@ -185,6 +186,7 @@ will take after this version. `open({ sync: { sharedLog } })` is refused.
 | `append(ops, { skipped, held }?)` | `Promise<LogEntry[]>` — entries with their seqs, once on disk; `skipped` ops are flagged, `held` ones with the version they wait for |
 | `held()` | `LogEntry[]` — the entries held for a newer schema version |
 | `droppedHeld`, `resetDroppedHeld()` | Held entries compaction dropped since the last reset |
+| `scrub(id)` | `Promise<number>` — strips the payload of every entry of `id` (`scrubbed: true`), in memory and on disk |
 | `since(eventId, { scopes, limit }?)` | `LogEntry[]` after the id, or `null` when it cannot be resumed |
 | `advance(vector)` | Adopts a vector (after a snapshot) |
 | `tail()` | The unsealed entries a reopen replays |

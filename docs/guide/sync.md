@@ -40,6 +40,7 @@ in the log:
 | `set` | `update()`, `swap()`, `record.save()` | Replaces the listed fields; last writer wins per field |
 | `inc` | `inc()`, `record.inc()` | Adds to a counter field |
 | `delete` | `delete()`, `record.delete()` | Leaves a tombstone; a newer write revives the record |
+| `purge` | `purge()` | Erases the record for good: wins at any stamp, nothing later lands, and every entry of the id is scrubbed from the log (see [Purge](./storage#purge)) |
 | `merge` | a snapshot page being joined | Joins a whole entry (see [Bootstrap](#bootstrap)) |
 | `advance` | a snapshot being joined | Records which ops the joined state already covers |
 
@@ -377,6 +378,10 @@ the engine's own tests run on.
   torn write can only affect the newest, unannounced batch.
 - **Encrypted records do not sync.** They are sealed for this node's key alone
   — see [Storage](./storage#encryption-at-rest).
+- **A purge forgets, a scrub tears.** `purge()` strips an id's entries from
+  the log in place (there is no rename); a crash mid-scrub leaves a torn
+  file, which a resuming peer answers with a bootstrap. Idempotent: run it
+  again.
 - **Chains diverge.** Each node's [chain](./chain) is its own audit log of what
   it applied, in the order it applied it. It is not a consensus.
 - **No signatures.** Trust rests on `authorize`, the token and the transport

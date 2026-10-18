@@ -60,7 +60,7 @@ export type ClockStamp = readonly [number, string];
 /** The highest per-origin sequence number a node has applied. */
 export type VersionVector = { readonly [origin: string]: number };
 
-export type SyncOpType = 'write' | 'set' | 'inc' | 'delete' | 'merge' | 'advance';
+export type SyncOpType = 'write' | 'set' | 'inc' | 'delete' | 'merge' | 'advance' | 'purge';
 
 export interface SyncOp {
   origin: string;
@@ -95,6 +95,8 @@ export interface EntryMeta {
   counters: { [field: string]: { [origin: string]: readonly [number, number, number] } };
   /** The schema version of the last whole-record write (or of the `set` that created the entry). */
   v?: number;
+  /** The stamp of a `purge`: the record is gone for good, whatever lands later. */
+  purged?: ClockStamp | null;
 }
 
 export interface Entry {
@@ -134,6 +136,8 @@ export interface LogEntry {
   skipped?: true;
   /** The schema version the op waits for (`ahead: 'hold'`). */
   held?: number;
+  /** The payload was scrubbed (a purge): `data`, `meta`, `key` and `value` are gone. */
+  scrubbed?: true;
 }
 
 export interface OpLogOptions {
@@ -161,6 +165,8 @@ export interface OpLog {
   /** Held entries compaction dropped since the last reset — lost for good. */
   readonly droppedHeld: number;
   resetDroppedHeld(): Promise<void>;
+  /** Strips the payload of every entry of `id`, in memory and on disk; resolves to how many. */
+  scrub(id: string): Promise<number>;
   since(eventId: string | null | undefined, options?: { scopes?: readonly string[] | null; limit?: number }): LogEntry[] | null;
   advance(vector: VersionVector): Promise<void>;
   tail(): LogEntry[];
@@ -895,6 +901,8 @@ export interface Storage {
   get(id: string): Promise<unknown>;
   set(id: string, data: unknown, options?: StorageDataOptions): Promise<void>;
   delete(id: string, options?: WriteOptions): Promise<void>;
+  /** Forgets the record for good: a `purge` op no later write revives, and a scrub of its entries from the log — here and on every peer it reaches. */
+  purge(id: string, options?: WriteOptions): Promise<void>;
   update(id: string, delta: unknown, options?: WriteOptions): Promise<void>;
   inc(id: string, key: string, value?: number, options?: WriteOptions): Promise<void>;
   swap(id: string, changes: unknown, prev: unknown, options?: WriteOptions): Promise<boolean>;

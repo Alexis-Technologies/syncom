@@ -23,6 +23,10 @@
 //                 a newer schema lenses the record through. A `set` that
 //                 creates the entry takes its op's `v`; a later `set`, `inc`
 //                 or `delete` leaves it; a merge takes the higher one.
+//   purged      — the stamp of a `purge`: the record is gone for good. It
+//                 wins over every other op at any stamp (a purge is a right
+//                 to be forgotten, not a race), the entry holds no data, and
+//                 nothing but another purge or a merge touches it again.
 //
 // Precondition, enforced by Storage: ops from ONE origin are applied in seq
 // order. Counters rely on it (a skipped seq would be lost, not reordered);
@@ -42,6 +46,7 @@ const cloneEntry = (entry) => {
   for (const field in entry.meta.counters) counters[field] = { ...entry.meta.counters[field] };
   const meta = { clock: { ...entry.meta.clock }, base: entry.meta.base, deleted: entry.meta.deleted, counters };
   if (entry.meta.v !== undefined) meta.v = entry.meta.v;
+  if (entry.meta.purged !== undefined) meta.purged = entry.meta.purged;
   return { data: { ...entry.data }, meta };
 };
 
@@ -82,6 +87,7 @@ const normalizeMeta = (meta) => {
     counters: isPlainObject(meta.counters) ? meta.counters : {},
   };
   if (Number.isInteger(meta.v)) normalized.v = meta.v;
+  if (Array.isArray(meta.purged)) normalized.purged = meta.purged;
   return normalized;
 };
 
@@ -91,8 +97,8 @@ const normalizeMeta = (meta) => {
 // node already has and is dropped as stale. Takes raw peer-shaped meta too.
 const latestClock = (meta) => {
   if (!isPlainObject(meta)) return null;
-  const { clock, base, deleted, counters } = normalizeMeta(meta);
-  let latest = maxClock(base, deleted);
+  const { clock, base, deleted, counters, purged } = normalizeMeta(meta);
+  let latest = maxClock(maxClock(base, deleted), purged ?? null);
   for (const field in clock) {
     if (Array.isArray(clock[field])) latest = maxClock(latest, clock[field]);
   }
@@ -161,12 +167,37 @@ const applyFields = (entry, fields, stamp, delta, rejected) => {
  * register/counter rule refused. Idempotent: applying an op twice, or an op
  * older than what the entry already reflects, changes nothing.
  */
+// Everything the entry held, gone: the purge, and a merge that meets one.
+const erase = (entry, stamp, delta) => {
+  const { meta, data } = entry;
+  for (const field of Object.keys(data)) delta[field] = undefined;
+  entry.data = {};
+  meta.clock = {};
+  meta.counters = {};
+  // Canonical: whatever came before, a purged entry looks the same, so two
+  // nodes that saw the purge and a write in either order hold one meta.
+  meta.purged = maxClock(meta.purged ?? null, stamp);
+  meta.base = meta.purged;
+  meta.deleted = meta.purged;
+};
+
 const applyOp = (previous, op) => {
   const entry = previous ? cloneEntry(previous) : createEntry();
   const { meta } = entry;
   const stamp = [op.ts, op.origin];
   const delta = {};
   const rejected = [];
+
+  // A purged record takes nothing more — not a newer write, not a revival.
+  if (meta.purged && op.type !== 'purge' && op.type !== 'merge') {
+    return { entry, changed: false, delta, rejected };
+  }
+  if (op.type === 'purge') {
+    erase(entry, stamp, delta);
+    const before = previous ? previous.meta.purged : undefined;
+    const changed = before === undefined || compareClock(meta.purged, before) > 0;
+    return { entry, changed, delta, rejected };
+  }
 
   if (op.type === 'set') {
     if (isPlainObject(op.data)) {
@@ -238,10 +269,11 @@ const applyOp = (previous, op) => {
   return { entry, changed, delta, rejected };
 };
 
-// Alive unless a tombstone stands and nothing newer than it has landed.
+// Alive unless purged, or a tombstone stands and nothing newer has landed.
 const isAlive = (entry) => {
   if (!entry) return false;
   const { meta } = entry;
+  if (meta.purged) return false;
   if (!meta.deleted) return true;
   for (const field in meta.clock) {
     if (compareClock(meta.clock[field], meta.deleted) > 0) return true;
@@ -269,6 +301,12 @@ const mergeEntry = (a, b) => {
   meta.deleted = maxClock(a.meta.deleted, b.meta.deleted);
   if (compareClock(meta.deleted, meta.base) < 0) meta.deleted = null;
   if (a.meta.v !== undefined || b.meta.v !== undefined) meta.v = Math.max(a.meta.v ?? 0, b.meta.v ?? 0);
+  // A purge on either side is the whole result: nothing to join.
+  const purged = maxClock(a.meta.purged ?? null, b.meta.purged ?? null);
+  if (purged) {
+    erase(entry, purged, {});
+    return entry;
+  }
   for (const source of [a, b]) {
     for (const field in source.meta.clock) {
       if (compareClock(source.meta.clock[field], meta.clock[field]) > 0) {
@@ -301,8 +339,8 @@ const mergeEntry = (a, b) => {
 // slot may be appended (the writer's schema version was the 13th, the actor
 // the 14th): a reader of an older shape ignores slots it does not know, a
 // reader of a newer one takes an absent slot as null.
-const TYPE_CODES = { write: 'w', set: 's', inc: 'i', delete: 'd', merge: 'm', advance: 'a' };
-const CODE_TYPES = { w: 'write', s: 'set', i: 'inc', d: 'delete', m: 'merge', a: 'advance' };
+const TYPE_CODES = { write: 'w', set: 's', inc: 'i', delete: 'd', merge: 'm', advance: 'a', purge: 'p' };
+const CODE_TYPES = { w: 'write', s: 'set', i: 'inc', d: 'delete', m: 'merge', a: 'advance', p: 'purge' };
 
 const packOps = (ops) => {
   const packed = new Array(ops.length);

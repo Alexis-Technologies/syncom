@@ -242,6 +242,54 @@ test('ops module', async (t) => {
     assert.strictEqual(joined.entry.meta.v, 5);
   });
 
+  await t.test('purge wins at any stamp, forever; a merge with a purged side is purged', () => {
+    const live = replay([
+      op('set', 5, 'A', { data: { x: 1, y: 1 } }),
+      op('inc', 6, 'A', { seq: 6, key: 'n', value: 2 }),
+    ]);
+    const purged = applyOp(live, op('purge', 1, 'B', { seq: 1 }));
+    assert.strictEqual(purged.changed, true, 'an older stamp still purges');
+    assert.deepStrictEqual(purged.entry.data, {});
+    assert.deepStrictEqual(purged.delta, { x: undefined, y: undefined, n: undefined });
+    assert.deepStrictEqual(purged.entry.meta.counters, {});
+    assert.deepStrictEqual(purged.entry.meta.clock, {});
+    assert.deepStrictEqual(purged.entry.meta.purged, [1, 'B']);
+    assert.strictEqual(isAlive(purged.entry), false);
+    // Nothing later lands: a write, a set, an inc, a delete — at any stamp.
+    for (const later of [
+      op('write', 99, 'C', { data: { x: 2 } }),
+      op('set', 99, 'C', { data: { x: 2 } }),
+      op('inc', 99, 'C', { seq: 99, key: 'n', value: 1 }),
+      op('delete', 99, 'C'),
+    ]) {
+      const result = applyOp(purged.entry, later);
+      assert.strictEqual(result.changed, false, later.type);
+      assert.deepStrictEqual(result.entry, purged.entry);
+    }
+    // Again, at the same stamp: a no-op; at a later one: the stamp moves.
+    assert.strictEqual(applyOp(purged.entry, op('purge', 1, 'B', { seq: 1 })).changed, false);
+    assert.strictEqual(applyOp(purged.entry, op('purge', 7, 'B', { seq: 7 })).changed, true);
+    assert.strictEqual(applyOp(null, op('purge', 1, 'B', { seq: 1 })).changed, true, 'an unknown record is purged too');
+    // Whatever order the purge and the writes arrive in, the result is the same.
+    assertCommutes(
+      [op('set', 5, 'A', { data: { x: 1 } }), op('purge', 1, 'B', { seq: 1 }), op('write', 9, 'C', { data: { z: 1 } })],
+      {},
+    );
+    // Merges: a purged side wins.
+    const other = replay([op('set', 8, 'D', { data: { x: 3 } })]);
+    assert.deepStrictEqual(mergeEntry(purged.entry, other).data, {});
+    assert.deepStrictEqual(mergeEntry(other, purged.entry).meta.purged, [1, 'B']);
+    assert.strictEqual(isAlive(mergeEntry(other, purged.entry)), false);
+    const joined = applyOp(other, op('merge', 1, 'E', { data: purged.entry.data, meta: purged.entry.meta }));
+    assert.strictEqual(joined.changed, true);
+    assert.deepStrictEqual(joined.entry.data, {});
+    assert.deepStrictEqual(latestClock(purged.entry.meta), [1, 'B']);
+    assert.deepStrictEqual(latestClock({ purged: [3, 'Z'], clock: { a: [1, 'A'] } }), [3, 'Z']);
+    const packed = packOps([op('purge', 1, 'B', { seq: 1 })]);
+    assert.strictEqual(packed[0][3], 'p');
+    assert.strictEqual(unpackOps(packed)[0].type, 'purge');
+  });
+
   await t.test('packOps carries v and actor in its 13th and 14th slots; older rows read without them', () => {
     const ops = [
       { origin: 'A', seq: 1, ts: 1, type: 'write', id: 'r', scope: 's', data: { x: 1 }, v: 2, actor: 'u1' },

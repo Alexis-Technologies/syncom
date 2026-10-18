@@ -29,7 +29,7 @@ const createMesh = async (t, names, edges, createStorage, options = {}) => {
     await storages.get(from).sync.addNode({ url: `mem://${to}`, scopes: options.scopes?.[from] });
   }
   for (const storage of storages.values()) await storage.sync.start();
-  return { storages, links, units, get: (name) => storages.get(name) };
+  return { storages, links, units, connect, get: (name) => storages.get(name) };
 };
 
 const sameVectors = (storages) => {

@@ -60,6 +60,7 @@ class OpLog {
   #otel;
   #fsi;
   #droppedHeld = 0;
+  #torn = new Set();
   #writes = Promise.resolve();
 
   constructor(basePath, options = {}) {
@@ -356,6 +357,58 @@ class OpLog {
   /** Forces a roll + compaction now; otherwise they happen every rollAfter appends. */
   flush() {
     return this.#serialize(() => this.#roll());
+  }
+
+  /**
+   * Strips the payload of every entry of `id` — `data`, `meta`, `key`,
+   * `value` — in memory and in the files that hold them, flagging each
+   * `scrubbed`; the op keeps its position, origin, seq and stamp, so the
+   * vector and a resuming peer are unaffected (a scrubbed `write` applies
+   * as a no-op). Returns how many entries. A file is rewritten in place:
+   * a crash in the middle tears it, and a peer resuming through it
+   * bootstraps instead — the price of forgetting over a backend with no
+   * rename.
+   */
+  scrub(id) {
+    return this.#serialize(async () => {
+      // Every entry of the id, for the files to rewrite; the ones still
+      // holding a payload, for the count. A rewrite that failed last time
+      // left the files behind memory: the id stays marked torn, and the
+      // next scrub rewrites them whether or not anything is fresh.
+      const seqs = new Set();
+      let fresh = 0;
+      for (const entry of this.#entries) {
+        if (entry.op?.id !== id) continue;
+        seqs.add(entry.seq);
+        if (entry.scrubbed) continue;
+        delete entry.op.data;
+        delete entry.op.meta;
+        delete entry.op.key;
+        delete entry.op.value;
+        entry.scrubbed = true;
+        fresh++;
+      }
+      if (fresh === 0 && !this.#torn.has(id)) return 0;
+      this.#torn.add(id);
+      const holds = (from, to) => [...seqs].some((seq) => seq >= from && seq <= to);
+      for (const segment of this.#segments) {
+        if (!holds(segment.from, segment.to)) continue;
+        const entries = this.#entries.filter((entry) => entry.seq >= segment.from && entry.seq <= segment.to);
+        await this.#fsi.write(this.#path, segment.name, JSON.stringify({ entries }));
+      }
+      // An open file holds the seqs from its name up to the next file's.
+      const sealedTo = this.#segments.length > 0 ? this.#segments[this.#segments.length - 1].to : this.#floor - 1;
+      const starts = this.#openFiles.map((name) => Number(name.slice(0, -5))).sort((a, b) => a - b);
+      for (let i = 0; i < starts.length; i++) {
+        const from = starts[i];
+        const to = i + 1 < starts.length ? starts[i + 1] - 1 : Infinity;
+        if (!holds(from, to)) continue;
+        const entries = this.#entries.filter((entry) => entry.seq > sealedTo && entry.seq >= from && entry.seq <= to);
+        await this.#fsi.write(this.#openPath, `${pad(from)}.json`, JSON.stringify({ entries }));
+      }
+      this.#torn.delete(id);
+      return fresh;
+    });
   }
 
   /**

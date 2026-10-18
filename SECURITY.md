@@ -46,6 +46,11 @@ These are the areas where a report matters most, roughly in order:
   identical in both halves. A *silent* mismatch that produces wrong plaintext
   rather than an error is in scope, as is any way an encrypted record's
   plaintext leaves the node (they are deliberately excluded from replication).
+- **Purge** (`storage.purge()`, `OpLog.scrub()`). A purged record must leave
+  no payload in this node's `data/` and `log/`, and the purge must reach and
+  scrub every peer that holds the id. A way for purged data to survive here
+  or to be resurrected by a later op is in scope; a peer that never
+  reconnects, and a chain block (hashes only), are not.
 - **Filesystem access** (`src/fsi.js`, `src/fsi.browser.js`). Paths are built
   from record ids and caller-supplied directory names. Traversal out of the
   storage directory via a crafted id or path is in scope.

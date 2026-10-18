@@ -63,6 +63,12 @@ docs/                     VitePress site
   `unit()` builds plain `{ access, handler }` objects that `defineRouter`
   accepts without wrpc's `procedure()`. The `tracked` shape it emits is
   `Symbol.for('wrpc.tracked')` — part of wrpc's frozen wire protocol.
+- **A purge is a scrub, not a delete.** `purge` wins at any stamp and a
+  purged entry takes nothing but another purge or a merge (`applyOp`
+  returns early). The payload leaves the log through `OpLog.scrub(id)`,
+  which rewrites files in place; `#applyRemote` scrubs every id of the
+  batch whose entry is purged, after the batch is durable and before the
+  relay. Never log a payload for a purged id through another path.
 - **`packOps` is 14 positional slots, both halves together.** `v` (13) and
   `actor` (14) were appended; a reader of fewer slots ignores the rest, a
   reader of more takes an absent slot as null. Append, never reorder — the

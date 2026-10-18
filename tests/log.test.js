@@ -240,6 +240,46 @@ test('OpLog', async (t) => {
     }
   });
 
+  await t.test('scrub strips an id’s payload from memory, the segments and the open files', async () => {
+    const dir = await createTemp();
+    try {
+      const log = await new OpLog(dir, { rollAfter: 2 });
+      await log.append([op('A', 1, { id: 'secret', data: { ssn: 'SECRET-1' } }), op('A', 2)]);
+      await log.append([op('A', 3, { id: 'secret', type: 'inc', key: 'n', value: 1 })]);
+      await log.append([op('A', 4, { id: 'other', data: { ssn: 'OTHER' } })]);
+      await log.append([op('A', 5, { id: 'secret', data: { ssn: 'SECRET-2' } })]);
+      assert.strictEqual(await log.scrub('secret'), 3);
+      assert.strictEqual(await log.scrub('secret'), 0, 'idempotent');
+      assert.strictEqual(await log.scrub('nope'), 0);
+      const entries = log.since(undefined);
+      assert.deepStrictEqual(
+        entries.map((entry) => [entry.seq, entry.scrubbed === true, 'data' in entry.op, 'key' in entry.op]),
+        [
+          [1, true, false, false],
+          [2, false, true, false],
+          [3, true, false, false],
+          [4, false, true, false],
+          [5, true, false, false],
+        ],
+      );
+      assert.deepStrictEqual(log.vector, { A: 5 }, 'positions and the vector are untouched');
+      const files = await fs.readdir(path.join(dir, 'log'), { recursive: true });
+      for (const file of files) {
+        const text = await fs.readFile(path.join(dir, 'log', file), 'utf8').catch(() => '');
+        assert.ok(!text.includes('SECRET'), `${file} still holds the payload`);
+      }
+      assert.ok((await fs.readFile(path.join(dir, 'log', 'seg-0000000004.json'), 'utf8')).includes('OTHER'));
+      await log.close();
+      const reopened = await new OpLog(dir, { rollAfter: 2 });
+      assert.deepStrictEqual(reopened.vector, { A: 5 });
+      assert.strictEqual(reopened.since(undefined)[0].scrubbed, true);
+      assert.strictEqual(reopened.since(undefined)[0].op.origin, 'A');
+      await reopened.close();
+    } finally {
+      await cleanupTemp(dir);
+    }
+  });
+
   await t.test('flush seals the open files on demand', async () => {
     const dir = await createTemp();
     try {
