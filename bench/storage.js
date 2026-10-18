@@ -73,6 +73,24 @@ const main = async () => {
     await bench(`list — ${many} ids (catalog)`, () => storage.list(), { warmup: 5 });
     await bench(`hasRecord — ${many} ids (catalog)`, () => storage.hasRecord(id), { warmup: 5 });
     await storage.close();
+
+    // Queries: a covered equality is posting lists and catalog rows; an
+    // order with a limit still sorts every candidate; a filter reads them.
+    const indexed = await open({
+      path: path.join(root, 'indexed'),
+      lock: false,
+      logger: false,
+      schema: { entities: { Item: { index: ['group'] } } },
+    });
+    for (let i = 0; i < many; i++) await indexed.Item.insert({ group: `g${i % 20}`, rank: i, name: `item ${i}` });
+    await bench(`select — covered eq over ${many}`, () =>
+      indexed.Item.select({ group: 'g7' }).projection(['group']).fetch());
+    await bench(`select — eq + order + limit over ${many}`, () =>
+      indexed.Item.select({ group: 'g7' }).desc('rank').limit(20).fetch());
+    await bench(`select — uncovered filter over ${many}`, () => indexed.Item.select({ rank: { $gte: 1900 } }).fetch(), {
+      warmup: 3,
+    });
+    await indexed.close();
     await bench(
       `open — catalog caught up from the log (${many} records)`,
       async () => {
@@ -85,7 +103,7 @@ const main = async () => {
     await bench(
       `open — catalog rebuilt from a scan (${many} records, integrity lazy)`,
       async () => {
-        const rebuilt = await open({ path: root, lock: false, integrity: 'lazy' });
+        const rebuilt = await open({ path: root, lock: false, integrity: 'lazy', logger: false });
         await fs.rm(path.join(root, 'index'), { recursive: true, force: true });
         await rebuilt.close();
       },

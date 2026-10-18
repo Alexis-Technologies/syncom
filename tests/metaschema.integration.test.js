@@ -78,6 +78,18 @@ test('syncom with metaschema', { skip: metaschema ? false : '@alexify/metaschema
     );
     await storage.Project.update(project.id, { desc: 'd' });
     assert.strictEqual((await storage.get(project.id)).desc, 'd');
+    // `slug: { unique: true }` and `byOrgName: { unique: [...] }` are the keys the catalog keeps.
+    const duplicate = await storage.Project.insert({ name: 'Other', slug: 'alioth', orgId: 'org2' }).catch((e) => e);
+    assert.strictEqual(duplicate.name, 'ValidationError');
+    assert.deepStrictEqual(duplicate.issues, [
+      { path: ['slug'], message: `is not unique (held by ${project.id})`, code: 'unique', conflict: project.id },
+    ]);
+    const sameName = await storage.Project.insert({ name: 'Alioth', slug: 'other', orgId: 'org1' }).catch((e) => e);
+    assert.deepStrictEqual(sameName.issues[0].path, ['orgId', 'name']);
+    assert.deepStrictEqual(
+      (await storage.Project.select({ orgId: 'org1' }).fetch()).map((r) => r.id),
+      [project.id],
+    );
     await assert.rejects(() => storage.Project.update(project.id, { orgId: 7 }), { name: 'ValidationError' });
     assert.strictEqual((await storage.get(project.id)).orgId, 'org1');
   });

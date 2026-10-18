@@ -232,8 +232,8 @@ An entity definition is `{ schema?, idField?, validate?, index?, unique?, fields
 `{}` is a bare collection. `schema` validates the records ([below](#validation)),
 `idField` names the key the id is handed to the validator under, `index` and
 `unique` — explicit, or read off a metaschema schema's `indexes` and
-`unique: true` fields — are checked at open (no query reads them yet), and
-`fields` is free-form notes kept as given. Anything else is a `TypeError` at
+`unique: true` fields — are what [queries](#queries) key on, and `fields` is
+free-form notes kept as given. Anything else is a `TypeError` at
 `open()`: a definition with a typo is a validation that silently never runs.
 
 `$type` is the record's collection and never changes. `storage.set()` without
@@ -247,6 +247,58 @@ await storage.Post.set(post.id, { title: 'Replaced' }); // { title: 'Replaced', 
 await storage.set(post.id, { title: 'Again' });          // keeps $type: 'Post'
 await storage.Author.set(post.id, { name: 'x' });        // TypeError: $type is immutable
 ```
+
+### Queries
+
+`collection.select(query)` is a cursor: build it, then `fetch()`, `count()`,
+`one()`, iterate it, or `watch()` it. The query is Mango-shaped —
+`{ field: value }` is equality (a dotted path reaches into the record, an
+array field holds a scalar value), `{ field: { $op } }` the operators `$eq`,
+`$ne`, `$in`, `$nin`, `$gt`, `$gte`, `$lt`, `$lte`, `$exists`, `$regex`
+(with `$options`), and `$and` / `$or` / `$not` nest. A malformed query is a
+`TypeError` at `select()`.
+
+```js
+const storage = await open({
+  path: 'data',
+  schema: { entities: { Project: { index: ['orgId'], unique: ['slug', ['orgId', 'name']] } } },
+});
+
+await storage.Project.insert({ orgId: 'o1', name: 'Alioth', slug: 'alioth', stars: 3 });
+await storage.Project.insert({ orgId: 'o1', name: 'Vega', slug: 'vega', stars: 7 });
+
+await storage.Project.select({ orgId: 'o1', stars: { $gte: 5 } }).fetch();
+// [{ id: '…', orgId: 'o1', name: 'Vega', slug: 'vega', stars: 7, $type: 'Project' }]
+await storage.Project.select({ orgId: 'o1' }).order('name').limit(10).offset(0).projection(['name']).fetch();
+// [{ id: '…', name: 'Alioth' }, { id: '…', name: 'Vega' }]
+await storage.Project.count({ orgId: 'o1' }); // 2
+await storage.Project.select({ slug: 'vega' }).one(); // the record, or null
+
+const stop = storage.Project.select({ orgId: 'o1' }).order('name').watch((rows) => render(rows));
+```
+
+Rows are the records as they read (the lens applied, `$type` included)
+under their `id`; `projection(fields)` keeps only those (a dotted field comes
+back under its dotted name), `filter(fn)` takes a predicate over the loaded
+row, `order(field)` / `desc(field)` sort by any field — nothing first, then
+booleans, numbers, strings — stably, and `offset` / `limit` cut after the
+sort. A cursor does not run the read hooks: like `snapshot()` and `swap()`,
+it reads the records themselves.
+
+The entity's `index` and `unique` fields are what the catalog keeps: a query
+whose fields, order and projection are all indexed — and has no `filter` —
+is answered from the catalog alone, with no record read; an equality on an
+indexed field narrows every other query to its posting list before the
+records are read. `watch(listener)` runs the cursor now and again after
+every change to the collection (one run per batch of changes), until the
+returned function is called; a failing run goes to `onError` or the logger.
+
+A `unique` key — a field, or a composite — is refused on a local write with
+a `ValidationError` whose issue has `code: 'unique'` and `conflict`, the id
+holding the key. Two nodes writing the same key at once cannot be refused:
+both records arrive, both are kept, and the `conflict` event
+`{ kind: 'unique', entity, fields, id, other, op }` names them — the
+application decides which yields.
 
 ### Validation
 

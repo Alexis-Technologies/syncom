@@ -91,7 +91,8 @@ appears on one.
 | `syncom.commits` | Counter | `{op}` | `syncom.op.type`, `syncom.result` (`applied` / `noop` / `encrypted` / `error`) |
 | `syncom.write.duration` | Histogram | `ms` | `syncom.path` (`commit` / `apply` / `replay`) |
 | `syncom.ops.received` | Counter | `{op}` | `syncom.outcome` (`applied` / `duplicate` / `gap` / `malformed`) |
-| `syncom.ops.rejected` | Counter | `{op}` | `syncom.reason` (`register` / `counter`) |
+| `syncom.ops.rejected` | Counter | `{op}` | `syncom.reason` (`register` / `counter` / `validation`) |
+| `syncom.conflicts` | Counter | `{conflict}` | `syncom.kind` (`unique`) |
 | `syncom.replication.lag` | Histogram | `ms` | — |
 | `syncom.push.ops` | Histogram | `{op}` | `syncom.push.reason`, `syncom.result` (`ok` / `error`) |
 | `syncom.bootstraps` | Counter | `{bootstrap}` | `syncom.result` |

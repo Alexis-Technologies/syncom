@@ -25,6 +25,7 @@ browser.d.ts              re-exports index.d.ts, overrides the 3 async crypto fn
 src/backend.js            the fsi contract (isFsi/checkFsi), createMemoryFsi, withSync — no requires
 src/lock.js               exclusive open: Web Locks or lock.json, stale by pid or age — no requires
 src/catalog.js            the record catalog: live ids, collections, indexed values; index/catalog.json — no requires
+src/query.js              compileQuery (Mango predicate), compareRows, Cursor — reads through storage[SOURCE]
 src/storage.js            Storage, Record, Collection — every write is an op
 src/schema.js             entity definitions, the injected validator (Standard Schema / ajv / compile), ValidationError
 src/ops.js                the record-level model: applyOp / mergeEntry / isAlive, packOps
@@ -116,6 +117,11 @@ docs/                     VitePress site
 - **Encrypted records are local.** `{ encrypted: true }` seals a record for
   this node's key; it produces no op and is excluded from snapshots. Do not
   route an encrypted entry through `applyOp`.
+- **A cursor reads through `storage[SOURCE]`, not through `get()`.** The
+  seam hands it the catalog and a lensed, hook-free `load(id)` — like
+  `snapshot()` and `swap()`. Unique keys are checked after validation and
+  the fold, before `#log.append` (local: throw) and after `applyOp` on the
+  apply path (remote: `conflict` event, never a skip — both records stay).
 - **The catalog is derived state, kept at one seam.** `#writeEntry` (both
   write paths go through it), `#writeEncrypted` and `#removeEncrypted` are
   the only places that `catalog.put`; it indexes the lensed view and never

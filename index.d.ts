@@ -302,6 +302,8 @@ export interface ValidationIssue {
   path: Array<string | number>;
   message: string;
   code?: string;
+  /** `code: 'unique'`: the id already holding the key (`path` lists its fields). */
+  conflict?: string;
 }
 
 /**
@@ -782,6 +784,11 @@ export interface StorageEvents {
   /** A peer's batch is durable. */
   apply: (batch: ApplyBatchContext) => void;
   /**
+   * A peer's op left a unique key shared by two records: `id` (the op's)
+   * and `other`. Both are kept — the application decides which yields.
+   */
+  conflict: (event: { kind: 'unique'; entity: string; fields: string[]; id: string; other: string; op: SyncOp }) => void;
+  /**
    * `drift`: a peer runs this node's schema version with another snapshot
    * hash — two builds of "the same" schema that disagree. Reported after
    * hello on both sides; the link stays up. `ahead`: a peer's op is from a
@@ -868,6 +875,55 @@ export interface Storage {
   close(): Promise<void>;
 }
 
+// ---------------------------------------------------------------------------
+// Queries (src/query.js)
+
+export interface MangoOperators {
+  $eq?: unknown;
+  $ne?: unknown;
+  $in?: readonly unknown[];
+  $nin?: readonly unknown[];
+  $gt?: number | string | boolean;
+  $gte?: number | string | boolean;
+  $lt?: number | string | boolean;
+  $lte?: number | string | boolean;
+  $exists?: boolean;
+  $regex?: RegExp | string;
+  $options?: string;
+}
+
+/**
+ * `{ field: value }` is equality (a dotted path reaches into the record; an
+ * array field holds a scalar value), `{ field: { $op } }` the operators,
+ * `$and`/`$or` arrays of queries, `$not` one.
+ */
+export type MangoQuery = {
+  [field: string]: unknown;
+  $and?: readonly MangoQuery[];
+  $or?: readonly MangoQuery[];
+  $not?: MangoQuery;
+};
+
+/** A row a cursor yields: the record as it reads, under its `id`. */
+export type QueryRow = Record<string, unknown> & { id: string };
+
+export interface Cursor<T = QueryRow> {
+  order(field: string): this;
+  desc(field: string): this;
+  limit(n: number): this;
+  offset(n: number): this;
+  /** A predicate over the loaded row; a cursor with one always reads the records. */
+  filter(fn: (row: T) => boolean): this;
+  /** The fields each row carries (plus `id`); a dotted field comes back under its dotted name. */
+  projection(fields: readonly string[]): this;
+  fetch(): Promise<T[]>;
+  count(): Promise<number>;
+  one(): Promise<T | null>;
+  /** Runs now and after every change to the collection (coalesced); returns the stop function. */
+  watch(listener: (rows: T[]) => void, options?: { onError?: (error: Error) => void }): () => void;
+  [Symbol.asyncIterator](): AsyncIterator<T>;
+}
+
 // A string field whose value is a known record id reads back as a Reference.
 export interface Reference {
   record(): Promise<SyncomRecord>;
@@ -892,6 +948,9 @@ declare class SyncomCollection {
   readonly name: string;
   insert(data: unknown): Promise<SyncomRecord>;
   get(id: string): Promise<unknown | null>;
+  /** A cursor over this collection — see Cursor. */
+  select(query?: MangoQuery): Cursor;
+  count(query?: MangoQuery): Promise<number>;
   /** Replaces the record wholesale, stamped as this collection's. */
   set(id: string, data: unknown, options?: StorageDataOptions): Promise<void>;
   delete(id: string): Promise<void>;

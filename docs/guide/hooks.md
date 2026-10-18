@@ -88,7 +88,8 @@ then:   append to the log → persist the records → afterApply → 'apply' →
 `Record`'s live properties, `Collection.get`, a contract's `DataReader` —
 hands back. It does not touch the record: `swap()` compares against the raw
 data, `snapshot()` replicates the raw data, `getCachedData()` and `has()` are
-raw. A `Record` that saved a redacted field would write the redaction back;
+raw, and so is what a cursor (`select()`) reads. A `Record` that saved a
+redacted field would write the redaction back;
 it does not, because `save()` writes only the fields that were assigned.
 
 ### Skipping a peer's op
@@ -169,6 +170,7 @@ than a throw.
 | --- | --- | --- |
 | `change` | `(op, via)` | Every op applied here; `via` is `null` for a local write, otherwise the link it came from |
 | `apply` | `({ via, peer, ops, applied, skipped, duplicates, gaps })` | A peer's batch is durable — `ops` are the accepted ones, skipped included |
+| `conflict` | `({ kind: 'unique', entity, fields, id, other, op })` | A peer's op left a unique key shared by two records — see [Queries](./storage#queries) |
 | `schema` | `({ kind: 'drift', … })` / `({ kind: 'ahead', op, held })` | A peer runs this node's schema version with another snapshot hash — see [Schemas](./sync#schemas); a peer's op is from a newer version — see [Reading across versions](./storage#reading-across-versions) |
 | `error` | `(error)` with `error.op`, `error.rejected` | A peer's op refused by the register/counter rule |
 | `close` | — | After `close()` sealed the log |

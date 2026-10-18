@@ -71,6 +71,7 @@ the operation (see [Hooks and events](../guide/hooks#events)):
 | `change` | `(op, via)` | Every op applied here; `via` is `null` for a local write, otherwise the link it came from |
 | `apply` | `({ via, peer, ops, applied, skipped, duplicates, gaps })` | A peer's batch is durable |
 | `error` | `(error)` with `error.op`, and `error.rejected` or `error.entity` + `error.issues` | A peer's op refused by the register/counter rule, or skipped as invalid under this node's schema |
+| `conflict` | `({ kind: 'unique', entity, fields, id, other, op })` | A peer's op left a unique key shared by two records; both are kept |
 | `schema` | `({ kind: 'drift', peer, version, hash, local })` / `({ kind: 'ahead', op, held })` | A peer runs this schema version with another snapshot hash (see [Schemas](../guide/sync#schemas)) / a peer's op is from a newer version, applied or held |
 | `close` | — | After `close()` sealed the log |
 
@@ -92,8 +93,26 @@ Created per schema entity and exposed as `storage.<EntityName>`.
 
 `name`, `insert(data)`, `get(id)`, `set(id, data, options?)` (stamped as the
 collection's), `update(id, delta)` (refuses a delta naming `$type`),
-`delete(id)`, `record(id)`. Writes through a collection with a `schema` are
-validated — see [Validation](../guide/storage#validation).
+`delete(id)`, `record(id)`, `select(query?)` → a cursor, `count(query?)`.
+Writes through a collection with a `schema` are validated — see
+[Validation](../guide/storage#validation); `unique` keys are refused with a
+`ValidationError` whose issue has `code: 'unique'` and `conflict`.
+
+#### `Cursor`
+
+`collection.select(query)` — see [Queries](../guide/storage#queries).
+
+| Member | Notes |
+| --- | --- |
+| `order(field)`, `desc(field)` | Sort keys, in order; nothing first, then booleans, numbers, strings; stable |
+| `limit(n)`, `offset(n)` | Applied after the sort |
+| `filter(fn)` | A predicate over the loaded row |
+| `projection(fields)` | The fields each row carries, plus `id` |
+| `fetch()` | `Promise<QueryRow[]>` — `{ id, ...data }` as the record reads |
+| `count()` | `Promise<number>` |
+| `one()` | `Promise<QueryRow \| null>` |
+| `watch(listener, { onError }?)` | Runs now and after every change to the collection; returns the stop function |
+| `[Symbol.asyncIterator]` | `for await (const row of cursor)` |
 
 ## Sync
 

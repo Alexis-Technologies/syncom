@@ -8,7 +8,8 @@ const { OpLog } = require('./log.js');
 const { applyOp, isAlive, isCounter, latestClock } = require('./ops.js');
 const { Clock, opKey, keyScope, vectorHas, vectorNext, vectorAdvance } = require('./vector.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
-const { normalizeSchema, createLens, project, unproject, foldSet } = require('./schema.js');
+const { ValidationError, normalizeSchema, createLens, project, unproject, foldSet } = require('./schema.js');
+const { Cursor } = require('./query.js');
 const defaultFsi = require('./fsi.js');
 const { checkFsi, withSync } = require('./backend.js');
 const { acquireLock } = require('./lock.js');
@@ -35,6 +36,7 @@ const STORAGE_HOOKS = ['beforeWrite', 'afterWrite', 'beforeRead', 'afterRead', '
 // record changes underneath it. Symbols keep both off the public surface.
 const COMMIT = Symbol('syncom.commit');
 const REFRESH = Symbol('syncom.refresh');
+const SOURCE = Symbol('syncom.source');
 
 const isPlainObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -201,6 +203,16 @@ class Collection {
 
   async get(id) {
     return this.#storage.get(id);
+  }
+
+  /** A cursor over this collection: `select(query).order(f).limit(n).fetch()`. */
+  select(query) {
+    return new Cursor(this.#storage[SOURCE], this.#name, query);
+  }
+
+  /** How many records of this collection match `query`. */
+  count(query) {
+    return this.select(query).count();
   }
 
   /** Replaces the record wholesale, stamped as this collection's. */
@@ -646,6 +658,32 @@ class Storage extends Emitter {
     return this.#fsi;
   }
 
+  // What a Cursor reads through: the catalog, and a record as it reads —
+  // lensed, without the read hooks (like `snapshot` and `swap`).
+  get [SOURCE]() {
+    const catalog = this.#catalog;
+    return {
+      logger: this.#logger,
+      candidates: (entity, query) => catalog.candidates(entity, query),
+      ids: (entity) => catalog.ids(entity),
+      row: (id) => catalog.row(id),
+      indexed: (entity) => catalog.indexed(entity),
+      subscribe: (entity, fn) => catalog.subscribe(entity, fn),
+      load: async (id) => {
+        const entry = await this.#load(id);
+        if (entry === null || entry.encrypted || !isAlive(entry)) return null;
+        return this.#view(id, entry);
+      },
+    };
+  }
+
+  // The unique keys `entry` would collide on, as the catalog knows them.
+  async #conflicts(id, entry) {
+    const def = this.#definitionOf(entry.data);
+    if (!def || def.unique.length === 0) return [];
+    return this.#catalog.uniqueConflicts(def.name, id, await this.#view(id, entry));
+  }
+
   // The entity definition a record belongs to, by its `$type`.
   #definitionOf(data) {
     const type = data.$type;
@@ -939,6 +977,21 @@ class Storage extends Emitter {
         ({ entry, changed, delta, rejected } = applyOp(current, op));
         this.#refuse(id, rejected);
         if (!changed) return null;
+      }
+    }
+    // A unique key another record holds: refused here, where one writer
+    // can be told. Two concurrent writers on two nodes cannot be — see the
+    // `conflict` event on the apply path.
+    if (VALIDATED.has(type)) {
+      const conflicts = await this.#conflicts(id, entry);
+      if (conflicts.length > 0) {
+        const issues = conflicts.map(({ fields, other }) => ({
+          path: fields,
+          message: `is not unique (held by ${other})`,
+          code: 'unique',
+          conflict: other,
+        }));
+        throw new ValidationError(entry.data.$type, issues);
       }
     }
 
@@ -1248,6 +1301,16 @@ class Storage extends Emitter {
         accepted.push(op);
         this.#otel.recordLag(op.ts);
         if (!changed) continue;
+        // A unique key the op leaves shared with another record: applied —
+        // the op is in the peer's log already — and reported; the
+        // application decides which record yields.
+        if (VALIDATED.has(op.type)) {
+          for (const { fields, other } of await this.#conflicts(op.id, entry)) {
+            this.#otel.recordConflict('unique');
+            const entity = entry.data.$type;
+            notify(this, this.#logger, 'conflict', { kind: 'unique', entity, fields, id: op.id, other, op });
+          }
+        }
         touched.set(op.id, entry);
         deltas.set(op.id, { ...(deltas.get(op.id) ?? {}), ...delta });
       }

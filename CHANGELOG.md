@@ -12,6 +12,20 @@ section until the first publish; everything below lands there on release day.
 
 ### Added
 
+- **Queries.** `collection.select(query)` is a cursor over a Mango-shaped
+  query (`{ field: value }`, `$eq` `$ne` `$in` `$nin` `$gt` `$gte` `$lt`
+  `$lte` `$exists` `$regex`/`$options`, `$and` `$or` `$not`, dotted paths,
+  an array field holding a scalar) with `order`/`desc`, `limit`/`offset`,
+  `filter`, `projection`, `fetch`/`count`/`one`, `for await`, and
+  `watch(listener)` — run now and after every change to the collection,
+  coalesced. A query whose fields are all indexed (and has no filter) is
+  answered from the catalog alone; an equality on an indexed field narrows
+  the records read. `collection.count(query)`. **Unique keys**: an entity's
+  `unique` fields (single or composite) are refused on a local write with
+  a `ValidationError` issue `{ code: 'unique', conflict }`; a peer's op
+  that leaves two records on one key is applied and reported through the
+  `conflict` event `{ kind: 'unique', entity, fields, id, other, op }` and
+  the `syncom.conflicts` metric. Browser budget raised 24.5 → 26.5 KB.
 - **The record catalog.** Every live record's id, collection and indexed
   field values stay in memory (`src/catalog.js`), kept by every write and
   persisted as `<path>/index/catalog.json` stamped with the log position it

@@ -16,8 +16,11 @@ const FORMAT = 1;
 
 const isObject = (value) => typeof value === 'object' && value !== null;
 
-// A value by dotted path; `undefined` when any step is missing.
+// A value by dotted path — a key spelled with the dot first (a catalog
+// row, a projected row), the walk otherwise; `undefined` when a step is
+// missing.
 const valueOf = (data, path) => {
+  if (isObject(data) && Object.hasOwn(data, path)) return data[path];
   let value = data;
   for (const part of path.split('.')) {
     if (!isObject(value)) return undefined;
@@ -51,6 +54,7 @@ class Catalog {
   #byType = new Map();
   #eq = new Map();
   #unique = new Map();
+  #watchers = new Map();
   #dirty = 0;
 
   constructor({ fsi, path, entities }) {
@@ -123,10 +127,13 @@ class Catalog {
    * live one — `data` as it reads (the lens applied).
    */
   put(id, view) {
+    const before = this.#rows.get(id)?.type ?? null;
     this.#remove(id);
     this.#dirty++;
+    const type = view === null ? null : typeof view.type === 'string' ? view.type : null;
+    if (before !== null) this.#wake(before);
+    if (type !== null && type !== before) this.#wake(type);
     if (view === null) return;
-    const type = typeof view.type === 'string' ? view.type : null;
     const row = { type, v: view.v ?? null, encrypted: view.encrypted === true, fields: {} };
     const def = type === null ? undefined : this.#defs.get(type);
     if (def && !row.encrypted) {
@@ -140,6 +147,27 @@ class Catalog {
 
   has(id) {
     return this.#rows.has(id);
+  }
+
+  /** The fields of a collection the catalog holds — what a covered query may read. */
+  indexed(type) {
+    return new Set(this.#defs.get(type)?.fields ?? []);
+  }
+
+  /** Calls `fn` after every change to a record of `type`; returns the unsubscribe. */
+  subscribe(type, fn) {
+    let fns = this.#watchers.get(type);
+    if (!fns) this.#watchers.set(type, (fns = new Set()));
+    fns.add(fn);
+    return () => {
+      fns.delete(fn);
+      if (fns.size === 0) this.#watchers.delete(type);
+    };
+  }
+
+  #wake(type) {
+    const fns = this.#watchers.get(type);
+    if (fns) for (const fn of [...fns]) fn();
   }
 
   row(id) {

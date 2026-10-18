@@ -355,6 +355,7 @@ test('containment: a hostile tracer never breaks the work', async (t) => {
       otel.recordApply({ applied: 1, duplicates: 1, gaps: 1 }, 1);
       otel.recordMalformed();
       otel.recordRejected('register');
+      otel.recordConflict('unique');
       otel.recordLag(Date.now());
       otel.recordLag('not a stamp');
       otel.recordReplay(1);
@@ -446,6 +447,16 @@ test('Storage telemetry', async (t) => {
     assert.strictEqual(named('syncom.commit').length, 1, 'only the insert has a span');
     const commits = await points('syncom.commits');
     assert.strictEqual(point(commits, { 'syncom.op.type': 'merge', 'syncom.result': 'noop' }).value, 1);
+  });
+
+  await t.test('a unique key a peer’s op leaves shared is counted', async (t2) => {
+    const { meter, points } = createMetrics();
+    const schema = { entities: { Post: { unique: ['slug'] } } };
+    const { storage } = await openTemp(t2, { telemetry: { meter }, schema });
+    storage.on('conflict', () => {});
+    await storage.Post.insert({ slug: 's' });
+    await storage.applyRemote([remoteOp('peer', 1, 'write', 'r1', { data: { slug: 's', $type: 'Post' } })]);
+    assert.strictEqual(point(await points('syncom.conflicts'), { 'syncom.kind': 'unique' }).value, 1);
   });
 
   await t.test('an apply span counts the batch; ops by outcome, rejections and lag are sampled', async (t2) => {

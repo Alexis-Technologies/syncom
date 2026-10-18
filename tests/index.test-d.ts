@@ -311,7 +311,27 @@ storage.on('error', (error) => {
 syncom.open({ schema: { entities: { Post: {} } } }).then((typed) => {
   expectType<Promise<void>>(typed.Post.set('id', { title: 'a' }));
   expectType<Promise<void>>(typed.Post.set('id', { title: 'a' }, { encrypted: false }));
+  const cursor = typed.Post.select({ orgId: 'o', createdAt: { $gte: 1 }, $or: [{ a: 1 }, { b: { $exists: false } }] });
+  expectType<syncom.Cursor>(cursor);
+  expectType<Promise<syncom.QueryRow[]>>(cursor.order('name').desc('createdAt').limit(20).offset(0).fetch());
+  expectType<Promise<number>>(cursor.count());
+  expectType<Promise<syncom.QueryRow | null>>(cursor.one());
+  expectType<() => void>(
+    cursor
+      .filter((row) => row.id !== 'x')
+      .projection(['name'])
+      .watch((rows) => rows.length),
+  );
+  expectType<Promise<number>>(typed.Post.count());
+  expectError(cursor.order(1));
+  expectError(typed.Post.select('orgId'));
 });
+storage.on('conflict', (event) => {
+  expectType<'unique'>(event.kind);
+  expectType<string[]>(event.fields);
+  expectType<string>(event.other);
+});
+expectType<string | undefined>(validationError.issues[0].conflict);
 storage.on('close', () => {});
 expectType<number>(storage.listenerCount('change'));
 expectError(storage.on('nope', () => {}));

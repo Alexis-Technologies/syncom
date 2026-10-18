@@ -141,6 +141,7 @@ const DISABLED = Object.freeze({
   recordApply: noop,
   recordMalformed: noop,
   recordRejected: noop,
+  recordConflict: noop,
   recordLag: noop,
   recordReplay: noop,
   recordPush: noop,
@@ -174,6 +175,7 @@ const createTelemetry = (telemetry) => {
   let writeDuration = null;
   let opsReceived = null;
   let opsRejected = null;
+  let conflicts = null;
   let lag = null;
   let pushOps = null;
   let bootstraps = null;
@@ -197,6 +199,10 @@ const createTelemetry = (telemetry) => {
       opsRejected = meter.createCounter('syncom.ops.rejected', {
         unit: '{op}',
         description: 'Peer ops refused because a field is the other kind (register/counter)',
+      });
+      conflicts = meter.createCounter('syncom.conflicts', {
+        unit: '{conflict}',
+        description: 'Constraints a peer op left violated here, by kind (unique)',
       });
       lag = meter.createHistogram('syncom.replication.lag', {
         unit: 'ms',
@@ -223,6 +229,7 @@ const createTelemetry = (telemetry) => {
       writeDuration = null;
       opsReceived = null;
       opsRejected = null;
+      conflicts = null;
       lag = null;
       pushOps = null;
       bootstraps = null;
@@ -285,6 +292,10 @@ const createTelemetry = (telemetry) => {
 
     recordRejected(reason) {
       add(opsRejected, 1, { 'syncom.reason': reason });
+    },
+
+    recordConflict(kind) {
+      add(conflicts, 1, { 'syncom.kind': kind });
     },
 
     // The op's stamp is the origin's wall clock at commit time
