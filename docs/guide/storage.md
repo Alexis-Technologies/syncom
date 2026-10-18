@@ -311,6 +311,66 @@ downgrade (logged as a warning) — and is `null` otherwise. Peers exchange
 `{ version, hash }` in [hello](./sync#schemas): the same version with another
 hash is reported as drift.
 
+### Reading across versions
+
+Nodes on different versions keep working together. A record written under an
+older version is read through a **lens** — nothing is rewritten, the view is
+computed once per cached entry — in two steps:
+
+1. the **migrations**: `migrations` is keyed by the version each one migrates
+   *to* (`2` takes a record from 1 to 2), either storage-wide `{ up }` or per
+   entity `{ Post: { up } }`; `up(data, { entity, id, from, to })` gets the
+   record without `$type` and returns it as it is under `to`;
+2. the entity's **Standard Schema validator**: its aliases and defaults are a
+   rename and a fill for free, so a metaschema entity with
+   `name: { aliases: ['title'] }` and `'desc?': { default: '' }` reads a v1
+   `{ title }` as `{ name, desc }` with no migration written. A validator that
+   refuses the record leaves step 1's result and logs at debug.
+
+`lens` picks the steps: `'both'` (default), `'migrations'`, or `'validate'`
+(refused together with `migrations`).
+
+```js
+const storage = await open({
+  path: 'data',
+  schema: {
+    version: 2,
+    entities: { Post: {} },
+    migrations: { 2: { Post: { up: ({ title, ...rest }) => ({ ...rest, name: title }) } } },
+  },
+});
+
+await storage.get(oldPost); // { name: 'Hello', $type: 'Post' } — on disk it is still { title: 'Hello' }
+```
+
+Writes go through the lens too: `update()` validates the record as it reads,
+and carries only the keys that changed. `get()`, `Record`, `swap()` read the
+view; `snapshot()` and `getCachedData()` read the raw data, and so does
+replication — a peer on the older version sees the record exactly as it was
+written.
+
+`migrate()` rewrites what the lens only reads: every record of an older
+version becomes a whole-record write of its view (the version with it), with
+its counters added back. Run it on one node after an upgrade; peers receive
+ordinary ops. It is idempotent, and `{ entities }` limits it to those
+collections:
+
+```js
+if (storage.schemaInfo.previous) {
+  await storage.migrate(); // { migrated: 12, counters: 3 }
+}
+```
+
+The other direction — an op from a **newer** version — is `ahead`:
+`'apply'` (default) applies it as it is, unvalidated (registers are
+forward-tolerant; the validator does not know the shape), and emits `schema`
+`{ kind: 'ahead', op, held: false }`; `'hold'` keeps it in the log, skipped
+and flagged with its version, relays it, and applies it at the first open
+that runs that version — `schemaInfo.held` is then `{ replayed, lost }`,
+`lost` counting held ops that retention dropped before the upgrade. A hold
+needs `sync.retention.ops` of 1000 or more, and a directory that ran a newer
+version cannot be reopened with `'hold'` on an older one.
+
 ## On disk
 
 ```

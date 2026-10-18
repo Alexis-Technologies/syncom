@@ -169,7 +169,7 @@ than a throw.
 | --- | --- | --- |
 | `change` | `(op, via)` | Every op applied here; `via` is `null` for a local write, otherwise the link it came from |
 | `apply` | `({ via, peer, ops, applied, skipped, duplicates, gaps })` | A peer's batch is durable — `ops` are the accepted ones, skipped included |
-| `schema` | `({ kind: 'drift', peer, version, hash, local })` | A peer runs this node's schema version with another snapshot hash — see [Schemas](./sync#schemas) |
+| `schema` | `({ kind: 'drift', … })` / `({ kind: 'ahead', op, held })` | A peer runs this node's schema version with another snapshot hash — see [Schemas](./sync#schemas); a peer's op is from a newer version — see [Reading across versions](./storage#reading-across-versions) |
 | `error` | `(error)` with `error.op`, `error.rejected` | A peer's op refused by the register/counter rule |
 | `close` | — | After `close()` sealed the log |
 

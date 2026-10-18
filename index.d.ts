@@ -99,6 +99,10 @@ export function isAlive(entry: Entry | null): boolean;
 export interface LogEntry {
   seq: number;
   op: SyncOp;
+  /** Accepted but not applied here: a `beforeApply` false, a failed validation, or a held op. */
+  skipped?: true;
+  /** The schema version the op waits for (`ahead: 'hold'`). */
+  held?: number;
 }
 
 export interface OpLogOptions {
@@ -116,7 +120,15 @@ export interface OpLog {
   readonly length: number;
   readonly lastEventId: string;
   formatId(seq: number): string;
-  append(ops: readonly SyncOp[]): Promise<LogEntry[]>;
+  append(
+    ops: readonly SyncOp[],
+    options?: { skipped?: ReadonlySet<SyncOp> | null; held?: ReadonlyMap<SyncOp, number> | null },
+  ): Promise<LogEntry[]>;
+  /** The entries held for a newer schema version, oldest first. */
+  held(): LogEntry[];
+  /** Held entries compaction dropped since the last reset — lost for good. */
+  readonly droppedHeld: number;
+  resetDroppedHeld(): Promise<void>;
   since(eventId: string | null | undefined, options?: { scopes?: readonly string[] | null; limit?: number }): LogEntry[] | null;
   advance(vector: VersionVector): Promise<void>;
   tail(): LogEntry[];
@@ -361,10 +373,42 @@ export type SchemaEntities =
   | { readonly [entityName: string]: EntityDefinition }
   | Map<string, EntityDefinition>;
 
+export interface MigrationContext {
+  /** The record's `$type`, or `null` outside any collection. */
+  entity: string | null;
+  id: string;
+  from: number;
+  to: number;
+}
+
+/** One step of the up-chain: the record (without `$type`) as it was under `from`, returned as it is under `to`. */
+export interface Migration {
+  up(data: Record<string, unknown>, context: MigrationContext): Record<string, unknown> | Promise<Record<string, unknown>>;
+  /** Reserved. */
+  down?(data: Record<string, unknown>, context: MigrationContext): Record<string, unknown> | Promise<Record<string, unknown>>;
+}
+
 export interface Schema {
   /** A positive integer; default 1. */
   version?: number;
   entities?: SchemaEntities;
+  /**
+   * Keyed by the version each one migrates TO (`2` takes a record from 1 to
+   * 2): a storage-wide migration, or one per entity. Run on read, for a
+   * record of an older version, before the entity's validator.
+   */
+  migrations?: { [version: number]: Migration | { [entity: string]: Migration } };
+  /**
+   * An op from a newer schema version: `'apply'` (default) applies it as it
+   * is, unvalidated; `'hold'` keeps it in the log until this node runs that
+   * version (needs `sync.retention.ops` of 1000 or more).
+   */
+  ahead?: 'apply' | 'hold';
+  /**
+   * What lenses a record older than `version` on read: the migrations, the
+   * entity's Standard Schema validator (aliases, defaults), or both (default).
+   */
+  lens?: 'migrations' | 'validate' | 'both';
   /**
    * Any JSON describing the schema (metaschema's `model.toJSON()`): hashed,
    * kept in `schema.json`, exchanged in hello — the same version with
@@ -382,6 +426,8 @@ export interface SchemaInfo {
 /** `storage.schemaInfo`: the schema this node runs, and what `schema.json` held before this open when that differed. */
 export interface SchemaStatus extends SchemaInfo {
   previous: SchemaInfo | null;
+  /** Ops held for this version and applied at open (`replayed`), and held ops compaction had dropped (`lost`); `null` when none. */
+  held: { replayed: number; lost: number } | null;
 }
 
 /** The peer whose whole state is about to be joined. */
@@ -733,9 +779,14 @@ export interface StorageEvents {
   /**
    * `drift`: a peer runs this node's schema version with another snapshot
    * hash — two builds of "the same" schema that disagree. Reported after
-   * hello on both sides; the link stays up.
+   * hello on both sides; the link stays up. `ahead`: a peer's op is from a
+   * newer version — applied as it is (`held` false) or held (`held` true).
    */
-  schema: (event: { kind: 'drift'; peer: PeerRef; version: number; hash: string; local: string }) => void;
+  schema: (
+    event:
+      | { kind: 'drift'; peer: PeerRef; version: number; hash: string; local: string }
+      | { kind: 'ahead'; op: SyncOp; held: boolean },
+  ) => void;
   close: () => void;
 }
 
@@ -788,6 +839,12 @@ export interface Storage {
    * with a ValidationError. Nothing is written.
    */
   check(entity: string, data: unknown): Promise<unknown>;
+  /**
+   * Rewrites every record of an older schema version as this one, through
+   * the lens — a whole-record write of the view, the counters added back.
+   * Idempotent; `entities` limits it to those collections.
+   */
+  migrate(options?: { entities?: readonly string[]; batch?: number }): Promise<{ migrated: number; counters: number }>;
   record(id: string): Promise<Storage.StorageRecord>;
   getCachedData(id: string): unknown | null;
   hasRecord(id: string): boolean;

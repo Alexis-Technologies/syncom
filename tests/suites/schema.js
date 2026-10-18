@@ -434,7 +434,7 @@ const runSchemaTests = async (t, assert, createStorage) => {
     storage.on('change', (op) => ops.push(op));
     const seen = [];
     const plain = await createStorage(t2, 'B', { hooks: { beforeWrite: (ctx) => void seen.push(ctx.v) } });
-    assert.deepStrictEqual(storage.schemaInfo, { version: 2, hash: null, previous: null });
+    assert.deepStrictEqual(storage.schemaInfo, { version: 2, hash: null, previous: null, held: null });
     assert.strictEqual(plain.schemaInfo, null);
     const post = await storage.Post.insert({ title: 'a' });
     await storage.update(post.id, { title: 'b' });
@@ -480,7 +480,7 @@ const runSchemaTests = async (t, assert, createStorage) => {
     const first = await createStorage(t2, 'A', { schema: v2 });
     const { hash } = first.schemaInfo;
     assert.match(hash, /^[0-9a-f]{64}$/);
-    assert.deepStrictEqual(first.schemaInfo, { version: 2, hash, previous: null });
+    assert.deepStrictEqual(first.schemaInfo, { version: 2, hash, previous: null, held: null });
     await first.close();
     const same = await createStorage(t2, 'A', { schema: v2 });
     assert.deepStrictEqual(same.schemaInfo.previous, null, 'the same version and snapshot: nothing to report');
@@ -498,7 +498,12 @@ const runSchemaTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(warnings, ['schema.upgrade'], 'a downgrade is warned about');
     await downgraded.close();
     const unversioned = await createStorage(t2, 'A', { schema: { entities: {} } });
-    assert.deepStrictEqual(unversioned.schemaInfo, { version: 1, hash: null, previous: { version: 2, hash } });
+    assert.deepStrictEqual(unversioned.schemaInfo, {
+      version: 1,
+      hash: null,
+      previous: { version: 2, hash },
+      held: null,
+    });
     await unversioned.close();
     const none = await createStorage(t2, 'A');
     assert.strictEqual(none.schemaInfo, null, 'no schema: the file is left alone');
@@ -600,6 +605,272 @@ const runSchemaTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(hellos.at(-1), { node: plain.nodeId, scopes: ['*'], schema: null });
     assert.deepStrictEqual(drifts.B.length, 1, 'no schema on one side: nothing to compare');
   });
+
+  // Two nodes on two versions. A (v1) writes `{ title }`; B (v2) reads it as
+  // `{ name, desc }` through its lens — migrations, or the validator's alias
+  // and default — and `migrate()` rewrites it for everyone.
+  const aliasStub = standard(({ title, ...rest }) => {
+    const value = { ...rest };
+    if (value.name === undefined && title !== undefined) value.name = title;
+    if (value.desc === undefined) value.desc = '';
+    return { value };
+  });
+  const v2Variants = {
+    migrations: {
+      version: 2,
+      entities: { Post: {} },
+      migrations: { 2: { Post: { up: ({ title, ...rest }) => ({ ...rest, name: title, desc: rest.desc ?? '' }) } } },
+    },
+    validate: { version: 2, entities: { Post: { schema: aliasStub } } },
+  };
+  const metaOf = async (storage, id) => (await storage.snapshot()).records.find((r) => r.id === id).meta;
+
+  for (const [variant, v2] of Object.entries(v2Variants)) {
+    await t.test(
+      `a newer node reads an older record through the lens (${variant}), and migrate() rewrites it`,
+      async (t2) => {
+        const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage, {
+          nodes: { A: { schema: { entities: { Post: {} } } }, B: { schema: v2 } },
+        });
+        const [a, b] = ['A', 'B'].map((name) => mesh.get(name));
+        const bOps = [];
+        b.on('change', (op, via) => via === null && bOps.push(op));
+        const aEvents = [];
+        a.on('schema', (event) => aEvents.push(event));
+        await waitUntil(() => a.sync.peers()[0]?.subscribed);
+        const post = await a.Post.insert({ title: 'x' });
+        await settle([a, b]);
+        assert.deepStrictEqual(await b.get(post.id), { name: 'x', desc: '', $type: 'Post' }, 'lensed on read');
+        assert.deepStrictEqual(
+          (await b.snapshot()).records[0].data,
+          { title: 'x', $type: 'Post' },
+          'replication is raw',
+        );
+        assert.deepStrictEqual(b.getCachedData(post.id), { title: 'x', $type: 'Post' }, 'the cache peek is raw');
+        const record = await b.record(post.id);
+        assert.strictEqual(record.name, 'x', 'a Record view reads through the lens');
+        assert.strictEqual(await b.swap(post.id, { desc: 'swapped' }, { name: 'x' }), true, 'swap compares the view');
+        await settle([a, b]);
+        // A set is validated through the lens and carries only what changed.
+        await b.Post.update(post.id, { desc: 'd' });
+        assert.deepStrictEqual(bOps.at(-1).data, { desc: 'd' });
+        await settle([a, b]);
+        assert.deepStrictEqual(await a.get(post.id), { title: 'x', desc: 'd', $type: 'Post' }, 'A keeps its shape');
+        assert.deepStrictEqual(await b.get(post.id), { name: 'x', desc: 'd', $type: 'Post' });
+        assert.strictEqual((await metaOf(b, post.id)).v, 1, 'a set does not move the record’s version');
+        await a.inc(post.id, 'hits', 3);
+        await settle([a, b]);
+        assert.strictEqual((await b.get(post.id)).hits, 3);
+        // migrate(): a whole-record write of the view (v2, no `title`), then the counter added back.
+        const before = bOps.length;
+        assert.deepStrictEqual(await b.migrate({ batch: 1 }), { migrated: 1, counters: 1 });
+        const [write, inc] = bOps.slice(before);
+        assert.deepStrictEqual(
+          [write.type, write.v, write.data],
+          ['write', 2, { name: 'x', desc: 'd', $type: 'Post' }],
+        );
+        assert.deepStrictEqual([inc.type, inc.key, inc.value], ['inc', 'hits', 3]);
+        assert.deepStrictEqual(await b.get(post.id), { name: 'x', desc: 'd', hits: 3, $type: 'Post' });
+        assert.strictEqual((await metaOf(b, post.id)).v, 2);
+        await settle([a, b]);
+        assert.deepStrictEqual(
+          await a.get(post.id),
+          { name: 'x', desc: 'd', hits: 3, $type: 'Post' },
+          'A applies v2 ops as they are',
+        );
+        assert.strictEqual((await metaOf(a, post.id)).v, 2);
+        // Every v2 op B made — its swap, its update, the migration's write and inc — was ahead of A.
+        assert.deepStrictEqual(
+          aEvents.map((event) => [event.kind, event.held, event.op.type]),
+          [
+            ['ahead', false, 'set'],
+            ['ahead', false, 'set'],
+            ['ahead', false, 'write'],
+            ['ahead', false, 'inc'],
+          ],
+        );
+        assert.deepStrictEqual(await b.migrate(), { migrated: 0, counters: 0 }, 'idempotent');
+        // A record B writes itself is of its version and never lensed.
+        const fresh = await b.Post.insert({ name: 'fresh' });
+        assert.strictEqual((await metaOf(b, fresh.id)).v, 2);
+        assert.deepStrictEqual(await b.migrate({ entities: ['Other'] }), { migrated: 0, counters: 0 });
+      },
+    );
+  }
+
+  await t.test('lens options: which steps read an older record, what a migration may return', async (t2) => {
+    const v1 = { entities: { Post: {} } };
+    const migrations = { 2: { up: (data) => ({ ...data, v2: true }) } };
+    // 'migrations' alone: the alias stub is not consulted on read.
+    const mesh = await createMesh(
+      t2,
+      ['A', 'B', 'C', 'D'],
+      [
+        ['A', 'B'],
+        ['A', 'C'],
+        ['A', 'D'],
+      ],
+      createStorage,
+      {
+        nodes: {
+          A: { schema: v1 },
+          B: { schema: { version: 2, entities: { Post: { schema: aliasStub } }, lens: 'migrations', migrations } },
+          C: { schema: { version: 2, entities: { Post: { schema: aliasStub } }, lens: 'validate' } },
+          D: { schema: { version: 2, entities: { Post: {} }, migrations } },
+        },
+      },
+    );
+    const [a, b, c, d] = ['A', 'B', 'C', 'D'].map((name) => mesh.get(name));
+    await waitUntil(() => a.sync.peers().every((peer) => peer.subscribed));
+    const post = await a.Post.insert({ title: 'x' });
+    const loose = await a.insert({ n: 1 });
+    await settle([a, b, c, d]);
+    assert.deepStrictEqual(await b.get(post.id), { title: 'x', v2: true, $type: 'Post' }, 'migrations only');
+    assert.deepStrictEqual(await c.get(post.id), { name: 'x', desc: '', $type: 'Post' }, 'validate only');
+    assert.deepStrictEqual(
+      await d.get(loose),
+      { n: 1, v2: true },
+      'a storage-wide migration reaches records without $type',
+    );
+    assert.deepStrictEqual(await b.get(loose), { n: 1, v2: true });
+    // A validator that refuses an old record (written before it existed)
+    // leaves the migrated data, at debug.
+    const debug = [];
+    const strict = standard((value) =>
+      value.slug ? { value } : { issues: [issue('is required', ['slug'], 'required')] },
+    );
+    const old = await createStorage(t2, 'E', { schema: { entities: { Post: {} } } });
+    await old.set('p', { title: 'x', $type: 'Post' });
+    await old.set('q', { title: 'y', slug: 'q', $type: 'Post' });
+    await old.close();
+    const e = await createStorage(t2, 'E', {
+      schema: {
+        version: 2,
+        entities: { Post: { schema: strict } },
+        migrations: { 2: { Post: { up: (data) => ({ ...data, up: 1 }) } } },
+      },
+      logger: { debug: (entry) => debug.push(entry) },
+    });
+    assert.deepStrictEqual(await e.get('p'), { title: 'x', up: 1, $type: 'Post' });
+    assert.deepStrictEqual(await e.get('q'), { title: 'y', slug: 'q', up: 1, $type: 'Post' });
+    // migrate() goes through the validator: the record it refuses stops the run.
+    await assert.rejects(() => e.migrate({ batch: 1 }), { name: 'ValidationError', entity: 'Post' });
+    assert.strictEqual((await metaOf(e, 'q')).v, 1, 'p came first; q was not reached');
+    assert.deepStrictEqual(await e.migrate({ entities: ['Nope'], batch: 1 }), { migrated: 0, counters: 0 });
+    assert.deepStrictEqual(
+      debug.filter((entry) => entry.event === 'schema.lens.issues').map((entry) => [entry.entity, entry.id]),
+      [['Post', 'p']],
+    );
+    // A migration must return an object.
+    const bad = await createStorage(t2, 'F', { schema: { version: 2, migrations: { 2: { up: () => 'nope' } } } });
+    await bad.applyRemote([{ origin: 'old', seq: 1, ts: Date.now(), type: 'write', id: 'p', data: { n: 1 }, v: 1 }]);
+    await assert.rejects(() => bad.get('p'), { name: 'TypeError', message: /migrations\[2\] must return an object/ });
+    // Refused at open.
+    await assert.rejects(() => createStorage(t2, 'G', { schema: { version: 2, lens: 'validate', migrations } }), {
+      name: 'TypeError',
+      message: /lens 'validate' skips the migrations/,
+    });
+    await assert.rejects(
+      () => createStorage(t2, 'G2', { schema: { ahead: 'maybe' } }),
+      /ahead must be 'apply' or 'hold'/,
+    );
+    await assert.rejects(() => createStorage(t2, 'G3', { schema: { lens: 'none' } }), /lens must be/);
+    await assert.rejects(
+      () => createStorage(t2, 'G4', { schema: { version: 2, migrations: { 3: { up: () => ({}) } } } }),
+      /beyond version 2/,
+    );
+    await assert.rejects(
+      () => createStorage(t2, 'G5', { schema: { version: 2, migrations: { 1: { up: () => ({}) } } } }),
+      /not a version of 2 or more/,
+    );
+    await assert.rejects(
+      () => createStorage(t2, 'G6', { schema: { version: 2, migrations: { 2: 'up' } } }),
+      /must be \{ up \}/,
+    );
+    await assert.rejects(
+      () => createStorage(t2, 'G7', { schema: { version: 2, migrations: { 2: { Post: 'up' } } } }),
+      /migrations\[2\].Post must be/,
+    );
+    await assert.rejects(
+      () => createStorage(t2, 'G8', { schema: { version: 2, migrations: [] } }),
+      /migrations must be an object/,
+    );
+    await assert.rejects(
+      () => createStorage(t2, 'G9', { schema: { ahead: 'hold' }, sync: { retention: { ops: 10 } } }),
+      /ahead 'hold' needs sync.retention.ops of 1000 or more/,
+    );
+    await assert.rejects(() => e.migrate({ entities: 'Post' }), TypeError);
+    await assert.rejects(() => e.migrate({ batch: 0 }), TypeError);
+    assert.deepStrictEqual(await a.migrate(), { migrated: 0, counters: 0 }, 'version 1: nothing older to migrate');
+    const none = await createStorage(t2, 'N');
+    await assert.rejects(() => none.migrate(), { name: 'TypeError', message: 'migrate() needs open({ schema })' });
+  });
+
+  await t.test(
+    "ahead 'hold': an op from a newer version waits in the log, relays, and lands on the upgrade",
+    async (t2) => {
+      const v2 = { version: 2, entities: { Post: {} } };
+      const mesh = await createMesh(
+        t2,
+        ['A', 'B', 'C'],
+        [
+          ['B', 'A'],
+          ['C', 'B'],
+        ],
+        createStorage,
+        {
+          nodes: {
+            A: { schema: v2 },
+            B: { schema: { version: 1, entities: { Post: {} }, ahead: 'hold' } },
+            C: { schema: v2 },
+          },
+        },
+      );
+      const [a, b, c] = ['A', 'B', 'C'].map((name) => mesh.get(name));
+      const events = [];
+      b.on('schema', (event) => events.push(event));
+      await waitUntil(() => b.sync.peers()[0]?.subscribed && c.sync.peers()[0]?.subscribed);
+      const post = await a.Post.insert({ n: 1 });
+      await settle([a, b, c]);
+      assert.strictEqual(await b.get(post.id), null, 'held, not applied');
+      assert.strictEqual(b.vector[a.nodeId], 1, 'but the vector moved');
+      assert.deepStrictEqual(
+        b.log.held().map((entry) => [entry.op.type, entry.held, entry.skipped]),
+        [['write', 2, true]],
+      );
+      assert.deepStrictEqual(await c.get(post.id), { n: 1, $type: 'Post' }, 'C, behind B, received it');
+      assert.deepStrictEqual(
+        events.map((event) => [event.kind, event.held, event.op.id]),
+        [['ahead', true, post.id]],
+      );
+      // B's own writes are of version 1 and land as usual.
+      await b.Post.set('mine', { mine: true });
+      assert.deepStrictEqual(await b.get('mine'), { mine: true, $type: 'Post' });
+      // B upgrades: the held op is applied as if it had just arrived.
+      await c.sync.stop();
+      await b.close();
+      const upgraded = await createStorage(t2, 'B', { schema: v2 });
+      assert.deepStrictEqual(upgraded.schemaInfo.held, { replayed: 1, lost: 0 });
+      assert.deepStrictEqual(upgraded.schemaInfo.previous, { version: 1, hash: null });
+      assert.deepStrictEqual(await upgraded.get(post.id), { n: 1, $type: 'Post' });
+      assert.deepStrictEqual(await upgraded.get('mine'), { mine: true, $type: 'Post' });
+      await upgraded.close();
+      const again = await createStorage(t2, 'B', { schema: v2 });
+      assert.deepStrictEqual(
+        again.schemaInfo.held,
+        { replayed: 0, lost: 0 },
+        'a held op stays flagged, re-applied as a no-op',
+      );
+      assert.deepStrictEqual(await again.get(post.id), { n: 1, $type: 'Post' });
+      await again.close();
+      await assert.rejects(
+        () => createStorage(t2, 'B', { schema: { version: 1, ahead: 'hold' } }),
+        /ahead 'hold' cannot downgrade/,
+      );
+      const noHeld = await createStorage(t2, 'B', { schema: { version: 1 } });
+      assert.strictEqual(noHeld.schemaInfo.held, null, 'nothing held for version 1');
+    },
+  );
 };
 
 module.exports = { runSchemaTests };

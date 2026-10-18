@@ -79,15 +79,42 @@ expectAssignable<StorageOptions>({
 expectAssignable<EntityDefinition>({ schema: {}, validate: false });
 expectAssignable<EntityDefinition>({});
 expectAssignable<StorageOptions>({ schema: { version: 2, snapshot: { any: 'json' } } });
+expectAssignable<StorageOptions>({
+  schema: {
+    version: 3,
+    migrations: {
+      2: { up: (data) => ({ ...data, two: true }) },
+      3: { Post: { up: async (data, ctx) => ({ ...data, entity: ctx.entity, from: ctx.from }) } },
+    },
+    ahead: 'hold',
+    lens: 'migrations',
+  },
+});
+expectError(syncom.open({ schema: { ahead: 'ignore' } }));
+expectError(syncom.open({ schema: { lens: 'none' } }));
+expectError(syncom.open({ schema: { version: 2, migrations: { 2: { up: 'rename' } } } }));
+expectType<Promise<{ migrated: number; counters: number }>>(storage.migrate({ entities: ['Post'], batch: 10 }));
+expectType<{ replayed: number; lost: number } | null>(storage.schemaInfo!.held);
+storage.on('schema', (event) => {
+  if (event.kind === 'ahead') {
+    expectType<boolean>(event.held);
+    expectType<syncom.SyncOp>(event.op);
+  }
+});
+expectType<syncom.LogEntry[]>(log.held());
+expectType<number | undefined>(log.held()[0].held);
+expectType<number>(log.droppedHeld);
+expectType<Promise<syncom.LogEntry[]>>(log.append([], { skipped: null, held: new Map() }));
 expectType<syncom.SchemaStatus | null>(storage.schemaInfo);
 expectType<syncom.SchemaInfo | null>(storage.schemaInfo!.previous);
 storage.on('schema', (event) => {
-  expectType<'drift'>(event.kind);
-  expectType<syncom.PeerRef>(event.peer);
-  expectType<string>(event.local);
+  if (event.kind === 'drift') {
+    expectType<syncom.PeerRef>(event.peer);
+    expectType<string>(event.local);
+  }
 });
 expectError(syncom.open({ schema: { version: '2' } }));
-expectError(syncom.open({ schema: { migrations: {} } }));
+expectError(syncom.open({ schema: { lenses: {} } }));
 expectError(syncom.open({ schema: { entities: { P: { idField: 1 } } } }));
 expectError(syncom.open({ schema: { entities: { P: { validate: true } } } }));
 expectError(syncom.open({ schema: { entities: { P: { index: 'orgId' } } } }));

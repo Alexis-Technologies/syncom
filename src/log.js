@@ -58,6 +58,7 @@ class OpLog {
   #retention;
   #log;
   #otel;
+  #droppedHeld = 0;
   #writes = Promise.resolve();
 
   constructor(basePath, options = {}) {
@@ -78,6 +79,7 @@ class OpLog {
       this.#floor = index.floor ?? 1;
       this.#vector = index.vector ?? {};
       this.#segments = Array.isArray(index.segments) ? index.segments : [];
+      this.#droppedHeld = Number.isInteger(index.droppedHeld) ? index.droppedHeld : 0;
     } else {
       // No (readable) index: a new incarnation. Existing segments are still
       // picked up below, but their ids belong to an epoch nobody can resume.
@@ -209,17 +211,22 @@ class OpLog {
    * Appends a batch; resolves once it is on disk. Returns the entries with
    * their seqs, so the caller can announce them by id. Rolls the open files
    * into a segment when enough have accumulated. Ops in `skipped` were
-   * accepted but not applied here (a beforeApply hook said no): they are
-   * logged and served like any other, and flagged so a reopen's replay of
-   * the tail leaves them alone too.
+   * accepted but not applied here (a beforeApply hook said no, the record
+   * failed its schema, or the op is from a newer schema version — then
+   * `held` maps it to that version): they are logged and served like any
+   * other, and flagged so a reopen's replay of the tail leaves them alone
+   * too; a held one is applied once this node runs its version.
    */
-  append(ops, { skipped = null } = {}) {
+  append(ops, { skipped = null, held = null } = {}) {
     return this.#serialize(async () => {
       if (ops.length === 0) return [];
       const entries = [];
       for (const op of ops) {
         const seq = this.#next++;
-        entries.push(skipped?.has(op) ? { seq, op, skipped: true } : { seq, op });
+        const entry = { seq, op };
+        if (skipped?.has(op)) entry.skipped = true;
+        if (held?.has(op)) entry.held = held.get(op);
+        entries.push(entry);
       }
       const name = `${pad(entries[0].seq)}.json`;
       const started = this.#otel.enabled ? now() : 0;
@@ -284,6 +291,9 @@ class OpLog {
       const tooMany = ops ? this.#entries.length > ops : false;
       if (!(tooMany && overOps) && !overAge) break;
       this.#segments.shift();
+      for (const entry of this.#entries) {
+        if (entry.seq <= oldest.to && entry.held !== undefined) this.#droppedHeld++;
+      }
       this.#entries = this.#entries.filter((entry) => entry.seq > oldest.to);
       this.#floor = oldest.to + 1;
       await fsi.remove(this.#path, oldest.name);
@@ -299,8 +309,27 @@ class OpLog {
       next: this.#next,
       vector: this.#vector,
       segments: this.#segments,
+      droppedHeld: this.#droppedHeld,
     };
     await fsi.write(this.#path, INDEX, JSON.stringify(index));
+  }
+
+  /** The entries held for a newer schema version, oldest first. */
+  held() {
+    return this.#entries.filter((entry) => entry.held !== undefined);
+  }
+
+  /** How many held entries compaction has dropped — lost for good — since the last reset. */
+  get droppedHeld() {
+    return this.#droppedHeld;
+  }
+
+  resetDroppedHeld() {
+    return this.#serialize(async () => {
+      if (this.#droppedHeld === 0) return;
+      this.#droppedHeld = 0;
+      await this.#writeIndex();
+    });
   }
 
   /**

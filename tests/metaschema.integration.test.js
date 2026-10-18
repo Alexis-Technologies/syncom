@@ -134,6 +134,66 @@ test('syncom with metaschema', { skip: metaschema ? false : '@alexify/metaschema
     assert.strictEqual((await c.get(project.id)).name, 'Alioth', 'ops still flow');
   });
 
+  await t.test('a v2 model reads v1 records through aliases and defaults; migrate() rewrites them', async (t2) => {
+    const { diff, compatibility } = require('@alexify/metaschema/model');
+    const v1 = new Model(
+      {},
+      new Map([['Project', { Registry: {}, orgId: 'string', title: 'string', slug: 'string' }]]),
+    );
+    const dirs = new Map();
+    const createStorage = async (t3, name, options = {}) => {
+      const key = `${t3.name}:${name}`;
+      if (!dirs.has(key)) {
+        dirs.set(key, await createTemp());
+        t3.after(() => cleanupTemp(dirs.get(key)));
+      }
+      const storage = await syncom.open({ path: dirs.get(key), logger: false, ...options });
+      t3.after(() => storage.close().catch(() => {}));
+      return storage;
+    };
+    const schemaOf = (m, version) => ({
+      version,
+      snapshot: m.toJSON(),
+      entities: Object.fromEntries([...m.entities].map(([name, schema]) => [name, { schema }])),
+    });
+    const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage, {
+      nodes: { A: { schema: schemaOf(v1, 1) }, B: { schema: schemaOf(model, 2) } },
+    });
+    const [a, b] = ['A', 'B'].map((name) => mesh.get(name));
+    await waitUntil(() => a.sync.peers()[0]?.subscribed);
+    const project = await a.Project.insert({ title: 'Alioth', slug: 'alioth', orgId: 'org1' });
+    await settle([a, b]);
+    assert.deepStrictEqual(await b.get(project.id), {
+      name: 'Alioth',
+      slug: 'alioth',
+      orgId: 'org1',
+      desc: '',
+      $type: 'Project',
+    });
+    assert.deepStrictEqual((await b.snapshot()).records[0].data, {
+      title: 'Alioth',
+      slug: 'alioth',
+      orgId: 'org1',
+      $type: 'Project',
+    });
+    await b.Project.update(project.id, { desc: 'A data modeler' });
+    await settle([a, b]);
+    assert.deepStrictEqual(await a.get(project.id), {
+      title: 'Alioth',
+      slug: 'alioth',
+      orgId: 'org1',
+      desc: 'A data modeler',
+      $type: 'Project',
+    });
+    assert.deepStrictEqual(await b.migrate(), { migrated: 1, counters: 0 });
+    await settle([a, b]);
+    const migrated = { name: 'Alioth', slug: 'alioth', orgId: 'org1', desc: 'A data modeler', $type: 'Project' };
+    assert.deepStrictEqual(await b.get(project.id), migrated);
+    assert.deepStrictEqual(await a.get(project.id), migrated, 'A (v1) applies the v2 write as it is');
+    // What metaschema says of the change: a reader on v2 reads v1 data.
+    assert.strictEqual(compatibility(diff(v1, model)), 'backward');
+  });
+
   await t.test('a struct is handed no id; an async validator is awaited', async (t2) => {
     const Address = Schema.from({
       Struct: {},

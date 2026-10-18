@@ -30,6 +30,8 @@ export type {
   ValidationIssue,
   SchemaInfo,
   SchemaStatus,
+  Migration,
+  MigrationContext,
   StorageOptions,
   StorageHooks,
   WriteContext,

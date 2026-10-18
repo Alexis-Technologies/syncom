@@ -13,9 +13,13 @@
 // everything a validator returns or throws is normalized here, once, so the
 // write path sees `async (record) => validated` and nothing else.
 
+const { deepEqual } = require('./ops.js');
+
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const SCHEMA_KEYS = ['version', 'entities', 'snapshot'];
+const SCHEMA_KEYS = ['version', 'entities', 'snapshot', 'migrations', 'ahead', 'lens'];
+const AHEAD = ['apply', 'hold'];
+const LENS = ['migrations', 'validate', 'both'];
 const ENTITY_KEYS = ['schema', 'idField', 'validate', 'index', 'unique', 'fields'];
 
 const fail = (entity, text) => new TypeError(`open({ schema }): entity ${entity}: ${text}`);
@@ -242,14 +246,50 @@ const normalizeEntity = (name, def, validator) => {
   };
 };
 
+const isMigration = (value) =>
+  isObject(value) && typeof value.up === 'function' && (value.down === undefined || typeof value.down === 'function');
+
+// `migrations` keyed by the version each one migrates TO (`2` takes a record
+// from 1 to 2): a storage-wide `{ up }`, or `{ [entity]: { up } }`. `down`
+// is accepted and reserved. A Map of version → `{ up }` | Map<entity, { up }>.
+const normalizeMigrations = (migrations, version) => {
+  if (migrations === undefined) return null;
+  if (!isObject(migrations)) throw new TypeError('open({ schema }): migrations must be an object keyed by version');
+  const chain = new Map();
+  for (const key of Object.keys(migrations)) {
+    const to = Number(key);
+    if (!Number.isInteger(to) || to < 2 || String(to) !== key) {
+      throw new TypeError(`open({ schema }): migrations: '${key}' is not a version of 2 or more`);
+    }
+    if (to > version) throw new TypeError(`open({ schema }): migrations: ${key} is beyond version ${version}`);
+    const value = migrations[key];
+    if (isMigration(value)) {
+      chain.set(to, { up: value.up });
+      continue;
+    }
+    if (!isObject(value)) {
+      throw new TypeError(`open({ schema }): migrations[${key}] must be { up } or { [entity]: { up } }`);
+    }
+    const perEntity = new Map();
+    for (const [entity, migration] of Object.entries(value)) {
+      if (!isMigration(migration)) throw new TypeError(`open({ schema }): migrations[${key}].${entity} must be { up }`);
+      perEntity.set(entity, { up: migration.up });
+    }
+    chain.set(to, perEntity);
+  }
+  return chain;
+};
+
 /**
- * `open({ schema, validator })` normalized: `{ version, entities, snapshot }`,
- * the entities a Map of `{ name, schema, standard, validator, idField, index,
- * unique, fields }`, `snapshot` whatever JSON describes the schema (hashed by
- * the storage, exchanged in hello). Unknown keys, a malformed definition and
- * a schema this engine cannot validate are TypeErrors here, at open — a
- * schema that silently never validates would be a validation that silently
- * never runs.
+ * `open({ schema, validator })` normalized: `{ version, entities, snapshot,
+ * migrations, ahead, lens }` — the entities a Map of `{ name, schema,
+ * standard, validator, idField, index, unique, fields }`, `snapshot` whatever
+ * JSON describes the schema (hashed by the storage, exchanged in hello),
+ * `migrations` the up-chain, `ahead` what to do with an op from a newer
+ * version, `lens` which steps read an older record. Unknown keys, a malformed
+ * definition and a schema this engine cannot validate are TypeErrors here, at
+ * open — a schema that silently never validates would be a validation that
+ * silently never runs.
  */
 const normalizeSchema = (schema, { validator } = {}) => {
   if (validator !== undefined && (!isObject(validator) || typeof validator.compile !== 'function')) {
@@ -257,7 +297,9 @@ const normalizeSchema = (schema, { validator } = {}) => {
   }
   const compiler = validator === undefined ? null : validator;
   const entities = new Map();
-  if (schema === undefined || schema === null) return { version: 1, entities, snapshot: undefined };
+  if (schema === undefined || schema === null) {
+    return { version: 1, entities, snapshot: undefined, migrations: null, ahead: 'apply', lens: 'both' };
+  }
   if (!isObject(schema)) throw new TypeError('open({ schema }): schema must be an object');
   for (const key of Object.keys(schema)) {
     if (!SCHEMA_KEYS.includes(key)) throw new TypeError(`open({ schema }): unknown key '${key}'`);
@@ -265,6 +307,14 @@ const normalizeSchema = (schema, { validator } = {}) => {
   const version = schema.version === undefined ? 1 : schema.version;
   if (!Number.isInteger(version) || version < 1) {
     throw new TypeError('open({ schema }): version must be a positive integer');
+  }
+  const ahead = schema.ahead === undefined ? 'apply' : schema.ahead;
+  if (!AHEAD.includes(ahead)) throw new TypeError("open({ schema }): ahead must be 'apply' or 'hold'");
+  const lens = schema.lens === undefined ? 'both' : schema.lens;
+  if (!LENS.includes(lens)) throw new TypeError("open({ schema }): lens must be 'migrations', 'validate' or 'both'");
+  const migrations = normalizeMigrations(schema.migrations, version);
+  if (lens === 'validate' && migrations !== null) {
+    throw new TypeError("open({ schema }): lens 'validate' skips the migrations the schema declares");
   }
   const source = schema.entities;
   if (source !== undefined && source !== null) {
@@ -276,7 +326,49 @@ const normalizeSchema = (schema, { validator } = {}) => {
       entities.set(name, normalizeEntity(name, def, compiler));
     }
   }
-  return { version, entities, snapshot: schema.snapshot };
+  return { version, entities, snapshot: schema.snapshot, migrations, ahead, lens };
+};
+
+// ---------------------------------------------------------------------------
+// The lens: how a record written under an older version reads under this
+// one. Step 1, the migrations from the record's version up to this one;
+// step 2, the entity's Standard Schema validator — its aliases and defaults
+// are a rename and a fill for free, and metaschema's own `validate` is the
+// lens of its evolution model. Neither step writes anything: the record
+// stays as it is until `migrate()` rewrites it, and the view is cached on
+// the entry. A validator that refuses the record leaves step 1's result
+// (logged at debug); a migration that returns no object is a TypeError.
+
+const createLens = ({ version, entities, migrations, lens }, logger) => {
+  const chain = lens === 'validate' ? null : migrations;
+  const validates = lens !== 'migrations';
+  return async (id, data, from) => {
+    const type = data.$type;
+    const entity = typeof type === 'string' ? type : null;
+    let out = {};
+    for (const key of Object.keys(data)) if (key !== '$type') out[key] = data[key];
+    if (chain !== null) {
+      for (let to = from + 1; to <= version; to++) {
+        const step = chain.get(to);
+        const migration = step instanceof Map ? (entity === null ? undefined : step.get(entity)) : step;
+        if (!migration) continue;
+        out = await migration.up(out, { entity, id, from: to - 1, to });
+        if (!isObject(out)) throw new TypeError(`open({ schema }): migrations[${to}] must return an object (${id})`);
+      }
+    }
+    const def = entity === null ? undefined : entities.get(entity);
+    if (validates && def?.standard && def.validator) {
+      let output = null;
+      try {
+        output = await def.validator(project(def, id, out));
+      } catch (error) {
+        logger.debug({ event: 'schema.lens.issues', entity, id, issues: error.issues });
+      }
+      if (output !== null) return unproject(def, output, type);
+    }
+    if (type !== undefined) out.$type = type;
+    return out;
+  };
 };
 
 // ---------------------------------------------------------------------------
@@ -306,17 +398,18 @@ const unproject = (def, output, type) => {
 };
 
 // A `set` carries only the fields it names. Of the validated record keep the
-// keys of the delta (in their validated form) and the keys the record did
-// not have (defaults, alias targets). A delta key the validator dropped
-// drops out of the delta — the op never carries it — and a key outside the
-// delta is never touched, so a `set` stays a `set`: promoting it to a
-// whole-record write would reset the record's base and erase concurrent
-// sets and counters from other peers.
-const foldSet = (delta, validated, projected) => {
+// keys of the delta (in their validated form) and the keys whose value is
+// not what the record read as before the write (defaults, alias targets, a
+// migration's rename). A delta key the validator dropped drops out of the
+// delta — the op never carries it — and a key the validator left as it was
+// is never touched, so a `set` stays a `set`: promoting it to a whole-record
+// write would reset the record's base and erase concurrent sets and
+// counters from other peers.
+const foldSet = (delta, validated, before) => {
   const next = {};
   for (const key of Object.keys(validated)) {
     if (key === '$type') continue;
-    if (Object.hasOwn(delta, key) || !Object.hasOwn(projected, key)) next[key] = validated[key];
+    if (Object.hasOwn(delta, key) || !deepEqual(validated[key], before[key])) next[key] = validated[key];
   }
   return next;
 };
@@ -325,6 +418,7 @@ module.exports = {
   ValidationError,
   normalizeSchema,
   normalizeValidator,
+  createLens,
   deriveIdField,
   derivedIndexes,
   toIssues,

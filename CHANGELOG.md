@@ -12,6 +12,21 @@ section until the first publish; everything below lands there on release day.
 
 ### Added
 
+- **Reading across schema versions.** A record of an older version is read
+  through a lens: `schema.migrations` (keyed by the version migrated to,
+  storage-wide or per entity, `up(data, { entity, id, from, to })`), then
+  the entity's Standard Schema validator (aliases and defaults — a metaschema
+  model reads a renamed field with no migration written); `schema.lens`
+  picks the steps. `get()`, `Record` and `swap()` read the view, `update()`
+  validates and folds through it; `snapshot()`, `getCachedData()` and
+  replication stay raw. `storage.migrate({ entities?, batch? })` rewrites
+  the old records as whole-record writes of their view with the counters
+  added back — idempotent, one node runs it. `schema.ahead`: `'apply'`
+  (default) applies an op from a newer version as it is and emits `schema`
+  `{ kind: 'ahead', op, held: false }`; `'hold'` keeps it in the log
+  (`LogEntry.held`, `OpLog.held()`, `droppedHeld`) until an open runs that
+  version, reported as `schemaInfo.held = { replayed, lost }`. Browser
+  budget raised 20.5 → 22 KB.
 - **Schema versions on the wire.** `open({ schema: { version, snapshot } })`:
   the version (a positive integer, 1 by default) is stamped on every op this
   node makes as `v` (the 13th slot of the packed shape; older readers ignore

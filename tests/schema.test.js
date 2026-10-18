@@ -10,6 +10,7 @@ const {
   ValidationError,
   normalizeSchema,
   normalizeValidator,
+  createLens,
   deriveIdField,
   derivedIndexes,
   toIssues,
@@ -73,7 +74,7 @@ test('normalizeSchema', async (t) => {
 
   await t.test('the shape is checked at open, with TypeErrors that name the problem', () => {
     assert.throws(() => normalizeSchema('nope'), typeError('open({ schema }): schema must be an object'));
-    assert.throws(() => normalizeSchema({ migrations: {} }), typeError("open({ schema }): unknown key 'migrations'"));
+    assert.throws(() => normalizeSchema({ lenses: {} }), typeError("open({ schema }): unknown key 'lenses'"));
     for (const version of [0, -1, 1.5, '2', null]) {
       assert.throws(
         () => normalizeSchema({ version }),
@@ -195,6 +196,108 @@ test('normalizeSchema', async (t) => {
     const { entities } = normalizeSchema({ entities: { Post: { schema: standard((v) => ({ value: v })) } } });
     assert.strictEqual(entities.get('Post').standard, true);
     assert.strictEqual(typeof entities.get('Post').validator, 'function');
+  });
+});
+
+test('createLens', async (t) => {
+  const quiet = { debug() {} };
+  const lensOf = (schema, logger = quiet) => createLens(normalizeSchema(schema), logger);
+
+  await t.test('runs the up-chain from the record’s version, per entity or storage-wide, in order', async () => {
+    const calls = [];
+    const lens = lensOf({
+      version: 4,
+      entities: { Post: {}, Tag: {} },
+      migrations: {
+        2: {
+          up: (data, ctx) => {
+            calls.push(['2', ctx]);
+            return { ...data, two: true };
+          },
+        },
+        3: {
+          Post: {
+            up: (data, ctx) => {
+              calls.push(['3.Post', ctx]);
+              return { ...data, three: true };
+            },
+          },
+        },
+        4: { Tag: { up: (data) => ({ ...data, four: true }) } },
+      },
+    });
+    assert.deepStrictEqual(await lens('p', { $type: 'Post', title: 'x' }, 1), {
+      title: 'x',
+      two: true,
+      three: true,
+      $type: 'Post',
+    });
+    assert.deepStrictEqual(calls, [
+      ['2', { entity: 'Post', id: 'p', from: 1, to: 2 }],
+      ['3.Post', { entity: 'Post', id: 'p', from: 2, to: 3 }],
+    ]);
+    assert.deepStrictEqual(await lens('t', { $type: 'Tag', n: 1 }, 2), { n: 1, four: true, $type: 'Tag' });
+    assert.deepStrictEqual(await lens('x', { n: 1 }, 1), { n: 1, two: true }, 'no $type: the storage-wide step only');
+    assert.deepStrictEqual(await lens('x', { n: 1, $type: 'Nope' }, 3), { n: 1, $type: 'Nope' });
+    await assert.rejects(() => lensOf({ version: 2, migrations: { 2: { up: () => null } } })('x', { n: 1 }, 1), {
+      name: 'TypeError',
+      message: 'open({ schema }): migrations[2] must return an object (x)',
+    });
+  });
+
+  await t.test('then the entity’s Standard Schema validator; its issues leave the migrated data', async () => {
+    const debug = [];
+    const Post = standard((value) =>
+      value.slug === undefined
+        ? { issues: [{ message: 'is required', path: ['slug'] }] }
+        : { value: { ...value, status: value.status ?? 'draft' } },
+    );
+    const lens = lensOf(
+      {
+        version: 2,
+        entities: { Post: { schema: Post } },
+        migrations: { 2: { Post: { up: ({ title, ...rest }) => ({ ...rest, name: title }) } } },
+      },
+      { debug: (entry) => debug.push(entry) },
+    );
+    assert.deepStrictEqual(await lens('p', { $type: 'Post', title: 'x', slug: 's' }, 1), {
+      name: 'x',
+      slug: 's',
+      status: 'draft',
+      $type: 'Post',
+    });
+    assert.deepStrictEqual(await lens('p', { $type: 'Post', title: 'x' }, 1), { name: 'x', $type: 'Post' });
+    assert.deepStrictEqual(debug, [
+      { event: 'schema.lens.issues', entity: 'Post', id: 'p', issues: [{ path: ['slug'], message: 'is required' }] },
+    ]);
+    // A function validator is not a lens: it has no aliases or defaults to offer.
+    const fn = lensOf({ version: 2, entities: { Post: { schema: () => ({ added: true }) } } });
+    assert.deepStrictEqual(await fn('p', { $type: 'Post', title: 'x' }, 1), { title: 'x', $type: 'Post' });
+    // `lens` picks the steps.
+    const only = lensOf({ version: 2, entities: { Post: { schema: Post } }, lens: 'validate' });
+    assert.deepStrictEqual(await only('p', { $type: 'Post', slug: 's' }, 1), {
+      slug: 's',
+      status: 'draft',
+      $type: 'Post',
+    });
+    const none = lensOf({ version: 2, entities: { Post: { schema: Post } }, lens: 'migrations' });
+    assert.deepStrictEqual(await none('p', { $type: 'Post', slug: 's' }, 1), { slug: 's', $type: 'Post' });
+  });
+
+  await t.test('normalizeSchema reads migrations, ahead and lens', () => {
+    const up = () => ({});
+    const { migrations, ahead, lens } = normalizeSchema({
+      version: 3,
+      migrations: { 2: { up }, 3: { Post: { up, down: up } } },
+    });
+    assert.deepStrictEqual([...migrations.keys()], [2, 3]);
+    assert.deepStrictEqual(migrations.get(2), { up });
+    assert.deepStrictEqual([...migrations.get(3).entries()], [['Post', { up }]]);
+    assert.deepStrictEqual([ahead, lens], ['apply', 'both']);
+    assert.deepStrictEqual(normalizeSchema({ ahead: 'hold', lens: 'migrations' }).ahead, 'hold');
+    assert.deepStrictEqual(normalizeSchema(null).migrations, null);
+    assert.throws(() => normalizeSchema({ version: 2, migrations: { 2: { up, down: 'x' } } }), /must be \{ up \}/);
+    assert.throws(() => normalizeSchema({ version: 2, migrations: { 2.5: { up } } }), /not a version of 2 or more/);
   });
 });
 
@@ -373,5 +476,13 @@ test('project, unproject, foldSet', async (t) => {
       createdAt: 't',
     });
     assert.deepStrictEqual(foldSet({ extra: 1 }, { name: 'old', $type: 'Post' }, projected), {});
+    // A key outside the delta whose validated value changed (a lens rename) is carried too.
+    assert.deepStrictEqual(
+      foldSet({ desc: 'd' }, { name: 'new', desc: 'd', $type: 'Post' }, { name: 'old', desc: '' }),
+      {
+        name: 'new',
+        desc: 'd',
+      },
+    );
   });
 });

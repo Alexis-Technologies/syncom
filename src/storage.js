@@ -5,10 +5,10 @@ const { encrypt, decrypt, loadKeys, calculateHash } = require('./crypto.js');
 const { Blockchain } = require('./chain.js');
 const { SyncManager } = require('./sync.js');
 const { OpLog } = require('./log.js');
-const { applyOp, isAlive, latestClock } = require('./ops.js');
+const { applyOp, isAlive, isCounter, latestClock } = require('./ops.js');
 const { Clock, opKey, keyScope, vectorHas, vectorNext, vectorAdvance } = require('./vector.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
-const { normalizeSchema, project, unproject, foldSet } = require('./schema.js');
+const { normalizeSchema, createLens, project, unproject, foldSet } = require('./schema.js');
 const fsi = require('./fsi.js');
 const { createTelemetry, traced, now } = require('./telemetry.js');
 
@@ -234,6 +234,9 @@ class Storage extends Emitter {
   #snapshot = undefined;
   #schemaHash = null;
   #schemaPrevious = null;
+  #lens = null;
+  #ahead = 'apply';
+  #held = null;
   #getId = null;
   #logger;
   #otel;
@@ -274,6 +277,14 @@ class Storage extends Emitter {
     if (schema !== null) {
       this.#version = normalized.version;
       this.#snapshot = normalized.snapshot;
+      this.#ahead = normalized.ahead;
+      this.#lens = createLens(normalized, this.#logger);
+      // A held op lives in the log until this node runs its version;
+      // retention that would drop it first makes the hold a silent loss.
+      const retained = options.sync?.retention?.ops;
+      if (this.#ahead === 'hold' && retained !== undefined && retained < 1000) {
+        throw new TypeError("open({ schema }): ahead 'hold' needs sync.retention.ops of 1000 or more");
+      }
     }
     if (options.getId !== undefined) {
       if (typeof options.getId !== 'function') throw new TypeError('open({ getId }): getId must be a function');
@@ -303,6 +314,7 @@ class Storage extends Emitter {
     await this.#loadIdentity();
     await this.#loadSchema();
     await this.#replayTail();
+    await this.#replayHeld();
     this.#sync = await new SyncManager(this, this.#options.sync);
     this.#initCollections();
     return this;
@@ -331,6 +343,13 @@ class Storage extends Emitter {
       this.#schemaPrevious = { version: stored.version, hash: stored.hash };
       const event = stored.version === version ? 'schema.changed' : 'schema.upgrade';
       this.#logger[stored.version > version ? 'warn' : 'info']({ event, from: stored.version, to: version });
+      // Holding ops from a version this directory already ran makes no
+      // sense: its own records are of that version.
+      if (stored.version > version && this.#ahead === 'hold') {
+        throw new Error(
+          `Schema version ${version} is below the ${stored.version} this directory ran; ahead 'hold' cannot downgrade`,
+        );
+      }
     }
     // `migrated`: when this version first ran here — kept across a snapshot
     // change of the same version.
@@ -346,7 +365,81 @@ class Storage extends Emitter {
    */
   get schemaInfo() {
     if (this.#version === null) return null;
-    return { version: this.#version, hash: this.#schemaHash, previous: this.#schemaPrevious };
+    return { version: this.#version, hash: this.#schemaHash, previous: this.#schemaPrevious, held: this.#held };
+  }
+
+  // Ops held for a newer schema version (`ahead: 'hold'`) that this node
+  // now runs: applied in log order, as if they had just arrived. The log
+  // keeps them flagged, so a later open applies them again as no-ops; what
+  // compaction dropped before the upgrade is counted as lost, once.
+  async #replayHeld() {
+    if (this.#version === null) return;
+    const lost = this.#log.droppedHeld;
+    const entries = this.#log.held().filter((entry) => entry.held <= this.#version);
+    if (entries.length === 0 && lost === 0) return;
+    const touched = new Map();
+    for (const { seq, op } of entries) {
+      this.#clock.observe(op.ts);
+      const current = touched.get(op.id) ?? (await this.#load(op.id));
+      if (current?.encrypted) continue;
+      const { entry, changed } = applyOp(current, op);
+      if (changed) touched.set(op.id, { ...entry, seq });
+    }
+    if (touched.size > 0) {
+      await this.#persistBatch(touched, entries[0].seq, entries[entries.length - 1].seq);
+    }
+    if (lost > 0) await this.#log.resetDroppedHeld();
+    this.#held = { replayed: touched.size, lost };
+    this.#logger.info({ event: 'schema.held', ...this.#held });
+  }
+
+  // What a record reads as: itself when it is of this node's version (or
+  // newer, or there is no schema), the lens of it otherwise, computed once
+  // per cached entry. Replication (`snapshot`, `applyOp`) reads the raw data.
+  async #view(id, entry) {
+    if (this.#lens === null || (entry.meta.v ?? 1) >= this.#version) return entry.data;
+    return (entry.view ??= await this.#lens(id, entry.data, entry.meta.v ?? 1));
+  }
+
+  /**
+   * Rewrites every record of an older version as this one, through the
+   * lens: a whole-record write of the view, then the counters added back
+   * (a write resets them). One designated node runs it; peers receive
+   * ordinary ops. Idempotent — a record already of this version is left
+   * alone. `entities` limits it to those collections; `batch` is how many
+   * records go between turns of the event loop.
+   */
+  async migrate({ entities = null, batch = 100 } = {}) {
+    if (this.#version === null) throw new TypeError('migrate() needs open({ schema })');
+    if (entities !== null && !(Array.isArray(entities) && entities.every((name) => typeof name === 'string'))) {
+      throw new TypeError('migrate({ entities }) takes an array of entity names');
+    }
+    if (!Number.isInteger(batch) || batch < 1) throw new TypeError('migrate({ batch }) takes a positive integer');
+    const result = { migrated: 0, counters: 0 };
+    let since = 0;
+    for (const id of await this.list()) {
+      const entry = await this.#load(id);
+      if (!entry || entry.encrypted || (entry.meta.v ?? 1) >= this.#version) continue;
+      if (entities !== null && !entities.includes(entry.data.$type)) continue;
+      const view = await this.#view(id, entry);
+      const data = {};
+      const counters = {};
+      for (const key of Object.keys(view)) {
+        if (isCounter(entry.meta, key)) counters[key] = entry.data[key];
+        else data[key] = view[key];
+      }
+      await this[COMMIT]('write', id, { data });
+      for (const key of Object.keys(counters)) {
+        await this[COMMIT]('inc', id, { key, value: counters[key] });
+        result.counters++;
+      }
+      result.migrated++;
+      if (++since >= batch) {
+        since = 0;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    }
+    return result;
   }
 
   // The node id is minted once and never changes; the own sequence numbers
@@ -577,7 +670,7 @@ class Storage extends Emitter {
     const def = this.#definitionOf(entry.data);
     if (!def?.validator || !VALIDATED.has(op.type)) return null;
     try {
-      await def.validator(project(def, op.id, entry.data));
+      await def.validator(project(def, op.id, await this.#view(op.id, entry)));
       return null;
     } catch (error) {
       return { entity: def.name, issues: error.issues };
@@ -692,11 +785,13 @@ class Storage extends Emitter {
     // to fold.
     const def = this.#definitionOf(entry.data);
     if (def?.validator && VALIDATED.has(type)) {
-      const projected = project(def, id, entry.data);
-      const output = await def.validator(projected);
+      // Through the lens: a record of an older version is validated as it
+      // reads, and a set is folded against how it read before the write.
+      const output = await def.validator(project(def, id, await this.#view(id, entry)));
       if (type !== 'inc') {
         const validated = unproject(def, output, entry.data.$type);
-        op.data = type === 'write' ? validated : foldSet(op.data, validated, projected);
+        if (type === 'write') op.data = validated;
+        else op.data = foldSet(op.data, validated, visible ? project(def, id, await this.#view(id, current)) : {});
         ctx.data = op.data;
         ({ entry, changed, delta, rejected } = applyOp(current, op));
         this.#refuse(id, rejected);
@@ -796,7 +891,7 @@ class Storage extends Emitter {
     const entry = await this.#load(id);
     if (entry === null) return null;
     if (entry.encrypted) return entry.data;
-    return isAlive(entry) ? entry.data : null;
+    return isAlive(entry) ? this.#view(id, entry) : null;
   }
 
   async get(id) {
@@ -917,6 +1012,7 @@ class Storage extends Emitter {
       const vector = this.#log.vector;
       let adopted = null;
       let skipped = null;
+      let held = null;
       let duplicates = 0;
       let gaps = 0;
       for (const op of ops) {
@@ -954,6 +1050,18 @@ class Storage extends Emitter {
           accepted.push(op);
           continue;
         }
+        // From a newer schema version than this node runs: applied as it is
+        // (registers are forward-tolerant; the validator does not know the
+        // shape), or held in the log until this node runs that version.
+        const ahead = this.#version !== null && Number.isInteger(op.v) && op.v > this.#version;
+        if (ahead && this.#ahead === 'hold') {
+          vectorAdvance(vector, op);
+          accepted.push(op);
+          (skipped ??= new Set()).add(op);
+          (held ??= new Map()).set(op, op.v);
+          notify(this, this.#logger, 'schema', { kind: 'ahead', op, held: true });
+          continue;
+        }
         const current = touched.get(op.id) ?? (await this.#load(op.id));
         if (current?.encrypted) {
           this.#logger.warn({ event: 'sync.op.encrypted', id: op.id });
@@ -983,7 +1091,7 @@ class Storage extends Emitter {
         }
         // Invalid under this node's schema: skipped like a beforeApply
         // `false` — logged, relayed, replay-safe — and reported.
-        const invalid = changed ? await this.#invalid(op, entry) : null;
+        const invalid = changed && !ahead ? await this.#invalid(op, entry) : null;
         if (invalid) {
           this.#logger.warn({ event: 'sync.op.invalid', id: op.id, ...invalid });
           this.#otel.recordRejected('validation');
@@ -993,6 +1101,7 @@ class Storage extends Emitter {
           (skipped ??= new Set()).add(op);
           continue;
         }
+        if (ahead) notify(this, this.#logger, 'schema', { kind: 'ahead', op, held: false });
         vectorAdvance(vector, op);
         accepted.push(op);
         this.#otel.recordLag(op.ts);
@@ -1002,7 +1111,7 @@ class Storage extends Emitter {
       }
       const result = { applied: accepted.length, skipped: skipped?.size ?? 0, duplicates, gaps };
       if (accepted.length > 0) {
-        const entries = await this.#log.append(accepted, { skipped });
+        const entries = await this.#log.append(accepted, { skipped, held });
         if (adopted) await this.#log.advance(adopted);
         if (touched.size > 0) {
           await this.#persistBatch(touched, entries[0].seq, entries[entries.length - 1].seq);

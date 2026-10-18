@@ -205,6 +205,41 @@ test('OpLog', async (t) => {
     }
   });
 
+  await t.test('held entries are flagged, listed, kept through a reopen, and counted when compacted away', async () => {
+    const dir = await createTemp();
+    try {
+      const log = await new OpLog(dir, { rollAfter: 2, retention: { ops: 4 } });
+      const ops = [op('A', 1, { v: 2 }), op('A', 2)];
+      const entries = await log.append(ops, { skipped: new Set([ops[0]]), held: new Map([[ops[0], 2]]) });
+      assert.deepStrictEqual(entries, [
+        { seq: 1, op: ops[0], skipped: true, held: 2 },
+        { seq: 2, op: ops[1] },
+      ]);
+      assert.deepStrictEqual(log.held(), [entries[0]]);
+      assert.strictEqual(log.droppedHeld, 0);
+      await log.close();
+
+      const reopened = await new OpLog(dir, { rollAfter: 2, retention: { ops: 4 } });
+      assert.deepStrictEqual(reopened.held(), [{ seq: 1, op: ops[0], skipped: true, held: 2 }]);
+      // Append past retention: the segment holding it is dropped, and that is counted.
+      for (let seq = 3; seq <= 14; seq++) await reopened.append([op('A', seq)]);
+      assert.deepStrictEqual(reopened.held(), []);
+      assert.strictEqual(reopened.droppedHeld, 1);
+      await reopened.close();
+
+      const again = await new OpLog(dir, { rollAfter: 2, retention: { ops: 4 } });
+      assert.strictEqual(again.droppedHeld, 1, 'persisted with the index');
+      await again.resetDroppedHeld();
+      assert.strictEqual(again.droppedHeld, 0);
+      await again.resetDroppedHeld();
+      await again.close();
+      const index = JSON.parse(await fs.readFile(path.join(dir, 'log', 'index.json'), 'utf8'));
+      assert.strictEqual(index.droppedHeld, 0);
+    } finally {
+      await cleanupTemp(dir);
+    }
+  });
+
   await t.test('flush seals the open files on demand', async () => {
     const dir = await createTemp();
     try {

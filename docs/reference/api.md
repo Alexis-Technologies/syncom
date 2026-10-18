@@ -30,6 +30,7 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 | `has(id)` | `Promise<boolean>` | `false` for a tombstone |
 | `list()` | `Promise<string[]>` | Every live id |
 | `check(entity, data)` | `Promise<unknown>` | Runs the entity's validator as a write would and returns its value; rejects with `ValidationError`; writes nothing |
+| `migrate({ entities, batch }?)` | `Promise<{ migrated, counters }>` | Rewrites records of an older schema version through the lens; idempotent (see [Reading across versions](../guide/storage#reading-across-versions)) |
 | `set(id, data, options?)` | `Promise<void>` | Replaces the record (a `write` op); keeps `$type` unless the data names the same |
 | `update(id, delta)` | `Promise<void>` | Sets the listed fields (a `set` op); throws if absent, or on a counter field |
 | `inc(id, key, value = 1)` | `Promise<void>` | Adds to a counter field (an `inc` op); throws on a register field |
@@ -48,8 +49,8 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 | `adoptVector(vector, { via, from }?)` | `Promise<SyncOp \| null>` | Records what a joined snapshot covers (an `advance` op) |
 | `close()` | `Promise<void>` | Stops sync and seals the log; further writes are refused |
 
-Properties: `schema`, `schemaInfo` (`{ version, hash, previous }`, `null`
-without a schema — see [Schema versions](../guide/storage#schema-versions)),
+Properties: `schema`, `schemaInfo` (`{ version, hash, previous, held }`,
+`null` without a schema — see [Schema versions](../guide/storage#schema-versions)),
 `sync`, `nodeId`, `path`, `log`, `vector`, `logger`, `telemetry` (the writer
 built from the option — opaque).
 Statics: `Storage.Collection`, `Storage.Record`, `Storage.generateId()` — the
@@ -63,7 +64,7 @@ the operation (see [Hooks and events](../guide/hooks#events)):
 | `change` | `(op, via)` | Every op applied here; `via` is `null` for a local write, otherwise the link it came from |
 | `apply` | `({ via, peer, ops, applied, skipped, duplicates, gaps })` | A peer's batch is durable |
 | `error` | `(error)` with `error.op`, and `error.rejected` or `error.entity` + `error.issues` | A peer's op refused by the register/counter rule, or skipped as invalid under this node's schema |
-| `schema` | `({ kind: 'drift', peer, version, hash, local })` | A peer runs this schema version with another snapshot hash (see [Schemas](../guide/sync#schemas)) |
+| `schema` | `({ kind: 'drift', peer, version, hash, local })` / `({ kind: 'ahead', op, held })` | A peer runs this schema version with another snapshot hash (see [Schemas](../guide/sync#schemas)) / a peer's op is from a newer version, applied or held |
 | `close` | — | After `close()` sealed the log |
 
 Hooks (`open({ hooks })`): `beforeWrite`, `afterWrite`, `beforeRead`,
@@ -147,7 +148,9 @@ Structural check for the [link contract](../guide/sync#the-link-contract).
 | Member | Notes |
 | --- | --- |
 | `epoch`, `floor`, `next`, `vector`, `length`, `lastEventId` | See [The log](../guide/sync#the-log) |
-| `append(ops)` | `Promise<LogEntry[]>` — entries with their seqs, once on disk |
+| `append(ops, { skipped, held }?)` | `Promise<LogEntry[]>` — entries with their seqs, once on disk; `skipped` ops are flagged, `held` ones with the version they wait for |
+| `held()` | `LogEntry[]` — the entries held for a newer schema version |
+| `droppedHeld`, `resetDroppedHeld()` | Held entries compaction dropped since the last reset |
 | `since(eventId, { scopes, limit }?)` | `LogEntry[]` after the id, or `null` when it cannot be resumed |
 | `advance(vector)` | Adopts a vector (after a snapshot) |
 | `tail()` | The unsealed entries a reopen replays |

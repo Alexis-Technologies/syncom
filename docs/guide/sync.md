@@ -355,3 +355,7 @@ the engine's own tests run on.
   it applied, in the order it applied it. It is not a consensus.
 - **No signatures.** Trust rests on `authorize`, the token and the transport
   (use `wss://`).
+- **A held op lives in the log.** With `ahead: 'hold'` an op from a newer
+  [schema version](./storage#reading-across-versions) waits as a flagged
+  entry; retention that drops its segment before the upgrade loses it, which
+  `schemaInfo.held.lost` reports once. Hence the 1000-op floor on retention.

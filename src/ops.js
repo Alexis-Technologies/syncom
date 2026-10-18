@@ -348,4 +348,15 @@ const unpackOps = (packed) => {
   return ops;
 };
 
-module.exports = { createEntry, cloneEntry, applyOp, mergeEntry, isAlive, isCounter, latestClock, packOps, unpackOps };
+module.exports = {
+  createEntry,
+  cloneEntry,
+  applyOp,
+  mergeEntry,
+  isAlive,
+  isCounter,
+  latestClock,
+  deepEqual,
+  packOps,
+  unpackOps,
+};
