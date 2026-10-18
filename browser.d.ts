@@ -25,6 +25,9 @@ export type {
   SchemaEntity,
   SchemaEntities,
   Schema,
+  EntityDefinition,
+  SchemaValidator,
+  ValidationIssue,
   StorageOptions,
   StorageHooks,
   WriteContext,
@@ -98,6 +101,7 @@ export {
   Storage,
   open,
   HookError,
+  ValidationError,
 } from './index.js';
 
 // Web Crypto: async where node:crypto is sync.

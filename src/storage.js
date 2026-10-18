@@ -8,11 +8,17 @@ const { OpLog } = require('./log.js');
 const { applyOp, isAlive, latestClock } = require('./ops.js');
 const { Clock, opKey, keyScope, vectorHas, vectorNext, vectorAdvance } = require('./vector.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
+const { normalizeSchema, project, unproject, foldSet } = require('./schema.js');
 const fsi = require('./fsi.js');
 const { createTelemetry, traced, now } = require('./telemetry.js');
 
 const NODE_FILE = 'node.json';
 const GLOBAL_SCOPE = '*';
+
+// The ops an entity's validator sees: the ones that leave a record for the
+// application to read. A `merge` joins a peer's state as it is, a `delete`
+// leaves nothing to validate.
+const VALIDATED = new Set(['write', 'set', 'inc']);
 
 // The hooks a storage accepts (`open({ hooks })`). Writes and reads run
 // their hooks inside this storage; the apply pair runs per peer batch.
@@ -29,6 +35,18 @@ const isPlainObject = (value) => typeof value === 'object' && value !== null && 
 // What a commit came to: an op, `null` for a write that changed nothing, and
 // `undefined` for an encrypted record (saved locally, no op).
 const commitResult = (op) => (op === undefined ? 'encrypted' : op === null ? 'noop' : 'applied');
+
+// `$type` names the collection a record belongs to and never changes: a
+// whole-record write that does not name it keeps it, and neither a write nor
+// a set may name another. A peer's op is applied as it is — it is already in
+// the peer's log, and the collection membership it carries is theirs to keep.
+const sameType = (type, id, data, current) => {
+  const before = current?.$type;
+  if (before === undefined) return data;
+  if (data.$type === undefined) return type === 'write' ? { ...data, $type: before } : data;
+  if (data.$type !== before) throw new TypeError(`Record ${id} is a ${before}; $type is immutable`);
+  return data;
+};
 
 class Reference {
   #id;
@@ -179,11 +197,20 @@ class Collection {
     return this.#storage.get(id);
   }
 
+  /** Replaces the record wholesale, stamped as this collection's. */
+  async set(id, data, options) {
+    if (!isPlainObject(data)) throw new TypeError('set() takes a plain object');
+    return this.#storage.set(id, { ...data, $type: this.#name }, options);
+  }
+
   async delete(id) {
     return this.#storage.delete(id);
   }
 
   async update(id, delta) {
+    if (isPlainObject(delta) && Object.hasOwn(delta, '$type')) {
+      throw new TypeError('$type is immutable; update() may not name it');
+    }
     return this.#storage.update(id, delta);
   }
 
@@ -201,6 +228,7 @@ class Storage extends Emitter {
   #sync = null;
   #cache = new Map();
   #schema = null;
+  #entities = null;
   #getId = null;
   #logger;
   #otel;
@@ -229,10 +257,16 @@ class Storage extends Emitter {
     this.#records = new Map();
     this.#logger = createLogger(options.logger);
     this.#otel = createTelemetry(options.telemetry);
-    if (options.schema) this.#schema = options.schema;
-    // A non-function is ignored rather than rejected: the id generator is a
-    // convenience seam, not a security boundary, and the default still holds.
-    if (typeof options.getId === 'function') this.#getId = options.getId;
+    // The schema is kept as given (`storage.schema`) and read once into the
+    // entity definitions the write path consults: validators, id fields,
+    // indexes. A malformed one is refused here, not at the first write.
+    const schema = options.schema ?? null;
+    this.#entities = normalizeSchema(schema, { validator: options.validator }).entities;
+    this.#schema = schema;
+    if (options.getId !== undefined) {
+      if (typeof options.getId !== 'function') throw new TypeError('open({ getId }): getId must be a function');
+      this.#getId = options.getId;
+    }
     // Encrypt every record at rest by default; a per-call `{ encrypted }`
     // still overrides. Encrypted records are local — see saveData().
     this.#encrypted = options.encrypted === true;
@@ -322,15 +356,32 @@ class Storage extends Emitter {
   }
 
   #initCollections() {
-    const entities = this.#schema?.entities;
-    if (!entities) return;
-    for (const [name] of entities.entries?.() ?? Object.entries(entities)) {
-      this[name] = new Collection(this, name);
-    }
+    for (const name of this.#entities.keys()) this[name] = new Collection(this, name);
   }
 
   get schema() {
     return this.#schema;
+  }
+
+  // The entity definition a record belongs to, by its `$type`.
+  #definitionOf(data) {
+    const type = data.$type;
+    return typeof type === 'string' ? this.#entities.get(type) : undefined;
+  }
+
+  /**
+   * Runs `data` through an entity's validator the way a write would —
+   * under its id field, without `$type` — and returns what the validator
+   * gives back (defaults filled, aliases resolved). Rejects with a
+   * ValidationError; the storage is untouched either way.
+   */
+  async check(entity, data) {
+    const def = this.#entities.get(entity);
+    if (!def) throw new TypeError(`Unknown entity ${entity}`);
+    if (!isPlainObject(data)) throw new TypeError('check() takes a plain object');
+    if (!def.validator) return data;
+    const id = def.idField !== false && typeof data[def.idField] === 'string' ? data[def.idField] : null;
+    return def.validator(project(def, id, data));
   }
 
   /** This node's stable identity — the `origin` of every op it creates. */
@@ -456,6 +507,29 @@ class Storage extends Emitter {
     if (stamp) this.#clock.observe(stamp[0]);
   }
 
+  // The register/counter rule, refused with a hint at the right call.
+  #refuse(id, rejected) {
+    if (rejected.length === 0) return;
+    const [{ field, reason }] = rejected;
+    const hint = reason === 'counter' ? 'a counter; use inc()' : 'a register; use update()';
+    throw new Error(`Field ${field} of record ${id} is ${hint}`);
+  }
+
+  // A peer's op that would leave the record invalid under this node's
+  // schema: `{ entity, issues }`, or null. The verdict is all this node takes
+  // from its validator — the op is the peer's, already in its log, and is
+  // never rewritten here; the same schema gives the same verdict everywhere.
+  async #invalid(op, entry) {
+    const def = this.#definitionOf(entry.data);
+    if (!def?.validator || !VALIDATED.has(op.type)) return null;
+    try {
+      await def.validator(project(def, op.id, entry.data));
+      return null;
+    } catch (error) {
+      return { entity: def.name, issues: error.issues };
+    }
+  }
+
   // ---------------------------------------------------------------------
   // The one local write path. Builds the op, applies it, logs it (durable
   // seq), persists the entry, then announces it.
@@ -527,6 +601,10 @@ class Storage extends Emitter {
       }
       return undefined;
     }
+    if (type === 'write' || type === 'set') {
+      ctx.data = sameType(type, id, payload.data, visible);
+      payload = { ...payload, data: ctx.data };
+    }
     const data = payload.data ?? current?.data ?? {};
     const scope = this.#scope(id, data);
     // Stamp above everything this node already holds for the record — its
@@ -546,13 +624,27 @@ class Storage extends Emitter {
     if (payload.key !== undefined) op.key = payload.key;
     if (payload.value !== undefined) op.value = payload.value;
 
-    const { entry, changed, delta, rejected } = applyOp(current, op);
-    if (rejected.length > 0) {
-      const [{ field, reason }] = rejected;
-      const hint = reason === 'counter' ? 'a counter; use inc()' : 'a register; use update()';
-      throw new Error(`Field ${field} of record ${id} is ${hint}`);
-    }
+    let { entry, changed, delta, rejected } = applyOp(current, op);
+    this.#refuse(id, rejected);
     if (!changed) return null;
+    // Validated as the record will be after the op, and what the validator
+    // gives back (defaults, aliases, stripped keys) becomes the op: the
+    // peers receive the validated record, not the one that was typed. A
+    // throw leaves nothing durable. An `inc` is checked but carries no data
+    // to fold.
+    const def = this.#definitionOf(entry.data);
+    if (def?.validator && VALIDATED.has(type)) {
+      const projected = project(def, id, entry.data);
+      const output = await def.validator(projected);
+      if (type !== 'inc') {
+        const validated = unproject(def, output, entry.data.$type);
+        op.data = type === 'write' ? validated : foldSet(op.data, validated, projected);
+        ctx.data = op.data;
+        ({ entry, changed, delta, rejected } = applyOp(current, op));
+        this.#refuse(id, rejected);
+        if (!changed) return null;
+      }
+    }
 
     const [{ seq: position }] = await this.#log.append([op]);
     const hash = await calculateHash(entry.data);
@@ -830,6 +922,18 @@ class Storage extends Emitter {
           this.#logger.warn({ event: 'sync.op.rejected', id: op.id, rejected });
           this.#otel.recordRejected(rejected[0].reason);
           notify(this, this.#logger, 'error', Object.assign(new Error(`Refused op on ${op.id}`), { op, rejected }));
+        }
+        // Invalid under this node's schema: skipped like a beforeApply
+        // `false` — logged, relayed, replay-safe — and reported.
+        const invalid = changed ? await this.#invalid(op, entry) : null;
+        if (invalid) {
+          this.#logger.warn({ event: 'sync.op.invalid', id: op.id, ...invalid });
+          this.#otel.recordRejected('validation');
+          notify(this, this.#logger, 'error', Object.assign(new Error(`Invalid op on ${op.id}`), { op, ...invalid }));
+          vectorAdvance(vector, op);
+          accepted.push(op);
+          (skipped ??= new Set()).add(op);
+          continue;
         }
         vectorAdvance(vector, op);
         accepted.push(op);

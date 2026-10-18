@@ -10,9 +10,9 @@ const { createTemp, cleanupTemp } = require('./utils/temp.js');
 
 const mockSchema = {
   entities: {
-    Post: { title: 'string', content: 'string', author: 'Author' },
-    Author: { name: 'string', email: 'string' },
-    Comment: { text: 'string', post: 'Post', author: 'Author' },
+    Post: { fields: { title: 'string', content: 'string', author: 'Author' } },
+    Author: { fields: { name: 'string', email: 'string' } },
+    Comment: { fields: { text: 'string', post: 'Post', author: 'Author' } },
   },
 };
 
@@ -164,8 +164,8 @@ test('Storage module', async (t) => {
     try {
       const mapSchema = {
         entities: new Map([
-          ['User', { name: 'string', email: 'string' }],
-          ['Article', { title: 'string', body: 'string' }],
+          ['User', { fields: { name: 'string', email: 'string' } }],
+          ['Article', { fields: { title: 'string', body: 'string' } }],
         ]),
       };
       const options = { path: tempDir, schema: mapSchema };
@@ -437,10 +437,14 @@ test('Storage id generation', async (t) => {
     }
   });
 
-  await t.test('a non-function getId falls back to the default', async () => {
+  await t.test('a non-function getId is refused at open', async () => {
     const tempDir = await createTemp();
     try {
-      const storage = await syncom.open({ path: tempDir, getId: 'nope' });
+      await assert.rejects(async () => syncom.open({ path: tempDir, getId: 'nope' }), {
+        name: 'TypeError',
+        message: 'open({ getId }): getId must be a function',
+      });
+      const storage = await syncom.open({ path: tempDir });
       assert.match(await storage.insert({ a: 1 }), UUID);
     } finally {
       await cleanupTemp(tempDir);

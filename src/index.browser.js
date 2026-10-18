@@ -17,5 +17,19 @@ const { applyOp, mergeEntry, isAlive } = require('./ops.js');
 const ops = { applyOp, mergeEntry, isAlive };
 const { HookError } = require('./hooks.js');
 const hooks = { HookError };
+const { ValidationError } = require('./schema.js');
+const schema = { ValidationError };
 
-module.exports = { ...chain, ...contract, ...crdt, ...crypto, ...fsi, ...storage, ...sync, ...log, ...ops, ...hooks };
+module.exports = {
+  ...chain,
+  ...contract,
+  ...crdt,
+  ...crypto,
+  ...fsi,
+  ...storage,
+  ...sync,
+  ...log,
+  ...ops,
+  ...hooks,
+  ...schema,
+};

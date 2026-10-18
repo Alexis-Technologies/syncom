@@ -13,8 +13,9 @@ const syncom = require('@alexify/syncom');
 ### `open(options?)`
 
 Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
-(alias for `path`), `schema`, `getId`, `logger`, `encrypted`, `sync` (see
-[Sync options](../guide/sync#options)), `telemetry` (see
+(alias for `path`), `schema` and `validator` (see
+[Collections](../guide/storage#collections)), `getId`, `logger`, `encrypted`,
+`sync` (see [Sync options](../guide/sync#options)), `telemetry` (see
 [OpenTelemetry](../guide/telemetry)), `hooks` (see
 [Hooks and events](../guide/hooks)).
 
@@ -28,7 +29,8 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 | `get(id)` | `Promise<unknown>` | `null` when absent or deleted; verifies against the chain |
 | `has(id)` | `Promise<boolean>` | `false` for a tombstone |
 | `list()` | `Promise<string[]>` | Every live id |
-| `set(id, data, options?)` | `Promise<void>` | Replaces the record (a `write` op) |
+| `check(entity, data)` | `Promise<unknown>` | Runs the entity's validator as a write would and returns its value; rejects with `ValidationError`; writes nothing |
+| `set(id, data, options?)` | `Promise<void>` | Replaces the record (a `write` op); keeps `$type` unless the data names the same |
 | `update(id, delta)` | `Promise<void>` | Sets the listed fields (a `set` op); throws if absent, or on a counter field |
 | `inc(id, key, value = 1)` | `Promise<void>` | Adds to a counter field (an `inc` op); throws on a register field |
 | `swap(id, changes, prev)` | `Promise<boolean>` | CAS — `false`, and no write, on mismatch |
@@ -58,7 +60,7 @@ the operation (see [Hooks and events](../guide/hooks#events)):
 | --- | --- | --- |
 | `change` | `(op, via)` | Every op applied here; `via` is `null` for a local write, otherwise the link it came from |
 | `apply` | `({ via, peer, ops, applied, skipped, duplicates, gaps })` | A peer's batch is durable |
-| `error` | `(error)` with `error.op`, `error.rejected` | A peer's op refused by the register/counter rule |
+| `error` | `(error)` with `error.op`, and `error.rejected` or `error.entity` + `error.issues` | A peer's op refused by the register/counter rule, or skipped as invalid under this node's schema |
 | `close` | — | After `close()` sealed the log |
 
 Hooks (`open({ hooks })`): `beforeWrite`, `afterWrite`, `beforeRead`,
@@ -77,8 +79,10 @@ live property per field of the loaded object.
 
 Created per schema entity and exposed as `storage.<EntityName>`.
 
-`name`, `insert(data)`, `get(id)`, `update(id, delta)`, `delete(id)`,
-`record(id)`.
+`name`, `insert(data)`, `get(id)`, `set(id, data, options?)` (stamped as the
+collection's), `update(id, delta)` (refuses a delta naming `$type`),
+`delete(id)`, `record(id)`. Writes through a collection with a `schema` are
+validated — see [Validation](../guide/storage#validation).
 
 ## Sync
 
@@ -117,6 +121,14 @@ Hooks (`open({ sync: { hooks } })`): `beforeConnect`, `beforeBootstrap` — see
 What an operation rejects with when one of its hooks threw: `name`
 `'HookError'`, `code` `'HOOK_FAILED'`, `hook` (the hook's name), `cause` (the
 original error). Exported from the package root.
+
+### `ValidationError`
+
+What a write rejects with when the record would not pass its entity's
+validator — nothing was stamped, logged or written: `name`
+`'ValidationError'`, `code` `'VALIDATION_FAILED'`, `entity` (the collection),
+`issues` (`[{ path, message, code? }]`), and `cause` when the validator threw
+something of its own. Exported from the package root.
 
 ### `isSyncLink(value)`
 

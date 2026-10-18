@@ -12,6 +12,26 @@ section until the first publish; everything below lands there on release day.
 
 ### Added
 
+- **Schema validation, injected.** An entity definition
+  (`open({ schema: { entities: { Project: { schema, idField, validate, index, unique, fields } } } })`)
+  may carry a validator of any of three shapes, none of them a dependency: a
+  Standard Schema (`~standard` — an entity of a metaschema `Model`, zod,
+  valibot, arktype), a compiled function (ajv), or a plain object compiled
+  through `open({ validator })` (JSON Schema, TypeBox; an Ajv instance fits).
+  Every write to the collection is validated as the whole record it leaves,
+  after the op is applied and before anything is logged; what the validator
+  returns (defaults, aliases, stripped keys) is what is written and
+  replicated, a `set` keeping only its own keys. A failed write rejects with
+  `ValidationError` (`code: 'VALIDATION_FAILED'`, `entity`, `issues`,
+  `cause`). A peer's op the schema refuses is skipped like a `beforeApply`
+  `false` and reported through the `error` event (`entity`, `issues`). The id
+  is handed to the validator under `idField` — `id`, metaschema's
+  `<entityName>Id`, or none — and dropped from its output; `validate: false`
+  reads a definition-only schema. `storage.check(entity, data)`,
+  `Collection.set()`, `$type` immutable on the local write path, `index` /
+  `unique` (explicit or off a metaschema schema) checked at open.
+  `@alexify/metaschema` is a devDependency for one skip-guarded integration
+  test. Browser budget raised 18 → 20 KB.
 - **Hooks.** `open({ hooks })` — `beforeWrite` (sees the op being made and
   the record it lands on; may replace the data of a write or a set; a throw
   refuses the write), `afterWrite` (the durable op), `beforeRead` /
@@ -134,6 +154,11 @@ section until the first publish; everything below lands there on release day.
 
 ### Changed (breaking)
 
+- An entity definition is `{ schema?, idField?, validate?, index?, unique?,
+  fields? }` and any other key is a `TypeError` at `open()`; a legacy field
+  map (`Post: { title: 'string' }`) goes under `fields`. A `schema` with a
+  key other than `version` and `entities`, and a `getId` that is not a
+  function, are refused at `open()` too (the latter used to be ignored).
 - `SyncManager` is constructed as `new SyncManager(storage, options)`; nodes
   no longer carry `type: 'uplink' | 'downlink'` — every registered node is
   dialed, and any node can host. `src/sync.browser.js` is gone: one

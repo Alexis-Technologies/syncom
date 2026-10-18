@@ -4,6 +4,7 @@ import type {
   Block,
   Blockchain,
   CrdtDelta,
+  EntityDefinition,
   KeyPair,
   Node,
   Reference,
@@ -63,6 +64,35 @@ syncom.open({ path: 'data', schema: { entities: { Post: {}, Author: {} } } }).th
   expectType<Promise<string>>(typed.insert({ a: 1 }));
 });
 expectAssignable<StorageOptions>({ path: 'data', schema: {} as Schema });
+// Entity definitions: a validator of any of the three shapes, the id key, the indexes.
+expectAssignable<StorageOptions>({
+  schema: {
+    version: 2,
+    entities: {
+      Project: { schema: {}, idField: 'projectId', index: ['orgId'], unique: ['slug', ['orgId', 'name']] },
+      Fn: { schema: (data: unknown) => data !== null, idField: false },
+      Thin: { schema: { fields: {} }, validate: false, fields: { title: 'string' } },
+    },
+  },
+  validator: { compile: () => (data) => data },
+});
+expectAssignable<EntityDefinition>({ schema: {}, validate: false });
+expectAssignable<EntityDefinition>({});
+expectError(syncom.open({ schema: { version: '2' } }));
+expectError(syncom.open({ schema: { migrations: {} } }));
+expectError(syncom.open({ schema: { entities: { P: { idField: 1 } } } }));
+expectError(syncom.open({ schema: { entities: { P: { validate: true } } } }));
+expectError(syncom.open({ schema: { entities: { P: { index: 'orgId' } } } }));
+expectError(syncom.open({ schema: { entities: { P: { uniqe: ['slug'] } } } }));
+expectError(syncom.open({ validator: {} }));
+expectType<Promise<unknown>>(storage.check('Project', { title: 'a' }));
+const validationError = new syncom.ValidationError('Project', [
+  { path: ['title'], message: 'is required', code: 'required' },
+]);
+expectType<'VALIDATION_FAILED'>(validationError.code);
+expectType<string | null>(validationError.entity);
+expectType<syncom.ValidationIssue[]>(validationError.issues);
+expectAssignable<Error>(validationError);
 expectAssignable<StorageOptions>({ getId: () => 'id' });
 expectAssignable<StorageOptions>({ getId: async () => 'id' });
 expectType<string>(syncom.Storage.generateId());
@@ -217,6 +247,11 @@ storage.once('apply', (batch) => {
 });
 storage.on('error', (error) => {
   expectType<syncom.SyncOp | undefined>(error.op);
+  expectType<syncom.ValidationIssue[] | undefined>(error.issues);
+});
+syncom.open({ schema: { entities: { Post: {} } } }).then((typed) => {
+  expectType<Promise<void>>(typed.Post.set('id', { title: 'a' }));
+  expectType<Promise<void>>(typed.Post.set('id', { title: 'a' }, { encrypted: false }));
 });
 storage.on('close', () => {});
 expectType<number>(storage.listenerCount('change'));

@@ -33,8 +33,11 @@ const ENTRIES = [
   // that makes `storage.sync` move data) earned the raise to 14 KB; the
   // injected OpenTelemetry writer (src/telemetry.js and its call sites in
   // storage, log and sync) the raise to 17 KB; hooks (src/hooks.js and the
-  // write, read, apply and sync seams they run in) the raise to 18 KB.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 18 },
+  // write, read, apply and sync seams they run in) the raise to 18 KB; the
+  // schema layer (src/schema.js: entity definitions, the injected validator
+  // normalized to one shape, validation in the write and apply paths) the
+  // raise to 20 KB.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 20 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check

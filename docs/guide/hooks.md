@@ -101,7 +101,10 @@ origin and scope, so an op missing from a log is a gap that stops every later
 op of that stream for everyone who resumes from it, and a vector that does not
 move has the sender offer the same page forever. Skipping is a local decision;
 peers make their own with their own `beforeApply`. A skipped op is flagged in
-the log so a reopen's replay of the unsealed tail leaves it alone too.
+the log so a reopen's replay of the unsealed tail leaves it alone too. The
+same path takes an op that would leave the record invalid under this node's
+[schema](./storage#validation): skipped, logged, relayed, and reported through
+the `error` event rather than a hook.
 
 `applyRemote` reports it: `{ applied, skipped, duplicates, gaps }` — `applied`
 counts every accepted op, skipped ones included; `applied - skipped` reached a

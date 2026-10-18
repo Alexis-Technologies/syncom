@@ -13,7 +13,8 @@ const storage = await open({ path: 'data' });
 | --- | --- | --- |
 | `path` | `'syncom'` | Directory (or OPFS path) holding keys, chain, data and peers |
 | `name` | — | Alias for `path` |
-| `schema` | — | Entity definitions; each name becomes a collection (see below) |
+| `schema` | — | Entity definitions: collections, their validators and indexes ([see below](#collections)) |
+| `validator` | — | Compiles entity schemas that are plain objects without `~standard` ([see below](#validation)) |
 | `getId` | `crypto.randomUUID()` | Id generator for `insert()`; sync or async ([see below](#custom-identifiers)) |
 | `logger` | `console` | A Console or pino-shaped logger, or `false` for silence |
 | `encrypted` | `false` | Encrypt every record at rest by default ([see below](#encryption-at-rest)) |
@@ -82,7 +83,7 @@ await open({ path: 'data', getId: async () => (await fetch('/next-id')).text() }
 ```
 
 `Storage.generateId()` is the default generator, should you want to fall back to
-it. A `getId` that is not a function is ignored and the default stands.
+it. A `getId` that is not a function is refused at `open()`.
 
 Two things the engine does not check for you:
 
@@ -177,6 +178,112 @@ await storage.Post.delete(post.id);
 
 `entities` may be a plain object or a `Map`. Without a schema the storage has
 no collections and you address records by id only.
+
+An entity definition is `{ schema?, idField?, validate?, index?, unique?, fields? }`;
+`{}` is a bare collection. `schema` validates the records ([below](#validation)),
+`idField` names the key the id is handed to the validator under, `index` and
+`unique` — explicit, or read off a metaschema schema's `indexes` and
+`unique: true` fields — are checked at open (no query reads them yet), and
+`fields` is free-form notes kept as given. Anything else is a `TypeError` at
+`open()`: a definition with a typo is a validation that silently never runs.
+
+`$type` is the record's collection and never changes. `storage.set()` without
+it keeps it, `Collection.set()` stamps its own, a write that would change it
+throws, and `Collection.update()` refuses a delta that names it. A record
+outside any collection may join one, and a deleted record may be reborn in
+another.
+
+```js
+await storage.Post.set(post.id, { title: 'Replaced' }); // { title: 'Replaced', $type: 'Post' }
+await storage.set(post.id, { title: 'Again' });          // keeps $type: 'Post'
+await storage.Author.set(post.id, { name: 'x' });        // TypeError: $type is immutable
+```
+
+### Validation
+
+Give an entity a `schema` and every write to its collection — `insert()`,
+`set()`, `update()`, `inc()`, a `Record.save()` — is validated as the whole
+record the write leaves behind, before anything is stamped, logged or written.
+Three shapes are understood, and the package requires none of them:
+
+- a **Standard Schema** — anything with a `~standard` property: an entity of a
+  metaschema `Model`, a zod, valibot or arktype schema;
+- a **function** — an ajv-compiled validator (`false` plus `fn.errors`), or any
+  function that throws on a bad value and returns the value (or nothing) on a
+  good one;
+- a **plain object** compiled through `open({ validator })` — a JSON Schema or
+  TypeBox object handed to `validator.compile(schema, { entity })`; an Ajv
+  instance fits as it is.
+
+```js
+const { Model } = require('@alexify/metaschema');
+
+const model = new Model(
+  {},
+  new Map([
+    [
+      'Project',
+      {
+        Registry: {},
+        orgId: 'string',
+        name: { type: 'string', aliases: ['title'] },
+        slug: 'string',
+        'desc?': { type: 'string', default: '' },
+      },
+    ],
+  ]),
+);
+
+const storage = await open({
+  path: 'data',
+  schema: { entities: { Project: { schema: model.entities.get('Project') } } },
+});
+
+const project = await storage.Project.insert({ title: 'Alioth', slug: 'alioth', orgId: 'org1' });
+await storage.get(project.id);
+// { name: 'Alioth', slug: 'alioth', orgId: 'org1', desc: '', $type: 'Project' }
+
+await storage.Project.insert({ name: 'x' });
+// ValidationError: Project failed validation at orgId: is required (+1 more)
+//   error.issues → [{ path: ['orgId'], message: 'is required', code: 'required' }, { path: ['slug'], … }]
+
+await storage.check('Project', { title: 'Alioth', slug: 'alioth', orgId: 'org1' });
+// { name: 'Alioth', slug: 'alioth', orgId: 'org1', desc: '' } — validated, nothing written
+```
+
+What the validator returns is what is written and replicated: the defaults it
+filled, the aliases it resolved (`title` became `name`), the keys it stripped —
+taken as JSON, so a `Date` a decoder produced is stored as the string it
+serializes to. A failed write rejects with a `ValidationError` — `code:
+'VALIDATION_FAILED'`, `entity`, and `issues` as `[{ path, message, code? }]`,
+with `cause` when the validator threw something of its own — and leaves nothing
+behind. `storage.check(entity, data)` runs the same validator without writing.
+
+The validator sees the record without `$type` and with its id under `idField`:
+`id` by default; metaschema's `<entityName>Id` when the schema's fields have
+that (an entity of a `Model` needs no configuration); nothing at all (`false`)
+for a schema that shows its fields and has neither, such as a metaschema
+struct. Set `idField` to override. The id is dropped from the validator's
+output again. A schema you only want read, not run — one from
+`@alexify/metaschema/definition`, say — takes `validate: false`.
+
+Two things to know about `update()`:
+
+- it is validated as the whole record it leaves, so a required field missing
+  from the delta is fine as long as the record has it;
+- it stays a `set` op: of what the validator returns, only the keys the delta
+  named (in their validated form) and the keys the record did not have (a
+  default, an alias target) are written. Write a field by its own name, not an
+  alias — a delta under an alias of a field the record already has changes
+  nothing, and the alias key an older record holds stays until a whole-record
+  write replaces it.
+
+A peer's op is validated here too, but never rewritten: an op that would leave
+the record invalid under this node's schema is skipped exactly like a
+[`beforeApply` hook returning `false`](./hooks#skipping-a-peers-op) — logged,
+relayed, replay-safe — and reported through the `error` event with
+`error.entity` and `error.issues`. Give every node the same schema and every
+node reaches the same verdict.
 
 ## On disk
 

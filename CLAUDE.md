@@ -21,6 +21,7 @@ wrpc.js / wrpc.d.ts       the @alexify/syncom/wrpc subpath (src/wrpc.js)
 index.d.ts                the Node type surface (hand-written)
 browser.d.ts              re-exports index.d.ts, overrides the 3 async crypto fns
 src/storage.js            Storage, Record, Collection — every write is an op
+src/schema.js             entity definitions, the injected validator (Standard Schema / ajv / compile), ValidationError
 src/ops.js                the record-level model: applyOp / mergeEntry / isAlive, packOps
 src/vector.js             clocks, version vectors, event ids
 src/log.js                OpLog — the persisted operation log over fsi
@@ -110,6 +111,18 @@ docs/                     VitePress site
 - **Encrypted records are local.** `{ encrypted: true }` seals a record for
   this node's key; it produces no op and is excluded from snapshots. Do not
   route an encrypted entry through `applyOp`.
+- **Validation is after `applyOp`, before `#log.append`.** An entity's
+  validator (`src/schema.js`, no requires — it ships to the browser) sees
+  the record as the op leaves it, under `idField` and without `$type`, and
+  for a local `write`/`set` what it returns is folded back INTO the op
+  (defaults, aliases, stripped keys), so peers receive the validated record;
+  a `set` keeps only its own keys plus the ones the record lacked and is
+  never promoted to a `write`. A peer's op is never rewritten: the verdict
+  alone decides, and a failing op is skipped exactly like a `beforeApply`
+  false (`skipped: true`, vector moves, relayed, `error` event). `$type` is
+  immutable on the local path and restored after every fold. Validators are
+  `~standard`, a function, or `validator.compile` — do not add a fourth
+  duck-type.
 - **Hooks run inside the operation; events never do.** `src/hooks.js` (no
   requires — it ships to the browser) is the whole mechanism. Storage hooks
   go through `#hook()` inside the mutation queue, and `#run` refuses a write

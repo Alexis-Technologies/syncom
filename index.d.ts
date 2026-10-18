@@ -290,14 +290,77 @@ export class SmartContract {
   static load(hash: string, context: ContractContext): Promise<SmartContract>;
 }
 
-export type SchemaEntity = { readonly [fieldName: string]: unknown };
+// ---------------------------------------------------------------------------
+// Schema (src/schema.js)
+
+/** One problem a validator found: `path` from the record root, `code` as the library names it. */
+export interface ValidationIssue {
+  path: Array<string | number>;
+  message: string;
+  code?: string;
+}
+
+/**
+ * What a write rejects with when the record would not pass its entity's
+ * validator — nothing was stamped, logged or written. `entity` names the
+ * collection, `issues` the problems; `cause` is set when the validator threw
+ * something of its own.
+ */
+export class ValidationError extends Error {
+  constructor(entity: string | null, issues: ValidationIssue[]);
+  readonly name: 'ValidationError';
+  readonly code: 'VALIDATION_FAILED';
+  readonly entity: string | null;
+  readonly issues: ValidationIssue[];
+  cause?: unknown;
+}
+
+/**
+ * How a schema object without `~standard` (JSON Schema, TypeBox, …) becomes
+ * a validator: `compile(schema, { entity })` returns a function that gets
+ * the record and returns the value to write (or `true`/`undefined` for "as
+ * given"), returns `false` with its `errors` set (ajv), or throws. An Ajv
+ * instance fits as it is.
+ */
+export interface SchemaValidator {
+  compile(schema: unknown, meta: { entity: string }): (data: unknown) => unknown | Promise<unknown>;
+}
+
+/** One collection: what validates its records and what is indexed. `{}` is a bare collection. */
+export interface EntityDefinition {
+  /**
+   * A Standard Schema (`~standard`: metaschema, zod, valibot, arktype), a
+   * compiled validator function (ajv), or an object `open({ validator })`
+   * compiles. The record is validated under `idField`, without `$type`, and
+   * what the validator returns is what is written and replicated.
+   */
+  schema?: unknown;
+  /**
+   * The key the record id is handed to the validator under (and dropped
+   * from its output); `false` passes no id. Default: `id` when the schema's
+   * field map has it, metaschema's `<entityName>Id` when it has that, `false`
+   * when it shows fields and has neither, `id` when it shows no fields.
+   */
+  idField?: string | false;
+  /** Read the schema's indexes and fields, validate nothing (`@alexify/metaschema/definition`). */
+  validate?: false;
+  /** Fields with an equality index; read off the schema's `indexes`/`fields` when absent. */
+  index?: readonly string[];
+  /** Unique keys, single or composite; read off the schema when absent. */
+  unique?: ReadonlyArray<string | readonly string[]>;
+  /** Free-form field notes, kept as given. */
+  fields?: { readonly [name: string]: unknown };
+}
+
+export type SchemaEntity = EntityDefinition;
 export type SchemaEntities =
-  | { readonly [entityName: string]: SchemaEntity }
-  | Map<string, SchemaEntity>;
+  | { readonly [entityName: string]: EntityDefinition }
+  | Map<string, EntityDefinition>;
 
 export interface Schema {
+  /** A positive integer; default 1. */
+  version?: number;
   entities?: SchemaEntities;
-  readonly [key: string]: unknown;
 }
 
 /** The peer whose whole state is about to be joined. */
@@ -438,6 +501,8 @@ export interface StorageOptions<S extends Schema = Schema> {
   path?: string;
   name?: string;
   schema?: S;
+  /** Compiles entity schemas that are plain objects without `~standard`. */
+  validator?: SchemaValidator;
   getId?: () => string | Promise<string>;
   logger?: Logger | false;
   sync?: SyncOptions;
@@ -464,6 +529,8 @@ export interface StorageDataOptions {
 
 export interface StorageEntry {
   data: unknown;
+  /** The replication bookkeeping; `null` for an encrypted (local) record. */
+  meta: EntryMeta | null;
   encrypted: boolean;
   timestamp: number;
   block: string;
@@ -622,8 +689,19 @@ export interface ApplyRemoteResult {
 export interface StorageEvents {
   /** Every op applied here — local (`via` null) or from a peer (`via` = the link). */
   change: (op: SyncOp, via: unknown) => void;
-  /** A peer's op refused by the register/counter rule. */
-  error: (error: Error & { op?: SyncOp; rejected?: Array<{ field: string; reason: 'register' | 'counter' }> }) => void;
+  /**
+   * A peer's op refused by the register/counter rule (`rejected`), or skipped
+   * because the record would not pass its entity's validator (`entity`,
+   * `issues`).
+   */
+  error: (
+    error: Error & {
+      op?: SyncOp;
+      rejected?: Array<{ field: string; reason: 'register' | 'counter' }>;
+      entity?: string;
+      issues?: ValidationIssue[];
+    },
+  ) => void;
   /** A peer's batch is durable. */
   apply: (batch: ApplyBatchContext) => void;
   close: () => void;
@@ -670,6 +748,12 @@ export interface Storage {
   inc(id: string, key: string, value?: number): Promise<void>;
   swap(id: string, changes: unknown, prev: unknown): Promise<boolean>;
   list(): Promise<string[]>;
+  /**
+   * Runs `data` through an entity's validator the way a write would and
+   * returns what it gives back (defaults filled, aliases resolved); rejects
+   * with a ValidationError. Nothing is written.
+   */
+  check(entity: string, data: unknown): Promise<unknown>;
   record(id: string): Promise<Storage.StorageRecord>;
   getCachedData(id: string): unknown | null;
   hasRecord(id: string): boolean;
@@ -707,7 +791,10 @@ declare class SyncomCollection {
   readonly name: string;
   insert(data: unknown): Promise<SyncomRecord>;
   get(id: string): Promise<unknown | null>;
+  /** Replaces the record wholesale, stamped as this collection's. */
+  set(id: string, data: unknown, options?: StorageDataOptions): Promise<void>;
   delete(id: string): Promise<void>;
+  /** Sets the listed fields; `$type` may not be among them. */
   update(id: string, delta: unknown): Promise<void>;
   record(id: string): Promise<SyncomRecord>;
 }
