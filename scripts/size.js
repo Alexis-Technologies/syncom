@@ -36,8 +36,9 @@ const ENTRIES = [
   // write, read, apply and sync seams they run in) the raise to 18 KB; the
   // schema layer (src/schema.js: entity definitions, the injected validator
   // normalized to one shape, validation in the write and apply paths) the
-  // raise to 20 KB.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 20 },
+  // raise to 20 KB; schema versions (the `v` slot, `meta.v`, schema.json,
+  // hello.schema and drift) the raise to 20.5 KB.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 20.5 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -98,7 +99,7 @@ async function main() {
       raw: kb(raw.length),
       min: kb(min.length),
       gzip: kb(gzip),
-      budget: budget === undefined ? '—' : `${budget}.0 KB`,
+      budget: budget === undefined ? '—' : `${budget.toFixed(1)} KB`,
     });
   }
 

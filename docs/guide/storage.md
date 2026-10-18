@@ -13,7 +13,7 @@ const storage = await open({ path: 'data' });
 | --- | --- | --- |
 | `path` | `'syncom'` | Directory (or OPFS path) holding keys, chain, data and peers |
 | `name` | — | Alias for `path` |
-| `schema` | — | Entity definitions: collections, their validators and indexes ([see below](#collections)) |
+| `schema` | — | Entity definitions: collections, their validators and indexes ([see below](#collections)); `version` and `snapshot` ([see below](#schema-versions)) |
 | `validator` | — | Compiles entity schemas that are plain objects without `~standard` ([see below](#validation)) |
 | `getId` | `crypto.randomUUID()` | Id generator for `insert()`; sync or async ([see below](#custom-identifiers)) |
 | `logger` | `console` | A Console or pino-shaped logger, or `false` for silence |
@@ -285,6 +285,32 @@ relayed, replay-safe — and reported through the `error` event with
 `error.entity` and `error.issues`. Give every node the same schema and every
 node reaches the same verdict.
 
+### Schema versions
+
+`schema.version` (a positive integer, `1` by default) is stamped on every op
+this node makes as `v`, and a record remembers the version of its last
+whole-record write as `meta.v` — what tells a node on another version which
+shape a record is in. `schema.snapshot` is any JSON that describes the
+schema — metaschema's `model.toJSON()`, whose key order is deterministic —
+and is hashed:
+
+```js
+const storage = await open({
+  path: 'data',
+  schema: { version: 2, snapshot: model.toJSON(), entities: { /* … */ } },
+});
+
+storage.schemaInfo;
+// { version: 2, hash: '9f3c…', previous: null }
+```
+
+`schema.json` in the directory remembers the version and hash it last ran.
+When they differ at open, `schemaInfo.previous` holds what it was — an
+upgrade to run migrations after, a snapshot change of the same version, or a
+downgrade (logged as a warning) — and is `null` otherwise. Peers exchange
+`{ version, hash }` in [hello](./sync#schemas): the same version with another
+hash is reported as drift.
+
 ## On disk
 
 ```
@@ -292,6 +318,7 @@ data/
 ├── node.json      { id } — this node's identity
 ├── keys/          public.pem, private.pem
 ├── blockchain/    <hash>.json per block, .blockchain.json holds the tail
+├── schema.json    { version, migrated, hash } — the schema this directory last ran
 ├── data/          <id>.json per record: { data, meta, encrypted, timestamp, block }
 ├── log/           the operation log (see Sync)
 └── remote/        <url>.json per registered sync node

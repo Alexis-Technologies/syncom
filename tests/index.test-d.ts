@@ -78,6 +78,14 @@ expectAssignable<StorageOptions>({
 });
 expectAssignable<EntityDefinition>({ schema: {}, validate: false });
 expectAssignable<EntityDefinition>({});
+expectAssignable<StorageOptions>({ schema: { version: 2, snapshot: { any: 'json' } } });
+expectType<syncom.SchemaStatus | null>(storage.schemaInfo);
+expectType<syncom.SchemaInfo | null>(storage.schemaInfo!.previous);
+storage.on('schema', (event) => {
+  expectType<'drift'>(event.kind);
+  expectType<syncom.PeerRef>(event.peer);
+  expectType<string>(event.local);
+});
 expectError(syncom.open({ schema: { version: '2' } }));
 expectError(syncom.open({ schema: { migrations: {} } }));
 expectError(syncom.open({ schema: { entities: { P: { idField: 1 } } } }));
@@ -151,7 +159,8 @@ storage.on('change', (op, via) => {
   expectType<unknown>(via);
 });
 declare const entry: syncom.Entry;
-const applied = syncom.applyOp(null, { origin: 'a', seq: 1, ts: 1, type: 'set', id: 'r', data: { x: 1 } });
+const applied = syncom.applyOp(null, { origin: 'a', seq: 1, ts: 1, type: 'set', id: 'r', data: { x: 1 }, v: 2 });
+expectType<number | undefined>(applied.entry.meta.v);
 expectType<syncom.Entry>(applied.entry);
 expectType<boolean>(applied.changed);
 expectType<syncom.Entry | null>(syncom.mergeEntry(entry, null));
@@ -194,6 +203,7 @@ expectAssignable<StorageOptions>({
       expectType<string>(ctx.id);
       expectType<Record<string, unknown> | null>(ctx.current);
       expectType<boolean>(ctx.encrypted);
+      expectType<number | null>(ctx.v);
       return { ...ctx.data };
     },
     afterWrite: (ctx, op) => {
@@ -274,5 +284,9 @@ expectType<Promise<void>>(sync.enableNode('ws://a', false));
 expectType<Promise<Array<{ url: string; pushed: number }>>>(sync.sync());
 expectType<number>(sync.peers()[0].pending);
 expectType<string | null>(sync.listNodes()[0].cursor);
+expectType<syncom.SchemaInfo | null>(sync.listNodes()[0].remote!.schema);
+sync.on('hello', ({ schema }) => expectType<syncom.SchemaInfo | null>(schema));
+sync.on('peer', ({ schema }) => expectType<syncom.SchemaInfo | null | undefined>(schema));
+expectType<syncom.SyncUnit>(sync.unit({ authorize: (_context, hello) => hello.schema?.version === 2 }));
 expectType<syncom.SyncUnit>(sync.unit({ access: 'public', authorize: async () => true }));
 expectType<string>(sync.unit().hello.access);

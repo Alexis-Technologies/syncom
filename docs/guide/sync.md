@@ -31,7 +31,7 @@ Every write becomes an **op** — the unit that travels between nodes and sits
 in the log:
 
 ```
-{ origin, seq, ts, type, id, scope?, data?, key?, value? }
+{ origin, seq, ts, type, id, scope?, data?, key?, value?, v? }
 ```
 
 | `type` | Produced by | Effect on the record |
@@ -45,7 +45,10 @@ in the log:
 
 `origin` is the node that made the op, `seq` its sequence number on that node,
 `ts` a millisecond stamp that never runs backwards and never falls behind a
-stamp the node has seen from a peer (see [Clocks](#clocks)).
+stamp the node has seen from a peer (see [Clocks](#clocks)). `v` is the
+[schema version](./storage#schema-versions) of the node that made it — absent
+on a node without a schema, and on `merge`/`advance` — and a record remembers
+the version of its last whole-record write as `meta.v`.
 
 ### Clocks
 
@@ -149,7 +152,7 @@ which one a node plays on a given link is just who opened the connection.
 
 | Procedure | Direction | Purpose |
 | --- | --- | --- |
-| `hello` | dialer → host | Exchange node ids, vectors and log epochs; the host may `authorize` |
+| `hello` | dialer → host | Exchange node ids, vectors, log epochs and schemas; the host may `authorize` |
 | `push` | dialer → host | Ops the host lacks, by its vector |
 | `changes` (subscription) | host → dialer | Everything that lands in the host's log from the cursor on, live |
 | `snapshot` | dialer → host | One page of the host's state, for bootstrap |
@@ -159,8 +162,8 @@ sequenceDiagram
   autonumber
   participant D as dialer
   participant H as host
-  D->>H: hello { node, vector, scopes, token }
-  H-->>D: { node, vector, epoch }
+  D->>H: hello { node, vector, scopes, token, schema }
+  H-->>D: { node, vector, epoch, schema }
   D->>H: push { ops the host lacks }
   D->>H: subscribe changes { lastEventId }
   H-->>D: data × n (replay from the cursor)
@@ -180,6 +183,18 @@ backing off and re-opening the subscription from the last event id are the
 **link's** job — a wrpc client already does all three. After a reconnect the
 manager only repeats `hello` + `push`, the outbound half a transport cannot know
 about.
+
+### Schemas
+
+`schema` in both directions is `{ version, hash }` — the node's
+[schema version](./storage#schema-versions) and the hash of its `snapshot` —
+or `null` for a node without one. The host's `authorize(context, hello)` sees
+it and may refuse; the dialer keeps it as `listNodes()[0].remote.schema`,
+and the `peer` and `hello` events carry it. The same version with another
+hash on the far side is **drift** — two builds of "the same" schema that
+disagree: both sides emit `schema` `{ kind: 'drift', peer, version, hash,
+local }` on the storage and log a warning, and the link stays up. A
+different version is not drift; it is what `v` on the ops is for.
 
 ### Bootstrap
 

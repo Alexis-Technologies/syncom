@@ -73,6 +73,13 @@ const inScope = (op, scopes) => {
   return !scopes || scope === GLOBAL_SCOPE || scopes.includes(GLOBAL_SCOPE) || scopes.includes(scope);
 };
 
+// A peer's schema as hello carries it — `{ version, hash }` — or null for
+// a peer without one (or one speaking a shape this node does not read).
+const schemaOf = (value) => {
+  if (!value || typeof value !== 'object' || !Number.isInteger(value.version)) return null;
+  return { version: value.version, hash: typeof value.hash === 'string' ? value.hash : null };
+};
+
 // Resolves on the next change (or abort). The manager keeps ONE listener on
 // the storage and wakes every waiting subscription from it, because Emitter
 // refuses more than ten listeners and a host has as many `changes` feeds as
@@ -337,6 +344,25 @@ class SyncManager extends Emitter {
     notify(this, this.#storage.logger, 'error', Object.assign(error, { url: peer.node.url }));
   }
 
+  // The same schema version with another snapshot hash on the far side: not
+  // a version difference (the lens handles those) but two builds of "the
+  // same" schema that disagree. Reported, never refused — `authorize` sees
+  // `hello.schema` for a host that wants to refuse.
+  #drift(theirs, peer) {
+    const mine = this.#storage.schemaInfo;
+    if (!mine || !theirs || mine.version !== theirs.version) return;
+    if (!mine.hash || !theirs.hash || mine.hash === theirs.hash) return;
+    const logger = this.#storage.logger;
+    logger.warn({ event: 'schema.drift', peer: peer.node, version: mine.version });
+    notify(this.#storage, logger, 'schema', {
+      kind: 'drift',
+      peer,
+      version: mine.version,
+      hash: theirs.hash,
+      local: mine.hash,
+    });
+  }
+
   // Single-flight: a reconnect and a refused restored subscription can both
   // ask for one in the same tick.
   #handshake(peer, options) {
@@ -357,6 +383,7 @@ class SyncManager extends Emitter {
       // For `authorize(context, hello)`; a transport-level credential (a
       // wrpc `headers`/`authenticate` option) is the other way to carry it.
       token: node.token,
+      schema: schemaOf(this.#storage.schemaInfo),
     });
     if (peer.closed) return;
     if (!answer || typeof answer.node !== 'string') throw new Error(`Bad hello from ${node.url}`);
@@ -368,10 +395,12 @@ class SyncManager extends Emitter {
     // A host reinstalled since we last spoke: its log speaks another epoch,
     // so our cursor is void and the subscription will say `bootstrap`.
     if (node.remote && node.remote.epoch !== answer.epoch) node.cursor = null;
+    const schema = schemaOf(answer.schema);
     peer.remote = { id: answer.node, vector: answer.vector ?? {}, epoch: answer.epoch };
-    node.remote = { id: answer.node, epoch: answer.epoch };
+    node.remote = { id: answer.node, epoch: answer.epoch, schema };
     await this.#saveNode(node);
-    notify(this, this.#storage.logger, 'peer', { url: node.url, connected: true, node: answer.node });
+    notify(this, this.#storage.logger, 'peer', { url: node.url, connected: true, node: answer.node, schema });
+    this.#drift(schema, { url: node.url, node: answer.node });
     await this.#push(peer, 'handshake');
     if (resubscribe && !peer.subscription) this.#subscribe(peer);
   }
@@ -663,15 +692,23 @@ class SyncManager extends Emitter {
           if (args.node === storage.nodeId) throw coded('A node cannot sync with itself (copied data directory?)', 409);
           if (authorize && !(await authorize(context, args))) throw coded('Not authorized to sync', 403);
           const scopes = Array.isArray(args.scopes) ? args.scopes.filter((s) => typeof s === 'string') : [GLOBAL_SCOPE];
+          const schema = schemaOf(args.schema);
           if (context?.client) {
             context.client.data ??= {};
-            context.client.data.syncom = { node: args.node, scopes, vector: args.vector ?? {} };
+            context.client.data.syncom = { node: args.node, scopes, vector: args.vector ?? {}, schema };
             if (typeof context.client.join === 'function') {
               for (const scope of scopes) context.client.join(`syncom:${scope}`);
             }
           }
-          notify(this, storage.logger, 'hello', { node: args.node, scopes });
-          return { node: storage.nodeId, vector: storage.vector, epoch: storage.log.epoch, version: PROTOCOL };
+          notify(this, storage.logger, 'hello', { node: args.node, scopes, schema });
+          this.#drift(schema, { url: null, node: args.node });
+          return {
+            node: storage.nodeId,
+            vector: storage.vector,
+            epoch: storage.log.epoch,
+            version: PROTOCOL,
+            schema: schemaOf(storage.schemaInfo),
+          };
         },
       },
 

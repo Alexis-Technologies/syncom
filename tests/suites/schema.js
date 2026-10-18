@@ -4,7 +4,8 @@
 // caller builds: `createStorage(t, name, options)` gives the SAME directory
 // for the same name within one subtest (reopen cases).
 
-const { createMesh, settle } = require('../utils/mesh.js');
+const { createMesh, settle, waitUntil } = require('../utils/mesh.js');
+const { MemoryLink } = require('../utils/memory-link.js');
 
 const remoteOp = (origin, seq, type, id, extra = {}) => ({ origin, seq, ts: Date.now() + seq, type, id, ...extra });
 const standard = (validate) => ({ '~standard': { version: 1, vendor: 'test', validate } });
@@ -426,6 +427,179 @@ const runSchemaTests = async (t, assert, createStorage) => {
       assert.deepStrictEqual(seen.at(-1), ['a']);
     },
   );
+
+  await t.test('the schema version rides on every local op and on the record it writes', async (t2) => {
+    const storage = await createStorage(t2, 'A', { schema: { version: 2, entities: { Post: {} } } });
+    const ops = [];
+    storage.on('change', (op) => ops.push(op));
+    const seen = [];
+    const plain = await createStorage(t2, 'B', { hooks: { beforeWrite: (ctx) => void seen.push(ctx.v) } });
+    assert.deepStrictEqual(storage.schemaInfo, { version: 2, hash: null, previous: null });
+    assert.strictEqual(plain.schemaInfo, null);
+    const post = await storage.Post.insert({ title: 'a' });
+    await storage.update(post.id, { title: 'b' });
+    await storage.inc(post.id, 'hits');
+    await storage.delete(post.id);
+    assert.deepStrictEqual(
+      ops.map((op) => [op.type, op.v]),
+      [
+        ['write', 2],
+        ['set', 2],
+        ['inc', 2],
+        ['delete', 2],
+      ],
+    );
+    const metaOf = async (target, id) => (await target.snapshot()).records.find((r) => r.id === id).meta;
+    const alive = await storage.Post.insert({ title: 'c' });
+    assert.strictEqual((await metaOf(storage, alive.id)).v, 2, 'the record remembers the version that wrote it');
+    const id = await plain.insert({ n: 1 });
+    assert.strictEqual(ops.at(-1).v, 2);
+    assert.strictEqual('v' in (await metaOf(plain, id)), false, 'no schema, no version');
+    assert.deepStrictEqual(seen, [null]);
+    // A peer's version lands with its ops: a set leaves it, a write moves it.
+    const stamp = () => Date.now() + 10_000;
+    await storage.applyRemote([
+      { origin: 'peer', seq: 1, ts: stamp(), type: 'set', id: alive.id, data: { n: 1 }, v: 3 },
+    ]);
+    assert.strictEqual((await metaOf(storage, alive.id)).v, 2);
+    await storage.applyRemote([
+      { origin: 'peer', seq: 2, ts: stamp(), type: 'write', id: alive.id, data: { n: 2 }, v: 3 },
+    ]);
+    assert.strictEqual((await metaOf(storage, alive.id)).v, 3);
+    await storage.applyRemote([{ origin: 'peer', seq: 3, ts: stamp(), type: 'set', id: 'new', data: { n: 1 }, v: 3 }]);
+    assert.strictEqual((await metaOf(storage, 'new')).v, 3, 'a set that creates the record takes its v');
+    // A merge (bootstrap) carries the joined entry's own version.
+    await plain.mergeSnapshot([{ id: alive.id, data: { n: 2 }, meta: await metaOf(storage, alive.id) }]);
+    assert.strictEqual((await metaOf(plain, alive.id)).v, 3);
+  });
+
+  await t.test('schema.json remembers the version this directory ran; a change is schemaInfo.previous', async (t2) => {
+    const warnings = [];
+    const logger = { warn: (entry) => warnings.push(entry.event) };
+    const v2 = { version: 2, entities: {}, snapshot: { entities: ['Post'] } };
+    const first = await createStorage(t2, 'A', { schema: v2 });
+    const { hash } = first.schemaInfo;
+    assert.match(hash, /^[0-9a-f]{64}$/);
+    assert.deepStrictEqual(first.schemaInfo, { version: 2, hash, previous: null });
+    await first.close();
+    const same = await createStorage(t2, 'A', { schema: v2 });
+    assert.deepStrictEqual(same.schemaInfo.previous, null, 'the same version and snapshot: nothing to report');
+    await same.close();
+    const upgraded = await createStorage(t2, 'A', { schema: { ...v2, version: 3 }, logger });
+    assert.deepStrictEqual(upgraded.schemaInfo.previous, { version: 2, hash });
+    assert.deepStrictEqual(warnings, []);
+    await upgraded.close();
+    const changed = await createStorage(t2, 'A', { schema: { ...v2, version: 3, snapshot: { entities: [] } }, logger });
+    assert.deepStrictEqual(changed.schemaInfo.previous, { version: 3, hash }, 'same version, other snapshot');
+    assert.notStrictEqual(changed.schemaInfo.hash, hash);
+    await changed.close();
+    const downgraded = await createStorage(t2, 'A', { schema: v2, logger });
+    assert.deepStrictEqual(downgraded.schemaInfo.previous, { version: 3, hash: changed.schemaInfo.hash });
+    assert.deepStrictEqual(warnings, ['schema.upgrade'], 'a downgrade is warned about');
+    await downgraded.close();
+    const unversioned = await createStorage(t2, 'A', { schema: { entities: {} } });
+    assert.deepStrictEqual(unversioned.schemaInfo, { version: 1, hash: null, previous: { version: 2, hash } });
+    await unversioned.close();
+    const none = await createStorage(t2, 'A');
+    assert.strictEqual(none.schemaInfo, null, 'no schema: the file is left alone');
+    await none.close();
+    const back = await createStorage(t2, 'A', { schema: { entities: {} } });
+    assert.deepStrictEqual(back.schemaInfo.previous, null);
+  });
+
+  await t.test('hello exchanges the schema; a host may refuse on it; drift is reported, never refused', async (t2) => {
+    const snapshot = { entities: { Post: { title: 'string' } } };
+    const other = { entities: { Post: { title: 'string', body: 'string' } } };
+    const mesh = await createMesh(
+      t2,
+      ['A', 'B', 'C', 'D'],
+      [
+        ['A', 'B'],
+        ['C', 'B'],
+        ['D', 'B'],
+      ],
+      createStorage,
+      {
+        nodes: {
+          A: { schema: { version: 2, snapshot } },
+          B: { schema: { version: 2, snapshot } },
+          C: { schema: { version: 2, snapshot: other } },
+          D: { schema: { version: 3, snapshot: other } },
+        },
+      },
+    );
+    const [a, b, c, d] = ['A', 'B', 'C', 'D'].map((name) => mesh.get(name));
+    const drifts = { A: [], B: [], C: [], D: [] };
+    for (const [name, storage] of [
+      ['A', a],
+      ['B', b],
+      ['C', c],
+      ['D', d],
+    ]) {
+      storage.on('schema', (event) => drifts[name].push(event));
+    }
+    await waitUntil(() => [a, c, d].every((s) => s.sync.peers()[0]?.subscribed));
+    const id = await a.insert({ from: 'A', $type: 'Post' });
+    await settle([a, b, c, d]);
+    assert.deepStrictEqual(await c.get(id), { from: 'A', $type: 'Post' }, 'ops flow regardless');
+    const [peerA] = a.sync.listNodes();
+    assert.deepStrictEqual(peerA.remote.schema, { version: 2, hash: a.schemaInfo.hash });
+    assert.strictEqual(a.schemaInfo.hash, b.schemaInfo.hash, 'the same snapshot hashes the same');
+    assert.deepStrictEqual(drifts.A, []);
+    assert.deepStrictEqual(drifts.D, [], 'another version is not drift');
+    assert.deepStrictEqual(drifts.C, [
+      {
+        kind: 'drift',
+        peer: { url: 'mem://B', node: b.nodeId },
+        version: 2,
+        hash: b.schemaInfo.hash,
+        local: c.schemaInfo.hash,
+      },
+    ]);
+    assert.deepStrictEqual(drifts.B, [
+      {
+        kind: 'drift',
+        peer: { url: null, node: c.nodeId },
+        version: 2,
+        hash: c.schemaInfo.hash,
+        local: b.schemaInfo.hash,
+      },
+    ]);
+    // The hosting side sees it in hello, and `authorize` may act on it.
+    const hellos = [];
+    b.sync.on('hello', (event) => hellos.push(event));
+    const strict = b.sync.unit({
+      access: 'public',
+      authorize: (context, hello) => hello.schema?.version === 2,
+    });
+    await new MemoryLink(strict).call('syncom/hello', { node: 'x', version: 1, schema: { version: 2, hash: null } });
+    assert.deepStrictEqual(hellos, [{ node: 'x', scopes: ['*'], schema: { version: 2, hash: null } }]);
+    await assert.rejects(
+      () => new MemoryLink(strict).call('syncom/hello', { node: 'y', version: 1, schema: { version: 3, hash: 'h' } }),
+      { code: 403 },
+    );
+    await assert.rejects(() => new MemoryLink(strict).call('syncom/hello', { node: 'z', version: 1 }), { code: 403 });
+    // A dialer without a schema says so; a peer event carries what hello learned.
+    const events = [];
+    const plain = await createStorage(t2, 'P', {
+      sync: { autoStart: false, connect: () => new MemoryLink(mesh.units.get('B')) },
+    });
+    plain.sync.on('peer', (event) => events.push(event));
+    await plain.sync.addNode({ url: 'mem://B' });
+    await plain.sync.start();
+    await waitUntil(() => plain.sync.peers()[0]?.subscribed);
+    assert.deepStrictEqual(
+      events.find((e) => e.node),
+      {
+        url: 'mem://B',
+        connected: true,
+        node: b.nodeId,
+        schema: { version: 2, hash: b.schemaInfo.hash },
+      },
+    );
+    assert.deepStrictEqual(hellos.at(-1), { node: plain.nodeId, scopes: ['*'], schema: null });
+    assert.deepStrictEqual(drifts.B.length, 1, 'no schema on one side: nothing to compare');
+  });
 };
 
 module.exports = { runSchemaTests };

@@ -15,7 +15,7 @@
 
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const SCHEMA_KEYS = ['version', 'entities'];
+const SCHEMA_KEYS = ['version', 'entities', 'snapshot'];
 const ENTITY_KEYS = ['schema', 'idField', 'validate', 'index', 'unique', 'fields'];
 
 const fail = (entity, text) => new TypeError(`open({ schema }): entity ${entity}: ${text}`);
@@ -243,11 +243,13 @@ const normalizeEntity = (name, def, validator) => {
 };
 
 /**
- * `open({ schema, validator })` normalized: `{ version, entities }`, the
- * entities a Map of `{ name, schema, standard, validator, idField, index,
- * unique, fields }`. Unknown keys, a malformed definition and a schema this
- * engine cannot validate are TypeErrors here, at open — a schema that
- * silently never validates would be a validation that silently never runs.
+ * `open({ schema, validator })` normalized: `{ version, entities, snapshot }`,
+ * the entities a Map of `{ name, schema, standard, validator, idField, index,
+ * unique, fields }`, `snapshot` whatever JSON describes the schema (hashed by
+ * the storage, exchanged in hello). Unknown keys, a malformed definition and
+ * a schema this engine cannot validate are TypeErrors here, at open — a
+ * schema that silently never validates would be a validation that silently
+ * never runs.
  */
 const normalizeSchema = (schema, { validator } = {}) => {
   if (validator !== undefined && (!isObject(validator) || typeof validator.compile !== 'function')) {
@@ -255,7 +257,7 @@ const normalizeSchema = (schema, { validator } = {}) => {
   }
   const compiler = validator === undefined ? null : validator;
   const entities = new Map();
-  if (schema === undefined || schema === null) return { version: 1, entities };
+  if (schema === undefined || schema === null) return { version: 1, entities, snapshot: undefined };
   if (!isObject(schema)) throw new TypeError('open({ schema }): schema must be an object');
   for (const key of Object.keys(schema)) {
     if (!SCHEMA_KEYS.includes(key)) throw new TypeError(`open({ schema }): unknown key '${key}'`);
@@ -274,7 +276,7 @@ const normalizeSchema = (schema, { validator } = {}) => {
       entities.set(name, normalizeEntity(name, def, compiler));
     }
   }
-  return { version, entities };
+  return { version, entities, snapshot: schema.snapshot };
 };
 
 // ---------------------------------------------------------------------------

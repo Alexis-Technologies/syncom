@@ -583,8 +583,8 @@ const runHooksTests = async (t, assert, createStorage) => {
       ],
     );
     assert.deepStrictEqual(hellos, [
-      { node: dialer.nodeId, scopes: ['docs'] },
-      { node: dialer.nodeId, scopes: ['docs'] },
+      { node: dialer.nodeId, scopes: ['docs'], schema: null },
+      { node: dialer.nodeId, scopes: ['docs'], schema: null },
     ]);
   });
 

@@ -13,6 +13,7 @@ const fsi = require('./fsi.js');
 const { createTelemetry, traced, now } = require('./telemetry.js');
 
 const NODE_FILE = 'node.json';
+const SCHEMA_FILE = 'schema.json';
 const GLOBAL_SCOPE = '*';
 
 // The ops an entity's validator sees: the ones that leave a record for the
@@ -229,6 +230,10 @@ class Storage extends Emitter {
   #cache = new Map();
   #schema = null;
   #entities = null;
+  #version = null;
+  #snapshot = undefined;
+  #schemaHash = null;
+  #schemaPrevious = null;
   #getId = null;
   #logger;
   #otel;
@@ -261,8 +266,15 @@ class Storage extends Emitter {
     // entity definitions the write path consults: validators, id fields,
     // indexes. A malformed one is refused here, not at the first write.
     const schema = options.schema ?? null;
-    this.#entities = normalizeSchema(schema, { validator: options.validator }).entities;
+    const normalized = normalizeSchema(schema, { validator: options.validator });
+    this.#entities = normalized.entities;
     this.#schema = schema;
+    // A node with a schema stamps its version on every op it makes; one
+    // without stamps nothing, and nothing in hello says what it runs.
+    if (schema !== null) {
+      this.#version = normalized.version;
+      this.#snapshot = normalized.snapshot;
+    }
     if (options.getId !== undefined) {
       if (typeof options.getId !== 'function') throw new TypeError('open({ getId }): getId must be a function');
       this.#getId = options.getId;
@@ -289,10 +301,52 @@ class Storage extends Emitter {
     // logged is below what it will stamp next, whatever the wall clock says.
     this.#clock.observe(this.#log.latestTs);
     await this.#loadIdentity();
+    await this.#loadSchema();
     await this.#replayTail();
     this.#sync = await new SyncManager(this, this.#options.sync);
     this.#initCollections();
     return this;
+  }
+
+  // `schema.json` remembers the version (and the snapshot's hash) this
+  // directory last ran: a change since is reported as `schemaInfo.previous`
+  // — a fact the caller reads after open, where an event at open would find
+  // no listener yet. The hash is of the snapshot's JSON; metaschema's
+  // `model.toJSON()` is deterministic, a hand-written one is as stable as
+  // its author keeps it.
+  async #loadSchema() {
+    if (this.#version === null) return;
+    if (this.#snapshot !== undefined) this.#schemaHash = await calculateHash(this.#snapshot);
+    const version = this.#version;
+    const hash = this.#schemaHash;
+    let stored = null;
+    if (await fsi.exists(this.#path, SCHEMA_FILE)) {
+      const raw = JSON.parse(await fsi.read(this.#path, SCHEMA_FILE));
+      if (isPlainObject(raw) && Number.isInteger(raw.version)) {
+        stored = { version: raw.version, hash: typeof raw.hash === 'string' ? raw.hash : null, migrated: raw.migrated };
+      }
+    }
+    if (stored && stored.version === version && stored.hash === hash) return;
+    if (stored) {
+      this.#schemaPrevious = { version: stored.version, hash: stored.hash };
+      const event = stored.version === version ? 'schema.changed' : 'schema.upgrade';
+      this.#logger[stored.version > version ? 'warn' : 'info']({ event, from: stored.version, to: version });
+    }
+    // `migrated`: when this version first ran here — kept across a snapshot
+    // change of the same version.
+    const migrated = stored?.version === version && Number.isInteger(stored.migrated) ? stored.migrated : Date.now();
+    await fsi.write(this.#path, SCHEMA_FILE, JSON.stringify({ version, migrated, hash }));
+  }
+
+  /**
+   * The schema this node runs — `{ version, hash }`, what hello carries —
+   * plus `previous`: what `schema.json` held before this open when that was
+   * another version or hash (an upgrade to run migrations after), `null`
+   * otherwise. `null` without a schema.
+   */
+  get schemaInfo() {
+    if (this.#version === null) return null;
+    return { version: this.#version, hash: this.#schemaHash, previous: this.#schemaPrevious };
   }
 
   // The node id is minted once and never changes; the own sequence numbers
@@ -575,7 +629,7 @@ class Storage extends Emitter {
     // encrypted record has no op log — writes to it stay local.
     const sealed = encrypted || current?.encrypted === true;
     const visible = current && (current.encrypted || isAlive(current)) ? current.data : null;
-    const ctx = { type, id, ...payload, current: visible, encrypted: sealed, source, via, from };
+    const ctx = { type, id, ...payload, current: visible, encrypted: sealed, source, via, from, v: this.#version };
     const replacement = await this.#hook('beforeWrite', ctx);
     if (replacement !== undefined) {
       if (type !== 'write' && type !== 'set') {
@@ -616,6 +670,10 @@ class Storage extends Emitter {
     const op = { origin: this.#nodeId, seq: 0, ts: this.#clock.now(), type, id };
     if (scope !== GLOBAL_SCOPE) op.scope = scope;
     if (from) op.from = from;
+    // The writer's schema version rides on the op: what a reader on another
+    // version lenses the record through. A merge carries the joined entry's
+    // own `meta.v` instead.
+    if (this.#version !== null && type !== 'merge') op.v = this.#version;
     // Sequence numbers run per stream (see vector.js opKey): the scope's,
     // or the bootstrap stream for a merge.
     op.seq = (this.#log.vector[opKey(op)] ?? 0) + 1;

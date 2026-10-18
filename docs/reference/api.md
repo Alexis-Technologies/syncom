@@ -48,8 +48,10 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 | `adoptVector(vector, { via, from }?)` | `Promise<SyncOp \| null>` | Records what a joined snapshot covers (an `advance` op) |
 | `close()` | `Promise<void>` | Stops sync and seals the log; further writes are refused |
 
-Properties: `schema`, `sync`, `nodeId`, `path`, `log`, `vector`, `logger`,
-`telemetry` (the writer built from the option — opaque).
+Properties: `schema`, `schemaInfo` (`{ version, hash, previous }`, `null`
+without a schema — see [Schema versions](../guide/storage#schema-versions)),
+`sync`, `nodeId`, `path`, `log`, `vector`, `logger`, `telemetry` (the writer
+built from the option — opaque).
 Statics: `Storage.Collection`, `Storage.Record`, `Storage.generateId()` — the
 default `getId`, synchronous in both halves.
 
@@ -61,6 +63,7 @@ the operation (see [Hooks and events](../guide/hooks#events)):
 | `change` | `(op, via)` | Every op applied here; `via` is `null` for a local write, otherwise the link it came from |
 | `apply` | `({ via, peer, ops, applied, skipped, duplicates, gaps })` | A peer's batch is durable |
 | `error` | `(error)` with `error.op`, and `error.rejected` or `error.entity` + `error.issues` | A peer's op refused by the register/counter rule, or skipped as invalid under this node's schema |
+| `schema` | `({ kind: 'drift', peer, version, hash, local })` | A peer runs this schema version with another snapshot hash (see [Schemas](../guide/sync#schemas)) |
 | `close` | — | After `close()` sealed the log |
 
 Hooks (`open({ hooks })`): `beforeWrite`, `afterWrite`, `beforeRead`,
@@ -96,7 +99,7 @@ Extends `Emitter`. See [Sync](../guide/sync).
 | `addNode({ url, token?, scopes? })` | `Promise<void>` | Registers a peer to dial; dials it at once when started |
 | `removeNode(url)` | `Promise<void>` | Hangs up too |
 | `enableNode(url, enabled = true)` | `Promise<void>` | Keep a node without dialing it |
-| `listNodes()` | `Node[]` | `{ url, token, scopes, enabled, lastSync, cursor, remote }` |
+| `listNodes()` | `Node[]` | `{ url, token, scopes, enabled, lastSync, cursor, remote }`; `remote` is `{ id, epoch, schema }` after a hello |
 | `start()` | `Promise<void>` | Dials every enabled node; needs `sync.connect` |
 | `stop()` | `Promise<void>` | Closes every link |
 | `sync(url?)` | `Promise<Array<{ url, pushed }>>` | Pushes what the peers lack now |
@@ -106,12 +109,12 @@ Extends `Emitter`. See [Sync](../guide/sync).
 Properties: `storage`, `started`.
 
 Events (contained, like the storage's): `peer` `({ url, connected, node?,
-reconnected? })`, `sync` `({ url, pushed })` after a push and `({ url,
+reconnected?, schema? })`, `sync` `({ url, pushed })` after a push and `({ url,
 received, applied, skipped, duplicates, gaps })` after a received page,
 `bootstrap` `({ url, records })`, `error` (with `.url`), `start`, `stop`,
 `node` `({ url, action: 'add' | 'remove' | 'enable' | 'disable' })`, `connect`
 `({ url })` once a link is accepted (before hello), and on the hosting side
-`hello` `({ node, scopes })` once a peer is authorized.
+`hello` `({ node, scopes, schema })` once a peer is authorized.
 
 Hooks (`open({ sync: { hooks } })`): `beforeConnect`, `beforeBootstrap` — see
 [Hooks and events](../guide/hooks#sync-hooks).

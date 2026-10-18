@@ -2,7 +2,16 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { applyOp, mergeEntry, isAlive, createEntry, isCounter, latestClock } = require('../src/ops.js');
+const {
+  applyOp,
+  mergeEntry,
+  isAlive,
+  createEntry,
+  isCounter,
+  latestClock,
+  packOps,
+  unpackOps,
+} = require('../src/ops.js');
 
 const op = (type, ts, origin, extra = {}) => ({ type, ts, origin, seq: extra.seq ?? ts, id: 'r', ...extra });
 
@@ -202,5 +211,57 @@ test('ops module', async (t) => {
     const cnt = replay([op('inc', 1, 'C', { seq: 1, key: 'n', value: 4 })]);
     assert.deepStrictEqual(mergeEntry(reg, cnt).data, { n: 'text' });
     assert.deepStrictEqual(mergeEntry(cnt, reg).data, { n: 'text' });
+  });
+
+  await t.test('meta.v is the schema version of the last whole-record write', () => {
+    const fresh = applyOp(null, op('set', 1, 'A', { data: { x: 1 }, v: 2 }));
+    assert.strictEqual(fresh.entry.meta.v, 2, 'a set that creates the entry takes its v');
+    const later = applyOp(fresh.entry, op('set', 2, 'B', { data: { x: 2 }, v: 3 }));
+    assert.strictEqual(later.entry.meta.v, 2, 'a later set leaves it');
+    const incremented = applyOp(later.entry, op('inc', 3, 'B', { seq: 3, key: 'n', value: 1, v: 3 }));
+    assert.strictEqual(incremented.entry.meta.v, 2);
+    const written = applyOp(incremented.entry, op('write', 4, 'B', { data: { x: 3 }, v: 3 }));
+    assert.strictEqual(written.entry.meta.v, 3, 'a write sets it');
+    const stale = applyOp(written.entry, op('write', 1, 'C', { data: { x: 0 }, v: 9 }));
+    assert.strictEqual(stale.entry.meta.v, 3, 'a stale write does not');
+    const deleted = applyOp(written.entry, op('delete', 5, 'B', { v: 4 }));
+    assert.strictEqual(deleted.entry.meta.v, 3);
+    const unversioned = applyOp(written.entry, op('write', 6, 'D', { data: { x: 4 } }));
+    assert.strictEqual(unversioned.entry.meta.v, 3, 'a write without v keeps the last one');
+    assert.strictEqual(applyOp(null, op('write', 1, 'A', { data: { x: 1 } })).entry.meta.v, undefined);
+    assert.strictEqual('v' in createEntry().meta, false);
+    // Merges take the higher one; a peer meta is normalized.
+    const a = replay([op('write', 1, 'A', { data: { x: 1 }, v: 2 })]);
+    const b = replay([op('write', 2, 'B', { data: { y: 1 }, v: 5 })]);
+    assert.strictEqual(mergeEntry(a, b).meta.v, 5);
+    assert.strictEqual(mergeEntry(b, a).meta.v, 5);
+    assert.strictEqual(mergeEntry(a, replay([op('write', 3, 'C', { data: {} })])).meta.v, 2);
+    const merged = applyOp(null, op('merge', 1, 'A', { data: { x: 1 }, meta: { ...a.meta, v: '7' } }));
+    assert.strictEqual(merged.entry.meta.v, undefined, 'a non-integer v is dropped');
+    const joined = applyOp(a, op('merge', 1, 'A', { data: b.data, meta: b.meta }));
+    assert.strictEqual(joined.entry.meta.v, 5);
+  });
+
+  await t.test('packOps carries v in its 13th slot; older rows read without it', () => {
+    const ops = [
+      { origin: 'A', seq: 1, ts: 1, type: 'write', id: 'r', scope: 's', data: { x: 1 }, v: 2 },
+      { origin: 'A', seq: 2, ts: 2, type: 'inc', id: 'r', key: 'n', value: 1 },
+      { origin: 'A', seq: 3, ts: 3, type: 'advance', vector: { B: 4 }, from: 'B' },
+    ];
+    const packed = packOps(ops);
+    assert.strictEqual(packed[0].length, 13);
+    assert.strictEqual(packed[0][12], 2);
+    assert.strictEqual(packed[1][12], null);
+    assert.deepStrictEqual(unpackOps(JSON.parse(JSON.stringify(packed))), ops);
+    // A row of the previous shape (12 slots) and a short one.
+    assert.deepStrictEqual(
+      unpackOps([packed[0].slice(0, 12)]),
+      [{ ...ops[0], v: undefined }].map(({ v, ...op }) => op),
+    );
+    assert.deepStrictEqual(unpackOps([['A', 1, 1, 'w', 'r']]), [
+      { origin: 'A', seq: 1, ts: 1, type: 'write', id: 'r' },
+    ]);
+    assert.deepStrictEqual(unpackOps([['A', 1, 1, 'w'], 'nope']), []);
+    assert.deepStrictEqual(unpackOps('nope'), []);
   });
 });

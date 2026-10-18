@@ -28,6 +28,8 @@ export type {
   EntityDefinition,
   SchemaValidator,
   ValidationIssue,
+  SchemaInfo,
+  SchemaStatus,
   StorageOptions,
   StorageHooks,
   WriteContext,

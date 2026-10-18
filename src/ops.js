@@ -18,6 +18,11 @@
 //   counters[f] — { [origin]: [seq, sum, ts] }: a PN-counter, one running sum
 //                 per origin, so re-applying an `inc` (seq already seen) is a
 //                 no-op and two snapshots join by taking the higher seq
+//   v           — the schema version of the last whole-record write (the op's
+//                 `v`, absent on a node without a schema): what a reader on
+//                 a newer schema lenses the record through. A `set` that
+//                 creates the entry takes its op's `v`; a later `set`, `inc`
+//                 or `delete` leaves it; a merge takes the higher one.
 //
 // Precondition, enforced by Storage: ops from ONE origin are applied in seq
 // order. Counters rely on it (a skipped seq would be lost, not reordered);
@@ -35,10 +40,9 @@ const createEntry = () => ({ data: {}, meta: { clock: {}, base: null, deleted: n
 const cloneEntry = (entry) => {
   const counters = {};
   for (const field in entry.meta.counters) counters[field] = { ...entry.meta.counters[field] };
-  return {
-    data: { ...entry.data },
-    meta: { clock: { ...entry.meta.clock }, base: entry.meta.base, deleted: entry.meta.deleted, counters },
-  };
+  const meta = { clock: { ...entry.meta.clock }, base: entry.meta.base, deleted: entry.meta.deleted, counters };
+  if (entry.meta.v !== undefined) meta.v = entry.meta.v;
+  return { data: { ...entry.data }, meta };
 };
 
 const counterValue = (perOrigin) => {
@@ -70,12 +74,16 @@ const deepEqual = (a, b) => {
 };
 
 // A peer-supplied meta, coerced to the shape the rest of this module trusts.
-const normalizeMeta = (meta) => ({
-  clock: isPlainObject(meta.clock) ? { ...meta.clock } : {},
-  base: Array.isArray(meta.base) ? meta.base : null,
-  deleted: Array.isArray(meta.deleted) ? meta.deleted : null,
-  counters: isPlainObject(meta.counters) ? meta.counters : {},
-});
+const normalizeMeta = (meta) => {
+  const normalized = {
+    clock: isPlainObject(meta.clock) ? { ...meta.clock } : {},
+    base: Array.isArray(meta.base) ? meta.base : null,
+    deleted: Array.isArray(meta.deleted) ? meta.deleted : null,
+    counters: isPlainObject(meta.counters) ? meta.counters : {},
+  };
+  if (Number.isInteger(meta.v)) normalized.v = meta.v;
+  return normalized;
+};
 
 // The newest stamp an entry's metadata holds, over registers, the reset
 // watermark, the tombstone and the counters — what a node must have observed
@@ -161,13 +169,17 @@ const applyOp = (previous, op) => {
   const rejected = [];
 
   if (op.type === 'set') {
-    if (isPlainObject(op.data)) applyFields(entry, op.data, stamp, delta, rejected);
+    if (isPlainObject(op.data)) {
+      if (!previous && Number.isInteger(op.v)) meta.v = op.v;
+      applyFields(entry, op.data, stamp, delta, rejected);
+    }
   } else if (op.type === 'write') {
     if (isPlainObject(op.data) && compareClock(stamp, meta.base) > 0) {
       meta.base = stamp;
       // A write above the tombstone is a revival; dropping the stale stamp
       // keeps the metadata identical whichever order the two arrived in.
       if (compareClock(meta.deleted, meta.base) < 0) meta.deleted = null;
+      if (Number.isInteger(op.v)) meta.v = op.v;
       applyBase(entry, delta);
       applyFields(entry, op.data, stamp, delta, rejected);
     }
@@ -256,6 +268,7 @@ const mergeEntry = (a, b) => {
   meta.base = maxClock(a.meta.base, b.meta.base);
   meta.deleted = maxClock(a.meta.deleted, b.meta.deleted);
   if (compareClock(meta.deleted, meta.base) < 0) meta.deleted = null;
+  if (a.meta.v !== undefined || b.meta.v !== undefined) meta.v = Math.max(a.meta.v ?? 0, b.meta.v ?? 0);
   for (const source of [a, b]) {
     for (const field in source.meta.clock) {
       if (compareClock(source.meta.clock[field], meta.clock[field]) > 0) {
@@ -284,7 +297,10 @@ const mergeEntry = (a, b) => {
 };
 
 // The wire/log shape of a batch: one positional array per op, type as a
-// single letter, absent fields as null — no key names repeated per op.
+// single letter, absent fields as null — no key names repeated per op. A
+// slot may be appended (the writer's schema version was the 13th): a reader
+// of an older shape ignores slots it does not know, a reader of a newer one
+// takes an absent slot as null.
 const TYPE_CODES = { write: 'w', set: 's', inc: 'i', delete: 'd', merge: 'm', advance: 'a' };
 const CODE_TYPES = { w: 'write', s: 'set', i: 'inc', d: 'delete', m: 'merge', a: 'advance' };
 
@@ -305,6 +321,7 @@ const packOps = (ops) => {
       op.value === undefined ? null : op.value,
       op.vector === undefined ? null : op.vector,
       op.from === undefined ? null : op.from,
+      op.v === undefined ? null : op.v,
     ];
   }
   return packed;
@@ -315,9 +332,10 @@ const unpackOps = (packed) => {
   const ops = [];
   for (const row of packed) {
     if (!Array.isArray(row) || row.length < 5) continue;
-    const [origin, seq, ts, code, id, scope, data, meta, key, value, vector, from] = row;
+    const [origin, seq, ts, code, id, scope, data, meta, key, value, vector, from, v] = row;
     const op = { origin, seq, ts, type: CODE_TYPES[code] ?? code };
     if (id !== null && id !== undefined) op.id = id;
+    if (v !== null && v !== undefined) op.v = v;
     if (vector !== null && vector !== undefined) op.vector = vector;
     if (from !== null && from !== undefined) op.from = from;
     if (scope !== null && scope !== undefined) op.scope = scope;

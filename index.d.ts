@@ -53,6 +53,8 @@ export interface SyncOp {
   key?: string;
   /** `inc`: the amount added. */
   value?: number;
+  /** The schema version of the node that made it; absent without a schema, and on `merge`/`advance`. */
+  v?: number;
 }
 
 export interface EntryMeta {
@@ -60,6 +62,8 @@ export interface EntryMeta {
   base: ClockStamp | null;
   deleted: ClockStamp | null;
   counters: { [field: string]: { [origin: string]: readonly [number, number, number] } };
+  /** The schema version of the last whole-record write (or of the `set` that created the entry). */
+  v?: number;
 }
 
 export interface Entry {
@@ -361,6 +365,23 @@ export interface Schema {
   /** A positive integer; default 1. */
   version?: number;
   entities?: SchemaEntities;
+  /**
+   * Any JSON describing the schema (metaschema's `model.toJSON()`): hashed,
+   * kept in `schema.json`, exchanged in hello — the same version with
+   * another hash on a peer is reported as drift.
+   */
+  snapshot?: unknown;
+}
+
+/** What hello carries: a node's schema version and the hash of its snapshot (`null` without one). */
+export interface SchemaInfo {
+  version: number;
+  hash: string | null;
+}
+
+/** `storage.schemaInfo`: the schema this node runs, and what `schema.json` held before this open when that differed. */
+export interface SchemaStatus extends SchemaInfo {
+  previous: SchemaInfo | null;
 }
 
 /** The peer whose whole state is about to be joined. */
@@ -428,6 +449,8 @@ export interface WriteContext {
   via: unknown;
   /** The peer a `merge` came from; `null` for a local write. */
   from: string | null;
+  /** This node's schema version, stamped on the op; `null` without a schema. */
+  v: number | null;
 }
 
 export interface ReadContext {
@@ -545,7 +568,7 @@ export interface Node {
   /** Where the subscription resumes from; `null` until the first page. */
   cursor: string | null;
   /** What the last hello learned; `null` before the first. */
-  remote: { id: string; epoch: string } | null;
+  remote: { id: string; epoch: string; schema: SchemaInfo | null } | null;
 }
 
 /** One dialed peer, as `sync.peers()` reports it. */
@@ -563,8 +586,11 @@ export interface PeerView {
 export interface SyncUnitOptions {
   /** wrpc's access level for the four procedures (default `'session'`). */
   access?: string;
-  /** Gates a peer by whatever the transport presented. */
-  authorize?: (context: unknown, hello: { node: string; vector?: VersionVector; scopes?: string[]; token?: string }) => boolean | Promise<boolean>;
+  /** Gates a peer by whatever the transport presented, and by what hello says. */
+  authorize?: (
+    context: unknown,
+    hello: { node: string; vector?: VersionVector; scopes?: string[]; token?: string; schema?: SchemaInfo | null },
+  ) => boolean | Promise<boolean>;
   /** How a `changes` value is labelled with its position (wrpc's tracked shape by default). */
   tracked?: (id: string, data: unknown) => unknown;
   pageSize?: number;
@@ -586,8 +612,8 @@ export interface SyncUnit {
 
 /** The events a SyncManager emits; listeners are contained. */
 export interface SyncEvents {
-  /** A link came up (with the host's node id after hello), went down, or came back. */
-  peer: (event: { url: string; connected: boolean; node?: string; reconnected?: boolean }) => void;
+  /** A link came up (with the host's node id and schema after hello), went down, or came back. */
+  peer: (event: { url: string; connected: boolean; node?: string; reconnected?: boolean; schema?: SchemaInfo | null }) => void;
   /** A push went out (`pushed`) or a page came in (`received` and the apply result). */
   sync: (event: {
     url: string;
@@ -607,7 +633,7 @@ export interface SyncEvents {
   /** A link was accepted, before hello. */
   connect: (event: { url: string }) => void;
   /** Hosting side: a peer greeted this node and was authorized. */
-  hello: (event: { node: string; scopes: string[] }) => void;
+  hello: (event: { node: string; scopes: string[]; schema: SchemaInfo | null }) => void;
 }
 
 export interface NodeData {
@@ -704,6 +730,12 @@ export interface StorageEvents {
   ) => void;
   /** A peer's batch is durable. */
   apply: (batch: ApplyBatchContext) => void;
+  /**
+   * `drift`: a peer runs this node's schema version with another snapshot
+   * hash — two builds of "the same" schema that disagree. Reported after
+   * hello on both sides; the link stays up.
+   */
+  schema: (event: { kind: 'drift'; peer: PeerRef; version: number; hash: string; local: string }) => void;
   close: () => void;
 }
 
@@ -714,6 +746,8 @@ export interface RecordEvents {
 
 export interface Storage {
   readonly schema: Schema | null;
+  /** The schema version and snapshot hash this node runs, with `previous` when `schema.json` differed; `null` without a schema. */
+  readonly schemaInfo: SchemaStatus | null;
   readonly sync: SyncManager;
   readonly nodeId: string;
   readonly path: string;

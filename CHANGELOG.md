@@ -12,6 +12,22 @@ section until the first publish; everything below lands there on release day.
 
 ### Added
 
+- **Schema versions on the wire.** `open({ schema: { version, snapshot } })`:
+  the version (a positive integer, 1 by default) is stamped on every op this
+  node makes as `v` (the 13th slot of the packed shape; older readers ignore
+  it), and a record remembers the version of its last whole-record write as
+  `meta.v` (a `set` that creates the entry takes its op's; a merge takes the
+  higher). `snapshot` is any JSON describing the schema (metaschema's
+  `model.toJSON()`), hashed and kept in `<path>/schema.json`
+  `{ version, migrated, hash }`; `storage.schemaInfo` is `{ version, hash,
+  previous }`, `previous` being what the file held before this open when
+  that differed (an upgrade to migrate after, a snapshot change, a logged
+  downgrade). `hello` carries `schema: { version, hash } | null` both ways:
+  `authorize(context, hello)` sees it, `listNodes()[0].remote.schema` keeps
+  it, the `peer` and `hello` events carry it, and the same version with
+  another hash is reported on both sides as the storage's `schema` event
+  `{ kind: 'drift', peer, version, hash, local }` plus a warning — never
+  refused. `WriteContext.v`.
 - **Schema validation, injected.** An entity definition
   (`open({ schema: { entities: { Project: { schema, idField, validate, index, unique, fields } } } })`)
   may carry a validator of any of three shapes, none of them a dependency: a

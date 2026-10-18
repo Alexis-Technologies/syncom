@@ -10,6 +10,7 @@ const assert = require('node:assert');
 const syncom = require('..');
 const { normalizeSchema } = require('../src/schema.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
+const { createMesh, settle, waitUntil } = require('./utils/mesh.js');
 
 const optional = (name) => {
   try {
@@ -88,6 +89,49 @@ test('syncom with metaschema', { skip: metaschema ? false : '@alexify/metaschema
     assert.strictEqual(def.standard, true);
     assert.deepStrictEqual(def.index, ['orgId']);
     assert.deepStrictEqual(def.unique, [['orgId', 'name'], ['slug']]);
+  });
+
+  await t.test('model.toJSON() as the snapshot: the same model hashes the same, another one is drift', async (t2) => {
+    const v2 = new Model({}, new Map([...entities, ['Tag', { Registry: {}, name: 'string' }]]));
+    const dirs = new Map();
+    const createStorage = async (t3, name, options = {}) => {
+      const key = `${t3.name}:${name}`;
+      if (!dirs.has(key)) {
+        dirs.set(key, await createTemp());
+        t3.after(() => cleanupTemp(dirs.get(key)));
+      }
+      const storage = await syncom.open({ path: dirs.get(key), logger: false, ...options });
+      t3.after(() => storage.close().catch(() => {}));
+      return storage;
+    };
+    const schemaOf = (m) => ({
+      version: 1,
+      snapshot: m.toJSON(),
+      entities: Object.fromEntries([...m.entities].map(([name, schema]) => [name, { schema }])),
+    });
+    const mesh = await createMesh(
+      t2,
+      ['A', 'B', 'C'],
+      [
+        ['A', 'B'],
+        ['C', 'B'],
+      ],
+      createStorage,
+      { nodes: { A: { schema: schemaOf(model) }, B: { schema: schemaOf(model) }, C: { schema: schemaOf(v2) } } },
+    );
+    const [a, b, c] = ['A', 'B', 'C'].map((name) => mesh.get(name));
+    const drifts = [];
+    b.on('schema', (event) => drifts.push(event));
+    await waitUntil(() => [a, c].every((s) => s.sync.peers()[0]?.subscribed));
+    assert.strictEqual(a.schemaInfo.hash, b.schemaInfo.hash, 'the snapshot is deterministic across processes');
+    assert.notStrictEqual(c.schemaInfo.hash, b.schemaInfo.hash);
+    assert.deepStrictEqual(
+      drifts.map((e) => [e.kind, e.peer.node, e.version]),
+      [['drift', c.nodeId, 1]],
+    );
+    const project = await a.Project.insert({ title: 'Alioth', slug: 'alioth', orgId: 'org1' });
+    await settle([a, b, c]);
+    assert.strictEqual((await c.get(project.id)).name, 'Alioth', 'ops still flow');
   });
 
   await t.test('a struct is handed no id; an async validator is awaited', async (t2) => {
