@@ -278,6 +278,7 @@ await storage.Author.set(post.id, { name: 'x' });        // TypeError: $type is 
 
 ### Queries
 
+The full guide is [Queries](./query); the shape, in short.
 `collection.select(query)` is a cursor: build it, then `fetch()`, `count()`,
 `one()`, iterate it, or `watch()` it. The query is Mango-shaped —
 `{ field: value }` is equality (a dotted path reaches into the record, an
@@ -330,6 +331,7 @@ application decides which yields.
 
 ### Validation
 
+The full guide is [Schema and validation](./schema); the shape, in short.
 Give an entity a `schema` and every write to its collection — `insert()`,
 `set()`, `update()`, `inc()`, a `Record.save()` — is validated as the whole
 record the write leaves behind, before anything is stamped, logged or written.

@@ -35,6 +35,10 @@ const keywords = [
   'offline-first',
   'storage',
   'database',
+  'query',
+  'schema',
+  'migrations',
+  'standard-schema',
   'zero-dependency',
   'javascript',
   'nodejs',
@@ -144,6 +148,8 @@ export default withMermaid({
             text: 'Core',
             items: [
               { text: 'Storage', link: '/guide/storage' },
+              { text: 'Schema and validation', link: '/guide/schema' },
+              { text: 'Queries', link: '/guide/query' },
               { text: 'Hooks and events', link: '/guide/hooks' },
               { text: 'CRDT deltas', link: '/guide/crdt' },
               { text: 'Blockchain log', link: '/guide/chain' },
@@ -156,11 +162,15 @@ export default withMermaid({
               { text: 'Sync', link: '/guide/sync' },
               { text: 'wrpc transport', link: '/guide/wrpc' },
               { text: 'WebRTC', link: '/guide/webrtc' },
+              { text: 'Scaling', link: '/guide/scaling' },
             ],
           },
           {
             text: 'Platforms',
-            items: [{ text: 'Browser', link: '/guide/browser' }],
+            items: [
+              { text: 'Browser', link: '/guide/browser' },
+              { text: 'Backends', link: '/guide/backends' },
+            ],
           },
           {
             text: 'Operations',

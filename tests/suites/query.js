@@ -108,6 +108,7 @@ const runQueryTests = async (t, assert, createStorage) => {
     await storage.delete(all[0].id);
     await storage.insert({ orgId: 'o0', $type: 'Project', sealed: true }, { encrypted: true });
     assert.strictEqual(await storage.Project.count({ orgId: 'o0' }), 23);
+    assert.strictEqual(await storage.Project.count(), 119, 'the covered path skips a sealed record too');
   });
 
   await t.test('unique keys: refused locally, reported when a peer’s op leaves two on one', async (t2) => {

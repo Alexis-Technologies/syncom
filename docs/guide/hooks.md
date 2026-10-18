@@ -173,7 +173,7 @@ than a throw.
 | `apply` | `({ via, peer, ops, applied, skipped, duplicates, gaps })` | A peer's batch is durable — `ops` are the accepted ones, skipped included |
 | `conflict` | `({ kind: 'unique', entity, fields, id, other, op })` | A peer's op left a unique key shared by two records — see [Queries](./storage#queries) |
 | `schema` | `({ kind: 'drift', … })` / `({ kind: 'ahead', op, held })` | A peer runs this node's schema version with another snapshot hash — see [Schemas](./sync#schemas); a peer's op is from a newer version — see [Reading across versions](./storage#reading-across-versions) |
-| `error` | `(error)` with `error.op`, `error.rejected` | A peer's op refused by the register/counter rule |
+| `error` | `(error)` with `error.op`, and `error.rejected` or `error.entity` + `error.issues` | A peer's op refused by the register/counter rule, or skipped as invalid under this node's [schema](./schema#how-a-write-is-validated) |
 | `close` | — | After `close()` sealed the log |
 
 A `Record` emits `update` `(data, delta)` on a staged assignment and when the
@@ -186,11 +186,11 @@ record changes in storage (`null` data once deleted).
 | `start` / `stop` | — | Dialling began / every link was closed |
 | `node` | `({ url, action })` | The registry changed: `'add'`, `'remove'`, `'enable'`, `'disable'` |
 | `connect` | `({ url })` | A link was accepted, before hello |
-| `peer` | `({ url, connected, node?, reconnected? })` | Hello answered (with the host's `node` id), the link closed, or it came back |
+| `peer` | `({ url, connected, node?, reconnected?, schema? })` | Hello answered (with the host's `node` id and `schema`), the link closed, or it came back |
 | `sync` | `({ url, pushed })` / `({ url, received, applied, skipped, duplicates, gaps })` | A push went out / a page came in |
 | `bootstrap` | `({ url, records })` | A host's whole state was joined |
 | `error` | `(error)` with `error.url` | A failure on the way to a peer — a refused link, a failed push, a hook that threw |
-| `hello` | `({ node, scopes })` | Hosting side: a peer greeted this node and was authorized |
+| `hello` | `({ node, scopes, schema })` | Hosting side: a peer greeted this node and was authorized |
 
 ## `HookError`
 

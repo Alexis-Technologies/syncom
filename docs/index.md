@@ -4,7 +4,7 @@ layout: home
 hero:
   name: syncom
   text: Distributed data sync engine
-  tagline: Local-first storage with a tamper-evident log, CRDT deltas and JavaScript smart contracts — zero runtime dependencies, one API for Node.js and the browser.
+  tagline: Local-first storage with a tamper-evident log, schema validation and versions, Mango queries, and replication over wrpc or WebRTC — zero runtime dependencies, one API for Node.js and the browser.
   image:
     src: /logo-mark.svg
     alt: syncom
@@ -45,6 +45,21 @@ features:
     details: A schema turns entity names into collections. Records expose live properties that track their own delta, emit update events, and persist with a single save().
     link: /guide/storage
     linkText: Storage
+  - icon: ✅
+    title: Schema, validation, versions
+    details: A metaschema model, any Standard Schema, ajv or a compiled JSON Schema validates every write before it is stamped — locally and again on the hub. Versions ride on ops, old records read through a lens, migrate() rewrites them.
+    link: /guide/schema
+    linkText: Schema and validation
+  - icon: 🔍
+    title: Mango queries
+    details: "select({ orgId, status: { $in } }).order('name').limit(20) over a record catalog that answers indexed queries with no I/O, unique keys, and watch() for live views."
+    link: /guide/query
+    linkText: Queries
+  - icon: 🗄️
+    title: Any backend
+    details: "node:fs, OPFS, IndexedDB or memory — five functions over a directory and a file name, injected at open(); durable writes and one instance per directory."
+    link: /guide/backends
+    linkText: Backends
   - icon: 📜
     title: JavaScript smart contracts
     details: Store a procedure in the chain by hash, load it back anywhere, and run it against a read-only view of storage. Failures are recorded as blocks.
@@ -57,5 +72,5 @@ features:
     linkText: Browser
   - icon: 📦
     title: Zero runtime dependencies
-    details: Nothing is installed alongside it. The browser bundle is under 22 KB min+gzip, and CI fails the build if that budget is exceeded.
+    details: Nothing is installed alongside it. The browser bundle is under 28 KB min+gzip, and CI fails the build if that budget is exceeded.
 ---

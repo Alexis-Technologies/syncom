@@ -138,7 +138,10 @@ nodes converges.
 
 | Area | What you get |
 | --- | --- |
-| **Storage** | Records with live properties and per-record deltas, schema-driven collections, compare-and-swap writes, counters, encryption at rest (AES-256-GCM under an RSA-wrapped key) |
+| **Storage** | Records with live properties and per-record deltas, schema-driven collections, compare-and-swap writes, counters, encryption at rest (AES-256-GCM under an RSA-wrapped key), `purge()` for the right to be forgotten |
+| **Schema** | A metaschema model, any Standard Schema (zod, valibot, arktype), ajv or a compiled JSON Schema validates every write before it is stamped — locally and again on the hub. Versions ride on ops; an older record reads through a lens (migrations, then the validator's aliases and defaults); `migrate()` rewrites it. See [Schema and validation](https://syncomjs.vercel.app/guide/schema) |
+| **Queries** | `select({ orgId, status: { $in } }).order('name').limit(20).fetch()` over an in-memory record catalog: indexed queries with no I/O, unique keys, `watch()` for live views. See [Queries](https://syncomjs.vercel.app/guide/query) |
+| **Backends** | node:fs, OPFS, IndexedDB (`@alexify/syncom/idb`) or memory — five functions injected at `open({ fsi })`; `durable: true` for fsync, one instance per directory. See [Backends](https://syncomjs.vercel.app/guide/backends) |
 | **Replication** | Every write is an op in a persisted log; peers exchange ops over an injected link, resume from where they stopped, and bootstrap from a streamed snapshot when they cannot; scopes for partial replication |
 | **Convergence** | Last-writer-wins registers, per-origin counters, tombstones with revival — any order, any number of times, same result |
 | **Transport** | `@alexify/syncom/wrpc` adapts a `WrpcClient` — over a WebSocket, or a WebRTC `PeerLink`'s `remote` from `@alexify/wrpc/webrtc`; `storage.sync.unit()` is the router unit a wrpc server, or a browser's `PeerHost`, mounts. Reconnects, resumable subscriptions, binary streams and rooms come from wrpc. See [WebRTC](https://syncomjs.vercel.app/guide/webrtc) |
@@ -148,7 +151,8 @@ nodes converges.
 | **Portability** | One API over `node:fs` + `node:crypto` on the server and OPFS + Web Crypto in the browser, chosen by the `browser` export condition |
 | **Hooks and events** | `open({ hooks })` runs your code inside a write, a read or a peer's batch — validate, stamp, redact, skip — and rejects with a typed `HookError` when it throws; `on()` events (`change`, `apply`, `peer`, `sync`, …) observe everything and can never break it. See [Hooks and events](https://syncomjs.vercel.app/guide/hooks) |
 | **Observability** | Injected OpenTelemetry (`open({ telemetry })`): spans for local writes, applied batches, pushes, bootstraps and log rolls, plus outcome and lag metrics — nested under wrpc's spans, which carry the trace across the wire. See [OpenTelemetry](https://syncomjs.vercel.app/guide/telemetry) |
-| **Dependencies** | None. wrpc is a devDependency for one integration test and is injected at runtime |
+| **Scaling** | Hubs that dial each other, scopes as buckets, per-peer push limits, a reserved shared-log contract for the broker-backed hub. See [Scaling](https://syncomjs.vercel.app/guide/scaling) |
+| **Dependencies** | None. wrpc, metaschema and fake-indexeddb are devDependencies for the integration tests; everything is injected at runtime |
 
 ## Browser usage
 
@@ -183,6 +187,10 @@ local — are listed under [Guarantees and limits](https://syncomjs.vercel.app/g
 - [Sync](https://syncomjs.vercel.app/guide/sync) ·
   [wrpc transport](https://syncomjs.vercel.app/guide/wrpc) ·
   [WebRTC](https://syncomjs.vercel.app/guide/webrtc) ·
+  [Schema and validation](https://syncomjs.vercel.app/guide/schema) ·
+  [Queries](https://syncomjs.vercel.app/guide/query) ·
+  [Backends](https://syncomjs.vercel.app/guide/backends) ·
+  [Scaling](https://syncomjs.vercel.app/guide/scaling) ·
   [Browser](https://syncomjs.vercel.app/guide/browser)
 - [API reference](https://syncomjs.vercel.app/reference/api)
 

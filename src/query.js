@@ -224,7 +224,7 @@ class Cursor {
       for (const id of found) {
         if (rows.length >= enough) break;
         const indexed = row(id);
-        if (indexed === null) continue;
+        if (indexed === null || indexed.encrypted) continue;
         const candidate = { id, ...indexed.fields };
         if (this.#predicate(candidate)) rows.push(candidate);
       }

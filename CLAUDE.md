@@ -186,7 +186,9 @@ docs/                     VitePress site
 `node:test` + `node:assert`. Browser halves run under Node with the OPFS mock
 (`tests/utils/mock-opfs.js`) and `node:crypto`'s `webcrypto` — see
 `tests/index.browser.test.js`. Cross-platform behaviour goes in `tests/suites/`
-and is run against both halves; `tests/suites/sync-engine.js` runs the
+and is run against both halves (`schema`, `catalog`, `query`, `purge`, `hooks`,
+`fsi`, `sync-engine`, each with a `*.test.js` and a `*.browser.test.js`
+wrapper); `tests/suites/sync-engine.js` runs the
 convergence properties over `tests/utils/memory-link.js` (an in-process link
 that mimics a wrpc client: JSON across the boundary, a reconnect re-opens the
 subscription from its last event id against a fresh server-side client) and
@@ -209,8 +211,14 @@ running it before writing it down — several examples inherited from the legacy
 repo were wrong in exactly that way. A new page needs a sidebar entry in
 `docs/.vitepress/config.mts`; `docs/guide/sync.md` and `docs/guide/wrpc.md`
 are the two pages that describe the protocol — keep them in step with
-`src/sync.js`, and `docs/guide/hooks.md` with the hook and event surface of
-`src/storage.js` and `src/sync.js`.
+`src/sync.js`, `docs/guide/hooks.md` with the hook and event surface of
+`src/storage.js` and `src/sync.js`, `docs/guide/schema.md` with
+`src/schema.js` (metaschema is the first-class example there; zod/ajv/JSON
+Schema are the alternatives), `docs/guide/query.md` with `src/query.js` and
+`src/catalog.js`, `docs/guide/backends.md` with `src/backend.js`, `src/lock.js`
+and the two `fsi` halves. The browser-only WebRTC recipes in
+`docs/guide/webrtc.md` follow wrpc's documented API and the raw-channel
+integration tests; they cannot be run here.
 
 ## Skills
 
