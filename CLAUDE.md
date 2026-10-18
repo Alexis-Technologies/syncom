@@ -153,6 +153,25 @@ are the two pages that describe the protocol — keep them in step with
 `src/sync.js`, and `docs/guide/hooks.md` with the hook and event surface of
 `src/storage.js` and `src/sync.js`.
 
+## Skills
+
+`.claude/skills/` holds six of the seven [metaskills](https://github.com/metarhia/metaskills)
+v1.0.5 skills that `metaschema` carries: `js-conventions`, `js-data-structures`,
+`data-structures`, `js-gof`, `error-handling` and `npm-publish`.
+
+- **`js-conventions` is adapted to this repo:** oxlint/oxfmt, pnpm, 120 columns, `'use strict'`
+  in every `src/` file, `node:` prefix and `.js` in relative requires, no runtime dependencies,
+  and the error and hot-path rules of this engine. `forEach` and `reduce` are avoided by
+  convention here, not by a lint rule.
+- **`npm-publish` is adapted to the release checklist in CONTRIBUTING.md:** the CI gates, the
+  hand-synced docs nav version, the size table, and the first-release notes (nothing is
+  published yet). It never publishes.
+- **The other four are verbatim copies.** `metautil-data-structures` is left out on purpose: it
+  documents the `metautil` package, and this one takes no runtime dependencies.
+
+Keep the two adapted skills in sync with this file and CONTRIBUTING.md. **This file wins** if
+they ever disagree.
+
 ## Formatting
 
 `oxlint` + `oxfmt`, not eslint/prettier. `printWidth` is 120. Run
