@@ -44,6 +44,9 @@ importers:
       esbuild:
         specifier: ^0.28.1
         version: 0.28.2
+      fake-indexeddb:
+        specifier: ^6.2.6
+        version: 6.2.6
       mermaid:
         specifier: ^11.16.0
         version: 11.17.2
@@ -1816,6 +1819,10 @@ packages:
 
   estree-walker@2.0.2:
     resolution: {integrity: sha512-Rfkk/Mp/DL7JVje3u18FxFujQlTNR2q6QfMSMB7AvCBx91NGj/ba3kCfza0f6dVDbw7YlRf/nDrn7pQrCCyQ/w==}
+
+  fake-indexeddb@6.2.6:
+    resolution: {integrity: sha512-ihhmr0KoET51jT8R4YhbUYuLLvr1qqO6INISygtN16i8loR8kAxtAUr4+EKHTSMjL+lggaAn4OC7DRqzrNgnuQ==}
+    engines: {node: '>=18'}
 
   fast-glob@3.3.3:
     resolution: {integrity: sha512-7MptL8U0cqcFdzIzwOTHoilX9x5BrNqye7Z/LuC7kCMRio1EMSyqRK3BEAUD7sXRq4iT4AzTVuZdhgQ2TCvYLg==}
@@ -4089,6 +4096,8 @@ snapshots:
   eslint-rule-docs@1.1.235: {}
 
   estree-walker@2.0.2: {}
+
+  fake-indexeddb@6.2.6: {}
 
   fast-glob@3.3.3:
     dependencies:

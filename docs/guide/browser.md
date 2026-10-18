@@ -42,7 +42,32 @@ RSA-OAEP (SHA-256). Keys and ciphertext move between the platforms.
 `data/` directory inside the origin's OPFS rather than on disk. It is
 per-origin and the browser may evict it. Another backend goes in through
 `open({ fsi })` — `createMemoryFsi()` for a node that must not persist, or
-IndexedDB through `@alexify/syncom/idb` (see [Backends](../reference/api#backends)).
+IndexedDB (see [Backends](../reference/api#backends)).
+
+## OPFS or IndexedDB
+
+OPFS is the default. Where it is unavailable or unwanted — a context without
+it, a profile that evicts it, an app that already lives in IndexedDB — the
+`@alexify/syncom/idb` subpath is the same contract over IndexedDB:
+
+```js
+import { open } from '@alexify/syncom';
+import { createIdbFsi } from '@alexify/syncom/idb';
+
+const fsi = createIdbFsi({ name: 'app' }); // one database, one store `files`
+const storage = await open({ path: 'data', fsi });
+// …
+await storage.close();
+await fsi.close();
+```
+
+Every file of the storage — records, log, chain, keys, registry — is a row
+keyed by `[dir, name]`; a directory listing is one index lookup. The database
+is opened on the first call and reopened after another tab upgrades or
+deletes it; a write resolves once its transaction completed, which is as
+durable as IndexedDB gets (`durable: true` is a no-op here). `close()` is the
+backend's own: the storage never closes a backend it was handed, since two
+storages may share one.
 
 **A browser node dials, it cannot host.** Its registry, log and cursors live
 in OPFS like everything else, so a reload resumes where it left off. See

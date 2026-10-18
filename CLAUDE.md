@@ -19,6 +19,7 @@ object the caller hands in.
 index.js / browser.js     two-line shims over src/index.js / src/index.browser.js
 wrpc.js / wrpc.d.ts       the @alexify/syncom/wrpc subpath (src/wrpc.js)
 contracts.js / .d.ts      the @alexify/syncom/contracts subpath (src/contract.js) — never back in the barrel
+idb.js / idb.d.ts         the @alexify/syncom/idb subpath (src/idb.js) — the IndexedDB backend, browser-only
 index.d.ts                the Node type surface (hand-written)
 browser.d.ts              re-exports index.d.ts, overrides the 3 async crypto fns
 src/backend.js            the fsi contract (isFsi/checkFsi), createMemoryFsi, withSync — no requires

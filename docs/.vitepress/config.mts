@@ -38,6 +38,7 @@ const keywords = [
   'javascript',
   'nodejs',
   'browser',
+  'indexeddb',
   'opentelemetry',
   'observability',
 ].join(', ');

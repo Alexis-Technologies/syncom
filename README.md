@@ -76,10 +76,11 @@ that fails the build when exceeded.
 
 | Entry | raw | min | min+gzip | budget |
 | ----- | ---:| ---:| --------:| ------:|
-| main entry — browser (@alexify/syncom) | 150.7 KB | 62.5 KB | 21.3 KB | 22.0 KB |
-| main entry — node (@alexify/syncom) | 141.3 KB | 61.5 KB | 21.0 KB | — |
+| main entry — browser (@alexify/syncom) | 154.5 KB | 64.3 KB | 21.9 KB | 22.0 KB |
+| main entry — node (@alexify/syncom) | 145.1 KB | 63.4 KB | 21.7 KB | — |
 | wrpc adapter — browser (@alexify/syncom/wrpc) | 3.3 KB | 1.4 KB | 0.7 KB | 2.0 KB |
 | contracts — browser (@alexify/syncom/contracts) | 3.0 KB | 1.2 KB | 0.6 KB | 1.0 KB |
+| idb backend — browser (@alexify/syncom/idb) | 3.7 KB | 1.7 KB | 0.8 KB | 2.0 KB |
 
 ## Quick Start
 
@@ -159,7 +160,8 @@ import { open, diff, merge } from '@alexify/syncom';
 ```
 
 Crypto is asynchronous there (`calculateHash`, `encrypt` and `decrypt` return
-promises), and storage lives in the origin-private filesystem. `browser.d.ts`
+promises), and storage lives in the origin-private filesystem — or in
+IndexedDB through `open({ fsi: createIdbFsi() })` from `@alexify/syncom/idb`. `browser.d.ts`
 declares those signatures separately. A browser node dials the mesh through
 `@alexify/syncom/wrpc` like any other. See
 [Browser](https://syncomjs.vercel.app/guide/browser).

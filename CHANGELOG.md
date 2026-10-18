@@ -12,6 +12,11 @@ section until the first publish; everything below lands there on release day.
 
 ### Added
 
+- `@alexify/syncom/idb` — `createIdbFsi({ name, store, indexedDB })`, the
+  backend over IndexedDB for browsers where OPFS is unavailable or unwanted:
+  one object store keyed by `[dir, name]` with an index on `dir`, opened
+  lazily, reopened after a `versionchange`, closed by its own `close()`.
+  `fake-indexeddb` is a devDependency for its tests.
 - **The backend is injected.** `open({ fsi })` takes any object with the
   five functions of the contract (`read`, `write`, `exists`, `remove`,
   `list`) and routes the records, the log, the chain, the keys and the

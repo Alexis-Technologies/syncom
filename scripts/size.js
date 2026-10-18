@@ -50,6 +50,9 @@ const ENTRIES = [
   // chain data), so a node that never imports the subpath never pays for it
   // — in bytes or in attack surface.
   { label: 'contracts — browser (@alexify/syncom/contracts)', entry: 'contracts.js', platform: 'browser', budget: 1 },
+  // The IndexedDB backend: browser-only by nature, its own row so the main
+  // entry pays nothing for it.
+  { label: 'idb backend — browser (@alexify/syncom/idb)', entry: 'idb.js', platform: 'browser', budget: 2 },
 ];
 
 // A browser entry has to be self-contained: no node builtins, and no packages
