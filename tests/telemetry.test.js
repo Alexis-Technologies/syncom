@@ -549,6 +549,9 @@ test('Sync telemetry', async (t) => {
     );
     const a = mesh.get('A');
     const b = mesh.get('B');
+    // After the handshake: a write that lands before its push is sent along
+    // with it as a 'handshake' push, not relayed.
+    await waitUntil(() => a.sync.peers()[0]?.subscribed);
     await a.insert({ n: 1 });
     await settle([a, b]);
     const [commit] = tracing.A.named('syncom.commit');
