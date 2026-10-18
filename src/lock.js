@@ -53,8 +53,8 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const webLock = (locks, name, mode) =>
   new Promise((resolve, reject) => {
     let release = null;
-    const held = new Promise((done) => {
-      release = done;
+    const held = new Promise((resolve) => {
+      release = resolve;
     });
     const options = mode === 'fail' ? { ifAvailable: true } : {};
     locks
