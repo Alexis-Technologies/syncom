@@ -194,9 +194,10 @@ that mimics a wrpc client: JSON across the boundary, a reconnect re-opens the
 subscription from its last event id against a fresh server-side client) and
 `tests/utils/mesh.js` (N storages from an adjacency list, `settle()`).
 `tests/wrpc.integration.test.js` runs two real wrpc `Server`s and a dialer,
-plus syncom over a fake WebRTC data channel (`tests/utils/fake-channel.js`)
-attached to an `RpcServer` and to a `PeerHost`, and skips when
-`@alexify/wrpc` (2.x) is not installed. Two things bite there: two nodes'
+the `onRequest` rate-limit recipe of `docs/guide/scaling.md` (keep the two in
+step), plus syncom over a fake WebRTC data channel
+(`tests/utils/fake-channel.js`) attached to an `RpcServer` and to a
+`PeerHost`, and skips when `@alexify/wrpc` (2.x) is not installed. Two things bite there: two nodes'
 clocks are independent, so "later" needs a `tick()` between writes on
 different nodes; and `settle()` ignores `@~` vector keys, because a node's
 bootstrap stream never reaches the node it bootstrapped from.

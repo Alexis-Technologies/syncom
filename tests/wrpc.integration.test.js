@@ -152,6 +152,67 @@ test('syncom over wrpc', { skip: wrpc ? false : '@alexify/wrpc unavailable' }, a
     assert.match(refused[0].message, /Not authorized/);
     assert.strictEqual(await bad.get(id), null);
   });
+
+  await t.test('a wrpc onRequest hook reads unit({ meta }): the per-procedure rate-limit recipe', async (t2) => {
+    // wrpc ships no limiter. The recipe in docs/guide/scaling.md is one
+    // router-level `onRequest` hook that reads `context.procedure.meta.rateLimit`
+    // — what `unit({ meta })` put on every syncom procedure — and answers 429;
+    // a bucket per client and per procedure, so hello and changes keep their own.
+    const buckets = new WeakMap();
+    const rateLimitFromMeta = (context) => {
+      const config = context.procedure.meta?.rateLimit;
+      if (!config) return;
+      let perClient = buckets.get(context.client);
+      if (!perClient) buckets.set(context.client, (perClient = new Map()));
+      let bucket = perClient.get(context.procedure);
+      const now = Date.now();
+      if (!bucket || now - bucket.start >= config.windowMs) {
+        perClient.set(context.procedure, (bucket = { start: now, used: 0 }));
+      }
+      if (++bucket.used > config.limit) {
+        const error = new Error('Rate limit exceeded');
+        error.code = 429;
+        error.expose = true;
+        throw error;
+      }
+    };
+    const hub = await openTemp(t2);
+    const router = wrpc.defineRouter(
+      { syncom: hub.sync.unit({ access: 'public', meta: { rateLimit: { limit: 5, windowMs: 500 } } }) },
+      { hooks: { onRequest: rateLimitFromMeta } },
+    );
+    const server = new wrpc.Server({ router, host: '127.0.0.1', port: 0, protocol: 'http', logger: false });
+    await server.listen();
+    t2.after(() => server.close().catch(() => {}));
+    const url = `ws://127.0.0.1:${server.address().port}${server.rpc.basePath}`;
+    // Seven ops, one per page: the sixth push of the window is refused.
+    const c = await openTemp(t2, { sync: { connect: connect(), autoStart: false, pageSize: 1 } });
+    const errors = [];
+    c.sync.on('error', (error) => errors.push(error));
+    const ids = [];
+    for (let i = 0; i < 7; i++) ids.push(await c.insert({ i }));
+    await c.sync.addNode({ url });
+    await c.sync.start();
+    await waitUntil(() => errors.length > 0, { timeout: 5000 });
+    assert.strictEqual(errors[0].code, 429);
+    assert.match(errors[0].message, /Rate limit exceeded/);
+    assert.strictEqual(errors[0].url, url);
+    // Five pages got through before the refusal — hello was not counted
+    // against push — and the hub keeps them; the dialer keeps its cursor.
+    assert.strictEqual((await hub.list()).length, 5);
+    assert.deepStrictEqual(await hub.get(ids[4]), { i: 4 });
+    assert.strictEqual(await hub.get(ids[5]), null);
+    assert.strictEqual(c.sync.peers()[0].subscribed, false, 'the handshake stopped at the push');
+    // The window passes; the next handshake pushes what the hub's vector says
+    // it lacks — two pages, not seven — and the subscription opens.
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await c.sync.enableNode(url, false);
+    await c.sync.enableNode(url, true);
+    await settle([hub, c], { timeout: 10_000 });
+    assert.strictEqual((await hub.list()).length, 7);
+    assert.strictEqual(c.sync.peers()[0].subscribed, true);
+    assert.strictEqual(errors.length, 1, 'the resend fit the window');
+  });
 });
 
 // WebRTC is wrpc's: a PeerLink's `remote` is a WrpcClient, and so is a

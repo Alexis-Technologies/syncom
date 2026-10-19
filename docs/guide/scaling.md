@@ -60,11 +60,37 @@ Three layers, each its own:
   `unit({ meta })` is what it reads as `context.procedure.meta`:
 
 ```js
+// A bucket per client and per procedure; the limit comes off the procedure.
+const buckets = new WeakMap();
+const rateLimitFromMeta = (context) => {
+  const config = context.procedure.meta?.rateLimit;
+  if (!config) return;
+  let perClient = buckets.get(context.client);
+  if (!perClient) buckets.set(context.client, (perClient = new Map()));
+  let bucket = perClient.get(context.procedure);
+  const now = Date.now();
+  if (!bucket || now - bucket.start >= config.windowMs) {
+    perClient.set(context.procedure, (bucket = { start: now, used: 0 }));
+  }
+  if (++bucket.used > config.limit) {
+    const error = new Error('Rate limit exceeded');
+    error.code = 429;
+    error.expose = true;
+    throw error;
+  }
+};
+
 const router = defineRouter(
   { syncom: hub.sync.unit({ access: 'session', meta: { rateLimit: { limit: 200, windowMs: 1000 } } }) },
-  { hooks: { onRequest: rateLimitFromMeta } }, // your hook, reading context.procedure.meta.rateLimit
+  { hooks: { onRequest: rateLimitFromMeta } },
 );
 ```
+
+The hook runs before access and the handler, on every transport the router
+serves — a WebSocket, a `PeerHost` — and a refused push reaches the dialer as
+its `error` event with `code` 429; it keeps its cursor and resends what the
+hub's vector still lacks at the next handshake. The wrpc integration test
+runs exactly this recipe.
 
 Retention bounds the log: `sync.retention.ops` / `.days` size it for the
 longest outage a client may have — below the floor a client bootstraps,
