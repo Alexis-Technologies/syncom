@@ -186,6 +186,17 @@ for a browser rebuilding a large catalog, where that verification is one
 hash and two reads per record. `storage.validate(id, data, block)` is still
 there for a check on demand.
 
+### Health
+
+`storage.stats()` is what an operator reads at runtime, from memory: whether
+the storage is closed, how many writes wait on the mutation queue, the cache
+(`size`, `max`, `pinned` by live Records), the catalog (`entries`, tombstones
+included, and `dirty` puts since the last save), the log (`length`, `floor`,
+`next`, `epoch`, `segments`, `latestTs`), the chain's `tail` (or `null` under
+`chain: false`) and the lock `mode` (or `null` under `lock: false`). The
+[sync manager](./sync#lifecycle-and-events) adds `peers()`, `hosted()` and the
+`log` event; [telemetry](./telemetry) adds the gauges.
+
 ### Encryption at rest
 
 Open the storage with `encrypted: true`, or pass the flag per write:

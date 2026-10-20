@@ -274,6 +274,13 @@ section until the first publish; everything below lands there on release day.
 
 ### Fixed
 
+- **What an operator could not read at runtime.** `storage.stats()` (queue,
+  cache, catalog, log, chain, lock — from memory), `peers()[i].lastError`,
+  `sync.hosted()` (every live `changes` feed on a host) and a `log` event
+  when the log seals a segment (`floor` is where a resume still works).
+  `via` on `change`, `apply` and the apply hooks is `{ url, node }` of the
+  peer, on both sides; before, the dialing side handed out its internal
+  peer object — with the registered token on it.
 - **What an operator could not see.** Spans for a served snapshot page
   (`syncom.snapshot`), a scrub (`syncom.log.scrub`) and a catalog rebuild
   (`syncom.catalog.rebuild`); histograms for hook durations

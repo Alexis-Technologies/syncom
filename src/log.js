@@ -69,6 +69,7 @@ class OpLog {
   // Record id → the seqs of its entries: what a scrub rewrites, found
   // without a walk over everything retained.
   #byId = new Map();
+  #onRoll = null;
 
   constructor(basePath, options = {}) {
     this.#path = `${basePath}/log`;
@@ -83,6 +84,8 @@ class OpLog {
     // failed stays in the open files, replayed at every reopen until it
     // lands. A log on its own seals everything, as before.
     this.#sealApplied = options.sealApplied === true;
+    // Told after every seal — what the storage turns into its `log` event.
+    this.#onRoll = typeof options.onRoll === 'function' ? options.onRoll : null;
     return this.#init();
   }
 
@@ -214,6 +217,11 @@ class OpLog {
 
   get floor() {
     return this.#floor;
+  }
+
+  /** Sealed segments on disk. */
+  get segments() {
+    return this.#segments.length;
   }
 
   get next() {
@@ -357,6 +365,13 @@ class OpLog {
       else kept.push(file);
     }
     this.#openFiles = kept;
+    if (this.#onRoll !== null) {
+      try {
+        this.#onRoll({ sealed: entries.length, dropped, floor: this.#floor, segments: this.#segments.length });
+      } catch (error) {
+        this.#log?.warn?.({ event: 'listener.error', name: 'log', err: error });
+      }
+    }
     return { dropped };
   }
 

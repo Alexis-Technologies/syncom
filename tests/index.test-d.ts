@@ -215,11 +215,11 @@ expectType<Promise<void>>(storage.inc('id', 'hits'));
 expectType<Promise<void>>(storage.inc('id', 'hits', 2));
 expectType<Promise<string[]>>(storage.list());
 expectType<Promise<void>>(storage.close());
-expectType<Promise<syncom.ApplyRemoteResult>>(storage.applyRemote([], { via: 'link' }));
+expectType<Promise<syncom.ApplyRemoteResult>>(storage.applyRemote([], { via: { url: 'ws://x', node: 'n' } }));
 expectType<Promise<syncom.SnapshotPage>>(storage.snapshot({ cursor: null, limit: 10 }));
 storage.on('change', (op, via) => {
   expectType<syncom.SyncOp>(op);
-  expectType<unknown>(via);
+  expectType<syncom.PeerRef | null>(via);
   expectType<string | undefined>(op.actor);
 });
 declare const entry: syncom.Entry;
@@ -439,3 +439,20 @@ expectError(syncom.open({ sync: { maxOutbox: 'lots' } }));
 expectAssignable<StorageOptions>({ chain: false });
 expectError(syncom.open({ chain: 'no' }));
 expectType<number>(log.seqOf('origin@scope'));
+
+// E5b: introspection
+expectType<syncom.StorageStats>(storage.stats());
+expectType<number>(storage.stats().cache.pinned);
+expectType<{ tail: string } | null>(storage.stats().chain);
+expectType<syncom.HostedPeer[]>(storage.sync.hosted());
+expectType<string | null>(storage.sync.hosted()[0].cursor);
+expectType<number | null | string>(storage.sync.peers()[0].lastError!.code);
+storage.on('log', (event) => {
+  expectType<'roll'>(event.kind);
+  expectType<number>(event.floor);
+});
+storage.on('change', (op, via) => {
+  expectType<syncom.PeerRef | null>(via);
+});
+expectType<number>(log.segments);
+expectType<Promise<syncom.OpLog>>(new syncom.OpLog('base', { onRoll: (roll) => void roll.floor }));

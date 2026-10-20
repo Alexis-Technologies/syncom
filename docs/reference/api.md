@@ -53,6 +53,7 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 | `validate(id, data, blockHash)` | `Promise<boolean>` | One record against its block |
 | `getCachedData(id)` | `unknown \| null` | Synchronous cache peek, raw (no lens) |
 | `hasRecord(id)` | `boolean` | Whether the id is a live record — from the catalog, no I/O |
+| `stats()` | `{ closed, queue, cache: { size, max, pinned }, catalog: { entries, dirty }, log: { length, floor, next, epoch, segments, latestTs }, chain: { tail } \| null, lock: { mode } \| null }` | The node's health, from memory — no I/O |
 | `applyRemote(ops, { via, scopes, peer, adoptFrom }?)` | `Promise<{ applied, skipped, duplicates, gaps, malformed }>` | Applies a peer's ops, in order per origin; `peer` is `{ url, node }` for the hooks; `malformed` ops (shape, id, a stamp beyond `sync.maxSkew`) are counted and dropped; an `advance` is adopted only when its origin is `adoptFrom` |
 | `snapshot({ cursor, limit, scopes }?)` | `Promise<{ records, cursor, eventId, vector }>` | One page of state, tombstones included |
 | `mergeSnapshot(records, { via, from }?)` | `Promise<void>` | Joins a page (as `merge` ops of this node) |
@@ -71,11 +72,12 @@ the operation (see [Hooks and events](../guide/hooks#events)):
 
 | Event | Payload | When |
 | --- | --- | --- |
-| `change` | `(op, via)` | Every op applied here; `via` is `null` for a local write, otherwise the link it came from |
+| `change` | `(op, via)` | Every op applied here; `via` is `null` for a local write, otherwise `{ url, node }` of the peer it came from (`url` null on the hosting side) |
 | `apply` | `({ via, peer, ops, applied, skipped, duplicates, gaps })` | A peer's batch is durable |
 | `error` | `(error)` with `error.code` and `error.op`, plus `error.rejected` (`OP_REFUSED`) or `error.entity` + `error.issues` (`OP_INVALID`) | A peer's op refused by the register/counter rule, skipped as invalid under this node's schema, skipped because this node cannot read the record's file (`OP_UNREADABLE`), or refused for a stamp beyond `sync.maxSkew` (`SKEW`) |
 | `conflict` | `({ kind: 'unique', entity, fields, id, other, op })` | A peer's op left a unique key shared by two records; both are kept |
 | `schema` | `({ kind: 'drift', peer, version, hash, local })` / `({ kind: 'ahead', op, held })` | A peer runs this schema version with another snapshot hash (see [Schemas](../guide/sync#schemas)) / a peer's op is from a newer version, applied or held |
+| `log` | `({ kind: 'roll', sealed, dropped, floor, segments })` | The log sealed a segment and maybe dropped old ones; `floor` is where a resume is still possible |
 | `close` | — | After `close()` sealed the log |
 
 Hooks (`open({ hooks })`): `beforeWrite`, `afterWrite`, `beforeRead`,
@@ -135,7 +137,8 @@ Extends `Emitter`. See [Sync](../guide/sync).
 | `start()` | `Promise<void>` | Dials every enabled node; needs `sync.connect` |
 | `stop()` | `Promise<void>` | Closes every link |
 | `sync(url?)` | `Promise<Array<{ url, pushed }>>` | Pushes what the peers lack now |
-| `peers()` | `Array<{ url, node, connected, subscribed, cursor, lastSync, pending, behind, stuck }>` | Live view; `behind` after a failed push until the next recovery, `stuck` once a page failed three times in a row (see [Protocol](../guide/sync#protocol)) |
+| `peers()` | `Array<{ url, node, connected, subscribed, cursor, lastSync, pending, behind, stuck, lastError }>` | Live view; `behind` after a failed push until the next recovery, `stuck` once a page failed three times in a row (see [Protocol](../guide/sync#protocol)), `lastError` `{ code, message, at }` or null |
+| `hosted()` | `Array<{ node, scopes, since, cursor }>` | Hosting side: every peer with a live `changes` feed here (`scopes` null means every scope) |
 | `unit({ access, authorize, tracked, pageSize, pageBytes, limits, meta }?)` | router unit | The procedures a host mounts: `hello`, `push`, `snapshot`, `changes` — see [Hosting](../guide/sync#hosting) |
 
 Properties: `storage`, `started`.

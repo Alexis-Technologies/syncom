@@ -500,6 +500,8 @@ class Storage extends Emitter {
       // OpLog.applied: the tail a reopen replays must hold every batch whose
       // records may not have been written.
       sealApplied: true,
+      // The floor moving is news to an operator: a peer below it bootstraps.
+      onRoll: (roll) => notify(this, this.#logger, 'log', { kind: 'roll', ...roll }),
     });
     // The clock picks up where the log left off: every stamp this node ever
     // logged is below what it will stamp next, whatever the wall clock says.
@@ -898,6 +900,32 @@ class Storage extends Emitter {
   /** The highest per-origin seq applied here — what a peer compares against. */
   get vector() {
     return this.#log.vector;
+  }
+
+  /**
+   * The node's health, as an operator reads it: what is queued, cached,
+   * catalogued, retained and locked. No I/O — every number is in memory.
+   */
+  stats() {
+    let pinned = 0;
+    for (const id of Array.from(this.#records.keys())) if (this.#live(id) !== undefined) pinned++;
+    const log = this.#log;
+    return {
+      closed: this.#closed,
+      queue: this.#queued,
+      cache: { size: this.#cache.size, max: this.#cacheMax, pinned },
+      catalog: { entries: this.#catalog.size, dirty: this.#catalog.dirty },
+      log: {
+        length: log.length,
+        floor: log.floor,
+        next: log.next,
+        epoch: log.epoch,
+        segments: log.segments,
+        latestTs: log.latestTs,
+      },
+      chain: this.#chain ? { tail: this.#chain.tailHash } : null,
+      lock: this.#lock ? { mode: this.#options.lock ?? 'fail' } : null,
+    };
   }
 
   // Every mutation passes through one queue: the chain's tail pointer, the

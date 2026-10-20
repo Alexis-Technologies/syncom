@@ -96,6 +96,11 @@ docs/                     VitePress site
   `#chain` null: `#commit`, `#persistBatch` and `#writeEncrypted` write
   `block: null`, `#verify` is forced off, `validate()` throws `NO_CHAIN`. A
   new place that reads `this.#chain` must take null.
+- **`via` is a descriptor, never the link.** `peer.ref` (`{ url, node }`,
+  `node` filled by hello) is what `change`, `apply` and the apply hooks get
+  on the dialing side; the host's is `state.ref` (`url` null). `#fanOut`
+  compares `peer.ref === via`. Never hand the peer object, the link or the
+  wrpc client out of `SyncManager`: they carry the token and the socket.
 - **Live Records are weak.** `#records` holds `WeakRef`s (a
   `FinalizationRegistry` clears the slot); go through `#live(id)`, never
   `#records.get`. A Record the application still holds pins its cache entry;

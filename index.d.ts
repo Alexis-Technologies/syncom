@@ -155,6 +155,8 @@ export interface OpLogOptions {
    * have been written. A log on its own seals everything.
    */
   sealApplied?: boolean;
+  /** Told after every seal: what was sealed and dropped, and where the floor is. */
+  onRoll?: (roll: { sealed: number; dropped: number; floor: number; segments: number }) => void;
 }
 
 export interface OpLog {
@@ -185,6 +187,8 @@ export interface OpLog {
   applied(from: number, to?: number): void;
   /** One key of the vector (`origin` or `origin@scope`), without copying the whole. */
   seqOf(key: string): number;
+  /** Sealed segments on disk. */
+  readonly segments: number;
 }
 
 export interface OpLogConstructor {
@@ -517,7 +521,7 @@ export interface WriteContext {
   /** The Record whose `save()` this is, or `null`. */
   source: SyncomRecord | null;
   /** The link a `merge` came in on; `null` for a local write. */
-  via: unknown;
+  via: PeerRef | null;
   /** The peer a `merge` came from; `null` for a local write. */
   from: string | null;
   /** This node's schema version, stamped on the op; `null` without a schema. */
@@ -534,21 +538,44 @@ export interface ReadContext {
 export interface ApplyContext {
   op: SyncOp;
   /** The link the op arrived on. */
-  via: unknown;
+  via: PeerRef | null;
   /** Who sent it — `url` is `null` when this node is the host. */
   peer: PeerRef | null;
   /** The record before the op — `null` when absent or deleted. Read-only. */
   current: Record<string, unknown> | null;
 }
 
+/** A peer, by url (null on the hosting side) and node id (null until its hello answered). */
 export interface PeerRef {
   url: string | null;
+  node: string | null;
+}
+
+/** What `storage.stats()` answers — every number from memory, no I/O. */
+export interface StorageStats {
+  closed: boolean;
+  /** Writes waiting on, or running in, the mutation queue. */
+  queue: number;
+  cache: { size: number; max: number; pinned: number };
+  /** Rows, tombstones included, and the puts since the last save. */
+  catalog: { entries: number; dirty: number };
+  log: { length: number; floor: number; next: number; epoch: string; segments: number; latestTs: number };
+  chain: { tail: string } | null;
+  lock: { mode: 'fail' | 'wait' } | null;
+}
+
+/** Hosting side: a peer with a live `changes` feed on this node. */
+export interface HostedPeer {
   node: string;
+  /** The scopes the feed serves; `null` for every scope. */
+  scopes: string[] | null;
+  since: number;
+  cursor: string | null;
 }
 
 /** One `applyRemote` call, after its batch is durable. */
 export interface ApplyBatchContext extends ApplyRemoteResult {
-  via: unknown;
+  via: PeerRef | null;
   peer: PeerRef | null;
   /** Every accepted op — the skipped ones included. */
   ops: SyncOp[];
@@ -702,6 +729,8 @@ export interface PeerView {
    * application intervenes (`enableNode` off and on, or a bootstrap).
    */
   stuck: boolean;
+  /** The last failure on the way to this peer, or null. */
+  lastError: { code: string | number | null; message: string; at: number } | null;
 }
 
 export interface SyncUnitOptions {
@@ -830,6 +859,8 @@ export interface SyncManager {
   /** Pushes whatever the connected peers (or one) lack right now. */
   sync(url?: string): Promise<Array<{ url: string; pushed: number }>>;
   peers(): PeerView[];
+  /** Hosting side: every peer with a live `changes` feed here. */
+  hosted(): HostedPeer[];
   unit(options?: SyncUnitOptions): SyncUnit;
 }
 
@@ -891,8 +922,10 @@ export interface ApplyRemoteResult {
 
 /** The events a Storage emits; listeners are contained. */
 export interface StorageEvents {
-  /** Every op applied here — local (`via` null) or from a peer (`via` = the link). */
-  change: (op: SyncOp, via: unknown) => void;
+  /** Every op applied here — local (`via` null) or from a peer (`via` names it). */
+  change: (op: SyncOp, via: PeerRef | null) => void;
+  /** The log sealed a segment (and maybe dropped old ones): `floor` is where a resume is still possible. */
+  log: (event: { kind: 'roll'; sealed: number; dropped: number; floor: number; segments: number }) => void;
   /**
    * A peer's op refused by the register/counter rule (`OP_REFUSED`,
    * `rejected`), skipped because the record would not pass its entity's
@@ -1001,6 +1034,8 @@ export interface Storage {
   getCachedData(id: string): unknown | null;
   /** Whether `id` is a live record here — from the catalog, no I/O. */
   hasRecord(id: string): boolean;
+  /** The node's health as an operator reads it — queue, cache, catalog, log, chain, lock. No I/O. */
+  stats(): StorageStats;
   /**
    * `adoptFrom`: the node id whose own `advance` ops may move this node's
    * vector — the host a subscription is read from. Absent, an `advance` is
@@ -1008,11 +1043,11 @@ export interface Storage {
    */
   applyRemote(
     ops: readonly SyncOp[],
-    options?: { via?: unknown; scopes?: readonly string[] | null; peer?: PeerRef | null; adoptFrom?: string | null },
+    options?: { via?: PeerRef | null; scopes?: readonly string[] | null; peer?: PeerRef | null; adoptFrom?: string | null },
   ): Promise<ApplyRemoteResult>;
-  adoptVector(vector: VersionVector, options?: { via?: unknown; from?: string }): Promise<SyncOp | null>;
+  adoptVector(vector: VersionVector, options?: { via?: PeerRef | null; from?: string }): Promise<SyncOp | null>;
   snapshot(options?: { cursor?: string | null; limit?: number; scopes?: readonly string[] | null }): Promise<SnapshotPage>;
-  mergeSnapshot(records: readonly (Entry & { id: string })[], options?: { via?: unknown; from?: string }): Promise<void>;
+  mergeSnapshot(records: readonly (Entry & { id: string })[], options?: { via?: PeerRef | null; from?: string }): Promise<void>;
   close(): Promise<void>;
 }
 

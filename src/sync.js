@@ -145,6 +145,7 @@ class SyncManager extends Emitter {
   #nodes = new Map();
   #peers = new Map();
   #wakers = new Set();
+  #feeds = new Set();
   #onChange = null;
   #started = false;
   #saving = new Map();
@@ -328,13 +329,23 @@ class SyncManager extends Emitter {
       pending: peer.outbox.length + (peer.inflight ? 1 : 0),
       behind: peer.behind,
       stuck: peer.stuck,
+      lastError: peer.lastError,
     }));
+  }
+
+  /** Hosting side: every peer with a live `changes` feed on this node. */
+  hosted() {
+    return Array.from(this.#feeds, (feed) => ({ ...feed, scopes: feed.scopes === null ? null : [...feed.scopes] }));
   }
 
   #connect(node) {
     if (this.#peers.has(node.url)) return;
     const peer = {
       node,
+      // What the application sees as `via` on a change, an apply, a hook:
+      // the peer by url and node id, never the link or its token.
+      ref: { url: node.url, node: null },
+      lastError: null,
       link: null,
       remote: null,
       connected: false,
@@ -424,6 +435,7 @@ class SyncManager extends Emitter {
 
   #fail(peer, error) {
     if (peer.closed) return;
+    peer.lastError = { code: error?.code ?? null, message: error?.message ?? String(error), at: Date.now() };
     this.#storage.logger.warn({ event: 'sync.error', url: peer.node.url, err: error });
     notify(this, this.#storage.logger, 'error', Object.assign(error, { url: peer.node.url }));
   }
@@ -481,6 +493,7 @@ class SyncManager extends Emitter {
     if (node.remote && node.remote.epoch !== answer.epoch) node.cursor = null;
     const schema = schemaOf(answer.schema);
     peer.remote = { id: answer.node, vector: answer.vector ?? {}, epoch: answer.epoch };
+    peer.ref.node = answer.node;
     node.remote = { id: answer.node, epoch: answer.epoch, schema };
     await this.#saveNode(node);
     notify(this, this.#storage.logger, 'peer', { url: node.url, connected: true, node: answer.node, schema });
@@ -705,7 +718,7 @@ class SyncManager extends Emitter {
     // The host's own `advance` ops, received on its feed, move this node's
     // vector (their merges came down the same feed); nothing else does.
     const result = await this.#storage.applyRemote(ops, {
-      via: peer,
+      via: peer.ref,
       scopes: peer.node.scopes,
       peer: { url: peer.node.url, node: peer.remote.id },
       adoptFrom: peer.remote.id,
@@ -786,7 +799,7 @@ class SyncManager extends Emitter {
       startEventId ??= page.eventId;
       startVector ??= page.vector ?? null;
       const records = page.id !== undefined ? await this.#readSnapshot(link, page) : page.records;
-      await this.#storage.mergeSnapshot(records, { via: peer, from: peer.remote.id });
+      await this.#storage.mergeSnapshot(records, { via: peer.ref, from: peer.remote.id });
       total += records.length;
       cursor = page.cursor ?? null;
     } while (cursor !== null);
@@ -794,7 +807,7 @@ class SyncManager extends Emitter {
     // was joined; adopting it (for the scopes asked for) means nobody
     // offers those ops again. Later ops replay from the cursor.
     if (startVector) {
-      await this.#storage.adoptVector(scopedVector(startVector, node.scopes), { via: peer, from: peer.remote.id });
+      await this.#storage.adoptVector(scopedVector(startVector, node.scopes), { via: peer.ref, from: peer.remote.id });
     }
     if (peer.closed) return { pages, records: total };
     node.cursor = startEventId;
@@ -834,7 +847,7 @@ class SyncManager extends Emitter {
   #fanOut(op, via) {
     for (const wake of Array.from(this.#wakers)) wake();
     for (const peer of this.#peers.values()) {
-      if (peer === via || !peer.remote || !peer.connected) continue;
+      if (peer.ref === via || !peer.remote || !peer.connected) continue;
       if (peer.behind) {
         // Nothing is queued for a peer that is behind: the vector-based push
         // that recovers it carries this op with everything else it lacks.
@@ -898,6 +911,7 @@ class SyncManager extends Emitter {
     }
     const storage = this.#storage;
     const wakers = this.#wakers;
+    const feeds = this.#feeds;
     const track = tracked ?? ((id, data) => ({ [TRACKED]: true, id: String(id), data }));
     // `meta` rides on every procedure: what a wrpc `onRequest` hook reads
     // as `context.procedure.meta` — a hub-wide policy (rate limits, audit)
@@ -933,7 +947,8 @@ class SyncManager extends Emitter {
           context.client.data ??= {};
           // A repeated hello keeps the rate bucket: greeting again is not a refill.
           const bucket = context.client.data.syncom?.bucket;
-          context.client.data.syncom = { node: args.node, scopes, schema, bucket };
+          const ref = { url: null, node: args.node };
+          context.client.data.syncom = { node: args.node, scopes, schema, bucket, ref };
           if (typeof context.client.join === 'function') {
             for (const scope of scopes) context.client.join(`syncom:${scope}`);
           }
@@ -966,7 +981,8 @@ class SyncManager extends Emitter {
         }
         if (outOfScope > 0) this.#refuse(node, 'scope', outOfScope);
         // `url` is null: a host does not dial, so it has no url for the peer.
-        const result = await storage.applyRemote(granted, { via: context.client, scopes, peer: { url: null, node } });
+        const via = state.ref ?? { url: null, node };
+        const result = await storage.applyRemote(granted, { via, scopes, peer: via });
         // The vector the dialer merges in: the keys this page touched, not
         // the whole thing — a hub's has a key per client and scope.
         const whole = storage.vector;
@@ -1012,25 +1028,33 @@ class SyncManager extends Emitter {
         const { lastEventId, signal } = subscription;
         const scopes = grant(args?.scopes, granted);
         let cursor = lastEventId ?? undefined;
-        for (;;) {
-          if (signal?.aborted) return;
-          const entries = storage.log.since(cursor, { scopes, limit: pageSize });
-          if (entries === null) {
-            // Cannot resume: another epoch, or compacted past the cursor.
-            yield { bootstrap: true };
-            return;
+        // What hosted() lists while this feed is live.
+        const feed = { node, scopes, since: Date.now(), cursor: cursor ?? null };
+        feeds.add(feed);
+        try {
+          for (;;) {
+            if (signal?.aborted) return;
+            const entries = storage.log.since(cursor, { scopes, limit: pageSize });
+            if (entries === null) {
+              // Cannot resume: another epoch, or compacted past the cursor.
+              yield { bootstrap: true };
+              return;
+            }
+            if (entries.length === 0) {
+              await waitFor(wakers, signal);
+              continue;
+            }
+            const last = entries[entries.length - 1].seq;
+            const ops = [];
+            for (const { op } of entries) if (op.origin !== node && op.from !== node) ops.push(op);
+            cursor = storage.log.formatId(last);
+            feed.cursor = cursor;
+            // Labelled even when every op was the peer's own echo: the
+            // position still moves, and a resume must not replay it.
+            yield track(cursor, { ops: packOps(ops), eventId: cursor });
           }
-          if (entries.length === 0) {
-            await waitFor(wakers, signal);
-            continue;
-          }
-          const last = entries[entries.length - 1].seq;
-          const ops = [];
-          for (const { op } of entries) if (op.origin !== node && op.from !== node) ops.push(op);
-          cursor = storage.log.formatId(last);
-          // Labelled even when every op was the peer's own echo: the
-          // position still moves, and a resume must not replay it.
-          yield track(cursor, { ops: packOps(ops), eventId: cursor });
+        } finally {
+          feeds.delete(feed);
         }
       }),
     };

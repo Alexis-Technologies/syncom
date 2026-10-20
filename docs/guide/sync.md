@@ -295,7 +295,8 @@ are kept there too, which is why a restart resumes instead of bootstrapping.
 await storage.sync.start(); // dial every enabled node; automatic when `connect` is given
 await storage.sync.stop();  // close every link
 await storage.sync.sync();  // push what the peers lack right now
-storage.sync.peers();       // [{ url, node, connected, subscribed, cursor, lastSync, pending, behind, stuck }]
+storage.sync.peers();       // [{ url, node, connected, subscribed, cursor, lastSync, pending, behind, stuck, lastError }]
+storage.sync.hosted();      // hosting side: [{ node, scopes, since, cursor }] — every live `changes` feed
 
 storage.sync.on('peer', ({ url, connected, node, reconnected }) => {});
 storage.sync.on('sync', ({ url, pushed, received, applied, skipped, duplicates, gaps, malformed }) => {});
@@ -308,7 +309,8 @@ storage.sync.on('node', ({ url, action }) => {}); // 'add' | 'remove' | 'enable'
 storage.sync.on('connect', ({ url }) => {});     // a link was accepted, before hello
 storage.sync.on('hello', ({ node, scopes }) => {}); // hosting side: a peer was authorized
 
-storage.on('change', (op, via) => {});  // every op applied here; via is null for a local write
+storage.on('change', (op, via) => {});  // every op applied here; via is { url, node } of the peer, null for a local write
+storage.on('log', ({ kind, sealed, dropped, floor, segments }) => {}); // the log sealed a segment; floor is where a resume still works
 storage.on('apply', ({ peer, applied, skipped }) => {}); // a peer's batch is durable
 storage.on('error', (error) => {});     // error.code: 'OP_REFUSED' | 'OP_INVALID' | 'OP_UNREADABLE' | 'SKEW'
 ```
