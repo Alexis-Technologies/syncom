@@ -140,7 +140,12 @@ docs/                     VitePress site
 - **Reconnect/backoff/resume belong to the link.** `SyncManager` re-runs only
   `hello` + `push` on `reconnect`; a refused restored subscription (428 "say
   hello first" — wrpc gives a reconnect a NEW server-side client) triggers a
-  fresh handshake. Do not add a reconnect loop to syncom.
+  fresh handshake, at most `MAX_REHELLOS` in a row. Do not add a reconnect
+  loop or a timer to syncom: a failed push marks the peer `behind` and
+  `#recover` pushes from the vector at the next sign of life on the link (a
+  page in `#receive`, an op in `#fanOut`) or on `sync()`, backed off by a
+  timestamp. Every push goes through `#serializePush` — never call
+  `#sendPages` from a new place.
 - **Async asymmetry is real.** `calculateHash`, `encrypt` and `decrypt` are
   synchronous in `src/crypto.js` and promise-returning in
   `src/crypto.browser.js`. Shared code must `await` them; `browser.d.ts`

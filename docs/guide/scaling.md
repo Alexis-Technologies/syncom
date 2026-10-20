@@ -89,9 +89,10 @@ const router = defineRouter(
 
 The hook runs before access and the handler, on every transport the router
 serves — a WebSocket, a `PeerHost` — and a refused push reaches the dialer as
-its `error` event with `code` 429; it keeps its cursor and resends what the
-hub's vector still lacks at the next handshake. The wrpc integration test
-runs exactly this recipe.
+its `error` event with `code` 429; it keeps its cursor, marks the peer behind,
+and resends what the hub's vector still lacks at the next sign of life on the
+link (a page from the hub, an op to relay) or on `sync()` — backed off after a
+recovery that failed. The wrpc integration test runs exactly this recipe.
 
 Retention bounds the log: `sync.retention.ops` / `.days` size it for the
 longest outage a client may have — below the floor a client bootstraps,

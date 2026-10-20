@@ -270,6 +270,31 @@ section until the first publish; everything below lands there on release day.
 
 ### Fixed
 
+- **A failed relay left the peer behind until the link reconnected.** A 429
+  or 413 (or any failed push) dropped the outbox and nothing re-pushed until
+  the next handshake, which on a stable link never came: silent divergence
+  until a manual `sync()`. The peer is now marked `behind`
+  (`peers()[i].behind`), queues nothing more, and is caught up from the
+  vector — what a handshake does — at the next sign of life on the link (a
+  page received, an op to relay) or on `sync()`, backed off by timestamp
+  (1 s doubling to a minute) after a failed recovery.
+- **Pushes to one peer could overlap.** The handshake push and `sync()`
+  bypassed the relay's single flight, so two pushes could carry one op and
+  the vector answer was last-writer-wins. Every push now runs on one chain
+  per peer (`peers()[i].pending` counts the one in flight).
+- **The outbox was unbounded.** `sync.maxOutbox` (default 10 000) drops the
+  backlog beyond it, logs `sync.outbox.dropped` and marks the peer behind.
+- **A page from the host taught the dialer nothing.** The host's vector was
+  known from hello and push answers only, so ops that came down the feed
+  could be offered straight back. Every op a page delivers now advances the
+  known vector; a push answers with the keys the page touched (merged, not
+  replaced) and a snapshot carries the vector on its first page only.
+- **A host that kept answering 428 was greeted forever.** Five fresh hellos
+  in a row refused with 428 end in one `error` `code: 'HANDSHAKE_LOOP'`.
+- A repeated hello no longer refills the peer's rate bucket; `bytesPerPush`
+  counts UTF-8 bytes rather than UTF-16 units; a feed page carrying only the
+  dialer's own echoes moves the cursor without an `applyRemote` or a
+  registry write; `close()` refuses writes from the moment it is called.
 - **A roll could seal an op before its record was written.** `OpLog.append`
   rolled after writing the new batch, sealing it out of the tail a reopen
   replays — a crash between the log append and the record write left an op

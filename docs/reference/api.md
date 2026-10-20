@@ -134,7 +134,7 @@ Extends `Emitter`. See [Sync](../guide/sync).
 | `start()` | `Promise<void>` | Dials every enabled node; needs `sync.connect` |
 | `stop()` | `Promise<void>` | Closes every link |
 | `sync(url?)` | `Promise<Array<{ url, pushed }>>` | Pushes what the peers lack now |
-| `peers()` | `Array<{ url, node, connected, subscribed, cursor, lastSync, pending, stuck }>` | Live view; `stuck` once a page failed three times in a row (see [Protocol](../guide/sync#protocol)) |
+| `peers()` | `Array<{ url, node, connected, subscribed, cursor, lastSync, pending, behind, stuck }>` | Live view; `behind` after a failed push until the next recovery, `stuck` once a page failed three times in a row (see [Protocol](../guide/sync#protocol)) |
 | `unit({ access, authorize, tracked, pageSize, pageBytes, limits, meta }?)` | router unit | The procedures a host mounts: `hello`, `push`, `snapshot`, `changes` — see [Hosting](../guide/sync#hosting) |
 
 Properties: `storage`, `started`.
@@ -143,8 +143,8 @@ Events (contained, like the storage's): `peer` `({ url, connected, node?,
 reconnected?, schema? })`, `sync` `({ url, pushed })` after a push and `({ url,
 received, applied, skipped, duplicates, gaps, malformed })` after a received
 page, `bootstrap` `({ url, records })`, `error` (with `.url`; `code: 'PAGE_FAILED'` / `'STUCK'`
-with `cursor` and `attempt` for a page of the feed that could not be applied),
-`start`, `stop`,
+with `cursor` and `attempt` for a page of the feed that could not be applied,
+`'HANDSHAKE_LOOP'` for a host that keeps answering 428), `start`, `stop`,
 `node` `({ url, action: 'add' | 'remove' | 'enable' | 'disable' })`, `connect`
 `({ url })` once a link is accepted (before hello), and on the hosting side
 `hello` `({ node, scopes, schema })` once a peer is authorized and `refused`

@@ -429,3 +429,8 @@ storage.sync.on('error', (error) => {
   expectType<number | undefined>(error.attempt);
 });
 expectError(storage.swap('id', 'text', { a: 1 }));
+
+// E3: behind peers, the outbox bound
+expectType<boolean>(storage.sync.peers()[0].behind);
+expectAssignable<StorageOptions>({ sync: { maxOutbox: 500 } });
+expectError(syncom.open({ sync: { maxOutbox: 'lots' } }));

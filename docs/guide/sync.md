@@ -292,12 +292,12 @@ are kept there too, which is why a restart resumes instead of bootstrapping.
 await storage.sync.start(); // dial every enabled node; automatic when `connect` is given
 await storage.sync.stop();  // close every link
 await storage.sync.sync();  // push what the peers lack right now
-storage.sync.peers();       // [{ url, node, connected, subscribed, cursor, lastSync, pending, stuck }]
+storage.sync.peers();       // [{ url, node, connected, subscribed, cursor, lastSync, pending, behind, stuck }]
 
 storage.sync.on('peer', ({ url, connected, node, reconnected }) => {});
 storage.sync.on('sync', ({ url, pushed, received, applied, skipped, duplicates, gaps, malformed }) => {});
 storage.sync.on('bootstrap', ({ url, records }) => {});
-storage.sync.on('error', (error) => {}); // error.url names the peer; error.code may be 'PAGE_FAILED' | 'STUCK'
+storage.sync.on('error', (error) => {}); // error.url names the peer; error.code may be 'PAGE_FAILED' | 'STUCK' | 'HANDSHAKE_LOOP'
 storage.sync.on('refused', ({ node, reason, count }) => {}); // hosting side: ops outside the peer's scopes
 storage.sync.on('start', () => {});
 storage.sync.on('stop', () => {});
@@ -314,7 +314,15 @@ Listeners are contained: one that throws is logged and never fails what it
 observed. To take part in an operation — refuse a write, skip a peer's op,
 decline to dial a node — use [hooks](./hooks) instead.
 
-`await storage.close()` stops sync and seals the log.
+Pushes to one peer never overlap — a handshake, a relay, a `sync()` and a
+recovery take turns on one chain, so the vector a push answers with is always
+the latest. A host that answers **428** to five fresh hellos in a row is
+reported once as `code: 'HANDSHAKE_LOOP'` and not greeted again until the link
+reconnects. Timeouts on a call are the link's: give `connect(node)` a wrpc
+client with a `timeout`.
+
+`await storage.close()` stops sync and seals the log; a write that arrives
+once `close()` was called is refused at once.
 
 ## Options
 
@@ -326,6 +334,7 @@ decline to dial a node — use [hooks](./hooks) instead.
 | `retention.ops` | `10000` | Ops kept in the log before the oldest segment is dropped |
 | `retention.days` | — | Age after which a segment is dropped |
 | `maxSkew` | `86400000` | How far ahead of this node's clock a peer's stamp may be, in ms; beyond it the op is `malformed`. `Infinity` disables |
+| `maxOutbox` | `10000` | Ops queued for one peer beyond this are dropped and the peer is `behind`; the recovery pushes what it lacks from the vector |
 | `log.rollAfter` | `64` | Appended batches per sealed segment |
 | `pageSize` | `500` | Ops per push, records per snapshot page |
 | `hooks` | — | `beforeConnect`, `beforeBootstrap` — see [Hooks and events](./hooks#sync-hooks) |
@@ -360,10 +369,14 @@ ops and the bytes of a page, whatever transport carried it. A page over
 exceed `opsPerSecond` — a token bucket per peer, refilled at that rate and
 holding one second's worth — with **429**. A refusal is a code, not a
 hang-up: the dialer reports it through its `error` event (`error.code`),
-drops that outbox, and offers what the host still lacks at its next
-handshake. A dialer whose `pageSize` is above the host's `opsPerPush` will
-never get a page through — keep the two in step. The `syncom.ops.limited`
-metric counts refusals by reason.
+drops that outbox and marks the peer **behind** (`peers()[i].behind`); what
+the host still lacks is pushed from the vector at the next sign of life on
+the link — a page received from the host, an op to relay — or by `sync()`,
+backed off (1 s, doubling to a minute) after a recovery that failed. A dialer
+whose `pageSize` is above the host's `opsPerPush` will never get a page
+through — keep the two in step. The `syncom.ops.limited` metric counts
+refusals by reason. The answer to a push carries the vector keys the page
+touched, which the dialer merges into what hello gave it.
 
 ```js
 const unit = storage.sync.unit({

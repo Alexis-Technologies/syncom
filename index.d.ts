@@ -484,6 +484,12 @@ export interface SyncOptions {
    * refused as malformed rather than observed into the clock.
    */
   maxSkew?: number;
+  /**
+   * Ops queued for one peer beyond this (default 10 000) are dropped and the
+   * peer is marked `behind`; the vector-based push that recovers it carries
+   * what it lacks.
+   */
+  maxOutbox?: number;
   /** Lifecycle hooks — see SyncHooks. */
   hooks?: SyncHooks;
   /** Reserved for the broker-backed hub mode; refused in this version. See SharedLog. */
@@ -677,6 +683,12 @@ export interface PeerView {
   /** Ops waiting in the outbox, plus one while a push is in flight. */
   pending: number;
   /**
+   * A push to this peer failed (or its outbox overflowed `sync.maxOutbox`):
+   * what it lacks is pushed from the vector at the next sign of life on the
+   * link — a page received from it, an op to relay — or by `sync()`.
+   */
+  behind: boolean;
+  /**
    * A page of this peer's feed failed to apply three times in a row; the
    * subscription is closed and nothing past that page is taken until the
    * application intervenes (`enableNode` off and on, or a bootstrap).
@@ -775,7 +787,8 @@ export interface SyncEvents {
    * A failure on the way to a peer; `url` names it. A page of the feed that
    * could not be applied comes as `code: 'PAGE_FAILED'` (with `cursor`, the
    * last position saved, and `attempt`), and is retried from that cursor;
-   * the third failure in a row is `code: 'STUCK'`.
+   * the third failure in a row is `code: 'STUCK'`. A host that answers 428
+   * to five fresh hellos in a row is `code: 'HANDSHAKE_LOOP'`.
    */
   error: (error: Error & { url: string; code?: string | number; cursor?: string | null; attempt?: number }) => void;
   start: () => void;

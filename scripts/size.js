@@ -51,8 +51,10 @@ const ENTRIES = [
   // host, own-key walks in ops.js) the raise to 29 KB; the failure paths (the
   // log sealing only applied batches, a failed page as a break in the
   // stream, swap inside the queue, copies at the boundary, unreadable
-  // records contained) the raise to 29.5 KB.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 29.5 },
+  // records contained) the raise to 29.5 KB; push recovery (one push chain
+  // per peer, `behind` and the vector-based catch-up, the outbox bound, the
+  // vector learned from the feed, the 428 cap) the raise to 30 KB.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 30 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check

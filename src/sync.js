@@ -23,7 +23,7 @@
 
 const { Emitter } = require('./utils.js');
 const { packOps, unpackOps } = require('./ops.js');
-const { vectorHas, keyScope } = require('./vector.js');
+const { vectorHas, vectorAdvance, vectorMax, opKey, keyScope } = require('./vector.js');
 const { isSyncLink } = require('./link.js');
 const { createTelemetry, traced } = require('./telemetry.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
@@ -35,6 +35,15 @@ const DEFAULT_PAGE_SIZE = 500;
 const DEFAULT_PAGE_BYTES = 4 << 20;
 // A page that fails this many times in a row leaves its peer `stuck`.
 const MAX_PAGE_RETRIES = 3;
+// A host that answers 428 to this many fresh hellos in a row is not going to
+// remember us; the dialer stops greeting and reports a loop.
+const MAX_REHELLOS = 5;
+// Ops queued for a peer beyond this are dropped — the vector-based push that
+// recovers the peer carries what it lacks, and memory is not a buffer.
+const DEFAULT_MAX_OUTBOX = 10_000;
+// A failed recovery waits this long (doubling, by timestamp) before the next.
+const RECOVER_BACKOFF = 1000;
+const MAX_RECOVER_BACKOFF = 60_000;
 const TRACKED = Symbol.for('wrpc.tracked');
 
 // The hooks a manager accepts (`open({ sync: { hooks } })`). There is no
@@ -142,12 +151,18 @@ class SyncManager extends Emitter {
   #otel;
   #hooks;
   #fsi;
+  #maxOutbox = DEFAULT_MAX_OUTBOX;
 
   constructor(storage, options = {}) {
     super();
     this.#storage = storage;
     this.#options = options ?? {};
     this.#hooks = normalizeHooks(this.#options.hooks, SYNC_HOOKS, 'SyncManager');
+    const { maxOutbox } = this.#options;
+    if (maxOutbox !== undefined && !(Number.isInteger(maxOutbox) && maxOutbox > 0)) {
+      throw new TypeError('sync.maxOutbox must be a positive integer');
+    }
+    if (maxOutbox !== undefined) this.#maxOutbox = maxOutbox;
     this.#otel = createTelemetry(storage.telemetry);
     // Reserved for the broker-backed hub mode (see src/shared-log.js).
     if (this.#options.sharedLog !== undefined) {
@@ -287,7 +302,9 @@ class SyncManager extends Emitter {
     const results = [];
     for (const peer of peers) {
       if (!peer.remote) continue;
-      results.push({ url: peer.node.url, pushed: await this.#push(peer, 'manual') });
+      const pushed = await this.#push(peer, 'manual');
+      peer.behind = false;
+      results.push({ url: peer.node.url, pushed });
     }
     return results;
   }
@@ -301,7 +318,8 @@ class SyncManager extends Emitter {
       subscribed: Boolean(peer.subscription),
       cursor: peer.node.cursor,
       lastSync: peer.node.lastSync,
-      pending: peer.outbox.length + (peer.pushing ? 1 : 0),
+      pending: peer.outbox.length + (peer.inflight ? 1 : 0),
+      behind: peer.behind,
       stuck: peer.stuck,
     }));
   }
@@ -315,7 +333,19 @@ class SyncManager extends Emitter {
       connected: false,
       subscription: null,
       outbox: [],
-      pushing: null,
+      // Every push to this peer runs on this chain (see #serializePush);
+      // `inflight` is what peers() shows while one runs.
+      pushing: Promise.resolve(),
+      inflight: false,
+      flushQueued: false,
+      // A relay that failed: what the host lacks is pushed from the vector
+      // at the next sign of life on the link (see #recover), backed off by
+      // timestamp after a failed recovery.
+      behind: false,
+      recovering: false,
+      recoverAfter: 0,
+      backoff: 0,
+      rehellos: 0,
       bootstrapping: false,
       handshaking: null,
       closed: false,
@@ -435,7 +465,7 @@ class SyncManager extends Emitter {
     if (peer.closed) return;
     if (!answer || typeof answer.node !== 'string') throw new Error(`Bad hello from ${node.url}`);
     if (answer.duplicate) {
-      // The host already dials us; one link is enough.
+      // A host may say it already dials us; one link is enough.
       this.#disconnect(node.url);
       return;
     }
@@ -448,15 +478,72 @@ class SyncManager extends Emitter {
     await this.#saveNode(node);
     notify(this, this.#storage.logger, 'peer', { url: node.url, connected: true, node: answer.node, schema });
     this.#drift(schema, { url: node.url, node: answer.node });
-    await this.#push(peer, 'handshake');
+    try {
+      await this.#push(peer, 'handshake');
+      peer.behind = false;
+    } catch (error) {
+      // Reported by the caller; what the host lacks waits for #recover.
+      this.#fallBehind(peer, null);
+      throw error;
+    }
     if (resubscribe && !peer.subscription) this.#subscribe(peer);
+  }
+
+  // Every push to a peer — handshake, manual, relay, recovery — runs on one
+  // chain: two never overlap, so the vector a push answers with is always
+  // the latest and no op is in flight twice.
+  #serializePush(peer, task) {
+    const run = peer.pushing.then(async () => {
+      peer.inflight = true;
+      try {
+        return await task();
+      } finally {
+        peer.inflight = false;
+      }
+    });
+    peer.pushing = run.catch(() => {});
+    return run;
+  }
+
+  // A push that failed, or an outbox that overflowed: the peer is `behind`,
+  // and what it lacks is recomputed from the vector at the next sign of life
+  // on the link (see #recover) — not on a timer, which is the link's business.
+  #fallBehind(peer, error) {
+    if (peer.closed) return;
+    peer.behind = true;
+    peer.recoverAfter = Date.now() + peer.backoff;
+    peer.backoff = peer.backoff === 0 ? RECOVER_BACKOFF : Math.min(peer.backoff * 2, MAX_RECOVER_BACKOFF);
+    if (error) this.#fail(peer, error);
+  }
+
+  // A page received from the peer, or an op to relay to it: if it is behind,
+  // catch it up the way a handshake does — one recovery at a time, `behind`
+  // cleared only once it went through, backed off after one that failed.
+  #recover(peer) {
+    if (!peer.behind || peer.recovering || !peer.connected || !peer.remote) return;
+    if (Date.now() < peer.recoverAfter) return;
+    peer.recovering = true;
+    this.#push(peer, 'recover').then(
+      () => {
+        peer.recovering = false;
+        peer.behind = false;
+      },
+      (error) => {
+        peer.recovering = false;
+        this.#fallBehind(peer, error);
+      },
+    );
+  }
+
+  #push(peer, reason) {
+    return this.#serializePush(peer, () => this.#pushFromLog(peer, reason));
   }
 
   // Everything in our log the host has not seen, by its vector — ops of its
   // own origin excluded (it has those by definition). A host that is behind
   // what we still retain cannot be caught up from here; it will bootstrap
   // from a node that dials it, or we from it.
-  async #push(peer, reason) {
+  async #pushFromLog(peer, reason) {
     const { node } = peer;
     const entries =
       this.#storage.log.since(undefined) ??
@@ -511,9 +598,11 @@ class SyncManager extends Emitter {
     for (let index = 0; index < ops.length; index += pageSize) {
       const page = ops.slice(index, index + pageSize);
       const answer = await peer.link.call('syncom/push', { ops: packOps(page) });
-      if (answer?.vector) peer.remote.vector = answer.vector;
+      // The host answers with the keys the page touched; merged, never replaced.
+      if (answer?.vector) peer.remote.vector = vectorMax(peer.remote.vector, answer.vector);
       sent += page.length;
     }
+    peer.backoff = 0;
     if (sent > 0 && !peer.closed) {
       peer.node.lastSync = Date.now();
       await this.#saveNode(peer.node);
@@ -544,6 +633,11 @@ class SyncManager extends Emitter {
           // is a new server-side client, and its restored subscription
           // arrives before our hello does. Greet again, then subscribe.
           if (error?.code === 428 && peer.connected) {
+            if (++peer.rehellos > MAX_REHELLOS) {
+              const message = `The host answered 428 to ${MAX_REHELLOS} fresh hellos in a row; not greeting again`;
+              this.#fail(peer, Object.assign(new Error(message, { cause: error }), { code: 'HANDSHAKE_LOOP' }));
+              return;
+            }
             this.#handshake(peer, { resubscribe: true }).catch((e) => this.#fail(peer, e));
             return;
           }
@@ -595,6 +689,12 @@ class SyncManager extends Emitter {
       return;
     }
     const ops = unpackOps(value.ops);
+    // A page of nothing but this node's own echoes: the position moved, the
+    // cursor follows in memory, and that is all.
+    if (ops.length === 0) {
+      if (eventId) peer.node.cursor = eventId;
+      return;
+    }
     // The host's own `advance` ops, received on its feed, move this node's
     // vector (their merges came down the same feed); nothing else does.
     const result = await this.#storage.applyRemote(ops, {
@@ -609,6 +709,10 @@ class SyncManager extends Emitter {
     if (peer.closed) return;
     peer.failures = 0;
     peer.stuck = false;
+    peer.rehellos = 0;
+    // The host has every op it just sent: known, so a relay does not hand
+    // them straight back to it.
+    for (const op of ops) vectorAdvance(peer.remote.vector, op);
     if (result.gaps > 0) {
       // Ops of a stream this node is behind on: they are lost to it unless
       // the stream is replayed, and the counter alone is easy to miss.
@@ -618,6 +722,8 @@ class SyncManager extends Emitter {
     peer.node.lastSync = Date.now();
     await this.#saveNode(peer.node);
     notify(this, this.#storage.logger, 'sync', { url: peer.node.url, received: ops.length, ...result });
+    // A page from the host is a sign of life: a peer left behind is caught up.
+    this.#recover(peer);
   }
 
   // Bootstrap: page through the host's whole state, joining each page, then
@@ -722,35 +828,43 @@ class SyncManager extends Emitter {
     for (const wake of Array.from(this.#wakers)) wake();
     for (const peer of this.#peers.values()) {
       if (peer === via || !peer.remote || !peer.connected) continue;
+      if (peer.behind) {
+        // Nothing is queued for a peer that is behind: the vector-based push
+        // that recovers it carries this op with everything else it lacks.
+        this.#recover(peer);
+        continue;
+      }
       if (op.origin === peer.remote.id || op.from === peer.remote.id) continue;
       if (vectorHas(peer.remote.vector, op)) continue;
       if (!inScope(op, peer.node.scopes)) continue;
       peer.outbox.push(op);
+      if (peer.outbox.length > this.#maxOutbox) {
+        this.#storage.logger.warn({ event: 'sync.outbox.dropped', url: peer.node.url, ops: peer.outbox.length });
+        peer.outbox = [];
+        this.#fallBehind(peer, null);
+        continue;
+      }
       this.#scheduleFlush(peer);
     }
   }
 
-  // Ops that land in one tick travel as one push; pushes to a peer never
-  // overlap, so its vector answer is always the latest.
+  // Ops that land in one tick travel as one push, behind whatever push is
+  // already in flight. A relay that fails drops its outbox and leaves the
+  // peer behind, for #recover to catch up from the vector.
   #scheduleFlush(peer) {
-    if (peer.pushing) return;
-    peer.pushing = Promise.resolve()
-      .then(async () => {
-        while (peer.outbox.length > 0 && !peer.closed && peer.connected) {
-          const ops = peer.outbox;
-          peer.outbox = [];
-          await this.#send(peer, ops, 'relay');
-        }
-      })
-      .catch((error) => {
-        // Dropped on purpose: the next hello/push recomputes from the vector.
+    if (peer.flushQueued) return;
+    peer.flushQueued = true;
+    this.#serializePush(peer, async () => {
+      peer.flushQueued = false;
+      while (peer.outbox.length > 0 && !peer.closed && peer.connected && !peer.behind) {
+        const ops = peer.outbox;
         peer.outbox = [];
-        this.#fail(peer, error);
-      })
-      .finally(() => {
-        peer.pushing = null;
-        if (peer.outbox.length > 0 && !peer.closed && peer.connected) this.#scheduleFlush(peer);
-      });
+        await this.#send(peer, ops, 'relay');
+      }
+    }).catch((error) => {
+      peer.outbox = [];
+      this.#fallBehind(peer, error);
+    });
   }
 
   // ---------------------------------------------------------------------
@@ -801,7 +915,9 @@ class SyncManager extends Emitter {
         const schema = schemaOf(args.schema);
         if (context?.client) {
           context.client.data ??= {};
-          context.client.data.syncom = { node: args.node, scopes, vector: args.vector ?? {}, schema };
+          // A repeated hello keeps the rate bucket: greeting again is not a refill.
+          const bucket = context.client.data.syncom?.bucket;
+          context.client.data.syncom = { node: args.node, scopes, schema, bucket };
           if (typeof context.client.join === 'function') {
             for (const scope of scopes) context.client.join(`syncom:${scope}`);
           }
@@ -835,7 +951,15 @@ class SyncManager extends Emitter {
         if (outOfScope > 0) this.#refuse(node, 'scope', outOfScope);
         // `url` is null: a host does not dial, so it has no url for the peer.
         const result = await storage.applyRemote(granted, { via: context.client, scopes, peer: { url: null, node } });
-        return { vector: storage.vector, ...result, outOfScope };
+        // The vector the dialer merges in: the keys this page touched, not
+        // the whole thing — a hub's has a key per client and scope.
+        const whole = storage.vector;
+        const vector = {};
+        for (const op of granted) {
+          const key = opKey(op);
+          if (whole[key] !== undefined) vector[key] = whole[key];
+        }
+        return { vector, ...result, outOfScope };
       }),
 
       snapshot: procedure(async (context, args) => {
@@ -845,6 +969,9 @@ class SyncManager extends Emitter {
           limit: pageSize,
           scopes: grant(args?.scopes, state.scopes),
         });
+        // The vector rides on the first page only: the dialer adopts it as of
+        // the start, and a hub's is too large to repeat.
+        if (args?.cursor) page.vector = undefined;
         const client = context?.client;
         const canStream = client && client.binary !== false && typeof client.createStream === 'function';
         if (!canStream || page.records.length === 0) return page;
@@ -914,7 +1041,7 @@ class SyncManager extends Emitter {
       throw coded(`Push of ${ops.length} ops exceeds opsPerPush ${opsPerPush}`, 413);
     }
     if (bytesPerPush !== undefined) {
-      const bytes = JSON.stringify(args?.ops ?? null).length;
+      const bytes = new TextEncoder().encode(JSON.stringify(args?.ops ?? null)).length;
       if (bytes > bytesPerPush) {
         this.#otel.recordLimited('bytes');
         throw coded(`Push of ${bytes} bytes exceeds bytesPerPush ${bytesPerPush}`, 413);

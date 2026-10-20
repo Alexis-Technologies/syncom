@@ -1631,15 +1631,21 @@ class Storage extends Emitter {
     });
   }
 
-  /** Stops replication and seals the log. Further writes are refused. */
+  /** Stops replication and seals the log. Further writes are refused — from the moment close() is called. */
   async close() {
     if (this.#closed) return;
+    // Refused from here on: a write that landed while the links were
+    // closing would be announced to nobody, after the final catalog save.
+    // What was queued before this call still runs, ahead of the seal.
+    this.#closed = true;
     await this.#sync.stop();
-    await this.#run(async () => {
+    const seal = async () => {
       await this.#catalog.save(this.#log.lastEventId);
       await this.#log.close();
-    });
-    this.#closed = true;
+    };
+    const done = this.#queue.then(seal, seal);
+    this.#queue = done.catch(() => {});
+    await done;
     await this.#lock?.release();
     notify(this, this.#logger, 'close');
   }

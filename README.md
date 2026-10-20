@@ -76,8 +76,8 @@ that fails the build when exceeded.
 
 | Entry | raw | min | min+gzip | budget |
 | ----- | ---:| ---:| --------:| ------:|
-| main entry — browser (@alexify/syncom) | 210.5 KB | 86.9 KB | 29.4 KB | 29.5 KB |
-| main entry — node (@alexify/syncom) | 198.9 KB | 86.1 KB | 29.1 KB | — |
+| main entry — browser (@alexify/syncom) | 215.4 KB | 88.5 KB | 29.9 KB | 30.0 KB |
+| main entry — node (@alexify/syncom) | 203.5 KB | 87.7 KB | 29.6 KB | — |
 | wrpc adapter — browser (@alexify/syncom/wrpc) | 3.3 KB | 1.4 KB | 0.7 KB | 2.0 KB |
 | contracts — browser (@alexify/syncom/contracts) | 3.0 KB | 1.2 KB | 0.6 KB | 1.0 KB |
 | idb backend — browser (@alexify/syncom/idb) | 3.7 KB | 1.7 KB | 0.8 KB | 2.0 KB |
