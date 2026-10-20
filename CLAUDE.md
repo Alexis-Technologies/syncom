@@ -69,6 +69,29 @@ docs/                     VitePress site
   `unit()` builds plain `{ access, handler }` objects that `defineRouter`
   accepts without wrpc's `procedure()`. The `tracked` shape it emits is
   `Symbol.for('wrpc.tracked')` — part of wrpc's frozen wire protocol.
+- **A record id is checked where it enters, nowhere else.** `isRecordId` in
+  `src/storage.js` (`[A-Za-z0-9_@-][A-Za-z0-9._@-]{0,127}`) guards `[COMMIT]`
+  (every local writer), `insert` (what `getId` minted), the malformed check
+  of `#applyRemote` and `mergeSnapshot`; `#load` answers `null` for anything
+  else. An id is a file name on three platforms — do not widen the class, and
+  do not add a writer that reaches `#writeEntry` without passing one of those.
+- **A peer's op is `wellFormed` or it is nothing.** `#applyRemote` checks
+  `origin`/`scope` (no `@`, no control characters), `seq`/`ts` (positive safe
+  integers), `type`, `v` and the id before reading anything else (`actor`
+  and `from` are claims, carried as they are); a stamp beyond `sync.maxSkew`
+  ahead of `Date.now()` is refused the
+  same way (`SKEW`), never observed into the clock. `malformed` ops are
+  counted, not logged, not relayed. Payload shape is `applyOp`'s business.
+- **Scopes are enforced by the host.** `unit().push` drops out-of-scope ops
+  before `applyRemote` (`refused` event, `syncom.ops.rejected{scope}`);
+  `snapshot`/`changes` serve `grant(asked, granted)`. `applyRemote`'s
+  `scopes` option only gates `advance` adoption, and adoption needs
+  `adoptFrom === op.origin` — the host a feed is read from. Never adopt on the
+  push path.
+- **`ops.js` walks own keys only.** `Object.keys` + `isKey` (`__proto__` is
+  never a field) + `own()` for every lookup into `meta.clock`/`meta.counters`;
+  `normalizeMeta` deep-copies a peer's meta into the trusted shape. A
+  `for...in` or a bare `obj[key]` over peer-shaped data is a bug.
 - **A purge is a scrub, not a delete.** `purge` wins at any stamp and a
   purged entry takes nothing but another purge or a merge (`applyOp`
   returns early). The payload leaves the log through `OpLog.scrub(id)`,

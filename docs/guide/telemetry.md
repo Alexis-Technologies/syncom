@@ -90,8 +90,8 @@ appears on one.
 | --- | --- | --- | --- |
 | `syncom.commits` | Counter | `{op}` | `syncom.op.type`, `syncom.result` (`applied` / `noop` / `encrypted` / `error`) |
 | `syncom.write.duration` | Histogram | `ms` | `syncom.path` (`commit` / `apply` / `replay`) |
-| `syncom.ops.received` | Counter | `{op}` | `syncom.outcome` (`applied` / `duplicate` / `gap` / `malformed`) |
-| `syncom.ops.rejected` | Counter | `{op}` | `syncom.reason` (`register` / `counter` / `validation`) |
+| `syncom.ops.received` | Counter | `{op}` | `syncom.outcome` (`applied` / `duplicate` / `gap` / `malformed` — the last includes a stamp beyond `maxSkew`) |
+| `syncom.ops.rejected` | Counter | `{op}` | `syncom.reason` (`register` / `counter` / `validation` / `scope`) |
 | `syncom.conflicts` | Counter | `{conflict}` | `syncom.kind` (`unique`) |
 | `syncom.ops.limited` | Counter | `{push}` | `syncom.reason` (`ops` / `bytes` / `rate`) |
 | `syncom.replication.lag` | Histogram | `ms` | — |

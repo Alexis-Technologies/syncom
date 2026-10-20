@@ -319,3 +319,57 @@ test('ops module', async (t) => {
     assert.deepStrictEqual(unpackOps('nope'), []);
   });
 });
+
+test('ops: a peer-shaped meta reaches nothing it should not', async (t) => {
+  await t.test('normalizeMeta rebuilds a merge meta from own keys and well-formed stamps alone', () => {
+    const base = replay([op('set', 1, 'A', { data: { x: 1 } }), op('inc', 2, 'A', { seq: 2, key: 'n', value: 1 })]);
+    const hostile = JSON.parse(
+      '{"clock":{"__proto__":[5,"evil"],"x":"nope","y":[9,"B"],"constructor":[7,"B"]},' +
+        '"counters":{"__proto__":{"pwned":[1,1,1]},"constructor":{"zzz":[1,1,1]},' +
+        '"n":{"B":[1,"0abc",3],"C":[2,4,5],"__proto__":[1,1,1]}},' +
+        '"base":"no","deleted":[1],"purged":{"a":1},"v":"2"}',
+    );
+    assert.deepStrictEqual(latestClock(hostile), [9, 'B']);
+    const merged = applyOp(base, op('merge', 3, 'B', { data: { y: 2, constructor: 'c' }, meta: hostile }));
+    assert.strictEqual(Object.hasOwn(Object.prototype, 'pwned'), false, 'Object.prototype is untouched');
+    assert.strictEqual(Object.hasOwn(Object, 'zzz'), false, 'Object is untouched');
+    assert.strictEqual(merged.changed, true);
+    assert.deepStrictEqual(merged.entry.data, { x: 1, y: 2, constructor: 'c', n: 5 });
+    assert.deepStrictEqual(Object.keys(merged.entry.meta.counters.n).sort(), ['A', 'C'], 'the malformed count is out');
+    assert.strictEqual(Object.getPrototypeOf(merged.entry.meta.counters), Object.prototype);
+    assert.strictEqual(Object.getPrototypeOf(merged.entry.meta.clock), Object.prototype);
+    assert.strictEqual('v' in merged.entry.meta, false, 'a string v is not a version');
+    assert.strictEqual(merged.entry.meta.base, null, 'a non-stamp base is none');
+    assert.strictEqual(merged.entry.meta.deleted, null, 'a one-element array is not a stamp');
+    assert.strictEqual('purged' in merged.entry.meta, false);
+    // The peer's object is not kept by reference.
+    const kept = applyOp(null, op('merge', 1, 'B', { data: { y: 1 }, meta: { clock: { y: [1, 'B'] }, counters: {} } }));
+    hostile.clock.y[0] = 99;
+    assert.deepStrictEqual(kept.entry.meta.clock.y, [1, 'B']);
+  });
+
+  await t.test('fields named after Object.prototype members are fields; __proto__ never is', () => {
+    const entry = replay([
+      op('write', 1, 'A', { data: { constructor: 1, toString: 't', hasOwnProperty: true, ok: 1 } }),
+    ]);
+    assert.deepStrictEqual(entry.data, { constructor: 1, toString: 't', hasOwnProperty: true, ok: 1 });
+    const bumped = applyOp(entry, op('set', 2, 'B', { data: { constructor: 2 } }));
+    assert.strictEqual(bumped.entry.data.constructor, 2);
+    const counted = applyOp(null, op('inc', 1, 'A', { seq: 1, key: 'constructor', value: 3 }));
+    assert.deepStrictEqual(counted.entry.data, { constructor: 3 });
+    assert.strictEqual(isCounter(counted.entry.meta, 'constructor'), true);
+    assert.strictEqual(isCounter(counted.entry.meta, 'toString'), false);
+    assert.strictEqual(Object.hasOwn(Object, 'A'), false, 'the counter did not land on Object');
+    assert.strictEqual(applyOp(null, op('inc', 1, 'A', { seq: 1, key: '__proto__', value: 1 })).changed, false);
+    assert.strictEqual(applyOp(null, op('inc', 1, '__proto__', { seq: 1, key: 'n', value: 1 })).changed, false);
+    const both = mergeEntry(counted.entry, replay([op('set', 5, 'B', { data: { constructor: 'reg' } })]));
+    assert.deepStrictEqual(both.data, { constructor: 'reg' }, 'the register wins over the counter, through own keys');
+  });
+
+  await t.test('pack and unpack look type codes up as own keys', () => {
+    const [row] = packOps([{ origin: 'A', seq: 1, ts: 1, type: 'constructor', id: 'r' }]);
+    assert.strictEqual(row[3], 'constructor');
+    const [back] = unpackOps([['A', 1, 1, 'constructor', 'r']]);
+    assert.strictEqual(back.type, 'constructor', 'an unknown code stays a string for the storage to refuse');
+  });
+});

@@ -21,7 +21,8 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 `cache`, `integrity` and `catalog` (see
 [The catalog and the cache](../guide/storage#the-catalog-and-the-cache)),
 `actor` (see [Operations](../guide/sync#operations)), `schema` and `validator` (see
-[Collections](../guide/storage#collections)), `getId`, `logger`, `encrypted`,
+[Collections](../guide/storage#collections)), `getId` (must mint a
+[valid id](../guide/storage#custom-identifiers)), `logger`, `encrypted`,
 `sync` (see [Sync options](../guide/sync#options)), `telemetry` (see
 [OpenTelemetry](../guide/telemetry)), `hooks` (see
 [Hooks and events](../guide/hooks)).
@@ -32,13 +33,13 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 
 | Method | Returns | Notes |
 | --- | --- | --- |
-| `insert(data, options?)` | `Promise<string>` | Generates an id via `getId` (a UUID by default) and writes |
+| `insert(data, options?)` | `Promise<string>` | Generates an id via `getId` (a UUID by default) and writes; rejects with `code: 'INVALID_ID'` when the generator mints one that is not a [valid id](../guide/storage#custom-identifiers) |
 | `get(id)` | `Promise<unknown>` | `null` when absent or deleted; verifies against the chain |
 | `has(id)` | `Promise<boolean>` | `false` for a tombstone |
 | `list()` | `Promise<string[]>` | Every live id, sorted — from the catalog, no I/O |
 | `check(entity, data)` | `Promise<unknown>` | Runs the entity's validator as a write would and returns its value; rejects with `ValidationError`; writes nothing |
 | `migrate({ entities, batch }?)` | `Promise<{ migrated, counters }>` | Rewrites records of an older schema version through the lens; idempotent (see [Reading across versions](../guide/storage#reading-across-versions)) |
-| `set(id, data, options?)` | `Promise<void>` | Replaces the record (a `write` op); keeps `$type` unless the data names the same |
+| `set(id, data, options?)` | `Promise<void>` | Replaces the record (a `write` op); keeps `$type` unless the data names the same. Every writer rejects an invalid id with `TypeError` `code: 'INVALID_ID'` |
 | `update(id, delta, { actor }?)` | `Promise<void>` | Sets the listed fields (a `set` op); throws if absent, or on a counter field |
 | `inc(id, key, value = 1, { actor }?)` | `Promise<void>` | Adds to a counter field (an `inc` op); throws on a register field |
 | `swap(id, changes, prev, { actor }?)` | `Promise<boolean>` | CAS — `false`, and no write, on mismatch |
@@ -51,7 +52,7 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 | `validate(id, data, blockHash)` | `Promise<boolean>` | One record against its block |
 | `getCachedData(id)` | `unknown \| null` | Synchronous cache peek, raw (no lens) |
 | `hasRecord(id)` | `boolean` | Whether the id is a live record — from the catalog, no I/O |
-| `applyRemote(ops, { via, scopes, peer }?)` | `Promise<{ applied, skipped, duplicates, gaps }>` | Applies a peer's ops, in order per origin; `peer` is `{ url, node }` for the hooks |
+| `applyRemote(ops, { via, scopes, peer, adoptFrom }?)` | `Promise<{ applied, skipped, duplicates, gaps, malformed }>` | Applies a peer's ops, in order per origin; `peer` is `{ url, node }` for the hooks; `malformed` ops (shape, id, a stamp beyond `sync.maxSkew`) are counted and dropped; an `advance` is adopted only when its origin is `adoptFrom` |
 | `snapshot({ cursor, limit, scopes }?)` | `Promise<{ records, cursor, eventId, vector }>` | One page of state, tombstones included |
 | `mergeSnapshot(records, { via, from }?)` | `Promise<void>` | Joins a page (as `merge` ops of this node) |
 | `adoptVector(vector, { via, from }?)` | `Promise<SyncOp \| null>` | Records what a joined snapshot covers (an `advance` op) |
@@ -71,7 +72,7 @@ the operation (see [Hooks and events](../guide/hooks#events)):
 | --- | --- | --- |
 | `change` | `(op, via)` | Every op applied here; `via` is `null` for a local write, otherwise the link it came from |
 | `apply` | `({ via, peer, ops, applied, skipped, duplicates, gaps })` | A peer's batch is durable |
-| `error` | `(error)` with `error.op`, and `error.rejected` or `error.entity` + `error.issues` | A peer's op refused by the register/counter rule, or skipped as invalid under this node's schema |
+| `error` | `(error)` with `error.code` and `error.op`, plus `error.rejected` (`OP_REFUSED`) or `error.entity` + `error.issues` (`OP_INVALID`) | A peer's op refused by the register/counter rule, skipped as invalid under this node's schema, or refused for a stamp beyond `sync.maxSkew` (`SKEW`) |
 | `conflict` | `({ kind: 'unique', entity, fields, id, other, op })` | A peer's op left a unique key shared by two records; both are kept |
 | `schema` | `({ kind: 'drift', peer, version, hash, local })` / `({ kind: 'ahead', op, held })` | A peer runs this schema version with another snapshot hash (see [Schemas](../guide/sync#schemas)) / a peer's op is from a newer version, applied or held |
 | `close` | — | After `close()` sealed the log |
@@ -140,11 +141,13 @@ Properties: `storage`, `started`.
 
 Events (contained, like the storage's): `peer` `({ url, connected, node?,
 reconnected?, schema? })`, `sync` `({ url, pushed })` after a push and `({ url,
-received, applied, skipped, duplicates, gaps })` after a received page,
-`bootstrap` `({ url, records })`, `error` (with `.url`), `start`, `stop`,
+received, applied, skipped, duplicates, gaps, malformed })` after a received
+page, `bootstrap` `({ url, records })`, `error` (with `.url`), `start`, `stop`,
 `node` `({ url, action: 'add' | 'remove' | 'enable' | 'disable' })`, `connect`
 `({ url })` once a link is accepted (before hello), and on the hosting side
-`hello` `({ node, scopes, schema })` once a peer is authorized.
+`hello` `({ node, scopes, schema })` once a peer is authorized and `refused`
+`({ node, reason: 'scope', count })` when a push carried ops outside the
+scopes that hello granted (see [Scopes](../guide/sync#scopes)).
 
 Hooks (`open({ sync: { hooks } })`): `beforeConnect`, `beforeBootstrap` — see
 [Hooks and events](../guide/hooks#sync-hooks).
@@ -267,13 +270,15 @@ storage access a contract has.
 `KeyPair` is `{ publicKey, privateKey }`, PEM-encoded RSA-2048. `encrypt`
 returns a JSON envelope — AES-256-GCM under a fresh key, that key wrapped with
 RSA-OAEP (SHA-256) — identical on both platforms. `loadKeys` reads
-`public.pem` / `private.pem` from `basePath`, generating and writing them if
-either is absent.
+`public.pem` / `private.pem` from `basePath`, generating and writing them
+(`private.pem` owner-only where the backend has permissions) when neither
+exists, and rejecting with `code: 'KEYS_INCOMPLETE'` when only one does.
 
 ## Backends
 
 A backend — an **fsi** — is five functions over "a directory and a file name":
-`read(dir, file)` → `Promise<string>`, `write(dir, file, content)`,
+`read(dir, file)` → `Promise<string>`, `write(dir, file, content, options?)`
+(`options.mode` is a permissions hint the `node:fs` adapter honours),
 `exists(dir, file)` → `Promise<boolean>`, `remove(dir, file)`,
 `list(dir)` → `Promise<string[]>` (file names, sorted; an absent directory is
 empty). `write` creates the directory; `remove` is a no-op when the file is

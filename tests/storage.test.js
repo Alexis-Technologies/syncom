@@ -477,3 +477,52 @@ test('Storage id generation', async (t) => {
     }
   });
 });
+
+test('Record: a field named like a method never shadows it', async (t) => {
+  const tempDir = await createTemp();
+  t.after(() => cleanupTemp(tempDir));
+  const warnings = [];
+  const logger = { warn: (entry) => warnings.push(entry), debug() {}, info() {}, error() {} };
+  const storage = await syncom.open({ path: tempDir, logger });
+  t.after(() => storage.close());
+  const id = await storage.insert({ save: 'no', delete: 1, data: 'd', on: 'x', title: 'ok' });
+  const record = await storage.record(id);
+  assert.strictEqual(typeof record.save, 'function');
+  assert.strictEqual(typeof record.delete, 'function');
+  assert.strictEqual(typeof record.on, 'function');
+  assert.strictEqual(record.title, 'ok');
+  assert.deepStrictEqual(await record.data(), { save: 'no', delete: 1, data: 'd', on: 'x', title: 'ok' });
+  record.title = 'changed';
+  await record.save();
+  assert.deepStrictEqual(await storage.get(id), { save: 'no', delete: 1, data: 'd', on: 'x', title: 'changed' });
+  const shadowed = warnings.filter((entry) => entry.event === 'record.shadowed').map((entry) => entry.key);
+  assert.deepStrictEqual(shadowed.sort(), ['data', 'delete', 'on', 'save'], 'reported once per field');
+});
+
+test('validate(id, data, block) checks the block is the one it is filed under', async (t) => {
+  const tempDir = await createTemp();
+  t.after(() => cleanupTemp(tempDir));
+  const storage = await syncom.open({ path: tempDir, logger: false });
+  t.after(() => storage.close());
+  const id = await storage.insert({ n: 1 });
+  const stored = JSON.parse(await storage.fsi.read(`${tempDir}/data`, `${id}.json`));
+  assert.strictEqual(await storage.validate(id, stored.data, stored.block), true);
+  // A block file planted under another name, with the right hash inside it.
+  const block = JSON.parse(await storage.fsi.read(`${tempDir}/blockchain`, `${stored.block}.json`));
+  const planted = 'f'.repeat(64);
+  await storage.fsi.write(`${tempDir}/blockchain`, `${planted}.json`, JSON.stringify(block));
+  assert.strictEqual(await storage.validate(id, stored.data, planted), false);
+});
+
+test('the private key is written owner-only where the backend has permissions', async (t) => {
+  const fsp = require('node:fs/promises');
+  const nodePath = require('node:path');
+  const tempDir = await createTemp();
+  t.after(() => cleanupTemp(tempDir));
+  const storage = await syncom.open({ path: tempDir, logger: false });
+  await storage.close();
+  const { mode } = await fsp.stat(nodePath.join(tempDir, 'keys', 'private.pem'));
+  if (process.platform !== 'win32') assert.strictEqual(mode & 0o777, 0o600);
+  const open = await fsp.stat(nodePath.join(tempDir, 'keys', 'public.pem'));
+  assert.notStrictEqual(open.mode & 0o777, 0o600, 'the public half keeps the default');
+});

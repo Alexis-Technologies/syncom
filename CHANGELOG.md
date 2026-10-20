@@ -227,6 +227,47 @@ section until the first publish; everything below lands there on release day.
   running lint + format + size, the test matrix, and the docs build.
 - `CHANGELOG.md`, `SECURITY.md`, `CONTRIBUTING.md`, `CLAUDE.md`, `vercel.json`.
 
+### Security
+
+- **Record ids are checked at every entrance.** An id is
+  `[A-Za-z0-9_@-][A-Za-z0-9._@-]{0,127}`: the local writers reject anything
+  else with `TypeError` `code: 'INVALID_ID'` (naming `getId` when it minted
+  the id), a peer's op with another id is `malformed`, a snapshot record is
+  skipped. Before, an id became `data/${id}.json` as given — `../x` wrote
+  outside the storage on `node:fs`, and an id with `/` left an op in the log
+  that no reopen could replay.
+- **A peer's op is `wellFormed` before anything reads it** — `origin`, `seq`,
+  `ts`, `type`, `scope`, `v` and the id — and a stamp more
+  than `sync.maxSkew` (default 24 hours, `Infinity` to disable) ahead of the
+  node's clock is refused with an `error` event `code: 'SKEW'` instead of
+  being observed into the clock. Before, one op stamped far in the future
+  (or with a string `ts`) silently froze every later local write to the
+  field, on every node that saw it, across restarts.
+- **`mergeEntry`/`normalizeMeta` walk own keys only.** A `merge` op (or a
+  snapshot record) whose metadata carried a `__proto__` or `constructor`
+  counter polluted `Object.prototype` / `Object` on the receiving node;
+  non-finite counter sums leaked into records. Peer metadata is now rebuilt
+  into the trusted shape — stamps as `[ts, origin]`, counts as
+  `[seq, sum, ts]` — and fields named `constructor`/`toString` are ordinary
+  fields rather than silently dropped.
+- **Scopes are a boundary on the host.** `push` refuses ops outside the
+  scopes `hello` granted (counted as `outOfScope`, announced as `refused`,
+  metric reason `scope`); `snapshot` and `changes` serve the intersection of
+  what is asked and what was granted (403 when nothing is). Before, the
+  scopes only selected what a peer was *sent*.
+- **An `advance` moves the vector only from the feed host's own ops.**
+  Pushed or relayed, it is logged and passed on but adopts nothing
+  (`applyRemote({ adoptFrom })`). Before, any peer could mark another
+  origin's future ops as already seen.
+- **`validate(id, data, block)` checks the block's own hash**, so a file
+  planted beside the chain with the right `records` map no longer passes.
+- **`loadKeys` refuses half a key pair** (`code: 'KEYS_INCOMPLETE'`) instead
+  of minting a new one that orphans every sealed record; `private.pem` is
+  written `0o600` where the backend has permissions (`fsi.write`'s optional
+  `{ mode }` hint).
+- A `Record` field named like a member of the class (`save`, `delete`, `data`,
+  `on`) no longer shadows the method (`record.shadowed` is logged once).
+
 ### Fixed
 
 - A peer's op refused by the register/counter rule no longer fails the whole
@@ -267,6 +308,24 @@ section until the first publish; everything below lands there on release day.
 - `examples/main.js` required a `globalstorage.js` that does not exist.
 
 ### Changed (breaking)
+
+- A record id is `[A-Za-z0-9_@-][A-Za-z0-9._@-]{0,127}`; every writer rejects
+  anything else (`code: 'INVALID_ID'`), `get()`/`has()` answer absent, and a
+  peer's op or snapshot record with another id is dropped as `malformed`.
+- `applyRemote()` answers `{ applied, skipped, duplicates, gaps, malformed }`
+  (the `sync` and `apply` events carry the new count too), and takes
+  `adoptFrom`: an `advance` is adopted only when its origin is that node.
+- `storage.on('error')` payloads carry `code` — `OP_REFUSED`, `OP_INVALID`,
+  `SKEW`.
+- `open({ sync: { maxSkew } })` (default 24 hours) bounds how far ahead of the
+  node's clock a peer's stamp may be.
+- A hosted unit refuses `push` ops outside the peer's hello scopes (answer
+  field `outOfScope`, `refused` event) and serves `snapshot`/`changes` for the
+  granted scopes only (403 when none of the asked ones is).
+- `loadKeys` rejects with `code: 'KEYS_INCOMPLETE'` when exactly one of
+  `public.pem`/`private.pem` exists; before, it generated a new pair.
+- `fsi.write(dir, name, content, options?)` takes an optional `{ mode }` hint;
+  `withSync` forwards it. Adapters without permissions ignore it.
 
 - **`open()` is exclusive by default.** A second instance over the same
   directory used to open silently and mint the seqs of the first; it now

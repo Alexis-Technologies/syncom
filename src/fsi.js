@@ -6,9 +6,12 @@ const { fileExists } = require('./utils.js');
 
 const read = (dir, filename) => fs.readFile(path.join(dir, filename), 'utf8');
 
-const write = async (dir, filename, content) => {
+// `options.mode` is a hint for a backend with file permissions — the
+// private key asks for owner-only; adapters without permissions ignore it.
+const write = async (dir, filename, content, options) => {
   await fs.mkdir(dir, { recursive: true });
-  await fs.writeFile(path.join(dir, filename), content);
+  const mode = options?.mode;
+  await fs.writeFile(path.join(dir, filename), content, mode === undefined ? undefined : { mode });
 };
 
 const exists = (dir, filename) => fileExists(path.join(dir, filename));

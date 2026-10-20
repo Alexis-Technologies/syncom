@@ -43,7 +43,7 @@ const createEntry = () => ({ data: {}, meta: { clock: {}, base: null, deleted: n
 
 const cloneEntry = (entry) => {
   const counters = {};
-  for (const field in entry.meta.counters) counters[field] = { ...entry.meta.counters[field] };
+  for (const field of Object.keys(entry.meta.counters)) counters[field] = { ...entry.meta.counters[field] };
   const meta = { clock: { ...entry.meta.clock }, base: entry.meta.base, deleted: entry.meta.deleted, counters };
   if (entry.meta.v !== undefined) meta.v = entry.meta.v;
   if (entry.meta.purged !== undefined) meta.purged = entry.meta.purged;
@@ -52,16 +52,29 @@ const cloneEntry = (entry) => {
 
 const counterValue = (perOrigin) => {
   let sum = 0;
-  for (const origin in perOrigin) sum += perOrigin[origin][1];
+  for (const origin of Object.keys(perOrigin)) sum += perOrigin[origin][1];
   return sum;
 };
 
 const isCounter = (meta, field) => {
-  const perOrigin = meta.counters[field];
+  const perOrigin = own(meta.counters, field);
   return Boolean(perOrigin) && Object.keys(perOrigin).length > 0;
 };
 
 const isPlainObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
+
+// A key a JSON payload may carry that must never become a property name
+// here: assigning under it would replace the object's prototype. Every
+// other name — `constructor`, `toString` — is a field like any other, which
+// is why lookups below go through `own` rather than the prototype chain.
+const isKey = (key) => key !== '__proto__';
+const own = (object, key) => (Object.hasOwn(object, key) ? object[key] : undefined);
+
+const isStamp = (value) =>
+  Array.isArray(value) && value.length === 2 && typeof value[0] === 'number' && typeof value[1] === 'string';
+const stampOf = (value) => (isStamp(value) ? [value[0], value[1]] : null);
+const isCount = (value) =>
+  Array.isArray(value) && Number.isInteger(value[0]) && Number.isFinite(value[1]) && typeof value[2] === 'number';
 
 // Structural equality over JSON-shaped values, key order ignored — what a
 // `merge` op needs to tell "already have this" from "news".
@@ -78,16 +91,35 @@ const deepEqual = (a, b) => {
   return true;
 };
 
-// A peer-supplied meta, coerced to the shape the rest of this module trusts.
+// A peer-supplied meta, rebuilt into the shape the rest of this module
+// trusts: own keys only, stamps as `[ts, origin]`, counters as `[seq, sum,
+// ts]` per origin, anything else dropped. A copy, so nothing of the peer's
+// object is kept by reference and a `__proto__` key in it reaches nothing.
 const normalizeMeta = (meta) => {
-  const normalized = {
-    clock: isPlainObject(meta.clock) ? { ...meta.clock } : {},
-    base: Array.isArray(meta.base) ? meta.base : null,
-    deleted: Array.isArray(meta.deleted) ? meta.deleted : null,
-    counters: isPlainObject(meta.counters) ? meta.counters : {},
-  };
+  const clock = {};
+  if (isPlainObject(meta.clock)) {
+    for (const field of Object.keys(meta.clock)) {
+      const stamp = stampOf(meta.clock[field]);
+      if (isKey(field) && stamp) clock[field] = stamp;
+    }
+  }
+  const counters = {};
+  if (isPlainObject(meta.counters)) {
+    for (const field of Object.keys(meta.counters)) {
+      const source = meta.counters[field];
+      if (!isKey(field) || !isPlainObject(source)) continue;
+      const perOrigin = {};
+      for (const origin of Object.keys(source)) {
+        const count = source[origin];
+        if (isKey(origin) && isCount(count)) perOrigin[origin] = [count[0], count[1], count[2]];
+      }
+      if (Object.keys(perOrigin).length > 0) counters[field] = perOrigin;
+    }
+  }
+  const normalized = { clock, base: stampOf(meta.base), deleted: stampOf(meta.deleted), counters };
   if (Number.isInteger(meta.v)) normalized.v = meta.v;
-  if (Array.isArray(meta.purged)) normalized.purged = meta.purged;
+  const purged = stampOf(meta.purged);
+  if (purged) normalized.purged = purged;
   return normalized;
 };
 
@@ -99,16 +131,10 @@ const latestClock = (meta) => {
   if (!isPlainObject(meta)) return null;
   const { clock, base, deleted, counters, purged } = normalizeMeta(meta);
   let latest = maxClock(maxClock(base, deleted), purged ?? null);
-  for (const field in clock) {
-    if (Array.isArray(clock[field])) latest = maxClock(latest, clock[field]);
-  }
-  for (const field in counters) {
+  for (const field of Object.keys(clock)) latest = maxClock(latest, clock[field]);
+  for (const field of Object.keys(counters)) {
     const perOrigin = counters[field];
-    if (!isPlainObject(perOrigin)) continue;
-    for (const origin in perOrigin) {
-      const ts = Array.isArray(perOrigin[origin]) ? perOrigin[origin][2] : undefined;
-      if (typeof ts === 'number') latest = maxClock(latest, [ts, origin]);
-    }
+    for (const origin of Object.keys(perOrigin)) latest = maxClock(latest, [perOrigin[origin][2], origin]);
   }
   return latest;
 };
@@ -116,16 +142,16 @@ const latestClock = (meta) => {
 // Drops every register and counter entry that fell below the (new) base.
 const applyBase = (entry, delta) => {
   const { meta, data } = entry;
-  for (const field in meta.clock) {
+  for (const field of Object.keys(meta.clock)) {
     if (compareClock(meta.clock[field], meta.base) < 0) {
       delete meta.clock[field];
       delete data[field];
       delta[field] = undefined;
     }
   }
-  for (const field in meta.counters) {
+  for (const field of Object.keys(meta.counters)) {
     const perOrigin = meta.counters[field];
-    for (const origin in perOrigin) {
+    for (const origin of Object.keys(perOrigin)) {
       if (compareClock([perOrigin[origin][2], origin], meta.base) < 0) delete perOrigin[origin];
     }
     if (isCounter(meta, field)) {
@@ -145,14 +171,15 @@ const applyFields = (entry, fields, stamp, delta, rejected) => {
   const { meta, data } = entry;
   // Own keys only: `fields` may be a JSON-parsed peer payload, where
   // "__proto__" is an ordinary own key, or an in-process object with a
-  // prototype chain nothing here should walk.
+  // prototype chain nothing here should walk. The clock is read the same
+  // way, or a field called `constructor` would meet Object's.
   for (const field of Object.keys(fields)) {
-    if (field === '__proto__') continue;
+    if (!isKey(field)) continue;
     if (isCounter(meta, field)) {
       rejected.push({ field, reason: 'counter' });
       continue;
     }
-    if (compareClock(meta.clock[field], stamp) >= 0) continue;
+    if (compareClock(own(meta.clock, field), stamp) >= 0) continue;
     if (compareClock(stamp, meta.base) < 0) continue;
     meta.clock[field] = stamp;
     data[field] = fields[field];
@@ -246,12 +273,12 @@ const applyOp = (previous, op) => {
     return { entry, changed: false, delta, rejected };
   } else if (op.type === 'inc') {
     const { key: field, value } = op;
-    if (typeof field === 'string' && field !== '__proto__' && Number.isFinite(value)) {
-      if (meta.clock[field] !== undefined) {
+    if (typeof field === 'string' && isKey(field) && isKey(op.origin) && Number.isFinite(value)) {
+      if (own(meta.clock, field) !== undefined) {
         rejected.push({ field, reason: 'register' });
       } else if (compareClock(stamp, meta.base) >= 0) {
-        const perOrigin = (meta.counters[field] ??= {});
-        const known = perOrigin[op.origin];
+        const perOrigin = own(meta.counters, field) ?? (meta.counters[field] = {});
+        const known = own(perOrigin, op.origin);
         if (!known || known[0] < op.seq) {
           perOrigin[op.origin] = [op.seq, (known ? known[1] : 0) + value, op.ts];
           entry.data[field] = counterValue(perOrigin);
@@ -275,12 +302,12 @@ const isAlive = (entry) => {
   const { meta } = entry;
   if (meta.purged) return false;
   if (!meta.deleted) return true;
-  for (const field in meta.clock) {
+  for (const field of Object.keys(meta.clock)) {
     if (compareClock(meta.clock[field], meta.deleted) > 0) return true;
   }
-  for (const field in meta.counters) {
+  for (const field of Object.keys(meta.counters)) {
     const perOrigin = meta.counters[field];
-    for (const origin in perOrigin) {
+    for (const origin of Object.keys(perOrigin)) {
       if (compareClock([perOrigin[origin][2], origin], meta.deleted) > 0) return true;
     }
   }
@@ -290,7 +317,9 @@ const isAlive = (entry) => {
 /**
  * Joins two entries for the same record — the snapshot merge. Commutative,
  * associative and idempotent, and equal to applying both histories in any
- * interleaving (up to the documented counter/reset straddle).
+ * interleaving (up to the documented counter/reset straddle). Both entries
+ * are expected in this module's shape: a peer's goes through normalizeMeta
+ * first (applyOp does that for a `merge` op).
  */
 const mergeEntry = (a, b) => {
   if (!a) return b ? cloneEntry(b) : null;
@@ -308,25 +337,28 @@ const mergeEntry = (a, b) => {
     return entry;
   }
   for (const source of [a, b]) {
-    for (const field in source.meta.clock) {
-      if (compareClock(source.meta.clock[field], meta.clock[field]) > 0) {
+    for (const field of Object.keys(source.meta.clock)) {
+      if (!isKey(field)) continue;
+      if (compareClock(source.meta.clock[field], own(meta.clock, field)) > 0) {
         meta.clock[field] = source.meta.clock[field];
         data[field] = source.data[field];
       }
     }
-    for (const field in source.meta.counters) {
-      const perOrigin = (meta.counters[field] ??= {});
+    for (const field of Object.keys(source.meta.counters)) {
+      if (!isKey(field)) continue;
+      const perOrigin = own(meta.counters, field) ?? (meta.counters[field] = {});
       const from = source.meta.counters[field];
-      for (const origin in from) {
-        if (!perOrigin[origin] || perOrigin[origin][0] < from[origin][0]) perOrigin[origin] = from[origin];
+      for (const origin of Object.keys(from)) {
+        const held = own(perOrigin, origin);
+        if (isKey(origin) && (!held || held[0] < from[origin][0])) perOrigin[origin] = from[origin];
       }
     }
   }
   applyBase(entry, {});
   // A register that also became a counter on the other side: the register
   // wins (the rule is refuse-on-write, and the writes already happened).
-  for (const field in meta.counters) {
-    if (meta.clock[field] !== undefined) {
+  for (const field of Object.keys(meta.counters)) {
+    if (own(meta.clock, field) !== undefined) {
       delete meta.counters[field];
       data[field] = a.meta.clock[field] === meta.clock[field] ? a.data[field] : b.data[field];
     }
@@ -350,7 +382,7 @@ const packOps = (ops) => {
       op.origin,
       op.seq,
       op.ts,
-      TYPE_CODES[op.type] ?? op.type,
+      own(TYPE_CODES, op.type) ?? op.type,
       op.id,
       op.scope ?? null,
       op.data === undefined ? null : op.data,
@@ -372,7 +404,7 @@ const unpackOps = (packed) => {
   for (const row of packed) {
     if (!Array.isArray(row) || row.length < 5) continue;
     const [origin, seq, ts, code, id, scope, data, meta, key, value, vector, from, v, actor] = row;
-    const op = { origin, seq, ts, type: CODE_TYPES[code] ?? code };
+    const op = { origin, seq, ts, type: own(CODE_TYPES, code) ?? code };
     if (id !== null && id !== undefined) op.id = id;
     if (v !== null && v !== undefined) op.v = v;
     if (actor !== null && actor !== undefined) op.actor = actor;

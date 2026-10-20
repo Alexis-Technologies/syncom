@@ -216,6 +216,12 @@ The joined state enters the dialer's own log as `merge` and `advance` ops, so
 a third node resuming from the dialer gets it too — bootstrap is transitive.
 Those ops never travel back to the node the snapshot came from.
 
+An `advance` moves a node's vector only when it is the **feed host's own** op,
+read from that host's subscription — the merges it covers came down the same
+feed first. Pushed by a peer, or relayed from someone else's log, an `advance`
+is logged and passed on but grants nothing: a node's vector is the one thing a
+peer must not be able to move on its behalf.
+
 ## Scopes
 
 By default a storage is one scope, `'*'`, and every peer gets everything. To
@@ -239,6 +245,17 @@ subscriber joins the room `syncom:<scope>` for each scope it asked for, so
 `server.rooms.count('syncom:Doc')` and the cluster's `fetchClients({ room })`
 describe the sync topology without any code in syncom. Delivery itself stays
 on the subscription — a room broadcast is at-most-once and cannot be resumed.
+
+On the hosting side the scopes a peer named in `hello` are a **boundary**, not
+a filter. A `push` carrying an op of another scope has that op refused —
+counted as `outOfScope` in the answer, announced through the `refused` event,
+never applied or logged; the peer's other streams are untouched, since
+sequence numbers run per scope. `snapshot` and `changes` serve the
+intersection of what is asked and what was granted: asking for `'*'` or for
+nothing is asking for the granted list, asking only for other scopes is
+refused with code **403**. A peer granted `'*'` is bound by nothing.
+`authorize(context, hello)` sees `hello.scopes`, which is where a host decides
+what a credential may claim.
 
 A node that carries one scope can only relay that scope: a peer wanting more
 has to reach a fuller node.
@@ -268,9 +285,10 @@ await storage.sync.sync();  // push what the peers lack right now
 storage.sync.peers();       // [{ url, node, connected, subscribed, cursor, lastSync, pending }]
 
 storage.sync.on('peer', ({ url, connected, node, reconnected }) => {});
-storage.sync.on('sync', ({ url, pushed, received, applied, skipped, duplicates, gaps }) => {});
+storage.sync.on('sync', ({ url, pushed, received, applied, skipped, duplicates, gaps, malformed }) => {});
 storage.sync.on('bootstrap', ({ url, records }) => {});
 storage.sync.on('error', (error) => {}); // error.url names the peer
+storage.sync.on('refused', ({ node, reason, count }) => {}); // hosting side: ops outside the peer's scopes
 storage.sync.on('start', () => {});
 storage.sync.on('stop', () => {});
 storage.sync.on('node', ({ url, action }) => {}); // 'add' | 'remove' | 'enable' | 'disable'
@@ -279,7 +297,7 @@ storage.sync.on('hello', ({ node, scopes }) => {}); // hosting side: a peer was 
 
 storage.on('change', (op, via) => {});  // every op applied here; via is null for a local write
 storage.on('apply', ({ peer, applied, skipped }) => {}); // a peer's batch is durable
-storage.on('error', (error) => {});     // a peer's op refused by the register/counter rule
+storage.on('error', (error) => {});     // error.code: 'OP_REFUSED' | 'OP_INVALID' | 'SKEW'
 ```
 
 Listeners are contained: one that throws is logged and never fails what it
@@ -297,6 +315,7 @@ decline to dial a node — use [hooks](./hooks) instead.
 | `scope(id, data)` | `() => '*'` | The scope of a record |
 | `retention.ops` | `10000` | Ops kept in the log before the oldest segment is dropped |
 | `retention.days` | — | Age after which a segment is dropped |
+| `maxSkew` | `86400000` | How far ahead of this node's clock a peer's stamp may be, in ms; beyond it the op is `malformed`. `Infinity` disables |
 | `log.rollAfter` | `64` | Appended batches per sealed segment |
 | `pageSize` | `500` | Ops per push, records per snapshot page |
 | `hooks` | — | `beforeConnect`, `beforeBootstrap` — see [Hooks and events](./hooks#sync-hooks) |
@@ -318,7 +337,7 @@ const unit = storage.sync.unit({
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `access` | `'session'` | Applied to every procedure, wrpc-style |
-| `authorize(context, hello)` | — | Gate the handshake; `hello.token` is the dialer's registered token |
+| `authorize(context, hello)` | — | Gate the handshake; `hello.token` is the dialer's registered token, `hello.scopes` what it will be held to |
 | `tracked` | built in | wrpc's `tracked()`; the built-in produces the same shape |
 | `pageSize` | `500` | Records per snapshot page |
 | `pageBytes` | `4 MiB` | Above this a page is sent inline rather than streamed |
@@ -370,6 +389,13 @@ the engine's own tests run on.
   same records, whatever the order — except the documented counter/reset case.
 - **At-least-once delivery, idempotent application.** An op may arrive more
   than once; applying it again changes nothing.
+- **A peer's op is checked before it is read.** `origin`, `seq`, `ts`, `type`,
+  `scope`, `v` and the record id (or an `advance`'s vector) must have their
+  shape (`actor` and `from` are claims, carried as they are), and a stamp more
+  than `sync.maxSkew` (24 hours) ahead of this
+  node's clock is a broken clock, not a concurrent write. Either is
+  `malformed`: counted, reported (`error` with `code: 'SKEW'` for the latter),
+  neither logged nor relayed, and never observed into this node's clock.
 - **A node's own sequence never repeats.** The log is written before the op is
   announced, so a crash cannot mint two different ops with one number.
 - **fsync is opt-in.** Files are written with the platform's default

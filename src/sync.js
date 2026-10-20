@@ -91,6 +91,19 @@ const inScope = (op, scopes) => {
   return !scopes || scope === GLOBAL_SCOPE || scopes.includes(GLOBAL_SCOPE) || scopes.includes(scope);
 };
 
+// The scopes a read may cover: what hello granted, narrowed to what the
+// call asks for. A peer granted `'*'` reads what it asks (nothing asked:
+// everything); one granted a list reads the intersection — asking for `'*'`
+// or for nothing is asking for its list, asking only for others is 403.
+const grant = (asked, granted) => {
+  const wanted = Array.isArray(asked) ? asked.filter((scope) => typeof scope === 'string') : null;
+  if (granted.includes(GLOBAL_SCOPE)) return wanted;
+  if (wanted === null || wanted.includes(GLOBAL_SCOPE)) return granted;
+  const scopes = wanted.filter((scope) => granted.includes(scope));
+  if (scopes.length === 0) throw coded('Scopes not granted', 403);
+  return scopes;
+};
+
 // A peer's schema as hello carries it — `{ version, hash }` — or null for
 // a peer without one (or one speaking a shape this node does not read).
 const schemaOf = (value) => {
@@ -531,10 +544,13 @@ class SyncManager extends Emitter {
     if (peer.closed || !value) return;
     if (value.bootstrap) return void (await this.#bootstrap(peer));
     const ops = unpackOps(value.ops);
+    // The host's own `advance` ops, received on its feed, move this node's
+    // vector (their merges came down the same feed); nothing else does.
     const result = await this.#storage.applyRemote(ops, {
       via: peer,
       scopes: peer.node.scopes,
       peer: { url: peer.node.url, node: peer.remote.id },
+      adoptFrom: peer.remote.id,
     });
     // Hung up while applying: the cursor is not saved, so a restart replays
     // this page as duplicates — better than a registry write racing whoever
@@ -748,17 +764,28 @@ class SyncManager extends Emitter {
         const { node, scopes } = state;
         const ops = unpackOps(args?.ops);
         if (limits !== null) this.#limit(state, args, ops, limits);
+        // The scopes hello granted bound what a peer writes here, not only
+        // what it reads: an op outside them is refused before anything
+        // sees it. No stream is harmed — seqs run per scope, and a dialer
+        // that honours its registry never sends one.
+        const granted = [];
+        let outOfScope = 0;
+        for (const op of ops) {
+          if (inScope(op, scopes)) granted.push(op);
+          else outOfScope++;
+        }
+        if (outOfScope > 0) this.#refuse(node, 'scope', outOfScope);
         // `url` is null: a host does not dial, so it has no url for the peer.
-        const result = await storage.applyRemote(ops, { via: context.client, scopes, peer: { url: null, node } });
-        return { vector: storage.vector, ...result };
+        const result = await storage.applyRemote(granted, { via: context.client, scopes, peer: { url: null, node } });
+        return { vector: storage.vector, ...result, outOfScope };
       }),
 
       snapshot: procedure(async (context, args) => {
-        peerOf(context);
+        const state = peerOf(context);
         const page = await storage.snapshot({
           cursor: args?.cursor ?? null,
           limit: pageSize,
-          scopes: args?.scopes ?? null,
+          scopes: grant(args?.scopes, state.scopes),
         });
         const client = context?.client;
         const canStream = client && client.binary !== false && typeof client.createStream === 'function';
@@ -780,9 +807,9 @@ class SyncManager extends Emitter {
       }),
 
       changes: procedure(async function* (context, args, subscription = {}) {
-        const { node } = peerOf(context);
+        const { node, scopes: granted } = peerOf(context);
         const { lastEventId, signal } = subscription;
-        const scopes = Array.isArray(args?.scopes) ? args.scopes : null;
+        const scopes = grant(args?.scopes, granted);
         let cursor = lastEventId ?? undefined;
         for (;;) {
           if (signal?.aborted) return;
@@ -806,6 +833,15 @@ class SyncManager extends Emitter {
         }
       }),
     };
+  }
+
+  // Ops of a peer this host would not take: counted, logged and announced
+  // through the `refused` event, never applied. `reason` is what the
+  // `syncom.ops.rejected` metric carries.
+  #refuse(node, reason, count) {
+    this.#storage.logger.warn({ event: 'sync.op.refused', node, reason, count });
+    for (let i = 0; i < count; i++) this.#otel.recordRejected(reason);
+    notify(this, this.#storage.logger, 'refused', { node, reason, count });
   }
 
   // Per-peer push limits, the one place that knows the ops and the bytes:

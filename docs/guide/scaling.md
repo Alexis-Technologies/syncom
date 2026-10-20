@@ -41,9 +41,10 @@ exists.
 Partial replication is the lever: `sync.scope(id, data)` assigns a record to
 a scope, `addNode({ scopes })` says which scopes a node receives, and the
 hub serves each peer its scopes alone — a tenant, an organisation, a
-project. A hub that holds every tenant's data sends each client only its own,
-and the version vector runs per origin *and scope*, so a client of one scope
-sees no holes.
+project. A hub that holds every tenant's data sends each client only its own
+and takes from it only its own: the scopes `hello` named bound `push` as well
+as `snapshot` and `changes` ([Scopes](./sync#scopes)). The version vector runs
+per origin *and scope*, so a client of one scope sees no holes.
 
 ## Limits
 

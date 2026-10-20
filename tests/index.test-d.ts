@@ -391,3 +391,30 @@ expectAssignable<syncom.SharedLog>({
   read: () => ({ ready: Promise.resolve(), [Symbol.asyncIterator]: async function* () {} }),
   parseId: (text) => (typeof text === 'string' ? text : null),
 });
+
+// ids, skew, scopes and codes
+expectAssignable<StorageOptions>({ sync: { maxSkew: 60_000 } });
+expectAssignable<StorageOptions>({ sync: { maxSkew: Infinity } });
+expectError(syncom.open({ sync: { maxSkew: '1h' } }));
+storage.applyRemote([], { adoptFrom: 'host' }).then((result) => {
+  expectType<number>(result.malformed);
+  expectType<number>(result.gaps);
+});
+storage.sync.on('refused', (event) => {
+  expectType<'scope'>(event.reason);
+  expectType<number>(event.count);
+  expectType<string>(event.node);
+});
+storage.sync.on('sync', (event) => {
+  expectType<number | undefined>(event.malformed);
+});
+storage.on('error', (error) => {
+  expectType<'OP_REFUSED' | 'OP_INVALID' | 'SKEW' | undefined>(error.code);
+});
+expectAssignable<Fsi>({
+  read: async () => '',
+  write: async (_dir: string, _file: string, _content: string, _options?: { mode?: number }) => {},
+  exists: async () => true,
+  remove: async () => {},
+  list: async () => [],
+});

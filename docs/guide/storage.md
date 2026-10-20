@@ -119,14 +119,18 @@ await open({ path: 'data', getId: async () => (await fetch('/next-id')).text() }
 `Storage.generateId()` is the default generator, should you want to fall back to
 it. A `getId` that is not a function is refused at `open()`.
 
-Two things the engine does not check for you:
+**Ids are file names.** A record is written to `data/${id}.json`, on every
+platform, so an id is letters, digits, `.`, `_`, `-` and `@`, not starting
+with a dot, 128 characters at most — UUIDs, ULIDs, CUID2s and nanoids all
+qualify. Anything else is refused with a `TypeError` (`code: 'INVALID_ID'`)
+before anything is written: from `insert()` (naming `getId`), from `set()` and
+the other writers, and from a peer — whose op is then counted as `malformed`
+and never logged. `get()` and `has()` answer `null` and `false` for such an id.
 
-- **Ids become filenames.** A record is written to `data/${id}.json` with no
-  sanitising, so a generator that can emit `/`, `\` or `..` will break the
-  write. Keep ids to filename-safe characters.
-- **Ids are matched against string fields.** A `Record` turns any string field
-  whose value is a known id into a [reference](#references). Short, guessable
-  ids raise the odds of an accidental match; UUIDs, ULIDs and CUID2s do not.
+One thing the engine does not check for you: **ids are matched against string
+fields.** A `Record` turns any string field whose value is a known id into a
+[reference](#references). Short, guessable ids raise the odds of an accidental
+match; UUIDs, ULIDs and CUID2s do not.
 
 ### One instance per directory
 

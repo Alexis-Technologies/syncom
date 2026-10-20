@@ -83,8 +83,8 @@ const withSync = (fsi) => ({
   remove: (dir, name) => fsi.remove(dir, name),
   list: (dir) => fsi.list(dir),
   sync: (dir, name) => fsi.sync(dir, name),
-  async write(dir, name, content) {
-    await fsi.write(dir, name, content);
+  async write(dir, name, content, options) {
+    await fsi.write(dir, name, content, options);
     await fsi.sync(dir, name);
   },
 });

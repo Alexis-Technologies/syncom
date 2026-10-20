@@ -27,8 +27,11 @@ export function loadKeys(basePath: string, options?: { fsi?: Fsi }): Promise<Key
  */
 export interface Fsi {
   read(dir: string, filename: string): Promise<string>;
-  /** Creates the directory. */
-  write(dir: string, filename: string, content: string): Promise<void>;
+  /**
+   * Creates the directory. `options.mode` is a hint for a backend with file
+   * permissions (the private key asks for owner-only); the others ignore it.
+   */
+  write(dir: string, filename: string, content: string, options?: { mode?: number }): Promise<void>;
   exists(dir: string, filename: string): Promise<boolean>;
   /** A no-op when the file is absent. */
   remove(dir: string, filename: string): Promise<void>;
@@ -467,6 +470,12 @@ export interface SyncOptions {
   scope?: (id: string, data: Record<string, unknown>) => string;
   retention?: { ops?: number; days?: number };
   log?: { rollAfter?: number };
+  /**
+   * How far ahead of this node's clock a peer's stamp may be, in
+   * milliseconds (default 24 hours; `Infinity` disables). Beyond it the op is
+   * refused as malformed rather than observed into the clock.
+   */
+  maxSkew?: number;
   /** Lifecycle hooks — see SyncHooks. */
   hooks?: SyncHooks;
   /** Reserved for the broker-backed hub mode; refused in this version. See SharedLog. */
@@ -593,6 +602,11 @@ export interface StorageOptions<S extends Schema = Schema> {
   validator?: SchemaValidator;
   /** Who writes — stamped on every op as `actor`: a string, or a function asked per write. */
   actor?: string | (() => string | Promise<string>);
+  /**
+   * Mints record ids. An id is a file name on every platform: letters,
+   * digits, `.`, `_`, `-`, `@`, not starting with a dot, 128 characters at
+   * most — anything else is refused with `code: 'INVALID_ID'`.
+   */
   getId?: () => string | Promise<string>;
   logger?: Logger | false;
   sync?: SyncOptions;
@@ -659,7 +673,11 @@ export interface PeerView {
 export interface SyncUnitOptions {
   /** wrpc's access level for the four procedures (default `'session'`). */
   access?: string;
-  /** Gates a peer by whatever the transport presented, and by what hello says. */
+  /**
+   * Gates a peer by whatever the transport presented, and by what hello says.
+   * The `scopes` hello carries are what the peer may then write (`push`) and
+   * read (`snapshot`, `changes`) here.
+   */
   authorize?: (
     context: unknown,
     hello: { node: string; vector?: VersionVector; scopes?: string[]; token?: string; schema?: SchemaInfo | null },
@@ -734,8 +752,11 @@ export interface SyncEvents {
     skipped?: number;
     duplicates?: number;
     gaps?: number;
+    malformed?: number;
   }) => void;
   bootstrap: (event: { url: string; records: number }) => void;
+  /** Hosting side: ops of a peer this node would not take — outside the scopes its hello granted. */
+  refused: (event: { node: string; reason: 'scope'; count: number }) => void;
   /** A failure on the way to a peer; `url` names it. */
   error: (error: Error & { url: string }) => void;
   start: () => void;
@@ -820,6 +841,12 @@ export interface ApplyRemoteResult {
   skipped: number;
   duplicates: number;
   gaps: number;
+  /**
+   * Refused before anything read them, neither logged nor relayed: not the
+   * shape of an op (origin, seq, ts, type, a valid record id or an advance
+   * vector), or a stamp beyond `sync.maxSkew` ahead of this node's clock.
+   */
+  malformed: number;
 }
 
 /** The events a Storage emits; listeners are contained. */
@@ -827,15 +854,17 @@ export interface StorageEvents {
   /** Every op applied here — local (`via` null) or from a peer (`via` = the link). */
   change: (op: SyncOp, via: unknown) => void;
   /**
-   * A peer's op refused by the register/counter rule (`rejected`), or skipped
-   * because the record would not pass its entity's validator (`entity`,
-   * `issues`).
+   * A peer's op refused by the register/counter rule (`OP_REFUSED`,
+   * `rejected`), skipped because the record would not pass its entity's
+   * validator (`OP_INVALID`, `entity`, `issues`), or refused for a stamp
+   * beyond `sync.maxSkew` (`SKEW`).
    */
   error: (
     error: Error & {
+      code?: 'OP_REFUSED' | 'OP_INVALID' | 'SKEW';
       op?: SyncOp;
       rejected?: Array<{ field: string; reason: 'register' | 'counter' }>;
-      entity?: string;
+      entity?: string | null;
       issues?: ValidationIssue[];
     },
   ) => void;
@@ -925,9 +954,14 @@ export interface Storage {
   getCachedData(id: string): unknown | null;
   /** Whether `id` is a live record here — from the catalog, no I/O. */
   hasRecord(id: string): boolean;
+  /**
+   * `adoptFrom`: the node id whose own `advance` ops may move this node's
+   * vector — the host a subscription is read from. Absent, an `advance` is
+   * logged and relayed but grants nothing.
+   */
   applyRemote(
     ops: readonly SyncOp[],
-    options?: { via?: unknown; scopes?: readonly string[] | null; peer?: PeerRef | null },
+    options?: { via?: unknown; scopes?: readonly string[] | null; peer?: PeerRef | null; adoptFrom?: string | null },
   ): Promise<ApplyRemoteResult>;
   adoptVector(vector: VersionVector, options?: { via?: unknown; from?: string }): Promise<SyncOp | null>;
   snapshot(options?: { cursor?: string | null; limit?: number; scopes?: readonly string[] | null }): Promise<SnapshotPage>;

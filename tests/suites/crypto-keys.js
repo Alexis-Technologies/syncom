@@ -53,16 +53,21 @@ const runCryptoKeysTests = async (t, assert, cryptoMod, { getKeysBase, fsi } = {
     assert.strictEqual(keys2.privateKey, keys1.privateKey);
   });
 
-  await t.test('loadKeys regenerates a pair missing its private half', async (t2) => {
+  await t.test('loadKeys refuses half a pair instead of minting a new one', async (t2) => {
     const base = await getKeysBase(t2);
     const keys1 = await Promise.resolve(cryptoMod.loadKeys(base));
     await fsi.remove(base, 'private.pem');
-
-    const keys2 = await Promise.resolve(cryptoMod.loadKeys(base));
-    assert.strictEqual(typeof keys2.privateKey, 'string');
-    // A fresh pair, not the orphaned public key with no private key behind it.
-    assert.notStrictEqual(keys2.publicKey, keys1.publicKey);
-    assert.strictEqual(await fsi.exists(base, 'private.pem'), true);
+    // Without private.pem every sealed record is already unreadable; a fresh
+    // pair would hide that behind ciphertext that decrypts to nothing.
+    await assert.rejects(() => Promise.resolve(cryptoMod.loadKeys(base)), {
+      code: 'KEYS_INCOMPLETE',
+      message: /private\.pem is missing/,
+    });
+    assert.strictEqual(await fsi.exists(base, 'private.pem'), false, 'nothing was written');
+    assert.strictEqual(await fsi.read(base, 'public.pem'), keys1.publicKey, 'the orphan is left for the operator');
+    await fsi.remove(base, 'public.pem');
+    await fsi.write(base, 'private.pem', keys1.privateKey);
+    await assert.rejects(() => Promise.resolve(cryptoMod.loadKeys(base)), { code: 'KEYS_INCOMPLETE' });
   });
 };
 

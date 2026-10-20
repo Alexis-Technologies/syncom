@@ -79,7 +79,7 @@ load the record → beforeWrite → apply the op → append to the log → chain
 and of a page from a peer:
 
 ```
-per op: malformed / duplicate / gap checks → beforeApply → apply
+per op: malformed (shape, id, skew) / duplicate / gap checks → beforeApply → apply
 then:   append to the log → persist the records → afterApply → 'apply' → 'change' × n
 ```
 

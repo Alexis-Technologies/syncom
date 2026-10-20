@@ -114,20 +114,27 @@ const decrypt = async (text, privateKey) => {
   return JSON.parse(new TextDecoder().decode(plain));
 };
 
+// Half a pair is refused, not replaced — the same rule as the node half.
+const incomplete = (basePath, hasPublic) => {
+  const missing = hasPublic ? 'private' : 'public';
+  const error = new Error(`Key pair at ${basePath} is incomplete: ${missing}.pem is missing`);
+  error.code = 'KEYS_INCOMPLETE';
+  return error;
+};
+
 const loadKeys = async (basePath = 'keys', { fsi = defaultFsi } = {}) => {
   let publicKey, privateKey;
-  // Both halves of the pair, or neither: a public.pem left behind without
-  // its private.pem used to surface as an ENOENT from the second read.
   const hasPublic = await fsi.exists(basePath, 'public.pem');
   const hasPrivate = await fsi.exists(basePath, 'private.pem');
-  if (hasPublic && hasPrivate) {
+  if (hasPublic !== hasPrivate) throw incomplete(basePath, hasPublic);
+  if (hasPublic) {
     publicKey = await fsi.read(basePath, 'public.pem');
     privateKey = await fsi.read(basePath, 'private.pem');
   } else {
     const keys = await generateKeys();
     ({ publicKey, privateKey } = keys);
     await fsi.write(basePath, 'public.pem', publicKey);
-    await fsi.write(basePath, 'private.pem', privateKey);
+    await fsi.write(basePath, 'private.pem', privateKey, { mode: 0o600 });
   }
   return { publicKey, privateKey };
 };

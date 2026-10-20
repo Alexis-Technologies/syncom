@@ -40,6 +40,54 @@ const SOURCE = Symbol('syncom.source');
 
 const isPlainObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 
+// A record id is a file name on three platforms, a key in every peer's
+// catalog and a line in every peer's log: letters, digits, `.`, `_`, `-`,
+// `@`, not starting with a dot, 128 characters at most. Checked where an id
+// enters — the local write path, a peer's op, a snapshot record — so
+// nothing below has to.
+const RECORD_ID = /^[A-Za-z0-9_@-][A-Za-z0-9._@-]{0,127}$/;
+const isRecordId = (id) => typeof id === 'string' && RECORD_ID.test(id);
+const invalidId = (id) => {
+  const shown = typeof id === 'string' ? JSON.stringify(id) : typeof id;
+  const error = new TypeError(
+    `Invalid record id ${shown}: letters, digits, . _ - @, not starting with a dot, 128 at most`,
+  );
+  error.code = 'INVALID_ID';
+  return error;
+};
+
+// An origin or a scope ends up a vector key (`origin@scope`) and a room
+// name: a non-empty string without `@` or control characters.
+const hasControl = (value) => {
+  for (let i = 0; i < value.length; i++) if (value.charCodeAt(i) < 32) return true;
+  return false;
+};
+const isStreamName = (value) =>
+  typeof value === 'string' && value.length > 0 && value.length <= 128 && !value.includes('@') && !hasControl(value);
+
+const OP_TYPES = new Set(['write', 'set', 'inc', 'delete', 'merge', 'advance', 'purge']);
+
+// A peer's stamp this far ahead of this node's wall clock is a broken clock,
+// not a concurrent write: observing it would move every later stamp here —
+// and, through replication, everywhere — into the future for good.
+const DEFAULT_MAX_SKEW = 86_400_000;
+
+// The fields the engine indexes a peer's op by, checked before anything here
+// reads them. Payloads (`data`, `meta`, `key`, `value`, `vector`) are the
+// business of applyOp and normalizeMeta, which take garbage as a no-op;
+// `actor` and `from` are claims, carried as they are.
+const wellFormed = (op) =>
+  isPlainObject(op) &&
+  isStreamName(op.origin) &&
+  Number.isSafeInteger(op.seq) &&
+  op.seq > 0 &&
+  Number.isSafeInteger(op.ts) &&
+  op.ts > 0 &&
+  OP_TYPES.has(op.type) &&
+  (op.scope === undefined || isStreamName(op.scope)) &&
+  (op.v === undefined || (Number.isInteger(op.v) && op.v >= 1)) &&
+  (op.type === 'advance' ? isPlainObject(op.vector) : isRecordId(op.id));
+
 // What a commit came to: an op, `null` for a write that changed nothing, and
 // `undefined` for an encrypted record (saved locally, no op).
 const commitResult = (op) => (op === undefined ? 'encrypted' : op === null ? 'noop' : 'applied');
@@ -75,6 +123,7 @@ class Record extends Emitter {
   #storage = null;
   #data = null;
   #changes = {};
+  #shadowed = new Set();
 
   constructor(id, storage) {
     super();
@@ -120,7 +169,16 @@ class Record extends Emitter {
   #defineProperties() {
     for (const key in this.#data) {
       if (key === 'id') continue;
-      if (Object.prototype.hasOwnProperty.call(this, key)) continue;
+      if (key in this) {
+        // An accessor from an earlier adopt reads #data live. A field named
+        // like a member of the class (`save`, `delete`, `data`) stays
+        // reachable through data() and never shadows the method.
+        if (!Object.hasOwn(this, key) && !this.#shadowed.has(key)) {
+          this.#shadowed.add(key);
+          this.#storage.logger.warn({ event: 'record.shadowed', id: this.#id, key });
+        }
+        continue;
+      }
       Object.defineProperty(this, key, {
         get() {
           return this.#data?.[key];
@@ -268,6 +326,7 @@ class Storage extends Emitter {
   #nodeId = null;
   #clock = new Clock();
   #scopeOf;
+  #maxSkew = DEFAULT_MAX_SKEW;
   #encrypted = false;
   #hooks;
   #inHook = 0;
@@ -361,6 +420,13 @@ class Storage extends Emitter {
     this.#hooks = normalizeHooks(options.hooks, STORAGE_HOOKS, 'Storage');
     const scope = options.sync?.scope;
     this.#scopeOf = typeof scope === 'function' ? scope : () => GLOBAL_SCOPE;
+    // How far ahead of this node's clock a peer's stamp may be before the op
+    // is refused as malformed rather than observed — see applyRemote.
+    const maxSkew = options.sync?.maxSkew;
+    if (maxSkew !== undefined && !(typeof maxSkew === 'number' && maxSkew > 0)) {
+      throw new TypeError('open({ sync }): maxSkew must be a positive number of milliseconds (Infinity to disable)');
+    }
+    if (maxSkew !== undefined) this.#maxSkew = maxSkew;
     return this.#init();
   }
 
@@ -785,7 +851,11 @@ class Storage extends Emitter {
 
   #scope(id, data) {
     const scope = this.#scopeOf(id, data);
-    return typeof scope === 'string' && scope.length > 0 ? scope : GLOBAL_SCOPE;
+    if (typeof scope !== 'string' || scope.length === 0 || scope === GLOBAL_SCOPE) return GLOBAL_SCOPE;
+    if (!isStreamName(scope)) {
+      throw new TypeError(`sync.scope(${id}) returned ${JSON.stringify(scope)}: a scope is a short name without '@'`);
+    }
+    return scope;
   }
 
   // The actor of one write: the call's own, else the storage's (asked when
@@ -802,6 +872,7 @@ class Storage extends Emitter {
   // replicated.
 
   async #load(id) {
+    if (!isRecordId(id)) return null;
     const cached = this.#cache.get(id);
     if (cached !== undefined) {
       this.#remember(id, cached);
@@ -877,6 +948,7 @@ class Storage extends Emitter {
   // seq), persists the entry, then announces it.
 
   [COMMIT](type, id, payload, options = {}) {
+    if (!isRecordId(id)) return Promise.reject(invalidId(id));
     return this.#run(() => {
       const otel = this.#otel;
       if (!otel.enabled) return this.#commit(type, id, payload, options);
@@ -1089,6 +1161,9 @@ class Storage extends Emitter {
       const block = await this.#chain.readBlock(blockHash);
       const expectedHash = await calculateHash(data);
       if (!block) return false;
+      // The block must be the one it is filed under: a file planted beside
+      // the chain with the right `records` map is not a commit.
+      if ((await calculateHash(block)) !== blockHash) return false;
       // A local write commits `{ id, hash }`; a replicated batch commits
       // `{ records: { [id]: hash } }` for every record it touched.
       if (block.data.records) return block.data.records[id] === expectedHash;
@@ -1101,6 +1176,11 @@ class Storage extends Emitter {
   async insert(data, options = {}) {
     // `getId` may be sync or async — both call sites already await this.
     const id = await this.#getId();
+    if (!isRecordId(id)) {
+      const error = invalidId(id);
+      error.message = `open({ getId }): ${error.message}`;
+      throw error;
+    }
     await this.saveData(id, data, options);
     return id;
   }
@@ -1229,38 +1309,49 @@ class Storage extends Emitter {
           'syncom.ops.skipped': r.skipped,
           'syncom.ops.duplicates': r.duplicates,
           'syncom.ops.gaps': r.gaps,
+          'syncom.ops.malformed': r.malformed,
         }),
       );
       return result;
     } finally {
-      otel.recordApply(result ?? { applied: 0, skipped: 0, duplicates: 0, gaps: 0 }, now() - started);
+      otel.recordApply(result ?? { applied: 0, skipped: 0, duplicates: 0, gaps: 0, malformed: 0 }, now() - started);
     }
   }
 
-  async #applyRemote(ops, { via = null, scopes = null, peer = null } = {}) {
+  async #applyRemote(ops, { via = null, scopes = null, peer = null, adoptFrom = null } = {}) {
     {
       const accepted = [];
       const touched = new Map();
       const deltas = new Map();
       const vector = this.#log.vector;
+      const now = Date.now();
+      const horizon = now + this.#maxSkew;
       let adopted = null;
       let skipped = null;
       let held = null;
       let purged = null;
       let duplicates = 0;
       let gaps = 0;
+      let malformed = 0;
       for (const op of ops) {
-        const isAdvance = isPlainObject(op) && op.type === 'advance' && isPlainObject(op.vector);
-        if (
-          !isPlainObject(op) ||
-          typeof op.origin !== 'string' ||
-          !Number.isInteger(op.seq) ||
-          (!isAdvance && typeof op.id !== 'string')
-        ) {
-          this.#logger.warn({ event: 'sync.op.malformed', op });
+        if (!wellFormed(op)) {
+          const shape = isPlainObject(op) ? { origin: op.origin, seq: op.seq, type: op.type, id: op.id } : typeof op;
+          this.#logger.warn({ event: 'sync.op.malformed', op: shape });
           this.#otel.recordMalformed();
+          malformed++;
           continue;
         }
+        if (op.ts > horizon) {
+          // Refused, not observed: this node's clock stays where it is, and
+          // the peer hears of it through the `error` event and the count.
+          this.#logger.warn({ event: 'sync.op.skew', origin: op.origin, seq: op.seq, ts: op.ts, ahead: op.ts - now });
+          this.#otel.recordMalformed();
+          malformed++;
+          const message = `Op ${op.origin}:${op.seq} is stamped ${op.ts - now} ms ahead of this node (maxSkew ${this.#maxSkew})`;
+          notify(this, this.#logger, 'error', Object.assign(new Error(message), { op, code: 'SKEW' }));
+          continue;
+        }
+        const isAdvance = op.type === 'advance';
         if (op.origin === this.#nodeId || vectorHas(vector, op)) {
           duplicates++;
           continue;
@@ -1271,13 +1362,20 @@ class Storage extends Emitter {
         }
         if (isAdvance) {
           // The peer joined a snapshot covering these seqs; so, through its
-          // merges, have we — for the scopes we take from it.
-          for (const key in op.vector) {
-            const scope = keyScope(key);
-            const inScope = scope === null || !scopes || scopes.includes('*') || scopes.includes(scope);
-            if (inScope && Number.isInteger(op.vector[key]) && (vector[key] ?? 0) < op.vector[key]) {
-              vector[key] = op.vector[key];
-              (adopted ??= {})[key] = op.vector[key];
+          // merges, have we — when the op is that peer's own and came down
+          // its feed (the merges came first), for the scopes we take from
+          // it. Pushed or relayed, an advance is logged and passed on but
+          // grants nothing: the vector is the one thing a peer must not be
+          // able to move on another node's behalf.
+          if (adoptFrom !== null && op.origin === adoptFrom) {
+            for (const key of Object.keys(op.vector)) {
+              const seq = op.vector[key];
+              const scope = keyScope(key);
+              const inScope = scope === null || !scopes || scopes.includes('*') || scopes.includes(scope);
+              if (inScope && key !== '__proto__' && Number.isSafeInteger(seq) && (vector[key] ?? 0) < seq) {
+                vector[key] = seq;
+                (adopted ??= {})[key] = seq;
+              }
             }
           }
           vectorAdvance(vector, op);
@@ -1321,7 +1419,8 @@ class Storage extends Emitter {
         if (rejected.length > 0) {
           this.#logger.warn({ event: 'sync.op.rejected', id: op.id, rejected });
           this.#otel.recordRejected(rejected[0].reason);
-          notify(this, this.#logger, 'error', Object.assign(new Error(`Refused op on ${op.id}`), { op, rejected }));
+          const error = Object.assign(new Error(`Refused op on ${op.id}`), { op, code: 'OP_REFUSED', rejected });
+          notify(this, this.#logger, 'error', error);
         }
         // Invalid under this node's schema: skipped like a beforeApply
         // `false` — logged, relayed, replay-safe — and reported.
@@ -1329,7 +1428,8 @@ class Storage extends Emitter {
         if (invalid) {
           this.#logger.warn({ event: 'sync.op.invalid', id: op.id, ...invalid });
           this.#otel.recordRejected('validation');
-          notify(this, this.#logger, 'error', Object.assign(new Error(`Invalid op on ${op.id}`), { op, ...invalid }));
+          const error = Object.assign(new Error(`Invalid op on ${op.id}`), { op, code: 'OP_INVALID', ...invalid });
+          notify(this, this.#logger, 'error', error);
           vectorAdvance(vector, op);
           accepted.push(op);
           (skipped ??= new Set()).add(op);
@@ -1356,7 +1456,7 @@ class Storage extends Emitter {
         touched.set(op.id, entry);
         deltas.set(op.id, { ...(deltas.get(op.id) ?? {}), ...delta });
       }
-      const result = { applied: accepted.length, skipped: skipped?.size ?? 0, duplicates, gaps };
+      const result = { applied: accepted.length, skipped: skipped?.size ?? 0, duplicates, gaps, malformed };
       if (accepted.length > 0) {
         const entries = await this.#log.append(accepted, { skipped, held });
         if (adopted) await this.#log.advance(adopted);
@@ -1413,8 +1513,19 @@ class Storage extends Emitter {
    * resume from THIS node's log — bootstrap is transitive.
    */
   async mergeSnapshot(records, { via = null, from = null } = {}) {
+    const horizon = Date.now() + this.#maxSkew;
     for (const record of records) {
-      if (!isPlainObject(record) || typeof record.id !== 'string') continue;
+      if (!isPlainObject(record) || !isRecordId(record.id)) {
+        this.#logger.warn({ event: 'sync.record.malformed', id: isPlainObject(record) ? record.id : typeof record });
+        continue;
+      }
+      // A stamp beyond the skew allowed is refused here as an op's is in
+      // applyRemote: a snapshot is the other way a clock reaches this node.
+      const latest = latestClock(record.meta);
+      if (latest !== null && latest[0] > horizon) {
+        this.#logger.warn({ event: 'sync.record.skew', id: record.id, ts: latest[0], ahead: latest[0] - horizon });
+        continue;
+      }
       await this[COMMIT]('merge', record.id, { data: record.data, meta: record.meta }, { via, from });
     }
   }

@@ -323,7 +323,7 @@ const runSchemaTests = async (t, assert, createStorage) => {
       ],
       { via: 'L', peer: { url: 'mem://peer', node: 'peer' } },
     );
-    assert.deepStrictEqual(result, { applied: 3, skipped: 1, duplicates: 0, gaps: 0 });
+    assert.deepStrictEqual(result, { applied: 3, skipped: 1, duplicates: 0, gaps: 0, malformed: 0 });
     assert.strictEqual(await storage.get('r1'), null, 'the invalid op did not touch the record');
     assert.deepStrictEqual(await storage.get('r2'), { n: 2, $type: 'Post' });
     assert.deepStrictEqual(await storage.get('r3'), { secret: true }, 'outside the collection: not validated');
@@ -336,7 +336,7 @@ const runSchemaTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(errors[0].issues, [{ path: ['secret'], message: 'no secrets', code: 'forbidden' }]);
     // A later set that would make the record invalid is skipped too.
     const later = await storage.applyRemote([remoteOp('peer', 4, 'set', 'r2', { data: { secret: 1 } })]);
-    assert.deepStrictEqual(later, { applied: 1, skipped: 1, duplicates: 0, gaps: 0 });
+    assert.deepStrictEqual(later, { applied: 1, skipped: 1, duplicates: 0, gaps: 0, malformed: 0 });
     assert.deepStrictEqual(await storage.get('r2'), { n: 2, $type: 'Post' });
     // A reopen replays the unsealed tail and leaves the skipped ops alone.
     await storage.close();

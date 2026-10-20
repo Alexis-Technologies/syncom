@@ -93,7 +93,7 @@ test('Storage replication model', async (t) => {
     storage.on('change', (op, via) => changes.push({ op, via }));
 
     const first = await storage.applyRemote([remoteOp('peer', 1, 'write', 'r1', { data: { a: 1 } })], { via: 'L' });
-    assert.deepStrictEqual(first, { applied: 1, skipped: 0, duplicates: 0, gaps: 0 });
+    assert.deepStrictEqual(first, { applied: 1, skipped: 0, duplicates: 0, gaps: 0, malformed: 0 });
     assert.deepStrictEqual(await storage.get('r1'), { a: 1 });
     assert.deepStrictEqual(changes[0].via, 'L');
     assert.strictEqual(changes[0].op.origin, 'peer');
@@ -104,7 +104,7 @@ test('Storage replication model', async (t) => {
       { origin: storage.nodeId, seq: 1, ts: 1, type: 'write', id: 'x', data: {} },
       'garbage',
     ]);
-    assert.deepStrictEqual(again, { applied: 0, skipped: 0, duplicates: 2, gaps: 1 });
+    assert.deepStrictEqual(again, { applied: 0, skipped: 0, duplicates: 2, gaps: 1, malformed: 1 });
     assert.deepStrictEqual(await storage.get('r1'), { a: 1 });
 
     const next = await storage.applyRemote([
@@ -112,7 +112,7 @@ test('Storage replication model', async (t) => {
       remoteOp('peer', 3, 'inc', 'r1', { key: 'n', value: 4 }),
       remoteOp('peer', 4, 'delete', 'r1'),
     ]);
-    assert.deepStrictEqual(next, { applied: 3, skipped: 0, duplicates: 0, gaps: 0 });
+    assert.deepStrictEqual(next, { applied: 3, skipped: 0, duplicates: 0, gaps: 0, malformed: 0 });
     assert.strictEqual(await storage.get('r1'), null);
     assert.deepStrictEqual(storage.vector, { peer: 4 });
     // Accepted-but-unchanged ops still advance the vector and are logged.
@@ -402,5 +402,123 @@ test('Storage: events are contained', async (t) => {
     assert.strictEqual(record.views, 1);
     assert.deepStrictEqual(rejections, []);
     assert.strictEqual(entries.filter((entry) => entry.event === 'listener.error').length, 2);
+  });
+});
+
+test("Storage: what a peer's op must look like", async (t) => {
+  await t.test('an op the engine cannot index by is malformed: counted, never logged', async (t2) => {
+    const { storage } = await openTemp(t2);
+    const ok = remoteOp('peer', 1, 'write', 'r1', { data: { a: 1 } });
+    const bad = [
+      { ...ok, seq: 2, ts: 'zzz' },
+      { ...ok, seq: 2, ts: 1.5 },
+      { ...ok, seq: 2, ts: -1 },
+      { ...ok, seq: 2, type: 'bogus' },
+      { ...ok, seq: 2, type: 'constructor' },
+      { ...ok, seq: 2, origin: 'peer@scope' },
+      { ...ok, seq: 2, origin: '' },
+      { ...ok, seq: 2, scope: 'a@b' },
+      { ...ok, seq: 2, id: '../evil' },
+      { ...ok, seq: 2, id: 'a/b' },
+      { ...ok, seq: 2, v: 0 },
+      { ...ok, seq: 0 },
+      { ...ok, seq: 2.5 },
+      { origin: 'peer', seq: 2, ts: Date.now(), type: 'advance', vector: 'no' },
+    ];
+    const result = await storage.applyRemote([ok, ...bad]);
+    assert.deepStrictEqual(result, { applied: 1, skipped: 0, duplicates: 0, gaps: 0, malformed: bad.length });
+    assert.strictEqual(storage.log.length, 1, 'only the good op is in the log');
+    assert.deepStrictEqual(storage.vector, { peer: 1 });
+    assert.strictEqual(await storage.fsi.exists(storage.path, 'evil.json'), false, 'nothing left data/');
+    // Nothing malformed moved the vector: the stream's next op is not a gap.
+    const next = await storage.applyRemote([remoteOp('peer', 2, 'set', 'r1', { data: { b: 1 } })]);
+    assert.strictEqual(next.applied, 1);
+  });
+
+  await t.test('a stamp beyond maxSkew is refused and never observed into the clock', async (t2) => {
+    const { storage } = await openTemp(t2, { sync: { maxSkew: 60_000 } });
+    const errors = [];
+    storage.on('error', (error) => errors.push(error));
+    const id = await storage.insert({ f: 1 });
+    const far = Date.now() + 3_600_000;
+    const result = await storage.applyRemote([remoteOp('peer', 1, 'set', id, { data: { f: 2 }, ts: far })]);
+    assert.deepStrictEqual(result, { applied: 0, skipped: 0, duplicates: 0, gaps: 0, malformed: 1 });
+    assert.strictEqual(errors.length, 1);
+    assert.strictEqual(errors[0].code, 'SKEW');
+    assert.strictEqual(errors[0].op.seq, 1);
+    assert.deepStrictEqual(await storage.get(id), { f: 1 });
+    const ops = [];
+    storage.on('change', (op) => ops.push(op));
+    await storage.update(id, { f: 3 });
+    assert.deepStrictEqual(await storage.get(id), { f: 3 }, 'the local write is not frozen out');
+    assert.ok(ops[0].ts < far, 'the clock did not follow the refused stamp');
+    // Within the skew a peer ahead of us is observed, as before.
+    const near = Date.now() + 30_000;
+    await storage.applyRemote([remoteOp('peer', 1, 'set', id, { data: { f: 4 }, ts: near })]);
+    assert.deepStrictEqual(await storage.get(id), { f: 4 });
+    await storage.update(id, { f: 5 });
+    assert.ok(ops.at(-1).ts > near);
+    // A snapshot record stamped beyond the skew is left out the same way.
+    const meta = { clock: { g: [far, 'peer'] }, base: null, deleted: null, counters: {} };
+    const fine = { ...meta, clock: { g: [near, 'peer'] } };
+    await storage.mergeSnapshot([
+      { id: 'skewed', data: { g: 1 }, meta },
+      { id: 'fine', data: { g: 1 }, meta: fine },
+    ]);
+    assert.strictEqual(await storage.get('skewed'), null);
+    assert.deepStrictEqual(await storage.get('fine'), { g: 1 });
+    // Infinity disables the check; anything but a positive number is refused at open.
+    const { storage: loose } = await openTemp(t2, { sync: { maxSkew: Infinity } });
+    assert.strictEqual(
+      (await loose.applyRemote([remoteOp('peer', 1, 'write', 'r', { data: {}, ts: far })])).applied,
+      1,
+    );
+    await assert.rejects(() => openTemp(t2, { sync: { maxSkew: '1h' } }), TypeError);
+    await assert.rejects(() => openTemp(t2, { sync: { maxSkew: 0 } }), TypeError);
+  });
+
+  await t.test('error events carry a code', async (t2) => {
+    const schema = { entities: { Post: { schema: (data) => !('secret' in data) } } };
+    const { storage } = await openTemp(t2, { schema });
+    const errors = [];
+    storage.on('error', (error) => errors.push(error.code));
+    const id = await storage.insert({ hits: 'text' });
+    await storage.applyRemote([remoteOp('peer', 1, 'inc', id, { key: 'hits', value: 1 })]);
+    await storage.applyRemote([remoteOp('peer', 2, 'write', 'p1', { data: { $type: 'Post', secret: 1 } })]);
+    assert.deepStrictEqual(errors, ['OP_REFUSED', 'OP_INVALID']);
+  });
+
+  await t.test('a snapshot record with an invalid id or shape is left out', async (t2) => {
+    const { storage } = await openTemp(t2);
+    const meta = { clock: { a: [1, 'peer'] }, base: null, deleted: null, counters: {} };
+    await storage.mergeSnapshot([
+      { id: '../evil', data: { a: 1 }, meta },
+      { id: 'ok', data: { a: 1 }, meta },
+      'garbage',
+    ]);
+    assert.deepStrictEqual(await storage.list(), ['ok']);
+    assert.strictEqual(await storage.fsi.exists(storage.path, 'evil.json'), false);
+  });
+
+  await t.test("an advance moves the vector only when it is the feed host's own", async (t2) => {
+    const { storage } = await openTemp(t2);
+    const advance = (origin, seq, vector) => ({ origin, seq, ts: Date.now(), type: 'advance', vector });
+    // Pushed by a peer (no adoptFrom): logged and passed on, nothing adopted.
+    let result = await storage.applyRemote([advance('client', 1, JSON.parse('{"victim":1000000,"__proto__":5}'))]);
+    assert.strictEqual(result.applied, 1);
+    assert.deepStrictEqual(storage.vector, { 'client@~': 1 });
+    // The victim's real first op is news, not a duplicate.
+    result = await storage.applyRemote([remoteOp('victim', 1, 'write', 'v1', { data: { a: 1 } })]);
+    assert.strictEqual(result.applied, 1);
+    assert.deepStrictEqual(await storage.get('v1'), { a: 1 });
+    // Read from a host's feed and authored by that host: adopted (safe integers, own keys).
+    const claimed = JSON.parse('{"other":3,"bogus":1.5,"victim":1,"__proto__":7}');
+    result = await storage.applyRemote([advance('host', 1, claimed)], { adoptFrom: 'host' });
+    assert.strictEqual(result.applied, 1);
+    assert.deepStrictEqual(storage.vector, { 'client@~': 1, victim: 1, 'host@~': 1, other: 3 });
+    // Relayed through that host but authored by someone else: not adopted.
+    result = await storage.applyRemote([advance('client', 2, { other: 9 })], { adoptFrom: 'host' });
+    assert.strictEqual(result.applied, 1);
+    assert.strictEqual(storage.vector.other, 3);
   });
 });
