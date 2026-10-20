@@ -52,8 +52,9 @@ test('Storage telemetry on the browser halves', async (t) => {
     const provider = new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] });
     const storage = await browser.open({ path: 'store-telemetry', telemetry: { tracer: provider.getTracer('t') } });
     const id = await storage.insert({ title: 'Traced' });
-    const [span] = exporter.getFinishedSpans();
-    assert.strictEqual(span.name, 'syncom.commit');
+    // The open rebuilt the catalog under a span of its own; the commit is the one we want.
+    const span = exporter.getFinishedSpans().find((candidate) => candidate.name === 'syncom.commit');
+    assert.ok(span);
     assert.strictEqual(span.attributes['syncom.op.type'], 'write');
     assert.strictEqual(span.attributes['syncom.record.id'], id);
     assert.strictEqual(span.attributes['syncom.result'], 'applied');

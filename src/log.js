@@ -103,7 +103,14 @@ class OpLog {
     }
     await this.#loadSegments(hasIndex);
     await this.#loadOpen();
-    if (!index) await this.#writeIndex();
+    if (!index) {
+      // Every subscriber of this node will be told to bootstrap: worth a
+      // line when there was a log here, a whisper for a brand-new one.
+      const level = this.#entries.length > 0 ? 'warn' : 'debug';
+      const reason = hasIndex ? 'unreadable index' : 'no index';
+      this.#log?.[level]?.({ event: 'log.epoch.new', epoch: this.#epoch, reason, entries: this.#entries.length });
+      await this.#writeIndex();
+    }
     return this;
   }
 
@@ -446,7 +453,21 @@ class OpLog {
    * rename.
    */
   scrub(id) {
-    return this.#serialize(async () => {
+    return this.#serialize(() => {
+      const otel = this.#otel;
+      if (!otel.enabled) return this.#scrub(id);
+      return traced(
+        otel,
+        'syncom.log.scrub',
+        {},
+        () => this.#scrub(id),
+        (fresh) => ({ 'syncom.log.scrubbed': fresh }),
+      );
+    });
+  }
+
+  async #scrub(id) {
+    {
       // Every entry of the id (from the index, not a walk), for the files to
       // rewrite; the ones still holding a payload, for the count. A rewrite
       // that failed last time left the files behind memory: the id stays
@@ -484,7 +505,7 @@ class OpLog {
       }
       this.#torn.delete(id);
       return fresh;
-    });
+    }
   }
 
   /**

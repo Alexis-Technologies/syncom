@@ -231,7 +231,7 @@ const runQueryTests = async (t, assert, createStorage) => {
     // A failing run reaches onError, or the logger.
     const errors = [];
     const debug = [];
-    const noisy = await createStorage(t2, 'N', { schema, logger: { debug: (entry) => debug.push(entry.event) } });
+    const noisy = await createStorage(t2, 'N', { schema, logger: { warn: (entry) => debug.push(entry.event) } });
     await noisy.Project.insert({ orgId: 'o', name: 'a', slug: 'a' });
     const bad = noisy.Project.select().filter(() => {
       throw new Error('boom');

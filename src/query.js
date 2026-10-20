@@ -286,7 +286,7 @@ class Cursor {
         if (!stopped) listener(rows);
       } catch (error) {
         if (onError) onError(error);
-        else logger.debug({ event: 'watch.error', entity: this.#entity, err: error });
+        else logger.warn({ event: 'watch.error', entity: this.#entity, err: error });
       } finally {
         running = false;
         if (dirty && !stopped) queueMicrotask(run);

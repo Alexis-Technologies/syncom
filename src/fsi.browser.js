@@ -25,13 +25,19 @@ const write = async (dir, filename, content) => {
   await writable.close();
 };
 
+// "Not there" is a `NotFoundError`, a name OPFS refuses (`TypeError`) or a
+// directory under that name (`TypeMismatchError`), like the node half's
+// `fileExists`; a storage that is denied or broken is not "not there".
+const ABSENT = new Set(['NotFoundError', 'TypeError', 'TypeMismatchError']);
+
 const exists = async (dir, filename) => {
   const dirHandle = await resolveDir(dir);
   try {
     await dirHandle.getFileHandle(filename);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if (ABSENT.has(error?.name)) return false;
+    throw error;
   }
 };
 
@@ -39,8 +45,9 @@ const remove = async (dir, filename) => {
   const dirHandle = await resolveDir(dir);
   try {
     await dirHandle.removeEntry(filename);
-  } catch {
-    // File may not exist
+  } catch (error) {
+    // A file already gone is what remove() was for; anything else is not.
+    if (error?.name !== 'NotFoundError') throw error;
   }
 };
 

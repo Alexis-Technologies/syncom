@@ -215,7 +215,7 @@ test('SyncManager edges', async (t) => {
 test('SyncManager: events are contained', async (t) => {
   await t.test('listeners that throw do not break the handshake or the feed', async (t2) => {
     const entries = [];
-    const logger = { debug: (entry) => entries.push(entry), info() {}, warn() {}, error() {} };
+    const logger = { warn: (entry) => entries.push(entry), info() {}, debug() {}, error() {} };
     const host = await openTemp(t2, { logger });
     const unit = host.sync.unit({ access: 'public' });
     const dialer = await openTemp(t2, { logger, sync: { autoStart: false, connect: () => new MemoryLink(unit) } });

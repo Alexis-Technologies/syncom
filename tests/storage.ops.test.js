@@ -396,7 +396,7 @@ test('Storage announces close', async (t) => {
 test('Storage: events are contained', async (t) => {
   const collect = () => {
     const entries = [];
-    return { entries, logger: { debug: (entry) => entries.push(entry), info() {}, warn() {}, error() {} } };
+    return { entries, logger: { warn: (entry) => entries.push(entry), info() {}, debug() {}, error() {} } };
   };
 
   await t.test('a change listener that throws does not fail the write it observed', async (t2) => {

@@ -24,10 +24,11 @@ const SPAN_STATUS_ERROR = 2;
 // would drag this file's whole dependency graph into browser bundles.
 const SCOPE_NAME = '@alexify/syncom';
 
-// Span attributes that identify a record or a peer. They stay off the span
-// when `includeIdentity` is false; they are never metric labels at any
+// Span attributes that identify a record, a peer or a tenant. They stay off
+// the span when `includeIdentity` is false — and so does the text of an
+// exception, which names records; they are never metric labels at any
 // setting — a record id or a peer url on a label is unbounded cardinality.
-const IDENTITY_KEYS = Object.freeze(['syncom.record.id', 'syncom.peer.url', 'syncom.peer.node']);
+const IDENTITY_KEYS = Object.freeze(['syncom.record.id', 'syncom.peer.url', 'syncom.peer.node', 'syncom.scope']);
 
 const hasMethod = (value, name) => typeof value?.[name] === 'function';
 const noop = () => {};
@@ -89,32 +90,46 @@ const startSpanWith = (tracer, name, options, handle, fn) => {
   return fn(handle);
 };
 
-const recordSpanError = (handle, error) => {
+const recordSpanError = (handle, error, includeIdentity) => {
   try {
     handle.error = true;
     const span = handle?.span;
     if (!span) return;
-    span.recordException?.(error);
-    span.setStatus?.({ code: SPAN_STATUS_ERROR, message: error?.message });
+    // A message such as "Record <id> is invalid" is identity too: without
+    // it, the status says what kind of failure, not whose.
+    if (includeIdentity) span.recordException?.(error);
+    const message = includeIdentity ? error?.message : String(error?.code ?? error?.name ?? 'error');
+    span.setStatus?.({ code: SPAN_STATUS_ERROR, message });
     if (error?.name) span.setAttribute?.('error.type', error.name);
   } catch {
     // Telemetry must never break the write path.
   }
 };
 
-const endSpanHandle = (handle, attributes) => {
+const endSpanHandle = (handle, attributes, includeIdentity) => {
   try {
     const span = handle?.span;
     if (!span) return;
     if (attributes) {
       for (const key in attributes) {
         const value = attributes[key];
-        if (value !== undefined && value !== null) span.setAttribute?.(key, value);
+        if (value === undefined || value === null) continue;
+        if (!includeIdentity && IDENTITY_KEYS.includes(key)) continue;
+        span.setAttribute?.(key, value);
       }
     }
     span.end();
   } catch {}
 };
+
+// What the gauges read: one callback per instrument, each contained.
+const GAUGES = Object.freeze([
+  ['syncom.outbox.size', 'outbox', 'Ops queued for peers, over every dialed peer'],
+  ['syncom.queue.depth', 'queue', 'Writes waiting on, or running in, the mutation queue'],
+  ['syncom.cache.size', 'cache', 'Entries in the record cache'],
+  ['syncom.catalog.size', 'catalog', 'Rows in the record catalog, tombstones included'],
+  ['syncom.log.length', 'log', 'Entries retained in the operation log'],
+]);
 
 // Label sets for the fixed-attribute samples, built once: they ride on every
 // write when metrics are on.
@@ -122,6 +137,7 @@ const PATH_COMMIT = Object.freeze({ 'syncom.path': 'commit' });
 const PATH_APPLY = Object.freeze({ 'syncom.path': 'apply' });
 const PATH_REPLAY = Object.freeze({ 'syncom.path': 'replay' });
 const OUTCOME_APPLIED = Object.freeze({ 'syncom.outcome': 'applied' });
+const OUTCOME_SKIPPED = Object.freeze({ 'syncom.outcome': 'skipped' });
 const OUTCOME_DUPLICATE = Object.freeze({ 'syncom.outcome': 'duplicate' });
 const OUTCOME_GAP = Object.freeze({ 'syncom.outcome': 'gap' });
 const OUTCOME_MALFORMED = Object.freeze({ 'syncom.outcome': 'malformed' });
@@ -149,6 +165,10 @@ const DISABLED = Object.freeze({
   recordBootstrap: noop,
   recordLogRoll: noop,
   recordAppend: noop,
+  recordHook: noop,
+  recordLockWait: noop,
+  recordRefusal: noop,
+  gauges: noop,
 });
 
 const isWriter = (value) => typeof value.enabled === 'boolean' && typeof value.withSpan === 'function';
@@ -183,6 +203,10 @@ const createTelemetry = (telemetry) => {
   let bootstraps = null;
   let logSegments = null;
   let appendDuration = null;
+  let hookDuration = null;
+  let lockWait = null;
+  let refused = null;
+  let gauges = null;
 
   if (hasMethod(meter, 'createCounter') && hasMethod(meter, 'createHistogram')) {
     try {
@@ -230,6 +254,30 @@ const createTelemetry = (telemetry) => {
         unit: 'ms',
         description: 'Duration of writing a batch to the open log',
       });
+      hookDuration = meter.createHistogram('syncom.hook.duration', {
+        unit: 'ms',
+        description: 'Duration of a storage hook, by hook name',
+      });
+      lockWait = meter.createHistogram('syncom.lock.wait', {
+        unit: 'ms',
+        description: 'Time open() spent taking the directory lock',
+      });
+      refused = meter.createCounter('syncom.hello.refused', {
+        unit: '{call}',
+        description: 'Calls a hosted unit refused before the handler, by code (400, 403, 409, 428)',
+      });
+      // Observable: read when the SDK collects, through the callbacks
+      // `gauges(read)` registers. Optional — a meter without the factory
+      // keeps the counters and histograms.
+      if (hasMethod(meter, 'createObservableGauge')) {
+        gauges = GAUGES.map(([name, key, description]) => [
+          meter.createObservableGauge(name, {
+            unit: key === 'log' || key === 'catalog' ? '{entry}' : '{op}',
+            description,
+          }),
+          key,
+        ]);
+      }
     } catch {
       commits = null;
       writeDuration = null;
@@ -242,6 +290,10 @@ const createTelemetry = (telemetry) => {
       bootstraps = null;
       logSegments = null;
       appendDuration = null;
+      hookDuration = null;
+      lockWait = null;
+      refused = null;
+      gauges = null;
     }
   }
 
@@ -274,11 +326,11 @@ const createTelemetry = (telemetry) => {
     },
 
     recordError(handle, error) {
-      recordSpanError(handle, error);
+      recordSpanError(handle, error, includeIdentity);
     },
 
     endSpan(handle, attributes) {
-      endSpanHandle(handle, attributes);
+      endSpanHandle(handle, attributes, includeIdentity);
     },
 
     recordCommit(type, result, elapsed) {
@@ -287,7 +339,11 @@ const createTelemetry = (telemetry) => {
     },
 
     recordApply(result, elapsed) {
-      if (result.applied > 0) add(opsReceived, result.applied, OUTCOME_APPLIED);
+      // `applied` counts every accepted op, the skipped ones among them:
+      // the two outcomes are told apart here.
+      const skipped = result.skipped ?? 0;
+      if (result.applied - skipped > 0) add(opsReceived, result.applied - skipped, OUTCOME_APPLIED);
+      if (skipped > 0) add(opsReceived, skipped, OUTCOME_SKIPPED);
       if (result.duplicates > 0) add(opsReceived, result.duplicates, OUTCOME_DUPLICATE);
       if (result.gaps > 0) add(opsReceived, result.gaps, OUTCOME_GAP);
       record(writeDuration, elapsed, PATH_APPLY);
@@ -334,6 +390,37 @@ const createTelemetry = (telemetry) => {
 
     recordAppend(elapsed) {
       record(appendDuration, elapsed);
+    },
+
+    recordHook(name, elapsed) {
+      record(hookDuration, elapsed, { 'syncom.hook': name });
+    },
+
+    recordLockWait(elapsed) {
+      record(lockWait, elapsed);
+    },
+
+    recordRefusal(code) {
+      add(refused, 1, { 'syncom.code': String(code) });
+    },
+
+    /**
+     * Registers `read` — `() => ({ outbox, queue, cache, catalog, log })` —
+     * behind the observable gauges, which the SDK samples when it collects.
+     * One storage per meter for these: two would observe over each other.
+     */
+    gauges(read) {
+      if (!gauges) return;
+      for (const [gauge, key] of gauges) {
+        try {
+          gauge.addCallback((result) => {
+            try {
+              const value = read()[key];
+              if (typeof value === 'number') result.observe(value);
+            } catch {}
+          });
+        } catch {}
+      }
     },
   };
 };

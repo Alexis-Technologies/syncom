@@ -340,3 +340,33 @@ test('OpLog', async (t) => {
     }
   });
 });
+
+test('a new epoch is said out loud when a log was there', async () => {
+  const dir = await createTemp();
+  try {
+    const entries = [];
+    const logger = {
+      warn: (entry) => entries.push(['warn', entry]),
+      debug: (entry) => entries.push(['debug', entry]),
+      info() {},
+      error() {},
+    };
+    const fresh = await new OpLog(dir, { logger });
+    await fresh.append([op('A', 1)]);
+    await fresh.close();
+    assert.deepStrictEqual(
+      entries.filter(([, e]) => e.event === 'log.epoch.new').map(([level, e]) => [level, e.reason, e.entries]),
+      [['debug', 'no index', 0]],
+      'a brand-new log whispers',
+    );
+    await fs.rm(path.join(dir, 'log', 'index.json'));
+    await new OpLog(dir, { logger });
+    const loud = entries.filter(([, e]) => e.event === 'log.epoch.new').at(-1);
+    assert.deepStrictEqual([loud[0], loud[1].reason, loud[1].entries], ['warn', 'no index', 1]);
+    await fs.writeFile(path.join(dir, 'log', 'index.json'), '{broken');
+    await new OpLog(dir, { logger });
+    assert.strictEqual(entries.filter(([, e]) => e.event === 'log.epoch.new').at(-1)[1].reason, 'unreadable index');
+  } finally {
+    await cleanupTemp(dir);
+  }
+});

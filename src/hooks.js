@@ -54,12 +54,13 @@ const runHook = async (hooks, name, ...args) => {
 // Emitter invokes them synchronously) but are never awaited, so a slow
 // listener does not hold the mutation queue and one that writes back to the
 // storage queues behind the write it heard about instead of deadlocking it.
-// A rejection is contained: logged at debug, never surfaced to the caller.
+// A rejection is contained: logged as a warning (it is the application's
+// bug, and the application should see it), never surfaced to the caller.
 // The count check is what keeps an unhandled `error` from throwing.
 const notify = (emitter, logger, event, ...args) => {
   if (emitter.listenerCount(event) === 0) return;
   emitter.emit(event, ...args).catch((err) => {
-    logger.debug({ event: 'listener.error', name: event, err });
+    logger.warn({ event: 'listener.error', name: event, err });
   });
 };
 

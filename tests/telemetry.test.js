@@ -763,3 +763,137 @@ test('OpLog telemetry', async (t) => {
     assert.strictEqual((await collect()).length, 0);
   });
 });
+
+test('What the engine adds beyond the write path', async (t) => {
+  await t.test('hook durations, the lock wait, host refusals and the gauges', async (t2) => {
+    const { meter, points } = createMetrics();
+    const { dir, storage } = await openTemp(t2, {
+      telemetry: { meter },
+      hooks: { beforeWrite: async () => void (await new Promise((resolve) => setTimeout(resolve, 2))) },
+    });
+    const id = await storage.insert({ n: 1 });
+    await storage.update(id, { n: 2 });
+    const hooks = await points('syncom.hook.duration');
+    assert.strictEqual(point(hooks, { 'syncom.hook': 'beforeWrite' }).value.count, 2);
+    assert.ok(point(hooks, { 'syncom.hook': 'beforeWrite' }).value.sum >= 2);
+    assert.strictEqual((await points('syncom.lock.wait'))[0].value.count, 1);
+    // Refusals before the handler, by code.
+    const unit = storage.sync.unit({ access: 'public', authorize: (context, hello) => hello.token === 'ok' });
+    const link = new MemoryLink(unit);
+    await assert.rejects(() => link.call('syncom/push', { ops: [] }), { code: 428 });
+    await assert.rejects(() => link.call('syncom/hello', {}), { code: 400 });
+    await assert.rejects(() => link.call('syncom/hello', { node: 'p', token: 'no' }), { code: 403 });
+    await assert.rejects(() => link.call('syncom/hello', { node: storage.nodeId, token: 'ok' }), { code: 409 });
+    const refused = await points('syncom.hello.refused');
+    for (const code of ['428', '400', '403', '409']) {
+      assert.strictEqual(point(refused, { 'syncom.code': code }).value, 1, code);
+    }
+    // The gauges read the storage when the SDK collects.
+    assert.strictEqual((await points('syncom.cache.size'))[0].value, 1);
+    assert.strictEqual((await points('syncom.catalog.size'))[0].value, 1);
+    assert.strictEqual((await points('syncom.log.length'))[0].value, 2);
+    assert.strictEqual((await points('syncom.queue.depth'))[0].value, 0);
+    assert.strictEqual((await points('syncom.outbox.size'))[0].value, 0);
+    assertNoIdentityLabels(
+      await (async () => {
+        const { collect } = createMetrics();
+        return collect();
+      })(),
+    );
+    assert.ok(dir);
+  });
+
+  await t.test('a snapshot, a scrub and a catalog rebuild are spans; skipped ops are their own outcome', async (t2) => {
+    const { tracer, named } = createTracing();
+    const { meter, points } = createMetrics();
+    const { dir, storage } = await openTemp(t2, {
+      telemetry: { tracer, meter },
+      hooks: { beforeApply: ({ op }) => op.id !== 'skip' },
+    });
+    storage.on('error', () => {});
+    await storage.insert({ n: 1 });
+    await storage.insert({ n: 2 });
+    const page = await storage.snapshot({ limit: 10 });
+    assert.strictEqual(page.records.length, 2);
+    const [snapshot] = named('syncom.snapshot');
+    assert.strictEqual(snapshot.attributes['syncom.limit'], 10);
+    assert.strictEqual(snapshot.attributes['syncom.records'], 2);
+    assert.strictEqual(snapshot.attributes['syncom.done'], true);
+    const gone = await storage.insert({ secret: 's' });
+    await storage.purge(gone);
+    const [scrub] = named('syncom.log.scrub');
+    assert.strictEqual(scrub.attributes['syncom.log.scrubbed'], 2, 'the write and the purge op itself');
+    await storage.applyRemote([
+      remoteOp('peer', 1, 'write', 'skip', { data: { a: 1 } }),
+      remoteOp('peer', 2, 'write', 'keep', { data: { a: 1 } }),
+    ]);
+    const received = await points('syncom.ops.received');
+    assert.strictEqual(point(received, { 'syncom.outcome': 'applied' }).value, 1);
+    assert.strictEqual(point(received, { 'syncom.outcome': 'skipped' }).value, 1);
+    // A rebuild: the catalog file gone, the next open scans data/ under a span.
+    await storage.close();
+    await require('node:fs/promises').rm(require('node:path').join(dir, 'index', 'catalog.json'));
+    const second = await syncom.open({ path: dir, logger: false, telemetry: { tracer, meter } });
+    t2.after(() => second.close().catch(() => {}));
+    // The first open rebuilt an empty directory too; the last span is this one.
+    const rebuild = named('syncom.catalog.rebuild').at(-1);
+    assert.strictEqual(rebuild.attributes['syncom.records'], 4, 'every entry with a file, the tombstone included');
+  });
+
+  await t.test('includeIdentity: false keeps the scope and the exception text off a span too', async (t2) => {
+    const { tracer, spans } = createTracing();
+    const otel = createTelemetry({ tracer, includeIdentity: false });
+    otel.withSpan('syncom.commit', { 'syncom.op.type': 'write' }, (handle) => {
+      otel.recordError(handle, Object.assign(new Error('Record r-123 is invalid'), { code: 'OP_INVALID' }));
+      otel.endSpan(handle, { 'syncom.scope': 'tenant-7', 'syncom.result': 'error' });
+    });
+    const [span] = spans();
+    assert.deepStrictEqual(span.attributes, {
+      'syncom.op.type': 'write',
+      'syncom.result': 'error',
+      'error.type': 'Error',
+    });
+    assert.strictEqual(span.status.message, 'OP_INVALID');
+    assert.strictEqual(span.events.length, 0, 'no exception event: its message names the record');
+    const { storage } = await openTemp(t2, { telemetry: { tracer, includeIdentity: false } });
+    await storage.insert({ n: 1 });
+    const commit = spans().find((s) => s.name === 'syncom.commit' && s.attributes['syncom.result'] === 'applied');
+    assert.strictEqual('syncom.scope' in commit.attributes, false);
+    assert.strictEqual('syncom.record.id' in commit.attributes, false);
+  });
+
+  await t.test('a hostile observable gauge is contained; a meter without the factory keeps the rest', async () => {
+    const hostile = () => {
+      throw new Error('gauge boom');
+    };
+    const noGauge = { createCounter: () => ({ add() {} }), createHistogram: () => ({ record() {} }) };
+    const without = createTelemetry({ meter: noGauge });
+    assert.strictEqual(without.enabled, true);
+    without.gauges(() => ({ cache: 1 }));
+    const throwingFactory = { ...noGauge, createObservableGauge: hostile };
+    const partial = createTelemetry({ meter: throwingFactory });
+    assert.strictEqual(partial.enabled, true, 'the writer survives; the instruments are off');
+    partial.gauges(() => ({ cache: 1 }));
+    const throwingCallback = { ...noGauge, createObservableGauge: () => ({ addCallback: hostile }) };
+    createTelemetry({ meter: throwingCallback }).gauges(() => ({ cache: 1 }));
+    let observed = null;
+    const observing = {
+      ...noGauge,
+      createObservableGauge: () => ({
+        addCallback: (callback) => {
+          observed = callback;
+        },
+      }),
+    };
+    createTelemetry({ meter: observing }).gauges(() => {
+      throw new Error('read boom');
+    });
+    assert.doesNotThrow(() => observed({ observe: hostile }), 'a reader that throws is contained');
+    // The last gauge registered reads the log length.
+    createTelemetry({ meter: observing }).gauges(() => ({ log: 3, cache: 'not a number' }));
+    const seen = [];
+    observed({ observe: (value) => seen.push(value) });
+    assert.deepStrictEqual(seen, [3]);
+    observed({ observe: hostile });
+  });
+});

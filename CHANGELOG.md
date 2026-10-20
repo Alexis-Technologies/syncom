@@ -274,6 +274,20 @@ section until the first publish; everything below lands there on release day.
 
 ### Fixed
 
+- **What an operator could not see.** Spans for a served snapshot page
+  (`syncom.snapshot`), a scrub (`syncom.log.scrub`) and a catalog rebuild
+  (`syncom.catalog.rebuild`); histograms for hook durations
+  (`syncom.hook.duration{syncom.hook}`) and the lock wait at open
+  (`syncom.lock.wait`); a counter for calls a hosted unit refused before the
+  handler (`syncom.hello.refused{syncom.code}`); observable gauges for the
+  outbox, the mutation queue, the cache, the catalog and the log; `skipped`
+  as its own outcome of `syncom.ops.received` (it hid inside `applied`).
+  `includeIdentity: false` now also keeps the scope and the exception text
+  off a span. A log that changed epoch says so (`log.epoch.new`, a warning
+  when a log was there); an event listener or a `watch()` that throws is
+  logged at warn, not debug; the OPFS backend swallows only "not there"
+  from `exists()`/`remove()` and lets a denied or broken storage surface.
+  The log events are documented as a surface in the telemetry guide.
 - **Every record inserted through a collection stayed in memory for good.**
   `Collection.insert()` returned a `Record`, and the storage kept every
   `Record` ever made, which also exempted its cache entry from eviction —

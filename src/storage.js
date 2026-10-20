@@ -353,6 +353,7 @@ class Storage extends Emitter {
   #encrypted = false;
   #hooks;
   #inHook = 0;
+  #queued = 0;
   #queue = Promise.resolve();
   #closed = false;
 
@@ -471,7 +472,11 @@ class Storage extends Emitter {
     // One instance per directory, first: a second one would mint the seqs
     // this one is about to. `lock: false` is for a caller that coordinates.
     const { lock = 'fail' } = this.#options;
-    if (lock !== false) this.#lock = await acquireLock({ fsi: this.#fsi, path: this.#path, mode: lock });
+    if (lock !== false) {
+      const started = this.#otel.enabled ? now() : 0;
+      this.#lock = await acquireLock({ fsi: this.#fsi, path: this.#path, mode: lock });
+      if (started) this.#otel.recordLockWait(now() - started);
+    }
     try {
       await this.#open();
     } catch (error) {
@@ -506,6 +511,14 @@ class Storage extends Emitter {
     await this.#replayHeld();
     this.#sync = await new SyncManager(this, this.#options.sync);
     this.#initCollections();
+    // What the observable gauges sample, when a meter was given.
+    this.#otel.gauges(() => ({
+      outbox: this.#sync.pendingOps(),
+      queue: this.#queued,
+      cache: this.#cache.size,
+      catalog: this.#catalog.size,
+      log: this.#log.length,
+    }));
   }
 
   // The catalog is derived from the records: the persisted one is reused
@@ -516,11 +529,21 @@ class Storage extends Emitter {
     const saved = await this.#catalog.load();
     const tail = saved === null ? null : this.#log.since(saved.stamp);
     if (tail === null) {
-      this.#logger.debug({ event: 'catalog.rebuild' });
-      for (const name of await this.#fsi.list(`${this.#path}/data`)) {
-        if (name.endsWith('.json')) await this.#index(name.slice(0, -5));
-      }
-      await this.#catalog.save(this.#log.lastEventId);
+      const reason = saved === null ? 'no catalog' : 'stamp not resumable';
+      this.#logger.debug({ event: 'catalog.rebuild', reason });
+      const rebuild = async () => {
+        let count = 0;
+        for (const name of await this.#fsi.list(`${this.#path}/data`)) {
+          if (!name.endsWith('.json')) continue;
+          await this.#index(name.slice(0, -5));
+          count++;
+        }
+        await this.#catalog.save(this.#log.lastEventId);
+        return count;
+      };
+      const otel = this.#otel;
+      if (!otel.enabled) return void (await rebuild());
+      await traced(otel, 'syncom.catalog.rebuild', {}, rebuild, (count) => ({ 'syncom.records': count }));
       return;
     }
     const touched = new Set();
@@ -893,8 +916,12 @@ class Storage extends Emitter {
         ),
       );
     }
+    this.#queued++;
     const result = this.#queue.then(task, task);
-    this.#queue = result.catch(() => {});
+    const settled = result.finally(() => {
+      this.#queued--;
+    });
+    this.#queue = settled.catch(() => {});
     return result;
   }
 
@@ -903,11 +930,14 @@ class Storage extends Emitter {
   // is a HookError. The read hooks call runHook directly.
   async #hook(name, ...args) {
     if (!this.#hooks[name]) return undefined;
+    const otel = this.#otel;
+    const started = otel.enabled ? now() : 0;
     this.#inHook++;
     try {
       return await runHook(this.#hooks, name, ...args);
     } finally {
       this.#inHook--;
+      if (started) otel.recordHook(name, now() - started);
     }
   }
 
@@ -1608,7 +1638,23 @@ class Storage extends Emitter {
    * the log: live records AND tombstones, with their metadata, in id order.
    * `cursor` is the last id of the previous page; `null` back means done.
    */
-  async snapshot({ cursor = null, limit = 500, scopes = null } = {}) {
+  snapshot(options = {}) {
+    const otel = this.#otel;
+    if (!otel.enabled) return this.#page(options);
+    const attributes = { 'syncom.limit': options.limit ?? 500 };
+    return traced(
+      otel,
+      'syncom.snapshot',
+      attributes,
+      () => this.#page(options),
+      (page) => ({
+        'syncom.records': page.records.length,
+        'syncom.done': page.cursor === null,
+      }),
+    );
+  }
+
+  async #page({ cursor = null, limit = 500, scopes = null } = {}) {
     // Over the catalog, which knows every entry with a file — live records,
     // tombstones, sealed ones — in id order: no directory listing per page,
     // no load of what the row already says is sealed.

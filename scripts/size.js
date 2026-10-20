@@ -56,8 +56,11 @@ const ENTRIES = [
   // vector learned from the feed, the 428 cap) the raise to 30 KB; the
   // optional chain, weak live Records, catalog saves off the queue and the
   // scrub index the raise to 30.5 KB; the bootstrap page as one batch and
-  // snapshots over a catalog that keeps tombstones the raise to 31 KB.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 31 },
+  // snapshots over a catalog that keeps tombstones the raise to 31 KB; the
+  // operator's signals (snapshot/scrub/rebuild spans, hook and lock
+  // histograms, refusal counts, five observable gauges, identity scrubbing)
+  // the raise to 32 KB.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 32 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check

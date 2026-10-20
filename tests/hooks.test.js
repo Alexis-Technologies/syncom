@@ -78,7 +78,7 @@ test('runHook', async (t) => {
 test('notify', async (t) => {
   const stubLogger = () => {
     const entries = [];
-    return { entries, debug: (entry) => entries.push(entry), info() {}, warn() {}, error() {} };
+    return { entries, warn: (entry) => entries.push(entry), info() {}, debug() {}, error() {} };
   };
 
   await t.test('with no listener nothing is emitted — not even error, which the Emitter would throw on', () => {
@@ -101,7 +101,7 @@ test('notify', async (t) => {
     resolveSlow();
   });
 
-  await t.test('a throwing or rejecting listener is contained and logged at debug', async () => {
+  await t.test('a throwing or rejecting listener is contained and logged as a warning', async () => {
     const emitter = new Emitter();
     const logger = stubLogger();
     const seen = [];

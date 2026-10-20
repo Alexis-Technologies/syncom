@@ -309,6 +309,13 @@ class SyncManager extends Emitter {
     return results;
   }
 
+  /** Ops queued for peers, over every dialed peer — what the outbox gauge reads. */
+  pendingOps() {
+    let total = 0;
+    for (const peer of this.#peers.values()) total += peer.outbox.length;
+    return total;
+  }
+
   /** Live view of every dialed peer. */
   peers() {
     return Array.from(this.#peers.values(), (peer) => ({
@@ -897,20 +904,29 @@ class SyncManager extends Emitter {
     // stays the host's, and the unit stays a plain object.
     const procedure = (handler) => (meta === undefined ? { access, handler } : { access, handler, meta });
 
+    // A refusal before the handler: counted by code; 428 is the normal
+    // course of a wrpc reconnect (a new server-side client) and only counted.
+    const refuse = (message, code, node = null) => {
+      this.#otel.recordRefusal(code);
+      if (code !== 428) storage.logger.warn({ event: 'sync.hello.refused', code, node });
+      return coded(message, code);
+    };
     const peerOf = (context) => {
       const state = context?.client?.data?.syncom;
-      if (!state) throw coded('Say hello first', 428);
+      if (!state) throw refuse('Say hello first', 428);
       return state;
     };
 
     return {
       hello: procedure(async (context, args) => {
-        if (!args || typeof args.node !== 'string') throw coded('hello needs a node id', 400);
+        if (!args || typeof args.node !== 'string') throw refuse('hello needs a node id', 400);
         if (args.version !== undefined && args.version !== PROTOCOL) {
-          throw coded(`Unsupported protocol ${args.version}`, 400);
+          throw refuse(`Unsupported protocol ${args.version}`, 400, args.node);
         }
-        if (args.node === storage.nodeId) throw coded('A node cannot sync with itself (copied data directory?)', 409);
-        if (authorize && !(await authorize(context, args))) throw coded('Not authorized to sync', 403);
+        if (args.node === storage.nodeId) {
+          throw refuse('A node cannot sync with itself (copied data directory?)', 409, args.node);
+        }
+        if (authorize && !(await authorize(context, args))) throw refuse('Not authorized to sync', 403, args.node);
         const scopes = Array.isArray(args.scopes) ? args.scopes.filter((s) => typeof s === 'string') : [GLOBAL_SCOPE];
         const schema = schemaOf(args.schema);
         if (context?.client) {

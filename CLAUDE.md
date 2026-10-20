@@ -184,6 +184,11 @@ docs/                     VitePress site
   Never mint a metric label from a record id, an origin, a peer url or a
   scope. Every `catch {}` in the writer has a hostile-implementation test in
   `tests/telemetry.test.js`; keep it that way or the branch threshold drops.
+  The observable gauges are registered once, in `#open`, through
+  `otel.gauges(read)`; `includeIdentity: false` strips `IDENTITY_KEYS` (the
+  scope among them) at span start AND end and records a failure's `code`
+  rather than the exception. A new `event:` name goes into the table in
+  `docs/guide/telemetry.md` — the names are a surface.
 - **Encrypted records are local.** `{ encrypted: true }` seals a record for
   this node's key; it produces no op and is excluded from snapshots. Do not
   route an encrypted entry through `applyOp`.

@@ -23,8 +23,10 @@ const storage = await open({ path: 'data', telemetry: { api: otelApi } });
 const traced = await open({ path: 'data', telemetry: { tracer, meter } });
 ```
 
-`includeIdentity: false` keeps record ids and peer urls/node ids off spans.
-They are never metric labels at any setting.
+`includeIdentity: false` keeps record ids, peer urls/node ids and scopes off
+spans, and records a failure's `code` (or class) as the span status instead
+of the exception, whose message names the record. None of them is ever a
+metric label at any setting.
 
 The writer is `storage.telemetry` (opaque, `@experimental`), and `OpLog`
 takes the same option directly. The signals will keep improving in minor
@@ -66,9 +68,12 @@ wrpc's spans around the actual calls.
 | `syncom.replay` | the unsealed log tail replayed at open | `syncom.ops.count`, `syncom.records` |
 | `syncom.push` | one push to a peer, all its pages | `syncom.push.reason` (`handshake` / `manual` / `relay`), `syncom.ops.count`, `syncom.pages`, `syncom.peer.url`†, `syncom.peer.node`† |
 | `syncom.bootstrap` | the whole snapshot walk from a peer | `syncom.peer.url`†, `syncom.peer.node`†, `syncom.pages`, `syncom.records` |
+| `syncom.snapshot` | one page served to a peer (the host side) | `syncom.limit`, `syncom.records`, `syncom.done` |
 | `syncom.log.roll` | sealing open files into a segment and compacting | `syncom.log.sealed`, `syncom.log.dropped`, `syncom.log.floor` |
+| `syncom.log.scrub` | a purge stripping an id's entries from the log files | `syncom.log.scrubbed` |
+| `syncom.catalog.rebuild` | the catalog rebuilt from a scan of `data/` at open | `syncom.records` |
 
-† off the span when `includeIdentity` is false.
+† off the span when `includeIdentity` is false (so is `syncom.scope`).
 
 A span is marked failed (status `ERROR`, the exception recorded, `error.type`
 set) when the work it brackets throws: a write refused by the
@@ -77,9 +82,9 @@ read a snapshot. A peer's op refused inside `applyRemote` is a protocol
 outcome, not a failure of the batch: it is counted (below), the batch's span
 stays green.
 
-A `merge` — one commit per snapshot record during a bootstrap — is counted
-but not spanned, or a bootstrap of ten thousand records would open ten
-thousand spans under one `syncom.bootstrap`.
+A `merge` — one per snapshot record during a bootstrap — is counted but not
+spanned, or a bootstrap of ten thousand records would open ten thousand
+spans under one `syncom.bootstrap`.
 
 ## Metrics
 
@@ -90,8 +95,8 @@ appears on one.
 | --- | --- | --- | --- |
 | `syncom.commits` | Counter | `{op}` | `syncom.op.type`, `syncom.result` (`applied` / `noop` / `encrypted` / `error`) |
 | `syncom.write.duration` | Histogram | `ms` | `syncom.path` (`commit` / `apply` / `replay`) |
-| `syncom.ops.received` | Counter | `{op}` | `syncom.outcome` (`applied` / `duplicate` / `gap` / `malformed` — the last includes a stamp beyond `maxSkew`) |
-| `syncom.ops.rejected` | Counter | `{op}` | `syncom.reason` (`register` / `counter` / `validation` / `scope`) |
+| `syncom.ops.received` | Counter | `{op}` | `syncom.outcome` (`applied` / `skipped` — accepted but not applied here: a hook, the schema, an unreadable record / `duplicate` / `gap` / `malformed` — the last includes a stamp beyond `maxSkew`) |
+| `syncom.ops.rejected` | Counter | `{op}` | `syncom.reason` (`register` / `counter` / `validation` / `scope` / `unreadable`) |
 | `syncom.conflicts` | Counter | `{conflict}` | `syncom.kind` (`unique`) |
 | `syncom.ops.limited` | Counter | `{push}` | `syncom.reason` (`ops` / `bytes` / `rate`) |
 | `syncom.replication.lag` | Histogram | `ms` | — |
@@ -99,6 +104,19 @@ appears on one.
 | `syncom.bootstraps` | Counter | `{bootstrap}` | `syncom.result` |
 | `syncom.log.segments` | Counter | `{segment}` | `syncom.log.event` (`sealed` / `dropped`) |
 | `syncom.log.append.duration` | Histogram | `ms` | — |
+| `syncom.hook.duration` | Histogram | `ms` | `syncom.hook` (the hook's name) |
+| `syncom.lock.wait` | Histogram | `ms` | — (what `open()` spent taking the directory lock) |
+| `syncom.hello.refused` | Counter | `{call}` | `syncom.code` (`400` / `403` / `409` / `428`) — calls a hosted unit refused before the handler |
+| `syncom.outbox.size` | Observable gauge | `{op}` | — (ops queued for peers, over every dialed peer) |
+| `syncom.queue.depth` | Observable gauge | `{op}` | — (writes waiting on, or in, the mutation queue) |
+| `syncom.cache.size` | Observable gauge | `{entry}` | — |
+| `syncom.catalog.size` | Observable gauge | `{entry}` | — (rows, tombstones included) |
+| `syncom.log.length` | Observable gauge | `{entry}` | — (entries retained) |
+
+The gauges are observable: the SDK reads them when it collects, through a
+callback the storage registers at open. **One storage per meter** for those —
+two storages on one meter would observe over each other (the counters and
+histograms are fine to share; the SDK merges identical instruments).
 
 `syncom.push.ops` answers three questions with one instrument: its count is
 the number of pushes, its sum the ops pushed, and its distribution how many
@@ -182,6 +200,24 @@ was queued: `Storage` serialises writes, and time spent waiting on an earlier
 write is the caller's contention, not this write's cost. They end after the
 `change` listeners have run, because that is what the caller awaits — a slow
 listener shows up in `syncom.write.duration`, and it should.
+
+## Log events
+
+What the injected `logger` receives is structured — one object per line with
+an `event` field — and the names are a stable surface for a dashboard or an
+alert to key on:
+
+| Level | `event` | When |
+| --- | --- | --- |
+| warn | `sync.op.malformed`, `sync.op.skew` | a peer's op refused before it was read; the latter also an `error` event (`SKEW`) |
+| warn | `sync.op.rejected`, `sync.op.invalid`, `sync.op.unreadable`, `sync.op.encrypted`, `sync.op.lens` | a peer's op not applied here, by reason |
+| warn | `sync.op.refused`, `sync.op.outOfScope`, `sync.hello.refused` | hosting side: ops outside a peer's scopes, a call refused by code |
+| warn | `sync.gaps`, `sync.error`, `sync.outbox.dropped`, `sync.record.malformed`, `sync.record.skew`, `sync.record.encrypted` | a page with gaps, a failure on the way to a peer, a dropped backlog, a snapshot record left out |
+| warn | `log.epoch.new` (when a log was there), `log.segment.unreadable`, `log.open.unreadable` | the log changed epoch or lost a file |
+| warn | `catalog.skipped`, `catalog.lens`, `catalog.save`, `snapshot.skipped`, `replay.skipped`, `record.shadowed` | derived state could not follow a record; a field shadowing a method |
+| warn | `listener.error`, `watch.error`, `schema.drift` | an event listener or a watcher threw; two builds of one schema version |
+| info | `schema.upgrade`, `schema.changed`, `schema.held` | what a reopen found about the schema |
+| debug | `catalog.rebuild`, `durable.noop`, `log.epoch.new` (a brand-new log), `schema.lens.issues` | routine |
 
 ## Failures
 
