@@ -9,10 +9,12 @@
 //
 // Rows hold the indexed field values only (the record itself stays in the
 // cache or on disk); an encrypted record is a row with no fields, so it is
-// listed but never matched.
+// listed but never matched. A tombstone — a deleted or purged record, whose
+// file stays — is a row flagged `gone`: not listed, not matched, but there,
+// so a snapshot can page over every entry without listing the directory.
 
 const FILE = 'catalog.json';
-const FORMAT = 1;
+const FORMAT = 2;
 
 const isObject = (value) => typeof value === 'object' && value !== null;
 
@@ -56,6 +58,7 @@ class Catalog {
   #unique = new Map();
   #watchers = new Map();
   #dirty = 0;
+  #sorted = null;
 
   constructor({ fsi, path, entities }) {
     this.#fsi = fsi;
@@ -84,6 +87,8 @@ class Catalog {
     const row = this.#rows.get(id);
     if (!row) return;
     this.#rows.delete(id);
+    this.#sorted = null;
+    if (row.gone) return;
     drop(this.#byType, row.type, id);
     const def = row.type === null ? undefined : this.#defs.get(row.type);
     if (!def) return;
@@ -107,6 +112,8 @@ class Catalog {
 
   #insert(id, row) {
     this.#rows.set(id, row);
+    this.#sorted = null;
+    if (row.gone) return;
     add(this.#byType, row.type, id);
     const def = row.type === null ? undefined : this.#defs.get(row.type);
     if (!def) return;
@@ -122,20 +129,24 @@ class Catalog {
   }
 
   /**
-   * Records what `id` is now: `null` for gone (deleted, purged), `{ type,
-   * v, encrypted: true }` for a sealed record, `{ type, v, data }` for a
-   * live one — `data` as it reads (the lens applied).
+   * Records what `id` is now: `null` for a record with no file any more,
+   * `{ type, v, gone: true }` for a tombstone (deleted or purged, the file
+   * stays), `{ type, v, encrypted: true }` for a sealed record, `{ type, v,
+   * data }` for a live one — `data` as it reads (the lens applied).
    */
   put(id, view) {
-    const before = this.#rows.get(id)?.type ?? null;
+    const was = this.#rows.get(id);
+    const before = was && !was.gone ? was.type : null;
     this.#remove(id);
     this.#dirty++;
+    const gone = view !== null && view.gone === true;
     const type = view === null ? null : typeof view.type === 'string' ? view.type : null;
     if (before !== null) this.#wake(before);
-    if (type !== null && type !== before) this.#wake(type);
+    if (!gone && type !== null && type !== before) this.#wake(type);
     if (view === null) return;
     const row = { type, v: view.v ?? null, encrypted: view.encrypted === true, fields: {} };
-    const def = type === null ? undefined : this.#defs.get(type);
+    if (gone) row.gone = true;
+    const def = type === null || gone ? undefined : this.#defs.get(type);
     if (def && !row.encrypted) {
       for (const field of def.fields) {
         const value = valueOf(view.data, field);
@@ -145,8 +156,16 @@ class Catalog {
     this.#insert(id, row);
   }
 
+  /** Whether `id` is a live record (an encrypted one counts; a tombstone does not). */
   has(id) {
-    return this.#rows.has(id);
+    const row = this.#rows.get(id);
+    return row !== undefined && !row.gone;
+  }
+
+  /** Every id with a file — live, encrypted or a tombstone — sorted, cached until the next put. */
+  all() {
+    this.#sorted ??= [...this.#rows.keys()].sort();
+    return this.#sorted;
   }
 
   /** The fields of a collection the catalog holds — what a covered query may read. */
@@ -174,9 +193,11 @@ class Catalog {
     return this.#rows.get(id) ?? null;
   }
 
-  /** Every live id, or those of one collection, sorted. */
+  /** Every live id (tombstones left out), or those of one collection, sorted. */
   ids(type) {
-    const ids = type === undefined ? [...this.#rows.keys()] : [...(this.#byType.get(type) ?? [])];
+    if (type !== undefined) return [...(this.#byType.get(type) ?? [])].sort();
+    const ids = [];
+    for (const [id, row] of this.#rows) if (!row.gone) ids.push(id);
     return ids.sort();
   }
 
@@ -254,14 +275,16 @@ class Catalog {
     if (!usable) return null;
     for (const row of parsed.rows) {
       if (!Array.isArray(row) || typeof row[0] !== 'string') continue;
-      const [id, type, v, encrypted, fields] = row;
+      const [id, type, v, encrypted, fields, gone] = row;
       this.#remove(id);
-      this.#insert(id, {
+      const loaded = {
         type: typeof type === 'string' ? type : null,
         v: v ?? null,
         encrypted: encrypted === true,
         fields: isObject(fields) ? fields : {},
-      });
+      };
+      if (gone === true) loaded.gone = true;
+      this.#insert(id, loaded);
     }
     this.#dirty = 0;
     return { stamp: parsed.stamp };
@@ -274,7 +297,11 @@ class Catalog {
    */
   async save(stamp) {
     const rows = [];
-    for (const [id, row] of this.#rows) rows.push([id, row.type, row.v, row.encrypted, row.fields]);
+    for (const [id, row] of this.#rows) {
+      const cells = [id, row.type, row.v, row.encrypted, row.fields];
+      if (row.gone) cells.push(true);
+      rows.push(cells);
+    }
     const saved = this.#dirty;
     await this.#fsi.write(this.#dir, FILE, JSON.stringify({ format: FORMAT, indexes: this.#indexKey, stamp, rows }));
     this.#dirty -= saved;

@@ -280,6 +280,20 @@ section until the first publish; everything below lands there on release day.
   the "bounded" cache was unbounded for collection users. Live Records are
   now held weakly: one the application still references pins its entry and
   follows the record; one it dropped is collected, and the pin with it.
+- **A bootstrap paid a full commit per record.** Every snapshot record went
+  through `[COMMIT]` on its own: a log append, a chain block, a tail-pointer
+  rewrite and a record write each, and one log entry per record towards
+  `retention.ops`. A page is now joined as one batch under one turn of the
+  queue — one append, one block, one catalog flush — with the same hooks,
+  events and `merge` ops as before. A record the dialer keeps sealed no
+  longer fails the page; it is left alone and logged.
+- **`snapshot()` listed the data directory on every page** and loaded every
+  entry to decide what to send — O(N) per page, O(N²/limit) per bootstrap,
+  and a decrypt per sealed record just to skip it. The catalog now keeps a
+  row for every entry with a file, tombstones included (`gone`), and a page
+  is a slice of its sorted ids; a record this node cannot read is left out
+  of the page instead of failing it. The persisted catalog is format 2 (an
+  older file is rebuilt once).
 - **The catalog was written on the mutation queue.** Every 64th write paid
   for a full serialization of the catalog before it returned; the save now
   runs off the queue (the rows and the stamp taken as it starts, one save in

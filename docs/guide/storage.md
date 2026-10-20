@@ -162,6 +162,8 @@ yourself and pass `lock: false`.
 
 ### The catalog and the cache
 
+`snapshot()` pages over the catalog too — it keeps a row for every entry with a
+file, tombstones included, so a bootstrap never lists the data directory.
 `list()` and `hasRecord()` answer from the **catalog**: every live record's
 id, collection and indexed field values, in memory, kept up to date by every
 write — local or a peer's — and persisted as `index/catalog.json` stamped

@@ -112,7 +112,7 @@ test('Catalog', async (t) => {
     await catalog.save('epoch.7');
     assert.strictEqual(catalog.dirty, 0);
     const file = JSON.parse(await fsi.read('store/index', 'catalog.json'));
-    assert.strictEqual(file.format, 1);
+    assert.strictEqual(file.format, 2);
     assert.strictEqual(file.stamp, 'epoch.7');
     assert.deepStrictEqual(file.rows, [
       ['a', 'Post', 1, false, { orgId: 'o1', slug: 'a' }],
@@ -131,7 +131,7 @@ test('Catalog', async (t) => {
     assert.strictEqual(other.size, 0);
     // Absent, unreadable, or of another shape.
     assert.strictEqual(await catalogOf(schema, createMemoryFsi()).load(), null);
-    for (const text of ['not json', '{"format":2}', '{"format":1,"indexes":"x"}', '[]', 'null']) {
+    for (const text of ['not json', '{"format":1}', '{"format":2,"indexes":"x"}', '[]', 'null']) {
       await fsi.write('store/index', 'catalog.json', text);
       assert.strictEqual(await catalogOf(schema, fsi).load(), null, text);
     }
@@ -173,4 +173,38 @@ test('a save takes its rows at the start; puts that land during the write stay d
     ['a'],
     'the rows are as of the start',
   );
+});
+
+test('a tombstone is a row that is there but not listed; all() pages over every entry', async () => {
+  const fsi = createMemoryFsi();
+  const { entities } = normalizeSchema({ entities: { Post: { index: ['slug'], unique: ['slug'] } } });
+  const catalog = new Catalog({ fsi, path: 'store', entities });
+  const woken = [];
+  catalog.subscribe('Post', () => woken.push('Post'));
+  catalog.put('b', { type: 'Post', v: 1, data: { slug: 'b' } });
+  catalog.put('a', { type: 'Post', v: 1, data: { slug: 'a' } });
+  catalog.put('e', { type: 'Post', encrypted: true });
+  assert.deepStrictEqual(catalog.all(), ['a', 'b', 'e']);
+  assert.strictEqual(catalog.all(), catalog.all(), 'cached until the next put');
+  catalog.put('b', { type: 'Post', v: 1, gone: true });
+  assert.strictEqual(catalog.has('b'), false);
+  assert.deepStrictEqual(catalog.ids(), ['a', 'e']);
+  assert.deepStrictEqual(catalog.ids('Post'), ['a', 'e']);
+  assert.deepStrictEqual(catalog.all(), ['a', 'b', 'e'], 'the tombstone is still an entry');
+  assert.strictEqual(catalog.size, 3);
+  assert.deepStrictEqual(catalog.row('b'), { type: 'Post', v: 1, encrypted: false, gone: true, fields: {} });
+  assert.deepStrictEqual(catalog.candidates('Post', { slug: 'b' }), new Set(), 'not matched');
+  assert.deepStrictEqual(catalog.uniqueConflicts('Post', 'n', { slug: 'b' }), [], 'a tombstone holds no key');
+  assert.deepStrictEqual(woken, ['Post', 'Post', 'Post', 'Post'], 'watchers hear a record go');
+  await catalog.save('e.3');
+  const loaded = new Catalog({ fsi, path: 'store', entities });
+  await loaded.load();
+  assert.deepStrictEqual(loaded.all(), ['a', 'b', 'e']);
+  assert.deepStrictEqual(loaded.ids(), ['a', 'e']);
+  assert.strictEqual(loaded.has('b'), false);
+  // A revival turns the tombstone back into a row of its type.
+  loaded.put('b', { type: 'Post', v: 2, data: { slug: 'b2' } });
+  assert.deepStrictEqual(loaded.ids('Post'), ['a', 'b', 'e']);
+  loaded.put('e', null);
+  assert.deepStrictEqual(loaded.all(), ['a', 'b'], 'no file, no entry');
 });

@@ -218,9 +218,12 @@ away longer than the host's retention — receives `{ bootstrap: true }` on the
 subscription, and switches to `snapshot`. The host pages through **every**
 entry, tombstones included, with its merge metadata. On a binary-capable
 transport a page is streamed as NDJSON with backpressure; otherwise it comes
-inline. The dialer joins each record (`mergeEntry`), adopts the host's vector as
-of the first page, and re-subscribes from that page's event id. Whatever landed
-while paging replays and folds in as a no-op.
+inline. The dialer joins each page as one batch — one log append, one chain
+block, every record a `merge` op of its own (`mergeEntry`) — adopts the host's
+vector as of the first page, and re-subscribes from that page's event id.
+Whatever landed while paging replays and folds in as a no-op. A record the
+dialer keeps sealed ([encrypted](./storage#encryption-at-rest)) is left as it
+is; the rest of the page lands.
 
 The joined state enters the dialer's own log as `merge` and `advance` ops, so
 a third node resuming from the dialer gets it too — bootstrap is transitive.

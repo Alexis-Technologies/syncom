@@ -138,13 +138,16 @@ docs/                     VitePress site
   `Cursor.fetch()` hand out copies. `getCachedData()` and `snapshot()` are the
   raw objects on purpose. Do not return `entry.data` from a public method.
 - **Stamps come from `#clock.now()` after the clock has observed everything
-  the node holds for the record.** `[COMMIT]` in `src/storage.js` does that
-  (`latestClock` over the entry's meta, and the joined meta for a `merge`) and
-  `Storage.#init` seeds the clock from `log.latestTs`; `applyRemote` observes
-  every peer op. A stamp taken any other way can sort below state the node
-  already has, and `applyOp` then drops the write silently (`changed` false,
-  `COMMIT` returns null). Do not add a second write path; go through
-  `[COMMIT]`.
+  the node holds for the record.** `#commit` in `src/storage.js` does that
+  (`latestClock` over the entry's meta), `#mergeBatch` does it over the
+  entry's meta AND the joined meta, and `Storage.#init` seeds the clock from
+  `log.latestTs`; `applyRemote` observes every peer op. A stamp taken any
+  other way can sort below state the node already has, and `applyOp` then
+  drops the write silently (`changed` false, `COMMIT` returns null). There
+  are exactly three write paths — `#commit` (a local op, through `[COMMIT]`),
+  `#applyRemote` (a peer's page), `#mergeBatch` (a snapshot page, through
+  `mergeSnapshot`) — all inside `#run`, all ending in `#persistBatch` or
+  `#writeEntry`. Do not add a fourth.
 - **Reconnect/backoff/resume belong to the link.** `SyncManager` re-runs only
   `hello` + `push` on `reconnect`; a refused restored subscription (428 "say
   hello first" — wrpc gives a reconnect a NEW server-side client) triggers a
@@ -197,9 +200,10 @@ docs/                     VitePress site
   rows and the stamp before its first await, one save in flight at a time,
   `close()` awaits it — so a write never waits for the catalog file. Do not
   `await` a save inside `#commit`/`#applyRemote`.
-  `list()`/`hasRecord()` read it, `snapshot()` still scans `data/` (it needs
-  tombstones). A new way of changing a record's file must put too, or the
-  catalog lies until the next rebuild.
+  `list()`/`hasRecord()` read it, and so does `snapshot()`: a tombstone is a
+  row flagged `gone` (there, not listed), so a page is a slice of
+  `catalog.all()` and never a directory listing. A new way of changing a
+  record's file must put too, or the catalog lies until the next rebuild.
 - **`open()` is exclusive by default (`lock: 'fail'`).** A test that opens
   the same directory twice must `close()` the first storage or pass
   `lock: false`; `bench/storage.js` does the latter. Never weaken the

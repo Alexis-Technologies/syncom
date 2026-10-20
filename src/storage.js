@@ -40,6 +40,18 @@ const SOURCE = Symbol('syncom.source');
 
 const isPlainObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 
+// The index of the first element of a sorted array above `value`.
+const upperBound = (sorted, value) => {
+  let low = 0;
+  let high = sorted.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (sorted[mid] <= value) low = mid + 1;
+    else high = mid;
+  }
+  return low;
+};
+
 // A record id is a file name on three platforms, a key in every peer's
 // catalog and a line in every peer's log: letters, digits, `.`, `_`, `-`,
 // `@`, not starting with a dot, 128 characters at most. Checked where an id
@@ -536,7 +548,7 @@ class Storage extends Emitter {
   async #rowOf(id, entry) {
     if (entry === null) return null;
     if (entry.encrypted) return { type: entry.data?.$type, v: null, encrypted: true };
-    if (!isAlive(entry)) return null;
+    if (!isAlive(entry)) return { type: entry.data?.$type, v: entry.meta.v ?? null, gone: true };
     let data = entry.data;
     try {
       data = await this.#view(id, entry);
@@ -1016,21 +1028,18 @@ class Storage extends Emitter {
 
   // The span starts when the write RUNS, not when it was queued: waiting on
   // `#run` is the caller's contention, not the write's cost. It ends after
-  // the `change` listeners, because that is what the caller awaits. A merge
-  // — one commit per snapshot record during a bootstrap — is counted but not
-  // spanned, or a bootstrap would open thousands of spans.
+  // the `change` listeners, because that is what the caller awaits. (A
+  // bootstrap's merges go through #mergeBatch: counted, never spanned.)
   async #tracedCommit(otel, type, id, payload, options) {
     const started = now();
     let result = 'error';
     try {
       const task = () => this.#commit(type, id, payload, options);
-      const op =
-        type === 'merge'
-          ? await task()
-          : await traced(otel, 'syncom.commit', { 'syncom.op.type': type, 'syncom.record.id': id }, task, (op) => ({
-              'syncom.result': commitResult(op),
-              'syncom.scope': op ? (op.scope ?? GLOBAL_SCOPE) : undefined,
-            }));
+      const attributes = { 'syncom.op.type': type, 'syncom.record.id': id };
+      const op = await traced(otel, 'syncom.commit', attributes, task, (op) => ({
+        'syncom.result': commitResult(op),
+        'syncom.scope': op ? (op.scope ?? GLOBAL_SCOPE) : undefined,
+      }));
       result = commitResult(op);
       return op;
     } finally {
@@ -1055,16 +1064,12 @@ class Storage extends Emitter {
     }
     // The payload is taken as JSON — a copy, like the disk and the peers
     // hold it — before anything keeps a reference to it.
-    if (payload.data !== undefined || payload.meta !== undefined) {
-      payload = { ...payload, data: asJson(payload.data), meta: asJson(payload.meta) };
-      if (payload.data === undefined) delete payload.data;
-      if (payload.meta === undefined) delete payload.meta;
-    }
+    if (payload.data !== undefined) payload = { ...payload, data: asJson(payload.data) };
     // Sealed: this write is encrypted, or the record already is. An
     // encrypted record has no op log — writes to it stay local.
     const sealed = encrypted || current?.encrypted === true;
     const visible = current && (current.encrypted || isAlive(current)) ? current.data : null;
-    const who = type === 'merge' ? null : await this.#actorOf(actor);
+    const who = await this.#actorOf(actor);
     const ctx = {
       type,
       id,
@@ -1108,25 +1113,21 @@ class Storage extends Emitter {
     }
     const data = payload.data ?? current?.data ?? {};
     const scope = this.#scope(id, data);
-    // Stamp above everything this node already holds for the record — its
-    // entry and, for a merge, the one being joined — so a local write never
-    // sorts below state the node knows about and is silently dropped. The
-    // log seeds the clock at open; this covers what the log no longer has.
+    // Stamp above everything this node already holds for the record, so a
+    // local write never sorts below state the node knows about and is
+    // silently dropped. The log seeds the clock at open; this covers what
+    // the log no longer has.
     this.#observe(latestClock(current?.meta));
-    if (type === 'merge') this.#observe(latestClock(payload.meta));
     const op = { origin: this.#nodeId, seq: 0, ts: this.#clock.now(), type, id };
     if (scope !== GLOBAL_SCOPE) op.scope = scope;
     if (from) op.from = from;
     // The writer's schema version rides on the op: what a reader on another
-    // version lenses the record through. A merge carries the joined entry's
-    // own `meta.v` instead.
-    if (this.#version !== null && type !== 'merge') op.v = this.#version;
+    // version lenses the record through.
+    if (this.#version !== null) op.v = this.#version;
     if (who !== null) op.actor = who;
-    // Sequence numbers run per stream (see vector.js opKey): the scope's,
-    // or the bootstrap stream for a merge.
+    // Sequence numbers run per stream (see vector.js opKey): the scope's.
     op.seq = this.#log.seqOf(opKey(op)) + 1;
     if (payload.data !== undefined) op.data = payload.data;
-    if (payload.meta !== undefined) op.meta = payload.meta;
     if (payload.key !== undefined) op.key = payload.key;
     if (payload.value !== undefined) op.value = payload.value;
 
@@ -1608,15 +1609,25 @@ class Storage extends Emitter {
    * `cursor` is the last id of the previous page; `null` back means done.
    */
   async snapshot({ cursor = null, limit = 500, scopes = null } = {}) {
-    const names = await this.#fsi.list(`${this.#path}/data`);
+    // Over the catalog, which knows every entry with a file — live records,
+    // tombstones, sealed ones — in id order: no directory listing per page,
+    // no load of what the row already says is sealed.
+    const ids = this.#catalog.all();
     const records = [];
     let last = cursor;
-    for (const name of names) {
-      if (!name.endsWith('.json')) continue;
-      const id = name.slice(0, -5);
-      if (cursor !== null && id <= cursor) continue;
-      const entry = await this.#load(id);
+    for (let index = cursor === null ? 0 : upperBound(ids, cursor); index < ids.length; index++) {
+      const id = ids[index];
       last = id;
+      if (this.#catalog.row(id)?.encrypted) continue;
+      let entry;
+      try {
+        entry = await this.#load(id);
+      } catch (error) {
+        // A record this node cannot read is this node's problem to report
+        // (it does, on the read); the page goes out without it.
+        this.#logger.warn({ event: 'snapshot.skipped', id, err: error });
+        continue;
+      }
       if (!entry || entry.encrypted) continue;
       const scope = this.#scope(id, entry.data);
       if (scopes && scope !== GLOBAL_SCOPE && !scopes.includes(GLOBAL_SCOPE) && !scopes.includes(scope)) continue;
@@ -1631,23 +1642,89 @@ class Storage extends Emitter {
   /**
    * Joins snapshot records into this node's state. Each becomes a `merge` op
    * of this node's own, so the joined state also reaches the peers that
-   * resume from THIS node's log — bootstrap is transitive.
+   * resume from THIS node's log — bootstrap is transitive. A page is joined
+   * under one turn of the mutation queue: one log append, one chain block,
+   * one catalog flush, rather than a full commit per record.
    */
-  async mergeSnapshot(records, { via = null, from = null } = {}) {
+  mergeSnapshot(records, { via = null, from = null } = {}) {
+    return this.#run(() => this.#mergeBatch(records, via, from));
+  }
+
+  // The bootstrap write path: a snapshot page as merge ops of this node's
+  // own. Each record runs the write hooks, is stamped above everything this
+  // node holds for it and above the joined meta, and is announced on its
+  // own — like a local write — but the page lands as one batch.
+  async #mergeBatch(records, via, from) {
     const horizon = Date.now() + this.#maxSkew;
+    const otel = this.#otel;
+    const key = opKey({ origin: this.#nodeId, type: 'merge' });
+    let seq = this.#log.seqOf(key);
+    const ops = [];
+    const touched = new Map();
+    const deltas = new Map();
+    const pending = [];
     for (const record of records) {
       if (!isPlainObject(record) || !isRecordId(record.id)) {
         this.#logger.warn({ event: 'sync.record.malformed', id: isPlainObject(record) ? record.id : typeof record });
         continue;
       }
+      const { id } = record;
       // A stamp beyond the skew allowed is refused here as an op's is in
       // applyRemote: a snapshot is the other way a clock reaches this node.
       const latest = latestClock(record.meta);
       if (latest !== null && latest[0] > horizon) {
-        this.#logger.warn({ event: 'sync.record.skew', id: record.id, ts: latest[0], ahead: latest[0] - horizon });
+        this.#logger.warn({ event: 'sync.record.skew', id, ts: latest[0], ahead: latest[0] - horizon });
         continue;
       }
-      await this[COMMIT]('merge', record.id, { data: record.data, meta: record.meta }, { via, from });
+      const started = otel.enabled ? now() : 0;
+      const data = asJson(record.data);
+      const meta = asJson(record.meta);
+      const current = touched.get(id) ?? (await this.#load(id));
+      if (current?.encrypted) {
+        // Sealed here for this node alone: a peer's state of it is not taken.
+        this.#logger.warn({ event: 'sync.record.encrypted', id });
+        continue;
+      }
+      const visible = current && isAlive(current) ? current.data : null;
+      const ctx = { type: 'merge', id, data, meta, current: visible, encrypted: false, source: null, via, from };
+      ctx.v = this.#version;
+      ctx.actor = null;
+      if ((await this.#hook('beforeWrite', ctx)) !== undefined) {
+        throw new TypeError('beforeWrite may only replace data for write and set');
+      }
+      const scope = this.#scope(id, data ?? current?.data ?? {});
+      this.#observe(latestClock(current?.meta));
+      this.#observe(latestClock(meta));
+      const op = { origin: this.#nodeId, seq: 0, ts: this.#clock.now(), type: 'merge', id };
+      if (scope !== GLOBAL_SCOPE) op.scope = scope;
+      if (from) op.from = from;
+      if (data !== undefined) op.data = data;
+      if (meta !== undefined) op.meta = meta;
+      const { entry, changed, delta } = applyOp(current, op);
+      if (!changed) {
+        if (otel.enabled) otel.recordCommit('merge', 'noop', now() - started);
+        continue;
+      }
+      op.seq = ++seq;
+      ops.push(op);
+      touched.set(id, entry);
+      deltas.set(id, { ...(deltas.get(id) ?? {}), ...delta });
+      pending.push({ ctx, op, started });
+    }
+    if (ops.length === 0) return;
+    const entries = await this.#log.append(ops);
+    await this.#persistBatch(touched, entries[0].seq, entries[entries.length - 1].seq);
+    this.#log.applied(entries[0].seq, entries[entries.length - 1].seq);
+    this.#flushCatalog();
+    for (const { ctx, op, started } of pending) {
+      try {
+        await this.#hook('afterWrite', ctx, op);
+      } finally {
+        const entry = touched.get(op.id);
+        this.#emitUpdate(op.id, isAlive(entry) ? entry.data : null, deltas.get(op.id));
+        notify(this, this.#logger, 'change', op, via);
+        if (otel.enabled) otel.recordCommit('merge', 'applied', now() - started);
+      }
     }
   }
 

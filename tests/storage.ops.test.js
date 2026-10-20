@@ -571,3 +571,93 @@ test("Storage: what a peer's op must look like", async (t) => {
     assert.strictEqual(storage.vector.other, 3);
   });
 });
+
+test('a snapshot page is joined as one batch', async (t) => {
+  await t.test('one log append, one block, every record announced', async (t2) => {
+    const { storage: a } = await openTemp(t2);
+    const { storage: b } = await openTemp(t2);
+    const ids = [];
+    for (let i = 0; i < 6; i++) ids.push(await a.insert({ i }));
+    await a.delete(ids[5]);
+    const { records } = await a.snapshot();
+    assert.strictEqual(records.length, 6, 'tombstone included');
+    const changes = [];
+    b.on('change', (op, via) => changes.push([op.type, op.seq, via]));
+    const hooks = [];
+    await b.close();
+    const { storage: c } = await openTemp(t2, {
+      hooks: {
+        beforeWrite: (ctx) => void hooks.push(['before', ctx.type, ctx.id]),
+        afterWrite: (ctx, op) => void hooks.push(['after', op.type, op.id]),
+      },
+    });
+    const seen = [];
+    c.on('change', (op, via) => seen.push([op.type, op.seq, via]));
+    await c.mergeSnapshot(records, { via: 'L', from: a.nodeId });
+    assert.deepStrictEqual(
+      seen,
+      records.map((_, i) => ['merge', i + 1, 'L']),
+      'merge ops of this node, one seq each, announced one by one',
+    );
+    assert.strictEqual(hooks.filter(([when]) => when === 'before').length, 6);
+    assert.strictEqual(hooks.filter(([when]) => when === 'after').length, 6);
+    assert.strictEqual(c.log.length, 6);
+    assert.strictEqual((await c.fsi.list(`${c.path}/log/open`)).length, 1, 'one append for the page');
+    const blocks = (await c.fsi.list(`${c.path}/blockchain`)).filter((n) => !n.startsWith('.'));
+    assert.strictEqual(blocks.length, 2, 'the genesis block and one for the page');
+    assert.deepStrictEqual((await c.list()).sort(), ids.slice(0, 5).sort());
+    assert.strictEqual(await c.get(ids[5]), null, 'the tombstone travelled');
+    assert.strictEqual(await c.validate(), true);
+    assert.deepStrictEqual(c.vector, { [`${c.nodeId}@~`]: 6 });
+    // Again: nothing changes, nothing is appended.
+    await c.mergeSnapshot(records, { via: 'L', from: a.nodeId });
+    assert.strictEqual(c.log.length, 6);
+  });
+
+  await t.test('a record sealed here is left alone; the rest of the page lands', async (t2) => {
+    const { storage } = await openTemp(t2, { logger: { warn: () => {}, debug() {}, info() {}, error() {} } });
+    await storage.saveData('sealed', { mine: true }, { encrypted: true });
+    const meta = { clock: { a: [1, 'peer'] }, base: null, deleted: null, counters: {} };
+    await storage.mergeSnapshot([
+      { id: 'sealed', data: { a: 1 }, meta },
+      { id: 'ok', data: { a: 1 }, meta },
+    ]);
+    assert.deepStrictEqual(await storage.get('sealed'), { mine: true });
+    assert.deepStrictEqual(await storage.get('ok'), { a: 1 });
+    assert.strictEqual(storage.log.length, 1);
+  });
+
+  await t.test(
+    'snapshot pages over the catalog: no listing, and a record this node cannot read is left out',
+    async (t2) => {
+      const dir = await createTemp();
+      t2.after(() => cleanupTemp(dir));
+      const first = await syncom.open({ path: dir, logger: false });
+      const ids = [];
+      for (let i = 0; i < 4; i++) ids.push(await first.insert({ i }));
+      await first.close();
+      await fs.writeFile(path.join(dir, 'data', `${ids[1]}.json`), '{not json');
+      const storage = await syncom.open({ path: dir, logger: false });
+      t2.after(() => storage.close().catch(() => {}));
+      const page = await storage.snapshot({ limit: 10 });
+      assert.deepStrictEqual(
+        page.records.map((r) => r.id).sort(),
+        [ids[0], ids[2], ids[3]].sort(),
+        'the unreadable record is left out of the page, not a failure of it',
+      );
+      // Paging: the cursor is an id, the next page starts above it, and a page
+      // that filled up hands back a cursor whether or not more follows.
+      const paged = [];
+      let cursor = null;
+      let pages = 0;
+      do {
+        const next = await storage.snapshot({ cursor, limit: 1 });
+        paged.push(...next.records.map((r) => r.id));
+        cursor = next.cursor;
+        pages++;
+      } while (cursor !== null);
+      assert.deepStrictEqual(paged, [ids[0], ids[2], ids[3]].sort());
+      assert.ok(pages >= 3 && pages <= 5, `${pages} pages`);
+    },
+  );
+});
