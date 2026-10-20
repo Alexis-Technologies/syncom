@@ -620,7 +620,9 @@ const runReadHookQueueTests = async (t, assert, createStorage) => {
       hooks: {
         afterRead: async ({ id }, data) => {
           if (data?.slow) await held;
-          if (data?.echo) echoes.push(storage.update(id, { echoed: true }));
+          // Once per record: a later read of the echoed record queues nothing,
+          // so no write is left running behind the test.
+          if (data?.echo && !data.echoed) echoes.push(storage.update(id, { echoed: true }));
           return undefined;
         },
       },

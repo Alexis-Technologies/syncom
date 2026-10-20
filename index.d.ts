@@ -189,6 +189,8 @@ export interface OpLog {
   seqOf(key: string): number;
   /** Sealed segments on disk. */
   readonly segments: number;
+  /** The newest stamp this log has held since it was opened — what the clock is seeded from. */
+  readonly latestTs: number;
 }
 
 export interface OpLogConstructor {
@@ -850,6 +852,12 @@ export interface SyncManager {
   once<E extends keyof SyncEvents>(event: E, listener: SyncEvents[E]): void;
   off<E extends keyof SyncEvents>(event: E, listener?: SyncEvents[E]): void;
   listenerCount(event: keyof SyncEvents): number;
+  listeners<E extends keyof SyncEvents>(event: E): SyncEvents[E][];
+  eventNames(): (keyof SyncEvents)[];
+  /** Resolves with the next emission's first argument. */
+  toPromise<E extends keyof SyncEvents>(event: E): Promise<Parameters<SyncEvents[E]>[0]>;
+  /** Drops every listener of `event`, or of every event. */
+  clear(event?: keyof SyncEvents): void;
   addNode(nodeData: NodeData): Promise<void>;
   removeNode(url: string): Promise<void>;
   enableNode(url: string, enabled?: boolean): Promise<void>;
@@ -978,6 +986,8 @@ export interface Storage {
   readonly path: string;
   readonly log: OpLog;
   readonly vector: VersionVector;
+  /** The writer built from `open({ logger })`: every level a function, `false` silenced it. */
+  readonly logger: Logger;
   /**
    * The telemetry writer built from `options.telemetry`. Opaque on purpose:
    * its shape is an implementation detail.
@@ -989,6 +999,12 @@ export interface Storage {
   once<E extends keyof StorageEvents>(event: E, listener: StorageEvents[E]): void;
   off<E extends keyof StorageEvents>(event: E, listener?: StorageEvents[E]): void;
   listenerCount(event: keyof StorageEvents): number;
+  listeners<E extends keyof StorageEvents>(event: E): StorageEvents[E][];
+  eventNames(): (keyof StorageEvents)[];
+  /** Resolves with the next emission's first argument. */
+  toPromise<E extends keyof StorageEvents>(event: E): Promise<Parameters<StorageEvents[E]>[0]>;
+  /** Drops every listener of `event`, or of every event. */
+  clear(event?: keyof StorageEvents): void;
 
   saveData(
     id: string,
@@ -1110,6 +1126,11 @@ export interface SyncomRecord {
   on<E extends keyof RecordEvents>(event: E, listener: RecordEvents[E]): void;
   once<E extends keyof RecordEvents>(event: E, listener: RecordEvents[E]): void;
   off<E extends keyof RecordEvents>(event: E, listener?: RecordEvents[E]): void;
+  listenerCount(event: keyof RecordEvents): number;
+  listeners<E extends keyof RecordEvents>(event: E): RecordEvents[E][];
+  eventNames(): (keyof RecordEvents)[];
+  toPromise<E extends keyof RecordEvents>(event: E): Promise<Parameters<RecordEvents[E]>[0]>;
+  clear(event?: keyof RecordEvents): void;
   data(): Promise<unknown>;
   delta(): Record<string, unknown>;
   save(options?: WriteOptions): Promise<void>;
@@ -1119,7 +1140,7 @@ export interface SyncomRecord {
   [field: string]: unknown;
 }
 
-declare class SyncomCollection {
+export declare class SyncomCollection {
   constructor(storage: Storage, name: string);
   readonly name: string;
   insert(data: unknown, options?: StorageDataOptions): Promise<SyncomRecord>;
@@ -1135,7 +1156,7 @@ declare class SyncomCollection {
   record(id: string): Promise<SyncomRecord>;
 }
 
-declare const SyncomRecordCtor: {
+export declare const SyncomRecordCtor: {
   readonly prototype: SyncomRecord;
   new (id: string, storage: Storage): Promise<SyncomRecord>;
 };

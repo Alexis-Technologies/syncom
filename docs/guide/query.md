@@ -11,7 +11,7 @@ const storage = await open({
   schema: { entities: { Task: { index: ['boardId', 'status'], unique: ['key'] } } },
 });
 
-await storage.Task.select({ boardId: 'b1', status: 'open' }).fetch();             // ['T-1']
+await storage.Task.select({ boardId: 'b1', status: 'open' }).fetch();             // [{ id: 'T-1', boardId: 'b1', status: 'open', … }]
 await storage.Task.select({ priority: { $gte: 2 }, tags: 'bug' }).order('priority').fetch();
 await storage.Task.select({ 'assignee.name': 'ada' }).fetch();                     // a dotted path
 await storage.Task.select({ $or: [{ status: 'done' }, { boardId: 'b2' }] }).desc('priority').projection(['key', 'priority']).fetch();

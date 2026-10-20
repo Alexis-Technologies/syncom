@@ -818,8 +818,9 @@ class SyncManager extends Emitter {
     return { pages, records: total };
   }
 
-  // A streamed page: NDJSON, one `{ id, data, meta }` per line, parsed as the
-  // chunks arrive so a page costs one record of memory, not one page.
+  // A streamed page: NDJSON, one `{ id, data, meta }` per line, parsed line
+  // by line as the chunks arrive; the records are collected and handed to
+  // mergeSnapshot as one page — a page is bounded by the host's `pageSize`.
   async #readSnapshot(link, page) {
     if (typeof link.stream !== 'function') {
       throw new Error('The host streamed a snapshot but the link cannot read streams');

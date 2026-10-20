@@ -458,7 +458,7 @@ const storage = await open({
 });
 
 storage.schemaInfo;
-// { version: 2, hash: '9f3c…', previous: null }
+// { version: 2, hash: '9f3c…', previous: null, held: null }
 ```
 
 `schema.json` in the directory remembers the version and hash it last ran.

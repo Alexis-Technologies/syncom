@@ -456,3 +456,14 @@ storage.on('change', (op, via) => {
 });
 expectType<number>(log.segments);
 expectType<Promise<syncom.OpLog>>(new syncom.OpLog('base', { onRoll: (roll) => void roll.floor }));
+
+// E6: what existed at runtime but not in the types
+expectType<syncom.Logger>(storage.logger);
+expectType<number>(log.latestTs);
+expectType<typeof syncom.SyncomCollection>(syncom.Storage.Collection);
+expectType<number>(storage.listenerCount('change'));
+expectType<(keyof syncom.StorageEvents)[]>(storage.eventNames());
+expectType<Promise<syncom.SyncOp>>(storage.toPromise('change'));
+expectType<Promise<string>>(storage.sync.toPromise('error').then((error) => error.url));
+storage.clear('change');
+storage.sync.clear();

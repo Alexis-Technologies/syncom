@@ -44,7 +44,7 @@ const sameVectors = (storages) => {
   return true;
 };
 
-// Quiet = every vector equal and nothing in flight, twice in a row.
+// Quiet = every vector equal and nothing in flight, three polls in a row.
 const settle = async (storages, { timeout = 5000, step = 10 } = {}) => {
   const deadline = Date.now() + timeout;
   let stable = 0;

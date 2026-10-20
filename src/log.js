@@ -7,9 +7,9 @@
 // between "logged" and "written to data/" recoverable).
 //
 // Layout under `<path>/log/`, over fsi (whole-file read/write, no rename):
-//   open/<seq>.json     one file per append batch, never rewritten — a torn
-//                       write can only damage the newest batch, which has not
-//                       been announced to anyone yet
+//   open/<seq>.json     one file per append batch, rewritten only by a scrub
+//                       — a torn write can only damage the newest batch,
+//                       which has not been announced to anyone yet
 //   seg-<from>.json     sealed segments: the open files rolled together once
 //                       enough of them accumulate
 //   index.json          { epoch, floor, next, vector, segments } — a summary;
@@ -462,10 +462,11 @@ class OpLog {
    * `value` — in memory and in the files that hold them, flagging each
    * `scrubbed`; the op keeps its position, origin, seq and stamp, so the
    * vector and a resuming peer are unaffected (a scrubbed `write` applies
-   * as a no-op). Returns how many entries. A file is rewritten in place:
-   * a crash in the middle tears it, and a peer resuming through it
-   * bootstraps instead — the price of forgetting over a backend with no
-   * rename.
+   * as a no-op). Returns how many entries. A file is rewritten in place: a
+   * crash in the middle tears it — a torn segment is skipped at the next
+   * open (what it held is gone from `since`, and a peer resuming through it
+   * bootstraps), a torn open file is dropped — the price of forgetting over
+   * a backend with no rename.
    */
   scrub(id) {
     return this.#serialize(() => {

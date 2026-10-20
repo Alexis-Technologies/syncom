@@ -1,8 +1,9 @@
 # API reference
 
-Everything below is exported from the package root, except two subpaths: the
-wrpc adapter, [`@alexify/syncom/wrpc`](#wrpc-adapter), and the smart contracts,
-[`@alexify/syncom/contracts`](#contracts-subpath). The browser build exports
+Everything below is exported from the package root, except three subpaths: the
+wrpc adapter, [`@alexify/syncom/wrpc`](#wrpc-adapter), the smart contracts,
+[`@alexify/syncom/contracts`](#contracts-subpath), and the IndexedDB backend,
+[`@alexify/syncom/idb`](#backends) (`createIdbFsi`). The browser build exports
 the same names — see [Browser](../guide/browser) for the three signatures that
 differ.
 
@@ -39,7 +40,7 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 | `has(id)` | `Promise<boolean>` | `false` for a tombstone |
 | `list()` | `Promise<string[]>` | Every live id, sorted — from the catalog, no I/O |
 | `check(entity, data)` | `Promise<unknown>` | Runs the entity's validator as a write would and returns its value; rejects with `ValidationError`; writes nothing |
-| `migrate({ entities, batch }?)` | `Promise<{ migrated, counters }>` | Rewrites records of an older schema version through the lens; idempotent (see [Reading across versions](../guide/storage#reading-across-versions)) |
+| `migrate({ entities, batch, actor }?)` | `Promise<{ migrated, counters }>` | Rewrites records of an older schema version through the lens; idempotent; `actor` rides on the ops it writes (see [Reading across versions](../guide/storage#reading-across-versions)) |
 | `set(id, data, options?)` | `Promise<void>` | Replaces the record (a `write` op); keeps `$type` unless the data names the same. Every writer rejects an invalid id with `TypeError` `code: 'INVALID_ID'` |
 | `update(id, delta, { actor }?)` | `Promise<void>` | Sets the listed fields (a `set` op); throws if absent, or on a counter field |
 | `inc(id, key, value = 1, { actor }?)` | `Promise<void>` | Adds to a counter field (an `inc` op); throws on a register field |
@@ -62,7 +63,8 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 
 Properties: `schema`, `schemaInfo` (`{ version, hash, previous, held }`,
 `null` without a schema — see [Schema versions](../guide/storage#schema-versions)),
-`sync`, `nodeId`, `path`, `log`, `vector`, `logger`, `telemetry` (the writer
+`sync`, `nodeId`, `path`, `log`, `vector`, `logger` (the writer built from
+`open({ logger })` — `debug`/`info`/`warn`/`error`), `telemetry` (the writer
 built from the option — opaque).
 Statics: `Storage.Collection`, `Storage.Record`, `Storage.generateId()` — the
 default `getId`, synchronous in both halves.
@@ -303,7 +305,9 @@ server, OPFS in the browser — as those five functions, and:
 | `createMemoryFsi()` | A backend in memory: `size`, `dump()`; two storages opened over one share it |
 | `loadKeys(base, { fsi })`, `new Blockchain(base, { fsi })`, `new OpLog(base, { fsi })` | The pieces take the backend too |
 
-`@alexify/syncom/idb` is the IndexedDB backend (see [Browser](../guide/browser)).
+`@alexify/syncom/idb` is the IndexedDB backend: `createIdbFsi({ name, store,
+indexedDB }?)` returns an fsi over one object store, with a `close()` of its
+own (see [Browser](../guide/browser)).
 
 ## wrpc adapter
 

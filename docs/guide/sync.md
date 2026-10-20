@@ -280,7 +280,7 @@ await storage.sync.addNode({ url: 'wss://peer/api', token: 'secret', scopes: ['*
 await storage.sync.enableNode('wss://peer/api', false); // keep, but do not dial
 await storage.sync.removeNode('wss://peer/api');
 storage.sync.listNodes();
-// [{ url, token, scopes, enabled, lastSync, cursor, remote: { id, epoch } }]
+// [{ url, token, scopes, enabled, lastSync, cursor, remote: { id, epoch, schema } }]
 ```
 
 Each node is a file under `<path>/remote/`, named by its percent-encoded url,

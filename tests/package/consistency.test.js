@@ -127,11 +127,16 @@ test('every runtime export is declared in the types', () => {
     for (const name of runtime) {
       const declared =
         new RegExp(`export (?:declare )?(?:function|const|class) ${name}\\b`).test(source) ||
-        new RegExp(`^\\s*${name},?$`, 'm').test(source);
+        new RegExp(`^\\s*${name},?$`, 'm').test(source) ||
+        new RegExp(`export \\{[^}]*\\b${name}\\b[^}]*\\} from`).test(source);
       assert.ok(declared, `${entry} exports ${name}, but ${types} does not declare it`);
     }
   };
   check('index.js', 'index.d.ts');
+  // The subpaths: their runtime surface is small and loads without a browser.
+  check('wrpc.js', 'wrpc.d.ts');
+  check('contracts.js', 'contracts.d.ts');
+  check('idb.js', 'idb.d.ts');
   // browser.js is only loadable under OPFS/WebCrypto globals, so compare its
   // barrel's names against the node one instead of requiring it here.
   check('index.js', 'browser.d.ts');

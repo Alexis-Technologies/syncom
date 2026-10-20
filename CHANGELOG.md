@@ -274,6 +274,17 @@ section until the first publish; everything below lands there on release day.
 
 ### Fixed
 
+- **Docs, types and comments that had drifted from the code.** The API
+  reference named two subpaths (there are three; `createIdbFsi` now has a
+  line), `migrate()` without its `actor`, `fetch()` returning ids (rows),
+  `schemaInfo` without `held`, `remote` without `schema`, the write hooks
+  without `purge`; `storage.logger`, `OpLog.latestTs` and the `Collection`
+  and `Record` constructor types existed at runtime but not in `index.d.ts`;
+  the package consistency test now checks the subpaths' exports against
+  their types too. Comments that said the opposite of the code are fixed
+  (`packOps` is the wire shape, not the log's; a streamed snapshot page is
+  collected whole; a torn open log file is dropped, not bootstrapped; the
+  mesh helper waits three polls).
 - **What an operator could not read at runtime.** `storage.stats()` (queue,
   cache, catalog, log, chain, lock — from memory), `peers()[i].lastError`,
   `sync.hosted()` (every live `changes` feed on a host) and a `log` event

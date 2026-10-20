@@ -114,7 +114,8 @@ docs/                     VitePress site
 - **`packOps` is 14 positional slots, both halves together.** `v` (13) and
   `actor` (14) were appended; a reader of fewer slots ignores the rest, a
   reader of more takes an absent slot as null. Append, never reorder — the
-  shape is in every peer's log.
+  shape is on the wire between every pair of peers (the log itself stores
+  keyed `{ seq, op }` JSON; `packOps` is for `push` and `changes` only).
 - **Every write is an op, and a field is a register OR a counter.** `insert`/
   `set` → `write`, `update`/`swap`/`record.save` → `set`, `inc` → `inc`,
   `delete` → tombstone. Registers are last-writer-wins by `(ts, origin)`;

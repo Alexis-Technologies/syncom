@@ -11,8 +11,8 @@ const diff = (source, target) => {
     if (!sourceKeys.has(key)) {
       delta[key] = target[key];
     } else if (Array.isArray(target[key]) || target[key] instanceof Set) {
-      const sourceArr = Array.isArray(source[key]) ? source[key] : source[key];
-      const targetArr = Array.isArray(target[key]) ? target[key] : target[key];
+      const sourceArr = source[key];
+      const targetArr = target[key];
       const sourceSet = new Set(sourceArr);
       const targetSet = new Set(targetArr);
       const diffSet = new Set([...targetSet].filter((x) => !sourceSet.has(x)));
@@ -51,7 +51,7 @@ const merge = (source, delta) => {
     }
 
     if (Array.isArray(delta[key]) || delta[key] instanceof Set) {
-      const sourceSet = new Set(Array.isArray(result[key]) ? result[key] : result[key] || []);
+      const sourceSet = new Set(result[key] || []);
       const deltaSet = new Set(Array.isArray(delta[key]) ? delta[key] : delta[key]);
       result[key] = Array.from(new Set([...sourceSet, ...deltaSet]));
     } else if (typeof delta[key] === 'object' && delta[key] !== null) {

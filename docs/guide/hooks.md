@@ -61,7 +61,7 @@ silently never runs.
 
 `ctx` for a write is `{ type, id, data?, key?, value?, meta?, current,
 encrypted, source, via, from, v, actor }`: `type` is the op type (`write`,
-`set`, `inc`, `delete`, `merge`), `data` is the whole record for a `write`
+`set`, `inc`, `delete`, `purge`, `merge`), `data` is the whole record for a `write`
 and the delta for a `set`, `key`/`value` belong to an `inc`, `current` is the
 record as it is now (`null` when absent or deleted — read it, do not change
 it), `encrypted` says whether the write is sealed for this node, `source` is

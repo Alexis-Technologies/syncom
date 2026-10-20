@@ -27,8 +27,12 @@ Three parties, three levels of trust:
   makes about itself; ops are not signed. It cannot move another node's
   version vector (an `advance` is adopted only from the host a subscription is
   read from, and only that host's own), cannot move another node's clock more
-  than `sync.maxSkew` ahead, and cannot reach a property name, a file name or
-  a type the engine does not index records by.
+  than `sync.maxSkew` ahead, cannot make a dialer step over a page it could
+  not apply (the page is retried from the saved cursor, then the peer is
+  `stuck`), cannot grow a dialer's memory through the outbox
+  (`sync.maxOutbox`), and cannot reach a property name, a file name or a type
+  the engine does not index records by. What events and hooks say about a
+  peer is `{ url, node }` — never the link, the client or the token.
 - **Anyone else** — a peer that fails `hello` — gets nothing but the refusal.
 
 ## Scope
