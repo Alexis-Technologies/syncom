@@ -115,6 +115,20 @@ docs/                     VitePress site
 - **Log first, then data.** `OpLog.append` resolves before the record file is
   written and before the op is announced; a reopen replays the unsealed tail.
   A node's own seq must never repeat — it is recovered from the log's vector.
+  The storage opens its log with `sealApplied: true` and calls
+  `log.applied(from, to)` after `#writeEntry`/`#persistBatch`; a roll then
+  seals nothing from the oldest batch not yet applied onwards. A new path
+  that appends must mark what it applied, or the tail grows forever.
+- **A failed page is a break in the stream.** `#receive` runs pages one after
+  another per peer (`peer.inbound`), numbered by `peer.feed`; a rejection goes
+  to `#pageFailed`, which closes the feed (pages of the old feed are dropped),
+  reports `PAGE_FAILED` with the saved cursor, and resubscribes from it —
+  `STUCK` after `MAX_PAGE_RETRIES`. Never move `node.cursor` past a page that
+  did not land, and never catch inside `#receive` to "keep going".
+- **Data crosses the boundary as JSON copies.** `#commit` copies `payload.data`/
+  `payload.meta` (`asJson`) before anything keeps a reference; `#read` and
+  `Cursor.fetch()` hand out copies. `getCachedData()` and `snapshot()` are the
+  raw objects on purpose. Do not return `entry.data` from a public method.
 - **Stamps come from `#clock.now()` after the clock has observed everything
   the node holds for the record.** `[COMMIT]` in `src/storage.js` does that
   (`latestClock` over the entry's meta, and the joined meta for a `merge`) and
@@ -197,7 +211,9 @@ docs/                     VitePress site
   waits for it. Hook calls live in `#commit`, `get`, `#applyRemote`,
   `#connect` and `#bootstrap` only; there is deliberately no hook on the ops
   that leave for a peer (a withheld op is a gap that stops that stream —
-  scopes are the per-peer filter). Every event leaves through `notify()`:
+  scopes are the per-peer filter). Only the hooks that run inside the
+  mutation queue go through `#hook` and its `#inHook` guard; `beforeRead`/
+  `afterRead` call `runHook` directly — a write from a read hook queues. Every event leaves through `notify()`:
   never `await this.emit(...)`, never emit `error` any other way (the Emitter
   throws on an unheard `error`, and that throw used to fail a push before the
   vector moved). A remote op a `beforeApply` skipped is still appended, with

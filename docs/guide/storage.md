@@ -70,6 +70,10 @@ const ok = await storage.swap(id, { hits: 2 }, { hits: 1 });
 // ok === false if hits was no longer 1 — nothing was written
 ```
 
+The comparison runs inside the mutation queue, against the record as it reads
+(the lens applied, the read hooks not run), so two concurrent swaps on the same
+expectation cannot both pass. An absent record rejects.
+
 ### Purge
 
 `delete()` leaves a tombstone, and the record's history stays in the log —
@@ -168,8 +172,12 @@ catalog is rebuilt from one scan of `data/`. It is derived state: delete the
 file and the next open rebuilds it.
 
 The **cache** holds the last `cache.max` entries read or written, evicting
-the oldest; a record with a live `Record` is never evicted. `getCachedData()`
-reads it raw. A cold read re-verifies the record against the chain block
+the oldest; a record with a live `Record` is never evicted. What leaves the
+storage leaves as a **copy**, as JSON — the value `get()` returns, a cursor's
+rows, a `Record`'s data — and what comes in (`set()`, `update()`) is copied the
+same way, so editing an object on either side of the call changes nothing in
+the cache, the log or the next write's base. `getCachedData()` and `snapshot()`
+hand out the raw objects, for callers that know not to touch them. A cold read re-verifies the record against the chain block
 that committed it; `integrity: 'lazy'` trusts the file instead — the choice
 for a browser rebuilding a large catalog, where that verification is one
 hash and two reads per record. `storage.validate(id, data, block)` is still

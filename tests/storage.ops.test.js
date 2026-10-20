@@ -210,28 +210,77 @@ test('Storage replication model', async (t) => {
     );
   });
 
-  await t.test('identity, seq and vector survive a reopen; the log tail is replayed', async (t2) => {
+  await t.test('identity, seq and vector survive a reopen; what was logged but not written is replayed', async (t2) => {
     const dir = await createTemp();
     t2.after(() => cleanupTemp(dir));
-    const first = await syncom.open({ path: dir, logger: false });
+    // A backend whose record writes fail on demand: the op is in the log, the
+    // record is not — what a crash between the two leaves behind.
+    const base = require('../src/fsi.js');
+    let failing = null;
+    const fsi = {
+      ...base,
+      write: async (dir2, name, content, options) => {
+        if (failing !== null && dir2.endsWith('data') && name === `${failing}.json`) throw new Error('ENOSPC');
+        return base.write(dir2, name, content, options);
+      },
+    };
+    const first = await syncom.open({ path: dir, logger: false, fsi, sync: { log: { rollAfter: 1 } } });
     const id = await first.insert({ n: 1 });
+    failing = 'lost';
+    await assert.rejects(() => first.set('lost', { p: 1 }), /ENOSPC/);
+    failing = null;
     await first.applyRemote([remoteOp('peer', 1, 'write', 'r', { data: { p: 1 } })]);
     const { nodeId } = first;
+    assert.ok(
+      first.log.tail().some((entry) => entry.op.id === 'lost'),
+      'a batch whose record write failed is never sealed, whatever lands after it',
+    );
     await first.close();
     await assert.rejects(() => first.insert({ n: 2 }), /closed/);
+    assert.strictEqual(await fsi.exists(path.join(dir, 'data'), 'lost.json'), false);
 
-    // Crash between "logged" and "written": the record file is gone.
-    await fs.rm(path.join(dir, 'data', `${id}.json`));
-
-    const second = await syncom.open({ path: dir, logger: false });
+    const second = await syncom.open({ path: dir, logger: false, fsi });
     assert.strictEqual(second.nodeId, nodeId);
-    assert.deepStrictEqual(second.vector, { [nodeId]: 1, peer: 1 });
-    assert.deepStrictEqual(await second.get(id), { n: 1 }, 'replayed from the log');
+    assert.deepStrictEqual(second.vector, { [nodeId]: 2, peer: 1 });
+    assert.deepStrictEqual(await second.get('lost'), { p: 1 }, 'replayed from the log');
+    assert.deepStrictEqual(await second.get(id), { n: 1 });
+    assert.deepStrictEqual(await second.get('r'), { p: 1 });
     const ops = [];
     second.on('change', (op) => ops.push(op));
     await second.insert({ n: 3 });
-    assert.strictEqual(ops[0].seq, 2, 'the own seq continues, never repeats');
+    assert.strictEqual(ops[0].seq, 3, 'the own seq continues, never repeats');
     assert.strictEqual(await second.validate(), true);
+    await second.close();
+    const third = await syncom.open({ path: dir, logger: false, fsi });
+    assert.strictEqual(third.log.tail().length, 0, 'once every record is written, a clean close seals everything');
+    await third.close();
+  });
+
+  await t.test('a record this node cannot read does not stop a page: its op is skipped and reported', async (t2) => {
+    const dir = await createTemp();
+    t2.after(() => cleanupTemp(dir));
+    const first = await syncom.open({ path: dir, logger: false });
+    const bad = await first.insert({ n: 1 });
+    await first.close();
+    await fs.writeFile(path.join(dir, 'data', `${bad}.json`), '{not json');
+    const storage = await syncom.open({ path: dir, logger: false });
+    t2.after(() => storage.close().catch(() => {}));
+    const errors = [];
+    storage.on('error', (error) => errors.push(error));
+    const result = await storage.applyRemote([
+      remoteOp('peer', 1, 'set', bad, { data: { n: 2 } }),
+      remoteOp('peer', 2, 'write', 'fine', { data: { n: 3 } }),
+    ]);
+    assert.deepStrictEqual(result, { applied: 2, skipped: 1, duplicates: 0, gaps: 0, malformed: 0 });
+    assert.strictEqual(errors.length, 1);
+    assert.strictEqual(errors[0].code, 'OP_UNREADABLE');
+    assert.strictEqual(errors[0].op.id, bad);
+    assert.ok(errors[0].cause instanceof Error);
+    assert.deepStrictEqual(await storage.get('fine'), { n: 3 });
+    assert.strictEqual(storage.vector.peer, 2, 'the stream went on');
+    const logged = storage.log.since(undefined).find((entry) => entry.op.origin === 'peer' && entry.op.id === bad);
+    assert.strictEqual(logged.skipped, true, 'logged and flagged, so a replay leaves it alone too');
+    await assert.rejects(() => storage.get(bad), /JSON|token|invalid/i);
   });
 
   await t.test('a local write outranks a snapshot joined from a peer whose clock is ahead', async (t2) => {

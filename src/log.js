@@ -62,6 +62,10 @@ class OpLog {
   #droppedHeld = 0;
   #torn = new Set();
   #writes = Promise.resolve();
+  // Batches appended whose records may not be written yet: first seq → last
+  // seq. Only kept under `sealApplied`; a roll stops short of the oldest.
+  #pending = new Map();
+  #sealApplied;
 
   constructor(basePath, options = {}) {
     this.#path = `${basePath}/log`;
@@ -71,6 +75,11 @@ class OpLog {
     this.#retention = { ops: DEFAULT_RETENTION_OPS, ...options.retention };
     this.#log = options.logger ?? null;
     this.#otel = createTelemetry(options.telemetry);
+    // The storage asks for `sealApplied`: a roll then seals only the batches
+    // it has marked applied (see `applied`), so an op whose record write
+    // failed stays in the open files, replayed at every reopen until it
+    // lands. A log on its own seals everything, as before.
+    this.#sealApplied = options.sealApplied === true;
     return this.#init();
   }
 
@@ -137,6 +146,12 @@ class OpLog {
       }
       this.#adopt(parsed.entries);
       this.#openFiles.push(name);
+      // Nothing says these records were written: pending until the owner's
+      // replay says so.
+      if (this.#sealApplied && parsed.entries.length > 0) {
+        const seqs = parsed.entries.map((entry) => entry.seq).filter(Number.isInteger);
+        if (seqs.length > 0) this.#pending.set(Math.min(...seqs), Math.max(...seqs));
+      }
     }
   }
 
@@ -194,6 +209,20 @@ class OpLog {
     return this.#entries.length;
   }
 
+  /**
+   * The batches within `from..to` are reflected in the records. With
+   * `sealApplied` a roll seals nothing from the oldest batch not yet applied
+   * onwards, so the tail a reopen replays always holds every batch whose
+   * records may not have been written: the one a crash interrupted (which
+   * used to be sealed by the roll its own append triggered, before its
+   * records existed) and one whose record write failed while later writes
+   * went through.
+   */
+  applied(from, to = from) {
+    if (!Number.isInteger(from) || !Number.isInteger(to)) return;
+    for (const [first, last] of this.#pending) if (first >= from && last <= to) this.#pending.delete(first);
+  }
+
   /** The id of the newest entry; resuming from it replays nothing. */
   get lastEventId() {
     return formatEventId(this.#epoch, this.#next - 1);
@@ -241,17 +270,21 @@ class OpLog {
         this.#observe(op);
       }
       this.#openFiles.push(name);
+      if (this.#sealApplied) this.#pending.set(entries[0].seq, entries[entries.length - 1].seq);
       if (this.#openFiles.length >= this.#rollAfter) await this.#roll();
       return entries;
     });
   }
 
   // Sealing: write the segment, then the index, then remove the open files.
-  // Any crash in between leaves duplicates, which #adopt tolerates.
+  // Any crash in between leaves duplicates, which #adopt tolerates. Under
+  // `sealApplied` only the batches marked applied go; a batch is applied
+  // whole, so the cut never falls inside an open file.
   async #roll() {
     if (this.#openFiles.length === 0) return;
     const sealedFrom = this.#segments.length > 0 ? this.#segments[this.#segments.length - 1].to + 1 : this.#floor;
-    const entries = this.#entries.filter((entry) => entry.seq >= sealedFrom);
+    const limit = this.#sealApplied && this.#pending.size > 0 ? Math.min(...this.#pending.keys()) - 1 : Infinity;
+    const entries = this.#entries.filter((entry) => entry.seq >= sealedFrom && entry.seq <= limit);
     if (entries.length === 0) return;
     const otel = this.#otel;
     if (!otel.enabled) return void (await this.#seal(entries));
@@ -273,9 +306,15 @@ class OpLog {
     this.#segments.push({ name, from, to: entries[entries.length - 1].seq, count: entries.length });
     const dropped = await this.#compact();
     await this.#writeIndex();
-    const files = this.#openFiles;
-    this.#openFiles = [];
-    for (const file of files) await this.#fsi.remove(this.#openPath, file);
+    // An open file is named by its first seq and holds one batch: sealed
+    // with the segment when that seq is inside it, kept otherwise.
+    const to = entries[entries.length - 1].seq;
+    const kept = [];
+    for (const file of this.#openFiles) {
+      if (Number(file.slice(0, -5)) <= to) await this.#fsi.remove(this.#openPath, file);
+      else kept.push(file);
+    }
+    this.#openFiles = kept;
     return { dropped };
   }
 
@@ -459,8 +498,12 @@ class OpLog {
     return this.#entries.filter((entry) => entry.seq > sealedTo);
   }
 
+  /** Seals what can be sealed and writes the index: a reopen after a clean close replays nothing it need not. */
   close() {
-    return this.#serialize(() => this.#writeIndex());
+    return this.#serialize(async () => {
+      await this.#roll();
+      await this.#writeIndex();
+    });
   }
 }
 

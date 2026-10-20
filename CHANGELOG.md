@@ -270,6 +270,42 @@ section until the first publish; everything below lands there on release day.
 
 ### Fixed
 
+- **A roll could seal an op before its record was written.** `OpLog.append`
+  rolled after writing the new batch, sealing it out of the tail a reopen
+  replays — a crash between the log append and the record write left an op
+  in the log and the vector that no replay ever applied. The storage now
+  opens its log with `sealApplied` and marks each batch `applied` once its
+  records are written; a roll stops short of the oldest batch still pending,
+  so a crash, or a record write that failed while later writes went through,
+  is replayed at the next open. `close()` seals what is applied, so a clean
+  reopen replays nothing.
+- **A page the dialer could not apply was stepped over.** A `beforeApply`
+  that threw, or a record file this node could not read, failed the page and
+  the next page moved the cursor past it: its ops were lost to this node for
+  good, reported only as `gaps`. Pages now run one after another per peer, a
+  failed page closes the subscription and reopens it from the last saved
+  cursor (`error` `code: 'PAGE_FAILED'`, with `cursor` and `attempt`), and
+  the third failure in a row leaves the peer `stuck` (`code: 'STUCK'`,
+  `peers()[i].stuck`) rather than silently behind. `gaps > 0` on a page is
+  logged (`sync.gaps`).
+- **A record this node cannot read no longer poisons a page.** An op on a
+  record whose file is torn or fails its integrity check is skipped like a
+  `beforeApply` `false` — logged, relayed, replay-safe — and reported
+  (`error` `code: 'OP_UNREADABLE'`, metric reason `unreadable`); before, the
+  whole push failed and a host's dialer offered the same page at every hello.
+- **`swap()` compared outside the mutation queue**, so two concurrent swaps
+  on one expectation could both pass; the comparison now runs inside the
+  queue (`expect` on the commit), against the record as it reads.
+- **Data was shared by reference across the boundary.** `get()` returned the
+  cached object, `set()`/`update()` kept the caller's; editing either changed
+  the cache, the in-memory log entry (later written to disk by a roll or a
+  scrub) and the base of the next write, without an op. Everything now
+  crosses as a JSON copy — `get()`, a cursor's rows, the write payloads.
+  `getCachedData()` and `snapshot()` stay raw.
+- **A pending read hook blocked every write.** The guard against writes from
+  inside a hook counted `beforeRead`/`afterRead` too, so any `set()` that ran
+  while a read hook was in flight was refused. Read hooks run outside the
+  queue; a write from one simply queues.
 - A peer's op refused by the register/counter rule no longer fails the whole
   push when nobody listens for `error`: the emit is guarded, the vector
   advances, and the peer stops offering the same page on every hello.

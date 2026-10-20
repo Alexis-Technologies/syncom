@@ -526,3 +526,54 @@ test('the private key is written owner-only where the backend has permissions', 
   const open = await fsp.stat(nodePath.join(tempDir, 'keys', 'public.pem'));
   assert.notStrictEqual(open.mode & 0o777, 0o600, 'the public half keeps the default');
 });
+
+test('what crosses the boundary is a copy', async (t) => {
+  const tempDir = await createTemp();
+  t.after(() => cleanupTemp(tempDir));
+  const storage = await syncom.open({ path: tempDir, logger: false });
+  t.after(() => storage.close());
+  const input = { title: 'a', tags: ['x'], nested: { n: 1 } };
+  const id = await storage.insert(input);
+  input.tags.push('y');
+  input.nested.n = 2;
+  input.title = 'b';
+  assert.deepStrictEqual(await storage.get(id), { title: 'a', tags: ['x'], nested: { n: 1 } }, 'set() took a copy');
+  const out = await storage.get(id);
+  out.tags.push('z');
+  out.nested.n = 3;
+  assert.deepStrictEqual(await storage.get(id), { title: 'a', tags: ['x'], nested: { n: 1 } }, 'get() handed a copy');
+  assert.deepStrictEqual(storage.log.since(undefined)[0].op.data, { title: 'a', tags: ['x'], nested: { n: 1 } });
+  const delta = { nested: { n: 5 } };
+  await storage.update(id, delta);
+  delta.nested.n = 6;
+  assert.deepStrictEqual((await storage.get(id)).nested, { n: 5 });
+  // A cursor's rows are copies too; the cache is the raw object.
+  const typed = await syncom.open({ path: `${tempDir}-typed`, logger: false, schema: { entities: { Post: {} } } });
+  t.after(() => typed.close());
+  t.after(() => cleanupTemp(`${tempDir}-typed`));
+  const post = await typed.Post.insert({ tags: ['a'] });
+  const [row] = await typed.Post.select({}).fetch();
+  row.tags.push('b');
+  assert.deepStrictEqual((await typed.get(post.id)).tags, ['a']);
+  assert.deepStrictEqual(typed.getCachedData(post.id).tags, ['a']);
+});
+
+test('swap compares inside the queue: two swaps on one expectation cannot both pass', async (t) => {
+  const tempDir = await createTemp();
+  t.after(() => cleanupTemp(tempDir));
+  const storage = await syncom.open({ path: tempDir, logger: false });
+  t.after(() => storage.close());
+  const id = await storage.insert({ hits: 1 });
+  const results = await Promise.all([
+    storage.swap(id, { hits: 2, by: 'a' }, { hits: 1 }),
+    storage.swap(id, { hits: 2, by: 'b' }, { hits: 1 }),
+    storage.swap(id, { hits: 2, by: 'c' }, { hits: 1 }),
+  ]);
+  assert.deepStrictEqual(results.filter(Boolean).length, 1, 'exactly one won');
+  const winner = results.indexOf(true);
+  assert.deepStrictEqual(await storage.get(id), { hits: 2, by: 'abc'[winner] });
+  await assert.rejects(() => storage.swap('missing', { a: 1 }, { a: 0 }), /not found/);
+  await assert.rejects(() => storage.swap(id, 'x', { a: 0 }), TypeError);
+  await assert.rejects(() => storage.swap(id, { a: 1 }, null), TypeError);
+  assert.strictEqual(storage.log.length, 2, 'the losing swaps wrote nothing');
+});

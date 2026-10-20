@@ -33,6 +33,8 @@ const PROTOCOL = 1;
 const GLOBAL_SCOPE = '*';
 const DEFAULT_PAGE_SIZE = 500;
 const DEFAULT_PAGE_BYTES = 4 << 20;
+// A page that fails this many times in a row leaves its peer `stuck`.
+const MAX_PAGE_RETRIES = 3;
 const TRACKED = Symbol.for('wrpc.tracked');
 
 // The hooks a manager accepts (`open({ sync: { hooks } })`). There is no
@@ -300,6 +302,7 @@ class SyncManager extends Emitter {
       cursor: peer.node.cursor,
       lastSync: peer.node.lastSync,
       pending: peer.outbox.length + (peer.pushing ? 1 : 0),
+      stuck: peer.stuck,
     }));
   }
 
@@ -317,6 +320,12 @@ class SyncManager extends Emitter {
       handshaking: null,
       closed: false,
       handlers: null,
+      // Inbound pages run one after another; `feed` numbers the
+      // subscription they came on, so pages of a closed one are dropped.
+      inbound: Promise.resolve(),
+      feed: 0,
+      failures: 0,
+      stuck: false,
     };
     this.#peers.set(node.url, peer);
     Promise.resolve()
@@ -515,12 +524,19 @@ class SyncManager extends Emitter {
 
   #subscribe(peer) {
     const { node, link } = peer;
+    const feed = ++peer.feed;
     peer.subscription = link.subscribe(
       'syncom/changes',
       { scopes: node.scopes },
       {
         lastEventId: node.cursor ?? undefined,
-        onData: (value, eventId) => void this.#receive(peer, value, eventId).catch((error) => this.#fail(peer, error)),
+        // One page after another: a page that fails must stop the ones
+        // behind it from moving the cursor past it (see #pageFailed).
+        onData: (value, eventId) => {
+          peer.inbound = peer.inbound
+            .then(() => this.#receive(peer, value, eventId, feed))
+            .catch((error) => this.#pageFailed(peer, feed, error));
+        },
         onError: (error) => {
           peer.subscription = null;
           if (peer.closed) return;
@@ -540,9 +556,44 @@ class SyncManager extends Emitter {
     );
   }
 
-  async #receive(peer, value, eventId) {
-    if (peer.closed || !value) return;
-    if (value.bootstrap) return void (await this.#bootstrap(peer));
+  // A page that could not be applied is a break in the stream, not a page to
+  // step over: the subscription is closed (its queued pages are dropped —
+  // they carry another feed number) and reopened from the last cursor that
+  // was saved, so the page comes again. Bounded: a page that fails
+  // MAX_PAGE_RETRIES times in a row leaves the peer `stuck` — reported, and
+  // the application's to resolve (enableNode off and on, or a bootstrap).
+  #pageFailed(peer, feed, error) {
+    if (peer.closed || feed !== peer.feed) return;
+    peer.failures++;
+    peer.subscription?.unsubscribe?.();
+    peer.subscription = null;
+    const stuck = peer.failures >= MAX_PAGE_RETRIES;
+    const message = `Page after ${peer.node.cursor ?? 'the start'} failed (${error?.message ?? error})`;
+    const reported = Object.assign(new Error(message, { cause: error }), {
+      code: stuck ? 'STUCK' : 'PAGE_FAILED',
+      cursor: peer.node.cursor ?? null,
+      attempt: peer.failures,
+    });
+    this.#fail(peer, reported);
+    if (stuck) {
+      peer.stuck = true;
+      return;
+    }
+    if (peer.connected) this.#subscribe(peer);
+  }
+
+  async #receive(peer, value, eventId, feed) {
+    if (peer.closed || feed !== peer.feed || !value) return;
+    if (value.bootstrap) {
+      // Not a page: a bootstrap the hook refused or that failed is reported
+      // as it is, and asked again at the next handshake — the feed has ended.
+      try {
+        await this.#bootstrap(peer);
+      } catch (error) {
+        this.#fail(peer, error);
+      }
+      return;
+    }
     const ops = unpackOps(value.ops);
     // The host's own `advance` ops, received on its feed, move this node's
     // vector (their merges came down the same feed); nothing else does.
@@ -556,6 +607,13 @@ class SyncManager extends Emitter {
     // this page as duplicates — better than a registry write racing whoever
     // reopens the directory next.
     if (peer.closed) return;
+    peer.failures = 0;
+    peer.stuck = false;
+    if (result.gaps > 0) {
+      // Ops of a stream this node is behind on: they are lost to it unless
+      // the stream is replayed, and the counter alone is easy to miss.
+      this.#storage.logger.warn({ event: 'sync.gaps', url: peer.node.url, gaps: result.gaps, cursor: eventId });
+    }
     if (eventId) peer.node.cursor = eventId;
     peer.node.lastSync = Date.now();
     await this.#saveNode(peer.node);

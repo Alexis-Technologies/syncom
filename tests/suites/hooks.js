@@ -604,6 +604,39 @@ const runHooksTests = async (t, assert, createStorage) => {
     await storage.update(id, { n: 2 });
     assert.deepStrictEqual(order, ['beforeWrite', 'afterWrite', 'update', 'change']);
   });
+  await runReadHookQueueTests(t, assert, createStorage);
 };
 
 module.exports = { runHooksTests, remoteOp, createMesh, settle, waitUntil, MemoryLink };
+
+const runReadHookQueueTests = async (t, assert, createStorage) => {
+  await t.test('read hooks run outside the queue: a write from one queues, a slow one holds no write', async (t2) => {
+    let release = null;
+    const held = new Promise((resolve) => {
+      release = resolve;
+    });
+    const echoes = [];
+    const storage = await createStorage(t2, 'A', {
+      hooks: {
+        afterRead: async ({ id }, data) => {
+          if (data?.slow) await held;
+          if (data?.echo) echoes.push(storage.update(id, { echoed: true }));
+          return undefined;
+        },
+      },
+    });
+    const slow = await storage.insert({ slow: true });
+    const other = await storage.insert({ n: 1 });
+    const reading = storage.get(slow);
+    // A write while a read hook is pending is not "a write from inside a hook".
+    await storage.update(other, { n: 2 });
+    assert.deepStrictEqual(await storage.get(other), { n: 2 });
+    release();
+    assert.deepStrictEqual(await reading, { slow: true });
+    // A write issued from a read hook lands after the read that issued it.
+    const echo = await storage.insert({ echo: true });
+    assert.deepStrictEqual(await storage.get(echo), { echo: true });
+    await Promise.all(echoes);
+    assert.deepStrictEqual(await storage.get(echo), { echo: true, echoed: true });
+  });
+};

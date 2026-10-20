@@ -510,12 +510,25 @@ test('Storage telemetry', async (t) => {
   await t.test('a replayed tail is spanned on reopen', async (t2) => {
     const { tracer, named } = createTracing();
     const { meter, points } = createMetrics();
-    const { dir, storage: first } = await openTemp(t2);
-    const id = await first.insert({ n: 1 });
+    // Crash between "logged" and "written": the backend fails the record
+    // write, so the op is in the log and nothing else — the batch a clean
+    // close must not seal.
+    const base = require('../src/fsi.js');
+    let failing = false;
+    const fsi = {
+      ...base,
+      write: async (dir2, name, content, options) => {
+        if (failing && dir2.endsWith('data')) throw new Error('ENOSPC');
+        return base.write(dir2, name, content, options);
+      },
+    };
+    const { dir, storage: first } = await openTemp(t2, { fsi });
+    const id = 'lost';
+    failing = true;
+    await assert.rejects(() => first.set(id, { n: 1 }), /ENOSPC/);
+    failing = false;
     await first.close();
-    // Crash between "logged" and "written": the record file is gone.
-    await require('node:fs/promises').rm(require('node:path').join(dir, 'data', `${id}.json`));
-    const second = await syncom.open({ path: dir, logger: false, telemetry: { tracer, meter } });
+    const second = await syncom.open({ path: dir, logger: false, fsi, telemetry: { tracer, meter } });
     t2.after(() => second.close().catch(() => {}));
     assert.deepStrictEqual(await second.get(id), { n: 1 });
     const [span] = named('syncom.replay');
@@ -657,7 +670,9 @@ test('Sync telemetry', async (t) => {
 
     const rolls = tracing.A.named('syncom.log.roll');
     assert.ok(rolls.length >= 3);
-    assert.ok(rolls.every((span) => span.attributes['syncom.log.sealed'] === 2));
+    // A roll seals the batches before the one just appended (that one is
+    // not applied yet): with rollAfter 2, one batch per roll.
+    assert.ok(rolls.every((span) => span.attributes['syncom.log.sealed'] === 1));
     assert.ok(rolls.at(-1).attributes['syncom.log.floor'] > 1);
     assert.ok(rolls.some((span) => span.attributes['syncom.log.dropped'] >= 1));
     const segments = await metrics.A.points('syncom.log.segments');

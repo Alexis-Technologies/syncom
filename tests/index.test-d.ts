@@ -409,7 +409,7 @@ storage.sync.on('sync', (event) => {
   expectType<number | undefined>(event.malformed);
 });
 storage.on('error', (error) => {
-  expectType<'OP_REFUSED' | 'OP_INVALID' | 'SKEW' | undefined>(error.code);
+  expectType<'OP_REFUSED' | 'OP_INVALID' | 'OP_UNREADABLE' | 'SKEW' | undefined>(error.code);
 });
 expectAssignable<Fsi>({
   read: async () => '',
@@ -418,3 +418,14 @@ expectAssignable<Fsi>({
   remove: async () => {},
   list: async () => [],
 });
+
+// E2: the applied watermark, stuck peers, page failures
+expectType<void>(log.applied(3));
+expectType<void>(log.applied(2, 4));
+expectType<Promise<syncom.OpLog>>(new syncom.OpLog('base', { sealApplied: true }));
+expectType<boolean>(storage.sync.peers()[0].stuck);
+storage.sync.on('error', (error) => {
+  expectType<string | null | undefined>(error.cursor);
+  expectType<number | undefined>(error.attempt);
+});
+expectError(storage.swap('id', 'text', { a: 1 }));

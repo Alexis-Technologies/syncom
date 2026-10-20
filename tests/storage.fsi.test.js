@@ -59,7 +59,8 @@ test('Storage over an injected fsi', async (t) => {
     const log = await new syncom.OpLog('l', { fsi });
     await log.append([{ origin: 'A', seq: 1, ts: 1, type: 'set', id: 'r', data: {} }]);
     await log.close();
-    assert.deepStrictEqual(await fsi.list('l/log/open'), ['0000000001.json']);
+    assert.deepStrictEqual(await fsi.list('l/log/open'), [], 'a close seals the open files');
+    assert.ok((await fsi.list('l/log')).some((name) => name.startsWith('seg-')));
     assert.ok((await fsi.list('k')).includes('private.pem'));
     await assert.rejects(async () => new syncom.Blockchain('c', { fsi: {} }), /Blockchain: adapter has no read\(\)/);
   });

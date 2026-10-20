@@ -88,9 +88,17 @@ const wellFormed = (op) =>
   (op.v === undefined || (Number.isInteger(op.v) && op.v >= 1)) &&
   (op.type === 'advance' ? isPlainObject(op.vector) : isRecordId(op.id));
 
-// What a commit came to: an op, `null` for a write that changed nothing, and
-// `undefined` for an encrypted record (saved locally, no op).
-const commitResult = (op) => (op === undefined ? 'encrypted' : op === null ? 'noop' : 'applied');
+// What a commit came to: an op, `null` for a write that changed nothing,
+// `undefined` for an encrypted record (saved locally, no op), and MISMATCH
+// for a swap whose expectation no longer held.
+const MISMATCH = Symbol('syncom.mismatch');
+const commitResult = (op) => (op === undefined ? 'encrypted' : op === null || op === MISMATCH ? 'noop' : 'applied');
+
+// Data crosses the boundary as JSON — what the disk, the log and the peers
+// hold. A copy on the way in (a caller mutating its object after `set()`)
+// and on the way out (a caller mutating what `get()` returned) keeps the
+// cache, the log entries and the next op's base to themselves.
+const asJson = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
 
 // `$type` names the collection a record belongs to and never changes: a
 // whole-record write that does not name it keeps it, and neither a write nor
@@ -454,6 +462,10 @@ class Storage extends Emitter {
       logger: this.#logger,
       telemetry: this.#otel,
       fsi,
+      // A roll seals only what #commit / #applyRemote marked applied — see
+      // OpLog.applied: the tail a reopen replays must hold every batch whose
+      // records may not have been written.
+      sealApplied: true,
     });
     // The clock picks up where the log left off: every stamp this node ever
     // logged is below what it will stamp next, whatever the wall clock says.
@@ -596,7 +608,13 @@ class Storage extends Emitter {
     const touched = new Map();
     for (const { seq, op } of entries) {
       this.#clock.observe(op.ts);
-      const current = touched.get(op.id) ?? (await this.#load(op.id));
+      let current;
+      try {
+        current = touched.get(op.id) ?? (await this.#load(op.id));
+      } catch (error) {
+        this.#logger.warn({ event: 'replay.skipped', id: op.id, err: error });
+        continue;
+      }
       if (current?.encrypted) continue;
       const { entry, changed } = applyOp(current, op);
       if (changed) touched.set(op.id, { ...entry, seq });
@@ -715,6 +733,7 @@ class Storage extends Emitter {
       if (changed) touched.set(op.id, { ...entry, seq });
     }
     if (touched.size > 0) await this.#persistBatch(touched, tail[0].seq, tail[tail.length - 1].seq);
+    this.#log.applied(tail[0].seq, tail[tail.length - 1].seq);
     return touched.size;
   }
 
@@ -817,9 +836,10 @@ class Storage extends Emitter {
   // interleaved writers would race all three.
   #run(task) {
     if (this.#closed) return Promise.reject(new Error('Storage is closed'));
-    // A hook runs inside the queue (or, for a read, while a queued hook may
-    // be running); a write it issues would wait for the hook that waits for
-    // it. Refused here, where the deadlock would otherwise begin.
+    // A write or apply hook runs inside the queue; a write it issues would
+    // wait for the hook that waits for it. Refused here, where the deadlock
+    // would otherwise begin. Read hooks run outside the queue and are not
+    // counted — a write from one simply queues.
     if (this.#inHook > 0) {
       return Promise.reject(
         new Error(
@@ -832,8 +852,9 @@ class Storage extends Emitter {
     return result;
   }
 
-  // Every hook of this storage goes through here, so the guard above knows
-  // one is running. Returns what the hook returns; a throw is a HookError.
+  // Every hook that runs inside the mutation queue goes through here, so the
+  // guard above knows one is running. Returns what the hook returns; a throw
+  // is a HookError. The read hooks call runHook directly.
   async #hook(name, ...args) {
     if (!this.#hooks[name]) return undefined;
     this.#inHook++;
@@ -980,10 +1001,27 @@ class Storage extends Emitter {
     }
   }
 
-  async #commit(type, id, payload, { source = null, via = null, from = null, encrypted = false, actor } = {}) {
+  async #commit(type, id, payload, options = {}) {
+    const { source = null, via = null, from = null, encrypted = false, actor, expect = null } = options;
     const current = await this.#load(id);
     if (encrypted && current && !current.encrypted) {
       throw new Error(`Record ${id} is replicated and cannot become encrypted`);
+    }
+    // A swap's expectation, checked here — inside the queue — against the
+    // record as it reads: a live one, or an encrypted one's data.
+    if (expect !== null) {
+      let seen = null;
+      if (current?.encrypted) seen = current.data;
+      else if (current && isAlive(current)) seen = await this.#view(id, current);
+      if (!seen) throw new Error(`Record ${id} not found`);
+      for (const key of Object.keys(expect)) if (seen[key] !== expect[key]) return MISMATCH;
+    }
+    // The payload is taken as JSON — a copy, like the disk and the peers
+    // hold it — before anything keeps a reference to it.
+    if (payload.data !== undefined || payload.meta !== undefined) {
+      payload = { ...payload, data: asJson(payload.data), meta: asJson(payload.meta) };
+      if (payload.data === undefined) delete payload.data;
+      if (payload.meta === undefined) delete payload.meta;
     }
     // Sealed: this write is encrypted, or the record already is. An
     // encrypted record has no op log — writes to it stay local.
@@ -1098,6 +1136,7 @@ class Storage extends Emitter {
     const hash = await calculateHash(entry.data);
     const blockHash = await this.#chain.addBlock({ id, hash, from: this.#log.formatId(position) });
     await this.#writeEntry(id, entry, blockHash);
+    this.#log.applied(position);
 
     await this.#flushCatalog();
 
@@ -1197,17 +1236,20 @@ class Storage extends Emitter {
 
   // The raw read: what `get` returns before its hooks. `swap` compares
   // against this, so a redacting afterRead cannot break its CAS.
+  // The raw read, as a copy: what `get` returns before its hooks, what
+  // `swap` compares against. `getCachedData()` and `snapshot()` are the raw
+  // objects, for callers that know not to touch them.
   async #read(id) {
     const entry = await this.#load(id);
     if (entry === null) return null;
-    if (entry.encrypted) return entry.data;
-    return isAlive(entry) ? this.#view(id, entry) : null;
+    if (entry.encrypted) return asJson(entry.data);
+    return isAlive(entry) ? asJson(await this.#view(id, entry)) : null;
   }
 
   async get(id) {
-    await this.#hook('beforeRead', { id });
+    await runHook(this.#hooks, 'beforeRead', { id });
     const data = await this.#read(id);
-    const replaced = await this.#hook('afterRead', { id }, data);
+    const replaced = await runHook(this.#hooks, 'afterRead', { id }, data);
     return replaced === undefined ? data : replaced;
   }
 
@@ -1250,13 +1292,16 @@ class Storage extends Emitter {
     await this[COMMIT]('inc', id, { key, value }, { actor });
   }
 
+  /**
+   * Compare-and-swap: writes `changes` only if the fields of `prev` still
+   * hold their values — compared inside the mutation queue, against the
+   * record as it reads (the lens applied, the read hooks not run), so two
+   * concurrent swaps on one expectation cannot both pass.
+   */
   async swap(id, changes, prev, { actor } = {}) {
-    const data = await this.#read(id);
-    if (!data) throw new Error(`Record ${id} not found`);
-    const matches = Object.keys(prev).every((key) => data[key] === prev[key]);
-    if (!matches) return false;
-    await this[COMMIT]('set', id, { data: changes }, { actor });
-    return true;
+    if (!isPlainObject(changes) || !isPlainObject(prev)) throw new TypeError('swap() takes two plain objects');
+    const op = await this[COMMIT]('set', id, { data: changes }, { actor, expect: prev });
+    return op !== MISMATCH;
   }
 
   async record(id) {
@@ -1394,7 +1439,28 @@ class Storage extends Emitter {
           notify(this, this.#logger, 'schema', { kind: 'ahead', op, held: true });
           continue;
         }
-        const current = touched.get(op.id) ?? (await this.#load(op.id));
+        let current;
+        try {
+          current = touched.get(op.id) ?? (await this.#load(op.id));
+        } catch (error) {
+          // The record's file is torn or fails its integrity check: this op
+          // cannot land here, and must not stop the page or the stream.
+          // Skipped like a beforeApply `false` — logged, relayed, replay-safe
+          // — and reported; the record stays as it is for a read to report.
+          this.#logger.warn({ event: 'sync.op.unreadable', id: op.id, err: error });
+          this.#otel.recordRejected('unreadable');
+          const message = `Record ${op.id} is unreadable here; op ${op.origin}:${op.seq} skipped`;
+          notify(
+            this,
+            this.#logger,
+            'error',
+            Object.assign(new Error(message, { cause: error }), { op, code: 'OP_UNREADABLE' }),
+          );
+          vectorAdvance(vector, op);
+          accepted.push(op);
+          (skipped ??= new Set()).add(op);
+          continue;
+        }
         if (current?.encrypted) {
           this.#logger.warn({ event: 'sync.op.encrypted', id: op.id });
           vectorAdvance(vector, op);
@@ -1447,7 +1513,15 @@ class Storage extends Emitter {
         // the op is in the peer's log already — and reported; the
         // application decides which record yields.
         if (VALIDATED.has(op.type)) {
-          for (const { fields, other } of await this.#conflicts(op.id, entry)) {
+          let conflicts = [];
+          try {
+            conflicts = await this.#conflicts(op.id, entry);
+          } catch (error) {
+            // A lens that throws for this record: the op is applied as it
+            // is (the record is the peer's); only the unique check is lost.
+            this.#logger.warn({ event: 'sync.op.lens', id: op.id, err: error });
+          }
+          for (const { fields, other } of conflicts) {
             this.#otel.recordConflict('unique');
             const entity = entry.data.$type;
             notify(this, this.#logger, 'conflict', { kind: 'unique', entity, fields, id: op.id, other, op });
@@ -1464,6 +1538,7 @@ class Storage extends Emitter {
           await this.#persistBatch(touched, entries[0].seq, entries[entries.length - 1].seq);
           await this.#flushCatalog();
         }
+        this.#log.applied(entries[0].seq, entries[entries.length - 1].seq);
         if (purged) for (const id of purged) await this.#log.scrub(id);
       }
       // afterApply sees a durable batch; whatever it does, the record views
@@ -1548,8 +1623,9 @@ class Storage extends Emitter {
       const op = { origin: this.#nodeId, seq: 0, ts: this.#clock.now(), type: 'advance', vector: news };
       if (from) op.from = from;
       op.seq = (known[opKey(op)] ?? 0) + 1;
-      await this.#log.append([op]);
+      const [{ seq }] = await this.#log.append([op]);
       await this.#log.advance(news);
+      this.#log.applied(seq);
       notify(this, this.#logger, 'change', op, via);
       return op;
     });

@@ -48,8 +48,11 @@ const ENTRIES = [
   // raise to 27.5 KB; purge (the op, the scrub) the raise to 28 KB; the
   // trust boundary (record ids checked at every entrance, a peer's op
   // well-formed before it is read, the skew horizon, scopes enforced by the
-  // host, own-key walks in ops.js) the raise to 29 KB.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 29 },
+  // host, own-key walks in ops.js) the raise to 29 KB; the failure paths (the
+  // log sealing only applied batches, a failed page as a break in the
+  // stream, swap inside the queue, copies at the boundary, unreadable
+  // records contained) the raise to 29.5 KB.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 29.5 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check

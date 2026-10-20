@@ -149,6 +149,12 @@ export interface OpLogOptions {
   logger?: Logger | false;
   telemetry?: SyncomTelemetryOptions;
   fsi?: Fsi;
+  /**
+   * Seal only the batches the owner has marked `applied`: what Storage asks
+   * for, so a reopen's replay always covers a batch whose records may not
+   * have been written. A log on its own seals everything.
+   */
+  sealApplied?: boolean;
 }
 
 export interface OpLog {
@@ -175,6 +181,8 @@ export interface OpLog {
   tail(): LogEntry[];
   flush(): Promise<void>;
   close(): Promise<void>;
+  /** The batches within `from..to` are reflected in the records (see `sealApplied`). */
+  applied(from: number, to?: number): void;
 }
 
 export interface OpLogConstructor {
@@ -668,6 +676,12 @@ export interface PeerView {
   lastSync: number | null;
   /** Ops waiting in the outbox, plus one while a push is in flight. */
   pending: number;
+  /**
+   * A page of this peer's feed failed to apply three times in a row; the
+   * subscription is closed and nothing past that page is taken until the
+   * application intervenes (`enableNode` off and on, or a bootstrap).
+   */
+  stuck: boolean;
 }
 
 export interface SyncUnitOptions {
@@ -757,8 +771,13 @@ export interface SyncEvents {
   bootstrap: (event: { url: string; records: number }) => void;
   /** Hosting side: ops of a peer this node would not take — outside the scopes its hello granted. */
   refused: (event: { node: string; reason: 'scope'; count: number }) => void;
-  /** A failure on the way to a peer; `url` names it. */
-  error: (error: Error & { url: string }) => void;
+  /**
+   * A failure on the way to a peer; `url` names it. A page of the feed that
+   * could not be applied comes as `code: 'PAGE_FAILED'` (with `cursor`, the
+   * last position saved, and `attempt`), and is retried from that cursor;
+   * the third failure in a row is `code: 'STUCK'`.
+   */
+  error: (error: Error & { url: string; code?: string | number; cursor?: string | null; attempt?: number }) => void;
   start: () => void;
   stop: () => void;
   node: (event: { url: string; action: 'add' | 'remove' | 'enable' | 'disable' }) => void;
@@ -861,7 +880,7 @@ export interface StorageEvents {
    */
   error: (
     error: Error & {
-      code?: 'OP_REFUSED' | 'OP_INVALID' | 'SKEW';
+      code?: 'OP_REFUSED' | 'OP_INVALID' | 'OP_UNREADABLE' | 'SKEW';
       op?: SyncOp;
       rejected?: Array<{ field: string; reason: 'register' | 'counter' }>;
       entity?: string | null;
@@ -927,6 +946,7 @@ export interface Storage {
   validate(id: string, data: unknown, blockHash: string): Promise<boolean>;
   insert(data: unknown, options?: StorageDataOptions): Promise<string>;
   has(id: string): Promise<boolean>;
+  /** The record as it reads (the lens applied, the read hooks run), as a copy: editing it changes nothing. */
   get(id: string): Promise<unknown>;
   set(id: string, data: unknown, options?: StorageDataOptions): Promise<void>;
   delete(id: string, options?: WriteOptions): Promise<void>;
@@ -934,7 +954,13 @@ export interface Storage {
   purge(id: string, options?: WriteOptions): Promise<void>;
   update(id: string, delta: unknown, options?: WriteOptions): Promise<void>;
   inc(id: string, key: string, value?: number, options?: WriteOptions): Promise<void>;
-  swap(id: string, changes: unknown, prev: unknown, options?: WriteOptions): Promise<boolean>;
+  /**
+   * Compare-and-swap: writes `changes` only if every field of `prev` still
+   * holds its value, compared inside the mutation queue — two concurrent
+   * swaps on one expectation cannot both pass. `false`, and no write, on a
+   * mismatch; rejects when the record is absent.
+   */
+  swap(id: string, changes: object, prev: object, options?: WriteOptions): Promise<boolean>;
   /** Every live id, sorted — from the catalog, no I/O. */
   list(): Promise<string[]>;
   /**

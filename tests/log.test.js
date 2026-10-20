@@ -73,8 +73,9 @@ test('OpLog', async (t) => {
       assert.strictEqual(reopened.next, 3);
       assert.deepStrictEqual(reopened.vector, { A: 2 });
       assert.strictEqual(reopened.since(reopened.formatId(0)).length, 2);
-      // Unsealed entries are the tail a reopen replays.
-      assert.strictEqual(reopened.tail().length, 2);
+      // A clean close seals the open files: a reopen has nothing to replay.
+      assert.strictEqual(reopened.tail().length, 0);
+      assert.ok((await fs.readdir(path.join(dir, 'log'))).some((name) => name.startsWith('seg-')));
       const more = await reopened.append([op('A', 3)]);
       assert.strictEqual(more[0].seq, 3);
     } finally {
@@ -196,9 +197,9 @@ test('OpLog', async (t) => {
       await log.close();
       log = await new OpLog(dir);
       assert.deepStrictEqual(
-        log.tail().map((entry) => entry.skipped),
+        log.since(log.formatId(0)).map((entry) => entry.skipped),
         [undefined, true, undefined],
-        'the flag survives a reopen, for the replay to honour',
+        'the flag survives a reopen (in the segment the close sealed), for a replay to honour',
       );
     } finally {
       await cleanupTemp(dir);
@@ -279,6 +280,50 @@ test('OpLog', async (t) => {
       await cleanupTemp(dir);
     }
   });
+
+  await t.test(
+    'sealApplied: a roll never seals past the oldest batch not yet applied; close seals the rest',
+    async () => {
+      const dir = await createTemp();
+      try {
+        const log = await new OpLog(dir, { rollAfter: 1, sealApplied: true });
+        await log.append([op('A', 1)]);
+        await log.append([op('A', 2)]); // rolls — nothing is applied yet
+        assert.strictEqual(log.tail().length, 2);
+        log.applied(1);
+        await log.append([op('A', 3)]); // rolls — seals 1; 2 is unapplied, 3 just landed
+        assert.deepStrictEqual(
+          log.tail().map((entry) => entry.seq),
+          [2, 3],
+        );
+        log.applied(3); // 3 landed while 2 still has not: 2 holds the line
+        await log.append([op('A', 4)]);
+        assert.deepStrictEqual(
+          log.tail().map((entry) => entry.seq),
+          [2, 3, 4],
+        );
+        await log.close();
+        assert.deepStrictEqual(
+          log.tail().map((entry) => entry.seq),
+          [2, 3, 4],
+          'a clean close seals nothing past it either',
+        );
+        const reopened = await new OpLog(dir, { rollAfter: 1, sealApplied: true });
+        assert.deepStrictEqual(
+          reopened.tail().map((entry) => entry.seq),
+          [2, 3, 4],
+          'the open files are pending again until the owner says otherwise',
+        );
+        reopened.applied(2, 4);
+        await reopened.close();
+        assert.strictEqual(reopened.tail().length, 0);
+        assert.strictEqual((await fs.readdir(path.join(dir, 'log', 'open'))).length, 0);
+        assert.strictEqual(reopened.since(reopened.formatId(0)).length, 4);
+      } finally {
+        await cleanupTemp(dir);
+      }
+    },
+  );
 
   await t.test('flush seals the open files on demand', async () => {
     const dir = await createTemp();

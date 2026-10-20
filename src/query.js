@@ -247,11 +247,14 @@ class Cursor {
     return projected;
   }
 
+  // Rows leave as copies (JSON, like everything that crosses the storage's
+  // boundary): the candidates were read raw from the cache, and a caller
+  // that edits a row must not be editing the cache.
   async fetch() {
     let rows = await this.#matching(true);
     if (this.#order.length > 0) rows.sort(compareRows(this.#order));
     if (this.#offset > 0 || this.#limit !== Infinity) rows = rows.slice(this.#offset, this.#offset + this.#limit);
-    return rows.map((row) => this.#project(row));
+    return rows.map((row) => JSON.parse(JSON.stringify(this.#project(row))));
   }
 
   async count() {

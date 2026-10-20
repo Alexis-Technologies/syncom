@@ -189,6 +189,16 @@ backing off and re-opening the subscription from the last event id are the
 manager only repeats `hello` + `push`, the outbound half a transport cannot know
 about.
 
+A page that cannot be applied — a `beforeApply` that throws, a record file this
+node cannot read — is a **break in the stream**, not a page to step over: the
+pages behind it are dropped, the subscription is closed and reopened from the
+last cursor that was saved, and the page comes again (`error` with
+`code: 'PAGE_FAILED'`, `cursor`, `attempt`). The third failure in a row leaves
+the peer **stuck** (`code: 'STUCK'`, `peers()[i].stuck`): nothing past that
+page is taken until the application intervenes — `enableNode(url, false)` then
+`true` once the cause is fixed. The cursor never moves past a page that did not
+land.
+
 ### Schemas
 
 `schema` in both directions is `{ version, hash }` — the node's
@@ -282,12 +292,12 @@ are kept there too, which is why a restart resumes instead of bootstrapping.
 await storage.sync.start(); // dial every enabled node; automatic when `connect` is given
 await storage.sync.stop();  // close every link
 await storage.sync.sync();  // push what the peers lack right now
-storage.sync.peers();       // [{ url, node, connected, subscribed, cursor, lastSync, pending }]
+storage.sync.peers();       // [{ url, node, connected, subscribed, cursor, lastSync, pending, stuck }]
 
 storage.sync.on('peer', ({ url, connected, node, reconnected }) => {});
 storage.sync.on('sync', ({ url, pushed, received, applied, skipped, duplicates, gaps, malformed }) => {});
 storage.sync.on('bootstrap', ({ url, records }) => {});
-storage.sync.on('error', (error) => {}); // error.url names the peer
+storage.sync.on('error', (error) => {}); // error.url names the peer; error.code may be 'PAGE_FAILED' | 'STUCK'
 storage.sync.on('refused', ({ node, reason, count }) => {}); // hosting side: ops outside the peer's scopes
 storage.sync.on('start', () => {});
 storage.sync.on('stop', () => {});
@@ -297,7 +307,7 @@ storage.sync.on('hello', ({ node, scopes }) => {}); // hosting side: a peer was 
 
 storage.on('change', (op, via) => {});  // every op applied here; via is null for a local write
 storage.on('apply', ({ peer, applied, skipped }) => {}); // a peer's batch is durable
-storage.on('error', (error) => {});     // error.code: 'OP_REFUSED' | 'OP_INVALID' | 'SKEW'
+storage.on('error', (error) => {});     // error.code: 'OP_REFUSED' | 'OP_INVALID' | 'OP_UNREADABLE' | 'SKEW'
 ```
 
 Listeners are contained: one that throws is logged and never fails what it
@@ -398,6 +408,10 @@ the engine's own tests run on.
   neither logged nor relayed, and never observed into this node's clock.
 - **A node's own sequence never repeats.** The log is written before the op is
   announced, so a crash cannot mint two different ops with one number.
+- **Logged means applied, eventually.** The record files are written after
+  the log; a reopen replays the unsealed tail onto them, and the log seals a
+  batch only once its records were written — a crash between the two, or a
+  record write that failed, leaves the batch in the tail until it lands.
 - **fsync is opt-in.** Files are written with the platform's default
   durability; `open({ durable: true })` adds an fsync after every write on a
   backend that has one (`node:fs`). On OPFS there is no rename either, so a

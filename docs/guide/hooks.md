@@ -120,10 +120,13 @@ handshake.
 ### Hooks and the queue
 
 Every local write and every peer batch runs through one mutation queue, and
-hooks run inside it. A hook that awaits something slow holds every other
-write for that long. A hook that *writes* would wait for the queue, which is
-waiting for the hook — so a write issued from any hook is refused with an
-error rather than left to deadlock. Reads (`get`, `has`, `record`) are fine.
+the write and apply hooks run inside it. A hook that awaits something slow
+holds every other write for that long. A hook that *writes* would wait for the
+queue, which is waiting for the hook — so a write issued from `beforeWrite`,
+`afterWrite`, `beforeApply` or `afterApply` is refused with an error rather
+than left to deadlock. Reads (`get`, `has`, `record`) are fine from any hook.
+The read hooks run outside the queue: a write issued from `beforeRead` or
+`afterRead` simply queues, and a slow read hook holds no write.
 
 ## Sync hooks
 
