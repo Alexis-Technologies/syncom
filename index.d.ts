@@ -183,6 +183,8 @@ export interface OpLog {
   close(): Promise<void>;
   /** The batches within `from..to` are reflected in the records (see `sealApplied`). */
   applied(from: number, to?: number): void;
+  /** One key of the vector (`origin` or `origin@scope`), without copying the whole. */
+  seqOf(key: string): number;
 }
 
 export interface OpLogConstructor {
@@ -609,6 +611,12 @@ export interface StorageOptions<S extends Schema = Schema> {
   cache?: { max?: number };
   /** `'verify'` (default) re-checks a record against its chain block on a cold read; `'lazy'` trusts the file. */
   integrity?: 'verify' | 'lazy';
+  /**
+   * `false` keeps no hash-linked chain of what this node applied (a hub that
+   * only replicates has nothing to audit): two file writes less per record,
+   * reads lazy, and `validate()` rejects with `code: 'NO_CHAIN'`.
+   */
+  chain?: boolean;
   /** The record catalog is persisted every `flushEvery` changes (default 64) and at close; the log catches up the rest. */
   catalog?: { flushEvery?: number };
   schema?: S;

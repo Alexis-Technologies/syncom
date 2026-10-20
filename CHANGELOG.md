@@ -12,6 +12,10 @@ section until the first publish; everything below lands there on release day.
 
 ### Added
 
+- **`open({ chain: false })`.** A node that only replicates — a hub — keeps
+  no hash-linked chain: two file writes less per record (the chain grew by
+  one block file per write and was never compacted), reads without the
+  block re-check, `validate()` rejecting with `code: 'NO_CHAIN'`.
 - **WebRTC, through wrpc 2.** No transport code in syncom: a `PeerLink`'s
   `remote` from `@alexify/wrpc/webrtc` is a `WrpcClient`, which
   `createWrpcLink()` takes as it is, and `storage.sync.unit()` mounts on a
@@ -270,6 +274,21 @@ section until the first publish; everything below lands there on release day.
 
 ### Fixed
 
+- **Every record inserted through a collection stayed in memory for good.**
+  `Collection.insert()` returned a `Record`, and the storage kept every
+  `Record` ever made, which also exempted its cache entry from eviction —
+  the "bounded" cache was unbounded for collection users. Live Records are
+  now held weakly: one the application still references pins its entry and
+  follows the record; one it dropped is collected, and the pin with it.
+- **The catalog was written on the mutation queue.** Every 64th write paid
+  for a full serialization of the catalog before it returned; the save now
+  runs off the queue (the rows and the stamp taken as it starts, one save in
+  flight at a time, `close()` waits for it).
+- `node:fs` writes no longer `mkdir -p` on every call (once per directory;
+  a directory removed behind the storage's back is made again); a local
+  write mints its seq without copying the whole vector (`OpLog.seqOf`); a
+  scrub finds an id's entries through an index instead of a walk over the
+  retained log.
 - **A failed relay left the peer behind until the link reconnected.** A 429
   or 413 (or any failed push) dropped the outbox and nothing re-pushed until
   the next handshake, which on a stable link never came: silent divergence

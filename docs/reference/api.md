@@ -20,6 +20,7 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 [One instance per directory](../guide/storage#one-instance-per-directory)),
 `cache`, `integrity` and `catalog` (see
 [The catalog and the cache](../guide/storage#the-catalog-and-the-cache)),
+`chain` (`false` keeps no [chain](../guide/chain#through-storage)),
 `actor` (see [Operations](../guide/sync#operations)), `schema` and `validator` (see
 [Collections](../guide/storage#collections)), `getId` (must mint a
 [valid id](../guide/storage#custom-identifiers)), `logger`, `encrypted`,
@@ -48,7 +49,7 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 | `record(id)` | `Promise<Record>` | Cached per id |
 | `saveData(id, data, options?)` | `Promise<void>` | `{ encrypted: true }` seals the record for this node only; `{ actor }` names the writer |
 | `loadData(id)` | `Promise<unknown>` | Alias of `get()`; throws if the record no longer matches its block |
-| `validate(options?)` | `Promise<boolean>` | `{ last, from }`; no argument walks the whole chain |
+| `validate(options?)` | `Promise<boolean>` | `{ last, from }`; no argument walks the whole chain; rejects with `code: 'NO_CHAIN'` under `open({ chain: false })` |
 | `validate(id, data, blockHash)` | `Promise<boolean>` | One record against its block |
 | `getCachedData(id)` | `unknown \| null` | Synchronous cache peek, raw (no lens) |
 | `hasRecord(id)` | `boolean` | Whether the id is a live record — from the catalog, no I/O |

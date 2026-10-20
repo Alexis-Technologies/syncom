@@ -145,3 +145,32 @@ test('Catalog', async (t) => {
     assert.deepStrictEqual(tolerant.ids(), ['ok']);
   });
 });
+
+test('a save takes its rows at the start; puts that land during the write stay dirty', async () => {
+  const base = createMemoryFsi();
+  let release = null;
+  const fsi = {
+    ...base,
+    write: async (dir, name, content) => {
+      await new Promise((resolve) => {
+        release = resolve;
+      });
+      return base.write(dir, name, content);
+    },
+  };
+  const { entities } = normalizeSchema({ entities: { Post: { index: ['slug'] } } });
+  const catalog = new Catalog({ fsi, path: 'store', entities });
+  catalog.put('a', { type: 'Post', v: null, data: { slug: 'a' } });
+  const saving = catalog.save('e.1');
+  catalog.put('b', { type: 'Post', v: null, data: { slug: 'b' } });
+  assert.strictEqual(catalog.dirty, 2);
+  release();
+  await saving;
+  assert.strictEqual(catalog.dirty, 1, 'the put during the write is still dirty');
+  const file = JSON.parse(await base.read('store/index', 'catalog.json'));
+  assert.deepStrictEqual(
+    file.rows.map((row) => row[0]),
+    ['a'],
+    'the rows are as of the start',
+  );
+});

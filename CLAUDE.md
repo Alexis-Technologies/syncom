@@ -92,6 +92,14 @@ docs/                     VitePress site
   never a field) + `own()` for every lookup into `meta.clock`/`meta.counters`;
   `normalizeMeta` deep-copies a peer's meta into the trusted shape. A
   `for...in` or a bare `obj[key]` over peer-shaped data is a bug.
+- **The chain is optional, the log is not.** `open({ chain: false })` leaves
+  `#chain` null: `#commit`, `#persistBatch` and `#writeEncrypted` write
+  `block: null`, `#verify` is forced off, `validate()` throws `NO_CHAIN`. A
+  new place that reads `this.#chain` must take null.
+- **Live Records are weak.** `#records` holds `WeakRef`s (a
+  `FinalizationRegistry` clears the slot); go through `#live(id)`, never
+  `#records.get`. A Record the application still holds pins its cache entry;
+  one it dropped is collected with its pin.
 - **A purge is a scrub, not a delete.** `purge` wins at any stamp and a
   purged entry takes nothing but another purge or a merge (`applyOp`
   returns early). The payload leaves the log through `OpLog.scrub(id)`,
@@ -185,6 +193,10 @@ docs/                     VitePress site
   write paths go through it), `#writeEncrypted` and `#removeEncrypted` are
   the only places that `catalog.put`; it indexes the lensed view and never
   fails a write (a throwing lens is logged and the raw data indexed).
+  `#flushCatalog` saves it OFF the mutation queue — `Catalog.save` takes the
+  rows and the stamp before its first await, one save in flight at a time,
+  `close()` awaits it — so a write never waits for the catalog file. Do not
+  `await` a save inside `#commit`/`#applyRemote`.
   `list()`/`hasRecord()` read it, `snapshot()` still scans `data/` (it needs
   tombstones). A new way of changing a record's file must put too, or the
   catalog lies until the next rebuild.

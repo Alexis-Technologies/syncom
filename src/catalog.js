@@ -267,12 +267,17 @@ class Catalog {
     return { stamp: parsed.stamp };
   }
 
-  /** Writes the catalog as of `stamp`, the log position it reflects. */
+  /**
+   * Writes the catalog as of `stamp`, the log position it reflects. The rows
+   * are taken before the first await, so a save may run while puts go on:
+   * what lands during the write stays dirty for the next one.
+   */
   async save(stamp) {
     const rows = [];
     for (const [id, row] of this.#rows) rows.push([id, row.type, row.v, row.encrypted, row.fields]);
+    const saved = this.#dirty;
     await this.#fsi.write(this.#dir, FILE, JSON.stringify({ format: FORMAT, indexes: this.#indexKey, stamp, rows }));
-    this.#dirty = 0;
+    this.#dirty -= saved;
   }
 }
 

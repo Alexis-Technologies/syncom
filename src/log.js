@@ -66,6 +66,9 @@ class OpLog {
   // seq. Only kept under `sealApplied`; a roll stops short of the oldest.
   #pending = new Map();
   #sealApplied;
+  // Record id → the seqs of its entries: what a scrub rewrites, found
+  // without a walk over everything retained.
+  #byId = new Map();
 
   constructor(basePath, options = {}) {
     this.#path = `${basePath}/log`;
@@ -169,9 +172,33 @@ class OpLog {
       if (entry.op) {
         vectorAdvance(this.#vector, entry.op);
         this.#observe(entry.op);
+        this.#indexEntry(entry);
       }
     }
     if (added) this.#entries.sort((a, b) => a.seq - b.seq);
+  }
+
+  #indexEntry(entry) {
+    const id = entry.op?.id;
+    if (typeof id !== 'string') return;
+    let seqs = this.#byId.get(id);
+    if (!seqs) this.#byId.set(id, (seqs = new Set()));
+    seqs.add(entry.seq);
+  }
+
+  #unindexEntry(entry) {
+    const id = entry.op?.id;
+    if (typeof id !== 'string') return;
+    const seqs = this.#byId.get(id);
+    if (!seqs) return;
+    seqs.delete(entry.seq);
+    if (seqs.size === 0) this.#byId.delete(id);
+  }
+
+  // The entry with `seq`, or undefined.
+  #entryAt(seq) {
+    const entry = this.#entries[this.#lowerBound(seq)];
+    return entry?.seq === seq ? entry : undefined;
   }
 
   get epoch() {
@@ -203,6 +230,11 @@ class OpLog {
   /** The highest per-origin seq this log has ever held — survives compaction. */
   get vector() {
     return { ...this.#vector };
+  }
+
+  /** One key of the vector, without copying it: what a local write mints its seq from. */
+  seqOf(key) {
+    return this.#vector[key] ?? 0;
   }
 
   get length() {
@@ -264,7 +296,10 @@ class OpLog {
       const started = this.#otel.enabled ? now() : 0;
       await this.#fsi.write(this.#openPath, name, JSON.stringify({ entries }));
       if (started) this.#otel.recordAppend(now() - started);
-      for (const entry of entries) this.#entries.push(entry);
+      for (const entry of entries) {
+        this.#entries.push(entry);
+        this.#indexEntry(entry);
+      }
       for (const op of ops) {
         vectorAdvance(this.#vector, op);
         this.#observe(op);
@@ -334,7 +369,9 @@ class OpLog {
       if (!(tooMany && overOps) && !overAge) break;
       this.#segments.shift();
       for (const entry of this.#entries) {
-        if (entry.seq <= oldest.to && entry.held !== undefined) this.#droppedHeld++;
+        if (entry.seq > oldest.to) break;
+        if (entry.held !== undefined) this.#droppedHeld++;
+        this.#unindexEntry(entry);
       }
       this.#entries = this.#entries.filter((entry) => entry.seq > oldest.to);
       this.#floor = oldest.to + 1;
@@ -410,16 +447,16 @@ class OpLog {
    */
   scrub(id) {
     return this.#serialize(async () => {
-      // Every entry of the id, for the files to rewrite; the ones still
-      // holding a payload, for the count. A rewrite that failed last time
-      // left the files behind memory: the id stays marked torn, and the
-      // next scrub rewrites them whether or not anything is fresh.
-      const seqs = new Set();
+      // Every entry of the id (from the index, not a walk), for the files to
+      // rewrite; the ones still holding a payload, for the count. A rewrite
+      // that failed last time left the files behind memory: the id stays
+      // marked torn, and the next scrub rewrites them whether or not
+      // anything is fresh.
+      const seqs = this.#byId.get(id) ?? new Set();
       let fresh = 0;
-      for (const entry of this.#entries) {
-        if (entry.op?.id !== id) continue;
-        seqs.add(entry.seq);
-        if (entry.scrubbed) continue;
+      for (const seq of seqs) {
+        const entry = this.#entryAt(seq);
+        if (!entry || entry.scrubbed) continue;
         delete entry.op.data;
         delete entry.op.meta;
         delete entry.op.key;

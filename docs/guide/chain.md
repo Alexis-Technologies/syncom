@@ -64,6 +64,13 @@ Each node's chain is its **own** audit log: the order in which *it* applied
 things. Two nodes that hold the same records hold different chains — that is
 expected, and it is not a consensus mechanism.
 
+The chain grows by one block file per local write and one per batch applied
+from a peer, and it is never compacted — the log is, the chain is the audit.
+A node that only replicates, a hub, has nothing to audit: `open({ chain:
+false })` keeps none, saves two file writes per record, reads records without
+re-verifying them (`integrity` is lazy, there is no block to check against),
+and `validate()` rejects with `code: 'NO_CHAIN'`.
+
 ```js
 await storage.validate({ last: 10 }); // delegates to the chain
 ```

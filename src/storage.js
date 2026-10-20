@@ -309,11 +309,14 @@ class Storage extends Emitter {
   #chain = null;
   #log = null;
   #records = null;
+  #reaper = null;
   #sync = null;
   #cache = new Map();
   #cacheMax = DEFAULT_CACHE;
   #verify = true;
+  #chained = true;
   #catalog = null;
+  #catalogSave = null;
   #flushEvery = DEFAULT_FLUSH_EVERY;
   #fsi;
   #lock = null;
@@ -353,7 +356,14 @@ class Storage extends Emitter {
     this.#options = options;
     this.#getId = Storage.generateId;
     this.#path = options.path || options.name || 'syncom';
+    // Live Records, weakly: one the application still holds pins its cache
+    // entry and follows the record; one it dropped is collected, and its
+    // slot here with it.
     this.#records = new Map();
+    this.#reaper = new FinalizationRegistry((id) => {
+      const ref = this.#records.get(id);
+      if (ref !== undefined && ref.deref() === undefined) this.#records.delete(id);
+    });
     this.#logger = createLogger(options.logger);
     this.#otel = createTelemetry(options.telemetry);
     // The backend: node:fs or OPFS by default, anything with the five
@@ -382,7 +392,14 @@ class Storage extends Emitter {
     if (integrity !== 'verify' && integrity !== 'lazy') {
       throw new TypeError("open({ integrity }): integrity must be 'verify' or 'lazy'");
     }
-    this.#verify = integrity === 'verify';
+    // `chain: false` keeps no hash-linked log of what this node applied —
+    // a hub that only replicates has nothing to audit and saves two file
+    // writes per record; with no block to check against, reads are lazy.
+    if (options.chain !== undefined && typeof options.chain !== 'boolean') {
+      throw new TypeError('open({ chain }): chain must be a boolean');
+    }
+    this.#chained = options.chain !== false;
+    this.#verify = this.#chained && integrity === 'verify';
     const flushEvery = options.catalog?.flushEvery;
     if (flushEvery !== undefined) {
       if (!Number.isInteger(flushEvery) || flushEvery < 1) {
@@ -455,7 +472,7 @@ class Storage extends Emitter {
   async #open() {
     const fsi = this.#fsi;
     this.#keys = await loadKeys(`${this.#path}/keys`, { fsi });
-    this.#chain = await new Blockchain(`${this.#path}/blockchain`, { fsi });
+    this.#chain = this.#chained ? await new Blockchain(`${this.#path}/blockchain`, { fsi }) : null;
     this.#log = await new OpLog(this.#path, {
       ...this.#options.sync?.log,
       retention: this.#options.sync?.retention,
@@ -529,10 +546,27 @@ class Storage extends Emitter {
     return { type: entry.data.$type, v: entry.meta.v ?? null, data };
   }
 
-  // The persisted catalog is written every `flushEvery` puts and at close;
-  // what lands in between is caught up from the log on the next open.
-  async #flushCatalog() {
-    if (this.#catalog.dirty >= this.#flushEvery) await this.#catalog.save(this.#log.lastEventId);
+  // The persisted catalog is written every `flushEvery` puts and at close,
+  // off the mutation queue: the rows and the stamp are taken as the save
+  // starts and the write runs while writes go on, one save at a time. What
+  // lands in between is caught up from the log on the next open.
+  #flushCatalog() {
+    if (this.#catalogSave !== null || this.#catalog.dirty < this.#flushEvery) return;
+    this.#catalogSave = this.#catalog
+      .save(this.#log.lastEventId)
+      .catch((error) => this.#logger.warn({ event: 'catalog.save', err: error }))
+      .finally(() => {
+        this.#catalogSave = null;
+      });
+  }
+
+  // The Record the application holds for `id`, if it still does.
+  #live(id) {
+    const ref = this.#records.get(id);
+    if (ref === undefined) return undefined;
+    const record = ref.deref();
+    if (record === undefined) this.#records.delete(id);
+    return record;
   }
 
   // The newest entries stay; a live Record pins its own. Absent ids are
@@ -543,7 +577,7 @@ class Storage extends Emitter {
     if (this.#cache.size <= this.#cacheMax) return;
     for (const key of this.#cache.keys()) {
       if (this.#cache.size <= this.#cacheMax) break;
-      if (this.#records.has(key)) continue;
+      if (this.#live(key) !== undefined) continue;
       this.#cache.delete(key);
     }
   }
@@ -866,7 +900,7 @@ class Storage extends Emitter {
   }
 
   #emitUpdate(id, data, delta, source = null) {
-    const record = this.#records.get(id);
+    const record = this.#live(id);
     if (record) record[REFRESH](data, delta, source);
   }
 
@@ -928,11 +962,14 @@ class Storage extends Emitter {
   // One chain block per applied batch: `records` maps every touched id to
   // the hash of its data after the batch, `from`/`to` are the log positions.
   async #persistBatch(touched, fromSeq, toSeq) {
-    const records = {};
-    for (const [id, entry] of touched) records[id] = await calculateHash(entry.data);
-    const from = this.#log.formatId(fromSeq);
-    const to = this.#log.formatId(toSeq);
-    const blockHash = await this.#chain.addBlock({ records, from, to });
+    let blockHash = null;
+    if (this.#chain) {
+      const records = {};
+      for (const [id, entry] of touched) records[id] = await calculateHash(entry.data);
+      const from = this.#log.formatId(fromSeq);
+      const to = this.#log.formatId(toSeq);
+      blockHash = await this.#chain.addBlock({ records, from, to });
+    }
     for (const [id, entry] of touched) await this.#writeEntry(id, entry, blockHash);
     return blockHash;
   }
@@ -1087,7 +1124,7 @@ class Storage extends Emitter {
     if (who !== null) op.actor = who;
     // Sequence numbers run per stream (see vector.js opKey): the scope's,
     // or the bootstrap stream for a merge.
-    op.seq = (this.#log.vector[opKey(op)] ?? 0) + 1;
+    op.seq = this.#log.seqOf(opKey(op)) + 1;
     if (payload.data !== undefined) op.data = payload.data;
     if (payload.meta !== undefined) op.meta = payload.meta;
     if (payload.key !== undefined) op.key = payload.key;
@@ -1133,12 +1170,15 @@ class Storage extends Emitter {
     }
 
     const [{ seq: position }] = await this.#log.append([op]);
-    const hash = await calculateHash(entry.data);
-    const blockHash = await this.#chain.addBlock({ id, hash, from: this.#log.formatId(position) });
+    let blockHash = null;
+    if (this.#chain) {
+      const hash = await calculateHash(entry.data);
+      blockHash = await this.#chain.addBlock({ id, hash, from: this.#log.formatId(position) });
+    }
     await this.#writeEntry(id, entry, blockHash);
     this.#log.applied(position);
 
-    await this.#flushCatalog();
+    this.#flushCatalog();
 
     const alive = isAlive(entry);
     // afterWrite sees a durable op; whatever it does, the record views and
@@ -1162,20 +1202,19 @@ class Storage extends Emitter {
   // log, because no peer could read it. Reached only through #commit.
   async #writeEncrypted(id, data) {
     const record = await encrypt(data, this.#keys.publicKey);
-    const hash = await calculateHash(record);
-    const blockHash = await this.#chain.addBlock({ id, hash });
+    const blockHash = this.#chain ? await this.#chain.addBlock({ id, hash: await calculateHash(record) }) : null;
     const entry = { data: record, meta: null, encrypted: true, timestamp: Date.now(), block: blockHash };
     await this.#fsi.write(`${this.#path}/data`, `${id}.json`, JSON.stringify(entry));
     this.#remember(id, { data, meta: null, encrypted: true, block: blockHash });
     this.#catalog.put(id, { type: data?.$type, v: null, encrypted: true });
-    await this.#flushCatalog();
+    this.#flushCatalog();
   }
 
   async #removeEncrypted(id) {
     await this.#fsi.remove(`${this.#path}/data`, `${id}.json`);
     this.#cache.delete(id);
     this.#catalog.put(id, null);
-    await this.#flushCatalog();
+    this.#flushCatalog();
   }
 
   async saveData(id, data, options = {}) {
@@ -1192,6 +1231,11 @@ class Storage extends Emitter {
     // single record against its block, anything else walks the chain. A record
     // id is always a string, so that is the discriminator.
     const isChainValidation = typeof idOrOptions !== 'string' && !data && !blockHash;
+    if (this.#chain === null) {
+      const error = new TypeError('open({ chain: false }): this storage keeps no chain to validate against');
+      error.code = 'NO_CHAIN';
+      throw error;
+    }
     if (isChainValidation) {
       return await this.#chain.validate(idOrOptions);
     }
@@ -1231,7 +1275,7 @@ class Storage extends Emitter {
 
   /** Whether `id` is a live record here — answered from the catalog, no I/O. */
   hasRecord(id) {
-    return this.#catalog.has(id) || this.#records.has(id);
+    return this.#catalog.has(id) || this.#live(id) !== undefined;
   }
 
   // The raw read: what `get` returns before its hooks. `swap` compares
@@ -1305,11 +1349,13 @@ class Storage extends Emitter {
   }
 
   async record(id) {
-    if (!this.#records.has(id)) {
-      const record = await new Record(id, this);
-      this.#records.set(id, record);
+    let record = this.#live(id);
+    if (record === undefined) {
+      record = await new Record(id, this);
+      this.#records.set(id, new WeakRef(record));
+      this.#reaper.register(record, id);
     }
-    return this.#records.get(id);
+    return record;
   }
 
   getCachedData(id) {
@@ -1536,7 +1582,7 @@ class Storage extends Emitter {
         if (adopted) await this.#log.advance(adopted);
         if (touched.size > 0) {
           await this.#persistBatch(touched, entries[0].seq, entries[entries.length - 1].seq);
-          await this.#flushCatalog();
+          this.#flushCatalog();
         }
         this.#log.applied(entries[0].seq, entries[entries.length - 1].seq);
         if (purged) for (const id of purged) await this.#log.scrub(id);
@@ -1640,6 +1686,7 @@ class Storage extends Emitter {
     this.#closed = true;
     await this.#sync.stop();
     const seal = async () => {
+      await this.#catalogSave;
       await this.#catalog.save(this.#log.lastEventId);
       await this.#log.close();
     };

@@ -434,3 +434,8 @@ expectError(storage.swap('id', 'text', { a: 1 }));
 expectType<boolean>(storage.sync.peers()[0].behind);
 expectAssignable<StorageOptions>({ sync: { maxOutbox: 500 } });
 expectError(syncom.open({ sync: { maxOutbox: 'lots' } }));
+
+// E4a: no chain, seqOf
+expectAssignable<StorageOptions>({ chain: false });
+expectError(syncom.open({ chain: 'no' }));
+expectType<number>(log.seqOf('origin@scope'));

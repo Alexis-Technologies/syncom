@@ -577,3 +577,69 @@ test('swap compares inside the queue: two swaps on one expectation cannot both p
   await assert.rejects(() => storage.swap(id, { a: 1 }, null), TypeError);
   assert.strictEqual(storage.log.length, 2, 'the losing swaps wrote nothing');
 });
+
+test('chain: false keeps no chain, writes less, and says so when asked to validate', async (t) => {
+  const fsp = require('node:fs/promises');
+  const nodePath = require('node:path');
+  const tempDir = await createTemp();
+  t.after(() => cleanupTemp(tempDir));
+  const storage = await syncom.open({ path: tempDir, logger: false, chain: false });
+  const id = await storage.insert({ n: 1 });
+  await storage.update(id, { n: 2 });
+  await storage.inc(id, 'hits', 3);
+  await storage.saveData('sealed', { secret: true }, { encrypted: true });
+  await storage.applyRemote([{ origin: 'peer', seq: 1, ts: Date.now(), type: 'write', id: 'r', data: { p: 1 } }]);
+  assert.deepStrictEqual(await storage.get(id), { n: 2, hits: 3 });
+  assert.deepStrictEqual(await storage.get('sealed'), { secret: true });
+  assert.deepStrictEqual(await storage.get('r'), { p: 1 });
+  await assert.rejects(() => storage.validate(), { code: 'NO_CHAIN' });
+  await assert.rejects(() => storage.validate(id, { n: 2 }, 'x'), { code: 'NO_CHAIN' });
+  await assert.rejects(() => fsp.stat(nodePath.join(tempDir, 'blockchain')), /ENOENT/);
+  const stored = JSON.parse(await fsp.readFile(nodePath.join(tempDir, 'data', `${id}.json`), 'utf8'));
+  assert.strictEqual(stored.block, null);
+  await storage.close();
+  // A cold read trusts the file: there is no block to check against.
+  const again = await syncom.open({ path: tempDir, logger: false, chain: false });
+  t.after(() => again.close());
+  assert.deepStrictEqual(await again.get(id), { n: 2, hits: 3 });
+  assert.deepStrictEqual((await again.snapshot()).records.map((r) => r.id).sort(), [id, 'r'].sort());
+  assert.throws(() => syncom.open({ path: `${tempDir}-bad`, logger: false, chain: 'no' }), TypeError);
+});
+
+test(
+  'a Record the application dropped lets go of its cache entry',
+  { skip: typeof globalThis.gc !== 'function' },
+  async (t) => {
+    const tempDir = await createTemp();
+    t.after(() => cleanupTemp(tempDir));
+    const storage = await syncom.open({ path: tempDir, logger: false, cache: { max: 2 } });
+    t.after(() => storage.close());
+    let dropped = await storage.record(await storage.insert({ n: 1 }));
+    const droppedId = dropped.id;
+    const kept = await storage.record(await storage.insert({ n: 2 }));
+    dropped = null;
+    globalThis.gc();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    globalThis.gc();
+    for (let i = 0; i < 5; i++) await storage.insert({ i });
+    assert.strictEqual(storage.getCachedData(kept.id)?.n, 2, 'a held Record pins its entry');
+    assert.strictEqual(storage.getCachedData(droppedId), null, 'a dropped one does not');
+    assert.strictEqual(storage.hasRecord(droppedId), true, 'the record itself is still there, in the catalog');
+  },
+);
+
+test('a live Record is the same instance while held, and a new one after delete', async (t) => {
+  const tempDir = await createTemp();
+  t.after(() => cleanupTemp(tempDir));
+  const storage = await syncom.open({ path: tempDir, logger: false });
+  t.after(() => storage.close());
+  const id = await storage.insert({ n: 1 });
+  const a = await storage.record(id);
+  const b = await storage.record(id);
+  assert.strictEqual(a, b);
+  await storage.delete(id);
+  await storage.set(id, { n: 2 });
+  const c = await storage.record(id);
+  assert.notStrictEqual(a, c);
+  assert.strictEqual(c.n, 2);
+});

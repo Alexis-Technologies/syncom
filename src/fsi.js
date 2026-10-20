@@ -6,12 +6,28 @@ const { fileExists } = require('./utils.js');
 
 const read = (dir, filename) => fs.readFile(path.join(dir, filename), 'utf8');
 
+// Directories this process has written into: `mkdir -p` on every write is a
+// syscall the hot path need not pay twice. A directory removed behind our
+// back fails the write with ENOENT, which makes it again, once.
+const known = new Set();
+
 // `options.mode` is a hint for a backend with file permissions — the
 // private key asks for owner-only; adapters without permissions ignore it.
 const write = async (dir, filename, content, options) => {
-  await fs.mkdir(dir, { recursive: true });
   const mode = options?.mode;
-  await fs.writeFile(path.join(dir, filename), content, mode === undefined ? undefined : { mode });
+  const target = path.join(dir, filename);
+  const fileOptions = mode === undefined ? undefined : { mode };
+  if (!known.has(dir)) {
+    await fs.mkdir(dir, { recursive: true });
+    known.add(dir);
+  }
+  try {
+    await fs.writeFile(target, content, fileOptions);
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(target, content, fileOptions);
+  }
 };
 
 const exists = (dir, filename) => fileExists(path.join(dir, filename));
