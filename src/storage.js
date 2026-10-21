@@ -9,6 +9,7 @@
 
 const { Emitter, generateUUID, createLogger } = require('./utils.js');
 const { decrypt, loadKeys, loadSigningKeys, calculateHash } = require('./crypto.js');
+const { signOp } = require('./signing.js');
 const { Blockchain } = require('./chain.js');
 const { SyncManager } = require('./sync.js');
 const { OpLog } = require('./log.js');
@@ -271,6 +272,8 @@ class Storage extends Emitter {
       version: this.#version,
       ahead: this.#ahead,
       maxSkew: this.#maxSkew,
+      // Signs an op of this node's own, in place, once it is final.
+      sign: (op) => signOp(op, this.#signing.privateKey),
       hook: (name, ...args) => this.#hook(name, ...args),
       view: (id, entry) => this.#view(id, entry),
       scopeOf: (id, data) => this.#scope(id, data),

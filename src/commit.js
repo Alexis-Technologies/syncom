@@ -174,10 +174,13 @@ const validateLocal = async (core, op, current, visible, ctx) => {
   return { entry, delta };
 };
 
-// Log first (the seq is durable from here), then the chain block, then the
-// record file; the log is told the batch landed.
+// Signed, then logged (the seq is durable from here), then the chain block,
+// then the record file; the log is told the batch landed. The signature is
+// made here and nowhere earlier: validateLocal rewrote `op.data`, and what
+// the peers receive is what must verify.
 const persistLocal = async (core, op, entry) => {
   const { id } = op;
+  if (core.sign !== null) await core.sign(op);
   const [{ seq: position }] = await core.log.append([op]);
   let blockHash = null;
   if (core.chain) {

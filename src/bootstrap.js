@@ -148,6 +148,10 @@ const mergeBatch = async (core, records, via, from) => {
   };
   for (const record of records) await mergeOne(batch, record);
   if (batch.ops.length === 0) return;
+  // Signed here, not in mergeOne: an op's seq is assigned after applyOp,
+  // and the signature covers it. The joiner signs the host's state as its
+  // own — a snapshot record carries no provenance to sign over.
+  if (core.sign !== null) for (const op of batch.ops) await core.sign(op);
   const entries = await core.log.append(batch.ops);
   const first = entries[0].seq;
   const last = entries[entries.length - 1].seq;
@@ -183,6 +187,7 @@ const adopt = async (core, vector, { via = null, from = null } = {}) => {
   const op = { origin: core.nodeId, seq: 0, ts: core.clock.now(), type: 'advance', vector: news };
   if (from) op.from = from;
   op.seq = (known[opKey(op)] ?? 0) + 1;
+  if (core.sign !== null) await core.sign(op);
   const [{ seq }] = await core.log.append([op]);
   await core.log.advance(news);
   core.log.applied(seq);

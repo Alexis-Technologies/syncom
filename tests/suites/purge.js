@@ -56,8 +56,15 @@ const runPurgeTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual([purge.type, purge.actor, purge.id], ['purge', 'dpo', person.id]);
     const entries = storage.log.since(undefined).filter((entry) => entry.op.id === person.id);
     assert.ok(entries.length >= 5);
-    const bare = (op) => !('data' in op) && !('key' in op) && !('value' in op);
+    const bare = (op) => !('data' in op) && !('key' in op) && !('value' in op) && !('nonce' in op);
     assert.ok(entries.every((entry) => entry.scrubbed === true && bare(entry.op)));
+    // The signature and the digest stay, and the header still verifies —
+    // required lazily, after the wrapper primed the crypto half.
+    const { verifyOp } = require('../../src/signing.js');
+    for (const entry of entries) {
+      assert.strictEqual(typeof entry.op.sig, 'string');
+      assert.strictEqual(await verifyOp(entry.op, 'require'), 'ok', `${entry.op.type} after the scrub`);
+    }
     const page = await storage.snapshot();
     const tombstone = page.records.find((r) => r.id === person.id);
     assert.deepStrictEqual(tombstone.data, {});
