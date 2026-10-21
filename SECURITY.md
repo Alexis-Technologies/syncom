@@ -52,7 +52,8 @@ These are the areas where a report matters most, roughly in order:
   evidence claim rests on blocks hashing to what they are filed under and on
   `validate` walking `prev` honestly. A way to mutate a record or block and
   still pass `validate` is a vulnerability.
-- **Replication** (`src/sync.js`, `src/ops.js`, `src/log.js`). A peer is
+- **Replication** (`src/sync.js`, `src/hosting.js`, `src/apply.js`, `src/ops.js`,
+  `src/log.js`). A peer is
   trusted with everything its scopes cover: anything that passes `hello`
   (the unit's `access`, your `authorize(context, hello)`, the transport's own
   authentication) can write any record in those scopes. The host holds it to

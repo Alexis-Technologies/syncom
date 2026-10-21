@@ -451,6 +451,24 @@ section until the first publish; everything below lands there on release day.
   `../lib/` directory that does not exist in this layout.
 - `examples/main.js` required a `globalstorage.js` that does not exist.
 
+### Changed
+
+- **The engine is modules, not one class.** `src/storage.js` (1 900 lines)
+  is now the facade — the open sequence, the mutation queue, the public API
+  — and lends a `core` to its three write paths: `src/commit.js` (a local
+  op: prepare, validate, persist, announce), `src/apply.js` (a peer's batch:
+  admit, apply, persist, announce) and `src/bootstrap.js` (snapshot pages,
+  merge pages, `adoptVector`). Record files, the cache and the catalog rows
+  live in `src/entries.js` (`EntryStore`); `Reference`/`Record`/`Collection`
+  in `src/record.js`; `open()`'s option checks in `src/options.js`; the
+  entrance checks (ids, stream names, a peer's op shape) in `src/shape.js`;
+  the hosting side of replication in `src/hosting.js` (`createUnit`), with
+  `src/protocol.js` for what both halves share. No public name, error
+  message, event, hook signature or on-disk format changed; every function
+  in the engine is now under 60 lines. The browser budget was raised
+  33.5 → 35.5 KB: a class's private names minify to one letter, the property
+  names of a seam shared between modules do not (+2.3 KB min+gzip).
+
 ### Changed (breaking)
 
 - A record id is `[A-Za-z0-9_@-][A-Za-z0-9._@-]{0,127}`; every writer rejects

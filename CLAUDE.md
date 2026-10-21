@@ -26,17 +26,27 @@ src/backend.js            the fsi contract (isFsi/checkFsi), createMemoryFsi, wi
 src/emitter.js            the Emitter both halves extend — no requires
 src/logger.js             createLogger, the duck-typed logger writer — no requires
 src/keys.js               loadKeyPair — the on-disk key pair, generator injected by each crypto half — no requires
-src/scope.js              GLOBAL_SCOPE, inScope — the one definition of "in scope" — no requires
+src/scope.js              GLOBAL_SCOPE, inScope, opInScope — the one definition of "in scope" — no requires
+src/shape.js              isPlainObject, asJson, isRecordId, isStreamName, wellFormed — what enters is checked here — no requires
+src/symbols.js            COMMIT / REFRESH / SOURCE — the module-private seams between Storage and what it hands out — no requires
+src/options.js            normalizeStorageOptions — open()'s plain options checked and defaulted (lock, cache, chain, skew…)
+src/protocol.js           PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf — what both halves of the sync protocol agree on — no requires
 src/lock.js               exclusive open: Web Locks or lock.json, stale by pid or age — no requires
 src/catalog.js            the record catalog: live ids, collections, indexed values; index/catalog.json — no requires
 src/query.js              compileQuery (Mango predicate), compareRows, Cursor — reads through storage[SOURCE]
 src/shared-log.js         isSharedLog — the reserved broker-log contract (wrpc BrokerLog shape), no consumer yet
-src/storage.js            Storage, Record, Collection — every write is an op
+src/storage.js            Storage — the facade: open sequence, the mutation queue, the public API, the `core` it lends
+src/entries.js            EntryStore — record files under data/, the bounded cache, the catalog row each change leaves
+src/record.js             Reference, Record, Collection — what the application holds; public API + the symbols only
+src/commit.js             the one local write path: prepare → validate → persist → announce (`storage[COMMIT]`)
+src/apply.js              a peer's batch: admit → apply one by one → persist → announce (`storage.applyRemote`)
+src/bootstrap.js          snapshot pages out, merge pages in, adoptVector — the bootstrap write path
 src/schema.js             entity definitions, the injected validator (Standard Schema / ajv / compile), ValidationError
 src/ops.js                the record-level model: applyOp / mergeEntry / isAlive, packOps
 src/vector.js             clocks, version vectors, event ids
 src/log.js                OpLog — the persisted operation log over fsi
-src/sync.js               SyncManager (dialing side) + unit() (hosting side)
+src/sync.js               SyncManager — the dialing side; `unit()` delegates to hosting.js
+src/hosting.js            createUnit — the hosting side: hello/push/snapshot/changes, limits, grant()
 src/link.js               isSyncLink — the link contract check
 src/wrpc.js               createWrpcLink — a WrpcClient as a SyncLink (no wrpc import)
 src/telemetry.js          the injected-OpenTelemetry writer (duck-typed; @opentelemetry/* only devDeps)
@@ -72,16 +82,17 @@ docs/                     VitePress site
 - **wrpc is injected, never required.** Nothing under `src/` may
   `require('@alexify/wrpc')`; `scripts/size.js` fails on any bare import in a
   browser bundle anyway. `src/wrpc.js` duck-types the client it is handed, and
-  `unit()` builds plain `{ access, handler }` objects that `defineRouter`
-  accepts without wrpc's `procedure()`. The `tracked` shape it emits is
+  `unit()` (`src/hosting.js`) builds plain `{ access, handler }` objects that
+  `defineRouter` accepts without wrpc's `procedure()`. The `tracked` shape it emits is
   `Symbol.for('wrpc.tracked')` — part of wrpc's frozen wire protocol.
 - **A record id is checked where it enters, nowhere else.** `isRecordId` in
-  `src/storage.js` (`[A-Za-z0-9_@-][A-Za-z0-9._@-]{0,127}`) guards `[COMMIT]`
-  (every local writer), `insert` (what `getId` minted), the malformed check
-  of `#applyRemote` and `mergeSnapshot`; `#load` answers `null` for anything
-  else. An id is a file name on three platforms — do not widen the class, and
-  do not add a writer that reaches `#writeEntry` without passing one of those.
-- **A peer's op is `wellFormed` or it is nothing.** `#applyRemote` checks
+  `src/shape.js` (`[A-Za-z0-9_@-][A-Za-z0-9._@-]{0,127}`) guards `[COMMIT]`
+  (every local writer), `insert` (what `getId` minted), `admit` in
+  `src/apply.js` (the malformed check) and `mergeOne` in `src/bootstrap.js`;
+  `EntryStore.load` answers `null` for anything else. An id is a file name on
+  three platforms — do not widen the class, and do not add a writer that
+  reaches `EntryStore.write` without passing one of those.
+- **A peer's op is `wellFormed` or it is nothing.** `admit` (`src/apply.js`) checks
   `origin`/`scope` (no `@`, no control characters), `seq`/`ts` (positive safe
   integers), `type`, `v` and the id before reading anything else (`actor`
   and `from` are claims, carried as they are); a stamp beyond `sync.maxSkew`
@@ -99,9 +110,9 @@ docs/                     VitePress site
   `normalizeMeta` deep-copies a peer's meta into the trusted shape. A
   `for...in` or a bare `obj[key]` over peer-shaped data is a bug.
 - **The chain is optional, the log is not.** `open({ chain: false })` leaves
-  `#chain` null: `#commit`, `#persistBatch` and `#writeEncrypted` write
-  `block: null`, `#verify` is forced off, `validate()` throws `NO_CHAIN`. A
-  new place that reads `this.#chain` must take null.
+  `core.chain` null: `persistLocal`/`seal` in `src/commit.js` and
+  `#persistBatch` write `block: null`, `verify` is forced off, `validate()`
+  throws `NO_CHAIN`. A new place that reads the chain must take null.
 - **`via` is a descriptor, never the link.** `peer.ref` (`{ url, node }`,
   `node` filled by hello) is what `change`, `apply` and the apply hooks get
   on the dialing side; the host's is `state.ref` (`url` null). `#fanOut`
@@ -114,9 +125,9 @@ docs/                     VitePress site
 - **A purge is a scrub, not a delete.** `purge` wins at any stamp and a
   purged entry takes nothing but another purge or a merge (`applyOp`
   returns early). The payload leaves the log through `OpLog.scrub(id)`,
-  which rewrites files in place; `#applyRemote` scrubs every id of the
-  batch whose entry is purged, after the batch is durable and before the
-  relay. Never log a payload for a purged id through another path.
+  which rewrites files in place; `persist` in `src/apply.js` scrubs every id
+  of the batch whose entry is purged, after the batch is durable and before
+  the relay. Never log a payload for a purged id through another path.
 - **`packOps` is 14 positional slots, both halves together.** `v` (13) and
   `actor` (14) were appended; a reader of fewer slots ignores the rest, a
   reader of more takes an absent slot as null. Append, never reorder — the
@@ -135,8 +146,8 @@ docs/                     VitePress site
 - **Log first, then data.** `OpLog.append` resolves before the record file is
   written and before the op is announced; a reopen replays the unsealed tail.
   A node's own seq must never repeat — it is recovered from the log's vector.
-  The storage opens its log with `sealApplied: true` and calls
-  `log.applied(from, to)` after `#writeEntry`/`#persistBatch`; a roll then
+  The storage opens its log with `sealApplied: true` and every write path
+  calls `log.applied(from, to)` after `EntryStore.write`/`#persistBatch`; a roll then
   seals nothing from the oldest batch not yet applied onwards. A new path
   that appends must mark what it applied, or the tail grows forever.
 - **A failed page is a break in the stream.** `#receive` runs pages one after
@@ -145,21 +156,24 @@ docs/                     VitePress site
   reports `PAGE_FAILED` with the saved cursor, and resubscribes from it —
   `STUCK` after `MAX_PAGE_RETRIES`. Never move `node.cursor` past a page that
   did not land, and never catch inside `#receive` to "keep going".
-- **Data crosses the boundary as JSON copies.** `#commit` copies `payload.data`/
-  `payload.meta` (`asJson`) before anything keeps a reference; `#read` and
-  `Cursor.fetch()` hand out copies. `getCachedData()` and `snapshot()` are the
+- **Data crosses the boundary as JSON copies.** `src/commit.js` copies
+  `payload.data` and `src/bootstrap.js` a record's `data`/`meta` (`asJson`)
+  before anything keeps a reference; `#read` and `Cursor.fetch()` hand out
+  copies. `getCachedData()` and `snapshot()` are the
   raw objects on purpose. Do not return `entry.data` from a public method.
 - **Stamps come from `#clock.now()` after the clock has observed everything
-  the node holds for the record.** `#commit` in `src/storage.js` does that
-  (`latestClock` over the entry's meta), `#mergeBatch` does it over the
-  entry's meta AND the joined meta, and `Storage.#init` seeds the clock from
-  `log.latestTs`; `applyRemote` observes every peer op. A stamp taken any
-  other way can sort below state the node already has, and `applyOp` then
-  drops the write silently (`changed` false, `COMMIT` returns null). There
-  are exactly three write paths — `#commit` (a local op, through `[COMMIT]`),
-  `#applyRemote` (a peer's page), `#mergeBatch` (a snapshot page, through
-  `mergeSnapshot`) — all inside `#run`, all ending in `#persistBatch` or
-  `#writeEntry`. Do not add a fourth.
+  the node holds for the record.** `prepareOp` in `src/commit.js` does that
+  (`latestClock` over the entry's meta), `mergeOne` in `src/bootstrap.js`
+  does it over the entry's meta AND the joined meta, and `Storage.#open`
+  seeds the clock from `log.latestTs`; `src/apply.js` observes every peer op.
+  A stamp taken any other way can sort below state the node already has, and
+  `applyOp` then drops the write silently (`changed` false, `COMMIT` returns
+  null). There are exactly three write paths — `src/commit.js` (a local op,
+  through `[COMMIT]`), `src/apply.js` (a peer's page, through `applyRemote`),
+  `src/bootstrap.js` (a snapshot page, through `mergeSnapshot`) — all inside
+  `#run`, all over the `core` Storage lends them (`#lend`), all ending in
+  `#persistBatch` or `EntryStore.write`. Do not add a fourth, and do not
+  reach the storage's state from a path module except through `core`.
 - **Reconnect/backoff/resume belong to the link.** `SyncManager` re-runs only
   `hello` + `push` on `reconnect`; a refused restored subscription (428 "say
   hello first" — wrpc gives a reconnect a NEW server-side client) triggers a
@@ -209,14 +223,14 @@ docs/                     VitePress site
   `snapshot()` and `swap()`. Unique keys are checked after validation and
   the fold, before `#log.append` (local: throw) and after `applyOp` on the
   apply path (remote: `conflict` event, never a skip — both records stay).
-- **The catalog is derived state, kept at one seam.** `#writeEntry` (both
-  write paths go through it), `#writeEncrypted` and `#removeEncrypted` are
-  the only places that `catalog.put`; it indexes the lensed view and never
-  fails a write (a throwing lens is logged and the raw data indexed).
-  `#flushCatalog` saves it OFF the mutation queue — `Catalog.save` takes the
-  rows and the stamp before its first await, one save in flight at a time,
-  `close()` awaits it — so a write never waits for the catalog file. Do not
-  `await` a save inside `#commit`/`#applyRemote`.
+- **The catalog is derived state, kept at one seam.** `EntryStore`
+  (`src/entries.js`) is the only place that `catalog.put`: `write` (every
+  write path goes through it), `writeSealed`, `remove` and `index`; it
+  indexes the lensed view and never fails a write (a throwing lens is logged
+  and the raw data indexed). `#flushCatalog` (`core.flush`) saves it OFF the
+  mutation queue — `Catalog.save` takes the rows and the stamp before its
+  first await, one save in flight at a time, `close()` awaits it — so a write
+  never waits for the catalog file. Do not `await` a save inside a write path.
   `list()`/`hasRecord()` read it, and so does `snapshot()`: a tombstone is a
   row flagged `gone` (there, not listed), so a page is a slice of
   `catalog.all()` and never a directory listing. A new way of changing a
@@ -248,12 +262,13 @@ docs/                     VitePress site
   requires — it ships to the browser) is the whole mechanism. Storage hooks
   go through `#hook()` inside the mutation queue, and `#run` refuses a write
   while one is running — a write from a hook would wait for the hook that
-  waits for it. Hook calls live in `#commit`, `get`, `#applyRemote`,
-  `#connect` and `#bootstrap` only; there is deliberately no hook on the ops
+  waits for it. Hook calls live in `src/commit.js`, `src/bootstrap.js`
+  (`core.hook`), `get`, `src/apply.js`, `#connect` and `#bootstrap` only; there is deliberately no hook on the ops
   that leave for a peer (a withheld op is a gap that stops that stream —
   scopes are the per-peer filter). Only the hooks that run inside the
-  mutation queue go through `#hook` and its `#inHook` guard; `beforeRead`/
-  `afterRead` call `runHook` directly — a write from a read hook queues. Every event leaves through `notify()`:
+  mutation queue go through `#hook` (`core.hook`) and its `#inHook` guard;
+  `beforeRead`/`afterRead` call `runHook` directly — a write from a read hook
+  queues. Every event leaves through `notify()`:
   never `await this.emit(...)`, never emit `error` any other way (the Emitter
   throws on an unheard `error`, and that throw used to fail a push before the
   vector moved). A remote op a `beforeApply` skipped is still appended, with
@@ -291,7 +306,8 @@ running it before writing it down — several examples inherited from the legacy
 repo were wrong in exactly that way. A new page needs a sidebar entry in
 `docs/.vitepress/config.mts`; `docs/guide/sync.md` and `docs/guide/wrpc.md`
 are the two pages that describe the protocol — keep them in step with
-`src/sync.js`, `docs/guide/hooks.md` with the hook and event surface of
+`src/sync.js` and `src/hosting.js`, `docs/guide/hooks.md` with the hook and
+event surface of `src/commit.js`, `src/apply.js`, `src/bootstrap.js`,
 `src/storage.js` and `src/sync.js`, `docs/guide/schema.md` with
 `src/schema.js` (metaschema is the first-class example there; zod/ajv/JSON
 Schema are the alternatives), `docs/guide/query.md` with `src/query.js` and

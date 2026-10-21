@@ -1,0 +1,18 @@
+'use strict';
+
+// What both halves of the sync protocol agree on: the version hello carries,
+// the page size a host serves and a dialer pushes by, and the shape of a
+// peer's schema in hello. The dialing side is src/sync.js, the hosting side
+// src/hosting.js. No requires.
+
+const PROTOCOL = 1;
+const DEFAULT_PAGE_SIZE = 500;
+
+// A peer's schema as hello carries it — `{ version, hash }` — or null for
+// a peer without one (or one speaking a shape this node does not read).
+const schemaOf = (value) => {
+  if (!value || typeof value !== 'object' || !Number.isInteger(value.version)) return null;
+  return { version: value.version, hash: typeof value.hash === 'string' ? value.hash : null };
+};
+
+module.exports = { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf };

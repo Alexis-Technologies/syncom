@@ -10,4 +10,7 @@ const GLOBAL_SCOPE = '*';
 const inScope = (scope, scopes) =>
   !scopes || scope === GLOBAL_SCOPE || scopes.includes(GLOBAL_SCOPE) || scopes.includes(scope);
 
-module.exports = { GLOBAL_SCOPE, inScope };
+// An op without a `scope` is in the global one.
+const opInScope = (op, scopes) => inScope(op.scope ?? GLOBAL_SCOPE, scopes);
+
+module.exports = { GLOBAL_SCOPE, inScope, opInScope };

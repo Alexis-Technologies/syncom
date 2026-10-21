@@ -11,28 +11,25 @@
 //   does all three); on `reconnect` the manager only repeats hello + push,
 //   the outbound half a transport cannot know about.
 //
-//   unit() — the HOSTING side: a plain object of `{ access, handler }`
-//   procedures shaped for wrpc's defineRouter, with no import of wrpc.
-//   `changes` is an async generator, which wrpc treats as a subscription;
-//   its values are labelled with this node's log position through the
-//   `tracked` shape (Symbol.for('wrpc.tracked'), part of wrpc's frozen wire
-//   protocol), so a resuming subscriber replays exactly what it missed.
+//   unit() — the HOSTING side, built in src/hosting.js: a plain object of
+//   `{ access, handler }` procedures shaped for wrpc's defineRouter, with no
+//   import of wrpc. The manager lends it the storage, the wakers every live
+//   `changes` feed waits on, and the set `hosted()` lists.
 //
 // Every node is both: a mesh is nodes dialing whichever nodes they can
 // reach, with ops relayed transitively and de-duplicated by version vector.
 
 const { Emitter } = require('./utils.js');
 const { packOps, unpackOps } = require('./ops.js');
-const { vectorHas, vectorAdvance, vectorMax, opKey, keyScope } = require('./vector.js');
+const { vectorHas, vectorAdvance, vectorMax, keyScope } = require('./vector.js');
 const { isSyncLink } = require('./link.js');
 const { createTelemetry, traced } = require('./telemetry.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
-const { GLOBAL_SCOPE, inScope: scopeIn } = require('./scope.js');
+const { GLOBAL_SCOPE, opInScope } = require('./scope.js');
+const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf } = require('./protocol.js');
+const { createUnit } = require('./hosting.js');
 
 const REMOTE = 'remote';
-const PROTOCOL = 1;
-const DEFAULT_PAGE_SIZE = 500;
-const DEFAULT_PAGE_BYTES = 4 << 20;
 // A page that fails this many times in a row leaves its peer `stuck`.
 const MAX_PAGE_RETRIES = 3;
 // A host that answers 428 to this many fresh hellos in a row is not going to
@@ -44,7 +41,6 @@ const DEFAULT_MAX_OUTBOX = 10_000;
 // A failed recovery waits this long (doubling, by timestamp) before the next.
 const RECOVER_BACKOFF = 1000;
 const MAX_RECOVER_BACKOFF = 60_000;
-const TRACKED = Symbol.for('wrpc.tracked');
 
 // The hooks a manager accepts (`open({ sync: { hooks } })`). There is no
 // hook on what leaves for a peer: seqs run contiguously per origin and
@@ -59,32 +55,6 @@ const NOT_DIALLED = Symbol('syncom.notDialled');
 // url without a port cannot collide.
 const fileName = (url) => `${encodeURIComponent(url)}.json`;
 
-const coded = (message, code) => {
-  const error = new Error(message);
-  error.code = code;
-  error.expose = true;
-  return error;
-};
-
-const LIMIT_KEYS = ['opsPerPush', 'bytesPerPush', 'opsPerSecond'];
-
-// `unit({ limits })`: each a positive number, unknown keys refused.
-const normalizeLimits = (limits) => {
-  if (limits === undefined || limits === null) return null;
-  if (typeof limits !== 'object') throw new TypeError('unit({ limits }): limits must be an object');
-  const normalized = {};
-  for (const key of Object.keys(limits)) {
-    if (!LIMIT_KEYS.includes(key)) throw new TypeError(`unit({ limits }): unknown limit '${key}'`);
-    const value = limits[key];
-    if (value === undefined) continue;
-    if (!Number.isFinite(value) || value <= 0) {
-      throw new TypeError(`unit({ limits }): ${key} must be a positive number`);
-    }
-    normalized[key] = value;
-  }
-  return normalized;
-};
-
 // The part of a vector that concerns `scopes`: global keys (`origin`) and
 // the `origin@scope` keys of the scopes asked for.
 const scopedVector = (vector, scopes) => {
@@ -96,44 +66,6 @@ const scopedVector = (vector, scopes) => {
   }
   return out;
 };
-
-const inScope = (op, scopes) => scopeIn(op.scope ?? GLOBAL_SCOPE, scopes);
-
-// The scopes a read may cover: what hello granted, narrowed to what the
-// call asks for. A peer granted `'*'` reads what it asks (nothing asked:
-// everything); one granted a list reads the intersection — asking for `'*'`
-// or for nothing is asking for its list, asking only for others is 403.
-const grant = (asked, granted) => {
-  const wanted = Array.isArray(asked) ? asked.filter((scope) => typeof scope === 'string') : null;
-  if (granted.includes(GLOBAL_SCOPE)) return wanted;
-  if (wanted === null || wanted.includes(GLOBAL_SCOPE)) return granted;
-  const scopes = wanted.filter((scope) => granted.includes(scope));
-  if (scopes.length === 0) throw coded('Scopes not granted', 403);
-  return scopes;
-};
-
-// A peer's schema as hello carries it — `{ version, hash }` — or null for
-// a peer without one (or one speaking a shape this node does not read).
-const schemaOf = (value) => {
-  if (!value || typeof value !== 'object' || !Number.isInteger(value.version)) return null;
-  return { version: value.version, hash: typeof value.hash === 'string' ? value.hash : null };
-};
-
-// Resolves on the next change (or abort). The manager keeps ONE listener on
-// the storage and wakes every waiting subscription from it, because Emitter
-// refuses more than ten listeners and a host has as many `changes` feeds as
-// it has peers.
-const waitFor = (wakers, signal) =>
-  new Promise((resolve) => {
-    if (signal?.aborted) return void resolve();
-    const done = () => {
-      wakers.delete(done);
-      signal?.removeEventListener?.('abort', done);
-      resolve();
-    };
-    wakers.add(done);
-    signal?.addEventListener?.('abort', done, { once: true });
-  });
 
 class SyncManager extends Emitter {
   #storage;
@@ -577,7 +509,7 @@ class SyncManager extends Emitter {
     for (const { op } of entries) {
       if (op.origin === peer.remote.id || op.from === peer.remote.id) continue;
       if (vectorHas(peer.remote.vector, op)) continue;
-      if (!inScope(op, node.scopes)) continue;
+      if (!opInScope(op, node.scopes)) continue;
       ops.push(op);
     }
     return this.#send(peer, ops, reason);
@@ -861,7 +793,7 @@ class SyncManager extends Emitter {
       }
       if (op.origin === peer.remote.id || op.from === peer.remote.id) continue;
       if (vectorHas(peer.remote.vector, op)) continue;
-      if (!inScope(op, peer.node.scopes)) continue;
+      if (!opInScope(op, peer.node.scopes)) continue;
       peer.outbox.push(op);
       if (peer.outbox.length > this.#maxOutbox) {
         this.#storage.logger.warn({ event: 'sync.outbox.dropped', url: peer.node.url, ops: peer.outbox.length });
@@ -899,213 +831,17 @@ class SyncManager extends Emitter {
    * The router unit a wrpc server (or anything shaped like one) hosts:
    * `defineRouter({ syncom: storage.sync.unit({ access: 'public' }) })`.
    * `access` defaults to wrpc's own default, 'session'; `authorize(context,
-   * hello)` gates a peer by whatever the transport presented.
+   * hello)` gates a peer by whatever the transport presented. Built in
+   * src/hosting.js from what both halves share.
    */
   unit(options = {}) {
-    const {
-      access = 'session',
-      authorize = null,
-      tracked = null,
-      pageSize = DEFAULT_PAGE_SIZE,
-      pageBytes = DEFAULT_PAGE_BYTES,
-      meta,
-    } = options;
-    const limits = normalizeLimits(options.limits);
-    if (meta !== undefined && (typeof meta !== 'object' || meta === null || Array.isArray(meta))) {
-      throw new TypeError('unit({ meta }): meta must be an object');
-    }
-    const storage = this.#storage;
-    const wakers = this.#wakers;
-    const feeds = this.#feeds;
-    const track = tracked ?? ((id, data) => ({ [TRACKED]: true, id: String(id), data }));
-    // `meta` rides on every procedure: what a wrpc `onRequest` hook reads
-    // as `context.procedure.meta` — a hub-wide policy (rate limits, audit)
-    // stays the host's, and the unit stays a plain object.
-    const procedure = (handler) => (meta === undefined ? { access, handler } : { access, handler, meta });
-
-    // A refusal before the handler: counted by code; 428 is the normal
-    // course of a wrpc reconnect (a new server-side client) and only counted.
-    const refuse = (message, code, node = null) => {
-      this.#otel.recordRefusal(code);
-      if (code !== 428) storage.logger.warn({ event: 'sync.hello.refused', code, node });
-      return coded(message, code);
-    };
-    const peerOf = (context) => {
-      const state = context?.client?.data?.syncom;
-      if (!state) throw refuse('Say hello first', 428);
-      return state;
-    };
-
-    return {
-      hello: procedure(async (context, args) => {
-        if (!args || typeof args.node !== 'string') throw refuse('hello needs a node id', 400);
-        if (args.version !== undefined && args.version !== PROTOCOL) {
-          throw refuse(`Unsupported protocol ${args.version}`, 400, args.node);
-        }
-        if (args.node === storage.nodeId) {
-          throw refuse('A node cannot sync with itself (copied data directory?)', 409, args.node);
-        }
-        if (authorize && !(await authorize(context, args))) throw refuse('Not authorized to sync', 403, args.node);
-        const scopes = Array.isArray(args.scopes) ? args.scopes.filter((s) => typeof s === 'string') : [GLOBAL_SCOPE];
-        const schema = schemaOf(args.schema);
-        if (context?.client) {
-          context.client.data ??= {};
-          // A repeated hello keeps the rate bucket: greeting again is not a refill.
-          const bucket = context.client.data.syncom?.bucket;
-          const ref = { url: null, node: args.node };
-          context.client.data.syncom = { node: args.node, scopes, schema, bucket, ref };
-          if (typeof context.client.join === 'function') {
-            for (const scope of scopes) context.client.join(`syncom:${scope}`);
-          }
-        }
-        notify(this, storage.logger, 'hello', { node: args.node, scopes, schema });
-        this.#drift(schema, { url: null, node: args.node });
-        return {
-          node: storage.nodeId,
-          vector: storage.vector,
-          epoch: storage.log.epoch,
-          version: PROTOCOL,
-          schema: schemaOf(storage.schemaInfo),
-        };
-      }),
-
-      push: procedure(async (context, args) => {
-        const state = peerOf(context);
-        const { node, scopes } = state;
-        const ops = unpackOps(args?.ops);
-        if (limits !== null) this.#limit(state, args, ops, limits);
-        // The scopes hello granted bound what a peer writes here, not only
-        // what it reads: an op outside them is refused before anything
-        // sees it. No stream is harmed — seqs run per scope, and a dialer
-        // that honours its registry never sends one.
-        const granted = [];
-        let outOfScope = 0;
-        for (const op of ops) {
-          if (inScope(op, scopes)) granted.push(op);
-          else outOfScope++;
-        }
-        if (outOfScope > 0) this.#refuse(node, 'scope', outOfScope);
-        // `url` is null: a host does not dial, so it has no url for the peer.
-        const via = state.ref ?? { url: null, node };
-        const result = await storage.applyRemote(granted, { via, scopes, peer: via });
-        // The vector the dialer merges in: the keys this page touched, not
-        // the whole thing — a hub's has a key per client and scope.
-        const whole = storage.vector;
-        const vector = {};
-        for (const op of granted) {
-          const key = opKey(op);
-          if (whole[key] !== undefined) vector[key] = whole[key];
-        }
-        return { vector, ...result, outOfScope };
-      }),
-
-      snapshot: procedure(async (context, args) => {
-        const state = peerOf(context);
-        const page = await storage.snapshot({
-          cursor: args?.cursor ?? null,
-          limit: pageSize,
-          scopes: grant(args?.scopes, state.scopes),
-        });
-        // The vector rides on the first page only: the dialer adopts it as of
-        // the start, and a hub's is too large to repeat.
-        if (args?.cursor) page.vector = undefined;
-        const client = context?.client;
-        const canStream = client && client.binary !== false && typeof client.createStream === 'function';
-        if (!canStream || page.records.length === 0) return page;
-        // NDJSON, serialized first because a wrpc stream declares its size
-        // up front; a page is bounded, so that buffer is too.
-        let text = '';
-        for (const record of page.records) text += `${JSON.stringify(record)}\n`;
-        const bytes = new TextEncoder().encode(text);
-        if (bytes.length > pageBytes) return page;
-        const stream = client.createStream('syncom/snapshot', bytes.length);
-        // The opening packet is already out; writing in this tick would
-        // race the caller's chance to attach a consumer.
-        queueMicrotask(() => {
-          stream.write(bytes);
-          stream.end();
-        });
-        return { id: stream.id, size: bytes.length, cursor: page.cursor, eventId: page.eventId, vector: page.vector };
-      }),
-
-      changes: procedure(async function* (context, args, subscription = {}) {
-        const { node, scopes: granted } = peerOf(context);
-        const { lastEventId, signal } = subscription;
-        const scopes = grant(args?.scopes, granted);
-        let cursor = lastEventId ?? undefined;
-        // What hosted() lists while this feed is live.
-        const feed = { node, scopes, since: Date.now(), cursor: cursor ?? null };
-        feeds.add(feed);
-        try {
-          for (;;) {
-            if (signal?.aborted) return;
-            const entries = storage.log.since(cursor, { scopes, limit: pageSize });
-            if (entries === null) {
-              // Cannot resume: another epoch, or compacted past the cursor.
-              yield { bootstrap: true };
-              return;
-            }
-            if (entries.length === 0) {
-              // The cursor stays: `lastEventId` can be ahead of the entries
-              // while an append is in flight, and a feed that jumped there
-              // would never deliver that batch.
-              await waitFor(wakers, signal);
-              continue;
-            }
-            const last = entries[entries.length - 1].seq;
-            const ops = [];
-            for (const { op } of entries) if (op.origin !== node && op.from !== node) ops.push(op);
-            cursor = storage.log.formatId(last);
-            feed.cursor = cursor;
-            // Labelled even when every op was the peer's own echo: the
-            // position still moves, and a resume must not replay it.
-            yield track(cursor, { ops: packOps(ops), eventId: cursor });
-          }
-        } finally {
-          feeds.delete(feed);
-        }
-      }),
-    };
-  }
-
-  // Ops of a peer this host would not take: counted, logged and announced
-  // through the `refused` event, never applied. `reason` is what the
-  // `syncom.ops.rejected` metric carries.
-  #refuse(node, reason, count) {
-    this.#storage.logger.warn({ event: 'sync.op.refused', node, reason, count });
-    for (let i = 0; i < count; i++) this.#otel.recordRejected(reason);
-    notify(this, this.#storage.logger, 'refused', { node, reason, count });
-  }
-
-  // Per-peer push limits, the one place that knows the ops and the bytes:
-  // a page over `opsPerPush` or `bytesPerPush` is 413, a peer over
-  // `opsPerSecond` is 429 — a token bucket in its state, refilled at that
-  // rate, holding one second's worth. Codes, not a hang-up: the dialer
-  // reports them and recomputes from the vector at its next hello.
-  #limit(state, args, ops, limits) {
-    const { opsPerPush, bytesPerPush, opsPerSecond } = limits;
-    if (opsPerPush !== undefined && ops.length > opsPerPush) {
-      this.#otel.recordLimited('ops');
-      throw coded(`Push of ${ops.length} ops exceeds opsPerPush ${opsPerPush}`, 413);
-    }
-    if (bytesPerPush !== undefined) {
-      const bytes = new TextEncoder().encode(JSON.stringify(args?.ops ?? null)).length;
-      if (bytes > bytesPerPush) {
-        this.#otel.recordLimited('bytes');
-        throw coded(`Push of ${bytes} bytes exceeds bytesPerPush ${bytesPerPush}`, 413);
-      }
-    }
-    if (opsPerSecond !== undefined) {
-      const at = Date.now();
-      const bucket = (state.bucket ??= { tokens: opsPerSecond, at });
-      bucket.tokens = Math.min(opsPerSecond, bucket.tokens + ((at - bucket.at) / 1000) * opsPerSecond);
-      bucket.at = at;
-      if (ops.length > bucket.tokens) {
-        this.#otel.recordLimited('rate');
-        throw coded(`Rate limited: ${ops.length} ops over opsPerSecond ${opsPerSecond}`, 429);
-      }
-      bucket.tokens -= ops.length;
-    }
+    return createUnit(this, options, {
+      storage: this.#storage,
+      otel: this.#otel,
+      wakers: this.#wakers,
+      feeds: this.#feeds,
+      drift: (schema, peer) => this.#drift(schema, peer),
+    });
   }
 }
 
