@@ -1,0 +1,139 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="548" viewBox="0 0 760 548" role="img" aria-label="Bundle size. What a browser app ships to keep records on the device and sync them (esbuild, minified, tree-shaken, the network client left out), min+gzip, WebAssembly included. Lower is better.">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .title { font-size: 15px; font-weight: 700; fill: #1b1c1e; }
+  .subtitle, .caption { font-size: 12px; fill: #67676c; }
+  .caption { font-size: 11px; }
+  .group { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; fill: #67676c; }
+  .label { font-size: 13px; font-weight: 600; fill: #1b1c1e; }
+  .label.primary, .label.secondary { font-weight: 700; }
+  .sublabel { font-size: 11px; fill: #67676c; }
+  .value { font-size: 12px; font-weight: 600; fill: #3c3c43; font-variant-numeric: tabular-nums; }
+  .value.small { font-size: 10px; }
+  .legend { font-size: 11px; fill: #3c3c43; }
+  .tick { font-size: 11px; fill: #67676c; font-variant-numeric: tabular-nums; }
+  .grid { stroke: #e4e4e7; stroke-width: 1; }
+  .axis { stroke: #c2c2c4; stroke-width: 1; }
+  .ref { stroke: #67676c; stroke-width: 1; stroke-dasharray: 3 3; }
+  .bar { fill: #c4c6cc; }
+  .bar.primary { fill: #245a9e; }
+  .bar.secondary { fill: #5e9be6; }
+  @media (prefers-color-scheme: dark) {
+    .title, .label { fill: #dfdfd6; }
+    .subtitle, .caption, .group, .sublabel, .tick { fill: #98989f; }
+    .value, .legend { fill: #c2c2c4; }
+    .grid { stroke: #2e2e32; }
+    .axis { stroke: #48484c; }
+    .ref { stroke: #98989f; }
+    .bar { fill: #46474e; }
+    .bar.primary { fill: #8dbcf2; }
+    .bar.secondary { fill: #3d7bd0; }
+  }
+</style>
+<text class="title" x="20" y="35">Bundle size</text>
+<text class="subtitle" x="20" y="56">What a browser app ships to keep records on the device and sync them (esbuild, minified, tree-shaken, the</text>
+<text class="subtitle" x="20" y="73">network client left out), min+gzip, WebAssembly included. Lower is better.</text>
+<line class="grid" x1="372" y1="88" x2="372" y2="488"/>
+<text class="tick" x="372" y="504" text-anchor="middle">0 KB</text>
+<line class="grid" x1="473.3333333333333" y1="88" x2="473.3333333333333" y2="488"/>
+<text class="tick" x="473.3333333333333" y="504" text-anchor="middle">500 KB</text>
+<line class="grid" x1="574.6666666666666" y1="88" x2="574.6666666666666" y2="488"/>
+<text class="tick" x="574.6666666666666" y="504" text-anchor="middle">1000 KB</text>
+<line class="grid" x1="676" y1="88" x2="676" y2="488"/>
+<text class="tick" x="676" y="504" text-anchor="middle">1500 KB</text>
+<line class="axis" x1="372" y1="88" x2="372" y2="488"/>
+<g><title>GUN · gun (localStorage; its WebSocket mesh is built in)
+17.1 KB min+gzip
+42.2 KB minified
+gun@0.2020.1241</title>
+<text class="label" x="20" y="105">GUN</text>
+<text class="sublabel" x="20" y="120">gun (localStorage; its WebSocket mesh is built in)</text>
+<path class="bar" d="M372,101H372A3.4710625,3.4710625 0 0 1 375.4710625,104.4710625V111.5289375A3.4710625,3.4710625 0 0 1 372,115H372Z"/>
+<text class="value" x="381.4710625" y="114">17.1 KB</text>
+</g>
+<g><title>TinyBase · MergeableStore + IndexedDB persister + custom synchronizer
+23.8 KB min+gzip
+56.4 KB minified
+tinybase@10.0.1</title>
+<text class="label" x="20" y="145">TinyBase</text>
+<text class="sublabel" x="20" y="160">MergeableStore + IndexedDB persister + custom synchroniz…</text>
+<path class="bar" d="M372,141H372.82857291666664A4,4 0 0 1 376.82857291666664,145V151A4,4 0 0 1 372.82857291666664,155H372Z"/>
+<text class="value" x="382.82857291666664" y="154">23.8 KB</text>
+</g>
+<g><title>Yjs · yjs + y-indexeddb + y-protocols/sync
+24.5 KB min+gzip
+80.2 KB minified
+yjs@13.6.33, y-indexeddb@9.0.12, y-protocols@1.0.7</title>
+<text class="label" x="20" y="185">Yjs</text>
+<text class="sublabel" x="20" y="200">yjs + y-indexeddb + y-protocols/sync</text>
+<path class="bar" d="M372,181H372.9615729166667A4,4 0 0 1 376.9615729166667,185V191A4,4 0 0 1 372.9615729166667,195H372Z"/>
+<text class="value" x="382.9615729166667" y="194">24.5 KB</text>
+</g>
+<g><title>syncom · open() over OPFS + the wrpc link adapter
+37.2 KB min+gzip
+107.0 KB minified
+@alexify/syncom@0.0.1
+storage, schema, queries, the op log and the sync protocol are one entry</title>
+<text class="label primary" x="20" y="225">syncom</text>
+<text class="sublabel" x="20" y="240">open() over OPFS + the wrpc link adapter</text>
+<path class="bar primary" d="M372,221H375.54102083333333A4,4 0 0 1 379.54102083333333,225V231A4,4 0 0 1 375.54102083333333,235H372Z"/>
+<text class="value" x="385.54102083333333" y="234">37.2 KB</text>
+</g>
+<g><title>PouchDB · pouchdb-browser
+40.4 KB min+gzip
+117.8 KB minified
+pouchdb-browser@9.0.0
+pouchdb-browser carries its HTTP adapter (the CouchDB client) with it</title>
+<text class="label" x="20" y="265">PouchDB</text>
+<text class="sublabel" x="20" y="280">pouchdb-browser</text>
+<path class="bar" d="M372,261H376.18266666666665A4,4 0 0 1 380.18266666666665,265V271A4,4 0 0 1 376.18266666666665,275H372Z"/>
+<text class="value" x="386.18266666666665" y="274">40.4 KB</text>
+</g>
+<g><title>RxDB · rxdb + Dexie storage + replication
+90.1 KB min+gzip
+282.3 KB minified
+rxdb@17.6.0, dexie@4.4.6, rxjs@7.8.2</title>
+<text class="label" x="20" y="305">RxDB</text>
+<text class="sublabel" x="20" y="320">rxdb + Dexie storage + replication</text>
+<path class="bar" d="M372,301H386.2683020833333A4,4 0 0 1 390.2683020833333,305V311A4,4 0 0 1 386.2683020833333,315H372Z"/>
+<text class="value" x="396.2683020833333" y="314">90.1 KB</text>
+</g>
+<g><title>Fireproof · @fireproof/core
+204.0 KB min+gzip
+784.2 KB minified
+@fireproof/core@0.24.19</title>
+<text class="label" x="20" y="345">Fireproof</text>
+<text class="sublabel" x="20" y="360">@fireproof/core</text>
+<path class="bar" d="M372,341H409.34934375A4,4 0 0 1 413.34934375,345V351A4,4 0 0 1 409.34934375,355H372Z"/>
+<text class="value" x="419.34934375" y="354">204 KB</text>
+</g>
+<g><title>OrbitDB · @orbitdb/core + helia + libp2p, IndexedDB blockstore
+353.7 KB min+gzip
+1185.6 KB minified
+@orbitdb/core@4.0.0, helia@6.1.4, libp2p@3.5.1, @libp2p/gossipsub@15.0.23, blockstore-idb@4.0.1
+createHelia brings Helia's default libp2p configuration with it</title>
+<text class="label" x="20" y="385">OrbitDB</text>
+<text class="sublabel" x="20" y="400">@orbitdb/core + helia + libp2p, IndexedDB blockstore</text>
+<path class="bar" d="M372,381H439.6786875A4,4 0 0 1 443.6786875,385V391A4,4 0 0 1 439.6786875,395H372Z"/>
+<text class="value" x="449.6786875" y="394">354 KB</text>
+</g>
+<g><title>Loro · loro-crdt (no persistence of its own)
+1114.8 KB min+gzip
+3405.0 KB minified, 3319.1 KB of it WebAssembly
+loro-crdt@1.16.4</title>
+<text class="label" x="20" y="425">Loro</text>
+<text class="sublabel" x="20" y="440">loro-crdt (no persistence of its own)</text>
+<path class="bar" d="M372,421H593.9250416666666A4,4 0 0 1 597.9250416666666,425V431A4,4 0 0 1 593.9250416666666,435H372Z"/>
+<text class="value" x="603.9250416666666" y="434">1115 KB</text>
+</g>
+<g><title>Automerge · automerge-repo + IndexedDB storage
+1171.9 KB min+gzip
+3744.5 KB minified, 3558.8 KB of it WebAssembly
+@automerge/automerge@3.5.0, @automerge/automerge-repo@2.6.0-alpha.3, @automerge/automerge-repo-storage-indexeddb@2.6.0-alpha.3</title>
+<text class="label" x="20" y="465">Automerge</text>
+<text class="sublabel" x="20" y="480">automerge-repo + IndexedDB storage</text>
+<path class="bar" d="M372,461H605.5116770833333A4,4 0 0 1 609.5116770833333,465V471A4,4 0 0 1 605.5116770833333,475H372Z"/>
+<text class="value" x="615.5116770833333" y="474">1172 KB</text>
+</g>
+<text class="caption" x="20" y="529">esbuild 0.28.2 · 2026-10-21</text>
+</svg>

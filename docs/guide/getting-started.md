@@ -1,9 +1,11 @@
 # Getting Started
 
-`syncom` is a local-first data engine. It stores records on disk (or in the
-browser's origin-private filesystem), commits every write to a hash-linked log
-so tampering is detectable, and produces CRDT deltas that peers can merge
-without coordination.
+`syncom` is a distributed data sync engine. It stores records on disk (or, in
+the browser, in the origin-private filesystem or IndexedDB) and logs every write
+as an op that its peers replicate, and every replica converges on the same records
+without coordination. Every write can also be committed to a hash-linked chain,
+so tampering is detectable. [Why syncom?](./why) says what it is for and when
+something else fits better.
 
 It has **no runtime dependencies**.
 

@@ -1,21 +1,27 @@
 # @alexify/syncom
 
-> Fast, zero-dependency distributed data sync engine for JavaScript. Local-first
-> storage with a hash-linked integrity log, an operation log replicated between
-> peers over an injected transport (wrpc), CRDT deltas, and JavaScript smart
-> contracts — one API across Node.js and the browser.
+> Fast, zero-dependency distributed data sync engine for JavaScript. Records
+> are stored locally (node:fs, OPFS, IndexedDB, memory), every write is an op in
+> a persisted log that peers replicate over an injected transport (wrpc over
+> WebSocket or WebRTC) and that converges without a coordinator; schema
+> validation, Mango queries, an optional hash-linked chain — one API across
+> Node.js and the browser.
 
 ## Key facts
 
 - Package: `@alexify/syncom` (npm), MIT, source at https://github.com/Alexis-Technologies/syncom
 - Requires Node.js >= 22, or a browser with OPFS and Web Crypto (secure context)
-- **Zero runtime dependencies.** Browser bundle is ~13 KB min+gzip; the wrpc adapter under 1 KB
-- CommonJS, no build step; `src/` ships as published
-- Entry points: `.` (Node `index.js` / browser `browser.js` via the `browser` export condition) and `./wrpc`
+- **Zero runtime dependencies.** Browser bundle is about 37 KB min+gzip (a CI budget); the wrpc adapter under 1 KB
+- CommonJS, no build step; `src/` ships as published; pre-1.0, not yet on npm
+- Entry points: `.` (Node `index.js` / browser `browser.js` via the `browser` export condition), `./wrpc`,
+  `./contracts`, `./idb`
 - Exports: `open`, `Storage`, `SyncManager`, `isSyncLink`, `OpLog`, `applyOp`, `mergeEntry`, `isAlive`,
-  `Blockchain`, `SmartContract`, `DataReader`, `diff`, `merge`, `apply`, `calculateHash`, `generateKeys`,
-  `encrypt`, `decrypt`, `loadKeys`, `read`, `write`, `exists`, `remove`, `list`
-- `@alexify/syncom/wrpc` exports `createWrpcLink`, `isSyncLink`, `SYNC_INTROSPECTION`
+  `Blockchain`, `diff`, `merge`, `apply`, `calculateHash`, `generateKeys`, `encrypt`, `decrypt`, `loadKeys`,
+  `read`, `write`, `exists`, `remove`, `list`, `isFsi`, `createMemoryFsi`, `HookError`, `ValidationError`,
+  `SyncomError`, `isSharedLog`
+- `@alexify/syncom/wrpc` exports `createWrpcLink`, `isSyncLink`, `SYNC_INTROSPECTION`;
+  `@alexify/syncom/contracts` exports `SmartContract`, `DataReader`; `@alexify/syncom/idb` exports `createIdbFsi`
+- Every operational error is a `SyncomError` with a `code`
 - `Storage`, `Blockchain`, `SyncManager` and `OpLog` initialise asynchronously: `await new Blockchain(path)`
 - In the browser `calculateHash`, `encrypt` and `decrypt` return promises; in Node.js they are synchronous
 - Every write is an op: `write` (insert/set), `set` (update/swap/record.save), `inc` (counters), `delete` (tombstone).
@@ -26,14 +32,27 @@
 - `merge` ADDS numbers rather than replacing them — this is the counter CRDT and is deliberate; storage
   does not replicate through `merge`
 - Encrypted records (`encrypted: true`) are sealed for this node's key and never leave it
+- Scopes: a host drops the ops a peer may not write and serves only the scopes it was granted;
+  `purge(id)` scrubs a payload out of the op log; `open({ chain: false })` keeps no chain
 
 ## Documentation
 
+- [Why syncom?](https://syncomjs.vercel.app/guide/why): what it is for, what sets it apart, when something else fits better.
+- [Compared with alternatives](https://syncomjs.vercel.app/guide/comparison): a 40-feature matrix against Yjs, Automerge, Loro, Jazz, RxDB, PouchDB, TinyBase, Dexie Cloud, Fireproof, GUN, OrbitDB, Evolu, LiveStore, ElectricSQL, PowerSync, Zero, Triplit and InstantDB.
+- [Benchmarks](https://syncomjs.vercel.app/guide/benchmarks): insert, update, read, counters, batches, replication, cold start and bundle size against nine libraries, plus syncom's own benchmarks.
+- [Architecture](https://syncomjs.vercel.app/guide/architecture): the facade, the three write paths, replication between nodes, the files on disk.
 - [Getting Started](https://syncomjs.vercel.app/guide/getting-started): install, open a storage, records, validation, a first sync.
 - [Storage](https://syncomjs.vercel.app/guide/storage): explicit API, registers vs counters, compare-and-swap, records, references, schema collections, encryption at rest, on-disk layout.
 - [Sync](https://syncomjs.vercel.app/guide/sync): the operation model, the log and its two cursors, the protocol, bootstrap, scopes, the registry, the link contract, guarantees and limits.
 - [wrpc transport](https://syncomjs.vercel.app/guide/wrpc): hosting `storage.sync.unit()` on a wrpc server, dialing with `createWrpcLink`, the browser, rooms and presence.
 - [CRDT deltas](https://syncomjs.vercel.app/guide/crdt): diff/merge/apply semantics, grow-only sets, the numeric-addition rule.
+- [Schema and validation](https://syncomjs.vercel.app/guide/schema): entity definitions, validators, versions and lenses, `migrate()`.
+- [Queries](https://syncomjs.vercel.app/guide/query): Mango `select()`, the catalog, indexes, unique keys, `watch()`.
+- [Hooks and events](https://syncomjs.vercel.app/guide/hooks): hooks inside writes, reads and peer batches; events.
+- [Backends](https://syncomjs.vercel.app/guide/backends): the `fsi` contract, node:fs, OPFS, IndexedDB, memory, the lock.
+- [Scaling](https://syncomjs.vercel.app/guide/scaling): hubs, scopes as buckets, limits, presence.
+- [WebRTC](https://syncomjs.vercel.app/guide/webrtc): browser peers through wrpc's PeerLink and PeerHost.
+- [OpenTelemetry](https://syncomjs.vercel.app/guide/telemetry): injected spans and metrics.
 - [Blockchain log](https://syncomjs.vercel.app/guide/chain): block structure, hash linking, validate cost, per-record verification.
 - [Smart contracts](https://syncomjs.vercel.app/guide/contracts): storing procedures in the chain, DataReader, the `new Function` risk, serialisation limits.
 - [Browser](https://syncomjs.vercel.app/guide/browser): OPFS and Web Crypto, the async signature differences, bundle size.

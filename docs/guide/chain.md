@@ -1,7 +1,9 @@
 # Blockchain log
 
-Every write goes through an append-only, hash-linked log. Each block names its
-predecessor by hash, so changing any block invalidates every block after it.
+Every write a storage applies is committed to an append-only, hash-linked log,
+unless it was opened with `chain: false` (see [Through storage](#through-storage)).
+Each block names its predecessor by hash, so changing any block invalidates
+every block after it.
 
 ```mermaid
 flowchart LR

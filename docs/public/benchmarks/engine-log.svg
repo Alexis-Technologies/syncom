@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="428" viewBox="0 0 760 428" role="img" aria-label="Op log: syncom's own benchmarks. OpLog, the persisted operation log every write and every replicated op goes through. ops/s, log scale, higher is better.">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .title { font-size: 15px; font-weight: 700; fill: #1b1c1e; }
+  .subtitle, .caption { font-size: 12px; fill: #67676c; }
+  .caption { font-size: 11px; }
+  .group { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; fill: #67676c; }
+  .label { font-size: 13px; font-weight: 600; fill: #1b1c1e; }
+  .label.primary, .label.secondary { font-weight: 700; }
+  .sublabel { font-size: 11px; fill: #67676c; }
+  .value { font-size: 12px; font-weight: 600; fill: #3c3c43; font-variant-numeric: tabular-nums; }
+  .value.small { font-size: 10px; }
+  .legend { font-size: 11px; fill: #3c3c43; }
+  .tick { font-size: 11px; fill: #67676c; font-variant-numeric: tabular-nums; }
+  .grid { stroke: #e4e4e7; stroke-width: 1; }
+  .axis { stroke: #c2c2c4; stroke-width: 1; }
+  .ref { stroke: #67676c; stroke-width: 1; stroke-dasharray: 3 3; }
+  .bar { fill: #c4c6cc; }
+  .bar.primary { fill: #245a9e; }
+  .bar.secondary { fill: #5e9be6; }
+  @media (prefers-color-scheme: dark) {
+    .title, .label { fill: #dfdfd6; }
+    .subtitle, .caption, .group, .sublabel, .tick { fill: #98989f; }
+    .value, .legend { fill: #c2c2c4; }
+    .grid { stroke: #2e2e32; }
+    .axis { stroke: #48484c; }
+    .ref { stroke: #98989f; }
+    .bar { fill: #46474e; }
+    .bar.primary { fill: #8dbcf2; }
+    .bar.secondary { fill: #3d7bd0; }
+  }
+</style>
+<text class="title" x="20" y="35">Op log: syncom's own benchmarks</text>
+<text class="subtitle" x="20" y="56">OpLog, the persisted operation log every write and every replicated op goes through. ops/s, log scale, higher is</text>
+<text class="subtitle" x="20" y="73">better.</text>
+<line class="grid" x1="285" y1="88" x2="285" y2="368"/>
+<text class="tick" x="285" y="384" text-anchor="middle">10</text>
+<line class="grid" x1="350.16666666666663" y1="88" x2="350.16666666666663" y2="368"/>
+<text class="tick" x="350.16666666666663" y="384" text-anchor="middle">100</text>
+<line class="grid" x1="415.3333333333333" y1="88" x2="415.3333333333333" y2="368"/>
+<text class="tick" x="415.3333333333333" y="384" text-anchor="middle">1,000</text>
+<line class="grid" x1="480.5" y1="88" x2="480.5" y2="368"/>
+<text class="tick" x="480.5" y="384" text-anchor="middle">10k</text>
+<line class="grid" x1="545.6666666666666" y1="88" x2="545.6666666666666" y2="368"/>
+<text class="tick" x="545.6666666666666" y="384" text-anchor="middle">100k</text>
+<line class="grid" x1="610.8333333333334" y1="88" x2="610.8333333333334" y2="368"/>
+<text class="tick" x="610.8333333333334" y="384" text-anchor="middle">1M</text>
+<line class="grid" x1="676" y1="88" x2="676" y2="368"/>
+<text class="tick" x="676" y="384" text-anchor="middle">10M</text>
+<line class="axis" x1="285" y1="88" x2="285" y2="368"/>
+<g><title>append · one op
+5,704 ops/s
+175 µs per operation</title>
+<text class="label primary" x="20" y="105">append</text>
+<text class="sublabel" x="20" y="120">one op</text>
+<path class="bar primary" d="M285,101H460.6110318476549A4,4 0 0 1 464.6110318476549,105V111A4,4 0 0 1 460.6110318476549,115H285Z"/>
+<text class="value" x="470.6110318476549" y="114">5,704</text>
+</g>
+<g><title>append · batch of 100
+330,947 ops/s
+3.02 µs per operation</title>
+<text class="label primary" x="20" y="145">append</text>
+<text class="sublabel" x="20" y="160">batch of 100</text>
+<path class="bar primary" d="M285,141H575.5375922342837A4,4 0 0 1 579.5375922342837,145V151A4,4 0 0 1 575.5375922342837,155H285Z"/>
+<text class="value" x="585.5375922342837" y="154">331k</text>
+</g>
+<g><title>since · last 500 entries
+625,009 ops/s
+1.6 µs per operation</title>
+<text class="label primary" x="20" y="185">since</text>
+<text class="sublabel" x="20" y="200">last 500 entries</text>
+<path class="bar primary" d="M285,181H593.5319220025965A4,4 0 0 1 597.5319220025965,185V191A4,4 0 0 1 593.5319220025965,195H285Z"/>
+<text class="value" x="603.5319220025965" y="194">625k</text>
+</g>
+<g><title>since · everything (no cursor)
+1,694 ops/s
+590 µs per operation</title>
+<text class="label primary" x="20" y="225">since</text>
+<text class="sublabel" x="20" y="240">everything (no cursor)</text>
+<path class="bar primary" d="M285,221H426.2508569573205A4,4 0 0 1 430.2508569573205,225V231A4,4 0 0 1 426.2508569573205,235H285Z"/>
+<text class="value" x="436.2508569573205" y="234">1,694</text>
+</g>
+<g><title>since · 20 from the middle, scoped
+3,510,827 ops/s
+285 ns per operation</title>
+<text class="label primary" x="20" y="265">since</text>
+<text class="sublabel" x="20" y="280">20 from the middle, scoped</text>
+<path class="bar primary" d="M285,261H642.3758478313607A4,4 0 0 1 646.3758478313607,265V271A4,4 0 0 1 642.3758478313607,275H285Z"/>
+<text class="value" x="652.3758478313607" y="274">3.51M</text>
+</g>
+<g><title>append with a roll every 8 batches
+4,413 ops/s
+227 µs per operation</title>
+<text class="label primary" x="20" y="312">append with a roll every 8 batches</text>
+<path class="bar primary" d="M285,301H453.34849427197537A4,4 0 0 1 457.34849427197537,305V311A4,4 0 0 1 453.34849427197537,315H285Z"/>
+<text class="value" x="463.34849427197537" y="314">4,413</text>
+</g>
+<g><title>reopen · index + segments + tail
+10 ops/s
+100 ms per operation</title>
+<text class="label primary" x="20" y="345">reopen</text>
+<text class="sublabel" x="20" y="360">index + segments + tail</text>
+<path class="bar primary" d="M285,341H285A2,2 0 0 1 287,343V353A2,2 0 0 1 285,355H285Z"/>
+<text class="value" x="293" y="354">10</text>
+</g>
+<text class="caption" x="20" y="409">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-21</text>
+</svg>

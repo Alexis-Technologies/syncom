@@ -1,0 +1,44 @@
+{
+  "name": "@alexify/syncom-bench-compare",
+  "private": true,
+  "description": "The libraries syncom is benchmarked against. Installed on its own (pnpm bench:compare:install), so the package's devDependencies and CI stay lean.",
+  "license": "MIT",
+  "dependencies": {
+    "@automerge/automerge": "latest",
+    "@automerge/automerge-repo": "latest",
+    "@automerge/automerge-repo-network-messagechannel": "2.6.0-alpha.3",
+    "@automerge/automerge-repo-storage-indexeddb": "2.6.0-alpha.3",
+    "@automerge/automerge-repo-storage-nodefs": "latest",
+    "@chainsafe/libp2p-noise": "^17.0.0",
+    "@chainsafe/libp2p-yamux": "^8.0.1",
+    "@fireproof/core": "latest",
+    "@libp2p/gossipsub": "^15.0.23",
+    "@libp2p/identify": "latest",
+    "@libp2p/tcp": "^11.0.32",
+    "@orbitdb/core": "latest",
+    "blockstore-idb": "^4.0.1",
+    "blockstore-level": "^3.0.3",
+    "dexie": "^4.4.6",
+    "gun": "latest",
+    "helia": "^6.1.4",
+    "libp2p": "latest",
+    "loro-crdt": "latest",
+    "pouchdb": "latest",
+    "pouchdb-adapter-memory": "latest",
+    "pouchdb-browser": "^9.0.0",
+    "rxdb": "latest",
+    "rxjs": "latest",
+    "tinybase": "latest",
+    "y-indexeddb": "^9.0.12",
+    "y-leveldb": "latest",
+    "y-protocols": "^1.0.7",
+    "yjs": "latest"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "cbor-extract",
+      "classic-level",
+      "leveldown"
+    ]
+  }
+}

@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="428" viewBox="0 0 760 428" role="img" aria-label="Chain: syncom's own benchmarks. The hash-linked chain a write appends a block to (open({ chain: false }) skips it). ops/s, log scale, higher is better.">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .title { font-size: 15px; font-weight: 700; fill: #1b1c1e; }
+  .subtitle, .caption { font-size: 12px; fill: #67676c; }
+  .caption { font-size: 11px; }
+  .group { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; fill: #67676c; }
+  .label { font-size: 13px; font-weight: 600; fill: #1b1c1e; }
+  .label.primary, .label.secondary { font-weight: 700; }
+  .sublabel { font-size: 11px; fill: #67676c; }
+  .value { font-size: 12px; font-weight: 600; fill: #3c3c43; font-variant-numeric: tabular-nums; }
+  .value.small { font-size: 10px; }
+  .legend { font-size: 11px; fill: #3c3c43; }
+  .tick { font-size: 11px; fill: #67676c; font-variant-numeric: tabular-nums; }
+  .grid { stroke: #e4e4e7; stroke-width: 1; }
+  .axis { stroke: #c2c2c4; stroke-width: 1; }
+  .ref { stroke: #67676c; stroke-width: 1; stroke-dasharray: 3 3; }
+  .bar { fill: #c4c6cc; }
+  .bar.primary { fill: #245a9e; }
+  .bar.secondary { fill: #5e9be6; }
+  @media (prefers-color-scheme: dark) {
+    .title, .label { fill: #dfdfd6; }
+    .subtitle, .caption, .group, .sublabel, .tick { fill: #98989f; }
+    .value, .legend { fill: #c2c2c4; }
+    .grid { stroke: #2e2e32; }
+    .axis { stroke: #48484c; }
+    .ref { stroke: #98989f; }
+    .bar { fill: #46474e; }
+    .bar.primary { fill: #8dbcf2; }
+    .bar.secondary { fill: #3d7bd0; }
+  }
+</style>
+<text class="title" x="20" y="35">Chain: syncom's own benchmarks</text>
+<text class="subtitle" x="20" y="56">The hash-linked chain a write appends a block to (open({ chain: false }) skips it). ops/s, log scale, higher is</text>
+<text class="subtitle" x="20" y="73">better.</text>
+<line class="grid" x1="202" y1="88" x2="202" y2="368"/>
+<text class="tick" x="202" y="384" text-anchor="middle">10</text>
+<line class="grid" x1="320.5" y1="88" x2="320.5" y2="368"/>
+<text class="tick" x="320.5" y="384" text-anchor="middle">100</text>
+<line class="grid" x1="439" y1="88" x2="439" y2="368"/>
+<text class="tick" x="439" y="384" text-anchor="middle">1,000</text>
+<line class="grid" x1="557.5" y1="88" x2="557.5" y2="368"/>
+<text class="tick" x="557.5" y="384" text-anchor="middle">10k</text>
+<line class="grid" x1="676" y1="88" x2="676" y2="368"/>
+<text class="tick" x="676" y="384" text-anchor="middle">100k</text>
+<line class="axis" x1="202" y1="88" x2="202" y2="368"/>
+<g><title>addBlock · small payload
+5,044 ops/s
+198 µs per operation</title>
+<text class="label primary" x="20" y="105">addBlock</text>
+<text class="sublabel" x="20" y="120">small payload</text>
+<path class="bar primary" d="M202,101H518.2788467312737A4,4 0 0 1 522.2788467312737,105V111A4,4 0 0 1 518.2788467312737,115H202Z"/>
+<text class="value" x="528.2788467312737" y="114">5,044</text>
+</g>
+<g><title>addBlock · 4 KB payload
+5,023 ops/s
+199 µs per operation</title>
+<text class="label primary" x="20" y="145">addBlock</text>
+<text class="sublabel" x="20" y="160">4 KB payload</text>
+<path class="bar primary" d="M202,141H518.0641366119066A4,4 0 0 1 522.0641366119066,145V151A4,4 0 0 1 518.0641366119066,155H202Z"/>
+<text class="value" x="528.0641366119066" y="154">5,023</text>
+</g>
+<g><title>readBlock · single block
+13,352 ops/s
+74.9 µs per operation</title>
+<text class="label primary" x="20" y="185">readBlock</text>
+<text class="sublabel" x="20" y="200">single block</text>
+<path class="bar primary" d="M202,181H568.3772393550361A4,4 0 0 1 572.3772393550361,185V191A4,4 0 0 1 568.3772393550361,195H202Z"/>
+<text class="value" x="578.3772393550361" y="194">13.4k</text>
+</g>
+<g><title>validate · last 1 block
+11,679 ops/s
+85.6 µs per operation</title>
+<text class="label primary" x="20" y="225">validate</text>
+<text class="sublabel" x="20" y="240">last 1 block</text>
+<path class="bar primary" d="M202,221H561.4875705248821A4,4 0 0 1 565.4875705248821,225V231A4,4 0 0 1 561.4875705248821,235H202Z"/>
+<text class="value" x="571.4875705248821" y="234">11.7k</text>
+</g>
+<g><title>validate · last 10 blocks
+1,155 ops/s
+866 µs per operation</title>
+<text class="label primary" x="20" y="265">validate</text>
+<text class="sublabel" x="20" y="280">last 10 blocks</text>
+<path class="bar primary" d="M202,261H442.4159651310373A4,4 0 0 1 446.4159651310373,265V271A4,4 0 0 1 442.4159651310373,275H202Z"/>
+<text class="value" x="452.4159651310373" y="274">1,155</text>
+</g>
+<g><title>validate · last 100 blocks
+118 ops/s
+8.47 ms per operation</title>
+<text class="label primary" x="20" y="305">validate</text>
+<text class="sublabel" x="20" y="320">last 100 blocks</text>
+<path class="bar primary" d="M202,301H325.01801786577585A4,4 0 0 1 329.01801786577585,305V311A4,4 0 0 1 325.01801786577585,315H202Z"/>
+<text class="value" x="335.01801786577585" y="314">118</text>
+</g>
+<g><title>validate · full 200-block chain
+57 ops/s
+17.5 ms per operation</title>
+<text class="label primary" x="20" y="345">validate</text>
+<text class="sublabel" x="20" y="360">full 200-block chain</text>
+<path class="bar primary" d="M202,341H287.57117039719026A4,4 0 0 1 291.57117039719026,345V351A4,4 0 0 1 287.57117039719026,355H202Z"/>
+<text class="value" x="297.57117039719026" y="354">57</text>
+</g>
+<text class="caption" x="20" y="409">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-21</text>
+</svg>

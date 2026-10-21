@@ -22,7 +22,10 @@ pnpm test:types        # tsd against the .d.ts files
 pnpm lint              # oxlint
 pnpm format            # oxfmt (format:check in CI)
 pnpm size              # bundle-size report; the browser budget fails the run
-pnpm bench             # every script in bench/
+pnpm bench             # every script in bench/ (--save → bench/results/engine.json)
+pnpm bench:compare     # against the alternatives (pnpm bench:compare:install first)
+pnpm bench:report      # charts and tables of docs/guide/benchmarks.md and the README
+pnpm docs:comparison   # the matrix of docs/guide/comparison.md from docs/comparison.json
 pnpm docs:dev          # the VitePress site (docs:build / docs:preview too)
 ```
 

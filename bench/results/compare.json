@@ -1,0 +1,923 @@
+{
+  "generatedAt": "2026-10-21T13:24:27.681Z",
+  "machine": {
+    "cpu": "Apple M3 Max",
+    "cores": 16,
+    "memoryGb": 64,
+    "os": "darwin 25.6.0 (arm64)",
+    "node": "v24.14.1"
+  },
+  "method": {
+    "warmupMs": 1000,
+    "sampleMs": 1000,
+    "samples": 5,
+    "maxOps": 5000,
+    "rounds": 5,
+    "warmupRounds": 1,
+    "coldStartRuns": 10
+  },
+  "libraries": [
+    {
+      "id": "syncom",
+      "name": "syncom",
+      "package": "@alexify/syncom",
+      "version": "0.0.1",
+      "url": "https://github.com/Alexis-Technologies/syncom",
+      "lines": {
+        "memory": "default, createMemoryFsi()",
+        "disk": "default, node:fs"
+      }
+    },
+    {
+      "id": "syncom-nochain",
+      "name": "syncom",
+      "package": "@alexify/syncom",
+      "version": "0.0.1",
+      "url": "https://github.com/Alexis-Technologies/syncom",
+      "lines": {
+        "memory": "chain: false, createMemoryFsi()",
+        "disk": "chain: false, node:fs"
+      }
+    },
+    {
+      "id": "yjs",
+      "name": "Yjs",
+      "package": "yjs",
+      "version": "13.6.33",
+      "url": "https://github.com/yjs/yjs",
+      "lines": {
+        "memory": "Y.Doc, a Y.Map per record",
+        "disk": "y-leveldb"
+      }
+    },
+    {
+      "id": "automerge",
+      "name": "Automerge",
+      "package": "@automerge/automerge",
+      "version": "3.5.0",
+      "url": "https://github.com/automerge/automerge",
+      "lines": {
+        "memory": "Automerge.change, Counter",
+        "disk": "automerge-repo, NodeFS storage"
+      }
+    },
+    {
+      "id": "loro",
+      "name": "Loro",
+      "package": "loro-crdt",
+      "version": "1.16.4",
+      "url": "https://github.com/loro-dev/loro",
+      "lines": {
+        "memory": "LoroDoc, a LoroMap per record",
+        "disk": "updates appended to a file"
+      }
+    },
+    {
+      "id": "tinybase",
+      "name": "TinyBase",
+      "package": "tinybase",
+      "version": "10.0.1",
+      "url": "https://github.com/tinyplex/tinybase",
+      "lines": {
+        "memory": "MergeableStore",
+        "disk": "MergeableStore, file persister"
+      }
+    },
+    {
+      "id": "pouchdb",
+      "name": "PouchDB",
+      "package": "pouchdb",
+      "version": "9.0.0",
+      "url": "https://github.com/pouchdb/pouchdb",
+      "lines": {
+        "memory": "pouchdb-adapter-memory",
+        "disk": "LevelDB (Node default)"
+      }
+    },
+    {
+      "id": "rxdb",
+      "name": "RxDB",
+      "package": "rxdb",
+      "version": "17.6.0",
+      "url": "https://github.com/pubkey/rxdb",
+      "lines": {
+        "memory": "memory storage"
+      }
+    },
+    {
+      "id": "fireproof",
+      "name": "Fireproof",
+      "package": "@fireproof/core",
+      "version": "0.24.19",
+      "url": "https://github.com/fireproof-storage/fireproof",
+      "lines": {
+        "memory": "memory:// store",
+        "disk": "file:// store"
+      }
+    },
+    {
+      "id": "gun",
+      "name": "GUN",
+      "package": "gun",
+      "version": "0.2020.1241",
+      "url": "https://github.com/amark/gun",
+      "lines": {
+        "disk": "RAD on node:fs"
+      }
+    },
+    {
+      "id": "orbitdb",
+      "name": "OrbitDB",
+      "package": "@orbitdb/core",
+      "version": "4.0.0",
+      "url": "https://github.com/orbitdb/orbitdb",
+      "lines": {
+        "memory": "documents, memory blockstore",
+        "disk": "documents, LevelDB"
+      }
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "insert-memory",
+      "kind": "insert",
+      "kindTitle": "Insert a record",
+      "line": "memory",
+      "lineTitle": "In memory",
+      "title": "Insert a record, in memory",
+      "description": "Add one record to a store of 1,000. Nothing touches the disk.",
+      "unit": "ops/s",
+      "results": {
+        "syncom": {
+          "median": 11122.136577586902,
+          "min": 9193.6311937608,
+          "max": 13978.928451120137
+        },
+        "syncom-nochain": {
+          "median": 10834.195437161667,
+          "min": 9125.587186382798,
+          "max": 14193.02070887105
+        },
+        "yjs": {
+          "median": 234529.6807032105,
+          "min": 225529.49877390236,
+          "max": 236545.2565284014
+        },
+        "automerge": {
+          "median": 511.69846524527185,
+          "min": 400.1050855106084,
+          "max": 746.2406444007447
+        },
+        "loro": {
+          "median": 31337.55876035522,
+          "min": 29947.088677456904,
+          "max": 43153.86905340527
+        },
+        "tinybase": {
+          "median": 22940.886546700327,
+          "min": 21783.787616798203,
+          "max": 24610.36364006111
+        },
+        "pouchdb": {
+          "median": 20291.253218325066,
+          "min": 19923.381586936062,
+          "max": 20639.453004881307
+        },
+        "rxdb": {
+          "median": 16702.33121448718,
+          "min": 8306.007383022803,
+          "max": 111087.10770852045
+        },
+        "fireproof": {
+          "median": 309.77171094967025,
+          "min": 290.20001086084767,
+          "max": 404.78231171580006
+        },
+        "orbitdb": {
+          "median": 1080.8720192546582,
+          "min": 1077.0966304392773,
+          "max": 1090.9675355984984
+        }
+      },
+      "unsupported": {
+        "gun": "needs its storage adapter to answer in Node.js"
+      },
+      "failed": {}
+    },
+    {
+      "id": "insert-disk",
+      "kind": "insert",
+      "kindTitle": "Insert a record",
+      "line": "disk",
+      "lineTitle": "On disk",
+      "title": "Insert a record, on disk",
+      "description": "Add one record to a store of 1,000. Each library's own persistence on node:fs, every write awaited.",
+      "unit": "ops/s",
+      "results": {
+        "syncom": {
+          "median": 1394.5389875225596,
+          "min": 614.1712549787504,
+          "max": 1947.0037026293355
+        },
+        "syncom-nochain": {
+          "median": 2098.2266412710237,
+          "min": 1729.9512255398995,
+          "max": 2911.9627411415413
+        },
+        "yjs": {
+          "median": 19246.796884022235,
+          "min": 19136.451011066834,
+          "max": 19601.68373437207
+        },
+        "automerge": {
+          "median": 489.5104895104898,
+          "min": 395.5009212886779,
+          "max": 663.1449296542402
+        },
+        "loro": {
+          "median": 19464.67275944976,
+          "min": 17018.45498372347,
+          "max": 23561.617973285494
+        },
+        "tinybase": {
+          "median": 171.7761041057149,
+          "min": 147.4121693568572,
+          "max": 217.65492639721106
+        },
+        "pouchdb": {
+          "median": 26392.37474807824,
+          "min": 26199.887813885824,
+          "max": 26822.936781126722
+        },
+        "fireproof": {
+          "median": 300.0864743540796,
+          "min": 219.81197337265468,
+          "max": 345.5047766020386
+        },
+        "gun": {
+          "median": 3.63188266575459,
+          "min": 3.600527883474475,
+          "max": 3.6442423790598917
+        },
+        "orbitdb": {
+          "median": 952.386260529592,
+          "min": 926.1097376659119,
+          "max": 962.103773317405
+        }
+      },
+      "unsupported": {
+        "rxdb": "Node.js disk storages are Premium"
+      },
+      "failed": {}
+    },
+    {
+      "id": "update-memory",
+      "kind": "update",
+      "kindTitle": "Update a field",
+      "line": "memory",
+      "lineTitle": "In memory",
+      "title": "Update a field, in memory",
+      "description": "Change one field of an existing record. Nothing touches the disk.",
+      "unit": "ops/s",
+      "results": {
+        "syncom": {
+          "median": 55225.10775008162,
+          "min": 50674.0938592429,
+          "max": 55289.56068855516
+        },
+        "syncom-nochain": {
+          "median": 83007.64085999239,
+          "min": 79050.2467564855,
+          "max": 83658.31931374974
+        },
+        "yjs": {
+          "median": 382443.6455842893,
+          "min": 230765.86774501475,
+          "max": 417340.87565868377
+        },
+        "automerge": {
+          "median": 1985.0313023160725,
+          "min": 1970.315461063724,
+          "max": 1992.3954259368395
+        },
+        "loro": {
+          "median": 411535.717692217,
+          "min": 124281.34004952456,
+          "max": 415571.9349337753
+        },
+        "tinybase": {
+          "median": 108308.26119309537,
+          "min": 101720.12770521877,
+          "max": 109780.63664852417
+        },
+        "pouchdb": {
+          "median": 8312.519882004779,
+          "min": 7416.122011037645,
+          "max": 9680.635505020302
+        },
+        "rxdb": {
+          "median": 50365.99084896765,
+          "min": 48737.1493844397,
+          "max": 52328.50637104806
+        },
+        "fireproof": {
+          "median": 376.80735723861176,
+          "min": 301.0827252766818,
+          "max": 452.62900573835043
+        },
+        "orbitdb": {
+          "median": 31.129438027308048,
+          "min": 30.36126104537576,
+          "max": 31.884551364230198
+        }
+      },
+      "unsupported": {
+        "gun": "needs its storage adapter to answer in Node.js"
+      },
+      "failed": {}
+    },
+    {
+      "id": "update-disk",
+      "kind": "update",
+      "kindTitle": "Update a field",
+      "line": "disk",
+      "lineTitle": "On disk",
+      "title": "Update a field, on disk",
+      "description": "Change one field of an existing record. Each library's own persistence on node:fs, every write awaited.",
+      "unit": "ops/s",
+      "results": {
+        "syncom": {
+          "median": 1537.8688981743542,
+          "min": 543.256756849535,
+          "max": 2137.6775010398983
+        },
+        "syncom-nochain": {
+          "median": 3504.0311009339753,
+          "min": 3396.8532400797203,
+          "max": 3613.370517753893
+        },
+        "yjs": {
+          "median": 22410.120467865163,
+          "min": 21705.853834849982,
+          "max": 22534.770480496172
+        },
+        "automerge": {
+          "median": 1247.3462870158621,
+          "min": 1112.4533660971954,
+          "max": 1258.5120197082026
+        },
+        "loro": {
+          "median": 43301.946939501315,
+          "min": 41260.21900200213,
+          "max": 45001.335165815515
+        },
+        "tinybase": {
+          "median": 303.87204434407954,
+          "min": 297.873726561331,
+          "max": 304.7032951663318
+        },
+        "pouchdb": {
+          "median": 8805.499802285485,
+          "min": 7160.388075649104,
+          "max": 10557.384763221517
+        },
+        "fireproof": {
+          "median": 334.5623515456379,
+          "min": 296.8011556913352,
+          "max": 397.6310977490634
+        },
+        "gun": {
+          "median": 3.7731040733796744,
+          "min": 3.7522422578930175,
+          "max": 3.798080882713192
+        },
+        "orbitdb": {
+          "median": 17.350155696007857,
+          "min": 16.800943828795713,
+          "max": 17.59325566375549
+        }
+      },
+      "unsupported": {
+        "rxdb": "Node.js disk storages are Premium"
+      },
+      "failed": {}
+    },
+    {
+      "id": "get-memory",
+      "kind": "get",
+      "kindTitle": "Read a record",
+      "line": "memory",
+      "lineTitle": "In memory",
+      "title": "Read a record, in memory",
+      "description": "Read one record by id, as a plain object. Nothing touches the disk.",
+      "unit": "ops/s",
+      "results": {
+        "syncom": {
+          "median": 980461.3865533565,
+          "min": 966208.6453972139,
+          "max": 991947.6902584773
+        },
+        "syncom-nochain": {
+          "median": 962905.5675500879,
+          "min": 956208.8559973906,
+          "max": 974165.3536284267
+        },
+        "yjs": {
+          "median": 3675329.173463649,
+          "min": 3601800.5485359826,
+          "max": 3694946.7814006167
+        },
+        "automerge": {
+          "median": 10595368.665022623,
+          "min": 9623494.860497415,
+          "max": 10711997.384762391
+        },
+        "loro": {
+          "median": 312943.3874002758,
+          "min": 288571.895389429,
+          "max": 314529.39460804214
+        },
+        "tinybase": {
+          "median": 1458019.1229744286,
+          "min": 1428256.1083577645,
+          "max": 1471396.497530281
+        },
+        "pouchdb": {
+          "median": 30073.93488930443,
+          "min": 28529.776273746505,
+          "max": 30923.324761402568
+        },
+        "rxdb": {
+          "median": 281316.53451973206,
+          "min": 270362.37006412394,
+          "max": 302298.57127187663
+        },
+        "fireproof": {
+          "median": 725.8630840757661,
+          "min": 717.7854718670957,
+          "max": 727.4262730790124
+        },
+        "orbitdb": {
+          "median": 81.40252581117741,
+          "min": 68.62079012273065,
+          "max": 110.38856238924558
+        }
+      },
+      "unsupported": {
+        "gun": "needs its storage adapter to answer in Node.js"
+      },
+      "failed": {}
+    },
+    {
+      "id": "get-disk",
+      "kind": "get",
+      "kindTitle": "Read a record",
+      "line": "disk",
+      "lineTitle": "On disk",
+      "title": "Read a record, on disk",
+      "description": "Read one record by id, as a plain object. Each library's own persistence on node:fs, every write awaited.",
+      "unit": "ops/s",
+      "results": {
+        "syncom": {
+          "median": 953926.2472480993,
+          "min": 951507.0561588915,
+          "max": 968808.2074328029
+        },
+        "syncom-nochain": {
+          "median": 943996.3125144169,
+          "min": 936282.07326134,
+          "max": 954417.033175115
+        },
+        "yjs": {
+          "median": 3688013.505908745,
+          "min": 3528372.994508353,
+          "max": 3704135.772492425
+        },
+        "automerge": {
+          "median": 10539723.383723387,
+          "min": 10392641.928321417,
+          "max": 10684056.08086392
+        },
+        "loro": {
+          "median": 285174.98530185345,
+          "min": 252926.8266443499,
+          "max": 306933.13187294465
+        },
+        "tinybase": {
+          "median": 1393434.2575267048,
+          "min": 1347682.7325846504,
+          "max": 1406754.7582724271
+        },
+        "pouchdb": {
+          "median": 42005.587046002045,
+          "min": 41416.95981693702,
+          "max": 43504.68969574163
+        },
+        "fireproof": {
+          "median": 719.5273000644769,
+          "min": 714.4438054974204,
+          "max": 727.9488615924727
+        },
+        "gun": {
+          "median": 748.6859625499793,
+          "min": 641.7584581603098,
+          "max": 775.9771246332222
+        },
+        "orbitdb": {
+          "median": 82.39540656607684,
+          "min": 68.69226442552389,
+          "max": 109.51969676998795
+        }
+      },
+      "unsupported": {
+        "rxdb": "Node.js disk storages are Premium"
+      },
+      "failed": {}
+    },
+    {
+      "id": "inc-memory",
+      "kind": "inc",
+      "kindTitle": "Increment a counter",
+      "line": "memory",
+      "lineTitle": "In memory",
+      "title": "Increment a counter, in memory",
+      "description": "Add 1 to a counter that converges when replicas increment it concurrently. Nothing touches the disk.",
+      "unit": "ops/s",
+      "results": {
+        "syncom": {
+          "median": 53053.0477339271,
+          "min": 51884.2737487869,
+          "max": 53777.98766131294
+        },
+        "syncom-nochain": {
+          "median": 76419.12941037657,
+          "min": 74264.16441657563,
+          "max": 79944.74972224724
+        },
+        "automerge": {
+          "median": 1948.709360655863,
+          "min": 1942.704862777247,
+          "max": 1952.4254331345537
+        },
+        "loro": {
+          "median": 349007.1738091291,
+          "min": 335641.91552763805,
+          "max": 360132.4612208923
+        }
+      },
+      "unsupported": {
+        "yjs": "no counter that converges",
+        "tinybase": "no counter that converges",
+        "pouchdb": "no counter that converges",
+        "rxdb": "no counter that converges",
+        "fireproof": "no counter that converges",
+        "gun": "needs its storage adapter to answer in Node.js",
+        "orbitdb": "no counter that converges"
+      },
+      "failed": {}
+    },
+    {
+      "id": "inc-disk",
+      "kind": "inc",
+      "kindTitle": "Increment a counter",
+      "line": "disk",
+      "lineTitle": "On disk",
+      "title": "Increment a counter, on disk",
+      "description": "Add 1 to a counter that converges when replicas increment it concurrently. Each library's own persistence on node:fs, every write awaited.",
+      "unit": "ops/s",
+      "results": {
+        "syncom": {
+          "median": 1724.2056190615654,
+          "min": 1418.5119809320024,
+          "max": 2184.9003539695354
+        },
+        "syncom-nochain": {
+          "median": 3543.731856441618,
+          "min": 3217.2093633069703,
+          "max": 3645.958565817703
+        },
+        "automerge": {
+          "median": 1196.502626020144,
+          "min": 1138.5898087011517,
+          "max": 1209.0811491080867
+        },
+        "loro": {
+          "median": 42555.111170624594,
+          "min": 41071.86983192341,
+          "max": 44340.078274627405
+        }
+      },
+      "unsupported": {
+        "yjs": "no counter that converges",
+        "tinybase": "no counter that converges",
+        "pouchdb": "no counter that converges",
+        "rxdb": "Node.js disk storages are Premium",
+        "fireproof": "no counter that converges",
+        "gun": "no counter that converges",
+        "orbitdb": "no counter that converges"
+      },
+      "failed": {}
+    },
+    {
+      "id": "bulk-memory",
+      "kind": "bulk",
+      "kindTitle": "Insert 1,000 at once",
+      "line": "memory",
+      "lineTitle": "In memory",
+      "title": "Insert 1,000 at once, in memory",
+      "description": "Add 1,000 records in one call or transaction. Nothing touches the disk.",
+      "unit": "records/s",
+      "results": {
+        "syncom": {
+          "median": 36044.966095203774,
+          "min": 32032.374736757924,
+          "max": 39553.70291284939
+        },
+        "syncom-nochain": {
+          "median": 43001.73619509888,
+          "min": 39102.02206331598,
+          "max": 48973.69500407092
+        },
+        "yjs": {
+          "median": 274583.8338767806,
+          "min": 210546.61691590512,
+          "max": 387484.2584520012
+        },
+        "automerge": {
+          "median": 8962.343619875175,
+          "min": 8888.0132813227,
+          "max": 9081.645152370396
+        },
+        "loro": {
+          "median": 83114.58267794023,
+          "min": 67759.66622130496,
+          "max": 87917.8846956943
+        },
+        "tinybase": {
+          "median": 23707.098981737432,
+          "min": 20816.582489611224,
+          "max": 24781.202427061045
+        },
+        "pouchdb": {
+          "median": 73956.75127516237,
+          "min": 68915.80755646671,
+          "max": 82643.48748244549
+        },
+        "rxdb": {
+          "median": 2224901.9930672413,
+          "min": 2117706.354601493,
+          "max": 2330779.575844821
+        },
+        "fireproof": {
+          "median": 22263.905200291658,
+          "min": 16643.169562492185,
+          "max": 23762.776205144044
+        },
+        "orbitdb": {
+          "median": 1087.515400631843,
+          "min": 1083.8114070608688,
+          "max": 1101.7260880336976
+        }
+      },
+      "unsupported": {
+        "gun": "needs its storage adapter to answer in Node.js"
+      },
+      "failed": {}
+    },
+    {
+      "id": "bulk-disk",
+      "kind": "bulk",
+      "kindTitle": "Insert 1,000 at once",
+      "line": "disk",
+      "lineTitle": "On disk",
+      "title": "Insert 1,000 at once, on disk",
+      "description": "Add 1,000 records in one call or transaction. Each library's own persistence on node:fs, every write awaited.",
+      "unit": "records/s",
+      "results": {
+        "syncom": {
+          "median": 1848.1878468260786,
+          "min": 1579.1161884083003,
+          "max": 1991.16999338838
+        },
+        "syncom-nochain": {
+          "median": 2917.06741460353,
+          "min": 2472.9380699250546,
+          "max": 3068.2442695046107
+        },
+        "yjs": {
+          "median": 154946.6805230321,
+          "min": 134449.26220967373,
+          "max": 208726.5219189981
+        },
+        "automerge": {
+          "median": 7817.070115687245,
+          "min": 7439.180035127358,
+          "max": 8330.816732445408
+        },
+        "loro": {
+          "median": 66874.3471809821,
+          "min": 54776.01075844671,
+          "max": 72511.2787668557
+        },
+        "tinybase": {
+          "median": 15421.181378152425,
+          "min": 11277.575518846572,
+          "max": 15747.928328532516
+        },
+        "pouchdb": {
+          "median": 65463.945601032305,
+          "min": 58124.7502452138,
+          "max": 68236.0968952576
+        },
+        "fireproof": {
+          "median": 20702.594293847487,
+          "min": 16006.968281488034,
+          "max": 22090.21258449811
+        },
+        "orbitdb": {
+          "median": 920.951932755774,
+          "min": 917.5926485589476,
+          "max": 939.9910131971188
+        }
+      },
+      "unsupported": {
+        "rxdb": "Node.js disk storages are Premium"
+      },
+      "failed": {
+        "gun": "Error: no acknowledgement in 30000 ms"
+      }
+    },
+    {
+      "id": "sync-memory",
+      "kind": "sync",
+      "kindTitle": "Replicate a store",
+      "line": "memory",
+      "lineTitle": "In memory",
+      "title": "Replicate a store, in memory",
+      "description": "An empty replica pulls a store of 1,000 records, in process, through the library's own sync protocol, until every record reads back. Nothing touches the disk.",
+      "unit": "records/s",
+      "results": {
+        "syncom": {
+          "median": 101300.87545229588,
+          "min": 78857.3568985401,
+          "max": 105482.91767438009
+        },
+        "syncom-nochain": {
+          "median": 112039.58313656405,
+          "min": 100766.2466931037,
+          "max": 132082.94809140192
+        },
+        "yjs": {
+          "median": 99728.64832078399,
+          "min": 81198.21938800733,
+          "max": 117770.02458449267
+        },
+        "automerge": {
+          "median": 20912.39000971632,
+          "min": 19548.04910469935,
+          "max": 21491.106711403998
+        },
+        "loro": {
+          "median": 105332.45556287025,
+          "min": 93361.96433572964,
+          "max": 110201.9450643303
+        },
+        "tinybase": {
+          "median": 11486.320183196696,
+          "min": 10520.48799283555,
+          "max": 11707.808138621944
+        },
+        "pouchdb": {
+          "median": 17776.15817225541,
+          "min": 16966.94626780203,
+          "max": 18337.61859029628
+        },
+        "rxdb": {
+          "median": 64123.11638345612,
+          "min": 47007.391912378305,
+          "max": 95576.78294665483
+        },
+        "orbitdb": {
+          "median": 219.70634456003432,
+          "min": 214.4255484610183,
+          "max": 221.3553903815209
+        }
+      },
+      "unsupported": {
+        "fireproof": "syncs through a cloud or self-hosted gateway only",
+        "gun": "needs its storage adapter to answer in Node.js"
+      },
+      "failed": {}
+    },
+    {
+      "id": "sync-disk",
+      "kind": "sync",
+      "kindTitle": "Replicate a store",
+      "line": "disk",
+      "lineTitle": "On disk",
+      "title": "Replicate a store, on disk",
+      "description": "An empty replica pulls a store of 1,000 records, in process, through the library's own sync protocol, until every record reads back. Each library's own persistence on node:fs, every write awaited.",
+      "unit": "records/s",
+      "results": {
+        "syncom": {
+          "median": 7095.291222751541,
+          "min": 5858.20078543827,
+          "max": 7455.745490671928
+        },
+        "syncom-nochain": {
+          "median": 7311.6941891509505,
+          "min": 6187.278092497805,
+          "max": 7584.671000674088
+        },
+        "yjs": {
+          "median": 53737.56015785516,
+          "min": 51172.052363133094,
+          "max": 55051.93131258611
+        },
+        "automerge": {
+          "median": 3098.120579986887,
+          "min": 2448.922864787582,
+          "max": 4154.925401472159
+        },
+        "loro": {
+          "median": 107708.80536717261,
+          "min": 98854.52321227771,
+          "max": 111568.75374243424
+        },
+        "tinybase": {
+          "median": 11071.581382976476,
+          "min": 10121.589746683832,
+          "max": 11198.877084115225
+        },
+        "pouchdb": {
+          "median": 16502.773497370894,
+          "min": 15927.170274446802,
+          "max": 16770.387038395937
+        },
+        "orbitdb": {
+          "median": 193.23519336538558,
+          "min": 176.79850265812135,
+          "max": 195.0535476720387
+        }
+      },
+      "unsupported": {
+        "rxdb": "Node.js disk storages are Premium",
+        "fireproof": "syncs through a cloud or self-hosted gateway only",
+        "gun": "syncs over its WebSocket/WebRTC mesh only"
+      },
+      "failed": {}
+    }
+  ],
+  "coldStart": {
+    "syncom": {
+      "open": 33.902145999999995,
+      "firstRead": 0.878437500000004,
+      "total": 34.7604375
+    },
+    "syncom-nochain": {
+      "open": 33.7217085,
+      "firstRead": 0.36718799999999874,
+      "total": 34.0958335
+    },
+    "yjs": {
+      "open": 82.67010450000001,
+      "firstRead": 0.08016649999999714,
+      "total": 82.74404200000001
+    },
+    "automerge": {
+      "open": 182.69243799999998,
+      "firstRead": 0.028687500000017963,
+      "total": 182.72002100000003
+    },
+    "loro": {
+      "open": 51.202417,
+      "firstRead": 0.7197499999999977,
+      "total": 51.91245850000001
+    },
+    "tinybase": {
+      "open": 50.7468745,
+      "firstRead": 0.0523965000000004,
+      "total": 50.7998125
+    },
+    "pouchdb": {
+      "open": 81.584146,
+      "firstRead": 3.242770499999992,
+      "total": 85.1489585
+    },
+    "fireproof": {
+      "open": 158.1682915,
+      "firstRead": 81.8072705,
+      "total": 239.5535835
+    },
+    "gun": {
+      "open": 56.454333,
+      "firstRead": 28.0445415,
+      "total": 84.597104
+    },
+    "orbitdb": {
+      "open": 531.867542,
+      "firstRead": 45.10087500000003,
+      "total": 577.392042
+    }
+  }
+}

@@ -3,8 +3,9 @@ import { withMermaid } from 'vitepress-plugin-mermaid';
 
 const ogTitle = 'syncom — distributed data sync engine for Node.js and the browser';
 const ogDescription =
-  'Fast, zero-dependency distributed data sync engine: local-first storage with a hash-linked ' +
-  'integrity log, CRDT deltas, JavaScript smart contracts, and one API across Node.js and the Web.';
+  'Fast, zero-dependency distributed data sync engine: replicate records between servers, browsers ' +
+  'and peers as ops that converge without a coordinator, with resumable feeds, snapshots, scopes, ' +
+  'schema validation, Mango queries and a verifiable log. One API across Node.js and the Web.';
 const repo = 'https://github.com/Alexis-Technologies/syncom';
 const base = '/';
 const hostname = 'https://syncomjs.vercel.app/';
@@ -142,7 +143,13 @@ export default withMermaid({
         '/guide/': [
           {
             text: 'Introduction',
-            items: [{ text: 'Getting Started', link: '/guide/getting-started' }],
+            items: [
+              { text: 'Why syncom?', link: '/guide/why' },
+              { text: 'Compared with alternatives', link: '/guide/comparison' },
+              { text: 'Benchmarks', link: '/guide/benchmarks' },
+              { text: 'Getting Started', link: '/guide/getting-started' },
+              { text: 'Architecture', link: '/guide/architecture' },
+            ],
           },
           {
             text: 'Core',

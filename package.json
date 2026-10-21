@@ -42,13 +42,18 @@
     "test:coverage": "c8 --all --include 'src/**' --check-coverage --lines 95 --statements 95 --branches 90 --functions 95 --reporter text --reporter lcov node --test",
     "test:types": "tsd",
     "bench": "node bench/run-all.js",
+    "bench:compare:install": "pnpm --dir bench/compare install --ignore-workspace",
+    "bench:compare": "node bench/compare.js",
+    "bench:size": "node bench/compare/size.js",
+    "bench:report": "node bench/report.js",
     "lint": "oxlint src tests scripts bench examples",
     "format": "oxfmt src tests scripts bench examples",
     "format:check": "oxfmt --check src tests scripts bench examples",
     "size": "node scripts/size.js",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
-    "docs:preview": "vitepress preview docs"
+    "docs:preview": "vitepress preview docs",
+    "docs:comparison": "node scripts/comparison.js"
   },
   "tsd": {
     "directory": "tests"

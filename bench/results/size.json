@@ -1,0 +1,121 @@
+{
+  "generatedAt": "2026-10-21T12:51:23.128Z",
+  "esbuild": "0.28.2",
+  "libraries": [
+    {
+      "id": "syncom",
+      "name": "syncom",
+      "entry": "open() over OPFS + the wrpc link adapter",
+      "packages": [
+        "@alexify/syncom@0.0.1"
+      ],
+      "min": 109591,
+      "gzip": 38102,
+      "note": "storage, schema, queries, the op log and the sync protocol are one entry"
+    },
+    {
+      "id": "yjs",
+      "name": "Yjs",
+      "entry": "yjs + y-indexeddb + y-protocols/sync",
+      "packages": [
+        "yjs@13.6.33",
+        "y-indexeddb@9.0.12",
+        "y-protocols@1.0.7"
+      ],
+      "min": 82151,
+      "gzip": 25069
+    },
+    {
+      "id": "automerge",
+      "name": "Automerge",
+      "entry": "automerge-repo + IndexedDB storage",
+      "packages": [
+        "@automerge/automerge@3.5.0",
+        "@automerge/automerge-repo@2.6.0-alpha.3",
+        "@automerge/automerge-repo-storage-indexeddb@2.6.0-alpha.3"
+      ],
+      "min": 3834382,
+      "gzip": 1200059,
+      "wasm": 3644225
+    },
+    {
+      "id": "loro",
+      "name": "Loro",
+      "entry": "loro-crdt (no persistence of its own)",
+      "packages": [
+        "loro-crdt@1.16.4"
+      ],
+      "min": 3486757,
+      "gzip": 1141516,
+      "wasm": 3398779
+    },
+    {
+      "id": "tinybase",
+      "name": "TinyBase",
+      "entry": "MergeableStore + IndexedDB persister + custom synchronizer",
+      "packages": [
+        "tinybase@10.0.1"
+      ],
+      "min": 57710,
+      "gzip": 24397
+    },
+    {
+      "id": "pouchdb",
+      "name": "PouchDB",
+      "entry": "pouchdb-browser",
+      "packages": [
+        "pouchdb-browser@9.0.0"
+      ],
+      "min": 120665,
+      "gzip": 41344,
+      "note": "pouchdb-browser carries its HTTP adapter (the CouchDB client) with it"
+    },
+    {
+      "id": "rxdb",
+      "name": "RxDB",
+      "entry": "rxdb + Dexie storage + replication",
+      "packages": [
+        "rxdb@17.6.0",
+        "dexie@4.4.6",
+        "rxjs@7.8.2"
+      ],
+      "min": 289119,
+      "gzip": 92303
+    },
+    {
+      "id": "fireproof",
+      "name": "Fireproof",
+      "entry": "@fireproof/core",
+      "packages": [
+        "@fireproof/core@0.24.19"
+      ],
+      "min": 803042,
+      "gzip": 208923
+    },
+    {
+      "id": "gun",
+      "name": "GUN",
+      "entry": "gun (localStorage; its WebSocket mesh is built in)",
+      "packages": [
+        "gun@0.2020.1241"
+      ],
+      "min": 43243,
+      "gzip": 17538
+    },
+    {
+      "id": "orbitdb",
+      "name": "OrbitDB",
+      "entry": "@orbitdb/core + helia + libp2p, IndexedDB blockstore",
+      "packages": [
+        "@orbitdb/core@4.0.0",
+        "helia@6.1.4",
+        "libp2p@3.5.1",
+        "@libp2p/gossipsub@15.0.23",
+        "blockstore-idb@4.0.1"
+      ],
+      "min": 1214066,
+      "gzip": 362166,
+      "note": "createHelia brings Helia's default libp2p configuration with it"
+    }
+  ]
+}

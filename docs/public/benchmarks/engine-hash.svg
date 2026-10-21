@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="331" viewBox="0 0 760 331" role="img" aria-label="Hash: syncom's own benchmarks. The digest behind the chain and the integrity checks. ops/s, log scale, higher is better.">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .title { font-size: 15px; font-weight: 700; fill: #1b1c1e; }
+  .subtitle, .caption { font-size: 12px; fill: #67676c; }
+  .caption { font-size: 11px; }
+  .group { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; fill: #67676c; }
+  .label { font-size: 13px; font-weight: 600; fill: #1b1c1e; }
+  .label.primary, .label.secondary { font-weight: 700; }
+  .sublabel { font-size: 11px; fill: #67676c; }
+  .value { font-size: 12px; font-weight: 600; fill: #3c3c43; font-variant-numeric: tabular-nums; }
+  .value.small { font-size: 10px; }
+  .legend { font-size: 11px; fill: #3c3c43; }
+  .tick { font-size: 11px; fill: #67676c; font-variant-numeric: tabular-nums; }
+  .grid { stroke: #e4e4e7; stroke-width: 1; }
+  .axis { stroke: #c2c2c4; stroke-width: 1; }
+  .ref { stroke: #67676c; stroke-width: 1; stroke-dasharray: 3 3; }
+  .bar { fill: #c4c6cc; }
+  .bar.primary { fill: #245a9e; }
+  .bar.secondary { fill: #5e9be6; }
+  @media (prefers-color-scheme: dark) {
+    .title, .label { fill: #dfdfd6; }
+    .subtitle, .caption, .group, .sublabel, .tick { fill: #98989f; }
+    .value, .legend { fill: #c2c2c4; }
+    .grid { stroke: #2e2e32; }
+    .axis { stroke: #48484c; }
+    .ref { stroke: #98989f; }
+    .bar { fill: #46474e; }
+    .bar.primary { fill: #8dbcf2; }
+    .bar.secondary { fill: #3d7bd0; }
+  }
+</style>
+<text class="title" x="20" y="35">Hash: syncom's own benchmarks</text>
+<text class="subtitle" x="20" y="56">The digest behind the chain and the integrity checks. ops/s, log scale, higher is better.</text>
+<line class="grid" x1="202" y1="71" x2="202" y2="271"/>
+<text class="tick" x="202" y="287" text-anchor="middle">10k</text>
+<line class="grid" x1="360" y1="71" x2="360" y2="271"/>
+<text class="tick" x="360" y="287" text-anchor="middle">100k</text>
+<line class="grid" x1="518" y1="71" x2="518" y2="271"/>
+<text class="tick" x="518" y="287" text-anchor="middle">1M</text>
+<line class="grid" x1="676" y1="71" x2="676" y2="271"/>
+<text class="tick" x="676" y="287" text-anchor="middle">10M</text>
+<line class="axis" x1="202" y1="71" x2="202" y2="271"/>
+<g><title>calculateHash · empty genesis block
+1,167,644 ops/s
+856 ns per operation</title>
+<text class="label primary" x="20" y="88">calculateHash</text>
+<text class="sublabel" x="20" y="103">empty genesis block</text>
+<path class="bar primary" d="M202,84H524.6350514193147A4,4 0 0 1 528.6350514193147,88V94A4,4 0 0 1 524.6350514193147,98H202Z"/>
+<text class="value" x="534.6350514193147" y="97">1.17M</text>
+</g>
+<g><title>calculateHash · small record (5 x 16 B)
+1,008,173 ops/s
+992 ns per operation</title>
+<text class="label primary" x="20" y="128">calculateHash</text>
+<text class="sublabel" x="20" y="143">small record (5 x 16 B)</text>
+<path class="bar primary" d="M202,124H514.5585398538501A4,4 0 0 1 518.5585398538501,128V134A4,4 0 0 1 514.5585398538501,138H202Z"/>
+<text class="value" x="524.5585398538501" y="137">1.01M</text>
+</g>
+<g><title>calculateHash · medium record (50 x 64 B)
+139,205 ops/s
+7.18 µs per operation</title>
+<text class="label primary" x="20" y="168">calculateHash</text>
+<text class="sublabel" x="20" y="183">medium record (50 x 64 B)</text>
+<path class="bar primary" d="M202,164H378.6974638750947A4,4 0 0 1 382.6974638750947,168V174A4,4 0 0 1 378.6974638750947,178H202Z"/>
+<text class="value" x="388.6974638750947" y="177">139k</text>
+</g>
+<g><title>calculateHash · large record (200 x 256 B)
+14,712 ops/s
+68 µs per operation</title>
+<text class="label primary" x="20" y="208">calculateHash</text>
+<text class="sublabel" x="20" y="223">large record (200 x 256 B)</text>
+<path class="bar primary" d="M202,204H224.4921311643434A4,4 0 0 1 228.4921311643434,208V214A4,4 0 0 1 224.4921311643434,218H202Z"/>
+<text class="value" x="234.4921311643434" y="217">14.7k</text>
+</g>
+<g><title>calculateHash · deeply nested record
+632,016 ops/s
+1.58 µs per operation</title>
+<text class="label primary" x="20" y="248">calculateHash</text>
+<text class="sublabel" x="20" y="263">deeply nested record</text>
+<path class="bar primary" d="M202,244H482.51503552455523A4,4 0 0 1 486.51503552455523,248V254A4,4 0 0 1 482.51503552455523,258H202Z"/>
+<text class="value" x="492.51503552455523" y="257">632k</text>
+</g>
+<text class="caption" x="20" y="312">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-21</text>
+</svg>

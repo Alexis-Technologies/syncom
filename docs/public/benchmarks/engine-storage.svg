@@ -1,0 +1,182 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="788" viewBox="0 0 760 788" role="img" aria-label="Storage: syncom's own benchmarks. The public API end to end on node:fs: a write is an op appended to the log, a record file and a block. ops/s, log scale, higher is better.">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .title { font-size: 15px; font-weight: 700; fill: #1b1c1e; }
+  .subtitle, .caption { font-size: 12px; fill: #67676c; }
+  .caption { font-size: 11px; }
+  .group { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; fill: #67676c; }
+  .label { font-size: 13px; font-weight: 600; fill: #1b1c1e; }
+  .label.primary, .label.secondary { font-weight: 700; }
+  .sublabel { font-size: 11px; fill: #67676c; }
+  .value { font-size: 12px; font-weight: 600; fill: #3c3c43; font-variant-numeric: tabular-nums; }
+  .value.small { font-size: 10px; }
+  .legend { font-size: 11px; fill: #3c3c43; }
+  .tick { font-size: 11px; fill: #67676c; font-variant-numeric: tabular-nums; }
+  .grid { stroke: #e4e4e7; stroke-width: 1; }
+  .axis { stroke: #c2c2c4; stroke-width: 1; }
+  .ref { stroke: #67676c; stroke-width: 1; stroke-dasharray: 3 3; }
+  .bar { fill: #c4c6cc; }
+  .bar.primary { fill: #245a9e; }
+  .bar.secondary { fill: #5e9be6; }
+  @media (prefers-color-scheme: dark) {
+    .title, .label { fill: #dfdfd6; }
+    .subtitle, .caption, .group, .sublabel, .tick { fill: #98989f; }
+    .value, .legend { fill: #c2c2c4; }
+    .grid { stroke: #2e2e32; }
+    .axis { stroke: #48484c; }
+    .ref { stroke: #98989f; }
+    .bar { fill: #46474e; }
+    .bar.primary { fill: #8dbcf2; }
+    .bar.secondary { fill: #3d7bd0; }
+  }
+</style>
+<text class="title" x="20" y="35">Storage: syncom's own benchmarks</text>
+<text class="subtitle" x="20" y="56">The public API end to end on node:fs: a write is an op appended to the log, a record file and a block. ops/s,</text>
+<text class="subtitle" x="20" y="73">log scale, higher is better.</text>
+<line class="grid" x1="372" y1="88" x2="372" y2="728"/>
+<text class="tick" x="372" y="744" text-anchor="middle">10</text>
+<line class="grid" x1="415.42857142857144" y1="88" x2="415.42857142857144" y2="728"/>
+<text class="tick" x="415.42857142857144" y="744" text-anchor="middle">100</text>
+<line class="grid" x1="458.85714285714283" y1="88" x2="458.85714285714283" y2="728"/>
+<text class="tick" x="458.85714285714283" y="744" text-anchor="middle">1,000</text>
+<line class="grid" x1="502.2857142857143" y1="88" x2="502.2857142857143" y2="728"/>
+<text class="tick" x="502.2857142857143" y="744" text-anchor="middle">10k</text>
+<line class="grid" x1="545.7142857142857" y1="88" x2="545.7142857142857" y2="728"/>
+<text class="tick" x="545.7142857142857" y="744" text-anchor="middle">100k</text>
+<line class="grid" x1="589.1428571428571" y1="88" x2="589.1428571428571" y2="728"/>
+<text class="tick" x="589.1428571428571" y="744" text-anchor="middle">1M</text>
+<line class="grid" x1="632.5714285714286" y1="88" x2="632.5714285714286" y2="728"/>
+<text class="tick" x="632.5714285714286" y="744" text-anchor="middle">10M</text>
+<line class="grid" x1="676" y1="88" x2="676" y2="728"/>
+<text class="tick" x="676" y="744" text-anchor="middle">100M</text>
+<line class="axis" x1="372" y1="88" x2="372" y2="728"/>
+<g><title>insert · small record
+1,889 ops/s
+529 µs per operation</title>
+<text class="label primary" x="20" y="105">insert</text>
+<text class="sublabel" x="20" y="120">small record</text>
+<path class="bar primary" d="M372,101H466.8535021726053A4,4 0 0 1 470.8535021726053,105V111A4,4 0 0 1 466.8535021726053,115H372Z"/>
+<text class="value" x="476.8535021726053" y="114">1,889</text>
+</g>
+<g><title>get · cached
+204,935 ops/s
+4.88 µs per operation</title>
+<text class="label primary" x="20" y="145">get</text>
+<text class="sublabel" x="20" y="160">cached</text>
+<path class="bar primary" d="M372,141H555.2473293388416A4,4 0 0 1 559.2473293388416,145V151A4,4 0 0 1 555.2473293388416,155H372Z"/>
+<text class="value" x="565.2473293388416" y="154">205k</text>
+</g>
+<g><title>get · cold (re-verifies the block)
+162 ops/s
+6.17 ms per operation</title>
+<text class="label primary" x="20" y="185">get</text>
+<text class="sublabel" x="20" y="200">cold (re-verifies the block)</text>
+<path class="bar primary" d="M372,181H420.5275092029942A4,4 0 0 1 424.5275092029942,185V191A4,4 0 0 1 420.5275092029942,195H372Z"/>
+<text class="value" x="430.5275092029942" y="194">162</text>
+</g>
+<g><title>update · one field
+2,066 ops/s
+484 µs per operation</title>
+<text class="label primary" x="20" y="225">update</text>
+<text class="sublabel" x="20" y="240">one field</text>
+<path class="bar primary" d="M372,221H468.5428023462593A4,4 0 0 1 472.5428023462593,225V231A4,4 0 0 1 468.5428023462593,235H372Z"/>
+<text class="value" x="478.5428023462593" y="234">2,066</text>
+</g>
+<g><title>set · whole record
+1,721 ops/s
+581 µs per operation</title>
+<text class="label primary" x="20" y="265">set</text>
+<text class="sublabel" x="20" y="280">whole record</text>
+<path class="bar primary" d="M372,261H465.09676922565404A4,4 0 0 1 469.09676922565404,265V271A4,4 0 0 1 465.09676922565404,275H372Z"/>
+<text class="value" x="475.09676922565404" y="274">1,721</text>
+</g>
+<g><title>swap · match (writes)
+1,772 ops/s
+564 µs per operation</title>
+<text class="label primary" x="20" y="305">swap</text>
+<text class="sublabel" x="20" y="320">match (writes)</text>
+<path class="bar primary" d="M372,301H465.64756716221626A4,4 0 0 1 469.64756716221626,305V311A4,4 0 0 1 465.64756716221626,315H372Z"/>
+<text class="value" x="475.64756716221626" y="314">1,772</text>
+</g>
+<g><title>swap · mismatch (reads only)
+216,441 ops/s
+4.62 µs per operation</title>
+<text class="label primary" x="20" y="345">swap</text>
+<text class="sublabel" x="20" y="360">mismatch (reads only)</text>
+<path class="bar primary" d="M372,341H556.2776025235003A4,4 0 0 1 560.2776025235003,345V351A4,4 0 0 1 556.2776025235003,355H372Z"/>
+<text class="value" x="566.2776025235003" y="354">216k</text>
+</g>
+<g><title>has · existing id
+239,444 ops/s
+4.18 µs per operation</title>
+<text class="label primary" x="20" y="385">has</text>
+<text class="sublabel" x="20" y="400">existing id</text>
+<path class="bar primary" d="M372,381H558.1825719311794A4,4 0 0 1 562.1825719311794,385V391A4,4 0 0 1 558.1825719311794,395H372Z"/>
+<text class="value" x="568.1825719311794" y="394">239k</text>
+</g>
+<g><title>record · cached Record instance
+9,876,481 ops/s
+101 ns per operation</title>
+<text class="label primary" x="20" y="425">record</text>
+<text class="sublabel" x="20" y="440">cached Record instance</text>
+<path class="bar primary" d="M372,421H628.337011244009A4,4 0 0 1 632.337011244009,425V431A4,4 0 0 1 628.337011244009,435H372Z"/>
+<text class="value" x="638.337011244009" y="434">9.88M</text>
+</g>
+<g><title>list · 2000 ids (catalog)
+11,546,070 ops/s
+86.6 ns per operation</title>
+<text class="label primary" x="20" y="465">list</text>
+<text class="sublabel" x="20" y="480">2000 ids (catalog)</text>
+<path class="bar primary" d="M372,461H631.2828560844137A4,4 0 0 1 635.2828560844137,465V471A4,4 0 0 1 631.2828560844137,475H372Z"/>
+<text class="value" x="641.2828560844137" y="474">11.5M</text>
+</g>
+<g><title>hasRecord · 2000 ids (catalog)
+13,267,898 ops/s
+75.4 ns per operation</title>
+<text class="label primary" x="20" y="505">hasRecord</text>
+<text class="sublabel" x="20" y="520">2000 ids (catalog)</text>
+<path class="bar primary" d="M372,501H633.9045493904468A4,4 0 0 1 637.9045493904468,505V511A4,4 0 0 1 633.9045493904468,515H372Z"/>
+<text class="value" x="643.9045493904468" y="514">13.3M</text>
+</g>
+<g><title>select · covered eq over 2000
+21,433 ops/s
+46.7 µs per operation</title>
+<text class="label primary" x="20" y="545">select</text>
+<text class="sublabel" x="20" y="560">covered eq over 2000</text>
+<path class="bar primary" d="M372,541H512.664174434879A4,4 0 0 1 516.664174434879,545V551A4,4 0 0 1 512.664174434879,555H372Z"/>
+<text class="value" x="522.664174434879" y="554">21.4k</text>
+</g>
+<g><title>select · eq + order + limit over 2000
+11,349 ops/s
+88.1 µs per operation</title>
+<text class="label primary" x="20" y="585">select</text>
+<text class="sublabel" x="20" y="600">eq + order + limit over 2000</text>
+<path class="bar primary" d="M372,581H500.6724441696816A4,4 0 0 1 504.6724441696816,585V591A4,4 0 0 1 500.6724441696816,595H372Z"/>
+<text class="value" x="510.6724441696816" y="594">11.3k</text>
+</g>
+<g><title>select · uncovered filter over 2000
+1,032 ops/s
+969 µs per operation</title>
+<text class="label primary" x="20" y="625">select</text>
+<text class="sublabel" x="20" y="640">uncovered filter over 2000</text>
+<path class="bar primary" d="M372,621H455.45123256807466A4,4 0 0 1 459.45123256807466,625V631A4,4 0 0 1 455.45123256807466,635H372Z"/>
+<text class="value" x="465.45123256807466" y="634">1,032</text>
+</g>
+<g><title>open · catalog caught up from the log (2000 records)
+32 ops/s
+31.3 ms per operation</title>
+<text class="label primary" x="20" y="665">open</text>
+<text class="sublabel" x="20" y="680">catalog caught up from the log (2000 records)</text>
+<path class="bar primary" d="M372,661H389.9379419156073A4,4 0 0 1 393.9379419156073,665V671A4,4 0 0 1 389.9379419156073,675H372Z"/>
+<text class="value" x="399.9379419156073" y="674">32</text>
+</g>
+<g><title>open · catalog rebuilt from a scan (2000 records, integrity lazy)
+32 ops/s
+31.3 ms per operation</title>
+<text class="label primary" x="20" y="705">open</text>
+<text class="sublabel" x="20" y="720">catalog rebuilt from a scan (2000 records, integrity laz…</text>
+<path class="bar primary" d="M372,701H389.9379419156073A4,4 0 0 1 393.9379419156073,705V711A4,4 0 0 1 389.9379419156073,715H372Z"/>
+<text class="value" x="399.9379419156073" y="714">32</text>
+</g>
+<text class="caption" x="20" y="769">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-21</text>
+</svg>

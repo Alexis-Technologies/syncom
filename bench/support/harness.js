@@ -1,6 +1,14 @@
 'use strict';
 
+const fs = require('node:fs');
+const path = require('node:path');
 const { performance } = require('node:perf_hooks');
+
+// `pnpm bench --save` (bench/run-all.js) names a file in SYNCOM_BENCH_OUT;
+// every row a bench measures is appended to it as a JSON line, tagged with the
+// script it came from, and run-all.js gathers them into bench/results/engine.json.
+const OUT = process.env.SYNCOM_BENCH_OUT;
+const SUBJECT = path.basename(process.argv[1] ?? '', '.js');
 
 const WARMUP_ITERATIONS = 200;
 const MEASURE_MS = 1_000;
@@ -46,6 +54,7 @@ async function bench(name, fn, options = {}) {
   const elapsed = performance.now() - start;
   const opsPerSec = Math.round(((iterations * opsPerIteration) / elapsed) * 1000);
   console.log(`${name.padEnd(60)} ${opsPerSec.toLocaleString('en-US').padStart(12)} ops/sec`);
+  if (OUT) fs.appendFileSync(OUT, `${JSON.stringify({ subject: SUBJECT, name, opsPerSec })}\n`);
   return { name, opsPerSec };
 }
 

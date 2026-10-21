@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="388" viewBox="0 0 760 388" role="img" aria-label="Sync: syncom's own benchmarks. Replication over the in-process link (JSON across the boundary, like a wrpc client). ops/s, log scale, higher is better.">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .title { font-size: 15px; font-weight: 700; fill: #1b1c1e; }
+  .subtitle, .caption { font-size: 12px; fill: #67676c; }
+  .caption { font-size: 11px; }
+  .group { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; fill: #67676c; }
+  .label { font-size: 13px; font-weight: 600; fill: #1b1c1e; }
+  .label.primary, .label.secondary { font-weight: 700; }
+  .sublabel { font-size: 11px; fill: #67676c; }
+  .value { font-size: 12px; font-weight: 600; fill: #3c3c43; font-variant-numeric: tabular-nums; }
+  .value.small { font-size: 10px; }
+  .legend { font-size: 11px; fill: #3c3c43; }
+  .tick { font-size: 11px; fill: #67676c; font-variant-numeric: tabular-nums; }
+  .grid { stroke: #e4e4e7; stroke-width: 1; }
+  .axis { stroke: #c2c2c4; stroke-width: 1; }
+  .ref { stroke: #67676c; stroke-width: 1; stroke-dasharray: 3 3; }
+  .bar { fill: #c4c6cc; }
+  .bar.primary { fill: #245a9e; }
+  .bar.secondary { fill: #5e9be6; }
+  @media (prefers-color-scheme: dark) {
+    .title, .label { fill: #dfdfd6; }
+    .subtitle, .caption, .group, .sublabel, .tick { fill: #98989f; }
+    .value, .legend { fill: #c2c2c4; }
+    .grid { stroke: #2e2e32; }
+    .axis { stroke: #48484c; }
+    .ref { stroke: #98989f; }
+    .bar { fill: #46474e; }
+    .bar.primary { fill: #8dbcf2; }
+    .bar.secondary { fill: #3d7bd0; }
+  }
+</style>
+<text class="title" x="20" y="35">Sync: syncom's own benchmarks</text>
+<text class="subtitle" x="20" y="56">Replication over the in-process link (JSON across the boundary, like a wrpc client). ops/s, log scale, higher is</text>
+<text class="subtitle" x="20" y="73">better.</text>
+<line class="grid" x1="372" y1="88" x2="372" y2="328"/>
+<text class="tick" x="372" y="344" text-anchor="middle">1</text>
+<line class="grid" x1="448" y1="88" x2="448" y2="328"/>
+<text class="tick" x="448" y="344" text-anchor="middle">10</text>
+<line class="grid" x1="524" y1="88" x2="524" y2="328"/>
+<text class="tick" x="524" y="344" text-anchor="middle">100</text>
+<line class="grid" x1="600" y1="88" x2="600" y2="328"/>
+<text class="tick" x="600" y="344" text-anchor="middle">1,000</text>
+<line class="grid" x1="676" y1="88" x2="676" y2="328"/>
+<text class="tick" x="676" y="344" text-anchor="middle">10k</text>
+<line class="axis" x1="372" y1="88" x2="372" y2="328"/>
+<g><title>write on A, applied on B (one hop)
+711 ops/s
+1.41 ms per operation</title>
+<text class="label primary" x="20" y="112">write on A, applied on B (one hop)</text>
+<path class="bar primary" d="M372,101H584.7420896554622A4,4 0 0 1 588.7420896554622,105V111A4,4 0 0 1 584.7420896554622,115H372Z"/>
+<text class="value" x="594.7420896554622" y="114">711</text>
+</g>
+<g><title>write on A, applied on C (two hops)
+917 ops/s
+1.09 ms per operation</title>
+<text class="label primary" x="20" y="152">write on A, applied on C (two hops)</text>
+<path class="bar primary" d="M372,141H593.1400695109216A4,4 0 0 1 597.1400695109216,145V151A4,4 0 0 1 593.1400695109216,155H372Z"/>
+<text class="value" x="603.1400695109216" y="154">917</text>
+</g>
+<g><title>update on A, applied on C (two hops)
+859 ops/s
+1.16 ms per operation</title>
+<text class="label primary" x="20" y="192">update on A, applied on C (two hops)</text>
+<path class="bar primary" d="M372,181H590.9834804511744A4,4 0 0 1 594.9834804511744,185V191A4,4 0 0 1 590.9834804511744,195H372Z"/>
+<text class="value" x="600.9834804511744" y="194">859</text>
+</g>
+<g><title>snapshot · one page of 500 out of 2000 (host side)
+9,391 ops/s
+106 µs per operation</title>
+<text class="label primary" x="20" y="225">snapshot</text>
+<text class="sublabel" x="20" y="240">one page of 500 out of 2000 (host side)</text>
+<path class="bar primary" d="M372,221H669.9260998815771A4,4 0 0 1 673.9260998815771,225V231A4,4 0 0 1 669.9260998815771,235H372Z"/>
+<text class="value" x="679.9260998815771" y="234">9,391</text>
+</g>
+<g><title>bootstrap · a new node joins a host of 2000 records
+2 ops/s
+500 ms per operation</title>
+<text class="label primary" x="20" y="265">bootstrap</text>
+<text class="sublabel" x="20" y="280">a new node joins a host of 2000 records</text>
+<path class="bar primary" d="M372,261H390.8782796704626A4,4 0 0 1 394.8782796704626,265V271A4,4 0 0 1 390.8782796704626,275H372Z"/>
+<text class="value" x="400.8782796704626" y="274">2</text>
+</g>
+<g><title>append of another scope's op while a scoped feed listens
+2,000 ops/s
+500 µs per operation</title>
+<text class="label primary" x="20" y="312">append of another scope's op while a scoped fe…</text>
+<path class="bar primary" d="M372,301H618.8782796704626A4,4 0 0 1 622.8782796704626,305V311A4,4 0 0 1 618.8782796704626,315H372Z"/>
+<text class="value" x="628.8782796704626" y="314">2,000</text>
+</g>
+<text class="caption" x="20" y="369">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-21</text>
+</svg>
