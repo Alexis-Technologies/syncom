@@ -221,7 +221,15 @@ test('Storage replication model', async (t) => {
     storage.on('change', (op, via) => changes.push({ op, via }));
 
     const first = await storage.applyRemote([remoteOp('peer', 1, 'write', 'r1', { data: { a: 1 } })], { via: 'L' });
-    assert.deepStrictEqual(first, { applied: 1, skipped: 0, duplicates: 0, gaps: 0, malformed: 0 });
+    assert.deepStrictEqual(first, {
+      applied: 1,
+      skipped: 0,
+      duplicates: 0,
+      gaps: 0,
+      malformed: 0,
+      unsigned: 0,
+      forged: 0,
+    });
     assert.deepStrictEqual(await storage.get('r1'), { a: 1 });
     assert.deepStrictEqual(changes[0].via, 'L');
     assert.strictEqual(changes[0].op.origin, 'peer');
@@ -232,7 +240,15 @@ test('Storage replication model', async (t) => {
       { origin: storage.nodeId, seq: 1, ts: 1, type: 'write', id: 'x', data: {} },
       'garbage',
     ]);
-    assert.deepStrictEqual(again, { applied: 0, skipped: 0, duplicates: 2, gaps: 1, malformed: 1 });
+    assert.deepStrictEqual(again, {
+      applied: 0,
+      skipped: 0,
+      duplicates: 2,
+      gaps: 1,
+      malformed: 1,
+      unsigned: 0,
+      forged: 0,
+    });
     assert.deepStrictEqual(await storage.get('r1'), { a: 1 });
 
     const next = await storage.applyRemote([
@@ -240,7 +256,15 @@ test('Storage replication model', async (t) => {
       remoteOp('peer', 3, 'inc', 'r1', { key: 'n', value: 4 }),
       remoteOp('peer', 4, 'delete', 'r1'),
     ]);
-    assert.deepStrictEqual(next, { applied: 3, skipped: 0, duplicates: 0, gaps: 0, malformed: 0 });
+    assert.deepStrictEqual(next, {
+      applied: 3,
+      skipped: 0,
+      duplicates: 0,
+      gaps: 0,
+      malformed: 0,
+      unsigned: 0,
+      forged: 0,
+    });
     assert.strictEqual(await storage.get('r1'), null);
     assert.deepStrictEqual(storage.vector, { peer: 4 });
     // Accepted-but-unchanged ops still advance the vector and are logged.
@@ -399,7 +423,15 @@ test('Storage replication model', async (t) => {
       remoteOp('peer', 1, 'set', bad, { data: { n: 2 } }),
       remoteOp('peer', 2, 'write', 'fine', { data: { n: 3 } }),
     ]);
-    assert.deepStrictEqual(result, { applied: 2, skipped: 1, duplicates: 0, gaps: 0, malformed: 0 });
+    assert.deepStrictEqual(result, {
+      applied: 2,
+      skipped: 1,
+      duplicates: 0,
+      gaps: 0,
+      malformed: 0,
+      unsigned: 0,
+      forged: 0,
+    });
     assert.strictEqual(errors.length, 1);
     assert.strictEqual(errors[0].code, 'OP_UNREADABLE');
     assert.strictEqual(errors[0].op.id, bad);
@@ -612,7 +644,15 @@ test("Storage: what a peer's op must look like", async (t) => {
       { ...ok, seq: 2, nonce: 'has space in it!' },
     ];
     const result = await storage.applyRemote([ok, ...bad]);
-    assert.deepStrictEqual(result, { applied: 1, skipped: 0, duplicates: 0, gaps: 0, malformed: bad.length });
+    assert.deepStrictEqual(result, {
+      applied: 1,
+      skipped: 0,
+      duplicates: 0,
+      gaps: 0,
+      malformed: bad.length,
+      unsigned: 0,
+      forged: 0,
+    });
     assert.strictEqual(storage.log.length, 1, 'only the good op is in the log');
     assert.deepStrictEqual(storage.vector, { peer: 1 });
     assert.strictEqual(await storage.fsi.exists(storage.path, 'evil.json'), false, 'nothing left data/');
@@ -628,7 +668,15 @@ test("Storage: what a peer's op must look like", async (t) => {
     const id = await storage.insert({ f: 1 });
     const far = Date.now() + 3_600_000;
     const result = await storage.applyRemote([remoteOp('peer', 1, 'set', id, { data: { f: 2 }, ts: far })]);
-    assert.deepStrictEqual(result, { applied: 0, skipped: 0, duplicates: 0, gaps: 0, malformed: 1 });
+    assert.deepStrictEqual(result, {
+      applied: 0,
+      skipped: 0,
+      duplicates: 0,
+      gaps: 0,
+      malformed: 1,
+      unsigned: 0,
+      forged: 0,
+    });
     assert.strictEqual(errors.length, 1);
     assert.strictEqual(errors[0].code, 'SKEW');
     assert.strictEqual(errors[0].op.seq, 1);

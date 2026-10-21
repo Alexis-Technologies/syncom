@@ -87,6 +87,13 @@ const normalizeStorageOptions = (options) => {
   if (maxSkew !== undefined && !(typeof maxSkew === 'number' && maxSkew > 0)) {
     throw new TypeError('open({ sync }): maxSkew must be a positive number of milliseconds (Infinity to disable)');
   }
+  // Signed ops: 'verify' signs this node's and checks a peer's when it
+  // carries a signature; 'require' refuses unsigned ones too; false does
+  // neither. The node id is the signing key in every mode — see src/apply.js.
+  const signatures = options.sync?.signatures;
+  if (signatures !== undefined && signatures !== 'verify' && signatures !== 'require' && signatures !== false) {
+    throw new TypeError("open({ sync }): signatures must be 'verify', 'require' or false");
+  }
   return {
     path: options.path || options.name || 'syncom',
     maxListeners,
@@ -103,6 +110,7 @@ const normalizeStorageOptions = (options) => {
     encrypted: options.encrypted === true,
     scope: typeof scope === 'function' ? scope : null,
     maxSkew: maxSkew ?? DEFAULT_MAX_SKEW,
+    signatures: signatures ?? 'verify',
   };
 };
 

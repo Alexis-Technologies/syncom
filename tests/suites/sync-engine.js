@@ -209,6 +209,43 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     await assertConverged(storages);
   });
 
+  await t.test(
+    'a mesh that requires signatures converges, and every logged op verifies against its origin',
+    async (t2) => {
+      const options = { sync: { signatures: 'require' } };
+      const mesh = await createMesh(
+        t2,
+        ['A', 'B', 'C'],
+        [
+          ['A', 'B'],
+          ['B', 'C'],
+        ],
+        createStorage,
+        options,
+      );
+      const a = mesh.get('A');
+      const b = mesh.get('B');
+      const c = mesh.get('C');
+      const id = await a.insert({ n: 1 });
+      await settle([a, b, c]);
+      await b.update(id, { m: 2 });
+      await c.inc(id, 'hits', 1);
+      await c.add(id, 'tags', ['x']);
+      await c.delete(await a.insert({ gone: true }));
+      await settle([a, b, c]);
+      await assertConverged([a, b, c]);
+      assert.deepStrictEqual(await c.get(id), { n: 1, m: 2, hits: 1, tags: ['x'] });
+      const { verifyOp } = require('../../src/signing.js');
+      for (const storage of [a, b, c]) {
+        const entries = storage.log.since(undefined);
+        assert.ok(entries.length >= 5);
+        for (const entry of entries) {
+          assert.strictEqual(await verifyOp(entry.op, 'require'), 'ok', `${storage.nodeId}: ${entry.op.type}`);
+        }
+      }
+    },
+  );
+
   await t.test('a late joiner bootstraps from a snapshot once history is compacted', async (t2) => {
     const options = { sync: { log: { rollAfter: 2 }, retention: { ops: 4 } } };
     const mesh = await createMesh(t2, ['A', 'B'], [], createStorage, options);

@@ -1,7 +1,8 @@
 'use strict';
 
 // A peer's batch, applied: `storage.applyRemote(ops)` lands here, inside the
-// mutation queue. Every op is admitted (well-formed, inside the skew
+// mutation queue. Every op's signature is checked first (a pre-pass over
+// the page), then every op is admitted (well-formed, inside the skew
 // horizon, the next of its stream), applied one by one, and the batch is
 // then made durable — log first, then the records — and announced. This is
 // the trust boundary: nothing below `admit` reads a field it did not check.
@@ -14,8 +15,13 @@ const { inScope } = require('./scope.js');
 const { traced, now } = require('./telemetry.js');
 const { isPlainObject, VALIDATED, wellFormed } = require('./shape.js');
 const { SyncomError } = require('./errors.js');
+const { verifyOp, OK, FORGED } = require('./signing.js');
 
-const NOTHING = { applied: 0, skipped: 0, duplicates: 0, gaps: 0, malformed: 0 };
+const NOTHING = { applied: 0, skipped: 0, duplicates: 0, gaps: 0, malformed: 0, unsigned: 0, forged: 0 };
+// Signatures are verified this many at a time under Promise.all: the
+// verdicts are independent, and the browser's async verify is four times
+// faster that way than one after another.
+const VERIFY_CHUNK = 64;
 
 // What one batch accumulates: the ops it accepts (logged, whether or not
 // they changed anything), the entries it touched and their deltas, and the
@@ -42,7 +48,68 @@ const openBatch = (core, { via = null, scopes = null, peer = null, adoptFrom = n
     duplicates: 0,
     gaps: 0,
     malformed: 0,
+    signatures: core.signatures,
+    unsigned: 0,
+    forged: 0,
+    firstUnsigned: null,
+    firstForged: null,
   };
+};
+
+// The verdict on every op of the page before any is admitted — `admit` must
+// stay sequential (each accept moves the vector), verification need not.
+// Only a well-formed op that carries a signature is checked, and under
+// 'require' every well-formed one; the rest is OK by rule, which is what
+// keeps an unsigned page — an older peer's, a test's — at a property check
+// per op. A malformed op is left to `admit` to count.
+const verifyPage = async (batch, ops) => {
+  const { signatures } = batch;
+  const verdicts = new Array(ops.length).fill(OK);
+  if (signatures === false) return verdicts;
+  const pending = [];
+  for (let start = 0; start < ops.length; start += VERIFY_CHUNK) {
+    pending.length = 0;
+    for (let i = start; i < ops.length && i < start + VERIFY_CHUNK; i++) {
+      const op = ops[i];
+      if (!wellFormed(op) || (op.sig === undefined && signatures !== 'require')) continue;
+      pending.push(verifyOp(op, signatures).then((verdict) => void (verdicts[i] = verdict)));
+    }
+    if (pending.length > 0) await Promise.all(pending);
+  }
+  return verdicts;
+};
+
+// Refused before admission: counted per op (the metric), remembered once
+// per page (the event — a page of forgeries is one listener call, not 500).
+// Neither logged nor relayed, the vector unmoved: like a malformed op, a
+// refused one is a gap for its stream until it comes again, intact.
+const refuseSignature = (batch, op, verdict) => {
+  if (verdict === FORGED) {
+    batch.forged++;
+    batch.firstForged ??= op;
+  } else {
+    batch.unsigned++;
+    batch.firstUnsigned ??= op;
+  }
+  batch.core.otel.recordRejected(verdict);
+};
+
+const reportSignatures = (batch) => {
+  const { core } = batch;
+  if (batch.forged > 0) {
+    const op = batch.firstForged;
+    const count = batch.forged;
+    core.logger.warn({ event: 'sync.op.forged', origin: op.origin, seq: op.seq, count });
+    const message = `Op ${op.origin}:${op.seq} does not verify against its origin (${count} in this page)`;
+    notify(core.storage, core.logger, 'error', new SyncomError('BAD_SIGNATURE', message, { op, count }));
+  }
+  if (batch.unsigned > 0) {
+    const op = batch.firstUnsigned;
+    const count = batch.unsigned;
+    core.logger.warn({ event: 'sync.op.unsigned', origin: op.origin, seq: op.seq, count });
+    const message = `Op ${op.origin}:${op.seq} carries no signature; sync.signatures is 'require' (${count} in this page)`;
+    notify(core.storage, core.logger, 'error', new SyncomError('UNSIGNED', message, { op, count }));
+  }
 };
 
 // Accepted: logged and relayed, the vector moves.
@@ -246,15 +313,24 @@ const announce = async (batch, result) => {
 
 const applyRemote = async (core, ops, options) => {
   const batch = openBatch(core, options);
-  for (const op of ops) {
+  const verdicts = await verifyPage(batch, ops);
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i];
+    if (verdicts[i] !== OK) {
+      refuseSignature(batch, op, verdicts[i]);
+      continue;
+    }
     if (admit(batch, op)) await applyOne(batch, op);
   }
+  reportSignatures(batch);
   const result = {
     applied: batch.accepted.length,
     skipped: batch.skipped?.size ?? 0,
     duplicates: batch.duplicates,
     gaps: batch.gaps,
     malformed: batch.malformed,
+    unsigned: batch.unsigned,
+    forged: batch.forged,
   };
   await persist(batch);
   await announce(batch, result);
@@ -278,6 +354,8 @@ const tracedApply = async (core, ops, options) => {
         'syncom.ops.duplicates': r.duplicates,
         'syncom.ops.gaps': r.gaps,
         'syncom.ops.malformed': r.malformed,
+        'syncom.ops.unsigned': r.unsigned,
+        'syncom.ops.forged': r.forged,
       }),
     );
     return result;

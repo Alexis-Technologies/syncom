@@ -303,6 +303,22 @@ expectType<SyncomErrorCode>(coded.code);
 expectAssignable<Error>(coded);
 expectAssignable<SyncomErrorCode>('LOCKED');
 expectAssignable<SyncomErrorCode>('IDENTITY_MISMATCH');
+expectAssignable<SyncomErrorCode>('BAD_SIGNATURE');
+expectAssignable<SyncomErrorCode>('UNSIGNED');
+expectAssignable<StorageOptions>({ sync: { signatures: 'require' } });
+expectAssignable<StorageOptions>({ sync: { signatures: false } });
+expectError(syncom.open({ sync: { signatures: 'yes' } }));
+expectType<'verify' | 'require' | false>(storage.signatures);
+expectAssignable<syncom.SyncOp>({
+  origin: 'a',
+  seq: 1,
+  ts: 1,
+  type: 'delete',
+  id: 'r',
+  sig: 's',
+  digest: 'd',
+  nonce: 'n',
+});
 expectError(new syncom.SyncomError('NOT_A_CODE', 'x'));
 expectAssignable<Error>(hookError);
 expectAssignable<StorageOptions>({
@@ -368,6 +384,12 @@ storage.on('error', (error) => {
   expectType<syncom.SyncOp>(error.op);
   expectType<syncom.ValidationIssue[] | undefined>(error.issues);
   expectType<syncom.FieldKind | undefined>(error.rejected?.[0]?.reason);
+  expectType<number | undefined>(error.count);
+  if (error.code === 'BAD_SIGNATURE' || error.code === 'UNSIGNED') expectType<syncom.SyncOp>(error.op);
+});
+storage.applyRemote([]).then((result) => {
+  expectType<number>(result.unsigned);
+  expectType<number>(result.forged);
 });
 syncom.open({ schema: { entities: { Post: {} } } }).then((typed) => {
   expectType<Promise<void>>(typed.Post.set('id', { title: 'a' }));
@@ -454,7 +476,7 @@ storage.sync.on('sync', (event) => {
   expectType<number | undefined>(event.malformed);
 });
 storage.on('error', (error) => {
-  expectType<'OP_REFUSED' | 'OP_INVALID' | 'OP_UNREADABLE' | 'SKEW'>(error.code);
+  expectType<'OP_REFUSED' | 'OP_INVALID' | 'OP_UNREADABLE' | 'SKEW' | 'BAD_SIGNATURE' | 'UNSIGNED'>(error.code);
   expectAssignable<SyncomError>(error);
   expectType<string>(error.op.origin);
 });

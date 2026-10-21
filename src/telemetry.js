@@ -141,6 +141,7 @@ const OUTCOME_SKIPPED = Object.freeze({ 'syncom.outcome': 'skipped' });
 const OUTCOME_DUPLICATE = Object.freeze({ 'syncom.outcome': 'duplicate' });
 const OUTCOME_GAP = Object.freeze({ 'syncom.outcome': 'gap' });
 const OUTCOME_MALFORMED = Object.freeze({ 'syncom.outcome': 'malformed' });
+const OUTCOME_REFUSED = Object.freeze({ 'syncom.outcome': 'refused' });
 const SEGMENT_SEALED = Object.freeze({ 'syncom.log.event': 'sealed' });
 const SEGMENT_DROPPED = Object.freeze({ 'syncom.log.event': 'dropped' });
 
@@ -224,7 +225,8 @@ const createTelemetry = (telemetry) => {
       });
       opsRejected = meter.createCounter('syncom.ops.rejected', {
         unit: '{op}',
-        description: 'Peer ops refused because a field is the other kind (register/counter)',
+        description:
+          'Peer ops refused, by reason: a field of another kind, invalid, out of scope, unreadable, forged, unsigned',
       });
       conflicts = meter.createCounter('syncom.conflicts', {
         unit: '{conflict}',
@@ -346,6 +348,8 @@ const createTelemetry = (telemetry) => {
       if (skipped > 0) add(opsReceived, skipped, OUTCOME_SKIPPED);
       if (result.duplicates > 0) add(opsReceived, result.duplicates, OUTCOME_DUPLICATE);
       if (result.gaps > 0) add(opsReceived, result.gaps, OUTCOME_GAP);
+      const refused = (result.forged ?? 0) + (result.unsigned ?? 0);
+      if (refused > 0) add(opsReceived, refused, OUTCOME_REFUSED);
       record(writeDuration, elapsed, PATH_APPLY);
     },
 

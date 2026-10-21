@@ -77,8 +77,10 @@ const ENTRIES = [
   // their reset and merge rules — the raise to 38 KB (37.7 measured). Signed
   // ops — Ed25519 on both crypto halves, the signing pair and the node id
   // derived from it, the canonical form and three packed slots, every own op
-  // signed at its three sites — the raise to 39.5 KB (39.3 measured).
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 39.5 },
+  // signed at its three sites, the verify pre-pass over a peer's page with
+  // its two refusals and the `sync.signatures` option — the raise to 40 KB
+  // (39.8 measured).
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 40 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check

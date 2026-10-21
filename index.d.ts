@@ -108,8 +108,14 @@ export interface SyncOp {
   value?: number | readonly unknown[] | readonly SetRemoval[];
   /** The schema version of the node that made it; absent without a schema, and on `merge`/`advance`. */
   v?: number;
-  /** Who made it — `open({ actor })` or the write's own; a claim, not a signature. Absent on `merge`/`advance`. */
+  /** Who made it — `open({ actor })` or the write's own; a claim the origin signed, not a proof of identity. Absent on `merge`/`advance`. */
   actor?: string;
+  /** The origin's Ed25519 signature over the header and `digest` (base64url); absent under `sync.signatures: false` and on ops of older peers. */
+  sig?: string;
+  /** SHA-256 of the payload (`data`, `meta`, `key`, `value`, `vector`) in canonical JSON, salted with `nonce`; stays after a purge scrubbed the payload. */
+  digest?: string;
+  /** The digest's salt; scrubbed with the payload. */
+  nonce?: string;
 }
 
 export interface EntryMeta {
@@ -161,6 +167,8 @@ export type SyncomErrorCode =
   | 'LOCKED'
   | 'KEYS_INCOMPLETE'
   | 'IDENTITY_MISMATCH'
+  | 'BAD_SIGNATURE'
+  | 'UNSIGNED'
   | 'BAD_ENVELOPE'
   | 'BLOCK_NOT_FOUND'
   | 'NOT_CONTRACT'
@@ -589,6 +597,15 @@ export interface SyncOptions {
    */
   maxSkew?: number;
   /**
+   * Signed ops. `'verify'` (the default): this node signs its ops; a peer's
+   * op that carries a signature is verified and refused when it does not
+   * check against its origin, an unsigned one is accepted. `'require'`:
+   * unsigned ops, and ops whose origin is no signing key, are refused too —
+   * the one mode that resists a relay stripping signatures. `false`: nothing
+   * is signed or verified. The node id is the signing key in every mode.
+   */
+  signatures?: 'verify' | 'require' | false;
+  /**
    * Ops queued for one peer beyond this (default 10 000) are dropped and the
    * peer is marked `behind`; the vector-based push that recovers it carries
    * what it lacks.
@@ -931,6 +948,8 @@ export interface SyncEvents {
     duplicates?: number;
     gaps?: number;
     malformed?: number;
+    unsigned?: number;
+    forged?: number;
   }) => void;
   bootstrap: (event: { url: string; records: number }) => void;
   /** Hosting side: ops of a peer this node would not take — outside the scopes its hello granted. */
@@ -1040,6 +1059,10 @@ export interface ApplyRemoteResult {
    * vector), or a stamp beyond `sync.maxSkew` ahead of this node's clock.
    */
   malformed: number;
+  /** Refused under `sync.signatures: 'require'` for carrying no signature, or an origin that is no key; neither logged nor relayed. */
+  unsigned: number;
+  /** Refused for a signature that does not verify against the origin, or a payload its digest does not match; neither logged nor relayed. */
+  forged: number;
 }
 
 /** The events a Storage emits; listeners are contained. */
@@ -1051,13 +1074,16 @@ export interface StorageEvents {
   /**
    * A peer's op refused by the field-kind rule (`OP_REFUSED`,
    * `rejected`), skipped because the record would not pass its entity's
-   * validator (`OP_INVALID`, `entity`, `issues`), or refused for a stamp
-   * beyond `sync.maxSkew` (`SKEW`).
+   * validator (`OP_INVALID`, `entity`, `issues`), refused for a stamp
+   * beyond `sync.maxSkew` (`SKEW`), or refused for its signature — once per
+   * page, `op` the first refused and `count` how many (`BAD_SIGNATURE`,
+   * `UNSIGNED`).
    */
   error: (
     error: SyncomError & {
-      code: 'OP_REFUSED' | 'OP_INVALID' | 'OP_UNREADABLE' | 'SKEW';
+      code: 'OP_REFUSED' | 'OP_INVALID' | 'OP_UNREADABLE' | 'SKEW' | 'BAD_SIGNATURE' | 'UNSIGNED';
       op: SyncOp;
+      count?: number;
       rejected?: Array<{ field: string; reason: FieldKind }>;
       entity?: string | null;
       issues?: ValidationIssue[];
@@ -1097,6 +1123,8 @@ export interface Storage {
   readonly schemaInfo: SchemaStatus | null;
   readonly sync: SyncManager;
   readonly nodeId: string;
+  /** `open({ sync: { signatures } })`: `'verify'`, `'require'` or `false`. */
+  readonly signatures: 'verify' | 'require' | false;
   readonly path: string;
   readonly log: OpLog;
   readonly vector: VersionVector;

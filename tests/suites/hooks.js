@@ -299,7 +299,15 @@ const runHooksTests = async (t, assert, createStorage) => {
       ],
       { via: 'L', peer: { url: 'mem://peer', node: 'peer' } },
     );
-    assert.deepStrictEqual(first, { applied: 2, skipped: 1, duplicates: 0, gaps: 0, malformed: 0 });
+    assert.deepStrictEqual(first, {
+      applied: 2,
+      skipped: 1,
+      duplicates: 0,
+      gaps: 0,
+      malformed: 0,
+      unsigned: 0,
+      forged: 0,
+    });
     assert.strictEqual(await storage.get('r1'), null, 'the skipped op did not touch the record');
     assert.deepStrictEqual(await storage.get('r2'), { n: 2 });
     assert.strictEqual(storage.vector.peer, 2, 'but moved the vector');
@@ -368,7 +376,15 @@ const runHooksTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(await storage.get('r1'), { n: 1 }, 'the batch is committed');
     assert.deepStrictEqual(events, [1], 'and announced');
     const empty = await storage.applyRemote([remoteOp('peer', 1, 'write', 'r1', { data: { n: 1 } })]);
-    assert.deepStrictEqual(empty, { applied: 0, skipped: 0, duplicates: 1, gaps: 0, malformed: 0 });
+    assert.deepStrictEqual(empty, {
+      applied: 0,
+      skipped: 0,
+      duplicates: 1,
+      gaps: 0,
+      malformed: 0,
+      unsigned: 0,
+      forged: 0,
+    });
     assert.strictEqual(batches.length, 2, 'an empty batch runs the hook too');
     assert.deepStrictEqual(batches[1].ops, []);
     assert.deepStrictEqual(events, [1, 0]);

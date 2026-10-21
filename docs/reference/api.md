@@ -188,6 +188,8 @@ value is data or configuration. `HookError` and `ValidationError` are
 | `LOCKED` | `open()` while another instance holds the directory | `path` |
 | `KEYS_INCOMPLETE` | `open()`, `loadKeys()`, `loadSigningKeys()` when one file of a pair (RSA or signing) is missing | — |
 | `IDENTITY_MISMATCH` | `open()` when `node.json` names another signing key than `keys/sign-public.pem` — a key pair replaced or restored under a signed identity | `id` (what `node.json` names), `key` (the pair on disk) |
+| `BAD_SIGNATURE` | the storage's `error` event, once per page: a peer's op whose signature does not verify against its origin, or whose payload its digest does not match (`sync.signatures` `'verify'` or `'require'`) | `op` (the first refused), `count` |
+| `UNSIGNED` | the storage's `error` event, once per page, under `sync.signatures: 'require'`: a peer's op with no signature, or whose origin is no signing key | `op`, `count` |
 | `BAD_ENVELOPE` | `decrypt()` of a ciphertext this version does not read | — |
 | `BLOCK_NOT_FOUND` | `Blockchain.readBlock()`, `SmartContract.load()` | `hash` |
 | `NOT_CONTRACT` | `SmartContract.load()` of a block that is not a contract | `hash` |

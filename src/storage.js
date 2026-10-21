@@ -104,6 +104,7 @@ class Storage extends Emitter {
   #clock = new Clock();
   #scopeOf;
   #maxSkew;
+  #signatures;
   #encrypted;
   #hooks;
   #inHook = 0;
@@ -133,6 +134,7 @@ class Storage extends Emitter {
     this.#encrypted = settings.encrypted;
     this.#scopeOf = settings.scope ?? (() => GLOBAL_SCOPE);
     this.#maxSkew = settings.maxSkew;
+    this.#signatures = settings.signatures;
     // Live Records, weakly: one the application still holds pins its cache
     // entry and follows the record; one it dropped is collected, and its
     // slot here with it.
@@ -272,8 +274,9 @@ class Storage extends Emitter {
       version: this.#version,
       ahead: this.#ahead,
       maxSkew: this.#maxSkew,
+      signatures: this.#signatures,
       // Signs an op of this node's own, in place, once it is final.
-      sign: (op) => signOp(op, this.#signing.privateKey),
+      sign: this.#signatures === false ? null : (op) => signOp(op, this.#signing.privateKey),
       hook: (name, ...args) => this.#hook(name, ...args),
       view: (id, entry) => this.#view(id, entry),
       scopeOf: (id, data) => this.#scope(id, data),
@@ -649,6 +652,11 @@ class Storage extends Emitter {
   /** This node's stable identity — the `origin` of every op it creates. */
   get nodeId() {
     return this.#nodeId;
+  }
+
+  /** `'verify'`, `'require'` or `false` — `open({ sync: { signatures } })`. */
+  get signatures() {
+    return this.#signatures;
   }
 
   get path() {
