@@ -161,6 +161,9 @@ test('SyncomError', async (t) => {
     });
     await assert.rejects(() => link.call('syncom/hello', { node: other.nodeId }), { code: 409, reason: 'SELF' });
     await assert.rejects(() => link.call('syncom/hello', { node: 'banned' }), { code: 403, reason: 'UNAUTHORIZED' });
+    const strict = await openTemp(t2, { logger, sync: { autoStart: false, signatures: 'require' } });
+    const strictLink = new MemoryLink(strict.sync.unit({ access: 'public' }));
+    await assert.rejects(() => strictLink.call('syncom/hello', { node: 'peer' }), { code: 403, reason: 'UNSIGNED' });
     const logged = refusals.filter((entry) => entry.event === 'sync.hello.refused');
     assert.deepStrictEqual(
       logged.map((entry) => [entry.code, entry.reason, entry.node]),
@@ -169,6 +172,7 @@ test('SyncomError', async (t) => {
         [400, 'PROTOCOL', 'peer'],
         [409, 'SELF', other.nodeId],
         [403, 'UNAUTHORIZED', 'banned'],
+        [403, 'UNSIGNED', 'peer'],
       ],
       '428 is only counted, every other refusal is logged with its reason',
     );

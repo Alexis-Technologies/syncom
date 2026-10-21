@@ -16,6 +16,7 @@ const { packOps, unpackOps } = require('./ops.js');
 const { opKey } = require('./vector.js');
 const { notify } = require('./hooks.js');
 const { GLOBAL_SCOPE, opInScope } = require('./scope.js');
+const { isKeyId } = require('./shape.js');
 const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf } = require('./protocol.js');
 
 const DEFAULT_PAGE_BYTES = 4 << 20;
@@ -145,13 +146,19 @@ const peerOf = (host, context) => {
   return state;
 };
 
-// Ops of a peer this host would not take: counted, logged and announced
-// through the `refused` event, never applied. `reason` is what the
-// `syncom.ops.rejected` metric carries.
-const refuseOps = (host, node, reason, count) => {
+// Ops of a peer this host would not take, logged and announced through the
+// `refused` event — where the host ties a refusal to the client that pushed.
+const announceRefused = (host, node, reason, count) => {
   host.logger.warn({ event: 'sync.op.refused', node, reason, count });
-  for (let i = 0; i < count; i++) host.otel.recordRejected(reason);
   notify(host.manager, host.logger, 'refused', { node, reason, count });
+};
+
+// Refused HERE, before anything sees them: counted too — `reason` is what
+// the `syncom.ops.rejected` metric carries. (A signature refusal is counted
+// per op in applyRemote already, and only announced here.)
+const refuseOps = (host, node, reason, count) => {
+  for (let i = 0; i < count; i++) host.otel.recordRejected(reason);
+  announceRefused(host, node, reason, count);
 };
 
 const hello = (host) => async (context, args) => {
@@ -162,6 +169,12 @@ const hello = (host) => async (context, args) => {
   }
   if (args.node === storage.nodeId) {
     throw refuse(host, 'A node cannot sync with itself (copied data directory?)', 409, 'SELF', args.node);
+  }
+  // Under 'require' a peer whose id is no key could never push: every op of
+  // its own would be refused, in silence, at every handshake. Said once,
+  // here. (Not a proof of possession — a signed hello challenge would be.)
+  if (storage.signatures === 'require' && !isKeyId(args.node)) {
+    throw refuse(host, 'This host requires signed ops; hello needs a signing-key node id', 403, 'UNSIGNED', args.node);
   }
   if (host.authorize && !(await host.authorize(context, args))) {
     throw refuse(host, 'Not authorized to sync', 403, 'UNAUTHORIZED', args.node);
@@ -209,6 +222,8 @@ const push = (host) => async (context, args) => {
   // `url` is null: a host does not dial, so it has no url for the peer.
   const via = state.ref ?? { url: null, node };
   const result = await storage.applyRemote(granted, { via, scopes, peer: via });
+  if (result.forged > 0) announceRefused(host, node, 'forged', result.forged);
+  if (result.unsigned > 0) announceRefused(host, node, 'unsigned', result.unsigned);
   // The vector the dialer merges in: the keys this page touched, not the
   // whole thing — a hub's has a key per client and scope.
   const whole = storage.vector;

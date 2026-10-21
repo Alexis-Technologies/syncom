@@ -480,12 +480,16 @@ test('Storage telemetry', async (t) => {
     const { storage } = await openTemp(t2, { telemetry: { tracer, meter } });
     storage.on('error', () => {});
     const id = await storage.insert({ hits: 'text' });
+    const { createSigner, tamper } = require('./utils/signed.js');
+    const signer = await createSigner();
+    const forged = tamper(await signer.sign({ seq: 1, ts: Date.now(), type: 'write', id: 'r9', data: { z: 1 } }));
     const result = await storage.applyRemote([
       remoteOp('peer', 1, 'write', 'r1', { data: { a: 1 } }),
       remoteOp('peer', 1, 'write', 'r1', { data: { a: 1 } }),
       remoteOp('peer', 3, 'set', 'r1', { data: { b: 1 } }),
       'garbage',
       remoteOp('peer', 2, 'inc', id, { key: 'hits', value: 1 }),
+      forged,
     ]);
     assert.deepStrictEqual(result, {
       applied: 2,
@@ -494,21 +498,26 @@ test('Storage telemetry', async (t) => {
       gaps: 1,
       malformed: 1,
       unsigned: 0,
-      forged: 0,
+      forged: 1,
     });
     const [span] = named('syncom.apply');
-    assert.strictEqual(span.attributes['syncom.ops.count'], 5);
+    assert.strictEqual(span.attributes['syncom.ops.count'], 6);
     assert.strictEqual(span.attributes['syncom.ops.applied'], 2);
     assert.strictEqual(span.attributes['syncom.ops.duplicates'], 1);
     assert.strictEqual(span.attributes['syncom.ops.gaps'], 1);
     assert.strictEqual(span.attributes['syncom.ops.malformed'], 1);
+    assert.strictEqual(span.attributes['syncom.ops.forged'], 1);
+    assert.strictEqual(span.attributes['syncom.ops.unsigned'], 0);
     assert.strictEqual(span.status.code, 0);
     const received = await points('syncom.ops.received');
     assert.strictEqual(point(received, { 'syncom.outcome': 'applied' }).value, 2);
     assert.strictEqual(point(received, { 'syncom.outcome': 'duplicate' }).value, 1);
     assert.strictEqual(point(received, { 'syncom.outcome': 'gap' }).value, 1);
     assert.strictEqual(point(received, { 'syncom.outcome': 'malformed' }).value, 1);
-    assert.strictEqual(point(await points('syncom.ops.rejected'), { 'syncom.reason': 'register' }).value, 1);
+    assert.strictEqual(point(received, { 'syncom.outcome': 'refused' }).value, 1);
+    const rejected = await points('syncom.ops.rejected');
+    assert.strictEqual(point(rejected, { 'syncom.reason': 'register' }).value, 1);
+    assert.strictEqual(point(rejected, { 'syncom.reason': 'forged' }).value, 1);
     const [lag] = await points('syncom.replication.lag');
     assert.strictEqual(lag.value.count, 2);
     assert.strictEqual(point(await points('syncom.write.duration'), { 'syncom.path': 'apply' }).value.count, 1);

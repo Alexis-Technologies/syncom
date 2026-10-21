@@ -121,6 +121,45 @@ const runSignatureTests = async (t, assert, createStorage) => {
     await assert.rejects(() => createStorage(t2, 'bad2', { sync: { signatures: true } }), TypeError);
   });
 
+  await t.test(
+    'hosting: a push with refused signatures is announced; a require host refuses a keyless hello',
+    async (t2) => {
+      const { MemoryLink } = require('../utils/memory-link.js');
+      const { packOps } = require('../../src/ops.js');
+      const host = await createStorage(t2, 'H');
+      const refused = [];
+      host.sync.on('refused', (event) => refused.push(event));
+      host.on('error', () => {});
+      const peer = await createSigner();
+      const link = new MemoryLink(host.sync.unit({ access: 'public' }));
+      await link.call('syncom/hello', { node: peer.id, version: 1 });
+      const good = await peer.sign(unsignedOp(null, 1, 'r1', { a: 1 }));
+      const bad = tamper(await peer.sign(unsignedOp(null, 2, 'r1', { a: 2 })));
+      const answer = await link.call('syncom/push', { ops: packOps([good, bad]) });
+      assert.deepStrictEqual([answer.applied, answer.forged, answer.unsigned], [1, 1, 0]);
+      assert.deepStrictEqual(refused, [{ node: peer.id, reason: 'forged', count: 1 }]);
+      assert.deepStrictEqual(await host.get('r1'), { a: 1 });
+      // A 'verify' host greets anyone; a 'require' one needs a key for a node id.
+      const plain = new MemoryLink(host.sync.unit({ access: 'public' }));
+      await plain.call('syncom/hello', { node: 'peer', version: 1 });
+      const strict = await createStorage(t2, 'S', { sync: { signatures: 'require' } });
+      strict.on('error', () => {});
+      const strictRefused = [];
+      strict.sync.on('refused', (event) => strictRefused.push(event));
+      const unit = strict.sync.unit({ access: 'public' });
+      await assert.rejects(() => new MemoryLink(unit).call('syncom/hello', { node: 'peer', version: 1 }), {
+        code: 403,
+        reason: 'UNSIGNED',
+      });
+      const keyed = new MemoryLink(unit);
+      await keyed.call('syncom/hello', { node: peer.id, version: 1 });
+      const ops = packOps([good, unsignedOp(peer.id, 2, 'r1', { b: 1 })]);
+      const pushed = await keyed.call('syncom/push', { ops });
+      assert.deepStrictEqual([pushed.applied, pushed.unsigned], [1, 1]);
+      assert.deepStrictEqual(strictRefused, [{ node: peer.id, reason: 'unsigned', count: 1 }]);
+    },
+  );
+
   await t.test('a signed op relays intact through a node that does not verify, into one that requires', async (t2) => {
     const { MemoryLink } = require('../utils/memory-link.js');
     const a = await createStorage(t2, 'A', { sync: { signatures: false } });

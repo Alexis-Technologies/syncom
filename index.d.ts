@@ -952,8 +952,12 @@ export interface SyncEvents {
     forged?: number;
   }) => void;
   bootstrap: (event: { url: string; records: number }) => void;
-  /** Hosting side: ops of a peer this node would not take — outside the scopes its hello granted. */
-  refused: (event: { node: string; reason: 'scope'; count: number }) => void;
+  /**
+   * Hosting side: ops of a peer this node would not take — outside the
+   * scopes its hello granted (`scope`), signed but not by their origin
+   * (`forged`), or unsigned under `sync.signatures: 'require'` (`unsigned`).
+   */
+  refused: (event: { node: string; reason: 'scope' | 'forged' | 'unsigned'; count: number }) => void;
   /**
    * A failure on the way to a peer; `url` names it. A page of the feed that
    * could not be applied comes as `code: 'PAGE_FAILED'` (with `cursor`, the

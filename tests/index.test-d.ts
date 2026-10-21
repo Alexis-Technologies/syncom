@@ -468,7 +468,7 @@ storage.applyRemote([], { adoptFrom: 'host' }).then((result) => {
   expectType<number>(result.gaps);
 });
 storage.sync.on('refused', (event) => {
-  expectType<'scope'>(event.reason);
+  expectType<'scope' | 'forged' | 'unsigned'>(event.reason);
   expectType<number>(event.count);
   expectType<string>(event.node);
 });

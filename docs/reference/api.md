@@ -206,7 +206,8 @@ value is data or configuration. `HookError` and `ValidationError` are
 
 A refusal the host answers on the wire is not a `SyncomError`: it is a plain
 error with the numeric `code` wrpc transports (`400` `BAD_HELLO` or
-`PROTOCOL`, `403` `UNAUTHORIZED` or `SCOPES`, `409` `SELF`, `413`
+`PROTOCOL`, `403` `UNAUTHORIZED`, `SCOPES` or `UNSIGNED` (a `sync.signatures: 'require'`
+host greeted by a node id that is no signing key), `409` `SELF`, `413`
 `OPS_PER_PUSH` or `BYTES_PER_PUSH`, `428` `HELLO_FIRST`, `429`
 `OPS_PER_SECOND`) and that constant as `reason` on the host's side — in the
 `sync.hello.refused` log line and on the thrown error; wrpc carries the code
