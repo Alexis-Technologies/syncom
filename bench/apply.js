@@ -18,6 +18,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { bench } = require('./support/harness.js');
 const { applyOp, observedTags, packOps, unpackOps } = require('../src/ops.js');
+const { generateSigningKeys } = require('../src/crypto.js');
+const { signOp, verifyOp } = require('../src/signing.js');
 const { open } = require('../src/storage.js');
 
 const record = { name: 'Example', email: 'example@example.com', hits: 0, tags: ['a', 'b'], nested: { k: 1 } };
@@ -87,6 +89,29 @@ const main = async () => {
           () => storage.applyRemote(pageOf(`W${n}`, writer, n, 'write', record)),
           { warmup: 3, measureMs: 1500, opsPerIteration: n },
         );
+      }
+      // The same page, signed by its origin: what the verify pre-pass costs
+      // on top of the writes. Pages are signed ahead so signing is not timed;
+      // past the prepared pages, a page is signed on the fly.
+      const keys = await generateSigningKeys();
+      const prepared = [];
+      const signer = { seq: 0, ids: [] };
+      const signPage = async (n) => {
+        const ops = pageOf(keys.id, signer, n, 'write', record);
+        for (const op of ops) await signOp(op, keys.privateKey);
+        return ops;
+      };
+      for (let i = 0; i < 150; i++) prepared.push(await signPage(100));
+      await bench(
+        `applyRemote — 100 signed writes, new records${label}`,
+        async () => storage.applyRemote(prepared.length > 0 ? prepared.shift() : await signPage(100)),
+        { warmup: 3, measureMs: 1500, opsPerIteration: 100 },
+      );
+      if (chain) {
+        const page = await signPage(100);
+        await bench('verifyOp — 100 signed writes', () => Promise.all(page.map((op) => verifyOp(op, 'require'))), {
+          opsPerIteration: 100,
+        });
       }
       // Updates land on records that exist: the entry is read (cached after
       // the first page) and one field moves.

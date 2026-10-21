@@ -95,8 +95,8 @@ appears on one.
 | --- | --- | --- | --- |
 | `syncom.commits` | Counter | `{op}` | `syncom.op.type`, `syncom.result` (`applied` / `noop` / `encrypted` / `error`) |
 | `syncom.write.duration` | Histogram | `ms` | `syncom.path` (`commit` / `apply` / `replay`) |
-| `syncom.ops.received` | Counter | `{op}` | `syncom.outcome` (`applied` / `skipped` — accepted but not applied here: a hook, the schema, an unreadable record / `duplicate` / `gap` / `malformed` — the last includes a stamp beyond `maxSkew`) |
-| `syncom.ops.rejected` | Counter | `{op}` | `syncom.reason` (`register` / `counter` / `set` / `validation` / `scope` / `unreadable`) |
+| `syncom.ops.received` | Counter | `{op}` | `syncom.outcome` (`applied` / `skipped` — accepted but not applied here: a hook, the schema, an unreadable record / `duplicate` / `gap` / `malformed` — the last includes a stamp beyond `maxSkew` / `refused` — a signature that does not check, or none under `'require'`) |
+| `syncom.ops.rejected` | Counter | `{op}` | `syncom.reason` (`register` / `counter` / `set` / `validation` / `scope` / `unreadable` / `forged` / `unsigned`) |
 | `syncom.conflicts` | Counter | `{conflict}` | `syncom.kind` (`unique`) |
 | `syncom.ops.limited` | Counter | `{push}` | `syncom.reason` (`ops` / `bytes` / `rate`) |
 | `syncom.replication.lag` | Histogram | `ms` | — |
@@ -210,12 +210,14 @@ alert to key on:
 | Level | `event` | When |
 | --- | --- | --- |
 | warn | `sync.op.malformed`, `sync.op.skew` | a peer's op refused before it was read; the latter also an `error` event (`SKEW`) |
+| warn | `sync.op.forged`, `sync.op.unsigned` | a page with ops refused for their signature, once per page with the count; also an `error` event (`BAD_SIGNATURE`, `UNSIGNED`) |
 | warn | `sync.op.rejected`, `sync.op.invalid`, `sync.op.unreadable`, `sync.op.encrypted`, `sync.op.lens` | a peer's op not applied here, by reason |
 | warn | `sync.op.refused`, `sync.op.outOfScope`, `sync.hello.refused` | hosting side: ops outside a peer's scopes, a call refused by code |
 | warn | `sync.gaps`, `sync.error`, `sync.outbox.dropped`, `sync.record.malformed`, `sync.record.skew`, `sync.record.encrypted` | a page with gaps, a failure on the way to a peer, a dropped backlog, a snapshot record left out |
 | warn | `log.epoch.new` (when a log was there), `log.segment.unreadable`, `log.open.unreadable` | the log changed epoch or lost a file |
 | warn | `catalog.skipped`, `catalog.lens`, `catalog.save`, `snapshot.skipped`, `replay.skipped`, `record.shadowed` | derived state could not follow a record; a field shadowing a method |
 | warn | `listener.error`, `watch.error`, `schema.drift` | an event listener or a watcher threw; two builds of one schema version |
+| warn | `identity.rekeyed` | a directory from before signing: `node.json` held a UUID, the node is now its signing key (once) |
 | info | `schema.upgrade`, `schema.changed`, `schema.held`, `record.repaired` | what a reopen found about the schema; a record rebuilt from the log |
 | debug | `catalog.rebuild`, `durable.noop`, `log.epoch.new` (a brand-new log), `schema.lens.issues` | routine |
 

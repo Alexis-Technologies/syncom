@@ -31,7 +31,7 @@ Every write becomes an **op** — the unit that travels between nodes and sits
 in the log:
 
 ```
-{ origin, seq, ts, type, id, scope?, data?, key?, value?, v?, actor? }
+{ origin, seq, ts, type, id, scope?, data?, key?, value?, v?, actor?, sig?, digest?, nonce? }
 ```
 
 | `type` | Produced by | Effect on the record |
@@ -56,6 +56,9 @@ it: `open({ actor })` (a string, or a function asked per write — the
 signed-in user) or the write's own `{ actor }`, absent when neither says. It
 rides on the op, into every log and every `change` and `beforeApply` on the
 way, and never into the record: an audit trail is the log, not the state.
+The origin signs it with the rest of the header (see [Signatures](#signatures)),
+so no relay can change it on the way — what it names is still the writer's
+claim about itself.
 
 ### Clocks
 
@@ -176,6 +179,73 @@ peer whose cursor fell below the floor cannot be resumed — it is told to
 [bootstrap](#bootstrap) instead. Size retention for the longest outage a peer
 should be able to sit out.
 
+## Signatures
+
+Every op a node makes is signed with its Ed25519 key, and the node's id **is**
+that key — the raw public key, 43 characters of base64url — so a peer verifies
+an op against its `origin` with no key to look up, through any number of
+relays. The pair lives in `<path>/keys/sign-public.pem` and `sign-private.pem`,
+made at the first open, next to the RSA pair that seals records.
+
+The signature covers the op's **header** — `origin`, `seq`, `ts`, `type`,
+`id`, `scope`, `from`, `v`, `actor` — as a positional JSON array under a
+version number, together with a **digest** of the payload (`data`, `meta`,
+`key`, `value`, `vector`) serialized with sorted keys and salted with a random
+`nonce`:
+
+```
+sig    = Ed25519( [1, origin, seq, ts, type, id, scope, from, v, actor, digest] )
+digest = SHA-256( nonce + "\n" + canonical(payload) )
+```
+
+The split is what lets a [purge](./storage#purge) scrub the payload and the
+nonce out of the log and leave an op whose header still verifies — a resuming
+peer takes the scrubbed op as the no-op it is — and the nonce is what keeps a
+scrubbed op's digest from giving a low-entropy payload away by brute force. A
+`delete` and a `purge` carry no payload, so no digest; an `advance`'s vector is
+a payload like any other. The three fields ride in `packOps` slots 15 to 17.
+
+`open({ sync: { signatures } })` picks the mode:
+
+| Mode | This node | A peer's op with a signature | A peer's op without one |
+| --- | --- | --- | --- |
+| `'verify'` (default) | signs | verified; refused when it does not check | taken |
+| `'require'` | signs | verified; refused when it does not check | refused — as is one whose origin is no key |
+| `false` | signs nothing | taken, unverified | taken |
+
+A refused op is counted (`forged`, `unsigned` in the apply result and the
+`syncom.ops.rejected` metric) and reported once per page as an `error` event
+(`BAD_SIGNATURE` or `UNSIGNED`, with the first refused op and the `count`);
+it is neither logged nor relayed and the vector does not move, so it is a gap
+for its stream until it comes again, intact. The hosting side announces the
+same through the `refused` event (`reason: 'forged' | 'unsigned'`), and a
+`'require'` host refuses a `hello` from a node id that is no key (403
+`UNSIGNED`) rather than refusing every push of that peer in silence.
+
+What a signature proves: the op — header and content — was made by the holder
+of the key its origin names, whatever path it took. What it does not:
+
+- `actor` is signed, so a relay cannot change it, but it is still what the
+  writer claimed about itself: hold it to what `authorize` established, in
+  `beforeApply` (see [Guarantees and limits](#guarantees-and-limits)).
+- A snapshot carries records, not ops: a node that [bootstraps](#bootstrap)
+  signs the joined state as `merge` and `advance` ops of its own, under its
+  own key. Under `'require'` that is the one way unverified state enters a
+  node — from a host it chose, and `beforeBootstrap` let through.
+- Under `'verify'`, a relay can strip a signature and the op is taken as an
+  unsigned one. Only `'require'` resists that, and it is for a mesh where
+  every node signs.
+- Delivery is not proved: a peer can withhold an op (a gap, which you see),
+  or strip its payload and nonce and present it as scrubbed, which applies as
+  a no-op — suppression, not forgery.
+- Holding the key is not proved at `hello`: a peer may greet with any key id,
+  and its pushes then fail as `forged`. A signed hello challenge is a
+  follow-up.
+
+The cost: a tenth of a millisecond of CPU per op verified in Node.js, less in
+the browser (sixty-four at a time), and some 190 bytes per op on the wire and
+in the log — `bytesPerPush` counts them.
+
 ## Protocol
 
 A node **dials** the nodes in its registry through `connect(node)`; the node
@@ -184,7 +254,7 @@ which one a node plays on a given link is just who opened the connection.
 
 | Procedure | Direction | Purpose |
 | --- | --- | --- |
-| `hello` | dialer → host | Exchange node ids, vectors, log epochs and schemas; the host may `authorize` |
+| `hello` | dialer → host | Exchange node ids, vectors, log epochs and schemas; the host may `authorize` (and, requiring signatures, refuses a node id that is no key) |
 | `push` | dialer → host | Ops the host lacks, by its vector |
 | `changes` (subscription) | host → dialer | Everything that lands in the host's log from the cursor on, live |
 | `snapshot` | dialer → host | One page of the host's state, for bootstrap |
@@ -449,8 +519,9 @@ the engine's own tests run on.
 - **At-least-once delivery, idempotent application.** An op may arrive more
   than once; applying it again changes nothing.
 - **A peer's op is checked before it is read.** `origin`, `seq`, `ts`, `type`,
-  `scope`, `v` and the record id (or an `advance`'s vector) must have their
-  shape (`actor` and `from` are claims, carried as they are), and a stamp more
+  `scope`, `v`, the record id (or an `advance`'s vector) and the signature's
+  three fields must have their shape (`actor` and `from` are claims, carried
+  as they are), and a stamp more
   than `sync.maxSkew` (24 hours) ahead of this
   node's clock is a broken clock, not a concurrent write. Either is
   `malformed`: counted, reported (`error` with `code: 'SKEW'` for the latter),
@@ -473,11 +544,15 @@ the engine's own tests run on.
   again.
 - **Chains diverge.** Each node's [chain](./chain) is its own audit log of what
   it applied, in the order it applied it. It is not a consensus.
-- **No signatures.** Trust rests on `authorize`, the token and the transport
-  (use `wss://`). `op.actor` is a claim the writer made about itself: a host
-  that knows who a peer is (what `authorize` established) can hold the
-  claim to it in `beforeApply` — `({ op, peer }) => op.actor === userOf(peer.node)`
-  — and skip the op otherwise.
+- **Signed ops, and what they leave to you.** Every op is [signed](#signatures)
+  by its origin's key; under the default `'verify'` an unsigned op is still
+  taken, and only `'require'` refuses it. Who may push at all rests on
+  `authorize`, the token and the transport (use `wss://`). `op.actor` is a
+  claim the writer made about itself — signed, so unchanged in transit, but
+  a claim: a host that knows who a peer is (what `authorize` established) can
+  hold it to the claim in `beforeApply` —
+  `({ op, peer }) => op.actor === userOf(peer.node)` — and skip the op
+  otherwise.
 - **A held op lives in the log.** With `ahead: 'hold'` an op from a newer
   [schema version](./storage#reading-across-versions) waits as a flagged
   entry; retention that drops its segment before the upgrade loses it, which

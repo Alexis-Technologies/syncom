@@ -23,8 +23,15 @@ Three parties, three levels of trust:
 - **An authorized peer** — one that passed the unit's `access`, your
   `authorize(context, hello)` and the transport's own authentication — may
   write and read every record **in the scopes its hello named**, and nothing
-  outside them. `origin`, `actor` and the node id it greets with are claims it
-  makes about itself; ops are not signed. It cannot move another node's
+  outside them. Every op is signed by its origin's Ed25519 key, and a node's
+  id is that key, so an op's header (`actor` among it) and content are bound
+  to the key that made them through any relay. What is still a claim: that
+  `actor` names a user (hold it to what `authorize` established, in
+  `beforeApply`); that the node greeting is the holder of the key it names
+  (there is no hello challenge yet — its pushes fail as `forged` otherwise);
+  and, under the default `sync.signatures: 'verify'`, that an unsigned op
+  came from a node that does not sign — only `'require'` refuses unsigned
+  ops, and so resists a relay stripping signatures. It cannot move another node's
   version vector (an `advance` is adopted only from the host a subscription is
   read from, and only that host's own), cannot move another node's clock more
   than `sync.maxSkew` ahead, cannot make a dialer step over a page it could
@@ -58,8 +65,15 @@ These are the areas where a report matters most, roughly in order:
   (the unit's `access`, your `authorize(context, hello)`, the transport's own
   authentication) can write any record in those scopes. The host holds it to
   them — in `push`, `snapshot` and `changes` — and checks every op's shape
-  (`origin`, `seq`, `ts`, `type`, `scope`, the record id) before reading it.
-  Ops are not signed; `origin` is a claim. In scope: a way for a peer to
+  (`origin`, `seq`, `ts`, `type`, `scope`, the record id, the signature
+  fields) before reading it, then its signature (`src/signing.js`: the header
+  and a salted digest of the payload, verified against the origin, which is
+  the key). In scope: a way to make a node apply an op whose header or
+  payload differs from what its origin signed, to forge a signature under
+  another node's id, to recover a purged payload from a scrubbed op's digest,
+  or to pass a stripped op as signed under `'require'`; a relay that
+  withholds an op or scrubs its payload is not (delivery is not proved). In
+  scope too: a way for a peer to
   write or read outside its scopes, to make another node apply an op twice
   with a different result (idempotence), to move another node's vector
   through a `merge`/`advance` op, to move another node's clock past
@@ -70,8 +84,13 @@ These are the areas where a report matters most, roughly in order:
 - **Crypto** (`src/crypto.js`, `src/crypto.browser.js`). RSA-2048 key
   generation, PEM handling, and the hybrid envelope (AES-256-GCM under an
   RSA-OAEP/SHA-256 wrapped key) records stored with `{ encrypted: true }` use,
-  identical in both halves. Half a key pair is refused (`KEYS_INCOMPLETE`),
-  never replaced. A *silent* mismatch that produces wrong plaintext rather
+  identical in both halves; the Ed25519 pair that signs ops, the node id
+  derived from its public key (a canonical base64url form, or one key would
+  be several ids), and `verify` answering `false` — never anything else, never
+  a throw — for a malformed id or signature. Half a key pair of either kind
+  is refused (`KEYS_INCOMPLETE`), never replaced; a `node.json` naming
+  another signing key is refused (`IDENTITY_MISMATCH`), never silently
+  rekeyed. A *silent* mismatch that produces wrong plaintext rather
   than an error is in scope, as is any way an encrypted record's plaintext
   leaves the node (they are deliberately excluded from replication).
 - **Purge** (`storage.purge()`, `OpLog.scrub()`). A purged record must leave

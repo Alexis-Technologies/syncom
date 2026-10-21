@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-21T18:50:59.862Z",
+  "generatedAt": "2026-10-21T19:20:17.749Z",
   "machine": {
     "cpu": "Apple M3 Max",
     "cores": 16,
@@ -291,92 +291,107 @@
     {
       "subject": "apply",
       "name": "applyOp — set one field on a 5-field entry",
-      "opsPerSec": 4521521
+      "opsPerSec": 4568358
     },
     {
       "subject": "apply",
       "name": "applyOp — inc a counter",
-      "opsPerSec": 4378699
+      "opsPerSec": 4560221
     },
     {
       "subject": "apply",
       "name": "applyOp — add to a 20-element set",
-      "opsPerSec": 231350
+      "opsPerSec": 231381
     },
     {
       "subject": "apply",
       "name": "applyOp — remove from a 20-element set",
-      "opsPerSec": 243460
+      "opsPerSec": 242234
     },
     {
       "subject": "apply",
       "name": "applyOp — write the whole record",
-      "opsPerSec": 961326
+      "opsPerSec": 932462
     },
     {
       "subject": "apply",
       "name": "applyOp — merge a peer entry",
-      "opsPerSec": 689572
+      "opsPerSec": 686842
     },
     {
       "subject": "apply",
       "name": "packOps — 500 writes",
-      "opsPerSec": 74014
+      "opsPerSec": 72067
     },
     {
       "subject": "apply",
       "name": "unpackOps — 500 writes",
-      "opsPerSec": 40393
+      "opsPerSec": 42140
     },
     {
       "subject": "apply",
       "name": "applyRemote — 100 writes, new records",
-      "opsPerSec": 7000
+      "opsPerSec": 7003
     },
     {
       "subject": "apply",
       "name": "applyRemote — 500 writes, new records",
-      "opsPerSec": 7082
+      "opsPerSec": 7043
+    },
+    {
+      "subject": "apply",
+      "name": "applyRemote — 100 signed writes, new records",
+      "opsPerSec": 3836
+    },
+    {
+      "subject": "apply",
+      "name": "verifyOp — 100 signed writes",
+      "opsPerSec": 10326
     },
     {
       "subject": "apply",
       "name": "applyRemote — 100 sets on cached records",
-      "opsPerSec": 10437
+      "opsPerSec": 10746
     },
     {
       "subject": "apply",
       "name": "applyRemote — 100 incs on cached records",
-      "opsPerSec": 10299
+      "opsPerSec": 9443
     },
     {
       "subject": "apply",
       "name": "applyRemote — 100 adds on cached records",
-      "opsPerSec": 6861
+      "opsPerSec": 6465
     },
     {
       "subject": "apply",
       "name": "applyRemote — 100 writes, new records (chain: false)",
-      "opsPerSec": 7225
+      "opsPerSec": 7117
     },
     {
       "subject": "apply",
       "name": "applyRemote — 500 writes, new records (chain: false)",
-      "opsPerSec": 7273
+      "opsPerSec": 7117
+    },
+    {
+      "subject": "apply",
+      "name": "applyRemote — 100 signed writes, new records (chain: false)",
+      "opsPerSec": 3888
     },
     {
       "subject": "apply",
       "name": "applyRemote — 100 sets on cached records (chain: false)",
-      "opsPerSec": 11214
+      "opsPerSec": 10942
     },
     {
       "subject": "apply",
       "name": "applyRemote — 100 incs on cached records (chain: false)",
-      "opsPerSec": 10533
+      "opsPerSec": 10832
     },
     {
       "subject": "apply",
       "name": "applyRemote — 100 adds on cached records (chain: false)",
-      "opsPerSec": 6969
+      "opsPerSec": 7190
     }
   ]
 }

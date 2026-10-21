@@ -129,6 +129,13 @@ needs the number), and an index, a unique key or a query over a sealed field
 is impossible, since the catalog sees ciphertext. A key per scope is the
 natural shape, and a follow-up.
 
+[Signatures](./sync#signatures) are a different matter, and already there:
+every op is signed by its origin and verified by every node that takes it —
+about a tenth of a millisecond per op in Node.js, less in the browser — and a
+hub that runs `sync: { signatures: false }` to spare itself the check still
+relays the signatures intact, since the fields are opaque to it. A mesh in
+which every node is yours can run `'require'` end to end.
+
 ## Observability
 
 Every path emits through the injected OpenTelemetry writer

@@ -229,28 +229,31 @@ the CRDT helpers and the emitter. They are the numbers to watch for a regression
 </details>
 
 <details>
-<summary>Apply — 18 rows</summary>
+<summary>Apply — 21 rows</summary>
 
 | Benchmark | ops/s | per operation |
 | --- | ---: | ---: |
-| applyOp — set one field on a 5-field entry | 4,521,521 | 221 ns |
-| applyOp — inc a counter | 4,378,699 | 228 ns |
-| applyOp — add to a 20-element set | 231,350 | 4.32 µs |
-| applyOp — remove from a 20-element set | 243,460 | 4.11 µs |
-| applyOp — write the whole record | 961,326 | 1.04 µs |
-| applyOp — merge a peer entry | 689,572 | 1.45 µs |
-| packOps — 500 writes | 74,014 | 13.5 µs |
-| unpackOps — 500 writes | 40,393 | 24.8 µs |
-| applyRemote — 100 writes, new records | 7,000 | 143 µs |
-| applyRemote — 500 writes, new records | 7,082 | 141 µs |
-| applyRemote — 100 sets on cached records | 10,437 | 95.8 µs |
-| applyRemote — 100 incs on cached records | 10,299 | 97.1 µs |
-| applyRemote — 100 adds on cached records | 6,861 | 146 µs |
-| applyRemote — 100 writes, new records (chain: false) | 7,225 | 138 µs |
-| applyRemote — 500 writes, new records (chain: false) | 7,273 | 137 µs |
-| applyRemote — 100 sets on cached records (chain: false) | 11,214 | 89.2 µs |
-| applyRemote — 100 incs on cached records (chain: false) | 10,533 | 94.9 µs |
-| applyRemote — 100 adds on cached records (chain: false) | 6,969 | 143 µs |
+| applyOp — set one field on a 5-field entry | 4,568,358 | 219 ns |
+| applyOp — inc a counter | 4,560,221 | 219 ns |
+| applyOp — add to a 20-element set | 231,381 | 4.32 µs |
+| applyOp — remove from a 20-element set | 242,234 | 4.13 µs |
+| applyOp — write the whole record | 932,462 | 1.07 µs |
+| applyOp — merge a peer entry | 686,842 | 1.46 µs |
+| packOps — 500 writes | 72,067 | 13.9 µs |
+| unpackOps — 500 writes | 42,140 | 23.7 µs |
+| applyRemote — 100 writes, new records | 7,003 | 143 µs |
+| applyRemote — 500 writes, new records | 7,043 | 142 µs |
+| applyRemote — 100 signed writes, new records | 3,836 | 261 µs |
+| verifyOp — 100 signed writes | 10,326 | 96.8 µs |
+| applyRemote — 100 sets on cached records | 10,746 | 93.1 µs |
+| applyRemote — 100 incs on cached records | 9,443 | 106 µs |
+| applyRemote — 100 adds on cached records | 6,465 | 155 µs |
+| applyRemote — 100 writes, new records (chain: false) | 7,117 | 141 µs |
+| applyRemote — 500 writes, new records (chain: false) | 7,117 | 141 µs |
+| applyRemote — 100 signed writes, new records (chain: false) | 3,888 | 257 µs |
+| applyRemote — 100 sets on cached records (chain: false) | 10,942 | 91.4 µs |
+| applyRemote — 100 incs on cached records (chain: false) | 10,832 | 92.3 µs |
+| applyRemote — 100 adds on cached records (chain: false) | 7,190 | 139 µs |
 
 </details>
 

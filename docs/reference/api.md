@@ -4,7 +4,7 @@ Everything below is exported from the package root, except three subpaths: the
 wrpc adapter, [`@alexify/syncom/wrpc`](#wrpc-adapter), the smart contracts,
 [`@alexify/syncom/contracts`](#contracts-subpath), and the IndexedDB backend,
 [`@alexify/syncom/idb`](#backends) (`createIdbFsi`). The browser build exports
-the same names — see [Browser](../guide/browser) for the three signatures that
+the same names — see [Browser](../guide/browser) for the five signatures that
 differ.
 
 ```js
@@ -66,7 +66,9 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 
 Properties: `schema`, `schemaInfo` (`{ version, hash, previous, held }`,
 `null` without a schema — see [Schema versions](../guide/storage#schema-versions)),
-`sync`, `nodeId`, `path`, `log`, `vector`, `logger` (the writer built from
+`sync`, `nodeId` (this node's Ed25519 public key, base64url — what its ops are
+verified against), `signatures` (`'verify'`, `'require'` or `false`), `path`,
+`log`, `vector`, `logger` (the writer built from
 `open({ logger })` — `debug`/`info`/`warn`/`error`), `telemetry` (the writer
 built from the option — opaque).
 Statics: `Storage.Collection`, `Storage.Record`, `Storage.generateId()` — the
@@ -251,7 +253,7 @@ for) a roll seals only the batches marked `applied`.
 | `append(ops, { skipped, held }?)` | `Promise<LogEntry[]>` — entries with their seqs, once on disk; `skipped` ops are flagged, `held` ones with the version they wait for |
 | `held()` | `LogEntry[]` — the entries held for a newer schema version |
 | `droppedHeld`, `resetDroppedHeld()` | Held entries compaction dropped since the last reset |
-| `scrub(id)` | `Promise<number>` — strips the payload of every entry of `id` (`scrubbed: true`), in memory and on disk |
+| `scrub(id)` | `Promise<number>` — strips the payload of every entry of `id` and the nonce that salted its digest (`scrubbed: true`), in memory and on disk; the signature and the digest stay, so the header still verifies |
 | `read(eventId, { scopes, limit }?)` | `{ entries, last }` — the entries in `scopes` after the id, and the seq of the last entry examined (in scope or not; where a feed's cursor may move), or `null` when it cannot be resumed |
 | `since(eventId, { scopes, limit }?)` | `read(...).entries`, or `null` when it cannot be resumed |
 | `entriesOf(id)` | Every retained entry of the record, oldest first — what `repair()` replays |
@@ -331,6 +333,10 @@ storage access a contract has.
 | `encrypt(data, publicKey)` | `string` | `Promise<string>` |
 | `decrypt(data, privateKey)` | `unknown` | `Promise<unknown>` |
 | `calculateHash(data)` | `string` | `Promise<string>` |
+| `generateSigningKeys()` | `Promise<SigningKeyPair>` | `Promise<SigningKeyPair>` |
+| `loadSigningKeys(basePath)` | `Promise<SigningKeyPair>` | `Promise<SigningKeyPair>` |
+| `sign(message, privateKey)` | `string` | `Promise<string>` |
+| `verify(message, signature, publicKey)` | `boolean` | `Promise<boolean>` |
 
 `KeyPair` is `{ publicKey, privateKey }`, PEM-encoded RSA-2048. `encrypt`
 returns a JSON envelope — AES-256-GCM under a fresh key, that key wrapped with
@@ -338,6 +344,15 @@ RSA-OAEP (SHA-256) — identical on both platforms. `loadKeys` reads
 `public.pem` / `private.pem` from `basePath`, generating and writing them
 (`private.pem` owner-only where the backend has permissions) when neither
 exists, and rejecting with `code: 'KEYS_INCOMPLETE'` when only one does.
+
+`SigningKeyPair` is `{ publicKey, privateKey, id }`: a PEM-encoded Ed25519 pair
+and `id`, the raw public key in base64url (43 characters) — the node id of a
+storage that loaded it. `loadSigningKeys` reads `sign-public.pem` /
+`sign-private.pem` the way `loadKeys` reads the RSA pair. `sign` takes a
+string (UTF-8) and gives the 64-byte signature in base64url; `verify` takes
+the message, that signature and an `id`, and answers `false` — never a throw —
+for an id that is no key or a signature of the wrong shape. The op-level use
+of both is [Signatures](../guide/sync#signatures) in the Sync guide.
 
 ## Backends
 

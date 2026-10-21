@@ -13,6 +13,24 @@ it is published, and everything below lands there on release day.
 
 ### Added
 
+- **Signed operations.** Every op a node makes is signed with its Ed25519
+  key, and the node id *is* that key — the raw public key in base64url — so a
+  peer verifies an op against its `origin` through any relay, with no key
+  exchange. The signature covers the header and a salted digest of the
+  payload; a purge scrubs the payload and the nonce and leaves a header that
+  still verifies. `open({ sync: { signatures: 'verify' | 'require' | false } })`:
+  `'verify'` (the default) checks a signature when there is one, `'require'`
+  refuses unsigned ops and keyless origins too (and a keyless `hello`, 403
+  `UNSIGNED`). Refusals are `forged`/`unsigned` in the apply result and the
+  `refused` event, `error` events `BAD_SIGNATURE`/`UNSIGNED` once per page,
+  `syncom.ops.received{refused}` and `syncom.ops.rejected{forged|unsigned}`.
+  New: `generateSigningKeys`, `loadSigningKeys`, `sign`, `verify` on both
+  halves (async in the browser), `SigningKeyPair`, `storage.signatures`,
+  `keys/sign-public.pem` and `sign-private.pem`, `node.json` rekeyed once
+  from a UUID (`identity.rekeyed`) and refused when it names another key
+  (`IDENTITY_MISMATCH`), `packOps` slots 15–17 (`sig`, `digest`, `nonce`).
+  Browser budget 38 → 40 KB.
+
 - **Observed-remove sets.** A third field kind next to the register and the
   counter: `storage.add(id, field, elements)` and `storage.remove(...)` (and
   `record.add`/`record.remove`) commit `add`/`remove` ops (wire codes `+`/`-`,

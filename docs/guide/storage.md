@@ -250,8 +250,9 @@ await storage.saveData(id, data, { encrypted: true });
 A record is sealed with a fresh AES-256-GCM key, and that key is wrapped with
 the storage's RSA-OAEP (SHA-256) public key — the same envelope on Node.js and
 in the browser, so ciphertext and keys move between the two. There is no size
-ceiling. The key pair lives in `<path>/keys/`, unprotected: whoever can read
-the directory can read the records.
+ceiling. Both key pairs live in `<path>/keys/` — the RSA one that seals
+records, the Ed25519 one that [signs ops](./sync#signatures) — unprotected:
+whoever can read the directory can read the records, and sign as this node.
 
 Encrypted records are **local**. No peer holds this node's private key, so
 they produce no operations, never appear in a snapshot, and `inc()`, `add()`
@@ -574,8 +575,8 @@ version cannot be reopened with `'hold'` on an older one.
 
 ```
 data/
-├── node.json      { id } — this node's identity
-├── keys/          public.pem, private.pem
+├── node.json      { id } — this node's identity: its signing key (see Sync › Signatures)
+├── keys/          public.pem, private.pem (RSA, seals records); sign-public.pem, sign-private.pem (Ed25519, signs ops)
 ├── blockchain/    <hash>.json per block, .blockchain.json holds the tail
 ├── lock.json      { pid, id, since } — while an instance holds the directory (not with Web Locks)
 ├── schema.json    { version, migrated, hash } — the schema this directory last ran

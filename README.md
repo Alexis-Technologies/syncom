@@ -78,8 +78,8 @@ that fails the build when exceeded.
 
 | Entry | raw | min | min+gzip | budget |
 | ----- | ---:| ---:| --------:| ------:|
-| main entry — browser (@alexify/syncom) | 267.2 KB | 110.3 KB | 37.9 KB | 38.0 KB |
-| main entry — node (@alexify/syncom) | 252.4 KB | 109.3 KB | 37.5 KB | — |
+| main entry — browser (@alexify/syncom) | 279.5 KB | 115.9 KB | 39.9 KB | 40.0 KB |
+| main entry — node (@alexify/syncom) | 263.7 KB | 114.7 KB | 39.5 KB | — |
 | wrpc adapter — browser (@alexify/syncom/wrpc) | 3.4 KB | 1.4 KB | 0.7 KB | 2.0 KB |
 | contracts — browser (@alexify/syncom/contracts) | 3.7 KB | 1.6 KB | 0.8 KB | 1.0 KB |
 | idb backend — browser (@alexify/syncom/idb) | 3.7 KB | 1.7 KB | 0.8 KB | 2.0 KB |
@@ -148,6 +148,7 @@ nodes converges.
 | **Convergence** | Last-writer-wins registers, per-origin counters, observed-remove sets, tombstones with revival — any order, any number of times, same result |
 | **Transport** | `@alexify/syncom/wrpc` adapts a `WrpcClient` — over a WebSocket, or a WebRTC `PeerLink`'s `remote` from `@alexify/wrpc/webrtc`; `storage.sync.unit()` is the router unit a wrpc server, or a browser's `PeerHost`, mounts. Reconnects, resumable subscriptions, binary streams and rooms come from wrpc. See [WebRTC](https://syncomjs.vercel.app/guide/webrtc) |
 | **Integrity** | Every write appends a hash-linked block (`chain: false` turns it off for a hub); reads re-verify the record against the block that committed it and throw on a mismatch; `repair(id)` rebuilds a record from the log |
+| **Signed ops** | Every op is signed with the node's Ed25519 key, and the node id *is* that key: a peer verifies an op against its origin through any relay, a purge leaves a header that still verifies, `sync.signatures: 'require'` refuses unsigned ops. See [Signatures](https://syncomjs.vercel.app/guide/sync#signatures) |
 | **CRDT** | `diff` / `merge` / `apply` over plain objects — nested maps merge recursively, arrays are grow-only sets, numbers add so counters converge |
 | **Contracts** | `@alexify/syncom/contracts`: store a procedure in the chain by hash, load it anywhere, run it against a read-only view of storage; failures are recorded as blocks. A subpath, so the package root never runs a block's code |
 | **Portability** | One API over `node:fs` + `node:crypto` on the server and OPFS + Web Crypto in the browser, chosen by the `browser` export condition |
@@ -165,7 +166,7 @@ InstantDB) meet. The [comparison](https://syncomjs.vercel.app/guide/comparison) 
 nineteen in one table of forty features, each cell decided from the published source. In short:
 syncom is a database that merges field by field, not a text CRDT. It syncs with no service to
 run, its hosts validate and scope what peers send, and its log is verifiable and purgeable. It
-has no text or list CRDT, no signed ops and no UI bindings, and 1.0.0 is not on npm yet.
+has no text or list CRDT and no UI bindings, and 1.0.0 is not on npm yet.
 
 ## Benchmarks
 
@@ -301,7 +302,7 @@ See [Browser](https://syncomjs.vercel.app/guide/browser).
 
 1.0.0, not yet published to npm. Everything on this page works today and is covered by the test suite,
 including replication over real wrpc WebSockets. Known limits — a counter
-straddling a concurrent reset, no op signatures, encrypted records staying
+straddling a concurrent reset, encrypted records staying
 local — are listed under [Guarantees and limits](https://syncomjs.vercel.app/guide/sync#guarantees-and-limits).
 
 ## Documentation

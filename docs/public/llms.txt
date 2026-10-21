@@ -17,13 +17,17 @@
   `./contracts`, `./idb`
 - Exports: `open`, `Storage`, `SyncManager`, `isSyncLink`, `OpLog`, `applyOp`, `mergeEntry`, `isAlive`,
   `Blockchain`, `diff`, `merge`, `apply`, `calculateHash`, `generateKeys`, `encrypt`, `decrypt`, `loadKeys`,
+  `generateSigningKeys`, `loadSigningKeys`, `sign`, `verify`,
   `read`, `write`, `exists`, `remove`, `list`, `isFsi`, `createMemoryFsi`, `HookError`, `ValidationError`,
   `SyncomError`, `isSharedLog`
 - `@alexify/syncom/wrpc` exports `createWrpcLink`, `isSyncLink`, `SYNC_INTROSPECTION`;
   `@alexify/syncom/contracts` exports `SmartContract`, `DataReader`; `@alexify/syncom/idb` exports `createIdbFsi`
 - Every operational error is a `SyncomError` with a `code`
 - `Storage`, `Blockchain`, `SyncManager` and `OpLog` initialise asynchronously: `await new Blockchain(path)`
-- In the browser `calculateHash`, `encrypt` and `decrypt` return promises; in Node.js they are synchronous
+- In the browser `calculateHash`, `encrypt`, `decrypt`, `sign` and `verify` return promises; in Node.js they are synchronous
+- Every op is signed (Ed25519) by its origin, and the node id IS the origin's public key (base64url), so any
+  peer verifies through any relay; `open({ sync: { signatures: 'verify' | 'require' | false } })` — only
+  'require' refuses unsigned ops
 - Every write is an op: `write` (insert/set), `set` (update/swap/record.save), `inc` (counters), `add`/`remove`
   (observed-remove sets, read sorted by element text), `delete` (tombstone). A field is a last-writer-wins
   register, a per-origin counter OR a set — one kind only; mixing throws

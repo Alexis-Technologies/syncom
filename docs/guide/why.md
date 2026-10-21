@@ -35,9 +35,11 @@ engine also covers what an application keeps next to replication:
   is skipped, a unique-key clash is reported, and each peer is served only the scopes it was
   granted. Of the eight alternatives that sync without a server of their own, only RxDB
   validates writes against a schema.
-- **A history you can verify and still purge.** Every write can be committed to a hash-linked
-  chain that is re-checked when a record is read, so silent corruption surfaces as an error,
-  not as data. `purge()` removes a payload from the op log and replicates the purge itself.
+- **A history you can verify and still purge.** Every op is signed by the node that made it —
+  the node id is its Ed25519 key, so any peer verifies an op through any relay — and every
+  write can be committed to a hash-linked chain that is re-checked when a record is read, so
+  silent corruption surfaces as an error, not as data. `purge()` removes a payload from the op
+  log, replicates the purge itself, and leaves a header that still verifies.
   Among the tamper-evident stores in the comparison, Automerge, Fireproof and OrbitDB keep
   every payload forever.
 - **An engine you can operate.** Hooks run your code inside a write, a read or a peer's batch,
@@ -65,15 +67,15 @@ Yjs and PouchDB do 19,000 to 26,000.
 - **Postgres is your source of truth.** ElectricSQL, PowerSync and Zero replicate a server
   database's tables to clients and send writes through your API. syncom keeps its own records
   and has no Postgres connector.
-- **End-to-end encryption or signed changes.** Ops are not signed, and an encrypted record
-  stays on the node that wrote it. End-to-end encryption is a [recipe](/guide/scaling#end-to-end-encryption)
+- **End-to-end encryption.** Ops are signed, but an encrypted record stays on the node that
+  wrote it. End-to-end encryption is a [recipe](/guide/scaling#end-to-end-encryption)
   (wrpc's sealer in the hooks, field by field, with no counter, index or query over a sealed
   field). Jazz signs and encrypts every change, and Evolu encrypts everything it syncs.
 - **Ready-made UI bindings, React Native, a managed cloud.** syncom ships none of them. RxDB,
   TinyBase, Dexie Cloud, InstantDB and others do.
 - **A package with a track record.** syncom 1.0.0 is not on npm yet. The
-  [Sync](/guide/sync#guarantees-and-limits) guide lists the known limits: a counter straddling a concurrent reset, no op signatures,
-  encrypted records that stay local.
+  [Sync](/guide/sync#guarantees-and-limits) guide lists the known limits: a counter straddling a concurrent reset,
+  encrypted records that stay local, no proof of key possession at `hello`.
 
 ## Where it comes from
 

@@ -29,13 +29,17 @@ the Web Crypto API does not. So in the browser:
 await calculateHash({ a: 1 }); // Promise<string> — sync in Node.js
 await encrypt(data, publicKey);
 await decrypt(data, privateKey);
+await sign(message, privateKey); // the Ed25519 pair that signs ops
+await verify(message, signature, nodeId);
 ```
 
 `browser.d.ts` declares these signatures separately from `index.d.ts` for
 exactly this reason.
 
 The cipher is the same on both: AES-256-GCM under a key wrapped with
-RSA-OAEP (SHA-256). Keys and ciphertext move between the platforms.
+RSA-OAEP (SHA-256), and the signature is Ed25519 over the same bytes. Keys,
+ciphertext and signatures move between the platforms: a signing pair on disk
+is one node id on both.
 
 **Storage is origin-private.** `fsi.browser.js` resolves paths against
 `navigator.storage.getDirectory()`, so `open({ path: 'data' })` creates a

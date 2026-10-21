@@ -227,6 +227,24 @@ docs/                     VitePress site
   `src/crypto.browser.js`. Shared code must `await` them; `browser.d.ts`
   exists to declare that difference. Do not "fix" it by making the Node half
   async.
+- **Signed ops: the id is the key, the signature is the header plus a salted
+  digest.** `nodeId` = the Ed25519 public key (`isKeyId`: 43 base64url chars,
+  canonical last char — a non-canonical one is the same key under another
+  id); `keys/sign-*.pem` next to the RSA pair, `node.json` names the id
+  (a UUID there is rekeyed once with `identity.rekeyed`; another key id is
+  `IDENTITY_MISMATCH`, never silent). `src/signing.js` signs
+  `[1, origin, seq, ts, type, id, scope, from, v, actor, digest]` with
+  `digest = sha256(nonce + canonical(payload))` — three sign sites, `core.sign`
+  in `persistLocal` (after `validateLocal` rewrote `op.data`), `mergeBatch`
+  (after the seq is assigned) and `adopt`, all before the append. A peer's
+  page is verified in `verifyPage` (src/apply.js) BEFORE the sequential
+  `admit`, sixty-four at a time; `verify` never throws (a throw there would
+  be `PAGE_FAILED`, a stream-stopper). `OpLog.scrub` deletes the nonce with
+  the payload and keeps `sig`+`digest`, so a scrubbed op's header verifies.
+  A refused op is a gap, like a malformed one. `'verify'` is the default
+  because ~70 call sites inject unsigned hand-made ops; `'require'` is the
+  only mode that resists stripping — say so wherever signatures are
+  documented. Never put the key or a signature into a metric label.
 - **A `.d.ts` change and its `tsd` test land together** (`tests/*.test-d.ts`).
 - **`tests/package/consistency.test.js` guards the metadata.** If it goes red
   after you add an entry point, update `exports`, `files`, the `browser` map,
