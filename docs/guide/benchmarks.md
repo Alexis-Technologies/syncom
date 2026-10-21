@@ -74,7 +74,7 @@ The libraries do different work for one call, so read the charts as a price list
   its catalog row and, unless `chain: false`, a block in the chain. That is four file writes
   per write with the chain and two without, and it is what lets a record be checked, purged,
   repaired, replicated by scope and queried. The `chain: false` rows show what the chain costs:
-  between a third and a half of a write on disk.
+  40 to 55 percent of a write on disk.
 - **Writes on disk are where syncom pays.** It does about 1,500 inserts a second (2,450 without
   the chain), where the LevelDB-backed Yjs and PouchDB and Loro's single append do 19,000 to
   26,000: what is left is the file writes themselves. A write no longer costs more as the store
