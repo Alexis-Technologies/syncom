@@ -17,7 +17,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { bench } = require('./support/harness.js');
-const { applyOp, packOps, unpackOps } = require('../src/ops.js');
+const { applyOp, observedTags, packOps, unpackOps } = require('../src/ops.js');
 const { open } = require('../src/storage.js');
 
 const record = { name: 'Example', email: 'example@example.com', hits: 0, tags: ['a', 'b'], nested: { k: 1 } };
@@ -31,6 +31,7 @@ const pageOf = (origin, state, n, type, data) => {
     const id = type === 'write' ? `${origin}-${seq}` : state.ids[i % state.ids.length];
     const op = { origin, seq, ts: Date.now() + seq, type, id };
     if (type === 'inc') Object.assign(op, { key: 'views', value: 1 });
+    else if (type === 'add') Object.assign(op, { key: 'labels', value: [`t${seq}`] });
     else op.data = data;
     ops.push(op);
   }
@@ -47,6 +48,22 @@ const main = async () => {
     applyOp(base, { origin: 'B', seq: 1, ts: ++ts, type: 'set', id: 'r', data: { hits: ts } }));
   await bench('applyOp — inc a counter', () =>
     applyOp(base, { origin: 'B', seq: 1, ts: ++ts, type: 'inc', id: 'r', key: 'views', value: 1 }));
+  // A 20-element set: an add or a remove re-reads the whole field.
+  const members = Array.from({ length: 20 }, (_, i) => `m${i}`);
+  const withSet = applyOp(base, {
+    origin: 'A',
+    seq: 2,
+    ts: ++ts,
+    type: 'add',
+    id: 'r',
+    key: 'labels',
+    value: members,
+  }).entry;
+  await bench('applyOp — add to a 20-element set', () =>
+    applyOp(withSet, { origin: 'B', seq: 1, ts: ++ts, type: 'add', id: 'r', key: 'labels', value: ['new'] }));
+  const tags = observedTags(withSet.meta, 'labels', ['m3']);
+  await bench('applyOp — remove from a 20-element set', () =>
+    applyOp(withSet, { origin: 'B', seq: 1, ts: ++ts, type: 'remove', id: 'r', key: 'labels', value: tags }));
   await bench('applyOp — write the whole record', () =>
     applyOp(base, { origin: 'B', seq: 1, ts: ++ts, type: 'write', id: 'r', data: record }));
   await bench('applyOp — merge a peer entry', () =>
@@ -89,6 +106,13 @@ const main = async () => {
       await bench(
         `applyRemote — 100 incs on cached records${label}`,
         () => storage.applyRemote(pageOf('C', counter, 100, 'inc')),
+        { warmup: 3, measureMs: 1500, opsPerIteration: 100 },
+      );
+      // A set field of its own, growing by one element per op.
+      const adder = { seq: 0, ids };
+      await bench(
+        `applyRemote — 100 adds on cached records${label}`,
+        () => storage.applyRemote(pageOf('T', adder, 100, 'add')),
         { warmup: 3, measureMs: 1500, opsPerIteration: 100 },
       );
       await storage.close();

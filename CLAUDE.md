@@ -150,13 +150,26 @@ docs/                     VitePress site
   `actor` (14) were appended; a reader of fewer slots ignores the rest, a
   reader of more takes an absent slot as null. Append, never reorder — the
   shape is on the wire between every pair of peers (the log itself stores
-  keyed `{ seq, op }` JSON; `packOps` is for `push` and `changes` only).
-- **Every write is an op, and a field is a register OR a counter.** `insert`/
-  `set` → `write`, `update`/`swap`/`record.save` → `set`, `inc` → `inc`,
-  `delete` → tombstone. Registers are last-writer-wins by `(ts, origin)`;
-  counters are per-origin sums. Mixing the two on one field throws locally and
-  is refused (with an `error` event) from a peer. Do not add a path that lets
-  them meet — it cannot be made to commute.
+  keyed `{ seq, op }` JSON; `packOps` is for `push` and `changes` only). An
+  op type is one character in `TYPE_CODES`/`CODE_TYPES` (`+`/`-` are the set
+  ops). Once the package is published, an older reader counts an unknown type
+  as malformed and its stream stalls there — a new type, or a slot an older
+  reader cannot take as null, is then a `PROTOCOL` bump (`src/protocol.js`).
+- **Every write is an op, and a field is a register, a counter OR a set.**
+  `insert`/`set` → `write`, `update`/`swap`/`record.save` → `set`, `inc` →
+  `inc`, `add`/`remove` → `add`/`remove`, `delete` → tombstone. Registers are
+  last-writer-wins by `(ts, origin)`; counters are per-origin sums; a set is
+  `meta.sets[field][elementKey][origin] = [added, removed]` — the newest add
+  ts and the newest add ts a remove observed — live while `added > removed`,
+  read sorted by element text (a same-origin re-add moves the stamp, so there
+  is no insertion order to keep). A `remove` carries the tags this node
+  observed (`observedTags`, built in `prepareOp` INSIDE the queue — outside it
+  a concurrent apply could add between the two); `applyBase` drops a slot
+  below `base` and clamps a surviving component below it, which is what makes
+  meta — not only data — order-free. Mixing two kinds on one field throws
+  locally (`FIELD_KIND`) and is refused (`OP_REFUSED` event) from a peer; the
+  snapshot merge lets a register, then a counter, win over a set. Do not add
+  a path that lets kinds meet — it cannot be made to commute.
 - **Ops from one origin apply in seq order; seqs run per origin AND scope**
   (`origin@scope` vector keys), and ops born from a snapshot (`merge`,
   `advance`) run in their own `origin@~` stream. `applyRemote` skips
@@ -319,7 +332,9 @@ docs/                     VitePress site
 and is run against both halves (`schema`, `catalog`, `query`, `purge`, `hooks`,
 `fsi`, `sync-engine`, each with a `*.test.js` and a `*.browser.test.js`
 wrapper); `tests/suites/sync-engine.js` runs the
-convergence properties over `tests/utils/memory-link.js` (an in-process link
+convergence properties (a partition, a seeded fuzz over `set`/`update`/`inc`/
+`add`/`remove`/`delete` — a new op kind joins as a branch there — and a late
+joiner) over `tests/utils/memory-link.js` (an in-process link
 that mimics a wrpc client: JSON across the boundary, a reconnect re-opens the
 subscription from its last event id against a fresh server-side client) and
 `tests/utils/mesh.js` (N storages from an adjacency list, `settle()`).

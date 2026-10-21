@@ -61,8 +61,9 @@ silently never runs.
 
 `ctx` for a write is `{ type, id, data?, key?, value?, meta?, current,
 encrypted, source, via, from, v, actor }`: `type` is the op type (`write`,
-`set`, `inc`, `delete`, `purge`, `merge`), `data` is the whole record for a `write`
-and the delta for a `set`, `key`/`value` belong to an `inc`, `current` is the
+`set`, `inc`, `add`, `remove`, `delete`, `purge`, `merge`), `data` is the whole record for a `write`
+and the delta for a `set`, `key`/`value` belong to an `inc` (the amount), an
+`add` or a `remove` (the elements), `current` is the
 record as it is now (`null` when absent or deleted — read it, do not change
 it), `encrypted` says whether the write is sealed for this node, `source` is
 the `Record` whose `save()` this is, `v` is this node's schema version and
@@ -176,7 +177,7 @@ than a throw.
 | `apply` | `({ via, peer, ops, applied, skipped, duplicates, gaps })` | A peer's batch is durable — `ops` are the accepted ones, skipped included |
 | `conflict` | `({ kind: 'unique', entity, fields, id, other, op })` | A peer's op left a unique key shared by two records — see [Queries](./storage#queries) |
 | `schema` | `({ kind: 'drift', … })` / `({ kind: 'ahead', op, held })` | A peer runs this node's schema version with another snapshot hash — see [Schemas](./sync#schemas); a peer's op is from a newer version — see [Reading across versions](./storage#reading-across-versions) |
-| `error` | `(error)` with `error.op`, and `error.rejected` or `error.entity` + `error.issues` | A peer's op refused by the register/counter rule, or skipped as invalid under this node's [schema](./schema#how-a-write-is-validated) |
+| `error` | `(error)` with `error.op`, and `error.rejected` or `error.entity` + `error.issues` | A peer's op refused by the field-kind rule, or skipped as invalid under this node's [schema](./schema#how-a-write-is-validated) |
 | `close` | — | After `close()` sealed the log |
 
 A `Record` emits `update` `(data, delta)` on a staged assignment and when the

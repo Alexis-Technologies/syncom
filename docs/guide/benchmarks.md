@@ -229,24 +229,28 @@ the CRDT helpers and the emitter. They are the numbers to watch for a regression
 </details>
 
 <details>
-<summary>Apply — 14 rows</summary>
+<summary>Apply — 18 rows</summary>
 
 | Benchmark | ops/s | per operation |
 | --- | ---: | ---: |
-| applyOp — set one field on a 5-field entry | 4,949,483 | 202 ns |
-| applyOp — inc a counter | 5,040,340 | 198 ns |
-| applyOp — write the whole record | 983,157 | 1.02 µs |
-| applyOp — merge a peer entry | 733,629 | 1.36 µs |
-| packOps — 500 writes | 79,607 | 12.6 µs |
-| unpackOps — 500 writes | 43,620 | 22.9 µs |
-| applyRemote — 100 writes, new records | 7,168 | 140 µs |
-| applyRemote — 500 writes, new records | 7,198 | 139 µs |
-| applyRemote — 100 sets on cached records | 10,861 | 92.1 µs |
-| applyRemote — 100 incs on cached records | 10,714 | 93.3 µs |
-| applyRemote — 100 writes, new records (chain: false) | 7,322 | 137 µs |
-| applyRemote — 500 writes, new records (chain: false) | 7,302 | 137 µs |
-| applyRemote — 100 sets on cached records (chain: false) | 11,389 | 87.8 µs |
-| applyRemote — 100 incs on cached records (chain: false) | 11,195 | 89.3 µs |
+| applyOp — set one field on a 5-field entry | 4,521,521 | 221 ns |
+| applyOp — inc a counter | 4,378,699 | 228 ns |
+| applyOp — add to a 20-element set | 231,350 | 4.32 µs |
+| applyOp — remove from a 20-element set | 243,460 | 4.11 µs |
+| applyOp — write the whole record | 961,326 | 1.04 µs |
+| applyOp — merge a peer entry | 689,572 | 1.45 µs |
+| packOps — 500 writes | 74,014 | 13.5 µs |
+| unpackOps — 500 writes | 40,393 | 24.8 µs |
+| applyRemote — 100 writes, new records | 7,000 | 143 µs |
+| applyRemote — 500 writes, new records | 7,082 | 141 µs |
+| applyRemote — 100 sets on cached records | 10,437 | 95.8 µs |
+| applyRemote — 100 incs on cached records | 10,299 | 97.1 µs |
+| applyRemote — 100 adds on cached records | 6,861 | 146 µs |
+| applyRemote — 100 writes, new records (chain: false) | 7,225 | 138 µs |
+| applyRemote — 500 writes, new records (chain: false) | 7,273 | 137 µs |
+| applyRemote — 100 sets on cached records (chain: false) | 11,214 | 89.2 µs |
+| applyRemote — 100 incs on cached records (chain: false) | 10,533 | 94.9 µs |
+| applyRemote — 100 adds on cached records (chain: false) | 6,969 | 143 µs |
 
 </details>
 

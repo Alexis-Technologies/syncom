@@ -120,7 +120,7 @@ is stored as the string it serializes to.
 
 The validator sees the record **as the op leaves it**: for a `write` the
 whole new record, for a `set` the whole record after the delta, for an
-`inc` the record with the counter moved — under its id field, without
+`inc`, `add` or `remove` the record with the counter or the set moved — under its id field, without
 `$type`. What it returns is folded back into the op:
 
 - a `write` becomes the validated record — defaults filled, aliases
@@ -199,11 +199,11 @@ validated against; `snapshot()`, `getCachedData()` and replication stay raw.
 ### Rewriting: `migrate()`
 
 ```js
-if (storage.schemaInfo.previous) await storage.migrate(); // { migrated: 12, counters: 3 }
+if (storage.schemaInfo.previous) await storage.migrate(); // { migrated: 12, counters: 3, sets: 1 }
 ```
 
 Every record of an older version becomes a whole-record write of its view,
-with its counters added back (a write resets them); the op carries this
+with its counters and sets added back (a write resets them); the op carries this
 node's version, peers receive ordinary ops, and a record already of this
 version is left alone — idempotent. Run it on one node after an upgrade;
 `{ entities: ['Project'] }` limits it, `{ batch }` sets how many records go
@@ -248,7 +248,7 @@ compatibility(diff(previousModel, model)); // 'full' | 'backward' | 'forward' | 
 | `validator` | `open({ validator })` | `{ compile(schema, { entity }) }` for plain-object schemas |
 | `storage.check(entity, data)` | — | The validator's value, nothing written |
 | `storage.schemaInfo` | — | `{ version, hash, previous, held }` |
-| `storage.migrate(options?)` | — | `{ migrated, counters }` |
+| `storage.migrate(options?)` | — | `{ migrated, counters, sets }` |
 
 See [Storage](./storage#collections) for `$type` and the collection
 methods, and [Sync](./sync#schemas) for what hello carries.

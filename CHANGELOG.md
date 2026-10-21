@@ -13,6 +13,20 @@ it is published, and everything below lands there on release day.
 
 ### Added
 
+- **Observed-remove sets.** A third field kind next to the register and the
+  counter: `storage.add(id, field, elements)` and `storage.remove(...)` (and
+  `record.add`/`record.remove`) commit `add`/`remove` ops (wire codes `+`/`-`,
+  payload in the key/value slots). Two nodes that add concurrently both keep
+  theirs; an element one node removes while another re-adds it survives, since
+  a remove names the adds its node had seen (`meta.sets[field][element][origin]
+  = [added, removed]`); a reset drops and clamps slots so metas agree in any
+  order. A set reads sorted by element text. The kind rule gains
+  `reason: 'set'` (`FIELD_KIND`, `OP_REFUSED`); a set op is validated as the
+  record it leaves; `migrate()` adds sets back and reports `sets`. The catalog
+  posts an indexed array under each element, so `{ tags: 'bug' }` narrows to
+  the arrays holding it — a covered count and a loaded fetch used to disagree
+  on an indexed array. Browser budget 37 → 38 KB.
+
 - **Benchmarks against nine libraries and a comparison with eighteen.**
   `pnpm bench:compare` measures syncom against Yjs, Automerge, Loro, TinyBase,
   PouchDB, RxDB, Fireproof, GUN and OrbitDB (insert, update, read, a converging

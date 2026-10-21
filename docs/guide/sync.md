@@ -39,6 +39,8 @@ in the log:
 | `write` | `insert()`, `set()`, `saveData()` | Replaces the record: fields not written are gone |
 | `set` | `update()`, `swap()`, `record.save()` | Replaces the listed fields; last writer wins per field |
 | `inc` | `inc()`, `record.inc()` | Adds to a counter field |
+| `add` | `add()`, `record.add()` | Adds elements to a set field |
+| `remove` | `remove()`, `record.remove()` | Removes from a set field the elements this node had seen added |
 | `delete` | `delete()`, `record.delete()` | Leaves a tombstone; a newer write revives the record |
 | `purge` | `purge()` | Erases the record for good: wins at any stamp, nothing later lands, and every entry of the id is scrubbed from the log (see [Purge](./storage#purge)) |
 | `merge` | a snapshot page being joined | Joins a whole entry (see [Bootstrap](#bootstrap)) |
@@ -81,28 +83,43 @@ that they do not have to:
   by a peer far ahead age out late and ops from a peer far behind age out
   early. Retention by `ops` is unaffected.
 
-### Registers and counters
+### Registers, counters and sets
 
-A field is either a **register** or a **counter**, never both.
+A field is a **register**, a **counter** or a **set** — one of them, never two.
 
 - A register holds whatever was written last: two nodes writing the same field
   concurrently agree on the winner by `(ts, origin)`, so both end up with the
   same value.
 - A counter is a sum. Two nodes each adding 1 concurrently end up at +2 on
   both, because the sum keeps one running total per origin and adds them up.
+- A set is an array of JSON values that nodes add to and remove from. Two
+  nodes adding different elements concurrently keep both; an element one node
+  removes while another re-adds it survives, because a remove names the adds
+  its node had seen and the new add is not among them — an *observed-remove*
+  set. A set reads sorted by element text: it has no insertion order.
 
 ```js
 const id = await storage.insert({ title: 'Draft' }); // title is a register
 await storage.inc(id, 'views', 1);                   // views is a counter
+await storage.add(id, 'tags', ['bug', 'ui']);        // tags is a set
+await storage.remove(id, 'tags', ['ui']);            // tags is ['bug']
 await storage.update(id, { title: 'Final' });        // fine
 await storage.update(id, { views: 10 });              // throws: views is a counter; use inc()
+await storage.update(id, { tags: [] });               // throws: tags is a set; use add() or remove()
 await storage.inc(id, 'title', 1);                    // throws: title is a register; use update()
 ```
 
-Do not initialise a counter in `insert()` — `{ views: 0 }` makes `views` a
-register. `inc()` creates the field. A peer's op that breaks the rule is
+Do not initialise a counter or a set in `insert()` — `{ views: 0 }` makes
+`views` a register and `{ tags: [] }` makes `tags` one; `inc()` and `add()`
+create their fields. A validator's default for the field (`tags: []`) is
+folded into the write and does the same. A peer's op that breaks the rule is
 refused for that field and reported as an `error` event on the storage; the
 rest of the op still applies.
+
+Elements are told apart by their JSON text: `1` and `'1'` are two elements,
+and so are `{ a: 1, b: 2 }` and `{ b: 2, a: 1 }`. A remove of an element this
+node never saw added is nothing — no op is made — and one of an element a
+peer re-added meanwhile leaves that add alone.
 
 ### Whole-record writes and deletes
 
@@ -114,7 +131,17 @@ write brings it back.
 
 One case does not converge and is left that way on purpose: a counter
 incremented by one origin both before and after a concurrent reset by another.
-Resettable counters need causal metadata syncom does not carry.
+Resettable counters need causal metadata syncom does not carry. A set has no
+such case: a remove names the add stamps its node saw, so a reset and a
+remove read the same whichever lands first.
+
+What neither survives is a **kind clash**: a whole-record write that carries
+a field as a register (`set(id, { views: 0 })`, `set(id, { tags: [] })`),
+concurrent with an `inc` or an `add` to that field stamped later. The node
+that saw the write first refuses the increment or the add; the node that saw
+the increment or the add first refuses that field of the write. Keep a field
+one kind, and do not reset it in a whole-record write while another node may
+be moving it.
 
 ## The log
 
@@ -417,7 +444,8 @@ the engine's own tests run on.
 ## Guarantees and limits
 
 - **Convergence.** Two nodes that have applied the same set of ops hold the
-  same records, whatever the order — except the documented counter/reset case.
+  same records, whatever the order — except the documented counter/reset and
+  kind-clash cases.
 - **At-least-once delivery, idempotent application.** An op may arrive more
   than once; applying it again changes nothing.
 - **A peer's op is checked before it is read.** `origin`, `seq`, `ts`, `type`,

@@ -26,8 +26,8 @@ features:
   - icon: 🔄
     title: Ops that converge
     details: "Every write is an op: last-writer-wins per field, counters whose increments add up across nodes, tombstones that a newer write revives. Applied in any order, any number of times, every node ends up with the same records."
-    link: /guide/sync#registers-and-counters
-    linkText: Registers and counters
+    link: /guide/sync#registers-counters-and-sets
+    linkText: Registers, counters and sets
   - icon: ⏯️
     title: Resume and bootstrap
     details: "A peer that reconnects picks up from the last event id it saw. One that was away longer than the host keeps its log, or a new one, joins from a streamed snapshot, a page at a time."

@@ -42,7 +42,9 @@ await storage.get(id);                    // { title: 'Draft' }
 await storage.update(id, { status: 'review' }); // set some fields
 await storage.update(id, { status: 'done' }, { actor: 'ada' }); // … and say who
 await storage.inc(id, 'views', 1);        // add to a counter field
-await storage.set(id, { title: 'Final' }); // replace wholesale — status and views are gone
+await storage.add(id, 'tags', ['bug', 'ui']); // add to a set field
+await storage.remove(id, 'tags', ['ui']);  // tags is ['bug']
+await storage.set(id, { title: 'Final' }); // replace wholesale — status, views and tags are gone
 await storage.list();                     // every live id
 await storage.delete(id);
 await storage.purge(id);                  // forget it for good — see below
@@ -51,14 +53,17 @@ await storage.close();                    // stop replication, seal the log
 
 Every one of these is an **operation**: applied here, written to the
 [log](./sync#the-log), announced as a `change` event, and replicated to peers
-when a transport is configured. `set()`, `update()` and `inc()` also emit an
-`update` event on any live `Record` for that id.
+when a transport is configured. `set()`, `update()`, `inc()`, `add()` and
+`remove()` also emit an `update` event on any live `Record` for that id.
 
-::: tip Registers and counters
+::: tip Registers, counters and sets
 A field written with `insert()`, `set()` or `update()` is a *register* — last
 writer wins. A field created with `inc()` is a *counter* — increments add up
-across nodes. A field cannot be both: `update()` on a counter and `inc()` on a
-register throw. See [Sync](./sync#registers-and-counters).
+across nodes. A field created with `add()` is a *set* — concurrent adds both
+keep, and an add a remove did not see survives it; it reads sorted by element
+text. A field is one kind only: `update()` on a counter or a set, `inc()` on a
+register or a set, `add()` on a register or a counter throw. See
+[Sync](./sync#registers-counters-and-sets).
 :::
 
 ### Compare-and-swap
@@ -249,9 +254,9 @@ ceiling. The key pair lives in `<path>/keys/`, unprotected: whoever can read
 the directory can read the records.
 
 Encrypted records are **local**. No peer holds this node's private key, so
-they produce no operations, never appear in a snapshot, and `inc()` on one
-throws — `update()`, `set()` and `delete()` still work, they simply stay
-here. A record never changes kind: writing an encrypted record over a
+they produce no operations, never appear in a snapshot, and `inc()`, `add()`
+and `remove()` on one throw — `update()`, `set()` and `delete()` still work,
+they simply stay here. A record never changes kind: writing an encrypted record over a
 replicated one (or the reverse) is refused.
 
 ## Records
@@ -271,9 +276,13 @@ record.title = 'Final';        // stages the change and emits
 record.delta();                // { title: 'Final' }
 await record.save();           // writes, then clears the delta
 await record.inc('views', 1);  // a counter, through the record
+await record.add('tags', ['bug']); // a set, through the record
 await record.data();           // the full current object
 await record.delete();
 ```
+
+A set field changes through `record.add()` and `record.remove()`: assigning
+it and saving is a `set` op on a set field, which throws `FIELD_KIND`.
 
 Properties are defined from whatever keys the record had when it was loaded;
 `id` is reserved and never becomes a settable property.
@@ -392,7 +401,7 @@ application decides which yields.
 
 The full guide is [Schema and validation](./schema); the shape, in short.
 Give an entity a `schema` and every write to its collection — `insert()`,
-`set()`, `update()`, `inc()`, a `Record.save()` — is validated as the whole
+`set()`, `update()`, `inc()`, `add()`, `remove()`, a `Record.save()` — is validated as the whole
 record the write leaves behind, before anything is stamped, logged or written.
 Three shapes are understood, and the package requires none of them:
 
@@ -541,7 +550,7 @@ written.
 
 `migrate()` rewrites what the lens only reads: every record of an older
 version becomes a whole-record write of its view (the version with it), with
-its counters added back. Run it on one node after an upgrade; peers receive
+its counters and sets added back. Run it on one node after an upgrade; peers receive
 ordinary ops. It is idempotent, and `{ entities }` limits it to those
 collections:
 

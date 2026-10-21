@@ -288,7 +288,7 @@
         },
         "lists": {
           "mark": "❌",
-          "text": "an array is one register",
+          "text": "no ordered list; an array field can be an observed-remove set (`add()`/`remove()`)",
           "source": "src/ops.js"
         },
         "counters": {

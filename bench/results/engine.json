@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-21T14:21:59.565Z",
+  "generatedAt": "2026-10-21T18:50:59.862Z",
   "machine": {
     "cpu": "Apple M3 Max",
     "cores": 16,
@@ -8,76 +8,6 @@
     "node": "v24.14.1"
   },
   "results": [
-    {
-      "subject": "apply",
-      "name": "applyOp — set one field on a 5-field entry",
-      "opsPerSec": 4949483
-    },
-    {
-      "subject": "apply",
-      "name": "applyOp — inc a counter",
-      "opsPerSec": 5040340
-    },
-    {
-      "subject": "apply",
-      "name": "applyOp — write the whole record",
-      "opsPerSec": 983157
-    },
-    {
-      "subject": "apply",
-      "name": "applyOp — merge a peer entry",
-      "opsPerSec": 733629
-    },
-    {
-      "subject": "apply",
-      "name": "packOps — 500 writes",
-      "opsPerSec": 79607
-    },
-    {
-      "subject": "apply",
-      "name": "unpackOps — 500 writes",
-      "opsPerSec": 43620
-    },
-    {
-      "subject": "apply",
-      "name": "applyRemote — 100 writes, new records",
-      "opsPerSec": 7168
-    },
-    {
-      "subject": "apply",
-      "name": "applyRemote — 500 writes, new records",
-      "opsPerSec": 7198
-    },
-    {
-      "subject": "apply",
-      "name": "applyRemote — 100 sets on cached records",
-      "opsPerSec": 10861
-    },
-    {
-      "subject": "apply",
-      "name": "applyRemote — 100 incs on cached records",
-      "opsPerSec": 10714
-    },
-    {
-      "subject": "apply",
-      "name": "applyRemote — 100 writes, new records (chain: false)",
-      "opsPerSec": 7322
-    },
-    {
-      "subject": "apply",
-      "name": "applyRemote — 500 writes, new records (chain: false)",
-      "opsPerSec": 7302
-    },
-    {
-      "subject": "apply",
-      "name": "applyRemote — 100 sets on cached records (chain: false)",
-      "opsPerSec": 11389
-    },
-    {
-      "subject": "apply",
-      "name": "applyRemote — 100 incs on cached records (chain: false)",
-      "opsPerSec": 11195
-    },
     {
       "subject": "chain",
       "name": "addBlock — small payload",
@@ -357,6 +287,96 @@
       "subject": "sync",
       "name": "append of another scope's op while a scoped feed listens",
       "opsPerSec": 1877
+    },
+    {
+      "subject": "apply",
+      "name": "applyOp — set one field on a 5-field entry",
+      "opsPerSec": 4521521
+    },
+    {
+      "subject": "apply",
+      "name": "applyOp — inc a counter",
+      "opsPerSec": 4378699
+    },
+    {
+      "subject": "apply",
+      "name": "applyOp — add to a 20-element set",
+      "opsPerSec": 231350
+    },
+    {
+      "subject": "apply",
+      "name": "applyOp — remove from a 20-element set",
+      "opsPerSec": 243460
+    },
+    {
+      "subject": "apply",
+      "name": "applyOp — write the whole record",
+      "opsPerSec": 961326
+    },
+    {
+      "subject": "apply",
+      "name": "applyOp — merge a peer entry",
+      "opsPerSec": 689572
+    },
+    {
+      "subject": "apply",
+      "name": "packOps — 500 writes",
+      "opsPerSec": 74014
+    },
+    {
+      "subject": "apply",
+      "name": "unpackOps — 500 writes",
+      "opsPerSec": 40393
+    },
+    {
+      "subject": "apply",
+      "name": "applyRemote — 100 writes, new records",
+      "opsPerSec": 7000
+    },
+    {
+      "subject": "apply",
+      "name": "applyRemote — 500 writes, new records",
+      "opsPerSec": 7082
+    },
+    {
+      "subject": "apply",
+      "name": "applyRemote — 100 sets on cached records",
+      "opsPerSec": 10437
+    },
+    {
+      "subject": "apply",
+      "name": "applyRemote — 100 incs on cached records",
+      "opsPerSec": 10299
+    },
+    {
+      "subject": "apply",
+      "name": "applyRemote — 100 adds on cached records",
+      "opsPerSec": 6861
+    },
+    {
+      "subject": "apply",
+      "name": "applyRemote — 100 writes, new records (chain: false)",
+      "opsPerSec": 7225
+    },
+    {
+      "subject": "apply",
+      "name": "applyRemote — 500 writes, new records (chain: false)",
+      "opsPerSec": 7273
+    },
+    {
+      "subject": "apply",
+      "name": "applyRemote — 100 sets on cached records (chain: false)",
+      "opsPerSec": 11214
+    },
+    {
+      "subject": "apply",
+      "name": "applyRemote — 100 incs on cached records (chain: false)",
+      "opsPerSec": 10533
+    },
+    {
+      "subject": "apply",
+      "name": "applyRemote — 100 adds on cached records (chain: false)",
+      "opsPerSec": 6969
     }
   ]
 }

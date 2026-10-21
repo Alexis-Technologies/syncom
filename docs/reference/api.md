@@ -40,10 +40,12 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 | `has(id)` | `Promise<boolean>` | `false` for a tombstone |
 | `list()` | `Promise<string[]>` | Every live id, sorted — from the catalog, no I/O |
 | `check(entity, data)` | `Promise<unknown>` | Runs the entity's validator as a write would and returns its value; rejects with `ValidationError`; writes nothing |
-| `migrate({ entities, batch, actor }?)` | `Promise<{ migrated, counters }>` | Rewrites records of an older schema version through the lens; idempotent; `actor` rides on the ops it writes (see [Reading across versions](../guide/storage#reading-across-versions)) |
+| `migrate({ entities, batch, actor }?)` | `Promise<{ migrated, counters, sets }>` | Rewrites records of an older schema version through the lens; idempotent; `actor` rides on the ops it writes (see [Reading across versions](../guide/storage#reading-across-versions)) |
 | `set(id, data, options?)` | `Promise<void>` | Replaces the record (a `write` op); keeps `$type` unless the data names the same. Every writer rejects an invalid id with `TypeError` `code: 'INVALID_ID'` |
-| `update(id, delta, { actor }?)` | `Promise<void>` | Sets the listed fields (a `set` op); throws if absent, or on a counter field |
-| `inc(id, key, value = 1, { actor }?)` | `Promise<void>` | Adds to a counter field (an `inc` op); throws on a register field |
+| `update(id, delta, { actor }?)` | `Promise<void>` | Sets the listed fields (a `set` op); throws if absent, or on a counter or set field |
+| `inc(id, key, value = 1, { actor }?)` | `Promise<void>` | Adds to a counter field (an `inc` op); throws on a register or set field |
+| `add(id, key, elements, { actor }?)` | `Promise<void>` | Adds JSON values to a set field (an `add` op); creates the field and the record when absent; throws on a register or counter field |
+| `remove(id, key, elements, { actor }?)` | `Promise<void>` | Removes from a set field the elements this node has seen added (a `remove` op; none seen: no op); throws on a register or counter field |
 | `swap(id, changes, prev, { actor }?)` | `Promise<boolean>` | CAS, compared inside the mutation queue — `false`, and no write, on mismatch; rejects when absent |
 | `repair(id)` | `Promise<{ ops, alive }>` | Rebuilds a record whose file fails its integrity check from the log's entries of it (see [Repair](../guide/storage#repair)); rejects with `code: 'UNRECOVERABLE'` when the log holds no whole-record op for it |
 | `delete(id, { actor }?)` | `Promise<void>` | Leaves a tombstone |
@@ -77,7 +79,7 @@ the operation (see [Hooks and events](../guide/hooks#events)):
 | --- | --- | --- |
 | `change` | `(op, via)` | Every op applied here; `via` is `null` for a local write, otherwise `{ url, node }` of the peer it came from (`url` null on the hosting side) |
 | `apply` | `({ via, peer, ops, applied, skipped, duplicates, gaps })` | A peer's batch is durable |
-| `error` | `(error)` with `error.code` and `error.op`, plus `error.rejected` (`OP_REFUSED`) or `error.entity` + `error.issues` (`OP_INVALID`) | A peer's op refused by the register/counter rule, skipped as invalid under this node's schema, skipped because this node cannot read the record's file (`OP_UNREADABLE`), or refused for a stamp beyond `sync.maxSkew` (`SKEW`) |
+| `error` | `(error)` with `error.code` and `error.op`, plus `error.rejected` (`OP_REFUSED`) or `error.entity` + `error.issues` (`OP_INVALID`) | A peer's op refused by the field-kind rule, skipped as invalid under this node's schema, skipped because this node cannot read the record's file (`OP_UNREADABLE`), or refused for a stamp beyond `sync.maxSkew` (`SKEW`) |
 | `conflict` | `({ kind: 'unique', entity, fields, id, other, op })` | A peer's op left a unique key shared by two records; both are kept |
 | `schema` | `({ kind: 'drift', peer, version, hash, local })` / `({ kind: 'ahead', op, held })` | A peer runs this schema version with another snapshot hash (see [Schemas](../guide/sync#schemas)) / a peer's op is from a newer version, applied or held |
 | `log` | `({ kind: 'roll', sealed, dropped, floor, segments })` | The log sealed a segment and maybe dropped old ones; `floor` is where a resume is still possible |
@@ -93,6 +95,7 @@ Extends `Emitter`. Emits `update` with `(data, delta)` — on a staged
 assignment, and when the record changes in storage (`null` data once deleted).
 
 `id`, `data()`, `delta()`, `save({ actor }?)`, `inc(key, value?, { actor }?)`,
+`add(key, elements, { actor }?)`, `remove(key, elements, { actor }?)`,
 `delete({ actor }?)`, plus a
 live property per field of the loaded object.
 
@@ -177,8 +180,8 @@ value is data or configuration. `HookError` and `ValidationError` are
 | `CLOSED` | any write or `applyRemote()` after `close()` | — |
 | `IN_HOOK` | a write issued from inside a write or apply hook (the `cause` of the `HookError` the operation rejects with) | — |
 | `NOT_FOUND` | `update()`, `swap()` on a record that is absent, deleted or purged | — |
-| `FIELD_KIND` | `update()`/`set()` on a counter field, `inc()` on a register field | `field`, `kind` (`'register'` or `'counter'`, what the field is) |
-| `ENCRYPTED` | `inc()` on an encrypted record; `{ encrypted: true }` on a replicated one | — |
+| `FIELD_KIND` | `update()`/`set()` on a counter or set field, `inc()` on a register or set field, `add()`/`remove()` on a register or counter field | `field`, `kind` (`'register'`, `'counter'` or `'set'`: what the field is) |
+| `ENCRYPTED` | `inc()`, `add()` or `remove()` on an encrypted record; `{ encrypted: true }` on a replicated one | — |
 | `INTEGRITY` | a read (`get()`, `has()`, a cursor) of a record whose file fails its chain block check, under `integrity: 'verify'` | `id` |
 | `CORRUPT` | `open()` when `node.json`, `schema.json` or `.blockchain.json` cannot be read | `cause` |
 | `DOWNGRADE` | `open()` with `ahead: 'hold'` and a schema version below the one the directory ran | — |

@@ -16,7 +16,7 @@ Fast, zero-dependency distributed data sync engine 🌐
 disk — or in the browser's origin-private filesystem — commits every write to
 a hash-linked log so tampering is detectable, and replicates every write to
 peers as an operation that converges without coordination: last-writer-wins
-registers, per-origin counters, tombstones. The transport is injected —
+registers, per-origin counters, observed-remove sets, tombstones. The transport is injected —
 [wrpc](https://wrpc.vercel.app) out of the box — and the package has no
 runtime dependencies.
 
@@ -78,8 +78,8 @@ that fails the build when exceeded.
 
 | Entry | raw | min | min+gzip | budget |
 | ----- | ---:| ---:| --------:| ------:|
-| main entry — browser (@alexify/syncom) | 254.8 KB | 105.5 KB | 36.6 KB | 37.0 KB |
-| main entry — node (@alexify/syncom) | 240.6 KB | 104.4 KB | 36.1 KB | — |
+| main entry — browser (@alexify/syncom) | 267.2 KB | 110.3 KB | 37.9 KB | 38.0 KB |
+| main entry — node (@alexify/syncom) | 252.4 KB | 109.3 KB | 37.5 KB | — |
 | wrpc adapter — browser (@alexify/syncom/wrpc) | 3.4 KB | 1.4 KB | 0.7 KB | 2.0 KB |
 | contracts — browser (@alexify/syncom/contracts) | 3.7 KB | 1.6 KB | 0.8 KB | 1.0 KB |
 | idb backend — browser (@alexify/syncom/idb) | 3.7 KB | 1.7 KB | 0.8 KB | 2.0 KB |
@@ -140,12 +140,12 @@ nodes converges.
 
 | Area | What you get |
 | --- | --- |
-| **Storage** | Records with live properties and per-record deltas, schema-driven collections, compare-and-swap writes, counters, encryption at rest (AES-256-GCM under an RSA-wrapped key), `purge()` for the right to be forgotten |
+| **Storage** | Records with live properties and per-record deltas, schema-driven collections, compare-and-swap writes, counters and sets, encryption at rest (AES-256-GCM under an RSA-wrapped key), `purge()` for the right to be forgotten |
 | **Schema** | A metaschema model, any Standard Schema (zod, valibot, arktype), ajv or a compiled JSON Schema validates every write before it is stamped — locally and again on the hub. Versions ride on ops; an older record reads through a lens (migrations, then the validator's aliases and defaults); `migrate()` rewrites it. See [Schema and validation](https://syncomjs.vercel.app/guide/schema) |
 | **Queries** | `select({ orgId, status: { $in } }).order('name').limit(20).fetch()` over an in-memory record catalog: indexed queries with no I/O, unique keys, `watch()` for live views. See [Queries](https://syncomjs.vercel.app/guide/query) |
 | **Backends** | node:fs, OPFS, IndexedDB (`@alexify/syncom/idb`) or memory — five functions injected at `open({ fsi })`; `durable: true` for fsync, one instance per directory. See [Backends](https://syncomjs.vercel.app/guide/backends) |
 | **Replication** | Every write is an op in a persisted log; peers exchange ops over an injected link, resume from where they stopped, and bootstrap from a streamed snapshot when they cannot; scopes for partial replication |
-| **Convergence** | Last-writer-wins registers, per-origin counters, tombstones with revival — any order, any number of times, same result |
+| **Convergence** | Last-writer-wins registers, per-origin counters, observed-remove sets, tombstones with revival — any order, any number of times, same result |
 | **Transport** | `@alexify/syncom/wrpc` adapts a `WrpcClient` — over a WebSocket, or a WebRTC `PeerLink`'s `remote` from `@alexify/wrpc/webrtc`; `storage.sync.unit()` is the router unit a wrpc server, or a browser's `PeerHost`, mounts. Reconnects, resumable subscriptions, binary streams and rooms come from wrpc. See [WebRTC](https://syncomjs.vercel.app/guide/webrtc) |
 | **Integrity** | Every write appends a hash-linked block (`chain: false` turns it off for a hub); reads re-verify the record against the block that committed it and throw on a mismatch; `repair(id)` rebuilds a record from the log |
 | **CRDT** | `diff` / `merge` / `apply` over plain objects — nested maps merge recursively, arrays are grow-only sets, numbers add so counters converge |

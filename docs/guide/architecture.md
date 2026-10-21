@@ -130,13 +130,15 @@ An op is applied by `applyOp` in `src/ops.js`, the same function on every node:
 - a **field** is a last-writer-wins register, ordered by `(ts, origin)`; `ts` comes from a clock
   that never falls behind a stamp the node has seen;
 - a **counter** is a sum per origin, so concurrent increments add up;
+- a **set** keeps, per element and origin, the newest add and the newest add a remove had
+  observed, so concurrent adds both keep and an add a remove did not see survives it;
 - a **delete** is a tombstone that a newer write revives; a **purge** wins at any stamp and
   scrubs the id from the log;
 - ops from one origin apply in sequence order; a duplicate or a gap is skipped, and resuming
   from the last event id fills the gap.
 
 Any order, any number of times, gives the same record. See
-[Registers and counters](/guide/sync#registers-and-counters).
+[Registers, counters and sets](/guide/sync#registers-counters-and-sets).
 
 ## On disk
 

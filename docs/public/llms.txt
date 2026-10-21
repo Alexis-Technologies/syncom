@@ -24,8 +24,9 @@
 - Every operational error is a `SyncomError` with a `code`
 - `Storage`, `Blockchain`, `SyncManager` and `OpLog` initialise asynchronously: `await new Blockchain(path)`
 - In the browser `calculateHash`, `encrypt` and `decrypt` return promises; in Node.js they are synchronous
-- Every write is an op: `write` (insert/set), `set` (update/swap/record.save), `inc` (counters), `delete` (tombstone).
-  A field is a last-writer-wins register OR a per-origin counter, never both — mixing throws
+- Every write is an op: `write` (insert/set), `set` (update/swap/record.save), `inc` (counters), `add`/`remove`
+  (observed-remove sets, read sorted by element text), `delete` (tombstone). A field is a last-writer-wins
+  register, a per-origin counter OR a set — one kind only; mixing throws
 - Replication: every node dials the nodes in its registry through `sync.connect(node)` and hosts
   `storage.sync.unit()`; ops relay hop by hop, de-duplicated by version vector; a peer that cannot be
   resumed bootstraps from a snapshot. wrpc is injected, never a dependency
