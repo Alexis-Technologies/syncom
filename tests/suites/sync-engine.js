@@ -259,7 +259,7 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     const global = await b.insert({ t: 3 });
     const fromA = await a.insert({ $type: 'Note', t: 4 });
     await waitUntil(async () => (await a.get(doc)) !== null && (await a.get(global)) !== null);
-    await waitUntil(async () => (await b.get(fromA)) === null || true);
+    // What must NOT arrive gets a moment to not arrive in.
     await new Promise((resolve) => setTimeout(resolve, 50));
     assert.deepStrictEqual(await a.get(doc), { $type: 'Doc', t: 1 });
     assert.deepStrictEqual(await a.get(global), { t: 3 });

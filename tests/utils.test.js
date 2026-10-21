@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const path = require('node:path');
 const fs = require('node:fs/promises');
-const { Emitter, generateUUID, between, fileExists, directoryExists } = require('../src/utils.js');
+const { Emitter, generateUUID, fileExists, directoryExists } = require('../src/utils.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const { runEmitterTests } = require('./suites/emitter.js');
 
@@ -16,13 +16,6 @@ test('generateUUID', () => {
   const id = generateUUID();
   assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
   assert.notStrictEqual(id, generateUUID());
-});
-
-test('between', () => {
-  assert.strictEqual(between('ws://peer.example.com:9000', '://', ':'), 'peer.example.com');
-  assert.strictEqual(between('abc', 'a'), 'bc');
-  assert.strictEqual(between('abc', 'z'), '');
-  assert.strictEqual(between('abc', 'a', 'z'), '');
 });
 
 test('fileExists and directoryExists', async (t) => {

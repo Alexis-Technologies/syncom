@@ -15,10 +15,10 @@ const { checkFsi, withSync } = require('./backend.js');
 const { acquireLock } = require('./lock.js');
 const { Catalog } = require('./catalog.js');
 const { createTelemetry, traced, now } = require('./telemetry.js');
+const { GLOBAL_SCOPE, inScope } = require('./scope.js');
 
 const NODE_FILE = 'node.json';
 const SCHEMA_FILE = 'schema.json';
-const GLOBAL_SCOPE = '*';
 const DEFAULT_CACHE = 5000;
 const DEFAULT_FLUSH_EVERY = 64;
 
@@ -51,6 +51,37 @@ const upperBound = (sorted, value) => {
   }
   return low;
 };
+
+// `open({ lock })`: `'fail'` (the default), `'wait'`, `false`, or an object
+// `{ mode, staleAfter, poll, timeout }` for the lockfile's knobs. `null`
+// here means no lock at all.
+const normalizeLock = (lock) => {
+  if (lock === false) return null;
+  if (lock === undefined || lock === 'fail' || lock === 'wait') return { mode: lock ?? 'fail' };
+  if (!isPlainObject(lock)) throw new TypeError("open({ lock }): lock must be 'fail', 'wait', false or an object");
+  const { mode = 'fail', ...rest } = lock;
+  if (mode !== 'fail' && mode !== 'wait') throw new TypeError("open({ lock }): lock.mode must be 'fail' or 'wait'");
+  const options = { mode };
+  for (const key of ['staleAfter', 'poll', 'timeout']) {
+    const value = rest[key];
+    if (value === undefined) continue;
+    if (typeof value !== 'number' || !(value > 0)) {
+      throw new TypeError(`open({ lock }): lock.${key} must be a positive number`);
+    }
+    options[key] = value;
+  }
+  for (const key of Object.keys(rest)) {
+    if (!['staleAfter', 'poll', 'timeout'].includes(key)) throw new TypeError(`open({ lock }): unknown key '${key}'`);
+  }
+  return options;
+};
+
+// A service file this storage wrote itself and cannot read any more.
+const corrupt = (file, cause) =>
+  Object.assign(new Error(`${file} is unreadable (${cause?.message ?? cause}); restore it or remove the directory`), {
+    code: 'CORRUPT',
+    cause,
+  });
 
 // A record id is a file name on three platforms, a key in every peer's
 // catalog and a line in every peer's log: letters, digits, `.`, `_`, `-`,
@@ -332,6 +363,7 @@ class Storage extends Emitter {
   #flushEvery = DEFAULT_FLUSH_EVERY;
   #fsi;
   #lock = null;
+  #lockOptions = null;
   #schema = null;
   #entities = null;
   #version = null;
@@ -365,7 +397,10 @@ class Storage extends Emitter {
   }
 
   constructor(options = {}) {
-    super();
+    super({ maxListeners: options.maxListeners });
+    if (options.maxListeners !== undefined && !(Number.isInteger(options.maxListeners) && options.maxListeners > 0)) {
+      throw new TypeError('open({ maxListeners }): maxListeners must be a positive integer');
+    }
     this.#options = options;
     this.#getId = Storage.generateId;
     this.#path = options.path || options.name || 'syncom';
@@ -384,9 +419,7 @@ class Storage extends Emitter {
     // adapter's fsync, where it has one.
     const fsi = checkFsi(options.fsi === undefined ? defaultFsi : options.fsi, 'open({ fsi })');
     this.#fsi = fsi;
-    if (options.lock !== undefined && options.lock !== false && options.lock !== 'fail' && options.lock !== 'wait') {
-      throw new TypeError("open({ lock }): lock must be 'fail', 'wait' or false");
-    }
+    this.#lockOptions = normalizeLock(options.lock);
     if (options.durable === true) {
       if (typeof fsi.sync === 'function') this.#fsi = withSync(fsi);
       else this.#logger.debug({ event: 'durable.noop' });
@@ -471,10 +504,10 @@ class Storage extends Emitter {
   async #init() {
     // One instance per directory, first: a second one would mint the seqs
     // this one is about to. `lock: false` is for a caller that coordinates.
-    const { lock = 'fail' } = this.#options;
-    if (lock !== false) {
+    const lock = this.#lockOptions;
+    if (lock !== null) {
       const started = this.#otel.enabled ? now() : 0;
-      this.#lock = await acquireLock({ fsi: this.#fsi, path: this.#path, mode: lock });
+      this.#lock = await acquireLock({ fsi: this.#fsi, path: this.#path, ...lock });
       if (started) this.#otel.recordLockWait(now() - started);
     }
     try {
@@ -511,7 +544,8 @@ class Storage extends Emitter {
     await this.#loadCatalog();
     await this.#replayTail();
     await this.#replayHeld();
-    this.#sync = await new SyncManager(this, this.#options.sync);
+    const syncOptions = this.#options.sync ?? {};
+    this.#sync = await new SyncManager(this, { ...syncOptions, maxListeners: this.#options.maxListeners });
     this.#initCollections();
     // What the observable gauges sample, when a meter was given.
     this.#otel.gauges(() => ({
@@ -632,7 +666,12 @@ class Storage extends Emitter {
     const hash = this.#schemaHash;
     let stored = null;
     if (await this.#fsi.exists(this.#path, SCHEMA_FILE)) {
-      const raw = JSON.parse(await this.#fsi.read(this.#path, SCHEMA_FILE));
+      let raw;
+      try {
+        raw = JSON.parse(await this.#fsi.read(this.#path, SCHEMA_FILE));
+      } catch (error) {
+        throw corrupt(SCHEMA_FILE, error);
+      }
       if (isPlainObject(raw) && Number.isInteger(raw.version)) {
         stored = { version: raw.version, hash: typeof raw.hash === 'string' ? raw.hash : null, migrated: raw.migrated };
       }
@@ -752,8 +791,14 @@ class Storage extends Emitter {
   // a seq is durable the moment its op is appended, before anyone hears of it.
   async #loadIdentity() {
     if (await this.#fsi.exists(this.#path, NODE_FILE)) {
-      const raw = await this.#fsi.read(this.#path, NODE_FILE);
-      this.#nodeId = JSON.parse(raw).id;
+      let id;
+      try {
+        ({ id } = JSON.parse(await this.#fsi.read(this.#path, NODE_FILE)));
+      } catch (error) {
+        throw corrupt(NODE_FILE, error);
+      }
+      if (!isStreamName(id)) throw corrupt(NODE_FILE, 'no node id in it');
+      this.#nodeId = id;
     } else {
       this.#nodeId = generateUUID();
       await this.#fsi.write(this.#path, NODE_FILE, JSON.stringify({ id: this.#nodeId }));
@@ -924,7 +969,7 @@ class Storage extends Emitter {
         latestTs: log.latestTs,
       },
       chain: this.#chain ? { tail: this.#chain.tailHash } : null,
-      lock: this.#lock ? { mode: this.#options.lock ?? 'fail' } : null,
+      lock: this.#lock ? { mode: this.#lockOptions.mode } : null,
     };
   }
 
@@ -1521,8 +1566,8 @@ class Storage extends Emitter {
             for (const key of Object.keys(op.vector)) {
               const seq = op.vector[key];
               const scope = keyScope(key);
-              const inScope = scope === null || !scopes || scopes.includes('*') || scopes.includes(scope);
-              if (inScope && key !== '__proto__' && Number.isSafeInteger(seq) && (vector[key] ?? 0) < seq) {
+              const taken = scope === null || inScope(scope, scopes);
+              if (taken && key !== '__proto__' && Number.isSafeInteger(seq) && (vector[key] ?? 0) < seq) {
                 vector[key] = seq;
                 (adopted ??= {})[key] = seq;
               }
@@ -1703,8 +1748,7 @@ class Storage extends Emitter {
         continue;
       }
       if (!entry || entry.encrypted) continue;
-      const scope = this.#scope(id, entry.data);
-      if (scopes && scope !== GLOBAL_SCOPE && !scopes.includes(GLOBAL_SCOPE) && !scopes.includes(scope)) continue;
+      if (!inScope(this.#scope(id, entry.data), scopes)) continue;
       records.push({ id, data: entry.data, meta: entry.meta });
       if (records.length >= limit) {
         return { records, cursor: last, eventId: this.#log.lastEventId, vector: this.#log.vector };

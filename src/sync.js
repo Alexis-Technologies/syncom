@@ -27,10 +27,10 @@ const { vectorHas, vectorAdvance, vectorMax, opKey, keyScope } = require('./vect
 const { isSyncLink } = require('./link.js');
 const { createTelemetry, traced } = require('./telemetry.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
+const { GLOBAL_SCOPE, inScope: scopeIn } = require('./scope.js');
 
 const REMOTE = 'remote';
 const PROTOCOL = 1;
-const GLOBAL_SCOPE = '*';
 const DEFAULT_PAGE_SIZE = 500;
 const DEFAULT_PAGE_BYTES = 4 << 20;
 // A page that fails this many times in a row leaves its peer `stuck`.
@@ -97,10 +97,7 @@ const scopedVector = (vector, scopes) => {
   return out;
 };
 
-const inScope = (op, scopes) => {
-  const scope = op.scope ?? GLOBAL_SCOPE;
-  return !scopes || scope === GLOBAL_SCOPE || scopes.includes(GLOBAL_SCOPE) || scopes.includes(scope);
-};
+const inScope = (op, scopes) => scopeIn(op.scope ?? GLOBAL_SCOPE, scopes);
 
 // The scopes a read may cover: what hello granted, narrowed to what the
 // call asks for. A peer granted `'*'` reads what it asks (nothing asked:
@@ -155,7 +152,7 @@ class SyncManager extends Emitter {
   #maxOutbox = DEFAULT_MAX_OUTBOX;
 
   constructor(storage, options = {}) {
-    super();
+    super({ maxListeners: options?.maxListeners });
     this.#storage = storage;
     this.#options = options ?? {};
     this.#hooks = normalizeHooks(this.#options.hooks, SYNC_HOOKS, 'SyncManager');
@@ -179,8 +176,15 @@ class SyncManager extends Emitter {
     const files = await this.#fsi.list(this.#path);
     for (const file of files) {
       if (!file.endsWith('.json')) continue;
-      const raw = await this.#fsi.read(this.#path, file);
-      const node = JSON.parse(raw);
+      // A registry file is rewritten on every page received; one torn by a
+      // crash is reported and skipped, not fatal to the open.
+      let node = null;
+      try {
+        node = JSON.parse(await this.#fsi.read(this.#path, file));
+      } catch (error) {
+        this.#storage.logger.warn({ event: 'sync.node.unreadable', file, err: error });
+        continue;
+      }
       if (node && typeof node.url === 'string') this.#nodes.set(node.url, node);
     }
     // One listener for both halves: the dialing side's fan-out to its
@@ -1042,6 +1046,9 @@ class SyncManager extends Emitter {
               return;
             }
             if (entries.length === 0) {
+              // The cursor stays: `lastEventId` can be ahead of the entries
+              // while an append is in flight, and a feed that jumped there
+              // would never deliver that batch.
               await waitFor(wakers, signal);
               continue;
             }

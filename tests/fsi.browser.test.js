@@ -40,7 +40,9 @@ test('fsi.browser module (OPFS mock)', async (t) => {
     t2.after(() => {
       storage.getDirectory = getDirectory;
     });
-    await assert.rejects(() => fsi.exists('narrow/dir', 'a.txt'), { name: 'NotAllowedError' });
-    await assert.rejects(() => fsi.remove('narrow/dir', 'a.txt'), { name: 'InvalidModificationError' });
+    // A directory not seen before: resolved through the denied root (a cached
+    // handle would still answer for `narrow/dir`).
+    await assert.rejects(() => fsi.exists('denied/dir', 'a.txt'), { name: 'NotAllowedError' });
+    await assert.rejects(() => fsi.remove('denied/dir', 'a.txt'), { name: 'InvalidModificationError' });
   });
 });

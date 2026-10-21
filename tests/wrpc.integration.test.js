@@ -11,11 +11,13 @@ const { createWrpcLink } = require('../wrpc.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const { settle, waitUntil } = require('./utils/mesh.js');
 
+// Skip only when the module is not there; a broken one is a failure to see.
 const optional = (name) => {
   try {
     return require(name);
-  } catch {
-    return null;
+  } catch (error) {
+    if (error?.code === 'MODULE_NOT_FOUND') return null;
+    throw error;
   }
 };
 

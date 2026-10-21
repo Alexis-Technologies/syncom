@@ -370,3 +370,19 @@ test('a new epoch is said out loud when a log was there', async () => {
     await cleanupTemp(dir);
   }
 });
+
+test('latestTs rides in the index: a reopen with everything sealed still knows the newest stamp', async () => {
+  const dir = await createTemp();
+  try {
+    const ahead = Date.now() + 3_600_000;
+    const log = await new OpLog(dir, { rollAfter: 1 });
+    await log.append([{ origin: 'A', seq: 1, ts: ahead, type: 'write', id: 'r', data: {} }]);
+    await log.close();
+    const index = JSON.parse(await fs.readFile(path.join(dir, 'log', 'index.json'), 'utf8'));
+    assert.strictEqual(index.latestTs, ahead);
+    const reopened = await new OpLog(dir, { rollAfter: 1 });
+    assert.strictEqual(reopened.latestTs, ahead);
+  } finally {
+    await cleanupTemp(dir);
+  }
+});

@@ -643,3 +643,22 @@ test('a live Record is the same instance while held, and a new one after delete'
   assert.notStrictEqual(a, c);
   assert.strictEqual(c.n, 2);
 });
+
+test('maxListeners: a hundred by default, tunable, enforced on the storage and its sync manager', async (t) => {
+  const tempDir = await createTemp();
+  t.after(() => cleanupTemp(tempDir));
+  const storage = await syncom.open({ path: tempDir, logger: false });
+  t.after(() => storage.close());
+  // The sync manager holds one `change` listener of its own.
+  for (let i = 0; i < 99; i++) storage.on('change', () => i);
+  assert.throws(() => storage.on('change', () => 100), /MaxListenersExceededWarning/);
+  const tight = await syncom.open({ path: `${tempDir}-tight`, logger: false, lock: false, maxListeners: 2 });
+  t.after(() => tight.close());
+  t.after(() => cleanupTemp(`${tempDir}-tight`));
+  tight.on('change', () => 1);
+  assert.throws(() => tight.on('change', () => 2), /MaxListenersExceededWarning/);
+  tight.sync.on('peer', () => 1);
+  tight.sync.on('peer', () => 2);
+  assert.throws(() => tight.sync.on('peer', () => 3), /MaxListenersExceededWarning/);
+  assert.throws(() => syncom.open({ path: tempDir, logger: false, lock: false, maxListeners: 0 }), TypeError);
+});

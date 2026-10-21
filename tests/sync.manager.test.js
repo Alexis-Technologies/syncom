@@ -234,3 +234,24 @@ test('SyncManager: events are contained', async (t) => {
     assert.ok(names.has('peer') && names.has('sync'), `logged: ${[...names].join(', ')}`);
   });
 });
+
+test('a torn registry file is reported and skipped, not fatal to the open', async (t) => {
+  const fs = require('node:fs/promises');
+  const path = require('node:path');
+  const dir = await createTemp();
+  t.after(() => cleanupTemp(dir));
+  const warnings = [];
+  const logger = { warn: (entry) => warnings.push(entry), debug() {}, info() {}, error() {} };
+  const first = await syncom.open({ path: dir, logger });
+  await first.sync.addNode({ url: 'mem://a' });
+  await first.sync.addNode({ url: 'mem://b' });
+  await first.close();
+  await fs.writeFile(path.join(dir, 'remote', `${encodeURIComponent('mem://a')}.json`), '{torn');
+  const second = await syncom.open({ path: dir, logger });
+  t.after(() => second.close());
+  assert.deepStrictEqual(
+    second.sync.listNodes().map((node) => node.url),
+    ['mem://b'],
+  );
+  assert.ok(warnings.some((entry) => entry.event === 'sync.node.unreadable'));
+});

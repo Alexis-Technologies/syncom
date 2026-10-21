@@ -10,8 +10,8 @@
 const LOCK_FILE = 'lock.json';
 const DEFAULT_STALE = 30 * 60 * 1000;
 
-const locked = (path) =>
-  Object.assign(new Error(`Storage at ${path} is locked by another instance`), { code: 'LOCKED' });
+const locked = (path, why = 'is locked by another instance') =>
+  Object.assign(new Error(`Storage at ${path} ${why}`), { code: 'LOCKED' });
 
 const random = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
 
@@ -36,15 +36,20 @@ const stale = (lock, staleAfter) => {
   return typeof lock.since !== 'number' || Date.now() - lock.since > staleAfter;
 };
 
-const readLock = async (fsi, path) => {
-  if (!(await fsi.exists(path, LOCK_FILE))) return null;
+// The lockfile's text, or null when there is none.
+const readRaw = async (fsi, path) => ((await fsi.exists(path, LOCK_FILE)) ? fsi.read(path, LOCK_FILE) : null);
+
+const parseLock = (raw) => {
+  if (raw === null) return null;
   try {
-    const lock = JSON.parse(await fsi.read(path, LOCK_FILE));
+    const lock = JSON.parse(raw);
     return typeof lock === 'object' && lock !== null ? lock : null;
   } catch {
     return null;
   }
 };
+
+const readLock = async (fsi, path) => parseLock(await readRaw(fsi, path));
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -69,9 +74,12 @@ const webLock = (locks, name, mode) =>
 /**
  * Holds `path` for this instance: `{ release() }`. `mode` is `'fail'` (an
  * `Error` with `code: 'LOCKED'` when another instance holds it) or `'wait'`
- * (poll until it is free or stale).
+ * (poll until it is free or stale — or `timeout` ms have passed, then
+ * `LOCKED` too). A backend with `create` (exclusive) makes two openers racing
+ * for a free lock lose deterministically; without it the last write wins and
+ * the other reads it back and tries again.
  */
-const acquireLock = async ({ fsi, path, mode, staleAfter = DEFAULT_STALE, poll = 100 }) => {
+const acquireLock = async ({ fsi, path, mode, staleAfter = DEFAULT_STALE, poll = 100, timeout = Infinity }) => {
   // Web Locks only where a lock outlives nothing but the tab: Node has a
   // `navigator.locks` too, scoped to one process, which is not what two
   // processes over one directory need.
@@ -84,24 +92,41 @@ const acquireLock = async ({ fsi, path, mode, staleAfter = DEFAULT_STALE, poll =
   }
   const id = random();
   const pid = globalThis.process?.pid ?? null;
+  const exclusive = typeof fsi.create === 'function';
+  const deadline = Number.isFinite(timeout) ? Date.now() + timeout : Infinity;
+  const holder = {
+    release: async () => {
+      const now = await readLock(fsi, path);
+      if (now?.id === id) await fsi.remove(path, LOCK_FILE);
+    },
+  };
   for (;;) {
-    const current = await readLock(fsi, path);
+    const raw = await readRaw(fsi, path);
+    const current = parseLock(raw);
     if (current === null || stale(current, staleAfter)) {
-      await fsi.write(path, LOCK_FILE, JSON.stringify({ pid, id, since: Date.now() }));
-      // Two openers racing for a stale lock: the one whose write landed last
-      // owns it, the other tries again.
-      const written = await readLock(fsi, path);
-      if (written?.id === id) {
-        return {
-          release: async () => {
-            const now = await readLock(fsi, path);
-            if (now?.id === id) await fsi.remove(path, LOCK_FILE);
-          },
-        };
+      const body = JSON.stringify({ pid, id, since: Date.now() });
+      if (exclusive) {
+        // A stale or unreadable file is removed first — if it is still the
+        // same file: another opener may have taken the lock meanwhile, and
+        // theirs is not ours to remove. Then only one creator succeeds.
+        if (raw !== null && (await readRaw(fsi, path)) === raw) await fsi.remove(path, LOCK_FILE);
+        try {
+          await fsi.create(path, LOCK_FILE, body);
+          return holder;
+        } catch (error) {
+          if (error?.code !== 'EEXIST') throw error;
+        }
+      } else {
+        await fsi.write(path, LOCK_FILE, body);
+        // Two openers racing for a free lock: the one whose write landed
+        // last owns it, the other reads that back and tries again.
+        const written = await readLock(fsi, path);
+        if (written?.id === id) return holder;
       }
     } else if (mode === 'fail') {
       throw locked(path);
     }
+    if (Date.now() >= deadline) throw locked(path, `is still locked after ${timeout} ms`);
     await sleep(poll);
   }
 };

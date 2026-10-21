@@ -467,3 +467,17 @@ expectType<Promise<syncom.SyncOp>>(storage.toPromise('change'));
 expectType<Promise<string>>(storage.sync.toPromise('error').then((error) => error.url));
 storage.clear('change');
 storage.sync.clear();
+
+// E7a: lock knobs, the listener cap, exclusive create
+expectAssignable<StorageOptions>({ lock: { mode: 'wait', timeout: 5000, poll: 50, staleAfter: 60_000 } });
+expectError(syncom.open({ lock: { mode: 'maybe' } }));
+expectAssignable<StorageOptions>({ maxListeners: 20 });
+expectError(syncom.open({ maxListeners: 'many' }));
+expectAssignable<Fsi>({
+  read: async () => '',
+  write: async () => {},
+  exists: async () => true,
+  remove: async () => {},
+  list: async () => [],
+  create: async (_dir: string, _file: string, _content: string) => {},
+});

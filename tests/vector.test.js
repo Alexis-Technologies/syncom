@@ -18,11 +18,8 @@ test('vector module', async (t) => {
     assert.deepStrictEqual(vector.maxClock(null, [1, 'b']), [1, 'b']);
   });
 
-  await t.test('vectorMax, vectorDominates and vectorHas', () => {
+  await t.test('vectorMax and vectorHas', () => {
     assert.deepStrictEqual(vector.vectorMax({ a: 2, b: 1 }, { a: 1, c: 3 }), { a: 2, b: 1, c: 3 });
-    assert.strictEqual(vector.vectorDominates({ a: 2, b: 1 }, { a: 2 }), true);
-    assert.strictEqual(vector.vectorDominates({ a: 1 }, { a: 2 }), false);
-    assert.strictEqual(vector.vectorDominates({}, {}), true);
     assert.strictEqual(vector.vectorHas({ a: 3 }, { origin: 'a', seq: 3 }), true);
     assert.strictEqual(vector.vectorHas({ a: 3 }, { origin: 'a', seq: 4 }), false);
     assert.strictEqual(vector.vectorHas({}, { origin: 'a', seq: 1 }), false);

@@ -274,6 +274,24 @@ section until the first publish; everything below lands there on release day.
 
 ### Fixed
 
+- **The debt that had no decision attached.** The `Emitter`, the logger
+  and `loadKeys` lived twice (once per platform half); they are
+  `src/emitter.js`, `src/logger.js` and `src/keys.js` now, shared, and
+  "in scope" is defined once in `src/scope.js`. The directory lock uses an
+  exclusive create where the backend has one (`fsi.create`, on `node:fs`
+  and the memory backend), so openers racing for a free lock lose
+  deterministically; `open({ lock })` takes an object (`mode`, `staleAfter`,
+  `poll`, `timeout` — a `'wait'` that gives up). `open({ maxListeners })`
+  tunes the listener cap, a hundred by default (ten threw at the eleventh
+  `change` listener). `$regex` is capped at 1000 characters and
+  `projection(['__proto__'])` refused. A torn registry file is reported and
+  skipped at open; a torn `node.json`, `schema.json` or `.blockchain.json`
+  rejects with `code: 'CORRUPT'` and the file's name. The OPFS backend keeps
+  its directory handles, the browser crypto its imported keys; the log's
+  `latestTs` rides in the index, its open builds the dedup set once.
+  `examples/` is linted and closes its
+  storage; the wrpc integration test skips only on `MODULE_NOT_FOUND`.
+  Removed: `between`, `vectorDominates` (no callers).
 - **Docs, types and comments that had drifted from the code.** The API
   reference named two subpaths (there are three; `createIdbFsi` now has a
   line), `migrate()` without its `actor`, `fetch()` returning ids (rows),

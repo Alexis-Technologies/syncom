@@ -39,6 +39,8 @@ export interface Fsi {
   list(dir: string): Promise<string[]>;
   /** fsync, where the backend has one; what `open({ durable: true })` calls after every write. */
   sync?(dir: string, filename: string): Promise<void>;
+  /** Exclusive create — rejects with `code: 'EEXIST'` when the file is there; what the directory lock uses when present. */
+  create?(dir: string, filename: string, content: string): Promise<void>;
 }
 
 /** Whether `value` has the five functions of the backend contract. */
@@ -553,6 +555,17 @@ export interface PeerRef {
   node: string | null;
 }
 
+/** The lockfile's knobs: `open({ lock: { mode, staleAfter, poll, timeout } })`. */
+export interface LockOptions {
+  mode?: 'fail' | 'wait';
+  /** A lockfile whose process cannot be checked is stale after this many ms (default 30 minutes). */
+  staleAfter?: number;
+  /** How often `'wait'` looks again, in ms (default 100). */
+  poll?: number;
+  /** How long `'wait'` waits before `LOCKED`, in ms (default forever). */
+  timeout?: number;
+}
+
 /** What `storage.stats()` answers — every number from memory, no I/O. */
 export interface StorageStats {
   closed: boolean;
@@ -635,7 +648,9 @@ export interface StorageOptions<S extends Schema = Schema> {
    * leaves the coordination to the caller. Web Locks in the browser, a
    * `lock.json` with the pid otherwise (stale when its process is gone).
    */
-  lock?: 'fail' | 'wait' | false;
+  lock?: 'fail' | 'wait' | false | LockOptions;
+  /** The listener cap of the storage and its sync manager (default 100); exceeding it throws. */
+  maxListeners?: number;
   /** The in-memory entry cache: the last `max` records read or written (default 5000); a live Record pins its own. */
   cache?: { max?: number };
   /** `'verify'` (default) re-checks a record against its chain block on a cold read; `'lazy'` trusts the file. */

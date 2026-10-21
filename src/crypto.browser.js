@@ -1,6 +1,7 @@
 'use strict';
 
 const defaultFsi = require('./fsi.browser.js');
+const { loadKeyPair } = require('./keys.js');
 
 const PUBLIC_KEY_HEADER = '-----BEGIN PUBLIC KEY-----';
 const PUBLIC_KEY_FOOTER = '-----END PUBLIC KEY-----';
@@ -67,15 +68,25 @@ const generateKeys = async () => {
   };
 };
 
-const importPublicKey = async (pemKey) => {
-  const bytes = fromBase64(cleanPemKey(pemKey, PUBLIC_KEY_HEADER, PUBLIC_KEY_FOOTER));
-  return crypto.subtle.importKey('spki', bytes, RSA, false, ['encrypt']);
+// A storage uses one pair for its whole life; importing the PEM on every
+// encrypt and decrypt was the cost of every sealed record. A few imported
+// keys are kept, by their PEM text.
+const imported = new Map();
+const MAX_IMPORTED = 8;
+
+const importKey = (pemKey, header, footer, format, usage) => {
+  const cached = imported.get(pemKey);
+  if (cached !== undefined) return cached;
+  const bytes = fromBase64(cleanPemKey(pemKey, header, footer));
+  const key = crypto.subtle.importKey(format, bytes, RSA, false, [usage]);
+  if (imported.size >= MAX_IMPORTED) imported.delete(imported.keys().next().value);
+  imported.set(pemKey, key);
+  key.catch(() => imported.delete(pemKey));
+  return key;
 };
 
-const importPrivateKey = async (pemKey) => {
-  const bytes = fromBase64(cleanPemKey(pemKey, PRIVATE_KEY_HEADER, PRIVATE_KEY_FOOTER));
-  return crypto.subtle.importKey('pkcs8', bytes, RSA, false, ['decrypt']);
-};
+const importPublicKey = (pemKey) => importKey(pemKey, PUBLIC_KEY_HEADER, PUBLIC_KEY_FOOTER, 'spki', 'encrypt');
+const importPrivateKey = (pemKey) => importKey(pemKey, PRIVATE_KEY_HEADER, PRIVATE_KEY_FOOTER, 'pkcs8', 'decrypt');
 
 const encrypt = async (data, publicKey) => {
   const rsa = await importPublicKey(publicKey);
@@ -114,29 +125,6 @@ const decrypt = async (text, privateKey) => {
   return JSON.parse(new TextDecoder().decode(plain));
 };
 
-// Half a pair is refused, not replaced — the same rule as the node half.
-const incomplete = (basePath, hasPublic) => {
-  const missing = hasPublic ? 'private' : 'public';
-  const error = new Error(`Key pair at ${basePath} is incomplete: ${missing}.pem is missing`);
-  error.code = 'KEYS_INCOMPLETE';
-  return error;
-};
-
-const loadKeys = async (basePath = 'keys', { fsi = defaultFsi } = {}) => {
-  let publicKey, privateKey;
-  const hasPublic = await fsi.exists(basePath, 'public.pem');
-  const hasPrivate = await fsi.exists(basePath, 'private.pem');
-  if (hasPublic !== hasPrivate) throw incomplete(basePath, hasPublic);
-  if (hasPublic) {
-    publicKey = await fsi.read(basePath, 'public.pem');
-    privateKey = await fsi.read(basePath, 'private.pem');
-  } else {
-    const keys = await generateKeys();
-    ({ publicKey, privateKey } = keys);
-    await fsi.write(basePath, 'public.pem', publicKey);
-    await fsi.write(basePath, 'private.pem', privateKey, { mode: 0o600 });
-  }
-  return { publicKey, privateKey };
-};
+const loadKeys = async (basePath = 'keys', { fsi = defaultFsi } = {}) => loadKeyPair(basePath, fsi, generateKeys);
 
 module.exports = { calculateHash, generateKeys, encrypt, decrypt, loadKeys };

@@ -2,6 +2,7 @@
 
 const crypto = require('node:crypto');
 const defaultFsi = require('./fsi.js');
+const { loadKeyPair } = require('./keys.js');
 
 const calculateHash = (data) => {
   const block = JSON.stringify(data);
@@ -56,33 +57,6 @@ const decrypt = (text, privateKey) => {
   return JSON.parse(plain.toString());
 };
 
-// Half a pair is refused, not replaced: without private.pem every sealed
-// record is already unreadable, without public.pem the next one would be,
-// and a fresh pair would hide both behind records that decrypt to garbage.
-const incomplete = (basePath, hasPublic) => {
-  const missing = hasPublic ? 'private' : 'public';
-  const error = new Error(`Key pair at ${basePath} is incomplete: ${missing}.pem is missing`);
-  error.code = 'KEYS_INCOMPLETE';
-  return error;
-};
-
-const loadKeys = async (basePath, { fsi = defaultFsi } = {}) => {
-  let publicKey, privateKey;
-  const hasPublic = await fsi.exists(basePath, 'public.pem');
-  const hasPrivate = await fsi.exists(basePath, 'private.pem');
-  if (hasPublic !== hasPrivate) throw incomplete(basePath, hasPublic);
-  if (hasPublic) {
-    publicKey = await fsi.read(basePath, 'public.pem');
-    privateKey = await fsi.read(basePath, 'private.pem');
-  } else {
-    const keys = await generateKeys();
-    await fsi.write(basePath, 'public.pem', keys.publicKey);
-    // Owner-only where the backend has permissions; a hint elsewhere.
-    await fsi.write(basePath, 'private.pem', keys.privateKey, { mode: 0o600 });
-    publicKey = keys.publicKey;
-    privateKey = keys.privateKey;
-  }
-  return { publicKey, privateKey };
-};
+const loadKeys = async (basePath, { fsi = defaultFsi } = {}) => loadKeyPair(basePath, fsi, generateKeys);
 
 module.exports = { calculateHash, generateKeys, encrypt, decrypt, loadKeys };

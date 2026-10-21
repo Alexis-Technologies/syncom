@@ -29,14 +29,6 @@ const vectorMax = (a = {}, b = {}) => {
   return result;
 };
 
-// True when `a` has seen everything `b` has.
-const vectorDominates = (a = {}, b = {}) => {
-  for (const origin in b) {
-    if (!((a[origin] ?? 0) >= b[origin])) return false;
-  }
-  return true;
-};
-
 // Sequence numbers run per ORIGIN AND SCOPE, so a peer that syncs one scope
 // still sees every seq of that scope in order — a global counter would show
 // it holes wherever an op of another scope sat. The vector key spells that
@@ -105,7 +97,6 @@ module.exports = {
   compareClock,
   maxClock,
   vectorMax,
-  vectorDominates,
   vectorKey,
   opKey,
   keyScope,

@@ -30,6 +30,17 @@ const write = async (dir, filename, content, options) => {
   }
 };
 
+// Exclusive: the file must not exist, or the write fails with EEXIST. What
+// the directory lock uses to make two openers racing for a free lock lose
+// deterministically — the optional sixth function of the contract.
+const create = async (dir, filename, content) => {
+  if (!known.has(dir)) {
+    await fs.mkdir(dir, { recursive: true });
+    known.add(dir);
+  }
+  await fs.writeFile(path.join(dir, filename), content, { flag: 'wx' });
+};
+
 const exists = (dir, filename) => fileExists(path.join(dir, filename));
 
 const remove = async (dir, filename) => {
@@ -61,4 +72,4 @@ const sync = async (dir, filename) => {
   }
 };
 
-module.exports = { read, write, exists, remove, list, sync };
+module.exports = { read, write, exists, remove, list, sync, create };

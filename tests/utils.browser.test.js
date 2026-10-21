@@ -30,12 +30,6 @@ test('utils.browser module', async (t) => {
     assert.notStrictEqual(id, utils.generateUUID());
   });
 
-  await t.test('between matches the node half', () => {
-    assert.strictEqual(utils.between('ws://peer.example.com:9000', '://', ':'), 'peer.example.com');
-    assert.strictEqual(utils.between('abc', 'z'), '');
-    assert.strictEqual(utils.between('abc', 'a', 'z'), '');
-  });
-
   await t.test('no filesystem predicates are exported', () => {
     assert.strictEqual(utils.fileExists, undefined);
     assert.strictEqual(utils.directoryExists, undefined);

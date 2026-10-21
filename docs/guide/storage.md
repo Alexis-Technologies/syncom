@@ -144,7 +144,11 @@ mint the next sequence number — the same number for two different ops, which
 every peer drops as a duplicate. So `open()` holds the directory: through the
 Web Locks API in the browser (released when the tab dies), through
 `<path>/lock.json` with the process id elsewhere (stale once that process is
-gone, or after 30 minutes when there is no way to tell).
+gone, or after 30 minutes when there is no way to tell). On a backend with
+`create` (exclusive create — `node:fs` and the memory backend have it) two
+openers racing for a free lock lose deterministically. The knobs are an
+object: `lock: { mode: 'wait', timeout: 5000, poll: 50, staleAfter: 60_000 }`
+— `timeout` turns a `'wait'` that never ends into `LOCKED`.
 
 ```js
 const a = await open({ path: 'data' });

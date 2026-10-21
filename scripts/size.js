@@ -60,8 +60,10 @@ const ENTRIES = [
   // operator's signals (snapshot/scrub/rebuild spans, hook and lock
   // histograms, refusal counts, five observable gauges, identity scrubbing)
   // the raise to 32 KB; introspection (stats, hosted feeds, lastError, the
-  // log event, via as a descriptor) the raise to 32.5 KB.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 32.5 },
+  // log event, via as a descriptor) the raise to 32.5 KB; the lock knobs and
+  // its exclusive create, the OPFS handle and key caches, the CORRUPT codes
+  // and the query guards the raise to 33.5 KB.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 33.5 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check

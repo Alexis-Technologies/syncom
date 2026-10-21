@@ -158,3 +158,11 @@ test('Cursor over a fake source', async (t) => {
     assert.deepStrictEqual(seen, ['a', 'b']);
   });
 });
+
+test('query guards: a pattern the size of a document, a projection of __proto__', () => {
+  const { compileQuery, Cursor } = require('../src/query.js');
+  assert.throws(() => compileQuery({ key: { $regex: 'a'.repeat(1001) } }), /longer than 1000/);
+  assert.doesNotThrow(() => compileQuery({ key: { $regex: 'a'.repeat(1000) } }));
+  const source = { logger: null, candidates: () => null, ids: () => [], row: () => null, indexed: () => new Set() };
+  assert.throws(() => new Cursor(source, 'T').projection(['__proto__']), TypeError);
+});

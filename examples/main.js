@@ -25,6 +25,10 @@ const main = async () => {
 
   await domain.publish({ postId });
   console.log('Post published');
+  await storage.close();
 };
 
-main();
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

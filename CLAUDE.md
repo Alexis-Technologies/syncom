@@ -23,6 +23,10 @@ idb.js / idb.d.ts         the @alexify/syncom/idb subpath (src/idb.js) — the I
 index.d.ts                the Node type surface (hand-written)
 browser.d.ts              re-exports index.d.ts, overrides the 3 async crypto fns
 src/backend.js            the fsi contract (isFsi/checkFsi), createMemoryFsi, withSync — no requires
+src/emitter.js            the Emitter both halves extend — no requires
+src/logger.js             createLogger, the duck-typed logger writer — no requires
+src/keys.js               loadKeyPair — the on-disk key pair, generator injected by each crypto half — no requires
+src/scope.js              GLOBAL_SCOPE, inScope — the one definition of "in scope" — no requires
 src/lock.js               exclusive open: Web Locks or lock.json, stale by pid or age — no requires
 src/catalog.js            the record catalog: live ids, collections, indexed values; index/catalog.json — no requires
 src/query.js              compileQuery (Mango predicate), compareRows, Cursor — reads through storage[SOURCE]
@@ -51,8 +55,10 @@ docs/                     VitePress site
   stray `require('some-pkg')` in shared code breaks `pnpm size`, not just the
   dependency count.
 - **Browser halves are `*.browser.js`** (dot, not dash): `fsi`, `crypto`,
-  `utils`. Everything else (storage, chain, log, ops, sync, wrpc adapter) is
-  shared. Adding a split means three edits: the file, `package.json#browser`,
+  `utils`. Everything else (storage, chain, log, ops, sync, wrpc adapter,
+  and the require-free `emitter`, `logger`, `keys`, `scope`) is shared; the
+  two `utils` halves only re-export `Emitter`/`createLogger` and add the
+  platform's own bits. Adding a split means three edits: the file, `package.json#browser`,
   and `src/index.browser.js`. `tests/package/consistency.test.js` catches a
   missed one. To run shared code against the browser halves under Node, load
   it through `tests/utils/browser-env.js` — requiring `src/index.browser.js`
@@ -219,7 +225,9 @@ docs/                     VitePress site
   the same directory twice must `close()` the first storage or pass
   `lock: false`; `bench/storage.js` does the latter. Never weaken the
   default to make a test pass — two instances minting the same seq is the
-  bug the lock exists for.
+  bug the lock exists for. `acquireLock` prefers `fsi.create` (exclusive) and
+  falls back to write-then-read-back; `open({ lock: { ... } })` is the object
+  form (`normalizeLock`).
 - **fsi is injected.** `open({ fsi })` reaches storage, log, chain, keys and
   the registry as `this.#fsi` (or the `fsi` parameter of `loadKeys`); the
   module-level `require('./fsi.js')` is only the default. A new `fsi.` call

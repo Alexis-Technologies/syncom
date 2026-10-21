@@ -9,6 +9,7 @@ const { deepEqual } = require('./ops.js');
 const { valueOf } = require('./catalog.js');
 
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
+const MAX_REGEX = 1000;
 
 // A total order for sorting: nothing, then booleans, numbers, strings, then
 // everything else (left where it was). Comparisons in a query are stricter —
@@ -53,6 +54,9 @@ const regexOf = (expected, options) => {
   const flags = (options ?? (expected instanceof RegExp ? expected.flags : '')).replaceAll(/[gy]/g, '');
   const source = expected instanceof RegExp ? expected.source : expected;
   if (typeof source !== 'string') throw new TypeError('select(): $regex takes a RegExp or a string');
+  // A query is the application's, but a pattern the size of a document is
+  // never one: a bound keeps a pasted-in pattern from being a denial.
+  if (source.length > MAX_REGEX) throw new TypeError(`select(): $regex is longer than ${MAX_REGEX} characters`);
   try {
     return new RegExp(source, flags);
   } catch (error) {
@@ -193,7 +197,7 @@ class Cursor {
 
   /** The fields each row carries (plus `id`); a dotted field comes back under its dotted name. */
   projection(fields) {
-    if (!Array.isArray(fields) || !fields.every((field) => typeof field === 'string')) {
+    if (!Array.isArray(fields) || !fields.every((field) => typeof field === 'string' && field !== '__proto__')) {
       throw new TypeError('projection() takes an array of field names');
     }
     this.#projection = fields;

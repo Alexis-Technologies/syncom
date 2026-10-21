@@ -25,6 +25,7 @@
 
 const defaultFsi = require('./fsi.js');
 const { formatEventId, parseEventId, vectorAdvance } = require('./vector.js');
+const { GLOBAL_SCOPE, inScope } = require('./scope.js');
 const { createTelemetry, traced, now } = require('./telemetry.js');
 
 const OPEN = 'open';
@@ -70,6 +71,7 @@ class OpLog {
   // without a walk over everything retained.
   #byId = new Map();
   #onRoll = null;
+  #seen = null;
 
   constructor(basePath, options = {}) {
     this.#path = `${basePath}/log`;
@@ -98,6 +100,8 @@ class OpLog {
       this.#vector = index.vector ?? {};
       this.#segments = Array.isArray(index.segments) ? index.segments : [];
       this.#droppedHeld = Number.isInteger(index.droppedHeld) ? index.droppedHeld : 0;
+      // Seeded from the index; what the files hold only moves it up.
+      if (typeof index.latestTs === 'number') this.#latestTs = index.latestTs;
     } else {
       // No (readable) index: a new incarnation. Existing segments are still
       // picked up below, but their ids belong to an epoch nobody can resume.
@@ -106,6 +110,7 @@ class OpLog {
     }
     await this.#loadSegments(hasIndex);
     await this.#loadOpen();
+    this.#seen = null;
     if (!index) {
       // Every subscriber of this node will be told to bootstrap: worth a
       // line when there was a log here, a whisper for a brand-new one.
@@ -171,7 +176,8 @@ class OpLog {
   // Merges loaded entries in, deduplicating by seq (a crash mid-roll leaves
   // the same batch both sealed and open) and keeping the order by seq.
   #adopt(entries) {
-    const seen = new Set(this.#entries.map((entry) => entry.seq));
+    // The seqs already held, built once per open rather than once per file.
+    const seen = (this.#seen ??= new Set(this.#entries.map((entry) => entry.seq)));
     let added = false;
     for (const entry of entries) {
       if (!entry || !Number.isInteger(entry.seq) || seen.has(entry.seq)) continue;
@@ -411,6 +417,7 @@ class OpLog {
       vector: this.#vector,
       segments: this.#segments,
       droppedHeld: this.#droppedHeld,
+      latestTs: this.#latestTs,
     };
     await this.#fsi.write(this.#path, INDEX, JSON.stringify(index));
   }
@@ -547,8 +554,7 @@ class OpLog {
       const entry = this.#entries[index];
       // An op without a scope (or scoped '*') is global and reaches every
       // subscriber; a scoped one only those who asked for that scope.
-      const scope = entry.op.scope ?? '*';
-      if (scopes && scope !== '*' && !scopes.includes('*') && !scopes.includes(scope)) continue;
+      if (!inScope(entry.op.scope ?? GLOBAL_SCOPE, scopes)) continue;
       entries.push(entry);
     }
     return entries;

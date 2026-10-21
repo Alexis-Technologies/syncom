@@ -55,6 +55,12 @@ const createMemoryFsi = () => {
     async remove(dir, name) {
       files.delete(keyOf(dir, name));
     },
+    // Exclusive create, like the node half's: EEXIST when the file is there.
+    async create(dir, name, content) {
+      const key = keyOf(dir, name);
+      if (files.has(key)) throw Object.assign(new Error(`EEXIST: file already exists, ${key}`), { code: 'EEXIST' });
+      files.set(key, String(content));
+    },
     // Files directly under `dir`, sorted; a directory is only ever implied.
     async list(dir) {
       const prefix = `${dir}/`;
@@ -77,16 +83,25 @@ const createMemoryFsi = () => {
 
 // The same adapter with every write followed by its `sync`: what `durable`
 // means on a backend that can fsync.
-const withSync = (fsi) => ({
-  read: (dir, name) => fsi.read(dir, name),
-  exists: (dir, name) => fsi.exists(dir, name),
-  remove: (dir, name) => fsi.remove(dir, name),
-  list: (dir) => fsi.list(dir),
-  sync: (dir, name) => fsi.sync(dir, name),
-  async write(dir, name, content, options) {
-    await fsi.write(dir, name, content, options);
-    await fsi.sync(dir, name);
-  },
-});
+const withSync = (fsi) => {
+  const wrapped = {
+    read: (dir, name) => fsi.read(dir, name),
+    exists: (dir, name) => fsi.exists(dir, name),
+    remove: (dir, name) => fsi.remove(dir, name),
+    list: (dir) => fsi.list(dir),
+    sync: (dir, name) => fsi.sync(dir, name),
+    async write(dir, name, content, options) {
+      await fsi.write(dir, name, content, options);
+      await fsi.sync(dir, name);
+    },
+  };
+  if (typeof fsi.create === 'function') {
+    wrapped.create = async (dir, name, content) => {
+      await fsi.create(dir, name, content);
+      await fsi.sync(dir, name);
+    };
+  }
+  return wrapped;
+};
 
 module.exports = { isFsi, checkFsi, createMemoryFsi, withSync };

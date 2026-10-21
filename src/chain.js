@@ -24,7 +24,13 @@ class Blockchain {
       await this.writeChain();
     } else {
       const raw = await this.#fsi.read(this.path, BLOCKCHAIN);
-      const chain = JSON.parse(raw);
+      let chain;
+      try {
+        chain = JSON.parse(raw);
+      } catch (error) {
+        const corrupt = new Error(`${BLOCKCHAIN} is unreadable (${error.message}); restore it or remove the directory`);
+        throw Object.assign(corrupt, { code: 'CORRUPT', cause: error });
+      }
       this.tailHash = chain.tailHash;
     }
     return this;

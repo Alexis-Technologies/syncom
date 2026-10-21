@@ -99,7 +99,7 @@ test('Exclusive open (lockfile)', async (t) => {
     const { dir, open } = await openTemp(t2);
     await assert.rejects(async () => open({ lock: 'maybe' }), {
       name: 'TypeError',
-      message: "open({ lock }): lock must be 'fail', 'wait' or false",
+      message: "open({ lock }): lock must be 'fail', 'wait', false or an object",
     });
     const fsi = require('../src/fsi.js');
     const results = await Promise.allSettled([
@@ -110,5 +110,59 @@ test('Exclusive open (lockfile)', async (t) => {
     assert.strictEqual(held.length >= 1, true);
     for (const r of held) await r.value.release();
     await assert.rejects(() => fs.stat(path.join(dir, LOCK_FILE)), { code: 'ENOENT' });
+  });
+});
+
+test('Exclusive open: the knobs, the race, the timeout', async (t) => {
+  const { createMemoryFsi } = require('../src/backend.js');
+
+  await t.test('openers racing for a free lock: exactly one wins, on a backend with create()', async () => {
+    const fsi = createMemoryFsi();
+    const results = await Promise.allSettled(
+      Array.from({ length: 6 }, () => acquireLock({ fsi, path: 'store', mode: 'fail' })),
+    );
+    const won = results.filter((r) => r.status === 'fulfilled');
+    assert.strictEqual(won.length, 1, 'one holder');
+    assert.ok(results.filter((r) => r.status === 'rejected').every((r) => r.reason.code === 'LOCKED'));
+    await won[0].value.release();
+    assert.strictEqual(await fsi.exists('store', LOCK_FILE), false);
+    // Without create(): write, read back, retry — still one holder at a time.
+    const plain = { ...fsi, create: undefined };
+    const first = await acquireLock({ fsi: plain, path: 'store', mode: 'fail' });
+    await assert.rejects(() => acquireLock({ fsi: plain, path: 'store', mode: 'fail' }), { code: 'LOCKED' });
+    await first.release();
+  });
+
+  await t.test("'wait' gives up after `timeout`, with LOCKED", async () => {
+    const fsi = createMemoryFsi();
+    const holder = await acquireLock({ fsi, path: 'store', mode: 'fail' });
+    const started = Date.now();
+    await assert.rejects(() => acquireLock({ fsi, path: 'store', mode: 'wait', poll: 10, timeout: 60 }), {
+      code: 'LOCKED',
+      message: /still locked after 60 ms/,
+    });
+    assert.ok(Date.now() - started >= 50);
+    await holder.release();
+    const next = await acquireLock({ fsi, path: 'store', mode: 'wait', poll: 10, timeout: 60 });
+    await next.release();
+  });
+
+  await t.test('open({ lock }) takes an object: mode, staleAfter, poll, timeout', async (t2) => {
+    const { dir, open } = await openTemp(t2);
+    const first = await open({ lock: { mode: 'fail' } });
+    await assert.rejects(() => open({ lock: { mode: 'wait', poll: 10, timeout: 50 } }), {
+      code: 'LOCKED',
+      message: /still locked/,
+    });
+    assert.deepStrictEqual(first.stats().lock, { mode: 'fail' });
+    await first.close();
+    // A stale lock by age: staleAfter tunable, pid absent.
+    await fs.writeFile(path.join(dir, LOCK_FILE), JSON.stringify({ id: 'old', since: Date.now() - 5_000 }));
+    await assert.rejects(() => open({ lock: { staleAfter: 60_000 } }), { code: 'LOCKED' });
+    const over = await open({ lock: { staleAfter: 1_000 } });
+    await over.close();
+    for (const lock of [{ mode: 'maybe' }, { poll: -1 }, { timeout: 'soon' }, { nope: 1 }, 'later', 1]) {
+      assert.throws(() => syncom.open({ path: dir, logger: false, lock }), TypeError, JSON.stringify(lock));
+    }
   });
 });

@@ -13,6 +13,7 @@ own is the default; any other goes in through `open({ fsi })`.
 | `remove(dir, name)` | A no-op when absent |
 | `list(dir)` | File names, sorted; an absent directory is `[]` |
 | `sync(dir, name)` *(optional)* | fsync — what `durable: true` calls after every write |
+| `create(dir, name, content)` *(optional)* | Exclusive create: rejects with `code: 'EEXIST'` when the file is there; what the directory lock uses when present |
 
 `isFsi(value)` tells whether an object has the five. The check runs at
 `open()`, naming the method that is missing, and the storage never closes a
