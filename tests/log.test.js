@@ -265,7 +265,8 @@ test('OpLog', async (t) => {
       await log.append([op('A', 1, { id: 'secret', data: { ssn: 'SECRET-1' } }), op('A', 2)]);
       await log.append([op('A', 3, { id: 'secret', type: 'add', key: 'tags', value: ['SECRET-3'] })]);
       await log.append([op('A', 4, { id: 'other', data: { ssn: 'OTHER' } })]);
-      await log.append([op('A', 5, { id: 'secret', data: { ssn: 'SECRET-2' } })]);
+      const signed = { sig: 'S'.repeat(86), digest: 'd'.repeat(64), nonce: 'SECRET-NONCE-0000' };
+      await log.append([op('A', 5, { id: 'secret', data: { ssn: 'SECRET-2' }, ...signed })]);
       assert.strictEqual(await log.scrub('secret'), 3);
       assert.strictEqual(await log.scrub('secret'), 0, 'idempotent');
       assert.strictEqual(await log.scrub('nope'), 0);
@@ -287,6 +288,10 @@ test('OpLog', async (t) => {
         ],
       );
       assert.deepStrictEqual(log.vector, { A: 5 }, 'positions and the vector are untouched');
+      const scrubbedSigned = entries[4].op;
+      assert.strictEqual(scrubbedSigned.sig, signed.sig, 'the signature stays');
+      assert.strictEqual(scrubbedSigned.digest, signed.digest, 'and the digest');
+      assert.strictEqual('nonce' in scrubbedSigned, false, 'the nonce goes with the payload');
       const files = await fs.readdir(path.join(dir, 'log'), { recursive: true });
       for (const file of files) {
         const text = await fs.readFile(path.join(dir, 'log', file), 'utf8').catch(() => '');

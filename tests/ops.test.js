@@ -500,44 +500,69 @@ test('ops module', async (t) => {
     assert.strictEqual(unpackOps(packed)[0].type, 'purge');
   });
 
-  await t.test('packOps carries v and actor in its 13th and 14th slots; older rows read without them', () => {
-    const ops = [
-      { origin: 'A', seq: 1, ts: 1, type: 'write', id: 'r', scope: 's', data: { x: 1 }, v: 2, actor: 'u1' },
-      { origin: 'A', seq: 2, ts: 2, type: 'inc', id: 'r', key: 'n', value: 1 },
-      { origin: 'A', seq: 3, ts: 3, type: 'advance', vector: { B: 4 }, from: 'B' },
-    ];
-    const packed = packOps(ops);
-    assert.strictEqual(packed[0].length, 14);
-    assert.strictEqual(packed[0][12], 2);
-    assert.strictEqual(packed[0][13], 'u1');
-    assert.strictEqual(packed[1][12], null);
-    assert.strictEqual(packed[1][13], null);
-    assert.deepStrictEqual(unpackOps(JSON.parse(JSON.stringify(packed))), ops);
-    // Rows of the previous shapes (13 and 12 slots) and a short one.
-    assert.deepStrictEqual(
-      unpackOps([packed[0].slice(0, 13)]),
-      [ops[0]].map(({ actor, ...op }) => op),
-    );
-    assert.deepStrictEqual(
-      unpackOps([packed[0].slice(0, 12)]),
-      [ops[0]].map(({ v, actor, ...op }) => op),
-    );
-    assert.deepStrictEqual(unpackOps([['A', 1, 1, 'w', 'r']]), [
-      { origin: 'A', seq: 1, ts: 1, type: 'write', id: 'r' },
-    ]);
-    assert.deepStrictEqual(unpackOps([['A', 1, 1, 'w'], 'nope']), []);
-    assert.deepStrictEqual(unpackOps('nope'), []);
-    // The set ops: `+` and `-`, their payload in the key/value slots like inc.
-    const sets = [
-      { origin: 'A', seq: 4, ts: 4, type: 'add', id: 'r', key: 't', value: ['x', { a: 1 }] },
-      { origin: 'A', seq: 5, ts: 5, type: 'remove', id: 'r', key: 't', value: [['x', { A: 4 }]] },
-    ];
-    const rows = packOps(sets);
-    assert.strictEqual(rows[0][3], '+');
-    assert.strictEqual(rows[1][3], '-');
-    assert.deepStrictEqual(rows[1][9], [['x', { A: 4 }]]);
-    assert.deepStrictEqual(unpackOps(JSON.parse(JSON.stringify(rows))), sets);
-  });
+  await t.test(
+    'packOps carries v, actor, sig, digest and nonce in slots 13 to 17; older rows read without them',
+    () => {
+      const sig = 'S'.repeat(86);
+      const digest = 'd'.repeat(64);
+      const ops = [
+        {
+          origin: 'A',
+          seq: 1,
+          ts: 1,
+          type: 'write',
+          id: 'r',
+          scope: 's',
+          data: { x: 1 },
+          v: 2,
+          actor: 'u1',
+          sig,
+          digest,
+          nonce: 'n'.repeat(20),
+        },
+        { origin: 'A', seq: 2, ts: 2, type: 'inc', id: 'r', key: 'n', value: 1 },
+        { origin: 'A', seq: 3, ts: 3, type: 'advance', vector: { B: 4 }, from: 'B', sig },
+      ];
+      const packed = packOps(ops);
+      assert.strictEqual(packed[0].length, 17);
+      assert.strictEqual(packed[0][12], 2);
+      assert.strictEqual(packed[0][13], 'u1');
+      assert.strictEqual(packed[0][14], sig);
+      assert.strictEqual(packed[0][15], digest);
+      assert.strictEqual(packed[0][16], 'n'.repeat(20));
+      assert.deepStrictEqual(packed[1].slice(12), [null, null, null, null, null]);
+      assert.deepStrictEqual(packed[2].slice(14), [sig, null, null]);
+      assert.deepStrictEqual(unpackOps(JSON.parse(JSON.stringify(packed))), ops);
+      // Rows of the previous shapes (14, 13 and 12 slots) and a short one.
+      assert.deepStrictEqual(
+        unpackOps([packed[0].slice(0, 14)]),
+        [ops[0]].map(({ sig, digest, nonce, ...op }) => op),
+      );
+      assert.deepStrictEqual(
+        unpackOps([packed[0].slice(0, 13)]),
+        [ops[0]].map(({ actor, sig, digest, nonce, ...op }) => op),
+      );
+      assert.deepStrictEqual(
+        unpackOps([packed[0].slice(0, 12)]),
+        [ops[0]].map(({ v, actor, sig, digest, nonce, ...op }) => op),
+      );
+      assert.deepStrictEqual(unpackOps([['A', 1, 1, 'w', 'r']]), [
+        { origin: 'A', seq: 1, ts: 1, type: 'write', id: 'r' },
+      ]);
+      assert.deepStrictEqual(unpackOps([['A', 1, 1, 'w'], 'nope']), []);
+      assert.deepStrictEqual(unpackOps('nope'), []);
+      // The set ops: `+` and `-`, their payload in the key/value slots like inc.
+      const sets = [
+        { origin: 'A', seq: 4, ts: 4, type: 'add', id: 'r', key: 't', value: ['x', { a: 1 }] },
+        { origin: 'A', seq: 5, ts: 5, type: 'remove', id: 'r', key: 't', value: [['x', { A: 4 }]] },
+      ];
+      const rows = packOps(sets);
+      assert.strictEqual(rows[0][3], '+');
+      assert.strictEqual(rows[1][3], '-');
+      assert.deepStrictEqual(rows[1][9], [['x', { A: 4 }]]);
+      assert.deepStrictEqual(unpackOps(JSON.parse(JSON.stringify(rows))), sets);
+    },
+  );
 });
 
 test('ops: a peer-shaped meta reaches nothing it should not', async (t) => {

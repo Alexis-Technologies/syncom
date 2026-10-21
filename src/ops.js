@@ -674,8 +674,9 @@ const observedTags = (meta, field, elements) => {
 // The wire/log shape of a batch: one positional array per op, type as a
 // single character, absent fields as null — no key names repeated per op. A
 // slot may be appended (the writer's schema version was the 13th, the actor
-// the 14th): a reader of an older shape ignores slots it does not know, a
-// reader of a newer one takes an absent slot as null.
+// the 14th, the signature, its payload digest and the digest's nonce the
+// 15th to 17th): a reader of an older shape ignores slots it does not know,
+// a reader of a newer one takes an absent slot as null.
 const TYPE_CODES = {
   write: 'w',
   set: 's',
@@ -718,6 +719,9 @@ const packOps = (ops) => {
       op.from === undefined ? null : op.from,
       op.v === undefined ? null : op.v,
       op.actor === undefined ? null : op.actor,
+      op.sig === undefined ? null : op.sig,
+      op.digest === undefined ? null : op.digest,
+      op.nonce === undefined ? null : op.nonce,
     ];
   }
   return packed;
@@ -728,11 +732,14 @@ const unpackOps = (packed) => {
   const ops = [];
   for (const row of packed) {
     if (!Array.isArray(row) || row.length < 5) continue;
-    const [origin, seq, ts, code, id, scope, data, meta, key, value, vector, from, v, actor] = row;
+    const [origin, seq, ts, code, id, scope, data, meta, key, value, vector, from, v, actor, sig, digest, nonce] = row;
     const op = { origin, seq, ts, type: own(CODE_TYPES, code) ?? code };
     if (id !== null && id !== undefined) op.id = id;
     if (v !== null && v !== undefined) op.v = v;
     if (actor !== null && actor !== undefined) op.actor = actor;
+    if (sig !== null && sig !== undefined) op.sig = sig;
+    if (digest !== null && digest !== undefined) op.digest = digest;
+    if (nonce !== null && nonce !== undefined) op.nonce = nonce;
     if (vector !== null && vector !== undefined) op.vector = vector;
     if (from !== null && from !== undefined) op.from = from;
     if (scope !== null && scope !== undefined) op.scope = scope;

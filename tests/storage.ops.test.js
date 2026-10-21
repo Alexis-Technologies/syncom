@@ -556,6 +556,15 @@ test("Storage: what a peer's op must look like", async (t) => {
       { ...ok, seq: 0 },
       { ...ok, seq: 2.5 },
       { origin: 'peer', seq: 2, ts: Date.now(), type: 'advance', vector: 'no' },
+      // A signature's fields must have their shape, whether or not they check.
+      { ...ok, seq: 2, sig: 'short' },
+      { ...ok, seq: 2, sig: 42 },
+      { ...ok, seq: 2, sig: `${'S'.repeat(85)}=` },
+      { ...ok, seq: 2, digest: 'D'.repeat(64) },
+      { ...ok, seq: 2, digest: 'd'.repeat(63) },
+      { ...ok, seq: 2, nonce: 'short' },
+      { ...ok, seq: 2, nonce: 'n'.repeat(65) },
+      { ...ok, seq: 2, nonce: 'has space in it!' },
     ];
     const result = await storage.applyRemote([ok, ...bad]);
     assert.deepStrictEqual(result, { applied: 1, skipped: 0, duplicates: 0, gaps: 0, malformed: bad.length });

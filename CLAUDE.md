@@ -27,6 +27,7 @@ src/emitter.js            the Emitter both halves extend — no requires
 src/logger.js             createLogger, the duck-typed logger writer — no requires
 src/keys.js               loadKeyPair — the on-disk key pairs (RSA for sealing, Ed25519 for signing), generator injected by each crypto half — no requires
 src/scope.js              GLOBAL_SCOPE, inScope, opInScope — the one definition of "in scope" — no requires
+src/signing.js            canonical form, signOp, verifyOp — what a signature covers (the header + a salted payload digest) and the verdict on a peer's op
 src/shape.js              isPlainObject, asJson, isRecordId, isStreamName, wellFormed — what enters is checked here
 src/errors.js             SyncomError (an operational failure, with a code) and typed() — no requires
 src/symbols.js            COMMIT / REFRESH / SOURCE — the module-private seams between Storage and what it hands out — no requires
@@ -146,9 +147,10 @@ docs/                     VitePress site
   which rewrites files in place; `persist` in `src/apply.js` scrubs every id
   of the batch whose entry is purged, after the batch is durable and before
   the relay. Never log a payload for a purged id through another path.
-- **`packOps` is 14 positional slots, both halves together.** `v` (13) and
-  `actor` (14) were appended; a reader of fewer slots ignores the rest, a
-  reader of more takes an absent slot as null. Append, never reorder — the
+- **`packOps` is 17 positional slots, both halves together.** `v` (13),
+  `actor` (14), `sig`, `digest` and `nonce` (15–17) were appended; a reader
+  of fewer slots ignores the rest, a reader of more takes an absent slot as
+  null. Append, never reorder — the
   shape is on the wire between every pair of peers (the log itself stores
   keyed `{ seq, op }` JSON; `packOps` is for `push` and `changes` only). An
   op type is one character in `TYPE_CODES`/`CODE_TYPES` (`+`/`-` are the set

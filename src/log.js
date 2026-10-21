@@ -472,10 +472,11 @@ class OpLog {
 
   /**
    * Strips the payload of every entry of `id` — `data`, `meta`, `key`,
-   * `value` — in memory and in the files that hold them, flagging each
-   * `scrubbed`; the op keeps its position, origin, seq and stamp, so the
+   * `value`, and the `nonce` that salted their digest — in memory and in
+   * the files that hold them, flagging each `scrubbed`; the op keeps its
+   * position, origin, seq and stamp, its signature and digest, so the
    * vector and a resuming peer are unaffected (a scrubbed `write` applies
-   * as a no-op). Returns how many entries. A file is rewritten in place: a
+   * as a no-op, and its header still verifies). Returns how many entries. A file is rewritten in place: a
    * crash in the middle tears it — a torn segment is skipped at the next
    * open (what it held is gone from `since`, and a peer resuming through it
    * bootstraps), a torn open file is dropped — the price of forgetting over
@@ -511,6 +512,7 @@ class OpLog {
         delete entry.op.meta;
         delete entry.op.key;
         delete entry.op.value;
+        delete entry.op.nonce;
         entry.scrubbed = true;
         fresh++;
       }

@@ -51,6 +51,12 @@ const OP_TYPES = new Set(['write', 'set', 'inc', 'delete', 'merge', 'advance', '
 // leaves nothing to validate.
 const VALIDATED = new Set(['write', 'set', 'inc', 'add', 'remove']);
 
+// A signature's three fields, by shape alone — whether they check is
+// src/signing.js's business: 64 bytes base64url, 32 bytes hex, a nonce.
+const SIGNATURE = /^[A-Za-z0-9_-]{86}$/;
+const DIGEST = /^[0-9a-f]{64}$/;
+const NONCE = /^[A-Za-z0-9_-]{16,64}$/;
+
 // The fields the engine indexes a peer's op by, checked before anything here
 // reads them. Payloads (`data`, `meta`, `key`, `value`, `vector`) are the
 // business of applyOp and normalizeMeta, which take garbage as a no-op;
@@ -65,6 +71,9 @@ const wellFormed = (op) =>
   OP_TYPES.has(op.type) &&
   (op.scope === undefined || isStreamName(op.scope)) &&
   (op.v === undefined || (Number.isInteger(op.v) && op.v >= 1)) &&
+  (op.sig === undefined || (typeof op.sig === 'string' && SIGNATURE.test(op.sig))) &&
+  (op.digest === undefined || (typeof op.digest === 'string' && DIGEST.test(op.digest))) &&
+  (op.nonce === undefined || (typeof op.nonce === 'string' && NONCE.test(op.nonce))) &&
   (op.type === 'advance' ? isPlainObject(op.vector) : isRecordId(op.id));
 
 module.exports = { isPlainObject, asJson, isRecordId, invalidId, isStreamName, isKeyId, VALIDATED, wellFormed };
