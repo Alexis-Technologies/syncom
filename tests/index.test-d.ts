@@ -302,6 +302,7 @@ const coded = new syncom.SyncomError('NOT_FOUND', 'Record x not found', { cause:
 expectType<SyncomErrorCode>(coded.code);
 expectAssignable<Error>(coded);
 expectAssignable<SyncomErrorCode>('LOCKED');
+expectAssignable<SyncomErrorCode>('IDENTITY_MISMATCH');
 expectError(new syncom.SyncomError('NOT_A_CODE', 'x'));
 expectAssignable<Error>(hookError);
 expectAssignable<StorageOptions>({

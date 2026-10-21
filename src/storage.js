@@ -8,7 +8,7 @@
 // src/record.js, the options in src/options.js.
 
 const { Emitter, generateUUID, createLogger } = require('./utils.js');
-const { decrypt, loadKeys, calculateHash } = require('./crypto.js');
+const { decrypt, loadKeys, loadSigningKeys, calculateHash } = require('./crypto.js');
 const { Blockchain } = require('./chain.js');
 const { SyncManager } = require('./sync.js');
 const { OpLog } = require('./log.js');
@@ -28,7 +28,7 @@ const { Catalog } = require('./catalog.js');
 const { createTelemetry, traced, now } = require('./telemetry.js');
 const { GLOBAL_SCOPE } = require('./scope.js');
 const { normalizeStorageOptions } = require('./options.js');
-const { isPlainObject, asJson, isRecordId, invalidId, isStreamName, VALIDATED } = require('./shape.js');
+const { isPlainObject, asJson, isRecordId, invalidId, isStreamName, isKeyId, VALIDATED } = require('./shape.js');
 const { COMMIT, REFRESH, SOURCE } = require('./symbols.js');
 const { SyncomError, typed } = require('./errors.js');
 
@@ -68,6 +68,7 @@ const setElements = (method, key, elements) => {
 class Storage extends Emitter {
   #path;
   #keys = null;
+  #signing = null;
   #chain = null;
   #log = null;
   #entries = null;
@@ -203,6 +204,7 @@ class Storage extends Emitter {
   async #open() {
     const fsi = this.#fsi;
     this.#keys = await loadKeys(`${this.#path}/keys`, { fsi });
+    this.#signing = await loadSigningKeys(`${this.#path}/keys`, { fsi });
     this.#chain = this.#chained ? await new Blockchain(`${this.#path}/blockchain`, { fsi }) : null;
     this.#log = await new OpLog(this.#path, {
       ...this.#options.sync?.log,
@@ -479,10 +481,16 @@ class Storage extends Emitter {
     return result;
   }
 
-  // The node id is minted once and never changes; the own sequence numbers
-  // (one per scope) live in the log's vector, which survives compaction — so
-  // a seq is durable the moment its op is appended, before anyone hears of it.
+  // The node id is the signing key — minted with the pair, never changed —
+  // and node.json names it for the operator; the own sequence numbers (one
+  // per scope) live in the log's vector, which survives compaction, so a seq
+  // is durable the moment its op is appended, before anyone hears of it. A
+  // directory from before signing (a UUID in node.json) is rekeyed once,
+  // with a warning. node.json naming ANOTHER key is refused: an id that
+  // changed in silence would break SELF detection and every peer's echo
+  // filter, and a key pair restored from elsewhere is a thing to be told.
   async #loadIdentity() {
+    const keyId = this.#signing.id;
     if (await this.#fsi.exists(this.#path, NODE_FILE)) {
       let id;
       try {
@@ -491,11 +499,18 @@ class Storage extends Emitter {
         throw corrupt(NODE_FILE, error);
       }
       if (!isStreamName(id)) throw corrupt(NODE_FILE, 'no node id in it');
-      this.#nodeId = id;
-    } else {
-      this.#nodeId = generateUUID();
-      await this.#fsi.write(this.#path, NODE_FILE, JSON.stringify({ id: this.#nodeId }));
+      if (id === keyId) {
+        this.#nodeId = keyId;
+        return;
+      }
+      if (isKeyId(id)) {
+        const message = `${NODE_FILE} names node ${id}, but keys/sign-public.pem is ${keyId}`;
+        throw new SyncomError('IDENTITY_MISMATCH', message, { id, key: keyId });
+      }
+      this.#logger.warn({ event: 'identity.rekeyed', from: id, to: keyId });
     }
+    this.#nodeId = keyId;
+    await this.#fsi.write(this.#path, NODE_FILE, JSON.stringify({ id: keyId }));
   }
 
   // The log is written before the record files are: a crash in between

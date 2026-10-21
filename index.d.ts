@@ -160,6 +160,7 @@ export type SyncomErrorCode =
   | 'DOWNGRADE'
   | 'LOCKED'
   | 'KEYS_INCOMPLETE'
+  | 'IDENTITY_MISMATCH'
   | 'BAD_ENVELOPE'
   | 'BLOCK_NOT_FOUND'
   | 'NOT_CONTRACT'

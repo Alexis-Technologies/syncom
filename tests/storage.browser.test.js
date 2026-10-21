@@ -23,6 +23,17 @@ test('Storage on the browser halves', async (t) => {
     assert.strictEqual(await browser.exists('store-basic/data', `${id}.json`), true);
   });
 
+  await t.test('the node id is the signing key here too, derived by Web Crypto', async () => {
+    const storage = await browser.open({ path: 'store-identity' });
+    assert.match(storage.nodeId, /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/);
+    assert.strictEqual(storage.nodeId, (await browser.loadSigningKeys('store-identity/keys')).id);
+    assert.deepStrictEqual(JSON.parse(await browser.read('store-identity', 'node.json')), { id: storage.nodeId });
+    await storage.close();
+    const reopened = await browser.open({ path: 'store-identity' });
+    assert.strictEqual(reopened.nodeId, storage.nodeId);
+    await reopened.close();
+  });
+
   await t.test('encryption at rest awaits the async Web Crypto', async () => {
     const storage = await browser.open({ path: 'store-encrypted' });
     const secret = { ssn: '123-45-6789' };

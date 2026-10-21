@@ -37,6 +37,13 @@ const hasControl = (value) => {
 const isStreamName = (value) =>
   typeof value === 'string' && value.length > 0 && value.length <= 128 && !value.includes('@') && !hasControl(value);
 
+// A node id is its Ed25519 public key: 32 bytes as 43 base64url characters.
+// The last character carries two bits of key and four of padding, so only
+// sixteen of the sixty-four are canonical — a non-canonical one decodes to
+// the same key, and would make one key four origins.
+const KEY_ID = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
+const isKeyId = (value) => typeof value === 'string' && KEY_ID.test(value);
+
 const OP_TYPES = new Set(['write', 'set', 'inc', 'delete', 'merge', 'advance', 'purge', 'add', 'remove']);
 
 // The ops an entity's validator sees: the ones that leave a record for the
@@ -60,4 +67,4 @@ const wellFormed = (op) =>
   (op.v === undefined || (Number.isInteger(op.v) && op.v >= 1)) &&
   (op.type === 'advance' ? isPlainObject(op.vector) : isRecordId(op.id));
 
-module.exports = { isPlainObject, asJson, isRecordId, invalidId, isStreamName, VALIDATED, wellFormed };
+module.exports = { isPlainObject, asJson, isRecordId, invalidId, isStreamName, isKeyId, VALIDATED, wellFormed };
