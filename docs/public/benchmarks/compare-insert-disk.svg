@@ -76,25 +76,25 @@ yjs@13.6.33</title>
 <path class="bar" d="M276,181H614.7486770500323A4,4 0 0 1 618.7486770500323,185V191A4,4 0 0 1 614.7486770500323,195H276Z"/>
 <text class="value" x="624.7486770500323" y="194">19.2k</text>
 </g>
-<g><title>syncom · chain: false, node:fs · v0.0.1
-2,098 ops/s
-477 µs per operation
-samples 1,730 – 2,912
-@alexify/syncom@0.0.1</title>
+<g><title>syncom · chain: false, node:fs · v1.0.0
+2,452 ops/s
+408 µs per operation
+samples 1,782 – 2,875
+@alexify/syncom@1.0.0</title>
 <text class="label secondary" x="20" y="225">syncom</text>
-<text class="sublabel" x="20" y="240">chain: false, node:fs · v0.0.1</text>
-<path class="bar secondary" d="M276,221H537.7481917586413A4,4 0 0 1 541.7481917586413,225V231A4,4 0 0 1 537.7481917586413,235H276Z"/>
-<text class="value" x="547.7481917586413" y="234">2,098</text>
+<text class="sublabel" x="20" y="240">chain: false, node:fs · v1.0.0</text>
+<path class="bar secondary" d="M276,221H543.1628422575172A4,4 0 0 1 547.1628422575172,225V231A4,4 0 0 1 543.1628422575172,235H276Z"/>
+<text class="value" x="553.1628422575172" y="234">2,452</text>
 </g>
-<g><title>syncom · default, node:fs · v0.0.1
-1,395 ops/s
-717 µs per operation
-samples 614 – 1,947
-@alexify/syncom@0.0.1</title>
+<g><title>syncom · default, node:fs · v1.0.0
+1,491 ops/s
+671 µs per operation
+samples 1,476 – 1,783
+@alexify/syncom@1.0.0</title>
 <text class="label primary" x="20" y="265">syncom</text>
-<text class="sublabel" x="20" y="280">default, node:fs · v0.0.1</text>
-<path class="bar primary" d="M276,261H523.5544528372782A4,4 0 0 1 527.5544528372782,265V271A4,4 0 0 1 523.5544528372782,275H276Z"/>
-<text class="value" x="533.5544528372782" y="274">1,395</text>
+<text class="sublabel" x="20" y="280">default, node:fs · v1.0.0</text>
+<path class="bar primary" d="M276,261H525.8797118828533A4,4 0 0 1 529.8797118828533,265V271A4,4 0 0 1 525.8797118828533,275H276Z"/>
+<text class="value" x="535.8797118828533" y="274">1,491</text>
 </g>
 <g><title>OrbitDB · documents, LevelDB · v4.0.0
 952 ops/s

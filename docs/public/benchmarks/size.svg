@@ -70,14 +70,14 @@ yjs@13.6.33, y-indexeddb@9.0.12, y-protocols@1.0.7</title>
 <text class="value" x="382.9615729166667" y="194">24.5 KB</text>
 </g>
 <g><title>syncom · open() over OPFS + the wrpc link adapter
-37.2 KB min+gzip
-107.0 KB minified
-@alexify/syncom@0.0.1
+37.3 KB min+gzip
+107.2 KB minified
+@alexify/syncom@1.0.0
 storage, schema, queries, the op log and the sync protocol are one entry</title>
 <text class="label primary" x="20" y="225">syncom</text>
 <text class="sublabel" x="20" y="240">open() over OPFS + the wrpc link adapter</text>
-<path class="bar primary" d="M372,221H375.54102083333333A4,4 0 0 1 379.54102083333333,225V231A4,4 0 0 1 375.54102083333333,235H372Z"/>
-<text class="value" x="385.54102083333333" y="234">37.2 KB</text>
+<path class="bar primary" d="M372,221H375.55329166666667A4,4 0 0 1 379.55329166666667,225V231A4,4 0 0 1 375.55329166666667,235H372Z"/>
+<text class="value" x="385.55329166666667" y="234">37.3 KB</text>
 </g>
 <g><title>PouchDB · pouchdb-browser
 40.4 KB min+gzip

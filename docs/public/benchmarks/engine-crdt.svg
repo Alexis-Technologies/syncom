@@ -44,76 +44,76 @@
 <text class="tick" x="676" y="447" text-anchor="middle">10M</text>
 <line class="axis" x1="202" y1="71" x2="202" y2="431"/>
 <g><title>diff · 20 flat keys, all changed
-327,305 ops/s
-3.06 µs per operation</title>
+337,100 ops/s
+2.97 µs per operation</title>
 <text class="label primary" x="20" y="88">diff</text>
 <text class="sublabel" x="20" y="103">20 flat keys, all changed</text>
-<path class="bar primary" d="M202,84H496.0218878114461A4,4 0 0 1 500.0218878114461,88V94A4,4 0 0 1 496.0218878114461,98H202Z"/>
-<text class="value" x="506.0218878114461" y="97">327k</text>
+<path class="bar primary" d="M202,84H497.5394121737352A4,4 0 0 1 501.5394121737352,88V94A4,4 0 0 1 497.5394121737352,98H202Z"/>
+<text class="value" x="507.5394121737352" y="97">337k</text>
 </g>
 <g><title>diff · 20 flat keys, one changed
-446,609 ops/s
-2.24 µs per operation</title>
+452,962 ops/s
+2.21 µs per operation</title>
 <text class="label primary" x="20" y="128">diff</text>
 <text class="sublabel" x="20" y="143">20 flat keys, one changed</text>
-<path class="bar primary" d="M202,124H512.016405273591A4,4 0 0 1 516.016405273591,128V134A4,4 0 0 1 512.016405273591,138H202Z"/>
-<text class="value" x="522.016405273591" y="137">447k</text>
+<path class="bar primary" d="M202,124H512.7433196977242A4,4 0 0 1 516.7433196977242,128V134A4,4 0 0 1 512.7433196977242,138H202Z"/>
+<text class="value" x="522.7433196977242" y="137">453k</text>
 </g>
 <g><title>diff · depth 3, width 4
-35,500 ops/s
-28.2 µs per operation</title>
+36,221 ops/s
+27.6 µs per operation</title>
 <text class="label primary" x="20" y="168">diff</text>
 <text class="sublabel" x="20" y="183">depth 3, width 4</text>
-<path class="bar primary" d="M202,164H381.7020598370286A4,4 0 0 1 385.7020598370286,168V174A4,4 0 0 1 381.7020598370286,178H202Z"/>
-<text class="value" x="391.7020598370286" y="177">35.5k</text>
+<path class="bar primary" d="M202,164H382.7368116983613A4,4 0 0 1 386.7368116983613,168V174A4,4 0 0 1 382.7368116983613,178H202Z"/>
+<text class="value" x="392.7368116983613" y="177">36.2k</text>
 </g>
 <g><title>diff · array as a grow-only set
-2,856,083 ops/s
-350 ns per operation</title>
+2,972,954 ops/s
+336 ns per operation</title>
 <text class="label primary" x="20" y="208">diff</text>
 <text class="sublabel" x="20" y="223">array as a grow-only set</text>
-<path class="bar primary" d="M202,204H607.5088426705397A4,4 0 0 1 611.5088426705397,208V214A4,4 0 0 1 607.5088426705397,218H202Z"/>
-<text class="value" x="617.5088426705397" y="217">2.86M</text>
+<path class="bar primary" d="M202,204H609.5728004550349A4,4 0 0 1 613.5728004550349,208V214A4,4 0 0 1 609.5728004550349,218H202Z"/>
+<text class="value" x="619.5728004550349" y="217">2.97M</text>
 </g>
 <g><title>merge · 20 flat keys
-2,120,424 ops/s
-472 ns per operation</title>
+2,105,534 ops/s
+475 ns per operation</title>
 <text class="label primary" x="20" y="248">merge</text>
 <text class="sublabel" x="20" y="263">20 flat keys</text>
-<path class="bar primary" d="M202,244H592.1810912701375A4,4 0 0 1 596.1810912701375,248V254A4,4 0 0 1 592.1810912701375,258H202Z"/>
-<text class="value" x="602.1810912701375" y="257">2.12M</text>
+<path class="bar primary" d="M202,244H591.818427663839A4,4 0 0 1 595.818427663839,248V254A4,4 0 0 1 591.818427663839,258H202Z"/>
+<text class="value" x="601.818427663839" y="257">2.11M</text>
 </g>
 <g><title>merge · depth 3, width 4
-4,897,973 ops/s
-204 ns per operation</title>
+5,046,798 ops/s
+198 ns per operation</title>
 <text class="label primary" x="20" y="288">merge</text>
 <text class="sublabel" x="20" y="303">depth 3, width 4</text>
-<path class="bar primary" d="M202,284H635.2669418303153A4,4 0 0 1 639.2669418303153,288V294A4,4 0 0 1 635.2669418303153,298H202Z"/>
-<text class="value" x="645.2669418303153" y="297">4.9M</text>
+<path class="bar primary" d="M202,284H636.807386790245A4,4 0 0 1 640.807386790245,288V294A4,4 0 0 1 636.807386790245,298H202Z"/>
+<text class="value" x="646.807386790245" y="297">5.05M</text>
 </g>
 <g><title>merge · numeric counter increment
-5,516,438 ops/s
-181 ns per operation</title>
+5,682,591 ops/s
+176 ns per operation</title>
 <text class="label primary" x="20" y="328">merge</text>
 <text class="sublabel" x="20" y="343">numeric counter increment</text>
-<path class="bar primary" d="M202,324H641.3865608614817A4,4 0 0 1 645.3865608614817,328V334A4,4 0 0 1 641.3865608614817,338H202Z"/>
-<text class="value" x="651.3865608614817" y="337">5.52M</text>
+<path class="bar primary" d="M202,324H642.9137483013089A4,4 0 0 1 646.9137483013089,328V334A4,4 0 0 1 642.9137483013089,338H202Z"/>
+<text class="value" x="652.9137483013089" y="337">5.68M</text>
 </g>
 <g><title>apply · 100 inc records
-210,975 ops/s
-4.74 µs per operation</title>
+211,811 ops/s
+4.72 µs per operation</title>
 <text class="label primary" x="20" y="368">apply</text>
 <text class="sublabel" x="20" y="383">100 inc records</text>
-<path class="bar primary" d="M202,364H473.42137297349274A4,4 0 0 1 477.42137297349274,368V374A4,4 0 0 1 473.42137297349274,378H202Z"/>
-<text class="value" x="483.42137297349274" y="377">211k</text>
+<path class="bar primary" d="M202,364H473.6248985075361A4,4 0 0 1 477.6248985075361,368V374A4,4 0 0 1 473.6248985075361,378H202Z"/>
+<text class="value" x="483.6248985075361" y="377">212k</text>
 </g>
 <g><title>apply · 100 delta records
-8,845 ops/s
+8,843 ops/s
 113 µs per operation</title>
 <text class="label primary" x="20" y="408">apply</text>
 <text class="sublabel" x="20" y="423">100 delta records</text>
-<path class="bar primary" d="M202,404H310.1836937136204A4,4 0 0 1 314.1836937136204,408V414A4,4 0 0 1 310.1836937136204,418H202Z"/>
-<text class="value" x="320.1836937136204" y="417">8,845</text>
+<path class="bar primary" d="M202,404H310.1720555642932A4,4 0 0 1 314.1720555642932,408V414A4,4 0 0 1 310.1720555642932,418H202Z"/>
+<text class="value" x="320.1720555642932" y="417">8,843</text>
 </g>
 <text class="caption" x="20" y="472">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-21</text>
 </svg>

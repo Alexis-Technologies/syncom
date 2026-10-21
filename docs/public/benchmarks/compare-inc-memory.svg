@@ -54,25 +54,25 @@ loro-crdt@1.16.4</title>
 <path class="bar" d="M276,135H611.0445805243373A4,4 0 0 1 615.0445805243373,139V145A4,4 0 0 1 611.0445805243373,149H276Z"/>
 <text class="value" x="621.0445805243373" y="148">349k</text>
 </g>
-<g><title>syncom · chain: false, createMemoryFsi() · v0.0.1
-76,419 ops/s
-13.1 µs per operation
-samples 74.3k – 79.9k
-@alexify/syncom@0.0.1</title>
+<g><title>syncom · chain: false, createMemoryFsi() · v1.0.0
+79,384 ops/s
+12.6 µs per operation
+samples 75.3k – 80.3k
+@alexify/syncom@1.0.0</title>
 <text class="label secondary" x="20" y="179">syncom</text>
-<text class="sublabel" x="20" y="194">chain: false, createMemoryFsi() · v0.0.1</text>
-<path class="bar secondary" d="M276,175H523.0936114356914A4,4 0 0 1 527.0936114356914,179V185A4,4 0 0 1 523.0936114356914,189H276Z"/>
-<text class="value" x="533.0936114356914" y="188">76.4k</text>
+<text class="sublabel" x="20" y="194">chain: false, createMemoryFsi() · v1.0.0</text>
+<path class="bar secondary" d="M276,175H525.2980374576075A4,4 0 0 1 529.2980374576075,179V185A4,4 0 0 1 525.2980374576075,189H276Z"/>
+<text class="value" x="535.2980374576075" y="188">79.4k</text>
 </g>
-<g><title>syncom · default, createMemoryFsi() · v0.0.1
-53,053 ops/s
+<g><title>syncom · default, createMemoryFsi() · v1.0.0
+53,069 ops/s
 18.8 µs per operation
-samples 51.9k – 53.8k
-@alexify/syncom@0.0.1</title>
+samples 51.6k – 53.3k
+@alexify/syncom@1.0.0</title>
 <text class="label primary" x="20" y="219">syncom</text>
-<text class="sublabel" x="20" y="234">default, createMemoryFsi() · v0.0.1</text>
-<path class="bar primary" d="M276,215H501.96137837762933A4,4 0 0 1 505.96137837762933,219V225A4,4 0 0 1 501.96137837762933,229H276Z"/>
-<text class="value" x="511.96137837762933" y="228">53.1k</text>
+<text class="sublabel" x="20" y="234">default, createMemoryFsi() · v1.0.0</text>
+<path class="bar primary" d="M276,215H501.97915083359953A4,4 0 0 1 505.97915083359953,219V225A4,4 0 0 1 501.97915083359953,229H276Z"/>
+<text class="value" x="511.97915083359953" y="228">53.1k</text>
 </g>
 <g><title>Automerge · Automerge.change, Counter · v3.5.0
 1,949 ops/s

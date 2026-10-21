@@ -76,25 +76,25 @@ pouchdb@9.0.0</title>
 <path class="bar" d="M276,181H587.5803209329681A4,4 0 0 1 591.5803209329681,185V191A4,4 0 0 1 587.5803209329681,195H276Z"/>
 <text class="value" x="597.5803209329681" y="194">8,805</text>
 </g>
-<g><title>syncom · chain: false, node:fs · v0.0.1
-3,504 ops/s
+<g><title>syncom · chain: false, node:fs · v1.0.0
+3,503 ops/s
 285 µs per operation
-samples 3,397 – 3,613
-@alexify/syncom@0.0.1</title>
+samples 3,443 – 3,648
+@alexify/syncom@1.0.0</title>
 <text class="label secondary" x="20" y="225">syncom</text>
-<text class="sublabel" x="20" y="240">chain: false, node:fs · v0.0.1</text>
-<path class="bar secondary" d="M276,221H555.5654361764887A4,4 0 0 1 559.5654361764887,225V231A4,4 0 0 1 555.5654361764887,235H276Z"/>
-<text class="value" x="565.5654361764887" y="234">3,504</text>
+<text class="sublabel" x="20" y="240">chain: false, node:fs · v1.0.0</text>
+<path class="bar secondary" d="M276,221H555.5586820430437A4,4 0 0 1 559.5586820430437,225V231A4,4 0 0 1 555.5586820430437,235H276Z"/>
+<text class="value" x="565.5586820430437" y="234">3,503</text>
 </g>
-<g><title>syncom · default, node:fs · v0.0.1
-1,538 ops/s
-650 µs per operation
-samples 543 – 2,138
-@alexify/syncom@0.0.1</title>
+<g><title>syncom · default, node:fs · v1.0.0
+1,589 ops/s
+629 µs per operation
+samples 1,290 – 2,172
+@alexify/syncom@1.0.0</title>
 <text class="label primary" x="20" y="265">syncom</text>
-<text class="sublabel" x="20" y="280">default, node:fs · v0.0.1</text>
-<path class="bar primary" d="M276,261H526.953545108948A4,4 0 0 1 530.953545108948,265V271A4,4 0 0 1 526.953545108948,275H276Z"/>
-<text class="value" x="536.953545108948" y="274">1,538</text>
+<text class="sublabel" x="20" y="280">default, node:fs · v1.0.0</text>
+<path class="bar primary" d="M276,261H528.098346090086A4,4 0 0 1 532.098346090086,265V271A4,4 0 0 1 528.098346090086,275H276Z"/>
+<text class="value" x="538.098346090086" y="274">1,589</text>
 </g>
 <g><title>Automerge · automerge-repo, NodeFS storage · v3.5.0
 1,247 ops/s

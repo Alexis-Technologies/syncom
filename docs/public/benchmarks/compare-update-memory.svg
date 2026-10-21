@@ -76,25 +76,25 @@ tinybase@10.0.1</title>
 <path class="bar" d="M276,181H594.7729266897618A4,4 0 0 1 598.7729266897618,185V191A4,4 0 0 1 594.7729266897618,195H276Z"/>
 <text class="value" x="604.7729266897618" y="194">108k</text>
 </g>
-<g><title>syncom · chain: false, createMemoryFsi() · v0.0.1
-83,008 ops/s
-12 µs per operation
-samples 79.1k – 83.7k
-@alexify/syncom@0.0.1</title>
+<g><title>syncom · chain: false, createMemoryFsi() · v1.0.0
+78,440 ops/s
+12.7 µs per operation
+samples 73.1k – 80.5k
+@alexify/syncom@1.0.0</title>
 <text class="label secondary" x="20" y="225">syncom</text>
-<text class="sublabel" x="20" y="240">chain: false, createMemoryFsi() · v0.0.1</text>
-<path class="bar secondary" d="M276,221H585.5294456846384A4,4 0 0 1 589.5294456846384,225V231A4,4 0 0 1 585.5294456846384,235H276Z"/>
-<text class="value" x="595.5294456846384" y="234">83k</text>
+<text class="sublabel" x="20" y="240">chain: false, createMemoryFsi() · v1.0.0</text>
+<path class="bar secondary" d="M276,221H583.5631430041416A4,4 0 0 1 587.5631430041416,225V231A4,4 0 0 1 583.5631430041416,235H276Z"/>
+<text class="value" x="593.5631430041416" y="234">78.4k</text>
 </g>
-<g><title>syncom · default, createMemoryFsi() · v0.0.1
-55,225 ops/s
-18.1 µs per operation
-samples 50.7k – 55.3k
-@alexify/syncom@0.0.1</title>
+<g><title>syncom · default, createMemoryFsi() · v1.0.0
+52,921 ops/s
+18.9 µs per operation
+samples 51.5k – 53.4k
+@alexify/syncom@1.0.0</title>
 <text class="label primary" x="20" y="265">syncom</text>
-<text class="sublabel" x="20" y="280">default, createMemoryFsi() · v0.0.1</text>
-<path class="bar primary" d="M276,261H571.3709257519363A4,4 0 0 1 575.3709257519363,265V271A4,4 0 0 1 571.3709257519363,275H276Z"/>
-<text class="value" x="581.3709257519363" y="274">55.2k</text>
+<text class="sublabel" x="20" y="280">default, createMemoryFsi() · v1.0.0</text>
+<path class="bar primary" d="M276,261H569.8903477000931A4,4 0 0 1 573.8903477000931,265V271A4,4 0 0 1 569.8903477000931,275H276Z"/>
+<text class="value" x="579.8903477000931" y="274">52.9k</text>
 </g>
 <g><title>RxDB · memory storage · v17.6.0
 50,366 ops/s

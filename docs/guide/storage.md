@@ -19,7 +19,7 @@ const storage = await open({ path: 'data' });
 | `cache` | `{ max: 5000 }` | How many entries stay in memory; a live `Record` pins its own ([see below](#the-catalog-and-the-cache)) |
 | `integrity` | `'verify'` | `'lazy'` trusts a record file on the cold read instead of re-verifying it against its block |
 | `chain` | `true` | `false` keeps no [chain](./chain#through-storage) — a hub that only replicates has nothing to audit; two file writes less per record, reads lazy, `validate()` rejects with `code: 'NO_CHAIN'` |
-| `catalog` | `{ flushEvery: 64 }` | How often the record catalog is persisted; the log catches up the rest |
+| `catalog` | `{ flushEvery: 64 }` | The fewest changes between two saves of the record catalog; a large catalog is saved every sixteenth of its size, never more than half the log's retention apart, and the log catches up the rest |
 | `actor` | — | Who writes — stamped on every op as `actor`: a string, or a function asked per write ([see Sync](./sync#operations)) |
 | `schema` | — | Entity definitions: collections, their validators and indexes ([see below](#collections)); `version` and `snapshot` ([see below](#schema-versions)) |
 | `validator` | — | Compiles entity schemas that are plain objects without `~standard` ([see below](#validation)) |
@@ -171,8 +171,11 @@ file, tombstones included, so a bootstrap never lists the data directory.
 `list()` and `hasRecord()` answer from the **catalog**: every live record's
 id, collection and indexed field values, in memory, kept up to date by every
 write — local or a peer's — and persisted as `index/catalog.json` stamped
-with the log position it reflects (every `catalog.flushEvery` changes, and
-at `close()`). A reopen reads it back and re-reads only the records the log
+with the log position it reflects: at `close()`, and in between every
+`catalog.flushEvery` changes while it is small and every sixteenth of its size
+as it grows, so a save costs a write the same share of a row whatever the
+store's size, never more than half the log's `retention.ops` apart, so a node
+stopped without `close()` finds its stamp still in the log. A reopen reads it back and re-reads only the records the log
 changed since the stamp; when the log cannot say — a first open, a stamp
 from another epoch or below the retention floor, other indexes — the
 catalog is rebuilt from one scan of `data/`. It is derived state: delete the

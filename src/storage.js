@@ -300,12 +300,23 @@ class Storage extends Emitter {
     if (touched.size > 0) await this.#catalog.save(this.#log.lastEventId);
   }
 
-  // The persisted catalog is written every `flushEvery` puts and at close,
-  // off the mutation queue: the rows and the stamp are taken as the save
-  // starts and the write runs while writes go on, one save at a time. What
-  // lands in between is caught up from the log on the next open.
+  // The persisted catalog is written at close and, in between, off the
+  // mutation queue: the rows and the stamp are taken as the save starts and
+  // the write runs while writes go on, one save at a time. What lands in
+  // between is caught up from the log on the next open. A save writes every
+  // row, so it comes every `flushEvery` puts while the catalog is small and
+  // every sixteenth of its size as it grows — a sixteenth of a row per put
+  // whatever the size, where a fixed interval made a write cost more as the
+  // store grew — but never further apart than half what the log retains, so
+  // a node stopped without close() still finds its stamp in the log and
+  // catches up instead of rebuilding from a scan.
+  #flushThreshold() {
+    const grown = Math.min(this.#catalog.size >> 4, Math.floor(this.#log.retainedOps / 2));
+    return Math.max(this.#flushEvery, grown);
+  }
+
   #flushCatalog() {
-    if (this.#catalogSave !== null || this.#catalog.dirty < this.#flushEvery) return;
+    if (this.#catalogSave !== null || this.#catalog.dirty < this.#flushThreshold()) return;
     this.#catalogSave = this.#catalog
       .save(this.#log.lastEventId)
       .catch((error) => this.#logger.warn({ event: 'catalog.save', err: error }))

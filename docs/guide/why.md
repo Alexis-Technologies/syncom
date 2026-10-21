@@ -51,9 +51,9 @@ engine also covers what an application keeps next to replication:
 
 The [benchmarks](/guide/benchmarks) put a number on all of this. syncom opens a store and reads
 a record in 34 ms, the fastest cold start of the ten libraries measured. An empty replica pulls
-1,000 records in memory at about 100,000 a second, level with Yjs and Loro, and a read is served
+1,000 records in memory at about 110,000 a second, level with Yjs and Loro, and a read is served
 from its cache at about a million a second. A write costs more than a CRDT's, because it is
-logged, filed, catalogued and chained: about 1,400 a second on disk, where the LevelDB-backed
+logged, filed, catalogued and chained: about 1,500 a second on disk, where the LevelDB-backed
 Yjs and PouchDB do 19,000 to 26,000.
 
 ## When something else fits better
@@ -71,8 +71,8 @@ Yjs and PouchDB do 19,000 to 26,000.
   field). Jazz signs and encrypts every change, and Evolu encrypts everything it syncs.
 - **Ready-made UI bindings, React Native, a managed cloud.** syncom ships none of them. RxDB,
   TinyBase, Dexie Cloud, InstantDB and others do.
-- **A published 1.0.** syncom is pre-1.0 and not yet on npm. The [Sync](/guide/sync#guarantees-and-limits)
-  guide lists the known limits: a counter straddling a concurrent reset, no op signatures,
+- **A package with a track record.** syncom 1.0.0 is not on npm yet. The
+  [Sync](/guide/sync#guarantees-and-limits) guide lists the known limits: a counter straddling a concurrent reset, no op signatures,
   encrypted records that stay local.
 
 ## Where it comes from

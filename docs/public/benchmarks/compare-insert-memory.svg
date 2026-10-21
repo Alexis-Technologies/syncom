@@ -54,65 +54,65 @@ yjs@13.6.33</title>
 <path class="bar" d="M276,101H609.0197812296036A4,4 0 0 1 613.0197812296036,105V111A4,4 0 0 1 609.0197812296036,115H276Z"/>
 <text class="value" x="619.0197812296036" y="114">235k</text>
 </g>
+<g><title>syncom · chain: false, createMemoryFsi() · v1.0.0
+44,327 ops/s
+22.6 µs per operation
+samples 39.3k – 50.1k
+@alexify/syncom@1.0.0</title>
+<text class="label secondary" x="20" y="145">syncom</text>
+<text class="sublabel" x="20" y="160">chain: false, createMemoryFsi() · v1.0.0</text>
+<path class="bar secondary" d="M276,141H536.6664518055386A4,4 0 0 1 540.6664518055386,145V151A4,4 0 0 1 536.6664518055386,155H276Z"/>
+<text class="value" x="546.6664518055386" y="154">44.3k</text>
+</g>
+<g><title>syncom · default, createMemoryFsi() · v1.0.0
+37,539 ops/s
+26.6 µs per operation
+samples 34k – 41.9k
+@alexify/syncom@1.0.0</title>
+<text class="label primary" x="20" y="185">syncom</text>
+<text class="sublabel" x="20" y="200">default, createMemoryFsi() · v1.0.0</text>
+<path class="bar primary" d="M276,181H529.4482532836087A4,4 0 0 1 533.4482532836087,185V191A4,4 0 0 1 529.4482532836087,195H276Z"/>
+<text class="value" x="539.4482532836087" y="194">37.5k</text>
+</g>
 <g><title>Loro · LoroDoc, a LoroMap per record · v1.16.4
 31,338 ops/s
 31.9 µs per operation
 samples 29.9k – 43.2k
 loro-crdt@1.16.4</title>
-<text class="label" x="20" y="145">Loro</text>
-<text class="sublabel" x="20" y="160">LoroDoc, a LoroMap per record · v1.16.4</text>
-<path class="bar" d="M276,141H521.6065161302902A4,4 0 0 1 525.6065161302902,145V151A4,4 0 0 1 521.6065161302902,155H276Z"/>
-<text class="value" x="531.6065161302902" y="154">31.3k</text>
+<text class="label" x="20" y="225">Loro</text>
+<text class="sublabel" x="20" y="240">LoroDoc, a LoroMap per record · v1.16.4</text>
+<path class="bar" d="M276,221H521.6065161302902A4,4 0 0 1 525.6065161302902,225V231A4,4 0 0 1 521.6065161302902,235H276Z"/>
+<text class="value" x="531.6065161302902" y="234">31.3k</text>
 </g>
 <g><title>TinyBase · MergeableStore · v10.0.1
 22,941 ops/s
 43.6 µs per operation
 samples 21.8k – 24.6k
 tinybase@10.0.1</title>
-<text class="label" x="20" y="185">TinyBase</text>
-<text class="sublabel" x="20" y="200">MergeableStore · v10.0.1</text>
-<path class="bar" d="M276,181H508.0610197126724A4,4 0 0 1 512.0610197126724,185V191A4,4 0 0 1 508.0610197126724,195H276Z"/>
-<text class="value" x="518.0610197126724" y="194">22.9k</text>
+<text class="label" x="20" y="265">TinyBase</text>
+<text class="sublabel" x="20" y="280">MergeableStore · v10.0.1</text>
+<path class="bar" d="M276,261H508.0610197126724A4,4 0 0 1 512.0610197126724,265V271A4,4 0 0 1 508.0610197126724,275H276Z"/>
+<text class="value" x="518.0610197126724" y="274">22.9k</text>
 </g>
 <g><title>PouchDB · pouchdb-adapter-memory · v9.0.0
 20,291 ops/s
 49.3 µs per operation
 samples 19.9k – 20.6k
 pouchdb@9.0.0</title>
-<text class="label" x="20" y="225">PouchDB</text>
-<text class="sublabel" x="20" y="240">pouchdb-adapter-memory · v9.0.0</text>
-<path class="bar" d="M276,221H502.73088705422424A4,4 0 0 1 506.73088705422424,225V231A4,4 0 0 1 502.73088705422424,235H276Z"/>
-<text class="value" x="512.7308870542242" y="234">20.3k</text>
+<text class="label" x="20" y="305">PouchDB</text>
+<text class="sublabel" x="20" y="320">pouchdb-adapter-memory · v9.0.0</text>
+<path class="bar" d="M276,301H502.73088705422424A4,4 0 0 1 506.73088705422424,305V311A4,4 0 0 1 502.73088705422424,315H276Z"/>
+<text class="value" x="512.7308870542242" y="314">20.3k</text>
 </g>
 <g><title>RxDB · memory storage · v17.6.0
 16,702 ops/s
 59.9 µs per operation
 samples 8,306 – 111k
 rxdb@17.6.0</title>
-<text class="label" x="20" y="265">RxDB</text>
-<text class="sublabel" x="20" y="280">memory storage · v17.6.0</text>
-<path class="bar" d="M276,261H494.27770916823033A4,4 0 0 1 498.27770916823033,265V271A4,4 0 0 1 494.27770916823033,275H276Z"/>
-<text class="value" x="504.27770916823033" y="274">16.7k</text>
-</g>
-<g><title>syncom · default, createMemoryFsi() · v0.0.1
-11,122 ops/s
-89.9 µs per operation
-samples 9,194 – 14k
-@alexify/syncom@0.0.1</title>
-<text class="label primary" x="20" y="305">syncom</text>
-<text class="sublabel" x="20" y="320">default, createMemoryFsi() · v0.0.1</text>
-<path class="bar primary" d="M276,301H476.61882238219954A4,4 0 0 1 480.61882238219954,305V311A4,4 0 0 1 476.61882238219954,315H276Z"/>
-<text class="value" x="486.61882238219954" y="314">11.1k</text>
-</g>
-<g><title>syncom · chain: false, createMemoryFsi() · v0.0.1
-10,834 ops/s
-92.3 µs per operation
-samples 9,126 – 14.2k
-@alexify/syncom@0.0.1</title>
-<text class="label secondary" x="20" y="345">syncom</text>
-<text class="sublabel" x="20" y="360">chain: false, createMemoryFsi() · v0.0.1</text>
-<path class="bar secondary" d="M276,341H475.4796665524335A4,4 0 0 1 479.4796665524335,345V351A4,4 0 0 1 475.4796665524335,355H276Z"/>
-<text class="value" x="485.4796665524335" y="354">10.8k</text>
+<text class="label" x="20" y="345">RxDB</text>
+<text class="sublabel" x="20" y="360">memory storage · v17.6.0</text>
+<path class="bar" d="M276,341H494.27770916823033A4,4 0 0 1 498.27770916823033,345V351A4,4 0 0 1 494.27770916823033,355H276Z"/>
+<text class="value" x="504.27770916823033" y="354">16.7k</text>
 </g>
 <g><title>OrbitDB · documents, memory blockstore · v4.0.0
 1,081 ops/s

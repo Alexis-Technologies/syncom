@@ -199,16 +199,16 @@
       "url": "https://github.com/Alexis-Technologies/syncom",
       "direction": "sync engine",
       "package": "@alexify/syncom",
-      "version": "0.0.1",
+      "version": "1.0.0",
       "cells": {
         "version": {
           "mark": "",
-          "text": "0.0.1 (`@alexify/syncom`)",
+          "text": "1.0.0 (`@alexify/syncom`)",
           "source": "package.json"
         },
         "released": {
           "mark": "",
-          "text": "not yet on npm (pre-1.0)",
+          "text": "not yet on npm",
           "source": "CHANGELOG.md"
         },
         "license": {

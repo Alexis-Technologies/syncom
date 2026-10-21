@@ -45,44 +45,44 @@
 <text class="tick" x="676" y="384" text-anchor="middle">100k</text>
 <line class="axis" x1="202" y1="88" x2="202" y2="368"/>
 <g><title>addBlock · small payload
-5,044 ops/s
-198 µs per operation</title>
+5,515 ops/s
+181 µs per operation</title>
 <text class="label primary" x="20" y="105">addBlock</text>
 <text class="sublabel" x="20" y="120">small payload</text>
-<path class="bar primary" d="M202,101H518.2788467312737A4,4 0 0 1 522.2788467312737,105V111A4,4 0 0 1 518.2788467312737,115H202Z"/>
-<text class="value" x="528.2788467312737" y="114">5,044</text>
+<path class="bar primary" d="M202,101H522.8731437379809A4,4 0 0 1 526.8731437379809,105V111A4,4 0 0 1 522.8731437379809,115H202Z"/>
+<text class="value" x="532.8731437379809" y="114">5,515</text>
 </g>
 <g><title>addBlock · 4 KB payload
-5,023 ops/s
-199 µs per operation</title>
+4,869 ops/s
+205 µs per operation</title>
 <text class="label primary" x="20" y="145">addBlock</text>
 <text class="sublabel" x="20" y="160">4 KB payload</text>
-<path class="bar primary" d="M202,141H518.0641366119066A4,4 0 0 1 522.0641366119066,145V151A4,4 0 0 1 518.0641366119066,155H202Z"/>
-<text class="value" x="528.0641366119066" y="154">5,023</text>
+<path class="bar primary" d="M202,141H516.4616132836885A4,4 0 0 1 520.4616132836885,145V151A4,4 0 0 1 516.4616132836885,155H202Z"/>
+<text class="value" x="526.4616132836885" y="154">4,869</text>
 </g>
 <g><title>readBlock · single block
-13,352 ops/s
-74.9 µs per operation</title>
+13,701 ops/s
+73 µs per operation</title>
 <text class="label primary" x="20" y="185">readBlock</text>
 <text class="sublabel" x="20" y="200">single block</text>
-<path class="bar primary" d="M202,181H568.3772393550361A4,4 0 0 1 572.3772393550361,185V191A4,4 0 0 1 568.3772393550361,195H202Z"/>
-<text class="value" x="578.3772393550361" y="194">13.4k</text>
+<path class="bar primary" d="M202,181H569.7051435597095A4,4 0 0 1 573.7051435597095,185V191A4,4 0 0 1 569.7051435597095,195H202Z"/>
+<text class="value" x="579.7051435597095" y="194">13.7k</text>
 </g>
 <g><title>validate · last 1 block
-11,679 ops/s
-85.6 µs per operation</title>
+11,700 ops/s
+85.5 µs per operation</title>
 <text class="label primary" x="20" y="225">validate</text>
 <text class="sublabel" x="20" y="240">last 1 block</text>
-<path class="bar primary" d="M202,221H561.4875705248821A4,4 0 0 1 565.4875705248821,225V231A4,4 0 0 1 561.4875705248821,235H202Z"/>
-<text class="value" x="571.4875705248821" y="234">11.7k</text>
+<path class="bar primary" d="M202,221H561.5800246169201A4,4 0 0 1 565.5800246169201,225V231A4,4 0 0 1 561.5800246169201,235H202Z"/>
+<text class="value" x="571.5800246169201" y="234">11.7k</text>
 </g>
 <g><title>validate · last 10 blocks
-1,155 ops/s
-866 µs per operation</title>
+1,151 ops/s
+869 µs per operation</title>
 <text class="label primary" x="20" y="265">validate</text>
 <text class="sublabel" x="20" y="280">last 10 blocks</text>
-<path class="bar primary" d="M202,261H442.4159651310373A4,4 0 0 1 446.4159651310373,265V271A4,4 0 0 1 442.4159651310373,275H202Z"/>
-<text class="value" x="452.4159651310373" y="274">1,155</text>
+<path class="bar primary" d="M202,261H442.2374258501303A4,4 0 0 1 446.2374258501303,265V271A4,4 0 0 1 442.2374258501303,275H202Z"/>
+<text class="value" x="452.2374258501303" y="274">1,151</text>
 </g>
 <g><title>validate · last 100 blocks
 118 ops/s
@@ -93,12 +93,12 @@
 <text class="value" x="335.01801786577585" y="314">118</text>
 </g>
 <g><title>validate · full 200-block chain
-57 ops/s
-17.5 ms per operation</title>
+55 ops/s
+18.2 ms per operation</title>
 <text class="label primary" x="20" y="345">validate</text>
 <text class="sublabel" x="20" y="360">full 200-block chain</text>
-<path class="bar primary" d="M202,341H287.57117039719026A4,4 0 0 1 291.57117039719026,345V351A4,4 0 0 1 287.57117039719026,355H202Z"/>
-<text class="value" x="297.57117039719026" y="354">57</text>
+<path class="bar primary" d="M202,341H285.7329787050679A4,4 0 0 1 289.7329787050679,345V351A4,4 0 0 1 285.7329787050679,355H202Z"/>
+<text class="value" x="295.7329787050679" y="354">55</text>
 </g>
 <text class="caption" x="20" y="409">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-21</text>
 </svg>

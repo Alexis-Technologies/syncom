@@ -45,116 +45,116 @@
 <text class="tick" x="676" y="664" text-anchor="middle">10M</text>
 <line class="axis" x1="282" y1="88" x2="282" y2="648"/>
 <g><title>applyOp · set one field on a 5-field entry
-4,927,704 ops/s
-203 ns per operation</title>
+4,949,483 ops/s
+202 ns per operation</title>
 <text class="label primary" x="20" y="105">applyOp</text>
 <text class="sublabel" x="20" y="120">set one field on a 5-field entry</text>
-<path class="bar primary" d="M282,101H641.7254943315514A4,4 0 0 1 645.7254943315514,105V111A4,4 0 0 1 641.7254943315514,115H282Z"/>
-<text class="value" x="651.7254943315514" y="114">4.93M</text>
+<path class="bar primary" d="M282,101H641.9141439364953A4,4 0 0 1 645.9141439364953,105V111A4,4 0 0 1 641.9141439364953,115H282Z"/>
+<text class="value" x="651.9141439364953" y="114">4.95M</text>
 </g>
 <g><title>applyOp · inc a counter
-4,671,356 ops/s
-214 ns per operation</title>
+5,040,340 ops/s
+198 ns per operation</title>
 <text class="label primary" x="20" y="145">applyOp</text>
 <text class="sublabel" x="20" y="160">inc a counter</text>
-<path class="bar primary" d="M282,141H639.4401321269462A4,4 0 0 1 643.4401321269462,145V151A4,4 0 0 1 639.4401321269462,155H282Z"/>
-<text class="value" x="649.4401321269462" y="154">4.67M</text>
+<path class="bar primary" d="M282,141H642.6922935604462A4,4 0 0 1 646.6922935604462,145V151A4,4 0 0 1 642.6922935604462,155H282Z"/>
+<text class="value" x="652.6922935604462" y="154">5.04M</text>
 </g>
 <g><title>applyOp · write the whole record
-959,526 ops/s
-1.04 µs per operation</title>
+983,157 ops/s
+1.02 µs per operation</title>
 <text class="label primary" x="20" y="185">applyOp</text>
 <text class="sublabel" x="20" y="200">write the whole record</text>
-<path class="bar primary" d="M282,181H571.7325895975821A4,4 0 0 1 575.7325895975821,185V191A4,4 0 0 1 571.7325895975821,195H282Z"/>
-<text class="value" x="581.7325895975821" y="194">960k</text>
+<path class="bar primary" d="M282,181H572.7733532569611A4,4 0 0 1 576.7733532569611,185V191A4,4 0 0 1 572.7733532569611,195H282Z"/>
+<text class="value" x="582.7733532569611" y="194">983k</text>
 </g>
 <g><title>applyOp · merge a peer entry
-727,105 ops/s
-1.38 µs per operation</title>
+733,629 ops/s
+1.36 µs per operation</title>
 <text class="label primary" x="20" y="225">applyOp</text>
 <text class="sublabel" x="20" y="240">merge a peer entry</text>
-<path class="bar primary" d="M282,221H559.8673174150688A4,4 0 0 1 563.8673174150688,225V231A4,4 0 0 1 559.8673174150688,235H282Z"/>
-<text class="value" x="569.8673174150688" y="234">727k</text>
+<path class="bar primary" d="M282,221H560.2494343095588A4,4 0 0 1 564.2494343095588,225V231A4,4 0 0 1 560.2494343095588,235H282Z"/>
+<text class="value" x="570.2494343095588" y="234">734k</text>
 </g>
 <g><title>packOps · 500 writes
-77,508 ops/s
-12.9 µs per operation</title>
+79,607 ops/s
+12.6 µs per operation</title>
 <text class="label primary" x="20" y="265">packOps</text>
 <text class="sublabel" x="20" y="280">500 writes</text>
-<path class="bar primary" d="M282,261H464.1006332631913A4,4 0 0 1 468.1006332631913,265V271A4,4 0 0 1 464.1006332631913,275H282Z"/>
-<text class="value" x="474.1006332631913" y="274">77.5k</text>
+<path class="bar primary" d="M282,261H465.2436988917514A4,4 0 0 1 469.2436988917514,265V271A4,4 0 0 1 465.2436988917514,275H282Z"/>
+<text class="value" x="475.2436988917514" y="274">79.6k</text>
 </g>
 <g><title>unpackOps · 500 writes
-43,365 ops/s
-23.1 µs per operation</title>
+43,620 ops/s
+22.9 µs per operation</title>
 <text class="label primary" x="20" y="305">unpackOps</text>
 <text class="sublabel" x="20" y="320">500 writes</text>
-<path class="bar primary" d="M282,301H439.2582260465444A4,4 0 0 1 443.2582260465444,305V311A4,4 0 0 1 439.2582260465444,315H282Z"/>
-<text class="value" x="449.2582260465444" y="314">43.4k</text>
+<path class="bar primary" d="M282,301H439.5090376324041A4,4 0 0 1 443.5090376324041,305V311A4,4 0 0 1 439.5090376324041,315H282Z"/>
+<text class="value" x="449.5090376324041" y="314">43.6k</text>
 </g>
 <g><title>applyRemote · 100 writes, new records
-6,573 ops/s
-152 µs per operation</title>
+7,168 ops/s
+140 µs per operation</title>
 <text class="label primary" x="20" y="345">applyRemote</text>
 <text class="sublabel" x="20" y="360">100 writes, new records</text>
-<path class="bar primary" d="M282,341H358.54971777961623A4,4 0 0 1 362.54971777961623,345V351A4,4 0 0 1 358.54971777961623,355H282Z"/>
-<text class="value" x="368.54971777961623" y="354">6,573</text>
+<path class="bar primary" d="M282,341H362.25670267042574A4,4 0 0 1 366.25670267042574,345V351A4,4 0 0 1 362.25670267042574,355H282Z"/>
+<text class="value" x="372.25670267042574" y="354">7,168</text>
 </g>
 <g><title>applyRemote · 500 writes, new records
-6,938 ops/s
-144 µs per operation</title>
+7,198 ops/s
+139 µs per operation</title>
 <text class="label primary" x="20" y="385">applyRemote</text>
 <text class="sublabel" x="20" y="400">500 writes, new records</text>
-<path class="bar primary" d="M282,381H360.86157810734505A4,4 0 0 1 364.86157810734505,385V391A4,4 0 0 1 360.86157810734505,395H282Z"/>
-<text class="value" x="370.86157810734505" y="394">6,938</text>
+<path class="bar primary" d="M282,381H362.43536646821394A4,4 0 0 1 366.43536646821394,385V391A4,4 0 0 1 362.43536646821394,395H282Z"/>
+<text class="value" x="372.43536646821394" y="394">7,198</text>
 </g>
 <g><title>applyRemote · 100 sets on cached records
-7,972 ops/s
-125 µs per operation</title>
+10,861 ops/s
+92.1 µs per operation</title>
 <text class="label primary" x="20" y="425">applyRemote</text>
 <text class="sublabel" x="20" y="440">100 sets on cached records</text>
-<path class="bar primary" d="M282,421H366.80437806780236A4,4 0 0 1 370.80437806780236,425V431A4,4 0 0 1 366.80437806780236,435H282Z"/>
-<text class="value" x="376.80437806780236" y="434">7,972</text>
+<path class="bar primary" d="M282,421H380.0331766490119A4,4 0 0 1 384.0331766490119,425V431A4,4 0 0 1 380.0331766490119,435H282Z"/>
+<text class="value" x="390.0331766490119" y="434">10.9k</text>
 </g>
 <g><title>applyRemote · 100 incs on cached records
-8,364 ops/s
-120 µs per operation</title>
+10,714 ops/s
+93.3 µs per operation</title>
 <text class="label primary" x="20" y="465">applyRemote</text>
 <text class="sublabel" x="20" y="480">100 incs on cached records</text>
-<path class="bar primary" d="M282,461H368.85778137834495A4,4 0 0 1 372.85778137834495,465V471A4,4 0 0 1 368.85778137834495,475H282Z"/>
-<text class="value" x="378.85778137834495" y="474">8,364</text>
+<path class="bar primary" d="M282,461H379.4502367406287A4,4 0 0 1 383.4502367406287,465V471A4,4 0 0 1 379.4502367406287,475H282Z"/>
+<text class="value" x="389.4502367406287" y="474">10.7k</text>
 </g>
 <g><title>applyRemote · 100 writes, new records (chain: false)
-6,881 ops/s
-145 µs per operation</title>
+7,322 ops/s
+137 µs per operation</title>
 <text class="label primary" x="20" y="505">applyRemote</text>
 <text class="sublabel" x="20" y="520">100 writes, new records (chain: false)</text>
-<path class="bar primary" d="M282,501H360.50867844786967A4,4 0 0 1 364.50867844786967,505V511A4,4 0 0 1 360.50867844786967,515H282Z"/>
-<text class="value" x="370.50867844786967" y="514">6,881</text>
+<path class="bar primary" d="M282,501H363.16602786773296A4,4 0 0 1 367.16602786773296,505V511A4,4 0 0 1 363.16602786773296,515H282Z"/>
+<text class="value" x="373.16602786773296" y="514">7,322</text>
 </g>
 <g><title>applyRemote · 500 writes, new records (chain: false)
-6,867 ops/s
-146 µs per operation</title>
+7,302 ops/s
+137 µs per operation</title>
 <text class="label primary" x="20" y="545">applyRemote</text>
 <text class="sublabel" x="20" y="560">500 writes, new records (chain: false)</text>
-<path class="bar primary" d="M282,541H360.42155416832924A4,4 0 0 1 364.42155416832924,545V551A4,4 0 0 1 360.42155416832924,555H282Z"/>
-<text class="value" x="370.42155416832924" y="554">6,867</text>
+<path class="bar primary" d="M282,541H363.0490201184503A4,4 0 0 1 367.0490201184503,545V551A4,4 0 0 1 363.0490201184503,555H282Z"/>
+<text class="value" x="373.0490201184503" y="554">7,302</text>
 </g>
 <g><title>applyRemote · 100 sets on cached records (chain: false)
-8,578 ops/s
-117 µs per operation</title>
+11,389 ops/s
+87.8 µs per operation</title>
 <text class="label primary" x="20" y="585">applyRemote</text>
 <text class="sublabel" x="20" y="600">100 sets on cached records (chain: false)</text>
-<path class="bar primary" d="M282,581H369.9385251274509A4,4 0 0 1 373.9385251274509,585V591A4,4 0 0 1 369.9385251274509,595H282Z"/>
-<text class="value" x="379.9385251274509" y="594">8,578</text>
+<path class="bar primary" d="M282,581H382.0638309056849A4,4 0 0 1 386.0638309056849,585V591A4,4 0 0 1 382.0638309056849,595H282Z"/>
+<text class="value" x="392.0638309056849" y="594">11.4k</text>
 </g>
 <g><title>applyRemote · 100 incs on cached records (chain: false)
-8,346 ops/s
-120 µs per operation</title>
+11,195 ops/s
+89.3 µs per operation</title>
 <text class="label primary" x="20" y="625">applyRemote</text>
 <text class="sublabel" x="20" y="640">100 incs on cached records (chain: false)</text>
-<path class="bar primary" d="M282,621H368.7656204670055A4,4 0 0 1 372.7656204670055,625V631A4,4 0 0 1 368.7656204670055,635H282Z"/>
-<text class="value" x="378.7656204670055" y="634">8,346</text>
+<path class="bar primary" d="M282,621H381.32887364463227A4,4 0 0 1 385.32887364463227,625V631A4,4 0 0 1 381.32887364463227,635H282Z"/>
+<text class="value" x="391.32887364463227" y="634">11.2k</text>
 </g>
 <text class="caption" x="20" y="689">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-21</text>
 </svg>

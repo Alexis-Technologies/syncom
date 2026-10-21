@@ -251,6 +251,8 @@ export interface OpLog {
   applied(from: number, to?: number): void;
   /** One key of the vector (`origin` or `origin@scope`), without copying the whole. */
   seqOf(key: string): number;
+  /** How many ops the log keeps at least (`retention.ops`); `Infinity` when no count bounds it. */
+  readonly retainedOps: number;
   /** Sealed segments on disk. */
   readonly segments: number;
   /** The newest stamp this log has held since it was opened — what the clock is seeded from. */
@@ -723,7 +725,11 @@ export interface StorageOptions<S extends Schema = Schema> {
    * reads lazy, and `validate()` rejects with `code: 'NO_CHAIN'`.
    */
   chain?: boolean;
-  /** The record catalog is persisted every `flushEvery` changes (default 64) and at close; the log catches up the rest. */
+  /**
+   * The record catalog is persisted at close and, in between, every `flushEvery` changes (default 64) while it is
+   * small, every sixteenth of its size as it grows, never more than half the log's `retention.ops` apart; the log
+   * catches up the rest on the next open.
+   */
   catalog?: { flushEvery?: number };
   schema?: S;
   /** Compiles entity schemas that are plain objects without `~standard`. */

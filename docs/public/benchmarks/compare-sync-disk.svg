@@ -86,25 +86,25 @@ tinybase@10.0.1</title>
 <path class="bar" d="M276,255H476.4209656727902A4,4 0 0 1 480.4209656727902,259V265A4,4 0 0 1 476.4209656727902,269H276Z"/>
 <text class="value" x="486.4209656727902" y="268">11.1k</text>
 </g>
-<g><title>syncom · chain: false, node:fs · v0.0.1
-7,312 records/s
-137 µs per record
-samples 6,187 – 7,585
-@alexify/syncom@0.0.1</title>
+<g><title>syncom · chain: false, node:fs · v1.0.0
+7,404 records/s
+135 µs per record
+samples 7,011 – 7,580
+@alexify/syncom@1.0.0</title>
 <text class="label secondary" x="20" y="299">syncom</text>
-<text class="sublabel" x="20" y="314">chain: false, node:fs · v0.0.1</text>
-<path class="bar secondary" d="M276,295H458.40180187840855A4,4 0 0 1 462.40180187840855,299V305A4,4 0 0 1 458.40180187840855,309H276Z"/>
-<text class="value" x="468.40180187840855" y="308">7,312</text>
+<text class="sublabel" x="20" y="314">chain: false, node:fs · v1.0.0</text>
+<path class="bar secondary" d="M276,295H458.9490805535272A4,4 0 0 1 462.9490805535272,299V305A4,4 0 0 1 458.9490805535272,309H276Z"/>
+<text class="value" x="468.9490805535272" y="308">7,404</text>
 </g>
-<g><title>syncom · default, node:fs · v0.0.1
-7,095 records/s
-141 µs per record
-samples 5,858 – 7,456
-@alexify/syncom@0.0.1</title>
+<g><title>syncom · default, node:fs · v1.0.0
+6,947 records/s
+144 µs per record
+samples 4,099 – 7,598
+@alexify/syncom@1.0.0</title>
 <text class="label primary" x="20" y="339">syncom</text>
-<text class="sublabel" x="20" y="354">default, node:fs · v0.0.1</text>
-<path class="bar primary" d="M276,335H457.09702255635256A4,4 0 0 1 461.09702255635256,339V345A4,4 0 0 1 457.09702255635256,349H276Z"/>
-<text class="value" x="467.09702255635256" y="348">7,095</text>
+<text class="sublabel" x="20" y="354">default, node:fs · v1.0.0</text>
+<path class="bar primary" d="M276,335H456.17877002372313A4,4 0 0 1 460.17877002372313,339V345A4,4 0 0 1 456.17877002372313,349H276Z"/>
+<text class="value" x="466.17877002372313" y="348">6,947</text>
 </g>
 <g><title>Automerge · automerge-repo, NodeFS storage · v3.5.0
 3,098 records/s

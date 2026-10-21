@@ -1,6 +1,6 @@
 {
   "name": "@alexify/syncom",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "description": "Fast, zero-dependency distributed data sync engine",
   "main": "index.js",
   "browser": {

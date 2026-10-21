@@ -80,25 +80,25 @@ tinybase@10.0.1</title>
 <path class="bar" d="M276,181H567.0721840060161A4,4 0 0 1 571.0721840060161,185V191A4,4 0 0 1 567.0721840060161,195H276Z"/>
 <text class="value" x="577.0721840060161" y="194">1.46M</text>
 </g>
-<g><title>syncom · default, createMemoryFsi() · v0.0.1
-980,461 ops/s
+<g><title>syncom · chain: false, createMemoryFsi() · v1.0.0
+982,922 ops/s
 1.02 µs per operation
-samples 966k – 992k
-@alexify/syncom@0.0.1</title>
-<text class="label primary" x="20" y="225">syncom</text>
-<text class="sublabel" x="20" y="240">default, createMemoryFsi() · v0.0.1</text>
-<path class="bar primary" d="M276,221H557.2245996885385A4,4 0 0 1 561.2245996885385,225V231A4,4 0 0 1 557.2245996885385,235H276Z"/>
-<text class="value" x="567.2245996885385" y="234">980k</text>
+samples 962k – 992k
+@alexify/syncom@1.0.0</title>
+<text class="label secondary" x="20" y="225">syncom</text>
+<text class="sublabel" x="20" y="240">chain: false, createMemoryFsi() · v1.0.0</text>
+<path class="bar secondary" d="M276,221H557.2868083969722A4,4 0 0 1 561.2868083969722,225V231A4,4 0 0 1 557.2868083969722,235H276Z"/>
+<text class="value" x="567.2868083969722" y="234">983k</text>
 </g>
-<g><title>syncom · chain: false, createMemoryFsi() · v0.0.1
-962,906 ops/s
-1.04 µs per operation
-samples 956k – 974k
-@alexify/syncom@0.0.1</title>
-<text class="label secondary" x="20" y="265">syncom</text>
-<text class="sublabel" x="20" y="280">chain: false, createMemoryFsi() · v0.0.1</text>
-<path class="bar secondary" d="M276,261H556.7762113038468A4,4 0 0 1 560.7762113038468,265V271A4,4 0 0 1 556.7762113038468,275H276Z"/>
-<text class="value" x="566.7762113038468" y="274">963k</text>
+<g><title>syncom · default, createMemoryFsi() · v1.0.0
+966,417 ops/s
+1.03 µs per operation
+samples 964k – 974k
+@alexify/syncom@1.0.0</title>
+<text class="label primary" x="20" y="265">syncom</text>
+<text class="sublabel" x="20" y="280">default, createMemoryFsi() · v1.0.0</text>
+<path class="bar primary" d="M276,261H556.8665582779187A4,4 0 0 1 560.8665582779187,265V271A4,4 0 0 1 556.8665582779187,275H276Z"/>
+<text class="value" x="566.8665582779187" y="274">966k</text>
 </g>
 <g><title>Loro · LoroDoc, a LoroMap per record · v1.16.4
 312,943 ops/s

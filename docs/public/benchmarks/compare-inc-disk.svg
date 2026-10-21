@@ -53,25 +53,25 @@ loro-crdt@1.16.4</title>
 <path class="bar" d="M271,152H596.8627252035749A4,4 0 0 1 600.8627252035749,156V162A4,4 0 0 1 596.8627252035749,166H271Z"/>
 <text class="value" x="606.8627252035749" y="165">42.6k</text>
 </g>
-<g><title>syncom · chain: false, node:fs · v0.0.1
-3,544 ops/s
-282 µs per operation
-samples 3,217 – 3,646
-@alexify/syncom@0.0.1</title>
+<g><title>syncom · chain: false, node:fs · v1.0.0
+3,561 ops/s
+281 µs per operation
+samples 3,143 – 3,639
+@alexify/syncom@1.0.0</title>
 <text class="label secondary" x="20" y="196">syncom</text>
-<text class="sublabel" x="20" y="211">chain: false, node:fs · v0.0.1</text>
-<path class="bar secondary" d="M271,192H378.26582267127685A4,4 0 0 1 382.26582267127685,196V202A4,4 0 0 1 378.26582267127685,206H271Z"/>
-<text class="value" x="388.26582267127685" y="205">3,544</text>
+<text class="sublabel" x="20" y="211">chain: false, node:fs · v1.0.0</text>
+<path class="bar secondary" d="M271,192H378.70240454493603A4,4 0 0 1 382.70240454493603,196V202A4,4 0 0 1 378.70240454493603,206H271Z"/>
+<text class="value" x="388.70240454493603" y="205">3,561</text>
 </g>
-<g><title>syncom · default, node:fs · v0.0.1
-1,724 ops/s
-580 µs per operation
-samples 1,419 – 2,185
-@alexify/syncom@0.0.1</title>
+<g><title>syncom · default, node:fs · v1.0.0
+1,808 ops/s
+553 µs per operation
+samples 1,239 – 2,161
+@alexify/syncom@1.0.0</title>
 <text class="label primary" x="20" y="236">syncom</text>
-<text class="sublabel" x="20" y="251">default, node:fs · v0.0.1</text>
-<path class="bar primary" d="M271,232H314.90928385896353A4,4 0 0 1 318.90928385896353,236V242A4,4 0 0 1 314.90928385896353,246H271Z"/>
-<text class="value" x="324.90928385896353" y="245">1,724</text>
+<text class="sublabel" x="20" y="251">default, node:fs · v1.0.0</text>
+<path class="bar primary" d="M271,232H319.0665303374742A4,4 0 0 1 323.0665303374742,236V242A4,4 0 0 1 319.0665303374742,246H271Z"/>
+<text class="value" x="329.0665303374742" y="245">1,808</text>
 </g>
 <g><title>Automerge · automerge-repo, NodeFS storage · v3.5.0
 1,197 ops/s

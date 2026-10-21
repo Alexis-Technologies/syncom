@@ -102,6 +102,7 @@ test('OpLog', async (t) => {
     const dir = await createTemp();
     try {
       const log = await new OpLog(dir, { rollAfter: 2, retention: { ops: 4 } });
+      assert.strictEqual(log.retainedOps, 4);
       for (let seq = 1; seq <= 8; seq++) await log.append([op('A', seq)]);
       const names = (await fs.readdir(path.join(dir, 'log'))).sort();
       assert.ok(names.some((name) => name.startsWith('seg-')));
@@ -131,6 +132,7 @@ test('OpLog', async (t) => {
     const dir = await createTemp();
     try {
       const log = await new OpLog(dir, { rollAfter: 2, retention: { ops: 0, days: 1 } });
+      assert.strictEqual(log.retainedOps, Infinity, 'no count bounds a log retained by age only');
       const old = Date.now() - 3 * 86_400_000;
       await log.append([op('A', 1, { ts: old })]);
       await log.append([op('A', 2, { ts: old })]);

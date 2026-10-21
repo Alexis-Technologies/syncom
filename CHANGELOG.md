@@ -7,10 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-This package has not been published to npm yet — there is no released version
-section until the first publish; everything below lands there on release day.
+This package has not been published to npm yet. `package.json` carries the
+version of the first release, 1.0.0; there is no released version section until
+it is published, and everything below lands there on release day.
 
 ### Added
+
+- **Benchmarks against nine libraries and a comparison with eighteen.**
+  `pnpm bench:compare` measures syncom against Yjs, Automerge, Loro, TinyBase,
+  PouchDB, RxDB, Fireproof, GUN and OrbitDB (insert, update, read, a converging
+  counter, a batch, replicating a store; in memory and on disk; a cold start),
+  each pair in a fresh process and checked before it is timed; the libraries
+  live in `bench/compare`'s own `package.json`, never in syncom's
+  devDependencies. `pnpm bench:size` measures browser bundles, `pnpm bench
+  --save` records syncom's own benchmarks, `pnpm bench:report` turns all three
+  into the charts of the docs and the README. `docs/comparison.json` (rendered
+  by `pnpm docs:comparison`) compares forty features, each cell decided from
+  the published source. New pages: Why syncom?, Compared with alternatives,
+  Benchmarks, Architecture.
 
 - **`storage.repair(id)`.** A record whose file fails its integrity check
   (`INTEGRITY`) or is torn is rebuilt from this node's log: the retained
@@ -500,6 +514,17 @@ section until the first publish; everything below lands there on release day.
 - `examples/main.js` required a `globalstorage.js` that does not exist.
 
 ### Changed
+
+- **A write no longer costs more as the store grows.** The record catalog is a
+  whole file, and it was saved every `catalog.flushEvery` (64) puts whatever
+  its size, so every write paid for a sixty-fourth of every row: inserts into
+  20,000 records in memory ran at a third of the speed of inserts into 1,000,
+  and the save was half of the CPU. `flushEvery` is now the floor: a catalog
+  is saved every sixteenth of its size as it grows, never more than half the
+  log's `retention.ops` apart (so a node stopped without `close()` still
+  catches up from the log rather than rebuilding from a scan). Inserts in
+  memory hold their speed at 40,000 records; `OpLog.retainedOps` says what
+  the log keeps.
 
 - **The engine is modules, not one class.** `src/storage.js` (1 900 lines)
   is now the facade — the open sequence, the mutation queue, the public API

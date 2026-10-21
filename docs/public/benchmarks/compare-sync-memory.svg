@@ -45,35 +45,35 @@
 <line class="grid" x1="676" y1="105" x2="676" y2="465"/>
 <text class="tick" x="676" y="481" text-anchor="middle">1M</text>
 <line class="axis" x1="276" y1="105" x2="276" y2="465"/>
-<g><title>syncom · chain: false, createMemoryFsi() · v0.0.1
-112,040 records/s
-8.93 µs per record
-samples 101k – 132k
-@alexify/syncom@0.0.1</title>
+<g><title>syncom · chain: false, createMemoryFsi() · v1.0.0
+126,826 records/s
+7.88 µs per record
+samples 99.7k – 138k
+@alexify/syncom@1.0.0</title>
 <text class="label secondary" x="20" y="122">syncom</text>
-<text class="sublabel" x="20" y="137">chain: false, createMemoryFsi() · v0.0.1</text>
-<path class="bar secondary" d="M276,118H576.9371484283745A4,4 0 0 1 580.9371484283745,122V128A4,4 0 0 1 576.9371484283745,132H276Z"/>
-<text class="value" x="586.9371484283745" y="131">112k</text>
+<text class="sublabel" x="20" y="137">chain: false, createMemoryFsi() · v1.0.0</text>
+<path class="bar secondary" d="M276,118H582.3207445473049A4,4 0 0 1 586.3207445473049,122V128A4,4 0 0 1 582.3207445473049,132H276Z"/>
+<text class="value" x="592.3207445473049" y="131">127k</text>
+</g>
+<g><title>syncom · default, createMemoryFsi() · v1.0.0
+107,635 records/s
+9.29 µs per record
+samples 92.3k – 110k
+@alexify/syncom@1.0.0</title>
+<text class="label primary" x="20" y="162">syncom</text>
+<text class="sublabel" x="20" y="177">default, createMemoryFsi() · v1.0.0</text>
+<path class="bar primary" d="M276,158H575.1955069114966A4,4 0 0 1 579.1955069114966,162V168A4,4 0 0 1 575.1955069114966,172H276Z"/>
+<text class="value" x="585.1955069114966" y="171">108k</text>
 </g>
 <g><title>Loro · LoroDoc, a LoroMap per record · v1.16.4
 105,332 records/s
 9.49 µs per record
 samples 93.4k – 110k
 loro-crdt@1.16.4</title>
-<text class="label" x="20" y="162">Loro</text>
-<text class="sublabel" x="20" y="177">LoroDoc, a LoroMap per record · v1.16.4</text>
-<path class="bar" d="M276,158H574.2562208793138A4,4 0 0 1 578.2562208793138,162V168A4,4 0 0 1 574.2562208793138,172H276Z"/>
-<text class="value" x="584.2562208793138" y="171">105k</text>
-</g>
-<g><title>syncom · default, createMemoryFsi() · v0.0.1
-101,301 records/s
-9.87 µs per record
-samples 78.9k – 105k
-@alexify/syncom@0.0.1</title>
-<text class="label primary" x="20" y="202">syncom</text>
-<text class="sublabel" x="20" y="217">default, createMemoryFsi() · v0.0.1</text>
-<path class="bar primary" d="M276,198H572.5613198592841A4,4 0 0 1 576.5613198592841,202V208A4,4 0 0 1 572.5613198592841,212H276Z"/>
-<text class="value" x="582.5613198592841" y="211">101k</text>
+<text class="label" x="20" y="202">Loro</text>
+<text class="sublabel" x="20" y="217">LoroDoc, a LoroMap per record · v1.16.4</text>
+<path class="bar" d="M276,198H574.2562208793138A4,4 0 0 1 578.2562208793138,202V208A4,4 0 0 1 574.2562208793138,212H276Z"/>
+<text class="value" x="584.2562208793138" y="211">105k</text>
 </g>
 <g><title>Yjs · Y.Doc, a Y.Map per record · v13.6.33
 99,729 records/s

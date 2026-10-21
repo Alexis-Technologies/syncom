@@ -225,6 +225,12 @@ class OpLog {
     return this.#floor;
   }
 
+  /** How many ops the log keeps at least (`retention.ops`); Infinity when no count bounds it. */
+  get retainedOps() {
+    const { ops } = this.#retention;
+    return typeof ops === 'number' && ops > 0 ? ops : Infinity;
+  }
+
   /** Sealed segments on disk. */
   get segments() {
     return this.#segments.length;

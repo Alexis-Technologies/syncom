@@ -84,25 +84,25 @@ pouchdb@9.0.0</title>
 <path class="bar" d="M276,221H458.8977825496081A4,4 0 0 1 462.8977825496081,225V231A4,4 0 0 1 458.8977825496081,235H276Z"/>
 <text class="value" x="468.8977825496081" y="234">74k</text>
 </g>
-<g><title>syncom · chain: false, createMemoryFsi() · v0.0.1
-43,002 records/s
-23.3 µs per record
-samples 39.1k – 49k
-@alexify/syncom@0.0.1</title>
+<g><title>syncom · chain: false, createMemoryFsi() · v1.0.0
+61,080 records/s
+16.4 µs per record
+samples 59.1k – 63.6k
+@alexify/syncom@1.0.0</title>
 <text class="label secondary" x="20" y="265">syncom</text>
-<text class="sublabel" x="20" y="280">chain: false, createMemoryFsi() · v0.0.1</text>
-<path class="bar secondary" d="M276,261H435.34859905732833A4,4 0 0 1 439.34859905732833,265V271A4,4 0 0 1 435.34859905732833,275H276Z"/>
-<text class="value" x="445.34859905732833" y="274">43k</text>
+<text class="sublabel" x="20" y="280">chain: false, createMemoryFsi() · v1.0.0</text>
+<path class="bar secondary" d="M276,261H450.59004922719464A4,4 0 0 1 454.59004922719464,265V271A4,4 0 0 1 450.59004922719464,275H276Z"/>
+<text class="value" x="460.59004922719464" y="274">61.1k</text>
 </g>
-<g><title>syncom · default, createMemoryFsi() · v0.0.1
-36,045 records/s
-27.7 µs per record
-samples 32k – 39.6k
-@alexify/syncom@0.0.1</title>
+<g><title>syncom · default, createMemoryFsi() · v1.0.0
+41,204 records/s
+24.3 µs per record
+samples 35.4k – 43.4k
+@alexify/syncom@1.0.0</title>
 <text class="label primary" x="20" y="305">syncom</text>
-<text class="sublabel" x="20" y="320">default, createMemoryFsi() · v0.0.1</text>
-<path class="bar primary" d="M276,301H427.68446213515267A4,4 0 0 1 431.68446213515267,305V311A4,4 0 0 1 427.68446213515267,315H276Z"/>
-<text class="value" x="437.68446213515267" y="314">36k</text>
+<text class="sublabel" x="20" y="320">default, createMemoryFsi() · v1.0.0</text>
+<path class="bar primary" d="M276,301H433.494291090685A4,4 0 0 1 437.494291090685,305V311A4,4 0 0 1 433.494291090685,315H276Z"/>
+<text class="value" x="443.494291090685" y="314">41.2k</text>
 </g>
 <g><title>TinyBase · MergeableStore · v10.0.1
 23,707 records/s

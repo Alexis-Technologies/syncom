@@ -473,6 +473,7 @@ storage.on('change', (op, via) => {
   expectType<syncom.PeerRef | null>(via);
 });
 expectType<number>(log.segments);
+expectType<number>(log.retainedOps);
 expectType<Promise<syncom.OpLog>>(new syncom.OpLog('base', { onRoll: (roll) => void roll.floor }));
 
 // E6: what existed at runtime but not in the types

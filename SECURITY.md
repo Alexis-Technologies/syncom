@@ -105,4 +105,4 @@ These are the areas where a report matters most, roughly in order:
 
 ## Supported versions
 
-Pre-1.0: only the latest release receives fixes.
+Only the latest release receives fixes.

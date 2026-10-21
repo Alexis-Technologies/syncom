@@ -78,8 +78,8 @@ that fails the build when exceeded.
 
 | Entry | raw | min | min+gzip | budget |
 | ----- | ---:| ---:| --------:| ------:|
-| main entry — browser (@alexify/syncom) | 253.9 KB | 105.3 KB | 36.5 KB | 37.0 KB |
-| main entry — node (@alexify/syncom) | 239.7 KB | 104.3 KB | 36.1 KB | — |
+| main entry — browser (@alexify/syncom) | 254.8 KB | 105.5 KB | 36.6 KB | 37.0 KB |
+| main entry — node (@alexify/syncom) | 240.6 KB | 104.4 KB | 36.1 KB | — |
 | wrpc adapter — browser (@alexify/syncom/wrpc) | 3.4 KB | 1.4 KB | 0.7 KB | 2.0 KB |
 | contracts — browser (@alexify/syncom/contracts) | 3.7 KB | 1.6 KB | 0.8 KB | 1.0 KB |
 | idb backend — browser (@alexify/syncom/idb) | 3.7 KB | 1.7 KB | 0.8 KB | 2.0 KB |
@@ -165,7 +165,7 @@ InstantDB) meet. The [comparison](https://syncomjs.vercel.app/guide/comparison) 
 nineteen in one table of forty features, each cell decided from the published source. In short:
 syncom is a database that merges field by field, not a text CRDT. It syncs with no service to
 run, its hosts validate and scope what peers send, and its log is verifiable and purgeable. It
-has no text or list CRDT, no signed ops and no UI bindings, and it is pre-1.0.
+has no text or list CRDT, no signed ops and no UI bindings, and 1.0.0 is not on npm yet.
 
 ## Benchmarks
 
@@ -211,8 +211,8 @@ interactive charts are on the [Benchmarks](https://syncomjs.vercel.app/guide/ben
 
 | Library | Insert a record<br><sub>ops/s</sub> | Update a field<br><sub>ops/s</sub> | Read a record<br><sub>ops/s</sub> | Increment a counter<br><sub>ops/s</sub> | Insert 1,000 at once<br><sub>records/s</sub> | Replicate a store<br><sub>records/s</sub> |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| **syncom**<br><sub>default, createMemoryFsi() · v0.0.1</sub> | 11,100 | 55,200 | 980,000 | 53,100 | 36,000 | 101,000 |
-| **syncom**<br><sub>chain: false, createMemoryFsi() · v0.0.1</sub> | 10,800 | 83,000 | 963,000 | 76,400 | 43,000 | 112,000 |
+| **syncom**<br><sub>default, createMemoryFsi() · v1.0.0</sub> | 37,500 | 52,900 | 966,000 | 53,100 | 41,200 | 108,000 |
+| **syncom**<br><sub>chain: false, createMemoryFsi() · v1.0.0</sub> | 44,300 | 78,400 | 983,000 | 79,400 | 61,100 | 127,000 |
 | Yjs<br><sub>Y.Doc, a Y.Map per record · v13.6.33</sub> | 235,000 | 382,000 | 3,680,000 | — | 275,000 | 99,700 |
 | Automerge<br><sub>Automerge.change, Counter · v3.5.0</sub> | 512 | 1,990 | 10,600,000 | 1,950 | 8,960 | 20,900 |
 | Loro<br><sub>LoroDoc, a LoroMap per record · v1.16.4</sub> | 31,300 | 412,000 | 313,000 | 349,000 | 83,100 | 105,000 |
@@ -226,8 +226,8 @@ interactive charts are on the [Benchmarks](https://syncomjs.vercel.app/guide/ben
 
 | Library | Insert a record<br><sub>ops/s</sub> | Update a field<br><sub>ops/s</sub> | Read a record<br><sub>ops/s</sub> | Increment a counter<br><sub>ops/s</sub> | Insert 1,000 at once<br><sub>records/s</sub> | Replicate a store<br><sub>records/s</sub> |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| **syncom**<br><sub>default, node:fs · v0.0.1</sub> | 1,390 | 1,540 | 954,000 | 1,720 | 1,850 | 7,100 |
-| **syncom**<br><sub>chain: false, node:fs · v0.0.1</sub> | 2,100 | 3,500 | 944,000 | 3,540 | 2,920 | 7,310 |
+| **syncom**<br><sub>default, node:fs · v1.0.0</sub> | 1,490 | 1,590 | 896,000 | 1,810 | 1,850 | 6,950 |
+| **syncom**<br><sub>chain: false, node:fs · v1.0.0</sub> | 2,450 | 3,500 | 955,000 | 3,560 | 3,100 | 7,400 |
 | Yjs<br><sub>y-leveldb · v13.6.33</sub> | 19,200 | 22,400 | 3,690,000 | — | 155,000 | 53,700 |
 | Automerge<br><sub>automerge-repo, NodeFS storage · v3.5.0</sub> | 490 | 1,250 | 10,500,000 | 1,200 | 7,820 | 3,100 |
 | Loro<br><sub>updates appended to a file · v1.16.4</sub> | 19,500 | 43,300 | 285,000 | 42,600 | 66,900 | 108,000 |
@@ -262,7 +262,7 @@ _Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 roun
 | GUN<br><sub>gun@0.2020.1241</sub> | gun (localStorage; its WebSocket mesh is built in) | 42.2 KB | 17.1 KB |  |
 | TinyBase<br><sub>tinybase@10.0.1</sub> | MergeableStore + IndexedDB persister + custom synchronizer | 56.4 KB | 23.8 KB |  |
 | Yjs<br><sub>yjs@13.6.33, y-indexeddb@9.0.12, y-protocols@1.0.7</sub> | yjs + y-indexeddb + y-protocols/sync | 80.2 KB | 24.5 KB |  |
-| **syncom**<br><sub>@alexify/syncom@0.0.1</sub> | open() over OPFS + the wrpc link adapter | 107.0 KB | 37.2 KB | storage, schema, queries, the op log and the sync protocol are one entry |
+| **syncom**<br><sub>@alexify/syncom@1.0.0</sub> | open() over OPFS + the wrpc link adapter | 107.2 KB | 37.3 KB | storage, schema, queries, the op log and the sync protocol are one entry |
 | PouchDB<br><sub>pouchdb-browser@9.0.0</sub> | pouchdb-browser | 117.8 KB | 40.4 KB | pouchdb-browser carries its HTTP adapter (the CouchDB client) with it |
 | RxDB<br><sub>rxdb@17.6.0, dexie@4.4.6, rxjs@7.8.2</sub> | rxdb + Dexie storage + replication | 282.3 KB | 90.1 KB |  |
 | Fireproof<br><sub>@fireproof/core@0.24.19</sub> | @fireproof/core | 784.2 KB | 204.0 KB |  |
@@ -299,7 +299,7 @@ See [Browser](https://syncomjs.vercel.app/guide/browser).
 
 ## Status
 
-Pre-1.0. Everything on this page works today and is covered by the test suite,
+1.0.0, not yet published to npm. Everything on this page works today and is covered by the test suite,
 including replication over real wrpc WebSockets. Known limits — a counter
 straddling a concurrent reset, no op signatures, encrypted records staying
 local — are listed under [Guarantees and limits](https://syncomjs.vercel.app/guide/sync#guarantees-and-limits).

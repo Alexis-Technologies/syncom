@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-21T13:25:56.086Z",
+  "generatedAt": "2026-10-21T14:21:59.565Z",
   "machine": {
     "cpu": "Apple M3 Max",
     "cores": 16,
@@ -11,97 +11,97 @@
     {
       "subject": "apply",
       "name": "applyOp — set one field on a 5-field entry",
-      "opsPerSec": 4927704
+      "opsPerSec": 4949483
     },
     {
       "subject": "apply",
       "name": "applyOp — inc a counter",
-      "opsPerSec": 4671356
+      "opsPerSec": 5040340
     },
     {
       "subject": "apply",
       "name": "applyOp — write the whole record",
-      "opsPerSec": 959526
+      "opsPerSec": 983157
     },
     {
       "subject": "apply",
       "name": "applyOp — merge a peer entry",
-      "opsPerSec": 727105
+      "opsPerSec": 733629
     },
     {
       "subject": "apply",
       "name": "packOps — 500 writes",
-      "opsPerSec": 77508
+      "opsPerSec": 79607
     },
     {
       "subject": "apply",
       "name": "unpackOps — 500 writes",
-      "opsPerSec": 43365
+      "opsPerSec": 43620
     },
     {
       "subject": "apply",
       "name": "applyRemote — 100 writes, new records",
-      "opsPerSec": 6573
+      "opsPerSec": 7168
     },
     {
       "subject": "apply",
       "name": "applyRemote — 500 writes, new records",
-      "opsPerSec": 6938
+      "opsPerSec": 7198
     },
     {
       "subject": "apply",
       "name": "applyRemote — 100 sets on cached records",
-      "opsPerSec": 7972
+      "opsPerSec": 10861
     },
     {
       "subject": "apply",
       "name": "applyRemote — 100 incs on cached records",
-      "opsPerSec": 8364
+      "opsPerSec": 10714
     },
     {
       "subject": "apply",
       "name": "applyRemote — 100 writes, new records (chain: false)",
-      "opsPerSec": 6881
+      "opsPerSec": 7322
     },
     {
       "subject": "apply",
       "name": "applyRemote — 500 writes, new records (chain: false)",
-      "opsPerSec": 6867
+      "opsPerSec": 7302
     },
     {
       "subject": "apply",
       "name": "applyRemote — 100 sets on cached records (chain: false)",
-      "opsPerSec": 8578
+      "opsPerSec": 11389
     },
     {
       "subject": "apply",
       "name": "applyRemote — 100 incs on cached records (chain: false)",
-      "opsPerSec": 8346
+      "opsPerSec": 11195
     },
     {
       "subject": "chain",
       "name": "addBlock — small payload",
-      "opsPerSec": 5044
+      "opsPerSec": 5515
     },
     {
       "subject": "chain",
       "name": "addBlock — 4 KB payload",
-      "opsPerSec": 5023
+      "opsPerSec": 4869
     },
     {
       "subject": "chain",
       "name": "readBlock — single block",
-      "opsPerSec": 13352
+      "opsPerSec": 13701
     },
     {
       "subject": "chain",
       "name": "validate — last 1 block",
-      "opsPerSec": 11679
+      "opsPerSec": 11700
     },
     {
       "subject": "chain",
       "name": "validate — last 10 blocks",
-      "opsPerSec": 1155
+      "opsPerSec": 1151
     },
     {
       "subject": "chain",
@@ -111,137 +111,137 @@
     {
       "subject": "chain",
       "name": "validate — full 200-block chain",
-      "opsPerSec": 57
+      "opsPerSec": 55
     },
     {
       "subject": "crdt",
       "name": "diff — 20 flat keys, all changed",
-      "opsPerSec": 327305
+      "opsPerSec": 337100
     },
     {
       "subject": "crdt",
       "name": "diff — 20 flat keys, one changed",
-      "opsPerSec": 446609
+      "opsPerSec": 452962
     },
     {
       "subject": "crdt",
       "name": "diff — depth 3, width 4",
-      "opsPerSec": 35500
+      "opsPerSec": 36221
     },
     {
       "subject": "crdt",
       "name": "diff — array as a grow-only set",
-      "opsPerSec": 2856083
+      "opsPerSec": 2972954
     },
     {
       "subject": "crdt",
       "name": "merge — 20 flat keys",
-      "opsPerSec": 2120424
+      "opsPerSec": 2105534
     },
     {
       "subject": "crdt",
       "name": "merge — depth 3, width 4",
-      "opsPerSec": 4897973
+      "opsPerSec": 5046798
     },
     {
       "subject": "crdt",
       "name": "merge — numeric counter increment",
-      "opsPerSec": 5516438
+      "opsPerSec": 5682591
     },
     {
       "subject": "crdt",
       "name": "apply — 100 inc records",
-      "opsPerSec": 210975
+      "opsPerSec": 211811
     },
     {
       "subject": "crdt",
       "name": "apply — 100 delta records",
-      "opsPerSec": 8845
+      "opsPerSec": 8843
     },
     {
       "subject": "emitter",
       "name": "emit awaited — 0 listeners",
-      "opsPerSec": 15132102
+      "opsPerSec": 15438480
     },
     {
       "subject": "emitter",
       "name": "emit awaited — 1 sync listener",
-      "opsPerSec": 3803750
+      "opsPerSec": 3767087
     },
     {
       "subject": "emitter",
       "name": "emit awaited — 1 listener, (data, delta)",
-      "opsPerSec": 3800286
+      "opsPerSec": 3767151
     },
     {
       "subject": "emitter",
       "name": "emit awaited — 1 async listener",
-      "opsPerSec": 3492102
+      "opsPerSec": 3552996
     },
     {
       "subject": "emitter",
       "name": "emit awaited — 2 sync listeners",
-      "opsPerSec": 3249690
+      "opsPerSec": 3275916
     },
     {
       "subject": "emitter",
       "name": "emit fire-and-forget — 1 sync listener",
-      "opsPerSec": 4829832
+      "opsPerSec": 4844337
     },
     {
       "subject": "hash",
       "name": "calculateHash — empty genesis block",
-      "opsPerSec": 1167644
+      "opsPerSec": 1198887
     },
     {
       "subject": "hash",
       "name": "calculateHash — small record (5 x 16 B)",
-      "opsPerSec": 1008173
+      "opsPerSec": 1037711
     },
     {
       "subject": "hash",
       "name": "calculateHash — medium record (50 x 64 B)",
-      "opsPerSec": 139205
+      "opsPerSec": 138316
     },
     {
       "subject": "hash",
       "name": "calculateHash — large record (200 x 256 B)",
-      "opsPerSec": 14712
+      "opsPerSec": 14604
     },
     {
       "subject": "hash",
       "name": "calculateHash — deeply nested record",
-      "opsPerSec": 632016
+      "opsPerSec": 646523
     },
     {
       "subject": "log",
       "name": "append — one op",
-      "opsPerSec": 5704
+      "opsPerSec": 5875
     },
     {
       "subject": "log",
       "name": "append — batch of 100",
-      "opsPerSec": 330947
+      "opsPerSec": 354551
     },
     {
       "subject": "log",
       "name": "since — last 500 entries",
-      "opsPerSec": 625009
+      "opsPerSec": 624414
     },
     {
       "subject": "log",
       "name": "since — everything (no cursor)",
-      "opsPerSec": 1694
+      "opsPerSec": 1704
     },
     {
       "subject": "log",
       "name": "since — 20 from the middle, scoped",
-      "opsPerSec": 3510827
+      "opsPerSec": 3488826
     },
     {
       "subject": "log",
       "name": "append with a roll every 8 batches",
-      "opsPerSec": 4413
+      "opsPerSec": 4893
     },
     {
       "subject": "log",
@@ -251,72 +251,72 @@
     {
       "subject": "storage",
       "name": "insert — small record",
-      "opsPerSec": 1889
+      "opsPerSec": 1911
     },
     {
       "subject": "storage",
       "name": "get — cached",
-      "opsPerSec": 204935
+      "opsPerSec": 207187
     },
     {
       "subject": "storage",
       "name": "get — cold (re-verifies the block)",
-      "opsPerSec": 162
+      "opsPerSec": 169
     },
     {
       "subject": "storage",
       "name": "update — one field",
-      "opsPerSec": 2066
+      "opsPerSec": 1938
     },
     {
       "subject": "storage",
       "name": "set — whole record",
-      "opsPerSec": 1721
+      "opsPerSec": 1811
     },
     {
       "subject": "storage",
       "name": "swap — match (writes)",
-      "opsPerSec": 1772
+      "opsPerSec": 2177
     },
     {
       "subject": "storage",
       "name": "swap — mismatch (reads only)",
-      "opsPerSec": 216441
+      "opsPerSec": 213062
     },
     {
       "subject": "storage",
       "name": "has — existing id",
-      "opsPerSec": 239444
+      "opsPerSec": 232776
     },
     {
       "subject": "storage",
       "name": "record — cached Record instance",
-      "opsPerSec": 9876481
+      "opsPerSec": 9624259
     },
     {
       "subject": "storage",
       "name": "list — 2000 ids (catalog)",
-      "opsPerSec": 11546070
+      "opsPerSec": 11258503
     },
     {
       "subject": "storage",
       "name": "hasRecord — 2000 ids (catalog)",
-      "opsPerSec": 13267898
+      "opsPerSec": 14643966
     },
     {
       "subject": "storage",
       "name": "select — covered eq over 2000",
-      "opsPerSec": 21433
+      "opsPerSec": 21540
     },
     {
       "subject": "storage",
       "name": "select — eq + order + limit over 2000",
-      "opsPerSec": 11349
+      "opsPerSec": 11588
     },
     {
       "subject": "storage",
       "name": "select — uncovered filter over 2000",
-      "opsPerSec": 1032
+      "opsPerSec": 1037
     },
     {
       "subject": "storage",
@@ -326,27 +326,27 @@
     {
       "subject": "storage",
       "name": "open — catalog rebuilt from a scan (2000 records, integrity lazy)",
-      "opsPerSec": 32
+      "opsPerSec": 30
     },
     {
       "subject": "sync",
       "name": "write on A, applied on B (one hop)",
-      "opsPerSec": 711
+      "opsPerSec": 719
     },
     {
       "subject": "sync",
       "name": "write on A, applied on C (two hops)",
-      "opsPerSec": 917
+      "opsPerSec": 865
     },
     {
       "subject": "sync",
       "name": "update on A, applied on C (two hops)",
-      "opsPerSec": 859
+      "opsPerSec": 902
     },
     {
       "subject": "sync",
       "name": "snapshot — one page of 500 out of 2000 (host side)",
-      "opsPerSec": 9391
+      "opsPerSec": 9303
     },
     {
       "subject": "sync",
@@ -356,7 +356,7 @@
     {
       "subject": "sync",
       "name": "append of another scope's op while a scoped feed listens",
-      "opsPerSec": 2000
+      "opsPerSec": 1877
     }
   ]
 }

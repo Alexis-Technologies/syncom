@@ -77,6 +77,43 @@ const runCatalogTests = async (t, assert, createStorage) => {
   );
 
   await t.test(
+    'a growing catalog is saved every sixteenth of its size, never further apart than half the retained log',
+    async (t2) => {
+      const base = createMemoryFsi();
+      let saves = 0;
+      const fsi = {
+        ...base,
+        write: (dir, name, content) => {
+          if (name === 'catalog.json') saves++;
+          return base.write(dir, name, content);
+        },
+      };
+      // flushEvery 1 would save after every put; the catalog's growth and
+      // the log's retention (30 ops, so at most 15 puts apart) decide instead.
+      const storage = await createStorage(t2, 'A', {
+        fsi,
+        schema,
+        catalog: { flushEvery: 1 },
+        sync: { retention: { ops: 30 } },
+      });
+      const opened = saves;
+      let worst = 0;
+      for (let i = 0; i < 320; i++) {
+        await storage.Post.insert({ orgId: 'o', slug: `s${i}` });
+        worst = Math.max(worst, storage.stats().catalog.dirty);
+      }
+      const during = saves - opened;
+      assert.ok(during > 20, `saved as it grew (${during} saves)`);
+      assert.ok(during < 100, `not after every put (${during} saves for 320 puts)`);
+      assert.ok(worst <= 16, `never more than half the retained log behind (${worst} puts at most)`);
+      await storage.close();
+      const reopened = await createStorage(t2, 'A', { fsi, schema, sync: { retention: { ops: 30 } } });
+      assert.strictEqual((await reopened.list()).length, 320);
+      await reopened.close();
+    },
+  );
+
+  await t.test(
     'a catalog the log cannot catch up — foreign stamp, other indexes, absent — is rebuilt from a scan',
     async (t2) => {
       const fsi = counting(createMemoryFsi());

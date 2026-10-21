@@ -82,7 +82,7 @@ the way its documentation shows, and is checked to give the right answer before 
 chart shows an empty replica pulling a store of 1,000 records; pick another scenario or storage.
 syncom replicates in memory as fast as Yjs and Loro, has the fastest cold start (34 ms), and
 serves about a million reads a second from its cache. Its writes cost more, because each one is
-logged, filed, catalogued and chained: on disk about 1,400 a second, where the LevelDB-backed
+logged, filed, catalogued and chained: on disk about 1,500 a second, where the LevelDB-backed
 libraries do about 20,000.
 
 <BenchCompare kind="sync" line="memory" />
