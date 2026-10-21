@@ -192,6 +192,15 @@ expectType<{ [elementKey: string]: { [origin: string]: readonly [number, number]
 expectAssignable<syncom.FieldKind>('set');
 expectError<syncom.FieldKind>('list');
 expectAssignable<syncom.SetRemoval>(['x', { a: 1 }]);
+expectAssignable<EntityDefinition>({ search: ['title', 'body'] });
+expectError(syncom.open({ schema: { entities: { P: { search: 'title' } } } }));
+expectError(syncom.open({ search: 'yes' }));
+declare const textIndex: syncom.TextIndex;
+expectType<void>(textIndex.put('id', 'text'));
+expectType<ReadonlyArray<{ id: string; score: number }>>(textIndex.query('text'));
+expectAssignable<StorageOptions>({ search: () => textIndex });
+expectAssignable<syncom.MangoQuery>({ $text: 'quick fox', orgId: 'o1' });
+expectError<syncom.MangoQuery>({ $text: 1 });
 expectType<Promise<boolean>>(storage.swap('id', { a: 2 }, { a: 1 }, { actor: 'u2' }));
 expectType<Promise<string>>(storage.insert({ a: 1 }, { actor: 'u2', encrypted: false }));
 expectType<Promise<void>>(record.save({ actor: 'u2' }));

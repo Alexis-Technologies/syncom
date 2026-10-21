@@ -79,8 +79,11 @@ const ENTRIES = [
   // derived from it, the canonical form and three packed slots, every own op
   // signed at its three sites, the verify pre-pass over a peer's page with
   // its two refusals and the `sync.signatures` option — the raise to 40 KB
-  // (39.8 measured).
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 40 },
+  // (39.8 measured). The search seam — an entity's `search` fields joined
+  // into its catalog row (format 3), the injected TextIndex contract, `$text`
+  // seeding the candidates in the index's order — the raise to 41 KB (40.7
+  // measured); the index itself is the @alexify/syncom/search subpath.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 41 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check

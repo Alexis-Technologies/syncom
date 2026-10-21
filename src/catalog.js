@@ -12,11 +12,17 @@
 // listed but never matched. A tombstone — a deleted or purged record, whose
 // file stays — is a row flagged `gone`: not listed, not matched, but there,
 // so a snapshot can page over every entry without listing the directory.
+//
+// A searchable entity (`search: [...]` fields) keeps the joined text of
+// those fields on its row too, and hands it to an injected text index
+// (`open({ search })`, the TextIndex contract) on every put — the index is
+// rebuilt from the rows at load and never persists anything of its own.
+// `$text` in a query then seeds the candidates with the index's ranking.
 
 const FILE = 'catalog.json';
 // The key `ids()` caches the whole live list under.
 const ALL = Symbol('syncom.catalog.all');
-const FORMAT = 2;
+const FORMAT = 3;
 
 const isObject = (value) => typeof value === 'object' && value !== null;
 
@@ -36,6 +42,29 @@ const valueOf = (data, path) => {
 // Arrays and objects are keyed as values; an array is posted under each of
 // its elements too (see `post`). Unique keys compare the whole value.
 const keyOf = (value) => JSON.stringify(value);
+
+// The text `$text` searches a record by: its string fields among `fields`,
+// and the string elements of its array fields, joined by a space — as the
+// record reads (the lens applied). Nothing else is a word.
+const textOf = (data, fields) => {
+  const parts = [];
+  for (let i = 0; i < fields.length; i++) {
+    const value = valueOf(data, fields[i]);
+    if (typeof value === 'string') parts.push(value);
+    else if (Array.isArray(value)) {
+      for (let j = 0; j < value.length; j++) if (typeof value[j] === 'string') parts.push(value[j]);
+    }
+  }
+  return parts.join(' ');
+};
+
+// The TextIndex contract — what `open({ search })` must hand back for an
+// entity: put(id, text), remove(id), query(text) → [{ id, score }] best first.
+const isTextIndex = (value) =>
+  isObject(value) &&
+  typeof value.put === 'function' &&
+  typeof value.remove === 'function' &&
+  typeof value.query === 'function';
 
 const add = (map, key, id) => {
   let ids = map.get(key);
@@ -74,19 +103,39 @@ class Catalog {
   #dirty = 0;
   #sorted = null;
   #sortedIds = new Map();
+  #text;
+  #logger;
 
-  constructor({ fsi, path, entities }) {
+  constructor({ fsi, path, entities, text = new Map(), logger = null }) {
     this.#fsi = fsi;
     this.#dir = `${path}/index`;
+    this.#text = text;
+    this.#logger = logger;
     const shape = [];
     for (const [name, def] of entities) {
       const fields = new Set(def.index);
       for (const key of def.unique) for (const field of key) fields.add(field);
-      this.#defs.set(name, { index: def.index, unique: def.unique, fields: [...fields], indexed: fields });
-      shape.push([name, def.index, def.unique]);
+      const search = def.search ?? [];
+      this.#defs.set(name, { index: def.index, unique: def.unique, search, fields: [...fields], indexed: fields });
+      shape.push([name, def.index, def.unique, search]);
     }
     // What a persisted catalog must have been built with to be reused.
     this.#indexKey = keyOf(shape);
+  }
+
+  // The row's text into the entity's text index, or out of it. Derived
+  // state never fails a write — the record is durable by now — so an index
+  // that throws is logged (where there is a logger) and left as it is.
+  #index(id, row, kept) {
+    if (row.text === undefined) return;
+    const index = this.#text.get(row.type);
+    if (index === undefined) return;
+    try {
+      if (kept) index.put(id, row.text);
+      else index.remove(id);
+    } catch (error) {
+      this.#logger?.warn({ event: 'catalog.search', id, err: error });
+    }
   }
 
   get size() {
@@ -107,6 +156,7 @@ class Catalog {
     this.#sortedIds.delete(row.type);
     this.#sortedIds.delete(ALL);
     drop(this.#byType, row.type, id);
+    this.#index(id, row, false);
     const def = row.type === null ? undefined : this.#defs.get(row.type);
     if (!def) return;
     const eq = this.#eq.get(row.type);
@@ -134,6 +184,7 @@ class Catalog {
     this.#sortedIds.delete(row.type);
     this.#sortedIds.delete(ALL);
     add(this.#byType, row.type, id);
+    this.#index(id, row, true);
     const def = row.type === null ? undefined : this.#defs.get(row.type);
     if (!def) return;
     let eq = this.#eq.get(row.type);
@@ -171,8 +222,17 @@ class Catalog {
         const value = valueOf(view.data, field);
         if (value !== undefined) row.fields[field] = value;
       }
+      if (def.search.length > 0) {
+        const text = textOf(view.data, def.search);
+        if (text.length > 0) row.text = text;
+      }
     }
     this.#insert(id, row);
+  }
+
+  /** Whether `$text` can be asked of this collection: it has search fields and an index. */
+  searches(type) {
+    return this.#text.has(type);
   }
 
   /** Whether `id` is a live record (an encrypted one counts; a tombstone does not). */
@@ -241,13 +301,25 @@ class Catalog {
    */
   candidates(entity, query) {
     const def = this.#defs.get(entity);
+    if (!def || !isObject(query) || Array.isArray(query)) return null;
+    // `$text` seeds the candidates with the index's ranking, best first;
+    // every equality then narrows that order rather than replacing it.
+    const index = this.#text.get(entity);
+    const ranked = index !== undefined && typeof query.$text === 'string' ? this.#ranked(index, query.$text) : null;
     const eq = this.#eq.get(entity);
-    if (!def || !eq || !isObject(query) || Array.isArray(query)) return null;
-    return this.#narrow(eq, query);
+    if (!eq) return ranked;
+    return this.#narrow(eq, query, ranked);
   }
 
-  #narrow(eq, query) {
-    let result = null;
+  // A fresh Set in the index's order: never the index's own structures.
+  #ranked(index, text) {
+    const found = new Set();
+    for (const hit of index.query(text)) if (isObject(hit) && typeof hit.id === 'string') found.add(hit.id);
+    return found;
+  }
+
+  #narrow(eq, query, seed = null) {
+    let result = seed;
     const meet = (found) => {
       result = result === null ? found : new Set([...result].filter((id) => found.has(id)));
     };
@@ -335,7 +407,7 @@ class Catalog {
     if (!usable) return null;
     for (const row of parsed.rows) {
       if (!Array.isArray(row) || typeof row[0] !== 'string') continue;
-      const [id, type, v, encrypted, fields, gone] = row;
+      const [id, type, v, encrypted, fields, gone, text] = row;
       this.#remove(id);
       const loaded = {
         type: typeof type === 'string' ? type : null,
@@ -344,6 +416,9 @@ class Catalog {
         fields: isObject(fields) ? fields : {},
       };
       if (gone === true) loaded.gone = true;
+      else if (typeof text === 'string') loaded.text = text;
+      // Replayed through #insert: the text index is rebuilt here, under the
+      // file's stamp, from the rows alone.
       this.#insert(id, loaded);
     }
     this.#dirty = 0;
@@ -360,6 +435,7 @@ class Catalog {
     for (const [id, row] of this.#rows) {
       const cells = [id, row.type, row.v, row.encrypted, row.fields];
       if (row.gone) cells.push(true);
+      else if (row.text !== undefined) cells.push(false, row.text);
       rows.push(cells);
     }
     const saved = this.#dirty;
@@ -368,4 +444,4 @@ class Catalog {
   }
 }
 
-module.exports = { Catalog, valueOf };
+module.exports = { Catalog, valueOf, textOf, isTextIndex };

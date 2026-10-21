@@ -32,6 +32,7 @@ export type {
   MigrationContext,
   MangoOperators,
   MangoQuery,
+  TextIndex,
   QueryRow,
   Cursor,
   StorageOptions,

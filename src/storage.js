@@ -25,7 +25,7 @@ const { normalizeSchema, createLens, project } = require('./schema.js');
 const defaultFsi = require('./fsi.js');
 const { checkFsi, withSync } = require('./backend.js');
 const { acquireLock } = require('./lock.js');
-const { Catalog } = require('./catalog.js');
+const { Catalog, isTextIndex } = require('./catalog.js');
 const { createTelemetry, traced, now } = require('./telemetry.js');
 const { GLOBAL_SCOPE } = require('./scope.js');
 const { normalizeStorageOptions } = require('./options.js');
@@ -146,7 +146,7 @@ class Storage extends Emitter {
     this.#logger = createLogger(options.logger);
     this.#otel = createTelemetry(options.telemetry);
     this.#fsi = this.#backend(options, settings.durable);
-    this.#defineSchema(options);
+    this.#defineSchema(options, settings.search);
     this.#hooks = normalizeHooks(options.hooks, STORAGE_HOOKS, 'Storage');
     return this.#init();
   }
@@ -165,12 +165,29 @@ class Storage extends Emitter {
   // The schema is kept as given (`storage.schema`) and read once into the
   // entity definitions the write path consults: validators, id fields,
   // indexes. A malformed one is refused here, not at the first write.
-  #defineSchema(options) {
+  #defineSchema(options, search) {
     const schema = options.schema ?? null;
     const normalized = normalizeSchema(schema, { validator: options.validator });
     this.#entities = normalized.entities;
     this.#schema = schema;
-    this.#catalog = new Catalog({ fsi: this.#fsi, path: this.#path, entities: normalized.entities });
+    // One text index per searchable entity, from the injected factory: the
+    // core knows the contract, not the index — a node that never searches
+    // ships none of it.
+    const text = new Map();
+    for (const def of normalized.entities.values()) {
+      if (def.search.length === 0) continue;
+      if (search === null) {
+        const hint = 'give open() an index — createSearch() from @alexify/syncom/search';
+        throw new TypeError(`open({ search }): entity ${def.name} declares search fields; ${hint}`);
+      }
+      const index = search(def.name);
+      if (!isTextIndex(index)) {
+        throw new TypeError(`open({ search }): the index for ${def.name} must have put(), remove() and query()`);
+      }
+      text.set(def.name, index);
+    }
+    const { logger } = this;
+    this.#catalog = new Catalog({ fsi: this.#fsi, path: this.#path, entities: normalized.entities, text, logger });
     // A node with a schema stamps its version on every op it makes; one
     // without stamps nothing, and nothing in hello says what it runs.
     if (schema === null) return;
@@ -597,6 +614,7 @@ class Storage extends Emitter {
       ids: (entity) => catalog.ids(entity),
       row: (id) => catalog.row(id),
       indexed: (entity) => catalog.indexed(entity),
+      searches: (entity) => catalog.searches(entity),
       subscribe: (entity, fn) => catalog.subscribe(entity, fn),
       load: async (id) => {
         const entry = await this.#entries.load(id);

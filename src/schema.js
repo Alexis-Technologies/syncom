@@ -21,7 +21,7 @@ const isObject = (value) => typeof value === 'object' && value !== null && !Arra
 const SCHEMA_KEYS = ['version', 'entities', 'snapshot', 'migrations', 'ahead', 'lens'];
 const AHEAD = ['apply', 'hold'];
 const LENS = ['migrations', 'validate', 'both'];
-const ENTITY_KEYS = ['schema', 'idField', 'validate', 'index', 'unique', 'fields'];
+const ENTITY_KEYS = ['schema', 'idField', 'validate', 'index', 'unique', 'fields', 'search'];
 
 const fail = (entity, text) => new TypeError(`open({ schema }): entity ${entity}: ${text}`);
 
@@ -167,6 +167,14 @@ const explicitIndex = (value, entity) => {
   return [...new Set(value)];
 };
 
+// The fields `$text` searches, joined into the record's catalog row and
+// handed to the injected text index (`open({ search })`); never derived from
+// a schema — no validator has a notion of "searchable".
+const explicitSearch = (value, entity) => {
+  if (!Array.isArray(value) || !value.every(isField)) throw fail(entity, 'search must be an array of field names');
+  return [...new Set(value)];
+};
+
 const explicitUnique = (value, entity) => {
   if (!Array.isArray(value)) throw fail(entity, 'unique must be an array');
   const keys = [];
@@ -240,6 +248,7 @@ const normalizeEntity = (name, def, validator) => {
     index,
     unique,
     fields: fields ?? null,
+    search: def.search === undefined ? [] : explicitSearch(def.search, name),
   };
 };
 
@@ -280,7 +289,7 @@ const normalizeMigrations = (migrations, version) => {
 /**
  * `open({ schema, validator })` normalized: `{ version, entities, snapshot,
  * migrations, ahead, lens }` — the entities a Map of `{ name, schema,
- * standard, validator, idField, index, unique, fields }`, `snapshot` whatever
+ * standard, validator, idField, index, unique, fields, search }`, `snapshot` whatever
  * JSON describes the schema (hashed by the storage, exchanged in hello),
  * `migrations` the up-chain, `ahead` what to do with an op from a newer
  * version, `lens` which steps read an older record. Unknown keys, a malformed

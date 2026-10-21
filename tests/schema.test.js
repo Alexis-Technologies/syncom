@@ -63,7 +63,25 @@ test('normalizeSchema', async (t) => {
       index: [],
       unique: [],
       fields: null,
+      search: [],
     });
+  });
+
+  await t.test('search fields are explicit, deduplicated, and checked', () => {
+    const { entities } = normalizeSchema({ entities: { Post: { search: ['title', 'body', 'title'] } } });
+    assert.deepStrictEqual(entities.get('Post').search, ['title', 'body']);
+    assert.throws(
+      () => normalizeSchema({ entities: { Post: { search: 'title' } } }),
+      /search must be an array of field names/,
+    );
+    assert.throws(
+      () => normalizeSchema({ entities: { Post: { search: [''] } } }),
+      /search must be an array of field names/,
+    );
+    assert.throws(
+      () => normalizeSchema({ entities: { Post: { search: [1] } } }),
+      /search must be an array of field names/,
+    );
   });
 
   await t.test('entities may be a Map, and keep `fields` as given', () => {
@@ -88,7 +106,7 @@ test('normalizeSchema', async (t) => {
     assert.throws(
       () => normalizeSchema({ entities: { Post: { uniqe: ['slug'] } } }),
       typeError(
-        "open({ schema }): entity Post: unknown key 'uniqe' (expected schema, idField, validate, index, unique, fields)",
+        "open({ schema }): entity Post: unknown key 'uniqe' (expected schema, idField, validate, index, unique, fields, search)",
       ),
     );
     assert.throws(() => normalizeSchema({ entities: { Post: { validate: true } } }), /validate may only be false/);

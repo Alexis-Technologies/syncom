@@ -80,6 +80,13 @@ const normalizeStorageOptions = (options) => {
   if (options.actor !== undefined && typeof options.actor !== 'string' && typeof options.actor !== 'function') {
     throw new TypeError('open({ actor }): actor must be a string or a function');
   }
+  // The text index behind `$text`: a function asked once per searchable
+  // entity — `createSearch()` from @alexify/syncom/search, or your own.
+  if (options.search !== undefined && typeof options.search !== 'function') {
+    throw new TypeError(
+      'open({ search }): search must be a function (entity) => TextIndex — createSearch() from @alexify/syncom/search',
+    );
+  }
   const scope = options.sync?.scope;
   // How far ahead of this node's clock a peer's stamp may be before the op
   // is refused as malformed rather than observed — see src/apply.js.
@@ -105,6 +112,7 @@ const normalizeStorageOptions = (options) => {
     flushEvery,
     getId: options.getId ?? null,
     actor: options.actor ?? null,
+    search: options.search ?? null,
     // Encrypt every record at rest by default; a per-call `{ encrypted }`
     // still overrides. Encrypted records are local — see Storage#saveData.
     encrypted: options.encrypted === true,

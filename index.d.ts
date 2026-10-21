@@ -487,6 +487,26 @@ export interface EntityDefinition {
   unique?: ReadonlyArray<string | readonly string[]>;
   /** Free-form field notes, kept as given. */
   fields?: { readonly [name: string]: unknown };
+  /**
+   * The fields `$text` searches (dotted paths; string values and the string
+   * elements of arrays, as the record reads). Needs `open({ search })`:
+   * `createSearch()` from `@alexify/syncom/search`, or a `TextIndex` of your
+   * own. Changing them rebuilds the catalog once.
+   */
+  search?: readonly string[];
+}
+
+/**
+ * What `open({ search })` hands back per searchable entity: the catalog puts
+ * the joined text of a record's `search` fields on every write (and replays
+ * every row at open), removes it when the record goes, and asks `query` for
+ * every match, best first, when a cursor carries `$text`. Postings live in
+ * memory only; the catalog persists the text.
+ */
+export interface TextIndex {
+  put(id: string, text: string): void;
+  remove(id: string): void;
+  query(text: string): ReadonlyArray<{ id: string; score: number }>;
 }
 
 export type SchemaEntity = EntityDefinition;
@@ -778,6 +798,8 @@ export interface StorageOptions<S extends Schema = Schema> {
    * catches up the rest on the next open.
    */
   catalog?: { flushEvery?: number };
+  /** The text index behind `$text`, one per searchable entity — `createSearch()` from `@alexify/syncom/search`. */
+  search?: (entity: string) => TextIndex;
   schema?: S;
   /** Compiles entity schemas that are plain objects without `~standard`. */
   validator?: SchemaValidator;
@@ -1264,6 +1286,8 @@ export type MangoQuery = {
   $and?: readonly MangoQuery[];
   $or?: readonly MangoQuery[];
   $not?: MangoQuery;
+  /** Full-text search over the entity's `search` fields, top level only; rows come back best first unless ordered. */
+  $text?: string;
 };
 
 /** A row a cursor yields: the record as it reads, under its `id`. */

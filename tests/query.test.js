@@ -67,6 +67,17 @@ test('compileQuery', async (t) => {
     );
   });
 
+  await t.test('$text: a string at the top level, no predicate of its own, no field', () => {
+    assert.deepStrictEqual(ids({ $text: 'apple' }), ['a', 'b', 'c', 'd'], 'the catalog answers it, not the predicate');
+    assert.deepStrictEqual(ids({ $text: 'apple', n: 1 }), ['a']);
+    assert.throws(() => compileQuery({ $text: 1 }), /\$text takes a string/);
+    assert.throws(() => compileQuery({ $text: 'a'.repeat(1001) }), /\$text is longer than 1000 characters/);
+    assert.throws(() => compileQuery({ $and: [{ $text: 'x' }] }), /only allowed at the top level/);
+    assert.throws(() => compileQuery({ $or: [{ n: 1 }, { $text: 'x' }] }), /only allowed at the top level/);
+    assert.throws(() => compileQuery({ $not: { $text: 'x' } }), /only allowed at the top level/);
+    assert.deepStrictEqual([...fieldsOf({ $text: 'x', a: 1, $and: [{ b: 2 }] })], ['a', 'b']);
+  });
+
   await t.test('a malformed query is a TypeError at compile time', () => {
     const bad = (query, pattern) => assert.throws(() => compileQuery(query), { name: 'TypeError', message: pattern });
     bad('n', /takes a query object/);
@@ -125,6 +136,7 @@ test('Cursor over a fake source', async (t) => {
       ids: () => Object.keys(records),
       row: (id) => rowsOf()[id] ?? null,
       indexed: () => new Set(indexed),
+      searches: () => false,
       subscribe: () => () => {},
       load: async (id) => {
         calls.load++;
@@ -157,6 +169,45 @@ test('Cursor over a fake source', async (t) => {
     for await (const row of new Cursor(src, 'T').order('n')) seen.push(row.id);
     assert.deepStrictEqual(seen, ['a', 'b']);
   });
+
+  await t.test(
+    '$text: refused where nothing searches; rank order kept unless ordered; limit reads little',
+    async () => {
+      const plain = source({ a: { n: 1 } });
+      assert.throws(() => new Cursor(plain, 'T', { $text: 'x' }), /\$text needs search fields on T/);
+      const src = source({ a: { n: 1, s: 'x' }, b: { n: 2, s: 'y' }, c: { n: 3, s: 'z' } }, ['n']);
+      src.searches = () => true;
+      src.candidates = (entity, query) => (query.$text === undefined ? null : new Set(['c', 'a']));
+      const ranked = new Cursor(src, 'T', { $text: 'words' });
+      assert.deepStrictEqual(
+        (await ranked.fetch()).map((row) => row.id),
+        ['c', 'a'],
+        'the index order, as it came',
+      );
+      assert.strictEqual(await ranked.count(), 2);
+      assert.deepStrictEqual(
+        (await new Cursor(src, 'T', { $text: 'w' }).order('n').fetch()).map((r) => r.id),
+        ['a', 'c'],
+      );
+      src.calls.load = 0;
+      assert.deepStrictEqual(
+        (await new Cursor(src, 'T', { $text: 'w' }).limit(1).fetch()).map((r) => r.id),
+        ['c'],
+      );
+      assert.strictEqual(src.calls.load, 1, 'an unordered limit reads one record');
+      src.calls.load = 0;
+      const covered = await new Cursor(src, 'T', { $text: 'w' }).projection(['n']).fetch();
+      assert.deepStrictEqual(covered, [
+        { id: 'c', n: 3 },
+        { id: 'a', n: 1 },
+      ]);
+      assert.strictEqual(src.calls.load, 0, 'covered: $text reads no field of its own');
+      assert.deepStrictEqual(
+        (await new Cursor(src, 'T', { $text: 'w', n: 1 }).fetch()).map((r) => r.id),
+        ['a'],
+      );
+    },
+  );
 });
 
 test('query guards: a pattern the size of a document, a projection of __proto__', () => {

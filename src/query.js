@@ -10,6 +10,7 @@ const { valueOf } = require('./catalog.js');
 
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 const MAX_REGEX = 1000;
+const MAX_TEXT = 1000;
 // How many records a loaded cursor reads at once.
 const CONCURRENCY = 16;
 
@@ -95,24 +96,36 @@ const compileField = (path, condition) => {
   };
 };
 
+// `$text` is a string, bounded like a pattern; it is the catalog's to
+// answer (the text index ranks the candidates), so it compiles to no test.
+const checkText = (value) => {
+  if (typeof value !== 'string') throw new TypeError('select(): $text takes a string');
+  if (value.length > MAX_TEXT) throw new TypeError(`select(): $text is longer than ${MAX_TEXT} characters`);
+};
+
 /**
  * A query as a predicate over `{ id, ...data }`: `{ field: value }` is
  * equality (dotted paths reach into the record), `{ field: { $op } }` the
- * operators, `$and` / `$or` take arrays of queries, `$not` one. A malformed
+ * operators, `$and` / `$or` take arrays of queries, `$not` one, `$text` (at
+ * the top level only) a full-text search the catalog answers. A malformed
  * query is a TypeError here, at `select()`, not at `fetch()`.
  */
-const compileQuery = (query = {}) => {
+const compileQuery = (query = {}, nested = false) => {
   if (!isObject(query)) throw new TypeError('select() takes a query object');
   const tests = [];
   for (const key of Object.keys(query)) {
     const value = query[key];
     if (key === '$and' || key === '$or') {
       if (!Array.isArray(value)) throw new TypeError(`select(): ${key} takes an array of queries`);
-      const subs = value.map((sub) => compileQuery(sub));
+      const subs = value.map((sub) => compileQuery(sub, true));
       tests.push(key === '$and' ? (row) => subs.every((sub) => sub(row)) : (row) => subs.some((sub) => sub(row)));
     } else if (key === '$not') {
-      const sub = compileQuery(value);
+      const sub = compileQuery(value, true);
       tests.push((row) => !sub(row));
+    } else if (key === '$text') {
+      // Inside $and/$or/$not it could neither narrow nor keep a rank order.
+      if (nested) throw new TypeError('select(): $text is only allowed at the top level of the query');
+      checkText(value);
     } else if (key.startsWith('$')) throw new TypeError(`select(): unknown operator ${key}`);
     else tests.push(compileField(key, value));
   }
@@ -120,12 +133,12 @@ const compileQuery = (query = {}) => {
 };
 
 // The fields a query reads, dotted paths as given — what decides whether
-// the catalog alone can answer it.
+// the catalog alone can answer it. `$text` reads no field.
 const fieldsOf = (query, into = new Set()) => {
   for (const key of Object.keys(query)) {
     if (key === '$and' || key === '$or') for (const sub of query[key]) fieldsOf(sub, into);
     else if (key === '$not') fieldsOf(query[key], into);
-    else into.add(key);
+    else if (key !== '$text') into.add(key);
   }
   return into;
 };
@@ -210,6 +223,9 @@ class Cursor {
     this.#entity = entity;
     this.#query = query;
     this.#predicate = compileQuery(query);
+    if (query.$text !== undefined && !source.searches(entity)) {
+      throw new TypeError(`select(): $text needs search fields on ${entity} (schema.entities.${entity}.search)`);
+    }
   }
 
   #key(field, desc) {
@@ -269,7 +285,9 @@ class Cursor {
   // enough rows matched — `one()` on a loaded cursor reads up to the first
   // match, not the table; with one, only the best `offset + limit` are kept
   // (`sorted` says so). The records are read CONCURRENCY at a time, in
-  // candidate order, so the rows come in that order whatever the backend.
+  // candidate order, so the rows come in that order whatever the backend —
+  // and for `$text` the candidate order is the index's ranking, which an
+  // unordered cursor hands out as it is.
   async #matching(needsRows) {
     const { candidates, ids, row, load } = this.#source;
     const found = candidates(this.#entity, this.#query) ?? ids(this.#entity);
