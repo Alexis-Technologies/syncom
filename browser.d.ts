@@ -77,6 +77,8 @@ export type {
   VersionVector,
   SyncOpType,
   SyncOp,
+  SetRemoval,
+  FieldKind,
   EntryMeta,
   Entry,
   ApplyResult,

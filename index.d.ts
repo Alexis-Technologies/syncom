@@ -65,7 +65,10 @@ export type ClockStamp = readonly [number, string];
 /** The highest per-origin sequence number a node has applied. */
 export type VersionVector = { readonly [origin: string]: number };
 
-export type SyncOpType = 'write' | 'set' | 'inc' | 'delete' | 'merge' | 'advance' | 'purge';
+export type SyncOpType = 'write' | 'set' | 'inc' | 'add' | 'remove' | 'delete' | 'merge' | 'advance' | 'purge';
+
+/** What a `remove` carries per element: the element and, per origin, the newest add ts the remover had observed. */
+export type SetRemoval = readonly [element: unknown, tags: { readonly [origin: string]: number }];
 
 export interface SyncOp {
   origin: string;
@@ -83,10 +86,10 @@ export interface SyncOp {
   data?: Record<string, unknown>;
   /** `merge`: the joined entry's metadata. */
   meta?: EntryMeta;
-  /** `inc`: the counter field. */
+  /** `inc`, `add`, `remove`: the field. */
   key?: string;
-  /** `inc`: the amount added. */
-  value?: number;
+  /** `inc`: the amount added; `add`: the elements; `remove`: the elements with the tags the remover observed. */
+  value?: number | readonly unknown[] | readonly SetRemoval[];
   /** The schema version of the node that made it; absent without a schema, and on `merge`/`advance`. */
   v?: number;
   /** Who made it — `open({ actor })` or the write's own; a claim, not a signature. Absent on `merge`/`advance`. */
@@ -98,6 +101,13 @@ export interface EntryMeta {
   base: ClockStamp | null;
   deleted: ClockStamp | null;
   counters: { [field: string]: { [origin: string]: readonly [number, number, number] } };
+  /**
+   * An observed-remove set per field: per element (its JSON text), per origin,
+   * the ts of that origin's newest `add` and the newest add ts a `remove` had
+   * observed (0 = none); the element is live for the origin while the first
+   * is the greater.
+   */
+  sets: { [field: string]: { [elementKey: string]: { [origin: string]: readonly [number, number] } } };
   /** The schema version of the last whole-record write (or of the `set` that created the entry). */
   v?: number;
   /** The stamp of a `purge`: the record is gone for good, whatever lands later. */
@@ -113,8 +123,11 @@ export interface ApplyResult {
   entry: Entry;
   changed: boolean;
   delta: Record<string, unknown>;
-  rejected: Array<{ field: string; reason: 'register' | 'counter' }>;
+  rejected: Array<{ field: string; reason: FieldKind }>;
 }
+
+/** What a field is, once written: a register (last writer wins), a counter (`inc`) or a set (`add`/`remove`). */
+export type FieldKind = 'register' | 'counter' | 'set';
 
 /**
  * The codes a SyncomError carries — one constant per thing that can go
@@ -576,10 +589,10 @@ export interface WriteContext {
   id: string;
   /** The whole record for `write`, the delta for `set`, the joined data for `merge`. */
   data?: Record<string, unknown>;
-  /** `inc` only. */
+  /** `inc`, `add`, `remove`: the field. */
   key?: string;
-  /** `inc` only. */
-  value?: number;
+  /** `inc`: the amount; `add`/`remove`: the elements, as the caller gave them. */
+  value?: number | readonly unknown[];
   /** `merge` only: the metadata being joined. */
   meta?: EntryMeta;
   /** The record before the write — `null` when absent or deleted. Read-only. */
@@ -1019,7 +1032,7 @@ export interface StorageEvents {
   /** The log sealed a segment (and maybe dropped old ones): `floor` is where a resume is still possible. */
   log: (event: { kind: 'roll'; sealed: number; dropped: number; floor: number; segments: number }) => void;
   /**
-   * A peer's op refused by the register/counter rule (`OP_REFUSED`,
+   * A peer's op refused by the field-kind rule (`OP_REFUSED`,
    * `rejected`), skipped because the record would not pass its entity's
    * validator (`OP_INVALID`, `entity`, `issues`), or refused for a stamp
    * beyond `sync.maxSkew` (`SKEW`).
@@ -1028,7 +1041,7 @@ export interface StorageEvents {
     error: SyncomError & {
       code: 'OP_REFUSED' | 'OP_INVALID' | 'OP_UNREADABLE' | 'SKEW';
       op: SyncOp;
-      rejected?: Array<{ field: string; reason: 'register' | 'counter' }>;
+      rejected?: Array<{ field: string; reason: FieldKind }>;
       entity?: string | null;
       issues?: ValidationIssue[];
     },
@@ -1109,6 +1122,16 @@ export interface Storage {
   update(id: string, delta: unknown, options?: WriteOptions): Promise<void>;
   inc(id: string, key: string, value?: number, options?: WriteOptions): Promise<void>;
   /**
+   * Adds `elements` to set field `key` — an observed-remove set: two nodes
+   * that add concurrently both keep theirs, and an add a remove did not
+   * observe survives it. Elements are JSON values, told apart by their text;
+   * the set reads sorted by that text. Creates the field, and the record,
+   * when absent.
+   */
+  add(id: string, key: string, elements: readonly unknown[], options?: WriteOptions): Promise<void>;
+  /** Removes from set field `key` the `elements` this node has seen added; one it never saw is left alone. */
+  remove(id: string, key: string, elements: readonly unknown[], options?: WriteOptions): Promise<void>;
+  /**
    * Compare-and-swap: writes `changes` only if every field of `prev` still
    * holds its value, compared inside the mutation queue — two concurrent
    * swaps on one expectation cannot both pass. `false`, and no write, on a
@@ -1134,10 +1157,15 @@ export interface Storage {
   check(entity: string, data: unknown): Promise<unknown>;
   /**
    * Rewrites every record of an older schema version as this one, through
-   * the lens — a whole-record write of the view, the counters added back.
-   * Idempotent; `entities` limits it to those collections.
+   * the lens — a whole-record write of the view, the counters and the sets
+   * added back (a set with nothing live is dropped). Idempotent; `entities`
+   * limits it to those collections.
    */
-  migrate(options?: { entities?: readonly string[]; batch?: number; actor?: string }): Promise<{ migrated: number; counters: number }>;
+  migrate(options?: {
+    entities?: readonly string[];
+    batch?: number;
+    actor?: string;
+  }): Promise<{ migrated: number; counters: number; sets: number }>;
   record(id: string): Promise<Storage.StorageRecord>;
   /** The raw data of a cached entry (no lens), `null` when not cached, absent or deleted. */
   getCachedData(id: string): unknown | null;
@@ -1228,6 +1256,10 @@ export interface SyncomRecord {
   delta(): Record<string, unknown>;
   save(options?: WriteOptions): Promise<void>;
   inc(key: string, value?: number, options?: WriteOptions): Promise<void>;
+  /** Adds to a set field — `storage.add` with this record's id. */
+  add(key: string, elements: readonly unknown[], options?: WriteOptions): Promise<void>;
+  /** Removes from a set field — `storage.remove` with this record's id. */
+  remove(key: string, elements: readonly unknown[], options?: WriteOptions): Promise<void>;
   delete(options?: WriteOptions): Promise<void>;
   // Live properties: one getter/setter per field of the loaded object.
   [field: string]: unknown;
