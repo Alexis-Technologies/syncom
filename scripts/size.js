@@ -69,8 +69,11 @@ const ENTRIES = [
   // minify to one letter, the property names of a seam shared between
   // modules do not — the raise to 35.5 KB buys readable modules, not bytes.
   // The error model (src/errors.js: a code constant on every operational
-  // error, a reason on every wire refusal) the raise to 36 KB.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 36 },
+  // error, a reason on every wire refusal) the raise to 36 KB; top-k and
+  // parallel reads in queries, candidates narrowed through $and/$or,
+  // repair(id) and the log read a scoped feed moves its cursor by, the
+  // raise to 37 KB (36.5 measured).
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 37 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check

@@ -68,6 +68,49 @@ test('Catalog', async (t) => {
     assert.strictEqual(catalog.candidates('Post', { title: 'x' }), null, 'no indexed field named');
     assert.strictEqual(catalog.candidates('Post', { orgId: { $gt: 'o' } }), null, 'not an equality');
     assert.strictEqual(catalog.candidates('Post', {}), null);
+    // Down the branches: every $and term narrows, an $or narrows when each
+    // of its branches does, a $not never does.
+    assert.deepStrictEqual(
+      catalog.candidates('Post', { $and: [{ orgId: 'o1' }, { 'meta.kind': 'x' }] }),
+      new Set(['a']),
+      '$and intersects its branches',
+    );
+    assert.deepStrictEqual(
+      catalog.candidates('Post', { $and: [{ orgId: 'o1' }, { title: 'x' }] }),
+      new Set(['a', 'b']),
+      'a branch that cannot narrow is left to the predicate',
+    );
+    assert.deepStrictEqual(
+      catalog.candidates('Post', { $or: [{ orgId: 'o2' }, { slug: 'a' }] }),
+      new Set(['c', 'a']),
+      '$or unions its branches',
+    );
+    assert.strictEqual(catalog.candidates('Post', { $or: [{ orgId: 'o2' }, { title: 'x' }] }), null, 'one open branch');
+    assert.deepStrictEqual(
+      catalog.candidates('Post', { 'meta.kind': 'x', $or: [{ orgId: 'o1' }, { orgId: 'o3' }] }),
+      new Set(['a']),
+      'top-level equalities and an $or meet',
+    );
+    assert.strictEqual(catalog.candidates('Post', { $not: { orgId: 'o1' } }), null);
+    assert.strictEqual(
+      catalog.candidates('Post', { $and: 'nope', $or: [] }),
+      null,
+      'malformed branches narrow nothing',
+    );
+    assert.deepStrictEqual(
+      catalog.candidates('Post', { $and: [{ $or: [{ slug: 'b' }, { slug: 'c' }] }, { orgId: 'o1' }] }),
+      new Set(['b']),
+    );
+    // ids() is cached until the collection changes.
+    const before = catalog.ids('Post');
+    assert.strictEqual(catalog.ids('Post'), before, 'the same array while nothing changed');
+    assert.strictEqual(catalog.ids(), catalog.ids(), 'the whole list too');
+    catalog.put('d', { type: 'Post', data: { orgId: 'o3', slug: 'd' } });
+    assert.notStrictEqual(catalog.ids('Post'), before);
+    assert.deepStrictEqual(catalog.ids('Post'), ['a', 'b', 'c', 'd']);
+    assert.ok(catalog.indexed('Post').has('orgId'));
+    assert.strictEqual(catalog.indexed('Post'), catalog.indexed('Post'), 'one set per collection');
+    assert.strictEqual(catalog.indexed('Nope').size, 0);
     assert.strictEqual(catalog.candidates('Tag', { name: 't' }), null, 'no indexes on the collection');
     assert.strictEqual(catalog.candidates('Nope', { name: 't' }), null);
     assert.strictEqual(catalog.candidates('Post', 'orgId'), null);

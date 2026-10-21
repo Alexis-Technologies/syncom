@@ -12,6 +12,36 @@ section until the first publish; everything below lands there on release day.
 
 ### Added
 
+- **`storage.repair(id)`.** A record whose file fails its integrity check
+  (`INTEGRITY`) or is torn is rebuilt from this node's log: the retained
+  entries of the id replayed from the first whole-record op (`write`,
+  `merge`, `delete`, `purge`), written back with a chain block of its own —
+  `{ ops, alive }`. `UNRECOVERABLE` when the log holds no such op (compacted
+  away, never written here, encrypted). `OpLog.entriesOf(id)` is what it
+  reads; `record.repaired` is logged at info.
+- **Queries: the first page costs its reads, not its sort.** An ordered
+  cursor with a `limit` keeps only the best `offset + limit` rows as the
+  candidates go by (a bounded, stable top-k) instead of sorting every match;
+  a loaded cursor reads its candidates sixteen at a time, in candidate
+  order; the catalog narrows through every `$and` branch and through an
+  `$or` whose branches all name an indexed equality; `ids()` is cached
+  until the collection changes, `indexed()` is one set per collection.
+  Browser budget 36 → 37 KB (36.5 measured), for this, `repair()` and the
+  log read together.
+- **A scoped feed moves past other scopes' ops.** `OpLog.read(eventId, {
+  scopes, limit })` answers `{ entries, last }` — `last` the seq of the last
+  entry examined, in scope or not; the host's `changes` feed moves its
+  cursor there when a wake brings nothing for the peer, so an op of another
+  scope is looked at once, not on every wake (`since()` is `read().entries`).
+  The cursor moves to a real entry's position, never to `lastEventId`, which
+  runs ahead of the entries while an append is in flight.
+- **Benches for the apply path and for replication.** `bench/apply.js`
+  (`applyOp`, `packOps`/`unpackOps`, `applyRemote` pages of 100 and 500
+  writes, sets and incs, with and without the chain) and `bench/sync.js`
+  (a write applied one and two hops away over the memory link, a snapshot
+  page, a 2 000-record bootstrap, a scoped feed under another scope's
+  appends); the cold-read row of `bench/storage.js` closes the instance it
+  opens.
 - **`SyncomError`: every operational error carries a `code`.** What syncom
   rejects with when an operation cannot be done — `CLOSED`, `IN_HOOK`,
   `NOT_FOUND`, `FIELD_KIND`, `ENCRYPTED`, `INTEGRITY`, `CORRUPT`,

@@ -10,6 +10,8 @@ const { valueOf } = require('./catalog.js');
 
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 const MAX_REGEX = 1000;
+// How many records a loaded cursor reads at once.
+const CONCURRENCY = 16;
 
 // A total order for sorting: nothing, then booleans, numbers, strings, then
 // everything else (left where it was). Comparisons in a query are stricter —
@@ -141,6 +143,52 @@ const count = (name, value) => {
   return value;
 };
 
+// Every matching row, in the order it came.
+class Every {
+  rows = [];
+
+  get size() {
+    return this.rows.length;
+  }
+
+  push(row) {
+    this.rows.push(row);
+  }
+}
+
+// The first `k` rows by `compare`, kept sorted as they come: a binary search
+// and a bounded splice per match, instead of a sort of every match when only
+// one page is wanted. Stable, like the sort it replaces — of two equal rows
+// the one that came first stays.
+class TopK {
+  rows = [];
+  #compare;
+  #k;
+
+  constructor(compare, k) {
+    this.#compare = compare;
+    this.#k = k;
+  }
+
+  get size() {
+    return this.rows.length;
+  }
+
+  push(row) {
+    const { rows } = this;
+    if (rows.length === this.#k && (this.#k === 0 || this.#compare(row, rows[rows.length - 1]) >= 0)) return;
+    let low = 0;
+    let high = rows.length;
+    while (low < high) {
+      const mid = (low + high) >>> 1;
+      if (this.#compare(rows[mid], row) <= 0) low = mid + 1;
+      else high = mid;
+    }
+    rows.splice(low, 0, row);
+    if (rows.length > this.#k) rows.pop();
+  }
+}
+
 /**
  * The cursor of `collection.select(query)`: builders return it, `fetch()`,
  * `count()`, `one()` and `watch()` run it. `source` is the storage's seam —
@@ -217,31 +265,46 @@ class Cursor {
     return true;
   }
 
-  // Without an order, a limit is reached as soon as enough rows matched —
-  // `one()` on a loaded cursor reads up to the first match, not the table.
+  // The matching rows. Without an order, a limit is reached as soon as
+  // enough rows matched — `one()` on a loaded cursor reads up to the first
+  // match, not the table; with one, only the best `offset + limit` are kept
+  // (`sorted` says so). The records are read CONCURRENCY at a time, in
+  // candidate order, so the rows come in that order whatever the backend.
   async #matching(needsRows) {
     const { candidates, ids, row, load } = this.#source;
     const found = candidates(this.#entity, this.#query) ?? ids(this.#entity);
-    const enough = needsRows && this.#order.length === 0 ? this.#offset + this.#limit : Infinity;
-    const rows = [];
+    const ordered = needsRows && this.#order.length > 0;
+    const wanted = this.#offset + this.#limit;
+    const enough = needsRows && !ordered ? wanted : Infinity;
+    const sink = ordered && wanted !== Infinity ? new TopK(compareRows(this.#order), wanted) : new Every();
+    const take = (candidate) => {
+      if (this.#predicate(candidate) && (this.#filter === null || this.#filter(candidate))) sink.push(candidate);
+    };
     if (this.#covered(needsRows)) {
       for (const id of found) {
-        if (rows.length >= enough) break;
+        if (sink.size >= enough) break;
         const indexed = row(id);
         if (indexed === null || indexed.encrypted) continue;
-        const candidate = { id, ...indexed.fields };
-        if (this.#predicate(candidate)) rows.push(candidate);
+        take({ id, ...indexed.fields });
       }
-      return rows;
+      return { rows: sink.rows, sorted: sink instanceof TopK };
     }
+    // A batch is as wide as what is still wanted, CONCURRENCY at most: a
+    // `one()` reads one record at a time and stops at the first match, a
+    // scan reads sixteen.
+    const batch = [];
+    const read = async () => {
+      const records = await Promise.all(batch.map((id) => load(id)));
+      for (let i = 0; i < batch.length; i++) if (records[i] !== null) take({ id: batch[i], ...records[i] });
+      batch.length = 0;
+    };
     for (const id of found) {
-      if (rows.length >= enough) break;
-      const data = await load(id);
-      if (data === null) continue;
-      const candidate = { id, ...data };
-      if (this.#predicate(candidate) && (this.#filter === null || this.#filter(candidate))) rows.push(candidate);
+      if (sink.size >= enough) break;
+      batch.push(id);
+      if (batch.length >= Math.min(CONCURRENCY, Math.max(1, enough - sink.size))) await read();
     }
-    return rows;
+    if (batch.length > 0 && sink.size < enough) await read();
+    return { rows: sink.rows, sorted: sink instanceof TopK };
   }
 
   #project(row) {
@@ -255,14 +318,14 @@ class Cursor {
   // boundary): the candidates were read raw from the cache, and a caller
   // that edits a row must not be editing the cache.
   async fetch() {
-    let rows = await this.#matching(true);
-    if (this.#order.length > 0) rows.sort(compareRows(this.#order));
+    let { rows, sorted } = await this.#matching(true);
+    if (this.#order.length > 0 && !sorted) rows.sort(compareRows(this.#order));
     if (this.#offset > 0 || this.#limit !== Infinity) rows = rows.slice(this.#offset, this.#offset + this.#limit);
     return rows.map((row) => JSON.parse(JSON.stringify(this.#project(row))));
   }
 
   async count() {
-    return (await this.#matching(false)).length;
+    return (await this.#matching(false)).rows.length;
   }
 
   async one() {

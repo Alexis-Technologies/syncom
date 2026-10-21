@@ -537,7 +537,17 @@ class OpLog {
    * floor. No id at all resumes from the very beginning — possible only while
    * nothing has been compacted away.
    */
-  since(eventId, { scopes = null, limit = Infinity } = {}) {
+  /**
+   * The entries after `eventId` — `{ entries, last }`: the entries in
+   * `scopes` (all of them, or the first `limit`), and `last`, the seq of the
+   * last entry EXAMINED, in scope or not — where a reader's cursor may move
+   * to, so that an entry of another scope is looked at once rather than on
+   * every read; `null` when nothing was examined. A real entry's position,
+   * unlike `lastEventId`, which runs ahead of the entries while an append is
+   * in flight. The whole answer is `null` when the position cannot be
+   * resumed: another epoch, or compacted past.
+   */
+  read(eventId, { scopes = null, limit = Infinity } = {}) {
     let after;
     if (eventId === undefined || eventId === null) {
       if (this.#floor > 1) return null;
@@ -549,13 +559,32 @@ class OpLog {
       after = parsed.seq;
     }
     const entries = [];
+    let last = null;
     let index = this.#lowerBound(after + 1);
     for (; index < this.#entries.length && entries.length < limit; index++) {
       const entry = this.#entries[index];
+      last = entry.seq;
       // An op without a scope (or scoped '*') is global and reaches every
       // subscriber; a scoped one only those who asked for that scope.
       if (!inScope(entry.op.scope ?? GLOBAL_SCOPE, scopes)) continue;
       entries.push(entry);
+    }
+    return { entries, last };
+  }
+
+  /** The entries after `eventId` in `scopes` (see `read`), or null when the position cannot be resumed. */
+  since(eventId, options) {
+    return this.read(eventId, options)?.entries ?? null;
+  }
+
+  /** Every retained entry of the record `id`, oldest first — what `repair()` rebuilds from. */
+  entriesOf(id) {
+    const seqs = this.#byId.get(id);
+    if (!seqs) return [];
+    const entries = [];
+    for (const seq of [...seqs].sort((a, b) => a - b)) {
+      const entry = this.#entryAt(seq);
+      if (entry !== undefined) entries.push(entry);
     }
     return entries;
   }

@@ -39,6 +39,10 @@ const SCHEMA_FILE = 'schema.json';
 // their hooks inside this storage; the apply pair runs per peer batch.
 const STORAGE_HOOKS = ['beforeWrite', 'afterWrite', 'beforeRead', 'afterRead', 'beforeApply', 'afterApply'];
 
+// The ops that leave a record's whole state behind them — where a repair
+// can start replaying from. A purge counts even scrubbed; the others not.
+const WHOLE = new Set(['write', 'merge', 'delete']);
+
 // A service file this storage wrote itself and cannot read any more.
 const corrupt = (file, cause) =>
   new SyncomError('CORRUPT', `${file} is unreadable (${cause?.message ?? cause}); restore it or remove the directory`, {
@@ -852,6 +856,45 @@ class Storage extends Emitter {
     if (typeof key !== 'string') throw new TypeError('inc() takes a field name');
     if (!Number.isFinite(value)) throw new TypeError('inc() takes a finite number');
     await this[COMMIT]('inc', id, { key, value }, { actor });
+  }
+
+  /**
+   * Rebuilds the record `id` from what this node's log holds of it — for a
+   * file that fails its integrity check (`INTEGRITY`) or is torn. The
+   * retained entries are replayed from the first whole-record op among
+   * them (a `write`, `merge`, `delete` or `purge`; a scrubbed one is a
+   * no-op), the result written through the usual seam with a chain block of
+   * its own. What comes out is what a peer replaying this log from that op
+   * would hold; an id with no such op retained — compacted away, never
+   * written here, encrypted — rejects with `UNRECOVERABLE`. Returns how many
+   * ops went in and whether the record is alive.
+   */
+  repair(id) {
+    if (!isRecordId(id)) return Promise.reject(invalidId(id));
+    return this.#run(() => this.#repair(id));
+  }
+
+  async #repair(id) {
+    const entries = this.#log.entriesOf(id).filter((entry) => !entry.skipped);
+    const whole = ({ op, scrubbed }) => op.type === 'purge' || (!scrubbed && WHOLE.has(op.type));
+    const start = entries.findIndex(whole);
+    if (start === -1) {
+      const message = `Record ${id} cannot be rebuilt: the log holds no whole-record op for it`;
+      throw new SyncomError('UNRECOVERABLE', message, { id });
+    }
+    let entry = null;
+    for (let i = start; i < entries.length; i++) {
+      this.#clock.observe(entries[i].op.ts);
+      ({ entry } = applyOp(entry, entries[i].op));
+    }
+    this.#entries.forget(id);
+    await this.#persistBatch(new Map([[id, entry]]), entries[start].seq, entries[entries.length - 1].seq);
+    this.#flushCatalog();
+    const ops = entries.length - start;
+    const alive = isAlive(entry);
+    this.#logger.info({ event: 'record.repaired', id, ops, alive });
+    this.#emitUpdate(id, alive ? entry.data : null, alive ? { ...entry.data } : {});
+    return { ops, alive };
   }
 
   /**

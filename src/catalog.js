@@ -14,6 +14,8 @@
 // so a snapshot can page over every entry without listing the directory.
 
 const FILE = 'catalog.json';
+// The key `ids()` caches the whole live list under.
+const ALL = Symbol('syncom.catalog.all');
 const FORMAT = 2;
 
 const isObject = (value) => typeof value === 'object' && value !== null;
@@ -59,6 +61,7 @@ class Catalog {
   #watchers = new Map();
   #dirty = 0;
   #sorted = null;
+  #sortedIds = new Map();
 
   constructor({ fsi, path, entities }) {
     this.#fsi = fsi;
@@ -67,7 +70,7 @@ class Catalog {
     for (const [name, def] of entities) {
       const fields = new Set(def.index);
       for (const key of def.unique) for (const field of key) fields.add(field);
-      this.#defs.set(name, { index: def.index, unique: def.unique, fields: [...fields] });
+      this.#defs.set(name, { index: def.index, unique: def.unique, fields: [...fields], indexed: fields });
       shape.push([name, def.index, def.unique]);
     }
     // What a persisted catalog must have been built with to be reused.
@@ -89,6 +92,8 @@ class Catalog {
     this.#rows.delete(id);
     this.#sorted = null;
     if (row.gone) return;
+    this.#sortedIds.delete(row.type);
+    this.#sortedIds.delete(ALL);
     drop(this.#byType, row.type, id);
     const def = row.type === null ? undefined : this.#defs.get(row.type);
     if (!def) return;
@@ -114,6 +119,8 @@ class Catalog {
     this.#rows.set(id, row);
     this.#sorted = null;
     if (row.gone) return;
+    this.#sortedIds.delete(row.type);
+    this.#sortedIds.delete(ALL);
     add(this.#byType, row.type, id);
     const def = row.type === null ? undefined : this.#defs.get(row.type);
     if (!def) return;
@@ -168,9 +175,9 @@ class Catalog {
     return this.#sorted;
   }
 
-  /** The fields of a collection the catalog holds — what a covered query may read. */
+  /** The fields of a collection the catalog holds — what a covered query may read. Shared: read it, do not edit it. */
   indexed(type) {
-    return new Set(this.#defs.get(type)?.fields ?? []);
+    return this.#defs.get(type)?.indexed ?? new Set();
   }
 
   /** Calls `fn` after every change to a record of `type`; returns the unsubscribe. */
@@ -193,38 +200,79 @@ class Catalog {
     return this.#rows.get(id) ?? null;
   }
 
-  /** Every live id (tombstones left out), or those of one collection, sorted. */
+  /**
+   * Every live id (tombstones left out), or those of one collection, sorted
+   * — cached until a record of the collection changes. Shared: read it, do
+   * not edit it.
+   */
   ids(type) {
-    if (type !== undefined) return [...(this.#byType.get(type) ?? [])].sort();
-    const ids = [];
-    for (const [id, row] of this.#rows) if (!row.gone) ids.push(id);
-    return ids.sort();
+    const key = type === undefined ? ALL : type;
+    let sorted = this.#sortedIds.get(key);
+    if (sorted !== undefined) return sorted;
+    if (type !== undefined) sorted = [...(this.#byType.get(type) ?? [])].sort();
+    else {
+      sorted = [];
+      for (const [id, row] of this.#rows) if (!row.gone) sorted.push(id);
+      sorted.sort();
+    }
+    this.#sortedIds.set(key, sorted);
+    return sorted;
   }
 
   /**
    * The ids a query over `entity` can only match, from the indexed fields
-   * it names by equality (`field: value`, `{ $eq }`, `{ $in }`): the
-   * intersection of their posting lists. `null` when no indexed field is
-   * named — then every record of the collection is a candidate.
+   * it names by equality (`field: value`, `{ $eq }`, `{ $in }`) — at the top
+   * level and down every `$and` branch; an `$or` narrows when each of its
+   * branches does: the intersection of their posting lists. `null` when no
+   * indexed field is named — then every record of the collection is a
+   * candidate.
    */
   candidates(entity, query) {
     const def = this.#defs.get(entity);
     const eq = this.#eq.get(entity);
-    if (!def || !eq || !isObject(query)) return null;
+    if (!def || !eq || !isObject(query) || Array.isArray(query)) return null;
+    return this.#narrow(eq, query);
+  }
+
+  #narrow(eq, query) {
     let result = null;
-    for (const field of Object.keys(query)) {
-      if (!eq.has(field)) continue;
-      const condition = query[field];
-      let values;
-      if (!isObject(condition) || Array.isArray(condition)) values = [condition];
-      else if (Object.hasOwn(condition, '$eq')) values = [condition.$eq];
-      else if (Array.isArray(condition.$in)) values = condition.$in;
-      else continue;
-      const posting = eq.get(field);
-      const found = new Set();
-      for (const value of values) for (const id of posting.get(keyOf(value)) ?? []) found.add(id);
+    const meet = (found) => {
       result = result === null ? found : new Set([...result].filter((id) => found.has(id)));
-      if (result.size === 0) break;
+    };
+    for (const key of Object.keys(query)) {
+      const condition = query[key];
+      if (key === '$and') {
+        if (!Array.isArray(condition)) continue;
+        for (const sub of condition) {
+          const found = isObject(sub) && !Array.isArray(sub) ? this.#narrow(eq, sub) : null;
+          if (found !== null) meet(found);
+        }
+      } else if (key === '$or') {
+        // One branch that cannot narrow is the whole collection.
+        if (!Array.isArray(condition) || condition.length === 0) continue;
+        const union = new Set();
+        let whole = false;
+        for (const sub of condition) {
+          const found = isObject(sub) && !Array.isArray(sub) ? this.#narrow(eq, sub) : null;
+          if (found === null) {
+            whole = true;
+            break;
+          }
+          for (const id of found) union.add(id);
+        }
+        if (!whole) meet(union);
+      } else if (eq.has(key)) {
+        let values;
+        if (!isObject(condition) || Array.isArray(condition)) values = [condition];
+        else if (Object.hasOwn(condition, '$eq')) values = [condition.$eq];
+        else if (Array.isArray(condition.$in)) values = condition.$in;
+        else continue;
+        const posting = eq.get(key);
+        const found = new Set();
+        for (const value of values) for (const id of posting.get(keyOf(value)) ?? []) found.add(id);
+        meet(found);
+      }
+      if (result !== null && result.size === 0) break;
     }
     return result;
   }

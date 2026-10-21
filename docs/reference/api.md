@@ -45,6 +45,7 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 | `update(id, delta, { actor }?)` | `Promise<void>` | Sets the listed fields (a `set` op); throws if absent, or on a counter field |
 | `inc(id, key, value = 1, { actor }?)` | `Promise<void>` | Adds to a counter field (an `inc` op); throws on a register field |
 | `swap(id, changes, prev, { actor }?)` | `Promise<boolean>` | CAS, compared inside the mutation queue — `false`, and no write, on mismatch; rejects when absent |
+| `repair(id)` | `Promise<{ ops, alive }>` | Rebuilds a record whose file fails its integrity check from the log's entries of it (see [Repair](../guide/storage#repair)); rejects with `code: 'UNRECOVERABLE'` when the log holds no whole-record op for it |
 | `delete(id, { actor }?)` | `Promise<void>` | Leaves a tombstone |
 | `purge(id, { actor }?)` | `Promise<void>` | Forgets the record for good: a `purge` op and a scrub of its log entries, here and on every peer (see [Purge](../guide/storage#purge)) |
 | `record(id)` | `Promise<Record>` | Cached per id |
@@ -192,6 +193,7 @@ value is data or configuration. `HookError` and `ValidationError` are
 | `HANDSHAKE_LOOP` | the sync `error` event: five fresh hellos answered 428 in a row | `url`, `cause` |
 | `PAGE_FAILED`, `STUCK` | the sync `error` event: a page of the feed could not be applied; the third in a row | `url`, `cursor`, `attempt`, `cause` |
 | `STREAMS_UNSUPPORTED` | the sync `error` event: the host streamed a snapshot and the link cannot read streams | `url` |
+| `UNRECOVERABLE` | `repair()` when the log holds no whole-record op for the id | `id` |
 | `SKEW`, `OP_UNREADABLE`, `OP_REFUSED`, `OP_INVALID` | the storage `error` event — see [`Storage`](#storage) | `op`, plus `rejected` / `entity` + `issues` |
 | `HOOK_FAILED` | a `HookError` | `hook`, `cause` |
 | `VALIDATION_FAILED` | a `ValidationError` | `entity`, `issues`, `cause` |
@@ -243,7 +245,9 @@ for) a roll seals only the batches marked `applied`.
 | `held()` | `LogEntry[]` — the entries held for a newer schema version |
 | `droppedHeld`, `resetDroppedHeld()` | Held entries compaction dropped since the last reset |
 | `scrub(id)` | `Promise<number>` — strips the payload of every entry of `id` (`scrubbed: true`), in memory and on disk |
-| `since(eventId, { scopes, limit }?)` | `LogEntry[]` after the id, or `null` when it cannot be resumed |
+| `read(eventId, { scopes, limit }?)` | `{ entries, last }` — the entries in `scopes` after the id, and the seq of the last entry examined (in scope or not; where a feed's cursor may move), or `null` when it cannot be resumed |
+| `since(eventId, { scopes, limit }?)` | `read(...).entries`, or `null` when it cannot be resumed |
+| `entriesOf(id)` | Every retained entry of the record, oldest first — what `repair()` replays |
 | `advance(vector)` | Adopts a vector (after a snapshot) |
 | `tail()` | The unsealed entries a reopen replays |
 | `applied(from, to?)` | The batches within `from..to` are reflected in the records; under `sealApplied` a roll stops short of the oldest batch not yet applied |

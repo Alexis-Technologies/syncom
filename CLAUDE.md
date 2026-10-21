@@ -169,6 +169,12 @@ docs/                     VitePress site
   reports `PAGE_FAILED` with the saved cursor, and resubscribes from it —
   `STUCK` after `MAX_PAGE_RETRIES`. Never move `node.cursor` past a page that
   did not land, and never catch inside `#receive` to "keep going".
+- **A hosted feed's cursor moves to a real entry, never to `lastEventId`.**
+  `changes` in `src/hosting.js` reads through `OpLog.read`, whose `last` is
+  the seq of the last entry examined (in scope or not); when a wake brings
+  nothing for the peer, the cursor moves there without a page. `lastEventId`
+  is `next - 1` and runs ahead of the entries while an append is in flight —
+  a feed that jumped there lost the batch in flight (it was tried).
 - **Data crosses the boundary as JSON copies.** `src/commit.js` copies
   `payload.data` and `src/bootstrap.js` a record's `data`/`meta` (`asJson`)
   before anything keeps a reference; `#read` and `Cursor.fetch()` hand out
@@ -228,12 +234,24 @@ docs/                     VitePress site
   scope among them) at span start AND end and records a failure's `code`
   rather than the exception. A new `event:` name goes into the table in
   `docs/guide/telemetry.md` — the names are a surface.
+- **`repair(id)` replays the log, it does not guess.** `Storage.#repair`
+  starts at the first whole-record op the log retains for the id (`WHOLE`:
+  `write`/`merge`/`delete`, or a `purge` even scrubbed), folds the rest with
+  `applyOp`, and writes through `#persistBatch` like a replay — one chain
+  block, the catalog put by `EntryStore.write`. No such op is
+  `UNRECOVERABLE`; an integrity failure is never repaired implicitly on
+  read — it is evidence first.
 - **Encrypted records are local.** `{ encrypted: true }` seals a record for
   this node's key; it produces no op and is excluded from snapshots. Do not
   route an encrypted entry through `applyOp`.
 - **A cursor reads through `storage[SOURCE]`, not through `get()`.** The
   seam hands it the catalog and a lensed, hook-free `load(id)` — like
-  `snapshot()` and `swap()`. Unique keys are checked after validation and
+  `snapshot()` and `swap()`. `Cursor#matching` is the one place that reads
+  records for a query: sixteen at a time, in candidate order, into a `TopK`
+  when the cursor is ordered and limited (the rows come back sorted, `fetch`
+  must not sort again) or an `Every` otherwise; `Catalog.candidates` narrows
+  through `$and`/`$or`, and `ids()`/`indexed()` hand out cached, shared
+  arrays and sets — never edit what they return. Unique keys are checked after validation and
   the fold, before `#log.append` (local: throw) and after `applyOp` on the
   apply path (remote: `conflict` event, never a skip — both records stay).
 - **The catalog is derived state, kept at one seam.** `EntryStore`

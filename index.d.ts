@@ -141,6 +141,7 @@ export type SyncomErrorCode =
   | 'PAGE_FAILED'
   | 'STUCK'
   | 'STREAMS_UNSUPPORTED'
+  | 'UNRECOVERABLE'
   | 'SKEW'
   | 'OP_UNREADABLE'
   | 'OP_REFUSED'
@@ -228,7 +229,20 @@ export interface OpLog {
   resetDroppedHeld(): Promise<void>;
   /** Strips the payload of every entry of `id`, in memory and on disk; resolves to how many. */
   scrub(id: string): Promise<number>;
+  /**
+   * The entries after `eventId` in `scopes` (all, or the first `limit`), and
+   * `last`: the seq of the last entry examined, in scope or not — where a
+   * reader's cursor may move so an entry of another scope is looked at once.
+   * `null` when the position cannot be resumed (another epoch, compacted past).
+   */
+  read(
+    eventId: string | null | undefined,
+    options?: { scopes?: readonly string[] | null; limit?: number },
+  ): { entries: LogEntry[]; last: number | null } | null;
+  /** `read(...).entries`, or null when the position cannot be resumed. */
   since(eventId: string | null | undefined, options?: { scopes?: readonly string[] | null; limit?: number }): LogEntry[] | null;
+  /** Every retained entry of the record `id`, oldest first — what `Storage.repair()` rebuilds from. */
+  entriesOf(id: string): LogEntry[];
   advance(vector: VersionVector): Promise<void>;
   tail(): LogEntry[];
   flush(): Promise<void>;
@@ -1095,6 +1109,15 @@ export interface Storage {
    * mismatch; rejects when the record is absent.
    */
   swap(id: string, changes: object, prev: object, options?: WriteOptions): Promise<boolean>;
+  /**
+   * Rebuilds the record from what the log holds of it — a file that fails
+   * its integrity check, or is torn: the retained entries replayed from the
+   * first whole-record op (`write`, `merge`, `delete`, `purge`), written with
+   * a chain block of its own. Rejects with `UNRECOVERABLE` when the log holds
+   * no such op (compacted away, never written here, encrypted). `ops` is how
+   * many entries went in.
+   */
+  repair(id: string): Promise<{ ops: number; alive: boolean }>;
   /** Every live id, sorted — from the catalog, no I/O. */
   list(): Promise<string[]>;
   /**

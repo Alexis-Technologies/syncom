@@ -44,8 +44,14 @@ const main = async () => {
     await bench(
       'get — cold (re-verifies the block)',
       async () => {
+        // A second instance on the same directory, closed after the read:
+        // left open, every iteration would leak a log and a lock.
         const cold = await open({ path: root, lock: false });
-        return cold.get(id);
+        try {
+          return await cold.get(id);
+        } finally {
+          await cold.close();
+        }
       },
       { warmup: 3, measureMs: 500 },
     );

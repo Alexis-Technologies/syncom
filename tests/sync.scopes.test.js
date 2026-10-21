@@ -93,4 +93,41 @@ test('Hosting scopes', async (t) => {
     assert.deepStrictEqual(types(await admin.call('syncom/snapshot', {})), ['*', '*', 'A', 'A', 'B', 'B']);
     assert.deepStrictEqual(types(await admin.call('syncom/snapshot', { scopes: ['B'] })), ['*', '*', 'B', 'B']);
   });
+
+  await t.test("a feed moves past other scopes' ops without sending a page", async (t2) => {
+    const host = await openTemp(t2, { sync: { autoStart: false, scope } });
+    const unit = host.sync.unit({ access: 'public' });
+    const link = new MemoryLink(unit);
+    await link.call('syncom/hello', { node: 'tenant-a', version: 1, scopes: ['A'] });
+    const pages = [];
+    link.subscribe(
+      'syncom/changes',
+      { scopes: ['A'] },
+      {
+        onData: (value, eventId) => pages.push({ ids: (value.ops ?? []).map((row) => row[4]), eventId }),
+        onError: (error) => {
+          throw error;
+        },
+      },
+    );
+    for (let i = 0; i < 20; i++) await host.insert({ $type: 'B', i });
+    // Every B op woke the feed; its cursor followed them to the last real
+    // entry, and nothing went out.
+    await waitUntil(() => host.sync.hosted()[0]?.cursor === host.log.lastEventId);
+    assert.deepStrictEqual(pages, [], 'no empty pages');
+    const a = await host.insert({ $type: 'A', n: 1 });
+    await waitUntil(() => pages.length === 1);
+    assert.deepStrictEqual(pages[0].ids, [a], 'the A op alone, labelled with its own position');
+    assert.strictEqual(pages[0].eventId, host.log.lastEventId);
+    assert.strictEqual(host.sync.hosted()[0].cursor, host.log.lastEventId);
+    // A resume from the last page delivered is exact: the B ops before it are
+    // behind the cursor the page carried. (The socket dies first, as it does
+    // before a real reconnect — the old feed ends, the new one resumes.)
+    link.disconnect();
+    await link.reconnect({ freshClient: false });
+    const b = await host.insert({ $type: 'B', i: 99 });
+    const a2 = await host.insert({ $type: 'A', n: 2 });
+    await waitUntil(() => pages.length === 2);
+    assert.deepStrictEqual(pages[1].ids, [a2], `B ${b} never reached an A subscriber`);
+  });
 });

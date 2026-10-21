@@ -455,6 +455,11 @@ expectType<number>(log.seqOf('origin@scope'));
 
 // E5b: introspection
 expectType<syncom.StorageStats>(storage.stats());
+expectType<Promise<{ ops: number; alive: boolean }>>(storage.repair('r1'));
+expectAssignable<SyncomErrorCode>('UNRECOVERABLE');
+expectType<{ entries: syncom.LogEntry[]; last: number | null } | null>(log.read('e.1', { scopes: ['a'], limit: 5 }));
+expectType<syncom.LogEntry[] | null>(log.since('e.1'));
+expectType<syncom.LogEntry[]>(log.entriesOf('r1'));
 expectType<number>(storage.stats().cache.pinned);
 expectType<{ tail: string } | null>(storage.stats().chain);
 expectType<syncom.HostedPeer[]>(storage.sync.hosted());

@@ -246,23 +246,30 @@ const changes = (host) =>
     try {
       for (;;) {
         if (signal?.aborted) return;
-        const entries = storage.log.since(cursor, { scopes, limit: pageSize });
-        if (entries === null) {
+        const page = storage.log.read(cursor, { scopes, limit: pageSize });
+        if (page === null) {
           // Cannot resume: another epoch, or compacted past the cursor.
           yield { bootstrap: true };
           return;
         }
+        const { entries, last } = page;
         if (entries.length === 0) {
-          // The cursor stays: `lastEventId` can be ahead of the entries
-          // while an append is in flight, and a feed that jumped there
-          // would never deliver that batch.
+          // Nothing for this peer: what came is another scope's. The cursor
+          // moves past it — to a real entry's position, never to
+          // `lastEventId`, which runs ahead of the entries while an append
+          // is in flight — so the next wake scans only what is new. Not
+          // labelled: there is no page to send; a resume from the last page
+          // delivered looks at these once more.
+          if (last !== null) {
+            cursor = storage.log.formatId(last);
+            feed.cursor = cursor;
+          }
           await waitFor(wakers, signal);
           continue;
         }
-        const last = entries[entries.length - 1].seq;
         const ops = [];
         for (const { op } of entries) if (op.origin !== node && op.from !== node) ops.push(op);
-        cursor = storage.log.formatId(last);
+        cursor = storage.log.formatId(entries[entries.length - 1].seq);
         feed.cursor = cursor;
         // Labelled even when every op was the peer's own echo: the position
         // still moves, and a resume must not replay it.

@@ -68,18 +68,23 @@ reads from it twice:
 
 - an **equality** on an indexed field (`field: value`, `$eq`, `$in`) narrows
   the candidates to that field's posting list before any record is read —
-  `{ boardId: 'b1', priority: { $gte: 2 } }` reads the board's records only;
+  `{ boardId: 'b1', priority: { $gte: 2 } }` reads the board's records only.
+  The narrowing follows every `$and` branch, and an `$or` whose branches all
+  name an indexed equality; a `$not`, or a branch without one, is left to the
+  predicate;
 - a query whose fields, order and projection are **all indexed**, with no
   `filter`, is answered from the catalog alone: not one record read.
   `{ boardId: 'b1', status: 'open' }` with `projection(['status'])` is one;
   without the projection the rows are the records, which must be read.
 
 Everything else reads the candidates — from the cache for the recent ones,
-from disk otherwise — and evaluates the predicate on each. There is no
-B-tree: an ordered range over an unindexed field is a scan of the
-collection, sorted in memory, which is fine for the tens of thousands of
-records a local-first app holds and the wrong tool for millions. An
-unordered cursor with a `limit` stops reading at enough matches.
+from disk otherwise, sixteen at a time — and evaluates the predicate on each.
+There is no B-tree: an ordered range over an unindexed field is a scan of the
+collection, which is fine for the tens of thousands of records a local-first
+app holds and the wrong tool for millions. An unordered cursor with a `limit`
+stops reading at enough matches; an ordered one with a `limit` keeps only the
+best `offset + limit` rows as the candidates go by, instead of sorting every
+match — the first page of a large collection costs its reads, not its sort.
 
 ## watch()
 

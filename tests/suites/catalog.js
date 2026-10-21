@@ -176,6 +176,66 @@ const runCatalogTests = async (t, assert, createStorage) => {
     assert.strictEqual(strict.hasRecord(id), false, 'left out of the rebuilt catalog');
     await assert.rejects(() => createStorage(t2, 'B', { integrity: 'trust' }), /integrity must be/);
   });
+
+  await t.test(
+    'repair(id) rebuilds a record from its log entries; UNRECOVERABLE when the log has no start',
+    async (t2) => {
+      const fsi = createMemoryFsi();
+      const storage = await createStorage(t2, 'A', { fsi });
+      const id = await storage.insert({ title: 'first', hits: 0, $type: 'Post' });
+      await storage.update(id, { title: 'second' });
+      await storage.inc(id, 'views', 3);
+      const gone = await storage.insert({ $type: 'Post', title: 'gone' });
+      await storage.delete(gone);
+      const purged = await storage.insert({ $type: 'Post', title: 'purged' });
+      await storage.purge(purged);
+      const expected = await storage.get(id);
+      await storage.close();
+      // The file is tampered with: the data no longer hashes to its block.
+      const dir = `${storage.path}/data`;
+      const file = JSON.parse(await fsi.read(dir, `${id}.json`));
+      file.data = { title: 'forged' };
+      await fsi.write(dir, `${id}.json`, JSON.stringify(file));
+      await fsi.write(dir, `${purged}.json`, 'torn{');
+      const again = await createStorage(t2, 'A', { fsi, logger: false });
+      await assert.rejects(() => again.get(id), { code: 'INTEGRITY' });
+      const seen = [];
+      const record = await again.record(gone);
+      record.on('update', (data) => seen.push(data));
+      assert.deepStrictEqual(await again.repair(id), { ops: 3, alive: true }, 'write, set, inc');
+      assert.deepStrictEqual(await again.get(id), expected, 'what the log says the record is');
+      assert.strictEqual(again.hasRecord(id), true, 'back in the catalog');
+      assert.strictEqual(await again.validate(id, expected, JSON.parse(await fsi.read(dir, `${id}.json`)).block), true);
+      assert.deepStrictEqual(await again.repair(gone), { ops: 2, alive: false }, 'a tombstone is rebuilt as one');
+      assert.deepStrictEqual(seen, [null], 'a live Record hears of it');
+      assert.deepStrictEqual(
+        await again.repair(purged),
+        { ops: 1, alive: false },
+        'the purge alone: a scrubbed write is no start',
+      );
+      assert.strictEqual(await again.get(purged), null);
+      assert.deepStrictEqual(await again.list(), [id], 'the catalog lists the rebuilt record alone');
+      await assert.rejects(() => again.repair('never-written'), { code: 'UNRECOVERABLE', id: 'never-written' });
+      await assert.rejects(() => again.repair('../x'), { code: 'INVALID_ID' });
+      const sealed = await again.insert({ secret: 1 }, { encrypted: true });
+      await assert.rejects(() => again.repair(sealed), { code: 'UNRECOVERABLE' }, 'no ops for a sealed record');
+      await again.close();
+      // Compaction took the write: only sets remain, and a set is not a start.
+      const short = await createStorage(t2, 'C', { fsi, sync: { log: { rollAfter: 1 }, retention: { ops: 2 } } });
+      const shortId = await short.insert({ n: 0 });
+      for (let i = 1; i <= 4; i++) await short.update(shortId, { n: i });
+      assert.ok(
+        short.log.entriesOf(shortId).every(({ op }) => op.type === 'set'),
+        'the write was compacted away',
+      );
+      await assert.rejects(() => short.repair(shortId), {
+        code: 'UNRECOVERABLE',
+        message: /no whole-record op/,
+      });
+      assert.deepStrictEqual(await short.get(shortId), { n: 4 }, 'the record itself is untouched');
+      await short.close();
+    },
+  );
 };
 
 module.exports = { runCatalogTests };

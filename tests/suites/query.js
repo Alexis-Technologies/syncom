@@ -81,6 +81,43 @@ const runQueryTests = async (t, assert, createStorage) => {
     assert.ok(narrowed.length > 0 && narrowed.length < 24);
     assert.ok(fsi.dataReads() <= 24, `read ${fsi.dataReads()} candidates, not 120`);
     assert.ok(narrowed.every((row) => row.orgId === 'o3' && row.createdAt >= 1030));
+    // Ordered with a limit: only the best offset + limit rows are kept while
+    // the candidates are read (in parallel, in candidate order); the page is
+    // what a stable sort of every match would give — equal keys in candidate
+    // order, which is id order — for any limit and offset, either way.
+    const byKind = (desc) => (a, b) => {
+      const order = a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : 0;
+      return desc ? -order : order;
+    };
+    const byId = [...all].sort((a, b) => (a.id < b.id ? -1 : 1));
+    for (const [limit, offset, desc] of [
+      [0, 0, false],
+      [1, 0, false],
+      [3, 2, true],
+      [7, 0, false],
+      [10, 5, true],
+      [30, 10, false],
+      [200, 0, true],
+      [5, 200, false],
+    ]) {
+      const expected = [...byId]
+        .sort(byKind(desc))
+        .slice(offset, offset + limit)
+        .map((row) => row.id);
+      const cursor = storage.Project.select({});
+      if (desc) cursor.desc('kind');
+      else cursor.order('kind');
+      const got = (await cursor.limit(limit).offset(offset).fetch()).map((row) => row.id);
+      assert.deepStrictEqual(got, expected, `limit ${limit} offset ${offset} ${desc ? 'desc' : 'asc'}`);
+    }
+    // $and narrows to the posting lists of every branch: the candidates
+    // read are the eight o1 libs, not the 24 of o1 or the 120 of all.
+    fsi.reset();
+    const both = await storage.Project.select({ $and: [{ orgId: 'o1' }, { kind: 'lib' }, { createdAt: { $gte: 0 } }] })
+      .order('createdAt')
+      .fetch();
+    assert.strictEqual(both.length, 8);
+    assert.ok(fsi.dataReads() <= 8, `read ${fsi.dataReads()} candidates, not 24 or 120`);
     // The operators and the rest of the cursor.
     assert.deepStrictEqual(
       (

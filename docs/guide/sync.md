@@ -267,6 +267,8 @@ sequence numbers run per scope. `snapshot` and `changes` serve the
 intersection of what is asked and what was granted: asking for `'*'` or for
 nothing is asking for the granted list, asking only for other scopes is
 refused with code **403** (`reason: 'SCOPES'`). A peer granted `'*'` is bound by nothing.
+A scoped feed moves its cursor past the other scopes' ops without sending a
+page, so an op is looked at once however many feeds it does not concern.
 `authorize(context, hello)` sees `hello.scopes`, which is where a host decides
 what a credential may claim.
 

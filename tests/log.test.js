@@ -51,6 +51,21 @@ test('OpLog', async (t) => {
       assert.strictEqual(log.since(undefined, { scopes: ['*'] }).length, 3);
       assert.strictEqual(log.since(undefined, { scopes: ['other'] }).length, 2);
       assert.strictEqual(log.since(undefined, { scopes: ['other'] })[0].op.scope, undefined);
+      // read(): the same entries, plus where the cursor may move — the last
+      // entry examined, in scope or not, a real position.
+      assert.deepStrictEqual(log.read(undefined, { scopes: ['other'] }).last, 3, 'B@s was looked at');
+      assert.strictEqual(log.read(undefined, { scopes: ['other'] }).entries.length, 2);
+      assert.deepStrictEqual(log.read(log.formatId(3)), { entries: [], last: null }, 'nothing to examine');
+      assert.strictEqual(log.read(undefined, { limit: 1 }).last, 1, 'a limit stops at the entry it took');
+      assert.strictEqual(log.read(log.formatId(2), { scopes: ['other'] }).last, 3, 'an empty page still moves');
+      assert.strictEqual(log.read('garbage'), null);
+      // entriesOf(): a record's own entries, oldest first.
+      assert.deepStrictEqual(
+        log.entriesOf('r1').map((entry) => entry.seq),
+        [1, 3],
+        'r1 was written at seq 1 and again at 3',
+      );
+      assert.deepStrictEqual(log.entriesOf('nope'), []);
 
       assert.strictEqual(log.since('other-epoch.1'), null);
       assert.strictEqual(log.since('garbage'), null);

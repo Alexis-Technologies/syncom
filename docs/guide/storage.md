@@ -201,6 +201,32 @@ included, and `dirty` puts since the last save), the log (`length`, `floor`,
 [sync manager](./sync#lifecycle-and-events) adds `peers()`, `hosted()` and the
 `log` event; [telemetry](./telemetry) adds the gauges.
 
+### Repair
+
+A record file that fails its integrity check — its data no longer hashes to
+what its chain block recorded — rejects every read with `code: 'INTEGRITY'`,
+and stays that way: nothing repairs it behind your back, because a file that
+changed under the chain is evidence first. When you have looked,
+`storage.repair(id)` rebuilds the record from this node's own log: the
+retained entries of the id are replayed from the first whole-record op among
+them (a `write`, `merge`, `delete` or `purge`), and the result is written the
+usual way, with a chain block of its own, back into the catalog and the cache.
+What comes out is what a peer replaying this log from that op would hold.
+
+```js
+try {
+  await storage.get(id);
+} catch (error) {
+  if (error.code !== 'INTEGRITY') throw error;
+  const { ops, alive } = await storage.repair(id); // { ops: 3, alive: true }
+}
+```
+
+A record the log cannot rebuild — its write compacted away so only `set`s and
+`inc`s remain, an id never written here, an encrypted record (which has no
+ops) — rejects with `code: 'UNRECOVERABLE'`; a peer that still holds the
+record is the way back then (a [bootstrap](./sync#bootstrap) carries it).
+
 ### Encryption at rest
 
 Open the storage with `encrypted: true`, or pass the flag per write:

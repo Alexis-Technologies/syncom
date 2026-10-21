@@ -216,7 +216,7 @@ alert to key on:
 | warn | `log.epoch.new` (when a log was there), `log.segment.unreadable`, `log.open.unreadable` | the log changed epoch or lost a file |
 | warn | `catalog.skipped`, `catalog.lens`, `catalog.save`, `snapshot.skipped`, `replay.skipped`, `record.shadowed` | derived state could not follow a record; a field shadowing a method |
 | warn | `listener.error`, `watch.error`, `schema.drift` | an event listener or a watcher threw; two builds of one schema version |
-| info | `schema.upgrade`, `schema.changed`, `schema.held` | what a reopen found about the schema |
+| info | `schema.upgrade`, `schema.changed`, `schema.held`, `record.repaired` | what a reopen found about the schema; a record rebuilt from the log |
 | debug | `catalog.rebuild`, `durable.noop`, `log.epoch.new` (a brand-new log), `schema.lens.issues` | routine |
 
 ## Failures
