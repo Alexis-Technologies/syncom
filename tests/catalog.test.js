@@ -51,6 +51,34 @@ test('Catalog', async (t) => {
     assert.deepStrictEqual(catalog.candidates('Post', { orgId: 'o1' }), new Set());
   });
 
+  await t.test('an indexed array is posted under each element: a scalar narrows to the arrays holding it', () => {
+    const tagged = catalogOf({ entities: { Issue: { index: ['tags'] } } });
+    tagged.put('i1', { type: 'Issue', data: { tags: ['bug', 'ui'] } });
+    tagged.put('i2', { type: 'Issue', data: { tags: ['ui'] } });
+    tagged.put('i3', { type: 'Issue', data: { tags: 'bug' } });
+    tagged.put('i4', { type: 'Issue', data: { tags: [['bug']] } });
+    assert.deepStrictEqual(tagged.candidates('Issue', { tags: 'bug' }), new Set(['i1', 'i3']));
+    assert.deepStrictEqual(tagged.candidates('Issue', { tags: 'ui' }), new Set(['i1', 'i2']));
+    assert.deepStrictEqual(
+      tagged.candidates('Issue', { tags: ['ui'] }),
+      new Set(['i2']),
+      'an array value: the whole array',
+    );
+    // A superset: the nested array's element shares the key with the value;
+    // the predicate, not the catalog, decides.
+    assert.deepStrictEqual(tagged.candidates('Issue', { tags: ['bug'] }), new Set(['i4']));
+    assert.deepStrictEqual(tagged.candidates('Issue', { tags: { $in: ['bug', 'nope'] } }), new Set(['i1', 'i3']));
+    tagged.put('i1', { type: 'Issue', data: { tags: ['ui'] } });
+    assert.deepStrictEqual(
+      tagged.candidates('Issue', { tags: 'bug' }),
+      new Set(['i3']),
+      'the old element posting is gone',
+    );
+    tagged.put('i3', null);
+    assert.deepStrictEqual(tagged.candidates('Issue', { tags: 'bug' }), new Set());
+    assert.deepStrictEqual(tagged.candidates('Issue', { tags: 'ui' }), new Set(['i1', 'i2']));
+  });
+
   await t.test('candidates: the intersection of the indexed equalities a query names', () => {
     const catalog = catalogOf(schema);
     catalog.put('a', { type: 'Post', data: { orgId: 'o1', slug: 'a', meta: { kind: 'x' }, tags: ['t'] } });

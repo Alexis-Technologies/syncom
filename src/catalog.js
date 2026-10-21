@@ -33,7 +33,8 @@ const valueOf = (data, path) => {
   return value;
 };
 
-// Arrays and objects are keyed as values, not as sets of their elements.
+// Arrays and objects are keyed as values; an array is posted under each of
+// its elements too (see `post`). Unique keys compare the whole value.
 const keyOf = (value) => JSON.stringify(value);
 
 const add = (map, key, id) => {
@@ -47,6 +48,17 @@ const drop = (map, key, id) => {
   if (!ids) return;
   ids.delete(id);
   if (ids.size === 0) map.delete(key);
+};
+
+// A value is posted under its own key and, for an array, under each
+// element's as well: `{ tags: 'bug' }` then narrows to the arrays that hold
+// it, the way the predicate matches it. Candidates are a superset the
+// predicate filters — a `[1]` element and a `[1]` value share a key, and
+// the extra candidate costs a read, never a wrong row.
+const post = (map, value, id, fn) => {
+  fn(map, keyOf(value), id);
+  if (!Array.isArray(value)) return;
+  for (let i = 0; i < value.length; i++) fn(map, keyOf(value[i]), id);
 };
 
 class Catalog {
@@ -98,7 +110,7 @@ class Catalog {
     const def = row.type === null ? undefined : this.#defs.get(row.type);
     if (!def) return;
     const eq = this.#eq.get(row.type);
-    for (const field of Object.keys(row.fields)) drop(eq.get(field), keyOf(row.fields[field]), id);
+    for (const field of Object.keys(row.fields)) post(eq.get(field), row.fields[field], id, drop);
     const unique = this.#unique.get(row.type);
     for (const key of def.unique) {
       const value = this.#uniqueKey(row.fields, key);
@@ -126,7 +138,7 @@ class Catalog {
     if (!def) return;
     let eq = this.#eq.get(row.type);
     if (!eq) this.#eq.set(row.type, (eq = new Map(def.fields.map((field) => [field, new Map()]))));
-    for (const field of Object.keys(row.fields)) add(eq.get(field), keyOf(row.fields[field]), id);
+    for (const field of Object.keys(row.fields)) post(eq.get(field), row.fields[field], id, add);
     let unique = this.#unique.get(row.type);
     if (!unique) this.#unique.set(row.type, (unique = new Map(def.unique.map((key) => [key.join(','), new Map()]))));
     for (const key of def.unique) {

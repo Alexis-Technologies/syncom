@@ -26,7 +26,7 @@ for await (const row of storage.Task.select({ boardId: 'b1' }).order('key').limi
 
 | Form | Matches when |
 | --- | --- |
-| `{ field: value }` | The field equals the value (deep); an **array** field holds the value as an element; an array value matches an array field whole |
+| `{ field: value }` | The field equals the value (deep); an **array** field holds the value as an element (indexed or not — a set, or any array); an array value matches an array field whole |
 | `{ 'a.b': value }` | A dotted path reaches into the record |
 | `$eq`, `$ne` | Equality, as above, and its negation |
 | `$in`, `$nin` | Any of the values matches (the array rule applies), or none does |
@@ -71,7 +71,11 @@ reads from it twice:
   `{ boardId: 'b1', priority: { $gte: 2 } }` reads the board's records only.
   The narrowing follows every `$and` branch, and an `$or` whose branches all
   name an indexed equality; a `$not`, or a branch without one, is left to the
-  predicate;
+  predicate. An indexed array field — a [set](./sync#registers-counters-and-sets)
+  or any array — is posted under each of its elements as well, so
+  `{ tags: 'bug' }` narrows to the records whose array holds it, and an array
+  value to the records holding that array whole; a unique key over an array
+  compares the whole array;
 - a query whose fields, order and projection are **all indexed**, with no
   `filter`, is answered from the catalog alone: not one record read.
   `{ boardId: 'b1', status: 'open' }` with `projection(['status'])` is one;

@@ -148,6 +148,39 @@ const runQueryTests = async (t, assert, createStorage) => {
     assert.strictEqual(await storage.Project.count(), 119, 'the covered path skips a sealed record too');
   });
 
+  await t.test('an indexed array field narrows by element — a set, or any array', async (t2) => {
+    const fsi = counting(createMemoryFsi());
+    const storage = await createStorage(t2, 'A', { fsi, schema: { entities: { Issue: { index: ['tags'] } } } });
+    const ids = [];
+    for (let i = 0; i < 30; i++) {
+      const { id } = await storage.Issue.insert({ n: i });
+      ids.push(id);
+      if (i % 3 === 0) await storage.add(id, 'tags', ['bug', `t${i}`]);
+      else if (i % 3 === 1) await storage.update(id, { tags: ['ui'] });
+    }
+    fsi.reset();
+    assert.strictEqual(await storage.Issue.count({ tags: 'bug' }), 10, 'a set');
+    assert.strictEqual(await storage.Issue.count({ tags: 'ui' }), 10, 'a register holding an array');
+    assert.strictEqual(fsi.dataReads(), 0, 'covered: the catalog answers');
+    assert.strictEqual(await storage.Issue.count({ tags: ['bug', 't0'] }), 1, 'an array value matches whole');
+    assert.strictEqual(await storage.Issue.count({ tags: ['bug'] }), 0);
+    assert.strictEqual(await storage.Issue.count({ tags: { $in: ['t3', 't6', 'nope'] } }), 2);
+    fsi.reset();
+    const rows = await storage.Issue.select({ tags: 'bug' }).fetch();
+    assert.strictEqual(rows.length, 10);
+    assert.ok(fsi.dataReads() <= 10, `read ${fsi.dataReads()} candidates, not 30`);
+    // A remove drops the element's posting, and watch() hears it.
+    const seen = [];
+    const stop = storage.Issue.select({ tags: 't0' }).watch((found) => seen.push(found.length));
+    await tick();
+    await storage.remove(ids[0], 'tags', ['t0']);
+    await tick();
+    stop();
+    assert.deepStrictEqual(seen, [1, 0]);
+    assert.strictEqual(await storage.Issue.count({ tags: 'bug' }), 10, 'bug is still on it');
+    assert.strictEqual(await storage.Issue.count({ tags: 't0' }), 0);
+  });
+
   await t.test('unique keys: refused locally, reported when a peer’s op leaves two on one', async (t2) => {
     const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage, {
       nodes: { A: { schema }, B: { schema } },
