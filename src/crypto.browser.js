@@ -2,6 +2,7 @@
 
 const defaultFsi = require('./fsi.browser.js');
 const { loadKeyPair } = require('./keys.js');
+const { SyncomError } = require('./errors.js');
 
 const PUBLIC_KEY_HEADER = '-----BEGIN PUBLIC KEY-----';
 const PUBLIC_KEY_FOOTER = '-----END PUBLIC KEY-----';
@@ -112,7 +113,9 @@ const encrypt = async (data, publicKey) => {
 
 const decrypt = async (text, privateKey) => {
   const envelope = JSON.parse(text);
-  if (envelope.v !== 1 || envelope.alg !== ALG) throw new Error('Unsupported ciphertext envelope');
+  if (envelope.v !== 1 || envelope.alg !== ALG) {
+    throw new SyncomError('BAD_ENVELOPE', 'Unsupported ciphertext envelope');
+  }
   const rsa = await importPrivateKey(privateKey);
   const raw = await crypto.subtle.decrypt(RSA, rsa, fromBase64(envelope.key));
   const aes = await crypto.subtle.importKey('raw', raw, AES, false, ['decrypt']);

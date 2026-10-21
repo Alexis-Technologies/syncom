@@ -70,10 +70,10 @@ test('encrypted storage', async (t) => {
     storage.on('change', (op) => ops.push(op));
     const shared = await storage.insert({ shared: true }, { encrypted: false });
     assert.strictEqual(ops.length, 1, 'an explicitly replicated record is an op');
-    await assert.rejects(
-      () => storage.set(shared, { x: 1 }, { encrypted: true }),
-      /replicated and cannot become encrypted/,
-    );
+    await assert.rejects(() => storage.set(shared, { x: 1 }, { encrypted: true }), {
+      code: 'ENCRYPTED',
+      message: /replicated and cannot become encrypted/,
+    });
 
     const plain = await syncom.open({ path: await createTemp(), logger: false });
     const local = await plain.insert({ local: true }, { encrypted: true });

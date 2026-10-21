@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const defaultFsi = require('./fsi.js');
 const { loadKeyPair } = require('./keys.js');
+const { SyncomError } = require('./errors.js');
 
 const calculateHash = (data) => {
   const block = JSON.stringify(data);
@@ -49,7 +50,9 @@ const encrypt = (data, publicKey) => {
 
 const decrypt = (text, privateKey) => {
   const envelope = JSON.parse(text);
-  if (envelope.v !== 1 || envelope.alg !== ALG) throw new Error('Unsupported ciphertext envelope');
+  if (envelope.v !== 1 || envelope.alg !== ALG) {
+    throw new SyncomError('BAD_ENVELOPE', 'Unsupported ciphertext envelope');
+  }
   const key = crypto.privateDecrypt({ key: privateKey, ...OAEP }, Buffer.from(envelope.key, 'base64'));
   const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(envelope.iv, 'base64'));
   decipher.setAuthTag(Buffer.from(envelope.tag, 'base64'));

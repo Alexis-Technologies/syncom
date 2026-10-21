@@ -1,8 +1,9 @@
 'use strict';
 
+const { typed } = require('./errors.js');
 // The shapes checked where something enters a storage — a caller's object, a
 // record id, an origin or a scope, a peer's op — and the JSON copy taken at
-// that boundary. No requires: this file ships to the browser as it is.
+// that boundary. No requires beyond ./errors.js: this file ships to the browser as it is.
 
 const isPlainObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -21,11 +22,10 @@ const RECORD_ID = /^[A-Za-z0-9_@-][A-Za-z0-9._@-]{0,127}$/;
 const isRecordId = (id) => typeof id === 'string' && RECORD_ID.test(id);
 const invalidId = (id) => {
   const shown = typeof id === 'string' ? JSON.stringify(id) : typeof id;
-  const error = new TypeError(
+  return typed(
+    'INVALID_ID',
     `Invalid record id ${shown}: letters, digits, . _ - @, not starting with a dot, 128 at most`,
   );
-  error.code = 'INVALID_ID';
-  return error;
 };
 
 // An origin or a scope ends up a vector key (`origin@scope`) and a room

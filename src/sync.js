@@ -28,6 +28,7 @@ const { notify, runHook, normalizeHooks } = require('./hooks.js');
 const { GLOBAL_SCOPE, opInScope } = require('./scope.js');
 const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf } = require('./protocol.js');
 const { createUnit } = require('./hosting.js');
+const { SyncomError } = require('./errors.js');
 
 const REMOTE = 'remote';
 // A page that fails this many times in a row leaves its peer `stuck`.
@@ -141,10 +142,10 @@ class SyncManager extends Emitter {
 
   async addNode(nodeData) {
     const { url, token, scopes } = nodeData ?? {};
-    if (typeof url !== 'string' || url.length === 0) throw new Error('Node URL is required');
-    if (this.#nodes.has(url)) throw new Error(`Node with URL ${url} already exists`);
+    if (typeof url !== 'string' || url.length === 0) throw new TypeError('Node URL is required');
+    if (this.#nodes.has(url)) throw new SyncomError('NODE_EXISTS', `Node with URL ${url} already exists`, { url });
     if (scopes !== undefined && !(Array.isArray(scopes) && scopes.every((s) => typeof s === 'string'))) {
-      throw new Error('Node scopes must be an array of strings');
+      throw new TypeError('Node scopes must be an array of strings');
     }
     const node = {
       url,
@@ -163,7 +164,7 @@ class SyncManager extends Emitter {
 
   async removeNode(url) {
     const node = this.#nodes.get(url);
-    if (!node) throw new Error(`Node with URL ${url} not found`);
+    if (!node) throw new SyncomError('NODE_NOT_FOUND', `Node with URL ${url} not found`, { url });
     this.#nodes.delete(url);
     this.#disconnect(url);
     await this.#fsi.remove(this.#path, fileName(url));
@@ -176,7 +177,7 @@ class SyncManager extends Emitter {
 
   async enableNode(url, enabled = true) {
     const node = this.#nodes.get(url);
-    if (!node) throw new Error(`Node with URL ${url} not found`);
+    if (!node) throw new SyncomError('NODE_NOT_FOUND', `Node with URL ${url} not found`, { url });
     node.enabled = enabled;
     await this.#saveNode(node);
     notify(this, this.#storage.logger, 'node', { url, action: enabled ? 'enable' : 'disable' });
@@ -217,7 +218,7 @@ class SyncManager extends Emitter {
   async start() {
     if (this.#started) return;
     if (typeof this.#options.connect !== 'function') {
-      throw new Error('sync.start() needs a connect(node) factory in the storage sync options');
+      throw new TypeError('sync.start() needs a connect(node) factory in the storage sync options');
     }
     this.#started = true;
     for (const node of this.#nodes.values()) {
@@ -418,7 +419,7 @@ class SyncManager extends Emitter {
       schema: schemaOf(this.#storage.schemaInfo),
     });
     if (peer.closed) return;
-    if (!answer || typeof answer.node !== 'string') throw new Error(`Bad hello from ${node.url}`);
+    if (!answer || typeof answer.node !== 'string') throw new SyncomError('BAD_HELLO', `Bad hello from ${node.url}`);
     if (answer.duplicate) {
       // A host may say it already dials us; one link is enough.
       this.#disconnect(node.url);
@@ -591,7 +592,7 @@ class SyncManager extends Emitter {
           if (error?.code === 428 && peer.connected) {
             if (++peer.rehellos > MAX_REHELLOS) {
               const message = `The host answered 428 to ${MAX_REHELLOS} fresh hellos in a row; not greeting again`;
-              this.#fail(peer, Object.assign(new Error(message, { cause: error }), { code: 'HANDSHAKE_LOOP' }));
+              this.#fail(peer, new SyncomError('HANDSHAKE_LOOP', message, { cause: error }));
               return;
             }
             this.#handshake(peer, { resubscribe: true }).catch((e) => this.#fail(peer, e));
@@ -619,8 +620,8 @@ class SyncManager extends Emitter {
     peer.subscription = null;
     const stuck = peer.failures >= MAX_PAGE_RETRIES;
     const message = `Page after ${peer.node.cursor ?? 'the start'} failed (${error?.message ?? error})`;
-    const reported = Object.assign(new Error(message, { cause: error }), {
-      code: stuck ? 'STUCK' : 'PAGE_FAILED',
+    const reported = new SyncomError(stuck ? 'STUCK' : 'PAGE_FAILED', message, {
+      cause: error,
       cursor: peer.node.cursor ?? null,
       attempt: peer.failures,
     });
@@ -759,7 +760,7 @@ class SyncManager extends Emitter {
   // mergeSnapshot as one page — a page is bounded by the host's `pageSize`.
   async #readSnapshot(link, page) {
     if (typeof link.stream !== 'function') {
-      throw new Error('The host streamed a snapshot but the link cannot read streams');
+      throw new SyncomError('STREAMS_UNSUPPORTED', 'The host streamed a snapshot but the link cannot read streams');
     }
     const decoder = new TextDecoder();
     const records = [];

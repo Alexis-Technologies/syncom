@@ -12,6 +12,7 @@
 
 const { isRecordId } = require('./shape.js');
 const { isAlive } = require('./ops.js');
+const { SyncomError } = require('./errors.js');
 
 class EntryStore {
   #fsi;
@@ -84,7 +85,7 @@ class EntryStore {
     const { data, meta, encrypted, block } = JSON.parse(raw);
     if (this.#verify !== null) {
       const isValid = await this.#verify(id, data, block);
-      if (!isValid) throw new Error(`Storage record ${id} is invalid`);
+      if (!isValid) throw new SyncomError('INTEGRITY', `Storage record ${id} is invalid`, { id });
     }
     const entry = encrypted
       ? { data: await this.#decrypt(data), meta: null, encrypted: true, block }

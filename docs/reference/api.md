@@ -160,11 +160,55 @@ scopes that hello granted (see [Scopes](../guide/sync#scopes)).
 Hooks (`open({ sync: { hooks } })`): `beforeConnect`, `beforeBootstrap` — see
 [Hooks and events](../guide/hooks#sync-hooks).
 
+### `SyncomError`
+
+What syncom rejects with when an operation cannot be done: `name`
+`'SyncomError'`, a `code` from the table below, the fields the code lists,
+and `cause` when an underlying error exists. A `TypeError` is the other kind
+— a wrong argument, option or hook result, a bug in the calling code — and
+carries no code, except `INVALID_ID`, `TYPE_IMMUTABLE` and `NO_CHAIN`, whose
+value is data or configuration. `HookError` and `ValidationError` are
+`SyncomError`s. Exported from the package root; the union of codes is the
+`SyncomErrorCode` type.
+
+| Code | Raised by | Fields |
+| --- | --- | --- |
+| `CLOSED` | any write or `applyRemote()` after `close()` | — |
+| `IN_HOOK` | a write issued from inside a write or apply hook (the `cause` of the `HookError` the operation rejects with) | — |
+| `NOT_FOUND` | `update()`, `swap()` on a record that is absent, deleted or purged | — |
+| `FIELD_KIND` | `update()`/`set()` on a counter field, `inc()` on a register field | `field`, `kind` (`'register'` or `'counter'`, what the field is) |
+| `ENCRYPTED` | `inc()` on an encrypted record; `{ encrypted: true }` on a replicated one | — |
+| `INTEGRITY` | a read (`get()`, `has()`, a cursor) of a record whose file fails its chain block check, under `integrity: 'verify'` | `id` |
+| `CORRUPT` | `open()` when `node.json`, `schema.json` or `.blockchain.json` cannot be read | `cause` |
+| `DOWNGRADE` | `open()` with `ahead: 'hold'` and a schema version below the one the directory ran | — |
+| `LOCKED` | `open()` while another instance holds the directory | `path` |
+| `KEYS_INCOMPLETE` | `open()`, `loadKeys()` when one of the two key files is missing | — |
+| `BAD_ENVELOPE` | `decrypt()` of a ciphertext this version does not read | — |
+| `BLOCK_NOT_FOUND` | `Blockchain.readBlock()`, `SmartContract.load()` | `hash` |
+| `NOT_CONTRACT` | `SmartContract.load()` of a block that is not a contract | `hash` |
+| `NODE_EXISTS` | `addNode()` of a registered url | `url` |
+| `NODE_NOT_FOUND` | `removeNode()`, `enableNode()` of an unknown url | `url` |
+| `BAD_HELLO` | the sync `error` event: the host's hello answer has no node id | `url` |
+| `HANDSHAKE_LOOP` | the sync `error` event: five fresh hellos answered 428 in a row | `url`, `cause` |
+| `PAGE_FAILED`, `STUCK` | the sync `error` event: a page of the feed could not be applied; the third in a row | `url`, `cursor`, `attempt`, `cause` |
+| `STREAMS_UNSUPPORTED` | the sync `error` event: the host streamed a snapshot and the link cannot read streams | `url` |
+| `SKEW`, `OP_UNREADABLE`, `OP_REFUSED`, `OP_INVALID` | the storage `error` event — see [`Storage`](#storage) | `op`, plus `rejected` / `entity` + `issues` |
+| `HOOK_FAILED` | a `HookError` | `hook`, `cause` |
+| `VALIDATION_FAILED` | a `ValidationError` | `entity`, `issues`, `cause` |
+
+A refusal the host answers on the wire is not a `SyncomError`: it is a plain
+error with the numeric `code` wrpc transports (`400` `BAD_HELLO` or
+`PROTOCOL`, `403` `UNAUTHORIZED` or `SCOPES`, `409` `SELF`, `413`
+`OPS_PER_PUSH` or `BYTES_PER_PUSH`, `428` `HELLO_FIRST`, `429`
+`OPS_PER_SECOND`) and that constant as `reason` on the host's side — in the
+`sync.hello.refused` log line and on the thrown error; wrpc carries the code
+and the message. The dialer sees the numeric code through its `error` event.
+
 ### `HookError`
 
 What an operation rejects with when one of its hooks threw: `name`
 `'HookError'`, `code` `'HOOK_FAILED'`, `hook` (the hook's name), `cause` (the
-original error). Exported from the package root.
+original error). A `SyncomError`; exported from the package root.
 
 ### `ValidationError`
 
@@ -172,7 +216,7 @@ What a write rejects with when the record would not pass its entity's
 validator — nothing was stamped, logged or written: `name`
 `'ValidationError'`, `code` `'VALIDATION_FAILED'`, `entity` (the collection),
 `issues` (`[{ path, message, code? }]`), and `cause` when the validator threw
-something of its own. Exported from the package root.
+something of its own. A `SyncomError`; exported from the package root.
 
 ### `isSyncLink(value)`
 

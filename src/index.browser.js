@@ -23,6 +23,8 @@ const { ValidationError } = require('./schema.js');
 const schema = { ValidationError };
 const { isSharedLog } = require('./shared-log.js');
 const sharedLog = { isSharedLog };
+const { SyncomError } = require('./errors.js');
+const errors = { SyncomError };
 
 module.exports = {
   ...chain,
@@ -37,4 +39,5 @@ module.exports = {
   ...hooks,
   ...schema,
   ...sharedLog,
+  ...errors,
 };

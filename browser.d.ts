@@ -86,6 +86,7 @@ export type {
   Logger,
   SnapshotPage,
   ApplyRemoteResult,
+  SyncomErrorCode,
 } from './index.js';
 
 export {
@@ -110,6 +111,7 @@ export {
   isSyncLink,
   Storage,
   open,
+  SyncomError,
   HookError,
   ValidationError,
   isSharedLog,

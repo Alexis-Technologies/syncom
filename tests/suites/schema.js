@@ -285,6 +285,7 @@ const runSchemaTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(await storage.get(post.id), { title: 'b', n: 1, $type: 'Post' });
     await assert.rejects(() => storage.set(post.id, { $type: 'Tag' }), {
       name: 'TypeError',
+      code: 'TYPE_IMMUTABLE',
       message: `Record ${post.id} is a Post; $type is immutable`,
     });
     await assert.rejects(() => storage.update(post.id, { $type: 'Tag' }), TypeError);
@@ -863,10 +864,11 @@ const runSchemaTests = async (t, assert, createStorage) => {
       );
       assert.deepStrictEqual(await again.get(post.id), { n: 1, $type: 'Post' });
       await again.close();
-      await assert.rejects(
-        () => createStorage(t2, 'B', { schema: { version: 1, ahead: 'hold' } }),
-        /ahead 'hold' cannot downgrade/,
-      );
+      await assert.rejects(() => createStorage(t2, 'B', { schema: { version: 1, ahead: 'hold' } }), {
+        name: 'SyncomError',
+        code: 'DOWNGRADE',
+        message: /ahead 'hold' cannot downgrade/,
+      });
       const noHeld = await createStorage(t2, 'B', { schema: { version: 1 } });
       assert.strictEqual(noHeld.schemaInfo.held, null, 'nothing held for version 1');
     },

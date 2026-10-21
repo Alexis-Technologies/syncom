@@ -13,6 +13,7 @@ const { notify } = require('./hooks.js');
 const { inScope } = require('./scope.js');
 const { traced, now } = require('./telemetry.js');
 const { isPlainObject, VALIDATED, wellFormed } = require('./shape.js');
+const { SyncomError } = require('./errors.js');
 
 const NOTHING = { applied: 0, skipped: 0, duplicates: 0, gaps: 0, malformed: 0 };
 
@@ -107,7 +108,7 @@ const admit = (batch, op) => {
     core.otel.recordMalformed();
     batch.malformed++;
     const message = `Op ${op.origin}:${op.seq} is stamped ${ahead} ms ahead of this node (maxSkew ${core.maxSkew})`;
-    notify(core.storage, core.logger, 'error', Object.assign(new Error(message), { op, code: 'SKEW' }));
+    notify(core.storage, core.logger, 'error', new SyncomError('SKEW', message, { op }));
     return false;
   }
   if (op.origin === core.nodeId || vectorHas(vector, op)) {
@@ -134,7 +135,7 @@ const currentOf = async (batch, op) => {
     return batch.touched.get(op.id) ?? (await core.entries.load(op.id));
   } catch (error) {
     const message = `Record ${op.id} is unreadable here; op ${op.origin}:${op.seq} skipped`;
-    const reported = Object.assign(new Error(message, { cause: error }), { op, code: 'OP_UNREADABLE' });
+    const reported = new SyncomError('OP_UNREADABLE', message, { cause: error, op });
     report(batch, { event: 'sync.op.unreadable', id: op.id, err: error }, 'unreadable', reported);
     skip(batch, op);
     return undefined;
@@ -190,14 +191,14 @@ const applyOne = async (batch, op) => {
   core.clock.observe(op.ts);
   const { entry, changed, delta, rejected } = applyOp(current, op);
   if (rejected.length > 0) {
-    const error = Object.assign(new Error(`Refused op on ${op.id}`), { op, code: 'OP_REFUSED', rejected });
+    const error = new SyncomError('OP_REFUSED', `Refused op on ${op.id}`, { op, rejected });
     report(batch, { event: 'sync.op.rejected', id: op.id, rejected }, rejected[0].reason, error);
   }
   // Invalid under this node's schema: skipped like a beforeApply `false` —
   // logged, relayed, replay-safe — and reported.
   const invalid = changed && !ahead ? await core.invalid(op, entry) : null;
   if (invalid) {
-    const error = Object.assign(new Error(`Invalid op on ${op.id}`), { op, code: 'OP_INVALID', ...invalid });
+    const error = new SyncomError('OP_INVALID', `Invalid op on ${op.id}`, { op, ...invalid });
     report(batch, { event: 'sync.op.invalid', id: op.id, ...invalid }, 'validation', error);
     return void skip(batch, op);
   }

@@ -30,6 +30,7 @@ const { GLOBAL_SCOPE } = require('./scope.js');
 const { normalizeStorageOptions } = require('./options.js');
 const { isPlainObject, asJson, isRecordId, invalidId, isStreamName, VALIDATED } = require('./shape.js');
 const { COMMIT, REFRESH, SOURCE } = require('./symbols.js');
+const { SyncomError, typed } = require('./errors.js');
 
 const NODE_FILE = 'node.json';
 const SCHEMA_FILE = 'schema.json';
@@ -40,8 +41,7 @@ const STORAGE_HOOKS = ['beforeWrite', 'afterWrite', 'beforeRead', 'afterRead', '
 
 // A service file this storage wrote itself and cannot read any more.
 const corrupt = (file, cause) =>
-  Object.assign(new Error(`${file} is unreadable (${cause?.message ?? cause}); restore it or remove the directory`), {
-    code: 'CORRUPT',
+  new SyncomError('CORRUPT', `${file} is unreadable (${cause?.message ?? cause}); restore it or remove the directory`, {
     cause,
   });
 
@@ -350,7 +350,8 @@ class Storage extends Emitter {
       // Holding ops from a version this directory already ran makes no
       // sense: its own records are of that version.
       if (stored.version > version && this.#ahead === 'hold') {
-        throw new Error(
+        throw new SyncomError(
+          'DOWNGRADE',
           `Schema version ${version} is below the ${stored.version} this directory ran; ahead 'hold' cannot downgrade`,
         );
       }
@@ -652,14 +653,15 @@ class Storage extends Emitter {
   // log's seq counter and a record's entry are all read-then-written, and two
   // interleaved writers would race all three.
   #run(task) {
-    if (this.#closed) return Promise.reject(new Error('Storage is closed'));
+    if (this.#closed) return Promise.reject(new SyncomError('CLOSED', 'Storage is closed'));
     // A write or apply hook runs inside the queue; a write it issues would
     // wait for the hook that waits for it. Refused here, where the deadlock
     // would otherwise begin. Read hooks run outside the queue and are not
     // counted — a write from one simply queues.
     if (this.#inHook > 0) {
       return Promise.reject(
-        new Error(
+        new SyncomError(
+          'IN_HOOK',
           'Cannot write to the storage from inside a hook: the write would wait for the hook that waits for it',
         ),
       );
@@ -751,9 +753,7 @@ class Storage extends Emitter {
     // id is always a string, so that is the discriminator.
     const isChainValidation = typeof idOrOptions !== 'string' && !data && !blockHash;
     if (this.#chain === null) {
-      const error = new TypeError('open({ chain: false }): this storage keeps no chain to validate against');
-      error.code = 'NO_CHAIN';
-      throw error;
+      throw typed('NO_CHAIN', 'open({ chain: false }): this storage keeps no chain to validate against');
     }
     if (isChainValidation) {
       return await this.#chain.validate(idOrOptions);
@@ -842,7 +842,7 @@ class Storage extends Emitter {
   }
 
   async update(id, delta, { actor } = {}) {
-    if (!(await this.has(id))) throw new Error(`Record ${id} not found`);
+    if (!(await this.has(id))) throw new SyncomError('NOT_FOUND', `Record ${id} not found`);
     if (!isPlainObject(delta)) throw new TypeError('update() takes a plain object');
     await this[COMMIT]('set', id, { data: delta }, { actor });
   }

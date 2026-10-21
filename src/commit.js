@@ -16,6 +16,7 @@ const { ValidationError, project, unproject, foldSet } = require('./schema.js');
 const { traced, now } = require('./telemetry.js');
 const { GLOBAL_SCOPE } = require('./scope.js');
 const { isPlainObject, asJson, VALIDATED } = require('./shape.js');
+const { SyncomError, typed } = require('./errors.js');
 
 // What a commit came to: an op, `null` for a write that changed nothing,
 // `undefined` for an encrypted record (saved locally, no op), and MISMATCH
@@ -31,7 +32,7 @@ const sameType = (type, id, data, current) => {
   const before = current?.$type;
   if (before === undefined) return data;
   if (data.$type === undefined) return type === 'write' ? { ...data, $type: before } : data;
-  if (data.$type !== before) throw new TypeError(`Record ${id} is a ${before}; $type is immutable`);
+  if (data.$type !== before) throw typed('TYPE_IMMUTABLE', `Record ${id} is a ${before}; $type is immutable`);
   return data;
 };
 
@@ -40,7 +41,7 @@ const refuse = (id, rejected) => {
   if (rejected.length === 0) return;
   const [{ field, reason }] = rejected;
   const hint = reason === 'counter' ? 'a counter; use inc()' : 'a register; use update()';
-  throw new Error(`Field ${field} of record ${id} is ${hint}`);
+  throw new SyncomError('FIELD_KIND', `Field ${field} of record ${id} is ${hint}`, { field, kind: reason });
 };
 
 // A swap's expectation, checked inside the queue against the record as it
@@ -49,7 +50,7 @@ const expectation = async (core, id, current, expect) => {
   let seen = null;
   if (current?.encrypted) seen = current.data;
   else if (current && isAlive(current)) seen = await core.view(id, current);
-  if (!seen) throw new Error(`Record ${id} not found`);
+  if (!seen) throw new SyncomError('NOT_FOUND', `Record ${id} not found`);
   for (const key of Object.keys(expect)) if (seen[key] !== expect[key]) return false;
   return true;
 };
@@ -87,7 +88,7 @@ const commitSealed = async (core, type, id, payload, current, ctx, source) => {
   if (type === 'write') data = payload.data;
   else if (type === 'set') data = { ...(current?.data ?? {}), ...payload.data };
   else if (type === 'delete' || type === 'purge') data = null;
-  else throw new Error(`Record ${id} is encrypted; ${type} needs a replicated record`);
+  else throw new SyncomError('ENCRYPTED', `Record ${id} is encrypted; ${type} needs a replicated record`);
   if (data === null) await unseal(core, id);
   else await seal(core, id, data);
   try {
@@ -198,7 +199,7 @@ const commitLocal = async (core, type, id, payload, options) => {
   const { source = null, via = null, from = null, encrypted = false, actor, expect = null } = options;
   const current = await core.entries.load(id);
   if (encrypted && current && !current.encrypted) {
-    throw new Error(`Record ${id} is replicated and cannot become encrypted`);
+    throw new SyncomError('ENCRYPTED', `Record ${id} is replicated and cannot become encrypted`);
   }
   if (expect !== null && !(await expectation(core, id, current, expect))) return MISMATCH;
   // The payload is taken as JSON — a copy, like the disk and the peers

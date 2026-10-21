@@ -266,7 +266,7 @@ never applied or logged; the peer's other streams are untouched, since
 sequence numbers run per scope. `snapshot` and `changes` serve the
 intersection of what is asked and what was granted: asking for `'*'` or for
 nothing is asking for the granted list, asking only for other scopes is
-refused with code **403**. A peer granted `'*'` is bound by nothing.
+refused with code **403** (`reason: 'SCOPES'`). A peer granted `'*'` is bound by nothing.
 `authorize(context, hello)` sees `hello.scopes`, which is where a host decides
 what a credential may claim.
 
@@ -370,9 +370,10 @@ const unit = storage.sync.unit({
 
 `limits` are the host's own, checked in `push` — the one place that knows the
 ops and the bytes of a page, whatever transport carried it. A page over
-`opsPerPush` or `bytesPerPush` is refused with code **413**; a peer whose ops
-exceed `opsPerSecond` — a token bucket per peer, refilled at that rate and
-holding one second's worth — with **429**. A refusal is a code, not a
+`opsPerPush` or `bytesPerPush` is refused with code **413** (`reason`
+`'OPS_PER_PUSH'` / `'BYTES_PER_PUSH'`); a peer whose ops exceed
+`opsPerSecond` — a token bucket per peer, refilled at that rate and holding
+one second's worth — with **429** (`'OPS_PER_SECOND'`). A refusal is a code, not a
 hang-up: the dialer reports it through its `error` event (`error.code`),
 drops that outbox and marks the peer **behind** (`peers()[i].behind`); what
 the host still lacks is pushed from the vector at the next sign of life on

@@ -33,6 +33,7 @@ test('Hosting limits', async (t) => {
     await link.call('syncom/hello', { node: 'peer', version: 1 });
     await assert.rejects(() => link.call('syncom/push', { ops: packOps(ops('peer', 1, 4)) }), {
       code: 413,
+      reason: 'OPS_PER_PUSH',
       message: 'Push of 4 ops exceeds opsPerPush 3',
     });
     assert.deepStrictEqual(host.vector, {}, 'nothing applied');
@@ -41,6 +42,7 @@ test('Hosting limits', async (t) => {
     const big = packOps(ops('peer', 4, 1, { text: 'x'.repeat(500) }));
     await assert.rejects(() => link.call('syncom/push', { ops: big }), {
       code: 413,
+      reason: 'BYTES_PER_PUSH',
       message: /bytes exceeds bytesPerPush 400/,
     });
     assert.strictEqual((await link.call('syncom/push', {})).applied, 0, 'no ops: nothing to limit');
@@ -54,6 +56,7 @@ test('Hosting limits', async (t) => {
     assert.strictEqual((await link.call('syncom/push', { ops: packOps(ops('peer', 1, 10)) })).applied, 10);
     await assert.rejects(() => link.call('syncom/push', { ops: packOps(ops('peer', 11, 1)) }), {
       code: 429,
+      reason: 'OPS_PER_SECOND',
       message: 'Rate limited: 1 ops over opsPerSecond 10',
     });
     await new Promise((resolve) => setTimeout(resolve, 150));

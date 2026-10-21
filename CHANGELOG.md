@@ -12,6 +12,24 @@ section until the first publish; everything below lands there on release day.
 
 ### Added
 
+- **`SyncomError`: every operational error carries a `code`.** What syncom
+  rejects with when an operation cannot be done — `CLOSED`, `IN_HOOK`,
+  `NOT_FOUND`, `FIELD_KIND`, `ENCRYPTED`, `INTEGRITY`, `CORRUPT`,
+  `DOWNGRADE`, `LOCKED`, `KEYS_INCOMPLETE`, `BAD_ENVELOPE`, `BLOCK_NOT_FOUND`,
+  `NOT_CONTRACT`, `NODE_EXISTS`, `NODE_NOT_FOUND`, `BAD_HELLO`,
+  `HANDSHAKE_LOOP`, `PAGE_FAILED`, `STUCK`, `STREAMS_UNSUPPORTED`, `SKEW`,
+  `OP_UNREADABLE`, `OP_REFUSED`, `OP_INVALID` — is a `SyncomError` (exported
+  from the package root, `SyncomErrorCode` the union) with the fields the
+  code documents (`field`/`kind`, `id`, `url`, `hash`, `cursor`/`attempt`,
+  `op`…) and `cause`; `HookError` and `ValidationError` are `SyncomError`s.
+  A wrong argument stays a `TypeError` without a code (`INVALID_ID`,
+  `TYPE_IMMUTABLE` and `NO_CHAIN` keep theirs). A host's wire refusal keeps
+  its numeric code and gains `reason` (`HELLO_FIRST`, `BAD_HELLO`,
+  `PROTOCOL`, `SELF`, `UNAUTHORIZED`, `SCOPES`, `OPS_PER_PUSH`,
+  `BYTES_PER_PUSH`, `OPS_PER_SECOND`), logged in `sync.hello.refused`. No
+  message changed; three registry argument errors (`addNode` without a url
+  or with bad scopes, `start()` without `connect`) are now `TypeError`s.
+  Browser budget 35.5 → 36 KB.
 - **`open({ chain: false })`.** A node that only replicates — a hub — keeps
   no hash-linked chain: two file writes less per record (the chain grew by
   one block file per write and was never compacted), reads without the

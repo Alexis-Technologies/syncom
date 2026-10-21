@@ -3,6 +3,7 @@
 const defaultFsi = require('./fsi.js');
 const { calculateHash } = require('./crypto.js');
 const { checkFsi } = require('./backend.js');
+const { SyncomError } = require('./errors.js');
 
 const BLOCKCHAIN = '.blockchain.json';
 
@@ -28,8 +29,8 @@ class Blockchain {
       try {
         chain = JSON.parse(raw);
       } catch (error) {
-        const corrupt = new Error(`${BLOCKCHAIN} is unreadable (${error.message}); restore it or remove the directory`);
-        throw Object.assign(corrupt, { code: 'CORRUPT', cause: error });
+        const message = `${BLOCKCHAIN} is unreadable (${error.message}); restore it or remove the directory`;
+        throw new SyncomError('CORRUPT', message, { cause: error });
       }
       this.tailHash = chain.tailHash;
     }
@@ -59,7 +60,7 @@ class Blockchain {
 
   async readBlock(hash) {
     const exists = await this.#fsi.exists(this.path, `${hash}.json`);
-    if (!exists) throw new Error(`Block not found: ${hash}`);
+    if (!exists) throw new SyncomError('BLOCK_NOT_FOUND', `Block not found: ${hash}`, { hash });
     const raw = await this.#fsi.read(this.path, `${hash}.json`);
     return JSON.parse(raw);
   }

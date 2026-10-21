@@ -14,6 +14,8 @@ import type {
   StorageOptions,
   SyncManager,
   SyncomCollection,
+  SyncomError,
+  SyncomErrorCode,
   SyncomRecord,
   SyncomTelemetryOptions,
 } from '../index.js';
@@ -260,6 +262,15 @@ const hookError = new syncom.HookError('beforeWrite', new Error('x'));
 expectType<'HOOK_FAILED'>(hookError.code);
 expectType<string>(hookError.hook);
 expectType<unknown>(hookError.cause);
+expectAssignable<SyncomError>(hookError);
+expectAssignable<SyncomError>(validationError);
+
+// errors: operational ones carry a code from the union
+const coded = new syncom.SyncomError('NOT_FOUND', 'Record x not found', { cause: new Error('y'), id: 'x' });
+expectType<SyncomErrorCode>(coded.code);
+expectAssignable<Error>(coded);
+expectAssignable<SyncomErrorCode>('LOCKED');
+expectError(new syncom.SyncomError('NOT_A_CODE', 'x'));
 expectAssignable<Error>(hookError);
 expectAssignable<StorageOptions>({
   hooks: {
@@ -321,7 +332,7 @@ storage.once('apply', (batch) => {
   expectType<syncom.SyncOp[]>(batch.ops);
 });
 storage.on('error', (error) => {
-  expectType<syncom.SyncOp | undefined>(error.op);
+  expectType<syncom.SyncOp>(error.op);
   expectType<syncom.ValidationIssue[] | undefined>(error.issues);
 });
 syncom.open({ schema: { entities: { Post: {} } } }).then((typed) => {
@@ -409,7 +420,9 @@ storage.sync.on('sync', (event) => {
   expectType<number | undefined>(event.malformed);
 });
 storage.on('error', (error) => {
-  expectType<'OP_REFUSED' | 'OP_INVALID' | 'OP_UNREADABLE' | 'SKEW' | undefined>(error.code);
+  expectType<'OP_REFUSED' | 'OP_INVALID' | 'OP_UNREADABLE' | 'SKEW'>(error.code);
+  expectAssignable<SyncomError>(error);
+  expectType<string>(error.op.origin);
 });
 expectAssignable<Fsi>({
   read: async () => '',

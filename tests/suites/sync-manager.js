@@ -25,7 +25,11 @@ const runSyncManagerCoreTests = async (t, assert, getSync) => {
     await assert.rejects(() => sync.addNode({ url: 'ws://a.com:1', scopes: 'nope' }), /scopes/);
 
     await sync.addNode({ url: 'ws://dup.example.com:80' });
-    await assert.rejects(() => sync.addNode({ url: 'ws://dup.example.com:80' }), /already exists/);
+    await assert.rejects(() => sync.addNode({ url: 'ws://dup.example.com:80' }), {
+      code: 'NODE_EXISTS',
+      url: 'ws://dup.example.com:80',
+      message: /already exists/,
+    });
   });
 
   await t.test('two peers on one host, or a url without a port, do not collide', async (t2) => {
@@ -38,7 +42,10 @@ const runSyncManagerCoreTests = async (t, assert, getSync) => {
 
   await t.test('removeNode throws when unknown', async (t2) => {
     const sync = await getSync(t2);
-    await assert.rejects(() => sync.removeNode('http://nope.example.com:1'), /not found/);
+    await assert.rejects(() => sync.removeNode('http://nope.example.com:1'), {
+      code: 'NODE_NOT_FOUND',
+      message: /not found/,
+    });
   });
 
   await t.test('the registry survives a reopen', async (t2) => {

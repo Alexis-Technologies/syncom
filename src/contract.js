@@ -1,5 +1,7 @@
 'use strict';
 
+const { SyncomError } = require('./errors.js');
+
 const deserializeFunction = (source) => {
   const arrowIndex = source.indexOf('=>');
   const header = source.slice(0, arrowIndex).trim();
@@ -65,9 +67,9 @@ class SmartContract {
 
   static async load(hash, { storage, chain }) {
     const block = await chain.readBlock(hash);
-    if (!block) throw new Error('Block not found');
+    if (!block) throw new SyncomError('BLOCK_NOT_FOUND', 'Block not found', { hash });
     if (block.data.type !== 'smart contract') {
-      throw new Error('Not a smart contract block');
+      throw new SyncomError('NOT_CONTRACT', 'Not a smart contract block', { hash });
     }
     const { name, source } = block.data;
     const proc = deserializeFunction(source);

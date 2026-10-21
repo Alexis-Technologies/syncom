@@ -418,7 +418,7 @@ test('Storage telemetry', async (t) => {
     const span = named('syncom.commit').at(-1);
     assert.strictEqual(span.attributes['syncom.op.type'], 'inc');
     assert.strictEqual(span.status.code, 2);
-    assert.strictEqual(span.attributes['error.type'], 'Error');
+    assert.strictEqual(span.attributes['error.type'], 'SyncomError');
     assert.strictEqual(span.events[0].name, 'exception');
     assert.strictEqual(
       sum(await points('syncom.commits'), (p) => p.attributes['syncom.result'] === 'error'),

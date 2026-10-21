@@ -117,12 +117,60 @@ export interface ApplyResult {
 }
 
 /**
+ * The codes a SyncomError carries — one constant per thing that can go
+ * wrong at run time, documented under each operation in the API reference.
+ */
+export type SyncomErrorCode =
+  | 'CLOSED'
+  | 'IN_HOOK'
+  | 'NOT_FOUND'
+  | 'FIELD_KIND'
+  | 'ENCRYPTED'
+  | 'INTEGRITY'
+  | 'CORRUPT'
+  | 'DOWNGRADE'
+  | 'LOCKED'
+  | 'KEYS_INCOMPLETE'
+  | 'BAD_ENVELOPE'
+  | 'BLOCK_NOT_FOUND'
+  | 'NOT_CONTRACT'
+  | 'NODE_EXISTS'
+  | 'NODE_NOT_FOUND'
+  | 'BAD_HELLO'
+  | 'HANDSHAKE_LOOP'
+  | 'PAGE_FAILED'
+  | 'STUCK'
+  | 'STREAMS_UNSUPPORTED'
+  | 'SKEW'
+  | 'OP_UNREADABLE'
+  | 'OP_REFUSED'
+  | 'OP_INVALID'
+  | 'HOOK_FAILED'
+  | 'VALIDATION_FAILED';
+
+/**
+ * What syncom rejects with when an operation cannot be done — as opposed to
+ * a `TypeError`, which is a wrong argument, option or hook result and carries
+ * no code (except `INVALID_ID`, `TYPE_IMMUTABLE` and `NO_CHAIN`, whose value
+ * is data or configuration). `code` is one constant; the fields the code
+ * documents (`op`, `cursor`, `rejected`…) ride on the error, `cause` is the
+ * underlying one. A host's wire refusal is not one of these: it is a plain
+ * `Error` with the numeric `code` the transport carries and a `reason`.
+ */
+export class SyncomError extends Error {
+  constructor(code: SyncomErrorCode, message: string, fields?: { cause?: unknown; [field: string]: unknown });
+  readonly name: string;
+  readonly code: SyncomErrorCode;
+  cause?: unknown;
+}
+
+/**
  * Thrown (rejected) by the operation a hook belongs to when that hook threw.
  * `hook` names it, `cause` is the original error; the operation itself is
  * described by the hook's documentation — a `before*` hook aborts it, an
  * `after*` hook fails the call while what it observed stays committed.
  */
-export class HookError extends Error {
+export class HookError extends SyncomError {
   constructor(hook: string, cause: unknown);
   readonly name: 'HookError';
   readonly code: 'HOOK_FAILED';
@@ -341,7 +389,7 @@ export interface ValidationIssue {
  * collection, `issues` the problems; `cause` is set when the validator threw
  * something of its own.
  */
-export class ValidationError extends Error {
+export class ValidationError extends SyncomError {
   constructor(entity: string | null, issues: ValidationIssue[]);
   readonly name: 'ValidationError';
   readonly code: 'VALIDATION_FAILED';
@@ -842,7 +890,8 @@ export interface SyncEvents {
    * could not be applied comes as `code: 'PAGE_FAILED'` (with `cursor`, the
    * last position saved, and `attempt`), and is retried from that cursor;
    * the third failure in a row is `code: 'STUCK'`. A host that answers 428
-   * to five fresh hellos in a row is `code: 'HANDSHAKE_LOOP'`.
+   * to five fresh hellos in a row is `code: 'HANDSHAKE_LOOP'`. A refusal the
+   * host answered with comes as the link delivered it: a numeric `code`.
    */
   error: (error: Error & { url: string; code?: string | number; cursor?: string | null; attempt?: number }) => void;
   start: () => void;
@@ -956,9 +1005,9 @@ export interface StorageEvents {
    * beyond `sync.maxSkew` (`SKEW`).
    */
   error: (
-    error: Error & {
-      code?: 'OP_REFUSED' | 'OP_INVALID' | 'OP_UNREADABLE' | 'SKEW';
-      op?: SyncOp;
+    error: SyncomError & {
+      code: 'OP_REFUSED' | 'OP_INVALID' | 'OP_UNREADABLE' | 'SKEW';
+      op: SyncOp;
       rejected?: Array<{ field: string; reason: 'register' | 'counter' }>;
       entity?: string | null;
       issues?: ValidationIssue[];

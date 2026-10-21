@@ -68,7 +68,9 @@ const ENTRIES = [
   // hosting.js) cost ~2.3 KB with no new behaviour: a class's private names
   // minify to one letter, the property names of a seam shared between
   // modules do not — the raise to 35.5 KB buys readable modules, not bytes.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 35.5 },
+  // The error model (src/errors.js: a code constant on every operational
+  // error, a reason on every wire refusal) the raise to 36 KB.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 36 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check

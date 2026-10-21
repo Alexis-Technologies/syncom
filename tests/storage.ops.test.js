@@ -84,7 +84,7 @@ test('Storage replication model', async (t) => {
     assert.strictEqual((await storage.list()).length, 2);
     // update() on a dead record is "not found".
     await storage.delete(gone);
-    await assert.rejects(() => storage.update(gone, { n: 4 }), /not found/);
+    await assert.rejects(() => storage.update(gone, { n: 4 }), { code: 'NOT_FOUND', message: /not found/ });
   });
 
   await t.test('applyRemote: in order per origin, duplicates and gaps skipped', async (t2) => {

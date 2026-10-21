@@ -172,7 +172,7 @@ const runCatalogTests = async (t, assert, createStorage) => {
     await storage.close();
     await fsi.remove(`${storage.path}/index`, 'catalog.json');
     const strict = await createStorage(t2, 'A', { fsi, logger: false });
-    await assert.rejects(() => strict.get(id), /is invalid/);
+    await assert.rejects(() => strict.get(id), { code: 'INTEGRITY', id, message: /is invalid/ });
     assert.strictEqual(strict.hasRecord(id), false, 'left out of the rebuilt catalog');
     await assert.rejects(() => createStorage(t2, 'B', { integrity: 'trust' }), /integrity must be/);
   });

@@ -21,9 +21,13 @@ const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf } = require('./protocol.js');
 const DEFAULT_PAGE_BYTES = 4 << 20;
 const TRACKED = Symbol.for('wrpc.tracked');
 
-const coded = (message, code) => {
+// A refusal as it goes on the wire: the numeric `code` a transport carries
+// (wrpc sends code and message), and `reason` — a constant naming which
+// check refused — for the host's own logs and listeners.
+const coded = (message, code, reason) => {
   const error = new Error(message);
   error.code = code;
+  error.reason = reason;
   error.expose = true;
   return error;
 };
@@ -56,7 +60,7 @@ const grant = (asked, granted) => {
   if (granted.includes(GLOBAL_SCOPE)) return wanted;
   if (wanted === null || wanted.includes(GLOBAL_SCOPE)) return granted;
   const scopes = wanted.filter((scope) => granted.includes(scope));
-  if (scopes.length === 0) throw coded('Scopes not granted', 403);
+  if (scopes.length === 0) throw coded('Scopes not granted', 403, 'SCOPES');
   return scopes;
 };
 
@@ -84,13 +88,13 @@ const limit = (otel, state, args, ops, limits) => {
   const { opsPerPush, bytesPerPush, opsPerSecond } = limits;
   if (opsPerPush !== undefined && ops.length > opsPerPush) {
     otel.recordLimited('ops');
-    throw coded(`Push of ${ops.length} ops exceeds opsPerPush ${opsPerPush}`, 413);
+    throw coded(`Push of ${ops.length} ops exceeds opsPerPush ${opsPerPush}`, 413, 'OPS_PER_PUSH');
   }
   if (bytesPerPush !== undefined) {
     const bytes = new TextEncoder().encode(JSON.stringify(args?.ops ?? null)).length;
     if (bytes > bytesPerPush) {
       otel.recordLimited('bytes');
-      throw coded(`Push of ${bytes} bytes exceeds bytesPerPush ${bytesPerPush}`, 413);
+      throw coded(`Push of ${bytes} bytes exceeds bytesPerPush ${bytesPerPush}`, 413, 'BYTES_PER_PUSH');
     }
   }
   if (opsPerSecond !== undefined) {
@@ -100,7 +104,7 @@ const limit = (otel, state, args, ops, limits) => {
     bucket.at = at;
     if (ops.length > bucket.tokens) {
       otel.recordLimited('rate');
-      throw coded(`Rate limited: ${ops.length} ops over opsPerSecond ${opsPerSecond}`, 429);
+      throw coded(`Rate limited: ${ops.length} ops over opsPerSecond ${opsPerSecond}`, 429, 'OPS_PER_SECOND');
     }
     bucket.tokens -= ops.length;
   }
@@ -129,15 +133,15 @@ const streamed = (client, page, pageBytes) => {
 
 // A refusal before the handler: counted by code; 428 is the normal course
 // of a wrpc reconnect (a new server-side client) and only counted.
-const refuse = (host, message, code, node = null) => {
+const refuse = (host, message, code, reason, node = null) => {
   host.otel.recordRefusal(code);
-  if (code !== 428) host.logger.warn({ event: 'sync.hello.refused', code, node });
-  return coded(message, code);
+  if (code !== 428) host.logger.warn({ event: 'sync.hello.refused', code, reason, node });
+  return coded(message, code, reason);
 };
 
 const peerOf = (host, context) => {
   const state = context?.client?.data?.syncom;
-  if (!state) throw refuse(host, 'Say hello first', 428);
+  if (!state) throw refuse(host, 'Say hello first', 428, 'HELLO_FIRST');
   return state;
 };
 
@@ -152,15 +156,15 @@ const refuseOps = (host, node, reason, count) => {
 
 const hello = (host) => async (context, args) => {
   const { storage } = host;
-  if (!args || typeof args.node !== 'string') throw refuse(host, 'hello needs a node id', 400);
+  if (!args || typeof args.node !== 'string') throw refuse(host, 'hello needs a node id', 400, 'BAD_HELLO');
   if (args.version !== undefined && args.version !== PROTOCOL) {
-    throw refuse(host, `Unsupported protocol ${args.version}`, 400, args.node);
+    throw refuse(host, `Unsupported protocol ${args.version}`, 400, 'PROTOCOL', args.node);
   }
   if (args.node === storage.nodeId) {
-    throw refuse(host, 'A node cannot sync with itself (copied data directory?)', 409, args.node);
+    throw refuse(host, 'A node cannot sync with itself (copied data directory?)', 409, 'SELF', args.node);
   }
   if (host.authorize && !(await host.authorize(context, args))) {
-    throw refuse(host, 'Not authorized to sync', 403, args.node);
+    throw refuse(host, 'Not authorized to sync', 403, 'UNAUTHORIZED', args.node);
   }
   const scopes = Array.isArray(args.scopes) ? args.scopes.filter((s) => typeof s === 'string') : [GLOBAL_SCOPE];
   const schema = schemaOf(args.schema);

@@ -2,14 +2,14 @@
 
 // The key pair on disk, shared by both crypto halves: `public.pem` and
 // `private.pem` under `basePath`, read when both are there, made when
-// neither is, refused when one is. No requires: the generator and the
-// backend are handed in.
+// neither is, refused when one is. No requires beyond ./errors.js: the
+// generator and the backend are handed in.
+
+const { SyncomError } = require('./errors.js');
 
 const incomplete = (basePath, hasPublic) => {
   const missing = hasPublic ? 'private' : 'public';
-  const error = new Error(`Key pair at ${basePath} is incomplete: ${missing}.pem is missing`);
-  error.code = 'KEYS_INCOMPLETE';
-  return error;
+  return new SyncomError('KEYS_INCOMPLETE', `Key pair at ${basePath} is incomplete: ${missing}.pem is missing`);
 };
 
 // Half a pair is refused, not replaced: without private.pem every sealed

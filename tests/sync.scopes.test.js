@@ -65,6 +65,7 @@ test('Hosting scopes', async (t) => {
     assert.deepStrictEqual(types(await link.call('syncom/snapshot', { scopes: ['A', 'B'] })), ['*', 'A'], 'narrowed');
     await assert.rejects(() => link.call('syncom/snapshot', { scopes: ['B'] }), {
       code: 403,
+      reason: 'SCOPES',
       message: 'Scopes not granted',
     });
     // The live feed is bound the same way.

@@ -64,7 +64,7 @@ const createWrpcLink = (client, { unit = UNIT } = {}) => {
       const name = target(method).slice(unit.length + 1);
       const procedure = client.api?.[unit]?.[name];
       if (!procedure || typeof procedure.subscribe !== 'function') {
-        throw new Error(`createWrpcLink: ${unit}/${name} is not a subscription on this client`);
+        throw new TypeError(`createWrpcLink: ${unit}/${name} is not a subscription on this client`);
       }
       const handle = procedure.subscribe(args, {
         lastEventId,

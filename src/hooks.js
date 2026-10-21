@@ -1,8 +1,9 @@
 'use strict';
 
-// Hooks and the contained event path. No requires on purpose: this file is
-// reached from the browser bundle, and scripts/size.js fails on any import
-// that is not a relative file.
+const { SyncomError } = require('./errors.js');
+// Hooks and the contained event path. No requires beyond ./errors.js: this
+// file is reached from the browser bundle, and scripts/size.js fails on any
+// import that is not a relative file.
 //
 // A hook is one function per name, configured up front (`open({ hooks })`)
 // and awaited INSIDE the operation it belongs to: it can alter the operation
@@ -10,13 +11,10 @@
 // outside: many listeners, none of which can affect the operation — a
 // listener that throws is logged and forgotten.
 
-class HookError extends Error {
+class HookError extends SyncomError {
   constructor(hook, cause) {
-    super(`The ${hook} hook failed: ${cause?.message ?? cause}`, { cause });
+    super('HOOK_FAILED', `The ${hook} hook failed: ${cause?.message ?? cause}`, { cause, hook });
     this.name = 'HookError';
-    this.code = 'HOOK_FAILED';
-    this.hook = hook;
-    Error.captureStackTrace?.(this, HookError);
   }
 }
 

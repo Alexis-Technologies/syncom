@@ -127,7 +127,10 @@ test('Contract module', async (t) => {
 
       const plainHash = await blockchain.addBlock({ kind: 'not-a-contract' });
 
-      await assert.rejects(() => SmartContract.load(plainHash, context), /Not a smart contract block/);
+      await assert.rejects(() => SmartContract.load(plainHash, context), {
+        code: 'NOT_CONTRACT',
+        message: /Not a smart contract block/,
+      });
     } finally {
       await cleanupTemp(tempDir);
     }

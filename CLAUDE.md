@@ -27,7 +27,8 @@ src/emitter.js            the Emitter both halves extend — no requires
 src/logger.js             createLogger, the duck-typed logger writer — no requires
 src/keys.js               loadKeyPair — the on-disk key pair, generator injected by each crypto half — no requires
 src/scope.js              GLOBAL_SCOPE, inScope, opInScope — the one definition of "in scope" — no requires
-src/shape.js              isPlainObject, asJson, isRecordId, isStreamName, wellFormed — what enters is checked here — no requires
+src/shape.js              isPlainObject, asJson, isRecordId, isStreamName, wellFormed — what enters is checked here
+src/errors.js             SyncomError (an operational failure, with a code) and typed() — no requires
 src/symbols.js            COMMIT / REFRESH / SOURCE — the module-private seams between Storage and what it hands out — no requires
 src/options.js            normalizeStorageOptions — open()'s plain options checked and defaulted (lock, cache, chain, skew…)
 src/protocol.js           PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf — what both halves of the sync protocol agree on — no requires
@@ -85,6 +86,18 @@ docs/                     VitePress site
   `unit()` (`src/hosting.js`) builds plain `{ access, handler }` objects that
   `defineRouter` accepts without wrpc's `procedure()`. The `tracked` shape it emits is
   `Symbol.for('wrpc.tracked')` — part of wrpc's frozen wire protocol.
+- **Every operational error is a `SyncomError` with a `code`.** `src/errors.js`:
+  a failure that can happen to correct calling code — given the data, the
+  files or the peers — is `new SyncomError(code, message, { cause, ...fields })`,
+  and its code is in the `SyncomErrorCode` union of `index.d.ts` and the table
+  in `docs/reference/api.md` (one row per code: who raises it, which fields
+  ride on it). A wrong argument, option or hook result is a `TypeError`
+  without a code, except `typed(code, message)` for a value that is data
+  (`INVALID_ID`, `TYPE_IMMUTABLE`) or configuration (`NO_CHAIN`). A host's
+  wire refusal (`coded` in `src/hosting.js`) keeps the numeric code wrpc
+  carries and names the check in `reason`. `HookError` and `ValidationError`
+  extend `SyncomError`. Never `new Error(...)` for something a caller may
+  handle, never invent a code without its row in the table and the union.
 - **A record id is checked where it enters, nowhere else.** `isRecordId` in
   `src/shape.js` (`[A-Za-z0-9_@-][A-Za-z0-9._@-]{0,127}`) guards `[COMMIT]`
   (every local writer), `insert` (what `getId` minted), `admit` in

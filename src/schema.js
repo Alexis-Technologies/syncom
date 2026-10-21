@@ -1,8 +1,8 @@
 'use strict';
 
-// Entity definitions and the injected validator. No requires on purpose: this
-// file ships to the browser, and scripts/size.js fails on any import that is
-// not a relative file.
+// Entity definitions and the injected validator. No requires beyond ./ops.js
+// and ./errors.js: this file ships to the browser, and scripts/size.js fails
+// on any import that is not a relative file.
 //
 // `open({ schema: { entities } })` names the collections. Each entity may
 // carry a `schema` — any Standard Schema (`~standard`: metaschema, zod,
@@ -14,6 +14,7 @@
 // write path sees `async (record) => validated` and nothing else.
 
 const { deepEqual } = require('./ops.js');
+const { SyncomError } = require('./errors.js');
 
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -35,14 +36,10 @@ const describe = (entity, issues) => {
 
 // What a write rejects with when the record would not pass its entity's
 // validator: `entity` names it, `issues` are `{ path, message, code? }`.
-class ValidationError extends Error {
+class ValidationError extends SyncomError {
   constructor(entity, issues) {
-    super(describe(entity, issues));
+    super('VALIDATION_FAILED', describe(entity, issues), { entity, issues });
     this.name = 'ValidationError';
-    this.code = 'VALIDATION_FAILED';
-    this.entity = entity;
-    this.issues = issues;
-    Error.captureStackTrace?.(this, ValidationError);
   }
 }
 

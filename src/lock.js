@@ -1,17 +1,18 @@
 'use strict';
 
+const { SyncomError } = require('./errors.js');
 // Exclusive open. Two storages over one directory would both read the log's
 // vector and both mint the next `origin:seq` — the same number for two
 // different ops, which a peer drops as a duplicate and nothing ever
 // reconciles. So a directory is held by one instance at a time: through the
 // Web Locks API where there is one (the browser releases it when the tab
-// dies), through `<path>/lock.json` otherwise. No requires: shared code.
+// dies), through `<path>/lock.json` otherwise. No requires beyond ./errors.js: shared code.
 
 const LOCK_FILE = 'lock.json';
 const DEFAULT_STALE = 30 * 60 * 1000;
 
 const locked = (path, why = 'is locked by another instance') =>
-  Object.assign(new Error(`Storage at ${path} ${why}`), { code: 'LOCKED' });
+  new SyncomError('LOCKED', `Storage at ${path} ${why}`, { path });
 
 const random = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
 

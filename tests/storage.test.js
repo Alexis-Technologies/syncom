@@ -137,7 +137,7 @@ test('Storage module', async (t) => {
       const notSwapped = await storage.swap(id, { v: 9 }, { n: 999 });
       assert.strictEqual(notSwapped, false);
 
-      await assert.rejects(() => storage.update('missing-id', { x: 1 }), /not found/);
+      await assert.rejects(() => storage.update('missing-id', { x: 1 }), { code: 'NOT_FOUND', message: /not found/ });
     } finally {
       await cleanupTemp(tempDir);
     }
@@ -572,7 +572,7 @@ test('swap compares inside the queue: two swaps on one expectation cannot both p
   assert.deepStrictEqual(results.filter(Boolean).length, 1, 'exactly one won');
   const winner = results.indexOf(true);
   assert.deepStrictEqual(await storage.get(id), { hits: 2, by: 'abc'[winner] });
-  await assert.rejects(() => storage.swap('missing', { a: 1 }, { a: 0 }), /not found/);
+  await assert.rejects(() => storage.swap('missing', { a: 1 }, { a: 0 }), { code: 'NOT_FOUND', message: /not found/ });
   await assert.rejects(() => storage.swap(id, 'x', { a: 0 }), TypeError);
   await assert.rejects(() => storage.swap(id, { a: 1 }, null), TypeError);
   assert.strictEqual(storage.log.length, 2, 'the losing swaps wrote nothing');

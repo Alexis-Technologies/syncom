@@ -116,6 +116,7 @@ test('SyncManager edges', async (t) => {
     await other.sync.start();
     await waitUntil(() => errors.length > 0);
     assert.match(errors[0].message, /Bad hello/);
+    assert.strictEqual(errors[0].code, 'BAD_HELLO');
   });
 
   await t.test('a streamed snapshot needs a link that can read streams', async (t2) => {
@@ -137,6 +138,7 @@ test('SyncManager edges', async (t) => {
     await dialer.sync.start();
     await waitUntil(() => errors.length > 0);
     assert.match(errors[0].message, /cannot read streams/);
+    assert.strictEqual(errors[0].code, 'STREAMS_UNSUPPORTED');
   });
 
   await t.test('a push that fails mid-flight is reported and recomputed from the vector', async (t2) => {
