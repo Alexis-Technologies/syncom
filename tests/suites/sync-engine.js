@@ -115,6 +115,38 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     await assert.rejects(() => b.update(id, { hits: 9 }), /counter/);
   });
 
+  await t.test('sets converge: concurrent adds both keep, an unobserved add beats a remove', async (t2) => {
+    const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage);
+    const a = mesh.get('A');
+    const b = mesh.get('B');
+    const id = await a.insert({ title: 'tags' });
+    await a.add(id, 'tags', ['x', 'shared']);
+    await settle([a, b]);
+    assert.deepStrictEqual((await b.get(id)).tags, ['shared', 'x']);
+    const link = mesh.links.get('mem://B');
+    link.disconnect();
+    await a.add(id, 'tags', ['p']);
+    await a.remove(id, 'tags', ['x', 'shared']);
+    await tick();
+    // B, cut off, drops x too, then adds it back: A's remove never observed
+    // that add, so x survives everywhere; shared, removed on both, is gone.
+    await b.add(id, 'tags', ['q']);
+    await b.remove(id, 'tags', ['x', 'shared']);
+    await b.add(id, 'tags', ['x']);
+    await link.reconnect();
+    await settle([a, b]);
+    const state = await assertConverged([a, b]);
+    assert.deepStrictEqual(state[id].tags, ['p', 'q', 'x']);
+    // The kind rule holds across the wire too.
+    await assert.rejects(() => b.update(id, { tags: [] }), /set/);
+    await assert.rejects(() => b.add(id, 'title', ['x']), /register/);
+    // A remove of what the other side added, once seen, lands on both.
+    await b.remove(id, 'tags', ['p']);
+    await settle([a, b]);
+    assert.deepStrictEqual((await a.get(id)).tags, ['q', 'x']);
+    assert.deepStrictEqual((await b.get(id)).tags, ['q', 'x']);
+  });
+
   await t.test('delete versus a concurrent write converges either way', async (t2) => {
     const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage);
     const a = mesh.get('A');
@@ -162,9 +194,11 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
       const id = ids[Math.floor(random() * ids.length)];
       const roll = random();
       try {
-        if (roll < 0.4) await storage.set(id, { v: step, by: storage.nodeId.slice(0, 4) });
-        else if (roll < 0.7) await storage.update(id, { [`f${step % 3}`]: step });
-        else if (roll < 0.85) await storage.inc(id, 'count', 1);
+        if (roll < 0.3) await storage.set(id, { v: step, by: storage.nodeId.slice(0, 4) });
+        else if (roll < 0.5) await storage.update(id, { [`f${step % 3}`]: step });
+        else if (roll < 0.6) await storage.inc(id, 'count', 1);
+        else if (roll < 0.75) await storage.add(id, 'tags', [`t${step % 4}`]);
+        else if (roll < 0.85) await storage.remove(id, 'tags', [`t${step % 4}`]);
         else await storage.delete(id);
       } catch (error) {
         // A record deleted elsewhere is a legitimate outcome of the workload.
@@ -181,6 +215,8 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     const a = mesh.get('A');
     const id = await a.insert({ n: 0 });
     for (let i = 0; i < 12; i++) await a.inc(id, 'hits', 1);
+    await a.add(id, 'tags', ['x', 'y']);
+    await a.remove(id, 'tags', ['x']);
     await a.insert({ other: true });
     assert.ok(a.log.floor > 1, 'history was compacted');
     // A holds state stamped by a peer whose clock runs an hour ahead; it
@@ -196,11 +232,16 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     assert.strictEqual(events.length, 1);
     await assertConverged([a, b]);
     assert.strictEqual((await b.get(id)).hits, 12, 'counters are exact after a snapshot');
+    assert.deepStrictEqual((await b.get(id)).tags, ['y'], 'and so is a set, tags included');
     // Live after bootstrap, both ways.
     await a.inc(id, 'hits', 1);
+    await a.remove(id, 'tags', ['y']);
+    await b.add(id, 'tags', ['z']);
     const fromB = await b.insert({ late: true });
     await settle([a, b]);
     assert.strictEqual((await b.get(id)).hits, 13);
+    assert.deepStrictEqual((await a.get(id)).tags, ['z']);
+    assert.deepStrictEqual((await b.get(id)).tags, ['z']);
     assert.deepStrictEqual(await a.get(fromB), { late: true });
     // B's write to the skew-stamped record wins over what it joined, everywhere.
     await b.update('skewed', { v: 'B' });

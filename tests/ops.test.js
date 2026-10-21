@@ -173,17 +173,17 @@ test('ops module', async (t) => {
     assert.strictEqual(isSet(added.entry.meta, 'tags'), true);
     assert.strictEqual(isSet(added.entry.meta, 'other'), false);
     assert.strictEqual(isSet({ clock: {}, counters: {} }, 'tags'), false, 'an entry from before sets existed');
-    // Order: by the earliest live add, then by key; a re-add keeps its place.
+    // A set reads sorted by element text: it has no insertion order.
     const more = applyOp(added.entry, op('add', 2, 'B', { seq: 1, key: 'tags', value: ['api', 'bug'] })).entry;
-    assert.deepStrictEqual(more.data.tags, ['bug', 'ui', 'api']);
+    assert.deepStrictEqual(more.data.tags, ['api', 'bug', 'ui']);
     assert.deepStrictEqual(more.meta.sets.tags['"bug"'], { A: [1, 0], B: [2, 0] });
     assert.strictEqual(applyOp(more, op('add', 2, 'B', { seq: 1, key: 'tags', value: ['api', 'bug'] })).changed, false);
     // A remove carries the tags its node observed; only those die.
     const tags = observedTags(more.meta, 'tags', ['bug', 'nope']);
     assert.deepStrictEqual(tags, [['bug', { A: 1, B: 2 }]]);
     const removed = applyOp(more, op('remove', 3, 'C', { seq: 1, key: 'tags', value: tags }));
-    assert.deepStrictEqual(removed.entry.data.tags, ['ui', 'api']);
-    assert.deepStrictEqual(removed.delta, { tags: ['ui', 'api'] });
+    assert.deepStrictEqual(removed.entry.data.tags, ['api', 'ui']);
+    assert.deepStrictEqual(removed.delta, { tags: ['api', 'ui'] });
     assert.deepStrictEqual(removed.entry.meta.sets.tags['"bug"'], { A: [1, 1], B: [2, 2] });
     assert.strictEqual(
       applyOp(removed.entry, op('remove', 3, 'C', { seq: 1, key: 'tags', value: tags })).changed,
@@ -202,7 +202,7 @@ test('ops module', async (t) => {
     assert.deepStrictEqual(empty.data, { tags: [] });
     assert.strictEqual(isSet(empty.meta, 'tags'), true);
     // Elements are JSON values, told apart by their text.
-    // One add stamps them all alike, so the key decides the order.
+    // Sorted by key — the JSON text — whatever the add said.
     const mixed = replay([op('add', 1, 'A', { seq: 1, key: 's', value: [1, '1', { a: 1 }, [2], null, true] })]);
     assert.deepStrictEqual(mixed.data.s, ['1', 1, [2], null, true, { a: 1 }]);
     assert.deepStrictEqual(Object.keys(mixed.meta.sets.s).sort(), ['"1"', '1', '[2]', 'null', 'true', '{"a":1}']);

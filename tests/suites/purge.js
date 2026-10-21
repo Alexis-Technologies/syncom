@@ -37,6 +37,7 @@ const runPurgeTests = async (t, assert, createStorage) => {
     const person = await storage.Person.insert({ name: 'Ada', ssn: SECRET });
     await storage.update(person.id, { ssn: SECRET, note: 'x' });
     await storage.inc(person.id, 'visits', 3);
+    await storage.add(person.id, 'aliases', [SECRET]);
     const keep = await storage.insert({ ssn: 'KEEP' });
     assert.strictEqual(await holdsSecret(storage), true, 'before: the payload is in the log and the record');
     const record = await storage.record(person.id);
@@ -54,8 +55,9 @@ const runPurgeTests = async (t, assert, createStorage) => {
     const purge = ops.at(-1);
     assert.deepStrictEqual([purge.type, purge.actor, purge.id], ['purge', 'dpo', person.id]);
     const entries = storage.log.since(undefined).filter((entry) => entry.op.id === person.id);
-    assert.ok(entries.length >= 4);
-    assert.ok(entries.every((entry) => entry.scrubbed === true && !('data' in entry.op) && !('key' in entry.op)));
+    assert.ok(entries.length >= 5);
+    const bare = (op) => !('data' in op) && !('key' in op) && !('value' in op);
+    assert.ok(entries.every((entry) => entry.scrubbed === true && bare(entry.op)));
     const page = await storage.snapshot();
     const tombstone = page.records.find((r) => r.id === person.id);
     assert.deepStrictEqual(tombstone.data, {});

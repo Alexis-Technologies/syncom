@@ -81,6 +81,14 @@ test('SyncomError', async (t) => {
       kind: 'register',
       message: /is a register; use update\(\)/,
     });
+    await storage.add(id, 'tags', ['x']);
+    await assert.rejects(() => storage.update(id, { tags: [] }), {
+      code: 'FIELD_KIND',
+      field: 'tags',
+      kind: 'set',
+      message: /is a set; use add\(\) or remove\(\)/,
+    });
+    await assert.rejects(() => storage.remove(id, 'hits', ['x']), { code: 'FIELD_KIND', kind: 'counter' });
     await assert.rejects(() => storage.set(id, { $type: 'Other' }), {
       name: 'TypeError',
       code: 'TYPE_IMMUTABLE',
@@ -102,6 +110,7 @@ test('SyncomError', async (t) => {
     );
     const sealed = await storage.insert({ secret: 1 }, { encrypted: true });
     await assert.rejects(() => storage.inc(sealed, 'n'), { code: 'ENCRYPTED', message: /needs a replicated record/ });
+    await assert.rejects(() => storage.add(sealed, 'tags', ['x']), { code: 'ENCRYPTED', message: /add needs/ });
     await assert.rejects(() => storage.set(id, { a: 1 }, { encrypted: true }), {
       code: 'ENCRYPTED',
       message: /cannot become encrypted/,

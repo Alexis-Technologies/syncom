@@ -140,6 +140,16 @@ class Record extends Emitter {
     await this.#storage.inc(this.#id, key, value, options);
   }
 
+  /** Adds to a set field; the storage-level `add` with this record's id. */
+  async add(key, elements, options = {}) {
+    await this.#storage.add(this.#id, key, elements, options);
+  }
+
+  /** Removes from a set field; the storage-level `remove` with this record's id. */
+  async remove(key, elements, options = {}) {
+    await this.#storage.remove(this.#id, key, elements, options);
+  }
+
   async delete(options = {}) {
     await this.#storage.delete(this.#id, options);
     this.#data = null;

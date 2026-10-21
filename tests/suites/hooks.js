@@ -30,6 +30,8 @@ const runHooksTests = async (t, assert, createStorage) => {
     const id = await storage.insert({ title: 'a' });
     await storage.update(id, { title: 'b' });
     await storage.inc(id, 'hits', 2);
+    await storage.add(id, 'tags', ['x']);
+    await storage.remove(id, 'tags', ['x']);
     const record = await storage.record(id);
     record.title = 'c';
     await record.save();
@@ -73,8 +75,26 @@ const runHooksTests = async (t, assert, createStorage) => {
           encrypted: false,
         },
         {
-          type: 'set',
+          type: 'add',
           current: { title: 'b', hits: 2 },
+          data: undefined,
+          key: 'tags',
+          value: ['x'],
+          source: null,
+          encrypted: false,
+        },
+        {
+          type: 'remove',
+          current: { title: 'b', hits: 2, tags: ['x'] },
+          data: undefined,
+          key: 'tags',
+          value: ['x'],
+          source: null,
+          encrypted: false,
+        },
+        {
+          type: 'set',
+          current: { title: 'b', hits: 2, tags: [] },
           data: { title: 'c' },
           key: undefined,
           value: undefined,
@@ -83,7 +103,7 @@ const runHooksTests = async (t, assert, createStorage) => {
         },
         {
           type: 'delete',
-          current: { title: 'c', hits: 2 },
+          current: { title: 'c', hits: 2, tags: [] },
           data: undefined,
           key: undefined,
           value: undefined,
@@ -99,7 +119,7 @@ const runHooksTests = async (t, assert, createStorage) => {
     const storage = await createStorage(t2, 'A', {
       hooks: {
         beforeWrite: ({ type, data }) => {
-          if (type === 'inc') return { nope: true };
+          if (type === 'inc' || type === 'add') return { nope: true };
           return { ...data, stamped: type };
         },
       },
@@ -114,6 +134,10 @@ const runHooksTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(await storage.get(id), { title: 'b', stamped: 'set' });
     assert.deepStrictEqual(ops.at(-1).data, { title: 'b', stamped: 'set' }, 'the op carries the replacement');
     await assert.rejects(() => storage.inc(id, 'hits'), {
+      name: 'TypeError',
+      message: 'beforeWrite may only replace data for write and set',
+    });
+    await assert.rejects(() => storage.add(id, 'tags', ['x']), {
       name: 'TypeError',
       message: 'beforeWrite may only replace data for write and set',
     });

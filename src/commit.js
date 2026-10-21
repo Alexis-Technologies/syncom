@@ -3,13 +3,13 @@
 // The one local write path: `storage[COMMIT]` lands here, inside the
 // mutation queue. The op is built, applied, validated, logged (a durable
 // seq), persisted, then announced — in that order, for every kind of local
-// write (`write`, `set`, `inc`, `delete`, `purge`; a bootstrap's merges go
-// through src/bootstrap.js). `core` is what Storage lends its write paths:
+// write (`write`, `set`, `inc`, `add`, `remove`, `delete`, `purge`; a
+// bootstrap's merges go through src/bootstrap.js). `core` is what Storage lends its write paths:
 // the log, the clock, the chain, the entries, the hook runner and the
 // lensed readers — see Storage#open.
 
 const { encrypt, calculateHash } = require('./crypto.js');
-const { applyOp, isAlive, latestClock } = require('./ops.js');
+const { applyOp, isAlive, latestClock, observedTags } = require('./ops.js');
 const { opKey } = require('./vector.js');
 const { notify } = require('./hooks.js');
 const { ValidationError, project, unproject, foldSet } = require('./schema.js');
@@ -36,12 +36,16 @@ const sameType = (type, id, data, current) => {
   return data;
 };
 
-// The register/counter rule, refused with a hint at the right call.
+// The field-kind rule, refused with a hint at the right call.
+const HINTS = {
+  register: 'a register; use update()',
+  counter: 'a counter; use inc()',
+  set: 'a set; use add() or remove()',
+};
 const refuse = (id, rejected) => {
   if (rejected.length === 0) return;
   const [{ field, reason }] = rejected;
-  const hint = reason === 'counter' ? 'a counter; use inc()' : 'a register; use update()';
-  throw new SyncomError('FIELD_KIND', `Field ${field} of record ${id} is ${hint}`, { field, kind: reason });
+  throw new SyncomError('FIELD_KIND', `Field ${field} of record ${id} is ${HINTS[reason]}`, { field, kind: reason });
 };
 
 // A swap's expectation, checked inside the queue against the record as it
@@ -82,7 +86,7 @@ const unseal = async (core, id) => {
 };
 
 // A write to a sealed record: set and write map onto the encrypted save, a
-// delete or purge removes it; a counter needs ops.
+// delete or purge removes it; a counter or a set needs ops.
 const commitSealed = async (core, type, id, payload, current, ctx, source) => {
   let data;
   if (type === 'write') data = payload.data;
@@ -119,6 +123,9 @@ const prepareOp = (core, type, id, payload, current, who, from) => {
   if (payload.data !== undefined) op.data = payload.data;
   if (payload.key !== undefined) op.key = payload.key;
   if (payload.value !== undefined) op.value = payload.value;
+  // A remove names the tags this node observed, read here, inside the
+  // queue — read outside it, a concurrent apply could add between the two.
+  if (type === 'remove') op.value = observedTags(current?.meta ?? null, payload.key, payload.value);
   return op;
 };
 
@@ -140,8 +147,9 @@ const assertUnique = async (core, id, entry) => {
 // The op applied, and validated as the record will be after it. What the
 // validator gives back (defaults, aliases, stripped keys) becomes the op:
 // the peers receive the validated record, not the one that was typed. A
-// throw leaves nothing durable. An `inc` is checked but carries no data to
-// fold. Returns `{ entry, delta }`, or null for an op that changes nothing.
+// throw leaves nothing durable. An `inc`, `add` or `remove` is checked but
+// carries no data to fold. Returns `{ entry, delta }`, or null for an op that
+// changes nothing.
 const validateLocal = async (core, op, current, visible, ctx) => {
   const { id, type } = op;
   let { entry, changed, delta, rejected } = applyOp(current, op);
@@ -152,7 +160,7 @@ const validateLocal = async (core, op, current, visible, ctx) => {
     // Through the lens: a record of an older version is validated as it
     // reads, and a set is folded against how it read before the write.
     const output = await def.validator(project(def, id, await core.view(id, entry)));
-    if (type !== 'inc') {
+    if (type === 'write' || type === 'set') {
       const validated = unproject(def, output, entry.data.$type);
       if (type === 'write') op.data = validated;
       else op.data = foldSet(op.data, validated, visible ? project(def, id, await core.view(id, current)) : {});
@@ -205,6 +213,7 @@ const commitLocal = async (core, type, id, payload, options) => {
   // The payload is taken as JSON — a copy, like the disk and the peers
   // hold it — before anything keeps a reference to it.
   if (payload.data !== undefined) payload = { ...payload, data: asJson(payload.data) };
+  if (Array.isArray(payload.value)) payload = { ...payload, value: asJson(payload.value) };
   // Sealed: this write is encrypted, or the record already is. An
   // encrypted record has no op log — writes to it stay local.
   const sealed = encrypted || current?.encrypted === true;

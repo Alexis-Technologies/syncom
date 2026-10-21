@@ -17,7 +17,7 @@ const { Record, Collection } = require('./record.js');
 const { commit, MISMATCH } = require('./commit.js');
 const { applyBatch } = require('./apply.js');
 const { snapshotPage, mergeBatch, adopt } = require('./bootstrap.js');
-const { applyOp, isAlive, isCounter } = require('./ops.js');
+const { applyOp, isAlive, isCounter, isSet } = require('./ops.js');
 const { Clock } = require('./vector.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
 const { normalizeSchema, createLens, project } = require('./schema.js');
@@ -48,6 +48,22 @@ const corrupt = (file, cause) =>
   new SyncomError('CORRUPT', `${file} is unreadable (${cause?.message ?? cause}); restore it or remove the directory`, {
     cause,
   });
+
+// What add()/remove() take: a field name and a non-empty array of JSON
+// values — an element JSON cannot carry (undefined, a function, a symbol) has
+// no text to be told apart by.
+const setElements = (method, key, elements) => {
+  if (typeof key !== 'string') throw new TypeError(`${method}() takes a field name`);
+  if (!Array.isArray(elements) || elements.length === 0) {
+    throw new TypeError(`${method}() takes a non-empty array of elements`);
+  }
+  for (const element of elements) {
+    if (element === undefined || typeof element === 'function' || typeof element === 'symbol') {
+      throw new TypeError(`${method}() takes JSON values; got ${typeof element}`);
+    }
+  }
+  return elements;
+};
 
 class Storage extends Emitter {
   #path;
@@ -416,8 +432,8 @@ class Storage extends Emitter {
 
   /**
    * Rewrites every record of an older version as this one, through the
-   * lens: a whole-record write of the view, then the counters added back
-   * (a write resets them). One designated node runs it; peers receive
+   * lens: a whole-record write of the view, then the counters and the sets
+   * added back (a write resets them). One designated node runs it; peers receive
    * ordinary ops. Idempotent — a record already of this version is left
    * alone. `entities` limits it to those collections; `batch` is how many
    * records go between turns of the event loop.
@@ -428,7 +444,7 @@ class Storage extends Emitter {
       throw new TypeError('migrate({ entities }) takes an array of entity names');
     }
     if (!Number.isInteger(batch) || batch < 1) throw new TypeError('migrate({ batch }) takes a positive integer');
-    const result = { migrated: 0, counters: 0 };
+    const result = { migrated: 0, counters: 0, sets: 0 };
     let since = 0;
     for (const id of await this.list()) {
       const entry = await this.#entries.load(id);
@@ -437,14 +453,22 @@ class Storage extends Emitter {
       const view = await this.#view(id, entry);
       const data = {};
       const counters = {};
+      const sets = {};
       for (const key of Object.keys(view)) {
         if (isCounter(entry.meta, key)) counters[key] = entry.data[key];
+        else if (isSet(entry.meta, key)) sets[key] = entry.data[key];
         else data[key] = view[key];
       }
       await this[COMMIT]('write', id, { data }, { actor });
       for (const key of Object.keys(counters)) {
         await this[COMMIT]('inc', id, { key, value: counters[key] }, { actor });
         result.counters++;
+      }
+      // A set with nothing live has nothing to add back: it is dropped.
+      for (const key of Object.keys(sets)) {
+        if (sets[key].length === 0) continue;
+        await this[COMMIT]('add', id, { key, value: sets[key] }, { actor });
+        result.sets++;
       }
       result.migrated++;
       if (++since >= batch) {
@@ -867,6 +891,20 @@ class Storage extends Emitter {
     if (typeof key !== 'string') throw new TypeError('inc() takes a field name');
     if (!Number.isFinite(value)) throw new TypeError('inc() takes a finite number');
     await this[COMMIT]('inc', id, { key, value }, { actor });
+  }
+
+  /**
+   * Adds `elements` to set field `key` — an observed-remove set: two nodes
+   * that add concurrently both keep theirs, and an add a remove did not
+   * observe survives it. Creates the field, and the record, when absent.
+   */
+  async add(id, key, elements, { actor } = {}) {
+    await this[COMMIT]('add', id, { key, value: setElements('add', key, elements) }, { actor });
+  }
+
+  /** Removes from set field `key` the `elements` this node has seen added; one it never saw is left alone. */
+  async remove(id, key, elements, { actor } = {}) {
+    await this[COMMIT]('remove', id, { key, value: setElements('remove', key, elements) }, { actor });
   }
 
   /**

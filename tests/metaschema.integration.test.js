@@ -197,7 +197,7 @@ test('syncom with metaschema', { skip: metaschema ? false : '@alexify/metaschema
       desc: 'A data modeler',
       $type: 'Project',
     });
-    assert.deepStrictEqual(await b.migrate(), { migrated: 1, counters: 0 });
+    assert.deepStrictEqual(await b.migrate(), { migrated: 1, counters: 0, sets: 0 });
     await settle([a, b]);
     const migrated = { name: 'Alioth', slug: 'alioth', orgId: 'org1', desc: 'A data modeler', $type: 'Project' };
     assert.deepStrictEqual(await b.get(project.id), migrated);

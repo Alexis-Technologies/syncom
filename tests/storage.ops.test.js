@@ -66,6 +66,89 @@ test('Storage replication model', async (t) => {
     assert.deepStrictEqual(await storage.get(id), { name: 'Ada' });
   });
 
+  await t.test('add and remove keep an observed-remove set; a field is one kind only', async (t2) => {
+    const { storage } = await openTemp(t2);
+    const ops = [];
+    storage.on('change', (op) => ops.push(op));
+    const id = await storage.insert({ name: 'Ada' });
+    await storage.add(id, 'tags', ['bug', 'ui']);
+    await storage.add(id, 'tags', ['api', 'bug']);
+    assert.deepStrictEqual(await storage.get(id), { name: 'Ada', tags: ['api', 'bug', 'ui'] }, 'sorted by text');
+    await storage.remove(id, 'tags', ['bug', 'nope']);
+    assert.deepStrictEqual(await storage.get(id), { name: 'Ada', tags: ['api', 'ui'] });
+    // The remove op carries the tags this node observed — the newest add
+    // per origin — not the elements alone.
+    const remove = ops.at(-1);
+    assert.strictEqual(remove.type, 'remove');
+    assert.deepStrictEqual(remove.value, [['bug', { [storage.nodeId]: ops[2].ts }]]);
+    assert.deepStrictEqual(
+      ops.map((op) => op.type),
+      ['write', 'add', 'add', 'remove'],
+    );
+    // Removing what was never added changes nothing: no op.
+    await storage.remove(id, 'tags', ['nope']);
+    await storage.remove(id, 'other', ['x']);
+    assert.strictEqual(ops.length, 4);
+    // The kind rule, with a hint at the right call.
+    await assert.rejects(() => storage.update(id, { tags: [] }), /set; use add\(\) or remove\(\)/);
+    await assert.rejects(() => storage.inc(id, 'tags'), /set; use add\(\) or remove\(\)/);
+    await assert.rejects(() => storage.add(id, 'name', ['x']), /register; use update\(\)/);
+    await storage.inc(id, 'hits');
+    await assert.rejects(() => storage.remove(id, 'hits', ['x']), /counter; use inc\(\)/);
+    // Arguments.
+    await assert.rejects(() => storage.add(id, 7, ['x']), TypeError);
+    await assert.rejects(() => storage.add(id, 'tags', 'x'), TypeError);
+    await assert.rejects(() => storage.add(id, 'tags', []), TypeError);
+    await assert.rejects(() => storage.add(id, 'tags', [undefined]), TypeError);
+    await assert.rejects(() => storage.remove(id, 'tags', [() => 1]), TypeError);
+    // Through a live Record, which follows along.
+    const record = await storage.record(id);
+    await record.add('tags', ['docs']);
+    assert.deepStrictEqual(record.tags, ['api', 'docs', 'ui']);
+    await record.remove('tags', ['ui']);
+    assert.deepStrictEqual(record.tags, ['api', 'docs']);
+    // The caller's array is copied, not kept.
+    const mine = ['mine'];
+    await storage.add(id, 'tags', mine);
+    mine.push('later');
+    assert.deepStrictEqual((await storage.get(id)).tags, ['api', 'docs', 'mine']);
+    // A whole-record write resets the set along with everything else; the
+    // field is free to be a register after that.
+    await storage.set(id, { name: 'Ada' });
+    assert.deepStrictEqual(await storage.get(id), { name: 'Ada' });
+    await storage.update(id, { tags: ['plain'] });
+    assert.deepStrictEqual(await storage.get(id), { name: 'Ada', tags: ['plain'] });
+    // An add creates the field, and the record, when absent.
+    await storage.add('fresh', 'tags', ['x']);
+    assert.deepStrictEqual(await storage.get('fresh'), { tags: ['x'] });
+    assert.strictEqual(await storage.validate(), true);
+  });
+
+  await t.test('a peer’s set ops land in any order; a write on a set field is refused for that field', async (t2) => {
+    const { storage } = await openTemp(t2);
+    const errors = [];
+    storage.on('error', (error) => errors.push(error));
+    const t0 = Date.now();
+    // The remove arrives before the add it observed: that add is dead on arrival.
+    const tags = [['x', { p1: t0 + 1 }]];
+    await storage.applyRemote([remoteOp('p2', 1, 'remove', 'r', { key: 'tags', value: tags, ts: t0 + 5 })]);
+    assert.deepStrictEqual(await storage.get('r'), { tags: [] });
+    await storage.applyRemote([remoteOp('p1', 1, 'add', 'r', { key: 'tags', value: ['x', 'y'], ts: t0 + 1 })]);
+    assert.deepStrictEqual(await storage.get('r'), { tags: ['y'] });
+    // A peer's set on the field is refused for that field alone, as an event.
+    const result = await storage.applyRemote([remoteOp('p3', 1, 'set', 'r', { data: { tags: ['z'], note: 'n' } })]);
+    assert.strictEqual(result.applied, 1);
+    assert.deepStrictEqual(await storage.get('r'), { tags: ['y'], note: 'n' });
+    assert.deepStrictEqual(
+      errors.map((error) => [error.code, error.rejected]),
+      [['OP_REFUSED', [{ field: 'tags', reason: 'set' }]]],
+    );
+    // And the local writer is told the same.
+    await assert.rejects(() => storage.update('r', { tags: [] }), { code: 'FIELD_KIND', kind: 'set' });
+    await storage.add('r', 'tags', ['local']);
+    assert.deepStrictEqual((await storage.get('r')).tags, ['local', 'y']);
+  });
+
   await t.test('delete leaves a tombstone: hidden from get/has/list, kept on disk', async (t2) => {
     const { dir, storage } = await openTemp(t2);
     const keep = await storage.insert({ n: 1 });
@@ -527,14 +610,22 @@ test("Storage: what a peer's op must look like", async (t) => {
   });
 
   await t.test('error events carry a code', async (t2) => {
-    const schema = { entities: { Post: { schema: (data) => !('secret' in data) } } };
+    const valid = (data) => !('secret' in data) && !(Array.isArray(data.tags) && data.tags.length > 1);
+    const schema = { entities: { Post: { schema: valid } } };
     const { storage } = await openTemp(t2, { schema });
     const errors = [];
     storage.on('error', (error) => errors.push(error.code));
     const id = await storage.insert({ hits: 'text' });
     await storage.applyRemote([remoteOp('peer', 1, 'inc', id, { key: 'hits', value: 1 })]);
     await storage.applyRemote([remoteOp('peer', 2, 'write', 'p1', { data: { $type: 'Post', secret: 1 } })]);
-    assert.deepStrictEqual(errors, ['OP_REFUSED', 'OP_INVALID']);
+    // A set op is validated against the record it leaves, like an inc.
+    await storage.applyRemote([remoteOp('peer', 3, 'write', 'p2', { data: { $type: 'Post' } })]);
+    await storage.applyRemote([remoteOp('peer', 4, 'add', 'p2', { key: 'tags', value: ['a', 'b'] })]);
+    assert.deepStrictEqual(errors, ['OP_REFUSED', 'OP_INVALID', 'OP_INVALID']);
+    assert.deepStrictEqual(await storage.get('p2'), { $type: 'Post' });
+    await assert.rejects(() => storage.add('p2', 'tags', ['a', 'b']), { name: 'ValidationError' });
+    await storage.add('p2', 'tags', ['a']);
+    assert.deepStrictEqual(await storage.get('p2'), { $type: 'Post', tags: ['a'] });
   });
 
   await t.test('a snapshot record with an invalid id or shape is left out', async (t2) => {

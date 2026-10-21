@@ -121,31 +121,24 @@ const isElementKey = (key) => {
   }
 };
 
-// The live elements of a set in a deterministic order — by the earliest live
-// add, then by key: equal metas on two nodes must read as equal arrays.
-const compareElements = (a, b) => {
-  const byStamp = compareClock(a.stamp, b.stamp);
-  if (byStamp !== 0) return byStamp;
-  if (a.key === b.key) return 0;
-  return a.key < b.key ? -1 : 1;
-};
-
+// The live elements of a set, sorted by key: a set has no order of its own
+// (an add by the same origin moves the element's stamp, so "insertion order"
+// would shift under the reader), and equal metas on two nodes must read as
+// equal arrays.
 const liveElements = (elements) => {
-  const live = [];
+  const keys = [];
   for (const key of Object.keys(elements)) {
     const slots = elements[key];
-    let stamp = null;
     for (const origin of Object.keys(slots)) {
-      const slot = slots[origin];
-      if (slot[0] <= slot[1]) continue;
-      const candidate = [slot[0], origin];
-      if (stamp === null || compareClock(candidate, stamp) < 0) stamp = candidate;
+      if (slots[origin][0] > slots[origin][1]) {
+        keys.push(key);
+        break;
+      }
     }
-    if (stamp !== null) live.push({ stamp, key });
   }
-  live.sort(compareElements);
-  const values = new Array(live.length);
-  for (let i = 0; i < live.length; i++) values[i] = JSON.parse(live[i].key);
+  keys.sort();
+  const values = new Array(keys.length);
+  for (let i = 0; i < keys.length; i++) values[i] = JSON.parse(keys[i]);
   return values;
 };
 
