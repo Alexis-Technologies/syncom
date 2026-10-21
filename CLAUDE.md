@@ -25,7 +25,7 @@ browser.d.ts              re-exports index.d.ts, overrides the 3 async crypto fn
 src/backend.js            the fsi contract (isFsi/checkFsi), createMemoryFsi, withSync — no requires
 src/emitter.js            the Emitter both halves extend — no requires
 src/logger.js             createLogger, the duck-typed logger writer — no requires
-src/keys.js               loadKeyPair — the on-disk key pair, generator injected by each crypto half — no requires
+src/keys.js               loadKeyPair — the on-disk key pairs (RSA for sealing, Ed25519 for signing), generator injected by each crypto half — no requires
 src/scope.js              GLOBAL_SCOPE, inScope, opInScope — the one definition of "in scope" — no requires
 src/shape.js              isPlainObject, asJson, isRecordId, isStreamName, wellFormed — what enters is checked here
 src/errors.js             SyncomError (an operational failure, with a code) and typed() — no requires
@@ -220,8 +220,8 @@ docs/                     VitePress site
   page in `#receive`, an op in `#fanOut`) or on `sync()`, backed off by a
   timestamp. Every push goes through `#serializePush` — never call
   `#sendPages` from a new place.
-- **Async asymmetry is real.** `calculateHash`, `encrypt` and `decrypt` are
-  synchronous in `src/crypto.js` and promise-returning in
+- **Async asymmetry is real.** `calculateHash`, `encrypt`, `decrypt`, `sign`
+  and `verify` are synchronous in `src/crypto.js` and promise-returning in
   `src/crypto.browser.js`. Shared code must `await` them; `browser.d.ts`
   exists to declare that difference. Do not "fix" it by making the Node half
   async.

@@ -78,7 +78,7 @@ Use following conventions for JavaScript and TypeScript code.
   has to branch on it (`HookError`, `code: 'HOOK_FAILED'`, with the original as `cause`); never
   swallow an error without saying why in a comment
 - Events leave through `notify()` and never fail the operation they observe; a hook may fail it
-- `await` `calculateHash`, `encrypt` and `decrypt` in shared code: they are synchronous in Node and
+- `await` `calculateHash`, `encrypt`, `decrypt`, `sign` and `verify` in shared code: they are synchronous in Node and
   promise-returning in the browser
 
 ## Optimizations

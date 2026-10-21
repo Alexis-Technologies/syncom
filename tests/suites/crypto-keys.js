@@ -53,6 +53,66 @@ const runCryptoKeysTests = async (t, assert, cryptoMod, { getKeysBase, fsi } = {
     assert.strictEqual(keys2.privateKey, keys1.privateKey);
   });
 
+  await t.test('generateSigningKeys: an Ed25519 pair whose id is the raw public key', async () => {
+    const keys = await Promise.resolve(cryptoMod.generateSigningKeys());
+    assert.ok(keys.publicKey.includes('-----BEGIN PUBLIC KEY-----'));
+    assert.ok(keys.privateKey.includes('-----BEGIN PRIVATE KEY-----'));
+    assert.match(keys.id, /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/, '32 bytes, base64url, a canonical last character');
+    const again = await Promise.resolve(cryptoMod.generateSigningKeys());
+    assert.notStrictEqual(again.id, keys.id);
+  });
+
+  await t.test('sign and verify: a signature checks against the id, and nothing else passes', async () => {
+    const keys = await Promise.resolve(cryptoMod.generateSigningKeys());
+    const other = await Promise.resolve(cryptoMod.generateSigningKeys());
+    const message = JSON.stringify([1, 'A', 7, 'write', 'r', 'ünïcödé — 日本']);
+    const signature = await Promise.resolve(cryptoMod.sign(message, keys.privateKey));
+    assert.match(signature, /^[A-Za-z0-9_-]{86}$/, '64 bytes, base64url');
+    assert.strictEqual(await Promise.resolve(cryptoMod.sign(message, keys.privateKey)), signature, 'deterministic');
+    assert.strictEqual(await Promise.resolve(cryptoMod.verify(message, signature, keys.id)), true);
+    assert.strictEqual(await Promise.resolve(cryptoMod.verify(`${message} `, signature, keys.id)), false);
+    assert.strictEqual(await Promise.resolve(cryptoMod.verify(message, signature, other.id)), false);
+    const flipped = (signature[0] === 'A' ? 'B' : 'A') + signature.slice(1);
+    assert.strictEqual(await Promise.resolve(cryptoMod.verify(message, flipped, keys.id)), false);
+    // Malformed input is false, never a throw: it is a peer's claim.
+    const junk = [
+      [signature, 'n1'],
+      [signature, 'A'.repeat(43)],
+      [signature, 42],
+      [signature, ''],
+      ['short', keys.id],
+      [null, keys.id],
+      [`${signature}AA`, keys.id],
+    ];
+    for (const [sig, id] of junk) {
+      assert.strictEqual(await Promise.resolve(cryptoMod.verify(message, sig, id)), false, `${sig}/${id}`);
+    }
+  });
+
+  await t.test('loadSigningKeys: sign-public.pem and sign-private.pem, a pair of its own', async (t2) => {
+    const base = await getKeysBase(t2);
+    const keys1 = await Promise.resolve(cryptoMod.loadSigningKeys(base));
+    assert.match(keys1.id, /^[A-Za-z0-9_-]{43}$/);
+    assert.strictEqual(await fsi.exists(base, 'sign-public.pem'), true);
+    assert.strictEqual(await fsi.exists(base, 'sign-private.pem'), true);
+    const keys2 = await Promise.resolve(cryptoMod.loadSigningKeys(base));
+    assert.deepStrictEqual(keys2, keys1, 'stable across loads');
+    const rsa = await Promise.resolve(cryptoMod.loadKeys(base));
+    assert.notStrictEqual(rsa.publicKey, keys1.publicKey, 'the RSA pair is another pair');
+    // Each pair is refused as half a pair on its own; the other is untouched.
+    await fsi.remove(base, 'sign-private.pem');
+    await assert.rejects(() => Promise.resolve(cryptoMod.loadSigningKeys(base)), {
+      code: 'KEYS_INCOMPLETE',
+      message: /sign-private\.pem is missing/,
+    });
+    assert.deepStrictEqual(await Promise.resolve(cryptoMod.loadKeys(base)), rsa);
+    await fsi.remove(base, 'sign-public.pem');
+    await fsi.write(base, 'sign-private.pem', keys1.privateKey);
+    await assert.rejects(() => Promise.resolve(cryptoMod.loadSigningKeys(base)), /sign-public\.pem is missing/);
+    await fsi.remove(base, 'private.pem');
+    await assert.rejects(() => Promise.resolve(cryptoMod.loadKeys(base)), { code: 'KEYS_INCOMPLETE' });
+  });
+
   await t.test('loadKeys refuses half a pair instead of minting a new one', async (t2) => {
     const base = await getKeysBase(t2);
     const keys1 = await Promise.resolve(cryptoMod.loadKeys(base));

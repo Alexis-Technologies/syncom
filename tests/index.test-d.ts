@@ -8,6 +8,7 @@ import type {
   Fsi,
   KeyPair,
   Node,
+  SigningKeyPair,
   Reference,
   Schema,
   Storage,
@@ -52,6 +53,13 @@ expectError(syncom.open({ integrity: 'trust' }));
 expectError(syncom.open({ cache: { max: 'many' } }));
 expectType<Fsi>(storage.fsi);
 expectType<Promise<KeyPair>>(syncom.loadKeys('keys', { fsi: syncom.createMemoryFsi() }));
+expectType<Promise<SigningKeyPair>>(syncom.generateSigningKeys());
+expectType<Promise<SigningKeyPair>>(syncom.loadSigningKeys('keys', { fsi: syncom.createMemoryFsi() }));
+expectType<string>(syncom.sign('message', 'private'));
+expectType<boolean>(syncom.verify('message', 'signature', 'id'));
+declare const signing: SigningKeyPair;
+expectType<string>(signing.id);
+expectAssignable<KeyPair>(signing);
 expectType<Promise<Blockchain>>(new syncom.Blockchain('base', { fsi: syncom.createMemoryFsi() }));
 expectType<Promise<syncom.OpLog>>(new syncom.OpLog('base', { fsi: syncom.createMemoryFsi() }));
 

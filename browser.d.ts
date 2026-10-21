@@ -5,14 +5,15 @@
 // their types — is re-exported from ./index.js unchanged (smart contracts are
 // the `@alexify/syncom/contracts` subpath). What differs is the
 // crypto and OPFS layer: node:crypto is synchronous, the Web Crypto API is
-// not, so `calculateHash`, `encrypt` and `decrypt` return promises here and
-// are declared below rather than re-exported.
+// not, so `calculateHash`, `encrypt`, `decrypt`, `sign` and `verify` return
+// promises here and are declared below rather than re-exported.
 
 import type { JSONSafe as JSONSafeValue } from './index.js';
 
 export type {
   JSONSafe,
   KeyPair,
+  SigningKeyPair,
   Fsi,
   CrdtDelta,
   CrdtHistoryRecord,
@@ -94,6 +95,8 @@ export type {
 export {
   generateKeys,
   loadKeys,
+  generateSigningKeys,
+  loadSigningKeys,
   read,
   write,
   exists,
@@ -123,3 +126,5 @@ export {
 export function calculateHash(data: JSONSafeValue): Promise<string>;
 export function encrypt(data: unknown, publicKey: string): Promise<string>;
 export function decrypt(data: string, privateKey: string): Promise<unknown>;
+export function sign(message: string, privateKey: string): Promise<string>;
+export function verify(message: string, signature: string, publicKey: string): Promise<boolean>;

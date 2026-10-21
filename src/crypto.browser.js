@@ -1,7 +1,7 @@
 'use strict';
 
 const defaultFsi = require('./fsi.browser.js');
-const { loadKeyPair } = require('./keys.js');
+const { loadKeyPair, SIGNING_FILES } = require('./keys.js');
 const { SyncomError } = require('./errors.js');
 
 const PUBLIC_KEY_HEADER = '-----BEGIN PUBLIC KEY-----';
@@ -11,6 +11,10 @@ const PRIVATE_KEY_FOOTER = '-----END PRIVATE KEY-----';
 
 const RSA = { name: 'RSA-OAEP', hash: 'SHA-256' };
 const AES = 'AES-GCM';
+const ED25519 = { name: 'Ed25519' };
+// An Ed25519 SPKI is a fixed 12-byte header and the 32-byte key.
+const SPKI_HEADER_BYTES = 12;
+const PADDING = /=+$/;
 // The same envelope as src/crypto.js, so a record encrypted on one platform
 // decrypts on the other given the same key pair.
 const ALG = 'RSA-OAEP-256+A256GCM';
@@ -30,6 +34,8 @@ const toBase64 = (buffer) => {
   for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
   return btoa(binary);
 };
+
+const toBase64Url = (buffer) => toBase64(buffer).replaceAll('+', '-').replaceAll('/', '_').replace(PADDING, '');
 
 // Accepts standard AND url-safe base64: keys written by an earlier version
 // of this file were url-safe, and node's PEMs are standard.
@@ -69,25 +75,29 @@ const generateKeys = async () => {
   };
 };
 
-// A storage uses one pair for its whole life; importing the PEM on every
-// encrypt and decrypt was the cost of every sealed record. A few imported
-// keys are kept, by their PEM text.
+// A storage uses one pair of each kind for its whole life; importing the
+// PEM on every call was the cost of every sealed record and every signed op.
+// A few imported keys are kept, by usage and PEM text — the usage names the
+// algorithm, so one PEM never comes back as the other kind of key.
 const imported = new Map();
 const MAX_IMPORTED = 8;
 
-const importKey = (pemKey, header, footer, format, usage) => {
-  const cached = imported.get(pemKey);
+const importKey = (pemKey, header, footer, format, algorithm, usage) => {
+  const cacheKey = `${usage}:${pemKey}`;
+  const cached = imported.get(cacheKey);
   if (cached !== undefined) return cached;
   const bytes = fromBase64(cleanPemKey(pemKey, header, footer));
-  const key = crypto.subtle.importKey(format, bytes, RSA, false, [usage]);
+  const key = crypto.subtle.importKey(format, bytes, algorithm, false, [usage]);
   if (imported.size >= MAX_IMPORTED) imported.delete(imported.keys().next().value);
-  imported.set(pemKey, key);
-  key.catch(() => imported.delete(pemKey));
+  imported.set(cacheKey, key);
+  key.catch(() => imported.delete(cacheKey));
   return key;
 };
 
-const importPublicKey = (pemKey) => importKey(pemKey, PUBLIC_KEY_HEADER, PUBLIC_KEY_FOOTER, 'spki', 'encrypt');
-const importPrivateKey = (pemKey) => importKey(pemKey, PRIVATE_KEY_HEADER, PRIVATE_KEY_FOOTER, 'pkcs8', 'decrypt');
+const importPublicKey = (pemKey) => importKey(pemKey, PUBLIC_KEY_HEADER, PUBLIC_KEY_FOOTER, 'spki', RSA, 'encrypt');
+const importPrivateKey = (pemKey) => importKey(pemKey, PRIVATE_KEY_HEADER, PRIVATE_KEY_FOOTER, 'pkcs8', RSA, 'decrypt');
+const importSigningKey = (pemKey) =>
+  importKey(pemKey, PRIVATE_KEY_HEADER, PRIVATE_KEY_FOOTER, 'pkcs8', ED25519, 'sign');
 
 const encrypt = async (data, publicKey) => {
   const rsa = await importPublicKey(publicKey);
@@ -130,4 +140,68 @@ const decrypt = async (text, privateKey) => {
 
 const loadKeys = async (basePath = 'keys', { fsi = defaultFsi } = {}) => loadKeyPair(basePath, fsi, generateKeys);
 
-module.exports = { calculateHash, generateKeys, encrypt, decrypt, loadKeys };
+// Ed25519 signs ops; the raw public key, base64url, is the node id — the
+// same derivation as src/crypto.js, so one pair on disk is one id on both
+// platforms.
+const signingId = (publicKey) => {
+  const der = fromBase64(cleanPemKey(publicKey, PUBLIC_KEY_HEADER, PUBLIC_KEY_FOOTER));
+  return toBase64Url(der.subarray(SPKI_HEADER_BYTES));
+};
+
+const generateSigningKeys = async () => {
+  const keyPair = await crypto.subtle.generateKey(ED25519, true, ['sign', 'verify']);
+  const pubBuf = await crypto.subtle.exportKey('spki', keyPair.publicKey);
+  const privBuf = await crypto.subtle.exportKey('pkcs8', keyPair.privateKey);
+  return {
+    publicKey: toPem(pubBuf, PUBLIC_KEY_HEADER, PUBLIC_KEY_FOOTER),
+    privateKey: toPem(privBuf, PRIVATE_KEY_HEADER, PRIVATE_KEY_FOOTER),
+    id: toBase64Url(await crypto.subtle.exportKey('raw', keyPair.publicKey)),
+  };
+};
+
+// A verifier per origin this node hears from, by id, bounded like the PEMs.
+const verifiers = new Map();
+const MAX_VERIFIERS = 64;
+
+const verifierOf = (id) => {
+  const cached = verifiers.get(id);
+  if (cached !== undefined) return cached;
+  const key = crypto.subtle.importKey('raw', fromBase64(id), ED25519, false, ['verify']);
+  if (verifiers.size >= MAX_VERIFIERS) verifiers.delete(verifiers.keys().next().value);
+  verifiers.set(id, key);
+  key.catch(() => verifiers.delete(id));
+  return key;
+};
+
+const sign = async (message, privateKey) => {
+  const key = await importSigningKey(privateKey);
+  return toBase64Url(await crypto.subtle.sign(ED25519, key, new TextEncoder().encode(message)));
+};
+
+// False, never a throw: an id that is no key, a signature of the wrong
+// length — a peer's claim, answered at the trust boundary.
+const verify = async (message, signature, publicKey) => {
+  try {
+    const key = await verifierOf(publicKey);
+    return await crypto.subtle.verify(ED25519, key, fromBase64(signature), new TextEncoder().encode(message));
+  } catch {
+    return false;
+  }
+};
+
+const loadSigningKeys = async (basePath = 'keys', { fsi = defaultFsi } = {}) => {
+  const keys = await loadKeyPair(basePath, fsi, generateSigningKeys, SIGNING_FILES);
+  return { publicKey: keys.publicKey, privateKey: keys.privateKey, id: signingId(keys.publicKey) };
+};
+
+module.exports = {
+  calculateHash,
+  generateKeys,
+  encrypt,
+  decrypt,
+  loadKeys,
+  generateSigningKeys,
+  loadSigningKeys,
+  sign,
+  verify,
+};
