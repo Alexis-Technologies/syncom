@@ -37,12 +37,12 @@ const hasControl = (value) => {
 const isStreamName = (value) =>
   typeof value === 'string' && value.length > 0 && value.length <= 128 && !value.includes('@') && !hasControl(value);
 
-const OP_TYPES = new Set(['write', 'set', 'inc', 'delete', 'merge', 'advance', 'purge']);
+const OP_TYPES = new Set(['write', 'set', 'inc', 'delete', 'merge', 'advance', 'purge', 'add', 'remove']);
 
 // The ops an entity's validator sees: the ones that leave a record for the
 // application to read. A `merge` joins a peer's state as it is, a `delete`
 // leaves nothing to validate.
-const VALIDATED = new Set(['write', 'set', 'inc']);
+const VALIDATED = new Set(['write', 'set', 'inc', 'add', 'remove']);
 
 // The fields the engine indexes a peer's op by, checked before anything here
 // reads them. Payloads (`data`, `meta`, `key`, `value`, `vector`) are the

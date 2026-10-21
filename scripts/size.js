@@ -72,8 +72,10 @@ const ENTRIES = [
   // error, a reason on every wire refusal) the raise to 36 KB; top-k and
   // parallel reads in queries, candidates narrowed through $and/$or,
   // repair(id) and the log read a scoped feed moves its cursor by, the
-  // raise to 37 KB (36.5 measured).
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 37 },
+  // raise to 37 KB (36.5 measured). Observed-remove sets — a third field
+  // kind in src/ops.js: `add`/`remove` ops, a slot per element and origin,
+  // their reset and merge rules — the raise to 38 KB (37.7 measured).
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 38 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check

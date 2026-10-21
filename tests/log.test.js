@@ -263,7 +263,7 @@ test('OpLog', async (t) => {
     try {
       const log = await new OpLog(dir, { rollAfter: 2 });
       await log.append([op('A', 1, { id: 'secret', data: { ssn: 'SECRET-1' } }), op('A', 2)]);
-      await log.append([op('A', 3, { id: 'secret', type: 'inc', key: 'n', value: 1 })]);
+      await log.append([op('A', 3, { id: 'secret', type: 'add', key: 'tags', value: ['SECRET-3'] })]);
       await log.append([op('A', 4, { id: 'other', data: { ssn: 'OTHER' } })]);
       await log.append([op('A', 5, { id: 'secret', data: { ssn: 'SECRET-2' } })]);
       assert.strictEqual(await log.scrub('secret'), 3);
@@ -271,13 +271,19 @@ test('OpLog', async (t) => {
       assert.strictEqual(await log.scrub('nope'), 0);
       const entries = log.since(undefined);
       assert.deepStrictEqual(
-        entries.map((entry) => [entry.seq, entry.scrubbed === true, 'data' in entry.op, 'key' in entry.op]),
+        entries.map((entry) => [
+          entry.seq,
+          entry.scrubbed === true,
+          'data' in entry.op,
+          'key' in entry.op,
+          'value' in entry.op,
+        ]),
         [
-          [1, true, false, false],
-          [2, false, true, false],
-          [3, true, false, false],
-          [4, false, true, false],
-          [5, true, false, false],
+          [1, true, false, false, false],
+          [2, false, true, false, false],
+          [3, true, false, false, false],
+          [4, false, true, false, false],
+          [5, true, false, false, false],
         ],
       );
       assert.deepStrictEqual(log.vector, { A: 5 }, 'positions and the vector are untouched');

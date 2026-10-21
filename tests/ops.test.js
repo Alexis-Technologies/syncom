@@ -8,6 +8,8 @@ const {
   isAlive,
   createEntry,
   isCounter,
+  isSet,
+  observedTags,
   latestClock,
   packOps,
   unpackOps,
@@ -162,6 +164,205 @@ test('ops module', async (t) => {
     });
   });
 
+  await t.test('add and remove keep an observed-remove set per field', () => {
+    const added = applyOp(null, op('add', 1, 'A', { seq: 1, key: 'tags', value: ['bug', 'ui'] }));
+    assert.strictEqual(added.changed, true);
+    assert.deepStrictEqual(added.entry.data, { tags: ['bug', 'ui'] });
+    assert.deepStrictEqual(added.delta, { tags: ['bug', 'ui'] });
+    assert.deepStrictEqual(added.entry.meta.sets, { tags: { '"bug"': { A: [1, 0] }, '"ui"': { A: [1, 0] } } });
+    assert.strictEqual(isSet(added.entry.meta, 'tags'), true);
+    assert.strictEqual(isSet(added.entry.meta, 'other'), false);
+    assert.strictEqual(isSet({ clock: {}, counters: {} }, 'tags'), false, 'an entry from before sets existed');
+    // Order: by the earliest live add, then by key; a re-add keeps its place.
+    const more = applyOp(added.entry, op('add', 2, 'B', { seq: 1, key: 'tags', value: ['api', 'bug'] })).entry;
+    assert.deepStrictEqual(more.data.tags, ['bug', 'ui', 'api']);
+    assert.deepStrictEqual(more.meta.sets.tags['"bug"'], { A: [1, 0], B: [2, 0] });
+    assert.strictEqual(applyOp(more, op('add', 2, 'B', { seq: 1, key: 'tags', value: ['api', 'bug'] })).changed, false);
+    // A remove carries the tags its node observed; only those die.
+    const tags = observedTags(more.meta, 'tags', ['bug', 'nope']);
+    assert.deepStrictEqual(tags, [['bug', { A: 1, B: 2 }]]);
+    const removed = applyOp(more, op('remove', 3, 'C', { seq: 1, key: 'tags', value: tags }));
+    assert.deepStrictEqual(removed.entry.data.tags, ['ui', 'api']);
+    assert.deepStrictEqual(removed.delta, { tags: ['ui', 'api'] });
+    assert.deepStrictEqual(removed.entry.meta.sets.tags['"bug"'], { A: [1, 1], B: [2, 2] });
+    assert.strictEqual(
+      applyOp(removed.entry, op('remove', 3, 'C', { seq: 1, key: 'tags', value: tags })).changed,
+      false,
+    );
+    // A dead tag is still observed (a peer may not have seen it die yet).
+    assert.deepStrictEqual(observedTags(removed.entry.meta, 'tags', ['bug']), [['bug', { A: 1, B: 2 }]]);
+    // Removing what nobody added, or nothing, is nothing.
+    assert.deepStrictEqual(observedTags(removed.entry.meta, 'tags', ['nope']), []);
+    assert.deepStrictEqual(observedTags(removed.entry.meta, 'other', ['bug']), []);
+    assert.deepStrictEqual(observedTags(null, 'tags', ['bug']), []);
+    assert.strictEqual(applyOp(removed.entry, op('remove', 4, 'C', { seq: 2, key: 'tags', value: [] })).changed, false);
+    // A set with nothing live reads as [] and is still a set.
+    const all = observedTags(removed.entry.meta, 'tags', ['ui', 'api']);
+    const empty = applyOp(removed.entry, op('remove', 5, 'C', { seq: 3, key: 'tags', value: all })).entry;
+    assert.deepStrictEqual(empty.data, { tags: [] });
+    assert.strictEqual(isSet(empty.meta, 'tags'), true);
+    // Elements are JSON values, told apart by their text.
+    // One add stamps them all alike, so the key decides the order.
+    const mixed = replay([op('add', 1, 'A', { seq: 1, key: 's', value: [1, '1', { a: 1 }, [2], null, true] })]);
+    assert.deepStrictEqual(mixed.data.s, ['1', 1, [2], null, true, { a: 1 }]);
+    assert.deepStrictEqual(Object.keys(mixed.meta.sets.s).sort(), ['"1"', '1', '[2]', 'null', 'true', '{"a":1}']);
+    // The previous entry is untouched: applyOp hands out a new one.
+    assert.deepStrictEqual(added.entry.data, { tags: ['bug', 'ui'] });
+    assert.deepStrictEqual(added.entry.meta.sets.tags['"bug"'], { A: [1, 0] });
+  });
+
+  await t.test('a set converges: concurrent adds both keep, an unobserved add beats a remove', () => {
+    const add = (ts, origin, seq, elements) => op('add', ts, origin, { seq, key: 't', value: elements });
+    const remove = (ts, origin, seq, tags) => op('remove', ts, origin, { seq, key: 't', value: tags });
+    assertCommutes([add(1, 'A', 1, ['p']), add(2, 'B', 1, ['q'])], { t: ['p', 'q'] });
+    // B removes what it saw of A's add@1; A's re-add@3 was not seen: it survives.
+    assertCommutes([add(1, 'A', 1, ['x']), remove(2, 'B', 1, [['x', { A: 1 }]]), add(3, 'A', 2, ['x'])], { t: ['x'] });
+    // The remove observed the newest add: the element goes in any order — a
+    // remove that lands before the add it observed kills it on arrival.
+    assertCommutes([add(1, 'A', 1, ['x']), remove(2, 'B', 1, [['x', { A: 1 }]])], { t: [] });
+    // Re-add by the remover itself.
+    assertCommutes([add(1, 'A', 1, ['x']), remove(2, 'B', 1, [['x', { A: 1 }]]), add(3, 'B', 2, ['x'])], { t: ['x'] });
+    // Two origins add the same element; one remove observed only one of them.
+    assertCommutes([add(1, 'A', 1, ['x']), add(2, 'B', 1, ['x']), remove(3, 'C', 1, [['x', { A: 1 }]])], {
+      t: ['x'],
+    });
+    assertCommutes([add(1, 'A', 1, ['x']), add(2, 'B', 1, ['x']), remove(3, 'C', 1, [['x', { A: 1, B: 2 }]])], {
+      t: [],
+    });
+  });
+
+  await t.test('a reset drops set tags older than it and clamps the rest, so metas agree too', () => {
+    const add = (ts, origin, seq, elements) => op('add', ts, origin, { seq, key: 't', value: elements });
+    const remove = (ts, origin, seq, tags) => op('remove', ts, origin, { seq, key: 't', value: tags });
+    // A write without the field: the older add goes, the newer one stays.
+    assertCommutes([add(1, 'A', 1, ['old']), op('write', 2, 'W', { data: { x: 1 } }), add(3, 'A', 2, ['new'])], {
+      x: 1,
+      t: ['new'],
+    });
+    // A remove whose tags are below the reset is moot: no empty set appears.
+    assertCommutes(
+      [add(1, 'A', 1, ['x']), op('write', 2, 'W', { data: { x: 1 } }), remove(3, 'B', 1, [['x', { A: 1 }]])],
+      {
+        x: 1,
+      },
+    );
+    // The clamp: a removed tag below the reset reads as none whichever came first.
+    assertCommutes(
+      [
+        add(1, 'A', 1, ['x']),
+        remove(2, 'B', 1, [['x', { A: 1 }]]),
+        add(5, 'A', 2, ['x']),
+        op('write', 4, 'W', { data: { y: 1 } }),
+      ],
+      { y: 1, t: ['x'] },
+    );
+    const clamped = replay([add(1, 'A', 1, ['x']), remove(2, 'B', 1, [['x', { A: 1 }]]), add(5, 'A', 2, ['x'])]);
+    const reset = applyOp(clamped, op('write', 4, 'W', { data: { y: 1 } }));
+    assert.deepStrictEqual(reset.entry.meta.sets.t['"x"'], { A: [5, 0] });
+    assert.deepStrictEqual(reset.delta, { y: 1 }, 'the array did not change, so the field is not in the delta');
+    // A write carrying the field as a register: below a concurrent add it is
+    // refused on that field; above every add it resets the set to a register.
+    const concurrent = applyOp(replay([add(3, 'A', 1, ['x'])]), op('write', 2, 'W', { data: { t: 'w', z: 1 } }));
+    assert.deepStrictEqual(concurrent.rejected, [{ field: 't', reason: 'set' }]);
+    assert.deepStrictEqual(concurrent.entry.data, { t: ['x'], z: 1 });
+    const over = applyOp(replay([add(1, 'A', 1, ['x'])]), op('write', 2, 'W', { data: { t: 'w' } }));
+    assert.deepStrictEqual(over.rejected, []);
+    assert.deepStrictEqual(over.entry.data, { t: 'w' });
+    assert.deepStrictEqual(over.entry.meta.sets, {});
+    // A tombstone: an add newer than it revives, an older one does not.
+    const dead = replay([add(1, 'A', 1, ['x']), op('delete', 2, 'D')]);
+    assert.strictEqual(isAlive(dead), false);
+    assert.deepStrictEqual(dead.data, {});
+    const back = applyOp(dead, add(3, 'A', 2, ['y'])).entry;
+    assert.strictEqual(isAlive(back), true);
+    assert.deepStrictEqual(back.data, { t: ['y'] });
+    assertCommutes([op('delete', 2, 'D'), add(1, 'A', 1, ['x'])], {});
+    assertCommutes([op('delete', 2, 'D'), add(3, 'A', 1, ['x'])], { t: ['x'] });
+    // An add newer than the tombstone revives even once removed — like a
+    // counter back at zero — and a remove alone never does.
+    const gone = replay([op('delete', 2, 'D'), add(3, 'A', 1, ['x']), remove(4, 'B', 1, [['x', { A: 3 }]])]);
+    assert.strictEqual(isAlive(gone), true);
+    assert.deepStrictEqual(gone.data, { t: [] });
+    assert.strictEqual(isAlive(replay([op('delete', 2, 'D'), remove(4, 'B', 1, [['x', { A: 3 }]])])), false);
+  });
+
+  await t.test('a field is a register, a counter or a set — never two of them', () => {
+    const add = (ts, origin, seq, elements) => op('add', ts, origin, { seq, key: 't', value: elements });
+    const register = replay([op('set', 1, 'A', { data: { t: 1 } })]);
+    const addOnRegister = applyOp(register, add(2, 'B', 1, ['x']));
+    assert.deepStrictEqual(addOnRegister.rejected, [{ field: 't', reason: 'register' }]);
+    assert.strictEqual(addOnRegister.changed, false);
+    const counter = replay([op('inc', 1, 'A', { seq: 1, key: 't', value: 1 })]);
+    const removeOnCounter = applyOp(counter, op('remove', 2, 'B', { seq: 1, key: 't', value: [['x', { A: 1 }]] }));
+    assert.deepStrictEqual(removeOnCounter.rejected, [{ field: 't', reason: 'counter' }]);
+    assert.strictEqual(removeOnCounter.changed, false);
+    const set = replay([add(1, 'A', 1, ['x'])]);
+    const setOnSet = applyOp(set, op('set', 2, 'B', { data: { t: 5, other: 1 } }));
+    assert.deepStrictEqual(setOnSet.rejected, [{ field: 't', reason: 'set' }]);
+    assert.deepStrictEqual(setOnSet.entry.data, { t: ['x'], other: 1 });
+    const incOnSet = applyOp(set, op('inc', 2, 'B', { seq: 1, key: 't', value: 1 }));
+    assert.deepStrictEqual(incOnSet.rejected, [{ field: 't', reason: 'set' }]);
+    assert.strictEqual(incOnSet.changed, false);
+    // Merges: the register, then the counter, wins over a set.
+    const reg = replay([op('set', 9, 'R', { data: { t: 'text' } })]);
+    assert.deepStrictEqual(mergeEntry(reg, set).data, { t: 'text' });
+    assert.deepStrictEqual(mergeEntry(set, reg).data, { t: 'text' });
+    assert.deepStrictEqual(mergeEntry(set, reg).meta.sets, {});
+    assert.deepStrictEqual(mergeEntry(counter, set).data, { t: 1 });
+    assert.deepStrictEqual(mergeEntry(set, counter).data, { t: 1 });
+    assert.deepStrictEqual(mergeEntry(set, counter).meta.sets, {});
+    // Malformed payloads are ignored, not applied half-way.
+    assert.strictEqual(applyOp(set, op('add', 2, 'B', { seq: 1, key: 't', value: 'nope' })).changed, false);
+    assert.strictEqual(applyOp(set, op('add', 2, 'B', { seq: 1, key: 5, value: ['x'] })).changed, false);
+    assert.strictEqual(
+      applyOp(set, op('remove', 2, 'B', { seq: 1, key: 't', value: [['x', { A: 9 }]] })).changed,
+      false,
+    );
+    const junk = [['x', { A: 1.5 }], ['x', { A: 0 }], ['x', { A: -1 }], ['x', 'nope'], ['x'], 'x', null];
+    assert.strictEqual(applyOp(set, op('remove', 2, 'B', { seq: 1, key: 't', value: junk })).changed, false);
+    const nothing = applyOp(set, op('add', 2, 'B', { seq: 1, key: 'u', value: [undefined, () => 1] }));
+    assert.strictEqual(nothing.changed, false, 'nothing JSON can carry');
+    assert.deepStrictEqual(nothing.entry.meta.sets, set.meta.sets, 'no empty map left behind');
+    assert.strictEqual(applyOp(null, op('add', 1, 'A', { seq: 1, key: '__proto__', value: ['x'] })).changed, false);
+    assert.strictEqual(applyOp(null, op('add', 1, '__proto__', { seq: 1, key: 't', value: ['x'] })).changed, false);
+    assert.strictEqual(Object.hasOwn(Object.prototype, 't'), false);
+  });
+
+  await t.test('mergeEntry joins set histories like replaying both', () => {
+    const add = (ts, origin, seq, elements) => op('add', ts, origin, { seq, key: 't', value: elements });
+    const remove = (ts, origin, seq, tags) => op('remove', ts, origin, { seq, key: 't', value: tags });
+    const left = [add(1, 'A', 1, ['p', 'q']), remove(2, 'A', 2, [['q', { A: 1 }]])];
+    // B's remove observed A's add of p; replaying B alone holds that as a
+    // removal waiting for the add.
+    const right = [add(3, 'B', 1, ['q', 'r']), remove(4, 'B', 2, [['p', { A: 1 }]])];
+    const merged = mergeEntry(replay(left), replay(right));
+    const replayed = replay([...left, ...right]);
+    assert.deepStrictEqual(merged.data, { t: ['q', 'r'] });
+    assert.deepStrictEqual(merged.data, replayed.data);
+    assert.deepStrictEqual(merged.meta, replayed.meta);
+    assert.deepStrictEqual(merged.meta.sets.t['"p"'], { A: [1, 1] });
+    assert.deepStrictEqual(replay(right).meta.sets.t['"p"'], { A: [0, 1] });
+    assert.deepStrictEqual(mergeEntry(merged, merged), merged);
+    assert.deepStrictEqual(mergeEntry(replay(right), replay(left)), merged);
+    assert.deepStrictEqual(mergeEntry(null, merged), merged);
+    // A merge op from a peer: the same join, through normalizeMeta.
+    const joined = applyOp(replay(left), op('merge', 9, 'C', { data: replay(right).data, meta: replay(right).meta }));
+    assert.strictEqual(joined.changed, true);
+    assert.deepStrictEqual(joined.entry.data, merged.data);
+    assert.deepStrictEqual(joined.entry.meta, merged.meta);
+    assert.deepStrictEqual(joined.delta, { t: ['q', 'r'] });
+    assert.strictEqual(
+      applyOp(joined.entry, op('merge', 9, 'C', { data: merged.data, meta: merged.meta })).changed,
+      false,
+    );
+    // Replaying with a reset in the middle still equals the merge.
+    const withReset = [...left, op('delete', 5, 'B'), add(6, 'B', 3, ['s'])];
+    const reset = mergeEntry(replay(left), replay([op('delete', 5, 'B'), add(6, 'B', 3, ['s'])]));
+    assert.deepStrictEqual(reset.data, replay(withReset).data);
+    assert.deepStrictEqual(reset.meta, replay(withReset).meta);
+    assert.deepStrictEqual(reset.data, { t: ['s'] });
+  });
+
   await t.test('latestClock is the newest stamp an entry holds, or null', () => {
     assert.strictEqual(latestClock(null), null);
     assert.strictEqual(latestClock(createEntry().meta), null);
@@ -174,6 +375,12 @@ test('ops module', async (t) => {
     assert.deepStrictEqual(latestClock(meta), [9, 'z'], 'ties break by origin, like compareClock');
     meta.deleted = [12, 'x'];
     assert.deepStrictEqual(latestClock(meta), [12, 'x']);
+    // Both components of a set slot count: a removed tag this node has not
+    // seen the add of is still a stamp it must not write below.
+    meta.sets = { t: { '"x"': { y: [14, 0], z: [0, 15] } } };
+    assert.deepStrictEqual(latestClock(meta), [15, 'z']);
+    meta.sets.t['"x"'].z = [16, 15];
+    assert.deepStrictEqual(latestClock(meta), [16, 'z']);
     // Peer-shaped garbage is tolerated, not trusted.
     assert.deepStrictEqual(latestClock({ clock: { a: 'nope', b: [2, 'b'] }, counters: { c: 3, d: { o: 'x' } } }), [
       2,
@@ -246,12 +453,14 @@ test('ops module', async (t) => {
     const live = replay([
       op('set', 5, 'A', { data: { x: 1, y: 1 } }),
       op('inc', 6, 'A', { seq: 6, key: 'n', value: 2 }),
+      op('add', 7, 'A', { seq: 7, key: 't', value: ['x'] }),
     ]);
     const purged = applyOp(live, op('purge', 1, 'B', { seq: 1 }));
     assert.strictEqual(purged.changed, true, 'an older stamp still purges');
     assert.deepStrictEqual(purged.entry.data, {});
-    assert.deepStrictEqual(purged.delta, { x: undefined, y: undefined, n: undefined });
+    assert.deepStrictEqual(purged.delta, { x: undefined, y: undefined, n: undefined, t: undefined });
     assert.deepStrictEqual(purged.entry.meta.counters, {});
+    assert.deepStrictEqual(purged.entry.meta.sets, {});
     assert.deepStrictEqual(purged.entry.meta.clock, {});
     assert.deepStrictEqual(purged.entry.meta.purged, [1, 'B']);
     assert.strictEqual(isAlive(purged.entry), false);
@@ -260,6 +469,7 @@ test('ops module', async (t) => {
       op('write', 99, 'C', { data: { x: 2 } }),
       op('set', 99, 'C', { data: { x: 2 } }),
       op('inc', 99, 'C', { seq: 99, key: 'n', value: 1 }),
+      op('add', 99, 'C', { seq: 99, key: 't', value: ['y'] }),
       op('delete', 99, 'C'),
     ]) {
       const result = applyOp(purged.entry, later);
@@ -317,6 +527,16 @@ test('ops module', async (t) => {
     ]);
     assert.deepStrictEqual(unpackOps([['A', 1, 1, 'w'], 'nope']), []);
     assert.deepStrictEqual(unpackOps('nope'), []);
+    // The set ops: `+` and `-`, their payload in the key/value slots like inc.
+    const sets = [
+      { origin: 'A', seq: 4, ts: 4, type: 'add', id: 'r', key: 't', value: ['x', { a: 1 }] },
+      { origin: 'A', seq: 5, ts: 5, type: 'remove', id: 'r', key: 't', value: [['x', { A: 4 }]] },
+    ];
+    const rows = packOps(sets);
+    assert.strictEqual(rows[0][3], '+');
+    assert.strictEqual(rows[1][3], '-');
+    assert.deepStrictEqual(rows[1][9], [['x', { A: 4 }]]);
+    assert.deepStrictEqual(unpackOps(JSON.parse(JSON.stringify(rows))), sets);
   });
 });
 
@@ -346,6 +566,33 @@ test('ops: a peer-shaped meta reaches nothing it should not', async (t) => {
     const kept = applyOp(null, op('merge', 1, 'B', { data: { y: 1 }, meta: { clock: { y: [1, 'B'] }, counters: {} } }));
     hostile.clock.y[0] = 99;
     assert.deepStrictEqual(kept.entry.meta.clock.y, [1, 'B']);
+  });
+
+  await t.test('normalizeMeta keeps only well-formed set slots under canonical JSON keys', () => {
+    const base = replay([op('add', 1, 'A', { seq: 1, key: 't', value: ['x'] })]);
+    const hostile = JSON.parse(
+      '{"sets":{"__proto__":{"\\"x\\"":{"A":[1,0]}},' +
+        '"t":{"__proto__":{"A":[1,0]},"1.0":{"A":[1,0]},"nope":{"A":[1,0]},"{\\"b\\":1,\\"a\\":2}":{"A":[1,0]},' +
+        '"\\"ok\\"":{"__proto__":[1,0],"A":[1,0],"B":[0,0],"C":[1,"x"],"D":[-1,2],"E":[2,1],"F":[1,0,0]}},' +
+        '"empty":{"\\"x\\"":{"A":"no"}},"flat":"no"}}',
+    );
+    assert.deepStrictEqual(latestClock(hostile), [2, 'E']);
+    const merged = applyOp(base, op('merge', 3, 'B', { data: { t: ['ok'] }, meta: hostile }));
+    assert.strictEqual(Object.hasOwn(Object.prototype, 'A'), false, 'Object.prototype is untouched');
+    assert.strictEqual(merged.changed, true);
+    // `{"b":1,"a":2}` is canonical text too — elements are JSON text, not
+    // JSON values, so key order tells two objects apart on every node alike.
+    assert.deepStrictEqual(merged.entry.meta.sets, {
+      t: { '"x"': { A: [1, 0] }, '{"b":1,"a":2}': { A: [1, 0] }, '"ok"': { A: [1, 0], E: [2, 1] } },
+    });
+    assert.deepStrictEqual(merged.entry.data, { t: ['ok', 'x', { b: 1, a: 2 }] });
+    assert.strictEqual(Object.getPrototypeOf(merged.entry.meta.sets), Object.prototype);
+    // The peer's object is not kept by reference.
+    hostile.sets.t['"ok"'].A[0] = 99;
+    assert.deepStrictEqual(merged.entry.meta.sets.t['"ok"'].A, [1, 0]);
+    // A meta from before sets existed merges as an empty set of sets.
+    const old = applyOp(base, op('merge', 4, 'B', { data: { y: 1 }, meta: { clock: { y: [4, 'B'] }, counters: {} } }));
+    assert.deepStrictEqual(old.entry.data, { t: ['x'], y: 1 });
   });
 
   await t.test('fields named after Object.prototype members are fields; __proto__ never is', () => {

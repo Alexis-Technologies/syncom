@@ -18,6 +18,11 @@
 //   counters[f] — { [origin]: [seq, sum, ts] }: a PN-counter, one running sum
 //                 per origin, so re-applying an `inc` (seq already seen) is a
 //                 no-op and two snapshots join by taking the higher seq
+//   sets[f]     — { [elementKey]: { [origin]: [added, removed] } }: an
+//                 observed-remove set. elementKey is the element's JSON text;
+//                 per (element, origin) the ts of that origin's newest `add`
+//                 and the newest add ts a `remove` had observed (0 = none).
+//                 The element is live for that origin iff added > removed.
 //   v           — the schema version of the last whole-record write (the op's
 //                 `v`, absent on a node without a schema): what a reader on
 //                 a newer schema lenses the record through. A `set` that
@@ -32,19 +37,57 @@
 // order. Counters rely on it (a skipped seq would be lost, not reordered);
 // registers do not, but the vector-based dedup does.
 //
-// A field is a REGISTER or a COUNTER, never both: `set`/`write` on a counter
-// field and `inc` on a register field are refused (reported in `rejected`) —
-// the two kinds cannot be made to commute, and refusing is honest where
-// guessing would silently diverge.
+// A field is a REGISTER, a COUNTER or a SET, never two of them: `set`/`write`
+// on a counter or set field, `inc` on a register or set field, `add`/`remove`
+// on a register or counter field are refused (reported in `rejected`) — the
+// kinds cannot be made to commute, and refusing is honest where guessing
+// would silently diverge.
+//
+// Why a set converges (what the tests check): one origin's adds of an element
+// are stamped in seq order, so a node that observed the add at `r` observed
+// every earlier one, and "remove what I observed" is exactly
+// `removed := max(removed, r)`; `add` is `added := max(added, ts)`. Both are
+// joins on the pair, hence order-free and idempotent, and `data[f]` is a pure
+// function of the meta. A reset (`write`/`delete`) drops a slot whose newest
+// stamp is below `base` and clamps a surviving component below `base` to 0,
+// and the same predicate guards each tag as it is applied — so meta, not only
+// data, agrees whatever the order of adds, removes and resets.
 
 const { compareClock, maxClock } = require('./vector.js');
 
-const createEntry = () => ({ data: {}, meta: { clock: {}, base: null, deleted: null, counters: {} } });
+const createEntry = () => ({ data: {}, meta: { clock: {}, base: null, deleted: null, counters: {}, sets: {} } });
+
+// An entry written before sets existed has no `sets` key; reading it as
+// empty is the whole compatibility story.
+const EMPTY = Object.freeze({});
+const setsOf = (meta) => meta.sets ?? EMPTY;
+
+const cloneSets = (sets) => {
+  const copy = {};
+  for (const field of Object.keys(sets)) {
+    const elements = {};
+    const from = sets[field];
+    for (const key of Object.keys(from)) {
+      const slots = {};
+      const theirs = from[key];
+      for (const origin of Object.keys(theirs)) slots[origin] = [theirs[origin][0], theirs[origin][1]];
+      elements[key] = slots;
+    }
+    copy[field] = elements;
+  }
+  return copy;
+};
 
 const cloneEntry = (entry) => {
   const counters = {};
   for (const field of Object.keys(entry.meta.counters)) counters[field] = { ...entry.meta.counters[field] };
-  const meta = { clock: { ...entry.meta.clock }, base: entry.meta.base, deleted: entry.meta.deleted, counters };
+  const meta = {
+    clock: { ...entry.meta.clock },
+    base: entry.meta.base,
+    deleted: entry.meta.deleted,
+    counters,
+    sets: cloneSets(setsOf(entry.meta)),
+  };
   if (entry.meta.v !== undefined) meta.v = entry.meta.v;
   if (entry.meta.purged !== undefined) meta.purged = entry.meta.purged;
   return { data: { ...entry.data }, meta };
@@ -61,6 +104,51 @@ const isCounter = (meta, field) => {
   return Boolean(perOrigin) && Object.keys(perOrigin).length > 0;
 };
 
+const isSet = (meta, field) => {
+  const elements = own(setsOf(meta), field);
+  return Boolean(elements) && Object.keys(elements).length > 0;
+};
+
+// An element is identified by its JSON text — `1` and `'1'` are two elements,
+// `{ a: 1, b: 2 }` and `{ b: 2, a: 1 }` are two too. A key from a peer must
+// be that text exactly, or two peers would hold one element under two keys.
+const elementKey = (element) => JSON.stringify(element);
+const isElementKey = (key) => {
+  try {
+    return JSON.stringify(JSON.parse(key)) === key;
+  } catch {
+    return false;
+  }
+};
+
+// The live elements of a set in a deterministic order — by the earliest live
+// add, then by key: equal metas on two nodes must read as equal arrays.
+const compareElements = (a, b) => {
+  const byStamp = compareClock(a.stamp, b.stamp);
+  if (byStamp !== 0) return byStamp;
+  if (a.key === b.key) return 0;
+  return a.key < b.key ? -1 : 1;
+};
+
+const liveElements = (elements) => {
+  const live = [];
+  for (const key of Object.keys(elements)) {
+    const slots = elements[key];
+    let stamp = null;
+    for (const origin of Object.keys(slots)) {
+      const slot = slots[origin];
+      if (slot[0] <= slot[1]) continue;
+      const candidate = [slot[0], origin];
+      if (stamp === null || compareClock(candidate, stamp) < 0) stamp = candidate;
+    }
+    if (stamp !== null) live.push({ stamp, key });
+  }
+  live.sort(compareElements);
+  const values = new Array(live.length);
+  for (let i = 0; i < live.length; i++) values[i] = JSON.parse(live[i].key);
+  return values;
+};
+
 const isPlainObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 
 // A key a JSON payload may carry that must never become a property name
@@ -75,6 +163,14 @@ const isStamp = (value) =>
 const stampOf = (value) => (isStamp(value) ? [value[0], value[1]] : null);
 const isCount = (value) =>
   Array.isArray(value) && Number.isInteger(value[0]) && Number.isFinite(value[1]) && typeof value[2] === 'number';
+const isSlot = (value) =>
+  Array.isArray(value) &&
+  value.length === 2 &&
+  Number.isSafeInteger(value[0]) &&
+  value[0] >= 0 &&
+  Number.isSafeInteger(value[1]) &&
+  value[1] >= 0 &&
+  value[0] + value[1] > 0;
 
 // Structural equality over JSON-shaped values, key order ignored — what a
 // `merge` op needs to tell "already have this" from "news".
@@ -93,8 +189,10 @@ const deepEqual = (a, b) => {
 
 // A peer-supplied meta, rebuilt into the shape the rest of this module
 // trusts: own keys only, stamps as `[ts, origin]`, counters as `[seq, sum,
-// ts]` per origin, anything else dropped. A copy, so nothing of the peer's
-// object is kept by reference and a `__proto__` key in it reaches nothing.
+// ts]` per origin, set slots as `[added, removed]` per element and origin
+// under a canonical JSON key, anything else dropped. A copy, so nothing of
+// the peer's object is kept by reference and a `__proto__` key in it reaches
+// nothing.
 const normalizeMeta = (meta) => {
   const clock = {};
   if (isPlainObject(meta.clock)) {
@@ -116,7 +214,26 @@ const normalizeMeta = (meta) => {
       if (Object.keys(perOrigin).length > 0) counters[field] = perOrigin;
     }
   }
-  const normalized = { clock, base: stampOf(meta.base), deleted: stampOf(meta.deleted), counters };
+  const sets = {};
+  if (isPlainObject(meta.sets)) {
+    for (const field of Object.keys(meta.sets)) {
+      const source = meta.sets[field];
+      if (!isKey(field) || !isPlainObject(source)) continue;
+      const elements = {};
+      for (const key of Object.keys(source)) {
+        const slotsFrom = source[key];
+        if (!isKey(key) || !isPlainObject(slotsFrom) || !isElementKey(key)) continue;
+        const slots = {};
+        for (const origin of Object.keys(slotsFrom)) {
+          const slot = slotsFrom[origin];
+          if (isKey(origin) && isSlot(slot)) slots[origin] = [slot[0], slot[1]];
+        }
+        if (Object.keys(slots).length > 0) elements[key] = slots;
+      }
+      if (Object.keys(elements).length > 0) sets[field] = elements;
+    }
+  }
+  const normalized = { clock, base: stampOf(meta.base), deleted: stampOf(meta.deleted), counters, sets };
   if (Number.isInteger(meta.v)) normalized.v = meta.v;
   const purged = stampOf(meta.purged);
   if (purged) normalized.purged = purged;
@@ -124,22 +241,34 @@ const normalizeMeta = (meta) => {
 };
 
 // The newest stamp an entry's metadata holds, over registers, the reset
-// watermark, the tombstone and the counters — what a node must have observed
-// before it stamps a write to that record, or the write sorts below state the
-// node already has and is dropped as stale. Takes raw peer-shaped meta too.
+// watermark, the tombstone, the counters and the sets — what a node must have
+// observed before it stamps a write to that record, or the write sorts below
+// state the node already has and is dropped as stale. Takes raw peer-shaped
+// meta too.
 const latestClock = (meta) => {
   if (!isPlainObject(meta)) return null;
-  const { clock, base, deleted, counters, purged } = normalizeMeta(meta);
+  const { clock, base, deleted, counters, sets, purged } = normalizeMeta(meta);
   let latest = maxClock(maxClock(base, deleted), purged ?? null);
   for (const field of Object.keys(clock)) latest = maxClock(latest, clock[field]);
   for (const field of Object.keys(counters)) {
     const perOrigin = counters[field];
     for (const origin of Object.keys(perOrigin)) latest = maxClock(latest, [perOrigin[origin][2], origin]);
   }
+  for (const field of Object.keys(sets)) {
+    const elements = sets[field];
+    for (const key of Object.keys(elements)) {
+      const slots = elements[key];
+      for (const origin of Object.keys(slots)) {
+        const slot = slots[origin];
+        if (slot[0] > 0) latest = maxClock(latest, [slot[0], origin]);
+        if (slot[1] > 0) latest = maxClock(latest, [slot[1], origin]);
+      }
+    }
+  }
   return latest;
 };
 
-// Drops every register and counter entry that fell below the (new) base.
+// Drops every register, counter and set entry that fell below the (new) base.
 const applyBase = (entry, delta) => {
   const { meta, data } = entry;
   for (const field of Object.keys(meta.clock)) {
@@ -164,6 +293,34 @@ const applyBase = (entry, delta) => {
       delta[field] = undefined;
     }
   }
+  for (const field of Object.keys(meta.sets)) {
+    const elements = meta.sets[field];
+    for (const key of Object.keys(elements)) {
+      const slots = elements[key];
+      for (const origin of Object.keys(slots)) {
+        const slot = slots[origin];
+        const newest = slot[0] > slot[1] ? slot[0] : slot[1];
+        if (compareClock([newest, origin], meta.base) < 0) {
+          delete slots[origin];
+          continue;
+        }
+        // A component below the base is clamped, not kept: a tag the reset
+        // made moot must read the same whether it landed before or after.
+        if (slot[0] > 0 && compareClock([slot[0], origin], meta.base) < 0) slot[0] = 0;
+        if (slot[1] > 0 && compareClock([slot[1], origin], meta.base) < 0) slot[1] = 0;
+      }
+      if (Object.keys(slots).length === 0) delete elements[key];
+    }
+    if (Object.keys(elements).length === 0) {
+      delete meta.sets[field];
+      delete data[field];
+      delta[field] = undefined;
+      continue;
+    }
+    const value = liveElements(elements);
+    if (!deepEqual(data[field], value)) delta[field] = value;
+    data[field] = value;
+  }
 };
 
 // Sets register fields at `stamp`, honouring last-writer-wins per field.
@@ -179,6 +336,10 @@ const applyFields = (entry, fields, stamp, delta, rejected) => {
       rejected.push({ field, reason: 'counter' });
       continue;
     }
+    if (isSet(meta, field)) {
+      rejected.push({ field, reason: 'set' });
+      continue;
+    }
     if (compareClock(own(meta.clock, field), stamp) >= 0) continue;
     if (compareClock(stamp, meta.base) < 0) continue;
     meta.clock[field] = stamp;
@@ -187,12 +348,88 @@ const applyFields = (entry, fields, stamp, delta, rejected) => {
   }
 };
 
+// A set's `add`: the origin's newest add of each element moves up to the
+// op's stamp. Maps are created only when a slot is written — an empty map
+// left behind by a malformed payload would make two nodes' metas differ.
+const addElements = (meta, field, op, stamp) => {
+  if (compareClock(stamp, meta.base) < 0) return false;
+  let moved = false;
+  const { value } = op;
+  for (let i = 0; i < value.length; i++) {
+    const key = elementKey(value[i]);
+    if (key === undefined || !isKey(key)) continue;
+    const elements = own(meta.sets, field) ?? (meta.sets[field] = {});
+    const slots = own(elements, key) ?? (elements[key] = {});
+    const slot = own(slots, op.origin);
+    if (!slot) {
+      slots[op.origin] = [op.ts, 0];
+      moved = true;
+    } else if (slot[0] < op.ts) {
+      slot[0] = op.ts;
+      moved = true;
+    }
+  }
+  return moved;
+};
+
+// A set's `remove`: for each element, the tags the remover observed — the
+// newest add ts per origin — become that origin's `removed` watermark, so the
+// add dies whether it has landed here yet or not. A tag below the base is
+// moot (the reset already dropped that add); a tag above the op's own stamp
+// is not one an honest remover could have observed.
+const removeElements = (meta, field, op) => {
+  let moved = false;
+  const { value } = op;
+  for (let i = 0; i < value.length; i++) {
+    const item = value[i];
+    if (!Array.isArray(item) || item.length !== 2 || !isPlainObject(item[1])) continue;
+    const key = elementKey(item[0]);
+    if (key === undefined || !isKey(key)) continue;
+    const tags = item[1];
+    for (const origin of Object.keys(tags)) {
+      const ts = tags[origin];
+      if (!isKey(origin) || !Number.isSafeInteger(ts) || ts <= 0 || ts > op.ts) continue;
+      if (compareClock([ts, origin], meta.base) < 0) continue;
+      const elements = own(meta.sets, field) ?? (meta.sets[field] = {});
+      const slots = own(elements, key) ?? (elements[key] = {});
+      const slot = own(slots, origin);
+      if (!slot) {
+        slots[origin] = [0, ts];
+        moved = true;
+      } else if (slot[1] < ts) {
+        slot[1] = ts;
+        moved = true;
+      }
+    }
+  }
+  return moved;
+};
+
+const applySet = (entry, op, stamp, delta, rejected) => {
+  const { meta } = entry;
+  const { key: field } = op;
+  if (typeof field !== 'string' || !isKey(field) || !isKey(op.origin) || !Array.isArray(op.value)) return;
+  if (own(meta.clock, field) !== undefined) {
+    rejected.push({ field, reason: 'register' });
+    return;
+  }
+  if (isCounter(meta, field)) {
+    rejected.push({ field, reason: 'counter' });
+    return;
+  }
+  const moved = op.type === 'add' ? addElements(meta, field, op, stamp) : removeElements(meta, field, op);
+  if (!moved) return;
+  // A tag that moved is news to persist even when the array reads the same.
+  entry.data[field] = liveElements(meta.sets[field]);
+  delta[field] = entry.data[field];
+};
+
 /**
  * Applies one op to an entry (null for a record this node has never seen).
  * Returns `{ entry, changed, delta, rejected }` — a NEW entry, whether it
  * differs, the fields that changed (undefined = removed) and the fields the
- * register/counter rule refused. Idempotent: applying an op twice, or an op
- * older than what the entry already reflects, changes nothing.
+ * field-kind rule refused. Idempotent: applying an op twice, or an op older
+ * than what the entry already reflects, changes nothing.
  */
 // Everything the entry held, gone: the purge, and a merge that meets one.
 const erase = (entry, stamp, delta) => {
@@ -201,6 +438,7 @@ const erase = (entry, stamp, delta) => {
   entry.data = {};
   meta.clock = {};
   meta.counters = {};
+  meta.sets = {};
   // Canonical: whatever came before, a purged entry looks the same, so two
   // nodes that saw the purge and a write in either order hold one meta.
   meta.purged = maxClock(meta.purged ?? null, stamp);
@@ -276,6 +514,8 @@ const applyOp = (previous, op) => {
     if (typeof field === 'string' && isKey(field) && isKey(op.origin) && Number.isFinite(value)) {
       if (own(meta.clock, field) !== undefined) {
         rejected.push({ field, reason: 'register' });
+      } else if (isSet(meta, field)) {
+        rejected.push({ field, reason: 'set' });
       } else if (compareClock(stamp, meta.base) >= 0) {
         const perOrigin = own(meta.counters, field) ?? (meta.counters[field] = {});
         const known = own(perOrigin, op.origin);
@@ -286,6 +526,8 @@ const applyOp = (previous, op) => {
         }
       }
     }
+  } else if (op.type === 'add' || op.type === 'remove') {
+    applySet(entry, op, stamp, delta, rejected);
   }
 
   const before = previous ? previous.meta : null;
@@ -309,6 +551,18 @@ const isAlive = (entry) => {
     const perOrigin = meta.counters[field];
     for (const origin of Object.keys(perOrigin)) {
       if (compareClock([perOrigin[origin][2], origin], meta.deleted) > 0) return true;
+    }
+  }
+  // An add newer than the tombstone revives, live or since removed — like a
+  // counter whose sum is back to zero; a remove alone never does.
+  const sets = setsOf(meta);
+  for (const field of Object.keys(sets)) {
+    const elements = sets[field];
+    for (const key of Object.keys(elements)) {
+      const slots = elements[key];
+      for (const origin of Object.keys(slots)) {
+        if (slots[origin][0] > 0 && compareClock([slots[origin][0], origin], meta.deleted) > 0) return true;
+      }
     }
   }
   return false;
@@ -353,6 +607,27 @@ const mergeEntry = (a, b) => {
         if (isKey(origin) && (!held || held[0] < from[origin][0])) perOrigin[origin] = from[origin];
       }
     }
+    const sets = setsOf(source.meta);
+    for (const field of Object.keys(sets)) {
+      if (!isKey(field)) continue;
+      const elements = own(meta.sets, field) ?? (meta.sets[field] = {});
+      const from = sets[field];
+      for (const key of Object.keys(from)) {
+        if (!isKey(key)) continue;
+        const slots = own(elements, key) ?? (elements[key] = {});
+        const theirs = from[key];
+        for (const origin of Object.keys(theirs)) {
+          if (!isKey(origin)) continue;
+          const slot = own(slots, origin);
+          if (!slot) {
+            slots[origin] = [theirs[origin][0], theirs[origin][1]];
+            continue;
+          }
+          if (slot[0] < theirs[origin][0]) slot[0] = theirs[origin][0];
+          if (slot[1] < theirs[origin][1]) slot[1] = theirs[origin][1];
+        }
+      }
+    }
   }
   applyBase(entry, {});
   // A register that also became a counter on the other side: the register
@@ -363,16 +638,73 @@ const mergeEntry = (a, b) => {
       data[field] = a.meta.clock[field] === meta.clock[field] ? a.data[field] : b.data[field];
     }
   }
+  // A set that is a register or a counter on the other side: the register,
+  // then the counter, wins — the precedence the writes were refused by.
+  for (const field of Object.keys(meta.sets)) {
+    if (own(meta.clock, field) !== undefined) {
+      delete meta.sets[field];
+      data[field] = a.meta.clock[field] === meta.clock[field] ? a.data[field] : b.data[field];
+    } else if (isCounter(meta, field)) {
+      delete meta.sets[field];
+      data[field] = counterValue(meta.counters[field]);
+    }
+  }
   return entry;
 };
 
+// What a `remove` carries for each element: the newest add ts per origin this
+// node holds — dead ones too, so the remove reaches a peer that has not seen
+// an earlier remove of the same tag. An element the node never saw is left
+// out: there is nothing to remove, and nothing a peer could apply.
+const observedTags = (meta, field, elements) => {
+  const tags = [];
+  const known = meta ? own(setsOf(meta), field) : undefined;
+  if (!known) return tags;
+  for (let i = 0; i < elements.length; i++) {
+    const key = elementKey(elements[i]);
+    if (key === undefined || !isKey(key)) continue;
+    const slots = own(known, key);
+    if (!slots) continue;
+    const observed = {};
+    let any = false;
+    for (const origin of Object.keys(slots)) {
+      if (slots[origin][0] > 0) {
+        observed[origin] = slots[origin][0];
+        any = true;
+      }
+    }
+    if (any) tags.push([elements[i], observed]);
+  }
+  return tags;
+};
+
 // The wire/log shape of a batch: one positional array per op, type as a
-// single letter, absent fields as null — no key names repeated per op. A
+// single character, absent fields as null — no key names repeated per op. A
 // slot may be appended (the writer's schema version was the 13th, the actor
 // the 14th): a reader of an older shape ignores slots it does not know, a
 // reader of a newer one takes an absent slot as null.
-const TYPE_CODES = { write: 'w', set: 's', inc: 'i', delete: 'd', merge: 'm', advance: 'a', purge: 'p' };
-const CODE_TYPES = { w: 'write', s: 'set', i: 'inc', d: 'delete', m: 'merge', a: 'advance', p: 'purge' };
+const TYPE_CODES = {
+  write: 'w',
+  set: 's',
+  inc: 'i',
+  delete: 'd',
+  merge: 'm',
+  advance: 'a',
+  purge: 'p',
+  add: '+',
+  remove: '-',
+};
+const CODE_TYPES = {
+  w: 'write',
+  s: 'set',
+  i: 'inc',
+  d: 'delete',
+  m: 'merge',
+  a: 'advance',
+  p: 'purge',
+  '+': 'add',
+  '-': 'remove',
+};
 
 const packOps = (ops) => {
   const packed = new Array(ops.length);
@@ -427,6 +759,8 @@ module.exports = {
   mergeEntry,
   isAlive,
   isCounter,
+  isSet,
+  observedTags,
   latestClock,
   deepEqual,
   packOps,
