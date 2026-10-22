@@ -32,7 +32,9 @@ it is published, and everything below lands there on release day.
   exchange. The signature covers the header and a salted digest of the
   payload; a purge scrubs the payload and the nonce and leaves a header that
   still verifies. `open({ sync: { signatures: 'verify' | 'require' | false } })`:
-  `'verify'` (the default) checks a signature when there is one, `'require'`
+  A peer's page is verified sixty-four ops at a time, on Node's thread pool
+  (Web Crypto in the browser), so a replica is not held to one check after
+  another. `'verify'` (the default) checks a signature when there is one, `'require'`
   refuses unsigned ops and keyless origins too (and a keyless `hello`, 403
   `UNSIGNED`). Refusals are `forged`/`unsigned` in the apply result and the
   `refused` event, `error` events `BAD_SIGNATURE`/`UNSIGNED` once per page,

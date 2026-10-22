@@ -227,7 +227,11 @@ docs/                     VitePress site
   and `verify` are synchronous in `src/crypto.js` and promise-returning in
   `src/crypto.browser.js`. Shared code must `await` them; `browser.d.ts`
   exists to declare that difference. Do not "fix" it by making the Node half
-  async.
+  async. The one async function of the Node half is `verifyAsync` — the
+  engine's verify, `crypto.verify` with a callback, on libuv's thread pool —
+  and it is not on the package root: both barrels drop it (`const {
+  verifyAsync, ...crypto }`), and `src/signing.js` is its only caller. In the
+  browser it is `verify` itself.
 - **Signed ops: the id is the key, the signature is the header plus a salted
   digest.** `nodeId` = the Ed25519 public key (`isKeyId`: 43 base64url chars,
   canonical last char — a non-canonical one is the same key under another
@@ -239,8 +243,10 @@ docs/                     VitePress site
   in `persistLocal` (after `validateLocal` rewrote `op.data`), `mergeBatch`
   (after the seq is assigned) and `adopt`, all before the append. A peer's
   page is verified in `verifyPage` (src/apply.js) BEFORE the sequential
-  `admit`, sixty-four at a time; `verify` never throws (a throw there would
-  be `PAGE_FAILED`, a stream-stopper). `OpLog.scrub` deletes the nonce with
+  `admit`, sixty-four at a time through `verifyAsync` (the thread pool in
+  Node.js — a synchronous verify there would hold a page to one check at a
+  time); it never throws (a throw there would be `PAGE_FAILED`, a
+  stream-stopper). `OpLog.scrub` deletes the nonce with
   the payload and keeps `sig`+`digest`, so a scrubbed op's header verifies.
   A refused op is a gap, like a malformed one. `'verify'` is the default
   because ~70 call sites inject unsigned hand-made ops; `'require'` is the

@@ -242,9 +242,11 @@ of the key its origin names, whatever path it took. What it does not:
   and its pushes then fail as `forged`. A signed hello challenge is a
   follow-up.
 
-The cost: a tenth of a millisecond of CPU per op verified in Node.js, less in
-the browser (sixty-four at a time), and some 190 bytes per op on the wire and
-in the log — `bytesPerPush` counts them.
+The cost: about a tenth of a millisecond of CPU per op verified, which Node.js
+spends on libuv's thread pool (four threads unless `UV_THREADPOOL_SIZE` says
+otherwise) and the browser inside Web Crypto, sixty-four ops of a page at a
+time; some tens of microseconds per write signed, on the main thread; and some
+190 bytes per op on the wire and in the log — `bytesPerPush` counts them.
 
 ## Protocol
 

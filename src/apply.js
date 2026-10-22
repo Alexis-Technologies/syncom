@@ -19,8 +19,9 @@ const { verifyOp, OK, FORGED } = require('./signing.js');
 
 const NOTHING = { applied: 0, skipped: 0, duplicates: 0, gaps: 0, malformed: 0, unsigned: 0, forged: 0 };
 // Signatures are verified this many at a time under Promise.all: the
-// verdicts are independent, and the browser's async verify is four times
-// faster that way than one after another.
+// verdicts are independent, and both halves verify off the main thread —
+// node:crypto on libuv's thread pool, Web Crypto on its own — so a chunk is
+// checked several at once rather than one after another.
 const VERIFY_CHUNK = 64;
 
 // What one batch accumulates: the ops it accepts (logged, whether or not

@@ -89,6 +89,40 @@ const runCryptoKeysTests = async (t, assert, cryptoMod, { getKeysBase, fsi } = {
     }
   });
 
+  await t.test("verifyAsync, the engine's verify: the same answers, as a promise, many at once", async () => {
+    const keys = await Promise.resolve(cryptoMod.generateSigningKeys());
+    const other = await Promise.resolve(cryptoMod.generateSigningKeys());
+    const message = JSON.stringify([1, 'A', 7, 'write', 'r', 'ünïcödé']);
+    const signature = await Promise.resolve(cryptoMod.sign(message, keys.privateKey));
+    const pending = cryptoMod.verifyAsync(message, signature, keys.id);
+    assert.ok(pending instanceof Promise, 'a promise on both halves');
+    assert.strictEqual(await pending, true);
+    const cases = [
+      [`${message} `, signature, keys.id],
+      [message, signature, other.id],
+      [message, signature, 'n1'],
+      [message, signature, 'A'.repeat(43)],
+      [message, signature, 42],
+      [message, 'short', keys.id],
+      [message, null, keys.id],
+      [42, signature, keys.id],
+    ];
+    for (const [text, sig, id] of cases) {
+      assert.strictEqual(await cryptoMod.verifyAsync(text, sig, id), false, `${String(sig).slice(0, 8)}/${id}`);
+      assert.strictEqual(await Promise.resolve(cryptoMod.verify(text, sig, id)), false, 'and verify agrees');
+    }
+    // A page's worth at once, half of them forged: every verdict is its own.
+    const checks = [];
+    for (let i = 0; i < 64; i++) {
+      checks.push(cryptoMod.verifyAsync(i % 2 ? `${message}${i}` : message, signature, keys.id));
+    }
+    const verdicts = await Promise.all(checks);
+    assert.deepStrictEqual(
+      verdicts,
+      verdicts.map((_, i) => i % 2 === 0),
+    );
+  });
+
   await t.test('loadSigningKeys: sign-public.pem and sign-private.pem, a pair of its own', async (t2) => {
     const base = await getKeysBase(t2);
     const keys1 = await Promise.resolve(cryptoMod.loadSigningKeys(base));

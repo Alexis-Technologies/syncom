@@ -189,6 +189,10 @@ const verify = async (message, signature, publicKey) => {
   }
 };
 
+// Web Crypto's verify is off the main thread already: the engine's verify is
+// the public one (src/crypto.js has its own, on the thread pool).
+const verifyAsync = verify;
+
 const loadSigningKeys = async (basePath = 'keys', { fsi = defaultFsi } = {}) => {
   const keys = await loadKeyPair(basePath, fsi, generateSigningKeys, SIGNING_FILES);
   return { publicKey: keys.publicKey, privateKey: keys.privateKey, id: signingId(keys.publicKey) };
@@ -204,4 +208,5 @@ module.exports = {
   loadSigningKeys,
   sign,
   verify,
+  verifyAsync,
 };

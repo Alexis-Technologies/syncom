@@ -12,7 +12,7 @@
 // binds authorship and content to the origin's key, through any relay — it
 // proves nothing about delivery, and `actor` stays a claim the origin made.
 
-const { calculateHash, sign, verify } = require('./crypto.js');
+const { calculateHash, sign, verifyAsync } = require('./crypto.js');
 const { generateUUID } = require('./utils.js');
 const { isKeyId } = require('./shape.js');
 
@@ -115,7 +115,7 @@ const verifyOp = async (op, mode) => {
   } else if (op.nonce !== undefined) {
     return FORGED;
   }
-  return (await verify(signedMessage(op), op.sig, op.origin)) ? OK : FORGED;
+  return (await verifyAsync(signedMessage(op), op.sig, op.origin)) ? OK : FORGED;
 };
 
 module.exports = { HEADER_VERSION, OK, UNSIGNED, FORGED, canonical, payloadOf, signedMessage, signOp, verifyOp };

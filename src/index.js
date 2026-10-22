@@ -4,7 +4,9 @@
 // the subpath, so a process that never imports it never runs a block's code.
 const chain = require('./chain.js');
 const crdt = require('./crdt.js');
-const crypto = require('./crypto.js');
+// `verifyAsync` is the engine's (src/signing.js), not the API's: the root
+// keeps one `verify`, synchronous in Node.js and a promise in the browser.
+const { verifyAsync, ...crypto } = require('./crypto.js');
 const { read, write, exists, remove, list } = require('./fsi.js');
 const fsi = { read, write, exists, remove, list };
 const { isFsi, createMemoryFsi } = require('./backend.js');

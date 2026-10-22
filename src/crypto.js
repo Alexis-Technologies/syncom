@@ -117,6 +117,23 @@ const verify = (message, signature, publicKey) => {
   }
 };
 
+// The engine's verify: the same answer as `verify`, off the main thread —
+// with a callback, node:crypto runs the check on libuv's thread pool, so a
+// page's checks run UV_THREADPOOL_SIZE (4 by default) at a time instead of
+// one after another. Not on the package root: the public `verify` stays
+// synchronous here, like every function of this half (see browser.d.ts).
+const verifyAsync = (message, signature, publicKey) =>
+  new Promise((resolve) => {
+    try {
+      const data = Buffer.from(message);
+      const sig = Buffer.from(signature, 'base64url');
+      // A failure in the pool is a signature that does not check.
+      crypto.verify(null, data, verifierOf(publicKey), sig, (error, ok) => resolve(!error && ok === true));
+    } catch {
+      resolve(false);
+    }
+  });
+
 const loadSigningKeys = async (basePath, { fsi = defaultFsi } = {}) => {
   const keys = await loadKeyPair(basePath, fsi, generateSigningKeys, SIGNING_FILES);
   return { publicKey: keys.publicKey, privateKey: keys.privateKey, id: signingId(keys.publicKey) };
@@ -132,4 +149,5 @@ module.exports = {
   loadSigningKeys,
   sign,
   verify,
+  verifyAsync,
 };
