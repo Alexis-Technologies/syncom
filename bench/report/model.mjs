@@ -231,6 +231,7 @@ export const sizeModel = (size) => {
 /** The scripts of `pnpm bench`, in the order the toggle lists them. */
 export const ENGINE_SUBJECTS = [
   { id: 'storage', title: 'Storage' },
+  { id: 'search', title: 'Search' },
   { id: 'apply', title: 'Apply' },
   { id: 'sync', title: 'Sync' },
   { id: 'log', title: 'Op log' },
@@ -242,6 +243,7 @@ export const ENGINE_SUBJECTS = [
 
 const SUBJECT_NOTES = {
   storage: 'The public API end to end on node:fs: a write is an op appended to the log, a record file and a block.',
+  search: 'The @alexify/syncom/search trigram index: a put per write, $text answered from the catalog in rank order.',
   apply: "A peer's page once it has arrived: admit, fold, append, write, announce. The applyRemote rows count ops.",
   sync: 'Replication over the in-process link (JSON across the boundary, like a wrpc client).',
   log: 'OpLog, the persisted operation log every write and every replicated op goes through.',

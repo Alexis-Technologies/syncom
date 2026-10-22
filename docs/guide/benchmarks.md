@@ -229,6 +229,23 @@ the CRDT helpers and the emitter. They are the numbers to watch for a regression
 </details>
 
 <details>
+<summary>Search — 9 rows</summary>
+
+| Benchmark | ops/s | per operation |
+| --- | ---: | ---: |
+| index.put — a 43-word record | 16,623 | 60.2 µs |
+| index.query — one word over 2000 | 1,718 | 582 µs |
+| index.query — two words over 2000 | 1,456 | 687 µs |
+| index.query — a typo over 2000 | 7,848 | 127 µs |
+| insert — 2 search fields (43 words) | 1,462 | 684 µs |
+| select — $text one word over 2000, limit 20 | 1,387 | 721 µs |
+| select — $text + eq narrowing over 2000 | 1,144 | 874 µs |
+| count — $text over 2000 | 1,156 | 865 µs |
+| open — catalog reloaded with text (2000 records) | 12 | 83.3 ms |
+
+</details>
+
+<details>
 <summary>Apply — 21 rows</summary>
 
 | Benchmark | ops/s | per operation |
@@ -345,7 +362,7 @@ the CRDT helpers and the emitter. They are the numbers to watch for a regression
 
 </details>
 
-_pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-21._
+_pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-22._
 
 <!-- bench:engine:end -->
 

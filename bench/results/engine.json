@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-21T19:20:17.749Z",
+  "generatedAt": "2026-10-22T18:43:04.686Z",
   "machine": {
     "cpu": "Apple M3 Max",
     "cores": 16,
@@ -392,6 +392,51 @@
       "subject": "apply",
       "name": "applyRemote — 100 adds on cached records (chain: false)",
       "opsPerSec": 7190
+    },
+    {
+      "subject": "search",
+      "name": "index.put — a 43-word record",
+      "opsPerSec": 16623
+    },
+    {
+      "subject": "search",
+      "name": "index.query — one word over 2000",
+      "opsPerSec": 1718
+    },
+    {
+      "subject": "search",
+      "name": "index.query — two words over 2000",
+      "opsPerSec": 1456
+    },
+    {
+      "subject": "search",
+      "name": "index.query — a typo over 2000",
+      "opsPerSec": 7848
+    },
+    {
+      "subject": "search",
+      "name": "insert — 2 search fields (43 words)",
+      "opsPerSec": 1462
+    },
+    {
+      "subject": "search",
+      "name": "select — $text one word over 2000, limit 20",
+      "opsPerSec": 1387
+    },
+    {
+      "subject": "search",
+      "name": "select — $text + eq narrowing over 2000",
+      "opsPerSec": 1144
+    },
+    {
+      "subject": "search",
+      "name": "count — $text over 2000",
+      "opsPerSec": 1156
+    },
+    {
+      "subject": "search",
+      "name": "open — catalog reloaded with text (2000 records)",
+      "opsPerSec": 12
     }
   ]
 }

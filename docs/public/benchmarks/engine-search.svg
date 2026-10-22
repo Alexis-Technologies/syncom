@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="508" viewBox="0 0 760 508" role="img" aria-label="Search: syncom's own benchmarks. The @alexify/syncom/search trigram index: a put per write, $text answered from the catalog in rank order. ops/s, log scale, higher is better.">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .title { font-size: 15px; font-weight: 700; fill: #1b1c1e; }
+  .subtitle, .caption { font-size: 12px; fill: #67676c; }
+  .caption { font-size: 11px; }
+  .group { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; fill: #67676c; }
+  .label { font-size: 13px; font-weight: 600; fill: #1b1c1e; }
+  .label.primary, .label.secondary { font-weight: 700; }
+  .sublabel { font-size: 11px; fill: #67676c; }
+  .value { font-size: 12px; font-weight: 600; fill: #3c3c43; font-variant-numeric: tabular-nums; }
+  .value.small { font-size: 10px; }
+  .legend { font-size: 11px; fill: #3c3c43; }
+  .tick { font-size: 11px; fill: #67676c; font-variant-numeric: tabular-nums; }
+  .grid { stroke: #e4e4e7; stroke-width: 1; }
+  .axis { stroke: #c2c2c4; stroke-width: 1; }
+  .ref { stroke: #67676c; stroke-width: 1; stroke-dasharray: 3 3; }
+  .bar { fill: #c4c6cc; }
+  .bar.primary { fill: #245a9e; }
+  .bar.secondary { fill: #5e9be6; }
+  @media (prefers-color-scheme: dark) {
+    .title, .label { fill: #dfdfd6; }
+    .subtitle, .caption, .group, .sublabel, .tick { fill: #98989f; }
+    .value, .legend { fill: #c2c2c4; }
+    .grid { stroke: #2e2e32; }
+    .axis { stroke: #48484c; }
+    .ref { stroke: #98989f; }
+    .bar { fill: #46474e; }
+    .bar.primary { fill: #8dbcf2; }
+    .bar.secondary { fill: #3d7bd0; }
+  }
+</style>
+<text class="title" x="20" y="35">Search: syncom's own benchmarks</text>
+<text class="subtitle" x="20" y="56">The @alexify/syncom/search trigram index: a put per write, $text answered from the catalog in rank order. ops/s,</text>
+<text class="subtitle" x="20" y="73">log scale, higher is better.</text>
+<line class="grid" x1="282" y1="88" x2="282" y2="448"/>
+<text class="tick" x="282" y="464" text-anchor="middle">10</text>
+<line class="grid" x1="380.5" y1="88" x2="380.5" y2="448"/>
+<text class="tick" x="380.5" y="464" text-anchor="middle">100</text>
+<line class="grid" x1="479" y1="88" x2="479" y2="448"/>
+<text class="tick" x="479" y="464" text-anchor="middle">1,000</text>
+<line class="grid" x1="577.5" y1="88" x2="577.5" y2="448"/>
+<text class="tick" x="577.5" y="464" text-anchor="middle">10k</text>
+<line class="grid" x1="676" y1="88" x2="676" y2="448"/>
+<text class="tick" x="676" y="464" text-anchor="middle">100k</text>
+<line class="axis" x1="282" y1="88" x2="282" y2="448"/>
+<g><title>index.put · a 43-word record
+16,623 ops/s
+60.2 µs per operation</title>
+<text class="label primary" x="20" y="105">index.put</text>
+<text class="sublabel" x="20" y="120">a 43-word record</text>
+<path class="bar primary" d="M282,101H595.2398763806373A4,4 0 0 1 599.2398763806373,105V111A4,4 0 0 1 595.2398763806373,115H282Z"/>
+<text class="value" x="605.2398763806373" y="114">16.6k</text>
+</g>
+<g><title>index.query · one word over 2000
+1,718 ops/s
+582 µs per operation</title>
+<text class="label primary" x="20" y="145">index.query</text>
+<text class="sublabel" x="20" y="160">one word over 2000</text>
+<path class="bar primary" d="M282,141H498.14978121027957A4,4 0 0 1 502.14978121027957,145V151A4,4 0 0 1 498.14978121027957,155H282Z"/>
+<text class="value" x="508.14978121027957" y="154">1,718</text>
+</g>
+<g><title>index.query · two words over 2000
+1,456 ops/s
+687 µs per operation</title>
+<text class="label primary" x="20" y="185">index.query</text>
+<text class="sublabel" x="20" y="200">two words over 2000</text>
+<path class="bar primary" d="M282,181H491.07139543523635A4,4 0 0 1 495.07139543523635,185V191A4,4 0 0 1 491.07139543523635,195H282Z"/>
+<text class="value" x="501.07139543523635" y="194">1,456</text>
+</g>
+<g><title>index.query · a typo over 2000
+7,848 ops/s
+127 µs per operation</title>
+<text class="label primary" x="20" y="225">index.query</text>
+<text class="sublabel" x="20" y="240">a typo over 2000</text>
+<path class="bar primary" d="M282,221H563.1337609456314A4,4 0 0 1 567.1337609456314,225V231A4,4 0 0 1 563.1337609456314,235H282Z"/>
+<text class="value" x="573.1337609456314" y="234">7,848</text>
+</g>
+<g><title>insert · 2 search fields (43 words)
+1,462 ops/s
+684 µs per operation</title>
+<text class="label primary" x="20" y="265">insert</text>
+<text class="sublabel" x="20" y="280">2 search fields (43 words)</text>
+<path class="bar primary" d="M282,261H491.2473162032514A4,4 0 0 1 495.2473162032514,265V271A4,4 0 0 1 491.2473162032514,275H282Z"/>
+<text class="value" x="501.2473162032514" y="274">1,462</text>
+</g>
+<g><title>select · $text one word over 2000, limit 20
+1,387 ops/s
+721 µs per operation</title>
+<text class="label primary" x="20" y="305">select</text>
+<text class="sublabel" x="20" y="320">$text one word over 2000, limit 20</text>
+<path class="bar primary" d="M282,301H488.99453141571854A4,4 0 0 1 492.99453141571854,305V311A4,4 0 0 1 488.99453141571854,315H282Z"/>
+<text class="value" x="498.99453141571854" y="314">1,387</text>
+</g>
+<g><title>select · $text + eq narrowing over 2000
+1,144 ops/s
+874 µs per operation</title>
+<text class="label primary" x="20" y="345">select</text>
+<text class="sublabel" x="20" y="360">$text + eq narrowing over 2000</text>
+<path class="bar primary" d="M282,341H480.754963409015A4,4 0 0 1 484.754963409015,345V351A4,4 0 0 1 480.754963409015,355H282Z"/>
+<text class="value" x="490.754963409015" y="354">1,144</text>
+</g>
+<g><title>count · $text over 2000
+1,156 ops/s
+865 µs per operation</title>
+<text class="label primary" x="20" y="385">count</text>
+<text class="sublabel" x="20" y="400">$text over 2000</text>
+<path class="bar primary" d="M282,381H481.2013466573243A4,4 0 0 1 485.2013466573243,385V391A4,4 0 0 1 481.2013466573243,395H282Z"/>
+<text class="value" x="491.2013466573243" y="394">1,156</text>
+</g>
+<g><title>open · catalog reloaded with text (2000 records)
+12 ops/s
+83.3 ms per operation</title>
+<text class="label primary" x="20" y="425">open</text>
+<text class="sublabel" x="20" y="440">catalog reloaded with text (2000 records)</text>
+<path class="bar primary" d="M282,421H285.79935273569106A4,4 0 0 1 289.79935273569106,425V431A4,4 0 0 1 285.79935273569106,435H282Z"/>
+<text class="value" x="295.79935273569106" y="434">12</text>
+</g>
+<text class="caption" x="20" y="489">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-22</text>
+</svg>

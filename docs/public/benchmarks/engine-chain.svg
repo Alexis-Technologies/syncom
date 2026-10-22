@@ -100,5 +100,5 @@
 <path class="bar primary" d="M202,341H285.7329787050679A4,4 0 0 1 289.7329787050679,345V351A4,4 0 0 1 285.7329787050679,355H202Z"/>
 <text class="value" x="295.7329787050679" y="354">55</text>
 </g>
-<text class="caption" x="20" y="409">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-21</text>
+<text class="caption" x="20" y="409">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-22</text>
 </svg>
