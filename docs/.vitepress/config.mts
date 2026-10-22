@@ -37,6 +37,7 @@ const keywords = [
   'storage',
   'database',
   'query',
+  'full-text-search',
   'schema',
   'migrations',
   'standard-schema',

@@ -32,6 +32,10 @@
       "types": "./idb.d.ts",
       "default": "./idb.js"
     },
+    "./search": {
+      "types": "./search.d.ts",
+      "default": "./search.js"
+    },
     "./package.json": "./package.json"
   },
   "directories": {
@@ -86,6 +90,7 @@
     "storage",
     "database",
     "query",
+    "full-text-search",
     "schema",
     "migrations",
     "standard-schema",
@@ -144,6 +149,8 @@
     "contracts.d.ts",
     "idb.js",
     "idb.d.ts",
+    "search.js",
+    "search.d.ts",
     "src/",
     "LICENSE",
     "README.md",
