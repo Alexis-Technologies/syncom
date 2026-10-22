@@ -11,15 +11,18 @@
 
 - Package: `@alexify/syncom` (npm), MIT, source at https://github.com/Alexis-Technologies/syncom
 - Requires Node.js >= 22, or a browser with OPFS and Web Crypto (secure context)
-- **Zero runtime dependencies.** Browser bundle is about 37 KB min+gzip (a CI budget); the wrpc adapter under 1 KB
+- **Zero runtime dependencies.** Browser bundle is about 41 KB min+gzip (a CI budget); the wrpc adapter and the
+  search index under 1 KB each
 - CommonJS, no build step; `src/` ships as published; version 1.0.0, not yet on npm
 - Entry points: `.` (Node `index.js` / browser `browser.js` via the `browser` export condition), `./wrpc`,
-  `./contracts`, `./idb`
+  `./contracts`, `./idb`, `./search`
 - Exports: `open`, `Storage`, `SyncManager`, `isSyncLink`, `OpLog`, `applyOp`, `mergeEntry`, `isAlive`,
   `Blockchain`, `diff`, `merge`, `apply`, `calculateHash`, `generateKeys`, `encrypt`, `decrypt`, `loadKeys`,
   `generateSigningKeys`, `loadSigningKeys`, `sign`, `verify`,
   `read`, `write`, `exists`, `remove`, `list`, `isFsi`, `createMemoryFsi`, `HookError`, `ValidationError`,
   `SyncomError`, `isSharedLog`
+- `@alexify/syncom/search` exports `createSearch`, `normalize`, `trigrams` — the trigram index for
+  `open({ search })`; an entity's `search: [...]` fields are queried with `select({ $text: 'words' })`, best first
 - `@alexify/syncom/wrpc` exports `createWrpcLink`, `isSyncLink`, `SYNC_INTROSPECTION`;
   `@alexify/syncom/contracts` exports `SmartContract`, `DataReader`; `@alexify/syncom/idb` exports `createIdbFsi`
 - Every operational error is a `SyncomError` with a `code`

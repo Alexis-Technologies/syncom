@@ -13,6 +13,19 @@ it is published, and everything below lands there on release day.
 
 ### Added
 
+- **Full-text search.** An entity names its `search: ['title', 'body']`
+  fields and `open({ search: createSearch() })` gives the index —
+  `@alexify/syncom/search`, a subpath under 1 KB, so a node that never
+  searches ships none of it. `select({ $text: 'quick fox', orgId })` is
+  fuzzy, typo-tolerant trigram search ranked by TF-IDF over the record's
+  length, best first unless ordered, narrowed by any equality, with `limit`,
+  `one()`, `count()` and `watch()` as for any cursor; text is normalized
+  (marks stripped, lower case). The catalog keeps each record's search text
+  (format 3 — an older `catalog.json` is rebuilt once) and replays it into
+  the index at open, so no record is read; an index that throws is logged
+  (`catalog.search`), never failing the write. A `TextIndex` of your own fits
+  too. Browser budget 40 → 41 KB.
+
 - **Signed operations.** Every op a node makes is signed with its Ed25519
   key, and the node id *is* that key — the raw public key in base64url — so a
   peer verifies an op against its `origin` through any relay, with no key

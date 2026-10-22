@@ -34,9 +34,12 @@ for await (const row of storage.Task.select({ boardId: 'b1' }).order('key').limi
 | `$exists` | `true`: the field is present (`null` counts); `false`: absent |
 | `$regex`, `$options` | A `RegExp` or a source string, with flags; strings only (an array field: any element); the `g` and `y` flags are dropped |
 | `$and: [...]`, `$or: [...]`, `$not: {...}` | Nest freely |
+| `$text: 'words'` | Full-text, over the entity's `search` fields through the injected index; top level only, once — see [Full-text search](#full-text-search) |
 
 A malformed query — an unknown operator, `$in` without an array, an invalid
-regex — is a `TypeError` at `select()`, not at `fetch()`.
+regex, a `$text` that is not a string, is over 1000 characters or sits inside
+`$and`/`$or`/`$not`, a `$text` on a collection with no search fields — is a
+`TypeError` at `select()`, not at `fetch()`.
 
 ## The cursor
 
@@ -89,6 +92,70 @@ app holds and the wrong tool for millions. An unordered cursor with a `limit`
 stops reading at enough matches; an ordered one with a `limit` keeps only the
 best `offset + limit` rows as the candidates go by, instead of sorting every
 match — the first page of a large collection costs its reads, not its sort.
+A `$text` seeds the candidates with the text index's ranking, best first, and
+every equality narrows that order rather than replacing it.
+
+## Full-text search
+
+An entity names the fields to search, and `open({ search })` gives the index
+that searches them — `createSearch()` from the `@alexify/syncom/search`
+subpath, so a node that never searches ships none of it:
+
+```js
+const { open } = require('@alexify/syncom');
+const { createSearch } = require('@alexify/syncom/search');
+
+const storage = await open({
+  path: 'data',
+  schema: { entities: { Note: { index: ['boardId'], search: ['title', 'body'] } } },
+  search: createSearch(),
+});
+await storage.Note.insert({ boardId: 'b1', title: 'Quick brown fox', body: 'Jumps over the lazy dog' });
+await storage.Note.insert({ boardId: 'b1', title: 'Crème brûlée', body: 'A dessert' });
+await storage.Note.insert({ boardId: 'b2', title: 'Fox hunting', body: 'An old sport' });
+
+await storage.Note.select({ $text: 'fox' }).fetch();               // Fox hunting, Quick brown fox — best first
+await storage.Note.select({ $text: 'fox', boardId: 'b1' }).fetch(); // Quick brown fox — an equality narrows
+await storage.Note.select({ $text: 'creme brulee' }).fetch();      // Crème brûlée — marks are ignored
+await storage.Note.select({ $text: 'quikc' }).fetch();             // Quick brown fox — a typo still matches
+await storage.Note.count({ $text: 'fox' });                        // 2
+await storage.Note.select({ $text: 'fox' }).order('title').fetch(); // order() re-sorts the matches
+```
+
+Rows come back **best first** unless the cursor has an `order()`; `limit()`
+and `one()` stop reading at enough matches, and `count()` counts every match.
+`watch()` runs again when a matching record lands. Scores are not handed out.
+
+**What is searched.** The record as it reads — the [lens](./storage#reading-across-versions)
+applied — through the `search` fields: a string field, and the string elements
+of an array field, joined by a space. An encrypted record and a deleted one
+never match, and neither does a record of another collection.
+
+**How it matches.** Text is normalized — decomposed, combining marks stripped
+(`Crème` is `creme`), lower case, anything that is not a letter or a digit a
+word break — and cut into trigrams per word, padded with a space either side
+(`quick` is ` qu`, `qui`, `uic`, `ick`, `ck `), so a word's start and end count
+and an exact word outranks part of a longer one. A record matches when it holds
+at least `minOverlap` of the query's distinct trigrams — 0.3 by default:
+`createSearch({ minOverlap })` takes 0 (one shared trigram is a match) to 1
+(every one) — which is why a typo at the end of a word still finds it. The
+score is TF-IDF over the shared trigrams, divided by the square root of the
+record's length: a rare word weighs more than a common one, and a short record
+holding the words outranks a long one. Ties break by id.
+
+**What it costs.** A put per write — the text is joined and indexed inside the
+write (a 40-word record is tens of microseconds; see [Benchmarks](./benchmarks)).
+The index lives in memory; the text is kept in the catalog's row and written
+with `index/catalog.json`, so a reopen rebuilds the index from the file with no
+record read — and the file grows with it, rewritten whole on OPFS: keep
+`search` to titles and short bodies. Changing an entity's `search` fields
+rebuilds the catalog once, from the records.
+
+**Limits.** No phrases, no field-scoped or boolean text operators, one `$text`
+per query, at the top level, 1000 characters at most; an index that throws is
+logged (`catalog.search`) and the write lands all the same. A `TextIndex` of
+your own — `{ put(id, text), remove(id), query(text) }`, `query` returning
+every match as `{ id, score }`, best first — can replace `createSearch()`.
 
 ## watch()
 

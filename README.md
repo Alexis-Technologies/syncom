@@ -78,11 +78,12 @@ that fails the build when exceeded.
 
 | Entry | raw | min | min+gzip | budget |
 | ----- | ---:| ---:| --------:| ------:|
-| main entry — browser (@alexify/syncom) | 279.5 KB | 115.9 KB | 39.9 KB | 40.0 KB |
-| main entry — node (@alexify/syncom) | 263.7 KB | 114.7 KB | 39.5 KB | — |
+| main entry — browser (@alexify/syncom) | 284.2 KB | 118.2 KB | 40.7 KB | 41.0 KB |
+| main entry — node (@alexify/syncom) | 268.3 KB | 117.0 KB | 40.2 KB | — |
 | wrpc adapter — browser (@alexify/syncom/wrpc) | 3.4 KB | 1.4 KB | 0.7 KB | 2.0 KB |
 | contracts — browser (@alexify/syncom/contracts) | 3.7 KB | 1.6 KB | 0.8 KB | 1.0 KB |
 | idb backend — browser (@alexify/syncom/idb) | 3.7 KB | 1.7 KB | 0.8 KB | 2.0 KB |
+| search — browser (@alexify/syncom/search) | 4.2 KB | 1.7 KB | 0.9 KB | 2.0 KB |
 
 ## Quick Start
 
@@ -143,6 +144,7 @@ nodes converges.
 | **Storage** | Records with live properties and per-record deltas, schema-driven collections, compare-and-swap writes, counters and sets, encryption at rest (AES-256-GCM under an RSA-wrapped key), `purge()` for the right to be forgotten |
 | **Schema** | A metaschema model, any Standard Schema (zod, valibot, arktype), ajv or a compiled JSON Schema validates every write before it is stamped — locally and again on the hub. Versions ride on ops; an older record reads through a lens (migrations, then the validator's aliases and defaults); `migrate()` rewrites it. See [Schema and validation](https://syncomjs.vercel.app/guide/schema) |
 | **Queries** | `select({ orgId, status: { $in } }).order('name').limit(20).fetch()` over an in-memory record catalog: indexed queries with no I/O, unique keys, `watch()` for live views. See [Queries](https://syncomjs.vercel.app/guide/query) |
+| **Full-text search** | `select({ $text: 'quick fox' })`: fuzzy, typo-tolerant, TF-IDF ranked trigram search over an entity's `search` fields, best first, narrowed by any equality — the index is `@alexify/syncom/search` (under 1 KB), injected at `open({ search })`. See [Full-text search](https://syncomjs.vercel.app/guide/query#full-text-search) |
 | **Backends** | node:fs, OPFS, IndexedDB (`@alexify/syncom/idb`) or memory — five functions injected at `open({ fsi })`; `durable: true` for fsync, one instance per directory. See [Backends](https://syncomjs.vercel.app/guide/backends) |
 | **Replication** | Every write is an op in a persisted log; peers exchange ops over an injected link, resume from where they stopped, and bootstrap from a streamed snapshot when they cannot; scopes for partial replication |
 | **Convergence** | Last-writer-wins registers, per-origin counters, observed-remove sets, tombstones with revival — any order, any number of times, same result |

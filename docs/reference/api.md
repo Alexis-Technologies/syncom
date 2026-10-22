@@ -1,9 +1,10 @@
 # API reference
 
-Everything below is exported from the package root, except three subpaths: the
+Everything below is exported from the package root, except four subpaths: the
 wrpc adapter, [`@alexify/syncom/wrpc`](#wrpc-adapter), the smart contracts,
-[`@alexify/syncom/contracts`](#contracts-subpath), and the IndexedDB backend,
-[`@alexify/syncom/idb`](#backends) (`createIdbFsi`). The browser build exports
+[`@alexify/syncom/contracts`](#contracts-subpath), the IndexedDB backend,
+[`@alexify/syncom/idb`](#backends) (`createIdbFsi`), and the text index,
+[`@alexify/syncom/search`](#search-subpath) (`createSearch`). The browser build exports
 the same names — see [Browser](../guide/browser) for the five signatures that
 differ.
 
@@ -23,7 +24,8 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 [The catalog and the cache](../guide/storage#the-catalog-and-the-cache)),
 `chain` (`false` keeps no [chain](../guide/chain#through-storage)),
 `actor` (see [Operations](../guide/sync#operations)), `schema` and `validator` (see
-[Collections](../guide/storage#collections)), `getId` (must mint a
+[Collections](../guide/storage#collections)), `search` (the text index behind
+`$text`, see [Full-text search](../guide/query#full-text-search)), `getId` (must mint a
 [valid id](../guide/storage#custom-identifiers)), `logger`, `encrypted`,
 `sync` (see [Sync options](../guide/sync#options)), `telemetry` (see
 [OpenTelemetry](../guide/telemetry)), `hooks` (see
@@ -115,7 +117,8 @@ Writes through a collection with a `schema` are validated — see
 
 #### `Cursor`
 
-`collection.select(query)` — see [Queries](../guide/storage#queries).
+`collection.select(query)` — see [Queries](../guide/query); `$text` in the
+query searches the entity's `search` fields, best first unless ordered.
 
 | Member | Notes |
 | --- | --- |
@@ -379,6 +382,23 @@ server, OPFS in the browser — as those five functions, and:
 `@alexify/syncom/idb` is the IndexedDB backend: `createIdbFsi({ name, store,
 indexedDB }?)` returns an fsi over one object store, with a `close()` of its
 own (see [Browser](../guide/browser)).
+
+## Search (subpath)
+
+```js
+const { createSearch, normalize, trigrams } = require('@alexify/syncom/search');
+```
+
+| Export | Notes |
+| --- | --- |
+| `createSearch({ minOverlap }?)` | For `open({ search })`: a function that makes a fresh trigram index per searchable entity. `minOverlap` (0 to 1, default 0.3) is the share of a query's distinct trigrams a record must hold to match; anything else is a `TypeError` |
+| `normalize(text)` | What the index sees: decomposed, combining marks stripped, lower case, letters and digits only, one space between words |
+| `trigrams(text)` | The per-word, space-padded trigrams of the normalized text |
+
+An index is a `TextIndex` — `put(id, text)`, `remove(id)`, `query(text)` →
+`[{ id, score }]`, every match, best first, ties by id — plus `size`, the
+records it holds. Any object with the three methods can stand in for it. The
+ranking and the costs are in [Full-text search](../guide/query#full-text-search).
 
 ## wrpc adapter
 

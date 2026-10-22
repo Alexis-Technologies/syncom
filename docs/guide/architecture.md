@@ -170,7 +170,9 @@ the five functions an `fsi` implements.
 | `log.js` | `OpLog`, the persisted operation log: append, seal, retention, scrub |
 | `ops.js`, `vector.js` | The op model (`applyOp`), clocks and version vectors |
 | `chain.js` | The hash-linked chain |
-| `schema.js`, `query.js` | Validators, versions and lenses; Mango cursors |
+| `schema.js`, `query.js` | Validators, versions and lenses; Mango cursors, `$text` among them |
+| `search.js` | The `@alexify/syncom/search` subpath: the trigram index behind `$text` — the core knows only its contract |
+| `signing.js` | What an op's signature covers, signing and verifying it |
 | `sync.js`, `hosting.js`, `link.js`, `wrpc.js` | Dialing, hosting, the link contract, the wrpc adapter |
 | `hooks.js`, `telemetry.js`, `errors.js` | Hooks and events, injected OpenTelemetry, `SyncomError` |
 | `fsi.js`, `fsi.browser.js`, `idb.js`, `backend.js` | `node:fs`, OPFS, IndexedDB and memory backends |

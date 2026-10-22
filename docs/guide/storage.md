@@ -174,7 +174,9 @@ yourself and pass `lock: false`.
 `snapshot()` pages over the catalog too — it keeps a row for every entry with a
 file, tombstones included, so a bootstrap never lists the data directory.
 `list()` and `hasRecord()` answer from the **catalog**: every live record's
-id, collection and indexed field values, in memory, kept up to date by every
+id, collection and indexed field values (and, for an entity with
+[search fields](./query#full-text-search), the text `$text` searches), in
+memory, kept up to date by every
 write — local or a peer's — and persisted as `index/catalog.json` stamped
 with the log position it reflects: at `close()`, and in between every
 `catalog.flushEvery` changes while it is small and every sixteenth of its size
@@ -580,7 +582,7 @@ data/
 ├── blockchain/    <hash>.json per block, .blockchain.json holds the tail
 ├── lock.json      { pid, id, since } — while an instance holds the directory (not with Web Locks)
 ├── schema.json    { version, migrated, hash } — the schema this directory last ran
-├── index/         catalog.json — the record catalog as of a log position (derived; rebuilt when missing)
+├── index/         catalog.json — the record catalog as of a log position, search text included (derived; rebuilt when missing)
 ├── data/          <id>.json per record: { data, meta, encrypted, timestamp, block }
 ├── log/           the operation log (see Sync)
 └── remote/        <url>.json per registered sync node

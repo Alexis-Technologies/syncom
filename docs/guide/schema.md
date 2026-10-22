@@ -241,7 +241,8 @@ compatibility(diff(previousModel, model)); // 'full' | 'backward' | 'forward' | 
 | --- | --- | --- |
 | `schema.version` | `open({ schema })` | A positive integer, default 1; on every op as `v` |
 | `schema.snapshot` | `open({ schema })` | Any JSON describing the schema (`model.toJSON()`); hashed, in hello |
-| `schema.entities[name]` | `open({ schema })` | `{ schema?, idField?, validate?, index?, unique?, fields? }`; `{}` is a bare collection |
+| `schema.entities[name]` | `open({ schema })` | `{ schema?, idField?, validate?, index?, unique?, fields?, search? }`; `{}` is a bare collection |
+| `schema.entities[name].search` | `open({ schema })` | Field paths `$text` searches; explicit for every validator, never read off a schema; needs `open({ search })` — see [Full-text search](./query#full-text-search) |
 | `schema.migrations` | `open({ schema })` | `{ [toVersion]: { up } \| { [entity]: { up } } }` |
 | `schema.ahead` | `open({ schema })` | `'apply'` (default) or `'hold'` |
 | `schema.lens` | `open({ schema })` | `'both'` (default), `'migrations'`, `'validate'` |

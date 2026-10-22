@@ -293,6 +293,19 @@ docs/                     VitePress site
   arrays and sets — never edit what they return. Unique keys are checked after validation and
   the fold, before `#log.append` (local: throw) and after `applyOp` on the
   apply path (remote: `conflict` event, never a skip — both records stay).
+- **`$text` is the catalog's.** An entity's `search` fields are joined into
+  its catalog row as `row.text` (format 3, a seventh cell) and handed to the
+  injected `TextIndex` (`open({ search })`, built per entity in
+  `#defineSchema`) inside `#insert`/`#remove` — never in `put`, so postings
+  and text never disagree under a watcher — under a try/catch that logs
+  `catalog.search`: derived state never fails a write. `compileQuery` takes
+  `$text` at the top level only and makes no test of it; `fieldsOf` skips it;
+  `Catalog.candidates` seeds `#narrow` with the index's ranked ids (a fresh
+  Set) and every `meet` keeps the seed's order, so an unordered cursor hands
+  rows out best first. Never apply a limit inside the index (the equality
+  intersection comes after, and `count()` needs every match), never persist
+  the index — `load()` replays the rows through `#insert` — and never let the
+  core normalize text: that is `src/search.js`'s, a subpath with no requires.
 - **The catalog is derived state, kept at one seam.** `EntryStore`
   (`src/entries.js`) is the only place that `catalog.put`: `write` (every
   write path goes through it), `writeSealed`, `remove` and `index`; it
@@ -350,8 +363,9 @@ docs/                     VitePress site
 `node:test` + `node:assert`. Browser halves run under Node with the OPFS mock
 (`tests/utils/mock-opfs.js`) and `node:crypto`'s `webcrypto` — see
 `tests/index.browser.test.js`. Cross-platform behaviour goes in `tests/suites/`
-and is run against both halves (`schema`, `catalog`, `query`, `purge`, `hooks`,
-`fsi`, `sync-engine`, each with a `*.test.js` and a `*.browser.test.js`
+and is run against both halves (`schema`, `catalog`, `query`, `search`, `purge`,
+`hooks`, `fsi`, `sync-engine`, `signatures`, `signing`, each with a `*.test.js`
+and a `*.browser.test.js`
 wrapper); `tests/suites/sync-engine.js` runs the
 convergence properties (a partition, a seeded fuzz over `set`/`update`/`inc`/
 `add`/`remove`/`delete` — a new op kind joins as a branch there — and a late

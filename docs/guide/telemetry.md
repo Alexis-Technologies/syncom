@@ -215,7 +215,7 @@ alert to key on:
 | warn | `sync.op.refused`, `sync.op.outOfScope`, `sync.hello.refused` | hosting side: ops outside a peer's scopes, a call refused by code |
 | warn | `sync.gaps`, `sync.error`, `sync.outbox.dropped`, `sync.record.malformed`, `sync.record.skew`, `sync.record.encrypted` | a page with gaps, a failure on the way to a peer, a dropped backlog, a snapshot record left out |
 | warn | `log.epoch.new` (when a log was there), `log.segment.unreadable`, `log.open.unreadable` | the log changed epoch or lost a file |
-| warn | `catalog.skipped`, `catalog.lens`, `catalog.save`, `snapshot.skipped`, `replay.skipped`, `record.shadowed` | derived state could not follow a record; a field shadowing a method |
+| warn | `catalog.skipped`, `catalog.lens`, `catalog.save`, `catalog.search`, `snapshot.skipped`, `replay.skipped`, `record.shadowed` | derived state could not follow a record (`catalog.search`: the injected text index threw); a field shadowing a method |
 | warn | `listener.error`, `watch.error`, `schema.drift` | an event listener or a watcher threw; two builds of one schema version |
 | warn | `identity.rekeyed` | a directory from before signing: `node.json` held a UUID, the node is now its signing key (once) |
 | info | `schema.upgrade`, `schema.changed`, `schema.held`, `record.repaired` | what a reopen found about the schema; a record rebuilt from the log |
