@@ -130,7 +130,7 @@ export default withMermaid({
         {
           // Hand-synced with package.json "version" — part of the release
           // checklist, and asserted by tests/package/consistency.test.js.
-          text: 'v1.0.0',
+          text: 'v0.0.1',
           items: [
             { text: 'Changelog', link: `${repo}/blob/main/CHANGELOG.md` },
             { text: 'npm', link: 'https://www.npmjs.com/package/@alexify/syncom' },

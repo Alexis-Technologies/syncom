@@ -11,7 +11,7 @@ description: Prepare an @alexify package for publishing with pnpm. Handles versi
 
 Systematic workflow for preparing the package for a new release. Every step must pass before proceeding to the next. The package manager is pnpm (pinned in `packageManager`); never create `package-lock.json`. Releases are run by hand on purpose: there is no release workflow and no publish automation, and this skill never publishes.
 
-`@alexify/syncom` has not been published yet (`1.0.0` in `package.json`, no `v*` tags, an `[Unreleased]` section that says so). The first release is the first run of this skill; read the "first release" notes in Steps 2 and 3.
+`@alexify/syncom` has not been published yet (`0.0.1` in `package.json`, a development placeholder; no `v*` tags, an `[Unreleased]` section that says so). The first release is the first run of this skill; read the "first release" notes in Steps 2 and 3.
 
 ## Step 0: Gather Release Intent
 
@@ -59,7 +59,7 @@ Update `"version"` in `package.json` with the Edit tool, not `pnpm version`: the
 
 Change the nav label in `docs/.vitepress/config.mts` (`text: 'v<version>'`) in the same edit: it is hand-synced and `tests/package/consistency.test.js` fails when the two differ.
 
-**First release:** the user chose `1.0.0`, and `package.json` and the nav label already carry it; confirm it is still the intent. The changelog states that all of `[Unreleased]` lands in it.
+**First release:** `0.0.1` is the placeholder the repository carries until then — the user releases only once the package meets its goals. Pick the first version with the user (`0.1.0` is the usual choice for an API that may still change); bump `package.json`, the docs nav label and the comparison matrix together (`tests/package/consistency.test.js` checks the first two). The changelog states that all of `[Unreleased]` lands in it.
 
 ## Step 3: Update CHANGELOG.md
 

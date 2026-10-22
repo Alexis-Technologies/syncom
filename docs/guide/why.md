@@ -26,8 +26,9 @@ engine also covers what an application keeps next to replication:
   [wrpc](/guide/wrpc) over WebSocket or [WebRTC](/guide/webrtc) out of the box.
 - **Records that merge field by field.** A write is a last-writer-wins register per field,
   stamped by a clock that never runs behind what the node has seen. Counters add up across
-  nodes, and tombstones revive. Two replicas that edit different fields of one record both
-  keep their change, and two that increment one counter both count. Of the eighteen
+  nodes, sets keep every concurrent add, and tombstones revive. Two replicas that edit different
+  fields of one record both keep their change, two that increment one counter both count, and
+  two that tag one record keep both tags. Of the eighteen
   alternatives in the [comparison](/guide/comparison), three others have counters that
   converge.
 - **The host decides what it accepts.** A hub checks a peer's op before applying it: the op's
@@ -52,11 +53,12 @@ engine also covers what an application keeps next to replication:
   and a browser bundle of about 41 KB min+gzip that CI holds to a budget.
 
 The [benchmarks](/guide/benchmarks) put a number on all of this. syncom opens a store and reads
-a record in 34 ms, the fastest cold start of the ten libraries measured. An empty replica pulls
-1,000 records in memory at about 110,000 a second, level with Yjs and Loro, and a read is served
+a record in about 37 ms, the fastest cold start of the ten libraries measured, and serves a read
 from its cache at about a million a second. A write costs more than a CRDT's, because it is
-logged, filed, catalogued and chained: about 1,500 a second on disk, where the LevelDB-backed
-Yjs and PouchDB do 19,000 to 26,000.
+signed, logged, filed, catalogued and chained: about 16,000 a second in memory and 1,500 on
+disk, where the LevelDB-backed Yjs and PouchDB do 19,000 to 26,000. And every op a replica
+receives is verified against its origin, so an empty replica pulls about 25,000 records a second
+in memory, where Yjs and Loro pull 100,000 — `sync.signatures: false` trades that check away.
 
 ## When something else fits better
 
@@ -73,7 +75,8 @@ Yjs and PouchDB do 19,000 to 26,000.
   field). Jazz signs and encrypts every change, and Evolu encrypts everything it syncs.
 - **Ready-made UI bindings, React Native, a managed cloud.** syncom ships none of them. RxDB,
   TinyBase, Dexie Cloud, InstantDB and others do.
-- **A package with a track record.** syncom 1.0.0 is not on npm yet. The
+- **A package with a track record.** syncom is a pre-release (0.0.1), not on npm yet, and its
+  API may still change before the first release. The
   [Sync](/guide/sync#guarantees-and-limits) guide lists the known limits: a counter straddling a concurrent reset,
   encrypted records that stay local, no proof of key possession at `hello`.
 

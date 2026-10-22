@@ -80,25 +80,25 @@ tinybase@10.0.1</title>
 <path class="bar" d="M276,181H565.9477990538655A4,4 0 0 1 569.9477990538655,185V191A4,4 0 0 1 565.9477990538655,195H276Z"/>
 <text class="value" x="575.9477990538655" y="194">1.39M</text>
 </g>
-<g><title>syncom · chain: false, node:fs · v1.0.0
-954,742 ops/s
-1.05 µs per operation
-samples 941k – 962k
-@alexify/syncom@1.0.0</title>
-<text class="label secondary" x="20" y="225">syncom</text>
-<text class="sublabel" x="20" y="240">chain: false, node:fs · v1.0.0</text>
-<path class="bar secondary" d="M276,221H556.564905785149A4,4 0 0 1 560.564905785149,225V231A4,4 0 0 1 556.564905785149,235H276Z"/>
-<text class="value" x="566.564905785149" y="234">955k</text>
+<g><title>syncom · default, node:fs · v0.0.1
+958,203 ops/s
+1.04 µs per operation
+samples 957k – 963k
+@alexify/syncom@0.0.1</title>
+<text class="label primary" x="20" y="225">syncom</text>
+<text class="sublabel" x="20" y="240">default, node:fs · v0.0.1</text>
+<path class="bar primary" d="M276,221H556.6547233986057A4,4 0 0 1 560.6547233986057,225V231A4,4 0 0 1 556.6547233986057,235H276Z"/>
+<text class="value" x="566.6547233986057" y="234">958k</text>
 </g>
-<g><title>syncom · default, node:fs · v1.0.0
-895,521 ops/s
-1.12 µs per operation
-samples 865k – 969k
-@alexify/syncom@1.0.0</title>
-<text class="label primary" x="20" y="265">syncom</text>
-<text class="sublabel" x="20" y="280">default, node:fs · v1.0.0</text>
-<path class="bar primary" d="M276,261H554.9757517955937A4,4 0 0 1 558.9757517955937,265V271A4,4 0 0 1 554.9757517955937,275H276Z"/>
-<text class="value" x="564.9757517955937" y="274">896k</text>
+<g><title>syncom · chain: false, node:fs · v0.0.1
+951,488 ops/s
+1.05 µs per operation
+samples 935k – 962k
+@alexify/syncom@0.0.1</title>
+<text class="label secondary" x="20" y="265">syncom</text>
+<text class="sublabel" x="20" y="280">chain: false, node:fs · v0.0.1</text>
+<path class="bar secondary" d="M276,261H556.4802022180281A4,4 0 0 1 560.4802022180281,265V271A4,4 0 0 1 556.4802022180281,275H276Z"/>
+<text class="value" x="566.4802022180281" y="274">951k</text>
 </g>
 <g><title>Loro · updates appended to a file · v1.16.4
 285,175 ops/s
@@ -151,5 +151,5 @@ samples 68.7 – 110
 <text class="value" x="334.33731434482036" y="474">82.4</text>
 </g>
 <text class="caption" x="20" y="529">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
-<text class="caption" x="20" y="545">in a fresh process · 2026-10-21</text>
+<text class="caption" x="20" y="545">in a fresh process · 2026-10-22</text>
 </svg>

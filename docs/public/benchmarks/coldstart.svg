@@ -42,23 +42,23 @@
 <line class="grid" x1="676" y1="88" x2="676" y2="488"/>
 <text class="tick" x="676" y="504" text-anchor="middle">600 ms</text>
 <line class="axis" x1="276" y1="88" x2="276" y2="488"/>
-<g><title>syncom · chain: false, node:fs · v1.0.0
-33.8 ms in total
-load and open 33.5 ms · first read 0.3 ms
-@alexify/syncom@1.0.0</title>
+<g><title>syncom · chain: false, node:fs · v0.0.1
+36.3 ms in total
+load and open 36.0 ms · first read 0.3 ms
+@alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="105">syncom</text>
-<text class="sublabel" x="20" y="120">chain: false, node:fs · v1.0.0</text>
-<path class="bar secondary" d="M276,101H294.53437533333334A4,4 0 0 1 298.53437533333334,105V111A4,4 0 0 1 294.53437533333334,115H276Z"/>
-<text class="value" x="304.53437533333334" y="114">34 ms</text>
+<text class="sublabel" x="20" y="120">chain: false, node:fs · v0.0.1</text>
+<path class="bar secondary" d="M276,101H296.2188053333333A4,4 0 0 1 300.2188053333333,105V111A4,4 0 0 1 296.2188053333333,115H276Z"/>
+<text class="value" x="306.2188053333333" y="114">36 ms</text>
 </g>
-<g><title>syncom · default, node:fs · v1.0.0
-34.3 ms in total
-load and open 33.5 ms · first read 0.8 ms
-@alexify/syncom@1.0.0</title>
+<g><title>syncom · default, node:fs · v0.0.1
+37.0 ms in total
+load and open 36.0 ms · first read 0.9 ms
+@alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="145">syncom</text>
-<text class="sublabel" x="20" y="160">default, node:fs · v1.0.0</text>
-<path class="bar primary" d="M276,141H294.88019433333335A4,4 0 0 1 298.88019433333335,145V151A4,4 0 0 1 294.88019433333335,155H276Z"/>
-<text class="value" x="304.88019433333335" y="154">34 ms</text>
+<text class="sublabel" x="20" y="160">default, node:fs · v0.0.1</text>
+<path class="bar primary" d="M276,141H296.67577766666665A4,4 0 0 1 300.67577766666665,145V151A4,4 0 0 1 296.67577766666665,155H276Z"/>
+<text class="value" x="306.67577766666665" y="154">37 ms</text>
 </g>
 <g><title>TinyBase · MergeableStore, file persister · v10.0.1
 50.8 ms in total

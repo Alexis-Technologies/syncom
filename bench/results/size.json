@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-21T14:20:30.324Z",
+  "generatedAt": "2026-10-22T19:01:27.716Z",
   "esbuild": "0.28.2",
   "libraries": [
     {
@@ -7,10 +7,10 @@
       "name": "syncom",
       "entry": "open() over OPFS + the wrpc link adapter",
       "packages": [
-        "@alexify/syncom@1.0.0"
+        "@alexify/syncom@0.0.1"
       ],
-      "min": 109767,
-      "gzip": 38164,
+      "min": 122785,
+      "gzip": 42313,
       "note": "storage, schema, queries, the op log and the sync protocol are one entry"
     },
     {

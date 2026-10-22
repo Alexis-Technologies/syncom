@@ -54,9 +54,9 @@ with `node --test --test-name-pattern 'swap'`.
   `tests/wrpc.integration.test.js` only, which skips when it is missing; nothing
   under `src/` may `require` it. The adapter in `src/wrpc.js` duck-types the
   client it is handed.
-- **A field is a register or a counter.** `set`/`update` write registers,
-  `inc` writes counters, and the two never meet on one field — do not add a
-  path that lets them.
+- **A field is a register, a counter or a set.** `set`/`update` write
+  registers, `inc` writes counters, `add`/`remove` write sets, and no two of
+  them meet on one field — do not add a path that lets them.
 
 ## Tests
 

@@ -76,25 +76,25 @@ pouchdb@9.0.0</title>
 <path class="bar" d="M276,181H587.5803209329681A4,4 0 0 1 591.5803209329681,185V191A4,4 0 0 1 587.5803209329681,195H276Z"/>
 <text class="value" x="597.5803209329681" y="194">8,805</text>
 </g>
-<g><title>syncom · chain: false, node:fs · v1.0.0
-3,503 ops/s
-285 µs per operation
-samples 3,443 – 3,648
-@alexify/syncom@1.0.0</title>
+<g><title>syncom · chain: false, node:fs · v0.0.1
+3,076 ops/s
+325 µs per operation
+samples 2,747 – 3,081
+@alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="225">syncom</text>
-<text class="sublabel" x="20" y="240">chain: false, node:fs · v1.0.0</text>
-<path class="bar secondary" d="M276,221H555.5586820430437A4,4 0 0 1 559.5586820430437,225V231A4,4 0 0 1 555.5586820430437,235H276Z"/>
-<text class="value" x="565.5586820430437" y="234">3,503</text>
+<text class="sublabel" x="20" y="240">chain: false, node:fs · v0.0.1</text>
+<path class="bar secondary" d="M276,221H551.0429149155887A4,4 0 0 1 555.0429149155887,225V231A4,4 0 0 1 551.0429149155887,235H276Z"/>
+<text class="value" x="561.0429149155887" y="234">3,076</text>
 </g>
-<g><title>syncom · default, node:fs · v1.0.0
-1,589 ops/s
-629 µs per operation
-samples 1,290 – 2,172
-@alexify/syncom@1.0.0</title>
+<g><title>syncom · default, node:fs · v0.0.1
+1,342 ops/s
+745 µs per operation
+samples 994 – 1,786
+@alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="265">syncom</text>
-<text class="sublabel" x="20" y="280">default, node:fs · v1.0.0</text>
-<path class="bar primary" d="M276,261H528.098346090086A4,4 0 0 1 532.098346090086,265V271A4,4 0 0 1 528.098346090086,275H276Z"/>
-<text class="value" x="538.098346090086" y="274">1,589</text>
+<text class="sublabel" x="20" y="280">default, node:fs · v0.0.1</text>
+<path class="bar primary" d="M276,261H522.2328914008173A4,4 0 0 1 526.2328914008173,265V271A4,4 0 0 1 522.2328914008173,275H276Z"/>
+<text class="value" x="532.2328914008173" y="274">1,342</text>
 </g>
 <g><title>Automerge · automerge-repo, NodeFS storage · v3.5.0
 1,247 ops/s
@@ -147,5 +147,5 @@ gun@0.2020.1241</title>
 <text class="value" x="328.13590275949116" y="474">3.77</text>
 </g>
 <text class="caption" x="20" y="529">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
-<text class="caption" x="20" y="545">in a fresh process · 2026-10-21</text>
+<text class="caption" x="20" y="545">in a fresh process · 2026-10-22</text>
 </svg>

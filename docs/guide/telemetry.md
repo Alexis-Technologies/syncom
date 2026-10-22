@@ -64,7 +64,7 @@ wrpc's spans around the actual calls.
 | Span | When | Attributes |
 | --- | --- | --- |
 | `syncom.commit` | one local write, from the moment it runs to after the `change` listeners | `syncom.op.type`, `syncom.record.id`†, `syncom.result` (`applied` / `noop` / `encrypted`), `syncom.scope` |
-| `syncom.apply` | one batch of a peer's ops | `syncom.ops.count`, `syncom.ops.applied`, `syncom.ops.duplicates`, `syncom.ops.gaps` |
+| `syncom.apply` | one batch of a peer's ops | `syncom.ops.count`, `syncom.ops.applied`, `syncom.ops.skipped`, `syncom.ops.duplicates`, `syncom.ops.gaps`, `syncom.ops.malformed`, `syncom.ops.unsigned`, `syncom.ops.forged` |
 | `syncom.replay` | the unsealed log tail replayed at open | `syncom.ops.count`, `syncom.records` |
 | `syncom.push` | one push to a peer, all its pages | `syncom.push.reason` (`handshake` / `manual` / `relay`), `syncom.ops.count`, `syncom.pages`, `syncom.peer.url`†, `syncom.peer.node`† |
 | `syncom.bootstrap` | the whole snapshot walk from a peer | `syncom.peer.url`†, `syncom.peer.node`†, `syncom.pages`, `syncom.records` |
@@ -77,7 +77,7 @@ wrpc's spans around the actual calls.
 
 A span is marked failed (status `ERROR`, the exception recorded, `error.type`
 set) when the work it brackets throws: a write refused by the
-register/counter rule, a push whose call rejected, a bootstrap that could not
+field-kind rule, a push whose call rejected, a bootstrap that could not
 read a snapshot. A peer's op refused inside `applyRemote` is a protocol
 outcome, not a failure of the batch: it is counted (below), the batch's span
 stays green.

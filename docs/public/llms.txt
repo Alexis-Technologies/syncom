@@ -13,7 +13,7 @@
 - Requires Node.js >= 22, or a browser with OPFS and Web Crypto (secure context)
 - **Zero runtime dependencies.** Browser bundle is about 41 KB min+gzip (a CI budget); the wrpc adapter and the
   search index under 1 KB each
-- CommonJS, no build step; `src/` ships as published; version 1.0.0, not yet on npm
+- CommonJS, no build step; `src/` ships as published; version 0.0.1 — a pre-release, not on npm, API may still change
 - Entry points: `.` (Node `index.js` / browser `browser.js` via the `browser` export condition), `./wrpc`,
   `./contracts`, `./idb`, `./search`
 - Exports: `open`, `Storage`, `SyncManager`, `isSyncLink`, `OpLog`, `applyOp`, `mergeEntry`, `isAlive`,
@@ -50,12 +50,12 @@
 - [Benchmarks](https://syncomjs.vercel.app/guide/benchmarks): insert, update, read, counters, batches, replication, cold start and bundle size against nine libraries, plus syncom's own benchmarks.
 - [Architecture](https://syncomjs.vercel.app/guide/architecture): the facade, the three write paths, replication between nodes, the files on disk.
 - [Getting Started](https://syncomjs.vercel.app/guide/getting-started): install, open a storage, records, validation, a first sync.
-- [Storage](https://syncomjs.vercel.app/guide/storage): explicit API, registers vs counters, compare-and-swap, records, references, schema collections, encryption at rest, on-disk layout.
-- [Sync](https://syncomjs.vercel.app/guide/sync): the operation model, the log and its two cursors, the protocol, bootstrap, scopes, the registry, the link contract, guarantees and limits.
+- [Storage](https://syncomjs.vercel.app/guide/storage): explicit API, registers, counters and sets, compare-and-swap, records, references, schema collections, encryption at rest, on-disk layout.
+- [Sync](https://syncomjs.vercel.app/guide/sync): the operation model, the log and its two cursors, signatures, the protocol, bootstrap, scopes, the registry, the link contract, guarantees and limits.
 - [wrpc transport](https://syncomjs.vercel.app/guide/wrpc): hosting `storage.sync.unit()` on a wrpc server, dialing with `createWrpcLink`, the browser, rooms and presence.
 - [CRDT deltas](https://syncomjs.vercel.app/guide/crdt): diff/merge/apply semantics, grow-only sets, the numeric-addition rule.
 - [Schema and validation](https://syncomjs.vercel.app/guide/schema): entity definitions, validators, versions and lenses, `migrate()`.
-- [Queries](https://syncomjs.vercel.app/guide/query): Mango `select()`, the catalog, indexes, unique keys, `watch()`.
+- [Queries](https://syncomjs.vercel.app/guide/query): Mango `select()`, the catalog, indexes, unique keys, `watch()`, full-text `$text`.
 - [Hooks and events](https://syncomjs.vercel.app/guide/hooks): hooks inside writes, reads and peer batches; events.
 - [Backends](https://syncomjs.vercel.app/guide/backends): the `fsi` contract, node:fs, OPFS, IndexedDB, memory, the lock.
 - [Scaling](https://syncomjs.vercel.app/guide/scaling): hubs, scopes as buckets, limits, presence.

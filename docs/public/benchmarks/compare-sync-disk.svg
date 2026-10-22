@@ -86,25 +86,25 @@ tinybase@10.0.1</title>
 <path class="bar" d="M276,255H476.4209656727902A4,4 0 0 1 480.4209656727902,259V265A4,4 0 0 1 476.4209656727902,269H276Z"/>
 <text class="value" x="486.4209656727902" y="268">11.1k</text>
 </g>
-<g><title>syncom · chain: false, node:fs · v1.0.0
-7,404 records/s
-135 µs per record
-samples 7,011 – 7,580
-@alexify/syncom@1.0.0</title>
-<text class="label secondary" x="20" y="299">syncom</text>
-<text class="sublabel" x="20" y="314">chain: false, node:fs · v1.0.0</text>
-<path class="bar secondary" d="M276,295H458.9490805535272A4,4 0 0 1 462.9490805535272,299V305A4,4 0 0 1 458.9490805535272,309H276Z"/>
-<text class="value" x="468.9490805535272" y="308">7,404</text>
+<g><title>syncom · default, node:fs · v0.0.1
+5,833 records/s
+171 µs per record
+samples 3,342 – 6,033
+@alexify/syncom@0.0.1</title>
+<text class="label primary" x="20" y="299">syncom</text>
+<text class="sublabel" x="20" y="314">default, node:fs · v0.0.1</text>
+<path class="bar primary" d="M276,295H448.59159210356006A4,4 0 0 1 452.59159210356006,299V305A4,4 0 0 1 448.59159210356006,309H276Z"/>
+<text class="value" x="458.59159210356006" y="308">5,833</text>
 </g>
-<g><title>syncom · default, node:fs · v1.0.0
-6,947 records/s
-144 µs per record
-samples 4,099 – 7,598
-@alexify/syncom@1.0.0</title>
-<text class="label primary" x="20" y="339">syncom</text>
-<text class="sublabel" x="20" y="354">default, node:fs · v1.0.0</text>
-<path class="bar primary" d="M276,335H456.17877002372313A4,4 0 0 1 460.17877002372313,339V345A4,4 0 0 1 456.17877002372313,349H276Z"/>
-<text class="value" x="466.17877002372313" y="348">6,947</text>
+<g><title>syncom · chain: false, node:fs · v0.0.1
+5,820 records/s
+172 µs per record
+samples 4,256 – 6,096
+@alexify/syncom@0.0.1</title>
+<text class="label secondary" x="20" y="339">syncom</text>
+<text class="sublabel" x="20" y="354">chain: false, node:fs · v0.0.1</text>
+<path class="bar secondary" d="M276,335H448.49340805292354A4,4 0 0 1 452.49340805292354,339V345A4,4 0 0 1 448.49340805292354,349H276Z"/>
+<text class="value" x="458.49340805292354" y="348">5,820</text>
 </g>
 <g><title>Automerge · automerge-repo, NodeFS storage · v3.5.0
 3,098 records/s
@@ -127,5 +127,5 @@ samples 177 – 195
 <text class="value" x="310.6086226077719" y="428">193</text>
 </g>
 <text class="caption" x="20" y="483">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
-<text class="caption" x="20" y="499">in a fresh process · 2026-10-21</text>
+<text class="caption" x="20" y="499">in a fresh process · 2026-10-22</text>
 </svg>

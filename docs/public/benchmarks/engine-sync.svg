@@ -45,33 +45,33 @@
 <text class="tick" x="676" y="344" text-anchor="middle">10k</text>
 <line class="axis" x1="372" y1="88" x2="372" y2="328"/>
 <g><title>write on A, applied on B (one hop)
-719 ops/s
-1.39 ms per operation</title>
+539 ops/s
+1.86 ms per operation</title>
 <text class="label primary" x="20" y="112">write on A, applied on B (one hop)</text>
-<path class="bar primary" d="M372,101H585.111395669099A4,4 0 0 1 589.111395669099,105V111A4,4 0 0 1 585.111395669099,115H372Z"/>
-<text class="value" x="595.111395669099" y="114">719</text>
+<path class="bar primary" d="M372,101H575.6007461541922A4,4 0 0 1 579.6007461541922,105V111A4,4 0 0 1 575.6007461541922,115H372Z"/>
+<text class="value" x="585.6007461541922" y="114">539</text>
 </g>
 <g><title>write on A, applied on C (two hops)
-865 ops/s
-1.16 ms per operation</title>
+679 ops/s
+1.47 ms per operation</title>
 <text class="label primary" x="20" y="152">write on A, applied on C (two hops)</text>
-<path class="bar primary" d="M372,141H591.2132241673258A4,4 0 0 1 595.2132241673258,145V151A4,4 0 0 1 591.2132241673258,155H372Z"/>
-<text class="value" x="601.2132241673258" y="154">865</text>
+<path class="bar primary" d="M372,141H583.2221028453181A4,4 0 0 1 587.2221028453181,145V151A4,4 0 0 1 583.2221028453181,155H372Z"/>
+<text class="value" x="593.2221028453181" y="154">679</text>
 </g>
 <g><title>update on A, applied on C (two hops)
-902 ops/s
-1.11 ms per operation</title>
+741 ops/s
+1.35 ms per operation</title>
 <text class="label primary" x="20" y="192">update on A, applied on C (two hops)</text>
-<path class="bar primary" d="M372,181H592.5956968531875A4,4 0 0 1 596.5956968531875,185V191A4,4 0 0 1 592.5956968531875,195H372Z"/>
-<text class="value" x="602.5956968531875" y="194">902</text>
+<path class="bar primary" d="M372,181H586.1061838064289A4,4 0 0 1 590.1061838064289,185V191A4,4 0 0 1 586.1061838064289,195H372Z"/>
+<text class="value" x="596.1061838064289" y="194">741</text>
 </g>
 <g><title>snapshot · one page of 500 out of 2000 (host side)
-9,303 ops/s
-107 µs per operation</title>
+8,920 ops/s
+112 µs per operation</title>
 <text class="label primary" x="20" y="225">snapshot</text>
 <text class="sublabel" x="20" y="240">one page of 500 out of 2000 (host side)</text>
-<path class="bar primary" d="M372,221H669.6153495927311A4,4 0 0 1 673.6153495927311,225V231A4,4 0 0 1 669.6153495927311,235H372Z"/>
-<text class="value" x="679.6153495927311" y="234">9,303</text>
+<path class="bar primary" d="M372,221H668.2277289325854A4,4 0 0 1 672.2277289325854,225V231A4,4 0 0 1 668.2277289325854,235H372Z"/>
+<text class="value" x="678.2277289325854" y="234">8,920</text>
 </g>
 <g><title>bootstrap · a new node joins a host of 2000 records
 2 ops/s
@@ -82,11 +82,11 @@
 <text class="value" x="400.8782796704626" y="274">2</text>
 </g>
 <g><title>append of another scope's op while a scoped feed listens
-1,877 ops/s
-533 µs per operation</title>
+1,711 ops/s
+584 µs per operation</title>
 <text class="label primary" x="20" y="312">append of another scope's op while a scoped fe…</text>
-<path class="bar primary" d="M372,301H616.7832847192224A4,4 0 0 1 620.7832847192224,305V311A4,4 0 0 1 616.7832847192224,315H372Z"/>
-<text class="value" x="626.7832847192224" y="314">1,877</text>
+<path class="bar primary" d="M372,301H613.7270007251236A4,4 0 0 1 617.7270007251236,305V311A4,4 0 0 1 613.7270007251236,315H372Z"/>
+<text class="value" x="623.7270007251236" y="314">1,711</text>
 </g>
 <text class="caption" x="20" y="369">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-22</text>
 </svg>

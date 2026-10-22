@@ -168,7 +168,7 @@ InstantDB) meet. The [comparison](https://syncomjs.vercel.app/guide/comparison) 
 nineteen in one table of forty features, each cell decided from the published source. In short:
 syncom is a database that merges field by field, not a text CRDT. It syncs with no service to
 run, its hosts validate and scope what peers send, and its log is verifiable and purgeable. It
-has no text or list CRDT and no UI bindings, and 1.0.0 is not on npm yet.
+has no text or list CRDT and no UI bindings, and it is a pre-release, not on npm yet.
 
 ## Benchmarks
 
@@ -214,8 +214,8 @@ interactive charts are on the [Benchmarks](https://syncomjs.vercel.app/guide/ben
 
 | Library | Insert a record<br><sub>ops/s</sub> | Update a field<br><sub>ops/s</sub> | Read a record<br><sub>ops/s</sub> | Increment a counter<br><sub>ops/s</sub> | Insert 1,000 at once<br><sub>records/s</sub> | Replicate a store<br><sub>records/s</sub> |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| **syncom**<br><sub>default, createMemoryFsi() · v1.0.0</sub> | 37,500 | 52,900 | 966,000 | 53,100 | 41,200 | 108,000 |
-| **syncom**<br><sub>chain: false, createMemoryFsi() · v1.0.0</sub> | 44,300 | 78,400 | 983,000 | 79,400 | 61,100 | 127,000 |
+| **syncom**<br><sub>default, createMemoryFsi() · v0.0.1</sub> | 16,200 | 17,100 | 972,000 | 16,700 | 16,000 | 25,200 |
+| **syncom**<br><sub>chain: false, createMemoryFsi() · v0.0.1</sub> | 17,500 | 18,800 | 929,000 | 18,600 | 17,200 | 26,200 |
 | Yjs<br><sub>Y.Doc, a Y.Map per record · v13.6.33</sub> | 235,000 | 382,000 | 3,680,000 | — | 275,000 | 99,700 |
 | Automerge<br><sub>Automerge.change, Counter · v3.5.0</sub> | 512 | 1,990 | 10,600,000 | 1,950 | 8,960 | 20,900 |
 | Loro<br><sub>LoroDoc, a LoroMap per record · v1.16.4</sub> | 31,300 | 412,000 | 313,000 | 349,000 | 83,100 | 105,000 |
@@ -229,8 +229,8 @@ interactive charts are on the [Benchmarks](https://syncomjs.vercel.app/guide/ben
 
 | Library | Insert a record<br><sub>ops/s</sub> | Update a field<br><sub>ops/s</sub> | Read a record<br><sub>ops/s</sub> | Increment a counter<br><sub>ops/s</sub> | Insert 1,000 at once<br><sub>records/s</sub> | Replicate a store<br><sub>records/s</sub> |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| **syncom**<br><sub>default, node:fs · v1.0.0</sub> | 1,490 | 1,590 | 896,000 | 1,810 | 1,850 | 6,950 |
-| **syncom**<br><sub>chain: false, node:fs · v1.0.0</sub> | 2,450 | 3,500 | 955,000 | 3,560 | 3,100 | 7,400 |
+| **syncom**<br><sub>default, node:fs · v0.0.1</sub> | 1,520 | 1,340 | 958,000 | 1,480 | 1,690 | 5,830 |
+| **syncom**<br><sub>chain: false, node:fs · v0.0.1</sub> | 2,060 | 3,080 | 951,000 | 3,060 | 2,740 | 5,820 |
 | Yjs<br><sub>y-leveldb · v13.6.33</sub> | 19,200 | 22,400 | 3,690,000 | — | 155,000 | 53,700 |
 | Automerge<br><sub>automerge-repo, NodeFS storage · v3.5.0</sub> | 490 | 1,250 | 10,500,000 | 1,200 | 7,820 | 3,100 |
 | Loro<br><sub>updates appended to a file · v1.16.4</sub> | 19,500 | 43,300 | 285,000 | 42,600 | 66,900 | 108,000 |
@@ -240,7 +240,7 @@ interactive charts are on the [Benchmarks](https://syncomjs.vercel.app/guide/ben
 | GUN<br><sub>RAD on node:fs · v0.2020.1241</sub> | 3.63 | 3.77 | 749 | — | failed | — |
 | OrbitDB<br><sub>documents, LevelDB · v4.0.0</sub> | 952 | 17.4 | 82.4 | — | 921 | 193 |
 
-_Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library in a fresh process · 2026-10-21. Medians, rounded to three significant figures; — where the library has no such operation, no such storage, or no in-process sync, failed where it did not finish twice (the chart above says why)._
+_Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library in a fresh process · 2026-10-22. Medians, rounded to three significant figures; — where the library has no such operation, no such storage, or no in-process sync, failed where it did not finish twice (the chart above says why)._
 
 <!-- bench:compare:end -->
 
@@ -265,8 +265,8 @@ _Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 roun
 | GUN<br><sub>gun@0.2020.1241</sub> | gun (localStorage; its WebSocket mesh is built in) | 42.2 KB | 17.1 KB |  |
 | TinyBase<br><sub>tinybase@10.0.1</sub> | MergeableStore + IndexedDB persister + custom synchronizer | 56.4 KB | 23.8 KB |  |
 | Yjs<br><sub>yjs@13.6.33, y-indexeddb@9.0.12, y-protocols@1.0.7</sub> | yjs + y-indexeddb + y-protocols/sync | 80.2 KB | 24.5 KB |  |
-| **syncom**<br><sub>@alexify/syncom@1.0.0</sub> | open() over OPFS + the wrpc link adapter | 107.2 KB | 37.3 KB | storage, schema, queries, the op log and the sync protocol are one entry |
 | PouchDB<br><sub>pouchdb-browser@9.0.0</sub> | pouchdb-browser | 117.8 KB | 40.4 KB | pouchdb-browser carries its HTTP adapter (the CouchDB client) with it |
+| **syncom**<br><sub>@alexify/syncom@0.0.1</sub> | open() over OPFS + the wrpc link adapter | 119.9 KB | 41.3 KB | storage, schema, queries, the op log and the sync protocol are one entry |
 | RxDB<br><sub>rxdb@17.6.0, dexie@4.4.6, rxjs@7.8.2</sub> | rxdb + Dexie storage + replication | 282.3 KB | 90.1 KB |  |
 | Fireproof<br><sub>@fireproof/core@0.24.19</sub> | @fireproof/core | 784.2 KB | 204.0 KB |  |
 | OrbitDB<br><sub>@orbitdb/core@4.0.0, helia@6.1.4, libp2p@3.5.1, @libp2p/gossipsub@15.0.23, blockstore-idb@4.0.1</sub> | @orbitdb/core + helia + libp2p, IndexedDB blockstore | 1185.6 KB | 353.7 KB | createHelia brings Helia's default libp2p configuration with it |
@@ -302,10 +302,11 @@ See [Browser](https://syncomjs.vercel.app/guide/browser).
 
 ## Status
 
-1.0.0, not yet published to npm. Everything on this page works today and is covered by the test suite,
-including replication over real wrpc WebSockets. Known limits — a counter
-straddling a concurrent reset, encrypted records staying
-local — are listed under [Guarantees and limits](https://syncomjs.vercel.app/guide/sync#guarantees-and-limits).
+0.0.1 — a pre-release, not published to npm, and there is no release until the package does what it is meant
+to; the API may still change. Everything on this page works today and is covered by the test suite, including
+replication over real wrpc WebSockets. Known limits — a counter straddling a concurrent reset, a field written
+as two kinds at once, encrypted records staying local, no proof of key possession at `hello` — are listed under
+[Guarantees and limits](https://syncomjs.vercel.app/guide/sync#guarantees-and-limits).
 
 ## Documentation
 

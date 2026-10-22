@@ -400,7 +400,7 @@ storage.sync.peers();       // [{ url, node, connected, subscribed, cursor, last
 storage.sync.hosted();      // hosting side: [{ node, scopes, since, cursor }] — every live `changes` feed
 
 storage.sync.on('peer', ({ url, connected, node, reconnected }) => {});
-storage.sync.on('sync', ({ url, pushed, received, applied, skipped, duplicates, gaps, malformed }) => {});
+storage.sync.on('sync', ({ url, pushed, received, applied, skipped, duplicates, gaps, malformed, unsigned, forged }) => {});
 storage.sync.on('bootstrap', ({ url, records }) => {});
 storage.sync.on('error', (error) => {}); // error.url names the peer; error.code may be 'PAGE_FAILED' | 'STUCK' | 'HANDSHAKE_LOOP'
 storage.sync.on('refused', ({ node, reason, count }) => {}); // hosting side: ops outside the peer's scopes

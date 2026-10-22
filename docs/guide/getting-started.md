@@ -15,14 +15,20 @@ It has **no runtime dependencies**.
 
 ## Installation
 
+syncom is not on npm yet: `0.0.1` is a development version, and there is no
+release until the package does what it is meant to. Until then, depend on the
+repository — a git dependency, or a workspace link. Once it is published:
+
 ```bash
 npm install @alexify/syncom
 ```
 
 ## Opening a storage
 
-`open()` is asynchronous: it generates or loads an RSA key pair, initialises
-the chain and the operation log, and returns once the storage is ready to use.
+`open()` is asynchronous: it generates or loads its two key pairs — RSA to
+seal encrypted records, Ed25519 to sign ops, whose public key is the node id —
+initialises the chain and the operation log, and returns once the storage is
+ready to use.
 
 ```js
 'use strict';

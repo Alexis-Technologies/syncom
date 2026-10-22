@@ -93,8 +93,9 @@ apply({ hits: 0 }, [
 ## Where storage uses them
 
 Storage does **not** replicate through `merge`. Its writes are typed
-operations — `write`, `set`, `inc`, `delete` — applied with last-writer-wins
-registers and per-origin counters, because a delta that *adds* numbers cannot
-tell `hits = 3` from `hits += 3`. See [Sync](./sync#operations) for that
+operations — `write`, `set`, `inc`, `add`, `remove`, `delete` — applied with
+last-writer-wins registers, per-origin counters and observed-remove sets,
+because a delta that *adds* numbers cannot tell `hits = 3` from `hits += 3`,
+and one that unions arrays can never take an element out. See [Sync](./sync#operations) for that
 model. `diff`, `merge` and `apply` remain what they are here: standalone
 helpers for plain objects.

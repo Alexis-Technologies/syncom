@@ -45,55 +45,55 @@
 <line class="grid" x1="676" y1="105" x2="676" y2="465"/>
 <text class="tick" x="676" y="481" text-anchor="middle">1M</text>
 <line class="axis" x1="276" y1="105" x2="276" y2="465"/>
-<g><title>syncom · chain: false, createMemoryFsi() · v1.0.0
-126,826 records/s
-7.88 µs per record
-samples 99.7k – 138k
-@alexify/syncom@1.0.0</title>
-<text class="label secondary" x="20" y="122">syncom</text>
-<text class="sublabel" x="20" y="137">chain: false, createMemoryFsi() · v1.0.0</text>
-<path class="bar secondary" d="M276,118H582.3207445473049A4,4 0 0 1 586.3207445473049,122V128A4,4 0 0 1 582.3207445473049,132H276Z"/>
-<text class="value" x="592.3207445473049" y="131">127k</text>
-</g>
-<g><title>syncom · default, createMemoryFsi() · v1.0.0
-107,635 records/s
-9.29 µs per record
-samples 92.3k – 110k
-@alexify/syncom@1.0.0</title>
-<text class="label primary" x="20" y="162">syncom</text>
-<text class="sublabel" x="20" y="177">default, createMemoryFsi() · v1.0.0</text>
-<path class="bar primary" d="M276,158H575.1955069114966A4,4 0 0 1 579.1955069114966,162V168A4,4 0 0 1 575.1955069114966,172H276Z"/>
-<text class="value" x="585.1955069114966" y="171">108k</text>
-</g>
 <g><title>Loro · LoroDoc, a LoroMap per record · v1.16.4
 105,332 records/s
 9.49 µs per record
 samples 93.4k – 110k
 loro-crdt@1.16.4</title>
-<text class="label" x="20" y="202">Loro</text>
-<text class="sublabel" x="20" y="217">LoroDoc, a LoroMap per record · v1.16.4</text>
-<path class="bar" d="M276,198H574.2562208793138A4,4 0 0 1 578.2562208793138,202V208A4,4 0 0 1 574.2562208793138,212H276Z"/>
-<text class="value" x="584.2562208793138" y="211">105k</text>
+<text class="label" x="20" y="122">Loro</text>
+<text class="sublabel" x="20" y="137">LoroDoc, a LoroMap per record · v1.16.4</text>
+<path class="bar" d="M276,118H574.2562208793138A4,4 0 0 1 578.2562208793138,122V128A4,4 0 0 1 574.2562208793138,132H276Z"/>
+<text class="value" x="584.2562208793138" y="131">105k</text>
 </g>
 <g><title>Yjs · Y.Doc, a Y.Map per record · v13.6.33
 99,729 records/s
 10 µs per record
 samples 81.2k – 118k
 yjs@13.6.33</title>
-<text class="label" x="20" y="242">Yjs</text>
-<text class="sublabel" x="20" y="257">Y.Doc, a Y.Map per record · v13.6.33</text>
-<path class="bar" d="M276,238H571.8819932839515A4,4 0 0 1 575.8819932839515,242V248A4,4 0 0 1 571.8819932839515,252H276Z"/>
-<text class="value" x="581.8819932839515" y="251">99.7k</text>
+<text class="label" x="20" y="162">Yjs</text>
+<text class="sublabel" x="20" y="177">Y.Doc, a Y.Map per record · v13.6.33</text>
+<path class="bar" d="M276,158H571.8819932839515A4,4 0 0 1 575.8819932839515,162V168A4,4 0 0 1 571.8819932839515,172H276Z"/>
+<text class="value" x="581.8819932839515" y="171">99.7k</text>
 </g>
 <g><title>RxDB · memory storage · v17.6.0
 64,123 records/s
 15.6 µs per record
 samples 47k – 95.6k
 rxdb@17.6.0</title>
-<text class="label" x="20" y="282">RxDB</text>
-<text class="sublabel" x="20" y="297">memory storage · v17.6.0</text>
-<path class="bar" d="M276,278H552.7014620906837A4,4 0 0 1 556.7014620906837,282V288A4,4 0 0 1 552.7014620906837,292H276Z"/>
-<text class="value" x="562.7014620906837" y="291">64.1k</text>
+<text class="label" x="20" y="202">RxDB</text>
+<text class="sublabel" x="20" y="217">memory storage · v17.6.0</text>
+<path class="bar" d="M276,198H552.7014620906837A4,4 0 0 1 556.7014620906837,202V208A4,4 0 0 1 552.7014620906837,212H276Z"/>
+<text class="value" x="562.7014620906837" y="211">64.1k</text>
+</g>
+<g><title>syncom · chain: false, createMemoryFsi() · v0.0.1
+26,249 records/s
+38.1 µs per record
+samples 22.5k – 26.5k
+@alexify/syncom@0.0.1</title>
+<text class="label secondary" x="20" y="242">syncom</text>
+<text class="sublabel" x="20" y="257">chain: false, createMemoryFsi() · v0.0.1</text>
+<path class="bar secondary" d="M276,238H513.9111114441471A4,4 0 0 1 517.9111114441471,242V248A4,4 0 0 1 513.9111114441471,252H276Z"/>
+<text class="value" x="523.9111114441471" y="251">26.2k</text>
+</g>
+<g><title>syncom · default, createMemoryFsi() · v0.0.1
+25,224 records/s
+39.6 µs per record
+samples 25.1k – 25.8k
+@alexify/syncom@0.0.1</title>
+<text class="label primary" x="20" y="282">syncom</text>
+<text class="sublabel" x="20" y="297">default, createMemoryFsi() · v0.0.1</text>
+<path class="bar primary" d="M276,278H512.1808379085866A4,4 0 0 1 516.1808379085866,282V288A4,4 0 0 1 512.1808379085866,292H276Z"/>
+<text class="value" x="522.1808379085866" y="291">25.2k</text>
 </g>
 <g><title>Automerge · Automerge.change, Counter · v3.5.0
 20,912 records/s
@@ -136,5 +136,5 @@ samples 214 – 221
 <text class="value" x="316.18425984208653" y="451">220</text>
 </g>
 <text class="caption" x="20" y="506">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
-<text class="caption" x="20" y="522">in a fresh process · 2026-10-21</text>
+<text class="caption" x="20" y="522">in a fresh process · 2026-10-22</text>
 </svg>

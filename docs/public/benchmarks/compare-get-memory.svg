@@ -80,25 +80,25 @@ tinybase@10.0.1</title>
 <path class="bar" d="M276,181H567.0721840060161A4,4 0 0 1 571.0721840060161,185V191A4,4 0 0 1 567.0721840060161,195H276Z"/>
 <text class="value" x="577.0721840060161" y="194">1.46M</text>
 </g>
-<g><title>syncom · chain: false, createMemoryFsi() · v1.0.0
-982,922 ops/s
-1.02 µs per operation
-samples 962k – 992k
-@alexify/syncom@1.0.0</title>
-<text class="label secondary" x="20" y="225">syncom</text>
-<text class="sublabel" x="20" y="240">chain: false, createMemoryFsi() · v1.0.0</text>
-<path class="bar secondary" d="M276,221H557.2868083969722A4,4 0 0 1 561.2868083969722,225V231A4,4 0 0 1 557.2868083969722,235H276Z"/>
-<text class="value" x="567.2868083969722" y="234">983k</text>
-</g>
-<g><title>syncom · default, createMemoryFsi() · v1.0.0
-966,417 ops/s
+<g><title>syncom · default, createMemoryFsi() · v0.0.1
+971,873 ops/s
 1.03 µs per operation
-samples 964k – 974k
-@alexify/syncom@1.0.0</title>
-<text class="label primary" x="20" y="265">syncom</text>
-<text class="sublabel" x="20" y="280">default, createMemoryFsi() · v1.0.0</text>
-<path class="bar primary" d="M276,261H556.8665582779187A4,4 0 0 1 560.8665582779187,265V271A4,4 0 0 1 556.8665582779187,275H276Z"/>
-<text class="value" x="566.8665582779187" y="274">966k</text>
+samples 964k – 981k
+@alexify/syncom@0.0.1</title>
+<text class="label primary" x="20" y="225">syncom</text>
+<text class="sublabel" x="20" y="240">default, createMemoryFsi() · v0.0.1</text>
+<path class="bar primary" d="M276,221H557.006266563448A4,4 0 0 1 561.006266563448,225V231A4,4 0 0 1 557.006266563448,235H276Z"/>
+<text class="value" x="567.006266563448" y="234">972k</text>
+</g>
+<g><title>syncom · chain: false, createMemoryFsi() · v0.0.1
+929,272 ops/s
+1.08 µs per operation
+samples 926k – 946k
+@alexify/syncom@0.0.1</title>
+<text class="label secondary" x="20" y="265">syncom</text>
+<text class="sublabel" x="20" y="280">chain: false, createMemoryFsi() · v0.0.1</text>
+<path class="bar secondary" d="M276,261H555.8938853635252A4,4 0 0 1 559.8938853635252,265V271A4,4 0 0 1 555.8938853635252,275H276Z"/>
+<text class="value" x="565.8938853635252" y="274">929k</text>
 </g>
 <g><title>Loro · LoroDoc, a LoroMap per record · v1.16.4
 312,943 ops/s
@@ -151,5 +151,5 @@ samples 68.6 – 110
 <text class="value" x="334.03645032419735" y="474">81.4</text>
 </g>
 <text class="caption" x="20" y="529">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
-<text class="caption" x="20" y="545">in a fresh process · 2026-10-21</text>
+<text class="caption" x="20" y="545">in a fresh process · 2026-10-22</text>
 </svg>

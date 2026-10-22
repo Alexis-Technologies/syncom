@@ -124,4 +124,5 @@ These are the areas where a report matters most, roughly in order:
 
 ## Supported versions
 
-Only the latest release receives fixes.
+Nothing is released yet: `0.0.1` is a development version, and fixes land on
+`main`. Once releases exist, only the latest one receives fixes.

@@ -69,25 +69,25 @@ yjs@13.6.33, y-indexeddb@9.0.12, y-protocols@1.0.7</title>
 <path class="bar" d="M372,181H372.9615729166667A4,4 0 0 1 376.9615729166667,185V191A4,4 0 0 1 372.9615729166667,195H372Z"/>
 <text class="value" x="382.9615729166667" y="194">24.5 KB</text>
 </g>
-<g><title>syncom · open() over OPFS + the wrpc link adapter
-37.3 KB min+gzip
-107.2 KB minified
-@alexify/syncom@1.0.0
-storage, schema, queries, the op log and the sync protocol are one entry</title>
-<text class="label primary" x="20" y="225">syncom</text>
-<text class="sublabel" x="20" y="240">open() over OPFS + the wrpc link adapter</text>
-<path class="bar primary" d="M372,221H375.55329166666667A4,4 0 0 1 379.55329166666667,225V231A4,4 0 0 1 375.55329166666667,235H372Z"/>
-<text class="value" x="385.55329166666667" y="234">37.3 KB</text>
-</g>
 <g><title>PouchDB · pouchdb-browser
 40.4 KB min+gzip
 117.8 KB minified
 pouchdb-browser@9.0.0
 pouchdb-browser carries its HTTP adapter (the CouchDB client) with it</title>
-<text class="label" x="20" y="265">PouchDB</text>
-<text class="sublabel" x="20" y="280">pouchdb-browser</text>
-<path class="bar" d="M372,261H376.18266666666665A4,4 0 0 1 380.18266666666665,265V271A4,4 0 0 1 376.18266666666665,275H372Z"/>
-<text class="value" x="386.18266666666665" y="274">40.4 KB</text>
+<text class="label" x="20" y="225">PouchDB</text>
+<text class="sublabel" x="20" y="240">pouchdb-browser</text>
+<path class="bar" d="M372,221H376.18266666666665A4,4 0 0 1 380.18266666666665,225V231A4,4 0 0 1 376.18266666666665,235H372Z"/>
+<text class="value" x="386.18266666666665" y="234">40.4 KB</text>
+</g>
+<g><title>syncom · open() over OPFS + the wrpc link adapter
+41.3 KB min+gzip
+119.9 KB minified
+@alexify/syncom@0.0.1
+storage, schema, queries, the op log and the sync protocol are one entry</title>
+<text class="label primary" x="20" y="265">syncom</text>
+<text class="sublabel" x="20" y="280">open() over OPFS + the wrpc link adapter</text>
+<path class="bar primary" d="M372,261H376.37444791666667A4,4 0 0 1 380.37444791666667,265V271A4,4 0 0 1 376.37444791666667,275H372Z"/>
+<text class="value" x="386.37444791666667" y="274">41.3 KB</text>
 </g>
 <g><title>RxDB · rxdb + Dexie storage + replication
 90.1 KB min+gzip
@@ -135,5 +135,5 @@ loro-crdt@1.16.4</title>
 <path class="bar" d="M372,461H605.5116770833333A4,4 0 0 1 609.5116770833333,465V471A4,4 0 0 1 605.5116770833333,475H372Z"/>
 <text class="value" x="615.5116770833333" y="474">1172 KB</text>
 </g>
-<text class="caption" x="20" y="529">esbuild 0.28.2 · 2026-10-21</text>
+<text class="caption" x="20" y="529">esbuild 0.28.2 · 2026-10-22</text>
 </svg>

@@ -25,7 +25,7 @@ hero:
 features:
   - icon: 🔄
     title: Ops that converge
-    details: "Every write is an op: last-writer-wins per field, counters whose increments add up across nodes, tombstones that a newer write revives. Applied in any order, any number of times, every node ends up with the same records."
+    details: "Every write is an op: last-writer-wins per field, counters whose increments add up across nodes, sets that keep every concurrent add, tombstones that a newer write revives. Applied in any order, any number of times, every node ends up with the same records."
     link: /guide/sync#registers-counters-and-sets
     linkText: Registers, counters and sets
   - icon: ⏯️
@@ -50,12 +50,12 @@ features:
     linkText: wrpc transport
   - icon: 💾
     title: Storage with schema and queries
-    details: "Records on node:fs, OPFS, IndexedDB or memory. A metaschema, Standard Schema or ajv validator runs on every write and on every hub, versions ride on ops, and Mango queries come with indexes, unique keys and watch()."
+    details: "Records on node:fs, OPFS, IndexedDB or memory. A metaschema, Standard Schema or ajv validator runs on every write and on every hub, versions ride on ops, and Mango queries come with indexes, unique keys, watch() and fuzzy full-text search."
     link: /guide/storage
     linkText: Storage
   - icon: 🔗
-    title: A log you can verify and purge
-    details: "Writes can be committed to a hash-linked chain that reads re-check, so corruption surfaces as an error, not as data. purge() scrubs a payload out of the op log, and repair(id) rebuilds a record from it."
+    title: Signed ops, a log you can verify and purge
+    details: "Every op is signed by its origin, whose node id is its Ed25519 key, so any peer verifies it through any relay. Writes can be committed to a hash-linked chain that reads re-check. purge() scrubs a payload out of the op log, and repair(id) rebuilds a record from it."
     link: /guide/chain
     linkText: Blockchain log
   - icon: 📈
@@ -80,10 +80,11 @@ syncom is measured against Yjs, Automerge, Loro, TinyBase, PouchDB, RxDB, Firepr
 OrbitDB on the same scenarios, in memory and on disk. Each library runs in a fresh process, is used
 the way its documentation shows, and is checked to give the right answer before it is timed. The
 chart shows an empty replica pulling a store of 1,000 records; pick another scenario or storage.
-syncom replicates in memory as fast as Yjs and Loro, has the fastest cold start (34 ms), and
-serves about a million reads a second from its cache. Its writes cost more, because each one is
-logged, filed, catalogued and chained: on disk about 1,500 a second, where the LevelDB-backed
-libraries do about 20,000.
+syncom has the fastest cold start (about 37 ms) and serves about a million reads a second from
+its cache. Its writes cost more, because each one is signed, logged, filed, catalogued and
+chained — on disk about 1,500 a second, where the LevelDB-backed libraries do about 20,000 — and
+a replica verifies every op it receives, which holds a pull in memory to about 25,000 records a
+second, where Yjs and Loro do 100,000.
 
 <BenchCompare kind="sync" line="memory" />
 

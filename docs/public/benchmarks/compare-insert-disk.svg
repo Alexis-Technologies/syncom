@@ -76,25 +76,25 @@ yjs@13.6.33</title>
 <path class="bar" d="M276,181H614.7486770500323A4,4 0 0 1 618.7486770500323,185V191A4,4 0 0 1 614.7486770500323,195H276Z"/>
 <text class="value" x="624.7486770500323" y="194">19.2k</text>
 </g>
-<g><title>syncom · chain: false, node:fs · v1.0.0
-2,452 ops/s
-408 µs per operation
-samples 1,782 – 2,875
-@alexify/syncom@1.0.0</title>
+<g><title>syncom · chain: false, node:fs · v0.0.1
+2,059 ops/s
+486 µs per operation
+samples 1,900 – 2,682
+@alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="225">syncom</text>
-<text class="sublabel" x="20" y="240">chain: false, node:fs · v1.0.0</text>
-<path class="bar secondary" d="M276,221H543.1628422575172A4,4 0 0 1 547.1628422575172,225V231A4,4 0 0 1 543.1628422575172,235H276Z"/>
-<text class="value" x="553.1628422575172" y="234">2,452</text>
+<text class="sublabel" x="20" y="240">chain: false, node:fs · v0.0.1</text>
+<path class="bar secondary" d="M276,221H537.0921823646574A4,4 0 0 1 541.0921823646574,225V231A4,4 0 0 1 537.0921823646574,235H276Z"/>
+<text class="value" x="547.0921823646574" y="234">2,059</text>
 </g>
-<g><title>syncom · default, node:fs · v1.0.0
-1,491 ops/s
-671 µs per operation
-samples 1,476 – 1,783
-@alexify/syncom@1.0.0</title>
+<g><title>syncom · default, node:fs · v0.0.1
+1,523 ops/s
+657 µs per operation
+samples 871 – 1,791
+@alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="265">syncom</text>
-<text class="sublabel" x="20" y="280">default, node:fs · v1.0.0</text>
-<path class="bar primary" d="M276,261H525.8797118828533A4,4 0 0 1 529.8797118828533,265V271A4,4 0 0 1 525.8797118828533,275H276Z"/>
-<text class="value" x="535.8797118828533" y="274">1,491</text>
+<text class="sublabel" x="20" y="280">default, node:fs · v0.0.1</text>
+<path class="bar primary" d="M276,261H526.6110324414185A4,4 0 0 1 530.6110324414185,265V271A4,4 0 0 1 526.6110324414185,275H276Z"/>
+<text class="value" x="536.6110324414185" y="274">1,523</text>
 </g>
 <g><title>OrbitDB · documents, LevelDB · v4.0.0
 952 ops/s
@@ -147,5 +147,5 @@ gun@0.2020.1241</title>
 <text class="value" x="326.8105447553589" y="474">3.63</text>
 </g>
 <text class="caption" x="20" y="529">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
-<text class="caption" x="20" y="545">in a fresh process · 2026-10-21</text>
+<text class="caption" x="20" y="545">in a fresh process · 2026-10-22</text>
 </svg>

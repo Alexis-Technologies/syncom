@@ -35,8 +35,8 @@ spread of the samples and the exact version.
 
 | Library | Insert a record<br><sub>ops/s</sub> | Update a field<br><sub>ops/s</sub> | Read a record<br><sub>ops/s</sub> | Increment a counter<br><sub>ops/s</sub> | Insert 1,000 at once<br><sub>records/s</sub> | Replicate a store<br><sub>records/s</sub> |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| **syncom**<br><sub>default, createMemoryFsi() · v1.0.0</sub> | 37,500 | 52,900 | 966,000 | 53,100 | 41,200 | 108,000 |
-| **syncom**<br><sub>chain: false, createMemoryFsi() · v1.0.0</sub> | 44,300 | 78,400 | 983,000 | 79,400 | 61,100 | 127,000 |
+| **syncom**<br><sub>default, createMemoryFsi() · v0.0.1</sub> | 16,200 | 17,100 | 972,000 | 16,700 | 16,000 | 25,200 |
+| **syncom**<br><sub>chain: false, createMemoryFsi() · v0.0.1</sub> | 17,500 | 18,800 | 929,000 | 18,600 | 17,200 | 26,200 |
 | Yjs<br><sub>Y.Doc, a Y.Map per record · v13.6.33</sub> | 235,000 | 382,000 | 3,680,000 | — | 275,000 | 99,700 |
 | Automerge<br><sub>Automerge.change, Counter · v3.5.0</sub> | 512 | 1,990 | 10,600,000 | 1,950 | 8,960 | 20,900 |
 | Loro<br><sub>LoroDoc, a LoroMap per record · v1.16.4</sub> | 31,300 | 412,000 | 313,000 | 349,000 | 83,100 | 105,000 |
@@ -50,8 +50,8 @@ spread of the samples and the exact version.
 
 | Library | Insert a record<br><sub>ops/s</sub> | Update a field<br><sub>ops/s</sub> | Read a record<br><sub>ops/s</sub> | Increment a counter<br><sub>ops/s</sub> | Insert 1,000 at once<br><sub>records/s</sub> | Replicate a store<br><sub>records/s</sub> |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| **syncom**<br><sub>default, node:fs · v1.0.0</sub> | 1,490 | 1,590 | 896,000 | 1,810 | 1,850 | 6,950 |
-| **syncom**<br><sub>chain: false, node:fs · v1.0.0</sub> | 2,450 | 3,500 | 955,000 | 3,560 | 3,100 | 7,400 |
+| **syncom**<br><sub>default, node:fs · v0.0.1</sub> | 1,520 | 1,340 | 958,000 | 1,480 | 1,690 | 5,830 |
+| **syncom**<br><sub>chain: false, node:fs · v0.0.1</sub> | 2,060 | 3,080 | 951,000 | 3,060 | 2,740 | 5,820 |
 | Yjs<br><sub>y-leveldb · v13.6.33</sub> | 19,200 | 22,400 | 3,690,000 | — | 155,000 | 53,700 |
 | Automerge<br><sub>automerge-repo, NodeFS storage · v3.5.0</sub> | 490 | 1,250 | 10,500,000 | 1,200 | 7,820 | 3,100 |
 | Loro<br><sub>updates appended to a file · v1.16.4</sub> | 19,500 | 43,300 | 285,000 | 42,600 | 66,900 | 108,000 |
@@ -61,7 +61,7 @@ spread of the samples and the exact version.
 | GUN<br><sub>RAD on node:fs · v0.2020.1241</sub> | 3.63 | 3.77 | 749 | — | failed | — |
 | OrbitDB<br><sub>documents, LevelDB · v4.0.0</sub> | 952 | 17.4 | 82.4 | — | 921 | 193 |
 
-_Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library in a fresh process · 2026-10-21. Medians, rounded to three significant figures; — where the library has no such operation, no such storage, or no in-process sync, failed where it did not finish twice (the chart above says why)._
+_Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library in a fresh process · 2026-10-22. Medians, rounded to three significant figures; — where the library has no such operation, no such storage, or no in-process sync, failed where it did not finish twice (the chart above says why)._
 
 <!-- bench:compare:end -->
 
@@ -70,39 +70,46 @@ _Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 roun
 The libraries do different work for one call, so read the charts as a price list, not a ranking.
 
 - **A syncom write does more.** A Yjs or Loro write changes a document in memory and, on disk,
-  appends one update. A syncom write is an op appended to the op log, the record's own file,
-  its catalog row and, unless `chain: false`, a block in the chain. That is four file writes
-  per write with the chain and two without, and it is what lets a record be checked, purged,
-  repaired, replicated by scope and queried. The `chain: false` rows show what the chain costs:
-  40 to 55 percent of a write on disk.
-- **Writes on disk are where syncom pays.** It does about 1,500 inserts a second (2,450 without
+  appends one update. A syncom write is an op, [signed](/guide/sync#signatures) with the node's
+  Ed25519 key, appended to the op log, the record's own file, its catalog row and, unless
+  `chain: false`, a block in the chain. That is four file writes per write with the chain and
+  two without, and it is what lets a record be checked, purged, repaired, replicated by scope,
+  queried and verified by every peer. The `chain: false` rows show what the chain costs: a
+  quarter to a half of a write on disk, under a tenth in memory.
+- **Signatures are the price in memory.** Every write is signed and every op a peer sends is
+  verified against its origin, and in memory that is most of what a write costs: syncom does
+  about 16,000 inserts a second there, where it did about 37,500 before ops were signed. A
+  peer's page is verified on Node's thread pool, four checks at a time by default — about 36,000
+  ops a second (the `verifyOp` row of [syncom's own](#syncom-s-own-benchmarks) benchmarks).
+  `sync.signatures: false` skips both, for a mesh that trusts its transport.
+- **Writes on disk are where syncom pays.** It does about 1,500 inserts a second (2,060 without
   the chain), where the LevelDB-backed Yjs and PouchDB and Loro's single append do 19,000 to
-  26,000: what is left is the file writes themselves. A write no longer costs more as the store
-  grows. The catalog used to be saved whole every 64 writes, so an insert into 20,000 records in
-  memory ran at a third of the speed of one into 1,000, and the save took half the CPU. It is
-  now saved every sixteenth of its size, so an insert in memory holds about 40,000 a second
-  whatever the store's size, three times what it was. Further down the disk chart: TinyBase's file persister rewrites the whole store
+  26,000: what is left is the file writes themselves. A write does not cost more as the store
+  grows: the catalog is saved every sixteenth of its size rather than whole every 64 writes.
+  Further down the disk chart: TinyBase's file persister rewrites the whole store
   on every save (about 170 a second), Automerge's change cost grows with the document, and GUN
   waits for RAD's 250 ms flush before it acknowledges a write (about 4 a second).
-- **Reads come from a cache.** syncom answers 900,000 to 980,000 reads a second on both lines, each a
+- **Reads come from a cache.** syncom answers 930,000 to 970,000 reads a second on both lines, each a
   JSON copy of the record. Automerge (10.6 million) and Yjs (3.7 million) read their
   materialized documents, and TinyBase reads 1.4 million. PouchDB (30,000 to 42,000), Fireproof
   (about 700) and OrbitDB (about 80) go to their storage; OrbitDB walks its log for every read.
-- **Replication in memory is level with the CRDTs.** An empty syncom replica pulls 1,000 records
-  at 108,000 to 127,000 a second, through the same path a WebSocket peer takes (hello, push, a
-  feed of pages, JSON across the boundary). Loro manages 105,000 and Yjs 100,000; RxDB 64,000,
-  Automerge 21,000, PouchDB 18,000 and TinyBase 11,500 come behind, and OrbitDB, over loopback
-  TCP, 220. On disk the replica writes every record's file and one chain block per page, and
-  manages 6,900 to 7,400 a second. That is behind Loro (108,000, one append), Yjs (54,000) and PouchDB
-  (16,500), and ahead of TinyBase (11,100), Automerge (3,100) and OrbitDB (193).
+- **Replication is bound by verification.** An empty syncom replica pulls 1,000 records at
+  25,000 to 26,000 a second in memory, through the same path a WebSocket peer takes (hello, push,
+  a feed of pages, JSON across the boundary), checking every op's signature on the way in, on
+  Node's thread pool (before ops were signed, the same pull ran at 108,000 to 127,000 a second).
+  Loro manages 105,000, Yjs 100,000 and RxDB 64,000; Automerge (21,000), PouchDB (18,000) and
+  TinyBase (11,500) come behind, and OrbitDB, over loopback TCP, 220. On disk the replica also
+  writes every record's file and one chain block per page, and manages about 5,800 a second:
+  behind Loro (108,000, one append), Yjs (54,000), PouchDB (16,500) and TinyBase (11,100), ahead
+  of Automerge (3,100) and OrbitDB (193).
 - **Batches.** syncom has no batch write: 1,000 inserts are 1,000 ops, each appended on its own
-  (41,000 to 61,000 a second in memory, 1,850 to 3,100 on disk). RxDB's in-memory `bulkInsert` (2.2 million) and
+  (16,000 to 17,200 a second in memory, 1,690 to 2,740 on disk), each signed. RxDB's in-memory `bulkInsert` (2.2 million) and
   a Yjs transaction (155,000 to 275,000) write the batch at once. GUN has no number: in two
   attempts, a batch of 1,000 concurrent puts left a write without its acknowledgement for 30 s.
 - **Counters.** Loro's `LoroCounter` is the fastest (349,000 a second in memory, 43,000 on
-  disk). syncom does 53,000 to 79,000 in memory and 1,800 to 3,600 on disk, and Automerge
+  disk). syncom does 16,700 to 18,600 in memory and 1,480 to 3,060 on disk, and Automerge
   about 2,000. The others have no counter that converges, so they are not in this chart.
-- **Cold start.** syncom opens a store of 1,000 records and reads one in 34 ms, the fastest here:
+- **Cold start.** syncom opens a store of 1,000 records and reads one in 36 to 37 ms, the fastest here:
   its catalog is one JSON file, and nothing compiles WebAssembly or starts a network stack.
   Loro and TinyBase take about 51 ms, Yjs and PouchDB about 83 to 85 ms (LevelDB), Automerge
   183 ms (WebAssembly), Fireproof 240 ms and OrbitDB 577 ms (libp2p and Helia).
@@ -151,8 +158,8 @@ command-line tool, a serverless function or a page that reloads pays once.
 
 | Library | Load and open | First read | Total |
 | --- | ---: | ---: | ---: |
-| **syncom**<br><sub>chain: false, node:fs · v1.0.0</sub> | 33.5 ms | 0.3 ms | 33.8 ms |
-| **syncom**<br><sub>default, node:fs · v1.0.0</sub> | 33.5 ms | 0.8 ms | 34.3 ms |
+| **syncom**<br><sub>chain: false, node:fs · v0.0.1</sub> | 36.0 ms | 0.3 ms | 36.3 ms |
+| **syncom**<br><sub>default, node:fs · v0.0.1</sub> | 36.0 ms | 0.9 ms | 37.0 ms |
 | TinyBase<br><sub>MergeableStore, file persister · v10.0.1</sub> | 50.7 ms | 0.1 ms | 50.8 ms |
 | Loro<br><sub>updates appended to a file · v1.16.4</sub> | 51.2 ms | 0.7 ms | 51.9 ms |
 | Yjs<br><sub>y-leveldb · v13.6.33</sub> | 82.7 ms | 0.1 ms | 82.7 ms |
@@ -182,8 +189,8 @@ loads is counted with the JavaScript, gzipped too.
 | GUN<br><sub>gun@0.2020.1241</sub> | gun (localStorage; its WebSocket mesh is built in) | 42.2 KB | 17.1 KB |  |
 | TinyBase<br><sub>tinybase@10.0.1</sub> | MergeableStore + IndexedDB persister + custom synchronizer | 56.4 KB | 23.8 KB |  |
 | Yjs<br><sub>yjs@13.6.33, y-indexeddb@9.0.12, y-protocols@1.0.7</sub> | yjs + y-indexeddb + y-protocols/sync | 80.2 KB | 24.5 KB |  |
-| **syncom**<br><sub>@alexify/syncom@1.0.0</sub> | open() over OPFS + the wrpc link adapter | 107.2 KB | 37.3 KB | storage, schema, queries, the op log and the sync protocol are one entry |
 | PouchDB<br><sub>pouchdb-browser@9.0.0</sub> | pouchdb-browser | 117.8 KB | 40.4 KB | pouchdb-browser carries its HTTP adapter (the CouchDB client) with it |
+| **syncom**<br><sub>@alexify/syncom@0.0.1</sub> | open() over OPFS + the wrpc link adapter | 119.9 KB | 41.3 KB | storage, schema, queries, the op log and the sync protocol are one entry |
 | RxDB<br><sub>rxdb@17.6.0, dexie@4.4.6, rxjs@7.8.2</sub> | rxdb + Dexie storage + replication | 282.3 KB | 90.1 KB |  |
 | Fireproof<br><sub>@fireproof/core@0.24.19</sub> | @fireproof/core | 784.2 KB | 204.0 KB |  |
 | OrbitDB<br><sub>@orbitdb/core@4.0.0, helia@6.1.4, libp2p@3.5.1, @libp2p/gossipsub@15.0.23, blockstore-idb@4.0.1</sub> | @orbitdb/core + helia + libp2p, IndexedDB blockstore | 1185.6 KB | 353.7 KB | createHelia brings Helia's default libp2p configuration with it |
@@ -195,8 +202,8 @@ loads is counted with the JavaScript, gzipped too.
 ## syncom's own benchmarks
 
 `pnpm bench` runs one script per subject in `bench/`: the storage API end to end, a peer's
-page as it is applied, replication over the in-process link, the op log, the chain, hashing,
-the CRDT helpers and the emitter. They are the numbers to watch for a regression, and
+page as it is applied, replication over the in-process link, full-text search, the op log, the
+chain, hashing, the CRDT helpers and the emitter. They are the numbers to watch for a regression, and
 `pnpm bench --save` records them.
 
 <BenchEngine />
@@ -209,21 +216,21 @@ the CRDT helpers and the emitter. They are the numbers to watch for a regression
 
 | Benchmark | ops/s | per operation |
 | --- | ---: | ---: |
-| insert — small record | 1,911 | 523 µs |
-| get — cached | 207,187 | 4.83 µs |
-| get — cold (re-verifies the block) | 169 | 5.92 ms |
-| update — one field | 1,938 | 516 µs |
-| set — whole record | 1,811 | 552 µs |
-| swap — match (writes) | 2,177 | 459 µs |
-| swap — mismatch (reads only) | 213,062 | 4.69 µs |
-| has — existing id | 232,776 | 4.3 µs |
-| record — cached Record instance | 9,624,259 | 104 ns |
-| list — 2000 ids (catalog) | 11,258,503 | 88.8 ns |
-| hasRecord — 2000 ids (catalog) | 14,643,966 | 68.3 ns |
-| select — covered eq over 2000 | 21,540 | 46.4 µs |
-| select — eq + order + limit over 2000 | 11,588 | 86.3 µs |
-| select — uncovered filter over 2000 | 1,037 | 964 µs |
-| open — catalog caught up from the log (2000 records) | 32 | 31.3 ms |
+| insert — small record | 1,156 | 865 µs |
+| get — cached | 161,791 | 6.18 µs |
+| get — cold (re-verifies the block) | 218 | 4.59 ms |
+| update — one field | 1,855 | 539 µs |
+| set — whole record | 1,855 | 539 µs |
+| swap — match (writes) | 1,927 | 519 µs |
+| swap — mismatch (reads only) | 166,997 | 5.99 µs |
+| has — existing id | 184,719 | 5.41 µs |
+| record — cached Record instance | 8,901,096 | 112 ns |
+| list — 2000 ids (catalog) | 11,325,130 | 88.3 ns |
+| hasRecord — 2000 ids (catalog) | 13,477,594 | 74.2 ns |
+| select — covered eq over 2000 | 21,362 | 46.8 µs |
+| select — eq + order + limit over 2000 | 11,000 | 90.9 µs |
+| select — uncovered filter over 2000 | 980 | 1.02 ms |
+| open — catalog caught up from the log (2000 records) | 31 | 32.3 ms |
 | open — catalog rebuilt from a scan (2000 records, integrity lazy) | 30 | 33.3 ms |
 
 </details>
@@ -233,15 +240,15 @@ the CRDT helpers and the emitter. They are the numbers to watch for a regression
 
 | Benchmark | ops/s | per operation |
 | --- | ---: | ---: |
-| index.put — a 43-word record | 16,623 | 60.2 µs |
-| index.query — one word over 2000 | 1,718 | 582 µs |
-| index.query — two words over 2000 | 1,456 | 687 µs |
-| index.query — a typo over 2000 | 7,848 | 127 µs |
-| insert — 2 search fields (43 words) | 1,462 | 684 µs |
-| select — $text one word over 2000, limit 20 | 1,387 | 721 µs |
-| select — $text + eq narrowing over 2000 | 1,144 | 874 µs |
-| count — $text over 2000 | 1,156 | 865 µs |
-| open — catalog reloaded with text (2000 records) | 12 | 83.3 ms |
+| index.put — a 43-word record | 16,128 | 62 µs |
+| index.query — one word over 2000 | 1,733 | 577 µs |
+| index.query — two words over 2000 | 1,442 | 693 µs |
+| index.query — a typo over 2000 | 7,824 | 128 µs |
+| insert — 2 search fields (43 words) | 1,561 | 641 µs |
+| select — $text one word over 2000, limit 20 | 1,348 | 742 µs |
+| select — $text + eq narrowing over 2000 | 1,129 | 886 µs |
+| count — $text over 2000 | 1,174 | 852 µs |
+| open — catalog reloaded with text (2000 records) | 10 | 100 ms |
 
 </details>
 
@@ -250,27 +257,27 @@ the CRDT helpers and the emitter. They are the numbers to watch for a regression
 
 | Benchmark | ops/s | per operation |
 | --- | ---: | ---: |
-| applyOp — set one field on a 5-field entry | 4,568,358 | 219 ns |
-| applyOp — inc a counter | 4,560,221 | 219 ns |
-| applyOp — add to a 20-element set | 231,381 | 4.32 µs |
-| applyOp — remove from a 20-element set | 242,234 | 4.13 µs |
-| applyOp — write the whole record | 932,462 | 1.07 µs |
-| applyOp — merge a peer entry | 686,842 | 1.46 µs |
-| packOps — 500 writes | 72,067 | 13.9 µs |
-| unpackOps — 500 writes | 42,140 | 23.7 µs |
-| applyRemote — 100 writes, new records | 7,003 | 143 µs |
-| applyRemote — 500 writes, new records | 7,043 | 142 µs |
-| applyRemote — 100 signed writes, new records | 3,836 | 261 µs |
-| verifyOp — 100 signed writes | 10,326 | 96.8 µs |
-| applyRemote — 100 sets on cached records | 10,746 | 93.1 µs |
-| applyRemote — 100 incs on cached records | 9,443 | 106 µs |
-| applyRemote — 100 adds on cached records | 6,465 | 155 µs |
-| applyRemote — 100 writes, new records (chain: false) | 7,117 | 141 µs |
-| applyRemote — 500 writes, new records (chain: false) | 7,117 | 141 µs |
-| applyRemote — 100 signed writes, new records (chain: false) | 3,888 | 257 µs |
-| applyRemote — 100 sets on cached records (chain: false) | 10,942 | 91.4 µs |
-| applyRemote — 100 incs on cached records (chain: false) | 10,832 | 92.3 µs |
-| applyRemote — 100 adds on cached records (chain: false) | 7,190 | 139 µs |
+| applyOp — set one field on a 5-field entry | 4,717,320 | 212 ns |
+| applyOp — inc a counter | 4,421,459 | 226 ns |
+| applyOp — add to a 20-element set | 236,399 | 4.23 µs |
+| applyOp — remove from a 20-element set | 246,187 | 4.06 µs |
+| applyOp — write the whole record | 930,456 | 1.07 µs |
+| applyOp — merge a peer entry | 667,351 | 1.5 µs |
+| packOps — 500 writes | 71,667 | 14 µs |
+| unpackOps — 500 writes | 40,294 | 24.8 µs |
+| applyRemote — 100 writes, new records | 6,549 | 153 µs |
+| applyRemote — 500 writes, new records | 6,997 | 143 µs |
+| applyRemote — 100 signed writes, new records | 5,154 | 194 µs |
+| verifyOp — 100 signed writes | 36,659 | 27.3 µs |
+| applyRemote — 100 sets on cached records | 10,621 | 94.2 µs |
+| applyRemote — 100 incs on cached records | 10,077 | 99.2 µs |
+| applyRemote — 100 adds on cached records | 6,702 | 149 µs |
+| applyRemote — 100 writes, new records (chain: false) | 7,175 | 139 µs |
+| applyRemote — 500 writes, new records (chain: false) | 7,173 | 139 µs |
+| applyRemote — 100 signed writes, new records (chain: false) | 5,015 | 199 µs |
+| applyRemote — 100 sets on cached records (chain: false) | 10,910 | 91.7 µs |
+| applyRemote — 100 incs on cached records (chain: false) | 9,994 | 100 µs |
+| applyRemote — 100 adds on cached records (chain: false) | 6,736 | 148 µs |
 
 </details>
 
@@ -279,12 +286,12 @@ the CRDT helpers and the emitter. They are the numbers to watch for a regression
 
 | Benchmark | ops/s | per operation |
 | --- | ---: | ---: |
-| write on A, applied on B (one hop) | 719 | 1.39 ms |
-| write on A, applied on C (two hops) | 865 | 1.16 ms |
-| update on A, applied on C (two hops) | 902 | 1.11 ms |
-| snapshot — one page of 500 out of 2000 (host side) | 9,303 | 107 µs |
+| write on A, applied on B (one hop) | 539 | 1.86 ms |
+| write on A, applied on C (two hops) | 679 | 1.47 ms |
+| update on A, applied on C (two hops) | 741 | 1.35 ms |
+| snapshot — one page of 500 out of 2000 (host side) | 8,920 | 112 µs |
 | bootstrap — a new node joins a host of 2000 records | 2 | 500 ms |
-| append of another scope's op while a scoped feed listens | 1,877 | 533 µs |
+| append of another scope's op while a scoped feed listens | 1,711 | 584 µs |
 
 </details>
 
@@ -293,13 +300,13 @@ the CRDT helpers and the emitter. They are the numbers to watch for a regression
 
 | Benchmark | ops/s | per operation |
 | --- | ---: | ---: |
-| append — one op | 5,875 | 170 µs |
-| append — batch of 100 | 354,551 | 2.82 µs |
-| since — last 500 entries | 624,414 | 1.6 µs |
-| since — everything (no cursor) | 1,704 | 587 µs |
-| since — 20 from the middle, scoped | 3,488,826 | 287 ns |
-| append with a roll every 8 batches | 4,893 | 204 µs |
-| reopen — index + segments + tail | 10 | 100 ms |
+| append — one op | 5,605 | 178 µs |
+| append — batch of 100 | 312,484 | 3.2 µs |
+| since — last 500 entries | 629,795 | 1.59 µs |
+| since — everything (no cursor) | 1,708 | 585 µs |
+| since — 20 from the middle, scoped | 3,511,359 | 285 ns |
+| append with a roll every 8 batches | 4,931 | 203 µs |
+| reopen — index + segments + tail | 11 | 90.9 ms |
 
 </details>
 
@@ -308,13 +315,13 @@ the CRDT helpers and the emitter. They are the numbers to watch for a regression
 
 | Benchmark | ops/s | per operation |
 | --- | ---: | ---: |
-| addBlock — small payload | 5,515 | 181 µs |
-| addBlock — 4 KB payload | 4,869 | 205 µs |
-| readBlock — single block | 13,701 | 73 µs |
-| validate — last 1 block | 11,700 | 85.5 µs |
-| validate — last 10 blocks | 1,151 | 869 µs |
-| validate — last 100 blocks | 118 | 8.47 ms |
-| validate — full 200-block chain | 55 | 18.2 ms |
+| addBlock — small payload | 5,107 | 196 µs |
+| addBlock — 4 KB payload | 4,283 | 233 µs |
+| readBlock — single block | 13,117 | 76.2 µs |
+| validate — last 1 block | 11,287 | 88.6 µs |
+| validate — last 10 blocks | 1,098 | 911 µs |
+| validate — last 100 blocks | 112 | 8.93 ms |
+| validate — full 200-block chain | 57 | 17.5 ms |
 
 </details>
 
@@ -323,11 +330,11 @@ the CRDT helpers and the emitter. They are the numbers to watch for a regression
 
 | Benchmark | ops/s | per operation |
 | --- | ---: | ---: |
-| calculateHash — empty genesis block | 1,198,887 | 834 ns |
-| calculateHash — small record (5 x 16 B) | 1,037,711 | 964 ns |
-| calculateHash — medium record (50 x 64 B) | 138,316 | 7.23 µs |
-| calculateHash — large record (200 x 256 B) | 14,604 | 68.5 µs |
-| calculateHash — deeply nested record | 646,523 | 1.55 µs |
+| calculateHash — empty genesis block | 1,166,378 | 857 ns |
+| calculateHash — small record (5 x 16 B) | 1,040,941 | 961 ns |
+| calculateHash — medium record (50 x 64 B) | 138,038 | 7.24 µs |
+| calculateHash — large record (200 x 256 B) | 14,570 | 68.6 µs |
+| calculateHash — deeply nested record | 633,815 | 1.58 µs |
 
 </details>
 
@@ -336,15 +343,15 @@ the CRDT helpers and the emitter. They are the numbers to watch for a regression
 
 | Benchmark | ops/s | per operation |
 | --- | ---: | ---: |
-| diff — 20 flat keys, all changed | 337,100 | 2.97 µs |
-| diff — 20 flat keys, one changed | 452,962 | 2.21 µs |
-| diff — depth 3, width 4 | 36,221 | 27.6 µs |
-| diff — array as a grow-only set | 2,972,954 | 336 ns |
-| merge — 20 flat keys | 2,105,534 | 475 ns |
-| merge — depth 3, width 4 | 5,046,798 | 198 ns |
-| merge — numeric counter increment | 5,682,591 | 176 ns |
-| apply — 100 inc records | 211,811 | 4.72 µs |
-| apply — 100 delta records | 8,843 | 113 µs |
+| diff — 20 flat keys, all changed | 324,832 | 3.08 µs |
+| diff — 20 flat keys, one changed | 444,578 | 2.25 µs |
+| diff — depth 3, width 4 | 35,563 | 28.1 µs |
+| diff — array as a grow-only set | 2,830,451 | 353 ns |
+| merge — 20 flat keys | 2,130,062 | 469 ns |
+| merge — depth 3, width 4 | 4,959,915 | 202 ns |
+| merge — numeric counter increment | 5,398,362 | 185 ns |
+| apply — 100 inc records | 207,946 | 4.81 µs |
+| apply — 100 delta records | 8,824 | 113 µs |
 
 </details>
 
@@ -353,12 +360,12 @@ the CRDT helpers and the emitter. They are the numbers to watch for a regression
 
 | Benchmark | ops/s | per operation |
 | --- | ---: | ---: |
-| emit awaited — 0 listeners | 15,438,480 | 64.8 ns |
-| emit awaited — 1 sync listener | 3,767,087 | 265 ns |
-| emit awaited — 1 listener, (data, delta) | 3,767,151 | 265 ns |
-| emit awaited — 1 async listener | 3,552,996 | 281 ns |
-| emit awaited — 2 sync listeners | 3,275,916 | 305 ns |
-| emit fire-and-forget — 1 sync listener | 4,844,337 | 206 ns |
+| emit awaited — 0 listeners | 14,423,606 | 69.3 ns |
+| emit awaited — 1 sync listener | 3,747,799 | 267 ns |
+| emit awaited — 1 listener, (data, delta) | 3,781,384 | 264 ns |
+| emit awaited — 1 async listener | 3,402,202 | 294 ns |
+| emit awaited — 2 sync listeners | 3,221,211 | 310 ns |
+| emit fire-and-forget — 1 sync listener | 4,688,543 | 213 ns |
 
 </details>
 

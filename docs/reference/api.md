@@ -60,7 +60,7 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 | `getCachedData(id)` | `unknown \| null` | Synchronous cache peek, raw (no lens) |
 | `hasRecord(id)` | `boolean` | Whether the id is a live record — from the catalog, no I/O |
 | `stats()` | `{ closed, queue, cache: { size, max, pinned }, catalog: { entries, dirty }, log: { length, floor, next, epoch, segments, latestTs }, chain: { tail } \| null, lock: { mode } \| null }` | The node's health, from memory — no I/O |
-| `applyRemote(ops, { via, scopes, peer, adoptFrom }?)` | `Promise<{ applied, skipped, duplicates, gaps, malformed }>` | Applies a peer's ops, in order per origin; `peer` is `{ url, node }` for the hooks; `malformed` ops (shape, id, a stamp beyond `sync.maxSkew`) are counted and dropped; an `advance` is adopted only when its origin is `adoptFrom` |
+| `applyRemote(ops, { via, scopes, peer, adoptFrom }?)` | `Promise<{ applied, skipped, duplicates, gaps, malformed, unsigned, forged }>` | Applies a peer's ops, in order per origin; `peer` is `{ url, node }` for the hooks; `malformed` ops (shape, id, a stamp beyond `sync.maxSkew`) and ops refused for their signature (`forged`; `unsigned` under `sync.signatures: 'require'`) are counted and dropped; an `advance` is adopted only when its origin is `adoptFrom` |
 | `snapshot({ cursor, limit, scopes }?)` | `Promise<{ records, cursor, eventId, vector }>` | One page of state, tombstones included |
 | `mergeSnapshot(records, { via, from }?)` | `Promise<void>` | Joins a page (as `merge` ops of this node) |
 | `adoptVector(vector, { via, from }?)` | `Promise<SyncOp \| null>` | Records what a joined snapshot covers (an `advance` op) |
@@ -82,7 +82,7 @@ the operation (see [Hooks and events](../guide/hooks#events)):
 | Event | Payload | When |
 | --- | --- | --- |
 | `change` | `(op, via)` | Every op applied here; `via` is `null` for a local write, otherwise `{ url, node }` of the peer it came from (`url` null on the hosting side) |
-| `apply` | `({ via, peer, ops, applied, skipped, duplicates, gaps })` | A peer's batch is durable |
+| `apply` | `({ via, peer, ops, applied, skipped, duplicates, gaps, malformed, unsigned, forged })` | A peer's batch is durable |
 | `error` | `(error)` with `error.code` and `error.op`, plus `error.rejected` (`OP_REFUSED`) or `error.entity` + `error.issues` (`OP_INVALID`) | A peer's op refused by the field-kind rule, skipped as invalid under this node's schema, skipped because this node cannot read the record's file (`OP_UNREADABLE`), or refused for a stamp beyond `sync.maxSkew` (`SKEW`) |
 | `conflict` | `({ kind: 'unique', entity, fields, id, other, op })` | A peer's op left a unique key shared by two records; both are kept |
 | `schema` | `({ kind: 'drift', peer, version, hash, local })` / `({ kind: 'ahead', op, held })` | A peer runs this schema version with another snapshot hash (see [Schemas](../guide/sync#schemas)) / a peer's op is from a newer version, applied or held |
@@ -156,7 +156,7 @@ Properties: `storage`, `started`.
 
 Events (contained, like the storage's): `peer` `({ url, connected, node?,
 reconnected?, schema? })`, `sync` `({ url, pushed })` after a push and `({ url,
-received, applied, skipped, duplicates, gaps, malformed })` after a received
+received, applied, skipped, duplicates, gaps, malformed, unsigned, forged })` after a received
 page, `bootstrap` `({ url, records })`, `error` (with `.url`; `code: 'PAGE_FAILED'` / `'STUCK'`
 with `cursor` and `attempt` for a page of the feed that could not be applied,
 `'HANDSHAKE_LOOP'` for a host that keeps answering 428), `start`, `stop`,

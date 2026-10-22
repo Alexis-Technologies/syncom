@@ -84,45 +84,45 @@ pouchdb@9.0.0</title>
 <path class="bar" d="M276,221H458.8977825496081A4,4 0 0 1 462.8977825496081,225V231A4,4 0 0 1 458.8977825496081,235H276Z"/>
 <text class="value" x="468.8977825496081" y="234">74k</text>
 </g>
-<g><title>syncom · chain: false, createMemoryFsi() · v1.0.0
-61,080 records/s
-16.4 µs per record
-samples 59.1k – 63.6k
-@alexify/syncom@1.0.0</title>
-<text class="label secondary" x="20" y="265">syncom</text>
-<text class="sublabel" x="20" y="280">chain: false, createMemoryFsi() · v1.0.0</text>
-<path class="bar secondary" d="M276,261H450.59004922719464A4,4 0 0 1 454.59004922719464,265V271A4,4 0 0 1 450.59004922719464,275H276Z"/>
-<text class="value" x="460.59004922719464" y="274">61.1k</text>
-</g>
-<g><title>syncom · default, createMemoryFsi() · v1.0.0
-41,204 records/s
-24.3 µs per record
-samples 35.4k – 43.4k
-@alexify/syncom@1.0.0</title>
-<text class="label primary" x="20" y="305">syncom</text>
-<text class="sublabel" x="20" y="320">default, createMemoryFsi() · v1.0.0</text>
-<path class="bar primary" d="M276,301H433.494291090685A4,4 0 0 1 437.494291090685,305V311A4,4 0 0 1 433.494291090685,315H276Z"/>
-<text class="value" x="443.494291090685" y="314">41.2k</text>
-</g>
 <g><title>TinyBase · MergeableStore · v10.0.1
 23,707 records/s
 42.2 µs per record
 samples 20.8k – 24.8k
 tinybase@10.0.1</title>
-<text class="label" x="20" y="345">TinyBase</text>
-<text class="sublabel" x="20" y="360">MergeableStore · v10.0.1</text>
-<path class="bar" d="M276,341H409.4878412969904A4,4 0 0 1 413.4878412969904,345V351A4,4 0 0 1 409.4878412969904,355H276Z"/>
-<text class="value" x="419.4878412969904" y="354">23.7k</text>
+<text class="label" x="20" y="265">TinyBase</text>
+<text class="sublabel" x="20" y="280">MergeableStore · v10.0.1</text>
+<path class="bar" d="M276,261H409.4878412969904A4,4 0 0 1 413.4878412969904,265V271A4,4 0 0 1 409.4878412969904,275H276Z"/>
+<text class="value" x="419.4878412969904" y="274">23.7k</text>
 </g>
 <g><title>Fireproof · memory:// store · v0.24.19
 22,264 records/s
 44.9 µs per record
 samples 16.6k – 23.8k
 @fireproof/core@0.24.19</title>
-<text class="label" x="20" y="385">Fireproof</text>
-<text class="sublabel" x="20" y="400">memory:// store · v0.24.19</text>
-<path class="bar" d="M276,381H406.760134410402A4,4 0 0 1 410.760134410402,385V391A4,4 0 0 1 406.760134410402,395H276Z"/>
-<text class="value" x="416.760134410402" y="394">22.3k</text>
+<text class="label" x="20" y="305">Fireproof</text>
+<text class="sublabel" x="20" y="320">memory:// store · v0.24.19</text>
+<path class="bar" d="M276,301H406.760134410402A4,4 0 0 1 410.760134410402,305V311A4,4 0 0 1 406.760134410402,315H276Z"/>
+<text class="value" x="416.760134410402" y="314">22.3k</text>
+</g>
+<g><title>syncom · chain: false, createMemoryFsi() · v0.0.1
+17,209 records/s
+58.1 µs per record
+samples 16.8k – 17.4k
+@alexify/syncom@0.0.1</title>
+<text class="label secondary" x="20" y="345">syncom</text>
+<text class="sublabel" x="20" y="360">chain: false, createMemoryFsi() · v0.0.1</text>
+<path class="bar secondary" d="M276,341H395.57472561498184A4,4 0 0 1 399.57472561498184,345V351A4,4 0 0 1 395.57472561498184,355H276Z"/>
+<text class="value" x="405.57472561498184" y="354">17.2k</text>
+</g>
+<g><title>syncom · default, createMemoryFsi() · v0.0.1
+16,009 records/s
+62.5 µs per record
+samples 15.5k – 16.4k
+@alexify/syncom@0.0.1</title>
+<text class="label primary" x="20" y="385">syncom</text>
+<text class="sublabel" x="20" y="400">default, createMemoryFsi() · v0.0.1</text>
+<path class="bar primary" d="M276,381H392.43713694546244A4,4 0 0 1 396.43713694546244,385V391A4,4 0 0 1 392.43713694546244,395H276Z"/>
+<text class="value" x="402.43713694546244" y="394">16k</text>
 </g>
 <g><title>Automerge · Automerge.change, Counter · v3.5.0
 8,962 records/s
@@ -145,5 +145,5 @@ samples 1,084 – 1,102
 <text class="value" x="285.64354158446696" y="474">1,088</text>
 </g>
 <text class="caption" x="20" y="529">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
-<text class="caption" x="20" y="545">in a fresh process · 2026-10-21</text>
+<text class="caption" x="20" y="545">in a fresh process · 2026-10-22</text>
 </svg>

@@ -55,8 +55,8 @@ flowchart TB
 
 ## A local write
 
-`storage.update(id, { done: true })`, step by step. An insert, an increment, a delete or a purge
-take the same road with another op type.
+`storage.update(id, { done: true })`, step by step. An insert, an increment, an add to a set, a
+delete or a purge take the same road with another op type.
 
 ```mermaid
 sequenceDiagram
@@ -72,6 +72,7 @@ sequenceDiagram
   Q->>C: run when the queue reaches it
   C->>C: beforeWrite hook · stamp from the clock · applyOp
   C->>C: validator (folded into the op) · unique keys
+  C->>C: sign the op (Ed25519) — unless signatures: false
   C->>L: append(op) — the seq is durable
   C->>B: addBlock(hash of the record) — unless chain: false
   C->>E: write the record file, put its catalog row
@@ -116,8 +117,10 @@ flowchart LR
   receives a streamed snapshot instead and joins each page of it as one batch. See
   [Sync](/guide/sync#bootstrap).
 - **The host enforces.** `push` drops the ops outside the peer's scopes before applying the
-  rest. `changes` and `snapshot` serve only the scopes `grant()` allows. Every op is checked for
-  shape and clock skew first. See [Scaling](/guide/scaling) for hubs that dial each other.
+  rest. `changes` and `snapshot` serve only the scopes `grant()` allows. Every op's signature is
+  verified against its origin — the node id is the key — and every op is checked for shape and
+  clock skew before anything reads it. See [Signatures](/guide/sync#signatures), and
+  [Scaling](/guide/scaling) for hubs that dial each other.
 - **Reconnects belong to the link.** syncom runs no reconnect loop or timer of its own. A failed
   push marks the peer as behind, and the next sign of life on the link sends what is missing.
 
@@ -146,12 +149,12 @@ A storage is one directory, through whichever `fsi` it was given:
 
 ```
 data/
-├── node.json      this node's identity
-├── keys/          the node's key pair (encryption at rest)
+├── node.json      this node's identity: its signing key
+├── keys/          two key pairs: RSA (encryption at rest), Ed25519 (signing ops)
 ├── blockchain/    one block per write, and the tail (unless chain: false)
 ├── lock.json      while an instance holds the directory
 ├── schema.json    the schema version this directory last ran
-├── index/         catalog.json — derived, rebuilt when missing
+├── index/         catalog.json — derived (ids, indexes, search text), rebuilt when missing
 ├── data/          <id>.json per record: data, meta, the block that committed it
 ├── log/           the operation log: open files and sealed segments
 └── remote/        one file per registered sync node

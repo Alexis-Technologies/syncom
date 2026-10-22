@@ -11,6 +11,8 @@ stays at zero and wrpc stays on your version.
 npm install @alexify/syncom @alexify/wrpc
 ```
 
+(syncom is not on npm yet — see [Installation](./getting-started#installation).)
+
 ## Hosting a node
 
 `storage.sync.unit()` returns a plain object of procedures shaped for

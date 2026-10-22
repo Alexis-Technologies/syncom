@@ -7,9 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-This package has not been published to npm yet. `package.json` carries the
-version of the first release, 1.0.0; there is no released version section until
-it is published, and everything below lands there on release day.
+This package has not been published to npm yet, and will not be until it does
+what it is meant to. `package.json` carries `0.0.1`, a development placeholder,
+not the version of the first release — that is chosen when the release is cut.
+There is no released version section until then; everything below lands in it.
 
 ### Added
 
@@ -594,8 +595,8 @@ it is published, and everything below lands there on release day.
 - A record id is `[A-Za-z0-9_@-][A-Za-z0-9._@-]{0,127}`; every writer rejects
   anything else (`code: 'INVALID_ID'`), `get()`/`has()` answer absent, and a
   peer's op or snapshot record with another id is dropped as `malformed`.
-- `applyRemote()` answers `{ applied, skipped, duplicates, gaps, malformed }`
-  (the `sync` and `apply` events carry the new count too), and takes
+- `applyRemote()` answers `{ applied, skipped, duplicates, gaps, malformed,
+  unsigned, forged }` (the `sync` and `apply` events carry the new counts too), and takes
   `adoptFrom`: an `advance` is adopted only when its origin is that node.
 - `storage.on('error')` payloads carry `code` — `OP_REFUSED`, `OP_INVALID`,
   `SKEW`.
@@ -617,7 +618,7 @@ it is published, and everything below lands there on release day.
   `SmartContract.load` runs code from the chain, and a process that never
   imports the subpath — a hub — never does.
 - An entity definition is `{ schema?, idField?, validate?, index?, unique?,
-  fields? }` and any other key is a `TypeError` at `open()`; a legacy field
+  fields?, search? }` and any other key is a `TypeError` at `open()`; a legacy field
   map (`Post: { title: 'string' }`) goes under `fields`. A `schema` with a
   key other than `version` and `entities`, and a `getId` that is not a
   function, are refused at `open()` too (the latter used to be ignored).
