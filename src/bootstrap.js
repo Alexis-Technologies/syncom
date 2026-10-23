@@ -155,8 +155,7 @@ const mergeBatch = async (core, records, via, from) => {
   const entries = await core.log.append(batch.ops);
   const first = entries[0].seq;
   const last = entries[entries.length - 1].seq;
-  await core.persist(batch.touched, first, last);
-  core.log.applied(first, last);
+  if (await core.persist(batch.touched, first, last)) core.log.applied(first, last);
   core.flush();
   for (const { ctx, op, started } of batch.pending) {
     try {

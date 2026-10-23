@@ -8,7 +8,7 @@
 const { settle, waitUntil } = require('../utils/mesh.js');
 const { createSigner, forge, tamper } = require('../utils/signed.js');
 
-const nothing = { applied: 0, skipped: 0, duplicates: 0, gaps: 0, malformed: 0, unsigned: 0, forged: 0 };
+const nothing = { applied: 0, skipped: 0, duplicates: 0, gaps: 0, malformed: 0, unsigned: 0, forged: 0, outOfScope: 0 };
 const unsignedOp = (origin, seq, id, data) => ({ origin, seq, ts: Date.now() + seq, type: 'write', id, data });
 const SIGNATURE = /^[A-Za-z0-9_-]{86}$/;
 

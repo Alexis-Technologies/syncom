@@ -476,6 +476,10 @@ storage.applyRemote([], { adoptFrom: 'host' }).then((result) => {
   expectType<number>(result.malformed);
   expectType<number>(result.gaps);
 });
+storage.applyRemote([], { bound: ['Doc'] }).then((result) => {
+  expectType<number>(result.outOfScope);
+});
+expectError(storage.applyRemote([], { bound: 'Doc' }));
 storage.sync.on('refused', (event) => {
   expectType<'scope' | 'forged' | 'unsigned'>(event.reason);
   expectType<number>(event.count);
@@ -525,6 +529,9 @@ expectAssignable<SyncomErrorCode>('UNRECOVERABLE');
 expectType<{ entries: syncom.LogEntry[]; last: number | null } | null>(log.read('e.1', { scopes: ['a'], limit: 5 }));
 expectType<syncom.LogEntry[] | null>(log.since('e.1'));
 expectType<syncom.LogEntry[]>(log.entriesOf('r1'));
+expectType<void>(log.retain((entry) => entry.op.type === 'write'));
+expectType<void>(log.retain(null));
+expectError(log.retain(true));
 expectType<number>(storage.stats().cache.pinned);
 expectType<{ tail: string } | null>(storage.stats().chain);
 expectType<syncom.HostedPeer[]>(storage.sync.hosted());

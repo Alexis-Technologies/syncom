@@ -343,6 +343,17 @@ There is no released version section until then; everything below lands in it.
 
 ### Security
 
+- **Scopes bound what a peer writes, not only what it declares.** An
+  `update()` took the scope of its delta, so with a field-based `sync.scope`
+  (`data.$type`, as the docs show) it was minted global and reached every
+  peer; an op now takes the scope of the record as it leaves it, read after
+  validation. And a host took the scope an op declared on trust, so a peer
+  granted `Other` could overwrite a `Doc` record by sending an op with no
+  scope: a host's `push` now passes the grant to `applyRemote` as `bound`,
+  and an op whose record is outside it — before or after the op, as the host
+  scopes it — is refused (`outOfScope` in the answer and the apply result,
+  `refused` with `reason: 'scope'`). Found while comparing with RxDB.
+
 - **Record ids are checked at every entrance.** An id is
   `[A-Za-z0-9_@-][A-Za-z0-9._@-]{0,127}`: the local writers reject anything
   else with `TypeError` `code: 'INVALID_ID'` (naming `getId` when it minted
@@ -383,6 +394,48 @@ There is no released version section until then; everything below lands in it.
   `on`) no longer shadows the method (`record.shadowed` is logged once).
 
 ### Fixed
+
+- **Offline writes past retention reach the host.** A node that wrote more
+  ops than `retention.ops` before reaching a host had the oldest compacted,
+  and the host took none of them — nor any later one of that stream —
+  without a word. A node that dials now keeps its own ops until every
+  enabled registered node holds them (`listNodes()` shows `acked`,
+  `OpLog.retain(keep)` is the hook), and a host that lacks ones the log no
+  longer holds is reported once per hello as `UNDELIVERABLE`.
+- **A restored directory no longer forks its node in silence.** A node
+  restored from an older copy minted again seqs its peers already held, and
+  they dropped its new writes as duplicates. At hello it now reports
+  `REWOUND`, moves its streams past what the host holds, and bootstraps from
+  the host to get back what the lost ops wrote.
+- **Logged is committed.** A record file (or chain block) that failed after
+  the log append rejected the write while its op stayed logged and
+  replicated, and the writer read the record as missing until a reopen. The
+  write now stands: the entry is held in memory, the batch is replayed onto
+  the files at the next open, and the storage reports `UNPERSISTED`. A
+  peer's batch is held the same way.
+- **A torn record file is `INTEGRITY`**, not a bare `SyntaxError` from
+  `get()`/`has()`; `repair(id)` rebuilds it.
+- **A collection answers for its own records.** `collection.get(id)`
+  returned a record of another collection, and `update`, `delete` and
+  `record` acted on one; `get` is `null` there now, the others reject with
+  `NOT_FOUND`. An entity named like a storage member (`get`, `close`, `log`…)
+  replaced it, or broke `open()` with a bare `TypeError`; it is refused at
+  `open()`.
+- **`cursor.one()` leaves the cursor as it was** instead of a `limit(1)` the
+  next `fetch()` kept.
+- **Indexed objects match whatever their key order.** `$eq`/`$in` through
+  an index, and unique keys, compared JSON text; they compare canonical keys
+  now, as the predicate does.
+- **`merge()` and `diff()` walk own keys and never take `__proto__`** as a
+  field (a JSON-parsed delta set the result's prototype).
+- **`import { open } from '@alexify/syncom'` works in Node.js ESM.** The root
+  re-exported through spreads of locals, which Node's CommonJS lexer cannot
+  read; both barrels spell their exports out.
+- **Docs that disagreed with the code:** failing listeners and watch runs
+  log at `warn`, not `debug`; an op that skips ahead is dropped as a gap, not
+  set aside; there is no read-only open for a second tab; a host relays an
+  op its validator or `beforeApply` skipped; a nested object is one
+  register; the event tables list `log`, `refused` and every `error` code.
 
 - **The debt that had no decision attached.** The `Emitter`, the logger
   and `loadKeys` lived twice (once per platform half); they are
@@ -562,6 +615,11 @@ There is no released version section until then; everything below lands in it.
 - `examples/main.js` required a `globalstorage.js` that does not exist.
 
 ### Changed
+
+- **Browser budget 41 → 42 KB.** The fixes above — scopes checked on the
+  record, own ops kept until delivered, `REWOUND`/`UNDELIVERABLE`,
+  `UNPERSISTED`, scoped collections, canonical index keys — add about 1.2 KB
+  min+gzip; the browser entry is 41.9 KB.
 
 - **A write no longer costs more as the store grows.** The record catalog is a
   whole file, and it was saved every `catalog.flushEvery` (64) puts whatever

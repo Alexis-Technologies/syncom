@@ -171,13 +171,33 @@ recognised as foreign rather than mistaken for a position.
 highest sequence number applied per origin. Sequence numbers run per origin
 *and scope*, so a node syncing one scope sees no holes; the key is then
 `origin@scope`. Ops from one origin are applied in order; an op that skips
-ahead is set aside until the ones before it arrive.
+ahead is a gap: it is dropped and counted (`gaps`), and comes again when the
+stream is read from the last position that landed.
 
 Retention bounds the log: `retention.ops` (default 10 000) and
 `retention.days` drop the oldest sealed segments, and `floor` moves up. A
 peer whose cursor fell below the floor cannot be resumed — it is told to
 [bootstrap](#bootstrap) instead. Size retention for the longest outage a peer
 should be able to sit out.
+
+A node's **own** ops are the exception, because nobody else can hand them to
+a host. A node that dials (it has `sync.connect`) keeps every op of its own
+until each enabled registered node in its scope has it — `listNodes()` shows
+how far each one holds them as `acked`, saved with the registry — so a node
+that writes offline for longer than retention still delivers every write
+when it reconnects. Only registered nodes are waited for: ops written before
+the first `addNode()` are retained like any other, and a host that lacks
+ones the log no longer holds is reported once per hello with
+`code: 'UNDELIVERABLE'` (those ops are not sent — every one would be a gap
+there). Register the node before going offline. A node that is never
+reached holds its ops back until it is removed or disabled.
+
+A directory restored from an older copy is noticed at the next hello: the
+host holds more of the node's own stream than its log does. The node reports
+`code: 'REWOUND'`, moves its streams past what the host holds — so nothing it
+mints collides with an op the host already has — and bootstraps from the
+host to get back what the lost ops wrote. Writes made between the restore
+and that hello reused seqs the host had, and are lost to it.
 
 ## Signatures
 
@@ -352,6 +372,12 @@ const storage = await open({
 await storage.sync.addNode({ url, scopes: ['Doc'] }); // Doc records, plus everything global
 ```
 
+An op belongs to the scope of the record as it leaves it: a `write`'s own
+data, a `set` (an `update()`) merged onto the record it changes, the record's
+for an `inc`, `add`, `remove`, `delete` or `purge` — and read after the
+validator, so a scope field a default fills counts. An `update()` that does
+not name the scoped field is still in the record's scope.
+
 An unscoped record (scope `'*'`) reaches every peer. On a wrpc host the
 subscriber joins the room `syncom:<scope>` for each scope it asked for, so
 `server.rooms.count('syncom:Doc')` and the cluster's `fetchClients({ room })`
@@ -362,7 +388,16 @@ On the hosting side the scopes a peer named in `hello` are a **boundary**, not
 a filter. A `push` carrying an op of another scope has that op refused —
 counted as `outOfScope` in the answer, announced through the `refused` event,
 never applied or logged; the peer's other streams are untouched, since
-sequence numbers run per scope. `snapshot` and `changes` serve the
+sequence numbers run per scope. The scope an op declares is only the peer's
+word, so the host also scopes the record it writes, with its own
+`sync.scope`, before the op and after it: a peer may write only records it may
+read. An op that would touch a record outside its scopes — a `set` declared
+global on a `Doc` record, a `write` that would move one into the peer's own
+scope, a new record whose data puts it in another — is refused the same way
+(`outOfScope`, `refused` with `reason: 'scope'`), and so is one the host's
+scope function throws on. That refusal is a gap in the op's stream at this
+host: the peer's later ops of that scope stop there too, which a peer that
+only writes what it may read never meets. `snapshot` and `changes` serve the
 intersection of what is asked and what was granted: asking for `'*'` or for
 nothing is asking for the granted list, asking only for other scopes is
 refused with code **403** (`reason: 'SCOPES'`). A peer granted `'*'` is bound by nothing.
@@ -533,7 +568,25 @@ the engine's own tests run on.
 - **Logged means applied, eventually.** The record files are written after
   the log; a reopen replays the unsealed tail onto them, and the log seals a
   batch only once its records were written — a crash between the two, or a
-  record write that failed, leaves the batch in the tail until it lands.
+  record write that failed, leaves the batch in the tail until it lands. The
+  append is the commit point: a write whose record file (or chain block)
+  fails after it still stands and replicates, its record is held in memory so
+  reads see it, and the storage reports `code: 'UNPERSISTED'`.
+- **A node's own ops are kept for the nodes it dials**, until they have them
+  — see [The log](#the-log). Ops written before any node was registered, and
+  compacted since, cannot reach a host (`UNDELIVERABLE`).
+- **A nested object is one register.** Merging is per top-level field: two
+  nodes that change different keys of one nested object concurrently keep
+  one object, the later writer's. `update({ 'a.b': 1 })` writes a top-level
+  field named `a.b`, not a path. Keep fields that change independently at the
+  top level.
+- **A host checks, every node decides.** A host that skips a peer's op — its
+  validator fails it (`OP_INVALID`) or `beforeApply` returns `false` — still
+  logs and relays it: a withheld op would be a gap in its origin's stream for
+  every node behind the host. Each of them runs its own validators and hooks
+  on it. What stops at the host is an op outside the peer's scopes, a
+  malformed or skewed one, a signature refused, and a `beforeApply` that
+  throws (the whole page is refused, and offered again).
 - **fsync is opt-in.** Files are written with the platform's default
   durability; `open({ durable: true })` adds an fsync after every write on a
   backend that has one (`node:fs`). On OPFS there is no rename either, so a

@@ -10,6 +10,7 @@ const { notify } = require('./hooks.js');
 const { Cursor } = require('./query.js');
 const { isPlainObject } = require('./shape.js');
 const { COMMIT, REFRESH, SOURCE } = require('./symbols.js');
+const { SyncomError } = require('./errors.js');
 
 class Reference {
   #id;
@@ -170,13 +171,28 @@ class Collection {
     return this.#name;
   }
 
+  // A live record of another collection (or of none): what the catalog says
+  // of `id`. An unknown id is not foreign — it is simply absent.
+  #foreign(id) {
+    const row = this.#storage[SOURCE].row(id);
+    return row !== null && !row.gone && row.type !== this.#name;
+  }
+
+  #mine(id) {
+    if (this.#foreign(id)) {
+      throw new SyncomError('NOT_FOUND', `Record ${id} is not a ${this.#name}`, { id, entity: this.#name });
+    }
+  }
+
   async insert(data, options = {}) {
     const record = { ...data, $type: this.#name };
     const id = await this.#storage.insert(record, options);
     return this.#storage.record(id);
   }
 
+  /** The record, or null when it is absent or belongs to another collection. */
   async get(id) {
+    if (this.#foreign(id)) return null;
     return this.#storage.get(id);
   }
 
@@ -197,6 +213,7 @@ class Collection {
   }
 
   async delete(id, options = {}) {
+    this.#mine(id);
     return this.#storage.delete(id, options);
   }
 
@@ -204,10 +221,12 @@ class Collection {
     if (isPlainObject(delta) && Object.hasOwn(delta, '$type')) {
       throw new TypeError('$type is immutable; update() may not name it');
     }
+    this.#mine(id);
     return this.#storage.update(id, delta, options);
   }
 
   async record(id) {
+    this.#mine(id);
     return this.#storage.record(id);
   }
 }

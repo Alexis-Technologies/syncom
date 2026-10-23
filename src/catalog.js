@@ -39,9 +39,20 @@ const valueOf = (data, path) => {
   return value;
 };
 
+// A value with its object keys sorted at every depth: `{ a, b }` and
+// `{ b, a }` are equal to the query's predicate, so they share a key. A
+// prototype-less copy, so a `__proto__` field stays a field.
+const canonical = (value) => {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (!isObject(value)) return value;
+  const out = Object.create(null);
+  for (const key of Object.keys(value).sort()) out[key] = canonical(value[key]);
+  return out;
+};
+
 // Arrays and objects are keyed as values; an array is posted under each of
 // its elements too (see `post`). Unique keys compare the whole value.
-const keyOf = (value) => JSON.stringify(value);
+const keyOf = (value) => JSON.stringify(canonical(value));
 
 // The text `$text` searches a record by: its string fields among `fields`,
 // and the string elements of its array fields, joined by a space — as the

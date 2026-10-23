@@ -211,7 +211,9 @@ const push = (host) => async (context, args) => {
   // The scopes hello granted bound what a peer writes here, not only what
   // it reads: an op outside them is refused before anything sees it. No
   // stream is harmed — seqs run per scope, and a dialer that honours its
-  // registry never sends one.
+  // registry never sends one. (An op in a granted scope that writes a
+  // record outside them is refused inside applyRemote, which reads the
+  // record: that one is a gap in its stream.)
   const granted = [];
   let outOfScope = 0;
   for (const op of ops) {
@@ -221,7 +223,10 @@ const push = (host) => async (context, args) => {
   if (outOfScope > 0) refuseOps(host, node, 'scope', outOfScope);
   // `url` is null: a host does not dial, so it has no url for the peer.
   const via = state.ref ?? { url: null, node };
-  const result = await storage.applyRemote(granted, { via, scopes, peer: via });
+  // `bound`: the records the peer writes must be in its scopes too, as this
+  // node scopes them — the scope an op declares is only the peer's word.
+  const result = await storage.applyRemote(granted, { via, scopes, peer: via, bound: scopes });
+  if (result.outOfScope > 0) refuseOps(host, node, 'scope', result.outOfScope);
   if (result.forged > 0) announceRefused(host, node, 'forged', result.forged);
   if (result.unsigned > 0) announceRefused(host, node, 'unsigned', result.unsigned);
   // The vector the dialer merges in: the keys this page touched, not the
@@ -232,7 +237,7 @@ const push = (host) => async (context, args) => {
     const key = opKey(op);
     if (whole[key] !== undefined) vector[key] = whole[key];
   }
-  return { vector, ...result, outOfScope };
+  return { vector, ...result, outOfScope: outOfScope + result.outOfScope };
 };
 
 const snapshot = (host) => async (context, args) => {

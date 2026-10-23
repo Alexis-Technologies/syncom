@@ -61,6 +61,8 @@ class OpLog {
   #otel;
   #fsi;
   #droppedHeld = 0;
+  // Entries compaction keeps whatever the retention says (see `retain`).
+  #keep = null;
   #torn = new Set();
   #writes = Promise.resolve();
   // Batches appended whose records may not be written yet: first seq → last
@@ -401,6 +403,7 @@ class OpLog {
       const overAge = cutoff !== null && lastTs < cutoff;
       const tooMany = ops ? this.#entries.length > ops : false;
       if (!(tooMany && overOps) && !overAge) break;
+      if (this.#keeps(oldest.to)) break;
       this.#segments.shift();
       for (const entry of this.#entries) {
         if (entry.seq > oldest.to) break;
@@ -413,6 +416,29 @@ class OpLog {
       dropped++;
     }
     return dropped;
+  }
+
+  // Whether an entry up to `to` must stay: the segment that holds it does.
+  #keeps(to) {
+    if (this.#keep === null) return false;
+    for (const entry of this.#entries) {
+      if (entry.seq > to) return false;
+      if (this.#keep(entry)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Entries compaction must not drop, whatever the retention: `keep(entry)`
+   * answers true for one that must stay, and the segment holding it stays
+   * with everything after it. The sync manager of a node that dials keeps
+   * its own ops until every node it syncs with has them. `null` clears it.
+   */
+  retain(keep) {
+    if (keep !== null && typeof keep !== 'function') {
+      throw new TypeError('retain(keep): keep must be a function or null');
+    }
+    this.#keep = keep;
   }
 
   async #writeIndex() {

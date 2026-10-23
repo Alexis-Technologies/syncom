@@ -121,8 +121,15 @@ docs/                     VitePress site
   counted, not logged, not relayed. Payload shape is `applyOp`'s business.
 - **Scopes are enforced by the host.** `unit().push` drops out-of-scope ops
   before `applyRemote` (`refused` event, `syncom.ops.rejected{scope}`);
-  `snapshot`/`changes` serve `grant(asked, granted)`. `applyRemote`'s
-  `scopes` option only gates `advance` adoption, and adoption needs
+  `snapshot`/`changes` serve `grant(asked, granted)`. The scope an op declares
+  is the peer's word: `push` also passes the grant as `bound`, and
+  `applyRemote` refuses an op whose RECORD — before the op and after it, as
+  this node's `sync.scope` reads it — is outside it (`outOfScope`, not logged,
+  not relayed: a gap, like a forged op; relaying it as skipped would hand the
+  write to every peer of the declared scope). A local op takes the scope of
+  the record as it leaves it (`scopeData` in `src/commit.js`, re-read after
+  validation), never of a `set`'s delta alone. `applyRemote`'s `scopes`
+  option only gates `advance` adoption, and adoption needs
   `adoptFrom === op.origin` — the host a feed is read from. Never adopt on the
   push path.
 - **`ops.js` walks own keys only.** `Object.keys` + `isKey` (`__proto__` is
@@ -183,7 +190,17 @@ docs/                     VitePress site
   The storage opens its log with `sealApplied: true` and every write path
   calls `log.applied(from, to)` after `EntryStore.write`/`#persistBatch`; a roll then
   seals nothing from the oldest batch not yet applied onwards. A new path
-  that appends must mark what it applied, or the tail grows forever.
+  that appends must mark what it applied, or the tail grows forever. The
+  append is the commit point: a chain block or record file that fails after
+  it is never thrown through — `core.persist` (`Storage#land`) and
+  `persistLocal` hold the entries in memory (`EntryStore.hold`, never
+  evicted), leave the batch unapplied for the next open to replay, and
+  report `UNPERSISTED`. A node that dials keeps its own ops past retention
+  until every enabled registered node in their scope holds them
+  (`OpLog.retain(keep)`, `node.acked` — the own keys of a peer's vector,
+  replaced at hello, raised by push answers); a host behind what the log
+  retains is `UNDELIVERABLE`, and a host ahead of the node's own stream at
+  hello is `REWOUND` (adopt the host's own keys, then bootstrap from it).
 - **A failed page is a break in the stream.** `#receive` runs pages one after
   another per peer (`peer.inbound`), numbered by `peer.feed`; a rejection goes
   to `#pageFailed`, which closes the feed (pages of the old feed are dropped),
@@ -229,9 +246,11 @@ docs/                     VitePress site
   exists to declare that difference. Do not "fix" it by making the Node half
   async. The one async function of the Node half is `verifyAsync` — the
   engine's verify, `crypto.verify` with a callback, on libuv's thread pool —
-  and it is not on the package root: both barrels drop it (`const {
-  verifyAsync, ...crypto }`), and `src/signing.js` is its only caller. In the
-  browser it is `verify` itself.
+  and it is not on the package root: both barrels leave it out by name, and
+  `src/signing.js` is its only caller. In the browser it is `verify` itself.
+  The barrels spell every export out — a required module spread whole, the
+  rest by name, never a spread of a local — because that is the shape Node's
+  cjs-module-lexer reads for an ESM importer (`tests/package/esm.test.js`).
 - **Signed ops: the id is the key, the signature is the header plus a salted
   digest.** `nodeId` = the Ed25519 public key (`isKeyId`: 43 base64url chars,
   canonical last char — a non-canonical one is the same key under another
@@ -296,7 +315,9 @@ docs/                     VitePress site
   when the cursor is ordered and limited (the rows come back sorted, `fetch`
   must not sort again) or an `Every` otherwise; `Catalog.candidates` narrows
   through `$and`/`$or`, and `ids()`/`indexed()` hand out cached, shared
-  arrays and sets — never edit what they return. Unique keys are checked after validation and
+  arrays and sets — never edit what they return. Indexed and unique values are
+  keyed canonically (`keyOf`: object keys sorted at every depth), as the
+  predicate compares them. Unique keys are checked after validation and
   the fold, before `#log.append` (local: throw) and after `applyOp` on the
   apply path (remote: `conflict` event, never a skip — both records stay).
 - **`$text` is the catalog's.** An entity's `search` fields are joined into

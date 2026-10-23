@@ -25,6 +25,10 @@ class EntryStore {
   #verify;
   #decrypt;
   #view;
+  // Records whose ops are logged but whose file could not be written: held
+  // in the cache, never evicted, until a write of theirs lands (or the next
+  // open replays the log onto the file).
+  #held = new Set();
 
   // `pinned(id)` says whether the application holds a live Record of `id`
   // (its entry stays cached); `verify(id, data, block)` checks a cold read
@@ -67,7 +71,7 @@ class EntryStore {
     if (this.#cache.size <= this.#max) return;
     for (const key of this.#cache.keys()) {
       if (this.#cache.size <= this.#max) break;
-      if (this.#pinned(key)) continue;
+      if (this.#pinned(key) || this.#held.has(key)) continue;
       this.#cache.delete(key);
     }
   }
@@ -82,7 +86,19 @@ class EntryStore {
     const exists = await this.#fsi.exists(this.#dir, `${id}.json`);
     if (!exists) return null;
     const raw = await this.#fsi.read(this.#dir, `${id}.json`);
-    const { data, meta, encrypted, block } = JSON.parse(raw);
+    // A file torn by a crash, or not ours: evidence, like a failed check —
+    // never a bare SyntaxError. `repair(id)` rebuilds it from the log.
+    let stored = null;
+    let cause;
+    try {
+      stored = JSON.parse(raw);
+    } catch (error) {
+      cause = error;
+    }
+    if (stored === null || typeof stored !== 'object' || Array.isArray(stored)) {
+      throw new SyncomError('INTEGRITY', `Storage record ${id} is unreadable`, { id, cause });
+    }
+    const { data, meta, encrypted, block } = stored;
     if (this.#verify !== null) {
       const isValid = await this.#verify(id, data, block);
       if (!isValid) throw new SyncomError('INTEGRITY', `Storage record ${id} is invalid`, { id });
@@ -127,7 +143,19 @@ class EntryStore {
   async write(id, entry, blockHash) {
     const stored = { data: entry.data, meta: entry.meta, encrypted: false, timestamp: Date.now(), block: blockHash };
     await this.#fsi.write(this.#dir, `${id}.json`, JSON.stringify(stored));
+    this.#held.delete(id);
     const cached = { data: entry.data, meta: entry.meta, encrypted: false, block: blockHash };
+    this.remember(id, cached);
+    this.#catalog.put(id, await this.row(id, cached));
+  }
+
+  // An entry whose op is logged but whose file (or chain block) could not be
+  // written: the cache and the catalog hold what the log says, so reads see
+  // the write; the file catches up when a later write of it lands, or when
+  // the next open replays the log.
+  async hold(id, entry) {
+    const cached = { data: entry.data, meta: entry.meta, encrypted: false, block: null };
+    this.#held.add(id);
     this.remember(id, cached);
     this.#catalog.put(id, await this.row(id, cached));
   }

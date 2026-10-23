@@ -662,3 +662,51 @@ test('maxListeners: a hundred by default, tunable, enforced on the storage and i
   assert.throws(() => tight.sync.on('peer', () => 3), /MaxListenersExceededWarning/);
   assert.throws(() => syncom.open({ path: tempDir, logger: false, lock: false, maxListeners: 0 }), TypeError);
 });
+
+test('A collection answers for its own records only', async (t) => {
+  const dir = await createTemp();
+  t.after(() => cleanupTemp(dir));
+  const storage = await syncom.open({ path: dir, logger: false, schema: { entities: { Todo: {}, Note: {} } } });
+  t.after(() => storage.close().catch(() => {}));
+  const note = await storage.Note.insert({ text: 'mine' });
+  const bare = await storage.insert({ loose: true });
+  assert.strictEqual(await storage.Todo.get(note.id), null, 'a Note is not a Todo');
+  assert.strictEqual(await storage.Todo.get(bare), null, 'nor is a record of no collection');
+  assert.deepStrictEqual(await storage.Note.get(note.id), { text: 'mine', $type: 'Note' });
+  assert.strictEqual(await storage.Todo.get('absent'), null);
+  for (const call of [
+    () => storage.Todo.update(note.id, { text: 'theirs' }),
+    () => storage.Todo.delete(note.id),
+    () => storage.Todo.record(note.id),
+  ]) {
+    await assert.rejects(call, (error) => {
+      assert.ok(error instanceof syncom.SyncomError);
+      assert.strictEqual(error.code, 'NOT_FOUND');
+      assert.strictEqual(error.id, note.id);
+      assert.strictEqual(error.entity, 'Todo');
+      return true;
+    });
+  }
+  assert.deepStrictEqual(await storage.get(note.id), { text: 'mine', $type: 'Note' }, 'untouched');
+  await storage.Note.update(note.id, { text: 'edited' });
+  assert.strictEqual((await storage.Note.record(note.id)).text, 'edited');
+  await storage.Note.delete(note.id);
+  assert.strictEqual(await storage.Note.get(note.id), null);
+});
+
+test('An entity name the storage answers to is refused at open', async (t) => {
+  for (const name of ['get', 'set', 'close', 'log', 'sync', 'path', 'on', 'constructor', '__proto__']) {
+    const dir = await createTemp();
+    t.after(() => cleanupTemp(dir));
+    const entities = Object.create(null);
+    entities[name] = {};
+    await assert.rejects(
+      async () => syncom.open({ path: dir, logger: false, schema: { entities } }),
+      (error) => error instanceof TypeError && error.message.includes(`'${name}'`),
+      name,
+    );
+    // Refused before anything was opened: the directory is free.
+    const storage = await syncom.open({ path: dir, logger: false });
+    await storage.close();
+  }
+});

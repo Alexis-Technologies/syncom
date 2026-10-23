@@ -60,7 +60,7 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 | `getCachedData(id)` | `unknown \| null` | Synchronous cache peek, raw (no lens) |
 | `hasRecord(id)` | `boolean` | Whether the id is a live record — from the catalog, no I/O |
 | `stats()` | `{ closed, queue, cache: { size, max, pinned }, catalog: { entries, dirty }, log: { length, floor, next, epoch, segments, latestTs }, chain: { tail } \| null, lock: { mode } \| null }` | The node's health, from memory — no I/O |
-| `applyRemote(ops, { via, scopes, peer, adoptFrom }?)` | `Promise<{ applied, skipped, duplicates, gaps, malformed, unsigned, forged }>` | Applies a peer's ops, in order per origin; `peer` is `{ url, node }` for the hooks; `malformed` ops (shape, id, a stamp beyond `sync.maxSkew`) and ops refused for their signature (`forged`; `unsigned` under `sync.signatures: 'require'`) are counted and dropped; an `advance` is adopted only when its origin is `adoptFrom` |
+| `applyRemote(ops, { via, scopes, peer, adoptFrom, bound }?)` | `Promise<{ applied, skipped, duplicates, gaps, malformed, unsigned, forged, outOfScope }>` | Applies a peer's ops, in order per origin; `peer` is `{ url, node }` for the hooks; `malformed` ops (shape, id, a stamp beyond `sync.maxSkew`) and ops refused for their signature (`forged`; `unsigned` under `sync.signatures: 'require'`) are counted and dropped; an `advance` is adopted only when its origin is `adoptFrom`; under `bound` (a host's push passes the peer's granted scopes) an op whose record is outside them, before or after it, is counted `outOfScope` and dropped |
 | `snapshot({ cursor, limit, scopes }?)` | `Promise<{ records, cursor, eventId, vector }>` | One page of state, tombstones included |
 | `mergeSnapshot(records, { via, from }?)` | `Promise<void>` | Joins a page (as `merge` ops of this node) |
 | `adoptVector(vector, { via, from }?)` | `Promise<SyncOp \| null>` | Records what a joined snapshot covers (an `advance` op) |
@@ -83,7 +83,7 @@ the operation (see [Hooks and events](../guide/hooks#events)):
 | --- | --- | --- |
 | `change` | `(op, via)` | Every op applied here; `via` is `null` for a local write, otherwise `{ url, node }` of the peer it came from (`url` null on the hosting side) |
 | `apply` | `({ via, peer, ops, applied, skipped, duplicates, gaps, malformed, unsigned, forged })` | A peer's batch is durable |
-| `error` | `(error)` with `error.code` and `error.op`, plus `error.rejected` (`OP_REFUSED`) or `error.entity` + `error.issues` (`OP_INVALID`) | A peer's op refused by the field-kind rule, skipped as invalid under this node's schema, skipped because this node cannot read the record's file (`OP_UNREADABLE`), or refused for a stamp beyond `sync.maxSkew` (`SKEW`) |
+| `error` | `(error)` with `error.code` and `error.op`, plus `error.rejected` (`OP_REFUSED`) or `error.entity` + `error.issues` (`OP_INVALID`); `error.ids` for `UNPERSISTED` | A peer's op refused by the field-kind rule, skipped as invalid under this node's schema, skipped because this node cannot read the record's file (`OP_UNREADABLE`), or refused for a stamp beyond `sync.maxSkew` (`SKEW`); signatures refused (`BAD_SIGNATURE`, `UNSIGNED`); logged ops whose record files could not be written (`UNPERSISTED`) |
 | `conflict` | `({ kind: 'unique', entity, fields, id, other, op })` | A peer's op left a unique key shared by two records; both are kept |
 | `schema` | `({ kind: 'drift', peer, version, hash, local })` / `({ kind: 'ahead', op, held })` | A peer runs this schema version with another snapshot hash (see [Schemas](../guide/sync#schemas)) / a peer's op is from a newer version, applied or held |
 | `log` | `({ kind: 'roll', sealed, dropped, floor, segments })` | The log sealed a segment and maybe dropped old ones; `floor` is where a resume is still possible |
@@ -105,11 +105,15 @@ live property per field of the loaded object.
 
 ### `Collection`
 
-Created per schema entity and exposed as `storage.<EntityName>`.
+Created per schema entity and exposed as `storage.<EntityName>`; a name the
+storage already answers to (`get`, `close`, `log`, `sync`…) is refused at
+`open()` with a `TypeError`.
 
-`name`, `insert(data, options?)`, `get(id)`, `set(id, data, options?)`
-(stamped as the collection's), `update(id, delta, { actor }?)` (refuses a
-delta naming `$type`), `delete(id, { actor }?)`, `record(id)`,
+`name`, `insert(data, options?)`, `get(id)` (null for a record of another
+collection), `set(id, data, options?)` (stamped as the collection's),
+`update(id, delta, { actor }?)` (refuses a delta naming `$type`),
+`delete(id, { actor }?)`, `record(id)` — `update`, `delete` and `record`
+reject with `NOT_FOUND` for a record of another collection —
 `select(query?)` → a cursor, `count(query?)`.
 Writes through a collection with a `schema` are validated — see
 [Validation](../guide/storage#validation); `unique` keys are refused with a
@@ -144,7 +148,7 @@ Extends `Emitter`. See [Sync](../guide/sync).
 | `addNode({ url, token?, scopes? })` | `Promise<void>` | Registers a peer to dial; dials it at once when started |
 | `removeNode(url)` | `Promise<void>` | Hangs up too |
 | `enableNode(url, enabled = true)` | `Promise<void>` | Keep a node without dialing it |
-| `listNodes()` | `Node[]` | `{ url, token, scopes, enabled, lastSync, cursor, remote }`; `remote` is `{ id, epoch, schema }` after a hello |
+| `listNodes()` | `Node[]` | `{ url, token, scopes, enabled, lastSync, cursor, remote, acked }`; `remote` is `{ id, epoch, schema }` after a hello; `acked` is how far the node holds this node's own streams (vector keys → seq), what the log keeps them for |
 | `start()` | `Promise<void>` | Dials every enabled node; needs `sync.connect` |
 | `stop()` | `Promise<void>` | Closes every link |
 | `sync(url?)` | `Promise<Array<{ url, pushed }>>` | Pushes what the peers lack now |
@@ -163,8 +167,12 @@ with `cursor` and `attempt` for a page of the feed that could not be applied,
 `node` `({ url, action: 'add' | 'remove' | 'enable' | 'disable' })`, `connect`
 `({ url })` once a link is accepted (before hello), and on the hosting side
 `hello` `({ node, scopes, schema })` once a peer is authorized and `refused`
-`({ node, reason: 'scope', count })` when a push carried ops outside the
-scopes that hello granted (see [Scopes](../guide/sync#scopes)).
+`({ node, reason, count })` when a push carried ops it would not take: `reason`
+`'scope'` for ops outside the scopes that hello granted — the scope an op
+declares, or the scope of the record it writes, before or after it (see
+[Scopes](../guide/sync#scopes)) — `'forged'` and `'unsigned'` for signatures
+refused (see [Signatures](../guide/sync#signatures)). The dialer's `error`
+event also carries `'REWOUND'` and `'UNDELIVERABLE'` (see the codes below).
 
 Hooks (`open({ sync: { hooks } })`): `beforeConnect`, `beforeBootstrap` — see
 [Hooks and events](../guide/hooks#sync-hooks).
@@ -184,10 +192,10 @@ value is data or configuration. `HookError` and `ValidationError` are
 | --- | --- | --- |
 | `CLOSED` | any write or `applyRemote()` after `close()` | — |
 | `IN_HOOK` | a write issued from inside a write or apply hook (the `cause` of the `HookError` the operation rejects with) | — |
-| `NOT_FOUND` | `update()`, `swap()` on a record that is absent, deleted or purged | — |
+| `NOT_FOUND` | `update()`, `swap()` on a record that is absent, deleted or purged; a collection's `update()`, `delete()`, `record()` on a record of another collection | `id`, `entity` (the collection's) |
 | `FIELD_KIND` | `update()`/`set()` on a counter or set field, `inc()` on a register or set field, `add()`/`remove()` on a register or counter field | `field`, `kind` (`'register'`, `'counter'` or `'set'`: what the field is) |
 | `ENCRYPTED` | `inc()`, `add()` or `remove()` on an encrypted record; `{ encrypted: true }` on a replicated one | — |
-| `INTEGRITY` | a read (`get()`, `has()`, a cursor) of a record whose file fails its chain block check, under `integrity: 'verify'` | `id` |
+| `INTEGRITY` | a read (`get()`, `has()`, a cursor) of a record whose file fails its chain block check, under `integrity: 'verify'`, or cannot be parsed at all (a file torn by a crash; `repair(id)` rebuilds it) | `id`, `cause` (the parse error) |
 | `CORRUPT` | `open()` when `node.json`, `schema.json` or `.blockchain.json` cannot be read | `cause` |
 | `DOWNGRADE` | `open()` with `ahead: 'hold'` and a schema version below the one the directory ran | — |
 | `LOCKED` | `open()` while another instance holds the directory | `path` |
@@ -205,6 +213,9 @@ value is data or configuration. `HookError` and `ValidationError` are
 | `PAGE_FAILED`, `STUCK` | the sync `error` event: a page of the feed could not be applied; the third in a row | `url`, `cursor`, `attempt`, `cause` |
 | `STREAMS_UNSUPPORTED` | the sync `error` event: the host streamed a snapshot and the link cannot read streams | `url` |
 | `UNRECOVERABLE` | `repair()` when the log holds no whole-record op for the id | `id` |
+| `UNPERSISTED` | the storage's `error` event: ops were logged — the write stands, and replicates — but their record files (or chain block) could not be written; the records are held in memory and the next open replays the batch onto the files | `ids`, `cause` |
+| `REWOUND` | the sync `error` event, at a hello: the host holds more of this node's own ops than its log does — a directory restored from an older copy, or another instance with this identity. The node moves its streams past the host's and bootstraps from it; writes made since the restore and before this hello are lost to the host | `url`, `local`, `remote` (vector keys of this node → seq) |
+| `UNDELIVERABLE` | the sync `error` event, once per hello: the host lacks ops of this node's own that its log no longer retains (written before any node was registered, and compacted since); they are not sent | `url`, `missing` (key → `{ host, retained }`) |
 | `SKEW`, `OP_UNREADABLE`, `OP_REFUSED`, `OP_INVALID` | the storage `error` event — see [`Storage`](#storage) | `op`, plus `rejected` / `entity` + `issues` |
 | `HOOK_FAILED` | a `HookError` | `hook`, `cause` |
 | `VALIDATION_FAILED` | a `ValidationError` | `entity`, `issues`, `cause` |

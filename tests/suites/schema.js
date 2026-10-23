@@ -344,6 +344,7 @@ const runSchemaTests = async (t, assert, createStorage) => {
       malformed: 0,
       unsigned: 0,
       forged: 0,
+      outOfScope: 0,
     });
     assert.strictEqual(await storage.get('r1'), null, 'the invalid op did not touch the record');
     assert.deepStrictEqual(await storage.get('r2'), { n: 2, $type: 'Post' });
@@ -365,6 +366,7 @@ const runSchemaTests = async (t, assert, createStorage) => {
       malformed: 0,
       unsigned: 0,
       forged: 0,
+      outOfScope: 0,
     });
     assert.deepStrictEqual(await storage.get('r2'), { n: 2, $type: 'Post' });
     // A reopen replays the unsealed tail and leaves the skipped ops alone.

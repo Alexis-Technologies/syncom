@@ -103,23 +103,40 @@ const commitSealed = async (core, type, id, payload, current, ctx, source) => {
   return undefined;
 };
 
+// The record as the op leaves it, as far as its scope goes: a write's own
+// data, a set's on top of the record's, the record's for the rest (a delete
+// or a purge empties it, but the op still belongs where the record was). A
+// set's delta alone would name no scope a field-based `sync.scope` reads,
+// and the op would go to every peer.
+const scopeData = (type, payload, current) => {
+  const data = current?.data ?? {};
+  if (type === 'write') return payload.data ?? data;
+  if (type === 'set') return { ...data, ...payload.data };
+  return data;
+};
+
+// The op's stream: its scope, and the next seq there (seqs run per stream,
+// see vector.js opKey).
+const assignScope = (core, op, data) => {
+  const scope = core.scopeOf(op.id, data);
+  if (scope === GLOBAL_SCOPE) delete op.scope;
+  else op.scope = scope;
+  op.seq = core.log.seqOf(opKey(op)) + 1;
+};
+
 // The op as this node mints it: stamped above everything the node already
 // holds for the record, so a local write never sorts below state the node
 // knows about and is silently dropped (the log seeds the clock at open; this
 // covers what the log no longer has), numbered in its stream.
 const prepareOp = (core, type, id, payload, current, who, from) => {
-  const data = payload.data ?? current?.data ?? {};
-  const scope = core.scopeOf(id, data);
   core.observe(latestClock(current?.meta));
   const op = { origin: core.nodeId, seq: 0, ts: core.clock.now(), type, id };
-  if (scope !== GLOBAL_SCOPE) op.scope = scope;
   if (from) op.from = from;
   // The writer's schema version rides on the op: what a reader on another
   // version lenses the record through.
   if (core.version !== null) op.v = core.version;
   if (who !== null) op.actor = who;
-  // Sequence numbers run per stream (see vector.js opKey): the scope's.
-  op.seq = core.log.seqOf(opKey(op)) + 1;
+  assignScope(core, op, scopeData(type, payload, current));
   if (payload.data !== undefined) op.data = payload.data;
   if (payload.key !== undefined) op.key = payload.key;
   if (payload.value !== undefined) op.value = payload.value;
@@ -182,12 +199,22 @@ const persistLocal = async (core, op, entry) => {
   const { id } = op;
   if (core.sign !== null) await core.sign(op);
   const [{ seq: position }] = await core.log.append([op]);
-  let blockHash = null;
-  if (core.chain) {
-    const hash = await calculateHash(entry.data);
-    blockHash = await core.chain.addBlock({ id, hash, from: core.log.formatId(position) });
+  // Logged: the write is durable from here and replicates from the log. A
+  // block or a file that fails now holds the entry in memory, leaves the
+  // batch unapplied (the next open replays it) and is reported — the write
+  // itself stands.
+  try {
+    let blockHash = null;
+    if (core.chain) {
+      const hash = await calculateHash(entry.data);
+      blockHash = await core.chain.addBlock({ id, hash, from: core.log.formatId(position) });
+    }
+    await core.entries.write(id, entry, blockHash);
+  } catch (error) {
+    await core.unpersisted(new Map([[id, entry]]), error);
+    core.flush();
+    return;
   }
-  await core.entries.write(id, entry, blockHash);
   core.log.applied(position);
   core.flush();
 };
@@ -243,6 +270,9 @@ const commitLocal = async (core, type, id, payload, options) => {
   const op = prepareOp(core, type, id, payload, current, who, from);
   const applied = await validateLocal(core, op, current, visible, ctx);
   if (applied === null) return null;
+  // The validator may have filled the field the scope reads (a default):
+  // the stream is the one of the record as it is written.
+  if (type === 'write' || type === 'set') assignScope(core, op, applied.entry.data);
   await persistLocal(core, op, applied.entry);
   await announce(core, op, applied.entry, applied.delta, ctx, source, via);
   return op;

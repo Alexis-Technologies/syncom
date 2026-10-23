@@ -33,8 +33,8 @@ engine also covers what an application keeps next to replication:
   converge.
 - **The host decides what it accepts.** A hub checks a peer's op before applying it: the op's
   shape and clock skew, the peer's scopes, the entity's validator and `beforeApply`. A failing op
-  is skipped, a unique-key clash is reported, and each peer is served only the scopes it was
-  granted. Of the eight alternatives that sync without a server of their own, only RxDB
+  is skipped there (and still relayed, so the nodes behind the hub judge it for themselves), a
+  unique-key clash is reported, and each peer is served only the scopes it was granted. Of the eight alternatives that sync without a server of their own, only RxDB
   validates writes against a schema.
 - **A history you can verify and still purge.** Every op is signed by the node that made it —
   the node id is its Ed25519 key, so any peer verifies an op through any relay — and every
@@ -50,7 +50,7 @@ engine also covers what an application keeps next to replication:
 - **Zero dependencies, one API for Node.js and the browser.** Nothing is installed with it.
   `node:fs` and `node:crypto` on the server, OPFS (or IndexedDB) and Web Crypto in the browser,
   picked by the `browser` export condition. CommonJS without a build step, hand-written typings,
-  and a browser bundle of about 41 KB min+gzip that CI holds to a budget.
+  and a browser bundle of about 42 KB min+gzip that CI holds to a budget.
 
 The [benchmarks](/guide/benchmarks) put a number on all of this. syncom opens a store and reads
 a record in about 37 ms, the fastest cold start of the ten libraries measured, and serves a read

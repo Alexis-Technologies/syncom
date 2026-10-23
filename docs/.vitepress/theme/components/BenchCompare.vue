@@ -5,9 +5,11 @@ import { compareCaption, compareKinds, compareModel } from '../../../../bench/re
 import BenchBars from './BenchBars.vue';
 import Segmented from './Segmented.vue';
 
-const props = withDefaults(defineProps<{ kind?: string; line?: string }>(), {
+// `only`: the library ids to show (a page about one alternative); all of them when absent.
+const props = withDefaults(defineProps<{ kind?: string; line?: string; only?: string[] }>(), {
   kind: 'insert',
   line: 'disk',
+  only: undefined,
 });
 
 const kinds = compareKinds(compare);
@@ -27,7 +29,7 @@ const scales = [
   { id: 'log', title: 'Log' },
   { id: 'linear', title: 'Linear' },
 ];
-const model = computed(() => compareModel(compare, scenario.value, scale.value));
+const model = computed(() => compareModel(compare, scenario.value, scale.value, props.only ?? null));
 const caption = compareCaption(compare);
 </script>
 

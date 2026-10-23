@@ -229,6 +229,7 @@ test('Storage replication model', async (t) => {
       malformed: 0,
       unsigned: 0,
       forged: 0,
+      outOfScope: 0,
     });
     assert.deepStrictEqual(await storage.get('r1'), { a: 1 });
     assert.deepStrictEqual(changes[0].via, 'L');
@@ -248,6 +249,7 @@ test('Storage replication model', async (t) => {
       malformed: 1,
       unsigned: 0,
       forged: 0,
+      outOfScope: 0,
     });
     assert.deepStrictEqual(await storage.get('r1'), { a: 1 });
 
@@ -264,6 +266,7 @@ test('Storage replication model', async (t) => {
       malformed: 0,
       unsigned: 0,
       forged: 0,
+      outOfScope: 0,
     });
     assert.strictEqual(await storage.get('r1'), null);
     assert.deepStrictEqual(storage.vector, { peer: 4 });
@@ -377,9 +380,15 @@ test('Storage replication model', async (t) => {
       },
     };
     const first = await syncom.open({ path: dir, logger: false, fsi, sync: { log: { rollAfter: 1 } } });
+    const errors = [];
+    first.on('error', (error) => errors.push(error));
     const id = await first.insert({ n: 1 });
     failing = 'lost';
-    await assert.rejects(() => first.set('lost', { p: 1 }), /ENOSPC/);
+    // Logged is committed: the write stands, held in memory, and says so.
+    await first.set('lost', { p: 1 });
+    assert.strictEqual(errors[0].code, 'UNPERSISTED');
+    assert.match(errors[0].cause.message, /ENOSPC/);
+    assert.deepStrictEqual(await first.get('lost'), { p: 1 });
     failing = null;
     await first.applyRemote([remoteOp('peer', 1, 'write', 'r', { data: { p: 1 } })]);
     const { nodeId } = first;
@@ -431,6 +440,7 @@ test('Storage replication model', async (t) => {
       malformed: 0,
       unsigned: 0,
       forged: 0,
+      outOfScope: 0,
     });
     assert.strictEqual(errors.length, 1);
     assert.strictEqual(errors[0].code, 'OP_UNREADABLE');
@@ -440,7 +450,8 @@ test('Storage replication model', async (t) => {
     assert.strictEqual(storage.vector.peer, 2, 'the stream went on');
     const logged = storage.log.since(undefined).find((entry) => entry.op.origin === 'peer' && entry.op.id === bad);
     assert.strictEqual(logged.skipped, true, 'logged and flagged, so a replay leaves it alone too');
-    await assert.rejects(() => storage.get(bad), /JSON|token|invalid/i);
+    // The torn file is evidence, reported with a code, never a bare SyntaxError.
+    await assert.rejects(() => storage.get(bad), { code: 'INTEGRITY', id: bad });
   });
 
   await t.test('a local write outranks a snapshot joined from a peer whose clock is ahead', async (t2) => {
@@ -652,6 +663,7 @@ test("Storage: what a peer's op must look like", async (t) => {
       malformed: bad.length,
       unsigned: 0,
       forged: 0,
+      outOfScope: 0,
     });
     assert.strictEqual(storage.log.length, 1, 'only the good op is in the log');
     assert.deepStrictEqual(storage.vector, { peer: 1 });
@@ -676,6 +688,7 @@ test("Storage: what a peer's op must look like", async (t) => {
       malformed: 1,
       unsigned: 0,
       forged: 0,
+      outOfScope: 0,
     });
     assert.strictEqual(errors.length, 1);
     assert.strictEqual(errors[0].code, 'SKEW');

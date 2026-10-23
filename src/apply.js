@@ -17,7 +17,7 @@ const { isPlainObject, VALIDATED, wellFormed } = require('./shape.js');
 const { SyncomError } = require('./errors.js');
 const { verifyOp, OK, FORGED } = require('./signing.js');
 
-const NOTHING = { applied: 0, skipped: 0, duplicates: 0, gaps: 0, malformed: 0, unsigned: 0, forged: 0 };
+const NOTHING = { applied: 0, skipped: 0, duplicates: 0, gaps: 0, malformed: 0, unsigned: 0, forged: 0, outOfScope: 0 };
 // Signatures are verified this many at a time under Promise.all: the
 // verdicts are independent, and both halves verify off the main thread —
 // node:crypto on libuv's thread pool, Web Crypto on its own — so a chunk is
@@ -27,8 +27,9 @@ const VERIFY_CHUNK = 64;
 // What one batch accumulates: the ops it accepts (logged, whether or not
 // they changed anything), the entries it touched and their deltas, and the
 // counts the result reports. `vector` is this node's, advanced as ops are
-// accepted so the next op of a stream is seen as the next.
-const openBatch = (core, { via = null, scopes = null, peer = null, adoptFrom = null } = {}) => {
+// accepted so the next op of a stream is seen as the next. `bound` is the
+// scopes of the peer that pushed the page, on a host: the records it may write.
+const openBatch = (core, { via = null, scopes = null, peer = null, adoptFrom = null, bound = null } = {}) => {
   const at = Date.now();
   return {
     core,
@@ -36,6 +37,7 @@ const openBatch = (core, { via = null, scopes = null, peer = null, adoptFrom = n
     peer,
     scopes,
     adoptFrom,
+    bound,
     vector: core.log.vector,
     now: at,
     horizon: at + core.maxSkew,
@@ -52,6 +54,7 @@ const openBatch = (core, { via = null, scopes = null, peer = null, adoptFrom = n
     signatures: core.signatures,
     unsigned: 0,
     forged: 0,
+    outOfScope: 0,
     firstUnsigned: null,
     firstForged: null,
   };
@@ -210,6 +213,35 @@ const currentOf = async (batch, op) => {
   }
 };
 
+// The record as the op leaves it, as far as its scope goes: a write's or a
+// merge's own data, a set's on top of the record's, the record's for the rest.
+const dataAfter = (op, current) => {
+  const data = current?.data ?? {};
+  if (!isPlainObject(op.data)) return data;
+  if (op.type === 'write' || op.type === 'merge') return op.data;
+  if (op.type === 'set') return { ...data, ...op.data };
+  return data;
+};
+
+// A peer pushing to a host writes only records it may read: the scope the
+// op declares is the peer's claim (src/hosting.js holds it to the grant);
+// the record's own, before the op and after it, is what this node's
+// `sync.scope` makes of the data. Outside the grant — or a scope function
+// that throws on it — the op is refused like a forged one: not logged, not
+// relayed, a gap in its stream. Relaying it as skipped would hand the write
+// to every peer of the declared scope.
+const outOfBounds = (batch, op, current) => {
+  const { core, bound } = batch;
+  if (bound === null) return false;
+  try {
+    if (current && !inScope(core.scopeOf(op.id, current.data), bound)) return true;
+    return !inScope(core.scopeOf(op.id, dataAfter(op, current)), bound);
+  } catch (error) {
+    core.logger.warn({ event: 'sync.op.scope', id: op.id, err: error });
+    return true;
+  }
+};
+
 // A unique key the op leaves shared with another record: applied — the op is
 // in the peer's log already — and reported; the application decides which
 // record yields.
@@ -237,6 +269,15 @@ const applyOne = async (batch, op) => {
   // (registers are forward-tolerant; the validator does not know the
   // shape), or held in the log until this node runs that version.
   const ahead = core.version !== null && Number.isInteger(op.v) && op.v > core.version;
+  // Checked before anything else may log the op, a held one included.
+  if (batch.bound !== null) {
+    const current = await currentOf(batch, op);
+    if (current === undefined) return;
+    if (outOfBounds(batch, op, current)) {
+      batch.outOfScope++;
+      return;
+    }
+  }
   if (ahead && core.ahead === 'hold') {
     skip(batch, op);
     (batch.held ??= new Map()).set(op, op.v);
@@ -291,11 +332,13 @@ const persist = async (batch) => {
   const first = entries[0].seq;
   const last = entries[entries.length - 1].seq;
   if (batch.adopted) await core.log.advance(batch.adopted);
+  let landed = true;
   if (touched.size > 0) {
-    await core.persist(touched, first, last);
+    landed = await core.persist(touched, first, last);
     core.flush();
   }
-  core.log.applied(first, last);
+  // Unapplied, a batch whose records did not land is replayed at the next open.
+  if (landed) core.log.applied(first, last);
   if (batch.purged) for (const id of batch.purged) await core.log.scrub(id);
 };
 
@@ -332,6 +375,7 @@ const applyRemote = async (core, ops, options) => {
     malformed: batch.malformed,
     unsigned: batch.unsigned,
     forged: batch.forged,
+    outOfScope: batch.outOfScope,
   };
   await persist(batch);
   await announce(batch, result);
@@ -357,6 +401,7 @@ const tracedApply = async (core, ops, options) => {
         'syncom.ops.malformed': r.malformed,
         'syncom.ops.unsigned': r.unsigned,
         'syncom.ops.forged': r.forged,
+        'syncom.ops.out_of_scope': r.outOfScope,
       }),
     );
     return result;

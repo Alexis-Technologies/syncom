@@ -135,9 +135,13 @@ export const compareKinds = (compare) => {
 
 const PER_WHAT = { 'ops/s': 'per operation', 'records/s': 'per record' };
 
-export const compareModel = (compare, scenarioId, scale = 'log') => {
+// The libraries a chart shows: all of them, or the ids of `only` (a page about one alternative).
+const pick = (libraries, only) => (only ? libraries.filter((library) => only.includes(library.id)) : libraries);
+
+export const compareModel = (compare, scenarioId, scale = 'log', only = null) => {
   const scenario = compare.scenarios.find((candidate) => candidate.id === scenarioId) ?? compare.scenarios[0];
-  const rows = compare.libraries
+  const libraries = pick(compare.libraries, only);
+  const rows = libraries
     .filter((library) => scenario.results[library.id])
     .map((library) => {
       const result = scenario.results[library.id];
@@ -151,7 +155,7 @@ export const compareModel = (compare, scenarioId, scale = 'log') => {
       });
     })
     .sort(byValueDesc);
-  const missing = compare.libraries.filter((library) => !scenario.results[library.id]);
+  const missing = libraries.filter((library) => !scenario.results[library.id]);
   const reasons = missing.map((library) => {
     const failed = scenario.failed?.[library.id];
     const why = failed ? `failed: ${failed.replace(/^\w*Error:\s*/, '')}` : scenario.unsupported?.[library.id];
@@ -170,8 +174,8 @@ export const compareModel = (compare, scenarioId, scale = 'log') => {
   };
 };
 
-export const coldStartModel = (compare) => {
-  const rows = compare.libraries
+export const coldStartModel = (compare, only = null) => {
+  const rows = pick(compare.libraries, only)
     .filter((library) => compare.coldStart?.[library.id])
     .map((library) => {
       const phases = compare.coldStart[library.id];
@@ -197,9 +201,9 @@ export const coldStartModel = (compare) => {
   };
 };
 
-export const sizeModel = (size) => {
+export const sizeModel = (size, only = null) => {
   const kb = (bytes) => `${(bytes / 1024).toFixed(1)} KB`;
-  const rows = size.libraries
+  const rows = pick(size.libraries, only)
     .map((library) => ({
       id: library.id,
       label: library.name,

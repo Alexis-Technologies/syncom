@@ -324,6 +324,37 @@ const runQueryTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(errors, ['boom', 'listener']);
     stopThrowing();
   });
+
+  await t.test('one() leaves the cursor as it was', async (t2) => {
+    const storage = await createStorage(t2, 'O', { schema });
+    for (const name of ['a', 'b', 'c']) await storage.Project.insert({ orgId: 'o', name, slug: name });
+    const cursor = storage.Project.select({ orgId: 'o' }).order('name');
+    assert.strictEqual((await cursor.one()).name, 'a');
+    assert.deepStrictEqual(
+      (await cursor.fetch()).map((row) => row.name),
+      ['a', 'b', 'c'],
+      'no limit(1) left behind',
+    );
+    const limited = storage.Project.select({ orgId: 'o' }).order('name').limit(0);
+    assert.strictEqual(await limited.one(), null, 'a cursor limited to none finds none');
+  });
+
+  await t.test('an indexed object matches whatever its key order', async (t2) => {
+    const shapes = {
+      entities: { Place: { index: ['at'], unique: ['code'] } },
+    };
+    const storage = await createStorage(t2, 'K', { schema: shapes });
+    await storage.Place.insert({ at: { x: 1, y: 2 }, code: { a: 1, b: 2 } });
+    const hits = async (query) => (await storage.Place.select(query).fetch()).length;
+    assert.strictEqual(await hits({ at: { $eq: { y: 2, x: 1 } } }), 1, '$eq through the index');
+    assert.strictEqual(await hits({ at: { $in: [{ y: 2, x: 1 }] } }), 1, '$in through the index');
+    assert.strictEqual(await hits({ at: { y: 2, x: 1 } }), 1);
+    await assert.rejects(
+      () => storage.Place.insert({ at: { x: 3 }, code: { b: 2, a: 1 } }),
+      (error) => error.name === 'ValidationError' && error.issues[0].code === 'unique',
+      'the same unique value, keys in another order',
+    );
+  });
 };
 
 module.exports = { runQueryTests };

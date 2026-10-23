@@ -167,7 +167,7 @@ stop();
 
 The first run is a microtask after `watch()`; changes that land while a run
 is in flight coalesce into one more run. A failing run — the query, or the
-listener — goes to `onError`, or to the logger at debug. Watching keys off
+listener — goes to `onError`, or to the logger at warn. Watching keys off
 the catalog, so a cursor over `Task` never wakes for a `Tag`.
 
 ## Unique keys

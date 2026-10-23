@@ -64,7 +64,7 @@ wrpc's spans around the actual calls.
 | Span | When | Attributes |
 | --- | --- | --- |
 | `syncom.commit` | one local write, from the moment it runs to after the `change` listeners | `syncom.op.type`, `syncom.record.id`†, `syncom.result` (`applied` / `noop` / `encrypted`), `syncom.scope` |
-| `syncom.apply` | one batch of a peer's ops | `syncom.ops.count`, `syncom.ops.applied`, `syncom.ops.skipped`, `syncom.ops.duplicates`, `syncom.ops.gaps`, `syncom.ops.malformed`, `syncom.ops.unsigned`, `syncom.ops.forged` |
+| `syncom.apply` | one batch of a peer's ops | `syncom.ops.count`, `syncom.ops.applied`, `syncom.ops.skipped`, `syncom.ops.duplicates`, `syncom.ops.gaps`, `syncom.ops.malformed`, `syncom.ops.unsigned`, `syncom.ops.forged`, `syncom.ops.out_of_scope` |
 | `syncom.replay` | the unsealed log tail replayed at open | `syncom.ops.count`, `syncom.records` |
 | `syncom.push` | one push to a peer, all its pages | `syncom.push.reason` (`handshake` / `manual` / `relay`), `syncom.ops.count`, `syncom.pages`, `syncom.peer.url`†, `syncom.peer.node`† |
 | `syncom.bootstrap` | the whole snapshot walk from a peer | `syncom.peer.url`†, `syncom.peer.node`†, `syncom.pages`, `syncom.records` |
@@ -212,9 +212,10 @@ alert to key on:
 | warn | `sync.op.malformed`, `sync.op.skew` | a peer's op refused before it was read; the latter also an `error` event (`SKEW`) |
 | warn | `sync.op.forged`, `sync.op.unsigned` | a page with ops refused for their signature, once per page with the count; also an `error` event (`BAD_SIGNATURE`, `UNSIGNED`) |
 | warn | `sync.op.rejected`, `sync.op.invalid`, `sync.op.unreadable`, `sync.op.encrypted`, `sync.op.lens` | a peer's op not applied here, by reason |
-| warn | `sync.op.refused`, `sync.op.outOfScope`, `sync.hello.refused` | hosting side: ops outside a peer's scopes, a call refused by code |
-| warn | `sync.gaps`, `sync.error`, `sync.outbox.dropped`, `sync.record.malformed`, `sync.record.skew`, `sync.record.encrypted` | a page with gaps, a failure on the way to a peer, a dropped backlog, a snapshot record left out |
+| warn | `sync.op.refused`, `sync.op.scope`, `sync.hello.refused` | hosting side: ops outside a peer's scopes (`sync.op.scope`: the scope function threw on a pushed record, and the op was refused), a call refused by code |
+| warn | `sync.gaps`, `sync.push.gaps`, `sync.error`, `sync.outbox.dropped`, `sync.record.malformed`, `sync.record.skew`, `sync.record.encrypted` | a page with gaps (received, or answered by the host to a push), a failure on the way to a peer (`REWOUND` and `UNDELIVERABLE` among them), a dropped backlog, a snapshot record left out |
 | warn | `log.epoch.new` (when a log was there), `log.segment.unreadable`, `log.open.unreadable` | the log changed epoch or lost a file |
+| warn | `storage.unpersisted` | logged ops whose record files could not be written, held in memory until the next open; also an `error` event (`UNPERSISTED`) |
 | warn | `catalog.skipped`, `catalog.lens`, `catalog.save`, `catalog.search`, `snapshot.skipped`, `replay.skipped`, `record.shadowed` | derived state could not follow a record (`catalog.search`: the injected text index threw); a field shadowing a method |
 | warn | `listener.error`, `watch.error`, `schema.drift` | an event listener or a watcher threw; two builds of one schema version |
 | warn | `identity.rekeyed` | a directory from before signing: `node.json` held a UUID, the node is now its signing key (once) |

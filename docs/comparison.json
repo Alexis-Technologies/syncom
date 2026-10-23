@@ -253,8 +253,9 @@
         },
         "schema": {
           "mark": "✅",
-          "text": "metaschema, Standard Schema, ajv; on every hop",
-          "source": "src/schema.js; docs/guide/schema.md"
+          "text": "metaschema, Standard Schema, ajv; local writes and peers' ops",
+          "source": "src/schema.js; src/apply.js; docs/guide/schema.md",
+          "note": "A snapshot merge (bootstrap) and an op from a newer schema version (`ahead: 'apply'`, the default) are applied unvalidated, and a record outside any collection has no validator."
         },
         "migrations": {
           "mark": "✅",
@@ -268,8 +269,8 @@
         },
         "indexes": {
           "mark": "✅",
-          "text": "entity `index` fields, in memory",
-          "source": "src/catalog.js; docs/guide/query.md"
+          "text": "entity `index` fields, equality only, in memory",
+          "source": "src/catalog.js; docs/guide/query.md#the-plan"
         },
         "unique": {
           "mark": "✅",
@@ -314,8 +315,8 @@
         },
         "partial": {
           "mark": "✅",
-          "text": "scopes per peer, enforced by the host",
-          "source": "src/scope.js; src/hosting.js"
+          "text": "scopes per peer, enforced by the host on the record",
+          "source": "src/scope.js; src/hosting.js; src/apply.js"
         },
         "resume": {
           "mark": "✅",
@@ -334,18 +335,21 @@
         },
         "offline": {
           "mark": "✅",
-          "text": "local op log; pushed when a peer is back",
-          "source": "src/log.js; src/sync.js"
+          "text": "local op log, kept until the hosts have it",
+          "source": "src/log.js; src/sync.js",
+          "note": "Ops written before any node was registered, and compacted since, cannot reach a host (`UNDELIVERABLE`)."
         },
         "serverAuth": {
-          "mark": "✅",
-          "text": "the host re-runs validators, hooks, scopes",
-          "source": "src/apply.js; src/hosting.js"
+          "mark": "⚠️",
+          "text": "out-of-scope and unsigned ops stop at the host; one its validator or `beforeApply` skips is relayed",
+          "source": "src/apply.js; src/hosting.js; docs/guide/hooks.md#skipping-a-peers-op",
+          "note": "A withheld op would leave a gap in its origin's stream, so a host that skips an op still relays it and every node re-checks it; a throwing `beforeApply` refuses the whole page instead."
         },
         "tamper": {
           "mark": "✅",
-          "text": "hash-linked chain, re-checked on read (optional)",
-          "source": "src/chain.js; docs/guide/chain.md"
+          "text": "hash-linked chain, unsigned (optional)",
+          "source": "src/chain.js; docs/guide/chain.md",
+          "note": "Whoever can write the directory can rebuild the chain; a read checks a record against the block its file names, so a block planted beside the chain passes. The ops in the log are what is signed."
         },
         "signing": {
           "mark": "✅",
@@ -356,7 +360,8 @@
         "atRest": {
           "mark": "⚠️",
           "text": "per record (`encrypted: true`), never synced",
-          "source": "docs/guide/storage.md#encryption-at-rest"
+          "source": "docs/guide/storage.md#encryption-at-rest",
+          "note": "The RSA key pair that unseals the records sits unprotected in `<path>/keys/`, beside the data."
         },
         "e2ee": {
           "mark": "⚠️",
@@ -371,7 +376,8 @@
         "purge": {
           "mark": "✅",
           "text": "`purge()` scrubs the op log",
-          "source": "src/log.js; docs/guide/storage.md#purge"
+          "source": "src/log.js; docs/guide/storage.md#purge",
+          "note": "The chain keeps an unsalted SHA-256 of every version of the record, which can confirm a guessed record."
         },
         "history": {
           "mark": "⚠️",
@@ -394,8 +400,8 @@
           "source": "src/errors.js"
         },
         "types": {
-          "mark": "✅",
-          "text": "hand-written `.d.ts`",
+          "mark": "⚠️",
+          "text": "hand-written `.d.ts`; record data `unknown`",
           "source": "index.d.ts"
         },
         "ui": {
@@ -1299,8 +1305,8 @@
         },
         "deps": {
           "mark": "",
-          "text": "24 direct",
-          "source": "rxdb@17.6.0 package.json dependencies (ajv, dexie, mingo, graphql, simple-peer, nostr-tools, ws, …)"
+          "text": "24 direct + required peer `rxjs`; 74 installed",
+          "source": "rxdb@17.6.0 package.json dependencies (ajv, dexie, mingo, graphql, simple-peer, nostr-tools, ws, …); bench/compare/pnpm-lock.yaml (74 packages with rxjs)"
         },
         "impl": {
           "mark": "",
@@ -1310,7 +1316,7 @@
         "node": {
           "mark": "⚠️",
           "text": "≥20; free persistence via MongoDB/FoundationDB storages",
-          "note": "Filesystem and SQLite storages are Premium; the free SQLite trial throws past 500 documents or 500 operations.",
+          "note": "Filesystem and SQLite storages are Premium; the free SQLite trial stops at 500 documents and after 500 SQL calls per storage instance (the 251st serial insert fails).",
           "source": "rxdb@17.6.0 package.json:84-86 (engines); src/plugins/storage-mongodb, storage-foundationdb; src/plugins/storage-sqlite/sqlite-storage-instance.ts:48-58; https://rxdb.info/premium/"
         },
         "browser": {
@@ -1322,7 +1328,7 @@
           "mark": "⚠️",
           "text": "React Native/Expo via Premium SQLite or filesystem",
           "source": "https://rxdb.info/react-native-database.html; rxdb@17.6.0 src/plugins/storage-sqlite/index.ts:43-60",
-          "detail": "The free SQLite storage is a trial capped at 500 documents."
+          "detail": "The free SQLite storage is a trial: 500 documents and 500 SQL calls per storage instance (one whole-table read per write plus one insert per new document, so the 251st serial insert fails, measured); no indexes, no attachments."
         },
         "server": {
           "mark": "✅",
@@ -1380,7 +1386,7 @@
           "mark": "⚠️",
           "text": "`crdt` plugin `$inc`",
           "source": "rxdb@17.6.0 src/plugins/crdt/index.ts:243-330; https://rxdb.info/crdt.html",
-          "detail": "Opt-in per schema; once on, plain writes to the document are refused."
+          "detail": "Opt-in per schema. Once on, `patch()`, `update()` and `remove()` become CRDT ops and `modify()` is refused, but `upsert()` and `incrementalUpsert()` replace the op history, and every op stays inside the document (measured: 200 `$inc` left 201 op rows)."
         },
         "topology": {
           "mark": "",
@@ -1441,7 +1447,8 @@
         "atRest": {
           "mark": "⚠️",
           "text": "`encryption-crypto-js` per field; WebCrypto Premium",
-          "source": "rxdb@17.6.0 src/plugins/encryption-crypto-js/index.ts; https://rxdb.info/encryption.html"
+          "source": "rxdb@17.6.0 src/plugins/encryption-crypto-js/index.ts; https://rxdb.info/encryption.html; rxdb@17.6.0 src/plugins/encryption-crypto-js/index.ts:34-37; src/rx-database-internal-store.ts:162-164",
+          "note": "The free plugin is AES-CBC in crypto-js's passphrase mode (MD5 key derivation, no MAC); an unsalted SHA-256 of the password is stored beside the data."
         },
         "e2ee": {
           "mark": "❌",
@@ -1450,9 +1457,10 @@
           "source": "rxdb@17.6.0 src/plugins/replication/index.ts:261; src/plugins/encryption-crypto-js/index.ts:120-170"
         },
         "access": {
-          "mark": "⚠️",
-          "text": "your backend; RxServer `queryModifier`",
-          "source": "https://rxdb.info/rx-server.html (authHandler, queryModifier, changeValidator)"
+          "mark": "✅",
+          "text": "RxServer `authHandler`, `queryModifier`, `changeValidator` (`rxdb-server`)",
+          "source": "rxdb-server@17.6.0 src/plugins/server/index.ts:17-22, endpoint-replication.ts:66-199, adapter-express/index.ts:18-33; https://rxdb.info/rx-server.html",
+          "note": "RxServer is SSPL and its defaults are open: with no `authHandler` every request is admitted, and the Express adapter's CORS reflects any origin with credentials."
         },
         "purge": {
           "mark": "⚠️",
@@ -1461,9 +1469,9 @@
           "source": "rxdb@17.6.0 src/rx-document.ts:430-433; src/plugins/cleanup/cleanup-helper.ts:5-11"
         },
         "history": {
-          "mark": "❌",
-          "text": "latest revision only",
-          "source": "https://rxdb.info/transactions-conflicts-revisions.html"
+          "mark": "⚠️",
+          "text": "latest revision; the `crdt` plugin keeps every op in the document",
+          "source": "https://rxdb.info/transactions-conflicts-revisions.html; rxdb@17.6.0 src/plugins/crdt/index.ts:56-79"
         },
         "hooks": {
           "mark": "✅",

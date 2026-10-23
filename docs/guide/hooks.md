@@ -109,10 +109,11 @@ same path takes an op that would leave the record invalid under this node's
 [schema](./storage#validation): skipped, logged, relayed, and reported through
 the `error` event rather than a hook.
 
-`applyRemote` reports it: `{ applied, skipped, duplicates, gaps, malformed, unsigned, forged }` —
+`applyRemote` reports it: `{ applied, skipped, duplicates, gaps, malformed, unsigned, forged, outOfScope }` —
 `applied` counts every accepted op, skipped ones included; `applied - skipped`
 reached a record; `malformed`, `unsigned` and `forged` were refused before
-anything read them.
+anything read them, and `outOfScope` (a host's push) because the record they
+write is outside the pushing peer's scopes.
 
 A throwing `beforeApply` aborts the batch before anything is durable. The
 sender sees a failed push (on the dialing side its `error` event fires, with
@@ -166,7 +167,7 @@ const storage = await open({
 ## Events
 
 Every listener is contained: it is invoked at once, never awaited, and if it
-throws the failure is logged at `debug` (`{ event: 'listener.error', name }`)
+throws the failure is logged at `warn` (`{ event: 'listener.error', name }`)
 and the operation carries on. `error` with nobody listening is silent rather
 than a throw.
 
@@ -175,10 +176,11 @@ than a throw.
 | Event | Payload | When |
 | --- | --- | --- |
 | `change` | `(op, via)` | Every op applied here; `via` is `null` for a local write, otherwise `{ url, node }` of the peer it came from (`url` null on the hosting side) |
-| `apply` | `({ via, peer, ops, applied, skipped, duplicates, gaps, malformed, unsigned, forged })` | A peer's batch is durable — `ops` are the accepted ones, skipped included |
+| `apply` | `({ via, peer, ops, applied, skipped, duplicates, gaps, malformed, unsigned, forged, outOfScope })` | A peer's batch is durable — `ops` are the accepted ones, skipped included |
 | `conflict` | `({ kind: 'unique', entity, fields, id, other, op })` | A peer's op left a unique key shared by two records — see [Queries](./storage#queries) |
 | `schema` | `({ kind: 'drift', … })` / `({ kind: 'ahead', op, held })` | A peer runs this node's schema version with another snapshot hash — see [Schemas](./sync#schemas); a peer's op is from a newer version — see [Reading across versions](./storage#reading-across-versions) |
-| `error` | `(error)` with `error.op`, and `error.rejected` or `error.entity` + `error.issues` | A peer's op refused by the field-kind rule, or skipped as invalid under this node's [schema](./schema#how-a-write-is-validated) |
+| `error` | `(error)` with `error.code`: `error.op`, and `error.rejected` or `error.entity` + `error.issues`; `error.count` for a signature; `error.ids` for `UNPERSISTED` | A peer's op refused by the field-kind rule (`OP_REFUSED`), skipped as invalid under this node's [schema](./schema#how-a-write-is-validated) (`OP_INVALID`) or because its record's file cannot be read (`OP_UNREADABLE`), stamped beyond `sync.maxSkew` (`SKEW`); a page's ops refused for their signature (`BAD_SIGNATURE`, `UNSIGNED`); logged ops whose record files could not be written (`UNPERSISTED`) |
+| `log` | `({ kind: 'roll', sealed, dropped, floor, segments })` | The op log sealed a segment, and compacted `dropped` of them — see [The log](./sync#the-log) |
 | `close` | — | After `close()` sealed the log |
 
 A `Record` emits `update` `(data, delta)` on a staged assignment and when the
@@ -192,10 +194,11 @@ record changes in storage (`null` data once deleted).
 | `node` | `({ url, action })` | The registry changed: `'add'`, `'remove'`, `'enable'`, `'disable'` |
 | `connect` | `({ url })` | A link was accepted, before hello |
 | `peer` | `({ url, connected, node?, reconnected?, schema? })` | Hello answered (with the host's `node` id and `schema`), the link closed, or it came back |
-| `sync` | `({ url, pushed })` / `({ url, received, applied, skipped, duplicates, gaps, malformed, unsigned, forged })` | A push went out / a page came in |
+| `sync` | `({ url, pushed })` / `({ url, received, applied, skipped, duplicates, gaps, malformed, unsigned, forged, outOfScope })` | A push went out / a page came in |
 | `bootstrap` | `({ url, records })` | A host's whole state was joined |
-| `error` | `(error)` with `error.url` | A failure on the way to a peer — a refused link, a failed push, a hook that threw |
+| `error` | `(error)` with `error.url` | A failure on the way to a peer — a refused link, a failed push, a hook that threw, a page that failed (`PAGE_FAILED`, `STUCK`), a host that holds more of this node's ops than its log (`REWOUND`) or lacks ones its log no longer holds (`UNDELIVERABLE`) |
 | `hello` | `({ node, scopes, schema })` | Hosting side: a peer greeted this node and was authorized |
+| `refused` | `({ node, reason, count })` | Hosting side: a push carried ops this node would not take — `'scope'` (outside the peer's scopes), `'forged'`, `'unsigned'` |
 
 ## `HookError`
 
