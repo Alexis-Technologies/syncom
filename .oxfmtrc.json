@@ -5,5 +5,5 @@
   "printWidth": 120,
   "trailingComma": "all",
   "sortPackageJson": false,
-  "ignorePatterns": []
+  "ignorePatterns": ["bench/results/**"]
 }

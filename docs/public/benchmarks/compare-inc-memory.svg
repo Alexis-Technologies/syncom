@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="358" viewBox="0 0 760 358" role="img" aria-label="Increment a counter, in memory. Add 1 to a counter that converges when replicas increment it concurrently. Nothing touches the disk. ops/s, log scale, higher is better. Not shown: Yjs (no counter that converges); TinyBase (no counter that converges); PouchDB (no counter that converges); RxDB (no counter that converges); Fireproof (no counter that converges); GUN (needs its storage adapter to answer in Node.js); OrbitDB (no counter that converges).">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .title { font-size: 15px; font-weight: 700; fill: #1b1c1e; }
+  .subtitle, .caption { font-size: 12px; fill: #67676c; }
+  .caption { font-size: 11px; }
+  .group { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; fill: #67676c; }
+  .label { font-size: 13px; font-weight: 600; fill: #1b1c1e; }
+  .label.primary, .label.secondary { font-weight: 700; }
+  .sublabel { font-size: 11px; fill: #67676c; }
+  .value { font-size: 12px; font-weight: 600; fill: #3c3c43; font-variant-numeric: tabular-nums; }
+  .value.small { font-size: 10px; }
+  .legend { font-size: 11px; fill: #3c3c43; }
+  .tick { font-size: 11px; fill: #67676c; font-variant-numeric: tabular-nums; }
+  .grid { stroke: #e4e4e7; stroke-width: 1; }
+  .axis { stroke: #c2c2c4; stroke-width: 1; }
+  .ref { stroke: #67676c; stroke-width: 1; stroke-dasharray: 3 3; }
+  .bar { fill: #c4c6cc; }
+  .bar.primary { fill: #245a9e; }
+  .bar.secondary { fill: #5e9be6; }
+  @media (prefers-color-scheme: dark) {
+    .title, .label { fill: #dfdfd6; }
+    .subtitle, .caption, .group, .sublabel, .tick { fill: #98989f; }
+    .value, .legend { fill: #c2c2c4; }
+    .grid { stroke: #2e2e32; }
+    .axis { stroke: #48484c; }
+    .ref { stroke: #98989f; }
+    .bar { fill: #46474e; }
+    .bar.primary { fill: #8dbcf2; }
+    .bar.secondary { fill: #3d7bd0; }
+  }
+</style>
+<text class="title" x="20" y="35">Increment a counter, in memory</text>
+<text class="subtitle" x="20" y="56">Add 1 to a counter that converges when replicas increment it concurrently. Nothing touches the disk. ops/s, log</text>
+<text class="subtitle" x="20" y="73">scale, higher is better. Not shown: Yjs (no counter that converges); TinyBase (no counter that converges);</text>
+<text class="subtitle" x="20" y="90">PouchDB (no counter that converges); RxDB (no counter that converges); Fireproof (no counter that converges);</text>
+<text class="subtitle" x="20" y="107">GUN (needs its storage adapter to answer in Node.js); OrbitDB (no counter that converges).</text>
+<line class="grid" x1="276" y1="122" x2="276" y2="282"/>
+<text class="tick" x="276" y="298" text-anchor="middle">1,000</text>
+<line class="grid" x1="409.3333333333333" y1="122" x2="409.3333333333333" y2="282"/>
+<text class="tick" x="409.3333333333333" y="298" text-anchor="middle">10k</text>
+<line class="grid" x1="542.6666666666666" y1="122" x2="542.6666666666666" y2="282"/>
+<text class="tick" x="542.6666666666666" y="298" text-anchor="middle">100k</text>
+<line class="grid" x1="676" y1="122" x2="676" y2="282"/>
+<text class="tick" x="676" y="298" text-anchor="middle">1M</text>
+<line class="axis" x1="276" y1="122" x2="276" y2="282"/>
+<g><title>Loro · LoroDoc, a LoroMap per record · v1.16.4
+349,007 ops/s
+2.87 µs per operation
+samples 336k – 360k
+loro-crdt@1.16.4</title>
+<text class="label" x="20" y="139">Loro</text>
+<text class="sublabel" x="20" y="154">LoroDoc, a LoroMap per record · v1.16.4</text>
+<path class="bar" d="M276,135H611.0445805243373A4,4 0 0 1 615.0445805243373,139V145A4,4 0 0 1 611.0445805243373,149H276Z"/>
+<text class="value" x="621.0445805243373" y="148">349k</text>
+</g>
+<g><title>syncom · chain: false, createMemoryFsi() · v0.0.1
+18,590 ops/s
+53.8 µs per operation
+samples 18k – 18.7k
+@alexify/syncom@0.0.1</title>
+<text class="label secondary" x="20" y="179">syncom</text>
+<text class="sublabel" x="20" y="194">chain: false, createMemoryFsi() · v0.0.1</text>
+<path class="bar secondary" d="M276,175H441.23672420165434A4,4 0 0 1 445.23672420165434,179V185A4,4 0 0 1 441.23672420165434,189H276Z"/>
+<text class="value" x="451.23672420165434" y="188">18.6k</text>
+</g>
+<g><title>syncom · default, createMemoryFsi() · v0.0.1
+16,711 ops/s
+59.8 µs per operation
+samples 16.2k – 16.9k
+@alexify/syncom@0.0.1</title>
+<text class="label primary" x="20" y="219">syncom</text>
+<text class="sublabel" x="20" y="234">default, createMemoryFsi() · v0.0.1</text>
+<path class="bar primary" d="M276,215H435.0680207199623A4,4 0 0 1 439.0680207199623,219V225A4,4 0 0 1 435.0680207199623,229H276Z"/>
+<text class="value" x="445.0680207199623" y="228">16.7k</text>
+</g>
+<g><title>Automerge · Automerge.change, Counter · v3.5.0
+1,949 ops/s
+513 µs per operation
+samples 1,943 – 1,952
+@automerge/automerge@3.5.0</title>
+<text class="label" x="20" y="259">Automerge</text>
+<text class="sublabel" x="20" y="274">Automerge.change, Counter · v3.5.0</text>
+<path class="bar" d="M276,255H310.6329428400609A4,4 0 0 1 314.6329428400609,259V265A4,4 0 0 1 310.6329428400609,269H276Z"/>
+<text class="value" x="320.6329428400609" y="268">1,949</text>
+</g>
+<text class="caption" x="20" y="323">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
+<text class="caption" x="20" y="339">in a fresh process · 2026-10-22</text>
+</svg>

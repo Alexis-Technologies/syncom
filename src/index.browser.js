@@ -1,0 +1,45 @@
+'use strict';
+
+// The browser twin of ./index.js: it names the browser variant of every split
+// module directly. The requires NESTED inside chain.js / storage.js / sync.js
+// / log.js (./fsi.js, ./crypto.js, ./utils.js) are redirected by
+// package.json#browser, so a bundler that ignores that field would still pull
+// the Node halves in.
+const chain = require('./chain.js');
+const crdt = require('./crdt.js');
+// `verifyAsync` is the engine's (src/signing.js), not the API's: the root
+// keeps one `verify`, synchronous in Node.js and a promise in the browser.
+const { verifyAsync, ...crypto } = require('./crypto.browser.js');
+const { read, write, exists, remove, list } = require('./fsi.browser.js');
+const fsi = { read, write, exists, remove, list };
+const { isFsi, createMemoryFsi } = require('./backend.js');
+const backend = { isFsi, createMemoryFsi };
+const storage = require('./storage.js');
+const sync = require('./sync.js');
+const log = require('./log.js');
+const { applyOp, mergeEntry, isAlive } = require('./ops.js');
+const ops = { applyOp, mergeEntry, isAlive };
+const { HookError } = require('./hooks.js');
+const hooks = { HookError };
+const { ValidationError } = require('./schema.js');
+const schema = { ValidationError };
+const { isSharedLog } = require('./shared-log.js');
+const sharedLog = { isSharedLog };
+const { SyncomError } = require('./errors.js');
+const errors = { SyncomError };
+
+module.exports = {
+  ...chain,
+  ...crdt,
+  ...crypto,
+  ...fsi,
+  ...backend,
+  ...storage,
+  ...sync,
+  ...log,
+  ...ops,
+  ...hooks,
+  ...schema,
+  ...sharedLog,
+  ...errors,
+};

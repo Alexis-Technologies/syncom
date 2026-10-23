@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="375" viewBox="0 0 760 375" role="img" aria-label="Increment a counter, on disk. Add 1 to a counter that converges when replicas increment it concurrently. Each library's own persistence on node:fs, every write awaited. ops/s, log scale, higher is better. Not shown: Yjs (no counter that converges); TinyBase (no counter that converges); PouchDB (no counter that converges); RxDB (Node.js disk storages are Premium); Fireproof (no counter that converges); GUN (no counter that converges); OrbitDB (no counter that converges).">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .title { font-size: 15px; font-weight: 700; fill: #1b1c1e; }
+  .subtitle, .caption { font-size: 12px; fill: #67676c; }
+  .caption { font-size: 11px; }
+  .group { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; fill: #67676c; }
+  .label { font-size: 13px; font-weight: 600; fill: #1b1c1e; }
+  .label.primary, .label.secondary { font-weight: 700; }
+  .sublabel { font-size: 11px; fill: #67676c; }
+  .value { font-size: 12px; font-weight: 600; fill: #3c3c43; font-variant-numeric: tabular-nums; }
+  .value.small { font-size: 10px; }
+  .legend { font-size: 11px; fill: #3c3c43; }
+  .tick { font-size: 11px; fill: #67676c; font-variant-numeric: tabular-nums; }
+  .grid { stroke: #e4e4e7; stroke-width: 1; }
+  .axis { stroke: #c2c2c4; stroke-width: 1; }
+  .ref { stroke: #67676c; stroke-width: 1; stroke-dasharray: 3 3; }
+  .bar { fill: #c4c6cc; }
+  .bar.primary { fill: #245a9e; }
+  .bar.secondary { fill: #5e9be6; }
+  @media (prefers-color-scheme: dark) {
+    .title, .label { fill: #dfdfd6; }
+    .subtitle, .caption, .group, .sublabel, .tick { fill: #98989f; }
+    .value, .legend { fill: #c2c2c4; }
+    .grid { stroke: #2e2e32; }
+    .axis { stroke: #48484c; }
+    .ref { stroke: #98989f; }
+    .bar { fill: #46474e; }
+    .bar.primary { fill: #8dbcf2; }
+    .bar.secondary { fill: #3d7bd0; }
+  }
+</style>
+<text class="title" x="20" y="35">Increment a counter, on disk</text>
+<text class="subtitle" x="20" y="56">Add 1 to a counter that converges when replicas increment it concurrently. Each library's own persistence on</text>
+<text class="subtitle" x="20" y="73">node:fs, every write awaited. ops/s, log scale, higher is better. Not shown: Yjs (no counter that converges);</text>
+<text class="subtitle" x="20" y="90">TinyBase (no counter that converges); PouchDB (no counter that converges); RxDB (Node.js disk storages are</text>
+<text class="subtitle" x="20" y="107">Premium); Fireproof (no counter that converges); GUN (no counter that converges); OrbitDB (no counter that</text>
+<text class="subtitle" x="20" y="124">converges).</text>
+<line class="grid" x1="271" y1="139" x2="271" y2="299"/>
+<text class="tick" x="271" y="315" text-anchor="middle">1,000</text>
+<line class="grid" x1="473.5" y1="139" x2="473.5" y2="299"/>
+<text class="tick" x="473.5" y="315" text-anchor="middle">10k</text>
+<line class="grid" x1="676" y1="139" x2="676" y2="299"/>
+<text class="tick" x="676" y="315" text-anchor="middle">100k</text>
+<line class="axis" x1="271" y1="139" x2="271" y2="299"/>
+<g><title>Loro · updates appended to a file · v1.16.4
+42,555 ops/s
+23.5 µs per operation
+samples 41.1k – 44.3k
+loro-crdt@1.16.4</title>
+<text class="label" x="20" y="156">Loro</text>
+<text class="sublabel" x="20" y="171">updates appended to a file · v1.16.4</text>
+<path class="bar" d="M271,152H596.8627252035749A4,4 0 0 1 600.8627252035749,156V162A4,4 0 0 1 596.8627252035749,166H271Z"/>
+<text class="value" x="606.8627252035749" y="165">42.6k</text>
+</g>
+<g><title>syncom · chain: false, node:fs · v0.0.1
+3,062 ops/s
+327 µs per operation
+samples 2,981 – 3,167
+@alexify/syncom@0.0.1</title>
+<text class="label secondary" x="20" y="196">syncom</text>
+<text class="sublabel" x="20" y="211">chain: false, node:fs · v0.0.1</text>
+<path class="bar secondary" d="M271,192H365.40254238176345A4,4 0 0 1 369.40254238176345,196V202A4,4 0 0 1 365.40254238176345,206H271Z"/>
+<text class="value" x="375.40254238176345" y="205">3,062</text>
+</g>
+<g><title>syncom · default, node:fs · v0.0.1
+1,478 ops/s
+677 µs per operation
+samples 1,006 – 1,913
+@alexify/syncom@0.0.1</title>
+<text class="label primary" x="20" y="236">syncom</text>
+<text class="sublabel" x="20" y="251">default, node:fs · v0.0.1</text>
+<path class="bar primary" d="M271,232H301.33973990887284A4,4 0 0 1 305.33973990887284,236V242A4,4 0 0 1 301.33973990887284,246H271Z"/>
+<text class="value" x="311.33973990887284" y="245">1,478</text>
+</g>
+<g><title>Automerge · automerge-repo, NodeFS storage · v3.5.0
+1,197 ops/s
+836 µs per operation
+samples 1,139 – 1,209
+@automerge/automerge@3.5.0</title>
+<text class="label" x="20" y="276">Automerge</text>
+<text class="sublabel" x="20" y="291">automerge-repo, NodeFS storage · v3.5.0</text>
+<path class="bar" d="M271,272H282.77751536366543A4,4 0 0 1 286.77751536366543,276V282A4,4 0 0 1 282.77751536366543,286H271Z"/>
+<text class="value" x="292.77751536366543" y="285">1,197</text>
+</g>
+<text class="caption" x="20" y="340">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
+<text class="caption" x="20" y="356">in a fresh process · 2026-10-22</text>
+</svg>

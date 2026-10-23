@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="491" viewBox="0 0 760 491" role="img" aria-label="CRDT: syncom's own benchmarks. diff / merge / apply over plain objects, no I/O. ops/s, log scale, higher is better.">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .title { font-size: 15px; font-weight: 700; fill: #1b1c1e; }
+  .subtitle, .caption { font-size: 12px; fill: #67676c; }
+  .caption { font-size: 11px; }
+  .group { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; fill: #67676c; }
+  .label { font-size: 13px; font-weight: 600; fill: #1b1c1e; }
+  .label.primary, .label.secondary { font-weight: 700; }
+  .sublabel { font-size: 11px; fill: #67676c; }
+  .value { font-size: 12px; font-weight: 600; fill: #3c3c43; font-variant-numeric: tabular-nums; }
+  .value.small { font-size: 10px; }
+  .legend { font-size: 11px; fill: #3c3c43; }
+  .tick { font-size: 11px; fill: #67676c; font-variant-numeric: tabular-nums; }
+  .grid { stroke: #e4e4e7; stroke-width: 1; }
+  .axis { stroke: #c2c2c4; stroke-width: 1; }
+  .ref { stroke: #67676c; stroke-width: 1; stroke-dasharray: 3 3; }
+  .bar { fill: #c4c6cc; }
+  .bar.primary { fill: #245a9e; }
+  .bar.secondary { fill: #5e9be6; }
+  @media (prefers-color-scheme: dark) {
+    .title, .label { fill: #dfdfd6; }
+    .subtitle, .caption, .group, .sublabel, .tick { fill: #98989f; }
+    .value, .legend { fill: #c2c2c4; }
+    .grid { stroke: #2e2e32; }
+    .axis { stroke: #48484c; }
+    .ref { stroke: #98989f; }
+    .bar { fill: #46474e; }
+    .bar.primary { fill: #8dbcf2; }
+    .bar.secondary { fill: #3d7bd0; }
+  }
+</style>
+<text class="title" x="20" y="35">CRDT: syncom's own benchmarks</text>
+<text class="subtitle" x="20" y="56">diff / merge / apply over plain objects, no I/O. ops/s, log scale, higher is better.</text>
+<line class="grid" x1="202" y1="71" x2="202" y2="431"/>
+<text class="tick" x="202" y="447" text-anchor="middle">1,000</text>
+<line class="grid" x1="320.5" y1="71" x2="320.5" y2="431"/>
+<text class="tick" x="320.5" y="447" text-anchor="middle">10k</text>
+<line class="grid" x1="439" y1="71" x2="439" y2="431"/>
+<text class="tick" x="439" y="447" text-anchor="middle">100k</text>
+<line class="grid" x1="557.5" y1="71" x2="557.5" y2="431"/>
+<text class="tick" x="557.5" y="447" text-anchor="middle">1M</text>
+<line class="grid" x1="676" y1="71" x2="676" y2="431"/>
+<text class="tick" x="676" y="447" text-anchor="middle">10M</text>
+<line class="axis" x1="202" y1="71" x2="202" y2="431"/>
+<g><title>diff · 20 flat keys, all changed
+324,832 ops/s
+3.08 µs per operation</title>
+<text class="label primary" x="20" y="88">diff</text>
+<text class="sublabel" x="20" y="103">20 flat keys, all changed</text>
+<path class="bar primary" d="M202,84H495.6315685222807A4,4 0 0 1 499.6315685222807,88V94A4,4 0 0 1 495.6315685222807,98H202Z"/>
+<text class="value" x="505.6315685222807" y="97">325k</text>
+</g>
+<g><title>diff · 20 flat keys, one changed
+444,578 ops/s
+2.25 µs per operation</title>
+<text class="label primary" x="20" y="128">diff</text>
+<text class="sublabel" x="20" y="143">20 flat keys, one changed</text>
+<path class="bar primary" d="M202,124H511.78183418144727A4,4 0 0 1 515.7818341814473,128V134A4,4 0 0 1 511.78183418144727,138H202Z"/>
+<text class="value" x="521.7818341814473" y="137">445k</text>
+</g>
+<g><title>diff · depth 3, width 4
+35,563 ops/s
+28.1 µs per operation</title>
+<text class="label primary" x="20" y="168">diff</text>
+<text class="sublabel" x="20" y="183">depth 3, width 4</text>
+<path class="bar primary" d="M202,164H381.79330918771905A4,4 0 0 1 385.79330918771905,168V174A4,4 0 0 1 381.79330918771905,178H202Z"/>
+<text class="value" x="391.79330918771905" y="177">35.6k</text>
+</g>
+<g><title>diff · array as a grow-only set
+2,830,451 ops/s
+353 ns per operation</title>
+<text class="label primary" x="20" y="208">diff</text>
+<text class="sublabel" x="20" y="223">array as a grow-only set</text>
+<path class="bar primary" d="M202,204H607.0448934463436A4,4 0 0 1 611.0448934463436,208V214A4,4 0 0 1 607.0448934463436,218H202Z"/>
+<text class="value" x="617.0448934463436" y="217">2.83M</text>
+</g>
+<g><title>merge · 20 flat keys
+2,130,062 ops/s
+469 ns per operation</title>
+<text class="label primary" x="20" y="248">merge</text>
+<text class="sublabel" x="20" y="263">20 flat keys</text>
+<path class="bar primary" d="M202,244H592.4144809958102A4,4 0 0 1 596.4144809958102,248V254A4,4 0 0 1 592.4144809958102,258H202Z"/>
+<text class="value" x="602.4144809958102" y="257">2.13M</text>
+</g>
+<g><title>merge · depth 3, width 4
+4,959,915 ops/s
+202 ns per operation</title>
+<text class="label primary" x="20" y="288">merge</text>
+<text class="sublabel" x="20" y="303">depth 3, width 4</text>
+<path class="bar primary" d="M202,284H635.9136967147634A4,4 0 0 1 639.9136967147634,288V294A4,4 0 0 1 635.9136967147634,298H202Z"/>
+<text class="value" x="645.9136967147634" y="297">4.96M</text>
+</g>
+<g><title>merge · numeric counter increment
+5,398,362 ops/s
+185 ns per operation</title>
+<text class="label primary" x="20" y="328">merge</text>
+<text class="sublabel" x="20" y="343">numeric counter increment</text>
+<path class="bar primary" d="M202,324H640.2730474557658A4,4 0 0 1 644.2730474557658,328V334A4,4 0 0 1 640.2730474557658,338H202Z"/>
+<text class="value" x="650.2730474557658" y="337">5.4M</text>
+</g>
+<g><title>apply · 100 inc records
+207,946 ops/s
+4.81 µs per operation</title>
+<text class="label primary" x="20" y="368">apply</text>
+<text class="sublabel" x="20" y="383">100 inc records</text>
+<path class="bar primary" d="M202,364H472.6771426392687A4,4 0 0 1 476.6771426392687,368V374A4,4 0 0 1 472.6771426392687,378H202Z"/>
+<text class="value" x="482.6771426392687" y="377">208k</text>
+</g>
+<g><title>apply · 100 delta records
+8,824 ops/s
+113 µs per operation</title>
+<text class="label primary" x="20" y="408">apply</text>
+<text class="sublabel" x="20" y="423">100 delta records</text>
+<path class="bar primary" d="M202,404H310.0613616827079A4,4 0 0 1 314.0613616827079,408V414A4,4 0 0 1 310.0613616827079,418H202Z"/>
+<text class="value" x="320.0613616827079" y="417">8,824</text>
+</g>
+<text class="caption" x="20" y="472">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-22</text>
+</svg>

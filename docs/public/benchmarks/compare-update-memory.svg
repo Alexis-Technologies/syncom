@@ -1,0 +1,151 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="564" viewBox="0 0 760 564" role="img" aria-label="Update a field, in memory. Change one field of an existing record. Nothing touches the disk. ops/s, log scale, higher is better. Not shown: GUN (needs its storage adapter to answer in Node.js).">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .title { font-size: 15px; font-weight: 700; fill: #1b1c1e; }
+  .subtitle, .caption { font-size: 12px; fill: #67676c; }
+  .caption { font-size: 11px; }
+  .group { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; fill: #67676c; }
+  .label { font-size: 13px; font-weight: 600; fill: #1b1c1e; }
+  .label.primary, .label.secondary { font-weight: 700; }
+  .sublabel { font-size: 11px; fill: #67676c; }
+  .value { font-size: 12px; font-weight: 600; fill: #3c3c43; font-variant-numeric: tabular-nums; }
+  .value.small { font-size: 10px; }
+  .legend { font-size: 11px; fill: #3c3c43; }
+  .tick { font-size: 11px; fill: #67676c; font-variant-numeric: tabular-nums; }
+  .grid { stroke: #e4e4e7; stroke-width: 1; }
+  .axis { stroke: #c2c2c4; stroke-width: 1; }
+  .ref { stroke: #67676c; stroke-width: 1; stroke-dasharray: 3 3; }
+  .bar { fill: #c4c6cc; }
+  .bar.primary { fill: #245a9e; }
+  .bar.secondary { fill: #5e9be6; }
+  @media (prefers-color-scheme: dark) {
+    .title, .label { fill: #dfdfd6; }
+    .subtitle, .caption, .group, .sublabel, .tick { fill: #98989f; }
+    .value, .legend { fill: #c2c2c4; }
+    .grid { stroke: #2e2e32; }
+    .axis { stroke: #48484c; }
+    .ref { stroke: #98989f; }
+    .bar { fill: #46474e; }
+    .bar.primary { fill: #8dbcf2; }
+    .bar.secondary { fill: #3d7bd0; }
+  }
+</style>
+<text class="title" x="20" y="35">Update a field, in memory</text>
+<text class="subtitle" x="20" y="56">Change one field of an existing record. Nothing touches the disk. ops/s, log scale, higher is better. Not shown:</text>
+<text class="subtitle" x="20" y="73">GUN (needs its storage adapter to answer in Node.js).</text>
+<line class="grid" x1="276" y1="88" x2="276" y2="488"/>
+<text class="tick" x="276" y="504" text-anchor="middle">10</text>
+<line class="grid" x1="356" y1="88" x2="356" y2="488"/>
+<text class="tick" x="356" y="504" text-anchor="middle">100</text>
+<line class="grid" x1="436" y1="88" x2="436" y2="488"/>
+<text class="tick" x="436" y="504" text-anchor="middle">1,000</text>
+<line class="grid" x1="516" y1="88" x2="516" y2="488"/>
+<text class="tick" x="516" y="504" text-anchor="middle">10k</text>
+<line class="grid" x1="596" y1="88" x2="596" y2="488"/>
+<text class="tick" x="596" y="504" text-anchor="middle">100k</text>
+<line class="grid" x1="676" y1="88" x2="676" y2="488"/>
+<text class="tick" x="676" y="504" text-anchor="middle">1M</text>
+<line class="axis" x1="276" y1="88" x2="276" y2="488"/>
+<g><title>Loro · LoroDoc, a LoroMap per record · v1.16.4
+411,536 ops/s
+2.43 µs per operation
+samples 124k – 416k
+loro-crdt@1.16.4</title>
+<text class="label" x="20" y="105">Loro</text>
+<text class="sublabel" x="20" y="120">LoroDoc, a LoroMap per record · v1.16.4</text>
+<path class="bar" d="M276,101H641.1526027310007A4,4 0 0 1 645.1526027310007,105V111A4,4 0 0 1 641.1526027310007,115H276Z"/>
+<text class="value" x="651.1526027310007" y="114">412k</text>
+</g>
+<g><title>Yjs · Y.Doc, a Y.Map per record · v13.6.33
+382,444 ops/s
+2.61 µs per operation
+samples 231k – 417k
+yjs@13.6.33</title>
+<text class="label" x="20" y="145">Yjs</text>
+<text class="sublabel" x="20" y="160">Y.Doc, a Y.Map per record · v13.6.33</text>
+<path class="bar" d="M276,141H638.6053959508298A4,4 0 0 1 642.6053959508298,145V151A4,4 0 0 1 638.6053959508298,155H276Z"/>
+<text class="value" x="648.6053959508298" y="154">382k</text>
+</g>
+<g><title>TinyBase · MergeableStore · v10.0.1
+108,308 ops/s
+9.23 µs per operation
+samples 102k – 110k
+tinybase@10.0.1</title>
+<text class="label" x="20" y="185">TinyBase</text>
+<text class="sublabel" x="20" y="200">MergeableStore · v10.0.1</text>
+<path class="bar" d="M276,181H594.7729266897618A4,4 0 0 1 598.7729266897618,185V191A4,4 0 0 1 594.7729266897618,195H276Z"/>
+<text class="value" x="604.7729266897618" y="194">108k</text>
+</g>
+<g><title>RxDB · memory storage · v17.6.0
+50,366 ops/s
+19.9 µs per operation
+samples 48.7k – 52.3k
+rxdb@17.6.0</title>
+<text class="label" x="20" y="225">RxDB</text>
+<text class="sublabel" x="20" y="240">memory storage · v17.6.0</text>
+<path class="bar" d="M276,221H568.1709905788939A4,4 0 0 1 572.1709905788939,225V231A4,4 0 0 1 568.1709905788939,235H276Z"/>
+<text class="value" x="578.1709905788939" y="234">50.4k</text>
+</g>
+<g><title>syncom · chain: false, createMemoryFsi() · v0.0.1
+18,832 ops/s
+53.1 µs per operation
+samples 18.7k – 19.7k
+@alexify/syncom@0.0.1</title>
+<text class="label secondary" x="20" y="265">syncom</text>
+<text class="sublabel" x="20" y="280">chain: false, createMemoryFsi() · v0.0.1</text>
+<path class="bar secondary" d="M276,261H533.9920112881774A4,4 0 0 1 537.9920112881774,265V271A4,4 0 0 1 533.9920112881774,275H276Z"/>
+<text class="value" x="543.9920112881774" y="274">18.8k</text>
+</g>
+<g><title>syncom · default, createMemoryFsi() · v0.0.1
+17,097 ops/s
+58.5 µs per operation
+samples 16.5k – 17.3k
+@alexify/syncom@0.0.1</title>
+<text class="label primary" x="20" y="305">syncom</text>
+<text class="sublabel" x="20" y="320">default, createMemoryFsi() · v0.0.1</text>
+<path class="bar primary" d="M276,301H530.6340450274927A4,4 0 0 1 534.6340450274927,305V311A4,4 0 0 1 530.6340450274927,315H276Z"/>
+<text class="value" x="540.6340450274927" y="314">17.1k</text>
+</g>
+<g><title>PouchDB · pouchdb-adapter-memory · v9.0.0
+8,313 ops/s
+120 µs per operation
+samples 7,416 – 9,681
+pouchdb@9.0.0</title>
+<text class="label" x="20" y="345">PouchDB</text>
+<text class="sublabel" x="20" y="360">pouchdb-adapter-memory · v9.0.0</text>
+<path class="bar" d="M276,341H505.578615765136A4,4 0 0 1 509.578615765136,345V351A4,4 0 0 1 505.578615765136,355H276Z"/>
+<text class="value" x="515.578615765136" y="354">8,313</text>
+</g>
+<g><title>Automerge · Automerge.change, Counter · v3.5.0
+1,985 ops/s
+504 µs per operation
+samples 1,970 – 1,992
+@automerge/automerge@3.5.0</title>
+<text class="label" x="20" y="385">Automerge</text>
+<text class="sublabel" x="20" y="400">Automerge.change, Counter · v3.5.0</text>
+<path class="bar" d="M276,381H455.821388769682A4,4 0 0 1 459.821388769682,385V391A4,4 0 0 1 455.821388769682,395H276Z"/>
+<text class="value" x="465.821388769682" y="394">1,985</text>
+</g>
+<g><title>Fireproof · memory:// store · v0.24.19
+377 ops/s
+2.65 ms per operation
+samples 301 – 453
+@fireproof/core@0.24.19</title>
+<text class="label" x="20" y="425">Fireproof</text>
+<text class="sublabel" x="20" y="440">memory:// store · v0.24.19</text>
+<path class="bar" d="M276,421H398.0895499111826A4,4 0 0 1 402.0895499111826,425V431A4,4 0 0 1 398.0895499111826,435H276Z"/>
+<text class="value" x="408.0895499111826" y="434">377</text>
+</g>
+<g><title>OrbitDB · documents, memory blockstore · v4.0.0
+31.1 ops/s
+32.1 ms per operation
+samples 30.4 – 31.9
+@orbitdb/core@4.0.0</title>
+<text class="label" x="20" y="465">OrbitDB</text>
+<text class="sublabel" x="20" y="480">documents, memory blockstore · v4.0.0</text>
+<path class="bar" d="M276,461H311.4537024426717A4,4 0 0 1 315.4537024426717,465V471A4,4 0 0 1 311.4537024426717,475H276Z"/>
+<text class="value" x="321.4537024426717" y="474">31.1</text>
+</g>
+<text class="caption" x="20" y="529">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
+<text class="caption" x="20" y="545">in a fresh process · 2026-10-22</text>
+</svg>

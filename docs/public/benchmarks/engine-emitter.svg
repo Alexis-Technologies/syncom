@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="371" viewBox="0 0 760 371" role="img" aria-label="Emitter: syncom's own benchmarks. The Emitter every event leaves through. ops/s, log scale, higher is better.">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .title { font-size: 15px; font-weight: 700; fill: #1b1c1e; }
+  .subtitle, .caption { font-size: 12px; fill: #67676c; }
+  .caption { font-size: 11px; }
+  .group { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; fill: #67676c; }
+  .label { font-size: 13px; font-weight: 600; fill: #1b1c1e; }
+  .label.primary, .label.secondary { font-weight: 700; }
+  .sublabel { font-size: 11px; fill: #67676c; }
+  .value { font-size: 12px; font-weight: 600; fill: #3c3c43; font-variant-numeric: tabular-nums; }
+  .value.small { font-size: 10px; }
+  .legend { font-size: 11px; fill: #3c3c43; }
+  .tick { font-size: 11px; fill: #67676c; font-variant-numeric: tabular-nums; }
+  .grid { stroke: #e4e4e7; stroke-width: 1; }
+  .axis { stroke: #c2c2c4; stroke-width: 1; }
+  .ref { stroke: #67676c; stroke-width: 1; stroke-dasharray: 3 3; }
+  .bar { fill: #c4c6cc; }
+  .bar.primary { fill: #245a9e; }
+  .bar.secondary { fill: #5e9be6; }
+  @media (prefers-color-scheme: dark) {
+    .title, .label { fill: #dfdfd6; }
+    .subtitle, .caption, .group, .sublabel, .tick { fill: #98989f; }
+    .value, .legend { fill: #c2c2c4; }
+    .grid { stroke: #2e2e32; }
+    .axis { stroke: #48484c; }
+    .ref { stroke: #98989f; }
+    .bar { fill: #46474e; }
+    .bar.primary { fill: #8dbcf2; }
+    .bar.secondary { fill: #3d7bd0; }
+  }
+</style>
+<text class="title" x="20" y="35">Emitter: syncom's own benchmarks</text>
+<text class="subtitle" x="20" y="56">The Emitter every event leaves through. ops/s, log scale, higher is better.</text>
+<line class="grid" x1="202" y1="71" x2="202" y2="311"/>
+<text class="tick" x="202" y="327" text-anchor="middle">1M</text>
+<line class="grid" x1="439" y1="71" x2="439" y2="311"/>
+<text class="tick" x="439" y="327" text-anchor="middle">10M</text>
+<line class="grid" x1="676" y1="71" x2="676" y2="311"/>
+<text class="tick" x="676" y="327" text-anchor="middle">100M</text>
+<line class="axis" x1="202" y1="71" x2="202" y2="311"/>
+<g><title>emit awaited · 0 listeners
+14,423,606 ops/s
+69.3 ns per operation</title>
+<text class="label primary" x="20" y="88">emit awaited</text>
+<text class="sublabel" x="20" y="103">0 listeners</text>
+<path class="bar primary" d="M202,84H472.7005025790288A4,4 0 0 1 476.7005025790288,88V94A4,4 0 0 1 472.7005025790288,98H202Z"/>
+<text class="value" x="482.7005025790288" y="97">14.4M</text>
+</g>
+<g><title>emit awaited · 1 sync listener
+3,747,799 ops/s
+267 ns per operation</title>
+<text class="label primary" x="20" y="128">emit awaited</text>
+<text class="sublabel" x="20" y="143">1 sync listener</text>
+<path class="bar primary" d="M202,124H333.9849809635185A4,4 0 0 1 337.9849809635185,128V134A4,4 0 0 1 333.9849809635185,138H202Z"/>
+<text class="value" x="343.9849809635185" y="137">3.75M</text>
+</g>
+<g><title>emit awaited · 1 listener, (data, delta)
+3,781,384 ops/s
+264 ns per operation</title>
+<text class="label primary" x="20" y="168">emit awaited</text>
+<text class="sublabel" x="20" y="183">1 listener, (data, delta)</text>
+<path class="bar primary" d="M202,164H334.90323539535314A4,4 0 0 1 338.90323539535314,168V174A4,4 0 0 1 334.90323539535314,178H202Z"/>
+<text class="value" x="344.90323539535314" y="177">3.78M</text>
+</g>
+<g><title>emit awaited · 1 async listener
+3,402,202 ops/s
+294 ns per operation</title>
+<text class="label primary" x="20" y="208">emit awaited</text>
+<text class="sublabel" x="20" y="223">1 async listener</text>
+<path class="bar primary" d="M202,204H324.02714264386475A4,4 0 0 1 328.02714264386475,208V214A4,4 0 0 1 324.02714264386475,218H202Z"/>
+<text class="value" x="334.02714264386475" y="217">3.4M</text>
+</g>
+<g><title>emit awaited · 2 sync listeners
+3,221,211 ops/s
+310 ns per operation</title>
+<text class="label primary" x="20" y="248">emit awaited</text>
+<text class="sublabel" x="20" y="263">2 sync listeners</text>
+<path class="bar primary" d="M202,244H318.4005441147251A4,4 0 0 1 322.4005441147251,248V254A4,4 0 0 1 318.4005441147251,258H202Z"/>
+<text class="value" x="328.4005441147251" y="257">3.22M</text>
+</g>
+<g><title>emit fire-and-forget · 1 sync listener
+4,688,543 ops/s
+213 ns per operation</title>
+<text class="label primary" x="20" y="288">emit fire-and-forget</text>
+<text class="sublabel" x="20" y="303">1 sync listener</text>
+<path class="bar primary" d="M202,284H357.0359831067717A4,4 0 0 1 361.0359831067717,288V294A4,4 0 0 1 357.0359831067717,298H202Z"/>
+<text class="value" x="367.0359831067717" y="297">4.69M</text>
+</g>
+<text class="caption" x="20" y="352">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-22</text>
+</svg>

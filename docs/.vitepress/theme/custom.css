@@ -1,0 +1,189 @@
+/**
+ * Brand theme for syncom — the same approach Pinia/Vite/Vue use: override
+ * VitePress CSS variables to restyle the default theme rather than fork its
+ * components.
+ *
+ * Palette: a replication blue (#3F7FD0 / #7FB0EC) on ink. syncom is about data
+ * moving between peers and staying consistent, so it wears a cool, calm blue
+ * rather than a platform colour.
+ *
+ * Note on contrast: #3F7FD0 as link text on white is 3.9:1, which fails WCAG
+ * AA for body text. So in the light theme brand-1/-2 are darkened blues (5.9:1
+ * and 4.6:1) and the brighter blue is reserved for filled surfaces, where the
+ * text on top is white.
+ */
+
+:root {
+  /* ─── Brand colors (buttons, links, accents) ──────────────────────── */
+  --vp-c-brand-1: #245a9e;
+  --vp-c-brand-2: #2f6cb8;
+  --vp-c-brand-3: #3f7fd0;
+  --vp-c-brand-soft: rgba(63, 127, 208, 0.16);
+
+  /* Default theme alias mappings (kept in sync with brand) */
+  --vp-c-default-1: var(--vp-c-gray-1);
+  --vp-c-default-2: var(--vp-c-gray-2);
+  --vp-c-default-3: var(--vp-c-gray-3);
+  --vp-c-default-soft: var(--vp-c-gray-soft);
+
+  --vp-c-tip-1: var(--vp-c-brand-1);
+  --vp-c-tip-2: var(--vp-c-brand-2);
+  --vp-c-tip-3: var(--vp-c-brand-3);
+  --vp-c-tip-soft: var(--vp-c-brand-soft);
+}
+
+.dark {
+  --vp-c-brand-1: #7fb0ec;
+  --vp-c-brand-2: #a3c7f3;
+  --vp-c-brand-3: #2f6cb8;
+  --vp-c-brand-soft: rgba(63, 127, 208, 0.18);
+}
+
+/* ─── Home hero: a soft brand wash behind the name ─────────────────── */
+:root {
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: -webkit-linear-gradient(120deg, #3f7fd0, #6ad0c8);
+  --vp-home-hero-image-background-image: linear-gradient(-45deg, #3f7fd0 40%, #6ad0c8 60%);
+  --vp-home-hero-image-filter: blur(48px);
+}
+
+/* ─── Buttons: white on the brighter blue, ink text on hover ───────── */
+:root {
+  --vp-button-brand-bg: var(--vp-c-brand-3);
+  --vp-button-brand-text: #ffffff;
+  --vp-button-brand-border: transparent;
+  --vp-button-brand-hover-bg: var(--vp-c-brand-2);
+  --vp-button-brand-hover-text: #ffffff;
+  --vp-button-brand-active-bg: var(--vp-c-brand-1);
+  --vp-button-brand-active-text: #ffffff;
+}
+
+/* Inline code in prose reads as data, not as a link. */
+.vp-doc :not(pre) > code {
+  --vp-code-color: var(--vp-c-text-1);
+}
+
+/* ─── The comparison matrix (/guide/comparison): one wide table ─────────────
+ * It scrolls sideways with the feature names pinned on the left, the
+ * syncom column tinted (and pinned beside them where there is room)
+ * and the group rows set apart. Sticky cells need an opaque background that
+ * follows the zebra stripes of the default theme, and borders of their own:
+ * collapsed borders belong to the table, and the text scrolling under a pinned
+ * cell shows through their seam. Each cell draws its right and bottom border,
+ * the first row and column the outer edges. */
+.vp-doc .sc-matrix table {
+  display: block;
+  max-height: 85vh;
+  overflow: auto;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+.vp-doc .sc-matrix th,
+.vp-doc .sc-matrix td {
+  min-width: 8.5rem;
+  padding: 5px 9px;
+  border-width: 0 1px 1px 0;
+  font-size: 12.5px;
+  line-height: 1.4;
+  vertical-align: top;
+}
+.vp-doc .sc-matrix thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  border-top-width: 1px;
+  background-color: var(--vp-c-bg-soft);
+}
+.vp-doc .sc-matrix th:first-child,
+.vp-doc .sc-matrix td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 11rem;
+  border-left-width: 1px;
+  background-color: var(--vp-c-bg);
+  font-weight: 600;
+}
+.vp-doc .sc-matrix thead th:first-child {
+  z-index: 3;
+  background-color: var(--vp-c-bg-soft);
+}
+.vp-doc .sc-matrix tr:nth-child(2n) td:first-child {
+  background-color: var(--vp-c-bg-soft);
+}
+/* The column of syncom, the first library of the data: the tint is an
+ * image over the background colour, so a pinned cell stays opaque, and a brand
+ * bar tops its name. */
+.vp-doc .sc-matrix th:nth-child(2),
+.vp-doc .sc-matrix td:nth-child(2) {
+  background-image: linear-gradient(var(--vp-c-brand-soft), var(--vp-c-brand-soft));
+}
+.vp-doc .sc-matrix thead th:nth-child(2) {
+  box-shadow: inset 0 3px 0 var(--vp-c-brand-3);
+}
+/* Two pinned columns take 20rem, too much of a phone: from a tablet up the
+ * features get a fixed width, the left offset of the column after them. */
+@media (min-width: 768px) {
+  .vp-doc .sc-matrix th:first-child,
+  .vp-doc .sc-matrix td:first-child {
+    width: 11rem;
+  }
+  .vp-doc .sc-matrix th:nth-child(2),
+  .vp-doc .sc-matrix td:nth-child(2) {
+    position: sticky;
+    left: 11rem;
+    z-index: 1;
+    background-color: var(--vp-c-bg);
+    box-shadow: inset -2px 0 0 var(--vp-c-brand-3);
+  }
+  .vp-doc .sc-matrix tr:nth-child(2n) td:nth-child(2) {
+    background-color: var(--vp-c-bg-soft);
+  }
+  .vp-doc .sc-matrix thead th:nth-child(2) {
+    z-index: 3;
+    background-color: var(--vp-c-bg-soft);
+    box-shadow:
+      inset 0 3px 0 var(--vp-c-brand-3),
+      inset -2px 0 0 var(--vp-c-brand-3);
+  }
+}
+.vp-doc .sc-matrix td code {
+  font-size: 11.5px;
+}
+.vp-doc .sc-matrix tr.sc-matrix-group td {
+  padding-top: 14px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--vp-c-text-2);
+}
+/* A group cell spans the whole table, so it cannot stick: its title does. */
+.vp-doc .sc-matrix tr.sc-matrix-group strong {
+  display: inline-block;
+  position: sticky;
+  left: 9px;
+}
+
+/* The page of the matrix uses the whole width next to the sidebar instead of
+ * the reading column, and drops the outline on the right. */
+@media (min-width: 960px) {
+  .VPDoc:has(.sc-matrix) .aside {
+    display: none;
+  }
+  .VPDoc:has(.sc-matrix) .container,
+  .VPDoc:has(.sc-matrix) .content,
+  .VPDoc:has(.sc-matrix) .content-container {
+    max-width: none !important;
+  }
+}
+
+/* ─── Mermaid labels ───────────────────────────────────────────────────────
+ * Mermaid sizes a node for its label at the line height it inherits (24px),
+ * but a label is a <p>, and `.vp-doc p` sets 28px: every label of two lines
+ * or more lost its last line to the clipped box. The label keeps the height
+ * Mermaid measured. */
+.vp-doc .mermaid p {
+  margin: 0;
+  line-height: inherit;
+}
