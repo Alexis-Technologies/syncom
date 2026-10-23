@@ -165,6 +165,18 @@
   left: 9px;
 }
 
+/* A page about one alternative (/guide/vs-rxdb): two libraries share the
+ * width and wrap their longer cells instead of scrolling sideways. */
+.vp-doc .sc-matrix-duel th,
+.vp-doc .sc-matrix-duel td {
+  font-size: 13px;
+}
+.vp-doc .sc-matrix-duel th:not(:first-child),
+.vp-doc .sc-matrix-duel td:not(:first-child) {
+  width: 50%;
+  min-width: 15rem;
+}
+
 /* The page of the matrix uses the whole width next to the sidebar instead of
  * the reading column, and drops the outline on the right. */
 @media (min-width: 960px) {

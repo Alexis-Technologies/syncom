@@ -180,6 +180,9 @@ export type SyncomErrorCode =
   | 'STUCK'
   | 'STREAMS_UNSUPPORTED'
   | 'UNRECOVERABLE'
+  | 'UNPERSISTED'
+  | 'REWOUND'
+  | 'UNDELIVERABLE'
   | 'SKEW'
   | 'OP_UNREADABLE'
   | 'OP_REFUSED'
@@ -284,6 +287,12 @@ export interface OpLog {
   advance(vector: VersionVector): Promise<void>;
   tail(): LogEntry[];
   flush(): Promise<void>;
+  /**
+   * Entries compaction must not drop, whatever the retention: the segment
+   * holding one `keep` answers true for stays. A node that dials keeps its
+   * own ops until every node it syncs with has them. `null` clears it.
+   */
+  retain(keep: ((entry: LogEntry) => boolean) | null): void;
   close(): Promise<void>;
   /** The batches within `from..to` are reflected in the records (see `sealApplied`). */
   applied(from: number, to?: number): void;
@@ -859,6 +868,11 @@ export interface Node {
   cursor: string | null;
   /** What the last hello learned; `null` before the first. */
   remote: { id: string; epoch: string; schema: SchemaInfo | null } | null;
+  /**
+   * This node's own streams as far as the peer is known to hold them
+   * (`origin` / `origin@scope` → seq): what the log keeps its own ops for.
+   */
+  acked?: VersionVector;
 }
 
 /** One dialed peer, as `sync.peers()` reports it. */
@@ -1089,6 +1103,12 @@ export interface ApplyRemoteResult {
   unsigned: number;
   /** Refused for a signature that does not verify against the origin, or a payload its digest does not match; neither logged nor relayed. */
   forged: number;
+  /**
+   * Refused under `bound` (a host's push): the record the op writes is
+   * outside the pushing peer's scopes, before the op or after it, as this
+   * node's `sync.scope` reads it; neither logged nor relayed.
+   */
+  outOfScope: number;
 }
 
 /** The events a Storage emits; listeners are contained. */
@@ -1247,11 +1267,19 @@ export interface Storage {
   /**
    * `adoptFrom`: the node id whose own `advance` ops may move this node's
    * vector — the host a subscription is read from. Absent, an `advance` is
-   * logged and relayed but grants nothing.
+   * logged and relayed but grants nothing. `bound`: the scopes of the peer
+   * that pushed the page — an op writing a record outside them is refused
+   * (`outOfScope`); a host's `push` passes the peer's grant.
    */
   applyRemote(
     ops: readonly SyncOp[],
-    options?: { via?: PeerRef | null; scopes?: readonly string[] | null; peer?: PeerRef | null; adoptFrom?: string | null },
+    options?: {
+      via?: PeerRef | null;
+      scopes?: readonly string[] | null;
+      peer?: PeerRef | null;
+      adoptFrom?: string | null;
+      bound?: readonly string[] | null;
+    },
   ): Promise<ApplyRemoteResult>;
   adoptVector(vector: VersionVector, options?: { via?: PeerRef | null; from?: string }): Promise<SyncOp | null>;
   snapshot(options?: { cursor?: string | null; limit?: number; scopes?: readonly string[] | null }): Promise<SnapshotPage>;

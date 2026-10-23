@@ -307,6 +307,7 @@ const runHooksTests = async (t, assert, createStorage) => {
       malformed: 0,
       unsigned: 0,
       forged: 0,
+      outOfScope: 0,
     });
     assert.strictEqual(await storage.get('r1'), null, 'the skipped op did not touch the record');
     assert.deepStrictEqual(await storage.get('r2'), { n: 2 });
@@ -384,6 +385,7 @@ const runHooksTests = async (t, assert, createStorage) => {
       malformed: 0,
       unsigned: 0,
       forged: 0,
+      outOfScope: 0,
     });
     assert.strictEqual(batches.length, 2, 'an empty batch runs the hook too');
     assert.deepStrictEqual(batches[1].ops, []);

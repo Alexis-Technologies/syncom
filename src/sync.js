@@ -21,7 +21,7 @@
 
 const { Emitter } = require('./utils.js');
 const { packOps, unpackOps } = require('./ops.js');
-const { vectorHas, vectorAdvance, vectorMax, keyScope } = require('./vector.js');
+const { vectorHas, vectorAdvance, vectorMax, keyScope, opKey, isBootstrapOp } = require('./vector.js');
 const { isSyncLink } = require('./link.js');
 const { createTelemetry, traced } = require('./telemetry.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
@@ -125,6 +125,10 @@ class SyncManager extends Emitter {
     this.#onChange = (op, via) => this.#fanOut(op, via);
     this.#storage.on('change', this.#onChange);
     const { connect, autoStart = typeof connect === 'function' } = this.#options;
+    // A node that dials keeps its own ops until every node it syncs with has
+    // them: nobody else can hand a host what this node wrote offline, so
+    // retention compacts only what was delivered (and what others made).
+    if (typeof connect === 'function') this.#storage.log.retain((entry) => this.#undelivered(entry));
     if (autoStart && typeof connect === 'function') await this.start();
     return this;
   }
@@ -210,6 +214,44 @@ class SyncManager extends Emitter {
         if (state.next === null) this.#saving.delete(url);
       });
     return write;
+  }
+
+  // This node's own streams in a peer's vector (`origin`, `origin@scope`)
+  // and the seqs the peer holds of them.
+  #own(vector) {
+    const own = this.#storage.nodeId;
+    const out = {};
+    for (const key of vector && typeof vector === 'object' ? Object.keys(vector) : []) {
+      const seq = vector[key];
+      if ((key === own || key.startsWith(`${own}@`)) && Number.isSafeInteger(seq) && seq > 0) out[key] = seq;
+    }
+    return out;
+  }
+
+  // What a peer is known to hold of this node's own streams: replaced by a
+  // hello's vector (a reinstalled host holds less than before), raised by
+  // a push's answer. Saved with the registry entry, so the log keeps the
+  // right ops across a restart too.
+  #ack(node, vector, replace = false) {
+    const acked = replace ? {} : { ...node.acked };
+    for (const [key, seq] of Object.entries(this.#own(vector))) if (!(acked[key] >= seq)) acked[key] = seq;
+    node.acked = acked;
+  }
+
+  // An entry of this node's own that an enabled registered node in its
+  // scope has not acknowledged. Only registered nodes are waited for: ops
+  // written before the first node was added are retained like any others
+  // (a host that lacks them is told UNDELIVERABLE). An op born from a node's
+  // snapshot never travels back to it, so that node is not waited for.
+  #undelivered(entry) {
+    const { op } = entry;
+    if (op.origin !== this.#storage.nodeId) return false;
+    for (const node of this.#nodes.values()) {
+      if (!node.enabled || !opInScope(op, node.scopes)) continue;
+      if (op.from !== undefined && op.from === node.remote?.id) continue;
+      if (!((node.acked?.[opKey(op)] ?? 0) >= op.seq)) return true;
+    }
+    return false;
   }
 
   // ---------------------------------------------------------------------
@@ -432,6 +474,11 @@ class SyncManager extends Emitter {
     peer.remote = { id: answer.node, vector: answer.vector ?? {}, epoch: answer.epoch };
     peer.ref.node = answer.node;
     node.remote = { id: answer.node, epoch: answer.epoch, schema };
+    // Before anything is pushed: a rewound node moves its streams past what
+    // the host holds, then takes the host's state back in a bootstrap.
+    const rewound = await this.#rewind(peer, answer.vector);
+    this.#ack(node, answer.vector, true);
+    peer.undeliverable = false;
     await this.#saveNode(node);
     notify(this, this.#storage.logger, 'peer', { url: node.url, connected: true, node: answer.node, schema });
     this.#drift(schema, { url: node.url, node: answer.node });
@@ -443,7 +490,32 @@ class SyncManager extends Emitter {
       this.#fallBehind(peer, null);
       throw error;
     }
+    // The state the lost ops made is in the host's: joined back, and the
+    // bootstrap subscribes from where its first page was taken.
+    if (rewound) await this.#bootstrap(peer);
     if (resubscribe && !peer.subscription) this.#subscribe(peer);
+  }
+
+  // The host holds more of this node's own streams than its log does: the
+  // directory was restored from an older copy (or another instance runs
+  // with its identity), and ops minted from here would reuse seqs the host
+  // already has — dropped there as duplicates. Reported, then the streams
+  // move past the host's, so nothing minted from now on collides. Writes
+  // made since the restore and before this hello are lost to the host.
+  async #rewind(peer, vector) {
+    const { log } = this.#storage;
+    const local = {};
+    let remote = null;
+    for (const [key, seq] of Object.entries(this.#own(vector))) {
+      if (seq <= log.seqOf(key)) continue;
+      (remote ??= {})[key] = seq;
+      local[key] = log.seqOf(key);
+    }
+    if (remote === null) return false;
+    const message = `${peer.node.url} holds more of this node's ops than its log: a restored copy, or a second instance`;
+    this.#fail(peer, new SyncomError('REWOUND', message, { local, remote }));
+    await this.#storage.adoptVector(remote, { via: peer.ref, from: peer.remote.id });
+    return true;
   }
 
   // Every push to a peer — handshake, manual, relay, recovery — runs on one
@@ -502,18 +574,47 @@ class SyncManager extends Emitter {
   // from a node that dials it, or we from it.
   async #pushFromLog(peer, reason) {
     const { node } = peer;
+    const own = this.#storage.nodeId;
     const entries =
       this.#storage.log.since(undefined) ??
       this.#storage.log.since(this.#storage.log.formatId(this.#storage.log.floor - 1)) ??
       [];
     const ops = [];
+    // The first seq this log retains of each of our own streams the host
+    // takes: a host behind it lacks ops only this node ever had.
+    const first = {};
     for (const { op } of entries) {
       if (op.origin === peer.remote.id || op.from === peer.remote.id) continue;
-      if (vectorHas(peer.remote.vector, op)) continue;
       if (!opInScope(op, node.scopes)) continue;
+      // (Not the bootstrap stream: it holds holes by design for a host
+      // whose snapshot some of it came from.)
+      if (op.origin === own && !isBootstrapOp(op)) first[opKey(op)] ??= op.seq;
+      if (vectorHas(peer.remote.vector, op)) continue;
       ops.push(op);
     }
-    return this.#send(peer, ops, reason);
+    const missing = this.#lost(peer, first);
+    return this.#send(
+      peer,
+      ops.filter((op) => !Object.hasOwn(missing, opKey(op))),
+      reason,
+    );
+  }
+
+  // Our own streams the host cannot be caught up on from this log: what it
+  // holds stops short of the first op retained here. Reported once per
+  // hello; their ops stay unsent — every one would be a gap at the host.
+  #lost(peer, first) {
+    const missing = {};
+    for (const key of Object.keys(first)) {
+      const host = peer.remote.vector[key] ?? 0;
+      if (host + 1 < first[key]) missing[key] = { host, retained: first[key] };
+    }
+    if (Object.keys(missing).length > 0 && !peer.undeliverable) {
+      peer.undeliverable = true;
+      const message = `${peer.node.url} lacks ops of this node that its log no longer holds`;
+      this.#fail(peer, new SyncomError('UNDELIVERABLE', message, { missing }));
+    }
+    return missing;
   }
 
   // One span per push, whatever its page count: with wrpc underneath, the
@@ -556,7 +657,15 @@ class SyncManager extends Emitter {
       const page = ops.slice(index, index + pageSize);
       const answer = await peer.link.call('syncom/push', { ops: packOps(page) });
       // The host answers with the keys the page touched; merged, never replaced.
-      if (answer?.vector) peer.remote.vector = vectorMax(peer.remote.vector, answer.vector);
+      if (answer?.vector) {
+        peer.remote.vector = vectorMax(peer.remote.vector, answer.vector);
+        this.#ack(peer.node, answer.vector);
+      }
+      if (answer?.gaps > 0) {
+        // Ops the host could not take in order: it lacks earlier ones of
+        // their streams, which this page did not carry.
+        this.#storage.logger.warn({ event: 'sync.push.gaps', url: peer.node.url, gaps: answer.gaps });
+      }
       sent += page.length;
     }
     peer.backoff = 0;

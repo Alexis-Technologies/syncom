@@ -83,7 +83,7 @@ const ENTRIES = [
   // into its catalog row (format 3), the injected TextIndex contract, `$text`
   // seeding the candidates in the index's order — the raise to 41 KB (40.7
   // measured); the index itself is the @alexify/syncom/search subpath.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 41 },
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 42 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check

@@ -288,11 +288,11 @@ class Cursor {
   // candidate order, so the rows come in that order whatever the backend —
   // and for `$text` the candidate order is the index's ranking, which an
   // unordered cursor hands out as it is.
-  async #matching(needsRows) {
+  async #matching(needsRows, limit = this.#limit) {
     const { candidates, ids, row, load } = this.#source;
     const found = candidates(this.#entity, this.#query) ?? ids(this.#entity);
     const ordered = needsRows && this.#order.length > 0;
-    const wanted = this.#offset + this.#limit;
+    const wanted = this.#offset + limit;
     const enough = needsRows && !ordered ? wanted : Infinity;
     const sink = ordered && wanted !== Infinity ? new TopK(compareRows(this.#order), wanted) : new Every();
     const take = (candidate) => {
@@ -335,10 +335,16 @@ class Cursor {
   // Rows leave as copies (JSON, like everything that crosses the storage's
   // boundary): the candidates were read raw from the cache, and a caller
   // that edits a row must not be editing the cache.
-  async fetch() {
-    let { rows, sorted } = await this.#matching(true);
+  fetch() {
+    return this.#fetch(this.#limit);
+  }
+
+  // `limit` is the call's own: `one()` asks for one row without leaving a
+  // limit on the cursor for the next `fetch()`.
+  async #fetch(limit) {
+    let { rows, sorted } = await this.#matching(true, limit);
     if (this.#order.length > 0 && !sorted) rows.sort(compareRows(this.#order));
-    if (this.#offset > 0 || this.#limit !== Infinity) rows = rows.slice(this.#offset, this.#offset + this.#limit);
+    if (this.#offset > 0 || limit !== Infinity) rows = rows.slice(this.#offset, this.#offset + limit);
     return rows.map((row) => JSON.parse(JSON.stringify(this.#project(row))));
   }
 
@@ -347,7 +353,7 @@ class Cursor {
   }
 
   async one() {
-    const [row = null] = await this.limit(1).fetch();
+    const [row = null] = await this.#fetch(Math.min(this.#limit, 1));
     return row;
   }
 

@@ -499,6 +499,7 @@ test('Storage telemetry', async (t) => {
       malformed: 1,
       unsigned: 0,
       forged: 1,
+      outOfScope: 0,
     });
     const [span] = named('syncom.apply');
     assert.strictEqual(span.attributes['syncom.ops.count'], 6);
@@ -542,7 +543,10 @@ test('Storage telemetry', async (t) => {
     const { dir, storage: first } = await openTemp(t2, { fsi });
     const id = 'lost';
     failing = true;
-    await assert.rejects(() => first.set(id, { n: 1 }), /ENOSPC/);
+    const errors = [];
+    first.on('error', (error) => errors.push(error));
+    await first.set(id, { n: 1 });
+    assert.strictEqual(errors[0].code, 'UNPERSISTED');
     failing = false;
     await first.close();
     const second = await syncom.open({ path: dir, logger: false, fsi, telemetry: { tracer, meter } });

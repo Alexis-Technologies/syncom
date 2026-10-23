@@ -168,6 +168,13 @@ class Storage extends Emitter {
   #defineSchema(options, search) {
     const schema = options.schema ?? null;
     const normalized = normalizeSchema(schema, { validator: options.validator });
+    // A collection becomes a property of the storage: a name the storage
+    // already answers to — a method, a getter, anything up its prototype
+    // chain — would replace it or break the open. Refused before anything
+    // is opened.
+    for (const name of normalized.entities.keys()) {
+      if (name in this) throw new TypeError(`open({ schema }): entity name '${name}' is taken by the storage itself`);
+    }
     this.#entities = normalized.entities;
     this.#schema = schema;
     // One text index per searchable entity, from the injected factory: the
@@ -304,7 +311,8 @@ class Storage extends Emitter {
       definitionOf: (data) => this.#definitionOf(data),
       conflicts: (id, entry) => this.#conflicts(id, entry),
       invalid: (op, entry) => this.#invalid(op, entry),
-      persist: (touched, from, to) => this.#persistBatch(touched, from, to),
+      persist: (touched, from, to) => this.#land(touched, from, to),
+      unpersisted: (touched, error) => this.#unpersisted(touched, error),
       flush: () => this.#flushCatalog(),
       refresh: (id, data, delta, source) => this.#emitUpdate(id, data, delta, source),
     };
@@ -797,6 +805,29 @@ class Storage extends Emitter {
 
   // One chain block per applied batch: `records` maps every touched id to
   // the hash of its data after the batch, `from`/`to` are the log positions.
+  // A logged batch's records, written: true when they landed. The append
+  // was the commit point — the ops are durable and replicate from the log —
+  // so a backend that fails here (a full disk, a quota) does not undo them:
+  // the entries are held in memory and the batch stays unapplied, replayed
+  // onto the files at the next open. Reported, never thrown.
+  async #land(touched, fromSeq, toSeq) {
+    try {
+      await this.#persistBatch(touched, fromSeq, toSeq);
+      return true;
+    } catch (error) {
+      await this.#unpersisted(touched, error);
+      return false;
+    }
+  }
+
+  async #unpersisted(touched, error) {
+    for (const [id, entry] of touched) await this.#entries.hold(id, entry);
+    const ids = [...touched.keys()];
+    this.#logger.warn({ event: 'storage.unpersisted', ids, err: error });
+    const message = `${ids.join(', ')}: logged, but not written; held until the next open`;
+    notify(this, this.#logger, 'error', new SyncomError('UNPERSISTED', message, { ids, cause: error }));
+  }
+
   async #persistBatch(touched, fromSeq, toSeq) {
     let blockHash = null;
     if (this.#chain) {

@@ -114,10 +114,10 @@ Two tabs are two instances, and `open()` is exclusive per directory
 wrpc's `WrpcClientProxy` holds one WebSocket, and every tab's
 `connect(url, { worker })` goes through it — but the storage is not: a
 proxied connection does not stop two storages from minting the same
-sequence number. For v1, one tab syncs (take the lock with `lock: 'wait'`
-and let the others work read-only, or route writes to it through a
-`BroadcastChannel`); a storage served from a worker to its tabs is the
-follow-up.
+sequence number. For v1, one tab owns the storage and syncs: the others
+wait for the lock (`lock: 'wait'`) or route reads and writes to it through a
+`BroadcastChannel` — there is no read-only open. A storage served from a
+worker to its tabs is the follow-up.
 
 ## End-to-end encryption
 

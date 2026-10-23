@@ -2,41 +2,60 @@
 
 // Smart contracts are deliberately not here: `@alexify/syncom/contracts` is
 // the subpath, so a process that never imports it never runs a block's code.
-const chain = require('./chain.js');
-const crdt = require('./crdt.js');
-// `verifyAsync` is the engine's (src/signing.js), not the API's: the root
-// keeps one `verify`, synchronous in Node.js and a promise in the browser.
-const { verifyAsync, ...crypto } = require('./crypto.js');
+// The exports are spelled out — required modules spread whole, the rest by
+// name — never a spread of a local: that is the shape Node.js reads a
+// CommonJS module's names from when ESM imports it (cjs-module-lexer), so
+// `import { open } from '@alexify/syncom'` works outside a bundler too.
+//
+// `verifyAsync` is the engine's (src/signing.js), not the API's: it is left
+// out by name, and the root keeps one `verify`, synchronous in Node.js and a
+// promise in the browser.
+const {
+  calculateHash,
+  generateKeys,
+  encrypt,
+  decrypt,
+  loadKeys,
+  generateSigningKeys,
+  loadSigningKeys,
+  sign,
+  verify,
+} = require('./crypto.js');
 const { read, write, exists, remove, list } = require('./fsi.js');
-const fsi = { read, write, exists, remove, list };
 const { isFsi, createMemoryFsi } = require('./backend.js');
-const backend = { isFsi, createMemoryFsi };
-const storage = require('./storage.js');
-const sync = require('./sync.js');
-const log = require('./log.js');
 const { applyOp, mergeEntry, isAlive } = require('./ops.js');
-const ops = { applyOp, mergeEntry, isAlive };
 const { HookError } = require('./hooks.js');
-const hooks = { HookError };
 const { ValidationError } = require('./schema.js');
-const schema = { ValidationError };
 const { isSharedLog } = require('./shared-log.js');
-const sharedLog = { isSharedLog };
 const { SyncomError } = require('./errors.js');
-const errors = { SyncomError };
 
 module.exports = {
-  ...chain,
-  ...crdt,
-  ...crypto,
-  ...fsi,
-  ...backend,
-  ...storage,
-  ...sync,
-  ...log,
-  ...ops,
-  ...hooks,
-  ...schema,
-  ...sharedLog,
-  ...errors,
+  ...require('./chain.js'),
+  ...require('./crdt.js'),
+  calculateHash,
+  generateKeys,
+  encrypt,
+  decrypt,
+  loadKeys,
+  generateSigningKeys,
+  loadSigningKeys,
+  sign,
+  verify,
+  read,
+  write,
+  exists,
+  remove,
+  list,
+  isFsi,
+  createMemoryFsi,
+  ...require('./storage.js'),
+  ...require('./sync.js'),
+  ...require('./log.js'),
+  applyOp,
+  mergeEntry,
+  isAlive,
+  HookError,
+  ValidationError,
+  isSharedLog,
+  SyncomError,
 };

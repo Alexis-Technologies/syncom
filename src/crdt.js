@@ -1,5 +1,9 @@
 'use strict';
 
+// `__proto__` is never a field: a JSON-parsed delta can carry it as an own
+// key, and assigning it would replace the result's prototype instead.
+const isField = (key) => key !== '__proto__';
+
 const diff = (source, target) => {
   if (typeof source !== 'object') source = {};
   if (typeof target !== 'object') target = {};
@@ -8,6 +12,7 @@ const diff = (source, target) => {
   const targetKeys = new Set(Object.keys(target));
 
   for (const key of targetKeys) {
+    if (!isField(key)) continue;
     if (!sourceKeys.has(key)) {
       delta[key] = target[key];
     } else if (Array.isArray(target[key]) || target[key] instanceof Set) {
@@ -30,7 +35,7 @@ const diff = (source, target) => {
   }
 
   for (const key of sourceKeys) {
-    if (!targetKeys.has(key)) {
+    if (isField(key) && !targetKeys.has(key)) {
       delta[key] = undefined;
     }
   }
@@ -44,7 +49,8 @@ const merge = (source, delta) => {
 
   const result = Array.isArray(source) ? [...source] : { ...source };
 
-  for (const key in delta) {
+  for (const key of Object.keys(delta)) {
+    if (!isField(key)) continue;
     if (delta[key] === undefined) {
       delete result[key];
       continue;

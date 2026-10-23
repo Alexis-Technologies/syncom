@@ -64,8 +64,8 @@ features:
     link: /guide/telemetry
     linkText: OpenTelemetry
   - icon: 📦
-    title: Zero dependencies, about 41 KB
-    details: "Nothing is installed with it. The same API on Node.js and in the browser, picked by the browser export condition, and about 41 KB min+gzip for the browser, held to a budget in CI."
+    title: Zero dependencies, about 42 KB
+    details: "Nothing is installed with it. The same API on Node.js and in the browser, picked by the browser export condition, and about 42 KB min+gzip for the browser, held to a budget in CI."
     link: /guide/browser
     linkText: Browser
 ---

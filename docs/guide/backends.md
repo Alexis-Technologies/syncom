@@ -70,7 +70,15 @@ price is the write latency of the disk. A backend without `sync` (OPFS,
 IndexedDB, memory) is as durable as it is, and `durable` logs a debug line
 and does nothing. What a crash can tear is the newest, unannounced batch:
 the log is written before the record, a reopen replays its unsealed tail,
-and a torn open file is dropped before anyone was told of it.
+and a torn open file is dropped before anyone was told of it. A record file
+torn the same way reads as `INTEGRITY` until `repair(id)` rebuilds it.
+
+The log append is the commit point. A backend that fails after it — a full
+disk, a browser's `QuotaExceededError` on the record file or the chain block
+— does not undo the write: it resolves, the op replicates, the record is
+held in memory so reads see it, and the storage's `error` event carries
+`code: 'UNPERSISTED'`. The batch stays unapplied in the log, and the next
+open replays it onto the files.
 
 ## One instance per directory
 

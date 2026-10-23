@@ -78,8 +78,8 @@ that fails the build when exceeded.
 
 | Entry | raw | min | min+gzip | budget |
 | ----- | ---:| ---:| --------:| ------:|
-| main entry — browser (@alexify/syncom) | 284.2 KB | 118.2 KB | 40.7 KB | 41.0 KB |
-| main entry — node (@alexify/syncom) | 268.3 KB | 117.0 KB | 40.2 KB | — |
+| main entry — browser (@alexify/syncom) | 296.0 KB | 122.3 KB | 41.9 KB | 42.0 KB |
+| main entry — node (@alexify/syncom) | 279.9 KB | 121.3 KB | 41.6 KB | — |
 | wrpc adapter — browser (@alexify/syncom/wrpc) | 3.4 KB | 1.4 KB | 0.7 KB | 2.0 KB |
 | contracts — browser (@alexify/syncom/contracts) | 3.7 KB | 1.6 KB | 0.8 KB | 1.0 KB |
 | idb backend — browser (@alexify/syncom/idb) | 3.7 KB | 1.7 KB | 0.8 KB | 2.0 KB |
@@ -169,6 +169,8 @@ nineteen in one table of forty features, each cell decided from the published so
 syncom is a database that merges field by field, not a text CRDT. It syncs with no service to
 run, its hosts validate and scope what peers send, and its log is verifiable and purgeable. It
 has no text or list CRDT and no UI bindings, and it is a pre-release, not on npm yet.
+RxDB, the closest of them, is compared [feature by feature](https://syncomjs.vercel.app/guide/vs-rxdb)
+in 300 rows, from its code and every page of its docs.
 
 ## Benchmarks
 
@@ -266,7 +268,7 @@ _Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 roun
 | TinyBase<br><sub>tinybase@10.0.1</sub> | MergeableStore + IndexedDB persister + custom synchronizer | 56.4 KB | 23.8 KB |  |
 | Yjs<br><sub>yjs@13.6.33, y-indexeddb@9.0.12, y-protocols@1.0.7</sub> | yjs + y-indexeddb + y-protocols/sync | 80.2 KB | 24.5 KB |  |
 | PouchDB<br><sub>pouchdb-browser@9.0.0</sub> | pouchdb-browser | 117.8 KB | 40.4 KB | pouchdb-browser carries its HTTP adapter (the CouchDB client) with it |
-| **syncom**<br><sub>@alexify/syncom@0.0.1</sub> | open() over OPFS + the wrpc link adapter | 119.9 KB | 41.3 KB | storage, schema, queries, the op log and the sync protocol are one entry |
+| **syncom**<br><sub>@alexify/syncom@0.0.1</sub> | open() over OPFS + the wrpc link adapter | 124.1 KB | 42.6 KB | storage, schema, queries, the op log and the sync protocol are one entry |
 | RxDB<br><sub>rxdb@17.6.0, dexie@4.4.6, rxjs@7.8.2</sub> | rxdb + Dexie storage + replication | 282.3 KB | 90.1 KB |  |
 | Fireproof<br><sub>@fireproof/core@0.24.19</sub> | @fireproof/core | 784.2 KB | 204.0 KB |  |
 | OrbitDB<br><sub>@orbitdb/core@4.0.0, helia@6.1.4, libp2p@3.5.1, @libp2p/gossipsub@15.0.23, blockstore-idb@4.0.1</sub> | @orbitdb/core + helia + libp2p, IndexedDB blockstore | 1185.6 KB | 353.7 KB | createHelia brings Helia's default libp2p configuration with it |

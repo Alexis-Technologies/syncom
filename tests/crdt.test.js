@@ -206,3 +206,16 @@ test('CRDT module', async (t) => {
     assert.deepStrictEqual(result, { a: 1, b: 2 });
   });
 });
+
+test('diff and merge take own keys only: __proto__ is never a field', () => {
+  const delta = JSON.parse('{"__proto__": {"polluted": true}, "n": 1}');
+  const merged = syncom.merge({ n: 1 }, delta);
+  assert.strictEqual(Object.getPrototypeOf(merged), Object.prototype);
+  assert.strictEqual(merged.polluted, undefined);
+  assert.deepStrictEqual(merged, { n: 2 });
+  const target = JSON.parse('{"__proto__": {"polluted": true}, "a": 1}');
+  const changed = syncom.diff({}, target);
+  assert.strictEqual(Object.getPrototypeOf(changed), Object.prototype);
+  assert.deepStrictEqual(changed, { a: 1 });
+  assert.strictEqual({}.polluted, undefined);
+});

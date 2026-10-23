@@ -62,8 +62,11 @@ writer wins. A field created with `inc()` is a *counter* — increments add up
 across nodes. A field created with `add()` is a *set* — concurrent adds both
 keep, and an add a remove did not see survives it; it reads sorted by element
 text. A field is one kind only: `update()` on a counter or a set, `inc()` on a
-register or a set, `add()` on a register or a counter throw. See
-[Sync](./sync#registers-counters-and-sets).
+register or a set, `add()` on a register or a counter throw. The fields are
+the top-level ones: a nested object is one register, replaced whole by
+whichever write is later — two nodes that change different keys of it
+concurrently keep one side — and `update({ 'a.b': 1 })` writes a field named
+`a.b`. See [Sync](./sync#registers-counters-and-sets).
 :::
 
 ### Compare-and-swap
@@ -164,7 +167,9 @@ const b = await open({ path: 'data', lock: false }); // yours to coordinate
 
 Two browser tabs are two instances: with the default `'fail'` the second tab
 sees `LOCKED` and must work through the first (a SharedWorker that owns the
-storage, say) or read-only. `close()` releases the lock; a crash releases it
+storage, say), or wait for it with `lock: 'wait'`. There is no read-only
+open: `lock: false` gives a second instance that writes too (its catalog,
+and the log it seals on close), which is yours to coordinate. `close()` releases the lock; a crash releases it
 in the browser and leaves a stale file elsewhere, which the next open takes
 over. The lock is per machine — on a shared network filesystem, coordinate
 yourself and pass `lock: false`.
@@ -214,7 +219,8 @@ included, and `dirty` puts since the last save), the log (`length`, `floor`,
 ### Repair
 
 A record file that fails its integrity check — its data no longer hashes to
-what its chain block recorded — rejects every read with `code: 'INTEGRITY'`,
+what its chain block recorded, or the file no longer parses (a write torn by
+a crash) — rejects every read with `code: 'INTEGRITY'`,
 and stays that way: nothing repairs it behind your back, because a file that
 changed under the chain is evidence first. When you have looked,
 `storage.repair(id)` rebuilds the record from this node's own log: the
@@ -325,7 +331,13 @@ await storage.Post.delete(post.id);
 ```
 
 `entities` may be a plain object or a `Map`. Without a schema the storage has
-no collections and you address records by id only.
+no collections and you address records by id only. An entity named like
+something the storage already answers to (`get`, `close`, `log`, `sync`…)
+would replace it, so `open()` refuses it with a `TypeError`.
+
+A collection answers for its own records: `get(id)` of a record of another
+collection is `null`, and `update()`, `delete()` and `record()` reject with
+`code: 'NOT_FOUND'` — the storage's own methods address any record.
 
 An entity definition is `{ schema?, idField?, validate?, index?, unique?, fields? }`;
 `{}` is a bare collection. `schema` validates the records ([below](#validation)),
