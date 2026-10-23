@@ -45,11 +45,17 @@ const sameVectors = (storages) => {
 };
 
 // Quiet = every vector equal and nothing in flight, three polls in a row.
+// "In flight" includes each storage's mutation queue: a peer's page moves the
+// vector at the log append, and its record files are written after that,
+// inside the same applyRemote — vectors alone say "converged" while a read
+// would still find nothing (a slow CI disk showed it).
 const settle = async (storages, { timeout = 5000, step = 10 } = {}) => {
   const deadline = Date.now() + timeout;
   let stable = 0;
   while (Date.now() < deadline) {
-    const idle = storages.every((storage) => storage.sync.peers().every((peer) => peer.pending === 0));
+    const idle = storages.every(
+      (storage) => storage.stats().queue === 0 && storage.sync.peers().every((peer) => peer.pending === 0),
+    );
     if (idle && sameVectors(storages)) {
       if (++stable >= 3) return;
     } else {

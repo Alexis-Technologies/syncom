@@ -170,9 +170,6 @@ const runSignatureTests = async (t, assert, createStorage) => {
     const c = await createStorage(t2, 'C', { sync: { signatures: 'require', connect } });
     await c.sync.addNode({ url: 'mem://A' });
     await settle([a, c]);
-    // The vector moves at the log append, the record file after it: wait
-    // for the record, not for the vectors alone.
-    await waitUntil(async () => (await c.get('r1')) !== null);
     assert.deepStrictEqual(await c.get('r1'), { a: 1 });
     const relayed = c.log.since(undefined).find((entry) => entry.op.origin === peer.id);
     assert.deepStrictEqual([relayed.op.sig, relayed.op.digest, relayed.op.nonce], [good.sig, good.digest, good.nonce]);
