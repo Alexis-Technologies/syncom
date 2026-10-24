@@ -17,7 +17,8 @@
 //                 something newer than it lands (see isAlive)
 //   counters[f] — { [origin]: [seq, sum, ts] }: a PN-counter, one running sum
 //                 per origin, so re-applying an `inc` (seq already seen) is a
-//                 no-op and two snapshots join by taking the higher seq
+//                 no-op and two snapshots join by taking the higher seq; a sum
+//                 stays within ±MAX_COUNT, an inc past it is a `bound` refusal
 //   sets[f]     — { [elementKey]: { [origin]: [added, removed] } }: an
 //                 observed-remove set. elementKey is the element's JSON text;
 //                 per (element, origin) the ts of that origin's newest `add`
@@ -120,9 +121,17 @@ const cloneEntry = (entry) => {
   return out;
 };
 
+// What one origin's running sum may reach, either way: past it a float
+// would no longer count an increment of 1, and the next step is Infinity,
+// which JSON keeps as null. Each sum depends on its origin's ops alone, so a
+// bound on it refuses the same op on every node.
+const MAX_COUNT = Number.MAX_SAFE_INTEGER;
+
+// The sums added up in origin order: floats round by the order they are
+// added in, and the order of arrival differs between nodes.
 const counterValue = (perOrigin) => {
   let sum = 0;
-  for (const origin of Object.keys(perOrigin)) sum += perOrigin[origin][1];
+  for (const origin of Object.keys(perOrigin).sort()) sum += perOrigin[origin][1];
   return sum;
 };
 
@@ -210,7 +219,11 @@ const isStamp = (value) =>
   Array.isArray(value) && value.length === 2 && typeof value[0] === 'number' && typeof value[1] === 'string';
 const stampOf = (value) => (isStamp(value) ? [value[0], value[1]] : null);
 const isCount = (value) =>
-  Array.isArray(value) && Number.isInteger(value[0]) && Number.isFinite(value[1]) && typeof value[2] === 'number';
+  Array.isArray(value) &&
+  Number.isInteger(value[0]) &&
+  Number.isFinite(value[1]) &&
+  Math.abs(value[1]) <= MAX_COUNT &&
+  typeof value[2] === 'number';
 const isSlot = (value) =>
   Array.isArray(value) &&
   value.length === 2 &&
@@ -759,8 +772,13 @@ const applyOp = (previous, op, limits = null) => {
       } else if (compareClock(stamp, meta.base) >= 0) {
         const perOrigin = own(meta.counters, field) ?? (meta.counters[field] = {});
         const known = own(perOrigin, op.origin);
-        if (!known || known[0] < op.seq) {
-          perOrigin[op.origin] = [op.seq, (known ? known[1] : 0) + value, op.ts];
+        const sum = (known ? known[1] : 0) + value;
+        const fresh = !known || known[0] < op.seq;
+        if (fresh && !(Math.abs(sum) <= MAX_COUNT)) {
+          rejected.push({ field, reason: 'bound', detail: 'counter', count: sum, max: MAX_COUNT });
+          if (Object.keys(perOrigin).length === 0) delete meta.counters[field];
+        } else if (fresh) {
+          perOrigin[op.origin] = [op.seq, sum, op.ts];
           entry.data[field] = counterValue(perOrigin);
           delta[field] = entry.data[field];
         }
@@ -827,7 +845,10 @@ const isAlive = (entry) => {
  * first (applyOp does that for a `merge` op).
  */
 const mergeEntry = (a, b) => {
-  if (!a) return b ? cloneEntry(b) : null;
+  // A side alone is joined with nothing rather than copied: its data is read
+  // again from its meta, so a field the meta does not back (a slot or a block
+  // normalizeMeta refused, a value with no stamp) does not come with it.
+  if (!a) return b ? mergeEntry(createEntry(), b) : null;
   if (!b) return cloneEntry(a);
   const entry = createEntry();
   const { meta, data } = entry;
@@ -1085,6 +1106,7 @@ const kindsOf = (entry) => {
 };
 
 module.exports = {
+  MAX_COUNT,
   createEntry,
   cloneEntry,
   applyOp,

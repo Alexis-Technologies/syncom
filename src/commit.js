@@ -48,7 +48,7 @@ const HINTS = {
   list: 'a list; use splice(), push(), setAt() or move() (an array, not a string)',
   text: 'a text; use splice(), push(), updateText() or mark() (a string, not an array)',
   tree: 'a tree; use treeMove() or treeRemove()',
-  bound: 'past a bound: pending work, a run or the field as a whole (see Costs and limits)',
+  bound: "past a bound: pending work, a run, the field as a whole or a counter's range (see Costs and limits)",
 };
 // `malformed` is a payload the engine does not admit after the arguments
 // were checked — a bug in the caller or here, never a peer's doing on this

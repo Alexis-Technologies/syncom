@@ -242,7 +242,7 @@ docs/                     VitePress site
   arguments were checked, so this is a bug — and from a peer it is
   `OP_REFUSED{reason:'malformed'}`, counted in `syncom.ops.rejected`, the op
   still logged and relayed as a no-op (a dirk, never a gap). A `bound`
-  refusal carries `detail` (`pending`/`run`/`field`), `count` and `max`.
+  refusal carries `detail` (`pending`/`run`/`field`/`counter`), `count` and `max`.
 - **A sequence block is never mutated in place; its index is cached by
   identity.** Every change goes through `cloneSeq`, so a changed block is a
   new object, and `seqIndexOf(entry, field)` in `src/ops.js` keeps

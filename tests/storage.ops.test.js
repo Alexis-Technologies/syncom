@@ -90,6 +90,38 @@ test('Storage replication model', async (t) => {
     },
   );
 
+  await t.test(
+    'an inc past a counter’s range is refused here, and from a peer, and a reopen reads the same',
+    async (t2) => {
+      const { dir, storage } = await openTemp(t2);
+      const id = await storage.insert({ title: 'doc' });
+      await storage.inc(id, 'n', Number.MAX_SAFE_INTEGER - 1);
+      const seq = storage.log.lastSeq;
+      await assert.rejects(() => storage.inc(id, 'n', 2), {
+        code: 'FIELD_KIND',
+        field: 'n',
+        kind: 'bound',
+        detail: 'counter',
+        max: Number.MAX_SAFE_INTEGER,
+      });
+      assert.strictEqual(storage.log.lastSeq, seq, 'nothing logged');
+      // A peer's sum past the range: refused as a bound, logged as a no-op, the field as it was.
+      const errors = [];
+      storage.on('error', (error) => errors.push(error));
+      await storage.applyRemote([remoteOp('peer', 1, 'inc', id, { key: 'n', value: 1e308 })]);
+      assert.deepStrictEqual(
+        errors.map((error) => [error.code, error.rejected?.[0]?.detail]),
+        [['OP_REFUSED', 'counter']],
+      );
+      await storage.inc(id, 'n', 1);
+      assert.strictEqual((await storage.get(id)).n, Number.MAX_SAFE_INTEGER);
+      await storage.close();
+      const again = await syncom.open({ path: dir, logger: false });
+      t2.after(() => again.close());
+      assert.strictEqual((await again.get(id)).n, Number.MAX_SAFE_INTEGER, 'a reopen reads the same');
+    },
+  );
+
   await t.test('inc is a counter; a field is a register or a counter, never both', async (t2) => {
     const { storage } = await openTemp(t2);
     const id = await storage.insert({ name: 'Ada' });

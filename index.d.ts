@@ -285,15 +285,16 @@ export interface ApplyResult {
 export type FieldKind = 'register' | 'counter' | 'set' | 'list' | 'text' | 'tree';
 /**
  * Why a field of an op was refused: another kind holds the field; work past
- * a bound of a list or text field (`'bound'`); a payload the engine does not
- * admit (`'malformed'` — a TypeError on the local path).
+ * a bound of a list or text field, or a counter's sum past the safe range
+ * (`'bound'`); a payload the engine does not admit (`'malformed'` — a
+ * TypeError on the local path).
  */
 export type RefusalReason = FieldKind | 'bound' | 'malformed';
 /** One refused field: for `'bound'`, which bound (`detail`), the count and the limit. */
 export interface Refusal {
   field: string | null;
   reason: RefusalReason;
-  detail?: 'pending' | 'run' | 'field';
+  detail?: 'pending' | 'run' | 'field' | 'counter';
   count?: number;
   max?: number;
 }

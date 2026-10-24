@@ -15,6 +15,7 @@ const {
   latestClock,
   packOps,
   unpackOps,
+  MAX_COUNT,
 } = require('../src/ops.js');
 
 const op = (type, ts, origin, extra = {}) => ({ type, ts, origin, seq: extra.seq ?? ts, id: 'r', ...extra });
@@ -1061,6 +1062,42 @@ test('ops: a peer-shaped meta reaches nothing it should not', async (t) => {
     assert.strictEqual(row[3], 'constructor');
     const [back] = unpackOps([['A', 1, 1, 'constructor', 'r']]);
     assert.strictEqual(back.type, 'constructor', 'an unknown code stays a string for the storage to refuse');
+  });
+});
+
+test('ops: a counter stays a number every node reads alike', async (t) => {
+  await t.test('an inc past MAX_COUNT is a bound refusal in any order; the sums add up in origin order', () => {
+    const inc = (ts, origin, seq, value) => op('inc', ts, origin, { seq, key: 'n', value });
+    // Fractions round by the order they are added in; the reading must not depend on arrival.
+    const parts = [inc(1, 'A', 1, 0.1), inc(2, 'B', 1, 0.2), inc(3, 'C', 1, 0.3)];
+    const readings = new Set(permutations(parts).map((order) => replay(order).data.n));
+    assert.deepStrictEqual([...readings], [0.1 + 0.2 + 0.3]);
+    // Past the bound: refused, the origin's slot as it was, the next small inc lands.
+    const near = applyOp(null, inc(1, 'A', 1, MAX_COUNT - 1)).entry;
+    const over = applyOp(near, inc(2, 'A', 2, 2));
+    const refused = { field: 'n', reason: 'bound', detail: 'counter', count: MAX_COUNT + 1, max: MAX_COUNT };
+    assert.deepStrictEqual([over.changed, over.rejected, over.entry.data.n], [false, [refused], MAX_COUNT - 1]);
+    const next = applyOp(over.entry, inc(3, 'A', 3, 1));
+    assert.deepStrictEqual([next.changed, next.entry.data.n], [true, MAX_COUNT]);
+    // A first inc past it leaves no field behind; another origin's sum is its own.
+    const huge = applyOp(null, inc(1, 'B', 1, 1e308));
+    assert.deepStrictEqual([huge.changed, huge.entry.data, huge.entry.meta.counters], [false, {}, {}]);
+    const ops = [inc(1, 'A', 1, MAX_COUNT), inc(2, 'A', 2, 1), inc(3, 'B', 1, -5)];
+    assertCommutes(ops, { n: MAX_COUNT - 5 });
+  });
+
+  await t.test('a merge drops a counter sum past MAX_COUNT and data its meta does not back', () => {
+    // What a snapshot page carries for a record this node does not hold: a sum
+    // no op could make, and a value with no stamp under it.
+    const meta = { clock: { title: [4, 'A'] }, counters: { n: { A: [1, 1e300, 5], B: [1, 2, 6] } } };
+    const data = { title: 'doc', n: 1e300, body: 'unstamped' };
+    const { entry } = applyOp(null, op('merge', 10, 'H', { seq: 1, data, meta }));
+    assert.deepStrictEqual(entry.meta.counters, { n: { B: [1, 2, 6] } });
+    assert.deepStrictEqual(entry.data, { title: 'doc', n: 2 });
+    // The same join over an entry this node holds reads alike.
+    const held = applyOp(null, op('set', 1, 'C', { data: { other: 1 } })).entry;
+    const over = applyOp(held, op('merge', 10, 'H', { seq: 1, data, meta })).entry;
+    assert.deepStrictEqual(over.data, { other: 1, title: 'doc', n: 2 });
   });
 });
 

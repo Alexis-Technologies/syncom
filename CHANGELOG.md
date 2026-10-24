@@ -609,6 +609,18 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **A counter stays a number every node reads alike.** One origin's sum had
+  no bound: past `Number.MAX_VALUE` it became `Infinity`, saved as `null`,
+  so a node that reloaded the record counted again from 0 while one holding
+  it in memory kept `Infinity` — a divergence a peer could cause on purpose.
+  Each origin's sum now stays within ±`Number.MAX_SAFE_INTEGER`: an `inc`
+  past it is a bound refusal (`detail: 'counter'`; `FIELD_KIND` locally,
+  `OP_REFUSED` from a peer), the same on every node; a snapshot slot past it
+  is not taken; and the sums add up in origin order, so a counter of
+  fractions no longer reads differently by the order of arrival. A merged
+  record this node did not hold is joined like any other rather than copied,
+  so data its meta does not back — a slot or block refused, a value with no
+  stamp — does not come with it.
 - **`compact()` keeps what a record reads as.** It made a text again from its
   string and dropped its marks, dropped a counter at `0`, and refused a text
   or a list longer than one run (`FIELD_KIND`, `detail: 'run'`). The marks

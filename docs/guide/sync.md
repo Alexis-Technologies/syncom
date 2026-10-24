@@ -670,11 +670,13 @@ the engine's own tests run on.
   not on the other (below).
 - **At-least-once delivery, idempotent application.** An op may arrive more
   than once; applying it again changes nothing.
-- **A counter is not bounded against overflow.** Each `inc` must be a finite
-  number, but a sum past `Number.MAX_VALUE` becomes `Infinity`, which reads
-  and is saved as `null`: a node that reloads the record starts counting
-  again from the next increment, while one that still holds it in memory
-  keeps `Infinity`. Keep counters well inside the safe range.
+- **A counter keeps to the safe range.** Each origin's running sum of a
+  counter stays within ±`Number.MAX_SAFE_INTEGER`: an `inc` that would take
+  it past is refused as a bound (`detail: 'counter'`) — locally `FIELD_KIND`,
+  from a peer `OP_REFUSED`, the same on every node, since a sum depends on its
+  origin's ops alone — and a snapshot slot past it is not taken. The sums of
+  the origins add up in the order of their ids, so a counter of fractions
+  reads the same everywhere, whatever order its increments arrived in.
 - **A peer's op is checked before it is read.** `origin`, `seq`, `ts`, `type`,
   `scope`, `v`, the record id (or an `advance`'s vector) and the signature's
   three fields must have their shape (`actor` and `from` are claims, carried
@@ -698,7 +700,8 @@ the engine's own tests run on.
   for their anchor, cuts and extensions waiting for their run, registers and
   switched-off marks for elements not here — `sync.pendingMax` (4096). An op
   past a bound is refused for that field (`OP_REFUSED`, `reason` `'bound'`,
-  with `detail` — `'pending'`, `'run'` or `'field'` — `count` and `max`),
+  with `detail` — `'pending'`, `'run'`, `'field'`, or `'counter'` for a
+  counter's range (above) — `count` and `max`),
   then logged and relayed: the vector moves past it, so this node never takes
   it, and each node it reaches decides by its own bounds. Pending work
   depends on the order ops arrive in, so two nodes can disagree there, and
