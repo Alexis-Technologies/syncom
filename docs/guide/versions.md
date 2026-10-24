@@ -317,9 +317,11 @@ increment back; a text comes back as new characters. A text's marks are not
 undone. An undo that fails partway — a hook refusing one record's inverse,
 say — leaves the records it took back taken back, with their way back on the
 redo stack, and the rest on the undo stack for another try, so a record is
-not inverted twice; within one record, the [`applyPatches()`](#diff-and-restore)
-rule holds — a hook or a validator that refuses a later op of its inverse
-leaves the earlier ones applied, and the record still on the undo stack.
+not inverted twice. Within one record too: a hook or a validator that
+refuses a later op of its inverse leaves the earlier ones applied (the
+[`applyPatches()`](#diff-and-restore) rule), their way back goes to the redo
+stack, and the record waits on the undo stack from where those ops left it —
+the retry takes back the rest, not the whole record again.
 
 `createUndo(storage, options)` also takes `scope` — only the ops of that
 scope (`'*'` the global one) — `exclude(op)` — ops to leave out — and

@@ -609,6 +609,12 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **A failed undo never inverts part of a record twice.** When a hook or a
+  validator refused a later op of one record's inverse, the earlier ops of
+  it had landed but the record stayed on the undo stack as the step left
+  it, so the retry took them back again (`views` 2 → 1 → 0). The record now
+  waits on the stack from where the landed ops left it — their way back is
+  on the redo stack — and the retry takes back the rest.
 - **A counter stays a number every node reads alike.** One origin's sum had
   no bound: past `Number.MAX_VALUE` it became `Infinity`, saved as `null`,
   so a node that reloaded the record counted again from 0 while one holding

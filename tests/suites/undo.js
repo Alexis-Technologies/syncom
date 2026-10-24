@@ -227,6 +227,36 @@ const runUndoTests = async (t, assert, createStorage) => {
   });
 
   await t.test(
+    'a failed undo inside one record leaves its landed ops landed; the retry takes back the rest',
+    async (t2) => {
+      let failing = false;
+      const beforeWrite = (ctx) => {
+        if (failing && ctx.type === 'set') throw new Error('not now');
+      };
+      const storage = await createStorage(t2, 'A', { hooks: { beforeWrite } });
+      await storage.inc('r', 'views', 1);
+      await storage.update('r', { title: 'Draft' });
+      const undo = createUndo(storage, { mergeInterval: 1e9 });
+      await storage.inc('r', 'views', 1);
+      await storage.update('r', { title: 'Final' });
+      // The step's inverse is two ops on one record: the inc lands, the hook refuses the set.
+      failing = true;
+      await assert.rejects(() => undo.undo(), { code: 'HOOK_FAILED' });
+      assert.deepStrictEqual(await storage.get('r'), { views: 1, title: 'Final' });
+      assert.deepStrictEqual(undo.size, { undo: 1, redo: 1 });
+      failing = false;
+      assert.deepStrictEqual(await undo.undo(), { applied: 1, skipped: 0 }, 'the set alone: the inc stays landed');
+      assert.deepStrictEqual(await storage.get('r'), { views: 1, title: 'Draft' });
+      // Redo brings it back in the two steps the undo left.
+      await undo.redo();
+      await undo.redo();
+      assert.deepStrictEqual(await storage.get('r'), { views: 2, title: 'Final' });
+      assert.deepStrictEqual(undo.size, { undo: 2, redo: 0 });
+      undo.stop();
+    },
+  );
+
+  await t.test(
     'a failed undo leaves what it took back taken back; the retry inverts the rest, never twice',
     async (t2) => {
       let failing = false;

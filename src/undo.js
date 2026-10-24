@@ -209,8 +209,10 @@ class UndoManager extends Emitter {
       left.delete(id);
       for (const seq of record.seqs) collected.taken.add(seq);
     };
+    let current = null;
     try {
       for (const [id, record] of step.records) {
+        current = id;
         const conflicts = this.#conflicts(step, id);
         let patches = invert(record, true);
         let kept = patches;
@@ -235,7 +237,15 @@ class UndoManager extends Emitter {
     } catch (error) {
       // What was taken back stays taken back: the records already inverted
       // leave the step, their way back on the other stack; the rest wait on
-      // this one for another try. A record is never inverted twice.
+      // this one for another try. A record is never inverted twice — nor in
+      // part: where the failure stopped inside a record, the ops that landed
+      // are on the other stack, and what they left is where its inverse
+      // starts next time.
+      const partial = current === null ? undefined : collected.records.get(current);
+      if (partial !== undefined && left.has(current)) {
+        const record = left.get(current);
+        left.set(current, { ...record, after: partial.after, kinds: { ...record.kinds, ...partial.kinds } });
+      }
       if (left.size > 0) from.push({ ...step, records: left });
       if (collected.records.size > 0) to.push(collected);
       this.#refreshOldest();
