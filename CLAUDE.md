@@ -373,7 +373,12 @@ docs/                     VitePress site
   name's directory first (fsi lists files, not directories, so a crash's
   leftover cannot be found at open). Every purge path goes through
   `core.scrub` (log + tags) — never `core.log.scrub` alone. The error field
-  is `tag`, never `name` (it would overwrite `Error.name`).
+  is `tag`, never `name` (it would overwrite `Error.name`). A view at a tag
+  (`at(name)`) reads through `#sourceAt(name)`, a `storage[SOURCE]`-shaped
+  seam over the tag's catalog and `#entryAt` (`searches` false, `subscribe`
+  throws — nothing to watch), and pages through `snapshotPage` with a core
+  of the tag's catalog, entries and position — the same `pageOf`, never a
+  second page writer.
 - **`repair(id)` replays the log, it does not guess.** `Storage.#repair`
   starts at the first whole-record op the log retains for the id (`WHOLE`:
   `write`/`merge`/`delete`, or a `purge` even scrubbed), folds the rest with

@@ -662,6 +662,17 @@ expectType<syncom.TagView>(storage.at('v1'));
 expectType<Promise<unknown>>(storage.at('v1').get('id'));
 expectType<boolean>(storage.at('v1').has('id'));
 expectType<string>(storage.at('v1').eventId);
+expectType<string[]>(storage.at('v1').list());
+expectType<syncom.TagCollection>(storage.at('v1').collection('Post'));
+expectType<syncom.Cursor>(
+  storage
+    .at('v1')
+    .collection('Post')
+    .select({ n: { $gte: 2 } }),
+);
+expectType<Promise<number>>(storage.at('v1').collection('Post').count());
+expectType<Promise<unknown | null>>(storage.at('v1').collection('Post').get('id'));
+expectType<Promise<syncom.SnapshotPage>>(storage.at('v1').snapshot({ limit: 100 }));
 expectError(storage.tag(5));
 expectType<() => void>(log.pin((entry) => entry.seq > 1));
 expectError(log.pin(null));

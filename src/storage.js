@@ -21,6 +21,7 @@ const { snapshotPage, mergeBatch, adopt } = require('./bootstrap.js');
 const { applyOp, isAlive, isCounter, isSet, isSeq, isTree, deepEqual } = require('./ops.js');
 const { diff } = require('./myers.js');
 const { buildIndex, spans, isRunKey, isAnchor, cursorAt, indexOfCursor, REVERSED } = require('./sequence.js');
+const { Cursor } = require('./query.js');
 const { TRASH, isNodeId } = require('./tree.js');
 const { appliedHere, parseVersion, within, exactStart, fold, gone } = require('./history.js');
 const { Tags } = require('./tags.js');
@@ -1035,10 +1036,10 @@ class Storage extends Emitter {
     return replaced === undefined ? data : replaced;
   }
 
-  // The record at a tag: its file as it was — the tag's copy, or the file
-  // as it is when nothing changed it since — parsed and read through the
-  // lens; `null` when it was not there.
-  async #readTag(id, name) {
+  // The record at a tag, as an entry: its file as it was — the tag's copy,
+  // or the file as it is when nothing changed it since — parsed; `null`
+  // when it was not there.
+  async #entryAt(name, id) {
     if (!isRecordId(id)) return null;
     let { exists, raw } = await this.#tags.readAt(name, id);
     if (!exists) return null;
@@ -1046,10 +1047,40 @@ class Storage extends Emitter {
     // (a write whose file failed) reads as the file, which is still the
     // tag's state; any other reads as it is.
     if (raw === null && this.#entries.held(id)) raw = await this.#entries.file(id);
-    if (raw === null) return this.#read(id);
-    const entry = await this.#entries.parse(id, raw);
+    return raw === null ? this.#entries.load(id) : this.#entries.parse(id, raw);
+  }
+
+  // The record at a tag as it reads, through the lens; `null` when it was
+  // not there.
+  async #readTag(id, name) {
+    const entry = await this.#entryAt(name, id);
+    if (entry === null) return null;
     if (entry.encrypted) return asJson(entry.data);
     return isAlive(entry) ? asJson(await this.#view(id, entry)) : null;
+  }
+
+  // What a cursor at a tag reads through: the tag's catalog, and the record
+  // as it was — lensed, without the read hooks, like the live seam. A tag
+  // does not change, so there is nothing to watch, and its catalog carries
+  // no text index.
+  #sourceAt(name) {
+    const catalog = this.#tags.catalogOf(name);
+    return {
+      logger: this.#logger,
+      candidates: (entity, query) => catalog.candidates(entity, query),
+      ids: (entity) => catalog.ids(entity),
+      row: (id) => catalog.row(id),
+      indexed: (entity) => catalog.indexed(entity),
+      searches: () => false,
+      subscribe: () => {
+        throw new TypeError(`watch(): tag ${name} does not change`);
+      },
+      load: async (id) => {
+        const entry = await this.#entryAt(name, id);
+        if (entry === null || entry.encrypted || !isAlive(entry)) return null;
+        return this.#view(id, entry);
+      },
+    };
   }
 
   async #folded(id, past) {
@@ -1112,10 +1143,39 @@ class Storage extends Emitter {
   at(name) {
     if (typeof name !== 'string') throw new TypeError('at() takes a name');
     const tag = this.#tags.info(name);
+    const catalog = this.#tags.catalogOf(name);
+    const source = this.#sourceAt(name);
+    const get = (id) => this.#getAt(id, { tag: name });
+    // What a snapshot page reads: the tag's catalog and entries, under the
+    // tag's position — the pages another storage joins to stand at the tag.
+    const core = {
+      catalog,
+      log: {
+        lastEventId: tag.eventId,
+        get vector() {
+          return { ...tag.vector };
+        },
+      },
+      entries: { load: (id) => this.#entryAt(name, id) },
+      scopeOf: (id, data) => this.#scope(id, data),
+      logger: this.#logger,
+      otel: this.#otel,
+    };
     return {
       ...tag,
-      get: (id) => this.#getAt(id, { tag: name }),
+      get,
       has: (id) => isRecordId(id) && this.#tags.hasAt(name, id),
+      list: () => [...catalog.ids()],
+      collection: (entity) => {
+        if (!this.#entities.has(entity)) throw new TypeError(`collection(): unknown entity ${entity}`);
+        return {
+          name: entity,
+          get: async (id) => (isRecordId(id) && catalog.row(id)?.type === entity ? get(id) : null),
+          select: (query) => new Cursor(source, entity, query),
+          count: (query) => new Cursor(source, entity, query).count(),
+        };
+      },
+      snapshot: (options) => snapshotPage(core, options),
     };
   }
 

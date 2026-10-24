@@ -42,7 +42,7 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 | `tag(name)` | `Promise<Tag>` | Names the storage as it is now — `{ name, eventId, seq, ts, vector, createdAt }`, kept on this node as the catalog of the moment plus a copy of each record's file taken before its first change after the tag (see [Tags](../guide/versions#tags)); `name` is of the record-id form; rejects with `TAG_EXISTS` |
 | `untag(name)` | `Promise<void>` | Drops a tag; the copies the next older tag needs move there; rejects with `TAG_NOT_FOUND` |
 | `tags()` | `Tag[]` | The tags, oldest first — from memory |
-| `at(name)` | `TagView` | The storage at a tag: its fields plus `get(id)` (the record as it was, through the lens and the read hooks with `at: { tag }`; `null` when it was not there) and `has(id)`; throws `TAG_NOT_FOUND` |
+| `at(name)` | `TagView` | The storage at a tag: its fields plus `get(id)` (the record as it was, through the lens and the read hooks with `at: { tag }`; `null` when it was not there), `has(id)`, `list()` (every live id then), `collection(entity)` (`select()`, `count()`, `get()` as it was — no `watch()`, no `$text`) and `snapshot(options)` (pages like `snapshot()`, at the tag's position); throws `TAG_NOT_FOUND` |
 | `history(id, { limit = 50 }?)` | `Promise<{ versions, complete, exact }>` | The record's past, newest first: `{ eventId, seq, ts, origin, actor, type, fields, data, scrubbed? }` per op this node applied, `data` the record after it through the lens and `afterRead`; `complete` when nothing was dropped or cut by `limit`, `exact` when the versions are what the node held |
 | `has(id)` | `Promise<boolean>` | `false` for a tombstone |
 | `list()` | `Promise<string[]>` | Every live id, sorted — from the catalog, no I/O |

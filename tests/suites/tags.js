@@ -267,6 +267,85 @@ const runTagTests = async (t, assert, createStorage) => {
     },
   );
 
+  await t.test('queries, the list and a snapshot at a tag read the storage as it was', async (t2) => {
+    const storage = await createStorage(t2, 'A', {
+      schema: { entities: { Post: { index: ['n'] }, Note: {} } },
+    });
+    const ids = [];
+    for (let n = 1; n <= 4; n++) ids.push((await storage.Post.insert({ n })).id);
+    const note = await storage.Note.insert({ text: 'x' });
+    const sealed = await storage.insert({ pin: '1' }, { encrypted: true });
+    const before = await storage.Post.select({ n: { $gte: 2 } })
+      .order('n')
+      .fetch();
+    const all = await storage.list();
+    const tag = await storage.tag('v1');
+    await storage.Post.update(ids[1], { n: 20 });
+    await storage.Post.delete(ids[2]);
+    await storage.Post.insert({ n: 5 });
+    await storage.Note.update(note.id, { text: 'y' });
+    const view = storage.at('v1');
+    const posts = view.collection('Post');
+    assert.strictEqual(posts.name, 'Post');
+    assert.deepStrictEqual(
+      await posts
+        .select({ n: { $gte: 2 } })
+        .order('n')
+        .fetch(),
+      before,
+      'as before the changes',
+    );
+    assert.deepStrictEqual(
+      (
+        await storage.Post.select({ n: { $gte: 2 } })
+          .order('n')
+          .fetch()
+      ).map((row) => row.n),
+      [4, 5, 20],
+      'the present moved on',
+    );
+    assert.strictEqual(await posts.count({ n: { $gte: 2 } }), 3);
+    assert.strictEqual(await posts.count(), 4);
+    assert.deepStrictEqual(view.list(), all);
+    assert.deepStrictEqual(await posts.get(ids[2]), { n: 3, $type: 'Post' }, 'deleted since');
+    assert.strictEqual(await posts.get(note.id), null, 'another collection');
+    assert.strictEqual(await posts.get('nope'), null);
+    assert.deepStrictEqual(await view.collection('Note').get(note.id), { text: 'x', $type: 'Note' });
+    assert.throws(() => view.collection('Nope'), TypeError);
+    assert.throws(() => posts.select().watch(() => {}), /does not change/);
+    assert.throws(() => posts.select({ $text: 'x' }), TypeError);
+    // A snapshot at the tag: pages another storage joins to stand there.
+    const page = await view.snapshot({ limit: 3 });
+    assert.strictEqual(page.records.length, 3);
+    assert.strictEqual(page.eventId, tag.eventId);
+    assert.deepStrictEqual(page.vector, tag.vector);
+    assert.ok(page.cursor !== null);
+    const rest = await view.snapshot({ cursor: page.cursor });
+    assert.strictEqual(rest.cursor, null);
+    const records = [...page.records, ...rest.records];
+    assert.deepStrictEqual(
+      records.map((record) => record.id).sort(),
+      all.filter((id) => id !== sealed).sort(),
+      'every record live at the tag, the sealed one left out',
+    );
+    assert.deepStrictEqual(records.find((record) => record.id === ids[1]).data, { n: 2, $type: 'Post' });
+    const other = await createStorage(t2, 'B', { schema: { entities: { Post: { index: ['n'] }, Note: {} } } });
+    await other.mergeSnapshot(JSON.parse(JSON.stringify(records)));
+    assert.deepStrictEqual(
+      await other.Post.select({ n: { $gte: 2 } })
+        .order('n')
+        .fetch(),
+      before,
+    );
+    assert.deepStrictEqual(
+      await other.list(),
+      all.filter((id) => id !== sealed),
+    );
+    assert.deepStrictEqual(await other.get(note.id), { text: 'x', $type: 'Note' });
+    await other.adoptVector(tag.vector);
+    for (const key of Object.keys(tag.vector)) assert.strictEqual(other.vector[key], tag.vector[key], key);
+  });
+
   await t.test('the read hooks see the tag; a Record and a collection read through it too', async (t2) => {
     const seen = [];
     const storage = await createStorage(t2, 'A', {

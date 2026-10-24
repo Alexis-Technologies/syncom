@@ -135,6 +135,25 @@ tag's catalog forgets its row, indexed values included, so
 `at(name).has(id)` is false and `get` is `null`. The read hooks run with
 `at: { tag }`.
 
+A tag is the whole storage, not one record: `at(name).list()` is every live
+id then, `at(name).collection('Post')` queries the collection as it was —
+`select()` and `count()` over the tag's own catalog, each row read from its
+copy or from the record as it is — and `at(name).snapshot()` pages the
+storage as it was, the way [`snapshot()`](./sync#bootstrap) pages the
+present, so another storage can `mergeSnapshot()` them and stand at the tag.
+A cursor at a tag has no `watch()` (a tag does not change) and no `$text`
+(its catalog carries no text index).
+
+```js
+const posts = storage.at('v1').collection('Post');
+await posts.select({ n: { $gte: 2 } }).order('n').fetch(); // as of v1
+await posts.count();                                         // as of v1
+storage.at('v1').list();                                     // every live id as of v1
+const page = await storage.at('v1').snapshot();              // { records, cursor, eventId, vector }
+await other.mergeSnapshot(page.records);                     // another storage, now at v1
+await other.adoptVector(page.vector);
+```
+
 Tags are this node's: they live under `tags/` next to the data, name a
 position in this node's log, and do not replicate — a peer that needs the
 same version takes its own tag. `tag()` runs in the mutation queue, so no

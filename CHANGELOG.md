@@ -83,9 +83,13 @@ There is no released version section until then; everything below lands in it.
   moves to the next older tag the copies it needs; `tags()` lists them. A
   copy carries its chain block and is checked like the file; a copy that
   cannot be written leaves the record held (`UNPERSISTED`) and the tag
-  reading the file; a purge reaches every tag. Tags do not replicate. New
-  codes `TAG_EXISTS` and `TAG_NOT_FOUND`; `tags.json` and `tags/` on disk.
-  Browser budget 56.5 → 58 KB.
+  reading the file; a purge reaches every tag. A tag is the whole storage:
+  `at(name).list()`, `at(name).collection('Post').select()`/`count()`/`get()`
+  over the tag's own catalog (no `watch()`, no `$text`), and
+  `at(name).snapshot()` pages the storage as it was for another storage's
+  `mergeSnapshot()`. Tags do not replicate. New codes `TAG_EXISTS` and
+  `TAG_NOT_FOUND`; `tags.json` and `tags/` on disk. Browser budget
+  56.5 → 58 KB.
 - **The log knows what it dropped.** `storage.log.droppedTs` is the newest
   stamp among the ops compaction dropped, or an open could not read — `0`
   while nothing ever was — persisted in `index.json`; a record's retained

@@ -899,12 +899,28 @@ export interface Tag {
   createdAt: number;
 }
 
+/** A collection as it was at a tag: queries over the tag's catalog, reading the records as they were. */
+export interface TagCollection {
+  readonly name: string;
+  /** The record as it was, or `null` when it was not there or is of another collection. */
+  get(id: string): Promise<unknown | null>;
+  /** A cursor at the tag; `watch()` on it throws — a tag does not change; `$text` is not available. */
+  select(query?: MangoQuery): Cursor;
+  count(query?: MangoQuery): Promise<number>;
+}
+
 /** The storage as it was at a tag. */
 export interface TagView extends Tag {
   /** The record as it was at the tag, through the lens and the read hooks (`at: { tag }`); `null` when it was not there. */
   get(id: string): Promise<unknown>;
   /** Whether `id` was a live record at the tag. */
   has(id: string): boolean;
+  /** Every live id at the tag, sorted. */
+  list(): string[];
+  /** A collection at the tag; throws for an entity the schema has not. */
+  collection(name: string): TagCollection;
+  /** One page of the storage as it was at the tag — what another storage's `mergeSnapshot` joins to stand at the tag. */
+  snapshot(options?: { cursor?: string | null; limit?: number; scopes?: readonly string[] | null }): Promise<SnapshotPage>;
 }
 
 /** What a remote op faces before it is applied here. */
