@@ -77,24 +77,24 @@ pouchdb@9.0.0</title>
 <text class="value" x="597.5803209329681" y="194">8,805</text>
 </g>
 <g><title>syncom · chain: false, node:fs · v0.0.1
-3,076 ops/s
-325 µs per operation
-samples 2,747 – 3,081
+2,836 ops/s
+353 µs per operation
+samples 2,718 – 3,027
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="225">syncom</text>
 <text class="sublabel" x="20" y="240">chain: false, node:fs · v0.0.1</text>
-<path class="bar secondary" d="M276,221H551.0429149155887A4,4 0 0 1 555.0429149155887,225V231A4,4 0 0 1 551.0429149155887,235H276Z"/>
-<text class="value" x="561.0429149155887" y="234">3,076</text>
+<path class="bar secondary" d="M276,221H548.21323046548A4,4 0 0 1 552.21323046548,225V231A4,4 0 0 1 548.21323046548,235H276Z"/>
+<text class="value" x="558.21323046548" y="234">2,836</text>
 </g>
 <g><title>syncom · default, node:fs · v0.0.1
-1,342 ops/s
-745 µs per operation
-samples 994 – 1,786
+1,529 ops/s
+654 µs per operation
+samples 1,223 – 1,649
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="265">syncom</text>
 <text class="sublabel" x="20" y="280">default, node:fs · v0.0.1</text>
-<path class="bar primary" d="M276,261H522.2328914008173A4,4 0 0 1 526.2328914008173,265V271A4,4 0 0 1 522.2328914008173,275H276Z"/>
-<text class="value" x="532.2328914008173" y="274">1,342</text>
+<path class="bar primary" d="M276,261H526.7452839245973A4,4 0 0 1 530.7452839245973,265V271A4,4 0 0 1 526.7452839245973,275H276Z"/>
+<text class="value" x="536.7452839245973" y="274">1,529</text>
 </g>
 <g><title>Automerge · automerge-repo, NodeFS storage · v3.5.0
 1,247 ops/s

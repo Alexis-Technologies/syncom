@@ -86,25 +86,25 @@ tinybase@10.0.1</title>
 <path class="bar" d="M276,255H476.4209656727902A4,4 0 0 1 480.4209656727902,259V265A4,4 0 0 1 476.4209656727902,269H276Z"/>
 <text class="value" x="486.4209656727902" y="268">11.1k</text>
 </g>
-<g><title>syncom · default, node:fs · v0.0.1
-5,833 records/s
-171 µs per record
-samples 3,342 – 6,033
-@alexify/syncom@0.0.1</title>
-<text class="label primary" x="20" y="299">syncom</text>
-<text class="sublabel" x="20" y="314">default, node:fs · v0.0.1</text>
-<path class="bar primary" d="M276,295H448.59159210356006A4,4 0 0 1 452.59159210356006,299V305A4,4 0 0 1 448.59159210356006,309H276Z"/>
-<text class="value" x="458.59159210356006" y="308">5,833</text>
-</g>
 <g><title>syncom · chain: false, node:fs · v0.0.1
-5,820 records/s
-172 µs per record
-samples 4,256 – 6,096
+5,907 records/s
+169 µs per record
+samples 5,294 – 5,967
 @alexify/syncom@0.0.1</title>
-<text class="label secondary" x="20" y="339">syncom</text>
-<text class="sublabel" x="20" y="354">chain: false, node:fs · v0.0.1</text>
-<path class="bar secondary" d="M276,335H448.49340805292354A4,4 0 0 1 452.49340805292354,339V345A4,4 0 0 1 448.49340805292354,349H276Z"/>
-<text class="value" x="458.49340805292354" y="348">5,820</text>
+<text class="label secondary" x="20" y="299">syncom</text>
+<text class="sublabel" x="20" y="314">chain: false, node:fs · v0.0.1</text>
+<path class="bar secondary" d="M276,295H449.13491343696785A4,4 0 0 1 453.13491343696785,299V305A4,4 0 0 1 449.13491343696785,309H276Z"/>
+<text class="value" x="459.13491343696785" y="308">5,907</text>
+</g>
+<g><title>syncom · default, node:fs · v0.0.1
+5,310 records/s
+188 µs per record
+samples 4,852 – 6,013
+@alexify/syncom@0.0.1</title>
+<text class="label primary" x="20" y="339">syncom</text>
+<text class="sublabel" x="20" y="354">default, node:fs · v0.0.1</text>
+<path class="bar primary" d="M276,335H444.50728053628984A4,4 0 0 1 448.50728053628984,339V345A4,4 0 0 1 444.50728053628984,349H276Z"/>
+<text class="value" x="454.50728053628984" y="348">5,310</text>
 </g>
 <g><title>Automerge · automerge-repo, NodeFS storage · v3.5.0
 3,098 records/s

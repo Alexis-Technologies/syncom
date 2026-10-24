@@ -76,25 +76,25 @@ samples 21.3k – 22.3k
 <path class="bar" d="M276,215H505.3704352724743A4,4 0 0 1 509.3704352724743,219V225A4,4 0 0 1 505.3704352724743,229H276Z"/>
 <text class="value" x="515.3704352724743" y="228">21.6k</text>
 </g>
-<g><title>syncom · default, createMemoryFsi() · v0.0.1
-399 ops/s
-2.5 ms per operation
-samples 300 – 650
-@alexify/syncom@0.0.1</title>
-<text class="label primary" x="20" y="259">syncom</text>
-<text class="sublabel" x="20" y="274">default, createMemoryFsi() · v0.0.1</text>
-<path class="bar primary" d="M276,255H332.1509600546542A4,4 0 0 1 336.1509600546542,259V265A4,4 0 0 1 332.1509600546542,269H276Z"/>
-<text class="value" x="342.1509600546542" y="268">399</text>
-</g>
 <g><title>syncom · chain: false, createMemoryFsi() · v0.0.1
-387 ops/s
-2.58 ms per operation
-samples 305 – 640
+391 ops/s
+2.56 ms per operation
+samples 296 – 621
 @alexify/syncom@0.0.1</title>
-<text class="label secondary" x="20" y="299">syncom</text>
-<text class="sublabel" x="20" y="314">chain: false, createMemoryFsi() · v0.0.1</text>
-<path class="bar secondary" d="M276,295H330.7945253404756A4,4 0 0 1 334.7945253404756,299V305A4,4 0 0 1 330.7945253404756,309H276Z"/>
-<text class="value" x="340.7945253404756" y="308">387</text>
+<text class="label secondary" x="20" y="259">syncom</text>
+<text class="sublabel" x="20" y="274">chain: false, createMemoryFsi() · v0.0.1</text>
+<path class="bar secondary" d="M276,255H331.2298783600603A4,4 0 0 1 335.2298783600603,259V265A4,4 0 0 1 331.2298783600603,269H276Z"/>
+<text class="value" x="341.2298783600603" y="268">391</text>
+</g>
+<g><title>syncom · default, createMemoryFsi() · v0.0.1
+388 ops/s
+2.57 ms per operation
+samples 303 – 632
+@alexify/syncom@0.0.1</title>
+<text class="label primary" x="20" y="299">syncom</text>
+<text class="sublabel" x="20" y="314">default, createMemoryFsi() · v0.0.1</text>
+<path class="bar primary" d="M276,295H330.93094760576946A4,4 0 0 1 334.93094760576946,299V305A4,4 0 0 1 330.93094760576946,309H276Z"/>
+<text class="value" x="340.93094760576946" y="308">388</text>
 </g>
 <text class="caption" x="20" y="363">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
 <text class="caption" x="20" y="379">in a fresh process · 2026-10-24</text>

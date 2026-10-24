@@ -16,8 +16,8 @@ Fast, zero-dependency distributed data sync engine 🌐
 disk — or in the browser's origin-private filesystem — commits every write to
 a hash-linked log so tampering is detectable, and replicates every write to
 peers as an operation that converges without coordination: last-writer-wins
-registers, per-origin counters, observed-remove sets, lists, text and trees that merge by
-position, tombstones. The transport is injected —
+registers, per-origin counters, observed-remove sets, lists and text that merge by
+position, trees whose moves never form a cycle, tombstones. The transport is injected —
 [wrpc](https://wrpc.vercel.app) out of the box — and the package has no
 runtime dependencies.
 
@@ -34,7 +34,7 @@ const main = async () => {
 
   record.on('update', (data, delta) => console.log('changed', delta));
 
-  record.title = 'Ada Lovelace';
+  record.name = 'Ada Lovelace'; // changed { name: 'Ada Lovelace' }
   await record.save();
   await storage.inc(id, 'hits', 1); // a counter: increments add up across nodes
 
@@ -74,17 +74,21 @@ npm install @alexify/syncom
 
 ### Bundle size
 
-Measured by `pnpm size` on every CI run. The browser entry carries a budget
-that fails the build when exceeded.
+Measured by `pnpm size` on every CI run. Every browser entry carries a budget
+that fails the build when exceeded; a subpath is off the main entry, so an app
+pays for what it imports.
 
 | Entry | raw | min | min+gzip | budget |
 | ----- | ---:| ---:| --------:| ------:|
-| main entry — browser (@alexify/syncom) | 296.0 KB | 122.3 KB | 41.9 KB | 42.0 KB |
-| main entry — node (@alexify/syncom) | 279.9 KB | 121.3 KB | 41.6 KB | — |
+| main entry — browser (@alexify/syncom) | 448.9 KB | 190.3 KB | 65.0 KB | 65.0 KB |
+| main entry — node (@alexify/syncom) | 426.0 KB | 189.2 KB | 64.6 KB | — |
 | wrpc adapter — browser (@alexify/syncom/wrpc) | 3.4 KB | 1.4 KB | 0.7 KB | 2.0 KB |
 | contracts — browser (@alexify/syncom/contracts) | 3.7 KB | 1.6 KB | 0.8 KB | 1.0 KB |
 | idb backend — browser (@alexify/syncom/idb) | 3.7 KB | 1.7 KB | 0.8 KB | 2.0 KB |
 | search — browser (@alexify/syncom/search) | 4.2 KB | 1.7 KB | 0.9 KB | 2.0 KB |
+| order — browser (@alexify/syncom/order) | 4.9 KB | 2.3 KB | 1.0 KB | 1.5 KB |
+| undo — browser (@alexify/syncom/undo) | 35.0 KB | 15.8 KB | 6.0 KB | 6.0 KB |
+| branch — browser (@alexify/syncom/branch) | 14.8 KB | 7.4 KB | 3.2 KB | 3.5 KB |
 
 ## Quick Start
 
@@ -142,22 +146,23 @@ nodes converges.
 
 | Area | What you get |
 | --- | --- |
-| **Storage** | Records with live properties and per-record deltas, schema-driven collections, compare-and-swap writes, counters and sets, encryption at rest (AES-256-GCM under an RSA-wrapped key), `purge()` for the right to be forgotten |
+| **Storage** | Records with live properties and per-record deltas, schema-driven collections, compare-and-swap writes, encryption at rest (AES-256-GCM under an RSA-wrapped key), `purge()` for the right to be forgotten, `repair(id)` from the log |
+| **Field kinds** | A field is a register, a counter (`inc()`), a set (`add()`/`remove()`), a list or a text (`splice()`, `push()`, `updateText()`; `setAt()`/`move()` on a list), or a tree (`treeMove()`/`treeRemove()`). A text carries marks (`mark()`, `unmark()`, `unmarkById()`, `spans()`), and `cursor()`/`index()` name a place that survives edits; `@alexify/syncom/order` mints fractional indexes for ordering records. See [Lists, text and trees](https://syncomjs.vercel.app/guide/lists) |
 | **Schema** | A metaschema model, any Standard Schema (zod, valibot, arktype), ajv or a compiled JSON Schema validates every write before it is stamped — locally and again on the hub. Versions ride on ops; an older record reads through a lens (migrations, then the validator's aliases and defaults); `migrate()` rewrites it. See [Schema and validation](https://syncomjs.vercel.app/guide/schema) |
 | **Queries** | `select({ orgId, status: { $in } }).order('name').limit(20).fetch()` over an in-memory record catalog: indexed queries with no I/O, unique keys, `watch()` for live views. See [Queries](https://syncomjs.vercel.app/guide/query) |
 | **Full-text search** | `select({ $text: 'quick fox' })`: fuzzy, typo-tolerant, TF-IDF ranked trigram search over an entity's `search` fields, best first, narrowed by any equality — the index is `@alexify/syncom/search` (under 1 KB), injected at `open({ search })`. See [Full-text search](https://syncomjs.vercel.app/guide/query#full-text-search) |
 | **Backends** | node:fs, OPFS, IndexedDB (`@alexify/syncom/idb`) or memory — five functions injected at `open({ fsi })`; `durable: true` for fsync, one instance per directory. See [Backends](https://syncomjs.vercel.app/guide/backends) |
 | **Replication** | Every write is an op in a persisted log; peers exchange ops over an injected link, resume from where they stopped, and bootstrap from a streamed snapshot when they cannot; scopes for partial replication |
-| **Versions** | `history(id)` and `get(id, { at })` by event id, stamp or vector; tags of the whole storage (`tag()`, `at(name)`); `diff()`, `restore()`, `applyPatches()`; an undo stack (`@alexify/syncom/undo`) and branches that merge back (`@alexify/syncom/branch`). See [Versions and history](https://syncomjs.vercel.app/guide/versions) |
-| **Convergence** | Last-writer-wins registers, per-origin counters, observed-remove sets, lists and text that merge by position (Fugue — each writer's run whole), trees whose concurrent moves never form a cycle, tombstones with revival — any order, any number of times, same result. See [Lists, text and trees](https://syncomjs.vercel.app/guide/lists) |
+| **Versions** | `history(id)` and `get(id, { at })` by event id, stamp or vector, folded from the log; tags of the whole storage (`tag()`, `at(name)`); `diff()`, `restore()`, `applyPatches()` and `compact(id)`, every way back new ops that merge; an undo stack (`@alexify/syncom/undo`) and branches that merge back (`@alexify/syncom/branch`). See [Versions and history](https://syncomjs.vercel.app/guide/versions) |
+| **Convergence** | Last-writer-wins registers, per-origin counters, observed-remove sets, lists and text that merge by position (Fugue — each writer's run whole), trees whose concurrent moves never form a cycle, tombstones with revival — any order, any number of times, same result. A field two nodes make as different kinds at once ends as the same kind everywhere, by a fixed precedence; what a peer can make a node hold is bounded. See [Sync](https://syncomjs.vercel.app/guide/sync#registers-counters-sets-lists-and-text) |
 | **Transport** | `@alexify/syncom/wrpc` adapts a `WrpcClient` — over a WebSocket, or a WebRTC `PeerLink`'s `remote` from `@alexify/wrpc/webrtc`; `storage.sync.unit()` is the router unit a wrpc server, or a browser's `PeerHost`, mounts. Reconnects, resumable subscriptions, binary streams and rooms come from wrpc. See [WebRTC](https://syncomjs.vercel.app/guide/webrtc) |
 | **Integrity** | Every write appends a hash-linked block (`chain: false` turns it off for a hub); reads re-verify the record against the block that committed it and throw on a mismatch; `repair(id)` rebuilds a record from the log |
 | **Signed ops** | Every op is signed with the node's Ed25519 key, and the node id *is* that key: a peer verifies an op against its origin through any relay, a purge leaves a header that still verifies, `sync.signatures: 'require'` refuses unsigned ops. See [Signatures](https://syncomjs.vercel.app/guide/sync#signatures) |
 | **CRDT** | `diff` / `merge` / `apply` over plain objects — nested maps merge recursively, arrays are grow-only sets, numbers add so counters converge |
 | **Contracts** | `@alexify/syncom/contracts`: store a procedure in the chain by hash, load it anywhere, run it against a read-only view of storage; failures are recorded as blocks. A subpath, so the package root never runs a block's code |
 | **Portability** | One API over `node:fs` + `node:crypto` on the server and OPFS + Web Crypto in the browser, chosen by the `browser` export condition |
-| **Hooks and events** | `open({ hooks })` runs your code inside a write, a read or a peer's batch — validate, stamp, redact, skip — and rejects with a typed `HookError` when it throws; `on()` events (`change`, `apply`, `peer`, `sync`, …) observe everything and can never break it. See [Hooks and events](https://syncomjs.vercel.app/guide/hooks) |
-| **Observability** | Injected OpenTelemetry (`open({ telemetry })`): spans for local writes, applied batches, pushes, bootstraps and log rolls, plus outcome and lag metrics — nested under wrpc's spans, which carry the trace across the wire. See [OpenTelemetry](https://syncomjs.vercel.app/guide/telemetry) |
+| **Hooks and events** | `open({ hooks })` runs your code inside a write, a read or a peer's batch — validate, stamp, redact, skip — and rejects with a typed `HookError` when it throws; `on()` events (`change`, `commit`, `apply`, `peer`, `sync`, …) observe everything and can never break it. See [Hooks and events](https://syncomjs.vercel.app/guide/hooks) |
+| **Observability** | Injected OpenTelemetry (`open({ telemetry })`): spans for local writes, applied batches, pushes, bootstraps, log rolls, tags, history reads and patches, plus outcome and lag metrics — nested under wrpc's spans, which carry the trace across the wire. `stats()` reports the queue, the cache, the log, the tags and the files that lag the log. See [OpenTelemetry](https://syncomjs.vercel.app/guide/telemetry) |
 | **Scaling** | Hubs that dial each other, scopes as buckets, per-peer push limits, a reserved shared-log contract for the broker-backed hub. See [Scaling](https://syncomjs.vercel.app/guide/scaling) |
 | **Dependencies** | None. wrpc, metaschema and fake-indexeddb are devDependencies for the integration tests; everything is injected at runtime |
 
@@ -180,9 +185,10 @@ in 300 rows, from its code and every page of its docs.
 
 Measured against Yjs, Automerge, Loro, TinyBase, PouchDB, RxDB, Fireproof, GUN and OrbitDB on
 the same scenarios: insert, update, read, a converging counter, a batch, replicating a store,
-in memory and on disk. Each library runs in a fresh process, is used the way its documentation
-shows, and is checked to give the right answer before it is timed. The method and the
-interactive charts are on the [Benchmarks](https://syncomjs.vercel.app/guide/benchmarks) page.
+in memory and on disk, and typing into a text, in memory. Each library runs in a fresh process,
+is used the way its documentation shows, and is checked to give the right answer before it is
+timed. The method and the interactive charts are on the
+[Benchmarks](https://syncomjs.vercel.app/guide/benchmarks) page.
 
 <!-- bench:compare:start -->
 <!-- generated by `pnpm bench:report` from bench/results — edit the results, not this block -->
@@ -226,8 +232,8 @@ interactive charts are on the [Benchmarks](https://syncomjs.vercel.app/guide/ben
 
 | Library | Insert a record<br><sub>ops/s</sub> | Update a field<br><sub>ops/s</sub> | Read a record<br><sub>ops/s</sub> | Increment a counter<br><sub>ops/s</sub> | Insert 1,000 at once<br><sub>records/s</sub> | Replicate a store<br><sub>records/s</sub> | Type at the end of a text<br><sub>ops/s</sub> | Type at the start of a text<br><sub>ops/s</sub> | Type anywhere in a text<br><sub>ops/s</sub> |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| **syncom**<br><sub>default, createMemoryFsi() · v0.0.1</sub> | 16,200 | 17,100 | 972,000 | 16,700 | 16,000 | 25,200 | 1,780 | 399 | 541 |
-| **syncom**<br><sub>chain: false, createMemoryFsi() · v0.0.1</sub> | 17,500 | 18,800 | 929,000 | 18,600 | 17,200 | 26,200 | 1,810 | 387 | 549 |
+| **syncom**<br><sub>default, createMemoryFsi() · v0.0.1</sub> | 15,200 | 17,200 | 845,000 | 17,100 | 15,800 | 25,100 | 1,800 | 388 | 537 |
+| **syncom**<br><sub>chain: false, createMemoryFsi() · v0.0.1</sub> | 16,700 | 19,400 | 885,000 | 18,800 | 16,900 | 25,800 | 1,820 | 391 | 550 |
 | Yjs<br><sub>Y.Doc, a Y.Map per record · v13.6.33</sub> | 235,000 | 382,000 | 3,680,000 | — | 275,000 | 99,700 | 346,000 | 525,000 | 30,400 |
 | Automerge<br><sub>Automerge.change, Counter · v3.5.0</sub> | 512 | 1,990 | 10,600,000 | 1,950 | 8,960 | 20,900 | 23,700 | 21,600 | 20,600 |
 | Loro<br><sub>LoroDoc, a LoroMap per record · v1.16.4</sub> | 31,300 | 412,000 | 313,000 | 349,000 | 83,100 | 105,000 | 619,000 | 444,000 | 311,000 |
@@ -241,8 +247,8 @@ interactive charts are on the [Benchmarks](https://syncomjs.vercel.app/guide/ben
 
 | Library | Insert a record<br><sub>ops/s</sub> | Update a field<br><sub>ops/s</sub> | Read a record<br><sub>ops/s</sub> | Increment a counter<br><sub>ops/s</sub> | Insert 1,000 at once<br><sub>records/s</sub> | Replicate a store<br><sub>records/s</sub> |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| **syncom**<br><sub>default, node:fs · v0.0.1</sub> | 1,520 | 1,340 | 958,000 | 1,480 | 1,690 | 5,830 |
-| **syncom**<br><sub>chain: false, node:fs · v0.0.1</sub> | 2,060 | 3,080 | 951,000 | 3,060 | 2,740 | 5,820 |
+| **syncom**<br><sub>default, node:fs · v0.0.1</sub> | 1,320 | 1,530 | 891,000 | 1,210 | 1,620 | 5,310 |
+| **syncom**<br><sub>chain: false, node:fs · v0.0.1</sub> | 2,420 | 2,840 | 875,000 | 2,960 | 2,640 | 5,910 |
 | Yjs<br><sub>y-leveldb · v13.6.33</sub> | 19,200 | 22,400 | 3,690,000 | — | 155,000 | 53,700 |
 | Automerge<br><sub>automerge-repo, NodeFS storage · v3.5.0</sub> | 490 | 1,250 | 10,500,000 | 1,200 | 7,820 | 3,100 |
 | Loro<br><sub>updates appended to a file · v1.16.4</sub> | 19,500 | 43,300 | 285,000 | 42,600 | 66,900 | 108,000 |
@@ -278,7 +284,7 @@ _Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 roun
 | TinyBase<br><sub>tinybase@10.0.1</sub> | MergeableStore + IndexedDB persister + custom synchronizer | 56.4 KB | 23.8 KB |  |
 | Yjs<br><sub>yjs@13.6.33, y-indexeddb@9.0.12, y-protocols@1.0.7</sub> | yjs + y-indexeddb + y-protocols/sync | 80.2 KB | 24.5 KB |  |
 | PouchDB<br><sub>pouchdb-browser@9.0.0</sub> | pouchdb-browser | 117.8 KB | 40.4 KB | pouchdb-browser carries its HTTP adapter (the CouchDB client) with it |
-| **syncom**<br><sub>@alexify/syncom@0.0.1</sub> | open() over OPFS + the wrpc link adapter | 179.6 KB | 60.8 KB | storage, schema, queries, the op log and the sync protocol are one entry |
+| **syncom**<br><sub>@alexify/syncom@0.0.1</sub> | open() over OPFS + the wrpc link adapter | 192.0 KB | 65.6 KB | storage, schema, queries, the op log and the sync protocol are one entry |
 | RxDB<br><sub>rxdb@17.6.0, dexie@4.4.6, rxjs@7.8.2</sub> | rxdb + Dexie storage + replication | 282.3 KB | 90.1 KB |  |
 | Fireproof<br><sub>@fireproof/core@0.24.19</sub> | @fireproof/core | 784.2 KB | 204.0 KB |  |
 | OrbitDB<br><sub>@orbitdb/core@4.0.0, helia@6.1.4, libp2p@3.5.1, @libp2p/gossipsub@15.0.23, blockstore-idb@4.0.1</sub> | @orbitdb/core + helia + libp2p, IndexedDB blockstore | 1185.6 KB | 353.7 KB | createHelia brings Helia's default libp2p configuration with it |
@@ -305,8 +311,8 @@ configuration needed.
 import { open, diff, merge } from '@alexify/syncom';
 ```
 
-Crypto is asynchronous there (`calculateHash`, `encrypt` and `decrypt` return
-promises), and storage lives in the origin-private filesystem — or in
+Crypto is asynchronous there (`calculateHash`, `encrypt`, `decrypt`, `sign` and
+`verify` return promises), and storage lives in the origin-private filesystem — or in
 IndexedDB through `open({ fsi: createIdbFsi() })` from `@alexify/syncom/idb`. `browser.d.ts`
 declares those signatures separately. A browser node dials the mesh through
 `@alexify/syncom/wrpc` like any other, and hosts for its peers over WebRTC.
@@ -316,29 +322,34 @@ See [Browser](https://syncomjs.vercel.app/guide/browser).
 
 0.0.1 — a pre-release, not published to npm, and there is no release until the package does what it is meant
 to; the API may still change. Everything on this page works today and is covered by the test suite, including
-replication over real wrpc WebSockets. Known limits — a counter straddling a concurrent reset, a field written
-as two kinds at once, encrypted records staying local, no proof of key possession at `hello` — are listed under
-[Guarantees and limits](https://syncomjs.vercel.app/guide/sync#guarantees-and-limits).
+replication over real wrpc WebSockets. Known limits — a counter straddling a concurrent reset, encrypted records
+staying local, no proof of key possession at `hello` — are on the
+[Sync](https://syncomjs.vercel.app/guide/sync#guarantees-and-limits) page.
 
 ## Documentation
 
 - [Why syncom?](https://syncomjs.vercel.app/guide/why) ·
   [Compared with alternatives](https://syncomjs.vercel.app/guide/comparison) ·
+  [Compared with RxDB](https://syncomjs.vercel.app/guide/vs-rxdb) ·
   [Benchmarks](https://syncomjs.vercel.app/guide/benchmarks) ·
   [Architecture](https://syncomjs.vercel.app/guide/architecture)
 - [Getting started](https://syncomjs.vercel.app/guide/getting-started)
 - [Storage](https://syncomjs.vercel.app/guide/storage) ·
+  [Schema and validation](https://syncomjs.vercel.app/guide/schema) ·
+  [Queries](https://syncomjs.vercel.app/guide/query) ·
+  [Lists, text and trees](https://syncomjs.vercel.app/guide/lists) ·
+  [Versions and history](https://syncomjs.vercel.app/guide/versions) ·
+  [Hooks and events](https://syncomjs.vercel.app/guide/hooks) ·
   [CRDT deltas](https://syncomjs.vercel.app/guide/crdt) ·
   [Blockchain log](https://syncomjs.vercel.app/guide/chain) ·
   [Smart contracts](https://syncomjs.vercel.app/guide/contracts)
 - [Sync](https://syncomjs.vercel.app/guide/sync) ·
   [wrpc transport](https://syncomjs.vercel.app/guide/wrpc) ·
   [WebRTC](https://syncomjs.vercel.app/guide/webrtc) ·
-  [Schema and validation](https://syncomjs.vercel.app/guide/schema) ·
-  [Queries](https://syncomjs.vercel.app/guide/query) ·
+  [Scaling](https://syncomjs.vercel.app/guide/scaling)
+- [Browser](https://syncomjs.vercel.app/guide/browser) ·
   [Backends](https://syncomjs.vercel.app/guide/backends) ·
-  [Scaling](https://syncomjs.vercel.app/guide/scaling) ·
-  [Browser](https://syncomjs.vercel.app/guide/browser)
+  [OpenTelemetry](https://syncomjs.vercel.app/guide/telemetry)
 - [API reference](https://syncomjs.vercel.app/reference/api)
 
 ## Contributing
@@ -352,10 +363,11 @@ pnpm test:coverage     # c8 over src/
 pnpm test:types        # tsd against the .d.ts files
 pnpm lint              # oxlint
 pnpm format            # oxfmt (format:check in CI)
-pnpm size              # bundle-size report; the browser budget fails the run
+pnpm size              # bundle-size report; a browser budget exceeded fails the run
 pnpm bench             # every script in bench/ (--save writes bench/results/engine.json)
 pnpm bench:compare:install && pnpm bench:compare   # against the alternatives
 pnpm bench:report      # the charts and the tables of the docs and this README
+pnpm docs:comparison   # the comparison matrix from docs/comparison.json
 pnpm docs:dev          # the VitePress site
 ```
 

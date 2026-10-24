@@ -47,13 +47,13 @@
 // registers do not, but the vector-based dedup does.
 //
 // A field is a REGISTER, a COUNTER, a SET, a LIST, a TEXT or a TREE, never
-// two of them: `set`/`write` on a counter, set, sequence or tree field, `inc`
-// on a register, set, sequence or tree field, `add`/`remove` on a register,
-// counter, sequence or tree field, `splice` on a register, counter, set or
-// tree field, `tree` on any other kind are refused (reported in `rejected`)
-// — the kinds cannot be made to commute, and refusing is honest where
-// guessing would silently diverge. On a snapshot merge the register wins,
-// then the counter, the set, the list, the text, the tree.
+// two of them. Locally an op on a field of another kind is refused before it
+// is stamped (`kindClash` in src/commit.js). From a peer the kinds' precedence
+// decides, on the op path (`yieldTo`) as on a snapshot merge: the register
+// wins, then the counter, the set, the list, the text, the tree. Where the
+// winner arrives the loser's state is dropped; where the winner is held the
+// loser's op is refused (reported in `rejected`). The rule reads kinds alone,
+// never stamps, which is what makes it commute.
 //
 // Why a set converges (what the tests check): one origin's adds of an element
 // are stamped in seq order, so a node that observed the add at `r` observed
@@ -896,7 +896,7 @@ const mergeEntry = (a, b) => {
   }
   applyBase(entry, {});
   // A register that also became a counter on the other side: the register
-  // wins (the rule is refuse-on-write, and the writes already happened).
+  // wins, by the kinds' precedence (the writes already happened).
   for (const field of Object.keys(meta.counters)) {
     if (own(meta.clock, field) !== undefined) {
       delete meta.counters[field];

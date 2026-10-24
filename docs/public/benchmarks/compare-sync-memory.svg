@@ -76,24 +76,24 @@ rxdb@17.6.0</title>
 <text class="value" x="562.7014620906837" y="211">64.1k</text>
 </g>
 <g><title>syncom · chain: false, createMemoryFsi() · v0.0.1
-26,249 records/s
-38.1 µs per record
-samples 22.5k – 26.5k
+25,836 records/s
+38.7 µs per record
+samples 23.8k – 26.2k
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="242">syncom</text>
 <text class="sublabel" x="20" y="257">chain: false, createMemoryFsi() · v0.0.1</text>
-<path class="bar secondary" d="M276,238H513.9111114441471A4,4 0 0 1 517.9111114441471,242V248A4,4 0 0 1 513.9111114441471,252H276Z"/>
-<text class="value" x="523.9111114441471" y="251">26.2k</text>
+<path class="bar secondary" d="M276,238H513.2231996896014A4,4 0 0 1 517.2231996896014,242V248A4,4 0 0 1 513.2231996896014,252H276Z"/>
+<text class="value" x="523.2231996896014" y="251">25.8k</text>
 </g>
 <g><title>syncom · default, createMemoryFsi() · v0.0.1
-25,224 records/s
-39.6 µs per record
-samples 25.1k – 25.8k
+25,091 records/s
+39.9 µs per record
+samples 24k – 25.9k
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="282">syncom</text>
 <text class="sublabel" x="20" y="297">default, createMemoryFsi() · v0.0.1</text>
-<path class="bar primary" d="M276,278H512.1808379085866A4,4 0 0 1 516.1808379085866,282V288A4,4 0 0 1 512.1808379085866,292H276Z"/>
-<text class="value" x="522.1808379085866" y="291">25.2k</text>
+<path class="bar primary" d="M276,278H511.9510376047956A4,4 0 0 1 515.9510376047956,282V288A4,4 0 0 1 511.9510376047956,292H276Z"/>
+<text class="value" x="521.9510376047956" y="291">25.1k</text>
 </g>
 <g><title>Automerge · Automerge.change, Counter · v3.5.0
 20,912 records/s

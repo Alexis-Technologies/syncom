@@ -1,28 +1,31 @@
 # Architecture
 
 This page shows how syncom is put together: what a storage is made of, the three paths a write
-can take into it, how two nodes replicate, and what lies on disk. Each part has a guide of its
-own; this page is the map between them.
+can take into it, how two nodes replicate, how the past is read back, and what lies on disk.
+Each part has a guide of its own; this page is the map between them.
 
 ## The big picture
 
 A `Storage` is the facade an application opens. It owns the **mutation queue**: every write runs
 inside it, one at a time. It lends its collaborators (the log, the clock, the chain, the
-records) to three write paths, and to nothing else. `storage.sync` is the replication: the
-dialing side (`SyncManager`) and the hosting side (`unit()`). Everything that touches the
-outside world is injected: the backend (`fsi`), the transport (a link), the validator, the
-telemetry.
+records, the tags) as one `core` to the three write paths and to the two API modules behind
+its methods — `src/fields.js` for the field kinds beyond registers, `src/versions.js` for
+versions, patches and tags — and to nothing else; the facade keeps one delegate per method.
+`storage.sync` is the replication: the dialing side (`SyncManager`) and the hosting side
+(`unit()`). Everything that touches the outside world is injected: the backend (`fsi`), the
+transport (a link), the validator, the text index, the telemetry.
 
 ```mermaid
 flowchart TB
   app["Application"]
+  api["fields.js · versions.js<br/>splice … treeMove<br/>history · tags · patches"]
   subgraph storage["Storage — the mutation queue"]
     direction LR
     commit["commit.js<br/>a local write"]
     apply["apply.js<br/>a peer's batch"]
     boot["bootstrap.js<br/>a snapshot page"]
   end
-  core["core<br/>OpLog · EntryStore<br/>Catalog · Chain · Clock"]
+  core["core<br/>OpLog · EntryStore<br/>Catalog · Chain · Clock · Tags"]
   fsi[("fsi<br/>node:fs · OPFS<br/>IndexedDB · memory")]
   subgraph sync["storage.sync"]
     direction LR
@@ -31,6 +34,9 @@ flowchart TB
   end
   link{{"link<br/>wrpc: WebSocket<br/>or WebRTC"}}
   app --> commit
+  app --> api
+  api --> commit
+  api -. reads .-> core
   commit --> core
   apply --> core
   boot --> core
@@ -45,18 +51,19 @@ flowchart TB
 
 - **Three write paths, one core.** A local write goes through `src/commit.js`, a peer's page
   through `src/apply.js`, a snapshot page through `src/bootstrap.js`. All three run inside the
-  queue, all three end in the same `EntryStore.write`, and there is no fourth.
+  queue, all three end in the same `EntryStore.write`, and there is no fourth: a `splice()`, a
+  `restore()` or an undo is a local write like `update()`.
 - **Log first, then data.** An op is appended to the log before its record is written, so a
   crash between the two is replayed on the next open. The chain and the catalog are derived
   from what was written.
 - **Events never run inside a write.** Hooks do: they can change or refuse the operation.
-  Events (`change`, `apply`, `sync`, …) leave after it, and a listener that throws cannot
-  break anything. See [Hooks and events](/guide/hooks).
+  Events (`change`, `commit`, `apply`, `sync`, …) leave after it, and a listener that throws
+  cannot break anything. See [Hooks and events](/guide/hooks).
 
 ## A local write
 
 `storage.update(id, { done: true })`, step by step. An insert, an increment, an add to a set, a
-delete or a purge take the same road with another op type.
+splice, a mark, a tree move, a delete or a purge take the same road with another op type.
 
 ```mermaid
 sequenceDiagram
@@ -70,22 +77,27 @@ sequenceDiagram
   participant S as SyncManager
   A->>Q: update(id, { done: true })
   Q->>C: run when the queue reaches it
-  C->>C: beforeWrite hook · stamp from the clock · applyOp
+  C->>C: beforeWrite hook · kind check · stamp from the clock · index resolved · applyOp
   C->>C: validator (folded into the op) · unique keys
   C->>C: sign the op (Ed25519) — unless signatures: false
   C->>L: append(op) — the seq is durable
   C->>B: addBlock(hash of the record) — unless chain: false
   C->>E: write the record file, put its catalog row
   C->>L: applied(seq)
-  C->>C: afterWrite hook · refresh live Records
+  C->>C: afterWrite hook · refresh live Records · commit event
   C-->>S: change(op)
   S->>S: push to every peer, in order
   C-->>A: resolves
 ```
 
-A write that changes nothing stops after `applyOp` and appends nothing. A record written with
-`encrypted: true` is sealed for this node's key and produces no op. The catalog file is saved
-off the queue, so a write never waits for it.
+The field's kind is checked before anything is stamped (`FIELD_KIND`), and an index, a sibling
+or a range is resolved inside the queue, against the record as it is (`OUT_OF_RANGE`, `CYCLE`,
+`NOT_FOUND`). A write that changes nothing stops after `applyOp` and appends nothing; a tree
+move to where the node is stops before it. A record written with `encrypted: true` is sealed for
+this node's key and produces no op. The catalog file is saved off the queue, so a write never
+waits for it. Under `open({ defer })` steps 7 to 9 wait for a timer instead: the log is durable
+at once, the cache and the catalog read the entry meanwhile, and the writes of one record within
+the window land as one file, every record due under one block.
 
 ## Two nodes
 
@@ -143,13 +155,56 @@ An op is applied by `applyOp` in `src/ops.js`, the same function on every node:
 - a **tree** is the fold of every node's moves in stamp order, a move that would put a node
   under itself skipped (Kleppmann et al., 2021), so two nodes agree on which concurrent move
   lost; siblings order by a fractional index, then by stamp;
+- a field two nodes make as **different kinds** at once ends as one kind everywhere, by the
+  kinds alone: a register outranks a counter, a counter a set, a set a list, a list a text, a
+  text a tree — on the op path as in a snapshot merge;
 - a **delete** is a tombstone that a newer write revives; a **purge** wins at any stamp and
-  scrubs the id from the log;
+  scrubs the id from the log and from every tag;
 - ops from one origin apply in sequence order; a duplicate or a gap is skipped, and resuming
   from the last event id fills the gap.
 
-Any order, any number of times, gives the same record. See
-[Registers, counters, sets, lists and text](/guide/sync#registers-counters-sets-lists-and-text).
+Any order, any number of times, gives the same record. What a peer can make a node hold is
+bounded the same way on the op path and in a snapshot: slots per run and per field, pending work
+per field (`sync.pendingMax`), the length of a tree place and the depth a tree reads; past a
+bound an op is refused, not half applied. See
+[Registers, counters, sets, lists and text](/guide/sync#registers-counters-sets-lists-and-text)
+and [Costs and limits](/guide/lists#costs-and-limits).
+
+## Versions
+
+The past is read out of the log, and every way back to it is new ops through the local write
+path — nothing rewrites the log or a record file.
+
+```mermaid
+flowchart TB
+  log[("OpLog")] --> hist["history.js<br/>the fold of a cut"]
+  entries[("EntryStore")] -- "first change after a tag" --> tags["tags.js<br/>the copies"]
+  hist --> versions["versions.js<br/>get at · history · diff<br/>applyPatches · restore · compact"]
+  tags --> versions
+  versions <--> patch["patch.js<br/>patches"]
+  versions -- "rehearsed, then one turn of the queue" --> commit["commit.js<br/>a local write"]
+  commit -. commit event .-> undo["undo subpath<br/>inverse patches, applied<br/>through applyPatches()"]
+```
+
+- **A version is a fold.** `get(id, { at })` and `history(id)` take the log's entries of the
+  record up to a cut — an event id, a stamp or a vector — and fold them with the same `applyOp`.
+  The fold is exact while the log holds everything the record depends on: nothing dropped
+  (`droppedTs` 0), or a reset stamped above what was dropped; otherwise `get()` rejects with
+  `HISTORY_GONE` and `history()` says `exact: false`.
+- **A tag is copy-on-write at the `EntryStore` seam.** Before a record's first change after the
+  newest tag, its file is copied into that tag; a tag's own catalog says what existed then.
+  Tags stay on the node.
+- **Patches are the write API's terms.** `diff()` hands out `put`, `write`, `inc`, `add`,
+  `remove`, `splice`, `treeMove`… per field by kind; `applyPatches()` rehearses them over a
+  scratch record, then commits them in one turn of the queue, so a `restore()` lands whole or
+  not at all. `compact(id)` is the reading rewritten as a reset plus one op per field.
+- **Undo and branches are subpaths over the public API.** `@alexify/syncom/undo` keeps the
+  inverse patches of every `commit` event and applies them with `applyPatches()`;
+  `@alexify/syncom/branch` opens a fork through the parent's constructor — another storage
+  with its own identity — and merges either way as the ops one side lacks, picked by
+  `src/outbound.js` as a push picks them, through `applyRemote()`.
+
+See [Versions and history](/guide/versions).
 
 ## On disk
 
@@ -165,6 +220,9 @@ data/
 ├── index/         catalog.json — derived (ids, indexes, search text), rebuilt when missing
 ├── data/          <id>.json per record: data, meta, the block that committed it
 ├── log/           the operation log: open files and sealed segments
+├── tags.json      the tags taken here, once there is one
+├── tags/          per tag: its catalog, and the record files copied before their first change
+├── branch.json    the parent and the fork point, in a branch's directory
 └── remote/        one file per registered sync node
 ```
 
@@ -175,18 +233,24 @@ the five functions an `fsi` implements.
 
 | Module | Role |
 | --- | --- |
-| `storage.js` | The facade: the open sequence, the mutation queue, the public API, the `core` it lends |
+| `storage.js` | The facade: the open sequence, the mutation queue, the public API (a delegate per method of the two API modules), the `core` it lends |
+| `fields.js`, `versions.js` | The API of the field kinds beyond registers (`inc` … `treeRemove`, `spans`, `cursor`, `index`) and the versions API (`get(id, { at })`, `history`, `diff`, `applyPatches`, `restore`, `compact`, `tag`, `untag`, `at`), over the lent core |
 | `commit.js`, `apply.js`, `bootstrap.js` | The three write paths |
-| `entries.js`, `catalog.js` | Record files, the bounded cache, the catalog (ids, indexes, tombstones) |
-| `log.js` | `OpLog`, the persisted operation log: append, seal, retention, scrub |
-| `ops.js`, `vector.js` | The op model (`applyOp`), clocks and version vectors |
-| `chain.js` | The hash-linked chain |
+| `args.js`, `shape.js`, `options.js` | The checks at the edges: the write API's arguments (shared with the patches), record ids and a peer's op shape, `open()`'s options |
+| `entries.js`, `catalog.js`, `record.js` | Record files, the bounded cache, the catalog (ids, indexes, tombstones); `Record`, `Reference` and `Collection` |
+| `log.js`, `outbound.js` | `OpLog`, the persisted operation log: append, seal, retention, scrub, pins; the ops a receiver lacks, for a push and a branch merge |
+| `ops.js`, `vector.js` | The op model (`applyOp`, the kinds' precedence), clocks and version vectors |
+| `sequence.js`, `rle.js` | Lists and texts: Fugue runs, the walk and its cached index, a movable list's registers, marks, cursors; the run-length content of a run |
+| `tree.js`, `order.js` | Trees: every node's moves and their fold; fractional indexes, in the core for a node's place and the `@alexify/syncom/order` subpath |
+| `history.js`, `tags.js`, `patch.js`, `myers.js` | A version as a fold of the log; tags as copy-on-write record files; the patch vocabulary of `diff()` and `applyPatches()`; the Myers diff behind `updateText()` and the splices of a patch |
+| `undo.js`, `branch.js` | The `@alexify/syncom/undo` and `@alexify/syncom/branch` subpaths — over the public API, no engine bundled |
+| `chain.js`, `contract.js`, `crdt.js` | The hash-linked chain; the `@alexify/syncom/contracts` subpath; `diff`/`merge`/`apply` over plain objects |
 | `schema.js`, `query.js` | Validators, versions and lenses; Mango cursors, `$text` among them |
 | `search.js` | The `@alexify/syncom/search` subpath: the trigram index behind `$text` — the core knows only its contract |
-| `signing.js` | What an op's signature covers, signing and verifying it |
-| `sync.js`, `hosting.js`, `link.js`, `wrpc.js` | Dialing, hosting, the link contract, the wrpc adapter |
-| `hooks.js`, `telemetry.js`, `errors.js` | Hooks and events, injected OpenTelemetry, `SyncomError` |
-| `fsi.js`, `fsi.browser.js`, `idb.js`, `backend.js` | `node:fs`, OPFS, IndexedDB and memory backends |
+| `signing.js`, `keys.js`, `crypto.js` | What an op's signature covers, signing and verifying it; the key pairs on disk; hashing, sealing and signing |
+| `sync.js`, `hosting.js`, `link.js`, `wrpc.js`, `protocol.js`, `scope.js` | Dialing, hosting, the link contract, the wrpc adapter, what both halves agree on, what "in scope" means |
+| `hooks.js`, `emitter.js`, `logger.js`, `telemetry.js`, `errors.js` | Hooks and events, injected logging and OpenTelemetry, `SyncomError` |
+| `fsi.js`, `fsi.browser.js`, `idb.js`, `backend.js`, `lock.js` | `node:fs`, OPFS, IndexedDB and memory backends; one instance per directory |
 
 The browser halves (`*.browser.js`) replace `fsi`, `crypto` and `utils` through the `browser`
 field of `package.json`; everything else is shared.

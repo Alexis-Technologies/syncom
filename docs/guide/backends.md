@@ -1,19 +1,19 @@
 # Backends
 
 Everything a storage persists — records, the operation log, the chain, the
-keys, the peer registry, the catalog — goes through one small contract: an
+keys, the peer registry, the catalog, the tags — goes through one small contract: an
 **fsi**, five functions over "a directory and a file name". The platform's
 own is the default; any other goes in through `open({ fsi })`.
 
 | Function | Meaning |
 | --- | --- |
 | `read(dir, name)` | `Promise<string>`; a missing file rejects (`code: 'ENOENT'` or `name: 'NotFoundError'`) |
-| `write(dir, name, content)` | Creates the directory; whole-file, no rename |
+| `write(dir, name, content, options?)` | Creates the directory; whole-file, no rename. `options.mode` is a permissions hint (the private keys ask for `0o600`); an adapter without permissions ignores it |
 | `exists(dir, name)` | `Promise<boolean>` |
 | `remove(dir, name)` | A no-op when absent |
 | `list(dir)` | File names, sorted; an absent directory is `[]` |
 | `sync(dir, name)` *(optional)* | fsync — what `durable: true` calls after every write |
-| `create(dir, name, content)` *(optional)* | Exclusive create: rejects with `code: 'EEXIST'` when the file is there; what the directory lock uses when present |
+| `create(dir, name, content)` *(optional)* | Exclusive create: rejects with `code: 'EEXIST'` when the file is there; what the directory lock uses when present (`node:fs` and the memory backend have it) |
 
 `isFsi(value)` tells whether an object has the five. The check runs at
 `open()`, naming the method that is missing, and the storage never closes a
@@ -34,7 +34,7 @@ const { open, createMemoryFsi } = require('@alexify/syncom');
 const fsi = createMemoryFsi();
 const storage = await open({ path: 'app', fsi });     // nothing touches the disk
 await storage.insert({ a: 1 });
-fsi.size;                                              // 11 files: keys, chain, log, data, catalog, lock…
+fsi.size;                                              // 13 files: keys, chain, log, data, catalog, lock…
 Object.keys(fsi.dump());                               // ['app/lock.json', 'app/keys/public.pem', …]
 ```
 
@@ -72,6 +72,13 @@ and does nothing. What a crash can tear is the newest, unannounced batch:
 the log is written before the record, a reopen replays its unsealed tail,
 and a torn open file is dropped before anyone was told of it. A record file
 torn the same way reads as `INTEGRITY` until `repair(id)` rebuilds it.
+
+`open({ defer: ms })` trades the record files' timing for fewer writes: a local
+write's record file and chain block wait up to `ms` (one timer for all of
+them), so the writes of one record within the window land as one file, and
+everything due lands under one block. The log append is not deferred — a crash before the flush replays
+the batch at the next open, as after a failed file write — and `tag()` and
+`close()` flush first. It is `0`, off, by default.
 
 The log append is the commit point. A backend that fails after it — a full
 disk, a browser's `QuotaExceededError` on the record file or the chain block

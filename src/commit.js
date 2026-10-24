@@ -3,8 +3,9 @@
 // The one local write path: `storage[COMMIT]` lands here, inside the
 // mutation queue. The op is built, applied, validated, logged (a durable
 // seq), persisted, then announced — in that order, for every kind of local
-// write (`write`, `set`, `inc`, `add`, `remove`, `delete`, `purge`; a
-// bootstrap's merges go through src/bootstrap.js). `core` is what Storage lends its write paths:
+// write (`write`, `set`, `inc`, `add`, `remove`, `splice`, `assign`, `move`,
+// `mark`, `tree`, `delete`, `purge`; a bootstrap's merges go through
+// src/bootstrap.js). `core` is what Storage lends its write paths:
 // the log, the clock, the chain, the entries, the hook runner and the
 // lensed readers — see Storage#open.
 

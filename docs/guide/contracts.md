@@ -5,8 +5,16 @@ loaded back by that hash, and run against a read-only view of storage. It is a
 way to make the code that produced a record as auditable as the record itself.
 
 ```js
+const { Blockchain } = require('@alexify/syncom');
 const { SmartContract, DataReader } = require('@alexify/syncom/contracts');
+
+const chain = await new Blockchain('contracts'); // a chain of its own
 ```
+
+The chain a contract lives in is a [`Blockchain`](./chain#using-it-directly)
+you open; a storage's own chain is internal to it and is not handed out. Give
+it a directory of its own — two writers of one chain directory overwrite each
+other's tail.
 
 Contracts are a **subpath**, not part of the package root: `SmartContract.load`
 reconstructs a stored procedure with `new Function`, so a process that never
@@ -35,7 +43,8 @@ const result = await contract.execute({ id: postId, ...args });
 ```
 
 `execute` calls the procedure with a `DataReader` and your arguments, then
-saves the returned value back to storage under `args.id`. If the procedure
+saves the returned value back to storage under `args.id` — through
+`saveData`, a whole-record write that replicates like any other. If the procedure
 throws, the failure is appended to the chain as
 `{ contract, args, error, timestamp }` and the error is re-thrown — so a
 rejected execution leaves an audit trail rather than vanishing.
@@ -66,5 +75,6 @@ outside that shape will not survive the round trip, so keep the stored
 procedure to a plain arrow function and put anything complex behind data it
 reads.
 
-Loading a hash whose block is not a contract throws
-`Not a smart contract block`.
+Loading a hash whose block is not a contract rejects with
+`code: 'NOT_CONTRACT'` (`Not a smart contract block`), and one with no block
+at all with `code: 'BLOCK_NOT_FOUND'`.

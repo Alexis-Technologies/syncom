@@ -605,8 +605,8 @@ class SyncManager extends Emitter {
   // One span per push, whatever its page count: with wrpc underneath, the
   // `syncom/push` client span of every page nests under it, and the server
   // span on the far side under that — the link carries the context.
-  // `reason` says what caused it: a handshake, a manual sync(), or a relay
-  // of ops that just landed.
+  // `reason` says what caused it: a handshake, a manual sync(), a relay of
+  // ops that just landed, or a recovery push after a failed one.
   async #send(peer, ops, reason) {
     const otel = this.#otel;
     if (!otel.enabled || ops.length === 0) return this.#sendPages(peer, ops);

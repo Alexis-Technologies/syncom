@@ -1546,7 +1546,7 @@
         },
         "entryPoints": {
           "mark": "",
-          "text": "root plus 4 subpaths: `/wrpc`, `/idb`, `/search`, `/contracts`",
+          "text": "root plus 7 subpaths: `/wrpc`, `/idb`, `/search`, `/order`, `/undo`, `/branch`, `/contracts`",
           "source": "package.json:14-40"
         },
         "types": {
@@ -1556,18 +1556,18 @@
         },
         "size": {
           "mark": "",
-          "text": "41.9 KB min+gzip: the browser entry, the whole engine",
+          "text": "65.0 KB min+gzip: the browser entry, the whole engine",
           "source": "pnpm size (scripts/size.js, esbuild), browser.js",
-          "detail": "With the IndexedDB backend 41.5 KB. CommonJS is not tree-shaken, so storage, schema, queries, the op log, signing and the sync protocol all come with `open()`. No validator library is included in either column (injected / wrapped separately)."
+          "detail": "Measured by `pnpm size` on 2026-10-24 (features/enhance-crdt-engine). CommonJS is not tree-shaken, so storage, schema, queries, the op log, signing, the sync protocol and the list, text and tree engines all come with `open()`. No validator library is included in either column (injected / wrapped separately)."
         },
         "sizeSync": {
           "mark": "",
-          "text": "42.6 KB min+gzip with the wrpc link adapter",
+          "text": "65.6 KB min+gzip with the wrpc link adapter",
           "source": "bench/results/size.json (pnpm bench:size)"
         },
         "sizeGate": {
           "mark": "✅",
-          "text": "`pnpm size` fails CI when the browser entry passes 60.5 KB",
+          "text": "`pnpm size` fails CI when the browser entry passes 65 KB",
           "source": "scripts/size.js:86; .github/workflows/ci.yml:20-24"
         },
         "node": {
@@ -2901,10 +2901,10 @@
           "source": "src/apply.js:276-278,299; docs/guide/storage.md#purge"
         },
         "history": {
-          "mark": "⚠️",
-          "text": "op log within retention (`storage.log.entriesOf(id)`); no read-at-version",
-          "source": "src/log.js:33-34; docs/reference/api.md#oplog; docs/guide/sync.md#the-log",
-          "detail": "`retention.ops` defaults to 10 000; the chain keeps hashes only."
+          "mark": "✅",
+          "text": "`history(id)`, `get(id, { at })`, `diff`/`restore`, tags of the whole storage",
+          "source": "src/history.js; src/versions.js; src/tags.js; docs/guide/versions.md",
+          "detail": "A version is a fold of the retained log: exact from the last whole-record write above what retention dropped, otherwise `HISTORY_GONE`. `retention.ops` defaults to 10 000; a tag keeps the whole storage as it was, copy-on-write."
         },
         "audit": {
           "mark": "✅",

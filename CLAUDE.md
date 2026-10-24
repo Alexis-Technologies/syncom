@@ -25,7 +25,7 @@ order.js / order.d.ts     the @alexify/syncom/order subpath (src/order.js) — f
 undo.js / undo.d.ts       the @alexify/syncom/undo subpath (src/undo.js) — the undo stack over the commit event; requires patch.js, emitter.js only
 branch.js / branch.d.ts   the @alexify/syncom/branch subpath (src/branch.js) — fork a storage, merge either way; never requires storage.js
 index.d.ts                the Node type surface (hand-written)
-browser.d.ts              re-exports index.d.ts, overrides the 3 async crypto fns
+browser.d.ts              re-exports index.d.ts, overrides the 5 async crypto fns
 THIRD_PARTY_NOTICES.md    the MIT notices of the algorithms adapted (Fugue, Yjs, list-positions…) and the files that carry them
 src/backend.js            the fsi contract (isFsi/checkFsi), createMemoryFsi, withSync — no requires
 src/emitter.js            the Emitter both halves extend — no requires
@@ -94,7 +94,7 @@ docs/                     VitePress site
 - **An adapted algorithm brings its notice.** Code or a rule taken from an MIT project is named in
   `THIRD_PARTY_NOTICES.md` (project, commit, the syncom files that carry it) with the upstream notice.
   Nothing is copied from json-joy (AGPL-3.0), Collabs or `fugue/fugue` (Apache-2.0) — those are read
-  as specifications only; the clones live in `../open-source/local-first-alternatives/`.
+  as specifications only; the clones live in `../../open-source/local-first-alternatives/`.
 - **CommonJS everywhere in `src/`.** No `import`, no `type: module`, no build.
 - **No runtime dependencies.** Helpers go in `src/utils.js`. `scripts/size.js`
   fails at resolve time on any bare import reaching a browser bundle, so a
@@ -585,9 +585,10 @@ bootstrap stream never reaches the node it bootstrapped from.
 Coverage thresholds (95/95/90/95) are enforced in CI. They currently pass with
 headroom; do not lower them to land a change.
 
-`INVARIANTS.md` names, for every guarantee (`SYNC-n`, `OPS-n`, `LIST-n`, `LOG-n`,
-`VER-n`), the tests that hold it; `tests/package/invariants.test.js` fails when an id
-names no test or a named title is gone. Rename a test and its row together; a new
+`INVARIANTS.md` names, for every guarantee (`SYNC-n`, `OPS-n`, `LIST-n`, `SEQ-n`, `RLE-n`,
+`TREE-n`, `BOUND-n`, `LOG-n`, `VER-n`, `TAG-n`, `PATCH-n`, `UNDO-n`, `BRANCH-n`), the tests
+that hold it; `tests/package/invariants.test.js` fails when an id names no test or a named
+title is gone. Rename a test and its row together; a new
 guarantee gets an id, a test and a row. Only plain-string titles are citable. The
 hazard walk in `tests/suites/sync-engine.js` (drops, duplicate pages through
 `tests/utils/memory-link.js`'s `duplicate` hook, a reopen) is the one that must stay

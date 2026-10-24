@@ -54,18 +54,18 @@ features:
     link: /guide/storage
     linkText: Storage
   - icon: 🔗
-    title: Signed ops, a log you can verify and purge
-    details: "Every op is signed by its origin, whose node id is its Ed25519 key, so any peer verifies it through any relay. Writes can be committed to a hash-linked chain that reads re-check. purge() scrubs a payload out of the op log, and repair(id) rebuilds a record from it."
-    link: /guide/chain
-    linkText: Blockchain log
+    title: A signed log you can verify, read back and purge
+    details: "Every op is signed by its origin, whose node id is its Ed25519 key, so any peer verifies it through any relay, and writes can be committed to a hash-linked chain that reads re-check. The log reads back: a record at any version it retains, tags of the whole storage, diff and restore, an undo stack, branches that merge back. purge() scrubs a payload out of it, and repair(id) rebuilds a record from it."
+    link: /guide/versions
+    linkText: Versions and history
   - icon: 📈
     title: Observable and hookable
     details: "Hooks run your code inside a write, a read or a peer's batch, and events can never break one. OpenTelemetry spans and metrics come from what you inject, and every failure is a SyncomError with a code."
     link: /guide/telemetry
     linkText: OpenTelemetry
   - icon: 📦
-    title: Zero dependencies, about 60 KB
-    details: "Nothing is installed with it. The same API on Node.js and in the browser, picked by the browser export condition, and about 60 KB min+gzip for the browser — lists, text, trees, history, tags and diff included — held to a budget in CI."
+    title: Zero dependencies, about 65 KB
+    details: "Nothing is installed with it. The same API on Node.js and in the browser, picked by the browser export condition, and about 65 KB min+gzip for the browser — lists, text, trees, history, tags and diff included; undo and branches are subpaths — held to a budget in CI."
     link: /guide/browser
     linkText: Browser
 ---
@@ -80,9 +80,9 @@ syncom is measured against Yjs, Automerge, Loro, TinyBase, PouchDB, RxDB, Firepr
 OrbitDB on the same scenarios, in memory and on disk. Each library runs in a fresh process, is used
 the way its documentation shows, and is checked to give the right answer before it is timed. The
 chart shows an empty replica pulling a store of 1,000 records; pick another scenario or storage.
-syncom has the fastest cold start (about 37 ms) and serves about a million reads a second from
+syncom has the fastest cold start (about 40 ms) and serves about a million reads a second from
 its cache. Its writes cost more, because each one is signed, logged, filed, catalogued and
-chained — on disk about 1,500 a second, where the LevelDB-backed libraries do about 20,000 — and
+chained — on disk about 1,300 a second, where the LevelDB-backed libraries do about 20,000 — and
 a replica verifies every op it receives, which holds a pull in memory to about 25,000 records a
 second, where Yjs and Loro do 100,000.
 

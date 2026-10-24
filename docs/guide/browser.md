@@ -17,8 +17,10 @@ swapped for their browser twins:
 | `src/crypto.js` | `src/crypto.browser.js` | Web Crypto (`crypto.subtle`) |
 | `src/utils.js` | `src/utils.browser.js` | `crypto.randomUUID()` — the default `getId` |
 
-CRDT, contracts, the chain, storage, the operation log and sync are the same
-code in both halves; so is the `@alexify/syncom/wrpc` adapter.
+CRDT, contracts, the chain, storage — lists, text, trees, history and tags
+among it — the operation log and sync are the same code in both halves; so
+are the `/wrpc`, `/search`, `/order`, `/undo` and `/branch` subpaths.
+`@alexify/syncom/idb` is the one that is browser-only.
 
 ## What differs
 
@@ -33,8 +35,8 @@ await sign(message, privateKey); // the Ed25519 pair that signs ops
 await verify(message, signature, nodeId);
 ```
 
-`browser.d.ts` declares these signatures separately from `index.d.ts` for
-exactly this reason.
+`browser.d.ts` declares these five signatures separately from `index.d.ts`
+for exactly this reason.
 
 The cipher is the same on both: AES-256-GCM under a key wrapped with
 RSA-OAEP (SHA-256), and the signature is Ed25519 over the same bytes. Keys,
@@ -46,7 +48,7 @@ is one node id on both.
 `data/` directory inside the origin's OPFS rather than on disk. It is
 per-origin and the browser may evict it. Another backend goes in through
 `open({ fsi })` — `createMemoryFsi()` for a node that must not persist, or
-IndexedDB (see [Backends](../reference/api#backends)).
+IndexedDB (see [Backends](./backends)).
 
 ## OPFS or IndexedDB
 
@@ -81,20 +83,23 @@ resumes where it left off; `storage.sync.unit()` mounted on a wrpc
 
 ## Requirements
 
-OPFS and Web Crypto — available in current Chrome, Edge, Firefox and Safari.
-Both APIs require a **secure context** (HTTPS or `localhost`).
+OPFS and Web Crypto, with Ed25519 among its algorithms (it signs every op) —
+available in current Chrome, Edge, Firefox and Safari. Both APIs require a
+**secure context** (HTTPS or `localhost`).
 
 ## Bundle size
 
 The browser entry is measured on every CI run with a budget that fails the
-build when exceeded:
+build when exceeded — 65 KB min+gzip — and so is every subpath, on its own row
+with its own budget, so what an app imports is what it ships:
 
 ```bash
 pnpm size
 ```
 
 The self-contained check in `scripts/size.js` also rejects any bare import
-that sneaks into the browser bundle, so it cannot silently grow a dependency.
+that sneaks into a browser bundle, so it cannot silently grow a dependency.
+The table is in the [README](https://github.com/Alexis-Technologies/syncom#bundle-size).
 
 ## Testing without a browser
 

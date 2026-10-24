@@ -26,7 +26,7 @@ for await (const row of storage.Task.select({ boardId: 'b1' }).order('key').limi
 
 | Form | Matches when |
 | --- | --- |
-| `{ field: value }` | The field equals the value (deep); an **array** field holds the value as an element (indexed or not — a set, or any array); an array value matches an array field whole |
+| `{ field: value }` | The field equals the value (deep); an **array** field holds the value as an element (indexed or not — a set, a list, or any array); an array value matches an array field whole, in order |
 | `{ 'a.b': value }` | A dotted path reaches into the record |
 | `$eq`, `$ne` | Equality, as above, and its negation |
 | `$in`, `$nin` | Any of the values matches (the array rule applies), or none does |
@@ -60,7 +60,14 @@ regex, a `$text` that is not a string, is over 1000 characters or sits inside
 
 A cursor reads the records themselves — like `snapshot()` and `swap()`, not
 through `get()`, so `beforeRead`/`afterRead` do not run. Records outside the
-collection, deleted ones and encrypted ones are never rows.
+collection, deleted ones and encrypted ones are never rows. In a row, and to
+the query, a list field is its array, a text its string and a tree its array
+of `{ id, children }`.
+
+A cursor at a [tag](./versions#tags) — `storage.at(name).collection(entity).select(query)`
+— reads the records as they were then, over the tag's catalog. A tag does not
+change, so `watch()` on it throws, and it carries no text index, so a `$text`
+query there is a `TypeError`.
 
 ## The plan
 
@@ -74,8 +81,8 @@ reads from it twice:
   `{ boardId: 'b1', priority: { $gte: 2 } }` reads the board's records only.
   The narrowing follows every `$and` branch, and an `$or` whose branches all
   name an indexed equality; a `$not`, or a branch without one, is left to the
-  predicate. An indexed array field — a [set](./sync#registers-counters-sets-lists-and-text)
-  or any array — is posted under each of its elements as well, so
+  predicate. An indexed array field — a [set](./sync#registers-counters-sets-lists-and-text),
+  a [list](./lists) or any array — is posted under each of its elements as well, so
   `{ tags: 'bug' }` narrows to the records whose array holds it, and an array
   value to the records holding that array whole; a unique key over an array
   compares the whole array;
@@ -195,7 +202,7 @@ once pick their own keys (`jitter` keeps them apart), and last-writer-wins
 settles the rare equal key on one of them.
 
 ```js
-import { between } from '@alexify/syncom/order';
+const { between } = require('@alexify/syncom/order');
 
 const first = between();            // 'V'
 const second = between(first);      // 'WV' — after first

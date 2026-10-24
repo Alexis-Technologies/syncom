@@ -80,14 +80,14 @@ pouchdb-browser carries its HTTP adapter (the CouchDB client) with it</title>
 <text class="value" x="386.18266666666665" y="234">40.4 KB</text>
 </g>
 <g><title>syncom · open() over OPFS + the wrpc link adapter
-60.8 KB min+gzip
-179.6 KB minified
+65.6 KB min+gzip
+192.0 KB minified
 @alexify/syncom@0.0.1
 storage, schema, queries, the op log and the sync protocol are one entry</title>
 <text class="label primary" x="20" y="265">syncom</text>
 <text class="sublabel" x="20" y="280">open() over OPFS + the wrpc link adapter</text>
-<path class="bar primary" d="M372,261H380.3181354166667A4,4 0 0 1 384.3181354166667,265V271A4,4 0 0 1 380.3181354166667,275H372Z"/>
-<text class="value" x="390.3181354166667" y="274">60.8 KB</text>
+<path class="bar primary" d="M372,261H381.30277083333334A4,4 0 0 1 385.30277083333334,265V271A4,4 0 0 1 381.30277083333334,275H372Z"/>
+<text class="value" x="391.30277083333334" y="274">65.6 KB</text>
 </g>
 <g><title>RxDB · rxdb + Dexie storage + replication
 90.1 KB min+gzip

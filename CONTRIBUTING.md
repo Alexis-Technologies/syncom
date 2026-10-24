@@ -21,9 +21,10 @@ pnpm test:coverage     # c8 over src/ — thresholds 95 lines / 95 statements / 
 pnpm test:types        # tsd against the .d.ts files
 pnpm lint              # oxlint
 pnpm format            # oxfmt (format:check in CI)
-pnpm size              # bundle-size report; the browser budget fails the run
+pnpm size              # bundle-size report; a browser budget exceeded fails the run
 pnpm bench             # every script in bench/ (--save → bench/results/engine.json)
 pnpm bench:compare     # against the alternatives (pnpm bench:compare:install first)
+pnpm bench:size        # the browser bundles of syncom and the alternatives (the same install)
 pnpm bench:report      # charts and tables of docs/guide/benchmarks.md and the README
 pnpm docs:comparison   # the matrix of docs/guide/comparison.md from docs/comparison.json
 pnpm docs:dev          # the VitePress site (docs:build / docs:preview too)
@@ -43,8 +44,10 @@ with `node --test --test-name-pattern 'swap'`.
   `package.json#browser` plus `src/index.browser.js`. A new split module needs
   an entry in both.
 - **A `.d.ts` change and its `tsd` test land together.** `index.d.ts` is the
-  Node surface; `browser.d.ts` re-exports it and overrides only the three
-  crypto functions that are async in the browser.
+  Node surface; `browser.d.ts` re-exports it and overrides only the five
+  crypto functions that are async in the browser (`calculateHash`, `encrypt`,
+  `decrypt`, `sign`, `verify`). Each subpath has its own `.d.ts` and
+  `tests/<name>.test-d.ts`.
 - **Anything in `tests/` not named `*.test.js` is a helper** and is skipped by
   `node --test` discovery — that is why `tests/suites/`, `tests/utils/` and
   `tests/package/` work the way they do.
@@ -54,9 +57,19 @@ with `node --test --test-name-pattern 'swap'`.
   `tests/wrpc.integration.test.js` only, which skips when it is missing; nothing
   under `src/` may `require` it. The adapter in `src/wrpc.js` duck-types the
   client it is handed.
-- **A field is a register, a counter or a set.** `set`/`update` write
-  registers, `inc` writes counters, `add`/`remove` write sets, and no two of
-  them meet on one field — do not add a path that lets them.
+- **A field is one kind: a register, a counter, a set, a list, a text or a
+  tree.** `set`/`update` write registers, `inc` counters, `add`/`remove` sets,
+  `splice`/`push`/`updateText` lists and texts (`setAt`/`move` a list,
+  `mark`/`unmark`/`unmarkById` a text), `treeMove`/`treeRemove` trees. A local
+  write of another kind is refused before it is stamped; between peers the
+  kinds' precedence decides — register, counter, set, list, text, tree — by
+  the kinds alone, the same on the op path and in a snapshot merge. Do not add
+  a path that decides a clash another way.
+- **An adapted algorithm brings its notice.** Code or a rule taken from an MIT
+  project is named in `THIRD_PARTY_NOTICES.md` — the project, the commit, the
+  files that carry it — with the upstream notice. Projects under other
+  licences (json-joy, Collabs, `fugue/fugue`) are read as specifications only;
+  nothing is copied from them.
 
 ## Tests
 
@@ -73,6 +86,16 @@ bundler honouring `package.json#browser` would. The sync engine is tested over
 `tests/utils/memory-link.js`, an in-process link that behaves like a wrpc
 client at the boundary (JSON across, resume from the last event id on
 reconnect), and once more over real wrpc in `tests/wrpc.integration.test.js`.
+
+`INVARIANTS.md` names every guarantee — `SYNC-n`, `OPS-n`, `LIST-n`, `SEQ-n`,
+`TREE-n`, `RLE-n`, `BOUND-n`, `LOG-n`, `VER-n`, `TAG-n`, `PATCH-n`, `UNDO-n`,
+`BRANCH-n` — with the tests that hold it, and `tests/package/invariants.test.js`
+fails when an id names no test or a named title is gone: rename a test and its
+row together, and give a new guarantee an id, a test and a row. The seeded
+hazard walk in `tests/suites/sync-engine.js` — dropped and duplicated pages, a
+reopen mid-walk — is the one that must stay green whatever else moves.
+`tests/package/telemetry-events.test.js` keeps every logged `event:`, span and
+metric in the table of `docs/guide/telemetry.md`.
 
 `tests/package/consistency.test.js` is the machine-checked half of the release
 checklist: it fails if `exports`, `files`, the `browser` map, the `.d.ts`
@@ -94,13 +117,14 @@ Benchmarks are not run in CI: they measure a machine, not a change.
 ## Bundle size
 
 `pnpm size` prints one row per `exports` entry and enforces a min+gzip budget
-on the browser entry. The budget is a **ratchet, not a target**: raise it
-deliberately, in the same change that earns the bytes, and say why in a comment
-next to the number. The main entry's v1 ceiling of 64 KB was passed on
-2026-10-24 for the module split of the second review (the comment in
-`scripts/size.js` names it); every raise still names its feature, and a
-raise of more than a kilobyte is a design decision (an engine subpath, an
-injected kind), taken in a plan, not in the number.
+on every browser entry — the main one and each subpath. The budget is a
+**ratchet, not a target**: raise it deliberately, in the same change that earns
+the bytes, and say why in a comment next to the number. The main entry's v1
+ceiling of 64 KB was passed on 2026-10-24 for the module split of the second
+review (the comment in `scripts/size.js` names it; the budget is 65 KB now);
+every raise still names its feature, and a raise of more than a kilobyte is a
+design decision (an engine subpath, an injected kind), taken in a plan, not in
+the number.
 
 ## Release checklist
 

@@ -43,22 +43,22 @@
 <text class="tick" x="676" y="504" text-anchor="middle">600 ms</text>
 <line class="axis" x1="276" y1="88" x2="276" y2="488"/>
 <g><title>syncom · chain: false, node:fs · v0.0.1
-36.3 ms in total
-load and open 36.0 ms · first read 0.3 ms
+39.9 ms in total
+load and open 39.4 ms · first read 0.5 ms
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="105">syncom</text>
 <text class="sublabel" x="20" y="120">chain: false, node:fs · v0.0.1</text>
-<path class="bar secondary" d="M276,101H296.2188053333333A4,4 0 0 1 300.2188053333333,105V111A4,4 0 0 1 296.2188053333333,115H276Z"/>
-<text class="value" x="306.2188053333333" y="114">36 ms</text>
+<path class="bar secondary" d="M276,101H298.60338866666666A4,4 0 0 1 302.60338866666666,105V111A4,4 0 0 1 298.60338866666666,115H276Z"/>
+<text class="value" x="308.60338866666666" y="114">40 ms</text>
 </g>
 <g><title>syncom · default, node:fs · v0.0.1
-37.0 ms in total
-load and open 36.0 ms · first read 0.9 ms
+41.3 ms in total
+load and open 40.3 ms · first read 1.1 ms
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="145">syncom</text>
 <text class="sublabel" x="20" y="160">default, node:fs · v0.0.1</text>
-<path class="bar primary" d="M276,141H296.67577766666665A4,4 0 0 1 300.67577766666665,145V151A4,4 0 0 1 296.67577766666665,155H276Z"/>
-<text class="value" x="306.67577766666665" y="154">37 ms</text>
+<path class="bar primary" d="M276,141H299.54613866666665A4,4 0 0 1 303.54613866666665,145V151A4,4 0 0 1 299.54613866666665,155H276Z"/>
+<text class="value" x="309.54613866666665" y="154">41 ms</text>
 </g>
 <g><title>TinyBase · MergeableStore, file persister · v10.0.1
 50.8 ms in total

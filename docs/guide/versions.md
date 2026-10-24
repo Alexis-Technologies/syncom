@@ -36,29 +36,40 @@ answer different questions, and the difference shows after a partition.
 | a stamp (a number or a `Date`) | every op stamped at or below it | *What had been written by then, wherever?* — the same answer on every node that holds the ops, whatever order they arrived in |
 | `{ vector }` (a [version vector](./sync#the-log), such as `storage.vector` at some moment) | every op the vector covers | *What do exactly these ops make?* — the one cut two nodes can agree on by name |
 
+A fourth form, `{ tag }`, is not a cut of the log: it reads the record's
+file as a [tag](#tags) kept it.
+
 Two nodes apart write to one record; A's own write lands in A's log before
 B's does. On A, the event id from before B's write arrived gives A's write
 alone; the stamp between the two writes gives B's alone (B wrote first by
 the clock); A's vector from that moment gives A's write alone, and B's vector
-gives both. `history()` on each node lists what that node applied, in its
-order.
+once the two have synced gives both. `history()` on each node lists what
+that node applied, in its order. An op this node skipped — a `beforeApply`
+that answered `false`, an op invalid under its schema — is no version here;
+one held for a newer schema version becomes one, at its own event id, once
+the node runs that version.
 
-`history(id, { limit })` lists the newest `limit` versions (50 by default);
-`complete` is then false, and `history(id, { limit, before })` with the
-oldest version's `eventId` pages back from it. Each version carries the op's `type`, `origin`,
-`actor` and `ts`, the `fields` it changed (removed ones included), and `data`
-— the record as it read after the op, through the schema lens and the
-`afterRead` hook, `null` once deleted. A read at a version runs
-`beforeRead` and `afterRead` with `{ id, at }`, so what redacts the present
-redacts the past too; `history()` runs `beforeRead` once with `{ id,
-history: true }` and `afterRead` per version.
+`history(id, { limit })` lists the newest `limit` versions (50 by default,
+`Infinity` for all); `complete` is false when it leaves older ones out, and
+`history(id, { limit, before })` with the oldest version's `eventId` pages
+back from it — the versions older than that entry. `before` is an event id
+of this log (another value is a `TypeError`, one of another incarnation
+`HISTORY_GONE` with `reason: 'epoch'`). Each version carries the op's
+`eventId`, `seq`, `type`, `origin`, `actor` and `ts`, the `fields` it
+changed (removed ones included), and `data` — the record as it read after
+the op, through the schema lens and the `afterRead` hook, `null` once
+deleted. A read at a version runs `beforeRead` and `afterRead` with `{ id,
+at }`, so what redacts the present redacts the past too; `history()` runs
+`beforeRead` once with `{ id, history: true }` and `afterRead` per version
+it hands out, with that version's event id as `at`.
 
 ## What the log can vouch for
 
 The fold is exact — the record as this node held it — while the log holds
 every op the node applied to the record. Compaction drops the oldest
 segments ([retention](./sync#the-log)), and `storage.log.droppedTs` is the
-newest stamp among what went. From then on a version is exact only when a
+newest stamp among what went (or among what an open could not read). From
+then on a version is exact only when a
 reset — a whole-record write (`set()`, `insert()`), a `delete()` or a
 `purge()` — stamped above `droppedTs` is inside the cut: a reset discards
 everything stamped below it, and everything dropped was stamped at or below
@@ -79,16 +90,18 @@ A node that joined through a [snapshot](./sync#bootstrap) holds the joined
 state as one `merge` op: a version by event id or vector takes it as one op,
 but a stamp below the merge's cannot tell which of the joined ops were
 written by then and rejects with `reason: 'merge'`. A purge scrubs the
-payload of every entry of the record: `history()` still lists the ops, with
-`data: null`, no `fields` and `scrubbed: true`, and a version before the
-purge rejects with `reason: 'scrubbed'`; one after it is `null`. An
-encrypted record has no ops and no past: `ENCRYPTED`. An event id from
-another incarnation of the log rejects with `reason: 'epoch'`; a seq the
-log has not reached, or an `at` of the wrong shape, is `INVALID_VERSION`.
+payload of every entry of the record: `history()` still lists the ops, the
+purge among them, with `data: null`, `fields: []` and `scrubbed: true`, and
+a version before the purge rejects with `reason: 'scrubbed'`; one after it
+is `null`. An encrypted record has no ops and no past: `ENCRYPTED`. An event
+id from another incarnation of the log rejects with `reason: 'epoch'`; a seq
+the log has not reached, or an `at` of the wrong shape, is a `TypeError`
+with `code: 'INVALID_VERSION'`.
 
 `storage.log.pin(keep)` holds the log's segments past retention for a reader
-that needs them — an undo stack, a long-running comparison — until the
-function it returns is called.
+that needs them — an undo stack, a long-running comparison: an entry
+`keep(entry)` answers true for stays, with its segment and everything after
+it, until the function `pin()` returns is called.
 
 ## Tags
 
@@ -131,10 +144,15 @@ be written leaves the record held — the op is logged, the record is
 reported `UNPERSISTED` and kept in memory, its file untouched, so the tag
 still reads the file — and the next write of it lands with the copy. For
 the same reason `tag()` refuses with `UNPERSISTED` while a record is held:
-there is no file of it to copy from until it lands. A purge reaches the tags: every copy of the record goes and every
-tag's catalog forgets its row, indexed values included, so
-`at(name).has(id)` is false and `get` is `null`. The read hooks run with
-`at: { tag }`.
+there is no file of it to copy from until it lands. Under
+[`open({ defer })`](./storage), where a local write's file waits for the
+window, `tag()` lands the waiting files first, so the tag's catalog and the
+files agree; a record written after the tag whose file still waits reads at
+the tag from that file — still the tag's state — and the copy is taken when
+the file lands. A purge reaches the tags:
+every copy of the record goes and every tag's catalog forgets its row,
+indexed values included, so `at(name).has(id)` is false and `get` is `null`.
+The read hooks run with `at: { tag }`.
 
 A tag is the whole storage, not one record: `at(name).list()` is every live
 id then, `at(name).collection('Post')` queries the collection as it was —
@@ -142,10 +160,12 @@ id then, `at(name).collection('Post')` queries the collection as it was —
 copy or from the record as it is — and `at(name).snapshot()` pages the
 storage as it was, the way [`snapshot()`](./sync#bootstrap) pages the
 present, so another storage can `mergeSnapshot()` them and stand at the tag.
-A cursor at a tag has no `watch()` (a tag does not change) and no `$text`
-(its catalog carries no text index).
+A cursor at a tag has no `watch()` (a tag does not change; it throws) and
+no `$text` (its catalog carries no text index; `select()` with one is a
+`TypeError`).
 
 ```js
+// storage and other opened with schema: { entities: { Post: { index: ['n'] } } }
 const posts = storage.at('v1').collection('Post');
 await posts.select({ n: { $gte: 2 } }).order('n').fetch(); // as of v1
 await posts.count();                                         // as of v1
@@ -159,14 +179,22 @@ Tags are this node's: they live under `tags/` next to the data, name a
 position in this node's log, and do not replicate — a peer that needs the
 same version takes its own tag. `tag()` runs in the mutation queue, so no
 write lands between the catalog and the position it names; a name is of the
-record-id form. A directory a crash left under `tags/` without its line in
-`tags.json` is unknown to every reader and is swept when a tag of that name
-is taken again. An open reads `tags.json` and the newest tag's catalog —
-the one the write path copies into — and an older tag's catalog when the
-tag is first read, so an open costs one catalog however many tags there
-are; a tag whose catalog file is gone is dropped then (the newest at open)
-as `untag()` would drop it — the copies the older tag needs move there — with
-a warning, and the read that found it gone rejects with `TAG_NOT_FOUND`. An unreadable `tags.json` does not stop the open: the tags are
+record-id form (another is a `TypeError`; a name in use is `TAG_EXISTS`,
+with `tag`), and so is every name `tags.json` holds — a line of another
+name is dropped at open, with a warning, never read as a path. A directory
+a crash left under `tags/` without its line in `tags.json` is unknown to
+every reader and is swept when a tag of that name is taken again.
+
+An open reads `tags.json` and the newest tag's catalog — the one the write
+path copies into — and an older tag's catalog when the tag is first read,
+so an open costs one catalog however many tags there are. `at(name)` reads
+nothing: it throws `TAG_NOT_FOUND` for a name this node has not, and the
+view's first read — `get`, `has`, `list`, a cursor's `fetch` or `count`,
+`snapshot` — reads the catalog, which is why `has()` and `list()` are
+promises. A tag whose catalog file is gone is dropped then (the newest at
+open) as `untag()` would drop it — the copies the older tag needs move there
+— with a warning, and the read that found it gone rejects with
+`TAG_NOT_FOUND`. An unreadable `tags.json` does not stop the open: the tags are
 auxiliary, and their names cannot be listed back from the disk, so the file
 is kept aside as `tags.corrupt.json` for a repair by hand, the storage runs
 without tags (`stats().tags.corrupt`), `tag()` refuses with `CORRUPT` so
@@ -182,11 +210,17 @@ and `restore(id, at)` applies the list the other way round — new ops that
 lead back, so the step is a version of its own and merges like any write:
 
 ```js
+const id = await storage.insert({ title: 'Draft' });
+await storage.tag('v1');
+await storage.update(id, { title: 'Final' });
+await storage.inc(id, 'views', 1);
+
 await storage.diff(id, { tag: 'v1' });
 // [{ action: 'put', field: 'title', value: 'Final' },
 //  { action: 'inc', field: 'views', value: 1 }]
-await storage.applyPatches(id, [{ action: 'inc', field: 'views', value: -1 }]); // one op
-await storage.restore(id, { tag: 'v1' });     // one op — a write, since the counter has to go
+await storage.applyPatches(id, [{ action: 'inc', field: 'views', value: -1 }]); // 1 — one op
+await storage.restore(id, { tag: 'v1' });     // 1 — a write, since the counter has to go
+await storage.get(id);                        // { title: 'Draft' }
 ```
 
 A patch is plain JSON in the terms of the write API, one per field by its
@@ -195,20 +229,27 @@ kind: `put` (a register's new value — a `set`), `inc` (a counter's delta),
 adds this node observed, with `own: true` this node's adds alone, the way an
 undo revokes its own add and leaves a peer's concurrent one, with `removals`
 exactly the tags named), `splice` (a text's
-or a list's edits, by Myers), `treeMove` and `treeRemove`, `delete`,
-`purge`. No op removes one field, so a register that is gone, or a field
-that changed kind, makes the diff a `write` of the registers followed by
-the other kinds made again whole. A text's marks are not diffed. The diff
-reads both versions through the schema lens, raw, without the read hooks.
+or a list's edits, by Myers), `treeMove` and `treeRemove`, `write` (the
+registers as a whole — a reset), `delete`, `purge`. No op removes one field,
+so a register that is gone, or a field that changed kind, makes the diff a
+`write` of the registers followed by the other kinds made again whole. A
+text's marks are not diffed. The diff reads both versions through the schema
+lens, raw, without the read hooks, and rejects as `get(id, { at })` would
+for either version.
+
 `applyPatches(id, patches, { actor, source })` realizes a list in one turn
-of the mutation queue and resolves to how many ops it took. A patch is
-checked as the method of its name checks its arguments — the wrong shape is
-a `TypeError` and nothing is written — and every patch is first resolved and
-applied over a scratch record, so an index out of range, a kind clash, a
-cycle or a type change refuses the whole list before anything is appended:
-a restore lands whole or not at all. (A hook or a validator that throws on
-a later op still leaves the earlier ones committed; those run on the real
-writes.)
+of the mutation queue and resolves to how many ops it took; `restore(id, at,
+{ actor, source })` is `applyPatches()` of `diff(id, undefined, at)`. A patch
+is checked as the method of its name checks its arguments — the wrong shape
+is a `TypeError` and nothing is written — and every patch is first resolved
+and applied over a scratch record, so an index out of range, a kind clash, a
+cycle, a sibling not there or a type change refuses the whole list, with the
+error the method would have thrown (`OUT_OF_RANGE`, `FIELD_KIND`, `CYCLE`,
+`NOT_FOUND`, `TYPE_IMMUTABLE`), before anything is appended: a restore lands
+whole or not at all. Hooks and validators run on the real writes alone, so
+one that throws on a later op rejects the call with its error and leaves the
+earlier ops committed — versions in `history()`, ops on their way to the
+peers; restoring again from there lands what is left.
 
 ## The commit event
 
@@ -216,13 +257,18 @@ writes.)
 storage.on('commit', ({ op, seq, source, before, after, kinds }) => { … });
 ```
 
-Every op this node makes raises `commit` once it is durable: the op, its
-seq in the log, the `source` (the `Record` whose `save()` it was, or what
-`applyPatches()` was given), the record `before` and `after` as copies, and
-every field's `kinds` (`register`, `counter`, `set`, `list`, `text`, `tree`
-— of the fields there before and after). It is what an undo stack keeps;
-the copies are made only while something listens. A peer's op raises
-`change`, not `commit`.
+Every local write — a call of the write API, a `Record`'s `save()`,
+`applyPatches()`, `restore()`, `compact()` — raises `commit` once its op is
+durable: the op, its seq in the log, the `source` (the `Record` whose
+`save()` it was, or what `applyPatches()` was given; `null` otherwise), the
+record `before` and `after` as copies of what is stored (no lens), and every
+field's `kinds` (`register`, `counter`, `set`, `list`, `text`, `tree` — of
+the fields there before and after). It is what an undo stack keeps; the
+copies are made only while something listens. A peer's op raises `change`,
+not `commit`, and so do the `merge` and `advance` ops a joined snapshot
+leaves (`mergeSnapshot()`, `adoptVector()`); an encrypted write makes no op
+and raises neither — nor does a tree move to where the node already is,
+which makes no op.
 
 ## Undo and redo
 
@@ -232,13 +278,15 @@ on the [commit event](#the-commit-event) and [patches](#diff-and-restore):
 ```js
 import { createUndo } from '@alexify/syncom/undo';
 
+const id = await storage.insert({ title: 'Draft' });
+await storage.inc(id, 'views', 1);
 const undo = createUndo(storage, { mergeInterval: 500, limit: 100 });
 await storage.update(id, { title: 'Final' });
 await storage.inc(id, 'views', 1);          // within 500 ms of the update: one step
-await undo.undo();                           // { applied: 2, skipped: 0 } — both taken back
-await undo.redo();                           // done again
+await undo.undo();                           // { applied: 2, skipped: 0 } — { title: 'Draft', views: 1 }
+await undo.redo();                           // { applied: 2, skipped: 0 } — { title: 'Final', views: 2 }
 undo.mark();                                 // the next write starts a new step
-undo.canUndo; undo.canRedo; undo.size;       // { undo, redo }
+undo.canUndo; undo.canRedo; undo.size;       // true, false, { undo: 1, redo: 0 }
 undo.stop();                                 // also on storage.close()
 ```
 
@@ -246,32 +294,43 @@ Every commit of the storage's own joins the current step — per record,
 how the step found it and how it left it; the patches that take it back are
 made when it is undone — commits within `mergeInterval` of the step's first
 merge into it, `mark()` closes a step by hand, a new write clears the redo
-stack, and `limit` steps are kept. An undo applies a step's patches through
-`applyPatches()` — new ops, so it merges like any write and a peer sees it
-as one — and what those ops commit is the redo step. The rule is Yjs's,
-refuse to overwrite: a field anything but the step's own ops changed since
-— a peer's write, a later step of this node's — is left alone and counted
-in `skipped`, and a whole-record step (a `set()` that added a field, a
-`delete()`) with such a conflict is skipped whole; `undo({ force: true })`
-overrides. What commutes is no conflict: a peer's increment of the same
-counter, or add to or remove from the same set, leaves the undo free; a
-peer's edit of the same list or text does not (the undo's positions are
-stale by then). A field the step created is gone again when nothing else
-changed since — a whole-record write; with a peer's change beside it the
-undo empties the field instead, so the peer's change stays. An undone
-`add` removes this node's adds of the element alone, so a peer's concurrent
-add of it survives; an undone `inc` is the increment back; a text comes
-back as new characters. A text's marks are not undone. An undo that fails
-partway — a hook refusing one record's inverse, say — leaves the records
-it took back taken back, with their way back on the redo stack, and the
-rest on the undo stack for another try: a record is never inverted twice.
+stack, and `limit` steps are kept, the oldest dropped first. An undo applies
+a step's patches through `applyPatches()` — new ops, so it merges like any
+write and a peer sees it as one — and what those ops commit is the redo
+step. The rule is Yjs's, refuse to overwrite: a field anything but the
+step's own ops changed since — a peer's write, a write of this node's the
+stack does not hold — is left alone and counted in `skipped`, and a step
+whose way back needs a reset (one that added a register field, a `delete()`,
+an `insert()`) is skipped whole when anything else changed the record since;
+`undo({ force: true })` overrides. A skipped patch goes with its step — the
+redo step holds only what was applied — so `force` is chosen up front, not
+as a retry. What commutes is no conflict: a peer's increment of
+the same counter, or add to or remove from the same set, leaves the undo
+free; a peer's edit of the same list or text does not (the undo's positions
+are stale by then). A field the step created is gone again when nothing else
+changed since — a whole-record write (had the step above created `views`,
+its way back would be that one write); with a peer's change beside it the
+undo empties a counter, a set, a list, a text or a tree instead, so the
+peer's change stays. An undone `add` removes this node's adds of the element
+alone, so a peer's concurrent add of it survives; an undone `inc` is the
+increment back; a text comes back as new characters. A text's marks are not
+undone. An undo that fails partway — a hook refusing one record's inverse,
+say — leaves the records it took back taken back, with their way back on the
+redo stack, and the rest on the undo stack for another try, so a record is
+not inverted twice; within one record, the [`applyPatches()`](#diff-and-restore)
+rule holds — a hook or a validator that refuses a later op of its inverse
+leaves the earlier ones applied, and the record still on the undo stack.
 
-The stack is this process's: nothing of it is written, a peer's ops are
-never undone from here, a `purge` forgets its record on every step, `scope`
-keeps to the ops of one scope and `exclude(op)` leaves ops out. The
-manager pins the log from the oldest step it holds (conflicts are read
-from the log's entries), so a long stack holds segments past retention
-until `clear()` or `stop()`.
+`createUndo(storage, options)` also takes `scope` — only the ops of that
+scope (`'*'` the global one) — `exclude(op)` — ops to leave out — and
+`actor`, the actor the undo's own ops carry. The manager is an emitter:
+`push` (`{ direction: 'undo', records }`) when a commit joins the stack,
+`pop` (`{ direction, applied, skipped }`) when an undo or a redo is done,
+`change` after either. The stack is this process's: nothing of it is
+written, a peer's ops are never undone from here, and a `purge` forgets its
+record on every step. The manager pins the log from the oldest step it holds
+(conflicts are read from the log's entries), so a long stack holds segments
+past retention until `clear()` or `stop()`.
 
 ## Branches
 
@@ -292,12 +351,15 @@ await drop(draft);                       // closed, files removed
 ```
 
 A branch is opened with the options you give it (the schema it should run
-with, hooks, a logger); its `sync` gets `retention: { ops: 0 }`, so every
-op stays for the merge back, and `autoStart: false`, so it dials nobody
-until told. The fork pages the parent's [snapshot](./sync#bootstrap) (or
-the tag's) into the branch and adopts the parent's vector, so the branch
-knows what it already holds; `branch.json` in its directory names the
-parent and the position.
+with, hooks, a logger), on the parent's `fsi` unless they name another; its
+`sync` gets `retention: { ops: 0 }`, so every op stays for the merge back,
+and `autoStart: false`, so it dials nobody until told. The fork pages the
+parent's [snapshot](./sync#bootstrap) (or the tag's) into the branch and
+adopts the parent's vector, so the branch knows what it already holds; what
+lands on the parent while the pages go out is caught up as ops, so a branch
+of the present stands at one cut. `branch.json` in its directory names the
+parent and the position — what `branchInfo()` reads back, and `null` for a
+storage that is no branch.
 
 `merge(source, { into })` hands `into` what `source` has that it lacks —
 the ops after `into`'s vector, through `applyRemote`, the way a peer's push
@@ -317,7 +379,9 @@ another storage, say — is refused (`BRANCH_EXISTS`), and a fork that fails
 halfway leaves nothing behind. `drop(branch)` closes it and removes every
 file of the known layout, the tags' included; the empty directories stay
 (no backend has rmdir). It is the one call here that deletes data, so it
-takes only what `branch()` made: a storage with no `branch.json` is refused.
+takes only what `branch()` made: a storage with no `branch.json` is refused
+with a `TypeError` and keeps its files. `merge()` of a storage into itself
+is a `TypeError` too.
 A branch is a branch only here: nothing of it replicates as such, and a
 peer sees merged ops like any other.
 
@@ -325,14 +389,35 @@ peer sees merged ops like any other.
 
 A version is a fold of the record's retained entries: as many `applyOp`
 calls as the record has ops in the log, read from memory — the log is held
-there — plus the comparison with the present when compaction has run. Fine
-for a record with hundreds of ops; a record edited ten thousand times is a
-record to reset now and then. A tag costs one catalog file when taken and one
-copied record file per record changed after it; the catalog of every tag is
-held in memory, so a hundred tags over a hundred thousand records is a cost
-to feel, ten tags is not. A record whose past has grown — a tree moved
-thousands of times keeps every move, a text typed into from many places
-keeps a run per place — is rewritten by `compact(id)`: a whole-record
-write of the registers and one op per field of another kind (a text as one
-run, a tree as one move per node), so what lies under it goes by the reset
-rule on every node, and the record reads the same.
+there — plus the comparison with the present when compaction has run.
+`history()` folds them all too, whatever its `limit`, and reads through the
+lens and `afterRead` only the versions it hands out: paging saves the reads,
+not the fold. Fine for a record with hundreds of ops; a record edited ten
+thousand times is a record to reset now and then. A tag costs one catalog
+file when taken and one copied record file per record changed after it; an
+open reads the newest tag's catalog alone, and every catalog read since —
+the newest, and each older tag a reader used — stays in memory, so reading
+a hundred tags over a hundred thousand records is a cost to feel, ten tags
+is not. A purge reads every tag's catalog, to forget the record there.
+
+A record whose past has grown — a tree moved thousands of times keeps every
+move, a text typed into from many places keeps a run per place, a field
+deleted from keeps its tombstones — is rewritten by `compact(id, { actor,
+source })`: a whole-record write of the registers and one op per field of
+another kind (an `inc`, an `add`, a text or a list as one run, a tree as one
+move per node), so what lies under it goes by the reset rule on every node,
+and the record's fields read as they did. It resolves to how many ops it
+took — `0` for a record that is not there, `ENCRYPTED` for an encrypted
+one — and is a whole-record write like any other: a peer's op stamped
+before it and arriving after it is dropped by the reset, and a peer's typing
+stamped above it that was anchored in the old runs reads from the head (see
+[How it merges](./lists#how-it-merges)). What it does not keep today: a
+text's marks — the text is made again from its string, and marks are not
+diffed, so `spans()` reads it plain afterwards; the cursors into its texts
+and lists, which named the old runs and read `null`; a field of another kind
+that reads empty (`''`, `[]`, a counter at `0`), which is not made again and
+is gone from the record; and a text or a list longer than one run
+(1 048 576 elements), which cannot be one op, so `compact()` refuses the
+record whole (`FIELD_KIND`, `kind: 'bound'`, `detail: 'run'`). The same holds
+for a `restore()` whose diff is a reset: the texts it makes again come back
+without their marks.

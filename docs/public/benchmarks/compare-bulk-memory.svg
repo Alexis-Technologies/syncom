@@ -105,24 +105,24 @@ samples 16.6k – 23.8k
 <text class="value" x="416.760134410402" y="314">22.3k</text>
 </g>
 <g><title>syncom · chain: false, createMemoryFsi() · v0.0.1
-17,209 records/s
-58.1 µs per record
-samples 16.8k – 17.4k
+16,869 records/s
+59.3 µs per record
+samples 16.1k – 17.1k
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="345">syncom</text>
 <text class="sublabel" x="20" y="360">chain: false, createMemoryFsi() · v0.0.1</text>
-<path class="bar secondary" d="M276,341H395.57472561498184A4,4 0 0 1 399.57472561498184,345V351A4,4 0 0 1 395.57472561498184,355H276Z"/>
-<text class="value" x="405.57472561498184" y="354">17.2k</text>
+<path class="bar secondary" d="M276,341H394.7097907758911A4,4 0 0 1 398.7097907758911,345V351A4,4 0 0 1 394.7097907758911,355H276Z"/>
+<text class="value" x="404.7097907758911" y="354">16.9k</text>
 </g>
 <g><title>syncom · default, createMemoryFsi() · v0.0.1
-16,009 records/s
-62.5 µs per record
-samples 15.5k – 16.4k
+15,789 records/s
+63.3 µs per record
+samples 15.5k – 16k
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="385">syncom</text>
 <text class="sublabel" x="20" y="400">default, createMemoryFsi() · v0.0.1</text>
-<path class="bar primary" d="M276,381H392.43713694546244A4,4 0 0 1 396.43713694546244,385V391A4,4 0 0 1 392.43713694546244,395H276Z"/>
-<text class="value" x="402.43713694546244" y="394">16k</text>
+<path class="bar primary" d="M276,381H391.8349080074752A4,4 0 0 1 395.8349080074752,385V391A4,4 0 0 1 391.8349080074752,395H276Z"/>
+<text class="value" x="401.8349080074752" y="394">15.8k</text>
 </g>
 <g><title>Automerge · Automerge.change, Counter · v3.5.0
 8,962 records/s

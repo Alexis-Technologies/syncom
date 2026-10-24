@@ -5,8 +5,8 @@ A field can be a **list** — an array that nodes edit by position — or a
 another without ever forming a cycle ([Trees](#trees), below). Two nodes that insert at the same spot
 both keep what they wrote, each writer's run whole, and a deleted element
 keeps its place so the anchors into it still resolve. The merge rule is
-Fugue (Weidner & Kleppmann, 2023), the one Loro and list-positions use; the
-same engine, `src/sequence.js`, carries both kinds, and a record with a text
+Fugue (Weidner & Kleppmann, 2023), the one Loro and list-positions use; one
+engine, `src/sequence.js`, carries lists and texts, and a record with a text
 field is still a record: it has a schema, it is queried, indexed and
 searched like any other, and its ops travel in the same signed log.
 
@@ -26,11 +26,12 @@ await storage.get(id);                              // { …, items: [{ n: 1 }, 
 
 `splice(id, key, index, count, content)` removes `count` elements at `index`
 and inserts `content` there — a string for a text, an array for a list; `push`
-is a splice at the end. A live `Record` has the same two methods with its own
-id. The first write decides the field's kind, and a call that only removes
-takes it from the field.
+is a splice at the end. A live `Record` has every method of this page with its
+own id (`record.splice(key, index, count, content)`). The first write decides
+the field's kind, and a call that only removes takes it from the field.
 
-Three things are refused (the same for `setAt()` and `move()`):
+Three things are refused (the same for `setAt()`, `move()`, `mark()` and
+`unmark()`):
 
 - **Past the end.** An index, or an index plus a count, beyond the field's
   length rejects with `code: 'OUT_OF_RANGE'` and `{ id, field, index, count,
@@ -39,17 +40,22 @@ Three things are refused (the same for `setAt()` and `move()`):
   check and the write.
 - **Another kind.** A field is a register, a counter, a set, a list, a text or
   a tree, never two: `splice()` on a field a register holds throws `FIELD_KIND`
-  with `kind: 'register'`, `update()` on a text throws with `kind: 'text'`. A
-  peer's op of a kind the field's holder outranks is refused for that field
-  (an `error` event, `OP_REFUSED`); one of a higher kind takes the field — the
-  precedence is register, counter, set, list, text, tree, see
-  [the sync guide](./sync#registers-counters-sets-lists-and-text). A
-  validator default for the field — `body: ''`, `items: []`
-  — is folded into the write that creates the record and makes the field a
-  register; leave list and text fields out of the defaults.
-- **Arguments.** A non-string key, a negative index or count, content that is
-  neither a string nor an array, an element JSON cannot carry, or a call that
-  neither removes nor inserts are `TypeError`s.
+  with `kind: 'register'`, `update()` on a text throws with `kind: 'text'`,
+  `setAt()` on a text too. From a peer the kinds' precedence decides —
+  register, counter, set, list, text, tree, on the op path as in a snapshot
+  merge (see [the sync guide](./sync#registers-counters-sets-lists-and-text)):
+  a peer's op of a kind that outranks the field's takes the field and drops
+  what the other kind held, so a list made concurrently with a text on one
+  field leaves the list on every node; an op the field's kind outranks is
+  refused for that field — an `error` event, `OP_REFUSED`, its `rejected`
+  naming the field and, as `reason`, the kind that holds it — and is still
+  logged and relayed. A validator default for the field — `body: ''`,
+  `items: []` — is folded into the write that creates the record and makes the
+  field a register; leave list and text fields out of the defaults.
+- **Arguments.** A non-string key, an index or a count that is not a
+  non-negative integer, content that is neither a string nor an array, an
+  element JSON cannot carry, or a call that neither removes nor inserts are
+  `TypeError`s.
 
 ## How it merges
 
@@ -58,7 +64,7 @@ the op. A new run — the elements one `splice` inserted — is the right child
 of the element before the insertion point when that element has no right
 children (deleted elements included), otherwise the left child of the
 leftmost descendant of its first right child. Siblings on one side are
-ordered by origin. A run's own continuation is one of those right children,
+ordered by origin, then by stamp. A run's own continuation is one of those right children,
 so a writer typing on at the end of its run extends the run instead of
 anchoring a new one: a keystroke costs no new key in the record. The reading
 is the walk of that tree — left children, the element if alive, right
@@ -79,7 +85,11 @@ What that gives you, concretely:
 - A reset — `set()` or `delete()` on the record — drops every run stamped
   below it. A run stamped above the reset but anchored on an element the
   reset dropped reads from the head: concurrent typing survives a concurrent
-  reset, at the start of the field.
+  reset, at the start of the field. Text written at the head after the reset
+  — the resetting node typing into the field again, a `compact()` or a
+  `restore()` making it anew — is a run from the head too, and runs from the
+  head order by their writers' ids like any siblings: the surviving typing
+  reads before that text or after it, the same on every node.
 - A list or a text touched after a `delete()` revives the record, like a set
   or a counter would.
 
@@ -111,7 +121,8 @@ await storage.move(id, 'todo', 2, 0);              // ['ship', 'write', 'test it
   made after the move takes the element away.
 - A value set with `setAt()` follows the element through a concurrent move;
   a value set concurrently by two nodes resolves by stamp.
-- `setAt()` and `move()` are for lists; a text has neither.
+- `setAt()` and `move()` are for lists; a text has neither. A `move()` to
+  where the element already is (`from === to`) makes no op.
 
 ## Rich text
 
@@ -143,11 +154,16 @@ await storage.unmark(id, 'body', 0, 7, 'bold');
   concurrently or not.
 - **Resolution.** Per name, the newest mark covering a character wins and a
   null value is none; `unmark` over a range is a null mark under the
-  reversed expand rule, so the removal grows where the style would not.
+  reversed expand rule — `both` and `none` swap, `before` and `after` stay —
+  so removing a link (`none`) grows at both edges, where the link would not.
 - **Many.** `{ many: true }` makes a mark stack with every other of its name
   instead of replacing it — comments, suggestions — and `spans` lists them
-  as `[{ id, value }]`, oldest first. Such a mark goes only by its id:
-  `unmarkById(id, key, markId)` with what `mark()` resolved to.
+  as `[{ id, value }]`, oldest first. Such a mark is switched off by its id:
+  `unmarkById(id, key, markId)` with what `mark()` resolved to (a `mark` op
+  that carries the id alone). An `unmark()` of the name is a null mark like
+  any other: it reads as none over its range, the stacked marks under it
+  included. Keep a name either stacking or not; the two are not meant to
+  mix.
 - The field still reads as the plain string; `spans` is raw — no lens, no
   read hooks. Blocks (paragraphs, headings) are records: a document is a
   list of block ids, each block a record with a text field.
@@ -169,6 +185,8 @@ it after the element before, so typed text lands after it. A cursor into a
 deleted element reads at the next visible one; one into a field a reset
 emptied reads `null`. In a list a cursor anchors the slot, not the element:
 a move takes the element elsewhere and leaves the cursor at the slot.
+`cursor()` is `null` for an index past the end and for a field that is not a
+list or a text; like `spans()`, it reads the record raw.
 
 ## Trees
 
@@ -176,7 +194,9 @@ A field can be a **tree**: nodes with a parent and a place among their
 siblings, put there by `treeMove(id, key, node, parent, { after, before })`
 and taken out, with everything under them, by `treeRemove(id, key, node)`. A
 node is a name — a record id, usually, so a node's own data lives in its
-record and the tree record holds the shape alone:
+record and the tree record holds the shape alone; any non-empty string of at
+most 128 characters without control characters will do, except `'$trash'`
+and `'__proto__'`:
 
 ```js
 const id = await storage.insert({ title: 'Outline' });
@@ -209,34 +229,43 @@ Beresford and Gomes's (2021), the one Loro's movable tree follows:
   a subtree removed concurrently is hidden with it.
 - Siblings that share an index order by stamp, and a node put after one of
   them lands after all of them.
-- A move to where the node already is makes no op. A parent that is the node
-  itself or hangs under it rejects with `CYCLE`; an `after`/`before` sibling
-  not under the parent with `NOT_FOUND` — both decided inside the mutation
-  queue, against the tree as it is, so a race with a peer's move surfaces as
-  the error rather than a silent nothing.
+- A move to where the node already is makes no op, and neither does a
+  removal of a node already removed. A parent that hangs under the node
+  rejects with `CYCLE` (`{ id, field, node, parent }`), an `after`/`before`
+  sibling not under the parent with `NOT_FOUND` (`{ id, field, node }`, the
+  sibling) — both decided inside the mutation queue, against the tree as it
+  is, so a race with a peer's move surfaces as the error rather than a silent
+  nothing. The node as its own parent or sibling, or both `after` and
+  `before`, are `TypeError`s.
 - A reset (`write`, `delete`) drops the moves below it, and a node whose
   parent fell reads again once the parent is back. A tree is a tree:
   `update()`, `push()`, `add()`, `inc()` on the field are refused
-  (`FIELD_KIND` with `kind: 'tree'`), and a merge lets every other kind win
-  over it.
+  (`FIELD_KIND` with `kind: 'tree'`), and the tree ranks last: a peer's op of
+  any other kind on the field takes it, and a peer's `tree` op on a field of
+  another kind is refused (`OP_REFUSED`).
 
 ## What travels
 
 A `tree` op carries `{ node, parent, fi }` — the node, its parent and its
 fractional index. A `mark` op carries the two anchors, the name, the value and whether it
-stacks — or the id of a mark to switch off. A `splice` op carries the cut ranges, `[run, offset, length]` per run, and
+stacks — or the id of a mark to switch off. An `assign` op carries `{ elem,
+value }`, a `move` op `{ elem, cut, at, value }` — the element's name, the
+slot it showed at, the anchor of its new place and its value. A `splice` op carries the cut ranges, `[run, offset, length]` per run, and
 either the anchor of its new run (`at`: `^` the head, `>e` or `<e` the right
 or left child of element `e`, named `ts:offset:origin`) or the writer's own
 run to extend (`run`, `from`); `content` is the inserted string or array and,
 empty, names the kind of a call that only removes. One call is one op, signed
 and logged like any other — an editor that types a word sends one op per
 keystroke unless it batches them (see below). A keystroke extending the
-writer's run adds a few bytes of content to the record and nothing to its
-metadata; a new run adds one key, about a hundred bytes.
+writer's run adds its characters to the run and no key to the record's
+metadata; a new run adds one key, a little over a hundred bytes.
+
+The first example of this page, with a listener attached before it:
 
 ```js
 storage.on('change', (op) => {
   if (op.type === 'splice') console.log(op.key, op.value);
+  // body { content: 'helo', at: '^' }
   // body { content: 'l', at: '<1792831354856:3:3oyEvh7q…' }
   // body { content: ' world', run: '1792831354856:3oyEvh7q…', from: 4 }
   // body { content: '', cut: [['1792831354856:3oyEvh7q…', 4, 6]] }
@@ -262,7 +291,11 @@ turn of the queue, so a peer's op cannot land between the diff and the
 splices. It resolves to how many ops it took; a difference deeper than a
 thousand edit steps (a paste that replaces most of the text) is one op that
 replaces the middle. Batch keystrokes into one call where you can — a word,
-or a pause — so a burst of typing is one op rather than ten. Indices are UTF-16 code units, as
+or a pause — so a burst of typing is one op rather than ten; where you
+cannot, `open({ defer: 50 })` lets a record's file lag the log by that many
+milliseconds, so the keystrokes of one burst are one file write and one chain
+block (the log is durable at once, and every read sees every write — see
+[Storage](./storage)). Indices are UTF-16 code units, as
 `String#slice` counts them; a splice that splits a surrogate pair is the
 caller's to avoid.
 
@@ -272,38 +305,54 @@ caller's to avoid.
   times on the node: as the field's string, as the runs in the record's
   metadata, and as the ops in the log. Keep a text to what a record is for —
   a note, a comment, a description, a block of a document — and make a long
-  document a list of block records rather than one field. A keystroke at the
-  end of your own run extends the field's index and reading in place rather
-  than rebuilding them; an insert elsewhere, or under a peer's concurrent
-  run, rebuilds.
+  document a list of block records rather than one field. A keystroke that
+  extends the newest run at the end of the field — typing on at the end of
+  what you just typed — carries the field's index and reading over instead
+  of rebuilding them; any other edit (an insert elsewhere, a cut, a peer's
+  run) rebuilds them, once per op.
 - A `splice` larger than a host's `bytesPerPush` is refused for the whole
   page it rides in; a paste of megabytes belongs in several calls.
-- A move adds a position run to the record's metadata — one key, about a
-  hundred bytes — and the old slot stays as a tombstone: a list reordered
-  thousands of times carries that history until a reset.
-- A tree keeps every move of every node until a reset — a few dozen bytes
-  each — and folds all of them on every op that touches the field. Keep a
+- A move adds a position run to the record's metadata — one key, some two
+  hundred bytes, twice that for an element's first move, which also starts
+  its position register — and the old slot stays as a tombstone: a list
+  reordered thousands of times carries that history until a reset.
+- A tree keeps every move of every node until a reset — some eighty bytes
+  each — and folds all of them once per op that changes the field. Keep a
   tree to the hundreds of nodes an outline or a folder pane shows, not the
   hundreds of thousands a file system holds.
+- [`compact(id)`](./versions#costs) is the reset that keeps what the fields
+  read as: it rewrites the record as a `write` of its registers and one op
+  per field of another kind — a text or a list as one run, a tree as one move per node —
+  so the tombstones, the runs and the move logs under it go, here and on
+  every peer. What it does not keep: a text's marks (`spans()` reads plain
+  afterwards), the cursors into its texts and lists (they read `null`), and
+  fields that read empty (see [Costs](./versions#costs)).
 - A tree reads 512 levels: a node that would hang deeper is folded but not
   shown, on every node alike, and `treeMove()` refuses a move that would reach
-  there (`OUT_OF_RANGE` with `depth`). A place among siblings is a fractional
-  index of at most 1 024 characters: after some thirty thousand inserts at
-  one spot the next `treeMove()` there is `OUT_OF_RANGE` (`reason: 'fi'`) —
-  move a sibling away, or reset the field. A peer's place that is not a
-  fractional index is malformed and never lands.
+  there (`OUT_OF_RANGE` with `node`, `depth` and `max`). A place among
+  siblings is a fractional index of at most 1 024 characters: after some
+  thirty thousand inserts at one spot — the end of a parent's children
+  included — the next `treeMove()` there is `OUT_OF_RANGE` (`reason: 'fi'`,
+  `length`, `max`) — move a sibling away, or reset the field. A peer's place
+  that is not a fractional index is malformed and never lands.
 - A run holds at most 1 048 576 slots and a field 4 194 304, tombstones
   included — the index allocates per slot, so this is what a peer can make a
-  node allocate. Typing past a full run starts a new one and reads the same;
-  a field at its bound takes nothing more until a reset (`set()` of the
-  record, or `updateText()` after one).
+  node allocate. One `splice()` inserts at most a run's worth; typing past a
+  full run starts a new one and reads the same; a field at its bound takes
+  nothing more until a reset — `set()` of the record, or `compact(id)`,
+  which writes the field again as one run without its tombstones. Locally
+  a call past a bound rejects with `FIELD_KIND`, `kind: 'bound'`, `detail`
+  (`'run'`, `'field'` or `'pending'`), `count` and `max`.
 - Pending work — a run whose anchor has not arrived, a cut or an extension
   of a run not here, a register for an element not here, a mark switched off
-  before it arrived — is bounded per field by `sync.pendingMax` (4 096). Past
-  it an op is refused for good on this node (`OP_REFUSED`, reason `bound`,
-  with `detail`, `count` and `max`) and a snapshot block is not taken as
-  state, so a mesh with several hosts, where a peer's ops can run far ahead
-  of the runs they cut, raises the bound rather than lowers it.
+  before it arrived — is bounded per field by `sync.pendingMax` (4 096;
+  `Infinity` disables it). Past it a peer's op is refused for good on this
+  node (`OP_REFUSED`, its `rejected` naming the field with `reason: 'bound'`,
+  `detail`, `count` and `max`), so a mesh with several hosts, where a peer's
+  ops can run far ahead of the runs they cut, raises the bound rather than
+  lowers it. A block that arrives as state — a snapshot page, a `merge` op —
+  is held to 4 096 pending items whatever `sync.pendingMax` says: one past
+  that is not taken as state, even on a node that raised the bound.
 - Queries see a list as the array it reads as: an index on the field posts
   every element (`select({ tags: 'bug' })` finds a list holding `'bug'`), an
   equality against a whole array compares it in order, and a unique key over

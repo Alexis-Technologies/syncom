@@ -55,24 +55,24 @@ loro-crdt@1.16.4</title>
 <text class="value" x="621.0445805243373" y="148">349k</text>
 </g>
 <g><title>syncom · chain: false, createMemoryFsi() · v0.0.1
-18,590 ops/s
-53.8 µs per operation
-samples 18k – 18.7k
+18,846 ops/s
+53.1 µs per operation
+samples 18.5k – 19.2k
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="179">syncom</text>
 <text class="sublabel" x="20" y="194">chain: false, createMemoryFsi() · v0.0.1</text>
-<path class="bar secondary" d="M276,175H441.23672420165434A4,4 0 0 1 445.23672420165434,179V185A4,4 0 0 1 441.23672420165434,189H276Z"/>
-<text class="value" x="451.23672420165434" y="188">18.6k</text>
+<path class="bar secondary" d="M276,175H442.0294441627251A4,4 0 0 1 446.0294441627251,179V185A4,4 0 0 1 442.0294441627251,189H276Z"/>
+<text class="value" x="452.0294441627251" y="188">18.8k</text>
 </g>
 <g><title>syncom · default, createMemoryFsi() · v0.0.1
-16,711 ops/s
-59.8 µs per operation
-samples 16.2k – 16.9k
+17,126 ops/s
+58.4 µs per operation
+samples 16.5k – 17.4k
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="219">syncom</text>
 <text class="sublabel" x="20" y="234">default, createMemoryFsi() · v0.0.1</text>
-<path class="bar primary" d="M276,215H435.0680207199623A4,4 0 0 1 439.0680207199623,219V225A4,4 0 0 1 435.0680207199623,229H276Z"/>
-<text class="value" x="445.0680207199623" y="228">16.7k</text>
+<path class="bar primary" d="M276,215H436.48592789517465A4,4 0 0 1 440.48592789517465,219V225A4,4 0 0 1 436.48592789517465,229H276Z"/>
+<text class="value" x="446.48592789517465" y="228">17.1k</text>
 </g>
 <g><title>Automerge · Automerge.change, Counter · v3.5.0
 1,949 ops/s

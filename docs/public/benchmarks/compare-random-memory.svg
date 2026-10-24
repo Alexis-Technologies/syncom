@@ -77,24 +77,24 @@ samples 20.5k – 21.1k
 <text class="value" x="513.3812661619697" y="228">20.6k</text>
 </g>
 <g><title>syncom · chain: false, createMemoryFsi() · v0.0.1
-549 ops/s
+550 ops/s
 1.82 ms per operation
-samples 419 – 853
+samples 399 – 852
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="259">syncom</text>
 <text class="sublabel" x="20" y="274">chain: false, createMemoryFsi() · v0.0.1</text>
-<path class="bar secondary" d="M276,255H345.92608205426586A4,4 0 0 1 349.92608205426586,259V265A4,4 0 0 1 345.92608205426586,269H276Z"/>
-<text class="value" x="355.92608205426586" y="268">549</text>
+<path class="bar secondary" d="M276,255H346.0673332715254A4,4 0 0 1 350.0673332715254,259V265A4,4 0 0 1 346.0673332715254,269H276Z"/>
+<text class="value" x="356.0673332715254" y="268">550</text>
 </g>
 <g><title>syncom · default, createMemoryFsi() · v0.0.1
-541 ops/s
-1.85 ms per operation
-samples 404 – 861
+537 ops/s
+1.86 ms per operation
+samples 406 – 824
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="299">syncom</text>
 <text class="sublabel" x="20" y="314">default, createMemoryFsi() · v0.0.1</text>
-<path class="bar primary" d="M276,295H345.3477656419785A4,4 0 0 1 349.3477656419785,299V305A4,4 0 0 1 345.3477656419785,309H276Z"/>
-<text class="value" x="355.3477656419785" y="308">541</text>
+<path class="bar primary" d="M276,295H344.9721979166761A4,4 0 0 1 348.9721979166761,299V305A4,4 0 0 1 344.9721979166761,309H276Z"/>
+<text class="value" x="354.9721979166761" y="308">537</text>
 </g>
 <text class="caption" x="20" y="363">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
 <text class="caption" x="20" y="379">in a fresh process · 2026-10-24</text>

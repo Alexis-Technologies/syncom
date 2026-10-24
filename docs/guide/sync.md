@@ -31,7 +31,7 @@ Every write becomes an **op** — the unit that travels between nodes and sits
 in the log:
 
 ```
-{ origin, seq, ts, type, id, scope?, data?, key?, value?, v?, actor?, sig?, digest?, nonce? }
+{ origin, seq, ts, type, id?, scope?, data?, meta?, key?, value?, vector?, from?, v?, actor?, sig?, digest?, nonce? }
 ```
 
 | `type` | Produced by | Effect on the record |
@@ -41,10 +41,10 @@ in the log:
 | `inc` | `inc()`, `record.inc()` | Adds to a counter field |
 | `add` | `add()`, `record.add()` | Adds elements to a set field |
 | `remove` | `remove()`, `record.remove()` | Removes from a set field the elements this node had seen added |
-| `splice` | `splice()`, `push()`, `record.splice()`, `record.push()` | Removes a range of a list or text field and inserts at a place — see [Lists, text and trees](./lists) |
+| `splice` | `splice()`, `push()`, `updateText()`, `record.splice()`, `record.push()`, `record.updateText()` | Removes a range of a list or text field and inserts at a place — see [Lists, text and trees](./lists) |
 | `assign` | `setAt()`, `record.setAt()` | Sets a list element's value register |
 | `move` | `move()`, `record.move()` | Moves a list element: cuts its slot, adds a position run, points its position register at it |
-| `mark` | `mark()`, `unmark()`, `record.mark()`, `record.unmark()` | Styles a range of a text field between two anchors, or switches a mark off |
+| `mark` | `mark()`, `unmark()`, `unmarkById()`, `record.mark()`, `record.unmark()`, `record.unmarkById()` | Styles a range of a text field between two anchors, or switches a mark off |
 | `tree` | `treeMove()`, `treeRemove()`, `record.treeMove()`, `record.treeRemove()` | Moves a node of a tree field under a parent (`$trash`: removed) at a place among its siblings — see [Trees](./lists#trees) |
 | `delete` | `delete()`, `record.delete()` | Leaves a tombstone; a newer write revives the record |
 | `purge` | `purge()` | Erases the record for good: wins at any stamp, nothing later lands, and every entry of the id is scrubbed from the log (see [Purge](./storage#purge)) |
@@ -64,6 +64,42 @@ way, and never into the record: an audit trail is the log, not the state.
 The origin signs it with the rest of the header (see [Signatures](#signatures)),
 so no relay can change it on the way — what it names is still the writer's
 claim about itself.
+
+[`applyPatches()` and `restore()`](./versions#diff-and-restore), `compact()`
+and the [undo stack](./versions#undo-and-redo) write through these same ops;
+they have none of their own.
+
+### On the wire
+
+`write` and `set` carry `data`. A field op names its field in `key` and
+carries its argument in `value`: the amount of an `inc`, the elements of an
+`add`, each element with the add stamps its node had seen for a `remove`,
+and for the list, text and tree ops the payload
+[What travels](./lists#what-travels) describes —
+`splice` `{ cut, at | run + from, content }`,
+`assign` `{ elem, value }`,
+`move` `{ elem, cut, at, value }`,
+`mark` `{ start, end, key, value, many? }` or `{ off }`,
+`tree` `{ node, parent, fi }`.
+A `merge` carries `data` and `meta`, an `advance` a `vector`, and both name
+in `from` the node whose snapshot was joined.
+
+A push and a `changes` page carry ops packed: one positional array of 17
+slots per op — `origin`, `seq`, `ts`, `type`, `id`, `scope`, `data`, `meta`,
+`key`, `value`, `vector`, `from`, `v`, `actor`, `sig`, `digest`, `nonce` —
+with `null` for an absent field and the type as one character: `w` write,
+`s` set, `i` inc, `+` add, `-` remove, `/` splice, `=` assign, `^` move, `*`
+mark, `~` tree, `d` delete, `p` purge, `m` merge, `a` advance. Slots are
+appended, never reordered: a reader of fewer slots ignores the rest, a
+reader of more takes an absent one as `null`. The log itself keeps keyed
+`{ seq, op }` JSON; packing is for the wire.
+
+`hello` carries the protocol version both ways, and a host answers a hello
+of another version with 400 (`PROTOCOL`). Version 1 is the wire as the first
+publication will have it, with every type and slot above. After that, a new
+type — which an older reader counts as malformed, so the stream that carries
+it stops there — or a slot an older reader cannot take as `null` is a new
+version.
 
 ### Clocks
 
@@ -129,15 +165,16 @@ await storage.update(id, { title: 'Final' });        // fine
 await storage.update(id, { views: 10 });              // throws: views is a counter; use inc()
 await storage.update(id, { tags: [] });               // throws: tags is a set; use add() or remove()
 await storage.inc(id, 'title', 1);                    // throws: title is a register; use update()
-await storage.update(id, { body: 'x' });              // throws: body is a text; use splice() or push()
+await storage.update(id, { body: 'x' });              // throws: body is a text; use splice(), push() or updateText()
 ```
 
-Do not initialise a counter, a set, a list, a text or a tree in `insert()` — `{ views:
-0 }` makes `views` a register, `{ tags: [] }` and `{ body: '' }` make theirs
-registers too; `inc()`, `add()`, `splice()`, `push()` and `treeMove()` create their fields. A validator's default for the field (`tags: []`) is
-folded into the write and does the same. A peer's op that breaks the rule is
-refused for that field and reported as an `error` event on the storage; the
-rest of the op still applies.
+Do not initialise a counter, a set, a list, a text or a tree in `insert()` —
+`{ views: 0 }` makes `views` a register, `{ tags: [] }` and `{ body: '' }`
+make theirs registers too; `inc()`, `add()`, `splice()`, `push()` and
+`treeMove()` create their fields. A validator's default for the field
+(`tags: []`) is folded into the write and does the same. A peer's op that
+meets a field of another kind is settled field by field by the kinds'
+precedence — see the kind clash below — and the rest of the op still applies.
 
 Elements are told apart by their JSON text: `1` and `'1'` are two elements,
 and so are `{ a: 1, b: 2 }` and `{ b: 2, a: 1 }`. A remove of an element this
@@ -156,9 +193,9 @@ One case does not converge and is left that way on purpose: a counter
 incremented by one origin both before and after a concurrent reset by another.
 Resettable counters need causal metadata syncom does not carry. A set has no
 such case: a remove names the add stamps its node saw, so a reset and a
-remove read the same whichever lands first. Nor do lists and texts: a reset
-drops every run stamped below it, and a run stamped above it but anchored on
-a dropped element reads from the head of the field.
+remove read the same whichever lands first. Nor do lists, texts and trees: a
+reset drops every run and every tree move stamped below it, and a run stamped
+above it but anchored on a dropped element reads from the head of the field.
 
 A **kind clash** — two nodes making one field as different kinds at once: a
 whole-record write that carries a field as a register (`set(id, { views: 0 })`,
@@ -167,7 +204,8 @@ that field — is decided by the kinds' precedence, the same on the op path
 and in a snapshot merge: a register outranks a counter, a counter a set, a
 set a list, a list a text, a text a tree. Where the winner's op arrives, the
 loser's state is dropped; where the winner is held, the loser's op is refused
-for that field (an `error` event, `OP_REFUSED`). Every node ends with the
+for that field (an `error` event, `OP_REFUSED`, the field's `reason` naming
+the kind that holds it) and still logged and relayed. Every node ends with the
 same kind whatever the order — and the loser's edits are gone, so keep a field
 one kind, and do not reset it in a whole-record write while another node may
 be moving it. A local write of the wrong kind is refused before it is stamped
@@ -311,7 +349,7 @@ which one a node plays on a given link is just who opened the connection.
 
 | Procedure | Direction | Purpose |
 | --- | --- | --- |
-| `hello` | dialer → host | Exchange node ids, vectors, log epochs and schemas; the host may `authorize` (and, requiring signatures, refuses a node id that is no key) |
+| `hello` | dialer → host | Exchange node ids, vectors, log epochs, schemas and the protocol version; the host may `authorize` (and, requiring signatures, refuses a node id that is no key) |
 | `push` | dialer → host | Ops the host lacks, by its vector |
 | `changes` (subscription) | host → dialer | Everything that lands in the host's log from the cursor on, live |
 | `snapshot` | dialer → host | One page of the host's state, for bootstrap |
@@ -321,16 +359,27 @@ sequenceDiagram
   autonumber
   participant D as dialer
   participant H as host
-  D->>H: hello { node, vector, scopes, token, schema }
-  H-->>D: { node, vector, epoch, schema }
+  D->>H: hello { node, vector, version, scopes, token, schema }
+  H-->>D: { node, vector, epoch, version, schema }
   D->>H: push { ops the host lacks }
-  D->>H: subscribe changes { lastEventId }
+  D->>H: subscribe changes { scopes } from lastEventId
   H-->>D: data × n (replay from the cursor)
   loop live
     D->>H: push (local and relayed ops)
     H-->>D: data (ops landing on the host)
   end
 ```
+
+A host refuses a `hello` with a code: 400 without a node id (`BAD_HELLO`) or
+for another protocol version (`PROTOCOL`), 409 for its own node id — a copied
+directory (`SELF`) — and 403 when `authorize` says no (`UNAUTHORIZED`) or,
+requiring signatures, for a node id that is no key (`UNSIGNED`). `push`,
+`snapshot` and `changes` from a client that has not said hello are 428
+(`HELLO_FIRST`) — the ordinary course of a wrpc reconnect, whose restored
+subscription reaches a new server-side client: the dialer greets again. A
+refused hello is reported through the dialer's `error` event and kept as
+`peers()[i].lastError`; the host is greeted again when the link reconnects,
+or after `enableNode(url, false)` and `true`.
 
 A push carries the dialer's own writes **and** what it received from its other
 peers, so ops travel across the mesh hop by hop. The version vector stops them
@@ -343,8 +392,10 @@ backing off and re-opening the subscription from the last event id are the
 manager only repeats `hello` + `push`, the outbound half a transport cannot know
 about.
 
-A page that cannot be applied — a `beforeApply` that throws, a record file this
-node cannot read — is a **break in the stream**, not a page to step over: the
+A page that cannot be applied — a `beforeApply` that throws, a log append
+that fails — is a **break in the stream**, not a page to step over (an op on
+a record file this node cannot read is skipped, `OP_UNREADABLE`, and the
+page goes on): the
 pages behind it are dropped, the subscription is closed and reopened from the
 last cursor that was saved, and the page comes again (`error` with
 `code: 'PAGE_FAILED'`, `cursor`, `attempt`). The third failure in a row leaves
@@ -370,14 +421,19 @@ different version is not drift; it is what `v` on the ops is for.
 A dialer whose cursor the host cannot resume — a brand-new node, or one that was
 away longer than the host's retention — receives `{ bootstrap: true }` on the
 subscription, and switches to `snapshot`. The host pages through **every**
-entry, tombstones included, with its merge metadata. On a binary-capable
-transport a page is streamed as NDJSON with backpressure; otherwise it comes
-inline. The dialer joins each page as one batch — one log append, one chain
+entry of the scopes it granted, tombstones included, with its merge metadata.
+On a binary-capable transport a page is streamed as NDJSON with
+backpressure; otherwise, or above the host's `pageBytes`, it comes inline. The dialer joins each page as one batch — one log append, one chain
 block, every record a `merge` op of its own (`mergeEntry`) — adopts the host's
 vector as of the first page, and re-subscribes from that page's event id.
 Whatever landed while paging replays and folds in as a no-op. A record the
 dialer keeps sealed ([encrypted](./storage#encryption-at-rest)) is left as it
-is; the rest of the page lands.
+is, and a record stamped beyond `sync.maxSkew` or under an id that is no
+record id is left out; the rest of the page lands. The metadata is rebuilt
+into the shape the engine trusts before it is joined, and a list or text
+block past a [bound](#guarantees-and-limits) is not taken as state — for
+pending work that bound is the default 4096, whatever `sync.pendingMax`
+says.
 
 The joined state enters the dialer's own log as `merge` and `advance` ops, so
 a third node resuming from the dialer gets it too — bootstrap is transitive.
@@ -409,12 +465,13 @@ await storage.sync.addNode({ url, scopes: ['Doc'] }); // Doc records, plus every
 
 An op belongs to the scope of the record as it leaves it: a `write`'s own
 data, a `set` (an `update()`) merged onto the record it changes, the record's
-for an `inc`, `add`, `remove`, `delete` or `purge` — and read after the
-validator, so a scope field a default fills counts. An `update()` that does
-not name the scoped field is still in the record's scope.
+for every other op — an `inc`, an `add` or a `remove`, a list, text or tree
+op, a `delete`, a `purge` — and read after the validator, so a scope field a
+default fills counts. An `update()` that does not name the scoped field is
+still in the record's scope.
 
-An unscoped record (scope `'*'`) reaches every peer. On a wrpc host the
-subscriber joins the room `syncom:<scope>` for each scope it asked for, so
+An unscoped record (scope `'*'`) reaches every peer. On a wrpc host a peer
+joins the room `syncom:<scope>` at `hello` for each scope it asked for, so
 `server.rooms.count('syncom:Doc')` and the cluster's `fetchClients({ room })`
 describe the sync topology without any code in syncom. Delivery itself stays
 on the subscription — a room broadcast is at-most-once and cannot be resumed.
@@ -451,12 +508,14 @@ await storage.sync.addNode({ url: 'wss://peer/api', token: 'secret', scopes: ['*
 await storage.sync.enableNode('wss://peer/api', false); // keep, but do not dial
 await storage.sync.removeNode('wss://peer/api');
 storage.sync.listNodes();
-// [{ url, token, scopes, enabled, lastSync, cursor, remote: { id, epoch, schema } }]
+// [{ url, token, scopes, enabled, lastSync, cursor, remote: { id, epoch, schema }, acked }]
 ```
 
 Each node is a file under `<path>/remote/`, named by its percent-encoded url,
 on Node.js and in the browser alike. The `cursor` and the remote node's identity
-are kept there too, which is why a restart resumes instead of bootstrapping.
+are kept there too, which is why a restart resumes instead of bootstrapping —
+and why a node is registered once: `addNode()` of a url already there is
+`NODE_EXISTS`.
 
 `url` is whatever `connect(node)` understands — syncom never parses it.
 
@@ -469,22 +528,32 @@ await storage.sync.sync();  // push what the peers lack right now
 storage.sync.peers();       // [{ url, node, connected, subscribed, cursor, lastSync, pending, behind, stuck, lastError }]
 storage.sync.hosted();      // hosting side: [{ node, scopes, since, cursor }] — every live `changes` feed
 
-storage.sync.on('peer', ({ url, connected, node, reconnected }) => {});
+storage.sync.on('peer', ({ url, connected, node, reconnected, schema }) => {});
 storage.sync.on('sync', ({ url, pushed, received, applied, skipped, duplicates, gaps, malformed, unsigned, forged }) => {});
 storage.sync.on('bootstrap', ({ url, records }) => {});
-storage.sync.on('error', (error) => {}); // error.url names the peer; error.code may be 'PAGE_FAILED' | 'STUCK' | 'HANDSHAKE_LOOP'
-storage.sync.on('refused', ({ node, reason, count }) => {}); // hosting side: ops outside the peer's scopes
+storage.sync.on('error', (error) => {}); // error.url names the peer; error.code: a string below, or a host's numeric refusal
+storage.sync.on('refused', ({ node, reason, count }) => {}); // hosting side: a peer's ops refused — 'scope' | 'forged' | 'unsigned'
 storage.sync.on('start', () => {});
 storage.sync.on('stop', () => {});
 storage.sync.on('node', ({ url, action }) => {}); // 'add' | 'remove' | 'enable' | 'disable'
 storage.sync.on('connect', ({ url }) => {});     // a link was accepted, before hello
-storage.sync.on('hello', ({ node, scopes }) => {}); // hosting side: a peer was authorized
+storage.sync.on('hello', ({ node, scopes, schema }) => {}); // hosting side: a peer was authorized
 
-storage.on('change', (op, via) => {});  // every op applied here; via is { url, node } of the peer, null for a local write
+storage.on('change', (op, via) => {});  // every op logged here, one skipped here too; via is { url, node } of the peer, null for a local write
 storage.on('log', ({ kind, sealed, dropped, floor, segments }) => {}); // the log sealed a segment; floor is where a resume still works
-storage.on('apply', ({ peer, applied, skipped }) => {}); // a peer's batch is durable
-storage.on('error', (error) => {});     // error.code: 'OP_REFUSED' | 'OP_INVALID' | 'OP_UNREADABLE' | 'SKEW'
+storage.on('apply', ({ via, peer, ops, applied, skipped }) => {}); // a peer's batch is durable
+storage.on('error', (error) => {});     // error.code: 'OP_REFUSED' | 'OP_INVALID' | 'OP_UNREADABLE' | 'SKEW' | 'BAD_SIGNATURE' | 'UNSIGNED' | 'UNPERSISTED'
 ```
+
+The sync `error` codes are `PAGE_FAILED` and `STUCK` (a page of the feed
+that did not land — see [Protocol](#protocol)), `HANDSHAKE_LOOP` (below),
+`REWOUND` and `UNDELIVERABLE` ([The log](#the-log)), `BAD_HELLO` (an answer
+without a node id) and `STREAMS_UNSUPPORTED` (a streamed page on a link
+without `stream`); a refusal the host answered with (400, 403, 409, 413,
+429) arrives as its number. In the `sync` event, `malformed` counts the ops
+refused by their shape or their stamp
+([Guarantees and limits](#guarantees-and-limits)); a payload the engine does
+not admit is an `OP_REFUSED` on the storage instead.
 
 Listeners are contained: one that throws is logged and never fails what it
 observed. To take part in an operation — refuse a write, skip a peer's op,
@@ -509,12 +578,14 @@ once `close()` was called is refused at once.
 | `scope(id, data)` | `() => '*'` | The scope of a record |
 | `retention.ops` | `10000` | Ops kept in the log before the oldest segment is dropped |
 | `retention.days` | — | Age after which a segment is dropped |
-| `maxSkew` | `86400000` | How far ahead of this node's clock a peer's stamp may be, in ms; beyond it the op is `malformed`. `Infinity` disables |
-| `pendingMax` | `4096` | How much pending work a list or text field takes from ops that ran ahead of what they depend on — runs waiting for their anchor, cuts and extensions for their run, registers and switched-off marks for elements not here — before an op is refused (`OP_REFUSED`, reason `bound`, with `detail`, `count` and `max`) and a snapshot block is dropped. A refusal is final on this node, so a mesh with several hosts raises it rather than lowers it. `Infinity` disables |
+| `maxSkew` | `86400000` | How far ahead of this node's clock a peer's stamp may be, in ms; beyond it the op is `malformed`, and a snapshot record is left out of the join. `Infinity` disables |
+| `pendingMax` | `4096` | How much pending work a list or text field takes from a peer's ops that ran ahead of what they depend on — runs waiting for their anchor, cuts and extensions for their run, registers and switched-off marks for elements not here — before an op is refused (`OP_REFUSED`, reason `bound`, with `detail`, `count` and `max`). A refusal is final on this node, so a mesh with several hosts raises it rather than lowers it. `Infinity` disables. A snapshot block is held to the default whatever this says |
+| `signatures` | `'verify'` | `'verify'`, `'require'` or `false` — see [Signatures](#signatures) |
 | `maxOutbox` | `10000` | Ops queued for one peer beyond this are dropped and the peer is `behind`; the recovery pushes what it lacks from the vector |
 | `log.rollAfter` | `64` | Appended batches per sealed segment |
-| `pageSize` | `500` | Ops per push, records per snapshot page |
+| `pageSize` | `500` | Ops per push. What a host serves per page — snapshot records, `changes` ops — is its own `unit({ pageSize })` |
 | `hooks` | — | `beforeConnect`, `beforeBootstrap` — see [Hooks and events](./hooks#sync-hooks) |
+| `sharedLog` | — | Reserved for a hub mode on a broker's log; refused in this version — see [Scaling](./scaling#hubs) |
 
 The `telemetry` option sits beside `sync` on `open()`, not inside it — see
 [OpenTelemetry](./telemetry) for the spans and metrics replication emits.
@@ -535,7 +606,7 @@ const unit = storage.sync.unit({
 | `access` | `'session'` | Applied to every procedure, wrpc-style |
 | `authorize(context, hello)` | — | Gate the handshake; `hello.token` is the dialer's registered token, `hello.scopes` what it will be held to |
 | `tracked` | built in | wrpc's `tracked()`; the built-in produces the same shape |
-| `pageSize` | `500` | Records per snapshot page |
+| `pageSize` | `500` | Records per snapshot page, ops per `changes` page |
 | `pageBytes` | `4 MiB` | Above this a page is sent inline rather than streamed |
 | `limits` | — | Per-peer push limits: `opsPerPush`, `bytesPerPush` (the JSON length of a page) and `opsPerSecond` — see below |
 | `meta` | — | Copied onto all four procedures, for a wrpc `onRequest` hook to read as `context.procedure.meta` |
@@ -545,16 +616,23 @@ ops and the bytes of a page, whatever transport carried it. A page over
 `opsPerPush` or `bytesPerPush` is refused with code **413** (`reason`
 `'OPS_PER_PUSH'` / `'BYTES_PER_PUSH'`); a peer whose ops exceed
 `opsPerSecond` — a token bucket per peer, refilled at that rate and holding
-one second's worth — with **429** (`'OPS_PER_SECOND'`). A refusal is a code, not a
-hang-up: the dialer reports it through its `error` event (`error.code`),
-drops that outbox and marks the peer **behind** (`peers()[i].behind`); what
-the host still lacks is pushed from the vector at the next sign of life on
-the link — a page received from the host, an op to relay — or by `sync()`,
-backed off (1 s, doubling to a minute) after a recovery that failed. A dialer
-whose `pageSize` is above the host's `opsPerPush` will never get a page
-through — keep the two in step. The `syncom.ops.limited` metric counts
-refusals by reason. The answer to a push carries the vector keys the page
-touched, which the dialer merges into what hello gave it.
+one second's worth — with **429** (`'OPS_PER_SECOND'`). A refusal is a code,
+not a hang-up: the dialer reports it through its `error` event
+(`error.code`), drops that outbox and marks the peer **behind**
+(`peers()[i].behind`); what the host still lacks is pushed from the vector at
+the next sign of life on the link — a page received from the host, an op to
+relay — or by `sync()`, backed off (1 s, doubling to a minute) after a
+recovery that failed. A push refused during the handshake stops the
+handshake there: the `changes` subscription is not opened, so nothing comes
+from the host — the recovery still catches the host up — until the next
+handshake, when the link reconnects or after `enableNode(url, false)` and
+`true`. A dialer whose `pageSize` is above the host's `opsPerPush` will never
+get a page through — keep the two in step. The `syncom.ops.limited` metric
+counts refusals by reason (`ops`, `bytes`, `rate`). The answer to a push
+carries the vector keys the page touched, which the dialer merges into what
+hello gave it, and the counts of what the host made of the page — `applied`,
+`skipped`, `duplicates`, `gaps`, `malformed`, `unsigned`, `forged`,
+`outOfScope`.
 
 ```js
 const unit = storage.sync.unit({
@@ -588,17 +666,47 @@ the engine's own tests run on.
 
 - **Convergence.** Two nodes that have applied the same set of ops hold the
   same records, whatever the order — except the documented counter/reset
-  case.
+  case, and a list or text field where a bound refused an op on one node and
+  not on the other (below).
 - **At-least-once delivery, idempotent application.** An op may arrive more
   than once; applying it again changes nothing.
+- **A counter is not bounded against overflow.** Each `inc` must be a finite
+  number, but a sum past `Number.MAX_VALUE` becomes `Infinity`, which reads
+  and is saved as `null`: a node that reloads the record starts counting
+  again from the next increment, while one that still holds it in memory
+  keeps `Infinity`. Keep counters well inside the safe range.
 - **A peer's op is checked before it is read.** `origin`, `seq`, `ts`, `type`,
   `scope`, `v`, the record id (or an `advance`'s vector) and the signature's
   three fields must have their shape (`actor` and `from` are claims, carried
-  as they are), and a stamp more
-  than `sync.maxSkew` (24 hours) ahead of this
-  node's clock is a broken clock, not a concurrent write. Either is
+  as they are), and a stamp more than `sync.maxSkew` (24 hours) ahead of
+  this node's clock is a broken clock, not a concurrent write. Either is
   `malformed`: counted, reported (`error` with `code: 'SKEW'` for the latter),
-  neither logged nor relayed, and never observed into this node's clock.
+  neither logged nor relayed, and never observed into this node's clock — a
+  gap in its stream, as an op of a type this version does not know is.
+- **A payload is checked where it lands.** A list, text or tree op whose
+  payload the engine does not admit — a `content` that names no kind, an
+  anchor or a cut naming an element no older than the op, a run extended by
+  another origin than the one that made it, a place among siblings that is
+  no fractional index — changes nothing and is reported: `OP_REFUSED`, the
+  field's `reason` `'malformed'`, counted in `syncom.ops.rejected`. The op is
+  well formed, so it is still logged and relayed, as a no-op everywhere. (A
+  `write`, `set`, `inc`, `add` or `remove` whose payload has the wrong shape
+  applies as nothing, unreported.)
+- **Bounded, and a refusal is final.** What a peer can make a node hold is
+  bounded per field: a run of a list or a text at most 1 048 576 slots and
+  the field 4 194 304, tombstones included; its pending work — runs waiting
+  for their anchor, cuts and extensions waiting for their run, registers and
+  switched-off marks for elements not here — `sync.pendingMax` (4096). An op
+  past a bound is refused for that field (`OP_REFUSED`, `reason` `'bound'`,
+  with `detail` — `'pending'`, `'run'` or `'field'` — `count` and `max`),
+  then logged and relayed: the vector moves past it, so this node never takes
+  it, and each node it reaches decides by its own bounds. Pending work
+  depends on the order ops arrive in, so two nodes can disagree there, and
+  then read the field differently: the bound is a defence against a hostile
+  peer, and a mesh where honest ops run far ahead of what they depend on
+  raises it. A tree shows 512 levels (what hangs deeper is folded, not
+  shown, the same everywhere) and a place of more than 1 024 characters is
+  malformed. See [Costs and limits](./lists#costs-and-limits).
 - **A node's own sequence never repeats.** The log is written before the op is
   announced, so a crash cannot mint two different ops with one number.
 - **Logged means applied, eventually.** The record files are written after
@@ -617,12 +725,15 @@ the engine's own tests run on.
   field named `a.b`, not a path. Keep fields that change independently at the
   top level.
 - **A host checks, every node decides.** A host that skips a peer's op — its
-  validator fails it (`OP_INVALID`) or `beforeApply` returns `false` — still
-  logs and relays it: a withheld op would be a gap in its origin's stream for
-  every node behind the host. Each of them runs its own validators and hooks
-  on it. What stops at the host is an op outside the peer's scopes, a
-  malformed or skewed one, a signature refused, and a `beforeApply` that
-  throws (the whole page is refused, and offered again).
+  validator fails it (`OP_INVALID`), `beforeApply` returns `false`, the
+  record is unreadable here (`OP_UNREADABLE`) — or refuses it for a field
+  (`OP_REFUSED`: a kind that the field's holder outranks, a payload it does
+  not admit, a bound) still logs and relays it: a withheld op would be a gap
+  in its origin's stream for every node behind the host. Each of them runs
+  its own validators, hooks and bounds on it. What stops at the host is an
+  op outside the peer's scopes, a malformed or skewed one, a signature
+  refused, and a `beforeApply` that throws (the whole page is refused, and
+  offered again).
 - **fsync is opt-in.** Files are written with the platform's default
   durability; `open({ durable: true })` adds an fsync after every write on a
   backend that has one (`node:fs`). On OPFS there is no rename either, so a

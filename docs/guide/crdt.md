@@ -8,6 +8,11 @@ their own.
 const { diff, merge, apply } = require('@alexify/syncom');
 ```
 
+They are not the storage's methods of similar names: `storage.diff(id, from,
+to)` hands out the patches between two versions of a record and
+`storage.applyPatches()` writes them as ops — see [Diff and
+restore](./versions#diff-and-restore).
+
 ## `diff(source, target)`
 
 Returns the change that turns `source` into `target`.
@@ -77,7 +82,7 @@ or whose `type` is unrecognised, are skipped.
 | --- | --- |
 | `write` | replaces the state with `record.data` — a full record write; a bare `write` without data copies the state forward |
 | `delta` | `merge(state, record.data)` |
-| `delete` | removes `record.key`; without a `key` (Storage's `{ type: 'delete', id }`) the record is gone and the state becomes `{}` |
+| `delete` | sets `record.key` to `undefined` — the key stays on the object and is gone from its JSON; without a `key` (Storage's `{ type: 'delete', id }`) the record is gone and the state becomes `{}` |
 | `inc` | adds `record.value` to `record.key` |
 | `dec` | subtracts `record.value` from `record.key` |
 
@@ -93,9 +98,11 @@ apply({ hits: 0 }, [
 ## Where storage uses them
 
 Storage does **not** replicate through `merge`. Its writes are typed
-operations — `write`, `set`, `inc`, `add`, `remove`, `delete` — applied with
-last-writer-wins registers, per-origin counters and observed-remove sets,
-because a delta that *adds* numbers cannot tell `hits = 3` from `hits += 3`,
-and one that unions arrays can never take an element out. See [Sync](./sync#operations) for that
-model. `diff`, `merge` and `apply` remain what they are here: standalone
-helpers for plain objects.
+operations — `write`, `set`, `inc`, `add`, `remove`, `splice`, `assign`,
+`move`, `mark`, `tree`, `delete`, `purge` — applied with last-writer-wins
+registers, per-origin counters, observed-remove sets, sequences for lists and
+texts, and move logs for trees, because a delta that *adds* numbers cannot
+tell `hits = 3` from `hits += 3`, one that unions arrays can never take an
+element out, and neither knows a position. See [Sync](./sync#operations) and
+[Lists, text and trees](./lists) for that model. `diff`, `merge` and `apply`
+remain what they are here: standalone helpers for plain objects.

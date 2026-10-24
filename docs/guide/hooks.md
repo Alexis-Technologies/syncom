@@ -52,11 +52,11 @@ silently never runs.
 
 | Hook | Runs | Return | Throw |
 | --- | --- | --- | --- |
-| `beforeWrite(ctx)` | Inside every local write, after the current record is loaded and before the op is stamped and applied | A plain object replaces `data` (`write` and `set` only; a `TypeError` for anything else) | The write is refused: nothing stamped, logged or written |
-| `afterWrite(ctx, op)` | After the write is durable — `op` is the op it became, `null` for an encrypted (local) write; not called when the write changed nothing | Ignored | The call rejects, but the op stays committed and is announced |
+| `beforeWrite(ctx)` | Inside every local write, after the current record is loaded and before the op is stamped and applied — once per op, so once per hunk of `updateText()`, per patch of `applyPatches()`, `restore()` and `compact()`, per op of `migrate()`, and per record a bootstrap joins (`merge`) | A plain object replaces `data` (`write` and `set` only; a `TypeError` for anything else) | The write is refused: nothing stamped, logged or written |
+| `afterWrite(ctx, op)` | After the write is durable — `op` is the op it became, `null` for an encrypted (local) write; not called when the write changed nothing (a tree move to where the node already is) or was refused | Ignored | The call rejects, but the op stays committed and is announced |
 | `beforeRead({ id, at? })` | Inside `get(id)`, before the read — with `at` for a read at a version (`{ tag }` for `at(name).get(id)`), once with `{ id, history: true }` for `history()` | Ignored | The read is refused |
 | `afterRead({ id, at? }, data)` | Inside `get(id)`, after the read — with `at` for a read at a version, and per version of `history()` (its event id) | Anything but `undefined` (including `null`) replaces what the caller sees | The read rejects |
-| `beforeApply(ctx)` | Inside `applyRemote`, once per op, after the duplicate/gap checks and before the op is applied | `false` skips the op *here* (see below) | The whole batch is aborted before anything is durable |
+| `beforeApply(ctx)` | Inside `applyRemote`, once per op of any kind, after the signature, duplicate, gap and scope checks and before the op is applied; not for an op held for a newer schema (`ahead: 'hold'`) or one on a record this node keeps sealed | `false` skips the op *here* (see below) | The whole batch is aborted before anything is durable |
 | `afterApply(batch)` | After a peer's batch is durable, once per `applyRemote` call | Ignored | The call rejects; the batch stays and is announced |
 
 `ctx` for a write is `{ type, id, data?, key?, value?, index?, count?, content?,
@@ -68,37 +68,55 @@ type (`write`, `set`, `inc`, `add`, `remove`, `splice`, `assign`, `move`,
 amount), an `add` or a `remove` (the elements), `key`/`index`/`count`/`content`
 to a `splice`, `key`/`index`/`value` to an `assign`, `key`/`index`/`to` to a
 `move`, `key`/`start`/`end`/`name`/`value`/`expand`/`many` (or `off`) to a
-`mark`, `key`/`node`/`parent`/`after`/`before` to a `tree` (each the call as
-the caller made it), `current` is the
+`mark`, `key`/`node`/`parent`/`after`/`before` to a `tree` — each the call as
+the caller made it, save that a `push()` is a `splice` with `index: null`
+(the end), an `unmark()` a `mark` with `value: null` and the reversed expand
+rule, an `unmarkById()` a `mark` with `off`, a `treeRemove()` a `tree` with
+`parent: '$trash'`, and a `remove` from `applyPatches()` carries `removals`
+or `own` as the patch did.
+`meta` is the joined metadata of a `merge`. `current` is the
 record as it is now (`null` when absent or deleted — read it, do not change
 it), `encrypted` says whether the write is sealed for this node, `source` is
-the `Record` whose `save()` this is, `v` is this node's schema version and
+the `Record` whose `save()` this is or the `source` given to `applyPatches()`
+(`null` otherwise), `v` is this node's schema version and
 `actor` who the op will say made it (`null` when nobody). For a remote op it is `{ op, via, peer, current }`,
-where `peer` is `{ url, node }` — `url` is `null` when this node is the host.
+where `peer` is `{ url, node }` — `url` is `null` when this node is the host —
+and `op` is the op as it travels: a `splice`, a `move` or a `tree` names
+anchors and places, not the indices of the call that made it (see [What
+travels](./lists#what-travels)).
 
 The order of a local write:
 
 ```
-load the record → beforeWrite → apply the op → append to the log → chain block
-→ record file → afterWrite → Record 'update' → 'change'
+load the record → beforeWrite → stamp → apply the op → validate → append to the log
+→ chain block → record file → afterWrite → Record 'update' → 'commit' → 'change'
 ```
 
-and of a page from a peer:
+(under [`open({ defer })`](./storage#when-a-record-file-lags-the-log) the
+chain block and the record file wait for the flush, after the events), and of
+a page from a peer:
 
 ```
-per op: malformed (shape, id, skew) / duplicate / gap checks → beforeApply → apply
-then:   append to the log → persist the records → afterApply → 'apply' → 'change' × n
+the page: signatures checked
+per op:   malformed (shape, id, skew) / duplicate / gap checks → the pushing peer's
+          scopes (a host) → beforeApply → apply → validate
+then:     append to the log → persist the records → afterApply → 'apply' → 'change' × n
 ```
 
 ### Reads stay raw where it matters
 
-`afterRead` changes what `get()` — and everything that reads through it: a
-`Record`'s live properties, `Collection.get`, a contract's `DataReader` —
-hands back. It does not touch the record: `swap()` compares against the raw
-data, `snapshot()` replicates the raw data, `getCachedData()` and `has()` are
-raw, and so is what a cursor (`select()`) reads. A `Record` that saved a
-redacted field would write the redaction back;
-it does not, because `save()` writes only the fields that were assigned.
+`afterRead` changes what `get()` — and everything that reads through it:
+`get(id, { at })`, `at(name).get(id)`, each version `history()` hands out,
+`Collection.get`, a contract's `DataReader`, a `Record` as it loads — hands
+back. It does not touch the record: `swap()` compares against the raw data,
+`snapshot()` replicates the raw data, `getCachedData()` and `has()` are raw,
+and so is what a cursor (`select()`), `diff()`, `spans()`, `cursor()` and
+`index()` read. A `Record` is loaded through `get()`, but the changes it
+follows afterwards — a write here, an op from a peer — arrive as the record
+is stored, without `afterRead`: a redaction holds on a live `Record` only
+until the record next changes. A `Record` that saved a redacted field would
+write the redaction back; it does not, because `save()` writes only the
+fields that were assigned.
 
 ### Skipping a peer's op
 
@@ -118,9 +136,12 @@ keeps sealed (`encrypted: true`), which is logged and relayed, never applied.
 
 `applyRemote` reports it: `{ applied, skipped, duplicates, gaps, malformed, unsigned, forged, outOfScope }` —
 `applied` counts every accepted op, skipped ones included; `applied - skipped`
-reached a record; `malformed`, `unsigned` and `forged` were refused before
-anything read them, and `outOfScope` (a host's push) because the record they
-write is outside the pushing peer's scopes.
+were applied here — an op older than what the record holds, or one the
+engine refused (`OP_REFUSED`: the field is held by a kind that outranks the
+op's, a bound, a payload it does not admit), leaves the record as it was and
+is logged and relayed all the same, never a gap; `malformed`, `unsigned` and
+`forged` were refused before anything read them, and `outOfScope` (a host's
+push) because the record they write is outside the pushing peer's scopes.
 
 A throwing `beforeApply` aborts the batch before anything is durable. The
 sender sees a failed push (on the dialing side its `error` event fires, with
@@ -133,10 +154,12 @@ Every local write and every peer batch runs through one mutation queue, and
 the write and apply hooks run inside it. A hook that awaits something slow
 holds every other write for that long. A hook that *writes* would wait for the
 queue, which is waiting for the hook — so a write issued from `beforeWrite`,
-`afterWrite`, `beforeApply` or `afterApply` is refused with an error rather
-than left to deadlock. Reads (`get`, `has`, `record`) are fine from any hook.
-The read hooks run outside the queue: a write issued from `beforeRead` or
-`afterRead` simply queues, and a slow read hook holds no write.
+`afterWrite`, `beforeApply` or `afterApply` is refused with a `SyncomError`
+(`code: 'IN_HOOK'`) rather than left to deadlock; a hook that awaits it and
+lets it throw fails with a `HookError` whose `cause` is that refusal. Reads
+(`get`, `has`, `record`) are fine from any hook. The read hooks run outside
+the queue: a write issued from `beforeRead` or `afterRead` simply queues, and
+a slow read hook holds no write.
 
 ## Sync hooks
 
@@ -176,18 +199,20 @@ const storage = await open({
 Every listener is contained: it is invoked at once, never awaited, and if it
 throws the failure is logged at `warn` (`{ event: 'listener.error', name }`)
 and the operation carries on. `error` with nobody listening is silent rather
-than a throw.
+than a throw. A function is one listener per event — `on()` with it twice
+throws — and an event takes at most `open({ maxListeners })` of them (100 by
+default) on the storage and on its sync manager; one more throws.
 
 ### Storage
 
 | Event | Payload | When |
 | --- | --- | --- |
-| `change` | `(op, via)` | Every op applied here; `via` is `null` for a local write, otherwise `{ url, node }` of the peer it came from (`url` null on the hosting side) |
-| `commit` | `({ op, seq, source, before, after, kinds })` | An op of this node's own is durable: its log seq, the `Record` or `applyPatches()` source it came from, the record before and after as copies, every field's kind — see [The commit event](./versions#the-commit-event); built only while something listens |
+| `change` | `(op, via)` | Every op this node logs — a local write, a peer's accepted op (a skipped one included), a bootstrap's `merge` and `advance`; `via` is `null` for a local write, otherwise `{ url, node }` of the peer it came from (`url` null on the hosting side) |
+| `commit` | `({ op, seq, source, before, after, kinds })` | A local write is durable — any kind of op made through the write API, `applyPatches()` and `migrate()` included; never a peer's op, a bootstrap's `merge`, an encrypted write (it makes no op) or a write that changed nothing. `seq` is its log position, `source` the `Record` whose `save()` it was or the `source` given to `applyPatches()` (`null` otherwise), `before`/`after` the record as copies (`null` when absent or deleted), `kinds` every field's kind before and after (`register`, `counter`, `set`, `list`, `text`, `tree`) — see [The commit event](./versions#the-commit-event); built only while something listens. It fires after `afterWrite` and the `Record`'s `update`, before `change` |
 | `apply` | `({ via, peer, ops, applied, skipped, duplicates, gaps, malformed, unsigned, forged, outOfScope })` | A peer's batch is durable — `ops` are the accepted ones, skipped included |
 | `conflict` | `({ kind: 'unique', entity, fields, id, other, op })` | A peer's op left a unique key shared by two records — see [Queries](./storage#queries) |
 | `schema` | `({ kind: 'drift', … })` / `({ kind: 'ahead', op, held })` | A peer runs this node's schema version with another snapshot hash — see [Schemas](./sync#schemas); a peer's op is from a newer version — see [Reading across versions](./storage#reading-across-versions) |
-| `error` | `(error)` with `error.code`: `error.op`, and `error.rejected` or `error.entity` + `error.issues`; `error.count` for a signature; `error.ids` for `UNPERSISTED` | A peer's op of a kind the field's holder outranks (`OP_REFUSED`), skipped as invalid under this node's [schema](./schema#how-a-write-is-validated) (`OP_INVALID`) or because its record's file cannot be read (`OP_UNREADABLE`), stamped beyond `sync.maxSkew` (`SKEW`); a page's ops refused for their signature (`BAD_SIGNATURE`, `UNSIGNED`); logged ops whose record files could not be written (`UNPERSISTED`) |
+| `error` | `(error)` with `error.code`: `error.op`, and `error.rejected` (`[{ field, reason, detail?, count?, max? }]`) or `error.entity` + `error.issues`; `error.count` for a signature; `error.ids` for `UNPERSISTED` | A peer's op the engine refused (`OP_REFUSED`) — `reason` the kind holding the field when it outranks the op's, `bound` past a [limit](./lists#costs-and-limits) (`detail`: `pending`, `run` or `field`), `malformed` for a payload it does not admit; skipped as invalid under this node's [schema](./schema#how-a-write-is-validated) (`OP_INVALID`) or because its record's file cannot be read (`OP_UNREADABLE`), stamped beyond `sync.maxSkew` (`SKEW`); a page's ops refused for their signature (`BAD_SIGNATURE`, `UNSIGNED`); logged ops whose record files could not be written (`UNPERSISTED`) |
 | `log` | `({ kind: 'roll', sealed, dropped, floor, segments })` | The op log sealed a segment, and compacted `dropped` of them — see [The log](./sync#the-log) |
 | `close` | — | After `close()` sealed the log |
 
