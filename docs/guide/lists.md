@@ -29,7 +29,7 @@ is a splice at the end. A live `Record` has the same two methods with its own
 id. The first write decides the field's kind, and a call that only removes
 takes it from the field.
 
-Three things are refused:
+Three things are refused (the same for `setAt()` and `move()`):
 
 - **Past the end.** An index, or an index plus a count, beyond the field's
   length rejects with `code: 'OUT_OF_RANGE'` and `{ id, field, index, count,
@@ -82,6 +82,31 @@ The one case Fugue orders differently from FugueMax: when two writers insert
 right after the same element while each sees a different element following
 it, their two runs may come out in either order. The letters of a run never
 mix with another's.
+
+## Moving and assigning
+
+A list's elements keep their names: `setAt(id, key, index, value)` gives the
+element at `index` a new value, `move(id, key, from, to)` puts the element
+at `from` where it reads as `to` once it is out. Both are registers per
+element — last writer wins, by stamp — so the merge keeps the element once:
+
+```js
+await storage.push(id, 'todo', ['write', 'test', 'ship']);
+await storage.setAt(id, 'todo', 1, 'test it');     // ['write', 'test it', 'ship']
+await storage.move(id, 'todo', 2, 0);              // ['ship', 'write', 'test it']
+```
+
+- Two nodes that move the same element concurrently leave it at the newer
+  move's place, not twice: the element shows where its position register
+  points. A move is a cut of the slot it showed at and a new one-element
+  position run that names it, so every node keeps every position and shows
+  the element at the one the register names.
+- A move concurrent with a removal of the element brings it back at the new
+  place — the removal took the old slot, the move made a new one. A removal
+  made after the move takes the element away.
+- A value set with `setAt()` follows the element through a concurrent move;
+  a value set concurrently by two nodes resolves by stamp.
+- `setAt()` and `move()` are for lists; a text has neither.
 
 ## What travels
 
@@ -142,10 +167,9 @@ caller's to avoid.
   document a list of block records rather than one field.
 - A `splice` larger than a host's `bytesPerPush` is refused for the whole
   page it rides in; a paste of megabytes belongs in several calls.
-- Lists have no `move` yet: moving an element is a cut and an insert, and two
-  nodes moving the same element concurrently leave it twice. Elements have no
-  identity across that; `setAt` and `move` with per-element registers are
-  the next step.
+- A move adds a position run to the record's metadata — one key, about a
+  hundred bytes — and the old slot stays as a tombstone: a list reordered
+  thousands of times carries that history until a reset.
 - Queries see a list as the array it reads as: an index on the field posts
   every element (`select({ tags: 'bug' })` finds a list holding `'bug'`), an
   equality against a whole array compares it in order, and a unique key over

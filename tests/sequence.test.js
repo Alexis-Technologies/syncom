@@ -147,6 +147,120 @@ test('sequence engine', async (t) => {
     assert.deepStrictEqual(read(a), [0, { id: 1 }, 3]);
   });
 
+  await t.test('a list moves and assigns: a position and a value register per element', () => {
+    const a = node('A', 'l');
+    const first = insert(a, 0, ['a', 'b', 'c']);
+    const R = S.runKey(first.ts, 'A');
+    const idx = index(a);
+    const bKey = S.elemAt(idx, 1);
+    assert.strictEqual(bKey, S.elemKey(R, 1));
+    assert.deepStrictEqual(S.slotAt(idx, 1), [R, 1, 1]);
+    // assign: last writer wins by stamp; the same stamp changes nothing.
+    const ts1 = tick();
+    const assigned = S.applyAssign(a.seq, [ts1, 'A'], { elem: bKey, value: 'B' });
+    assert.strictEqual(assigned.changed, true);
+    a.seq = assigned.seq;
+    assert.deepStrictEqual(read(a), ['a', 'B', 'c']);
+    assert.strictEqual(S.applyAssign(a.seq, [ts1 - 1, 'Z'], { elem: bKey, value: 'old' }).changed, false);
+    assert.strictEqual(S.applyAssign(a.seq, [ts1, 'A'], { elem: bKey, value: 'B' }).changed, false);
+    // move a to the end: cut its slot, add a position run after c, point the register at it.
+    const aKey = S.elemAt(idx, 0);
+    const mv = {
+      ts: tick(),
+      origin: 'A',
+      payload: { elem: aKey, cut: S.slotAt(idx, 0), at: `>${S.elemKey(R, 2)}`, value: 'a' },
+    };
+    const moved = S.applyMove(a.seq, [mv.ts, mv.origin], mv.payload);
+    assert.strictEqual(moved.changed, true);
+    a.seq = moved.seq;
+    assert.deepStrictEqual(read(a), ['B', 'c', 'a']);
+    assert.strictEqual(S.elemAt(index(a), 2), aKey, 'the element keeps its name across the move');
+    assert.deepStrictEqual(a.seq.pos[aKey], [mv.ts, 'A', S.runKey(mv.ts, 'A')]);
+    assert.strictEqual(S.applyMove(a.seq, [mv.ts, mv.origin], mv.payload).changed, false, 'idempotent');
+    // A concurrent move of the same element by B, stamped newer, wins: the
+    // element shows once, at B's place; A's position stays as a dead slot.
+    const b = node('B', 'l');
+    apply(b, first);
+    const mvB = {
+      ts: tick(),
+      origin: 'B',
+      payload: { elem: aKey, cut: S.slotAt(index(b), 0), at: `<${S.elemKey(R, 1)}`, value: 'a' },
+    };
+    const seqs = [
+      [
+        first,
+        { ts: ts1, origin: 'A', payload: { elem: bKey, value: 'B' }, kind: 'assign' },
+        { ...mv, kind: 'move' },
+        { ...mvB, kind: 'move' },
+      ],
+    ];
+    for (const ops of seqs) {
+      const results = permutations(ops)
+        .filter(orderedPerOrigin)
+        .map((order) => {
+          const n = node('fresh', 'l');
+          for (const op of order) {
+            const stamp = [op.ts, op.origin];
+            const r =
+              op.kind === 'assign'
+                ? S.applyAssign(n.seq, stamp, op.payload)
+                : op.kind === 'move'
+                  ? S.applyMove(n.seq, stamp, op.payload)
+                  : S.applySplice(n.seq, stamp, op.payload);
+            n.seq = r.seq;
+          }
+          return n;
+        });
+      for (const n of results) {
+        assert.deepStrictEqual(read(n), ['a', 'B', 'c']);
+        assert.deepStrictEqual(n.seq, results[0].seq);
+      }
+    }
+    // A cut of the slot an element shows at hides it; a concurrent move brings it back at the new place.
+    const c = node('C', 'l');
+    apply(c, first);
+    const cutA = { ts: tick(), origin: 'C', payload: { cut: [S.slotAt(index(c), 0)], content: [] } };
+    apply(c, cutA);
+    assert.deepStrictEqual(read(c), ['b', 'c']);
+    c.seq = S.applyMove(c.seq, [mvB.ts, 'B'], mvB.payload).seq;
+    assert.deepStrictEqual(read(c), ['a', 'b', 'c'], 'resurrected at the moved-to place');
+    // Cutting the winning position removes the element for good.
+    const gone = S.rangesOf(index(c), 0, 1);
+    c.seq = S.applySplice(c.seq, [tick(), 'C'], { cut: gone, content: [] }).seq;
+    assert.deepStrictEqual(read(c), ['b', 'c']);
+    // join equals replay with registers in it.
+    const joined = S.join(a.seq, c.seq);
+    const replayed = node('R', 'l');
+    for (const op of [first, cutA]) apply(replayed, op);
+    replayed.seq = S.applyAssign(replayed.seq, [ts1, 'A'], { elem: bKey, value: 'B' }).seq;
+    replayed.seq = S.applyMove(replayed.seq, [mv.ts, 'A'], mv.payload).seq;
+    replayed.seq = S.applyMove(replayed.seq, [mvB.ts, 'B'], mvB.payload).seq;
+    replayed.seq = S.applySplice(replayed.seq, [gone === null ? 1 : tick(), 'C'], { cut: gone, content: [] }).seq;
+    assert.deepStrictEqual(S.render(S.buildIndex(joined)), S.render(S.buildIndex(replayed.seq)));
+    // Malformed, and a text refuses both.
+    for (const bad of [null, { elem: 'nope', value: 1 }, { elem: aKey }, { elem: aKey, value: () => 1 }]) {
+      assert.strictEqual(S.applyAssign(a.seq, [tick(), 'A'], bad).reason, 'malformed', JSON.stringify(bad));
+    }
+    for (const bad of [
+      { elem: aKey, cut: [R, 0, 2], at: '^', value: 1 },
+      { elem: aKey, cut: [R, 0, 1], at: '$', value: 1 },
+      { elem: aKey, cut: [R, 0, 1], at: `<${S.elemKey(S.runKey(9e15, 'Z'), 0)}`, value: 1 },
+      { elem: aKey, cut: [S.runKey(9e15, 'Z'), 0, 1], at: '^', value: 1 },
+      { elem: aKey, cut: [R, 0, 1], at: '^' },
+    ]) {
+      assert.strictEqual(S.applyMove(a.seq, [tick(), 'A'], bad).reason, 'malformed', JSON.stringify(bad));
+    }
+    const text = node('T');
+    const t0 = insert(text, 0, 'ab');
+    assert.strictEqual(
+      S.applyAssign(text.seq, [tick(), 'T'], { elem: S.elemKey(S.runKey(t0.ts, 'T'), 0), value: 'x' }).reason,
+      'malformed',
+    );
+    // prune drops registers below the base with their runs.
+    const pruned = S.prune(a.seq, [mv.ts + 1, 'R']);
+    assert.strictEqual(pruned, null, 'everything was stamped below the reset');
+  });
+
   await t.test('concurrent inserts at one spot keep both, in origin order, whatever arrives first', () => {
     const a = node('A');
     const b = node('B');

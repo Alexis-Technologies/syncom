@@ -28,7 +28,11 @@ There is no released version section until then; everything below lands in it.
   counter or a set outrank a list, a list a text. Lists and texts cross a
   schema version through `migrate()`, are indexed and queried as the arrays
   and strings they read as, and converge over a mesh in the seeded fuzz.
-  Browser budget 42 → 48 KB.
+  A list is movable: `setAt(id, key, index, value)` and `move(id, key,
+  from, to)` are a value and a position register per element, so two nodes
+  moving one element concurrently leave it once, at the newer move's place,
+  and a move concurrent with a removal brings the element back. Browser
+  budget 42 → 49 KB.
 - **Full-text search.** An entity names its `search: ['title', 'body']`
   fields and `open({ search: createSearch() })` gives the index —
   `@alexify/syncom/search`, a subpath under 1 KB, so a node that never

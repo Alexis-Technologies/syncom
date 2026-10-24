@@ -187,6 +187,20 @@ expectAssignable<syncom.SyncOp>({
   value: { at: '^', content: 'hi' },
 });
 expectAssignable<syncom.SplicePayload>({ cut: [['1:a', 0, 2]], content: '' });
+expectType<Promise<void>>(storage.setAt('id', 'items', 0, { done: true }));
+expectType<Promise<void>>(storage.move('id', 'items', 0, 2, { actor: 'u2' }));
+expectError(storage.setAt('id', 'items', 'x', 1));
+expectError(storage.move('id', 'items', 0));
+expectAssignable<syncom.SyncOp>({
+  origin: 'a',
+  seq: 4,
+  ts: 4,
+  type: 'assign',
+  id: 'r',
+  key: 'items',
+  value: { elem: '1:0:a', value: 1 },
+});
+expectAssignable<syncom.MovePayload>({ elem: '1:0:a', cut: ['1:a', 0, 1], at: '^', value: 1 });
 expectType<syncom.SequenceBlock>(entry.meta.seqs.body);
 expectType<Promise<void>>(storage.delete('id', { actor: 'u2' }));
 expectType<Promise<void>>(storage.purge('id', { actor: 'u2' }));
@@ -228,6 +242,8 @@ expectType<Promise<void>>(record.remove('tags', ['x'], { actor: 'u2' }));
 expectError(record.add('tags', 'x'));
 expectType<Promise<void>>(record.splice('body', 0, 1, 'x'));
 expectType<Promise<void>>(record.push('items', [1]));
+expectType<Promise<void>>(record.setAt('items', 0, 'x'));
+expectType<Promise<void>>(record.move('items', 0, 1));
 expectAssignable<StorageOptions>({ getId: () => 'id' });
 expectAssignable<StorageOptions>({ getId: async () => 'id' });
 expectType<string>(syncom.Storage.generateId());

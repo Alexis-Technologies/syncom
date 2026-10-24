@@ -740,6 +740,60 @@ test('ops: a peer-shaped meta reaches nothing it should not', async (t) => {
     assert.deepStrictEqual(latestClock(revived.entry.meta), [60, '']);
   });
 
+  await t.test('a list moves and assigns through applyOp; concurrent moves leave the element once', () => {
+    const items = (ts, origin, seq, value) => op('splice', ts, origin, { seq, key: 'items', value });
+    const a1 = items(10, 'A', 1, { at: '^', content: [1, 2, 3] });
+    const assign = op('assign', 20, 'B', { seq: 1, key: 'items', value: { elem: '10:1:A', value: 'two' } });
+    const toEnd = op('move', 30, 'C', {
+      seq: 1,
+      key: 'items',
+      value: { elem: '10:0:A', cut: ['10:A', 0, 1], at: '>10:2:A', value: 1 },
+    });
+    assertCommutes([a1, assign, toEnd], { items: ['two', 3, 1] });
+    // Two moves of one element: the newer stamp names where it shows.
+    const toHead = op('move', 40, 'D', {
+      seq: 1,
+      key: 'items',
+      // To the head: a left child of the first element — `^` would be a child
+      // of the root, ordered among them by origin, D after A.
+      value: { elem: '10:0:A', cut: ['10:A', 0, 1], at: '<10:0:A', value: 1 },
+    });
+    assertCommutes([a1, assign, toEnd, toHead], { items: [1, 'two', 3] });
+    // A cut of the old slot concurrent with a move: the move brings it back.
+    const cut = items(25, 'B', 2, { cut: [['10:A', 0, 1]], content: [] });
+    assertCommutes([a1, assign, cut, toEnd], { items: ['two', 3, 1] });
+    // The assigned value travels with the element.
+    const assignMoved = op('assign', 50, 'E', { seq: 1, key: 'items', value: { elem: '10:0:A', value: 'one' } });
+    assertCommutes([a1, toEnd, toHead, assignMoved], { items: ['one', 2, 3] });
+    // Refusals: a text, a register, a counter, a set; a field with no block is nothing.
+    const text = replay([op('splice', 10, 'A', { seq: 1, key: 'body', value: { at: '^', content: 'ab' } })]);
+    const onText = applyOp(text, op('assign', 11, 'B', { seq: 1, key: 'body', value: { elem: '10:0:A', value: 'x' } }));
+    assert.deepStrictEqual([onText.changed, onText.rejected], [false, [{ field: 'body', reason: 'text' }]]);
+    const reg = replay([op('set', 1, 'A', { data: { f: 1 } })]);
+    assert.deepStrictEqual(applyOp(reg, op('move', 2, 'B', { seq: 1, key: 'f', value: toEnd.value })).rejected, [
+      { field: 'f', reason: 'register' },
+    ]);
+    // A register for an element whose run is not here yet names the field a
+    // list and waits — like a cut that comes before its run.
+    const none = applyOp(reg, op('assign', 2, 'B', { seq: 1, key: 'other', value: { elem: '10:0:A', value: 1 } }));
+    assert.deepStrictEqual([none.changed, none.rejected, none.entry.data.other], [true, [], []]);
+    assert.deepStrictEqual(none.entry.meta.seqs.other.vals, { '10:0:A': [2, 'B', 1] });
+    // Merge == replay with registers, and the codes are one character.
+    const left = replay([a1, assign]);
+    const right = replay([a1, toEnd, toHead]);
+    const all = replay([a1, assign, toEnd, toHead]);
+    assert.deepStrictEqual(mergeEntry(left, right).meta, all.meta);
+    assert.deepStrictEqual(mergeEntry(left, right).data, all.data);
+    assert.deepStrictEqual(
+      packOps([assign, toEnd]).map((row) => row[3]),
+      ['=', '^'],
+    );
+    assert.deepStrictEqual(
+      unpackOps(packOps([assign, toEnd])).map((o) => o.type),
+      ['assign', 'move'],
+    );
+  });
+
   await t.test('mergeEntry joins two sequence histories like replaying both; kinds keep their precedence', () => {
     const splice = (ts, origin, seq, key, value) => op('splice', ts, origin, { seq, key, value });
     const a1 = splice(10, 'A', 1, 'body', { at: '^', content: 'ab' });

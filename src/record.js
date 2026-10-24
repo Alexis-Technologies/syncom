@@ -161,6 +161,16 @@ class Record extends Emitter {
     await this.#storage.push(this.#id, key, content, options);
   }
 
+  /** Replaces an element of a list field; the storage-level `setAt` with this record's id. */
+  async setAt(key, index, value, options = {}) {
+    await this.#storage.setAt(this.#id, key, index, value, options);
+  }
+
+  /** Moves an element of a list field; the storage-level `move` with this record's id. */
+  async move(key, from, to, options = {}) {
+    await this.#storage.move(this.#id, key, from, to, options);
+  }
+
   async delete(options = {}) {
     await this.#storage.delete(this.#id, options);
     this.#data = null;

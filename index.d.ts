@@ -81,7 +81,19 @@ export type ClockStamp = readonly [number, string];
 /** The highest per-origin sequence number a node has applied. */
 export type VersionVector = { readonly [origin: string]: number };
 
-export type SyncOpType = 'write' | 'set' | 'inc' | 'add' | 'remove' | 'splice' | 'delete' | 'merge' | 'advance' | 'purge';
+export type SyncOpType =
+  | 'write'
+  | 'set'
+  | 'inc'
+  | 'add'
+  | 'remove'
+  | 'splice'
+  | 'assign'
+  | 'move'
+  | 'delete'
+  | 'merge'
+  | 'advance'
+  | 'purge';
 
 /** What a `remove` carries per element: the element and, per origin, the newest add ts the remover had observed. */
 export type SetRemoval = readonly [element: unknown, tags: { readonly [origin: string]: number }];
@@ -99,6 +111,23 @@ export interface SplicePayload {
   run?: string;
   from?: number;
   content: string | readonly unknown[];
+}
+
+/** What an `assign` carries: a list element by name and its new value. */
+export interface AssignPayload {
+  elem: string;
+  value: unknown;
+}
+
+/**
+ * What a `move` carries: the element, the slot it showed at (cut), the
+ * anchor of its new one-element position run, and its value for that run.
+ */
+export interface MovePayload {
+  elem: string;
+  cut: readonly [run: string, offset: number, length: 1];
+  at: string;
+  value: unknown;
 }
 
 /**
@@ -139,7 +168,7 @@ export interface SyncOp {
   /** `inc`, `add`, `remove`: the field. */
   key?: string;
   /** `inc`: the amount added; `add`: the elements; `remove`: the elements with the tags the remover observed. */
-  value?: number | readonly unknown[] | readonly SetRemoval[] | SplicePayload;
+  value?: number | readonly unknown[] | readonly SetRemoval[] | SplicePayload | AssignPayload | MovePayload;
   /** The schema version of the node that made it; absent without a schema, and on `merge`/`advance`. */
   v?: number;
   /** Who made it — `open({ actor })` or the write's own; a claim the origin signed, not a proof of identity. Absent on `merge`/`advance`. */
@@ -695,10 +724,15 @@ export interface WriteContext {
   key?: string;
   /** `inc`: the amount; `add`/`remove`: the elements, as the caller gave them. */
   value?: number | readonly unknown[];
-  /** `splice`: the index (`null`: the end), how many to remove and what to insert, as the caller gave them. */
+  /**
+   * `splice`: the index (`null`: the end), how many to remove and what to
+   * insert; `assign`: the index and the value; `move`: the index (`from`)
+   * and `to` — as the caller gave them.
+   */
   index?: number | null;
   count?: number;
   content?: string | readonly unknown[];
+  to?: number;
   /** `merge` only: the metadata being joined. */
   meta?: EntryMeta;
   /** The record before the write — `null` when absent or deleted. Read-only. */
@@ -1283,6 +1317,17 @@ export interface Storage {
   /** Appends `content` to list or text field `key` — a splice at the end. */
   push(id: string, key: string, content: string | readonly unknown[], options?: WriteOptions): Promise<void>;
   /**
+   * Replaces the element at `index` of list field `key`: a register per
+   * element, last writer wins, following the element through a concurrent move.
+   */
+  setAt(id: string, key: string, index: number, value: unknown, options?: WriteOptions): Promise<void>;
+  /**
+   * Moves the element at `from` of list field `key` to `to`, its index once
+   * it is out. Two nodes moving one element concurrently leave it once, at
+   * the newer move's place; a move concurrent with a removal brings it back.
+   */
+  move(id: string, key: string, from: number, to: number, options?: WriteOptions): Promise<void>;
+  /**
    * Compare-and-swap: writes `changes` only if every field of `prev` still
    * holds its value, compared inside the mutation queue — two concurrent
    * swaps on one expectation cannot both pass. `false`, and no write, on a
@@ -1425,6 +1470,10 @@ export interface SyncomRecord {
   splice(key: string, index: number, count?: number, content?: string | readonly unknown[], options?: WriteOptions): Promise<void>;
   /** Appends to a list or text field — `storage.push` with this record's id. */
   push(key: string, content: string | readonly unknown[], options?: WriteOptions): Promise<void>;
+  /** Replaces an element of a list field — `storage.setAt` with this record's id. */
+  setAt(key: string, index: number, value: unknown, options?: WriteOptions): Promise<void>;
+  /** Moves an element of a list field — `storage.move` with this record's id. */
+  move(key: string, from: number, to: number, options?: WriteOptions): Promise<void>;
   delete(options?: WriteOptions): Promise<void>;
   // Live properties: one getter/setter per field of the loaded object.
   [field: string]: unknown;

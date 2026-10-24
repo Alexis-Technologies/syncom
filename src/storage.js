@@ -1041,6 +1041,35 @@ class Storage extends Emitter {
   }
 
   /**
+   * Replaces the element at `index` of list field `key` with `value` (an
+   * `assign` op): a register per element, last writer wins, and the value
+   * follows the element through a concurrent move.
+   */
+  async setAt(id, key, index, value, { actor } = {}) {
+    if (typeof key !== 'string') throw new TypeError('setAt() takes a field name');
+    if (!Number.isInteger(index) || index < 0) throw new TypeError('setAt() takes a non-negative integer index');
+    if (value === undefined || typeof value === 'function' || typeof value === 'symbol') {
+      throw new TypeError(`setAt() takes a JSON value; got ${typeof value}`);
+    }
+    await this[COMMIT]('assign', id, { key, index, value }, { actor });
+  }
+
+  /**
+   * Moves the element at `from` of list field `key` to `to` — its index once
+   * it is out (a `move` op). Two nodes moving one element concurrently leave
+   * it once, at the newer move's place; a move concurrent with a removal of
+   * the element brings it back.
+   */
+  async move(id, key, from, to, { actor } = {}) {
+    if (typeof key !== 'string') throw new TypeError('move() takes a field name');
+    if (!Number.isInteger(from) || from < 0 || !Number.isInteger(to) || to < 0) {
+      throw new TypeError('move() takes non-negative integer indices');
+    }
+    if (from === to) return;
+    await this[COMMIT]('move', id, { key, index: from, to }, { actor });
+  }
+
+  /**
    * Rebuilds the record `id` from what this node's log holds of it — for a
    * file that fails its integrity check (`INTEGRITY`) or is torn. The
    * retained entries are replayed from the first whole-record op among

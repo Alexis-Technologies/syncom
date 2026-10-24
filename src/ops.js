@@ -505,10 +505,16 @@ const applySeq = (entry, op, stamp, delta, rejected) => {
   }
   if (compareClock(stamp, meta.base) < 0) return;
   const result = S.applySplice(held ?? S.createSeq(kind), stamp, payload, meta.base);
+  settleSeq(entry, field, held, result, delta, rejected);
+};
+
+// What a sequence op leaves: the block pruned at once (what fell below the
+// base must look the same as if it had never landed, whichever side of the
+// reset it arrived on), the field read again, a refusal reported.
+const settleSeq = (entry, field, held, result, delta, rejected) => {
+  const { meta } = entry;
   if (result.reason === 'bound') rejected.push({ field, reason: 'bound' });
   if (!result.changed) return;
-  // Pruned at once: what the op left below the base must look the same as
-  // if it had never landed, whichever side of the reset it arrived on.
   const seq = S.prune(result.seq, meta.base);
   if (seq === null) {
     if (held !== undefined) {
@@ -522,6 +528,38 @@ const applySeq = (entry, op, stamp, delta, rejected) => {
   // Pending work is news to persist even when the field reads the same.
   entry.data[field] = S.render(S.buildIndex(seq, meta.base));
   delta[field] = entry.data[field];
+};
+
+// An `assign` or a `move` on a list: the element's value or position
+// register (src/sequence.js); refused on a text and on the other kinds.
+const applyListOp = (entry, op, stamp, delta, rejected) => {
+  const { meta } = entry;
+  const { key: field, value: payload } = op;
+  if (typeof field !== 'string' || !isKey(field) || !isKey(op.origin) || !isPlainObject(payload)) return;
+  if (own(meta.clock, field) !== undefined) {
+    rejected.push({ field, reason: 'register' });
+    return;
+  }
+  if (isCounter(meta, field)) {
+    rejected.push({ field, reason: 'counter' });
+    return;
+  }
+  if (isSet(meta, field)) {
+    rejected.push({ field, reason: 'set' });
+    return;
+  }
+  const held = own(meta.seqs, field);
+  if (held !== undefined && held.k !== 'l') {
+    rejected.push({ field, reason: 'text' });
+    return;
+  }
+  if (compareClock(stamp, meta.base) < 0) return;
+  // A register for an element whose run has not arrived is kept: the op
+  // names the field a list, like a cut that comes before its run.
+  const block = held ?? S.createSeq('l');
+  const result =
+    op.type === 'assign' ? S.applyAssign(block, stamp, payload) : S.applyMove(block, stamp, payload, meta.base);
+  settleSeq(entry, field, held, result, delta, rejected);
 };
 
 // Everything the entry held, gone: the purge, and a merge that meets one.
@@ -626,6 +664,8 @@ const applyOp = (previous, op) => {
     applySet(entry, op, stamp, delta, rejected);
   } else if (op.type === 'splice') {
     applySeq(entry, op, stamp, delta, rejected);
+  } else if (op.type === 'assign' || op.type === 'move') {
+    applyListOp(entry, op, stamp, delta, rejected);
   }
 
   const before = previous ? previous.meta : null;
@@ -818,6 +858,8 @@ const TYPE_CODES = {
   add: '+',
   remove: '-',
   splice: '/',
+  assign: '=',
+  move: '^',
 };
 const CODE_TYPES = {
   w: 'write',
@@ -830,6 +872,8 @@ const CODE_TYPES = {
   '+': 'add',
   '-': 'remove',
   '/': 'splice',
+  '=': 'assign',
+  '^': 'move',
 };
 
 const packOps = (ops) => {

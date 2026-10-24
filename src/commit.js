@@ -42,7 +42,7 @@ const HINTS = {
   register: 'a register; use update()',
   counter: 'a counter; use inc()',
   set: 'a set; use add() or remove()',
-  list: 'a list; use splice() or push()',
+  list: 'a list; use splice(), push(), setAt() or move()',
   text: 'a text; use splice() or push()',
   bound: 'past the bound on pending work',
 };
@@ -156,6 +156,45 @@ const resolveSplice = (core, id, payload, current) => {
   return value;
 };
 
+// A list's element, by its index: the name it keeps across moves. Another
+// kind under the field is left to applyOp to refuse; a field with no block
+// has no elements (OUT_OF_RANGE).
+const elementAt = (core, id, key, index, current) => {
+  const meta = current?.meta;
+  const held = meta && Object.hasOwn(meta.seqs ?? {}, key) ? meta.seqs[key] : undefined;
+  if (held === undefined && meta && (Object.hasOwn(meta.clock, key) || isCounter(meta, key) || isSet(meta, key))) {
+    return { idx: null, elem: '1:0:placeholder' };
+  }
+  if (held !== undefined && held.k !== 'l') return { idx: null, elem: '1:0:placeholder' };
+  const idx = held === undefined ? null : S.buildIndex(held, meta.base);
+  const length = idx === null ? 0 : idx.length;
+  if (index >= length) {
+    const message = `Index ${index} is out of range for field ${key} of record ${id} (length ${length})`;
+    throw new SyncomError('OUT_OF_RANGE', message, { id, field: key, index, count: 0, length });
+  }
+  return { idx, elem: S.elemAt(idx, index) };
+};
+
+const resolveAssign = (core, id, payload, current) => {
+  const { key, index, value } = payload;
+  return { elem: elementAt(core, id, key, index, current).elem, value };
+};
+
+// A move names two indices; what travels is the element, the slot it showed
+// at and the anchor of its new position (`to` counts once it is out).
+const resolveMove = (core, id, payload, current) => {
+  const { key, index: from, to } = payload;
+  const { idx, elem } = elementAt(core, id, key, from, current);
+  if (idx === null) return { elem, cut: ['1:placeholder', 0, 1], at: S.HEAD, value: null };
+  if (to >= idx.length) {
+    const message = `Index ${to} is out of range for field ${key} of record ${id} (length ${idx.length})`;
+    throw new SyncomError('OUT_OF_RANGE', message, { id, field: key, index: to, count: 0, length: idx.length });
+  }
+  const place = S.placeInsert(idx, to < from ? to : to + 1, core.nodeId);
+  const at = place.at ?? `>${S.elemKey(place.run, place.from - 1)}`;
+  return { elem, cut: S.slotAt(idx, from), at, value: S.render(idx)[from] };
+};
+
 // The op as this node mints it: stamped above everything the node already
 // holds for the record, so a local write never sorts below state the node
 // knows about and is silently dropped (the log seeds the clock at open; this
@@ -176,6 +215,8 @@ const prepareOp = (core, type, id, payload, current, who, from) => {
   // queue — read outside it, a concurrent apply could add between the two.
   if (type === 'remove') op.value = observedTags(current?.meta ?? null, payload.key, payload.value);
   if (type === 'splice') op.value = resolveSplice(core, id, payload, current);
+  if (type === 'assign') op.value = resolveAssign(core, id, payload, current);
+  if (type === 'move') op.value = resolveMove(core, id, payload, current);
   return op;
 };
 

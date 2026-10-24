@@ -44,12 +44,25 @@ const isStreamName = (value) =>
 const KEY_ID = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
 const isKeyId = (value) => typeof value === 'string' && KEY_ID.test(value);
 
-const OP_TYPES = new Set(['write', 'set', 'inc', 'delete', 'merge', 'advance', 'purge', 'add', 'remove', 'splice']);
+const OP_TYPES = new Set([
+  'write',
+  'set',
+  'inc',
+  'delete',
+  'merge',
+  'advance',
+  'purge',
+  'add',
+  'remove',
+  'splice',
+  'assign',
+  'move',
+]);
 
 // The ops an entity's validator sees: the ones that leave a record for the
 // application to read. A `merge` joins a peer's state as it is, a `delete`
 // leaves nothing to validate.
-const VALIDATED = new Set(['write', 'set', 'inc', 'add', 'remove', 'splice']);
+const VALIDATED = new Set(['write', 'set', 'inc', 'add', 'remove', 'splice', 'assign', 'move']);
 
 // A signature's three fields, by shape alone — whether they check is
 // src/signing.js's business: 64 bytes base64url, 32 bytes hex, a nonce.

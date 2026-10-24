@@ -218,10 +218,10 @@ test('Storage replication model', async (t) => {
     await assert.rejects(() => storage.splice(id, 'nope', 0, 1), { code: 'OUT_OF_RANGE', length: 0 });
     // The kind rule, with a hint at the right call.
     await assert.rejects(() => storage.update(id, { body: 'plain' }), /text; use splice\(\) or push\(\)/);
-    await assert.rejects(() => storage.inc(id, 'items'), /list; use splice\(\) or push\(\)/);
+    await assert.rejects(() => storage.inc(id, 'items'), /list; use splice\(\), push\(\), setAt\(\) or move\(\)/);
     await assert.rejects(() => storage.add(id, 'body', ['x']), /text; use splice\(\)/);
     await assert.rejects(() => storage.splice(id, 'name', 0, 0, 'x'), /register; use update\(\)/);
-    await assert.rejects(() => storage.push(id, 'items', 'text'), /list; use splice\(\)/);
+    await assert.rejects(() => storage.push(id, 'items', 'text'), /list; use splice\(\), push/);
     await storage.inc(id, 'hits');
     await assert.rejects(() => storage.push(id, 'hits', 'x'), /counter; use inc\(\)/);
     await storage.add(id, 'tags', ['t']);
@@ -256,6 +256,64 @@ test('Storage replication model', async (t) => {
     // A splice creates the field, and the record, when absent.
     await storage.splice('fresh', 'body', 0, 0, 'x');
     assert.deepStrictEqual(await storage.get('fresh'), { body: 'x' });
+    assert.strictEqual(await storage.validate(), true);
+  });
+
+  await t.test('setAt and move keep an element’s name; a move names where it shows', async (t2) => {
+    const { storage } = await openTemp(t2);
+    const ops = [];
+    storage.on('change', (op) => ops.push(op));
+    const id = await storage.insert({ name: 'list' });
+    await storage.push(id, 'items', ['a', 'b', 'c']);
+    await storage.setAt(id, 'items', 1, 'B');
+    assert.deepStrictEqual((await storage.get(id)).items, ['a', 'B', 'c']);
+    await storage.move(id, 'items', 0, 2);
+    assert.deepStrictEqual((await storage.get(id)).items, ['B', 'c', 'a']);
+    await storage.move(id, 'items', 2, 0);
+    assert.deepStrictEqual((await storage.get(id)).items, ['a', 'B', 'c']);
+    await storage.move(id, 'items', 1, 1);
+    assert.deepStrictEqual(
+      ops.map((op) => op.type),
+      ['write', 'splice', 'assign', 'move', 'move'],
+      'a move to the same place is nothing',
+    );
+    const run = `${ops[1].ts}:${storage.nodeId}`;
+    assert.deepStrictEqual(ops[2].value, { elem: `${ops[1].ts}:1:${storage.nodeId}`, value: 'B' });
+    assert.deepStrictEqual(ops[3].value, {
+      elem: `${ops[1].ts}:0:${storage.nodeId}`,
+      cut: [run, 0, 1],
+      at: `>${ops[1].ts}:2:${storage.nodeId}`,
+      value: 'a',
+    });
+    assert.strictEqual(ops[4].value.elem, ops[3].value.elem, 'the element keeps its name across moves');
+    assert.deepStrictEqual(
+      ops[4].value.cut,
+      [`${ops[3].ts}:${storage.nodeId}`, 0, 1],
+      'the slot it showed at was its position run',
+    );
+    // The value follows the element: set after a move, read at the new place.
+    await storage.setAt(id, 'items', 0, 'A');
+    assert.deepStrictEqual((await storage.get(id)).items, ['A', 'B', 'c']);
+    // Out of range, the kind rule, arguments.
+    await assert.rejects(() => storage.setAt(id, 'items', 3, 'x'), { code: 'OUT_OF_RANGE', index: 3, length: 3 });
+    await assert.rejects(() => storage.move(id, 'items', 0, 3), { code: 'OUT_OF_RANGE', index: 3, length: 3 });
+    await assert.rejects(() => storage.move(id, 'items', 5, 0), { code: 'OUT_OF_RANGE', index: 5, length: 3 });
+    await storage.splice(id, 'body', 0, 0, 'text');
+    await assert.rejects(() => storage.setAt(id, 'body', 0, 'x'), /text; use splice\(\) or push\(\)/);
+    await storage.move(id, 'name', 0, 0); // from === to is nothing, even on a register
+    await assert.rejects(() => storage.move(id, 'name', 0, 1), /register; use update\(\)/);
+    await assert.rejects(() => storage.setAt(id, 'name', 0, 'x'), /register; use update\(\)/);
+    await assert.rejects(() => storage.setAt(id, 'nope', 0, 'x'), { code: 'OUT_OF_RANGE', length: 0 });
+    await assert.rejects(() => storage.setAt(id, 7, 0, 'x'), TypeError);
+    await assert.rejects(() => storage.setAt(id, 'items', -1, 'x'), TypeError);
+    await assert.rejects(() => storage.setAt(id, 'items', 0, undefined), TypeError);
+    await assert.rejects(() => storage.move(id, 'items', 'a', 0), TypeError);
+    // Through a live Record.
+    const record = await storage.record(id);
+    await record.move('items', 2, 0);
+    assert.deepStrictEqual(record.items, ['c', 'A', 'B']);
+    await record.setAt('items', 0, 'C');
+    assert.deepStrictEqual(record.items, ['C', 'A', 'B']);
     assert.strictEqual(await storage.validate(), true);
   });
 

@@ -42,6 +42,8 @@ in the log:
 | `add` | `add()`, `record.add()` | Adds elements to a set field |
 | `remove` | `remove()`, `record.remove()` | Removes from a set field the elements this node had seen added |
 | `splice` | `splice()`, `push()`, `record.splice()`, `record.push()` | Removes a range of a list or text field and inserts at a place — see [Lists and text](./lists) |
+| `assign` | `setAt()`, `record.setAt()` | Sets a list element's value register |
+| `move` | `move()`, `record.move()` | Moves a list element: cuts its slot, adds a position run, points its position register at it |
 | `delete` | `delete()`, `record.delete()` | Leaves a tombstone; a newer write revives the record |
 | `purge` | `purge()` | Erases the record for good: wins at any stamp, nothing later lands, and every entry of the id is scrubbed from the log (see [Purge](./storage#purge)) |
 | `merge` | a snapshot page being joined | Joins a whole entry (see [Bootstrap](#bootstrap)) |

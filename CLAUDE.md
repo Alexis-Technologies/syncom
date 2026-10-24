@@ -191,7 +191,11 @@ docs/                     VitePress site
   `src/sequence.js` (Fugue runs anchored `^`/`>e`/`<e`, run-length content with
   tombstones as lengths, pending runs/cuts/extensions under `PENDING_MAX`):
   `splice` (code `/`) carries `{ cut, at | run/from, content }` in `key`/`value`,
-  `content` naming the kind even when empty; the index is resolved in
+  `content` naming the kind even when empty; `assign` (`=`, `{ elem, value }`)
+  and `move` (`^`, `{ elem, cut, at, value }`) are a list's per-element value
+  and position registers (Kleppmann's move: a move cuts the shown slot and
+  adds a one-element position run the register points at; a slot shows iff
+  it is the position the register names); the index is resolved in
   `prepareOp` INSIDE the queue (`resolveSplice`, `OUT_OF_RANGE`); `applySeq`
   prunes at once so what fell below the base reads the same on either side of
   a reset; the block's `ts` is derived from the runs and registers it holds —

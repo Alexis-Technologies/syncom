@@ -210,6 +210,21 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     await b.splice(id, 'body', 4, 0, '!');
     await settle([a, b]);
     await assertConverged([a, b]);
+    // Two moves of one element apart: it ends up once, where the newer move put it.
+    await a.push(id, 'items', ['x', 'y', 'z']);
+    await settle([a, b]);
+    const before = (await a.get(id)).items;
+    link.disconnect();
+    await a.move(id, 'items', before.indexOf('x'), before.length - 1);
+    await tick();
+    await b.move(id, 'items', before.indexOf('x'), 0);
+    await b.setAt(id, 'items', 0, 'X');
+    await link.reconnect();
+    await settle([a, b]);
+    const after = await assertConverged([a, b]);
+    assert.strictEqual(after[id].items.length, before.length);
+    assert.strictEqual(after[id].items.filter((v) => v === 'X' || v === 'x').length, 1, 'the element shows once');
+    assert.strictEqual(after[id].items[0], 'X', 'at the newer move’s place, with the assigned value');
     // A reset by one side frees the field everywhere; typing after it starts over.
     await a.set(id, { title: 'reset' });
     await settle([a, b]);
@@ -277,6 +292,7 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
       const count = Math.floor(random() * Math.min(3, length - at + 1));
       await storage.splice(id, key, at, count, content);
     };
+    let incs = 0;
     for (let step = 0; step < 80; step++) {
       const storage = storages[Math.floor(random() * storages.length)];
       const id = ids[Math.floor(random() * ids.length)];
@@ -284,12 +300,23 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
       try {
         if (roll < 0.12) await storage.set(id, { v: step, by: storage.nodeId.slice(0, 4) });
         else if (roll < 0.24) await storage.update(id, { [`f${step % 3}`]: step });
-        else if (roll < 0.3) await storage.inc('c1', 'count', 1);
-        else if (roll < 0.4) await storage.add(id, 'tags', [`t${step % 4}`]);
+        else if (roll < 0.3) {
+          await storage.inc('c1', 'count', 1);
+          incs++;
+        } else if (roll < 0.4) await storage.add(id, 'tags', [`t${step % 4}`]);
         else if (roll < 0.48) await storage.remove(id, 'tags', [`t${step % 4}`]);
         else if (roll < 0.54) await storage.delete(id);
-        else if (roll < 0.78) await spliceAt(storage, id, 'body', letter(storage).repeat(1 + (step % 3)));
-        else await spliceAt(storage, id, 'items', [`${letter(storage)}${step}`]);
+        else if (roll < 0.72) await spliceAt(storage, id, 'body', letter(storage).repeat(1 + (step % 3)));
+        else if (roll < 0.82) await spliceAt(storage, id, 'items', [`${letter(storage)}${step}`]);
+        else {
+          const items = (await storage.get(id))?.items ?? [];
+          if (items.length === 0) await storage.push(id, 'items', [`${letter(storage)}${step}`]);
+          else if (roll < 0.9) {
+            await storage.setAt(id, 'items', Math.floor(random() * items.length), `${letter(storage)}=${step}`);
+          } else {
+            await storage.move(id, 'items', Math.floor(random() * items.length), Math.floor(random() * items.length));
+          }
+        }
       } catch (error) {
         // A record deleted or shortened elsewhere is a legitimate outcome.
         if (!/not found|out of range|takes a count/.test(error.message)) throw error;
@@ -305,7 +332,7 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     };
     const expected = await blocks(storages[0]);
     for (const other of storages.slice(1)) assert.deepStrictEqual(await blocks(other), expected);
-    assert.strictEqual((await storages[0].get('c1')).count, 7, 'every inc counted once');
+    assert.strictEqual((await storages[0].get('c1')).count, incs, 'every inc counted once');
   });
 
   await t.test(

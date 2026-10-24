@@ -91,8 +91,10 @@ const ENTRIES = [
   // reset rule and the join) wired into ops.js as the list and text kinds —
   // the raise to 47 KB (47.0 measured); its API — splice() and push(), the
   // index resolved inside the queue, OUT_OF_RANGE, migrate() over lists and
-  // texts — the raise to 48 KB (47.7 measured).
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 48 },
+  // texts — the raise to 48 KB (47.7 measured). The movable list — setAt()
+  // and move(), a value and a position register per element, position runs
+  // — the raise to 49 KB (48.9 measured).
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 49 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check

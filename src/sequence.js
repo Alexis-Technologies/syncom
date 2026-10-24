@@ -32,6 +32,18 @@
 // set of runs, never of their order of arrival. Each of those pending things
 // counts against PENDING_MAX, a bound on hostile input like `sync.maxSkew`.
 //
+// A LIST is also movable (Kleppmann et al., "Moving elements in list
+// CRDTs", 2020; Loro's MovableList): every element has, beside its place in
+// the tree, two registers keyed by its name — `pos`, the position it shows
+// at, and `vals`, its value — each last-writer-wins by stamp. A `move` cuts
+// the slot the element showed at and adds a one-element POSITION run
+// (`[at, [[value]], elem]`) that names the element; the register then points
+// at that run. A slot shows iff it is alive and it is the position its
+// element's register names (its own slot, when no move has named one), so
+// two concurrent moves leave the element once, at the newer one's place, and
+// a move concurrent with a cut of the old slot brings the element back at the
+// new one. An `assign` sets the value register; a cut element keeps neither.
+//
 // A reset (`write`, `delete`) drops every run stamped below `base` — a run
 // is as old as its first element — and a surviving run whose anchor fell
 // reads as a right child of the head. `prune` applies the rule to a block,
@@ -173,6 +185,13 @@ const rleCut = (kind, rle, offset, length) => {
   }
   return b.done();
 };
+
+// Segment by segment: gaps by length, texts by value, list items by their JSON.
+const sameSeg = (a, b) =>
+  typeof a === 'number' || typeof a === 'string'
+    ? a === b
+    : Array.isArray(b) && JSON.stringify(a) === JSON.stringify(b);
+const sameRle = (a, b) => a.length === b.length && a.every((seg, i) => sameSeg(seg, b[i]));
 
 // Two pictures of one run: the longer one's length, an element alive only
 // where both have it alive (a cut seen anywhere happened).
@@ -393,6 +412,19 @@ const buildIndex = (seq, base = null) => {
   const runIndex = new Map(runs.map((r, i) => [r.key, i]));
   let n = 0;
   let v = 0;
+  const movable = seq.k === 'l';
+  const visElem = movable ? [] : null;
+  // A list slot shows when alive AND it is the position its element's
+  // register names: its own slot when no move named one, else the position
+  // run the newest move made.
+  const shows = (r, off) => {
+    if (r.items[off] === GAP) return false;
+    if (!movable) return true;
+    const elem = r.elem ?? elemKey(r.key, off);
+    const winner = seq.pos && own(seq.pos, elem);
+    if (winner === undefined) return r.elem === null;
+    return r.elem === elem && r.key === winner[2];
+  };
   const emit = (r, off) => {
     const i = runIndex.get(r.key);
     ordRun[n] = i;
@@ -400,9 +432,10 @@ const buildIndex = (seq, base = null) => {
     r.ordAt[off] = n;
     r.visAt[off] = v;
     n++;
-    if (r.items[off] !== GAP) {
+    if (shows(r, off)) {
       visRun[v] = i;
       visOff[v] = off;
+      if (movable) visElem.push(r.elem ?? elemKey(r.key, off));
       v++;
     }
   };
@@ -468,6 +501,8 @@ const buildIndex = (seq, base = null) => {
     ordOff,
     visRun: visible,
     visOff: visibleOff,
+    visElem,
+    vals: seq.vals ?? null,
     length: v,
     total: n,
   };
@@ -482,12 +517,23 @@ const render = (index) => {
     return out;
   }
   const out = new Array(length);
-  for (let i = 0; i < length; i++) out[i] = runs[visRun[i]].items[visOff[i]];
+  for (let i = 0; i < length; i++) {
+    const assigned = index.vals === null ? undefined : own(index.vals, index.visElem[i]);
+    out[i] = assigned === undefined ? runs[visRun[i]].items[visOff[i]] : assigned[2];
+  }
   return out;
 };
 
-const elemAt = (index, i) =>
-  i >= 0 && i < index.length ? elemKey(index.runs[index.visRun[i]].key, index.visOff[i]) : null;
+// The element at visible index `i`: its name (a list element keeps it across
+// moves; a text element's is its slot) or null out of range.
+const elemAt = (index, i) => {
+  if (i < 0 || i >= index.length) return null;
+  return index.visElem !== null ? index.visElem[i] : elemKey(index.runs[index.visRun[i]].key, index.visOff[i]);
+};
+
+// The slot visible index `i` shows at, as a cut range.
+const slotAt = (index, i) =>
+  i >= 0 && i < index.length ? [index.runs[index.visRun[i]].key, index.visOff[i], 1] : null;
 
 const leftmostDescendant = (r, off) => {
   for (;;) {
@@ -655,7 +701,7 @@ const applySplice = (seq, stamp, payload, base = null, pendingMax = PENDING_MAX)
       const len = rleLength(before[1]);
       const inside = Math.min(length, len - offset);
       const after = rleCut(m.k, before[1], offset, inside);
-      if (after.length !== before[1].length || after.some((seg, i) => seg !== before[1][i])) {
+      if (!sameRle(after, before[1])) {
         m.runs[key] = before.length === 3 ? [before[0], after, before[2]] : [before[0], after];
         changed = true;
       }
@@ -709,6 +755,63 @@ const applySplice = (seq, stamp, payload, base = null, pendingMax = PENDING_MAX)
     }
   }
   if (!changed) return { seq, changed: false, reason: null };
+  return { seq: next, changed: true, reason: null };
+};
+
+// A register write, LWW by stamp: null when the held one is as new.
+const newer = (map, key, stamp) => {
+  const held = map && own(map, key);
+  return held === undefined || compareClock([held[0], held[1]], stamp) < 0;
+};
+
+// An `assign`: the element's value register (lists only).
+const applyAssign = (seq, stamp, payload) => {
+  if (seq.k !== 'l' || !payload || typeof payload !== 'object') return { seq, changed: false, reason: 'malformed' };
+  const { elem, value } = payload;
+  if (!isElemKey(elem) || !isJson(value) || value === undefined) return { seq, changed: false, reason: 'malformed' };
+  if (!newer(seq.vals, elem, stamp)) return { seq, changed: false, reason: null };
+  const next = cloneSeq(seq);
+  (next.vals ??= {})[elem] = [stamp[0], stamp[1], value];
+  next.ts = Math.max(next.ts, stamp[0]);
+  return { seq: next, changed: true, reason: null };
+};
+
+// A `move`: cuts the slot the element showed at, adds a position run that
+// names it (whatever the register says — another node may anchor on it)
+// and points the position register at that run when the stamp is newer.
+const applyMove = (seq, stamp, payload, base = null, pendingMax = PENDING_MAX) => {
+  const [ts, origin] = stamp;
+  if (seq.k !== 'l' || !payload || typeof payload !== 'object') return { seq, changed: false, reason: 'malformed' };
+  const { elem, cut, at, value } = payload;
+  const anchor = parseAnchor(at);
+  const cutOk = Array.isArray(cut) && cut.length === 3 && isRunKey(cut[0]) && parseRun(cut[0]).ts < ts;
+  const anchorOk = anchor !== null && at !== END && (anchor.elem === null || anchor.elem.ts < ts);
+  if (!isElemKey(elem) || !cutOk || !Number.isInteger(cut[1]) || cut[1] < 0 || cut[2] !== 1 || !anchorOk) {
+    return { seq, changed: false, reason: 'malformed' };
+  }
+  if (!isJson(value) || value === undefined) return { seq, changed: false, reason: 'malformed' };
+  const key = runKey(ts, origin);
+  let next = null;
+  const mutable = () => (next ??= cloneSeq(seq));
+  const spliced = applySplice(seq, stamp, { cut: [cut], content: [] }, base, pendingMax);
+  if (spliced.reason === 'bound') return spliced;
+  if (spliced.changed) next = spliced.seq;
+  if (own((next ?? seq).runs, key) === undefined) {
+    const parent = anchor.elem === null ? null : own((next ?? seq).runs, anchor.elem.run);
+    const resolved =
+      anchor.elem === null ||
+      (base !== null && compareClock([anchor.elem.ts, anchor.elem.origin], base) < 0) ||
+      (parent !== undefined && anchor.elem.offset < rleLength(parent[1]));
+    if (!resolved && pendingMax - pendingCount(next ?? seq, buildIndex(next ?? seq, base)) <= 0) {
+      return { seq, changed: false, reason: 'bound' };
+    }
+    const m = mutable();
+    m.runs[key] = [at, [[value]], elem];
+    m.ts = Math.max(m.ts, ts);
+    settle(m, key);
+  }
+  if (newer((next ?? seq).pos, elem, stamp)) (mutable().pos ??= {})[elem] = [ts, origin, key];
+  if (next === null) return { seq, changed: false, reason: null };
   return { seq: next, changed: true, reason: null };
 };
 
@@ -816,6 +919,9 @@ module.exports = {
   placeInsert,
   rangesOf,
   applySplice,
+  applyAssign,
+  applyMove,
+  slotAt,
   prune,
   join,
   pendingCount,
