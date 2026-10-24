@@ -15,6 +15,7 @@ const storage = await open({ path: 'data' });
 | `name` | — | Alias for `path` |
 | `fsi` | `node:fs` / OPFS | The backend — any object with `read`, `write`, `exists`, `remove`, `list` (see [Backends](../reference/api#backends)) |
 | `durable` | `false` | fsync after every write, where the backend can (`node:fs`); OPFS and memory are as durable as they are |
+| `defer` | `0` | Record files may lag the log by this many ms: the log is durable at once, every read sees the write, a crash replays the batch at the next open, `tag()` and `close()` flush first, and a peer's write of the record lands it whole. The writes of one record within the window coalesce into one file and one block — what typing into a text or a list wants |
 | `lock` | `'fail'` | One instance per directory: `'fail'` rejects a second `open()` (`code: 'LOCKED'`), `'wait'` waits, `false` leaves it to you ([see below](#one-instance-per-directory)) |
 | `cache` | `{ max: 5000 }` | How many entries stay in memory; a live `Record` pins its own ([see below](#the-catalog-and-the-cache)) |
 | `integrity` | `'verify'` | `'lazy'` trusts a record file on the cold read instead of re-verifying it against its block |

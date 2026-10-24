@@ -20,10 +20,11 @@ const { vectorHas, opKey, isBootstrapOp } = require('./vector.js');
  * node id; `allStreams` takes `first` of every origin, not the sender's alone.
  */
 const outbound = (log, { exclude, vector, scopes = null, own, allStreams = false }) => {
-  const entries = log.since(undefined) ?? log.since(log.formatId(log.floor - 1)) ?? [];
   const ops = [];
   const first = {};
-  for (const { op } of entries) {
+  // One pass over what the log retains, no copy of it: a push and a merge
+  // run this on every call.
+  for (const { op } of log.scan()) {
     if (op.origin === exclude || op.from === exclude) continue;
     if (!opInScope(op, scopes)) continue;
     if ((allStreams || op.origin === own) && !isBootstrapOp(op)) first[opKey(op)] ??= op.seq;

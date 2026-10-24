@@ -395,6 +395,41 @@ const runPatchTests = async (t, assert, createStorage) => {
       assert.deepStrictEqual(storage.log.entriesOf(id).at(-1).op.value, [['x', { [added.origin]: added.ts }]]);
     },
   );
+
+  await t.test(
+    'compact() rewrites a record as one op per field: a text of many runs is one, a tree one move per node, the reading the same',
+    async (t2) => {
+      const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage);
+      const a = mesh.get('A');
+      const b = mesh.get('B');
+      const id = await a.insert({ title: 'doc', n: 1 });
+      await a.inc(id, 'hits', 3);
+      await a.add(id, 'tags', ['x', 'y']);
+      for (const ch of 'hello') await a.splice(id, 'body', 0, 0, ch); // prepends: a run each
+      await a.treeMove(id, 'outline', 'r');
+      for (let i = 0; i < 5; i++) await a.treeMove(id, 'outline', `n${i}`, 'r');
+      // Each move takes the node to the end: twenty real moves in the log.
+      for (let i = 0; i < 20; i++) await a.treeMove(id, 'outline', `n${i % 5}`, 'r');
+      await settle([a, b]);
+      const before = await a.get(id);
+      const blocks = async (storage) => (await storage.snapshot()).records.find((r) => r.id === id).meta;
+      const was = await blocks(a);
+      assert.strictEqual(Object.keys(was.seqs.body.runs).length, 5);
+      assert.ok(Object.values(was.trees.outline.moves).flat().length > 20, 'a move log worth compacting');
+      const ops = await a.compact(id);
+      assert.strictEqual(ops, 10, 'a write, an inc, an add, a splice, six moves');
+      assert.deepStrictEqual(await a.get(id), before, 'reads the same');
+      const now = await blocks(a);
+      assert.strictEqual(Object.keys(now.seqs.body.runs).length, 1, 'one run');
+      assert.strictEqual(Object.values(now.trees.outline.moves).flat().length, 6, 'one move per node');
+      assert.strictEqual(Object.keys(now.counters.hits).length, 1, 'one slot: the sum as this node’s');
+      await settle([a, b]);
+      assert.deepStrictEqual(await b.get(id), before, 'the peer reads the same');
+      assert.deepStrictEqual(await blocks(b), now, 'and holds the same blocks');
+      assert.strictEqual((await a.history(id, { limit: 1 })).exact, true);
+      assert.strictEqual(await a.compact('nope'), 0, 'a record that is not there');
+    },
+  );
 };
 
 module.exports = { runPatchTests };

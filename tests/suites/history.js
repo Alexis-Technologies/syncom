@@ -414,6 +414,30 @@ const runHistoryTests = async (t, assert, createStorage) => {
       [30, 29, 28, 27, 26],
     );
   });
+
+  await t.test('history({ before }) pages back: the versions older than an event id, until complete', async (t2) => {
+    const storage = await createStorage(t2, 'A');
+    const id = await storage.insert({ n: 0 });
+    for (let i = 1; i <= 25; i++) await storage.update(id, { n: i });
+    const seen = [];
+    let page = await storage.history(id, { limit: 10 });
+    assert.strictEqual(page.complete, false);
+    seen.push(...page.versions.map((version) => version.data.n));
+    while (!page.complete) {
+      const oldest = page.versions[page.versions.length - 1];
+      page = await storage.history(id, { limit: 10, before: oldest.eventId });
+      seen.push(...page.versions.map((version) => version.data.n));
+    }
+    assert.deepStrictEqual(
+      seen,
+      Array.from({ length: 26 }, (_, i) => 25 - i),
+      'every version once, newest first',
+    );
+    const first = page.versions[page.versions.length - 1].eventId;
+    assert.deepStrictEqual((await storage.history(id, { limit: 10, before: first })).versions, []);
+    await assert.rejects(() => storage.history(id, { before: 7 }), TypeError);
+    await assert.rejects(() => storage.history(id, { before: { vector: {} } }), TypeError);
+  });
 };
 
 module.exports = { runHistoryTests };

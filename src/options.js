@@ -105,6 +105,14 @@ const normalizeStorageOptions = (options) => {
   if (pendingMax !== undefined && !((Number.isInteger(pendingMax) && pendingMax > 0) || pendingMax === Infinity)) {
     throw new TypeError('open({ sync }): pendingMax must be a positive integer (Infinity to disable)');
   }
+  // Record files may lag the log by this many ms (0: never): the log is
+  // durable at once and a crash replays the batch, so the writes of one
+  // record within the window coalesce into one file and one block — see
+  // Storage#deferWrite.
+  const defer = options.defer;
+  if (defer !== undefined && !(Number.isInteger(defer) && defer >= 0)) {
+    throw new TypeError('open({ defer }): defer must be a non-negative integer of milliseconds');
+  }
   // Signed ops: 'verify' signs this node's and checks a peer's when it
   // carries a signature; 'require' refuses unsigned ones too; false does
   // neither. The node id is the signing key in every mode — see src/apply.js.
@@ -130,6 +138,7 @@ const normalizeStorageOptions = (options) => {
     scope: typeof scope === 'function' ? scope : null,
     maxSkew: maxSkew ?? DEFAULT_MAX_SKEW,
     pendingMax: pendingMax ?? PENDING_MAX,
+    defer: defer ?? 0,
     signatures: signatures ?? 'verify',
   };
 };

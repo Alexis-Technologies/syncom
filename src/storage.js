@@ -98,6 +98,11 @@ class Storage extends Emitter {
   #scopeOf;
   #maxSkew;
   #limits;
+  // Local writes whose record files wait (`open({ defer })`): id → the
+  // entry to write and the log positions it covers; one timer for the flush.
+  #defer = 0;
+  #deferred = new Map();
+  #deferTimer = null;
   #signatures;
   #encrypted;
   #hooks;
@@ -131,6 +136,7 @@ class Storage extends Emitter {
     // What the op model is told to bound (src/ops.js applyOp): the pending
     // work of a list or text field. Every fold of the log runs under it too.
     this.#limits = { pendingMax: settings.pendingMax };
+    this.#defer = settings.defer;
     this.#signatures = settings.signatures;
     // Live Records, weakly: one the application still holds pins its cache
     // entry and follows the record; one it dropped is collected, and its
@@ -304,6 +310,8 @@ class Storage extends Emitter {
       ahead: this.#ahead,
       maxSkew: this.#maxSkew,
       limits: this.#limits,
+      defer: this.#defer,
+      deferred: (id, entry, position) => this.#deferWrite(id, entry, position),
       signatures: this.#signatures,
       // Signs an op of this node's own, in place, once it is final.
       sign: this.#signatures === false ? null : (op) => signOp(op, this.#signing.privateKey),
@@ -762,6 +770,10 @@ class Storage extends Emitter {
       cache: { size: this.#entries.size, max: this.#cacheMax, pinned },
       catalog: { entries: this.#catalog.size, dirty: this.#catalog.dirty },
       tags: { count: this.#tags.size, corrupt: this.#tags.corrupt },
+      // Records whose files lag the log: deferred by `open({ defer })`, or
+      // held after a write that failed (replayed at the next open).
+      held: this.#entries.heldIds().size,
+      deferred: this.#deferred.size,
       log: {
         length: log.length,
         floor: log.floor,
@@ -849,11 +861,66 @@ class Storage extends Emitter {
   async #land(touched, fromSeq, toSeq) {
     try {
       await this.#persistBatch(touched, fromSeq, toSeq);
-      return true;
     } catch (error) {
       await this.#unpersisted(touched, error);
       return false;
     }
+    // A record written by this batch (a peer's page, a replay, a repair) was
+    // written from the cache, which held its deferred local ops too: those
+    // are on disk now, so their slot goes and their positions are applied —
+    // a later flush must not lay the older deferred entry over this file.
+    for (const id of touched.keys()) this.#settleDeferred(id);
+    return true;
+  }
+
+  #settleDeferred(id) {
+    const slot = this.#deferred.get(id);
+    if (slot === undefined) return;
+    this.#deferred.delete(id);
+    for (const position of slot.positions) this.#log.applied(position);
+  }
+
+  // A local write under `open({ defer })`: the entry is held — the cache and
+  // the catalog read it, the file and the block wait — and the flush is due
+  // in `defer` ms, or at once ahead of tag() and close(). The log is durable
+  // already; a crash before the flush replays the batch at the next open,
+  // as it does after a file write that failed.
+  async #deferWrite(id, entry, position) {
+    await this.#entries.hold(id, entry);
+    const slot = this.#deferred.get(id);
+    if (slot !== undefined) {
+      slot.entry = entry;
+      slot.positions.push(position);
+    } else this.#deferred.set(id, { entry, positions: [position] });
+    if (this.#deferTimer === null) {
+      this.#deferTimer = setTimeout(() => {
+        this.#deferTimer = null;
+        this.#run(() => this.#flushDeferred()).catch(() => {});
+      }, this.#defer);
+      this.#deferTimer.unref?.();
+    }
+  }
+
+  // The deferred writes landed: one chain block, every file, the log told.
+  // Inside the mutation queue, or after it drained (close).
+  async #flushDeferred() {
+    if (this.#deferTimer !== null) {
+      clearTimeout(this.#deferTimer);
+      this.#deferTimer = null;
+    }
+    if (this.#deferred.size === 0) return;
+    const pending = this.#deferred;
+    this.#deferred = new Map();
+    const touched = new Map();
+    const positions = [];
+    for (const [id, slot] of pending) {
+      touched.set(id, slot.entry);
+      positions.push(...slot.positions);
+    }
+    if (await this.#land(touched, Math.min(...positions), Math.max(...positions))) {
+      for (const position of positions) this.#log.applied(position);
+    }
+    this.#flushCatalog();
   }
 
   async #unpersisted(touched, error) {
@@ -1114,6 +1181,26 @@ class Storage extends Emitter {
   }
 
   /**
+   * Rewrites record `id` as the ops its reading takes today — a `write` of
+   * the registers, then one op per field of another kind: an `inc`, an
+   * `add`, one `splice` (a text or a list becomes one run), one `tree` move
+   * per node — so what lies under it goes by the reset rule, here and on
+   * every peer alike: a text of ten thousand runs is one, a tree's move log
+   * is one move per node, and the record reads the same. A peer's op stamped
+   * before the rewrite and arriving after it is dropped by the reset, as
+   * with any whole-record write. Resolves to how many ops it took; `0` for
+   * a record that is not there, `ENCRYPTED` for an encrypted one.
+   */
+  async compact(id, { actor, source = null } = {}) {
+    if (!isRecordId(id)) throw invalidId(id);
+    const entry = await this.#entries.load(id);
+    if (entry?.encrypted) throw new SyncomError('ENCRYPTED', `Record ${id} is encrypted here`);
+    if (entry === null || !isAlive(entry)) return 0;
+    const view = await this.#view(id, entry);
+    return this.applyPatches(id, diffViews(null, {}, view, kindsOf(entry)), { actor, source });
+  }
+
+  /**
    * Names the storage as it is now: a tag — `{ name, eventId, seq, ts,
    * vector, createdAt }` — that `at(name)` and `get(id, { at: { tag } })`
    * read records through as they were when it was taken. Kept on this node
@@ -1125,7 +1212,9 @@ class Storage extends Emitter {
    */
   async tag(name) {
     if (!isRecordId(name)) throw new TypeError('tag() takes a name of the record-id form');
-    return this.#run(() => {
+    return this.#run(async () => {
+      // Deferred files land first; what is held after that failed to write.
+      await this.#flushDeferred();
       // A record logged but not on disk has no file to copy from: the tag
       // waits for it to land (the next write of it, or the next open).
       const held = this.#entries.heldIds();
@@ -1211,9 +1300,17 @@ class Storage extends Emitter {
    * ever applied to the record (nothing dropped, nothing cut by `limit`).
    * Rejects with ENCRYPTED for an encrypted record.
    */
-  async history(id, { limit = 50 } = {}) {
+  async history(id, { limit = 50, before } = {}) {
     if (!(Number.isInteger(limit) && limit > 0) && limit !== Infinity) {
       throw new TypeError('history({ limit }) takes a positive integer');
+    }
+    // `before`: an event id of this log; the versions older than it — how a
+    // reader pages back once `complete` came out false.
+    let cut = null;
+    if (before !== undefined) {
+      cut = parseVersion(before);
+      if (cut.kind !== 'event') throw new TypeError('history({ before }) takes an event id');
+      if (cut.epoch !== this.#log.epoch) throw gone(id, 'epoch');
     }
     await runHook(this.#hooks, 'beforeRead', { id, history: true });
     const { entries, purged } = await this.#applied(id);
@@ -1222,7 +1319,13 @@ class Storage extends Emitter {
     const steps = fold(entries, start, this.#limits);
     // The fold is whole — each version is the record after its op — but the
     // lens and afterRead run for the versions handed out alone.
-    const shown = steps.slice(Math.max(0, steps.length - limit));
+    let upto = steps.length;
+    if (cut !== null) {
+      const at = steps.findIndex((step) => step.logged.seq >= cut.seq);
+      if (at !== -1) upto = at;
+    }
+    const first = Math.max(0, upto - limit);
+    const shown = steps.slice(first, upto);
     const versions = [];
     for (const { logged, entry, delta } of shown) {
       const { seq, op, scrubbed } = logged;
@@ -1252,7 +1355,7 @@ class Storage extends Emitter {
     versions.reverse();
     const last = steps.length > 0 ? steps[steps.length - 1].entry : null;
     const exact = fromReset && (await this.#present(id, last));
-    return { versions, complete: droppedTs === 0 && steps.length <= limit, exact };
+    return { versions, complete: droppedTs === 0 && first === 0, exact };
   }
 
   // The retained entries of `id` this node applied, oldest first, and the
@@ -1669,6 +1772,7 @@ class Storage extends Emitter {
     this.#closed = true;
     await this.#sync.stop();
     const seal = async () => {
+      await this.#flushDeferred();
       await this.#catalogSave;
       await this.#catalog.save(this.#log.lastEventId);
       await this.#log.close();

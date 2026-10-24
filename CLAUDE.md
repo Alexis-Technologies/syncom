@@ -240,7 +240,10 @@ docs/                     VitePress site
   (depth; no room for a place) there, and hands back `null` for a move to
   where the node is — `commitLocal` returns before `applyOp` on it. The
   fuzz in `tests/suites/sync-engine.js` compares the blocks and the move
-  logs across nodes, not only what they read as.
+  logs across nodes, not only what they read as. The compaction of a move
+  log, a text of many runs or a set's tags is `compact(id)` in storage.js:
+  `applyPatches(id, diffViews(null, {}, reading, kinds))` — a reset plus one
+  op per field, one move per node — convergent through the reset rule.
 - **A payload the engine does not admit is never silent.** `applyOp` reports
   `reason: 'malformed'` in `rejected` (`malformed()` in `src/ops.js`): on the
   local path `refuse()` in `src/commit.js` throws a `TypeError` — the
@@ -278,7 +281,15 @@ docs/                     VitePress site
   The storage opens its log with `sealApplied: true` and every write path
   calls `log.applied(from, to)` after `EntryStore.write`/`#persistBatch`; a roll then
   seals nothing from the oldest batch not yet applied onwards. A new path
-  that appends must mark what it applied, or the tail grows forever.
+  that appends must mark what it applied, or the tail grows forever. Under
+  `open({ defer })` a local write stops at the append: `persistLocal` hands
+  the entry to `Storage#deferWrite` — `EntryStore.hold` (cache, catalog,
+  held), a slot per record with its positions, one timer — and
+  `#flushDeferred` lands every slot through `#land` (one block, the files)
+  and marks the positions applied; `tag()` and `close()` flush first, and
+  `#land` on any other path (a peer's page, a replay) settles a slot of a
+  record it wrote, so an older deferred entry is never laid over a newer
+  file. Never write a record file from a deferred slot outside `#land`.
   `droppedTs` is the newest stamp among what `#compact` dropped or an open
   could not read (an unreadable segment, an index without the field and a
   floor above 1, no index and a floor above 1 — all `latestTs`): a reader of

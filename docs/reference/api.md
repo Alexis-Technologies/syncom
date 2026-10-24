@@ -17,7 +17,8 @@ const syncom = require('@alexify/syncom');
 ### `open(options?)`
 
 Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
-(alias for `path`), `fsi` and `durable` (see [Backends](#backends)), `lock`
+(alias for `path`), `fsi`, `durable` and `defer` (see [Backends](#backends) and
+[the storage guide](../guide/storage)), `lock`
 (`'fail'` | `'wait'` | `false` — see
 [One instance per directory](../guide/storage#one-instance-per-directory)),
 `cache`, `integrity` and `catalog` (see
@@ -46,7 +47,8 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 | `diff(id, from?, to?)` | `Promise<Patch[]>` | The patches that turn the record at `from` into the record at `to` (the present when omitted), per field by kind — see [Diff and restore](../guide/versions#diff-and-restore); raw, through the lens, no read hooks; rejects as `get(id, { at })` would, `ENCRYPTED` for an encrypted record |
 | `applyPatches(id, patches, { actor, source }?)` | `Promise<number>` | Realizes patches as ops of this node's own in one turn of the mutation queue (`put`, `write`, `inc`, `add`, `remove` with `elements` — `own: true` for this node's adds alone — or exact `removals`, `splice`, `treeMove`, `treeRemove`, `delete`, `purge`); `source` rides on the `commit` events; resolves to how many ops. A patch is checked as the method of its name checks its arguments — the wrong shape is a `TypeError` with nothing minted — and every patch is first resolved and applied over a scratch record, so an index out of range, a kind clash, a cycle or a type change refuses the whole batch with nothing written; a hook or a validator that throws on a later op leaves the earlier ones committed |
 | `restore(id, at, { actor, source }?)` | `Promise<number>` | Makes the record read as it did at `at` with new ops that lead back — `diff(id, undefined, at)` applied; lands whole or not at all (see `applyPatches`) |
-| `history(id, { limit = 50 }?)` | `Promise<{ versions, complete, exact }>` | The record's past, newest first: `{ eventId, seq, ts, origin, actor, type, fields, data, scrubbed? }` per op this node applied, `data` the record after it through the lens and `afterRead`; `complete` when nothing was dropped or cut by `limit`, `exact` when the versions are what the node held |
+| `compact(id, { actor, source }?)` | `Promise<number>` | Rewrites the record as the ops its reading takes today — a `write` of the registers, then one op per field of another kind: an `inc`, an `add`, one `splice` (a text or a list becomes one run), one `tree` move per node — so what lies under it goes by the reset rule here and on every peer, and the record reads the same; a peer's op stamped before the rewrite and arriving after it is dropped, as with any whole-record write. Resolves to how many ops; `0` for a record that is not there; `ENCRYPTED` for an encrypted one |
+| `history(id, { limit = 50, before }?)` | `Promise<{ versions, complete, exact }>` | The record's past, newest first: `{ eventId, seq, ts, origin, actor, type, fields, data, scrubbed? }` per op this node applied, `data` the record after it through the lens and `afterRead` — run for the versions handed out alone; `before` (an event id) pages back to the versions older than it; `complete` when the page reaches the first op the node applied and nothing was dropped, `exact` when the versions are what the node held |
 | `has(id)` | `Promise<boolean>` | `false` for a tombstone |
 | `list()` | `Promise<string[]>` | Every live id, sorted — from the catalog, no I/O |
 | `check(entity, data)` | `Promise<unknown>` | Runs the entity's validator as a write would and returns its value; rejects with `ValidationError`; writes nothing |

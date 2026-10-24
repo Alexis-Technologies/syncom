@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="760" height="628" viewBox="0 0 760 628" role="img" aria-label="Lists and text: syncom's own benchmarks. The sequence engine behind list and text fields: a fold per op over Fugue runs, a reading, a join, a diff. ops/s, log scale, higher is better.">
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="708" viewBox="0 0 760 708" role="img" aria-label="Lists and text: syncom's own benchmarks. The sequence engine behind list and text fields: a fold per op over Fugue runs, a reading, a join, a diff. ops/s, log scale, higher is better.">
 <style>
   text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
   .title { font-size: 15px; font-weight: 700; fill: #1b1c1e; }
@@ -33,112 +33,128 @@
 <text class="title" x="20" y="35">Lists and text: syncom's own benchmarks</text>
 <text class="subtitle" x="20" y="56">The sequence engine behind list and text fields: a fold per op over Fugue runs, a reading, a join, a diff.</text>
 <text class="subtitle" x="20" y="73">ops/s, log scale, higher is better.</text>
-<line class="grid" x1="324" y1="88" x2="324" y2="568"/>
-<text class="tick" x="324" y="584" text-anchor="middle">100</text>
-<line class="grid" x1="412" y1="88" x2="412" y2="568"/>
-<text class="tick" x="412" y="584" text-anchor="middle">1,000</text>
-<line class="grid" x1="500" y1="88" x2="500" y2="568"/>
-<text class="tick" x="500" y="584" text-anchor="middle">10k</text>
-<line class="grid" x1="588" y1="88" x2="588" y2="568"/>
-<text class="tick" x="588" y="584" text-anchor="middle">100k</text>
-<line class="grid" x1="676" y1="88" x2="676" y2="568"/>
-<text class="tick" x="676" y="584" text-anchor="middle">1M</text>
-<line class="axis" x1="324" y1="88" x2="324" y2="568"/>
+<line class="grid" x1="335" y1="88" x2="335" y2="648"/>
+<text class="tick" x="335" y="664" text-anchor="middle">100</text>
+<line class="grid" x1="420.25" y1="88" x2="420.25" y2="648"/>
+<text class="tick" x="420.25" y="664" text-anchor="middle">1,000</text>
+<line class="grid" x1="505.5" y1="88" x2="505.5" y2="648"/>
+<text class="tick" x="505.5" y="664" text-anchor="middle">10k</text>
+<line class="grid" x1="590.75" y1="88" x2="590.75" y2="648"/>
+<text class="tick" x="590.75" y="664" text-anchor="middle">100k</text>
+<line class="grid" x1="676" y1="88" x2="676" y2="648"/>
+<text class="tick" x="676" y="664" text-anchor="middle">1M</text>
+<line class="axis" x1="335" y1="88" x2="335" y2="648"/>
 <g><title>applyOp · append one char to a 1 000-char text (one run)
-155,400 ops/s
-6.44 µs per operation</title>
+158,717 ops/s
+6.3 µs per operation</title>
 <text class="label primary" x="20" y="105">applyOp</text>
 <text class="sublabel" x="20" y="120">append one char to a 1 000-char text (one run)</text>
-<path class="bar primary" d="M324,101H600.8476892729109A4,4 0 0 1 604.8476892729109,105V111A4,4 0 0 1 600.8476892729109,115H324Z"/>
-<text class="value" x="610.8476892729109" y="114">155k</text>
+<path class="bar primary" d="M335,101H603.8531487750345A4,4 0 0 1 607.8531487750345,105V111A4,4 0 0 1 603.8531487750345,115H335Z"/>
+<text class="value" x="613.8531487750345" y="114">159k</text>
 </g>
 <g><title>applyOp · insert one char into a 1 000-char text (new run)
-25,723 ops/s
-38.9 µs per operation</title>
+25,814 ops/s
+38.7 µs per operation</title>
 <text class="label primary" x="20" y="145">applyOp</text>
 <text class="sublabel" x="20" y="160">insert one char into a 1 000-char text (new run)</text>
-<path class="bar primary" d="M324,141H532.1083023603001A4,4 0 0 1 536.1083023603001,145V151A4,4 0 0 1 532.1083023603001,155H324Z"/>
-<text class="value" x="542.1083023603001" y="154">25.7k</text>
+<path class="bar primary" d="M335,141H536.6106648125401A4,4 0 0 1 540.6106648125401,145V151A4,4 0 0 1 536.6106648125401,155H335Z"/>
+<text class="value" x="546.6106648125401" y="154">25.8k</text>
 </g>
 <g><title>applyOp · delete 10 chars from a 1 000-char text
-29,051 ops/s
-34.4 µs per operation</title>
+30,325 ops/s
+33 µs per operation</title>
 <text class="label primary" x="20" y="185">applyOp</text>
 <text class="sublabel" x="20" y="200">delete 10 chars from a 1 000-char text</text>
-<path class="bar primary" d="M324,181H536.7581756001332A4,4 0 0 1 540.7581756001332,185V191A4,4 0 0 1 536.7581756001332,195H324Z"/>
-<text class="value" x="546.7581756001332" y="194">29.1k</text>
+<path class="bar primary" d="M335,181H542.5735190131666A4,4 0 0 1 546.5735190131666,185V191A4,4 0 0 1 542.5735190131666,195H335Z"/>
+<text class="value" x="552.5735190131666" y="194">30.3k</text>
 </g>
 <g><title>applyOp · prepend one char to a 1 000-run text
-2,339 ops/s
-428 µs per operation</title>
+2,310 ops/s
+433 µs per operation</title>
 <text class="label primary" x="20" y="225">applyOp</text>
 <text class="sublabel" x="20" y="240">prepend one char to a 1 000-run text</text>
-<path class="bar primary" d="M324,221H440.4746595192055A4,4 0 0 1 444.4746595192055,225V231A4,4 0 0 1 440.4746595192055,235H324Z"/>
-<text class="value" x="450.4746595192055" y="234">2,339</text>
+<path class="bar primary" d="M335,221H447.2479212858053A4,4 0 0 1 451.2479212858053,225V231A4,4 0 0 1 447.2479212858053,235H335Z"/>
+<text class="value" x="457.2479212858053" y="234">2,310</text>
 </g>
 <g><title>applyOp · merge two pictures of a 1 000-char text
-425 ops/s
-2.35 ms per operation</title>
+434 ops/s
+2.3 ms per operation</title>
 <text class="label primary" x="20" y="265">applyOp</text>
 <text class="sublabel" x="20" y="280">merge two pictures of a 1 000-char text</text>
-<path class="bar primary" d="M324,261H375.2982258444274A4,4 0 0 1 379.2982258444274,265V271A4,4 0 0 1 375.2982258444274,275H324Z"/>
-<text class="value" x="385.2982258444274" y="274">425</text>
+<path class="bar primary" d="M335,261H385.34599944094157A4,4 0 0 1 389.34599944094157,265V271A4,4 0 0 1 385.34599944094157,275H335Z"/>
+<text class="value" x="395.34599944094157" y="274">434</text>
 </g>
 <g><title>buildIndex + render · a 1 000-char text
-39,152 ops/s
-25.5 µs per operation</title>
+38,401 ops/s
+26 µs per operation</title>
 <text class="label primary" x="20" y="305">buildIndex + render</text>
 <text class="sublabel" x="20" y="320">a 1 000-char text</text>
-<path class="bar primary" d="M324,301H548.1623477766789A4,4 0 0 1 552.1623477766789,305V311A4,4 0 0 1 548.1623477766789,315H324Z"/>
-<text class="value" x="558.1623477766789" y="314">39.2k</text>
+<path class="bar primary" d="M335,301H551.3152010211475A4,4 0 0 1 555.3152010211475,305V311A4,4 0 0 1 551.3152010211475,315H335Z"/>
+<text class="value" x="561.3152010211475" y="314">38.4k</text>
 </g>
 <g><title>buildIndex + render · a 100 KB text (one run)
-375 ops/s
-2.67 ms per operation</title>
+376 ops/s
+2.66 ms per operation</title>
 <text class="label primary" x="20" y="345">buildIndex + render</text>
 <text class="sublabel" x="20" y="360">a 100 KB text (one run)</text>
-<path class="bar primary" d="M324,341H370.51475156003926A4,4 0 0 1 374.51475156003926,345V351A4,4 0 0 1 370.51475156003926,355H324Z"/>
-<text class="value" x="380.51475156003926" y="354">375</text>
+<path class="bar primary" d="M335,341H380.0347637800831A4,4 0 0 1 384.0347637800831,345V351A4,4 0 0 1 380.0347637800831,355H335Z"/>
+<text class="value" x="390.0347637800831" y="354">376</text>
 </g>
 <g><title>spans · 1 000 chars, 50 overlapping marks
-11,703 ops/s
-85.4 µs per operation</title>
+11,429 ops/s
+87.5 µs per operation</title>
 <text class="label primary" x="20" y="385">spans</text>
 <text class="sublabel" x="20" y="400">1 000 chars, 50 overlapping marks</text>
-<path class="bar primary" d="M324,381H502.0101540427679A4,4 0 0 1 506.0101540427679,385V391A4,4 0 0 1 502.0101540427679,395H324Z"/>
-<text class="value" x="512.0101540427679" y="394">11.7k</text>
+<path class="bar primary" d="M335,381H506.44520183898805A4,4 0 0 1 510.44520183898805,385V391A4,4 0 0 1 506.44520183898805,395H335Z"/>
+<text class="value" x="516.445201838988" y="394">11.4k</text>
 </g>
 <g><title>diff · one keystroke in a 1 KB text
-329,225 ops/s
-3.04 µs per operation</title>
+315,083 ops/s
+3.17 µs per operation</title>
 <text class="label primary" x="20" y="425">diff</text>
 <text class="sublabel" x="20" y="440">one keystroke in a 1 KB text</text>
-<path class="bar primary" d="M324,421H629.5393669578456A4,4 0 0 1 633.5393669578456,425V431A4,4 0 0 1 629.5393669578456,435H324Z"/>
-<text class="value" x="639.5393669578456" y="434">329k</text>
+<path class="bar primary" d="M335,421H629.2407288515199A4,4 0 0 1 633.2407288515199,425V431A4,4 0 0 1 629.2407288515199,435H335Z"/>
+<text class="value" x="639.2407288515199" y="434">315k</text>
 </g>
 <g><title>storage.push · one char (memory fsi)
-8,451 ops/s
-118 µs per operation</title>
+8,051 ops/s
+124 µs per operation</title>
 <text class="label primary" x="20" y="465">storage.push</text>
 <text class="sublabel" x="20" y="480">one char (memory fsi)</text>
-<path class="bar primary" d="M324,461H489.5679129500784A4,4 0 0 1 493.5679129500784,465V471A4,4 0 0 1 489.5679129500784,475H324Z"/>
-<text class="value" x="499.5679129500784" y="474">8,451</text>
+<path class="bar primary" d="M335,461H493.4736977212577A4,4 0 0 1 497.4736977212577,465V471A4,4 0 0 1 493.4736977212577,475H335Z"/>
+<text class="value" x="503.4736977212577" y="474">8,051</text>
 </g>
 <g><title>storage.updateText · one keystroke in a 1 KB text (memory fsi)
-2,153 ops/s
-464 µs per operation</title>
+2,143 ops/s
+467 µs per operation</title>
 <text class="label primary" x="20" y="505">storage.updateText</text>
 <text class="sublabel" x="20" y="520">one keystroke in a 1 KB text (memory fsi)</text>
-<path class="bar primary" d="M324,501H437.3078746244669A4,4 0 0 1 441.3078746244669,505V511A4,4 0 0 1 437.3078746244669,515H324Z"/>
-<text class="value" x="447.3078746244669" y="514">2,153</text>
+<path class="bar primary" d="M335,501H444.4696400813159A4,4 0 0 1 448.4696400813159,505V511A4,4 0 0 1 444.4696400813159,515H335Z"/>
+<text class="value" x="454.4696400813159" y="514">2,143</text>
 </g>
 <g><title>storage.move · in a 100-element list (memory fsi)
-1,251 ops/s
-799 µs per operation</title>
+1,216 ops/s
+822 µs per operation</title>
 <text class="label primary" x="20" y="545">storage.move</text>
 <text class="sublabel" x="20" y="560">in a 100-element list (memory fsi)</text>
-<path class="bar primary" d="M324,541H416.558643253021A4,4 0 0 1 420.558643253021,545V551A4,4 0 0 1 416.558643253021,555H324Z"/>
-<text class="value" x="426.558643253021" y="554">1,251</text>
+<path class="bar primary" d="M335,541H423.49058726335505A4,4 0 0 1 427.49058726335505,545V551A4,4 0 0 1 423.49058726335505,555H335Z"/>
+<text class="value" x="433.49058726335505" y="554">1,216</text>
 </g>
-<text class="caption" x="20" y="609">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-24</text>
+<g><title>storage.push · one char into a 10 KB text (memory fsi)
+3,233 ops/s
+309 µs per operation</title>
+<text class="label primary" x="20" y="585">storage.push</text>
+<text class="sublabel" x="20" y="600">one char into a 10 KB text (memory fsi)</text>
+<path class="bar primary" d="M335,581H459.6938863181352A4,4 0 0 1 463.6938863181352,585V591A4,4 0 0 1 459.6938863181352,595H335Z"/>
+<text class="value" x="469.6938863181352" y="594">3,233</text>
+</g>
+<g><title>storage.push · one char into a 10 KB text, defer: 50 (memory fsi)
+3,143 ops/s
+318 µs per operation</title>
+<text class="label primary" x="20" y="625">storage.push</text>
+<text class="sublabel" x="20" y="640">one char into a 10 KB text, defer: 50 (memory fsi)</text>
+<path class="bar primary" d="M335,621H458.64860848174874A4,4 0 0 1 462.64860848174874,625V631A4,4 0 0 1 458.64860848174874,635H335Z"/>
+<text class="value" x="468.64860848174874" y="634">3,143</text>
+</g>
+<text class="caption" x="20" y="689">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-24</text>
 </svg>

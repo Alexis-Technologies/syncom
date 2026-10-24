@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-24T15:01:56.217Z",
+  "generatedAt": "2026-10-24T15:16:19.982Z",
   "machine": {
     "cpu": "Apple M3 Max",
     "cores": 16,
@@ -369,66 +369,6 @@
       "opsPerSec": 11
     },
     {
-      "subject": "sequence",
-      "name": "applyOp — append one char to a 1 000-char text (one run)",
-      "opsPerSec": 155400
-    },
-    {
-      "subject": "sequence",
-      "name": "applyOp — insert one char into a 1 000-char text (new run)",
-      "opsPerSec": 25723
-    },
-    {
-      "subject": "sequence",
-      "name": "applyOp — delete 10 chars from a 1 000-char text",
-      "opsPerSec": 29051
-    },
-    {
-      "subject": "sequence",
-      "name": "applyOp — prepend one char to a 1 000-run text",
-      "opsPerSec": 2339
-    },
-    {
-      "subject": "sequence",
-      "name": "applyOp — merge two pictures of a 1 000-char text",
-      "opsPerSec": 425
-    },
-    {
-      "subject": "sequence",
-      "name": "buildIndex + render — a 1 000-char text",
-      "opsPerSec": 39152
-    },
-    {
-      "subject": "sequence",
-      "name": "buildIndex + render — a 100 KB text (one run)",
-      "opsPerSec": 375
-    },
-    {
-      "subject": "sequence",
-      "name": "spans — 1 000 chars, 50 overlapping marks",
-      "opsPerSec": 11703
-    },
-    {
-      "subject": "sequence",
-      "name": "diff — one keystroke in a 1 KB text",
-      "opsPerSec": 329225
-    },
-    {
-      "subject": "sequence",
-      "name": "storage.push — one char (memory fsi)",
-      "opsPerSec": 8451
-    },
-    {
-      "subject": "sequence",
-      "name": "storage.updateText — one keystroke in a 1 KB text (memory fsi)",
-      "opsPerSec": 2153
-    },
-    {
-      "subject": "sequence",
-      "name": "storage.move — in a 100-element list (memory fsi)",
-      "opsPerSec": 1251
-    },
-    {
       "subject": "storage",
       "name": "insert — small record",
       "opsPerSec": 1649
@@ -617,6 +557,76 @@
       "subject": "undo",
       "name": "undo + redo — one step of four kinds",
       "opsPerSec": 340
+    },
+    {
+      "subject": "sequence",
+      "name": "applyOp — append one char to a 1 000-char text (one run)",
+      "opsPerSec": 158717
+    },
+    {
+      "subject": "sequence",
+      "name": "applyOp — insert one char into a 1 000-char text (new run)",
+      "opsPerSec": 25814
+    },
+    {
+      "subject": "sequence",
+      "name": "applyOp — delete 10 chars from a 1 000-char text",
+      "opsPerSec": 30325
+    },
+    {
+      "subject": "sequence",
+      "name": "applyOp — prepend one char to a 1 000-run text",
+      "opsPerSec": 2310
+    },
+    {
+      "subject": "sequence",
+      "name": "applyOp — merge two pictures of a 1 000-char text",
+      "opsPerSec": 434
+    },
+    {
+      "subject": "sequence",
+      "name": "buildIndex + render — a 1 000-char text",
+      "opsPerSec": 38401
+    },
+    {
+      "subject": "sequence",
+      "name": "buildIndex + render — a 100 KB text (one run)",
+      "opsPerSec": 376
+    },
+    {
+      "subject": "sequence",
+      "name": "spans — 1 000 chars, 50 overlapping marks",
+      "opsPerSec": 11429
+    },
+    {
+      "subject": "sequence",
+      "name": "diff — one keystroke in a 1 KB text",
+      "opsPerSec": 315083
+    },
+    {
+      "subject": "sequence",
+      "name": "storage.push — one char (memory fsi)",
+      "opsPerSec": 8051
+    },
+    {
+      "subject": "sequence",
+      "name": "storage.updateText — one keystroke in a 1 KB text (memory fsi)",
+      "opsPerSec": 2143
+    },
+    {
+      "subject": "sequence",
+      "name": "storage.move — in a 100-element list (memory fsi)",
+      "opsPerSec": 1216
+    },
+    {
+      "subject": "sequence",
+      "name": "storage.push — one char into a 10 KB text (memory fsi)",
+      "opsPerSec": 3233
+    },
+    {
+      "subject": "sequence",
+      "name": "storage.push — one char into a 10 KB text, defer: 50 (memory fsi)",
+      "opsPerSec": 3143
     }
   ]
 }

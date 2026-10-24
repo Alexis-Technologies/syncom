@@ -656,6 +656,11 @@ class OpLog {
     return this.read(eventId, options)?.entries ?? null;
   }
 
+  /** Every retained entry, oldest first, without a copy — for a selection over the whole log (src/outbound.js). */
+  *scan() {
+    yield* this.#entries;
+  }
+
   /** Every retained entry of the record `id`, oldest first — what `repair()` rebuilds from. */
   entriesOf(id) {
     const seqs = this.#byId.get(id);

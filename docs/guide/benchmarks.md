@@ -300,22 +300,24 @@ chain, hashing, the CRDT helpers and the emitter. They are the numbers to watch 
 </details>
 
 <details>
-<summary>Lists and text — 12 rows</summary>
+<summary>Lists and text — 14 rows</summary>
 
 | Benchmark | ops/s | per operation |
 | --- | ---: | ---: |
-| applyOp — append one char to a 1 000-char text (one run) | 155,400 | 6.44 µs |
-| applyOp — insert one char into a 1 000-char text (new run) | 25,723 | 38.9 µs |
-| applyOp — delete 10 chars from a 1 000-char text | 29,051 | 34.4 µs |
-| applyOp — prepend one char to a 1 000-run text | 2,339 | 428 µs |
-| applyOp — merge two pictures of a 1 000-char text | 425 | 2.35 ms |
-| buildIndex + render — a 1 000-char text | 39,152 | 25.5 µs |
-| buildIndex + render — a 100 KB text (one run) | 375 | 2.67 ms |
-| spans — 1 000 chars, 50 overlapping marks | 11,703 | 85.4 µs |
-| diff — one keystroke in a 1 KB text | 329,225 | 3.04 µs |
-| storage.push — one char (memory fsi) | 8,451 | 118 µs |
-| storage.updateText — one keystroke in a 1 KB text (memory fsi) | 2,153 | 464 µs |
-| storage.move — in a 100-element list (memory fsi) | 1,251 | 799 µs |
+| applyOp — append one char to a 1 000-char text (one run) | 158,717 | 6.3 µs |
+| applyOp — insert one char into a 1 000-char text (new run) | 25,814 | 38.7 µs |
+| applyOp — delete 10 chars from a 1 000-char text | 30,325 | 33 µs |
+| applyOp — prepend one char to a 1 000-run text | 2,310 | 433 µs |
+| applyOp — merge two pictures of a 1 000-char text | 434 | 2.3 ms |
+| buildIndex + render — a 1 000-char text | 38,401 | 26 µs |
+| buildIndex + render — a 100 KB text (one run) | 376 | 2.66 ms |
+| spans — 1 000 chars, 50 overlapping marks | 11,429 | 87.5 µs |
+| diff — one keystroke in a 1 KB text | 315,083 | 3.17 µs |
+| storage.push — one char (memory fsi) | 8,051 | 124 µs |
+| storage.updateText — one keystroke in a 1 KB text (memory fsi) | 2,143 | 467 µs |
+| storage.move — in a 100-element list (memory fsi) | 1,216 | 822 µs |
+| storage.push — one char into a 10 KB text (memory fsi) | 3,233 | 309 µs |
+| storage.push — one char into a 10 KB text, defer: 50 (memory fsi) | 3,143 | 318 µs |
 
 </details>
 

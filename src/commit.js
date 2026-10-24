@@ -410,8 +410,15 @@ const persistLocal = async (core, op, entry) => {
   const { id } = op;
   if (core.sign !== null) await core.sign(op);
   const [{ seq: position }] = await core.log.append([op]);
-  // Logged: the write is durable from here and replicates from the log. A
-  // block or a file that fails now holds the entry in memory, leaves the
+  // Logged: the write is durable from here and replicates from the log.
+  // Under `open({ defer })` the file and the block wait for the flush
+  // (Storage#deferWrite): held in memory, the batch unapplied until then.
+  if (core.defer > 0) {
+    await core.deferred(id, entry, position);
+    core.flush();
+    return position;
+  }
+  // A block or a file that fails now holds the entry in memory, leaves the
   // batch unapplied (the next open replays it) and is reported — the write
   // itself stands.
   try {

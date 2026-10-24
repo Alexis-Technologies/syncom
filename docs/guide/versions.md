@@ -44,7 +44,8 @@ gives both. `history()` on each node lists what that node applied, in its
 order.
 
 `history(id, { limit })` lists the newest `limit` versions (50 by default);
-`complete` is then false. Each version carries the op's `type`, `origin`,
+`complete` is then false, and `history(id, { limit, before })` with the
+oldest version's `eventId` pages back from it. Each version carries the op's `type`, `origin`,
 `actor` and `ts`, the `fields` it changed (removed ones included), and `data`
 — the record as it read after the op, through the schema lens and the
 `afterRead` hook, `null` once deleted. A read at a version runs
@@ -325,4 +326,9 @@ for a record with hundreds of ops; a record edited ten thousand times is a
 record to reset now and then. A tag costs one catalog file when taken and one
 copied record file per record changed after it; the catalog of every tag is
 held in memory, so a hundred tags over a hundred thousand records is a cost
-to feel, ten tags is not.
+to feel, ten tags is not. A record whose past has grown — a tree moved
+thousands of times keeps every move, a text typed into from many places
+keeps a run per place — is rewritten by `compact(id)`: a whole-record
+write of the registers and one op per field of another kind (a text as one
+run, a tree as one move per node), so what lies under it goes by the reset
+rule on every node, and the record reads the same.

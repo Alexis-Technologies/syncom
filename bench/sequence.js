@@ -83,7 +83,18 @@ const main = async () => {
     Array.from({ length: 100 }, (_, i) => i),
   );
   await bench('storage.move — in a 100-element list (memory fsi)', () => storage.move(list, 'items', n++ % 100, 50));
+  // The record file written whole on every keystroke, against the same
+  // keystrokes under `defer`: the file and the block wait for the window.
+  const long = await storage.insert({});
+  await storage.updateText(long, 'body', 'x'.repeat(10_000));
+  await bench('storage.push — one char into a 10 KB text (memory fsi)', () => storage.push(long, 'body', 'z'));
   await storage.close();
+  const deferred = await open({ path: '/bench-defer', fsi: createMemoryFsi(), logger: false, defer: 50 });
+  const lazy = await deferred.insert({});
+  await deferred.updateText(lazy, 'body', 'x'.repeat(10_000));
+  await bench('storage.push — one char into a 10 KB text, defer: 50 (memory fsi)', () =>
+    deferred.push(lazy, 'body', 'z'));
+  await deferred.close();
 };
 
 main().catch((error) => {

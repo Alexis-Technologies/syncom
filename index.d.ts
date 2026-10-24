@@ -1021,6 +1021,9 @@ export interface StorageStats {
   };
   /** The tags held; `corrupt` when `tags.json` could not be read at open (no tags, `tag()` refused until it is repaired). */
   tags: { count: number; corrupt: boolean };
+  /** Records whose files lag the log: held after a write that failed (replayed at the next open), or deferred by `open({ defer })`. */
+  held: number;
+  deferred: number;
   chain: { tail: string } | null;
   lock: { mode: 'fail' | 'wait' } | null;
 }
@@ -1088,6 +1091,13 @@ export interface StorageOptions<S extends Schema = Schema> {
   fsi?: Fsi;
   /** Call the backend's `sync` after every write (fsync). A backend without one logs at debug and is as durable as it is. */
   durable?: boolean;
+  /**
+   * Record files may lag the log by this many ms (0, the default: never).
+   * The log is durable at once, every read sees the write, a crash replays
+   * the batch at the next open, `tag()` and `close()` flush first; the writes
+   * of one record within the window coalesce into one file and one block.
+   */
+  defer?: number;
   /**
    * One instance per directory: `'fail'` (default) rejects `open()` with
    * `code: 'LOCKED'` while another holds it, `'wait'` waits for it, `false`
@@ -1525,7 +1535,7 @@ export interface Storage {
    * The record's past as this node's log holds it, newest first — one
    * version per op this node applied, with the record as it read after it.
    */
-  history(id: string, options?: { limit?: number }): Promise<HistoryResult>;
+  history(id: string, options?: { limit?: number; before?: string }): Promise<HistoryResult>;
   /**
    * Names the storage as it is now. A tag is kept on this node — the
    * catalog of the moment plus a copy of each record's file taken before
@@ -1549,6 +1559,14 @@ export interface Storage {
   applyPatches(id: string, patches: readonly Patch[], options?: WriteOptions & { source?: unknown }): Promise<number>;
   /** Makes the record read as it did at `at`, with new ops that lead back; resolves to how many. */
   restore(id: string, at: Version, options?: WriteOptions & { source?: unknown }): Promise<number>;
+  /**
+   * Rewrites the record as the ops its reading takes today — a `write` of
+   * the registers, then one op per field of another kind (a text or a list
+   * as one run, a tree as one move per node) — so what lies under it goes by
+   * the reset rule here and on every peer, and the record reads the same.
+   * Resolves to how many ops it took; `0` for a record that is not there.
+   */
+  compact(id: string, options?: WriteOptions & { source?: unknown }): Promise<number>;
   set(id: string, data: unknown, options?: StorageDataOptions): Promise<void>;
   delete(id: string, options?: WriteOptions): Promise<void>;
   /** Forgets the record for good: a `purge` op no later write revives, and a scrub of its entries from the log — here and on every peer it reaches. */
