@@ -116,7 +116,11 @@ const ENTRIES = [
   // epic — the argument checks shared with realize(), the kind clash refused
   // before any index is read, applyPatches rehearsed before the first append,
   // a merge that asks for every stream — the raise to 62.5 KB (62.0 measured).
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 62.5 },
+  // 64 KB is the CEILING for v1, decided with the second review (2026-10-24):
+  // a raise below it names its feature here, as every one above did; a need
+  // to go past it is a design question (an engine subpath, say), not a line
+  // edit. Measured 62.4 KB after the kinds' precedence and the tags repair.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 64 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check

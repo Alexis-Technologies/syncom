@@ -96,7 +96,9 @@ Benchmarks are not run in CI: they measure a machine, not a change.
 `pnpm size` prints one row per `exports` entry and enforces a min+gzip budget
 on the browser entry. The budget is a **ratchet, not a target**: raise it
 deliberately, in the same change that earns the bytes, and say why in a comment
-next to the number.
+next to the number. For v1 the main entry has a **ceiling of 64 KB**: a raise
+below it names its feature; going past it is a design decision (an engine
+subpath, an injected kind), taken in a plan, not in the number.
 
 ## Release checklist
 
