@@ -108,9 +108,49 @@ await storage.move(id, 'todo', 2, 0);              // ['ship', 'write', 'test it
   a value set concurrently by two nodes resolves by stamp.
 - `setAt()` and `move()` are for lists; a text has neither.
 
+## Rich text
+
+A text carries **marks**: a style over a range, with a name and a value.
+`mark(id, key, start, end, name, value)` sets one, `unmark` removes one,
+and `spans(id, key)` reads the text as runs of equal style — what an editor
+renders:
+
+```js
+await storage.updateText(id, 'body', 'hello world');
+const bold = await storage.mark(id, 'body', 0, 5, 'bold', true);
+await storage.spans(id, 'body');
+// [{ text: 'hello', marks: { bold: true } }, { text: ' world', marks: {} }]
+
+await storage.splice(id, 'body', 5, 0, '!');   // typed at the end of the range: bold
+await storage.splice(id, 'body', 0, 0, '>');   // typed before it: not
+// [{ text: '>', marks: {} }, { text: 'hello!', marks: { bold: true } }, { text: ' world', marks: {} }]
+
+await storage.mark(id, 'body', 8, 13, 'link', 'https://x', { expand: 'none' });
+await storage.unmark(id, 'body', 0, 7, 'bold');
+```
+
+- **Expand.** `expand` says whether text typed at the range's edges takes the
+  style: `'after'` (the default — bold grows as you type on), `'before'`,
+  `'both'`, `'none'` (a link does not grow). A mark is two anchors, each an
+  element and a side, and the rule picks the sides; a character typed after
+  an element is its right child in the tree, before it its left child, so the
+  same rule that places the text decides whether it is inside the mark —
+  concurrently or not.
+- **Resolution.** Per name, the newest mark covering a character wins and a
+  null value is none; `unmark` over a range is a null mark under the
+  reversed expand rule, so the removal grows where the style would not.
+- **Many.** `{ many: true }` makes a mark stack with every other of its name
+  instead of replacing it — comments, suggestions — and `spans` lists them
+  as `[{ id, value }]`, oldest first. Such a mark goes only by its id:
+  `unmark(id, key, markId)` with what `mark()` resolved to.
+- The field still reads as the plain string; `spans` is raw — no lens, no
+  read hooks. Blocks (paragraphs, headings) are records: a document is a
+  list of block ids, each block a record with a text field.
+
 ## What travels
 
-A `splice` op carries the cut ranges, `[run, offset, length]` per run, and
+A `mark` op carries the two anchors, the name, the value and whether it
+stacks — or the id of a mark to switch off. A `splice` op carries the cut ranges, `[run, offset, length]` per run, and
 either the anchor of its new run (`at`: `^` the head, `>e` or `<e` the right
 or left child of element `e`, named `ts:offset:origin`) or the writer's own
 run to extend (`run`, `from`); `content` is the inserted string or array and,

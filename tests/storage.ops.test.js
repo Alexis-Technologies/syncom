@@ -217,7 +217,10 @@ test('Storage replication model', async (t) => {
     });
     await assert.rejects(() => storage.splice(id, 'nope', 0, 1), { code: 'OUT_OF_RANGE', length: 0 });
     // The kind rule, with a hint at the right call.
-    await assert.rejects(() => storage.update(id, { body: 'plain' }), /text; use splice\(\) or push\(\)/);
+    await assert.rejects(
+      () => storage.update(id, { body: 'plain' }),
+      /text; use splice\(\), push\(\), updateText\(\) or mark\(\)/,
+    );
     await assert.rejects(() => storage.inc(id, 'items'), /list; use splice\(\), push\(\), setAt\(\) or move\(\)/);
     await assert.rejects(() => storage.add(id, 'body', ['x']), /text; use splice\(\)/);
     await assert.rejects(() => storage.splice(id, 'name', 0, 0, 'x'), /register; use update\(\)/);
@@ -292,6 +295,79 @@ test('Storage replication model', async (t) => {
     assert.strictEqual(await storage.validate(), true);
   });
 
+  await t.test('mark, unmark and spans: styles grow as their expand rule says, stack when many', async (t2) => {
+    const { storage } = await openTemp(t2);
+    const id = await storage.insert({});
+    await storage.updateText(id, 'body', 'hello world');
+    const bold = await storage.mark(id, 'body', 0, 5, 'bold', true);
+    assert.match(bold, /^\d+:/);
+    assert.deepStrictEqual(await storage.spans(id, 'body'), [
+      { text: 'hello', marks: { bold: true } },
+      { text: ' world', marks: {} },
+    ]);
+    await storage.splice(id, 'body', 5, 0, '!'); // at the end of the range: bold
+    await storage.splice(id, 'body', 0, 0, '>'); // before it: not
+    assert.deepStrictEqual(await storage.spans(id, 'body'), [
+      { text: '>', marks: {} },
+      { text: 'hello!', marks: { bold: true } },
+      { text: ' world', marks: {} },
+    ]);
+    await storage.mark(id, 'body', 8, 13, 'link', 'https://x', { expand: 'none' });
+    await storage.splice(id, 'body', 13, 0, '?');
+    await storage.unmark(id, 'body', 0, 7, 'bold');
+    assert.deepStrictEqual(await storage.spans(id, 'body'), [
+      { text: '>hello! ', marks: {} },
+      { text: 'world', marks: { link: 'https://x' } },
+      { text: '?', marks: {} },
+    ]);
+    const c1 = await storage.mark(id, 'body', 0, 3, 'comment', { by: 'ada' }, { many: true });
+    const c2 = await storage.mark(id, 'body', 2, 5, 'comment', { by: 'bob' }, { many: true });
+    assert.deepStrictEqual((await storage.spans(id, 'body')).slice(0, 3), [
+      { text: '>h', marks: { comment: [{ id: c1, value: { by: 'ada' } }] } },
+      {
+        text: 'e',
+        marks: {
+          comment: [
+            { id: c1, value: { by: 'ada' } },
+            { id: c2, value: { by: 'bob' } },
+          ],
+        },
+      },
+      { text: 'll', marks: { comment: [{ id: c2, value: { by: 'bob' } }] } },
+    ]);
+    await storage.unmark(id, 'body', c1);
+    assert.deepStrictEqual((await storage.spans(id, 'body')).slice(0, 2), [
+      { text: '>h', marks: {} },
+      { text: 'ell', marks: { comment: [{ id: c2, value: { by: 'bob' } }] } },
+    ]);
+    assert.strictEqual((await storage.get(id)).body, '>hello! world?', 'the field reads as the plain string');
+    // Errors and arguments; spans of what is not a text.
+    await assert.rejects(() => storage.mark(id, 'body', 0, 99, 'bold', true), {
+      code: 'OUT_OF_RANGE',
+      index: 0,
+      count: 99,
+    });
+    await assert.rejects(() => storage.mark(id, 'body', 3, 2, 'bold', true), TypeError);
+    await assert.rejects(() => storage.mark(id, 'body', 0, 1, 'bold', true, { expand: 'sideways' }), TypeError);
+    await assert.rejects(() => storage.mark(id, 'body', 0, 1, '', true), TypeError);
+    await assert.rejects(() => storage.mark(id, 'body', 0, 1, 'bold', undefined), TypeError);
+    await assert.rejects(() => storage.unmark(id, 'body', 'not a mark id'), TypeError);
+    await storage.push(id, 'items', [1]);
+    await assert.rejects(() => storage.mark(id, 'items', 0, 1, 'bold', true), /list; use splice\(\), push/);
+    await storage.update(id, { title: 'plain' });
+    await assert.rejects(() => storage.mark(id, 'title', 0, 1, 'bold', true), /register; use update\(\)/);
+    assert.strictEqual(await storage.spans(id, 'items'), null);
+    assert.strictEqual(await storage.spans(id, 'title'), null);
+    assert.strictEqual(await storage.spans('absent', 'body'), null);
+    // Through a live Record.
+    const record = await storage.record(id);
+    const em = await record.mark('body', 0, 1, 'em', true);
+    assert.deepStrictEqual((await record.spans('body'))[0], { text: '>', marks: { em: true } });
+    await record.unmark('body', em);
+    assert.deepStrictEqual((await record.spans('body'))[0].marks, {});
+    assert.strictEqual(await storage.validate(), true);
+  });
+
   await t.test('setAt and move keep an element’s name; a move names where it shows', async (t2) => {
     const { storage } = await openTemp(t2);
     const ops = [];
@@ -332,7 +408,10 @@ test('Storage replication model', async (t) => {
     await assert.rejects(() => storage.move(id, 'items', 0, 3), { code: 'OUT_OF_RANGE', index: 3, length: 3 });
     await assert.rejects(() => storage.move(id, 'items', 5, 0), { code: 'OUT_OF_RANGE', index: 5, length: 3 });
     await storage.splice(id, 'body', 0, 0, 'text');
-    await assert.rejects(() => storage.setAt(id, 'body', 0, 'x'), /text; use splice\(\) or push\(\)/);
+    await assert.rejects(
+      () => storage.setAt(id, 'body', 0, 'x'),
+      /text; use splice\(\), push\(\), updateText\(\) or mark\(\)/,
+    );
     await storage.move(id, 'name', 0, 0); // from === to is nothing, even on a register
     await assert.rejects(() => storage.move(id, 'name', 0, 1), /register; use update\(\)/);
     await assert.rejects(() => storage.setAt(id, 'name', 0, 'x'), /register; use update\(\)/);

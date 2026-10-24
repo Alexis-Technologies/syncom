@@ -43,7 +43,7 @@ const HINTS = {
   counter: 'a counter; use inc()',
   set: 'a set; use add() or remove()',
   list: 'a list; use splice(), push(), setAt() or move()',
-  text: 'a text; use splice() or push()',
+  text: 'a text; use splice(), push(), updateText() or mark()',
   bound: 'past the bound on pending work',
 };
 const refuse = (id, rejected) => {
@@ -195,6 +195,32 @@ const resolveMove = (core, id, payload, current) => {
   return { elem, cut: S.slotAt(idx, from), at, value: S.render(idx)[from] };
 };
 
+// A mark names a visible range and an expand rule; what travels is the pair
+// of anchors — an element and a side — the rule picks (src/sequence.js
+// markAnchors), or the id of the mark to switch off.
+const resolveMark = (core, id, payload, current) => {
+  const { key, off } = payload;
+  if (off !== undefined) return { off };
+  const { start, end, name, value, expand, many } = payload;
+  const meta = current?.meta;
+  const held = meta && Object.hasOwn(meta.seqs ?? {}, key) ? meta.seqs[key] : undefined;
+  const other =
+    held === undefined
+      ? meta && (Object.hasOwn(meta.clock, key) || isCounter(meta, key) || isSet(meta, key))
+      : held.k !== 't';
+  if (other) return { start: S.HEAD, end: S.END, key: name, value };
+  const idx = held === undefined ? null : S.buildIndex(held, meta.base);
+  const length = idx === null ? 0 : idx.length;
+  if (start > end || end > length) {
+    const message = `Range ${start}..${end} is out of range for field ${key} of record ${id} (length ${length})`;
+    throw new SyncomError('OUT_OF_RANGE', message, { id, field: key, index: start, count: end - start, length });
+  }
+  const [from, to] = idx === null ? [S.HEAD, S.END] : S.markAnchors(idx, start, end, expand);
+  const out = { start: from, end: to, key: name, value };
+  if (many) out.many = true;
+  return out;
+};
+
 // The op as this node mints it: stamped above everything the node already
 // holds for the record, so a local write never sorts below state the node
 // knows about and is silently dropped (the log seeds the clock at open; this
@@ -217,6 +243,7 @@ const prepareOp = (core, type, id, payload, current, who, from) => {
   if (type === 'splice') op.value = resolveSplice(core, id, payload, current);
   if (type === 'assign') op.value = resolveAssign(core, id, payload, current);
   if (type === 'move') op.value = resolveMove(core, id, payload, current);
+  if (type === 'mark') op.value = resolveMark(core, id, payload, current);
   return op;
 };
 

@@ -94,8 +94,10 @@ const ENTRIES = [
   // texts — the raise to 48 KB (47.7 measured). The movable list — setAt()
   // and move(), a value and a position register per element, position runs
   // — the raise to 49 KB (48.9 measured). updateText() with the Myers diff
-  // behind it (src/myers.js) — the raise to 50 KB (49.7 measured).
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 50 },
+  // behind it (src/myers.js) — the raise to 50 KB (49.7 measured). Rich text —
+  // marks as anchor pairs with an expand rule, the newest per key, stacking
+  // marks, spans() — the raise to 51.5 KB (51.4 measured).
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 51.5 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check

@@ -34,8 +34,13 @@ There is no released version section until then; everything below lands in it.
   and a move concurrent with a removal brings the element back.
   `updateText(id, key, text)` diffs a text field against a whole new string
   inside the mutation queue (Myers, UTF-16 units) and sends one splice per
-  hunk — what an editor hands over becomes the edits that merge. Browser
-  budget 42 → 49 KB.
+  hunk — what an editor hands over becomes the edits that merge. A text
+  carries rich text: `mark(id, key, start, end, name, value, { expand, many })`,
+  `unmark()` and `spans()` — a mark is two anchors, an element and a side
+  each, so the same tree rule that places typed text decides whether it takes
+  the style (Peritext, Loro); per name the newest mark wins, and a `many`
+  mark stacks with every other of its name (comments), removable only by id.
+  Browser budget 42 → 51.5 KB.
 - **Full-text search.** An entity names its `search: ['title', 'body']`
   fields and `open({ search: createSearch() })` gives the index —
   `@alexify/syncom/search`, a subpath under 1 KB, so a node that never

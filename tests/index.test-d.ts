@@ -191,6 +191,24 @@ expectType<Promise<void>>(storage.setAt('id', 'items', 0, { done: true }));
 expectType<Promise<number>>(storage.updateText('id', 'body', 'hello', { actor: 'u2' }));
 expectError(storage.updateText('id', 'body', 5));
 expectType<Promise<number>>(record.updateText('body', 'x'));
+expectType<Promise<string | null>>(storage.mark('id', 'body', 0, 5, 'bold', true, { expand: 'after' }));
+expectType<Promise<string | null>>(storage.mark('id', 'body', 0, 5, 'comment', { by: 'ada' }, { many: true }));
+expectType<Promise<void>>(storage.unmark('id', 'body', 0, 5, 'bold'));
+expectType<Promise<void>>(storage.unmark('id', 'body', '1:a'));
+expectType<Promise<syncom.TextSpan[] | null>>(storage.spans('id', 'body'));
+expectError(storage.mark('id', 'body', 0, 5, 'bold', true, { expand: 'sideways' }));
+expectType<Promise<string | null>>(record.mark('body', 0, 1, 'em', true));
+expectType<Promise<syncom.TextSpan[] | null>>(record.spans('body'));
+expectAssignable<syncom.SyncOp>({
+  origin: 'a',
+  seq: 5,
+  ts: 5,
+  type: 'mark',
+  id: 'r',
+  key: 'body',
+  value: { start: '^', end: '$', key: 'bold', value: true },
+});
+expectAssignable<syncom.MarkPayload>({ off: '1:a' });
 expectType<Promise<void>>(storage.move('id', 'items', 0, 2, { actor: 'u2' }));
 expectError(storage.setAt('id', 'items', 'x', 1));
 expectError(storage.move('id', 'items', 0));

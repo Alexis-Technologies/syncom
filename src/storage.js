@@ -20,6 +20,7 @@ const { applyBatch } = require('./apply.js');
 const { snapshotPage, mergeBatch, adopt } = require('./bootstrap.js');
 const { applyOp, isAlive, isCounter, isSet, isSeq } = require('./ops.js');
 const { diff } = require('./myers.js');
+const { buildIndex, spans, isRunKey, REVERSED } = require('./sequence.js');
 const { Clock } = require('./vector.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
 const { normalizeSchema, createLens, project } = require('./schema.js');
@@ -80,6 +81,17 @@ const spliceArgs = (method, key, index, count, content) => {
   const payload = { key, index, count };
   if (content !== undefined) payload.content = content;
   return payload;
+};
+
+// What mark()/unmark() take over a range: a field name, a visible range
+// start ≤ end, a style name and an expand rule.
+const markArgs = (method, key, start, end, name, expand) => {
+  if (typeof key !== 'string') throw new TypeError(`${method}() takes a field name`);
+  if (!Number.isInteger(start) || start < 0 || !Number.isInteger(end) || end < start) {
+    throw new TypeError(`${method}() takes a range: 0 <= start <= end`);
+  }
+  if (typeof name !== 'string' || name.length === 0) throw new TypeError(`${method}() takes a style name`);
+  if (!Object.hasOwn(REVERSED, expand)) throw new TypeError(`${method}() takes expand: before, after, both or none`);
 };
 
 // What add()/remove() take: a field name and a non-empty array of JSON
@@ -1066,6 +1078,58 @@ class Storage extends Emitter {
       }
       return ops;
     });
+  }
+
+  /**
+   * Marks visible range `[start, end)` of text field `key` with `name: value`
+   * (a `mark` op). `expand` says whether text typed at the range's edges
+   * takes the style — `'after'` (the default: bold grows), `'before'`,
+   * `'both'`, `'none'` (a link does not). Per name the newest mark wins;
+   * `{ many: true }` makes a mark stack with every other of its name
+   * (comments), removable only by id. Resolves to the mark's id.
+   */
+  async mark(id, key, start, end, name, value, { expand = 'after', many = false, actor } = {}) {
+    markArgs('mark', key, start, end, name, expand);
+    if (value === undefined || typeof value === 'function' || typeof value === 'symbol') {
+      throw new TypeError(`mark() takes a JSON value; got ${typeof value}`);
+    }
+    const payload = { key, start, end, name, value, expand };
+    if (many === true) payload.many = true;
+    const op = await this[COMMIT]('mark', id, payload, { actor });
+    return op ? `${op.ts}:${op.origin}` : null;
+  }
+
+  /**
+   * Removes a style: over `[start, end)` by `name` — a mark with a null value
+   * under the reversed expand rule, so the removal grows where the style would
+   * not — or one mark by its id (`unmark(id, key, markId)`), the only way for
+   * a `many` mark.
+   */
+  async unmark(id, key, start, end, name, { expand = 'after', actor } = {}) {
+    if (typeof start === 'string') {
+      if (typeof key !== 'string') throw new TypeError('unmark() takes a field name');
+      if (!isRunKey(start)) throw new TypeError('unmark() takes a mark id, or a range and a name');
+      await this[COMMIT]('mark', id, { key, off: start }, end && typeof end === 'object' ? end : { actor });
+      return;
+    }
+    markArgs('unmark', key, start, end, name, expand);
+    await this[COMMIT]('mark', id, { key, start, end, name, value: null, expand: REVERSED[expand] }, { actor });
+  }
+
+  /**
+   * Text field `key` of record `id` as runs of equal style: `[{ text, marks }]`,
+   * `marks` per name the winning value (a `many` name lists `{ id, value }`).
+   * Raw: no lens, no read hooks. `null` when the record or the field is not
+   * a text.
+   */
+  async spans(id, key) {
+    if (!isRecordId(id)) throw invalidId(id);
+    if (typeof key !== 'string') throw new TypeError('spans() takes a field name');
+    const entry = await this.#entries.load(id);
+    if (!entry || entry.encrypted || !isAlive(entry)) return null;
+    const held = Object.hasOwn(entry.meta.seqs ?? {}, key) ? entry.meta.seqs[key] : undefined;
+    if (held === undefined || held.k !== 't') return null;
+    return spans(buildIndex(held, entry.meta.base), held, entry.meta.base);
   }
 
   /**

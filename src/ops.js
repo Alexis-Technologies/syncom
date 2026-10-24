@@ -530,9 +530,12 @@ const settleSeq = (entry, field, held, result, delta, rejected) => {
   delta[field] = entry.data[field];
 };
 
-// An `assign` or a `move` on a list: the element's value or position
-// register (src/sequence.js); refused on a text and on the other kinds.
+// An `assign` or a `move` on a list, a `mark` on a text: the block's
+// registers (src/sequence.js); refused on the other kind and on the other
+// kinds. A register or a mark for a field with no block yet names its kind
+// and waits, like a cut that comes before its run.
 const applyListOp = (entry, op, stamp, delta, rejected) => {
+  const kind = op.type === 'mark' ? 't' : 'l';
   const { meta } = entry;
   const { key: field, value: payload } = op;
   if (typeof field !== 'string' || !isKey(field) || !isKey(op.origin) || !isPlainObject(payload)) return;
@@ -549,16 +552,18 @@ const applyListOp = (entry, op, stamp, delta, rejected) => {
     return;
   }
   const held = own(meta.seqs, field);
-  if (held !== undefined && held.k !== 'l') {
-    rejected.push({ field, reason: 'text' });
+  if (held !== undefined && held.k !== kind) {
+    rejected.push({ field, reason: seqKind(meta, field) });
     return;
   }
   if (compareClock(stamp, meta.base) < 0) return;
-  // A register for an element whose run has not arrived is kept: the op
-  // names the field a list, like a cut that comes before its run.
-  const block = held ?? S.createSeq('l');
+  const block = held ?? S.createSeq(kind);
   const result =
-    op.type === 'assign' ? S.applyAssign(block, stamp, payload) : S.applyMove(block, stamp, payload, meta.base);
+    op.type === 'assign'
+      ? S.applyAssign(block, stamp, payload)
+      : op.type === 'move'
+        ? S.applyMove(block, stamp, payload, meta.base)
+        : S.applyMark(block, stamp, payload);
   settleSeq(entry, field, held, result, delta, rejected);
 };
 
@@ -664,7 +669,7 @@ const applyOp = (previous, op) => {
     applySet(entry, op, stamp, delta, rejected);
   } else if (op.type === 'splice') {
     applySeq(entry, op, stamp, delta, rejected);
-  } else if (op.type === 'assign' || op.type === 'move') {
+  } else if (op.type === 'assign' || op.type === 'move' || op.type === 'mark') {
     applyListOp(entry, op, stamp, delta, rejected);
   }
 
@@ -860,6 +865,7 @@ const TYPE_CODES = {
   splice: '/',
   assign: '=',
   move: '^',
+  mark: '*',
 };
 const CODE_TYPES = {
   w: 'write',
@@ -874,6 +880,7 @@ const CODE_TYPES = {
   '/': 'splice',
   '=': 'assign',
   '^': 'move',
+  '*': 'mark',
 };
 
 const packOps = (ops) => {

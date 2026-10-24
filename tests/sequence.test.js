@@ -261,6 +261,140 @@ test('sequence engine', async (t) => {
     assert.strictEqual(pruned, null, 'everything was stamped below the reset');
   });
 
+  await t.test('marks: anchors take the side the expand rule says, the newest wins, many stack', () => {
+    const a = node('A');
+    const first = insert(a, 0, 'hello world');
+    const R = S.runKey(first.ts, 'A');
+    const idx = index(a);
+    assert.deepStrictEqual(S.markAnchors(idx, 0, 5, 'after'), [`<${S.elemKey(R, 0)}`, `<${S.elemKey(R, 5)}`]);
+    assert.deepStrictEqual(S.markAnchors(idx, 0, 5, 'before'), ['^', `>${S.elemKey(R, 4)}`]);
+    assert.deepStrictEqual(S.markAnchors(idx, 6, 11, 'none'), [`<${S.elemKey(R, 6)}`, `>${S.elemKey(R, 10)}`]);
+    assert.deepStrictEqual(S.markAnchors(idx, 6, 11, 'both'), [`>${S.elemKey(R, 5)}`, '$']);
+    const mark = (n, start, end, key, value, expand = 'after', extra = {}) => {
+      const [from, to] = S.markAnchors(index(n), start, end, expand);
+      const op = { ts: tick(), origin: n.origin, payload: { start: from, end: to, key, value, ...extra } };
+      const r = S.applyMark(n.seq, [op.ts, op.origin], op.payload);
+      n.seq = r.seq;
+      return op;
+    };
+    const spansOf = (n) => S.spans(index(n), n.seq);
+    const bold = mark(a, 0, 5, 'bold', true);
+    assert.deepStrictEqual(spansOf(a), [
+      { text: 'hello', marks: { bold: true } },
+      { text: ' world', marks: {} },
+    ]);
+    assert.strictEqual(S.applyMark(a.seq, [bold.ts, 'A'], bold.payload).changed, false, 'first wins on a key');
+    // Typing at the end of a bold range grows it; typing before it does not.
+    insert(a, 5, '!');
+    insert(a, 0, '>');
+    assert.deepStrictEqual(spansOf(a), [
+      { text: '>', marks: {} },
+      { text: 'hello!', marks: { bold: true } },
+      { text: ' world', marks: {} },
+    ]);
+    // A link does not grow at either edge.
+    mark(a, 8, 13, 'link', 'https://x', 'none');
+    insert(a, 13, '?');
+    insert(a, 8, '[');
+    assert.deepStrictEqual(spansOf(a).slice(2), [
+      { text: ' [', marks: {} },
+      { text: 'world', marks: { link: 'https://x' } },
+      { text: '?', marks: {} },
+    ]);
+    // A null mark removes a style over its range — reversed expand — and the newest wins.
+    mark(a, 0, 7, 'bold', null, S.REVERSED.after);
+    assert.deepStrictEqual(spansOf(a)[0], { text: '>hello! [', marks: {} });
+    // Many: comments stack, go only by id.
+    const c1 = mark(a, 0, 3, 'comment', { by: 'ada' }, 'none', { many: true });
+    const c2 = mark(a, 2, 5, 'comment', { by: 'bob' }, 'none', { many: true });
+    const id1 = S.runKey(c1.ts, 'A');
+    const id2 = S.runKey(c2.ts, 'A');
+    assert.deepStrictEqual(spansOf(a).slice(0, 3), [
+      { text: '>h', marks: { comment: [{ id: id1, value: { by: 'ada' } }] } },
+      {
+        text: 'e',
+        marks: {
+          comment: [
+            { id: id1, value: { by: 'ada' } },
+            { id: id2, value: { by: 'bob' } },
+          ],
+        },
+      },
+      { text: 'll', marks: { comment: [{ id: id2, value: { by: 'bob' } }] } },
+    ]);
+    const off = S.applyMark(a.seq, [tick(), 'A'], { off: id1 });
+    a.seq = off.seq;
+    assert.deepStrictEqual(spansOf(a)[0], { text: '>h', marks: {} });
+    assert.strictEqual(S.applyMark(a.seq, [tick(), 'A'], { off: id1 }).changed, false);
+    // An off for a mark not here yet waits; the mark then arrives switched off.
+    const b = node('B');
+    apply(b, first);
+    b.seq = S.applyMark(b.seq, [tick(), 'B'], { off: id2 }).seq;
+    b.seq = S.applyMark(b.seq, [c2.ts, 'A'], c2.payload).seq;
+    assert.deepStrictEqual(spansOf(b), [{ text: 'hello world', marks: {} }]);
+    assert.strictEqual(b.seq.marks[id2][4] & S.OFF, S.OFF);
+    // Anchors on deleted elements still resolve; below the base they read as the head.
+    const c = node('C');
+    apply(c, first);
+    const em = mark(c, 2, 8, 'em', true);
+    c.seq = S.applySplice(c.seq, [tick(), 'C'], { cut: S.rangesOf(index(c), 1, 4), content: '' }).seq;
+    assert.deepStrictEqual(spansOf(c), [
+      { text: 'h', marks: {} },
+      { text: ' wo', marks: { em: true } },
+      { text: 'rld', marks: {} },
+    ]);
+    const pruned = S.prune(c.seq, [em.ts - 1, 'R']);
+    assert.deepStrictEqual(Object.keys(pruned.runs), [], 'the run fell; the mark, stamped above, stays');
+    assert.deepStrictEqual(S.spans(S.buildIndex(pruned, [em.ts - 1, 'R']), pruned, [em.ts - 1, 'R']), []);
+    // Order of arrival changes nothing: marks and inserts from two origins.
+    const d = node('D');
+    const e = node('E');
+    const base = insert(d, 0, 'abc');
+    apply(e, base);
+    const mD = mark(d, 0, 2, 'bold', true);
+    const iE = insert(e, 2, 'X');
+    const mE = mark(e, 1, 3, 'bold', null, S.REVERSED.after);
+    const ops = [base, { ...mD, kind: 'mark' }, iE, { ...mE, kind: 'mark' }];
+    const results = permutations(ops)
+      .filter(orderedPerOrigin)
+      .map((order) => {
+        const n = node('fresh');
+        for (const op of order) {
+          const r =
+            op.kind === 'mark'
+              ? S.applyMark(n.seq, [op.ts, op.origin], op.payload)
+              : S.applySplice(n.seq, [op.ts, op.origin], op.payload);
+          n.seq = r.seq;
+        }
+        return n;
+      });
+    for (const n of results) {
+      assert.deepStrictEqual(n.seq, results[0].seq);
+      assert.deepStrictEqual(spansOf(n), spansOf(results[0]));
+    }
+    assert.deepStrictEqual(spansOf(results[0]), [
+      { text: 'a', marks: { bold: true } },
+      { text: 'bXc', marks: {} },
+    ]);
+    // Malformed, and a list refuses marks.
+    for (const bad of [
+      null,
+      { start: 'x', end: '$', key: 'k', value: 1 },
+      { start: '^', end: '$', key: 7, value: 1 },
+      { start: '^', end: '$', key: 'k' },
+      { start: '^', end: '$', key: 'k', value: 1, many: false },
+      { off: 'bad' },
+    ]) {
+      assert.strictEqual(S.applyMark(a.seq, [tick(), 'A'], bad).reason, 'malformed', JSON.stringify(bad));
+    }
+    const list = node('L', 'l');
+    insert(list, 0, [1]);
+    assert.strictEqual(
+      S.applyMark(list.seq, [tick(), 'L'], { start: '^', end: '$', key: 'k', value: 1 }).reason,
+      'malformed',
+    );
+  });
+
   await t.test('concurrent inserts at one spot keep both, in origin order, whatever arrives first', () => {
     const a = node('A');
     const b = node('B');

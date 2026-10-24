@@ -90,6 +90,7 @@ export type SyncOpType =
   | 'splice'
   | 'assign'
   | 'move'
+  | 'mark'
   | 'delete'
   | 'merge'
   | 'advance'
@@ -130,6 +131,30 @@ export interface MovePayload {
   value: unknown;
 }
 
+/** How a style behaves under text typed at its edges. */
+export type MarkExpand = 'before' | 'after' | 'both' | 'none';
+
+/**
+ * What a `mark` carries: the anchors of the range — an element and a side
+ * (`<e`, `>e`), the head `^` or the end `$` — the style's name and value
+ * (`null` removes it), `many` for a mark that stacks; or `off`, the id of a
+ * mark to switch off.
+ */
+export interface MarkPayload {
+  start?: string;
+  end?: string;
+  key?: string;
+  value?: unknown;
+  many?: true;
+  off?: string;
+}
+
+/** A run of equal style in a text: `marks` per name, a `many` name listing every mark. */
+export interface TextSpan {
+  text: string;
+  marks: { [name: string]: unknown | readonly { id: string; value: unknown }[] };
+}
+
 /**
  * A list or text field's block (src/sequence.js): the runs by key
  * (`ts:origin`) as `[anchor, content, element?]`, with content run-length
@@ -168,7 +193,7 @@ export interface SyncOp {
   /** `inc`, `add`, `remove`: the field. */
   key?: string;
   /** `inc`: the amount added; `add`: the elements; `remove`: the elements with the tags the remover observed. */
-  value?: number | readonly unknown[] | readonly SetRemoval[] | SplicePayload | AssignPayload | MovePayload;
+  value?: number | readonly unknown[] | readonly SetRemoval[] | SplicePayload | AssignPayload | MovePayload | MarkPayload;
   /** The schema version of the node that made it; absent without a schema, and on `merge`/`advance`. */
   v?: number;
   /** Who made it — `open({ actor })` or the write's own; a claim the origin signed, not a proof of identity. Absent on `merge`/`advance`. */
@@ -733,6 +758,13 @@ export interface WriteContext {
   count?: number;
   content?: string | readonly unknown[];
   to?: number;
+  /** `mark`: the range, the style name, the expand rule and whether the mark stacks; or the id switched off. */
+  start?: number;
+  end?: number;
+  name?: string;
+  expand?: MarkExpand;
+  many?: boolean;
+  off?: string;
   /** `merge` only: the metadata being joined. */
   meta?: EntryMeta;
   /** The record before the write — `null` when absent or deleted. Read-only. */
@@ -1323,6 +1355,34 @@ export interface Storage {
    */
   updateText(id: string, key: string, text: string, options?: WriteOptions): Promise<number>;
   /**
+   * Marks visible range `[start, end)` of text field `key` with `name: value`.
+   * `expand` says whether text typed at the edges takes the style ('after'
+   * by default); per name the newest mark wins; `many` makes it stack with
+   * every other of its name, removable only by id. Resolves to the mark's id.
+   */
+  mark(
+    id: string,
+    key: string,
+    start: number,
+    end: number,
+    name: string,
+    value: unknown,
+    options?: WriteOptions & { expand?: MarkExpand; many?: boolean },
+  ): Promise<string | null>;
+  /** Removes a style over `[start, end)` by name (under the reversed expand rule). */
+  unmark(
+    id: string,
+    key: string,
+    start: number,
+    end: number,
+    name: string,
+    options?: WriteOptions & { expand?: MarkExpand },
+  ): Promise<void>;
+  /** Switches one mark off by its id — the only way for a `many` mark. */
+  unmark(id: string, key: string, markId: string, options?: WriteOptions): Promise<void>;
+  /** Text field `key` as runs of equal style; raw (no lens, no read hooks); `null` unless the field is a text. */
+  spans(id: string, key: string): Promise<TextSpan[] | null>;
+  /**
    * Replaces the element at `index` of list field `key`: a register per
    * element, last writer wins, following the element through a concurrent move.
    */
@@ -1478,6 +1538,20 @@ export interface SyncomRecord {
   push(key: string, content: string | readonly unknown[], options?: WriteOptions): Promise<void>;
   /** Makes a text field read as `text` — `storage.updateText` with this record's id. */
   updateText(key: string, text: string, options?: WriteOptions): Promise<number>;
+  /** Marks a range of a text field — `storage.mark` with this record's id. */
+  mark(
+    key: string,
+    start: number,
+    end: number,
+    name: string,
+    value: unknown,
+    options?: WriteOptions & { expand?: MarkExpand; many?: boolean },
+  ): Promise<string | null>;
+  /** Removes a style from a text field — `storage.unmark` with this record's id. */
+  unmark(key: string, start: number, end: number, name: string, options?: WriteOptions & { expand?: MarkExpand }): Promise<void>;
+  unmark(key: string, markId: string, options?: WriteOptions): Promise<void>;
+  /** The text field as runs of equal style — `storage.spans` with this record's id. */
+  spans(key: string): Promise<TextSpan[] | null>;
   /** Replaces an element of a list field — `storage.setAt` with this record's id. */
   setAt(key: string, index: number, value: unknown, options?: WriteOptions): Promise<void>;
   /** Moves an element of a list field — `storage.move` with this record's id. */

@@ -94,7 +94,7 @@ test('SyncomError', async (t) => {
       code: 'FIELD_KIND',
       field: 'body',
       kind: 'text',
-      message: /is a text; use splice\(\) or push\(\)/,
+      message: /is a text; use splice\(\), push/,
     });
     await assert.rejects(() => storage.splice(id, 'hits', 0, 0, 'x'), { code: 'FIELD_KIND', kind: 'counter' });
     await assert.rejects(() => storage.splice(id, 'body', 9, 0, 'x'), {

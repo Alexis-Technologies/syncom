@@ -166,6 +166,21 @@ class Record extends Emitter {
     return this.#storage.updateText(this.#id, key, text, options);
   }
 
+  /** Marks a range of a text field; the storage-level `mark` with this record's id. */
+  async mark(key, start, end, name, value, options = {}) {
+    return this.#storage.mark(this.#id, key, start, end, name, value, options);
+  }
+
+  /** Removes a style from a text field; the storage-level `unmark` with this record's id. */
+  async unmark(key, start, end, name, options = {}) {
+    await this.#storage.unmark(this.#id, key, start, end, name, options);
+  }
+
+  /** The text field as runs of equal style; the storage-level `spans` with this record's id. */
+  async spans(key) {
+    return this.#storage.spans(this.#id, key);
+  }
+
   /** Replaces an element of a list field; the storage-level `setAt` with this record's id. */
   async setAt(key, index, value, options = {}) {
     await this.#storage.setAt(this.#id, key, index, value, options);

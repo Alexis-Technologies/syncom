@@ -44,6 +44,17 @@
 // a move concurrent with a cut of the old slot brings the element back at the
 // new one. An `assign` sets the value register; a cut element keeps neither.
 //
+// A TEXT carries MARKS (Peritext, Litt et al. 2022; Loro's rich text): a
+// mark is the range between two anchors — an element and a side, `<e` or
+// `>e`, or the head `^` or the end `$` — with a key and a value, keyed by
+// the stamp of the op that made it. Which side an anchor takes is what makes
+// a style grow or not under text typed at its edge: a character typed after
+// `e` is a right child of `e`, inside `>e` and outside `<next`; one typed
+// before `e` is a left child, inside `>prev` and outside `<e` — the same
+// tree rule that places the text. Per key, the newest mark covering a
+// character wins and a null value is none; a mark flagged MANY stacks with
+// every other of its key (comments) and goes only by its own id (OFF).
+//
 // A reset (`write`, `delete`) drops every run stamped below `base` — a run
 // is as old as its first element — and a surviving run whose anchor fell
 // reads as a right child of the head. `prune` applies the rule to a block,
@@ -758,6 +769,115 @@ const applySplice = (seq, stamp, payload, base = null, pendingMax = PENDING_MAX)
   return { seq: next, changed: true, reason: null };
 };
 
+// ---- marks -----------------------------------------------------------
+
+const MANY = 1;
+const OFF = 2;
+const EXPANDS = { before: [true, false], after: [false, true], both: [true, true], none: [false, false] };
+// Removing a style grows where the style would not and the other way round
+// (Loro): both ↔ none, before and after stay.
+const REVERSED = { before: 'before', after: 'after', both: 'none', none: 'both' };
+
+// The anchors of a mark over visible [start, end) under an expand rule.
+const markAnchors = (index, start, end, expand) => {
+  const [before, after] = EXPANDS[expand];
+  const at = (i) => elemAt(index, i);
+  const from = before ? (start === 0 ? HEAD : `>${at(start - 1)}`) : start === index.length ? END : `<${at(start)}`;
+  const to = after ? (end === index.length ? END : `<${at(end)}`) : end === 0 ? HEAD : `>${at(end - 1)}`;
+  return [from, to];
+};
+
+// A `mark`: a new mark keyed by the op's stamp — first wins on a key — or
+// `{ off }`, which flags an existing mark (or a placeholder for one not here
+// yet) as removed by id.
+const applyMark = (seq, stamp, payload) => {
+  const [ts, origin] = stamp;
+  if (seq.k !== 't' || !payload || typeof payload !== 'object') return { seq, changed: false, reason: 'malformed' };
+  if (payload.off !== undefined) {
+    if (!isRunKey(payload.off)) return { seq, changed: false, reason: 'malformed' };
+    const held = seq.marks && own(seq.marks, payload.off);
+    if (held !== undefined && (held[4] & OFF) !== 0) return { seq, changed: false, reason: null };
+    const next = cloneSeq(seq);
+    (next.marks ??= {})[payload.off] =
+      held === undefined ? [HEAD, HEAD, '', null, OFF] : [held[0], held[1], held[2], held[3], held[4] | OFF];
+    return { seq: next, changed: true, reason: null };
+  }
+  const { start, end, key, value, many } = payload;
+  const a = parseAnchor(start);
+  const b = parseAnchor(end);
+  const okAnchor = (x) => x !== null && (x.elem === null || x.elem.ts < ts);
+  if (!okAnchor(a) || !okAnchor(b) || typeof key !== 'string' || !isJson(value) || value === undefined) {
+    return { seq, changed: false, reason: 'malformed' };
+  }
+  if (many !== undefined && many !== true) return { seq, changed: false, reason: 'malformed' };
+  const id = runKey(ts, origin);
+  if (seq.marks && own(seq.marks, id) !== undefined) return { seq, changed: false, reason: null };
+  const next = cloneSeq(seq);
+  (next.marks ??= {})[id] = [start, end, key, value, many ? MANY : 0];
+  next.ts = Math.max(next.ts, ts);
+  return { seq: next, changed: true, reason: null };
+};
+
+// Where an anchor falls in the walk: the ordinal before the element for
+// `<e`, after it for `>e`; the head for `^`, an anchor below the base, or
+// an element dropped by it; the end for `$`; null while the element has
+// not arrived.
+const anchorOrdinal = (index, token, base) => {
+  if (token === HEAD) return 0;
+  if (token === END) return index.total;
+  const { side, elem } = parseAnchor(token);
+  if (base !== null && compareClock([elem.ts, elem.origin], base) < 0) return 0;
+  const r = index.byKey.get(elem.run);
+  if (r === undefined || elem.offset >= r.len) return null;
+  return r.ordAt[elem.offset] + (side === 'L' ? 0 : 1);
+};
+
+// The text as runs of equal style: `[{ text, marks }]`, marks per key —
+// the newest mark's value, none when null; a MANY key lists every mark as
+// `{ id, value }`. A mark whose anchor has not arrived is not shown yet.
+const spans = (index, seq, base = null) => {
+  const { runs, visRun, visOff, length } = index;
+  if (length === 0) return [];
+  const styles = new Array(length);
+  for (let i = 0; i < length; i++) styles[i] = null;
+  const ordOf = (i) => runs[visRun[i]].ordAt[visOff[i]];
+  const entries = [];
+  for (const id of keysOf(seq.marks)) {
+    const [from, to, key, value, flags] = seq.marks[id];
+    if ((flags & OFF) !== 0) continue;
+    const lo = anchorOrdinal(index, from, base);
+    const hi = anchorOrdinal(index, to, base);
+    if (lo === null || hi === null || lo >= hi) continue;
+    const { ts, origin } = parseRun(id);
+    entries.push({ id, ts, origin, key, value, many: (flags & MANY) !== 0, lo, hi });
+  }
+  entries.sort((x, y) => (x.key < y.key ? -1 : x.key > y.key ? 1 : compareClock([x.ts, x.origin], [y.ts, y.origin])));
+  for (let i = 0; i < length; i++) {
+    const ord = ordOf(i);
+    let marks = null;
+    for (const m of entries) {
+      if (ord < m.lo || ord >= m.hi) continue;
+      marks ??= {};
+      if (m.many) (marks[m.key] ??= []).push({ id: m.id, value: m.value });
+      else if (m.value === null) delete marks[m.key];
+      else marks[m.key] = m.value;
+    }
+    styles[i] = marks && Object.keys(marks).length > 0 ? marks : null;
+  }
+  const out = [];
+  let i = 0;
+  while (i < length) {
+    let j = i + 1;
+    const same = JSON.stringify(styles[i]);
+    while (j < length && JSON.stringify(styles[j]) === same) j++;
+    let text = '';
+    for (let k = i; k < j; k++) text += runs[visRun[k]].items[visOff[k]];
+    out.push({ text, marks: styles[i] ?? {} });
+    i = j;
+  }
+  return out;
+};
+
 // A register write, LWW by stamp: null when the held one is as new.
 const newer = (map, key, stamp) => {
   const held = map && own(map, key);
@@ -921,7 +1041,14 @@ module.exports = {
   applySplice,
   applyAssign,
   applyMove,
+  applyMark,
+  markAnchors,
+  anchorOrdinal,
+  spans,
   slotAt,
+  REVERSED,
+  MANY,
+  OFF,
   prune,
   join,
   pendingCount,

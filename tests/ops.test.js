@@ -794,6 +794,37 @@ test('ops: a peer-shaped meta reaches nothing it should not', async (t) => {
     );
   });
 
+  await t.test('a mark rides on a text through applyOp; a list, a register or a counter refuses it', () => {
+    const text = op('splice', 10, 'A', { seq: 1, key: 'body', value: { at: '^', content: 'hello' } });
+    const bold = op('mark', 20, 'B', {
+      seq: 1,
+      key: 'body',
+      value: { start: '<10:0:A', end: '<10:3:A', key: 'bold', value: true },
+    });
+    const marked = replay([text, bold]);
+    assert.deepStrictEqual(marked.data, { body: 'hello' }, 'the field reads as the plain string');
+    assert.deepStrictEqual(marked.meta.seqs.body.marks, { '20:B': ['<10:0:A', '<10:3:A', 'bold', true, 0] });
+    assertCommutes([text, bold], { body: 'hello' });
+    // A mark that arrives before its text names the field a text and waits.
+    const early = applyOp(null, bold);
+    assert.deepStrictEqual([early.changed, early.entry.data], [true, { body: '' }]);
+    assert.deepStrictEqual(applyOp(early.entry, text).entry.meta, marked.meta);
+    // Refusals.
+    const list = replay([op('splice', 10, 'A', { seq: 1, key: 'items', value: { at: '^', content: [1] } })]);
+    const onList = applyOp(list, op('mark', 11, 'B', { seq: 1, key: 'items', value: bold.value }));
+    assert.deepStrictEqual([onList.changed, onList.rejected], [false, [{ field: 'items', reason: 'list' }]]);
+    const reg = replay([op('set', 1, 'A', { data: { body: 'x' } })]);
+    assert.deepStrictEqual(applyOp(reg, op('mark', 2, 'B', { seq: 1, key: 'body', value: bold.value })).rejected, [
+      { field: 'body', reason: 'register' },
+    ]);
+    // Merge == replay; the code is one character; a purge erases marks.
+    const off = op('mark', 30, 'C', { seq: 1, key: 'body', value: { off: '20:B' } });
+    assert.deepStrictEqual(mergeEntry(replay([text, bold]), replay([text, off])).meta, replay([text, bold, off]).meta);
+    assert.strictEqual(packOps([bold])[0][3], '*');
+    assert.strictEqual(unpackOps(packOps([bold]))[0].type, 'mark');
+    assert.deepStrictEqual(applyOp(marked, op('purge', 99, 'P')).entry.meta.seqs, {});
+  });
+
   await t.test('mergeEntry joins two sequence histories like replaying both; kinds keep their precedence', () => {
     const splice = (ts, origin, seq, key, value) => op('splice', ts, origin, { seq, key, value });
     const a1 = splice(10, 'A', 1, 'body', { at: '^', content: 'ab' });

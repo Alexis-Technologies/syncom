@@ -195,7 +195,10 @@ docs/                     VitePress site
   and `move` (`^`, `{ elem, cut, at, value }`) are a list's per-element value
   and position registers (Kleppmann's move: a move cuts the shown slot and
   adds a one-element position run the register points at; a slot shows iff
-  it is the position the register names); the index is resolved in
+  it is the position the register names); `mark` (`*`, `{ start, end, key,
+  value, many? } | { off }`) is a text's style register — two anchors (an
+  element and a side, `^`/`$`), the newest per key wins, MANY stacks and goes
+  only by id (OFF), anchors picked by the expand rule in `markAnchors`; the index is resolved in
   `prepareOp` INSIDE the queue (`resolveSplice`, `OUT_OF_RANGE`); `applySeq`
   prunes at once so what fell below the base reads the same on either side of
   a reset; the block's `ts` is derived from the runs and registers it holds —

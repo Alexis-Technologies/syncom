@@ -225,6 +225,27 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     assert.strictEqual(after[id].items.length, before.length);
     assert.strictEqual(after[id].items.filter((v) => v === 'X' || v === 'x').length, 1, 'the element shows once');
     assert.strictEqual(after[id].items[0], 'X', 'at the newer move’s place, with the assigned value');
+    // A style typed into from both sides apart: both insertions take it,
+    // and the spans agree.
+    await a.updateText(id, 'body', 'hello world');
+    await a.mark(id, 'body', 0, 5, 'bold', true);
+    await settle([a, b]);
+    link.disconnect();
+    await a.splice(id, 'body', 5, 0, '!');
+    await tick();
+    await b.splice(id, 'body', 5, 0, '?');
+    await b.mark(id, 'body', 7, 12, 'em', true, { expand: 'none' }); // 'world' in B's 'hello? world'
+    await link.reconnect();
+    await settle([a, b]);
+    await assertConverged([a, b]);
+    const spansA = await a.spans(id, 'body');
+    assert.deepStrictEqual(await b.spans(id, 'body'), spansA);
+    assert.match(spansA[0].text, /^hello[!?]{2}$/);
+    assert.deepStrictEqual(spansA[0].marks, { bold: true });
+    assert.deepStrictEqual(
+      spansA.find((s) => s.marks.em),
+      { text: 'world', marks: { em: true } },
+    );
     // Two editors hand over whole new texts apart: each one's change lands.
     await a.updateText(id, 'body', 'one two three');
     await settle([a, b]);
