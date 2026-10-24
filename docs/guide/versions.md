@@ -89,10 +89,68 @@ log has not reached, or an `at` of the wrong shape, is `INVALID_VERSION`.
 that needs them — an undo stack, a long-running comparison — until the
 function it returns is called.
 
+## Tags
+
+A tag names the whole storage as it is now, and keeps it on this node:
+
+```js
+const id = await storage.insert({ title: 'Draft' });
+const tag = await storage.tag('v1');
+// { name: 'v1', eventId: 'mvm…1', seq: 1, ts: 1792…, vector: { '…': 1 }, createdAt: 1792… }
+await storage.update(id, { title: 'Final' });
+const later = await storage.insert({ title: 'Another' });
+
+const v1 = storage.at('v1');
+await v1.get(id);                              // { title: 'Draft' }
+await v1.get(later);                           // null — not there yet
+v1.has(id);                                    // true
+await storage.get(id, { at: { tag: 'v1' } }); // { title: 'Draft' }
+storage.tags();                                // [tag]
+await storage.untag('v1');
+```
+
+A tag is the catalog of the moment — which records existed, as what — plus
+a copy of each record's file taken **before its first change after the
+tag**, so a tag costs nothing per record until the record changes, and one
+file per changed record after that, however many times it changes. A copy
+lands in the newest tag only: had the record changed between two tags, the
+older one took its copy while it was the newest. Reading a record at a tag
+walks the tags from it to the newest for a copy and falls through to the
+record as it is — a record unchanged since the tag is its own copy — and a
+record that was not there, or was a tombstone, at the tag reads as `null`.
+`untag()` moves to the next older tag the copies it needs — those of
+records that did not change between the two — and drops the rest; the
+empty directory stays (`fsi` has no rmdir).
+
+A copy is the file as it was, chain block included: a tampered or torn copy
+fails its check at the tag (`INTEGRITY`) and leaves the present alone; a
+sealed record's copy stays sealed for this node's key. The copy is taken
+inside the write, before the record's file changes, so a copy that cannot
+be written leaves the record held — the op is logged, the record is
+reported `UNPERSISTED` and kept in memory, its file untouched, so the tag
+still reads the file — and the next write of it lands with the copy. For
+the same reason `tag()` refuses with `UNPERSISTED` while a record is held:
+there is no file of it to copy from until it lands. A purge reaches the tags: every copy of the record goes and every
+tag's catalog forgets its row, indexed values included, so
+`at(name).has(id)` is false and `get` is `null`. The read hooks run with
+`at: { tag }`.
+
+Tags are this node's: they live under `tags/` next to the data, name a
+position in this node's log, and do not replicate — a peer that needs the
+same version takes its own tag. `tag()` runs in the mutation queue, so no
+write lands between the catalog and the position it names; a name is of the
+record-id form. A directory a crash left under `tags/` without its line in
+`tags.json` is unknown to every reader and is swept when a tag of that name
+is taken again; an unreadable `tags.json` refuses the open (`CORRUPT`), and a
+tag whose catalog file is gone is dropped at open with a warning.
+
 ## Costs
 
 A version is a fold of the record's retained entries: as many `applyOp`
 calls as the record has ops in the log, read from memory — the log is held
 there — plus the comparison with the present when compaction has run. Fine
 for a record with hundreds of ops; a record edited ten thousand times is a
-record to reset now and then.
+record to reset now and then. A tag costs one catalog file when taken and one
+copied record file per record changed after it; the catalog of every tag is
+held in memory, so a hundred tags over a hundred thousand records is a cost
+to feel, ten tags is not.

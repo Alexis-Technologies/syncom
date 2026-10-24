@@ -103,8 +103,10 @@ const ENTRIES = [
   // siblings — the raise to 55 KB (54.6 measured). History — a version as a
   // cut through the log, the exact start above droppedTs, the fold and the
   // present check, history()/get(id, { at }) — the raise to 56.5 KB (56.2
-  // measured).
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 56.5 },
+  // measured). Tags — tags.json, a catalog per tag, copy-on-write record
+  // files at the EntryStore seam, tag()/untag()/at() — the raise to 58 KB
+  // (57.7 measured; ≈60 KB at the end of the versions epic was agreed).
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 58 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check

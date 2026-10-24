@@ -38,7 +38,11 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 | Method | Returns | Notes |
 | --- | --- | --- |
 | `insert(data, options?)` | `Promise<string>` | Generates an id via `getId` (a UUID by default) and writes; rejects with `code: 'INVALID_ID'` when the generator mints one that is not a [valid id](../guide/storage#custom-identifiers) |
-| `get(id, { at }?)` | `Promise<unknown>` | `null` when absent or deleted; verifies against the chain; a copy — editing it changes nothing. With `at` — an event id, a stamp (a number or a `Date`) or `{ vector }` — the record at that version, folded from the log (see [Versions and history](../guide/versions)); rejects with `HISTORY_GONE` when the log cannot give it exactly, `INVALID_VERSION` for a malformed `at` or a seq not reached, `ENCRYPTED` for an encrypted record |
+| `get(id, { at }?)` | `Promise<unknown>` | `null` when absent or deleted; verifies against the chain; a copy — editing it changes nothing. With `at` — an event id, a stamp (a number or a `Date`), `{ vector }` or `{ tag }` — the record at that version, folded from the log (see [Versions and history](../guide/versions)); rejects with `HISTORY_GONE` when the log cannot give it exactly, `INVALID_VERSION` for a malformed `at` or a seq not reached, `ENCRYPTED` for an encrypted record |
+| `tag(name)` | `Promise<Tag>` | Names the storage as it is now — `{ name, eventId, seq, ts, vector, createdAt }`, kept on this node as the catalog of the moment plus a copy of each record's file taken before its first change after the tag (see [Tags](../guide/versions#tags)); `name` is of the record-id form; rejects with `TAG_EXISTS` |
+| `untag(name)` | `Promise<void>` | Drops a tag; the copies the next older tag needs move there; rejects with `TAG_NOT_FOUND` |
+| `tags()` | `Tag[]` | The tags, oldest first — from memory |
+| `at(name)` | `TagView` | The storage at a tag: its fields plus `get(id)` (the record as it was, through the lens and the read hooks with `at: { tag }`; `null` when it was not there) and `has(id)`; throws `TAG_NOT_FOUND` |
 | `history(id, { limit = 50 }?)` | `Promise<{ versions, complete, exact }>` | The record's past, newest first: `{ eventId, seq, ts, origin, actor, type, fields, data, scrubbed? }` per op this node applied, `data` the record after it through the lens and `afterRead`; `complete` when nothing was dropped or cut by `limit`, `exact` when the versions are what the node held |
 | `has(id)` | `Promise<boolean>` | `false` for a tombstone |
 | `list()` | `Promise<string[]>` | Every live id, sorted — from the catalog, no I/O |
@@ -216,9 +220,11 @@ value is data or configuration. `HookError` and `ValidationError` are
 | `CYCLE` | `treeMove()` to a parent that is the node itself or hangs under it — decided inside the mutation queue, against the tree as it is | `id`, `field`, `node`, `parent` |
 | `HISTORY_GONE` | `get(id, { at })` for a version the log cannot give exactly: `reason` `'compacted'` (dropped entries the version depends on, or a cut before anything retained), `'scrubbed'` (a cut before a purge), `'merge'` (a stamp below a joined snapshot), `'epoch'` (an event id of another incarnation) | `id`, `reason` |
 | `INVALID_VERSION` | `get(id, { at })` with an `at` of the wrong shape, or an event id this log has not reached (a `TypeError`) | — |
+| `TAG_EXISTS` | `tag()` of a name in use | `tag` |
+| `TAG_NOT_FOUND` | `untag()`, `at()`, `get(id, { at: { tag } })` of a tag this node has not | `tag` |
 | `ENCRYPTED` | `inc()`, `add()`, `remove()`, `splice()` or `push()` on an encrypted record; `{ encrypted: true }` on a replicated one | — |
 | `INTEGRITY` | a read (`get()`, `has()`, a cursor) of a record whose file fails its chain block check, under `integrity: 'verify'`, or cannot be parsed at all (a file torn by a crash; `repair(id)` rebuilds it) | `id`, `cause` (the parse error) |
-| `CORRUPT` | `open()` when `node.json`, `schema.json` or `.blockchain.json` cannot be read | `cause` |
+| `CORRUPT` | `open()` when `node.json`, `schema.json`, `tags.json` or `.blockchain.json` cannot be read | `cause` |
 | `DOWNGRADE` | `open()` with `ahead: 'hold'` and a schema version below the one the directory ran | — |
 | `LOCKED` | `open()` while another instance holds the directory | `path` |
 | `KEYS_INCOMPLETE` | `open()`, `loadKeys()`, `loadSigningKeys()` when one file of a pair (RSA or signing) is missing | — |
@@ -235,7 +241,7 @@ value is data or configuration. `HookError` and `ValidationError` are
 | `PAGE_FAILED`, `STUCK` | the sync `error` event: a page of the feed could not be applied; the third in a row | `url`, `cursor`, `attempt`, `cause` |
 | `STREAMS_UNSUPPORTED` | the sync `error` event: the host streamed a snapshot and the link cannot read streams | `url` |
 | `UNRECOVERABLE` | `repair()` when the log holds no whole-record op for the id | `id` |
-| `UNPERSISTED` | the storage's `error` event: ops were logged — the write stands, and replicates — but their record files (or chain block) could not be written; the records are held in memory and the next open replays the batch onto the files | `ids`, `cause` |
+| `UNPERSISTED` | the storage's `error` event: ops were logged — the write stands, and replicates — but their record files (or chain block, or a tag's copy) could not be written; the records are held in memory and the next open replays the batch onto the files. Also `tag()` while a record is held: no file to copy from until it lands | `ids`, `cause` (the event's) |
 | `REWOUND` | the sync `error` event, at a hello: the host holds more of this node's own ops than its log does — a directory restored from an older copy, or another instance with this identity. The node moves its streams past the host's and bootstraps from it; writes made since the restore and before this hello are lost to the host | `url`, `local`, `remote` (vector keys of this node → seq) |
 | `UNDELIVERABLE` | the sync `error` event, once per hello: the host lacks ops of this node's own that its log no longer retains (written before any node was registered, and compacted since); they are not sent | `url`, `missing` (key → `{ host, retained }`) |
 | `SKEW`, `OP_UNREADABLE`, `OP_REFUSED`, `OP_INVALID` | the storage `error` event — see [`Storage`](#storage) | `op`, plus `rejected` / `entity` + `issues` |

@@ -297,6 +297,10 @@ export type SyncomErrorCode =
   | 'FIELD_KIND'
   | 'OUT_OF_RANGE'
   | 'CYCLE'
+  | 'HISTORY_GONE'
+  | 'INVALID_VERSION'
+  | 'TAG_EXISTS'
+  | 'TAG_NOT_FOUND'
   | 'ENCRYPTED'
   | 'INTEGRITY'
   | 'CORRUPT'
@@ -846,6 +850,61 @@ export interface WriteContext {
 
 export interface ReadContext {
   id: string;
+  /** `get(id, { at })`: the version asked for, as the caller gave it; `history()`: each version's event id. */
+  at?: Version;
+  /** `history()`: the one `beforeRead` before the versions are read. */
+  history?: true;
+}
+
+/**
+ * A version of a record: an event id of this node's log (the record as this
+ * node held it after that entry), a stamp — a number or a Date — (every op
+ * stamped at or below it), a version vector (every op it covers), or a tag.
+ */
+export type Version = string | number | Date | { vector: VersionVector } | { tag: string };
+
+/** One op of a record's past and the record after it. */
+export interface HistoryVersion {
+  eventId: string;
+  seq: number;
+  ts: number;
+  origin: string;
+  actor: string | null;
+  type: SyncOpType;
+  /** The fields the op changed (removed ones included). */
+  fields: string[];
+  /** The record as it read after the op, through the lens and `afterRead`; `null` once deleted or when the content is scrubbed. */
+  data: unknown;
+  /** The op's payload is gone (a purge). */
+  scrubbed?: true;
+}
+
+export interface HistoryResult {
+  /** Newest first. */
+  versions: HistoryVersion[];
+  /** The list reaches the first op this node applied to the record: nothing dropped by compaction, nothing cut by `limit`. */
+  complete: boolean;
+  /** The versions are what this node held; false once compaction took something a retained op still depends on. */
+  exact: boolean;
+}
+
+/** A named version of the whole storage, kept on this node: the log position it was taken at. */
+export interface Tag {
+  name: string;
+  eventId: string;
+  seq: number;
+  /** The newest stamp the log held when the tag was taken. */
+  ts: number;
+  vector: VersionVector;
+  createdAt: number;
+}
+
+/** The storage as it was at a tag. */
+export interface TagView extends Tag {
+  /** The record as it was at the tag, through the lens and the read hooks (`at: { tag }`); `null` when it was not there. */
+  get(id: string): Promise<unknown>;
+  /** Whether `id` was a live record at the tag. */
+  has(id: string): boolean;
 }
 
 /** What a remote op faces before it is applied here. */
@@ -1382,8 +1441,33 @@ export interface Storage {
   validate(id: string, data: unknown, blockHash: string): Promise<boolean>;
   insert(data: unknown, options?: StorageDataOptions): Promise<string>;
   has(id: string): Promise<boolean>;
-  /** The record as it reads (the lens applied, the read hooks run), as a copy: editing it changes nothing. */
-  get(id: string): Promise<unknown>;
+  /**
+   * The record as it reads (the lens applied, the read hooks run), as a
+   * copy: editing it changes nothing. With `at`, the record at that version
+   * — folded from the log, or a tag's copy: rejects with `HISTORY_GONE`
+   * when the log cannot give it exactly, `INVALID_VERSION` for a malformed
+   * `at` or a seq this log has not reached, `TAG_NOT_FOUND`, `ENCRYPTED`
+   * for an encrypted record's history.
+   */
+  get(id: string, options?: { at?: Version }): Promise<unknown>;
+  /**
+   * The record's past as this node's log holds it, newest first — one
+   * version per op this node applied, with the record as it read after it.
+   */
+  history(id: string, options?: { limit?: number }): Promise<HistoryResult>;
+  /**
+   * Names the storage as it is now. A tag is kept on this node — the
+   * catalog of the moment plus a copy of each record's file taken before
+   * its first change after the tag — and read through `at(name)` or
+   * `get(id, { at: { tag: name } })`. Rejects with `TAG_EXISTS`.
+   */
+  tag(name: string): Promise<Tag>;
+  /** Drops a tag; what the next older tag needs of its copies moves there. Rejects with `TAG_NOT_FOUND`. */
+  untag(name: string): Promise<void>;
+  /** The tags, oldest first. */
+  tags(): Tag[];
+  /** The storage as it was at tag `name`; throws `TAG_NOT_FOUND`. */
+  at(name: string): TagView;
   set(id: string, data: unknown, options?: StorageDataOptions): Promise<void>;
   delete(id: string, options?: WriteOptions): Promise<void>;
   /** Forgets the record for good: a `purge` op no later write revives, and a scrub of its entries from the log — here and on every peer it reaches. */
@@ -1673,7 +1757,7 @@ export declare class SyncomCollection {
   constructor(storage: Storage, name: string);
   readonly name: string;
   insert(data: unknown, options?: StorageDataOptions): Promise<SyncomRecord>;
-  get(id: string): Promise<unknown | null>;
+  get(id: string, options?: { at?: Version }): Promise<unknown | null>;
   /** A cursor over this collection — see Cursor. */
   select(query?: MangoQuery): Cursor;
   count(query?: MangoQuery): Promise<number>;

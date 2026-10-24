@@ -75,6 +75,17 @@ There is no released version section until then; everything below lands in it.
   purge leaves the ops listed with their content gone; an encrypted record
   has no past. The read hooks see `at`. New page: Versions and history.
   Browser budget 55 → 56.5 KB.
+- **Tags.** `tag(name)` names the storage as it is now and keeps it on
+  this node: the catalog of the moment plus a copy of each record's file
+  taken before its first change after the tag — nothing per record until it
+  changes, one file after, in the newest tag only. `at(name)` reads records
+  as they were (`get`, `has`), `get(id, { at: { tag } })` too; `untag()`
+  moves to the next older tag the copies it needs; `tags()` lists them. A
+  copy carries its chain block and is checked like the file; a copy that
+  cannot be written leaves the record held (`UNPERSISTED`) and the tag
+  reading the file; a purge reaches every tag. Tags do not replicate. New
+  codes `TAG_EXISTS` and `TAG_NOT_FOUND`; `tags.json` and `tags/` on disk.
+  Browser budget 56.5 → 58 KB.
 - **The log knows what it dropped.** `storage.log.droppedTs` is the newest
   stamp among the ops compaction dropped, or an open could not read — `0`
   while nothing ever was — persisted in `index.json`; a record's retained

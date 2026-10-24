@@ -342,7 +342,7 @@ const persist = async (batch) => {
   }
   // Unapplied, a batch whose records did not land is replayed at the next open.
   if (landed) core.log.applied(first, last);
-  if (batch.purged) for (const id of batch.purged) await core.log.scrub(id);
+  if (batch.purged) for (const id of batch.purged) await core.scrub(id);
 };
 
 // afterApply sees a durable batch; whatever it does, the record views and

@@ -23,6 +23,7 @@ const { diff } = require('./myers.js');
 const { buildIndex, spans, isRunKey, isAnchor, cursorAt, indexOfCursor, REVERSED } = require('./sequence.js');
 const { TRASH, isNodeId } = require('./tree.js');
 const { appliedHere, parseVersion, within, exactStart, fold, gone } = require('./history.js');
+const { Tags } = require('./tags.js');
 const { Clock } = require('./vector.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
 const { normalizeSchema, createLens, project } = require('./schema.js');
@@ -122,6 +123,7 @@ class Storage extends Emitter {
   #chain = null;
   #log = null;
   #entries = null;
+  #tags = null;
   #core = null;
   #records = null;
   #reaper = null;
@@ -308,10 +310,18 @@ class Storage extends Emitter {
       verify: this.#verify ? (id, data, block) => this.validate(id, data, block) : null,
       decrypt: (data) => decrypt(data, this.#keys.privateKey),
       view: (id, entry) => this.#view(id, entry),
+      before: (id, file) => this.#tags.copyBefore(id, file),
     });
     await this.#loadIdentity();
     await this.#loadSchema();
     await this.#loadCatalog();
+    this.#tags = new Tags({
+      fsi,
+      path: this.#path,
+      logger: this.#logger,
+      catalogOf: (path) => new Catalog({ fsi, path, entities: this.#entities, logger: this.#logger }),
+    });
+    await this.#tags.load();
     this.#core = this.#lend();
     await this.#replayTail();
     await this.#replayHeld();
@@ -364,6 +374,11 @@ class Storage extends Emitter {
       unpersisted: (touched, error) => this.#unpersisted(touched, error),
       flush: () => this.#flushCatalog(),
       refresh: (id, data, delta, source) => this.#emitUpdate(id, data, delta, source),
+      // A purge reaches the log and the tags alike.
+      scrub: async (id) => {
+        await this.#log.scrub(id);
+        await this.#tags.scrub(id);
+      },
     };
   }
 
@@ -1010,16 +1025,98 @@ class Storage extends Emitter {
   async #getAt(id, at) {
     const version = parseVersion(at);
     await runHook(this.#hooks, 'beforeRead', { id, at });
-    const past = await this.#past(id, version);
     let data = null;
-    if (past !== null) {
-      const { entries, start } = past;
-      const steps = fold(entries, start);
-      const last = steps.length > 0 ? steps[steps.length - 1].entry : null;
-      data = last !== null && isAlive(last) ? asJson(await this.#view(id, last)) : null;
+    if (version.kind === 'tag') data = await this.#readTag(id, version.name);
+    else {
+      const past = await this.#past(id, version);
+      if (past !== null) data = await this.#folded(id, past);
     }
     const replaced = await runHook(this.#hooks, 'afterRead', { id, at }, data);
     return replaced === undefined ? data : replaced;
+  }
+
+  // The record at a tag: its file as it was — the tag's copy, or the file
+  // as it is when nothing changed it since — parsed and read through the
+  // lens; `null` when it was not there.
+  async #readTag(id, name) {
+    if (!isRecordId(id)) return null;
+    let { exists, raw } = await this.#tags.readAt(name, id);
+    if (!exists) return null;
+    // No copy: nothing landed on the file since the tag. A record held since
+    // (a write whose file failed) reads as the file, which is still the
+    // tag's state; any other reads as it is.
+    if (raw === null && this.#entries.held(id)) raw = await this.#entries.file(id);
+    if (raw === null) return this.#read(id);
+    const entry = await this.#entries.parse(id, raw);
+    if (entry.encrypted) return asJson(entry.data);
+    return isAlive(entry) ? asJson(await this.#view(id, entry)) : null;
+  }
+
+  async #folded(id, past) {
+    {
+      const { entries, start } = past;
+      const steps = fold(entries, start);
+      const last = steps.length > 0 ? steps[steps.length - 1].entry : null;
+      return last !== null && isAlive(last) ? asJson(await this.#view(id, last)) : null;
+    }
+  }
+
+  /**
+   * Names the storage as it is now: a tag — `{ name, eventId, seq, ts,
+   * vector, createdAt }` — that `at(name)` and `get(id, { at: { tag } })`
+   * read records through as they were when it was taken. Kept on this node
+   * (tags do not replicate) as the catalog of the moment plus a copy of
+   * each record's file made before its first change after the tag; a tag
+   * costs nothing per record until the record changes. `name` is a
+   * [record id](../guide/storage#custom-identifiers); rejects with
+   * `TAG_EXISTS`.
+   */
+  async tag(name) {
+    if (!isRecordId(name)) throw new TypeError('tag() takes a name of the record-id form');
+    return this.#run(() => {
+      // A record logged but not on disk has no file to copy from: the tag
+      // waits for it to land (the next write of it, or the next open).
+      const held = this.#entries.heldIds();
+      if (held.size > 0) {
+        const ids = [...held];
+        const message = `tag(): ${ids.join(', ')}: logged, but not written; take the tag once they land`;
+        throw new SyncomError('UNPERSISTED', message, { ids });
+      }
+      return this.#tags.take(name, {
+        eventId: this.#log.lastEventId,
+        seq: this.#log.next - 1,
+        ts: this.#log.latestTs,
+        vector: this.#log.vector,
+        rows: this.#catalog.rows(),
+      });
+    });
+  }
+
+  /** Drops a tag; what the next older tag needs of its copies moves there. Rejects with `TAG_NOT_FOUND`. */
+  async untag(name) {
+    if (typeof name !== 'string') throw new TypeError('untag() takes a name');
+    return this.#run(() => this.#tags.drop(name));
+  }
+
+  /** The tags, oldest first. */
+  tags() {
+    return this.#tags.list();
+  }
+
+  /**
+   * A view of the storage at tag `name`: the tag's fields plus `get(id)` —
+   * the record as it was, through the lens and the read hooks (`at: { tag }`)
+   * — and `has(id)`, whether it was a live record then. Rejects with
+   * `TAG_NOT_FOUND`.
+   */
+  at(name) {
+    if (typeof name !== 'string') throw new TypeError('at() takes a name');
+    const tag = this.#tags.info(name);
+    return {
+      ...tag,
+      get: (id) => this.#getAt(id, { tag: name }),
+      has: (id) => isRecordId(id) && this.#tags.hasAt(name, id),
+    };
   }
 
   /**
@@ -1159,7 +1256,7 @@ class Storage extends Emitter {
    */
   async purge(id, { actor } = {}) {
     await this[COMMIT]('purge', id, {}, { actor });
-    await this.#log.scrub(id);
+    await this.#core.scrub(id);
     this.#records.delete(id);
   }
 

@@ -46,8 +46,8 @@ const isVector = (value) =>
   typeof value === 'object' &&
   Object.keys(value).every((key) => Number.isSafeInteger(value[key]) && value[key] >= 0);
 
-// `at`, checked: an event id (a string), a stamp (a number or a Date), or
-// `{ vector }`. The shape is data, so a wrong one is INVALID_VERSION.
+// `at`, checked: an event id (a string), a stamp (a number or a Date),
+// `{ vector }` or `{ tag }`. The shape is data, so a wrong one is INVALID_VERSION.
 const parseVersion = (at) => {
   if (typeof at === 'string') {
     const parsed = parseEventId(at);
@@ -60,7 +60,8 @@ const parseVersion = (at) => {
     return { kind: 'stamp', ts: stamp };
   }
   if (at !== null && typeof at === 'object' && isVector(at.vector)) return { kind: 'vector', vector: at.vector };
-  throw typed('INVALID_VERSION', 'at: an event id, a stamp (a number or a Date) or { vector }');
+  if (at !== null && typeof at === 'object' && typeof at.tag === 'string') return { kind: 'tag', name: at.tag };
+  throw typed('INVALID_VERSION', 'at: an event id, a stamp (a number or a Date), { vector } or { tag }');
 };
 
 // Whether an applied entry falls inside the version.

@@ -606,6 +606,8 @@ data/
 ├── index/         catalog.json — the record catalog as of a log position, search text included (derived; rebuilt when missing)
 ├── data/          <id>.json per record: { data, meta, encrypted, timestamp, block }
 ├── log/           the operation log (see Sync)
+├── tags.json      { format, tags } — the tags taken here (see Versions and history › Tags)
+├── tags/          <name>/index/catalog.json and <name>/data/<id>.json — a tag's catalog and the record files copied before their first change after it
 └── remote/        <url>.json per registered sync node
 ```
 

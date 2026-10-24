@@ -401,7 +401,23 @@ class Catalog {
    * when it was built for these indexes, `null` when absent, unreadable or
    * built for others — a rebuild is the caller's.
    */
-  async load() {
+  /** The rows as they are, `[id, row]` pairs — shared objects, never edited in place. */
+  rows() {
+    return [...this.#rows];
+  }
+
+  /** Takes rows as `rows()` hands them out — a copy of another catalog, under the same definitions. */
+  adopt(rows) {
+    for (const [id, row] of rows) {
+      this.#remove(id);
+      this.#insert(id, row);
+      this.#dirty++;
+    }
+  }
+
+  // `strict: false` reuses a catalog saved under other indexes — a tag's,
+  // where the rows say what existed and the indexes are those of its day.
+  async load({ strict = true } = {}) {
     if (!(await this.#fsi.exists(this.#dir, FILE))) return null;
     let parsed = null;
     try {
@@ -412,7 +428,7 @@ class Catalog {
     const usable =
       isObject(parsed) &&
       parsed.format === FORMAT &&
-      parsed.indexes === this.#indexKey &&
+      (!strict || parsed.indexes === this.#indexKey) &&
       typeof parsed.stamp === 'string' &&
       Array.isArray(parsed.rows);
     if (!usable) return null;

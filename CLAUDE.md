@@ -38,6 +38,7 @@ src/tree.js               the tree kind: per node its stamped moves, the fold in
                           2021, Loro), prune and join — requires vector.js only
 src/order.js              fractional indexes over a 62-letter alphabet (Loro's rule, MIT) — no requires; the core uses it for a tree's places
 src/history.js            the past out of the log: a version (event id / stamp / vector) as a cut, the exact start above droppedTs, the fold
+src/tags.js               Tags — named versions kept locally: tags.json, a catalog per tag, copy-on-write record files in the newest tag
 src/errors.js             SyncomError (an operational failure, with a code) and typed() — no requires
 src/symbols.js            COMMIT / REFRESH / SOURCE — the module-private seams between Storage and what it hands out — no requires
 src/options.js            normalizeStorageOptions — open()'s plain options checked and defaulted (lock, cache, chain, skew…)
@@ -355,6 +356,24 @@ docs/                     VitePress site
   'merge'`; a purged record lists scrubbed versions and refuses a cut before
   the purge (`'scrubbed'`). Never answer a version from the record file or
   the catalog, and never fold from an entry below the exact start.
+- **A tag is copy-on-write at the EntryStore seam.** `src/tags.js` keeps
+  `tags.json` and, per tag, a Catalog (`adopt(rows)` of the live one at
+  `tag()` time, saved under the tag's event id; loaded with `strict: false`
+  so a schema's index change does not drop it) plus `tags/<name>/data/` —
+  record files copied by `EntryStore.#changing` (`before(id, file)`) ahead
+  of `write`/`writeSealed`/`remove`, into the NEWEST tag only, once per
+  record, only for a record the tag's catalog holds live. `tag()` refuses
+  (`UNPERSISTED`) while a record is held — its file is behind the cache and
+  a copy from memory would carry no block to verify. A read at a tag walks
+  the tags from it to the newest for a copy, else reads the present — except
+  a record held since the tag, whose file is still the tag's state; the
+  tag's catalog row decides existence.
+  `untag` moves to the older tag the copies of records it has no copy of and
+  holds live, then rewrites tags.json, then sweeps; `take()` sweeps the
+  name's directory first (fsi lists files, not directories, so a crash's
+  leftover cannot be found at open). Every purge path goes through
+  `core.scrub` (log + tags) — never `core.log.scrub` alone. The error field
+  is `tag`, never `name` (it would overwrite `Error.name`).
 - **`repair(id)` replays the log, it does not guess.** `Storage.#repair`
   starts at the first whole-record op the log retains for the id (`WHOLE`:
   `write`/`merge`/`delete`, or a `purge` even scrubbed), folds the rest with

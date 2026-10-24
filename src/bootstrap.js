@@ -160,7 +160,7 @@ const mergeBatch = async (core, records, via, from) => {
   const first = entries[0].seq;
   const last = entries[entries.length - 1].seq;
   if (await core.persist(batch.touched, first, last)) core.log.applied(first, last);
-  if (batch.purged) for (const id of batch.purged) await core.log.scrub(id);
+  if (batch.purged) for (const id of batch.purged) await core.scrub(id);
   core.flush();
   for (const { ctx, op, started } of batch.pending) {
     try {
