@@ -33,11 +33,11 @@ const shortestEdit = (x, y, max) => {
   const limit = Math.min(n + m, max);
   const offset = limit + 1;
   const width = 2 * offset + 1;
-  let v = new Int32Array(width);
+  const v = new Int32Array(width);
   const trace = [];
   for (let d = 0; d <= limit; d++) {
-    const snapshot = Int32Array.from(v);
-    trace.push(snapshot);
+    // The frontier as this round found it; the round then moves `v` on.
+    trace.push(Int32Array.from(v));
     for (let k = -d; k <= d; k += 2) {
       let i;
       if (k === -d || (k !== d && v[offset + k - 1] < v[offset + k + 1])) i = v[offset + k + 1];
@@ -50,7 +50,6 @@ const shortestEdit = (x, y, max) => {
       v[offset + k] = i;
       if (i >= n && j >= m) return backtrack(trace, offset, n, m);
     }
-    v = Int32Array.from(v);
   }
   return null;
 };

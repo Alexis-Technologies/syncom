@@ -194,7 +194,7 @@ const resolveMove = (core, id, payload, current) => {
   }
   const place = S.placeInsert(idx, to < from ? to : to + 1, core.nodeId);
   const at = place.at ?? `>${S.elemKey(place.run, place.from - 1)}`;
-  return { elem, cut: S.slotAt(idx, from), at, value: S.render(idx)[from] };
+  return { elem, cut: S.slotAt(idx, from), at, value: S.valueAt(idx, from) };
 };
 
 // A mark names a visible range and an expand rule; what travels is the pair

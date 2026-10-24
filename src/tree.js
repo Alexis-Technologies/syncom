@@ -160,8 +160,14 @@ const byPlace = (placeOf) => (x, y) => {
   return compareClock([a[1], a[2]], [b[1], b[2]]);
 };
 
-// The children of each parent, in order; roots under null.
+// The children of each parent, in order; roots under null. Kept by the
+// block: a block is never mutated (every change is a new one), so a tree
+// is folded once however many times it is read — a local move reads it
+// several times, a page of a peer's moves renders it once per op.
+const FOLDED = new WeakMap();
 const childrenOf = (tree) => {
+  const hit = FOLDED.get(tree);
+  if (hit !== undefined) return hit;
   const { parentOf, placeOf } = resolve(tree);
   const children = new Map();
   for (const [node, parent] of parentOf) {
@@ -172,7 +178,9 @@ const childrenOf = (tree) => {
   }
   const order = byPlace(placeOf);
   for (const list of children.values()) list.sort(order);
-  return { children, parentOf, placeOf };
+  const folded = { children, parentOf, placeOf };
+  FOLDED.set(tree, folded);
+  return folded;
 };
 
 // What the field reads as: the roots and their children, nested —

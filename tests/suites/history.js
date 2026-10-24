@@ -398,6 +398,22 @@ const runHistoryTests = async (t, assert, createStorage) => {
       { id, at: { vector: storage.vector } },
     ]);
   });
+
+  await t.test('history({ limit }) runs afterRead for the versions it hands out alone', async (t2) => {
+    let reads = 0;
+    const storage = await createStorage(t2, 'A', { hooks: { afterRead: () => void reads++ } });
+    const id = await storage.insert({ n: 0 });
+    for (let i = 1; i <= 30; i++) await storage.update(id, { n: i });
+    reads = 0;
+    const { versions, complete } = await storage.history(id, { limit: 5 });
+    assert.strictEqual(versions.length, 5);
+    assert.strictEqual(complete, false);
+    assert.strictEqual(reads, 5, 'one afterRead per version handed out, none for the rest');
+    assert.deepStrictEqual(
+      versions.map((version) => version.data.n),
+      [30, 29, 28, 27, 26],
+    );
+  });
 };
 
 module.exports = { runHistoryTests };

@@ -599,6 +599,15 @@ const buildIndex = (seq, base = null) => {
   };
 };
 
+// The value at visible index `i`: a text's character; a list element's
+// assigned value when a register names one, else what its run holds.
+const valueAt = (index, i) => {
+  const held = index.runs[index.visRun[i]].items[index.visOff[i]];
+  if (index.visElem === null || index.vals === null) return held;
+  const assigned = own(index.vals, index.visElem[i]);
+  return assigned === undefined ? held : assigned[2];
+};
+
 // What the field reads as: the visible elements in order.
 const render = (index) => {
   const { runs, visRun, visOff, length } = index;
@@ -608,10 +617,7 @@ const render = (index) => {
     return out;
   }
   const out = new Array(length);
-  for (let i = 0; i < length; i++) {
-    const assigned = index.vals === null ? undefined : own(index.vals, index.visElem[i]);
-    out[i] = assigned === undefined ? runs[visRun[i]].items[visOff[i]] : assigned[2];
-  }
+  for (let i = 0; i < length; i++) out[i] = valueAt(index, i);
   return out;
 };
 
@@ -1209,6 +1215,7 @@ module.exports = {
   cloneSeq,
   buildIndex,
   render,
+  valueAt,
   elemAt,
   placeInsert,
   rangesOf,

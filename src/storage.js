@@ -1219,8 +1219,11 @@ class Storage extends Emitter {
     const droppedTs = this.#log.droppedTs;
     const { start, exact: fromReset } = exactStart(entries, droppedTs);
     const steps = fold(entries, start, this.#limits);
+    // The fold is whole — each version is the record after its op — but the
+    // lens and afterRead run for the versions handed out alone.
+    const shown = steps.slice(Math.max(0, steps.length - limit));
     const versions = [];
-    for (const { logged, entry, delta } of steps) {
+    for (const { logged, entry, delta } of shown) {
       const { seq, op, scrubbed } = logged;
       const version = {
         eventId: this.#log.formatId(seq),
@@ -1248,7 +1251,7 @@ class Storage extends Emitter {
     versions.reverse();
     const last = steps.length > 0 ? steps[steps.length - 1].entry : null;
     const exact = fromReset && (await this.#present(id, last));
-    return { versions: versions.slice(0, limit), complete: droppedTs === 0 && versions.length <= limit, exact };
+    return { versions, complete: droppedTs === 0 && steps.length <= limit, exact };
   }
 
   // The retained entries of `id` this node applied, oldest first, and the
