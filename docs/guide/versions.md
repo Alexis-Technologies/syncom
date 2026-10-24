@@ -250,7 +250,10 @@ changed since — a whole-record write; with a peer's change beside it the
 undo empties the field instead, so the peer's change stays. An undone
 `add` removes this node's adds of the element alone, so a peer's concurrent
 add of it survives; an undone `inc` is the increment back; a text comes
-back as new characters. A text's marks are not undone.
+back as new characters. A text's marks are not undone. An undo that fails
+partway — a hook refusing one record's inverse, say — leaves the records
+it took back taken back, with their way back on the redo stack, and the
+rest on the undo stack for another try: a record is never inverted twice.
 
 The stack is this process's: nothing of it is written, a peer's ops are
 never undone from here, a `purge` forgets its record on every step, `scope`

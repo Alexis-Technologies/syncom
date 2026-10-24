@@ -226,6 +226,53 @@ const runUndoTests = async (t, assert, createStorage) => {
     undo.stop();
   });
 
+  await t.test(
+    'a failed undo leaves what it took back taken back; the retry inverts the rest, never twice',
+    async (t2) => {
+      let failing = false;
+      const beforeWrite = (ctx) => {
+        if (failing && ctx.id === 'c') throw new Error('boom');
+      };
+      const storage = await createStorage(t2, 'A', { hooks: { beforeWrite } });
+      const undo = createUndo(storage, { mergeInterval: 1e9 });
+      for (const id of ['a', 'b', 'c']) await storage.set(id, { n: 0 });
+      undo.mark();
+      await storage.splice('a', 'body', 0, 0, 'abcde');
+      await storage.inc('b', 'hits', 1);
+      await storage.inc('c', 'hits', 2);
+      assert.deepStrictEqual(undo.size, { undo: 2, redo: 0 });
+      // The hook refuses the third record's inverse: the first two stand
+      // inverted, the third as the step left it, and the stacks say so.
+      failing = true;
+      await assert.rejects(() => undo.undo(), { code: 'HOOK_FAILED' });
+      assert.deepStrictEqual(await storage.get('a'), { n: 0 }, 'a was taken back');
+      assert.deepStrictEqual(await storage.get('b'), { n: 0 }, 'b was taken back');
+      assert.deepStrictEqual(
+        await storage.get('c'),
+        { n: 0, hits: 2 },
+        'c, where the hook threw, is as the step left it',
+      );
+      assert.deepStrictEqual(
+        undo.size,
+        { undo: 2, redo: 1 },
+        'a and b went to the redo stack; c waits on the undo stack',
+      );
+      failing = false;
+      assert.deepStrictEqual(await undo.undo(), { applied: 1, skipped: 0 }, 'the retry inverts c alone');
+      assert.deepStrictEqual(await storage.get('a'), { n: 0 }, 'a is not inverted twice');
+      assert.deepStrictEqual(await storage.get('c'), { n: 0 });
+      assert.deepStrictEqual(undo.size, { undo: 1, redo: 2 });
+      // Redo brings the three back, in the two steps the undo left.
+      await undo.redo();
+      assert.deepStrictEqual(await storage.get('c'), { n: 0, hits: 2 });
+      await undo.redo();
+      assert.deepStrictEqual(await storage.get('a'), { n: 0, body: 'abcde' });
+      assert.deepStrictEqual(await storage.get('b'), { n: 0, hits: 1 });
+      assert.deepStrictEqual(undo.size, { undo: 3, redo: 0 });
+      undo.stop();
+    },
+  );
+
   await t.test('the stack holds the log; limit, exclude and scope bound what it keeps; a purge forgets', async (t2) => {
     const storage = await createStorage(t2, 'A', { sync: { log: { rollAfter: 1 }, retention: { ops: 2 } } });
     const undo = createUndo(storage, { mergeInterval: 0, limit: 2, exclude: (op) => op.id === 'skip' });

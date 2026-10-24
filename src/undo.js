@@ -71,7 +71,11 @@ class UndoManager extends Emitter {
   #redo = [];
   // The seqs of the manager's own ops: an undo's ops never stand in the way
   // of an older step (undoing two steps in a row), only everyone else's do.
+  // Those below the oldest step stand in nobody's way and are forgotten.
   #own = new Set();
+  // The oldest seq a step on either stack was made at — what the log is
+  // asked to keep; read by the pin on every entry, so kept, not recomputed.
+  #oldestSeq = Infinity;
   #collecting = null;
   #unpin;
   #stopped = false;
@@ -85,14 +89,17 @@ class UndoManager extends Emitter {
     storage.on('commit', this.#onCommit);
     storage.on('close', this.#onClose);
     // What a step's conflicts are read from must stay in the log.
-    this.#unpin = storage.log.pin((entry) => entry.seq >= this.#oldest());
+    this.#unpin = storage.log.pin((entry) => entry.seq >= this.#oldestSeq);
   }
 
-  #oldest() {
+  // After the stacks changed: the oldest seq they hold, and the own seqs
+  // that no step can consult any more.
+  #refreshOldest() {
     let seq = Infinity;
     for (const step of this.#undo) seq = Math.min(seq, step.lastSeq);
     for (const step of this.#redo) seq = Math.min(seq, step.lastSeq);
-    return seq;
+    this.#oldestSeq = seq;
+    for (const own of this.#own) if (own <= seq) this.#own.delete(own);
   }
 
   get canUndo() {
@@ -131,22 +138,24 @@ class UndoManager extends Emitter {
     }
     this.#record(step, event);
     if (this.#redo.length > 0) this.#redo = [];
+    this.#refreshOldest();
     this.emit('push', { direction: 'undo', records: step.records.size });
     this.emit('change');
   }
 
   // One commit into a step: per record the step keeps how it found the
   // record (the first commit's before), how it left it (the last commit's
-  // after) and the kinds of every field seen — the inverse is made of
-  // those when the step is taken back.
+  // after), the kinds of every field seen — the inverse is made of those
+  // when the step is taken back — and the seqs of its own ops on it.
   #record(step, event) {
     const { op, seq, before, after, kinds } = event;
     step.lastSeq = Math.max(step.lastSeq, seq);
     step.seqs.add(seq);
     const record = step.records.get(op.id);
-    if (record === undefined) step.records.set(op.id, { before, after, kinds: { ...kinds } });
+    if (record === undefined) step.records.set(op.id, { before, after, kinds: { ...kinds }, seqs: new Set([seq]) });
     else {
       record.after = after;
+      record.seqs.add(seq);
       Object.assign(record.kinds, kinds);
     }
   }
@@ -159,6 +168,7 @@ class UndoManager extends Emitter {
       stack.length = 0;
       stack.push(...kept);
     }
+    this.#refreshOldest();
     this.emit('change');
   }
 
@@ -189,10 +199,16 @@ class UndoManager extends Emitter {
     const step = from.pop();
     if (step === undefined) return { applied: 0, skipped: 0 };
     const result = { applied: 0, skipped: 0 };
-    // The step of the other stack: what this one's ops commit, and which
-    // seqs it took back (they no longer stand in an older step's way).
-    const collected = { at: 0, lastSeq: 0, seqs: new Set(), taken: step.seqs, records: new Map(), closed: true };
+    // The step of the other stack: what this one's ops commit, and the seqs
+    // of the records it took back (they no longer stand in an older step's
+    // way) — record by record, so a step taken back in part is accounted in part.
+    const collected = { at: step.at, lastSeq: 0, seqs: new Set(), taken: new Set(), records: new Map(), closed: true };
     this.#collecting = collected;
+    const left = new Map(step.records);
+    const took = (id, record) => {
+      left.delete(id);
+      for (const seq of record.seqs) collected.taken.add(seq);
+    };
     try {
       for (const [id, record] of step.records) {
         const conflicts = this.#conflicts(step, id);
@@ -208,22 +224,28 @@ class UndoManager extends Emitter {
           else kept = patches.filter((patch) => !conflicting(patch, conflicts.get(patch.field)));
         }
         result.skipped += patches.length - kept.length;
-        if (kept.length === 0) continue;
-        result.applied += await this.#storage.applyPatches(id, kept, {
-          source: this.#token,
-          actor: this.#options.actor,
-        });
+        if (kept.length > 0) {
+          result.applied += await this.#storage.applyPatches(id, kept, {
+            source: this.#token,
+            actor: this.#options.actor,
+          });
+        }
+        took(id, record);
       }
     } catch (error) {
-      from.push(step);
+      // What was taken back stays taken back: the records already inverted
+      // leave the step, their way back on the other stack; the rest wait on
+      // this one for another try. A record is never inverted twice.
+      if (left.size > 0) from.push({ ...step, records: left });
+      if (collected.records.size > 0) to.push(collected);
+      this.#refreshOldest();
+      this.emit('change');
       throw error;
     } finally {
       this.#collecting = null;
     }
-    if (collected.records.size > 0) {
-      collected.at = step.at;
-      to.push(collected);
-    }
+    if (collected.records.size > 0) to.push(collected);
+    this.#refreshOldest();
     this.emit('pop', { direction, ...result });
     this.emit('change');
     return result;
@@ -249,6 +271,7 @@ class UndoManager extends Emitter {
     this.#undo = [];
     this.#redo = [];
     this.#own.clear();
+    this.#refreshOldest();
     this.emit('change');
   }
 
