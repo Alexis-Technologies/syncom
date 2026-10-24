@@ -3,8 +3,8 @@
 // The sequence engine behind the `list` and `text` field kinds: where an
 // element goes, what a field reads as, and how two nodes' pictures of one
 // field join. Pure functions over the plain JSON block Storage keeps in a
-// record's meta (`meta.seqs[field]`); no requires beyond ./vector.js, so it
-// ships to the browser as it is.
+// record's meta (`meta.seqs[field]`); no requires beyond ./vector.js and
+// ./rle.js (the run-length content), so it ships to the browser as it is.
 //
 // The ordering rule is Fugue (Weidner & Kleppmann, "The Art of the Fugue",
 // 2023; reference: fugue-simple, MIT): every element has one place in a
@@ -67,18 +67,30 @@
 // is a PROTOCOL bump once the package is published.
 
 const { compareClock } = require('./vector.js');
+const {
+  MAX_RUN,
+  GAP,
+  isText,
+  present,
+  isGap,
+  rleLength,
+  rleExpand,
+  rleAppend,
+  rleCut,
+  sameRle,
+  rleMerge,
+  normalizeRle,
+} = require('./rle.js');
 
 // Pending work — runs waiting for their anchor, cuts and extensions waiting
 // for their run, registers and switched-off marks for elements and marks not
 // here — is bounded per field, on the op path and on the snapshot path
 // alike: beyond it an op is refused (`bound`) and a peer's block is dropped.
 const PENDING_MAX = 4096;
-// A run holds at most MAX_RUN slots and a field MAX_FIELD, tombstones
-// included: the index allocates per slot, so a gap is the one thing a peer
-// could make expensive for nothing (a `[3e8]` in a snapshot block would be
-// expanded element by element). A node typing past MAX_RUN starts a new run
-// (`placeInsert`); a field at MAX_FIELD takes nothing more until a reset.
-const MAX_RUN = 1 << 20;
+// A field holds at most MAX_FIELD slots, tombstones included (and a run
+// MAX_RUN, src/rle.js's): the index allocates per slot, so a gap is the one
+// thing a peer could make expensive for nothing. A field at MAX_FIELD takes
+// nothing more until a reset.
 const MAX_FIELD = 1 << 22;
 
 // Keys: a run is `ts:origin` (the op that created it), an element
@@ -134,117 +146,6 @@ const parseAnchor = (token) => {
   return elem === null ? null : { side: token[0] === '<' ? 'L' : 'R', elem };
 };
 const isAnchor = (token) => parseAnchor(token) !== null;
-
-// ---- run-length content -------------------------------------------------
-
-const isText = (kind) => kind === 't';
-const present = (kind, seg) => (isText(kind) ? typeof seg === 'string' : Array.isArray(seg));
-const isGap = (seg) => Number.isInteger(seg) && seg > 0;
-const segLength = (seg) => (typeof seg === 'number' ? seg : seg.length);
-
-// Builds a canonical RLE: adjacent gaps add up, adjacent present items join.
-const builder = (kind) => {
-  const out = [];
-  return {
-    push(seg) {
-      if (segLength(seg) === 0) return;
-      const last = out.length - 1;
-      if (last < 0) out.push(typeof seg === 'number' ? seg : isText(kind) ? seg : [...seg]);
-      else if (typeof seg === 'number') typeof out[last] === 'number' ? (out[last] += seg) : out.push(seg);
-      else if (typeof out[last] === 'number') out.push(isText(kind) ? seg : [...seg]);
-      else if (isText(kind)) out[last] += seg;
-      else out[last].push(...seg);
-    },
-    done: () => out,
-  };
-};
-
-const rleLength = (rle) => {
-  let n = 0;
-  for (const seg of rle) n += segLength(seg);
-  return n;
-};
-
-// Expands to one entry per element: the value, or GAP for a tombstone.
-const GAP = Symbol('gap');
-const rleExpand = (rle) => {
-  const out = [];
-  for (const seg of rle) {
-    if (typeof seg === 'number') for (let i = 0; i < seg; i++) out.push(GAP);
-    else for (let i = 0; i < seg.length; i++) out.push(seg[i]);
-  }
-  return out;
-};
-const rleCollapse = (kind, items) => {
-  const b = builder(kind);
-  for (const item of items) b.push(item === GAP ? 1 : isText(kind) ? item : [item]);
-  return b.done();
-};
-
-const rleAppend = (kind, rle, content) => {
-  const b = builder(kind);
-  for (const seg of rle) b.push(seg);
-  b.push(content);
-  return b.done();
-};
-
-// Marks [offset, offset + length) as gone; what lies past the end is not here.
-const rleCut = (kind, rle, offset, length) => {
-  const b = builder(kind);
-  let at = 0;
-  const end = offset + length;
-  for (const seg of rle) {
-    const n = segLength(seg);
-    if (typeof seg === 'number' || end <= at || offset >= at + n) b.push(seg);
-    else {
-      const from = Math.max(offset, at) - at;
-      const to = Math.min(end, at + n) - at;
-      if (from > 0) b.push(seg.slice(0, from));
-      b.push(to - from);
-      if (to < n) b.push(seg.slice(to));
-    }
-    at += n;
-  }
-  return b.done();
-};
-
-// Segment by segment: gaps by length, texts by value, list items by their JSON.
-const sameSeg = (a, b) =>
-  typeof a === 'number' || typeof a === 'string'
-    ? a === b
-    : Array.isArray(b) && JSON.stringify(a) === JSON.stringify(b);
-const sameRle = (a, b) => a.length === b.length && a.every((seg, i) => sameSeg(seg, b[i]));
-
-// Two pictures of one run: the longer one's length, an element alive only
-// where both have it alive (a cut seen anywhere happened).
-const rleMerge = (kind, a, b) => {
-  const x = rleExpand(a);
-  const y = rleExpand(b);
-  const n = Math.max(x.length, y.length);
-  const out = new Array(n);
-  for (let i = 0; i < n; i++) {
-    if (i >= x.length) out[i] = y[i];
-    else if (i >= y.length) out[i] = x[i];
-    else out[i] = x[i] === GAP || y[i] === GAP ? GAP : x[i];
-  }
-  return rleCollapse(kind, out);
-};
-
-// Whether a run's content is well-formed for its kind and within MAX_RUN;
-// returns the canonical form, or null.
-const normalizeRle = (kind, rle) => {
-  if (!Array.isArray(rle)) return null;
-  const b = builder(kind);
-  let n = 0;
-  for (const seg of rle) {
-    if (isGap(seg)) b.push(seg);
-    else if (present(kind, seg) && seg.length > 0) b.push(seg);
-    else return null;
-    n += segLength(seg);
-    if (n > MAX_RUN) return null;
-  }
-  return b.done();
-};
 
 // The slots a block holds, tombstones included — through the memoized parse
 // of each run (`parsedRun`), so a block of many runs is summed, not re-read.

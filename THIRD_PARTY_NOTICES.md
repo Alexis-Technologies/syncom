@@ -42,7 +42,7 @@ Interleaving in Collaborative Text Editing" (2023), arXiv:2305.00583.
 
 Repository: https://github.com/yjs/yjs (commit 0e0dc34). Three ideas of
 `src/sequence.js` follow Yjs: deleted content collapsed to a length that
-keeps the place (`ContentDeleted`), consecutive inserts by one writer stored
+keeps the place (`ContentDeleted`; the run-length form is `src/rle.js`), consecutive inserts by one writer stored
 as one run (`Item.mergeWith`), and an op whose dependency has not arrived
 kept until it does (`pendingStructs`). The undo manager of `src/undo.js`
 follows the rules of Yjs's `UndoManager` (`src/utils/UndoManager.js`):
@@ -149,8 +149,8 @@ replaces another of its key and goes only by its own id — follow Peritext's
 ## list-positions
 
 Repository: https://github.com/mweidner037/list-positions (commit 383b844).
-The run-length form of a sequence's content in `src/sequence.js` —
-`["ab", 3, "c"]`, present items alternating with gap lengths — is the save
+The run-length form of a sequence's content in `src/rle.js` (read by
+`src/sequence.js`) — `["ab", 3, "c"]`, present items alternating with gap lengths — is the save
 format of its `List` and `Text` (`src/lists/list.ts`, `src/lists/text.ts`),
 and the rule that a writer extends its own run instead of anchoring a new one
 follows `Order.createPositions` (`src/order/order.ts`).

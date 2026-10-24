@@ -36,8 +36,10 @@ src/signing.js            canonical form, signOp, verifyOp — what a signature 
 src/shape.js              isPlainObject, asJson, isRecordId, isStreamName, wellFormed — what enters is checked here
 src/args.js               spliceArgs, treeArgs, markArgs, setElements, jsonValue, isNodeId — the write API’s argument
                           checks, shared by Storage and realize() in patch.js — no requires
-src/sequence.js           the sequence engine behind the list and text kinds: Fugue runs, run-length content, the walk,
-                          local placement, pending ops, pos/vals/marks registers, cursors, prune and join — requires vector.js only
+src/rle.js                run-length content: a run's items and gaps, cut, append, merge, the canonical form under MAX_RUN —
+                          no requires; sequence.js is the caller and re-exports what the tests read
+src/sequence.js           the sequence engine behind the list and text kinds: Fugue runs, the walk, local placement, pending ops,
+                          pos/vals/marks registers, cursors, prune and join — requires vector.js and rle.js only
 src/tree.js               the tree kind: per node its stamped moves, the fold in stamp order with the cycle check (Kleppmann
                           2021, Loro), MAX_DEPTH levels read, prune and join — requires vector.js and order.js (a place is a
                           fractional index or the move is malformed)
