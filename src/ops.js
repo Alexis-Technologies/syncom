@@ -142,15 +142,21 @@ const isSeq = (meta, field) => own(seqsOf(meta), field) !== undefined;
 // The index of a sequence field (src/sequence.js buildIndex), kept on the
 // entry under `seqIndex` — never persisted, never copied by value — and
 // reused while the block object and the base it was built against are the
-// ones the entry holds; a block replaced by an op is a new object.
-const seqIndexOf = (entry, field) => {
+// ones the entry holds; a block replaced by an op is a new object. When the
+// op only appended to a run (`extended`: the held block, the run, where and
+// what), the held block's index is carried over instead of walked anew.
+const seqIndexOf = (entry, field, extended = null) => {
   const seq = own(seqsOf(entry.meta), field);
   if (seq === undefined) return null;
   const base = entry.meta.base;
   const cache = (entry.seqIndex ??= {});
   const hit = own(cache, field);
   if (hit !== undefined && hit.seq === seq && hit.base === base) return hit.index;
-  const index = S.buildIndex(seq, base);
+  let index = null;
+  if (extended !== null && hit !== undefined && hit.seq === extended.held && hit.base === base) {
+    index = S.extendIndex(hit.index, seq, extended);
+  }
+  if (index === null) index = S.buildIndex(seq, base);
   cache[field] = { seq, base, index };
   return index;
 };
@@ -600,8 +606,12 @@ const settleSeq = (entry, field, held, result, delta, rejected) => {
     return;
   }
   meta.seqs[field] = seq;
-  // Pending work is news to persist even when the field reads the same.
-  entry.data[field] = S.render(seqIndexOf(entry, field));
+  // The new block's index: the held block's extended when the op only
+  // appended to a run and the prune left the block as the op made it,
+  // walked otherwise. Pending work is news to persist even when the field
+  // reads the same.
+  const extended = result.extended && seq === result.seq ? { ...result.extended, held } : null;
+  entry.data[field] = S.render(seqIndexOf(entry, field, extended));
   delta[field] = entry.data[field];
 };
 

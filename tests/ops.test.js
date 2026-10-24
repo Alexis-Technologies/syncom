@@ -1115,3 +1115,29 @@ test('ops: the kinds’ precedence on the op path', async (t) => {
     }
   });
 });
+
+test('ops: a keystroke extends the held index', async (t) => {
+  await t.test('appending to a run carries the held index and reading over; nothing before the new slot moves', () => {
+    const S = require('../src/sequence.js');
+    const splice = (ts, seq, value) => op('splice', ts, 'A', { seq, key: 'body', value });
+    let entry = applyOp(null, splice(1, 1, { at: '^', content: 'ab' })).entry;
+    const run = '1:A';
+    for (let i = 0; i < 5; i++) {
+      const before = entry.seqIndex.body.index;
+      entry = applyOp(entry, splice(2 + i, 2 + i, { run, from: 2 + i, content: 'x' })).entry;
+      const after = entry.seqIndex.body.index;
+      assert.strictEqual(after.length, before.length + 1);
+      assert.strictEqual(after.rendered, entry.data.body);
+      assert.strictEqual(after.runs[0].items.length, before.runs[0].items.length + 1);
+      assert.deepStrictEqual(Array.from(after.ordAt).slice(0, before.total), Array.from(before.ordAt));
+    }
+    assert.strictEqual(entry.data.body, 'abxxxxx');
+    assert.strictEqual(S.render(S.buildIndex(entry.meta.seqs.body)), entry.data.body);
+    // After a reset the base changes: the next keystroke walks, then extends again.
+    const reset = applyOp(entry, op('write', 20, 'B', { data: { t: 1 } })).entry;
+    const typed = applyOp(reset, splice(21, 7, { at: '^', content: 'new' })).entry;
+    const more = applyOp(typed, splice(22, 8, { run: '21:A', from: 3, content: '!' })).entry;
+    assert.strictEqual(more.data.body, 'new!');
+    assert.strictEqual(more.seqIndex.body.index.rendered, 'new!');
+  });
+});

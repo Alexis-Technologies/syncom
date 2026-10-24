@@ -255,7 +255,14 @@ docs/                     VitePress site
   reuses it while `meta.seqs[field]` is the SAME object and the base is the
   same — every change goes through `cloneSeq`, so a changed block is a new
   object. Read a sequence field through `seqIndexOf`, never through a bare
-  `buildIndex` on a path that runs per op. `parsedRun` memoizes a run tuple's
+  `buildIndex` on a path that runs per op. A keystroke — `applySplice`
+  returns `extended: { run, from, content }` when it only appended to a run
+  and nothing waited for it — carries the held block's index over with
+  `extendIndex` (the run last in key order, its last slot the walk's last,
+  no run waiting for an anchor, no position register on a new element; else
+  null and a walk) and registers the new tuple's parse; `render` keeps the
+  reading on the index (`rendered`, an extended text index carries it over),
+  so never mutate an index or the array `render` hands back. `parsedRun` memoizes a run tuple's
   parse in a WeakMap keyed by the tuple (an unchanged run shares its tuple
   between blocks; a tuple under another key is parsed again); `prune` and
   `buildIndex` go through it. `latestClock(meta, true)` is the trusted path

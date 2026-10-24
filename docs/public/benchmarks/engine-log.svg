@@ -49,51 +49,51 @@
 <text class="tick" x="676" y="384" text-anchor="middle">10M</text>
 <line class="axis" x1="285" y1="88" x2="285" y2="368"/>
 <g><title>append · one op
-5,605 ops/s
-178 µs per operation</title>
+5,351 ops/s
+187 µs per operation</title>
 <text class="label primary" x="20" y="105">append</text>
 <text class="sublabel" x="20" y="120">one op</text>
-<path class="bar primary" d="M285,101H460.11551103666966A4,4 0 0 1 464.11551103666966,105V111A4,4 0 0 1 460.11551103666966,115H285Z"/>
-<text class="value" x="470.11551103666966" y="114">5,605</text>
+<path class="bar primary" d="M285,101H458.8030109718223A4,4 0 0 1 462.8030109718223,105V111A4,4 0 0 1 458.8030109718223,115H285Z"/>
+<text class="value" x="468.8030109718223" y="114">5,351</text>
 </g>
 <g><title>append · batch of 100
-312,484 ops/s
-3.2 µs per operation</title>
+315,328 ops/s
+3.17 µs per operation</title>
 <text class="label primary" x="20" y="145">append</text>
 <text class="sublabel" x="20" y="160">batch of 100</text>
-<path class="bar primary" d="M285,141H573.9129440043741A4,4 0 0 1 577.9129440043741,145V151A4,4 0 0 1 573.9129440043741,155H285Z"/>
-<text class="value" x="583.9129440043741" y="154">312k</text>
+<path class="bar primary" d="M285,141H574.1693586128649A4,4 0 0 1 578.1693586128649,145V151A4,4 0 0 1 574.1693586128649,155H285Z"/>
+<text class="value" x="584.1693586128649" y="154">315k</text>
 </g>
 <g><title>since · last 500 entries
-629,795 ops/s
-1.59 µs per operation</title>
+623,608 ops/s
+1.6 µs per operation</title>
 <text class="label primary" x="20" y="185">since</text>
 <text class="sublabel" x="20" y="200">last 500 entries</text>
-<path class="bar primary" d="M285,181H593.7478150814288A4,4 0 0 1 597.7478150814288,185V191A4,4 0 0 1 593.7478150814288,195H285Z"/>
-<text class="value" x="603.7478150814288" y="194">630k</text>
+<path class="bar primary" d="M285,181H593.468411011803A4,4 0 0 1 597.468411011803,185V191A4,4 0 0 1 593.468411011803,195H285Z"/>
+<text class="value" x="603.468411011803" y="194">624k</text>
 </g>
 <g><title>since · everything (no cursor)
-1,708 ops/s
-585 µs per operation</title>
+1,573 ops/s
+636 µs per operation</title>
 <text class="label primary" x="20" y="225">since</text>
 <text class="sublabel" x="20" y="240">everything (no cursor)</text>
-<path class="bar primary" d="M285,221H426.48379262400294A4,4 0 0 1 430.48379262400294,225V231A4,4 0 0 1 426.48379262400294,235H285Z"/>
-<text class="value" x="436.48379262400294" y="234">1,708</text>
+<path class="bar primary" d="M285,221H424.1534884242842A4,4 0 0 1 428.1534884242842,225V231A4,4 0 0 1 424.1534884242842,235H285Z"/>
+<text class="value" x="434.1534884242842" y="234">1,573</text>
 </g>
 <g><title>since · 20 from the middle, scoped
-3,511,359 ops/s
-285 ns per operation</title>
+3,430,272 ops/s
+292 ns per operation</title>
 <text class="label primary" x="20" y="265">since</text>
 <text class="sublabel" x="20" y="280">20 from the middle, scoped</text>
-<path class="bar primary" d="M285,261H642.3801360717055A4,4 0 0 1 646.3801360717055,265V271A4,4 0 0 1 642.3801360717055,275H285Z"/>
-<text class="value" x="652.3801360717055" y="274">3.51M</text>
+<path class="bar primary" d="M285,261H641.718911052888A4,4 0 0 1 645.718911052888,265V271A4,4 0 0 1 641.718911052888,275H285Z"/>
+<text class="value" x="651.718911052888" y="274">3.43M</text>
 </g>
 <g><title>append with a roll every 8 batches
-4,931 ops/s
-203 µs per operation</title>
+4,989 ops/s
+200 µs per operation</title>
 <text class="label primary" x="20" y="312">append with a roll every 8 batches</text>
-<path class="bar primary" d="M285,301H456.4895976649458A4,4 0 0 1 460.4895976649458,305V311A4,4 0 0 1 456.4895976649458,315H285Z"/>
-<text class="value" x="466.4895976649458" y="314">4,931</text>
+<path class="bar primary" d="M285,301H456.82054667337A4,4 0 0 1 460.82054667337,305V311A4,4 0 0 1 456.82054667337,315H285Z"/>
+<text class="value" x="466.82054667337" y="314">4,989</text>
 </g>
 <g><title>reopen · index + segments + tail
 11 ops/s
@@ -103,5 +103,5 @@
 <path class="bar primary" d="M285,341H285A2.6974233161443237,2.6974233161443237 0 0 1 287.6974233161443,343.6974233161443V352.3025766838557A2.6974233161443237,2.6974233161443237 0 0 1 285,355H285Z"/>
 <text class="value" x="293.6974233161443" y="354">11</text>
 </g>
-<text class="caption" x="20" y="409">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-22</text>
+<text class="caption" x="20" y="409">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-24</text>
 </svg>

@@ -272,7 +272,10 @@ caller's to avoid.
   times on the node: as the field's string, as the runs in the record's
   metadata, and as the ops in the log. Keep a text to what a record is for —
   a note, a comment, a description, a block of a document — and make a long
-  document a list of block records rather than one field.
+  document a list of block records rather than one field. A keystroke at the
+  end of your own run extends the field's index and reading in place rather
+  than rebuilding them; an insert elsewhere, or under a peer's concurrent
+  run, rebuilds.
 - A `splice` larger than a host's `bytesPerPush` is refused for the whole
   page it rides in; a paste of megabytes belongs in several calls.
 - A move adds a position run to the record's metadata — one key, about a

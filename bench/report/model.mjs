@@ -238,6 +238,9 @@ export const ENGINE_SUBJECTS = [
   { id: 'search', title: 'Search' },
   { id: 'apply', title: 'Apply' },
   { id: 'sequence', title: 'Lists and text' },
+  { id: 'tree', title: 'Trees' },
+  { id: 'history', title: 'History' },
+  { id: 'tags', title: 'Tags' },
   { id: 'undo', title: 'Undo' },
   { id: 'sync', title: 'Sync' },
   { id: 'log', title: 'Op log' },
@@ -253,6 +256,10 @@ const SUBJECT_NOTES = {
   apply: "A peer's page once it has arrived: admit, fold, append, write, announce. The applyRemote rows count ops.",
   sequence:
     'The sequence engine behind list and text fields: a fold per op over Fugue runs, a reading, a join, a diff.',
+  tree: 'The movable tree behind tree fields: one move folded over a block of thousands, the fold read anew and read kept.',
+  history:
+    'The past out of the log: history() over a record with two thousand ops, a version a thousand ops back, its diff.',
+  tags: 'Named versions: a tag over a thousand records, writes under it (the first copies the file), reads at the tag.',
   undo: 'The @alexify/syncom/undo manager: what capturing a commit costs a write, what one step back and forward costs.',
   sync: 'Replication over the in-process link (JSON across the boundary, like a wrpc client).',
   log: 'OpLog, the persisted operation log every write and every replicated op goes through.',

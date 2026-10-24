@@ -599,6 +599,104 @@ const buildIndex = (seq, base = null) => {
   };
 };
 
+// The index of a block that differs from an indexed one by `content`
+// appended to run `run` at `from` — the keystroke — made from the held
+// index in one pass over the new slots instead of a walk over all of them.
+// The new slots land at the end of the walk, so the arrays grow by `count`
+// and nothing before them moves, when: the run is the last in key order
+// (its slots end the per-slot arrays), its last slot was the last emitted
+// (no explicit right child, no continuation), no run waits for an anchor
+// (one could wait for a new slot), and no list register names a new
+// element. Otherwise null, and the caller walks. The new run tuple's parse
+// is registered too, so the next op's prune and slot count read it cached.
+// A child list of another run may still hold the run record this one
+// replaces; only `key`, `origin`, `ts`, `L` and `R` are read through those.
+const extendIndex = (index, seq, { run, from, content }) => {
+  const r = index.byKey.get(run);
+  const count = content.length;
+  if (r === undefined || r.len !== from || r.i !== index.runs.length - 1 || index.pending.size > 0) return null;
+  if (index.total === 0 || index.ordAt[r.start + from - 1] !== index.total - 1) return null;
+  const tuple = own(seq.runs, run);
+  if (tuple === undefined || rleLength(tuple[1]) !== from + count) return null;
+  const movable = seq.k === 'l';
+  const tail = new Array(count);
+  for (let i = 0; i < count; i++) {
+    tail[i] = content[i];
+    if (movable && seq.pos && own(seq.pos, elemKey(run, from + i)) !== undefined) return null;
+  }
+  const items = r.items.concat(tail);
+  const len = from + count;
+  PARSED.set(tuple, {
+    key: run,
+    ts: r.ts,
+    origin: r.origin,
+    at: r.at,
+    anchor: r.anchor,
+    content: tuple[1],
+    items,
+    len,
+    elem: r.elem,
+  });
+  const r2 = { ...r, content: tuple[1], items, len };
+  const runs = index.runs.slice();
+  runs[r.i] = r2;
+  const byKey = new Map(index.byKey);
+  byKey.set(run, r2);
+  const root = index.root.map((x) => (x === r ? r2 : x));
+  const total = index.total + count;
+  const length = index.length + count;
+  const grow = (old, size) => {
+    const out = new Int32Array(size);
+    out.set(old);
+    return out;
+  };
+  const ordRun = grow(index.ordRun, total);
+  const ordOff = grow(index.ordOff, total);
+  const visRun = grow(index.visRun, length);
+  const visOff = grow(index.visOff, length);
+  const ordAt = grow(index.ordAt, total);
+  const visAt = grow(index.visAt, total);
+  const shown = new Uint8Array(total);
+  shown.set(index.shown);
+  const visElem = movable ? index.visElem.slice() : null;
+  for (let i = 0; i < count; i++) {
+    const off = from + i;
+    const slot = r.start + off;
+    const ord = index.total + i;
+    const vis = index.length + i;
+    ordRun[ord] = r.i;
+    ordOff[ord] = off;
+    ordAt[slot] = ord;
+    visAt[slot] = vis;
+    shown[slot] = 1;
+    visRun[vis] = r.i;
+    visOff[vis] = off;
+    if (movable) visElem.push(elemKey(run, off));
+  }
+  const out = {
+    kind: seq.k,
+    runs,
+    byKey,
+    root,
+    pending: index.pending,
+    ordRun,
+    ordOff,
+    visRun,
+    visOff,
+    visElem,
+    ordAt,
+    visAt,
+    shown,
+    vals: seq.vals ?? null,
+    length,
+    total,
+  };
+  // A text's reading grows by the content; a list's is read again (a value
+  // register may name a new element).
+  if (!movable && index.rendered !== undefined) out.rendered = index.rendered + content;
+  return out;
+};
+
 // The value at visible index `i`: a text's character; a list element's
 // assigned value when a register names one, else what its run holds.
 const valueAt = (index, i) => {
@@ -608,16 +706,21 @@ const valueAt = (index, i) => {
   return assigned === undefined ? held : assigned[2];
 };
 
-// What the field reads as: the visible elements in order.
+// What the field reads as: the visible elements in order — kept on the
+// index, which is never mutated, so a second reading of one block is free
+// and an extended index carries a text's reading over.
 const render = (index) => {
+  if (index.rendered !== undefined) return index.rendered;
   const { runs, visRun, visOff, length } = index;
+  let out;
   if (index.kind === 't') {
-    let out = '';
+    out = '';
     for (let i = 0; i < length; i++) out += runs[visRun[i]].items[visOff[i]];
-    return out;
+  } else {
+    out = new Array(length);
+    for (let i = 0; i < length; i++) out[i] = valueAt(index, i);
   }
-  const out = new Array(length);
-  for (let i = 0; i < length; i++) out[i] = valueAt(index, i);
+  index.rendered = out;
   return out;
 };
 
@@ -788,6 +891,9 @@ const applySplice = (seq, stamp, payload, base = null, pendingMax = PENDING_MAX)
   let next = null;
   const mutable = () => (next ??= cloneSeq(seq));
   let changed = false;
+  // Set when the op did nothing but append to a run: what `extendIndex`
+  // takes to carry the held block's index over instead of walking anew.
+  let extended = null;
   let index = null;
   const indexOf = () => (index ??= buildIndex(next ?? seq, base));
   const pending = () => pendingCount(next ?? seq, indexOf());
@@ -866,7 +972,9 @@ const applySplice = (seq, stamp, payload, base = null, pendingMax = PENDING_MAX)
             target.length === 3
               ? [target[0], rleAppend(m.k, target[1], content), target[2]]
               : [target[0], rleAppend(m.k, target[1], content)];
-          settle(m, run);
+          // Nothing waited for this run and nothing was cut: the block differs
+          // from the held one by these items appended, and the index can too.
+          if (!settle(m, run) && cut === undefined) extended = { run, from: len, content };
           changed = true;
         } else if (from > len) {
           const stop = full();
@@ -883,7 +991,7 @@ const applySplice = (seq, stamp, payload, base = null, pendingMax = PENDING_MAX)
     }
   }
   if (!changed) return { seq, changed: false, reason: null };
-  return { seq: next, changed: true, reason: null };
+  return { seq: next, changed: true, reason: null, extended };
 };
 
 // ---- marks -----------------------------------------------------------
@@ -961,16 +1069,34 @@ const anchorOrdinal = (index, token, base) => {
   return index.ordAt[r.start + elem.offset] + (side === 'L' ? 0 : 1);
 };
 
-// The text as runs of equal style: `[{ text, marks }]`, marks per key —
-// the newest mark's value, none when null; a MANY key lists every mark as
-// `{ id, value }`. A mark whose anchor has not arrived is not shown yet.
+// Marks by key, then by stamp: the order their values are laid over one
+// another in, so the newest of a key wins.
+const byKeyThenStamp = (x, y) =>
+  x.key < y.key ? -1 : x.key > y.key ? 1 : compareClock([x.ts, x.origin], [y.ts, y.origin]);
+
+// The style of the marks in force at one point: per key the newest value,
+// none when null; a MANY key lists every mark as `{ id, value }`.
+const styleOf = (active) => {
+  let marks = null;
+  for (const m of [...active].sort(byKeyThenStamp)) {
+    marks ??= {};
+    if (m.many) (marks[m.key] ??= []).push({ id: m.id, value: m.value });
+    else if (m.value === null) delete marks[m.key];
+    else marks[m.key] = m.value;
+  }
+  return marks && Object.keys(marks).length > 0 ? marks : null;
+};
+
+// The text as runs of equal style: `[{ text, marks }]`. A mark whose anchor
+// has not arrived is not shown yet. A sweep over the walk: each mark opens at
+// its first ordinal and closes at its last, the visible characters come in
+// ordinal order, and the style is read again only where a mark opened or
+// closed — O(characters + marks × active), not O(characters × marks).
 const spans = (index, seq, base = null) => {
   const { runs, visRun, visOff, length } = index;
   if (length === 0) return [];
-  const styles = new Array(length);
-  for (let i = 0; i < length; i++) styles[i] = null;
   const ordOf = (i) => index.ordAt[runs[visRun[i]].start + visOff[i]];
-  const entries = [];
+  const events = [];
   for (const id of keysOf(seq.marks)) {
     const [from, to, key, value, flags] = seq.marks[id];
     if ((flags & OFF) !== 0) continue;
@@ -978,32 +1104,36 @@ const spans = (index, seq, base = null) => {
     const hi = anchorOrdinal(index, to, base);
     if (lo === null || hi === null || lo >= hi) continue;
     const { ts, origin } = parseRun(id);
-    entries.push({ id, ts, origin, key, value, many: (flags & MANY) !== 0, lo, hi });
+    const mark = { id, ts, origin, key, value, many: (flags & MANY) !== 0 };
+    events.push([lo, 1, mark], [hi, -1, mark]);
   }
-  entries.sort((x, y) => (x.key < y.key ? -1 : x.key > y.key ? 1 : compareClock([x.ts, x.origin], [y.ts, y.origin])));
+  // Closes before opens at one ordinal: `hi` is exclusive.
+  events.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const active = new Set();
+  const out = [];
+  let e = 0;
+  let style = null;
+  let text = '';
   for (let i = 0; i < length; i++) {
     const ord = ordOf(i);
-    let marks = null;
-    for (const m of entries) {
-      if (ord < m.lo || ord >= m.hi) continue;
-      marks ??= {};
-      if (m.many) (marks[m.key] ??= []).push({ id: m.id, value: m.value });
-      else if (m.value === null) delete marks[m.key];
-      else marks[m.key] = m.value;
+    let moved = false;
+    while (e < events.length && events[e][0] <= ord) {
+      const [, kind, mark] = events[e++];
+      if (kind === 1) active.add(mark);
+      else active.delete(mark);
+      moved = true;
     }
-    styles[i] = marks && Object.keys(marks).length > 0 ? marks : null;
+    if (moved) {
+      const next = styleOf(active);
+      if (text.length > 0 && JSON.stringify(next) !== JSON.stringify(style)) {
+        out.push({ text, marks: style ?? {} });
+        text = '';
+      }
+      style = next;
+    }
+    text += runs[visRun[i]].items[visOff[i]];
   }
-  const out = [];
-  let i = 0;
-  while (i < length) {
-    let j = i + 1;
-    const same = JSON.stringify(styles[i]);
-    while (j < length && JSON.stringify(styles[j]) === same) j++;
-    let text = '';
-    for (let k = i; k < j; k++) text += runs[visRun[k]].items[visOff[k]];
-    out.push({ text, marks: styles[i] ?? {} });
-    i = j;
-  }
+  out.push({ text, marks: style ?? {} });
   return out;
 };
 
@@ -1214,6 +1344,7 @@ module.exports = {
   normalizeSeq,
   cloneSeq,
   buildIndex,
+  extendIndex,
   render,
   valueAt,
   elemAt,

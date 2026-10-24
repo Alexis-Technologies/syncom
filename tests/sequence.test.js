@@ -809,6 +809,161 @@ test('sequence engine', async (t) => {
     assert.strictEqual(read(b), 'ab');
   });
 
+  await t.test(
+    'typing at the end of a run extends the held index: the same index as a walk, or null and a walk',
+    () => {
+      const same = (a, b) => {
+        assert.deepStrictEqual([a.kind, a.length, a.total], [b.kind, b.length, b.total]);
+        for (const name of ['ordRun', 'ordOff', 'visRun', 'visOff', 'ordAt', 'visAt', 'shown']) {
+          assert.deepStrictEqual(Array.from(a[name]), Array.from(b[name]), name);
+        }
+        assert.deepStrictEqual(a.visElem, b.visElem);
+        const runs = (x) => x.runs.map((r) => [r.key, r.len, r.items, r.start]);
+        assert.deepStrictEqual(runs(a), runs(b));
+        assert.deepStrictEqual([...a.byKey.keys()], [...b.byKey.keys()]);
+        assert.deepStrictEqual(
+          a.root.map((r) => r.key),
+          b.root.map((r) => r.key),
+        );
+        assert.deepStrictEqual(S.render(a), S.render(b));
+      };
+      const a = node('A');
+      const first = insert(a, 0, 'ab');
+      const run = S.runKey(first.ts, 'A');
+      let idx = index(a);
+      S.render(idx); // the reading is kept, and carried over
+      for (const ch of 'cdefg') {
+        const r = apply(a, { ts: tick(), origin: 'A', payload: { run, from: idx.length, content: ch } });
+        assert.deepStrictEqual(r.extended, { run, from: idx.length, content: ch });
+        const ext = S.extendIndex(idx, a.seq, r.extended);
+        assert.notStrictEqual(ext, null);
+        const walked = S.buildIndex(a.seq);
+        same(ext, walked);
+        assert.strictEqual(ext.rendered, S.render(walked));
+        idx = ext;
+      }
+      assert.strictEqual(read(a), 'abcdefg');
+      // The extended run's parse is registered: the next prune and slot count find it.
+      const b2 = apply(a, { ts: tick(), origin: 'A', payload: { run, from: 7, content: 'h' } });
+      assert.deepStrictEqual(b2.extended, { run, from: 7, content: 'h' });
+      // A list carries its elements, not its reading (a value register may name a new one).
+      const l = node('L', 'l');
+      const li = insert(l, 0, [1, 2]);
+      const lrun = S.runKey(li.ts, 'L');
+      const lidx = index(l);
+      const lr = apply(l, { ts: tick(), origin: 'L', payload: { run: lrun, from: 2, content: [3, { x: 4 }] } });
+      const lext = S.extendIndex(lidx, l.seq, lr.extended);
+      assert.strictEqual(lext.rendered, undefined, 'read again, not carried over');
+      same(lext, S.buildIndex(l.seq));
+      assert.deepStrictEqual(S.render(lext), [1, 2, 3, { x: 4 }]);
+      // Not an extension at all: a cut rides along, an extension waits, a waiting one settles.
+      const b = node('B');
+      const bf = insert(b, 0, 'xyz');
+      const brun = S.runKey(bf.ts, 'B');
+      const withCut = apply(b, {
+        ts: tick(),
+        origin: 'B',
+        payload: { run: brun, from: 3, content: 'w', cut: [[brun, 0, 1]] },
+      });
+      assert.strictEqual(withCut.extended, null);
+      const ahead = apply(b, { ts: tick(), origin: 'B', payload: { run: brun, from: 6, content: 'late' } });
+      assert.strictEqual(ahead.extended, null, 'an extension ahead of the run waits');
+      const fill = apply(b, { ts: tick(), origin: 'B', payload: { run: brun, from: 4, content: 'vv' } });
+      assert.strictEqual(fill.extended, null, 'the waiting extension settled: more than appended');
+      assert.strictEqual(read(b), 'yzwvvlate');
+      // An extension the index cannot take in place: another run after this one
+      // in key order, a run waiting for its anchor, a position register for a
+      // new element — null, and the caller walks.
+      const c = node('C');
+      const cf = insert(c, 0, 'ab');
+      const crun = S.runKey(cf.ts, 'C');
+      apply(c, { ts: tick(), origin: 'D', payload: { at: `>${S.elemKey(crun, 1)}`, content: 'Q' } });
+      const cidx = index(c);
+      const cr = apply(c, { ts: tick(), origin: 'C', payload: { run: crun, from: 2, content: 'c' } });
+      assert.strictEqual(S.extendIndex(cidx, c.seq, cr.extended), null, 'not the last run, not the last slot');
+      assert.strictEqual(read(c), 'abcQ');
+      const p = node('P');
+      const pf = insert(p, 0, 'ab');
+      const prun = S.runKey(pf.ts, 'P');
+      apply(p, { ts: tick(), origin: 'Z', payload: { at: '<5:0:Q', content: 'w' } });
+      const pidx = index(p);
+      const pr = apply(p, { ts: tick(), origin: 'P', payload: { run: prun, from: 2, content: 'c' } });
+      assert.strictEqual(S.extendIndex(pidx, p.seq, pr.extended), null, 'a run waits for its anchor');
+      const m = node('M', 'l');
+      const mf = insert(m, 0, [1, 2]);
+      const mrun = S.runKey(mf.ts, 'M');
+      const moved = S.applyMove(m.seq, [tick(), 'N'], {
+        elem: S.elemKey(mrun, 2),
+        cut: [mrun, 0, 1],
+        at: '^',
+        value: 9,
+      });
+      m.seq = moved.seq;
+      const midx = index(m);
+      const mr = apply(m, { ts: tick(), origin: 'M', payload: { run: mrun, from: 2, content: [3] } });
+      assert.strictEqual(S.extendIndex(midx, m.seq, mr.extended), null, 'a position register names the new element');
+      assert.deepStrictEqual(read(m), [2, 9], 'the moved-ahead element shows where its register says');
+    },
+  );
+
+  await t.test('spans by a sweep read as a per-character tally would, under random overlapping marks', () => {
+    const text = node('T');
+    const first = insert(text, 0, 'abcdefghijklmnopqrstuvwxyz'.repeat(4));
+    const run = S.runKey(first.ts, 'T');
+    remove(text, 10, 5);
+    let x = 12345;
+    const next = () => (x = (x * 1103515245 + 12345) % 2147483648) / 2147483648;
+    for (let i = 0; i < 40; i++) {
+      const s = Math.floor(next() * 100);
+      const e = s + 1 + Math.floor(next() * (104 - s - 1));
+      const key = ['bold', 'em', 'note'][i % 3];
+      const many = key === 'note';
+      const value = !many && i % 5 === 0 ? null : i;
+      const payload = { start: `<${S.elemKey(run, s)}`, end: `<${S.elemKey(run, e)}`, key, value };
+      if (many) payload.many = true;
+      const r = S.applyMark(text.seq, [tick(), 'T'], payload);
+      if (r.changed) text.seq = r.seq;
+    }
+    const off = S.applyMark(text.seq, [tick(), 'T'], { off: Object.keys(text.seq.marks)[3] });
+    text.seq = off.seq;
+    const idx = index(text);
+    // The tally: per visible character, every mark in force, laid over by key then stamp.
+    const marks = [];
+    for (const id of Object.keys(text.seq.marks)) {
+      const [from, to, key, value, flags] = text.seq.marks[id];
+      if ((flags & S.OFF) !== 0) continue;
+      const lo = S.anchorOrdinal(idx, from, null);
+      const hi = S.anchorOrdinal(idx, to, null);
+      if (lo === null || hi === null || lo >= hi) continue;
+      const { ts, origin } = S.parseRun(id);
+      marks.push({ id, ts, origin, key, value, many: (flags & S.MANY) !== 0, lo, hi });
+    }
+    marks.sort((p, q) => (p.key < q.key ? -1 : p.key > q.key ? 1 : p.ts - q.ts));
+    const styles = [];
+    for (let i = 0; i < idx.length; i++) {
+      const ord = idx.ordAt[idx.runs[idx.visRun[i]].start + idx.visOff[i]];
+      let style = null;
+      for (const m of marks) {
+        if (ord < m.lo || ord >= m.hi) continue;
+        style ??= {};
+        if (m.many) (style[m.key] ??= []).push({ id: m.id, value: m.value });
+        else if (m.value === null) delete style[m.key];
+        else style[m.key] = m.value;
+      }
+      styles.push(style && Object.keys(style).length > 0 ? style : null);
+    }
+    const tally = [];
+    const rendered = S.render(idx);
+    for (let i = 0; i < idx.length; i++) {
+      const last = tally[tally.length - 1];
+      if (last && JSON.stringify(last.marks) === JSON.stringify(styles[i] ?? {})) last.text += rendered[i];
+      else tally.push({ text: rendered[i], marks: styles[i] ?? {} });
+    }
+    const swept = S.spans(idx, text.seq);
+    assert.deepStrictEqual(swept, tally);
+    assert.ok(swept.length > 10, `${swept.length} spans: the marks did overlap`);
+  });
+
   await t.test('a mark switched off before it arrives leaves one block, whichever came first', () => {
     const text = node('T');
     const first = insert(text, 0, 'abc');
