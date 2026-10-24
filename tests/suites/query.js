@@ -157,10 +157,12 @@ const runQueryTests = async (t, assert, createStorage) => {
       ids.push(id);
       if (i % 3 === 0) await storage.add(id, 'tags', ['bug', `t${i}`]);
       else if (i % 3 === 1) await storage.update(id, { tags: ['ui'] });
+      else await storage.push(id, 'tags', ['list', `t${i}`]);
     }
     fsi.reset();
     assert.strictEqual(await storage.Issue.count({ tags: 'bug' }), 10, 'a set');
     assert.strictEqual(await storage.Issue.count({ tags: 'ui' }), 10, 'a register holding an array');
+    assert.strictEqual(await storage.Issue.count({ tags: 'list' }), 10, 'a list');
     assert.strictEqual(fsi.dataReads(), 0, 'covered: the catalog answers');
     assert.strictEqual(await storage.Issue.count({ tags: ['bug', 't0'] }), 1, 'an array value matches whole');
     assert.strictEqual(await storage.Issue.count({ tags: ['bug'] }), 0);

@@ -1934,7 +1934,7 @@
           "mark": "⚠️",
           "text": "stored and validated; merged as one top-level register",
           "note": "Concurrent edits to two keys of one nested object keep only one side, and `update({ 'a.b': 1 })` writes a top-level field named `a.b` (both documented in the Storage and Sync guides).",
-          "source": "src/ops.js:320-345 (applyFields over top-level keys); docs/guide/sync.md#registers-counters-and-sets"
+          "source": "src/ops.js:320-345 (applyFields over top-level keys); docs/guide/sync.md#registers-counters-sets-lists-and-text"
         },
         "schemaVersion": {
           "mark": "✅",
@@ -2024,12 +2024,12 @@
           "mark": "✅",
           "text": "`inc()`: one running sum per origin",
           "note": "A counter that one node resets while another increments it does not converge to the intuitive value; see Guarantees and limits in the Sync guide.",
-          "source": "src/ops.js:17-20,96-105; docs/guide/sync.md#registers-counters-and-sets"
+          "source": "src/ops.js:17-20,96-105; docs/guide/sync.md#registers-counters-sets-lists-and-text"
         },
         "sets": {
           "mark": "✅",
           "text": "`add()`/`remove()`: observed-remove set, read sorted",
-          "source": "src/ops.js:21-26,115-140; docs/guide/sync.md#registers-counters-and-sets"
+          "source": "src/ops.js:21-26,115-140; docs/guide/sync.md#registers-counters-sets-lists-and-text"
         },
         "lists": {
           "mark": "❌",
@@ -2044,7 +2044,7 @@
         "crdtModel": {
           "mark": "✅",
           "text": "built into every write: register, counter or OR-set per field",
-          "source": "src/ops.js:1-50; docs/guide/sync.md#registers-counters-and-sets"
+          "source": "src/ops.js:1-50; docs/guide/sync.md#registers-counters-sets-lists-and-text"
         },
         "mergeGranularity": {
           "mark": "✅",
@@ -2065,7 +2065,7 @@
         "mergeBypass": {
           "mark": "✅",
           "text": "none: every write is an op; mixing field kinds throws `FIELD_KIND`",
-          "source": "src/commit.js:39-50; docs/guide/sync.md#registers-counters-and-sets"
+          "source": "src/commit.js:39-50; docs/guide/sync.md#registers-counters-sets-lists-and-text"
         },
         "conditionalOps": {
           "mark": "❌",
@@ -2590,7 +2590,7 @@
         "conflictResolve": {
           "mark": "",
           "text": "built in: per-field LWW by `(ts, origin)`, per-origin counter sums, OR-sets",
-          "source": "src/ops.js; docs/guide/sync.md#registers-counters-and-sets"
+          "source": "src/ops.js; docs/guide/sync.md#registers-counters-sets-lists-and-text"
         },
         "customMerge": {
           "mark": "❌",

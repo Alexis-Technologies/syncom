@@ -268,6 +268,27 @@ const runSchemaTests = async (t, assert, createStorage) => {
     await tagged.remove(post.id, 'tags', ['a']);
     await tagged.add(post.id, 'tags', ['c']);
     assert.deepStrictEqual((await tagged.get(post.id)).tags, ['b', 'c']);
+    // A splice too: the validator sees the text as the op leaves it.
+    const Short = standard((value) =>
+      (value.body ?? '').length > 5 ? { issues: [issue('too long', ['body'], 'max')] } : { value },
+    );
+    const texts = await createStorage(t2, 'C', { schema: { entities: { Short: { schema: Short } } } });
+    const note = await texts.Short.insert({ name: 'n' });
+    await texts.splice(note.id, 'body', 0, 0, 'abc');
+    await assert.rejects(() => texts.push(note.id, 'body', 'defg'), invalid('Short'));
+    assert.strictEqual((await texts.get(note.id)).body, 'abc');
+    await texts.push(note.id, 'body', 'de');
+    assert.strictEqual((await texts.get(note.id)).body, 'abcde');
+    // A validator default for the field makes it a register — the trap the
+    // docs name: the splice is then refused for the kind.
+    const Defaulted = standard((value) => ({ value: { body: '', ...value } }));
+    const defaults = await createStorage(t2, 'D', { schema: { entities: { Defaulted: { schema: Defaulted } } } });
+    const blank = await defaults.Defaulted.insert({ name: 'd' });
+    assert.deepStrictEqual(await defaults.get(blank.id), { body: '', name: 'd', $type: 'Defaulted' });
+    await assert.rejects(() => defaults.splice(blank.id, 'body', 0, 0, 'x'), {
+      code: 'FIELD_KIND',
+      kind: 'register',
+    });
   });
 
   await t.test('check() runs the validator without writing', async (t2) => {

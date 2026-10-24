@@ -141,7 +141,7 @@ An op is applied by `applyOp` in `src/ops.js`, the same function on every node:
   from the last event id fills the gap.
 
 Any order, any number of times, gives the same record. See
-[Registers, counters and sets](/guide/sync#registers-counters-and-sets).
+[Registers, counters, sets, lists and text](/guide/sync#registers-counters-sets-lists-and-text).
 
 ## On disk
 

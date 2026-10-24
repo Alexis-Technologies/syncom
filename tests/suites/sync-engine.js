@@ -174,6 +174,84 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     assert.strictEqual(await b.get(first), null);
   });
 
+  await t.test('lists and texts converge: concurrent inserts and cuts, each writer’s run whole', async (t2) => {
+    const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage);
+    const a = mesh.get('A');
+    const b = mesh.get('B');
+    const id = await a.insert({ title: 'doc' });
+    await a.splice(id, 'body', 0, 0, 'hello');
+    await a.push(id, 'items', [1, 2, 3]);
+    await settle([a, b]);
+    assert.deepStrictEqual(await b.get(id), { title: 'doc', body: 'hello', items: [1, 2, 3] });
+    const link = mesh.links.get('mem://B');
+    link.disconnect();
+    // Apart: A types on at the end, B types at the end too and cuts the
+    // start; both edit the list at one spot.
+    for (const ch of ' AAA') await a.push(id, 'body', ch);
+    await tick();
+    for (const ch of ' BBB') await b.push(id, 'body', ch);
+    await b.splice(id, 'body', 0, 1);
+    await a.splice(id, 'items', 1, 1, ['a']);
+    await b.splice(id, 'items', 1, 0, ['b']);
+    await link.reconnect();
+    await settle([a, b]);
+    const state = await assertConverged([a, b]);
+    assert.match(state[id].body, /^ello( AAA| BBB){2}$/, state[id].body);
+    assert.ok(
+      JSON.stringify(state[id].items) === JSON.stringify([1, 'b', 'a', 3]) ||
+        JSON.stringify(state[id].items) === JSON.stringify([1, 'a', 'b', 3]),
+      JSON.stringify(state[id].items),
+    );
+    // The blocks agree too, not only the readings.
+    const blocks = async (storage) => (await storage.snapshot()).records.find((r) => r.id === id).meta.seqs;
+    assert.deepStrictEqual(await blocks(a), await blocks(b));
+    // Live again: a cut on one side, typing on the other, in one spot.
+    await a.splice(id, 'body', 0, 4);
+    await b.splice(id, 'body', 4, 0, '!');
+    await settle([a, b]);
+    await assertConverged([a, b]);
+    // A reset by one side frees the field everywhere; typing after it starts over.
+    await a.set(id, { title: 'reset' });
+    await settle([a, b]);
+    assert.deepStrictEqual(await b.get(id), { title: 'reset' });
+    await b.splice(id, 'body', 0, 0, 'again');
+    await settle([a, b]);
+    assert.deepStrictEqual(await a.get(id), { title: 'reset', body: 'again' });
+  });
+
+  await t.test('three nodes type words apart; after the merge every word is whole', async (t2) => {
+    // A line with one dialer per host, so every link has a url of its own
+    // to disconnect: mesh.links is keyed by the host url.
+    const mesh = await createMesh(
+      t2,
+      ['A', 'B', 'C'],
+      [
+        ['A', 'B'],
+        ['B', 'C'],
+      ],
+      createStorage,
+    );
+    const nodes = ['A', 'B', 'C'].map((name) => mesh.get(name));
+    const [a] = nodes;
+    const id = await a.insert({});
+    await a.splice(id, 'body', 0, 0, 'the quick brown fox');
+    await settle(nodes);
+    for (const link of mesh.links.values()) link.disconnect();
+    const random = prng(7);
+    for (const node of nodes) {
+      const word = node.nodeId.slice(0, 1).repeat(4);
+      const at = Math.floor(random() * ((await node.get(id)).body.length + 1));
+      for (let i = 0; i < word.length; i++) await node.splice(id, 'body', at + i, 0, word[i]);
+    }
+    for (const link of mesh.links.values()) await link.reconnect();
+    await settle(nodes);
+    const state = await assertConverged(nodes);
+    for (const node of nodes) {
+      const word = node.nodeId.slice(0, 1).repeat(4);
+      assert.ok(state[id].body.includes(word), `${word} is whole in ${state[id].body}`);
+    }
+  });
+
   await t.test('a random workload over a mesh converges (seeded)', async (t2) => {
     const names = ['A', 'B', 'C', 'D'];
     const edges = [
@@ -186,27 +264,48 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     const mesh = await createMesh(t2, names, edges, createStorage);
     const storages = names.map((name) => mesh.get(name));
     const random = prng(20260905);
+    // r1–r3 take every kind of write, resets included; c1 is never reset, so
+    // its counter stays clear of the documented counter/reset straddle.
     const ids = ['r1', 'r2', 'r3'];
     for (const id of ids) await storages[0].set(id, { v: 0 });
     await settle(storages);
-    for (let step = 0; step < 40; step++) {
+    const letter = (storage) => storage.nodeId.slice(0, 1);
+    const spliceAt = async (storage, id, key, content) => {
+      const current = (await storage.get(id))?.[key];
+      const length = typeof current === 'string' || Array.isArray(current) ? current.length : 0;
+      const at = Math.floor(random() * (length + 1));
+      const count = Math.floor(random() * Math.min(3, length - at + 1));
+      await storage.splice(id, key, at, count, content);
+    };
+    for (let step = 0; step < 80; step++) {
       const storage = storages[Math.floor(random() * storages.length)];
       const id = ids[Math.floor(random() * ids.length)];
       const roll = random();
       try {
-        if (roll < 0.3) await storage.set(id, { v: step, by: storage.nodeId.slice(0, 4) });
-        else if (roll < 0.5) await storage.update(id, { [`f${step % 3}`]: step });
-        else if (roll < 0.6) await storage.inc(id, 'count', 1);
-        else if (roll < 0.75) await storage.add(id, 'tags', [`t${step % 4}`]);
-        else if (roll < 0.85) await storage.remove(id, 'tags', [`t${step % 4}`]);
-        else await storage.delete(id);
+        if (roll < 0.12) await storage.set(id, { v: step, by: storage.nodeId.slice(0, 4) });
+        else if (roll < 0.24) await storage.update(id, { [`f${step % 3}`]: step });
+        else if (roll < 0.3) await storage.inc('c1', 'count', 1);
+        else if (roll < 0.4) await storage.add(id, 'tags', [`t${step % 4}`]);
+        else if (roll < 0.48) await storage.remove(id, 'tags', [`t${step % 4}`]);
+        else if (roll < 0.54) await storage.delete(id);
+        else if (roll < 0.78) await spliceAt(storage, id, 'body', letter(storage).repeat(1 + (step % 3)));
+        else await spliceAt(storage, id, 'items', [`${letter(storage)}${step}`]);
       } catch (error) {
-        // A record deleted elsewhere is a legitimate outcome of the workload.
-        if (!/not found/.test(error.message)) throw error;
+        // A record deleted or shortened elsewhere is a legitimate outcome.
+        if (!/not found|out of range|takes a count/.test(error.message)) throw error;
       }
     }
     await settle(storages, { timeout: 10_000 });
     await assertConverged(storages);
+    // The sequence blocks agree too, not only what they read as.
+    const blocks = async (storage) => {
+      const out = {};
+      for (const record of (await storage.snapshot()).records) out[record.id] = record.meta.seqs ?? {};
+      return out;
+    };
+    const expected = await blocks(storages[0]);
+    for (const other of storages.slice(1)) assert.deepStrictEqual(await blocks(other), expected);
+    assert.strictEqual((await storages[0].get('c1')).count, 7, 'every inc counted once');
   });
 
   await t.test(
@@ -254,6 +353,10 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     for (let i = 0; i < 12; i++) await a.inc(id, 'hits', 1);
     await a.add(id, 'tags', ['x', 'y']);
     await a.remove(id, 'tags', ['x']);
+    await a.splice(id, 'body', 0, 0, 'hello');
+    await a.splice(id, 'body', 5, 0, ' world');
+    await a.splice(id, 'body', 0, 1);
+    await a.push(id, 'items', [1, 2]);
     await a.insert({ other: true });
     assert.ok(a.log.floor > 1, 'history was compacted');
     // A holds state stamped by a peer whose clock runs an hour ahead; it
@@ -270,15 +373,22 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     await assertConverged([a, b]);
     assert.strictEqual((await b.get(id)).hits, 12, 'counters are exact after a snapshot');
     assert.deepStrictEqual((await b.get(id)).tags, ['y'], 'and so is a set, tags included');
+    assert.strictEqual((await b.get(id)).body, 'ello world', 'and a text, with its runs and cuts');
+    assert.deepStrictEqual((await b.get(id)).items, [1, 2]);
     // Live after bootstrap, both ways.
     await a.inc(id, 'hits', 1);
     await a.remove(id, 'tags', ['y']);
     await b.add(id, 'tags', ['z']);
+    await b.splice(id, 'body', 0, 0, 'h'); // anchored into the joined runs
+    await a.push(id, 'body', '!');
+    await b.push(id, 'items', [3]);
     const fromB = await b.insert({ late: true });
     await settle([a, b]);
     assert.strictEqual((await b.get(id)).hits, 13);
     assert.deepStrictEqual((await a.get(id)).tags, ['z']);
     assert.deepStrictEqual((await b.get(id)).tags, ['z']);
+    assert.strictEqual((await a.get(id)).body, 'hello world!');
+    assert.deepStrictEqual((await a.get(id)).items, [1, 2, 3]);
     assert.deepStrictEqual(await a.get(fromB), { late: true });
     // B's write to the skew-stamped record wins over what it joined, everywhere.
     await b.update('skewed', { v: 'B' });

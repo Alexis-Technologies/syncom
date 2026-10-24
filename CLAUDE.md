@@ -172,9 +172,9 @@ docs/                     VitePress site
   ops). Once the package is published, an older reader counts an unknown type
   as malformed and its stream stalls there — a new type, or a slot an older
   reader cannot take as null, is then a `PROTOCOL` bump (`src/protocol.js`).
-- **Every write is an op, and a field is a register, a counter OR a set.**
+- **Every write is an op, and a field is a register, a counter, a set, a list OR a text.**
   `insert`/`set` → `write`, `update`/`swap`/`record.save` → `set`, `inc` →
-  `inc`, `add`/`remove` → `add`/`remove`, `delete` → tombstone. Registers are
+  `inc`, `add`/`remove` → `add`/`remove`, `splice`/`push` → `splice`, `delete` → tombstone. Registers are
   last-writer-wins by `(ts, origin)`; counters are per-origin sums; a set is
   `meta.sets[field][elementKey][origin] = [added, removed]` — the newest add
   ts and the newest add ts a remove observed — live while `added > removed`,
@@ -185,8 +185,19 @@ docs/                     VitePress site
   below `base` and clamps a surviving component below it, which is what makes
   meta — not only data — order-free. Mixing two kinds on one field throws
   locally (`FIELD_KIND`) and is refused (`OP_REFUSED` event) from a peer; the
-  snapshot merge lets a register, then a counter, win over a set. Do not add
-  a path that lets kinds meet — it cannot be made to commute.
+  snapshot merge lets a register, then a counter, win over a set, a set over a
+  list, a list over a text. Do not add a path that lets kinds meet — it cannot
+  be made to commute. A list or a text is `meta.seqs[field]`, a block of
+  `src/sequence.js` (Fugue runs anchored `^`/`>e`/`<e`, run-length content with
+  tombstones as lengths, pending runs/cuts/extensions under `PENDING_MAX`):
+  `splice` (code `/`) carries `{ cut, at | run/from, content }` in `key`/`value`,
+  `content` naming the kind even when empty; the index is resolved in
+  `prepareOp` INSIDE the queue (`resolveSplice`, `OUT_OF_RANGE`); `applySeq`
+  prunes at once so what fell below the base reads the same on either side of
+  a reset; the block's `ts` is derived from the runs and registers it holds —
+  a cut never bumps it, so meta is order-free. The fuzz in
+  `tests/suites/sync-engine.js` compares the blocks across nodes, not only
+  what they read as.
 - **Ops from one origin apply in seq order; seqs run per origin AND scope**
   (`origin@scope` vector keys), and ops born from a snapshot (`merge`,
   `advance`) run in their own `origin@~` stream. `applyRemote` skips

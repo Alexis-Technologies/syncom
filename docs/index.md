@@ -26,7 +26,7 @@ features:
   - icon: 🔄
     title: Ops that converge
     details: "Every write is an op: last-writer-wins per field, counters whose increments add up across nodes, sets that keep every concurrent add, tombstones that a newer write revives. Applied in any order, any number of times, every node ends up with the same records."
-    link: /guide/sync#registers-counters-and-sets
+    link: /guide/sync#registers-counters-sets-lists-and-text
     linkText: Registers, counters and sets
   - icon: ⏯️
     title: Resume and bootstrap

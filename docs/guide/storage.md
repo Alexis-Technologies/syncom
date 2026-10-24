@@ -44,7 +44,9 @@ await storage.update(id, { status: 'done' }, { actor: 'ada' }); // … and say w
 await storage.inc(id, 'views', 1);        // add to a counter field
 await storage.add(id, 'tags', ['bug', 'ui']); // add to a set field
 await storage.remove(id, 'tags', ['ui']);  // tags is ['bug']
-await storage.set(id, { title: 'Final' }); // replace wholesale — status, views and tags are gone
+await storage.splice(id, 'body', 0, 0, 'Hello'); // a text field: insert at 0
+await storage.push(id, 'items', [1, 2]);   // a list field: append
+await storage.set(id, { title: 'Final' }); // replace wholesale — everything but title is gone
 await storage.list();                     // every live id
 await storage.delete(id);
 await storage.purge(id);                  // forget it for good — see below
@@ -53,20 +55,24 @@ await storage.close();                    // stop replication, seal the log
 
 Every one of these is an **operation**: applied here, written to the
 [log](./sync#the-log), announced as a `change` event, and replicated to peers
-when a transport is configured. `set()`, `update()`, `inc()`, `add()` and
-`remove()` also emit an `update` event on any live `Record` for that id.
+when a transport is configured. `set()`, `update()`, `inc()`, `add()`,
+`remove()`, `splice()` and `push()` also emit an `update` event on any live
+`Record` for that id.
 
-::: tip Registers, counters and sets
+::: tip Registers, counters, sets, lists and text
 A field written with `insert()`, `set()` or `update()` is a *register* — last
 writer wins. A field created with `inc()` is a *counter* — increments add up
 across nodes. A field created with `add()` is a *set* — concurrent adds both
 keep, and an add a remove did not see survives it; it reads sorted by element
-text. A field is one kind only: `update()` on a counter or a set, `inc()` on a
-register or a set, `add()` on a register or a counter throw. The fields are
+text. A field created with `splice()` or `push()` is a *list* (an array) or a
+*text* (a string), edited by position: concurrent inserts both keep, each
+writer's run whole — see [Lists and text](./lists). A field is one kind only:
+`update()` on a counter, a set, a list or a text, `inc()` on a register or a
+set, `add()` on a register or a counter, `splice()` on a register throw. The fields are
 the top-level ones: a nested object is one register, replaced whole by
 whichever write is later — two nodes that change different keys of it
 concurrently keep one side — and `update({ 'a.b': 1 })` writes a field named
-`a.b`. See [Sync](./sync#registers-counters-and-sets).
+`a.b`. See [Sync](./sync#registers-counters-sets-lists-and-text).
 :::
 
 ### Compare-and-swap

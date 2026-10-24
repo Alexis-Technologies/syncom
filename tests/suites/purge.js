@@ -38,6 +38,7 @@ const runPurgeTests = async (t, assert, createStorage) => {
     await storage.update(person.id, { ssn: SECRET, note: 'x' });
     await storage.inc(person.id, 'visits', 3);
     await storage.add(person.id, 'aliases', [SECRET]);
+    await storage.splice(person.id, 'notes', 0, 0, SECRET);
     const keep = await storage.insert({ ssn: 'KEEP' });
     assert.strictEqual(await holdsSecret(storage), true, 'before: the payload is in the log and the record');
     const record = await storage.record(person.id);
@@ -55,7 +56,7 @@ const runPurgeTests = async (t, assert, createStorage) => {
     const purge = ops.at(-1);
     assert.deepStrictEqual([purge.type, purge.actor, purge.id], ['purge', 'dpo', person.id]);
     const entries = storage.log.since(undefined).filter((entry) => entry.op.id === person.id);
-    assert.ok(entries.length >= 5);
+    assert.ok(entries.length >= 6);
     const bare = (op) => !('data' in op) && !('key' in op) && !('value' in op) && !('nonce' in op);
     assert.ok(entries.every((entry) => entry.scrubbed === true && bare(entry.op)));
     // The signature and the digest stay, and the header still verifies —

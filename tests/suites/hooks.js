@@ -32,6 +32,7 @@ const runHooksTests = async (t, assert, createStorage) => {
     await storage.inc(id, 'hits', 2);
     await storage.add(id, 'tags', ['x']);
     await storage.remove(id, 'tags', ['x']);
+    await storage.splice(id, 'body', 0, 0, 'hi');
     const record = await storage.record(id);
     record.title = 'c';
     await record.save();
@@ -93,8 +94,17 @@ const runHooksTests = async (t, assert, createStorage) => {
           encrypted: false,
         },
         {
-          type: 'set',
+          type: 'splice',
           current: { title: 'b', hits: 2, tags: [] },
+          data: undefined,
+          key: 'body',
+          value: undefined,
+          source: null,
+          encrypted: false,
+        },
+        {
+          type: 'set',
+          current: { title: 'b', hits: 2, tags: [], body: 'hi' },
           data: { title: 'c' },
           key: undefined,
           value: undefined,
@@ -103,7 +113,7 @@ const runHooksTests = async (t, assert, createStorage) => {
         },
         {
           type: 'delete',
-          current: { title: 'c', hits: 2, tags: [] },
+          current: { title: 'c', hits: 2, tags: [], body: 'hi' },
           data: undefined,
           key: undefined,
           value: undefined,
@@ -113,13 +123,16 @@ const runHooksTests = async (t, assert, createStorage) => {
       ],
     );
     assert.ok(seen.every((ctx) => ctx.id === id && ctx.via === null && ctx.from === null));
+    // A splice's context carries the call as the caller made it.
+    const splice = seen.find((ctx) => ctx.type === 'splice');
+    assert.deepStrictEqual([splice.index, splice.count, splice.content], [0, 0, 'hi']);
   });
 
   await t.test('beforeWrite may replace the data of a write or a set, and only those', async (t2) => {
     const storage = await createStorage(t2, 'A', {
       hooks: {
         beforeWrite: ({ type, data }) => {
-          if (type === 'inc' || type === 'add') return { nope: true };
+          if (type === 'inc' || type === 'add' || type === 'splice') return { nope: true };
           return { ...data, stamped: type };
         },
       },
@@ -138,6 +151,10 @@ const runHooksTests = async (t, assert, createStorage) => {
       message: 'beforeWrite may only replace data for write and set',
     });
     await assert.rejects(() => storage.add(id, 'tags', ['x']), {
+      name: 'TypeError',
+      message: 'beforeWrite may only replace data for write and set',
+    });
+    await assert.rejects(() => storage.splice(id, 'body', 0, 0, 'x'), {
       name: 'TypeError',
       message: 'beforeWrite may only replace data for write and set',
     });

@@ -59,11 +59,13 @@ silently never runs.
 | `beforeApply(ctx)` | Inside `applyRemote`, once per op, after the duplicate/gap checks and before the op is applied | `false` skips the op *here* (see below) | The whole batch is aborted before anything is durable |
 | `afterApply(batch)` | After a peer's batch is durable, once per `applyRemote` call | Ignored | The call rejects; the batch stays and is announced |
 
-`ctx` for a write is `{ type, id, data?, key?, value?, meta?, current,
-encrypted, source, via, from, v, actor }`: `type` is the op type (`write`,
-`set`, `inc`, `add`, `remove`, `delete`, `purge`, `merge`), `data` is the whole record for a `write`
-and the delta for a `set`, `key`/`value` belong to an `inc` (the amount), an
-`add` or a `remove` (the elements), `current` is the
+`ctx` for a write is `{ type, id, data?, key?, value?, index?, count?, content?,
+meta?, current, encrypted, source, via, from, v, actor }`: `type` is the op
+type (`write`, `set`, `inc`, `add`, `remove`, `splice`, `delete`, `purge`,
+`merge`), `data` is the whole record for a `write` and the delta for a `set`,
+`key`/`value` belong to an `inc` (the amount), an `add` or a `remove` (the
+elements), `key`/`index`/`count`/`content` to a `splice` (the call as the
+caller made it), `current` is the
 record as it is now (`null` when absent or deleted — read it, do not change
 it), `encrypted` says whether the write is sealed for this node, `source` is
 the `Record` whose `save()` this is, `v` is this node's schema version and

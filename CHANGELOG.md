@@ -14,6 +14,21 @@ There is no released version section until then; everything below lands in it.
 
 ### Added
 
+- **Lists and text.** A field can be a list — an array edited by position —
+  or a text — a string typed into: `splice(id, key, index, count, content)`
+  and `push(id, key, content)`, on the storage and on a live Record. Two
+  nodes inserting at one spot both keep theirs, each writer's run whole
+  (Fugue, the rule Loro and list-positions use), a deleted element keeps its
+  place for the anchors into it, and a reset drops what is below it. A
+  `splice` op carries the cut ranges and either the anchor of a new run or
+  the writer's own run to extend — a keystroke at the end of one's run adds
+  no key to the record. The index is resolved inside the mutation queue;
+  past the length is `OUT_OF_RANGE`. Mixing kinds is refused as for sets
+  (`FIELD_KIND` with `kind: 'list' | 'text'`); a merge lets a register, a
+  counter or a set outrank a list, a list a text. Lists and texts cross a
+  schema version through `migrate()`, are indexed and queried as the arrays
+  and strings they read as, and converge over a mesh in the seeded fuzz.
+  Browser budget 42 → 48 KB.
 - **Full-text search.** An entity names its `search: ['title', 'body']`
   fields and `open({ search: createSearch() })` gives the index —
   `@alexify/syncom/search`, a subpath under 1 KB, so a node that never

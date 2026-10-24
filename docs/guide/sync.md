@@ -41,6 +41,7 @@ in the log:
 | `inc` | `inc()`, `record.inc()` | Adds to a counter field |
 | `add` | `add()`, `record.add()` | Adds elements to a set field |
 | `remove` | `remove()`, `record.remove()` | Removes from a set field the elements this node had seen added |
+| `splice` | `splice()`, `push()`, `record.splice()`, `record.push()` | Removes a range of a list or text field and inserts at a place — see [Lists and text](./lists) |
 | `delete` | `delete()`, `record.delete()` | Leaves a tombstone; a newer write revives the record |
 | `purge` | `purge()` | Erases the record for good: wins at any stamp, nothing later lands, and every entry of the id is scrubbed from the log (see [Purge](./storage#purge)) |
 | `merge` | a snapshot page being joined | Joins a whole entry (see [Bootstrap](#bootstrap)) |
@@ -86,9 +87,10 @@ that they do not have to:
   by a peer far ahead age out late and ops from a peer far behind age out
   early. Retention by `ops` is unaffected.
 
-### Registers, counters and sets
+### Registers, counters, sets, lists and text
 
-A field is a **register**, a **counter** or a **set** — one of them, never two.
+A field is a **register**, a **counter**, a **set**, a **list** or a **text** — one
+of them, never two.
 
 - A register holds whatever was written last: two nodes writing the same field
   concurrently agree on the winner by `(ts, origin)`, so both end up with the
@@ -100,21 +102,29 @@ A field is a **register**, a **counter** or a **set** — one of them, never two
   removes while another re-adds it survives, because a remove names the adds
   its node had seen and the new add is not among them — an *observed-remove*
   set. A set reads sorted by element text: it has no insertion order.
+- A list is an array, a text a string, that nodes edit by position with
+  `splice()` and `push()`. Two nodes inserting at one spot both keep theirs,
+  each writer's run whole, and a deleted element keeps its place so the
+  anchors into it still resolve — Fugue, the rule Loro and list-positions
+  use. [Lists and text](./lists) has the whole story.
 
 ```js
 const id = await storage.insert({ title: 'Draft' }); // title is a register
 await storage.inc(id, 'views', 1);                   // views is a counter
 await storage.add(id, 'tags', ['bug', 'ui']);        // tags is a set
 await storage.remove(id, 'tags', ['ui']);            // tags is ['bug']
+await storage.splice(id, 'body', 0, 0, 'Hello');     // body is a text
+await storage.push(id, 'items', [1, 2]);             // items is a list
 await storage.update(id, { title: 'Final' });        // fine
 await storage.update(id, { views: 10 });              // throws: views is a counter; use inc()
 await storage.update(id, { tags: [] });               // throws: tags is a set; use add() or remove()
 await storage.inc(id, 'title', 1);                    // throws: title is a register; use update()
+await storage.update(id, { body: 'x' });              // throws: body is a text; use splice() or push()
 ```
 
-Do not initialise a counter or a set in `insert()` — `{ views: 0 }` makes
-`views` a register and `{ tags: [] }` makes `tags` one; `inc()` and `add()`
-create their fields. A validator's default for the field (`tags: []`) is
+Do not initialise a counter, a set, a list or a text in `insert()` — `{ views:
+0 }` makes `views` a register, `{ tags: [] }` and `{ body: '' }` make theirs
+registers too; `inc()`, `add()`, `splice()` and `push()` create their fields. A validator's default for the field (`tags: []`) is
 folded into the write and does the same. A peer's op that breaks the rule is
 refused for that field and reported as an `error` event on the storage; the
 rest of the op still applies.
@@ -136,11 +146,14 @@ One case does not converge and is left that way on purpose: a counter
 incremented by one origin both before and after a concurrent reset by another.
 Resettable counters need causal metadata syncom does not carry. A set has no
 such case: a remove names the add stamps its node saw, so a reset and a
-remove read the same whichever lands first.
+remove read the same whichever lands first. Nor do lists and texts: a reset
+drops every run stamped below it, and a run stamped above it but anchored on
+a dropped element reads from the head of the field.
 
 What neither survives is a **kind clash**: a whole-record write that carries
-a field as a register (`set(id, { views: 0 })`, `set(id, { tags: [] })`),
-concurrent with an `inc` or an `add` to that field stamped later. The node
+a field as a register (`set(id, { views: 0 })`, `set(id, { tags: [] })`, `set(id,
+{ body: '' })`), concurrent with an `inc`, an `add` or a `splice` to that
+field stamped later. The node
 that saw the write first refuses the increment or the add; the node that saw
 the increment or the add first refuses that field of the write. Keep a field
 one kind, and do not reset it in a whole-record write while another node may

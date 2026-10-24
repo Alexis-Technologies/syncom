@@ -159,6 +159,7 @@ export default withMermaid({
               { text: 'Storage', link: '/guide/storage' },
               { text: 'Schema and validation', link: '/guide/schema' },
               { text: 'Queries', link: '/guide/query' },
+              { text: 'Lists and text', link: '/guide/lists' },
               { text: 'Hooks and events', link: '/guide/hooks' },
               { text: 'CRDT deltas', link: '/guide/crdt' },
               { text: 'Blockchain log', link: '/guide/chain' },
