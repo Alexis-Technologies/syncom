@@ -160,8 +160,14 @@ same version takes its own tag. `tag()` runs in the mutation queue, so no
 write lands between the catalog and the position it names; a name is of the
 record-id form. A directory a crash left under `tags/` without its line in
 `tags.json` is unknown to every reader and is swept when a tag of that name
-is taken again; an unreadable `tags.json` refuses the open (`CORRUPT`), and a
-tag whose catalog file is gone is dropped at open with a warning.
+is taken again; a tag whose catalog file is gone is dropped at open with a
+warning. An unreadable `tags.json` does not stop the open: the tags are
+auxiliary, and their names cannot be listed back from the disk, so the file
+is kept aside as `tags.corrupt.json` for a repair by hand, the storage runs
+without tags (`stats().tags.corrupt`), `tag()` refuses with `CORRUPT` so
+nothing overwrites the names, and every record changed meanwhile has its
+file kept under `tags/.pending/` — the next open with a repaired file hands
+those copies to the newest tag, so it reads as it did.
 
 ## Diff and restore
 

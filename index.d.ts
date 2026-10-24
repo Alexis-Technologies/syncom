@@ -1019,6 +1019,8 @@ export interface StorageStats {
     latestTs: number;
     droppedTs: number;
   };
+  /** The tags held; `corrupt` when `tags.json` could not be read at open (no tags, `tag()` refused until it is repaired). */
+  tags: { count: number; corrupt: boolean };
   chain: { tail: string } | null;
   lock: { mode: 'fail' | 'wait' } | null;
 }

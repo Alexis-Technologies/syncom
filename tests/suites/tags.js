@@ -186,14 +186,53 @@ const runTagTests = async (t, assert, createStorage) => {
     await storage.close();
     storage = await createStorage(t2, 'A');
     assert.deepStrictEqual(storage.tags(), []);
-    // tags.json unreadable: the open refuses, like node.json.
-    await storage.fsi.write(storage.path, 'tags.json', '{ torn');
-    await storage.close();
-    await assert.rejects(() => createStorage(t2, 'A'), { code: 'CORRUPT' });
-    await storage.fsi.write(storage.path, 'tags.json', JSON.stringify({ format: 1, tags: [] }));
-    storage = await createStorage(t2, 'A');
-    assert.deepStrictEqual(storage.tags(), []);
   });
+
+  await t.test(
+    'a torn tags.json never blocks open: no tags, the file kept aside, tag() refused until repaired',
+    async (t2) => {
+      let storage = await createStorage(t2, 'A');
+      const id = await storage.insert({ v: 1 });
+      const other = await storage.insert({ o: 1 });
+      const tag = await storage.tag('keep');
+      await storage.update(id, { v: 2 }); // copied into the tag before the file is torn
+      const good = await storage.fsi.read(storage.path, 'tags.json');
+      await storage.fsi.write(storage.path, 'tags.json', '{ torn');
+      await storage.close();
+      storage = await createStorage(t2, 'A');
+      assert.deepStrictEqual(storage.tags(), [], 'the open went on without the tags');
+      assert.deepStrictEqual(storage.stats().tags, { count: 0, corrupt: true });
+      assert.strictEqual(await storage.fsi.read(storage.path, 'tags.corrupt.json'), '{ torn', 'the file is kept aside');
+      await assert.rejects(() => storage.tag('other'), { code: 'CORRUPT', file: 'tags.json' });
+      assert.deepStrictEqual(await storage.get(id), { v: 2 }, 'the records are whole');
+      // Writes go on; what the tag would have copied is kept aside meanwhile.
+      await storage.update(id, { v: 3 });
+      await storage.update(other, { o: 2 });
+      await storage.update(other, { o: 3 });
+      assert.deepStrictEqual(
+        (await storage.fsi.list(`${storage.path}/tags/.pending/data`)).sort(),
+        [`${id}.json`, `${other}.json`].sort(),
+        'once per record',
+      );
+      // Repaired by hand: the tag is back and reads as it did — the copy kept
+      // aside went to it for the record it had none of, and away for the other.
+      await storage.fsi.write(storage.path, 'tags.json', good);
+      await storage.close();
+      storage = await createStorage(t2, 'A');
+      assert.deepStrictEqual(storage.tags(), [tag]);
+      assert.deepStrictEqual(storage.stats().tags, { count: 1, corrupt: false });
+      assert.deepStrictEqual(await storage.at('keep').get(id), { v: 1 });
+      assert.deepStrictEqual(await storage.at('keep').get(other), { o: 1 });
+      assert.deepStrictEqual(await storage.fsi.list(`${storage.path}/tags/.pending/data`), []);
+      assert.deepStrictEqual(await storage.get(other), { o: 3 });
+      // A tags file of another shape is the same case.
+      await storage.fsi.write(storage.path, 'tags.json', JSON.stringify({ format: 99 }));
+      await storage.close();
+      storage = await createStorage(t2, 'A');
+      assert.deepStrictEqual([storage.tags(), storage.stats().tags.corrupt], [[], true]);
+      await assert.rejects(() => storage.tag('other'), { code: 'CORRUPT' });
+    },
+  );
 
   await t.test(
     'a copy that cannot be written stops the write; a torn copy is evidence; a purge reaches the tags',

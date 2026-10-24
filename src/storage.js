@@ -761,6 +761,7 @@ class Storage extends Emitter {
       queue: this.#queued,
       cache: { size: this.#entries.size, max: this.#cacheMax, pinned },
       catalog: { entries: this.#catalog.size, dirty: this.#catalog.dirty },
+      tags: { count: this.#tags.size, corrupt: this.#tags.corrupt },
       log: {
         length: log.length,
         floor: log.floor,

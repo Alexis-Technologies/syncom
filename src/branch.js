@@ -154,7 +154,7 @@ const branchInfo = async (storage) => {
 
 // The directories a storage writes under its path; fsi lists files, not
 // directories, so the tags' are named from the storage before it closes.
-const DIRS = ['', 'keys', 'blockchain', 'index', 'data', 'log', 'log/open', 'remote'];
+const DIRS = ['', 'keys', 'blockchain', 'index', 'data', 'log', 'log/open', 'remote', 'tags/.pending/data'];
 
 // Closes a storage and removes its files — every file of the known layout,
 // the tags' included. The empty directories stay: no backend has rmdir.

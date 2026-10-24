@@ -26,6 +26,11 @@ const { SyncomError } = require('./errors.js');
 const { isRecordId } = require('./shape.js');
 
 const FILE = 'tags.json';
+// Where an unreadable tags.json is kept for a repair by hand, and where the
+// copies made while it was unreadable wait (`.pending` is no record id, so
+// no tag can be named so).
+const CORRUPT_FILE = 'tags.corrupt.json';
+const PENDING = '.pending';
 const FORMAT = 1;
 
 const isTag = (value) =>
@@ -56,6 +61,11 @@ class Tags {
   #catalogOf;
   #tags = [];
   #byName = new Map();
+  // tags.json could not be read: the storage runs without tags, the file is
+  // kept aside, take() refuses, and the copy-on-write seam keeps every
+  // changed record's file under tags/.pending for the tag a repair brings back.
+  #corrupt = false;
+  #pending = new Set();
 
   // `catalogOf(path)` builds a Catalog rooted at `path` — one per tag, under
   // the storage's own entity definitions.
@@ -69,6 +79,15 @@ class Tags {
 
   get size() {
     return this.#tags.length;
+  }
+
+  /** Whether tags.json could not be read at open: no tags, `take()` refused until it is repaired. */
+  get corrupt() {
+    return this.#corrupt;
+  }
+
+  get #pendingDir() {
+    return `${this.#dir}/${PENDING}/data`;
   }
 
   /** The tags, oldest first — copies. */
@@ -102,19 +121,23 @@ class Tags {
     }
   }
 
-  // Reads tags.json and every tag's catalog and copies.
+  // Reads tags.json and every tag's catalog and copies. A tags.json that
+  // cannot be read does not stop the open: the tags are auxiliary (the
+  // records, the log and the catalog are whole), and their names cannot be
+  // listed back from the disk — fsi lists files, not directories — so the
+  // file is kept aside for a repair by hand, and nothing here overwrites it.
   async load() {
     const exists = await this.#fsi.exists(this.#path, FILE);
     let parsed = null;
     if (exists) {
+      let text = null;
       try {
-        parsed = JSON.parse(await this.#fsi.read(this.#path, FILE));
+        text = await this.#fsi.read(this.#path, FILE);
+        parsed = JSON.parse(text);
       } catch (error) {
-        throw new SyncomError('CORRUPT', `${FILE} is unreadable`, { cause: error });
+        return this.#unreadable(text, error);
       }
-      if (!parsed || parsed.format !== FORMAT || !Array.isArray(parsed.tags)) {
-        throw new SyncomError('CORRUPT', `${FILE} is not a tags file`);
-      }
+      if (!parsed || parsed.format !== FORMAT || !Array.isArray(parsed.tags)) return this.#unreadable(text, null);
     }
     const known = new Set();
     for (const raw of parsed?.tags ?? []) {
@@ -142,7 +165,48 @@ class Tags {
       this.#tags.push(tag);
       this.#byName.set(tag.name, tag);
     }
+    await this.#adoptPending();
     if (known.size !== (parsed?.tags.length ?? 0)) await this.#save();
+  }
+
+  async #unreadable(text, cause) {
+    this.#corrupt = true;
+    const event = { event: 'tags.unreadable', file: FILE, kept: CORRUPT_FILE };
+    if (cause !== null) event.err = cause;
+    this.#logger?.warn(event);
+    if (text !== null) await this.#fsi.write(this.#path, CORRUPT_FILE, text);
+    for (const name of await this.#names(this.#pendingDir)) {
+      if (name.endsWith('.json')) this.#pending.add(name.slice(0, -5));
+    }
+  }
+
+  // Copies kept aside while tags.json was unreadable: each goes to the
+  // newest tag when it holds the record live and has no copy of it yet —
+  // the state before the record's first change after the tag, as
+  // copyBefore would have kept it — and goes away otherwise.
+  async #adoptPending() {
+    const names = await this.#names(this.#pendingDir);
+    const newest = this.#tags[this.#tags.length - 1];
+    for (const name of names) {
+      if (!name.endsWith('.json')) continue;
+      const id = name.slice(0, -5);
+      const row = newest === undefined ? null : newest.catalog.row(id);
+      if (row !== null && !row.gone && !newest.copied.has(id)) {
+        await this.#fsi.write(this.#data(newest), name, await this.#fsi.read(this.#pendingDir, name));
+        newest.copied.add(id);
+      }
+      await this.#fsi.remove(this.#pendingDir, name);
+    }
+  }
+
+  // While tags.json is unreadable: the file as it is, kept aside once per
+  // record, for the newest tag of a repaired file.
+  async #keepAside(id, file) {
+    if (this.#pending.has(id)) return;
+    const text = await file();
+    if (text === null) return;
+    await this.#fsi.write(this.#pendingDir, `${id}.json`, text);
+    this.#pending.add(id);
   }
 
   async #save() {
@@ -165,6 +229,10 @@ class Tags {
    * lands between the rows and the position.
    */
   async take(name, { eventId, seq, ts, vector, rows }) {
+    if (this.#corrupt) {
+      const message = `${FILE} is unreadable; repair or remove it (a copy is in ${CORRUPT_FILE}) before taking a tag`;
+      throw new SyncomError('CORRUPT', message, { file: FILE });
+    }
     if (this.#byName.has(name)) throw new SyncomError('TAG_EXISTS', `Tag ${name} exists`, { tag: name });
     // Whatever a crash left under this name goes first: a stale copy would
     // read as this tag's.
@@ -225,6 +293,7 @@ class Tags {
    * nothing landed on the file after the tag, or the copy would be here.
    */
   async copyBefore(id, file) {
+    if (this.#corrupt) return this.#keepAside(id, file);
     const tag = this.#tags[this.#tags.length - 1];
     if (tag === undefined || tag.copied.has(id)) return;
     const row = tag.catalog.row(id);
@@ -263,8 +332,12 @@ class Tags {
     return { exists: true, raw: null };
   }
 
-  /** A purge reaches the tags: every copy of `id` goes, and every tag's catalog forgets the row. */
+  /** A purge reaches the tags: every copy of `id` goes — one kept aside too — and every tag's catalog forgets the row. */
   async scrub(id) {
+    if (this.#pending.has(id)) {
+      await this.#fsi.remove(this.#pendingDir, `${id}.json`);
+      this.#pending.delete(id);
+    }
     for (const tag of this.#tags) {
       if (tag.copied.has(id)) {
         await this.#fsi.remove(this.#data(tag), `${id}.json`);

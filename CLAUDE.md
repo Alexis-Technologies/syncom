@@ -406,7 +406,14 @@ docs/                     VitePress site
   of `write`/`writeSealed`/`remove`, into the NEWEST tag only, once per
   record, only for a record the tag's catalog holds live. `tag()` refuses
   (`UNPERSISTED`) while a record is held — its file is behind the cache and
-  a copy from memory would carry no block to verify. A read at a tag walks
+  a copy from memory would carry no block to verify. An unreadable
+  `tags.json` never fails `open()`: `Tags.load` keeps it as
+  `tags.corrupt.json`, sets `corrupt` (`stats().tags`), `take()` refuses
+  `CORRUPT`, and `copyBefore` keeps every changed record's file once under
+  `tags/.pending/data/` — adopted by the newest tag at the next open with a
+  readable file (`#adoptPending`), so the tags a repair brings back read as
+  they did. Never rebuild `tags.json` from the disk: fsi lists files, not
+  directories, so the names are in that file alone. A read at a tag walks
   the tags from it to the newest for a copy, else reads the present — except
   a record held since the tag, whose file is still the tag's state; the
   tag's catalog row decides existence.

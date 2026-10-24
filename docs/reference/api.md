@@ -79,7 +79,7 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 | `validate(id, data, blockHash)` | `Promise<boolean>` | One record against its block |
 | `getCachedData(id)` | `unknown \| null` | Synchronous cache peek, raw (no lens) |
 | `hasRecord(id)` | `boolean` | Whether the id is a live record — from the catalog, no I/O |
-| `stats()` | `{ closed, queue, cache: { size, max, pinned }, catalog: { entries, dirty }, log: { length, floor, next, epoch, segments, latestTs, droppedTs }, chain: { tail } \| null, lock: { mode } \| null }` | The node's health, from memory — no I/O |
+| `stats()` | `{ closed, queue, cache: { size, max, pinned }, catalog: { entries, dirty }, tags: { count, corrupt }, log: { length, floor, next, epoch, segments, latestTs, droppedTs }, chain: { tail } \| null, lock: { mode } \| null }` | The node's health, from memory — no I/O; `tags.corrupt` while `tags.json` could not be read |
 | `applyRemote(ops, { via, scopes, peer, adoptFrom, bound }?)` | `Promise<{ applied, skipped, duplicates, gaps, malformed, unsigned, forged, outOfScope }>` | Applies a peer's ops, in order per origin; `peer` is `{ url, node }` for the hooks; `malformed` ops (shape, id, a stamp beyond `sync.maxSkew`) and ops refused for their signature (`forged`; `unsigned` under `sync.signatures: 'require'`) are counted and dropped; an `advance` is adopted only when its origin is `adoptFrom`; under `bound` (a host's push passes the peer's granted scopes) an op whose record is outside them, before or after it, is counted `outOfScope` and dropped |
 | `snapshot({ cursor, limit, scopes }?)` | `Promise<{ records, cursor, eventId, vector }>` | One page of state, tombstones included |
 | `mergeSnapshot(records, { via, from }?)` | `Promise<void>` | Joins a page (as `merge` ops of this node) |
@@ -228,7 +228,7 @@ value is data or configuration. `HookError` and `ValidationError` are
 | `BRANCH_EXISTS` | `branch()` (`@alexify/syncom/branch`) at a path that holds a `branch.json`, or any file — another storage, say — already: a branch opens in a new directory | `path` |
 | `ENCRYPTED` | `inc()`, `add()`, `remove()`, `splice()` or `push()` on an encrypted record; `{ encrypted: true }` on a replicated one | — |
 | `INTEGRITY` | a read (`get()`, `has()`, a cursor) of a record whose file fails its chain block check, under `integrity: 'verify'`, or cannot be parsed at all (a file torn by a crash; `repair(id)` rebuilds it) | `id`, `cause` (the parse error) |
-| `CORRUPT` | `open()` when `node.json`, `schema.json`, `tags.json` or `.blockchain.json` cannot be read | `cause` |
+| `CORRUPT` | `open()` when `node.json`, `schema.json` or `.blockchain.json` cannot be read; `tag()` while `tags.json` cannot be read — the open went on without tags, kept the file as `tags.corrupt.json` and keeps the copies the tags would need under `tags/.pending/` until the file is repaired | `cause`; `file` |
 | `DOWNGRADE` | `open()` with `ahead: 'hold'` and a schema version below the one the directory ran | — |
 | `LOCKED` | `open()` while another instance holds the directory | `path` |
 | `KEYS_INCOMPLETE` | `open()`, `loadKeys()`, `loadSigningKeys()` when one file of a pair (RSA or signing) is missing | — |
