@@ -15,3 +15,4 @@ undo.on('pop', ({ direction, applied }) => {
   expectType<number>(applied);
 });
 expectError(createUndo(storage, { limit: 'many' }));
+expectType<number>(undo.listenerCount('change'));

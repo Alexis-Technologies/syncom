@@ -34,6 +34,7 @@ export declare class UndoManager {
   on<E extends keyof UndoManagerEvents>(event: E, listener: UndoManagerEvents[E]): void;
   once<E extends keyof UndoManagerEvents>(event: E, listener: UndoManagerEvents[E]): void;
   off<E extends keyof UndoManagerEvents>(event: E, listener?: UndoManagerEvents[E]): void;
+  listenerCount(event: keyof UndoManagerEvents): number;
   readonly canUndo: boolean;
   readonly canRedo: boolean;
   /** How many steps each way. */

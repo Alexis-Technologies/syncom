@@ -479,6 +479,7 @@ storage.once('apply', (batch) => {
   expectType<syncom.SyncOp[]>(batch.ops);
 });
 storage.on('error', (error) => {
+  if (error.code === 'UNPERSISTED') return void expectType<string[]>(error.ids);
   expectType<syncom.SyncOp>(error.op);
   expectType<syncom.ValidationIssue[] | undefined>(error.issues);
   expectType<syncom.RefusalReason | undefined>(error.rejected?.[0]?.reason);
@@ -580,8 +581,9 @@ storage.sync.on('sync', (event) => {
   expectType<number | undefined>(event.malformed);
 });
 storage.on('error', (error) => {
-  expectType<'OP_REFUSED' | 'OP_INVALID' | 'OP_UNREADABLE' | 'SKEW' | 'BAD_SIGNATURE' | 'UNSIGNED'>(error.code);
   expectAssignable<SyncomError>(error);
+  if (error.code === 'UNPERSISTED') return;
+  expectType<'OP_REFUSED' | 'OP_INVALID' | 'OP_UNREADABLE' | 'SKEW' | 'BAD_SIGNATURE' | 'UNSIGNED'>(error.code);
   expectType<string>(error.op.origin);
 });
 expectAssignable<Fsi>({
@@ -726,3 +728,31 @@ expectAssignable<Fsi>({
   list: async () => [],
   create: async (_dir: string, _file: string, _content: string) => {},
 });
+
+// The mark patch compact() lays a text's marks again with.
+expectAssignable<syncom.Patch>({ action: 'mark', field: 'body', start: 0, end: 5, name: 'bold', value: true });
+expectAssignable<syncom.Patch>({
+  action: 'mark',
+  field: 'body',
+  start: 0,
+  end: 5,
+  name: 'comment',
+  value: { by: 'ada' },
+  expand: 'none',
+  many: true,
+});
+// What the types now say about the code as it is.
+declare const typedLog: syncom.OpLog;
+expectType<number>(typedLog.pins);
+declare const typedSync: syncom.SyncManager;
+expectType<number>(typedSync.pendingOps());
+expectType<syncom.ApplyResult>(syncom.applyOp(null, {} as syncom.SyncOp, { pendingMax: 10 }));
+declare const typedStorage: syncom.Storage;
+typedStorage.on('error', (error) => {
+  if (error.code === 'UNPERSISTED') expectType<string[]>(error.ids);
+  else expectType<syncom.SyncOp>(error.op);
+});
+typedSync.on('sync', (event) => expectType<number | undefined>(event.outOfScope));
+declare const removal: syncom.WriteContext;
+expectType<true | undefined>(removal.own);
+expectType<readonly syncom.SetRemoval[] | undefined>(removal.removals);

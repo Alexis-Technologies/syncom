@@ -348,8 +348,8 @@ export type SyncomErrorCode =
 /**
  * What syncom rejects with when an operation cannot be done — as opposed to
  * a `TypeError`, which is a wrong argument, option or hook result and carries
- * no code (except `INVALID_ID`, `TYPE_IMMUTABLE` and `NO_CHAIN`, whose value
- * is data or configuration). `code` is one constant; the fields the code
+ * no code (except `INVALID_ID`, `TYPE_IMMUTABLE`, `INVALID_VERSION` and
+ * `NO_CHAIN`, whose value is data or configuration). `code` is one constant; the fields the code
  * documents (`op`, `cursor`, `rejected`…) ride on the error, `cause` is the
  * underlying one. A host's wire refusal is not one of these: it is a plain
  * `Error` with the numeric `code` the transport carries and a `reason`.
@@ -375,7 +375,8 @@ export class HookError extends SyncomError {
   readonly cause: unknown;
 }
 
-export function applyOp(entry: Entry | null, op: SyncOp): ApplyResult;
+/** `limits.pendingMax` is the node's bound on a list or text field's pending work (`sync.pendingMax`). */
+export function applyOp(entry: Entry | null, op: SyncOp, limits?: { pendingMax?: number } | null): ApplyResult;
 export function mergeEntry(a: Entry | null, b: Entry | null): Entry | null;
 export function isAlive(entry: Entry | null): boolean;
 
@@ -407,6 +408,8 @@ export interface OpLogOptions {
 }
 
 export interface OpLog {
+  /** How many readers hold segments through `pin()`. */
+  readonly pins: number;
   readonly epoch: string;
   readonly floor: number;
   readonly next: number;
@@ -780,7 +783,7 @@ export interface SyncOptions {
   connect?: (node: Node) => SyncLink | Promise<SyncLink>;
   /** Dial on open — `true` when `connect` is given. */
   autoStart?: boolean;
-  /** Ops per push page and per `changes` page (default 500). */
+  /** Ops per push page (default 500); `snapshot` and `changes` pages are `unit({ pageSize })`'s. */
   pageSize?: number;
   /** Assigns a scope to a record; unscoped (`'*'`) records reach every peer. */
   scope?: (id: string, data: Record<string, unknown>) => string;
@@ -833,6 +836,10 @@ export interface WriteContext {
   key?: string;
   /** `inc`: the amount; `add`/`remove`: the elements, as the caller gave them. */
   value?: number | readonly unknown[];
+  /** A `remove` from `applyPatches()`: exactly these tags revoked… */
+  removals?: readonly SetRemoval[];
+  /** …or this node's adds of the elements alone (an undo). */
+  own?: true;
   /**
    * `splice`: the index (`null`: the end), how many to remove and what to
    * insert; `assign`: the index and the value; `move`: the index (`from`)
@@ -924,6 +931,16 @@ export type Patch =
   | { action: 'remove'; field: string; elements: readonly unknown[]; own?: true }
   | { action: 'remove'; field: string; removals: readonly SetRemoval[] }
   | { action: 'splice'; field: string; index: number; count?: number; content?: string | readonly unknown[] }
+  | {
+      action: 'mark';
+      field: string;
+      start: number;
+      end: number;
+      name: string;
+      value: unknown;
+      expand?: MarkExpand;
+      many?: true;
+    }
   | { action: 'treeMove'; field: string; node: string; parent?: string | null; after?: string; before?: string }
   | { action: 'treeRemove'; field: string; node: string }
   | { action: 'delete' }
@@ -1234,7 +1251,14 @@ export interface SyncUnitOptions {
    */
   authorize?: (
     context: unknown,
-    hello: { node: string; vector?: VersionVector; scopes?: string[]; token?: string; schema?: SchemaInfo | null },
+    hello: {
+      node: string;
+      version?: number;
+      vector?: VersionVector;
+      scopes?: string[];
+      token?: string;
+      schema?: SchemaInfo | null;
+    },
   ) => boolean | Promise<boolean>;
   /** How a `changes` value is labelled with its position (wrpc's tracked shape by default). */
   tracked?: (id: string, data: unknown) => unknown;
@@ -1309,6 +1333,7 @@ export interface SyncEvents {
     malformed?: number;
     unsigned?: number;
     forged?: number;
+    outOfScope?: number;
   }) => void;
   bootstrap: (event: { url: string; records: number }) => void;
   /**
@@ -1344,6 +1369,8 @@ export interface NodeData {
 export interface SyncManager {
   readonly storage: Storage;
   readonly started: boolean;
+  /** Ops queued for peers over every dialed peer — what the outbox gauge reads. */
+  pendingOps(): number;
   on<E extends keyof SyncEvents>(event: E, listener: SyncEvents[E]): void;
   once<E extends keyof SyncEvents>(event: E, listener: SyncEvents[E]): void;
   off<E extends keyof SyncEvents>(event: E, listener?: SyncEvents[E]): void;
@@ -1412,7 +1439,11 @@ export interface SnapshotPage {
 export interface ApplyRemoteResult {
   /** Accepted ops — the skipped ones included; they moved the vector too. */
   applied: number;
-  /** Accepted but not applied here: a beforeApply hook returned `false`. */
+  /**
+   * Accepted but not applied here: a beforeApply hook returned `false`, the
+   * record would not pass its entity's validator, its file could not be read,
+   * it is sealed for this node, or the op waits for a newer schema version.
+   */
   skipped: number;
   duplicates: number;
   gaps: number;
@@ -1451,14 +1482,17 @@ export interface StorageEvents {
    * `UNSIGNED`).
    */
   error: (
-    error: SyncomError & {
-      code: 'OP_REFUSED' | 'OP_INVALID' | 'OP_UNREADABLE' | 'SKEW' | 'BAD_SIGNATURE' | 'UNSIGNED';
-      op: SyncOp;
-      count?: number;
-      rejected?: Refusal[];
-      entity?: string | null;
-      issues?: ValidationIssue[];
-    },
+    error:
+      | (SyncomError & {
+          code: 'OP_REFUSED' | 'OP_INVALID' | 'OP_UNREADABLE' | 'SKEW' | 'BAD_SIGNATURE' | 'UNSIGNED';
+          op: SyncOp;
+          count?: number;
+          rejected?: Refusal[];
+          entity?: string | null;
+          issues?: ValidationIssue[];
+        })
+      /** Records logged but not written — held in memory until they land (see Health). */
+      | (SyncomError & { code: 'UNPERSISTED'; ids: string[] }),
   ) => void;
   /** A peer's batch is durable. */
   apply: (batch: ApplyBatchContext) => void;

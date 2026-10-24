@@ -609,6 +609,15 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **The types say what the code does.** `browser.d.ts` re-exports every type
+  `index.d.ts` does — the CRDT branch's (`Patch`, `Version`, `Tag`,
+  `TextSpan`, the payloads…) never reached the browser condition — and a
+  consistency test keeps it so. The storage `error` event is a union with
+  `UNPERSISTED` (`ids`, no `op`); `sync` events carry `outOfScope`;
+  `applyOp` takes its `{ pendingMax }`; `OpLog.pins`, `SyncManager.pendingOps()`,
+  `UndoManager.listenerCount()`, the hello's `version` and a write context's
+  `removals`/`own` are declared; `Patch` takes `mark`; and the doc comments of
+  `skipped`, `pageSize`, `branch()`, `branchInfo()` and `drop()` are right.
 - **A malformed register, counter or set payload is reported.** A peer's
   `write` or `set` without a plain object, `inc` of no finite number, or
   `add`/`remove` without an array applied as nothing and said nothing — the
