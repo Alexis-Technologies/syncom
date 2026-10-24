@@ -301,6 +301,7 @@ export type SyncomErrorCode =
   | 'INVALID_VERSION'
   | 'TAG_EXISTS'
   | 'TAG_NOT_FOUND'
+  | 'BRANCH_EXISTS'
   | 'ENCRYPTED'
   | 'INTEGRITY'
   | 'CORRUPT'

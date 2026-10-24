@@ -115,6 +115,16 @@ There is no released version section until then; everything below lands in it.
   `clear()`, `stop()` (on `close()` too). The manager pins the log from its
   oldest step. A subpath (5.1 KB alone, budget 5.5; its patch vocabulary,
   Myers, Emitter and shape helpers are the core's and dedupe in a bundle).
+- **Branches.** `@alexify/syncom/branch` — `branch(parent, { path, from?:
+  { tag }, ...options })` forks a storage into a new directory under a new
+  identity, standing at the parent's state or at a tag of it (its snapshot
+  pages joined, its vector adopted, `branch.json` written); `merge(source,
+  { into })` hands either side what the other lacks as ops through
+  `applyRemote` — `src/outbound.js`, the selection a push makes, now shared
+  with the sync manager — or, when the source compacted past it, as a join
+  of state (`joined: true`); `branchInfo()`, `drop()`. A branch is a storage
+  like any other; a merge into a parent that dials peers reaches them. New
+  code `BRANCH_EXISTS`. A subpath that bundles no engine.
 - **The log knows what it dropped.** `storage.log.droppedTs` is the newest
   stamp among the ops compaction dropped, or an open could not read — `0`
   while nothing ever was — persisted in `index.json`; a record's retained

@@ -253,6 +253,48 @@ manager pins the log from the oldest step it holds (conflicts are read
 from the log's entries), so a long stack holds segments past retention
 until `clear()` or `stop()`.
 
+## Branches
+
+`@alexify/syncom/branch` forks a storage into another directory — a new
+identity, its own keys and log, standing at the parent's state or at a tag
+of it — and merges the two as ops, either way:
+
+```js
+import { branch, merge, branchInfo, drop } from '@alexify/syncom/branch';
+
+const draft = await branch(storage, { path: './data-draft', schema });      // at the present
+const fromV1 = await branch(storage, { path: './data-v1', from: { tag: 'v1' } });
+await draft.update(id, { title: 'Reworked' });                          // a storage like any other
+await merge(draft, { into: storage });   // { ops: 1, pages: 1, joined: false }
+await merge(storage, { into: draft });   // the parent's news, the other way
+await branchInfo(draft);                 // { parent, forkedAt: { eventId, vector, ts, tag }, createdAt }
+await drop(draft);                       // closed, files removed
+```
+
+A branch is opened with the options you give it (the schema it should run
+with, hooks, a logger); its `sync` gets `retention: { ops: 0 }`, so every
+op stays for the merge back, and `autoStart: false`, so it dials nobody
+until told. The fork pages the parent's [snapshot](./sync#bootstrap) (or
+the tag's) into the branch and adopts the parent's vector, so the branch
+knows what it already holds; `branch.json` in its directory names the
+parent and the position.
+
+`merge(source, { into })` hands `into` what `source` has that it lacks —
+the ops after `into`'s vector, through `applyRemote`, the way a peer's push
+lands, so concurrent edits of one record converge by the usual rules and a
+second merge has nothing to hand over. The ops keep their origin: a merge
+into a parent that dials peers reaches them as the branch's own ops, and a
+branch that merged from the parent holds the parent's ops under the
+parent's name. A source whose log no longer holds what the other needs
+(compaction) is joined as state instead — its snapshot pages, then its
+vector — and the result says `joined: true`. A `signatures: 'require'`
+parent takes a branch's ops: they are signed by the branch's own key.
+
+`drop(branch)` closes it and removes every file of the known layout, the
+tags' included; the empty directories stay (no backend has rmdir). A
+branch is a branch only here: nothing of it replicates as such, and a peer
+sees merged ops like any other.
+
 ## Costs
 
 A version is a fold of the record's retained entries: as many `applyOp`

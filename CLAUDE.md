@@ -23,6 +23,7 @@ idb.js / idb.d.ts         the @alexify/syncom/idb subpath (src/idb.js) — the I
 search.js / search.d.ts   the @alexify/syncom/search subpath (src/search.js) — the trigram text index behind `$text`; the core knows only the TextIndex contract
 order.js / order.d.ts     the @alexify/syncom/order subpath (src/order.js) — fractional indexes as strings, for ordering records
 undo.js / undo.d.ts       the @alexify/syncom/undo subpath (src/undo.js) — the undo stack over the commit event; requires patch.js, emitter.js only
+branch.js / branch.d.ts   the @alexify/syncom/branch subpath (src/branch.js) — fork a storage, merge either way; never requires storage.js
 index.d.ts                the Node type surface (hand-written)
 browser.d.ts              re-exports index.d.ts, overrides the 3 async crypto fns
 THIRD_PARTY_NOTICES.md    the MIT notices of the algorithms adapted (Fugue, Yjs, list-positions…) and the files that carry them
@@ -42,6 +43,8 @@ src/history.js            the past out of the log: a version (event id / stamp /
 src/tags.js               Tags — named versions kept locally: tags.json, a catalog per tag, copy-on-write record files in the newest tag
 src/patch.js              patches — the one vocabulary of diff()/applyPatches()/restore(): diffViews by kind, realize() to an op — requires shape.js, myers.js only
 src/undo.js               UndoManager — steps of inverse patches from `commit` events, refuse-to-overwrite, pins the log; the core does not use it
+src/outbound.js           outbound(log, { exclude, vector, scopes, own }) — the ops a receiver lacks, the first retained seq per own stream; a push and a merge both pick with it
+src/branch.js             branch/merge/branchInfo/drop — a fork opened through parent.constructor, merged as ops through applyRemote
 src/errors.js             SyncomError (an operational failure, with a code) and typed() — no requires
 src/symbols.js            COMMIT / REFRESH / SOURCE — the module-private seams between Storage and what it hands out — no requires
 src/options.js            normalizeStorageOptions — open()'s plain options checked and defaulted (lock, cache, chain, skew…)
@@ -415,6 +418,18 @@ docs/                     VitePress site
   predicates) and `deepEqual` in shape.js, so patch.js and the subpath ship
   without the op model — keep it that way. The stack is memory only; a
   `purge` forgets the record on every step.
+- **A branch is a storage; a merge is a push.** `src/branch.js` opens the
+  fork through `parent.constructor` (the subpath bundles no engine), never
+  copies the directory (a copied identity is `SELF`/`REWOUND`), gives it
+  `retention: { ops: 0 }` + `autoStart: false`, joins the parent's (or the
+  tag's) snapshot pages and adopts the vector, then `merge(parent, { into:
+  child })` for what landed while paging. `merge` = `outbound(source.log, {
+  exclude: into.nodeId, vector: into.vector, own: source.nodeId })` →
+  `into.applyRemote(page, { via: { url: null, node }, adoptFrom: source })`
+  — the one selection `#pushFromLog` uses too (`src/outbound.js`; change
+  one, change both) — and a state join + `adoptVector` when `unreachable`
+  says the source compacted past the receiver. No-echo is `exclude` on
+  `origin`/`from` plus `vectorHas`; never add a third filter.
 - **`repair(id)` replays the log, it does not guess.** `Storage.#repair`
   starts at the first whole-record op the log retains for the id (`WHOLE`:
   `write`/`merge`/`delete`, or a `purge` even scrubbed), folds the rest with

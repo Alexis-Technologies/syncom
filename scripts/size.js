@@ -129,6 +129,9 @@ const ENTRIES = [
   // The undo manager with the patch vocabulary, Myers and the Emitter it
   // stands on — measured alone; in an app bundle those are shared with the core.
   { label: 'undo — browser (@alexify/syncom/undo)', entry: 'undo.js', platform: 'browser', budget: 5.5 },
+  // A fork opened through the parent's constructor, merged as ops: the
+  // selection a push makes, the shape helpers, the protocol constants.
+  { label: 'branch — browser (@alexify/syncom/branch)', entry: 'branch.js', platform: 'browser', budget: 3.5 },
 ];
 
 // A browser entry has to be self-contained: no node builtins, and no packages

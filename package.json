@@ -44,6 +44,10 @@
       "types": "./undo.d.ts",
       "default": "./undo.js"
     },
+    "./branch": {
+      "types": "./branch.d.ts",
+      "default": "./branch.js"
+    },
     "./package.json": "./package.json"
   },
   "directories": {
@@ -103,6 +107,7 @@
     "rich-text",
     "fractional-index",
     "undo",
+    "branches",
     "schema",
     "migrations",
     "standard-schema",
@@ -167,6 +172,8 @@
     "order.d.ts",
     "undo.js",
     "undo.d.ts",
+    "branch.js",
+    "branch.d.ts",
     "src/",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",

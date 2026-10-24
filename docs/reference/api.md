@@ -225,6 +225,7 @@ value is data or configuration. `HookError` and `ValidationError` are
 | `INVALID_VERSION` | `get(id, { at })` with an `at` of the wrong shape, or an event id this log has not reached (a `TypeError`) | — |
 | `TAG_EXISTS` | `tag()` of a name in use | `tag` |
 | `TAG_NOT_FOUND` | `untag()`, `at()`, `get(id, { at: { tag } })` of a tag this node has not | `tag` |
+| `BRANCH_EXISTS` | `branch()` (`@alexify/syncom/branch`) at a path that holds a `branch.json` already | `path` |
 | `ENCRYPTED` | `inc()`, `add()`, `remove()`, `splice()` or `push()` on an encrypted record; `{ encrypted: true }` on a replicated one | — |
 | `INTEGRITY` | a read (`get()`, `has()`, a cursor) of a record whose file fails its chain block check, under `integrity: 'verify'`, or cannot be parsed at all (a file torn by a crash; `repair(id)` rebuilds it) | `id`, `cause` (the parse error) |
 | `CORRUPT` | `open()` when `node.json`, `schema.json`, `tags.json` or `.blockchain.json` cannot be read | `cause` |
@@ -464,6 +465,23 @@ vocabulary, Myers and Emitter are the core's.
 | `mark()` | Closes the current step: the next commit starts a new one |
 | `clear()`, `stop()` | Drops the stacks; `stop()` also stops listening and lets the log compact |
 | `on('push' \| 'pop' \| 'change', fn)` | `push` `({ direction: 'undo', records })` a step grew; `pop` `({ direction, applied, skipped })` a step was undone or redone |
+
+## Branch (subpath)
+
+```js
+import { branch, merge, branchInfo, drop } from '@alexify/syncom/branch';
+```
+
+A storage forked from another and merged back — see
+[Branches](../guide/versions#branches). Off the main entry; opens the branch
+through the parent's own constructor, so it bundles no engine.
+
+| Function | Returns | Notes |
+| --- | --- | --- |
+| `branch(parent, { path, from?: { tag }, ...options })` | `Promise<Storage>` | A storage at `path` — a new identity — standing at the parent's state, or at the tag; opened with `options` (`sync` gets `retention: { ops: 0 }` and `autoStart: false`); writes `branch.json`; rejects with `BRANCH_EXISTS` |
+| `merge(source, { into })` | `Promise<{ ops, pages, joined }>` | Hands `into` the ops it lacks through `applyRemote`, in pages; `joined: true` when the source's log no longer held them and its state was joined instead |
+| `branchInfo(storage)` | `Promise<BranchInfo \| null>` | `{ parent, forkedAt: { eventId, vector, ts, tag }, createdAt }` from the directory's `branch.json`, or `null` |
+| `drop(storage)` | `Promise<void>` | Closes the branch and removes its files (the directories stay) |
 
 ## Search (subpath)
 

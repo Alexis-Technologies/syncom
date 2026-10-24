@@ -42,6 +42,7 @@ const keywords = [
   'rich-text',
   'fractional-index',
   'undo',
+  'branches',
   'schema',
   'migrations',
   'standard-schema',
