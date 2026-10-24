@@ -95,10 +95,10 @@ and `changes` keep their own. A refused push reaches the dialer as its
 behind. What the hub's vector still lacks is pushed at the next sign of
 life on the link (a page from the hub, an op to relay) or on `sync()` —
 backed off after a recovery that failed. A push refused during the
-handshake also leaves the `changes` subscription unopened until the next
-handshake — a reconnect, or `enableNode(url, false)` and `true` — which
-pushes what the hub lacks and subscribes ([Hosting](./sync#hosting)). The
-wrpc integration test runs exactly this recipe, down to that second path.
+handshake does not hold the `changes` subscription back: it opens anyway,
+and the rest goes at the next push ([Hosting](./sync#hosting)). The wrpc
+integration test runs exactly this recipe: a handshake push refused, the
+feed open, the rest sent by a `sync()` once the window passed.
 
 Retention bounds the log: `sync.retention.ops` / `.days` size it for the
 longest outage a client may have — below the floor a client bootstraps,

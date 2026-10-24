@@ -204,15 +204,14 @@ test('syncom over wrpc', { skip: wrpc ? false : '@alexify/wrpc unavailable' }, a
     assert.strictEqual((await hub.list()).length, 5);
     assert.deepStrictEqual(await hub.get(ids[4]), { i: 4 });
     assert.strictEqual(await hub.get(ids[5]), null);
-    assert.strictEqual(c.sync.peers()[0].subscribed, false, 'the handshake stopped at the push');
-    // The window passes; the next handshake pushes what the hub's vector says
-    // it lacks — two pages, not seven — and the subscription opens.
+    // The push stopped; the feed did not wait for it.
+    await waitUntil(() => c.sync.peers()[0].subscribed, { timeout: 5000 });
+    // The window passes; the next push — a sync(), a relay, a page that comes
+    // in — sends what the hub's vector says it lacks: two pages, not seven.
     await new Promise((resolve) => setTimeout(resolve, 600));
-    await c.sync.enableNode(url, false);
-    await c.sync.enableNode(url, true);
+    await c.sync.sync(url);
     await settle([hub, c], { timeout: 10_000 });
     assert.strictEqual((await hub.list()).length, 7);
-    assert.strictEqual(c.sync.peers()[0].subscribed, true);
     assert.strictEqual(errors.length, 1, 'the resend fit the window');
   });
 });

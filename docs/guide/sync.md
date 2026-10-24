@@ -621,11 +621,13 @@ not a hang-up: the dialer reports it through its `error` event
 (`peers()[i].behind`); what the host still lacks is pushed from the vector at
 the next sign of life on the link — a page received from the host, an op to
 relay — or by `sync()`, backed off (1 s, doubling to a minute) after a
-recovery that failed. A push refused during the handshake stops the
-handshake there: the `changes` subscription is not opened, so nothing comes
-from the host — the recovery still catches the host up — until the next
-handshake, when the link reconnects or after `enableNode(url, false)` and
-`true`. A dialer whose `pageSize` is above the host's `opsPerPush` will never
+recovery that failed. A push refused during the handshake does not hold
+the inbound half back: the `changes` subscription opens anyway (but for a
+rewound node, which bootstraps first at its next handshake), and its pages
+are the sign of life the recovery pushes at. A dial that failed — the
+`connect(node)` factory threw or returned no link — leaves the node in
+`peers()` with its `lastError`, and the next `sync()` dials it again. A
+dialer whose `pageSize` is above the host's `opsPerPush` will never
 get a page through — keep the two in step. The `syncom.ops.limited` metric
 counts refusals by reason (`ops`, `bytes`, `rate`). The answer to a push
 carries the vector keys the page touched, which the dialer merges into what

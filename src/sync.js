@@ -279,6 +279,12 @@ class SyncManager extends Emitter {
 
   /** Pushes whatever the connected peers lack right now; resolves when done. */
   async sync(url) {
+    // An enabled node whose dial failed has no peer: it is dialled again.
+    if (this.#started) {
+      for (const node of this.#nodes.values()) {
+        if (node.enabled && (url === undefined || node.url === url)) this.#connect(node);
+      }
+    }
     const peers = url ? [this.#peers.get(url)].filter(Boolean) : Array.from(this.#peers.values());
     const results = [];
     for (const peer of peers) {
@@ -319,7 +325,7 @@ class SyncManager extends Emitter {
   }
 
   #connect(node) {
-    if (this.#peers.has(node.url)) return;
+    if (this.#peers.has(node.url) && !this.#peers.get(node.url).failed) return;
     const peer = {
       node,
       // What the application sees as `via` on a change, an apply, a hook:
@@ -354,6 +360,8 @@ class SyncManager extends Emitter {
       feed: 0,
       failures: 0,
       stuck: false,
+      // The dial itself failed — no link: the next sync() dials again.
+      failed: false,
     };
     this.#peers.set(node.url, peer);
     Promise.resolve()
@@ -394,7 +402,12 @@ class SyncManager extends Emitter {
         notify(this, this.#storage.logger, 'connect', { url: node.url });
         return this.#handshake(peer, { resubscribe: true });
       })
-      .catch((error) => this.#fail(peer, error));
+      .catch((error) => {
+        // No link came of it: peers() still shows the node and its error,
+        // and the next sync() dials it again.
+        if (peer.link === null) peer.failed = true;
+        this.#fail(peer, error);
+      });
   }
 
   #disconnect(url) {
@@ -487,8 +500,12 @@ class SyncManager extends Emitter {
       await this.#push(peer, 'handshake');
       peer.behind = false;
     } catch (error) {
-      // Reported by the caller; what the host lacks waits for #recover.
+      // Reported by the caller; what the host lacks waits for #recover. The
+      // inbound half does not wait on it: the feed opens (but for a rewound
+      // node, which bootstraps first), and its pages are the sign of life
+      // the recovery pushes at.
       this.#fallBehind(peer, null);
+      if (resubscribe && !rewound && !peer.subscription && !peer.closed) this.#subscribe(peer);
       throw error;
     }
     // The state the lost ops made is in the host's: joined back, and the

@@ -609,6 +609,15 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **A refused handshake push no longer closes the inbound half, and a failed
+  dial is retried.** A push the host refused during the handshake (a rate
+  limit, a page over `opsPerPush`) stopped the handshake before the
+  `changes` subscription: nothing came from the host until a reconnect or
+  `enableNode(url, false)` and `true`, and with no pages there was no sign of
+  life to push the rest at. The subscription opens anyway now. And a
+  `connect(node)` that threw left the node dead until `enableNode()` or
+  `removeNode()`: it stays in `peers()` with its error, and the next
+  `sync()` dials it again — no timer, as before.
 - **The types say what the code does.** `browser.d.ts` re-exports every type
   `index.d.ts` does — the CRDT branch's (`Patch`, `Version`, `Tag`,
   `TextSpan`, the payloads…) never reached the browser condition — and a
