@@ -90,6 +90,19 @@ There is no released version section until then; everything below lands in it.
   `mergeSnapshot()`. Tags do not replicate. New codes `TAG_EXISTS` and
   `TAG_NOT_FOUND`; `tags.json` and `tags/` on disk. Browser budget
   56.5 → 58 KB.
+- **Diff, restore, patches, the commit event.** `diff(id, from, to)` is the
+  list of patches — plain JSON in the terms of the write API: `put`,
+  `write`, `inc`, `add`, `remove` (as observed, or exactly the `removals`
+  named), `splice`, `treeMove`, `treeRemove`, `delete`, `purge` — that
+  turns the record at one version into the record at another, per field by
+  kind, with a `write` plus the other kinds made again whole when a
+  register is gone or a field changed kind; `applyPatches(id, patches)`
+  realizes a list in one turn of the mutation queue; `restore(id, at)` leads
+  back with new ops, a version of its own that merges like any write. The
+  storage raises `commit` for every op of its own once durable — the op,
+  its seq, the source, the record before and after, the kinds — built only
+  while something listens: what an undo stack keeps. A text's marks are not
+  diffed. Browser budget 58 → 60.5 KB.
 - **The log knows what it dropped.** `storage.log.droppedTs` is the newest
   stamp among the ops compaction dropped, or an open could not read — `0`
   while nothing ever was — persisted in `index.json`; a record's retained

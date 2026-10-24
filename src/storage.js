@@ -25,6 +25,7 @@ const { Cursor } = require('./query.js');
 const { TRASH, isNodeId } = require('./tree.js');
 const { appliedHere, parseVersion, within, exactStart, fold, gone } = require('./history.js');
 const { Tags } = require('./tags.js');
+const { diffEntries, realize } = require('./patch.js');
 const { Clock } = require('./vector.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
 const { normalizeSchema, createLens, project } = require('./schema.js');
@@ -1090,6 +1091,73 @@ class Storage extends Emitter {
       const last = steps.length > 0 ? steps[steps.length - 1].entry : null;
       return last !== null && isAlive(last) ? asJson(await this.#view(id, last)) : null;
     }
+  }
+
+  // The entry of `id` at a version — the present when `at` is undefined,
+  // a tag's copy, or the fold of the log — or null when it was not there.
+  async #entryOf(id, at) {
+    if (at === undefined) return this.#entries.load(id);
+    const version = parseVersion(at);
+    if (version.kind === 'tag') return this.#entryAt(version.name, id);
+    const past = await this.#past(id, version);
+    if (past === null) return null;
+    const steps = fold(past.entries, past.start);
+    return steps.length > 0 ? steps[steps.length - 1].entry : null;
+  }
+
+  /**
+   * The patches that turn record `id` as it was at `from` into how it is at
+   * `to` (the present when omitted): per field by kind — a register's new
+   * value, a counter's delta, a set's added and removed elements, a text's
+   * or a list's splices, a tree's moves — and a whole-record `write` plus
+   * the other kinds made again when a register is gone or a field changed
+   * kind. In the terms the application writes (through the lens); a text's
+   * marks are not diffed. Raw: no read hooks. Rejects as `get(id, { at })`
+   * would for either version; `ENCRYPTED` for an encrypted record.
+   */
+  async diff(id, from, to) {
+    if (!isRecordId(id)) throw invalidId(id);
+    const [was, now] = await Promise.all([this.#entryOf(id, from), this.#entryOf(id, to)]);
+    if (was?.encrypted || now?.encrypted) throw new SyncomError('ENCRYPTED', `Record ${id} is encrypted here`);
+    const views = new Map();
+    for (const entry of [was, now]) if (entry !== null) views.set(entry, await this.#view(id, entry));
+    return asJson(diffEntries(was, now, (entry) => views.get(entry)));
+  }
+
+  /**
+   * Realizes `patches` on record `id` as ops of this node's own, in one turn
+   * of the mutation queue — `put` a `set`, `write`, `inc`, `add`, `remove`
+   * (`elements` as observed, or exactly the `removals` named), `splice`,
+   * `treeMove`/`treeRemove`, `delete`, `purge`. `source` rides on the
+   * `commit` events the ops raise, so a listener can tell its own. Resolves
+   * to how many ops it took; a patch of the wrong shape is a TypeError and
+   * nothing is written.
+   */
+  async applyPatches(id, patches, { actor, source = null } = {}) {
+    if (!isRecordId(id)) throw invalidId(id);
+    if (!Array.isArray(patches)) throw new TypeError('applyPatches() takes an array of patches');
+    const ops = patches.map(realize);
+    return this.#run(async () => {
+      let count = 0;
+      for (const [type, payload] of ops) {
+        const op = await commit(this.#core, type, id, payload, { actor, source });
+        if (op === null) continue;
+        count++;
+        if (type === 'purge') await this.#core.scrub(id);
+      }
+      if (ops.some(([type]) => type === 'delete' || type === 'purge')) this.#records.delete(id);
+      return count;
+    });
+  }
+
+  /**
+   * Makes record `id` read as it did at `at` — `diff(id, undefined, at)`
+   * applied: new ops that lead back, so the step is a version of its own
+   * and merges like any write. Resolves to how many ops it took.
+   */
+  async restore(id, at, { actor, source = null } = {}) {
+    if (at === undefined) throw new TypeError('restore() takes a version');
+    return this.applyPatches(id, await this.diff(id, undefined, at), { actor, source });
   }
 
   /**

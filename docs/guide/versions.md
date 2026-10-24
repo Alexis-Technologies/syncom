@@ -163,6 +163,49 @@ record-id form. A directory a crash left under `tags/` without its line in
 is taken again; an unreadable `tags.json` refuses the open (`CORRUPT`), and a
 tag whose catalog file is gone is dropped at open with a warning.
 
+## Diff and restore
+
+`diff(id, from, to)` is the list of **patches** that turn the record as it
+was at `from` into how it is at `to` (the present when `to` is left out),
+and `restore(id, at)` applies the list the other way round — new ops that
+lead back, so the step is a version of its own and merges like any write:
+
+```js
+await storage.diff(id, { tag: 'v1' });
+// [{ action: 'put', field: 'title', value: 'Final' },
+//  { action: 'inc', field: 'views', value: 1 }]
+await storage.applyPatches(id, [{ action: 'inc', field: 'views', value: -1 }]); // one op
+await storage.restore(id, { tag: 'v1' });     // one op — a write, since the counter has to go
+```
+
+A patch is plain JSON in the terms of the write API, one per field by its
+kind: `put` (a register's new value — a `set`), `inc` (a counter's delta),
+`add` and `remove` (a set's elements — `remove` with `elements` takes the
+adds this node observed, with `removals` exactly the tags named, the way an
+undo revokes its own add and leaves a concurrent one), `splice` (a text's
+or a list's edits, by Myers), `treeMove` and `treeRemove`, `delete`,
+`purge`. No op removes one field, so a register that is gone, or a field
+that changed kind, makes the diff a `write` of the registers followed by
+the other kinds made again whole. A text's marks are not diffed. The diff
+reads both versions through the schema lens, raw, without the read hooks.
+`applyPatches(id, patches, { actor, source })` realizes a list in one turn
+of the mutation queue and resolves to how many ops it took; a patch of the
+wrong shape is a `TypeError` and nothing is written.
+
+## The commit event
+
+```js
+storage.on('commit', ({ op, seq, source, before, after, kinds }) => { … });
+```
+
+Every op this node makes raises `commit` once it is durable: the op, its
+seq in the log, the `source` (the `Record` whose `save()` it was, or what
+`applyPatches()` was given), the record `before` and `after` as copies, and
+every field's `kinds` (`register`, `counter`, `set`, `list`, `text`, `tree`
+— of the fields there before and after). It is what an undo stack keeps;
+the copies are made only while something listens. A peer's op raises
+`change`, not `commit`.
+
 ## Costs
 
 A version is a fold of the record's retained entries: as many `applyOp`

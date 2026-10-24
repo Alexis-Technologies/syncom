@@ -39,6 +39,7 @@ src/tree.js               the tree kind: per node its stamped moves, the fold in
 src/order.js              fractional indexes over a 62-letter alphabet (Loro's rule, MIT) — no requires; the core uses it for a tree's places
 src/history.js            the past out of the log: a version (event id / stamp / vector) as a cut, the exact start above droppedTs, the fold
 src/tags.js               Tags — named versions kept locally: tags.json, a catalog per tag, copy-on-write record files in the newest tag
+src/patch.js              patches — the one vocabulary of diff()/applyPatches()/restore(): diffEntries by kind, realize() to an op
 src/errors.js             SyncomError (an operational failure, with a code) and typed() — no requires
 src/symbols.js            COMMIT / REFRESH / SOURCE — the module-private seams between Storage and what it hands out — no requires
 src/options.js            normalizeStorageOptions — open()'s plain options checked and defaulted (lock, cache, chain, skew…)
@@ -379,6 +380,20 @@ docs/                     VitePress site
   throws — nothing to watch), and pages through `snapshotPage` with a core
   of the tag's catalog, entries and position — the same `pageOf`, never a
   second page writer.
+- **A patch is in the write API's terms, and the only way back is new ops.**
+  `src/patch.js`: `diffEntries(from, to, view)` compares two entries per
+  field by kind (register put, counter delta, set add/remove, Myers splices
+  for a text and — interned to one char per element — a list, tree moves
+  parent-wise then removals) and falls back to `write` + recreate when a
+  register is gone or a kind changed (no op removes one field);
+  `realize(patch)` maps to `[type, payload]` for `commit()`. `applyPatches`
+  runs them in ONE `#run` turn; `restore(id, at)` = `applyPatches(diff(id,
+  undefined, at))` — never rewrite the log or the file. A `remove` patch
+  with `removals` goes out as given (`prepareOp` takes `payload.removals`
+  over `observedTags`): an undo revokes its own add alone. The `commit`
+  event (`announce` in src/commit.js) is LOCAL ops only, built only when
+  `listenerCount('commit') > 0`, with `before`/`after` as copies and the
+  kinds of both sides; a peer's op raises `change`, never `commit`.
 - **`repair(id)` replays the log, it does not guess.** `Storage.#repair`
   starts at the first whole-record op the log retains for the id (`WHOLE`:
   `write`/`merge`/`delete`, or a `purge` even scrubbed), folds the rest with

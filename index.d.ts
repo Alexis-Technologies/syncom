@@ -888,6 +888,34 @@ export interface HistoryResult {
   exact: boolean;
 }
 
+/**
+ * What turns one state of a record into another, in the terms of the write
+ * API — what `diff()` hands out and `applyPatches()` realizes as ops.
+ */
+export type Patch =
+  | { action: 'put'; field: string; value: unknown }
+  | { action: 'write'; data: Record<string, unknown> }
+  | { action: 'inc'; field: string; value: number }
+  | { action: 'add'; field: string; elements: readonly unknown[] }
+  | { action: 'remove'; field: string; elements: readonly unknown[] }
+  | { action: 'remove'; field: string; removals: readonly SetRemoval[] }
+  | { action: 'splice'; field: string; index: number; count?: number; content?: string | readonly unknown[] }
+  | { action: 'treeMove'; field: string; node: string; parent?: string | null; after?: string; before?: string }
+  | { action: 'treeRemove'; field: string; node: string }
+  | { action: 'delete' }
+  | { action: 'purge' };
+
+/** What a local commit leaves for a listener: the op, its log seq, the record before and after, every field's kind. */
+export interface CommitEvent {
+  op: SyncOp;
+  seq: number;
+  /** The Record whose `save()` this was, or the `source` `applyPatches()` was given; `null` otherwise. */
+  source: unknown;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  kinds: { [field: string]: FieldKind };
+}
+
 /** A named version of the whole storage, kept on this node: the log position it was taken at. */
 export interface Tag {
   name: string;
@@ -1368,6 +1396,8 @@ export interface ApplyRemoteResult {
 export interface StorageEvents {
   /** Every op applied here — local (`via` null) or from a peer (`via` names it). */
   change: (op: SyncOp, via: PeerRef | null) => void;
+  /** A local op is durable: what it changed, as copies — built only when someone listens. */
+  commit: (event: CommitEvent) => void;
   /** The log sealed a segment (and maybe dropped old ones): `floor` is where a resume is still possible. */
   log: (event: { kind: 'roll'; sealed: number; dropped: number; floor: number; segments: number }) => void;
   /**
@@ -1484,6 +1514,16 @@ export interface Storage {
   tags(): Tag[];
   /** The storage as it was at tag `name`; throws `TAG_NOT_FOUND`. */
   at(name: string): TagView;
+  /**
+   * The patches that turn the record as it was at `from` into how it is at
+   * `to` (the present when omitted) — raw, no read hooks; a text's marks are
+   * not diffed. Rejects as `get(id, { at })` would for either version.
+   */
+  diff(id: string, from?: Version, to?: Version): Promise<Patch[]>;
+  /** Realizes patches as ops of this node's own, in one turn of the mutation queue; resolves to how many. */
+  applyPatches(id: string, patches: readonly Patch[], options?: WriteOptions & { source?: unknown }): Promise<number>;
+  /** Makes the record read as it did at `at`, with new ops that lead back; resolves to how many. */
+  restore(id: string, at: Version, options?: WriteOptions & { source?: unknown }): Promise<number>;
   set(id: string, data: unknown, options?: StorageDataOptions): Promise<void>;
   delete(id: string, options?: WriteOptions): Promise<void>;
   /** Forgets the record for good: a `purge` op no later write revives, and a scrub of its entries from the log — here and on every peer it reaches. */

@@ -13,6 +13,7 @@ const { applyOp, isAlive, latestClock, observedTags, isCounter, isSet, isTree } 
 const S = require('./sequence.js');
 const T = require('./tree.js');
 const { between } = require('./order.js');
+const { kindsOf } = require('./patch.js');
 const { opKey } = require('./vector.js');
 const { notify } = require('./hooks.js');
 const { ValidationError, project, unproject, foldSet } = require('./schema.js');
@@ -287,8 +288,9 @@ const prepareOp = (core, type, id, payload, current, who, from) => {
   if (payload.key !== undefined) op.key = payload.key;
   if (payload.value !== undefined) op.value = payload.value;
   // A remove names the tags this node observed, read here, inside the
-  // queue — read outside it, a concurrent apply could add between the two.
-  if (type === 'remove') op.value = observedTags(current?.meta ?? null, payload.key, payload.value);
+  // queue — read outside it, a concurrent apply could add between the two —
+  // or exactly the tags a patch names (an undo revokes its own add alone).
+  if (type === 'remove') op.value = payload.removals ?? observedTags(current?.meta ?? null, payload.key, payload.value);
   if (type === 'splice') op.value = resolveSplice(core, id, payload, current);
   if (type === 'assign') op.value = resolveAssign(core, id, payload, current);
   if (type === 'move') op.value = resolveMove(core, id, payload, current);
@@ -364,22 +366,31 @@ const persistLocal = async (core, op, entry) => {
   } catch (error) {
     await core.unpersisted(new Map([[id, entry]]), error);
     core.flush();
-    return;
+    return position;
   }
   core.log.applied(position);
   core.flush();
+  return position;
 };
 
 // afterWrite sees a durable op; whatever it does, the record views and the
 // `change` listeners (the relay among them) hear about the op. `via` is null
 // for a local write; a merge made from a peer's snapshot names that peer, so
 // the relay does not hand its own state straight back to it.
-const announce = async (core, op, entry, delta, ctx, source, via) => {
+const announce = async (core, op, entry, delta, ctx, source, via, committed = null) => {
   const alive = isAlive(entry);
   try {
     await core.hook('afterWrite', ctx, op);
   } finally {
     core.refresh(op.id, alive ? entry.data : null, delta, source);
+    // What an undo manager keeps of a local commit: the record before and
+    // after, as copies, and every field's kind — built only for a listener.
+    if (committed !== null && core.storage.listenerCount('commit') > 0) {
+      const { seq, before, previous } = committed;
+      const kinds = { ...kindsOf(previous), ...kindsOf(entry) };
+      const after = alive ? asJson(entry.data) : null;
+      notify(core.storage, core.logger, 'commit', { op, seq, source, before: asJson(before), after, kinds });
+    }
     notify(core.storage, core.logger, 'change', op, via);
   }
 };
@@ -427,8 +438,9 @@ const commitLocal = async (core, type, id, payload, options) => {
   // The validator may have filled the field the scope reads (a default):
   // the stream is the one of the record as it is written.
   if (type === 'write' || type === 'set') assignScope(core, op, applied.entry.data);
-  await persistLocal(core, op, applied.entry);
-  await announce(core, op, applied.entry, applied.delta, ctx, source, via);
+  const seq = await persistLocal(core, op, applied.entry);
+  const committed = { seq, before: visible, previous: current && !current.encrypted ? current : null };
+  await announce(core, op, applied.entry, applied.delta, ctx, source, via, committed);
   return op;
 };
 
