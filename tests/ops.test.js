@@ -1101,6 +1101,27 @@ test('ops: a counter stays a number every node reads alike', async (t) => {
   });
 });
 
+test('ops: a payload the engine does not admit is reported, never silent', async (t) => {
+  await t.test('a set, a write, an inc, an add or a remove of the wrong shape is malformed', () => {
+    const base = applyOp(null, op('set', 1, 'A', { data: { n: 1 } })).entry;
+    const cases = [
+      op('set', 2, 'B', { data: 'x' }),
+      op('write', 2, 'B', { data: [1] }),
+      op('inc', 2, 'B', { key: 'hits', value: 'x' }),
+      op('inc', 2, 'B', { key: 'hits', value: Infinity }),
+      op('inc', 2, 'B', { key: 7, value: 1 }),
+      op('add', 2, 'B', { key: 'tags', value: 'x' }),
+      op('remove', 2, 'B', { key: 'tags' }),
+    ];
+    for (const item of cases) {
+      const { changed, rejected, entry } = applyOp(base, item);
+      const field = typeof item.key === 'string' ? item.key : null;
+      assert.deepStrictEqual([changed, rejected], [false, [{ field, reason: 'malformed' }]], JSON.stringify(item));
+      assert.deepStrictEqual(entry.data, { n: 1 });
+    }
+  });
+});
+
 test('ops: the bound on pending work is the node’s', async (t) => {
   await t.test('a merge takes a block by the node’s bound, as an op would be', () => {
     // A block holding three pending cuts of runs not here.

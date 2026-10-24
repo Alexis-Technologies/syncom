@@ -609,6 +609,11 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **A malformed register, counter or set payload is reported.** A peer's
+  `write` or `set` without a plain object, `inc` of no finite number, or
+  `add`/`remove` without an array applied as nothing and said nothing — the
+  sequence and tree ops already reported theirs. They are `OP_REFUSED` with
+  `reason: 'malformed'` now, counted, still logged and relayed as no-ops.
 - **A live `Record` reads as `get()` after a change too.** It loaded through
   the lens and the read hooks, but every change it followed — a write here,
   an op from a peer — handed it the record as stored: a redacted field showed

@@ -684,15 +684,15 @@ the engine's own tests run on.
   `malformed`: counted, reported (`error` with `code: 'SKEW'` for the latter),
   neither logged nor relayed, and never observed into this node's clock — a
   gap in its stream, as an op of a type this version does not know is.
-- **A payload is checked where it lands.** A list, text or tree op whose
-  payload the engine does not admit — a `content` that names no kind, an
-  anchor or a cut naming an element no older than the op, a run extended by
-  another origin than the one that made it, a place among siblings that is
-  no fractional index — changes nothing and is reported: `OP_REFUSED`, the
-  field's `reason` `'malformed'`, counted in `syncom.ops.rejected`. The op is
-  well formed, so it is still logged and relayed, as a no-op everywhere. (A
-  `write`, `set`, `inc`, `add` or `remove` whose payload has the wrong shape
-  applies as nothing, unreported.)
+- **A payload is checked where it lands.** An op whose payload the engine
+  does not admit — a `write` or a `set` without a plain object, an `inc` of no
+  finite number, an `add` or a `remove` without an array, a `content` that
+  names no kind, an anchor or a cut naming an element no older than the op, a
+  run extended by another origin than the one that made it, a place among
+  siblings that is no fractional index — changes nothing and is reported:
+  `OP_REFUSED`, the field's `reason` `'malformed'`, counted in
+  `syncom.ops.rejected`. The op is well formed, so it is still logged and
+  relayed, as a no-op everywhere.
 - **Bounded, and a refusal is final.** What a peer can make a node hold is
   bounded per field: a run of a list or a text at most 1 048 576 slots and
   the field 4 194 304, tombstones included; its pending work — runs waiting

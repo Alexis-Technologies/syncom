@@ -549,7 +549,9 @@ const removeElements = (meta, field, op) => {
 const applySet = (entry, op, stamp, delta, rejected) => {
   const { meta } = entry;
   const { key: field } = op;
-  if (typeof field !== 'string' || !isKey(field) || !isKey(op.origin) || !Array.isArray(op.value)) return;
+  if (typeof field !== 'string' || !isKey(field) || !isKey(op.origin) || !Array.isArray(op.value)) {
+    return void malformed(field, rejected);
+  }
   const holder = yieldTo(entry, field, 'set', stamp, delta);
   if (holder !== null) {
     rejected.push({ field, reason: holder });
@@ -719,12 +721,14 @@ const applyOp = (previous, op, limits = null) => {
   }
 
   if (op.type === 'set') {
-    if (isPlainObject(op.data)) {
+    if (!isPlainObject(op.data)) malformed(null, rejected);
+    else {
       if (!previous && Number.isInteger(op.v)) meta.v = op.v;
       applyFields(entry, op.data, stamp, delta, rejected);
     }
   } else if (op.type === 'write') {
-    if (isPlainObject(op.data) && compareClock(stamp, meta.base) > 0) {
+    if (!isPlainObject(op.data)) malformed(null, rejected);
+    else if (compareClock(stamp, meta.base) > 0) {
       meta.base = stamp;
       // A write above the tombstone is a revival; dropping the stale stamp
       // keeps the metadata identical whichever order the two arrived in.
@@ -765,7 +769,9 @@ const applyOp = (previous, op, limits = null) => {
     return { entry, changed: false, delta, rejected };
   } else if (op.type === 'inc') {
     const { key: field, value } = op;
-    if (typeof field === 'string' && isKey(field) && isKey(op.origin) && Number.isFinite(value)) {
+    if (typeof field !== 'string' || !isKey(field) || !isKey(op.origin) || !Number.isFinite(value)) {
+      malformed(field, rejected);
+    } else {
       const holder = yieldTo(entry, field, 'counter', stamp, delta);
       if (holder !== null) {
         rejected.push({ field, reason: holder });
