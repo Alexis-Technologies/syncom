@@ -226,7 +226,7 @@ const createTelemetry = (telemetry) => {
       opsRejected = meter.createCounter('syncom.ops.rejected', {
         unit: '{op}',
         description:
-          'Peer ops refused, by reason: a field of another kind, invalid, out of scope, unreadable, forged, unsigned',
+          'Peer ops refused, by reason: a field of another kind, work past a bound, a payload the engine does not admit, invalid, out of scope, unreadable, forged, unsigned',
       });
       conflicts = meter.createCounter('syncom.conflicts', {
         unit: '{conflict}',

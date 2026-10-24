@@ -14,6 +14,193 @@ There is no released version section until then; everything below lands in it.
 
 ### Added
 
+- **Lists and text.** A field can be a list — an array edited by position —
+  or a text — a string typed into: `splice(id, key, index, count, content)`
+  and `push(id, key, content)`, on the storage and on a live Record. Two
+  nodes inserting at one spot both keep theirs, each writer's run whole
+  (Fugue, the rule Loro and list-positions use), a deleted element keeps its
+  place for the anchors into it, and a reset drops what is below it. A
+  `splice` op carries the cut ranges and either the anchor of a new run or
+  the writer's own run to extend — a keystroke at the end of one's run adds
+  no key to the record. The index is resolved inside the mutation queue;
+  past the length is `OUT_OF_RANGE`. Mixing kinds is refused locally as for
+  sets (`FIELD_KIND` with `kind: 'list' | 'text'`); between peers the kinds'
+  precedence decides — register, counter, set, list, text, tree (see Fixed).
+  Lists and texts cross a
+  schema version through `migrate()`, are indexed and queried as the arrays
+  and strings they read as, and converge over a mesh in the seeded fuzz.
+  A list is movable: `setAt(id, key, index, value)` and `move(id, key,
+  from, to)` are a value and a position register per element, so two nodes
+  moving one element concurrently leave it once, at the newer move's place,
+  and a move concurrent with a removal brings the element back.
+  `updateText(id, key, text)` diffs a text field against a whole new string
+  inside the mutation queue (Myers, UTF-16 units) and sends one splice per
+  hunk — what an editor hands over becomes the edits that merge. A text
+  carries rich text: `mark(id, key, start, end, name, value, { expand, many })`,
+  `unmark(id, key, start, end, name)`, `unmarkById(id, key, markId)` and
+  `spans()` — a mark is two anchors, an element and a side
+  each, so the same tree rule that places typed text decides whether it takes
+  the style (Peritext, Loro); per name the newest mark wins, and a `many`
+  mark stacks with every other of its name (comments), removable only by id.
+  `cursor(id, key, index, { side })` names a place that survives edits around
+  it and `index(id, key, cursor)` says where it is now. `@alexify/syncom/order`
+  (1.0 KB, off the main entry) mints fractional indexes — strings that
+  sort with `<`, with room between any two — for ordering records by a
+  position field. Browser budget 42 → 52 KB.
+- **Trees.** A field can be a tree: `treeMove(id, key, node, parent, { after,
+  before })` puts a node under a parent at a place among its siblings and
+  `treeRemove(id, key, node)` takes it out with everything under it, on the
+  storage and on a live Record; the field reads as `[{ id, children }]`. A
+  `tree` op is one move — the node, its parent (`null` a root, `'$trash'`
+  removed) and a fractional index between its neighbours — and the record
+  keeps every move of every node; the tree is their fold in stamp order with
+  a move that would put a node under itself skipped (Kleppmann et al. 2021,
+  the rule Loro's movable tree follows), so two nodes moving concurrently so
+  that each would hang under the other agree that the older move stands. A
+  parent under the node itself rejects with `CYCLE` (new code), a sibling not
+  under the parent with `NOT_FOUND`, both decided inside the mutation queue;
+  a move to where the node is makes no op. `migrate()` carries a tree across
+  a schema version and counts `trees`. Browser budget 52 → 55 KB — the move
+  log and the fold, and `@alexify/syncom/order` now in the core for the
+  places.
+- **History and read-at-version.** `history(id, { limit, before })` lists a
+  record's past as this node's log holds it, newest first, a page at a time
+  (`before`, an event id, pages back from it) — one version per op the
+  node applied, with the record as it read after it through the lens and
+  `afterRead` — and `get(id, { at })` reads one back: by event id (what this
+  node held after that log entry), by stamp (every op stamped at or below
+  it, the same on every node) or by `{ vector }` (every op it covers); a
+  collection's `get` takes `at` too. Both are a fold of the retained log
+  (`src/history.js`), exact while nothing was dropped and, after compaction,
+  from a reset stamped above `droppedTs`; `history()` reports `exact` and
+  `complete`, `get()` rejects with `HISTORY_GONE` (`reason: 'compacted' |
+  'scrubbed' | 'merge' | 'epoch'`) or `INVALID_VERSION` (new codes). A
+  purge leaves the ops listed with their content gone; an encrypted record
+  has no past. The read hooks see `at`. New page: Versions and history.
+  Browser budget 55 → 56.5 KB.
+- **Tags.** `tag(name)` — a name of the record-id form — names the storage
+  as it is now and keeps it on this node: the catalog of the moment plus a
+  copy of each record's file
+  taken before its first change after the tag — nothing per record until it
+  changes, one file after, in the newest tag only. `at(name)` reads records
+  as they were (`get`, `has`), `get(id, { at: { tag } })` too; `untag()`
+  moves to the next older tag the copies it needs; `tags()` lists them. A
+  copy carries its chain block and is checked like the file; a copy that
+  cannot be written leaves the record held (`UNPERSISTED`) and the tag
+  reading the file; a purge reaches every tag. A tag is the whole storage:
+  `at(name).list()`, `at(name).collection('Post').select()`/`count()`/`get()`
+  over the tag's own catalog (no `watch()`, no `$text`), and
+  `at(name).snapshot()` pages the storage as it was for another storage's
+  `mergeSnapshot()`. Tags do not replicate. New codes `TAG_EXISTS` and
+  `TAG_NOT_FOUND`; `tags.json` and `tags/` on disk. Browser budget
+  56.5 → 58 KB.
+- **Diff, restore, patches, the commit event.** `diff(id, from, to)` is the
+  list of patches — plain JSON in the terms of the write API: `put`,
+  `write`, `inc`, `add`, `remove` (as observed, or exactly the `removals`
+  named), `splice`, `treeMove`, `treeRemove`, `delete`, `purge` — that
+  turns the record at one version into the record at another, per field by
+  kind, with a `write` plus the other kinds made again whole when a
+  register is gone or a field changed kind; `applyPatches(id, patches)`
+  realizes a list in one turn of the mutation queue — every patch checked as
+  the method of its name checks its arguments (`src/args.js`, a `TypeError`
+  otherwise), every op rehearsed over a scratch record before the first
+  append, so a list lands whole or not at all; `restore(id, at)` leads
+  back with new ops, a version of its own that merges like any write. The
+  storage raises `commit` for every op of its own once durable — the op,
+  its seq, the source, the record before and after, the kinds — built only
+  while something listens: what an undo stack keeps. A text's marks are not
+  diffed. Browser budget 58 → 60.5 KB.
+- **Undo and redo.** `@alexify/syncom/undo` — `createUndo(storage, {
+  mergeInterval, limit, scope, exclude, actor })` — is an undo stack over one
+  node's own writes, fed by the `commit` event: every commit adds the
+  patches that take it back, commits close together make one step, `mark()`
+  closes a step, a new write clears the redo stack. `undo()`/`redo()` apply
+  a step through `applyPatches()` — new ops that merge like any write — and
+  leave a field anyone else changed since alone (`skipped`), a whole-record
+  step with a conflict whole, unless `force`; an undone add revokes its own
+  tag alone. Events `push`, `pop`, `change`; `canUndo`, `canRedo`, `size`,
+  `clear()`, `stop()` (on `close()` too). The manager pins the log from its
+  oldest step. A subpath (6.0 KB alone, budget 6; its patch vocabulary, the
+  argument checks, Myers, Emitter and shape helpers are the core's and dedupe
+  in a bundle).
+- **Branches.** `@alexify/syncom/branch` — `branch(parent, { path, from?:
+  { tag }, ...options })` forks a storage into a new directory under a new
+  identity, standing at the parent's state or at a tag of it (its snapshot
+  pages joined, its vector adopted, `branch.json` written); `merge(source,
+  { into })` hands either side what the other lacks as ops through
+  `applyRemote` — `src/outbound.js`, the selection a push makes, now shared
+  with the sync manager, asked for every stream, a third node's included —
+  or, when one of those streams is out of the source's log, as a join of
+  state (`joined: true`); `branchInfo()`, `drop()`. A branch is a storage
+  like any other; a merge into a parent that dials peers reaches them. New
+  code `BRANCH_EXISTS`: a path that holds a branch, or any files, is never
+  taken over; `drop()` removes a branch alone (a storage without
+  `branch.json` is a `TypeError`), and a fork that fails leaves nothing
+  behind. A subpath that bundles no engine (3.2 KB, budget 3.5).
+- **Faster lists and text.** The index a sequence field is read through
+  (the Fugue walk) is built once per change and kept on the cached entry
+  (`entry.seqIndex`, never persisted): the resolver that places an insert
+  and the fold that reads the field back share it. The build itself parses
+  a run's tuple once — an unchanged run keeps its tuple between blocks —
+  and keeps one per-slot array instead of three per run; a reset prunes
+  through the same parse; a local write observes the record's clock
+  without rebuilding its metadata. Typing into a two-thousand-character
+  text: at the start 174 → 1,100 ops/s, anywhere 320 → 2,000, at the end
+  6,400 → 9,500 (in memory, on one machine); in the cross-library scenarios,
+  whose text grows past ten thousand characters, 155 → 399, 224 → 541 and
+  1,260 → 1,780 — every op still works over every run of the field, and the
+  record file is written whole.
+- **The log knows what it dropped.** `storage.log.droppedTs` is the newest
+  stamp among the ops compaction dropped, or an open could not read — `0`
+  while nothing ever was — persisted in `index.json`; a record's retained
+  entries are its whole past only from a reset stamped above it.
+  `storage.log.pin(keep)` holds the segments a reader of the past needs,
+  like `retain` does for the sync manager, until the returned function is
+  called; `stats().log.droppedTs` reports it.
+- **`compact(id)` and deferred record files.** `compact(id)` rewrites a
+  record as the ops its reading takes today — a `write` of the registers,
+  then one op per field of another kind (a text or a list as one run, a tree
+  as one move per node) — so what lies under it goes by the reset rule here
+  and on every peer and the record reads the same: the answer to a tree's
+  move log and a text's runs growing until a reset. It resolves to how many
+  ops it took, `0` for a record that is not there. `open({ defer: ms })`
+  lets a local write's record file and chain block wait up to `ms`: the log
+  append is durable at once, the cache and the catalog read the held entry,
+  one timer lands every record due, one file each under one block, `tag()` and
+  `close()` flush first, a peer's page or a replay that writes the record
+  settles its slot, and a crash before the flush replays the batch like a
+  failed file write. Off by default; one keystroke into a 10 KB text on
+  `node:fs`, 1,431 → 2,810 ops/s with the chain (on the memory backend the
+  file is not the cost, and nothing changes). `stats()` gains `held` and
+  `deferred`; a push and a branch merge walk the retained log without
+  copying it (`OpLog.scan()`).
+- **A keystroke costs its own run, not the field.** A splice that only
+  appends to the writer's run carries the held index over (`extendIndex`)
+  instead of walking the field again, and the reading with it — applying a
+  character at the end of a thousand-character text runs at 155,000 ops/s
+  in `applyOp`; an insert elsewhere, or under a peer's concurrent run, still
+  walks. `spans()` is one sweep over the walk, O(characters + marks ×
+  active) instead of O(characters × marks). A tree is folded once per block
+  however often it is read (a 20,000-move tree: one fold of about 100 ms,
+  then about 1 ms for a move's checks and the render), a `move()` reads one
+  list value instead of rendering the list, and `history()` runs the lens
+  and `afterRead` for the versions it hands out only. `bench/tree.js`,
+  `bench/tags.js` and `bench/history.js`.
+- **Telemetry for versions.** `tag()`, `untag()`, `history()`,
+  `get(id, { at })` and `applyPatches()` — so `restore()` and `compact()` —
+  are spans: `syncom.tag`, `syncom.untag`, `syncom.history`,
+  `syncom.version`, `syncom.patches` (each op a `syncom.commit` child), none
+  carrying a record id, an origin, a url or a scope. `stats().log.pins` and
+  `stats().tags`. `tests/package/telemetry-events.test.js` fails when a log
+  event, a span or a metric of `src/` has no row in the telemetry guide.
+- **`INVARIANTS.md`.** Every guarantee — `SYNC-n`, `OPS-n`, `LIST-n`,
+  `SEQ-n`, `TREE-n`, `RLE-n`, `BOUND-n`, `LOG-n`, `VER-n`, `TAG-n`,
+  `PATCH-n`, `UNDO-n`, `BRANCH-n` — names the tests that hold it, and
+  `tests/package/invariants.test.js` fails when an id names no test or a
+  named title is gone. The sync-engine suite gains a seeded walk under
+  hazards: a link that drops, comes back and may deliver a page twice, the
+  dialer closed and reopened mid-walk; after it the two nodes converge and
+  every record folds back to its present.
 - **Full-text search.** An entity names its `search: ['title', 'body']`
   fields and `open({ search: createSearch() })` gives the index —
   `@alexify/syncom/search`, a subpath under 1 KB, so a node that never
@@ -64,15 +251,21 @@ There is no released version section until then; everything below lands in it.
 - **Benchmarks against nine libraries and a comparison with eighteen.**
   `pnpm bench:compare` measures syncom against Yjs, Automerge, Loro, TinyBase,
   PouchDB, RxDB, Fireproof, GUN and OrbitDB (insert, update, read, a converging
-  counter, a batch, replicating a store; in memory and on disk; a cold start),
-  each pair in a fresh process and checked before it is timed; the libraries
+  counter, a batch, replicating a store; in memory and on disk; a cold start;
+  typing into a text at its end, its start and anywhere, against the three
+  CRDT libraries), each pair in a fresh process and checked before it is
+  timed; the libraries
   live in `bench/compare`'s own `package.json`, never in syncom's
   devDependencies. `pnpm bench:size` measures browser bundles, `pnpm bench
   --save` records syncom's own benchmarks, `pnpm bench:report` turns all three
   into the charts of the docs and the README. `docs/comparison.json` (rendered
-  by `pnpm docs:comparison`) compares forty features, each cell decided from
-  the published source. New pages: Why syncom?, Compared with alternatives,
-  Benchmarks, Architecture.
+  by `pnpm docs:comparison`) compares forty-eight features, each cell decided
+  from the published source. New pages: Why syncom?, Compared with
+  alternatives, Compared with RxDB (300 rows from its code and docs),
+  Compared with CRDT libraries (Yjs, Automerge and Loro as CRDT libraries
+  only: 141 rows from their repositories, `docs/comparison-crdt.json`, with
+  the size of each whole package from `pnpm bench:size`), Benchmarks,
+  Architecture.
 
 - **`storage.repair(id)`.** A record whose file fails its integrity check
   (`INTEGRITY`) or is torn is rebuilt from this node's log: the retained
@@ -343,6 +536,27 @@ There is no released version section until then; everything below lands in it.
 
 ### Security
 
+- **Lists, texts and trees are bounded against a peer.** A peer's op or
+  block could cost a node more than it says, or split the mesh: a `[3e8]`
+  gap in a snapshot run was expanded element by element; any origin could
+  extend another's run, so the order of arrival decided the text; the
+  snapshot path had no bound on pending work, so one hostile block spent it
+  for every honest op after it; a 4,000-deep tree chain threw in the render
+  on the apply path (`PAGE_FAILED`, then `STUCK`); a forged place among
+  siblings made every local `treeMove()` next to it throw. Now a run holds
+  at most 1,048,576 slots and a field 4,194,304, tombstones included; a run
+  is extended by its own origin alone; pending work per field — a run whose
+  anchor has not arrived, a cut or an extension of a run not here, a
+  register of an element not here, a mark switched off before it arrived —
+  is bounded by `open({ sync: { pendingMax } })` (4,096 by default,
+  `Infinity` to disable), all of it on the op path and in a snapshot block
+  alike (`OP_REFUSED`, reason `bound`, with `detail`, `count` and `max`); a
+  place is a fractional index of at most 1,024 characters, a tree reads 512
+  levels, and `treeMove()` refuses a move past either (`OUT_OF_RANGE`, with
+  `depth` or `reason: 'fi'`); two moves under one stamp tie by node id. A
+  payload the engine does not admit is never silent: a `TypeError` on the
+  local path, `OP_REFUSED` with `reason: 'malformed'` from a peer — the op
+  logged and relayed as a no-op, counted in `syncom.ops.rejected`.
 - **Scopes bound what a peer writes, not only what it declares.** An
   `update()` took the scope of its delta, so with a field-based `sync.scope`
   (`data.$type`, as the docs show) it was minted global and reached every
@@ -395,6 +609,142 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **A refused handshake push no longer closes the inbound half, and a failed
+  dial is retried.** A push the host refused during the handshake (a rate
+  limit, a page over `opsPerPush`) stopped the handshake before the
+  `changes` subscription: nothing came from the host until a reconnect or
+  `enableNode(url, false)` and `true`, and with no pages there was no sign of
+  life to push the rest at. The subscription opens anyway now. And a
+  `connect(node)` that threw left the node dead until `enableNode()` or
+  `removeNode()`: it stays in `peers()` with its error, and the next
+  `sync()` dials it again — no timer, as before.
+- **The types say what the code does.** `browser.d.ts` re-exports every type
+  `index.d.ts` does — the CRDT branch's (`Patch`, `Version`, `Tag`,
+  `TextSpan`, the payloads…) never reached the browser condition — and a
+  consistency test keeps it so. The storage `error` event is a union with
+  `UNPERSISTED` (`ids`, no `op`); `sync` events carry `outOfScope`;
+  `applyOp` takes its `{ pendingMax }`; `OpLog.pins`, `SyncManager.pendingOps()`,
+  `UndoManager.listenerCount()`, the hello's `version` and a write context's
+  `removals`/`own` are declared; `Patch` takes `mark`; and the doc comments of
+  `skipped`, `pageSize`, `branch()`, `branchInfo()` and `drop()` are right.
+- **A malformed register, counter or set payload is reported.** A peer's
+  `write` or `set` without a plain object, `inc` of no finite number, or
+  `add`/`remove` without an array applied as nothing and said nothing — the
+  sequence and tree ops already reported theirs. They are `OP_REFUSED` with
+  `reason: 'malformed'` now, counted, still logged and relayed as no-ops.
+- **A live `Record` reads as `get()` after a change too.** It loaded through
+  the lens and the read hooks, but every change it followed — a write here,
+  an op from a peer — handed it the record as stored: a redacted field showed
+  its raw value after an unrelated `update()`, and a record of an older
+  schema version showed its old field names after an `inc()`. The refresh
+  now reads through the lens and `beforeRead`/`afterRead`; with either in
+  play it runs once the write is done, outside the mutation queue (a read
+  hook may write), in the order of the writes.
+- **A snapshot block is held to the node's `sync.pendingMax`.** The op
+  path took a node's bound, the snapshot path the default 4 096 whatever
+  the option said: a node that raised it still dropped blocks a peer's ops
+  could have built there. `normalizeMeta` and `normalizeSeq` take the bound
+  a `merge` op is applied under.
+- **Small edges.** A listener the `maxListeners` cap refuses is no longer
+  left registered behind the throw. `diff()` of the CRDT deltas takes a
+  `null` side and a non-collection under an array instead of throwing, and
+  no longer reads a string as a set of its characters. `$text` at a tag says
+  that a tag keeps no text index, not that the entity has no search fields.
+  `update()` with an invalid id is `INVALID_ID` like every other writer, and
+  its `NOT_FOUND` (and `swap()`'s) carries the `id`. `applyPatches()` names
+  an unknown action as such. `adopt` walks a peer's vector by its own keys.
+- **A failed undo never inverts part of a record twice.** When a hook or a
+  validator refused a later op of one record's inverse, the earlier ops of
+  it had landed but the record stayed on the undo stack as the step left
+  it, so the retry took them back again (`views` 2 → 1 → 0). The record now
+  waits on the stack from where the landed ops left it — their way back is
+  on the redo stack — and the retry takes back the rest.
+- **A counter stays a number every node reads alike.** One origin's sum had
+  no bound: past `Number.MAX_VALUE` it became `Infinity`, saved as `null`,
+  so a node that reloaded the record counted again from 0 while one holding
+  it in memory kept `Infinity` — a divergence a peer could cause on purpose.
+  Each origin's sum now stays within ±`Number.MAX_SAFE_INTEGER`: an `inc`
+  past it is a bound refusal (`detail: 'counter'`; `FIELD_KIND` locally,
+  `OP_REFUSED` from a peer), the same on every node; a snapshot slot past it
+  is not taken; and the sums add up in origin order, so a counter of
+  fractions no longer reads differently by the order of arrival. A merged
+  record this node did not hold is joined like any other rather than copied,
+  so data its meta does not back — a slot or block refused, a value with no
+  stamp — does not come with it.
+- **`compact()` keeps what a record reads as.** It made a text again from its
+  string and dropped its marks, dropped a counter at `0`, and refused a text
+  or a list longer than one run (`FIELD_KIND`, `detail: 'run'`). The marks
+  in force are laid again now, in stamp order and with the expand rule their
+  anchors had (`marksIn` in src/sequence.js; patches take a `mark` action), a
+  counter at `0` is made again with an `inc` of 0, and a long field in runs
+  of `MAX_RUN` — `restore()` too. And one `splice()` that a writer's own run
+  cannot hold whole anchors a new run instead of overflowing it, as typing
+  past a full run already did.
+- **`spans()` reads a name that has both plain and stacking marks.** A
+  stacking (`many`) mark newer than a plain mark of its name over the same
+  characters threw `marks[key].push is not a function` from `spans()` — a
+  read any peer could break with two marks — and a plain mark whose value
+  was an array took the stack's entries into the block's own value. On one
+  name the two now mix in stamp order: a plain mark takes the place of what
+  is there, a stack included, and a newer stacking mark starts a stack over
+  it.
+- **An array spliced into a text, or a string into a list, is refused.**
+  `push(id, 'body', [1])` on a text field was let through the local kind
+  check; the list it made outranks a text, so the text was dropped — on
+  every node the op reached. A splice now names its kind by its content
+  and meets the field's before it is stamped (`FIELD_KIND`, the field left
+  whole), as a string on a list already did inside the engine.
+- **A kind clash converges.** Two nodes making one field as different kinds
+  at once — a write carrying it as a register, an `inc`, an `add` or a
+  `splice` to it — stayed apart for good: each refused the other's op, while
+  a snapshot merge of the same two states let the register win. One rule
+  now, on the op path as in the merge, by the kinds alone: a register
+  outranks a counter, a counter a set, a set a list, a list a text, a text a
+  tree. Where the winner's op arrives, the loser's state is dropped; where
+  the winner is held, the loser's op is refused for that field
+  (`OP_REFUSED`). Locally a write of another kind is refused before it is
+  stamped (`FIELD_KIND`), for `write`, `set`, `inc`, `add` and `remove` as
+  for the sequence and tree ops.
+- **The edges of branches, patches and tags.** `drop()` wiped any storage
+  handed to it; `branch()` opened over an existing storage and merged the
+  parent into it; a fork that failed left a half-made directory for the
+  retry to reuse; a merge asked only after the source's own streams, so a
+  third node's ops the parent had compacted past were skipped as gaps while
+  `merge()` reported success. A patch was checked more loosely than the
+  method of its name, so `applyPatches()` could mint nothing and answer with
+  a count; a `SyncomError` from a second op left the first committed, so a
+  `restore()` could land its reset without the rebuild; the `removals` a
+  patch named were kept by reference in the log; a `tags.json` line's name
+  became a path under `tags/` unchecked (such a line is dropped at load,
+  `tags.dropped` with `reason: 'name'`); `open('path')` opened the default
+  directory in silence — `open()` takes an options object, and anything
+  else is a `TypeError`.
+- **A failed undo never inverts a record twice.** A throw on the third
+  record of a step — a hook refusing its inverse — put the step back whole,
+  though the first two were already inverted and their redo was lost; the
+  next `undo()` inverted them again. A step keeps its seqs per record: on a
+  failure the records taken back leave the step with their way back on the
+  redo stack, and the rest wait for another try. The own seqs the manager
+  kept are forgotten below its pin instead of growing for its life.
+- **An unreadable `tags.json` no longer fails `open()`.** The tags are
+  auxiliary, yet a torn `tags.json` failed the open like `node.json` does.
+  The storage now opens without tags, keeps the file aside as
+  `tags.corrupt.json` for a repair by hand, warns `tags.unreadable`,
+  reports `stats().tags.corrupt` and refuses `tag()` with `CORRUPT`; every
+  record changed meanwhile has its file kept once under `tags/.pending/`,
+  and the next open with a readable file hands those copies to the newest
+  tag, so the tags a repair brings back read as they did.
+- **A snapshot that carries a purge scrubs the joiner's log.** A node that
+  held a record's ops and then bootstrapped from a peer where the record was
+  purged kept the payloads in its log and served them to the peers behind
+  it. The bootstrap merge now scrubs every id the page purges, as a peer's
+  page does.
+- **An op on a sealed record is skipped, not accepted.** A peer's op on a
+  record this node keeps `encrypted` was logged as applied, so a replay or
+  a fold of the log would have applied what the node never did; it is
+  flagged `skipped` now. Also: `ahead: 'hold'` accepts `retention.ops: 0`
+  (keep everything), and `repair(id)` counts a held op this node has since
+  applied.
 - **Offline writes past retention reach the host.** A node that wrote more
   ops than `retention.ops` before reaching a host had the oldest compacted,
   and the host took none of them — nor any later one of that stream —
@@ -615,6 +965,40 @@ There is no released version section until then; everything below lands in it.
 - `examples/main.js` required a `globalstorage.js` that does not exist.
 
 ### Changed
+
+- **A tag is read at its first use.** An open read every tag's catalog and
+  copy listing, so its time grew with the tags times their records; it reads
+  `tags.json` and the newest tag alone now (the one the write path copies
+  into), and an older tag's catalog and copies once, at its first read.
+  `at(name)` stays synchronous; its `has()` and `list()` are promises, and a
+  cursor at a tag waits for the catalog. A tag whose catalog cannot be read
+  is dropped at that first use, as `untag()` drops it (`tags.dropped` with
+  `reason: 'catalog'`), and its reader is told `TAG_NOT_FOUND`.
+- **The field kinds' API and the versions API are modules.** `storage.js`
+  had grown back to 1,821 lines: `src/fields.js` (`inc` … `treeRemove`,
+  `spans`, `cursor`, `index`) and `src/versions.js` (`get(id, { at })`,
+  `history`, `diff`, `applyPatches`, `restore`, `compact`, `tag`, `untag`,
+  `at`) run over the core Storage lends its write paths, the facade one
+  delegate per method; the run-length content of a run is `src/rle.js`, out
+  of `src/sequence.js`; the write API's argument checks are `src/args.js`,
+  shared with `realize()` in `src/patch.js` and so with the undo subpath. No
+  public name, type or message changed.
+- **Browser budget 60.5 → 65 KB, under a ceiling.** The bounds above
+  (62 KB), the argument checks and the rehearsal of `applyPatches()`
+  (62.5 KB), the two API modules (64.5 KB — the core's property names where
+  private fields minified away) and `src/rle.js` (65 KB; 64.6 measured, 65.0
+  with the tags read at their first use). 64 KB was set as the v1 ceiling
+  with the second review and lifted the same day for the module split; a
+  raise still names its feature in `scripts/size.js`, and one of more than a
+  kilobyte is a design decision, taken in a plan. `PROTOCOL` 1 is the wire
+  as of the first publication: every op type and `packOps` slot added before
+  it bumps nothing.
+- **Comparison: Jazz at 2.0.** The Jazz column described 0.20 (Jazz Classic);
+  it now describes 2.0.0-alpha.59, the version jazz.tools documents — a
+  server-merged relational database with queries, lenses, row policies and
+  queryable history, and without CoValues, per-change signatures, list or
+  text CRDTs or a purge. The method gains the rule for a project whose npm
+  `latest` is legacy, and the prose counts follow.
 
 - **Browser budget 41 → 42 KB.** The fixes above — scopes checked on the
   record, own ops kept until delivered, `REWOUND`/`UNDELIVERABLE`,

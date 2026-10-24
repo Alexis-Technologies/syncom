@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="268" viewBox="0 0 760 268" role="img" aria-label="Undo: syncom's own benchmarks. The @alexify/syncom/undo manager: what capturing a commit costs a write, what one step back and forward costs. ops/s, log scale, higher is better.">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .title { font-size: 15px; font-weight: 700; fill: #1b1c1e; }
+  .subtitle, .caption { font-size: 12px; fill: #67676c; }
+  .caption { font-size: 11px; }
+  .group { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; fill: #67676c; }
+  .label { font-size: 13px; font-weight: 600; fill: #1b1c1e; }
+  .label.primary, .label.secondary { font-weight: 700; }
+  .sublabel { font-size: 11px; fill: #67676c; }
+  .value { font-size: 12px; font-weight: 600; fill: #3c3c43; font-variant-numeric: tabular-nums; }
+  .value.small { font-size: 10px; }
+  .legend { font-size: 11px; fill: #3c3c43; }
+  .tick { font-size: 11px; fill: #67676c; font-variant-numeric: tabular-nums; }
+  .grid { stroke: #e4e4e7; stroke-width: 1; }
+  .axis { stroke: #c2c2c4; stroke-width: 1; }
+  .ref { stroke: #67676c; stroke-width: 1; stroke-dasharray: 3 3; }
+  .bar { fill: #c4c6cc; }
+  .bar.primary { fill: #245a9e; }
+  .bar.secondary { fill: #5e9be6; }
+  @media (prefers-color-scheme: dark) {
+    .title, .label { fill: #dfdfd6; }
+    .subtitle, .caption, .group, .sublabel, .tick { fill: #98989f; }
+    .value, .legend { fill: #c2c2c4; }
+    .grid { stroke: #2e2e32; }
+    .axis { stroke: #48484c; }
+    .ref { stroke: #98989f; }
+    .bar { fill: #46474e; }
+    .bar.primary { fill: #8dbcf2; }
+    .bar.secondary { fill: #3d7bd0; }
+  }
+</style>
+<text class="title" x="20" y="35">Undo: syncom's own benchmarks</text>
+<text class="subtitle" x="20" y="56">The @alexify/syncom/undo manager: what capturing a commit costs a write, what one step back and forward costs.</text>
+<text class="subtitle" x="20" y="73">ops/s, log scale, higher is better.</text>
+<line class="grid" x1="206" y1="88" x2="206" y2="208"/>
+<text class="tick" x="206" y="224" text-anchor="middle">100</text>
+<line class="grid" x1="441" y1="88" x2="441" y2="208"/>
+<text class="tick" x="441" y="224" text-anchor="middle">1,000</text>
+<line class="grid" x1="676" y1="88" x2="676" y2="208"/>
+<text class="tick" x="676" y="224" text-anchor="middle">10k</text>
+<line class="axis" x1="206" y1="88" x2="206" y2="208"/>
+<g><title>update · no undo manager
+1,983 ops/s
+504 µs per operation</title>
+<text class="label primary" x="20" y="105">update</text>
+<text class="sublabel" x="20" y="120">no undo manager</text>
+<path class="bar primary" d="M206,101H506.87083783824613A4,4 0 0 1 510.87083783824613,105V111A4,4 0 0 1 506.87083783824613,115H206Z"/>
+<text class="value" x="516.8708378382462" y="114">1,983</text>
+</g>
+<g><title>update · captured by the undo manager
+1,919 ops/s
+521 µs per operation</title>
+<text class="label primary" x="20" y="145">update</text>
+<text class="sublabel" x="20" y="160">captured by the undo manager</text>
+<path class="bar primary" d="M206,141H503.5226190628358A4,4 0 0 1 507.5226190628358,145V151A4,4 0 0 1 503.5226190628358,155H206Z"/>
+<text class="value" x="513.5226190628358" y="154">1,919</text>
+</g>
+<g><title>undo + redo · one step of four kinds
+340 ops/s
+2.94 ms per operation</title>
+<text class="label primary" x="20" y="185">undo + redo</text>
+<text class="sublabel" x="20" y="200">one step of four kinds</text>
+<path class="bar primary" d="M206,181H326.8975455049299A4,4 0 0 1 330.8975455049299,185V191A4,4 0 0 1 326.8975455049299,195H206Z"/>
+<text class="value" x="336.8975455049299" y="194">340</text>
+</g>
+<text class="caption" x="20" y="249">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-24</text>
+</svg>

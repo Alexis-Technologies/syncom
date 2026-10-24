@@ -85,6 +85,35 @@ test('SyncManager edges', async (t) => {
     assert.strictEqual(quiet.sync.peers()[0].connected, false);
   });
 
+  await t.test('a dial that failed is dialled again at the next sync()', async (t2) => {
+    const host = await openTemp(t2);
+    const unit = host.sync.unit({ access: 'public' });
+    let down = true;
+    const dialer = await openTemp(t2, {
+      sync: {
+        autoStart: false,
+        connect: () => {
+          if (down) throw new Error('host down');
+          return new MemoryLink(unit);
+        },
+      },
+    });
+    const errors = [];
+    dialer.sync.on('error', (error) => errors.push(error));
+    const id = await dialer.insert({ n: 1 });
+    await dialer.sync.addNode({ url: 'mem://host' });
+    await dialer.sync.start();
+    await waitUntil(() => errors.length > 0);
+    assert.deepStrictEqual(
+      dialer.sync.peers().map((peer) => [peer.url, peer.connected, peer.lastError?.message]),
+      [['mem://host', false, 'host down']],
+    );
+    down = false;
+    await dialer.sync.sync();
+    await waitUntil(async () => (await host.get(id)) !== null);
+    assert.strictEqual(dialer.sync.peers()[0].connected, true);
+  });
+
   await t.test('a host that already dials us answers duplicate and we hang up', async (t2) => {
     const host = await openTemp(t2);
     const unit = host.sync.unit({ access: 'public' });

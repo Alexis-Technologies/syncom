@@ -26,7 +26,8 @@ import { createWrpcLink } from '@alexify/syncom/wrpc';
 import { connect } from '@alexify/wrpc';
 import { WrpcPeer, wrpcSignaler, defineRouter } from '@alexify/wrpc/webrtc';
 
-const client = await connect('wss://hub.example.com/api', { headers: { authorization: `Bearer ${token}` } });
+const HUB = 'wss://hub.example.com/api';
+const client = await connect(HUB, { headers: { authorization: `Bearer ${token}` } });
 let peer = null; // made after open(): its router mounts the storage's unit
 
 const storage = await open({
@@ -36,6 +37,8 @@ const storage = await open({
     // A node's url says where it is: the hub's WebSocket, or a peer id.
     connect: async (node) =>
       createWrpcLink(node.url.startsWith('ws') ? client : (await peer.connect(node.url)).remote),
+    // The registry is on disk and may hold peer ids from the last run: dial once `peer` exists.
+    autoStart: false,
   },
 });
 
@@ -44,8 +47,11 @@ peer = new WrpcPeer({
   signaler: wrpcSignaler(client, { identity: () => user.id }),
   iceServers,
 });
-await storage.sync.addNode({ url: 'wss://hub.example.com/api', scopes: myOrgIds });
 await peer.start();
+if (!storage.sync.listNodes().some((node) => node.url === HUB)) {
+  await storage.sync.addNode({ url: HUB, scopes: myOrgIds });
+}
+await storage.sync.start();
 ```
 
 `peer.connect(id)` resolves a `PeerLink` whose `remote` is the `WrpcClient`
@@ -53,6 +59,13 @@ that calls the other peer's router — reconnecting, resuming subscriptions
 from their `lastEventId`, streaming binary, exactly what syncom asks of a
 link. It is idempotent while the link lives, so `connect(node)` may be
 called again for the same peer.
+
+The hub's branch hands every dial the one `client` the signaler speaks over.
+Closing a link closes its client, so `removeNode()` or `enableNode(url,
+false)` on the hub's node, or `sync.stop()`, closes that WebSocket —
+signaling with it — and a later dial would get the closed client back. Where
+the hub's node may be switched off and on, have `connect(node)` open a
+client of its own for it.
 
 ## Hosting in a browser
 
@@ -180,7 +193,7 @@ hook on the peer's router reads `unit({ meta })` for anything above.
   server's signed word at issue time; neither is revocable but by closing
   the link.
 - **The worker proxy.** `WrpcClientProxy` connects to a URL; a data channel
-  cannot be reached through it (see [Scaling](./sync#hosting)).
+  cannot be reached through it (see [Scaling](./scaling#several-tabs)).
 
 ## Bundle
 

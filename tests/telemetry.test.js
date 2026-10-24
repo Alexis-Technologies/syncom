@@ -409,6 +409,38 @@ test('Storage telemetry', async (t) => {
     assert.strictEqual(point(await points('syncom.write.duration'), { 'syncom.path': 'commit' }).value.count, 3);
   });
 
+  await t.test(
+    'a tag, a history read, a version read and a patch batch are spanned, with counts and no identity',
+    async (t2) => {
+      const { tracer, named } = createTracing();
+      const { storage } = await openTemp(t2, { telemetry: { tracer } });
+      const id = await storage.insert({ n: 0 });
+      for (let i = 1; i <= 3; i++) await storage.update(id, { n: i });
+      await storage.tag('v1');
+      await storage.untag('v1');
+      const { versions } = await storage.history(id, { limit: 2 });
+      await storage.get(id, { at: versions[1].eventId });
+      await storage.applyPatches(id, [
+        { action: 'put', field: 'n', value: 9 },
+        { action: 'inc', field: 'hits', value: 1 },
+      ]);
+      const [tag] = named('syncom.tag');
+      assert.strictEqual(tag.attributes['syncom.records'], 1);
+      assert.strictEqual(named('syncom.untag').length, 1);
+      const [history] = named('syncom.history');
+      const read = (span, keys) => keys.map((key) => span.attributes[key]);
+      assert.deepStrictEqual(read(history, ['syncom.ops.count', 'syncom.versions', 'syncom.exact']), [4, 2, true]);
+      const [version] = named('syncom.version');
+      assert.strictEqual(version.attributes['syncom.ops.count'], 3, 'the entries inside the cut');
+      const [patches] = named('syncom.patches');
+      assert.deepStrictEqual(read(patches, ['syncom.ops.count', 'syncom.ops.applied']), [2, 2]);
+      assert.strictEqual(named('syncom.commit').length, 6, 'the patch ops are commit spans too');
+      for (const span of [tag, history, version, patches]) {
+        assert.strictEqual('syncom.record.id' in span.attributes, false, `${span.name} carries no identity`);
+      }
+    },
+  );
+
   await t.test('a refused local write is an error span and an error sample', async (t2) => {
     const { tracer, named } = createTracing();
     const { meter, points } = createMetrics();

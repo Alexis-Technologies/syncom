@@ -48,17 +48,22 @@ const main = async () => {
 main();
 ```
 
-`path` (or `name`) selects the directory; it defaults to `syncom`. Under it
-syncom creates three subdirectories:
+`open()` takes one options object; `path` (or `name`) selects the directory,
+and it defaults to `syncom`. Under it syncom keeps:
 
 | Entry | Contents |
 | --- | --- |
 | `node.json` | this node's identity — the `origin` of every op it makes |
-| `keys/` | `public.pem` / `private.pem`, generated on first open |
-| `blockchain/` | one JSON file per block, plus `.blockchain.json` holding the tail hash |
+| `keys/` | `public.pem` / `private.pem` (RSA) and `sign-public.pem` / `sign-private.pem` (Ed25519), generated on first open |
+| `lock.json` | while an instance holds the directory |
+| `blockchain/` | one JSON file per block, plus `.blockchain.json` holding the tail hash (none with `chain: false`) |
 | `data/` | one JSON file per record, each naming the block that committed it |
+| `index/` | `catalog.json` — the record catalog, derived and rebuilt when missing |
 | `log/` | the operation log — what peers replicate from |
-| `remote/` | one JSON file per registered sync node |
+| `remote/` | one JSON file per registered sync node, from the first `addNode()` |
+
+[Storage](./storage#on-disk) lists the rest — `schema.json`, and `tags.json` and
+`tags/` once a tag is taken.
 
 ## Records
 
@@ -73,12 +78,47 @@ record.on('update', (data, delta) => {
   console.log('changed', delta);
 });
 
-record.email = 'ada@lovelace.dev';
-console.log(record.delta()); // { email: 'ada@lovelace.dev' }
+record.name = 'Ada Lovelace';
+console.log(record.delta()); // { name: 'Ada Lovelace' }
 await record.save();
 ```
 
 See [Storage](./storage) for collections, CAS writes and the explicit API.
+
+## Fields that merge
+
+A field written with `insert()` or `update()` is a register: the last writer
+wins. The other kinds are made by the calls that write them, and each merges
+its own way when two nodes edit it at once:
+
+```js
+await storage.inc(id, 'views', 1);                      // a counter: increments add up
+await storage.add(id, 'tags', ['draft', 'ideas']);      // a set: concurrent adds both keep
+await storage.splice(id, 'body', 0, 0, 'Hello world');  // a text: merges by position
+await storage.mark(id, 'body', 0, 5, 'bold', true);     // rich text over it
+await storage.push(id, 'todo', ['write', 'review']);    // a list
+await storage.treeMove(id, 'outline', 'intro');         // a tree: nodes that move
+console.log(await storage.get(id));
+// { name: 'Ada Lovelace', email: 'ada@lovelace.dev', views: 1, tags: ['draft', 'ideas'],
+//   body: 'Hello world', todo: ['write', 'review'], outline: [{ id: 'intro', children: [] }] }
+```
+
+[Lists, text and trees](./lists) has the whole story, and [Sync](./sync#registers-counters-sets-lists-and-text)
+how each kind converges.
+
+## Reading the past
+
+Every op is in the log, so a record's past reads back from it:
+
+```js
+const { versions } = await storage.history(id);         // newest first
+const first = versions[versions.length - 1];
+await storage.get(id, { at: first.eventId });           // the record as the first write left it
+await storage.restore(id, first.eventId);               // back to it, with new ops that merge
+```
+
+[Versions and history](./versions) covers versions by stamp and vector, tags,
+diff, an undo stack and branches.
 
 ## Verifying integrity
 

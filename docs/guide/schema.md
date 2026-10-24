@@ -120,8 +120,13 @@ is stored as the string it serializes to.
 
 The validator sees the record **as the op leaves it**: for a `write` the
 whole new record, for a `set` the whole record after the delta, for an
-`inc`, `add` or `remove` the record with the counter or the set moved — under its id field, without
-`$type`. What it returns is folded back into the op:
+`inc`, `add`, `remove`, or a list, text or tree write (`splice`, `assign`,
+`move`, `mark`, `tree`) the record with that field as it reads after the op —
+under its id field, without `$type`. A counter, set, list, text or tree op
+carries no record data, so for it the verdict alone counts — and a field the
+schema does not name is an unknown key there too, refused under
+`unknown: 'reject'` like any other. What the validator returns is folded back
+into a `write` or a `set`:
 
 - a `write` becomes the validated record — defaults filled, aliases
   renamed, unknown keys stripped if the validator strips;
@@ -137,8 +142,8 @@ A peer's op is validated here too, against this node's schema, and never
 rewritten: an op that would leave the record invalid is skipped — logged,
 relayed, replay-safe, exactly as a `beforeApply` returning `false` — and
 reported through the `error` event (`error.entity`, `error.issues`) and the
-`syncom.ops.rejected` metric with reason `validation`. `merge` and `delete`
-are not validated.
+`syncom.ops.rejected` metric with reason `validation`. `merge`, `delete`
+and `purge` are not validated.
 
 ## Versions
 
@@ -193,19 +198,24 @@ validator. `lens: 'migrations'` or `'validate'` picks one step (the default
 `migrations`).
 
 The lens applies everywhere a record is read as a record — `get()`,
-`Record`, `swap()`, the [query layer](./query) — and to what a write is
-validated against; `snapshot()`, `getCachedData()` and replication stay raw.
+`swap()`, the [query layer](./query), a `Record` as it loads and as it
+follows a change — and to what a write is validated against;
+`snapshot()`, `getCachedData()` and replication stay raw.
 
 ### Rewriting: `migrate()`
 
 ```js
-if (storage.schemaInfo.previous) await storage.migrate(); // { migrated: 12, counters: 3, sets: 1 }
+if (storage.schemaInfo.previous) await storage.migrate();
+// { migrated: 12, counters: 3, sets: 1, lists: 0, texts: 2, trees: 0 }
 ```
 
 Every record of an older version becomes a whole-record write of its view,
-with its counters and sets added back (a write resets them); the op carries this
-node's version, peers receive ordinary ops, and a record already of this
-version is left alone — idempotent. Run it on one node after an upgrade;
+with the fields of other kinds made again after it (a write resets them) —
+an `inc` per counter, an `add` per set, one `splice` per list or text (one
+run), one move per tree node; an empty set, list or text and a tree with
+nothing to read are dropped. The ops carry this node's version, peers
+receive ordinary ops, and a record already of this version is left alone —
+idempotent. Run it on one node after an upgrade;
 `{ entities: ['Project'] }` limits it, `{ batch }` sets how many records go
 between turns of the event loop, `{ actor }` names the writer.
 
@@ -218,7 +228,7 @@ know the shape — and emits `schema` `{ kind: 'ahead', op, held: false }`.
 open runs that version; the held ops are then applied and
 `schemaInfo.held = { replayed, lost }` says how many, `lost` counting ops
 retention dropped before the upgrade (a hold needs `sync.retention.ops` of
-1000 or more).
+1000 or more, or `0` — keep everything).
 
 ### Drift
 
@@ -249,7 +259,7 @@ compatibility(diff(previousModel, model)); // 'full' | 'backward' | 'forward' | 
 | `validator` | `open({ validator })` | `{ compile(schema, { entity }) }` for plain-object schemas |
 | `storage.check(entity, data)` | — | The validator's value, nothing written |
 | `storage.schemaInfo` | — | `{ version, hash, previous, held }` |
-| `storage.migrate(options?)` | — | `{ migrated, counters, sets }` |
+| `storage.migrate(options?)` | — | `{ migrated, counters, sets, lists, texts, trees }` — how many records, then how many fields of each kind made again |
 
 See [Storage](./storage#collections) for `$type` and the collection
 methods, and [Sync](./sync#schemas) for what hello carries.

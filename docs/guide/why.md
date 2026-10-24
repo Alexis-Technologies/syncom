@@ -6,11 +6,14 @@ the node talks to, and every replica converges on the same records without a coo
 engine also covers what an application keeps next to replication:
 
 - **Storage.** Records on `node:fs`, OPFS, IndexedDB or memory, schema-driven collections,
-  live `Record`s with their own delta, compare-and-swap, counters, encryption at rest.
+  live `Record`s with their own delta, compare-and-swap, encryption at rest, and fields that
+  are counters, sets, lists, texts or trees as well as plain values.
 - **Schema and queries.** Validation with a metaschema model, any Standard Schema, ajv or a
   compiled JSON Schema, on every node a write reaches. Versions travel with every op, and old
   records read through a lens. Mango queries run over an in-memory catalog with indexes,
   unique keys and live views.
+- **Versions.** A record read back at any version the log retains, tags of the whole storage,
+  diff and restore, an undo stack and branches that merge back.
 - **Integrity and operations.** A hash-linked chain, re-checked on read; `purge()`, which
   removes a payload from the log; `repair(id)`, which rebuilds a record from the log; hooks
   that run inside a write; events; injected OpenTelemetry; and a `SyncomError` with a code
@@ -29,8 +32,16 @@ engine also covers what an application keeps next to replication:
   nodes, sets keep every concurrent add, and tombstones revive. Two replicas that edit different
   fields of one record both keep their change, two that increment one counter both count, and
   two that tag one record keep both tags. Of the eighteen
-  alternatives in the [comparison](/guide/comparison), three others have counters that
+  alternatives in the [comparison](/guide/comparison), four others have counters that
   converge.
+- **Lists, text and trees in the same records, with their past.** A list or a text field
+  merges by position — Fugue, so two nodes typing at one spot both keep theirs, each writer's
+  run whole — with marks for rich text, cursors that survive edits and elements that move; a
+  tree field moves nodes and never forms a cycle. Every record's past reads back from the log,
+  by event id, stamp or version vector; tags, diff and restore, an undo stack and branches build
+  on it, and every way back is new ops that merge like any write. Of the eighteen alternatives,
+  Loro is the only other one with both a movable list and a movable tree. See
+  [Lists, text and trees](/guide/lists) and [Versions and history](/guide/versions).
 - **The host decides what it accepts.** A hub checks a peer's op before applying it: the op's
   shape and clock skew, the peer's scopes, the entity's validator and `beforeApply`. A failing op
   is skipped there (and still relayed, so the nodes behind the hub judge it for themselves), a
@@ -50,29 +61,33 @@ engine also covers what an application keeps next to replication:
 - **Zero dependencies, one API for Node.js and the browser.** Nothing is installed with it.
   `node:fs` and `node:crypto` on the server, OPFS (or IndexedDB) and Web Crypto in the browser,
   picked by the `browser` export condition. CommonJS without a build step, hand-written typings,
-  and a browser bundle of about 42 KB min+gzip that CI holds to a budget.
+  and a browser bundle of about 66 KB min+gzip that CI holds to a budget.
 
 The [benchmarks](/guide/benchmarks) put a number on all of this. syncom opens a store and reads
-a record in about 37 ms, the fastest cold start of the ten libraries measured, and serves a read
+a record in about 40 ms, the fastest cold start of the ten libraries measured, and serves a read
 from its cache at about a million a second. A write costs more than a CRDT's, because it is
-signed, logged, filed, catalogued and chained: about 16,000 a second in memory and 1,500 on
+signed, logged, filed, catalogued and chained: about 15,000 a second in memory and 1,300 on
 disk, where the LevelDB-backed Yjs and PouchDB do 19,000 to 26,000. And every op a replica
 receives is verified against its origin, so an empty replica pulls about 25,000 records a second
 in memory, where Yjs and Loro pull 100,000 — `sync.signatures: false` trades that check away.
 
 ## When something else fits better
 
-- **Collaborative text, rich text or ordered lists.** syncom merges records field by field. An
-  array is one value, and so is a string. Yjs, Automerge and Loro merge text and lists
-  character by character and have editor bindings. They can live next to syncom, as a field
-  that holds an encoded document.
+- **Document-scale text with editor plugins.** syncom's [list and text fields](/guide/lists)
+  merge by position — Fugue, with marks and cursors — but they are fields of a record, read and
+  written whole per op; a long document is a list of block records, and there are no editor
+  bindings yet. A keystroke is a write like any other: typing into a text that grows past ten
+  thousand characters runs at 400 to 1,800 keystrokes a second in memory, where Yjs, Automerge
+  and Loro type tens of thousands or more ([benchmarks](/guide/benchmarks)). They carry whole
+  documents of any size and ship bindings for ProseMirror, CodeMirror and the rest.
 - **Postgres is your source of truth.** ElectricSQL, PowerSync and Zero replicate a server
   database's tables to clients and send writes through your API. syncom keeps its own records
   and has no Postgres connector.
 - **End-to-end encryption.** Ops are signed, but an encrypted record stays on the node that
   wrote it. End-to-end encryption is a [recipe](/guide/scaling#end-to-end-encryption)
   (wrpc's sealer in the hooks, field by field, with no counter, index or query over a sealed
-  field). Jazz signs and encrypts every change, and Evolu encrypts everything it syncs.
+  field). Evolu encrypts everything it syncs; Jazz 2.0 ships encryption as adapters, not yet
+  wired into its tables.
 - **Ready-made UI bindings, React Native, a managed cloud.** syncom ships none of them. RxDB,
   TinyBase, Dexie Cloud, InstantDB and others do.
 - **A package with a track record.** syncom is a pre-release (0.0.1), not on npm yet, and its

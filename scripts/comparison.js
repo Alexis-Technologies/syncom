@@ -27,6 +27,8 @@ const PAGES = [
   { data: path.join(ROOT, 'docs', 'comparison.json'), target: path.join(ROOT, 'docs', 'guide', 'comparison.md') },
   // syncom and RxDB, feature by feature: /guide/vs-rxdb.
   { data: path.join(ROOT, 'docs', 'comparison-rxdb.json'), target: path.join(ROOT, 'docs', 'guide', 'vs-rxdb.md') },
+  // syncom, Yjs, Automerge and Loro as CRDT libraries: /guide/vs-crdt.
+  { data: path.join(ROOT, 'docs', 'comparison-crdt.json'), target: path.join(ROOT, 'docs', 'guide', 'vs-crdt.md') },
 ];
 const START = '<!-- comparison:start -->';
 const END = '<!-- comparison:end -->';

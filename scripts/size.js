@@ -82,8 +82,54 @@ const ENTRIES = [
   // (39.8 measured). The search seam — an entity's `search` fields joined
   // into its catalog row (format 3), the injected TextIndex contract, `$text`
   // seeding the candidates in the index's order — the raise to 41 KB (40.7
-  // measured); the index itself is the @alexify/syncom/search subpath.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 42 },
+  // measured); the index itself is the @alexify/syncom/search subpath. The
+  // fixes the RxDB comparison found — scope bounds on a push, a dialer that
+  // keeps its own ops until its nodes hold them, REWOUND, a record file that
+  // fails after the append held and replayed — the raise to 42 KB (41.9
+  // measured). The sequence engine (src/sequence.js: Fugue runs with
+  // extension, run-length tombstones, pending runs and cuts, the walk, the
+  // reset rule and the join) wired into ops.js as the list and text kinds —
+  // the raise to 47 KB (47.0 measured); its API — splice() and push(), the
+  // index resolved inside the queue, OUT_OF_RANGE, migrate() over lists and
+  // texts — the raise to 48 KB (47.7 measured). The movable list — setAt()
+  // and move(), a value and a position register per element, position runs
+  // — the raise to 49 KB (48.9 measured). updateText() with the Myers diff
+  // behind it (src/myers.js) — the raise to 50 KB (49.7 measured). Rich text —
+  // marks as anchor pairs with an expand rule, the newest per key, stacking
+  // marks, spans() — the raise to 51.5 KB (51.4 measured). Cursors — a place
+  // that survives edits, cursor()/index() — the raise to 52 KB (51.7 measured).
+  // Trees — the move log per node, the fold with the cycle check, treeMove()/
+  // treeRemove(), and src/order.js in the core for a node's place among its
+  // siblings — the raise to 55 KB (54.6 measured). History — a version as a
+  // cut through the log, the exact start above droppedTs, the fold and the
+  // present check, history()/get(id, { at }) — the raise to 56.5 KB (56.2
+  // measured). Tags — tags.json, a catalog per tag, copy-on-write record
+  // files at the EntryStore seam, tag()/untag()/at() — the raise to 58 KB
+  // (57.7 measured; 58.0 with the views at a tag; ≈60 KB at the end of the versions epic was agreed).
+  // Diff, restore, patches and the commit event (src/patch.js) — the raise to
+  // 60.5 KB (60.0 measured), the end of the versions epic. The bounds of the
+  // second review's first epic — slot caps on a run and a field, a run
+  // extended by its origin alone, the snapshot path under the same bound,
+  // orphan registers and off-placeholders counted, a fractional index
+  // checked, a tree read to a depth, a malformed payload reported, the
+  // `sync.pendingMax` option — the raise to 62 KB (61.7 measured). The second
+  // epic — the argument checks shared with realize(), the kind clash refused
+  // before any index is read, applyPatches rehearsed before the first append,
+  // a merge that asks for every stream — the raise to 62.5 KB (62.0 measured).
+  // 64 KB was the ceiling set with the second review (2026-10-24); the raise
+  // past it was decided the same day, for the review's maintainability epic:
+  // the API of the field kinds (src/fields.js) and the versions API
+  // (src/versions.js) as path modules over the lent core, the facade a
+  // delegate per method — the raise to 64.5 KB (64.4 measured; the shared
+  // property names of the core cost what private fields minified away). The
+  // run-length content as src/rle.js, out of sequence.js (the same epic) —
+  // the raise to 65 KB (64.6 measured: a module's exports and requires). The
+  // bugs the docs audit found (2026-10-24), fixed one commit each: a splice's
+  // content checked against the field's kind before the stamp — the raise to
+  // 65.5 KB (65.0 measured); compact() laying a text's marks again
+  // (sequence.js marksIn, the `mark` patch, long fields in runs) — the raise
+  // to 66 KB (65.6 measured). The rule stays: a raise names its feature here.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 66 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -99,6 +145,17 @@ const ENTRIES = [
   // The trigram text index behind `$text`: platform-neutral, off the main
   // entry so a node that never searches pays nothing for it.
   { label: 'search — browser (@alexify/syncom/search)', entry: 'search.js', platform: 'browser', budget: 2 },
+  // Fractional indexes for ordering records: a helper off the main entry.
+  { label: 'order — browser (@alexify/syncom/order)', entry: 'order.js', platform: 'browser', budget: 1.5 },
+  // The undo manager with the patch vocabulary, Myers, the argument checks
+  // realize() shares with the write API (src/args.js) and the Emitter it
+  // stands on — measured alone; in an app bundle those are shared with the
+  // core. 6 KB since the shared checks (5.9 measured); 6.5 KB since the
+  // `mark` patch (6.0 measured).
+  { label: 'undo — browser (@alexify/syncom/undo)', entry: 'undo.js', platform: 'browser', budget: 6.5 },
+  // A fork opened through the parent's constructor, merged as ops: the
+  // selection a push makes, the shape helpers, the protocol constants.
+  { label: 'branch — browser (@alexify/syncom/branch)', entry: 'branch.js', platform: 'browser', budget: 3.5 },
 ];
 
 // A browser entry has to be self-contained: no node builtins, and no packages

@@ -188,8 +188,10 @@ test('Scopes bound the records an op writes', async (t) => {
     }
     assert.deepStrictEqual(await host.get(doc), { $type: 'Doc', title: 'secret' });
     assert.strictEqual(await host.get('planted'), null);
+    // The peers' streams alone: the host's own key id begins with `o` one
+    // time in sixty-four.
     assert.deepStrictEqual(
-      Object.keys(host.vector).filter((key) => key.startsWith('o')),
+      Object.keys(host.vector).filter((key) => /^o[1-4](@|$)/.test(key)),
       [],
       'neither logged nor relayed: no stream moved',
     );

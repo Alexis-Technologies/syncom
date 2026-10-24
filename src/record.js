@@ -151,6 +151,71 @@ class Record extends Emitter {
     await this.#storage.remove(this.#id, key, elements, options);
   }
 
+  /** Splices a list or text field; the storage-level `splice` with this record's id. */
+  async splice(key, index, count = 0, content, options = {}) {
+    await this.#storage.splice(this.#id, key, index, count, content, options);
+  }
+
+  /** Appends to a list or text field; the storage-level `push` with this record's id. */
+  async push(key, content, options = {}) {
+    await this.#storage.push(this.#id, key, content, options);
+  }
+
+  /** Makes a text field read as `text`; the storage-level `updateText` with this record's id. */
+  async updateText(key, text, options = {}) {
+    return this.#storage.updateText(this.#id, key, text, options);
+  }
+
+  /** Marks a range of a text field; the storage-level `mark` with this record's id. */
+  async mark(key, start, end, name, value, options = {}) {
+    return this.#storage.mark(this.#id, key, start, end, name, value, options);
+  }
+
+  /** Removes a style from a text field; the storage-level `unmark` with this record's id. */
+  async unmark(key, start, end, name, options = {}) {
+    await this.#storage.unmark(this.#id, key, start, end, name, options);
+  }
+
+  /** Switches one mark off by its id; the storage-level `unmarkById` with this record's id. */
+  async unmarkById(key, markId, options = {}) {
+    await this.#storage.unmarkById(this.#id, key, markId, options);
+  }
+
+  /** The text field as runs of equal style; the storage-level `spans` with this record's id. */
+  async spans(key) {
+    return this.#storage.spans(this.#id, key);
+  }
+
+  /** A cursor into a list or text field; the storage-level `cursor` with this record's id. */
+  async cursor(key, index, options = {}) {
+    return this.#storage.cursor(this.#id, key, index, options);
+  }
+
+  /** Where a cursor is now; the storage-level `index` with this record's id. */
+  async index(key, cursor) {
+    return this.#storage.index(this.#id, key, cursor);
+  }
+
+  /** Replaces an element of a list field; the storage-level `setAt` with this record's id. */
+  async setAt(key, index, value, options = {}) {
+    await this.#storage.setAt(this.#id, key, index, value, options);
+  }
+
+  /** Moves an element of a list field; the storage-level `move` with this record's id. */
+  async move(key, from, to, options = {}) {
+    await this.#storage.move(this.#id, key, from, to, options);
+  }
+
+  /** Puts a node of a tree field under a parent; the storage-level `treeMove` with this record's id. */
+  async treeMove(key, node, parent = null, options = {}) {
+    await this.#storage.treeMove(this.#id, key, node, parent, options);
+  }
+
+  /** Removes a node of a tree field with its subtree; the storage-level `treeRemove` with this record's id. */
+  async treeRemove(key, node, options = {}) {
+    await this.#storage.treeRemove(this.#id, key, node, options);
+  }
+
   async delete(options = {}) {
     await this.#storage.delete(this.#id, options);
     this.#data = null;
@@ -191,9 +256,9 @@ class Collection {
   }
 
   /** The record, or null when it is absent or belongs to another collection. */
-  async get(id) {
+  async get(id, options = {}) {
     if (this.#foreign(id)) return null;
-    return this.#storage.get(id);
+    return this.#storage.get(id, options);
   }
 
   /** A cursor over this collection: `select(query).order(f).limit(n).fetch()`. */

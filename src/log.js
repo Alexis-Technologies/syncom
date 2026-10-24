@@ -12,7 +12,8 @@
 //                       which has not been announced to anyone yet
 //   seg-<from>.json     sealed segments: the open files rolled together once
 //                       enough of them accumulate
-//   index.json          { epoch, floor, next, vector, segments } — a summary;
+//   index.json          { epoch, floor, next, vector, segments, droppedHeld,
+//                       latestTs, droppedTs } — a summary;
 //                       the files are the source of truth and anything the
 //                       index lacks is rebuilt from a directory listing
 //
@@ -61,8 +62,15 @@ class OpLog {
   #otel;
   #fsi;
   #droppedHeld = 0;
-  // Entries compaction keeps whatever the retention says (see `retain`).
+  // The newest stamp among the ops compaction dropped, or that this open
+  // could not read: what a reader of the past checks before it trusts the
+  // log to be whole from some point on (see `droppedTs`).
+  #droppedTs = 0;
+  #lost = false;
+  // Entries compaction keeps whatever the retention says (see `retain`),
+  // and whatever a reader pinned for the time being (see `pin`).
   #keep = null;
+  #pins = new Set();
   #torn = new Set();
   #writes = Promise.resolve();
   // Batches appended whose records may not be written yet: first seq → last
@@ -104,6 +112,10 @@ class OpLog {
       this.#droppedHeld = Number.isInteger(index.droppedHeld) ? index.droppedHeld : 0;
       // Seeded from the index; what the files hold only moves it up.
       if (typeof index.latestTs === 'number') this.#latestTs = index.latestTs;
+      // An index from before droppedTs was kept, with something already
+      // compacted: what went is unknown, so nothing retained is vouched for.
+      if (typeof index.droppedTs === 'number') this.#droppedTs = index.droppedTs;
+      else if (this.#floor > 1) this.#lost = true;
     } else {
       // No (readable) index: a new incarnation. Existing segments are still
       // picked up below, but their ids belong to an epoch nobody can resume.
@@ -113,6 +125,10 @@ class OpLog {
     await this.#loadSegments(hasIndex);
     await this.#loadOpen();
     this.#seen = null;
+    // Entries this open could not read, or an incarnation that starts above
+    // seq 1 without an index to say what it dropped: as good as compacted,
+    // up to the newest stamp known.
+    if (this.#lost || (!index && this.#floor > 1)) this.#droppedTs = Math.max(this.#droppedTs, this.#latestTs);
     if (!index) {
       // Every subscriber of this node will be told to bootstrap: worth a
       // line when there was a log here, a whisper for a brand-new one.
@@ -140,6 +156,7 @@ class OpLog {
       const parsed = text === null ? null : parseJson(text);
       if (!parsed || !Array.isArray(parsed.entries)) {
         this.#log?.warn?.({ event: 'log.segment.unreadable', segment: segment.name });
+        this.#lost = true;
         continue;
       }
       this.#adopt(parsed.entries);
@@ -408,6 +425,7 @@ class OpLog {
       for (const entry of this.#entries) {
         if (entry.seq > oldest.to) break;
         if (entry.held !== undefined) this.#droppedHeld++;
+        if (typeof entry.op?.ts === 'number' && entry.op.ts > this.#droppedTs) this.#droppedTs = entry.op.ts;
         this.#unindexEntry(entry);
       }
       this.#entries = this.#entries.filter((entry) => entry.seq > oldest.to);
@@ -420,12 +438,30 @@ class OpLog {
 
   // Whether an entry up to `to` must stay: the segment that holds it does.
   #keeps(to) {
-    if (this.#keep === null) return false;
+    if (this.#keep === null && this.#pins.size === 0) return false;
     for (const entry of this.#entries) {
       if (entry.seq > to) return false;
-      if (this.#keep(entry)) return true;
+      if (this.#keep !== null && this.#keep(entry)) return true;
+      for (const pin of this.#pins) if (pin(entry)) return true;
     }
     return false;
+  }
+
+  /**
+   * Like `retain`, for a reader: entries `keep(entry)` answers true for stay,
+   * with their segment and everything after it, until the returned function
+   * is called. Pins add up — one per reader of the past — and leave `retain`
+   * to the sync manager.
+   */
+  pin(keep) {
+    if (typeof keep !== 'function') throw new TypeError('pin(keep): keep must be a function');
+    this.#pins.add(keep);
+    return () => void this.#pins.delete(keep);
+  }
+
+  /** How many readers hold segments past retention (`pin`). */
+  get pins() {
+    return this.#pins.size;
   }
 
   /**
@@ -450,6 +486,7 @@ class OpLog {
       segments: this.#segments,
       droppedHeld: this.#droppedHeld,
       latestTs: this.#latestTs,
+      droppedTs: this.#droppedTs,
     };
     await this.#fsi.write(this.#path, INDEX, JSON.stringify(index));
   }
@@ -457,6 +494,19 @@ class OpLog {
   /** The entries held for a newer schema version, oldest first. */
   held() {
     return this.#entries.filter((entry) => entry.held !== undefined);
+  }
+
+  /**
+   * The newest `ts` among the ops this log no longer holds — compacted away,
+   * or in a segment an open could not read — persisted with the index. Zero
+   * while nothing was ever dropped: every op this node applied is still here,
+   * and a fold of the retained entries is the whole past. Above zero, the
+   * past of a record is whole only from an op stamped after it that resets
+   * the record (a `write`, a `delete`, a `purge`) — everything dropped was
+   * stamped at or below it, and a reset discards what is below it anyway.
+   */
+  get droppedTs() {
+    return this.#droppedTs;
   }
 
   /** How many held entries compaction has dropped — lost for good — since the last reset. */
@@ -609,6 +659,11 @@ class OpLog {
   /** The entries after `eventId` in `scopes` (see `read`), or null when the position cannot be resumed. */
   since(eventId, options) {
     return this.read(eventId, options)?.entries ?? null;
+  }
+
+  /** Every retained entry, oldest first, without a copy — for a selection over the whole log (src/outbound.js). */
+  *scan() {
+    yield* this.#entries;
   }
 
   /** Every retained entry of the record `id`, oldest first — what `repair()` rebuilds from. */

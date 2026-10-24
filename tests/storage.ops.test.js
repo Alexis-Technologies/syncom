@@ -90,6 +90,38 @@ test('Storage replication model', async (t) => {
     },
   );
 
+  await t.test(
+    'an inc past a counter’s range is refused here, and from a peer, and a reopen reads the same',
+    async (t2) => {
+      const { dir, storage } = await openTemp(t2);
+      const id = await storage.insert({ title: 'doc' });
+      await storage.inc(id, 'n', Number.MAX_SAFE_INTEGER - 1);
+      const seq = storage.log.lastSeq;
+      await assert.rejects(() => storage.inc(id, 'n', 2), {
+        code: 'FIELD_KIND',
+        field: 'n',
+        kind: 'bound',
+        detail: 'counter',
+        max: Number.MAX_SAFE_INTEGER,
+      });
+      assert.strictEqual(storage.log.lastSeq, seq, 'nothing logged');
+      // A peer's sum past the range: refused as a bound, logged as a no-op, the field as it was.
+      const errors = [];
+      storage.on('error', (error) => errors.push(error));
+      await storage.applyRemote([remoteOp('peer', 1, 'inc', id, { key: 'n', value: 1e308 })]);
+      assert.deepStrictEqual(
+        errors.map((error) => [error.code, error.rejected?.[0]?.detail]),
+        [['OP_REFUSED', 'counter']],
+      );
+      await storage.inc(id, 'n', 1);
+      assert.strictEqual((await storage.get(id)).n, Number.MAX_SAFE_INTEGER);
+      await storage.close();
+      const again = await syncom.open({ path: dir, logger: false });
+      t2.after(() => again.close());
+      assert.strictEqual((await again.get(id)).n, Number.MAX_SAFE_INTEGER, 'a reopen reads the same');
+    },
+  );
+
   await t.test('inc is a counter; a field is a register or a counter, never both', async (t2) => {
     const { storage } = await openTemp(t2);
     const id = await storage.insert({ name: 'Ada' });
@@ -169,30 +201,477 @@ test('Storage replication model', async (t) => {
     assert.strictEqual(await storage.validate(), true);
   });
 
-  await t.test('a peer’s set ops land in any order; a write on a set field is refused for that field', async (t2) => {
+  await t.test('splice and push keep a list or a text; a field is one kind only', async (t2) => {
     const { storage } = await openTemp(t2);
-    const errors = [];
-    storage.on('error', (error) => errors.push(error));
-    const t0 = Date.now();
-    // The remove arrives before the add it observed: that add is dead on arrival.
-    const tags = [['x', { p1: t0 + 1 }]];
-    await storage.applyRemote([remoteOp('p2', 1, 'remove', 'r', { key: 'tags', value: tags, ts: t0 + 5 })]);
-    assert.deepStrictEqual(await storage.get('r'), { tags: [] });
-    await storage.applyRemote([remoteOp('p1', 1, 'add', 'r', { key: 'tags', value: ['x', 'y'], ts: t0 + 1 })]);
-    assert.deepStrictEqual(await storage.get('r'), { tags: ['y'] });
-    // A peer's set on the field is refused for that field alone, as an event.
-    const result = await storage.applyRemote([remoteOp('p3', 1, 'set', 'r', { data: { tags: ['z'], note: 'n' } })]);
-    assert.strictEqual(result.applied, 1);
-    assert.deepStrictEqual(await storage.get('r'), { tags: ['y'], note: 'n' });
+    const ops = [];
+    storage.on('change', (op) => ops.push(op));
+    const id = await storage.insert({ name: 'Ada' });
+    await storage.splice(id, 'body', 0, 0, 'helo');
+    await storage.splice(id, 'body', 3, 0, 'l');
+    await storage.push(id, 'body', ' world');
+    assert.deepStrictEqual(await storage.get(id), { name: 'Ada', body: 'hello world' });
+    await storage.splice(id, 'body', 5, 6);
+    assert.deepStrictEqual(await storage.get(id), { name: 'Ada', body: 'hello' });
+    // What travels: a run anchored at the head, one anchored inside it, an
+    // extension of this node's own run, and a cut naming its ranges.
     assert.deepStrictEqual(
-      errors.map((error) => [error.code, error.rejected]),
-      [['OP_REFUSED', [{ field: 'tags', reason: 'set' }]]],
+      ops.map((op) => op.type),
+      ['write', 'splice', 'splice', 'splice', 'splice'],
     );
-    // And the local writer is told the same.
-    await assert.rejects(() => storage.update('r', { tags: [] }), { code: 'FIELD_KIND', kind: 'set' });
-    await storage.add('r', 'tags', ['local']);
-    assert.deepStrictEqual((await storage.get('r')).tags, ['local', 'y']);
+    const [, first, inside, appended, cut] = ops;
+    const run = `${first.ts}:${storage.nodeId}`;
+    assert.deepStrictEqual(first.value, { at: '^', content: 'helo' });
+    assert.deepStrictEqual(inside.value, { at: `<${first.ts}:3:${storage.nodeId}`, content: 'l' });
+    assert.deepStrictEqual(appended.value, { run, from: 4, content: ' world' });
+    assert.deepStrictEqual(cut.value, { cut: [[run, 4, 6]], content: '' });
+    assert.strictEqual(cut.key, 'body');
+    // A list holds JSON values; a call that only cuts takes the field's kind.
+    await storage.push(id, 'items', [{ n: 1 }, 'two']);
+    await storage.splice(id, 'items', 1, 1, [2, 3]);
+    assert.deepStrictEqual((await storage.get(id)).items, [{ n: 1 }, 2, 3]);
+    await storage.splice(id, 'items', 0, 1);
+    assert.deepStrictEqual((await storage.get(id)).items, [2, 3]);
+    assert.deepStrictEqual(ops.at(-1).value.content, []);
+    // Out of range is a coded error, decided inside the queue.
+    await assert.rejects(() => storage.splice(id, 'body', 6, 0, 'x'), {
+      name: 'SyncomError',
+      code: 'OUT_OF_RANGE',
+      field: 'body',
+      index: 6,
+      count: 0,
+      length: 5,
+    });
+    await assert.rejects(() => storage.splice(id, 'body', 4, 2), {
+      code: 'OUT_OF_RANGE',
+      index: 4,
+      count: 2,
+      length: 5,
+    });
+    await assert.rejects(() => storage.splice(id, 'nope', 0, 1), { code: 'OUT_OF_RANGE', length: 0 });
+    // The kind rule, with a hint at the right call.
+    await assert.rejects(
+      () => storage.update(id, { body: 'plain' }),
+      /text; use splice\(\), push\(\), updateText\(\) or mark\(\)/,
+    );
+    await assert.rejects(() => storage.inc(id, 'items'), /list; use splice\(\), push\(\), setAt\(\) or move\(\)/);
+    await assert.rejects(() => storage.add(id, 'body', ['x']), /text; use splice\(\)/);
+    await assert.rejects(() => storage.splice(id, 'name', 0, 0, 'x'), /register; use update\(\)/);
+    await assert.rejects(() => storage.push(id, 'items', 'text'), /list; use splice\(\), push/);
+    await storage.inc(id, 'hits');
+    await assert.rejects(() => storage.push(id, 'hits', 'x'), /counter; use inc\(\)/);
+    await storage.add(id, 'tags', ['t']);
+    await assert.rejects(() => storage.splice(id, 'tags', 0, 0, ['x']), /set; use add\(\) or remove\(\)/);
+    // Arguments.
+    await assert.rejects(() => storage.splice(id, 7, 0, 0, 'x'), TypeError);
+    await assert.rejects(() => storage.splice(id, 'body', -1, 0, 'x'), TypeError);
+    await assert.rejects(() => storage.splice(id, 'body', 0, -1, 'x'), TypeError);
+    await assert.rejects(() => storage.splice(id, 'body', 0, 0, 5), TypeError);
+    await assert.rejects(() => storage.splice(id, 'body', 0, 0), TypeError);
+    await assert.rejects(() => storage.splice(id, 'body', 0, 0, ''), TypeError);
+    await assert.rejects(() => storage.push(id, 'items', [undefined]), TypeError);
+    await assert.rejects(() => storage.push(id, 'items', [() => 1]), TypeError);
+    // Through a live Record, which follows along.
+    const record = await storage.record(id);
+    await record.splice('body', 0, 1, 'H');
+    assert.strictEqual(record.body, 'Hello');
+    await record.push('items', [4]);
+    assert.deepStrictEqual(record.items, [2, 3, 4]);
+    // The caller's array is copied, not kept.
+    const mine = [{ x: 1 }];
+    await storage.push(id, 'items', mine);
+    mine[0].x = 2;
+    mine.push('later');
+    assert.deepStrictEqual((await storage.get(id)).items, [2, 3, 4, { x: 1 }]);
+    // A whole-record write resets the text along with everything else; the
+    // field is free to be a register after that.
+    await storage.set(id, { name: 'Ada' });
+    assert.deepStrictEqual(await storage.get(id), { name: 'Ada' });
+    await storage.update(id, { body: 'plain' });
+    assert.deepStrictEqual(await storage.get(id), { name: 'Ada', body: 'plain' });
+    // A splice creates the field, and the record, when absent.
+    await storage.splice('fresh', 'body', 0, 0, 'x');
+    assert.deepStrictEqual(await storage.get('fresh'), { body: 'x' });
+    assert.strictEqual(await storage.validate(), true);
   });
+
+  await t.test('updateText diffs the field inside the queue and sends one splice per hunk', async (t2) => {
+    const { storage } = await openTemp(t2);
+    const ops = [];
+    storage.on('change', (op) => ops.push(op));
+    const id = await storage.insert({ title: 'note' });
+    assert.strictEqual(await storage.updateText(id, 'body', 'the quick brown fox'), 1, 'one op creates the field');
+    assert.strictEqual(await storage.updateText(id, 'body', 'the slow brown dog'), 3, 'one op per hunk');
+    assert.strictEqual((await storage.get(id)).body, 'the slow brown dog');
+    assert.deepStrictEqual(
+      ops.slice(1).map((op) => [op.type, op.key]),
+      Array(4).fill(['splice', 'body']),
+    );
+    assert.strictEqual(await storage.updateText(id, 'body', 'the slow brown dog'), 0, 'nothing to do, no op');
+    assert.strictEqual(ops.length, 5);
+    assert.strictEqual(await storage.updateText(id, 'body', ''), 1, 'emptied, the field stays a text');
+    assert.strictEqual((await storage.get(id)).body, '');
+    // Another kind under the field is refused for it; arguments.
+    await assert.rejects(() => storage.updateText(id, 'title', 'x'), /register; use update\(\)/);
+    await storage.push(id, 'items', [1]);
+    await assert.rejects(() => storage.updateText(id, 'items', 'x'), /list; use splice\(\), push/);
+    await assert.rejects(() => storage.updateText(id, 7, 'x'), TypeError);
+    await assert.rejects(() => storage.updateText(id, 'body', 5), TypeError);
+    await assert.rejects(() => storage.updateText('bad id!', 'body', 'x'), { code: 'INVALID_ID' });
+    // Through a live Record; a reset frees the field as for any kind.
+    const record = await storage.record(id);
+    assert.strictEqual(await record.updateText('body', 'hello'), 1);
+    assert.strictEqual(record.body, 'hello');
+    await storage.set(id, { title: 'note' });
+    assert.strictEqual(await storage.updateText(id, 'body', 'again'), 1);
+    assert.deepStrictEqual(await storage.get(id), { title: 'note', body: 'again' });
+    assert.strictEqual(await storage.validate(), true);
+  });
+
+  await t.test('mark, unmark and spans: styles grow as their expand rule says, stack when many', async (t2) => {
+    const { storage } = await openTemp(t2);
+    const id = await storage.insert({});
+    await storage.updateText(id, 'body', 'hello world');
+    const bold = await storage.mark(id, 'body', 0, 5, 'bold', true);
+    assert.match(bold, /^\d+:/);
+    assert.deepStrictEqual(await storage.spans(id, 'body'), [
+      { text: 'hello', marks: { bold: true } },
+      { text: ' world', marks: {} },
+    ]);
+    await storage.splice(id, 'body', 5, 0, '!'); // at the end of the range: bold
+    await storage.splice(id, 'body', 0, 0, '>'); // before it: not
+    assert.deepStrictEqual(await storage.spans(id, 'body'), [
+      { text: '>', marks: {} },
+      { text: 'hello!', marks: { bold: true } },
+      { text: ' world', marks: {} },
+    ]);
+    await storage.mark(id, 'body', 8, 13, 'link', 'https://x', { expand: 'none' });
+    await storage.splice(id, 'body', 13, 0, '?');
+    await storage.unmark(id, 'body', 0, 7, 'bold');
+    assert.deepStrictEqual(await storage.spans(id, 'body'), [
+      { text: '>hello! ', marks: {} },
+      { text: 'world', marks: { link: 'https://x' } },
+      { text: '?', marks: {} },
+    ]);
+    const c1 = await storage.mark(id, 'body', 0, 3, 'comment', { by: 'ada' }, { many: true });
+    const c2 = await storage.mark(id, 'body', 2, 5, 'comment', { by: 'bob' }, { many: true });
+    assert.deepStrictEqual((await storage.spans(id, 'body')).slice(0, 3), [
+      { text: '>h', marks: { comment: [{ id: c1, value: { by: 'ada' } }] } },
+      {
+        text: 'e',
+        marks: {
+          comment: [
+            { id: c1, value: { by: 'ada' } },
+            { id: c2, value: { by: 'bob' } },
+          ],
+        },
+      },
+      { text: 'll', marks: { comment: [{ id: c2, value: { by: 'bob' } }] } },
+    ]);
+    await storage.unmarkById(id, 'body', c1);
+    assert.deepStrictEqual((await storage.spans(id, 'body')).slice(0, 2), [
+      { text: '>h', marks: {} },
+      { text: 'ell', marks: { comment: [{ id: c2, value: { by: 'bob' } }] } },
+    ]);
+    assert.strictEqual((await storage.get(id)).body, '>hello! world?', 'the field reads as the plain string');
+    // Errors and arguments; spans of what is not a text.
+    await assert.rejects(() => storage.mark(id, 'body', 0, 99, 'bold', true), {
+      code: 'OUT_OF_RANGE',
+      index: 0,
+      count: 99,
+    });
+    await assert.rejects(() => storage.mark(id, 'body', 3, 2, 'bold', true), TypeError);
+    await assert.rejects(() => storage.mark(id, 'body', 0, 1, 'bold', true, { expand: 'sideways' }), TypeError);
+    await assert.rejects(() => storage.mark(id, 'body', 0, 1, '', true), TypeError);
+    await assert.rejects(() => storage.mark(id, 'body', 0, 1, 'bold', undefined), TypeError);
+    await assert.rejects(() => storage.unmarkById(id, 'body', 'not a mark id'), TypeError);
+    await assert.rejects(() => storage.unmark(id, 'body', 'not a range'), TypeError);
+    await storage.push(id, 'items', [1]);
+    await assert.rejects(() => storage.mark(id, 'items', 0, 1, 'bold', true), /list; use splice\(\), push/);
+    await storage.update(id, { title: 'plain' });
+    await assert.rejects(() => storage.mark(id, 'title', 0, 1, 'bold', true), /register; use update\(\)/);
+    assert.strictEqual(await storage.spans(id, 'items'), null);
+    assert.strictEqual(await storage.spans(id, 'title'), null);
+    assert.strictEqual(await storage.spans('absent', 'body'), null);
+    // Through a live Record.
+    const record = await storage.record(id);
+    const em = await record.mark('body', 0, 1, 'em', true);
+    assert.deepStrictEqual((await record.spans('body'))[0], { text: '>', marks: { em: true } });
+    await record.unmarkById('body', em);
+    assert.deepStrictEqual((await record.spans('body'))[0].marks, {});
+    assert.strictEqual(await storage.validate(), true);
+  });
+
+  await t.test('a plain mark and a stacking mark of one name mix in stamp order, never throwing', async (t2) => {
+    const { storage } = await openTemp(t2);
+    const id = await storage.insert({ title: 'doc' });
+    await storage.updateText(id, 'body', 'hello world');
+    await storage.mark(id, 'body', 0, 5, 'note', ['plain']);
+    const c1 = await storage.mark(id, 'body', 0, 5, 'note', 'first', { many: true });
+    const c2 = await storage.mark(id, 'body', 3, 8, 'note', 'second', { many: true });
+    const stack = (...ids) => ids.map(([mid, value]) => ({ id: mid, value }));
+    assert.deepStrictEqual(await storage.spans(id, 'body'), [
+      { text: 'hel', marks: { note: stack([c1, 'first']) } },
+      { text: 'lo', marks: { note: stack([c1, 'first'], [c2, 'second']) } },
+      { text: ' wo', marks: { note: stack([c2, 'second']) } },
+      { text: 'rld', marks: {} },
+    ]);
+    // A plain mark newer than the stack takes its place; the plain value is never pushed into.
+    await storage.mark(id, 'body', 0, 3, 'note', ['again']);
+    assert.deepStrictEqual((await storage.spans(id, 'body'))[0], { text: 'hel', marks: { note: ['again'] } });
+    await storage.unmarkById(id, 'body', c1);
+    assert.deepStrictEqual((await storage.spans(id, 'body')).slice(0, 2), [
+      { text: 'hel', marks: { note: ['again'] } },
+      { text: 'lo wo', marks: { note: stack([c2, 'second']) } },
+    ]);
+  });
+
+  await t.test('a cursor names a place that survives the edits around it', async (t2) => {
+    const { storage } = await openTemp(t2);
+    const id = await storage.insert({});
+    await storage.updateText(id, 'body', 'hello world');
+    const before = await storage.cursor(id, 'body', 6);
+    const after = await storage.cursor(id, 'body', 6, { side: 'after' });
+    assert.match(before, /^</);
+    assert.match(after, /^>/);
+    assert.strictEqual(await storage.index(id, 'body', before), 6);
+    assert.strictEqual(await storage.index(id, 'body', after), 6);
+    await storage.splice(id, 'body', 0, 0, '>> ');
+    assert.strictEqual(await storage.index(id, 'body', before), 9, 'text before it moves it');
+    assert.strictEqual(await storage.index(id, 'body', after), 9);
+    await storage.splice(id, 'body', 9, 0, 'X');
+    assert.strictEqual(await storage.index(id, 'body', before), 10, 'typed at the cursor: before keeps to its element');
+    assert.strictEqual(await storage.index(id, 'body', after), 9, 'after keeps to the one before');
+    await storage.splice(id, 'body', 10, 5);
+    assert.strictEqual((await storage.get(id)).body, '>> hello X');
+    assert.strictEqual(await storage.index(id, 'body', before), 10, 'into a deleted element: the next visible');
+    assert.strictEqual(await storage.cursor(id, 'body', 0, { side: 'after' }), '^');
+    assert.strictEqual(await storage.cursor(id, 'body', 10), '$');
+    assert.strictEqual(await storage.index(id, 'body', '^'), 0);
+    assert.strictEqual(await storage.index(id, 'body', '$'), 10);
+    assert.strictEqual(await storage.cursor(id, 'body', 11), null);
+    // A list cursor anchors the slot, not the element.
+    await storage.push(id, 'items', ['a', 'b', 'c']);
+    const atB = await storage.cursor(id, 'items', 1);
+    await storage.move(id, 'items', 2, 0);
+    assert.strictEqual(await storage.index(id, 'items', atB), 2);
+    // A reset loses the place; not a sequence is null; a bad cursor is a TypeError.
+    await storage.set(id, { n: 1 });
+    assert.strictEqual(await storage.index(id, 'body', before), null);
+    assert.strictEqual(await storage.cursor(id, 'body', 0), null);
+    assert.strictEqual(await storage.cursor(id, 'n', 0), null);
+    await assert.rejects(() => storage.index(id, 'body', 'nope'), TypeError);
+    await assert.rejects(() => storage.cursor(id, 'body', 0, { side: 'left' }), TypeError);
+    const record = await storage.record(id);
+    await record.updateText('body', 'ab');
+    const c = await record.cursor('body', 1);
+    assert.strictEqual(await record.index('body', c), 1);
+  });
+
+  await t.test('treeMove and treeRemove keep a movable tree; a cycle is refused inside the queue', async (t2) => {
+    const { dir, storage } = await openTemp(t2);
+    const ops = [];
+    storage.on('change', (op) => ops.push(op));
+    const id = await storage.insert({ name: 'outline' });
+    await storage.treeMove(id, 'outline', 'root');
+    await storage.treeMove(id, 'outline', 'b', 'root');
+    await storage.treeMove(id, 'outline', 'a', 'root', { before: 'b' });
+    await storage.treeMove(id, 'outline', 'c', 'root', { after: 'b' });
+    await storage.treeMove(id, 'outline', 'c1', 'c');
+    const leaf = (name) => ({ id: name, children: [] });
+    assert.deepStrictEqual((await storage.get(id)).outline, [
+      { id: 'root', children: [leaf('a'), leaf('b'), { id: 'c', children: [leaf('c1')] }] },
+    ]);
+    // What travels: the node, its parent and a fractional index between
+    // the neighbours it was put among.
+    assert.deepStrictEqual(
+      ops.slice(1).map((op) => [op.type, op.key, op.value.node, op.value.parent]),
+      [
+        ['tree', 'outline', 'root', null],
+        ['tree', 'outline', 'b', 'root'],
+        ['tree', 'outline', 'a', 'root'],
+        ['tree', 'outline', 'c', 'root'],
+        ['tree', 'outline', 'c1', 'c'],
+      ],
+    );
+    const [, , fiB, fiA, fiC] = ops.map((op) => op.value?.fi);
+    assert.ok(fiA < fiB && fiB < fiC, `${fiA} < ${fiB} < ${fiC}`);
+    // A subtree moves whole; a move to where the node is makes no op.
+    await storage.treeMove(id, 'outline', 'c', 'a');
+    assert.deepStrictEqual((await storage.get(id)).outline, [
+      { id: 'root', children: [{ id: 'a', children: [{ id: 'c', children: [leaf('c1')] }] }, leaf('b')] },
+    ]);
+    const count = ops.length;
+    await storage.treeMove(id, 'outline', 'c', 'a');
+    await storage.treeMove(id, 'outline', 'b', 'root', { after: 'a' });
+    await storage.treeMove(id, 'outline', 'root');
+    assert.strictEqual(ops.length, count, 'already there');
+    await storage.treeMove(id, 'outline', 'b', 'root', { before: 'a' });
+    assert.deepStrictEqual(
+      (await storage.get(id)).outline[0].children.map((n) => n.id),
+      ['b', 'a'],
+    );
+    // A cycle, an unknown sibling: coded errors, decided inside the queue.
+    await assert.rejects(() => storage.treeMove(id, 'outline', 'a', 'c1'), {
+      name: 'SyncomError',
+      code: 'CYCLE',
+      id,
+      field: 'outline',
+      node: 'a',
+      parent: 'c1',
+    });
+    await assert.rejects(() => storage.treeMove(id, 'outline', 'a', 'root', { after: 'nope' }), {
+      code: 'NOT_FOUND',
+      id,
+      field: 'outline',
+      node: 'nope',
+    });
+    await assert.rejects(() => storage.treeMove(id, 'outline', 'a', 'root', { before: 'c1' }), { code: 'NOT_FOUND' });
+    // A removal takes the subtree; twice is nothing; a move brings it back whole.
+    await storage.treeRemove(id, 'outline', 'a');
+    assert.deepStrictEqual((await storage.get(id)).outline, [{ id: 'root', children: [leaf('b')] }]);
+    assert.deepStrictEqual([ops.at(-1).value.node, ops.at(-1).value.parent], ['a', '$trash']);
+    const removed = ops.length;
+    await storage.treeRemove(id, 'outline', 'a');
+    assert.strictEqual(ops.length, removed, 'already removed');
+    await storage.treeMove(id, 'outline', 'a', 'root');
+    assert.deepStrictEqual((await storage.get(id)).outline, [
+      { id: 'root', children: [leaf('b'), { id: 'a', children: [{ id: 'c', children: [leaf('c1')] }] }] },
+    ]);
+    // The kind rule, with a hint at the right call.
+    const hint = /tree; use treeMove\(\) or treeRemove\(\)/;
+    await assert.rejects(() => storage.update(id, { outline: [] }), hint);
+    await assert.rejects(() => storage.inc(id, 'outline'), hint);
+    await assert.rejects(() => storage.add(id, 'outline', ['x']), hint);
+    await assert.rejects(() => storage.push(id, 'outline', ['x']), hint);
+    await assert.rejects(() => storage.setAt(id, 'outline', 0, 'x'), hint);
+    await assert.rejects(() => storage.move(id, 'outline', 0, 1), hint);
+    await assert.rejects(() => storage.mark(id, 'outline', 0, 0, 'b', true), hint);
+    await assert.rejects(() => storage.treeMove(id, 'name', 'n'), /register; use update\(\)/);
+    await storage.push(id, 'items', [1]);
+    await assert.rejects(() => storage.treeMove(id, 'items', 'n'), /list; use splice\(\)/);
+    await storage.inc(id, 'hits');
+    await assert.rejects(() => storage.treeRemove(id, 'hits', 'n'), /counter; use inc\(\)/);
+    // Arguments.
+    await assert.rejects(() => storage.treeMove(id, 7, 'n'), TypeError);
+    await assert.rejects(() => storage.treeMove(id, 'outline', ''), TypeError);
+    await assert.rejects(() => storage.treeMove(id, 'outline', '$trash'), TypeError);
+    await assert.rejects(() => storage.treeMove(id, 'outline', 'x'.repeat(129)), TypeError);
+    await assert.rejects(() => storage.treeMove(id, 'outline', 'n', 5), TypeError);
+    await assert.rejects(() => storage.treeMove(id, 'outline', 'n', 'n'), TypeError);
+    await assert.rejects(() => storage.treeMove(id, 'outline', 'n', null, { after: 'a', before: 'b' }), TypeError);
+    await assert.rejects(() => storage.treeMove(id, 'outline', 'n', null, { after: 'n' }), TypeError);
+    await assert.rejects(() => storage.treeMove(id, 'outline', 'n', null, { before: 5 }), TypeError);
+    await assert.rejects(() => storage.treeRemove(id, 'outline', 'bad\u0001'), TypeError);
+    // Through a live Record.
+    const record = await storage.record(id);
+    await record.treeMove('outline', 'd', 'root', { before: 'b' });
+    assert.deepStrictEqual(
+      record.outline[0].children.map((n) => n.id),
+      ['d', 'b', 'a'],
+    );
+    await record.treeRemove('outline', 'd');
+    assert.deepStrictEqual(
+      record.outline[0].children.map((n) => n.id),
+      ['b', 'a'],
+    );
+    // The tree survives a reopen, from the file and from the log alike.
+    const outline = (await storage.get(id)).outline;
+    await storage.close();
+    const again = await syncom.open({ path: dir, logger: false });
+    t2.after(() => again.close());
+    assert.deepStrictEqual((await again.get(id)).outline, outline);
+    assert.ok((await again.repair(id)).ops > 0);
+    assert.deepStrictEqual((await again.get(id)).outline, outline, 'replayed from the log');
+  });
+
+  await t.test('setAt and move keep an element’s name; a move names where it shows', async (t2) => {
+    const { storage } = await openTemp(t2);
+    const ops = [];
+    storage.on('change', (op) => ops.push(op));
+    const id = await storage.insert({ name: 'list' });
+    await storage.push(id, 'items', ['a', 'b', 'c']);
+    await storage.setAt(id, 'items', 1, 'B');
+    assert.deepStrictEqual((await storage.get(id)).items, ['a', 'B', 'c']);
+    await storage.move(id, 'items', 0, 2);
+    assert.deepStrictEqual((await storage.get(id)).items, ['B', 'c', 'a']);
+    await storage.move(id, 'items', 2, 0);
+    assert.deepStrictEqual((await storage.get(id)).items, ['a', 'B', 'c']);
+    await storage.move(id, 'items', 1, 1);
+    assert.deepStrictEqual(
+      ops.map((op) => op.type),
+      ['write', 'splice', 'assign', 'move', 'move'],
+      'a move to the same place is nothing',
+    );
+    const run = `${ops[1].ts}:${storage.nodeId}`;
+    assert.deepStrictEqual(ops[2].value, { elem: `${ops[1].ts}:1:${storage.nodeId}`, value: 'B' });
+    assert.deepStrictEqual(ops[3].value, {
+      elem: `${ops[1].ts}:0:${storage.nodeId}`,
+      cut: [run, 0, 1],
+      at: `>${ops[1].ts}:2:${storage.nodeId}`,
+      value: 'a',
+    });
+    assert.strictEqual(ops[4].value.elem, ops[3].value.elem, 'the element keeps its name across moves');
+    assert.deepStrictEqual(
+      ops[4].value.cut,
+      [`${ops[3].ts}:${storage.nodeId}`, 0, 1],
+      'the slot it showed at was its position run',
+    );
+    // The value follows the element: set after a move, read at the new place.
+    await storage.setAt(id, 'items', 0, 'A');
+    assert.deepStrictEqual((await storage.get(id)).items, ['A', 'B', 'c']);
+    // Out of range, the kind rule, arguments.
+    await assert.rejects(() => storage.setAt(id, 'items', 3, 'x'), { code: 'OUT_OF_RANGE', index: 3, length: 3 });
+    await assert.rejects(() => storage.move(id, 'items', 0, 3), { code: 'OUT_OF_RANGE', index: 3, length: 3 });
+    await assert.rejects(() => storage.move(id, 'items', 5, 0), { code: 'OUT_OF_RANGE', index: 5, length: 3 });
+    await storage.splice(id, 'body', 0, 0, 'text');
+    await assert.rejects(
+      () => storage.setAt(id, 'body', 0, 'x'),
+      /text; use splice\(\), push\(\), updateText\(\) or mark\(\)/,
+    );
+    await storage.move(id, 'name', 0, 0); // from === to is nothing, even on a register
+    await assert.rejects(() => storage.move(id, 'name', 0, 1), /register; use update\(\)/);
+    await assert.rejects(() => storage.setAt(id, 'name', 0, 'x'), /register; use update\(\)/);
+    await assert.rejects(() => storage.setAt(id, 'nope', 0, 'x'), { code: 'OUT_OF_RANGE', length: 0 });
+    await assert.rejects(() => storage.setAt(id, 7, 0, 'x'), TypeError);
+    await assert.rejects(() => storage.setAt(id, 'items', -1, 'x'), TypeError);
+    await assert.rejects(() => storage.setAt(id, 'items', 0, undefined), TypeError);
+    await assert.rejects(() => storage.move(id, 'items', 'a', 0), TypeError);
+    // Through a live Record.
+    const record = await storage.record(id);
+    await record.move('items', 2, 0);
+    assert.deepStrictEqual(record.items, ['c', 'A', 'B']);
+    await record.setAt('items', 0, 'C');
+    assert.deepStrictEqual(record.items, ['C', 'A', 'B']);
+    assert.strictEqual(await storage.validate(), true);
+  });
+
+  await t.test(
+    'a peer’s set ops land in any order; a write on a set field takes it, as the register outranks the set',
+    async (t2) => {
+      const { storage } = await openTemp(t2);
+      const errors = [];
+      storage.on('error', (error) => errors.push(error));
+      const t0 = Date.now();
+      // The remove arrives before the add it observed: that add is dead on arrival.
+      const tags = [['x', { p1: t0 + 1 }]];
+      await storage.applyRemote([remoteOp('p2', 1, 'remove', 'r', { key: 'tags', value: tags, ts: t0 + 5 })]);
+      assert.deepStrictEqual(await storage.get('r'), { tags: [] });
+      await storage.applyRemote([remoteOp('p1', 1, 'add', 'r', { key: 'tags', value: ['x', 'y'], ts: t0 + 1 })]);
+      assert.deepStrictEqual(await storage.get('r'), { tags: ['y'] });
+      // A local write of another kind is refused before it is stamped.
+      await assert.rejects(() => storage.update('r', { tags: [] }), { code: 'FIELD_KIND', kind: 'set' });
+      // A peer's set on the field: the register outranks the set and takes the
+      // field — here as on the peer, whatever the order.
+      const result = await storage.applyRemote([remoteOp('p3', 1, 'set', 'r', { data: { tags: ['z'], note: 'n' } })]);
+      assert.strictEqual(result.applied, 1);
+      assert.deepStrictEqual(await storage.get('r'), { tags: ['z'], note: 'n' });
+      assert.deepStrictEqual(errors, []);
+      // The field is a register now: a local add is refused, an update lands.
+      await assert.rejects(() => storage.add('r', 'tags', ['local']), { code: 'FIELD_KIND', kind: 'register' });
+      await storage.update('r', { tags: ['local'] });
+      assert.deepStrictEqual((await storage.get('r')).tags, ['local']);
+    },
+  );
 
   await t.test('delete leaves a tombstone: hidden from get/has/list, kept on disk', async (t2) => {
     const { dir, storage } = await openTemp(t2);
@@ -864,6 +1343,130 @@ test('a snapshot page is joined as one batch', async (t) => {
       } while (cursor !== null);
       assert.deepStrictEqual(paged, [ids[0], ids[2], ids[3]].sort());
       assert.ok(pages >= 3 && pages <= 5, `${pages} pages`);
+    },
+  );
+});
+
+test('Storage: the bounds of the sequence and tree engines', async (t) => {
+  await t.test(
+    'open({ sync: { pendingMax } }) bounds a peer’s pending work; a refusal is reported with its count',
+    async (t2) => {
+      const { storage } = await openTemp(t2, { sync: { pendingMax: 2 } });
+      const errors = [];
+      storage.on('error', (error) => errors.push(error));
+      const id = await storage.insert({ title: 'doc' });
+      await storage.splice(id, 'body', 0, 0, 'ab');
+      // The runs the cuts wait for are stamped after the record's insert: a
+      // cut of a run below the reset watermark is moot and pruned at once.
+      const soon = Date.now() + 1000;
+      const waiting = (seq, origin) =>
+        remoteOp('peer', seq, 'splice', id, {
+          ts: soon + 1000 + seq,
+          key: 'body',
+          value: { cut: [[`${soon}:${origin}`, 0, 1]], content: '' },
+        });
+      const result = await storage.applyRemote([waiting(1, 'Z'), waiting(2, 'Y'), waiting(3, 'X')]);
+      assert.strictEqual(result.applied, 3, 'a refused op is accepted into the log, like a kind clash');
+      assert.deepStrictEqual(
+        errors.map((error) => [error.code, error.rejected]),
+        [['OP_REFUSED', [{ field: 'body', reason: 'bound', detail: 'pending', count: 2, max: 2 }]]],
+      );
+      assert.strictEqual((await storage.get(id)).body, 'ab');
+      const bad = (pendingMax) => syncom.open({ path: `${storage.path}-bad`, logger: false, sync: { pendingMax } });
+      assert.throws(() => bad(0), TypeError);
+      assert.throws(() => bad('many'), TypeError);
+    },
+  );
+
+  await t.test(
+    'treeMove refuses a node that would read below MAX_DEPTH levels, and a place with no room between its neighbours',
+    async (t2) => {
+      const { MAX_DEPTH, MAX_FI } = require('../src/tree.js');
+      const { storage } = await openTemp(t2);
+      const id = await storage.insert({});
+      let parent = null;
+      for (let i = 1; i <= MAX_DEPTH; i++) {
+        await storage.treeMove(id, 'outline', `n${i}`, parent);
+        parent = `n${i}`;
+      }
+      const deeper = { code: 'OUT_OF_RANGE', depth: MAX_DEPTH + 1, max: MAX_DEPTH };
+      await assert.rejects(() => storage.treeMove(id, 'outline', 'deep', parent), deeper);
+      // A subtree counts whole: two levels fit under the level before the last but one, not under the last but one.
+      await storage.treeMove(id, 'outline', 'pair');
+      await storage.treeMove(id, 'outline', 'child', 'pair');
+      await assert.rejects(() => storage.treeMove(id, 'outline', 'pair', `n${MAX_DEPTH - 1}`), {
+        code: 'OUT_OF_RANGE',
+      });
+      await storage.treeMove(id, 'outline', 'pair', `n${MAX_DEPTH - 2}`);
+      // A peer's place with no room after it: the next local place would need an index longer than MAX_FI.
+      const edge = { key: 'outline', value: { node: 'edge', parent: null, fi: `${'z'.repeat(MAX_FI - 1)}V` } };
+      await storage.applyRemote([remoteOp('peer', 1, 'tree', id, edge)]);
+      const noRoom = { code: 'OUT_OF_RANGE', reason: 'fi', max: MAX_FI };
+      await assert.rejects(() => storage.treeMove(id, 'outline', 'next', null, { after: 'edge' }), noRoom);
+      await storage.treeMove(id, 'outline', 'next', null, { before: 'edge' });
+      const roots = (await storage.get(id)).outline.map((node) => node.id);
+      assert.deepStrictEqual(roots.slice(-2), ['next', 'edge']);
+    },
+  );
+});
+
+test('Storage: a sequence op on a field of another kind is refused before any index is read', async (t) => {
+  await t.test(
+    'splice, setAt, move, mark and treeMove on the wrong kind are FIELD_KIND whatever the index',
+    async (t2) => {
+      const { storage } = await openTemp(t2);
+      const id = await storage.insert({ title: 'doc', n: 1 });
+      await storage.treeMove(id, 'outline', 'r');
+      await storage.inc(id, 'hits', 1);
+      for (const index of [0, 3]) {
+        await assert.rejects(() => storage.splice(id, 'outline', index, 0, 'x'), { code: 'FIELD_KIND', kind: 'tree' });
+      }
+      await assert.rejects(() => storage.setAt(id, 'title', 7, 'x'), { code: 'FIELD_KIND', kind: 'register' });
+      await assert.rejects(() => storage.move(id, 'hits', 5, 0), { code: 'FIELD_KIND', kind: 'counter' });
+      await assert.rejects(() => storage.mark(id, 'title', 0, 99, 'bold', true), {
+        code: 'FIELD_KIND',
+        kind: 'register',
+      });
+      await assert.rejects(() => storage.treeMove(id, 'title', 'n'), { code: 'FIELD_KIND', kind: 'register' });
+      await assert.rejects(() => storage.treeMove(id, 'n', 'x'), { code: 'FIELD_KIND', kind: 'register' });
+      const outline = [{ id: 'r', children: [] }];
+      assert.deepStrictEqual(await storage.get(id), { title: 'doc', n: 1, outline, hits: 1 });
+    },
+  );
+
+  await t.test(
+    'an array spliced into a text, or a string into a list, is FIELD_KIND and leaves the field whole',
+    async (t2) => {
+      const { storage } = await openTemp(t2);
+      const id = await storage.insert({ title: 'doc' });
+      await storage.push(id, 'body', 'Hello world');
+      await storage.push(id, 'items', [1, 2]);
+      const seq = storage.log.lastSeq;
+      for (const call of [
+        () => storage.push(id, 'body', [1]),
+        () => storage.splice(id, 'body', 5, 0, ['!']),
+        () => storage.splice(id, 'body', 0, 1, []),
+      ]) {
+        await assert.rejects(call, {
+          code: 'FIELD_KIND',
+          field: 'body',
+          kind: 'text',
+          message: /a string, not an array/,
+        });
+      }
+      for (const call of [() => storage.push(id, 'items', 'x'), () => storage.splice(id, 'items', 0, 1, 'y')]) {
+        await assert.rejects(call, {
+          code: 'FIELD_KIND',
+          field: 'items',
+          kind: 'list',
+          message: /an array, not a string/,
+        });
+      }
+      assert.strictEqual(storage.log.lastSeq, seq, 'nothing was stamped or logged');
+      assert.deepStrictEqual(await storage.get(id), { title: 'doc', body: 'Hello world', items: [1, 2] });
+      await storage.splice(id, 'body', 0, 6);
+      await storage.splice(id, 'items', 0, 1);
+      assert.deepStrictEqual(await storage.get(id), { title: 'doc', body: 'world', items: [2] });
     },
   );
 });

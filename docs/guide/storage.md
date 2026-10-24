@@ -1,7 +1,10 @@
 # Storage
 
 `Storage` is the entry point. `open(options)` returns a promise — key
-generation and chain initialisation happen before it resolves.
+generation and chain initialisation happen before it resolves. It takes an
+options object and nothing else: `open('./data')` is a `TypeError`, as is
+any option of the wrong shape, thrown by `open()` itself before anything is
+opened.
 
 ```js
 const { open } = require('@alexify/syncom');
@@ -15,6 +18,7 @@ const storage = await open({ path: 'data' });
 | `name` | — | Alias for `path` |
 | `fsi` | `node:fs` / OPFS | The backend — any object with `read`, `write`, `exists`, `remove`, `list` (see [Backends](../reference/api#backends)) |
 | `durable` | `false` | fsync after every write, where the backend can (`node:fs`); OPFS and memory are as durable as they are |
+| `defer` | `0` | Record files may lag the log by this many ms (a non-negative integer) — the writes of one record within the window coalesce into one file and one block, what typing into a text or a list wants ([see below](#when-a-record-file-lags-the-log)) |
 | `lock` | `'fail'` | One instance per directory: `'fail'` rejects a second `open()` (`code: 'LOCKED'`), `'wait'` waits, `false` leaves it to you ([see below](#one-instance-per-directory)) |
 | `cache` | `{ max: 5000 }` | How many entries stay in memory; a live `Record` pins its own ([see below](#the-catalog-and-the-cache)) |
 | `integrity` | `'verify'` | `'lazy'` trusts a record file on the cold read instead of re-verifying it against its block |
@@ -23,11 +27,14 @@ const storage = await open({ path: 'data' });
 | `actor` | — | Who writes — stamped on every op as `actor`: a string, or a function asked per write ([see Sync](./sync#operations)) |
 | `schema` | — | Entity definitions: collections, their validators and indexes ([see below](#collections)); `version` and `snapshot` ([see below](#schema-versions)) |
 | `validator` | — | Compiles entity schemas that are plain objects without `~standard` ([see below](#validation)) |
+| `search` | — | The text index behind `$text`, asked once per entity with `search` fields — `createSearch()` from `@alexify/syncom/search` ([see Queries](./query#full-text-search)) |
 | `getId` | `crypto.randomUUID()` | Id generator for `insert()`; sync or async ([see below](#custom-identifiers)) |
 | `logger` | `console` | A Console or pino-shaped logger, or `false` for silence |
 | `encrypted` | `false` | Encrypt every record at rest by default ([see below](#encryption-at-rest)) |
-| `sync` | — | Replication: `connect`, `scope`, `retention`, … — see [Sync](./sync#options) |
+| `sync` | — | Replication: `connect`, `scope`, `retention`, `pendingMax`, … — see [Sync](./sync#options) |
 | `hooks` | — | `beforeWrite`, `afterRead`, `beforeApply`, … — see [Hooks and events](./hooks) |
+| `telemetry` | — | Injected OpenTelemetry: `{ api }` or `{ tracer, meter }` — see [OpenTelemetry](./telemetry) |
+| `maxListeners` | `100` | Listeners per event on the storage and its sync manager; one more throws ([see Events](./hooks#events)) |
 
 ## The explicit API
 
@@ -44,30 +51,52 @@ await storage.update(id, { status: 'done' }, { actor: 'ada' }); // … and say w
 await storage.inc(id, 'views', 1);        // add to a counter field
 await storage.add(id, 'tags', ['bug', 'ui']); // add to a set field
 await storage.remove(id, 'tags', ['ui']);  // tags is ['bug']
-await storage.set(id, { title: 'Final' }); // replace wholesale — status, views and tags are gone
+await storage.splice(id, 'body', 0, 0, 'Hello'); // a text field: insert at 0
+await storage.push(id, 'items', [1, 2]);   // a list field: append
+await storage.treeMove(id, 'outline', 'n1'); // a tree field: node n1 at the root
+await storage.set(id, { title: 'Final' }); // replace wholesale — everything but title is gone
 await storage.list();                     // every live id
+await storage.compact(id);                // rewrite it as the few ops it reads as — see below
 await storage.delete(id);
 await storage.purge(id);                  // forget it for good — see below
 await storage.close();                    // stop replication, seal the log
 ```
 
-Every one of these is an **operation**: applied here, written to the
+Every write among these is an **operation**: applied here, written to the
 [log](./sync#the-log), announced as a `change` event, and replicated to peers
-when a transport is configured. `set()`, `update()`, `inc()`, `add()` and
-`remove()` also emit an `update` event on any live `Record` for that id.
+when a transport is configured. Every one of them — and every op from a peer —
+also emits an `update` event on any live `Record` for that id. The rest of
+the list, text and tree API — `updateText()`, `setAt()`, `move()`, `mark()`,
+`spans()`, `cursor()`, `treeRemove()` — is in [Lists, text and trees](./lists).
 
-::: tip Registers, counters and sets
+::: tip Registers, counters, sets, lists, texts and trees
 A field written with `insert()`, `set()` or `update()` is a *register* — last
 writer wins. A field created with `inc()` is a *counter* — increments add up
 across nodes. A field created with `add()` is a *set* — concurrent adds both
 keep, and an add a remove did not see survives it; it reads sorted by element
-text. A field is one kind only: `update()` on a counter or a set, `inc()` on a
-register or a set, `add()` on a register or a counter throw. The fields are
-the top-level ones: a nested object is one register, replaced whole by
-whichever write is later — two nodes that change different keys of it
-concurrently keep one side — and `update({ 'a.b': 1 })` writes a field named
-`a.b`. See [Sync](./sync#registers-counters-and-sets).
+text. A field created with `splice()` or `push()` is a *list* (an array) or a
+*text* (a string), edited by position: concurrent inserts both keep, each
+writer's run whole. A field created with `treeMove()` is a *tree* (an array of
+`{ id, children }`) — see [Lists, text and trees](./lists). A field is one
+kind only: a local write of another kind — `update()` or `set()` naming a
+counter, `inc()` on a set, `splice()` on a register, `treeMove()` on a list —
+throws a `SyncomError` with `code: 'FIELD_KIND'`, `field`, and `kind` the kind
+that holds it, before anything is stamped. A `set()` that leaves such a
+field out drops it, as it drops every field it does not name. From a peer the
+kinds' precedence decides instead — a register outranks a counter, a counter
+a set, then a list, a text, a tree — see [Sync](./sync#registers-counters-sets-lists-and-text).
+The fields are the top-level ones: a nested object is one register, replaced
+whole by whichever write is later — two nodes that change different keys of
+it concurrently keep one side — and `update({ 'a.b': 1 })` writes a field
+named `a.b`.
 :::
+
+`FIELD_KIND` also refuses a list or text write past a bound — a single
+insert over 1 048 576 elements, say — and then `kind` is `'bound'` and
+`detail`, `count` and `max` say which ([Costs and
+limits](./lists#costs-and-limits)). An index past a list's or a text's length
+rejects with `OUT_OF_RANGE`, a tree move under the node's own subtree with
+`CYCLE`.
 
 ### Compare-and-swap
 
@@ -90,13 +119,17 @@ that is what lets a peer that was away catch up. `purge(id)` is the other
 thing: the record is gone for good. It is a `purge` op, which wins over
 every other op at any stamp (a later write does not revive it, nor does a
 concurrent one on another node), and a **scrub** of every entry of the id
-in this node's log — their `data`, `meta`, `key` and `value` are stripped,
-in memory and in the files, with the position, origin and stamp kept so the
-vector and a resuming peer are unaffected. A peer that receives the purge
+in this node's log — their `data`, `meta`, `key`, `value` and the `nonce`
+that salted their signature's digest are stripped, in memory and in the
+files, with the position, origin, stamp, signature and digest kept so the
+vector and a resuming peer are unaffected — and of its copies and catalog
+rows in every [tag](./versions#tags). A peer that receives the purge
 scrubs its own log the same way, and so does any peer that receives
-anything else about that id afterwards. The chain keeps hashes only. A
-purged record is listed nowhere, reads as `null`, and a `Record` of it reads
-`null` too.
+anything else about that id afterwards, or that learns of the purge from a
+snapshot it bootstraps from. The chain keeps hashes only. A
+purged record is listed nowhere and reads as `null`, at a tag too; a read at
+a version before the purge rejects with `HISTORY_GONE` (`reason:
+'scrubbed'`), and a `Record` of it reads `null`.
 
 ```js
 await storage.purge(id);          // nothing of it left here
@@ -205,16 +238,46 @@ for a browser rebuilding a large catalog, where that verification is one
 hash and two reads per record. `storage.validate(id, data, block)` is still
 there for a check on demand.
 
+### When a record file lags the log
+
+A local write is durable once its op is in the log: the record file and its
+chain block come after. Two things put that file behind the log, and in both
+the cache holds the record — every read sees the write — and the log keeps
+the batch unapplied until the file lands, so a crash in between is replayed
+onto the file at the next open:
+
+- **`open({ defer })`.** The file waits up to `defer` ms, and the writes of
+  one record within the window land as one file and one block. `tag()` and
+  `close()` flush first, and a peer's write of the record lands it whole.
+- **A file write that failed** — a full disk, a quota. The write is not
+  undone (it replicates from the log already); the record is held in memory
+  until the next open, and the storage's `error` event fires with
+  `code: 'UNPERSISTED'` and the `ids`. `tag()` rejects with `UNPERSISTED`
+  while such a record is held.
+
+```js
+const storage = await open({ path: 'data', defer: 50 });
+const id = await storage.insert({ title: 'Notes' });
+for (const ch of 'hello') await storage.push(id, 'body', ch);
+await storage.get(id);   // { title: 'Notes', body: 'hello' } — six ops logged, no file yet
+storage.stats().deferred; // 1 — one record waiting; 0 once the window passed
+```
+
 ### Health
 
 `storage.stats()` is what an operator reads at runtime, from memory: whether
-the storage is closed, how many writes wait on the mutation queue, the cache
-(`size`, `max`, `pinned` by live Records), the catalog (`entries`, tombstones
-included, and `dirty` puts since the last save), the log (`length`, `floor`,
-`next`, `epoch`, `segments`, `latestTs`), the chain's `tail` (or `null` under
-`chain: false`) and the lock `mode` (or `null` under `lock: false`). The
-[sync manager](./sync#lifecycle-and-events) adds `peers()`, `hosted()` and the
-`log` event; [telemetry](./telemetry) adds the gauges.
+the storage is `closed`, how many writes wait on the mutation `queue`, the
+`cache` (`size`, `max`, `pinned` by live Records), the `catalog` (`entries`,
+tombstones included, and `dirty` puts since the last save), the `tags`
+(`count`, and `corrupt` when `tags.json` could not be read at open), the
+records whose files lag the log (`held`, the deferred ones among them, and
+`deferred`), the `log` (`length`, `floor`, `next`, `epoch`, `segments`,
+`latestTs`, `droppedTs`, and `pins` — readers holding segments past
+retention, an undo stack mostly), the `chain`'s `tail` (or `null` under
+`chain: false`) and the `lock`'s `mode` (or `null` under `lock: false`). The
+[sync manager](./sync#lifecycle-and-events) adds `peers()` and `hosted()`, the
+storage's [`log` event](./hooks#storage) reports the log rolling, and
+[telemetry](./telemetry) adds the gauges.
 
 ### Repair
 
@@ -227,7 +290,8 @@ changed under the chain is evidence first. When you have looked,
 retained entries of the id are replayed from the first whole-record op among
 them (a `write`, `merge`, `delete` or `purge`), and the result is written the
 usual way, with a chain block of its own, back into the catalog and the cache.
-What comes out is what a peer replaying this log from that op would hold.
+What comes out is what a peer replaying this log from that op would hold —
+the same fold [`history()` and `get(id, { at })`](./versions) read the past with.
 
 ```js
 try {
@@ -242,6 +306,30 @@ A record the log cannot rebuild — its write compacted away so only `set`s and
 `inc`s remain, an id never written here, an encrypted record (which has no
 ops) — rejects with `code: 'UNRECOVERABLE'`; a peer that still holds the
 record is the way back then (a [bootstrap](./sync#bootstrap) carries it).
+
+### Compact
+
+A record's metadata keeps what its fields merged from: a text typed into
+from many places keeps a run per place, a list reordered often keeps its old
+slots, a tree keeps every move of every node. `storage.compact(id)` rewrites
+the record as the ops it reads as today — a `write` of its registers, then
+an `inc` per counter, an `add` per set, one `splice` per list or text and
+one move per tree node — so what lay under it goes by the reset rule, on this
+node and on every peer the ops reach, and `get()` reads the same:
+
+```js
+await storage.compact(id); // how many ops it took; 0 for a record that is not there
+```
+
+A text's marks are laid again over the new run, so `spans()` reads the same
+too. What it cannot keep is the names of the elements: every
+[cursor](./lists#cursors) into a list or a text of the record reads `null`
+from then on, and a stacking mark has a new id. A list, a text, a set or a
+tree that reads empty is left out: no op makes an empty one. A peer's op stamped
+before the rewrite and arriving after it is dropped by the reset, as with
+any whole-record write; an encrypted record rejects with `ENCRYPTED`. It is
+`applyPatches()` over the record's own reading — see [Versions and
+history](./versions#diff-and-restore).
 
 ### Encryption at rest
 
@@ -263,10 +351,13 @@ records, the Ed25519 one that [signs ops](./sync#signatures) — unprotected:
 whoever can read the directory can read the records, and sign as this node.
 
 Encrypted records are **local**. No peer holds this node's private key, so
-they produce no operations, never appear in a snapshot, and `inc()`, `add()`
-and `remove()` on one throw — `update()`, `set()` and `delete()` still work,
-they simply stay here. A record never changes kind: writing an encrypted record over a
-replicated one (or the reverse) is refused.
+they produce no operations, never appear in a snapshot, and every field-kind
+method on one — `inc()`, `add()`, `remove()`, `splice()`, `push()`,
+`treeMove()`… — rejects with `code: 'ENCRYPTED'`, as do `history()`, `diff()`
+and `compact()`, which read the log it is not in. `update()`, `set()`,
+`delete()` and `purge()` still work; they simply stay here. A record never
+changes kind: an encrypted write over a replicated record is refused
+(`ENCRYPTED`), and a plain write to an encrypted one seals it again.
 
 ## Records
 
@@ -290,8 +381,12 @@ await record.data();           // the full current object
 await record.delete();
 ```
 
-A set field changes through `record.add()` and `record.remove()`: assigning
-it and saving is a `set` op on a set field, which throws `FIELD_KIND`.
+Every field-kind method of the storage is on the record too, without the
+id: `record.splice('body', 0, 0, 'Hi')`, `push()`, `updateText()`, `mark()`,
+`unmark()`, `unmarkById()`, `spans()`, `cursor()`, `index()`, `setAt()`,
+`move()`, `treeMove()`, `treeRemove()`. A field of any kind but a register
+changes through those: assigning it and saving is a `set` op on it, which
+throws `FIELD_KIND`.
 
 Properties are defined from whatever keys the record had when it was loaded;
 `id` is reserved and never becomes a settable property.
@@ -299,7 +394,10 @@ Properties are defined from whatever keys the record had when it was loaded;
 A record also follows changes made **elsewhere** — `storage.update()` in the
 same process, or an op from a peer: its properties are refreshed, `update`
 fires with the delta, and edits staged but not yet saved stay on top. A
-record deleted elsewhere reports `update` with `null` data.
+record deleted elsewhere reports `update` with `null` data. A record reads
+through `get()` — the lens and [`afterRead`](./hooks#reads-stay-raw-where-it-matters)
+applied — as it loads and as it follows a change; with the lens or a read
+hook in play, the change reaches it once the write is done, in order.
 
 ### References
 
@@ -339,12 +437,12 @@ A collection answers for its own records: `get(id)` of a record of another
 collection is `null`, and `update()`, `delete()` and `record()` reject with
 `code: 'NOT_FOUND'` — the storage's own methods address any record.
 
-An entity definition is `{ schema?, idField?, validate?, index?, unique?, fields? }`;
+An entity definition is `{ schema?, idField?, validate?, index?, unique?, fields?, search? }`;
 `{}` is a bare collection. `schema` validates the records ([below](#validation)),
 `idField` names the key the id is handed to the validator under, `index` and
 `unique` — explicit, or read off a metaschema schema's `indexes` and
-`unique: true` fields — are what [queries](#queries) key on, and `fields` is
-free-form notes kept as given. Anything else is a `TypeError` at
+`unique: true` fields — are what [queries](#queries) key on, `search` names
+the fields `$text` searches, and `fields` is free-form notes kept as given. Anything else is a `TypeError` at
 `open()`: a definition with a typo is a validation that silently never runs.
 
 `$type` is the record's collection and never changes. `storage.set()` without
@@ -367,7 +465,8 @@ The full guide is [Queries](./query); the shape, in short.
 `{ field: value }` is equality (a dotted path reaches into the record, an
 array field holds a scalar value), `{ field: { $op } }` the operators `$eq`,
 `$ne`, `$in`, `$nin`, `$gt`, `$gte`, `$lt`, `$lte`, `$exists`, `$regex`
-(with `$options`), and `$and` / `$or` / `$not` nest. A malformed query is a
+(with `$options`), `$and` / `$or` / `$not` nest, and `$text` searches an
+entity's [search fields](./query#full-text-search). A malformed query is a
 `TypeError` at `select()`.
 
 ```js
@@ -415,9 +514,11 @@ application decides which yields.
 ### Validation
 
 The full guide is [Schema and validation](./schema); the shape, in short.
-Give an entity a `schema` and every write to its collection — `insert()`,
-`set()`, `update()`, `inc()`, `add()`, `remove()`, a `Record.save()` — is validated as the whole
-record the write leaves behind, before anything is stamped, logged or written.
+Give an entity a `schema` and every write to its collection but `delete()`
+and `purge()` — `insert()`, `set()`, `update()`, a `Record.save()`, `inc()`,
+`add()`, `remove()`, and every list, text and tree write — is validated as
+the whole record the write leaves behind, before anything is logged or
+written.
 Three shapes are understood, and the package requires none of them:
 
 - a **Standard Schema** — anything with a `~standard` property: an entity of a
@@ -558,20 +659,21 @@ await storage.get(oldPost); // { name: 'Hello', $type: 'Post' } — on disk it i
 ```
 
 Writes go through the lens too: `update()` validates the record as it reads,
-and carries only the keys that changed. `get()`, `Record`, `swap()` read the
-view; `snapshot()` and `getCachedData()` read the raw data, and so does
-replication — a peer on the older version sees the record exactly as it was
-written.
+and carries only the keys that changed. `get()`, `swap()`, a cursor and a
+`Record` as it loads read the view; `snapshot()` and `getCachedData()` read
+the raw data, and so does replication — a peer on the older version sees the
+record exactly as it was written.
 
 `migrate()` rewrites what the lens only reads: every record of an older
 version becomes a whole-record write of its view (the version with it), with
-its counters and sets added back. Run it on one node after an upgrade; peers receive
-ordinary ops. It is idempotent, and `{ entities }` limits it to those
-collections:
+the fields of other kinds made again after it — an `inc` per counter, an
+`add` per set, one `splice` per list or text, one move per tree node. Run it
+on one node after an upgrade; peers receive ordinary ops. It is idempotent,
+and `{ entities }` limits it to those collections:
 
 ```js
 if (storage.schemaInfo.previous) {
-  await storage.migrate(); // { migrated: 12, counters: 3 }
+  await storage.migrate(); // { migrated: 12, counters: 3, sets: 1, lists: 0, texts: 2, trees: 0 }
 }
 ```
 
@@ -582,7 +684,8 @@ forward-tolerant; the validator does not know the shape), and emits `schema`
 and flagged with its version, relays it, and applies it at the first open
 that runs that version — `schemaInfo.held` is then `{ replayed, lost }`,
 `lost` counting held ops that retention dropped before the upgrade. A hold
-needs `sync.retention.ops` of 1000 or more, and a directory that ran a newer
+needs `sync.retention.ops` of 1000 or more (or `0`, keep everything), and a
+directory that ran a newer
 version cannot be reopened with `'hold'` on an older one.
 
 ## On disk
@@ -597,10 +700,14 @@ data/
 ├── index/         catalog.json — the record catalog as of a log position, search text included (derived; rebuilt when missing)
 ├── data/          <id>.json per record: { data, meta, encrypted, timestamp, block }
 ├── log/           the operation log (see Sync)
+├── tags.json      { format, tags } — the tags taken here (see Versions and history › Tags); tags.corrupt.json beside it once it could not be read
+├── tags/          <name>/index/catalog.json and <name>/data/<id>.json — a tag's catalog and the record files copied before their first change after it; .pending/data/ while tags.json is unreadable
+├── branch.json    { format, parent, forkedAt, createdAt } — in a branch only (see Versions and history › Branches)
 └── remote/        <url>.json per registered sync node
 ```
 
 Every record names the block that committed it, which is what makes
 [validation](./chain) possible. `meta` is the replication bookkeeping — per
-field clocks, the reset watermark, the tombstone, the counters — and is what
-lets two nodes' copies merge; a deleted record keeps its file as a tombstone.
+field clocks, the reset watermark, the tombstone, the counters, the sets, a
+list's or a text's block, a tree's moves — and is what lets two nodes'
+copies merge; a deleted record keeps its file as a tombstone.

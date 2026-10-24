@@ -138,7 +138,24 @@ test('every runtime export is declared in the types', () => {
   check('contracts.js', 'contracts.d.ts');
   check('idb.js', 'idb.d.ts');
   check('search.js', 'search.d.ts');
+  check('order.js', 'order.d.ts');
+  check('undo.js', 'undo.d.ts');
+  check('branch.js', 'branch.d.ts');
   // browser.js is only loadable under OPFS/WebCrypto globals, so compare its
   // barrel's names against the node one instead of requiring it here.
   check('index.js', 'browser.d.ts');
+});
+
+test('every type index.d.ts exports, browser.d.ts exports too', () => {
+  const declared = (source) =>
+    new Set([
+      ...[...source.matchAll(/^export (?:declare )?(?:type|interface|class|const|function|enum) (\w+)/gm)].map(
+        (m) => m[1],
+      ),
+      ...[...source.matchAll(/export (?:type )?\{([^}]*)\}/g)].flatMap((m) => m[1].match(/\w+/g) ?? []),
+    ]);
+  const node = declared(readFileSync(path.join(ROOT, 'index.d.ts'), 'utf8'));
+  const browser = declared(readFileSync(path.join(ROOT, 'browser.d.ts'), 'utf8'));
+  const missing = [...node].filter((name) => !browser.has(name));
+  assert.deepStrictEqual(missing, [], 'a TypeScript user under the browser condition imports these from browser.d.ts');
 });

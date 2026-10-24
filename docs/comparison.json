@@ -83,8 +83,32 @@
           "title": "Collaborative text"
         },
         {
+          "id": "richText",
+          "title": "Rich text: marks and blocks"
+        },
+        {
+          "id": "marksStack",
+          "title": "Overlapping marks of one kind (comments)"
+        },
+        {
+          "id": "cursors",
+          "title": "Stable cursors"
+        },
+        {
           "id": "lists",
           "title": "Ordered lists that merge"
+        },
+        {
+          "id": "move",
+          "title": "Move in lists without duplicates"
+        },
+        {
+          "id": "trees",
+          "title": "Trees that merge (move a node)"
+        },
+        {
+          "id": "undo",
+          "title": "Undo that converges (local undo)"
         },
         {
           "id": "counters",
@@ -163,6 +187,14 @@
         {
           "id": "history",
           "title": "History / time travel"
+        },
+        {
+          "id": "tags",
+          "title": "Named versions (tags)"
+        },
+        {
+          "id": "branches",
+          "title": "Branches and merge-back"
         }
       ]
     },
@@ -283,14 +315,15 @@
           "source": "src/query.js; docs/guide/hooks.md"
         },
         "text": {
-          "mark": "❌",
-          "text": "none",
-          "source": "src/ops.js"
+          "mark": "✅",
+          "text": "text fields: `splice()`/`updateText()` merge by position (Fugue); marks with expand rules, stacking comments, cursors",
+          "source": "src/sequence.js; src/ops.js; docs/guide/lists.md",
+          "note": "Fields of a record, not whole documents: a record is read and written whole per op, and a long document is a list of block records. No editor bindings yet."
         },
         "lists": {
-          "mark": "❌",
-          "text": "no ordered list; an array field can be an observed-remove set (`add()`/`remove()`)",
-          "source": "src/ops.js"
+          "mark": "✅",
+          "text": "list fields: `splice()`, `setAt()`, `move()` (Fugue; a concurrent move lands once)",
+          "source": "src/sequence.js; src/ops.js; docs/guide/lists.md"
         },
         "counters": {
           "mark": "✅",
@@ -380,9 +413,9 @@
           "note": "The chain keeps an unsalted SHA-256 of every version of the record, which can confirm a guessed record."
         },
         "history": {
-          "mark": "⚠️",
-          "text": "op log within retention; `repair(id)`; no read-at-version",
-          "source": "src/log.js; docs/guide/storage.md#repair"
+          "mark": "✅",
+          "text": "`history(id)` and `get(id, { at })` — by event id, stamp or version vector; exact within log retention, from the last reset",
+          "source": "src/history.js; docs/guide/versions.md"
         },
         "hooks": {
           "mark": "✅",
@@ -408,6 +441,46 @@
           "mark": "❌",
           "text": "none",
           "source": "package.json"
+        },
+        "richText": {
+          "mark": "✅",
+          "text": "`mark()`/`unmark()`/`spans()` on text fields: anchors with expand rules, newest per name; blocks are records in a movable list",
+          "source": "src/sequence.js (markAnchors, applyMark, spans); docs/guide/lists.md#rich-text"
+        },
+        "marksStack": {
+          "mark": "✅",
+          "text": "`mark(…, { many: true })` stacks every mark of a name; removable by id (comments)",
+          "source": "src/sequence.js (MANY, OFF flags); docs/guide/lists.md#rich-text"
+        },
+        "cursors": {
+          "mark": "✅",
+          "text": "`cursor(id, key, index, { side })` / `index(id, key, cursor)` — an element and a side; survives edits",
+          "source": "src/sequence.js (cursorAt, indexOfCursor); docs/guide/lists.md#cursors"
+        },
+        "move": {
+          "mark": "✅",
+          "text": "`move(id, key, from, to)`: a position register per element; a concurrent move lands once",
+          "source": "src/sequence.js (applyMove, pos registers); src/commit.js (resolveMove); docs/guide/lists.md#moving-and-assigning"
+        },
+        "trees": {
+          "mark": "✅",
+          "text": "`treeMove()`/`treeRemove()`: a tree field, moves folded in stamp order, a cycle never forms (Kleppmann 2021)",
+          "source": "src/tree.js; src/ops.js (applyTree); docs/guide/lists.md#trees"
+        },
+        "undo": {
+          "mark": "✅",
+          "text": "`@alexify/syncom/undo`: steps over the `commit` event, applied as new ops; refuse-to-overwrite; a peer sees an undo as a write",
+          "source": "src/undo.js; docs/guide/versions.md#undo-and-redo"
+        },
+        "tags": {
+          "mark": "✅",
+          "text": "`tag(name)` / `at(name)`: the whole storage as it was, copy-on-write; queries and a snapshot at the tag",
+          "source": "src/tags.js; docs/guide/versions.md#tags"
+        },
+        "branches": {
+          "mark": "✅",
+          "text": "`@alexify/syncom/branch`: fork a storage (at the present or a tag) under a new identity, merge either way as ops",
+          "source": "src/branch.js; src/outbound.js; docs/guide/versions.md#branches"
         }
       }
     },
@@ -627,6 +700,46 @@
           "mark": "⚠️",
           "text": "editor bindings official; React via `react-yjs` (third-party)",
           "source": "https://github.com/yjs/yjs README (Bindings: y-prosemirror, y-quill, y-codemirror, y-monaco; React: react-yjs, SyncedStore)"
+        },
+        "richText": {
+          "mark": "✅",
+          "text": "`Y.Text` formatting attributes, `Y.XmlFragment` for block trees",
+          "source": "yjs@13.6.33 src/types/YText.js:1198 (format), src/types/YXmlFragment.js:134"
+        },
+        "marksStack": {
+          "mark": "⚠️",
+          "text": "one value per attribute name; overlapping comments need distinct names",
+          "source": "yjs@13.6.33 src/types/YText.js:1124-1198 (attributes are a map)"
+        },
+        "cursors": {
+          "mark": "✅",
+          "text": "`RelativePosition` (item id + assoc)",
+          "source": "yjs@13.6.33 src/utils/RelativePosition.js:43,163"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "`Y.Array` has insert and delete only; a move is delete + insert (duplicates under concurrency)",
+          "source": "yjs@13.6.33 src/types/YArray.js:139,181 (no move method)"
+        },
+        "trees": {
+          "mark": "⚠️",
+          "text": "`Y.XmlFragment`/`Y.XmlElement` nest; a node is moved by delete + insert",
+          "source": "yjs@13.6.33 src/types/YXmlFragment.js:134, src/types/YXmlElement.js:30"
+        },
+        "undo": {
+          "mark": "✅",
+          "text": "`UndoManager` (tracked origins, capture timeout)",
+          "source": "yjs@13.6.33 src/utils/UndoManager.js:160"
+        },
+        "tags": {
+          "mark": "⚠️",
+          "text": "`Y.snapshot()` captures a state vector + delete set; unnamed, needs `gc: false`",
+          "source": "yjs@13.6.33 src/utils/Snapshot.js:28,125"
+        },
+        "branches": {
+          "mark": "⚠️",
+          "text": "a second `Y.Doc` loaded from an update and merged back by update exchange; no fork/merge API",
+          "source": "yjs@13.6.33 src/utils/encoding.js (applyUpdate / encodeStateAsUpdate)"
         }
       }
     },
@@ -844,6 +957,46 @@
           "mark": "✅",
           "text": "`@automerge/react`, Svelte store, Solid primitives",
           "source": "npm: @automerge/react, @automerge/automerge-repo-react-hooks, @automerge/automerge-repo-svelte-store, @automerge/automerge-repo-solid-primitives (all 2.6.0-alpha.3)"
+        },
+        "richText": {
+          "mark": "✅",
+          "text": "`mark`/`unmark`/`marks`, `splitBlock` (Peritext)",
+          "source": "@automerge/automerge@3.5.0 dist/implementation.d.ts:711,792-795"
+        },
+        "marksStack": {
+          "mark": "⚠️",
+          "text": "one value per mark name; overlapping comments need distinct names",
+          "source": "@automerge/automerge@3.5.0 dist/implementation.d.ts:792 (mark(name, value) replaces by name)"
+        },
+        "cursors": {
+          "mark": "✅",
+          "text": "`getCursor`/`getCursorPosition`",
+          "source": "@automerge/automerge@3.5.0 dist/implementation.d.ts:781,791"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "lists have `insertAt`/`deleteAt` only",
+          "source": "@automerge/automerge@3.5.0 dist/implementation.d.ts:55-62 (no move)"
+        },
+        "trees": {
+          "mark": "❌",
+          "text": "nested maps and lists; no tree type with a move",
+          "source": "@automerge/automerge@3.5.0 dist/implementation.d.ts:55-62"
+        },
+        "undo": {
+          "mark": "❌",
+          "text": "no undo manager in the package",
+          "source": "@automerge/automerge@3.5.0 dist/implementation.d.ts (no undo export); https://automerge.org/docs/"
+        },
+        "tags": {
+          "mark": "⚠️",
+          "text": "`getHeads()` names a version; unnamed, kept by the app",
+          "source": "@automerge/automerge@3.5.0 dist/implementation.d.ts:125,492 (view(doc, heads), getHeads)"
+        },
+        "branches": {
+          "mark": "✅",
+          "text": "`clone`, `merge`, `changeAt(heads)`",
+          "source": "@automerge/automerge@3.5.0 dist/implementation.d.ts:264-300,429-439"
         }
       }
     },
@@ -1058,6 +1211,46 @@
           "mark": "✅",
           "text": "`loro-mirror-react`; editor bindings",
           "source": "npm loro-mirror-react@2.3.3 (repo loro-dev/loro-mirror); https://loro.dev/llms.txt (loro-prosemirror, loro-codemirror)"
+        },
+        "richText": {
+          "mark": "✅",
+          "text": "`LoroText.mark`/`unmark` with expand behaviour, delta export",
+          "source": "loro-crdt@1.16.4 bundler/loro_wasm.d.ts:3395,3540,3629"
+        },
+        "marksStack": {
+          "mark": "⚠️",
+          "text": "one value per key; overlapping comments need distinct keys",
+          "source": "loro-crdt@1.16.4 bundler/loro_wasm.d.ts:3540 (mark(range, key, value))"
+        },
+        "cursors": {
+          "mark": "✅",
+          "text": "`getCursor(pos, side)` / `doc.getCursorPos`",
+          "source": "loro-crdt@1.16.4 bundler/loro_wasm.d.ts:533,1814,2091"
+        },
+        "move": {
+          "mark": "✅",
+          "text": "`LoroMovableList.move(from, to)`",
+          "source": "loro-crdt@1.16.4 bundler/loro_wasm.d.ts:3248,3305"
+        },
+        "trees": {
+          "mark": "✅",
+          "text": "`LoroTree`: move with a fractional index, no cycles",
+          "source": "loro-crdt@1.16.4 bundler/loro_wasm.d.ts:1542,3688"
+        },
+        "undo": {
+          "mark": "✅",
+          "text": "`UndoManager` with remote-change transform",
+          "source": "loro-crdt@1.16.4 bundler/loro_wasm.d.ts:3964,4026,4036"
+        },
+        "tags": {
+          "mark": "⚠️",
+          "text": "`frontiers()` name a version; unnamed, kept by the app",
+          "source": "loro-crdt@1.16.4 bundler/loro_wasm.d.ts:2839 (frontiers), 2816 (checkout)"
+        },
+        "branches": {
+          "mark": "✅",
+          "text": "`fork`, `forkAt(frontiers)`, `import` to merge",
+          "source": "loro-crdt@1.16.4 bundler/loro_wasm.d.ts:2617,2759"
         }
       }
     },
@@ -1065,217 +1258,252 @@
       "id": "jazz",
       "name": "Jazz",
       "url": "https://github.com/garden-co/jazz",
-      "direction": "local-first framework",
+      "direction": "local-first relational database",
       "package": "jazz-tools",
-      "version": "0.20.19",
+      "version": "2.0.0-alpha.59",
       "cells": {
         "version": {
           "mark": "",
-          "text": "0.20.19 (`jazz-tools`)",
-          "note": "Jazz 2.0 is a rewrite in alpha (2.0.0-alpha.59: tables, SQL-like queries) and jazz.tools/docs already documents it; the 0.20 docs ship in the package (`bin/docs-index.txt`) and at classic.jazz.tools.",
-          "source": "pnpm view jazz-tools dist-tags (latest 0.20.19, alpha 2.0.0-alpha.59); https://jazz.tools/llms.txt; jazz-tools@0.20.19 bin/docs-index.txt"
+          "text": "2.0.0-alpha.59 (`jazz-tools@alpha`); npm `latest` 0.20.19 is Jazz Classic",
+          "note": "The table compares 2.0: jazz.tools/docs documents only it, and 2.0 throws `JAZZ_CLASSIC_API_REMOVED` on every 0.x API; `latest` has not moved since 2026-07.",
+          "detail": "Cells cite the repository at commit 16cadcf (2026-10-23), which carries the architecture specs (crates/jazz/SPEC) the tarball does not ship.",
+          "source": "pnpm view jazz-tools dist-tags (latest 0.20.19, alpha 2.0.0-alpha.59); jazz@16cadcf packages/jazz-tools/src/classic-api.ts:9-17; https://jazz.tools/llms.txt"
         },
         "released": {
           "mark": "",
-          "text": "2026-07",
-          "source": "pnpm view jazz-tools time — 0.20.19 published 2026-07-03 (2.0.0-alpha.59: 2026-10-04)"
+          "text": "2026-10 (alpha); `latest` 2026-07",
+          "source": "pnpm view jazz-tools time — 2.0.0-alpha.59 published 2026-10-04, 0.20.19 2026-07-03"
         },
         "license": {
           "mark": "",
-          "text": "MIT (`jazz-run` server MIT); Jazz Cloud managed",
-          "source": "jazz-tools@0.20.19, cojson@0.20.19, jazz-run@0.20.19 package.json license; docs-index.txt:2670-2745"
+          "text": "MIT; Jazz Cloud managed",
+          "source": "jazz@16cadcf LICENSE; jazz@16cadcf packages/jazz-tools/package.json license; jazz@16cadcf docs/content/docs/install/client.mdx:116"
         },
         "deps": {
           "mark": "",
-          "text": "18 — `zod`, `cojson`, ProseMirror…",
-          "source": "jazz-tools@0.20.19 package.json dependencies (18 entries)"
+          "text": "17 — OpenTelemetry SDK + OTLP exporters, `jazz-wasm`, `jose`, `esbuild`…",
+          "source": "jazz@16cadcf packages/jazz-tools/package.json dependencies (17 entries)"
         },
         "impl": {
           "mark": "",
-          "text": "TS + Rust crypto core (WASM/N-API/RN)",
-          "source": "cojson@0.20.19 package.json deps cojson-core-wasm/-napi/-rn; jazz-tools@0.20.19 bin/docs-index.txt:9685-9710 ('Full native crypto')"
+          "text": "TS client + Rust core (`groove` query engine): WASM in the browser, N-API on Node, native on RN",
+          "source": "jazz@16cadcf crates/jazz/SPEC/1_intro.md:5-12; jazz@16cadcf docs/content/docs/install/typescript-server.mdx:22; jazz@16cadcf docs/content/docs/install/client.mdx:104-105"
         },
         "node": {
           "mark": "✅",
-          "text": "workers, `jazz-run sync` (SQLite); Node ≥20",
-          "source": "jazz-tools@0.20.19 src/worker/index.ts:49,62; jazz-run@0.20.19 dist/startSyncServer.js (getBetterSqliteStorage); bin/docs-index.txt:7450-7453",
-          "detail": "`startWorker` defaults `syncServer` to `wss://cloud.jazz.tools` when none is given."
+          "text": "`jazz-napi` runtime (SQLite storage), `jazz-tools/backend`; Node ≥22.12",
+          "source": "jazz@16cadcf docs/content/docs/install/typescript-server.mdx:22-25; jazz@16cadcf packages/jazz-tools/package.json exports ./backend, engines"
         },
         "browser": {
           "mark": "✅",
-          "text": "IndexedDB (`cojson-storage-indexeddb`)",
-          "source": "jazz-tools@0.20.19 src/browser/createBrowserContext.ts:2,55"
+          "text": "IndexedDB page store behind a `SharedWorker`",
+          "source": "jazz@16cadcf docs/content/docs/concepts/how-sync-works.mdx:49-51; jazz@16cadcf crates/jazz/SPEC/9_topology.md:79-86"
         },
         "mobile": {
-          "mark": "✅",
-          "text": "React Native and Expo (SQLite)",
-          "source": "jazz-tools@0.20.19 package.json exports ./react-native, ./expo; peerDependencies op-sqlite, expo-sqlite; bin/docs-index.txt:5013-5240"
+          "mark": "⚠️",
+          "text": "React Native/Expo in alpha (`jazz-tools/react-native`, `jazz-rn`); Expo Go unsupported",
+          "source": "jazz@16cadcf docs/content/docs/install/client.mdx:104-111; jazz@16cadcf packages/jazz-tools/package.json exports ./react-native, ./expo"
         },
         "server": {
           "mark": "⚠️",
-          "text": "a sync server: Jazz Cloud or `jazz-run sync`",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:2670-2745 ('Sync and storage: Jazz Cloud or self-hosted')"
+          "text": "a Core server: Jazz Cloud v2 or self-hosted `jazz-napi`",
+          "source": "jazz@16cadcf crates/jazz/SPEC/9_topology.md:5-13; jazz@16cadcf docs/content/docs/install/client.mdx:116; jazz@16cadcf docs/content/docs/install/typescript-server.mdx:22-25"
         },
         "model": {
           "mark": "",
-          "text": "CoValues (maps, lists, feeds, text) in a graph",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:1685-1765, 5448"
+          "text": "relational tables (UUID rows) with row history; mergeable or serializable transactions",
+          "source": "jazz@16cadcf crates/jazz/SPEC/1_intro.md:5-8; jazz@16cadcf crates/jazz/SPEC/2_data_model_identity.md:140-144; jazz@16cadcf crates/jazz/SPEC/3_transactions.md:5-9"
         },
         "schema": {
           "mark": "⚠️",
-          "text": "Zod-based `co.*` schemas; runtime check defaults to `warn`",
-          "note": "Runtime validation (0.20.10+) defaults to `warn`: invalid local writes go through with a console warning, although the source comment says `strict`.",
-          "source": "jazz-tools@0.20.19 src/tools/implementation/zodSchema/validationSettings.ts:17-21; bin/docs-index.txt:1680"
+          "text": "typed `s.table()` columns; no runtime check at write — a commit is never rejected for its schema",
+          "source": "jazz@16cadcf packages/jazz-tools/src/dsl.ts; jazz@16cadcf crates/jazz/SPEC/10_lenses_migrations.md:29 (INV-LENS-16)"
         },
         "migrations": {
-          "mark": "⚠️",
-          "text": "`withMigration()` on every load; no versions",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:937-968, 5590-5602"
+          "mark": "✅",
+          "text": "published schema versions + bidirectional lenses; any version reads any other",
+          "source": "jazz@16cadcf crates/jazz/SPEC/10_lenses_migrations.md:5-10; jazz@16cadcf docs/content/docs/schemas/migrations.mdx:19"
         },
         "queries": {
-          "mark": "❌",
-          "text": "none — traverse references from known ids",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:5542 ('Discovering CoValues without knowing their ID is only possible by traversing references')"
+          "mark": "✅",
+          "text": "typed builder: where/orderBy/limit/offset, includes, joins, aggregates; `db.all`/`db.subscribe`",
+          "source": "jazz@16cadcf crates/jazz/SPEC/6_queries.md:117-142; jazz@16cadcf docs/content/docs/reading/queries.mdx; jazz@16cadcf docs/content/docs/reading/history.mdx:13-20"
         },
         "indexes": {
-          "mark": "❌",
-          "text": "none",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt (no index API)"
+          "mark": "⚠️",
+          "text": "declared as hints (`indexOnly`, `compositeIndex`), maintained by the engine; no index API",
+          "source": "jazz@16cadcf packages/jazz-tools/src/typed-app.ts:48-106; jazz@16cadcf crates/jazz/SPEC/11_branch_views_time_travel.md:43,219; jazz@16cadcf crates/jazz/SPEC/14_lowering_to_groove.md:493-505"
         },
         "unique": {
           "mark": "⚠️",
-          "text": "`getOrCreateUnique`: deterministic id per group",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:985-1011, 5581-5582 (no built-in uniqueness of items)"
+          "text": "no constraint; a `serializable` transaction checks its read set at commit",
+          "source": "jazz@16cadcf crates/jazz/SPEC/3_transactions.md:5-9, 299-383; jazz@16cadcf crates/jazz/SPEC/11_branch_views_time_travel.md:533-540"
         },
         "live": {
           "mark": "✅",
-          "text": "`subscribe`, `useCoState` hooks",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:2143-2230"
+          "text": "`db.subscribe` on any query, maintained incrementally",
+          "source": "jazz@16cadcf docs/content/docs/concepts/branches.mdx:58-60; jazz@16cadcf crates/jazz/SPEC/16_maintained_subscription_views.md:3-60"
         },
         "text": {
-          "mark": "✅",
-          "text": "`co.plainText()`, `co.richText()`; ProseMirror",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:1034-1165; cojson@0.20.19 src/coValues/coPlainText.ts:48 (extends RawCoList)"
+          "mark": "❌",
+          "text": "strings are LWW; the recipe stores Yjs update bytes in rows",
+          "source": "jazz@16cadcf docs/content/docs/recipes/data-patterns/collaborative-text-editing.mdx:9-30; jazz@16cadcf crates/jazz/SPEC/4_history_merging.md:17"
         },
         "lists": {
-          "mark": "✅",
-          "text": "`co.list()` (ordered CRDT)",
-          "source": "cojson@0.20.19 src/coValues/coList.ts:18-25 (pre/app ops by OpID)"
+          "mark": "❌",
+          "text": "rows are the list, ordered by a column (LWW); `g-set` arrays grow only; no sequence CRDT",
+          "source": "jazz@16cadcf packages/jazz-tools/src/dsl.ts:470-481; jazz@16cadcf crates/jazz/SPEC/4_history_merging.md:676-682"
         },
         "counters": {
-          "mark": "❌",
-          "text": "no counter type",
-          "source": "cojson@0.20.19 src/coValues/ (account, binaryCoStream, coList, coMap, coPlainText, coStream, group)"
+          "mark": "✅",
+          "text": "`counter` columns: deltas summed by Core; non-nullable integers, overflow rejected",
+          "source": "jazz@16cadcf packages/jazz-tools/src/dsl.ts:481,493; jazz@16cadcf crates/jazz/SPEC/4_history_merging.md:110-137; jazz@16cadcf crates/jazz/SPEC/2_data_model_identity.md:146-153"
         },
         "topology": {
           "mark": "",
-          "text": "client–server through sync servers",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:2670-2745, 4864-4870 (sync.peer URL)"
+          "text": "client–server: Core orders and merges every write; relays store and forward",
+          "source": "jazz@16cadcf crates/jazz/SPEC/9_topology.md:5-13, 110-126; jazz@16cadcf crates/jazz/SPEC/4_history_merging.md:91-97"
         },
         "transport": {
           "mark": "⚠️",
-          "text": "WebSocket (`cojson-transport-ws`)",
-          "source": "jazz-tools@0.20.19 package.json dependencies (cojson-transport-ws); bin/docs-index.txt:4864-4870"
+          "text": "WebSocket with ordered channels, credits and streaming compression",
+          "source": "jazz@16cadcf crates/jazz/SPEC/14_ordered_transport_channels.md:5-13, 18-41"
         },
         "webrtc": {
           "mark": "❌",
-          "text": "not built in",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt (no WebRTC mention); package exports"
+          "text": "no peer-to-peer",
+          "source": "jazz@16cadcf crates/jazz/SPEC/4_history_merging.md:658-674"
         },
         "partial": {
           "mark": "✅",
-          "text": "per CoValue, loaded on demand",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:2143-2280 (resolve queries, deep loading)"
+          "text": "per query subscription, narrowed by the row-level read policy",
+          "source": "jazz@16cadcf crates/jazz/SPEC/8_sync_protocol.md:664-700; jazz@16cadcf crates/jazz/SPEC/7_authorization.md:5-9"
         },
         "resume": {
           "mark": "✅",
-          "text": "known-state diff per CoValue",
-          "source": "cojson@0.20.19 src/sync.ts:1234-1280 (knownState per session, new content only)"
+          "text": "reconnect resumes subscriptions from persisted watermarks",
+          "source": "jazz@16cadcf crates/jazz/SPEC/8_sync_protocol.md:914-985"
         },
         "bootstrap": {
-          "mark": "❌",
-          "text": "no snapshots — full history per CoValue",
-          "source": "cojson@0.20.19 src/ (no snapshot/compaction code; GarbageCollector.ts only unloads memory); bin/docs-index.txt:5537 ('CoValues track their full edit history')"
+          "mark": "✅",
+          "text": "a new subscription gets a full snapshot of its authorized set, no history replay",
+          "source": "jazz@16cadcf crates/jazz/SPEC/8_sync_protocol.md:664-700"
         },
         "conflicts": {
           "mark": "",
-          "text": "LWW per key by wall-clock `madeAt`; CoList CRDT",
-          "note": "`compareTransactions` returns 0 for equal `madeAt` from different sessions, so a same-millisecond tie falls to arrival order.",
-          "source": "cojson@0.20.19 src/coValueCore/coValueCore.ts:1842-1855; src/coValues/coMap.ts:153-159"
+          "text": "LWW per cell in Core's acceptance order; counters add; every version kept",
+          "note": "The docs say the edit Core receives first wins; the spec and its invariant tests say the last write Core accepts wins per cell. The spec is followed here.",
+          "source": "jazz@16cadcf crates/jazz/SPEC/4_history_merging.md:17, 246-256; jazz@16cadcf docs/content/docs/concepts/how-sync-works.mdx:113-121; jazz@16cadcf crates/invariant-registry.jsonl"
         },
         "offline": {
           "mark": "✅",
-          "text": "local-first; merges on reconnect",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt (FAQ: 'apps will always work, even offline')"
+          "text": "writes apply locally, queue, and upload on reconnect; `.wait({ tier })`",
+          "source": "jazz@16cadcf docs/content/docs/concepts/how-sync-works.mdx:45-58; jazz@16cadcf docs/content/docs/reference/durability-tiers.mdx:12-19"
         },
         "serverAuth": {
-          "mark": "⚠️",
-          "text": "signature/role checks; content opaque to server",
-          "note": "A write by a non-writer is stored and relayed, then ignored by every reader (`markInvalid`); content checks need a server worker.",
-          "source": "cojson@0.20.19 src/permissions.ts:145 ('Transactor has no write permissions'), src/sync.ts:1274-1300; bin/docs-index.txt:6969-6978"
+          "mark": "✅",
+          "text": "Core applies the write policies before accepting; a rejected write is rolled back locally",
+          "source": "jazz@16cadcf crates/jazz/SPEC/7_authorization.md:223-248; jazz@16cadcf docs/content/docs/reference/durability-tiers.mdx:22-28"
         },
         "tamper": {
-          "mark": "✅",
-          "text": "BLAKE3 hash chain per session",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:5864-5869 ('Integrity protection')"
+          "mark": "❌",
+          "text": "no hash chain; versions keyed by (time, node); nothing signed",
+          "source": "jazz@16cadcf crates/jazz/SPEC/2_data_model_identity.md:59-75; jazz@16cadcf crates/jazz/SPEC/4_history_merging.md:665-666"
         },
         "signing": {
-          "mark": "✅",
-          "text": "Ed25519 per session",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:5833-5842, 5867"
+          "mark": "❌",
+          "text": "no per-change signatures; a write is authorized by the authenticated session",
+          "source": "jazz@16cadcf crates/jazz/SPEC/4_history_merging.md:665-666; jazz@16cadcf crates/jazz/SPEC/7_authorization.md:403-412"
         },
         "atRest": {
-          "mark": "⚠️",
-          "text": "stored encrypted; keys kept locally",
-          "note": "The browser keeps the account secret in `localStorage` by default, so this protects data from the server, not from someone with the device.",
-          "source": "cojson@0.20.19 src/coValueCore/verifiedState.ts:56-59 (encryptedChanges); jazz-tools@0.20.19 src/browser/BrowserContextManager.ts:48 (LocalStorageKVStore)"
+          "mark": "❌",
+          "text": "SQLite / IndexedDB in plaintext; the E2EE adapters cover app-managed values only",
+          "source": "jazz@16cadcf crates/jazz/SPEC/9_topology.md:79-86; jazz@16cadcf crates/jazz/SPEC/E2EE_CRYPTO_FORMAT.md:194-196"
         },
         "e2ee": {
-          "mark": "✅",
-          "text": "XSalsa20 with group read keys",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:5844-5852, 5862-5870",
-          "detail": "Removing a member rotates the key for new data only; they keep what they could already read."
+          "mark": "⚠️",
+          "text": "`jazz-tools/e2ee` envelope adapters (XChaCha20-Poly1305); no key lifecycle or table integration yet",
+          "source": "jazz@16cadcf crates/jazz/SPEC/E2EE_CRYPTO_FORMAT.md:51-65, 194-196; jazz@16cadcf packages/jazz-tools/package.json exports ./e2ee"
         },
         "access": {
           "mark": "✅",
-          "text": "Groups: reader/writer/admin, cryptographically enforced",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:4206-4400; cojson@0.20.19 src/permissions.ts"
+          "text": "row-level read and write policies written as queries, enforced by Core",
+          "source": "jazz@16cadcf crates/jazz/SPEC/7_authorization.md:85-103, 223-248, 439-467"
         },
         "purge": {
-          "mark": "✅",
-          "text": "`deleteCoValues` (admin), erased in background",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:1848-1870; cojson@0.20.19 src/storage/DeletedCoValuesEraserScheduler.ts",
-          "detail": "Physical erasure runs on the sync server's schedule, and Jazz Cloud backups may keep data until overwritten."
+          "mark": "❌",
+          "text": "tombstones; a deletion never erases content history",
+          "source": "jazz@16cadcf crates/jazz/SPEC/2_data_model_identity.md:669-671; jazz@16cadcf docs/content/docs/reading/history.mdx:6-8"
         },
         "history": {
           "mark": "✅",
-          "text": "`$jazz.getEdits()`; branches (unstable)",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:3827-3920"
+          "text": "`$history` tables, queryable and subscribable; branch views over a captured snapshot",
+          "source": "jazz@16cadcf docs/content/docs/reading/history.mdx:6-20; jazz@16cadcf docs/content/docs/concepts/branches.mdx:283-290; jazz@16cadcf crates/jazz/SPEC/11_branch_views_time_travel.md:255-271"
         },
         "hooks": {
           "mark": "❌",
-          "text": "none",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt (no write middleware; server workers act through their own account)"
+          "text": "none before a write; `onMutationError` after a rejection",
+          "source": "jazz@16cadcf docs/content/docs/reference/durability-tiers.mdx:22-28"
         },
         "observability": {
           "mark": "✅",
-          "text": "OpenTelemetry metrics (`jazz.*`); no spans",
-          "source": "cojson@0.20.19 package.json dependency @opentelemetry/api; src/sync.ts:178-194, src/queue/IncomingMessagesQueue.ts:27-48"
+          "text": "OpenTelemetry traces and logs (OTLP); Inspector",
+          "source": "jazz@16cadcf packages/jazz-tools/src/runtime/sync-telemetry.ts:1-6; jazz@16cadcf packages/jazz-tools/package.json dependencies; jazz@16cadcf docs/content/docs/reference/inspector.mdx"
         },
         "errors": {
-          "mark": "⚠️",
-          "text": "load states `unavailable`/`unauthorized`/`deleted`",
-          "source": "jazz-tools@0.20.19 src/tools/subscribe/JazzError.ts:4-11, src/tools/subscribe/types.ts:5-33"
+          "mark": "✅",
+          "text": "coded: `permission_denied`, `transaction_conflict`, `write_rejected`, `not_observed`…",
+          "source": "jazz@16cadcf packages/jazz-tools/src (`code:` literals in client/, runtime/, internal/); jazz@16cadcf docs/content/docs/concepts/branches.mdx:286"
         },
         "types": {
           "mark": "✅",
-          "text": "inferred from `co.*` schemas",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:2352 ('Type safety with co.loaded'), 1633-1690"
+          "text": "inferred from `s.table()` schemas",
+          "source": "jazz@16cadcf docs/content/docs/concepts/branches.mdx:29-42"
         },
         "ui": {
           "mark": "✅",
-          "text": "React, RN/Expo, Svelte; Vue (`community-jazz-vue`)",
-          "source": "jazz-tools@0.20.19 package.json exports ./react, ./react-native, ./expo, ./svelte; npm community-jazz-vue@0.20.19"
+          "text": "React, RN/Expo, Solid, Vue, Svelte, Effect",
+          "source": "jazz@16cadcf packages/jazz-tools/package.json exports ./react, ./react-native, ./expo, ./solid, ./vue, ./svelte, ./effect"
+        },
+        "richText": {
+          "mark": "❌",
+          "text": "strings are LWW; the recipe keeps Yjs update bytes in rows",
+          "source": "jazz@16cadcf docs/content/docs/recipes/data-patterns/collaborative-text-editing.mdx:9-30"
+        },
+        "marksStack": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "jazz@16cadcf docs/content/docs/recipes/data-patterns/collaborative-text-editing.mdx:9-30"
+        },
+        "cursors": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "jazz@16cadcf docs/content/docs/recipes/data-patterns/collaborative-text-editing.mdx:9-30"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "rows ordered by a column (LWW); no sequence CRDT",
+          "source": "jazz@16cadcf packages/jazz-tools/src/dsl.ts:470-481"
+        },
+        "trees": {
+          "mark": "❌",
+          "text": "rows with a parent column; no tree merge",
+          "source": "jazz@16cadcf crates/jazz/SPEC/4_history_merging.md:17 (LWW per column)"
+        },
+        "undo": {
+          "mark": "❌",
+          "text": "no undo API",
+          "source": "jazz@16cadcf docs/content/docs (no undo page); crates/jazz/SPEC/E_glossary.md"
+        },
+        "tags": {
+          "mark": "❌",
+          "text": "`$history` rows per record; no named version of the database",
+          "source": "jazz@16cadcf docs/content/docs/reading/history.mdx:6-20"
+        },
+        "branches": {
+          "mark": "⚠️",
+          "text": "`branchBy` columns: the app owns branch names and merge; head-over-base views",
+          "source": "jazz@16cadcf docs/content/docs/concepts/branches.mdx:7-48"
         }
       }
     },
@@ -1498,6 +1726,46 @@
           "mark": "✅",
           "text": "`rxdb/plugins/react`; Vue, Angular, Preact signals",
           "source": "rxdb@17.6.0 package.json:381-404 exports; src/plugins/react/hooks/"
+        },
+        "richText": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "rxdb@17.6.0 src (no Yjs/Automerge or text CRDT)"
+        },
+        "marksStack": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "rxdb@17.6.0 src (no Yjs/Automerge or text CRDT)"
+        },
+        "cursors": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "rxdb@17.6.0 src (no Yjs/Automerge or text CRDT)"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "the `crdt` plugin replays `$push`; no move",
+          "source": "rxdb@17.6.0 src/plugins/crdt/index.ts:133-168,243-280"
+        },
+        "trees": {
+          "mark": "❌",
+          "text": "no tree CRDT",
+          "source": "rxdb@17.6.0 src (no Yjs/Automerge or text CRDT)"
+        },
+        "undo": {
+          "mark": "❌",
+          "text": "no undo API",
+          "source": "rxdb@17.6.0 src/plugins (no undo, tag or branch plugin); https://rxdb.info/transactions-conflicts-revisions.html"
+        },
+        "tags": {
+          "mark": "❌",
+          "text": "no named versions",
+          "source": "rxdb@17.6.0 src/plugins (no undo, tag or branch plugin); https://rxdb.info/transactions-conflicts-revisions.html"
+        },
+        "branches": {
+          "mark": "❌",
+          "text": "no fork/merge API",
+          "source": "rxdb@17.6.0 src/plugins (no undo, tag or branch plugin); https://rxdb.info/transactions-conflicts-revisions.html"
         }
       }
     },
@@ -1715,6 +1983,46 @@
           "mark": "⚠️",
           "text": "third-party `use-pouchdb`",
           "source": "pnpm view use-pouchdb (2.0.3, github.com/Terreii)"
+        },
+        "richText": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://pouchdb.com/api.html (no sequence or text type)"
+        },
+        "marksStack": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://pouchdb.com/api.html (no sequence or text type)"
+        },
+        "cursors": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://pouchdb.com/api.html (no sequence or text type)"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "no sequence CRDT",
+          "source": "https://pouchdb.com/api.html (no sequence or text type)"
+        },
+        "trees": {
+          "mark": "❌",
+          "text": "no tree CRDT",
+          "source": "https://pouchdb.com/api.html (no sequence or text type)"
+        },
+        "undo": {
+          "mark": "❌",
+          "text": "no undo API",
+          "source": "https://pouchdb.com/api.html (revisions per document; no named versions)"
+        },
+        "tags": {
+          "mark": "❌",
+          "text": "no named versions",
+          "source": "https://pouchdb.com/api.html (revisions per document; no named versions)"
+        },
+        "branches": {
+          "mark": "⚠️",
+          "text": "replicate to a second database and back; conflicts become revisions to resolve",
+          "source": "https://pouchdb.com/api.html#replication; https://pouchdb.com/guides/conflicts.html"
         }
       }
     },
@@ -1931,6 +2239,46 @@
           "mark": "✅",
           "text": "`ui-react`, `ui-solid`, `ui-svelte`",
           "source": "tinybase@10.0.1 ui-react/, ui-solid/, ui-svelte/"
+        },
+        "richText": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "tinybase@10.0.1 @types/store/index.d.ts:581 (cells are plain values)"
+        },
+        "marksStack": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "tinybase@10.0.1 @types/store/index.d.ts:581 (cells are plain values)"
+        },
+        "cursors": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "tinybase@10.0.1 @types/store/index.d.ts:581 (cells are plain values)"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "no sequence CRDT",
+          "source": "tinybase@10.0.1 @types/store/index.d.ts:581 (cells are plain values)"
+        },
+        "trees": {
+          "mark": "❌",
+          "text": "no tree CRDT",
+          "source": "tinybase@10.0.1 @types/store/index.d.ts:581 (cells are plain values)"
+        },
+        "undo": {
+          "mark": "✅",
+          "text": "`checkpoints`: undo/redo over the store, labels per checkpoint",
+          "source": "tinybase@10.0.1 @types/checkpoints/index.d.ts:115-119"
+        },
+        "tags": {
+          "mark": "⚠️",
+          "text": "named checkpoints, in memory",
+          "source": "tinybase@10.0.1 @types/checkpoints/index.d.ts:115-119 (addCheckpoint(label))"
+        },
+        "branches": {
+          "mark": "⚠️",
+          "text": "two `MergeableStore`s merge; no fork-from-point API",
+          "source": "tinybase@10.0.1 @types/mergeable-store/index.d.ts:264-267"
         }
       }
     },
@@ -2149,6 +2497,46 @@
           "mark": "✅",
           "text": "`dexie-react-hooks`; `liveQuery` observables",
           "source": "pnpm view dexie-react-hooks (4.4.0); dexie@4.4.6 dist/dexie.d.ts:1214"
+        },
+        "richText": {
+          "mark": "✅",
+          "text": "`Y.Text` in `Y.Doc` properties (Yjs through y-dexie)",
+          "source": "dexie-cloud-addon@4.4.16 package.json dependencies (yjs, y-dexie); https://dexie.org/docs/Y.js/Y.js"
+        },
+        "marksStack": {
+          "mark": "⚠️",
+          "text": "Yjs attributes: one value per name",
+          "source": "dexie-cloud-addon@4.4.16 (yjs); yjs@13.6.33 src/types/YText.js:1124-1198"
+        },
+        "cursors": {
+          "mark": "✅",
+          "text": "Yjs `RelativePosition` on the `Y.Doc`",
+          "source": "dexie-cloud-addon@4.4.16 (yjs); yjs@13.6.33 src/utils/RelativePosition.js:43"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "`Y.Array` has no move; rows are LWW",
+          "source": "dexie@4.4.6 dist/dexie.mjs:1363-1390 (PropModification.execute); yjs@13.6.33 src/types/YArray.js:139,181"
+        },
+        "trees": {
+          "mark": "⚠️",
+          "text": "`Y.XmlFragment` in a `Y.Doc` property; rows have no tree merge",
+          "source": "dexie-cloud-addon@4.4.16 (yjs); yjs@13.6.33 src/types/YXmlFragment.js:134"
+        },
+        "undo": {
+          "mark": "⚠️",
+          "text": "Yjs `UndoManager` on `Y.Doc` properties only; rows have no undo",
+          "source": "yjs@13.6.33 src/utils/UndoManager.js:160; dexie-cloud-addon@4.4.16 dist/modern/DexieCloudAPI.d.ts (no undo)"
+        },
+        "tags": {
+          "mark": "❌",
+          "text": "no named versions",
+          "source": "dexie-cloud-addon@4.4.16 dist/modern/DexieCloudAPI.d.ts:49+"
+        },
+        "branches": {
+          "mark": "❌",
+          "text": "no fork/merge API",
+          "source": "dexie-cloud-addon@4.4.16 dist/modern/DexieCloudAPI.d.ts:49+"
         }
       }
     },
@@ -2364,6 +2752,46 @@
           "mark": "✅",
           "text": "`use-fireproof` React hooks",
           "source": "pnpm view use-fireproof; @fireproof/use-fireproof@0.24.19 react/"
+        },
+        "richText": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "@fireproof/core-types-base@0.24.19 types.d.ts (no sequence or text type)"
+        },
+        "marksStack": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "@fireproof/core-types-base@0.24.19 types.d.ts (no sequence or text type)"
+        },
+        "cursors": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "@fireproof/core-types-base@0.24.19 types.d.ts (no sequence or text type)"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "no sequence CRDT",
+          "source": "@fireproof/core-types-base@0.24.19 types.d.ts (no sequence or text type)"
+        },
+        "trees": {
+          "mark": "❌",
+          "text": "no tree CRDT",
+          "source": "@fireproof/core-types-base@0.24.19 types.d.ts (no sequence or text type)"
+        },
+        "undo": {
+          "mark": "❌",
+          "text": "no undo API",
+          "source": "@fireproof/core-types-base@0.24.19 types.d.ts (changes(since); no snapshot, undo or fork API)"
+        },
+        "tags": {
+          "mark": "⚠️",
+          "text": "clock heads (CIDs) name a state; unnamed",
+          "source": "@fireproof/core-types-base@0.24.19 types.d.ts:438 (changes(since: ClockHead))"
+        },
+        "branches": {
+          "mark": "❌",
+          "text": "no fork/merge API",
+          "source": "@fireproof/core-types-base@0.24.19 types.d.ts (changes(since); no snapshot, undo or fork API)"
         }
       }
     },
@@ -2582,6 +3010,46 @@
           "mark": "❌",
           "text": "none official",
           "source": "https://gun.eco/docs; npm gun-react is third-party"
+        },
+        "richText": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "gun@0.2020.1241 src/, lib/ (no sequence CRDT)"
+        },
+        "marksStack": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "gun@0.2020.1241 src/, lib/ (no sequence CRDT)"
+        },
+        "cursors": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "gun@0.2020.1241 src/, lib/ (no sequence CRDT)"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "no sequence CRDT",
+          "source": "gun@0.2020.1241 src/, lib/ (no sequence CRDT)"
+        },
+        "trees": {
+          "mark": "❌",
+          "text": "no tree CRDT",
+          "source": "gun@0.2020.1241 src/, lib/ (no sequence CRDT)"
+        },
+        "undo": {
+          "mark": "❌",
+          "text": "no undo API",
+          "source": "gun@0.2020.1241 src/root.js:119-150 (older states dropped)"
+        },
+        "tags": {
+          "mark": "❌",
+          "text": "no named versions",
+          "source": "gun@0.2020.1241 src/root.js:119-150 (older states dropped)"
+        },
+        "branches": {
+          "mark": "❌",
+          "text": "no fork/merge API",
+          "source": "gun@0.2020.1241 src/root.js:119-150 (older states dropped)"
         }
       }
     },
@@ -2798,6 +3266,46 @@
           "mark": "❌",
           "text": "none",
           "source": "https://github.com/orbitdb/orbitdb (no framework packages)"
+        },
+        "richText": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "@orbitdb/core@4.0.0 src/databases/index.js (documents, events, keyvalue only)"
+        },
+        "marksStack": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "@orbitdb/core@4.0.0 src/databases/index.js (documents, events, keyvalue only)"
+        },
+        "cursors": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "@orbitdb/core@4.0.0 src/databases/index.js (documents, events, keyvalue only)"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "no sequence CRDT",
+          "source": "@orbitdb/core@4.0.0 src/databases/index.js (documents, events, keyvalue only)"
+        },
+        "trees": {
+          "mark": "❌",
+          "text": "no tree CRDT",
+          "source": "@orbitdb/core@4.0.0 src/databases/index.js (documents, events, keyvalue only)"
+        },
+        "undo": {
+          "mark": "❌",
+          "text": "no undo API",
+          "source": "@orbitdb/core@4.0.0 src/oplog/log.js (append-only log; no checkout, undo or fork API)"
+        },
+        "tags": {
+          "mark": "⚠️",
+          "text": "a log entry hash names a position (`log.iterator({ lt })`); unnamed",
+          "source": "@orbitdb/core@4.0.0 src/oplog/log.js:414"
+        },
+        "branches": {
+          "mark": "❌",
+          "text": "no fork/merge API",
+          "source": "@orbitdb/core@4.0.0 src/oplog/log.js (append-only log; no checkout, undo or fork API)"
         }
       }
     },
@@ -3017,6 +3525,46 @@
           "mark": "✅",
           "text": "`@evolu/react`, `@evolu/vue`, `@evolu/svelte`",
           "source": "npm @evolu/react 11.2.1, @evolu/vue 2.1.1, @evolu/svelte 3.0.4"
+        },
+        "richText": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "@evolu/common@8.23.2 src/local-first/ (column LWW only)"
+        },
+        "marksStack": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "@evolu/common@8.23.2 src/local-first/ (column LWW only)"
+        },
+        "cursors": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "@evolu/common@8.23.2 src/local-first/ (column LWW only)"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "no sequence CRDT",
+          "source": "@evolu/common@8.23.2 src/local-first/ (column LWW only)"
+        },
+        "trees": {
+          "mark": "❌",
+          "text": "no tree CRDT",
+          "source": "@evolu/common@8.23.2 src/local-first/ (column LWW only)"
+        },
+        "undo": {
+          "mark": "❌",
+          "text": "no undo API",
+          "source": "@evolu/common@8.23.2 src/local-first/Db.ts:748-775 (evolu_history is a table to read, not to restore from)"
+        },
+        "tags": {
+          "mark": "❌",
+          "text": "`evolu_history` is a table to read, not a version to stand at",
+          "source": "@evolu/common@8.23.2 src/local-first/Db.ts:748-775"
+        },
+        "branches": {
+          "mark": "❌",
+          "text": "no fork/merge API",
+          "source": "@evolu/common@8.23.2 src/local-first/Db.ts:748-775 (evolu_history is a table to read, not to restore from)"
         }
       }
     },
@@ -3232,6 +3780,46 @@
           "text": "`@livestore/react`, `solid`, `svelte`",
           "source": "npm @livestore/react|solid|svelte 0.5.0; https://docs.livestore.dev/framework-integrations/vue-integration/",
           "detail": "Vue goes through the community `vue-livestore` package."
+        },
+        "richText": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://docs.livestore.dev/patterns/rich-text-editing/ (pair with Yjs, Automerge or Loro)"
+        },
+        "marksStack": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://docs.livestore.dev/patterns/rich-text-editing/ (pair with Yjs, Automerge or Loro)"
+        },
+        "cursors": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://docs.livestore.dev/patterns/rich-text-editing/ (pair with Yjs, Automerge or Loro)"
+        },
+        "move": {
+          "mark": "⚠️",
+          "text": "fractional indexing pattern (Rocicorp package)",
+          "source": "https://docs.livestore.dev/patterns/list-ordering/"
+        },
+        "trees": {
+          "mark": "❌",
+          "text": "no tree CRDT",
+          "source": "https://docs.livestore.dev/patterns/rich-text-editing/ (pair with Yjs, Automerge or Loro)"
+        },
+        "undo": {
+          "mark": "❌",
+          "text": "no undo API",
+          "source": "https://docs.livestore.dev/building-with-livestore/state/materializers/ (an eventlog; no undo, tag or branch API)"
+        },
+        "tags": {
+          "mark": "❌",
+          "text": "no named versions",
+          "source": "https://docs.livestore.dev/building-with-livestore/state/materializers/ (an eventlog; no undo, tag or branch API)"
+        },
+        "branches": {
+          "mark": "❌",
+          "text": "no fork/merge API",
+          "source": "https://docs.livestore.dev/building-with-livestore/state/materializers/ (an eventlog; no undo, tag or branch API)"
         }
       }
     },
@@ -3459,6 +4047,46 @@
           "mark": "✅",
           "text": "React `useShape` (`@electric-sql/react`)",
           "source": "npm @electric-sql/react 1.0.57; website/docs/sync/integrations/react.md:60-200"
+        },
+        "richText": {
+          "mark": "⚠️",
+          "text": "Yjs through `@electric-sql/y-electric`",
+          "source": "packages/y-electric/README.md (Handling Writes); npm @electric-sql/y-electric 0.1.54 (deps yjs)"
+        },
+        "marksStack": {
+          "mark": "⚠️",
+          "text": "Yjs attributes through y-electric: one value per name",
+          "source": "packages/y-electric/README.md; yjs@13.6.33 src/types/YText.js:1124-1198"
+        },
+        "cursors": {
+          "mark": "⚠️",
+          "text": "Yjs `RelativePosition` through y-electric",
+          "source": "packages/y-electric/README.md; yjs@13.6.33 src/utils/RelativePosition.js:43"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "columns replaced whole; `Y.Array` has no move",
+          "source": "@electric-sql/client src/types.ts:5-14; yjs@13.6.33 src/types/YArray.js:139,181"
+        },
+        "trees": {
+          "mark": "⚠️",
+          "text": "`Y.XmlFragment` through y-electric only",
+          "source": "packages/y-electric/README.md; yjs@13.6.33 src/types/YXmlFragment.js:134"
+        },
+        "undo": {
+          "mark": "⚠️",
+          "text": "Yjs `UndoManager` on a y-electric doc only",
+          "source": "packages/y-electric/README.md; yjs@13.6.33 src/utils/UndoManager.js:160"
+        },
+        "tags": {
+          "mark": "❌",
+          "text": "no named versions; shapes of the present",
+          "source": "website/docs/sync/guides/writes.md (no write-path sync); @electric-sql/client@1.5.28 src/client.ts (shapes of the present)"
+        },
+        "branches": {
+          "mark": "❌",
+          "text": "no fork/merge API",
+          "source": "website/docs/sync/guides/writes.md (no write-path sync); @electric-sql/client@1.5.28 src/client.ts (shapes of the present)"
         }
       }
     },
@@ -3691,6 +4319,46 @@
           "text": "`@powersync/react`, `@powersync/vue`, TanStack",
           "source": "x-powersync-react-2.1.0/package/src/index.ts (useQuery, useSuspenseQuery, useSyncStream, useStatus); npm @powersync/vue 0.7.0, @powersync/tanstack-react-query 0.3.6; x-tanstack-powersync-db-collection-0.2.12/package/package.json",
           "detail": "TanStack integrations are `@powersync/tanstack-react-query` and `@tanstack/powersync-db-collection` (MIT, published from the TanStack repo)."
+        },
+        "richText": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://docs.powersync.com/handling-writes/handling-update-conflicts.md (no built-in CRDT)"
+        },
+        "marksStack": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://docs.powersync.com/handling-writes/handling-update-conflicts.md (no built-in CRDT)"
+        },
+        "cursors": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://docs.powersync.com/handling-writes/handling-update-conflicts.md (no built-in CRDT)"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "no sequence CRDT",
+          "source": "https://docs.powersync.com/handling-writes/handling-update-conflicts.md (no built-in CRDT)"
+        },
+        "trees": {
+          "mark": "❌",
+          "text": "no tree CRDT",
+          "source": "https://docs.powersync.com/handling-writes/handling-update-conflicts.md (no built-in CRDT)"
+        },
+        "undo": {
+          "mark": "❌",
+          "text": "no undo API",
+          "source": "https://docs.powersync.com/architecture/consistency.md (client state matches a checkpoint; no history API)"
+        },
+        "tags": {
+          "mark": "❌",
+          "text": "no named versions",
+          "source": "https://docs.powersync.com/architecture/consistency.md (client state matches a checkpoint; no history API)"
+        },
+        "branches": {
+          "mark": "❌",
+          "text": "no fork/merge API",
+          "source": "https://docs.powersync.com/architecture/consistency.md (client state matches a checkpoint; no history API)"
         }
       }
     },
@@ -3925,6 +4593,46 @@
           "text": "`@rocicorp/zero/react`, `/solid`; Vue/Svelte community",
           "source": "package.json exports ./react, ./solid; out/zero-react/src/mod.d.ts; out/zero-solid/src/mod.d.ts; https://zero.rocicorp.dev/docs/community (community.mdx:12-13)",
           "detail": "zero-vue and zero-svelte are third-party packages listed on the Community page."
+        },
+        "richText": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://zero.rocicorp.dev/docs/schema column types (schema.mdx:129); no text/sequence type"
+        },
+        "marksStack": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://zero.rocicorp.dev/docs/schema column types (schema.mdx:129); no text/sequence type"
+        },
+        "cursors": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://zero.rocicorp.dev/docs/schema column types (schema.mdx:129); no text/sequence type"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "no sequence CRDT",
+          "source": "https://zero.rocicorp.dev/docs/schema column types (schema.mdx:129); no text/sequence type"
+        },
+        "trees": {
+          "mark": "❌",
+          "text": "no tree CRDT",
+          "source": "https://zero.rocicorp.dev/docs/schema column types (schema.mdx:129); no text/sequence type"
+        },
+        "undo": {
+          "mark": "❌",
+          "text": "no undo API",
+          "source": "docs index https://zero.rocicorp.dev/llms.txt (no history, undo or branch page)"
+        },
+        "tags": {
+          "mark": "❌",
+          "text": "no named versions",
+          "source": "docs index https://zero.rocicorp.dev/llms.txt (no history, undo or branch page)"
+        },
+        "branches": {
+          "mark": "❌",
+          "text": "no fork/merge API",
+          "source": "docs index https://zero.rocicorp.dev/llms.txt (no history, undo or branch page)"
         }
       }
     },
@@ -4154,6 +4862,46 @@
           "text": "`@triplit/react`, react-native, svelte, vue, angular, solid",
           "source": "npm view @triplit/react 1.0.51, react-native 1.0.53, svelte 1.0.50, vue 1.0.50, angular 1.0.50, solid 1.0.34, tanstack 3.0.51; docs frameworks/*.mdx",
           "detail": "Also `@triplit/tanstack` (TanStack Router). All were last published 2025-07-31."
+        },
+        "richText": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://github.com/aspen-cloud/triplit/blob/main/packages/docs/src/pages/schemas/types.mdx (String, Number, Boolean, Date, Set, Record, Json only)"
+        },
+        "marksStack": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://github.com/aspen-cloud/triplit/blob/main/packages/docs/src/pages/schemas/types.mdx (String, Number, Boolean, Date, Set, Record, Json only)"
+        },
+        "cursors": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://github.com/aspen-cloud/triplit/blob/main/packages/docs/src/pages/schemas/types.mdx (String, Number, Boolean, Date, Set, Record, Json only)"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "no sequence CRDT",
+          "source": "https://github.com/aspen-cloud/triplit/blob/main/packages/docs/src/pages/schemas/types.mdx (String, Number, Boolean, Date, Set, Record, Json only)"
+        },
+        "trees": {
+          "mark": "❌",
+          "text": "no tree CRDT",
+          "source": "https://github.com/aspen-cloud/triplit/blob/main/packages/docs/src/pages/schemas/types.mdx (String, Number, Boolean, Date, Set, Record, Json only)"
+        },
+        "undo": {
+          "mark": "❌",
+          "text": "no undo API",
+          "source": "@triplit/db@1.1.10 src/entity-data-store.ts (latest state only)"
+        },
+        "tags": {
+          "mark": "❌",
+          "text": "no named versions",
+          "source": "@triplit/db@1.1.10 src/entity-data-store.ts (latest state only)"
+        },
+        "branches": {
+          "mark": "❌",
+          "text": "no fork/merge API",
+          "source": "@triplit/db@1.1.10 src/entity-data-store.ts (latest state only)"
         }
       }
     },
@@ -4377,6 +5125,46 @@
           "mark": "✅",
           "text": "React, React Native, Svelte, Vue, SolidJS packages",
           "source": "npm @instantdb/react, react-native, svelte, vue, solidjs 1.0.67 (repository client/packages/*); https://instantdb.com/docs/start-vue.md , start-svelte.md , start-solidjs.md"
+        },
+        "richText": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://instantdb.com/docs/instaml.md (actions: create/update/merge/delete/link/unlink); core src/instatx.ts:12-19"
+        },
+        "marksStack": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://instantdb.com/docs/instaml.md (actions: create/update/merge/delete/link/unlink); core src/instatx.ts:12-19"
+        },
+        "cursors": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://instantdb.com/docs/instaml.md (actions: create/update/merge/delete/link/unlink); core src/instatx.ts:12-19"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "no sequence CRDT",
+          "source": "https://instantdb.com/docs/instaml.md (actions: create/update/merge/delete/link/unlink); core src/instatx.ts:12-19"
+        },
+        "trees": {
+          "mark": "❌",
+          "text": "no tree CRDT",
+          "source": "https://instantdb.com/docs/instaml.md (actions: create/update/merge/delete/link/unlink); core src/instatx.ts:12-19"
+        },
+        "undo": {
+          "mark": "❌",
+          "text": "no undo API",
+          "source": "https://instantdb.com/docs/instaql.md (no as-of/version query); https://instantdb.com/docs (no undo or branch page)"
+        },
+        "tags": {
+          "mark": "❌",
+          "text": "no named versions",
+          "source": "https://instantdb.com/docs/instaql.md (no as-of/version query); https://instantdb.com/docs (no undo or branch page)"
+        },
+        "branches": {
+          "mark": "❌",
+          "text": "no fork/merge API",
+          "source": "https://instantdb.com/docs/instaql.md (no as-of/version query); https://instantdb.com/docs (no undo or branch page)"
         }
       }
     }

@@ -15,6 +15,11 @@
  * - sync:    a replica that has nothing pulls a store of SEED records and
  *            can read every one of them; the time from the first message to
  *            the last record in place
+ * - append, prepend, random: type one character into a text — at its end,
+ *            at its start, anywhere (seeded) — the keystrokes of an editor;
+ *            in memory only, and only the libraries with a text that merges
+ *            by position take part (syncom's text field, Y.Text, Automerge's
+ *            text, LoroText); the others show "—"
  *
  * Each runs on two lines:
  *
@@ -78,6 +83,30 @@ const KINDS = [
     unit: 'records/s',
     type: 'rounds',
   },
+  {
+    id: 'append',
+    title: 'Type at the end of a text',
+    description: 'Insert one character at the end of a text that merges by position — the common keystroke.',
+    unit: 'ops/s',
+    type: 'ops',
+    lines: ['memory'],
+  },
+  {
+    id: 'prepend',
+    title: 'Type at the start of a text',
+    description: 'Insert one character at the start of the text — every insert anchors into the same spot.',
+    unit: 'ops/s',
+    type: 'ops',
+    lines: ['memory'],
+  },
+  {
+    id: 'random',
+    title: 'Type anywhere in a text',
+    description: 'Insert one character at a random position of the text (seeded).',
+    unit: 'ops/s',
+    type: 'ops',
+    lines: ['memory'],
+  },
 ];
 
 const LINES = [
@@ -92,6 +121,7 @@ const LINES = [
 const SCENARIOS = [];
 for (const kind of KINDS) {
   for (const line of LINES) {
+    if (kind.lines && !kind.lines.includes(line.id)) continue;
     SCENARIOS.push({
       id: `${kind.id}-${line.id}`,
       kind: kind.id,

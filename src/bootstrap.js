@@ -109,14 +109,14 @@ const mergeOne = async (batch, record) => {
     throw new TypeError('beforeWrite may only replace data for write and set');
   }
   const scope = core.scopeOf(id, data ?? current?.data ?? {});
-  core.observe(latestClock(current?.meta));
+  core.observe(latestClock(current?.meta, true));
   core.observe(latestClock(meta));
   const op = { origin: core.nodeId, seq: 0, ts: core.clock.now(), type: 'merge', id };
   if (scope !== GLOBAL_SCOPE) op.scope = scope;
   if (from) op.from = from;
   if (data !== undefined) op.data = data;
   if (meta !== undefined) op.meta = meta;
-  const { entry, changed, delta } = applyOp(current, op);
+  const { entry, changed, delta } = applyOp(current, op, core.limits);
   if (!changed) {
     if (otel.enabled) otel.recordCommit('merge', 'noop', now() - started);
     return;
@@ -124,6 +124,9 @@ const mergeOne = async (batch, record) => {
   op.seq = ++batch.seq;
   batch.ops.push(op);
   batch.touched.set(id, entry);
+  // A record the snapshot carries as purged: what this node held of it —
+  // a peer's ops taken before the purge — is scrubbed once the batch is durable.
+  if (entry.meta.purged) (batch.purged ??= new Set()).add(id);
   batch.deltas.set(id, { ...(batch.deltas.get(id) ?? {}), ...delta });
   batch.pending.push({ ctx, op, started });
 };
@@ -145,6 +148,7 @@ const mergeBatch = async (core, records, via, from) => {
     touched: new Map(),
     deltas: new Map(),
     pending: [],
+    purged: null,
   };
   for (const record of records) await mergeOne(batch, record);
   if (batch.ops.length === 0) return;
@@ -156,13 +160,14 @@ const mergeBatch = async (core, records, via, from) => {
   const first = entries[0].seq;
   const last = entries[entries.length - 1].seq;
   if (await core.persist(batch.touched, first, last)) core.log.applied(first, last);
+  if (batch.purged) for (const id of batch.purged) await core.scrub(id);
   core.flush();
   for (const { ctx, op, started } of batch.pending) {
     try {
       await core.hook('afterWrite', ctx, op);
     } finally {
       const entry = batch.touched.get(op.id);
-      core.refresh(op.id, isAlive(entry) ? entry.data : null, batch.deltas.get(op.id));
+      core.refresh(op.id, isAlive(entry) ? entry.data : null, batch.deltas.get(op.id), null, entry);
       notify(core.storage, core.logger, 'change', op, via);
       if (core.otel.enabled) core.otel.recordCommit('merge', 'applied', now() - started);
     }
@@ -179,7 +184,9 @@ const mergeBatch = async (core, records, via, from) => {
 const adopt = async (core, vector, { via = null, from = null } = {}) => {
   const known = core.log.vector;
   const news = {};
-  for (const key in vector) {
+  // A peer's vector: own keys alone, read as values.
+  for (const key of Object.keys(vector)) {
+    if (key === '__proto__') continue;
     if (Number.isInteger(vector[key]) && (known[key] ?? 0) < vector[key]) news[key] = vector[key];
   }
   if (Object.keys(news).length === 0) return null;

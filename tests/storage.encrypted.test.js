@@ -84,4 +84,23 @@ test('encrypted storage', async (t) => {
     await storage.close();
     await plain.close();
   });
+
+  await t.test("a peer's op on a record sealed here is skipped: logged and relayed, never applied", async (t2) => {
+    const dir = await createTemp();
+    t2.after(() => cleanupTemp(dir));
+    const storage = await syncom.open({ path: dir, logger: false, encrypted: true });
+    const id = await storage.insert({ secret: 'mine' });
+    const op = { origin: 'peer', seq: 1, ts: Date.now() + 1, type: 'set', id, data: { secret: 'theirs' } };
+    const result = await storage.applyRemote([op]);
+    assert.strictEqual(result.applied, 1);
+    assert.strictEqual(result.skipped, 1, 'accepted for the log and the vector, not for the record');
+    assert.deepStrictEqual(await storage.get(id), { secret: 'mine' });
+    const entry = storage.log.since(undefined).find((e) => e.op.origin === 'peer');
+    assert.strictEqual(entry.skipped, true, 'flagged, so no replay or fold applies it');
+    assert.strictEqual(storage.vector.peer, 1, 'the vector moved');
+    await storage.close();
+    const reopened = await syncom.open({ path: dir, logger: false, encrypted: true });
+    assert.deepStrictEqual(await reopened.get(id), { secret: 'mine' }, 'the replay leaves the sealed record alone');
+    await reopened.close();
+  });
 });

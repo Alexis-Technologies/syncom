@@ -230,6 +230,38 @@ export const sizeModel = (size, only = null) => {
   };
 };
 
+/**
+ * The CRDT libraries' whole packages next to syncom's whole entry, nothing
+ * around them (bench/compare/size.js `CORES`): what /guide/vs-crdt shows.
+ */
+export const coreSizeModel = (size, only = null) => {
+  const kb = (bytes) => `${(bytes / 1024).toFixed(1)} KB`;
+  const rows = pick(size.cores ?? [], only)
+    .map((library) => ({
+      id: library.id,
+      label: library.name,
+      sublabel: library.entry,
+      value: library.gzip / 1024,
+      tone: TONES[library.id],
+      details: [
+        `${kb(library.gzip)} min+gzip`,
+        `${kb(library.min)} minified${library.wasm ? `, ${kb(library.wasm)} of it WebAssembly` : ''}`,
+        library.packages.join(', '),
+      ],
+    }))
+    .sort(byValueAsc);
+  return {
+    id: 'cores',
+    title: 'Bundle size of the whole package',
+    subtitle:
+      'Every export of the package (export *), with no persistence or sync around it (esbuild, minified), ' +
+      "min+gzip, WebAssembly included; syncom's entry carries its storage, queries and sync too. Lower is better.",
+    unit: 'KB',
+    scale: 'linear',
+    groups: [{ id: 'all', label: null, rows }],
+  };
+};
+
 // ─── syncom's own hot paths ─────────────────────────────────────────────────
 
 /** The scripts of `pnpm bench`, in the order the toggle lists them. */
@@ -237,6 +269,11 @@ export const ENGINE_SUBJECTS = [
   { id: 'storage', title: 'Storage' },
   { id: 'search', title: 'Search' },
   { id: 'apply', title: 'Apply' },
+  { id: 'sequence', title: 'Lists and text' },
+  { id: 'tree', title: 'Trees' },
+  { id: 'history', title: 'History' },
+  { id: 'tags', title: 'Tags' },
+  { id: 'undo', title: 'Undo' },
   { id: 'sync', title: 'Sync' },
   { id: 'log', title: 'Op log' },
   { id: 'chain', title: 'Chain' },
@@ -249,6 +286,13 @@ const SUBJECT_NOTES = {
   storage: 'The public API end to end on node:fs: a write is an op appended to the log, a record file and a block.',
   search: 'The @alexify/syncom/search trigram index: a put per write, $text answered from the catalog in rank order.',
   apply: "A peer's page once it has arrived: admit, fold, append, write, announce. The applyRemote rows count ops.",
+  sequence:
+    'The sequence engine behind list and text fields: a fold per op over Fugue runs, a reading, a join, a diff.',
+  tree: 'The movable tree behind tree fields: one move folded over a block of thousands, the fold read anew and read kept.',
+  history:
+    'The past out of the log: history() over a record with two thousand ops, a version a thousand ops back, its diff.',
+  tags: 'Named versions: a tag over a thousand records, writes under it (the first copies the file), reads at the tag.',
+  undo: 'The @alexify/syncom/undo manager: what capturing a commit costs a write, what one step back and forward costs.',
   sync: 'Replication over the in-process link (JSON across the boundary, like a wrpc client).',
   log: 'OpLog, the persisted operation log every write and every replicated op goes through.',
   chain: 'The hash-linked chain a write appends a block to (open({ chain: false }) skips it).',

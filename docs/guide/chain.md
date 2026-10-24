@@ -36,7 +36,8 @@ A block is `{ prev, timestamp, data }`. Its own hash is the SHA-256 of that
 object, and it is stored as `<hash>.json`. The tail hash lives in
 `.blockchain.json` so the chain can be reopened without scanning the directory.
 
-`readBlock` throws on an unknown hash.
+`readBlock` rejects on an unknown hash with `code: 'BLOCK_NOT_FOUND'`;
+`validate()` answers `false` for one instead.
 
 ## Validating
 
@@ -56,11 +57,15 @@ on hot paths. See `bench/chain.js` for the numbers.
 
 ## Through storage
 
-`Storage` keeps its own chain and adds a block for every write it applies. A
-local write commits `{ id, hash, from }` — the record, the hash of its data,
-and its position in the [log](./sync#the-log); a batch of ops applied from a
-peer commits one block `{ records: { [id]: hash }, from, to }` for every record
-it touched. `validate(id, data, block)` accepts both shapes.
+`Storage` keeps its own chain, under `<path>/blockchain/`, and adds a block
+for every write it applies. A local write commits `{ id, hash, from }` — the
+record, the hash of its data, and its position in the [log](./sync#the-log);
+an encrypted record's write, which has no op, commits `{ id, hash }`. A batch
+commits one block `{ records: { [id]: hash }, from, to }` for every record it
+touched: a page of ops applied from a peer, a snapshot page, the tail a
+reopen replays, a `repair(id)`, and the local writes `open({ defer })` held
+back. `validate(id, data, block)` accepts both shapes. A [tag](./versions#tags)'s
+copy of a record file keeps the block it named, and is checked like the file.
 
 Each node's chain is its **own** audit log: the order in which *it* applied
 things. Two nodes that hold the same records hold different chains — that is
@@ -84,6 +89,9 @@ const entry = JSON.parse(await fsi.read('data/data', `${id}.json`));
 await storage.validate(id, entry.data, entry.block); // true if intact
 ```
 
-This is exactly what `loadData` does on every read — a record whose bytes no
-longer hash to what its block recorded raises
-`Storage record <id> is invalid` rather than returning the modified data.
+This is exactly what `loadData` does on every read from the file (a cached
+record is not read again) — a record whose bytes no longer hash to what its
+block recorded rejects with `code: 'INTEGRITY'` and
+`Storage record <id> is invalid` rather than returning the modified data;
+`repair(id)` rebuilds it from the log. `open({ integrity: 'lazy' })` skips the
+check on a cold read.

@@ -38,9 +38,9 @@ other libraries, and [Benchmarks](/guide/benchmarks) measures them on the same s
   counters add up, sets keep every concurrent add. Every op is signed by the key that is the
   node's id, a hash-linked chain re-checks what is read, `repair(id)` rebuilds a record from the
   log, and `purge()` erases a payload on every replica it reaches. Any node hosts, a browser
-  included; the host limits, validates and reports. In 20 rows syncom has something where RxDB has
-  nothing: signatures, a tamper-evident log, unique keys, multi-entry and combined indexes,
-  projection, text search inside a query, OpenTelemetry, stats among them.
+  included; the host limits, validates and reports. In 21 rows syncom has something where RxDB has
+  nothing: signatures, a tamper-evident log, collaborative text, unique keys, multi-entry and
+  combined indexes, projection, text search inside a query, OpenTelemetry, stats among them.
 - **Several RxDB guarantees depend on a switch.** Without a `validate-*` storage wrapper,
   production RxDB stores documents with wrong types, unknown fields and missing required fields.
   `final` fields, frozen documents and the checks on queries and ids run only in dev-mode, and
@@ -72,7 +72,9 @@ other libraries, and [Benchmarks](/guide/benchmarks) measures them on the same s
   turned up a dozen syncom bugs, among them scopes a peer could write around, offline writes past
   retention that never arrived and a restored directory that forked its node in silence; they are
   fixed, with tests, and the cells describe the code as it is now.
-- **Neither has** collaborative text, multi-record transactions, aggregation or joins.
+- **Neither has** multi-record transactions, aggregation or joins. syncom has list, text and
+  tree fields that merge by position, with rich-text marks, cursors, history, tags, undo and
+  branches; RxDB's CRDT plugin has none of them.
 - **Maturity.** RxDB has been on npm since 2016, ships a minor about every month and a major
   about once a year (four of the last five asked users of some storages to migrate their stored
   data), and offers paid support. syncom is a pre-release with no users yet.
@@ -172,11 +174,11 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr class="sc-matrix-group"><td colspan="3"><strong>Dependencies, build and size</strong></td></tr>
 <tr><td>Runtime dependencies</td><td>✅ 0: devDependencies only</td><td>24 direct plus the required peer <code>rxjs</code>: 74 packages installed</td></tr>
 <tr><td>Language and module format</td><td>JavaScript, CommonJS, no build step; <code>src/</code> ships as is</td><td>TypeScript, built by Babel into CommonJS and ESM; <code>sideEffects: false</code></td></tr>
-<tr><td>Entry points</td><td>root plus 4 subpaths: <code>/wrpc</code>, <code>/idb</code>, <code>/search</code>, <code>/contracts</code></td><td>54 subpath exports, one per plugin (<code>rxdb/plugins/*</code>)</td></tr>
+<tr><td>Entry points</td><td>root plus 7 subpaths: <code>/wrpc</code>, <code>/idb</code>, <code>/search</code>, <code>/order</code>, <code>/undo</code>, <code>/branch</code>, <code>/contracts</code></td><td>54 subpath exports, one per plugin (<code>rxdb/plugins/*</code>)</td></tr>
 <tr><td>TypeScript types</td><td>⚠️ hand-written <code>.d.ts</code>, tsd-tested; collection names typed, record data <code>unknown</code></td><td>✅ generated from the source; document type inferred from the schema</td></tr>
-<tr><td>Browser bundle, minimal store</td><td>41.9 KB min+gzip: the browser entry, the whole engine</td><td>80.4 KB min+gzip: <code>createRxDatabase</code> with Dexie; 44.9 KB with localStorage</td></tr>
-<tr><td>Browser bundle with sync</td><td>42.6 KB min+gzip with the wrpc link adapter</td><td>90.1 KB min+gzip with Dexie and <code>replicateRxCollection</code></td></tr>
-<tr><td>Size budget in CI</td><td>✅ <code>pnpm size</code> fails CI when the browser entry passes 42 KB</td><td>⚠️ CI prints a webpack build size; no limit in 17.6.0</td></tr>
+<tr><td>Browser bundle, minimal store</td><td>66.0 KB min+gzip: the browser entry, the whole engine</td><td>80.4 KB min+gzip: <code>createRxDatabase</code> with Dexie; 44.9 KB with localStorage</td></tr>
+<tr><td>Browser bundle with sync</td><td>66.6 KB min+gzip with the wrpc link adapter</td><td>90.1 KB min+gzip with Dexie and <code>replicateRxCollection</code></td></tr>
+<tr><td>Size budget in CI</td><td>✅ <code>pnpm size</code> fails CI when the browser entry passes 66 KB</td><td>⚠️ CI prints a webpack build size; no limit in 17.6.0</td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Runtimes</strong></td></tr>
 <tr><td>Node.js</td><td>✅ ≥22; persists with <code>node:fs</code>; CI on Node 22 and 24</td><td>⚠️ ≥20; free disk persistence only via MongoDB or FoundationDB servers, or the capped SQLite trial<sup>4</sup></td></tr>
 <tr><td>Deno</td><td>❌ not tested; <code>engines</code> names Node.js only</td><td>✅ <code>rxdb/plugins/storage-denokv</code>; CI runs the Dexie and DenoKV suites on Deno 2.6.5</td></tr>
@@ -311,8 +313,8 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr class="sc-matrix-group"><td colspan="3"><strong>Counters, sets and lists</strong></td></tr>
 <tr><td>Counters that converge</td><td>✅ <code>inc()</code>: one running sum per origin<sup>27</sup></td><td>⚠️ <code>$inc</code> is local; it converges only under the <code>crdt</code> plugin</td></tr>
 <tr><td>Sets</td><td>✅ <code>add()</code>/<code>remove()</code>: observed-remove set, read sorted</td><td>⚠️ <code>$addToSet</code>/<code>$pullAll</code>; <code>crdt</code> replays them in creator order, not observed-remove</td></tr>
-<tr><td>Ordered lists that merge</td><td>❌ no list type; an array is a register or a set</td><td>⚠️ <code>crdt</code> plugin replays <code>$push</code>; no positional insert</td></tr>
-<tr><td>Collaborative text</td><td>❌ none</td><td>❌ none</td></tr>
+<tr><td>Ordered lists that merge</td><td>✅ list fields: <code>splice()</code>, <code>setAt()</code>, <code>move()</code> (Fugue; a concurrent move lands once)</td><td>⚠️ <code>crdt</code> plugin replays <code>$push</code>; no positional insert</td></tr>
+<tr><td>Collaborative text</td><td>✅ text fields: <code>splice()</code>/<code>updateText()</code> merge by position (Fugue); marks, cursors</td><td>❌ none</td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Merge model</strong></td></tr>
 <tr><td>Conflict-free model</td><td>✅ built into every write: register, counter or OR-set per field</td><td>⚠️ opt-in <code>crdt</code> plugin per schema; otherwise a conflict handler</td></tr>
 <tr><td>Concurrent edits to different fields</td><td>✅ both kept: last writer wins per top-level field</td><td>⚠️ the default handler keeps the master's whole document; merging needs a handler or <code>crdt</code></td></tr>
@@ -547,7 +549,7 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr class="sc-matrix-group"><td colspan="3"><strong>Erasure, history and audit</strong></td></tr>
 <tr><td>Purge: the payload leaves history</td><td>✅ <code>purge(id)</code>: a <code>purge</code> op that wins at any stamp, then a scrub of the op log<sup>65</sup></td><td>⚠️ <code>cleanup</code> plugin drops tombstones after <code>minimumDeletedTime</code> (31 days)<sup>66</sup></td></tr>
 <tr><td>Erasure across replicas</td><td>✅ the purge op replicates; every peer that takes it scrubs its own log<sup>67</sup></td><td>❌ cleanup is local; a delete replicates as a tombstone with the full data</td></tr>
-<tr><td>History / time travel</td><td>⚠️ op log within retention (<code>storage.log.entriesOf(id)</code>); no read-at-version</td><td>⚠️ latest revision only; the <code>crdt</code> plugin keeps every op in the document<sup>68</sup></td></tr>
+<tr><td>History / time travel</td><td>✅ <code>history(id)</code>, <code>get(id, { at })</code>, <code>diff</code>/<code>restore</code>, tags of the whole storage</td><td>⚠️ latest revision only; the <code>crdt</code> plugin keeps every op in the document<sup>68</sup></td></tr>
 <tr><td>Who made a change</td><td>✅ every op names its origin key and an <code>actor</code>, kept in the log<sup>69</sup></td><td>❌ none; <code>crdt</code> ops carry the writer's storage token and a time</td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Input hardening</strong></td></tr>
 <tr><td>Prototype pollution</td><td>✅ own keys only; <code>__proto__</code> is never a field</td><td>✅ mingo and dot-prop refuse <code>__proto__</code> paths</td></tr>
@@ -627,7 +629,7 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr class="sc-matrix-group"><td colspan="3"><strong>Adoption and trust</strong></td></tr>
 <tr><td>Adoption signals</td><td>pre-release, not on npm yet</td><td>23,412 GitHub stars; 63,815 npm downloads in the week to 2026-10-18</td></tr>
 <tr><td>Import from other databases</td><td>❌ no importer and no JSON import; write records with <code>insert()</code></td><td>⚠️ migration guides only; <code>importJSON()</code> takes an RxDB dump of the same schema<sup>79</sup></td></tr>
-<tr><td>Published benchmarks</td><td>✅ nine libraries, six scenarios, memory and disk; machine and date stated</td><td>⚠️ its own storages only; no machine, browser or date given<sup>80</sup></td></tr>
+<tr><td>Published benchmarks</td><td>✅ nine libraries, nine scenarios, memory and disk; machine and date stated</td><td>⚠️ its own storages only; no machine, browser or date given<sup>80</sup></td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>AI and coding agents</strong></td></tr>
 <tr><td>WebMCP agent tools</td><td>❌ none</td><td>✅ <code>rxdb/plugins/webmcp</code>: query, count, changes, insert, upsert, delete tools per collection; <code>readOnly</code><sup>81</sup></td></tr>
 <tr><td>Docs for coding agents</td><td>✅ <code>llms.txt</code> on the docs site; <code>CLAUDE.md</code> in the repository</td><td>✅ <code>llms.txt</code> plus three topic files; <code>ERROR-MESSAGES.md</code>, <code>CLAUDE.md</code>, <code>AGENTS.md</code> in the package<sup>82</sup></td></tr>
@@ -735,10 +737,10 @@ on one machine. RxDB runs in memory only there, because its Node.js disk storage
 Measured in memory, the two insert a record at about the same rate. RxDB updates a field about
 three times as fast and replicates a store into an empty replica about two and a half times as
 fast; syncom signs every op and verifies each one it receives (`sync.signatures: false` trades
-that away). syncom reads a record by id about three and a half times as fast, from its cache.
+that away). syncom reads a record by id about three times as fast, from its cache.
 RxDB's `bulkInsert()` is two orders of magnitude ahead, because syncom has no bulk write: each
 record is its own signed, logged op. On disk there is nothing to compare in Node.js, and a browser
-app that keeps records and syncs them ships about 43 KB of syncom against 90 KB of RxDB with
+app that keeps records and syncs them ships about 67 KB of syncom against 90 KB of RxDB with
 Dexie, min+gzip.
 
 ## Which to choose
@@ -751,7 +753,11 @@ Dexie, min+gzip.
 - **syncom** when the nodes replicate among themselves, with no backend of record: servers,
   browser tabs and peers in a mesh, any of which can host. When concurrent edits must merge field
   by field and counters must add up, when you need to prove which node wrote what, verify what is
-  stored and erase it everywhere, and when zero dependencies, a 42 KB bundle and an MIT license
+  stored and erase it everywhere, and when zero dependencies, a 66 KB bundle and an MIT license
   for everything, Node.js disk persistence included, are requirements.
-- **Neither** for collaborative text: Yjs, Automerge or Loro merge text character by character,
-  and can live in a field of either.
+- **Neither** for a long document that many people type into at once. syncom's text fields fit
+  a note, a comment or one block of a document: a record is read and written whole on every op,
+  so typing runs at hundreds to a couple of thousand keystrokes a second, where Automerge runs at
+  tens of thousands and Yjs and Loro at hundreds of thousands. They are built for that, and can
+  hold the documents beside either one, which keeps the records around them;
+  [Compared with CRDT libraries](/guide/vs-crdt) sets syncom against them.

@@ -287,8 +287,11 @@ const applyOne = async (batch, op) => {
   const current = await currentOf(batch, op);
   if (current === undefined) return;
   if (current?.encrypted) {
+    // Sealed here for this node alone: the op is logged and relayed, never
+    // applied — flagged skipped, so neither a replay nor a fold of the log
+    // applies what this node did not.
     core.logger.warn({ event: 'sync.op.encrypted', id: op.id });
-    accept(batch, op);
+    skip(batch, op);
     return;
   }
   // A `false` from beforeApply skips the op HERE only. A throw aborts the
@@ -298,7 +301,7 @@ const applyOne = async (batch, op) => {
   const verdict = await core.hook('beforeApply', { op, via: batch.via, peer: batch.peer, current: visible });
   if (verdict === false) return void skip(batch, op);
   core.clock.observe(op.ts);
-  const { entry, changed, delta, rejected } = applyOp(current, op);
+  const { entry, changed, delta, rejected } = applyOp(current, op, core.limits);
   if (rejected.length > 0) {
     const error = new SyncomError('OP_REFUSED', `Refused op on ${op.id}`, { op, rejected });
     report(batch, { event: 'sync.op.rejected', id: op.id, rejected }, rejected[0].reason, error);
@@ -339,7 +342,7 @@ const persist = async (batch) => {
   }
   // Unapplied, a batch whose records did not land is replayed at the next open.
   if (landed) core.log.applied(first, last);
-  if (batch.purged) for (const id of batch.purged) await core.log.scrub(id);
+  if (batch.purged) for (const id of batch.purged) await core.scrub(id);
 };
 
 // afterApply sees a durable batch; whatever it does, the record views and
@@ -349,7 +352,9 @@ const announce = async (batch, result) => {
   try {
     await core.hook('afterApply', { via, peer, ops: accepted, ...result });
   } finally {
-    for (const [id, entry] of touched) core.refresh(id, isAlive(entry) ? entry.data : null, batch.deltas.get(id));
+    for (const [id, entry] of touched) {
+      core.refresh(id, isAlive(entry) ? entry.data : null, batch.deltas.get(id), null, entry);
+    }
     notify(core.storage, core.logger, 'apply', { via, peer, ops: accepted, ...result });
     for (const op of accepted) notify(core.storage, core.logger, 'change', op, via);
   }

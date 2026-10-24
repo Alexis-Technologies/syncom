@@ -82,6 +82,16 @@ const wrap = (L, doc, file) => {
     close: async () => {
       if (file) await file.close();
     },
+    text: () => {
+      const text = doc.getText('text');
+      return {
+        insert: (index, chars) => {
+          text.insert(index, chars);
+          return commit();
+        },
+        read: () => text.toString(),
+      };
+    },
   };
 };
 
@@ -91,6 +101,7 @@ const memory = {
     const L = local('loro-crdt');
     return wrap(L, new L.LoroDoc(), null);
   },
+  text: (store) => store.text(),
 };
 
 const disk = {

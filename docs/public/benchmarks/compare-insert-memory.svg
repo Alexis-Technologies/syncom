@@ -84,35 +84,35 @@ pouchdb@9.0.0</title>
 <path class="bar" d="M276,221H502.73088705422424A4,4 0 0 1 506.73088705422424,225V231A4,4 0 0 1 502.73088705422424,235H276Z"/>
 <text class="value" x="512.7308870542242" y="234">20.3k</text>
 </g>
-<g><title>syncom · chain: false, createMemoryFsi() · v0.0.1
-17,478 ops/s
-57.2 µs per operation
-samples 17.1k – 17.9k
-@alexify/syncom@0.0.1</title>
-<text class="label secondary" x="20" y="265">syncom</text>
-<text class="sublabel" x="20" y="280">chain: false, createMemoryFsi() · v0.0.1</text>
-<path class="bar secondary" d="M276,261H496.2499392927133A4,4 0 0 1 500.2499392927133,265V271A4,4 0 0 1 496.2499392927133,275H276Z"/>
-<text class="value" x="506.2499392927133" y="274">17.5k</text>
-</g>
 <g><title>RxDB · memory storage · v17.6.0
 16,702 ops/s
 59.9 µs per operation
 samples 8,306 – 111k
 rxdb@17.6.0</title>
-<text class="label" x="20" y="305">RxDB</text>
-<text class="sublabel" x="20" y="320">memory storage · v17.6.0</text>
-<path class="bar" d="M276,301H494.27770916823033A4,4 0 0 1 498.27770916823033,305V311A4,4 0 0 1 494.27770916823033,315H276Z"/>
-<text class="value" x="504.27770916823033" y="314">16.7k</text>
+<text class="label" x="20" y="265">RxDB</text>
+<text class="sublabel" x="20" y="280">memory storage · v17.6.0</text>
+<path class="bar" d="M276,261H494.27770916823033A4,4 0 0 1 498.27770916823033,265V271A4,4 0 0 1 494.27770916823033,275H276Z"/>
+<text class="value" x="504.27770916823033" y="274">16.7k</text>
+</g>
+<g><title>syncom · chain: false, createMemoryFsi() · v0.0.1
+16,673 ops/s
+60 µs per operation
+samples 16.3k – 16.9k
+@alexify/syncom@0.0.1</title>
+<text class="label secondary" x="20" y="305">syncom</text>
+<text class="sublabel" x="20" y="320">chain: false, createMemoryFsi() · v0.0.1</text>
+<path class="bar secondary" d="M276,301H494.2020182741179A4,4 0 0 1 498.2020182741179,305V311A4,4 0 0 1 494.2020182741179,315H276Z"/>
+<text class="value" x="504.2020182741179" y="314">16.7k</text>
 </g>
 <g><title>syncom · default, createMemoryFsi() · v0.0.1
-16,159 ops/s
-61.9 µs per operation
-samples 15.4k – 16.3k
+15,151 ops/s
+66 µs per operation
+samples 14.9k – 15.6k
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="345">syncom</text>
 <text class="sublabel" x="20" y="360">default, createMemoryFsi() · v0.0.1</text>
-<path class="bar primary" d="M276,341H492.8408225237125A4,4 0 0 1 496.8408225237125,345V351A4,4 0 0 1 492.8408225237125,355H276Z"/>
-<text class="value" x="502.8408225237125" y="354">16.2k</text>
+<path class="bar primary" d="M276,341H490.04440905219906A4,4 0 0 1 494.04440905219906,345V351A4,4 0 0 1 490.04440905219906,355H276Z"/>
+<text class="value" x="500.04440905219906" y="354">15.2k</text>
 </g>
 <g><title>OrbitDB · documents, memory blockstore · v4.0.0
 1,081 ops/s
@@ -145,5 +145,5 @@ samples 290 – 405
 <text class="value" x="331.1041754483801" y="474">310</text>
 </g>
 <text class="caption" x="20" y="529">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
-<text class="caption" x="20" y="545">in a fresh process · 2026-10-22</text>
+<text class="caption" x="20" y="545">in a fresh process · 2026-10-24</text>
 </svg>

@@ -91,7 +91,12 @@ const runEmitterTests = async (t, assert, Emitter) => {
     const emitter = new Emitter({ maxListeners: 2 });
     emitter.on('a', () => {});
     emitter.on('a', () => {});
-    assert.throws(() => emitter.on('a', () => {}), /MaxListenersExceededWarning/);
+    const third = () => {};
+    assert.throws(() => emitter.on('a', third), /MaxListenersExceededWarning/);
+    assert.strictEqual(emitter.listenerCount('a'), 2, 'the refused listener is not kept');
+    emitter.off('a', [...emitter.listeners('a')][0]);
+    emitter.on('a', third);
+    assert.strictEqual(emitter.listenerCount('a'), 2);
   });
 
   await t.test('listeners and listenerCount require an event name', () => {

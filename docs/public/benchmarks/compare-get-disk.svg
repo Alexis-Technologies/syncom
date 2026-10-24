@@ -81,24 +81,24 @@ tinybase@10.0.1</title>
 <text class="value" x="575.9477990538655" y="194">1.39M</text>
 </g>
 <g><title>syncom · default, node:fs · v0.0.1
-958,203 ops/s
-1.04 µs per operation
-samples 957k – 963k
+890,677 ops/s
+1.12 µs per operation
+samples 885k – 895k
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="225">syncom</text>
 <text class="sublabel" x="20" y="240">default, node:fs · v0.0.1</text>
-<path class="bar primary" d="M276,221H556.6547233986057A4,4 0 0 1 560.6547233986057,225V231A4,4 0 0 1 556.6547233986057,235H276Z"/>
-<text class="value" x="566.6547233986057" y="234">958k</text>
+<path class="bar primary" d="M276,221H554.8411512644902A4,4 0 0 1 558.8411512644902,225V231A4,4 0 0 1 554.8411512644902,235H276Z"/>
+<text class="value" x="564.8411512644902" y="234">891k</text>
 </g>
 <g><title>syncom · chain: false, node:fs · v0.0.1
-951,488 ops/s
-1.05 µs per operation
-samples 935k – 962k
+875,393 ops/s
+1.14 µs per operation
+samples 825k – 887k
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="265">syncom</text>
 <text class="sublabel" x="20" y="280">chain: false, node:fs · v0.0.1</text>
-<path class="bar secondary" d="M276,261H556.4802022180281A4,4 0 0 1 560.4802022180281,265V271A4,4 0 0 1 556.4802022180281,275H276Z"/>
-<text class="value" x="566.4802022180281" y="274">951k</text>
+<path class="bar secondary" d="M276,261H554.4116002540303A4,4 0 0 1 558.4116002540303,265V271A4,4 0 0 1 554.4116002540303,275H276Z"/>
+<text class="value" x="564.4116002540303" y="274">875k</text>
 </g>
 <g><title>Loro · updates appended to a file · v1.16.4
 285,175 ops/s
@@ -151,5 +151,5 @@ samples 68.7 – 110
 <text class="value" x="334.33731434482036" y="474">82.4</text>
 </g>
 <text class="caption" x="20" y="529">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
-<text class="caption" x="20" y="545">in a fresh process · 2026-10-22</text>
+<text class="caption" x="20" y="545">in a fresh process · 2026-10-24</text>
 </svg>

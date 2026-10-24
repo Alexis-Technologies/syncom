@@ -84,7 +84,8 @@ const waitFor = (wakers, signal) =>
 // a page over `opsPerPush` or `bytesPerPush` is 413, a peer over
 // `opsPerSecond` is 429 — a token bucket in its state, refilled at that
 // rate, holding one second's worth. Codes, not a hang-up: the dialer
-// reports them and recomputes from the vector at its next hello.
+// reports them, marks the host behind and pushes again from the vector at
+// the next sign of life on the link (`#recover` in src/sync.js).
 const limit = (otel, state, args, ops, limits) => {
   const { opsPerPush, bytesPerPush, opsPerSecond } = limits;
   if (opsPerPush !== undefined && ops.length > opsPerPush) {

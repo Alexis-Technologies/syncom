@@ -106,24 +106,24 @@ samples 7,439 – 8,331
 <text class="value" x="471.30440074054354" y="331">7,817</text>
 </g>
 <g><title>syncom · chain: false, node:fs · v0.0.1
-2,737 records/s
-365 µs per record
-samples 2,696 – 2,762
+2,635 records/s
+379 µs per record
+samples 2,415 – 2,734
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="362">syncom</text>
 <text class="sublabel" x="20" y="377">chain: false, node:fs · v0.0.1</text>
-<path class="bar secondary" d="M276,358H415.73128799742716A4,4 0 0 1 419.73128799742716,362V368A4,4 0 0 1 415.73128799742716,372H276Z"/>
-<text class="value" x="425.73128799742716" y="371">2,737</text>
+<path class="bar secondary" d="M276,358H414.0854837297062A4,4 0 0 1 418.0854837297062,362V368A4,4 0 0 1 414.0854837297062,372H276Z"/>
+<text class="value" x="424.0854837297062" y="371">2,635</text>
 </g>
 <g><title>syncom · default, node:fs · v0.0.1
-1,690 records/s
-592 µs per record
-samples 903 – 1,734
+1,621 records/s
+617 µs per record
+samples 1,389 – 1,691
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="402">syncom</text>
 <text class="sublabel" x="20" y="417">default, node:fs · v0.0.1</text>
-<path class="bar primary" d="M276,398H394.79270876176645A4,4 0 0 1 398.79270876176645,402V408A4,4 0 0 1 394.79270876176645,412H276Z"/>
-<text class="value" x="404.79270876176645" y="411">1,690</text>
+<path class="bar primary" d="M276,398H392.98786951417566A4,4 0 0 1 396.98786951417566,402V408A4,4 0 0 1 392.98786951417566,412H276Z"/>
+<text class="value" x="402.98786951417566" y="411">1,621</text>
 </g>
 <g><title>OrbitDB · documents, LevelDB · v4.0.0
 921 records/s
@@ -136,5 +136,5 @@ samples 918 – 940
 <text class="value" x="378.4236963656467" y="451">921</text>
 </g>
 <text class="caption" x="20" y="506">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
-<text class="caption" x="20" y="522">in a fresh process · 2026-10-22</text>
+<text class="caption" x="20" y="522">in a fresh process · 2026-10-24</text>
 </svg>

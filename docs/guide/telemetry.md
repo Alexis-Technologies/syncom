@@ -63,24 +63,30 @@ wrpc's spans around the actual calls.
 
 | Span | When | Attributes |
 | --- | --- | --- |
-| `syncom.commit` | one local write, from the moment it runs to after the `change` listeners | `syncom.op.type`, `syncom.record.id`†, `syncom.result` (`applied` / `noop` / `encrypted`), `syncom.scope` |
+| `syncom.commit` | one local write — of any op type, a list, text or tree op as much as a `set` — from the moment it runs to after the `change` listeners | `syncom.op.type`, `syncom.record.id`†, `syncom.result` (`applied` / `noop` / `encrypted`), `syncom.scope` |
 | `syncom.apply` | one batch of a peer's ops | `syncom.ops.count`, `syncom.ops.applied`, `syncom.ops.skipped`, `syncom.ops.duplicates`, `syncom.ops.gaps`, `syncom.ops.malformed`, `syncom.ops.unsigned`, `syncom.ops.forged`, `syncom.ops.out_of_scope` |
 | `syncom.replay` | the unsealed log tail replayed at open | `syncom.ops.count`, `syncom.records` |
-| `syncom.push` | one push to a peer, all its pages | `syncom.push.reason` (`handshake` / `manual` / `relay`), `syncom.ops.count`, `syncom.pages`, `syncom.peer.url`†, `syncom.peer.node`† |
+| `syncom.push` | one push to a peer, all its pages | `syncom.push.reason` (`handshake` / `manual` / `relay` / `recover` — a peer that fell behind, caught up from the vector), `syncom.ops.count`, `syncom.pages`, `syncom.peer.url`†, `syncom.peer.node`† |
 | `syncom.bootstrap` | the whole snapshot walk from a peer | `syncom.peer.url`†, `syncom.peer.node`†, `syncom.pages`, `syncom.records` |
 | `syncom.snapshot` | one page served to a peer (the host side) | `syncom.limit`, `syncom.records`, `syncom.done` |
 | `syncom.log.roll` | sealing open files into a segment and compacting | `syncom.log.sealed`, `syncom.log.dropped`, `syncom.log.floor` |
 | `syncom.log.scrub` | a purge stripping an id's entries from the log files | `syncom.log.scrubbed` |
 | `syncom.catalog.rebuild` | the catalog rebuilt from a scan of `data/` at open | `syncom.records` |
+| `syncom.tag` | a tag taken: the catalog copied under the log position | `syncom.records` (the catalog's rows, tombstones included) |
+| `syncom.untag` | a tag dropped: the copies the older tag needs moved, the rest removed | — |
+| `syncom.history` | `history()`: the record's retained entries folded, the versions handed out | `syncom.ops.count` (every retained entry, whatever the `limit`), `syncom.versions`, `syncom.exact` |
+| `syncom.version` | `get(id, { at })`, and each version `diff()` and `restore()` name: one version folded out of the log (a tag's copy is a file read, not a fold, and has no span) | `syncom.ops.count` (the entries inside the cut) |
+| `syncom.patches` | `applyPatches()`, and so `restore()` and `compact()`: the batch rehearsed, then every op committed (each a `syncom.commit` child) | `syncom.ops.count`, `syncom.ops.applied` |
 
 † off the span when `includeIdentity` is false (so is `syncom.scope`).
 
 A span is marked failed (status `ERROR`, the exception recorded, `error.type`
-set) when the work it brackets throws: a write refused by the
-field-kind rule, a push whose call rejected, a bootstrap that could not
-read a snapshot. A peer's op refused inside `applyRemote` is a protocol
-outcome, not a failure of the batch: it is counted (below), the batch's span
-stays green.
+set) when the work it brackets throws: a write refused by the field-kind
+rule or out of range, a push whose call rejected, a bootstrap that could not
+read a snapshot, a version the log can no longer give (`HISTORY_GONE`), a
+batch of patches its rehearsal refused. A peer's op refused inside
+`applyRemote` is a protocol outcome, not a failure of the batch: it is
+counted (below), the batch's span stays green.
 
 A `merge` — one per snapshot record during a bootstrap — is counted but not
 spanned, or a bootstrap of ten thousand records would open ten thousand
@@ -95,16 +101,16 @@ appears on one.
 | --- | --- | --- | --- |
 | `syncom.commits` | Counter | `{op}` | `syncom.op.type`, `syncom.result` (`applied` / `noop` / `encrypted` / `error`) |
 | `syncom.write.duration` | Histogram | `ms` | `syncom.path` (`commit` / `apply` / `replay`) |
-| `syncom.ops.received` | Counter | `{op}` | `syncom.outcome` (`applied` / `skipped` — accepted but not applied here: a hook, the schema, an unreadable record / `duplicate` / `gap` / `malformed` — the last includes a stamp beyond `maxSkew` / `refused` — a signature that does not check, or none under `'require'`) |
-| `syncom.ops.rejected` | Counter | `{op}` | `syncom.reason` (`register` / `counter` / `set` / `validation` / `scope` / `unreadable` / `forged` / `unsigned`) |
+| `syncom.ops.received` | Counter | `{op}` | `syncom.outcome` (`applied` / `skipped` — accepted but not applied here: a hook, the schema, an unreadable record / `duplicate` / `gap` / `malformed` — the last includes a stamp beyond `maxSkew` / `refused` — a signature that does not check, or none under `'require'`, or on a host a record outside the pushing peer's scopes) |
+| `syncom.ops.rejected` | Counter | `{op}` | `syncom.reason` (`register` / `counter` / `set` / `list` / `text` / `tree` — the kind that holds the field and outranks the op's / `bound` — past a list's or a text's limit / `malformed` — a payload the engine does not admit / `validation` / `scope` / `unreadable` / `forged` / `unsigned`) |
 | `syncom.conflicts` | Counter | `{conflict}` | `syncom.kind` (`unique`) |
 | `syncom.ops.limited` | Counter | `{push}` | `syncom.reason` (`ops` / `bytes` / `rate`) |
 | `syncom.replication.lag` | Histogram | `ms` | — |
-| `syncom.push.ops` | Histogram | `{op}` | `syncom.push.reason`, `syncom.result` (`ok` / `error`) |
+| `syncom.push.ops` | Histogram | `{op}` | `syncom.push.reason` (as on the span), `syncom.result` (`ok` / `error`) |
 | `syncom.bootstraps` | Counter | `{bootstrap}` | `syncom.result` |
 | `syncom.log.segments` | Counter | `{segment}` | `syncom.log.event` (`sealed` / `dropped`) |
 | `syncom.log.append.duration` | Histogram | `ms` | — |
-| `syncom.hook.duration` | Histogram | `ms` | `syncom.hook` (the hook's name) |
+| `syncom.hook.duration` | Histogram | `ms` | `syncom.hook` (`beforeWrite` / `afterWrite` / `beforeApply` / `afterApply` — the hooks that run in the mutation queue; read and sync hooks are not timed) |
 | `syncom.lock.wait` | Histogram | `ms` | — (what `open()` spent taking the directory lock) |
 | `syncom.hello.refused` | Counter | `{call}` | `syncom.code` (`400` / `403` / `409` / `428`) — calls a hosted unit refused before the handler |
 | `syncom.outbox.size` | Observable gauge | `{op}` | — (ops queued for peers, over every dialed peer) |
@@ -216,9 +222,10 @@ alert to key on:
 | warn | `sync.gaps`, `sync.push.gaps`, `sync.error`, `sync.outbox.dropped`, `sync.record.malformed`, `sync.record.skew`, `sync.record.encrypted` | a page with gaps (received, or answered by the host to a push), a failure on the way to a peer (`REWOUND` and `UNDELIVERABLE` among them), a dropped backlog, a snapshot record left out |
 | warn | `log.epoch.new` (when a log was there), `log.segment.unreadable`, `log.open.unreadable` | the log changed epoch or lost a file |
 | warn | `storage.unpersisted` | logged ops whose record files could not be written, held in memory until the next open; also an `error` event (`UNPERSISTED`) |
-| warn | `catalog.skipped`, `catalog.lens`, `catalog.save`, `catalog.search`, `snapshot.skipped`, `replay.skipped`, `record.shadowed` | derived state could not follow a record (`catalog.search`: the injected text index threw); a field shadowing a method |
+| warn | `catalog.skipped`, `catalog.lens`, `catalog.save`, `catalog.search`, `snapshot.skipped`, `replay.skipped`, `record.shadowed`, `record.refresh` | derived state could not follow a record (`catalog.search`: the injected text index threw); a field shadowing a method; a live `Record` not refreshed after a change, a read hook having thrown |
 | warn | `listener.error`, `watch.error`, `schema.drift` | an event listener or a watcher threw; two builds of one schema version |
 | warn | `identity.rekeyed` | a directory from before signing: `node.json` held a UUID, the node is now its signing key (once) |
+| warn | `tags.dropped`, `tags.unreadable`, `sync.node.unreadable` | a `tags.json` line dropped (`reason`: `name` — not a record id, at open; `catalog` — the tag's catalog unreadable, found at open for the newest tag and at its first read for an older one); `tags.json` itself unreadable — kept as `tags.corrupt.json`, the storage open without tags until it is repaired; a registry entry that cannot be read, skipped |
 | info | `schema.upgrade`, `schema.changed`, `schema.held`, `record.repaired` | what a reopen found about the schema; a record rebuilt from the log |
 | debug | `catalog.rebuild`, `durable.noop`, `log.epoch.new` (a brand-new log), `schema.lens.issues` | routine |
 

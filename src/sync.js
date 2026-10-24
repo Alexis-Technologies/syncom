@@ -21,7 +21,8 @@
 
 const { Emitter } = require('./utils.js');
 const { packOps, unpackOps } = require('./ops.js');
-const { vectorHas, vectorAdvance, vectorMax, keyScope, opKey, isBootstrapOp } = require('./vector.js');
+const { vectorHas, vectorAdvance, vectorMax, keyScope, opKey } = require('./vector.js');
+const { outbound, unreachable } = require('./outbound.js');
 const { isSyncLink } = require('./link.js');
 const { createTelemetry, traced } = require('./telemetry.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
@@ -278,6 +279,12 @@ class SyncManager extends Emitter {
 
   /** Pushes whatever the connected peers lack right now; resolves when done. */
   async sync(url) {
+    // An enabled node whose dial failed has no peer: it is dialled again.
+    if (this.#started) {
+      for (const node of this.#nodes.values()) {
+        if (node.enabled && (url === undefined || node.url === url)) this.#connect(node);
+      }
+    }
     const peers = url ? [this.#peers.get(url)].filter(Boolean) : Array.from(this.#peers.values());
     const results = [];
     for (const peer of peers) {
@@ -318,7 +325,7 @@ class SyncManager extends Emitter {
   }
 
   #connect(node) {
-    if (this.#peers.has(node.url)) return;
+    if (this.#peers.has(node.url) && !this.#peers.get(node.url).failed) return;
     const peer = {
       node,
       // What the application sees as `via` on a change, an apply, a hook:
@@ -353,6 +360,8 @@ class SyncManager extends Emitter {
       feed: 0,
       failures: 0,
       stuck: false,
+      // The dial itself failed — no link: the next sync() dials again.
+      failed: false,
     };
     this.#peers.set(node.url, peer);
     Promise.resolve()
@@ -393,7 +402,12 @@ class SyncManager extends Emitter {
         notify(this, this.#storage.logger, 'connect', { url: node.url });
         return this.#handshake(peer, { resubscribe: true });
       })
-      .catch((error) => this.#fail(peer, error));
+      .catch((error) => {
+        // No link came of it: peers() still shows the node and its error,
+        // and the next sync() dials it again.
+        if (peer.link === null) peer.failed = true;
+        this.#fail(peer, error);
+      });
   }
 
   #disconnect(url) {
@@ -486,8 +500,12 @@ class SyncManager extends Emitter {
       await this.#push(peer, 'handshake');
       peer.behind = false;
     } catch (error) {
-      // Reported by the caller; what the host lacks waits for #recover.
+      // Reported by the caller; what the host lacks waits for #recover. The
+      // inbound half does not wait on it: the feed opens (but for a rewound
+      // node, which bootstraps first), and its pages are the sign of life
+      // the recovery pushes at.
       this.#fallBehind(peer, null);
+      if (resubscribe && !rewound && !peer.subscription && !peer.closed) this.#subscribe(peer);
       throw error;
     }
     // The state the lost ops made is in the host's: joined back, and the
@@ -569,29 +587,17 @@ class SyncManager extends Emitter {
   }
 
   // Everything in our log the host has not seen, by its vector — ops of its
-  // own origin excluded (it has those by definition). A host that is behind
-  // what we still retain cannot be caught up from here; it will bootstrap
-  // from a node that dials it, or we from it.
+  // own origin excluded (it has those by definition); src/outbound.js picks
+  // them, as a branch merge does. A host that is behind what we still
+  // retain cannot be caught up from here; it will bootstrap from a node
+  // that dials it, or we from it.
   async #pushFromLog(peer, reason) {
-    const { node } = peer;
-    const own = this.#storage.nodeId;
-    const entries =
-      this.#storage.log.since(undefined) ??
-      this.#storage.log.since(this.#storage.log.formatId(this.#storage.log.floor - 1)) ??
-      [];
-    const ops = [];
-    // The first seq this log retains of each of our own streams the host
-    // takes: a host behind it lacks ops only this node ever had.
-    const first = {};
-    for (const { op } of entries) {
-      if (op.origin === peer.remote.id || op.from === peer.remote.id) continue;
-      if (!opInScope(op, node.scopes)) continue;
-      // (Not the bootstrap stream: it holds holes by design for a host
-      // whose snapshot some of it came from.)
-      if (op.origin === own && !isBootstrapOp(op)) first[opKey(op)] ??= op.seq;
-      if (vectorHas(peer.remote.vector, op)) continue;
-      ops.push(op);
-    }
+    const { ops, first } = outbound(this.#storage.log, {
+      exclude: peer.remote.id,
+      vector: peer.remote.vector,
+      scopes: peer.node.scopes,
+      own: this.#storage.nodeId,
+    });
     const missing = this.#lost(peer, first);
     return this.#send(
       peer,
@@ -604,11 +610,7 @@ class SyncManager extends Emitter {
   // holds stops short of the first op retained here. Reported once per
   // hello; their ops stay unsent — every one would be a gap at the host.
   #lost(peer, first) {
-    const missing = {};
-    for (const key of Object.keys(first)) {
-      const host = peer.remote.vector[key] ?? 0;
-      if (host + 1 < first[key]) missing[key] = { host, retained: first[key] };
-    }
+    const missing = unreachable(first, peer.remote.vector);
     if (Object.keys(missing).length > 0 && !peer.undeliverable) {
       peer.undeliverable = true;
       const message = `${peer.node.url} lacks ops of this node that its log no longer holds`;
@@ -620,8 +622,8 @@ class SyncManager extends Emitter {
   // One span per push, whatever its page count: with wrpc underneath, the
   // `syncom/push` client span of every page nests under it, and the server
   // span on the far side under that — the link carries the context.
-  // `reason` says what caused it: a handshake, a manual sync(), or a relay
-  // of ops that just landed.
+  // `reason` says what caused it: a handshake, a manual sync(), a relay of
+  // ops that just landed, or a recovery push after a failed one.
   async #send(peer, ops, reason) {
     const otel = this.#otel;
     if (!otel.enabled || ops.length === 0) return this.#sendPages(peer, ops);

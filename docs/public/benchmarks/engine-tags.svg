@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="348" viewBox="0 0 760 348" role="img" aria-label="Tags: syncom's own benchmarks. Named versions: a tag over a thousand records, writes under it (the first copies the file), reads at the tag. ops/s, log scale, higher is better.">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .title { font-size: 15px; font-weight: 700; fill: #1b1c1e; }
+  .subtitle, .caption { font-size: 12px; fill: #67676c; }
+  .caption { font-size: 11px; }
+  .group { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; fill: #67676c; }
+  .label { font-size: 13px; font-weight: 600; fill: #1b1c1e; }
+  .label.primary, .label.secondary { font-weight: 700; }
+  .sublabel { font-size: 11px; fill: #67676c; }
+  .value { font-size: 12px; font-weight: 600; fill: #3c3c43; font-variant-numeric: tabular-nums; }
+  .value.small { font-size: 10px; }
+  .legend { font-size: 11px; fill: #3c3c43; }
+  .tick { font-size: 11px; fill: #67676c; font-variant-numeric: tabular-nums; }
+  .grid { stroke: #e4e4e7; stroke-width: 1; }
+  .axis { stroke: #c2c2c4; stroke-width: 1; }
+  .ref { stroke: #67676c; stroke-width: 1; stroke-dasharray: 3 3; }
+  .bar { fill: #c4c6cc; }
+  .bar.primary { fill: #245a9e; }
+  .bar.secondary { fill: #5e9be6; }
+  @media (prefers-color-scheme: dark) {
+    .title, .label { fill: #dfdfd6; }
+    .subtitle, .caption, .group, .sublabel, .tick { fill: #98989f; }
+    .value, .legend { fill: #c2c2c4; }
+    .grid { stroke: #2e2e32; }
+    .axis { stroke: #48484c; }
+    .ref { stroke: #98989f; }
+    .bar { fill: #46474e; }
+    .bar.primary { fill: #8dbcf2; }
+    .bar.secondary { fill: #3d7bd0; }
+  }
+</style>
+<text class="title" x="20" y="35">Tags: syncom's own benchmarks</text>
+<text class="subtitle" x="20" y="56">Named versions: a tag over a thousand records, writes under it (the first copies the file), reads at the tag.</text>
+<text class="subtitle" x="20" y="73">ops/s, log scale, higher is better.</text>
+<line class="grid" x1="371" y1="88" x2="371" y2="288"/>
+<text class="tick" x="371" y="304" text-anchor="middle">1,000</text>
+<line class="grid" x1="447.25" y1="88" x2="447.25" y2="288"/>
+<text class="tick" x="447.25" y="304" text-anchor="middle">10k</text>
+<line class="grid" x1="523.5" y1="88" x2="523.5" y2="288"/>
+<text class="tick" x="523.5" y="304" text-anchor="middle">100k</text>
+<line class="grid" x1="599.75" y1="88" x2="599.75" y2="288"/>
+<text class="tick" x="599.75" y="304" text-anchor="middle">1M</text>
+<line class="grid" x1="676" y1="88" x2="676" y2="288"/>
+<text class="tick" x="676" y="304" text-anchor="middle">10M</text>
+<line class="axis" x1="371" y1="88" x2="371" y2="288"/>
+<g><title>tag() + untag() · over 1 000 records (memory fsi)
+1,932 ops/s
+518 µs per operation</title>
+<text class="label primary" x="20" y="105">tag() + untag()</text>
+<text class="sublabel" x="20" y="120">over 1 000 records (memory fsi)</text>
+<path class="bar primary" d="M371,101H388.8080430585599A4,4 0 0 1 392.8080430585599,105V111A4,4 0 0 1 388.8080430585599,115H371Z"/>
+<text class="value" x="398.8080430585599" y="114">1,932</text>
+</g>
+<g><title>update · under a tag; the first write of a record copies its file
+17,511 ops/s
+57.1 µs per operation</title>
+<text class="label primary" x="20" y="145">update</text>
+<text class="sublabel" x="20" y="160">under a tag; the first write of a record copies its file</text>
+<path class="bar primary" d="M371,141H461.80245978727396A4,4 0 0 1 465.80245978727396,145V151A4,4 0 0 1 461.80245978727396,155H371Z"/>
+<text class="value" x="471.80245978727396" y="154">17.5k</text>
+</g>
+<g><title>at(tag).get · a record copied at the tag
+142,544 ops/s
+7.02 µs per operation</title>
+<text class="label primary" x="20" y="185">at(tag).get</text>
+<text class="sublabel" x="20" y="200">a record copied at the tag</text>
+<path class="bar primary" d="M371,181H531.238606796332A4,4 0 0 1 535.238606796332,185V191A4,4 0 0 1 531.238606796332,195H371Z"/>
+<text class="value" x="541.238606796332" y="194">143k</text>
+</g>
+<g><title>get(id, { at: { tag } }) · through the read hooks
+157,133 ops/s
+6.36 µs per operation</title>
+<text class="label primary" x="20" y="225">get(id, { at: { tag } })</text>
+<text class="sublabel" x="20" y="240">through the read hooks</text>
+<path class="bar primary" d="M371,221H534.4653894163097A4,4 0 0 1 538.4653894163097,225V231A4,4 0 0 1 534.4653894163097,235H371Z"/>
+<text class="value" x="544.4653894163097" y="234">157k</text>
+</g>
+<g><title>at(tag).list · the tag’s catalog, 1 000 ids
+1,364,874 ops/s
+733 ns per operation</title>
+<text class="label primary" x="20" y="265">at(tag).list</text>
+<text class="sublabel" x="20" y="280">the tag’s catalog, 1 000 ids</text>
+<path class="bar primary" d="M371,261H606.0508077613817A4,4 0 0 1 610.0508077613817,265V271A4,4 0 0 1 606.0508077613817,275H371Z"/>
+<text class="value" x="616.0508077613817" y="274">1.36M</text>
+</g>
+<text class="caption" x="20" y="329">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-24</text>
+</svg>

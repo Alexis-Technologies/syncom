@@ -22,8 +22,9 @@ defineRouter({ syncom: hub.sync.unit({ access: 'session', authorize, limits, met
 Two rules keep it simple. **Sticky sessions**: a client's `changes`
 subscription names a position in *one* hub's log (`<epoch>.<seq>`), so a
 load balancer must keep a client on the hub it greeted; a client moved to
-another hub resumes from a cursor that hub does not know and bootstraps
-from it — correct, just more expensive. **A hub restart resumes**: the log's
+another hub finds another epoch at hello, drops its cursor and starts over
+there — that hub's whole retained log, or a bootstrap once it has compacted
+— correct, just more expensive. **A hub restart resumes**: the log's
 epoch is minted once, so clients of a restarted hub pick up from their
 cursors without a snapshot, as long as retention still covers them.
 
@@ -88,11 +89,16 @@ const router = defineRouter(
 ```
 
 The hook runs before access and the handler, on every transport the router
-serves — a WebSocket, a `PeerHost` — and a refused push reaches the dialer as
-its `error` event with `code` 429; it keeps its cursor, marks the peer behind,
-and resends what the hub's vector still lacks at the next sign of life on the
-link (a page from the hub, an op to relay) or on `sync()` — backed off after a
-recovery that failed. The wrpc integration test runs exactly this recipe.
+serves — a WebSocket, a `PeerHost` — with a bucket per procedure, so `hello`
+and `changes` keep their own. A refused push reaches the dialer as its
+`error` event with `code` 429; it keeps its cursor and marks the peer
+behind. What the hub's vector still lacks is pushed at the next sign of
+life on the link (a page from the hub, an op to relay) or on `sync()` —
+backed off after a recovery that failed. A push refused during the
+handshake does not hold the `changes` subscription back: it opens anyway,
+and the rest goes at the next push ([Hosting](./sync#hosting)). The wrpc
+integration test runs exactly this recipe: a handshake push refused, the
+feed open, the rest sent by a `sync()` once the window passed.
 
 Retention bounds the log: `sync.retention.ops` / `.days` size it for the
 longest outage a client may have — below the floor a client bootstraps,
@@ -143,8 +149,10 @@ end.
 
 Every path emits through the injected OpenTelemetry writer
 ([telemetry](./telemetry)): `syncom.ops.received` by outcome,
-`syncom.ops.rejected` by reason (`register`, `counter`, `validation`),
-`syncom.conflicts`, `syncom.ops.limited` by reason, `syncom.replication.lag`,
-the push and bootstrap spans nested under wrpc's. On the hub, those plus
-the `hello`, `conflict`, `schema` and `error` events are what a dashboard
-and an audit are built from — and `op.actor` says who.
+`syncom.ops.rejected` by reason (the kind that held a field, `bound`,
+`malformed`, `validation`, `scope`, `unreadable`, `forged`, `unsigned`),
+`syncom.conflicts`, `syncom.ops.limited` by reason (`ops`, `bytes`, `rate`),
+`syncom.replication.lag`, the push and bootstrap spans nested under wrpc's.
+On the hub, those plus the `hello`, `refused`, `conflict`, `schema` and
+`error` events are what a dashboard and an audit are built from — and
+`op.actor` says who.

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-22T19:17:30.850Z",
+  "generatedAt": "2026-10-24T17:17:53.619Z",
   "machine": {
     "cpu": "Apple M3 Max",
     "cores": 16,
@@ -149,14 +149,14 @@
       "unit": "ops/s",
       "results": {
         "syncom": {
-          "median": 16158.767242467984,
-          "min": 15427.693967881063,
-          "max": 16335.408128686247
+          "median": 15151.097414745667,
+          "min": 14904.66255882781,
+          "max": 15552.003455535532
         },
         "syncom-nochain": {
-          "median": 17478.30819234039,
-          "min": 17077.209756476783,
-          "max": 17922.31956174327
+          "median": 16673.24695462492,
+          "min": 16274.081773811795,
+          "max": 16865.327806717673
         },
         "yjs": {
           "median": 234529.6807032105,
@@ -215,14 +215,14 @@
       "unit": "ops/s",
       "results": {
         "syncom": {
-          "median": 1522.782599268753,
-          "min": 870.7789145651154,
-          "max": 1791.154874022326
+          "median": 1317.3578188954496,
+          "min": 950.2611408948047,
+          "max": 1725.0194544609406
         },
         "syncom-nochain": {
-          "median": 2058.9807180673656,
-          "min": 1899.6581584021314,
-          "max": 2681.7215423345933
+          "median": 2417.3692978616027,
+          "min": 1769.5105198873337,
+          "max": 2614.4699912453634
         },
         "yjs": {
           "median": 19246.796884022235,
@@ -281,14 +281,14 @@
       "unit": "ops/s",
       "results": {
         "syncom": {
-          "median": 17097.2224719563,
-          "min": 16455.99233010987,
-          "max": 17342.47878112807
+          "median": 17242.84831364442,
+          "min": 17205.531481866048,
+          "max": 17315.366656374925
         },
         "syncom-nochain": {
-          "median": 18832.160250456855,
-          "min": 18730.591564198567,
-          "max": 19729.09057764994
+          "median": 19357.71257045609,
+          "min": 19117.982604604313,
+          "max": 19385.181268453507
         },
         "yjs": {
           "median": 382443.6455842893,
@@ -347,14 +347,14 @@
       "unit": "ops/s",
       "results": {
         "syncom": {
-          "median": 1342.4902569368933,
-          "min": 994.1276564981987,
-          "max": 1785.5020077001432
+          "median": 1528.678118244573,
+          "min": 1222.635060664519,
+          "max": 1649.4870695842033
         },
         "syncom-nochain": {
-          "median": 3076.354903983142,
-          "min": 2747.367021581029,
-          "max": 3081.166102992538
+          "median": 2835.733284806349,
+          "min": 2718.3785986194475,
+          "max": 3026.6886638253036
         },
         "yjs": {
           "median": 22410.120467865163,
@@ -413,14 +413,14 @@
       "unit": "ops/s",
       "results": {
         "syncom": {
-          "median": 971873.3309273649,
-          "min": 964350.8042652654,
-          "max": 981332.403112029
+          "median": 845124.1843550695,
+          "min": 685279.293974933,
+          "max": 886859.9657641001
         },
         "syncom-nochain": {
-          "median": 929272.3044637601,
-          "min": 926181.565504644,
-          "max": 946058.4976424875
+          "median": 885127.0987193184,
+          "min": 882711.0608264786,
+          "max": 893258.6450470127
         },
         "yjs": {
           "median": 3675329.173463649,
@@ -479,14 +479,14 @@
       "unit": "ops/s",
       "results": {
         "syncom": {
-          "median": 958203.2939642053,
-          "min": 956925.5030225046,
-          "max": 962537.8664417432
+          "median": 890676.8143517048,
+          "min": 884625.4855073391,
+          "max": 895251.6255942554
         },
         "syncom-nochain": {
-          "median": 951488.4894516196,
-          "min": 935275.5523628481,
-          "max": 961568.0319946897
+          "median": 875392.8688821379,
+          "min": 824518.1420159993,
+          "max": 887428.5220306918
         },
         "yjs": {
           "median": 3688013.505908745,
@@ -545,14 +545,14 @@
       "unit": "ops/s",
       "results": {
         "syncom": {
-          "median": 16711.29691002396,
-          "min": 16229.341348079113,
-          "max": 16871.947092656297
+          "median": 17125.547284222685,
+          "min": 16540.53399503686,
+          "max": 17355.73108508751
         },
         "syncom-nochain": {
-          "median": 18589.830567249475,
-          "min": 17960.3878465164,
-          "max": 18722.10628376218
+          "median": 18846.07135974315,
+          "min": 18484.470278960198,
+          "max": 19189.23373280474
         },
         "automerge": {
           "median": 1948.709360655863,
@@ -587,14 +587,14 @@
       "unit": "ops/s",
       "results": {
         "syncom": {
-          "median": 1477.6751249626168,
-          "min": 1005.8749634054353,
-          "max": 1912.8041824122345
+          "median": 1213.548883673148,
+          "min": 1167.2258374633018,
+          "max": 1802.2578949488534
         },
         "syncom-nochain": {
-          "median": 3061.5297282005586,
-          "min": 2980.962152147103,
-          "max": 3166.8103123249207
+          "median": 2964.8028025723006,
+          "min": 2751.190000746668,
+          "max": 3180.871612768841
         },
         "automerge": {
           "median": 1196.502626020144,
@@ -629,14 +629,14 @@
       "unit": "records/s",
       "results": {
         "syncom": {
-          "median": 16009.264112882725,
-          "min": 15523.531166197667,
-          "max": 16424.878763863613
+          "median": 15788.798422231685,
+          "min": 15456.229087528834,
+          "max": 16013.141280470678
         },
         "syncom-nochain": {
-          "median": 17208.668006074655,
-          "min": 16814.859385402095,
-          "max": 17407.96816319372
+          "median": 16869.332863601143,
+          "min": 16069.624411739253,
+          "max": 17073.39301895595
         },
         "yjs": {
           "median": 274583.8338767806,
@@ -695,14 +695,14 @@
       "unit": "records/s",
       "results": {
         "syncom": {
-          "median": 1690.1571524683907,
-          "min": 903.3901754381551,
-          "max": 1734.4466746537935
+          "median": 1621.3571651218515,
+          "min": 1389.372917468065,
+          "max": 1691.2450375170993
         },
         "syncom-nochain": {
-          "median": 2737.240013521964,
-          "min": 2695.7214544232434,
-          "max": 2762.2573443243564
+          "median": 2635.4503406941544,
+          "min": 2414.552750884859,
+          "max": 2733.7890838582616
         },
         "yjs": {
           "median": 154946.6805230321,
@@ -758,14 +758,14 @@
       "unit": "records/s",
       "results": {
         "syncom": {
-          "median": 25223.675991590604,
-          "min": 25137.75995208943,
-          "max": 25752.979787155728
+          "median": 25090.561244491815,
+          "min": 24029.869127325273,
+          "max": 25916.21934192241
         },
         "syncom-nochain": {
-          "median": 26248.900367941336,
-          "min": 22472.54136352146,
-          "max": 26531.64957825021
+          "median": 25836.399834099306,
+          "min": 23842.093812678617,
+          "max": 26197.69852170575
         },
         "yjs": {
           "median": 99728.64832078399,
@@ -820,14 +820,14 @@
       "unit": "records/s",
       "results": {
         "syncom": {
-          "median": 5833.321608356902,
-          "min": 3341.5014442620823,
-          "max": 6033.179446231833
+          "median": 5309.734494478818,
+          "min": 4852.105801545003,
+          "max": 6013.409904086109
         },
         "syncom-nochain": {
-          "median": 5820.148698280675,
-          "min": 4255.809617412205,
-          "max": 6095.829499843959
+          "median": 5906.757404304994,
+          "min": 5293.615939937269,
+          "max": 5967.290298230251
         },
         "yjs": {
           "median": 53737.56015785516,
@@ -866,18 +866,156 @@
         "gun": "syncs over its WebSocket/WebRTC mesh only"
       },
       "failed": {}
+    },
+    {
+      "id": "append-memory",
+      "kind": "append",
+      "kindTitle": "Type at the end of a text",
+      "line": "memory",
+      "lineTitle": "In memory",
+      "title": "Type at the end of a text, in memory",
+      "description": "Insert one character at the end of a text that merges by position — the common keystroke. Nothing touches the disk.",
+      "unit": "ops/s",
+      "results": {
+        "syncom": {
+          "median": 1801.4481331397703,
+          "min": 1463.0919645736933,
+          "max": 2805.155384295683
+        },
+        "syncom-nochain": {
+          "median": 1823.0736507012377,
+          "min": 1484.9941253812033,
+          "max": 2817.772598400425
+        },
+        "yjs": {
+          "median": 346453.14085936476,
+          "min": 335269.5001450474,
+          "max": 353758.53860873624
+        },
+        "automerge": {
+          "median": 23677.620095621172,
+          "min": 23427.197585406804,
+          "max": 23922.54409279021
+        },
+        "loro": {
+          "median": 618945.3177829481,
+          "min": 616183.079787133,
+          "max": 624243.603751006
+        }
+      },
+      "unsupported": {
+        "tinybase": "no text that merges by position",
+        "pouchdb": "no text that merges by position",
+        "rxdb": "no text that merges by position",
+        "fireproof": "no text that merges by position",
+        "gun": "needs its storage adapter to answer in Node.js",
+        "orbitdb": "no text that merges by position"
+      },
+      "failed": {}
+    },
+    {
+      "id": "prepend-memory",
+      "kind": "prepend",
+      "kindTitle": "Type at the start of a text",
+      "line": "memory",
+      "lineTitle": "In memory",
+      "title": "Type at the start of a text, in memory",
+      "description": "Insert one character at the start of the text — every insert anchors into the same spot. Nothing touches the disk.",
+      "unit": "ops/s",
+      "results": {
+        "syncom": {
+          "median": 388.4270585571998,
+          "min": 303.27659675996125,
+          "max": 631.7405707122994
+        },
+        "syncom-nochain": {
+          "median": 391.109876942166,
+          "min": 295.5667419357193,
+          "max": 620.929696690396
+        },
+        "yjs": {
+          "median": 524545.354540025,
+          "min": 452698.8299459338,
+          "max": 529378.5036914867
+        },
+        "automerge": {
+          "median": 21562.760180164805,
+          "min": 21345.56826642622,
+          "max": 22273.131756077335
+        },
+        "loro": {
+          "median": 443522.96217898326,
+          "min": 442433.48015506344,
+          "max": 449082.669706808
+        }
+      },
+      "unsupported": {
+        "tinybase": "no text that merges by position",
+        "pouchdb": "no text that merges by position",
+        "rxdb": "no text that merges by position",
+        "fireproof": "no text that merges by position",
+        "gun": "needs its storage adapter to answer in Node.js",
+        "orbitdb": "no text that merges by position"
+      },
+      "failed": {}
+    },
+    {
+      "id": "random-memory",
+      "kind": "random",
+      "kindTitle": "Type anywhere in a text",
+      "line": "memory",
+      "lineTitle": "In memory",
+      "title": "Type anywhere in a text, in memory",
+      "description": "Insert one character at a random position of the text (seeded). Nothing touches the disk.",
+      "unit": "ops/s",
+      "results": {
+        "syncom": {
+          "median": 536.6881165549418,
+          "min": 406.36055189612205,
+          "max": 824.3789945850202
+        },
+        "syncom-nochain": {
+          "median": 550.3935460789885,
+          "min": 399.0188869892625,
+          "max": 851.708777701791
+        },
+        "yjs": {
+          "median": 30398.223116685596,
+          "min": 28438.17880877493,
+          "max": 31809.964215128417
+        },
+        "automerge": {
+          "median": 20597.41226358537,
+          "min": 20535.090149786203,
+          "max": 21091.554177814367
+        },
+        "loro": {
+          "median": 310723.24949627114,
+          "min": 308747.1732514568,
+          "max": 313146.29320890346
+        }
+      },
+      "unsupported": {
+        "tinybase": "no text that merges by position",
+        "pouchdb": "no text that merges by position",
+        "rxdb": "no text that merges by position",
+        "fireproof": "no text that merges by position",
+        "gun": "needs its storage adapter to answer in Node.js",
+        "orbitdb": "no text that merges by position"
+      },
+      "failed": {}
     }
   ],
   "coldStart": {
     "syncom": {
-      "open": 36.004875,
-      "firstRead": 0.9018124999999984,
-      "total": 37.0136665
+      "open": 40.29775,
+      "firstRead": 1.057874499999997,
+      "total": 41.319208
     },
     "syncom-nochain": {
-      "open": 35.974396,
-      "firstRead": 0.3473954999999975,
-      "total": 36.328208
+      "open": 39.389958,
+      "firstRead": 0.5151250000000012,
+      "total": 39.905083
     },
     "yjs": {
       "open": 82.67010450000001,

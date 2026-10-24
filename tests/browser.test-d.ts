@@ -48,3 +48,9 @@ expectAssignable<StorageOptions>({
   hooks: { beforeWrite: () => undefined },
   sync: { hooks: { beforeConnect: () => false } },
 });
+// The types of the CRDT branch reach the browser half too.
+expectAssignable<browser.Patch>({ action: 'put', field: 'n', value: 1 });
+expectAssignable<browser.Version>({ tag: 'v1' });
+expectAssignable<browser.TextSpan>({ text: 'hi', marks: {} });
+expectAssignable<browser.CursorSide>('after');
+expectAssignable<browser.MarkExpand>('none');

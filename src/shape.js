@@ -44,12 +44,27 @@ const isStreamName = (value) =>
 const KEY_ID = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
 const isKeyId = (value) => typeof value === 'string' && KEY_ID.test(value);
 
-const OP_TYPES = new Set(['write', 'set', 'inc', 'delete', 'merge', 'advance', 'purge', 'add', 'remove']);
+const OP_TYPES = new Set([
+  'write',
+  'set',
+  'inc',
+  'delete',
+  'merge',
+  'advance',
+  'purge',
+  'add',
+  'remove',
+  'splice',
+  'assign',
+  'move',
+  'mark',
+  'tree',
+]);
 
 // The ops an entity's validator sees: the ones that leave a record for the
 // application to read. A `merge` joins a peer's state as it is, a `delete`
 // leaves nothing to validate.
-const VALIDATED = new Set(['write', 'set', 'inc', 'add', 'remove']);
+const VALIDATED = new Set(['write', 'set', 'inc', 'add', 'remove', 'splice', 'assign', 'move', 'mark', 'tree']);
 
 // A signature's three fields, by shape alone — whether they check is
 // src/signing.js's business: 64 bytes base64url, 32 bytes hex, a nonce.
@@ -76,4 +91,28 @@ const wellFormed = (op) =>
   (op.nonce === undefined || (typeof op.nonce === 'string' && NONCE.test(op.nonce))) &&
   (op.type === 'advance' ? isPlainObject(op.vector) : isRecordId(op.id));
 
-module.exports = { isPlainObject, asJson, isRecordId, invalidId, isStreamName, isKeyId, VALIDATED, wellFormed };
+// Structural equality over JSON values — own keys, in any order.
+const deepEqual = (a, b) => {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const keysA = Object.keys(a);
+  const keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+  for (const key of keysA) {
+    if (!Object.hasOwn(b, key) || !deepEqual(a[key], b[key])) return false;
+  }
+  return true;
+};
+
+module.exports = {
+  isPlainObject,
+  asJson,
+  isRecordId,
+  invalidId,
+  isStreamName,
+  isKeyId,
+  VALIDATED,
+  wellFormed,
+  deepEqual,
+};

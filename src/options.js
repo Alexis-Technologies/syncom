@@ -5,6 +5,7 @@
 // modules. Every message names the option the way the caller wrote it.
 
 const { isPlainObject } = require('./shape.js');
+const { PENDING_MAX } = require('./sequence.js');
 
 const DEFAULT_CACHE = 5000;
 const DEFAULT_FLUSH_EVERY = 64;
@@ -45,6 +46,10 @@ const positiveInteger = (value, message) => {
 };
 
 const normalizeStorageOptions = (options) => {
+  // `open('./path')` would otherwise open the default directory in silence.
+  if (options === null || typeof options !== 'object') {
+    throw new TypeError('open() takes an options object: open({ path, ... })');
+  }
   const { maxListeners } = options;
   if (maxListeners !== undefined && !(Number.isInteger(maxListeners) && maxListeners > 0)) {
     throw new TypeError('open({ maxListeners }): maxListeners must be a positive integer');
@@ -94,6 +99,20 @@ const normalizeStorageOptions = (options) => {
   if (maxSkew !== undefined && !(typeof maxSkew === 'number' && maxSkew > 0)) {
     throw new TypeError('open({ sync }): maxSkew must be a positive number of milliseconds (Infinity to disable)');
   }
+  // How much pending work a list or text field takes from ops that ran ahead
+  // of what they depend on before an op is refused — see src/sequence.js.
+  const pendingMax = options.sync?.pendingMax;
+  if (pendingMax !== undefined && !((Number.isInteger(pendingMax) && pendingMax > 0) || pendingMax === Infinity)) {
+    throw new TypeError('open({ sync }): pendingMax must be a positive integer (Infinity to disable)');
+  }
+  // Record files may lag the log by this many ms (0: never): the log is
+  // durable at once and a crash replays the batch, so the writes of one
+  // record within the window coalesce into one file and one block — see
+  // Storage#deferWrite.
+  const defer = options.defer;
+  if (defer !== undefined && !(Number.isInteger(defer) && defer >= 0)) {
+    throw new TypeError('open({ defer }): defer must be a non-negative integer of milliseconds');
+  }
   // Signed ops: 'verify' signs this node's and checks a peer's when it
   // carries a signature; 'require' refuses unsigned ones too; false does
   // neither. The node id is the signing key in every mode — see src/apply.js.
@@ -118,6 +137,8 @@ const normalizeStorageOptions = (options) => {
     encrypted: options.encrypted === true,
     scope: typeof scope === 'function' ? scope : null,
     maxSkew: maxSkew ?? DEFAULT_MAX_SKEW,
+    pendingMax: pendingMax ?? PENDING_MAX,
+    defer: defer ?? 0,
     signatures: signatures ?? 'verify',
   };
 };

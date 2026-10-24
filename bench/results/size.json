@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-23T19:12:12.497Z",
+  "generatedAt": "2026-10-24T19:09:32.026Z",
   "esbuild": "0.28.2",
   "libraries": [
     {
@@ -9,8 +9,8 @@
       "packages": [
         "@alexify/syncom@0.0.1"
       ],
-      "min": 127030,
-      "gzip": 43609,
+      "min": 199647,
+      "gzip": 68221,
       "note": "storage, schema, queries, the op log and the sync protocol are one entry"
     },
     {
@@ -116,6 +116,50 @@
       "min": 1214066,
       "gzip": 362166,
       "note": "createHelia brings Helia's default libp2p configuration with it"
+    }
+  ],
+  "cores": [
+    {
+      "id": "syncom",
+      "name": "syncom",
+      "entry": "export * from '@alexify/syncom'",
+      "packages": [
+        "@alexify/syncom@0.0.1"
+      ],
+      "min": 198395,
+      "gzip": 67767
+    },
+    {
+      "id": "yjs",
+      "name": "Yjs",
+      "entry": "export * from 'yjs'",
+      "packages": [
+        "yjs@13.6.33"
+      ],
+      "min": 93287,
+      "gzip": 28753
+    },
+    {
+      "id": "automerge",
+      "name": "Automerge",
+      "entry": "export * from '@automerge/automerge'",
+      "packages": [
+        "@automerge/automerge@3.5.0"
+      ],
+      "min": 3724185,
+      "gzip": 1161526,
+      "wasm": 3644225
+    },
+    {
+      "id": "loro",
+      "name": "Loro",
+      "entry": "export * from 'loro-crdt'",
+      "packages": [
+        "loro-crdt@1.16.4"
+      ],
+      "min": 3493645,
+      "gzip": 1143024,
+      "wasm": 3398779
     }
   ]
 }

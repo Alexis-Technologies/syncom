@@ -87,24 +87,24 @@ rxdb@17.6.0</title>
 <text class="value" x="578.1709905788939" y="234">50.4k</text>
 </g>
 <g><title>syncom · chain: false, createMemoryFsi() · v0.0.1
-18,832 ops/s
-53.1 µs per operation
-samples 18.7k – 19.7k
+19,358 ops/s
+51.7 µs per operation
+samples 19.1k – 19.4k
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="265">syncom</text>
 <text class="sublabel" x="20" y="280">chain: false, createMemoryFsi() · v0.0.1</text>
-<path class="bar secondary" d="M276,261H533.9920112881774A4,4 0 0 1 537.9920112881774,265V271A4,4 0 0 1 533.9920112881774,275H276Z"/>
-<text class="value" x="543.9920112881774" y="274">18.8k</text>
+<path class="bar secondary" d="M276,261H534.9483229620848A4,4 0 0 1 538.9483229620848,265V271A4,4 0 0 1 534.9483229620848,275H276Z"/>
+<text class="value" x="544.9483229620848" y="274">19.4k</text>
 </g>
 <g><title>syncom · default, createMemoryFsi() · v0.0.1
-17,097 ops/s
-58.5 µs per operation
-samples 16.5k – 17.3k
+17,243 ops/s
+58 µs per operation
+samples 17.2k – 17.3k
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="305">syncom</text>
 <text class="sublabel" x="20" y="320">default, createMemoryFsi() · v0.0.1</text>
-<path class="bar primary" d="M276,301H530.6340450274927A4,4 0 0 1 534.6340450274927,305V311A4,4 0 0 1 530.6340450274927,315H276Z"/>
-<text class="value" x="540.6340450274927" y="314">17.1k</text>
+<path class="bar primary" d="M276,301H530.9287206161881A4,4 0 0 1 534.9287206161881,305V311A4,4 0 0 1 530.9287206161881,315H276Z"/>
+<text class="value" x="540.9287206161881" y="314">17.2k</text>
 </g>
 <g><title>PouchDB · pouchdb-adapter-memory · v9.0.0
 8,313 ops/s
@@ -147,5 +147,5 @@ samples 30.4 – 31.9
 <text class="value" x="321.4537024426717" y="474">31.1</text>
 </g>
 <text class="caption" x="20" y="529">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
-<text class="caption" x="20" y="545">in a fresh process · 2026-10-22</text>
+<text class="caption" x="20" y="545">in a fresh process · 2026-10-24</text>
 </svg>

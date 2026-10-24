@@ -58,6 +58,8 @@ const storage = await open({
 await storage.sync.addNode({ url: 'ws://hub.example.com:8000/api', token: process.env.SYNC_TOKEN });
 ```
 
+The registry is kept on disk, so a node is added once: on the next start it
+is dialled from there, and a second `addNode()` of its url is `NODE_EXISTS`.
 `connect(node)` is called once per registered node and again whenever the node
 is re-enabled, so every dial gets a fresh client. Keep wrpc's `reconnect` and
 `heartbeat` defaults: reconnecting is the client's job, and after it the
@@ -90,17 +92,21 @@ a `WrpcClient` this adapter takes as it is — see [WebRTC](./webrtc).
 
 ## What the adapter does
 
-`createWrpcLink(client, { unit })`:
+`createWrpcLink(client, { unit })` feeds `client.use()` the unit's four
+procedures once, with no round trip, and returns:
 
 - `call('syncom/x', args)` → `client.call('syncom/x', args)` — no `load()`
   needed.
-- `subscribe('syncom/changes', …)` → `client.use(SYNC_INTROSPECTION)` (no
-  round trip) then `client.api.syncom.changes.subscribe(args, { lastEventId,
-  … })`. wrpc updates the handle's `lastEventId` from each packet before it
-  delivers the value, and the adapter passes that id along with it.
+- `subscribe('syncom/changes', …)` →
+  `client.api.syncom.changes.subscribe(args, { lastEventId, … })`, the handle
+  wrpc resumes. wrpc updates the handle's `lastEventId` from each packet
+  before it delivers the value, and the adapter passes that id along with it.
 - `stream(id)` → `client.getStream(id)`, the async-iterable `WrpcReadable` a
   streamed snapshot page arrives on.
-- `open` / `close` / `reconnect` events and `close()` are the client's own.
+- `open` / `close` / `reconnect` events and `close()` are the client's own —
+  so `removeNode()`, `enableNode(url, false)` and `sync.stop()` close the
+  client.
+- `client`: the client it wraps.
 
 `unit` renames the router unit when you mounted it under something other than
 `syncom`. `isSyncLink()` is exported too, and `SYNC_INTROSPECTION` if you want
@@ -122,10 +128,13 @@ for, so wrpc's rooms and [cluster](https://wrpc.vercel.app/guide/cluster)
 describe the sync topology for free:
 
 ```js
-server.rooms.count('syncom:*');                            // peers on this instance
-await server.cluster.fetchClients({ room: 'syncom:Doc' }); // across instances
-server.cluster.disconnect({ room: 'syncom:*' });           // drop every peer
+server.rooms.count('syncom:*');                            // peers here that take every scope
+await server.cluster.fetchClients({ room: 'syncom:Doc' }); // peers of Doc, across instances
+server.cluster.disconnect({ room: 'syncom:Doc' });         // drop them
 ```
+
+A peer registered with `scopes: ['Doc']` joins `syncom:Doc` alone — not
+`syncom:*`, though it receives the global records too.
 
 Delivery does **not** go through rooms: a room broadcast is at-most-once and
 cannot be resumed, which is exactly what the subscription provides.
@@ -133,11 +142,11 @@ cannot be resumed, which is exactly what the subscription provides.
 ## Why no codec
 
 wrpc's [wire codec](https://wrpc.vercel.app/guide/codec) is a connection-wide,
-text-only setting your application owns. syncom's ops already travel packed
-(one positional array per op, no repeated keys), permessage-deflate compresses
-the rest, and the storage is JSON on both ends — there is no binary
-representation to preserve. Set a codec if your application wants one; syncom
-neither needs nor notices it.
+text-only setting your application owns. syncom's ops already travel
+[packed](./sync#on-the-wire) (one positional array per op, no repeated
+keys), permessage-deflate compresses the rest, and the storage is JSON on
+both ends — there is no binary representation to preserve. Set a codec if
+your application wants one; syncom neither needs nor notices it.
 
 ## Testing
 

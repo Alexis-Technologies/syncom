@@ -36,6 +36,18 @@
       "types": "./search.d.ts",
       "default": "./search.js"
     },
+    "./order": {
+      "types": "./order.d.ts",
+      "default": "./order.js"
+    },
+    "./undo": {
+      "types": "./undo.d.ts",
+      "default": "./undo.js"
+    },
+    "./branch": {
+      "types": "./branch.d.ts",
+      "default": "./branch.js"
+    },
     "./package.json": "./package.json"
   },
   "directories": {
@@ -91,6 +103,11 @@
     "database",
     "query",
     "full-text-search",
+    "collaborative-text",
+    "rich-text",
+    "fractional-index",
+    "undo",
+    "branches",
     "schema",
     "migrations",
     "standard-schema",
@@ -151,8 +168,15 @@
     "idb.d.ts",
     "search.js",
     "search.d.ts",
+    "order.js",
+    "order.d.ts",
+    "undo.js",
+    "undo.d.ts",
+    "branch.js",
+    "branch.d.ts",
     "src/",
     "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
     "README.md",
     "CHANGELOG.md",
     "SECURITY.md",

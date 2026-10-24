@@ -5,7 +5,9 @@
 // collaborators to the three write paths — the local one in src/commit.js,
 // a peer's batch in src/apply.js, a bootstrap page in src/bootstrap.js.
 // Records live in src/entries.js, what the application holds in
-// src/record.js, the options in src/options.js.
+// src/record.js, the options in src/options.js. The API of the field kinds
+// beyond registers is src/fields.js and the versions API src/versions.js,
+// both over the same lent core: this file keeps a delegate per method.
 
 const { Emitter, generateUUID, createLogger } = require('./utils.js');
 const { decrypt, loadKeys, loadSigningKeys, calculateHash } = require('./crypto.js');
@@ -16,9 +18,13 @@ const { OpLog } = require('./log.js');
 const { EntryStore } = require('./entries.js');
 const { Record, Collection } = require('./record.js');
 const { commit, MISMATCH } = require('./commit.js');
+const F = require('./fields.js');
+const V = require('./versions.js');
 const { applyBatch } = require('./apply.js');
 const { snapshotPage, mergeBatch, adopt } = require('./bootstrap.js');
-const { applyOp, isAlive, isCounter, isSet } = require('./ops.js');
+const { applyOp, isAlive, isCounter, isSet, isSeq, isTree } = require('./ops.js');
+const { appliedHere } = require('./history.js');
+const { Tags } = require('./tags.js');
 const { Clock } = require('./vector.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
 const { normalizeSchema, createLens, project } = require('./schema.js');
@@ -29,7 +35,7 @@ const { Catalog, isTextIndex } = require('./catalog.js');
 const { createTelemetry, traced, now } = require('./telemetry.js');
 const { GLOBAL_SCOPE } = require('./scope.js');
 const { normalizeStorageOptions } = require('./options.js');
-const { isPlainObject, asJson, isRecordId, invalidId, isStreamName, isKeyId, VALIDATED } = require('./shape.js');
+const { isPlainObject, isRecordId, invalidId, isStreamName, isKeyId, VALIDATED } = require('./shape.js');
 const { COMMIT, REFRESH, SOURCE } = require('./symbols.js');
 const { SyncomError, typed } = require('./errors.js');
 
@@ -50,22 +56,6 @@ const corrupt = (file, cause) =>
     cause,
   });
 
-// What add()/remove() take: a field name and a non-empty array of JSON
-// values — an element JSON cannot carry (undefined, a function, a symbol) has
-// no text to be told apart by.
-const setElements = (method, key, elements) => {
-  if (typeof key !== 'string') throw new TypeError(`${method}() takes a field name`);
-  if (!Array.isArray(elements) || elements.length === 0) {
-    throw new TypeError(`${method}() takes a non-empty array of elements`);
-  }
-  for (const element of elements) {
-    if (element === undefined || typeof element === 'function' || typeof element === 'symbol') {
-      throw new TypeError(`${method}() takes JSON values; got ${typeof element}`);
-    }
-  }
-  return elements;
-};
-
 class Storage extends Emitter {
   #path;
   #keys = null;
@@ -73,9 +63,14 @@ class Storage extends Emitter {
   #chain = null;
   #log = null;
   #entries = null;
+  #tags = null;
   #core = null;
   #records = null;
   #reaper = null;
+  // Live Records refreshed as get() reads — the lens, the read hooks —
+  // after the write that changed them, one after another.
+  #refreshed = Promise.resolve();
+  #refreshing = 0;
   #sync = null;
   #cacheMax;
   #verify;
@@ -104,6 +99,12 @@ class Storage extends Emitter {
   #clock = new Clock();
   #scopeOf;
   #maxSkew;
+  #limits;
+  // Local writes whose record files wait (`open({ defer })`): id → the
+  // entry to write and the log positions it covers; one timer for the flush.
+  #defer = 0;
+  #deferred = new Map();
+  #deferTimer = null;
   #signatures;
   #encrypted;
   #hooks;
@@ -134,6 +135,10 @@ class Storage extends Emitter {
     this.#encrypted = settings.encrypted;
     this.#scopeOf = settings.scope ?? (() => GLOBAL_SCOPE);
     this.#maxSkew = settings.maxSkew;
+    // What the op model is told to bound (src/ops.js applyOp): the pending
+    // work of a list or text field. Every fold of the log runs under it too.
+    this.#limits = { pendingMax: settings.pendingMax };
+    this.#defer = settings.defer;
     this.#signatures = settings.signatures;
     // Live Records, weakly: one the application still holds pins its cache
     // entry and follows the record; one it dropped is collected, and its
@@ -205,8 +210,8 @@ class Storage extends Emitter {
     // A held op lives in the log until this node runs its version;
     // retention that would drop it first makes the hold a silent loss.
     const retained = options.sync?.retention?.ops;
-    if (this.#ahead === 'hold' && retained !== undefined && retained < 1000) {
-      throw new TypeError("open({ schema }): ahead 'hold' needs sync.retention.ops of 1000 or more");
+    if (this.#ahead === 'hold' && retained !== undefined && retained > 0 && retained < 1000) {
+      throw new TypeError("open({ schema }): ahead 'hold' needs sync.retention.ops of 1000 or more, or 0");
     }
   }
 
@@ -259,10 +264,18 @@ class Storage extends Emitter {
       verify: this.#verify ? (id, data, block) => this.validate(id, data, block) : null,
       decrypt: (data) => decrypt(data, this.#keys.privateKey),
       view: (id, entry) => this.#view(id, entry),
+      before: (id, file) => this.#tags.copyBefore(id, file),
     });
     await this.#loadIdentity();
     await this.#loadSchema();
     await this.#loadCatalog();
+    this.#tags = new Tags({
+      fsi,
+      path: this.#path,
+      logger: this.#logger,
+      catalogOf: (path) => new Catalog({ fsi, path, entities: this.#entities, logger: this.#logger }),
+    });
+    await this.#tags.load();
     this.#core = this.#lend();
     await this.#replayTail();
     await this.#replayHeld();
@@ -298,6 +311,9 @@ class Storage extends Emitter {
       version: this.#version,
       ahead: this.#ahead,
       maxSkew: this.#maxSkew,
+      limits: this.#limits,
+      defer: this.#defer,
+      deferred: (id, entry, position) => this.#deferWrite(id, entry, position),
       signatures: this.#signatures,
       // Signs an op of this node's own, in place, once it is final.
       sign: this.#signatures === false ? null : (op) => signOp(op, this.#signing.privateKey),
@@ -314,7 +330,25 @@ class Storage extends Emitter {
       persist: (touched, from, to) => this.#land(touched, from, to),
       unpersisted: (touched, error) => this.#unpersisted(touched, error),
       flush: () => this.#flushCatalog(),
-      refresh: (id, data, delta, source) => this.#emitUpdate(id, data, delta, source),
+      refresh: (id, data, delta, source, entry) => this.#emitUpdate(id, data, delta, source, entry),
+      // For the API modules (src/fields.js, src/versions.js), which stand
+      // outside the queue: the hooks (their read hooks run outside it), the
+      // tags, the entities, a task run in the queue, a local op committed
+      // through it (`storage[COMMIT]`), a Record forgotten, the deferred
+      // files landed. A write path is inside the queue already and calls
+      // none of these.
+      hooks: this.#hooks,
+      tags: this.#tags,
+      entities: this.#entities,
+      run: (task) => this.#run(task),
+      commit: (type, id, payload, options) => this[COMMIT](type, id, payload, options),
+      forget: (id) => this.#records.delete(id),
+      flushDeferred: () => this.#flushDeferred(),
+      // A purge reaches the log and the tags alike.
+      scrub: async (id) => {
+        await this.#log.scrub(id);
+        await this.#tags.scrub(id);
+      },
     };
   }
 
@@ -477,7 +511,7 @@ class Storage extends Emitter {
       throw new TypeError('migrate({ entities }) takes an array of entity names');
     }
     if (!Number.isInteger(batch) || batch < 1) throw new TypeError('migrate({ batch }) takes a positive integer');
-    const result = { migrated: 0, counters: 0, sets: 0 };
+    const result = { migrated: 0, counters: 0, sets: 0, lists: 0, texts: 0, trees: 0 };
     let since = 0;
     for (const id of await this.list()) {
       const entry = await this.#entries.load(id);
@@ -487,9 +521,13 @@ class Storage extends Emitter {
       const data = {};
       const counters = {};
       const sets = {};
+      const seqs = {};
+      const trees = {};
       for (const key of Object.keys(view)) {
         if (isCounter(entry.meta, key)) counters[key] = entry.data[key];
         else if (isSet(entry.meta, key)) sets[key] = entry.data[key];
+        else if (isSeq(entry.meta, key)) seqs[key] = entry.data[key];
+        else if (isTree(entry.meta, key)) trees[key] = entry.data[key];
         else data[key] = view[key];
       }
       await this[COMMIT]('write', id, { data }, { actor });
@@ -502,6 +540,25 @@ class Storage extends Emitter {
         if (sets[key].length === 0) continue;
         await this[COMMIT]('add', id, { key, value: sets[key] }, { actor });
         result.sets++;
+      }
+      // A list or a text comes back as one run; an empty one is dropped.
+      for (const key of Object.keys(seqs)) {
+        if (seqs[key].length === 0) continue;
+        await this[COMMIT]('splice', id, { key, index: 0, count: 0, content: seqs[key] }, { actor });
+        if (typeof seqs[key] === 'string') result.texts++;
+        else result.lists++;
+      }
+      // A tree comes back as one move per node it reads with, parents
+      // first, in order; what hangs in the trash is dropped, and so is a
+      // tree with nothing to read.
+      for (const key of Object.keys(trees)) {
+        const stack = trees[key].map((root) => [root, null]).reverse();
+        if (stack.length > 0) result.trees++;
+        while (stack.length > 0) {
+          const [{ id: node, children }, parent] = stack.pop();
+          await this[COMMIT]('tree', id, { key, node, parent }, { actor });
+          for (let i = children.length - 1; i >= 0; i--) stack.push([children[i], node]);
+        }
       }
       result.migrated++;
       if (++since >= batch) {
@@ -593,7 +650,7 @@ class Storage extends Emitter {
         continue;
       }
       if (current?.encrypted) continue;
-      const { entry, changed } = applyOp(current, op);
+      const { entry, changed } = applyOp(current, op, this.#limits);
       if (changed) touched.set(op.id, { ...entry, seq });
     }
     return touched;
@@ -727,6 +784,11 @@ class Storage extends Emitter {
       queue: this.#queued,
       cache: { size: this.#entries.size, max: this.#cacheMax, pinned },
       catalog: { entries: this.#catalog.size, dirty: this.#catalog.dirty },
+      tags: { count: this.#tags.size, corrupt: this.#tags.corrupt },
+      // Records whose files lag the log: deferred by `open({ defer })`, or
+      // held after a write that failed (replayed at the next open).
+      held: this.#entries.heldIds().size,
+      deferred: this.#deferred.size,
       log: {
         length: log.length,
         floor: log.floor,
@@ -734,6 +796,8 @@ class Storage extends Emitter {
         epoch: log.epoch,
         segments: log.segments,
         latestTs: log.latestTs,
+        droppedTs: log.droppedTs,
+        pins: log.pins,
       },
       chain: this.#chain ? { tail: this.#chain.tailHash } : null,
       lock: this.#lock ? { mode: this.#lockOptions.mode } : null,
@@ -782,9 +846,37 @@ class Storage extends Emitter {
     }
   }
 
-  #emitUpdate(id, data, delta, source = null) {
+  // A live Record reads what get() reads: through the lens and the read
+  // hooks. Those run after the write, outside the mutation queue — a read
+  // hook may write, and that write waits for the queue — in the order the
+  // writes came; with neither, the Record is refreshed at once.
+  #emitUpdate(id, data, delta, source = null, entry = null) {
     const record = this.#live(id);
-    if (record) record[REFRESH](data, delta, source);
+    if (!record) return;
+    const lensed =
+      data !== null && entry !== null && !entry.encrypted && this.#lens !== null && (entry.meta.v ?? 1) < this.#version;
+    const hooked = this.#hooks.beforeRead !== null || this.#hooks.afterRead !== null;
+    if (!lensed && !hooked && this.#refreshing === 0) {
+      record[REFRESH](data, delta, source);
+      return;
+    }
+    this.#refreshing += 1;
+    this.#refreshed = this.#refreshed.then(async () => {
+      try {
+        let view = lensed ? await this.#view(id, entry) : data;
+        if (view !== null && hooked) {
+          await runHook(this.#hooks, 'beforeRead', { id });
+          const replaced = await runHook(this.#hooks, 'afterRead', { id }, view);
+          if (replaced !== undefined) view = replaced;
+        }
+        record[REFRESH](view, delta, source);
+      } catch (error) {
+        // A read hook that refuses leaves the Record as it was.
+        this.#logger.warn({ event: 'record.refresh', id, err: error });
+      } finally {
+        this.#refreshing -= 1;
+      }
+    });
   }
 
   #scope(id, data) {
@@ -813,11 +905,66 @@ class Storage extends Emitter {
   async #land(touched, fromSeq, toSeq) {
     try {
       await this.#persistBatch(touched, fromSeq, toSeq);
-      return true;
     } catch (error) {
       await this.#unpersisted(touched, error);
       return false;
     }
+    // A record written by this batch (a peer's page, a replay, a repair) was
+    // written from the cache, which held its deferred local ops too: those
+    // are on disk now, so their slot goes and their positions are applied —
+    // a later flush must not lay the older deferred entry over this file.
+    for (const id of touched.keys()) this.#settleDeferred(id);
+    return true;
+  }
+
+  #settleDeferred(id) {
+    const slot = this.#deferred.get(id);
+    if (slot === undefined) return;
+    this.#deferred.delete(id);
+    for (const position of slot.positions) this.#log.applied(position);
+  }
+
+  // A local write under `open({ defer })`: the entry is held — the cache and
+  // the catalog read it, the file and the block wait — and the flush is due
+  // in `defer` ms, or at once ahead of tag() and close(). The log is durable
+  // already; a crash before the flush replays the batch at the next open,
+  // as it does after a file write that failed.
+  async #deferWrite(id, entry, position) {
+    await this.#entries.hold(id, entry);
+    const slot = this.#deferred.get(id);
+    if (slot !== undefined) {
+      slot.entry = entry;
+      slot.positions.push(position);
+    } else this.#deferred.set(id, { entry, positions: [position] });
+    if (this.#deferTimer === null) {
+      this.#deferTimer = setTimeout(() => {
+        this.#deferTimer = null;
+        this.#run(() => this.#flushDeferred()).catch(() => {});
+      }, this.#defer);
+      this.#deferTimer.unref?.();
+    }
+  }
+
+  // The deferred writes landed: one chain block, every file, the log told.
+  // Inside the mutation queue, or after it drained (close).
+  async #flushDeferred() {
+    if (this.#deferTimer !== null) {
+      clearTimeout(this.#deferTimer);
+      this.#deferTimer = null;
+    }
+    if (this.#deferred.size === 0) return;
+    const pending = this.#deferred;
+    this.#deferred = new Map();
+    const touched = new Map();
+    const positions = [];
+    for (const [id, slot] of pending) {
+      touched.set(id, slot.entry);
+      positions.push(...slot.positions);
+    }
+    if (await this.#land(touched, Math.min(...positions), Math.max(...positions))) {
+      for (const position of positions) this.#log.applied(position);
+    }
+    this.#flushCatalog();
   }
 
   async #unpersisted(touched, error) {
@@ -916,17 +1063,55 @@ class Storage extends Emitter {
   // `getCachedData()` and `snapshot()` are the raw objects, for callers that
   // know not to touch them.
   async #read(id) {
-    const entry = await this.#entries.load(id);
-    if (entry === null) return null;
-    if (entry.encrypted) return asJson(entry.data);
-    return isAlive(entry) ? asJson(await this.#view(id, entry)) : null;
+    return V.reading(this.#core, id, await this.#entries.load(id));
   }
 
-  async get(id) {
+  async get(id, { at } = {}) {
+    if (at !== undefined) return V.getAt(this.#core, id, at);
     await runHook(this.#hooks, 'beforeRead', { id });
     const data = await this.#read(id);
     const replaced = await runHook(this.#hooks, 'afterRead', { id }, data);
     return replaced === undefined ? data : replaced;
+  }
+
+  // ---------------------------------------------------------------------
+  // Versions, patches and tags — src/versions.js, one delegate each.
+
+  diff(id, from, to) {
+    return V.diff(this.#core, id, from, to);
+  }
+
+  applyPatches(id, patches, options) {
+    return V.applyPatches(this.#core, id, patches, options);
+  }
+
+  restore(id, at, options) {
+    return V.restore(this.#core, id, at, options);
+  }
+
+  compact(id, options) {
+    return V.compact(this.#core, id, options);
+  }
+
+  tag(name) {
+    return V.tag(this.#core, name);
+  }
+
+  untag(name) {
+    return V.untag(this.#core, name);
+  }
+
+  /** The tags, oldest first. */
+  tags() {
+    return this.#tags.list();
+  }
+
+  at(name) {
+    return V.at(this.#core, name);
+  }
+
+  history(id, options) {
+    return V.history(this.#core, id, options);
   }
 
   /** Every live record id, sorted — tombstones excluded, encrypted records included. From the catalog: no I/O. */
@@ -951,35 +1136,82 @@ class Storage extends Emitter {
    */
   async purge(id, { actor } = {}) {
     await this[COMMIT]('purge', id, {}, { actor });
-    await this.#log.scrub(id);
+    await this.#core.scrub(id);
     this.#records.delete(id);
   }
 
   async update(id, delta, { actor } = {}) {
-    if (!(await this.has(id))) throw new SyncomError('NOT_FOUND', `Record ${id} not found`);
+    if (!isRecordId(id)) throw invalidId(id);
+    if (!(await this.has(id))) throw new SyncomError('NOT_FOUND', `Record ${id} not found`, { id });
     if (!isPlainObject(delta)) throw new TypeError('update() takes a plain object');
     await this[COMMIT]('set', id, { data: delta }, { actor });
   }
 
-  /** Adds `value` to counter field `key` — the commutative alternative to update(). */
-  async inc(id, key, value = 1, { actor } = {}) {
-    if (typeof key !== 'string') throw new TypeError('inc() takes a field name');
-    if (!Number.isFinite(value)) throw new TypeError('inc() takes a finite number');
-    await this[COMMIT]('inc', id, { key, value }, { actor });
+  // ---------------------------------------------------------------------
+  // The field kinds beyond registers — src/fields.js, one delegate each.
+
+  inc(id, key, value, options) {
+    return F.inc(this.#core, id, key, value, options);
   }
 
-  /**
-   * Adds `elements` to set field `key` — an observed-remove set: two nodes
-   * that add concurrently both keep theirs, and an add a remove did not
-   * observe survives it. Creates the field, and the record, when absent.
-   */
-  async add(id, key, elements, { actor } = {}) {
-    await this[COMMIT]('add', id, { key, value: setElements('add', key, elements) }, { actor });
+  add(id, key, elements, options) {
+    return F.add(this.#core, id, key, elements, options);
   }
 
-  /** Removes from set field `key` the `elements` this node has seen added; one it never saw is left alone. */
-  async remove(id, key, elements, { actor } = {}) {
-    await this[COMMIT]('remove', id, { key, value: setElements('remove', key, elements) }, { actor });
+  remove(id, key, elements, options) {
+    return F.remove(this.#core, id, key, elements, options);
+  }
+
+  splice(id, key, index, count, content, options) {
+    return F.splice(this.#core, id, key, index, count, content, options);
+  }
+
+  push(id, key, content, options) {
+    return F.push(this.#core, id, key, content, options);
+  }
+
+  updateText(id, key, text, options) {
+    return F.updateText(this.#core, id, key, text, options);
+  }
+
+  mark(id, key, start, end, name, value, options) {
+    return F.mark(this.#core, id, key, start, end, name, value, options);
+  }
+
+  unmark(id, key, start, end, name, options) {
+    return F.unmark(this.#core, id, key, start, end, name, options);
+  }
+
+  unmarkById(id, key, markId, options) {
+    return F.unmarkById(this.#core, id, key, markId, options);
+  }
+
+  spans(id, key) {
+    return F.spans(this.#core, id, key);
+  }
+
+  cursor(id, key, index, options) {
+    return F.cursor(this.#core, id, key, index, options);
+  }
+
+  index(id, key, cursor) {
+    return F.index(this.#core, id, key, cursor);
+  }
+
+  setAt(id, key, index, value, options) {
+    return F.setAt(this.#core, id, key, index, value, options);
+  }
+
+  move(id, key, from, to, options) {
+    return F.move(this.#core, id, key, from, to, options);
+  }
+
+  treeMove(id, key, node, parent, options) {
+    return F.treeMove(this.#core, id, key, node, parent, options);
+  }
+
+  treeRemove(id, key, node, options) {
+    return F.treeRemove(this.#core, id, key, node, options);
   }
 
   /**
@@ -999,7 +1231,7 @@ class Storage extends Emitter {
   }
 
   async #repair(id) {
-    const entries = this.#log.entriesOf(id).filter((entry) => !entry.skipped);
+    const entries = this.#log.entriesOf(id).filter((entry) => appliedHere(entry, this.#version));
     const whole = ({ op, scrubbed }) => op.type === 'purge' || (!scrubbed && WHOLE.has(op.type));
     const start = entries.findIndex(whole);
     if (start === -1) {
@@ -1009,7 +1241,7 @@ class Storage extends Emitter {
     let entry = null;
     for (let i = start; i < entries.length; i++) {
       this.#clock.observe(entries[i].op.ts);
-      ({ entry } = applyOp(entry, entries[i].op));
+      ({ entry } = applyOp(entry, entries[i].op, this.#limits));
     }
     this.#entries.forget(id);
     await this.#persistBatch(new Map([[id, entry]]), entries[start].seq, entries[entries.length - 1].seq);
@@ -1104,6 +1336,7 @@ class Storage extends Emitter {
     this.#closed = true;
     await this.#sync.stop();
     const seal = async () => {
+      await this.#flushDeferred();
       await this.#catalogSave;
       await this.#catalog.save(this.#log.lastEventId);
       await this.#log.close();

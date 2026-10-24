@@ -30,11 +30,14 @@ class EntryStore {
   // open replays the log onto the file).
   #held = new Set();
 
+  #before;
+
   // `pinned(id)` says whether the application holds a live Record of `id`
   // (its entry stays cached); `verify(id, data, block)` checks a cold read
   // against its chain block, or is null; `view(id, entry)` is the lensed
-  // read the catalog indexes.
-  constructor({ fsi, path, max, logger, catalog, pinned, verify, decrypt, view }) {
+  // read the catalog indexes; `before(id, file)` runs ahead of every change
+  // of a record's file with `file()` the file as it is (the tags' copy).
+  constructor({ fsi, path, max, logger, catalog, pinned, verify, decrypt, view, before = null }) {
     this.#fsi = fsi;
     this.#dir = `${path}/data`;
     this.#max = max;
@@ -44,6 +47,27 @@ class EntryStore {
     this.#verify = verify;
     this.#decrypt = decrypt;
     this.#view = view;
+    this.#before = before;
+  }
+
+  /** The record's file as it is — its text — or null when there is none. */
+  async file(id) {
+    if (!(await this.#fsi.exists(this.#dir, `${id}.json`))) return null;
+    return this.#fsi.read(this.#dir, `${id}.json`);
+  }
+
+  /** Whether `id` is held: logged, in the cache, its file behind. */
+  held(id) {
+    return this.#held.has(id);
+  }
+
+  /** The held ids. */
+  heldIds() {
+    return new Set(this.#held);
+  }
+
+  async #changing(id) {
+    if (this.#before !== null) await this.#before(id, () => this.file(id));
   }
 
   get size() {
@@ -86,8 +110,18 @@ class EntryStore {
     const exists = await this.#fsi.exists(this.#dir, `${id}.json`);
     if (!exists) return null;
     const raw = await this.#fsi.read(this.#dir, `${id}.json`);
-    // A file torn by a crash, or not ours: evidence, like a failed check —
-    // never a bare SyntaxError. `repair(id)` rebuilds it from the log.
+    const entry = await this.parse(id, raw);
+    this.remember(id, entry);
+    return entry;
+  }
+
+  /**
+   * A record file's text as an entry: checked against its chain block,
+   * decrypted when sealed. A file torn by a crash, or not ours, is evidence,
+   * like a failed check — never a bare SyntaxError. `repair(id)` rebuilds
+   * the record's own file from the log.
+   */
+  async parse(id, raw) {
     let stored = null;
     let cause;
     try {
@@ -103,11 +137,9 @@ class EntryStore {
       const isValid = await this.#verify(id, data, block);
       if (!isValid) throw new SyncomError('INTEGRITY', `Storage record ${id} is invalid`, { id });
     }
-    const entry = encrypted
+    return encrypted
       ? { data: await this.#decrypt(data), meta: null, encrypted: true, block }
       : { data, meta, encrypted: false, block };
-    this.remember(id, entry);
-    return entry;
   }
 
   // The catalog's view of an entry: what `put` takes. Derived state never
@@ -141,10 +173,14 @@ class EntryStore {
 
   // A replicated entry: the file, the cache, the catalog row.
   async write(id, entry, blockHash) {
+    await this.#changing(id);
     const stored = { data: entry.data, meta: entry.meta, encrypted: false, timestamp: Date.now(), block: blockHash };
     await this.#fsi.write(this.#dir, `${id}.json`, JSON.stringify(stored));
     this.#held.delete(id);
     const cached = { data: entry.data, meta: entry.meta, encrypted: false, block: blockHash };
+    // The sequence indexes built while applying come along into the cache
+    // (never into the file): the next op reads the field through them.
+    if (entry.seqIndex !== undefined) cached.seqIndex = entry.seqIndex;
     this.remember(id, cached);
     this.#catalog.put(id, await this.row(id, cached));
   }
@@ -155,6 +191,7 @@ class EntryStore {
   // the next open replays the log.
   async hold(id, entry) {
     const cached = { data: entry.data, meta: entry.meta, encrypted: false, block: null };
+    if (entry.seqIndex !== undefined) cached.seqIndex = entry.seqIndex;
     this.#held.add(id);
     this.remember(id, cached);
     this.#catalog.put(id, await this.row(id, cached));
@@ -163,6 +200,7 @@ class EntryStore {
   // An entry sealed for this node's key: `record` is the ciphertext the
   // file holds, `data` what the cache (and so a read) holds.
   async writeSealed(id, record, data, blockHash) {
+    await this.#changing(id);
     const stored = { data: record, meta: null, encrypted: true, timestamp: Date.now(), block: blockHash };
     await this.#fsi.write(this.#dir, `${id}.json`, JSON.stringify(stored));
     this.remember(id, { data, meta: null, encrypted: true, block: blockHash });
@@ -171,6 +209,7 @@ class EntryStore {
 
   // A sealed entry removed: an encrypted record has no op, so no tombstone.
   async remove(id) {
+    await this.#changing(id);
     await this.#fsi.remove(this.#dir, `${id}.json`);
     this.#cache.delete(id);
     this.#catalog.put(id, null);

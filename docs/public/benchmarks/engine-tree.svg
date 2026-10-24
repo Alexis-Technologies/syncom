@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="308" viewBox="0 0 760 308" role="img" aria-label="Trees: syncom's own benchmarks. The movable tree behind tree fields: one move folded over a block of thousands, the fold read anew and read kept. ops/s, log scale, higher is better.">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .title { font-size: 15px; font-weight: 700; fill: #1b1c1e; }
+  .subtitle, .caption { font-size: 12px; fill: #67676c; }
+  .caption { font-size: 11px; }
+  .group { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; fill: #67676c; }
+  .label { font-size: 13px; font-weight: 600; fill: #1b1c1e; }
+  .label.primary, .label.secondary { font-weight: 700; }
+  .sublabel { font-size: 11px; fill: #67676c; }
+  .value { font-size: 12px; font-weight: 600; fill: #3c3c43; font-variant-numeric: tabular-nums; }
+  .value.small { font-size: 10px; }
+  .legend { font-size: 11px; fill: #3c3c43; }
+  .tick { font-size: 11px; fill: #67676c; font-variant-numeric: tabular-nums; }
+  .grid { stroke: #e4e4e7; stroke-width: 1; }
+  .axis { stroke: #c2c2c4; stroke-width: 1; }
+  .ref { stroke: #67676c; stroke-width: 1; stroke-dasharray: 3 3; }
+  .bar { fill: #c4c6cc; }
+  .bar.primary { fill: #245a9e; }
+  .bar.secondary { fill: #5e9be6; }
+  @media (prefers-color-scheme: dark) {
+    .title, .label { fill: #dfdfd6; }
+    .subtitle, .caption, .group, .sublabel, .tick { fill: #98989f; }
+    .value, .legend { fill: #c2c2c4; }
+    .grid { stroke: #2e2e32; }
+    .axis { stroke: #48484c; }
+    .ref { stroke: #98989f; }
+    .bar { fill: #46474e; }
+    .bar.primary { fill: #8dbcf2; }
+    .bar.secondary { fill: #3d7bd0; }
+  }
+</style>
+<text class="title" x="20" y="35">Trees: syncom's own benchmarks</text>
+<text class="subtitle" x="20" y="56">The movable tree behind tree fields: one move folded over a block of thousands, the fold read anew and read</text>
+<text class="subtitle" x="20" y="73">kept. ops/s, log scale, higher is better.</text>
+<line class="grid" x1="235" y1="88" x2="235" y2="248"/>
+<text class="tick" x="235" y="264" text-anchor="middle">100</text>
+<line class="grid" x1="382" y1="88" x2="382" y2="248"/>
+<text class="tick" x="382" y="264" text-anchor="middle">1,000</text>
+<line class="grid" x1="529" y1="88" x2="529" y2="248"/>
+<text class="tick" x="529" y="264" text-anchor="middle">10k</text>
+<line class="grid" x1="676" y1="88" x2="676" y2="248"/>
+<text class="tick" x="676" y="264" text-anchor="middle">100k</text>
+<line class="axis" x1="235" y1="88" x2="235" y2="248"/>
+<g><title>applyOp · one move on a tree of 5 000 moves
+277 ops/s
+3.61 ms per operation</title>
+<text class="label primary" x="20" y="105">applyOp</text>
+<text class="sublabel" x="20" y="120">one move on a tree of 5 000 moves</text>
+<path class="bar primary" d="M235,101H296.04452605247394A4,4 0 0 1 300.04452605247394,105V111A4,4 0 0 1 296.04452605247394,115H235Z"/>
+<text class="value" x="306.04452605247394" y="114">277</text>
+</g>
+<g><title>resolve · the fold of 5 000 moves, anew
+309 ops/s
+3.24 ms per operation</title>
+<text class="label primary" x="20" y="145">resolve</text>
+<text class="sublabel" x="20" y="160">the fold of 5 000 moves, anew</text>
+<path class="bar primary" d="M235,141H303.02389647545067A4,4 0 0 1 307.02389647545067,145V151A4,4 0 0 1 303.02389647545067,155H235Z"/>
+<text class="value" x="313.02389647545067" y="154">309</text>
+</g>
+<g><title>renderTree · the fold kept by the block
+13,978 ops/s
+71.5 µs per operation</title>
+<text class="label primary" x="20" y="185">renderTree</text>
+<text class="sublabel" x="20" y="200">the fold kept by the block</text>
+<path class="bar primary" d="M235,181H546.3804203122573A4,4 0 0 1 550.3804203122573,185V191A4,4 0 0 1 546.3804203122573,195H235Z"/>
+<text class="value" x="556.3804203122573" y="194">14k</text>
+</g>
+<g><title>storage.treeMove · among 300 siblings (memory fsi)
+1,528 ops/s
+654 µs per operation</title>
+<text class="label primary" x="20" y="225">storage.treeMove</text>
+<text class="sublabel" x="20" y="240">among 300 siblings (memory fsi)</text>
+<path class="bar primary" d="M235,221H405.06613307323164A4,4 0 0 1 409.06613307323164,225V231A4,4 0 0 1 405.06613307323164,235H235Z"/>
+<text class="value" x="415.06613307323164" y="234">1,528</text>
+</g>
+<text class="caption" x="20" y="289">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-24</text>
+</svg>

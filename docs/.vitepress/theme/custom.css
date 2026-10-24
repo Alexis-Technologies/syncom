@@ -177,6 +177,18 @@
   min-width: 15rem;
 }
 
+/* A page about one family of alternatives (/guide/vs-crdt): four libraries
+ * share the width, each wide enough to read a cell without scrolling. */
+.vp-doc .sc-matrix-quad th,
+.vp-doc .sc-matrix-quad td {
+  font-size: 13px;
+}
+.vp-doc .sc-matrix-quad th:not(:first-child),
+.vp-doc .sc-matrix-quad td:not(:first-child) {
+  width: 25%;
+  min-width: 13rem;
+}
+
 /* The page of the matrix uses the whole width next to the sidebar instead of
  * the reading column, and drops the outline on the right. */
 @media (min-width: 960px) {
