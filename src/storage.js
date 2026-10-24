@@ -5,7 +5,9 @@
 // collaborators to the three write paths — the local one in src/commit.js,
 // a peer's batch in src/apply.js, a bootstrap page in src/bootstrap.js.
 // Records live in src/entries.js, what the application holds in
-// src/record.js, the options in src/options.js.
+// src/record.js, the options in src/options.js. The API of the field kinds
+// beyond registers is src/fields.js and the versions API src/versions.js,
+// both over the same lent core: this file keeps a delegate per method.
 
 const { Emitter, generateUUID, createLogger } = require('./utils.js');
 const { decrypt, loadKeys, loadSigningKeys, calculateHash } = require('./crypto.js');
@@ -15,18 +17,14 @@ const { SyncManager } = require('./sync.js');
 const { OpLog } = require('./log.js');
 const { EntryStore } = require('./entries.js');
 const { Record, Collection } = require('./record.js');
-const { commit, rehearse, MISMATCH } = require('./commit.js');
-const { spliceArgs, treeArgs, markArgs, setElements, jsonValue } = require('./args.js');
+const { commit, MISMATCH } = require('./commit.js');
+const F = require('./fields.js');
+const V = require('./versions.js');
 const { applyBatch } = require('./apply.js');
 const { snapshotPage, mergeBatch, adopt } = require('./bootstrap.js');
-const { applyOp, isAlive, isCounter, isSet, isSeq, isTree, deepEqual, kindsOf, seqIndexOf } = require('./ops.js');
-const { diff } = require('./myers.js');
-const { spans, isRunKey, isAnchor, cursorAt, indexOfCursor, REVERSED } = require('./sequence.js');
-const { Cursor } = require('./query.js');
-const { TRASH } = require('./tree.js');
-const { appliedHere, parseVersion, within, exactStart, fold, gone } = require('./history.js');
+const { applyOp, isAlive, isCounter, isSet, isSeq, isTree } = require('./ops.js');
+const { appliedHere } = require('./history.js');
 const { Tags } = require('./tags.js');
-const { diffViews, realize } = require('./patch.js');
 const { Clock } = require('./vector.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
 const { normalizeSchema, createLens, project } = require('./schema.js');
@@ -37,7 +35,7 @@ const { Catalog, isTextIndex } = require('./catalog.js');
 const { createTelemetry, traced, now } = require('./telemetry.js');
 const { GLOBAL_SCOPE } = require('./scope.js');
 const { normalizeStorageOptions } = require('./options.js');
-const { isPlainObject, asJson, isRecordId, invalidId, isStreamName, isKeyId, VALIDATED } = require('./shape.js');
+const { isPlainObject, isRecordId, invalidId, isStreamName, isKeyId, VALIDATED } = require('./shape.js');
 const { COMMIT, REFRESH, SOURCE } = require('./symbols.js');
 const { SyncomError, typed } = require('./errors.js');
 
@@ -329,6 +327,19 @@ class Storage extends Emitter {
       unpersisted: (touched, error) => this.#unpersisted(touched, error),
       flush: () => this.#flushCatalog(),
       refresh: (id, data, delta, source) => this.#emitUpdate(id, data, delta, source),
+      // For the API modules (src/fields.js, src/versions.js), which stand
+      // outside the queue: the hooks (their read hooks run outside it), the
+      // tags, the entities, a task run in the queue, a local op committed
+      // through it (`storage[COMMIT]`), a Record forgotten, the deferred
+      // files landed. A write path is inside the queue already and calls
+      // none of these.
+      hooks: this.#hooks,
+      tags: this.#tags,
+      entities: this.#entities,
+      run: (task) => this.#run(task),
+      commit: (type, id, payload, options) => this[COMMIT](type, id, payload, options),
+      forget: (id) => this.#records.delete(id),
+      flushDeferred: () => this.#flushDeferred(),
       // A purge reaches the log and the tags alike.
       scrub: async (id) => {
         await this.#log.scrub(id);
@@ -1020,234 +1031,42 @@ class Storage extends Emitter {
   // `getCachedData()` and `snapshot()` are the raw objects, for callers that
   // know not to touch them.
   async #read(id) {
-    const entry = await this.#entries.load(id);
-    if (entry === null) return null;
-    if (entry.encrypted) return asJson(entry.data);
-    return isAlive(entry) ? asJson(await this.#view(id, entry)) : null;
+    return V.reading(this.#core, id, await this.#entries.load(id));
   }
 
   async get(id, { at } = {}) {
-    if (at !== undefined) return this.#getAt(id, at);
+    if (at !== undefined) return V.getAt(this.#core, id, at);
     await runHook(this.#hooks, 'beforeRead', { id });
     const data = await this.#read(id);
     const replaced = await runHook(this.#hooks, 'afterRead', { id }, data);
     return replaced === undefined ? data : replaced;
   }
 
-  // `get(id, { at })`: the record at a version — an event id (as this node
-  // held it after that entry), a stamp (every op stamped at or below it) or
-  // `{ vector }` (every op it covers) — folded from the log (src/history.js),
-  // through the lens and the read hooks, which see `at`.
-  async #getAt(id, at) {
-    const version = parseVersion(at);
-    await runHook(this.#hooks, 'beforeRead', { id, at });
-    const { entry } = await this.#versionEntry(id, version);
-    const data = await this.#reading(id, entry);
-    const replaced = await runHook(this.#hooks, 'afterRead', { id, at }, data);
-    return replaced === undefined ? data : replaced;
+  // ---------------------------------------------------------------------
+  // Versions, patches and tags — src/versions.js, one delegate each.
+
+  diff(id, from, to) {
+    return V.diff(this.#core, id, from, to);
   }
 
-  // The entry of `id` at `version` — a tag's copy, or the fold of the log,
-  // a span (`syncom.version`) when a tracer listens — and how many entries
-  // the fold ran over; the entry is null when the record was not there.
-  async #versionEntry(id, version) {
-    if (version.kind === 'tag') return { entry: await this.#entryAt(version.name, id), folded: 0 };
-    const read = async () => {
-      const past = await this.#past(id, version);
-      if (past === null) return { entry: null, folded: 0 };
-      const steps = fold(past.entries, past.start, this.#limits);
-      return { entry: steps.length > 0 ? steps[steps.length - 1].entry : null, folded: past.entries.length };
-    };
-    const otel = this.#otel;
-    if (!otel.enabled) return read();
-    return traced(otel, 'syncom.version', {}, read, (result) => ({ 'syncom.ops.count': result.folded }));
+  applyPatches(id, patches, options) {
+    return V.applyPatches(this.#core, id, patches, options);
   }
 
-  // What an entry reads as, the way `get()` hands a record out: an encrypted
-  // one as its data, a live one through the lens, a tombstone or none as null.
-  async #reading(id, entry) {
-    if (entry === null) return null;
-    if (entry.encrypted) return asJson(entry.data);
-    return isAlive(entry) ? asJson(await this.#view(id, entry)) : null;
+  restore(id, at, options) {
+    return V.restore(this.#core, id, at, options);
   }
 
-  // The record at a tag, as an entry: its file as it was — the tag's copy,
-  // or the file as it is when nothing changed it since — parsed; `null`
-  // when it was not there.
-  async #entryAt(name, id) {
-    if (!isRecordId(id)) return null;
-    let { exists, raw } = await this.#tags.readAt(name, id);
-    if (!exists) return null;
-    // No copy: nothing landed on the file since the tag. A record held since
-    // (a write whose file failed) reads as the file, which is still the
-    // tag's state; any other reads as it is.
-    if (raw === null && this.#entries.held(id)) raw = await this.#entries.file(id);
-    return raw === null ? this.#entries.load(id) : this.#entries.parse(id, raw);
+  compact(id, options) {
+    return V.compact(this.#core, id, options);
   }
 
-  // What a cursor at a tag reads through: the tag's catalog, and the record
-  // as it was — lensed, without the read hooks, like the live seam. A tag
-  // does not change, so there is nothing to watch, and its catalog carries
-  // no text index.
-  #sourceAt(name) {
-    const catalog = this.#tags.catalogOf(name);
-    return {
-      logger: this.#logger,
-      candidates: (entity, query) => catalog.candidates(entity, query),
-      ids: (entity) => catalog.ids(entity),
-      row: (id) => catalog.row(id),
-      indexed: (entity) => catalog.indexed(entity),
-      searches: () => false,
-      subscribe: () => {
-        throw new TypeError(`watch(): tag ${name} does not change`);
-      },
-      load: async (id) => {
-        const entry = await this.#entryAt(name, id);
-        if (entry === null || entry.encrypted || !isAlive(entry)) return null;
-        return this.#view(id, entry);
-      },
-    };
+  tag(name) {
+    return V.tag(this.#core, name);
   }
 
-  // The entry of `id` at a version — the present when `at` is undefined,
-  // a tag's copy, or the fold of the log — or null when it was not there.
-  async #entryOf(id, at) {
-    if (at === undefined) return this.#entries.load(id);
-    return (await this.#versionEntry(id, parseVersion(at))).entry;
-  }
-
-  /**
-   * The patches that turn record `id` as it was at `from` into how it is at
-   * `to` (the present when omitted): per field by kind — a register's new
-   * value, a counter's delta, a set's added and removed elements, a text's
-   * or a list's splices, a tree's moves — and a whole-record `write` plus
-   * the other kinds made again when a register is gone or a field changed
-   * kind. In the terms the application writes (through the lens); a text's
-   * marks are not diffed. Raw: no read hooks. Rejects as `get(id, { at })`
-   * would for either version; `ENCRYPTED` for an encrypted record.
-   */
-  async diff(id, from, to) {
-    if (!isRecordId(id)) throw invalidId(id);
-    const [was, now] = await Promise.all([this.#entryOf(id, from), this.#entryOf(id, to)]);
-    if (was?.encrypted || now?.encrypted) throw new SyncomError('ENCRYPTED', `Record ${id} is encrypted here`);
-    const live = async (entry) =>
-      entry !== null && isAlive(entry) ? [await this.#view(id, entry), kindsOf(entry)] : [null, {}];
-    const [[before, beforeKinds], [after, afterKinds]] = await Promise.all([live(was), live(now)]);
-    return asJson(diffViews(before, beforeKinds, after, afterKinds, { purged: now?.meta.purged != null }));
-  }
-
-  /**
-   * Realizes `patches` on record `id` as ops of this node's own, in one turn
-   * of the mutation queue — `put` a `set`, `write`, `inc`, `add`, `remove`
-   * (`elements` as observed, or exactly the `removals` named), `splice`,
-   * `treeMove`/`treeRemove`, `delete`, `purge`. `source` rides on the
-   * `commit` events the ops raise, so a listener can tell its own. Resolves
-   * to how many ops it took; a patch of the wrong shape is a TypeError and
-   * nothing is written.
-   */
-  async applyPatches(id, patches, { actor, source = null } = {}) {
-    if (!isRecordId(id)) throw invalidId(id);
-    if (!Array.isArray(patches)) throw new TypeError('applyPatches() takes an array of patches');
-    const ops = patches.map(realize);
-    const apply = async () => {
-      // Every op resolved and applied over a scratch record first — an index
-      // out of range, a kind clash, a cycle, a type change — so nothing is
-      // appended unless all of them can be: a restore lands whole or not at
-      // all. A hook or a validator that throws on a later op still leaves
-      // the earlier ones committed (see applyPatches in the reference).
-      await rehearse(this.#core, id, ops);
-      let count = 0;
-      for (const [type, payload] of ops) {
-        const op = await commit(this.#core, type, id, payload, { actor, source });
-        if (op === null) continue;
-        count++;
-        if (type === 'purge') await this.#core.scrub(id);
-      }
-      if (ops.some(([type]) => type === 'delete' || type === 'purge')) this.#records.delete(id);
-      return count;
-    };
-    const otel = this.#otel;
-    if (!otel.enabled) return this.#run(apply);
-    const attributes = { 'syncom.ops.count': ops.length };
-    return this.#run(() =>
-      traced(otel, 'syncom.patches', attributes, apply, (count) => ({ 'syncom.ops.applied': count })),
-    );
-  }
-
-  /**
-   * Makes record `id` read as it did at `at` — `diff(id, undefined, at)`
-   * applied: new ops that lead back, so the step is a version of its own
-   * and merges like any write. Resolves to how many ops it took.
-   */
-  async restore(id, at, { actor, source = null } = {}) {
-    if (at === undefined) throw new TypeError('restore() takes a version');
-    return this.applyPatches(id, await this.diff(id, undefined, at), { actor, source });
-  }
-
-  /**
-   * Rewrites record `id` as the ops its reading takes today — a `write` of
-   * the registers, then one op per field of another kind: an `inc`, an
-   * `add`, one `splice` (a text or a list becomes one run), one `tree` move
-   * per node — so what lies under it goes by the reset rule, here and on
-   * every peer alike: a text of ten thousand runs is one, a tree's move log
-   * is one move per node, and the record reads the same. A peer's op stamped
-   * before the rewrite and arriving after it is dropped by the reset, as
-   * with any whole-record write. Resolves to how many ops it took; `0` for
-   * a record that is not there, `ENCRYPTED` for an encrypted one.
-   */
-  async compact(id, { actor, source = null } = {}) {
-    if (!isRecordId(id)) throw invalidId(id);
-    const entry = await this.#entries.load(id);
-    if (entry?.encrypted) throw new SyncomError('ENCRYPTED', `Record ${id} is encrypted here`);
-    if (entry === null || !isAlive(entry)) return 0;
-    const view = await this.#view(id, entry);
-    return this.applyPatches(id, diffViews(null, {}, view, kindsOf(entry)), { actor, source });
-  }
-
-  /**
-   * Names the storage as it is now: a tag — `{ name, eventId, seq, ts,
-   * vector, createdAt }` — that `at(name)` and `get(id, { at: { tag } })`
-   * read records through as they were when it was taken. Kept on this node
-   * (tags do not replicate) as the catalog of the moment plus a copy of
-   * each record's file made before its first change after the tag; a tag
-   * costs nothing per record until the record changes. `name` is a
-   * [record id](../guide/storage#custom-identifiers); rejects with
-   * `TAG_EXISTS`.
-   */
-  async tag(name) {
-    if (!isRecordId(name)) throw new TypeError('tag() takes a name of the record-id form');
-    return this.#run(async () => {
-      // Deferred files land first; what is held after that failed to write.
-      await this.#flushDeferred();
-      // A record logged but not on disk has no file to copy from: the tag
-      // waits for it to land (the next write of it, or the next open).
-      const held = this.#entries.heldIds();
-      if (held.size > 0) {
-        const ids = [...held];
-        const message = `tag(): ${ids.join(', ')}: logged, but not written; take the tag once they land`;
-        throw new SyncomError('UNPERSISTED', message, { ids });
-      }
-      const rows = this.#catalog.rows();
-      const take = () =>
-        this.#tags.take(name, {
-          eventId: this.#log.lastEventId,
-          seq: this.#log.next - 1,
-          ts: this.#log.latestTs,
-          vector: this.#log.vector,
-          rows,
-        });
-      const otel = this.#otel;
-      if (!otel.enabled) return take();
-      return traced(otel, 'syncom.tag', {}, take, () => ({ 'syncom.records': rows.length }));
-    });
-  }
-
-  /** Drops a tag; what the next older tag needs of its copies moves there. Rejects with `TAG_NOT_FOUND`. */
-  async untag(name) {
-    if (typeof name !== 'string') throw new TypeError('untag() takes a name');
-    const drop = () => this.#tags.drop(name);
-    const otel = this.#otel;
-    return this.#run(() => (otel.enabled ? traced(otel, 'syncom.untag', {}, drop, () => ({})) : drop()));
+  untag(name) {
+    return V.untag(this.#core, name);
   }
 
   /** The tags, oldest first. */
@@ -1255,194 +1074,12 @@ class Storage extends Emitter {
     return this.#tags.list();
   }
 
-  /**
-   * A view of the storage at tag `name`: the tag's fields plus `get(id)` —
-   * the record as it was, through the lens and the read hooks (`at: { tag }`)
-   * — and `has(id)`, whether it was a live record then. Rejects with
-   * `TAG_NOT_FOUND`.
-   */
   at(name) {
-    if (typeof name !== 'string') throw new TypeError('at() takes a name');
-    const tag = this.#tags.info(name);
-    const catalog = this.#tags.catalogOf(name);
-    const source = this.#sourceAt(name);
-    const get = (id) => this.#getAt(id, { tag: name });
-    // What a snapshot page reads: the tag's catalog and entries, under the
-    // tag's position — the pages another storage joins to stand at the tag.
-    const core = {
-      catalog,
-      log: {
-        lastEventId: tag.eventId,
-        get vector() {
-          return { ...tag.vector };
-        },
-      },
-      entries: { load: (id) => this.#entryAt(name, id) },
-      scopeOf: (id, data) => this.#scope(id, data),
-      logger: this.#logger,
-      otel: this.#otel,
-    };
-    return {
-      ...tag,
-      get,
-      has: (id) => isRecordId(id) && this.#tags.hasAt(name, id),
-      list: () => [...catalog.ids()],
-      collection: (entity) => {
-        if (!this.#entities.has(entity)) throw new TypeError(`collection(): unknown entity ${entity}`);
-        return {
-          name: entity,
-          get: async (id) => (isRecordId(id) && catalog.row(id)?.type === entity ? get(id) : null),
-          select: (query) => new Cursor(source, entity, query),
-          count: (query) => new Cursor(source, entity, query).count(),
-        };
-      },
-      snapshot: (options) => snapshotPage(core, options),
-    };
+    return V.at(this.#core, name);
   }
 
-  /**
-   * The record's past as this node's log holds it: one version per op of
-   * the record this node applied, newest first — `{ eventId, seq, ts,
-   * origin, actor, type, fields, data, scrubbed? }`, `data` the record as it
-   * read after the op (`null` once deleted) through the lens and `afterRead`,
-   * `fields` what the op changed. `exact` says the versions are what this
-   * node held (false once compaction took something a retained op still
-   * depends on), `complete` that the list reaches the first op the node
-   * ever applied to the record (nothing dropped, nothing cut by `limit`).
-   * Rejects with ENCRYPTED for an encrypted record.
-   */
-  async history(id, { limit = 50, before } = {}) {
-    if (!(Number.isInteger(limit) && limit > 0) && limit !== Infinity) {
-      throw new TypeError('history({ limit }) takes a positive integer');
-    }
-    // `before`: an event id of this log; the versions older than it — how a
-    // reader pages back once `complete` came out false.
-    let cut = null;
-    if (before !== undefined) {
-      cut = parseVersion(before);
-      if (cut.kind !== 'event') throw new TypeError('history({ before }) takes an event id');
-      if (cut.epoch !== this.#log.epoch) throw gone(id, 'epoch');
-    }
-    const read = () => this.#history(id, limit, cut);
-    const otel = this.#otel;
-    const after = (result) => ({
-      'syncom.ops.count': result.folded,
-      'syncom.versions': result.versions.length,
-      'syncom.exact': result.exact,
-    });
-    const { folded, ...result } = otel.enabled ? await traced(otel, 'syncom.history', {}, read, after) : await read();
-    return result;
-  }
-
-  // The fold and the versions handed out — `folded`, how many entries, for the span.
-  async #history(id, limit, cut) {
-    await runHook(this.#hooks, 'beforeRead', { id, history: true });
-    const { entries, purged } = await this.#applied(id);
-    const droppedTs = this.#log.droppedTs;
-    const { start, exact: fromReset } = exactStart(entries, droppedTs);
-    const steps = fold(entries, start, this.#limits);
-    // The fold is whole — each version is the record after its op — but the
-    // lens and afterRead run for the versions handed out alone.
-    let upto = steps.length;
-    if (cut !== null) {
-      const at = steps.findIndex((step) => step.logged.seq >= cut.seq);
-      if (at !== -1) upto = at;
-    }
-    const first = Math.max(0, upto - limit);
-    const shown = steps.slice(first, upto);
-    const versions = [];
-    for (const { logged, entry, delta } of shown) {
-      const { seq, op, scrubbed } = logged;
-      const version = {
-        eventId: this.#log.formatId(seq),
-        seq,
-        ts: op.ts,
-        origin: op.origin,
-        actor: op.actor ?? null,
-        type: op.type,
-        fields: Object.keys(delta),
-        data: null,
-      };
-      // Before a purge the payloads are gone: the ops are listed, their
-      // content is not.
-      if (scrubbed) version.scrubbed = true;
-      if (purged === null || seq >= purged) {
-        version.data = isAlive(entry) ? asJson(await this.#view(id, entry)) : null;
-      } else {
-        version.fields = [];
-        version.scrubbed = true;
-      }
-      const replaced = await runHook(this.#hooks, 'afterRead', { id, at: version.eventId }, version.data);
-      if (replaced !== undefined) version.data = replaced;
-      versions.push(version);
-    }
-    versions.reverse();
-    const last = steps.length > 0 ? steps[steps.length - 1].entry : null;
-    const exact = fromReset && (await this.#present(id, last));
-    return { versions, complete: droppedTs === 0 && first === 0, exact, folded: entries.length };
-  }
-
-  // The retained entries of `id` this node applied, oldest first, and the
-  // seq of its purge when the record is purged (0 when the purge itself is
-  // no longer retained; `null` when not purged). An encrypted record has no
-  // past in the log.
-  async #applied(id) {
-    if (!isRecordId(id)) return { entries: [], purged: null, current: null };
-    const current = await this.#entries.load(id);
-    if (current?.encrypted) throw new SyncomError('ENCRYPTED', `Record ${id} is encrypted here; it has no history`);
-    const entries = this.#log.entriesOf(id).filter((entry) => appliedHere(entry, this.#version));
-    const purge = entries.find((entry) => entry.op.type === 'purge');
-    const purged = purge ? purge.seq : current?.meta?.purged ? 0 : null;
-    return { entries, purged, current };
-  }
-
-  // Whether the fold of everything retained of `id` reads as the record
-  // does: when it does not, compaction took something a retained op still
-  // depends on (a counter incremented across the reset the fold starts at).
-  async #present(id, folded) {
-    const current = await this.#entries.load(id);
-    const now = current !== null && isAlive(current) ? current.data : null;
-    const then = folded !== null && isAlive(folded) ? folded.data : null;
-    return deepEqual(now, then);
-  }
-
-  // The entries of `id` inside `version`, and where to fold them from; null
-  // when the record was not there (or was purged). Throws HISTORY_GONE when
-  // the log cannot give the version exactly, INVALID_VERSION for a seq this
-  // log has not reached.
-  async #past(id, version) {
-    const log = this.#log;
-    if (version.kind === 'event') {
-      if (version.epoch !== log.epoch) throw gone(id, 'epoch');
-      if (version.seq >= log.next) {
-        throw typed('INVALID_VERSION', `at: ${log.formatId(version.seq)} is not in this log yet`);
-      }
-    }
-    const { entries, purged, current } = await this.#applied(id);
-    const inside = entries.filter((entry) => within(version, entry));
-    if (purged !== null) {
-      // After the purge, nothing; before it, nothing readable.
-      if (purged === 0 || inside.some((entry) => entry.seq === purged)) return null;
-      throw gone(id, 'scrubbed');
-    }
-    if (version.kind === 'stamp' && entries.some((entry) => entry.op.type === 'merge' && entry.op.ts > version.ts)) {
-      throw gone(id, 'merge');
-    }
-    const droppedTs = log.droppedTs;
-    if (inside.length === 0) {
-      if (droppedTs === 0 || this.#catalog.row(id) === null) return null;
-      throw gone(id, 'compacted');
-    }
-    const { start, exact } = exactStart(inside, droppedTs);
-    if (!exact) throw gone(id, 'compacted');
-    if (droppedTs > 0) {
-      // The whole retained past must read as the present does, or the cut
-      // cannot be trusted either.
-      const all = fold(entries, exactStart(entries, droppedTs).start, this.#limits);
-      const last = all.length > 0 ? all[all.length - 1].entry : null;
-      if (current === null || !(await this.#present(id, last))) throw gone(id, 'compacted');
-    }
-    return { entries: inside, start };
+  history(id, options) {
+    return V.history(this.#core, id, options);
   }
 
   /** Every live record id, sorted — tombstones excluded, encrypted records included. From the catalog: no I/O. */
@@ -1477,205 +1114,71 @@ class Storage extends Emitter {
     await this[COMMIT]('set', id, { data: delta }, { actor });
   }
 
-  /** Adds `value` to counter field `key` — the commutative alternative to update(). */
-  async inc(id, key, value = 1, { actor } = {}) {
-    if (typeof key !== 'string') throw new TypeError('inc() takes a field name');
-    if (!Number.isFinite(value)) throw new TypeError('inc() takes a finite number');
-    await this[COMMIT]('inc', id, { key, value }, { actor });
+  // ---------------------------------------------------------------------
+  // The field kinds beyond registers — src/fields.js, one delegate each.
+
+  inc(id, key, value, options) {
+    return F.inc(this.#core, id, key, value, options);
   }
 
-  /**
-   * Adds `elements` to set field `key` — an observed-remove set: two nodes
-   * that add concurrently both keep theirs, and an add a remove did not
-   * observe survives it. Creates the field, and the record, when absent.
-   */
-  async add(id, key, elements, { actor } = {}) {
-    await this[COMMIT]('add', id, { key, value: setElements('add', key, elements) }, { actor });
+  add(id, key, elements, options) {
+    return F.add(this.#core, id, key, elements, options);
   }
 
-  /** Removes from set field `key` the `elements` this node has seen added; one it never saw is left alone. */
-  async remove(id, key, elements, { actor } = {}) {
-    await this[COMMIT]('remove', id, { key, value: setElements('remove', key, elements) }, { actor });
+  remove(id, key, elements, options) {
+    return F.remove(this.#core, id, key, elements, options);
   }
 
-  /**
-   * Splices list or text field `key` at `index`: removes `count` elements
-   * and inserts `content` — an array for a list, a string for a text — in
-   * their place (a `splice` op). The first write decides the kind. Elements
-   * merge by position (Fugue): two nodes inserting at one spot both keep
-   * theirs, each run whole, and a deleted element keeps its place for the
-   * anchors into it. Creates the field, and the record, when absent;
-   * rejects with `OUT_OF_RANGE` past the field's length.
-   */
-  async splice(id, key, index, count = 0, content, { actor } = {}) {
-    await this[COMMIT]('splice', id, spliceArgs('splice', key, index, count, content), { actor });
+  splice(id, key, index, count, content, options) {
+    return F.splice(this.#core, id, key, index, count, content, options);
   }
 
-  /** Appends `content` to list or text field `key` — a `splice` at the end. */
-  async push(id, key, content, { actor } = {}) {
-    await this[COMMIT]('splice', id, spliceArgs('push', key, null, 0, content), { actor });
+  push(id, key, content, options) {
+    return F.push(this.#core, id, key, content, options);
   }
 
-  /**
-   * Makes text field `key` read as `text`: the field is diffed against it
-   * inside the mutation queue (Myers, over UTF-16 units) and each hunk is a
-   * `splice`, last first, in one turn of the queue — what an editor hands
-   * over as a whole string becomes the edits that merge. Returns how many
-   * ops it took; a difference deeper than a thousand edit steps is one op
-   * replacing the middle.
-   */
-  async updateText(id, key, text, { actor } = {}) {
-    if (typeof key !== 'string') throw new TypeError('updateText() takes a field name');
-    if (typeof text !== 'string') throw new TypeError('updateText() takes a string');
-    if (!isRecordId(id)) throw invalidId(id);
-    return this.#run(async () => {
-      const current = await this.#core.entries.load(id);
-      const before = current && !current.encrypted && isAlive(current) ? current.data[key] : undefined;
-      // Another kind under the field: the first splice is refused for it.
-      const hunks = diff(typeof before === 'string' ? before : '', text);
-      let ops = 0;
-      for (const [index, count, content] of hunks) {
-        const payload = { key, index, count };
-        if (content.length > 0) payload.content = content;
-        if ((await commit(this.#core, 'splice', id, payload, { actor })) !== null) ops++;
-      }
-      return ops;
-    });
+  updateText(id, key, text, options) {
+    return F.updateText(this.#core, id, key, text, options);
   }
 
-  /**
-   * Marks visible range `[start, end)` of text field `key` with `name: value`
-   * (a `mark` op). `expand` says whether text typed at the range's edges
-   * takes the style — `'after'` (the default: bold grows), `'before'`,
-   * `'both'`, `'none'` (a link does not). Per name the newest mark wins;
-   * `{ many: true }` makes a mark stack with every other of its name
-   * (comments), removable only by id. Resolves to the mark's id.
-   */
-  async mark(id, key, start, end, name, value, { expand = 'after', many = false, actor } = {}) {
-    markArgs('mark', key, start, end, name, expand);
-    jsonValue('mark', value);
-    const payload = { key, start, end, name, value, expand };
-    if (many === true) payload.many = true;
-    const op = await this[COMMIT]('mark', id, payload, { actor });
-    return op ? `${op.ts}:${op.origin}` : null;
+  mark(id, key, start, end, name, value, options) {
+    return F.mark(this.#core, id, key, start, end, name, value, options);
   }
 
-  /**
-   * Removes a style: over `[start, end)` by `name` — a mark with a null value
-   * under the reversed expand rule, so the removal grows where the style would
-   * not — or one mark by its id (`unmark(id, key, markId)`), the only way for
-   * a `many` mark.
-   */
-  async unmark(id, key, start, end, name, { expand = 'after', actor } = {}) {
-    markArgs('unmark', key, start, end, name, expand);
-    await this[COMMIT]('mark', id, { key, start, end, name, value: null, expand: REVERSED[expand] }, { actor });
+  unmark(id, key, start, end, name, options) {
+    return F.unmark(this.#core, id, key, start, end, name, options);
   }
 
-  /**
-   * Switches one mark of text field `key` off by its id — what `mark()`
-   * resolved to — the only way for a `many` mark.
-   */
-  async unmarkById(id, key, markId, { actor } = {}) {
-    if (typeof key !== 'string') throw new TypeError('unmarkById() takes a field name');
-    if (!isRunKey(markId)) throw new TypeError('unmarkById() takes a mark id');
-    await this[COMMIT]('mark', id, { key, off: markId }, { actor });
+  unmarkById(id, key, markId, options) {
+    return F.unmarkById(this.#core, id, key, markId, options);
   }
 
-  /**
-   * Text field `key` of record `id` as runs of equal style: `[{ text, marks }]`,
-   * `marks` per name the winning value (a `many` name lists `{ id, value }`).
-   * Raw: no lens, no read hooks. `null` when the record or the field is not
-   * a text.
-   */
-  async spans(id, key) {
-    const held = await this.#sequence('spans', id, key);
-    if (held === null || held.seq.k !== 't') return null;
-    return spans(seqIndexOf(held.entry, key), held.seq, held.base);
+  spans(id, key) {
+    return F.spans(this.#core, id, key);
   }
 
-  /**
-   * A cursor into list or text field `key`: a place that survives edits
-   * around it — before the element at `index` (`side: 'before'`, the
-   * default) or after the one before it (`'after'`), a string to keep or to
-   * send. `index()` says where it is now. `null` out of range or when the
-   * field is not a list or a text.
-   */
-  async cursor(id, key, index, { side = 'before' } = {}) {
-    if (side !== 'before' && side !== 'after') throw new TypeError("cursor() takes side: 'before' or 'after'");
-    const held = await this.#sequence('cursor', id, key);
-    return held === null ? null : cursorAt(seqIndexOf(held.entry, key), index, side);
+  cursor(id, key, index, options) {
+    return F.cursor(this.#core, id, key, index, options);
   }
 
-  /** Where `cursor` is now in list or text field `key`; `null` once its place is gone (a reset, a field no longer a sequence). */
-  async index(id, key, cursor) {
-    if (typeof cursor !== 'string' || !isAnchor(cursor)) throw new TypeError('index() takes a cursor');
-    const held = await this.#sequence('index', id, key);
-    return held === null ? null : indexOfCursor(seqIndexOf(held.entry, key), cursor);
+  index(id, key, cursor) {
+    return F.index(this.#core, id, key, cursor);
   }
 
-  // A sequence field as the record holds it — raw, no lens, no hooks — or null.
-  async #sequence(method, id, key) {
-    if (!isRecordId(id)) throw invalidId(id);
-    if (typeof key !== 'string') throw new TypeError(`${method}() takes a field name`);
-    const entry = await this.#entries.load(id);
-    if (!entry || entry.encrypted || !isAlive(entry)) return null;
-    const seq = Object.hasOwn(entry.meta.seqs ?? {}, key) ? entry.meta.seqs[key] : undefined;
-    return seq === undefined ? null : { entry, seq, base: entry.meta.base };
+  setAt(id, key, index, value, options) {
+    return F.setAt(this.#core, id, key, index, value, options);
   }
 
-  /**
-   * Replaces the element at `index` of list field `key` with `value` (an
-   * `assign` op): a register per element, last writer wins, and the value
-   * follows the element through a concurrent move.
-   */
-  async setAt(id, key, index, value, { actor } = {}) {
-    if (typeof key !== 'string') throw new TypeError('setAt() takes a field name');
-    if (!Number.isInteger(index) || index < 0) throw new TypeError('setAt() takes a non-negative integer index');
-    jsonValue('setAt', value);
-    await this[COMMIT]('assign', id, { key, index, value }, { actor });
+  move(id, key, from, to, options) {
+    return F.move(this.#core, id, key, from, to, options);
   }
 
-  /**
-   * Moves the element at `from` of list field `key` to `to` — its index once
-   * it is out (a `move` op). Two nodes moving one element concurrently leave
-   * it once, at the newer move's place; a move concurrent with a removal of
-   * the element brings it back.
-   */
-  async move(id, key, from, to, { actor } = {}) {
-    if (typeof key !== 'string') throw new TypeError('move() takes a field name');
-    if (!Number.isInteger(from) || from < 0 || !Number.isInteger(to) || to < 0) {
-      throw new TypeError('move() takes non-negative integer indices');
-    }
-    if (from === to) return;
-    await this[COMMIT]('move', id, { key, index: from, to }, { actor });
+  treeMove(id, key, node, parent, options) {
+    return F.treeMove(this.#core, id, key, node, parent, options);
   }
 
-  /**
-   * Puts node `node` of tree field `key` under `parent` (`null`: a root) —
-   * after sibling `after`, before sibling `before`, or last (a `tree` op).
-   * A node the tree has not is created there; the field, and the record,
-   * when absent. Two nodes moving concurrently so that each would hang
-   * under the other: the newer move loses, on every node, and a later move
-   * can revive it. Rejects with `CYCLE` for a parent under the node itself
-   * and with `NOT_FOUND` for a sibling not under `parent`; a move to where
-   * the node already is makes no op.
-   */
-  async treeMove(id, key, node, parent = null, { after, before, actor } = {}) {
-    treeArgs('treeMove', key, node, parent, { after, before });
-    const payload = { key, node, parent };
-    if (after !== undefined) payload.after = after;
-    if (before !== undefined) payload.before = before;
-    await this[COMMIT]('tree', id, payload, { actor });
-  }
-
-  /**
-   * Removes node `node` of tree field `key` with everything under it — a
-   * move under the trash, which no reading shows. A node not yet known here
-   * is created there, so a creation of it elsewhere lands removed.
-   */
-  async treeRemove(id, key, node, { actor } = {}) {
-    treeArgs('treeRemove', key, node, null);
-    await this[COMMIT]('tree', id, { key, node, parent: TRASH }, { actor });
+  treeRemove(id, key, node, options) {
+    return F.treeRemove(this.#core, id, key, node, options);
   }
 
   /**

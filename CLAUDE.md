@@ -57,6 +57,10 @@ src/catalog.js            the record catalog: live ids, collections, indexed val
 src/query.js              compileQuery (Mango predicate), compareRows, Cursor — reads through storage[SOURCE]
 src/shared-log.js         isSharedLog — the reserved broker-log contract (wrpc BrokerLog shape), no consumer yet
 src/storage.js            Storage — the facade: open sequence, the mutation queue, the public API, the `core` it lends
+src/fields.js             the API of the field kinds beyond registers — inc/add/remove, splice…treeRemove, spans/cursor/index —
+                          over the lent core; Storage keeps a delegate per method
+src/versions.js           the versions API — get(id, { at }), history, diff/applyPatches/restore/compact, tag/untag/at — over the
+                          lent core; Storage keeps a delegate per method
 src/entries.js            EntryStore — record files under data/, the bounded cache, the catalog row each change leaves
 src/record.js             Reference, Record, Collection — what the application holds; public API + the symbols only
 src/commit.js             the one local write path: prepare → validate → persist → announce (`storage[COMMIT]`)
