@@ -672,9 +672,9 @@ expectType<Promise<void>>(storage.untag('v1'));
 expectType<syncom.Tag[]>(storage.tags());
 expectType<syncom.TagView>(storage.at('v1'));
 expectType<Promise<unknown>>(storage.at('v1').get('id'));
-expectType<boolean>(storage.at('v1').has('id'));
+expectType<Promise<boolean>>(storage.at('v1').has('id'));
 expectType<string>(storage.at('v1').eventId);
-expectType<string[]>(storage.at('v1').list());
+expectType<Promise<string[]>>(storage.at('v1').list());
 expectType<syncom.TagCollection>(storage.at('v1').collection('Post'));
 expectType<syncom.Cursor>(
   storage

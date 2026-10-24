@@ -150,15 +150,18 @@ const getAt = async (core, id, at) => {
 // What a cursor at a tag reads through: the tag's catalog, and the record
 // as it was — lensed, without the read hooks, like the live seam. A tag
 // does not change, so there is nothing to watch, and its catalog carries
-// no text index.
+// no text index. The catalog is read at the first use (`ready`, which
+// the Cursor awaits before it reads).
 const sourceAt = (core, name) => {
-  const catalog = core.tags.catalogOf(name);
+  const { tags } = core;
+  const catalog = () => tags.catalogOf(name);
   return {
     logger: core.logger,
-    candidates: (entity, query) => catalog.candidates(entity, query),
-    ids: (entity) => catalog.ids(entity),
-    row: (id) => catalog.row(id),
-    indexed: (entity) => catalog.indexed(entity),
+    ready: () => tags.ensure(name),
+    candidates: (entity, query) => catalog().candidates(entity, query),
+    ids: (entity) => catalog().ids(entity),
+    row: (id) => catalog().row(id),
+    indexed: (entity) => catalog().indexed(entity),
     searches: () => false,
     subscribe: () => {
       throw new TypeError(`watch(): tag ${name} does not change`);
@@ -308,19 +311,24 @@ const untag = async (core, name) => {
 /**
  * A view of the storage at tag `name`: the tag's fields plus `get(id)` —
  * the record as it was, through the lens and the read hooks (`at: { tag }`)
- * — and `has(id)`, whether it was a live record then. Rejects with
- * `TAG_NOT_FOUND`.
+ * — and `has(id)`, whether it was a live record then. Throws
+ * `TAG_NOT_FOUND` for a tag this node has not; the tag's catalog is read
+ * at the view's first read, and a reader of a tag whose catalog is gone is
+ * told `TAG_NOT_FOUND` then.
  */
 const at = (core, name) => {
   if (typeof name !== 'string') throw new TypeError('at() takes a name');
-  const info = core.tags.info(name);
-  const catalog = core.tags.catalogOf(name);
+  const { tags } = core;
+  const info = tags.info(name);
+  const ready = () => tags.ensure(name);
   const source = sourceAt(core, name);
   const get = (id) => getAt(core, id, { tag: name });
   // What a snapshot page reads: the tag's catalog and entries, under the
   // tag's position — the pages another storage joins to stand at the tag.
   const paging = {
-    catalog,
+    get catalog() {
+      return tags.catalogOf(name);
+    },
     log: {
       lastEventId: info.eventId,
       get vector() {
@@ -335,18 +343,31 @@ const at = (core, name) => {
   return {
     ...info,
     get,
-    has: (id) => isRecordId(id) && core.tags.hasAt(name, id),
-    list: () => [...catalog.ids()],
+    has: async (id) => {
+      await ready();
+      return isRecordId(id) && tags.hasAt(name, id);
+    },
+    list: async () => {
+      await ready();
+      return [...tags.catalogOf(name).ids()];
+    },
     collection: (entity) => {
       if (!core.entities.has(entity)) throw new TypeError(`collection(): unknown entity ${entity}`);
       return {
         name: entity,
-        get: async (id) => (isRecordId(id) && catalog.row(id)?.type === entity ? get(id) : null),
+        get: async (id) => {
+          if (!isRecordId(id)) return null;
+          await ready();
+          return tags.rowAt(name, id)?.type === entity ? get(id) : null;
+        },
         select: (query) => new Cursor(source, entity, query),
         count: (query) => new Cursor(source, entity, query).count(),
       };
     },
-    snapshot: (options) => snapshotPage(paging, options),
+    snapshot: async (options) => {
+      await ready();
+      return snapshotPage(paging, options);
+    },
   };
 };
 

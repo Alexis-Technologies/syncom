@@ -62,10 +62,10 @@ const runTagTests = async (t, assert, createStorage) => {
       assert.strictEqual(await view.get('never'), null);
       assert.strictEqual(await view.get('bad id!'), null);
       assert.deepStrictEqual(
-        [view.has(kept), view.has(doomed), view.has(sealed), view.has(fresh), view.has(stale)],
+        await Promise.all([view.has(kept), view.has(doomed), view.has(sealed), view.has(fresh), view.has(stale)]),
         [true, true, true, false, false],
       );
-      assert.strictEqual(view.has('bad id!'), false);
+      assert.strictEqual(await view.has('bad id!'), false);
       // The present is untouched.
       assert.deepStrictEqual(await storage.get(kept), { n: 2, body: 'hi!' });
       assert.strictEqual(await storage.get(doomed), null);
@@ -181,11 +181,74 @@ const runTagTests = async (t, assert, createStorage) => {
     await storage.tag('rel');
     assert.deepStrictEqual(await copies(storage, 'rel'), [], 'swept when the name is taken again');
     assert.deepStrictEqual(await storage.at('rel').get(id), { v: 3 });
-    // A tag whose catalog file is lost is dropped at open, with a warning.
+    // The newest tag's catalog is read at open; one that is lost drops the
+    // tag then, with a warning.
     await storage.fsi.remove(`${storage.path}/tags/rel/index`, 'catalog.json');
     await storage.close();
     storage = await createStorage(t2, 'A');
     assert.deepStrictEqual(storage.tags(), []);
+  });
+
+  await t.test('an older tag is read at its first use: the open reads the newest alone', async (t2) => {
+    const warnings = [];
+    const logger = { debug() {}, info() {}, warn: (event) => warnings.push(event), error() {} };
+    let storage = await createStorage(t2, 'A', { logger });
+    const a = await storage.insert({ a: 1 });
+    const b = await storage.insert({ b: 1 });
+    const c = await storage.insert({ c: 1 });
+    await storage.tag('t1');
+    await storage.update(a, { a: 2 });
+    await storage.tag('t2');
+    await storage.update(b, { b: 2 });
+    await storage.tag('t3');
+    await storage.update(a, { a: 3 });
+    await storage.close();
+    // t1's catalog gone: the open does not notice — it reads t3's — and t1
+    // is still listed; its first read drops it, with the warning, and the
+    // reader is told TAG_NOT_FOUND. t2 reads as it did, through t3's copy.
+    await storage.fsi.remove(`${storage.path}/tags/t1/index`, 'catalog.json');
+    storage = await createStorage(t2, 'A', { logger });
+    assert.deepStrictEqual(
+      storage.tags().map((tag) => tag.name),
+      ['t1', 't2', 't3'],
+      'nothing read of the older tags at open',
+    );
+    assert.deepStrictEqual(await storage.at('t2').get(a), { a: 2 });
+    assert.deepStrictEqual(await storage.at('t2').list(), [a, b, c].sort());
+    await assert.rejects(() => storage.at('t1').get(a), { code: 'TAG_NOT_FOUND', tag: 't1' });
+    assert.deepStrictEqual(
+      storage.tags().map((tag) => tag.name),
+      ['t2', 't3'],
+    );
+    assert.deepStrictEqual(
+      warnings.filter((event) => event.event === 'tags.dropped'),
+      [{ event: 'tags.dropped', name: 't1', reason: 'catalog' }],
+    );
+    const saved = JSON.parse(await storage.fsi.read(storage.path, 'tags.json'));
+    assert.deepStrictEqual(
+      saved.tags.map((line) => line.name),
+      ['t2', 't3'],
+      'the line is gone from the file',
+    );
+    assert.throws(() => storage.at('t1'), { code: 'TAG_NOT_FOUND', tag: 't1' });
+    // The newest tag's catalog gone: dropped at open as an untag would drop
+    // it — its copy of a (unchanged between t2 and t3) moves down to t2, the
+    // rest go — and the next newest takes the write path: the first change
+    // of a record after it copies into it.
+    await storage.close();
+    await storage.fsi.remove(`${storage.path}/tags/t3/index`, 'catalog.json');
+    storage = await createStorage(t2, 'A', { logger });
+    assert.deepStrictEqual(
+      storage.tags().map((tag) => tag.name),
+      ['t2'],
+    );
+    assert.deepStrictEqual(await copies(storage, 't2'), [`${a}.json`, `${b}.json`].sort(), 'a moved down from t3');
+    assert.deepStrictEqual(await copies(storage, 't3'), [], 'the rest went');
+    assert.deepStrictEqual(await storage.at('t2').get(a), { a: 2 });
+    assert.deepStrictEqual(await storage.at('t2').get(b), { b: 1 });
+    await storage.update(c, { c: 2 });
+    assert.deepStrictEqual(await copies(storage, 't2'), [a, b, c].map((id) => `${id}.json`).sort(), 'c copied into t2');
+    assert.deepStrictEqual(await storage.at('t2').get(c), { c: 1 });
   });
 
   await t.test(
@@ -298,7 +361,7 @@ const runTagTests = async (t, assert, createStorage) => {
       // A purge: the copies go, the tag's catalog forgets the row (its
       // indexed values and search text with it), nothing of the secret stays.
       await storage.purge(person.id);
-      assert.strictEqual(storage.at('v1').has(person.id), false);
+      assert.strictEqual(await storage.at('v1').has(person.id), false);
       assert.strictEqual(await storage.at('v1').get(person.id), null);
       assert.deepStrictEqual(await copies(storage, 'v1'), []);
       const texts = await Promise.all([dump(storage, dir), dump(storage, `${storage.path}/tags/v1/index`)]);
@@ -345,7 +408,7 @@ const runTagTests = async (t, assert, createStorage) => {
     );
     assert.strictEqual(await posts.count({ n: { $gte: 2 } }), 3);
     assert.strictEqual(await posts.count(), 4);
-    assert.deepStrictEqual(view.list(), all);
+    assert.deepStrictEqual(await view.list(), all);
     assert.deepStrictEqual(await posts.get(ids[2]), { n: 3, $type: 'Post' }, 'deleted since');
     assert.strictEqual(await posts.get(note.id), null, 'another collection');
     assert.strictEqual(await posts.get('nope'), null);

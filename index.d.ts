@@ -960,14 +960,18 @@ export interface TagCollection {
   count(query?: MangoQuery): Promise<number>;
 }
 
-/** The storage as it was at a tag. */
+/**
+ * The storage as it was at a tag. The tag's catalog is read at the view's
+ * first read (an open reads the newest tag's alone); a reader of a tag whose
+ * catalog is gone is told `TAG_NOT_FOUND` then.
+ */
 export interface TagView extends Tag {
   /** The record as it was at the tag, through the lens and the read hooks (`at: { tag }`); `null` when it was not there. */
   get(id: string): Promise<unknown>;
   /** Whether `id` was a live record at the tag. */
-  has(id: string): boolean;
+  has(id: string): Promise<boolean>;
   /** Every live id at the tag, sorted. */
-  list(): string[];
+  list(): Promise<string[]>;
   /** A collection at the tag; throws for an entity the schema has not. */
   collection(name: string): TagCollection;
   /** One page of the storage as it was at the tag — what another storage's `mergeSnapshot` joins to stand at the tag. */

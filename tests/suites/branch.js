@@ -62,7 +62,7 @@ const runBranchTests = async (t, assert, createStorage, branchPath) => {
     // A branch has a history and tags of its own.
     assert.ok((await child.history(post.id)).versions.length > 0);
     await child.tag('on-branch');
-    assert.strictEqual(child.at('on-branch').has(post.id), true);
+    assert.strictEqual(await child.at('on-branch').has(post.id), true);
     await assert.rejects(() => merge(parent, { into: parent }), TypeError);
     await assert.rejects(() => merge(parent, {}), TypeError);
     await assert.rejects(() => branch(parent, {}), TypeError);

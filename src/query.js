@@ -289,6 +289,8 @@ class Cursor {
   // and for `$text` the candidate order is the index's ranking, which an
   // unordered cursor hands out as it is.
   async #matching(needsRows, limit = this.#limit) {
+    // A source that reads its catalog at first use (a tag's) hands `ready`.
+    if (this.#source.ready !== undefined) await this.#source.ready();
     const { candidates, ids, row, load } = this.#source;
     const found = candidates(this.#entity, this.#query) ?? ids(this.#entity);
     const ordered = needsRows && this.#order.length > 0;

@@ -30,7 +30,7 @@ const main = async () => {
   await bench('at(tag).get — a record copied at the tag', () => storage.at('cow').get(ids[j++ % ids.length]));
   await bench('get(id, { at: { tag } }) — through the read hooks', () =>
     storage.get(ids[j++ % ids.length], { at: { tag: 'cow' } }));
-  await bench('at(tag).list — the tag’s catalog, 1 000 ids', () => storage.at('cow').list().length);
+  await bench('at(tag).list — the tag’s catalog, 1 000 ids', async () => (await storage.at('cow').list()).length);
   await storage.close();
 };
 

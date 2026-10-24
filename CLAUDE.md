@@ -425,7 +425,11 @@ docs/                     VitePress site
 - **A tag is copy-on-write at the EntryStore seam.** `src/tags.js` keeps
   `tags.json` and, per tag, a Catalog (`adopt(rows)` of the live one at
   `tag()` time, saved under the tag's event id; loaded with `strict: false`
-  so a schema's index change does not drop it) plus `tags/<name>/data/` —
+  so a schema's index change does not drop it — at open for the NEWEST tag
+  alone, for an older one at its first read (`#catalog`/`#copies`, one load
+  each; a catalog gone drops the tag then as `untag` would, `TAG_NOT_FOUND`), so the sync
+  readers `hasAt`/`rowAt`/`catalogOf` come after `ensure(name)` and a
+  Cursor at a tag awaits its source's `ready`) plus `tags/<name>/data/` —
   record files copied by `EntryStore.#changing` (`before(id, file)`) ahead
   of `write`/`writeSealed`/`remove`, into the NEWEST tag only, once per
   record, only for a record the tag's catalog holds live. `tag()` refuses

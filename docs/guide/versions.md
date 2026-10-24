@@ -104,7 +104,7 @@ const later = await storage.insert({ title: 'Another' });
 const v1 = storage.at('v1');
 await v1.get(id);                              // { title: 'Draft' }
 await v1.get(later);                           // null — not there yet
-v1.has(id);                                    // true
+await v1.has(id);                              // true
 await storage.get(id, { at: { tag: 'v1' } }); // { title: 'Draft' }
 storage.tags();                                // [tag]
 await storage.untag('v1');
@@ -149,7 +149,7 @@ A cursor at a tag has no `watch()` (a tag does not change) and no `$text`
 const posts = storage.at('v1').collection('Post');
 await posts.select({ n: { $gte: 2 } }).order('n').fetch(); // as of v1
 await posts.count();                                         // as of v1
-storage.at('v1').list();                                     // every live id as of v1
+await storage.at('v1').list();                               // every live id as of v1
 const page = await storage.at('v1').snapshot();              // { records, cursor, eventId, vector }
 await other.mergeSnapshot(page.records);                     // another storage, now at v1
 await other.adoptVector(page.vector);
@@ -161,8 +161,12 @@ same version takes its own tag. `tag()` runs in the mutation queue, so no
 write lands between the catalog and the position it names; a name is of the
 record-id form. A directory a crash left under `tags/` without its line in
 `tags.json` is unknown to every reader and is swept when a tag of that name
-is taken again; a tag whose catalog file is gone is dropped at open with a
-warning. An unreadable `tags.json` does not stop the open: the tags are
+is taken again. An open reads `tags.json` and the newest tag's catalog —
+the one the write path copies into — and an older tag's catalog when the
+tag is first read, so an open costs one catalog however many tags there
+are; a tag whose catalog file is gone is dropped then (the newest at open)
+as `untag()` would drop it — the copies the older tag needs move there — with
+a warning, and the read that found it gone rejects with `TAG_NOT_FOUND`. An unreadable `tags.json` does not stop the open: the tags are
 auxiliary, and their names cannot be listed back from the disk, so the file
 is kept aside as `tags.corrupt.json` for a repair by hand, the storage runs
 without tags (`stats().tags.corrupt`), `tag()` refuses with `CORRUPT` so
