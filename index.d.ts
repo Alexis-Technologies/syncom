@@ -1018,6 +1018,8 @@ export interface StorageStats {
     segments: number;
     latestTs: number;
     droppedTs: number;
+    /** Readers holding segments past retention: undo managers, mostly. */
+    pins: number;
   };
   /** The tags held; `corrupt` when `tags.json` could not be read at open (no tags, `tag()` refused until it is repaired). */
   tags: { count: number; corrupt: boolean };

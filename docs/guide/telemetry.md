@@ -72,6 +72,11 @@ wrpc's spans around the actual calls.
 | `syncom.log.roll` | sealing open files into a segment and compacting | `syncom.log.sealed`, `syncom.log.dropped`, `syncom.log.floor` |
 | `syncom.log.scrub` | a purge stripping an id's entries from the log files | `syncom.log.scrubbed` |
 | `syncom.catalog.rebuild` | the catalog rebuilt from a scan of `data/` at open | `syncom.records` |
+| `syncom.tag` | a tag taken: the catalog copied under the log position | `syncom.records` |
+| `syncom.untag` | a tag dropped: the copies the older tag needs moved, the rest removed | — |
+| `syncom.history` | `history()`: the record's retained entries folded, the versions handed out | `syncom.ops.count`, `syncom.versions`, `syncom.exact` |
+| `syncom.version` | `get(id, { at })`: one version folded out of the log (a tag's copy is a file read, not a fold) | `syncom.ops.count` |
+| `syncom.patches` | `applyPatches()`, and so `restore()` and `compact()`: the batch rehearsed, then every op committed (each a `syncom.commit` child) | `syncom.ops.count`, `syncom.ops.applied` |
 
 † off the span when `includeIdentity` is false (so is `syncom.scope`).
 

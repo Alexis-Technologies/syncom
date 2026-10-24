@@ -782,6 +782,7 @@ class Storage extends Emitter {
         segments: log.segments,
         latestTs: log.latestTs,
         droppedTs: log.droppedTs,
+        pins: log.pins,
       },
       chain: this.#chain ? { tail: this.#chain.tailHash } : null,
       lock: this.#lock ? { mode: this.#lockOptions.mode } : null,
@@ -1043,8 +1044,14 @@ class Storage extends Emitter {
     let data = null;
     if (version.kind === 'tag') data = await this.#readTag(id, version.name);
     else {
-      const past = await this.#past(id, version);
-      if (past !== null) data = await this.#folded(id, past);
+      const read = async () => {
+        const past = await this.#past(id, version);
+        if (past === null) return { data: null, folded: 0 };
+        return { data: await this.#folded(id, past), folded: past.entries.length };
+      };
+      const otel = this.#otel;
+      const after = (result) => ({ 'syncom.ops.count': result.folded });
+      ({ data } = otel.enabled ? await traced(otel, 'syncom.version', {}, read, after) : await read());
     }
     const replaced = await runHook(this.#hooks, 'afterRead', { id, at }, data);
     return replaced === undefined ? data : replaced;
@@ -1151,7 +1158,7 @@ class Storage extends Emitter {
     if (!isRecordId(id)) throw invalidId(id);
     if (!Array.isArray(patches)) throw new TypeError('applyPatches() takes an array of patches');
     const ops = patches.map(realize);
-    return this.#run(async () => {
+    const apply = async () => {
       // Every op resolved and applied over a scratch record first — an index
       // out of range, a kind clash, a cycle, a type change — so nothing is
       // appended unless all of them can be: a restore lands whole or not at
@@ -1167,7 +1174,13 @@ class Storage extends Emitter {
       }
       if (ops.some(([type]) => type === 'delete' || type === 'purge')) this.#records.delete(id);
       return count;
-    });
+    };
+    const otel = this.#otel;
+    if (!otel.enabled) return this.#run(apply);
+    const attributes = { 'syncom.ops.count': ops.length };
+    return this.#run(() =>
+      traced(otel, 'syncom.patches', attributes, apply, (count) => ({ 'syncom.ops.applied': count })),
+    );
   }
 
   /**
@@ -1223,20 +1236,27 @@ class Storage extends Emitter {
         const message = `tag(): ${ids.join(', ')}: logged, but not written; take the tag once they land`;
         throw new SyncomError('UNPERSISTED', message, { ids });
       }
-      return this.#tags.take(name, {
-        eventId: this.#log.lastEventId,
-        seq: this.#log.next - 1,
-        ts: this.#log.latestTs,
-        vector: this.#log.vector,
-        rows: this.#catalog.rows(),
-      });
+      const rows = this.#catalog.rows();
+      const take = () =>
+        this.#tags.take(name, {
+          eventId: this.#log.lastEventId,
+          seq: this.#log.next - 1,
+          ts: this.#log.latestTs,
+          vector: this.#log.vector,
+          rows,
+        });
+      const otel = this.#otel;
+      if (!otel.enabled) return take();
+      return traced(otel, 'syncom.tag', {}, take, () => ({ 'syncom.records': rows.length }));
     });
   }
 
   /** Drops a tag; what the next older tag needs of its copies moves there. Rejects with `TAG_NOT_FOUND`. */
   async untag(name) {
     if (typeof name !== 'string') throw new TypeError('untag() takes a name');
-    return this.#run(() => this.#tags.drop(name));
+    const drop = () => this.#tags.drop(name);
+    const otel = this.#otel;
+    return this.#run(() => (otel.enabled ? traced(otel, 'syncom.untag', {}, drop, () => ({})) : drop()));
   }
 
   /** The tags, oldest first. */
@@ -1312,6 +1332,19 @@ class Storage extends Emitter {
       if (cut.kind !== 'event') throw new TypeError('history({ before }) takes an event id');
       if (cut.epoch !== this.#log.epoch) throw gone(id, 'epoch');
     }
+    const read = () => this.#history(id, limit, cut);
+    const otel = this.#otel;
+    const after = (result) => ({
+      'syncom.ops.count': result.folded,
+      'syncom.versions': result.versions.length,
+      'syncom.exact': result.exact,
+    });
+    const { folded, ...result } = otel.enabled ? await traced(otel, 'syncom.history', {}, read, after) : await read();
+    return result;
+  }
+
+  // The fold and the versions handed out — `folded`, how many entries, for the span.
+  async #history(id, limit, cut) {
     await runHook(this.#hooks, 'beforeRead', { id, history: true });
     const { entries, purged } = await this.#applied(id);
     const droppedTs = this.#log.droppedTs;
@@ -1355,7 +1388,7 @@ class Storage extends Emitter {
     versions.reverse();
     const last = steps.length > 0 ? steps[steps.length - 1].entry : null;
     const exact = fromReset && (await this.#present(id, last));
-    return { versions, complete: droppedTs === 0 && first === 0, exact };
+    return { versions, complete: droppedTs === 0 && first === 0, exact, folded: entries.length };
   }
 
   // The retained entries of `id` this node applied, oldest first, and the

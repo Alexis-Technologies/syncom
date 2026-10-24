@@ -459,6 +459,11 @@ class OpLog {
     return () => void this.#pins.delete(keep);
   }
 
+  /** How many readers hold segments past retention (`pin`). */
+  get pins() {
+    return this.#pins.size;
+  }
+
   /**
    * Entries compaction must not drop, whatever the retention: `keep(entry)`
    * answers true for one that must stay, and the segment holding it stays
