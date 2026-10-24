@@ -198,8 +198,8 @@ validator. `lens: 'migrations'` or `'validate'` picks one step (the default
 `migrations`).
 
 The lens applies everywhere a record is read as a record — `get()`,
-`swap()`, the [query layer](./query), a `Record` as it loads (the changes it
-follows afterwards arrive raw) — and to what a write is validated against;
+`swap()`, the [query layer](./query), a `Record` as it loads and as it
+follows a change — and to what a write is validated against;
 `snapshot()`, `getCachedData()` and replication stay raw.
 
 ### Rewriting: `migrate()`

@@ -297,6 +297,11 @@ const runHooksTests = async (t, assert, createStorage) => {
     assert.strictEqual(await storage.has(hidden), true, 'has() is raw');
     const record = await storage.record(id);
     assert.strictEqual(record.ssn, '***', 'a Record view reads through get');
+    // …and after a change too: the refresh reads as get() does, once the write is done.
+    const refreshed = new Promise((resolve) => record.once('update', () => resolve()));
+    await storage.update(id, { name: 'Ada L.' });
+    await refreshed;
+    assert.deepStrictEqual([record.name, record.ssn], ['Ada L.', '***'], 'a changed Record is redacted still');
     assert.strictEqual(storage.getCachedData(id).ssn, '123', 'the cache is raw');
     const page = await storage.snapshot();
     assert.strictEqual(page.records.find((r) => r.id === id).data.ssn, '123', 'replication is raw');

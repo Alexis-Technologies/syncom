@@ -111,12 +111,13 @@ then:     append to the log → persist the records → afterApply → 'apply' �
 back. It does not touch the record: `swap()` compares against the raw data,
 `snapshot()` replicates the raw data, `getCachedData()` and `has()` are raw,
 and so is what a cursor (`select()`), `diff()`, `spans()`, `cursor()` and
-`index()` read. A `Record` is loaded through `get()`, but the changes it
-follows afterwards — a write here, an op from a peer — arrive as the record
-is stored, without `afterRead`: a redaction holds on a live `Record` only
-until the record next changes. A `Record` that saved a redacted field would
-write the redaction back; it does not, because `save()` writes only the
-fields that were assigned.
+`index()` read. A `Record` reads through `get()` as it loads and as it follows
+a change — a write here, an op from a peer: with `beforeRead` or `afterRead`
+set, it is refreshed once the write is done, outside the mutation queue (a
+read hook may write), so a redaction holds on a live `Record` for good; a
+`beforeRead` that throws then leaves the `Record` as it was. A `Record` that
+saved a redacted field would write the redaction back; it does not, because
+`save()` writes only the fields that were assigned.
 
 ### Skipping a peer's op
 

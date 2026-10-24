@@ -67,6 +67,10 @@ class Storage extends Emitter {
   #core = null;
   #records = null;
   #reaper = null;
+  // Live Records refreshed as get() reads — the lens, the read hooks —
+  // after the write that changed them, one after another.
+  #refreshed = Promise.resolve();
+  #refreshing = 0;
   #sync = null;
   #cacheMax;
   #verify;
@@ -326,7 +330,7 @@ class Storage extends Emitter {
       persist: (touched, from, to) => this.#land(touched, from, to),
       unpersisted: (touched, error) => this.#unpersisted(touched, error),
       flush: () => this.#flushCatalog(),
-      refresh: (id, data, delta, source) => this.#emitUpdate(id, data, delta, source),
+      refresh: (id, data, delta, source, entry) => this.#emitUpdate(id, data, delta, source, entry),
       // For the API modules (src/fields.js, src/versions.js), which stand
       // outside the queue: the hooks (their read hooks run outside it), the
       // tags, the entities, a task run in the queue, a local op committed
@@ -842,9 +846,37 @@ class Storage extends Emitter {
     }
   }
 
-  #emitUpdate(id, data, delta, source = null) {
+  // A live Record reads what get() reads: through the lens and the read
+  // hooks. Those run after the write, outside the mutation queue — a read
+  // hook may write, and that write waits for the queue — in the order the
+  // writes came; with neither, the Record is refreshed at once.
+  #emitUpdate(id, data, delta, source = null, entry = null) {
     const record = this.#live(id);
-    if (record) record[REFRESH](data, delta, source);
+    if (!record) return;
+    const lensed =
+      data !== null && entry !== null && !entry.encrypted && this.#lens !== null && (entry.meta.v ?? 1) < this.#version;
+    const hooked = this.#hooks.beforeRead !== null || this.#hooks.afterRead !== null;
+    if (!lensed && !hooked && this.#refreshing === 0) {
+      record[REFRESH](data, delta, source);
+      return;
+    }
+    this.#refreshing += 1;
+    this.#refreshed = this.#refreshed.then(async () => {
+      try {
+        let view = lensed ? await this.#view(id, entry) : data;
+        if (view !== null && hooked) {
+          await runHook(this.#hooks, 'beforeRead', { id });
+          const replaced = await runHook(this.#hooks, 'afterRead', { id }, view);
+          if (replaced !== undefined) view = replaced;
+        }
+        record[REFRESH](view, delta, source);
+      } catch (error) {
+        // A read hook that refuses leaves the Record as it was.
+        this.#logger.warn({ event: 'record.refresh', id, err: error });
+      } finally {
+        this.#refreshing -= 1;
+      }
+    });
   }
 
   #scope(id, data) {

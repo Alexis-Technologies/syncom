@@ -167,7 +167,7 @@ const mergeBatch = async (core, records, via, from) => {
       await core.hook('afterWrite', ctx, op);
     } finally {
       const entry = batch.touched.get(op.id);
-      core.refresh(op.id, isAlive(entry) ? entry.data : null, batch.deltas.get(op.id));
+      core.refresh(op.id, isAlive(entry) ? entry.data : null, batch.deltas.get(op.id), null, entry);
       notify(core.storage, core.logger, 'change', op, via);
       if (core.otel.enabled) core.otel.recordCommit('merge', 'applied', now() - started);
     }

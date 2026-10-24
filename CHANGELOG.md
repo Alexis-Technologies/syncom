@@ -609,6 +609,14 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **A live `Record` reads as `get()` after a change too.** It loaded through
+  the lens and the read hooks, but every change it followed — a write here,
+  an op from a peer — handed it the record as stored: a redacted field showed
+  its raw value after an unrelated `update()`, and a record of an older
+  schema version showed its old field names after an `inc()`. The refresh
+  now reads through the lens and `beforeRead`/`afterRead`; with either in
+  play it runs once the write is done, outside the mutation queue (a read
+  hook may write), in the order of the writes.
 - **A snapshot block is held to the node's `sync.pendingMax`.** The op
   path took a node's bound, the snapshot path the default 4 096 whatever
   the option said: a node that raised it still dropped blocks a peer's ops

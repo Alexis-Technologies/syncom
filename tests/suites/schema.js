@@ -704,7 +704,14 @@ const runSchemaTests = async (t, assert, createStorage) => {
         assert.strictEqual(await b.swap(post.id, { desc: 'swapped' }, { name: 'x' }), true, 'swap compares the view');
         await settle([a, b]);
         // A set is validated through the lens and carries only what changed.
+        const refreshed = new Promise((resolve) => record.once('update', () => resolve()));
         await b.Post.update(post.id, { desc: 'd' });
+        await refreshed;
+        assert.deepStrictEqual(
+          [record.name, record.desc, record.title],
+          ['x', 'd', undefined],
+          'the Record stays lensed',
+        );
         assert.deepStrictEqual(bOps.at(-1).data, { desc: 'd' });
         await settle([a, b]);
         assert.deepStrictEqual(await a.get(post.id), { title: 'x', desc: 'd', $type: 'Post' }, 'A keeps its shape');

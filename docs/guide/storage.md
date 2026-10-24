@@ -394,10 +394,10 @@ Properties are defined from whatever keys the record had when it was loaded;
 A record also follows changes made **elsewhere** — `storage.update()` in the
 same process, or an op from a peer: its properties are refreshed, `update`
 fires with the delta, and edits staged but not yet saved stay on top. A
-record deleted elsewhere reports `update` with `null` data. A record is
-loaded through `get()` — the lens and [`afterRead`](./hooks#reads-stay-raw-where-it-matters)
-applied — but a change it follows arrives as the record is stored, without
-either.
+record deleted elsewhere reports `update` with `null` data. A record reads
+through `get()` — the lens and [`afterRead`](./hooks#reads-stay-raw-where-it-matters)
+applied — as it loads and as it follows a change; with the lens or a read
+hook in play, the change reaches it once the write is done, in order.
 
 ### References
 

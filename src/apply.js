@@ -352,7 +352,9 @@ const announce = async (batch, result) => {
   try {
     await core.hook('afterApply', { via, peer, ops: accepted, ...result });
   } finally {
-    for (const [id, entry] of touched) core.refresh(id, isAlive(entry) ? entry.data : null, batch.deltas.get(id));
+    for (const [id, entry] of touched) {
+      core.refresh(id, isAlive(entry) ? entry.data : null, batch.deltas.get(id), null, entry);
+    }
     notify(core.storage, core.logger, 'apply', { via, peer, ops: accepted, ...result });
     for (const op of accepted) notify(core.storage, core.logger, 'change', op, via);
   }

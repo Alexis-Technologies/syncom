@@ -454,7 +454,7 @@ const announce = async (core, op, entry, delta, ctx, source, via, committed = nu
   try {
     await core.hook('afterWrite', ctx, op);
   } finally {
-    core.refresh(op.id, alive ? entry.data : null, delta, source);
+    core.refresh(op.id, alive ? entry.data : null, delta, source, entry);
     // What an undo manager keeps of a local commit: the record before and
     // after, as copies, and every field's kind — built only for a listener.
     if (committed !== null && core.storage.listenerCount('commit') > 0) {
