@@ -417,6 +417,13 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     const expected = await blocks(storages[0]);
     for (const other of storages.slice(1)) assert.deepStrictEqual(await blocks(other), expected);
     assert.strictEqual((await storages[0].get('c1')).count, incs, 'every inc counted once');
+    // The past folds back to the present: every node, every record, at its own vector.
+    for (const storage of storages) {
+      for (const id of [...ids, 'c1']) {
+        assert.deepStrictEqual(await storage.get(id, { at: { vector: storage.vector } }), await storage.get(id), id);
+      }
+      assert.strictEqual((await storage.history(ids[0])).exact, true);
+    }
   });
 
   await t.test(

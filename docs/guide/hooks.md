@@ -54,8 +54,8 @@ silently never runs.
 | --- | --- | --- | --- |
 | `beforeWrite(ctx)` | Inside every local write, after the current record is loaded and before the op is stamped and applied | A plain object replaces `data` (`write` and `set` only; a `TypeError` for anything else) | The write is refused: nothing stamped, logged or written |
 | `afterWrite(ctx, op)` | After the write is durable — `op` is the op it became, `null` for an encrypted (local) write; not called when the write changed nothing | Ignored | The call rejects, but the op stays committed and is announced |
-| `beforeRead({ id })` | Inside `get(id)`, before the read | Ignored | The read is refused |
-| `afterRead({ id }, data)` | Inside `get(id)`, after the read | Anything but `undefined` (including `null`) replaces what the caller sees | The read rejects |
+| `beforeRead({ id, at? })` | Inside `get(id)`, before the read — with `at` for a read at a version, once with `{ id, history: true }` for `history()` | Ignored | The read is refused |
+| `afterRead({ id, at? }, data)` | Inside `get(id)`, after the read — with `at` for a read at a version, and per version of `history()` (its event id) | Anything but `undefined` (including `null`) replaces what the caller sees | The read rejects |
 | `beforeApply(ctx)` | Inside `applyRemote`, once per op, after the duplicate/gap checks and before the op is applied | `false` skips the op *here* (see below) | The whole batch is aborted before anything is durable |
 | `afterApply(batch)` | After a peer's batch is durable, once per `applyRemote` call | Ignored | The call rejects; the batch stays and is announced |
 

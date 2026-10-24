@@ -234,7 +234,8 @@ changed under the chain is evidence first. When you have looked,
 retained entries of the id are replayed from the first whole-record op among
 them (a `write`, `merge`, `delete` or `purge`), and the result is written the
 usual way, with a chain block of its own, back into the catalog and the cache.
-What comes out is what a peer replaying this log from that op would hold.
+What comes out is what a peer replaying this log from that op would hold —
+the same fold [`history()` and `get(id, { at })`](./versions) read the past with.
 
 ```js
 try {

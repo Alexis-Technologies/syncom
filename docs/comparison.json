@@ -381,9 +381,9 @@
           "note": "The chain keeps an unsalted SHA-256 of every version of the record, which can confirm a guessed record."
         },
         "history": {
-          "mark": "⚠️",
-          "text": "op log within retention; `repair(id)`; no read-at-version",
-          "source": "src/log.js; docs/guide/storage.md#repair"
+          "mark": "✅",
+          "text": "`history(id)` and `get(id, { at })` — by event id, stamp or version vector; exact within log retention, from the last reset",
+          "source": "src/history.js; docs/guide/versions.md"
         },
         "hooks": {
           "mark": "✅",

@@ -37,6 +37,7 @@ src/sequence.js           the sequence engine behind the list and text kinds: Fu
 src/tree.js               the tree kind: per node its stamped moves, the fold in stamp order with the cycle check (Kleppmann
                           2021, Loro), prune and join — requires vector.js only
 src/order.js              fractional indexes over a 62-letter alphabet (Loro's rule, MIT) — no requires; the core uses it for a tree's places
+src/history.js            the past out of the log: a version (event id / stamp / vector) as a cut, the exact start above droppedTs, the fold
 src/errors.js             SyncomError (an operational failure, with a code) and typed() — no requires
 src/symbols.js            COMMIT / REFRESH / SOURCE — the module-private seams between Storage and what it hands out — no requires
 src/options.js            normalizeStorageOptions — open()'s plain options checked and defaulted (lock, cache, chain, skew…)
@@ -341,6 +342,19 @@ docs/                     VitePress site
   scope among them) at span start AND end and records a failure's `code`
   rather than the exception. A new `event:` name goes into the table in
   `docs/guide/telemetry.md` — the names are a surface.
+- **A version is a fold of the retained log, exact only from a reset above
+  `droppedTs`.** `history(id)` and `get(id, { at })` (`src/history.js`,
+  glued in `Storage.#past`/`#applied`) fold `log.entriesOf(id)` filtered by
+  `appliedHere` (skipped out, held in once the node runs the version) with
+  `applyOp`, outside the queue. An event id cuts by log seq, a stamp by
+  `op.ts`, a vector by `vectorHas`. With `droppedTs > 0` the fold starts at
+  the first `write`/`delete`/`purge` stamped above it (`exactStart`) and the
+  fold of everything retained must `deepEqual` the present (`#present`) —
+  the counter straddle `repair()` also has — or it is `HISTORY_GONE
+  compacted` / `exact: false`. A stamp below a retained `merge` is `reason:
+  'merge'`; a purged record lists scrubbed versions and refuses a cut before
+  the purge (`'scrubbed'`). Never answer a version from the record file or
+  the catalog, and never fold from an entry below the exact start.
 - **`repair(id)` replays the log, it does not guess.** `Storage.#repair`
   starts at the first whole-record op the log retains for the id (`WHOLE`:
   `write`/`merge`/`delete`, or a `purge` even scrubbed), folds the rest with

@@ -251,9 +251,9 @@ class Collection {
   }
 
   /** The record, or null when it is absent or belongs to another collection. */
-  async get(id) {
+  async get(id, options = {}) {
     if (this.#foreign(id)) return null;
-    return this.#storage.get(id);
+    return this.#storage.get(id, options);
   }
 
   /** A cursor over this collection: `select(query).order(f).limit(n).fetch()`. */

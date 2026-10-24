@@ -61,6 +61,20 @@ There is no released version section until then; everything below lands in it.
   a schema version and counts `trees`. Browser budget 52 → 55 KB — the move
   log and the fold, and `@alexify/syncom/order` now in the core for the
   places.
+- **History and read-at-version.** `history(id, { limit })` lists a record's
+  past as this node's log holds it, newest first — one version per op the
+  node applied, with the record as it read after it through the lens and
+  `afterRead` — and `get(id, { at })` reads one back: by event id (what this
+  node held after that log entry), by stamp (every op stamped at or below
+  it, the same on every node) or by `{ vector }` (every op it covers); a
+  collection's `get` takes `at` too. Both are a fold of the retained log
+  (`src/history.js`), exact while nothing was dropped and, after compaction,
+  from a reset stamped above `droppedTs`; `history()` reports `exact` and
+  `complete`, `get()` rejects with `HISTORY_GONE` (`reason: 'compacted' |
+  'scrubbed' | 'merge' | 'epoch'`) or `INVALID_VERSION` (new codes). A
+  purge leaves the ops listed with their content gone; an encrypted record
+  has no past. The read hooks see `at`. New page: Versions and history.
+  Browser budget 55 → 56.5 KB.
 - **The log knows what it dropped.** `storage.log.droppedTs` is the newest
   stamp among the ops compaction dropped, or an open could not read — `0`
   while nothing ever was — persisted in `index.json`; a record's retained

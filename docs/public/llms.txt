@@ -56,6 +56,8 @@
 - [CRDT deltas](https://syncomjs.vercel.app/guide/crdt): diff/merge/apply semantics, grow-only sets, the numeric-addition rule.
 - [Schema and validation](https://syncomjs.vercel.app/guide/schema): entity definitions, validators, versions and lenses, `migrate()`.
 - [Queries](https://syncomjs.vercel.app/guide/query): Mango `select()`, the catalog, indexes, unique keys, `watch()`, full-text `$text`.
+- [Lists, text and trees](https://syncomjs.vercel.app/guide/lists): list and text fields that merge by position (Fugue), the movable list, rich text marks, cursors, `updateText()`, trees whose moves never form a cycle.
+- [Versions and history](https://syncomjs.vercel.app/guide/versions): `history(id)` and `get(id, { at })` — by event id, stamp or version vector; what the log can vouch for after compaction.
 - [Hooks and events](https://syncomjs.vercel.app/guide/hooks): hooks inside writes, reads and peer batches; events.
 - [Backends](https://syncomjs.vercel.app/guide/backends): the `fsi` contract, node:fs, OPFS, IndexedDB, memory, the lock.
 - [Scaling](https://syncomjs.vercel.app/guide/scaling): hubs, scopes as buckets, limits, presence.

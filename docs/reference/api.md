@@ -38,7 +38,8 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 | Method | Returns | Notes |
 | --- | --- | --- |
 | `insert(data, options?)` | `Promise<string>` | Generates an id via `getId` (a UUID by default) and writes; rejects with `code: 'INVALID_ID'` when the generator mints one that is not a [valid id](../guide/storage#custom-identifiers) |
-| `get(id)` | `Promise<unknown>` | `null` when absent or deleted; verifies against the chain; a copy — editing it changes nothing |
+| `get(id, { at }?)` | `Promise<unknown>` | `null` when absent or deleted; verifies against the chain; a copy — editing it changes nothing. With `at` — an event id, a stamp (a number or a `Date`) or `{ vector }` — the record at that version, folded from the log (see [Versions and history](../guide/versions)); rejects with `HISTORY_GONE` when the log cannot give it exactly, `INVALID_VERSION` for a malformed `at` or a seq not reached, `ENCRYPTED` for an encrypted record |
+| `history(id, { limit = 50 }?)` | `Promise<{ versions, complete, exact }>` | The record's past, newest first: `{ eventId, seq, ts, origin, actor, type, fields, data, scrubbed? }` per op this node applied, `data` the record after it through the lens and `afterRead`; `complete` when nothing was dropped or cut by `limit`, `exact` when the versions are what the node held |
 | `has(id)` | `Promise<boolean>` | `false` for a tombstone |
 | `list()` | `Promise<string[]>` | Every live id, sorted — from the catalog, no I/O |
 | `check(entity, data)` | `Promise<unknown>` | Runs the entity's validator as a write would and returns its value; rejects with `ValidationError`; writes nothing |
@@ -213,6 +214,8 @@ value is data or configuration. `HookError` and `ValidationError` are
 | `FIELD_KIND` | `update()`/`set()` on a counter, set, list, text or tree field, `inc()` on a register, set, list, text or tree field, `add()`/`remove()` on a register, counter, list, text or tree field, `splice()`/`push()` on a register, counter, set or tree field, `setAt()`/`move()`/`mark()` and `treeMove()`/`treeRemove()` on any other kind | `field`, `kind` (`'register'`, `'counter'`, `'set'`, `'list'`, `'text'` or `'tree'`) |
 | `OUT_OF_RANGE` | `splice()` past the length of a list or text field — the index, or the index plus the count; `setAt()`/`move()` at an index the list has not; `mark()`/`unmark()` over a range the text has not | `id`, `field`, `index`, `count`, `length` |
 | `CYCLE` | `treeMove()` to a parent that is the node itself or hangs under it — decided inside the mutation queue, against the tree as it is | `id`, `field`, `node`, `parent` |
+| `HISTORY_GONE` | `get(id, { at })` for a version the log cannot give exactly: `reason` `'compacted'` (dropped entries the version depends on, or a cut before anything retained), `'scrubbed'` (a cut before a purge), `'merge'` (a stamp below a joined snapshot), `'epoch'` (an event id of another incarnation) | `id`, `reason` |
+| `INVALID_VERSION` | `get(id, { at })` with an `at` of the wrong shape, or an event id this log has not reached (a `TypeError`) | — |
 | `ENCRYPTED` | `inc()`, `add()`, `remove()`, `splice()` or `push()` on an encrypted record; `{ encrypted: true }` on a replicated one | — |
 | `INTEGRITY` | a read (`get()`, `has()`, a cursor) of a record whose file fails its chain block check, under `integrity: 'verify'`, or cannot be parsed at all (a file torn by a crash; `repair(id)` rebuilds it) | `id`, `cause` (the parse error) |
 | `CORRUPT` | `open()` when `node.json`, `schema.json` or `.blockchain.json` cannot be read | `cause` |

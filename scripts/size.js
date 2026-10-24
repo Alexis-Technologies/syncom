@@ -100,8 +100,11 @@ const ENTRIES = [
   // that survives edits, cursor()/index() — the raise to 52 KB (51.7 measured).
   // Trees — the move log per node, the fold with the cycle check, treeMove()/
   // treeRemove(), and src/order.js in the core for a node's place among its
-  // siblings — the raise to 55 KB (54.6 measured).
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 55 },
+  // siblings — the raise to 55 KB (54.6 measured). History — a version as a
+  // cut through the log, the exact start above droppedTs, the fold and the
+  // present check, history()/get(id, { at }) — the raise to 56.5 KB (56.2
+  // measured).
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 56.5 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check

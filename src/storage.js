@@ -18,10 +18,11 @@ const { Record, Collection } = require('./record.js');
 const { commit, MISMATCH } = require('./commit.js');
 const { applyBatch } = require('./apply.js');
 const { snapshotPage, mergeBatch, adopt } = require('./bootstrap.js');
-const { applyOp, isAlive, isCounter, isSet, isSeq, isTree } = require('./ops.js');
+const { applyOp, isAlive, isCounter, isSet, isSeq, isTree, deepEqual } = require('./ops.js');
 const { diff } = require('./myers.js');
 const { buildIndex, spans, isRunKey, isAnchor, cursorAt, indexOfCursor, REVERSED } = require('./sequence.js');
 const { TRASH, isNodeId } = require('./tree.js');
+const { appliedHere, parseVersion, within, exactStart, fold, gone } = require('./history.js');
 const { Clock } = require('./vector.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
 const { normalizeSchema, createLens, project } = require('./schema.js');
@@ -46,10 +47,6 @@ const STORAGE_HOOKS = ['beforeWrite', 'afterWrite', 'beforeRead', 'afterRead', '
 // The ops that leave a record's whole state behind them — where a repair
 // can start replaying from. A purge counts even scrubbed; the others not.
 const WHOLE = new Set(['write', 'merge', 'delete']);
-// Whether this node applied a log entry: not skipped, or held for a schema
-// version this node now runs (`#replayHeld` applied it; the flag stays).
-const appliedHere = (entry, version) =>
-  !entry.skipped || (entry.held !== undefined && version !== null && entry.held <= version);
 
 // A service file this storage wrote itself and cannot read any more.
 const corrupt = (file, cause) =>
@@ -998,11 +995,146 @@ class Storage extends Emitter {
     return isAlive(entry) ? asJson(await this.#view(id, entry)) : null;
   }
 
-  async get(id) {
+  async get(id, { at } = {}) {
+    if (at !== undefined) return this.#getAt(id, at);
     await runHook(this.#hooks, 'beforeRead', { id });
     const data = await this.#read(id);
     const replaced = await runHook(this.#hooks, 'afterRead', { id }, data);
     return replaced === undefined ? data : replaced;
+  }
+
+  // `get(id, { at })`: the record at a version — an event id (as this node
+  // held it after that entry), a stamp (every op stamped at or below it) or
+  // `{ vector }` (every op it covers) — folded from the log (src/history.js),
+  // through the lens and the read hooks, which see `at`.
+  async #getAt(id, at) {
+    const version = parseVersion(at);
+    await runHook(this.#hooks, 'beforeRead', { id, at });
+    const past = await this.#past(id, version);
+    let data = null;
+    if (past !== null) {
+      const { entries, start } = past;
+      const steps = fold(entries, start);
+      const last = steps.length > 0 ? steps[steps.length - 1].entry : null;
+      data = last !== null && isAlive(last) ? asJson(await this.#view(id, last)) : null;
+    }
+    const replaced = await runHook(this.#hooks, 'afterRead', { id, at }, data);
+    return replaced === undefined ? data : replaced;
+  }
+
+  /**
+   * The record's past as this node's log holds it: one version per op of
+   * the record this node applied, newest first — `{ eventId, seq, ts,
+   * origin, actor, type, fields, data, scrubbed? }`, `data` the record as it
+   * read after the op (`null` once deleted) through the lens and `afterRead`,
+   * `fields` what the op changed. `exact` says the versions are what this
+   * node held (false once compaction took something a retained op still
+   * depends on), `complete` that the list reaches the first op the node
+   * ever applied to the record (nothing dropped, nothing cut by `limit`).
+   * Rejects with ENCRYPTED for an encrypted record.
+   */
+  async history(id, { limit = 50 } = {}) {
+    if (!(Number.isInteger(limit) && limit > 0) && limit !== Infinity) {
+      throw new TypeError('history({ limit }) takes a positive integer');
+    }
+    await runHook(this.#hooks, 'beforeRead', { id, history: true });
+    const { entries, purged } = await this.#applied(id);
+    const droppedTs = this.#log.droppedTs;
+    const { start, exact: fromReset } = exactStart(entries, droppedTs);
+    const steps = fold(entries, start);
+    const versions = [];
+    for (const { logged, entry, delta } of steps) {
+      const { seq, op, scrubbed } = logged;
+      const version = {
+        eventId: this.#log.formatId(seq),
+        seq,
+        ts: op.ts,
+        origin: op.origin,
+        actor: op.actor ?? null,
+        type: op.type,
+        fields: Object.keys(delta),
+        data: null,
+      };
+      // Before a purge the payloads are gone: the ops are listed, their
+      // content is not.
+      if (scrubbed) version.scrubbed = true;
+      if (purged === null || seq >= purged) {
+        version.data = isAlive(entry) ? asJson(await this.#view(id, entry)) : null;
+      } else {
+        version.fields = [];
+        version.scrubbed = true;
+      }
+      const replaced = await runHook(this.#hooks, 'afterRead', { id, at: version.eventId }, version.data);
+      if (replaced !== undefined) version.data = replaced;
+      versions.push(version);
+    }
+    versions.reverse();
+    const last = steps.length > 0 ? steps[steps.length - 1].entry : null;
+    const exact = fromReset && (await this.#present(id, last));
+    return { versions: versions.slice(0, limit), complete: droppedTs === 0 && versions.length <= limit, exact };
+  }
+
+  // The retained entries of `id` this node applied, oldest first, and the
+  // seq of its purge when the record is purged (0 when the purge itself is
+  // no longer retained; `null` when not purged). An encrypted record has no
+  // past in the log.
+  async #applied(id) {
+    if (!isRecordId(id)) return { entries: [], purged: null, current: null };
+    const current = await this.#entries.load(id);
+    if (current?.encrypted) throw new SyncomError('ENCRYPTED', `Record ${id} is encrypted here; it has no history`);
+    const entries = this.#log.entriesOf(id).filter((entry) => appliedHere(entry, this.#version));
+    const purge = entries.find((entry) => entry.op.type === 'purge');
+    const purged = purge ? purge.seq : current?.meta?.purged ? 0 : null;
+    return { entries, purged, current };
+  }
+
+  // Whether the fold of everything retained of `id` reads as the record
+  // does: when it does not, compaction took something a retained op still
+  // depends on (a counter incremented across the reset the fold starts at).
+  async #present(id, folded) {
+    const current = await this.#entries.load(id);
+    const now = current !== null && isAlive(current) ? current.data : null;
+    const then = folded !== null && isAlive(folded) ? folded.data : null;
+    return deepEqual(now, then);
+  }
+
+  // The entries of `id` inside `version`, and where to fold them from; null
+  // when the record was not there (or was purged). Throws HISTORY_GONE when
+  // the log cannot give the version exactly, INVALID_VERSION for a seq this
+  // log has not reached.
+  async #past(id, version) {
+    const log = this.#log;
+    if (version.kind === 'event') {
+      if (version.epoch !== log.epoch) throw gone(id, 'epoch');
+      if (version.seq >= log.next) {
+        throw typed('INVALID_VERSION', `at: ${log.formatId(version.seq)} is not in this log yet`);
+      }
+    }
+    const { entries, purged, current } = await this.#applied(id);
+    const inside = entries.filter((entry) => within(version, entry));
+    if (purged !== null) {
+      // After the purge, nothing; before it, nothing readable.
+      if (purged === 0 || inside.some((entry) => entry.seq === purged)) return null;
+      throw gone(id, 'scrubbed');
+    }
+    if (version.kind === 'stamp' && entries.some((entry) => entry.op.type === 'merge' && entry.op.ts > version.ts)) {
+      throw gone(id, 'merge');
+    }
+    const droppedTs = log.droppedTs;
+    if (inside.length === 0) {
+      if (droppedTs === 0 || this.#catalog.row(id) === null) return null;
+      throw gone(id, 'compacted');
+    }
+    const { start, exact } = exactStart(inside, droppedTs);
+    if (!exact) throw gone(id, 'compacted');
+    if (droppedTs > 0) {
+      // The whole retained past must read as the present does, or the cut
+      // cannot be trusted either.
+      const all = fold(entries, exactStart(entries, droppedTs).start);
+      const last = all.length > 0 ? all[all.length - 1].entry : null;
+      if (current === null || !(await this.#present(id, last))) throw gone(id, 'compacted');
+    }
+    return { entries: inside, start };
   }
 
   /** Every live record id, sorted — tombstones excluded, encrypted records included. From the catalog: no I/O. */

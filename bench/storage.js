@@ -57,6 +57,14 @@ const main = async () => {
     );
 
     await bench('update — one field', () => storage.update(id, { hits: 1 }), { warmup: 20 });
+
+    // The past is a fold of the log's entries of the record: fifty versions
+    // read back, and one of them read at its event id.
+    const versioned = await storage.insert(record);
+    for (let i = 0; i < 49; i++) await storage.update(versioned, { hits: i });
+    const { versions } = await storage.history(versioned);
+    await bench('history — 50 versions', () => storage.history(versioned));
+    await bench('get — at an event id (25 ops back)', () => storage.get(versioned, { at: versions[25].eventId }));
     await bench('set — whole record', () => storage.set(id, record), { warmup: 20 });
 
     await bench(
