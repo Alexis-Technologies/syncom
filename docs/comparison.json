@@ -83,8 +83,32 @@
           "title": "Collaborative text"
         },
         {
+          "id": "richText",
+          "title": "Rich text: marks and blocks"
+        },
+        {
+          "id": "marksStack",
+          "title": "Overlapping marks of one kind (comments)"
+        },
+        {
+          "id": "cursors",
+          "title": "Stable cursors"
+        },
+        {
           "id": "lists",
           "title": "Ordered lists that merge"
+        },
+        {
+          "id": "move",
+          "title": "Move in lists without duplicates"
+        },
+        {
+          "id": "trees",
+          "title": "Trees that merge (move a node)"
+        },
+        {
+          "id": "undo",
+          "title": "Undo that converges (local undo)"
         },
         {
           "id": "counters",
@@ -163,6 +187,14 @@
         {
           "id": "history",
           "title": "History / time travel"
+        },
+        {
+          "id": "tags",
+          "title": "Named versions (tags)"
+        },
+        {
+          "id": "branches",
+          "title": "Branches and merge-back"
         }
       ]
     },
@@ -409,6 +441,46 @@
           "mark": "❌",
           "text": "none",
           "source": "package.json"
+        },
+        "richText": {
+          "mark": "✅",
+          "text": "`mark()`/`unmark()`/`spans()` on text fields: anchors with expand rules, newest per name; blocks are records in a movable list",
+          "source": "src/sequence.js (markAnchors, applyMark, spans); docs/guide/lists.md#rich-text"
+        },
+        "marksStack": {
+          "mark": "✅",
+          "text": "`mark(…, { many: true })` stacks every mark of a name; removable by id (comments)",
+          "source": "src/sequence.js (MANY, OFF flags); docs/guide/lists.md#rich-text"
+        },
+        "cursors": {
+          "mark": "✅",
+          "text": "`cursor(id, key, index, { side })` / `index(id, key, cursor)` — an element and a side; survives edits",
+          "source": "src/sequence.js (cursorAt, indexOfCursor); docs/guide/lists.md#cursors"
+        },
+        "move": {
+          "mark": "✅",
+          "text": "`move(id, key, from, to)`: a position register per element; a concurrent move lands once",
+          "source": "src/sequence.js (applyMove, pos registers); src/commit.js (resolveMove); docs/guide/lists.md#moving-and-assigning"
+        },
+        "trees": {
+          "mark": "✅",
+          "text": "`treeMove()`/`treeRemove()`: a tree field, moves folded in stamp order, a cycle never forms (Kleppmann 2021)",
+          "source": "src/tree.js; src/ops.js (applyTree); docs/guide/lists.md#trees"
+        },
+        "undo": {
+          "mark": "✅",
+          "text": "`@alexify/syncom/undo`: steps over the `commit` event, applied as new ops; refuse-to-overwrite; a peer sees an undo as a write",
+          "source": "src/undo.js; docs/guide/versions.md#undo-and-redo"
+        },
+        "tags": {
+          "mark": "✅",
+          "text": "`tag(name)` / `at(name)`: the whole storage as it was, copy-on-write; queries and a snapshot at the tag",
+          "source": "src/tags.js; docs/guide/versions.md#tags"
+        },
+        "branches": {
+          "mark": "✅",
+          "text": "`@alexify/syncom/branch`: fork a storage (at the present or a tag) under a new identity, merge either way as ops",
+          "source": "src/branch.js; src/outbound.js; docs/guide/versions.md#branches"
         }
       }
     },
@@ -628,6 +700,46 @@
           "mark": "⚠️",
           "text": "editor bindings official; React via `react-yjs` (third-party)",
           "source": "https://github.com/yjs/yjs README (Bindings: y-prosemirror, y-quill, y-codemirror, y-monaco; React: react-yjs, SyncedStore)"
+        },
+        "richText": {
+          "mark": "✅",
+          "text": "`Y.Text` formatting attributes, `Y.XmlFragment` for block trees",
+          "source": "yjs@13.6.33 src/types/YText.js:1198 (format), src/types/YXmlFragment.js:134"
+        },
+        "marksStack": {
+          "mark": "⚠️",
+          "text": "one value per attribute name; overlapping comments need distinct names",
+          "source": "yjs@13.6.33 src/types/YText.js:1124-1198 (attributes are a map)"
+        },
+        "cursors": {
+          "mark": "✅",
+          "text": "`RelativePosition` (item id + assoc)",
+          "source": "yjs@13.6.33 src/utils/RelativePosition.js:43,163"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "`Y.Array` has insert and delete only; a move is delete + insert (duplicates under concurrency)",
+          "source": "yjs@13.6.33 src/types/YArray.js:139,181 (no move method)"
+        },
+        "trees": {
+          "mark": "⚠️",
+          "text": "`Y.XmlFragment`/`Y.XmlElement` nest; a node is moved by delete + insert",
+          "source": "yjs@13.6.33 src/types/YXmlFragment.js:134, src/types/YXmlElement.js:30"
+        },
+        "undo": {
+          "mark": "✅",
+          "text": "`UndoManager` (tracked origins, capture timeout)",
+          "source": "yjs@13.6.33 src/utils/UndoManager.js:160"
+        },
+        "tags": {
+          "mark": "⚠️",
+          "text": "`Y.snapshot()` captures a state vector + delete set; unnamed, needs `gc: false`",
+          "source": "yjs@13.6.33 src/utils/Snapshot.js:28,125"
+        },
+        "branches": {
+          "mark": "⚠️",
+          "text": "a second `Y.Doc` loaded from an update and merged back by update exchange; no fork/merge API",
+          "source": "yjs@13.6.33 src/utils/encoding.js (applyUpdate / encodeStateAsUpdate)"
         }
       }
     },
@@ -845,6 +957,46 @@
           "mark": "✅",
           "text": "`@automerge/react`, Svelte store, Solid primitives",
           "source": "npm: @automerge/react, @automerge/automerge-repo-react-hooks, @automerge/automerge-repo-svelte-store, @automerge/automerge-repo-solid-primitives (all 2.6.0-alpha.3)"
+        },
+        "richText": {
+          "mark": "✅",
+          "text": "`mark`/`unmark`/`marks`, `splitBlock` (Peritext)",
+          "source": "@automerge/automerge@3.5.0 dist/implementation.d.ts:711,792-795"
+        },
+        "marksStack": {
+          "mark": "⚠️",
+          "text": "one value per mark name; overlapping comments need distinct names",
+          "source": "@automerge/automerge@3.5.0 dist/implementation.d.ts:792 (mark(name, value) replaces by name)"
+        },
+        "cursors": {
+          "mark": "✅",
+          "text": "`getCursor`/`getCursorPosition`",
+          "source": "@automerge/automerge@3.5.0 dist/implementation.d.ts:781,791"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "lists have `insertAt`/`deleteAt` only",
+          "source": "@automerge/automerge@3.5.0 dist/implementation.d.ts:55-62 (no move)"
+        },
+        "trees": {
+          "mark": "❌",
+          "text": "nested maps and lists; no tree type with a move",
+          "source": "@automerge/automerge@3.5.0 dist/implementation.d.ts:55-62"
+        },
+        "undo": {
+          "mark": "❌",
+          "text": "no undo manager in the package",
+          "source": "@automerge/automerge@3.5.0 dist/implementation.d.ts (no undo export); https://automerge.org/docs/"
+        },
+        "tags": {
+          "mark": "⚠️",
+          "text": "`getHeads()` names a version; unnamed, kept by the app",
+          "source": "@automerge/automerge@3.5.0 dist/implementation.d.ts:125,492 (view(doc, heads), getHeads)"
+        },
+        "branches": {
+          "mark": "✅",
+          "text": "`clone`, `merge`, `changeAt(heads)`",
+          "source": "@automerge/automerge@3.5.0 dist/implementation.d.ts:264-300,429-439"
         }
       }
     },
@@ -1059,6 +1211,46 @@
           "mark": "✅",
           "text": "`loro-mirror-react`; editor bindings",
           "source": "npm loro-mirror-react@2.3.3 (repo loro-dev/loro-mirror); https://loro.dev/llms.txt (loro-prosemirror, loro-codemirror)"
+        },
+        "richText": {
+          "mark": "✅",
+          "text": "`LoroText.mark`/`unmark` with expand behaviour, delta export",
+          "source": "loro-crdt@1.16.4 bundler/loro_wasm.d.ts:3395,3540,3629"
+        },
+        "marksStack": {
+          "mark": "⚠️",
+          "text": "one value per key; overlapping comments need distinct keys",
+          "source": "loro-crdt@1.16.4 bundler/loro_wasm.d.ts:3540 (mark(range, key, value))"
+        },
+        "cursors": {
+          "mark": "✅",
+          "text": "`getCursor(pos, side)` / `doc.getCursorPos`",
+          "source": "loro-crdt@1.16.4 bundler/loro_wasm.d.ts:533,1814,2091"
+        },
+        "move": {
+          "mark": "✅",
+          "text": "`LoroMovableList.move(from, to)`",
+          "source": "loro-crdt@1.16.4 bundler/loro_wasm.d.ts:3248,3305"
+        },
+        "trees": {
+          "mark": "✅",
+          "text": "`LoroTree`: move with a fractional index, no cycles",
+          "source": "loro-crdt@1.16.4 bundler/loro_wasm.d.ts:1542,3688"
+        },
+        "undo": {
+          "mark": "✅",
+          "text": "`UndoManager` with remote-change transform",
+          "source": "loro-crdt@1.16.4 bundler/loro_wasm.d.ts:3964,4026,4036"
+        },
+        "tags": {
+          "mark": "⚠️",
+          "text": "`frontiers()` name a version; unnamed, kept by the app",
+          "source": "loro-crdt@1.16.4 bundler/loro_wasm.d.ts:2839 (frontiers), 2816 (checkout)"
+        },
+        "branches": {
+          "mark": "✅",
+          "text": "`fork`, `forkAt(frontiers)`, `import` to merge",
+          "source": "loro-crdt@1.16.4 bundler/loro_wasm.d.ts:2617,2759"
         }
       }
     },
@@ -1272,6 +1464,46 @@
           "mark": "✅",
           "text": "React, RN/Expo, Solid, Vue, Svelte, Effect",
           "source": "jazz@16cadcf packages/jazz-tools/package.json exports ./react, ./react-native, ./expo, ./solid, ./vue, ./svelte, ./effect"
+        },
+        "richText": {
+          "mark": "❌",
+          "text": "strings are LWW; the recipe keeps Yjs update bytes in rows",
+          "source": "jazz@16cadcf docs/content/docs/recipes/data-patterns/collaborative-text-editing.mdx:9-30"
+        },
+        "marksStack": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "jazz@16cadcf docs/content/docs/recipes/data-patterns/collaborative-text-editing.mdx:9-30"
+        },
+        "cursors": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "jazz@16cadcf docs/content/docs/recipes/data-patterns/collaborative-text-editing.mdx:9-30"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "rows ordered by a column (LWW); no sequence CRDT",
+          "source": "jazz@16cadcf packages/jazz-tools/src/dsl.ts:470-481"
+        },
+        "trees": {
+          "mark": "❌",
+          "text": "rows with a parent column; no tree merge",
+          "source": "jazz@16cadcf crates/jazz/SPEC/4_history_merging.md:17 (LWW per column)"
+        },
+        "undo": {
+          "mark": "❌",
+          "text": "no undo API",
+          "source": "jazz@16cadcf docs/content/docs (no undo page); crates/jazz/SPEC/E_glossary.md"
+        },
+        "tags": {
+          "mark": "❌",
+          "text": "`$history` rows per record; no named version of the database",
+          "source": "jazz@16cadcf docs/content/docs/reading/history.mdx:6-20"
+        },
+        "branches": {
+          "mark": "⚠️",
+          "text": "`branchBy` columns: the app owns branch names and merge; head-over-base views",
+          "source": "jazz@16cadcf docs/content/docs/concepts/branches.mdx:7-48"
         }
       }
     },
@@ -1494,6 +1726,46 @@
           "mark": "✅",
           "text": "`rxdb/plugins/react`; Vue, Angular, Preact signals",
           "source": "rxdb@17.6.0 package.json:381-404 exports; src/plugins/react/hooks/"
+        },
+        "richText": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "rxdb@17.6.0 src (no Yjs/Automerge or text CRDT)"
+        },
+        "marksStack": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "rxdb@17.6.0 src (no Yjs/Automerge or text CRDT)"
+        },
+        "cursors": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "rxdb@17.6.0 src (no Yjs/Automerge or text CRDT)"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "the `crdt` plugin replays `$push`; no move",
+          "source": "rxdb@17.6.0 src/plugins/crdt/index.ts:133-168,243-280"
+        },
+        "trees": {
+          "mark": "❌",
+          "text": "no tree CRDT",
+          "source": "rxdb@17.6.0 src (no Yjs/Automerge or text CRDT)"
+        },
+        "undo": {
+          "mark": "❌",
+          "text": "no undo API",
+          "source": "rxdb@17.6.0 src/plugins (no undo, tag or branch plugin); https://rxdb.info/transactions-conflicts-revisions.html"
+        },
+        "tags": {
+          "mark": "❌",
+          "text": "no named versions",
+          "source": "rxdb@17.6.0 src/plugins (no undo, tag or branch plugin); https://rxdb.info/transactions-conflicts-revisions.html"
+        },
+        "branches": {
+          "mark": "❌",
+          "text": "no fork/merge API",
+          "source": "rxdb@17.6.0 src/plugins (no undo, tag or branch plugin); https://rxdb.info/transactions-conflicts-revisions.html"
         }
       }
     },
@@ -1711,6 +1983,46 @@
           "mark": "⚠️",
           "text": "third-party `use-pouchdb`",
           "source": "pnpm view use-pouchdb (2.0.3, github.com/Terreii)"
+        },
+        "richText": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://pouchdb.com/api.html (no sequence or text type)"
+        },
+        "marksStack": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://pouchdb.com/api.html (no sequence or text type)"
+        },
+        "cursors": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://pouchdb.com/api.html (no sequence or text type)"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "no sequence CRDT",
+          "source": "https://pouchdb.com/api.html (no sequence or text type)"
+        },
+        "trees": {
+          "mark": "❌",
+          "text": "no tree CRDT",
+          "source": "https://pouchdb.com/api.html (no sequence or text type)"
+        },
+        "undo": {
+          "mark": "❌",
+          "text": "no undo API",
+          "source": "https://pouchdb.com/api.html (revisions per document; no named versions)"
+        },
+        "tags": {
+          "mark": "❌",
+          "text": "no named versions",
+          "source": "https://pouchdb.com/api.html (revisions per document; no named versions)"
+        },
+        "branches": {
+          "mark": "⚠️",
+          "text": "replicate to a second database and back; conflicts become revisions to resolve",
+          "source": "https://pouchdb.com/api.html#replication; https://pouchdb.com/guides/conflicts.html"
         }
       }
     },
@@ -1927,6 +2239,46 @@
           "mark": "✅",
           "text": "`ui-react`, `ui-solid`, `ui-svelte`",
           "source": "tinybase@10.0.1 ui-react/, ui-solid/, ui-svelte/"
+        },
+        "richText": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "tinybase@10.0.1 @types/store/index.d.ts:581 (cells are plain values)"
+        },
+        "marksStack": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "tinybase@10.0.1 @types/store/index.d.ts:581 (cells are plain values)"
+        },
+        "cursors": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "tinybase@10.0.1 @types/store/index.d.ts:581 (cells are plain values)"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "no sequence CRDT",
+          "source": "tinybase@10.0.1 @types/store/index.d.ts:581 (cells are plain values)"
+        },
+        "trees": {
+          "mark": "❌",
+          "text": "no tree CRDT",
+          "source": "tinybase@10.0.1 @types/store/index.d.ts:581 (cells are plain values)"
+        },
+        "undo": {
+          "mark": "✅",
+          "text": "`checkpoints`: undo/redo over the store, labels per checkpoint",
+          "source": "tinybase@10.0.1 @types/checkpoints/index.d.ts:115-119"
+        },
+        "tags": {
+          "mark": "⚠️",
+          "text": "named checkpoints, in memory",
+          "source": "tinybase@10.0.1 @types/checkpoints/index.d.ts:115-119 (addCheckpoint(label))"
+        },
+        "branches": {
+          "mark": "⚠️",
+          "text": "two `MergeableStore`s merge; no fork-from-point API",
+          "source": "tinybase@10.0.1 @types/mergeable-store/index.d.ts:264-267"
         }
       }
     },
@@ -2145,6 +2497,46 @@
           "mark": "✅",
           "text": "`dexie-react-hooks`; `liveQuery` observables",
           "source": "pnpm view dexie-react-hooks (4.4.0); dexie@4.4.6 dist/dexie.d.ts:1214"
+        },
+        "richText": {
+          "mark": "✅",
+          "text": "`Y.Text` in `Y.Doc` properties (Yjs through y-dexie)",
+          "source": "dexie-cloud-addon@4.4.16 package.json dependencies (yjs, y-dexie); https://dexie.org/docs/Y.js/Y.js"
+        },
+        "marksStack": {
+          "mark": "⚠️",
+          "text": "Yjs attributes: one value per name",
+          "source": "dexie-cloud-addon@4.4.16 (yjs); yjs@13.6.33 src/types/YText.js:1124-1198"
+        },
+        "cursors": {
+          "mark": "✅",
+          "text": "Yjs `RelativePosition` on the `Y.Doc`",
+          "source": "dexie-cloud-addon@4.4.16 (yjs); yjs@13.6.33 src/utils/RelativePosition.js:43"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "`Y.Array` has no move; rows are LWW",
+          "source": "dexie@4.4.6 dist/dexie.mjs:1363-1390 (PropModification.execute); yjs@13.6.33 src/types/YArray.js:139,181"
+        },
+        "trees": {
+          "mark": "⚠️",
+          "text": "`Y.XmlFragment` in a `Y.Doc` property; rows have no tree merge",
+          "source": "dexie-cloud-addon@4.4.16 (yjs); yjs@13.6.33 src/types/YXmlFragment.js:134"
+        },
+        "undo": {
+          "mark": "⚠️",
+          "text": "Yjs `UndoManager` on `Y.Doc` properties only; rows have no undo",
+          "source": "yjs@13.6.33 src/utils/UndoManager.js:160; dexie-cloud-addon@4.4.16 dist/modern/DexieCloudAPI.d.ts (no undo)"
+        },
+        "tags": {
+          "mark": "❌",
+          "text": "no named versions",
+          "source": "dexie-cloud-addon@4.4.16 dist/modern/DexieCloudAPI.d.ts:49+"
+        },
+        "branches": {
+          "mark": "❌",
+          "text": "no fork/merge API",
+          "source": "dexie-cloud-addon@4.4.16 dist/modern/DexieCloudAPI.d.ts:49+"
         }
       }
     },
@@ -2360,6 +2752,46 @@
           "mark": "✅",
           "text": "`use-fireproof` React hooks",
           "source": "pnpm view use-fireproof; @fireproof/use-fireproof@0.24.19 react/"
+        },
+        "richText": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "@fireproof/core-types-base@0.24.19 types.d.ts (no sequence or text type)"
+        },
+        "marksStack": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "@fireproof/core-types-base@0.24.19 types.d.ts (no sequence or text type)"
+        },
+        "cursors": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "@fireproof/core-types-base@0.24.19 types.d.ts (no sequence or text type)"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "no sequence CRDT",
+          "source": "@fireproof/core-types-base@0.24.19 types.d.ts (no sequence or text type)"
+        },
+        "trees": {
+          "mark": "❌",
+          "text": "no tree CRDT",
+          "source": "@fireproof/core-types-base@0.24.19 types.d.ts (no sequence or text type)"
+        },
+        "undo": {
+          "mark": "❌",
+          "text": "no undo API",
+          "source": "@fireproof/core-types-base@0.24.19 types.d.ts (changes(since); no snapshot, undo or fork API)"
+        },
+        "tags": {
+          "mark": "⚠️",
+          "text": "clock heads (CIDs) name a state; unnamed",
+          "source": "@fireproof/core-types-base@0.24.19 types.d.ts:438 (changes(since: ClockHead))"
+        },
+        "branches": {
+          "mark": "❌",
+          "text": "no fork/merge API",
+          "source": "@fireproof/core-types-base@0.24.19 types.d.ts (changes(since); no snapshot, undo or fork API)"
         }
       }
     },
@@ -2578,6 +3010,46 @@
           "mark": "❌",
           "text": "none official",
           "source": "https://gun.eco/docs; npm gun-react is third-party"
+        },
+        "richText": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "gun@0.2020.1241 src/, lib/ (no sequence CRDT)"
+        },
+        "marksStack": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "gun@0.2020.1241 src/, lib/ (no sequence CRDT)"
+        },
+        "cursors": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "gun@0.2020.1241 src/, lib/ (no sequence CRDT)"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "no sequence CRDT",
+          "source": "gun@0.2020.1241 src/, lib/ (no sequence CRDT)"
+        },
+        "trees": {
+          "mark": "❌",
+          "text": "no tree CRDT",
+          "source": "gun@0.2020.1241 src/, lib/ (no sequence CRDT)"
+        },
+        "undo": {
+          "mark": "❌",
+          "text": "no undo API",
+          "source": "gun@0.2020.1241 src/root.js:119-150 (older states dropped)"
+        },
+        "tags": {
+          "mark": "❌",
+          "text": "no named versions",
+          "source": "gun@0.2020.1241 src/root.js:119-150 (older states dropped)"
+        },
+        "branches": {
+          "mark": "❌",
+          "text": "no fork/merge API",
+          "source": "gun@0.2020.1241 src/root.js:119-150 (older states dropped)"
         }
       }
     },
@@ -2794,6 +3266,46 @@
           "mark": "❌",
           "text": "none",
           "source": "https://github.com/orbitdb/orbitdb (no framework packages)"
+        },
+        "richText": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "@orbitdb/core@4.0.0 src/databases/index.js (documents, events, keyvalue only)"
+        },
+        "marksStack": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "@orbitdb/core@4.0.0 src/databases/index.js (documents, events, keyvalue only)"
+        },
+        "cursors": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "@orbitdb/core@4.0.0 src/databases/index.js (documents, events, keyvalue only)"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "no sequence CRDT",
+          "source": "@orbitdb/core@4.0.0 src/databases/index.js (documents, events, keyvalue only)"
+        },
+        "trees": {
+          "mark": "❌",
+          "text": "no tree CRDT",
+          "source": "@orbitdb/core@4.0.0 src/databases/index.js (documents, events, keyvalue only)"
+        },
+        "undo": {
+          "mark": "❌",
+          "text": "no undo API",
+          "source": "@orbitdb/core@4.0.0 src/oplog/log.js (append-only log; no checkout, undo or fork API)"
+        },
+        "tags": {
+          "mark": "⚠️",
+          "text": "a log entry hash names a position (`log.iterator({ lt })`); unnamed",
+          "source": "@orbitdb/core@4.0.0 src/oplog/log.js:414"
+        },
+        "branches": {
+          "mark": "❌",
+          "text": "no fork/merge API",
+          "source": "@orbitdb/core@4.0.0 src/oplog/log.js (append-only log; no checkout, undo or fork API)"
         }
       }
     },
@@ -3013,6 +3525,46 @@
           "mark": "✅",
           "text": "`@evolu/react`, `@evolu/vue`, `@evolu/svelte`",
           "source": "npm @evolu/react 11.2.1, @evolu/vue 2.1.1, @evolu/svelte 3.0.4"
+        },
+        "richText": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "@evolu/common@8.23.2 src/local-first/ (column LWW only)"
+        },
+        "marksStack": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "@evolu/common@8.23.2 src/local-first/ (column LWW only)"
+        },
+        "cursors": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "@evolu/common@8.23.2 src/local-first/ (column LWW only)"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "no sequence CRDT",
+          "source": "@evolu/common@8.23.2 src/local-first/ (column LWW only)"
+        },
+        "trees": {
+          "mark": "❌",
+          "text": "no tree CRDT",
+          "source": "@evolu/common@8.23.2 src/local-first/ (column LWW only)"
+        },
+        "undo": {
+          "mark": "❌",
+          "text": "no undo API",
+          "source": "@evolu/common@8.23.2 src/local-first/Db.ts:748-775 (evolu_history is a table to read, not to restore from)"
+        },
+        "tags": {
+          "mark": "❌",
+          "text": "`evolu_history` is a table to read, not a version to stand at",
+          "source": "@evolu/common@8.23.2 src/local-first/Db.ts:748-775"
+        },
+        "branches": {
+          "mark": "❌",
+          "text": "no fork/merge API",
+          "source": "@evolu/common@8.23.2 src/local-first/Db.ts:748-775 (evolu_history is a table to read, not to restore from)"
         }
       }
     },
@@ -3228,6 +3780,46 @@
           "text": "`@livestore/react`, `solid`, `svelte`",
           "source": "npm @livestore/react|solid|svelte 0.5.0; https://docs.livestore.dev/framework-integrations/vue-integration/",
           "detail": "Vue goes through the community `vue-livestore` package."
+        },
+        "richText": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://docs.livestore.dev/patterns/rich-text-editing/ (pair with Yjs, Automerge or Loro)"
+        },
+        "marksStack": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://docs.livestore.dev/patterns/rich-text-editing/ (pair with Yjs, Automerge or Loro)"
+        },
+        "cursors": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://docs.livestore.dev/patterns/rich-text-editing/ (pair with Yjs, Automerge or Loro)"
+        },
+        "move": {
+          "mark": "⚠️",
+          "text": "fractional indexing pattern (Rocicorp package)",
+          "source": "https://docs.livestore.dev/patterns/list-ordering/"
+        },
+        "trees": {
+          "mark": "❌",
+          "text": "no tree CRDT",
+          "source": "https://docs.livestore.dev/patterns/rich-text-editing/ (pair with Yjs, Automerge or Loro)"
+        },
+        "undo": {
+          "mark": "❌",
+          "text": "no undo API",
+          "source": "https://docs.livestore.dev/building-with-livestore/state/materializers/ (an eventlog; no undo, tag or branch API)"
+        },
+        "tags": {
+          "mark": "❌",
+          "text": "no named versions",
+          "source": "https://docs.livestore.dev/building-with-livestore/state/materializers/ (an eventlog; no undo, tag or branch API)"
+        },
+        "branches": {
+          "mark": "❌",
+          "text": "no fork/merge API",
+          "source": "https://docs.livestore.dev/building-with-livestore/state/materializers/ (an eventlog; no undo, tag or branch API)"
         }
       }
     },
@@ -3455,6 +4047,46 @@
           "mark": "✅",
           "text": "React `useShape` (`@electric-sql/react`)",
           "source": "npm @electric-sql/react 1.0.57; website/docs/sync/integrations/react.md:60-200"
+        },
+        "richText": {
+          "mark": "⚠️",
+          "text": "Yjs through `@electric-sql/y-electric`",
+          "source": "packages/y-electric/README.md (Handling Writes); npm @electric-sql/y-electric 0.1.54 (deps yjs)"
+        },
+        "marksStack": {
+          "mark": "⚠️",
+          "text": "Yjs attributes through y-electric: one value per name",
+          "source": "packages/y-electric/README.md; yjs@13.6.33 src/types/YText.js:1124-1198"
+        },
+        "cursors": {
+          "mark": "⚠️",
+          "text": "Yjs `RelativePosition` through y-electric",
+          "source": "packages/y-electric/README.md; yjs@13.6.33 src/utils/RelativePosition.js:43"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "columns replaced whole; `Y.Array` has no move",
+          "source": "@electric-sql/client src/types.ts:5-14; yjs@13.6.33 src/types/YArray.js:139,181"
+        },
+        "trees": {
+          "mark": "⚠️",
+          "text": "`Y.XmlFragment` through y-electric only",
+          "source": "packages/y-electric/README.md; yjs@13.6.33 src/types/YXmlFragment.js:134"
+        },
+        "undo": {
+          "mark": "⚠️",
+          "text": "Yjs `UndoManager` on a y-electric doc only",
+          "source": "packages/y-electric/README.md; yjs@13.6.33 src/utils/UndoManager.js:160"
+        },
+        "tags": {
+          "mark": "❌",
+          "text": "no named versions; shapes of the present",
+          "source": "website/docs/sync/guides/writes.md (no write-path sync); @electric-sql/client@1.5.28 src/client.ts (shapes of the present)"
+        },
+        "branches": {
+          "mark": "❌",
+          "text": "no fork/merge API",
+          "source": "website/docs/sync/guides/writes.md (no write-path sync); @electric-sql/client@1.5.28 src/client.ts (shapes of the present)"
         }
       }
     },
@@ -3687,6 +4319,46 @@
           "text": "`@powersync/react`, `@powersync/vue`, TanStack",
           "source": "x-powersync-react-2.1.0/package/src/index.ts (useQuery, useSuspenseQuery, useSyncStream, useStatus); npm @powersync/vue 0.7.0, @powersync/tanstack-react-query 0.3.6; x-tanstack-powersync-db-collection-0.2.12/package/package.json",
           "detail": "TanStack integrations are `@powersync/tanstack-react-query` and `@tanstack/powersync-db-collection` (MIT, published from the TanStack repo)."
+        },
+        "richText": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://docs.powersync.com/handling-writes/handling-update-conflicts.md (no built-in CRDT)"
+        },
+        "marksStack": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://docs.powersync.com/handling-writes/handling-update-conflicts.md (no built-in CRDT)"
+        },
+        "cursors": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://docs.powersync.com/handling-writes/handling-update-conflicts.md (no built-in CRDT)"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "no sequence CRDT",
+          "source": "https://docs.powersync.com/handling-writes/handling-update-conflicts.md (no built-in CRDT)"
+        },
+        "trees": {
+          "mark": "❌",
+          "text": "no tree CRDT",
+          "source": "https://docs.powersync.com/handling-writes/handling-update-conflicts.md (no built-in CRDT)"
+        },
+        "undo": {
+          "mark": "❌",
+          "text": "no undo API",
+          "source": "https://docs.powersync.com/architecture/consistency.md (client state matches a checkpoint; no history API)"
+        },
+        "tags": {
+          "mark": "❌",
+          "text": "no named versions",
+          "source": "https://docs.powersync.com/architecture/consistency.md (client state matches a checkpoint; no history API)"
+        },
+        "branches": {
+          "mark": "❌",
+          "text": "no fork/merge API",
+          "source": "https://docs.powersync.com/architecture/consistency.md (client state matches a checkpoint; no history API)"
         }
       }
     },
@@ -3921,6 +4593,46 @@
           "text": "`@rocicorp/zero/react`, `/solid`; Vue/Svelte community",
           "source": "package.json exports ./react, ./solid; out/zero-react/src/mod.d.ts; out/zero-solid/src/mod.d.ts; https://zero.rocicorp.dev/docs/community (community.mdx:12-13)",
           "detail": "zero-vue and zero-svelte are third-party packages listed on the Community page."
+        },
+        "richText": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://zero.rocicorp.dev/docs/schema column types (schema.mdx:129); no text/sequence type"
+        },
+        "marksStack": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://zero.rocicorp.dev/docs/schema column types (schema.mdx:129); no text/sequence type"
+        },
+        "cursors": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://zero.rocicorp.dev/docs/schema column types (schema.mdx:129); no text/sequence type"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "no sequence CRDT",
+          "source": "https://zero.rocicorp.dev/docs/schema column types (schema.mdx:129); no text/sequence type"
+        },
+        "trees": {
+          "mark": "❌",
+          "text": "no tree CRDT",
+          "source": "https://zero.rocicorp.dev/docs/schema column types (schema.mdx:129); no text/sequence type"
+        },
+        "undo": {
+          "mark": "❌",
+          "text": "no undo API",
+          "source": "docs index https://zero.rocicorp.dev/llms.txt (no history, undo or branch page)"
+        },
+        "tags": {
+          "mark": "❌",
+          "text": "no named versions",
+          "source": "docs index https://zero.rocicorp.dev/llms.txt (no history, undo or branch page)"
+        },
+        "branches": {
+          "mark": "❌",
+          "text": "no fork/merge API",
+          "source": "docs index https://zero.rocicorp.dev/llms.txt (no history, undo or branch page)"
         }
       }
     },
@@ -4150,6 +4862,46 @@
           "text": "`@triplit/react`, react-native, svelte, vue, angular, solid",
           "source": "npm view @triplit/react 1.0.51, react-native 1.0.53, svelte 1.0.50, vue 1.0.50, angular 1.0.50, solid 1.0.34, tanstack 3.0.51; docs frameworks/*.mdx",
           "detail": "Also `@triplit/tanstack` (TanStack Router). All were last published 2025-07-31."
+        },
+        "richText": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://github.com/aspen-cloud/triplit/blob/main/packages/docs/src/pages/schemas/types.mdx (String, Number, Boolean, Date, Set, Record, Json only)"
+        },
+        "marksStack": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://github.com/aspen-cloud/triplit/blob/main/packages/docs/src/pages/schemas/types.mdx (String, Number, Boolean, Date, Set, Record, Json only)"
+        },
+        "cursors": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://github.com/aspen-cloud/triplit/blob/main/packages/docs/src/pages/schemas/types.mdx (String, Number, Boolean, Date, Set, Record, Json only)"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "no sequence CRDT",
+          "source": "https://github.com/aspen-cloud/triplit/blob/main/packages/docs/src/pages/schemas/types.mdx (String, Number, Boolean, Date, Set, Record, Json only)"
+        },
+        "trees": {
+          "mark": "❌",
+          "text": "no tree CRDT",
+          "source": "https://github.com/aspen-cloud/triplit/blob/main/packages/docs/src/pages/schemas/types.mdx (String, Number, Boolean, Date, Set, Record, Json only)"
+        },
+        "undo": {
+          "mark": "❌",
+          "text": "no undo API",
+          "source": "@triplit/db@1.1.10 src/entity-data-store.ts (latest state only)"
+        },
+        "tags": {
+          "mark": "❌",
+          "text": "no named versions",
+          "source": "@triplit/db@1.1.10 src/entity-data-store.ts (latest state only)"
+        },
+        "branches": {
+          "mark": "❌",
+          "text": "no fork/merge API",
+          "source": "@triplit/db@1.1.10 src/entity-data-store.ts (latest state only)"
         }
       }
     },
@@ -4373,6 +5125,46 @@
           "mark": "✅",
           "text": "React, React Native, Svelte, Vue, SolidJS packages",
           "source": "npm @instantdb/react, react-native, svelte, vue, solidjs 1.0.67 (repository client/packages/*); https://instantdb.com/docs/start-vue.md , start-svelte.md , start-solidjs.md"
+        },
+        "richText": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://instantdb.com/docs/instaml.md (actions: create/update/merge/delete/link/unlink); core src/instatx.ts:12-19"
+        },
+        "marksStack": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://instantdb.com/docs/instaml.md (actions: create/update/merge/delete/link/unlink); core src/instatx.ts:12-19"
+        },
+        "cursors": {
+          "mark": "❌",
+          "text": "no text CRDT",
+          "source": "https://instantdb.com/docs/instaml.md (actions: create/update/merge/delete/link/unlink); core src/instatx.ts:12-19"
+        },
+        "move": {
+          "mark": "❌",
+          "text": "no sequence CRDT",
+          "source": "https://instantdb.com/docs/instaml.md (actions: create/update/merge/delete/link/unlink); core src/instatx.ts:12-19"
+        },
+        "trees": {
+          "mark": "❌",
+          "text": "no tree CRDT",
+          "source": "https://instantdb.com/docs/instaml.md (actions: create/update/merge/delete/link/unlink); core src/instatx.ts:12-19"
+        },
+        "undo": {
+          "mark": "❌",
+          "text": "no undo API",
+          "source": "https://instantdb.com/docs/instaql.md (no as-of/version query); https://instantdb.com/docs (no undo or branch page)"
+        },
+        "tags": {
+          "mark": "❌",
+          "text": "no named versions",
+          "source": "https://instantdb.com/docs/instaql.md (no as-of/version query); https://instantdb.com/docs (no undo or branch page)"
+        },
+        "branches": {
+          "mark": "❌",
+          "text": "no fork/merge API",
+          "source": "https://instantdb.com/docs/instaql.md (no as-of/version query); https://instantdb.com/docs (no undo or branch page)"
         }
       }
     }

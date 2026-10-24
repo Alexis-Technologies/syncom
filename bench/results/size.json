@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-23T19:12:12.497Z",
+  "generatedAt": "2026-10-24T11:31:50.316Z",
   "esbuild": "0.28.2",
   "libraries": [
     {
@@ -9,8 +9,8 @@
       "packages": [
         "@alexify/syncom@0.0.1"
       ],
-      "min": 127030,
-      "gzip": 43609,
+      "min": 183902,
+      "gzip": 62239,
       "note": "storage, schema, queries, the op log and the sync protocol are one entry"
     },
     {

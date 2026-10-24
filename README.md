@@ -148,6 +148,7 @@ nodes converges.
 | **Full-text search** | `select({ $text: 'quick fox' })`: fuzzy, typo-tolerant, TF-IDF ranked trigram search over an entity's `search` fields, best first, narrowed by any equality — the index is `@alexify/syncom/search` (under 1 KB), injected at `open({ search })`. See [Full-text search](https://syncomjs.vercel.app/guide/query#full-text-search) |
 | **Backends** | node:fs, OPFS, IndexedDB (`@alexify/syncom/idb`) or memory — five functions injected at `open({ fsi })`; `durable: true` for fsync, one instance per directory. See [Backends](https://syncomjs.vercel.app/guide/backends) |
 | **Replication** | Every write is an op in a persisted log; peers exchange ops over an injected link, resume from where they stopped, and bootstrap from a streamed snapshot when they cannot; scopes for partial replication |
+| **Versions** | `history(id)` and `get(id, { at })` by event id, stamp or vector; tags of the whole storage (`tag()`, `at(name)`); `diff()`, `restore()`, `applyPatches()`; an undo stack (`@alexify/syncom/undo`) and branches that merge back (`@alexify/syncom/branch`). See [Versions and history](https://syncomjs.vercel.app/guide/versions) |
 | **Convergence** | Last-writer-wins registers, per-origin counters, observed-remove sets, lists and text that merge by position (Fugue — each writer's run whole), trees whose concurrent moves never form a cycle, tombstones with revival — any order, any number of times, same result. See [Lists, text and trees](https://syncomjs.vercel.app/guide/lists) |
 | **Transport** | `@alexify/syncom/wrpc` adapts a `WrpcClient` — over a WebSocket, or a WebRTC `PeerLink`'s `remote` from `@alexify/wrpc/webrtc`; `storage.sync.unit()` is the router unit a wrpc server, or a browser's `PeerHost`, mounts. Reconnects, resumable subscriptions, binary streams and rooms come from wrpc. See [WebRTC](https://syncomjs.vercel.app/guide/webrtc) |
 | **Integrity** | Every write appends a hash-linked block (`chain: false` turns it off for a hub); reads re-verify the record against the block that committed it and throw on a mismatch; `repair(id)` rebuilds a record from the log |
@@ -166,9 +167,10 @@ syncom sits where the CRDT libraries (Yjs, Automerge, Loro), the local-first dat
 (Jazz, RxDB, PouchDB, TinyBase, Dexie Cloud, Fireproof), the peer-to-peer and event-sourced stores
 (GUN, OrbitDB, Evolu, LiveStore) and the sync services (ElectricSQL, PowerSync, Zero, Triplit,
 InstantDB) meet. The [comparison](https://syncomjs.vercel.app/guide/comparison) puts all
-nineteen in one table of forty features, each cell decided from the published source. In short:
-syncom is a database that merges field by field — and whose list and text fields merge by
-position, with marks and cursors, like a text CRDT's. It syncs with no service to run, its hosts
+nineteen in one table of forty-eight features, each cell decided from the published source. In short:
+syncom is a database that merges field by field — and whose list, text and tree fields merge by
+position, with marks, cursors and moves, like a text CRDT's — with tags, history, undo and
+branches on top. It syncs with no service to run, its hosts
 validate and scope what peers send, and its log is verifiable and purgeable. It has no editor
 bindings and no UI bindings yet, and it is a pre-release, not on npm yet.
 RxDB, the closest of them, is compared [feature by feature](https://syncomjs.vercel.app/guide/vs-rxdb)
@@ -270,7 +272,7 @@ _Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 roun
 | TinyBase<br><sub>tinybase@10.0.1</sub> | MergeableStore + IndexedDB persister + custom synchronizer | 56.4 KB | 23.8 KB |  |
 | Yjs<br><sub>yjs@13.6.33, y-indexeddb@9.0.12, y-protocols@1.0.7</sub> | yjs + y-indexeddb + y-protocols/sync | 80.2 KB | 24.5 KB |  |
 | PouchDB<br><sub>pouchdb-browser@9.0.0</sub> | pouchdb-browser | 117.8 KB | 40.4 KB | pouchdb-browser carries its HTTP adapter (the CouchDB client) with it |
-| **syncom**<br><sub>@alexify/syncom@0.0.1</sub> | open() over OPFS + the wrpc link adapter | 124.1 KB | 42.6 KB | storage, schema, queries, the op log and the sync protocol are one entry |
+| **syncom**<br><sub>@alexify/syncom@0.0.1</sub> | open() over OPFS + the wrpc link adapter | 179.6 KB | 60.8 KB | storage, schema, queries, the op log and the sync protocol are one entry |
 | RxDB<br><sub>rxdb@17.6.0, dexie@4.4.6, rxjs@7.8.2</sub> | rxdb + Dexie storage + replication | 282.3 KB | 90.1 KB |  |
 | Fireproof<br><sub>@fireproof/core@0.24.19</sub> | @fireproof/core | 784.2 KB | 204.0 KB |  |
 | OrbitDB<br><sub>@orbitdb/core@4.0.0, helia@6.1.4, libp2p@3.5.1, @libp2p/gossipsub@15.0.23, blockstore-idb@4.0.1</sub> | @orbitdb/core + helia + libp2p, IndexedDB blockstore | 1185.6 KB | 353.7 KB | createHelia brings Helia's default libp2p configuration with it |
