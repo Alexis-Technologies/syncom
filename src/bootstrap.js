@@ -109,7 +109,7 @@ const mergeOne = async (batch, record) => {
     throw new TypeError('beforeWrite may only replace data for write and set');
   }
   const scope = core.scopeOf(id, data ?? current?.data ?? {});
-  core.observe(latestClock(current?.meta));
+  core.observe(latestClock(current?.meta, true));
   core.observe(latestClock(meta));
   const op = { origin: core.nodeId, seq: 0, ts: core.clock.now(), type: 'merge', id };
   if (scope !== GLOBAL_SCOPE) op.scope = scope;

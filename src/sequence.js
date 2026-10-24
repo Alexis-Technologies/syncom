@@ -354,6 +354,31 @@ const pendingCount = (seq, index) => {
 const byOrigin = (a, b) => (a.origin < b.origin ? -1 : a.origin > b.origin ? 1 : a.ts - b.ts);
 const CONT = Symbol('continuation');
 
+// What a run's tuple parses to, kept by the tuple: an unchanged run shares
+// its tuple between a block and the next (cloneSeq copies the map, not the
+// tuples), so a rebuild of the index parses only what changed. A tuple met
+// under another key is parsed again, not trusted.
+const PARSED = new WeakMap();
+const parsedRun = (key, tuple) => {
+  const hit = PARSED.get(tuple);
+  if (hit !== undefined && hit.key === key) return hit;
+  const { ts, origin } = parseRun(key);
+  const [at, content, elem] = tuple;
+  const parsed = {
+    key,
+    ts,
+    origin,
+    at,
+    anchor: parseAnchor(at),
+    content,
+    items: rleExpand(content),
+    len: rleLength(content),
+    elem: elem ?? null,
+  };
+  PARSED.set(tuple, parsed);
+  return parsed;
+};
+
 // Reads the block into an index: the runs with their children by element,
 // the walk in order (every element, tombstones too) and the visible
 // elements, with each element's walk ordinal and visible position.
@@ -361,30 +386,33 @@ const buildIndex = (seq, base = null) => {
   const keys = Object.keys(seq.runs);
   const runs = [];
   const byKey = new Map();
+  let total = 0;
   for (const key of keys) {
-    const parsed = parseRun(key);
-    const [at, content, elem] = seq.runs[key];
-    const len = rleLength(content);
-    const items = rleExpand(content);
+    const p = parsedRun(key, seq.runs[key]);
     const r = {
       key,
-      ts: parsed.ts,
-      origin: parsed.origin,
-      at,
-      content,
-      items,
-      len,
-      elem: elem ?? null,
+      i: runs.length,
+      ts: p.ts,
+      origin: p.origin,
+      at: p.at,
+      anchor: p.anchor,
+      content: p.content,
+      items: p.items,
+      len: p.len,
+      elem: p.elem,
+      // Where the run's slots sit in the index's per-slot arrays.
+      start: total,
       L: null,
       R: null,
     };
+    total += p.len;
     runs.push(r);
     byKey.set(key, r);
   }
   const root = [];
   const pending = new Set();
   for (const r of runs) {
-    const anchor = parseAnchor(r.at);
+    const { anchor } = r;
     if (anchor.elem === null) {
       root.push(r);
       continue;
@@ -410,18 +438,15 @@ const buildIndex = (seq, base = null) => {
     if (r.L) for (const list of r.L.values()) list.sort(byOrigin);
     if (r.R) for (const list of r.R.values()) list.sort(byOrigin);
   }
-  // The walk.
-  const total = runs.reduce((n, r) => n + r.len, 0);
+  // The walk. Per slot (a run's start plus the offset): its ordinal, the
+  // visible index at it, whether it shows.
   const ordRun = new Int32Array(total);
   const ordOff = new Int32Array(total);
   const visRun = new Int32Array(total);
   const visOff = new Int32Array(total);
-  for (const r of runs) {
-    r.ordAt = new Int32Array(r.len).fill(-1);
-    r.visAt = new Int32Array(r.len).fill(-1);
-    r.shown = new Uint8Array(r.len);
-  }
-  const runIndex = new Map(runs.map((r, i) => [r.key, i]));
+  const ordAt = new Int32Array(total).fill(-1);
+  const visAt = new Int32Array(total).fill(-1);
+  const shown = new Uint8Array(total);
   let n = 0;
   let v = 0;
   const movable = seq.k === 'l';
@@ -438,16 +463,16 @@ const buildIndex = (seq, base = null) => {
     return r.elem === elem && r.key === winner[2];
   };
   const emit = (r, off) => {
-    const i = runIndex.get(r.key);
-    ordRun[n] = i;
+    const slot = r.start + off;
+    ordRun[n] = r.i;
     ordOff[n] = off;
-    r.ordAt[off] = n;
-    r.visAt[off] = v;
+    ordAt[slot] = n;
+    visAt[slot] = v;
     n++;
     if (shows(r, off)) {
-      visRun[v] = i;
+      visRun[v] = r.i;
       visOff[v] = off;
-      r.shown[off] = 1;
+      shown[slot] = 1;
       if (movable) visElem.push(r.elem ?? elemKey(r.key, off));
       v++;
     }
@@ -515,6 +540,9 @@ const buildIndex = (seq, base = null) => {
     visRun: visible,
     visOff: visibleOff,
     visElem,
+    ordAt,
+    visAt,
+    shown,
     vals: seq.vals ?? null,
     length: v,
     total: n,
@@ -831,7 +859,7 @@ const anchorOrdinal = (index, token, base) => {
   if (base !== null && compareClock([elem.ts, elem.origin], base) < 0) return 0;
   const r = index.byKey.get(elem.run);
   if (r === undefined || elem.offset >= r.len) return null;
-  return r.ordAt[elem.offset] + (side === 'L' ? 0 : 1);
+  return index.ordAt[r.start + elem.offset] + (side === 'L' ? 0 : 1);
 };
 
 // The text as runs of equal style: `[{ text, marks }]`, marks per key —
@@ -842,7 +870,7 @@ const spans = (index, seq, base = null) => {
   if (length === 0) return [];
   const styles = new Array(length);
   for (let i = 0; i < length; i++) styles[i] = null;
-  const ordOf = (i) => runs[visRun[i]].ordAt[visOff[i]];
+  const ordOf = (i) => index.ordAt[runs[visRun[i]].start + visOff[i]];
   const entries = [];
   for (const id of keysOf(seq.marks)) {
     const [from, to, key, value, flags] = seq.marks[id];
@@ -903,7 +931,8 @@ const indexOfCursor = (index, token) => {
   if (anchor === null) return null;
   const r = index.byKey.get(anchor.elem.run);
   if (r === undefined || anchor.elem.offset >= r.len) return null;
-  return r.visAt[anchor.elem.offset] + (anchor.side === 'R' ? r.shown[anchor.elem.offset] : 0);
+  const slot = r.start + anchor.elem.offset;
+  return index.visAt[slot] + (anchor.side === 'R' ? index.shown[slot] : 0);
 };
 
 // A register write, LWW by stamp: null when the held one is as new.
@@ -972,7 +1001,12 @@ const prune = (seq, base) => {
   if (base === null) return seq;
   let next = null;
   const mutable = () => (next ??= cloneSeq(seq));
-  for (const key of Object.keys(seq.runs)) if (below(key, base)) delete mutable().runs[key];
+  // A run's stamp through the tuple's parse (parsedRun): a block of
+  // thousands of runs is pruned on every op after a reset.
+  for (const key of Object.keys(seq.runs)) {
+    const { ts, origin } = parsedRun(key, seq.runs[key]);
+    if (compareClock([ts, origin], base) < 0) delete mutable().runs[key];
+  }
   for (const map of ['cuts', 'ext', 'marks']) {
     for (const key of keysOf(seq[map])) {
       if (below(key, base)) {

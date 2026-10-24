@@ -125,6 +125,16 @@ There is no released version section until then; everything below lands in it.
   of state (`joined: true`); `branchInfo()`, `drop()`. A branch is a storage
   like any other; a merge into a parent that dials peers reaches them. New
   code `BRANCH_EXISTS`. A subpath that bundles no engine.
+- **Faster lists and text.** The index a sequence field is read through
+  (the Fugue walk) is built once per change and kept on the cached entry
+  (`entry.seqIndex`, never persisted): the resolver that places an insert
+  and the fold that reads the field back share it. The build itself parses
+  a run's tuple once — an unchanged run keeps its tuple between blocks —
+  and keeps one per-slot array instead of three per run; a reset prunes
+  through the same parse; a local write observes the record's clock
+  without rebuilding its metadata. Typing into a two-thousand-character
+  text: at the start 174 → 1,100 ops/s, anywhere 320 → 2,000, at the end
+  6,400 → 9,500 (in memory, on one machine).
 - **The log knows what it dropped.** `storage.log.droppedTs` is the newest
   stamp among the ops compaction dropped, or an open could not read — `0`
   while nothing ever was — persisted in `index.json`; a record's retained

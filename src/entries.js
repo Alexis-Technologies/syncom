@@ -178,6 +178,9 @@ class EntryStore {
     await this.#fsi.write(this.#dir, `${id}.json`, JSON.stringify(stored));
     this.#held.delete(id);
     const cached = { data: entry.data, meta: entry.meta, encrypted: false, block: blockHash };
+    // The sequence indexes built while applying come along into the cache
+    // (never into the file): the next op reads the field through them.
+    if (entry.seqIndex !== undefined) cached.seqIndex = entry.seqIndex;
     this.remember(id, cached);
     this.#catalog.put(id, await this.row(id, cached));
   }
@@ -188,6 +191,7 @@ class EntryStore {
   // the next open replays the log.
   async hold(id, entry) {
     const cached = { data: entry.data, meta: entry.meta, encrypted: false, block: null };
+    if (entry.seqIndex !== undefined) cached.seqIndex = entry.seqIndex;
     this.#held.add(id);
     this.remember(id, cached);
     this.#catalog.put(id, await this.row(id, cached));

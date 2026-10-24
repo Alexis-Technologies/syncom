@@ -9,7 +9,17 @@
 // lensed readers — see Storage#open.
 
 const { encrypt, calculateHash } = require('./crypto.js');
-const { applyOp, isAlive, latestClock, observedTags, isCounter, isSet, isTree, kindsOf } = require('./ops.js');
+const {
+  applyOp,
+  isAlive,
+  latestClock,
+  observedTags,
+  isCounter,
+  isSet,
+  isTree,
+  kindsOf,
+  seqIndexOf,
+} = require('./ops.js');
 const S = require('./sequence.js');
 const T = require('./tree.js');
 const { between } = require('./order.js');
@@ -145,7 +155,7 @@ const resolveSplice = (core, id, payload, current) => {
     return { content: content ?? '', at: S.HEAD };
   }
   const marker = content ?? (held?.k === 'l' ? [] : '');
-  const idx = held === undefined ? null : S.buildIndex(held, meta.base);
+  const idx = held === undefined ? null : seqIndexOf(current, key);
   const length = idx === null ? 0 : idx.length;
   const at = index === null ? length : index;
   if (at > length || at + count > length) {
@@ -169,7 +179,7 @@ const elementAt = (core, id, key, index, current) => {
     meta && (Object.hasOwn(meta.clock, key) || isCounter(meta, key) || isSet(meta, key) || isTree(meta, key));
   if (held === undefined && other) return { idx: null, elem: '1:0:placeholder' };
   if (held !== undefined && held.k !== 'l') return { idx: null, elem: '1:0:placeholder' };
-  const idx = held === undefined ? null : S.buildIndex(held, meta.base);
+  const idx = held === undefined ? null : seqIndexOf(current, key);
   const length = idx === null ? 0 : idx.length;
   if (index >= length) {
     const message = `Index ${index} is out of range for field ${key} of record ${id} (length ${length})`;
@@ -212,7 +222,7 @@ const resolveMark = (core, id, payload, current) => {
       ? meta && (Object.hasOwn(meta.clock, key) || isCounter(meta, key) || isSet(meta, key) || isTree(meta, key))
       : held.k !== 't';
   if (other) return { start: S.HEAD, end: S.END, key: name, value };
-  const idx = held === undefined ? null : S.buildIndex(held, meta.base);
+  const idx = held === undefined ? null : seqIndexOf(current, key);
   const length = idx === null ? 0 : idx.length;
   if (start > end || end > length) {
     const message = `Range ${start}..${end} is out of range for field ${key} of record ${id} (length ${length})`;
@@ -284,7 +294,7 @@ const ownTags = (removals, origin) => {
 // knows about and is silently dropped (the log seeds the clock at open; this
 // covers what the log no longer has), numbered in its stream.
 const prepareOp = (core, type, id, payload, current, who, from) => {
-  core.observe(latestClock(current?.meta));
+  core.observe(latestClock(current?.meta, true));
   const op = { origin: core.nodeId, seq: 0, ts: core.clock.now(), type, id };
   if (from) op.from = from;
   // The writer's schema version rides on the op: what a reader on another

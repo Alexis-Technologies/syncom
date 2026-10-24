@@ -18,9 +18,9 @@ const { Record, Collection } = require('./record.js');
 const { commit, MISMATCH } = require('./commit.js');
 const { applyBatch } = require('./apply.js');
 const { snapshotPage, mergeBatch, adopt } = require('./bootstrap.js');
-const { applyOp, isAlive, isCounter, isSet, isSeq, isTree, deepEqual, kindsOf } = require('./ops.js');
+const { applyOp, isAlive, isCounter, isSet, isSeq, isTree, deepEqual, kindsOf, seqIndexOf } = require('./ops.js');
 const { diff } = require('./myers.js');
-const { buildIndex, spans, isRunKey, isAnchor, cursorAt, indexOfCursor, REVERSED } = require('./sequence.js');
+const { spans, isRunKey, isAnchor, cursorAt, indexOfCursor, REVERSED } = require('./sequence.js');
 const { Cursor } = require('./query.js');
 const { TRASH, isNodeId } = require('./tree.js');
 const { appliedHere, parseVersion, within, exactStart, fold, gone } = require('./history.js');
@@ -1506,7 +1506,7 @@ class Storage extends Emitter {
   async spans(id, key) {
     const held = await this.#sequence('spans', id, key);
     if (held === null || held.seq.k !== 't') return null;
-    return spans(buildIndex(held.seq, held.base), held.seq, held.base);
+    return spans(seqIndexOf(held.entry, key), held.seq, held.base);
   }
 
   /**
@@ -1519,14 +1519,14 @@ class Storage extends Emitter {
   async cursor(id, key, index, { side = 'before' } = {}) {
     if (side !== 'before' && side !== 'after') throw new TypeError("cursor() takes side: 'before' or 'after'");
     const held = await this.#sequence('cursor', id, key);
-    return held === null ? null : cursorAt(buildIndex(held.seq, held.base), index, side);
+    return held === null ? null : cursorAt(seqIndexOf(held.entry, key), index, side);
   }
 
   /** Where `cursor` is now in list or text field `key`; `null` once its place is gone (a reset, a field no longer a sequence). */
   async index(id, key, cursor) {
     if (typeof cursor !== 'string' || !isAnchor(cursor)) throw new TypeError('index() takes a cursor');
     const held = await this.#sequence('index', id, key);
-    return held === null ? null : indexOfCursor(buildIndex(held.seq, held.base), cursor);
+    return held === null ? null : indexOfCursor(seqIndexOf(held.entry, key), cursor);
   }
 
   // A sequence field as the record holds it — raw, no lens, no hooks — or null.
@@ -1536,7 +1536,7 @@ class Storage extends Emitter {
     const entry = await this.#entries.load(id);
     if (!entry || entry.encrypted || !isAlive(entry)) return null;
     const seq = Object.hasOwn(entry.meta.seqs ?? {}, key) ? entry.meta.seqs[key] : undefined;
-    return seq === undefined ? null : { seq, base: entry.meta.base };
+    return seq === undefined ? null : { entry, seq, base: entry.meta.base };
   }
 
   /**

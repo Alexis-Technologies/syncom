@@ -225,6 +225,19 @@ docs/                     VitePress site
   there, and hands back `null` (no op) for a move to where the node is. The
   fuzz in `tests/suites/sync-engine.js` compares the blocks and the move
   logs across nodes, not only what they read as.
+- **A sequence block is never mutated in place; its index is cached by
+  identity.** `seqIndexOf(entry, field)` in `src/ops.js` keeps `buildIndex`'s
+  result on the entry (`entry.seqIndex[field] = { seq, base, index }`, carried
+  by `cloneEntry` and into `EntryStore`'s cache, never into the file) and
+  reuses it while `meta.seqs[field]` is the SAME object and the base is the
+  same — every change goes through `cloneSeq`, so a changed block is a new
+  object. Read a sequence field through `seqIndexOf`, never through a bare
+  `buildIndex` on a path that runs per op. `parsedRun` memoizes a run tuple's
+  parse in a WeakMap keyed by the tuple (an unchanged run shares its tuple
+  between blocks; a tuple under another key is parsed again); `prune` and
+  `buildIndex` go through it. `latestClock(meta, true)` is the trusted path
+  for an entry this node holds — a peer's raw meta takes the untrusted one,
+  which normalizes first.
 - **Ops from one origin apply in seq order; seqs run per origin AND scope**
   (`origin@scope` vector keys), and ops born from a snapshot (`merge`,
   `advance`) run in their own `origin@~` stream. `applyRemote` skips

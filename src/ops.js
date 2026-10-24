@@ -114,7 +114,10 @@ const cloneEntry = (entry) => {
   };
   if (entry.meta.v !== undefined) meta.v = entry.meta.v;
   if (entry.meta.purged !== undefined) meta.purged = entry.meta.purged;
-  return { data: { ...entry.data }, meta };
+  const out = { data: { ...entry.data }, meta };
+  // The built indexes come along: an unchanged block reads through its own.
+  if (entry.seqIndex !== undefined) out.seqIndex = { ...entry.seqIndex };
+  return out;
 };
 
 const counterValue = (perOrigin) => {
@@ -135,6 +138,22 @@ const isSet = (meta, field) => {
 
 // A list or a text: the sequence engine's block under the field.
 const isSeq = (meta, field) => own(seqsOf(meta), field) !== undefined;
+
+// The index of a sequence field (src/sequence.js buildIndex), kept on the
+// entry under `seqIndex` — never persisted, never copied by value — and
+// reused while the block object and the base it was built against are the
+// ones the entry holds; a block replaced by an op is a new object.
+const seqIndexOf = (entry, field) => {
+  const seq = own(seqsOf(entry.meta), field);
+  if (seq === undefined) return null;
+  const base = entry.meta.base;
+  const cache = (entry.seqIndex ??= {});
+  const hit = own(cache, field);
+  if (hit !== undefined && hit.seq === seq && hit.base === base) return hit.index;
+  const index = S.buildIndex(seq, base);
+  cache[field] = { seq, base, index };
+  return index;
+};
 const seqKind = (meta, field) => (own(seqsOf(meta), field).k === 't' ? 'text' : 'list');
 // A tree: the move log under the field (src/tree.js).
 const isTree = (meta, field) => own(treesOf(meta), field) !== undefined;
@@ -272,9 +291,17 @@ const normalizeMeta = (meta) => {
 // observed before it stamps a write to that record, or the write sorts below
 // state the node already has and is dropped as stale. Takes raw peer-shaped
 // meta too.
-const latestClock = (meta) => {
+// The newest stamp an entry's metadata holds, over registers, the reset
+// watermark, the tombstone, the counters, the sets, the sequences and the
+// trees — what a node must have observed before it stamps a write to that
+// record, or the write sorts below state the node already has and is
+// dropped as stale. `trusted` says the meta is this module's own shape (an
+// entry this node holds); a peer's raw meta is rebuilt first.
+const latestClock = (meta, trusted = false) => {
   if (!isPlainObject(meta)) return null;
-  const { clock, base, deleted, counters, sets, seqs, trees, purged } = normalizeMeta(meta);
+  const { clock, base, deleted, counters, sets, seqs, trees, purged } = trusted
+    ? { ...meta, sets: setsOf(meta), seqs: seqsOf(meta), trees: treesOf(meta) }
+    : normalizeMeta(meta);
   let latest = maxClock(maxClock(base, deleted), purged ?? null);
   for (const field of Object.keys(seqs)) latest = maxClock(latest, [seqs[field].ts, '']);
   for (const field of Object.keys(trees)) latest = maxClock(latest, [trees[field].ts, '']);
@@ -361,7 +388,7 @@ const applyBase = (entry, delta) => {
     meta.seqs[field] = next;
     // Read again whatever was dropped: a new base can bring an orphan run
     // back to the head.
-    const value = S.render(S.buildIndex(next, meta.base));
+    const value = S.render(seqIndexOf(entry, field));
     if (!deepEqual(data[field], value)) delta[field] = value;
     data[field] = value;
   }
@@ -559,7 +586,7 @@ const settleSeq = (entry, field, held, result, delta, rejected) => {
   }
   meta.seqs[field] = seq;
   // Pending work is news to persist even when the field reads the same.
-  entry.data[field] = S.render(S.buildIndex(seq, meta.base));
+  entry.data[field] = S.render(seqIndexOf(entry, field));
   delta[field] = entry.data[field];
 };
 
@@ -913,7 +940,7 @@ const mergeEntry = (a, b) => {
       data[field] = liveElements(meta.sets[field]);
     } else if (isSeq(meta, field)) {
       delete meta.trees[field];
-      data[field] = S.render(S.buildIndex(meta.seqs[field], meta.base));
+      data[field] = S.render(seqIndexOf(entry, field));
     }
   }
   return entry;
@@ -1066,6 +1093,7 @@ module.exports = {
   isSet,
   isSeq,
   isTree,
+  seqIndexOf,
   kindOf,
   kindsOf,
   observedTags,
