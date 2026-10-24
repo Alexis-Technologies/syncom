@@ -60,12 +60,16 @@ silently never runs.
 | `afterApply(batch)` | After a peer's batch is durable, once per `applyRemote` call | Ignored | The call rejects; the batch stays and is announced |
 
 `ctx` for a write is `{ type, id, data?, key?, value?, index?, count?, content?,
+to?, start?, end?, name?, expand?, many?, off?, node?, parent?, after?, before?,
 meta?, current, encrypted, source, via, from, v, actor }`: `type` is the op
-type (`write`, `set`, `inc`, `add`, `remove`, `splice`, `delete`, `purge`,
-`merge`), `data` is the whole record for a `write` and the delta for a `set`,
-`key`/`value` belong to an `inc` (the amount), an `add` or a `remove` (the
-elements), `key`/`index`/`count`/`content` to a `splice` (the call as the
-caller made it), `current` is the
+type (`write`, `set`, `inc`, `add`, `remove`, `splice`, `assign`, `move`,
+`mark`, `tree`, `delete`, `purge`, `merge`), `data` is the whole record for a
+`write` and the delta for a `set`, `key`/`value` belong to an `inc` (the
+amount), an `add` or a `remove` (the elements), `key`/`index`/`count`/`content`
+to a `splice`, `key`/`index`/`value` to an `assign`, `key`/`index`/`to` to a
+`move`, `key`/`start`/`end`/`name`/`value`/`expand`/`many` (or `off`) to a
+`mark`, `key`/`node`/`parent`/`after`/`before` to a `tree` (each the call as
+the caller made it), `current` is the
 record as it is now (`null` when absent or deleted — read it, do not change
 it), `encrypted` says whether the write is sealed for this node, `source` is
 the `Record` whose `save()` this is, `v` is this node's schema version and

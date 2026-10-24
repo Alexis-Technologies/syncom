@@ -712,6 +712,8 @@ const runSchemaTests = async (t, assert, createStorage) => {
         assert.strictEqual((await metaOf(b, post.id)).v, 1, 'a set does not move the record’s version');
         await a.inc(post.id, 'hits', 3);
         await a.add(post.id, 'tags', ['t']);
+        await a.treeMove(post.id, 'outline', 'n1');
+        await a.treeMove(post.id, 'outline', 'n2', 'n1');
         await settle([a, b]);
         assert.strictEqual((await b.get(post.id)).hits, 3);
         assert.deepStrictEqual((await b.get(post.id)).tags, ['t']);
@@ -724,15 +726,22 @@ const runSchemaTests = async (t, assert, createStorage) => {
           sets: 1,
           lists: 0,
           texts: 0,
+          trees: 1,
         });
-        const [write, inc, add] = bOps.slice(before);
+        const [write, inc, add, n1, n2] = bOps.slice(before);
+        assert.deepStrictEqual(
+          [n1.type, n1.value.node, n1.value.parent, n2.type, n2.value.node, n2.value.parent],
+          ['tree', 'n1', null, 'tree', 'n2', 'n1'],
+          'a tree comes back as one move per node, parents first',
+        );
         assert.deepStrictEqual(
           [write.type, write.v, write.data],
           ['write', 2, { name: 'x', desc: 'd', $type: 'Post' }],
         );
         assert.deepStrictEqual([inc.type, inc.key, inc.value], ['inc', 'hits', 3]);
         assert.deepStrictEqual([add.type, add.key, add.value], ['add', 'tags', ['t']]);
-        const migrated = { name: 'x', desc: 'd', hits: 3, tags: ['t'], $type: 'Post' };
+        const outline = [{ id: 'n1', children: [{ id: 'n2', children: [] }] }];
+        const migrated = { name: 'x', desc: 'd', hits: 3, tags: ['t'], outline, $type: 'Post' };
         assert.deepStrictEqual(await b.get(post.id), migrated);
         assert.strictEqual((await metaOf(b, post.id)).v, 2);
         await settle([a, b]);
@@ -747,11 +756,13 @@ const runSchemaTests = async (t, assert, createStorage) => {
             ['ahead', false, 'write'],
             ['ahead', false, 'inc'],
             ['ahead', false, 'add'],
+            ['ahead', false, 'tree'],
+            ['ahead', false, 'tree'],
           ],
         );
         assert.deepStrictEqual(
           await b.migrate(),
-          { migrated: 0, counters: 0, sets: 0, lists: 0, texts: 0 },
+          { migrated: 0, counters: 0, sets: 0, lists: 0, texts: 0, trees: 0 },
           'idempotent',
         );
         // A record B writes itself is of its version and never lensed.
@@ -763,6 +774,7 @@ const runSchemaTests = async (t, assert, createStorage) => {
           sets: 0,
           lists: 0,
           texts: 0,
+          trees: 0,
         });
       },
     );
@@ -832,6 +844,7 @@ const runSchemaTests = async (t, assert, createStorage) => {
       sets: 0,
       lists: 0,
       texts: 0,
+      trees: 0,
     });
     assert.deepStrictEqual(
       debug.filter((entry) => entry.event === 'schema.lens.issues').map((entry) => [entry.entity, entry.id]),
@@ -881,7 +894,7 @@ const runSchemaTests = async (t, assert, createStorage) => {
     await assert.rejects(() => e.migrate({ batch: 0 }), TypeError);
     assert.deepStrictEqual(
       await a.migrate(),
-      { migrated: 0, counters: 0, sets: 0, lists: 0, texts: 0 },
+      { migrated: 0, counters: 0, sets: 0, lists: 0, texts: 0, trees: 0 },
       'version 1: nothing older to migrate',
     );
     const none = await createStorage(t2, 'N');

@@ -201,6 +201,16 @@ class Record extends Emitter {
     await this.#storage.move(this.#id, key, from, to, options);
   }
 
+  /** Puts a node of a tree field under a parent; the storage-level `treeMove` with this record's id. */
+  async treeMove(key, node, parent = null, options = {}) {
+    await this.#storage.treeMove(this.#id, key, node, parent, options);
+  }
+
+  /** Removes a node of a tree field with its subtree; the storage-level `treeRemove` with this record's id. */
+  async treeRemove(key, node, options = {}) {
+    await this.#storage.treeRemove(this.#id, key, node, options);
+  }
+
   async delete(options = {}) {
     await this.#storage.delete(this.#id, options);
     this.#data = null;

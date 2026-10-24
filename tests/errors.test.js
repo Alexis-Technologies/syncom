@@ -57,7 +57,7 @@ test('SyncomError', async (t) => {
     assert.strictEqual(data.code, 'INVALID_ID');
   });
 
-  await t.test('the storage: CLOSED, IN_HOOK, NOT_FOUND, FIELD_KIND, ENCRYPTED, TYPE_IMMUTABLE', async (t2) => {
+  await t.test('the storage: CLOSED, IN_HOOK, NOT_FOUND, FIELD_KIND, CYCLE, ENCRYPTED, TYPE_IMMUTABLE', async (t2) => {
     let store = null;
     const hooks = {
       beforeWrite: async (ctx) => {
@@ -89,6 +89,31 @@ test('SyncomError', async (t) => {
       message: /is a set; use add\(\) or remove\(\)/,
     });
     await assert.rejects(() => storage.remove(id, 'hits', ['x']), { code: 'FIELD_KIND', kind: 'counter' });
+    await storage.treeMove(id, 'outline', 'n');
+    await storage.treeMove(id, 'outline', 'm', 'n');
+    await assert.rejects(() => storage.treeMove(id, 'outline', 'n', 'm'), {
+      name: 'SyncomError',
+      code: 'CYCLE',
+      id,
+      field: 'outline',
+      node: 'n',
+      parent: 'm',
+      message: /cannot go under m, a node under it/,
+    });
+    await assert.rejects(() => storage.treeMove(id, 'outline', 'n', null, { after: 'zz' }), {
+      name: 'SyncomError',
+      code: 'NOT_FOUND',
+      id,
+      field: 'outline',
+      node: 'zz',
+      message: /is not under the root/,
+    });
+    await assert.rejects(() => storage.update(id, { outline: 1 }), {
+      code: 'FIELD_KIND',
+      field: 'outline',
+      kind: 'tree',
+      message: /is a tree; use treeMove\(\) or treeRemove\(\)/,
+    });
     await storage.splice(id, 'body', 0, 0, 'hi');
     await assert.rejects(() => storage.update(id, { body: 'x' }), {
       code: 'FIELD_KIND',

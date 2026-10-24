@@ -80,7 +80,14 @@ position register at it; `crates/loro-internal/src/state/movable_list_state.rs`,
 sides and reverses under removal (`crates/loro-internal/src/container/richtext.rs`),
 and the stable cursor as an element id with a side (`crates/loro-internal/src/cursor.rs`).
 `src/order.js` is an adaptation of `loro-js/src/runtime/fractional-index.ts`
-from bytes to a 62-letter alphabet.
+from bytes to a 62-letter alphabet. `src/tree.js` follows Loro's movable tree
+(`crates/loro-internal/src/state/tree_state.rs`, `loro-js/src/runtime/tree-moves.ts`)
+in its rules — a removal is a move under a trash node, siblings order by a
+fractional index then by stamp, a move that would make a cycle is kept and
+skipped — over the algorithm of Kleppmann, Mulligan, Beresford and Gomes, "A
+highly-available move operation for replicated trees" (2021); the fold itself
+is written for syncom's stamped move log and shares no code with Loro's
+undo-do-redo.
 
 > MIT License
 >

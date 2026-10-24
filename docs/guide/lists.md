@@ -1,7 +1,8 @@
-# Lists and text
+# Lists, text and trees
 
 A field can be a **list** — an array that nodes edit by position — or a
-**text** — a string they type into. Two nodes that insert at the same spot
+**text** — a string they type into — or a **tree** — nodes moved under one
+another without ever forming a cycle ([Trees](#trees), below). Two nodes that insert at the same spot
 both keep what they wrote, each writer's run whole, and a deleted element
 keeps its place so the anchors into it still resolve. The merge rule is
 Fugue (Weidner & Kleppmann, 2023), the one Loro and list-positions use; the
@@ -165,9 +166,60 @@ deleted element reads at the next visible one; one into a field a reset
 emptied reads `null`. In a list a cursor anchors the slot, not the element:
 a move takes the element elsewhere and leaves the cursor at the slot.
 
+## Trees
+
+A field can be a **tree**: nodes with a parent and a place among their
+siblings, put there by `treeMove(id, key, node, parent, { after, before })`
+and taken out, with everything under them, by `treeRemove(id, key, node)`. A
+node is a name — a record id, usually, so a node's own data lives in its
+record and the tree record holds the shape alone:
+
+```js
+const id = await storage.insert({ title: 'Outline' });
+await storage.treeMove(id, 'nodes', 'intro');                       // a root
+await storage.treeMove(id, 'nodes', 'scope', 'intro');              // under intro, last
+await storage.treeMove(id, 'nodes', 'why', 'intro', { before: 'scope' });
+await storage.treeMove(id, 'nodes', 'scope', null, { after: 'intro' }); // out, after intro
+await storage.treeRemove(id, 'nodes', 'why');                       // with its subtree
+(await storage.get(id)).nodes;
+// [{ id: 'intro', children: [] }, { id: 'scope', children: [] }]
+```
+
+The field reads as the roots and their children, nested — `[{ id,
+children }]` — in sibling order. The merge rule is Kleppmann, Mulligan,
+Beresford and Gomes's (2021), the one Loro's movable tree follows:
+
+- A `tree` op is one move: the node, its new parent (`null` a root,
+  `'$trash'` removed) and its place among the siblings — a fractional index
+  ([`@alexify/syncom/order`](./query#ordering-records)) between
+  the neighbours it was put among. The record keeps, per node, every move
+  made of it, stamped.
+- The tree is the fold of every move in stamp order, and a move whose target,
+  at that point of the fold, is the node itself or hangs under it does
+  nothing. Two nodes that move concurrently so that each would hang under
+  the other therefore agree, on every node, that the older move stands and
+  the newer one lost. The lost move is kept: a later move of either node can
+  make it count, or make it moot.
+- A removal is a move under the trash: what hangs under a removed node goes
+  with it and comes back with it when it is moved out again, and a move into
+  a subtree removed concurrently is hidden with it.
+- Siblings that share an index order by stamp, and a node put after one of
+  them lands after all of them.
+- A move to where the node already is makes no op. A parent that is the node
+  itself or hangs under it rejects with `CYCLE`; an `after`/`before` sibling
+  not under the parent with `NOT_FOUND` — both decided inside the mutation
+  queue, against the tree as it is, so a race with a peer's move surfaces as
+  the error rather than a silent nothing.
+- A reset (`write`, `delete`) drops the moves below it, and a node whose
+  parent fell reads again once the parent is back. A tree is a tree:
+  `update()`, `push()`, `add()`, `inc()` on the field are refused
+  (`FIELD_KIND` with `kind: 'tree'`), and a merge lets every other kind win
+  over it.
+
 ## What travels
 
-A `mark` op carries the two anchors, the name, the value and whether it
+A `tree` op carries `{ node, parent, fi }` — the node, its parent and its
+fractional index. A `mark` op carries the two anchors, the name, the value and whether it
 stacks — or the id of a mark to switch off. A `splice` op carries the cut ranges, `[run, offset, length]` per run, and
 either the anchor of its new run (`at`: `^` the head, `>e` or `<e` the right
 or left child of element `e`, named `ts:offset:origin`) or the writer's own
@@ -222,6 +274,10 @@ caller's to avoid.
 - A move adds a position run to the record's metadata — one key, about a
   hundred bytes — and the old slot stays as a tombstone: a list reordered
   thousands of times carries that history until a reset.
+- A tree keeps every move of every node until a reset — a few dozen bytes
+  each — and folds all of them on every op that touches the field. Keep a
+  tree to the hundreds of nodes an outline or a folder pane shows, not the
+  hundreds of thousands a file system holds.
 - Queries see a list as the array it reads as: an index on the field posts
   every element (`select({ tags: 'bug' })` finds a list holding `'bug'`), an
   equality against a whole array compares it in order, and a unique key over

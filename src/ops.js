@@ -28,6 +28,10 @@
 //                 tombstones as lengths, pending work, a movable list's
 //                 registers, a text's marks. data[f] is its walk; why it
 //                 converges is argued there.
+//   trees[f]    — a tree: per node the moves made of it, stamped
+//                 (src/tree.js). data[f] is the fold of every move in stamp
+//                 order, a move that would put a node under itself skipped;
+//                 why it converges is argued there.
 //   v           — the schema version of the last whole-record write (the op's
 //                 `v`, absent on a node without a schema): what a reader on
 //                 a newer schema lenses the record through. A `set` that
@@ -42,13 +46,14 @@
 // order. Counters rely on it (a skipped seq would be lost, not reordered);
 // registers do not, but the vector-based dedup does.
 //
-// A field is a REGISTER, a COUNTER, a SET, a LIST or a TEXT, never two of
-// them: `set`/`write` on a counter, set or sequence field, `inc` on a
-// register, set or sequence field, `add`/`remove` on a register, counter or
-// sequence field, `splice` on a register, counter or set field are refused
-// (reported in `rejected`) — the kinds cannot be made to commute, and
-// refusing is honest where guessing would silently diverge. On a snapshot
-// merge the register wins, then the counter, the set, the list, the text.
+// A field is a REGISTER, a COUNTER, a SET, a LIST, a TEXT or a TREE, never
+// two of them: `set`/`write` on a counter, set, sequence or tree field, `inc`
+// on a register, set, sequence or tree field, `add`/`remove` on a register,
+// counter, sequence or tree field, `splice` on a register, counter, set or
+// tree field, `tree` on any other kind are refused (reported in `rejected`)
+// — the kinds cannot be made to commute, and refusing is honest where
+// guessing would silently diverge. On a snapshot merge the register wins,
+// then the counter, the set, the list, the text, the tree.
 //
 // Why a set converges (what the tests check): one origin's adds of an element
 // are stamped in seq order, so a node that observed the add at `r` observed
@@ -62,10 +67,11 @@
 
 const { compareClock, maxClock } = require('./vector.js');
 const S = require('./sequence.js');
+const T = require('./tree.js');
 
 const createEntry = () => ({
   data: {},
-  meta: { clock: {}, base: null, deleted: null, counters: {}, sets: {}, seqs: {} },
+  meta: { clock: {}, base: null, deleted: null, counters: {}, sets: {}, seqs: {}, trees: {} },
 });
 
 // An entry written before sets existed has no `sets` key; reading it as
@@ -73,6 +79,7 @@ const createEntry = () => ({
 const EMPTY = Object.freeze({});
 const setsOf = (meta) => meta.sets ?? EMPTY;
 const seqsOf = (meta) => meta.seqs ?? EMPTY;
+const treesOf = (meta) => meta.trees ?? EMPTY;
 
 const cloneSets = (sets) => {
   const copy = {};
@@ -102,6 +109,7 @@ const cloneEntry = (entry) => {
     // A sequence block is never mutated in place (src/sequence.js hands back
     // a new one), so the map is copied and the blocks are shared.
     seqs: { ...seqsOf(entry.meta) },
+    trees: { ...treesOf(entry.meta) },
   };
   if (entry.meta.v !== undefined) meta.v = entry.meta.v;
   if (entry.meta.purged !== undefined) meta.purged = entry.meta.purged;
@@ -127,6 +135,8 @@ const isSet = (meta, field) => {
 // A list or a text: the sequence engine's block under the field.
 const isSeq = (meta, field) => own(seqsOf(meta), field) !== undefined;
 const seqKind = (meta, field) => (own(seqsOf(meta), field).k === 't' ? 'text' : 'list');
+// A tree: the move log under the field (src/tree.js).
+const isTree = (meta, field) => own(treesOf(meta), field) !== undefined;
 
 // An element is identified by its JSON text — `1` and `'1'` are two elements,
 // `{ a: 1, b: 2 }` and `{ b: 2, a: 1 }` are two too. A key from a peer must
@@ -253,7 +263,15 @@ const normalizeMeta = (meta) => {
       if (seq !== null) seqs[field] = seq;
     }
   }
-  const normalized = { clock, base: stampOf(meta.base), deleted: stampOf(meta.deleted), counters, sets, seqs };
+  const trees = {};
+  if (isPlainObject(meta.trees)) {
+    for (const field of Object.keys(meta.trees)) {
+      if (!isKey(field)) continue;
+      const tree = T.normalizeTree(meta.trees[field]);
+      if (tree !== null) trees[field] = tree;
+    }
+  }
+  const normalized = { clock, base: stampOf(meta.base), deleted: stampOf(meta.deleted), counters, sets, seqs, trees };
   if (Number.isInteger(meta.v)) normalized.v = meta.v;
   const purged = stampOf(meta.purged);
   if (purged) normalized.purged = purged;
@@ -267,9 +285,10 @@ const normalizeMeta = (meta) => {
 // meta too.
 const latestClock = (meta) => {
   if (!isPlainObject(meta)) return null;
-  const { clock, base, deleted, counters, sets, seqs, purged } = normalizeMeta(meta);
+  const { clock, base, deleted, counters, sets, seqs, trees, purged } = normalizeMeta(meta);
   let latest = maxClock(maxClock(base, deleted), purged ?? null);
   for (const field of Object.keys(seqs)) latest = maxClock(latest, [seqs[field].ts, '']);
+  for (const field of Object.keys(trees)) latest = maxClock(latest, [trees[field].ts, '']);
   for (const field of Object.keys(clock)) latest = maxClock(latest, clock[field]);
   for (const field of Object.keys(counters)) {
     const perOrigin = counters[field];
@@ -357,6 +376,19 @@ const applyBase = (entry, delta) => {
     if (!deepEqual(data[field], value)) delta[field] = value;
     data[field] = value;
   }
+  for (const field of Object.keys(meta.trees)) {
+    const next = T.pruneTree(meta.trees[field], meta.base);
+    if (next === null) {
+      delete meta.trees[field];
+      delete data[field];
+      delta[field] = undefined;
+      continue;
+    }
+    meta.trees[field] = next;
+    const value = T.renderTree(next);
+    if (!deepEqual(data[field], value)) delta[field] = value;
+    data[field] = value;
+  }
 };
 
 // Sets register fields at `stamp`, honouring last-writer-wins per field.
@@ -378,6 +410,10 @@ const applyFields = (entry, fields, stamp, delta, rejected) => {
     }
     if (isSeq(meta, field)) {
       rejected.push({ field, reason: seqKind(meta, field) });
+      continue;
+    }
+    if (isTree(meta, field)) {
+      rejected.push({ field, reason: 'tree' });
       continue;
     }
     if (compareClock(own(meta.clock, field), stamp) >= 0) continue;
@@ -461,6 +497,10 @@ const applySet = (entry, op, stamp, delta, rejected) => {
     rejected.push({ field, reason: seqKind(meta, field) });
     return;
   }
+  if (isTree(meta, field)) {
+    rejected.push({ field, reason: 'tree' });
+    return;
+  }
   const moved = op.type === 'add' ? addElements(meta, field, op, stamp) : removeElements(meta, field, op);
   if (!moved) return;
   // A tag that moved is news to persist even when the array reads the same.
@@ -494,6 +534,10 @@ const applySeq = (entry, op, stamp, delta, rejected) => {
   }
   if (isSet(meta, field)) {
     rejected.push({ field, reason: 'set' });
+    return;
+  }
+  if (isTree(meta, field)) {
+    rejected.push({ field, reason: 'tree' });
     return;
   }
   const kind = typeof payload.content === 'string' ? 't' : Array.isArray(payload.content) ? 'l' : null;
@@ -551,6 +595,10 @@ const applyListOp = (entry, op, stamp, delta, rejected) => {
     rejected.push({ field, reason: 'set' });
     return;
   }
+  if (isTree(meta, field)) {
+    rejected.push({ field, reason: 'tree' });
+    return;
+  }
   const held = own(meta.seqs, field);
   if (held !== undefined && held.k !== kind) {
     rejected.push({ field, reason: seqKind(meta, field) });
@@ -567,6 +615,39 @@ const applyListOp = (entry, op, stamp, delta, rejected) => {
   settleSeq(entry, field, held, result, delta, rejected);
 };
 
+// A `tree` op: one more move in the field's log (src/tree.js); the field
+// reads as the fold. Refused on every other kind; a move below the base is
+// moot, like a run.
+const applyTree = (entry, op, stamp, delta, rejected) => {
+  const { meta } = entry;
+  const { key: field, value: payload } = op;
+  if (typeof field !== 'string' || !isKey(field) || !isKey(op.origin) || !isPlainObject(payload)) return;
+  if (own(meta.clock, field) !== undefined) {
+    rejected.push({ field, reason: 'register' });
+    return;
+  }
+  if (isCounter(meta, field)) {
+    rejected.push({ field, reason: 'counter' });
+    return;
+  }
+  if (isSet(meta, field)) {
+    rejected.push({ field, reason: 'set' });
+    return;
+  }
+  if (isSeq(meta, field)) {
+    rejected.push({ field, reason: seqKind(meta, field) });
+    return;
+  }
+  if (compareClock(stamp, meta.base) < 0) return;
+  const held = own(meta.trees, field);
+  const result = T.applyTreeMove(held ?? T.createTree(), stamp, payload);
+  if (!result.changed) return;
+  meta.trees[field] = result.tree;
+  // A move that did not take is news to persist: a later move can make it count.
+  entry.data[field] = T.renderTree(result.tree);
+  delta[field] = entry.data[field];
+};
+
 // Everything the entry held, gone: the purge, and a merge that meets one.
 const erase = (entry, stamp, delta) => {
   const { meta, data } = entry;
@@ -576,6 +657,7 @@ const erase = (entry, stamp, delta) => {
   meta.counters = {};
   meta.sets = {};
   meta.seqs = {};
+  meta.trees = {};
   // Canonical: whatever came before, a purged entry looks the same, so two
   // nodes that saw the purge and a write in either order hold one meta.
   meta.purged = maxClock(meta.purged ?? null, stamp);
@@ -655,6 +737,8 @@ const applyOp = (previous, op) => {
         rejected.push({ field, reason: 'set' });
       } else if (isSeq(meta, field)) {
         rejected.push({ field, reason: seqKind(meta, field) });
+      } else if (isTree(meta, field)) {
+        rejected.push({ field, reason: 'tree' });
       } else if (compareClock(stamp, meta.base) >= 0) {
         const perOrigin = own(meta.counters, field) ?? (meta.counters[field] = {});
         const known = own(perOrigin, op.origin);
@@ -671,6 +755,8 @@ const applyOp = (previous, op) => {
     applySeq(entry, op, stamp, delta, rejected);
   } else if (op.type === 'assign' || op.type === 'move' || op.type === 'mark') {
     applyListOp(entry, op, stamp, delta, rejected);
+  } else if (op.type === 'tree') {
+    applyTree(entry, op, stamp, delta, rejected);
   }
 
   const before = previous ? previous.meta : null;
@@ -711,6 +797,8 @@ const isAlive = (entry) => {
   // A list or a text touched after the tombstone revives the record too.
   const seqs = seqsOf(meta);
   for (const field of Object.keys(seqs)) if (compareClock([seqs[field].ts, ''], meta.deleted) > 0) return true;
+  const trees = treesOf(meta);
+  for (const field of Object.keys(trees)) if (compareClock([trees[field].ts, ''], meta.deleted) > 0) return true;
   return false;
 };
 
@@ -782,6 +870,12 @@ const mergeEntry = (a, b) => {
       else if (mine.k === seqs[field].k) meta.seqs[field] = S.join(mine, seqs[field]);
       else if (mine.k === 't') meta.seqs[field] = seqs[field]; // a list outranks a text
     }
+    const trees = treesOf(source.meta);
+    for (const field of Object.keys(trees)) {
+      if (!isKey(field)) continue;
+      const mine = own(meta.trees, field);
+      meta.trees[field] = mine === undefined ? trees[field] : T.joinTrees(mine, trees[field]);
+    }
   }
   applyBase(entry, {});
   // A register that also became a counter on the other side: the register
@@ -815,6 +909,22 @@ const mergeEntry = (a, b) => {
     } else if (isSet(meta, field)) {
       delete meta.seqs[field];
       data[field] = liveElements(meta.sets[field]);
+    }
+  }
+  // A tree that is anything else on the other side: the other kind wins.
+  for (const field of Object.keys(meta.trees)) {
+    if (own(meta.clock, field) !== undefined) {
+      delete meta.trees[field];
+      data[field] = a.meta.clock[field] === meta.clock[field] ? a.data[field] : b.data[field];
+    } else if (isCounter(meta, field)) {
+      delete meta.trees[field];
+      data[field] = counterValue(meta.counters[field]);
+    } else if (isSet(meta, field)) {
+      delete meta.trees[field];
+      data[field] = liveElements(meta.sets[field]);
+    } else if (isSeq(meta, field)) {
+      delete meta.trees[field];
+      data[field] = S.render(S.buildIndex(meta.seqs[field], meta.base));
     }
   }
   return entry;
@@ -866,6 +976,7 @@ const TYPE_CODES = {
   assign: '=',
   move: '^',
   mark: '*',
+  tree: '~',
 };
 const CODE_TYPES = {
   w: 'write',
@@ -881,6 +992,7 @@ const CODE_TYPES = {
   '=': 'assign',
   '^': 'move',
   '*': 'mark',
+  '~': 'tree',
 };
 
 const packOps = (ops) => {
@@ -944,6 +1056,7 @@ module.exports = {
   isCounter,
   isSet,
   isSeq,
+  isTree,
   observedTags,
   latestClock,
   deepEqual,

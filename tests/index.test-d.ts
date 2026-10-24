@@ -125,7 +125,7 @@ expectAssignable<StorageOptions>({
 expectError(syncom.open({ schema: { ahead: 'ignore' } }));
 expectError(syncom.open({ schema: { lens: 'none' } }));
 expectError(syncom.open({ schema: { version: 2, migrations: { 2: { up: 'rename' } } } }));
-expectType<Promise<{ migrated: number; counters: number; sets: number; lists: number; texts: number }>>(
+expectType<Promise<{ migrated: number; counters: number; sets: number; lists: number; texts: number; trees: number }>>(
   storage.migrate({ entities: ['Post'], batch: 10 }),
 );
 expectType<{ replayed: number; lost: number } | null>(storage.schemaInfo!.held);
@@ -228,6 +228,27 @@ expectAssignable<syncom.SyncOp>({
 });
 expectAssignable<syncom.MovePayload>({ elem: '1:0:a', cut: ['1:a', 0, 1], at: '^', value: 1 });
 expectType<syncom.SequenceBlock>(entry.meta.seqs.body);
+expectType<Promise<void>>(storage.treeMove('id', 'outline', 'n1'));
+expectType<Promise<void>>(storage.treeMove('id', 'outline', 'n2', 'n1', { after: 'n3', actor: 'u2' }));
+expectType<Promise<void>>(storage.treeRemove('id', 'outline', 'n2'));
+expectError(storage.treeMove('id', 'outline', 5));
+expectError(storage.treeMove('id', 'outline', 'n2', 'n1', { after: 3 }));
+expectType<Promise<void>>(record.treeMove('outline', 'n1', null, { before: 'n2' }));
+expectType<Promise<void>>(record.treeRemove('outline', 'n1'));
+expectAssignable<syncom.SyncOp>({
+  origin: 'a',
+  seq: 6,
+  ts: 6,
+  type: 'tree',
+  id: 'r',
+  key: 'outline',
+  value: { node: 'n1', parent: null, fi: 'V' },
+});
+expectAssignable<syncom.TreePayload>({ node: 'n1', parent: '$trash', fi: 'V' });
+expectType<syncom.TreeBlock>(entry.meta.trees.outline);
+expectAssignable<syncom.TreeNode[]>([{ id: 'n1', children: [] }]);
+expectAssignable<syncom.FieldKind>('tree');
+expectAssignable<syncom.SyncomErrorCode>('CYCLE');
 expectType<Promise<void>>(storage.delete('id', { actor: 'u2' }));
 expectType<Promise<void>>(storage.purge('id', { actor: 'u2' }));
 expectType<Promise<number>>(log.scrub('id'));

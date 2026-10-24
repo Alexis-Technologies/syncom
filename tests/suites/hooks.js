@@ -33,6 +33,7 @@ const runHooksTests = async (t, assert, createStorage) => {
     await storage.add(id, 'tags', ['x']);
     await storage.remove(id, 'tags', ['x']);
     await storage.splice(id, 'body', 0, 0, 'hi');
+    await storage.treeMove(id, 'outline', 'n');
     const record = await storage.record(id);
     record.title = 'c';
     await record.save();
@@ -103,8 +104,17 @@ const runHooksTests = async (t, assert, createStorage) => {
           encrypted: false,
         },
         {
-          type: 'set',
+          type: 'tree',
           current: { title: 'b', hits: 2, tags: [], body: 'hi' },
+          data: undefined,
+          key: 'outline',
+          value: undefined,
+          source: null,
+          encrypted: false,
+        },
+        {
+          type: 'set',
+          current: { title: 'b', hits: 2, tags: [], body: 'hi', outline: [{ id: 'n', children: [] }] },
           data: { title: 'c' },
           key: undefined,
           value: undefined,
@@ -113,7 +123,7 @@ const runHooksTests = async (t, assert, createStorage) => {
         },
         {
           type: 'delete',
-          current: { title: 'c', hits: 2, tags: [], body: 'hi' },
+          current: { title: 'c', hits: 2, tags: [], body: 'hi', outline: [{ id: 'n', children: [] }] },
           data: undefined,
           key: undefined,
           value: undefined,
@@ -126,6 +136,8 @@ const runHooksTests = async (t, assert, createStorage) => {
     // A splice's context carries the call as the caller made it.
     const splice = seen.find((ctx) => ctx.type === 'splice');
     assert.deepStrictEqual([splice.index, splice.count, splice.content], [0, 0, 'hi']);
+    const tree = seen.find((ctx) => ctx.type === 'tree');
+    assert.deepStrictEqual([tree.node, tree.parent, tree.after, tree.before], ['n', null, undefined, undefined]);
   });
 
   await t.test('beforeWrite may replace the data of a write or a set, and only those', async (t2) => {

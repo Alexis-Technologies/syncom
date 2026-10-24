@@ -98,7 +98,10 @@ const ENTRIES = [
   // marks as anchor pairs with an expand rule, the newest per key, stacking
   // marks, spans() — the raise to 51.5 KB (51.4 measured). Cursors — a place
   // that survives edits, cursor()/index() — the raise to 52 KB (51.7 measured).
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 52 },
+  // Trees — the move log per node, the fold with the cycle check, treeMove()/
+  // treeRemove(), and src/order.js in the core for a node's place among its
+  // siblings — the raise to 55 KB (54.6 measured).
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 55 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check

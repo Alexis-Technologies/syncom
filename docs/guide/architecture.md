@@ -139,7 +139,10 @@ An op is applied by `applyOp` in `src/ops.js`, the same function on every node:
   the one before it or the left child of the leftmost descendant of its first right child, so
   concurrent inserts at one spot both keep and each writer's run stays whole; a deleted element
   keeps its place, and a list's elements carry a position and a value register, a text's marks
-  two anchors each (see [Lists and text](/guide/lists));
+  two anchors each (see [Lists, text and trees](/guide/lists));
+- a **tree** is the fold of every node's moves in stamp order, a move that would put a node
+  under itself skipped (Kleppmann et al., 2021), so two nodes agree on which concurrent move
+  lost; siblings order by a fractional index, then by stamp;
 - a **delete** is a tombstone that a newer write revives; a **purge** wins at any stamp and
   scrubs the id from the log;
 - ops from one origin apply in sequence order; a duplicate or a gap is skipped, and resuming

@@ -20,7 +20,7 @@ index.js / browser.js     two-line shims over src/index.js / src/index.browser.j
 wrpc.js / wrpc.d.ts       the @alexify/syncom/wrpc subpath (src/wrpc.js)
 contracts.js / .d.ts      the @alexify/syncom/contracts subpath (src/contract.js) — never back in the barrel
 idb.js / idb.d.ts         the @alexify/syncom/idb subpath (src/idb.js) — the IndexedDB backend, browser-only
-$1
+search.js / search.d.ts   the @alexify/syncom/search subpath (src/search.js) — the trigram text index behind `$text`; the core knows only the TextIndex contract
 order.js / order.d.ts     the @alexify/syncom/order subpath (src/order.js) — fractional indexes as strings, for ordering records
 index.d.ts                the Node type surface (hand-written)
 browser.d.ts              re-exports index.d.ts, overrides the 3 async crypto fns
@@ -32,9 +32,11 @@ src/keys.js               loadKeyPair — the on-disk key pairs (RSA for sealing
 src/scope.js              GLOBAL_SCOPE, inScope, opInScope — the one definition of "in scope" — no requires
 src/signing.js            canonical form, signOp, verifyOp — what a signature covers (the header + a salted payload digest) and the verdict on a peer's op
 src/shape.js              isPlainObject, asJson, isRecordId, isStreamName, wellFormed — what enters is checked here
-$1
-$1
-src/order.js              fractional indexes over a 62-letter alphabet (Loro's rule, MIT) — no requires; the core does not use it
+src/sequence.js           the sequence engine behind the list and text kinds: Fugue runs, run-length content, the walk,
+                          local placement, pending ops, pos/vals/marks registers, cursors, prune and join — requires vector.js only
+src/tree.js               the tree kind: per node its stamped moves, the fold in stamp order with the cycle check (Kleppmann
+                          2021, Loro), prune and join — requires vector.js only
+src/order.js              fractional indexes over a 62-letter alphabet (Loro's rule, MIT) — no requires; the core uses it for a tree's places
 src/errors.js             SyncomError (an operational failure, with a code) and typed() — no requires
 src/symbols.js            COMMIT / REFRESH / SOURCE — the module-private seams between Storage and what it hands out — no requires
 src/options.js            normalizeStorageOptions — open()'s plain options checked and defaulted (lock, cache, chain, skew…)
@@ -188,8 +190,8 @@ docs/                     VitePress site
   meta — not only data — order-free. Mixing two kinds on one field throws
   locally (`FIELD_KIND`) and is refused (`OP_REFUSED` event) from a peer; the
   snapshot merge lets a register, then a counter, win over a set, a set over a
-  list, a list over a text. Do not add a path that lets kinds meet — it cannot
-  be made to commute. A list or a text is `meta.seqs[field]`, a block of
+  list, a list over a text, a text over a tree. Do not add a path that lets
+  kinds meet — it cannot be made to commute. A list or a text is `meta.seqs[field]`, a block of
   `src/sequence.js` (Fugue runs anchored `^`/`>e`/`<e`, run-length content with
   tombstones as lengths, pending runs/cuts/extensions under `PENDING_MAX`):
   `splice` (code `/`) carries `{ cut, at | run/from, content }` in `key`/`value`,
@@ -204,9 +206,17 @@ docs/                     VitePress site
   `prepareOp` INSIDE the queue (`resolveSplice`, `OUT_OF_RANGE`); `applySeq`
   prunes at once so what fell below the base reads the same on either side of
   a reset; the block's `ts` is derived from the runs and registers it holds —
-  a cut never bumps it, so meta is order-free. The fuzz in
-  `tests/suites/sync-engine.js` compares the blocks across nodes, not only
-  what they read as.
+  a cut never bumps it, so meta is order-free. A tree is `meta.trees[field]`,
+  a block of `src/tree.js`: `tree` (code `~`, `{ node, parent, fi }`) appends
+  one stamped move per node and the field reads as the fold of every move in
+  stamp order with Kleppmann's cycle check — an ineffective move is KEPT (a
+  later move can make it count), `'$trash'` is the removal parent, siblings
+  order by `fi` (a fractional index from `src/order.js`, the one place the
+  core uses it) then by stamp; `resolveTree` in `src/commit.js` mints `fi`
+  INSIDE the queue between the neighbours, decides `CYCLE` and `NOT_FOUND`
+  there, and hands back `null` (no op) for a move to where the node is. The
+  fuzz in `tests/suites/sync-engine.js` compares the blocks and the move
+  logs across nodes, not only what they read as.
 - **Ops from one origin apply in seq order; seqs run per origin AND scope**
   (`origin@scope` vector keys), and ops born from a snapshot (`merge`,
   `advance`) run in their own `origin@~` stream. `applyRemote` skips

@@ -58,12 +58,13 @@ const OP_TYPES = new Set([
   'assign',
   'move',
   'mark',
+  'tree',
 ]);
 
 // The ops an entity's validator sees: the ones that leave a record for the
 // application to read. A `merge` joins a peer's state as it is, a `delete`
 // leaves nothing to validate.
-const VALIDATED = new Set(['write', 'set', 'inc', 'add', 'remove', 'splice', 'assign', 'move', 'mark']);
+const VALIDATED = new Set(['write', 'set', 'inc', 'add', 'remove', 'splice', 'assign', 'move', 'mark', 'tree']);
 
 // A signature's three fields, by shape alone — whether they check is
 // src/signing.js's business: 64 bytes base64url, 32 bytes hex, a nonce.

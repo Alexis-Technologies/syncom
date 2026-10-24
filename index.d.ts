@@ -91,6 +91,7 @@ export type SyncOpType =
   | 'assign'
   | 'move'
   | 'mark'
+  | 'tree'
   | 'delete'
   | 'merge'
   | 'advance'
@@ -149,6 +150,35 @@ export interface MarkPayload {
   off?: string;
 }
 
+/**
+ * What a `tree` op carries: the node, its new parent (`null`: a root,
+ * `'$trash'`: removed) and its place among the siblings — a fractional
+ * index (`@alexify/syncom/order`), ties broken by stamp.
+ */
+export interface TreePayload {
+  node: string;
+  parent: string | null;
+  fi: string;
+}
+
+/** A node of a tree field as it reads: its id and its children, in order. */
+export interface TreeNode {
+  id: string;
+  children: TreeNode[];
+}
+
+/**
+ * A tree field's block (src/tree.js): per node the moves made of it, each
+ * `[ts, origin, parent, fi]`, in stamp order. The field reads as the fold of
+ * every move in stamp order, a move that would put a node under itself
+ * skipped (Kleppmann et al., 2021).
+ */
+export interface TreeBlock {
+  /** The newest stamp the block holds. */
+  ts: number;
+  moves: { [node: string]: readonly (readonly [ts: number, origin: string, parent: string | null, fi: string])[] };
+}
+
 /** Which side of its slot a cursor keeps to. */
 export type CursorSide = 'before' | 'after';
 
@@ -196,7 +226,15 @@ export interface SyncOp {
   /** `inc`, `add`, `remove`: the field. */
   key?: string;
   /** `inc`: the amount added; `add`: the elements; `remove`: the elements with the tags the remover observed. */
-  value?: number | readonly unknown[] | readonly SetRemoval[] | SplicePayload | AssignPayload | MovePayload | MarkPayload;
+  value?:
+    | number
+    | readonly unknown[]
+    | readonly SetRemoval[]
+    | SplicePayload
+    | AssignPayload
+    | MovePayload
+    | MarkPayload
+    | TreePayload;
   /** The schema version of the node that made it; absent without a schema, and on `merge`/`advance`. */
   v?: number;
   /** Who made it — `open({ actor })` or the write's own; a claim the origin signed, not a proof of identity. Absent on `merge`/`advance`. */
@@ -223,6 +261,8 @@ export interface EntryMeta {
   sets: { [field: string]: { [elementKey: string]: { [origin: string]: readonly [number, number] } } };
   /** A list or a text per field — see SequenceBlock. */
   seqs: { [field: string]: SequenceBlock };
+  /** A tree per field — see TreeBlock. */
+  trees: { [field: string]: TreeBlock };
   /** The schema version of the last whole-record write (or of the `set` that created the entry). */
   v?: number;
   /** The stamp of a `purge`: the record is gone for good, whatever lands later. */
@@ -241,8 +281,8 @@ export interface ApplyResult {
   rejected: Array<{ field: string; reason: RefusalReason }>;
 }
 
-/** What a field is, once written: a register (last writer wins), a counter (`inc`) or a set (`add`/`remove`). */
-export type FieldKind = 'register' | 'counter' | 'set' | 'list' | 'text';
+/** What a field is, once written: a register (last writer wins), a counter (`inc`), a set (`add`/`remove`), a list, a text or a tree. */
+export type FieldKind = 'register' | 'counter' | 'set' | 'list' | 'text' | 'tree';
 /** Why a field of a peer's op was refused: another kind holds the field, or pending work hit its bound. */
 export type RefusalReason = FieldKind | 'bound';
 
@@ -256,6 +296,7 @@ export type SyncomErrorCode =
   | 'NOT_FOUND'
   | 'FIELD_KIND'
   | 'OUT_OF_RANGE'
+  | 'CYCLE'
   | 'ENCRYPTED'
   | 'INTEGRITY'
   | 'CORRUPT'
@@ -748,7 +789,7 @@ export interface WriteContext {
   id: string;
   /** The whole record for `write`, the delta for `set`, the joined data for `merge`. */
   data?: Record<string, unknown>;
-  /** `inc`, `add`, `remove`, `splice`: the field. */
+  /** `inc`, `add`, `remove`, `splice`, `assign`, `move`, `mark`, `tree`: the field. */
   key?: string;
   /** `inc`: the amount; `add`/`remove`: the elements, as the caller gave them. */
   value?: number | readonly unknown[];
@@ -768,6 +809,11 @@ export interface WriteContext {
   expand?: MarkExpand;
   many?: boolean;
   off?: string;
+  /** `tree`: the node, its parent (`null` a root, `'$trash'` removed) and the sibling it goes after or before — as the caller gave them. */
+  node?: string;
+  parent?: string | null;
+  after?: string;
+  before?: string;
   /** `merge` only: the metadata being joined. */
   meta?: EntryMeta;
   /** The record before the write — `null` when absent or deleted. Read-only. */
@@ -1405,6 +1451,24 @@ export interface Storage {
    */
   move(id: string, key: string, from: number, to: number, options?: WriteOptions): Promise<void>;
   /**
+   * Puts node `node` of tree field `key` under `parent` (`null`: a root),
+   * after sibling `after`, before sibling `before`, or last. Creates the
+   * node, the field and the record when absent. Two nodes moving
+   * concurrently so that each would hang under the other: the newer move
+   * loses, on every node. Rejects with `CYCLE` for a parent under the node
+   * and `NOT_FOUND` for a sibling not under `parent`; no op when the node
+   * is already there.
+   */
+  treeMove(
+    id: string,
+    key: string,
+    node: string,
+    parent?: string | null,
+    options?: WriteOptions & { after?: string; before?: string },
+  ): Promise<void>;
+  /** Removes node `node` of tree field `key` with everything under it — a move under the trash. */
+  treeRemove(id: string, key: string, node: string, options?: WriteOptions): Promise<void>;
+  /**
    * Compare-and-swap: writes `changes` only if every field of `prev` still
    * holds its value, compared inside the mutation queue — two concurrent
    * swaps on one expectation cannot both pass. `false`, and no write, on a
@@ -1438,7 +1502,7 @@ export interface Storage {
     entities?: readonly string[];
     batch?: number;
     actor?: string;
-  }): Promise<{ migrated: number; counters: number; sets: number; lists: number; texts: number }>;
+  }): Promise<{ migrated: number; counters: number; sets: number; lists: number; texts: number; trees: number }>;
   record(id: string): Promise<Storage.StorageRecord>;
   /** The raw data of a cached entry (no lens), `null` when not cached, absent or deleted. */
   getCachedData(id: string): unknown | null;
@@ -1571,6 +1635,15 @@ export interface SyncomRecord {
   setAt(key: string, index: number, value: unknown, options?: WriteOptions): Promise<void>;
   /** Moves an element of a list field — `storage.move` with this record's id. */
   move(key: string, from: number, to: number, options?: WriteOptions): Promise<void>;
+  /** Puts a node of a tree field under a parent — `storage.treeMove` with this record's id. */
+  treeMove(
+    key: string,
+    node: string,
+    parent?: string | null,
+    options?: WriteOptions & { after?: string; before?: string },
+  ): Promise<void>;
+  /** Removes a node of a tree field with its subtree — `storage.treeRemove` with this record's id. */
+  treeRemove(key: string, node: string, options?: WriteOptions): Promise<void>;
   delete(options?: WriteOptions): Promise<void>;
   // Live properties: one getter/setter per field of the loaded object.
   [field: string]: unknown;

@@ -16,7 +16,7 @@ Fast, zero-dependency distributed data sync engine 🌐
 disk — or in the browser's origin-private filesystem — commits every write to
 a hash-linked log so tampering is detectable, and replicates every write to
 peers as an operation that converges without coordination: last-writer-wins
-registers, per-origin counters, observed-remove sets, lists and text that merge by
+registers, per-origin counters, observed-remove sets, lists, text and trees that merge by
 position, tombstones. The transport is injected —
 [wrpc](https://wrpc.vercel.app) out of the box — and the package has no
 runtime dependencies.
@@ -148,7 +148,7 @@ nodes converges.
 | **Full-text search** | `select({ $text: 'quick fox' })`: fuzzy, typo-tolerant, TF-IDF ranked trigram search over an entity's `search` fields, best first, narrowed by any equality — the index is `@alexify/syncom/search` (under 1 KB), injected at `open({ search })`. See [Full-text search](https://syncomjs.vercel.app/guide/query#full-text-search) |
 | **Backends** | node:fs, OPFS, IndexedDB (`@alexify/syncom/idb`) or memory — five functions injected at `open({ fsi })`; `durable: true` for fsync, one instance per directory. See [Backends](https://syncomjs.vercel.app/guide/backends) |
 | **Replication** | Every write is an op in a persisted log; peers exchange ops over an injected link, resume from where they stopped, and bootstrap from a streamed snapshot when they cannot; scopes for partial replication |
-| **Convergence** | Last-writer-wins registers, per-origin counters, observed-remove sets, lists and text that merge by position (Fugue — each writer's run whole), tombstones with revival — any order, any number of times, same result. See [Lists and text](https://syncomjs.vercel.app/guide/lists) |
+| **Convergence** | Last-writer-wins registers, per-origin counters, observed-remove sets, lists and text that merge by position (Fugue — each writer's run whole), trees whose concurrent moves never form a cycle, tombstones with revival — any order, any number of times, same result. See [Lists, text and trees](https://syncomjs.vercel.app/guide/lists) |
 | **Transport** | `@alexify/syncom/wrpc` adapts a `WrpcClient` — over a WebSocket, or a WebRTC `PeerLink`'s `remote` from `@alexify/wrpc/webrtc`; `storage.sync.unit()` is the router unit a wrpc server, or a browser's `PeerHost`, mounts. Reconnects, resumable subscriptions, binary streams and rooms come from wrpc. See [WebRTC](https://syncomjs.vercel.app/guide/webrtc) |
 | **Integrity** | Every write appends a hash-linked block (`chain: false` turns it off for a hub); reads re-verify the record against the block that committed it and throw on a mismatch; `repair(id)` rebuilds a record from the log |
 | **Signed ops** | Every op is signed with the node's Ed25519 key, and the node id *is* that key: a peer verifies an op against its origin through any relay, a purge leaves a header that still verifies, `sync.signatures: 'require'` refuses unsigned ops. See [Signatures](https://syncomjs.vercel.app/guide/sync#signatures) |

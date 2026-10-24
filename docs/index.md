@@ -25,7 +25,7 @@ hero:
 features:
   - icon: 🔄
     title: Ops that converge
-    details: "Every write is an op: last-writer-wins per field, counters whose increments add up across nodes, sets that keep every concurrent add, lists and text that merge by position with marks and cursors, tombstones that a newer write revives. Applied in any order, any number of times, every node ends up with the same records."
+    details: "Every write is an op: last-writer-wins per field, counters whose increments add up across nodes, sets that keep every concurrent add, lists and text that merge by position with marks and cursors, trees whose moves never form a cycle, tombstones that a newer write revives. Applied in any order, any number of times, every node ends up with the same records."
     link: /guide/sync#registers-counters-sets-lists-and-text
     linkText: Registers, counters, sets, lists and text
   - icon: ⏯️

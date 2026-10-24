@@ -10,6 +10,7 @@ const {
   isCounter,
   isSet,
   isSeq,
+  isTree,
   observedTags,
   latestClock,
   packOps,
@@ -877,6 +878,151 @@ test('ops: a peer-shaped meta reaches nothing it should not', async (t) => {
     assert.deepStrictEqual(row[8], 'body');
     assert.deepStrictEqual(row[9], a1.value);
     assert.strictEqual(unpackOps([row])[0].type, 'splice');
+  });
+
+  await t.test('a tree moves through applyOp; concurrent moves that would make a cycle leave one in effect', () => {
+    const tree = (ts, origin, seq, node, parent, fi = 'V') =>
+      op('tree', ts, origin, { seq, key: 'outline', value: { node, parent, fi } });
+    const r = tree(10, 'A', 1, 'r', null);
+    const x = tree(20, 'A', 2, 'x', 'r', 'UV');
+    const y = tree(30, 'A', 3, 'y', 'r', 'WV');
+    const first = applyOp(null, r);
+    assert.strictEqual(first.changed, true);
+    assert.deepStrictEqual(first.entry.data, { outline: [{ id: 'r', children: [] }] });
+    assert.deepStrictEqual(first.delta, { outline: [{ id: 'r', children: [] }] });
+    assert.strictEqual(isTree(first.entry.meta, 'outline'), true);
+    assert.strictEqual(isTree(first.entry.meta, 'other'), false);
+    assert.strictEqual(isTree({ clock: {}, counters: {} }, 'outline'), false, 'an entry from before trees existed');
+    assert.deepStrictEqual(first.entry.meta.trees.outline, { ts: 10, moves: { r: [[10, 'A', null, 'V']] } });
+    assert.strictEqual(applyOp(first.entry, r).changed, false, 'a duplicate is nothing');
+    // Apart, A puts x under y and B puts y under x: the older move stands,
+    // the newer one is kept but does not take — the same on every node.
+    const underY = tree(40, 'A', 4, 'x', 'y');
+    const underX = tree(50, 'B', 1, 'y', 'x');
+    assertCommutes([r, x, y, underY, underX], {
+      outline: [{ id: 'r', children: [{ id: 'y', children: [{ id: 'x', children: [] }] }] }],
+    });
+    const held = replay([r, x, y, underY, underX]);
+    assert.deepStrictEqual(held.meta.trees.outline.moves.y, [
+      [30, 'A', 'r', 'WV'],
+      [50, 'B', 'x', 'V'],
+    ]);
+    // A later move of y out from under r makes the lost move count: x
+    // comes along, and y hangs where the lost move said.
+    const yOut = applyOp(held, tree(60, 'C', 1, 'y', null, 'XV'));
+    assert.deepStrictEqual(yOut.entry.data.outline, [
+      { id: 'r', children: [] },
+      { id: 'y', children: [{ id: 'x', children: [] }] },
+    ]);
+    // A removal concurrent with a move into the removed subtree hides the mover too.
+    const trash = tree(40, 'A', 4, 'y', '$trash');
+    const into = tree(50, 'B', 1, 'x', 'y');
+    assertCommutes([r, x, y, trash, into], { outline: [{ id: 'r', children: [] }] });
+    // A reset drops the moves below it; one above it stays and reads from
+    // its parent once the parent is back.
+    const write = op('write', 100, 'W', { data: { t: 1 } });
+    assertCommutes([r, x, write], { t: 1 });
+    const z = tree(150, 'B', 1, 'z', 'r');
+    assertCommutes([r, x, write, z], { t: 1, outline: [] });
+    const back = applyOp(replay([r, x, write, z]), tree(160, 'A', 3, 'r', null));
+    assert.deepStrictEqual(back.entry.data.outline, [{ id: 'r', children: [{ id: 'z', children: [] }] }]);
+    // A tree touched after a tombstone revives the record.
+    const dead = applyOp(replay([r]), op('delete', 100, 'D'));
+    assert.strictEqual(isAlive(dead.entry), false);
+    assert.strictEqual(isAlive(applyOp(dead.entry, tree(150, 'A', 2, 'r', null)).entry), true);
+    // The kinds never meet.
+    const reg = applyOp(null, op('set', 1, 'A', { data: { outline: 1 } })).entry;
+    assert.deepStrictEqual(applyOp(reg, tree(2, 'B', 1, 'r', null)).rejected, [
+      { field: 'outline', reason: 'register' },
+    ]);
+    const onTree = (o) => applyOp(first.entry, o).rejected;
+    assert.deepStrictEqual(onTree(op('set', 11, 'B', { data: { outline: 1 } })), [
+      { field: 'outline', reason: 'tree' },
+    ]);
+    assert.deepStrictEqual(onTree(op('inc', 11, 'B', { seq: 1, key: 'outline', value: 1 })), [
+      { field: 'outline', reason: 'tree' },
+    ]);
+    assert.deepStrictEqual(onTree(op('add', 11, 'B', { seq: 1, key: 'outline', value: ['x'] })), [
+      { field: 'outline', reason: 'tree' },
+    ]);
+    assert.deepStrictEqual(
+      onTree(op('splice', 11, 'B', { seq: 1, key: 'outline', value: { at: '^', content: 'x' } })),
+      [{ field: 'outline', reason: 'tree' }],
+    );
+    assert.deepStrictEqual(
+      onTree(op('assign', 11, 'B', { seq: 1, key: 'outline', value: { elem: '1:0:A', value: 1 } })),
+      [{ field: 'outline', reason: 'tree' }],
+    );
+    const counter = applyOp(null, op('inc', 1, 'A', { seq: 1, key: 'outline', value: 1 }));
+    assert.deepStrictEqual(applyOp(counter.entry, tree(2, 'B', 1, 'r', null)).rejected, [
+      { field: 'outline', reason: 'counter' },
+    ]);
+    const set = applyOp(null, op('add', 1, 'A', { seq: 1, key: 'outline', value: ['x'] }));
+    assert.deepStrictEqual(applyOp(set.entry, tree(2, 'B', 1, 'r', null)).rejected, [
+      { field: 'outline', reason: 'set' },
+    ]);
+    const text = applyOp(null, op('splice', 1, 'A', { seq: 1, key: 'outline', value: { at: '^', content: 'x' } }));
+    assert.deepStrictEqual(applyOp(text.entry, tree(2, 'B', 1, 'r', null)).rejected, [
+      { field: 'outline', reason: 'text' },
+    ]);
+    // A malformed payload is nothing.
+    for (const value of [
+      'nope',
+      null,
+      { node: 'n' },
+      { node: 'n', parent: 'n', fi: 'V' },
+      { node: '$trash', parent: null, fi: 'V' },
+    ]) {
+      const result = applyOp(first.entry, op('tree', 11, 'C', { seq: 1, key: 'outline', value }));
+      assert.deepStrictEqual([result.changed, result.rejected], [false, []], JSON.stringify(value));
+    }
+    // Over the wire: one code, round-tripped.
+    const [packed] = unpackOps(packOps([r]));
+    assert.deepStrictEqual(packed, r);
+    // mergeEntry joins two tree histories like replaying both; the other
+    // kinds outrank a tree.
+    const left = replay([r, x, underY]);
+    const right = replay([r, y, underX]);
+    const all = replay([r, x, y, underY, underX]);
+    const merged = mergeEntry(left, right);
+    assert.deepStrictEqual(merged.data, all.data);
+    assert.deepStrictEqual(merged.meta, all.meta);
+    assert.deepStrictEqual(mergeEntry(right, left).meta, all.meta, 'commutative');
+    const viaOp = applyOp(
+      left,
+      op('merge', 70, 'M', { data: right.data, meta: JSON.parse(JSON.stringify(right.meta)) }),
+    );
+    assert.deepStrictEqual(viaOp.entry.meta.trees, all.meta.trees);
+    const asText = mergeEntry(first.entry, text.entry);
+    assert.deepStrictEqual([asText.data.outline, asText.meta.trees], ['x', {}], 'a text outranks a tree');
+    const asSet = mergeEntry(first.entry, set.entry);
+    assert.deepStrictEqual([asSet.data.outline, asSet.meta.trees], [['x'], {}], 'a set outranks a tree');
+    const asCounter = mergeEntry(first.entry, counter.entry);
+    assert.deepStrictEqual([asCounter.data.outline, asCounter.meta.trees], [1, {}], 'a counter outranks a tree');
+    const asRegister = mergeEntry(first.entry, applyOp(null, op('set', 1, 'A', { data: { outline: 'reg' } })).entry);
+    assert.deepStrictEqual([asRegister.data.outline, asRegister.meta.trees], ['reg', {}], 'a register outranks a tree');
+    // A hostile block is rebuilt from own keys and well-formed moves alone.
+    const hostile = applyOp(
+      null,
+      op('merge', 80, 'M', {
+        data: {},
+        meta: JSON.parse(
+          JSON.stringify({
+            clock: {},
+            counters: {},
+            trees: {
+              outline: {
+                moves: { r: [[10, 'A', null, 'V'], 'junk', [5, 'A', 7, 'V']], ['__proto__']: [[1, 'A', null, 'V']] },
+              },
+              empty: { moves: {} },
+              junk: 5,
+            },
+          }),
+        ),
+      }),
+    );
+    assert.deepStrictEqual(hostile.entry.meta.trees, { outline: { ts: 10, moves: { r: [[10, 'A', null, 'V']] } } });
+    assert.deepStrictEqual(latestClock(hostile.entry.meta), [10, '']);
   });
 
   await t.test('fields named after Object.prototype members are fields; __proto__ never is', () => {

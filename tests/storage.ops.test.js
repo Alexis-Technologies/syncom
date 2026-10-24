@@ -410,6 +410,123 @@ test('Storage replication model', async (t) => {
     assert.strictEqual(await record.index('body', c), 1);
   });
 
+  await t.test('treeMove and treeRemove keep a movable tree; a cycle is refused inside the queue', async (t2) => {
+    const { dir, storage } = await openTemp(t2);
+    const ops = [];
+    storage.on('change', (op) => ops.push(op));
+    const id = await storage.insert({ name: 'outline' });
+    await storage.treeMove(id, 'outline', 'root');
+    await storage.treeMove(id, 'outline', 'b', 'root');
+    await storage.treeMove(id, 'outline', 'a', 'root', { before: 'b' });
+    await storage.treeMove(id, 'outline', 'c', 'root', { after: 'b' });
+    await storage.treeMove(id, 'outline', 'c1', 'c');
+    const leaf = (name) => ({ id: name, children: [] });
+    assert.deepStrictEqual((await storage.get(id)).outline, [
+      { id: 'root', children: [leaf('a'), leaf('b'), { id: 'c', children: [leaf('c1')] }] },
+    ]);
+    // What travels: the node, its parent and a fractional index between
+    // the neighbours it was put among.
+    assert.deepStrictEqual(
+      ops.slice(1).map((op) => [op.type, op.key, op.value.node, op.value.parent]),
+      [
+        ['tree', 'outline', 'root', null],
+        ['tree', 'outline', 'b', 'root'],
+        ['tree', 'outline', 'a', 'root'],
+        ['tree', 'outline', 'c', 'root'],
+        ['tree', 'outline', 'c1', 'c'],
+      ],
+    );
+    const [, , fiB, fiA, fiC] = ops.map((op) => op.value?.fi);
+    assert.ok(fiA < fiB && fiB < fiC, `${fiA} < ${fiB} < ${fiC}`);
+    // A subtree moves whole; a move to where the node is makes no op.
+    await storage.treeMove(id, 'outline', 'c', 'a');
+    assert.deepStrictEqual((await storage.get(id)).outline, [
+      { id: 'root', children: [{ id: 'a', children: [{ id: 'c', children: [leaf('c1')] }] }, leaf('b')] },
+    ]);
+    const count = ops.length;
+    await storage.treeMove(id, 'outline', 'c', 'a');
+    await storage.treeMove(id, 'outline', 'b', 'root', { after: 'a' });
+    await storage.treeMove(id, 'outline', 'root');
+    assert.strictEqual(ops.length, count, 'already there');
+    await storage.treeMove(id, 'outline', 'b', 'root', { before: 'a' });
+    assert.deepStrictEqual(
+      (await storage.get(id)).outline[0].children.map((n) => n.id),
+      ['b', 'a'],
+    );
+    // A cycle, an unknown sibling: coded errors, decided inside the queue.
+    await assert.rejects(() => storage.treeMove(id, 'outline', 'a', 'c1'), {
+      name: 'SyncomError',
+      code: 'CYCLE',
+      id,
+      field: 'outline',
+      node: 'a',
+      parent: 'c1',
+    });
+    await assert.rejects(() => storage.treeMove(id, 'outline', 'a', 'root', { after: 'nope' }), {
+      code: 'NOT_FOUND',
+      id,
+      field: 'outline',
+      node: 'nope',
+    });
+    await assert.rejects(() => storage.treeMove(id, 'outline', 'a', 'root', { before: 'c1' }), { code: 'NOT_FOUND' });
+    // A removal takes the subtree; twice is nothing; a move brings it back whole.
+    await storage.treeRemove(id, 'outline', 'a');
+    assert.deepStrictEqual((await storage.get(id)).outline, [{ id: 'root', children: [leaf('b')] }]);
+    assert.deepStrictEqual([ops.at(-1).value.node, ops.at(-1).value.parent], ['a', '$trash']);
+    const removed = ops.length;
+    await storage.treeRemove(id, 'outline', 'a');
+    assert.strictEqual(ops.length, removed, 'already removed');
+    await storage.treeMove(id, 'outline', 'a', 'root');
+    assert.deepStrictEqual((await storage.get(id)).outline, [
+      { id: 'root', children: [leaf('b'), { id: 'a', children: [{ id: 'c', children: [leaf('c1')] }] }] },
+    ]);
+    // The kind rule, with a hint at the right call.
+    const hint = /tree; use treeMove\(\) or treeRemove\(\)/;
+    await assert.rejects(() => storage.update(id, { outline: [] }), hint);
+    await assert.rejects(() => storage.inc(id, 'outline'), hint);
+    await assert.rejects(() => storage.add(id, 'outline', ['x']), hint);
+    await assert.rejects(() => storage.push(id, 'outline', ['x']), hint);
+    await assert.rejects(() => storage.setAt(id, 'outline', 0, 'x'), hint);
+    await assert.rejects(() => storage.move(id, 'outline', 0, 1), hint);
+    await assert.rejects(() => storage.mark(id, 'outline', 0, 0, 'b', true), hint);
+    await assert.rejects(() => storage.treeMove(id, 'name', 'n'), /register; use update\(\)/);
+    await storage.push(id, 'items', [1]);
+    await assert.rejects(() => storage.treeMove(id, 'items', 'n'), /list; use splice\(\)/);
+    await storage.inc(id, 'hits');
+    await assert.rejects(() => storage.treeRemove(id, 'hits', 'n'), /counter; use inc\(\)/);
+    // Arguments.
+    await assert.rejects(() => storage.treeMove(id, 7, 'n'), TypeError);
+    await assert.rejects(() => storage.treeMove(id, 'outline', ''), TypeError);
+    await assert.rejects(() => storage.treeMove(id, 'outline', '$trash'), TypeError);
+    await assert.rejects(() => storage.treeMove(id, 'outline', 'x'.repeat(129)), TypeError);
+    await assert.rejects(() => storage.treeMove(id, 'outline', 'n', 5), TypeError);
+    await assert.rejects(() => storage.treeMove(id, 'outline', 'n', 'n'), TypeError);
+    await assert.rejects(() => storage.treeMove(id, 'outline', 'n', null, { after: 'a', before: 'b' }), TypeError);
+    await assert.rejects(() => storage.treeMove(id, 'outline', 'n', null, { after: 'n' }), TypeError);
+    await assert.rejects(() => storage.treeMove(id, 'outline', 'n', null, { before: 5 }), TypeError);
+    await assert.rejects(() => storage.treeRemove(id, 'outline', 'bad\u0001'), TypeError);
+    // Through a live Record.
+    const record = await storage.record(id);
+    await record.treeMove('outline', 'd', 'root', { before: 'b' });
+    assert.deepStrictEqual(
+      record.outline[0].children.map((n) => n.id),
+      ['d', 'b', 'a'],
+    );
+    await record.treeRemove('outline', 'd');
+    assert.deepStrictEqual(
+      record.outline[0].children.map((n) => n.id),
+      ['b', 'a'],
+    );
+    // The tree survives a reopen, from the file and from the log alike.
+    const outline = (await storage.get(id)).outline;
+    await storage.close();
+    const again = await syncom.open({ path: dir, logger: false });
+    t2.after(() => again.close());
+    assert.deepStrictEqual((await again.get(id)).outline, outline);
+    assert.ok((await again.repair(id)).ops > 0);
+    assert.deepStrictEqual((await again.get(id)).outline, outline, 'replayed from the log');
+  });
+
   await t.test('setAt and move keep an element’s name; a move names where it shows', async (t2) => {
     const { storage } = await openTemp(t2);
     const ops = [];

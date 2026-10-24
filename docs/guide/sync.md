@@ -41,10 +41,11 @@ in the log:
 | `inc` | `inc()`, `record.inc()` | Adds to a counter field |
 | `add` | `add()`, `record.add()` | Adds elements to a set field |
 | `remove` | `remove()`, `record.remove()` | Removes from a set field the elements this node had seen added |
-| `splice` | `splice()`, `push()`, `record.splice()`, `record.push()` | Removes a range of a list or text field and inserts at a place — see [Lists and text](./lists) |
+| `splice` | `splice()`, `push()`, `record.splice()`, `record.push()` | Removes a range of a list or text field and inserts at a place — see [Lists, text and trees](./lists) |
 | `assign` | `setAt()`, `record.setAt()` | Sets a list element's value register |
 | `move` | `move()`, `record.move()` | Moves a list element: cuts its slot, adds a position run, points its position register at it |
 | `mark` | `mark()`, `unmark()`, `record.mark()`, `record.unmark()` | Styles a range of a text field between two anchors, or switches a mark off |
+| `tree` | `treeMove()`, `treeRemove()`, `record.treeMove()`, `record.treeRemove()` | Moves a node of a tree field under a parent (`$trash`: removed) at a place among its siblings — see [Trees](./lists#trees) |
 | `delete` | `delete()`, `record.delete()` | Leaves a tombstone; a newer write revives the record |
 | `purge` | `purge()` | Erases the record for good: wins at any stamp, nothing later lands, and every entry of the id is scrubbed from the log (see [Purge](./storage#purge)) |
 | `merge` | a snapshot page being joined | Joins a whole entry (see [Bootstrap](#bootstrap)) |
@@ -92,8 +93,8 @@ that they do not have to:
 
 ### Registers, counters, sets, lists and text
 
-A field is a **register**, a **counter**, a **set**, a **list** or a **text** — one
-of them, never two.
+A field is a **register**, a **counter**, a **set**, a **list**, a **text** or a
+**tree** — one of them, never two.
 
 - A register holds whatever was written last: two nodes writing the same field
   concurrently agree on the winner by `(ts, origin)`, so both end up with the
@@ -109,7 +110,12 @@ of them, never two.
   `splice()` and `push()`. Two nodes inserting at one spot both keep theirs,
   each writer's run whole, and a deleted element keeps its place so the
   anchors into it still resolve — Fugue, the rule Loro and list-positions
-  use. [Lists and text](./lists) has the whole story.
+  use. [Lists, text and trees](./lists) has the whole story.
+- A tree is nodes with a parent and a place among their siblings, moved with
+  `treeMove()` and removed with `treeRemove()`. Two nodes that move
+  concurrently so that each would hang under the other agree that the older
+  move stands and the newer one lost — Kleppmann's rule, the one Loro uses.
+  [Trees](./lists#trees).
 
 ```js
 const id = await storage.insert({ title: 'Draft' }); // title is a register
@@ -118,6 +124,7 @@ await storage.add(id, 'tags', ['bug', 'ui']);        // tags is a set
 await storage.remove(id, 'tags', ['ui']);            // tags is ['bug']
 await storage.splice(id, 'body', 0, 0, 'Hello');     // body is a text
 await storage.push(id, 'items', [1, 2]);             // items is a list
+await storage.treeMove(id, 'outline', 'n1');         // outline is a tree
 await storage.update(id, { title: 'Final' });        // fine
 await storage.update(id, { views: 10 });              // throws: views is a counter; use inc()
 await storage.update(id, { tags: [] });               // throws: tags is a set; use add() or remove()
@@ -125,9 +132,9 @@ await storage.inc(id, 'title', 1);                    // throws: title is a regi
 await storage.update(id, { body: 'x' });              // throws: body is a text; use splice() or push()
 ```
 
-Do not initialise a counter, a set, a list or a text in `insert()` — `{ views:
+Do not initialise a counter, a set, a list, a text or a tree in `insert()` — `{ views:
 0 }` makes `views` a register, `{ tags: [] }` and `{ body: '' }` make theirs
-registers too; `inc()`, `add()`, `splice()` and `push()` create their fields. A validator's default for the field (`tags: []`) is
+registers too; `inc()`, `add()`, `splice()`, `push()` and `treeMove()` create their fields. A validator's default for the field (`tags: []`) is
 folded into the write and does the same. A peer's op that breaks the rule is
 refused for that field and reported as an `error` event on the storage; the
 rest of the op still applies.

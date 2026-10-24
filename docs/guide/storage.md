@@ -66,7 +66,7 @@ across nodes. A field created with `add()` is a *set* — concurrent adds both
 keep, and an add a remove did not see survives it; it reads sorted by element
 text. A field created with `splice()` or `push()` is a *list* (an array) or a
 *text* (a string), edited by position: concurrent inserts both keep, each
-writer's run whole — see [Lists and text](./lists). A field is one kind only:
+writer's run whole — see [Lists, text and trees](./lists). A field is one kind only:
 `update()` on a counter, a set, a list or a text, `inc()` on a register or a
 set, `add()` on a register or a counter, `splice()` on a register throw. The fields are
 the top-level ones: a nested object is one register, replaced whole by

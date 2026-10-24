@@ -96,7 +96,7 @@ appears on one.
 | `syncom.commits` | Counter | `{op}` | `syncom.op.type`, `syncom.result` (`applied` / `noop` / `encrypted` / `error`) |
 | `syncom.write.duration` | Histogram | `ms` | `syncom.path` (`commit` / `apply` / `replay`) |
 | `syncom.ops.received` | Counter | `{op}` | `syncom.outcome` (`applied` / `skipped` — accepted but not applied here: a hook, the schema, an unreadable record / `duplicate` / `gap` / `malformed` — the last includes a stamp beyond `maxSkew` / `refused` — a signature that does not check, or none under `'require'`) |
-| `syncom.ops.rejected` | Counter | `{op}` | `syncom.reason` (`register` / `counter` / `set` / `list` / `text` / `bound` / `validation` / `scope` / `unreadable` / `forged` / `unsigned`) |
+| `syncom.ops.rejected` | Counter | `{op}` | `syncom.reason` (`register` / `counter` / `set` / `list` / `text` / `tree` / `bound` / `validation` / `scope` / `unreadable` / `forged` / `unsigned`) |
 | `syncom.conflicts` | Counter | `{conflict}` | `syncom.kind` (`unique`) |
 | `syncom.ops.limited` | Counter | `{push}` | `syncom.reason` (`ops` / `bytes` / `rate`) |
 | `syncom.replication.lag` | Histogram | `ms` | — |

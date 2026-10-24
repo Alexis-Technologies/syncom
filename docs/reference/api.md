@@ -48,14 +48,16 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 | `inc(id, key, value = 1, { actor }?)` | `Promise<void>` | Adds to a counter field (an `inc` op); throws on a register or set field |
 | `add(id, key, elements, { actor }?)` | `Promise<void>` | Adds JSON values to a set field (an `add` op); creates the field and the record when absent; throws on a register or counter field |
 | `remove(id, key, elements, { actor }?)` | `Promise<void>` | Removes from a set field the elements this node has seen added (a `remove` op; none seen: no op); throws on a register or counter field |
-| `splice(id, key, index, count = 0, content?, { actor }?)` | `Promise<void>` | Removes `count` elements at `index` of a list or text field and inserts `content` there (a `splice` op) — an array for a list, a string for a text; the first write decides the kind. Creates the field and the record when absent; rejects with `OUT_OF_RANGE` past the length; throws on a register, counter or set field |
-$1
+| `splice(id, key, index, count = 0, content?, { actor }?)` | `Promise<void>` | Removes `count` elements at `index` of a list or text field and inserts `content` there (a `splice` op) — an array for a list, a string for a text; the first write decides the kind. Creates the field and the record when absent; rejects with `OUT_OF_RANGE` past the length; throws on a register, counter, set or tree field |
+| `push(id, key, content, { actor }?)` | `Promise<void>` | Appends to a list or text field — a `splice` at the end |
 | `updateText(id, key, text, { actor }?)` | `Promise<number>` | Makes a text field read as `text`: diffed against the field inside the mutation queue (Myers, UTF-16 units), one `splice` per hunk, last first, in one turn of the queue; resolves to the number of ops. A difference deeper than a thousand edit steps is one op replacing the middle |
 | `setAt(id, key, index, value, { actor }?)` | `Promise<void>` | Replaces the element at `index` of a list field (an `assign` op) — a register per element that follows it through a concurrent move; rejects with `OUT_OF_RANGE`; throws on a text and on the other kinds |
-$1
+| `move(id, key, from, to, { actor }?)` | `Promise<void>` | Moves the element at `from` of a list field to `to`, its index once out (a `move` op); concurrent moves of one element leave it once, at the newer one's place; `from === to` is nothing; rejects with `OUT_OF_RANGE` |
+| `treeMove(id, key, node, parent = null, { after, before, actor }?)` | `Promise<void>` | Puts `node` of a tree field under `parent` (`null`: a root) — after sibling `after`, before sibling `before`, or last (a `tree` op); creates the node, the field and the record when absent. Two nodes moving concurrently so that each would hang under the other: the older move stands, the newer is kept without effect, on every node. Rejects with `CYCLE` for a parent under the node and `NOT_FOUND` for a sibling not under `parent`; a move to where the node already is makes no op; throws on the other kinds |
+| `treeRemove(id, key, node, { actor }?)` | `Promise<void>` | Removes `node` of a tree field with everything under it — a `tree` op moving it under `$trash`; a node not known here is created there, so a concurrent creation lands removed; twice is nothing |
 | `mark(id, key, start, end, name, value, { expand, many, actor }?)` | `Promise<string \| null>` | Marks visible range `[start, end)` of a text field with `name: value` (a `mark` op); `expand` (`'after'` by default, `'before'`, `'both'`, `'none'`) says whether text typed at the edges takes the style; per name the newest mark wins; `many: true` stacks with every other of its name. Resolves to the mark's id; rejects with `OUT_OF_RANGE`; throws on a list and on the other kinds |
 | `unmark(id, key, start, end, name, { expand, actor }?)` / `unmark(id, key, markId, { actor }?)` | `Promise<void>` | Removes a style over a range (a null mark under the reversed expand rule), or one mark by id — the only way for a `many` mark |
-$1
+| `spans(id, key)` | `Promise<TextSpan[] \| null>` | The text field as runs of equal style, `[{ text, marks }]`; raw — no lens, no read hooks; `null` unless the field is a text |
 | `cursor(id, key, index, { side }?)` | `Promise<string \| null>` | A cursor into a list or text field — a place that survives edits around it, before the element at `index` (`'before'`, the default) or after the one before it; `null` out of range or when the field is not a sequence |
 | `index(id, key, cursor)` | `Promise<number \| null>` | Where a cursor is now; `null` once its place is gone (a reset) |
 | `swap(id, changes, prev, { actor }?)` | `Promise<boolean>` | CAS, compared inside the mutation queue — `false`, and no write, on mismatch; rejects when absent |
@@ -110,6 +112,11 @@ assignment, and when the record changes in storage (`null` data once deleted).
 
 `id`, `data()`, `delta()`, `save({ actor }?)`, `inc(key, value?, { actor }?)`,
 `add(key, elements, { actor }?)`, `remove(key, elements, { actor }?)`,
+`splice(key, index, count?, content?, { actor }?)`, `push(key, content, { actor }?)`,
+`updateText(key, text, { actor }?)`, `setAt(key, index, value, { actor }?)`,
+`move(key, from, to, { actor }?)`, `mark(key, start, end, name, value, options?)`,
+`unmark(…)`, `spans(key)`, `cursor(key, index, options?)`, `index(key, cursor)`,
+`treeMove(key, node, parent?, { after, before, actor }?)`, `treeRemove(key, node, { actor }?)`,
 `delete({ actor }?)`, plus a
 live property per field of the loaded object.
 
@@ -202,9 +209,10 @@ value is data or configuration. `HookError` and `ValidationError` are
 | --- | --- | --- |
 | `CLOSED` | any write or `applyRemote()` after `close()` | — |
 | `IN_HOOK` | a write issued from inside a write or apply hook (the `cause` of the `HookError` the operation rejects with) | — |
-| `NOT_FOUND` | `update()`, `swap()` on a record that is absent, deleted or purged; a collection's `update()`, `delete()`, `record()` on a record of another collection | `id`, `entity` (the collection's) |
-| `FIELD_KIND` | `update()`/`set()` on a counter, set, list or text field, `inc()` on a register, set, list or text field, `add()`/`remove()` on a register, counter, list or text field, `splice()`/`push()` on a register, counter or set field | `field`, `kind` (`'register'`, `'counter'`, `'set'`, `'list'` or `'text'`) |
+| `NOT_FOUND` | `update()`, `swap()` on a record that is absent, deleted or purged; a collection's `update()`, `delete()`, `record()` on a record of another collection; `treeMove()` with an `after`/`before` sibling not under the parent | `id`, `entity` (the collection's); `field`, `node` (the sibling) for a tree |
+| `FIELD_KIND` | `update()`/`set()` on a counter, set, list, text or tree field, `inc()` on a register, set, list, text or tree field, `add()`/`remove()` on a register, counter, list, text or tree field, `splice()`/`push()` on a register, counter, set or tree field, `setAt()`/`move()`/`mark()` and `treeMove()`/`treeRemove()` on any other kind | `field`, `kind` (`'register'`, `'counter'`, `'set'`, `'list'`, `'text'` or `'tree'`) |
 | `OUT_OF_RANGE` | `splice()` past the length of a list or text field — the index, or the index plus the count; `setAt()`/`move()` at an index the list has not; `mark()`/`unmark()` over a range the text has not | `id`, `field`, `index`, `count`, `length` |
+| `CYCLE` | `treeMove()` to a parent that is the node itself or hangs under it — decided inside the mutation queue, against the tree as it is | `id`, `field`, `node`, `parent` |
 | `ENCRYPTED` | `inc()`, `add()`, `remove()`, `splice()` or `push()` on an encrypted record; `{ encrypted: true }` on a replicated one | — |
 | `INTEGRITY` | a read (`get()`, `has()`, a cursor) of a record whose file fails its chain block check, under `integrity: 'verify'`, or cannot be parsed at all (a file torn by a crash; `repair(id)` rebuilds it) | `id`, `cause` (the parse error) |
 | `CORRUPT` | `open()` when `node.json`, `schema.json` or `.blockchain.json` cannot be read | `cause` |

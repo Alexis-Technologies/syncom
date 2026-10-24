@@ -45,6 +45,22 @@ There is no released version section until then; everything below lands in it.
   (under 1 KB, off the main entry) mints fractional indexes — strings that
   sort with `<`, with room between any two — for ordering records by a
   position field. Browser budget 42 → 52 KB.
+- **Trees.** A field can be a tree: `treeMove(id, key, node, parent, { after,
+  before })` puts a node under a parent at a place among its siblings and
+  `treeRemove(id, key, node)` takes it out with everything under it, on the
+  storage and on a live Record; the field reads as `[{ id, children }]`. A
+  `tree` op is one move — the node, its parent (`null` a root, `'$trash'`
+  removed) and a fractional index between its neighbours — and the record
+  keeps every move of every node; the tree is their fold in stamp order with
+  a move that would put a node under itself skipped (Kleppmann et al. 2021,
+  the rule Loro's movable tree follows), so two nodes moving concurrently so
+  that each would hang under the other agree that the older move stands. A
+  parent under the node itself rejects with `CYCLE` (new code), a sibling not
+  under the parent with `NOT_FOUND`, both decided inside the mutation queue;
+  a move to where the node is makes no op. `migrate()` carries a tree across
+  a schema version and counts `trees`. Browser budget 52 → 55 KB — the move
+  log and the fold, and `@alexify/syncom/order` now in the core for the
+  places.
 - **Full-text search.** An entity names its `search: ['title', 'body']`
   fields and `open({ search: createSearch() })` gives the index —
   `@alexify/syncom/search`, a subpath under 1 KB, so a node that never

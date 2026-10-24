@@ -9,8 +9,10 @@
 // lensed readers — see Storage#open.
 
 const { encrypt, calculateHash } = require('./crypto.js');
-const { applyOp, isAlive, latestClock, observedTags, isCounter, isSet } = require('./ops.js');
+const { applyOp, isAlive, latestClock, observedTags, isCounter, isSet, isTree } = require('./ops.js');
 const S = require('./sequence.js');
+const T = require('./tree.js');
+const { between } = require('./order.js');
 const { opKey } = require('./vector.js');
 const { notify } = require('./hooks.js');
 const { ValidationError, project, unproject, foldSet } = require('./schema.js');
@@ -44,6 +46,7 @@ const HINTS = {
   set: 'a set; use add() or remove()',
   list: 'a list; use splice(), push(), setAt() or move()',
   text: 'a text; use splice(), push(), updateText() or mark()',
+  tree: 'a tree; use treeMove() or treeRemove()',
   bound: 'past the bound on pending work',
 };
 const refuse = (id, rejected) => {
@@ -162,9 +165,9 @@ const resolveSplice = (core, id, payload, current) => {
 const elementAt = (core, id, key, index, current) => {
   const meta = current?.meta;
   const held = meta && Object.hasOwn(meta.seqs ?? {}, key) ? meta.seqs[key] : undefined;
-  if (held === undefined && meta && (Object.hasOwn(meta.clock, key) || isCounter(meta, key) || isSet(meta, key))) {
-    return { idx: null, elem: '1:0:placeholder' };
-  }
+  const other =
+    meta && (Object.hasOwn(meta.clock, key) || isCounter(meta, key) || isSet(meta, key) || isTree(meta, key));
+  if (held === undefined && other) return { idx: null, elem: '1:0:placeholder' };
   if (held !== undefined && held.k !== 'l') return { idx: null, elem: '1:0:placeholder' };
   const idx = held === undefined ? null : S.buildIndex(held, meta.base);
   const length = idx === null ? 0 : idx.length;
@@ -206,7 +209,7 @@ const resolveMark = (core, id, payload, current) => {
   const held = meta && Object.hasOwn(meta.seqs ?? {}, key) ? meta.seqs[key] : undefined;
   const other =
     held === undefined
-      ? meta && (Object.hasOwn(meta.clock, key) || isCounter(meta, key) || isSet(meta, key))
+      ? meta && (Object.hasOwn(meta.clock, key) || isCounter(meta, key) || isSet(meta, key) || isTree(meta, key))
       : held.k !== 't';
   if (other) return { start: S.HEAD, end: S.END, key: name, value };
   const idx = held === undefined ? null : S.buildIndex(held, meta.base);
@@ -219,6 +222,52 @@ const resolveMark = (core, id, payload, current) => {
   const out = { start: from, end: to, key: name, value };
   if (many) out.many = true;
   return out;
+};
+
+// A tree move names a parent and a sibling to land after or before; what
+// travels is the place among the siblings as a fractional index
+// (src/order.js) between its neighbours — decided inside the queue, against
+// the tree as it is. A parent in the node's own subtree is CYCLE, a sibling
+// not under the parent NOT_FOUND; a move to where the node already is makes
+// no op (null). Siblings that share an index order by stamp, and a node put
+// after one of them lands after all of them. Another kind under the field
+// is left to applyOp to refuse.
+const resolveTree = (core, id, payload, current) => {
+  const { key, node, parent, after, before } = payload;
+  const meta = current?.meta;
+  const held = meta && Object.hasOwn(meta.trees ?? {}, key) ? meta.trees[key] : undefined;
+  const tree = held ?? T.createTree();
+  if (parent !== null && parent !== T.TRASH && T.subtree(tree, node).has(parent)) {
+    const where = parent === node ? 'itself' : `${parent}, a node under it`;
+    const message = `Node ${node} of field ${key} of record ${id} cannot go under ${where}`;
+    throw new SyncomError('CYCLE', message, { id, field: key, node, parent });
+  }
+  const all = T.siblings(tree, parent);
+  const was = all.findIndex((s) => s.id === node);
+  const sibs = was < 0 ? all : all.filter((s) => s.id !== node);
+  let at = sibs.length;
+  const next = after ?? before;
+  if (next !== undefined) {
+    const i = sibs.findIndex((s) => s.id === next);
+    if (i < 0) {
+      const message = `Node ${next} is not under ${parent ?? 'the root'} of field ${key} of record ${id}`;
+      throw new SyncomError('NOT_FOUND', message, { id, field: key, node: next });
+    }
+    at = after !== undefined ? i + 1 : i;
+  }
+  if (was >= 0 && (at === was || parent === T.TRASH)) return null;
+  const lower = at > 0 ? sibs[at - 1].fi : null;
+  let upper = at < sibs.length ? sibs[at].fi : null;
+  if (lower !== null && upper !== null && upper <= lower) {
+    upper = null;
+    for (let i = at + 1; i < sibs.length; i++) {
+      if (sibs[i].fi > lower) {
+        upper = sibs[i].fi;
+        break;
+      }
+    }
+  }
+  return { node, parent, fi: between(lower, upper) };
 };
 
 // The op as this node mints it: stamped above everything the node already
@@ -244,6 +293,7 @@ const prepareOp = (core, type, id, payload, current, who, from) => {
   if (type === 'assign') op.value = resolveAssign(core, id, payload, current);
   if (type === 'move') op.value = resolveMove(core, id, payload, current);
   if (type === 'mark') op.value = resolveMark(core, id, payload, current);
+  if (type === 'tree') op.value = resolveTree(core, id, payload, current);
   return op;
 };
 

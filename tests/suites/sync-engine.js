@@ -225,6 +225,37 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     assert.strictEqual(after[id].items.length, before.length);
     assert.strictEqual(after[id].items.filter((v) => v === 'X' || v === 'x').length, 1, 'the element shows once');
     assert.strictEqual(after[id].items[0], 'X', 'at the newer move’s place, with the assigned value');
+    // A tree: apart, A puts x under y and B puts y under x. The older move
+    // stands and the newer one is kept without effect — on both nodes.
+    await a.treeMove(id, 'outline', 'r');
+    await a.treeMove(id, 'outline', 'x', 'r');
+    await a.treeMove(id, 'outline', 'y', 'r');
+    await settle([a, b]);
+    link.disconnect();
+    await a.treeMove(id, 'outline', 'x', 'y');
+    await tick();
+    await b.treeMove(id, 'outline', 'y', 'x');
+    await link.reconnect();
+    await settle([a, b]);
+    const leaf = (name) => ({ id: name, children: [] });
+    const cyc = await assertConverged([a, b]);
+    assert.deepStrictEqual(cyc[id].outline, [{ id: 'r', children: [{ id: 'y', children: [leaf('x')] }] }]);
+    const trees = async (storage) => (await storage.snapshot()).records.find((r) => r.id === id).meta.trees;
+    assert.deepStrictEqual(await trees(a), await trees(b), 'the move logs agree too');
+    // A removal on one side, a move into the removed subtree on the other:
+    // the mover is hidden with it, and comes back with it.
+    link.disconnect();
+    await a.treeRemove(id, 'outline', 'y');
+    await tick();
+    await b.treeMove(id, 'outline', 'z', 'x');
+    await link.reconnect();
+    await settle([a, b]);
+    assert.deepStrictEqual((await assertConverged([a, b]))[id].outline, [{ id: 'r', children: [] }]);
+    await b.treeMove(id, 'outline', 'y', 'r');
+    await settle([a, b]);
+    assert.deepStrictEqual((await assertConverged([a, b]))[id].outline, [
+      { id: 'r', children: [{ id: 'y', children: [{ id: 'x', children: [leaf('z')] }] }] },
+    ]);
     // A style typed into from both sides apart: both insertions take it,
     // and the spans agree.
     await a.updateText(id, 'body', 'hello world');
@@ -351,27 +382,36 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
         else if (roll < 0.48) await storage.remove(id, 'tags', [`t${step % 4}`]);
         else if (roll < 0.54) await storage.delete(id);
         else if (roll < 0.72) await spliceAt(storage, id, 'body', letter(storage).repeat(1 + (step % 3)));
-        else if (roll < 0.82) await spliceAt(storage, id, 'items', [`${letter(storage)}${step}`]);
-        else {
+        else if (roll < 0.8) await spliceAt(storage, id, 'items', [`${letter(storage)}${step}`]);
+        else if (roll < 0.88) {
           const items = (await storage.get(id))?.items ?? [];
           if (items.length === 0) await storage.push(id, 'items', [`${letter(storage)}${step}`]);
-          else if (roll < 0.9) {
+          else if (roll < 0.84) {
             await storage.setAt(id, 'items', Math.floor(random() * items.length), `${letter(storage)}=${step}`);
           } else {
             await storage.move(id, 'items', Math.floor(random() * items.length), Math.floor(random() * items.length));
           }
+        } else {
+          // Six nodes moved about, under each other or a root; one in ten is a removal.
+          const node = `n${Math.floor(random() * 6)}`;
+          const parent = random() < 0.3 ? null : `n${Math.floor(random() * 6)}`;
+          if (roll < 0.98) await storage.treeMove(id, 'outline', node, parent === node ? null : parent);
+          else await storage.treeRemove(id, 'outline', node);
         }
       } catch (error) {
-        // A record deleted or shortened elsewhere is a legitimate outcome.
-        if (!/not found|out of range|takes a count/.test(error.message)) throw error;
+        // A record deleted or shortened elsewhere, a node moved under its
+        // own subtree elsewhere: legitimate outcomes.
+        if (!/not found|out of range|takes a count|cannot go under/.test(error.message)) throw error;
       }
     }
     await settle(storages, { timeout: 10_000 });
     await assertConverged(storages);
-    // The sequence blocks agree too, not only what they read as.
+    // The sequence blocks and the move logs agree too, not only what they read as.
     const blocks = async (storage) => {
       const out = {};
-      for (const record of (await storage.snapshot()).records) out[record.id] = record.meta.seqs ?? {};
+      for (const record of (await storage.snapshot()).records) {
+        out[record.id] = { seqs: record.meta.seqs ?? {}, trees: record.meta.trees ?? {} };
+      }
       return out;
     };
     const expected = await blocks(storages[0]);

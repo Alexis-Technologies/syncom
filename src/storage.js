@@ -18,9 +18,10 @@ const { Record, Collection } = require('./record.js');
 const { commit, MISMATCH } = require('./commit.js');
 const { applyBatch } = require('./apply.js');
 const { snapshotPage, mergeBatch, adopt } = require('./bootstrap.js');
-const { applyOp, isAlive, isCounter, isSet, isSeq } = require('./ops.js');
+const { applyOp, isAlive, isCounter, isSet, isSeq, isTree } = require('./ops.js');
 const { diff } = require('./myers.js');
 const { buildIndex, spans, isRunKey, isAnchor, cursorAt, indexOfCursor, REVERSED } = require('./sequence.js');
+const { TRASH, isNodeId } = require('./tree.js');
 const { Clock } = require('./vector.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
 const { normalizeSchema, createLens, project } = require('./schema.js');
@@ -85,6 +86,13 @@ const spliceArgs = (method, key, index, count, content) => {
 
 // What mark()/unmark() take over a range: a field name, a visible range
 // start ≤ end, a style name and an expand rule.
+const treeArgs = (method, key, node, parent) => {
+  if (typeof key !== 'string') throw new TypeError(`${method}() takes a field name`);
+  if (!isNodeId(node)) throw new TypeError(`${method}() takes a node id: a non-empty string of at most 128 characters`);
+  if (parent !== null && !isNodeId(parent)) throw new TypeError(`${method}() takes a parent: a node id or null`);
+  if (parent === node) throw new TypeError(`${method}() cannot put a node under itself`);
+};
+
 const markArgs = (method, key, start, end, name, expand) => {
   if (typeof key !== 'string') throw new TypeError(`${method}() takes a field name`);
   if (!Number.isInteger(start) || start < 0 || !Number.isInteger(end) || end < start) {
@@ -521,7 +529,7 @@ class Storage extends Emitter {
       throw new TypeError('migrate({ entities }) takes an array of entity names');
     }
     if (!Number.isInteger(batch) || batch < 1) throw new TypeError('migrate({ batch }) takes a positive integer');
-    const result = { migrated: 0, counters: 0, sets: 0, lists: 0, texts: 0 };
+    const result = { migrated: 0, counters: 0, sets: 0, lists: 0, texts: 0, trees: 0 };
     let since = 0;
     for (const id of await this.list()) {
       const entry = await this.#entries.load(id);
@@ -532,10 +540,12 @@ class Storage extends Emitter {
       const counters = {};
       const sets = {};
       const seqs = {};
+      const trees = {};
       for (const key of Object.keys(view)) {
         if (isCounter(entry.meta, key)) counters[key] = entry.data[key];
         else if (isSet(entry.meta, key)) sets[key] = entry.data[key];
         else if (isSeq(entry.meta, key)) seqs[key] = entry.data[key];
+        else if (isTree(entry.meta, key)) trees[key] = entry.data[key];
         else data[key] = view[key];
       }
       await this[COMMIT]('write', id, { data }, { actor });
@@ -555,6 +565,18 @@ class Storage extends Emitter {
         await this[COMMIT]('splice', id, { key, index: 0, count: 0, content: seqs[key] }, { actor });
         if (typeof seqs[key] === 'string') result.texts++;
         else result.lists++;
+      }
+      // A tree comes back as one move per node it reads with, parents
+      // first, in order; what hangs in the trash is dropped, and so is a
+      // tree with nothing to read.
+      for (const key of Object.keys(trees)) {
+        const stack = trees[key].map((root) => [root, null]).reverse();
+        if (stack.length > 0) result.trees++;
+        while (stack.length > 0) {
+          const [{ id: node, children }, parent] = stack.pop();
+          await this[COMMIT]('tree', id, { key, node, parent }, { actor });
+          for (let i = children.length - 1; i >= 0; i--) stack.push([children[i], node]);
+        }
       }
       result.migrated++;
       if (++since >= batch) {
@@ -1185,6 +1207,43 @@ class Storage extends Emitter {
     }
     if (from === to) return;
     await this[COMMIT]('move', id, { key, index: from, to }, { actor });
+  }
+
+  /**
+   * Puts node `node` of tree field `key` under `parent` (`null`: a root) —
+   * after sibling `after`, before sibling `before`, or last (a `tree` op).
+   * A node the tree has not is created there; the field, and the record,
+   * when absent. Two nodes moving concurrently so that each would hang
+   * under the other: the newer move loses, on every node, and a later move
+   * can revive it. Rejects with `CYCLE` for a parent under the node itself
+   * and with `NOT_FOUND` for a sibling not under `parent`; a move to where
+   * the node already is makes no op.
+   */
+  async treeMove(id, key, node, parent = null, { after, before, actor } = {}) {
+    treeArgs('treeMove', key, node, parent);
+    if (after !== undefined && before !== undefined) throw new TypeError('treeMove() takes after or before, not both');
+    for (const [name, value] of [
+      ['after', after],
+      ['before', before],
+    ]) {
+      if (value === undefined) continue;
+      if (!isNodeId(value)) throw new TypeError(`treeMove() takes ${name}: a node id`);
+      if (value === node) throw new TypeError(`treeMove() cannot place a node ${name} itself`);
+    }
+    const payload = { key, node, parent };
+    if (after !== undefined) payload.after = after;
+    if (before !== undefined) payload.before = before;
+    await this[COMMIT]('tree', id, payload, { actor });
+  }
+
+  /**
+   * Removes node `node` of tree field `key` with everything under it — a
+   * move under the trash, which no reading shows. A node not yet known here
+   * is created there, so a creation of it elsewhere lands removed.
+   */
+  async treeRemove(id, key, node, { actor } = {}) {
+    treeArgs('treeRemove', key, node, null);
+    await this[COMMIT]('tree', id, { key, node, parent: TRASH }, { actor });
   }
 
   /**
