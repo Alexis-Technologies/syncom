@@ -29,8 +29,14 @@
 // an extension ahead of its run's length in `ext`, a run whose anchor has not
 // arrived stays in `runs` and out of the walk with its subtree — ops from
 // different origins arrive in any order, and the tree is a function of the
-// set of runs, never of their order of arrival. Each of those pending things
-// counts against PENDING_MAX, a bound on hostile input like `sync.maxSkew`.
+// set of runs, never of their order of arrival. A run is extended by its
+// origin alone: another origin's `{ run, from }` is malformed, or the result
+// would be the order of arrival. Each of those pending things counts against
+// PENDING_MAX (`sync.pendingMax`), a run against MAX_RUN (./rle.js) and a
+// field against MAX_FIELD — bounds on hostile input like `sync.maxSkew`,
+// checked where an op lands (`applySplice`, `bound`) and where a peer's block
+// is normalized (`normalizeSeq`) alike, so a snapshot buys nothing an op
+// could not.
 //
 // A LIST is also movable (Kleppmann et al., "Moving elements in list
 // CRDTs", 2020; Loro's MovableList): every element has, beside its place in

@@ -193,18 +193,25 @@ docs/                     VitePress site
   ops). Once the package is published, an older reader counts an unknown type
   as malformed and its stream stalls there — a new type, or a slot an older
   reader cannot take as null, is then a `PROTOCOL` bump (`src/protocol.js`).
-- **Every write is an op, and a field is a register, a counter, a set, a list OR a text.**
+- **Every write is an op, and a field is a register, a counter, a set, a list, a text OR a tree.**
   `insert`/`set` → `write`, `update`/`swap`/`record.save` → `set`, `inc` →
-  `inc`, `add`/`remove` → `add`/`remove`, `splice`/`push` → `splice`, `delete` → tombstone. Registers are
-  last-writer-wins by `(ts, origin)`; counters are per-origin sums; a set is
-  `meta.sets[field][elementKey][origin] = [added, removed]` — the newest add
-  ts and the newest add ts a remove observed — live while `added > removed`,
-  read sorted by element text (a same-origin re-add moves the stamp, so there
-  is no insertion order to keep). A `remove` carries the tags this node
-  observed (`observedTags`, built in `prepareOp` INSIDE the queue — outside it
-  a concurrent apply could add between the two); `applyBase` drops a slot
-  below `base` and clamps a surviving component below it, which is what makes
-  meta — not only data — order-free. Mixing two kinds on one field throws
+  `inc`, `add`/`remove` → `add`/`remove`, `splice`/`push`/`updateText` →
+  `splice`, `setAt` → `assign`, `move` → `move`, `mark`/`unmark`/`unmarkById`
+  → `mark`, `treeMove`/`treeRemove` → `tree`, `delete` → tombstone. Registers
+  are last-writer-wins by `(ts, origin)`; counters are per-origin sums; a set
+  is `meta.sets[field][elementKey][origin] = [added, removed]`, live while
+  `added > removed`, read sorted by element text; a list or a text is
+  `meta.seqs[field]`, a block of `src/sequence.js`; a tree is
+  `meta.trees[field]`, a block of `src/tree.js` — how a block merges (Fugue,
+  the run-length content, the pending ops, the movable list, the marks; the
+  move log and its fold) is the header of its module, not repeated here.
+  What crosses modules: a `remove` carries the tags this node observed
+  (`observedTags`, built in `prepareOp` INSIDE the queue — outside it a
+  concurrent apply could add between the two); `applyBase` drops a slot below
+  `base` and clamps a surviving component below it, `applySeq` prunes a block
+  at once (`prune`, the same on either side of a reset) and a block's `ts` is
+  derived from what it holds, so a cut never bumps it — which is what makes
+  meta, not only data, order-free. Mixing two kinds on one field throws
   locally (`FIELD_KIND`, `kindClash` in `src/commit.js`, before the stamp);
   from a peer the kinds' PRECEDENCE decides, on the op path (`yieldTo` in
   `src/ops.js`) as in the snapshot merge: a register, then a counter, wins
@@ -212,43 +219,21 @@ docs/                     VitePress site
   where the winner arrives the loser's state is dropped, where the winner is
   held the loser's op is `OP_REFUSED`. The rule reads kinds alone, never
   stamps, which is what makes it commute; do not add a path that decides a
-  clash another way. A list or a text is `meta.seqs[field]`, a block of
-  `src/sequence.js` (Fugue runs anchored `^`/`>e`/`<e`, run-length content with
-  tombstones as lengths; pending runs/cuts/extensions, registers of elements
-  not here and off-placeholders of marks under `sync.pendingMax` — `PENDING_MAX`
-  4096 — a run under `MAX_RUN` and a field under `MAX_FIELD` slots, enforced on
-  the op path AND in `normalizeSeq` so a snapshot buys nothing an op could not;
-  a run is extended by its origin alone, anything else is malformed):
-  `splice` (code `/`) carries `{ cut, at | run/from, content }` in `key`/`value`,
-  `content` naming the kind even when empty; `assign` (`=`, `{ elem, value }`)
-  and `move` (`^`, `{ elem, cut, at, value }`) are a list's per-element value
-  and position registers (Kleppmann's move: a move cuts the shown slot and
-  adds a one-element position run the register points at; a slot shows iff
-  it is the position the register names); `mark` (`*`, `{ start, end, key,
-  value, many? } | { off }`) is a text's style register — two anchors (an
-  element and a side, `^`/`$`), the newest per key wins, MANY stacks and goes
-  only by id (OFF), anchors picked by the expand rule in `markAnchors`; the index is resolved in
-  `prepareOp` INSIDE the queue (`resolveSplice`, `OUT_OF_RANGE`); `applySeq`
-  prunes at once so what fell below the base reads the same on either side of
-  a reset; the block's `ts` is derived from the runs and registers it holds —
-  a cut never bumps it, so meta is order-free. A tree is `meta.trees[field]`,
-  a block of `src/tree.js`: `tree` (code `~`, `{ node, parent, fi }`) appends
-  one stamped move per node and the field reads as the fold of every move in
-  stamp order — ties (forged equal stamps) by node id — with Kleppmann's cycle
-  check — an ineffective move is KEPT (a later move can make it count),
-  `'$trash'` is the removal parent, siblings order by `fi` (a fractional index
-  from `src/order.js`, `order.isKey` or the move is malformed, at most `MAX_FI`
-  chars) then by stamp, and the render shows `MAX_DEPTH` levels (deeper is
-  folded, not shown — a deep chain must never throw on the apply path);
-  `resolveTree` in `src/commit.js` folds the tree ONCE (`childrenOf`, handed
-  to `subtree`/`siblings`/`depthOf`/`heightOf`), mints `fi` INSIDE the queue
-  between the neighbours, decides `CYCLE`, `NOT_FOUND` and `OUT_OF_RANGE`
-  (depth; no room for a place) there, and hands back `null` for a move to
-  where the node is — `commitLocal` returns before `applyOp` on it. The
-  fuzz in `tests/suites/sync-engine.js` compares the blocks and the move
-  logs across nodes, not only what they read as. The compaction of a move
-  log, a text of many runs or a set's tags is `compact(id)` in storage.js:
-  `applyPatches(id, diffViews(null, {}, reading, kinds))` — a reset plus one
+  clash another way. The wire: `splice` is code `/` with `{ cut, at |
+  run/from, content }` (`content` naming the kind even when empty), `assign`
+  `=` `{ elem, value }`, `move` `^` `{ elem, cut, at, value }`, `mark` `*`
+  `{ start, end, key, value, many? } | { off }`, `tree` `~` `{ node, parent,
+  fi }`. An index, a sibling or a range is resolved in `prepareOp` INSIDE the
+  queue (`resolveSplice`/`resolveMove`/`resolveMark`/`resolveTree` in
+  `src/commit.js`: `OUT_OF_RANGE`, `CYCLE`, `NOT_FOUND`; `resolveTree` folds
+  the tree ONCE and hands back `null` for a move to where the node is, and
+  `commitLocal` returns before `applyOp` on it). `sync.pendingMax`
+  (`PENDING_MAX`), `MAX_RUN` (`src/rle.js`), `MAX_FIELD`, `MAX_FI` and
+  `MAX_DEPTH` bound what a peer can make a node hold or read, on the op path
+  and in `normalizeMeta` alike — a snapshot buys nothing an op could not. The
+  fuzz in `tests/suites/sync-engine.js` compares the blocks and the move logs
+  across nodes, not only what they read as. `compact(id)` (`src/versions.js`)
+  = `applyPatches(id, diffViews(null, {}, reading, kinds))`: a reset plus one
   op per field, one move per node — convergent through the reset rule.
 - **A payload the engine does not admit is never silent.** `applyOp` reports
   `reason: 'malformed'` in `rejected` (`malformed()` in `src/ops.js`): on the
@@ -258,25 +243,21 @@ docs/                     VitePress site
   still logged and relayed as a no-op (a dirk, never a gap). A `bound`
   refusal carries `detail` (`pending`/`run`/`field`), `count` and `max`.
 - **A sequence block is never mutated in place; its index is cached by
-  identity.** `seqIndexOf(entry, field)` in `src/ops.js` keeps `buildIndex`'s
-  result on the entry (`entry.seqIndex[field] = { seq, base, index }`, carried
-  by `cloneEntry` and into `EntryStore`'s cache, never into the file) and
-  reuses it while `meta.seqs[field]` is the SAME object and the base is the
-  same — every change goes through `cloneSeq`, so a changed block is a new
-  object. Read a sequence field through `seqIndexOf`, never through a bare
-  `buildIndex` on a path that runs per op. A keystroke — `applySplice`
-  returns `extended: { run, from, content }` when it only appended to a run
-  and nothing waited for it — carries the held block's index over with
-  `extendIndex` (the run last in key order, its last slot the walk's last,
-  no run waiting for an anchor, no position register on a new element; else
-  null and a walk) and registers the new tuple's parse; `render` keeps the
-  reading on the index (`rendered`, an extended text index carries it over),
-  so never mutate an index or the array `render` hands back. `parsedRun` memoizes a run tuple's
-  parse in a WeakMap keyed by the tuple (an unchanged run shares its tuple
-  between blocks; a tuple under another key is parsed again); `prune` and
-  `buildIndex` go through it. `latestClock(meta, true)` is the trusted path
-  for an entry this node holds — a peer's raw meta takes the untrusted one,
-  which normalizes first.
+  identity.** Every change goes through `cloneSeq`, so a changed block is a
+  new object, and `seqIndexOf(entry, field)` in `src/ops.js` keeps
+  `buildIndex`'s result on the entry (`entry.seqIndex[field] = { seq, base,
+  index }`, carried by `cloneEntry` and into `EntryStore`'s cache, never into
+  the file) while `meta.seqs[field]` is the SAME object under the same base.
+  Read a sequence field through `seqIndexOf`, never through a bare
+  `buildIndex` on a path that runs per op; a keystroke carries the held index
+  over (`extendIndex`, on the `extended` hint `applySplice` returns — its
+  conditions are at its definition) and `render` keeps the reading on the
+  index, so never mutate an index or the array `render` hands back.
+  `parsedRun` memoizes a run tuple's parse by the tuple's identity (an
+  unchanged run shares its tuple between blocks; a tuple under another key is
+  parsed again). `latestClock(meta, true)` is the trusted path for an entry
+  this node holds — a peer's raw meta takes the untrusted one, which
+  normalizes first.
 - **Ops from one origin apply in seq order; seqs run per origin AND scope**
   (`origin@scope` vector keys), and ops born from a snapshot (`merge`,
   `advance`) run in their own `origin@~` stream. `applyRemote` skips
@@ -410,103 +391,75 @@ docs/                     VitePress site
   rather than the exception. A new `event:` name goes into the table in
   `docs/guide/telemetry.md` — the names are a surface.
 - **A version is a fold of the retained log, exact only from a reset above
-  `droppedTs`.** `history(id)` and `get(id, { at })` (`src/history.js`,
-  glued in `Storage.#past`/`#applied`) fold `log.entriesOf(id)` filtered by
-  `appliedHere` (skipped out, held in once the node runs the version) with
-  `applyOp`, outside the queue. An event id cuts by log seq, a stamp by
-  `op.ts`, a vector by `vectorHas`. With `droppedTs > 0` the fold starts at
-  the first `write`/`delete`/`purge` stamped above it (`exactStart`) and the
-  fold of everything retained must `deepEqual` the present (`#present`) —
-  the counter straddle `repair()` also has — or it is `HISTORY_GONE
-  compacted` / `exact: false`. A stamp below a retained `merge` is `reason:
-  'merge'`; a purged record lists scrubbed versions and refuses a cut before
-  the purge (`'scrubbed'`). Never answer a version from the record file or
-  the catalog, and never fold from an entry below the exact start.
-- **A tag is copy-on-write at the EntryStore seam.** `src/tags.js` keeps
-  `tags.json` and, per tag, a Catalog (`adopt(rows)` of the live one at
-  `tag()` time, saved under the tag's event id; loaded with `strict: false`
-  so a schema's index change does not drop it — at open for the NEWEST tag
-  alone, for an older one at its first read (`#catalog`/`#copies`, one load
-  each; a catalog gone drops the tag then as `untag` would, `TAG_NOT_FOUND`), so the sync
-  readers `hasAt`/`rowAt`/`catalogOf` come after `ensure(name)` and a
-  Cursor at a tag awaits its source's `ready`) plus `tags/<name>/data/` —
-  record files copied by `EntryStore.#changing` (`before(id, file)`) ahead
-  of `write`/`writeSealed`/`remove`, into the NEWEST tag only, once per
-  record, only for a record the tag's catalog holds live. `tag()` refuses
-  (`UNPERSISTED`) while a record is held — its file is behind the cache and
-  a copy from memory would carry no block to verify. An unreadable
-  `tags.json` never fails `open()`: `Tags.load` keeps it as
-  `tags.corrupt.json`, sets `corrupt` (`stats().tags`), `take()` refuses
-  `CORRUPT`, and `copyBefore` keeps every changed record's file once under
-  `tags/.pending/data/` — adopted by the newest tag at the next open with a
-  readable file (`#adoptPending`), so the tags a repair brings back read as
-  they did. Never rebuild `tags.json` from the disk: fsi lists files, not
-  directories, so the names are in that file alone. A read at a tag walks
-  the tags from it to the newest for a copy, else reads the present — except
-  a record held since the tag, whose file is still the tag's state; the
-  tag's catalog row decides existence.
-  `untag` moves to the older tag the copies of records it has no copy of and
-  holds live, then rewrites tags.json, then sweeps; `take()` sweeps the
-  name's directory first (fsi lists files, not directories, so a crash's
-  leftover cannot be found at open). Every purge path goes through
-  `core.scrub` (log + tags) — never `core.log.scrub` alone. The error field
-  is `tag`, never `name` (it would overwrite `Error.name`). A view at a tag
-  (`at(name)`) reads through `#sourceAt(name)`, a `storage[SOURCE]`-shaped
-  seam over the tag's catalog and `#entryAt` (`searches` false, `subscribe`
-  throws — nothing to watch), and pages through `snapshotPage` with a core
-  of the tag's catalog, entries and position — the same `pageOf`, never a
-  second page writer.
+  `droppedTs`.** The model is the header of `src/history.js`; the glue is
+  `src/versions.js` (`past`/`applied`/`present`), outside the queue:
+  `log.entriesOf(id)` filtered by `appliedHere` (skipped out, held in once
+  the node runs the version), folded with `applyOp`. With `droppedTs > 0` the
+  fold of everything retained must `deepEqual` the present (`present`) — the
+  counter straddle `repair()` also has — or it is `HISTORY_GONE compacted` /
+  `exact: false`; a stamp below a retained `merge` is `reason: 'merge'`, a
+  cut before a purge `'scrubbed'`. Never answer a version from the record
+  file or the catalog, and never fold from an entry below the exact start.
+- **A tag is copy-on-write at the EntryStore seam.** The layout, the read
+  walk, the untag move-down and the lazy read of an older tag are the header
+  of `src/tags.js`. What crosses modules: record files are copied by
+  `EntryStore.#changing` (`before(id, file)`) ahead of
+  `write`/`writeSealed`/`remove`, into the NEWEST tag only, once per record,
+  only for a record the tag's catalog holds live — so the newest tag is read
+  at open and after every drop, an older one at its first use, and the sync
+  readers `hasAt`/`rowAt`/`catalogOf` come after `ensure(name)` (a Cursor at
+  a tag awaits its source's `ready`). `tag()` flushes deferred files first and
+  refuses (`UNPERSISTED`) while a record is held — its file is behind the
+  cache and a copy from memory would carry no block to verify; a record held
+  since the tag reads as its file, still the tag's state. An unreadable
+  `tags.json` never fails `open()` (`tags.corrupt.json`, `stats().tags`,
+  `take()` refuses `CORRUPT`, the copies wait under `tags/.pending/data/` for
+  the next good open); never rebuild `tags.json` from the disk — fsi lists
+  files, not directories. Every purge path goes through `core.scrub` (log +
+  tags) — never `core.log.scrub` alone. The error field is `tag`, never
+  `name` (it would overwrite `Error.name`). A view at a tag (`at(name)`,
+  `src/versions.js`) reads through `sourceAt`, a `storage[SOURCE]`-shaped seam
+  over the tag's catalog (`searches` false, `subscribe` throws), and pages
+  through `snapshotPage` with a core of the tag's catalog, entries and
+  position — the same `pageOf`, never a second page writer.
 - **A patch is in the write API's terms, and the only way back is new ops.**
-  `src/patch.js`: `diffEntries(from, to, view)` compares two entries per
-  field by kind (register put, counter delta, set add/remove, Myers splices
-  for a text and — interned to one char per element — a list, tree moves
-  parent-wise then removals) and falls back to `write` + recreate when a
-  register is gone or a kind changed (no op removes one field);
+  The vocabulary and the per-kind diff are the header of `src/patch.js`;
   `realize(patch)` maps to `[type, payload]` for `commit()`. `applyPatches`
-  runs them in ONE `#run` turn; `restore(id, at)` = `applyPatches(diff(id,
-  undefined, at))` — never rewrite the log or the file. A `remove` patch
-  with `removals` goes out as given (`prepareOp` takes `payload.removals`
-  over `observedTags`), one with `own: true` keeps this node's tags alone
-  (`ownTags`): an undo revokes this node's adds and leaves a peer's. The `commit`
-  event (`announce` in src/commit.js) is LOCAL ops only, built only when
-  `listenerCount('commit') > 0`, with `before`/`after` as copies and the
-  kinds of both sides; a peer's op raises `change`, never `commit`.
-- **Undo is a subpath over `commit`, never inside the engine.** `src/undo.js`
-  captures `commit` events (own `source` token → the opposite stack), keeps
-  per step and record the first `before`, the last `after` and the kinds,
-  and inverts at undo time with `diffViews(after, kinds-of-after, before,
-  kinds-of-before, { exact })` — exact first (a field the step created goes
-  through a reset), loose (`exact: false`: a counter, set, list, text or
-  tree emptied instead) when the reset would meet a peer's change — every
-  `remove` marked `own: true`; groups by `mergeInterval`/`mark()`, and
-  applies through `storage.applyPatches(id, kept, { source: token })`;
-  conflicts are the fields of `log.entriesOf(id)` after the step's
-  `lastSeq` not among its own seqs, the manager's own seqs or the seqs of
-  steps on the redo stack (`taken`) — a whole op → every field; per field
-  the op TYPES, since an `inc` or an `add`/`remove` by others commutes with
-  an inverse `inc` or own-`remove` (`conflicting`) — so it `log.pin`s from
-  its oldest step. `kindsOf` lives in ops.js (it needs the
-  predicates) and `deepEqual` in shape.js, so patch.js and the subpath ship
-  without the op model — keep it that way. The stack is memory only; a
-  `purge` forgets the record on every step.
+  (`src/versions.js`) rehearses, then runs them in ONE `#run` turn;
+  `restore(id, at)` = `applyPatches(diff(id, undefined, at))` — never rewrite
+  the log or the file. A `remove` patch with `removals` goes out as given
+  (`prepareOp` takes `payload.removals` over `observedTags`), one with `own:
+  true` keeps this node's tags alone (`ownTags`): an undo revokes this node's
+  adds and leaves a peer's. The `commit` event (`announce` in src/commit.js)
+  is LOCAL ops only, built only when `listenerCount('commit') > 0`, with
+  `before`/`after` as copies and the kinds of both sides; a peer's op raises
+  `change`, never `commit`.
+- **Undo is a subpath over `commit`, never inside the engine.** The model —
+  steps of inverse patches, refuse-to-overwrite, the exact and the loose
+  inversion — is the header of `src/undo.js`. What crosses modules: the
+  manager applies through `storage.applyPatches(id, kept, { source: token })`
+  and tells its own commits by the token; every `remove` it makes is `own:
+  true`; conflicts are read from `log.entriesOf(id)` after the step's
+  `lastSeq` (an `inc` or an `add`/`remove` by others commutes with the
+  inverse, `conflicting`), so it `log.pin`s from its oldest step. `kindsOf`
+  lives in ops.js (it needs the predicates) and `deepEqual` in shape.js, so
+  patch.js and the subpath ship without the op model — keep it that way. The
+  stack is memory only; a `purge` forgets the record on every step.
 - **A branch is a storage; a merge is a push.** `src/branch.js` opens the
   fork through `parent.constructor` (the subpath bundles no engine), never
   copies the directory (a copied identity is `SELF`/`REWOUND`), gives it
   `retention: { ops: 0 }` + `autoStart: false`, joins the parent's (or the
-  tag's) snapshot pages and adopts the vector, then `merge(parent, { into:
-  child })` for what landed while paging. `merge` = `outbound(source.log, {
-  exclude: into.nodeId, vector: into.vector, own: source.nodeId })` →
-  `into.applyRemote(page, { via: { url: null, node }, adoptFrom: source })`
-  — the one selection `#pushFromLog` uses too (`src/outbound.js`; change
-  one, change both) — and a state join + `adoptVector` when `unreachable`
-  says the source compacted past the receiver. A push asks `first` of the
-  sender's own streams alone (a third node's reach the host another way); a
-  merge asks for EVERY stream (`allStreams: true`) — a branch has no other
-  way to them — and joins as state when any is out of reach. No-echo is
-  `exclude` on `origin`/`from` plus `vectorHas`; never add a third filter.
-  `drop()` refuses a storage without `branch.json` (`sweep` is the shared
-  remover, used by a failed `branch()` too), and `branch()` refuses a path
-  that holds files: another storage is never taken over.
+  tag's) snapshot pages and adopts the vector. `merge` = `outbound(source.log,
+  { exclude: into.nodeId, vector: into.vector, own: source.nodeId,
+  allStreams: true })` → `into.applyRemote(page, { via: { url: null, node },
+  adoptFrom: source })` — the one selection `#pushFromLog` uses too
+  (`src/outbound.js`; change one, change both: a push asks `first` of the
+  sender's own streams, a merge of EVERY stream, and joins as state when one
+  is out of reach). No-echo is `exclude` on `origin`/`from` plus `vectorHas`;
+  never add a third filter. `drop()` refuses a storage without `branch.json`
+  (`sweep` is the shared remover, used by a failed `branch()` too), and
+  `branch()` refuses a path that holds files: another storage is never taken
+  over.
 - **Arguments are checked once, in `src/args.js`.** `spliceArgs`, `treeArgs`,
   `markArgs`, `setElements`, `jsonValue` and `isNodeId` serve the public
   methods of `Storage` AND `realize()` in `src/patch.js` (no requires — the

@@ -9,8 +9,11 @@
 // itself or a descendant of it, at that point of the fold, does nothing. Two
 // nodes that apply the same moves hold the same fold, so they agree on which
 // move lost, and the loser is kept: a later move can make it moot or revive
-// it. Siblings order by a fractional index (`@alexify/syncom/order`), then by
-// stamp. A removal is a move under `$trash`; what hangs there is not read.
+// it. Two moves under one stamp (forged — honest clocks never repeat) tie by
+// node id, in the fold, the dedupe and the join alike, so every node agrees
+// which lost. Siblings order by a fractional index (`@alexify/syncom/order`,
+// at most MAX_FI characters), then by stamp. A removal is a move under
+// `$trash`; what hangs there is not read.
 // A tree reads MAX_DEPTH levels: what hangs deeper is folded but not shown,
 // the same on every node (a 4 000-deep chain would throw in the render and
 // in JSON.stringify, and a throw on the apply path stops a stream). Pure
