@@ -147,7 +147,7 @@ await storage.unmark(id, 'body', 0, 7, 'bold');
 - **Many.** `{ many: true }` makes a mark stack with every other of its name
   instead of replacing it — comments, suggestions — and `spans` lists them
   as `[{ id, value }]`, oldest first. Such a mark goes only by its id:
-  `unmark(id, key, markId)` with what `mark()` resolved to.
+  `unmarkById(id, key, markId)` with what `mark()` resolved to.
 - The field still reads as the plain string; `spans` is raw — no lens, no
   read hooks. Blocks (paragraphs, headings) are records: a document is a
   list of block ids, each block a record with a text field.

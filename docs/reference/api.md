@@ -66,7 +66,8 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 | `treeMove(id, key, node, parent = null, { after, before, actor }?)` | `Promise<void>` | Puts `node` of a tree field under `parent` (`null`: a root) — after sibling `after`, before sibling `before`, or last (a `tree` op); creates the node, the field and the record when absent. Two nodes moving concurrently so that each would hang under the other: the older move stands, the newer is kept without effect, on every node. Rejects with `CYCLE` for a parent under the node and `NOT_FOUND` for a sibling not under `parent`; a move to where the node already is makes no op; throws on the other kinds |
 | `treeRemove(id, key, node, { actor }?)` | `Promise<void>` | Removes `node` of a tree field with everything under it — a `tree` op moving it under `$trash`; a node not known here is created there, so a concurrent creation lands removed; twice is nothing |
 | `mark(id, key, start, end, name, value, { expand, many, actor }?)` | `Promise<string \| null>` | Marks visible range `[start, end)` of a text field with `name: value` (a `mark` op); `expand` (`'after'` by default, `'before'`, `'both'`, `'none'`) says whether text typed at the edges takes the style; per name the newest mark wins; `many: true` stacks with every other of its name. Resolves to the mark's id; rejects with `OUT_OF_RANGE`; throws on a list and on the other kinds |
-| `unmark(id, key, start, end, name, { expand, actor }?)` / `unmark(id, key, markId, { actor }?)` | `Promise<void>` | Removes a style over a range (a null mark under the reversed expand rule), or one mark by id — the only way for a `many` mark |
+| `unmark(id, key, start, end, name, { expand, actor }?)` | `Promise<void>` | Removes a style over a range: a null mark under the reversed expand rule, so the removal grows where the style would not |
+| `unmarkById(id, key, markId, { actor }?)` | `Promise<void>` | Switches one mark off by its id (what `mark()` resolved to) — the only way for a `many` mark |
 | `spans(id, key)` | `Promise<TextSpan[] \| null>` | The text field as runs of equal style, `[{ text, marks }]`; raw — no lens, no read hooks; `null` unless the field is a text |
 | `cursor(id, key, index, { side }?)` | `Promise<string \| null>` | A cursor into a list or text field — a place that survives edits around it, before the element at `index` (`'before'`, the default) or after the one before it; `null` out of range or when the field is not a sequence |
 | `index(id, key, cursor)` | `Promise<number \| null>` | Where a cursor is now; `null` once its place is gone (a reset) |
@@ -125,7 +126,7 @@ assignment, and when the record changes in storage (`null` data once deleted).
 `splice(key, index, count?, content?, { actor }?)`, `push(key, content, { actor }?)`,
 `updateText(key, text, { actor }?)`, `setAt(key, index, value, { actor }?)`,
 `move(key, from, to, { actor }?)`, `mark(key, start, end, name, value, options?)`,
-`unmark(…)`, `spans(key)`, `cursor(key, index, options?)`, `index(key, cursor)`,
+`unmark(…)`, `unmarkById(key, markId)`, `spans(key)`, `cursor(key, index, options?)`, `index(key, cursor)`,
 `treeMove(key, node, parent?, { after, before, actor }?)`, `treeRemove(key, node, { actor }?)`,
 `delete({ actor }?)`, plus a
 live property per field of the loaded object.

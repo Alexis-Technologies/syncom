@@ -1041,20 +1041,34 @@ class Storage extends Emitter {
   async #getAt(id, at) {
     const version = parseVersion(at);
     await runHook(this.#hooks, 'beforeRead', { id, at });
-    let data = null;
-    if (version.kind === 'tag') data = await this.#readTag(id, version.name);
-    else {
-      const read = async () => {
-        const past = await this.#past(id, version);
-        if (past === null) return { data: null, folded: 0 };
-        return { data: await this.#folded(id, past), folded: past.entries.length };
-      };
-      const otel = this.#otel;
-      const after = (result) => ({ 'syncom.ops.count': result.folded });
-      ({ data } = otel.enabled ? await traced(otel, 'syncom.version', {}, read, after) : await read());
-    }
+    const { entry } = await this.#versionEntry(id, version);
+    const data = await this.#reading(id, entry);
     const replaced = await runHook(this.#hooks, 'afterRead', { id, at }, data);
     return replaced === undefined ? data : replaced;
+  }
+
+  // The entry of `id` at `version` — a tag's copy, or the fold of the log,
+  // a span (`syncom.version`) when a tracer listens — and how many entries
+  // the fold ran over; the entry is null when the record was not there.
+  async #versionEntry(id, version) {
+    if (version.kind === 'tag') return { entry: await this.#entryAt(version.name, id), folded: 0 };
+    const read = async () => {
+      const past = await this.#past(id, version);
+      if (past === null) return { entry: null, folded: 0 };
+      const steps = fold(past.entries, past.start, this.#limits);
+      return { entry: steps.length > 0 ? steps[steps.length - 1].entry : null, folded: past.entries.length };
+    };
+    const otel = this.#otel;
+    if (!otel.enabled) return read();
+    return traced(otel, 'syncom.version', {}, read, (result) => ({ 'syncom.ops.count': result.folded }));
+  }
+
+  // What an entry reads as, the way `get()` hands a record out: an encrypted
+  // one as its data, a live one through the lens, a tombstone or none as null.
+  async #reading(id, entry) {
+    if (entry === null) return null;
+    if (entry.encrypted) return asJson(entry.data);
+    return isAlive(entry) ? asJson(await this.#view(id, entry)) : null;
   }
 
   // The record at a tag, as an entry: its file as it was — the tag's copy,
@@ -1069,15 +1083,6 @@ class Storage extends Emitter {
     // tag's state; any other reads as it is.
     if (raw === null && this.#entries.held(id)) raw = await this.#entries.file(id);
     return raw === null ? this.#entries.load(id) : this.#entries.parse(id, raw);
-  }
-
-  // The record at a tag as it reads, through the lens; `null` when it was
-  // not there.
-  async #readTag(id, name) {
-    const entry = await this.#entryAt(name, id);
-    if (entry === null) return null;
-    if (entry.encrypted) return asJson(entry.data);
-    return isAlive(entry) ? asJson(await this.#view(id, entry)) : null;
   }
 
   // What a cursor at a tag reads through: the tag's catalog, and the record
@@ -1104,25 +1109,11 @@ class Storage extends Emitter {
     };
   }
 
-  async #folded(id, past) {
-    {
-      const { entries, start } = past;
-      const steps = fold(entries, start, this.#limits);
-      const last = steps.length > 0 ? steps[steps.length - 1].entry : null;
-      return last !== null && isAlive(last) ? asJson(await this.#view(id, last)) : null;
-    }
-  }
-
   // The entry of `id` at a version — the present when `at` is undefined,
   // a tag's copy, or the fold of the log — or null when it was not there.
   async #entryOf(id, at) {
     if (at === undefined) return this.#entries.load(id);
-    const version = parseVersion(at);
-    if (version.kind === 'tag') return this.#entryAt(version.name, id);
-    const past = await this.#past(id, version);
-    if (past === null) return null;
-    const steps = fold(past.entries, past.start, this.#limits);
-    return steps.length > 0 ? steps[steps.length - 1].entry : null;
+    return (await this.#versionEntry(id, parseVersion(at))).entry;
   }
 
   /**
@@ -1576,14 +1567,18 @@ class Storage extends Emitter {
    * a `many` mark.
    */
   async unmark(id, key, start, end, name, { expand = 'after', actor } = {}) {
-    if (typeof start === 'string') {
-      if (typeof key !== 'string') throw new TypeError('unmark() takes a field name');
-      if (!isRunKey(start)) throw new TypeError('unmark() takes a mark id, or a range and a name');
-      await this[COMMIT]('mark', id, { key, off: start }, end && typeof end === 'object' ? end : { actor });
-      return;
-    }
     markArgs('unmark', key, start, end, name, expand);
     await this[COMMIT]('mark', id, { key, start, end, name, value: null, expand: REVERSED[expand] }, { actor });
+  }
+
+  /**
+   * Switches one mark of text field `key` off by its id — what `mark()`
+   * resolved to — the only way for a `many` mark.
+   */
+  async unmarkById(id, key, markId, { actor } = {}) {
+    if (typeof key !== 'string') throw new TypeError('unmarkById() takes a field name');
+    if (!isRunKey(markId)) throw new TypeError('unmarkById() takes a mark id');
+    await this[COMMIT]('mark', id, { key, off: markId }, { actor });
   }
 
   /**

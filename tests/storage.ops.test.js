@@ -335,7 +335,7 @@ test('Storage replication model', async (t) => {
       },
       { text: 'll', marks: { comment: [{ id: c2, value: { by: 'bob' } }] } },
     ]);
-    await storage.unmark(id, 'body', c1);
+    await storage.unmarkById(id, 'body', c1);
     assert.deepStrictEqual((await storage.spans(id, 'body')).slice(0, 2), [
       { text: '>h', marks: {} },
       { text: 'ell', marks: { comment: [{ id: c2, value: { by: 'bob' } }] } },
@@ -351,7 +351,8 @@ test('Storage replication model', async (t) => {
     await assert.rejects(() => storage.mark(id, 'body', 0, 1, 'bold', true, { expand: 'sideways' }), TypeError);
     await assert.rejects(() => storage.mark(id, 'body', 0, 1, '', true), TypeError);
     await assert.rejects(() => storage.mark(id, 'body', 0, 1, 'bold', undefined), TypeError);
-    await assert.rejects(() => storage.unmark(id, 'body', 'not a mark id'), TypeError);
+    await assert.rejects(() => storage.unmarkById(id, 'body', 'not a mark id'), TypeError);
+    await assert.rejects(() => storage.unmark(id, 'body', 'not a range'), TypeError);
     await storage.push(id, 'items', [1]);
     await assert.rejects(() => storage.mark(id, 'items', 0, 1, 'bold', true), /list; use splice\(\), push/);
     await storage.update(id, { title: 'plain' });
@@ -363,7 +364,7 @@ test('Storage replication model', async (t) => {
     const record = await storage.record(id);
     const em = await record.mark('body', 0, 1, 'em', true);
     assert.deepStrictEqual((await record.spans('body'))[0], { text: '>', marks: { em: true } });
-    await record.unmark('body', em);
+    await record.unmarkById('body', em);
     assert.deepStrictEqual((await record.spans('body'))[0].marks, {});
     assert.strictEqual(await storage.validate(), true);
   });

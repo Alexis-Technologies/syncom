@@ -176,6 +176,11 @@ class Record extends Emitter {
     await this.#storage.unmark(this.#id, key, start, end, name, options);
   }
 
+  /** Switches one mark off by its id; the storage-level `unmarkById` with this record's id. */
+  async unmarkById(key, markId, options = {}) {
+    await this.#storage.unmarkById(this.#id, key, markId, options);
+  }
+
   /** The text field as runs of equal style; the storage-level `spans` with this record's id. */
   async spans(key) {
     return this.#storage.spans(this.#id, key);

@@ -1632,8 +1632,8 @@ export interface Storage {
     name: string,
     options?: WriteOptions & { expand?: MarkExpand },
   ): Promise<void>;
-  /** Switches one mark off by its id — the only way for a `many` mark. */
-  unmark(id: string, key: string, markId: string, options?: WriteOptions): Promise<void>;
+  /** Switches one mark off by its id (what `mark()` resolved to) — the only way for a `many` mark. */
+  unmarkById(id: string, key: string, markId: string, options?: WriteOptions): Promise<void>;
   /** Text field `key` as runs of equal style; raw (no lens, no read hooks); `null` unless the field is a text. */
   spans(id: string, key: string): Promise<TextSpan[] | null>;
   /**
@@ -1829,7 +1829,8 @@ export interface SyncomRecord {
   ): Promise<string | null>;
   /** Removes a style from a text field — `storage.unmark` with this record's id. */
   unmark(key: string, start: number, end: number, name: string, options?: WriteOptions & { expand?: MarkExpand }): Promise<void>;
-  unmark(key: string, markId: string, options?: WriteOptions): Promise<void>;
+  /** Switches one mark off by its id — `storage.unmarkById` with this record's id. */
+  unmarkById(key: string, markId: string, options?: WriteOptions): Promise<void>;
   /** The text field as runs of equal style — `storage.spans` with this record's id. */
   spans(key: string): Promise<TextSpan[] | null>;
   /** A cursor into a list or text field — `storage.cursor` with this record's id. */
