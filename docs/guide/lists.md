@@ -37,11 +37,14 @@ Three things are refused (the same for `setAt()` and `move()`):
   length }`. The check runs inside the mutation queue, against the field as
   it is at that moment — a concurrent peer's op cannot shift it between the
   check and the write.
-- **Another kind.** A field is a register, a counter, a set, a list or a text,
-  never two: `splice()` on a field a register holds throws `FIELD_KIND` with
-  `kind: 'register'`, `update()` on a text throws with `kind: 'text'`, and a
-  peer's op that breaks the rule is refused for that field (an `error` event,
-  `OP_REFUSED`). A validator default for the field — `body: ''`, `items: []`
+- **Another kind.** A field is a register, a counter, a set, a list, a text or
+  a tree, never two: `splice()` on a field a register holds throws `FIELD_KIND`
+  with `kind: 'register'`, `update()` on a text throws with `kind: 'text'`. A
+  peer's op of a kind the field's holder outranks is refused for that field
+  (an `error` event, `OP_REFUSED`); one of a higher kind takes the field — the
+  precedence is register, counter, set, list, text, tree, see
+  [the sync guide](./sync#registers-counters-sets-lists-and-text). A
+  validator default for the field — `body: ''`, `items: []`
   — is folded into the write that creates the record and makes the field a
   register; leave list and text fields out of the defaults.
 - **Arguments.** A non-string key, a negative index or count, content that is

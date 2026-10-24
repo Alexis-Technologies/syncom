@@ -199,10 +199,14 @@ docs/                     VitePress site
   a concurrent apply could add between the two); `applyBase` drops a slot
   below `base` and clamps a surviving component below it, which is what makes
   meta — not only data — order-free. Mixing two kinds on one field throws
-  locally (`FIELD_KIND`) and is refused (`OP_REFUSED` event) from a peer; the
-  snapshot merge lets a register, then a counter, win over a set, a set over a
-  list, a list over a text, a text over a tree. Do not add a path that lets
-  kinds meet — it cannot be made to commute. A list or a text is `meta.seqs[field]`, a block of
+  locally (`FIELD_KIND`, `kindClash` in `src/commit.js`, before the stamp);
+  from a peer the kinds' PRECEDENCE decides, on the op path (`yieldTo` in
+  `src/ops.js`) as in the snapshot merge: a register, then a counter, wins
+  over a set, a set over a list, a list over a text, a text over a tree —
+  where the winner arrives the loser's state is dropped, where the winner is
+  held the loser's op is `OP_REFUSED`. The rule reads kinds alone, never
+  stamps, which is what makes it commute; do not add a path that decides a
+  clash another way. A list or a text is `meta.seqs[field]`, a block of
   `src/sequence.js` (Fugue runs anchored `^`/`>e`/`<e`, run-length content with
   tombstones as lengths; pending runs/cuts/extensions, registers of elements
   not here and off-placeholders of marks under `sync.pendingMax` — `PENDING_MAX`

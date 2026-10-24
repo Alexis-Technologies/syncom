@@ -410,7 +410,45 @@ const applyBase = (entry, delta) => {
   }
 };
 
-// Sets register fields at `stamp`, honouring last-writer-wins per field.
+// The kinds in order of precedence. When two meet on one field — two nodes
+// made it concurrently as different kinds — the lower rank wins, on the op
+// path as in a merge: where the winner's op arrives, the loser's state is
+// dropped; where the winner is held, the loser's op is refused (`rejected`,
+// the `OP_REFUSED` event). Every node ends with the same kind whatever the
+// order, since the rule reads the kinds alone. Locally a write of another
+// kind is refused before it is stamped (src/commit.js kindClash), so a
+// refusal here is a peer's op, a stale one, or a bug.
+const RANK = { register: 0, counter: 1, set: 2, list: 3, text: 4, tree: 5 };
+
+// Drops what the kind `held` keeps of `field`; a register is never dropped
+// (nothing outranks it).
+const dropKind = (entry, field, held, delta) => {
+  const { meta } = entry;
+  if (held === 'counter') delete meta.counters[field];
+  else if (held === 'set') delete meta.sets[field];
+  else if (held === 'tree') delete meta.trees[field];
+  else {
+    delete meta.seqs[field];
+    if (entry.seqIndex !== undefined) delete entry.seqIndex[field];
+  }
+  delete entry.data[field];
+  delta[field] = undefined;
+};
+
+// Makes room for an op of `kind` on `field`: null when it may land — the
+// field was free, its own kind, or held by a kind it outranks, dropped now —
+// else the kind that holds the field and keeps it: the holder outranks the
+// op, or the op is stamped below the reset that would have taken it anyway.
+const yieldTo = (entry, field, kind, stamp, delta) => {
+  const held = kindOf(entry, field);
+  if (held === undefined || held === kind) return null;
+  if (RANK[held] < RANK[kind] || compareClock(stamp, entry.meta.base) < 0) return held;
+  dropKind(entry, field, held, delta);
+  return null;
+};
+
+// Sets register fields at `stamp`, honouring last-writer-wins per field. A
+// register outranks every other kind: whatever held the field goes.
 const applyFields = (entry, fields, stamp, delta, rejected) => {
   const { meta, data } = entry;
   // Own keys only: `fields` may be a JSON-parsed peer payload, where
@@ -419,20 +457,9 @@ const applyFields = (entry, fields, stamp, delta, rejected) => {
   // way, or a field called `constructor` would meet Object's.
   for (const field of Object.keys(fields)) {
     if (!isKey(field)) continue;
-    if (isCounter(meta, field)) {
-      rejected.push({ field, reason: 'counter' });
-      continue;
-    }
-    if (isSet(meta, field)) {
-      rejected.push({ field, reason: 'set' });
-      continue;
-    }
-    if (isSeq(meta, field)) {
-      rejected.push({ field, reason: seqKind(meta, field) });
-      continue;
-    }
-    if (isTree(meta, field)) {
-      rejected.push({ field, reason: 'tree' });
+    const holder = yieldTo(entry, field, 'register', stamp, delta);
+    if (holder !== null) {
+      rejected.push({ field, reason: holder });
       continue;
     }
     if (compareClock(own(meta.clock, field), stamp) >= 0) continue;
@@ -504,20 +531,9 @@ const applySet = (entry, op, stamp, delta, rejected) => {
   const { meta } = entry;
   const { key: field } = op;
   if (typeof field !== 'string' || !isKey(field) || !isKey(op.origin) || !Array.isArray(op.value)) return;
-  if (own(meta.clock, field) !== undefined) {
-    rejected.push({ field, reason: 'register' });
-    return;
-  }
-  if (isCounter(meta, field)) {
-    rejected.push({ field, reason: 'counter' });
-    return;
-  }
-  if (isSeq(meta, field)) {
-    rejected.push({ field, reason: seqKind(meta, field) });
-    return;
-  }
-  if (isTree(meta, field)) {
-    rejected.push({ field, reason: 'tree' });
+  const holder = yieldTo(entry, field, 'set', stamp, delta);
+  if (holder !== null) {
+    rejected.push({ field, reason: holder });
     return;
   }
   const moved = op.type === 'add' ? addElements(meta, field, op, stamp) : removeElements(meta, field, op);
@@ -551,30 +567,15 @@ const applySeq = (entry, op, stamp, delta, rejected, pendingMax) => {
   if (typeof field !== 'string' || !isKey(field) || !isKey(op.origin) || !isPlainObject(payload)) {
     return void malformed(field, rejected);
   }
-  if (own(meta.clock, field) !== undefined) {
-    rejected.push({ field, reason: 'register' });
-    return;
-  }
-  if (isCounter(meta, field)) {
-    rejected.push({ field, reason: 'counter' });
-    return;
-  }
-  if (isSet(meta, field)) {
-    rejected.push({ field, reason: 'set' });
-    return;
-  }
-  if (isTree(meta, field)) {
-    rejected.push({ field, reason: 'tree' });
-    return;
-  }
   const kind = typeof payload.content === 'string' ? 't' : Array.isArray(payload.content) ? 'l' : null;
   if (kind === null) return void malformed(field, rejected);
-  const held = own(meta.seqs, field);
-  if (held !== undefined && held.k !== kind) {
-    rejected.push({ field, reason: seqKind(meta, field) });
+  const holder = yieldTo(entry, field, kind === 't' ? 'text' : 'list', stamp, delta);
+  if (holder !== null) {
+    rejected.push({ field, reason: holder });
     return;
   }
   if (compareClock(stamp, meta.base) < 0) return;
+  const held = own(meta.seqs, field);
   const result = S.applySplice(held ?? S.createSeq(kind), stamp, payload, meta.base, pendingMax);
   settleSeq(entry, field, held, result, delta, rejected);
 };
@@ -605,8 +606,8 @@ const settleSeq = (entry, field, held, result, delta, rejected) => {
 };
 
 // An `assign` or a `move` on a list, a `mark` on a text: the block's
-// registers (src/sequence.js); refused on the other kind and on the other
-// kinds. A register or a mark for a field with no block yet names its kind
+// registers (src/sequence.js); the kinds' precedence decides on another
+// kind. A register or a mark for a field with no block yet names its kind
 // and waits, like a cut that comes before its run.
 const applyListOp = (entry, op, stamp, delta, rejected, pendingMax) => {
   const kind = op.type === 'mark' ? 't' : 'l';
@@ -615,28 +616,13 @@ const applyListOp = (entry, op, stamp, delta, rejected, pendingMax) => {
   if (typeof field !== 'string' || !isKey(field) || !isKey(op.origin) || !isPlainObject(payload)) {
     return void malformed(field, rejected);
   }
-  if (own(meta.clock, field) !== undefined) {
-    rejected.push({ field, reason: 'register' });
-    return;
-  }
-  if (isCounter(meta, field)) {
-    rejected.push({ field, reason: 'counter' });
-    return;
-  }
-  if (isSet(meta, field)) {
-    rejected.push({ field, reason: 'set' });
-    return;
-  }
-  if (isTree(meta, field)) {
-    rejected.push({ field, reason: 'tree' });
-    return;
-  }
-  const held = own(meta.seqs, field);
-  if (held !== undefined && held.k !== kind) {
-    rejected.push({ field, reason: seqKind(meta, field) });
+  const holder = yieldTo(entry, field, kind === 't' ? 'text' : 'list', stamp, delta);
+  if (holder !== null) {
+    rejected.push({ field, reason: holder });
     return;
   }
   if (compareClock(stamp, meta.base) < 0) return;
+  const held = own(meta.seqs, field);
   const block = held ?? S.createSeq(kind);
   const result =
     op.type === 'assign'
@@ -648,28 +634,17 @@ const applyListOp = (entry, op, stamp, delta, rejected, pendingMax) => {
 };
 
 // A `tree` op: one more move in the field's log (src/tree.js); the field
-// reads as the fold. Refused on every other kind; a move below the base is
-// moot, like a run.
+// reads as the fold. Every other kind outranks a tree; a move below the
+// base is moot, like a run.
 const applyTree = (entry, op, stamp, delta, rejected) => {
   const { meta } = entry;
   const { key: field, value: payload } = op;
   if (typeof field !== 'string' || !isKey(field) || !isKey(op.origin) || !isPlainObject(payload)) {
     return void malformed(field, rejected);
   }
-  if (own(meta.clock, field) !== undefined) {
-    rejected.push({ field, reason: 'register' });
-    return;
-  }
-  if (isCounter(meta, field)) {
-    rejected.push({ field, reason: 'counter' });
-    return;
-  }
-  if (isSet(meta, field)) {
-    rejected.push({ field, reason: 'set' });
-    return;
-  }
-  if (isSeq(meta, field)) {
-    rejected.push({ field, reason: seqKind(meta, field) });
+  const holder = yieldTo(entry, field, 'tree', stamp, delta);
+  if (holder !== null) {
+    rejected.push({ field, reason: holder });
     return;
   }
   if (compareClock(stamp, meta.base) < 0) return;
@@ -768,14 +743,9 @@ const applyOp = (previous, op, limits = null) => {
   } else if (op.type === 'inc') {
     const { key: field, value } = op;
     if (typeof field === 'string' && isKey(field) && isKey(op.origin) && Number.isFinite(value)) {
-      if (own(meta.clock, field) !== undefined) {
-        rejected.push({ field, reason: 'register' });
-      } else if (isSet(meta, field)) {
-        rejected.push({ field, reason: 'set' });
-      } else if (isSeq(meta, field)) {
-        rejected.push({ field, reason: seqKind(meta, field) });
-      } else if (isTree(meta, field)) {
-        rejected.push({ field, reason: 'tree' });
+      const holder = yieldTo(entry, field, 'counter', stamp, delta);
+      if (holder !== null) {
+        rejected.push({ field, reason: holder });
       } else if (compareClock(stamp, meta.base) >= 0) {
         const perOrigin = own(meta.counters, field) ?? (meta.counters[field] = {});
         const known = own(perOrigin, op.origin);

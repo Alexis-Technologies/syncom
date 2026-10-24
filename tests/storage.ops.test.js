@@ -588,30 +588,33 @@ test('Storage replication model', async (t) => {
     assert.strictEqual(await storage.validate(), true);
   });
 
-  await t.test('a peer’s set ops land in any order; a write on a set field is refused for that field', async (t2) => {
-    const { storage } = await openTemp(t2);
-    const errors = [];
-    storage.on('error', (error) => errors.push(error));
-    const t0 = Date.now();
-    // The remove arrives before the add it observed: that add is dead on arrival.
-    const tags = [['x', { p1: t0 + 1 }]];
-    await storage.applyRemote([remoteOp('p2', 1, 'remove', 'r', { key: 'tags', value: tags, ts: t0 + 5 })]);
-    assert.deepStrictEqual(await storage.get('r'), { tags: [] });
-    await storage.applyRemote([remoteOp('p1', 1, 'add', 'r', { key: 'tags', value: ['x', 'y'], ts: t0 + 1 })]);
-    assert.deepStrictEqual(await storage.get('r'), { tags: ['y'] });
-    // A peer's set on the field is refused for that field alone, as an event.
-    const result = await storage.applyRemote([remoteOp('p3', 1, 'set', 'r', { data: { tags: ['z'], note: 'n' } })]);
-    assert.strictEqual(result.applied, 1);
-    assert.deepStrictEqual(await storage.get('r'), { tags: ['y'], note: 'n' });
-    assert.deepStrictEqual(
-      errors.map((error) => [error.code, error.rejected]),
-      [['OP_REFUSED', [{ field: 'tags', reason: 'set' }]]],
-    );
-    // And the local writer is told the same.
-    await assert.rejects(() => storage.update('r', { tags: [] }), { code: 'FIELD_KIND', kind: 'set' });
-    await storage.add('r', 'tags', ['local']);
-    assert.deepStrictEqual((await storage.get('r')).tags, ['local', 'y']);
-  });
+  await t.test(
+    'a peer’s set ops land in any order; a write on a set field takes it, as the register outranks the set',
+    async (t2) => {
+      const { storage } = await openTemp(t2);
+      const errors = [];
+      storage.on('error', (error) => errors.push(error));
+      const t0 = Date.now();
+      // The remove arrives before the add it observed: that add is dead on arrival.
+      const tags = [['x', { p1: t0 + 1 }]];
+      await storage.applyRemote([remoteOp('p2', 1, 'remove', 'r', { key: 'tags', value: tags, ts: t0 + 5 })]);
+      assert.deepStrictEqual(await storage.get('r'), { tags: [] });
+      await storage.applyRemote([remoteOp('p1', 1, 'add', 'r', { key: 'tags', value: ['x', 'y'], ts: t0 + 1 })]);
+      assert.deepStrictEqual(await storage.get('r'), { tags: ['y'] });
+      // A local write of another kind is refused before it is stamped.
+      await assert.rejects(() => storage.update('r', { tags: [] }), { code: 'FIELD_KIND', kind: 'set' });
+      // A peer's set on the field: the register outranks the set and takes the
+      // field — here as on the peer, whatever the order.
+      const result = await storage.applyRemote([remoteOp('p3', 1, 'set', 'r', { data: { tags: ['z'], note: 'n' } })]);
+      assert.strictEqual(result.applied, 1);
+      assert.deepStrictEqual(await storage.get('r'), { tags: ['z'], note: 'n' });
+      assert.deepStrictEqual(errors, []);
+      // The field is a register now: a local add is refused, an update lands.
+      await assert.rejects(() => storage.add('r', 'tags', ['local']), { code: 'FIELD_KIND', kind: 'register' });
+      await storage.update('r', { tags: ['local'] });
+      assert.deepStrictEqual((await storage.get('r')).tags, ['local']);
+    },
+  );
 
   await t.test('delete leaves a tombstone: hidden from get/has/list, kept on disk', async (t2) => {
     const { dir, storage } = await openTemp(t2);

@@ -299,20 +299,36 @@ const ownTags = (removals, origin) => {
 // holds for the record, so a local write never sorts below state the node
 // knows about and is silently dropped (the log seeds the clock at open; this
 // covers what the log no longer has), numbered in its stream.
-// The kinds each sequence or tree op may land on; another kind under the
-// field is refused — as applyOp would report it, with the hint for the right
-// call — before a stamp is minted or an index read, for a call and for a
-// patch alike.
-const TAKES = { splice: ['list', 'text'], assign: ['list'], move: ['list'], mark: ['text'], tree: ['tree'] };
-const kindClash = (type, key, current) => {
+// The kinds each op may land on. Locally, a field of another kind is refused
+// — with the hint for the right call — before a stamp is minted or an index
+// read, for a call and for a patch alike; applyOp would let the higher rank
+// win (src/ops.js yieldTo), which is a peer's right, not a local caller's.
+const TAKES = {
+  write: ['register'],
+  set: ['register'],
+  inc: ['counter'],
+  add: ['set'],
+  remove: ['set'],
+  splice: ['list', 'text'],
+  assign: ['list'],
+  move: ['list'],
+  mark: ['text'],
+  tree: ['tree'],
+};
+const kindClash = (type, payload, current) => {
   const takes = TAKES[type];
   if (takes === undefined || !current || current.encrypted) return [];
-  const kind = kindOf(current, key);
-  return kind === undefined || takes.includes(kind) ? [] : [{ field: key, reason: kind }];
+  const fields = type === 'write' || type === 'set' ? Object.keys(payload.data ?? {}) : [payload.key];
+  const rejected = [];
+  for (const field of fields) {
+    const kind = kindOf(current, field);
+    if (kind !== undefined && !takes.includes(kind)) rejected.push({ field, reason: kind });
+  }
+  return rejected;
 };
 
 const prepareOp = (core, type, id, payload, current, who, from) => {
-  refuse(id, kindClash(type, payload.key, current));
+  refuse(id, kindClash(type, payload, current));
   core.observe(latestClock(current?.meta, true));
   const op = { origin: core.nodeId, seq: 0, ts: core.clock.now(), type, id };
   if (from) op.from = from;

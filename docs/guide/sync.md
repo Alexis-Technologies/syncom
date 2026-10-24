@@ -160,14 +160,18 @@ remove read the same whichever lands first. Nor do lists and texts: a reset
 drops every run stamped below it, and a run stamped above it but anchored on
 a dropped element reads from the head of the field.
 
-What neither survives is a **kind clash**: a whole-record write that carries
-a field as a register (`set(id, { views: 0 })`, `set(id, { tags: [] })`, `set(id,
-{ body: '' })`), concurrent with an `inc`, an `add` or a `splice` to that
-field stamped later. The node
-that saw the write first refuses the increment or the add; the node that saw
-the increment or the add first refuses that field of the write. Keep a field
+A **kind clash** — two nodes making one field as different kinds at once: a
+whole-record write that carries a field as a register (`set(id, { views: 0 })`,
+`set(id, { tags: [] })`) concurrent with an `inc`, an `add` or a `splice` to
+that field — is decided by the kinds' precedence, the same on the op path
+and in a snapshot merge: a register outranks a counter, a counter a set, a
+set a list, a list a text, a text a tree. Where the winner's op arrives, the
+loser's state is dropped; where the winner is held, the loser's op is refused
+for that field (an `error` event, `OP_REFUSED`). Every node ends with the
+same kind whatever the order — and the loser's edits are gone, so keep a field
 one kind, and do not reset it in a whole-record write while another node may
-be moving it.
+be moving it. A local write of the wrong kind is refused before it is stamped
+(`FIELD_KIND`).
 
 ## The log
 
@@ -583,8 +587,8 @@ the engine's own tests run on.
 ## Guarantees and limits
 
 - **Convergence.** Two nodes that have applied the same set of ops hold the
-  same records, whatever the order — except the documented counter/reset and
-  kind-clash cases.
+  same records, whatever the order — except the documented counter/reset
+  case.
 - **At-least-once delivery, idempotent application.** An op may arrive more
   than once; applying it again changes nothing.
 - **A peer's op is checked before it is read.** `origin`, `seq`, `ts`, `type`,
