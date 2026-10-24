@@ -34,6 +34,8 @@ src/keys.js               loadKeyPair — the on-disk key pairs (RSA for sealing
 src/scope.js              GLOBAL_SCOPE, inScope, opInScope — the one definition of "in scope" — no requires
 src/signing.js            canonical form, signOp, verifyOp — what a signature covers (the header + a salted payload digest) and the verdict on a peer's op
 src/shape.js              isPlainObject, asJson, isRecordId, isStreamName, wellFormed — what enters is checked here
+src/args.js               spliceArgs, treeArgs, markArgs, setElements, jsonValue, isNodeId — the write API’s argument
+                          checks, shared by Storage and realize() in patch.js — no requires
 src/sequence.js           the sequence engine behind the list and text kinds: Fugue runs, run-length content, the walk,
                           local placement, pending ops, pos/vals/marks registers, cursors, prune and join — requires vector.js only
 src/tree.js               the tree kind: per node its stamped moves, the fold in stamp order with the cycle check (Kleppmann
@@ -458,8 +460,25 @@ docs/                     VitePress site
   `into.applyRemote(page, { via: { url: null, node }, adoptFrom: source })`
   — the one selection `#pushFromLog` uses too (`src/outbound.js`; change
   one, change both) — and a state join + `adoptVector` when `unreachable`
-  says the source compacted past the receiver. No-echo is `exclude` on
-  `origin`/`from` plus `vectorHas`; never add a third filter.
+  says the source compacted past the receiver. A push asks `first` of the
+  sender's own streams alone (a third node's reach the host another way); a
+  merge asks for EVERY stream (`allStreams: true`) — a branch has no other
+  way to them — and joins as state when any is out of reach. No-echo is
+  `exclude` on `origin`/`from` plus `vectorHas`; never add a third filter.
+  `drop()` refuses a storage without `branch.json` (`sweep` is the shared
+  remover, used by a failed `branch()` too), and `branch()` refuses a path
+  that holds files: another storage is never taken over.
+- **Arguments are checked once, in `src/args.js`.** `spliceArgs`, `treeArgs`,
+  `markArgs`, `setElements`, `jsonValue` and `isNodeId` serve the public
+  methods of `Storage` AND `realize()` in `src/patch.js` (no requires — the
+  undo subpath ships with it; `tree.js` takes `isNodeId` from it), so a patch
+  never reaches the engine with a shape a call could not have. `prepareOp`
+  refuses a sequence or tree op on a field of another kind (`kindClash`)
+  before a stamp is minted or an index read — no placeholder payloads for
+  `applyOp` to refuse later — and `applyPatches` rehearses every op over a
+  scratch record (`rehearse` in `src/commit.js`) before the first append: a
+  restore lands whole or not at all. `copyPayload` copies `data`, `value`,
+  `content` AND `removals` — nothing of a caller's is kept by reference.
 - **`repair(id)` replays the log, it does not guess.** `Storage.#repair`
   starts at the first whole-record op the log retains for the id (`WHOLE`:
   `write`/`merge`/`delete`, or a `purge` even scrubbed), folds the rest with

@@ -46,6 +46,10 @@ const positiveInteger = (value, message) => {
 };
 
 const normalizeStorageOptions = (options) => {
+  // `open('./path')` would otherwise open the default directory in silence.
+  if (options === null || typeof options !== 'object') {
+    throw new TypeError('open() takes an options object: open({ path, ... })');
+  }
   const { maxListeners } = options;
   if (maxListeners !== undefined && !(Number.isInteger(maxListeners) && maxListeners > 0)) {
     throw new TypeError('open({ maxListeners }): maxListeners must be a positive integer');

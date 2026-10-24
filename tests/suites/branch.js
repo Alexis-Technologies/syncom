@@ -184,6 +184,79 @@ const runBranchTests = async (t, assert, createStorage, branchPath) => {
     await assert.rejects(() => child.insert({ x: 1 }), { code: 'CLOSED' });
     await assert.rejects(() => drop({}), TypeError);
   });
+
+  await t.test(
+    'drop() takes a branch alone: a storage with no branch.json is refused and keeps its files',
+    async (t2) => {
+      const parent = await createStorage(t2, 'A');
+      const id = await parent.insert({ keep: true });
+      await assert.rejects(() => drop(parent), { name: 'TypeError', message: /takes a branch/ });
+      assert.deepStrictEqual(await parent.get(id), { keep: true }, 'still open, nothing removed');
+      assert.ok((await parent.fsi.list(parent.path)).includes('node.json'));
+    },
+  );
+
+  await t.test('branch() opens a new directory: a path that holds files — another storage — is refused', async (t2) => {
+    const parent = await createStorage(t2, 'A');
+    await parent.insert({ p: 1 });
+    const other = await createStorage(t2, 'B');
+    const kept = await other.insert({ o: 1 });
+    await other.close();
+    await assert.rejects(() => branch(parent, { path: other.path }), { code: 'BRANCH_EXISTS', path: other.path });
+    const again = await createStorage(t2, 'B');
+    assert.deepStrictEqual(await again.list(), [kept], 'the other storage is as it was');
+    assert.strictEqual(again.nodeId, other.nodeId);
+  });
+
+  await t.test('a failed branch() leaves nothing behind: the next attempt starts clean', async (t2) => {
+    const parent = await createStorage(t2, 'A');
+    await parent.insert({ p: 1 });
+    const path = branchPath(t2, 'aborted');
+    await assert.rejects(() => branch(parent, { path, from: { tag: 'nope' } }), { code: 'TAG_NOT_FOUND' });
+    let names = [];
+    try {
+      names = await parent.fsi.list(path);
+    } catch {
+      names = [];
+    }
+    assert.deepStrictEqual(names, [], 'no node.json, no lock, no log left');
+    const child = await branch(parent, { path });
+    t2.after(() => child.close().catch(() => {}));
+    assert.notStrictEqual(child.nodeId, parent.nodeId);
+    assert.deepStrictEqual(await child.list(), await parent.list());
+  });
+
+  await t.test(
+    'a merge hands over every stream or joins as state: a third node’s ops the parent compacted are never skipped',
+    async (t2) => {
+      const parent = await createStorage(t2, 'A', { sync: { log: { rollAfter: 1 }, retention: { ops: 2 } } });
+      const third = await createStorage(t2, 'T');
+      // The third node's ops reach the parent one page per op, as a feed
+      // would deliver them, so the parent rolls and compacts as it goes.
+      let sent = 0;
+      const feed = async () => {
+        const entries = third.log.since(undefined) ?? [];
+        const page = JSON.parse(JSON.stringify(entries.slice(sent).map((entry) => entry.op)));
+        sent = entries.length;
+        await parent.applyRemote(page, { via: { url: null, node: third.nodeId } });
+      };
+      for (let i = 1; i <= 3; i++) {
+        await third.set(`t${i}`, { v: i });
+        await feed();
+      }
+      const child = await branch(parent, { path: branchPath(t2, 'third') });
+      t2.after(() => child.close().catch(() => {}));
+      for (let i = 4; i <= 14; i++) {
+        await third.set(`t${i}`, { v: i });
+        await feed();
+      }
+      assert.ok(parent.log.floor > 4, 'the parent compacted past what the branch holds of the third node');
+      const result = await merge(parent, { into: child });
+      assert.strictEqual(result.joined, true, 'joined as state, not fed gaps');
+      assert.deepStrictEqual(await dump(child), await dump(parent));
+      assert.deepStrictEqual(await merge(parent, { into: child }), { ops: 0, pages: 0, joined: false });
+    },
+  );
 };
 
 module.exports = { runBranchTests };

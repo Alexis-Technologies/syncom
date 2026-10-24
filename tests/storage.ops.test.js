@@ -1349,3 +1349,28 @@ test('Storage: the bounds of the sequence and tree engines', async (t) => {
     },
   );
 });
+
+test('Storage: a sequence op on a field of another kind is refused before any index is read', async (t) => {
+  await t.test(
+    'splice, setAt, move, mark and treeMove on the wrong kind are FIELD_KIND whatever the index',
+    async (t2) => {
+      const { storage } = await openTemp(t2);
+      const id = await storage.insert({ title: 'doc', n: 1 });
+      await storage.treeMove(id, 'outline', 'r');
+      await storage.inc(id, 'hits', 1);
+      for (const index of [0, 3]) {
+        await assert.rejects(() => storage.splice(id, 'outline', index, 0, 'x'), { code: 'FIELD_KIND', kind: 'tree' });
+      }
+      await assert.rejects(() => storage.setAt(id, 'title', 7, 'x'), { code: 'FIELD_KIND', kind: 'register' });
+      await assert.rejects(() => storage.move(id, 'hits', 5, 0), { code: 'FIELD_KIND', kind: 'counter' });
+      await assert.rejects(() => storage.mark(id, 'title', 0, 99, 'bold', true), {
+        code: 'FIELD_KIND',
+        kind: 'register',
+      });
+      await assert.rejects(() => storage.treeMove(id, 'title', 'n'), { code: 'FIELD_KIND', kind: 'register' });
+      await assert.rejects(() => storage.treeMove(id, 'n', 'x'), { code: 'FIELD_KIND', kind: 'register' });
+      const outline = [{ id: 'r', children: [] }];
+      assert.deepStrictEqual(await storage.get(id), { title: 'doc', n: 1, outline, hits: 1 });
+    },
+  );
+});

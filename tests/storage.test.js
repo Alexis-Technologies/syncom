@@ -604,6 +604,8 @@ test('chain: false keeps no chain, writes less, and says so when asked to valida
   assert.deepStrictEqual(await again.get(id), { n: 2, hits: 3 });
   assert.deepStrictEqual((await again.snapshot()).records.map((r) => r.id).sort(), [id, 'r'].sort());
   assert.throws(() => syncom.open({ path: `${tempDir}-bad`, logger: false, chain: 'no' }), TypeError);
+  assert.throws(() => syncom.open(`${tempDir}-bad`), TypeError, 'a path alone is not options');
+  assert.throws(() => syncom.open(null), TypeError);
 });
 
 test(

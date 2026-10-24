@@ -23,6 +23,7 @@
 // directories, so an open cannot find it).
 
 const { SyncomError } = require('./errors.js');
+const { isRecordId } = require('./shape.js');
 
 const FILE = 'tags.json';
 const FORMAT = 1;
@@ -118,6 +119,12 @@ class Tags {
     const known = new Set();
     for (const raw of parsed?.tags ?? []) {
       if (!isTag(raw) || known.has(raw.name)) continue;
+      // The name is a path segment under tags/: the record-id form `tag()`
+      // takes, or the line is dropped — a file is a second way in.
+      if (!isRecordId(raw.name)) {
+        this.#logger?.warn({ event: 'tags.dropped', name: raw.name, reason: 'name' });
+        continue;
+      }
       const tag = {
         ...info(raw),
         catalog: this.#catalogOf(`${this.#dir}/${raw.name}`),
@@ -125,7 +132,7 @@ class Tags {
         held: new Set(),
       };
       if ((await tag.catalog.load({ strict: false })) === null) {
-        this.#logger?.warn({ event: 'tags.dropped', name: raw.name, reason: 'catalog unreadable' });
+        this.#logger?.warn({ event: 'tags.dropped', name: raw.name, reason: 'catalog' });
         continue;
       }
       for (const file of await this.#names(this.#data(tag))) {

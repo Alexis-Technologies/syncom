@@ -320,6 +320,81 @@ const runPatchTests = async (t, assert, createStorage) => {
     await storage.applyRemote([{ origin: 'peer', seq: 1, ts: Date.now() + 1, type: 'set', id, data: { peer: true } }]);
     assert.strictEqual(events.length, count);
   });
+
+  await t.test(
+    'applyPatches() is all or nothing before the first append: a patch out of range leaves the record as it was',
+    async (t2) => {
+      const storage = await createStorage(t2, 'A');
+      const id = await storage.insert({ title: 'a' });
+      await storage.splice(id, 'body', 0, 0, 'hello');
+      const next = storage.log.next;
+      const bad = [
+        { action: 'put', field: 'title', value: 'changed' },
+        { action: 'splice', field: 'body', index: 999, count: 1 },
+      ];
+      await assert.rejects(() => storage.applyPatches(id, bad), { code: 'OUT_OF_RANGE' });
+      assert.deepStrictEqual(await storage.get(id), { title: 'a', body: 'hello' }, 'the put did not land');
+      assert.strictEqual(storage.log.next, next, 'nothing appended');
+      // A kind clash and a cycle refuse the same way, before any op.
+      await storage.treeMove(id, 'outline', 'r');
+      await storage.treeMove(id, 'outline', 'x', 'r');
+      const clash = [
+        { action: 'inc', field: 'hits', value: 1 },
+        { action: 'splice', field: 'title', index: 0, count: 0, content: 'x' },
+      ];
+      await assert.rejects(() => storage.applyPatches(id, clash), { code: 'FIELD_KIND', kind: 'register' });
+      const cycle = [
+        { action: 'inc', field: 'hits', value: 1 },
+        { action: 'treeMove', field: 'outline', node: 'r', parent: 'x' },
+      ];
+      await assert.rejects(() => storage.applyPatches(id, cycle), { code: 'CYCLE' });
+      assert.strictEqual((await storage.get(id)).hits, undefined, 'the inc before the refused patch did not land');
+      // Later patches see the earlier ones: the second splice indexes the text the first one made.
+      const count = await storage.applyPatches(id, [
+        { action: 'splice', field: 'body', index: 5, count: 0, content: ' big' },
+        { action: 'splice', field: 'body', index: 9, count: 0, content: ' world' },
+      ]);
+      assert.strictEqual(count, 2);
+      assert.strictEqual((await storage.get(id)).body, 'hello big world');
+    },
+  );
+
+  await t.test(
+    'a patch is checked as the method of its name checks its arguments; removals are copied, not kept by reference',
+    async (t2) => {
+      const storage = await createStorage(t2, 'A');
+      const id = await storage.insert({ title: 'a' });
+      const bad = [
+        [{ action: 'splice', field: 'body', index: 0, count: 0, content: 5 }, /string for a text or an array/],
+        [{ action: 'splice', field: 'body', index: 0, count: 0 }, /count to remove or content to insert/],
+        [{ action: 'treeMove', field: 'outline', node: 5 }, /node id/],
+        [{ action: 'treeMove', field: 'outline', node: '__proto__' }, /node id/],
+        [{ action: 'treeMove', field: 'outline', node: 'a', after: 'b', before: 'c' }, /after or before, not both/],
+        [{ action: 'treeRemove', field: 'outline', node: 123 }, /node id/],
+        [{ action: 'put', field: 'f', value: () => 1 }, /JSON value/],
+        [{ action: 'write', data: [1, 2] }, /plain object/],
+        [{ action: 'add', field: 'tags', elements: [] }, /non-empty array/],
+        [{ action: 'remove', field: 'tags', removals: [['x', { A: -1 }]] }, /removals as/],
+        [{ action: 'remove', field: 'tags', removals: 'nope' }, /removals as/],
+      ];
+      const next = storage.log.next;
+      for (const [patch, message] of bad) {
+        const expected = { name: 'TypeError', message };
+        await assert.rejects(() => storage.applyPatches(id, [patch]), expected, JSON.stringify(patch));
+      }
+      assert.strictEqual(storage.log.next, next, 'nothing minted');
+      assert.deepStrictEqual(await storage.get(id), { title: 'a' });
+      // `removals` the caller keeps: the log holds a copy.
+      await storage.add(id, 'tags', ['x']);
+      const added = storage.log.entriesOf(id).at(-1).op;
+      const removals = [['x', { [added.origin]: added.ts }]];
+      await storage.applyPatches(id, [{ action: 'remove', field: 'tags', removals }]);
+      assert.deepStrictEqual((await storage.get(id)).tags, []);
+      removals[0][0] = 'MUTATED';
+      removals[0][1].INJECTED = 999;
+      assert.deepStrictEqual(storage.log.entriesOf(id).at(-1).op.value, [['x', { [added.origin]: added.ts }]]);
+    },
+  );
 };
 
 module.exports = { runPatchTests };

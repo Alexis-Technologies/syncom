@@ -190,8 +190,14 @@ that changed kind, makes the diff a `write` of the registers followed by
 the other kinds made again whole. A text's marks are not diffed. The diff
 reads both versions through the schema lens, raw, without the read hooks.
 `applyPatches(id, patches, { actor, source })` realizes a list in one turn
-of the mutation queue and resolves to how many ops it took; a patch of the
-wrong shape is a `TypeError` and nothing is written.
+of the mutation queue and resolves to how many ops it took. A patch is
+checked as the method of its name checks its arguments — the wrong shape is
+a `TypeError` and nothing is written — and every patch is first resolved and
+applied over a scratch record, so an index out of range, a kind clash, a
+cycle or a type change refuses the whole list before anything is appended:
+a restore lands whole or not at all. (A hook or a validator that throws on
+a later op still leaves the earlier ones committed; those run on the real
+writes.)
 
 ## The commit event
 
@@ -286,14 +292,20 @@ second merge has nothing to hand over. The ops keep their origin: a merge
 into a parent that dials peers reaches them as the branch's own ops, and a
 branch that merged from the parent holds the parent's ops under the
 parent's name. A source whose log no longer holds what the other needs
-(compaction) is joined as state instead — its snapshot pages, then its
-vector — and the result says `joined: true`. A `signatures: 'require'`
-parent takes a branch's ops: they are signed by the branch's own key.
+(compaction) — of any stream it carries, a third node's included: a merge
+is the other side's one way to those ops — is joined as state instead, its
+snapshot pages, then its vector, and the result says `joined: true`; a
+merge never reports success over a gap. A `signatures: 'require'` parent
+takes a branch's ops: they are signed by the branch's own key.
 
-`drop(branch)` closes it and removes every file of the known layout, the
-tags' included; the empty directories stay (no backend has rmdir). A
-branch is a branch only here: nothing of it replicates as such, and a peer
-sees merged ops like any other.
+`branch()` opens a new directory only: a path that holds files already —
+another storage, say — is refused (`BRANCH_EXISTS`), and a fork that fails
+halfway leaves nothing behind. `drop(branch)` closes it and removes every
+file of the known layout, the tags' included; the empty directories stay
+(no backend has rmdir). It is the one call here that deletes data, so it
+takes only what `branch()` made: a storage with no `branch.json` is refused.
+A branch is a branch only here: nothing of it replicates as such, and a
+peer sees merged ops like any other.
 
 ## Costs
 

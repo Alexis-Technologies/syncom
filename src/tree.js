@@ -14,12 +14,14 @@
 // A tree reads MAX_DEPTH levels: what hangs deeper is folded but not shown,
 // the same on every node (a 4 000-deep chain would throw in the render and
 // in JSON.stringify, and a throw on the apply path stops a stream). Pure
-// functions over plain JSON; requires ./vector.js and ./order.js (a place
+// functions over plain JSON; requires ./vector.js, ./order.js (a place
 // among siblings must be a fractional index: anything else would throw in
-// `between()` on every local move landing next to it).
+// `between()` on every local move landing next to it) and ./args.js (the
+// node-id rule, the one the write API checks with).
 
 const { compareClock } = require('./vector.js');
 const { isKey } = require('./order.js');
+const { isNodeId } = require('./args.js');
 
 const TRASH = '$trash';
 const MAX_DEPTH = 512;
@@ -29,13 +31,6 @@ const hasControl = (value) => {
   for (let i = 0; i < value.length; i++) if (value.charCodeAt(i) < 32) return true;
   return false;
 };
-const isNodeId = (value) =>
-  typeof value === 'string' &&
-  value.length > 0 &&
-  value.length <= 128 &&
-  value !== '__proto__' &&
-  value !== TRASH &&
-  !hasControl(value);
 const isParent = (value) => value === null || value === TRASH || isNodeId(value);
 const isStamp = (value) => Number.isSafeInteger(value) && value > 0;
 const isOrigin = (value) =>

@@ -27,8 +27,9 @@
 // Pure over plain data; the kinds come from ops.js (`kindsOf`), so this
 // module and the undo subpath on it ship without the op model.
 
-const { deepEqual } = require('./shape.js');
+const { deepEqual, isPlainObject } = require('./shape.js');
 const { diff: myers } = require('./myers.js');
+const { isJsonValue, jsonValue, spliceArgs, treeArgs, setElements } = require('./args.js');
 
 // A list's elements as one character each, so Myers runs over them as over
 // a text; past the private-use plane it is one replacing splice.
@@ -175,10 +176,22 @@ const diffViews = (from, fromKinds, to, toKinds, { purged = false, exact = true 
 };
 
 const isField = (value) => typeof value === 'string' && value.length > 0;
-const isIndex = (value) => Number.isInteger(value) && value >= 0;
+
+// Exactly the tags a remove revokes: `[[element, { origin: addTs }]]`.
+const isRemovals = (list) =>
+  Array.isArray(list) &&
+  list.every(
+    (pair) =>
+      Array.isArray(pair) &&
+      pair.length === 2 &&
+      isJsonValue(pair[0]) &&
+      isPlainObject(pair[1]) &&
+      Object.keys(pair[1]).every((origin) => Number.isSafeInteger(pair[1][origin]) && pair[1][origin] > 0),
+  );
 
 /**
- * A patch as the op the write path takes: `[type, payload]`. A patch of the
+ * A patch as the op the write path takes: `[type, payload]`, checked as the
+ * method of the same name checks its arguments (src/args.js). A patch of the
  * wrong shape is a TypeError — it is the caller's data.
  */
 const realize = (patch) => {
@@ -186,42 +199,46 @@ const realize = (patch) => {
   const { action, field } = patch;
   const named = action !== 'write' && action !== 'delete' && action !== 'purge';
   if (named && !isField(field)) throw new TypeError(`applyPatches(): ${action} needs a field`);
+  const method = 'applyPatches';
   switch (action) {
     case 'put':
-      if (patch.value === undefined) throw new TypeError('applyPatches(): put needs a value');
-      return ['set', { data: { [field]: patch.value } }];
+      return ['set', { data: { [field]: jsonValue(method, patch.value) } }];
     case 'write':
-      if (patch.data === null || typeof patch.data !== 'object') {
-        throw new TypeError('applyPatches(): write needs data');
-      }
+      if (!isPlainObject(patch.data)) throw new TypeError('applyPatches(): write needs data: a plain object');
       return ['write', { data: patch.data }];
     case 'inc':
       if (!Number.isFinite(patch.value)) throw new TypeError('applyPatches(): inc needs a finite value');
       return ['inc', { key: field, value: patch.value }];
     case 'add':
-      if (!Array.isArray(patch.elements)) throw new TypeError('applyPatches(): add needs elements');
-      return ['add', { key: field, value: patch.elements }];
+      return ['add', { key: field, value: setElements(method, field, patch.elements) }];
     case 'remove': {
-      if (Array.isArray(patch.removals)) return ['remove', { key: field, value: [], removals: patch.removals }];
-      if (!Array.isArray(patch.elements)) throw new TypeError('applyPatches(): remove needs elements or removals');
-      const payload = { key: field, value: patch.elements };
+      if (patch.removals !== undefined) {
+        if (!isRemovals(patch.removals)) {
+          throw new TypeError('applyPatches(): remove needs removals as [[element, { origin: addTs }]]');
+        }
+        return ['remove', { key: field, value: [], removals: patch.removals }];
+      }
+      const payload = { key: field, value: setElements(method, field, patch.elements) };
       if (patch.own === true) payload.own = true;
       return ['remove', payload];
     }
     case 'splice': {
       const { index, count = 0, content } = patch;
-      if (!isIndex(index) || !isIndex(count)) throw new TypeError('applyPatches(): splice needs an index and a count');
-      const payload = { key: field, index, count };
-      if (content !== undefined && content.length > 0) payload.content = content;
+      const payload = spliceArgs(method, field, index, count, content);
+      // A pure cut carries no content: the field's kind says what it is.
+      if (payload.content !== undefined && payload.content.length === 0) delete payload.content;
       return ['splice', payload];
     }
     case 'treeMove': {
-      const payload = { key: field, node: patch.node, parent: patch.parent ?? null };
+      const parent = patch.parent ?? null;
+      treeArgs(method, field, patch.node, parent, { after: patch.after, before: patch.before });
+      const payload = { key: field, node: patch.node, parent };
       if (patch.after !== undefined) payload.after = patch.after;
       if (patch.before !== undefined) payload.before = patch.before;
       return ['tree', payload];
     }
     case 'treeRemove':
+      treeArgs(method, field, patch.node, null);
       return ['tree', { key: field, node: patch.node, parent: '$trash' }];
     case 'delete':
       return ['delete', {}];

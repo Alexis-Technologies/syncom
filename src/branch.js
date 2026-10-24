@@ -54,7 +54,11 @@ const merge = async (source, { into } = {}) => {
   }
   if (source === into) throw new TypeError('merge(): a storage does not merge into itself');
   const vector = into.vector;
-  const { ops, first } = outbound(source.log, { exclude: into.nodeId, vector, own: source.nodeId });
+  // Every stream, not the source's own alone: a merge is the receiver's one
+  // way to a third node's ops the source holds, so a stream the source
+  // compacted past what the receiver has is joined as state, never skipped.
+  const selection = { exclude: into.nodeId, vector, own: source.nodeId, allStreams: true };
+  const { ops, first } = outbound(source.log, selection);
   const from = source.nodeId;
   if (Object.keys(unreachable(first, vector)).length > 0) {
     const pages = await join(into, (cursor) => source.snapshot({ cursor }), from);
@@ -89,6 +93,18 @@ const branch = async (parent, { path, from = null, ...options } = {}) => {
   }
   const fsi = options.fsi ?? parent.fsi;
   if (await fsi.exists(path, FILE)) throw new SyncomError('BRANCH_EXISTS', `${path} holds a branch already`, { path });
+  // A branch opens in a directory of its own: one that holds files already
+  // — another storage, say — is not taken over and merged into.
+  let present = [];
+  try {
+    present = await fsi.list(path);
+  } catch {
+    present = [];
+  }
+  if (present.length > 0) {
+    const message = `${path} holds files already; a branch opens in a new directory`;
+    throw new SyncomError('BRANCH_EXISTS', message, { path });
+  }
   const sync = { ...options.sync, retention: { ...options.sync?.retention, ops: 0 }, autoStart: false };
   const Storage = parent.constructor;
   const child = await new Storage({ ...options, fsi, path, sync });
@@ -112,7 +128,8 @@ const branch = async (parent, { path, from = null, ...options } = {}) => {
     const info = { format: FORMAT, parent: origin, forkedAt, createdAt: Date.now() };
     await fsi.write(path, FILE, JSON.stringify(info));
   } catch (error) {
-    await child.close().catch(() => {});
+    // Nothing half-made stays: a retry opens a new identity, not this one.
+    await sweep(child).catch(() => {});
     throw error;
   }
   return child;
@@ -139,12 +156,9 @@ const branchInfo = async (storage) => {
 // directories, so the tags' are named from the storage before it closes.
 const DIRS = ['', 'keys', 'blockchain', 'index', 'data', 'log', 'log/open', 'remote'];
 
-/**
- * Closes a branch and removes its files — every file of the known layout,
- * the tags' included. The empty directories stay: no backend has rmdir.
- */
-const drop = async (storage) => {
-  if (!isStorage(storage) || typeof storage.path !== 'string') throw new TypeError('drop() takes a storage');
+// Closes a storage and removes its files — every file of the known layout,
+// the tags' included. The empty directories stay: no backend has rmdir.
+const sweep = async (storage) => {
   const { fsi, path } = storage;
   const dirs = [...DIRS];
   for (const { name } of storage.tags()) dirs.push(`tags/${name}/data`, `tags/${name}/index`);
@@ -159,6 +173,20 @@ const drop = async (storage) => {
     }
     for (const name of names) await fsi.remove(full, name);
   }
+};
+
+/**
+ * Closes a branch and removes its files — every file of the known layout,
+ * the tags' included; the empty directories stay (no backend has rmdir).
+ * A storage that is no branch (no `branch.json`) is refused: this is the
+ * one call that deletes data, and it takes only what `branch()` made.
+ */
+const drop = async (storage) => {
+  if (!isStorage(storage) || typeof storage.path !== 'string') throw new TypeError('drop() takes a storage');
+  if ((await branchInfo(storage)) === null) {
+    throw new TypeError(`drop() takes a branch: ${storage.path} holds no ${FILE}`);
+  }
+  await sweep(storage);
 };
 
 module.exports = { branch, merge, branchInfo, drop };

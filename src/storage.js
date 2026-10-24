@@ -15,14 +15,15 @@ const { SyncManager } = require('./sync.js');
 const { OpLog } = require('./log.js');
 const { EntryStore } = require('./entries.js');
 const { Record, Collection } = require('./record.js');
-const { commit, MISMATCH } = require('./commit.js');
+const { commit, rehearse, MISMATCH } = require('./commit.js');
+const { spliceArgs, treeArgs, markArgs, setElements, jsonValue } = require('./args.js');
 const { applyBatch } = require('./apply.js');
 const { snapshotPage, mergeBatch, adopt } = require('./bootstrap.js');
 const { applyOp, isAlive, isCounter, isSet, isSeq, isTree, deepEqual, kindsOf, seqIndexOf } = require('./ops.js');
 const { diff } = require('./myers.js');
 const { spans, isRunKey, isAnchor, cursorAt, indexOfCursor, REVERSED } = require('./sequence.js');
 const { Cursor } = require('./query.js');
-const { TRASH, isNodeId } = require('./tree.js');
+const { TRASH } = require('./tree.js');
 const { appliedHere, parseVersion, within, exactStart, fold, gone } = require('./history.js');
 const { Tags } = require('./tags.js');
 const { diffViews, realize } = require('./patch.js');
@@ -56,67 +57,6 @@ const corrupt = (file, cause) =>
   new SyncomError('CORRUPT', `${file} is unreadable (${cause?.message ?? cause}); restore it or remove the directory`, {
     cause,
   });
-
-// What splice()/push() take: a field name, an index (null: the end) and a
-// count, and content — a string for a text, an array of JSON values for a
-// list, absent when the call only cuts.
-const spliceArgs = (method, key, index, count, content) => {
-  if (typeof key !== 'string') throw new TypeError(`${method}() takes a field name`);
-  if (index !== null && !(Number.isInteger(index) && index >= 0)) {
-    throw new TypeError(`${method}() takes a non-negative integer index`);
-  }
-  if (!Number.isInteger(count) || count < 0) throw new TypeError(`${method}() takes a non-negative integer count`);
-  if (content !== undefined && typeof content !== 'string' && !Array.isArray(content)) {
-    throw new TypeError(`${method}() takes a string for a text or an array for a list`);
-  }
-  if (Array.isArray(content)) {
-    for (const element of content) {
-      if (element === undefined || typeof element === 'function' || typeof element === 'symbol') {
-        throw new TypeError(`${method}() takes JSON values; got ${typeof element}`);
-      }
-    }
-  }
-  if (count === 0 && (content === undefined || content.length === 0)) {
-    throw new TypeError(`${method}() takes a count to remove or content to insert`);
-  }
-  const payload = { key, index, count };
-  if (content !== undefined) payload.content = content;
-  return payload;
-};
-
-// What mark()/unmark() take over a range: a field name, a visible range
-// start ≤ end, a style name and an expand rule.
-const treeArgs = (method, key, node, parent) => {
-  if (typeof key !== 'string') throw new TypeError(`${method}() takes a field name`);
-  if (!isNodeId(node)) throw new TypeError(`${method}() takes a node id: a non-empty string of at most 128 characters`);
-  if (parent !== null && !isNodeId(parent)) throw new TypeError(`${method}() takes a parent: a node id or null`);
-  if (parent === node) throw new TypeError(`${method}() cannot put a node under itself`);
-};
-
-const markArgs = (method, key, start, end, name, expand) => {
-  if (typeof key !== 'string') throw new TypeError(`${method}() takes a field name`);
-  if (!Number.isInteger(start) || start < 0 || !Number.isInteger(end) || end < start) {
-    throw new TypeError(`${method}() takes a range: 0 <= start <= end`);
-  }
-  if (typeof name !== 'string' || name.length === 0) throw new TypeError(`${method}() takes a style name`);
-  if (!Object.hasOwn(REVERSED, expand)) throw new TypeError(`${method}() takes expand: before, after, both or none`);
-};
-
-// What add()/remove() take: a field name and a non-empty array of JSON
-// values — an element JSON cannot carry (undefined, a function, a symbol) has
-// no text to be told apart by.
-const setElements = (method, key, elements) => {
-  if (typeof key !== 'string') throw new TypeError(`${method}() takes a field name`);
-  if (!Array.isArray(elements) || elements.length === 0) {
-    throw new TypeError(`${method}() takes a non-empty array of elements`);
-  }
-  for (const element of elements) {
-    if (element === undefined || typeof element === 'function' || typeof element === 'symbol') {
-      throw new TypeError(`${method}() takes JSON values; got ${typeof element}`);
-    }
-  }
-  return elements;
-};
 
 class Storage extends Emitter {
   #path;
@@ -1144,6 +1084,12 @@ class Storage extends Emitter {
     if (!Array.isArray(patches)) throw new TypeError('applyPatches() takes an array of patches');
     const ops = patches.map(realize);
     return this.#run(async () => {
+      // Every op resolved and applied over a scratch record first — an index
+      // out of range, a kind clash, a cycle, a type change — so nothing is
+      // appended unless all of them can be: a restore lands whole or not at
+      // all. A hook or a validator that throws on a later op still leaves
+      // the earlier ones committed (see applyPatches in the reference).
+      await rehearse(this.#core, id, ops);
       let count = 0;
       for (const [type, payload] of ops) {
         const op = await commit(this.#core, type, id, payload, { actor, source });
@@ -1476,9 +1422,7 @@ class Storage extends Emitter {
    */
   async mark(id, key, start, end, name, value, { expand = 'after', many = false, actor } = {}) {
     markArgs('mark', key, start, end, name, expand);
-    if (value === undefined || typeof value === 'function' || typeof value === 'symbol') {
-      throw new TypeError(`mark() takes a JSON value; got ${typeof value}`);
-    }
+    jsonValue('mark', value);
     const payload = { key, start, end, name, value, expand };
     if (many === true) payload.many = true;
     const op = await this[COMMIT]('mark', id, payload, { actor });
@@ -1552,9 +1496,7 @@ class Storage extends Emitter {
   async setAt(id, key, index, value, { actor } = {}) {
     if (typeof key !== 'string') throw new TypeError('setAt() takes a field name');
     if (!Number.isInteger(index) || index < 0) throw new TypeError('setAt() takes a non-negative integer index');
-    if (value === undefined || typeof value === 'function' || typeof value === 'symbol') {
-      throw new TypeError(`setAt() takes a JSON value; got ${typeof value}`);
-    }
+    jsonValue('setAt', value);
     await this[COMMIT]('assign', id, { key, index, value }, { actor });
   }
 
@@ -1584,16 +1526,7 @@ class Storage extends Emitter {
    * the node already is makes no op.
    */
   async treeMove(id, key, node, parent = null, { after, before, actor } = {}) {
-    treeArgs('treeMove', key, node, parent);
-    if (after !== undefined && before !== undefined) throw new TypeError('treeMove() takes after or before, not both');
-    for (const [name, value] of [
-      ['after', after],
-      ['before', before],
-    ]) {
-      if (value === undefined) continue;
-      if (!isNodeId(value)) throw new TypeError(`treeMove() takes ${name}: a node id`);
-      if (value === node) throw new TypeError(`treeMove() cannot place a node ${name} itself`);
-    }
+    treeArgs('treeMove', key, node, parent, { after, before });
     const payload = { key, node, parent };
     if (after !== undefined) payload.after = after;
     if (before !== undefined) payload.before = before;

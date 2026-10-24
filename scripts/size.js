@@ -112,8 +112,11 @@ const ENTRIES = [
   // extended by its origin alone, the snapshot path under the same bound,
   // orphan registers and off-placeholders counted, a fractional index
   // checked, a tree read to a depth, a malformed payload reported, the
-  // `sync.pendingMax` option — the raise to 62 KB (61.7 measured).
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 62 },
+  // `sync.pendingMax` option — the raise to 62 KB (61.7 measured). The second
+  // epic — the argument checks shared with realize(), the kind clash refused
+  // before any index is read, applyPatches rehearsed before the first append,
+  // a merge that asks for every stream — the raise to 62.5 KB (62.0 measured).
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 62.5 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -131,9 +134,11 @@ const ENTRIES = [
   { label: 'search — browser (@alexify/syncom/search)', entry: 'search.js', platform: 'browser', budget: 2 },
   // Fractional indexes for ordering records: a helper off the main entry.
   { label: 'order — browser (@alexify/syncom/order)', entry: 'order.js', platform: 'browser', budget: 1.5 },
-  // The undo manager with the patch vocabulary, Myers and the Emitter it
-  // stands on — measured alone; in an app bundle those are shared with the core.
-  { label: 'undo — browser (@alexify/syncom/undo)', entry: 'undo.js', platform: 'browser', budget: 5.5 },
+  // The undo manager with the patch vocabulary, Myers, the argument checks
+  // realize() shares with the write API (src/args.js) and the Emitter it
+  // stands on — measured alone; in an app bundle those are shared with the
+  // core. 6 KB since the shared checks (5.9 measured).
+  { label: 'undo — browser (@alexify/syncom/undo)', entry: 'undo.js', platform: 'browser', budget: 6 },
   // A fork opened through the parent's constructor, merged as ops: the
   // selection a push makes, the shape helpers, the protocol constants.
   { label: 'branch — browser (@alexify/syncom/branch)', entry: 'branch.js', platform: 'browser', budget: 3.5 },

@@ -44,8 +44,8 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 | `tags()` | `Tag[]` | The tags, oldest first — from memory |
 | `at(name)` | `TagView` | The storage at a tag: its fields plus `get(id)` (the record as it was, through the lens and the read hooks with `at: { tag }`; `null` when it was not there), `has(id)`, `list()` (every live id then), `collection(entity)` (`select()`, `count()`, `get()` as it was — no `watch()`, no `$text`) and `snapshot(options)` (pages like `snapshot()`, at the tag's position); throws `TAG_NOT_FOUND` |
 | `diff(id, from?, to?)` | `Promise<Patch[]>` | The patches that turn the record at `from` into the record at `to` (the present when omitted), per field by kind — see [Diff and restore](../guide/versions#diff-and-restore); raw, through the lens, no read hooks; rejects as `get(id, { at })` would, `ENCRYPTED` for an encrypted record |
-| `applyPatches(id, patches, { actor, source }?)` | `Promise<number>` | Realizes patches as ops of this node's own in one turn of the mutation queue (`put`, `write`, `inc`, `add`, `remove` with `elements` — `own: true` for this node's adds alone — or exact `removals`, `splice`, `treeMove`, `treeRemove`, `delete`, `purge`); `source` rides on the `commit` events; resolves to how many ops; a patch of the wrong shape is a `TypeError` and nothing is written |
-| `restore(id, at, { actor, source }?)` | `Promise<number>` | Makes the record read as it did at `at` with new ops that lead back — `diff(id, undefined, at)` applied |
+| `applyPatches(id, patches, { actor, source }?)` | `Promise<number>` | Realizes patches as ops of this node's own in one turn of the mutation queue (`put`, `write`, `inc`, `add`, `remove` with `elements` — `own: true` for this node's adds alone — or exact `removals`, `splice`, `treeMove`, `treeRemove`, `delete`, `purge`); `source` rides on the `commit` events; resolves to how many ops. A patch is checked as the method of its name checks its arguments — the wrong shape is a `TypeError` with nothing minted — and every patch is first resolved and applied over a scratch record, so an index out of range, a kind clash, a cycle or a type change refuses the whole batch with nothing written; a hook or a validator that throws on a later op leaves the earlier ones committed |
+| `restore(id, at, { actor, source }?)` | `Promise<number>` | Makes the record read as it did at `at` with new ops that lead back — `diff(id, undefined, at)` applied; lands whole or not at all (see `applyPatches`) |
 | `history(id, { limit = 50 }?)` | `Promise<{ versions, complete, exact }>` | The record's past, newest first: `{ eventId, seq, ts, origin, actor, type, fields, data, scrubbed? }` per op this node applied, `data` the record after it through the lens and `afterRead`; `complete` when nothing was dropped or cut by `limit`, `exact` when the versions are what the node held |
 | `has(id)` | `Promise<boolean>` | `false` for a tombstone |
 | `list()` | `Promise<string[]>` | Every live id, sorted — from the catalog, no I/O |
@@ -225,7 +225,7 @@ value is data or configuration. `HookError` and `ValidationError` are
 | `INVALID_VERSION` | `get(id, { at })` with an `at` of the wrong shape, or an event id this log has not reached (a `TypeError`) | — |
 | `TAG_EXISTS` | `tag()` of a name in use | `tag` |
 | `TAG_NOT_FOUND` | `untag()`, `at()`, `get(id, { at: { tag } })` of a tag this node has not | `tag` |
-| `BRANCH_EXISTS` | `branch()` (`@alexify/syncom/branch`) at a path that holds a `branch.json` already | `path` |
+| `BRANCH_EXISTS` | `branch()` (`@alexify/syncom/branch`) at a path that holds a `branch.json`, or any file — another storage, say — already: a branch opens in a new directory | `path` |
 | `ENCRYPTED` | `inc()`, `add()`, `remove()`, `splice()` or `push()` on an encrypted record; `{ encrypted: true }` on a replicated one | — |
 | `INTEGRITY` | a read (`get()`, `has()`, a cursor) of a record whose file fails its chain block check, under `integrity: 'verify'`, or cannot be parsed at all (a file torn by a crash; `repair(id)` rebuilds it) | `id`, `cause` (the parse error) |
 | `CORRUPT` | `open()` when `node.json`, `schema.json`, `tags.json` or `.blockchain.json` cannot be read | `cause` |
@@ -478,10 +478,10 @@ through the parent's own constructor, so it bundles no engine.
 
 | Function | Returns | Notes |
 | --- | --- | --- |
-| `branch(parent, { path, from?: { tag }, ...options })` | `Promise<Storage>` | A storage at `path` — a new identity — standing at the parent's state, or at the tag; opened with `options` (`sync` gets `retention: { ops: 0 }` and `autoStart: false`); writes `branch.json`; rejects with `BRANCH_EXISTS` |
-| `merge(source, { into })` | `Promise<{ ops, pages, joined }>` | Hands `into` the ops it lacks through `applyRemote`, in pages; `joined: true` when the source's log no longer held them and its state was joined instead |
+| `branch(parent, { path, from?: { tag }, ...options })` | `Promise<Storage>` | A storage at `path` — a new identity — standing at the parent's state, or at the tag; opened with `options` (`sync` gets `retention: { ops: 0 }` and `autoStart: false`); writes `branch.json`; rejects with `BRANCH_EXISTS` for a path that holds a `branch.json` or any other file (another storage is never taken over); a fork that fails leaves nothing behind |
+| `merge(source, { into })` | `Promise<{ ops, pages, joined }>` | Hands `into` the ops it lacks through `applyRemote`, in pages — of every stream the source holds; `joined: true` when the source's log no longer held what `into` needs of any of them (a third node's included) and its state was joined instead, never a gap |
 | `branchInfo(storage)` | `Promise<BranchInfo \| null>` | `{ parent, forkedAt: { eventId, vector, ts, tag }, createdAt }` from the directory's `branch.json`, or `null` |
-| `drop(storage)` | `Promise<void>` | Closes the branch and removes its files (the directories stay) |
+| `drop(storage)` | `Promise<void>` | Closes the branch and removes its files (the directories stay); a storage with no `branch.json` is refused with a `TypeError` — this is the one call that deletes data, and it takes only what `branch()` made |
 
 ## Search (subpath)
 

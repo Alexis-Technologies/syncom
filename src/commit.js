@@ -9,17 +9,7 @@
 // lensed readers — see Storage#open.
 
 const { encrypt, calculateHash } = require('./crypto.js');
-const {
-  applyOp,
-  isAlive,
-  latestClock,
-  observedTags,
-  isCounter,
-  isSet,
-  isTree,
-  kindsOf,
-  seqIndexOf,
-} = require('./ops.js');
+const { applyOp, isAlive, latestClock, observedTags, kindOf, kindsOf, seqIndexOf } = require('./ops.js');
 const S = require('./sequence.js');
 const T = require('./tree.js');
 const { between } = require('./order.js');
@@ -158,10 +148,6 @@ const resolveSplice = (core, id, payload, current) => {
   const { key, index, count, content } = payload;
   const meta = current?.meta;
   const held = meta && Object.hasOwn(meta.seqs ?? {}, key) ? meta.seqs[key] : undefined;
-  // Another kind under the field: applyOp refuses it with the right reason.
-  if (held === undefined && meta && (Object.hasOwn(meta.clock, key) || isCounter(meta, key) || isSet(meta, key))) {
-    return { content: content ?? '', at: S.HEAD };
-  }
   const marker = content ?? (held?.k === 'l' ? [] : '');
   const idx = held === undefined ? null : seqIndexOf(current, key);
   const length = idx === null ? 0 : idx.length;
@@ -177,16 +163,12 @@ const resolveSplice = (core, id, payload, current) => {
   return value;
 };
 
-// A list's element, by its index: the name it keeps across moves. Another
-// kind under the field is left to applyOp to refuse; a field with no block
-// has no elements (OUT_OF_RANGE).
+// A list's element, by its index: the name it keeps across moves. A field
+// with no block has no elements (OUT_OF_RANGE); another kind under the field
+// was refused before this is read (`kindClash`).
 const elementAt = (core, id, key, index, current) => {
   const meta = current?.meta;
   const held = meta && Object.hasOwn(meta.seqs ?? {}, key) ? meta.seqs[key] : undefined;
-  const other =
-    meta && (Object.hasOwn(meta.clock, key) || isCounter(meta, key) || isSet(meta, key) || isTree(meta, key));
-  if (held === undefined && other) return { idx: null, elem: '1:0:placeholder' };
-  if (held !== undefined && held.k !== 'l') return { idx: null, elem: '1:0:placeholder' };
   const idx = held === undefined ? null : seqIndexOf(current, key);
   const length = idx === null ? 0 : idx.length;
   if (index >= length) {
@@ -206,7 +188,6 @@ const resolveAssign = (core, id, payload, current) => {
 const resolveMove = (core, id, payload, current) => {
   const { key, index: from, to } = payload;
   const { idx, elem } = elementAt(core, id, key, from, current);
-  if (idx === null) return { elem, cut: ['1:placeholder', 0, 1], at: S.HEAD, value: null };
   if (to >= idx.length) {
     const message = `Index ${to} is out of range for field ${key} of record ${id} (length ${idx.length})`;
     throw new SyncomError('OUT_OF_RANGE', message, { id, field: key, index: to, count: 0, length: idx.length });
@@ -225,11 +206,6 @@ const resolveMark = (core, id, payload, current) => {
   const { start, end, name, value, expand, many } = payload;
   const meta = current?.meta;
   const held = meta && Object.hasOwn(meta.seqs ?? {}, key) ? meta.seqs[key] : undefined;
-  const other =
-    held === undefined
-      ? meta && (Object.hasOwn(meta.clock, key) || isCounter(meta, key) || isSet(meta, key) || isTree(meta, key))
-      : held.k !== 't';
-  if (other) return { start: S.HEAD, end: S.END, key: name, value };
   const idx = held === undefined ? null : seqIndexOf(current, key);
   const length = idx === null ? 0 : idx.length;
   if (start > end || end > length) {
@@ -323,7 +299,20 @@ const ownTags = (removals, origin) => {
 // holds for the record, so a local write never sorts below state the node
 // knows about and is silently dropped (the log seeds the clock at open; this
 // covers what the log no longer has), numbered in its stream.
+// The kinds each sequence or tree op may land on; another kind under the
+// field is refused — as applyOp would report it, with the hint for the right
+// call — before a stamp is minted or an index read, for a call and for a
+// patch alike.
+const TAKES = { splice: ['list', 'text'], assign: ['list'], move: ['list'], mark: ['text'], tree: ['tree'] };
+const kindClash = (type, key, current) => {
+  const takes = TAKES[type];
+  if (takes === undefined || !current || current.encrypted) return [];
+  const kind = kindOf(current, key);
+  return kind === undefined || takes.includes(kind) ? [] : [{ field: key, reason: kind }];
+};
+
 const prepareOp = (core, type, id, payload, current, who, from) => {
+  refuse(id, kindClash(type, payload.key, current));
   core.observe(latestClock(current?.meta, true));
   const op = { origin: core.nodeId, seq: 0, ts: core.clock.now(), type, id };
   if (from) op.from = from;
@@ -448,6 +437,39 @@ const announce = async (core, op, entry, delta, ctx, source, via, committed = nu
   }
 };
 
+// The payload taken as JSON — a copy, like the disk and the peers hold it —
+// before anything keeps a reference to it: the data, a value, a content, the
+// tags a remove names.
+const copyPayload = (payload) => {
+  if (payload.data !== undefined) payload = { ...payload, data: asJson(payload.data) };
+  if (payload.value !== undefined && typeof payload.value === 'object') {
+    payload = { ...payload, value: asJson(payload.value) };
+  }
+  if (payload.content !== undefined) payload = { ...payload, content: asJson(payload.content) };
+  if (payload.removals !== undefined) payload = { ...payload, removals: asJson(payload.removals) };
+  return payload;
+};
+
+// Every op of a batch resolved and applied over a scratch record, in order,
+// each against the result of the one before — what applyPatches() does
+// before it appends anything, so an index out of range, a kind clash, a
+// cycle or a type change refuses the batch whole. Hooks and validators are
+// not run here; they run on the real commits, which may still refuse.
+const rehearse = async (core, id, ops) => {
+  let current = await core.entries.load(id);
+  if (current?.encrypted) return;
+  for (const [type, given] of ops) {
+    const payload = copyPayload(given);
+    const visible = current && isAlive(current) ? current.data : null;
+    if (type === 'write' || type === 'set') payload.data = sameType(type, id, payload.data, visible);
+    const op = prepareOp(core, type, id, payload, current, null, null);
+    if (type === 'tree' && op.value === null) continue;
+    const { entry, changed, rejected } = applyOp(current, op, core.limits);
+    refuse(id, rejected);
+    if (changed) current = entry;
+  }
+};
+
 const commitLocal = async (core, type, id, payload, options) => {
   const { source = null, via = null, from = null, encrypted = false, actor, expect = null } = options;
   const current = await core.entries.load(id);
@@ -455,13 +477,7 @@ const commitLocal = async (core, type, id, payload, options) => {
     throw new SyncomError('ENCRYPTED', `Record ${id} is replicated and cannot become encrypted`);
   }
   if (expect !== null && !(await expectation(core, id, current, expect))) return MISMATCH;
-  // The payload is taken as JSON — a copy, like the disk and the peers
-  // hold it — before anything keeps a reference to it.
-  if (payload.data !== undefined) payload = { ...payload, data: asJson(payload.data) };
-  if (payload.value !== undefined && typeof payload.value === 'object') {
-    payload = { ...payload, value: asJson(payload.value) };
-  }
-  if (payload.content !== undefined) payload = { ...payload, content: asJson(payload.content) };
+  payload = copyPayload(payload);
   // Sealed: this write is encrypted, or the record already is. An
   // encrypted record has no op log — writes to it stay local.
   const sealed = encrypted || current?.encrypted === true;
@@ -528,4 +544,4 @@ const commit = (core, type, id, payload, options = {}) => {
   return tracedCommit(core, type, id, payload, options);
 };
 
-module.exports = { commit, MISMATCH };
+module.exports = { commit, rehearse, MISMATCH };

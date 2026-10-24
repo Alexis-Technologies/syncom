@@ -360,6 +360,29 @@ const runTagTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(await storage.at('v1').get(id), { secret: '***', n: 1 });
     assert.deepStrictEqual(seen, [{ id, at: { tag: 'v1' } }]);
   });
+
+  await t.test(
+    'a tags.json line whose name is not a record id is dropped at open, never read as a path',
+    async (t2) => {
+      let storage = await createStorage(t2, 'A');
+      const id = await storage.insert({ v: 1 });
+      const tag = await storage.tag('ok');
+      await storage.close();
+      // A tampered file names a directory outside tags/ as a tag.
+      const raw = JSON.parse(await storage.fsi.read(storage.path, 'tags.json'));
+      raw.tags.push({ ...raw.tags[0], name: '../../elsewhere' });
+      await storage.fsi.write(storage.path, 'tags.json', JSON.stringify(raw));
+      storage = await createStorage(t2, 'A');
+      assert.deepStrictEqual(storage.tags(), [tag]);
+      assert.deepStrictEqual(await storage.at('ok').get(id), { v: 1 });
+      const saved = JSON.parse(await storage.fsi.read(storage.path, 'tags.json'));
+      assert.deepStrictEqual(
+        saved.tags.map((line) => line.name),
+        ['ok'],
+        'the line is gone from the file',
+      );
+    },
+  );
 };
 
 module.exports = { runTagTests };
