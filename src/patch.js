@@ -13,6 +13,7 @@
 //   { action: 'remove', field, elements, own: true } …only this node's adds of them (an undo: a peer's stay)
 //   { action: 'remove', field, removals }           …or exactly these tags: `[[element, { origin: addTs }]]`
 //   { action: 'splice', field, index, count, content }   a list's or a text's edit
+//   { action: 'mark', field, start, end, name, value, expand?, many? }  a text's style over [start, end)
 //   { action: 'treeMove', field, node, parent, after? }  a tree node placed
 //   { action: 'treeRemove', field, node }
 //   { action: 'delete' }, { action: 'purge' }
@@ -23,13 +24,14 @@
 // and removed elements, a text's or a list's splices (Myers), a tree's
 // moves and removals — and a reset when a register is gone or a field
 // changed kind, since no op removes one field: a `write` of the registers,
-// then the other kinds made again whole. A text's marks are not diffed.
+// then the other kinds made again whole. A text's marks are not diffed;
+// `compact()` lays them again itself, as `mark` patches.
 // Pure over plain data; the kinds come from ops.js (`kindsOf`), so this
 // module and the undo subpath on it ship without the op model.
 
 const { deepEqual, isPlainObject } = require('./shape.js');
 const { diff: myers } = require('./myers.js');
-const { isJsonValue, jsonValue, spliceArgs, treeArgs, setElements } = require('./args.js');
+const { isJsonValue, jsonValue, spliceArgs, treeArgs, markArgs, setElements } = require('./args.js');
 
 // A list's elements as one character each, so Myers runs over them as over
 // a text; past the private-use plane it is one replacing splice.
@@ -105,7 +107,8 @@ const asKeys = (elements) => new Map(elements.map((element) => [JSON.stringify(e
 
 // A field's content made again from nothing, by kind.
 const recreate = (field, kind, value) => {
-  if (kind === 'counter') return value === 0 ? [] : [{ action: 'inc', field, value }];
+  // An inc of 0 makes a counter that reads 0: the field stays a counter.
+  if (kind === 'counter') return [{ action: 'inc', field, value }];
   if (kind === 'set') return value.length === 0 ? [] : [{ action: 'add', field, elements: value }];
   if (kind === 'text' || kind === 'list') {
     return value.length === 0 ? [] : [{ action: 'splice', field, index: 0, count: 0, content: value }];
@@ -228,6 +231,13 @@ const realize = (patch) => {
       // A pure cut carries no content: the field's kind says what it is.
       if (payload.content !== undefined && payload.content.length === 0) delete payload.content;
       return ['splice', payload];
+    }
+    case 'mark': {
+      const { start, end, name, value = null, expand = 'after' } = patch;
+      markArgs(method, field, start, end, name, expand);
+      const payload = { key: field, start, end, name, value: jsonValue(method, value), expand };
+      if (patch.many === true) payload.many = true;
+      return ['mark', payload];
     }
     case 'treeMove': {
       const parent = patch.parent ?? null;

@@ -609,6 +609,15 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **`compact()` keeps what a record reads as.** It made a text again from its
+  string and dropped its marks, dropped a counter at `0`, and refused a text
+  or a list longer than one run (`FIELD_KIND`, `detail: 'run'`). The marks
+  in force are laid again now, in stamp order and with the expand rule their
+  anchors had (`marksIn` in src/sequence.js; patches take a `mark` action), a
+  counter at `0` is made again with an `inc` of 0, and a long field in runs
+  of `MAX_RUN` — `restore()` too. And one `splice()` that a writer's own run
+  cannot hold whole anchors a new run instead of overflowing it, as typing
+  past a full run already did.
 - **`spans()` reads a name that has both plain and stacking marks.** A
   stacking (`many`) mark newer than a plain mark of its name over the same
   characters threw `marks[key].push is not a function` from `spans()` — a

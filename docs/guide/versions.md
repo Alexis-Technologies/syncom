@@ -411,13 +411,14 @@ took — `0` for a record that is not there, `ENCRYPTED` for an encrypted
 one — and is a whole-record write like any other: a peer's op stamped
 before it and arriving after it is dropped by the reset, and a peer's typing
 stamped above it that was anchored in the old runs reads from the head (see
-[How it merges](./lists#how-it-merges)). What it does not keep today: a
-text's marks — the text is made again from its string, and marks are not
-diffed, so `spans()` reads it plain afterwards; the cursors into its texts
-and lists, which named the old runs and read `null`; a field of another kind
-that reads empty (`''`, `[]`, a counter at `0`), which is not made again and
-is gone from the record; and a text or a list longer than one run
-(1 048 576 elements), which cannot be one op, so `compact()` refuses the
-record whole (`FIELD_KIND`, `kind: 'bound'`, `detail: 'run'`). The same holds
-for a `restore()` whose diff is a reset: the texts it makes again come back
-without their marks.
+[How it merges](./lists#how-it-merges)). A text's marks are laid again over
+the new run, in the order they were made and with the expand rule their
+anchors had, so `spans()` reads the same; a counter at `0` stays a counter;
+a text or a list longer than one run (1 048 576 elements) is made again in
+runs of that size. Two things it cannot keep, because it names every
+element anew: the cursors into its texts and lists, which named the old
+elements and read `null` afterwards, and the ids of stacking marks, which
+are new (`spans()` hands them out). And a list, a text, a set or a tree that
+reads empty is left out of the record: no op makes an empty one. A
+`restore()` whose diff is a reset makes texts again without their marks —
+`diff()` does not diff marks.

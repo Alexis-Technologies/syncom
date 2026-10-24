@@ -716,6 +716,8 @@ test('sequence engine', async (t) => {
       assert.deepStrictEqual(S.placeInsert(atCap, 1, 'A'), { at: `>${S.elemKey('1:A', S.MAX_RUN - 1)}` });
       const short = S.buildIndex({ k: 't', ts: 1, runs: { '1:A': ['^', [S.MAX_RUN - 2, 'x']] } });
       assert.deepStrictEqual(S.placeInsert(short, 1, 'A'), { run: '1:A', from: S.MAX_RUN - 1 });
+      // …and an insertion the run cannot hold whole anchors a new run, rather than overflow it.
+      assert.deepStrictEqual(S.placeInsert(short, 1, 'A', 2), { at: `>${S.elemKey('1:A', S.MAX_RUN - 2)}` });
     },
   );
 

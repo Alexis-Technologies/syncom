@@ -126,8 +126,10 @@ const ENTRIES = [
   // the raise to 65 KB (64.6 measured: a module's exports and requires). The
   // bugs the docs audit found (2026-10-24), fixed one commit each: a splice's
   // content checked against the field's kind before the stamp — the raise to
-  // 65.5 KB (65.0 measured). The rule stays: a raise names its feature here.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 65.5 },
+  // 65.5 KB (65.0 measured); compact() laying a text's marks again
+  // (sequence.js marksIn, the `mark` patch, long fields in runs) — the raise
+  // to 66 KB (65.6 measured). The rule stays: a raise names its feature here.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 66 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -148,8 +150,9 @@ const ENTRIES = [
   // The undo manager with the patch vocabulary, Myers, the argument checks
   // realize() shares with the write API (src/args.js) and the Emitter it
   // stands on — measured alone; in an app bundle those are shared with the
-  // core. 6 KB since the shared checks (5.9 measured).
-  { label: 'undo — browser (@alexify/syncom/undo)', entry: 'undo.js', platform: 'browser', budget: 6 },
+  // core. 6 KB since the shared checks (5.9 measured); 6.5 KB since the
+  // `mark` patch (6.0 measured).
+  { label: 'undo — browser (@alexify/syncom/undo)', entry: 'undo.js', platform: 'browser', budget: 6.5 },
   // A fork opened through the parent's constructor, merged as ops: the
   // selection a push makes, the shape helpers, the protocol constants.
   { label: 'branch — browser (@alexify/syncom/branch)', entry: 'branch.js', platform: 'browser', budget: 3.5 },

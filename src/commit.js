@@ -160,7 +160,9 @@ const resolveSplice = (core, id, payload, current) => {
   }
   const value = { content: marker };
   if (count > 0) value.cut = S.rangesOf(idx, at, count);
-  if (marker.length > 0) Object.assign(value, idx === null ? { at: S.HEAD } : S.placeInsert(idx, at, core.nodeId));
+  if (marker.length > 0) {
+    Object.assign(value, idx === null ? { at: S.HEAD } : S.placeInsert(idx, at, core.nodeId, marker.length));
+  }
   return value;
 };
 

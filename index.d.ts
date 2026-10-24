@@ -1569,9 +1569,10 @@ export interface Storage {
    * Rewrites the record as the ops its reading takes today — a `write` of
    * the registers, then one op per field of another kind (a text or a list
    * as one run, a tree as one move per node) — so what lies under it goes by
-   * the reset rule here and on every peer. `get()` reads the same, but for a
-   * field that reads empty, which is left out; a text's marks and the cursors
-   * into the record's lists and texts are not kept.
+   * the reset rule here and on every peer, a text's marks laid again. `get()`
+   * and `spans()` read the same, but for a list, text, set or tree that reads
+   * empty, which is left out; the elements are named anew, so a cursor taken
+   * before reads null and a stacking mark has a new id.
    * Resolves to how many ops it took; `0` for a record that is not there.
    */
   compact(id: string, options?: WriteOptions & { source?: unknown }): Promise<number>;

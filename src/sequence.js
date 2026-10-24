@@ -654,9 +654,10 @@ const leftmostDescendant = (r, off) => {
   }
 };
 
-// Where a local insertion at visible index `i` goes: the anchor of a new
-// run, or the run of this origin to extend. Null when `i` is out of range.
-const placeInsert = (index, i, origin) => {
+// Where a local insertion of `len` elements at visible index `i` goes: the
+// anchor of a new run, or the run of this origin to extend. Null when `i` is
+// out of range.
+const placeInsert = (index, i, origin, len = 1) => {
   if (!Number.isInteger(i) || i < 0 || i > index.length) return null;
   if (i === 0) {
     if (index.root.length === 0) return { at: HEAD };
@@ -668,9 +669,9 @@ const placeInsert = (index, i, origin) => {
   const explicit = r.R?.get(off);
   const cont = off + 1 < r.len;
   if (!explicit && !cont) {
-    // Own run, at its end: extend it — until it is full, then a new run
-    // anchored after its last element reads the same.
-    if (r.origin === origin && r.len < MAX_RUN) return { run: r.key, from: r.len };
+    // Own run, at its end: extend it — while it holds what comes, then a
+    // new run anchored after its last element reads the same.
+    if (r.origin === origin && r.len + len <= MAX_RUN) return { run: r.key, from: r.len };
     return { at: `>${elemKey(r.key, off)}` };
   }
   let first;
@@ -1008,6 +1009,48 @@ const styleOf = (active) => {
   return marks && Object.keys(marks).length > 0 ? marks : null;
 };
 
+// The marks in force over the reading, as the calls that would make them
+// again: a visible range `[start, end)`, the expand rule the sides of the
+// anchors say (a start after an element, or the head, takes text typed at
+// it; an end before an element, or the end, does too), the key, the value
+// and whether it stacks — in stamp order, so laid again they resolve as
+// before. A mark switched off, not anchored yet, or over no visible
+// character is left out. What `compact()` lays again over a text.
+const marksIn = (index, seq, base = null) => {
+  const { runs, visRun, visOff, length } = index;
+  if (length === 0 || !seq.marks) return [];
+  const ords = new Array(length);
+  for (let i = 0; i < length; i++) ords[i] = index.ordAt[runs[visRun[i]].start + visOff[i]];
+  // How many visible characters sit below an ordinal: they read in ordinal order.
+  const below = (ord) => {
+    let lo = 0;
+    let hi = length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (ords[mid] < ord) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
+  const out = [];
+  for (const id of keysOf(seq.marks)) {
+    const [from, to, key, value, flags] = seq.marks[id];
+    if ((flags & OFF) !== 0) continue;
+    const lo = anchorOrdinal(index, from, base);
+    const hi = anchorOrdinal(index, to, base);
+    if (lo === null || hi === null || lo >= hi) continue;
+    const start = below(lo);
+    const end = below(hi);
+    if (start >= end) continue;
+    const before = from === HEAD || from[0] === '>';
+    const after = to === END || to[0] === '<';
+    const expand = before ? (after ? 'both' : 'before') : after ? 'after' : 'none';
+    const { ts, origin } = parseRun(id);
+    out.push({ ts, origin, start, end, key, value, expand, many: (flags & MANY) !== 0 });
+  }
+  return out.sort((x, y) => compareClock([x.ts, x.origin], [y.ts, y.origin]));
+};
+
 // The text as runs of equal style: `[{ text, marks }]`. A mark whose anchor
 // has not arrived is not shown yet. A sweep over the walk: each mark opens at
 // its first ordinal and closes at its last, the visible characters come in
@@ -1277,6 +1320,7 @@ module.exports = {
   applyMark,
   markAnchors,
   anchorOrdinal,
+  marksIn,
   spans,
   slotAt,
   cursorAt,

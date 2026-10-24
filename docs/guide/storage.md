@@ -56,7 +56,7 @@ await storage.push(id, 'items', [1, 2]);   // a list field: append
 await storage.treeMove(id, 'outline', 'n1'); // a tree field: node n1 at the root
 await storage.set(id, { title: 'Final' }); // replace wholesale — everything but title is gone
 await storage.list();                     // every live id
-await storage.compact(id);                // rewrite it as the few ops it reads as (marks lost) — see below
+await storage.compact(id);                // rewrite it as the few ops it reads as — see below
 await storage.delete(id);
 await storage.purge(id);                  // forget it for good — see below
 await storage.close();                    // stop replication, seal the log
@@ -321,11 +321,11 @@ node and on every peer the ops reach, and `get()` reads the same:
 await storage.compact(id); // how many ops it took; 0 for a record that is not there
 ```
 
-What `get()` does not show is lost: a text's marks are not carried over —
-`spans()` reads the text plain afterwards — and every
+A text's marks are laid again over the new run, so `spans()` reads the same
+too. What it cannot keep is the names of the elements: every
 [cursor](./lists#cursors) into a list or a text of the record reads `null`
-from then on, its place gone with the old runs. Take the marks with
-`spans()` first and `mark()` them again if they matter. A peer's op stamped
+from then on, and a stacking mark has a new id. A list, a text, a set or a
+tree that reads empty is left out: no op makes an empty one. A peer's op stamped
 before the rewrite and arriving after it is dropped by the reset, as with
 any whole-record write; an encrypted record rejects with `ENCRYPTED`. It is
 `applyPatches()` over the record's own reading — see [Versions and

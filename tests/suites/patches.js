@@ -430,6 +430,52 @@ const runPatchTests = async (t, assert, createStorage) => {
       assert.strictEqual(await a.compact('nope'), 0, 'a record that is not there');
     },
   );
+
+  await t.test(
+    'compact() lays a text’s marks again, keeps a counter at 0, and lays a field longer than a run in several',
+    async (t2) => {
+      const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage);
+      const a = mesh.get('A');
+      const b = mesh.get('B');
+      const id = await a.insert({ title: 'doc' });
+      await a.updateText(id, 'body', 'hello brave new world');
+      await a.mark(id, 'body', 0, 5, 'bold', true);
+      await a.mark(id, 'body', 6, 11, 'link', 'https://x', { expand: 'none' });
+      await a.mark(id, 'body', 3, 9, 'comment', { by: 'ada' }, { many: true });
+      await a.unmark(id, 'body', 1, 2, 'bold');
+      await a.splice(id, 'body', 0, 0, '> ');
+      await a.splice(id, 'body', 8, 6);
+      await a.inc(id, 'hits', 2);
+      await a.inc(id, 'hits', -2);
+      // A stacking mark is named anew by the rewrite; the rest reads the same.
+      const plain = (spans) => JSON.parse(JSON.stringify(spans).replaceAll(/"id":"[^"]+"/g, '"id":"m"'));
+      const before = { data: await a.get(id), spans: plain(await a.spans(id, 'body')) };
+      assert.strictEqual(before.data.hits, 0);
+      await settle([a, b]);
+      await a.compact(id);
+      await settle([a, b]);
+      for (const node of [a, b]) {
+        assert.deepStrictEqual({ data: await node.get(id), spans: plain(await node.spans(id, 'body')) }, before);
+      }
+      // The expand rules came through: typed at the edge of the link (none) stays plain,
+      // typed at the end of the bold run (after) is bold.
+      await a.splice(id, 'body', 3, 0, 'Z');
+      assert.deepStrictEqual((await a.spans(id, 'body')).slice(0, 3), [
+        { text: '> ', marks: {} },
+        { text: 'hZ', marks: { bold: true } },
+        { text: 'e', marks: {} },
+      ]);
+      // A text longer than one run: two pushes of 600 000, compacted into two runs.
+      const big = await a.insert({ title: 'big' });
+      const half = 'ab'.repeat(300_000);
+      await a.push(big, 'body', half);
+      await a.push(big, 'body', half);
+      const text = (await a.get(big)).body;
+      assert.strictEqual(text.length, 1_200_000);
+      assert.strictEqual(await a.compact(big), 3, 'a write and two runs');
+      assert.strictEqual((await a.get(big)).body, text);
+    },
+  );
 };
 
 module.exports = { runPatchTests };

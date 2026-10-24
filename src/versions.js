@@ -12,7 +12,9 @@
 
 const { commit, rehearse } = require('./commit.js');
 const { snapshotPage } = require('./bootstrap.js');
-const { isAlive, deepEqual, kindsOf } = require('./ops.js');
+const { isAlive, deepEqual, kindsOf, seqIndexOf } = require('./ops.js');
+const { MAX_RUN } = require('./rle.js');
+const { marksIn } = require('./sequence.js');
 const { Cursor } = require('./query.js');
 const { appliedHere, parseVersion, within, exactStart, fold, gone } = require('./history.js');
 const { diffViews, realize } = require('./patch.js');
@@ -239,16 +241,49 @@ const applyPatches = async (core, id, patches, { actor, source = null } = {}) =>
  */
 const restore = async (core, id, at, { actor, source = null } = {}) => {
   if (at === undefined) throw new TypeError('restore() takes a version');
-  return applyPatches(core, id, await diff(core, id, undefined, at), { actor, source });
+  return applyPatches(core, id, inRuns(await diff(core, id, undefined, at)), { actor, source });
+};
+
+// A field made again whole is laid in runs of at most MAX_RUN elements: one
+// splice is one run, and a run holds no more (src/rle.js).
+const inRuns = (patches) =>
+  patches.flatMap((patch) => {
+    const { action, count, content } = patch;
+    if (action !== 'splice' || count !== 0 || content === undefined || content.length <= MAX_RUN) return [patch];
+    const runs = [];
+    for (let at = 0; at < content.length; at += MAX_RUN) {
+      runs.push({ ...patch, index: patch.index + at, content: content.slice(at, at + MAX_RUN) });
+    }
+    return runs;
+  });
+
+// A text's marks laid again over the field `compact()` makes anew: the ones
+// in force, in stamp order, as `mark` patches (src/sequence.js marksIn).
+const marksOf = (entry, kinds) => {
+  const patches = [];
+  for (const field of Object.keys(kinds)) {
+    if (kinds[field] !== 'text') continue;
+    for (const m of marksIn(seqIndexOf(entry, field), entry.meta.seqs[field], entry.meta.base)) {
+      const patch = { action: 'mark', field, start: m.start, end: m.end, name: m.key, value: m.value };
+      patch.expand = m.expand;
+      if (m.many) patch.many = true;
+      patches.push(patch);
+    }
+  }
+  return patches;
 };
 
 /**
  * Rewrites record `id` as the ops its reading takes today — a `write` of
  * the registers, then one op per field of another kind: an `inc`, an
  * `add`, one `splice` (a text or a list becomes one run), one `tree` move
- * per node — so what lies under it goes by the reset rule, here and on
- * every peer alike: a text of ten thousand runs is one, a tree's move log
- * is one move per node, and the record reads the same. A peer's op stamped
+ * per node, and the marks of a text laid again — so what lies under it
+ * goes by the reset rule, here and on every peer alike: a text of ten
+ * thousand runs is one (a run per MAX_RUN elements), a tree's move log is
+ * one move per node, and the record reads the same — but a list, a text, a
+ * set or a tree that reads empty, which no op makes again, and the names of
+ * the elements: a cursor taken before reads null, a stacking mark has a new
+ * id. A peer's op stamped
  * before the rewrite and arriving after it is dropped by the reset, as
  * with any whole-record write. Resolves to how many ops it took; `0` for
  * a record that is not there, `ENCRYPTED` for an encrypted one.
@@ -259,7 +294,9 @@ const compact = async (core, id, { actor, source = null } = {}) => {
   if (entry?.encrypted) throw sealed(id);
   if (entry === null || !isAlive(entry)) return 0;
   const view = await core.view(id, entry);
-  return applyPatches(core, id, diffViews(null, {}, view, kindsOf(entry)), { actor, source });
+  const kinds = kindsOf(entry);
+  const patches = [...inRuns(diffViews(null, {}, view, kinds)), ...marksOf(entry, kinds)];
+  return applyPatches(core, id, patches, { actor, source });
 };
 
 /**

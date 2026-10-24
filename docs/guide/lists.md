@@ -325,9 +325,10 @@ caller's to avoid.
   read as: it rewrites the record as a `write` of its registers and one op
   per field of another kind — a text or a list as one run, a tree as one move per node —
   so the tombstones, the runs and the move logs under it go, here and on
-  every peer. What it does not keep: a text's marks (`spans()` reads plain
-  afterwards), the cursors into its texts and lists (they read `null`), and
-  fields that read empty (see [Costs](./versions#costs)).
+  every peer. It lays a text's marks again and a field longer than a run in
+  several runs; what it cannot keep is the names of the elements — the
+  cursors into its texts and lists read `null`, a stacking mark has a new id
+  — and fields that read empty (see [Costs](./versions#costs)).
 - A tree reads 512 levels: a node that would hang deeper is folded but not
   shown, on every node alike, and `treeMove()` refuses a move that would reach
   there (`OUT_OF_RANGE` with `node`, `depth` and `max`). A place among
@@ -341,7 +342,7 @@ caller's to avoid.
   node allocate. One `splice()` inserts at most a run's worth; typing past a
   full run starts a new one and reads the same; a field at its bound takes
   nothing more until a reset — `set()` of the record, or `compact(id)`,
-  which writes the field again as one run without its tombstones. Locally
+  which writes the field again without its tombstones. Locally
   a call past a bound rejects with `FIELD_KIND`, `kind: 'bound'`, `detail`
   (`'run'`, `'field'` or `'pending'`), `count` and `max`.
 - Pending work — a run whose anchor has not arrived, a cut or an extension
