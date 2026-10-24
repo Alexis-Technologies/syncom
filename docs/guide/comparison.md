@@ -23,8 +23,11 @@ page. RxDB, the closest of them, is compared with syncom feature by feature, in 
   per document or per revision, or let the server decide. syncom sits between the two. It
   gives you records with a schema, Mango queries, indexes and unique keys, and it merges
   concurrent writes field by field, with counters that add up — and its list and text fields
-  merge by position (Fugue), with marks and cursors. That makes it a database that merges,
-  not a document CRDT: no editor bindings, and a text is a field of a record, not a document.
+  merge by position (Fugue), with marks, cursors and moves, its trees move without cycles, and
+  it carries what the CRDT libraries carry around a document: a history read at any version,
+  named versions, an undo that converges, branches that merge back. That makes it a database
+  that merges, not a document CRDT: no editor bindings, and a text is a field of a record, not
+  a document.
 - **Few sync without a server of their own and still check what they receive.** Nine of the
   nineteen need no server from the project to sync: syncom, Yjs, Automerge, Loro, RxDB,
   PouchDB, TinyBase, GUN and OrbitDB. Of those nine, only syncom and RxDB validate writes

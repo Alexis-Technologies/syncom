@@ -177,7 +177,7 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr><td>TypeScript types</td><td>⚠️ hand-written <code>.d.ts</code>, tsd-tested; collection names typed, record data <code>unknown</code></td><td>✅ generated from the source; document type inferred from the schema</td></tr>
 <tr><td>Browser bundle, minimal store</td><td>41.9 KB min+gzip: the browser entry, the whole engine</td><td>80.4 KB min+gzip: <code>createRxDatabase</code> with Dexie; 44.9 KB with localStorage</td></tr>
 <tr><td>Browser bundle with sync</td><td>42.6 KB min+gzip with the wrpc link adapter</td><td>90.1 KB min+gzip with Dexie and <code>replicateRxCollection</code></td></tr>
-<tr><td>Size budget in CI</td><td>✅ <code>pnpm size</code> fails CI when the browser entry passes 42 KB</td><td>⚠️ CI prints a webpack build size; no limit in 17.6.0</td></tr>
+<tr><td>Size budget in CI</td><td>✅ <code>pnpm size</code> fails CI when the browser entry passes 60.5 KB</td><td>⚠️ CI prints a webpack build size; no limit in 17.6.0</td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Runtimes</strong></td></tr>
 <tr><td>Node.js</td><td>✅ ≥22; persists with <code>node:fs</code>; CI on Node 22 and 24</td><td>⚠️ ≥20; free disk persistence only via MongoDB or FoundationDB servers, or the capped SQLite trial<sup>4</sup></td></tr>
 <tr><td>Deno</td><td>❌ not tested; <code>engines</code> names Node.js only</td><td>✅ <code>rxdb/plugins/storage-denokv</code>; CI runs the Dexie and DenoKV suites on Deno 2.6.5</td></tr>
@@ -628,7 +628,7 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr class="sc-matrix-group"><td colspan="3"><strong>Adoption and trust</strong></td></tr>
 <tr><td>Adoption signals</td><td>pre-release, not on npm yet</td><td>23,412 GitHub stars; 63,815 npm downloads in the week to 2026-10-18</td></tr>
 <tr><td>Import from other databases</td><td>❌ no importer and no JSON import; write records with <code>insert()</code></td><td>⚠️ migration guides only; <code>importJSON()</code> takes an RxDB dump of the same schema<sup>79</sup></td></tr>
-<tr><td>Published benchmarks</td><td>✅ nine libraries, six scenarios, memory and disk; machine and date stated</td><td>⚠️ its own storages only; no machine, browser or date given<sup>80</sup></td></tr>
+<tr><td>Published benchmarks</td><td>✅ nine libraries, nine scenarios, memory and disk; machine and date stated</td><td>⚠️ its own storages only; no machine, browser or date given<sup>80</sup></td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>AI and coding agents</strong></td></tr>
 <tr><td>WebMCP agent tools</td><td>❌ none</td><td>✅ <code>rxdb/plugins/webmcp</code>: query, count, changes, insert, upsert, delete tools per collection; <code>readOnly</code><sup>81</sup></td></tr>
 <tr><td>Docs for coding agents</td><td>✅ <code>llms.txt</code> on the docs site; <code>CLAUDE.md</code> in the repository</td><td>✅ <code>llms.txt</code> plus three topic files; <code>ERROR-MESSAGES.md</code>, <code>CLAUDE.md</code>, <code>AGENTS.md</code> in the package<sup>82</sup></td></tr>
@@ -752,7 +752,7 @@ Dexie, min+gzip.
 - **syncom** when the nodes replicate among themselves, with no backend of record: servers,
   browser tabs and peers in a mesh, any of which can host. When concurrent edits must merge field
   by field and counters must add up, when you need to prove which node wrote what, verify what is
-  stored and erase it everywhere, and when zero dependencies, a 42 KB bundle and an MIT license
+  stored and erase it everywhere, and when zero dependencies, a 60 KB bundle and an MIT license
   for everything, Node.js disk persistence included, are requirements.
 - **Neither** for collaborative text: Yjs, Automerge or Loro merge text character by character,
   and can live in a field of either.

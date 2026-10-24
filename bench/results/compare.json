@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-22T19:17:30.850Z",
+  "generatedAt": "2026-10-24T11:36:09.964Z",
   "machine": {
     "cpu": "Apple M3 Max",
     "cores": 16,
@@ -864,6 +864,144 @@
         "rxdb": "Node.js disk storages are Premium",
         "fireproof": "syncs through a cloud or self-hosted gateway only",
         "gun": "syncs over its WebSocket/WebRTC mesh only"
+      },
+      "failed": {}
+    },
+    {
+      "id": "append-memory",
+      "kind": "append",
+      "kindTitle": "Type at the end of a text",
+      "line": "memory",
+      "lineTitle": "In memory",
+      "title": "Type at the end of a text, in memory",
+      "description": "Insert one character at the end of a text that merges by position — the common keystroke. Nothing touches the disk.",
+      "unit": "ops/s",
+      "results": {
+        "syncom": {
+          "median": 1255.3155188581634,
+          "min": 996.898332810964,
+          "max": 1918.431043784169
+        },
+        "syncom-nochain": {
+          "median": 1215.525177726504,
+          "min": 985.9261614593578,
+          "max": 1892.871257160745
+        },
+        "yjs": {
+          "median": 359768.1182050619,
+          "min": 300471.9326416004,
+          "max": 361668.25131988106
+        },
+        "automerge": {
+          "median": 23740.038926720634,
+          "min": 23468.981350114474,
+          "max": 24115.718696460182
+        },
+        "loro": {
+          "median": 617953.2621550442,
+          "min": 607546.1203300327,
+          "max": 622831.5509798124
+        }
+      },
+      "unsupported": {
+        "tinybase": "no text that merges by position",
+        "pouchdb": "no text that merges by position",
+        "rxdb": "no text that merges by position",
+        "fireproof": "no text that merges by position",
+        "gun": "needs its storage adapter to answer in Node.js",
+        "orbitdb": "no text that merges by position"
+      },
+      "failed": {}
+    },
+    {
+      "id": "prepend-memory",
+      "kind": "prepend",
+      "kindTitle": "Type at the start of a text",
+      "line": "memory",
+      "lineTitle": "In memory",
+      "title": "Type at the start of a text, in memory",
+      "description": "Insert one character at the start of the text — every insert anchors into the same spot. Nothing touches the disk.",
+      "unit": "ops/s",
+      "results": {
+        "syncom": {
+          "median": 155.0559504666943,
+          "min": 125.9021913737722,
+          "max": 247.90639322640556
+        },
+        "syncom-nochain": {
+          "median": 161.83187252662927,
+          "min": 124.42279282206121,
+          "max": 247.2159545999861
+        },
+        "yjs": {
+          "median": 523093.906339117,
+          "min": 463663.1197645429,
+          "max": 533304.4460091798
+        },
+        "automerge": {
+          "median": 21527.630131095757,
+          "min": 20969.23923499243,
+          "max": 22150.008402760108
+        },
+        "loro": {
+          "median": 443002.3794073116,
+          "min": 440330.1520562784,
+          "max": 451443.8266918153
+        }
+      },
+      "unsupported": {
+        "tinybase": "no text that merges by position",
+        "pouchdb": "no text that merges by position",
+        "rxdb": "no text that merges by position",
+        "fireproof": "no text that merges by position",
+        "gun": "needs its storage adapter to answer in Node.js",
+        "orbitdb": "no text that merges by position"
+      },
+      "failed": {}
+    },
+    {
+      "id": "random-memory",
+      "kind": "random",
+      "kindTitle": "Type anywhere in a text",
+      "line": "memory",
+      "lineTitle": "In memory",
+      "title": "Type anywhere in a text, in memory",
+      "description": "Insert one character at a random position of the text (seeded). Nothing touches the disk.",
+      "unit": "ops/s",
+      "results": {
+        "syncom": {
+          "median": 223.59033895289224,
+          "min": 165.37485330475303,
+          "max": 351.0828183566845
+        },
+        "syncom-nochain": {
+          "median": 223.18642966725542,
+          "min": 168.05339891403338,
+          "max": 350.7789711097572
+        },
+        "yjs": {
+          "median": 29851.995814022997,
+          "min": 28339.188499957287,
+          "max": 31816.494290143903
+        },
+        "automerge": {
+          "median": 20919.203110615097,
+          "min": 20712.04930314138,
+          "max": 21081.21096911656
+        },
+        "loro": {
+          "median": 307121.52021420153,
+          "min": 305162.20815055596,
+          "max": 308674.76571732754
+        }
+      },
+      "unsupported": {
+        "tinybase": "no text that merges by position",
+        "pouchdb": "no text that merges by position",
+        "rxdb": "no text that merges by position",
+        "fireproof": "no text that merges by position",
+        "gun": "needs its storage adapter to answer in Node.js",
+        "orbitdb": "no text that merges by position"
       },
       "failed": {}
     }

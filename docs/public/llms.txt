@@ -11,7 +11,7 @@
 
 - Package: `@alexify/syncom` (npm), MIT, source at https://github.com/Alexis-Technologies/syncom
 - Requires Node.js >= 22, or a browser with OPFS and Web Crypto (secure context)
-- **Zero runtime dependencies.** Browser bundle is about 41 KB min+gzip (a CI budget); the wrpc adapter and the
+- **Zero runtime dependencies.** Browser bundle is about 60 KB min+gzip (a CI budget); the wrpc adapter and the
   search index under 1 KB each
 - CommonJS, no build step; `src/` ships as published; version 0.0.1 — a pre-release, not on npm, API may still change
 - Entry points: `.` (Node `index.js` / browser `browser.js` via the `browser` export condition), `./wrpc`,
@@ -46,8 +46,8 @@
 ## Documentation
 
 - [Why syncom?](https://syncomjs.vercel.app/guide/why): what it is for, what sets it apart, when something else fits better.
-- [Compared with alternatives](https://syncomjs.vercel.app/guide/comparison): a 40-feature matrix against Yjs, Automerge, Loro, Jazz, RxDB, PouchDB, TinyBase, Dexie Cloud, Fireproof, GUN, OrbitDB, Evolu, LiveStore, ElectricSQL, PowerSync, Zero, Triplit and InstantDB.
-- [Benchmarks](https://syncomjs.vercel.app/guide/benchmarks): insert, update, read, counters, batches, replication, cold start and bundle size against nine libraries, plus syncom's own benchmarks.
+- [Compared with alternatives](https://syncomjs.vercel.app/guide/comparison): a 48-feature matrix against Yjs, Automerge, Loro, Jazz, RxDB, PouchDB, TinyBase, Dexie Cloud, Fireproof, GUN, OrbitDB, Evolu, LiveStore, ElectricSQL, PowerSync, Zero, Triplit and InstantDB.
+- [Benchmarks](https://syncomjs.vercel.app/guide/benchmarks): insert, update, read, counters, batches, replication, typing into a text, cold start and bundle size against nine libraries, plus syncom's own benchmarks.
 - [Architecture](https://syncomjs.vercel.app/guide/architecture): the facade, the three write paths, replication between nodes, the files on disk.
 - [Getting Started](https://syncomjs.vercel.app/guide/getting-started): install, open a storage, records, validation, a first sync.
 - [Storage](https://syncomjs.vercel.app/guide/storage): explicit API, registers, counters and sets, compare-and-swap, records, references, schema collections, encryption at rest, on-disk layout.

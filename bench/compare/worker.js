@@ -20,6 +20,16 @@ const { getScenario, SEED, BULK, recordOf } = require('./scenarios.js');
 const { measureOps, measureRounds } = require('./measure.js');
 
 const FIELDS = ['title', 'done', 'priority', 'owner', 'hits'];
+const TEXT_KINDS = new Set(['append', 'prepend', 'random']);
+
+// A seeded generator, so every library types at the same random places.
+const lcg = (seed) => {
+  let state = seed >>> 0;
+  return () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state / 0x100000000;
+  };
+};
 
 // The answer goes to the file bench/compare.js names (stdout belongs to the
 // libraries' chatter), or to stdout when the worker runs by hand.
@@ -108,6 +118,23 @@ const measureKind = async (adapter, scenario, line, store, ids, dir, method) => 
       },
       method,
     );
+  }
+  if (TEXT_KINDS.has(kind)) {
+    if (!line.text) return { unsupported: 'no text that merges by position' };
+    const text = await line.text(store);
+    await settle(text.insert(0, 'ab'));
+    await settle(text.insert(1, 'c'));
+    const read = await settle(text.read());
+    if (read !== 'acb') fail(adapter, scenario, `a text reads "${read}" after inserting "ab" then "c" at 1`);
+    let length = 3;
+    const random = lcg(SEED);
+    const at =
+      kind === 'append' ? () => length : kind === 'prepend' ? () => 0 : () => Math.floor(random() * (length + 1));
+    return measureOps(() => {
+      const wait = text.insert(at(), 'x');
+      length++;
+      return wait;
+    }, method);
   }
   if (kind === 'sync') {
     if (!line.replicate) return { unsupported: line.noSync ?? 'no in-process sync' };

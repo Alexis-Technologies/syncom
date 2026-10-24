@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="398" viewBox="0 0 760 398" role="img" aria-label="Type at the start of a text, in memory. Insert one character at the start of the text — every insert anchors into the same spot. Nothing touches the disk. ops/s, log scale, higher is better. Not shown: TinyBase (no text that merges by position); PouchDB (no text that merges by position); RxDB (no text that merges by position); Fireproof (no text that merges by position); GUN (needs its storage adapter to answer in Node.js); OrbitDB (no text that merges by position).">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .title { font-size: 15px; font-weight: 700; fill: #1b1c1e; }
+  .subtitle, .caption { font-size: 12px; fill: #67676c; }
+  .caption { font-size: 11px; }
+  .group { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; fill: #67676c; }
+  .label { font-size: 13px; font-weight: 600; fill: #1b1c1e; }
+  .label.primary, .label.secondary { font-weight: 700; }
+  .sublabel { font-size: 11px; fill: #67676c; }
+  .value { font-size: 12px; font-weight: 600; fill: #3c3c43; font-variant-numeric: tabular-nums; }
+  .value.small { font-size: 10px; }
+  .legend { font-size: 11px; fill: #3c3c43; }
+  .tick { font-size: 11px; fill: #67676c; font-variant-numeric: tabular-nums; }
+  .grid { stroke: #e4e4e7; stroke-width: 1; }
+  .axis { stroke: #c2c2c4; stroke-width: 1; }
+  .ref { stroke: #67676c; stroke-width: 1; stroke-dasharray: 3 3; }
+  .bar { fill: #c4c6cc; }
+  .bar.primary { fill: #245a9e; }
+  .bar.secondary { fill: #5e9be6; }
+  @media (prefers-color-scheme: dark) {
+    .title, .label { fill: #dfdfd6; }
+    .subtitle, .caption, .group, .sublabel, .tick { fill: #98989f; }
+    .value, .legend { fill: #c2c2c4; }
+    .grid { stroke: #2e2e32; }
+    .axis { stroke: #48484c; }
+    .ref { stroke: #98989f; }
+    .bar { fill: #46474e; }
+    .bar.primary { fill: #8dbcf2; }
+    .bar.secondary { fill: #3d7bd0; }
+  }
+</style>
+<text class="title" x="20" y="35">Type at the start of a text, in memory</text>
+<text class="subtitle" x="20" y="56">Insert one character at the start of the text — every insert anchors into the same spot. Nothing touches the</text>
+<text class="subtitle" x="20" y="73">disk. ops/s, log scale, higher is better. Not shown: TinyBase (no text that merges by position); PouchDB (no</text>
+<text class="subtitle" x="20" y="90">text that merges by position); RxDB (no text that merges by position); Fireproof (no text that merges by</text>
+<text class="subtitle" x="20" y="107">position); GUN (needs its storage adapter to answer in Node.js); OrbitDB (no text that merges by position).</text>
+<line class="grid" x1="276" y1="122" x2="276" y2="322"/>
+<text class="tick" x="276" y="338" text-anchor="middle">100</text>
+<line class="grid" x1="376" y1="122" x2="376" y2="322"/>
+<text class="tick" x="376" y="338" text-anchor="middle">1,000</text>
+<line class="grid" x1="476" y1="122" x2="476" y2="322"/>
+<text class="tick" x="476" y="338" text-anchor="middle">10k</text>
+<line class="grid" x1="576" y1="122" x2="576" y2="322"/>
+<text class="tick" x="576" y="338" text-anchor="middle">100k</text>
+<line class="grid" x1="676" y1="122" x2="676" y2="322"/>
+<text class="tick" x="676" y="338" text-anchor="middle">1M</text>
+<line class="axis" x1="276" y1="122" x2="276" y2="322"/>
+<g><title>Yjs · Y.Doc, a Y.Map per record · v13.6.33
+523,094 ops/s
+1.91 µs per operation
+samples 464k – 533k
+yjs@13.6.33</title>
+<text class="label" x="20" y="139">Yjs</text>
+<text class="sublabel" x="20" y="154">Y.Doc, a Y.Map per record · v13.6.33</text>
+<path class="bar" d="M276,135H643.8579660844277A4,4 0 0 1 647.8579660844277,139V145A4,4 0 0 1 643.8579660844277,149H276Z"/>
+<text class="value" x="653.8579660844277" y="148">523k</text>
+</g>
+<g><title>Loro · LoroDoc, a LoroMap per record · v1.16.4
+443,002 ops/s
+2.26 µs per operation
+samples 440k – 451k
+loro-crdt@1.16.4</title>
+<text class="label" x="20" y="179">Loro</text>
+<text class="sublabel" x="20" y="194">LoroDoc, a LoroMap per record · v1.16.4</text>
+<path class="bar" d="M276,175H636.6406058865712A4,4 0 0 1 640.6406058865712,179V185A4,4 0 0 1 636.6406058865712,189H276Z"/>
+<text class="value" x="646.6406058865712" y="188">443k</text>
+</g>
+<g><title>Automerge · Automerge.change, Counter · v3.5.0
+21,528 ops/s
+46.5 µs per operation
+samples 21k – 22.2k
+@automerge/automerge@3.5.0</title>
+<text class="label" x="20" y="219">Automerge</text>
+<text class="sublabel" x="20" y="234">Automerge.change, Counter · v3.5.0</text>
+<path class="bar" d="M276,215H505.29962231520165A4,4 0 0 1 509.29962231520165,219V225A4,4 0 0 1 505.29962231520165,229H276Z"/>
+<text class="value" x="515.2996223152016" y="228">21.5k</text>
+</g>
+<g><title>syncom · chain: false, createMemoryFsi() · v0.0.1
+162 ops/s
+6.18 ms per operation
+samples 124 – 247
+@alexify/syncom@0.0.1</title>
+<text class="label secondary" x="20" y="259">syncom</text>
+<text class="sublabel" x="20" y="274">chain: false, createMemoryFsi() · v0.0.1</text>
+<path class="bar secondary" d="M276,255H292.90640592988984A4,4 0 0 1 296.90640592988984,259V265A4,4 0 0 1 292.90640592988984,269H276Z"/>
+<text class="value" x="302.90640592988984" y="268">162</text>
+</g>
+<g><title>syncom · default, createMemoryFsi() · v0.0.1
+155 ops/s
+6.45 ms per operation
+samples 126 – 248
+@alexify/syncom@0.0.1</title>
+<text class="label primary" x="20" y="299">syncom</text>
+<text class="sublabel" x="20" y="314">default, createMemoryFsi() · v0.0.1</text>
+<path class="bar primary" d="M276,295H291.04884374889366A4,4 0 0 1 295.04884374889366,299V305A4,4 0 0 1 291.04884374889366,309H276Z"/>
+<text class="value" x="301.04884374889366" y="308">155</text>
+</g>
+<text class="caption" x="20" y="363">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
+<text class="caption" x="20" y="379">in a fresh process · 2026-10-24</text>
+</svg>

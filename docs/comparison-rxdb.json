@@ -1567,7 +1567,7 @@
         },
         "sizeGate": {
           "mark": "✅",
-          "text": "`pnpm size` fails CI when the browser entry passes 42 KB",
+          "text": "`pnpm size` fails CI when the browser entry passes 60.5 KB",
           "source": "scripts/size.js:86; .github/workflows/ci.yml:20-24"
         },
         "node": {
@@ -3098,7 +3098,7 @@
         },
         "benchmarks": {
           "mark": "✅",
-          "text": "nine libraries, six scenarios, memory and disk; machine and date stated",
+          "text": "nine libraries, nine scenarios, memory and disk; machine and date stated",
           "source": "docs/guide/benchmarks.md; bench/compare/; bench/results/compare.json"
         },
         "webmcp": {

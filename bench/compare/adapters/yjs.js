@@ -59,6 +59,10 @@ const wrap = (Y, doc, persist, close) => {
     },
     flush,
     close,
+    text: () => {
+      const text = doc.getText('text');
+      return { insert: (index, chars) => write(() => text.insert(index, chars)), read: () => text.toString() };
+    },
   };
 };
 
@@ -68,6 +72,7 @@ const memory = {
     const Y = local('yjs');
     return wrap(Y, new Y.Doc(), null, async () => {});
   },
+  text: (store) => store.text(),
 };
 
 const disk = {

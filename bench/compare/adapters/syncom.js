@@ -52,6 +52,14 @@ const variant = (chain, memory) => {
   const units = new WeakMap();
   return {
     open: async (dir) => wrap(await engine().open(options(dir))),
+    // A text is a field of a record: one record, typed into with splice().
+    text: async (store) => {
+      const id = await store.storage.insert({ kind: 'text' });
+      return {
+        insert: (index, chars) => store.storage.splice(id, 'body', index, 0, chars),
+        read: async () => (await store.storage.get(id)).body ?? '',
+      };
+    },
     openReplica: async (dir, source) => {
       if (!units.has(source)) units.set(source, source.storage.sync.unit({ access: 'public' }));
       const unit = units.get(source);
