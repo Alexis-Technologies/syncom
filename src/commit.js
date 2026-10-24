@@ -45,8 +45,8 @@ const HINTS = {
   register: 'a register; use update()',
   counter: 'a counter; use inc()',
   set: 'a set; use add() or remove()',
-  list: 'a list; use splice(), push(), setAt() or move()',
-  text: 'a text; use splice(), push(), updateText() or mark()',
+  list: 'a list; use splice(), push(), setAt() or move() (an array, not a string)',
+  text: 'a text; use splice(), push(), updateText() or mark() (a string, not an array)',
   tree: 'a tree; use treeMove() or treeRemove()',
   bound: 'past a bound: pending work, a run or the field as a whole (see Costs and limits)',
 };
@@ -316,8 +316,12 @@ const TAKES = {
   mark: ['text'],
   tree: ['tree'],
 };
+// A splice names its kind by its content — a string a text, an array a
+// list — and one that only removes takes the field's.
+const takesOf = (type, payload) =>
+  type === 'splice' && payload.content !== undefined ? [Array.isArray(payload.content) ? 'list' : 'text'] : TAKES[type];
 const kindClash = (type, payload, current) => {
-  const takes = TAKES[type];
+  const takes = takesOf(type, payload);
   if (takes === undefined || !current || current.encrypted) return [];
   const fields = type === 'write' || type === 'set' ? Object.keys(payload.data ?? {}) : [payload.key];
   const rejected = [];

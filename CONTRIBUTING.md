@@ -121,7 +121,7 @@ on every browser entry — the main one and each subpath. The budget is a
 **ratchet, not a target**: raise it deliberately, in the same change that earns
 the bytes, and say why in a comment next to the number. The main entry's v1
 ceiling of 64 KB was passed on 2026-10-24 for the module split of the second
-review (the comment in `scripts/size.js` names it; the budget is 65 KB now);
+review (the comment in `scripts/size.js` names it; the budget is 65.5 KB now);
 every raise still names its feature, and a raise of more than a kilobyte is a
 design decision (an engine subpath, an injected kind), taken in a plan, not in
 the number.

@@ -41,7 +41,8 @@ Three things are refused (the same for `setAt()`, `move()`, `mark()` and
 - **Another kind.** A field is a register, a counter, a set, a list, a text or
   a tree, never two: `splice()` on a field a register holds throws `FIELD_KIND`
   with `kind: 'register'`, `update()` on a text throws with `kind: 'text'`,
-  `setAt()` on a text too. From a peer the kinds' precedence decides —
+  `setAt()` on a text too, and so does content of the other kind — an array
+  spliced into a text, a string into a list — before anything is stamped. From a peer the kinds' precedence decides —
   register, counter, set, list, text, tree, on the op path as in a snapshot
   merge (see [the sync guide](./sync#registers-counters-sets-lists-and-text)):
   a peer's op of a kind that outranks the field's takes the field and drops

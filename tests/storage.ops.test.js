@@ -1377,4 +1377,40 @@ test('Storage: a sequence op on a field of another kind is refused before any in
       assert.deepStrictEqual(await storage.get(id), { title: 'doc', n: 1, outline, hits: 1 });
     },
   );
+
+  await t.test(
+    'an array spliced into a text, or a string into a list, is FIELD_KIND and leaves the field whole',
+    async (t2) => {
+      const { storage } = await openTemp(t2);
+      const id = await storage.insert({ title: 'doc' });
+      await storage.push(id, 'body', 'Hello world');
+      await storage.push(id, 'items', [1, 2]);
+      const seq = storage.log.lastSeq;
+      for (const call of [
+        () => storage.push(id, 'body', [1]),
+        () => storage.splice(id, 'body', 5, 0, ['!']),
+        () => storage.splice(id, 'body', 0, 1, []),
+      ]) {
+        await assert.rejects(call, {
+          code: 'FIELD_KIND',
+          field: 'body',
+          kind: 'text',
+          message: /a string, not an array/,
+        });
+      }
+      for (const call of [() => storage.push(id, 'items', 'x'), () => storage.splice(id, 'items', 0, 1, 'y')]) {
+        await assert.rejects(call, {
+          code: 'FIELD_KIND',
+          field: 'items',
+          kind: 'list',
+          message: /an array, not a string/,
+        });
+      }
+      assert.strictEqual(storage.log.lastSeq, seq, 'nothing was stamped or logged');
+      assert.deepStrictEqual(await storage.get(id), { title: 'doc', body: 'Hello world', items: [1, 2] });
+      await storage.splice(id, 'body', 0, 6);
+      await storage.splice(id, 'items', 0, 1);
+      assert.deepStrictEqual(await storage.get(id), { title: 'doc', body: 'world', items: [2] });
+    },
+  );
 });

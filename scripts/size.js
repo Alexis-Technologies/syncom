@@ -124,8 +124,10 @@ const ENTRIES = [
   // property names of the core cost what private fields minified away). The
   // run-length content as src/rle.js, out of sequence.js (the same epic) —
   // the raise to 65 KB (64.6 measured: a module's exports and requires). The
-  // rule stays: a raise names its feature here.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 65 },
+  // bugs the docs audit found (2026-10-24), fixed one commit each: a splice's
+  // content checked against the field's kind before the stamp — the raise to
+  // 65.5 KB (65.0 measured). The rule stays: a raise names its feature here.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 65.5 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check

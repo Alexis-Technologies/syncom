@@ -609,6 +609,12 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **An array spliced into a text, or a string into a list, is refused.**
+  `push(id, 'body', [1])` on a text field was let through the local kind
+  check; the list it made outranks a text, so the text was dropped — on
+  every node the op reached. A splice now names its kind by its content
+  and meets the field's before it is stamped (`FIELD_KIND`, the field left
+  whole), as a string on a list already did inside the engine.
 - **A kind clash converges.** Two nodes making one field as different kinds
   at once — a write carrying it as a register, an `inc`, an `add` or a
   `splice` to it — stayed apart for good: each refused the other's op, while
