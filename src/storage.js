@@ -18,14 +18,14 @@ const { Record, Collection } = require('./record.js');
 const { commit, MISMATCH } = require('./commit.js');
 const { applyBatch } = require('./apply.js');
 const { snapshotPage, mergeBatch, adopt } = require('./bootstrap.js');
-const { applyOp, isAlive, isCounter, isSet, isSeq, isTree, deepEqual } = require('./ops.js');
+const { applyOp, isAlive, isCounter, isSet, isSeq, isTree, deepEqual, kindsOf } = require('./ops.js');
 const { diff } = require('./myers.js');
 const { buildIndex, spans, isRunKey, isAnchor, cursorAt, indexOfCursor, REVERSED } = require('./sequence.js');
 const { Cursor } = require('./query.js');
 const { TRASH, isNodeId } = require('./tree.js');
 const { appliedHere, parseVersion, within, exactStart, fold, gone } = require('./history.js');
 const { Tags } = require('./tags.js');
-const { diffEntries, realize } = require('./patch.js');
+const { diffViews, realize } = require('./patch.js');
 const { Clock } = require('./vector.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
 const { normalizeSchema, createLens, project } = require('./schema.js');
@@ -1119,9 +1119,10 @@ class Storage extends Emitter {
     if (!isRecordId(id)) throw invalidId(id);
     const [was, now] = await Promise.all([this.#entryOf(id, from), this.#entryOf(id, to)]);
     if (was?.encrypted || now?.encrypted) throw new SyncomError('ENCRYPTED', `Record ${id} is encrypted here`);
-    const views = new Map();
-    for (const entry of [was, now]) if (entry !== null) views.set(entry, await this.#view(id, entry));
-    return asJson(diffEntries(was, now, (entry) => views.get(entry)));
+    const live = async (entry) =>
+      entry !== null && isAlive(entry) ? [await this.#view(id, entry), kindsOf(entry)] : [null, {}];
+    const [[before, beforeKinds], [after, afterKinds]] = await Promise.all([live(was), live(now)]);
+    return asJson(diffViews(before, beforeKinds, after, afterKinds, { purged: now?.meta.purged != null }));
   }
 
   /**

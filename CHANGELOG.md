@@ -103,6 +103,18 @@ There is no released version section until then; everything below lands in it.
   its seq, the source, the record before and after, the kinds — built only
   while something listens: what an undo stack keeps. A text's marks are not
   diffed. Browser budget 58 → 60.5 KB.
+- **Undo and redo.** `@alexify/syncom/undo` — `createUndo(storage, {
+  mergeInterval, limit, scope, exclude, actor })` — is an undo stack over one
+  node's own writes, fed by the `commit` event: every commit adds the
+  patches that take it back, commits close together make one step, `mark()`
+  closes a step, a new write clears the redo stack. `undo()`/`redo()` apply
+  a step through `applyPatches()` — new ops that merge like any write — and
+  leave a field anyone else changed since alone (`skipped`), a whole-record
+  step with a conflict whole, unless `force`; an undone add revokes its own
+  tag alone. Events `push`, `pop`, `change`; `canUndo`, `canRedo`, `size`,
+  `clear()`, `stop()` (on `close()` too). The manager pins the log from its
+  oldest step. A subpath (5.1 KB alone, budget 5.5; its patch vocabulary,
+  Myers, Emitter and shape helpers are the core's and dedupe in a bundle).
 - **The log knows what it dropped.** `storage.log.droppedTs` is the newest
   stamp among the ops compaction dropped, or an open could not read — `0`
   while nothing ever was — persisted in `index.json`; a record's retained

@@ -22,6 +22,7 @@ contracts.js / .d.ts      the @alexify/syncom/contracts subpath (src/contract.js
 idb.js / idb.d.ts         the @alexify/syncom/idb subpath (src/idb.js) — the IndexedDB backend, browser-only
 search.js / search.d.ts   the @alexify/syncom/search subpath (src/search.js) — the trigram text index behind `$text`; the core knows only the TextIndex contract
 order.js / order.d.ts     the @alexify/syncom/order subpath (src/order.js) — fractional indexes as strings, for ordering records
+undo.js / undo.d.ts       the @alexify/syncom/undo subpath (src/undo.js) — the undo stack over the commit event; requires patch.js, emitter.js only
 index.d.ts                the Node type surface (hand-written)
 browser.d.ts              re-exports index.d.ts, overrides the 3 async crypto fns
 THIRD_PARTY_NOTICES.md    the MIT notices of the algorithms adapted (Fugue, Yjs, list-positions…) and the files that carry them
@@ -39,7 +40,8 @@ src/tree.js               the tree kind: per node its stamped moves, the fold in
 src/order.js              fractional indexes over a 62-letter alphabet (Loro's rule, MIT) — no requires; the core uses it for a tree's places
 src/history.js            the past out of the log: a version (event id / stamp / vector) as a cut, the exact start above droppedTs, the fold
 src/tags.js               Tags — named versions kept locally: tags.json, a catalog per tag, copy-on-write record files in the newest tag
-src/patch.js              patches — the one vocabulary of diff()/applyPatches()/restore(): diffEntries by kind, realize() to an op
+src/patch.js              patches — the one vocabulary of diff()/applyPatches()/restore(): diffViews by kind, realize() to an op — requires shape.js, myers.js only
+src/undo.js               UndoManager — steps of inverse patches from `commit` events, refuse-to-overwrite, pins the log; the core does not use it
 src/errors.js             SyncomError (an operational failure, with a code) and typed() — no requires
 src/symbols.js            COMMIT / REFRESH / SOURCE — the module-private seams between Storage and what it hands out — no requires
 src/options.js            normalizeStorageOptions — open()'s plain options checked and defaulted (lock, cache, chain, skew…)
@@ -390,10 +392,29 @@ docs/                     VitePress site
   runs them in ONE `#run` turn; `restore(id, at)` = `applyPatches(diff(id,
   undefined, at))` — never rewrite the log or the file. A `remove` patch
   with `removals` goes out as given (`prepareOp` takes `payload.removals`
-  over `observedTags`): an undo revokes its own add alone. The `commit`
+  over `observedTags`), one with `own: true` keeps this node's tags alone
+  (`ownTags`): an undo revokes this node's adds and leaves a peer's. The `commit`
   event (`announce` in src/commit.js) is LOCAL ops only, built only when
   `listenerCount('commit') > 0`, with `before`/`after` as copies and the
   kinds of both sides; a peer's op raises `change`, never `commit`.
+- **Undo is a subpath over `commit`, never inside the engine.** `src/undo.js`
+  captures `commit` events (own `source` token → the opposite stack), keeps
+  per step and record the first `before`, the last `after` and the kinds,
+  and inverts at undo time with `diffViews(after, kinds-of-after, before,
+  kinds-of-before, { exact })` — exact first (a field the step created goes
+  through a reset), loose (`exact: false`: a counter, set, list, text or
+  tree emptied instead) when the reset would meet a peer's change — every
+  `remove` marked `own: true`; groups by `mergeInterval`/`mark()`, and
+  applies through `storage.applyPatches(id, kept, { source: token })`;
+  conflicts are the fields of `log.entriesOf(id)` after the step's
+  `lastSeq` not among its own seqs, the manager's own seqs or the seqs of
+  steps on the redo stack (`taken`) — a whole op → every field; per field
+  the op TYPES, since an `inc` or an `add`/`remove` by others commutes with
+  an inverse `inc` or own-`remove` (`conflicting`) — so it `log.pin`s from
+  its oldest step. `kindsOf` lives in ops.js (it needs the
+  predicates) and `deepEqual` in shape.js, so patch.js and the subpath ship
+  without the op model — keep it that way. The stack is memory only; a
+  `purge` forgets the record on every step.
 - **`repair(id)` replays the log, it does not guess.** `Storage.#repair`
   starts at the first whole-record op the log retains for the id (`WHOLE`:
   `write`/`merge`/`delete`, or a `purge` even scrubbed), folds the rest with

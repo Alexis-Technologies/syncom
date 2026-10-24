@@ -185,6 +185,13 @@ const runPatchTests = async (t, assert, createStorage) => {
     await settle([a, b]);
     assert.deepStrictEqual((await a.get(id)).tags, ['x'], 'B’s add was not observed by the removal');
     assert.deepStrictEqual((await b.get(id)).tags, ['x']);
+    // `own`: this node's adds of the element alone — none here, so no op.
+    await a.add(id, 'tags', ['x']);
+    await settle([a, b]);
+    assert.strictEqual(await a.applyPatches(id, [{ action: 'remove', field: 'tags', elements: ['x'], own: true }]), 1);
+    await settle([a, b]);
+    assert.deepStrictEqual((await a.get(id)).tags, ['x'], 'B’s add stays');
+    assert.strictEqual(await a.applyPatches(id, [{ action: 'remove', field: 'tags', elements: ['x'], own: true }]), 0);
     // An observed remove, by contrast, takes every add this node saw.
     await a.applyPatches(id, [{ action: 'remove', field: 'tags', elements: ['x'] }]);
     await settle([a, b]);

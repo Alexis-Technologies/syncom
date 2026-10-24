@@ -897,7 +897,7 @@ export type Patch =
   | { action: 'write'; data: Record<string, unknown> }
   | { action: 'inc'; field: string; value: number }
   | { action: 'add'; field: string; elements: readonly unknown[] }
-  | { action: 'remove'; field: string; elements: readonly unknown[] }
+  | { action: 'remove'; field: string; elements: readonly unknown[]; own?: true }
   | { action: 'remove'; field: string; removals: readonly SetRemoval[] }
   | { action: 'splice'; field: string; index: number; count?: number; content?: string | readonly unknown[] }
   | { action: 'treeMove'; field: string; node: string; parent?: string | null; after?: string; before?: string }

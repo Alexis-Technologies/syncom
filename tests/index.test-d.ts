@@ -679,6 +679,7 @@ expectType<Promise<syncom.Patch[]>>(storage.diff('id', 'epoch.1', { vector: stor
 expectType<Promise<number>>(storage.applyPatches('id', [{ action: 'put', field: 'n', value: 1 }], { source: 'undo' }));
 expectType<Promise<number>>(storage.restore('id', { tag: 'v1' }, { actor: 'u2' }));
 expectAssignable<syncom.Patch>({ action: 'remove', field: 'tags', removals: [['x', { a: 1 }]] });
+expectAssignable<syncom.Patch>({ action: 'remove', field: 'tags', elements: ['x'], own: true });
 expectAssignable<syncom.Patch>({ action: 'splice', field: 'body', index: 0, count: 2, content: 'hi' });
 expectAssignable<syncom.Patch>({ action: 'treeMove', field: 'outline', node: 'n', parent: null, after: 'm' });
 expectError(storage.applyPatches('id', [{ action: 'nope' }]));

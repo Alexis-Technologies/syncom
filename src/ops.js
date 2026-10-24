@@ -66,6 +66,7 @@
 // data, agrees whatever the order of adds, removes and resets.
 
 const { compareClock, maxClock } = require('./vector.js');
+const { deepEqual } = require('./shape.js');
 const S = require('./sequence.js');
 const T = require('./tree.js');
 
@@ -196,18 +197,6 @@ const isSlot = (value) =>
 
 // Structural equality over JSON-shaped values, key order ignored — what a
 // `merge` op needs to tell "already have this" from "news".
-const deepEqual = (a, b) => {
-  if (a === b) return true;
-  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
-  if (Array.isArray(a) !== Array.isArray(b)) return false;
-  const keysA = Object.keys(a);
-  const keysB = Object.keys(b);
-  if (keysA.length !== keysB.length) return false;
-  for (const key of keysA) {
-    if (!Object.hasOwn(b, key) || !deepEqual(a[key], b[key])) return false;
-  }
-  return true;
-};
 
 // A peer-supplied meta, rebuilt into the shape the rest of this module
 // trusts: own keys only, stamps as `[ts, origin]`, counters as `[seq, sum,
@@ -1047,6 +1036,26 @@ const unpackOps = (packed) => {
   return ops;
 };
 
+// What a field is in an entry, by its meta: register, counter, set, list,
+// text, tree — or undefined. `kindsOf` names every field of the entry.
+const kindOf = (entry, field) => {
+  const { meta } = entry;
+  if (isCounter(meta, field)) return 'counter';
+  if (isSet(meta, field)) return 'set';
+  if (isSeq(meta, field)) return seqKind(meta, field);
+  if (isTree(meta, field)) return 'tree';
+  return own(entry.data, field) !== undefined || own(meta.clock, field) !== undefined ? 'register' : undefined;
+};
+
+const kindsOf = (entry) => {
+  const kinds = {};
+  if (!entry) return kinds;
+  for (const field of new Set([...Object.keys(entry.data), ...Object.keys(entry.meta.clock)])) {
+    kinds[field] = kindOf(entry, field);
+  }
+  return kinds;
+};
+
 module.exports = {
   createEntry,
   cloneEntry,
@@ -1057,6 +1066,8 @@ module.exports = {
   isSet,
   isSeq,
   isTree,
+  kindOf,
+  kindsOf,
   observedTags,
   latestClock,
   deepEqual,

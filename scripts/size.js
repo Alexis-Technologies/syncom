@@ -126,6 +126,9 @@ const ENTRIES = [
   { label: 'search — browser (@alexify/syncom/search)', entry: 'search.js', platform: 'browser', budget: 2 },
   // Fractional indexes for ordering records: a helper off the main entry.
   { label: 'order — browser (@alexify/syncom/order)', entry: 'order.js', platform: 'browser', budget: 1.5 },
+  // The undo manager with the patch vocabulary, Myers and the Emitter it
+  // stands on — measured alone; in an app bundle those are shared with the core.
+  { label: 'undo — browser (@alexify/syncom/undo)', entry: 'undo.js', platform: 'browser', budget: 5.5 },
 ];
 
 // A browser entry has to be self-contained: no node builtins, and no packages

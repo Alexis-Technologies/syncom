@@ -44,7 +44,11 @@ Repository: https://github.com/yjs/yjs (commit 0e0dc34). Three ideas of
 `src/sequence.js` follow Yjs: deleted content collapsed to a length that
 keeps the place (`ContentDeleted`), consecutive inserts by one writer stored
 as one run (`Item.mergeWith`), and an op whose dependency has not arrived
-kept until it does (`pendingStructs`). No code was copied.
+kept until it does (`pendingStructs`). The undo manager of `src/undo.js`
+follows the rules of Yjs's `UndoManager` (`src/utils/UndoManager.js`):
+changes tracked by origin, merged into one step within a capture timeout,
+an undo that refuses to overwrite what others changed since. No code was
+copied.
 
 > The MIT License (MIT)
 >

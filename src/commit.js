@@ -9,11 +9,10 @@
 // lensed readers — see Storage#open.
 
 const { encrypt, calculateHash } = require('./crypto.js');
-const { applyOp, isAlive, latestClock, observedTags, isCounter, isSet, isTree } = require('./ops.js');
+const { applyOp, isAlive, latestClock, observedTags, isCounter, isSet, isTree, kindsOf } = require('./ops.js');
 const S = require('./sequence.js');
 const T = require('./tree.js');
 const { between } = require('./order.js');
-const { kindsOf } = require('./patch.js');
 const { opKey } = require('./vector.js');
 const { notify } = require('./hooks.js');
 const { ValidationError, project, unproject, foldSet } = require('./schema.js');
@@ -271,6 +270,15 @@ const resolveTree = (core, id, payload, current) => {
   return { node, parent, fi: between(lower, upper) };
 };
 
+// Of a remove's observed tags, those of one origin; an element with none is left out.
+const ownTags = (removals, origin) => {
+  const out = [];
+  for (const [element, tags] of removals) {
+    if (Object.hasOwn(tags, origin)) out.push([element, { [origin]: tags[origin] }]);
+  }
+  return out;
+};
+
 // The op as this node mints it: stamped above everything the node already
 // holds for the record, so a local write never sorts below state the node
 // knows about and is silently dropped (the log seeds the clock at open; this
@@ -290,7 +298,12 @@ const prepareOp = (core, type, id, payload, current, who, from) => {
   // A remove names the tags this node observed, read here, inside the
   // queue — read outside it, a concurrent apply could add between the two —
   // or exactly the tags a patch names (an undo revokes its own add alone).
-  if (type === 'remove') op.value = payload.removals ?? observedTags(current?.meta ?? null, payload.key, payload.value);
+  if (type === 'remove') {
+    op.value = payload.removals ?? observedTags(current?.meta ?? null, payload.key, payload.value);
+    // `own`: this node's adds alone — an undo revokes what this node added
+    // and leaves what a peer added meanwhile.
+    if (payload.own === true) op.value = ownTags(op.value, core.nodeId);
+  }
   if (type === 'splice') op.value = resolveSplice(core, id, payload, current);
   if (type === 'assign') op.value = resolveAssign(core, id, payload, current);
   if (type === 'move') op.value = resolveMove(core, id, payload, current);

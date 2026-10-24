@@ -181,8 +181,9 @@ await storage.restore(id, { tag: 'v1' });     // one op — a write, since the c
 A patch is plain JSON in the terms of the write API, one per field by its
 kind: `put` (a register's new value — a `set`), `inc` (a counter's delta),
 `add` and `remove` (a set's elements — `remove` with `elements` takes the
-adds this node observed, with `removals` exactly the tags named, the way an
-undo revokes its own add and leaves a concurrent one), `splice` (a text's
+adds this node observed, with `own: true` this node's adds alone, the way an
+undo revokes its own add and leaves a peer's concurrent one, with `removals`
+exactly the tags named), `splice` (a text's
 or a list's edits, by Myers), `treeMove` and `treeRemove`, `delete`,
 `purge`. No op removes one field, so a register that is gone, or a field
 that changed kind, makes the diff a `write` of the registers followed by
@@ -205,6 +206,52 @@ every field's `kinds` (`register`, `counter`, `set`, `list`, `text`, `tree`
 — of the fields there before and after). It is what an undo stack keeps;
 the copies are made only while something listens. A peer's op raises
 `change`, not `commit`.
+
+## Undo and redo
+
+`@alexify/syncom/undo` is an undo stack over one node's own writes, built
+on the [commit event](#the-commit-event) and [patches](#diff-and-restore):
+
+```js
+import { createUndo } from '@alexify/syncom/undo';
+
+const undo = createUndo(storage, { mergeInterval: 500, limit: 100 });
+await storage.update(id, { title: 'Final' });
+await storage.inc(id, 'views', 1);          // within 500 ms of the update: one step
+await undo.undo();                           // { applied: 2, skipped: 0 } — both taken back
+await undo.redo();                           // done again
+undo.mark();                                 // the next write starts a new step
+undo.canUndo; undo.canRedo; undo.size;       // { undo, redo }
+undo.stop();                                 // also on storage.close()
+```
+
+Every commit of the storage's own joins the current step — per record,
+how the step found it and how it left it; the patches that take it back are
+made when it is undone — commits within `mergeInterval` of the step's first
+merge into it, `mark()` closes a step by hand, a new write clears the redo
+stack, and `limit` steps are kept. An undo applies a step's patches through
+`applyPatches()` — new ops, so it merges like any write and a peer sees it
+as one — and what those ops commit is the redo step. The rule is Yjs's,
+refuse to overwrite: a field anything but the step's own ops changed since
+— a peer's write, a later step of this node's — is left alone and counted
+in `skipped`, and a whole-record step (a `set()` that added a field, a
+`delete()`) with such a conflict is skipped whole; `undo({ force: true })`
+overrides. What commutes is no conflict: a peer's increment of the same
+counter, or add to or remove from the same set, leaves the undo free; a
+peer's edit of the same list or text does not (the undo's positions are
+stale by then). A field the step created is gone again when nothing else
+changed since — a whole-record write; with a peer's change beside it the
+undo empties the field instead, so the peer's change stays. An undone
+`add` removes this node's adds of the element alone, so a peer's concurrent
+add of it survives; an undone `inc` is the increment back; a text comes
+back as new characters. A text's marks are not undone.
+
+The stack is this process's: nothing of it is written, a peer's ops are
+never undone from here, a `purge` forgets its record on every step, `scope`
+keeps to the ops of one scope and `exclude(op)` leaves ops out. The
+manager pins the log from the oldest step it holds (conflicts are read
+from the log's entries), so a long stack holds segments past retention
+until `clear()` or `stop()`.
 
 ## Costs
 

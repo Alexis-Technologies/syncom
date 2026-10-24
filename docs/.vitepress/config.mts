@@ -41,6 +41,7 @@ const keywords = [
   'collaborative-text',
   'rich-text',
   'fractional-index',
+  'undo',
   'schema',
   'migrations',
   'standard-schema',

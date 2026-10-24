@@ -91,4 +91,28 @@ const wellFormed = (op) =>
   (op.nonce === undefined || (typeof op.nonce === 'string' && NONCE.test(op.nonce))) &&
   (op.type === 'advance' ? isPlainObject(op.vector) : isRecordId(op.id));
 
-module.exports = { isPlainObject, asJson, isRecordId, invalidId, isStreamName, isKeyId, VALIDATED, wellFormed };
+// Structural equality over JSON values — own keys, in any order.
+const deepEqual = (a, b) => {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const keysA = Object.keys(a);
+  const keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+  for (const key of keysA) {
+    if (!Object.hasOwn(b, key) || !deepEqual(a[key], b[key])) return false;
+  }
+  return true;
+};
+
+module.exports = {
+  isPlainObject,
+  asJson,
+  isRecordId,
+  invalidId,
+  isStreamName,
+  isKeyId,
+  VALIDATED,
+  wellFormed,
+  deepEqual,
+};

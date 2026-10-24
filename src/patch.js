@@ -10,43 +10,25 @@
 //   { action: 'inc', field, value }                 a counter moved by `value`
 //   { action: 'add', field, elements }              set elements added
 //   { action: 'remove', field, elements }           set elements removed, as this node observed them
-//   { action: 'remove', field, removals }           …or exactly these tags: `[[element, { origin: addTs }]]` (an undo)
+//   { action: 'remove', field, elements, own: true } …only this node's adds of them (an undo: a peer's stay)
+//   { action: 'remove', field, removals }           …or exactly these tags: `[[element, { origin: addTs }]]`
 //   { action: 'splice', field, index, count, content }   a list's or a text's edit
 //   { action: 'treeMove', field, node, parent, after? }  a tree node placed
 //   { action: 'treeRemove', field, node }
 //   { action: 'delete' }, { action: 'purge' }
 //
-// `diffEntries(from, to)` is the list that turns `from` into `to`: per field
-// by kind — a register's new value, a counter's delta, a set's added and
-// removed elements, a text's or a list's splices (Myers), a tree's moves
-// and removals — and a reset when a register is gone or a field changed
-// kind, since no op removes one field: a `write` of the registers, then the
-// other kinds made again whole. A text's marks are not diffed. Pure over
-// entries in ops.js's shape.
+// `diffViews(from, fromKinds, to, toKinds)` is the list that turns the
+// record `from` (its data, and what kind each field is) into `to`: per
+// field by kind — a register's new value, a counter's delta, a set's added
+// and removed elements, a text's or a list's splices (Myers), a tree's
+// moves and removals — and a reset when a register is gone or a field
+// changed kind, since no op removes one field: a `write` of the registers,
+// then the other kinds made again whole. A text's marks are not diffed.
+// Pure over plain data; the kinds come from ops.js (`kindsOf`), so this
+// module and the undo subpath on it ship without the op model.
 
-const { isAlive, isCounter, isSet, isSeq, isTree, deepEqual } = require('./ops.js');
+const { deepEqual } = require('./shape.js');
 const { diff: myers } = require('./myers.js');
-
-const own = (object, key) => (Object.hasOwn(object, key) ? object[key] : undefined);
-
-/** The kind of `field` in an entry, by its meta: register, counter, set, list, text, tree — or undefined. */
-const kindOf = (entry, field) => {
-  const { meta } = entry;
-  if (isCounter(meta, field)) return 'counter';
-  if (isSet(meta, field)) return 'set';
-  if (isSeq(meta, field)) return meta.seqs[field].k === 't' ? 'text' : 'list';
-  if (isTree(meta, field)) return 'tree';
-  return own(entry.data, field) !== undefined || own(meta.clock, field) !== undefined ? 'register' : undefined;
-};
-
-/** Every field of an entry and its kind. */
-const kindsOf = (entry) => {
-  const kinds = {};
-  if (entry === null) return kinds;
-  const fields = new Set([...Object.keys(entry.data), ...Object.keys(entry.meta.clock)]);
-  for (const field of fields) kinds[field] = kindOf(entry, field);
-  return kinds;
-};
 
 // A list's elements as one character each, so Myers runs over them as over
 // a text; past the private-use plane it is one replacing splice.
@@ -132,62 +114,61 @@ const recreate = (field, kind, value) => {
 };
 
 /**
- * The patches that turn entry `from` into entry `to` (either null when the
- * record was not there). `view(entry)` is the data to compare and carry —
- * the lensed read, so a patch is in the terms the application writes today.
+ * The patches that turn the record `from` — its data (`null` when it was
+ * not there) and the kind of each of its fields — into `to`. `purged` says
+ * `to` is a purged record. `exact` (the default) makes `to` read exactly:
+ * a field `to` lacks is gone through a reset; without it a counter, a set,
+ * a list, a text or a tree `to` lacks is emptied instead — what an undo
+ * wants, since a reset would take a peer's concurrent change with it.
  */
-const diffEntries = (from, to, view = (entry) => entry.data) => {
-  const was = from !== null && isAlive(from) ? from : null;
-  const now = to !== null && isAlive(to) ? to : null;
-  if (now === null) {
-    if (to?.meta.purged) return was === null && to.meta.purged ? [{ action: 'purge' }] : [{ action: 'purge' }];
-    return was === null ? [] : [{ action: 'delete' }];
+const diffViews = (from, fromKinds, to, toKinds, { purged = false, exact = true } = {}) => {
+  if (to === null) {
+    if (purged) return [{ action: 'purge' }];
+    return from === null ? [] : [{ action: 'delete' }];
   }
-  const data = view(now);
-  const kinds = kindsOf(now);
   const registers = {};
-  for (const field of Object.keys(data)) if (kinds[field] === 'register') registers[field] = data[field];
+  for (const field of Object.keys(to)) if (toKinds[field] === 'register') registers[field] = to[field];
   // A reset: a register gone, or a field that is another kind now. No op
   // removes one field, so the registers are written whole and the rest made
   // again from nothing.
-  let reset = was === null;
+  let reset = from === null;
   if (!reset) {
-    const oldKinds = kindsOf(was);
-    for (const field of Object.keys(oldKinds)) {
-      if (oldKinds[field] !== kinds[field]) reset = true;
+    for (const field of Object.keys(fromKinds)) {
+      const was = fromKinds[field];
+      const now = toKinds[field];
+      if (now === undefined ? exact || was === 'register' : was !== now) reset = true;
     }
   }
   const patches = [];
   if (reset) {
     patches.push({ action: 'write', data: registers });
-    for (const field of Object.keys(kinds)) {
-      if (kinds[field] !== 'register') patches.push(...recreate(field, kinds[field], data[field]));
+    for (const field of Object.keys(toKinds)) {
+      if (toKinds[field] !== 'register') patches.push(...recreate(field, toKinds[field], to[field]));
     }
     return patches;
   }
-  const old = view(was);
-  for (const field of Object.keys(kinds)) {
-    const kind = kinds[field];
-    const value = data[field];
-    const previous = old[field];
+  for (const field of new Set([...Object.keys(toKinds), ...Object.keys(fromKinds)])) {
+    const kind = toKinds[field] ?? fromKinds[field];
+    const value = to[field];
+    const previous = from[field];
     if (kind === 'register') {
       if (!deepEqual(previous, value)) patches.push({ action: 'put', field, value });
     } else if (kind === 'counter') {
-      const delta = value - (previous ?? 0);
+      const delta = (value ?? 0) - (previous ?? 0);
       if (delta !== 0) patches.push({ action: 'inc', field, value: delta });
     } else if (kind === 'set') {
       const before = asKeys(previous ?? []);
-      const after = asKeys(value);
+      const after = asKeys(value ?? []);
       const added = [...after].filter(([key]) => !before.has(key)).map(([, element]) => element);
       const removed = [...before].filter(([key]) => !after.has(key)).map(([, element]) => element);
       if (added.length > 0) patches.push({ action: 'add', field, elements: added });
       if (removed.length > 0) patches.push({ action: 'remove', field, elements: removed });
     } else if (kind === 'text') {
-      patches.push(...spliceText(field, previous ?? '', value));
+      patches.push(...spliceText(field, previous ?? '', value ?? ''));
     } else if (kind === 'list') {
-      patches.push(...spliceList(field, previous ?? [], value));
+      patches.push(...spliceList(field, previous ?? [], value ?? []));
     } else if (kind === 'tree') {
-      patches.push(...treePatches(field, previous ?? [], value));
+      patches.push(...treePatches(field, previous ?? [], value ?? []));
     }
   }
   return patches;
@@ -220,10 +201,13 @@ const realize = (patch) => {
     case 'add':
       if (!Array.isArray(patch.elements)) throw new TypeError('applyPatches(): add needs elements');
       return ['add', { key: field, value: patch.elements }];
-    case 'remove':
+    case 'remove': {
       if (Array.isArray(patch.removals)) return ['remove', { key: field, value: [], removals: patch.removals }];
       if (!Array.isArray(patch.elements)) throw new TypeError('applyPatches(): remove needs elements or removals');
-      return ['remove', { key: field, value: patch.elements }];
+      const payload = { key: field, value: patch.elements };
+      if (patch.own === true) payload.own = true;
+      return ['remove', payload];
+    }
     case 'splice': {
       const { index, count = 0, content } = patch;
       if (!isIndex(index) || !isIndex(count)) throw new TypeError('applyPatches(): splice needs an index and a count');
@@ -248,4 +232,4 @@ const realize = (patch) => {
   }
 };
 
-module.exports = { kindOf, kindsOf, diffEntries, realize };
+module.exports = { diffViews, realize };

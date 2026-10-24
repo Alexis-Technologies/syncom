@@ -44,7 +44,7 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 | `tags()` | `Tag[]` | The tags, oldest first — from memory |
 | `at(name)` | `TagView` | The storage at a tag: its fields plus `get(id)` (the record as it was, through the lens and the read hooks with `at: { tag }`; `null` when it was not there), `has(id)`, `list()` (every live id then), `collection(entity)` (`select()`, `count()`, `get()` as it was — no `watch()`, no `$text`) and `snapshot(options)` (pages like `snapshot()`, at the tag's position); throws `TAG_NOT_FOUND` |
 | `diff(id, from?, to?)` | `Promise<Patch[]>` | The patches that turn the record at `from` into the record at `to` (the present when omitted), per field by kind — see [Diff and restore](../guide/versions#diff-and-restore); raw, through the lens, no read hooks; rejects as `get(id, { at })` would, `ENCRYPTED` for an encrypted record |
-| `applyPatches(id, patches, { actor, source }?)` | `Promise<number>` | Realizes patches as ops of this node's own in one turn of the mutation queue (`put`, `write`, `inc`, `add`, `remove` with `elements` or exact `removals`, `splice`, `treeMove`, `treeRemove`, `delete`, `purge`); `source` rides on the `commit` events; resolves to how many ops; a patch of the wrong shape is a `TypeError` and nothing is written |
+| `applyPatches(id, patches, { actor, source }?)` | `Promise<number>` | Realizes patches as ops of this node's own in one turn of the mutation queue (`put`, `write`, `inc`, `add`, `remove` with `elements` — `own: true` for this node's adds alone — or exact `removals`, `splice`, `treeMove`, `treeRemove`, `delete`, `purge`); `source` rides on the `commit` events; resolves to how many ops; a patch of the wrong shape is a `TypeError` and nothing is written |
 | `restore(id, at, { actor, source }?)` | `Promise<number>` | Makes the record read as it did at `at` with new ops that lead back — `diff(id, undefined, at)` applied |
 | `history(id, { limit = 50 }?)` | `Promise<{ versions, complete, exact }>` | The record's past, newest first: `{ eventId, seq, ts, origin, actor, type, fields, data, scrubbed? }` per op this node applied, `data` the record after it through the lens and `afterRead`; `complete` when nothing was dropped or cut by `limit`, `exact` when the versions are what the node held |
 | `has(id)` | `Promise<boolean>` | `false` for a tombstone |
@@ -444,6 +444,26 @@ fractional index (see THIRD_PARTY_NOTICES.md); off the main entry, under 1 KB.
 | `spread(lower, upper, n, options?)` | `string[]` | `n` increasing keys between the bounds |
 | `compare(a, b)` | `-1 \| 0 \| 1` | What `a < b` says |
 | `isKey(key)` | `boolean` | A well-formed key |
+
+## Undo (subpath)
+
+```js
+import { createUndo } from '@alexify/syncom/undo';
+```
+
+An undo stack over one node's own writes, fed by the storage's `commit`
+event and applied through `applyPatches()` — see [Undo and
+redo](../guide/versions#undo-and-redo). Off the main entry; its patch
+vocabulary, Myers and Emitter are the core's.
+
+| Member | Notes |
+| --- | --- |
+| `createUndo(storage, { mergeInterval = 500, limit = 100, scope, exclude, actor }?)` | `UndoManager` — commits within `mergeInterval` ms make one step, `limit` steps are kept, `scope` keeps to one scope's ops, `exclude(op)` leaves ops out, `actor` is who the undo's ops say made them; stops itself on `close()` |
+| `undo({ force }?)`, `redo({ force }?)` | `Promise<{ applied, skipped }>` — the newest step taken back (done again) as new ops; a field anyone else changed since is left alone and counted in `skipped`, a whole-record step with such a conflict is skipped whole, unless `force` |
+| `canUndo`, `canRedo`, `size` | `boolean`, `boolean`, `{ undo, redo }` |
+| `mark()` | Closes the current step: the next commit starts a new one |
+| `clear()`, `stop()` | Drops the stacks; `stop()` also stops listening and lets the log compact |
+| `on('push' \| 'pop' \| 'change', fn)` | `push` `({ direction: 'undo', records })` a step grew; `pop` `({ direction, applied, skipped })` a step was undone or redone |
 
 ## Search (subpath)
 

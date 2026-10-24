@@ -40,6 +40,10 @@
       "types": "./order.d.ts",
       "default": "./order.js"
     },
+    "./undo": {
+      "types": "./undo.d.ts",
+      "default": "./undo.js"
+    },
     "./package.json": "./package.json"
   },
   "directories": {
@@ -98,6 +102,7 @@
     "collaborative-text",
     "rich-text",
     "fractional-index",
+    "undo",
     "schema",
     "migrations",
     "standard-schema",
@@ -160,6 +165,8 @@
     "search.d.ts",
     "order.js",
     "order.d.ts",
+    "undo.js",
+    "undo.d.ts",
     "src/",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",
