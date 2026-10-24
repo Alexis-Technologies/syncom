@@ -427,6 +427,72 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
   });
 
   await t.test(
+    'a random walk under hazards — drops, duplicate pages, a reopen — still converges (seeded)',
+    async (t2) => {
+      // A hosts, B dials. The link drops and comes back, pages arrive twice,
+      // B is closed and reopened mid-walk; the ops keep going on both sides.
+      const random = prng(20261024);
+      let duplicate = false;
+      const mesh = await createMesh(t2, ['A', 'B'], [['B', 'A']], createStorage, {
+        link: { duplicate: () => duplicate },
+      });
+      const a = mesh.get('A');
+      let b = mesh.get('B');
+      const ids = ['h1', 'h2', 'h3'];
+      for (const id of ids) await a.set(id, { n: 0 });
+      await settle([a, b]);
+      let down = false;
+      let reopens = 0;
+      const letter = (storage) => (storage === a ? 'a' : 'b');
+      for (let step = 0; step < 80; step++) {
+        const storage = random() < 0.5 ? a : b;
+        const id = ids[Math.floor(random() * ids.length)];
+        const roll = random();
+        try {
+          if (roll < 0.25) await storage.update(id, { [`f${step % 3}`]: step });
+          else if (roll < 0.4) await storage.inc(id, 'hits', 1);
+          else if (roll < 0.55) await storage.add(id, 'tags', [`t${step % 4}`]);
+          else if (roll < 0.75) await storage.push(id, 'body', letter(storage));
+          else if (roll < 0.9) {
+            await storage.treeMove(id, 'outline', `n${step % 4}`, step % 2 ? null : `n${(step + 1) % 4}`);
+          } else if (roll < 0.95) await storage.delete(id);
+          else await storage.set(id, { n: step });
+        } catch (error) {
+          if (!/not found|cannot go under/.test(error.message)) throw error;
+        }
+        const hazard = random();
+        if (hazard < 0.1 && !down) {
+          mesh.links.get('mem://A').disconnect();
+          down = true;
+        } else if (hazard < 0.2 && down) {
+          await mesh.links.get('mem://A').reconnect();
+          down = false;
+        } else if (hazard < 0.3) {
+          duplicate = !duplicate;
+        } else if (hazard < 0.36 && reopens < 3) {
+          // B comes back as a new storage on the same directory and dials
+          // A again; the registry and the cursor are on disk.
+          await b.close();
+          b = await createStorage(t2, 'B', { sync: { connect: mesh.connect, autoStart: false } });
+          await b.sync.start();
+          down = false;
+          reopens++;
+        }
+      }
+      if (down) await mesh.links.get('mem://A').reconnect();
+      duplicate = false;
+      await settle([a, b], { timeout: 10_000 });
+      await assertConverged([a, b]);
+      for (const storage of [a, b]) {
+        for (const id of ids) {
+          assert.deepStrictEqual(await storage.get(id, { at: { vector: storage.vector } }), await storage.get(id), id);
+        }
+      }
+      assert.ok(reopens > 0, 'the walk reopened B at least once');
+    },
+  );
+
+  await t.test(
     'a mesh that requires signatures converges, and every logged op verifies against its origin',
     async (t2) => {
       const options = { sync: { signatures: 'require' } };

@@ -78,6 +78,9 @@ class MemoryLink extends Emitter {
         if (eventId !== undefined) record.lastEventId = eventId;
         if (this.#options.drop?.(data)) continue;
         await onData?.(data, eventId);
+        // A page delivered twice, as a flaky transport might: the engine
+        // must take the second as the duplicate it is.
+        if (this.#options.duplicate?.(data)) await onData?.(clone(data), eventId);
       }
       if (!controller.signal.aborted) {
         this.#subscriptions.delete(record);
