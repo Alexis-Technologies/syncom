@@ -89,6 +89,24 @@ test('SyncomError', async (t) => {
       message: /is a set; use add\(\) or remove\(\)/,
     });
     await assert.rejects(() => storage.remove(id, 'hits', ['x']), { code: 'FIELD_KIND', kind: 'counter' });
+    await storage.splice(id, 'body', 0, 0, 'hi');
+    await assert.rejects(() => storage.update(id, { body: 'x' }), {
+      code: 'FIELD_KIND',
+      field: 'body',
+      kind: 'text',
+      message: /is a text; use splice\(\) or push\(\)/,
+    });
+    await assert.rejects(() => storage.splice(id, 'hits', 0, 0, 'x'), { code: 'FIELD_KIND', kind: 'counter' });
+    await assert.rejects(() => storage.splice(id, 'body', 9, 0, 'x'), {
+      name: 'SyncomError',
+      code: 'OUT_OF_RANGE',
+      id,
+      field: 'body',
+      index: 9,
+      count: 0,
+      length: 2,
+      message: /Index 9 is out of range for field body/,
+    });
     await assert.rejects(() => storage.set(id, { $type: 'Other' }), {
       name: 'TypeError',
       code: 'TYPE_IMMUTABLE',

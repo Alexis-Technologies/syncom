@@ -18,7 +18,7 @@ const { Record, Collection } = require('./record.js');
 const { commit, MISMATCH } = require('./commit.js');
 const { applyBatch } = require('./apply.js');
 const { snapshotPage, mergeBatch, adopt } = require('./bootstrap.js');
-const { applyOp, isAlive, isCounter, isSet } = require('./ops.js');
+const { applyOp, isAlive, isCounter, isSet, isSeq } = require('./ops.js');
 const { Clock } = require('./vector.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
 const { normalizeSchema, createLens, project } = require('./schema.js');
@@ -53,6 +53,33 @@ const corrupt = (file, cause) =>
   new SyncomError('CORRUPT', `${file} is unreadable (${cause?.message ?? cause}); restore it or remove the directory`, {
     cause,
   });
+
+// What splice()/push() take: a field name, an index (null: the end) and a
+// count, and content — a string for a text, an array of JSON values for a
+// list, absent when the call only cuts.
+const spliceArgs = (method, key, index, count, content) => {
+  if (typeof key !== 'string') throw new TypeError(`${method}() takes a field name`);
+  if (index !== null && !(Number.isInteger(index) && index >= 0)) {
+    throw new TypeError(`${method}() takes a non-negative integer index`);
+  }
+  if (!Number.isInteger(count) || count < 0) throw new TypeError(`${method}() takes a non-negative integer count`);
+  if (content !== undefined && typeof content !== 'string' && !Array.isArray(content)) {
+    throw new TypeError(`${method}() takes a string for a text or an array for a list`);
+  }
+  if (Array.isArray(content)) {
+    for (const element of content) {
+      if (element === undefined || typeof element === 'function' || typeof element === 'symbol') {
+        throw new TypeError(`${method}() takes JSON values; got ${typeof element}`);
+      }
+    }
+  }
+  if (count === 0 && (content === undefined || content.length === 0)) {
+    throw new TypeError(`${method}() takes a count to remove or content to insert`);
+  }
+  const payload = { key, index, count };
+  if (content !== undefined) payload.content = content;
+  return payload;
+};
 
 // What add()/remove() take: a field name and a non-empty array of JSON
 // values — an element JSON cannot carry (undefined, a function, a symbol) has
@@ -481,7 +508,7 @@ class Storage extends Emitter {
       throw new TypeError('migrate({ entities }) takes an array of entity names');
     }
     if (!Number.isInteger(batch) || batch < 1) throw new TypeError('migrate({ batch }) takes a positive integer');
-    const result = { migrated: 0, counters: 0, sets: 0 };
+    const result = { migrated: 0, counters: 0, sets: 0, lists: 0, texts: 0 };
     let since = 0;
     for (const id of await this.list()) {
       const entry = await this.#entries.load(id);
@@ -491,9 +518,11 @@ class Storage extends Emitter {
       const data = {};
       const counters = {};
       const sets = {};
+      const seqs = {};
       for (const key of Object.keys(view)) {
         if (isCounter(entry.meta, key)) counters[key] = entry.data[key];
         else if (isSet(entry.meta, key)) sets[key] = entry.data[key];
+        else if (isSeq(entry.meta, key)) seqs[key] = entry.data[key];
         else data[key] = view[key];
       }
       await this[COMMIT]('write', id, { data }, { actor });
@@ -506,6 +535,13 @@ class Storage extends Emitter {
         if (sets[key].length === 0) continue;
         await this[COMMIT]('add', id, { key, value: sets[key] }, { actor });
         result.sets++;
+      }
+      // A list or a text comes back as one run; an empty one is dropped.
+      for (const key of Object.keys(seqs)) {
+        if (seqs[key].length === 0) continue;
+        await this[COMMIT]('splice', id, { key, index: 0, count: 0, content: seqs[key] }, { actor });
+        if (typeof seqs[key] === 'string') result.texts++;
+        else result.lists++;
       }
       result.migrated++;
       if (++since >= batch) {
@@ -984,6 +1020,24 @@ class Storage extends Emitter {
   /** Removes from set field `key` the `elements` this node has seen added; one it never saw is left alone. */
   async remove(id, key, elements, { actor } = {}) {
     await this[COMMIT]('remove', id, { key, value: setElements('remove', key, elements) }, { actor });
+  }
+
+  /**
+   * Splices list or text field `key` at `index`: removes `count` elements
+   * and inserts `content` — an array for a list, a string for a text — in
+   * their place (a `splice` op). The first write decides the kind. Elements
+   * merge by position (Fugue): two nodes inserting at one spot both keep
+   * theirs, each run whole, and a deleted element keeps its place for the
+   * anchors into it. Creates the field, and the record, when absent;
+   * rejects with `OUT_OF_RANGE` past the field's length.
+   */
+  async splice(id, key, index, count = 0, content, { actor } = {}) {
+    await this[COMMIT]('splice', id, spliceArgs('splice', key, index, count, content), { actor });
+  }
+
+  /** Appends `content` to list or text field `key` — a `splice` at the end. */
+  async push(id, key, content, { actor } = {}) {
+    await this[COMMIT]('splice', id, spliceArgs('push', key, null, 0, content), { actor });
   }
 
   /**

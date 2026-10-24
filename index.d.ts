@@ -81,10 +81,44 @@ export type ClockStamp = readonly [number, string];
 /** The highest per-origin sequence number a node has applied. */
 export type VersionVector = { readonly [origin: string]: number };
 
-export type SyncOpType = 'write' | 'set' | 'inc' | 'add' | 'remove' | 'delete' | 'merge' | 'advance' | 'purge';
+export type SyncOpType = 'write' | 'set' | 'inc' | 'add' | 'remove' | 'splice' | 'delete' | 'merge' | 'advance' | 'purge';
 
 /** What a `remove` carries per element: the element and, per origin, the newest add ts the remover had observed. */
 export type SetRemoval = readonly [element: unknown, tags: { readonly [origin: string]: number }];
+
+/**
+ * What a `splice` carries: the ranges to cut (`[run, offset, length]`), and
+ * either the anchor of a new run (`at`: `^` the head, `>e`/`<e` the right or
+ * left child of element `e`) or the run of the writer to extend (`run`,
+ * `from`). `content` names the kind — a string for a text, an array for a
+ * list — and is empty when the op only cuts.
+ */
+export interface SplicePayload {
+  cut?: readonly (readonly [run: string, offset: number, length: number])[];
+  at?: string;
+  run?: string;
+  from?: number;
+  content: string | readonly unknown[];
+}
+
+/**
+ * A list or text field's block (src/sequence.js): the runs by key
+ * (`ts:origin`) as `[anchor, content, element?]`, with content run-length
+ * encoded — present items (a string or an array) alternating with gap
+ * lengths (tombstones); pending cuts and extensions; a movable list's
+ * position and value registers; a text's marks.
+ */
+export interface SequenceBlock {
+  k: 'l' | 't';
+  /** The newest stamp the block holds. */
+  ts: number;
+  runs: { [run: string]: readonly [at: string, content: readonly (string | number | readonly unknown[])[], elem?: string] };
+  cuts?: { [run: string]: readonly (readonly [offset: number, length: number])[] };
+  ext?: { [run: string]: readonly (readonly [from: number, content: string | readonly unknown[]])[] };
+  pos?: { [elem: string]: readonly [ts: number, origin: string, run: string] };
+  vals?: { [elem: string]: readonly [ts: number, origin: string, value: unknown] };
+  marks?: { [mark: string]: readonly [start: string, end: string, key: string, value: unknown, flags: number] };
+}
 
 export interface SyncOp {
   origin: string;
@@ -105,7 +139,7 @@ export interface SyncOp {
   /** `inc`, `add`, `remove`: the field. */
   key?: string;
   /** `inc`: the amount added; `add`: the elements; `remove`: the elements with the tags the remover observed. */
-  value?: number | readonly unknown[] | readonly SetRemoval[];
+  value?: number | readonly unknown[] | readonly SetRemoval[] | SplicePayload;
   /** The schema version of the node that made it; absent without a schema, and on `merge`/`advance`. */
   v?: number;
   /** Who made it — `open({ actor })` or the write's own; a claim the origin signed, not a proof of identity. Absent on `merge`/`advance`. */
@@ -130,6 +164,8 @@ export interface EntryMeta {
    * is the greater.
    */
   sets: { [field: string]: { [elementKey: string]: { [origin: string]: readonly [number, number] } } };
+  /** A list or a text per field — see SequenceBlock. */
+  seqs: { [field: string]: SequenceBlock };
   /** The schema version of the last whole-record write (or of the `set` that created the entry). */
   v?: number;
   /** The stamp of a `purge`: the record is gone for good, whatever lands later. */
@@ -145,11 +181,13 @@ export interface ApplyResult {
   entry: Entry;
   changed: boolean;
   delta: Record<string, unknown>;
-  rejected: Array<{ field: string; reason: FieldKind }>;
+  rejected: Array<{ field: string; reason: RefusalReason }>;
 }
 
 /** What a field is, once written: a register (last writer wins), a counter (`inc`) or a set (`add`/`remove`). */
-export type FieldKind = 'register' | 'counter' | 'set';
+export type FieldKind = 'register' | 'counter' | 'set' | 'list' | 'text';
+/** Why a field of a peer's op was refused: another kind holds the field, or pending work hit its bound. */
+export type RefusalReason = FieldKind | 'bound';
 
 /**
  * The codes a SyncomError carries — one constant per thing that can go
@@ -160,6 +198,7 @@ export type SyncomErrorCode =
   | 'IN_HOOK'
   | 'NOT_FOUND'
   | 'FIELD_KIND'
+  | 'OUT_OF_RANGE'
   | 'ENCRYPTED'
   | 'INTEGRITY'
   | 'CORRUPT'
@@ -652,10 +691,14 @@ export interface WriteContext {
   id: string;
   /** The whole record for `write`, the delta for `set`, the joined data for `merge`. */
   data?: Record<string, unknown>;
-  /** `inc`, `add`, `remove`: the field. */
+  /** `inc`, `add`, `remove`, `splice`: the field. */
   key?: string;
   /** `inc`: the amount; `add`/`remove`: the elements, as the caller gave them. */
   value?: number | readonly unknown[];
+  /** `splice`: the index (`null`: the end), how many to remove and what to insert, as the caller gave them. */
+  index?: number | null;
+  count?: number;
+  content?: string | readonly unknown[];
   /** `merge` only: the metadata being joined. */
   meta?: EntryMeta;
   /** The record before the write — `null` when absent or deleted. Read-only. */
@@ -1130,7 +1173,7 @@ export interface StorageEvents {
       code: 'OP_REFUSED' | 'OP_INVALID' | 'OP_UNREADABLE' | 'SKEW' | 'BAD_SIGNATURE' | 'UNSIGNED';
       op: SyncOp;
       count?: number;
-      rejected?: Array<{ field: string; reason: FieldKind }>;
+      rejected?: Array<{ field: string; reason: RefusalReason }>;
       entity?: string | null;
       issues?: ValidationIssue[];
     },
@@ -1223,6 +1266,23 @@ export interface Storage {
   /** Removes from set field `key` the `elements` this node has seen added; one it never saw is left alone. */
   remove(id: string, key: string, elements: readonly unknown[], options?: WriteOptions): Promise<void>;
   /**
+   * Splices list or text field `key` at `index`: removes `count` elements
+   * and inserts `content` — an array for a list, a string for a text — in
+   * their place. The first write decides the kind; elements merge by
+   * position (Fugue), each writer's run whole. Creates the field, and the
+   * record, when absent; rejects with `OUT_OF_RANGE` past the length.
+   */
+  splice(
+    id: string,
+    key: string,
+    index: number,
+    count?: number,
+    content?: string | readonly unknown[],
+    options?: WriteOptions,
+  ): Promise<void>;
+  /** Appends `content` to list or text field `key` — a splice at the end. */
+  push(id: string, key: string, content: string | readonly unknown[], options?: WriteOptions): Promise<void>;
+  /**
    * Compare-and-swap: writes `changes` only if every field of `prev` still
    * holds its value, compared inside the mutation queue — two concurrent
    * swaps on one expectation cannot both pass. `false`, and no write, on a
@@ -1256,7 +1316,7 @@ export interface Storage {
     entities?: readonly string[];
     batch?: number;
     actor?: string;
-  }): Promise<{ migrated: number; counters: number; sets: number }>;
+  }): Promise<{ migrated: number; counters: number; sets: number; lists: number; texts: number }>;
   record(id: string): Promise<Storage.StorageRecord>;
   /** The raw data of a cached entry (no lens), `null` when not cached, absent or deleted. */
   getCachedData(id: string): unknown | null;
@@ -1361,6 +1421,10 @@ export interface SyncomRecord {
   add(key: string, elements: readonly unknown[], options?: WriteOptions): Promise<void>;
   /** Removes from a set field — `storage.remove` with this record's id. */
   remove(key: string, elements: readonly unknown[], options?: WriteOptions): Promise<void>;
+  /** Splices a list or text field — `storage.splice` with this record's id. */
+  splice(key: string, index: number, count?: number, content?: string | readonly unknown[], options?: WriteOptions): Promise<void>;
+  /** Appends to a list or text field — `storage.push` with this record's id. */
+  push(key: string, content: string | readonly unknown[], options?: WriteOptions): Promise<void>;
   delete(options?: WriteOptions): Promise<void>;
   // Live properties: one getter/setter per field of the loaded object.
   [field: string]: unknown;

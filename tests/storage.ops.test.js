@@ -169,6 +169,96 @@ test('Storage replication model', async (t) => {
     assert.strictEqual(await storage.validate(), true);
   });
 
+  await t.test('splice and push keep a list or a text; a field is one kind only', async (t2) => {
+    const { storage } = await openTemp(t2);
+    const ops = [];
+    storage.on('change', (op) => ops.push(op));
+    const id = await storage.insert({ name: 'Ada' });
+    await storage.splice(id, 'body', 0, 0, 'helo');
+    await storage.splice(id, 'body', 3, 0, 'l');
+    await storage.push(id, 'body', ' world');
+    assert.deepStrictEqual(await storage.get(id), { name: 'Ada', body: 'hello world' });
+    await storage.splice(id, 'body', 5, 6);
+    assert.deepStrictEqual(await storage.get(id), { name: 'Ada', body: 'hello' });
+    // What travels: a run anchored at the head, one anchored inside it, an
+    // extension of this node's own run, and a cut naming its ranges.
+    assert.deepStrictEqual(
+      ops.map((op) => op.type),
+      ['write', 'splice', 'splice', 'splice', 'splice'],
+    );
+    const [, first, inside, appended, cut] = ops;
+    const run = `${first.ts}:${storage.nodeId}`;
+    assert.deepStrictEqual(first.value, { at: '^', content: 'helo' });
+    assert.deepStrictEqual(inside.value, { at: `<${first.ts}:3:${storage.nodeId}`, content: 'l' });
+    assert.deepStrictEqual(appended.value, { run, from: 4, content: ' world' });
+    assert.deepStrictEqual(cut.value, { cut: [[run, 4, 6]], content: '' });
+    assert.strictEqual(cut.key, 'body');
+    // A list holds JSON values; a call that only cuts takes the field's kind.
+    await storage.push(id, 'items', [{ n: 1 }, 'two']);
+    await storage.splice(id, 'items', 1, 1, [2, 3]);
+    assert.deepStrictEqual((await storage.get(id)).items, [{ n: 1 }, 2, 3]);
+    await storage.splice(id, 'items', 0, 1);
+    assert.deepStrictEqual((await storage.get(id)).items, [2, 3]);
+    assert.deepStrictEqual(ops.at(-1).value.content, []);
+    // Out of range is a coded error, decided inside the queue.
+    await assert.rejects(() => storage.splice(id, 'body', 6, 0, 'x'), {
+      name: 'SyncomError',
+      code: 'OUT_OF_RANGE',
+      field: 'body',
+      index: 6,
+      count: 0,
+      length: 5,
+    });
+    await assert.rejects(() => storage.splice(id, 'body', 4, 2), {
+      code: 'OUT_OF_RANGE',
+      index: 4,
+      count: 2,
+      length: 5,
+    });
+    await assert.rejects(() => storage.splice(id, 'nope', 0, 1), { code: 'OUT_OF_RANGE', length: 0 });
+    // The kind rule, with a hint at the right call.
+    await assert.rejects(() => storage.update(id, { body: 'plain' }), /text; use splice\(\) or push\(\)/);
+    await assert.rejects(() => storage.inc(id, 'items'), /list; use splice\(\) or push\(\)/);
+    await assert.rejects(() => storage.add(id, 'body', ['x']), /text; use splice\(\)/);
+    await assert.rejects(() => storage.splice(id, 'name', 0, 0, 'x'), /register; use update\(\)/);
+    await assert.rejects(() => storage.push(id, 'items', 'text'), /list; use splice\(\)/);
+    await storage.inc(id, 'hits');
+    await assert.rejects(() => storage.push(id, 'hits', 'x'), /counter; use inc\(\)/);
+    await storage.add(id, 'tags', ['t']);
+    await assert.rejects(() => storage.splice(id, 'tags', 0, 0, ['x']), /set; use add\(\) or remove\(\)/);
+    // Arguments.
+    await assert.rejects(() => storage.splice(id, 7, 0, 0, 'x'), TypeError);
+    await assert.rejects(() => storage.splice(id, 'body', -1, 0, 'x'), TypeError);
+    await assert.rejects(() => storage.splice(id, 'body', 0, -1, 'x'), TypeError);
+    await assert.rejects(() => storage.splice(id, 'body', 0, 0, 5), TypeError);
+    await assert.rejects(() => storage.splice(id, 'body', 0, 0), TypeError);
+    await assert.rejects(() => storage.splice(id, 'body', 0, 0, ''), TypeError);
+    await assert.rejects(() => storage.push(id, 'items', [undefined]), TypeError);
+    await assert.rejects(() => storage.push(id, 'items', [() => 1]), TypeError);
+    // Through a live Record, which follows along.
+    const record = await storage.record(id);
+    await record.splice('body', 0, 1, 'H');
+    assert.strictEqual(record.body, 'Hello');
+    await record.push('items', [4]);
+    assert.deepStrictEqual(record.items, [2, 3, 4]);
+    // The caller's array is copied, not kept.
+    const mine = [{ x: 1 }];
+    await storage.push(id, 'items', mine);
+    mine[0].x = 2;
+    mine.push('later');
+    assert.deepStrictEqual((await storage.get(id)).items, [2, 3, 4, { x: 1 }]);
+    // A whole-record write resets the text along with everything else; the
+    // field is free to be a register after that.
+    await storage.set(id, { name: 'Ada' });
+    assert.deepStrictEqual(await storage.get(id), { name: 'Ada' });
+    await storage.update(id, { body: 'plain' });
+    assert.deepStrictEqual(await storage.get(id), { name: 'Ada', body: 'plain' });
+    // A splice creates the field, and the record, when absent.
+    await storage.splice('fresh', 'body', 0, 0, 'x');
+    assert.deepStrictEqual(await storage.get('fresh'), { body: 'x' });
+    assert.strictEqual(await storage.validate(), true);
+  });
+
   await t.test('a peer’s set ops land in any order; a write on a set field is refused for that field', async (t2) => {
     const { storage } = await openTemp(t2);
     const errors = [];

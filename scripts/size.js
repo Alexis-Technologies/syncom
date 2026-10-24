@@ -89,8 +89,10 @@ const ENTRIES = [
   // measured). The sequence engine (src/sequence.js: Fugue runs with
   // extension, run-length tombstones, pending runs and cuts, the walk, the
   // reset rule and the join) wired into ops.js as the list and text kinds —
-  // the raise to 47 KB (47.0 measured).
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 47 },
+  // the raise to 47 KB (47.0 measured); its API — splice() and push(), the
+  // index resolved inside the queue, OUT_OF_RANGE, migrate() over lists and
+  // texts — the raise to 48 KB (47.7 measured).
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 48 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check

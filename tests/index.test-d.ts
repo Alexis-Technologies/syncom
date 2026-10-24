@@ -125,7 +125,7 @@ expectAssignable<StorageOptions>({
 expectError(syncom.open({ schema: { ahead: 'ignore' } }));
 expectError(syncom.open({ schema: { lens: 'none' } }));
 expectError(syncom.open({ schema: { version: 2, migrations: { 2: { up: 'rename' } } } }));
-expectType<Promise<{ migrated: number; counters: number; sets: number }>>(
+expectType<Promise<{ migrated: number; counters: number; sets: number; lists: number; texts: number }>>(
   storage.migrate({ entities: ['Post'], batch: 10 }),
 );
 expectType<{ replayed: number; lost: number } | null>(storage.schemaInfo!.held);
@@ -172,6 +172,22 @@ expectType<Promise<void>>(storage.remove('id', 'tags', ['a'] as const));
 expectError(storage.add('id', 'tags', 'a'));
 expectError(storage.add('id', 7, ['a']));
 expectError(storage.remove('id', 'tags'));
+expectType<Promise<void>>(storage.splice('id', 'body', 0, 0, 'hi', { actor: 'u2' }));
+expectType<Promise<void>>(storage.splice('id', 'items', 1, 2));
+expectType<Promise<void>>(storage.push('id', 'items', [1, { a: 2 }]));
+expectError(storage.splice('id', 'body', 'x', 0, 'hi'));
+expectError(storage.push('id', 'body', 5));
+expectAssignable<syncom.SyncOp>({
+  origin: 'a',
+  seq: 3,
+  ts: 3,
+  type: 'splice',
+  id: 'r',
+  key: 'body',
+  value: { at: '^', content: 'hi' },
+});
+expectAssignable<syncom.SplicePayload>({ cut: [['1:a', 0, 2]], content: '' });
+expectType<syncom.SequenceBlock>(entry.meta.seqs.body);
 expectType<Promise<void>>(storage.delete('id', { actor: 'u2' }));
 expectType<Promise<void>>(storage.purge('id', { actor: 'u2' }));
 expectType<Promise<number>>(log.scrub('id'));
@@ -190,7 +206,10 @@ expectAssignable<syncom.SyncOp>({
 });
 expectType<{ [elementKey: string]: { [origin: string]: readonly [number, number] } }>(entry.meta.sets.tags);
 expectAssignable<syncom.FieldKind>('set');
-expectError<syncom.FieldKind>('list');
+expectAssignable<syncom.FieldKind>('list');
+expectAssignable<syncom.FieldKind>('text');
+expectAssignable<syncom.RefusalReason>('bound');
+expectError<syncom.FieldKind>('map');
 expectAssignable<syncom.SetRemoval>(['x', { a: 1 }]);
 expectAssignable<EntityDefinition>({ search: ['title', 'body'] });
 expectError(syncom.open({ schema: { entities: { P: { search: 'title' } } } }));
@@ -207,6 +226,8 @@ expectType<Promise<void>>(record.save({ actor: 'u2' }));
 expectType<Promise<void>>(record.add('tags', ['x']));
 expectType<Promise<void>>(record.remove('tags', ['x'], { actor: 'u2' }));
 expectError(record.add('tags', 'x'));
+expectType<Promise<void>>(record.splice('body', 0, 1, 'x'));
+expectType<Promise<void>>(record.push('items', [1]));
 expectAssignable<StorageOptions>({ getId: () => 'id' });
 expectAssignable<StorageOptions>({ getId: async () => 'id' });
 expectType<string>(syncom.Storage.generateId());
@@ -392,7 +413,7 @@ storage.once('apply', (batch) => {
 storage.on('error', (error) => {
   expectType<syncom.SyncOp>(error.op);
   expectType<syncom.ValidationIssue[] | undefined>(error.issues);
-  expectType<syncom.FieldKind | undefined>(error.rejected?.[0]?.reason);
+  expectType<syncom.RefusalReason | undefined>(error.rejected?.[0]?.reason);
   expectType<number | undefined>(error.count);
   if (error.code === 'BAD_SIGNATURE' || error.code === 'UNSIGNED') expectType<syncom.SyncOp>(error.op);
 });

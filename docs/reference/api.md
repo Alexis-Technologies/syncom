@@ -48,6 +48,8 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 | `inc(id, key, value = 1, { actor }?)` | `Promise<void>` | Adds to a counter field (an `inc` op); throws on a register or set field |
 | `add(id, key, elements, { actor }?)` | `Promise<void>` | Adds JSON values to a set field (an `add` op); creates the field and the record when absent; throws on a register or counter field |
 | `remove(id, key, elements, { actor }?)` | `Promise<void>` | Removes from a set field the elements this node has seen added (a `remove` op; none seen: no op); throws on a register or counter field |
+| `splice(id, key, index, count = 0, content?, { actor }?)` | `Promise<void>` | Removes `count` elements at `index` of a list or text field and inserts `content` there (a `splice` op) — an array for a list, a string for a text; the first write decides the kind. Creates the field and the record when absent; rejects with `OUT_OF_RANGE` past the length; throws on a register, counter or set field |
+| `push(id, key, content, { actor }?)` | `Promise<void>` | Appends to a list or text field — a `splice` at the end |
 | `swap(id, changes, prev, { actor }?)` | `Promise<boolean>` | CAS, compared inside the mutation queue — `false`, and no write, on mismatch; rejects when absent |
 | `repair(id)` | `Promise<{ ops, alive }>` | Rebuilds a record whose file fails its integrity check from the log's entries of it (see [Repair](../guide/storage#repair)); rejects with `code: 'UNRECOVERABLE'` when the log holds no whole-record op for it |
 | `delete(id, { actor }?)` | `Promise<void>` | Leaves a tombstone |
@@ -193,8 +195,9 @@ value is data or configuration. `HookError` and `ValidationError` are
 | `CLOSED` | any write or `applyRemote()` after `close()` | — |
 | `IN_HOOK` | a write issued from inside a write or apply hook (the `cause` of the `HookError` the operation rejects with) | — |
 | `NOT_FOUND` | `update()`, `swap()` on a record that is absent, deleted or purged; a collection's `update()`, `delete()`, `record()` on a record of another collection | `id`, `entity` (the collection's) |
-| `FIELD_KIND` | `update()`/`set()` on a counter or set field, `inc()` on a register or set field, `add()`/`remove()` on a register or counter field | `field`, `kind` (`'register'`, `'counter'` or `'set'`: what the field is) |
-| `ENCRYPTED` | `inc()`, `add()` or `remove()` on an encrypted record; `{ encrypted: true }` on a replicated one | — |
+| `FIELD_KIND` | `update()`/`set()` on a counter, set, list or text field, `inc()` on a register, set, list or text field, `add()`/`remove()` on a register, counter, list or text field, `splice()`/`push()` on a register, counter or set field | `field`, `kind` (`'register'`, `'counter'`, `'set'`, `'list'` or `'text'`) |
+| `OUT_OF_RANGE` | `splice()` past the length of a list or text field — the index, or the index plus the count | `id`, `field`, `index`, `count`, `length` |
+| `ENCRYPTED` | `inc()`, `add()`, `remove()`, `splice()` or `push()` on an encrypted record; `{ encrypted: true }` on a replicated one | — |
 | `INTEGRITY` | a read (`get()`, `has()`, a cursor) of a record whose file fails its chain block check, under `integrity: 'verify'`, or cannot be parsed at all (a file torn by a crash; `repair(id)` rebuilds it) | `id`, `cause` (the parse error) |
 | `CORRUPT` | `open()` when `node.json`, `schema.json` or `.blockchain.json` cannot be read | `cause` |
 | `DOWNGRADE` | `open()` with `ahead: 'hold'` and a schema version below the one the directory ran | — |

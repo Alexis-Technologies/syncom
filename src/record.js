@@ -151,6 +151,16 @@ class Record extends Emitter {
     await this.#storage.remove(this.#id, key, elements, options);
   }
 
+  /** Splices a list or text field; the storage-level `splice` with this record's id. */
+  async splice(key, index, count = 0, content, options = {}) {
+    await this.#storage.splice(this.#id, key, index, count, content, options);
+  }
+
+  /** Appends to a list or text field; the storage-level `push` with this record's id. */
+  async push(key, content, options = {}) {
+    await this.#storage.push(this.#id, key, content, options);
+  }
+
   async delete(options = {}) {
     await this.#storage.delete(this.#id, options);
     this.#data = null;

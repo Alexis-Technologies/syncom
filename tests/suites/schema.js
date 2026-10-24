@@ -697,7 +697,13 @@ const runSchemaTests = async (t, assert, createStorage) => {
         // migrate(): a whole-record write of the view (v2, no `title`), then
         // the counter and the set added back.
         const before = bOps.length;
-        assert.deepStrictEqual(await b.migrate({ batch: 1 }), { migrated: 1, counters: 1, sets: 1 });
+        assert.deepStrictEqual(await b.migrate({ batch: 1 }), {
+          migrated: 1,
+          counters: 1,
+          sets: 1,
+          lists: 0,
+          texts: 0,
+        });
         const [write, inc, add] = bOps.slice(before);
         assert.deepStrictEqual(
           [write.type, write.v, write.data],
@@ -722,11 +728,21 @@ const runSchemaTests = async (t, assert, createStorage) => {
             ['ahead', false, 'add'],
           ],
         );
-        assert.deepStrictEqual(await b.migrate(), { migrated: 0, counters: 0, sets: 0 }, 'idempotent');
+        assert.deepStrictEqual(
+          await b.migrate(),
+          { migrated: 0, counters: 0, sets: 0, lists: 0, texts: 0 },
+          'idempotent',
+        );
         // A record B writes itself is of its version and never lensed.
         const fresh = await b.Post.insert({ name: 'fresh' });
         assert.strictEqual((await metaOf(b, fresh.id)).v, 2);
-        assert.deepStrictEqual(await b.migrate({ entities: ['Other'] }), { migrated: 0, counters: 0, sets: 0 });
+        assert.deepStrictEqual(await b.migrate({ entities: ['Other'] }), {
+          migrated: 0,
+          counters: 0,
+          sets: 0,
+          lists: 0,
+          texts: 0,
+        });
       },
     );
   }
@@ -789,7 +805,13 @@ const runSchemaTests = async (t, assert, createStorage) => {
     // migrate() goes through the validator: the record it refuses stops the run.
     await assert.rejects(() => e.migrate({ batch: 1 }), { name: 'ValidationError', entity: 'Post' });
     assert.strictEqual((await metaOf(e, 'q')).v, 1, 'p came first; q was not reached');
-    assert.deepStrictEqual(await e.migrate({ entities: ['Nope'], batch: 1 }), { migrated: 0, counters: 0, sets: 0 });
+    assert.deepStrictEqual(await e.migrate({ entities: ['Nope'], batch: 1 }), {
+      migrated: 0,
+      counters: 0,
+      sets: 0,
+      lists: 0,
+      texts: 0,
+    });
     assert.deepStrictEqual(
       debug.filter((entry) => entry.event === 'schema.lens.issues').map((entry) => [entry.entity, entry.id]),
       [['Post', 'p']],
@@ -838,7 +860,7 @@ const runSchemaTests = async (t, assert, createStorage) => {
     await assert.rejects(() => e.migrate({ batch: 0 }), TypeError);
     assert.deepStrictEqual(
       await a.migrate(),
-      { migrated: 0, counters: 0, sets: 0 },
+      { migrated: 0, counters: 0, sets: 0, lists: 0, texts: 0 },
       'version 1: nothing older to migrate',
     );
     const none = await createStorage(t2, 'N');

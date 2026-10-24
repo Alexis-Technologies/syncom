@@ -9,7 +9,8 @@
 // lensed readers — see Storage#open.
 
 const { encrypt, calculateHash } = require('./crypto.js');
-const { applyOp, isAlive, latestClock, observedTags } = require('./ops.js');
+const { applyOp, isAlive, latestClock, observedTags, isCounter, isSet } = require('./ops.js');
+const S = require('./sequence.js');
 const { opKey } = require('./vector.js');
 const { notify } = require('./hooks.js');
 const { ValidationError, project, unproject, foldSet } = require('./schema.js');
@@ -41,6 +42,9 @@ const HINTS = {
   register: 'a register; use update()',
   counter: 'a counter; use inc()',
   set: 'a set; use add() or remove()',
+  list: 'a list; use splice() or push()',
+  text: 'a text; use splice() or push()',
+  bound: 'past the bound on pending work',
 };
 const refuse = (id, rejected) => {
   if (rejected.length === 0) return;
@@ -124,6 +128,34 @@ const assignScope = (core, op, data) => {
   op.seq = core.log.seqOf(opKey(op)) + 1;
 };
 
+// A splice names an index and a count; what travels is the anchor of the
+// new run (or the run of this origin to extend) and the ranges to cut, read
+// here, inside the queue — read outside it, a concurrent apply would shift
+// the indices. The content names the kind — a string for a text, an array
+// for a list — and a call that only cuts takes the field's.
+const resolveSplice = (core, id, payload, current) => {
+  const { key, index, count, content } = payload;
+  const meta = current?.meta;
+  const held = meta && Object.hasOwn(meta.seqs ?? {}, key) ? meta.seqs[key] : undefined;
+  // Another kind under the field: applyOp refuses it with the right reason.
+  if (held === undefined && meta && (Object.hasOwn(meta.clock, key) || isCounter(meta, key) || isSet(meta, key))) {
+    return { content: content ?? '', at: S.HEAD };
+  }
+  const marker = content ?? (held?.k === 'l' ? [] : '');
+  const idx = held === undefined ? null : S.buildIndex(held, meta.base);
+  const length = idx === null ? 0 : idx.length;
+  const at = index === null ? length : index;
+  if (at > length || at + count > length) {
+    const span = count > 0 ? `${at}..${at + count}` : String(at);
+    const message = `Index ${span} is out of range for field ${key} of record ${id} (length ${length})`;
+    throw new SyncomError('OUT_OF_RANGE', message, { id, field: key, index: at, count, length });
+  }
+  const value = { content: marker };
+  if (count > 0) value.cut = S.rangesOf(idx, at, count);
+  if (marker.length > 0) Object.assign(value, idx === null ? { at: S.HEAD } : S.placeInsert(idx, at, core.nodeId));
+  return value;
+};
+
 // The op as this node mints it: stamped above everything the node already
 // holds for the record, so a local write never sorts below state the node
 // knows about and is silently dropped (the log seeds the clock at open; this
@@ -143,6 +175,7 @@ const prepareOp = (core, type, id, payload, current, who, from) => {
   // A remove names the tags this node observed, read here, inside the
   // queue — read outside it, a concurrent apply could add between the two.
   if (type === 'remove') op.value = observedTags(current?.meta ?? null, payload.key, payload.value);
+  if (type === 'splice') op.value = resolveSplice(core, id, payload, current);
   return op;
 };
 
@@ -243,7 +276,10 @@ const commitLocal = async (core, type, id, payload, options) => {
   // The payload is taken as JSON — a copy, like the disk and the peers
   // hold it — before anything keeps a reference to it.
   if (payload.data !== undefined) payload = { ...payload, data: asJson(payload.data) };
-  if (Array.isArray(payload.value)) payload = { ...payload, value: asJson(payload.value) };
+  if (payload.value !== undefined && typeof payload.value === 'object') {
+    payload = { ...payload, value: asJson(payload.value) };
+  }
+  if (payload.content !== undefined) payload = { ...payload, content: asJson(payload.content) };
   // Sealed: this write is encrypted, or the record already is. An
   // encrypted record has no op log — writes to it stay local.
   const sealed = encrypted || current?.encrypted === true;
