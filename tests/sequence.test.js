@@ -30,7 +30,7 @@ const insert = (n, i, content) => {
 const remove = (n, i, count) => {
   const cut = S.rangesOf(index(n), i, count);
   assert.ok(cut !== null);
-  const op = { ts: tick(), origin: n.origin, payload: { cut } };
+  const op = { ts: tick(), origin: n.origin, payload: { cut, content: n.seq.k === 't' ? '' : [] } };
   apply(n, op);
   return op;
 };
@@ -259,12 +259,15 @@ test('sequence engine', async (t) => {
       {},
       { content: '' },
       { content: ['x'] },
+      { cut: [], content: '' },
+      { cut: [[S.runKey(op.ts, 'A'), 0, 1]], content: '', at: '^' },
+      { cut: [['9999999999999:A', 0, 1]], content: '' },
       { at: '^', run: '1:A', from: 0, content: 'x' },
       { at: `<${S.elemKey(S.runKey(op.ts, 'A'), 0)}`, content: 'x', ts: 0 },
       { at: '$', content: 'x' },
-      { cut: 'nope' },
-      { cut: [['1:A', -1, 1]] },
-      { cut: [['1:A', 0, 0]] },
+      { cut: 'nope', content: '' },
+      { cut: [['1:A', -1, 1]], content: '' },
+      { cut: [['1:A', 0, 0]], content: '' },
       { run: 'bad key', from: 0, content: 'x' },
     ];
     for (const payload of malformed) {
@@ -280,7 +283,7 @@ test('sequence engine', async (t) => {
     const a = node('A');
     const options = { pendingMax: 2 };
     const r1 = apply(a, { ts: tick(), origin: 'B', payload: { at: '<5:0:Z', content: 'a' } }, options);
-    const r2 = apply(a, { ts: tick(), origin: 'B', payload: { cut: [['5:Z', 0, 1]] } }, options);
+    const r2 = apply(a, { ts: tick(), origin: 'B', payload: { cut: [['5:Z', 0, 1]], content: '' } }, options);
     assert.strictEqual(r1.changed && r2.changed, true);
     const r3 = apply(a, { ts: tick(), origin: 'B', payload: { at: '<6:0:Z', content: 'b' } }, options);
     assert.deepStrictEqual([r3.changed, r3.reason], [false, 'bound']);

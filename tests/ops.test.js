@@ -9,6 +9,7 @@ const {
   createEntry,
   isCounter,
   isSet,
+  isSeq,
   observedTags,
   latestClock,
   packOps,
@@ -618,6 +619,179 @@ test('ops: a peer-shaped meta reaches nothing it should not', async (t) => {
     // A meta from before sets existed merges as an empty set of sets.
     const old = applyOp(base, op('merge', 4, 'B', { data: { y: 1 }, meta: { clock: { y: [4, 'B'] }, counters: {} } }));
     assert.deepStrictEqual(old.entry.data, { t: ['x'], y: 1 });
+  });
+
+  await t.test('splice keeps a list or a text per field; the first op decides the kind', () => {
+    const splice = (ts, origin, seq, key, value) => op('splice', ts, origin, { seq, key, value });
+    const first = applyOp(null, splice(1, 'A', 1, 'body', { at: '^', content: 'ab' }));
+    assert.strictEqual(first.changed, true);
+    assert.deepStrictEqual(first.entry.data, { body: 'ab' });
+    assert.deepStrictEqual(first.delta, { body: 'ab' });
+    assert.strictEqual(isSeq(first.entry.meta, 'body'), true);
+    assert.strictEqual(isSeq(first.entry.meta, 'other'), false);
+    assert.strictEqual(isSeq({ clock: {}, counters: {} }, 'body'), false, 'an entry from before sequences existed');
+    assert.strictEqual(first.entry.meta.seqs.body.k, 't');
+    assert.deepStrictEqual(Object.keys(first.entry.meta.seqs.body.runs), ['1:A']);
+    // The same origin typing on extends the run; a cut keeps the places.
+    const more = applyOp(first.entry, splice(2, 'A', 2, 'body', { run: '1:A', from: 2, content: 'c' }));
+    assert.deepStrictEqual(more.entry.data, { body: 'abc' });
+    assert.deepStrictEqual(Object.keys(more.entry.meta.seqs.body.runs), ['1:A']);
+    const cut = applyOp(more.entry, splice(3, 'B', 1, 'body', { cut: [['1:A', 1, 1]], content: '' }));
+    assert.deepStrictEqual(cut.entry.data, { body: 'ac' });
+    assert.deepStrictEqual(cut.delta, { body: 'ac' });
+    assert.deepStrictEqual(cut.entry.meta.seqs.body.runs['1:A'], ['^', ['a', 1, 'c']]);
+    assert.strictEqual(
+      applyOp(cut.entry, splice(3, 'B', 1, 'body', { cut: [['1:A', 1, 1]], content: '' })).changed,
+      false,
+    );
+    // A list holds JSON values.
+    const list = applyOp(cut.entry, splice(4, 'A', 3, 'items', { at: '^', content: [1, { x: 2 }] }));
+    assert.deepStrictEqual(list.entry.data, { body: 'ac', items: [1, { x: 2 }] });
+    assert.strictEqual(list.entry.meta.seqs.items.k, 'l');
+    // The kinds never meet: a list op on a text, a text op on a list.
+    const clash = applyOp(list.entry, splice(5, 'B', 2, 'body', { at: '^', content: ['x'] }));
+    assert.deepStrictEqual([clash.changed, clash.rejected], [false, [{ field: 'body', reason: 'text' }]]);
+    const clash2 = applyOp(list.entry, splice(5, 'B', 2, 'items', { at: '^', content: 'x' }));
+    assert.deepStrictEqual([clash2.changed, clash2.rejected], [false, [{ field: 'items', reason: 'list' }]]);
+    // A malformed payload is nothing; a duplicate is nothing.
+    for (const value of ['nope', null, { content: 5 }, { at: '^' }, { at: '$', content: 'x' }, { content: '' }]) {
+      const r = applyOp(list.entry, splice(6, 'C', 1, 'body', value));
+      assert.deepStrictEqual([r.changed, r.rejected], [false, []], JSON.stringify(value));
+    }
+    assert.strictEqual(
+      applyOp(list.entry, splice(4, 'A', 3, 'items', { at: '^', content: [1, { x: 2 }] })).changed,
+      false,
+    );
+    // A cut that arrives before any run of its field is news: the field
+    // exists, reads empty, and remembers what to cut.
+    const early = applyOp(null, splice(9, 'C', 1, 'body', { cut: [['8:A', 0, 1]], content: '' }));
+    assert.strictEqual(early.changed, true);
+    assert.deepStrictEqual(early.entry.data, { body: '' });
+    assert.deepStrictEqual(early.entry.meta.seqs.body.cuts, { '8:A': [[0, 1]] });
+    const late = applyOp(early.entry, splice(8, 'A', 1, 'body', { at: '^', content: 'xy' }));
+    assert.deepStrictEqual(late.entry.data, { body: 'y' });
+    assert.strictEqual(late.entry.meta.seqs.body.cuts, undefined);
+    // The previous entry is untouched: applyOp hands out a new one.
+    assert.deepStrictEqual(first.entry.data, { body: 'ab' });
+    assert.deepStrictEqual(first.entry.meta.seqs.body.runs['1:A'], ['^', ['ab']]);
+  });
+
+  await t.test('a list or a text is never also a register, a counter or a set', () => {
+    const splice = (ts, origin, seq, key, value) => op('splice', ts, origin, { seq, key, value });
+    const text = replay([splice(10, 'A', 1, 'body', { at: '^', content: 'ab' })]);
+    const set = applyOp(text, op('set', 11, 'B', { data: { body: 'plain', ok: 1 } }));
+    assert.deepStrictEqual(set.rejected, [{ field: 'body', reason: 'text' }]);
+    assert.deepStrictEqual(set.entry.data, { body: 'ab', ok: 1 });
+    const inc = applyOp(text, op('inc', 11, 'B', { seq: 1, key: 'body', value: 1 }));
+    assert.deepStrictEqual([inc.changed, inc.rejected], [false, [{ field: 'body', reason: 'text' }]]);
+    const add = applyOp(text, op('add', 11, 'B', { seq: 1, key: 'body', value: ['x'] }));
+    assert.deepStrictEqual([add.changed, add.rejected], [false, [{ field: 'body', reason: 'text' }]]);
+    const list = replay([splice(10, 'A', 1, 'items', { at: '^', content: [1] })]);
+    assert.deepStrictEqual(applyOp(list, op('inc', 11, 'B', { seq: 1, key: 'items', value: 1 })).rejected, [
+      { field: 'items', reason: 'list' },
+    ]);
+    // And the other way round.
+    const reg = replay([op('set', 1, 'A', { data: { body: 'x' } })]);
+    assert.deepStrictEqual(applyOp(reg, splice(2, 'B', 1, 'body', { at: '^', content: 'y' })).rejected, [
+      { field: 'body', reason: 'register' },
+    ]);
+    const counter = replay([op('inc', 1, 'A', { seq: 1, key: 'n', value: 1 })]);
+    assert.deepStrictEqual(applyOp(counter, splice(2, 'B', 1, 'n', { at: '^', content: 'y' })).rejected, [
+      { field: 'n', reason: 'counter' },
+    ]);
+    const tags = replay([op('add', 1, 'A', { seq: 1, key: 'tags', value: ['x'] })]);
+    assert.deepStrictEqual(applyOp(tags, splice(2, 'B', 1, 'tags', { at: '^', content: 'y' })).rejected, [
+      { field: 'tags', reason: 'set' },
+    ]);
+    // A whole-record write above every run resets the field to a register;
+    // one below the runs leaves the text and is refused for that field.
+    const above = applyOp(text, op('write', 20, 'B', { data: { body: 'plain' } }));
+    assert.deepStrictEqual([above.entry.data, above.rejected], [{ body: 'plain' }, []]);
+    assert.strictEqual(isSeq(above.entry.meta, 'body'), false);
+    const below = applyOp(text, op('write', 5, 'B', { data: { body: 'plain' } }));
+    assert.deepStrictEqual([below.entry.data, below.rejected], [{ body: 'ab' }, [{ field: 'body', reason: 'text' }]]);
+  });
+
+  await t.test('a text converges: concurrent inserts, cuts, extensions and a reset, in any order', () => {
+    const splice = (ts, origin, seq, key, value) => op('splice', ts, origin, { seq, key, value });
+    const a1 = splice(10, 'A', 1, 'body', { at: '^', content: 'ab' });
+    const b1 = splice(20, 'B', 1, 'body', { at: '>10:1:A', content: 'X' }); // after b, having seen ab
+    const a2 = splice(30, 'A', 2, 'body', { run: '10:A', from: 2, content: 'c' }); // A types on, unaware of X
+    const b2 = splice(35, 'B', 2, 'body', { at: '<10:0:A', content: 'Y' }); // before a
+    const c1 = splice(40, 'C', 1, 'body', { cut: [['10:A', 0, 1]], content: '' }); // deletes a
+    assertCommutes([a1, b1, a2, b2, c1], { body: 'YbcX' });
+    // A reset in the middle drops every run below it; Y, stamped above and
+    // anchored on a dropped element, reads from the head.
+    const reset = op('write', 25, 'D', { data: {} });
+    assertCommutes([a1, b1, a2, b2, c1, reset], { body: 'Y' });
+    const after = replay([a1, b1, a2, reset, b2, c1]);
+    assert.strictEqual(after.meta.seqs.body.cuts, undefined, 'a cut on a dropped run is dropped too');
+    assert.deepStrictEqual(Object.keys(after.meta.seqs.body.runs), ['35:B']);
+    // A reset above everything frees the field.
+    const gone = applyOp(after, op('delete', 50, 'D'));
+    assert.deepStrictEqual(gone.entry.data, {});
+    assert.strictEqual(gone.entry.meta.seqs.body, undefined);
+    assert.deepStrictEqual(gone.delta, { body: undefined });
+    assert.strictEqual(isAlive(gone.entry), false);
+    // Typing after the tombstone revives the record.
+    const revived = applyOp(gone.entry, splice(60, 'A', 3, 'body', { at: '^', content: 'z' }));
+    assert.strictEqual(isAlive(revived.entry), true);
+    assert.deepStrictEqual(revived.entry.data, { body: 'z' });
+    assert.deepStrictEqual(latestClock(revived.entry.meta), [60, '']);
+  });
+
+  await t.test('mergeEntry joins two sequence histories like replaying both; kinds keep their precedence', () => {
+    const splice = (ts, origin, seq, key, value) => op('splice', ts, origin, { seq, key, value });
+    const a1 = splice(10, 'A', 1, 'body', { at: '^', content: 'ab' });
+    const b1 = splice(20, 'B', 1, 'body', { at: '>10:1:A', content: 'X' });
+    const a2 = splice(30, 'A', 2, 'body', { run: '10:A', from: 2, content: 'c' });
+    const b2 = splice(35, 'B', 2, 'body', { at: '<10:0:A', content: 'Y' });
+    const c1 = splice(40, 'C', 1, 'body', { cut: [['10:A', 0, 1]], content: '' });
+    const left = replay([a1, a2, c1]);
+    const right = replay([a1, b1, b2]);
+    const all = replay([a1, b1, a2, b2, c1]);
+    const merged = mergeEntry(left, right);
+    assert.deepStrictEqual(merged.data, all.data);
+    assert.deepStrictEqual(merged.meta, all.meta);
+    assert.deepStrictEqual(mergeEntry(right, left).meta, all.meta, 'commutative');
+    // Through a merge op, with the peer's meta normalized on the way in.
+    const viaOp = applyOp(
+      left,
+      op('merge', 50, 'M', { data: right.data, meta: JSON.parse(JSON.stringify(right.meta)) }),
+    );
+    assert.deepStrictEqual(viaOp.entry.data, all.data);
+    assert.deepStrictEqual(viaOp.entry.meta, all.meta);
+    assert.strictEqual(applyOp(viaOp.entry, op('merge', 51, 'M', { data: all.data, meta: all.meta })).changed, false);
+    // A hostile block in a peer's meta is dropped, not kept by reference.
+    const hostile = {
+      ...right.meta,
+      seqs: { body: { k: 'x' }, ['__proto__']: right.meta.seqs.body, ok: right.meta.seqs.body },
+    };
+    const guarded = applyOp(left, op('merge', 52, 'M', { data: { ok: 'YbX' }, meta: hostile }));
+    assert.deepStrictEqual(Object.keys(guarded.entry.meta.seqs).sort(), ['body', 'ok']);
+    assert.strictEqual(Object.getPrototypeOf(guarded.entry.meta.seqs), Object.prototype);
+    // Precedence on a merge: register, then counter, then set, then list, then text.
+    const text = replay([splice(10, 'A', 1, 'f', { at: '^', content: 'ab' })]);
+    const reg = replay([op('set', 5, 'B', { data: { f: 'reg' } })]);
+    assert.deepStrictEqual(mergeEntry(text, reg).data, { f: 'reg' });
+    assert.strictEqual(isSeq(mergeEntry(reg, text).meta, 'f'), false);
+    const counter = replay([op('inc', 5, 'B', { seq: 1, key: 'f', value: 2 })]);
+    assert.deepStrictEqual(mergeEntry(text, counter).data, { f: 2 });
+    const set = replay([op('add', 5, 'B', { seq: 1, key: 'f', value: ['s'] })]);
+    assert.deepStrictEqual(mergeEntry(text, set).data, { f: ['s'] });
+    const list = replay([splice(12, 'B', 1, 'f', { at: '^', content: [1] })]);
+    assert.deepStrictEqual(mergeEntry(text, list).data, { f: [1] }, 'a list outranks a text');
+    assert.deepStrictEqual(mergeEntry(list, text).data, { f: [1] });
+    // A purge erases sequences with everything else.
+    const purged = applyOp(all, op('purge', 99, 'P'));
+    assert.deepStrictEqual([purged.entry.data, purged.entry.meta.seqs], [{}, {}]);
+    assert.strictEqual(applyOp(purged.entry, a1).changed, false);
+    // The op code is one character.
+    const [row] = packOps([a1]);
+    assert.strictEqual(row[3], '/');
+    assert.deepStrictEqual(row[8], 'body');
+    assert.deepStrictEqual(row[9], a1.value);
+    assert.strictEqual(unpackOps([row])[0].type, 'splice');
   });
 
   await t.test('fields named after Object.prototype members are fields; __proto__ never is', () => {

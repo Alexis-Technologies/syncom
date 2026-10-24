@@ -23,6 +23,11 @@
 //                 per (element, origin) the ts of that origin's newest `add`
 //                 and the newest add ts a `remove` had observed (0 = none).
 //                 The element is live for that origin iff added > removed.
+//   seqs[f]     — a list or a text: the sequence engine's block
+//                 (src/sequence.js) — runs anchored in a Fugue tree,
+//                 tombstones as lengths, pending work, a movable list's
+//                 registers, a text's marks. data[f] is its walk; why it
+//                 converges is argued there.
 //   v           — the schema version of the last whole-record write (the op's
 //                 `v`, absent on a node without a schema): what a reader on
 //                 a newer schema lenses the record through. A `set` that
@@ -37,11 +42,13 @@
 // order. Counters rely on it (a skipped seq would be lost, not reordered);
 // registers do not, but the vector-based dedup does.
 //
-// A field is a REGISTER, a COUNTER or a SET, never two of them: `set`/`write`
-// on a counter or set field, `inc` on a register or set field, `add`/`remove`
-// on a register or counter field are refused (reported in `rejected`) — the
-// kinds cannot be made to commute, and refusing is honest where guessing
-// would silently diverge.
+// A field is a REGISTER, a COUNTER, a SET, a LIST or a TEXT, never two of
+// them: `set`/`write` on a counter, set or sequence field, `inc` on a
+// register, set or sequence field, `add`/`remove` on a register, counter or
+// sequence field, `splice` on a register, counter or set field are refused
+// (reported in `rejected`) — the kinds cannot be made to commute, and
+// refusing is honest where guessing would silently diverge. On a snapshot
+// merge the register wins, then the counter, the set, the list, the text.
 //
 // Why a set converges (what the tests check): one origin's adds of an element
 // are stamped in seq order, so a node that observed the add at `r` observed
@@ -54,13 +61,18 @@
 // data, agrees whatever the order of adds, removes and resets.
 
 const { compareClock, maxClock } = require('./vector.js');
+const S = require('./sequence.js');
 
-const createEntry = () => ({ data: {}, meta: { clock: {}, base: null, deleted: null, counters: {}, sets: {} } });
+const createEntry = () => ({
+  data: {},
+  meta: { clock: {}, base: null, deleted: null, counters: {}, sets: {}, seqs: {} },
+});
 
 // An entry written before sets existed has no `sets` key; reading it as
 // empty is the whole compatibility story.
 const EMPTY = Object.freeze({});
 const setsOf = (meta) => meta.sets ?? EMPTY;
+const seqsOf = (meta) => meta.seqs ?? EMPTY;
 
 const cloneSets = (sets) => {
   const copy = {};
@@ -87,6 +99,9 @@ const cloneEntry = (entry) => {
     deleted: entry.meta.deleted,
     counters,
     sets: cloneSets(setsOf(entry.meta)),
+    // A sequence block is never mutated in place (src/sequence.js hands back
+    // a new one), so the map is copied and the blocks are shared.
+    seqs: { ...seqsOf(entry.meta) },
   };
   if (entry.meta.v !== undefined) meta.v = entry.meta.v;
   if (entry.meta.purged !== undefined) meta.purged = entry.meta.purged;
@@ -108,6 +123,10 @@ const isSet = (meta, field) => {
   const elements = own(setsOf(meta), field);
   return Boolean(elements) && Object.keys(elements).length > 0;
 };
+
+// A list or a text: the sequence engine's block under the field.
+const isSeq = (meta, field) => own(seqsOf(meta), field) !== undefined;
+const seqKind = (meta, field) => (own(seqsOf(meta), field).k === 't' ? 'text' : 'list');
 
 // An element is identified by its JSON text — `1` and `'1'` are two elements,
 // `{ a: 1, b: 2 }` and `{ b: 2, a: 1 }` are two too. A key from a peer must
@@ -226,7 +245,15 @@ const normalizeMeta = (meta) => {
       if (Object.keys(elements).length > 0) sets[field] = elements;
     }
   }
-  const normalized = { clock, base: stampOf(meta.base), deleted: stampOf(meta.deleted), counters, sets };
+  const seqs = {};
+  if (isPlainObject(meta.seqs)) {
+    for (const field of Object.keys(meta.seqs)) {
+      if (!isKey(field)) continue;
+      const seq = S.normalizeSeq(meta.seqs[field]);
+      if (seq !== null) seqs[field] = seq;
+    }
+  }
+  const normalized = { clock, base: stampOf(meta.base), deleted: stampOf(meta.deleted), counters, sets, seqs };
   if (Number.isInteger(meta.v)) normalized.v = meta.v;
   const purged = stampOf(meta.purged);
   if (purged) normalized.purged = purged;
@@ -240,8 +267,9 @@ const normalizeMeta = (meta) => {
 // meta too.
 const latestClock = (meta) => {
   if (!isPlainObject(meta)) return null;
-  const { clock, base, deleted, counters, sets, purged } = normalizeMeta(meta);
+  const { clock, base, deleted, counters, sets, seqs, purged } = normalizeMeta(meta);
   let latest = maxClock(maxClock(base, deleted), purged ?? null);
+  for (const field of Object.keys(seqs)) latest = maxClock(latest, [seqs[field].ts, '']);
   for (const field of Object.keys(clock)) latest = maxClock(latest, clock[field]);
   for (const field of Object.keys(counters)) {
     const perOrigin = counters[field];
@@ -314,6 +342,21 @@ const applyBase = (entry, delta) => {
     if (!deepEqual(data[field], value)) delta[field] = value;
     data[field] = value;
   }
+  for (const field of Object.keys(meta.seqs)) {
+    const next = S.prune(meta.seqs[field], meta.base);
+    if (next === null) {
+      delete meta.seqs[field];
+      delete data[field];
+      delta[field] = undefined;
+      continue;
+    }
+    meta.seqs[field] = next;
+    // Read again whatever was dropped: a new base can bring an orphan run
+    // back to the head.
+    const value = S.render(S.buildIndex(next, meta.base));
+    if (!deepEqual(data[field], value)) delta[field] = value;
+    data[field] = value;
+  }
 };
 
 // Sets register fields at `stamp`, honouring last-writer-wins per field.
@@ -331,6 +374,10 @@ const applyFields = (entry, fields, stamp, delta, rejected) => {
     }
     if (isSet(meta, field)) {
       rejected.push({ field, reason: 'set' });
+      continue;
+    }
+    if (isSeq(meta, field)) {
+      rejected.push({ field, reason: seqKind(meta, field) });
       continue;
     }
     if (compareClock(own(meta.clock, field), stamp) >= 0) continue;
@@ -410,6 +457,10 @@ const applySet = (entry, op, stamp, delta, rejected) => {
     rejected.push({ field, reason: 'counter' });
     return;
   }
+  if (isSeq(meta, field)) {
+    rejected.push({ field, reason: seqKind(meta, field) });
+    return;
+  }
   const moved = op.type === 'add' ? addElements(meta, field, op, stamp) : removeElements(meta, field, op);
   if (!moved) return;
   // A tag that moved is news to persist even when the array reads the same.
@@ -424,6 +475,55 @@ const applySet = (entry, op, stamp, delta, rejected) => {
  * field-kind rule refused. Idempotent: applying an op twice, or an op older
  * than what the entry already reflects, changes nothing.
  */
+// A `splice` on a list or a text: the block takes the op (src/sequence.js),
+// the field reads as its walk. The first op of a field decides its kind by
+// what `content` is — a string or an array — and every later one carries
+// the same, so a cut that arrives before any run of the field still knows
+// what it belongs to.
+const applySeq = (entry, op, stamp, delta, rejected) => {
+  const { meta } = entry;
+  const { key: field, value: payload } = op;
+  if (typeof field !== 'string' || !isKey(field) || !isKey(op.origin) || !isPlainObject(payload)) return;
+  if (own(meta.clock, field) !== undefined) {
+    rejected.push({ field, reason: 'register' });
+    return;
+  }
+  if (isCounter(meta, field)) {
+    rejected.push({ field, reason: 'counter' });
+    return;
+  }
+  if (isSet(meta, field)) {
+    rejected.push({ field, reason: 'set' });
+    return;
+  }
+  const kind = typeof payload.content === 'string' ? 't' : Array.isArray(payload.content) ? 'l' : null;
+  if (kind === null) return;
+  const held = own(meta.seqs, field);
+  if (held !== undefined && held.k !== kind) {
+    rejected.push({ field, reason: seqKind(meta, field) });
+    return;
+  }
+  if (compareClock(stamp, meta.base) < 0) return;
+  const result = S.applySplice(held ?? S.createSeq(kind), stamp, payload, meta.base);
+  if (result.reason === 'bound') rejected.push({ field, reason: 'bound' });
+  if (!result.changed) return;
+  // Pruned at once: what the op left below the base must look the same as
+  // if it had never landed, whichever side of the reset it arrived on.
+  const seq = S.prune(result.seq, meta.base);
+  if (seq === null) {
+    if (held !== undefined) {
+      delete meta.seqs[field];
+      delete entry.data[field];
+      delta[field] = undefined;
+    }
+    return;
+  }
+  meta.seqs[field] = seq;
+  // Pending work is news to persist even when the field reads the same.
+  entry.data[field] = S.render(S.buildIndex(seq, meta.base));
+  delta[field] = entry.data[field];
+};
+
 // Everything the entry held, gone: the purge, and a merge that meets one.
 const erase = (entry, stamp, delta) => {
   const { meta, data } = entry;
@@ -432,6 +532,7 @@ const erase = (entry, stamp, delta) => {
   meta.clock = {};
   meta.counters = {};
   meta.sets = {};
+  meta.seqs = {};
   // Canonical: whatever came before, a purged entry looks the same, so two
   // nodes that saw the purge and a write in either order hold one meta.
   meta.purged = maxClock(meta.purged ?? null, stamp);
@@ -509,6 +610,8 @@ const applyOp = (previous, op) => {
         rejected.push({ field, reason: 'register' });
       } else if (isSet(meta, field)) {
         rejected.push({ field, reason: 'set' });
+      } else if (isSeq(meta, field)) {
+        rejected.push({ field, reason: seqKind(meta, field) });
       } else if (compareClock(stamp, meta.base) >= 0) {
         const perOrigin = own(meta.counters, field) ?? (meta.counters[field] = {});
         const known = own(perOrigin, op.origin);
@@ -521,6 +624,8 @@ const applyOp = (previous, op) => {
     }
   } else if (op.type === 'add' || op.type === 'remove') {
     applySet(entry, op, stamp, delta, rejected);
+  } else if (op.type === 'splice') {
+    applySeq(entry, op, stamp, delta, rejected);
   }
 
   const before = previous ? previous.meta : null;
@@ -558,6 +663,9 @@ const isAlive = (entry) => {
       }
     }
   }
+  // A list or a text touched after the tombstone revives the record too.
+  const seqs = seqsOf(meta);
+  for (const field of Object.keys(seqs)) if (compareClock([seqs[field].ts, ''], meta.deleted) > 0) return true;
   return false;
 };
 
@@ -621,6 +729,14 @@ const mergeEntry = (a, b) => {
         }
       }
     }
+    const seqs = seqsOf(source.meta);
+    for (const field of Object.keys(seqs)) {
+      if (!isKey(field)) continue;
+      const mine = own(meta.seqs, field);
+      if (mine === undefined) meta.seqs[field] = seqs[field];
+      else if (mine.k === seqs[field].k) meta.seqs[field] = S.join(mine, seqs[field]);
+      else if (mine.k === 't') meta.seqs[field] = seqs[field]; // a list outranks a text
+    }
   }
   applyBase(entry, {});
   // A register that also became a counter on the other side: the register
@@ -640,6 +756,20 @@ const mergeEntry = (a, b) => {
     } else if (isCounter(meta, field)) {
       delete meta.sets[field];
       data[field] = counterValue(meta.counters[field]);
+    }
+  }
+  // A list or a text that is a register, a counter or a set on the other
+  // side: those win, in that order — the precedence the writes were refused by.
+  for (const field of Object.keys(meta.seqs)) {
+    if (own(meta.clock, field) !== undefined) {
+      delete meta.seqs[field];
+      data[field] = a.meta.clock[field] === meta.clock[field] ? a.data[field] : b.data[field];
+    } else if (isCounter(meta, field)) {
+      delete meta.seqs[field];
+      data[field] = counterValue(meta.counters[field]);
+    } else if (isSet(meta, field)) {
+      delete meta.seqs[field];
+      data[field] = liveElements(meta.sets[field]);
     }
   }
   return entry;
@@ -687,6 +817,7 @@ const TYPE_CODES = {
   purge: 'p',
   add: '+',
   remove: '-',
+  splice: '/',
 };
 const CODE_TYPES = {
   w: 'write',
@@ -698,6 +829,7 @@ const CODE_TYPES = {
   p: 'purge',
   '+': 'add',
   '-': 'remove',
+  '/': 'splice',
 };
 
 const packOps = (ops) => {
@@ -760,6 +892,7 @@ module.exports = {
   isAlive,
   isCounter,
   isSet,
+  isSeq,
   observedTags,
   latestClock,
   deepEqual,

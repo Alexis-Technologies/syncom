@@ -205,6 +205,17 @@ const normalizeRle = (kind, rle) => {
 // ---- the block -----------------------------------------------------------
 
 const createSeq = (kind) => ({ k: kind, ts: 0, runs: {} });
+
+// The newest stamp a block holds — its runs, registers and marks; cuts and
+// extensions carry none of their own. Derived, so two nodes holding the
+// same runs agree on it whatever else they saw along the way.
+const stampsMax = (seq) => {
+  let ts = 0;
+  for (const key of Object.keys(seq.runs)) ts = Math.max(ts, parseRun(key).ts);
+  for (const map of ['pos', 'vals']) for (const key of keysOf(seq[map])) ts = Math.max(ts, seq[map][key][0]);
+  for (const key of keysOf(seq.marks)) ts = Math.max(ts, parseRun(key).ts);
+  return ts;
+};
 const own = (object, key) => (Object.hasOwn(object, key) ? object[key] : undefined);
 const keysOf = (object) => (object && typeof object === 'object' ? Object.keys(object) : []);
 
@@ -218,9 +229,8 @@ const isJson = (value) => value === null || ['string', 'number', 'boolean', 'obj
 const normalizeSeq = (raw) => {
   if (!raw || typeof raw !== 'object') return null;
   const kind = raw.k === 't' || raw.k === 'l' ? raw.k : null;
-  if (kind === null || !Number.isSafeInteger(raw.ts) || raw.ts < 0) return null;
+  if (kind === null) return null;
   const seq = createSeq(kind);
-  seq.ts = raw.ts;
   for (const key of keysOf(raw.runs)) {
     const run = raw.runs[key];
     if (!isRunKey(key) || !Array.isArray(run) || run.length < 2 || run.length > 3) continue;
@@ -284,6 +294,9 @@ const normalizeSeq = (raw) => {
     }
     if (Object.keys(marks).length > 0) seq.marks = marks;
   }
+  const empty = Object.keys(seq.runs).length === 0 && !seq.cuts && !seq.ext && !seq.marks && !seq.pos && !seq.vals;
+  if (empty) return null;
+  seq.ts = stampsMax(seq);
   return seq;
 };
 
@@ -596,13 +609,14 @@ const applySplice = (seq, stamp, payload, base = null, pendingMax = PENDING_MAX)
   const [ts, origin] = stamp;
   if (!payload || typeof payload !== 'object') return { seq, changed: false, reason: 'malformed' };
   const { cut, at, run, from, content } = payload;
-  const hasContent = content !== undefined;
-  if (hasContent && !(present(seq.k, content) && content.length > 0)) {
-    return { seq, changed: false, reason: 'malformed' };
-  }
+  // `content` always names the kind — a string for a text, an array for a
+  // list — and inserts when it is not empty.
+  if (content === undefined || !present(seq.k, content)) return { seq, changed: false, reason: 'malformed' };
+  const inserting = content.length > 0;
   if (cut !== undefined && !Array.isArray(cut)) return { seq, changed: false, reason: 'malformed' };
-  if (!hasContent && (cut === undefined || cut.length === 0)) return { seq, changed: false, reason: 'malformed' };
-  if (hasContent && (at === undefined) === (run === undefined)) return { seq, changed: false, reason: 'malformed' };
+  if (!inserting && (cut === undefined || cut.length === 0)) return { seq, changed: false, reason: 'malformed' };
+  if (!inserting && (at !== undefined || run !== undefined)) return { seq, changed: false, reason: 'malformed' };
+  if (inserting && (at === undefined) === (run === undefined)) return { seq, changed: false, reason: 'malformed' };
   if (at !== undefined) {
     const anchor = parseAnchor(at);
     if (anchor === null || at === END || (anchor.elem !== null && anchor.elem.ts >= ts)) {
@@ -620,7 +634,8 @@ const applySplice = (seq, stamp, payload, base = null, pendingMax = PENDING_MAX)
   const pendingLeft = () => pendingMax - pendingCount(next ?? seq, indexOf());
   if (cut !== undefined) {
     for (const range of cut) {
-      const shape = Array.isArray(range) && range.length === 3 && isRunKey(range[0]);
+      // An honest cutter saw the run it cuts, so the run is older than the op.
+      const shape = Array.isArray(range) && range.length === 3 && isRunKey(range[0]) && parseRun(range[0]).ts < ts;
       if (!shape) return { seq, changed: false, reason: 'malformed' };
       const [, offset, length] = range;
       if (!Number.isInteger(offset) || offset < 0 || !isGap(length)) {
@@ -651,7 +666,7 @@ const applySplice = (seq, stamp, payload, base = null, pendingMax = PENDING_MAX)
       }
     }
   }
-  if (hasContent) {
+  if (inserting) {
     if (at !== undefined) {
       const key = runKey(ts, origin);
       if (own((next ?? seq).runs, key) === undefined) {
@@ -664,6 +679,7 @@ const applySplice = (seq, stamp, payload, base = null, pendingMax = PENDING_MAX)
         if (!resolved && pendingLeft() <= 0) return { seq, changed: false, reason: 'bound' };
         const m = mutable();
         m.runs[key] = [at, isText(m.k) ? [content] : [[...content]]];
+        m.ts = Math.max(m.ts, ts);
         settle(m, key);
         changed = true;
       }
@@ -693,7 +709,6 @@ const applySplice = (seq, stamp, payload, base = null, pendingMax = PENDING_MAX)
     }
   }
   if (!changed) return { seq, changed: false, reason: null };
-  next.ts = Math.max(next.ts, ts);
   return { seq: next, changed: true, reason: null };
 };
 
@@ -728,7 +743,9 @@ const prune = (seq, base) => {
   }
   const out = next ?? seq;
   const empty = Object.keys(out.runs).length === 0 && !out.cuts && !out.ext && !out.marks && !out.pos && !out.vals;
-  return empty ? null : out;
+  if (empty) return null;
+  if (next !== null) next.ts = stampsMax(next);
+  return out;
 };
 
 // Two nodes' pictures of one field joined: the union of runs (one run's two

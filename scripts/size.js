@@ -82,8 +82,15 @@ const ENTRIES = [
   // (39.8 measured). The search seam — an entity's `search` fields joined
   // into its catalog row (format 3), the injected TextIndex contract, `$text`
   // seeding the candidates in the index's order — the raise to 41 KB (40.7
-  // measured); the index itself is the @alexify/syncom/search subpath.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 42 },
+  // measured); the index itself is the @alexify/syncom/search subpath. The
+  // fixes the RxDB comparison found — scope bounds on a push, a dialer that
+  // keeps its own ops until its nodes hold them, REWOUND, a record file that
+  // fails after the append held and replayed — the raise to 42 KB (41.9
+  // measured). The sequence engine (src/sequence.js: Fugue runs with
+  // extension, run-length tombstones, pending runs and cuts, the walk, the
+  // reset rule and the join) wired into ops.js as the list and text kinds —
+  // the raise to 47 KB (47.0 measured).
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 47 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
