@@ -12,7 +12,8 @@
 //                       which has not been announced to anyone yet
 //   seg-<from>.json     sealed segments: the open files rolled together once
 //                       enough of them accumulate
-//   index.json          { epoch, floor, next, vector, segments } — a summary;
+//   index.json          { epoch, floor, next, vector, segments, droppedHeld,
+//                       latestTs } — a summary;
 //                       the files are the source of truth and anything the
 //                       index lacks is rebuilt from a directory listing
 //

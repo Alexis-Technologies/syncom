@@ -176,6 +176,29 @@ const runPurgeTests = async (t, assert, createStorage) => {
     assert.strictEqual(await holdsSecret(storage), false);
     assert.strictEqual(await storage.validate(), true);
   });
+
+  await t.test('a snapshot that carries a purge scrubs what the joiner held of the record', async (t2) => {
+    const a = await createStorage(t2, 'A', { sync: { log: { rollAfter: 1 } } });
+    const d = await createStorage(t2, 'D', { sync: { log: { rollAfter: 1 } } });
+    const id = await a.insert({ ssn: SECRET });
+    await a.update(id, { more: SECRET });
+    // D took the record's ops from A before the purge, as any peer would.
+    const ops = a.log.since(undefined).map((entry) => JSON.parse(JSON.stringify(entry.op)));
+    const result = await d.applyRemote(ops);
+    assert.strictEqual(result.applied, 2);
+    assert.deepStrictEqual(await d.get(id), { ssn: SECRET, more: SECRET });
+    assert.strictEqual(await holdsSecret(d), true);
+    await a.purge(id);
+    // D missed the purge op itself and learns of it from A's snapshot.
+    const page = await a.snapshot();
+    await d.mergeSnapshot(page.records, { from: a.nodeId });
+    assert.strictEqual(await d.get(id), null);
+    assert.strictEqual(await holdsSecret(d), false, 'the joiner scrubbed its own log');
+    const entries = d.log.since(undefined).filter((entry) => entry.op.id === id);
+    assert.ok(entries.length >= 3, 'the two ops it held and the merge');
+    assert.ok(entries.every((entry) => entry.scrubbed === true));
+    assert.strictEqual(await d.validate(), true);
+  });
 };
 
 module.exports = { runPurgeTests };

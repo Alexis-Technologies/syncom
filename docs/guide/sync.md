@@ -154,9 +154,9 @@ recovered by replaying the log on the next open:
 
 ```
 log/
-├── open/<seq>.json     one file per appended batch, never rewritten
+├── open/<seq>.json     one file per appended batch, rewritten only by a scrub
 ├── seg-<from>.json     sealed segments, rolled from open/ every `rollAfter` batches
-└── index.json          { epoch, floor, vector, segments }
+└── index.json          { epoch, floor, next, vector, segments, droppedHeld, latestTs }
 ```
 
 The log has two cursors, for two different questions.

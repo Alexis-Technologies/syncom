@@ -218,7 +218,7 @@ know the shape — and emits `schema` `{ kind: 'ahead', op, held: false }`.
 open runs that version; the held ops are then applied and
 `schemaInfo.held = { replayed, lost }` says how many, `lost` counting ops
 retention dropped before the upgrade (a hold needs `sync.retention.ops` of
-1000 or more).
+1000 or more, or `0` — keep everything).
 
 ### Drift
 

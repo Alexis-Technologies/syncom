@@ -124,6 +124,9 @@ const mergeOne = async (batch, record) => {
   op.seq = ++batch.seq;
   batch.ops.push(op);
   batch.touched.set(id, entry);
+  // A record the snapshot carries as purged: what this node held of it —
+  // a peer's ops taken before the purge — is scrubbed once the batch is durable.
+  if (entry.meta.purged) (batch.purged ??= new Set()).add(id);
   batch.deltas.set(id, { ...(batch.deltas.get(id) ?? {}), ...delta });
   batch.pending.push({ ctx, op, started });
 };
@@ -145,6 +148,7 @@ const mergeBatch = async (core, records, via, from) => {
     touched: new Map(),
     deltas: new Map(),
     pending: [],
+    purged: null,
   };
   for (const record of records) await mergeOne(batch, record);
   if (batch.ops.length === 0) return;
@@ -156,6 +160,7 @@ const mergeBatch = async (core, records, via, from) => {
   const first = entries[0].seq;
   const last = entries[entries.length - 1].seq;
   if (await core.persist(batch.touched, first, last)) core.log.applied(first, last);
+  if (batch.purged) for (const id of batch.purged) await core.log.scrub(id);
   core.flush();
   for (const { ctx, op, started } of batch.pending) {
     try {

@@ -107,7 +107,8 @@ peers make their own with their own `beforeApply`. A skipped op is flagged in
 the log so a reopen's replay of the unsealed tail leaves it alone too. The
 same path takes an op that would leave the record invalid under this node's
 [schema](./storage#validation): skipped, logged, relayed, and reported through
-the `error` event rather than a hook.
+the `error` event rather than a hook — and a peer's op on a record this node
+keeps sealed (`encrypted: true`), which is logged and relayed, never applied.
 
 `applyRemote` reports it: `{ applied, skipped, duplicates, gaps, malformed, unsigned, forged, outOfScope }` —
 `applied` counts every accepted op, skipped ones included; `applied - skipped`

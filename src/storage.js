@@ -43,6 +43,10 @@ const STORAGE_HOOKS = ['beforeWrite', 'afterWrite', 'beforeRead', 'afterRead', '
 // The ops that leave a record's whole state behind them — where a repair
 // can start replaying from. A purge counts even scrubbed; the others not.
 const WHOLE = new Set(['write', 'merge', 'delete']);
+// Whether this node applied a log entry: not skipped, or held for a schema
+// version this node now runs (`#replayHeld` applied it; the flag stays).
+const appliedHere = (entry, version) =>
+  !entry.skipped || (entry.held !== undefined && version !== null && entry.held <= version);
 
 // A service file this storage wrote itself and cannot read any more.
 const corrupt = (file, cause) =>
@@ -205,8 +209,8 @@ class Storage extends Emitter {
     // A held op lives in the log until this node runs its version;
     // retention that would drop it first makes the hold a silent loss.
     const retained = options.sync?.retention?.ops;
-    if (this.#ahead === 'hold' && retained !== undefined && retained < 1000) {
-      throw new TypeError("open({ schema }): ahead 'hold' needs sync.retention.ops of 1000 or more");
+    if (this.#ahead === 'hold' && retained !== undefined && retained > 0 && retained < 1000) {
+      throw new TypeError("open({ schema }): ahead 'hold' needs sync.retention.ops of 1000 or more, or 0");
     }
   }
 
@@ -999,7 +1003,7 @@ class Storage extends Emitter {
   }
 
   async #repair(id) {
-    const entries = this.#log.entriesOf(id).filter((entry) => !entry.skipped);
+    const entries = this.#log.entriesOf(id).filter((entry) => appliedHere(entry, this.#version));
     const whole = ({ op, scrubbed }) => op.type === 'purge' || (!scrubbed && WHOLE.has(op.type));
     const start = entries.findIndex(whole);
     if (start === -1) {

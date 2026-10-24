@@ -94,7 +94,8 @@ in this node's log — their `data`, `meta`, `key` and `value` are stripped,
 in memory and in the files, with the position, origin and stamp kept so the
 vector and a resuming peer are unaffected. A peer that receives the purge
 scrubs its own log the same way, and so does any peer that receives
-anything else about that id afterwards. The chain keeps hashes only. A
+anything else about that id afterwards, or that learns of the purge from a
+snapshot it bootstraps from. The chain keeps hashes only. A
 purged record is listed nowhere, reads as `null`, and a `Record` of it reads
 `null` too.
 
@@ -582,7 +583,8 @@ forward-tolerant; the validator does not know the shape), and emits `schema`
 and flagged with its version, relays it, and applies it at the first open
 that runs that version — `schemaInfo.held` is then `{ replayed, lost }`,
 `lost` counting held ops that retention dropped before the upgrade. A hold
-needs `sync.retention.ops` of 1000 or more, and a directory that ran a newer
+needs `sync.retention.ops` of 1000 or more (or `0`, keep everything), and a
+directory that ran a newer
 version cannot be reopened with `'hold'` on an older one.
 
 ## On disk

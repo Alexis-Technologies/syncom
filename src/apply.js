@@ -287,8 +287,11 @@ const applyOne = async (batch, op) => {
   const current = await currentOf(batch, op);
   if (current === undefined) return;
   if (current?.encrypted) {
+    // Sealed here for this node alone: the op is logged and relayed, never
+    // applied — flagged skipped, so neither a replay nor a fold of the log
+    // applies what this node did not.
     core.logger.warn({ event: 'sync.op.encrypted', id: op.id });
-    accept(batch, op);
+    skip(batch, op);
     return;
   }
   // A `false` from beforeApply skips the op HERE only. A throw aborts the

@@ -832,6 +832,8 @@ const runSchemaTests = async (t, assert, createStorage) => {
       () => createStorage(t2, 'G9', { schema: { ahead: 'hold' }, sync: { retention: { ops: 10 } } }),
       /ahead 'hold' needs sync.retention.ops of 1000 or more/,
     );
+    const kept = await createStorage(t2, 'G10', { schema: { ahead: 'hold' }, sync: { retention: { ops: 0 } } });
+    assert.strictEqual(kept.schemaInfo.held, null, "retention.ops 0 keeps everything, so 'hold' is fine");
     await assert.rejects(() => e.migrate({ entities: 'Post' }), TypeError);
     await assert.rejects(() => e.migrate({ batch: 0 }), TypeError);
     assert.deepStrictEqual(
@@ -891,6 +893,12 @@ const runSchemaTests = async (t, assert, createStorage) => {
       assert.deepStrictEqual(upgraded.schemaInfo.previous, { version: 1, hash: null });
       assert.deepStrictEqual(await upgraded.get(post.id), { n: 1, $type: 'Post' });
       assert.deepStrictEqual(await upgraded.get('mine'), { mine: true, $type: 'Post' });
+      assert.deepStrictEqual(
+        await upgraded.repair(post.id),
+        { ops: 1, alive: true },
+        'a held op this node has since applied counts for repair()',
+      );
+      assert.deepStrictEqual(await upgraded.get(post.id), { n: 1, $type: 'Post' });
       await upgraded.close();
       const again = await createStorage(t2, 'B', { schema: v2 });
       assert.deepStrictEqual(

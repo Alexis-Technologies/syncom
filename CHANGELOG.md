@@ -395,6 +395,17 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **A snapshot that carries a purge scrubs the joiner's log.** A node that
+  held a record's ops and then bootstrapped from a peer where the record was
+  purged kept the payloads in its log and served them to the peers behind
+  it. The bootstrap merge now scrubs every id the page purges, as a peer's
+  page does.
+- **An op on a sealed record is skipped, not accepted.** A peer's op on a
+  record this node keeps `encrypted` was logged as applied, so a replay or
+  a fold of the log would have applied what the node never did; it is
+  flagged `skipped` now. Also: `ahead: 'hold'` accepts `retention.ops: 0`
+  (keep everything), and `repair(id)` counts a held op this node has since
+  applied.
 - **Offline writes past retention reach the host.** A node that wrote more
   ops than `retention.ops` before reaching a host had the oldest compacted,
   and the host took none of them — nor any later one of that stream —
