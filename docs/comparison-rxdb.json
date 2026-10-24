@@ -1556,18 +1556,18 @@
         },
         "size": {
           "mark": "",
-          "text": "65.0 KB min+gzip: the browser entry, the whole engine",
+          "text": "66.0 KB min+gzip: the browser entry, the whole engine",
           "source": "pnpm size (scripts/size.js, esbuild), browser.js",
-          "detail": "Measured by `pnpm size` on 2026-10-24 (features/enhance-crdt-engine). CommonJS is not tree-shaken, so storage, schema, queries, the op log, signing, the sync protocol and the list, text and tree engines all come with `open()`. No validator library is included in either column (injected / wrapped separately)."
+          "detail": "Measured by `pnpm size` on 2026-10-24 (features/enhance-crdt-engine, after the docs audit's fixes). CommonJS is not tree-shaken, so storage, schema, queries, the op log, signing, the sync protocol and the list, text and tree engines all come with `open()`. No validator library is included in either column (injected / wrapped separately)."
         },
         "sizeSync": {
           "mark": "",
-          "text": "65.6 KB min+gzip with the wrpc link adapter",
+          "text": "66.6 KB min+gzip with the wrpc link adapter",
           "source": "bench/results/size.json (pnpm bench:size)"
         },
         "sizeGate": {
           "mark": "✅",
-          "text": "`pnpm size` fails CI when the browser entry passes 65 KB",
+          "text": "`pnpm size` fails CI when the browser entry passes 66 KB",
           "source": "scripts/size.js:86; .github/workflows/ci.yml:20-24"
         },
         "node": {

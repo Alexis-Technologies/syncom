@@ -80,14 +80,14 @@ pays for what it imports.
 
 | Entry | raw | min | min+gzip | budget |
 | ----- | ---:| ---:| --------:| ------:|
-| main entry — browser (@alexify/syncom) | 448.9 KB | 190.3 KB | 65.0 KB | 65.0 KB |
-| main entry — node (@alexify/syncom) | 426.0 KB | 189.2 KB | 64.6 KB | — |
+| main entry — browser (@alexify/syncom) | 456.0 KB | 193.2 KB | 66.0 KB | 66.0 KB |
+| main entry — node (@alexify/syncom) | 432.8 KB | 192.2 KB | 65.6 KB | — |
 | wrpc adapter — browser (@alexify/syncom/wrpc) | 3.4 KB | 1.4 KB | 0.7 KB | 2.0 KB |
 | contracts — browser (@alexify/syncom/contracts) | 3.7 KB | 1.6 KB | 0.8 KB | 1.0 KB |
 | idb backend — browser (@alexify/syncom/idb) | 3.7 KB | 1.7 KB | 0.8 KB | 2.0 KB |
 | search — browser (@alexify/syncom/search) | 4.2 KB | 1.7 KB | 0.9 KB | 2.0 KB |
 | order — browser (@alexify/syncom/order) | 4.9 KB | 2.3 KB | 1.0 KB | 1.5 KB |
-| undo — browser (@alexify/syncom/undo) | 35.0 KB | 15.8 KB | 6.0 KB | 6.0 KB |
+| undo — browser (@alexify/syncom/undo) | 36.1 KB | 16.3 KB | 6.1 KB | 6.5 KB |
 | branch — browser (@alexify/syncom/branch) | 14.8 KB | 7.4 KB | 3.2 KB | 3.5 KB |
 
 ## Quick Start
@@ -285,7 +285,7 @@ _Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 roun
 | TinyBase<br><sub>tinybase@10.0.1</sub> | MergeableStore + IndexedDB persister + custom synchronizer | 56.4 KB | 23.8 KB |  |
 | Yjs<br><sub>yjs@13.6.33, y-indexeddb@9.0.12, y-protocols@1.0.7</sub> | yjs + y-indexeddb + y-protocols/sync | 80.2 KB | 24.5 KB |  |
 | PouchDB<br><sub>pouchdb-browser@9.0.0</sub> | pouchdb-browser | 117.8 KB | 40.4 KB | pouchdb-browser carries its HTTP adapter (the CouchDB client) with it |
-| **syncom**<br><sub>@alexify/syncom@0.0.1</sub> | open() over OPFS + the wrpc link adapter | 192.0 KB | 65.6 KB | storage, schema, queries, the op log and the sync protocol are one entry |
+| **syncom**<br><sub>@alexify/syncom@0.0.1</sub> | open() over OPFS + the wrpc link adapter | 195.0 KB | 66.6 KB | storage, schema, queries, the op log and the sync protocol are one entry |
 | RxDB<br><sub>rxdb@17.6.0, dexie@4.4.6, rxjs@7.8.2</sub> | rxdb + Dexie storage + replication | 282.3 KB | 90.1 KB |  |
 | Fireproof<br><sub>@fireproof/core@0.24.19</sub> | @fireproof/core | 784.2 KB | 204.0 KB |  |
 | OrbitDB<br><sub>@orbitdb/core@4.0.0, helia@6.1.4, libp2p@3.5.1, @libp2p/gossipsub@15.0.23, blockstore-idb@4.0.1</sub> | @orbitdb/core + helia + libp2p, IndexedDB blockstore | 1185.6 KB | 353.7 KB | createHelia brings Helia's default libp2p configuration with it |

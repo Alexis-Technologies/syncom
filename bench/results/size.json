@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-24T16:55:29.090Z",
+  "generatedAt": "2026-10-24T19:09:32.026Z",
   "esbuild": "0.28.2",
   "libraries": [
     {
@@ -9,8 +9,8 @@
       "packages": [
         "@alexify/syncom@0.0.1"
       ],
-      "min": 196631,
-      "gzip": 67214,
+      "min": 199647,
+      "gzip": 68221,
       "note": "storage, schema, queries, the op log and the sync protocol are one entry"
     },
     {
@@ -126,8 +126,8 @@
       "packages": [
         "@alexify/syncom@0.0.1"
       ],
-      "min": 195379,
-      "gzip": 66755
+      "min": 198395,
+      "gzip": 67767
     },
     {
       "id": "yjs",

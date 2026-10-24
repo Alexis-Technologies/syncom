@@ -884,9 +884,9 @@
         },
         "counterNum": {
           "mark": "",
-          "text": "finite floats; a negative `inc` decrements; no overflow guard",
-          "note": "A sum past `Number.MAX_VALUE` becomes `Infinity`, stored as `null` in JSON: after a reload the next `inc` starts from 0 there, while a node holding the record in cache keeps `Infinity` — the two diverge (probe).",
-          "source": "src/fields.js:22-31; src/ops.js:753-767; src/ops.js:212-213"
+          "text": "finite floats; a negative `inc` decrements; each origin's sum within ±2^53−1",
+          "note": "An `inc` that would take its origin's sum past `Number.MAX_SAFE_INTEGER` is refused as a bound (`detail: 'counter'`), the same on every node; the sums add up in origin order, so fractions read alike everywhere.",
+          "source": "src/ops.js (MAX_COUNT, counterValue, the inc branch); docs/guide/sync.md#guarantees-and-limits"
         },
         "counterReset": {
           "mark": "",
@@ -1223,8 +1223,8 @@
         "trim": {
           "mark": "✅",
           "text": "log retention drops old segments; `compact(id)` rewrites a record's metadata",
-          "note": "Before what compaction dropped a version is `HISTORY_GONE`, and a peer behind the floor bootstraps from a snapshot. `compact()` loses a text's marks and makes old cursors read `null`.",
-          "source": "docs/guide/sync.md:212-216; src/versions.js:256-273; docs/guide/versions.md:333-338"
+          "note": "Before what compaction dropped a version is `HISTORY_GONE`, and a peer behind the floor bootstraps from a snapshot. `compact()` lays a text's marks again; it names the elements anew, so old cursors read `null` and a stacking mark has a new id.",
+          "source": "docs/guide/sync.md#the-log; src/versions.js (compact, marksOf, inRuns); docs/guide/versions.md#costs"
         },
         "purge": {
           "mark": "✅",
@@ -1408,13 +1408,13 @@
         "malformed": {
           "mark": "✅",
           "text": "dropped and counted, never thrown: not logged, not relayed (a gap)",
-          "note": "A payload `applyOp` cannot admit is `OP_REFUSED` (malformed) and logged as a no-op; a page that throws is retried from its cursor.",
+          "note": "A payload `applyOp` cannot admit — of any op type — is `OP_REFUSED` (malformed) and logged as a no-op; a page that throws is retried from its cursor.",
           "source": "src/apply.js:169-183; src/ops.js:561-564; docs/guide/sync.md:346-354"
         },
         "bounds": {
           "mark": "✅",
-          "text": "pending work, run and field slots, tree depth and index, skew, push limits",
-          "note": "`pendingMax` 4 096 per field, a run 2^20 and a field 2^22 slots, trees 512 levels and 1 024-character indexes, `maxSkew` 24 h, per-peer `opsPerPush`, `bytesPerPush` and `opsPerSecond`. Nothing else caps a set's size or a tree's move count.",
+          "text": "pending work, run and field slots, tree depth and index, counter range, skew, push limits",
+          "note": "`pendingMax` 4 096 per field (snapshot blocks too), a run 2^20 and a field 2^22 slots, trees 512 levels and 1 024-character indexes, an origin's counter sum ±2^53−1, `maxSkew` 24 h, per-peer `opsPerPush`, `bytesPerPush` and `opsPerSecond`. Nothing else caps a set's size or a tree's move count.",
           "source": "src/sequence.js:88-100; src/rle.js:11-17; src/tree.js:28-30; src/options.js:15; src/hosting.js:84-110"
         },
         "remoteValidation": {
@@ -1465,9 +1465,9 @@
         },
         "tests": {
           "mark": "",
-          "text": "942 `node:test` tests in 88 files, 9 `tsd` files; CI on Node 22, 24",
-          "note": "Coverage is enforced at 95/95/90/95 (lines, statements, branches, functions); a run here passed 941 with 1 skipped.",
-          "source": "package.json:57-59; .github/workflows/ci.yml:26-44; tests/"
+          "text": "958 `node:test` tests, 9 `tsd` files; CI on Node 22, 24",
+          "note": "Coverage is enforced at 95/95/90/95 (lines, statements, branches, functions); a run here passed 957 with 1 skipped.",
+          "source": "package.json (test, test:coverage); .github/workflows/ci.yml; tests/"
         }
       }
     },

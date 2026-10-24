@@ -59,7 +59,7 @@ compares all four, row by row, from their source code: 141 rows in seven section
   for a note, a comment, or one block of a document. A document hundreds of pages long that many
   people type into at once belongs in one of the three.
 - **Size depends on what is counted.** Yjs ships 28 KB min+gzip, all of it. Automerge and Loro
-  ship about 1.1 MB each, almost all of it WebAssembly. syncom's single entry is 65 KB, and that
+  ship about 1.1 MB each, almost all of it WebAssembly. syncom's single entry is 66 KB, and that
   includes its storage, queries and sync protocol, which the three do not carry.
 - **History is kept four ways.** Automerge keeps every change forever, in a graph of SHA-256
   hashes, and never drops any. Loro keeps every change too, until you export a shallow snapshot.
@@ -239,7 +239,7 @@ The closest counterpart of each building block, in each library. The Yjs column 
 <tr><td>Key order when read</td><td>as each node's object took the keys; replicas can differ<sup>90</sup></td><td>local <code>Map</code> insertion order; can differ between replicas<sup>91</sup></td><td>sorted by key in the core; a live JS doc appends newly added keys<sup>92</sup></td><td><code>keys()</code>/<code>entries()</code> sorted by key; <code>toJSON()</code> order unspecified</td></tr>
 <tr class="sc-matrix-group"><td colspan="5"><strong>Counters and sets</strong></td></tr>
 <tr><td>Counter type</td><td>✅ <code>inc(id, key, value)</code>: one running sum per origin, added up</td><td>❌ no counter type<sup>93</sup></td><td>✅ <code>Counter</code> class: <code>increment(n)</code>, <code>decrement(n)</code>, <code>.value</code></td><td>✅ <code>LoroCounter</code>: <code>increment(n)</code>, <code>decrement(n)</code>, <code>value</code></td></tr>
-<tr><td>Counter values</td><td>finite floats; a negative <code>inc</code> decrements; no overflow guard<sup>94</sup></td><td>— no counter type</td><td>64-bit integer; decrement allowed; fractional deltas truncated<sup>95</sup></td><td>f64 floats; decrement; no bounds or overflow checks</td></tr>
+<tr><td>Counter values</td><td>finite floats; a negative <code>inc</code> decrements; each origin's sum within ±2^53−1<sup>94</sup></td><td>— no counter type</td><td>64-bit integer; decrement allowed; fractional deltas truncated<sup>95</sup></td><td>f64 floats; decrement; no bounds or overflow checks</td></tr>
 <tr><td>A counter reset while others add</td><td>a reset drops increments stamped below it; a register outranks the counter<sup>96</sup></td><td>— no counter type</td><td>an overwrite or delete wins; concurrent increments are dropped<sup>97</sup></td><td>no reset op; a concurrent increment lands in the deleted counter, hidden<sup>98</sup></td></tr>
 <tr><td>Set type (concurrent adds kept)</td><td>✅ oR-set field: <code>add()</code> / <code>remove()</code>; a concurrent add survives a remove<sup>99</sup></td><td>❌ no set type; map keys behave add-wins<sup>100</sup></td><td>❌ no set type; the docs give no set recipe</td><td>❌ no set type; map keys give LWW, not add-wins</td></tr>
 <tr class="sc-matrix-group"><td colspan="5"><strong>Lists</strong></td></tr>
@@ -425,7 +425,7 @@ The closest counterpart of each building block, in each library. The Yjs column 
 <tr><td>Signed changes</td><td>✅ Ed25519 per op; the node id is the key; verified on receipt<sup>280</sup></td><td>❌ no signatures</td><td>❌ no signatures on changes in the core<sup>281</sup></td><td>❌ no</td></tr>
 <tr><td>Checksums on encoded data</td><td>⚠️ a signed SHA-256 digest per op; record files checked against the chain<sup>282</sup></td><td>❌ no checksum in either format</td><td>✅ each chunk carries a 4-byte SHA-256-prefix checksum, checked on load</td><td>✅ xxHash32 over every blob, plus one per SSTable block</td></tr>
 <tr><td>A malformed update</td><td>✅ dropped and counted, never thrown: not logged, not relayed (a gap)<sup>283</sup></td><td>⚠️ throws a plain <code>Error</code>; parts decoded before the failure stay applied<sup>284</sup></td><td>⚠️ undecodable bytes throw, nothing applied; nonsense ops panic and broke the doc<sup>285</sup></td><td>✅ throws; the import rolls back and the doc is unchanged<sup>286</sup></td></tr>
-<tr><td>Limits against a hostile peer</td><td>✅ pending work, run and field slots, tree depth and index, skew, push limits<sup>287</sup></td><td>❌ no limits on size, depth or pending data<sup>288</sup></td><td>⚠️ 1 GB cap per decoded item, leb128 overflow checks; no queue or size caps<sup>289</sup></td><td>⚠️ decode caps (positions &lt; 2^30, value depth 128); no size or pending caps<sup>290</sup></td></tr>
+<tr><td>Limits against a hostile peer</td><td>✅ pending work, run and field slots, tree depth and index, counter range, skew, push limits<sup>287</sup></td><td>❌ no limits on size, depth or pending data<sup>288</sup></td><td>⚠️ 1 GB cap per decoded item, leb128 overflow checks; no queue or size caps<sup>289</sup></td><td>⚠️ decode caps (positions &lt; 2^30, value depth 128); no size or pending caps<sup>290</sup></td></tr>
 <tr><td>Validation of a peer's change</td><td>✅ the entity validator and <code>beforeApply</code> run on every peer's op</td><td>❌ none; peers are assumed trusted</td><td>❌ none in the core; Keyhive's server policy (alpha) checks edit access only</td><td>❌ no schema or rule checks; structural checks only</td></tr>
 <tr><td>End-to-end encryption</td><td>❌ no; an encrypted record stays local and does not sync</td><td>⚠️ none in core; <code>y-webrtc</code> encrypts signaling with a shared secret<sup>291</sup></td><td>⚠️ keyhive via <code>@automerge/automerge-repo-keyhive</code>, in alpha<sup>292</sup></td><td>⚠️ experimental, in the Loro Protocol (<code>%ELO</code> rooms, <code>EloLoroAdaptor</code>)</td></tr>
 <tr><td>Convergence tested by fuzzing</td><td>✅ seeded mesh fuzz: 4 nodes, 80 ops of every kind; a hazard walk<sup>293</sup></td><td>✅ 5 peers, random disconnects and delivery order, up to 100,000 ops</td><td>✅ proptests, random fork/merge batch tests, a 3-repo fuzz, libFuzzer on <code>load</code><sup>294</sup></td><td>✅ cargo-fuzz, 14 targets, 5 peers compared; loro.js-vs-Rust differential fuzz</td></tr>
@@ -436,7 +436,7 @@ The closest counterpart of each building block, in each library. The Yjs column 
 <tr><td>Anonymized copy for bug reports</td><td>❌ none</td><td>✅ <code>obfuscateUpdate</code> replaces content, keeps the CRDT structure</td><td>✅ <code>anonymize(doc)</code> replaces keys, values, actors and metadata, keeps history shape<sup>302</sup></td><td>⚠️ <code>redactJsonUpdates</code> blanks content in JSON updates over a version range</td></tr>
 <tr><td>UI framework bindings</td><td>❌ none; <code>Cursor.watch()</code> and <code>Record</code> events to wire one</td><td>⚠️ third-party only: react-yjs, SyncedStore, valtio-yjs, immer-yjs</td><td>✅ react hooks, Svelte store, Solid primitives (automerge-repo packages); no Vue<sup>303</sup></td><td>✅ <code>loro-mirror</code> (state mirror) and <code>loro-mirror-react</code><sup>304</sup></td></tr>
 <tr><td>Documentation</td><td>✅ VitePress site: guides, API reference, architecture, benchmarks</td><td>⚠️ docs.yjs.dev: guides, API, ecosystem, internals, for v13<sup>305</sup></td><td>✅ automerge.org: tutorial, data model, merge rules, internals, cookbook, typedoc API<sup>306</sup></td><td>✅ loro.dev: tutorials, concepts, full JS API reference, benchmarks, blog</td></tr>
-<tr><td>Test suite</td><td>942 <code>node:test</code> tests in 88 files, 9 <code>tsd</code> files; CI on Node 22, 24<sup>307</sup></td><td>338 cases in 16 files (lib0/testing); CI on Node 26</td><td>Rust ~730 tests + proptests, JS 351, WASM 160, automerge-repo 711; GitHub CI<sup>308</sup></td><td>~2,000 Rust tests, 472 JS cases, 396 loro.js cases, fuzz, loom; CI</td></tr>
+<tr><td>Test suite</td><td>958 <code>node:test</code> tests, 9 <code>tsd</code> files; CI on Node 22, 24<sup>307</sup></td><td>338 cases in 16 files (lib0/testing); CI on Node 26</td><td>Rust ~730 tests + proptests, JS 351, WASM 160, automerge-repo 711; GitHub CI<sup>308</sup></td><td>~2,000 Rust tests, 472 JS cases, 396 loro.js cases, fuzz, loom; CI</td></tr>
 </tbody>
 </table>
 
@@ -537,7 +537,7 @@ The closest counterpart of each building block, in each library. The Yjs column 
 91. <code>toJSON()</code> returns a plain object, so integer-like keys come first there.
 92. Probe: after a change <code>Object.keys</code> read <code>z, a, m</code>; after <code>load</code> it read <code>a, m, z</code>. Integer-like keys follow JS object rules.
 93. A number in an attr is a register: concurrent increments lose all but one.
-94. A sum past <code>Number.MAX_VALUE</code> becomes <code>Infinity</code>, stored as <code>null</code> in JSON: after a reload the next <code>inc</code> starts from 0 there, while a node holding the record in cache keeps <code>Infinity</code> — the two diverge (probe).
+94. An <code>inc</code> that would take its origin's sum past <code>Number.MAX_SAFE_INTEGER</code> is refused as a bound (<code>detail: 'counter'</code>), the same on every node; the sums add up in origin order, so fractions read alike everywhere.
 95. <code>increment(1.7)</code> adds 1 and <code>new Counter(1.5)</code> stores 1 (probed). The sum is a plain i64 <code>+</code> with no overflow check.
 96. A peer's register write takes the field whatever its stamp (locally <code>update()</code> of a counter throws <code>FIELD_KIND</code>). A counter one origin incremented both before and after a concurrent reset does not converge — documented and left so.
 97. An increment counts only while the counter's put has no other successor (probed: reset to 0 ‖ +3 → 0; delete ‖ +3 → key gone).
@@ -660,7 +660,7 @@ The closest counterpart of each building block, in each library. The Yjs column 
 214. Yjs records only <code>clientID</code>s; mapping changes to users is collected by the app or server, e.g. from each update's <code>createContentIdsFromUpdate</code>. In 13.6.33 (npm <code>latest</code>) only the experimental <code>PermanentUserData</code>.
 215. 3.5.0 maps authors to actors (<code>getAuthors</code>, <code>getActorsForAuthor</code>); op ids name each value's actor (<code>getConflicts</code> keys).
 216. Attribution is by peer id; map peers to users yourself (e.g. with <code>subscribeFirstCommitFromPeer</code>).
-217. Before what compaction dropped a version is <code>HISTORY_GONE</code>, and a peer behind the floor bootstraps from a snapshot. <code>compact()</code> loses a text's marks and makes old cursors read <code>null</code>.
+217. Before what compaction dropped a version is <code>HISTORY_GONE</code>, and a peer behind the floor bootstraps from a snapshot. <code>compact()</code> lays a text's marks again; it names the elements anew, so old cursors read <code>null</code> and a stacking mark has a new id.
 218. No shallow snapshot. A collected doc can no longer restore snapshots.
 219. The trimmed doc cannot check out before its root, and rejects updates from peers whose edits are based on an older version.
 220. A purge wins at any stamp; signatures and digests stay so the headers still verify, and the tags drop their copies. Per record, not per field; a peer that never comes back keeps what it had.
@@ -726,11 +726,11 @@ The closest counterpart of each building block, in each library. The Yjs column 
 280. <code>'verify'</code> (the default) still takes unsigned ops; only <code>'require'</code> refuses them. The signature covers the header and a salted payload digest, so a scrubbed op still verifies.
 281. Keyhive (alpha) signs sync traffic and contact cards, not individual changes; <code>emptyChange</code> is suggested for signing merged heads yourself.
 282. Log segments carry no checksum: a torn one is skipped at open and counted in <code>droppedTs</code>.
-283. A payload <code>applyOp</code> cannot admit is <code>OP_REFUSED</code> (malformed) and logged as a no-op; a page that throws is retried from its cursor.
+283. A payload <code>applyOp</code> cannot admit — of any op type — is <code>OP_REFUSED</code> (malformed) and logged as a no-op; a page that throws is retried from its cursor.
 284. Items are integrated before the delete set is read, so a truncated update leaves its items in the doc.
 285. Probe: a change with an op on an unknown object (built with <code>encodeChange</code>) threw <code>PanicError</code> from Rust, via <code>applyChanges</code> and via a sync message; the same doc then panicked on its next <code>change</code>.
 286. Many of these paths trapped the WASM instance until 1.16.4. A Rust panic still kills the instance (e.g. <code>configTextStyle</code> with ':' in a key).
-287. <code>pendingMax</code> 4 096 per field, a run 2^20 and a field 2^22 slots, trees 512 levels and 1 024-character indexes, <code>maxSkew</code> 24 h, per-peer <code>opsPerPush</code>, <code>bytesPerPush</code> and <code>opsPerSecond</code>. Nothing else caps a set's size or a tree's move count.
+287. <code>pendingMax</code> 4 096 per field (snapshot blocks too), a run 2^20 and a field 2^22 slots, trees 512 levels and 1 024-character indexes, an origin's counter sum ±2^53−1, <code>maxSkew</code> 24 h, per-peer <code>opsPerPush</code>, <code>bytesPerPush</code> and <code>opsPerSecond</code>. Nothing else caps a set's size or a tree's move count.
 288. The decoder sizes arrays from wire counts; the threat model leaves size limits to the app.
 289. A libFuzzer target and crash fixtures (<code>too_many_ops</code>, <code>overflow_in_length</code>…) cover loading.
 290. Nothing bounds the size of an update or the pending queue; a WASM out-of-memory traps the instance.
@@ -750,7 +750,7 @@ The closest counterpart of each building block, in each library. The Yjs column 
 304. Official loro-dev packages outside the clones; no Vue, Svelte or Solid binding is named.
 305. v14's <code>Y.Node</code> API is in JSDoc and two repo notes; the site and most of the README describe v13.
 306. The README calls the Rust API low level and not well documented; the binary format has its own spec page.
-307. Coverage is enforced at 95/95/90/95 (lines, statements, branches, functions); a run here passed 941 with 1 skipped.
+307. Coverage is enforced at 95/95/90/95 (lines, statements, branches, functions); a run here passed 957 with 1 skipped.
 308. CI builds and tests on Linux, macOS and Windows, runs the WASM and JS suites and a Node 18 packaging test; the C API has cmocka tests.
 
 <!-- comparison:end -->

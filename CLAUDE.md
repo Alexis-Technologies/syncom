@@ -163,8 +163,10 @@ docs/                     VitePress site
   push path.
 - **`ops.js` walks own keys only.** `Object.keys` + `isKey` (`__proto__` is
   never a field) + `own()` for every lookup into `meta.clock`/`meta.counters`;
-  `normalizeMeta` deep-copies a peer's meta into the trusted shape. A
-  `for...in` or a bare `obj[key]` over peer-shaped data is a bug.
+  `normalizeMeta` deep-copies a peer's meta into the trusted shape (under the
+  node's `pendingMax`), and `mergeEntry` joins a side alone with an empty
+  entry rather than copy it, so data its meta does not back never comes
+  along. A `for...in` or a bare `obj[key]` over peer-shaped data is a bug.
 - **The chain is optional, the log is not.** `open({ chain: false })` leaves
   `core.chain` null: `persistLocal`/`seal` in `src/commit.js` and
   `#persistBatch` write `block: null`, `verify` is forced off, `validate()`
@@ -177,7 +179,10 @@ docs/                     VitePress site
 - **Live Records are weak.** `#records` holds `WeakRef`s (a
   `FinalizationRegistry` clears the slot); go through `#live(id)`, never
   `#records.get`. A Record the application still holds pins its cache entry;
-  one it dropped is collected with its pin.
+  one it dropped is collected with its pin. A write path hands `core.refresh`
+  the entry: with a lens or a read hook in play the Record is refreshed as
+  `get()` reads, after the write and outside the queue (`#emitUpdate`, in
+  order) — never await a read hook inside the queue.
 - **A purge is a scrub, not a delete.** `purge` wins at any stamp and a
   purged entry takes nothing but another purge or a merge (`applyOp`
   returns early). The payload leaves the log through `OpLog.scrub(id)`,
@@ -199,7 +204,8 @@ docs/                     VitePress site
   `inc`, `add`/`remove` → `add`/`remove`, `splice`/`push`/`updateText` →
   `splice`, `setAt` → `assign`, `move` → `move`, `mark`/`unmark`/`unmarkById`
   → `mark`, `treeMove`/`treeRemove` → `tree`, `delete` → tombstone. Registers
-  are last-writer-wins by `(ts, origin)`; counters are per-origin sums; a set
+  are last-writer-wins by `(ts, origin)`; counters are per-origin sums, each
+  within ±`MAX_COUNT` and added up in origin order; a set
   is `meta.sets[field][elementKey][origin] = [added, removed]`, live while
   `added > removed`, read sorted by element text; a list or a text is
   `meta.seqs[field]`, a block of `src/sequence.js`; a tree is
@@ -229,13 +235,15 @@ docs/                     VitePress site
   `src/commit.js`: `OUT_OF_RANGE`, `CYCLE`, `NOT_FOUND`; `resolveTree` folds
   the tree ONCE and hands back `null` for a move to where the node is, and
   `commitLocal` returns before `applyOp` on it). `sync.pendingMax`
-  (`PENDING_MAX`), `MAX_RUN` (`src/rle.js`), `MAX_FIELD`, `MAX_FI` and
-  `MAX_DEPTH` bound what a peer can make a node hold or read, on the op path
+  (`PENDING_MAX`), `MAX_RUN` (`src/rle.js`), `MAX_FIELD`, `MAX_FI`, `MAX_DEPTH`
+  and `MAX_COUNT` bound what a peer can make a node hold or read, on the op path
   and in `normalizeMeta` alike — a snapshot buys nothing an op could not. The
   fuzz in `tests/suites/sync-engine.js` compares the blocks and the move logs
   across nodes, not only what they read as. `compact(id)` (`src/versions.js`)
-  = `applyPatches(id, diffViews(null, {}, reading, kinds))`: a reset plus one
-  op per field, one move per node — convergent through the reset rule.
+  = `applyPatches(id, diffViews(null, {}, reading, kinds))` laid in runs of
+  `MAX_RUN`, then a text's marks as `mark` patches (`marksIn` in
+  src/sequence.js): a reset plus one op per field, one move per node —
+  convergent through the reset rule.
 - **A payload the engine does not admit is never silent.** `applyOp` reports
   `reason: 'malformed'` in `rejected` (`malformed()` in `src/ops.js`): on the
   local path `refuse()` in `src/commit.js` throws a `TypeError` — the

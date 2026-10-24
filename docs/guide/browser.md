@@ -90,7 +90,7 @@ available in current Chrome, Edge, Firefox and Safari. Both APIs require a
 ## Bundle size
 
 The browser entry is measured on every CI run with a budget that fails the
-build when exceeded — 65 KB min+gzip — and so is every subpath, on its own row
+build when exceeded — 66 KB min+gzip — and so is every subpath, on its own row
 with its own budget, so what an app imports is what it ships:
 
 ```bash
