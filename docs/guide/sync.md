@@ -431,9 +431,8 @@ dialer keeps sealed ([encrypted](./storage#encryption-at-rest)) is left as it
 is, and a record stamped beyond `sync.maxSkew` or under an id that is no
 record id is left out; the rest of the page lands. The metadata is rebuilt
 into the shape the engine trusts before it is joined, and a list or text
-block past a [bound](#guarantees-and-limits) is not taken as state — for
-pending work that bound is the default 4096, whatever `sync.pendingMax`
-says.
+block past a [bound](#guarantees-and-limits) — `sync.pendingMax` for its
+pending work, as on the op path — is not taken as state.
 
 The joined state enters the dialer's own log as `merge` and `advance` ops, so
 a third node resuming from the dialer gets it too — bootstrap is transitive.
@@ -579,7 +578,7 @@ once `close()` was called is refused at once.
 | `retention.ops` | `10000` | Ops kept in the log before the oldest segment is dropped |
 | `retention.days` | — | Age after which a segment is dropped |
 | `maxSkew` | `86400000` | How far ahead of this node's clock a peer's stamp may be, in ms; beyond it the op is `malformed`, and a snapshot record is left out of the join. `Infinity` disables |
-| `pendingMax` | `4096` | How much pending work a list or text field takes from a peer's ops that ran ahead of what they depend on — runs waiting for their anchor, cuts and extensions for their run, registers and switched-off marks for elements not here — before an op is refused (`OP_REFUSED`, reason `bound`, with `detail`, `count` and `max`). A refusal is final on this node, so a mesh with several hosts raises it rather than lowers it. `Infinity` disables. A snapshot block is held to the default whatever this says |
+| `pendingMax` | `4096` | How much pending work a list or text field takes from a peer's ops that ran ahead of what they depend on — runs waiting for their anchor, cuts and extensions for their run, registers and switched-off marks for elements not here — before an op is refused (`OP_REFUSED`, reason `bound`, with `detail`, `count` and `max`). A refusal is final on this node, so a mesh with several hosts raises it rather than lowers it. `Infinity` disables. A snapshot block past it is not taken as state |
 | `signatures` | `'verify'` | `'verify'`, `'require'` or `false` — see [Signatures](#signatures) |
 | `maxOutbox` | `10000` | Ops queued for one peer beyond this are dropped and the peer is `behind`; the recovery pushes what it lacks from the vector |
 | `log.rollAfter` | `64` | Appended batches per sealed segment |

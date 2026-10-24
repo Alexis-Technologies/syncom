@@ -609,6 +609,11 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **A snapshot block is held to the node's `sync.pendingMax`.** The op
+  path took a node's bound, the snapshot path the default 4 096 whatever
+  the option said: a node that raised it still dropped blocks a peer's ops
+  could have built there. `normalizeMeta` and `normalizeSeq` take the bound
+  a `merge` op is applied under.
 - **Small edges.** A listener the `maxListeners` cap refuses is no longer
   left registered behind the throw. `diff()` of the CRDT deltas takes a
   `null` side and a non-collection under an array instead of throwing, and

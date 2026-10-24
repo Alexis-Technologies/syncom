@@ -187,10 +187,11 @@ const isJson = (value) => value === null || ['string', 'number', 'boolean', 'obj
 // A peer's block, rebuilt into the trusted shape: every key of a known
 // form, every run a canonical RLE of the block's kind anchored at an element
 // older than itself, every anchor and register well-formed, the whole within
-// MAX_FIELD slots and PENDING_MAX pending items under `base` (the entry's
-// reset watermark, which decides what an orphan run is). Anything else is
-// dropped; a block with nothing left, or past a bound, is null.
-const normalizeSeq = (raw, base = null) => {
+// MAX_FIELD slots and `pendingMax` pending items (the node's
+// `sync.pendingMax`, PENDING_MAX by default) under `base` (the entry's reset
+// watermark, which decides what an orphan run is). Anything else is dropped;
+// a block with nothing left, or past a bound, is null.
+const normalizeSeq = (raw, base = null, pendingMax = PENDING_MAX) => {
   if (!raw || typeof raw !== 'object') return null;
   const kind = raw.k === 't' || raw.k === 'l' ? raw.k : null;
   if (kind === null) return null;
@@ -265,7 +266,7 @@ const normalizeSeq = (raw, base = null) => {
   seq.ts = stampsMax(seq);
   // The same bound the op path keeps: a block a peer could not have built
   // through ops is not taken as state either.
-  if (pendingCount(seq, buildIndex(seq, base)) > PENDING_MAX) return null;
+  if (pendingCount(seq, buildIndex(seq, base)) > pendingMax) return null;
   return seq;
 };
 

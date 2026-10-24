@@ -1102,6 +1102,16 @@ test('ops: a counter stays a number every node reads alike', async (t) => {
 });
 
 test('ops: the bound on pending work is the node’s', async (t) => {
+  await t.test('a merge takes a block by the node’s bound, as an op would be', () => {
+    // A block holding three pending cuts of runs not here.
+    const cuts = { '1:X': [[0, 1]], '1:Y': [[0, 1]], '1:Z': [[0, 1]] };
+    const meta = { clock: {}, counters: {}, seqs: { body: { k: 't', ts: 2, runs: { '2:A': ['^', ['ab']] }, cuts } } };
+    const merge = (limits) => applyOp(null, op('merge', 10, 'H', { seq: 1, data: { body: 'ab' }, meta }), limits).entry;
+    assert.strictEqual(merge({ pendingMax: 2 }).data.body, undefined, 'past a lowered bound: not taken');
+    assert.strictEqual(merge({ pendingMax: 3 }).data.body, 'ab', 'within it: taken');
+    assert.strictEqual(merge(null).data.body, 'ab', 'the default bound');
+  });
+
   await t.test('applyOp takes { pendingMax }; a refusal names the bound, the count and the limit', () => {
     const splice = (ts, origin, seq, value) => op('splice', ts, origin, { seq, key: 'body', value });
     const first = applyOp(null, splice(1, 'A', 1, { at: '^', content: 'ab' }));

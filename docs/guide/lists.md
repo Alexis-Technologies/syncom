@@ -353,8 +353,7 @@ caller's to avoid.
   `detail`, `count` and `max`), so a mesh with several hosts, where a peer's
   ops can run far ahead of the runs they cut, raises the bound rather than
   lowers it. A block that arrives as state — a snapshot page, a `merge` op —
-  is held to 4 096 pending items whatever `sync.pendingMax` says: one past
-  that is not taken as state, even on a node that raised the bound.
+  is held to the same bound: one past it is not taken as state.
 - Queries see a list as the array it reads as: an index on the field posts
   every element (`select({ tags: 'bug' })` finds a list holding `'bug'`), an
   equality against a whole array compares it in order, and a unique key over

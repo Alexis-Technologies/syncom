@@ -729,6 +729,8 @@ test('sequence engine', async (t) => {
       for (let i = 1; i <= S.PENDING_MAX + 1; i++) cuts[`${i}:Z`] = [[0, 1]];
       const flood = { k: 't', ts: 1, runs: { '1:A': ['^', ['a']] }, cuts };
       assert.strictEqual(S.normalizeSeq(flood), null);
+      assert.ok(S.normalizeSeq(flood, null, S.PENDING_MAX + 1) !== null, 'a node that raised the bound takes it');
+      assert.strictEqual(S.normalizeSeq(flood, null, 10), null, 'one that lowered it does not');
       delete cuts[`${S.PENDING_MAX + 1}:Z`];
       assert.ok(S.normalizeSeq(flood) !== null, 'at the bound it is taken');
       // A run anchored at an element as new as itself or newer is nobody's; a mark spanning one, the same.

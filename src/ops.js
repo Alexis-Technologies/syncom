@@ -242,7 +242,7 @@ const isSlot = (value) =>
 // under a canonical JSON key, anything else dropped. A copy, so nothing of
 // the peer's object is kept by reference and a `__proto__` key in it reaches
 // nothing.
-const normalizeMeta = (meta) => {
+const normalizeMeta = (meta, pendingMax = S.PENDING_MAX) => {
   const clock = {};
   if (isPlainObject(meta.clock)) {
     for (const field of Object.keys(meta.clock)) {
@@ -289,7 +289,7 @@ const normalizeMeta = (meta) => {
   if (isPlainObject(meta.seqs)) {
     for (const field of Object.keys(meta.seqs)) {
       if (!isKey(field)) continue;
-      const seq = S.normalizeSeq(meta.seqs[field], base);
+      const seq = S.normalizeSeq(meta.seqs[field], base, pendingMax);
       if (seq !== null) seqs[field] = seq;
     }
   }
@@ -744,7 +744,7 @@ const applyOp = (previous, op, limits = null) => {
     // downstream peer can receive. Idempotent and commutative by
     // construction (see mergeEntry).
     if (isPlainObject(op.data) && isPlainObject(op.meta)) {
-      const joined = mergeEntry(previous, { data: op.data, meta: normalizeMeta(op.meta) });
+      const joined = mergeEntry(previous, { data: op.data, meta: normalizeMeta(op.meta, pendingMax) });
       // Only the replicated halves count: a cached entry also carries its
       // block hash and the encrypted flag.
       const same = previous && deepEqual(joined.data, previous.data) && deepEqual(joined.meta, previous.meta);
