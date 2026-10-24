@@ -369,6 +369,86 @@ test('OpLog', async (t) => {
   });
 });
 
+test('droppedTs is the newest stamp compaction dropped; a pin holds a segment past retention', async () => {
+  const dir = await createTemp();
+  try {
+    const log = await new OpLog(dir, { rollAfter: 1, retention: { ops: 2 } });
+    assert.strictEqual(log.droppedTs, 0, 'nothing dropped yet');
+    // Stamps out of seq order: the newest DROPPED stamp is kept, not the last.
+    await log.append([op('A', 1, { ts: 5 })]);
+    await log.append([op('A', 2, { ts: 1 })]);
+    await log.append([op('A', 3, { ts: 2 })]);
+    await log.append([op('A', 4, { ts: 3 })]);
+    assert.strictEqual(log.floor, 3, 'compacted to the last two');
+    const dropped = log.droppedTs;
+    assert.strictEqual(dropped, 5);
+    assert.strictEqual(log.latestTs, 5);
+    const index = JSON.parse(await fs.readFile(path.join(dir, 'log', 'index.json'), 'utf8'));
+    assert.strictEqual(index.droppedTs, 5, 'persisted with the index');
+    // A pin keeps the segment that holds a kept entry, and everything after
+    // it; the floor still moves up to it.
+    const unpin = log.pin((entry) => entry.seq === 4);
+    for (let seq = 5; seq <= 9; seq++) await log.append([op('A', seq, { ts: seq })]);
+    assert.strictEqual(log.floor, 4, 'the pinned segment stays');
+    assert.strictEqual(log.entriesOf('r4').length, 1);
+    assert.strictEqual(log.droppedTs, dropped, 'seq 3 (ts 2) went, below the newest dropped');
+    assert.ok(log.length >= 6);
+    // Two pins and a retain add up: the lowest kept entry wins.
+    const unpinLater = log.pin((entry) => entry.seq === 8);
+    log.retain((entry) => entry.seq === 6);
+    unpin();
+    await log.append([op('A', 10, { ts: 10 })]);
+    assert.ok(log.floor <= 6, `retain still holds 6 (floor ${log.floor})`);
+    log.retain(null);
+    await log.append([op('A', 11, { ts: 11 })]);
+    assert.ok(log.floor <= 8 && log.floor > 6, `the pin on 8 holds (floor ${log.floor})`);
+    unpinLater();
+    await log.append([op('A', 12, { ts: 12 })]);
+    assert.ok(log.floor > 8, `released (floor ${log.floor})`);
+    assert.strictEqual(log.droppedTs, 10, 'the newest stamp among what went');
+    assert.throws(() => log.pin(null), TypeError);
+    assert.throws(() => log.pin('x'), TypeError);
+    await log.close();
+    // Reopen: droppedTs rides in the index.
+    const reopened = await new OpLog(dir, { rollAfter: 1, retention: { ops: 2 } });
+    assert.strictEqual(reopened.droppedTs, 10);
+    await reopened.close();
+    // An index from before droppedTs existed, with something compacted:
+    // what went is unknown, so everything retained is vouched for by nothing.
+    const stale = JSON.parse(await fs.readFile(path.join(dir, 'log', 'index.json'), 'utf8'));
+    delete stale.droppedTs;
+    await fs.writeFile(path.join(dir, 'log', 'index.json'), JSON.stringify(stale));
+    const old = await new OpLog(dir, { rollAfter: 1, retention: { ops: 2 } });
+    assert.strictEqual(old.droppedTs, old.latestTs);
+    await old.close();
+    // A segment that cannot be read is as good as dropped.
+    const fresh = await createTemp();
+    try {
+      const whole = await new OpLog(fresh, { rollAfter: 1 });
+      await whole.append([op('A', 1, { ts: 100 })]);
+      await whole.append([op('A', 2, { ts: 200 })]);
+      await whole.close();
+      assert.strictEqual(whole.droppedTs, 0);
+      const names = (await fs.readdir(path.join(fresh, 'log'))).filter((name) => name.startsWith('seg-')).sort();
+      await fs.writeFile(path.join(fresh, 'log', names[0]), '{ torn');
+      const torn = await new OpLog(fresh, { rollAfter: 1, logger: false });
+      assert.strictEqual(torn.droppedTs, 200, 'up to the newest stamp known');
+      await torn.close();
+      // No index at all with retained entries that start above 1: the same.
+      await fs.rm(path.join(fresh, 'log', 'index.json'));
+      await fs.rm(path.join(fresh, 'log', names[0]));
+      const orphan = await new OpLog(fresh, { rollAfter: 1, logger: false });
+      assert.ok(orphan.floor > 1);
+      assert.strictEqual(orphan.droppedTs, orphan.latestTs);
+      await orphan.close();
+    } finally {
+      await cleanupTemp(fresh);
+    }
+  } finally {
+    await cleanupTemp(dir);
+  }
+});
+
 test('a new epoch is said out loud when a log was there', async () => {
   const dir = await createTemp();
   try {

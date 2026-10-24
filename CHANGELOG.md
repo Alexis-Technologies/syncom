@@ -61,6 +61,13 @@ There is no released version section until then; everything below lands in it.
   a schema version and counts `trees`. Browser budget 52 → 55 KB — the move
   log and the fold, and `@alexify/syncom/order` now in the core for the
   places.
+- **The log knows what it dropped.** `storage.log.droppedTs` is the newest
+  stamp among the ops compaction dropped, or an open could not read — `0`
+  while nothing ever was — persisted in `index.json`; a record's retained
+  entries are its whole past only from a reset stamped above it.
+  `storage.log.pin(keep)` holds the segments a reader of the past needs,
+  like `retain` does for the sync manager, until the returned function is
+  called; `stats().log.droppedTs` reports it.
 - **Full-text search.** An entity names its `search: ['title', 'body']`
   fields and `open({ search: createSearch() })` gives the index —
   `@alexify/syncom/search`, a subpath under 1 KB, so a node that never

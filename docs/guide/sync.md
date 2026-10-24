@@ -179,8 +179,16 @@ recovered by replaying the log on the next open:
 log/
 ├── open/<seq>.json     one file per appended batch, rewritten only by a scrub
 ├── seg-<from>.json     sealed segments, rolled from open/ every `rollAfter` batches
-└── index.json          { epoch, floor, next, vector, segments, droppedHeld, latestTs }
+└── index.json          { epoch, floor, next, vector, segments, droppedHeld, latestTs, droppedTs }
 ```
+
+`droppedTs` is the newest stamp among the ops the log no longer holds —
+compacted away, or in a segment an open could not read — and `0` while nothing
+was ever dropped. It is what a reader of the past checks: the retained entries
+of a record are its whole history only from a reset (`write`, `delete`,
+`purge`) stamped above `droppedTs`. `storage.log.pin(keep)` holds the
+segments such a reader needs, like `retain` does for the sync manager, until
+the function it returns is called.
 
 The log has two cursors, for two different questions.
 

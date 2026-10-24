@@ -218,7 +218,7 @@ there for a check on demand.
 the storage is closed, how many writes wait on the mutation queue, the cache
 (`size`, `max`, `pinned` by live Records), the catalog (`entries`, tombstones
 included, and `dirty` puts since the last save), the log (`length`, `floor`,
-`next`, `epoch`, `segments`, `latestTs`), the chain's `tail` (or `null` under
+`next`, `epoch`, `segments`, `latestTs`, `droppedTs`), the chain's `tail` (or `null` under
 `chain: false`) and the lock `mode` (or `null` under `lock: false`). The
 [sync manager](./sync#lifecycle-and-events) adds `peers()`, `hosted()` and the
 `log` event; [telemetry](./telemetry) adds the gauges.

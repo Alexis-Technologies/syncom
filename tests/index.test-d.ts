@@ -635,6 +635,10 @@ expectType<Promise<syncom.OpLog>>(new syncom.OpLog('base', { onRoll: (roll) => v
 // E6: what existed at runtime but not in the types
 expectType<syncom.Logger>(storage.logger);
 expectType<number>(log.latestTs);
+expectType<number>(log.droppedTs);
+expectType<() => void>(log.pin((entry) => entry.seq > 1));
+expectError(log.pin(null));
+expectType<number>(storage.stats().log.droppedTs);
 expectType<typeof syncom.SyncomCollection>(syncom.Storage.Collection);
 expectType<number>(storage.listenerCount('change'));
 expectType<(keyof syncom.StorageEvents)[]>(storage.eventNames());

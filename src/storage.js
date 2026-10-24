@@ -809,6 +809,7 @@ class Storage extends Emitter {
         epoch: log.epoch,
         segments: log.segments,
         latestTs: log.latestTs,
+        droppedTs: log.droppedTs,
       },
       chain: this.#chain ? { tail: this.#chain.tailHash } : null,
       lock: this.#lock ? { mode: this.#lockOptions.mode } : null,

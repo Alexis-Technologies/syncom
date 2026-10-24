@@ -430,6 +430,12 @@ export interface OpLog {
    * own ops until every node it syncs with has them. `null` clears it.
    */
   retain(keep: ((entry: LogEntry) => boolean) | null): void;
+  /**
+   * Like `retain`, for a reader of the past: the entries `keep` answers true
+   * for stay, with their segment and everything after it, until the returned
+   * function is called. Pins add up; `retain` stays the sync manager's.
+   */
+  pin(keep: (entry: LogEntry) => boolean): () => void;
   close(): Promise<void>;
   /** The batches within `from..to` are reflected in the records (see `sealApplied`). */
   applied(from: number, to?: number): void;
@@ -441,6 +447,12 @@ export interface OpLog {
   readonly segments: number;
   /** The newest stamp this log has held since it was opened — what the clock is seeded from. */
   readonly latestTs: number;
+  /**
+   * The newest stamp among the ops the log no longer holds (compacted, or
+   * unreadable at open); 0 while nothing was ever dropped. A record's past is
+   * whole from a reset stamped above it.
+   */
+  readonly droppedTs: number;
 }
 
 export interface OpLogConstructor {
@@ -872,7 +884,15 @@ export interface StorageStats {
   cache: { size: number; max: number; pinned: number };
   /** Rows, tombstones included, and the puts since the last save. */
   catalog: { entries: number; dirty: number };
-  log: { length: number; floor: number; next: number; epoch: string; segments: number; latestTs: number };
+  log: {
+    length: number;
+    floor: number;
+    next: number;
+    epoch: string;
+    segments: number;
+    latestTs: number;
+    droppedTs: number;
+  };
   chain: { tail: string } | null;
   lock: { mode: 'fail' | 'wait' } | null;
 }

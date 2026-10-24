@@ -71,7 +71,7 @@ Returns `Promise<Storage>`. Options: `path` (default `'syncom'`), `name`
 | `validate(id, data, blockHash)` | `Promise<boolean>` | One record against its block |
 | `getCachedData(id)` | `unknown \| null` | Synchronous cache peek, raw (no lens) |
 | `hasRecord(id)` | `boolean` | Whether the id is a live record — from the catalog, no I/O |
-| `stats()` | `{ closed, queue, cache: { size, max, pinned }, catalog: { entries, dirty }, log: { length, floor, next, epoch, segments, latestTs }, chain: { tail } \| null, lock: { mode } \| null }` | The node's health, from memory — no I/O |
+| `stats()` | `{ closed, queue, cache: { size, max, pinned }, catalog: { entries, dirty }, log: { length, floor, next, epoch, segments, latestTs, droppedTs }, chain: { tail } \| null, lock: { mode } \| null }` | The node's health, from memory — no I/O |
 | `applyRemote(ops, { via, scopes, peer, adoptFrom, bound }?)` | `Promise<{ applied, skipped, duplicates, gaps, malformed, unsigned, forged, outOfScope }>` | Applies a peer's ops, in order per origin; `peer` is `{ url, node }` for the hooks; `malformed` ops (shape, id, a stamp beyond `sync.maxSkew`) and ops refused for their signature (`forged`; `unsigned` under `sync.signatures: 'require'`) are counted and dropped; an `advance` is adopted only when its origin is `adoptFrom`; under `bound` (a host's push passes the peer's granted scopes) an op whose record is outside them, before or after it, is counted `outOfScope` and dropped |
 | `snapshot({ cursor, limit, scopes }?)` | `Promise<{ records, cursor, eventId, vector }>` | One page of state, tombstones included |
 | `mergeSnapshot(records, { via, from }?)` | `Promise<void>` | Joins a page (as `merge` ops of this node) |
@@ -286,6 +286,8 @@ for) a roll seals only the batches marked `applied`.
 | `append(ops, { skipped, held }?)` | `Promise<LogEntry[]>` — entries with their seqs, once on disk; `skipped` ops are flagged, `held` ones with the version they wait for |
 | `held()` | `LogEntry[]` — the entries held for a newer schema version |
 | `droppedHeld`, `resetDroppedHeld()` | Held entries compaction dropped since the last reset |
+| `droppedTs` | The newest stamp among the ops the log no longer holds — compacted, or unreadable at open; `0` while nothing was ever dropped. A record's past is whole from a reset (`write`, `delete`, `purge`) stamped above it |
+| `pin(keep)` → `unpin()` | Like `retain`, for a reader of the past: the entries `keep(entry)` answers true for stay, with their segment and everything after it, until `unpin()`; pins add up, `retain` stays the sync manager's |
 | `scrub(id)` | `Promise<number>` — strips the payload of every entry of `id` and the nonce that salted its digest (`scrubbed: true`), in memory and on disk; the signature and the digest stay, so the header still verifies |
 | `read(eventId, { scopes, limit }?)` | `{ entries, last }` — the entries in `scopes` after the id, and the seq of the last entry examined (in scope or not; where a feed's cursor may move), or `null` when it cannot be resumed |
 | `since(eventId, { scopes, limit }?)` | `read(...).entries`, or `null` when it cannot be resumed |

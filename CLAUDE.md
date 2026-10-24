@@ -227,7 +227,13 @@ docs/                     VitePress site
   The storage opens its log with `sealApplied: true` and every write path
   calls `log.applied(from, to)` after `EntryStore.write`/`#persistBatch`; a roll then
   seals nothing from the oldest batch not yet applied onwards. A new path
-  that appends must mark what it applied, or the tail grows forever. The
+  that appends must mark what it applied, or the tail grows forever.
+  `droppedTs` is the newest stamp among what `#compact` dropped or an open
+  could not read (an unreadable segment, an index without the field and a
+  floor above 1, no index and a floor above 1 — all `latestTs`): a reader of
+  the past is exact only from a reset stamped above it. `pin(keep)` holds
+  segments for such a reader and adds up; `retain` is one slot and the
+  SyncManager's. The
   append is the commit point: a chain block or record file that fails after
   it is never thrown through — `core.persist` (`Storage#land`) and
   `persistLocal` hold the entries in memory (`EntryStore.hold`, never
