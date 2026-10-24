@@ -134,7 +134,10 @@ There is no released version section until then; everything below lands in it.
   through the same parse; a local write observes the record's clock
   without rebuilding its metadata. Typing into a two-thousand-character
   text: at the start 174 → 1,100 ops/s, anywhere 320 → 2,000, at the end
-  6,400 → 9,500 (in memory, on one machine).
+  6,400 → 9,500 (in memory, on one machine); in the cross-library scenarios,
+  whose text grows past ten thousand characters, 155 → 399, 224 → 541 and
+  1,260 → 1,780 — every op still works over every run of the field, and the
+  record file is written whole.
 - **The log knows what it dropped.** `storage.log.droppedTs` is the newest
   stamp among the ops compaction dropped, or an open could not read — `0`
   while nothing ever was — persisted in `index.json`; a record's retained
