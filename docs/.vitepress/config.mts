@@ -153,6 +153,7 @@ export default withMermaid({
               { text: 'Why syncom?', link: '/guide/why' },
               { text: 'Compared with alternatives', link: '/guide/comparison' },
               { text: 'Compared with RxDB', link: '/guide/vs-rxdb' },
+              { text: 'Compared with CRDT libraries', link: '/guide/vs-crdt' },
               { text: 'Benchmarks', link: '/guide/benchmarks' },
               { text: 'Getting Started', link: '/guide/getting-started' },
               { text: 'Architecture', link: '/guide/architecture' },

@@ -84,7 +84,8 @@ bench/compare/            the cross-library comparison: its OWN package.json (th
                           devDependencies), adapters/ (one per library), worker.js, size.js
 bench/report/             model.mjs (what every chart shows) + svg.mjs (README images); bench/report.js writes both
 bench/results/            compare.json, size.json, engine.json — the inputs of the charts, committed
-docs/comparison.json      the feature matrix; scripts/comparison.js renders it into docs/guide/comparison.md
+docs/comparison*.json     the feature matrices; scripts/comparison.js renders comparison.json into docs/guide/comparison.md,
+                          comparison-rxdb.json into vs-rxdb.md, comparison-crdt.json into vs-crdt.md
 scripts/size.js           bundle-size report with browser budgets
 docs/                     VitePress site
 ```
@@ -604,10 +605,12 @@ green whatever else moves.
   `<!-- bench:<name>:start -->` / `:end -->` in README.md and docs/guide/benchmarks.md and the SVGs in
   docs/public/benchmarks/; edit `bench/results/*.json` or the model, never the regions. The docs components
   (`docs/.vitepress/theme/components/Bench*.vue`) import the same `bench/report/model.mjs`.
-- **The matrix is data.** Every cell of `docs/comparison.json` keeps the `source` it was decided from (and a
-  `detail` for a footnote left out of the table); `pnpm docs:comparison` renders it. A cell about another
-  project is decided from its published source and official docs, not its README; the syncom column from
-  this repository. Keep the prose of docs/guide/comparison.md and why.md in step with the counts.
+- **The matrix is data.** Every cell of `docs/comparison.json`, `docs/comparison-rxdb.json` and
+  `docs/comparison-crdt.json` keeps the `source` it was decided from (and a `detail` for a footnote left out of
+  the table); `pnpm docs:comparison` renders them. A cell about another project is decided from its source and
+  official docs, not its README — the CRDT page from the clones in `../../open-source/local-first-alternatives/`
+  at the commits it names; the syncom column from this repository. Keep the prose of docs/guide/comparison.md,
+  vs-rxdb.md, vs-crdt.md and why.md in step with the counts.
 
 ## Documentation
 

@@ -13,7 +13,8 @@ pinned next to the features while the table scrolls, so every row can be read ag
 
 How fast each one is, measured on the same scenarios, is on the [Benchmarks](/guide/benchmarks)
 page. RxDB, the closest of them, is compared with syncom feature by feature, in 300 rows, on
-[Compared with RxDB](/guide/vs-rxdb).
+[Compared with RxDB](/guide/vs-rxdb), and the three CRDT libraries, as CRDT libraries only, in 141
+rows on [Compared with CRDT libraries](/guide/vs-crdt).
 
 ## What the table shows
 

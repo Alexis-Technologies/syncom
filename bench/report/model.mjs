@@ -230,6 +230,38 @@ export const sizeModel = (size, only = null) => {
   };
 };
 
+/**
+ * The CRDT libraries' whole packages next to syncom's whole entry, nothing
+ * around them (bench/compare/size.js `CORES`): what /guide/vs-crdt shows.
+ */
+export const coreSizeModel = (size, only = null) => {
+  const kb = (bytes) => `${(bytes / 1024).toFixed(1)} KB`;
+  const rows = pick(size.cores ?? [], only)
+    .map((library) => ({
+      id: library.id,
+      label: library.name,
+      sublabel: library.entry,
+      value: library.gzip / 1024,
+      tone: TONES[library.id],
+      details: [
+        `${kb(library.gzip)} min+gzip`,
+        `${kb(library.min)} minified${library.wasm ? `, ${kb(library.wasm)} of it WebAssembly` : ''}`,
+        library.packages.join(', '),
+      ],
+    }))
+    .sort(byValueAsc);
+  return {
+    id: 'cores',
+    title: 'Bundle size of the whole package',
+    subtitle:
+      'Every export of the package (export *), with no persistence or sync around it (esbuild, minified), ' +
+      "min+gzip, WebAssembly included; syncom's entry carries its storage, queries and sync too. Lower is better.",
+    unit: 'KB',
+    scale: 'linear',
+    groups: [{ id: 'all', label: null, rows }],
+  };
+};
+
 // ─── syncom's own hot paths ─────────────────────────────────────────────────
 
 /** The scripts of `pnpm bench`, in the order the toggle lists them. */

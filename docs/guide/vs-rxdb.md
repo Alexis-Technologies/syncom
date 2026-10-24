@@ -759,4 +759,5 @@ Dexie, min+gzip.
   a note, a comment or one block of a document: a record is read and written whole on every op,
   so typing runs at hundreds to a couple of thousand keystrokes a second, where Automerge runs at
   tens of thousands and Yjs and Loro at hundreds of thousands. They are built for that, and can
-  hold the documents beside either one, which keeps the records around them.
+  hold the documents beside either one, which keeps the records around them;
+  [Compared with CRDT libraries](/guide/vs-crdt) sets syncom against them.

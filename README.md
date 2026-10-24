@@ -179,7 +179,8 @@ branches on top. It syncs with no service to run, its hosts
 validate and scope what peers send, and its log is verifiable and purgeable. It has no editor
 bindings and no UI bindings yet, and it is a pre-release, not on npm yet.
 RxDB, the closest of them, is compared [feature by feature](https://syncomjs.vercel.app/guide/vs-rxdb)
-in 300 rows, from its code and every page of its docs.
+in 300 rows, from its code and every page of its docs, and Yjs, Automerge and Loro
+[as CRDT libraries](https://syncomjs.vercel.app/guide/vs-crdt) in 141 rows, from their code.
 
 ## Benchmarks
 
@@ -331,6 +332,7 @@ staying local, no proof of key possession at `hello` — are on the
 - [Why syncom?](https://syncomjs.vercel.app/guide/why) ·
   [Compared with alternatives](https://syncomjs.vercel.app/guide/comparison) ·
   [Compared with RxDB](https://syncomjs.vercel.app/guide/vs-rxdb) ·
+  [Compared with CRDT libraries](https://syncomjs.vercel.app/guide/vs-crdt) ·
   [Benchmarks](https://syncomjs.vercel.app/guide/benchmarks) ·
   [Architecture](https://syncomjs.vercel.app/guide/architecture)
 - [Getting started](https://syncomjs.vercel.app/guide/getting-started)

@@ -11,6 +11,10 @@
  * package instead would charge a modular library for what an app never
  * imports. Writes bench/results/size.json.
  *
+ * `cores` measures the CRDT libraries a second way, for /guide/vs-crdt: the
+ * whole package entry of each (`export *`), with no persistence or sync
+ * around it — what a page that only merges documents ships.
+ *
  * Run: pnpm bench:size (after pnpm bench:compare:install)
  */
 
@@ -134,6 +138,26 @@ const ENTRIES = [
   },
 ];
 
+// The whole package of each CRDT library and syncom's whole entry, nothing around them.
+const CORES = [
+  { id: 'syncom', name: 'syncom', entry: "export * from '@alexify/syncom'", packages: ['@alexify/syncom'] },
+  { id: 'yjs', name: 'Yjs', entry: "export * from 'yjs'", packages: ['yjs'] },
+  {
+    id: 'automerge',
+    name: 'Automerge',
+    entry: "export * from '@automerge/automerge'",
+    packages: ['@automerge/automerge'],
+    wasm: ['@automerge/automerge/dist/automerge.wasm'],
+  },
+  {
+    id: 'loro',
+    name: 'Loro',
+    entry: "export * from 'loro-crdt'",
+    packages: ['loro-crdt'],
+    wasm: ['loro-crdt/browser/loro_wasm_bg.wasm'],
+  },
+].map((spec) => ({ ...spec, source: `${spec.entry};` }));
+
 const versionOf = (name) => {
   if (name === '@alexify/syncom') return require(path.join(ROOT, 'package.json')).version;
   return JSON.parse(fs.readFileSync(path.join(MODULES, name, 'package.json'), 'utf8')).version;
@@ -214,7 +238,13 @@ const main = async () => {
     libraries.push(row);
     console.log(`${spec.name.padEnd(12)} ${kb(row.gzip).padStart(10)} min+gzip  ${kb(row.min).padStart(10)} min`);
   }
-  const report = { generatedAt: new Date().toISOString(), esbuild: esbuild.version, libraries };
+  const cores = [];
+  for (const spec of CORES) {
+    const row = await measure(spec);
+    cores.push(row);
+    console.log(`core ${spec.name.padEnd(7)} ${kb(row.gzip).padStart(10)} min+gzip  ${kb(row.min).padStart(10)} min`);
+  }
+  const report = { generatedAt: new Date().toISOString(), esbuild: esbuild.version, libraries, cores };
   fs.mkdirSync(path.dirname(OUT), { recursive: true });
   fs.writeFileSync(OUT, `${JSON.stringify(report, null, 2)}\n`);
   console.log(`\nWrote ${path.relative(ROOT, OUT)}`);

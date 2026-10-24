@@ -262,7 +262,10 @@ There is no released version section until then; everything below lands in it.
   by `pnpm docs:comparison`) compares forty-eight features, each cell decided
   from the published source. New pages: Why syncom?, Compared with
   alternatives, Compared with RxDB (300 rows from its code and docs),
-  Benchmarks, Architecture.
+  Compared with CRDT libraries (Yjs, Automerge and Loro as CRDT libraries
+  only: 141 rows from their repositories, `docs/comparison-crdt.json`, with
+  the size of each whole package from `pnpm bench:size`), Benchmarks,
+  Architecture.
 
 - **`storage.repair(id)`.** A record whose file fails its integrity check
   (`INTEGRITY`) or is torn is rebuilt from this node's log: the retained
