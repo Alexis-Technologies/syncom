@@ -153,6 +153,7 @@
     "search.d.ts",
     "src/",
     "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
     "README.md",
     "CHANGELOG.md",
     "SECURITY.md",

@@ -23,6 +23,7 @@ idb.js / idb.d.ts         the @alexify/syncom/idb subpath (src/idb.js) — the I
 search.js / search.d.ts   the @alexify/syncom/search subpath (src/search.js) — the trigram text index behind `$text`; the core knows only the TextIndex contract
 index.d.ts                the Node type surface (hand-written)
 browser.d.ts              re-exports index.d.ts, overrides the 3 async crypto fns
+THIRD_PARTY_NOTICES.md    the MIT notices of the algorithms adapted (Fugue, Yjs, list-positions…) and the files that carry them
 src/backend.js            the fsi contract (isFsi/checkFsi), createMemoryFsi, withSync — no requires
 src/emitter.js            the Emitter both halves extend — no requires
 src/logger.js             createLogger, the duck-typed logger writer — no requires
@@ -30,6 +31,8 @@ src/keys.js               loadKeyPair — the on-disk key pairs (RSA for sealing
 src/scope.js              GLOBAL_SCOPE, inScope, opInScope — the one definition of "in scope" — no requires
 src/signing.js            canonical form, signOp, verifyOp — what a signature covers (the header + a salted payload digest) and the verdict on a peer's op
 src/shape.js              isPlainObject, asJson, isRecordId, isStreamName, wellFormed — what enters is checked here
+src/sequence.js           the sequence engine behind the list and text kinds: Fugue runs, run-length content, the walk,
+                          local placement, pending ops, prune and join — requires vector.js only
 src/errors.js             SyncomError (an operational failure, with a code) and typed() — no requires
 src/symbols.js            COMMIT / REFRESH / SOURCE — the module-private seams between Storage and what it hands out — no requires
 src/options.js            normalizeStorageOptions — open()'s plain options checked and defaulted (lock, cache, chain, skew…)
@@ -67,6 +70,10 @@ docs/                     VitePress site
 
 ## Rules that bite
 
+- **An adapted algorithm brings its notice.** Code or a rule taken from an MIT project is named in
+  `THIRD_PARTY_NOTICES.md` (project, commit, the syncom files that carry it) with the upstream notice.
+  Nothing is copied from json-joy (AGPL-3.0), Collabs or `fugue/fugue` (Apache-2.0) — those are read
+  as specifications only; the clones live in `../open-source/local-first-alternatives/`.
 - **CommonJS everywhere in `src/`.** No `import`, no `type: module`, no build.
 - **No runtime dependencies.** Helpers go in `src/utils.js`. `scripts/size.js`
   fails at resolve time on any bare import reaching a browser bundle, so a
