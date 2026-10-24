@@ -31,7 +31,10 @@ There is no released version section until then; everything below lands in it.
   A list is movable: `setAt(id, key, index, value)` and `move(id, key,
   from, to)` are a value and a position register per element, so two nodes
   moving one element concurrently leave it once, at the newer move's place,
-  and a move concurrent with a removal brings the element back. Browser
+  and a move concurrent with a removal brings the element back.
+  `updateText(id, key, text)` diffs a text field against a whole new string
+  inside the mutation queue (Myers, UTF-16 units) and sends one splice per
+  hunk — what an editor hands over becomes the edits that merge. Browser
   budget 42 → 49 KB.
 - **Full-text search.** An entity names its `search: ['title', 'body']`
   fields and `open({ search: createSearch() })` gives the index —

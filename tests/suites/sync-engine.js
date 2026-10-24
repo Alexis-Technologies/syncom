@@ -225,6 +225,17 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     assert.strictEqual(after[id].items.length, before.length);
     assert.strictEqual(after[id].items.filter((v) => v === 'X' || v === 'x').length, 1, 'the element shows once');
     assert.strictEqual(after[id].items[0], 'X', 'at the newer move’s place, with the assigned value');
+    // Two editors hand over whole new texts apart: each one's change lands.
+    await a.updateText(id, 'body', 'one two three');
+    await settle([a, b]);
+    link.disconnect();
+    await a.updateText(id, 'body', 'ONE two three');
+    await tick();
+    await b.updateText(id, 'body', 'one two THREE');
+    await link.reconnect();
+    await settle([a, b]);
+    const texts = await assertConverged([a, b]);
+    assert.strictEqual(texts[id].body, 'ONE two THREE');
     // A reset by one side frees the field everywhere; typing after it starts over.
     await a.set(id, { title: 'reset' });
     await settle([a, b]);

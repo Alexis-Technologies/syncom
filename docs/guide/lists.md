@@ -131,30 +131,24 @@ storage.on('change', (op) => {
 
 ## Binding an editor
 
-An editor holds its own string; syncom holds the record's. Send what changed
-as one splice — the common prefix and suffix of the old and new text give the
-index, the count and the inserted text — and re-read the record on every
+An editor holds its own string; syncom holds the record's. Hand the whole
+new string over with `updateText()` and re-read the record on every
 `change` of it:
 
 ```js
-const diffSplice = (before, after) => {
-  let start = 0;
-  while (start < before.length && start < after.length && before[start] === after[start]) start++;
-  let endB = before.length;
-  let endA = after.length;
-  while (endB > start && endA > start && before[endB - 1] === after[endA - 1]) {
-    endB--;
-    endA--;
-  }
-  return [start, endB - start, after.slice(start, endA)];
-};
-
-const [index, count, text] = diffSplice('hello', 'hallo'); // [1, 1, 'a']
-await storage.splice(id, 'body', index, count, text);
+await storage.updateText(id, 'body', 'the quick brown fox'); // 1 — one op created the field
+await storage.updateText(id, 'body', 'the slow brown dog');  // 3 — one op per hunk
+await storage.updateText(id, 'body', 'the slow brown dog');  // 0 — nothing to do
 ```
 
-Batch keystrokes into one call where you can — a word, or a pause — so a
-burst of typing is one op rather than ten. Indices are UTF-16 code units, as
+`updateText` diffs the field against the new string *inside the mutation
+queue* — Myers' algorithm over UTF-16 units, after the common prefix and
+suffix are set aside — and sends one `splice` per hunk, last first, in one
+turn of the queue, so a peer's op cannot land between the diff and the
+splices. It resolves to how many ops it took; a difference deeper than a
+thousand edit steps (a paste that replaces most of the text) is one op that
+replaces the middle. Batch keystrokes into one call where you can — a word,
+or a pause — so a burst of typing is one op rather than ten. Indices are UTF-16 code units, as
 `String#slice` counts them; a splice that splits a surrogate pair is the
 caller's to avoid.
 

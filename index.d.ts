@@ -1317,6 +1317,12 @@ export interface Storage {
   /** Appends `content` to list or text field `key` — a splice at the end. */
   push(id: string, key: string, content: string | readonly unknown[], options?: WriteOptions): Promise<void>;
   /**
+   * Makes text field `key` read as `text`: diffed inside the mutation queue
+   * (Myers), one `splice` per hunk, last first, in one turn of the queue.
+   * Resolves to how many ops it took.
+   */
+  updateText(id: string, key: string, text: string, options?: WriteOptions): Promise<number>;
+  /**
    * Replaces the element at `index` of list field `key`: a register per
    * element, last writer wins, following the element through a concurrent move.
    */
@@ -1470,6 +1476,8 @@ export interface SyncomRecord {
   splice(key: string, index: number, count?: number, content?: string | readonly unknown[], options?: WriteOptions): Promise<void>;
   /** Appends to a list or text field — `storage.push` with this record's id. */
   push(key: string, content: string | readonly unknown[], options?: WriteOptions): Promise<void>;
+  /** Makes a text field read as `text` — `storage.updateText` with this record's id. */
+  updateText(key: string, text: string, options?: WriteOptions): Promise<number>;
   /** Replaces an element of a list field — `storage.setAt` with this record's id. */
   setAt(key: string, index: number, value: unknown, options?: WriteOptions): Promise<void>;
   /** Moves an element of a list field — `storage.move` with this record's id. */

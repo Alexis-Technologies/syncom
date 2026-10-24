@@ -161,6 +161,11 @@ class Record extends Emitter {
     await this.#storage.push(this.#id, key, content, options);
   }
 
+  /** Makes a text field read as `text`; the storage-level `updateText` with this record's id. */
+  async updateText(key, text, options = {}) {
+    return this.#storage.updateText(this.#id, key, text, options);
+  }
+
   /** Replaces an element of a list field; the storage-level `setAt` with this record's id. */
   async setAt(key, index, value, options = {}) {
     await this.#storage.setAt(this.#id, key, index, value, options);

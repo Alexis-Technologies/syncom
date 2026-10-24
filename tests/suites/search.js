@@ -82,6 +82,20 @@ const runSearchTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(await find('peer'), ['From a peer']);
   });
 
+  await t.test('a text field is searched as it reads: updateText moves a word in and out of the index', async (t2) => {
+    const storage = await createStorage(t2, 'T', { schema, search });
+    const find = async (text) => titles(await storage.Post.select({ $text: text }).fetch());
+    const post = await storage.Post.insert({ orgId: 'o1', title: 'Typed' });
+    await storage.updateText(post.id, 'body', 'jumps over the lazy dog');
+    assert.deepStrictEqual(await find('lazy'), ['Typed']);
+    await storage.updateText(post.id, 'body', 'jumps over the sleepy dog');
+    assert.deepStrictEqual(await find('lazy'), []);
+    assert.deepStrictEqual(await find('sleepy'), ['Typed']);
+    await storage.splice(post.id, 'body', 0, 5, 'leaps');
+    assert.deepStrictEqual(await find('leaps'), ['Typed']);
+    assert.deepStrictEqual(await find('jumps'), []);
+  });
+
   await t.test('$text ranks, an equality narrows, limit and one() read little, order re-sorts', async (t2) => {
     const fsi = counting(createMemoryFsi());
     const storage = await createStorage(t2, 'A', { fsi, schema, search, cache: { max: 5 } });

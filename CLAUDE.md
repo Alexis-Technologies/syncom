@@ -31,8 +31,8 @@ src/keys.js               loadKeyPair — the on-disk key pairs (RSA for sealing
 src/scope.js              GLOBAL_SCOPE, inScope, opInScope — the one definition of "in scope" — no requires
 src/signing.js            canonical form, signOp, verifyOp — what a signature covers (the header + a salted payload digest) and the verdict on a peer's op
 src/shape.js              isPlainObject, asJson, isRecordId, isStreamName, wellFormed — what enters is checked here
-src/sequence.js           the sequence engine behind the list and text kinds: Fugue runs, run-length content, the walk,
-                          local placement, pending ops, prune and join — requires vector.js only
+$1
+src/myers.js              the diff behind updateText: Myers O(ND) over UTF-16 units into splices, last first — no requires
 src/errors.js             SyncomError (an operational failure, with a code) and typed() — no requires
 src/symbols.js            COMMIT / REFRESH / SOURCE — the module-private seams between Storage and what it hands out — no requires
 src/options.js            normalizeStorageOptions — open()'s plain options checked and defaulted (lock, cache, chain, skew…)

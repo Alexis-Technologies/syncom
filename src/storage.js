@@ -19,6 +19,7 @@ const { commit, MISMATCH } = require('./commit.js');
 const { applyBatch } = require('./apply.js');
 const { snapshotPage, mergeBatch, adopt } = require('./bootstrap.js');
 const { applyOp, isAlive, isCounter, isSet, isSeq } = require('./ops.js');
+const { diff } = require('./myers.js');
 const { Clock } = require('./vector.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
 const { normalizeSchema, createLens, project } = require('./schema.js');
@@ -1038,6 +1039,33 @@ class Storage extends Emitter {
   /** Appends `content` to list or text field `key` — a `splice` at the end. */
   async push(id, key, content, { actor } = {}) {
     await this[COMMIT]('splice', id, spliceArgs('push', key, null, 0, content), { actor });
+  }
+
+  /**
+   * Makes text field `key` read as `text`: the field is diffed against it
+   * inside the mutation queue (Myers, over UTF-16 units) and each hunk is a
+   * `splice`, last first, in one turn of the queue — what an editor hands
+   * over as a whole string becomes the edits that merge. Returns how many
+   * ops it took; a difference deeper than a thousand edit steps is one op
+   * replacing the middle.
+   */
+  async updateText(id, key, text, { actor } = {}) {
+    if (typeof key !== 'string') throw new TypeError('updateText() takes a field name');
+    if (typeof text !== 'string') throw new TypeError('updateText() takes a string');
+    if (!isRecordId(id)) throw invalidId(id);
+    return this.#run(async () => {
+      const current = await this.#core.entries.load(id);
+      const before = current && !current.encrypted && isAlive(current) ? current.data[key] : undefined;
+      // Another kind under the field: the first splice is refused for it.
+      const hunks = diff(typeof before === 'string' ? before : '', text);
+      let ops = 0;
+      for (const [index, count, content] of hunks) {
+        const payload = { key, index, count };
+        if (content.length > 0) payload.content = content;
+        if ((await commit(this.#core, 'splice', id, payload, { actor })) !== null) ops++;
+      }
+      return ops;
+    });
   }
 
   /**

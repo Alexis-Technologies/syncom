@@ -259,6 +259,39 @@ test('Storage replication model', async (t) => {
     assert.strictEqual(await storage.validate(), true);
   });
 
+  await t.test('updateText diffs the field inside the queue and sends one splice per hunk', async (t2) => {
+    const { storage } = await openTemp(t2);
+    const ops = [];
+    storage.on('change', (op) => ops.push(op));
+    const id = await storage.insert({ title: 'note' });
+    assert.strictEqual(await storage.updateText(id, 'body', 'the quick brown fox'), 1, 'one op creates the field');
+    assert.strictEqual(await storage.updateText(id, 'body', 'the slow brown dog'), 3, 'one op per hunk');
+    assert.strictEqual((await storage.get(id)).body, 'the slow brown dog');
+    assert.deepStrictEqual(
+      ops.slice(1).map((op) => [op.type, op.key]),
+      Array(4).fill(['splice', 'body']),
+    );
+    assert.strictEqual(await storage.updateText(id, 'body', 'the slow brown dog'), 0, 'nothing to do, no op');
+    assert.strictEqual(ops.length, 5);
+    assert.strictEqual(await storage.updateText(id, 'body', ''), 1, 'emptied, the field stays a text');
+    assert.strictEqual((await storage.get(id)).body, '');
+    // Another kind under the field is refused for it; arguments.
+    await assert.rejects(() => storage.updateText(id, 'title', 'x'), /register; use update\(\)/);
+    await storage.push(id, 'items', [1]);
+    await assert.rejects(() => storage.updateText(id, 'items', 'x'), /list; use splice\(\), push/);
+    await assert.rejects(() => storage.updateText(id, 7, 'x'), TypeError);
+    await assert.rejects(() => storage.updateText(id, 'body', 5), TypeError);
+    await assert.rejects(() => storage.updateText('bad id!', 'body', 'x'), { code: 'INVALID_ID' });
+    // Through a live Record; a reset frees the field as for any kind.
+    const record = await storage.record(id);
+    assert.strictEqual(await record.updateText('body', 'hello'), 1);
+    assert.strictEqual(record.body, 'hello');
+    await storage.set(id, { title: 'note' });
+    assert.strictEqual(await storage.updateText(id, 'body', 'again'), 1);
+    assert.deepStrictEqual(await storage.get(id), { title: 'note', body: 'again' });
+    assert.strictEqual(await storage.validate(), true);
+  });
+
   await t.test('setAt and move keep an element’s name; a move names where it shows', async (t2) => {
     const { storage } = await openTemp(t2);
     const ops = [];

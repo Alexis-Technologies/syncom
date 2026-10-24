@@ -188,6 +188,9 @@ expectAssignable<syncom.SyncOp>({
 });
 expectAssignable<syncom.SplicePayload>({ cut: [['1:a', 0, 2]], content: '' });
 expectType<Promise<void>>(storage.setAt('id', 'items', 0, { done: true }));
+expectType<Promise<number>>(storage.updateText('id', 'body', 'hello', { actor: 'u2' }));
+expectError(storage.updateText('id', 'body', 5));
+expectType<Promise<number>>(record.updateText('body', 'x'));
 expectType<Promise<void>>(storage.move('id', 'items', 0, 2, { actor: 'u2' }));
 expectError(storage.setAt('id', 'items', 'x', 1));
 expectError(storage.move('id', 'items', 0));
