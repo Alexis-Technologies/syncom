@@ -609,6 +609,14 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **`spans()` reads a name that has both plain and stacking marks.** A
+  stacking (`many`) mark newer than a plain mark of its name over the same
+  characters threw `marks[key].push is not a function` from `spans()` — a
+  read any peer could break with two marks — and a plain mark whose value
+  was an array took the stack's entries into the block's own value. On one
+  name the two now mix in stamp order: a plain mark takes the place of what
+  is there, a stack included, and a newer stacking mark starts a stack over
+  it.
 - **An array spliced into a text, or a string into a list, is refused.**
   `push(id, 'body', [1])` on a text field was let through the local kind
   check; the list it made outranks a text, so the text was dropped — on

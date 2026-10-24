@@ -161,10 +161,10 @@ await storage.unmark(id, 'body', 0, 7, 'bold');
   instead of replacing it — comments, suggestions — and `spans` lists them
   as `[{ id, value }]`, oldest first. Such a mark is switched off by its id:
   `unmarkById(id, key, markId)` with what `mark()` resolved to (a `mark` op
-  that carries the id alone). An `unmark()` of the name is a null mark like
-  any other: it reads as none over its range, the stacked marks under it
-  included. Keep a name either stacking or not; the two are not meant to
-  mix.
+  that carries the id alone). On one name the two mix in stamp order: a
+  plain mark — an `unmark()` too, a null mark like any other — takes the
+  place of what is there, the stacked marks under it included, and a
+  stacking mark newer than it starts a stack over it.
 - The field still reads as the plain string; `spans` is raw — no lens, no
   read hooks. Blocks (paragraphs, headings) are records: a document is a
   list of block ids, each block a record with a text field.

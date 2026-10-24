@@ -369,6 +369,30 @@ test('Storage replication model', async (t) => {
     assert.strictEqual(await storage.validate(), true);
   });
 
+  await t.test('a plain mark and a stacking mark of one name mix in stamp order, never throwing', async (t2) => {
+    const { storage } = await openTemp(t2);
+    const id = await storage.insert({ title: 'doc' });
+    await storage.updateText(id, 'body', 'hello world');
+    await storage.mark(id, 'body', 0, 5, 'note', ['plain']);
+    const c1 = await storage.mark(id, 'body', 0, 5, 'note', 'first', { many: true });
+    const c2 = await storage.mark(id, 'body', 3, 8, 'note', 'second', { many: true });
+    const stack = (...ids) => ids.map(([mid, value]) => ({ id: mid, value }));
+    assert.deepStrictEqual(await storage.spans(id, 'body'), [
+      { text: 'hel', marks: { note: stack([c1, 'first']) } },
+      { text: 'lo', marks: { note: stack([c1, 'first'], [c2, 'second']) } },
+      { text: ' wo', marks: { note: stack([c2, 'second']) } },
+      { text: 'rld', marks: {} },
+    ]);
+    // A plain mark newer than the stack takes its place; the plain value is never pushed into.
+    await storage.mark(id, 'body', 0, 3, 'note', ['again']);
+    assert.deepStrictEqual((await storage.spans(id, 'body'))[0], { text: 'hel', marks: { note: ['again'] } });
+    await storage.unmarkById(id, 'body', c1);
+    assert.deepStrictEqual((await storage.spans(id, 'body')).slice(0, 2), [
+      { text: 'hel', marks: { note: ['again'] } },
+      { text: 'lo wo', marks: { note: stack([c2, 'second']) } },
+    ]);
+  });
+
   await t.test('a cursor names a place that survives the edits around it', async (t2) => {
     const { storage } = await openTemp(t2);
     const id = await storage.insert({});

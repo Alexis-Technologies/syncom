@@ -59,7 +59,10 @@
 // before `e` is a left child, inside `>prev` and outside `<e` — the same
 // tree rule that places the text. Per key, the newest mark covering a
 // character wins and a null value is none; a mark flagged MANY stacks with
-// every other of its key (comments) and goes only by its own id (OFF).
+// every other of its key (comments) and goes only by its own id (OFF). On
+// one key the two mix in stamp order: a plain mark (a null one too) takes
+// the place of what is there, a stack included, and a MANY mark newer than
+// it starts a stack over it.
 //
 // A reset (`write`, `delete`) drops every run stamped below `base` — a run
 // is as old as its first element — and a surviving run whose anchor fell
@@ -982,13 +985,24 @@ const byKeyThenStamp = (x, y) =>
   x.key < y.key ? -1 : x.key > y.key ? 1 : compareClock([x.ts, x.origin], [y.ts, y.origin]);
 
 // The style of the marks in force at one point: per key the newest value,
-// none when null; a MANY key lists every mark as `{ id, value }`.
+// none when null; MANY marks list as `{ id, value }`, the ones newer than
+// the key's newest plain mark. `stacked` tells a stack from a plain value
+// that is an array — never pushed into, it is the block's own.
 const styleOf = (active) => {
   let marks = null;
+  const stacked = new Set();
   for (const m of [...active].sort(byKeyThenStamp)) {
     marks ??= {};
-    if (m.many) (marks[m.key] ??= []).push({ id: m.id, value: m.value });
-    else if (m.value === null) delete marks[m.key];
+    if (m.many) {
+      if (!stacked.has(m.key)) {
+        stacked.add(m.key);
+        marks[m.key] = [];
+      }
+      marks[m.key].push({ id: m.id, value: m.value });
+      continue;
+    }
+    stacked.delete(m.key);
+    if (m.value === null) delete marks[m.key];
     else marks[m.key] = m.value;
   }
   return marks && Object.keys(marks).length > 0 ? marks : null;

@@ -917,7 +917,8 @@ test('sequence engine', async (t) => {
       const s = Math.floor(next() * 100);
       const e = s + 1 + Math.floor(next() * (104 - s - 1));
       const key = ['bold', 'em', 'note'][i % 3];
-      const many = key === 'note';
+      // A note is a comment, stacked — but every seventh is a plain mark of the name, mixed in.
+      const many = key === 'note' && i % 7 !== 0;
       const value = !many && i % 5 === 0 ? null : i;
       const payload = { start: `<${S.elemKey(run, s)}`, end: `<${S.elemKey(run, e)}`, key, value };
       if (many) payload.many = true;
@@ -943,12 +944,19 @@ test('sequence engine', async (t) => {
     for (let i = 0; i < idx.length; i++) {
       const ord = idx.ordAt[idx.runs[idx.visRun[i]].start + idx.visOff[i]];
       let style = null;
+      const stacks = {};
       for (const m of marks) {
         if (ord < m.lo || ord >= m.hi) continue;
         style ??= {};
-        if (m.many) (style[m.key] ??= []).push({ id: m.id, value: m.value });
-        else if (m.value === null) delete style[m.key];
-        else style[m.key] = m.value;
+        if (m.many) {
+          stacks[m.key] ??= [];
+          stacks[m.key].push({ id: m.id, value: m.value });
+          style[m.key] = stacks[m.key];
+        } else {
+          delete stacks[m.key];
+          if (m.value === null) delete style[m.key];
+          else style[m.key] = m.value;
+        }
       }
       styles.push(style && Object.keys(style).length > 0 ? style : null);
     }
