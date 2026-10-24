@@ -29,7 +29,7 @@ engine also covers what an application keeps next to replication:
   nodes, sets keep every concurrent add, and tombstones revive. Two replicas that edit different
   fields of one record both keep their change, two that increment one counter both count, and
   two that tag one record keep both tags. Of the eighteen
-  alternatives in the [comparison](/guide/comparison), three others have counters that
+  alternatives in the [comparison](/guide/comparison), four others have counters that
   converge.
 - **The host decides what it accepts.** A hub checks a peer's op before applying it: the op's
   shape and clock skew, the peer's scopes, the entity's validator and `beforeApply`. A failing op
@@ -72,7 +72,8 @@ in memory, where Yjs and Loro pull 100,000 — `sync.signatures: false` trades t
 - **End-to-end encryption.** Ops are signed, but an encrypted record stays on the node that
   wrote it. End-to-end encryption is a [recipe](/guide/scaling#end-to-end-encryption)
   (wrpc's sealer in the hooks, field by field, with no counter, index or query over a sealed
-  field). Jazz signs and encrypts every change, and Evolu encrypts everything it syncs.
+  field). Evolu encrypts everything it syncs; Jazz 2.0 ships encryption as adapters, not yet
+  wired into its tables.
 - **Ready-made UI bindings, React Native, a managed cloud.** syncom ships none of them. RxDB,
   TinyBase, Dexie Cloud, InstantDB and others do.
 - **A package with a track record.** syncom is a pre-release (0.0.1), not on npm yet, and its

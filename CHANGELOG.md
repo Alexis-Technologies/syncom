@@ -627,6 +627,13 @@ There is no released version section until then; everything below lands in it.
 
 ### Changed
 
+- **Comparison: Jazz at 2.0.** The Jazz column described 0.20 (Jazz Classic);
+  it now describes 2.0.0-alpha.59, the version jazz.tools documents — a
+  server-merged relational database with queries, lenses, row policies and
+  queryable history, and without CoValues, per-change signatures, list or
+  text CRDTs or a purge. The method gains the rule for a project whose npm
+  `latest` is legacy, and the prose counts follow.
+
 - **Browser budget 41 → 42 KB.** The fixes above — scopes checked on the
   record, own ops kept until delivered, `REWOUND`/`UNDELIVERABLE`,
   `UNPERSISTED`, scoped collections, canonical index keys — add about 1.2 KB

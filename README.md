@@ -161,8 +161,8 @@ nodes converges.
 
 ## Compared with alternatives
 
-syncom sits where the CRDT libraries (Yjs, Automerge, Loro, Jazz), the local-first databases
-(RxDB, PouchDB, TinyBase, Dexie Cloud, Fireproof), the peer-to-peer and event-sourced stores
+syncom sits where the CRDT libraries (Yjs, Automerge, Loro), the local-first databases
+(Jazz, RxDB, PouchDB, TinyBase, Dexie Cloud, Fireproof), the peer-to-peer and event-sourced stores
 (GUN, OrbitDB, Evolu, LiveStore) and the sync services (ElectricSQL, PowerSync, Zero, Triplit,
 InstantDB) meet. The [comparison](https://syncomjs.vercel.app/guide/comparison) puts all
 nineteen in one table of forty features, each cell decided from the published source. In short:

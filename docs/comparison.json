@@ -1065,217 +1065,212 @@
       "id": "jazz",
       "name": "Jazz",
       "url": "https://github.com/garden-co/jazz",
-      "direction": "local-first framework",
+      "direction": "local-first relational database",
       "package": "jazz-tools",
-      "version": "0.20.19",
+      "version": "2.0.0-alpha.59",
       "cells": {
         "version": {
           "mark": "",
-          "text": "0.20.19 (`jazz-tools`)",
-          "note": "Jazz 2.0 is a rewrite in alpha (2.0.0-alpha.59: tables, SQL-like queries) and jazz.tools/docs already documents it; the 0.20 docs ship in the package (`bin/docs-index.txt`) and at classic.jazz.tools.",
-          "source": "pnpm view jazz-tools dist-tags (latest 0.20.19, alpha 2.0.0-alpha.59); https://jazz.tools/llms.txt; jazz-tools@0.20.19 bin/docs-index.txt"
+          "text": "2.0.0-alpha.59 (`jazz-tools@alpha`); npm `latest` 0.20.19 is Jazz Classic",
+          "note": "The table compares 2.0: jazz.tools/docs documents only it, and 2.0 throws `JAZZ_CLASSIC_API_REMOVED` on every 0.x API; `latest` has not moved since 2026-07.",
+          "detail": "Cells cite the repository at commit 16cadcf (2026-10-23), which carries the architecture specs (crates/jazz/SPEC) the tarball does not ship.",
+          "source": "pnpm view jazz-tools dist-tags (latest 0.20.19, alpha 2.0.0-alpha.59); jazz@16cadcf packages/jazz-tools/src/classic-api.ts:9-17; https://jazz.tools/llms.txt"
         },
         "released": {
           "mark": "",
-          "text": "2026-07",
-          "source": "pnpm view jazz-tools time — 0.20.19 published 2026-07-03 (2.0.0-alpha.59: 2026-10-04)"
+          "text": "2026-10 (alpha); `latest` 2026-07",
+          "source": "pnpm view jazz-tools time — 2.0.0-alpha.59 published 2026-10-04, 0.20.19 2026-07-03"
         },
         "license": {
           "mark": "",
-          "text": "MIT (`jazz-run` server MIT); Jazz Cloud managed",
-          "source": "jazz-tools@0.20.19, cojson@0.20.19, jazz-run@0.20.19 package.json license; docs-index.txt:2670-2745"
+          "text": "MIT; Jazz Cloud managed",
+          "source": "jazz@16cadcf LICENSE; jazz@16cadcf packages/jazz-tools/package.json license; jazz@16cadcf docs/content/docs/install/client.mdx:116"
         },
         "deps": {
           "mark": "",
-          "text": "18 — `zod`, `cojson`, ProseMirror…",
-          "source": "jazz-tools@0.20.19 package.json dependencies (18 entries)"
+          "text": "17 — OpenTelemetry SDK + OTLP exporters, `jazz-wasm`, `jose`, `esbuild`…",
+          "source": "jazz@16cadcf packages/jazz-tools/package.json dependencies (17 entries)"
         },
         "impl": {
           "mark": "",
-          "text": "TS + Rust crypto core (WASM/N-API/RN)",
-          "source": "cojson@0.20.19 package.json deps cojson-core-wasm/-napi/-rn; jazz-tools@0.20.19 bin/docs-index.txt:9685-9710 ('Full native crypto')"
+          "text": "TS client + Rust core (`groove` query engine): WASM in the browser, N-API on Node, native on RN",
+          "source": "jazz@16cadcf crates/jazz/SPEC/1_intro.md:5-12; jazz@16cadcf docs/content/docs/install/typescript-server.mdx:22; jazz@16cadcf docs/content/docs/install/client.mdx:104-105"
         },
         "node": {
           "mark": "✅",
-          "text": "workers, `jazz-run sync` (SQLite); Node ≥20",
-          "source": "jazz-tools@0.20.19 src/worker/index.ts:49,62; jazz-run@0.20.19 dist/startSyncServer.js (getBetterSqliteStorage); bin/docs-index.txt:7450-7453",
-          "detail": "`startWorker` defaults `syncServer` to `wss://cloud.jazz.tools` when none is given."
+          "text": "`jazz-napi` runtime (SQLite storage), `jazz-tools/backend`; Node ≥22.12",
+          "source": "jazz@16cadcf docs/content/docs/install/typescript-server.mdx:22-25; jazz@16cadcf packages/jazz-tools/package.json exports ./backend, engines"
         },
         "browser": {
           "mark": "✅",
-          "text": "IndexedDB (`cojson-storage-indexeddb`)",
-          "source": "jazz-tools@0.20.19 src/browser/createBrowserContext.ts:2,55"
+          "text": "IndexedDB page store behind a `SharedWorker`",
+          "source": "jazz@16cadcf docs/content/docs/concepts/how-sync-works.mdx:49-51; jazz@16cadcf crates/jazz/SPEC/9_topology.md:79-86"
         },
         "mobile": {
-          "mark": "✅",
-          "text": "React Native and Expo (SQLite)",
-          "source": "jazz-tools@0.20.19 package.json exports ./react-native, ./expo; peerDependencies op-sqlite, expo-sqlite; bin/docs-index.txt:5013-5240"
+          "mark": "⚠️",
+          "text": "React Native/Expo in alpha (`jazz-tools/react-native`, `jazz-rn`); Expo Go unsupported",
+          "source": "jazz@16cadcf docs/content/docs/install/client.mdx:104-111; jazz@16cadcf packages/jazz-tools/package.json exports ./react-native, ./expo"
         },
         "server": {
           "mark": "⚠️",
-          "text": "a sync server: Jazz Cloud or `jazz-run sync`",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:2670-2745 ('Sync and storage: Jazz Cloud or self-hosted')"
+          "text": "a Core server: Jazz Cloud v2 or self-hosted `jazz-napi`",
+          "source": "jazz@16cadcf crates/jazz/SPEC/9_topology.md:5-13; jazz@16cadcf docs/content/docs/install/client.mdx:116; jazz@16cadcf docs/content/docs/install/typescript-server.mdx:22-25"
         },
         "model": {
           "mark": "",
-          "text": "CoValues (maps, lists, feeds, text) in a graph",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:1685-1765, 5448"
+          "text": "relational tables (UUID rows) with row history; mergeable or serializable transactions",
+          "source": "jazz@16cadcf crates/jazz/SPEC/1_intro.md:5-8; jazz@16cadcf crates/jazz/SPEC/2_data_model_identity.md:140-144; jazz@16cadcf crates/jazz/SPEC/3_transactions.md:5-9"
         },
         "schema": {
           "mark": "⚠️",
-          "text": "Zod-based `co.*` schemas; runtime check defaults to `warn`",
-          "note": "Runtime validation (0.20.10+) defaults to `warn`: invalid local writes go through with a console warning, although the source comment says `strict`.",
-          "source": "jazz-tools@0.20.19 src/tools/implementation/zodSchema/validationSettings.ts:17-21; bin/docs-index.txt:1680"
+          "text": "typed `s.table()` columns; no runtime check at write — a commit is never rejected for its schema",
+          "source": "jazz@16cadcf packages/jazz-tools/src/dsl.ts; jazz@16cadcf crates/jazz/SPEC/10_lenses_migrations.md:29 (INV-LENS-16)"
         },
         "migrations": {
-          "mark": "⚠️",
-          "text": "`withMigration()` on every load; no versions",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:937-968, 5590-5602"
+          "mark": "✅",
+          "text": "published schema versions + bidirectional lenses; any version reads any other",
+          "source": "jazz@16cadcf crates/jazz/SPEC/10_lenses_migrations.md:5-10; jazz@16cadcf docs/content/docs/schemas/migrations.mdx:19"
         },
         "queries": {
-          "mark": "❌",
-          "text": "none — traverse references from known ids",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:5542 ('Discovering CoValues without knowing their ID is only possible by traversing references')"
+          "mark": "✅",
+          "text": "typed builder: where/orderBy/limit/offset, includes, joins, aggregates; `db.all`/`db.subscribe`",
+          "source": "jazz@16cadcf crates/jazz/SPEC/6_queries.md:117-142; jazz@16cadcf docs/content/docs/reading/queries.mdx; jazz@16cadcf docs/content/docs/reading/history.mdx:13-20"
         },
         "indexes": {
-          "mark": "❌",
-          "text": "none",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt (no index API)"
+          "mark": "⚠️",
+          "text": "declared as hints (`indexOnly`, `compositeIndex`), maintained by the engine; no index API",
+          "source": "jazz@16cadcf packages/jazz-tools/src/typed-app.ts:48-106; jazz@16cadcf crates/jazz/SPEC/11_branch_views_time_travel.md:43,219; jazz@16cadcf crates/jazz/SPEC/14_lowering_to_groove.md:493-505"
         },
         "unique": {
           "mark": "⚠️",
-          "text": "`getOrCreateUnique`: deterministic id per group",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:985-1011, 5581-5582 (no built-in uniqueness of items)"
+          "text": "no constraint; a `serializable` transaction checks its read set at commit",
+          "source": "jazz@16cadcf crates/jazz/SPEC/3_transactions.md:5-9, 299-383; jazz@16cadcf crates/jazz/SPEC/11_branch_views_time_travel.md:533-540"
         },
         "live": {
           "mark": "✅",
-          "text": "`subscribe`, `useCoState` hooks",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:2143-2230"
+          "text": "`db.subscribe` on any query, maintained incrementally",
+          "source": "jazz@16cadcf docs/content/docs/concepts/branches.mdx:58-60; jazz@16cadcf crates/jazz/SPEC/16_maintained_subscription_views.md:3-60"
         },
         "text": {
-          "mark": "✅",
-          "text": "`co.plainText()`, `co.richText()`; ProseMirror",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:1034-1165; cojson@0.20.19 src/coValues/coPlainText.ts:48 (extends RawCoList)"
+          "mark": "❌",
+          "text": "strings are LWW; the recipe stores Yjs update bytes in rows",
+          "source": "jazz@16cadcf docs/content/docs/recipes/data-patterns/collaborative-text-editing.mdx:9-30; jazz@16cadcf crates/jazz/SPEC/4_history_merging.md:17"
         },
         "lists": {
-          "mark": "✅",
-          "text": "`co.list()` (ordered CRDT)",
-          "source": "cojson@0.20.19 src/coValues/coList.ts:18-25 (pre/app ops by OpID)"
+          "mark": "❌",
+          "text": "rows are the list, ordered by a column (LWW); `g-set` arrays grow only; no sequence CRDT",
+          "source": "jazz@16cadcf packages/jazz-tools/src/dsl.ts:470-481; jazz@16cadcf crates/jazz/SPEC/4_history_merging.md:676-682"
         },
         "counters": {
-          "mark": "❌",
-          "text": "no counter type",
-          "source": "cojson@0.20.19 src/coValues/ (account, binaryCoStream, coList, coMap, coPlainText, coStream, group)"
+          "mark": "✅",
+          "text": "`counter` columns: deltas summed by Core; non-nullable integers, overflow rejected",
+          "source": "jazz@16cadcf packages/jazz-tools/src/dsl.ts:481,493; jazz@16cadcf crates/jazz/SPEC/4_history_merging.md:110-137; jazz@16cadcf crates/jazz/SPEC/2_data_model_identity.md:146-153"
         },
         "topology": {
           "mark": "",
-          "text": "client–server through sync servers",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:2670-2745, 4864-4870 (sync.peer URL)"
+          "text": "client–server: Core orders and merges every write; relays store and forward",
+          "source": "jazz@16cadcf crates/jazz/SPEC/9_topology.md:5-13, 110-126; jazz@16cadcf crates/jazz/SPEC/4_history_merging.md:91-97"
         },
         "transport": {
           "mark": "⚠️",
-          "text": "WebSocket (`cojson-transport-ws`)",
-          "source": "jazz-tools@0.20.19 package.json dependencies (cojson-transport-ws); bin/docs-index.txt:4864-4870"
+          "text": "WebSocket with ordered channels, credits and streaming compression",
+          "source": "jazz@16cadcf crates/jazz/SPEC/14_ordered_transport_channels.md:5-13, 18-41"
         },
         "webrtc": {
           "mark": "❌",
-          "text": "not built in",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt (no WebRTC mention); package exports"
+          "text": "no peer-to-peer",
+          "source": "jazz@16cadcf crates/jazz/SPEC/4_history_merging.md:658-674"
         },
         "partial": {
           "mark": "✅",
-          "text": "per CoValue, loaded on demand",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:2143-2280 (resolve queries, deep loading)"
+          "text": "per query subscription, narrowed by the row-level read policy",
+          "source": "jazz@16cadcf crates/jazz/SPEC/8_sync_protocol.md:664-700; jazz@16cadcf crates/jazz/SPEC/7_authorization.md:5-9"
         },
         "resume": {
           "mark": "✅",
-          "text": "known-state diff per CoValue",
-          "source": "cojson@0.20.19 src/sync.ts:1234-1280 (knownState per session, new content only)"
+          "text": "reconnect resumes subscriptions from persisted watermarks",
+          "source": "jazz@16cadcf crates/jazz/SPEC/8_sync_protocol.md:914-985"
         },
         "bootstrap": {
-          "mark": "❌",
-          "text": "no snapshots — full history per CoValue",
-          "source": "cojson@0.20.19 src/ (no snapshot/compaction code; GarbageCollector.ts only unloads memory); bin/docs-index.txt:5537 ('CoValues track their full edit history')"
+          "mark": "✅",
+          "text": "a new subscription gets a full snapshot of its authorized set, no history replay",
+          "source": "jazz@16cadcf crates/jazz/SPEC/8_sync_protocol.md:664-700"
         },
         "conflicts": {
           "mark": "",
-          "text": "LWW per key by wall-clock `madeAt`; CoList CRDT",
-          "note": "`compareTransactions` returns 0 for equal `madeAt` from different sessions, so a same-millisecond tie falls to arrival order.",
-          "source": "cojson@0.20.19 src/coValueCore/coValueCore.ts:1842-1855; src/coValues/coMap.ts:153-159"
+          "text": "LWW per cell in Core's acceptance order; counters add; every version kept",
+          "note": "The docs say the edit Core receives first wins; the spec and its invariant tests say the last write Core accepts wins per cell. The spec is followed here.",
+          "source": "jazz@16cadcf crates/jazz/SPEC/4_history_merging.md:17, 246-256; jazz@16cadcf docs/content/docs/concepts/how-sync-works.mdx:113-121; jazz@16cadcf crates/invariant-registry.jsonl"
         },
         "offline": {
           "mark": "✅",
-          "text": "local-first; merges on reconnect",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt (FAQ: 'apps will always work, even offline')"
+          "text": "writes apply locally, queue, and upload on reconnect; `.wait({ tier })`",
+          "source": "jazz@16cadcf docs/content/docs/concepts/how-sync-works.mdx:45-58; jazz@16cadcf docs/content/docs/reference/durability-tiers.mdx:12-19"
         },
         "serverAuth": {
-          "mark": "⚠️",
-          "text": "signature/role checks; content opaque to server",
-          "note": "A write by a non-writer is stored and relayed, then ignored by every reader (`markInvalid`); content checks need a server worker.",
-          "source": "cojson@0.20.19 src/permissions.ts:145 ('Transactor has no write permissions'), src/sync.ts:1274-1300; bin/docs-index.txt:6969-6978"
+          "mark": "✅",
+          "text": "Core applies the write policies before accepting; a rejected write is rolled back locally",
+          "source": "jazz@16cadcf crates/jazz/SPEC/7_authorization.md:223-248; jazz@16cadcf docs/content/docs/reference/durability-tiers.mdx:22-28"
         },
         "tamper": {
-          "mark": "✅",
-          "text": "BLAKE3 hash chain per session",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:5864-5869 ('Integrity protection')"
+          "mark": "❌",
+          "text": "no hash chain; versions keyed by (time, node); nothing signed",
+          "source": "jazz@16cadcf crates/jazz/SPEC/2_data_model_identity.md:59-75; jazz@16cadcf crates/jazz/SPEC/4_history_merging.md:665-666"
         },
         "signing": {
-          "mark": "✅",
-          "text": "Ed25519 per session",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:5833-5842, 5867"
+          "mark": "❌",
+          "text": "no per-change signatures; a write is authorized by the authenticated session",
+          "source": "jazz@16cadcf crates/jazz/SPEC/4_history_merging.md:665-666; jazz@16cadcf crates/jazz/SPEC/7_authorization.md:403-412"
         },
         "atRest": {
-          "mark": "⚠️",
-          "text": "stored encrypted; keys kept locally",
-          "note": "The browser keeps the account secret in `localStorage` by default, so this protects data from the server, not from someone with the device.",
-          "source": "cojson@0.20.19 src/coValueCore/verifiedState.ts:56-59 (encryptedChanges); jazz-tools@0.20.19 src/browser/BrowserContextManager.ts:48 (LocalStorageKVStore)"
+          "mark": "❌",
+          "text": "SQLite / IndexedDB in plaintext; the E2EE adapters cover app-managed values only",
+          "source": "jazz@16cadcf crates/jazz/SPEC/9_topology.md:79-86; jazz@16cadcf crates/jazz/SPEC/E2EE_CRYPTO_FORMAT.md:194-196"
         },
         "e2ee": {
-          "mark": "✅",
-          "text": "XSalsa20 with group read keys",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:5844-5852, 5862-5870",
-          "detail": "Removing a member rotates the key for new data only; they keep what they could already read."
+          "mark": "⚠️",
+          "text": "`jazz-tools/e2ee` envelope adapters (XChaCha20-Poly1305); no key lifecycle or table integration yet",
+          "source": "jazz@16cadcf crates/jazz/SPEC/E2EE_CRYPTO_FORMAT.md:51-65, 194-196; jazz@16cadcf packages/jazz-tools/package.json exports ./e2ee"
         },
         "access": {
           "mark": "✅",
-          "text": "Groups: reader/writer/admin, cryptographically enforced",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:4206-4400; cojson@0.20.19 src/permissions.ts"
+          "text": "row-level read and write policies written as queries, enforced by Core",
+          "source": "jazz@16cadcf crates/jazz/SPEC/7_authorization.md:85-103, 223-248, 439-467"
         },
         "purge": {
-          "mark": "✅",
-          "text": "`deleteCoValues` (admin), erased in background",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:1848-1870; cojson@0.20.19 src/storage/DeletedCoValuesEraserScheduler.ts",
-          "detail": "Physical erasure runs on the sync server's schedule, and Jazz Cloud backups may keep data until overwritten."
+          "mark": "❌",
+          "text": "tombstones; a deletion never erases content history",
+          "source": "jazz@16cadcf crates/jazz/SPEC/2_data_model_identity.md:669-671; jazz@16cadcf docs/content/docs/reading/history.mdx:6-8"
         },
         "history": {
           "mark": "✅",
-          "text": "`$jazz.getEdits()`; branches (unstable)",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:3827-3920"
+          "text": "`$history` tables, queryable and subscribable; branch views over a captured snapshot",
+          "source": "jazz@16cadcf docs/content/docs/reading/history.mdx:6-20; jazz@16cadcf docs/content/docs/concepts/branches.mdx:283-290; jazz@16cadcf crates/jazz/SPEC/11_branch_views_time_travel.md:255-271"
         },
         "hooks": {
           "mark": "❌",
-          "text": "none",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt (no write middleware; server workers act through their own account)"
+          "text": "none before a write; `onMutationError` after a rejection",
+          "source": "jazz@16cadcf docs/content/docs/reference/durability-tiers.mdx:22-28"
         },
         "observability": {
           "mark": "✅",
-          "text": "OpenTelemetry metrics (`jazz.*`); no spans",
-          "source": "cojson@0.20.19 package.json dependency @opentelemetry/api; src/sync.ts:178-194, src/queue/IncomingMessagesQueue.ts:27-48"
+          "text": "OpenTelemetry traces and logs (OTLP); Inspector",
+          "source": "jazz@16cadcf packages/jazz-tools/src/runtime/sync-telemetry.ts:1-6; jazz@16cadcf packages/jazz-tools/package.json dependencies; jazz@16cadcf docs/content/docs/reference/inspector.mdx"
         },
         "errors": {
-          "mark": "⚠️",
-          "text": "load states `unavailable`/`unauthorized`/`deleted`",
-          "source": "jazz-tools@0.20.19 src/tools/subscribe/JazzError.ts:4-11, src/tools/subscribe/types.ts:5-33"
+          "mark": "✅",
+          "text": "coded: `permission_denied`, `transaction_conflict`, `write_rejected`, `not_observed`…",
+          "source": "jazz@16cadcf packages/jazz-tools/src (`code:` literals in client/, runtime/, internal/); jazz@16cadcf docs/content/docs/concepts/branches.mdx:286"
         },
         "types": {
           "mark": "✅",
-          "text": "inferred from `co.*` schemas",
-          "source": "jazz-tools@0.20.19 bin/docs-index.txt:2352 ('Type safety with co.loaded'), 1633-1690"
+          "text": "inferred from `s.table()` schemas",
+          "source": "jazz@16cadcf docs/content/docs/concepts/branches.mdx:29-42"
         },
         "ui": {
           "mark": "✅",
-          "text": "React, RN/Expo, Svelte; Vue (`community-jazz-vue`)",
-          "source": "jazz-tools@0.20.19 package.json exports ./react, ./react-native, ./expo, ./svelte; npm community-jazz-vue@0.20.19"
+          "text": "React, RN/Expo, Solid, Vue, Svelte, Effect",
+          "source": "jazz@16cadcf packages/jazz-tools/package.json exports ./react, ./react-native, ./expo, ./solid, ./vue, ./svelte, ./effect"
         }
       }
     },
