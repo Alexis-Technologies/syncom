@@ -2032,14 +2032,14 @@
           "source": "src/ops.js:21-26,115-140; docs/guide/sync.md#registers-counters-sets-lists-and-text"
         },
         "lists": {
-          "mark": "❌",
-          "text": "no list type; an array is a register or a set",
-          "source": "src/ops.js"
+          "mark": "✅",
+          "text": "list fields: `splice()`, `setAt()`, `move()` (Fugue; a concurrent move lands once)",
+          "source": "src/sequence.js; src/ops.js; docs/guide/lists.md"
         },
         "text": {
-          "mark": "❌",
-          "text": "none",
-          "source": "src/ops.js"
+          "mark": "✅",
+          "text": "text fields: `splice()`/`updateText()` merge by position (Fugue); marks, cursors",
+          "source": "src/sequence.js; src/ops.js; docs/guide/lists.md"
         },
         "crdtModel": {
           "mark": "✅",

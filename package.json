@@ -36,6 +36,10 @@
       "types": "./search.d.ts",
       "default": "./search.js"
     },
+    "./order": {
+      "types": "./order.d.ts",
+      "default": "./order.js"
+    },
     "./package.json": "./package.json"
   },
   "directories": {
@@ -91,6 +95,9 @@
     "database",
     "query",
     "full-text-search",
+    "collaborative-text",
+    "rich-text",
+    "fractional-index",
     "schema",
     "migrations",
     "standard-schema",
@@ -151,6 +158,8 @@
     "idb.d.ts",
     "search.js",
     "search.d.ts",
+    "order.js",
+    "order.d.ts",
     "src/",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",

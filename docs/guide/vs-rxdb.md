@@ -72,7 +72,8 @@ other libraries, and [Benchmarks](/guide/benchmarks) measures them on the same s
   turned up a dozen syncom bugs, among them scopes a peer could write around, offline writes past
   retention that never arrived and a restored directory that forked its node in silence; they are
   fixed, with tests, and the cells describe the code as it is now.
-- **Neither has** collaborative text, multi-record transactions, aggregation or joins.
+- **Neither has** multi-record transactions, aggregation or joins. syncom has list and text
+  fields that merge by position; RxDB's CRDT plugin has neither.
 - **Maturity.** RxDB has been on npm since 2016, ships a minor about every month and a major
   about once a year (four of the last five asked users of some storages to migrate their stored
   data), and offers paid support. syncom is a pre-release with no users yet.
@@ -311,8 +312,8 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr class="sc-matrix-group"><td colspan="3"><strong>Counters, sets and lists</strong></td></tr>
 <tr><td>Counters that converge</td><td>✅ <code>inc()</code>: one running sum per origin<sup>27</sup></td><td>⚠️ <code>$inc</code> is local; it converges only under the <code>crdt</code> plugin</td></tr>
 <tr><td>Sets</td><td>✅ <code>add()</code>/<code>remove()</code>: observed-remove set, read sorted</td><td>⚠️ <code>$addToSet</code>/<code>$pullAll</code>; <code>crdt</code> replays them in creator order, not observed-remove</td></tr>
-<tr><td>Ordered lists that merge</td><td>❌ no list type; an array is a register or a set</td><td>⚠️ <code>crdt</code> plugin replays <code>$push</code>; no positional insert</td></tr>
-<tr><td>Collaborative text</td><td>❌ none</td><td>❌ none</td></tr>
+<tr><td>Ordered lists that merge</td><td>✅ list fields: <code>splice()</code>, <code>setAt()</code>, <code>move()</code> (Fugue; a concurrent move lands once)</td><td>⚠️ <code>crdt</code> plugin replays <code>$push</code>; no positional insert</td></tr>
+<tr><td>Collaborative text</td><td>✅ text fields: <code>splice()</code>/<code>updateText()</code> merge by position (Fugue); marks, cursors</td><td>❌ none</td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Merge model</strong></td></tr>
 <tr><td>Conflict-free model</td><td>✅ built into every write: register, counter or OR-set per field</td><td>⚠️ opt-in <code>crdt</code> plugin per schema; otherwise a conflict handler</td></tr>
 <tr><td>Concurrent edits to different fields</td><td>✅ both kept: last writer wins per top-level field</td><td>⚠️ the default handler keeps the master's whole document; merging needs a handler or <code>crdt</code></td></tr>

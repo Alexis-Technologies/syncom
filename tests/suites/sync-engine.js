@@ -246,6 +246,18 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
       spansA.find((s) => s.marks.em),
       { text: 'world', marks: { em: true } },
     );
+    // A cursor taken here stays right under a peer's concurrent edits.
+    await a.updateText(id, 'body', 'hello world');
+    await settle([a, b]);
+    const caret = await a.cursor(id, 'body', 6);
+    link.disconnect();
+    await b.splice(id, 'body', 6, 0, 'big ');
+    await b.splice(id, 'body', 0, 1);
+    await link.reconnect();
+    await settle([a, b]);
+    assert.strictEqual((await a.get(id)).body, 'ello big world');
+    assert.strictEqual(await a.index(id, 'body', caret), 9);
+    assert.strictEqual(await b.index(id, 'body', caret), 9, 'and means the same on the peer');
     // Two editors hand over whole new texts apart: each one's change lands.
     await a.updateText(id, 'body', 'one two three');
     await settle([a, b]);

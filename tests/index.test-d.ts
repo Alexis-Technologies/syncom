@@ -209,6 +209,11 @@ expectAssignable<syncom.SyncOp>({
   value: { start: '^', end: '$', key: 'bold', value: true },
 });
 expectAssignable<syncom.MarkPayload>({ off: '1:a' });
+expectType<Promise<string | null>>(storage.cursor('id', 'body', 3, { side: 'after' }));
+expectType<Promise<number | null>>(storage.index('id', 'body', '<1:0:a'));
+expectError(storage.cursor('id', 'body', 3, { side: 'left' }));
+expectType<Promise<string | null>>(record.cursor('body', 0));
+expectType<Promise<number | null>>(record.index('body', '^'));
 expectType<Promise<void>>(storage.move('id', 'items', 0, 2, { actor: 'u2' }));
 expectError(storage.setAt('id', 'items', 'x', 1));
 expectError(storage.move('id', 'items', 0));

@@ -96,8 +96,9 @@ const ENTRIES = [
   // — the raise to 49 KB (48.9 measured). updateText() with the Myers diff
   // behind it (src/myers.js) — the raise to 50 KB (49.7 measured). Rich text —
   // marks as anchor pairs with an expand rule, the newest per key, stacking
-  // marks, spans() — the raise to 51.5 KB (51.4 measured).
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 51.5 },
+  // marks, spans() — the raise to 51.5 KB (51.4 measured). Cursors — a place
+  // that survives edits, cursor()/index() — the raise to 52 KB (51.7 measured).
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 52 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -113,6 +114,8 @@ const ENTRIES = [
   // The trigram text index behind `$text`: platform-neutral, off the main
   // entry so a node that never searches pays nothing for it.
   { label: 'search — browser (@alexify/syncom/search)', entry: 'search.js', platform: 'browser', budget: 2 },
+  // Fractional indexes for ordering records: a helper off the main entry.
+  { label: 'order — browser (@alexify/syncom/order)', entry: 'order.js', platform: 'browser', budget: 1.5 },
 ];
 
 // A browser entry has to be self-contained: no node builtins, and no packages

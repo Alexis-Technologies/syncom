@@ -55,7 +55,9 @@ $1
 $1
 | `mark(id, key, start, end, name, value, { expand, many, actor }?)` | `Promise<string \| null>` | Marks visible range `[start, end)` of a text field with `name: value` (a `mark` op); `expand` (`'after'` by default, `'before'`, `'both'`, `'none'`) says whether text typed at the edges takes the style; per name the newest mark wins; `many: true` stacks with every other of its name. Resolves to the mark's id; rejects with `OUT_OF_RANGE`; throws on a list and on the other kinds |
 | `unmark(id, key, start, end, name, { expand, actor }?)` / `unmark(id, key, markId, { actor }?)` | `Promise<void>` | Removes a style over a range (a null mark under the reversed expand rule), or one mark by id — the only way for a `many` mark |
-| `spans(id, key)` | `Promise<TextSpan[] \| null>` | The text field as runs of equal style, `[{ text, marks }]`; raw — no lens, no read hooks; `null` unless the field is a text |
+$1
+| `cursor(id, key, index, { side }?)` | `Promise<string \| null>` | A cursor into a list or text field — a place that survives edits around it, before the element at `index` (`'before'`, the default) or after the one before it; `null` out of range or when the field is not a sequence |
+| `index(id, key, cursor)` | `Promise<number \| null>` | Where a cursor is now; `null` once its place is gone (a reset) |
 | `swap(id, changes, prev, { actor }?)` | `Promise<boolean>` | CAS, compared inside the mutation queue — `false`, and no write, on mismatch; rejects when absent |
 | `repair(id)` | `Promise<{ ops, alive }>` | Rebuilds a record whose file fails its integrity check from the log's entries of it (see [Repair](../guide/storage#repair)); rejects with `code: 'UNRECOVERABLE'` when the log holds no whole-record op for it |
 | `delete(id, { actor }?)` | `Promise<void>` | Leaves a tombstone |
@@ -402,6 +404,24 @@ server, OPFS in the browser — as those five functions, and:
 `@alexify/syncom/idb` is the IndexedDB backend: `createIdbFsi({ name, store,
 indexedDB }?)` returns an fsi over one object store, with a `close()` of its
 own (see [Browser](../guide/browser)).
+
+## Order
+
+```js
+import { between, spread, compare, isKey } from '@alexify/syncom/order';
+```
+
+Fractional indexes: strings that sort with `<`, with room between any two.
+Keep one in a register field (`position`) and `order('position')` the
+records — tasks in a column, blocks of a document. Adapted from Loro's
+fractional index (see THIRD_PARTY_NOTICES.md); off the main entry, under 1 KB.
+
+| Function | Returns | Notes |
+| --- | --- | --- |
+| `between(lower?, upper?, { jitter }?)` | `string` | A key between the two; `null`/`undefined` leaves a side open; `jitter` appends that many random digits so two nodes inserting between the same keys at once rarely mint the same one; `RangeError` for bounds out of order |
+| `spread(lower, upper, n, options?)` | `string[]` | `n` increasing keys between the bounds |
+| `compare(a, b)` | `-1 \| 0 \| 1` | What `a < b` says |
+| `isKey(key)` | `boolean` | A well-formed key |
 
 ## Search (subpath)
 

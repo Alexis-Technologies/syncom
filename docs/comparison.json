@@ -283,14 +283,15 @@
           "source": "src/query.js; docs/guide/hooks.md"
         },
         "text": {
-          "mark": "❌",
-          "text": "none",
-          "source": "src/ops.js"
+          "mark": "✅",
+          "text": "text fields: `splice()`/`updateText()` merge by position (Fugue); marks with expand rules, stacking comments, cursors",
+          "source": "src/sequence.js; src/ops.js; docs/guide/lists.md",
+          "note": "Fields of a record, not whole documents: a record is read and written whole per op, and a long document is a list of block records. No editor bindings yet."
         },
         "lists": {
-          "mark": "❌",
-          "text": "no ordered list; an array field can be an observed-remove set (`add()`/`remove()`)",
-          "source": "src/ops.js"
+          "mark": "✅",
+          "text": "list fields: `splice()`, `setAt()`, `move()` (Fugue; a concurrent move lands once)",
+          "source": "src/sequence.js; src/ops.js; docs/guide/lists.md"
         },
         "counters": {
           "mark": "✅",

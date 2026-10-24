@@ -419,6 +419,7 @@ const buildIndex = (seq, base = null) => {
   for (const r of runs) {
     r.ordAt = new Int32Array(r.len).fill(-1);
     r.visAt = new Int32Array(r.len).fill(-1);
+    r.shown = new Uint8Array(r.len);
   }
   const runIndex = new Map(runs.map((r, i) => [r.key, i]));
   let n = 0;
@@ -446,6 +447,7 @@ const buildIndex = (seq, base = null) => {
     if (shows(r, off)) {
       visRun[v] = i;
       visOff[v] = off;
+      r.shown[off] = 1;
       if (movable) visElem.push(r.elem ?? elemKey(r.key, off));
       v++;
     }
@@ -878,6 +880,32 @@ const spans = (index, seq, base = null) => {
   return out;
 };
 
+// ---- cursors ---------------------------------------------------------
+
+// A place in the field that survives edits around it: the slot visible
+// index `i` shows at, taken on its left (`<e`, the cursor stays before that
+// element) or the one before on its right (`>e`, it stays after that one);
+// the head or the end at the ends. Null out of range.
+const cursorAt = (index, i, side) => {
+  if (!Number.isInteger(i) || i < 0 || i > index.length) return null;
+  const slot = (k) => elemKey(index.runs[index.visRun[k]].key, index.visOff[k]);
+  if (side === 'after') return i === 0 ? HEAD : `>${slot(i - 1)}`;
+  return i === index.length ? END : `<${slot(i)}`;
+};
+
+// Where a cursor is now: the visible elements before its slot, plus one
+// for a slot still shown when the cursor sits after it. Null once the slot
+// is gone — its run not here, or dropped by a reset.
+const indexOfCursor = (index, token) => {
+  if (token === HEAD) return 0;
+  if (token === END) return index.length;
+  const anchor = parseAnchor(token);
+  if (anchor === null) return null;
+  const r = index.byKey.get(anchor.elem.run);
+  if (r === undefined || anchor.elem.offset >= r.len) return null;
+  return r.visAt[anchor.elem.offset] + (anchor.side === 'R' ? r.shown[anchor.elem.offset] : 0);
+};
+
 // A register write, LWW by stamp: null when the held one is as new.
 const newer = (map, key, stamp) => {
   const held = map && own(map, key);
@@ -1046,6 +1074,8 @@ module.exports = {
   anchorOrdinal,
   spans,
   slotAt,
+  cursorAt,
+  indexOfCursor,
   REVERSED,
   MANY,
   OFF,

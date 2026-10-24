@@ -181,6 +181,16 @@ class Record extends Emitter {
     return this.#storage.spans(this.#id, key);
   }
 
+  /** A cursor into a list or text field; the storage-level `cursor` with this record's id. */
+  async cursor(key, index, options = {}) {
+    return this.#storage.cursor(this.#id, key, index, options);
+  }
+
+  /** Where a cursor is now; the storage-level `index` with this record's id. */
+  async index(key, cursor) {
+    return this.#storage.index(this.#id, key, cursor);
+  }
+
   /** Replaces an element of a list field; the storage-level `setAt` with this record's id. */
   async setAt(key, index, value, options = {}) {
     await this.#storage.setAt(this.#id, key, index, value, options);

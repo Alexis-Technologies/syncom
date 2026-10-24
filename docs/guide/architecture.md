@@ -135,6 +135,11 @@ An op is applied by `applyOp` in `src/ops.js`, the same function on every node:
 - a **counter** is a sum per origin, so concurrent increments add up;
 - a **set** keeps, per element and origin, the newest add and the newest add a remove had
   observed, so concurrent adds both keep and an add a remove did not see survives it;
+- a **list** or a **text** is a tree of runs (Fugue): an element's place is the right child of
+  the one before it or the left child of the leftmost descendant of its first right child, so
+  concurrent inserts at one spot both keep and each writer's run stays whole; a deleted element
+  keeps its place, and a list's elements carry a position and a value register, a text's marks
+  two anchors each (see [Lists and text](/guide/lists));
 - a **delete** is a tombstone that a newer write revives; a **purge** wins at any stamp and
   scrubs the id from the log;
 - ops from one origin apply in sequence order; a duplicate or a gap is skipped, and resuming

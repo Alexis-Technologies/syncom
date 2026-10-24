@@ -62,10 +62,11 @@ in memory, where Yjs and Loro pull 100,000 — `sync.signatures: false` trades t
 
 ## When something else fits better
 
-- **Collaborative text, rich text or ordered lists.** syncom merges records field by field. An
-  array is one value, and so is a string. Yjs, Automerge and Loro merge text and lists
-  character by character and have editor bindings. They can live next to syncom, as a field
-  that holds an encoded document.
+- **Document-scale text with editor plugins.** syncom's [list and text fields](/guide/lists)
+  merge by position — Fugue, with marks and cursors — but they are fields of a record, read and
+  written whole per op; a long document is a list of block records, and there are no editor
+  bindings yet. Yjs, Automerge and Loro carry whole documents of any size and ship bindings for
+  ProseMirror, CodeMirror and the rest.
 - **Postgres is your source of truth.** ElectricSQL, PowerSync and Zero replicate a server
   database's tables to clients and send writes through your API. syncom keeps its own records
   and has no Postgres connector.

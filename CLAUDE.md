@@ -20,7 +20,8 @@ index.js / browser.js     two-line shims over src/index.js / src/index.browser.j
 wrpc.js / wrpc.d.ts       the @alexify/syncom/wrpc subpath (src/wrpc.js)
 contracts.js / .d.ts      the @alexify/syncom/contracts subpath (src/contract.js) — never back in the barrel
 idb.js / idb.d.ts         the @alexify/syncom/idb subpath (src/idb.js) — the IndexedDB backend, browser-only
-search.js / search.d.ts   the @alexify/syncom/search subpath (src/search.js) — the trigram text index behind `$text`; the core knows only the TextIndex contract
+$1
+order.js / order.d.ts     the @alexify/syncom/order subpath (src/order.js) — fractional indexes as strings, for ordering records
 index.d.ts                the Node type surface (hand-written)
 browser.d.ts              re-exports index.d.ts, overrides the 3 async crypto fns
 THIRD_PARTY_NOTICES.md    the MIT notices of the algorithms adapted (Fugue, Yjs, list-positions…) and the files that carry them
@@ -32,7 +33,8 @@ src/scope.js              GLOBAL_SCOPE, inScope, opInScope — the one definitio
 src/signing.js            canonical form, signOp, verifyOp — what a signature covers (the header + a salted payload digest) and the verdict on a peer's op
 src/shape.js              isPlainObject, asJson, isRecordId, isStreamName, wellFormed — what enters is checked here
 $1
-src/myers.js              the diff behind updateText: Myers O(ND) over UTF-16 units into splices, last first — no requires
+$1
+src/order.js              fractional indexes over a 62-letter alphabet (Loro's rule, MIT) — no requires; the core does not use it
 src/errors.js             SyncomError (an operational failure, with a code) and typed() — no requires
 src/symbols.js            COMMIT / REFRESH / SOURCE — the module-private seams between Storage and what it hands out — no requires
 src/options.js            normalizeStorageOptions — open()'s plain options checked and defaulted (lock, cache, chain, skew…)

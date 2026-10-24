@@ -20,7 +20,7 @@ const { applyBatch } = require('./apply.js');
 const { snapshotPage, mergeBatch, adopt } = require('./bootstrap.js');
 const { applyOp, isAlive, isCounter, isSet, isSeq } = require('./ops.js');
 const { diff } = require('./myers.js');
-const { buildIndex, spans, isRunKey, REVERSED } = require('./sequence.js');
+const { buildIndex, spans, isRunKey, isAnchor, cursorAt, indexOfCursor, REVERSED } = require('./sequence.js');
 const { Clock } = require('./vector.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
 const { normalizeSchema, createLens, project } = require('./schema.js');
@@ -1123,13 +1123,39 @@ class Storage extends Emitter {
    * a text.
    */
   async spans(id, key) {
+    const held = await this.#sequence('spans', id, key);
+    if (held === null || held.seq.k !== 't') return null;
+    return spans(buildIndex(held.seq, held.base), held.seq, held.base);
+  }
+
+  /**
+   * A cursor into list or text field `key`: a place that survives edits
+   * around it — before the element at `index` (`side: 'before'`, the
+   * default) or after the one before it (`'after'`), a string to keep or to
+   * send. `index()` says where it is now. `null` out of range or when the
+   * field is not a list or a text.
+   */
+  async cursor(id, key, index, { side = 'before' } = {}) {
+    if (side !== 'before' && side !== 'after') throw new TypeError("cursor() takes side: 'before' or 'after'");
+    const held = await this.#sequence('cursor', id, key);
+    return held === null ? null : cursorAt(buildIndex(held.seq, held.base), index, side);
+  }
+
+  /** Where `cursor` is now in list or text field `key`; `null` once its place is gone (a reset, a field no longer a sequence). */
+  async index(id, key, cursor) {
+    if (typeof cursor !== 'string' || !isAnchor(cursor)) throw new TypeError('index() takes a cursor');
+    const held = await this.#sequence('index', id, key);
+    return held === null ? null : indexOfCursor(buildIndex(held.seq, held.base), cursor);
+  }
+
+  // A sequence field as the record holds it — raw, no lens, no hooks — or null.
+  async #sequence(method, id, key) {
     if (!isRecordId(id)) throw invalidId(id);
-    if (typeof key !== 'string') throw new TypeError('spans() takes a field name');
+    if (typeof key !== 'string') throw new TypeError(`${method}() takes a field name`);
     const entry = await this.#entries.load(id);
     if (!entry || entry.encrypted || !isAlive(entry)) return null;
-    const held = Object.hasOwn(entry.meta.seqs ?? {}, key) ? entry.meta.seqs[key] : undefined;
-    if (held === undefined || held.k !== 't') return null;
-    return spans(buildIndex(held, entry.meta.base), held, entry.meta.base);
+    const seq = Object.hasOwn(entry.meta.seqs ?? {}, key) ? entry.meta.seqs[key] : undefined;
+    return seq === undefined ? null : { seq, base: entry.meta.base };
   }
 
   /**

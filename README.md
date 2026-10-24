@@ -167,9 +167,10 @@ syncom sits where the CRDT libraries (Yjs, Automerge, Loro), the local-first dat
 (GUN, OrbitDB, Evolu, LiveStore) and the sync services (ElectricSQL, PowerSync, Zero, Triplit,
 InstantDB) meet. The [comparison](https://syncomjs.vercel.app/guide/comparison) puts all
 nineteen in one table of forty features, each cell decided from the published source. In short:
-syncom is a database that merges field by field, not a text CRDT. It syncs with no service to
-run, its hosts validate and scope what peers send, and its log is verifiable and purgeable. It
-has no text or list CRDT and no UI bindings, and it is a pre-release, not on npm yet.
+syncom is a database that merges field by field — and whose list and text fields merge by
+position, with marks and cursors, like a text CRDT's. It syncs with no service to run, its hosts
+validate and scope what peers send, and its log is verifiable and purgeable. It has no editor
+bindings and no UI bindings yet, and it is a pre-release, not on npm yet.
 RxDB, the closest of them, is compared [feature by feature](https://syncomjs.vercel.app/guide/vs-rxdb)
 in 300 rows, from its code and every page of its docs.
 

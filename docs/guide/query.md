@@ -187,8 +187,19 @@ converges like any other op. A `select({ slug })` meanwhile returns both.
 ## Ordering records
 
 An ordered field — a list or a text — merges by position; see [Lists and
-text](./lists). To order *records* — tasks in a column — keep a position
-in a register and sort by it: a string that sorts between
-its neighbours, generated on the client (`midpoint('a', 'c')` → `'b'`, and
-so on), survives concurrent inserts because every writer picks its own key
-and last-writer-wins settles the rare collision on one of them.
+text](./lists). To order *records* — tasks in a column — keep a position in
+a register and sort by it. `@alexify/syncom/order` mints the keys: strings
+that sort with `<`, with room between any two, so an insert between two
+neighbours never renumbers the rest; two writers inserting at one spot at
+once pick their own keys (`jitter` keeps them apart), and last-writer-wins
+settles the rare equal key on one of them.
+
+```js
+import { between } from '@alexify/syncom/order';
+
+const first = between();            // 'V'
+const second = between(first);      // 'WV' — after first
+const inserted = between(first, second); // 'WUV' — between the two
+await storage.Task.insert({ title: 'ship', position: inserted });
+const tasks = await storage.Task.select().order('position').fetch();
+```

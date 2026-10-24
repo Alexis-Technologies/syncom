@@ -149,6 +149,9 @@ export interface MarkPayload {
   off?: string;
 }
 
+/** Which side of its slot a cursor keeps to. */
+export type CursorSide = 'before' | 'after';
+
 /** A run of equal style in a text: `marks` per name, a `many` name listing every mark. */
 export interface TextSpan {
   text: string;
@@ -1383,6 +1386,14 @@ export interface Storage {
   /** Text field `key` as runs of equal style; raw (no lens, no read hooks); `null` unless the field is a text. */
   spans(id: string, key: string): Promise<TextSpan[] | null>;
   /**
+   * A cursor into list or text field `key`: a place that survives edits
+   * around it — before the element at `index`, or after the one before it.
+   * `null` out of range or when the field is not a list or a text.
+   */
+  cursor(id: string, key: string, index: number, options?: { side?: CursorSide }): Promise<string | null>;
+  /** Where `cursor` is now; `null` once its place is gone. */
+  index(id: string, key: string, cursor: string): Promise<number | null>;
+  /**
    * Replaces the element at `index` of list field `key`: a register per
    * element, last writer wins, following the element through a concurrent move.
    */
@@ -1552,6 +1563,10 @@ export interface SyncomRecord {
   unmark(key: string, markId: string, options?: WriteOptions): Promise<void>;
   /** The text field as runs of equal style — `storage.spans` with this record's id. */
   spans(key: string): Promise<TextSpan[] | null>;
+  /** A cursor into a list or text field — `storage.cursor` with this record's id. */
+  cursor(key: string, index: number, options?: { side?: CursorSide }): Promise<string | null>;
+  /** Where a cursor is now — `storage.index` with this record's id. */
+  index(key: string, cursor: string): Promise<number | null>;
   /** Replaces an element of a list field — `storage.setAt` with this record's id. */
   setAt(key: string, index: number, value: unknown, options?: WriteOptions): Promise<void>;
   /** Moves an element of a list field — `storage.move` with this record's id. */

@@ -237,6 +237,7 @@ export const ENGINE_SUBJECTS = [
   { id: 'storage', title: 'Storage' },
   { id: 'search', title: 'Search' },
   { id: 'apply', title: 'Apply' },
+  { id: 'sequence', title: 'Lists and text' },
   { id: 'sync', title: 'Sync' },
   { id: 'log', title: 'Op log' },
   { id: 'chain', title: 'Chain' },
@@ -249,6 +250,8 @@ const SUBJECT_NOTES = {
   storage: 'The public API end to end on node:fs: a write is an op appended to the log, a record file and a block.',
   search: 'The @alexify/syncom/search trigram index: a put per write, $text answered from the catalog in rank order.',
   apply: "A peer's page once it has arrived: admit, fold, append, write, announce. The applyRemote rows count ops.",
+  sequence:
+    'The sequence engine behind list and text fields: a fold per op over Fugue runs, a reading, a join, a diff.',
   sync: 'Replication over the in-process link (JSON across the boundary, like a wrpc client).',
   log: 'OpLog, the persisted operation log every write and every replicated op goes through.',
   chain: 'The hash-linked chain a write appends a block to (open({ chain: false }) skips it).',

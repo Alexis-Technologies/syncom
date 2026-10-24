@@ -368,6 +368,48 @@ test('Storage replication model', async (t) => {
     assert.strictEqual(await storage.validate(), true);
   });
 
+  await t.test('a cursor names a place that survives the edits around it', async (t2) => {
+    const { storage } = await openTemp(t2);
+    const id = await storage.insert({});
+    await storage.updateText(id, 'body', 'hello world');
+    const before = await storage.cursor(id, 'body', 6);
+    const after = await storage.cursor(id, 'body', 6, { side: 'after' });
+    assert.match(before, /^</);
+    assert.match(after, /^>/);
+    assert.strictEqual(await storage.index(id, 'body', before), 6);
+    assert.strictEqual(await storage.index(id, 'body', after), 6);
+    await storage.splice(id, 'body', 0, 0, '>> ');
+    assert.strictEqual(await storage.index(id, 'body', before), 9, 'text before it moves it');
+    assert.strictEqual(await storage.index(id, 'body', after), 9);
+    await storage.splice(id, 'body', 9, 0, 'X');
+    assert.strictEqual(await storage.index(id, 'body', before), 10, 'typed at the cursor: before keeps to its element');
+    assert.strictEqual(await storage.index(id, 'body', after), 9, 'after keeps to the one before');
+    await storage.splice(id, 'body', 10, 5);
+    assert.strictEqual((await storage.get(id)).body, '>> hello X');
+    assert.strictEqual(await storage.index(id, 'body', before), 10, 'into a deleted element: the next visible');
+    assert.strictEqual(await storage.cursor(id, 'body', 0, { side: 'after' }), '^');
+    assert.strictEqual(await storage.cursor(id, 'body', 10), '$');
+    assert.strictEqual(await storage.index(id, 'body', '^'), 0);
+    assert.strictEqual(await storage.index(id, 'body', '$'), 10);
+    assert.strictEqual(await storage.cursor(id, 'body', 11), null);
+    // A list cursor anchors the slot, not the element.
+    await storage.push(id, 'items', ['a', 'b', 'c']);
+    const atB = await storage.cursor(id, 'items', 1);
+    await storage.move(id, 'items', 2, 0);
+    assert.strictEqual(await storage.index(id, 'items', atB), 2);
+    // A reset loses the place; not a sequence is null; a bad cursor is a TypeError.
+    await storage.set(id, { n: 1 });
+    assert.strictEqual(await storage.index(id, 'body', before), null);
+    assert.strictEqual(await storage.cursor(id, 'body', 0), null);
+    assert.strictEqual(await storage.cursor(id, 'n', 0), null);
+    await assert.rejects(() => storage.index(id, 'body', 'nope'), TypeError);
+    await assert.rejects(() => storage.cursor(id, 'body', 0, { side: 'left' }), TypeError);
+    const record = await storage.record(id);
+    await record.updateText('body', 'ab');
+    const c = await record.cursor('body', 1);
+    assert.strictEqual(await record.index('body', c), 1);
+  });
+
   await t.test('setAt and move keep an element’s name; a move names where it shows', async (t2) => {
     const { storage } = await openTemp(t2);
     const ops = [];

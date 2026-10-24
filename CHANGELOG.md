@@ -40,7 +40,11 @@ There is no released version section until then; everything below lands in it.
   each, so the same tree rule that places typed text decides whether it takes
   the style (Peritext, Loro); per name the newest mark wins, and a `many`
   mark stacks with every other of its name (comments), removable only by id.
-  Browser budget 42 → 51.5 KB.
+  `cursor(id, key, index, { side })` names a place that survives edits around
+  it and `index(id, key, cursor)` says where it is now. `@alexify/syncom/order`
+  (under 1 KB, off the main entry) mints fractional indexes — strings that
+  sort with `<`, with room between any two — for ordering records by a
+  position field. Browser budget 42 → 52 KB.
 - **Full-text search.** An entity names its `search: ['title', 'body']`
   fields and `open({ search: createSearch() })` gives the index —
   `@alexify/syncom/search`, a subpath under 1 KB, so a node that never

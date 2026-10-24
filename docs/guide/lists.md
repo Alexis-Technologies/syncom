@@ -147,6 +147,24 @@ await storage.unmark(id, 'body', 0, 7, 'bold');
   read hooks. Blocks (paragraphs, headings) are records: a document is a
   list of block ids, each block a record with a text field.
 
+## Cursors
+
+A cursor is a place in a list or a text that survives edits around it — a
+selection, a caret, a bookmark, a string you can keep or send to a peer:
+
+```js
+const caret = await storage.cursor(id, 'body', 6);          // before the element at 6
+await storage.splice(id, 'body', 0, 0, '>> ');
+await storage.index(id, 'body', caret);                     // 9
+```
+
+`side: 'before'` (the default) keeps the cursor before the element at
+`index`, so text typed at the cursor pushes it right; `side: 'after'` keeps
+it after the element before, so typed text lands after it. A cursor into a
+deleted element reads at the next visible one; one into a field a reset
+emptied reads `null`. In a list a cursor anchors the slot, not the element:
+a move takes the element elsewhere and leaves the cursor at the slot.
+
 ## What travels
 
 A `mark` op carries the two anchors, the name, the value and whether it
