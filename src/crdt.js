@@ -4,9 +4,12 @@
 // key, and assigning it would replace the result's prototype instead.
 const isField = (key) => key !== '__proto__';
 
+// A collection's elements, for the set diff; anything else has none.
+const elementsOf = (value) => (Array.isArray(value) || value instanceof Set ? value : []);
+
 const diff = (source, target) => {
-  if (typeof source !== 'object') source = {};
-  if (typeof target !== 'object') target = {};
+  if (source === null || typeof source !== 'object') source = {};
+  if (target === null || typeof target !== 'object') target = {};
   const delta = {};
   const sourceKeys = new Set(Object.keys(source));
   const targetKeys = new Set(Object.keys(target));
@@ -16,10 +19,8 @@ const diff = (source, target) => {
     if (!sourceKeys.has(key)) {
       delta[key] = target[key];
     } else if (Array.isArray(target[key]) || target[key] instanceof Set) {
-      const sourceArr = source[key];
-      const targetArr = target[key];
-      const sourceSet = new Set(sourceArr);
-      const targetSet = new Set(targetArr);
+      const sourceSet = new Set(elementsOf(source[key]));
+      const targetSet = new Set(target[key]);
       const diffSet = new Set([...targetSet].filter((x) => !sourceSet.has(x)));
       if (diffSet.size > 0) {
         delta[key] = Array.from(diffSet);

@@ -27,7 +27,7 @@ const runIdTests = async (t, assert, createStorage) => {
       await assert.rejects(() => storage.inc(id, 'n'), { code: 'INVALID_ID' }, label);
       await assert.rejects(() => storage.delete(id), { code: 'INVALID_ID' }, label);
       await assert.rejects(() => storage.purge(id), { code: 'INVALID_ID' }, label);
-      await assert.rejects(() => storage.update(id, { a: 1 }), /not found/, label);
+      await assert.rejects(() => storage.update(id, { a: 1 }), { name: 'TypeError', code: 'INVALID_ID' }, label);
       assert.strictEqual(await storage.get(id), null, label);
       assert.strictEqual(await storage.has(id), false, label);
     }

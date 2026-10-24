@@ -415,7 +415,7 @@ const runTagTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(await view.collection('Note').get(note.id), { text: 'x', $type: 'Note' });
     assert.throws(() => view.collection('Nope'), TypeError);
     assert.throws(() => posts.select().watch(() => {}), /does not change/);
-    assert.throws(() => posts.select({ $text: 'x' }), TypeError);
+    assert.throws(() => posts.select({ $text: 'x' }), { name: 'TypeError', message: /\$text is not served at tag/ });
     // A snapshot at the tag: pages another storage joins to stand there.
     const page = await view.snapshot({ limit: 3 });
     assert.strictEqual(page.records.length, 3);

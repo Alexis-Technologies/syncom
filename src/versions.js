@@ -164,7 +164,9 @@ const sourceAt = (core, name) => {
     ids: (entity) => catalog().ids(entity),
     row: (id) => catalog().row(id),
     indexed: (entity) => catalog().indexed(entity),
-    searches: () => false,
+    searches: () => {
+      throw new TypeError(`select(): $text is not served at tag ${name}: a tag keeps no text index`);
+    },
     subscribe: () => {
       throw new TypeError(`watch(): tag ${name} does not change`);
     },

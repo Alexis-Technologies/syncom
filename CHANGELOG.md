@@ -609,6 +609,14 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **Small edges.** A listener the `maxListeners` cap refuses is no longer
+  left registered behind the throw. `diff()` of the CRDT deltas takes a
+  `null` side and a non-collection under an array instead of throwing, and
+  no longer reads a string as a set of its characters. `$text` at a tag says
+  that a tag keeps no text index, not that the entity has no search fields.
+  `update()` with an invalid id is `INVALID_ID` like every other writer, and
+  its `NOT_FOUND` (and `swap()`'s) carries the `id`. `applyPatches()` names
+  an unknown action as such. `adopt` walks a peer's vector by its own keys.
 - **A failed undo never inverts part of a record twice.** When a hook or a
   validator refused a later op of one record's inverse, the earlier ops of
   it had landed but the record stayed on the undo stack as the step left

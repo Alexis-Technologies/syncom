@@ -179,6 +179,19 @@ const diffViews = (from, fromKinds, to, toKinds, { purged = false, exact = true 
 };
 
 const isField = (value) => typeof value === 'string' && value.length > 0;
+const ACTIONS = new Set([
+  'put',
+  'write',
+  'inc',
+  'add',
+  'remove',
+  'splice',
+  'mark',
+  'treeMove',
+  'treeRemove',
+  'delete',
+  'purge',
+]);
 
 // Exactly the tags a remove revokes: `[[element, { origin: addTs }]]`.
 const isRemovals = (list) =>
@@ -200,6 +213,7 @@ const isRemovals = (list) =>
 const realize = (patch) => {
   if (patch === null || typeof patch !== 'object') throw new TypeError('applyPatches(): a patch is an object');
   const { action, field } = patch;
+  if (!ACTIONS.has(action)) throw new TypeError(`applyPatches(): unknown action ${action}`);
   const named = action !== 'write' && action !== 'delete' && action !== 'purge';
   if (named && !isField(field)) throw new TypeError(`applyPatches(): ${action} needs a field`);
   const method = 'applyPatches';
@@ -254,8 +268,6 @@ const realize = (patch) => {
       return ['delete', {}];
     case 'purge':
       return ['purge', {}];
-    default:
-      throw new TypeError(`applyPatches(): unknown action ${action}`);
   }
 };
 

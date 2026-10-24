@@ -184,7 +184,9 @@ const mergeBatch = async (core, records, via, from) => {
 const adopt = async (core, vector, { via = null, from = null } = {}) => {
   const known = core.log.vector;
   const news = {};
-  for (const key in vector) {
+  // A peer's vector: own keys alone, read as values.
+  for (const key of Object.keys(vector)) {
+    if (key === '__proto__') continue;
     if (Number.isInteger(vector[key]) && (known[key] ?? 0) < vector[key]) news[key] = vector[key];
   }
   if (Object.keys(news).length === 0) return null;

@@ -1109,7 +1109,8 @@ class Storage extends Emitter {
   }
 
   async update(id, delta, { actor } = {}) {
-    if (!(await this.has(id))) throw new SyncomError('NOT_FOUND', `Record ${id} not found`);
+    if (!isRecordId(id)) throw invalidId(id);
+    if (!(await this.has(id))) throw new SyncomError('NOT_FOUND', `Record ${id} not found`, { id });
     if (!isPlainObject(delta)) throw new TypeError('update() takes a plain object');
     await this[COMMIT]('set', id, { data: delta }, { actor });
   }

@@ -46,23 +46,23 @@ class Emitter {
     return Promise.all(promises).then(() => undefined);
   }
 
+  // Checked before the listener is kept: one the cap refuses is not left
+  // registered behind the throw.
   #addListener(eventName, listener, once) {
     let event = this.#events.get(eventName);
+    if (event && event.on.includes(listener)) throw new Error('Duplicate listeners detected');
+    if ((event ? event.on.length : 0) + 1 > this.#maxListeners) {
+      throw new Error(
+        `MaxListenersExceededWarning: Possible memory leak. ` + `Current maxListeners is ${this.#maxListeners}.`,
+      );
+    }
     if (!event) {
       const on = [listener];
       event = { on, once: once ? new Set(on) : new Set() };
       this.#events.set(eventName, event);
     } else {
-      if (event.on.includes(listener)) {
-        throw new Error('Duplicate listeners detected');
-      }
       event.on.push(listener);
       if (once) event.once.add(listener);
-    }
-    if (event.on.length > this.#maxListeners) {
-      throw new Error(
-        `MaxListenersExceededWarning: Possible memory leak. ` + `Current maxListeners is ${this.#maxListeners}.`,
-      );
     }
   }
 

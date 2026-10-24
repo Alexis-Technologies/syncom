@@ -70,7 +70,7 @@ const expectation = async (core, id, current, expect) => {
   let seen = null;
   if (current?.encrypted) seen = current.data;
   else if (current && isAlive(current)) seen = await core.view(id, current);
-  if (!seen) throw new SyncomError('NOT_FOUND', `Record ${id} not found`);
+  if (!seen) throw new SyncomError('NOT_FOUND', `Record ${id} not found`, { id });
   for (const key of Object.keys(expect)) if (seen[key] !== expect[key]) return false;
   return true;
 };

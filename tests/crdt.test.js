@@ -39,6 +39,14 @@ test('CRDT module', async (t) => {
     assert.deepStrictEqual(setDiff, { tags: ['c'] });
   });
 
+  await t.test('diff function - a null side or a non-collection under an array is nothing, not a throw', () => {
+    assert.deepStrictEqual(syncom.diff({ a: null }, { a: { b: 1 } }), { a: { b: 1 } });
+    assert.deepStrictEqual(syncom.diff(null, { a: 1 }), { a: 1 });
+    assert.deepStrictEqual(syncom.diff({ a: 5 }, { a: [1, 2] }), { a: [1, 2] });
+    const chars = syncom.diff({ a: 'ab' }, { a: ['a', 'c'] });
+    assert.deepStrictEqual(chars, { a: ['a', 'c'] }, 'a string is not a set of characters');
+  });
+
   await t.test('diff function - nested objects', () => {
     const source = { user: { name: 'John', age: 30 } };
     const target = { user: { name: 'Jane', age: 30, city: 'NYC' } };
