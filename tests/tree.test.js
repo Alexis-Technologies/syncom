@@ -167,4 +167,60 @@ test('tree', async (t) => {
       assert.strictEqual(T.applyTreeMove(x.tree, [tick(), 'A'], bad).reason, 'malformed', JSON.stringify(bad));
     }
   });
+
+  await t.test('moves with one forged stamp fold the same on every node: ties go by node id', () => {
+    const r = move(T.createTree(), 'A', 'r', null);
+    const x = move(r.tree, 'A', 'x', 'r', 'UV');
+    const y = move(x.tree, 'A', 'y', 'r', 'WV');
+    const ts = tick();
+    const forged = [
+      { ts, origin: 'EVIL', node: 'x', parent: 'y', fi: 'V' },
+      { ts, origin: 'EVIL', node: 'y', parent: 'x', fi: 'V' },
+    ];
+    const one = replay([r.op, x.op, y.op, ...forged]);
+    const two = replay([r.op, x.op, y.op, forged[1], forged[0]]);
+    assert.deepStrictEqual(two, one);
+    assert.deepStrictEqual(flat(T.renderTree(one)), ['r', '  y', '    x'], 'x before y: x moves, y’s move would cycle');
+    assert.deepStrictEqual(flat(T.renderTree(two)), flat(T.renderTree(one)));
+    assert.deepStrictEqual(T.joinTrees(one, two), T.joinTrees(two, one));
+  });
+
+  await t.test('a tree reads MAX_DEPTH levels and no deeper: a 4 000-deep chain renders, folds and joins', () => {
+    let tree = T.createTree();
+    let parent = null;
+    for (let i = 0; i < 4000; i++) {
+      tree = move(tree, 'A', `n${i}`, parent).tree;
+      parent = `n${i}`;
+    }
+    const rendered = T.renderTree(tree);
+    let depth = 0;
+    for (let at = rendered; at.length > 0; at = at[0].children) depth++;
+    assert.strictEqual(depth, T.MAX_DEPTH);
+    assert.ok(JSON.stringify(rendered).length > 0, 'and it serializes');
+    assert.strictEqual(T.resolve(tree).parentOf.get('n3999'), 'n3998', 'the fold keeps every move');
+    assert.deepStrictEqual(T.renderTree(T.joinTrees(tree, tree)), rendered);
+    const up = move(tree, 'B', 'n3999', null, 'ZV');
+    assert.ok(flat(T.renderTree(up.tree)).includes('n3999'), 'moved up, the deep node shows again');
+  });
+
+  await t.test('a place is a fractional index, or the move is malformed — from an op and from a snapshot alike', () => {
+    const r = move(T.createTree(), 'A', 'r', null);
+    for (const fi of ['zzz', 'V0', '', 'a'.repeat(T.MAX_FI + 1), 7, null]) {
+      const bad = T.applyTreeMove(r.tree, [tick(), 'B'], { node: 'n', parent: 'r', fi });
+      assert.deepStrictEqual([bad.changed, bad.reason], [false, 'malformed'], JSON.stringify(fi));
+    }
+    const long = T.applyTreeMove(r.tree, [tick(), 'B'], { node: 'n', parent: 'r', fi: `${'a'.repeat(T.MAX_FI - 1)}V` });
+    assert.strictEqual(long.changed, true, 'a long but valid index is taken');
+    const hostile = T.normalizeTree({
+      moves: {
+        r: [[1, 'A', null, 'V']],
+        n: [
+          [2, 'B', 'r', 'zzz'],
+          [3, 'B@scope', 'r', 'V'],
+          [4, 'B', 'r', 'UV'],
+        ],
+      },
+    });
+    assert.deepStrictEqual(hostile.moves.n, [[4, 'B', 'r', 'UV']], 'a bad index and an origin with @ are dropped');
+  });
 });

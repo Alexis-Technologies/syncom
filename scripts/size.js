@@ -107,8 +107,13 @@ const ENTRIES = [
   // files at the EntryStore seam, tag()/untag()/at() — the raise to 58 KB
   // (57.7 measured; 58.0 with the views at a tag; ≈60 KB at the end of the versions epic was agreed).
   // Diff, restore, patches and the commit event (src/patch.js) — the raise to
-  // 60.5 KB (60.0 measured), the end of the versions epic.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 60.5 },
+  // 60.5 KB (60.0 measured), the end of the versions epic. The bounds of the
+  // second review's first epic — slot caps on a run and a field, a run
+  // extended by its origin alone, the snapshot path under the same bound,
+  // orphan registers and off-placeholders counted, a fractional index
+  // checked, a tree read to a depth, a malformed payload reported, the
+  // `sync.pendingMax` option — the raise to 62 KB (61.7 measured).
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 62 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check

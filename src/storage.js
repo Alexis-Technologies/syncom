@@ -157,6 +157,7 @@ class Storage extends Emitter {
   #clock = new Clock();
   #scopeOf;
   #maxSkew;
+  #limits;
   #signatures;
   #encrypted;
   #hooks;
@@ -187,6 +188,9 @@ class Storage extends Emitter {
     this.#encrypted = settings.encrypted;
     this.#scopeOf = settings.scope ?? (() => GLOBAL_SCOPE);
     this.#maxSkew = settings.maxSkew;
+    // What the op model is told to bound (src/ops.js applyOp): the pending
+    // work of a list or text field. Every fold of the log runs under it too.
+    this.#limits = { pendingMax: settings.pendingMax };
     this.#signatures = settings.signatures;
     // Live Records, weakly: one the application still holds pins its cache
     // entry and follows the record; one it dropped is collected, and its
@@ -359,6 +363,7 @@ class Storage extends Emitter {
       version: this.#version,
       ahead: this.#ahead,
       maxSkew: this.#maxSkew,
+      limits: this.#limits,
       signatures: this.#signatures,
       // Signs an op of this node's own, in place, once it is final.
       sign: this.#signatures === false ? null : (op) => signOp(op, this.#signing.privateKey),
@@ -682,7 +687,7 @@ class Storage extends Emitter {
         continue;
       }
       if (current?.encrypted) continue;
-      const { entry, changed } = applyOp(current, op);
+      const { entry, changed } = applyOp(current, op, this.#limits);
       if (changed) touched.set(op.id, { ...entry, seq });
     }
     return touched;
@@ -1087,7 +1092,7 @@ class Storage extends Emitter {
   async #folded(id, past) {
     {
       const { entries, start } = past;
-      const steps = fold(entries, start);
+      const steps = fold(entries, start, this.#limits);
       const last = steps.length > 0 ? steps[steps.length - 1].entry : null;
       return last !== null && isAlive(last) ? asJson(await this.#view(id, last)) : null;
     }
@@ -1101,7 +1106,7 @@ class Storage extends Emitter {
     if (version.kind === 'tag') return this.#entryAt(version.name, id);
     const past = await this.#past(id, version);
     if (past === null) return null;
-    const steps = fold(past.entries, past.start);
+    const steps = fold(past.entries, past.start, this.#limits);
     return steps.length > 0 ? steps[steps.length - 1].entry : null;
   }
 
@@ -1267,7 +1272,7 @@ class Storage extends Emitter {
     const { entries, purged } = await this.#applied(id);
     const droppedTs = this.#log.droppedTs;
     const { start, exact: fromReset } = exactStart(entries, droppedTs);
-    const steps = fold(entries, start);
+    const steps = fold(entries, start, this.#limits);
     const versions = [];
     for (const { logged, entry, delta } of steps) {
       const { seq, op, scrubbed } = logged;
@@ -1356,7 +1361,7 @@ class Storage extends Emitter {
     if (droppedTs > 0) {
       // The whole retained past must read as the present does, or the cut
       // cannot be trusted either.
-      const all = fold(entries, exactStart(entries, droppedTs).start);
+      const all = fold(entries, exactStart(entries, droppedTs).start, this.#limits);
       const last = all.length > 0 ? all[all.length - 1].entry : null;
       if (current === null || !(await this.#present(id, last))) throw gone(id, 'compacted');
     }
@@ -1632,7 +1637,7 @@ class Storage extends Emitter {
     let entry = null;
     for (let i = start; i < entries.length; i++) {
       this.#clock.observe(entries[i].op.ts);
-      ({ entry } = applyOp(entry, entries[i].op));
+      ({ entry } = applyOp(entry, entries[i].op, this.#limits));
     }
     this.#entries.forget(id);
     await this.#persistBatch(new Map([[id, entry]]), entries[start].seq, entries[entries.length - 1].seq);

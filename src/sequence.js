@@ -68,7 +68,18 @@
 
 const { compareClock } = require('./vector.js');
 
+// Pending work — runs waiting for their anchor, cuts and extensions waiting
+// for their run, registers and switched-off marks for elements and marks not
+// here — is bounded per field, on the op path and on the snapshot path
+// alike: beyond it an op is refused (`bound`) and a peer's block is dropped.
 const PENDING_MAX = 4096;
+// A run holds at most MAX_RUN slots and a field MAX_FIELD, tombstones
+// included: the index allocates per slot, so a gap is the one thing a peer
+// could make expensive for nothing (a `[3e8]` in a snapshot block would be
+// expanded element by element). A node typing past MAX_RUN starts a new run
+// (`placeInsert`); a field at MAX_FIELD takes nothing more until a reset.
+const MAX_RUN = 1 << 20;
+const MAX_FIELD = 1 << 22;
 
 // Keys: a run is `ts:origin` (the op that created it), an element
 // `ts:offset:origin` — the offset in the middle so two indexOf calls parse
@@ -219,17 +230,28 @@ const rleMerge = (kind, a, b) => {
   return rleCollapse(kind, out);
 };
 
-// Whether a run's content is well-formed for its kind; returns the
-// canonical form, or null.
+// Whether a run's content is well-formed for its kind and within MAX_RUN;
+// returns the canonical form, or null.
 const normalizeRle = (kind, rle) => {
   if (!Array.isArray(rle)) return null;
   const b = builder(kind);
+  let n = 0;
   for (const seg of rle) {
     if (isGap(seg)) b.push(seg);
     else if (present(kind, seg) && seg.length > 0) b.push(seg);
     else return null;
+    n += segLength(seg);
+    if (n > MAX_RUN) return null;
   }
   return b.done();
+};
+
+// The slots a block holds, tombstones included — through the memoized parse
+// of each run (`parsedRun`), so a block of many runs is summed, not re-read.
+const blockSlots = (seq) => {
+  let n = 0;
+  for (const key of Object.keys(seq.runs)) n += parsedRun(key, seq.runs[key]).len;
+  return n;
 };
 
 // ---- the block -----------------------------------------------------------
@@ -253,22 +275,28 @@ const isStamp = (value) => Number.isSafeInteger(value) && value > 0;
 const isJson = (value) => value === null || ['string', 'number', 'boolean', 'object'].includes(typeof value);
 
 // A peer's block, rebuilt into the trusted shape: every key of a known
-// form, every run a canonical RLE of the block's kind, every anchor and
-// register well-formed. Anything else is dropped; a block with nothing left
-// is null.
-const normalizeSeq = (raw) => {
+// form, every run a canonical RLE of the block's kind anchored at an element
+// older than itself, every anchor and register well-formed, the whole within
+// MAX_FIELD slots and PENDING_MAX pending items under `base` (the entry's
+// reset watermark, which decides what an orphan run is). Anything else is
+// dropped; a block with nothing left, or past a bound, is null.
+const normalizeSeq = (raw, base = null) => {
   if (!raw || typeof raw !== 'object') return null;
   const kind = raw.k === 't' || raw.k === 'l' ? raw.k : null;
   if (kind === null) return null;
   const seq = createSeq(kind);
+  let slots = 0;
   for (const key of keysOf(raw.runs)) {
     const run = raw.runs[key];
-    if (!isRunKey(key) || !Array.isArray(run) || run.length < 2 || run.length > 3) continue;
+    const made = parseRun(key);
+    if (made === null || !Array.isArray(run) || run.length < 2 || run.length > 3) continue;
     const anchor = parseAnchor(run[0]);
-    if (anchor === null || run[0] === END) continue;
+    if (anchor === null || run[0] === END || (anchor.elem !== null && anchor.elem.ts >= made.ts)) continue;
     const content = normalizeRle(kind, run[1]);
     if (content === null) continue;
     if (run.length === 3 && (kind !== 'l' || !isElemKey(run[2]))) continue;
+    slots += rleLength(content);
+    if (slots > MAX_FIELD) return null;
     seq.runs[key] = run.length === 3 ? [run[0], content, run[2]] : [run[0], content];
   }
   const ranges = (list) =>
@@ -294,14 +322,7 @@ const normalizeSeq = (raw) => {
     const out = {};
     for (const key of keysOf(raw2)) {
       const v = raw2[key];
-      if (
-        isElemKey(key) &&
-        Array.isArray(v) &&
-        v.length === 3 &&
-        isStamp(v[0]) &&
-        isOrigin(String(v[1])) &&
-        check(v[2])
-      ) {
+      if (isElemKey(key) && Array.isArray(v) && v.length === 3 && isStamp(v[0]) && isOrigin(v[1]) && check(v[2])) {
         out[key] = [v[0], v[1], v[2]];
       }
     }
@@ -317,8 +338,13 @@ const normalizeSeq = (raw) => {
     const marks = {};
     for (const key of keysOf(raw.marks)) {
       const m = raw.marks[key];
-      if (!isRunKey(key) || !Array.isArray(m) || m.length !== 5) continue;
-      if (!isAnchor(m[0]) || !isAnchor(m[1]) || typeof m[2] !== 'string' || !isJson(m[3])) continue;
+      const made = parseRun(key);
+      if (made === null || !Array.isArray(m) || m.length !== 5) continue;
+      const from = parseAnchor(m[0]);
+      const to = parseAnchor(m[1]);
+      if (from === null || to === null || typeof m[2] !== 'string' || !isJson(m[3])) continue;
+      // An honest mark spans elements older than itself.
+      if ((from.elem !== null && from.elem.ts >= made.ts) || (to.elem !== null && to.elem.ts >= made.ts)) continue;
       if (!Number.isInteger(m[4]) || m[4] < 0 || m[4] > 3) continue;
       marks[key] = [m[0], m[1], m[2], m[3], m[4]];
     }
@@ -327,6 +353,9 @@ const normalizeSeq = (raw) => {
   const empty = Object.keys(seq.runs).length === 0 && !seq.cuts && !seq.ext && !seq.marks && !seq.pos && !seq.vals;
   if (empty) return null;
   seq.ts = stampsMax(seq);
+  // The same bound the op path keeps: a block a peer could not have built
+  // through ops is not taken as state either.
+  if (pendingCount(seq, buildIndex(seq, base)) > PENDING_MAX) return null;
   return seq;
 };
 
@@ -342,12 +371,33 @@ const cloneSeq = (seq) => {
   return out;
 };
 
+// Whether the block holds the element `key` names: its run, long enough.
+const holdsElem = (seq, key) => {
+  const e = parseElem(key);
+  const run = own(seq.runs, e.run);
+  return run !== undefined && e.offset < rleLength(run[1]);
+};
+
+// What waits in a block: runs out of the walk, cuts and extensions of runs
+// not here, registers of elements no run holds, marks switched off before
+// they arrived — each one a thing a peer could pile up for nothing.
 const pendingCount = (seq, index) => {
   let n = index.pending.size;
   for (const key of keysOf(seq.cuts)) n += seq.cuts[key].length;
   for (const key of keysOf(seq.ext)) n += seq.ext[key].length;
+  for (const map of ['pos', 'vals']) {
+    for (const key of keysOf(seq[map])) {
+      const e = parseElem(key);
+      const r = index.byKey.get(e.run);
+      if (r === undefined || e.offset >= r.len) n++;
+    }
+  }
+  for (const key of keysOf(seq.marks)) if (isPlaceholder(seq.marks[key])) n++;
   return n;
 };
+
+// A refusal for work past a bound: which bound, the count and the limit.
+const refused = (seq, detail, count, max) => ({ seq, changed: false, reason: 'bound', detail, count, max });
 
 // ---- the tree and its walk ----------------------------------------------
 
@@ -599,7 +649,9 @@ const placeInsert = (index, i, origin) => {
   const explicit = r.R?.get(off);
   const cont = off + 1 < r.len;
   if (!explicit && !cont) {
-    if (r.origin === origin) return { run: r.key, from: r.len };
+    // Own run, at its end: extend it — until it is full, then a new run
+    // anchored after its last element reads the same.
+    if (r.origin === origin && r.len < MAX_RUN) return { run: r.key, from: r.len };
     return { at: `>${elemKey(r.key, off)}` };
   }
   let first;
@@ -681,10 +733,21 @@ const settle = (seq, key) => {
   return changed;
 };
 
+// Whether the block already waits to cut exactly this range of `key`.
+const hasRange = (seq, key, offset, length) => {
+  const held = seq.cuts && own(seq.cuts, key);
+  return held !== undefined && held.some(([o, n]) => o === offset && n === length);
+};
+
+// Adds a pending cut once: a range already waiting is not waited for twice
+// (a join of two pictures that both hold it, the same op arriving again).
 const addRange = (seq, key, offset, length) => {
-  const list = (seq.cuts ??= {})[key] ? [...seq.cuts[key]] : [];
+  if (hasRange(seq, key, offset, length)) return false;
+  const held = seq.cuts && own(seq.cuts, key);
+  const list = held ? [...held] : [];
   list.push([offset, length]);
-  seq.cuts[key] = list;
+  (seq.cuts ??= {})[key] = list;
+  return true;
 };
 
 // One `splice`: cuts first, then the insertion — a new run anchored at `at`,
@@ -713,12 +776,19 @@ const applySplice = (seq, stamp, payload, base = null, pendingMax = PENDING_MAX)
   if (run !== undefined && (!isRunKey(run) || !Number.isInteger(from) || from < 0)) {
     return { seq, changed: false, reason: 'malformed' };
   }
+  // A run is extended by the origin that made it, nobody else: two origins
+  // extending one run would leave the result to the order of arrival.
+  if (run !== undefined && parseRun(run).origin !== origin) return { seq, changed: false, reason: 'malformed' };
   let next = null;
   const mutable = () => (next ??= cloneSeq(seq));
   let changed = false;
   let index = null;
   const indexOf = () => (index ??= buildIndex(next ?? seq, base));
-  const pendingLeft = () => pendingMax - pendingCount(next ?? seq, indexOf());
+  const pending = () => pendingCount(next ?? seq, indexOf());
+  const full = () => {
+    const n = pending();
+    return n >= pendingMax ? refused(seq, 'pending', n, pendingMax) : null;
+  };
   if (cut !== undefined) {
     for (const range of cut) {
       // An honest cutter saw the run it cuts, so the run is older than the op.
@@ -732,7 +802,9 @@ const applySplice = (seq, stamp, payload, base = null, pendingMax = PENDING_MAX)
     for (const [key, offset, length] of cut) {
       const target = own(seq.runs, key);
       if (target === undefined || offset >= rleLength(target[1])) {
-        if (pendingLeft() <= 0) return { seq, changed: false, reason: 'bound' };
+        if (hasRange(next ?? seq, key, offset, length)) continue;
+        const stop = full();
+        if (stop !== null) return stop;
         addRange(mutable(), key, offset, length);
         changed = true;
         continue;
@@ -746,14 +818,18 @@ const applySplice = (seq, stamp, payload, base = null, pendingMax = PENDING_MAX)
         m.runs[key] = before.length === 3 ? [before[0], after, before[2]] : [before[0], after];
         changed = true;
       }
-      if (offset + length > len) {
-        if (pendingLeft() <= 0) return { seq, changed: false, reason: 'bound' };
+      if (offset + length > len && !hasRange(m, key, len, offset + length - len)) {
+        const stop = full();
+        if (stop !== null) return stop;
         addRange(m, key, len, offset + length - len);
         changed = true;
       }
     }
   }
   if (inserting) {
+    if (content.length > MAX_RUN) return refused(seq, 'run', content.length, MAX_RUN);
+    const slots = blockSlots(next ?? seq) + content.length;
+    if (slots > MAX_FIELD) return refused(seq, 'field', slots, MAX_FIELD);
     if (at !== undefined) {
       const key = runKey(ts, origin);
       if (own((next ?? seq).runs, key) === undefined) {
@@ -763,7 +839,10 @@ const applySplice = (seq, stamp, payload, base = null, pendingMax = PENDING_MAX)
           anchor.elem === null ||
           (base !== null && compareClock([anchor.elem.ts, anchor.elem.origin], base) < 0) ||
           (parent !== undefined && anchor.elem.offset < rleLength(parent[1]));
-        if (!resolved && pendingLeft() <= 0) return { seq, changed: false, reason: 'bound' };
+        if (!resolved) {
+          const stop = full();
+          if (stop !== null) return stop;
+        }
         const m = mutable();
         m.runs[key] = [at, isText(m.k) ? [content] : [[...content]]];
         m.ts = Math.max(m.ts, ts);
@@ -774,6 +853,7 @@ const applySplice = (seq, stamp, payload, base = null, pendingMax = PENDING_MAX)
       const target = own((next ?? seq).runs, run);
       if (target !== undefined) {
         const len = rleLength(target[1]);
+        if (len + content.length > MAX_RUN) return refused(seq, 'run', len + content.length, MAX_RUN);
         if (from === len) {
           const m = mutable();
           m.runs[run] =
@@ -783,7 +863,8 @@ const applySplice = (seq, stamp, payload, base = null, pendingMax = PENDING_MAX)
           settle(m, run);
           changed = true;
         } else if (from > len) {
-          if (pendingLeft() <= 0) return { seq, changed: false, reason: 'bound' };
+          const stop = full();
+          if (stop !== null) return stop;
           const m = mutable();
           const list = m.ext && own(m.ext, run) ? [...m.ext[run]] : [];
           if (!list.some(([f]) => f === from)) {
@@ -803,6 +884,9 @@ const applySplice = (seq, stamp, payload, base = null, pendingMax = PENDING_MAX)
 
 const MANY = 1;
 const OFF = 2;
+// What an `off` leaves for a mark not here yet: no anchors, no key, no value, switched off.
+const PLACEHOLDER = [HEAD, HEAD, '', null, OFF];
+const isPlaceholder = (m) => m[0] === HEAD && m[1] === HEAD && m[2] === '' && m[3] === null && (m[4] & OFF) !== 0;
 const EXPANDS = { before: [true, false], after: [false, true], both: [true, true], none: [false, false] };
 // Removing a style grows where the style would not and the other way round
 // (Loro): both ↔ none, before and after stay.
@@ -819,17 +903,25 @@ const markAnchors = (index, start, end, expand) => {
 
 // A `mark`: a new mark keyed by the op's stamp — first wins on a key — or
 // `{ off }`, which flags an existing mark (or a placeholder for one not here
-// yet) as removed by id.
-const applyMark = (seq, stamp, payload) => {
+// yet) as removed by id. A mark that lands on its placeholder fills it in and
+// stays off; the block's `ts` counts a placeholder by the id it names, so the
+// two orders leave one block.
+const applyMark = (seq, stamp, payload, base = null, pendingMax = PENDING_MAX) => {
   const [ts, origin] = stamp;
   if (seq.k !== 't' || !payload || typeof payload !== 'object') return { seq, changed: false, reason: 'malformed' };
   if (payload.off !== undefined) {
-    if (!isRunKey(payload.off)) return { seq, changed: false, reason: 'malformed' };
+    const named = parseRun(payload.off);
+    if (named === null) return { seq, changed: false, reason: 'malformed' };
     const held = seq.marks && own(seq.marks, payload.off);
     if (held !== undefined && (held[4] & OFF) !== 0) return { seq, changed: false, reason: null };
+    if (held === undefined) {
+      const n = pendingCount(seq, buildIndex(seq, base));
+      if (n >= pendingMax) return refused(seq, 'pending', n, pendingMax);
+    }
     const next = cloneSeq(seq);
     (next.marks ??= {})[payload.off] =
-      held === undefined ? [HEAD, HEAD, '', null, OFF] : [held[0], held[1], held[2], held[3], held[4] | OFF];
+      held === undefined ? [...PLACEHOLDER] : [held[0], held[1], held[2], held[3], held[4] | OFF];
+    next.ts = Math.max(next.ts, named.ts);
     return { seq: next, changed: true, reason: null };
   }
   const { start, end, key, value, many } = payload;
@@ -841,9 +933,10 @@ const applyMark = (seq, stamp, payload) => {
   }
   if (many !== undefined && many !== true) return { seq, changed: false, reason: 'malformed' };
   const id = runKey(ts, origin);
-  if (seq.marks && own(seq.marks, id) !== undefined) return { seq, changed: false, reason: null };
+  const held = seq.marks && own(seq.marks, id);
+  if (held !== undefined && !isPlaceholder(held)) return { seq, changed: false, reason: null };
   const next = cloneSeq(seq);
-  (next.marks ??= {})[id] = [start, end, key, value, many ? MANY : 0];
+  (next.marks ??= {})[id] = [start, end, key, value, (many ? MANY : 0) | (held === undefined ? 0 : OFF)];
   next.ts = Math.max(next.ts, ts);
   return { seq: next, changed: true, reason: null };
 };
@@ -941,12 +1034,22 @@ const newer = (map, key, stamp) => {
   return held === undefined || compareClock([held[0], held[1]], stamp) < 0;
 };
 
+// A register for an element no run here holds is pending work, bounded like
+// a cut: null to go on, a refusal to hand back.
+const orphan = (seq, map, elem, base, pendingMax) => {
+  if ((seq[map] && own(seq[map], elem) !== undefined) || holdsElem(seq, elem)) return null;
+  const n = pendingCount(seq, buildIndex(seq, base));
+  return n >= pendingMax ? refused(seq, 'pending', n, pendingMax) : null;
+};
+
 // An `assign`: the element's value register (lists only).
-const applyAssign = (seq, stamp, payload) => {
+const applyAssign = (seq, stamp, payload, base = null, pendingMax = PENDING_MAX) => {
   if (seq.k !== 'l' || !payload || typeof payload !== 'object') return { seq, changed: false, reason: 'malformed' };
   const { elem, value } = payload;
   if (!isElemKey(elem) || !isJson(value) || value === undefined) return { seq, changed: false, reason: 'malformed' };
   if (!newer(seq.vals, elem, stamp)) return { seq, changed: false, reason: null };
+  const stop = orphan(seq, 'vals', elem, base, pendingMax);
+  if (stop !== null) return stop;
   const next = cloneSeq(seq);
   (next.vals ??= {})[elem] = [stamp[0], stamp[1], value];
   next.ts = Math.max(next.ts, stamp[0]);
@@ -970,6 +1073,8 @@ const applyMove = (seq, stamp, payload, base = null, pendingMax = PENDING_MAX) =
   const key = runKey(ts, origin);
   let next = null;
   const mutable = () => (next ??= cloneSeq(seq));
+  const stop = newer(seq.pos, elem, stamp) ? orphan(seq, 'pos', elem, base, pendingMax) : null;
+  if (stop !== null) return stop;
   const spliced = applySplice(seq, stamp, { cut: [cut], content: [] }, base, pendingMax);
   if (spliced.reason === 'bound') return spliced;
   if (spliced.changed) next = spliced.seq;
@@ -979,8 +1084,9 @@ const applyMove = (seq, stamp, payload, base = null, pendingMax = PENDING_MAX) =
       anchor.elem === null ||
       (base !== null && compareClock([anchor.elem.ts, anchor.elem.origin], base) < 0) ||
       (parent !== undefined && anchor.elem.offset < rleLength(parent[1]));
-    if (!resolved && pendingMax - pendingCount(next ?? seq, buildIndex(next ?? seq, base)) <= 0) {
-      return { seq, changed: false, reason: 'bound' };
+    if (!resolved) {
+      const n = pendingCount(next ?? seq, buildIndex(next ?? seq, base));
+      if (n >= pendingMax) return refused(seq, 'pending', n, pendingMax);
     }
     const m = mutable();
     m.runs[key] = [at, [[value]], elem];
@@ -1068,7 +1174,11 @@ const join = (a, b) => {
       const theirs = side.marks[key];
       const mine = out.marks && own(out.marks, key);
       if (mine === undefined) (out.marks ??= {})[key] = theirs;
-      else if (theirs[4] !== mine[4]) out.marks[key] = [mine[0], mine[1], mine[2], mine[3], mine[4] | theirs[4]];
+      else if (theirs[4] !== mine[4] || isPlaceholder(mine) !== isPlaceholder(theirs)) {
+        // The filled-in mark over its placeholder, the flags of both.
+        const filled = isPlaceholder(mine) ? theirs : mine;
+        out.marks[key] = [filled[0], filled[1], filled[2], filled[3], mine[4] | theirs[4]];
+      }
     }
   }
   for (const key of Object.keys(out.runs)) settle(out, key);
@@ -1077,6 +1187,8 @@ const join = (a, b) => {
 
 module.exports = {
   PENDING_MAX,
+  MAX_RUN,
+  MAX_FIELD,
   HEAD,
   END,
   runKey,

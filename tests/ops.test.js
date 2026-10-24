@@ -654,10 +654,12 @@ test('ops: a peer-shaped meta reaches nothing it should not', async (t) => {
     assert.deepStrictEqual([clash.changed, clash.rejected], [false, [{ field: 'body', reason: 'text' }]]);
     const clash2 = applyOp(list.entry, splice(5, 'B', 2, 'items', { at: '^', content: 'x' }));
     assert.deepStrictEqual([clash2.changed, clash2.rejected], [false, [{ field: 'items', reason: 'list' }]]);
-    // A malformed payload is nothing; a duplicate is nothing.
+    // A malformed payload changes nothing and is reported as such — a local
+    // caller hears of it, a peer's is counted; a duplicate is nothing.
     for (const value of ['nope', null, { content: 5 }, { at: '^' }, { at: '$', content: 'x' }, { content: '' }]) {
       const r = applyOp(list.entry, splice(6, 'C', 1, 'body', value));
-      assert.deepStrictEqual([r.changed, r.rejected], [false, []], JSON.stringify(value));
+      const refused = [{ field: 'body', reason: 'malformed' }];
+      assert.deepStrictEqual([r.changed, r.rejected], [false, refused], JSON.stringify(value));
     }
     assert.strictEqual(
       applyOp(list.entry, splice(4, 'A', 3, 'items', { at: '^', content: [1, { x: 2 }] })).changed,
@@ -965,16 +967,18 @@ test('ops: a peer-shaped meta reaches nothing it should not', async (t) => {
     assert.deepStrictEqual(applyOp(text.entry, tree(2, 'B', 1, 'r', null)).rejected, [
       { field: 'outline', reason: 'text' },
     ]);
-    // A malformed payload is nothing.
+    // A malformed payload changes nothing and is reported as such.
     for (const value of [
       'nope',
       null,
       { node: 'n' },
       { node: 'n', parent: 'n', fi: 'V' },
       { node: '$trash', parent: null, fi: 'V' },
+      { node: 'n', parent: null, fi: 'not-an-index' },
     ]) {
       const result = applyOp(first.entry, op('tree', 11, 'C', { seq: 1, key: 'outline', value }));
-      assert.deepStrictEqual([result.changed, result.rejected], [false, []], JSON.stringify(value));
+      const refused = [{ field: 'outline', reason: 'malformed' }];
+      assert.deepStrictEqual([result.changed, result.rejected], [false, refused], JSON.stringify(value));
     }
     // Over the wire: one code, round-tripped.
     const [packed] = unpackOps(packOps([r]));
@@ -1048,5 +1052,25 @@ test('ops: a peer-shaped meta reaches nothing it should not', async (t) => {
     assert.strictEqual(row[3], 'constructor');
     const [back] = unpackOps([['A', 1, 1, 'constructor', 'r']]);
     assert.strictEqual(back.type, 'constructor', 'an unknown code stays a string for the storage to refuse');
+  });
+});
+
+test('ops: the bound on pending work is the node’s', async (t) => {
+  await t.test('applyOp takes { pendingMax }; a refusal names the bound, the count and the limit', () => {
+    const splice = (ts, origin, seq, value) => op('splice', ts, origin, { seq, key: 'body', value });
+    const first = applyOp(null, splice(1, 'A', 1, { at: '^', content: 'ab' }));
+    const limits = { pendingMax: 1 };
+    const one = applyOp(first.entry, splice(2, 'B', 1, { cut: [['1:Z', 0, 1]], content: '' }), limits);
+    assert.deepStrictEqual([one.changed, one.rejected], [true, []]);
+    const two = applyOp(one.entry, splice(3, 'B', 2, { cut: [['1:Y', 0, 1]], content: '' }), limits);
+    const refused = { field: 'body', reason: 'bound', detail: 'pending', count: 1, max: 1 };
+    assert.deepStrictEqual([two.changed, two.rejected], [false, [refused]]);
+    const loose = applyOp(one.entry, splice(3, 'B', 2, { cut: [['1:Y', 0, 1]], content: '' }));
+    assert.strictEqual(loose.changed, true, 'the default bound is PENDING_MAX');
+    const off = (ts, seq, id, entry) =>
+      applyOp(entry, op('mark', ts, 'B', { seq, key: 'body', value: { off: id } }), limits);
+    const held = off(4, 3, '1:Q', first.entry);
+    assert.strictEqual(held.changed, true);
+    assert.deepStrictEqual(off(5, 4, '1:W', held.entry).rejected, [refused]);
   });
 });

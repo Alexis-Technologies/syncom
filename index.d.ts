@@ -278,13 +278,25 @@ export interface ApplyResult {
   entry: Entry;
   changed: boolean;
   delta: Record<string, unknown>;
-  rejected: Array<{ field: string; reason: RefusalReason }>;
+  rejected: Refusal[];
 }
 
 /** What a field is, once written: a register (last writer wins), a counter (`inc`), a set (`add`/`remove`), a list, a text or a tree. */
 export type FieldKind = 'register' | 'counter' | 'set' | 'list' | 'text' | 'tree';
-/** Why a field of a peer's op was refused: another kind holds the field, or pending work hit its bound. */
-export type RefusalReason = FieldKind | 'bound';
+/**
+ * Why a field of an op was refused: another kind holds the field; work past
+ * a bound of a list or text field (`'bound'`); a payload the engine does not
+ * admit (`'malformed'` — a TypeError on the local path).
+ */
+export type RefusalReason = FieldKind | 'bound' | 'malformed';
+/** One refused field: for `'bound'`, which bound (`detail`), the count and the limit. */
+export interface Refusal {
+  field: string | null;
+  reason: RefusalReason;
+  detail?: 'pending' | 'run' | 'field';
+  count?: number;
+  max?: number;
+}
 
 /**
  * The codes a SyncomError carries — one constant per thing that can go
@@ -779,6 +791,16 @@ export interface SyncOptions {
    * refused as malformed rather than observed into the clock.
    */
   maxSkew?: number;
+  /**
+   * How much pending work a list or text field takes from ops that ran
+   * ahead of what they depend on — runs waiting for their anchor, cuts and
+   * extensions for their run, registers and switched-off marks for elements
+   * not here — before an op is refused (`OP_REFUSED`, reason `'bound'`) and
+   * a snapshot block is dropped. 4096 by default; a refusal is final on this
+   * node, so a mesh with several hosts raises it rather than lowers it.
+   * `Infinity` disables the bound.
+   */
+  pendingMax?: number;
   /**
    * Signed ops. `'verify'` (the default): this node signs its ops; a peer's
    * op that carries a signature is verified and refused when it does not
@@ -1414,7 +1436,7 @@ export interface StorageEvents {
       code: 'OP_REFUSED' | 'OP_INVALID' | 'OP_UNREADABLE' | 'SKEW' | 'BAD_SIGNATURE' | 'UNSIGNED';
       op: SyncOp;
       count?: number;
-      rejected?: Array<{ field: string; reason: RefusalReason }>;
+      rejected?: Refusal[];
       entity?: string | null;
       issues?: ValidationIssue[];
     },

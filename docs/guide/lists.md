@@ -63,8 +63,9 @@ children — and the tree is a function of the *set* of runs, never of their
 order of arrival. A run whose anchor has not arrived yet stays out of the
 walk, with everything anchored on it, until the anchor lands; a cut is a
 union of ranges per run, held the same way for a run not yet here; both are
-bounded (`PENDING_MAX`, 4096 per field) against hostile input. Deleted
-content is dropped and its place kept, as a length.
+bounded (`sync.pendingMax`, 4096 per field) against hostile input, and so are
+a register for an element not here and a mark switched off before it arrived.
+Deleted content is dropped and its place kept, as a length.
 
 What that gives you, concretely:
 
@@ -278,6 +279,25 @@ caller's to avoid.
   each — and folds all of them on every op that touches the field. Keep a
   tree to the hundreds of nodes an outline or a folder pane shows, not the
   hundreds of thousands a file system holds.
+- A tree reads 512 levels: a node that would hang deeper is folded but not
+  shown, on every node alike, and `treeMove()` refuses a move that would reach
+  there (`OUT_OF_RANGE` with `depth`). A place among siblings is a fractional
+  index of at most 1 024 characters: after some thirty thousand inserts at
+  one spot the next `treeMove()` there is `OUT_OF_RANGE` (`reason: 'fi'`) —
+  move a sibling away, or reset the field. A peer's place that is not a
+  fractional index is malformed and never lands.
+- A run holds at most 1 048 576 slots and a field 4 194 304, tombstones
+  included — the index allocates per slot, so this is what a peer can make a
+  node allocate. Typing past a full run starts a new one and reads the same;
+  a field at its bound takes nothing more until a reset (`set()` of the
+  record, or `updateText()` after one).
+- Pending work — a run whose anchor has not arrived, a cut or an extension
+  of a run not here, a register for an element not here, a mark switched off
+  before it arrived — is bounded per field by `sync.pendingMax` (4 096). Past
+  it an op is refused for good on this node (`OP_REFUSED`, reason `bound`,
+  with `detail`, `count` and `max`) and a snapshot block is not taken as
+  state, so a mesh with several hosts, where a peer's ops can run far ahead
+  of the runs they cut, raises the bound rather than lowers it.
 - Queries see a list as the array it reads as: an index on the field posts
   every element (`select({ tags: 'bug' })` finds a list holding `'bug'`), an
   equality against a whole array compares it in order, and a unique key over

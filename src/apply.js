@@ -301,7 +301,7 @@ const applyOne = async (batch, op) => {
   const verdict = await core.hook('beforeApply', { op, via: batch.via, peer: batch.peer, current: visible });
   if (verdict === false) return void skip(batch, op);
   core.clock.observe(op.ts);
-  const { entry, changed, delta, rejected } = applyOp(current, op);
+  const { entry, changed, delta, rejected } = applyOp(current, op, core.limits);
   if (rejected.length > 0) {
     const error = new SyncomError('OP_REFUSED', `Refused op on ${op.id}`, { op, rejected });
     report(batch, { event: 'sync.op.rejected', id: op.id, rejected }, rejected[0].reason, error);

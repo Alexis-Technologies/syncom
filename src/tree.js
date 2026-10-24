@@ -11,11 +11,19 @@
 // move lost, and the loser is kept: a later move can make it moot or revive
 // it. Siblings order by a fractional index (`@alexify/syncom/order`), then by
 // stamp. A removal is a move under `$trash`; what hangs there is not read.
-// Pure functions over plain JSON; no requires beyond ./vector.js.
+// A tree reads MAX_DEPTH levels: what hangs deeper is folded but not shown,
+// the same on every node (a 4 000-deep chain would throw in the render and
+// in JSON.stringify, and a throw on the apply path stops a stream). Pure
+// functions over plain JSON; requires ./vector.js and ./order.js (a place
+// among siblings must be a fractional index: anything else would throw in
+// `between()` on every local move landing next to it).
 
 const { compareClock } = require('./vector.js');
+const { isKey } = require('./order.js');
 
 const TRASH = '$trash';
+const MAX_DEPTH = 512;
+const MAX_FI = 1024;
 
 const hasControl = (value) => {
   for (let i = 0; i < value.length; i++) if (value.charCodeAt(i) < 32) return true;
@@ -30,10 +38,12 @@ const isNodeId = (value) =>
   !hasControl(value);
 const isParent = (value) => value === null || value === TRASH || isNodeId(value);
 const isStamp = (value) => Number.isSafeInteger(value) && value > 0;
-const isOrigin = (value) => typeof value === 'string' && value.length > 0 && value.length <= 128 && !hasControl(value);
-const isFi = (value) => typeof value === 'string' && value.length > 0 && value.length <= 256;
+const isOrigin = (value) =>
+  typeof value === 'string' && value.length > 0 && value.length <= 128 && !value.includes('@') && !hasControl(value);
+const isFi = (value) => typeof value === 'string' && value.length <= MAX_FI && isKey(value);
 const own = (object, key) => (Object.hasOwn(object, key) ? object[key] : undefined);
 const byStamp = (a, b) => compareClock([a[0], a[1]], [b[0], b[1]]);
+const byNode = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
 const createTree = () => ({ ts: 0, moves: {} });
 
@@ -120,13 +130,14 @@ const joinTrees = (a, b) => {
   return out;
 };
 
-// The fold: every move in stamp order, a move that would put a node under
-// itself skipped. Gives each node's parent and place, and whether each
-// move took.
+// The fold: every move in stamp order — two moves of different nodes with
+// one stamp (forged: a clock never repeats) by node id, so the order is a
+// function of the moves alone — a move that would put a node under itself
+// skipped. Gives each node's parent and place, and whether each move took.
 const resolve = (tree) => {
   const all = [];
   for (const node of Object.keys(tree.moves)) for (const move of tree.moves[node]) all.push([node, move]);
-  all.sort((x, y) => byStamp(x[1], y[1]));
+  all.sort((x, y) => byStamp(x[1], y[1]) || byNode(x[0], y[0]));
   const parentOf = new Map();
   const placeOf = new Map();
   const isUnder = (ancestor, node) => {
@@ -170,17 +181,30 @@ const childrenOf = (tree) => {
 };
 
 // What the field reads as: the roots and their children, nested —
-// `[{ id, children }]`. What hangs under `$trash` or an unknown parent is
-// not there.
+// `[{ id, children }]`, MAX_DEPTH levels at most. What hangs under `$trash`,
+// an unknown parent or below the last level is not there.
 const renderTree = (tree) => {
   const { children } = childrenOf(tree);
-  const build = (parent) => (children.get(parent) ?? []).map((id) => ({ id, children: build(id) }));
-  return build(null);
+  const roots = (children.get(null) ?? []).map((id) => ({ id, children: [] }));
+  const stack = roots.map((node) => [node, 1]);
+  while (stack.length > 0) {
+    const [node, depth] = stack.pop();
+    if (depth >= MAX_DEPTH) continue;
+    for (const id of children.get(node.id) ?? []) {
+      const child = { id, children: [] };
+      node.children.push(child);
+      stack.push([child, depth + 1]);
+    }
+  }
+  return roots;
 };
 
+// The readers below take the fold (`childrenOf`) when the caller has it, so
+// a local move that needs several readings of one tree folds it once.
+
 // The nodes under `node`, itself included — what a move may not target.
-const subtree = (tree, node) => {
-  const { children } = childrenOf(tree);
+const subtree = (tree, node, folded = childrenOf(tree)) => {
+  const { children } = folded;
   const out = new Set([node]);
   const stack = [node];
   while (stack.length > 0) {
@@ -197,13 +221,38 @@ const subtree = (tree, node) => {
 
 // The ordered children of `parent` with their places — for a local move
 // that names a sibling to land after or before.
-const siblings = (tree, parent) => {
-  const { children, placeOf } = childrenOf(tree);
+const siblings = (tree, parent, folded = childrenOf(tree)) => {
+  const { children, placeOf } = folded;
   return (children.get(parent ?? null) ?? []).map((id) => ({ id, fi: placeOf.get(id)[0] }));
+};
+
+// The level `node` sits at in the fold — a root is 1, a node under a parent
+// the fold does not know counts up to it — and how tall the subtree under
+// `node` is, itself included (1 for a node not in the tree yet).
+const depthOf = (folded, node) => {
+  let depth = 0;
+  let at = node;
+  while (at !== null && at !== TRASH && folded.parentOf.has(at)) {
+    depth++;
+    at = folded.parentOf.get(at);
+  }
+  return depth;
+};
+const heightOf = (folded, node) => {
+  let height = 0;
+  const stack = [[node, 1]];
+  while (stack.length > 0) {
+    const [at, level] = stack.pop();
+    if (level > height) height = level;
+    for (const child of folded.children.get(at) ?? []) stack.push([child, level + 1]);
+  }
+  return height;
 };
 
 module.exports = {
   TRASH,
+  MAX_DEPTH,
+  MAX_FI,
   isNodeId,
   createTree,
   normalizeTree,
@@ -212,7 +261,10 @@ module.exports = {
   pruneTree,
   joinTrees,
   resolve,
+  childrenOf,
   renderTree,
   subtree,
   siblings,
+  depthOf,
+  heightOf,
 };

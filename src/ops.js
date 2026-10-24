@@ -263,11 +263,14 @@ const normalizeMeta = (meta) => {
       if (Object.keys(elements).length > 0) sets[field] = elements;
     }
   }
+  // The reset watermark first: it decides which of a block's runs are
+  // orphans (read from the head) and which wait for an anchor (bounded).
+  const base = stampOf(meta.base);
   const seqs = {};
   if (isPlainObject(meta.seqs)) {
     for (const field of Object.keys(meta.seqs)) {
       if (!isKey(field)) continue;
-      const seq = S.normalizeSeq(meta.seqs[field]);
+      const seq = S.normalizeSeq(meta.seqs[field], base);
       if (seq !== null) seqs[field] = seq;
     }
   }
@@ -279,7 +282,7 @@ const normalizeMeta = (meta) => {
       if (tree !== null) trees[field] = tree;
     }
   }
-  const normalized = { clock, base: stampOf(meta.base), deleted: stampOf(meta.deleted), counters, sets, seqs, trees };
+  const normalized = { clock, base, deleted: stampOf(meta.deleted), counters, sets, seqs, trees };
   if (Number.isInteger(meta.v)) normalized.v = meta.v;
   const purged = stampOf(meta.purged);
   if (purged) normalized.purged = purged;
@@ -531,15 +534,23 @@ const applySet = (entry, op, stamp, delta, rejected) => {
  * field-kind rule refused. Idempotent: applying an op twice, or an op older
  * than what the entry already reflects, changes nothing.
  */
+// A payload the engine does not admit: reported, so a local caller hears of
+// it (a bug) and a peer's is counted (`sync.op.rejected`), never silent.
+const malformed = (field, rejected) => {
+  rejected.push({ field: typeof field === 'string' ? field : null, reason: 'malformed' });
+};
+
 // A `splice` on a list or a text: the block takes the op (src/sequence.js),
 // the field reads as its walk. The first op of a field decides its kind by
 // what `content` is — a string or an array — and every later one carries
 // the same, so a cut that arrives before any run of the field still knows
-// what it belongs to.
-const applySeq = (entry, op, stamp, delta, rejected) => {
+// what it belongs to. `pendingMax` bounds what the field may hold waiting.
+const applySeq = (entry, op, stamp, delta, rejected, pendingMax) => {
   const { meta } = entry;
   const { key: field, value: payload } = op;
-  if (typeof field !== 'string' || !isKey(field) || !isKey(op.origin) || !isPlainObject(payload)) return;
+  if (typeof field !== 'string' || !isKey(field) || !isKey(op.origin) || !isPlainObject(payload)) {
+    return void malformed(field, rejected);
+  }
   if (own(meta.clock, field) !== undefined) {
     rejected.push({ field, reason: 'register' });
     return;
@@ -557,23 +568,26 @@ const applySeq = (entry, op, stamp, delta, rejected) => {
     return;
   }
   const kind = typeof payload.content === 'string' ? 't' : Array.isArray(payload.content) ? 'l' : null;
-  if (kind === null) return;
+  if (kind === null) return void malformed(field, rejected);
   const held = own(meta.seqs, field);
   if (held !== undefined && held.k !== kind) {
     rejected.push({ field, reason: seqKind(meta, field) });
     return;
   }
   if (compareClock(stamp, meta.base) < 0) return;
-  const result = S.applySplice(held ?? S.createSeq(kind), stamp, payload, meta.base);
+  const result = S.applySplice(held ?? S.createSeq(kind), stamp, payload, meta.base, pendingMax);
   settleSeq(entry, field, held, result, delta, rejected);
 };
 
 // What a sequence op leaves: the block pruned at once (what fell below the
 // base must look the same as if it had never landed, whichever side of the
-// reset it arrived on), the field read again, a refusal reported.
+// reset it arrived on), the field read again, a refusal reported — `bound`
+// with which bound, the count and the limit; `malformed` as such.
 const settleSeq = (entry, field, held, result, delta, rejected) => {
   const { meta } = entry;
-  if (result.reason === 'bound') rejected.push({ field, reason: 'bound' });
+  if (result.reason === 'bound') {
+    rejected.push({ field, reason: 'bound', detail: result.detail, count: result.count, max: result.max });
+  } else if (result.reason === 'malformed') malformed(field, rejected);
   if (!result.changed) return;
   const seq = S.prune(result.seq, meta.base);
   if (seq === null) {
@@ -594,11 +608,13 @@ const settleSeq = (entry, field, held, result, delta, rejected) => {
 // registers (src/sequence.js); refused on the other kind and on the other
 // kinds. A register or a mark for a field with no block yet names its kind
 // and waits, like a cut that comes before its run.
-const applyListOp = (entry, op, stamp, delta, rejected) => {
+const applyListOp = (entry, op, stamp, delta, rejected, pendingMax) => {
   const kind = op.type === 'mark' ? 't' : 'l';
   const { meta } = entry;
   const { key: field, value: payload } = op;
-  if (typeof field !== 'string' || !isKey(field) || !isKey(op.origin) || !isPlainObject(payload)) return;
+  if (typeof field !== 'string' || !isKey(field) || !isKey(op.origin) || !isPlainObject(payload)) {
+    return void malformed(field, rejected);
+  }
   if (own(meta.clock, field) !== undefined) {
     rejected.push({ field, reason: 'register' });
     return;
@@ -624,10 +640,10 @@ const applyListOp = (entry, op, stamp, delta, rejected) => {
   const block = held ?? S.createSeq(kind);
   const result =
     op.type === 'assign'
-      ? S.applyAssign(block, stamp, payload)
+      ? S.applyAssign(block, stamp, payload, meta.base, pendingMax)
       : op.type === 'move'
-        ? S.applyMove(block, stamp, payload, meta.base)
-        : S.applyMark(block, stamp, payload);
+        ? S.applyMove(block, stamp, payload, meta.base, pendingMax)
+        : S.applyMark(block, stamp, payload, meta.base, pendingMax);
   settleSeq(entry, field, held, result, delta, rejected);
 };
 
@@ -637,7 +653,9 @@ const applyListOp = (entry, op, stamp, delta, rejected) => {
 const applyTree = (entry, op, stamp, delta, rejected) => {
   const { meta } = entry;
   const { key: field, value: payload } = op;
-  if (typeof field !== 'string' || !isKey(field) || !isKey(op.origin) || !isPlainObject(payload)) return;
+  if (typeof field !== 'string' || !isKey(field) || !isKey(op.origin) || !isPlainObject(payload)) {
+    return void malformed(field, rejected);
+  }
   if (own(meta.clock, field) !== undefined) {
     rejected.push({ field, reason: 'register' });
     return;
@@ -657,6 +675,7 @@ const applyTree = (entry, op, stamp, delta, rejected) => {
   if (compareClock(stamp, meta.base) < 0) return;
   const held = own(meta.trees, field);
   const result = T.applyTreeMove(held ?? T.createTree(), stamp, payload);
+  if (result.reason === 'malformed') return void malformed(field, rejected);
   if (!result.changed) return;
   meta.trees[field] = result.tree;
   // A move that did not take is news to persist: a later move can make it count.
@@ -681,12 +700,14 @@ const erase = (entry, stamp, delta) => {
   meta.deleted = meta.purged;
 };
 
-const applyOp = (previous, op) => {
+const applyOp = (previous, op, limits = null) => {
   const entry = previous ? cloneEntry(previous) : createEntry();
   const { meta } = entry;
   const stamp = [op.ts, op.origin];
   const delta = {};
   const rejected = [];
+  // The node's bound on a sequence field's pending work (`sync.pendingMax`).
+  const pendingMax = limits?.pendingMax ?? S.PENDING_MAX;
 
   // A purged record takes nothing more — not a newer write, not a revival.
   if (meta.purged && op.type !== 'purge' && op.type !== 'merge') {
@@ -768,9 +789,9 @@ const applyOp = (previous, op) => {
   } else if (op.type === 'add' || op.type === 'remove') {
     applySet(entry, op, stamp, delta, rejected);
   } else if (op.type === 'splice') {
-    applySeq(entry, op, stamp, delta, rejected);
+    applySeq(entry, op, stamp, delta, rejected, pendingMax);
   } else if (op.type === 'assign' || op.type === 'move' || op.type === 'mark') {
-    applyListOp(entry, op, stamp, delta, rejected);
+    applyListOp(entry, op, stamp, delta, rejected, pendingMax);
   } else if (op.type === 'tree') {
     applyTree(entry, op, stamp, delta, rejected);
   }

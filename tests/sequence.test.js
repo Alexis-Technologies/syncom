@@ -660,4 +660,179 @@ test('sequence engine', async (t) => {
       'and the next keystroke extends it',
     );
   });
+
+  await t.test(
+    'a run is extended by its origin alone: a stranger’s extension is malformed, whichever arrives first',
+    () => {
+      // A types abc and types on; a validly signed stranger extends A's run at
+      // the same place. Without the rule the result would be whoever came first.
+      const a = node('A');
+      const first = insert(a, 0, 'abc');
+      const run = S.runKey(first.ts, 'A');
+      const own = { ts: tick(), origin: 'A', payload: { run, from: 3, content: 'de' } };
+      const stranger = { ts: tick(), origin: 'EVIL', payload: { run, from: 3, content: 'XY' } };
+      const nodes = [
+        [own, stranger],
+        [stranger, own],
+      ].map((order) => {
+        const n = node('N');
+        apply(n, first);
+        for (const op of order) assert.strictEqual(apply(n, op).reason, op === stranger ? 'malformed' : null);
+        return n;
+      });
+      for (const n of nodes) assert.strictEqual(read(n), 'abcde');
+      assert.deepStrictEqual(nodes[1].seq, nodes[0].seq);
+      assert.deepStrictEqual(S.join(nodes[0].seq, nodes[1].seq), S.join(nodes[1].seq, nodes[0].seq));
+    },
+  );
+
+  await t.test(
+    'a run and a field are bounded in slots: a gap bomb is dropped at the door, typing past the cap starts a new run',
+    () => {
+      // A snapshot block with a 300-million-slot gap would be expanded element by element.
+      assert.strictEqual(S.normalizeRle('t', [3e8]), null);
+      assert.strictEqual(S.normalizeRle('t', ['ab', S.MAX_RUN - 1]), null, 'present items and gaps add up');
+      assert.deepStrictEqual(S.normalizeRle('t', ['ab', S.MAX_RUN - 2]), ['ab', S.MAX_RUN - 2]);
+      assert.strictEqual(S.normalizeSeq({ k: 't', ts: 1, runs: { '1:A': ['^', [3e8]] } }), null);
+      // Four full runs fill a field; a block holding one slot more is not taken as state.
+      const runs = Object.fromEntries([1, 2, 3, 4].map((i) => [`${i}:A`, ['^', [S.MAX_RUN]]]));
+      const full = S.normalizeSeq({ k: 't', ts: 4, runs });
+      assert.strictEqual(S.rleLength(full.runs['4:A'][1]), S.MAX_RUN);
+      assert.strictEqual(S.normalizeSeq({ k: 't', ts: 5, runs: { ...runs, '5:A': ['^', ['x']] } }), null);
+      // The op path refuses the same: no extension of a full run, no insert into a full field.
+      const a = node('A');
+      a.seq = { k: 't', ts: 1, runs: { '1:A': ['^', [S.MAX_RUN]] } };
+      const ext = apply(a, { ts: tick(), origin: 'A', payload: { run: '1:A', from: S.MAX_RUN, content: 'x' } });
+      assert.deepStrictEqual([ext.changed, ext.reason, ext.detail, ext.max], [false, 'bound', 'run', S.MAX_RUN]);
+      const big = apply(a, { ts: tick(), origin: 'A', payload: { at: '^', content: 'x'.repeat(S.MAX_RUN + 1) } });
+      assert.deepStrictEqual([big.reason, big.detail, big.count], ['bound', 'run', S.MAX_RUN + 1]);
+      a.seq = full;
+      const over = apply(a, { ts: tick(), origin: 'A', payload: { at: '^', content: 'x' } });
+      const expected = ['bound', 'field', S.MAX_FIELD + 1, S.MAX_FIELD];
+      assert.deepStrictEqual([over.reason, over.detail, over.count, over.max], expected);
+      // Typing at the end of a full run of one's own anchors a new run after its
+      // last element — the same reading, one key more.
+      const atCap = S.buildIndex({ k: 't', ts: 1, runs: { '1:A': ['^', [S.MAX_RUN - 1, 'x']] } });
+      assert.deepStrictEqual(S.placeInsert(atCap, 1, 'A'), { at: `>${S.elemKey('1:A', S.MAX_RUN - 1)}` });
+      const short = S.buildIndex({ k: 't', ts: 1, runs: { '1:A': ['^', [S.MAX_RUN - 2, 'x']] } });
+      assert.deepStrictEqual(S.placeInsert(short, 1, 'A'), { run: '1:A', from: S.MAX_RUN - 1 });
+    },
+  );
+
+  await t.test(
+    'the snapshot path is bounded like the op path: pending work past it, self-anchored runs, typed-off origins',
+    () => {
+      // 4 097 pending cuts of runs not here: a block no peer could have built through ops.
+      const cuts = {};
+      for (let i = 1; i <= S.PENDING_MAX + 1; i++) cuts[`${i}:Z`] = [[0, 1]];
+      const flood = { k: 't', ts: 1, runs: { '1:A': ['^', ['a']] }, cuts };
+      assert.strictEqual(S.normalizeSeq(flood), null);
+      delete cuts[`${S.PENDING_MAX + 1}:Z`];
+      assert.ok(S.normalizeSeq(flood) !== null, 'at the bound it is taken');
+      // A run anchored at an element as new as itself or newer is nobody's; a mark spanning one, the same.
+      const loops = { '5:X': ['>5:0:X', ['x']], '6:X': ['<7:0:X', ['y']], '8:X': ['>7:0:X', ['z']] };
+      assert.deepStrictEqual(Object.keys(S.normalizeSeq({ k: 't', ts: 8, runs: loops }).runs), ['8:X']);
+      const marks = { '5:B': ['>1:0:A', '<5:0:B', 'b', true, 0], '6:B': ['^', '$', 'b', true, 0] };
+      const marked = S.normalizeSeq({ k: 't', ts: 6, runs: { '1:A': ['^', ['ab']] }, marks });
+      assert.deepStrictEqual(Object.keys(marked.marks), ['6:B']);
+      // A register's origin is a string: a number or null is not one, whatever String() would say.
+      const vals = { '1:0:A': [5, 7, 'x'], '1:1:A': [5, null, 'y'] };
+      const pos = { '1:0:A': [5, 'B', '2:B'] };
+      const typed = S.normalizeSeq({ k: 'l', ts: 5, runs: { '1:A': ['^', [[1, 2]]] }, vals, pos });
+      assert.strictEqual(typed.vals, undefined);
+      assert.deepStrictEqual(typed.pos, pos);
+      // Orphans are read under the entry's base: a run anchored below it is a root, not pending.
+      const orphans = {};
+      for (let i = 0; i <= S.PENDING_MAX; i++) orphans[`${20 + i}:A`] = ['>5:0:Q', ['x']];
+      assert.strictEqual(S.normalizeSeq({ k: 't', ts: 20, runs: orphans }), null, 'without the base they all wait');
+      assert.ok(
+        S.normalizeSeq({ k: 't', ts: 20, runs: orphans }, [10, 'R']) !== null,
+        'under it they read from the head',
+      );
+    },
+  );
+
+  await t.test(
+    'registers of elements not here and marks switched off before they arrive count against the bound',
+    () => {
+      const step = (n, result) => {
+        if (result.changed) n.seq = result.seq;
+        return result;
+      };
+      const a = node('A', 'l');
+      insert(a, 0, [1, 2]);
+      const run = Object.keys(a.seq.runs)[0];
+      const assign = (elem, max) => step(a, S.applyAssign(a.seq, [tick(), 'B'], { elem, value: 'v' }, null, max));
+      assert.strictEqual(assign(S.elemKey(run, 0), 1).changed, true, 'a held element is never pending');
+      assert.strictEqual(assign('9:0:Z', 1).changed, true, 'the first orphan fits a bound of one');
+      const stop = assign('9:1:Z', 1);
+      assert.deepStrictEqual(
+        [stop.changed, stop.reason, stop.detail, stop.count, stop.max],
+        [false, 'bound', 'pending', 1, 1],
+      );
+      assert.strictEqual(
+        assign('9:0:Z', 1).changed,
+        true,
+        'a newer value for an orphan already counted is no more pending',
+      );
+      const payload = { elem: '9:2:Z', cut: [run, 0, 1], at: '^', value: 1 };
+      const moved = step(a, S.applyMove(a.seq, [tick(), 'B'], payload, null, 1));
+      assert.deepStrictEqual([moved.changed, moved.reason], [false, 'bound'], 'a move names its element: pending too');
+      assert.strictEqual(S.pendingCount(a.seq, index(a)), 1);
+      const text = node('T');
+      insert(text, 0, 'ab');
+      const off = (id, max) => step(text, S.applyMark(text.seq, [tick(), 'B'], { off: id }, null, max));
+      assert.strictEqual(off('50:B', 1).changed, true);
+      const second = off('51:B', 1);
+      assert.deepStrictEqual([second.changed, second.reason], [false, 'bound']);
+      assert.strictEqual(off('50:B', 1).changed, false, 'off twice is nothing, not a refusal');
+      assert.strictEqual(S.pendingCount(text.seq, index(text)), 1);
+    },
+  );
+
+  await t.test('join and a repeated cut are idempotent: a pending cut is waited for once', () => {
+    const a = node('A');
+    const waiting = { ts: tick(), origin: 'B', payload: { cut: [['2:Z', 0, 1]], content: '' } };
+    assert.strictEqual(apply(a, waiting).changed, true);
+    assert.strictEqual(apply(a, waiting).changed, false, 'the same op again changes nothing');
+    const joined = S.join(a.seq, a.seq);
+    assert.deepStrictEqual(joined, a.seq);
+    assert.deepStrictEqual(S.join(joined, joined), a.seq);
+    assert.strictEqual(S.pendingCount(a.seq, index(a)), 1);
+    // A cut running past a run's end: what overflows waits once too.
+    const b = node('B');
+    const first = insert(b, 0, 'abc');
+    const over = { ts: tick(), origin: 'C', payload: { cut: [[S.runKey(first.ts, 'B'), 2, 5]], content: '' } };
+    assert.strictEqual(apply(b, over).changed, true);
+    assert.strictEqual(apply(b, over).changed, false);
+    assert.deepStrictEqual(b.seq.cuts, { [S.runKey(first.ts, 'B')]: [[3, 4]] });
+    assert.strictEqual(read(b), 'ab');
+  });
+
+  await t.test('a mark switched off before it arrives leaves one block, whichever came first', () => {
+    const text = node('T');
+    const first = insert(text, 0, 'abc');
+    const m = tick();
+    const o = tick();
+    const mark = { ts: m, origin: 'B', payload: { start: '^', end: '$', key: 'bold', value: true } };
+    const off = { ts: o, origin: 'B', payload: { off: S.runKey(m, 'B') } };
+    const run = (ops) => {
+      const n = node('N');
+      apply(n, first);
+      for (const op of ops) {
+        const r = S.applyMark(n.seq, [op.ts, op.origin], op.payload);
+        if (r.changed) n.seq = r.seq;
+      }
+      return n.seq;
+    };
+    const ab = run([mark, off]);
+    const ba = run([off, mark]);
+    assert.deepStrictEqual(ba, ab);
+    assert.deepStrictEqual(ab.marks[S.runKey(m, 'B')], ['^', '$', 'bold', true, S.OFF]);
+    assert.strictEqual(ab.ts, m, 'a placeholder counts by the id it names, as stampsMax does');
+    assert.deepStrictEqual(S.normalizeSeq(JSON.parse(JSON.stringify(ba))), ba);
+    assert.deepStrictEqual(S.join(ab, run([off])), ab, 'the filled mark wins the join over its placeholder');
+    assert.deepStrictEqual(S.join(run([off]), ab), ab);
+    assert.deepStrictEqual(S.spans(S.buildIndex(ab), ab), [{ text: 'abc', marks: {} }], 'and off is off');
+  });
 });

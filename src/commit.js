@@ -57,12 +57,20 @@ const HINTS = {
   list: 'a list; use splice(), push(), setAt() or move()',
   text: 'a text; use splice(), push(), updateText() or mark()',
   tree: 'a tree; use treeMove() or treeRemove()',
-  bound: 'past the bound on pending work',
+  bound: 'past a bound: pending work, a run or the field as a whole (see Costs and limits)',
 };
+// `malformed` is a payload the engine does not admit after the arguments
+// were checked — a bug in the caller or here, never a peer's doing on this
+// path — so it is a TypeError, not a coded failure.
 const refuse = (id, rejected) => {
   if (rejected.length === 0) return;
-  const [{ field, reason }] = rejected;
-  throw new SyncomError('FIELD_KIND', `Field ${field} of record ${id} is ${HINTS[reason]}`, { field, kind: reason });
+  const [{ field, reason, detail, count, max }] = rejected;
+  if (reason === 'malformed') {
+    throw new TypeError(`Field ${field} of record ${id}: the engine does not admit this payload`);
+  }
+  const fields = { field, kind: reason };
+  if (detail !== undefined) Object.assign(fields, { detail, count, max });
+  throw new SyncomError('FIELD_KIND', `Field ${field} of record ${id} is ${HINTS[reason]}`, fields);
 };
 
 // A swap's expectation, checked inside the queue against the record as it
@@ -237,22 +245,25 @@ const resolveMark = (core, id, payload, current) => {
 // A tree move names a parent and a sibling to land after or before; what
 // travels is the place among the siblings as a fractional index
 // (src/order.js) between its neighbours — decided inside the queue, against
-// the tree as it is. A parent in the node's own subtree is CYCLE, a sibling
-// not under the parent NOT_FOUND; a move to where the node already is makes
-// no op (null). Siblings that share an index order by stamp, and a node put
-// after one of them lands after all of them. Another kind under the field
-// is left to applyOp to refuse.
+// the tree as it is, folded once. A parent in the node's own subtree is
+// CYCLE, a sibling not under the parent NOT_FOUND; a move to where the node
+// already is makes no op (null). A move that would reach below the level a
+// tree reads (T.MAX_DEPTH), or a place with no room left between its
+// neighbours (an index past T.MAX_FI), is OUT_OF_RANGE. Siblings that share
+// an index order by stamp, and a node put after one of them lands after all
+// of them. Another kind under the field is left to applyOp to refuse.
 const resolveTree = (core, id, payload, current) => {
   const { key, node, parent, after, before } = payload;
   const meta = current?.meta;
   const held = meta && Object.hasOwn(meta.trees ?? {}, key) ? meta.trees[key] : undefined;
   const tree = held ?? T.createTree();
-  if (parent !== null && parent !== T.TRASH && T.subtree(tree, node).has(parent)) {
+  const folded = T.childrenOf(tree);
+  if (parent !== null && parent !== T.TRASH && T.subtree(tree, node, folded).has(parent)) {
     const where = parent === node ? 'itself' : `${parent}, a node under it`;
     const message = `Node ${node} of field ${key} of record ${id} cannot go under ${where}`;
     throw new SyncomError('CYCLE', message, { id, field: key, node, parent });
   }
-  const all = T.siblings(tree, parent);
+  const all = T.siblings(tree, parent, folded);
   const was = all.findIndex((s) => s.id === node);
   const sibs = was < 0 ? all : all.filter((s) => s.id !== node);
   let at = sibs.length;
@@ -266,6 +277,13 @@ const resolveTree = (core, id, payload, current) => {
     at = after !== undefined ? i + 1 : i;
   }
   if (was >= 0 && (at === was || parent === T.TRASH)) return null;
+  if (parent !== T.TRASH) {
+    const depth = (parent === null ? 0 : T.depthOf(folded, parent)) + T.heightOf(folded, node);
+    if (depth > T.MAX_DEPTH) {
+      const message = `Node ${node} of field ${key} of record ${id} would reach level ${depth}; a tree reads ${T.MAX_DEPTH}`;
+      throw new SyncomError('OUT_OF_RANGE', message, { id, field: key, node, depth, max: T.MAX_DEPTH });
+    }
+  }
   const lower = at > 0 ? sibs[at - 1].fi : null;
   let upper = at < sibs.length ? sibs[at].fi : null;
   if (lower !== null && upper !== null && upper <= lower) {
@@ -277,7 +295,19 @@ const resolveTree = (core, id, payload, current) => {
       }
     }
   }
-  return { node, parent, fi: between(lower, upper) };
+  const fi = between(lower, upper);
+  if (fi.length > T.MAX_FI) {
+    const message = `No room left between the neighbours of node ${node} in field ${key} of record ${id}; move a sibling away or reset the field`;
+    throw new SyncomError('OUT_OF_RANGE', message, {
+      id,
+      field: key,
+      node,
+      reason: 'fi',
+      length: fi.length,
+      max: T.MAX_FI,
+    });
+  }
+  return { node, parent, fi };
 };
 
 // Of a remove's observed tags, those of one origin; an element with none is left out.
@@ -345,7 +375,7 @@ const assertUnique = async (core, id, entry) => {
 // changes nothing.
 const validateLocal = async (core, op, current, visible, ctx) => {
   const { id, type } = op;
-  let { entry, changed, delta, rejected } = applyOp(current, op);
+  let { entry, changed, delta, rejected } = applyOp(current, op, core.limits);
   refuse(id, rejected);
   if (!changed) return null;
   const def = core.definitionOf(entry.data);
@@ -358,7 +388,7 @@ const validateLocal = async (core, op, current, visible, ctx) => {
       if (type === 'write') op.data = validated;
       else op.data = foldSet(op.data, validated, visible ? project(def, id, await core.view(id, current)) : {});
       ctx.data = op.data;
-      ({ entry, changed, delta, rejected } = applyOp(current, op));
+      ({ entry, changed, delta, rejected } = applyOp(current, op, core.limits));
       refuse(id, rejected);
       if (!changed) return null;
     }
@@ -456,6 +486,9 @@ const commitLocal = async (core, type, id, payload, options) => {
     payload = { ...payload, data: ctx.data };
   }
   const op = prepareOp(core, type, id, payload, current, who, from);
+  // A tree move to where the node already is: nothing to write (resolveTree
+  // hands back null instead of a place).
+  if (type === 'tree' && op.value === null) return null;
   const applied = await validateLocal(core, op, current, visible, ctx);
   if (applied === null) return null;
   // The validator may have filled the field the scope reads (a default):

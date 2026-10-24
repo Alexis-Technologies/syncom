@@ -37,7 +37,8 @@ src/shape.js              isPlainObject, asJson, isRecordId, isStreamName, wellF
 src/sequence.js           the sequence engine behind the list and text kinds: Fugue runs, run-length content, the walk,
                           local placement, pending ops, pos/vals/marks registers, cursors, prune and join — requires vector.js only
 src/tree.js               the tree kind: per node its stamped moves, the fold in stamp order with the cycle check (Kleppmann
-                          2021, Loro), prune and join — requires vector.js only
+                          2021, Loro), MAX_DEPTH levels read, prune and join — requires vector.js and order.js (a place is a
+                          fractional index or the move is malformed)
 src/order.js              fractional indexes over a 62-letter alphabet (Loro's rule, MIT) — no requires; the core uses it for a tree's places
 src/history.js            the past out of the log: a version (event id / stamp / vector) as a cut, the exact start above droppedTs, the fold
 src/tags.js               Tags — named versions kept locally: tags.json, a catalog per tag, copy-on-write record files in the newest tag
@@ -201,7 +202,11 @@ docs/                     VitePress site
   list, a list over a text, a text over a tree. Do not add a path that lets
   kinds meet — it cannot be made to commute. A list or a text is `meta.seqs[field]`, a block of
   `src/sequence.js` (Fugue runs anchored `^`/`>e`/`<e`, run-length content with
-  tombstones as lengths, pending runs/cuts/extensions under `PENDING_MAX`):
+  tombstones as lengths; pending runs/cuts/extensions, registers of elements
+  not here and off-placeholders of marks under `sync.pendingMax` — `PENDING_MAX`
+  4096 — a run under `MAX_RUN` and a field under `MAX_FIELD` slots, enforced on
+  the op path AND in `normalizeSeq` so a snapshot buys nothing an op could not;
+  a run is extended by its origin alone, anything else is malformed):
   `splice` (code `/`) carries `{ cut, at | run/from, content }` in `key`/`value`,
   `content` naming the kind even when empty; `assign` (`=`, `{ elem, value }`)
   and `move` (`^`, `{ elem, cut, at, value }`) are a list's per-element value
@@ -217,14 +222,26 @@ docs/                     VitePress site
   a cut never bumps it, so meta is order-free. A tree is `meta.trees[field]`,
   a block of `src/tree.js`: `tree` (code `~`, `{ node, parent, fi }`) appends
   one stamped move per node and the field reads as the fold of every move in
-  stamp order with Kleppmann's cycle check — an ineffective move is KEPT (a
-  later move can make it count), `'$trash'` is the removal parent, siblings
-  order by `fi` (a fractional index from `src/order.js`, the one place the
-  core uses it) then by stamp; `resolveTree` in `src/commit.js` mints `fi`
-  INSIDE the queue between the neighbours, decides `CYCLE` and `NOT_FOUND`
-  there, and hands back `null` (no op) for a move to where the node is. The
+  stamp order — ties (forged equal stamps) by node id — with Kleppmann's cycle
+  check — an ineffective move is KEPT (a later move can make it count),
+  `'$trash'` is the removal parent, siblings order by `fi` (a fractional index
+  from `src/order.js`, `order.isKey` or the move is malformed, at most `MAX_FI`
+  chars) then by stamp, and the render shows `MAX_DEPTH` levels (deeper is
+  folded, not shown — a deep chain must never throw on the apply path);
+  `resolveTree` in `src/commit.js` folds the tree ONCE (`childrenOf`, handed
+  to `subtree`/`siblings`/`depthOf`/`heightOf`), mints `fi` INSIDE the queue
+  between the neighbours, decides `CYCLE`, `NOT_FOUND` and `OUT_OF_RANGE`
+  (depth; no room for a place) there, and hands back `null` for a move to
+  where the node is — `commitLocal` returns before `applyOp` on it. The
   fuzz in `tests/suites/sync-engine.js` compares the blocks and the move
   logs across nodes, not only what they read as.
+- **A payload the engine does not admit is never silent.** `applyOp` reports
+  `reason: 'malformed'` in `rejected` (`malformed()` in `src/ops.js`): on the
+  local path `refuse()` in `src/commit.js` throws a `TypeError` — the
+  arguments were checked, so this is a bug — and from a peer it is
+  `OP_REFUSED{reason:'malformed'}`, counted in `syncom.ops.rejected`, the op
+  still logged and relayed as a no-op (a dirk, never a gap). A `bound`
+  refusal carries `detail` (`pending`/`run`/`field`), `count` and `max`.
 - **A sequence block is never mutated in place; its index is cached by
   identity.** `seqIndexOf(entry, field)` in `src/ops.js` keeps `buildIndex`'s
   result on the entry (`entry.seqIndex[field] = { seq, base, index }`, carried

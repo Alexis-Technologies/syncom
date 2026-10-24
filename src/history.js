@@ -81,12 +81,13 @@ const exactStart = (entries, droppedTs) => {
 };
 
 // The fold of `entries` from `start`: one step per entry — the entry of the
-// log, the record after it, what the op changed.
-const fold = (entries, start) => {
+// log, the record after it, what the op changed. `limits` are the node's
+// (`sync.pendingMax`): what it applied under them folds back under them.
+const fold = (entries, start, limits = null) => {
   const steps = [];
   let entry = null;
   for (let i = start; i < entries.length; i++) {
-    const applied = applyOp(entry, entries[i].op);
+    const applied = applyOp(entry, entries[i].op, limits);
     entry = applied.entry;
     steps.push({ logged: entries[i], entry, delta: applied.delta });
   }

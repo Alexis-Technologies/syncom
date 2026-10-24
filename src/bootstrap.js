@@ -116,7 +116,7 @@ const mergeOne = async (batch, record) => {
   if (from) op.from = from;
   if (data !== undefined) op.data = data;
   if (meta !== undefined) op.meta = meta;
-  const { entry, changed, delta } = applyOp(current, op);
+  const { entry, changed, delta } = applyOp(current, op, core.limits);
   if (!changed) {
     if (otel.enabled) otel.recordCommit('merge', 'noop', now() - started);
     return;

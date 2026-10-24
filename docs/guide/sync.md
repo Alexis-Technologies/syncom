@@ -506,6 +506,7 @@ once `close()` was called is refused at once.
 | `retention.ops` | `10000` | Ops kept in the log before the oldest segment is dropped |
 | `retention.days` | — | Age after which a segment is dropped |
 | `maxSkew` | `86400000` | How far ahead of this node's clock a peer's stamp may be, in ms; beyond it the op is `malformed`. `Infinity` disables |
+| `pendingMax` | `4096` | How much pending work a list or text field takes from ops that ran ahead of what they depend on — runs waiting for their anchor, cuts and extensions for their run, registers and switched-off marks for elements not here — before an op is refused (`OP_REFUSED`, reason `bound`, with `detail`, `count` and `max`) and a snapshot block is dropped. A refusal is final on this node, so a mesh with several hosts raises it rather than lowers it. `Infinity` disables |
 | `maxOutbox` | `10000` | Ops queued for one peer beyond this are dropped and the peer is `behind`; the recovery pushes what it lacks from the vector |
 | `log.rollAfter` | `64` | Appended batches per sealed segment |
 | `pageSize` | `500` | Ops per push, records per snapshot page |

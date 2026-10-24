@@ -270,6 +270,9 @@ expectAssignable<syncom.FieldKind>('set');
 expectAssignable<syncom.FieldKind>('list');
 expectAssignable<syncom.FieldKind>('text');
 expectAssignable<syncom.RefusalReason>('bound');
+expectAssignable<syncom.RefusalReason>('malformed');
+expectAssignable<syncom.Refusal>({ field: 'body', reason: 'bound', detail: 'pending', count: 1, max: 4096 });
+expectAssignable<syncom.Refusal>({ field: null, reason: 'malformed' });
 expectError<syncom.FieldKind>('map');
 expectAssignable<syncom.SetRemoval>(['x', { a: 1 }]);
 expectAssignable<EntityDefinition>({ search: ['title', 'body'] });
@@ -556,6 +559,8 @@ expectAssignable<syncom.SharedLog>({
 expectAssignable<StorageOptions>({ sync: { maxSkew: 60_000 } });
 expectAssignable<StorageOptions>({ sync: { maxSkew: Infinity } });
 expectError(syncom.open({ sync: { maxSkew: '1h' } }));
+expectAssignable<StorageOptions>({ sync: { pendingMax: 8192 } });
+expectError(syncom.open({ sync: { pendingMax: 'many' } }));
 storage.applyRemote([], { adoptFrom: 'host' }).then((result) => {
   expectType<number>(result.malformed);
   expectType<number>(result.gaps);

@@ -342,6 +342,53 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     }
   });
 
+  await t.test(
+    'a hostile snapshot is dropped at the door: a gap bomb, pending work past the bound, a stranger extending a run',
+    async (t2) => {
+      const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage);
+      const a = mesh.get('A');
+      const b = mesh.get('B');
+      const id = await a.insert({ title: 'doc' });
+      await a.splice(id, 'body', 0, 0, 'hello');
+      await settle([a, b]);
+      const record = (await a.snapshot()).records.find((r) => r.id === id);
+      const run = Object.keys(record.meta.seqs.body.runs)[0];
+      const forged = (edit) => {
+        const copy = JSON.parse(JSON.stringify(record));
+        edit(copy.meta.seqs.body);
+        return copy;
+      };
+      // A run with a 300-million-slot gap would be expanded element by
+      // element: dropped at the door, the field as it was.
+      await b.mergeSnapshot([forged((seq) => (seq.runs['1:Z'] = ['^', [3e8]]))]);
+      assert.strictEqual((await b.get(id)).body, 'hello');
+      // Pending work past the bound: the block is not taken as state, and the bound is not spent.
+      await b.mergeSnapshot([
+        forged((seq) => {
+          seq.cuts = {};
+          for (let i = 1; i <= 4097; i++) seq.cuts[`${i}:Z`] = [[0, 1]];
+        }),
+      ]);
+      assert.strictEqual((await b.get(id)).body, 'hello');
+      const errors = [];
+      b.on('error', (error) => errors.push(`${error.code}:${error.rejected?.[0]?.reason}`));
+      // A cut of a run stamped after the record's insert (below it, the reset rule would prune it as moot).
+      const late = { origin: 'late', seq: 1, ts: Date.now() + 2000, type: 'splice', id, key: 'body' };
+      late.value = { cut: [[`${Date.now() + 1000}:Q`, 0, 1]], content: '' };
+      assert.strictEqual((await b.applyRemote([late])).applied, 1, 'an honest op that ran ahead still waits here');
+      // A stranger extending A's run: refused, counted, never applied; A's own extension lands.
+      const stranger = { origin: 'stranger', seq: 1, ts: Date.now() + 2, type: 'splice', id, key: 'body' };
+      stranger.value = { run, from: 5, content: 'XX' };
+      await b.applyRemote([stranger]);
+      assert.strictEqual((await b.get(id)).body, 'hello');
+      assert.deepStrictEqual(errors, ['OP_REFUSED:malformed']);
+      await a.push(id, 'body', '!');
+      await settle([a, b]);
+      assert.strictEqual((await b.get(id)).body, 'hello!');
+      await assertConverged([a, b]);
+    },
+  );
+
   await t.test('a random workload over a mesh converges (seeded)', async (t2) => {
     const names = ['A', 'B', 'C', 'D'];
     const edges = [

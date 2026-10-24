@@ -1286,3 +1286,66 @@ test('a snapshot page is joined as one batch', async (t) => {
     },
   );
 });
+
+test('Storage: the bounds of the sequence and tree engines', async (t) => {
+  await t.test(
+    'open({ sync: { pendingMax } }) bounds a peer’s pending work; a refusal is reported with its count',
+    async (t2) => {
+      const { storage } = await openTemp(t2, { sync: { pendingMax: 2 } });
+      const errors = [];
+      storage.on('error', (error) => errors.push(error));
+      const id = await storage.insert({ title: 'doc' });
+      await storage.splice(id, 'body', 0, 0, 'ab');
+      // The runs the cuts wait for are stamped after the record's insert: a
+      // cut of a run below the reset watermark is moot and pruned at once.
+      const soon = Date.now() + 1000;
+      const waiting = (seq, origin) =>
+        remoteOp('peer', seq, 'splice', id, {
+          ts: soon + 1000 + seq,
+          key: 'body',
+          value: { cut: [[`${soon}:${origin}`, 0, 1]], content: '' },
+        });
+      const result = await storage.applyRemote([waiting(1, 'Z'), waiting(2, 'Y'), waiting(3, 'X')]);
+      assert.strictEqual(result.applied, 3, 'a refused op is accepted into the log, like a kind clash');
+      assert.deepStrictEqual(
+        errors.map((error) => [error.code, error.rejected]),
+        [['OP_REFUSED', [{ field: 'body', reason: 'bound', detail: 'pending', count: 2, max: 2 }]]],
+      );
+      assert.strictEqual((await storage.get(id)).body, 'ab');
+      const bad = (pendingMax) => syncom.open({ path: `${storage.path}-bad`, logger: false, sync: { pendingMax } });
+      assert.throws(() => bad(0), TypeError);
+      assert.throws(() => bad('many'), TypeError);
+    },
+  );
+
+  await t.test(
+    'treeMove refuses a node that would read below MAX_DEPTH levels, and a place with no room between its neighbours',
+    async (t2) => {
+      const { MAX_DEPTH, MAX_FI } = require('../src/tree.js');
+      const { storage } = await openTemp(t2);
+      const id = await storage.insert({});
+      let parent = null;
+      for (let i = 1; i <= MAX_DEPTH; i++) {
+        await storage.treeMove(id, 'outline', `n${i}`, parent);
+        parent = `n${i}`;
+      }
+      const deeper = { code: 'OUT_OF_RANGE', depth: MAX_DEPTH + 1, max: MAX_DEPTH };
+      await assert.rejects(() => storage.treeMove(id, 'outline', 'deep', parent), deeper);
+      // A subtree counts whole: two levels fit under the level before the last but one, not under the last but one.
+      await storage.treeMove(id, 'outline', 'pair');
+      await storage.treeMove(id, 'outline', 'child', 'pair');
+      await assert.rejects(() => storage.treeMove(id, 'outline', 'pair', `n${MAX_DEPTH - 1}`), {
+        code: 'OUT_OF_RANGE',
+      });
+      await storage.treeMove(id, 'outline', 'pair', `n${MAX_DEPTH - 2}`);
+      // A peer's place with no room after it: the next local place would need an index longer than MAX_FI.
+      const edge = { key: 'outline', value: { node: 'edge', parent: null, fi: `${'z'.repeat(MAX_FI - 1)}V` } };
+      await storage.applyRemote([remoteOp('peer', 1, 'tree', id, edge)]);
+      const noRoom = { code: 'OUT_OF_RANGE', reason: 'fi', max: MAX_FI };
+      await assert.rejects(() => storage.treeMove(id, 'outline', 'next', null, { after: 'edge' }), noRoom);
+      await storage.treeMove(id, 'outline', 'next', null, { before: 'edge' });
+      const roots = (await storage.get(id)).outline.map((node) => node.id);
+      assert.deepStrictEqual(roots.slice(-2), ['next', 'edge']);
+    },
+  );
+});
