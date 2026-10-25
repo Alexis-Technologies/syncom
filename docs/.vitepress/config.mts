@@ -165,6 +165,7 @@ export default withMermaid({
             items: [
               { text: 'Storage', link: '/guide/storage' },
               { text: 'Schema and validation', link: '/guide/schema' },
+              { text: 'TypeScript', link: '/guide/typescript' },
               { text: 'Queries', link: '/guide/query' },
               { text: 'Lists, text and trees', link: '/guide/lists' },
               { text: 'Versions and history', link: '/guide/versions' },

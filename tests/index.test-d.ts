@@ -1,6 +1,7 @@
-import { expectAssignable, expectError, expectType } from 'tsd';
+import { expectAssignable, expectError, expectNotAssignable, expectType } from 'tsd';
 import * as syncom from '../index.js';
 import type {
+  RecordData,
   CrdtDelta,
   EntityDefinition,
   Fsi,
@@ -261,7 +262,7 @@ expectType<Promise<string>>(storage.insert({ a: 1 }));
 expectType<Promise<string>>(storage.insert({ a: 1 }, { encrypted: true }));
 expectType<Promise<void>>(storage.set('id', { a: 1 }, { encrypted: false }));
 expectAssignable<StorageOptions>({ encrypted: true });
-expectType<Promise<unknown>>(storage.get('id'));
+expectType<Promise<RecordData | null>>(storage.get('id'));
 expectType<Promise<boolean>>(storage.has('id'));
 expectType<Promise<boolean>>(storage.swap('id', { a: 2 }, { a: 1 }));
 expectType<Promise<SyncomRecord>>(storage.record('id'));
@@ -271,8 +272,8 @@ expectType<boolean>(storage.hasRecord('id'));
 expectAssignable<typeof SyncomCollection>(syncom.Storage.Collection);
 declare const record: SyncomRecord;
 expectType<string>(record.id);
-expectType<Promise<unknown>>(record.data());
-expectType<Record<string, unknown>>(record.delta());
+expectType<Promise<RecordData | null>>(record.data());
+expectType<Partial<RecordData>>(record.delta());
 record.on('update', (data, delta) => {
   expectType<unknown>(data);
   expectType<unknown>(delta);
@@ -556,16 +557,16 @@ expectType<Promise<syncom.OpLog>>(new syncom.OpLog('base', { onRoll: (roll) => v
 expectType<syncom.Logger>(storage.logger);
 expectType<number>(log.latestTs);
 expectType<number>(log.droppedTs);
-expectType<Promise<unknown>>(storage.get('id', { at: 'epoch.5' }));
-expectType<Promise<unknown>>(storage.get('id', { at: Date.now() }));
-expectType<Promise<unknown>>(storage.get('id', { at: new Date() }));
-expectType<Promise<unknown>>(storage.get('id', { at: { vector: storage.vector } }));
-expectType<Promise<unknown>>(storage.get('id', { at: { tag: 'v1' } }));
+expectType<Promise<RecordData | null>>(storage.get('id', { at: 'epoch.5' }));
+expectType<Promise<RecordData | null>>(storage.get('id', { at: Date.now() }));
+expectType<Promise<RecordData | null>>(storage.get('id', { at: new Date() }));
+expectType<Promise<RecordData | null>>(storage.get('id', { at: { vector: storage.vector } }));
+expectType<Promise<RecordData | null>>(storage.get('id', { at: { tag: 'v1' } }));
 expectError(storage.get('id', { at: true }));
 expectType<Promise<syncom.HistoryResult>>(storage.history('id', { limit: 10 }));
 declare const posts: SyncomCollection;
-expectType<Promise<unknown | null>>(posts.get('id', { at: 'epoch.5' }));
-expectType<Promise<unknown | null>>(posts.get('id', { at: { tag: 'v1' } }));
+expectType<Promise<RecordData | null>>(posts.get('id', { at: 'epoch.5' }));
+expectType<Promise<RecordData | null>>(posts.get('id', { at: { tag: 'v1' } }));
 expectAssignable<syncom.ReadContext>({ id: 'x', at: 'epoch.1' });
 expectAssignable<syncom.ReadContext>({ id: 'x', history: true });
 expectAssignable<syncom.SyncomErrorCode>('HISTORY_GONE');
@@ -579,7 +580,7 @@ expectType<Promise<syncom.Tag>>(storage.tag('v1'));
 expectType<Promise<void>>(storage.untag('v1'));
 expectType<syncom.Tag[]>(storage.tags());
 expectType<syncom.TagView>(storage.at('v1'));
-expectType<Promise<unknown>>(storage.at('v1').get('id'));
+expectType<Promise<RecordData | null>>(storage.at('v1').get('id'));
 expectType<Promise<boolean>>(storage.at('v1').has('id'));
 expectType<string>(storage.at('v1').eventId);
 expectType<Promise<string[]>>(storage.at('v1').list());
@@ -591,7 +592,7 @@ expectType<syncom.Cursor>(
     .select({ n: { $gte: 2 } }),
 );
 expectType<Promise<number>>(storage.at('v1').collection('Post').count());
-expectType<Promise<unknown | null>>(storage.at('v1').collection('Post').get('id'));
+expectType<Promise<RecordData | null>>(storage.at('v1').collection('Post').get('id'));
 expectType<Promise<syncom.SnapshotPage>>(storage.at('v1').snapshot({ limit: 100 }));
 expectError(storage.tag(5));
 expectType<Promise<syncom.Patch[]>>(storage.diff('id', { tag: 'v1' }));
@@ -604,7 +605,7 @@ expectAssignable<syncom.Patch>({ action: 'setAt', field: 'body', index: 0, value
 expectType<Promise<string>>(
   storage.transact(
     async (tx) => {
-      expectType<Promise<unknown>>(tx.get('id'));
+      expectType<Promise<RecordData | null>>(tx.get('id'));
       expectType<Promise<boolean>>(tx.has('id'));
       await tx.update('id', { n: 1 });
       await tx.inc('id', 'hits', 1);
@@ -724,3 +725,95 @@ declare const somePlugin: syncom.Plugin<{ fly(): Promise<void> }>;
 const flown = await syncom.open({ plugins: [somePlugin] });
 expectType<Promise<void>>(flown.fly());
 expectType<Promise<string>>(flown.insert({}));
+
+// E9.3: typed records — from the entity's Standard Schema (`~standard.types`), or from `Schema<Shapes>`.
+interface Post {
+  title: string;
+  likes: number;
+  tags: string[];
+}
+interface PostInput {
+  title: string;
+  likes?: number;
+  tags?: string[];
+}
+interface PostSchema {
+  readonly '~standard': {
+    readonly version: 1;
+    readonly vendor: 'test';
+    readonly validate: (value: unknown) => { value: Post } | { issues: { message: string }[] };
+    readonly types?: { readonly input: PostInput; readonly output: Post } | undefined;
+  };
+}
+declare const postSchema: PostSchema;
+expectType<Post>({} as syncom.SchemaOutput<PostSchema>);
+expectType<PostInput>({} as syncom.SchemaInput<PostSchema>);
+expectType<RecordData>({} as syncom.SchemaOutput<{ type: 'object' }>);
+expectType<RecordData>({} as syncom.SchemaInput<undefined>);
+syncom.open({ schema: { entities: { Post: { schema: postSchema, index: ['title'] }, Note: {} } } }).then((typed) => {
+  expectType<SyncomCollection<Post, PostInput>>(typed.Post);
+  expectType<SyncomCollection>(typed.Note);
+  expectType<Promise<Post | null>>(typed.Post.get('id'));
+  expectType<Promise<Post | null>>(typed.Post.get('id', { at: 'epoch.5' }));
+  expectType<Promise<SyncomRecord<Post>>>(typed.Post.insert({ title: 'x' }));
+  expectType<Promise<void>>(typed.Post.set('id', { title: 'x', likes: 1 }));
+  expectError(typed.Post.insert({ likes: 1 }));
+  expectError(typed.Post.set('id', { title: 5 }));
+  expectType<Promise<void>>(typed.Post.update('id', { likes: 2 }));
+  expectType<Promise<void>>(typed.Post.update('id', { 'meta/views': 2 }));
+  expectError(typed.Post.update('id', { nope: 2 }));
+  expectError(typed.Post.update('id', { title: 5 }));
+  expectType<Promise<syncom.QueryRow<Post>[]>>(
+    typed.Post.select({
+      title: 'x',
+      likes: { $gt: 1 },
+      tags: 'a',
+      'meta.views': 2,
+      id: 'p1',
+      $or: [{ likes: 1 }],
+    }).fetch(),
+  );
+  expectType<Promise<syncom.QueryRow<Post> | null>>(typed.Post.select().order('title').one());
+  expectType<Promise<number>>(typed.Post.count({ tags: { $in: ['a'] } }));
+  expectError(typed.Post.select({ nope: 1 }));
+  expectError(typed.Post.select({ title: 5 }));
+  typed.Post.select().filter((row) => {
+    expectType<string>(row.id);
+    expectType<number>(row.likes);
+    return true;
+  });
+  typed.Post.record('id').then((record) => {
+    expectType<string>(record.title);
+    expectType<string[]>(record.tags);
+    expectType<Promise<Post | null>>(record.data());
+    expectType<Partial<Post>>(record.delta());
+    expectError(record.nope);
+  });
+  expectType<Promise<Post | null>>(typed.at('v1').collection<Post>('Post').get('id'));
+});
+// `Schema<Shapes>`: the record types declared, for an entity whose validator declares none.
+interface Author {
+  name: string;
+}
+const shaped: syncom.Schema<{ Post: Post; Author: Author }> = { entities: { Post: { index: ['title'] }, Author: {} } };
+syncom.open({ schema: shaped }).then((typed) => {
+  expectType<SyncomCollection<Post>>(typed.Post);
+  expectType<SyncomCollection<Author>>(typed.Author);
+  expectType<Promise<Author | null>>(typed.Author.get('id'));
+  expectError(typed.Nope);
+});
+expectAssignable<syncom.Shapes>({ Post: {} as Post, Author: {} as Author });
+expectNotAssignable<syncom.Shapes>({ Post: 'x' });
+// The storage's own readers take the type as an argument — or from the annotation.
+expectType<Promise<Post | null>>(storage.get<Post>('id'));
+const annotated: Promise<Post | null> = storage.get('id');
+expectType<Promise<Post | null>>(annotated);
+expectType<Promise<SyncomRecord<Post>>>(storage.record<Post>('id'));
+expectType<Post | null>(storage.getCachedData<Post>('id'));
+expectType<Promise<Post | null>>(storage.at('v1').get<Post>('id'));
+expectType<Promise<Post | null>>(storage.transact((tx) => tx.get<Post>('id')));
+storage.record<Post>('id').then((record) => {
+  expectType<number>(record.likes);
+  record.likes = 3;
+  expectType<Promise<void>>(record.save());
+});

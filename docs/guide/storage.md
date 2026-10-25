@@ -537,6 +537,10 @@ await storage.Post.update(post.id, { title: 'Hi' });
 await storage.Post.delete(post.id);
 ```
 
+In TypeScript the collection's records are typed by the entity's Standard
+Schema or by a `Schema<{ Post: Post }>` annotation — see
+[TypeScript](./typescript).
+
 `entities` may be a plain object or a `Map`. Without a schema the storage has
 no collections and you address records by id only. An entity named like
 something the storage already answers to (`get`, `close`, `log`, `sync`…)

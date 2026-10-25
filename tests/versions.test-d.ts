@@ -2,11 +2,12 @@ import { expectType } from 'tsd';
 import { versions } from '../src/versions/versions.js';
 import type { Plugin, Tag, TagView, HistoryResult, Patch } from '../src/versions/versions.js';
 import { open } from '../index.js';
+import type { RecordData } from '../index.js';
 
 expectType<Plugin>(versions);
 const storage = await open({ plugins: [versions] });
 expectType<Promise<HistoryResult>>(storage.history('id'));
-expectType<Promise<unknown>>(storage.get('id', { at: 'epoch:1' }));
+expectType<Promise<RecordData | null>>(storage.get('id', { at: 'epoch:1' }));
 expectType<Promise<Tag>>(storage.tag('v1'));
 expectType<Tag[]>(storage.tags());
 expectType<TagView>(storage.at('v1'));

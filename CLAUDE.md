@@ -598,6 +598,11 @@ docs/                     VitePress site
   documented — and so is the plugin on every node, since a node without it
   signs nothing. Never put the key or a signature into a metric label.
 - **A `.d.ts` change and its `tsd` test land together** (`tests/*.test-d.ts`).
+- **Record types are phantom.** `Schema<Shapes>` (`shapes?`) and a Standard Schema's
+  `~standard.types` are read by `index.d.ts` alone — `Collections<S>` maps them to
+  `SyncomCollection<R, I>` — and nothing at run time reads `shapes`; `RecordData` is the
+  type wherever the schema says no more. A reader of a record takes `R` (`get<R>`,
+  `record<R>`) rather than returning `unknown`; a new one does the same.
 - **`tests/package/consistency.test.js` guards the metadata.** If it goes red
   after you add an entry point, update `exports`, `files`, the `browser` map,
   `scripts/size.js` `ENTRIES` and the docs keywords — the test is right.

@@ -9,6 +9,10 @@
 import type {
   Plugin,
   Schema,
+  Shapes,
+  SchemaOutput,
+  SchemaInput,
+  RecordData,
   SchemaEntity,
   SchemaEntities,
   EntityDefinition,
@@ -23,6 +27,10 @@ import type {
 export type {
   Plugin,
   Schema,
+  Shapes,
+  SchemaOutput,
+  SchemaInput,
+  RecordData,
   SchemaEntity,
   SchemaEntities,
   EntityDefinition,

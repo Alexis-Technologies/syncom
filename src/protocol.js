@@ -9,7 +9,7 @@
 // `=`, `^`, `*`, `~` among them) and every packOps slot added before it is
 // pre-release and bumps nothing. After publication a new type, or a slot an
 // older reader cannot take as null, bumps this number (see CLAUDE.md,
-// "packOps is 17 positional slots").
+// "packOps is 18 positional slots").
 const PROTOCOL = 1;
 const DEFAULT_PAGE_SIZE = 500;
 

@@ -14,6 +14,20 @@ There is no released version section until then; everything below lands in it.
 
 ### Added
 
+- **Typed records.** A collection's records are typed by the schema: from the
+  entity's Standard Schema (`~standard.types` — zod, valibot, arktype:
+  `SchemaOutput<S>` is what a record reads as, `SchemaInput<S>` what a write
+  takes) or from a `Schema<{ Post: Post }>` annotation (`Shapes`, a phantom
+  the types alone read). `SyncomCollection<R, I>`: `get` is `R | null`,
+  `insert`/`set` take `I`, `update` a `Partial<I>` plus any field by path,
+  `select`/`count` a `MangoQuery<R>` that names the record's fields, `id` or a
+  dotted path, a cursor of `QueryRow<R>`; `SyncomRecord<R>` has a property
+  per field, `data()` as `R | null`, `delta()` as `Partial<R>`. The storage's
+  own readers take the type — `get<R>`, `record<R>`, `getCachedData<R>`, a
+  tag view's `get<R>`/`collection<R>`, a transaction's `get<R>` — or infer it
+  from the annotation; `RecordData` (`Record<string, unknown>`) wherever the
+  schema says no more. `insert`, `set` and `update` take `object`.
+  [TypeScript](https://syncomjs.vercel.app/guide/typescript) is the page.
 - **Devtools.** `@alexify/syncom/inspect`: `inspect(storage, id)` lays a
   record out raw — the data in the op model's terms and the composed
   reading, the reset stamps, every field with its kind, whether the reading

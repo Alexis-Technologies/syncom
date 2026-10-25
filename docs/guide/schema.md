@@ -10,6 +10,9 @@ Nothing is installed alongside it. The schema is the `schema` plugin —
 `@alexify/syncom/schema`, registered by `@alexify/syncom/all`; the core alone
 refuses `open({ schema })` and `open({ validator })` with `PLUGIN_MISSING`,
 and its records are untyped. The examples on this page open the core with it.
+In TypeScript a Standard Schema's `~standard.types` type the collection's
+records, and `Schema<Shapes>` types them for any other validator — see
+[TypeScript](./typescript).
 
 ## A metaschema model
 

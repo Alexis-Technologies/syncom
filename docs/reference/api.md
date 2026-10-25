@@ -26,7 +26,10 @@ const syncom = require('@alexify/syncom');
 
 ### `open(options?)`
 
-Returns `Promise<Storage>`. Takes an options object only — `open('./dir')` is a
+Returns `Promise<Storage>` — typed by the options: a collection per entity
+of `schema`, its records typed by the entity's Standard Schema or by
+`Schema<Shapes>` (see [TypeScript](../guide/typescript)), and the methods of
+every plugin in `plugins`, all inferred. Takes an options object only — `open('./dir')` is a
 `TypeError`. Options: `path` (default `'syncom'`), `name`
 (alias for `path`), `fsi`, `durable` and `defer` (see [Backends](#backends) and
 [the storage guide](../guide/storage)), `lock`
@@ -57,7 +60,7 @@ naming the subpath; `@alexify/syncom/all` has both.
 | Method | Returns | Notes |
 | --- | --- | --- |
 | `insert(data, options?)` | `Promise<string>` | Generates an id via `getId` (a UUID by default) and writes; rejects with `code: 'INVALID_ID'` when the generator mints one that is not a [valid id](../guide/storage#custom-identifiers) |
-| `get(id, { at }?)` | `Promise<unknown>` | `null` when absent or deleted; verifies against the chain; a copy — editing it changes nothing. With `at` (the `versions` plugin's) — an event id, a stamp (a number or a `Date`), `{ vector }` or `{ tag }` — the record at that version, folded from the log, or a tag's copy (see [Versions and history](../guide/versions)); rejects with `HISTORY_GONE` when the log cannot give it exactly, `INVALID_VERSION` for a malformed `at` or a seq not reached, `TAG_NOT_FOUND` for a tag this node has not, `ENCRYPTED` for an encrypted record (at a tag one reads as its data) |
+| `get(id, { at }?)` | `Promise<R \| null>` (`get<Post>(id)`; `RecordData` by default) | `null` when absent or deleted; verifies against the chain; a copy — editing it changes nothing. With `at` (the `versions` plugin's) — an event id, a stamp (a number or a `Date`), `{ vector }` or `{ tag }` — the record at that version, folded from the log, or a tag's copy (see [Versions and history](../guide/versions)); rejects with `HISTORY_GONE` when the log cannot give it exactly, `INVALID_VERSION` for a malformed `at` or a seq not reached, `TAG_NOT_FOUND` for a tag this node has not, `ENCRYPTED` for an encrypted record (at a tag one reads as its data) |
 | `tag(name)` | `Promise<Tag>` | Names the storage as it is now — `{ name, eventId, seq, ts, vector, createdAt }`, kept on this node as the catalog of the moment plus a copy of each record's file taken before its first change after the tag (see [Tags](../guide/versions#tags)); `name` is of the record-id form (a `TypeError` otherwise); deferred files land first. Rejects with `TAG_EXISTS`, `UNPERSISTED` while a record's file lags the log after a failed write, `CORRUPT` while `tags.json` is unreadable; the `versions` plugin's (`PLUGIN_MISSING` without it) |
 | `untag(name)` | `Promise<void>` | Drops a tag; the copies the next older tag needs move there; rejects with `TAG_NOT_FOUND`; the `versions` plugin's (`PLUGIN_MISSING` without it) |
 | `tags()` | `Tag[]` | The tags, oldest first — from memory; the `versions` plugin's (`PLUGIN_MISSING` without it) |
@@ -174,7 +177,10 @@ assignment, and when the record changes in storage (`null` data once deleted).
 `observe(path?, listener)`, `lastEditorOf(field)`, `editorsOf()`, `editorOf(key, index)`,
 `treeMove(key, node, parent?, { after, before, actor }?)`, `treeRemove(key, node, { actor }?)`,
 `delete({ actor }?)`, plus a
-live property per field of the loaded object.
+live property per field of the loaded object. `SyncomRecord<R>` types
+`data()` as `R | null`, `delta()` as `Partial<R>` and the live properties by
+`R` — a typed collection's `record()` and `storage.record<R>(id)` give it;
+`RecordData` otherwise (see [TypeScript](../guide/typescript)).
 
 ### `Collection`
 
@@ -182,6 +188,9 @@ Created per schema entity and exposed as `storage.<EntityName>`; a name the
 storage already answers to (`get`, `close`, `log`, `sync`…) is refused at
 `open()` with a `TypeError`.
 
+`SyncomCollection<R, I>` — `R` the record as it reads, `I` what a write
+takes; both from the entity's Standard Schema or the schema's `Shapes`,
+`RecordData` otherwise (see [TypeScript](../guide/typescript)).
 `name`, `insert(data, options?)` (resolves to the new record's `Record`),
 `get(id, { at }?)` (null for a record of another collection),
 `set(id, data, options?)` (stamped as the collection's),
@@ -206,9 +215,9 @@ query searches the entity's `search` fields, best first unless ordered.
 | `limit(n)`, `offset(n)` | Applied after the sort |
 | `filter(fn)` | A predicate over the loaded row |
 | `projection(fields)` | The fields each row carries, plus `id` |
-| `fetch()` | `Promise<QueryRow[]>` — `{ id, ...data }` as the record reads |
+| `fetch()` | `Promise<QueryRow<R>[]>` — `{ id, ...data }` as the record reads |
 | `count()` | `Promise<number>` |
-| `one()` | `Promise<QueryRow \| null>` |
+| `one()` | `Promise<QueryRow<R> \| null>` |
 | `watch(listener, { onError }?)` | Runs now and after every change to the collection; returns the stop function |
 | `[Symbol.asyncIterator]` | `for await (const row of cursor)` |
 
@@ -556,7 +565,9 @@ indexes, `schemaInfo` for hello, `migrate()` and `check()` (see
 [Schema and validation](../guide/schema)). Without the plugin `open({ schema })`
 and `open({ validator })` are `PLUGIN_MISSING`, as are `migrate()` and
 `check()`, and records are untyped — `$type` a field like any other.
-`ValidationError` is the root's, re-exported.
+`ValidationError` is the root's, re-exported, and so are the types a schema
+carries for TypeScript: `Shapes`, `SchemaOutput<S>`, `SchemaInput<S>`,
+`RecordData` (see [TypeScript](../guide/typescript)).
 
 ## Query (subpath)
 

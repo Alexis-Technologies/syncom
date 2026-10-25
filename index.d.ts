@@ -726,6 +726,41 @@ export interface SchemaValidator {
   compile(schema: unknown, meta: { entity: string }): (data: unknown) => unknown | Promise<unknown>;
 }
 
+/** A record's data as the application reads and writes it: the fields under their names. The record type wherever the schema says no more. */
+export type RecordData = Record<string, unknown>;
+
+/**
+ * The record type of each entity, by name — `{ Post: Post; Author: Author }`.
+ * `Schema<Shapes>` carries it for the types alone: `open()` reads it into the
+ * type of `storage.Post`; nothing reads it at run time.
+ */
+export type Shapes = { readonly [entity: string]: object };
+
+/** The fields a typed write may name by path (`'profile/city'`) beside the record's own. */
+export type PathFields = { readonly [path: `${string}/${string}`]: unknown };
+
+/**
+ * The output type a Standard Schema declares (`~standard.types.output` — zod,
+ * valibot, arktype), what a record of that entity reads as; `RecordData` when
+ * the schema declares none.
+ */
+export type SchemaOutput<T> = T extends {
+  readonly '~standard': { readonly types?: { readonly output: infer O } | undefined };
+}
+  ? O extends object
+    ? O
+    : RecordData
+  : RecordData;
+
+/** The input type a Standard Schema declares — what `insert()` and `set()` take, defaults and aliases not yet applied; `RecordData` when it declares none. */
+export type SchemaInput<T> = T extends {
+  readonly '~standard': { readonly types?: { readonly input: infer I } | undefined };
+}
+  ? I extends object
+    ? I
+    : RecordData
+  : RecordData;
+
 /** One collection: what validates its records and what is indexed. `{}` is a bare collection. */
 export interface EntityDefinition {
   /**
@@ -792,7 +827,7 @@ export interface Migration {
   down?(data: Record<string, unknown>, context: MigrationContext): Record<string, unknown> | Promise<Record<string, unknown>>;
 }
 
-export interface Schema {
+export interface Schema<T extends { readonly [K in keyof T]: object } = {}> {
   /** A positive integer; default 1. */
   version?: number;
   entities?: SchemaEntities;
@@ -819,6 +854,13 @@ export interface Schema {
    * another hash on a peer is reported as drift.
    */
   snapshot?: unknown;
+  /**
+   * Phantom: the record type of each entity, for the types alone —
+   * `const schema: Schema<{ Post: Post }> = { entities: { Post: {} } }` types
+   * `storage.Post` as a collection of `Post`. Never read at run time; an
+   * entity's Standard Schema types its records without it.
+   */
+  readonly shapes?: T;
 }
 
 /** What hello carries: a node's schema version and the hash of its snapshot (`null` without one). */
@@ -1074,13 +1116,13 @@ export interface Tag {
 }
 
 /** A collection as it was at a tag: queries over the tag's catalog, reading the records as they were. */
-export interface TagCollection {
+export interface TagCollection<R = RecordData> {
   readonly name: string;
   /** The record as it was, or `null` when it was not there or is of another collection. */
-  get(id: string): Promise<unknown | null>;
+  get(id: string): Promise<R | null>;
   /** A cursor at the tag; `watch()` on it throws — a tag does not change; `$text` is not available. */
-  select(query?: MangoQuery): Cursor;
-  count(query?: MangoQuery): Promise<number>;
+  select(query?: MangoQuery<R>): Cursor<QueryRow<R>>;
+  count(query?: MangoQuery<R>): Promise<number>;
 }
 
 /**
@@ -1107,7 +1149,7 @@ export interface VersionView {
   /** The version as given. */
   at: Version;
   /** The record as it was at the version, through the lens and the read hooks; `null` when it was not there. */
-  get(id: string): Promise<unknown>;
+  get<R = RecordData>(id: string): Promise<R | null>;
   has(id: string): Promise<boolean>;
   /** Every live id at the version, sorted. */
   list(): Promise<string[]>;
@@ -1117,13 +1159,13 @@ export interface VersionView {
 
 export interface TagView extends Tag {
   /** The record as it was at the tag, through the lens and the read hooks (`at: { tag }`); `null` when it was not there. */
-  get(id: string): Promise<unknown>;
+  get<R = RecordData>(id: string): Promise<R | null>;
   /** Whether `id` was a live record at the tag. */
   has(id: string): Promise<boolean>;
   /** Every live id at the tag, sorted. */
   list(): Promise<string[]>;
-  /** A collection at the tag; throws for an entity the schema has not. */
-  collection(name: string): TagCollection;
+  /** A collection at the tag; throws for an entity the schema has not. `R` types its records (`collection<Post>('Post')`). */
+  collection<R = RecordData>(name: string): TagCollection<R>;
   /** One page of the storage as it was at the tag — what another storage's `mergeSnapshot` joins to stand at the tag. */
   snapshot(options?: { cursor?: string | null; limit?: number; scopes?: readonly string[] | null }): Promise<SnapshotPage>;
 }
@@ -1305,13 +1347,29 @@ export interface StorageOptions<S extends Schema = Schema> {
 }
 
 // The collections a schema turns into properties on the storage object:
-// `open({ schema: { entities: { Post: {} } } })` yields `storage.Post`. A
+// `open({ schema: { entities: { Post: {} } } })` yields `storage.Post`. The
+// record type of each is the schema's `Shapes` entry when it carries one,
+// else what the entity's Standard Schema declares, else `RecordData`. A
 // `Map` of entities is opaque to the type system and adds nothing.
-export type Collections<S extends Schema> = S['entities'] extends Map<string, SchemaEntity>
+type ShapesOf<S> = S extends { readonly shapes?: infer T } ? (T extends object ? T : {}) : {};
+type EntitiesOf<S extends Schema> = S['entities'] extends { readonly [entityName: string]: SchemaEntity }
+  ? S['entities']
+  : {};
+type EntityNames<S extends Schema> = (keyof ShapesOf<S> | keyof EntitiesOf<S>) & string;
+type EntitySchema<S extends Schema, K extends string> = K extends keyof EntitiesOf<S>
+  ? EntitiesOf<S>[K] extends { readonly schema: infer X }
+    ? X
+    : unknown
+  : unknown;
+type EntityOutput<S extends Schema, K extends string> = K extends keyof ShapesOf<S>
+  ? ShapesOf<S>[K]
+  : SchemaOutput<EntitySchema<S, K>>;
+type EntityInput<S extends Schema, K extends string> = K extends keyof ShapesOf<S>
+  ? ShapesOf<S>[K]
+  : SchemaInput<EntitySchema<S, K>>;
+export type Collections<S extends Schema> = [EntityNames<S>] extends [never]
   ? {}
-  : S['entities'] extends { readonly [entityName: string]: SchemaEntity }
-    ? { readonly [K in keyof S['entities'] & string]: SyncomCollection }
-    : {};
+  : { readonly [K in EntityNames<S>]: SyncomCollection<EntityOutput<S, K>, EntityInput<S, K>> };
 
 export interface StorageDataOptions {
   encrypted?: boolean;
@@ -1335,12 +1393,12 @@ export interface TransactOptions extends WriteOptions {
  * records as the transaction left them (through the lens, no read hooks).
  */
 export interface Transaction extends TextMethods, TreeMethods {
-  get(id: string): Promise<unknown>;
+  get<R = RecordData>(id: string): Promise<R | null>;
   has(id: string): Promise<boolean>;
-  insert(data: Record<string, unknown>, options?: WriteOptions): Promise<string>;
-  set(id: string, data: Record<string, unknown>, options?: WriteOptions): Promise<void>;
-  update(id: string, delta: Record<string, unknown>, options?: WriteOptions): Promise<void>;
-  swap(id: string, changes: Record<string, unknown>, prev: Record<string, unknown>, options?: WriteOptions): Promise<boolean>;
+  insert(data: object, options?: WriteOptions): Promise<string>;
+  set(id: string, data: object, options?: WriteOptions): Promise<void>;
+  update(id: string, delta: object, options?: WriteOptions): Promise<void>;
+  swap(id: string, changes: object, prev: object, options?: WriteOptions): Promise<boolean>;
   delete(id: string, options?: WriteOptions): Promise<void>;
   unset(id: string, fields: string | readonly string[], options?: WriteOptions): Promise<void>;
   inc(id: string, key: string, value?: number, options?: WriteOptions): Promise<void>;
@@ -1765,7 +1823,7 @@ export interface Storage {
   loadData(id: string): Promise<unknown | null>;
   validate(options?: { last?: number; from?: string }): Promise<boolean>;
   validate(id: string, data: unknown, blockHash: string): Promise<boolean>;
-  insert(data: unknown, options?: StorageDataOptions): Promise<string>;
+  insert(data: object, options?: StorageDataOptions): Promise<string>;
   has(id: string): Promise<boolean>;
   /**
    * The record as it reads (the lens applied, the read hooks run), as a
@@ -1773,9 +1831,10 @@ export interface Storage {
    * — folded from the log, or a tag's copy: rejects with `HISTORY_GONE`
    * when the log cannot give it exactly, `INVALID_VERSION` for a malformed
    * `at` or a seq this log has not reached, `TAG_NOT_FOUND`, `ENCRYPTED`
-   * for an encrypted record's history.
+   * for an encrypted record's history. `R` types the result —
+   * `get<Post>(id)`; a collection's `get` knows its record type.
    */
-  get(id: string, options?: { at?: Version }): Promise<unknown>;
+  get<R = RecordData>(id: string, options?: { at?: Version }): Promise<R | null>;
   /**
    * The record's past as this node's log holds it, newest first — one
    * version per op this node applied, with the record as it read after it.
@@ -1843,11 +1902,11 @@ export interface Storage {
    * Resolves to how many ops it took; `0` for a record that is not there.
    */
   compact(id: string, options?: TransactOptions): Promise<number>;
-  set(id: string, data: unknown, options?: StorageDataOptions): Promise<void>;
+  set(id: string, data: object, options?: StorageDataOptions): Promise<void>;
   delete(id: string, options?: WriteOptions): Promise<void>;
   /** Forgets the record for good: a `purge` op no later write revives, and a scrub of its entries from the log — here and on every peer it reaches. */
   purge(id: string, options?: WriteOptions): Promise<void>;
-  update(id: string, delta: unknown, options?: WriteOptions): Promise<void>;
+  update(id: string, delta: object, options?: WriteOptions): Promise<void>;
   /** Removes fields of any kind — one name or an array; a field the record does not hold is no op. An `unset` op: a register's tombstone an older concurrent `set` loses to. */
   unset(id: string, fields: string | readonly string[], options?: WriteOptions): Promise<void>;
   inc(id: string, key: string, value?: number, options?: WriteOptions): Promise<void>;
@@ -1896,9 +1955,10 @@ export interface Storage {
     batch?: number;
     actor?: string;
   }): Promise<{ migrated: number; counters: number; sets: number; lists: number; texts: number; trees: number }>;
-  record(id: string): Promise<Storage.StorageRecord>;
+  /** A live `Record` of `id` — `R` types its fields (`record<Post>(id)`). */
+  record<R = RecordData>(id: string): Promise<Storage.StorageRecord<R>>;
   /** The raw data of a cached entry (no lens), `null` when not cached, absent or deleted. */
-  getCachedData(id: string): unknown | null;
+  getCachedData<R = RecordData>(id: string): R | null;
   /** Whether `id` is a live record here — from the catalog, no I/O. */
   hasRecord(id: string): boolean;
   /** The node's health as an operator reads it — queue, cache, catalog, log, chain, lock. No I/O. */
@@ -1945,22 +2005,30 @@ export interface MangoOperators {
   $options?: string;
 }
 
+/** What a field of type `V` is matched against: a value, an element (an array field holds a scalar value), or the operators. */
+export type MangoMatch<V> = V | MangoOperators | (V extends readonly (infer E)[] ? E : never);
+
 /**
  * `{ field: value }` is equality (a dotted path reaches into the record; an
  * array field holds a scalar value), `{ field: { $op } }` the operators,
- * `$and`/`$or` arrays of queries, `$not` one.
+ * `$and`/`$or` arrays of queries, `$not` one. `R` names the fields a query
+ * may test — the record's own, `id`, or any by a dotted path; `RecordData`
+ * lets every name through.
  */
-export type MangoQuery = {
-  [field: string]: unknown;
-  $and?: readonly MangoQuery[];
-  $or?: readonly MangoQuery[];
-  $not?: MangoQuery;
+export type MangoQuery<R = RecordData> = {
+  readonly [K in keyof R & string]?: MangoMatch<R[K]>;
+} & {
+  readonly [path: `${string}.${string}`]: unknown;
+  readonly id?: string | MangoOperators;
+  readonly $and?: readonly MangoQuery<R>[];
+  readonly $or?: readonly MangoQuery<R>[];
+  readonly $not?: MangoQuery<R>;
   /** Full-text search over the entity's `search` fields, top level only; rows come back best first unless ordered. */
-  $text?: string;
+  readonly $text?: string;
 };
 
 /** A row a cursor yields: the record as it reads, under its `id`. */
-export type QueryRow = Record<string, unknown> & { id: string };
+export type QueryRow<R = RecordData> = R & { id: string };
 
 export interface Cursor<T = QueryRow> {
   order(field: string): this;
@@ -1981,10 +2049,14 @@ export interface Cursor<T = QueryRow> {
 
 // A string field whose value is a known record id reads back as a Reference.
 export interface Reference {
-  record(): Promise<SyncomRecord>;
+  record<R = RecordData>(): Promise<SyncomRecord<R>>;
 }
 
-export interface SyncomRecord {
+/**
+ * The methods of a live `Record`; `SyncomRecord<R>` adds a property per
+ * field of `R`. `data()` is `null` for a record that is not there.
+ */
+export interface SyncomRecordApi<R = RecordData> {
   readonly id: string;
   on<E extends keyof RecordEvents>(event: E, listener: RecordEvents[E]): void;
   once<E extends keyof RecordEvents>(event: E, listener: RecordEvents[E]): void;
@@ -1994,8 +2066,8 @@ export interface SyncomRecord {
   eventNames(): (keyof RecordEvents)[];
   toPromise<E extends keyof RecordEvents>(event: E): Promise<Parameters<RecordEvents[E]>[0]>;
   clear(event?: keyof RecordEvents): void;
-  data(): Promise<unknown>;
-  delta(): Record<string, unknown>;
+  data(): Promise<R | null>;
+  delta(): Partial<R>;
   save(options?: WriteOptions): Promise<void>;
   /** Removes fields; the storage-level `unset` with this record's id. */
   unset(fields: string | readonly string[], options?: WriteOptions): Promise<void>;
@@ -2083,30 +2155,41 @@ export interface SyncomRecord {
   /** Removes a node of a tree field with its subtree — `storage.treeRemove` with this record's id. */
   treeRemove(key: string, node: string, options?: WriteOptions): Promise<void>;
   delete(options?: WriteOptions): Promise<void>;
-  // Live properties: one getter/setter per field of the loaded object.
-  [field: string]: unknown;
 }
 
-export declare class SyncomCollection {
+/**
+ * A live record: the methods, plus one getter/setter per field of the loaded
+ * object — typed by `R` (`record<Post>(id)`, a typed collection's
+ * `record()`), any name and `unknown` under `RecordData`. A field named
+ * like a method never shadows it; `data()` has it.
+ */
+export type SyncomRecord<R = RecordData> = SyncomRecordApi<R> & { -readonly [K in keyof R]: R[K] };
+
+/**
+ * A collection, `storage.<Entity>`. `R` is the record as it reads, `I` what
+ * a write takes — a Standard Schema's input, defaults and aliases not yet
+ * applied; both `RecordData` unless the schema says more (see `Collections`).
+ */
+export declare class SyncomCollection<R = RecordData, I = R> {
   constructor(storage: Storage, name: string);
   readonly name: string;
-  insert(data: unknown, options?: StorageDataOptions): Promise<SyncomRecord>;
-  get(id: string, options?: { at?: Version }): Promise<unknown | null>;
-  /** A cursor over this collection — see Cursor. */
-  select(query?: MangoQuery): Cursor;
-  count(query?: MangoQuery): Promise<number>;
+  insert(data: I, options?: StorageDataOptions): Promise<SyncomRecord<R>>;
+  get(id: string, options?: { at?: Version }): Promise<R | null>;
+  /** A cursor over this collection — see Cursor; the query names the record's fields, or any by a dotted path. */
+  select(query?: MangoQuery<R>): Cursor<QueryRow<R>>;
+  count(query?: MangoQuery<R>): Promise<number>;
   /** Replaces the record wholesale, stamped as this collection's. */
-  set(id: string, data: unknown, options?: StorageDataOptions): Promise<void>;
+  set(id: string, data: I, options?: StorageDataOptions): Promise<void>;
   delete(id: string, options?: WriteOptions): Promise<void>;
-  /** Sets the listed fields; `$type` may not be among them. */
-  update(id: string, delta: unknown, options?: WriteOptions): Promise<void>;
+  /** Sets the listed fields — the record's own, or any by path (`'profile/city'`); `$type` may not be among them. */
+  update(id: string, delta: Partial<I> & PathFields, options?: WriteOptions): Promise<void>;
   unset(id: string, fields: string | readonly string[], options?: WriteOptions): Promise<void>;
-  record(id: string): Promise<SyncomRecord>;
+  record(id: string): Promise<SyncomRecord<R>>;
 }
 
 export declare const SyncomRecordCtor: {
   readonly prototype: SyncomRecord;
-  new (id: string, storage: Storage): Promise<SyncomRecord>;
+  new <R = RecordData>(id: string, storage: Storage): Promise<SyncomRecord<R>>;
 };
 
 export interface StorageConstructor {
@@ -2123,10 +2206,16 @@ export interface StorageConstructor {
 export const Storage: StorageConstructor;
 
 export namespace Storage {
-  export type StorageRecord = SyncomRecord;
-  export type StorageCollection = SyncomCollection;
+  export type StorageRecord<R = RecordData> = SyncomRecord<R>;
+  export type StorageCollection<R = RecordData, I = R> = SyncomCollection<R, I>;
 }
 
+/**
+ * Opens a storage. The result's type follows the options: a collection per
+ * entity of `schema` (typed by the schema's `Shapes` or the entity's
+ * Standard Schema, `RecordData` otherwise) and the methods of every plugin
+ * in `plugins`. Both are inferred — no type arguments to pass.
+ */
 export function open<S extends Schema = Schema, const P extends readonly Plugin<any>[] = []>(
   options?: StorageOptions<S> & { plugins?: P },
 ): Promise<Storage & Collections<S> & PluginMethods<P>>;

@@ -88,3 +88,13 @@ expectType<syncom.ApplyResult>(
 expectType<syncom.Entry | null>(syncom.mergeEntry(entry, entry));
 expectAssignable<StorageOptions>({ plugins: [syncom.text] });
 expectType<syncom.StorageConstructor>(syncom.Storage);
+// A typed collection through the bundle's `open()`.
+interface Task {
+  title: string;
+  done: boolean;
+}
+const shaped: syncom.Schema<{ Task: Task }> = { entities: { Task: {} } };
+const tasks = await syncom.open({ schema: shaped });
+expectType<Promise<Task | null>>(tasks.Task.get('id'));
+expectType<Promise<syncom.SyncomRecord<Task>>>(tasks.Task.insert({ title: 'x', done: false }));
+expectType<Promise<void>>(tasks.splice('id', 'body', 0, 0, 'hi'));

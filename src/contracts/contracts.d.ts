@@ -4,7 +4,7 @@
 // a process that never imports this subpath never executes a block's code
 // (see SECURITY.md).
 
-import type { Storage } from '../../index.js';
+import type { Storage, RecordData } from '../../index.js';
 import type { Blockchain } from '../chain/chain.js';
 
 export interface ContractContext {
@@ -32,7 +32,8 @@ export type ContractProcedure = (reader: DataReader, args: ContractExecuteArgs) 
 /** The only storage access a contract has. */
 export class DataReader {
   constructor(storage: Storage);
-  get(id: string): Promise<unknown>;
+  /** The record as it reads, `null` when absent; `R` types it. */
+  get<R = RecordData>(id: string): Promise<R | null>;
 }
 
 export class SmartContract {

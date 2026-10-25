@@ -25,7 +25,7 @@ await presence.delete();                                    // leaves: null for 
   order; a state is gone when it is not renewed within `timeout` — this
   node's renews itself, a third of the timeout at a time — and `delete()`
   leaves at once with a null state.
-- **Signed when the node can sign.** With the [signing](./security) plugin
+- **Signed when the node can sign.** With the [signing](./sync#signatures) plugin
   registered, every state goes out signed with the node's Ed25519 key over
   `[1, node, clock, ts, state]` in canonical JSON, and a state received is
   verified against the node it claims: a signature that does not verify is
