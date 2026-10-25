@@ -10,12 +10,12 @@
 'use strict';
 
 const { bench } = require('./support/harness.js');
-const { createMemoryFsi } = require('../src/backend.js');
+const { memory } = require('../src/memory/memory.js');
 const { open } = require('../src/storage.js');
 
 const main = async () => {
   console.log(`History benchmark — Node ${process.version}\n`);
-  const storage = await open({ path: '/bench', fsi: createMemoryFsi(), logger: false });
+  const storage = await open({ path: '/bench', fsi: memory(), logger: false });
   const id = await storage.insert({ n: 0, title: 'a' });
   for (let i = 1; i <= 2000; i++) await storage.update(id, { n: i });
   await storage.splice(id, 'body', 0, 0, 'hello world');

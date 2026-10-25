@@ -13,9 +13,10 @@ const { text } = require('../src/text/text.js');
 const { tree } = require('../src/tree/tree.js');
 const { signing } = require('../src/signing/signing.js');
 const { runSyncEngineTests } = require('./suites/sync-engine.js');
+const { memory } = require('../src/memory/memory.js');
 
 test('Sync engine (lean core, plugins by hand)', async (t) => {
-  const fsi = core.createMemoryFsi();
+  const fsi = memory();
   let n = 0;
   const paths = new Map();
   await runSyncEngineTests(t, assert, async (t2, name, options = {}) => {

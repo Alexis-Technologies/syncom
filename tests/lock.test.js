@@ -114,10 +114,10 @@ test('Exclusive open (lockfile)', async (t) => {
 });
 
 test('Exclusive open: the knobs, the race, the timeout', async (t) => {
-  const { createMemoryFsi } = require('../src/backend.js');
+  const { memory } = require('../src/memory/memory.js');
 
   await t.test('openers racing for a free lock: exactly one wins, on a backend with create()', async () => {
-    const fsi = createMemoryFsi();
+    const fsi = memory();
     const results = await Promise.allSettled(
       Array.from({ length: 6 }, () => acquireLock({ fsi, path: 'store', mode: 'fail' })),
     );
@@ -134,7 +134,7 @@ test('Exclusive open: the knobs, the race, the timeout', async (t) => {
   });
 
   await t.test("'wait' gives up after `timeout`, with LOCKED", async () => {
-    const fsi = createMemoryFsi();
+    const fsi = memory();
     const holder = await acquireLock({ fsi, path: 'store', mode: 'fail' });
     const started = Date.now();
     await assert.rejects(() => acquireLock({ fsi, path: 'store', mode: 'wait', poll: 10, timeout: 60 }), {

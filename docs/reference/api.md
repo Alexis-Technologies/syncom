@@ -512,7 +512,8 @@ server, OPFS in the browser — as those five functions, and:
 | `open({ durable: true })` | Every write is followed by the backend's `sync`; a backend without one (OPFS, memory) logs `durable.noop` at debug |
 | `create(dir, file, content)` *(optional)* | Exclusive create (`EEXIST` when the file is there) — `node:fs` and the memory backend have it; the directory lock uses it to make a race deterministic |
 | `isFsi(value)` | Whether `value` has the five functions |
-| `createMemoryFsi()` | A backend in memory: `size`, `dump()`; two storages opened over one share it |
+| `memory()` (`@alexify/syncom/memory`) | A backend in memory: `size`, `dump()`, the exclusive `create`; two storages opened over one share it |
+| `layered(layers, { write, fill, queue }?)` (`@alexify/syncom/layered`) | One backend over several: a read is the first hit top down, filled upward; a write lands on every layer in order — `'through'` (default) or `'back'` from a queue the top answers ahead of; `flush()`, `close()`, `pending`, `layers`; `create` is exclusive across the layers — see [Backends](../guide/backends#layers) |
 | `new OpLog(base, { fsi })`, `loadKeys(base, { fsi })` (`/encryption`), `loadSigningKeys(base, { fsi })` (`/signing`), `new Blockchain(base, { fsi })` (`/chain`) | The pieces take the backend too |
 | `atRest(fsi, options)` (`/encryption`) | A wrapper: every file through it is ciphertext under one key — see [Encryption](#encryption-subpath) |
 

@@ -26,7 +26,7 @@
  *
  * Each runs on two lines:
  *
- * - memory: nothing touches the disk — syncom over createMemoryFsi(), the
+ * - memory: nothing touches the disk — syncom over memory(), the
  *   CRDT libraries' documents, the databases' in-memory storages;
  * - disk: each library's own persistence on node:fs, every write awaited
  *   until the library reports it written (no fsync for anyone: syncom's

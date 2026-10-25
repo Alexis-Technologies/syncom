@@ -13,7 +13,7 @@ const { bench } = require('./support/harness.js');
 const S = require('../src/text/sequence.js');
 const { applyOp } = require('../src/all/all.js');
 const { diff } = require('../src/text/myers.js');
-const { createMemoryFsi } = require('../src/backend.js');
+const { memory } = require('../src/memory/memory.js');
 const { open } = require('../src/storage.js');
 
 const op = (type, ts, origin, key, value) => ({ origin, seq: ts, ts, type, id: 'r', key, value });
@@ -108,7 +108,7 @@ const main = async () => {
   const after = `${before.slice(0, 500)}X${before.slice(500)}`;
   await bench('diff — one keystroke in a 1 KB text', () => diff(before, after));
 
-  const storage = await open({ path: '/bench', fsi: createMemoryFsi(), logger: false });
+  const storage = await open({ path: '/bench', fsi: memory(), logger: false });
   const id = await storage.insert({});
   await storage.updateText(id, 'body', before);
   await bench('storage.push — one char (memory fsi)', () => storage.push(id, 'body', 'z'));
@@ -131,7 +131,7 @@ const main = async () => {
   await storage.updateText(long, 'body', 'x'.repeat(10_000));
   await bench('storage.push — one char into a 10 KB text (memory fsi)', () => storage.push(long, 'body', 'z'));
   await storage.close();
-  const deferred = await open({ path: '/bench-defer', fsi: createMemoryFsi(), logger: false, defer: 50 });
+  const deferred = await open({ path: '/bench-defer', fsi: memory(), logger: false, defer: 50 });
   const lazy = await deferred.insert({});
   await deferred.updateText(lazy, 'body', 'x'.repeat(10_000));
   await bench('storage.push — one char into a 10 KB text, defer: 50 (memory fsi)', () =>

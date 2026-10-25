@@ -16,8 +16,9 @@ const { tree } = require('../src/tree/tree.js');
 const { createPlugins, missing } = require('../src/plugin.js');
 const { branch } = require('../src/branch/branch.js');
 const { createMesh, settle, waitUntil } = require('./utils/mesh.js');
+const { memory } = require('../src/memory/memory.js');
 
-const fsi = core.createMemoryFsi();
+const fsi = memory();
 let n = 0;
 const openLean = (options = {}) => core.open({ path: `kinds-${n++}`, fsi, logger: false, ...options });
 

@@ -25,6 +25,8 @@ const ENTRIES = [
   'src/signing/signing.js',
   'src/chain/chain.js',
   'src/encryption/encryption.js',
+  'src/memory/memory.js',
+  'src/layered/layered.js',
 ];
 
 for (const entry of ENTRIES) {

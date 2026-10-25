@@ -19,19 +19,22 @@ own is the default; any other goes in through `open({ fsi })`.
 `open()`, naming the method that is missing, and the storage never closes a
 backend it was handed — two storages may share one.
 
-## The four that ship
+## What ships
 
 | Backend | Where | How |
 | --- | --- | --- |
 | `node:fs/promises` | Node.js | The default under Node; `sync` is `fsync` |
 | OPFS | The browser | The default in a browser bundle (`fsi.browser.js`); durable when a writable closes, no `sync` |
 | `@alexify/syncom/idb` | The browser | `createIdbFsi({ name, store, indexedDB })` — see [Browser](./browser#opfs-or-indexeddb) |
-| `createMemoryFsi()` | Anywhere | A Map; nothing survives the process |
+| `@alexify/syncom/memory` | Anywhere | `memory()` — a Map; nothing survives the process |
+| `@alexify/syncom/layered` | Anywhere | `layered([top, …, bottom], options)` — one backend over several, a multi-level cache; see [Layers](#layers) |
+| `@alexify/syncom/encryption` | Anywhere | `atRest(fsi, options)` — every file through it encrypted; see [Encrypted at rest](#encrypted-at-rest) |
 
 ```js
-const { open, createMemoryFsi } = require('@alexify/syncom');
+const { open } = require('@alexify/syncom');
+const { memory } = require('@alexify/syncom/memory');
 
-const fsi = createMemoryFsi();
+const fsi = memory();
 const storage = await open({ path: 'app', fsi });     // nothing touches the disk
 await storage.insert({ a: 1 });
 fsi.size;                                              // 6 files: lock, node.json, log, data, catalog
@@ -52,6 +55,54 @@ const storage = await open({ path: 'data', fsi: idb });
 await storage.close();
 await idb.close();                                     // the backend's own
 ```
+
+## Layers
+
+`layered()` from `@alexify/syncom/layered` makes one backend of several — a
+memory layer over the disk, the disk over a remote store — that reads as a
+multi-level cache and writes to every layer in list order:
+
+```js
+const { open } = require('@alexify/syncom');
+const { memory } = require('@alexify/syncom/memory');
+const { layered } = require('@alexify/syncom/layered');
+const disk = require('@alexify/syncom'); // read, write, exists, remove, list: the platform's own
+
+const fsi = layered([memory(), disk], { write: 'back' });
+const storage = await open({ path: 'data', fsi });
+// … every read is answered from memory once seen; every write lands in
+// memory first and on the disk from the queue
+await storage.close();
+await fsi.flush(); // what the queue still holds
+```
+
+- A **read** is the first layer that has the file, top down; with `fill`
+  (the default) the content is copied into every layer above it, so the next
+  read is a hit at the top. `exists` is the first hit too; `list` is the
+  union of the layers' names.
+- A **write** or a removal lands on every layer, top to bottom. Under
+  `write: 'through'` (the default) the call resolves when the last layer has
+  it — durability is the bottom's. Under `write: 'back'` it resolves when the
+  first layer has it, and the lower layers are written from a queue, one call
+  at a time, at most `queue` calls waiting (1024 by default; the next write
+  waits for room). `flush()` awaits the queue and rejects with the first
+  queued call that failed; `close()` flushes and closes every layer that has
+  a `close()` (the IndexedDB one). What the queue holds is lost with the
+  process — the window is the queue — so `'back'` is for a node that
+  answers from memory and can afford to replay, not for a server of record.
+- Under `'back'` nothing stale is ever read from below: an operation that
+  would consult a lower layer — a read that misses the top, `exists`,
+  `list`, `create`, `sync` — first drains the queue. A read that hits the
+  top never waits.
+- `create` — the lock's exclusive create — is refused when **any** layer has
+  the file: a `lock.json` on the disk is a lock whatever the memory above it
+  holds. `sync` reaches every layer that has one, so `durable` reaches the
+  disk.
+
+The layers are any adapters — `layered([memory(), createIdbFsi()])` in the
+browser, `atRest(layered([memory(), disk]), { key })` for a cache over an
+encrypted disk — and a storage opened over the bottom alone reads what the
+stack wrote.
 
 ## Encrypted at rest
 

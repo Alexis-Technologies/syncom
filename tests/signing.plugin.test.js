@@ -12,6 +12,7 @@ const { signing } = require('../src/signing/signing.js');
 const { createSigner, tamper } = require('./utils/signed.js');
 const { createMesh, settle } = require('./utils/mesh.js');
 const { MemoryLink } = require('./utils/memory-link.js');
+const { memory } = require('../src/memory/memory.js');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const KEY = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
@@ -26,7 +27,7 @@ test('signing as a plugin', async (t) => {
   await t.test(
     'without the plugin the node id is what getId mints, a UUID by default, and its ops carry no signature',
     async (t2) => {
-      const fsi = core.createMemoryFsi();
+      const fsi = memory();
       const storage = await core.open({ path: 'plain', fsi, logger: false });
       t2.after(() => storage.close().catch(() => {}));
       assert.match(storage.nodeId, UUID);
@@ -59,7 +60,7 @@ test('signing as a plugin', async (t) => {
   );
 
   await t.test('require without the plugin is PLUGIN_MISSING; a tampered signature rides along unread', async (t2) => {
-    const fsi = core.createMemoryFsi();
+    const fsi = memory();
     await assert.rejects(() => core.open({ path: 'strict', fsi, logger: false, sync: { signatures: 'require' } }), {
       name: 'TypeError',
       code: 'PLUGIN_MISSING',
@@ -83,7 +84,7 @@ test('signing as a plugin', async (t) => {
   await t.test(
     'a directory keeps its key id without the plugin; one born without it is rekeyed once when the plugin arrives',
     async () => {
-      const fsi = core.createMemoryFsi();
+      const fsi = memory();
       const { warnings, logger } = collect();
       const signed = await core.open({ path: 'keyed', fsi, logger, plugins: [signing] });
       const key = signed.nodeId;
@@ -124,7 +125,7 @@ test('signing as a plugin', async (t) => {
   );
 
   await t.test('a verify host takes the ops of an unsigned node; a require host refuses its hello', async (t2) => {
-    const fsi = core.createMemoryFsi();
+    const fsi = memory();
     const createStorage = async (t3, name, options = {}) => {
       const storage = await core.open({ path: `mesh-${name}`, fsi, logger: false, ...options });
       t3.after(() => storage.close().catch(() => {}));

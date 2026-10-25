@@ -53,7 +53,7 @@ is one node id on both.
 `navigator.storage.getDirectory()`, so `open({ path: 'data' })` creates a
 `data/` directory inside the origin's OPFS rather than on disk. It is
 per-origin and the browser may evict it. Another backend goes in through
-`open({ fsi })` — `createMemoryFsi()` for a node that must not persist, or
+`open({ fsi })` — `memory()` for a node that must not persist, or
 IndexedDB (see [Backends](./backends)).
 
 ## OPFS or IndexedDB

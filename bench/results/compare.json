@@ -26,7 +26,7 @@
       "version": "0.0.1",
       "url": "https://github.com/Alexis-Technologies/syncom",
       "lines": {
-        "memory": "default, createMemoryFsi()",
+        "memory": "default, memory()",
         "disk": "default, node:fs"
       }
     },
@@ -37,7 +37,7 @@
       "version": "0.0.1",
       "url": "https://github.com/Alexis-Technologies/syncom",
       "lines": {
-        "memory": "chain: false, createMemoryFsi()",
+        "memory": "chain: false, memory()",
         "disk": "chain: false, node:fs"
       }
     },

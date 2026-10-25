@@ -206,6 +206,20 @@ const ENTRIES = [
     platform: 'browser',
     budget: 4,
   },
+  // The backends as blocks: the Map in memory; the multi-level cache over
+  // several (with the contract check it shares with the core).
+  {
+    label: 'memory — browser (@alexify/syncom/memory)',
+    entry: 'src/memory/memory.js',
+    platform: 'browser',
+    budget: 0.75,
+  },
+  {
+    label: 'layered — browser (@alexify/syncom/layered)',
+    entry: 'src/layered/layered.js',
+    platform: 'browser',
+    budget: 1.5,
+  },
 ];
 
 // A browser entry has to be self-contained: no node builtins, and no packages

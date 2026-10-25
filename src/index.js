@@ -11,7 +11,7 @@
 // out by name, and the root keeps one `verify`, synchronous in Node.js and a
 // promise in the browser.
 const { read, write, exists, remove, list } = require('./fsi.js');
-const { isFsi, createMemoryFsi } = require('./backend.js');
+const { isFsi } = require('./backend.js');
 const { applyOp, mergeEntry, isAlive } = require('./ops.js');
 const { HookError } = require('./hooks.js');
 const { ValidationError } = require('./schema.js');
@@ -27,7 +27,6 @@ module.exports = {
   remove,
   list,
   isFsi,
-  createMemoryFsi,
   ...require('./storage.js'),
   ...require('./sync.js'),
   ...require('./log.js'),

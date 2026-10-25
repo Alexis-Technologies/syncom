@@ -7,9 +7,10 @@ const test = require('node:test');
 const assert = require('node:assert');
 const syncom = require('../src/all/all.js');
 const { runSyncEngineTests } = require('./suites/sync-engine.js');
+const { memory } = require('../src/memory/memory.js');
 
 test('Sync engine (memory backend)', async (t) => {
-  const fsi = syncom.createMemoryFsi();
+  const fsi = memory();
   let n = 0;
   const paths = new Map();
   await runSyncEngineTests(t, assert, async (t2, name, options = {}) => {

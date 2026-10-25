@@ -1,6 +1,7 @@
 import { expectAssignable, expectError, expectType } from 'tsd';
 import * as syncom from '../src/all/all.js';
 import type { StorageOptions } from '../src/all/all.js';
+import { memory } from '../src/memory/memory.js';
 
 // Everything in one import: the core's surface plus the text and tree methods.
 const storage = await syncom.open({ path: 'x' });
@@ -59,7 +60,7 @@ expectType<syncom.Plugin>(syncom.chain);
 expectType<syncom.Plugin>(syncom.encryption);
 expectType<string>(syncom.calculateHash({ a: 1 }));
 expectType<Promise<syncom.Blockchain>>(new syncom.Blockchain('base'));
-expectType<syncom.Fsi>(syncom.atRest(syncom.createMemoryFsi(), { key: new Uint8Array(32) }));
+expectType<syncom.Fsi>(syncom.atRest(memory(), { key: new Uint8Array(32) }));
 declare const entry: syncom.Entry;
 expectType<syncom.ApplyResult>(
   syncom.applyOp(entry, {

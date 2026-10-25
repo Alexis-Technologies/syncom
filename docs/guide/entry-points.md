@@ -19,6 +19,7 @@ given, and another storage in the same process may run with others.
 | `@alexify/syncom/encryption` | records sealed for this node (`encrypted: true`), and `atRest()`, a backend wrapper that encrypts every file | `open({ plugins: [encryption] })`; `open({ fsi: atRest(fsi, …) })` |
 | `@alexify/syncom/all` | the core with every shipped plugin registered — the API as one import | `require('@alexify/syncom/all').open()` |
 | `@alexify/syncom/undo`, `/branch`, `/order` | the undo stack, forks and merges, fractional indexes | functions over a storage |
+| `@alexify/syncom/memory`, `/layered` | `memory()`, the backend in memory; `layered([top, …, bottom])`, one backend over several as a multi-level cache | `open({ fsi })` |
 | `@alexify/syncom/search`, `/idb`, `/wrpc`, `/contracts` | the text index behind `$text`, the IndexedDB backend, the wrpc link adapter, smart contracts | injected: `open({ search })`, `open({ fsi })`, `sync.connect` |
 
 ## Who imports what
@@ -26,10 +27,11 @@ given, and another storage in the same process may run with others.
 A **collaborative text** (the use a document CRDT is picked for):
 
 ```js
-const { open, createMemoryFsi } = require('@alexify/syncom');
+const { open } = require('@alexify/syncom');
+const { memory } = require('@alexify/syncom/memory');
 const { text } = require('@alexify/syncom/text');
 
-const storage = await open({ fsi: createMemoryFsi(), plugins: [text] });
+const storage = await open({ fsi: memory(), plugins: [text] });
 const id = await storage.insert({ kind: 'doc' });
 await storage.splice(id, 'body', 0, 0, 'hello');
 ```

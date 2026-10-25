@@ -47,7 +47,7 @@ const variant = (chain, memory) => {
     chain,
     logger: false,
     lock: false,
-    ...(memory ? { fsi: engine().createMemoryFsi() } : {}),
+    ...(memory ? { fsi: engine().memory() } : {}),
   });
   const units = new WeakMap();
   return {
@@ -99,7 +99,7 @@ const adapter = (id, chain, label) => ({
   version: ownVersion,
   url: 'https://github.com/Alexis-Technologies/syncom',
   lines: {
-    memory: { ...variant(chain, true), variant: `${label}, createMemoryFsi()` },
+    memory: { ...variant(chain, true), variant: `${label}, memory()` },
     disk: { ...variant(chain, false), variant: `${label}, node:fs` },
   },
 });

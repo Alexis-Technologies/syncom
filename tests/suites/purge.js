@@ -152,8 +152,8 @@ const runPurgeTests = async (t, assert, createStorage) => {
   );
 
   await t.test('a scrub that fails mid-way rejects the purge; the next purge finishes it', async (t2) => {
-    const { createMemoryFsi } = require('../../src/backend.js');
-    const inner = createMemoryFsi();
+    const { memory } = require('../../src/memory/memory.js');
+    const inner = memory();
     let failing = false;
     const fsi = {
       read: (dir, name) => inner.read(dir, name),

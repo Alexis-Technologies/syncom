@@ -4,7 +4,7 @@
 // cursors against a reference computed the slow way, the covered plan, the
 // unique keys on both write paths, and watch().
 
-const { createMemoryFsi } = require('../../src/backend.js');
+const { memory } = require('../../src/memory/memory.js');
 const { createMesh, settle, waitUntil } = require('../utils/mesh.js');
 
 const counting = (fsi) => {
@@ -34,7 +34,7 @@ const runQueryTests = async (t, assert, createStorage) => {
   };
 
   await t.test('a cursor answers what list()+get()+sort would, covered or not', async (t2) => {
-    const fsi = counting(createMemoryFsi());
+    const fsi = counting(memory());
     const storage = await createStorage(t2, 'A', { fsi, schema, cache: { max: 50 } });
     const orgs = ['o0', 'o1', 'o2', 'o3', 'o4'];
     const all = [];
@@ -149,7 +149,7 @@ const runQueryTests = async (t, assert, createStorage) => {
   });
 
   await t.test('an indexed array field narrows by element — a set, or any array', async (t2) => {
-    const fsi = counting(createMemoryFsi());
+    const fsi = counting(memory());
     const storage = await createStorage(t2, 'A', { fsi, schema: { entities: { Issue: { index: ['tags'] } } } });
     const ids = [];
     for (let i = 0; i < 30; i++) {

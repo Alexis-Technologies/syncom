@@ -17,16 +17,17 @@ import type {
   SyncomRecord,
   SyncomTelemetryOptions,
 } from '../index.js';
+import { memory } from '../src/memory/memory.js';
 
 // The key functions are the signing and encryption subpaths'; the pair shape stays here.
 expectAssignable<KeyPair>({ publicKey: 'pub', privateKey: 'priv' });
 
 // backends
-expectAssignable<Fsi>(syncom.createMemoryFsi());
-expectType<number>(syncom.createMemoryFsi().size);
-expectType<Record<string, string>>(syncom.createMemoryFsi().dump());
+expectAssignable<Fsi>(memory());
+expectType<number>(memory().size);
+expectType<Record<string, string>>(memory().dump());
 expectType<boolean>(syncom.isFsi({}));
-expectAssignable<StorageOptions>({ fsi: syncom.createMemoryFsi(), durable: true });
+expectAssignable<StorageOptions>({ fsi: memory(), durable: true });
 expectAssignable<Fsi>({
   read: async () => '',
   write: async () => {},
@@ -44,7 +45,7 @@ expectAssignable<StorageOptions>({ cache: { max: 100 }, integrity: 'lazy', catal
 expectError(syncom.open({ integrity: 'trust' }));
 expectError(syncom.open({ cache: { max: 'many' } }));
 expectType<Fsi>(storage.fsi);
-expectType<Promise<syncom.OpLog>>(new syncom.OpLog('base', { fsi: syncom.createMemoryFsi() }));
+expectType<Promise<syncom.OpLog>>(new syncom.OpLog('base', { fsi: memory() }));
 
 // fsi
 expectType<Promise<string>>(syncom.read('dir', 'file.json'));

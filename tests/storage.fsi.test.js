@@ -10,10 +10,11 @@ const path = require('node:path');
 const syncom = require('../src/all/all.js');
 const nodeFsi = require('../src/fsi.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
+const { memory } = require('../src/memory/memory.js');
 
 test('Storage over an injected fsi', async (t) => {
   await t.test('a memory backend: the whole lifecycle, nothing on disk, the same node on reopen', async () => {
-    const fsi = syncom.createMemoryFsi();
+    const fsi = memory();
     const storage = await syncom.open({ path: 'mem-store', fsi, logger: false });
     assert.strictEqual(storage.fsi, fsi);
     const id = await storage.insert({ title: 'Draft' });
@@ -43,14 +44,14 @@ test('Storage over an injected fsi', async (t) => {
     assert.strictEqual(reopened.sync.listNodes()[0].url, 'mem://peer', 'the registry is in the backend too');
     await reopened.close();
     // Another backend is another world.
-    const other = await syncom.open({ path: 'mem-store', fsi: syncom.createMemoryFsi(), logger: false });
+    const other = await syncom.open({ path: 'mem-store', fsi: memory(), logger: false });
     assert.notStrictEqual(other.nodeId, nodeId);
     assert.deepStrictEqual(await other.list(), []);
     await other.close();
   });
 
   await t.test('the pieces take the backend too', async () => {
-    const fsi = syncom.createMemoryFsi();
+    const fsi = memory();
     const keys = await syncom.loadKeys('k', { fsi });
     assert.deepStrictEqual(await syncom.loadKeys('k', { fsi }), keys, 'the same pair on the second load');
     const chain = await new syncom.Blockchain('c', { fsi });
@@ -95,7 +96,7 @@ test('Storage over an injected fsi', async (t) => {
     const debug = [];
     const storage = await syncom.open({
       path: 'mem-durable',
-      fsi: syncom.createMemoryFsi(),
+      fsi: memory(),
       durable: true,
       logger: { debug: (entry) => debug.push(entry.event) },
     });
@@ -109,7 +110,7 @@ test('A backend that fails after the log append', async (t) => {
   // A memory backend whose record files can be made to fail, as a full disk
   // or a browser quota would; everything else keeps working.
   const flakyFsi = () => {
-    const fsi = syncom.createMemoryFsi();
+    const fsi = memory();
     const control = { failing: false };
     const wrapped = {
       read: (dir, name) => fsi.read(dir, name),
@@ -124,11 +125,11 @@ test('A backend that fails after the log append', async (t) => {
         return fsi.write(dir, name, content);
       },
     };
-    return { fsi: wrapped, memory: fsi, control };
+    return { fsi: wrapped, inner: fsi, control };
   };
 
   await t.test('the write stands, is read back from memory, and lands at the next open', async () => {
-    const { fsi, memory, control } = flakyFsi();
+    const { fsi, inner, control } = flakyFsi();
     const storage = await syncom.open({ path: 'flaky', fsi, logger: false, cache: { max: 1 } });
     const errors = [];
     storage.on('error', (error) => errors.push(error));
@@ -144,12 +145,12 @@ test('A backend that fails after the log append', async (t) => {
     await storage.insert({ other: 1 });
     await storage.insert({ other: 2 });
     assert.deepStrictEqual(await storage.get(id), { n: 2 });
-    assert.strictEqual(JSON.parse(await memory.read('flaky/data', `${id}.json`)).data.n, 1, 'the file is behind');
+    assert.strictEqual(JSON.parse(await inner.read('flaky/data', `${id}.json`)).data.n, 1, 'the file is behind');
     await storage.close();
     // The batch was left unapplied: the reopen replays it onto the file.
     const reopened = await syncom.open({ path: 'flaky', fsi, logger: false });
     assert.deepStrictEqual(await reopened.get(id), { n: 2 });
-    assert.strictEqual(JSON.parse(await memory.read('flaky/data', `${id}.json`)).data.n, 2);
+    assert.strictEqual(JSON.parse(await inner.read('flaky/data', `${id}.json`)).data.n, 2);
     await reopened.close();
   });
 
@@ -172,11 +173,11 @@ test('A backend that fails after the log append', async (t) => {
   });
 
   await t.test('a torn record file is an INTEGRITY error, and repair(id) rebuilds it', async () => {
-    const memory = syncom.createMemoryFsi();
-    const storage = await syncom.open({ path: 'torn', fsi: memory, logger: false, cache: { max: 1 } });
+    const shared = memory();
+    const storage = await syncom.open({ path: 'torn', fsi: shared, logger: false, cache: { max: 1 } });
     const id = await storage.insert({ n: 1 });
     await storage.insert({ other: true });
-    await memory.write('torn/data', `${id}.json`, '{"data":{"n":');
+    await shared.write('torn/data', `${id}.json`, '{"data":{"n":');
     await assert.rejects(
       () => storage.get(id),
       (error) => {
@@ -188,7 +189,7 @@ test('A backend that fails after the log append', async (t) => {
       },
     );
     await assert.rejects(() => storage.has(id), { code: 'INTEGRITY' });
-    await memory.write('torn/data', `${id}.json`, 'null');
+    await shared.write('torn/data', `${id}.json`, 'null');
     await assert.rejects(() => storage.get(id), { code: 'INTEGRITY' });
     await storage.repair(id);
     assert.deepStrictEqual(await storage.get(id), { n: 1 });

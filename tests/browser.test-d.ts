@@ -1,6 +1,7 @@
 import { expectAssignable, expectType } from 'tsd';
 import * as browser from '../browser.js';
 import type { CrdtDelta, Storage, StorageOptions, SyncManager } from '../browser.js';
+import { memory } from '../src/memory/memory.js';
 
 // The split is the files layer; the crypto halves are the subpaths' (signing.browser.d.ts).
 expectType<CrdtDelta>(browser.diff({ a: 1 }, { a: 2 }));
@@ -10,8 +11,8 @@ expectType<Promise<Storage>>(browser.open({ path: 'data', getId: () => 'id' }));
 expectType<Promise<Storage>>(browser.open({ path: 'data', telemetry: { api: {} } }));
 // The id generator is not part of the async asymmetry: sync in both halves.
 expectType<string>(browser.Storage.generateId());
-expectType<Promise<Storage>>(browser.open({ fsi: browser.createMemoryFsi(), durable: true }));
-expectType<boolean>(browser.isFsi(browser.createMemoryFsi()));
+expectType<Promise<Storage>>(browser.open({ fsi: memory(), durable: true }));
+expectType<boolean>(browser.isFsi(memory()));
 expectType<'VALIDATION_FAILED'>(new browser.ValidationError('Post', []).code);
 declare const browserStorage: Storage;
 expectType<Promise<unknown>>(browserStorage.check('Post', {}));

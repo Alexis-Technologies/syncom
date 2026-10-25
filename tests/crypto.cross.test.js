@@ -7,7 +7,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { installBrowserGlobals } = require('./utils/browser-env.js');
-const { createMemoryFsi } = require('../src/backend.js');
+const { memory } = require('../src/memory/memory.js');
 const node = { ...require('../src/encryption/rsa.js'), ...require('../src/signing/ed25519.js') };
 
 test('crypto halves interoperate', async (t) => {
@@ -46,7 +46,7 @@ test('crypto halves interoperate', async (t) => {
   });
 
   await t.test('both halves derive one id from one signing pair on disk', async () => {
-    const fsi = createMemoryFsi();
+    const fsi = memory();
     const fromNode = await node.loadSigningKeys('keys', { fsi });
     const fromBrowser = await browser.loadSigningKeys('keys', { fsi });
     assert.deepStrictEqual(fromBrowser, fromNode);

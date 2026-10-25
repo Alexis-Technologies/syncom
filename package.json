@@ -81,6 +81,14 @@
       "types": "./src/encryption/encryption.d.ts",
       "default": "./src/encryption/encryption.js"
     },
+    "./memory": {
+      "types": "./src/memory/memory.d.ts",
+      "default": "./src/memory/memory.js"
+    },
+    "./layered": {
+      "types": "./src/layered/layered.d.ts",
+      "default": "./src/layered/layered.js"
+    },
     "./package.json": "./package.json"
   },
   "directories": {

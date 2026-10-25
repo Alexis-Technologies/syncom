@@ -5,7 +5,7 @@
 // directory for the same name within one subtest (reopen cases). The
 // memory backend is wrapped to count reads, so "no I/O" is a number.
 
-const { createMemoryFsi } = require('../../src/backend.js');
+const { memory } = require('../../src/memory/memory.js');
 
 const counting = (fsi) => {
   const reads = [];
@@ -29,7 +29,7 @@ const runCatalogTests = async (t, assert, createStorage) => {
   const schema = { entities: { Post: { index: ['orgId'], unique: ['slug'] } } };
 
   await t.test('list() and hasRecord() answer from the catalog, with no read of data/', async (t2) => {
-    const fsi = counting(createMemoryFsi());
+    const fsi = counting(memory());
     const storage = await createStorage(t2, 'A', { fsi, schema });
     const ids = [];
     for (let i = 0; i < 50; i++) ids.push((await storage.Post.insert({ orgId: `o${i % 5}`, slug: `s${i}` })).id);
@@ -49,7 +49,7 @@ const runCatalogTests = async (t, assert, createStorage) => {
   await t.test(
     'a reopen catches up from the log, and only re-reads what changed since the catalog was saved',
     async (t2) => {
-      const fsi = counting(createMemoryFsi());
+      const fsi = counting(memory());
       let storage = await createStorage(t2, 'A', { fsi, schema, catalog: { flushEvery: 1000 } });
       const ids = [];
       for (let i = 0; i < 20; i++) ids.push((await storage.Post.insert({ orgId: 'o', slug: `s${i}` })).id);
@@ -79,7 +79,7 @@ const runCatalogTests = async (t, assert, createStorage) => {
   await t.test(
     'a growing catalog is saved every sixteenth of its size, never further apart than half the retained log',
     async (t2) => {
-      const base = createMemoryFsi();
+      const base = memory();
       let saves = 0;
       const fsi = {
         ...base,
@@ -116,7 +116,7 @@ const runCatalogTests = async (t, assert, createStorage) => {
   await t.test(
     'a catalog the log cannot catch up — foreign stamp, other indexes, absent — is rebuilt from a scan',
     async (t2) => {
-      const fsi = counting(createMemoryFsi());
+      const fsi = counting(memory());
       const debug = [];
       const logger = { debug: (entry) => debug.push(entry.event) };
       let storage = await createStorage(t2, 'A', { fsi, schema, logger });
@@ -195,7 +195,7 @@ const runCatalogTests = async (t, assert, createStorage) => {
   });
 
   await t.test("integrity 'lazy' trusts the file on a cold read; validate() still tells", async (t2) => {
-    const fsi = createMemoryFsi();
+    const fsi = memory();
     let storage = await createStorage(t2, 'A', { fsi });
     const id = await storage.insert({ ok: true });
     await storage.close();
@@ -217,7 +217,7 @@ const runCatalogTests = async (t, assert, createStorage) => {
   await t.test(
     'repair(id) rebuilds a record from its log entries; UNRECOVERABLE when the log has no start',
     async (t2) => {
-      const fsi = createMemoryFsi();
+      const fsi = memory();
       const storage = await createStorage(t2, 'A', { fsi });
       const id = await storage.insert({ title: 'first', hits: 0, $type: 'Post' });
       await storage.update(id, { title: 'second' });

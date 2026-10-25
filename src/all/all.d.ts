@@ -25,6 +25,8 @@ export * from '../../index.js';
 export * from '../signing/signing.js';
 export * from '../chain/chain.js';
 export * from '../encryption/encryption.js';
+export * from '../memory/memory.js';
+export * from '../layered/layered.js';
 
 /** The storage with every shipped plugin registered: the core's API and the text and tree methods. */
 export interface Storage extends CoreStorage, TextMethods, TreeMethods {}

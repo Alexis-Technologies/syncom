@@ -39,7 +39,10 @@ src/branch/branch.js      the @alexify/syncom/branch subpath — fork a storage,
 index.d.ts                the Node type surface (hand-written)
 browser.d.ts              re-exports index.d.ts (the files layer differs; the crypto halves' types are the subpaths' *.browser.d.ts)
 THIRD_PARTY_NOTICES.md    the MIT notices of the algorithms adapted (Fugue, Yjs, list-positions…) and the files that carry them
-src/backend.js            the fsi contract (isFsi/checkFsi), createMemoryFsi, withSync — no requires
+src/backend.js            the fsi contract (isFsi/checkFsi), withSync — no requires
+src/memory/memory.js      @alexify/syncom/memory — memory(), the backend in memory (a Map; size, dump, the exclusive create) — no requires
+src/layered/layered.js    @alexify/syncom/layered — layered([top, …, bottom], { write, fill, queue }): one fsi over several, a multi-level
+                          cache; 'back' drains its queue before any lower layer is consulted; create is exclusive across layers
 src/emitter.js            the Emitter both halves extend — no requires
 src/logger.js             createLogger, the duck-typed logger writer — no requires
 src/keys.js               loadKeyPair — the on-disk key pairs (RSA for sealing, Ed25519 for signing), generator injected by each crypto half — no requires

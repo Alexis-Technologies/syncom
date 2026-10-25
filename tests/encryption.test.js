@@ -9,13 +9,14 @@ const assert = require('node:assert');
 const core = require('../index.js');
 const { encryption, atRest } = require('../src/encryption/encryption.js');
 const { runFsiTests } = require('./suites/fsi.js');
+const { memory } = require('../src/memory/memory.js');
 
 const KEY = Uint8Array.from({ length: 32 }, (_, i) => i * 7 + 1);
 const OTHER = new Uint8Array(32).fill(9);
 
 test('encryption as blocks', async (t) => {
   await t.test('an encrypted write without the plugin is PLUGIN_MISSING, at open() and per call', async (t2) => {
-    const fsi = core.createMemoryFsi();
+    const fsi = memory();
     await assert.rejects(() => core.open({ path: 'asked', fsi, logger: false, encrypted: true }), {
       name: 'TypeError',
       code: 'PLUGIN_MISSING',
@@ -47,7 +48,7 @@ test('encryption as blocks', async (t) => {
   await t.test(
     'atRest: every file through the wrapper is enc1: ciphertext, nothing plain in the backend, and the key reads it back',
     async () => {
-      const raw = core.createMemoryFsi();
+      const raw = memory();
       const storage = await core.open({ path: 's', fsi: atRest(raw, { key: KEY }), logger: false });
       const id = await storage.insert({ title: 'Secret' });
       await storage.close();
@@ -76,7 +77,7 @@ test('encryption as blocks', async (t) => {
   );
 
   await t.test('the wrong key, a plain file and a torn one are DECRYPT_FAILED, each with its reason', async () => {
-    const raw = core.createMemoryFsi();
+    const raw = memory();
     const mine = atRest(raw, { key: KEY });
     const theirs = atRest(raw, { key: OTHER });
     await mine.write('d', 'f.json', '{"a":1}');
@@ -112,7 +113,7 @@ test('encryption as blocks', async (t) => {
   });
 
   await t.test('the options are checked when the wrapper is made', () => {
-    const raw = core.createMemoryFsi();
+    const raw = memory();
     assert.throws(() => atRest({}, { key: KEY }), { message: 'atRest(): adapter has no read()' });
     assert.throws(() => atRest(raw), {
       name: 'TypeError',
@@ -132,7 +133,7 @@ test('encryption as blocks', async (t) => {
 
   // The backend contract holds through the wrapper.
   let n = 0;
-  await runFsiTests(t, atRest(core.createMemoryFsi(), { key: KEY }), {
+  await runFsiTests(t, atRest(memory(), { key: KEY }), {
     getRoot: async () => `enc-${n++}`,
     joinPath: (root, ...parts) => [root, ...parts].join('/'),
   });

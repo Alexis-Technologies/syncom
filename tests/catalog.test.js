@@ -6,12 +6,11 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { Catalog, valueOf } = require('../src/catalog.js');
-const { createMemoryFsi } = require('../src/backend.js');
+const { memory } = require('../src/memory/memory.js');
 const { normalizeSchema } = require('../src/schema.js');
 
 const entitiesOf = (schema) => normalizeSchema(schema).entities;
-const catalogOf = (schema, fsi = createMemoryFsi()) =>
-  new Catalog({ fsi, path: 'store', entities: entitiesOf(schema) });
+const catalogOf = (schema, fsi = memory()) => new Catalog({ fsi, path: 'store', entities: entitiesOf(schema) });
 
 test('Catalog', async (t) => {
   const schema = {
@@ -159,7 +158,7 @@ test('Catalog', async (t) => {
         remove: (id) => void calls.push(['remove', id]),
         query: () => [{ id: 'p2', score: 2 }, { id: 'p1', score: 1 }, { id: 'nope', score: 0 }, 'junk'],
       });
-      const fsi = createMemoryFsi();
+      const fsi = memory();
       const searchable = { entities: { Post: { index: ['orgId'], search: ['title', 'tags'] }, Tag: {} } };
       const text = new Map([['Post', fake()]]);
       const catalog = new Catalog({ fsi, path: 'store', entities: entitiesOf(searchable), text });
@@ -276,7 +275,7 @@ test('Catalog', async (t) => {
   });
 
   await t.test('save and load: the stamp, the rows, and what makes a file unusable', async () => {
-    const fsi = createMemoryFsi();
+    const fsi = memory();
     const catalog = catalogOf(schema, fsi);
     catalog.put('a', { type: 'Post', v: 1, data: { orgId: 'o1', slug: 'a' } });
     catalog.put('e', { type: 'Tag', encrypted: true });
@@ -302,7 +301,7 @@ test('Catalog', async (t) => {
     assert.strictEqual(await other.load(), null);
     assert.strictEqual(other.size, 0);
     // Absent, unreadable, or of another shape.
-    assert.strictEqual(await catalogOf(schema, createMemoryFsi()).load(), null);
+    assert.strictEqual(await catalogOf(schema, memory()).load(), null);
     for (const text of [
       'not json',
       '{"format":1}',
@@ -326,7 +325,7 @@ test('Catalog', async (t) => {
 });
 
 test('a save takes its rows at the start; puts that land during the write stay dirty', async () => {
-  const base = createMemoryFsi();
+  const base = memory();
   let release = null;
   const fsi = {
     ...base,
@@ -355,7 +354,7 @@ test('a save takes its rows at the start; puts that land during the write stay d
 });
 
 test('a tombstone is a row that is there but not listed; all() pages over every entry', async () => {
-  const fsi = createMemoryFsi();
+  const fsi = memory();
   const { entities } = normalizeSchema({ entities: { Post: { index: ['slug'], unique: ['slug'] } } });
   const catalog = new Catalog({ fsi, path: 'store', entities });
   const woken = [];

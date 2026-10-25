@@ -55,6 +55,15 @@ There is no released version section until then; everything below lands in it.
   — a backend wrapper (every file AES-256-GCM under one key, PBKDF2 from a
   password, `DECRYPT_FAILED` with a `reason` for a file that is not the
   key's). The main entry is 51 KB; `/all` registers all five plugins.
+- **Backends as blocks.** `memory()` — the backend in memory, what
+  `createMemoryFsi()` was — is `@alexify/syncom/memory`, off the root; the
+  core keeps the contract (`isFsi`). New: `layered([top, …, bottom], { write,
+  fill, queue })` from `@alexify/syncom/layered`, one backend over several —
+  a read is the first hit top down, filled upward; a write lands on every
+  layer in list order, `'through'` (the default) or `'back'` from a queue the
+  top answers ahead of (`flush()`, `close()`, `pending`); `create` is
+  exclusive across the layers, so a lock on the disk is a lock whatever the
+  memory above it holds, and under `'back'` nothing stale is read from below.
 - **Lists and text.** A field can be a list — an array edited by position —
   or a text — a string typed into: `splice(id, key, index, count, content)`
   and `push(id, key, content)`, on the storage and on a live Record. Two
@@ -438,7 +447,7 @@ There is no released version section until then; everything below lands in it.
   five functions of the contract (`read`, `write`, `exists`, `remove`,
   `list`) and routes the records, the log, the chain, the keys and the
   registry through it; `storage.fsi` is what the storage uses. `isFsi()`,
-  `createMemoryFsi()` (a backend in memory, for tests, SSR and benchmarks —
+  `memory()` (a backend in memory, for tests, SSR and benchmarks —
   two storages opened over one share it), and `open({ durable: true })`:
   every write followed by the backend's `sync` (fsync on `node:fs`; a
   backend without one logs at debug). `loadKeys`, `Blockchain` and `OpLog`

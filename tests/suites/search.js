@@ -6,7 +6,7 @@
 // options)` gives the same directory for the same name within one subtest;
 // the memory backend is wrapped to count reads, so "no I/O" is a number.
 
-const { createMemoryFsi } = require('../../src/backend.js');
+const { memory } = require('../../src/memory/memory.js');
 const { createSearch } = require('../../src/search/search.js');
 
 const counting = (fsi) => {
@@ -97,7 +97,7 @@ const runSearchTests = async (t, assert, createStorage) => {
   });
 
   await t.test('$text ranks, an equality narrows, limit and one() read little, order re-sorts', async (t2) => {
-    const fsi = counting(createMemoryFsi());
+    const fsi = counting(memory());
     const storage = await createStorage(t2, 'A', { fsi, schema, search, cache: { max: 5 } });
     const words = ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta'];
     for (let i = 0; i < 60; i++) {
@@ -149,7 +149,7 @@ const runSearchTests = async (t, assert, createStorage) => {
         entities: { Post: { search: ['title'] }, Tag: {} },
         migrations: { 2: { Post: { up: ({ headline, ...rest }) => ({ ...rest, title: headline }) } } },
       };
-      const fsi = createMemoryFsi();
+      const fsi = memory();
       let storage = await createStorage(t2, 'A', { fsi, schema: v1, search });
       await storage.Post.insert({ headline: 'Written before the rename' });
       await storage.insert({ $type: 'Post', headline: 'sealed words' }, { encrypted: true });
@@ -170,7 +170,7 @@ const runSearchTests = async (t, assert, createStorage) => {
   );
 
   await t.test('a reopen reuses the catalog, text included; other search fields rebuild it once', async (t2) => {
-    const fsi = counting(createMemoryFsi());
+    const fsi = counting(memory());
     let storage = await createStorage(t2, 'A', { fsi, schema, search, catalog: { flushEvery: 1000 } });
     for (let i = 0; i < 20; i++) await storage.Post.insert({ title: `title ${i}`, body: `body word${i}` });
     await storage.log.flush();

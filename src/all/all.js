@@ -16,6 +16,8 @@ const { tree } = require('../tree/tree.js');
 const { signing } = require('../signing/signing.js');
 const { chain } = require('../chain/chain.js');
 const { encryption } = require('../encryption/encryption.js');
+const { memory } = require('../memory/memory.js');
+const { layered } = require('../layered/layered.js');
 
 /** The plugins the package ships, in registration order. */
 const PLUGINS = Object.freeze([text, tree, signing, chain, encryption]);
@@ -46,6 +48,8 @@ module.exports = {
   ...require('../signing/signing.js'),
   ...require('../chain/chain.js'),
   ...require('../encryption/encryption.js'),
+  memory,
+  layered,
   Storage,
   open,
   applyOp,

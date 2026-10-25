@@ -125,7 +125,6 @@ export {
   remove,
   list,
   isFsi,
-  createMemoryFsi,
   applyOp,
   mergeEntry,
   isAlive,

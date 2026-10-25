@@ -1526,7 +1526,7 @@
         "collectionLimit": {
           "mark": "✅",
           "text": "none",
-          "source": "src/schema.js (no cap); scratch check: open() with 40 entities over createMemoryFsi()"
+          "source": "src/schema.js (no cap); scratch check: open() with 40 entities over memory()"
         },
         "phoneHome": {
           "mark": "",
@@ -1659,7 +1659,7 @@
         },
         "memoryBackend": {
           "mark": "✅",
-          "text": "`createMemoryFsi()`: a `Map` of files; Node and browser",
+          "text": "`memory()`: a `Map` of files; Node and browser",
           "source": "src/backend.js:35-82; docs/guide/backends.md#the-four-that-ship",
           "detail": "Files are kept as JSON strings, so reads still parse; two storages over one memory fsi with different paths form a mesh in one process (how the sync-engine suite runs)."
         },
@@ -3028,7 +3028,7 @@
         },
         "testing": {
           "mark": "⚠️",
-          "text": "`createMemoryFsi()` for in-memory stores; contract suites stay in the repo",
+          "text": "`memory()` for in-memory stores; contract suites stay in the repo",
           "source": "src/backend.js:10, 40; package.json#files (no tests/); tests/suites/fsi.js; docs/guide/backends.md#your-own",
           "detail": "tests/utils/memory-link.js (an in-process link) and tests/utils/mesh.js (N storages, `settle()`) are repo-only."
         },

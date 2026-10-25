@@ -9,12 +9,13 @@ const assert = require('node:assert');
 const core = require('../index.js');
 const all = require('../src/all/all.js');
 const { chain } = require('../src/chain/chain.js');
+const { memory } = require('../src/memory/memory.js');
 
 test('chain as a plugin', async (t) => {
   await t.test(
     'without the plugin no block is written, stats().chain is null and validate() names the plugin',
     async (t2) => {
-      const fsi = core.createMemoryFsi();
+      const fsi = memory();
       const storage = await core.open({ path: 'bare', fsi, logger: false });
       t2.after(() => storage.close().catch(() => {}));
       const id = await storage.insert({ a: 1 });
@@ -40,7 +41,7 @@ test('chain as a plugin', async (t) => {
   await t.test(
     'with the plugin every write has its block and validate() walks them; chain: false keeps it off',
     async (t2) => {
-      const fsi = core.createMemoryFsi();
+      const fsi = memory();
       const storage = await core.open({ path: 'chained', fsi, logger: false, plugins: [chain] });
       t2.after(() => storage.close().catch(() => {}));
       assert.deepStrictEqual([storage.plugins, storage.kinds], [['chain'], []]);

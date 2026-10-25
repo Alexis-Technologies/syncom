@@ -20,8 +20,8 @@ export interface KeyPair {
 
 /**
  * The storage backend: five functions over "a directory and a file name".
- * `node:fs` and OPFS are the defaults; `@alexify/syncom/idb` and
- * `createMemoryFsi()` are two more; anything with these functions fits
+ * `node:fs` and OPFS are the defaults; `@alexify/syncom/idb`, `@alexify/syncom/memory`
+ * and `@alexify/syncom/layered` are more; anything with these functions fits
  * `open({ fsi })`.
  */
 export interface Fsi {
@@ -46,7 +46,6 @@ export interface Fsi {
 export function isFsi(value: unknown): value is Fsi;
 
 /** A backend in memory — shared by every storage opened over it, gone with the process. */
-export function createMemoryFsi(): Fsi & { readonly size: number; dump(): Record<string, string> };
 
 // The platform's own backend, as functions.
 export function read(dir: string, filename: string): Promise<string>;

@@ -12,7 +12,7 @@
 const { bench } = require('./support/harness.js');
 const T = require('../src/tree/moves.js');
 const { applyOp } = require('../src/all/all.js');
-const { createMemoryFsi } = require('../src/backend.js');
+const { memory } = require('../src/memory/memory.js');
 const { open } = require('../src/storage.js');
 
 const op = (ts, origin, value) => ({ origin, seq: ts, ts, type: 'tree', id: 'r', key: 'outline', value });
@@ -37,7 +37,7 @@ const main = async () => {
   await bench('resolve — the fold of 5 000 moves, anew', () => T.resolve(block));
   await bench('renderTree — the fold kept by the block', () => T.renderTree(block));
 
-  const storage = await open({ path: '/bench', fsi: createMemoryFsi(), logger: false });
+  const storage = await open({ path: '/bench', fsi: memory(), logger: false });
   const id = await storage.insert({});
   await storage.treeMove(id, 'outline', 'root');
   for (let i = 0; i < 300; i++) await storage.treeMove(id, 'outline', `n${i}`, 'root');
