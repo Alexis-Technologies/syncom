@@ -143,11 +143,13 @@ Hand `open()` a way to reach a peer and register it; from then on writes flow
 both ways and converge without coordination:
 
 ```js
+const { sync } = require('@alexify/syncom/sync');
 const { createWrpcLink } = require('@alexify/syncom/wrpc');
 const { WrpcClient } = require('@alexify/wrpc');
 
 const storage = await open({
   path: 'data',
+  plugins: [sync],
   sync: { connect: async (node) => createWrpcLink(await WrpcClient.connect(node.url)) },
 });
 await storage.sync.addNode({ url: 'ws://hub.example.com:8000/api', token: 'secret' });

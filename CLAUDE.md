@@ -89,8 +89,9 @@ src/schema.js             entity definitions, the injected validator (Standard S
 src/ops.js                the record-level model: applyOp / mergeEntry / isAlive, packOps
 src/vector.js             clocks, version vectors, event ids
 src/log.js                OpLog — the persisted operation log over fsi
-src/sync.js               SyncManager — the dialing side; `unit()` delegates to hosting.js
-src/hosting.js            createUnit — the hosting side: hello/push/snapshot/changes, limits, grant()
+src/sync/sync.js          @alexify/syncom/sync — the sync plugin: `open(ctx)` after the replay hands the core its SyncManager
+src/sync/manager.js       SyncManager — the dialing side; `unit()` delegates to hosting.js
+src/sync/hosting.js       createUnit — the hosting side: hello/push/snapshot/changes, limits, grant()
 src/link.js               isSyncLink — the link contract check
 src/wrpc.js               createWrpcLink — a WrpcClient as a SyncLink (no wrpc import)
 src/telemetry.js          the injected-OpenTelemetry writer (duck-typed; @opentelemetry/* only devDeps)
@@ -136,7 +137,9 @@ docs/                     VitePress site
   `setup(ctx)` — `{ fsi, path, logger, options, settings, storage }`, run in `#open` before the
   log opens, in registration order — and hands back hooks the core takes: `identity` (`{ id,
   sign, verify, signMessage }`, the signing plugin), `seal` (`{ encrypt, decrypt }`, the
-  encryption plugin), `chain` (a Blockchain, the chain plugin). The core reads them as
+  encryption plugin), `chain` (a Blockchain, the chain plugin) — and `open(ctx)` — `{ storage,
+  options, settings, logger }`, run after the replay — hands back `sync` (the SyncManager, the
+  sync plugin: `storage.sync` is PLUGIN_MISSING without it). The core reads them as
   `core.identity`/`core.sign`/`core.verify`, `core.seal`, `core.chain`, and `core.hash` is
   `sha256` from `src/digest.js` (Web Crypto, async on both platforms — the core has no crypto
   half). Without a hook: the node id is what `getId` mints (checked by `isStreamName`), ops are
@@ -164,7 +167,7 @@ docs/                     VitePress site
 - **wrpc is injected, never required.** Nothing under `src/` may
   `require('@alexify/wrpc')`; `scripts/size.js` fails on any bare import in a
   browser bundle anyway. `src/wrpc.js` duck-types the client it is handed, and
-  `unit()` (`src/hosting.js`) builds plain `{ access, handler }` objects that
+  `unit()` (`src/sync/hosting.js`) builds plain `{ access, handler }` objects that
   `defineRouter` accepts without wrpc's `procedure()`. The `tracked` shape it emits is
   `Symbol.for('wrpc.tracked')` — part of wrpc's frozen wire protocol.
 - **Every operational error is a `SyncomError` with a `code`.** `src/errors.js`:
@@ -175,7 +178,7 @@ docs/                     VitePress site
   ride on it). A wrong argument, option or hook result is a `TypeError`
   without a code, except `typed(code, message)` for a value that is data
   (`INVALID_ID`, `TYPE_IMMUTABLE`) or configuration (`NO_CHAIN`). A host's
-  wire refusal (`coded` in `src/hosting.js`) keeps the numeric code wrpc
+  wire refusal (`coded` in `src/sync/hosting.js`) keeps the numeric code wrpc
   carries and names the check in `reason`. `HookError` and `ValidationError`
   extend `SyncomError`. Never `new Error(...)` for something a caller may
   handle, never invent a code without its row in the table and the union.
@@ -355,7 +358,7 @@ docs/                     VitePress site
   `STUCK` after `MAX_PAGE_RETRIES`. Never move `node.cursor` past a page that
   did not land, and never catch inside `#receive` to "keep going".
 - **A hosted feed's cursor moves to a real entry, never to `lastEventId`.**
-  `changes` in `src/hosting.js` reads through `OpLog.read`, whose `last` is
+  `changes` in `src/sync/hosting.js` reads through `OpLog.read`, whose `last` is
   the seq of the last entry examined (in scope or not); when a wake brings
   nothing for the peer, the cursor moves there without a page. `lastEventId`
   is `next - 1` and runs ahead of the entries while an append is in flight —
@@ -676,9 +679,9 @@ running it before writing it down — several examples inherited from the legacy
 repo were wrong in exactly that way. A new page needs a sidebar entry in
 `docs/.vitepress/config.mts`; `docs/guide/sync.md` and `docs/guide/wrpc.md`
 are the two pages that describe the protocol — keep them in step with
-`src/sync.js` and `src/hosting.js`, `docs/guide/hooks.md` with the hook and
+`src/sync/manager.js` and `src/sync/hosting.js`, `docs/guide/hooks.md` with the hook and
 event surface of `src/commit.js`, `src/apply.js`, `src/bootstrap.js`,
-`src/storage.js` and `src/sync.js`, `docs/guide/schema.md` with
+`src/storage.js` and `src/sync/manager.js`, `docs/guide/schema.md` with
 `src/schema.js` (metaschema is the first-class example there; zod/ajv/JSON
 Schema are the alternatives), `docs/guide/query.md` with `src/query.js` and
 `src/catalog.js`, `docs/guide/backends.md` with `src/backend.js`, `src/lock.js`

@@ -16,6 +16,7 @@ const { tree } = require('../src/tree/tree.js');
 const { createPlugins, missing } = require('../src/plugin.js');
 const { branch } = require('../src/branch/branch.js');
 const { createMesh, settle, waitUntil } = require('./utils/mesh.js');
+const { sync } = require('../src/sync/sync.js');
 const { memory } = require('../src/memory/memory.js');
 
 const fsi = memory();
@@ -101,8 +102,8 @@ test('open({ plugins }) picks the kinds; the /all entry has every shipped one', 
   const everything = await all.open({ path: `kinds-${n++}`, fsi, logger: false });
   t.after(() => everything.close());
   assert.deepStrictEqual(everything.kinds, ['text', 'tree']);
-  assert.deepStrictEqual(all.PLUGINS, [text, tree, all.signing, all.chain, all.encryption]);
-  assert.deepStrictEqual(everything.plugins, ['text', 'tree', 'signing', 'chain', 'encryption']);
+  assert.deepStrictEqual(all.PLUGINS, [text, tree, all.signing, all.chain, all.encryption, all.sync]);
+  assert.deepStrictEqual(everything.plugins, ['text', 'tree', 'signing', 'chain', 'encryption', 'sync']);
   const other = await everything.insert({});
   await everything.treeMove(other, 'outline', 'r');
   assert.deepStrictEqual(await everything.get(other), { outline: [{ id: 'r', children: [] }] });
@@ -142,7 +143,13 @@ test('a core-only hub between two text nodes logs and relays the text it cannot 
   // A dials B, C dials B: B is the hub, opened without the text kind.
   const createStorage = async (t2, name, options) => {
     const plugins = name === 'B' ? [] : [text];
-    const storage = await core.open({ path: `hub-${name}-${n++}`, fsi, logger: false, plugins, ...options });
+    const storage = await core.open({
+      path: `hub-${name}-${n++}`,
+      fsi,
+      logger: false,
+      plugins: [sync, ...plugins],
+      ...options,
+    });
     t2.after(() => storage.close().catch(() => {}));
     return storage;
   };
@@ -187,7 +194,13 @@ test('a node does not bootstrap from a host that cannot hold one of its kinds: K
   // every text field and the adopted vector would hide the ops behind them.
   const createStorage = async (t2, name, options) => {
     const plugins = name === 'A' ? [] : [text];
-    const storage = await core.open({ path: `mismatch-${name}-${n++}`, fsi, logger: false, plugins, ...options });
+    const storage = await core.open({
+      path: `mismatch-${name}-${n++}`,
+      fsi,
+      logger: false,
+      plugins: [sync, ...plugins],
+      ...options,
+    });
     t2.after(() => storage.close().catch(() => {}));
     return storage;
   };

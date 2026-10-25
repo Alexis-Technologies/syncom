@@ -11,8 +11,8 @@ inside it, one at a time. It lends its collaborators (the log, the clock, the ch
 records, the tags) as one `core` to the three write paths and to the two API modules behind
 its methods — `src/fields.js` for the field kinds beyond registers, `src/versions.js` for
 versions, patches and tags — and to nothing else; the facade keeps one delegate per method.
-`storage.sync` is the replication: the dialing side (`SyncManager`) and the hosting side
-(`unit()`). Everything that touches the outside world is injected: the backend (`fsi`), the
+`storage.sync` is the replication — the `sync` plugin: the dialing side (`SyncManager`) and the
+hosting side (`unit()`). Everything that touches the outside world is injected: the backend (`fsi`), the
 transport (a link), the validator, the text index, the telemetry.
 
 ```mermaid
@@ -251,7 +251,7 @@ the five functions an `fsi` implements.
 | `search/search.js` | The `@alexify/syncom/search` subpath: the trigram index behind `$text` — the core knows only its contract |
 | `signing/signing.js`, `signing/sign.js`, `signing/ed25519.js`, `keys.js`, `digest.js` | The identity plugin (`@alexify/syncom/signing`); what an op's signature covers, signing and verifying it; the Ed25519 half; the key pairs on disk; the core's SHA-256 through Web Crypto |
 | `encryption/encryption.js`, `encryption/rsa.js` | The sealing plugin and the at-rest backend wrapper (`@alexify/syncom/encryption`); the RSA half |
-| `sync.js`, `hosting.js`, `link.js`, `wrpc/wrpc.js`, `protocol.js`, `scope.js` | Dialing, hosting, the link contract, the wrpc adapter, what both halves agree on, what "in scope" means |
+| `sync/sync.js`, `sync/manager.js`, `sync/hosting.js`, `outbound.js`, `link.js`, `wrpc/wrpc.js`, `protocol.js`, `scope.js` | The sync plugin (`@alexify/syncom/sync`): dialing and hosting; the selection a push makes (the core's updates API); the link contract, the wrpc adapter, what both halves agree on, what "in scope" means |
 | `hooks.js`, `emitter.js`, `logger.js`, `telemetry.js`, `errors.js` | Hooks and events, injected logging and OpenTelemetry, `SyncomError` |
 | `fsi.js`, `fsi.browser.js`, `idb/idb.js`, `backend.js`, `lock.js` | `node:fs`, OPFS, IndexedDB and memory backends; one instance per directory |
 

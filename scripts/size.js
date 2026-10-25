@@ -178,8 +178,9 @@ const ENTRIES = [
   // 68.5 KB: what the 66 KB entry was, plus the registry and the plugins'
   // own module shells (68.0 measured).
   // The core with every shipped plugin: 68.3 at the kinds epic, 70.2 with
-  // the at-rest wrapper and the plugin seams of the security blocks.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 71 },
+  // the at-rest wrapper and the plugin seams of the security blocks, 71.3
+  // with the sync plugin's seam and the layered backend.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 72 },
   // The list and text kinds alone: the sequence engine, its patches and its
   // methods; in an app bundle the core they stand on is shared.
   { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 15 },
@@ -220,6 +221,11 @@ const ENTRIES = [
     platform: 'browser',
     budget: 1.5,
   },
+  // The sync of ops: the manager and the hosting unit, measured ALONE with
+  // the op model (packOps), the vectors, the hooks, the scopes and the
+  // telemetry writer they share with the core (17.7 measured; what it adds
+  // to the core is the 6.8 KB the main entry came down by).
+  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 18 },
 ];
 
 // A browser entry has to be self-contained: no node builtins, and no packages

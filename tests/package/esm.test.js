@@ -27,6 +27,7 @@ const ENTRIES = [
   'src/encryption/encryption.js',
   'src/memory/memory.js',
   'src/layered/layered.js',
+  'src/sync/sync.js',
 ];
 
 for (const entry of ENTRIES) {

@@ -18,9 +18,10 @@ const { chain } = require('../chain/chain.js');
 const { encryption } = require('../encryption/encryption.js');
 const { memory } = require('../memory/memory.js');
 const { layered } = require('../layered/layered.js');
+const { sync } = require('../sync/sync.js');
 
 /** The plugins the package ships, in registration order. */
-const PLUGINS = Object.freeze([text, tree, signing, chain, encryption]);
+const PLUGINS = Object.freeze([text, tree, signing, chain, encryption, sync]);
 const registry = createPlugins(PLUGINS);
 
 const withAll = (given = []) => {
@@ -48,6 +49,7 @@ module.exports = {
   ...require('../signing/signing.js'),
   ...require('../chain/chain.js'),
   ...require('../encryption/encryption.js'),
+  ...require('../sync/sync.js'),
   memory,
   layered,
   Storage,
@@ -59,5 +61,6 @@ module.exports = {
   signing,
   chain,
   encryption,
+  sync,
   PLUGINS,
 };

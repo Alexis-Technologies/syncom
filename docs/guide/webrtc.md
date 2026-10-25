@@ -22,6 +22,7 @@ an op reaches a node once, whichever links carried it.
 
 ```js
 import { open } from '@alexify/syncom';
+import { sync } from '@alexify/syncom/sync';
 import { createWrpcLink } from '@alexify/syncom/wrpc';
 import { connect } from '@alexify/wrpc';
 import { WrpcPeer, wrpcSignaler, defineRouter } from '@alexify/wrpc/webrtc';
@@ -32,6 +33,7 @@ let peer = null; // made after open(): its router mounts the storage's unit
 
 const storage = await open({
   path: 'app',
+  plugins: [sync],
   sync: {
     scope: (id, data) => data.orgId ?? '*',
     // A node's url says where it is: the hub's WebSocket, or a peer id.

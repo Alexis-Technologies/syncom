@@ -89,6 +89,10 @@
       "types": "./src/layered/layered.d.ts",
       "default": "./src/layered/layered.js"
     },
+    "./sync": {
+      "types": "./src/sync/sync.d.ts",
+      "default": "./src/sync/sync.js"
+    },
     "./package.json": "./package.json"
   },
   "directories": {

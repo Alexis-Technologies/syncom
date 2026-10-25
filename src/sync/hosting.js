@@ -12,12 +12,12 @@
 // with what the two halves share: the storage, the telemetry writer, the
 // wakers every live feed waits on and the set `hosted()` lists.
 
-const { packOps, unpackOps } = require('./ops.js');
-const { opKey } = require('./vector.js');
-const { notify } = require('./hooks.js');
-const { GLOBAL_SCOPE, opInScope } = require('./scope.js');
-const { isKeyId } = require('./shape.js');
-const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf, kindsOf } = require('./protocol.js');
+const { packOps, unpackOps } = require('../ops.js');
+const { opKey } = require('../vector.js');
+const { notify } = require('../hooks.js');
+const { GLOBAL_SCOPE, opInScope } = require('../scope.js');
+const { isKeyId } = require('../shape.js');
+const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf, kindsOf } = require('../protocol.js');
 
 const DEFAULT_PAGE_BYTES = 4 << 20;
 const TRACKED = Symbol.for('wrpc.tracked');

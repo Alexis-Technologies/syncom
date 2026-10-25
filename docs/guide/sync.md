@@ -7,15 +7,19 @@ converge because every operation is designed to be applied in any order, any
 number of times, with the same result.
 
 The transport is **injected**. syncom describes the small contract a link has
-to satisfy, ships an adapter for [wrpc](./wrpc), and depends on nothing.
+to satisfy, ships an adapter for [wrpc](./wrpc), and depends on nothing. The
+manager itself is the `sync` plugin — `@alexify/syncom/sync`, registered by
+`@alexify/syncom/all`; the examples on this page open the core with it:
 
 ```js
 const { open } = require('@alexify/syncom');
+const { sync } = require('@alexify/syncom/sync');
 const { createWrpcLink } = require('@alexify/syncom/wrpc');
 const { WrpcClient } = require('@alexify/wrpc');
 
 const storage = await open({
   path: 'data',
+  plugins: [sync],
   sync: {
     connect: async (node) => createWrpcLink(await WrpcClient.connect(node.url)),
   },
@@ -271,6 +275,26 @@ host holds more of the node's own stream than its log does. The node reports
 mints collides with an op the host already has — and bootstraps from the
 host to get back what the lost ops wrote. Writes made between the restore
 and that hello reused seqs the host had, and are lost to it.
+
+## Without the plugin
+
+A storage opened without `sync` has no manager (`storage.sync` is
+`PLUGIN_MISSING`) and still speaks the protocol's two halves: `applyRemote()`
+takes a peer's page, and `outbound()` — exported by the core — selects what a
+peer lacks from this node's log by that peer's version vector, the way a push
+does. A transport of the application's own carries the pages:
+
+```js
+const { open, outbound } = require('@alexify/syncom');
+
+// what `a` has that `b` lacks, by b's vector; then b takes it
+const { ops } = outbound(a.log, { exclude: b.nodeId, vector: b.vector, own: a.nodeId });
+await b.applyRemote(ops);
+```
+
+What the manager adds on top: the registry of nodes, the hello and the
+vectors exchanged, the push pages and the feed, the bootstrap from a
+snapshot, the recovery of a peer that fell behind, the hosting unit.
 
 ## Signatures
 

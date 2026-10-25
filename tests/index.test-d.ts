@@ -10,7 +10,6 @@ import type {
   Schema,
   Storage,
   StorageOptions,
-  SyncManager,
   SyncomCollection,
   SyncomError,
   SyncomErrorCode,
@@ -282,18 +281,6 @@ expectType<Promise<SyncomRecord>>(reference.record());
 expectType<unknown>(syncom.apply({}, [{ type: 'delete', id: 'r1' }]));
 expectType<unknown>(syncom.apply({}, [{ type: 'delete', key: 'a' }]));
 
-// sync
-expectType<SyncManager>(storage.sync);
-declare const sync: SyncManager;
-expectType<Node[]>(sync.listNodes());
-expectType<Promise<void>>(sync.addNode({ url: 'ws://a', token: 't', scopes: ['*'] }));
-expectType<Promise<void>>(sync.addNode({ url: 'ws://a' }));
-expectError(sync.addNode({ url: 'ws://a', type: 'uplink' }));
-expectError(sync.addNode({ token: 't' }));
-expectType<Promise<void>>(sync.start());
-expectType<Promise<void>>(sync.stop());
-expectType<Promise<SyncManager>>(new syncom.SyncManager(storage));
-
 // replication model
 expectType<string>(storage.nodeId);
 expectType<syncom.VersionVector>(storage.vector);
@@ -480,39 +467,6 @@ expectType<string | undefined>(validationError.issues[0].conflict);
 storage.on('close', () => {});
 expectType<number>(storage.listenerCount('change'));
 expectError(storage.on('nope', () => {}));
-sync.on('peer', ({ url, connected, node }) => {
-  expectType<string>(url);
-  expectType<boolean>(connected);
-  expectType<string | undefined>(node);
-});
-sync.on('sync', (event) => expectType<number | undefined>(event.skipped));
-sync.on('node', ({ action }) => expectType<'add' | 'remove' | 'enable' | 'disable'>(action));
-sync.on('hello', ({ node, scopes }) => {
-  expectType<string>(node);
-  expectType<string[]>(scopes);
-});
-sync.on('error', (error) => expectType<string>(error.url));
-expectError(sync.on('nope', () => {}));
-expectType<boolean>(sync.started);
-expectType<Promise<void>>(sync.enableNode('ws://a', false));
-expectType<Promise<Array<{ url: string; pushed: number }>>>(sync.sync());
-expectType<number>(sync.peers()[0].pending);
-expectType<string | null>(sync.listNodes()[0].cursor);
-expectType<syncom.SchemaInfo | null>(sync.listNodes()[0].remote!.schema);
-sync.on('hello', ({ schema }) => expectType<syncom.SchemaInfo | null>(schema));
-sync.on('peer', ({ schema }) => expectType<syncom.SchemaInfo | null | undefined>(schema));
-expectType<syncom.SyncUnit>(sync.unit({ authorize: (_context, hello) => hello.schema?.version === 2 }));
-expectType<syncom.SyncUnit>(sync.unit({ access: 'public', authorize: async () => true }));
-expectType<string>(sync.unit().hello.access);
-expectType<syncom.SyncUnit>(
-  sync.unit({
-    limits: { opsPerPush: 500, bytesPerPush: 1 << 20, opsPerSecond: 200 },
-    meta: { rateLimit: { limit: 5 } },
-  }),
-);
-expectType<Record<string, unknown> | undefined>(sync.unit().push.meta);
-expectError(sync.unit({ meta: 'x' }));
-expectError(sync.unit({ limits: { opsPerMinute: 1 } }));
 expectError(syncom.open({ sync: { sharedLog: {} } }));
 expectType<boolean>(syncom.isSharedLog({}));
 expectAssignable<syncom.SharedLog>({
@@ -535,14 +489,6 @@ storage.applyRemote([], { bound: ['Doc'] }).then((result) => {
   expectType<number>(result.outOfScope);
 });
 expectError(storage.applyRemote([], { bound: 'Doc' }));
-storage.sync.on('refused', (event) => {
-  expectType<'scope' | 'forged' | 'unsigned'>(event.reason);
-  expectType<number>(event.count);
-  expectType<string>(event.node);
-});
-storage.sync.on('sync', (event) => {
-  expectType<number | undefined>(event.malformed);
-});
 storage.on('error', (error) => {
   expectAssignable<SyncomError>(error);
   if (error.code === 'UNPERSISTED') return;
@@ -561,15 +507,9 @@ expectAssignable<Fsi>({
 expectType<void>(log.applied(3));
 expectType<void>(log.applied(2, 4));
 expectType<Promise<syncom.OpLog>>(new syncom.OpLog('base', { sealApplied: true }));
-expectType<boolean>(storage.sync.peers()[0].stuck);
-storage.sync.on('error', (error) => {
-  expectType<string | null | undefined>(error.cursor);
-  expectType<number | undefined>(error.attempt);
-});
 expectError(storage.swap('id', 'text', { a: 1 }));
 
 // E3: behind peers, the outbox bound
-expectType<boolean>(storage.sync.peers()[0].behind);
 expectAssignable<StorageOptions>({ sync: { maxOutbox: 500 } });
 expectError(syncom.open({ sync: { maxOutbox: 'lots' } }));
 
@@ -596,9 +536,6 @@ expectAssignable<StorageOptions>({ defer: 50 });
 expectError(syncom.open({ defer: '50ms' }));
 expectType<Promise<number>>(storage.compact('id'));
 expectType<Promise<syncom.HistoryResult>>(storage.history('id', { limit: 10, before: 'epoch:1' }));
-expectType<syncom.HostedPeer[]>(storage.sync.hosted());
-expectType<string | null>(storage.sync.hosted()[0].cursor);
-expectType<number | null | string>(storage.sync.peers()[0].lastError!.code);
 storage.on('log', (event) => {
   expectType<'roll'>(event.kind);
   expectType<number>(event.floor);
@@ -674,9 +611,7 @@ expectType<typeof syncom.SyncomCollection>(syncom.Storage.Collection);
 expectType<number>(storage.listenerCount('change'));
 expectType<(keyof syncom.StorageEvents)[]>(storage.eventNames());
 expectType<Promise<syncom.SyncOp>>(storage.toPromise('change'));
-expectType<Promise<string>>(storage.sync.toPromise('error').then((error) => error.url));
 storage.clear('change');
-storage.sync.clear();
 
 // E7a: lock knobs, the listener cap, exclusive create
 expectAssignable<StorageOptions>({ lock: { mode: 'wait', timeout: 5000, poll: 50, staleAfter: 60_000 } });
@@ -707,15 +642,12 @@ expectAssignable<syncom.Patch>({
 // What the types now say about the code as it is.
 declare const typedLog: syncom.OpLog;
 expectType<number>(typedLog.pins);
-declare const typedSync: syncom.SyncManager;
-expectType<number>(typedSync.pendingOps());
 expectType<syncom.ApplyResult>(syncom.applyOp(null, {} as syncom.SyncOp, { pendingMax: 10 }));
 declare const typedStorage: syncom.Storage;
 typedStorage.on('error', (error) => {
   if (error.code === 'UNPERSISTED') expectType<string[]>(error.ids);
   else expectType<syncom.SyncOp>(error.op);
 });
-typedSync.on('sync', (event) => expectType<number | undefined>(event.outOfScope));
 declare const removal: syncom.WriteContext;
 expectType<true | undefined>(removal.own);
 expectType<readonly syncom.SetRemoval[] | undefined>(removal.removals);

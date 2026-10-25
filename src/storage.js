@@ -11,7 +11,6 @@
 
 const { Emitter, generateUUID, createLogger } = require('./utils.js');
 const { sha256 } = require('./digest.js');
-const { SyncManager } = require('./sync.js');
 const { OpLog } = require('./log.js');
 const { EntryStore } = require('./entries.js');
 const { Record, Collection } = require('./record.js');
@@ -300,12 +299,17 @@ class Storage extends Emitter {
     this.#core = this.#lend();
     await this.#replayTail();
     await this.#replayHeld();
-    const syncOptions = this.#options.sync ?? {};
-    this.#sync = await new SyncManager(this, { ...syncOptions, maxListeners: this.#options.maxListeners });
+    // The API plugins that need the open log — the sync manager — come
+    // after the replay, and hand back what the facade exposes.
+    const opened = { storage: this, options: this.#options, settings: this.#settings, logger: this.#logger };
+    for (const mod of this.#plugins.apis) {
+      const hooks = (await mod.open?.(opened)) ?? {};
+      if (hooks.sync) this.#sync = hooks.sync;
+    }
     this.#initCollections();
     // What the observable gauges sample, when a meter was given.
     this.#otel.gauges(() => ({
-      outbox: this.#sync.pendingOps(),
+      outbox: this.#sync === null ? 0 : this.#sync.pendingOps(),
       queue: this.#queued,
       cache: this.#entries.size,
       catalog: this.#catalog.size,
@@ -836,7 +840,9 @@ class Storage extends Emitter {
     return this.#otel;
   }
 
+  /** The sync manager — the `sync` plugin's; PLUGIN_MISSING without it. */
   get sync() {
+    if (this.#sync === null) throw missing('storage.sync', 'sync');
     return this.#sync;
   }
 
@@ -1420,7 +1426,7 @@ class Storage extends Emitter {
     // closing would be announced to nobody, after the final catalog save.
     // What was queued before this call still runs, ahead of the seal.
     this.#closed = true;
-    await this.#sync.stop();
+    if (this.#sync !== null) await this.#sync.stop();
     const seal = async () => {
       await this.#flushDeferred();
       await this.#catalogSave;

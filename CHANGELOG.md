@@ -64,6 +64,14 @@ There is no released version section until then; everything below lands in it.
   top answers ahead of (`flush()`, `close()`, `pending`); `create` is
   exclusive across the layers, so a lock on the disk is a lock whatever the
   memory above it holds, and under `'back'` nothing stale is read from below.
+- **Sync as a block.** The sync manager — the dialing side and the hosting
+  unit — is the `sync` plugin, `@alexify/syncom/sync` (`SyncManager` and
+  `isSyncLink` with it); without it `storage.sync` is `PLUGIN_MISSING`, and
+  the core still takes a peer's page through `applyRemote()` and selects
+  what a peer lacks with `outbound()`, now exported from the root — the
+  updates API a transport of the application's own carries. The options,
+  the hooks, the link contract and the apply path stay in the core, which
+  is 44 KB.
 - **Lists and text.** A field can be a list — an array edited by position —
   or a text — a string typed into: `splice(id, key, index, count, content)`
   and `push(id, key, content)`, on the storage and on a live Record. Two

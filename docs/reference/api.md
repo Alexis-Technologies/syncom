@@ -186,7 +186,19 @@ query searches the entity's `search` fields, best first unless ordered.
 | `watch(listener, { onError }?)` | Runs now and after every change to the collection; returns the stop function |
 | `[Symbol.asyncIterator]` | `for await (const row of cursor)` |
 
-## Sync
+## Sync (subpath)
+
+```js
+const { sync, SyncManager, isSyncLink } = require('@alexify/syncom/sync');
+```
+
+`sync` is the plugin: `open({ plugins: [sync] })` gives the storage its
+manager at `storage.sync`, built once the log is open; without it
+`storage.sync` is `PLUGIN_MISSING`, and a transport of the application's own
+carries ops with the core's `outbound()` and `applyRemote()` (see
+[Without the plugin](../guide/sync#without-the-plugin)). The options
+(`open({ sync })`), the hooks, the link contract and the apply path are the
+core's.
 
 ### `SyncManager`
 
@@ -308,9 +320,16 @@ validator — nothing was stamped, logged or written: `name`
 `issues` (`[{ path, message, code? }]`), and `cause` when the validator threw
 something of its own. A `SyncomError`; exported from the package root.
 
-### `isSyncLink(value)`
+### `isSyncLink(value)` / `outbound(log, { exclude, vector, scopes, own, allStreams })`
 
-Structural check for the [link contract](../guide/sync#the-link-contract).
+`isSyncLink` is the structural check for the [link contract](../guide/sync#the-link-contract).
+`outbound` is the selection a push and a branch merge make, as a function:
+what `log` (`storage.log`) has that a receiver (`exclude`, its node id)
+lacks by its version `vector`, in `scopes` (`null`: every scope), as `{ ops,
+first }` — `first` the first seq the log retains per stream of the sender
+(`own`), or of every origin with `allStreams`. With `applyRemote()` on the
+receiving side it is the updates API of a transport of the application's
+own, no `sync` plugin needed (see [Without the plugin](../guide/sync#without-the-plugin)).
 
 ### `isSharedLog(value)`
 
@@ -543,23 +562,24 @@ host that lacks one of its own (`KINDS_MISMATCH`).
 
 A plugin that is not a kind sets the core up before the log opens — the
 identity (`signing`), the sealing of records (`encryption`), the chain
-(`chain`) — and what the options ask for and no plugin provides is refused at
-`open()` the same way: `sync.signatures: 'require'` without `signing`,
+(`chain`) — or once it is open (the manager of `sync`), and what the options
+ask for and no plugin provides is refused at `open()` the same way: `sync.signatures: 'require'` without `signing`,
 `chain: true` without `chain`, `encrypted: true` without `encryption` (and a
 per-call `{ encrypted: true }` at the call). Without them the node id is what
-`getId` mints, ops go unsigned and unchecked, no block is written and
-`validate()` is `NO_CHAIN`. `storage.plugins` lists them all.
+`getId` mints, ops go unsigned and unchecked, no block is written,
+`validate()` is `NO_CHAIN` and `storage.sync` is `PLUGIN_MISSING`.
+`storage.plugins` lists them all.
 
 ## All (subpath)
 
 ```js
-const { open, Storage, applyOp, mergeEntry, text, tree, signing, chain, encryption, PLUGINS } = require('@alexify/syncom/all');
+const { open, Storage, applyOp, mergeEntry, text, tree, signing, chain, encryption, sync, PLUGINS } = require('@alexify/syncom/all');
 ```
 
-Everything the root and the `/signing`, `/chain` and `/encryption` subpaths
-export, plus `open()`/`Storage` with every shipped plugin registered ahead of
-the caller's (`text`, `tree`, `signing`, `chain`, `encryption`; a plugin
-given twice is given once), `applyOp`/`mergeEntry` folding under the same
+Everything the root and the `/signing`, `/chain`, `/encryption`, `/memory`,
+`/layered` and `/sync` subpaths export, plus `open()`/`Storage` with every
+shipped plugin registered ahead of the caller's (`text`, `tree`, `signing`,
+`chain`, `encryption`, `sync`; a plugin given twice is given once), `applyOp`/`mergeEntry` folding under the same
 registry, the plugins themselves and `PLUGINS`, the list. The API of the
 package before it was taken apart into blocks: what the tests and the
 examples open.

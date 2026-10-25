@@ -19,17 +19,17 @@
 // Every node is both: a mesh is nodes dialing whichever nodes they can
 // reach, with ops relayed transitively and de-duplicated by version vector.
 
-const { Emitter } = require('./utils.js');
-const { packOps, unpackOps } = require('./ops.js');
-const { vectorHas, vectorAdvance, vectorMax, keyScope, opKey } = require('./vector.js');
-const { outbound, unreachable } = require('./outbound.js');
-const { isSyncLink } = require('./link.js');
-const { createTelemetry, traced } = require('./telemetry.js');
-const { notify, runHook, normalizeHooks } = require('./hooks.js');
-const { GLOBAL_SCOPE, opInScope } = require('./scope.js');
-const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf, kindsOf } = require('./protocol.js');
+const { Emitter } = require('../utils.js');
+const { packOps, unpackOps } = require('../ops.js');
+const { vectorHas, vectorAdvance, vectorMax, keyScope, opKey } = require('../vector.js');
+const { outbound, unreachable } = require('../outbound.js');
+const { isSyncLink } = require('../link.js');
+const { createTelemetry, traced } = require('../telemetry.js');
+const { notify, runHook, normalizeHooks } = require('../hooks.js');
+const { GLOBAL_SCOPE, opInScope } = require('../scope.js');
+const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf, kindsOf } = require('../protocol.js');
 const { createUnit } = require('./hosting.js');
-const { SyncomError } = require('./errors.js');
+const { SyncomError } = require('../errors.js');
 
 const REMOTE = 'remote';
 // A page that fails this many times in a row leaves its peer `stuck`.

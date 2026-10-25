@@ -9,6 +9,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const core = require('../index.js');
 const { signing } = require('../src/signing/signing.js');
+const { sync } = require('../src/sync/sync.js');
 const { createSigner, tamper } = require('./utils/signed.js');
 const { createMesh, settle } = require('./utils/mesh.js');
 const { MemoryLink } = require('./utils/memory-link.js');
@@ -127,7 +128,8 @@ test('signing as a plugin', async (t) => {
   await t.test('a verify host takes the ops of an unsigned node; a require host refuses its hello', async (t2) => {
     const fsi = memory();
     const createStorage = async (t3, name, options = {}) => {
-      const storage = await core.open({ path: `mesh-${name}`, fsi, logger: false, ...options });
+      const plugins = [sync, ...(options.plugins ?? [])];
+      const storage = await core.open({ path: `mesh-${name}`, fsi, logger: false, ...options, plugins });
       t3.after(() => storage.close().catch(() => {}));
       return storage;
     };

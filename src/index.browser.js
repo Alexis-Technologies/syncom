@@ -19,6 +19,8 @@ const { applyOp, mergeEntry, isAlive } = require('./ops.js');
 const { HookError } = require('./hooks.js');
 const { ValidationError } = require('./schema.js');
 const { isSharedLog } = require('./shared-log.js');
+const { isSyncLink } = require('./link.js');
+const { outbound } = require('./outbound.js');
 const { SyncomError } = require('./errors.js');
 const { createPlugins } = require('./plugin.js');
 
@@ -31,7 +33,6 @@ module.exports = {
   list,
   isFsi,
   ...require('./storage.js'),
-  ...require('./sync.js'),
   ...require('./log.js'),
   applyOp,
   mergeEntry,
@@ -39,6 +40,8 @@ module.exports = {
   HookError,
   ValidationError,
   isSharedLog,
+  isSyncLink,
+  outbound,
   SyncomError,
   createPlugins,
 };

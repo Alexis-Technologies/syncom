@@ -20,6 +20,7 @@ import type {
   ApplyResult,
   FoldLimits,
 } from '../../index.js';
+import type { SyncApi } from '../sync/sync.js';
 
 export * from '../../index.js';
 export * from '../signing/signing.js';
@@ -27,9 +28,10 @@ export * from '../chain/chain.js';
 export * from '../encryption/encryption.js';
 export * from '../memory/memory.js';
 export * from '../layered/layered.js';
+export * from '../sync/sync.js';
 
 /** The storage with every shipped plugin registered: the core's API and the text and tree methods. */
-export interface Storage extends CoreStorage, TextMethods, TreeMethods {}
+export interface Storage extends CoreStorage, TextMethods, TreeMethods, SyncApi {}
 
 export interface StorageConstructor extends Omit<CoreStorageConstructor, 'prototype' | 'new'> {
   readonly prototype: Storage;
@@ -51,5 +53,13 @@ export declare function mergeEntry(a: Entry | null, b: Entry | null, limits?: Fo
 
 export declare const text: Plugin<TextMethods>;
 export declare const tree: Plugin<TreeMethods>;
-/** The plugins the package ships, in registration order: the kinds, then the identity, the chain and the sealing. */
-export declare const PLUGINS: readonly [Plugin<TextMethods>, Plugin<TreeMethods>, Plugin, Plugin, Plugin];
+export declare const sync: Plugin<SyncApi>;
+/** The plugins the package ships, in registration order. */
+export declare const PLUGINS: readonly [
+  Plugin<TextMethods>,
+  Plugin<TreeMethods>,
+  Plugin,
+  Plugin,
+  Plugin,
+  Plugin<SyncApi>,
+];

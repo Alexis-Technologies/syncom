@@ -56,8 +56,9 @@ test('browser barrel', async (t) => {
     assert.strictEqual('DataReader' in node, false);
   });
 
-  await t.test('SyncManager is shared: one registry over fsi in both halves', () => {
-    assert.strictEqual(browser.SyncManager, node.SyncManager);
+  await t.test('the log and the apply path are shared: one engine over fsi in both halves', () => {
     assert.strictEqual(browser.OpLog, node.OpLog);
+    assert.strictEqual(browser.applyOp, node.applyOp);
+    assert.strictEqual(browser.outbound, node.outbound);
   });
 });

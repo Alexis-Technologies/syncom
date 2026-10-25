@@ -1,6 +1,6 @@
 import { expectAssignable, expectType } from 'tsd';
 import * as browser from '../browser.js';
-import type { CrdtDelta, Storage, StorageOptions, SyncManager } from '../browser.js';
+import type { CrdtDelta, Storage, StorageOptions } from '../browser.js';
 import { memory } from '../src/memory/memory.js';
 
 // The split is the files layer; the crypto halves are the subpaths' (signing.browser.d.ts).
@@ -19,7 +19,6 @@ expectType<Promise<unknown>>(browserStorage.check('Post', {}));
 expectType<Promise<string>>(browser.read('dir', 'file.json'));
 
 declare const storage: Storage;
-expectType<SyncManager>(storage.sync);
 expectType<Promise<string[]>>(browser.list('dir'));
 expectType<Promise<void>>(storage.inc('id', 'hits'));
 expectType<boolean>(browser.isAlive(null));

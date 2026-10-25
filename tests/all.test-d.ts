@@ -53,8 +53,11 @@ expectType<
     syncom.Plugin,
     syncom.Plugin,
     syncom.Plugin,
+    syncom.Plugin<syncom.SyncApi>,
   ]
 >(syncom.PLUGINS);
+expectType<syncom.SyncManager>(storage.sync);
+expectType<syncom.Plugin<syncom.SyncApi>>(syncom.sync);
 expectType<syncom.Plugin>(syncom.signing);
 expectType<syncom.Plugin>(syncom.chain);
 expectType<syncom.Plugin>(syncom.encryption);

@@ -168,18 +168,20 @@ syncom.commit            (node A)
 const otelApi = require('@opentelemetry/api');
 const { Server, WrpcClient, defineRouter } = require('@alexify/wrpc');
 const { open } = require('@alexify/syncom');
+const { sync } = require('@alexify/syncom/sync');
 const { createWrpcLink } = require('@alexify/syncom/wrpc');
 
 const telemetry = { api: otelApi };
 
 // the host
-const hub = await open({ path: 'hub', telemetry });
+const hub = await open({ path: 'hub', plugins: [sync], telemetry });
 const router = defineRouter({ syncom: hub.sync.unit({ access: 'public' }) });
 await new Server({ router, host: '0.0.0.0', port: 8000, protocol: 'http', telemetry }).listen();
 
 // a node
 const node = await open({
   path: 'node',
+  plugins: [sync],
   telemetry,
   sync: { connect: async (peer) => createWrpcLink(await WrpcClient.connect(peer.url, { telemetry })) },
 });

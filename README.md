@@ -77,11 +77,12 @@ npm install @alexify/syncom
 Measured by `pnpm size` on every CI run. Every browser entry carries a budget
 that fails the build when exceeded; a subpath is off the main entry, so an app
 pays for what it imports. The main entry is the core — records, the log,
-queries, versions, sync; lists, texts and trees are the `text` and `tree`
-plugins (`@alexify/syncom/text`, `/tree`), the identity and signatures, the
-chain and the sealing of records the `signing`, `chain` and `encryption`
-plugins (`/signing`, `/chain`, `/encryption`), and `@alexify/syncom/all` is
-the core with every plugin registered (see
+queries, versions, the apply path; lists, texts and trees are the `text` and
+`tree` plugins (`@alexify/syncom/text`, `/tree`), the identity and
+signatures, the chain and the sealing of records the `signing`, `chain` and
+`encryption` plugins (`/signing`, `/chain`, `/encryption`), the sync
+manager the `sync` plugin (`/sync`), and `@alexify/syncom/all` is the core
+with every plugin registered (see
 [Entry points](https://syncomjs.vercel.app/guide/entry-points)).
 
 | Entry | raw | min | min+gzip | budget |
@@ -133,11 +134,15 @@ diff({ tags: ['a'] }, { tags: ['a', 'b'] });   // { tags: ['b'] }
 ### Syncing between nodes
 
 Host one end on a [wrpc](https://wrpc.vercel.app) server, dial it from the
-other. wrpc is yours to install — syncom only takes the client you built:
+other. wrpc is yours to install — syncom only takes the client you built;
+the manager is the `sync` plugin (`@alexify/syncom/sync`), registered by
+`@alexify/syncom/all`:
 
 ```js
 // the hub
 const { Server, defineRouter } = require('@alexify/wrpc');
+const { sync } = require('@alexify/syncom/sync');
+const storage = await open({ path: 'hub', plugins: [sync] });
 const router = defineRouter({ syncom: storage.sync.unit({ access: 'public' }) });
 await new Server({ router, host: '0.0.0.0', port: 8000, protocol: 'http' }).listen();
 
@@ -146,6 +151,7 @@ const { WrpcClient } = require('@alexify/wrpc');
 const { createWrpcLink } = require('@alexify/syncom/wrpc');
 const storage = await open({
   path: 'data',
+  plugins: [sync],
   sync: { connect: async (node) => createWrpcLink(await WrpcClient.connect(node.url)) },
 });
 await storage.sync.addNode({ url: 'ws://hub.example.com:8000/api' });
