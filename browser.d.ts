@@ -53,6 +53,7 @@ export type {
   Node,
   SyncOptions,
   SyncomTelemetryOptions,
+  SyncomTelemetryWriter,
   SyncomTelemetryApi,
   SyncomTracer,
   SyncomSpan,

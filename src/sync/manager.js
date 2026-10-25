@@ -24,7 +24,7 @@ const { packOps, unpackOps } = require('../ops.js');
 const { vectorHas, vectorAdvance, vectorMax, keyScope, opKey } = require('../vector.js');
 const { outbound, unreachable } = require('../outbound.js');
 const { isSyncLink } = require('../link.js');
-const { createTelemetry, traced } = require('../telemetry.js');
+const { writerOf, traced } = require('../telemetry.js');
 const { notify, runHook, normalizeHooks } = require('../hooks.js');
 const { GLOBAL_SCOPE, opInScope } = require('../scope.js');
 const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf, kindsOf } = require('../protocol.js');
@@ -95,7 +95,7 @@ class SyncManager extends Emitter {
       throw new TypeError('sync.maxOutbox must be a positive integer');
     }
     if (maxOutbox !== undefined) this.#maxOutbox = maxOutbox;
-    this.#otel = createTelemetry(storage.telemetry);
+    this.#otel = writerOf(storage.telemetry);
     // Reserved for the broker-backed hub mode (see src/shared-log.js).
     if (this.#options.sharedLog !== undefined) {
       throw new TypeError('sync.sharedLog is reserved: the shared-log hub mode is not in this version');

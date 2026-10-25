@@ -29,7 +29,7 @@ const defaultFsi = require('./fsi.js');
 const { checkFsi, withSync } = require('./backend.js');
 const { acquireLock } = require('./lock.js');
 const { Catalog, isTextIndex } = require('./catalog.js');
-const { createTelemetry, traced, now } = require('./telemetry.js');
+const { DISABLED, isWriter, traced, now } = require('./telemetry.js');
 const { GLOBAL_SCOPE } = require('./scope.js');
 const { normalizeStorageOptions } = require('./options.js');
 const { isPlainObject, isRecordId, invalidId, isStreamName, isKeyId, VALIDATED } = require('./shape.js');
@@ -95,6 +95,7 @@ class Storage extends Emitter {
   #getId;
   #logger;
   #otel;
+  #lockWait = 0;
   #options;
   #nodeId = null;
   #clock = new Clock();
@@ -152,7 +153,7 @@ class Storage extends Emitter {
       if (ref !== undefined && ref.deref() === undefined) this.#records.delete(id);
     });
     this.#logger = createLogger(options.logger);
-    this.#otel = createTelemetry(options.telemetry);
+    this.#otel = DISABLED;
     this.#fsi = this.#backend(options, settings.durable);
     this.#hooks = normalizeHooks(options.hooks, STORAGE_HOOKS, 'Storage');
     return this.#init();
@@ -228,9 +229,10 @@ class Storage extends Emitter {
     // this one is about to. `lock: false` is for a caller that coordinates.
     const lock = this.#lockOptions;
     if (lock !== null) {
-      const started = this.#otel.enabled ? now() : 0;
+      // Recorded once the writer is set up (a plugin's, after the lock).
+      const started = now();
       this.#lock = await acquireLock({ fsi: this.#fsi, path: this.#path, ...lock });
-      if (started) this.#otel.recordLockWait(now() - started);
+      this.#lockWait = now() - started;
     }
     try {
       await this.#open();
@@ -255,13 +257,26 @@ class Storage extends Emitter {
       settings: this.#settings,
       storage: this,
     };
+    let adapted = false;
     for (const mod of this.#plugins.apis) {
       const hooks = (await mod.setup?.(ctx)) ?? {};
       if (hooks.identity) this.#identity = hooks.identity;
       if (hooks.seal) this.#seal = hooks.seal;
       if (hooks.chain) this.#chain = hooks.chain;
       if (hooks.schema) this.#schemaHook = hooks.schema;
+      if (Object.hasOwn(hooks, 'telemetry')) {
+        this.#otel = hooks.telemetry;
+        adapted = true;
+      }
     }
+    // A writer given as it is (the contract: `enabled`, `withSpan`) the core
+    // takes; an OpenTelemetry api or tracer needs the plugin to adapt it.
+    const given = this.#options.telemetry;
+    if (!adapted && given && typeof given === 'object') {
+      if (isWriter(given)) this.#otel = given;
+      else throw missing('open({ telemetry })', 'telemetry');
+    }
+    if (this.#lockWait > 0 && this.#otel.enabled) this.#otel.recordLockWait(this.#lockWait);
     if (this.#signatures === 'require' && this.#identity === null) {
       throw missing("sync.signatures 'require'", 'signing');
     }

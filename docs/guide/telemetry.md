@@ -11,17 +11,29 @@ and that is the point of the design, see
 
 ## Two injection modes
 
+The adapter that turns an OpenTelemetry api or tracer into what the engine
+records through is the `telemetry` plugin — `@alexify/syncom/telemetry`,
+registered by `@alexify/syncom/all`; without it `open({ telemetry: { api } })`
+is `PLUGIN_MISSING`, and a node that never traces ships none of the adapter.
+
 ```js
 const otelApi = require('@opentelemetry/api');
 const { open } = require('@alexify/syncom');
+const { telemetry } = require('@alexify/syncom/telemetry');
 
 // The api module: syncom derives its own tracer and meter, so spans carry
 // the `@alexify/syncom` instrumentation scope.
-const storage = await open({ path: 'data', telemetry: { api: otelApi } });
+const storage = await open({ path: 'data', plugins: [telemetry], telemetry: { api: otelApi } });
 
 // Or pre-built instances — either alone is fine.
-const traced = await open({ path: 'data', telemetry: { tracer, meter } });
+const traced = await open({ path: 'data', plugins: [telemetry], telemetry: { tracer, meter } });
 ```
+
+The core itself records through a **writer** — `enabled` and `withSpan`,
+duck-typed — and takes one given to `open({ telemetry })` as it is, plugin
+or not: `createTelemetry({ api })` from the same subpath builds one by hand,
+to share with an `OpLog` opened on its own (`new OpLog(path, { telemetry:
+writer })`) or with a second storage.
 
 `includeIdentity: false` keeps record ids, peer urls/node ids and scopes off
 spans, and records a failure's `code` (or class) as the span status instead
@@ -171,17 +183,18 @@ const { open } = require('@alexify/syncom');
 const { sync } = require('@alexify/syncom/sync');
 const { createWrpcLink } = require('@alexify/syncom/wrpc');
 
+const { telemetry: otel } = require('@alexify/syncom/telemetry');
 const telemetry = { api: otelApi };
 
 // the host
-const hub = await open({ path: 'hub', plugins: [sync], telemetry });
+const hub = await open({ path: 'hub', plugins: [sync, otel], telemetry });
 const router = defineRouter({ syncom: hub.sync.unit({ access: 'public' }) });
 await new Server({ router, host: '0.0.0.0', port: 8000, protocol: 'http', telemetry }).listen();
 
 // a node
 const node = await open({
   path: 'node',
-  plugins: [sync],
+  plugins: [sync, otel],
   telemetry,
   sync: { connect: async (peer) => createWrpcLink(await WrpcClient.connect(peer.url, { telemetry })) },
 });

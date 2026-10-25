@@ -20,9 +20,10 @@ const { memory } = require('../memory/memory.js');
 const { layered } = require('../layered/layered.js');
 const { sync } = require('../sync/sync.js');
 const { schema } = require('../schema/schema.js');
+const { telemetry, createTelemetry } = require('../telemetry/telemetry.js');
 
 /** The plugins the package ships, in registration order. */
-const PLUGINS = Object.freeze([text, tree, signing, chain, encryption, sync, schema]);
+const PLUGINS = Object.freeze([text, tree, signing, chain, encryption, sync, schema, telemetry]);
 const registry = createPlugins(PLUGINS);
 
 const withAll = (given = []) => {
@@ -64,5 +65,7 @@ module.exports = {
   encryption,
   sync,
   schema,
+  telemetry,
+  createTelemetry,
   PLUGINS,
 };

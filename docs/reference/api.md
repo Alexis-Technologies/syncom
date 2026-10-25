@@ -114,7 +114,8 @@ the platform's), `schema`, `schemaInfo` (`{ version, hash, previous, held }`,
 verified against), `signatures` (`'verify'`, `'require'` or `false`), `path`,
 `log`, `vector`, `logger` (the writer built from
 `open({ logger })` — `debug`/`info`/`warn`/`error`), `telemetry` (the writer
-built from the option — opaque).
+the engine records through — the `telemetry` plugin's from `{ api }` or
+`{ tracer, meter }`, one given as it is, or the disabled one).
 Statics: `Storage.Collection`, `Storage.Record`, `Storage.generateId()` — the
 default `getId`, synchronous in both halves.
 
@@ -342,7 +343,8 @@ will take after this version. `open({ sync: { sharedLog } })` is refused.
 ### `OpLog`
 
 `await new OpLog(basePath, { rollAfter, retention, logger, telemetry, fsi, sealApplied, onRoll })` —
-`storage.log` is the one you want. With `sealApplied` (what the storage asks
+`storage.log` is the one you want; `telemetry` here is a writer
+(`createTelemetry()` from `@alexify/syncom/telemetry`). With `sealApplied` (what the storage asks
 for) a roll seals only the batches marked `applied`; `onRoll` is told
 `{ sealed, dropped, floor, segments }` after every seal (the storage's `log`
 event).
@@ -529,6 +531,21 @@ and `open({ validator })` are `PLUGIN_MISSING`, as are `migrate()` and
 `check()`, and records are untyped — `$type` a field like any other.
 `ValidationError` is the root's, re-exported.
 
+## Telemetry (subpath)
+
+```js
+const { telemetry, createTelemetry } = require('@alexify/syncom/telemetry');
+```
+
+`telemetry` is the plugin: `open({ plugins: [telemetry], telemetry })` adapts
+`{ api }` (the `@opentelemetry/api` module) or `{ tracer, meter }` into the
+writer the engine records through (see [OpenTelemetry](../guide/telemetry)).
+`createTelemetry(options)` builds that writer by hand — for an `OpLog` opened
+on its own, or to give `open({ telemetry })` as it is, which the core takes
+without the plugin (duck-typed: `enabled`, `withSpan`); nothing usable is the
+frozen disabled writer, whose `withSpan` still runs its callback. Without the
+plugin an api or a tracer given to `open()` is `PLUGIN_MISSING`.
+
 ## Backends
 
 A backend — an **fsi** — is five functions over "a directory and a file name":
@@ -579,12 +596,12 @@ host that lacks one of its own (`KINDS_MISMATCH`).
 
 A plugin that is not a kind sets the core up before the log opens — the
 identity (`signing`), the sealing of records (`encryption`), the chain
-(`chain`), the definitions of `schema` — or once it is open (the manager of
-`sync`), and what the options ask for and no plugin provides is refused at
-`open()` the same way: `sync.signatures: 'require'` without `signing`,
+(`chain`), the definitions of `schema`, the writer of `telemetry` — or once
+it is open (the manager of `sync`), and what the options ask for and no
+plugin provides is refused at `open()` the same way: `sync.signatures: 'require'` without `signing`,
 `chain: true` without `chain`, `encrypted: true` without `encryption` (and a
 per-call `{ encrypted: true }` at the call), `schema` or `validator` without
-`schema`. Without them the node id is what
+`schema`, an OpenTelemetry api or tracer without `telemetry`. Without them the node id is what
 `getId` mints, ops go unsigned and unchecked, no block is written,
 `validate()` is `NO_CHAIN` and `storage.sync` is `PLUGIN_MISSING`.
 `storage.plugins` lists them all.
@@ -592,14 +609,14 @@ per-call `{ encrypted: true }` at the call), `schema` or `validator` without
 ## All (subpath)
 
 ```js
-const { open, Storage, applyOp, mergeEntry, text, tree, signing, chain, encryption, sync, schema, PLUGINS } = require('@alexify/syncom/all');
+const { open, Storage, applyOp, mergeEntry, text, tree, signing, chain, encryption, sync, schema, telemetry, PLUGINS } = require('@alexify/syncom/all');
 ```
 
 Everything the root and the `/signing`, `/chain`, `/encryption`, `/memory`,
-`/layered`, `/sync` and `/schema` subpaths export, plus `open()`/`Storage`
-with every shipped plugin registered ahead of the caller's (`text`, `tree`,
-`signing`, `chain`, `encryption`, `sync`, `schema`; a plugin given twice is
-given once), `applyOp`/`mergeEntry` folding under the same
+`/layered`, `/sync`, `/schema` and `/telemetry` subpaths export, plus
+`open()`/`Storage` with every shipped plugin registered ahead of the caller's
+(`text`, `tree`, `signing`, `chain`, `encryption`, `sync`, `schema`,
+`telemetry`; a plugin given twice is given once), `applyOp`/`mergeEntry` folding under the same
 registry, the plugins themselves and `PLUGINS`, the list. The API of the
 package before it was taken apart into blocks: what the tests and the
 examples open.

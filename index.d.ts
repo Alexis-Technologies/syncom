@@ -383,7 +383,7 @@ export interface OpLogOptions {
   rollAfter?: number;
   retention?: { ops?: number; days?: number };
   logger?: Logger | false;
-  telemetry?: SyncomTelemetryOptions;
+  telemetry?: SyncomTelemetryOptions | SyncomTelemetryWriter;
   fsi?: Fsi;
   /**
    * Seal only the batches the owner has marked `applied`: what Storage asks
@@ -541,6 +541,17 @@ export interface SyncomTelemetryOptions {
    * spans. They are never metric labels at any setting.
    */
   includeIdentity?: boolean;
+}
+
+/**
+ * The writer the engine records through: what the telemetry plugin builds
+ * from `SyncomTelemetryOptions`, and what `open({ telemetry })` takes as it
+ * is without the plugin. `enabled` false is the frozen disabled writer, whose
+ * `withSpan` still runs its callback.
+ */
+export interface SyncomTelemetryWriter {
+  readonly enabled: boolean;
+  withSpan<T>(name: string, attributes: Record<string, unknown>, fn: (handle: unknown) => T): T;
 }
 
 export type CrdtDelta = Record<string, unknown>;
@@ -1114,7 +1125,7 @@ export interface StorageOptions<S extends Schema = Schema> {
   /** Encrypt every record at rest by default (records then stay local). */
   encrypted?: boolean;
   /** Injected OpenTelemetry — see SyncomTelemetryOptions. */
-  telemetry?: SyncomTelemetryOptions;
+  telemetry?: SyncomTelemetryOptions | SyncomTelemetryWriter;
   /** Lifecycle hooks — see StorageHooks. */
   hooks?: StorageHooks;
   /**

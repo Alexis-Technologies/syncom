@@ -18,7 +18,8 @@ const {
 const { AsyncLocalStorageContextManager } = require('@opentelemetry/context-async-hooks');
 
 const syncom = require('../src/all/all.js');
-const { createTelemetry, DISABLED, SCOPE_NAME } = require('../src/telemetry.js');
+const { DISABLED, SCOPE_NAME } = require('../src/telemetry.js');
+const { createTelemetry } = require('../src/telemetry/telemetry.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const { createMesh, settle, waitUntil } = require('./utils/mesh.js');
 const { MemoryLink } = require('./utils/memory-link.js');
@@ -787,7 +788,9 @@ test('OpLog telemetry', async (t) => {
     t2.after(() => cleanupTemp(dir));
     const { tracer, named } = createTracing();
     const { meter, points } = createMetrics();
-    const log = await new syncom.OpLog(dir, { telemetry: { tracer, meter }, rollAfter: 2, retention: { ops: 4 } });
+    // A log on its own takes a writer — the adapter is the plugin's.
+    const telemetry = createTelemetry({ tracer, meter });
+    const log = await new syncom.OpLog(dir, { telemetry, rollAfter: 2, retention: { ops: 4 } });
     for (let seq = 1; seq <= 8; seq++) {
       await log.append([{ origin: 'n', seq, ts: seq, type: 'write', id: 'r', data: {} }]);
     }

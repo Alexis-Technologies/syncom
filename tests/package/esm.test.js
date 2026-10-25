@@ -29,6 +29,7 @@ const ENTRIES = [
   'src/layered/layered.js',
   'src/sync/sync.js',
   'src/schema/schema.js',
+  'src/telemetry/telemetry.js',
 ];
 
 for (const entry of ENTRIES) {

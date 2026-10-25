@@ -19,6 +19,7 @@ given, and another storage in the same process may run with others.
 | `@alexify/syncom/encryption` | records sealed for this node (`encrypted: true`), and `atRest()`, a backend wrapper that encrypts every file | `open({ plugins: [encryption] })`; `open({ fsi: atRest(fsi, …) })` |
 | `@alexify/syncom/sync` | the sync manager: nodes, links, pushes, the feed, the bootstrap, the hosting unit; the core keeps `applyRemote()` and `outbound()` | `open({ plugins: [sync] })` |
 | `@alexify/syncom/schema` | entity definitions: collections, validation, indexes, migrations and the lens, `migrate()`, `check()` | `open({ plugins: [schema], schema })` |
+| `@alexify/syncom/telemetry` | the OpenTelemetry adapter: `{ api }` or `{ tracer, meter }` into the writer the engine records through; `createTelemetry()` | `open({ plugins: [telemetry], telemetry })` |
 | `@alexify/syncom/all` | the core with every shipped plugin registered — the API as one import | `require('@alexify/syncom/all').open()` |
 | `@alexify/syncom/undo`, `/branch`, `/order` | the undo stack, forks and merges, fractional indexes | functions over a storage |
 | `@alexify/syncom/memory`, `/layered` | `memory()`, the backend in memory; `layered([top, …, bottom])`, one backend over several as a multi-level cache | `open({ fsi })` |
@@ -96,8 +97,9 @@ const { open } = require('@alexify/syncom/all'); // text, tree, signing, chain a
 ## Sizes
 
 `pnpm size` measures every entry on its own, min+gzip, against a budget: the
-core about 42 KB, `/text` 14 KB, `/tree` 5 KB, `/signing` 4 KB, `/chain`
-2 KB, `/encryption` 4 KB, `/sync` 18 KB, `/schema` 4 KB, `/all` 72 KB. In an app bundle the
+core about 40 KB, `/text` 14 KB, `/tree` 5 KB, `/signing` 4 KB, `/chain`
+2 KB, `/encryption` 4 KB, `/sync` 18 KB, `/schema` 4 KB, `/telemetry` 3 KB,
+`/all` 72 KB. In an app bundle the
 modules the blocks share with the core are counted once, so core + `/text` is
 about 53 KB, the three security blocks add about 2 KB together and `/sync`
 about 7 KB — not the sum of the rows.

@@ -229,6 +229,13 @@ const ENTRIES = [
   { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 18 },
   // The schema: the definitions read once, the validator adapters, the lens.
   { label: 'schema — browser (@alexify/syncom/schema)', entry: 'src/schema/schema.js', platform: 'browser', budget: 4 },
+  // The OpenTelemetry adapter: the tracer and meter resolved, the instruments, the gauges.
+  {
+    label: 'telemetry — browser (@alexify/syncom/telemetry)',
+    entry: 'src/telemetry/telemetry.js',
+    platform: 'browser',
+    budget: 4,
+  },
 ];
 
 // A browser entry has to be self-contained: no node builtins, and no packages

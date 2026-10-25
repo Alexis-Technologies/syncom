@@ -12,10 +12,17 @@ const path = require('node:path');
 const ROOT = path.join(__dirname, '..', '..');
 const SRC = path.join(ROOT, 'src');
 
-const sources = () =>
-  readdirSync(SRC)
-    .filter((name) => name.endsWith('.js'))
-    .map((name) => readFileSync(path.join(SRC, name), 'utf8'));
+// Every module under src/, the subpaths' folders included: a name is a
+// surface wherever it is emitted.
+const files = (dir) =>
+  readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+    entry.isDirectory()
+      ? files(path.join(dir, entry.name))
+      : entry.name.endsWith('.js')
+        ? [path.join(dir, entry.name)]
+        : [],
+  );
+const sources = () => files(SRC).map((file) => readFileSync(file, 'utf8'));
 
 const names = (pattern) => {
   const found = new Set();

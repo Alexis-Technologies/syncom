@@ -80,6 +80,14 @@ There is no released version section until then; everything below lands in it.
   the plugin `open({ schema })` and `open({ validator })` are
   `PLUGIN_MISSING`, as are `migrate()` and `check()`, and records are
   untyped. The core is 42 KB.
+- **Telemetry as a block.** The OpenTelemetry adapter — `{ api }` or
+  `{ tracer, meter }` into the writer the engine records through — is the
+  `telemetry` plugin, `@alexify/syncom/telemetry`, with `createTelemetry()`
+  to build a writer by hand; the core keeps the writer contract, the
+  disabled writer and `traced`, takes a writer given to `open({ telemetry })`
+  as it is, and refuses an api or a tracer without the plugin
+  (`PLUGIN_MISSING`). An `OpLog` opened on its own takes a writer. The core
+  is 40 KB.
 - **Lists and text.** A field can be a list — an array edited by position —
   or a text — a string typed into: `splice(id, key, index, count, content)`
   and `push(id, key, content)`, on the storage and on a live Record. Two

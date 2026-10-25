@@ -27,7 +27,7 @@
 const defaultFsi = require('./fsi.js');
 const { formatEventId, parseEventId, vectorAdvance } = require('./vector.js');
 const { GLOBAL_SCOPE, inScope } = require('./scope.js');
-const { createTelemetry, traced, now } = require('./telemetry.js');
+const { writerOf, traced, now } = require('./telemetry.js');
 
 const OPEN = 'open';
 const INDEX = 'index.json';
@@ -90,7 +90,7 @@ class OpLog {
     this.#rollAfter = options.rollAfter ?? DEFAULT_ROLL_AFTER;
     this.#retention = { ops: DEFAULT_RETENTION_OPS, ...options.retention };
     this.#log = options.logger ?? null;
-    this.#otel = createTelemetry(options.telemetry);
+    this.#otel = writerOf(options.telemetry);
     // The storage asks for `sealApplied`: a roll then seals only the batches
     // it has marked applied (see `applied`), so an op whose record write
     // failed stays in the open files, replayed at every reopen until it

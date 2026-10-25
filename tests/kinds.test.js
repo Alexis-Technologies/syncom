@@ -102,8 +102,26 @@ test('open({ plugins }) picks the kinds; the /all entry has every shipped one', 
   const everything = await all.open({ path: `kinds-${n++}`, fsi, logger: false });
   t.after(() => everything.close());
   assert.deepStrictEqual(everything.kinds, ['text', 'tree']);
-  assert.deepStrictEqual(all.PLUGINS, [text, tree, all.signing, all.chain, all.encryption, all.sync, all.schema]);
-  assert.deepStrictEqual(everything.plugins, ['text', 'tree', 'signing', 'chain', 'encryption', 'sync', 'schema']);
+  assert.deepStrictEqual(all.PLUGINS, [
+    text,
+    tree,
+    all.signing,
+    all.chain,
+    all.encryption,
+    all.sync,
+    all.schema,
+    all.telemetry,
+  ]);
+  assert.deepStrictEqual(everything.plugins, [
+    'text',
+    'tree',
+    'signing',
+    'chain',
+    'encryption',
+    'sync',
+    'schema',
+    'telemetry',
+  ]);
   const other = await everything.insert({});
   await everything.treeMove(other, 'outline', 'r');
   assert.deepStrictEqual(await everything.get(other), { outline: [{ id: 'r', children: [] }] });

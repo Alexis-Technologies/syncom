@@ -98,7 +98,9 @@ src/sync/manager.js       SyncManager — the dialing side; `unit()` delegates t
 src/sync/hosting.js       createUnit — the hosting side: hello/push/snapshot/changes, limits, grant()
 src/link.js               isSyncLink — the link contract check
 src/wrpc.js               createWrpcLink — a WrpcClient as a SyncLink (no wrpc import)
-src/telemetry.js          the injected-OpenTelemetry writer (duck-typed; @opentelemetry/* only devDeps)
+src/telemetry.js          the telemetry writer contract: DISABLED, writerOf, traced — what every write path records through; no requires
+src/telemetry/telemetry.js  @alexify/syncom/telemetry — the OpenTelemetry adapter (createTelemetry: { api } | { tracer, meter } → writer,
+                          duck-typed; @opentelemetry/* only devDeps) and the plugin whose setup hands the core the writer
 src/                      ships as-is — no build step, CommonJS, 'use strict'
 tests/                    *.test.js are tests; anything else is a helper
 bench/                    one file per subject + support/harness.js; run-all.js skips compare.js and report.js
@@ -441,8 +443,12 @@ docs/                     VitePress site
   examples that assume replacement. Storage does NOT replicate through
   `merge`; the op model in `src/ops.js` is what converges.
 - **Telemetry is injected, never required.** `createTelemetry` in
-  `src/telemetry.js` duck-types whatever `open({ telemetry })` was given and
-  returns a writer; `DISABLED` is a frozen null-object whose `withSpan` still
+  `src/telemetry/telemetry.js` (the telemetry plugin's) duck-types whatever
+  `open({ telemetry })` was given and returns a writer the plugin's `setup`
+  hands the core (`telemetry` hook); the core takes a writer given as it is
+  (`isWriter`) and refuses an api or a tracer without the plugin; the lock
+  wait is measured in `#init` and recorded once the writer is there.
+  `DISABLED` (src/telemetry.js) is a frozen null-object whose `withSpan` still
   runs its callback, so call sites bracket work the same way on or off (but
   guard with `otel.enabled` before allocating attributes or reading the
   clock). syncom never puts trace context into ops — `tp`/`ts` are wrpc's,

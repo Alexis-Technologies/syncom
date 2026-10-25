@@ -30,6 +30,7 @@ export * from '../memory/memory.js';
 export * from '../layered/layered.js';
 export * from '../sync/sync.js';
 export * from '../schema/schema.js';
+export * from '../telemetry/telemetry.js';
 
 /** The storage with every shipped plugin registered: the core's API and the text and tree methods. */
 export interface Storage extends CoreStorage, TextMethods, TreeMethods, SyncApi {}
@@ -56,6 +57,7 @@ export declare const text: Plugin<TextMethods>;
 export declare const tree: Plugin<TreeMethods>;
 export declare const sync: Plugin<SyncApi>;
 export declare const schema: Plugin;
+export declare const telemetry: Plugin;
 /** The plugins the package ships, in registration order. */
 export declare const PLUGINS: readonly [
   Plugin<TextMethods>,
@@ -64,5 +66,6 @@ export declare const PLUGINS: readonly [
   Plugin,
   Plugin,
   Plugin<SyncApi>,
+  Plugin,
   Plugin,
 ];
