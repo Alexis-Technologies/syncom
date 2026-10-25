@@ -211,7 +211,7 @@ timed. The method and the interactive charts are on the
 <img src="https://syncomjs.vercel.app/benchmarks/compare-insert-disk.svg" alt="Insert a record, on disk: Add one record to a store of 1,000. Each library's own persistence on node:fs, every write awaited. ops/s, log scale, higher is better. Not shown: RxDB (Node.js disk storages are Premium)." width="760" />
 
 <details>
-<summary>13 more scenarios</summary>
+<summary>14 more scenarios</summary>
 
 <img src="https://syncomjs.vercel.app/benchmarks/compare-insert-memory.svg" alt="Insert a record, in memory: Add one record to a store of 1,000. Nothing touches the disk. ops/s, log scale, higher is better. Not shown: GUN (needs its storage adapter to answer in Node.js)." width="760" />
 
@@ -239,22 +239,24 @@ timed. The method and the interactive charts are on the
 
 <img src="https://syncomjs.vercel.app/benchmarks/compare-random-memory.svg" alt="Type anywhere in a text, in memory: Insert one character at a random position of the text (seeded). Nothing touches the disk. ops/s, log scale, higher is better. Not shown: TinyBase (no text that merges by position); PouchDB (no text that merges by position); RxDB (no text that merges by position); Fireproof (no text that merges by position); GUN (needs its storage adapter to answer in Node.js); OrbitDB (no text that merges by position)." width="760" />
 
+<img src="https://syncomjs.vercel.app/benchmarks/compare-trace-memory.svg" alt="Replay an editing trace, in memory: The automerge-perf trace: 259,778 keystrokes of a real paper (182,315 inserts, 77,463 deletes) replayed into one text as an editor would send them, the text read back whole at the end. Nothing touches the disk. ops/s, log scale, higher is better. Not shown: TinyBase; PouchDB; RxDB; Fireproof; GUN; OrbitDB." width="760" />
+
 </details>
 
 **In memory**
 
-| Library | Insert a record<br><sub>ops/s</sub> | Update a field<br><sub>ops/s</sub> | Read a record<br><sub>ops/s</sub> | Increment a counter<br><sub>ops/s</sub> | Insert 1,000 at once<br><sub>records/s</sub> | Replicate a store<br><sub>records/s</sub> | Type at the end of a text<br><sub>ops/s</sub> | Type at the start of a text<br><sub>ops/s</sub> | Type anywhere in a text<br><sub>ops/s</sub> |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| **syncom**<br><sub>default, memory() · v0.0.1</sub> | 15,200 | 17,200 | 845,000 | 17,100 | 15,800 | 25,100 | 1,800 | 388 | 537 |
-| **syncom**<br><sub>chain: false, memory() · v0.0.1</sub> | 16,700 | 19,400 | 885,000 | 18,800 | 16,900 | 25,800 | 1,820 | 391 | 550 |
-| Yjs<br><sub>Y.Doc, a Y.Map per record · v13.6.33</sub> | 235,000 | 382,000 | 3,680,000 | — | 275,000 | 99,700 | 346,000 | 525,000 | 30,400 |
-| Automerge<br><sub>Automerge.change, Counter · v3.5.0</sub> | 512 | 1,990 | 10,600,000 | 1,950 | 8,960 | 20,900 | 23,700 | 21,600 | 20,600 |
-| Loro<br><sub>LoroDoc, a LoroMap per record · v1.16.4</sub> | 31,300 | 412,000 | 313,000 | 349,000 | 83,100 | 105,000 | 619,000 | 444,000 | 311,000 |
-| TinyBase<br><sub>MergeableStore · v10.0.1</sub> | 22,900 | 108,000 | 1,460,000 | — | 23,700 | 11,500 | — | — | — |
-| PouchDB<br><sub>pouchdb-adapter-memory · v9.0.0</sub> | 20,300 | 8,310 | 30,100 | — | 74,000 | 17,800 | — | — | — |
-| RxDB<br><sub>memory storage · v17.6.0</sub> | 16,700 | 50,400 | 281,000 | — | 2,220,000 | 64,100 | — | — | — |
-| Fireproof<br><sub>memory:// store · v0.24.19</sub> | 310 | 377 | 726 | — | 22,300 | — | — | — | — |
-| OrbitDB<br><sub>documents, memory blockstore · v4.0.0</sub> | 1,080 | 31.1 | 81.4 | — | 1,090 | 220 | — | — | — |
+| Library | Insert a record<br><sub>ops/s</sub> | Update a field<br><sub>ops/s</sub> | Read a record<br><sub>ops/s</sub> | Increment a counter<br><sub>ops/s</sub> | Insert 1,000 at once<br><sub>records/s</sub> | Replicate a store<br><sub>records/s</sub> | Type at the end of a text<br><sub>ops/s</sub> | Type at the start of a text<br><sub>ops/s</sub> | Type anywhere in a text<br><sub>ops/s</sub> | Replay an editing trace<br><sub>ops/s</sub> |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **syncom**<br><sub>default, memory() · v0.0.1</sub> | 15,200 | 17,200 | 845,000 | 17,100 | 15,800 | 25,100 | 1,800 | 388 | 537 | 138 |
+| **syncom**<br><sub>chain: false, memory() · v0.0.1</sub> | 16,700 | 19,400 | 885,000 | 18,800 | 16,900 | 25,800 | 1,820 | 391 | 550 | 162 |
+| Yjs<br><sub>Y.Doc, a Y.Map per record · v13.6.33</sub> | 235,000 | 382,000 | 3,680,000 | — | 275,000 | 99,700 | 346,000 | 525,000 | 30,400 | 52,100 |
+| Automerge<br><sub>Automerge.change, Counter · v3.5.0</sub> | 512 | 1,990 | 10,600,000 | 1,950 | 8,960 | 20,900 | 23,700 | 21,600 | 20,600 | 18,100 |
+| Loro<br><sub>LoroDoc, a LoroMap per record · v1.16.4</sub> | 31,300 | 412,000 | 313,000 | 349,000 | 83,100 | 105,000 | 619,000 | 444,000 | 311,000 | 470,000 |
+| TinyBase<br><sub>MergeableStore · v10.0.1</sub> | 22,900 | 108,000 | 1,460,000 | — | 23,700 | 11,500 | — | — | — | — |
+| PouchDB<br><sub>pouchdb-adapter-memory · v9.0.0</sub> | 20,300 | 8,310 | 30,100 | — | 74,000 | 17,800 | — | — | — | — |
+| RxDB<br><sub>memory storage · v17.6.0</sub> | 16,700 | 50,400 | 281,000 | — | 2,220,000 | 64,100 | — | — | — | — |
+| Fireproof<br><sub>memory:// store · v0.24.19</sub> | 310 | 377 | 726 | — | 22,300 | — | — | — | — | — |
+| OrbitDB<br><sub>documents, memory blockstore · v4.0.0</sub> | 1,080 | 31.1 | 81.4 | — | 1,090 | 220 | — | — | — | — |
 
 **On disk**
 
@@ -271,7 +273,7 @@ timed. The method and the interactive charts are on the
 | GUN<br><sub>RAD on node:fs · v0.2020.1241</sub> | 3.63 | 3.77 | 749 | — | failed | — |
 | OrbitDB<br><sub>documents, LevelDB · v4.0.0</sub> | 952 | 17.4 | 82.4 | — | 921 | 193 |
 
-_Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library in a fresh process · 2026-10-24. Medians, rounded to three significant figures; — where the library has no such operation, no such storage, or no in-process sync, failed where it did not finish twice (the chart above says why)._
+_Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library in a fresh process · 2026-10-25. Medians, rounded to three significant figures; — where the library has no such operation, no such storage, or no in-process sync, failed where it did not finish twice (the chart above says why)._
 
 <!-- bench:compare:end -->
 

@@ -34,17 +34,17 @@
 <text class="subtitle" x="20" y="56">An empty replica pulls a store of 1,000 records, in process, through the library's own sync protocol, until</text>
 <text class="subtitle" x="20" y="73">every record reads back. Nothing touches the disk. records/s, log scale, higher is better. Not shown: Fireproof</text>
 <text class="subtitle" x="20" y="90">(syncs through a cloud or self-hosted gateway only); GUN (needs its storage adapter to answer in Node.js).</text>
-<line class="grid" x1="276" y1="105" x2="276" y2="465"/>
-<text class="tick" x="276" y="481" text-anchor="middle">100</text>
-<line class="grid" x1="376" y1="105" x2="376" y2="465"/>
-<text class="tick" x="376" y="481" text-anchor="middle">1,000</text>
-<line class="grid" x1="476" y1="105" x2="476" y2="465"/>
-<text class="tick" x="476" y="481" text-anchor="middle">10k</text>
-<line class="grid" x1="576" y1="105" x2="576" y2="465"/>
-<text class="tick" x="576" y="481" text-anchor="middle">100k</text>
+<line class="grid" x1="271" y1="105" x2="271" y2="465"/>
+<text class="tick" x="271" y="481" text-anchor="middle">100</text>
+<line class="grid" x1="372.25" y1="105" x2="372.25" y2="465"/>
+<text class="tick" x="372.25" y="481" text-anchor="middle">1,000</text>
+<line class="grid" x1="473.5" y1="105" x2="473.5" y2="465"/>
+<text class="tick" x="473.5" y="481" text-anchor="middle">10k</text>
+<line class="grid" x1="574.75" y1="105" x2="574.75" y2="465"/>
+<text class="tick" x="574.75" y="481" text-anchor="middle">100k</text>
 <line class="grid" x1="676" y1="105" x2="676" y2="465"/>
 <text class="tick" x="676" y="481" text-anchor="middle">1M</text>
-<line class="axis" x1="276" y1="105" x2="276" y2="465"/>
+<line class="axis" x1="271" y1="105" x2="271" y2="465"/>
 <g><title>Loro · LoroDoc, a LoroMap per record · v1.16.4
 105,332 records/s
 9.49 µs per record
@@ -52,8 +52,8 @@ samples 93.4k – 110k
 loro-crdt@1.16.4</title>
 <text class="label" x="20" y="122">Loro</text>
 <text class="sublabel" x="20" y="137">LoroDoc, a LoroMap per record · v1.16.4</text>
-<path class="bar" d="M276,118H574.2562208793138A4,4 0 0 1 578.2562208793138,122V128A4,4 0 0 1 574.2562208793138,132H276Z"/>
-<text class="value" x="584.2562208793138" y="131">105k</text>
+<path class="bar" d="M271,118H573.0344236403052A4,4 0 0 1 577.0344236403052,122V128A4,4 0 0 1 573.0344236403052,132H271Z"/>
+<text class="value" x="583.0344236403052" y="131">105k</text>
 </g>
 <g><title>Yjs · Y.Doc, a Y.Map per record · v13.6.33
 99,729 records/s
@@ -62,8 +62,8 @@ samples 81.2k – 118k
 yjs@13.6.33</title>
 <text class="label" x="20" y="162">Yjs</text>
 <text class="sublabel" x="20" y="177">Y.Doc, a Y.Map per record · v13.6.33</text>
-<path class="bar" d="M276,158H571.8819932839515A4,4 0 0 1 575.8819932839515,162V168A4,4 0 0 1 571.8819932839515,172H276Z"/>
-<text class="value" x="581.8819932839515" y="171">99.7k</text>
+<path class="bar" d="M271,158H570.6305182000008A4,4 0 0 1 574.6305182000008,162V168A4,4 0 0 1 570.6305182000008,172H271Z"/>
+<text class="value" x="580.6305182000008" y="171">99.7k</text>
 </g>
 <g><title>RxDB · memory storage · v17.6.0
 64,123 records/s
@@ -72,28 +72,28 @@ samples 47k – 95.6k
 rxdb@17.6.0</title>
 <text class="label" x="20" y="202">RxDB</text>
 <text class="sublabel" x="20" y="217">memory storage · v17.6.0</text>
-<path class="bar" d="M276,198H552.7014620906837A4,4 0 0 1 556.7014620906837,202V208A4,4 0 0 1 552.7014620906837,212H276Z"/>
-<text class="value" x="562.7014620906837" y="211">64.1k</text>
+<path class="bar" d="M271,198H551.2102303668172A4,4 0 0 1 555.2102303668172,202V208A4,4 0 0 1 551.2102303668172,212H271Z"/>
+<text class="value" x="561.2102303668172" y="211">64.1k</text>
 </g>
-<g><title>syncom · chain: false, createMemoryFsi() · v0.0.1
+<g><title>syncom · chain: false, memory() · v0.0.1
 25,836 records/s
 38.7 µs per record
 samples 23.8k – 26.2k
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="242">syncom</text>
-<text class="sublabel" x="20" y="257">chain: false, createMemoryFsi() · v0.0.1</text>
-<path class="bar secondary" d="M276,238H513.2231996896014A4,4 0 0 1 517.2231996896014,242V248A4,4 0 0 1 513.2231996896014,252H276Z"/>
-<text class="value" x="523.2231996896014" y="251">25.8k</text>
+<text class="sublabel" x="20" y="257">chain: false, memory() · v0.0.1</text>
+<path class="bar secondary" d="M271,238H511.23848968572145A4,4 0 0 1 515.2384896857214,242V248A4,4 0 0 1 511.23848968572145,252H271Z"/>
+<text class="value" x="521.2384896857214" y="251">25.8k</text>
 </g>
-<g><title>syncom · default, createMemoryFsi() · v0.0.1
+<g><title>syncom · default, memory() · v0.0.1
 25,091 records/s
 39.9 µs per record
 samples 24k – 25.9k
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="282">syncom</text>
-<text class="sublabel" x="20" y="297">default, createMemoryFsi() · v0.0.1</text>
-<path class="bar primary" d="M276,278H511.9510376047956A4,4 0 0 1 515.9510376047956,282V288A4,4 0 0 1 511.9510376047956,292H276Z"/>
-<text class="value" x="521.9510376047956" y="291">25.1k</text>
+<text class="sublabel" x="20" y="297">default, memory() · v0.0.1</text>
+<path class="bar primary" d="M271,278H509.95042557485544A4,4 0 0 1 513.9504255748554,282V288A4,4 0 0 1 509.95042557485544,292H271Z"/>
+<text class="value" x="519.9504255748554" y="291">25.1k</text>
 </g>
 <g><title>Automerge · Automerge.change, Counter · v3.5.0
 20,912 records/s
@@ -102,8 +102,8 @@ samples 19.5k – 21.5k
 @automerge/automerge@3.5.0</title>
 <text class="label" x="20" y="322">Automerge</text>
 <text class="sublabel" x="20" y="337">Automerge.change, Counter · v3.5.0</text>
-<path class="bar" d="M276,318H504.0403669772058A4,4 0 0 1 508.0403669772058,322V328A4,4 0 0 1 504.0403669772058,332H276Z"/>
-<text class="value" x="514.0403669772058" y="331">20.9k</text>
+<path class="bar" d="M271,318H501.9408715644209A4,4 0 0 1 505.9408715644209,322V328A4,4 0 0 1 501.9408715644209,332H271Z"/>
+<text class="value" x="511.9408715644209" y="331">20.9k</text>
 </g>
 <g><title>PouchDB · pouchdb-adapter-memory · v9.0.0
 17,776 records/s
@@ -112,8 +112,8 @@ samples 17k – 18.3k
 pouchdb@9.0.0</title>
 <text class="label" x="20" y="362">PouchDB</text>
 <text class="sublabel" x="20" y="377">pouchdb-adapter-memory · v9.0.0</text>
-<path class="bar" d="M276,358H496.98379059662847A4,4 0 0 1 500.98379059662847,362V368A4,4 0 0 1 496.98379059662847,372H276Z"/>
-<text class="value" x="506.98379059662847" y="371">17.8k</text>
+<path class="bar" d="M271,358H494.79608797908634A4,4 0 0 1 498.79608797908634,362V368A4,4 0 0 1 494.79608797908634,372H271Z"/>
+<text class="value" x="504.79608797908634" y="371">17.8k</text>
 </g>
 <g><title>TinyBase · MergeableStore · v10.0.1
 11,486 records/s
@@ -122,8 +122,8 @@ samples 10.5k – 11.7k
 tinybase@10.0.1</title>
 <text class="label" x="20" y="402">TinyBase</text>
 <text class="sublabel" x="20" y="417">MergeableStore · v10.0.1</text>
-<path class="bar" d="M276,398H478.0180918148999A4,4 0 0 1 482.0180918148999,402V408A4,4 0 0 1 478.0180918148999,412H276Z"/>
-<text class="value" x="488.0180918148999" y="411">11.5k</text>
+<path class="bar" d="M271,398H475.59331796258607A4,4 0 0 1 479.59331796258607,402V408A4,4 0 0 1 475.59331796258607,412H271Z"/>
+<text class="value" x="485.59331796258607" y="411">11.5k</text>
 </g>
 <g><title>OrbitDB · documents, memory blockstore · v4.0.0
 220 records/s
@@ -132,9 +132,9 @@ samples 214 – 221
 @orbitdb/core@4.0.0</title>
 <text class="label" x="20" y="442">OrbitDB</text>
 <text class="sublabel" x="20" y="457">documents, memory blockstore · v4.0.0</text>
-<path class="bar" d="M276,438H306.18425984208653A4,4 0 0 1 310.18425984208653,442V448A4,4 0 0 1 306.18425984208653,452H276Z"/>
-<text class="value" x="316.18425984208653" y="451">220</text>
+<path class="bar" d="M271,438H301.6115630901126A4,4 0 0 1 305.6115630901126,442V448A4,4 0 0 1 301.6115630901126,452H271Z"/>
+<text class="value" x="311.6115630901126" y="451">220</text>
 </g>
 <text class="caption" x="20" y="506">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
-<text class="caption" x="20" y="522">in a fresh process · 2026-10-24</text>
+<text class="caption" x="20" y="522">in a fresh process · 2026-10-25</text>
 </svg>

@@ -33,18 +33,18 @@ spread of the samples and the exact version.
 
 **In memory**
 
-| Library | Insert a record<br><sub>ops/s</sub> | Update a field<br><sub>ops/s</sub> | Read a record<br><sub>ops/s</sub> | Increment a counter<br><sub>ops/s</sub> | Insert 1,000 at once<br><sub>records/s</sub> | Replicate a store<br><sub>records/s</sub> | Type at the end of a text<br><sub>ops/s</sub> | Type at the start of a text<br><sub>ops/s</sub> | Type anywhere in a text<br><sub>ops/s</sub> |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| **syncom**<br><sub>default, memory() · v0.0.1</sub> | 15,200 | 17,200 | 845,000 | 17,100 | 15,800 | 25,100 | 1,800 | 388 | 537 |
-| **syncom**<br><sub>chain: false, memory() · v0.0.1</sub> | 16,700 | 19,400 | 885,000 | 18,800 | 16,900 | 25,800 | 1,820 | 391 | 550 |
-| Yjs<br><sub>Y.Doc, a Y.Map per record · v13.6.33</sub> | 235,000 | 382,000 | 3,680,000 | — | 275,000 | 99,700 | 346,000 | 525,000 | 30,400 |
-| Automerge<br><sub>Automerge.change, Counter · v3.5.0</sub> | 512 | 1,990 | 10,600,000 | 1,950 | 8,960 | 20,900 | 23,700 | 21,600 | 20,600 |
-| Loro<br><sub>LoroDoc, a LoroMap per record · v1.16.4</sub> | 31,300 | 412,000 | 313,000 | 349,000 | 83,100 | 105,000 | 619,000 | 444,000 | 311,000 |
-| TinyBase<br><sub>MergeableStore · v10.0.1</sub> | 22,900 | 108,000 | 1,460,000 | — | 23,700 | 11,500 | — | — | — |
-| PouchDB<br><sub>pouchdb-adapter-memory · v9.0.0</sub> | 20,300 | 8,310 | 30,100 | — | 74,000 | 17,800 | — | — | — |
-| RxDB<br><sub>memory storage · v17.6.0</sub> | 16,700 | 50,400 | 281,000 | — | 2,220,000 | 64,100 | — | — | — |
-| Fireproof<br><sub>memory:// store · v0.24.19</sub> | 310 | 377 | 726 | — | 22,300 | — | — | — | — |
-| OrbitDB<br><sub>documents, memory blockstore · v4.0.0</sub> | 1,080 | 31.1 | 81.4 | — | 1,090 | 220 | — | — | — |
+| Library | Insert a record<br><sub>ops/s</sub> | Update a field<br><sub>ops/s</sub> | Read a record<br><sub>ops/s</sub> | Increment a counter<br><sub>ops/s</sub> | Insert 1,000 at once<br><sub>records/s</sub> | Replicate a store<br><sub>records/s</sub> | Type at the end of a text<br><sub>ops/s</sub> | Type at the start of a text<br><sub>ops/s</sub> | Type anywhere in a text<br><sub>ops/s</sub> | Replay an editing trace<br><sub>ops/s</sub> |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **syncom**<br><sub>default, memory() · v0.0.1</sub> | 15,200 | 17,200 | 845,000 | 17,100 | 15,800 | 25,100 | 1,800 | 388 | 537 | 138 |
+| **syncom**<br><sub>chain: false, memory() · v0.0.1</sub> | 16,700 | 19,400 | 885,000 | 18,800 | 16,900 | 25,800 | 1,820 | 391 | 550 | 162 |
+| Yjs<br><sub>Y.Doc, a Y.Map per record · v13.6.33</sub> | 235,000 | 382,000 | 3,680,000 | — | 275,000 | 99,700 | 346,000 | 525,000 | 30,400 | 52,100 |
+| Automerge<br><sub>Automerge.change, Counter · v3.5.0</sub> | 512 | 1,990 | 10,600,000 | 1,950 | 8,960 | 20,900 | 23,700 | 21,600 | 20,600 | 18,100 |
+| Loro<br><sub>LoroDoc, a LoroMap per record · v1.16.4</sub> | 31,300 | 412,000 | 313,000 | 349,000 | 83,100 | 105,000 | 619,000 | 444,000 | 311,000 | 470,000 |
+| TinyBase<br><sub>MergeableStore · v10.0.1</sub> | 22,900 | 108,000 | 1,460,000 | — | 23,700 | 11,500 | — | — | — | — |
+| PouchDB<br><sub>pouchdb-adapter-memory · v9.0.0</sub> | 20,300 | 8,310 | 30,100 | — | 74,000 | 17,800 | — | — | — | — |
+| RxDB<br><sub>memory storage · v17.6.0</sub> | 16,700 | 50,400 | 281,000 | — | 2,220,000 | 64,100 | — | — | — | — |
+| Fireproof<br><sub>memory:// store · v0.24.19</sub> | 310 | 377 | 726 | — | 22,300 | — | — | — | — | — |
+| OrbitDB<br><sub>documents, memory blockstore · v4.0.0</sub> | 1,080 | 31.1 | 81.4 | — | 1,090 | 220 | — | — | — | — |
 
 **On disk**
 
@@ -61,7 +61,7 @@ spread of the samples and the exact version.
 | GUN<br><sub>RAD on node:fs · v0.2020.1241</sub> | 3.63 | 3.77 | 749 | — | failed | — |
 | OrbitDB<br><sub>documents, LevelDB · v4.0.0</sub> | 952 | 17.4 | 82.4 | — | 921 | 193 |
 
-_Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library in a fresh process · 2026-10-24. Medians, rounded to three significant figures; — where the library has no such operation, no such storage, or no in-process sync, failed where it did not finish twice (the chart above says why)._
+_Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library in a fresh process · 2026-10-25. Medians, rounded to three significant figures; — where the library has no such operation, no such storage, or no in-process sync, failed where it did not finish twice (the chart above says why)._
 
 <!-- bench:compare:end -->
 
@@ -273,53 +273,59 @@ chain, hashing, the CRDT helpers and the emitter. They are the numbers to watch 
 </details>
 
 <details>
-<summary>Apply — 21 rows</summary>
+<summary>Apply — 23 rows</summary>
 
 | Benchmark | ops/s | per operation |
 | --- | ---: | ---: |
-| applyOp — set one field on a 5-field entry | 3,878,877 | 258 ns |
-| applyOp — inc a counter | 3,785,335 | 264 ns |
-| applyOp — add to a 20-element set | 215,539 | 4.64 µs |
-| applyOp — remove from a 20-element set | 225,366 | 4.44 µs |
-| applyOp — write the whole record | 749,830 | 1.33 µs |
-| applyOp — merge a peer entry | 583,583 | 1.71 µs |
-| packOps — 500 writes | 63,907 | 15.6 µs |
-| unpackOps — 500 writes | 40,107 | 24.9 µs |
-| applyRemote — 100 writes, new records | 6,376 | 157 µs |
-| applyRemote — 500 writes, new records | 6,638 | 151 µs |
-| applyRemote — 100 signed writes, new records | 5,025 | 199 µs |
-| verifyOp — 100 signed writes | 37,012 | 27 µs |
-| applyRemote — 100 sets on cached records | 10,087 | 99.1 µs |
-| applyRemote — 100 incs on cached records | 9,121 | 110 µs |
-| applyRemote — 100 adds on cached records | 6,395 | 156 µs |
-| applyRemote — 100 writes, new records (chain: false) | 6,742 | 148 µs |
-| applyRemote — 500 writes, new records (chain: false) | 6,846 | 146 µs |
-| applyRemote — 100 signed writes, new records (chain: false) | 5,092 | 196 µs |
-| applyRemote — 100 sets on cached records (chain: false) | 10,696 | 93.5 µs |
-| applyRemote — 100 incs on cached records (chain: false) | 10,091 | 99.1 µs |
-| applyRemote — 100 adds on cached records (chain: false) | 7,060 | 142 µs |
+| applyOp — set one field on a 5-field entry | 4,050,212 | 247 ns |
+| applyOp — inc a counter | 3,805,386 | 263 ns |
+| applyOp — add to a 20-element set | 215,597 | 4.64 µs |
+| applyOp — remove from a 20-element set | 227,159 | 4.4 µs |
+| applyOp — write the whole record | 776,654 | 1.29 µs |
+| applyOp — merge a peer entry | 583,092 | 1.71 µs |
+| packOps — 500 writes | 66,596 | 15 µs |
+| unpackOps — 500 writes | 41,412 | 24.1 µs |
+| applyRemote — 100 writes, new records | 6,403 | 156 µs |
+| applyRemote — 500 writes, new records | 6,399 | 156 µs |
+| applyRemote — 100 signed writes, new records | 4,312 | 232 µs |
+| verifyOp — 100 signed writes | 37,214 | 26.9 µs |
+| applyRemote — 100 sets on cached records | 9,699 | 103 µs |
+| applyRemote — 100 incs on cached records | 10,161 | 98.4 µs |
+| applyRemote — 100 adds on cached records | 6,243 | 160 µs |
+| applyRemote — 500 random inserts into a 5K text | 764 | 1.31 ms |
+| applyRemote — 100 writes, new records (chain: false) | 6,611 | 151 µs |
+| applyRemote — 500 writes, new records (chain: false) | 6,634 | 151 µs |
+| applyRemote — 100 signed writes, new records (chain: false) | 5,450 | 183 µs |
+| applyRemote — 100 sets on cached records (chain: false) | 10,687 | 93.6 µs |
+| applyRemote — 100 incs on cached records (chain: false) | 10,565 | 94.7 µs |
+| applyRemote — 100 adds on cached records (chain: false) | 6,999 | 143 µs |
+| applyRemote — 500 random inserts into a 5K text (chain: false) | 751 | 1.33 ms |
 
 </details>
 
 <details>
-<summary>Lists and text — 14 rows</summary>
+<summary>Lists and text — 18 rows</summary>
 
 | Benchmark | ops/s | per operation |
 | --- | ---: | ---: |
-| applyOp — append one char to a 1 000-char text (one run) | 158,717 | 6.3 µs |
-| applyOp — insert one char into a 1 000-char text (new run) | 25,814 | 38.7 µs |
-| applyOp — delete 10 chars from a 1 000-char text | 30,325 | 33 µs |
-| applyOp — prepend one char to a 1 000-run text | 2,310 | 433 µs |
-| applyOp — merge two pictures of a 1 000-char text | 434 | 2.3 ms |
-| buildIndex + render — a 1 000-char text | 38,401 | 26 µs |
-| buildIndex + render — a 100 KB text (one run) | 376 | 2.66 ms |
-| spans — 1 000 chars, 50 overlapping marks | 11,429 | 87.5 µs |
-| diff — one keystroke in a 1 KB text | 315,083 | 3.17 µs |
-| storage.push — one char (memory fsi) | 8,051 | 124 µs |
-| storage.updateText — one keystroke in a 1 KB text (memory fsi) | 2,143 | 467 µs |
-| storage.move — in a 100-element list (memory fsi) | 1,216 | 822 µs |
-| storage.push — one char into a 10 KB text (memory fsi) | 3,233 | 309 µs |
-| storage.push — one char into a 10 KB text, defer: 50 (memory fsi) | 3,143 | 318 µs |
+| applyOp — append one char to a 1 000-char text (one run) | 171,129 | 5.84 µs |
+| applyOp — insert one char into a 1 000-char text (new run) | 26,824 | 37.3 µs |
+| applyOp — delete 10 chars from a 1 000-char text | 31,596 | 31.6 µs |
+| applyOp — prepend one char to a 1 000-run text | 2,500 | 400 µs |
+| applyOp — merge two pictures of a 1 000-char text | 371 | 2.7 ms |
+| buildIndex + render — a 1 000-char text | 39,439 | 25.4 µs |
+| buildIndex + render — a 100 KB text (one run) | 383 | 2.61 ms |
+| applyOp — insert one char at a random place of a 100 KB text (10 000 runs) | 98 | 10.2 ms |
+| applyOp — prepend one char to a 10 000-run text | 98 | 10.2 ms |
+| applyOp — delete 10 chars from a 10 000-run text | 110 | 9.09 ms |
+| buildIndex + render — a 100 KB text (10 000 runs) | 160 | 6.25 ms |
+| spans — 1 000 chars, 50 overlapping marks | 11,509 | 86.9 µs |
+| diff — one keystroke in a 1 KB text | 314,650 | 3.18 µs |
+| storage.push — one char (memory fsi) | 8,172 | 122 µs |
+| storage.updateText — one keystroke in a 1 KB text (memory fsi) | 2,170 | 461 µs |
+| storage.move — in a 100-element list (memory fsi) | 1,251 | 799 µs |
+| storage.push — one char into a 10 KB text (memory fsi) | 3,279 | 305 µs |
+| storage.push — one char into a 10 KB text, defer: 50 (memory fsi) | 3,213 | 311 µs |
 
 </details>
 
@@ -460,7 +466,7 @@ chain, hashing, the CRDT helpers and the emitter. They are the numbers to watch 
 
 </details>
 
-_pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-24._
+_pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-25._
 
 <!-- bench:engine:end -->
 
