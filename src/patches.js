@@ -10,6 +10,7 @@
 
 const { commit, rehearse } = require('./commit.js');
 const { isAlive, kindsOf } = require('./ops.js');
+const { decompose } = require('./compose.js');
 const { diffViews, realize } = require('./patch.js');
 const { traced } = require('./telemetry.js');
 const { asJson, isRecordId, invalidId } = require('./shape.js');
@@ -96,8 +97,9 @@ const compact = async (core, id, { actor, source = null } = {}) => {
   const entry = await core.entries.load(id);
   if (entry?.encrypted) throw sealed(id);
   if (entry === null || !isAlive(entry)) return 0;
-  const view = await core.view(id, entry);
   const kinds = kindsOf(entry, core.plugins);
+  // The reading in the op model's terms: flat, every path a field.
+  const view = decompose(await core.view(id, entry), Object.keys(kinds));
   const patches = diffViews(null, {}, view, kinds, { plugins: core.plugins });
   // What a plugin lays after the field is made again (a text's marks).
   for (const field of Object.keys(kinds)) {

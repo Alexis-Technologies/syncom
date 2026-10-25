@@ -2,8 +2,11 @@
 
 // What the write API takes, checked where it enters — the public methods of
 // Storage and the patches applyPatches() realizes (src/patch.js) — so a patch
-// never reaches the engine with a shape a method call could not have. No
-// requires: patch.js and the undo subpath ship with it, without the op model.
+// never reaches the engine with a shape a method call could not have.
+// Requires ./paths.js alone (no requires itself): patch.js and the undo
+// subpath ship with both, without the op model.
+
+const { isPath, MAX_PATH_DEPTH, MAX_PATH } = require('./paths.js');
 
 const MAX_NODE_ID = 128;
 const EXPANDS = ['before', 'after', 'both', 'none'];
@@ -27,8 +30,16 @@ const isNodeId = (value) =>
 // which is what a record field, a set element and a list element are.
 const isJsonValue = (value) => value !== undefined && typeof value !== 'function' && typeof value !== 'symbol';
 
+// A field name, or a path of them (`profile/city`): the segments non-empty,
+// never `__proto__`, at most MAX_PATH_DEPTH deep and MAX_PATH long.
 const fieldName = (method, key) => {
   if (typeof key !== 'string') throw new TypeError(`${method}() takes a field name`);
+  if (!isPath(key)) {
+    const shown = JSON.stringify(key.length > 40 ? `${key.slice(0, 40)}…` : key);
+    throw new TypeError(
+      `${method}() takes a field name or a path of them (${shown}): segments of at most ${MAX_PATH_DEPTH}, ${MAX_PATH} characters in all, none empty or __proto__`,
+    );
+  }
 };
 
 // What unset() takes: a field name, or a non-empty array of them, each a
@@ -38,13 +49,7 @@ const fieldNames = (method, fields) => {
   if (!Array.isArray(list) || list.length === 0) {
     throw new TypeError(`${method}() takes a field name or a non-empty array of them`);
   }
-  for (const field of list) {
-    if (typeof field !== 'string' || field.length === 0 || field === '__proto__') {
-      throw new TypeError(
-        `${method}() takes field names; got ${typeof field === 'string' ? JSON.stringify(field) : typeof field}`,
-      );
-    }
-  }
+  for (const field of list) fieldName(method, field);
   return [...new Set(list)];
 };
 
@@ -126,4 +131,14 @@ const setElements = (method, key, elements) => {
   return elements;
 };
 
-module.exports = { isNodeId, isJsonValue, jsonValue, fieldNames, spliceArgs, treeArgs, markArgs, setElements };
+module.exports = {
+  isNodeId,
+  isJsonValue,
+  jsonValue,
+  fieldName,
+  fieldNames,
+  spliceArgs,
+  treeArgs,
+  markArgs,
+  setElements,
+};

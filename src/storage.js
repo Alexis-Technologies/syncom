@@ -31,6 +31,7 @@ const { DISABLED, isWriter, traced, now } = require('./telemetry.js');
 const { GLOBAL_SCOPE } = require('./scope.js');
 const { normalizeStorageOptions } = require('./options.js');
 const { isPlainObject, isRecordId, invalidId, isStreamName, isKeyId, VALIDATED } = require('./shape.js');
+const { compose } = require('./compose.js');
 const { COMMIT, REFRESH, SOURCE, PLUGINS, CURSOR } = require('./symbols.js');
 const { missing } = require('./plugin.js');
 const { SyncomError, typed } = require('./errors.js');
@@ -579,8 +580,11 @@ class Storage extends Emitter {
   // newer, or there is no schema), the lens of it otherwise, computed once
   // per cached entry. Replication (`snapshot`, `applyOp`) reads the raw data.
   async #view(id, entry) {
-    if (this.#lens === null || (entry.meta.v ?? 1) >= this.#version) return entry.data;
-    return (entry.view ??= await this.#lens(id, entry.data, entry.meta.v ?? 1));
+    // The paths composed into nested objects, once per cached entry (the
+    // data itself when it holds none); the lens over that.
+    const composed = (entry.composed ??= compose(entry.data));
+    if (this.#lens === null || (entry.meta.v ?? 1) >= this.#version) return composed;
+    return (entry.view ??= await this.#lens(id, composed, entry.meta.v ?? 1));
   }
 
   /**
@@ -1086,7 +1090,7 @@ class Storage extends Emitter {
   }
 
   #scope(id, data) {
-    const scope = this.#scopeOf(id, data);
+    const scope = this.#scopeOf(id, compose(data));
     if (typeof scope !== 'string' || scope.length === 0 || scope === GLOBAL_SCOPE) return GLOBAL_SCOPE;
     if (!isStreamName(scope)) {
       throw new TypeError(`sync.scope(${id}) returned ${JSON.stringify(scope)}: a scope is a short name without '@'`);

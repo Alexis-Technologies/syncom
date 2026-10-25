@@ -22,13 +22,20 @@ const compareClock = (a, b) => {
 const maxClock = (a, b) => (compareClock(a, b) >= 0 ? a : b);
 
 // The floor under a field of a record: the record's reset watermark
-// (`meta.base`) or the field's own (`meta.gone[field]`, an `unset`),
-// whichever is newer — what an op on the field must be stamped above to
-// count, and what its state is pruned under.
+// (`meta.base`), the field's own (`meta.gone[field]`, an `unset`), and —
+// for a path — the floor of every prefix above it: its unset, or the write
+// of a register there (a whole-object write of the prefix resets what was
+// under it). The newest of them is what an op on the field must be stamped
+// above to count, and what the field's state is pruned under.
 const floorOf = (meta, field) => {
-  const gone = meta.gone;
-  const own = gone && Object.hasOwn(gone, field) ? gone[field] : null;
-  return maxClock(meta.base ?? null, own);
+  const { gone, clock } = meta;
+  const held = (map, key) => (map && Object.hasOwn(map, key) ? map[key] : null);
+  let floor = maxClock(meta.base ?? null, held(gone, field));
+  for (let at = field.indexOf('/'); at !== -1; at = field.indexOf('/', at + 1)) {
+    const prefix = field.slice(0, at);
+    floor = maxClock(maxClock(floor, held(gone, prefix)), held(clock, prefix));
+  }
+  return floor;
 };
 
 /**

@@ -13,6 +13,7 @@
 
 const { snapshotPage } = require('../bootstrap.js');
 const { isAlive, deepEqual, kindsOf } = require('../ops.js');
+const { decompose } = require('../compose.js');
 const { parseVersion, within, exactStart, fold, gone } = require('./history.js');
 const { appliedHere } = require('../log.js');
 const { diffViews } = require('../patch.js');
@@ -181,8 +182,12 @@ const diff = async (core, id, from, to) => {
   if (!isRecordId(id)) throw invalidId(id);
   const [was, now] = await Promise.all([entryOf(core, id, from), entryOf(core, id, to)]);
   if (was?.encrypted || now?.encrypted) throw sealed(id);
-  const live = async (entry) =>
-    entry !== null && isAlive(entry) ? [await core.view(id, entry), kindsOf(entry, core.plugins)] : [null, {}];
+  // Each reading in the op model's terms: flat, every path a field.
+  const live = async (entry) => {
+    if (entry === null || !isAlive(entry)) return [null, {}];
+    const kinds = kindsOf(entry, core.plugins);
+    return [decompose(await core.view(id, entry), Object.keys(kinds)), kinds];
+  };
   const [[before, beforeKinds], [after, afterKinds]] = await Promise.all([live(was), live(now)]);
   const purged = now?.meta.purged != null;
   return asJson(diffViews(before, beforeKinds, after, afterKinds, { purged, plugins: core.plugins }));

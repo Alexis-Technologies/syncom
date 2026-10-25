@@ -88,11 +88,51 @@ older concurrent write of them loses to and a newer one makes them again, as
 whatever kind that write is. From a peer the
 kinds' precedence decides instead — a register outranks a counter, a counter
 a set, then a list, a text, a tree — see [Sync](./sync#registers-counters-sets-lists-and-text).
-The fields are the top-level ones: a nested object is one register, replaced
-whole by whichever write is later — two nodes that change different keys of
-it concurrently keep one side — and `update({ 'a.b': 1 })` writes a field
-named `a.b`.
+A nested object written as a value is one register, replaced whole by
+whichever write is later; a field named by a *path* — `update(id, { 'profile/city':
+'Kyiv' })` — is a field of its own under the prefix, so two nodes that write
+different children of one prefix both keep theirs (see [Paths](#paths)).
 :::
+
+### Paths
+
+A field name may be a path of stable segments joined by `/` — `profile/city`,
+`stats/views`, `profile/geo/lat` — at most 16 segments and 512 characters,
+none empty or `__proto__`; `/` is reserved for it (a dot is a plain
+character: `update({ 'a.b': 1 })` writes a field named `a.b`). Every path is
+a field like any other: a register, a counter, a set, a list, a text or a
+tree, with its own clock, merged on its own — two nodes writing different
+children of `profile` both keep theirs. A read composes the paths into
+nested objects, children laid over the register at their prefix:
+
+```js
+const id = await storage.insert({ name: 'ada', profile: { zip: 1 } });
+await storage.update(id, { 'profile/city': 'Kyiv' }); // a field of its own
+await storage.inc(id, 'stats/views', 1);              // a counter under a prefix
+await storage.get(id);
+// { name: 'ada', profile: { zip: 1, city: 'Kyiv' }, stats: { views: 1 } }
+```
+
+The rules, the same on every node whatever the order the writes arrive in:
+
+- A register written at a prefix — `update(id, { profile: { zip: 2 } })` — is
+  a reset of what hangs under it: children stamped below the write go, a
+  child written later survives and is read over the object. `unset(id,
+  'profile')` takes the subtree the same way.
+- A counter, a set, a list, a text or a tree holds its prefix alone: a write
+  under it is refused before anything is stamped (`FIELD_KIND`, with
+  `prefix` naming it), and where one lands from a peer, what hung under the
+  prefix goes.
+- A record holds at most 4 096 fields; a write that would add one past that
+  is refused (`FIELD_KIND`, `kind: 'bound'`, `detail: 'paths'`), and a
+  peer's picture of a record keeps the first 4 096 in sorted order.
+
+The ops, the log, a `snapshot()` and `getCachedData()` keep the paths
+apart; `get()`, a `Record`, a query (`'profile.city'` as a dotted path), a
+hook's `current` and a validator see them composed. A `Record`'s properties
+are the composed top-level fields: `record.profile = { … }` writes the
+object whole. A migration (`migrate()`) writes the registers as they read,
+composed.
 
 `FIELD_KIND` also refuses a list or text write past a bound — a single
 insert over 1 048 576 elements, say — and then `kind` is `'bound'` and

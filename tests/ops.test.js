@@ -1303,3 +1303,96 @@ test('ops: unset is a field’s own reset', async (t) => {
     assert.deepStrictEqual(unpackOps([row])[0].type, 'unset');
   });
 });
+
+test('ops: a field may be a path; a prefix holds what hangs under it', async (t) => {
+  const { applyOp, mergeEntry, normalizeMeta, MAX_PATHS } = require('../src/ops.js');
+  const at = (ts, origin, type, extra) => ({ origin, seq: ts, ts, type, id: 'r', ...extra });
+  const orders = (ops) => {
+    const forward = ops.reduce((entry, op) => applyOp(entry, op).entry, null);
+    const backward = [...ops].reverse().reduce((entry, op) => applyOp(entry, op).entry, null);
+    assert.deepStrictEqual(backward.data, forward.data, 'the data agrees whatever the order');
+    assert.deepStrictEqual(backward.meta, forward.meta, 'and so does the meta');
+    return forward;
+  };
+
+  await t.test(
+    'a register at a prefix resets what hangs under it below its stamp; a later child survives over it',
+    () => {
+      const base = applyOp(null, at(1, 'A', 'write', { data: { title: 'x' } })).entry;
+      const older = at(2, 'B', 'set', { data: { 'profile/city': 'Kyiv' } });
+      const parent = at(3, 'A', 'set', { data: { profile: { zip: 1 } } });
+      const newer = at(4, 'B', 'set', { data: { 'profile/geo/lat': 50 } });
+      const entry = orders([at(1, 'A', 'write', { data: { title: 'x' } }), older, parent, newer]);
+      assert.deepStrictEqual(
+        entry.data,
+        { title: 'x', profile: { zip: 1 }, 'profile/geo/lat': 50 },
+        'flat: the older child went',
+      );
+      assert.strictEqual(base.meta.clock['profile/city'], undefined);
+      // An unset of the prefix takes the subtree, below its stamp.
+      const unset = applyOp(entry, at(5, 'C', 'unset', { value: ['profile'] })).entry;
+      assert.deepStrictEqual(unset.data, { title: 'x' });
+      assert.deepStrictEqual(Object.keys(unset.meta.gone), ['profile']);
+      const late = applyOp(unset, at(4, 'D', 'set', { data: { 'profile/geo/lng': 30 } }));
+      assert.strictEqual(late.changed, false, 'a child stamped below the prefix’s unset is moot');
+      const fresh = applyOp(unset, at(6, 'D', 'set', { data: { 'profile/geo/lng': 30 } })).entry;
+      assert.deepStrictEqual(fresh.data, { title: 'x', 'profile/geo/lng': 30 });
+    },
+  );
+
+  await t.test('a counter, a set or a block holds its prefix alone, whatever the order', () => {
+    const write = at(1, 'A', 'write', { data: {} });
+    const child = at(2, 'B', 'set', { data: { 'stats/views': 1, 'stats/deep/x': 2 } });
+    const counter = at(3, 'A', 'inc', { key: 'stats', value: 1 });
+    const entry = orders([write, child, counter]);
+    assert.deepStrictEqual(entry.data, { stats: 1 }, 'the children went where the counter landed');
+    const refused = applyOp(entry, at(4, 'B', 'set', { data: { 'stats/views': 2 } }));
+    assert.deepStrictEqual(refused.rejected, [{ field: 'stats/views', reason: 'counter', prefix: 'stats' }]);
+    assert.strictEqual(refused.changed, false);
+    const underSet = orders([
+      write,
+      at(2, 'A', 'add', { key: 'tags', value: ['x'] }),
+      at(3, 'B', 'inc', { key: 'tags/n', value: 1 }),
+    ]);
+    assert.deepStrictEqual(underSet.data, { tags: ['x'] });
+    // Under a register that holds an object, children are fine and read over it.
+    const over = orders([
+      write,
+      at(2, 'A', 'set', { data: { profile: { a: 1 } } }),
+      at(3, 'B', 'inc', { key: 'profile/views', value: 2 }),
+    ]);
+    assert.deepStrictEqual(over.data, { profile: { a: 1 }, 'profile/views': 2 });
+  });
+
+  await t.test('two pictures of a record with paths merge as the ops would', () => {
+    const base = applyOp(null, at(1, 'A', 'write', { data: { title: 'x' } })).entry;
+    const a = applyOp(base, at(2, 'A', 'set', { data: { 'profile/city': 'Kyiv' } })).entry;
+    const b = applyOp(base, at(3, 'B', 'set', { data: { profile: { zip: 1 } } })).entry;
+    const joined = mergeEntry(a, b);
+    assert.deepStrictEqual(joined.data, { title: 'x', profile: { zip: 1 } });
+    assert.deepStrictEqual(mergeEntry(b, a).meta, joined.meta);
+    const c = applyOp(base, at(4, 'C', 'inc', { key: 'profile', value: 1 })).entry;
+    assert.deepStrictEqual(mergeEntry(a, c).data, { title: 'x', profile: 1 }, 'the counter holds the prefix alone');
+  });
+
+  await t.test('a record holds at most MAX_PATHS fields: a new one past it is bound, a peer’s picture is cut', () => {
+    const data = {};
+    for (let i = 0; i < MAX_PATHS; i++) data[`f/${String(i).padStart(4, '0')}`] = i;
+    const entry = applyOp(null, at(1, 'A', 'write', { data })).entry;
+    assert.strictEqual(Object.keys(entry.data).length, MAX_PATHS);
+    const more = applyOp(entry, at(2, 'B', 'set', { data: { extra: 1 } }));
+    assert.deepStrictEqual(more.rejected, [
+      { field: 'extra', reason: 'bound', detail: 'paths', count: MAX_PATHS + 1, max: MAX_PATHS },
+    ]);
+    assert.strictEqual(more.changed, false);
+    const again = applyOp(entry, at(2, 'B', 'set', { data: { 'f/0000': 9 } }));
+    assert.strictEqual(again.changed, true, 'a field held already is no new path');
+    const meta = JSON.parse(JSON.stringify(entry.meta));
+    meta.clock.zzz = [1, 'A'];
+    meta.clock['bad//path'] = [1, 'A'];
+    const normalized = normalizeMeta(meta);
+    assert.strictEqual(Object.keys(normalized.clock).length, MAX_PATHS, 'the first in sorted order stay');
+    assert.strictEqual(normalized.clock.zzz, undefined);
+    assert.strictEqual(normalized.clock['bad//path'], undefined);
+  });
+});

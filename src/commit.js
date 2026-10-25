@@ -15,9 +15,12 @@ const { opKey } = require('./vector.js');
 const { notify } = require('./hooks.js');
 const { ValidationError } = require('./errors.js');
 const { project, unproject, foldSet } = require('./entity.js');
+const { fieldName } = require('./args.js');
 const { traced, now } = require('./telemetry.js');
 const { GLOBAL_SCOPE } = require('./scope.js');
 const { isPlainObject, asJson, VALIDATED } = require('./shape.js');
+const { ancestorsOf, under } = require('./paths.js');
+const { compose } = require('./compose.js');
 const { SyncomError, typed } = require('./errors.js');
 
 // What a commit came to: an op, `null` for a write that changed nothing,
@@ -57,8 +60,10 @@ const refuse = (core, id, rejected) => {
   }
   const fields = { field, kind: reason };
   if (detail !== undefined) Object.assign(fields, { detail, count, max });
+  if (rejected[0].prefix !== undefined) fields.prefix = rejected[0].prefix;
   const hint = HINTS[reason] ?? core.plugins.hints[reason] ?? `held by another kind (${reason})`;
-  throw new SyncomError('FIELD_KIND', `Field ${field} of record ${id} is ${hint}`, fields);
+  const where = fields.prefix === undefined ? `Field ${field}` : `Field ${field} lies under ${fields.prefix}, which`;
+  throw new SyncomError('FIELD_KIND', `${where} of record ${id} is ${hint}`, fields);
 };
 
 // A swap's expectation, checked inside the queue against the record as it
@@ -137,7 +142,7 @@ const scopeData = (type, payload, current) => {
 // The op's stream: its scope, and the next seq there (seqs run per stream,
 // see vector.js opKey).
 const assignScope = (core, op, data) => {
-  const scope = core.scopeOf(op.id, data);
+  const scope = core.scopeOf(op.id, compose(data));
   if (scope === GLOBAL_SCOPE) delete op.scope;
   else op.scope = scope;
   op.seq = core.log.seqOf(opKey(op)) + 1;
@@ -173,10 +178,20 @@ const TAKES = {
 const takesOf = (type, payload, plugins) => plugins.byType[type]?.takes(type, payload) ?? TAKES[type];
 const kindClash = (type, payload, current, plugins) => {
   const takes = takesOf(type, payload, plugins);
-  if (takes === undefined || !current || current.encrypted) return [];
+  if (!current || current.encrypted) return [];
   const fields = type === 'write' || type === 'set' ? Object.keys(payload.data ?? {}) : [payload.key];
   const rejected = [];
   for (const field of fields) {
+    if (typeof field !== 'string') continue;
+    // A prefix a counter, a set or a block holds refuses every op under it.
+    for (const prefix of ancestorsOf(field)) {
+      const above = kindOf(current, prefix, plugins);
+      if (above !== undefined && above !== 'register') {
+        rejected.push({ field, reason: above, prefix });
+        break;
+      }
+    }
+    if (takes === undefined) continue;
     const kind = kindOf(current, field, plugins);
     if (kind !== undefined && !takes.includes(kind)) rejected.push({ field, reason: kind });
   }
@@ -196,9 +211,11 @@ const prepareOp = (core, type, id, payload, current, who, from) => {
   if (payload.data !== undefined) op.data = payload.data;
   if (payload.key !== undefined) op.key = payload.key;
   if (payload.value !== undefined) op.value = payload.value;
-  // An unset names the fields the record holds; the others are nothing to remove.
+  // An unset names the fields the record holds — or has something under
+  // (a prefix of paths); the others are nothing to remove.
   if (type === 'unset') {
-    op.value = current && !current.encrypted ? payload.value.filter((field) => Object.hasOwn(current.data, field)) : [];
+    const held = current && !current.encrypted ? Object.keys(current.data) : [];
+    op.value = payload.value.filter((field) => held.some((key) => key === field || under(key, field)));
   }
   // A remove names the tags this node observed, read here, inside the
   // queue — read outside it, a concurrent apply could add between the two —
@@ -366,7 +383,7 @@ const rehearse = async (core, id, ops) => {
   if (current?.encrypted) return;
   for (const [type, given] of ops) {
     const payload = copyPayload(given);
-    const visible = current && isAlive(current) ? current.data : null;
+    const visible = current && isAlive(current) ? compose(current.data) : null;
     if (type === 'write' || type === 'set') payload.data = sameType(type, id, payload.data, visible);
     const op = prepareOp(core, type, id, payload, current, null, null);
     // A plugin's op that resolved to nothing (a tree move to where the node is): nothing to write.
@@ -395,7 +412,9 @@ const commitLocal = async (core, type, id, payload, options) => {
   // Sealed: this write is encrypted, or the record already is. An
   // encrypted record has no op log — writes to it stay local.
   const sealed = encrypted || current?.encrypted === true;
-  const visible = current && (current.encrypted || isAlive(current)) ? current.data : null;
+  // The record as the application reads it — its paths composed — for the
+  // hooks and the commit event; the op model keeps the paths apart.
+  const visible = current && (current.encrypted || isAlive(current)) ? compose(current.data) : null;
   const who = await core.actorOf(actor);
   const ctx = {
     type,
@@ -412,6 +431,9 @@ const commitLocal = async (core, type, id, payload, options) => {
   payload = await replaced(core, type, payload, ctx);
   if (sealed) return outcome(await commitSealed(core, type, id, payload, current, ctx, source));
   if (type === 'write' || type === 'set') {
+    // Every key a field name or a path of them: a key that is neither would
+    // be left out of the op without a word.
+    for (const key of Object.keys(payload.data ?? {})) fieldName(type === 'write' ? 'set' : 'update', key);
     ctx.data = sameType(type, id, payload.data, visible);
     payload = { ...payload, data: ctx.data };
   }

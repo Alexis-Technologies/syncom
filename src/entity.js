@@ -8,6 +8,7 @@
 // Requires shape.js only: it ships to the browser.
 
 const { deepEqual } = require('./shape.js');
+const { valueAt, ancestorsOf } = require('./paths.js');
 
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -36,18 +37,28 @@ const unproject = (def, output, type) => {
 };
 
 // A `set` carries only the fields it names. Of the validated record keep the
-// keys of the delta (in their validated form) and the keys whose value is
-// not what the record read as before the write (defaults, alias targets, a
-// migration's rename). A delta key the validator dropped drops out of the
-// delta — the op never carries it — and a key the validator left as it was
-// is never touched, so a `set` stays a `set`: promoting it to a whole-record
-// write would reset the record's base and erase concurrent sets and
-// counters from other peers.
+// keys of the delta (in their validated form, read by path: the validator
+// sees the paths composed) and the top-level keys whose value is not what
+// the record read as before the write (defaults, alias targets, a
+// migration's rename) — but not a key a delta path lies under, which the
+// path's own write covers (a whole-object write of it would reset the
+// siblings). A delta key the validator dropped drops out of the delta — the
+// op never carries it — and a key the validator left as it was is never
+// touched, so a `set` stays a `set`: promoting it to a whole-record write
+// would reset the record's base and erase concurrent sets and counters
+// from other peers.
 const foldSet = (delta, validated, before) => {
   const next = {};
-  for (const key of Object.keys(validated)) {
+  const covered = new Set();
+  for (const key of Object.keys(delta)) {
     if (key === '$type') continue;
-    if (Object.hasOwn(delta, key) || !deepEqual(validated[key], before[key])) next[key] = validated[key];
+    const value = valueAt(validated, key);
+    if (value !== undefined) next[key] = value;
+    for (const prefix of ancestorsOf(key)) covered.add(prefix);
+  }
+  for (const key of Object.keys(validated)) {
+    if (key === '$type' || Object.hasOwn(next, key) || covered.has(key)) continue;
+    if (!deepEqual(validated[key], before[key])) next[key] = validated[key];
   }
   return next;
 };

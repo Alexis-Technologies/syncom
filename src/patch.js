@@ -27,13 +27,15 @@
 // `unset`, a field of another kind now an `unset` and the kind made again
 // whole, and a record that was not there a `write` of the registers with
 // the other kinds made again. A text's marks are not diffed; `compact()`
-// lays them again itself, through the plugin. Pure over plain data; the
-// kinds come from ops.js (`kindsOf`) and the plugins from the storage's
-// registry (src/plugin.js), so this module and the undo subpath on it ship
-// without the op model.
+// lays them again itself, through the plugin. Pure over plain data in the
+// op model's terms — flat, every path a field (src/paths.js `decompose`
+// takes a composed reading back to that); the kinds come from ops.js
+// (`kindsOf`) and the plugins from the storage's registry (src/plugin.js),
+// so this module and the undo subpath on it ship without the op model.
 
 const { deepEqual, isPlainObject } = require('./shape.js');
 const { isJsonValue, jsonValue, fieldNames, setElements } = require('./args.js');
+const { isPath } = require('./paths.js');
 const { EMPTY, HOME, missing } = require('./plugin.js');
 
 const asKeys = (elements) => new Map(elements.map((element) => [JSON.stringify(element), element]));
@@ -66,7 +68,7 @@ const diffViews = (from, fromKinds, to, toKinds, { purged = false, exact = true,
     return from === null ? [] : [{ action: 'delete' }];
   }
   const registers = {};
-  for (const field of Object.keys(to)) if (toKinds[field] === 'register') registers[field] = to[field];
+  for (const field of Object.keys(toKinds)) if (toKinds[field] === 'register') registers[field] = to[field];
   const patches = [];
   // A record that was not there: the registers written, the rest made again.
   if (from === null) {
@@ -112,7 +114,7 @@ const diffViews = (from, fromKinds, to, toKinds, { purged = false, exact = true,
   return patches;
 };
 
-const isField = (value) => typeof value === 'string' && value.length > 0;
+const isField = (value) => isPath(value);
 // The actions the core realizes itself; a plugin's (`splice`, `mark`,
 // `treeMove`, `treeRemove`) come from the registry.
 const ACTIONS = new Set(['put', 'unset', 'write', 'inc', 'add', 'remove', 'delete', 'purge']);

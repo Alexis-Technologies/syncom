@@ -1535,3 +1535,82 @@ test('a surrogate pair is never split: splice, mark and cursor refuse an index i
   assert.deepStrictEqual(await storage.get(id), { body: 'ab' });
   assert.strictEqual(typeof (await storage.cursor(id, 'body', 1)), 'string');
 });
+
+test('paths: a field may be a path of stable segments, read composed', async (t) => {
+  await t.test('children of a prefix merge, a whole-object write resets them, a read composes', async (t2) => {
+    const { storage } = await openTemp(t2, { schema: { entities: { User: { index: ['profile.city'] } } } });
+    const id = await storage.insert({ $type: 'User', name: 'ada', profile: { zip: 1 } });
+    await storage.update(id, { 'profile/city': 'Kyiv' });
+    await storage.inc(id, 'stats/views', 2);
+    await storage.add(id, 'profile/tags', ['x']);
+    assert.deepStrictEqual(await storage.get(id), {
+      $type: 'User',
+      name: 'ada',
+      profile: { zip: 1, city: 'Kyiv', tags: ['x'] },
+      stats: { views: 2 },
+    });
+    assert.deepStrictEqual(storage.getCachedData(id)['profile/city'], 'Kyiv', 'raw: the paths apart');
+    assert.deepStrictEqual(
+      (await storage.User.select({ 'profile.city': 'Kyiv' }).fetch()).map((row) => row.id),
+      [id],
+    );
+    const record = await storage.record(id);
+    assert.deepStrictEqual(record.profile, { zip: 1, city: 'Kyiv', tags: ['x'] });
+    // The whole object written: the children below it go.
+    await storage.update(id, { profile: { zip: 2 } });
+    assert.deepStrictEqual((await storage.get(id)).profile, { zip: 2 });
+    await storage.unset(id, 'stats');
+    assert.deepStrictEqual(await storage.get(id), { $type: 'User', name: 'ada', profile: { zip: 2 } });
+    // A prefix a counter holds refuses what is under it, before anything is stamped.
+    await storage.inc(id, 'hits', 1);
+    await assert.rejects(() => storage.update(id, { 'hits/today': 1 }), {
+      code: 'FIELD_KIND',
+      field: 'hits/today',
+      kind: 'counter',
+      prefix: 'hits',
+    });
+    await assert.rejects(() => storage.push(id, 'hits/log', 'x'), { code: 'FIELD_KIND', prefix: 'hits' });
+    await assert.rejects(() => storage.update(id, { 'a//b': 1 }), TypeError);
+    await assert.rejects(() => storage.inc(id, '__proto__/x', 1), TypeError);
+    await assert.rejects(() => storage.applyPatches(id, [{ action: 'put', field: 'a/', value: 1 }]), TypeError);
+  });
+
+  await t.test('a validator sees the paths composed and a set under a path keeps its siblings', async (t2) => {
+    // A Standard Schema that fills a default inside the object at `profile`.
+    const schema = {
+      '~standard': {
+        version: 1,
+        vendor: 'test',
+        validate: (data) => ({ value: { ...data, profile: { country: 'UA', ...data.profile } } }),
+      },
+    };
+    const { storage } = await openTemp(t2, { schema: { entities: { User: { schema } } } });
+    const id = await storage.insert({ $type: 'User', profile: { zip: 1 } });
+    assert.deepStrictEqual((await storage.get(id)).profile, { country: 'UA', zip: 1 });
+    await storage.update(id, { 'profile/city': 'Kyiv' });
+    assert.deepStrictEqual((await storage.get(id)).profile, { country: 'UA', zip: 1, city: 'Kyiv' });
+    const ops = storage.log.since(undefined).map((entry) => entry.op);
+    assert.deepStrictEqual(ops.at(-1).data, { 'profile/city': 'Kyiv' }, 'the set carries the path alone');
+  });
+
+  await t.test('a diff and an undo see paths as fields', async (t2) => {
+    const { createUndo } = require('../src/undo/undo.js');
+    const { storage } = await openTemp(t2);
+    const id = await storage.insert({ profile: { zip: 1 } });
+    const undo = createUndo(storage, { mergeInterval: 0 });
+    await storage.update(id, { 'profile/city': 'Kyiv' });
+    const v1 = await storage.tag('v1');
+    await storage.update(id, { 'profile/city': 'Lviv', 'profile/geo/lat': 49 });
+    assert.deepStrictEqual(await storage.diff(id, { tag: 'v1' }), [
+      { action: 'put', field: 'profile/city', value: 'Lviv' },
+      { action: 'put', field: 'profile/geo/lat', value: 49 },
+    ]);
+    await undo.undo();
+    assert.deepStrictEqual((await storage.get(id)).profile, { zip: 1, city: 'Kyiv' });
+    await undo.undo();
+    assert.deepStrictEqual((await storage.get(id)).profile, { zip: 1 });
+    assert.strictEqual(await storage.restore(id, v1.eventId), 1);
+    assert.deepStrictEqual((await storage.get(id)).profile, { zip: 1, city: 'Kyiv' });
+    undo.stop();
+  });
+});

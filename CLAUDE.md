@@ -51,6 +51,8 @@ src/pem.js                base64/PEM helpers over btoa/atob for the browser cryp
 src/scope.js              GLOBAL_SCOPE, inScope, opInScope — the one definition of "in scope" — no requires
 src/signing/sign.js       canonical form, signOp, verifyOp — what a signature covers (the header + a salted payload digest) and the verdict on a peer's op
 src/shape.js              isPlainObject, asJson, isRecordId, isStreamName, wellFormed — what enters is checked here
+src/paths.js              field paths: isPath, ancestorsOf, under, valueAt, MAX_PATHS — no requires
+src/compose.js            compose (the paths nested for a reader), decompose (a reading back to the fields) — requires paths.js
 src/args.js               spliceArgs, treeArgs, markArgs, setElements, jsonValue, isNodeId — the write API’s argument
                           checks, shared by Storage and realize() in patch.js — no requires
 src/text/rle.js           run-length content: a run's pieces and gaps, cut, append, merge, the canonical form under MAX_RUN —
@@ -271,6 +273,23 @@ docs/                     VitePress site
   ops). Once the package is published, an older reader counts an unknown type
   as malformed and its stream stalls there — a new type, or a slot an older
   reader cannot take as null, is then a `PROTOCOL` bump (`src/protocol.js`).
+- **A field may be a path; the op model keeps every path apart.** `profile/city`
+  is a field of its own in every map of the meta (src/paths.js `isPath`:
+  segments by `/`, at most MAX_PATH_DEPTH 16 and MAX_PATH 512, never
+  `__proto__`; a record holds MAX_PATHS 4096 of them — `pathsFull` refuses a
+  new one as `bound`/`paths`, `normalizeMeta` keeps the first in sorted
+  order). `floorOf(meta, field)` reaches up the path: a register's clock or
+  an unset at a prefix is the floor of everything under it (`pruneUnder` on
+  a register write and on an unset of the prefix). A counter, a set or a
+  block holds its prefix alone: `roomFor` (`holderAbove`) refuses an op
+  under it with `rejected.prefix` — locally `kindClash` does, before the
+  stamp, as `FIELD_KIND { prefix }` — and `dropUnder` takes the subtree
+  where one lands (the mergeEntry tail does the same). The reader's view
+  is `compose(data)` (`Storage#view`, cached as `entry.composed`; the lens
+  runs over it; `#scope`, a hook's `current` and the commit event's
+  `before`/`after` read it; `foldSet` folds a validator's output back by
+  path, `diffViews`/`kindsIn` read values by `valueAt`); `snapshot()`,
+  `getCachedData()`, the ops and the log keep the paths apart.
 - **Every write is an op, and a field is a register, a counter, a set, a list, a text OR a tree.**
   `insert`/`set` → `write`, `update`/`swap`/`record.save` → `set`, `unset` →
   `unset` (code `u`, `value` the field names: each field's own reset

@@ -14,6 +14,18 @@ There is no released version section until then; everything below lands in it.
 
 ### Added
 
+- **Paths: fields with stable segments.** A field name may be a path —
+  `update(id, { 'profile/city': 'Kyiv' })`, `inc(id, 'stats/views')` — a
+  field of its own under its prefix, merged on its own, so two nodes writing
+  different children of one prefix both keep theirs; a read composes the
+  paths into nested objects over the register at the prefix. A register
+  written at a prefix resets what hangs under it below its stamp (a later
+  child survives), an unset of the prefix takes the subtree, a counter, a
+  set or a block holds its prefix alone (`FIELD_KIND` with `prefix`; from a
+  peer, what hung under it goes), and a record holds at most 4 096 fields
+  (`FIELD_KIND`, `kind: 'bound'`, `detail: 'paths'`). `/` is reserved for
+  paths. A hook's `current`, a validator, a query and a `Record` see the
+  paths composed; the ops, the log and a snapshot keep them apart.
 - **A surrogate pair is never split.** `splice()`, `mark()`, `unmark()` and
   `cursor()` refuse an index of a text between the two halves of a pair with
   `SURROGATE` (`id`, `field`, `index`), `updateText()` diffs by code points

@@ -50,6 +50,16 @@
 // order. Counters rely on it (a skipped seq would be lost, not reordered);
 // registers do not, but the vector-based dedup does.
 //
+// A field may be a PATH (`profile/city`, src/paths.js): a field of its own
+// in every map here, under the prefixes above it. A register at a prefix
+// is the floor of what hangs under it — a whole-object write of `profile`
+// resets `profile/*` stamped below it, a later child survives and is read
+// over the object — and an unset of a prefix takes the subtree; a counter,
+// a set or a block holds its prefix alone: an op under one is refused, and
+// where one lands, what hung under the prefix goes (the same whatever the
+// order, like the kinds' precedence). A record holds at most MAX_PATHS
+// fields.
+//
 // A field is a REGISTER, a COUNTER, a SET, or a kind of one block, never two
 // of them. Locally an op on a field of another kind is refused before it is
 // stamped (`kindClash` in src/commit.js). From a peer the kinds' precedence
@@ -75,6 +85,7 @@
 const { compareClock, maxClock, floorOf } = require('./vector.js');
 const { deepEqual, OP_TYPES } = require('./shape.js');
 const { limitsOf, HOME } = require('./plugin.js');
+const { isPath, ancestorsOf, under, MAX_PATHS } = require('./paths.js');
 
 const createEntry = () => ({
   data: {},
@@ -297,6 +308,16 @@ const normalizeMeta = (meta, limits = null, dropped = null) => {
     }
   }
   const normalized = { clock, base, deleted: stampOf(meta.deleted), counters, sets, blocks, gone };
+  // Fields are paths, at most MAX_PATHS of them: the first in sorted order stay.
+  const fields = new Set();
+  for (const map of [clock, counters, sets, blocks, gone]) for (const field of Object.keys(map)) fields.add(field);
+  const kept = [...fields].filter(isPath).sort();
+  if (kept.length < fields.size || kept.length > MAX_PATHS) {
+    const allowed = new Set(kept.slice(0, MAX_PATHS));
+    for (const map of [clock, counters, sets, blocks, gone]) {
+      for (const field of Object.keys(map)) if (!allowed.has(field)) delete map[field];
+    }
+  }
   if (Number.isInteger(meta.v)) normalized.v = meta.v;
   const purged = stampOf(meta.purged);
   if (purged) normalized.purged = purged;
@@ -431,6 +452,60 @@ const applyBase = (entry, delta, plugins) => {
   for (const field of fields) pruneField(entry, field, floorOf(meta, field), delta, plugins);
 };
 
+// The fields under `prefix` — the paths of the subtree.
+const fieldsUnder = (meta, prefix) => {
+  const out = new Set();
+  for (const map of [meta.clock, meta.counters, meta.sets, meta.blocks]) {
+    for (const field of Object.keys(map)) if (under(field, prefix)) out.add(field);
+  }
+  return out;
+};
+
+// Every field under `prefix` pruned under `floor` — a register written at
+// the prefix, or the prefix unset: the subtree below the stamp goes.
+const pruneUnder = (entry, prefix, floor, delta, plugins) => {
+  for (const field of fieldsUnder(entry.meta, prefix)) pruneField(entry, field, floor, delta, plugins);
+};
+
+// Every field under `prefix` dropped, whatever its stamp: a counter, a set
+// or a block holds its prefix alone.
+const dropUnder = (entry, prefix, delta, plugins) => {
+  const { meta } = entry;
+  for (const field of fieldsUnder(meta, prefix)) {
+    const held = kindOf(entry, field, plugins);
+    if (held === 'register') {
+      delete meta.clock[field];
+      delete entry.data[field];
+      delta[field] = undefined;
+    } else if (held !== undefined) dropKind(entry, field, held, delta);
+    delete meta.gone[field];
+  }
+};
+
+// The prefix of `field` a counter, a set or a block holds, and its kind —
+// an op under it is refused — or null.
+const holderAbove = (entry, field, plugins) => {
+  if (!field.includes('/')) return null;
+  for (const prefix of ancestorsOf(field)) {
+    const kind = kindOf(entry, prefix, plugins);
+    if (kind !== undefined && kind !== 'register') return { prefix, kind };
+  }
+  return null;
+};
+
+// Whether `field` is new to the entry and the record holds MAX_PATHS fields
+// already: an op that would add it is refused as `bound`.
+const pathsFull = (entry, field, rejected) => {
+  const { meta } = entry;
+  const maps = [meta.clock, meta.counters, meta.sets, meta.blocks];
+  for (const map of maps) if (own(map, field) !== undefined) return false;
+  const fields = new Set();
+  for (const map of maps) for (const key of Object.keys(map)) fields.add(key);
+  if (fields.size < MAX_PATHS) return false;
+  rejected.push({ field, reason: 'bound', detail: 'paths', count: fields.size + 1, max: MAX_PATHS });
+  return true;
+};
+
 // Drops what the kind `held` keeps of `field`; a register is never dropped
 // (nothing outranks it).
 const dropKind = (entry, field, held, delta) => {
@@ -456,6 +531,22 @@ const yieldTo = (entry, field, kind, stamp, delta, plugins) => {
   return null;
 };
 
+// Room for an op of `kind` on `field`, with the paths in mind: a prefix a
+// counter, a set or a block holds refuses it (`rejected` names the prefix),
+// a new field past MAX_PATHS is `bound`, and the kinds' precedence decides
+// the rest (`yieldTo`); null when the op may land.
+const roomFor = (entry, field, kind, stamp, delta, rejected, plugins) => {
+  const above = holderAbove(entry, field, plugins);
+  if (above !== null) {
+    rejected.push({ field, reason: above.kind, prefix: above.prefix });
+    return above.kind;
+  }
+  if (pathsFull(entry, field, rejected)) return 'bound';
+  const holder = yieldTo(entry, field, kind, stamp, delta, plugins);
+  if (holder !== null) rejected.push({ field, reason: holder });
+  return holder;
+};
+
 // Removes fields at `stamp`: each field's own reset watermark moves up to
 // it and what the field held below it goes, whatever its kind — an op on
 // the field stamped below the watermark is moot from then on, one above
@@ -466,11 +557,12 @@ const applyUnset = (entry, fields, stamp, delta, plugins) => {
   const { meta } = entry;
   for (let i = 0; i < fields.length; i++) {
     const field = fields[i];
-    if (typeof field !== 'string' || !isKey(field)) continue;
+    if (!isPath(field)) continue;
     if (compareClock(stamp, meta.base) < 0) continue;
     if (compareClock(own(meta.gone, field), stamp) >= 0) continue;
     meta.gone[field] = stamp;
     pruneField(entry, field, stamp, delta, plugins);
+    pruneUnder(entry, field, stamp, delta, plugins);
     delta[field] = undefined;
   }
 };
@@ -484,17 +576,15 @@ const applyFields = (entry, fields, stamp, delta, rejected, plugins) => {
   // prototype chain nothing here should walk. The clock is read the same
   // way, or a field called `constructor` would meet Object's.
   for (const field of Object.keys(fields)) {
-    if (!isKey(field)) continue;
-    const holder = yieldTo(entry, field, 'register', stamp, delta, plugins);
-    if (holder !== null) {
-      rejected.push({ field, reason: holder });
-      continue;
-    }
+    if (!isPath(field)) continue;
+    if (roomFor(entry, field, 'register', stamp, delta, rejected, plugins) !== null) continue;
     if (compareClock(own(meta.clock, field), stamp) >= 0) continue;
     if (compareClock(stamp, floorOf(meta, field)) < 0) continue;
     meta.clock[field] = stamp;
     data[field] = fields[field];
     delta[field] = fields[field];
+    // A register written at a prefix resets what hangs under it below the stamp.
+    pruneUnder(entry, field, stamp, delta, plugins);
   }
 };
 
@@ -564,16 +654,14 @@ const malformed = (field, rejected) => {
 const applySet = (entry, op, stamp, delta, rejected, plugins) => {
   const { meta } = entry;
   const { key: field } = op;
-  if (typeof field !== 'string' || !isKey(field) || !isKey(op.origin) || !Array.isArray(op.value)) {
+  if (!isPath(field) || !isKey(op.origin) || !Array.isArray(op.value)) {
     return void malformed(field, rejected);
   }
-  const holder = yieldTo(entry, field, 'set', stamp, delta, plugins);
-  if (holder !== null) {
-    rejected.push({ field, reason: holder });
-    return;
-  }
+  if (roomFor(entry, field, 'set', stamp, delta, rejected, plugins) !== null) return;
   const moved = op.type === 'add' ? addElements(meta, field, op, stamp) : removeElements(meta, field, op);
   if (!moved) return;
+  // A set holds its prefix alone.
+  dropUnder(entry, field, delta, plugins);
   // A tag that moved is news to persist even when the array reads the same.
   entry.data[field] = liveElements(meta.sets[field]);
   delta[field] = entry.data[field];
@@ -589,16 +677,12 @@ const applySet = (entry, op, stamp, delta, rejected, plugins) => {
 const applyBlock = (entry, op, stamp, delta, rejected, mod, limits) => {
   const { meta } = entry;
   const { key: field, value: payload } = op;
-  if (typeof field !== 'string' || !isKey(field) || !isKey(op.origin) || !isPlainObject(payload)) {
+  if (!isPath(field) || !isKey(op.origin) || !isPlainObject(payload)) {
     return void malformed(field, rejected);
   }
   const kind = mod.kindOfOp(op);
   if (kind === null) return void malformed(field, rejected);
-  const holder = yieldTo(entry, field, kind, stamp, delta, limits.plugins);
-  if (holder !== null) {
-    rejected.push({ field, reason: holder });
-    return;
-  }
+  if (roomFor(entry, field, kind, stamp, delta, rejected, limits.plugins) !== null) return;
   if (compareClock(stamp, floorOf(meta, field)) < 0) return;
   const held = own(meta.blocks, field);
   const result = mod.apply(entry, field, held, op, stamp, limits);
@@ -618,6 +702,8 @@ const applyBlock = (entry, op, stamp, delta, rejected, mod, limits) => {
   // Pending work is news to persist even when the field reads the same.
   entry.data[field] = mod.render(entry, field, result.block, result.hint ?? null);
   delta[field] = entry.data[field];
+  // A block holds its prefix alone.
+  dropUnder(entry, field, delta, limits.plugins);
 };
 
 // Everything the entry held, gone: the purge, and a merge that meets one.
@@ -723,13 +809,10 @@ const applyOp = (previous, op, limits = null) => {
     return { entry, changed: false, delta, rejected };
   } else if (op.type === 'inc') {
     const { key: field, value } = op;
-    if (typeof field !== 'string' || !isKey(field) || !isKey(op.origin) || !Number.isFinite(value)) {
+    if (!isPath(field) || !isKey(op.origin) || !Number.isFinite(value)) {
       malformed(field, rejected);
-    } else {
-      const holder = yieldTo(entry, field, 'counter', stamp, delta, plugins);
-      if (holder !== null) {
-        rejected.push({ field, reason: holder });
-      } else if (compareClock(stamp, floorOf(meta, field)) >= 0) {
+    } else if (roomFor(entry, field, 'counter', stamp, delta, rejected, plugins) === null) {
+      if (compareClock(stamp, floorOf(meta, field)) >= 0) {
         const perOrigin = own(meta.counters, field) ?? (meta.counters[field] = {});
         const known = own(perOrigin, op.origin);
         const sum = (known ? known[1] : 0) + value;
@@ -741,6 +824,8 @@ const applyOp = (previous, op, limits = null) => {
           perOrigin[op.origin] = [op.seq, sum, op.ts];
           entry.data[field] = counterValue(perOrigin);
           delta[field] = entry.data[field];
+          // A counter holds its prefix alone.
+          dropUnder(entry, field, delta, plugins);
         }
       }
     }
@@ -918,6 +1003,11 @@ const mergeEntry = (a, b, limits = null) => {
       data[field] = liveElements(meta.sets[field]);
     }
   }
+  // A counter, a set or a block holds its prefix alone: what the other side
+  // hung under it goes, as it would have on the op path.
+  for (const map of [meta.counters, meta.sets, meta.blocks]) {
+    for (const field of Object.keys(map)) if (own(map, field) !== undefined) dropUnder(entry, field, {}, plugins);
+  }
   return entry;
 };
 
@@ -1066,6 +1156,7 @@ const kindsOf = (entry, plugins = null) => {
 
 module.exports = {
   MAX_COUNT,
+  MAX_PATHS,
   createEntry,
   cloneEntry,
   applyOp,
