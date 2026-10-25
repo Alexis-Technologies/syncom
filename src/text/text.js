@@ -100,7 +100,81 @@ const apply = (entry, field, held, op, stamp, limits) => {
   }
   if (!result.changed) return out;
   out.block = S.prune(result.seq, base);
+  // What the reading shows of the op, in its indices — none when the field went.
+  if (out.block !== null) out.change = changeOf(op, stamp, held, out.block);
   return out;
+};
+
+// An op as the reading shows it, in the write API's terms and the reading's
+// indices (src/patch.js's vocabulary, a `move` and an `unmarkById` beside):
+// a splice's cuts in the indices before it, last first, and its insert in
+// the indices after, both read from the rope in O(log n); an assign as a
+// `setAt`; a move by its index before and after; a mark over the indices
+// its anchors fall at. What the reading does not show — a slot born dead,
+// an element not placed here — is no change.
+const changeOf = (op, stamp, held, block) => {
+  const payload = op.value;
+  const [ts, origin] = stamp;
+  if (op.type === 'splice') {
+    const out = [];
+    if (held !== undefined && Array.isArray(payload.cut)) {
+      const cuts = [];
+      for (const [run, off, len] of payload.cut) {
+        const span = S.spanOf(held, run, off, len);
+        if (span !== null && span.count > 0) cuts.push(span);
+      }
+      cuts.sort((x, y) => y.index - x.index);
+      for (const { index, count } of cuts) out.push({ action: 'splice', index, count });
+    }
+    const { content } = payload;
+    if (content !== undefined && content.length > 0) {
+      const run = payload.at !== undefined ? S.runKey(ts, origin) : payload.run;
+      const span = S.spanOf(block, run, payload.at !== undefined ? 0 : payload.from, content.length);
+      if (span !== null && span.count > 0) {
+        const shown = S.render(block).slice(span.index, span.index + span.count);
+        const last = out[out.length - 1];
+        // One cut at the insertion point and the insert: one splice, as the call made it.
+        if (out.length === 1 && last.index === span.index) last.content = shown;
+        else out.push({ action: 'splice', index: span.index, count: 0, content: shown });
+        if (payload.vals !== undefined && span.count === content.length) out[out.length - 1].vals = payload.vals;
+      }
+    }
+    return out;
+  }
+  if (op.type === 'assign') {
+    const { elem, value } = payload;
+    let index = -1;
+    if (block.k === 't') {
+      const parsed = S.parseElem(elem);
+      const span = parsed === null ? null : S.spanOf(block, parsed.run, parsed.offset, 1);
+      if (span !== null && span.count === 1) index = span.index;
+    } else index = S.elems(block).indexOf(elem);
+    return index < 0 ? [] : [{ action: 'setAt', index, value }];
+  }
+  if (op.type === 'move') {
+    const from = held === undefined ? -1 : S.elems(held).indexOf(payload.elem);
+    const to = S.elems(block).indexOf(payload.elem);
+    if (from === to) return [];
+    if (from < 0) return [{ action: 'splice', index: to, count: 0, content: [S.render(block)[to]] }];
+    if (to < 0) return [{ action: 'splice', index: from, count: 1 }];
+    return [{ action: 'move', from, to }];
+  }
+  // A mark: over the indices its anchors fall at; switched off by id, with
+  // the range it covered when the mark is here.
+  if (payload.off !== undefined) {
+    const mark = block.marks?.[payload.off];
+    if (mark === undefined || S.isPlaceholder(mark)) return [];
+    const start = S.indexOfCursor(block, mark[0]);
+    const end = S.indexOfCursor(block, mark[1]);
+    if (start === null || end === null) return [];
+    return [{ action: 'unmarkById', markId: payload.off, start, end, name: mark[2] }];
+  }
+  const start = S.indexOfCursor(block, payload.start);
+  const end = S.indexOfCursor(block, payload.end);
+  if (start === null || end === null || start >= end) return [];
+  const change = { action: 'mark', start, end, name: payload.key, value: payload.value, markId: S.runKey(ts, origin) };
+  if (payload.many === true) change.many = true;
+  return [change];
 };
 
 const render = (entry, field) => S.render(S.indexOf(entry, field));

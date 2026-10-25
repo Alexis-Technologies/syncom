@@ -194,7 +194,8 @@ const ENTRIES = [
   // 87.3 with embeds and blocks in a text (the markers, the typed spans and
   // blocks, the diff context, the commit event's embeds).
   // 88.6 with transactions (transact in src/commit.js, the facade's tx, the message slot).
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 90 },
+  // 90.2 with the change reports (applyOp changes, the plugins' changeOf, the transaction event).
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 92 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -202,13 +203,15 @@ const ENTRIES = [
   // 22.6 with the field-path check every method takes (src/paths.js).
   // 24.6 with embeds and blocks: the markers, the six methods, the typed
   // spans and the diff that carries a slot's marker.
-  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 25 },
+  // 25.2 with the change reports (changeOf: a splice's spans, marks, moves; S.spanOf).
+  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 26 },
   // The tree kind alone, with the fractional indexes a place is made of and
   // the argument checks it shares with the core (5.1 measured).
   // 5.5 with the field-name check unset shares with it (src/args.js).
   // 5.9 with the field-path check (src/paths.js).
   // 6.1 with a node's data (the members' seam).
-  { label: 'tree — browser (@alexify/syncom/tree)', entry: 'src/tree/tree.js', platform: 'browser', budget: 6.25 },
+  // 6.3 with the change reports (treeChanges: the placements before and after).
+  { label: 'tree — browser (@alexify/syncom/tree)', entry: 'src/tree/tree.js', platform: 'browser', budget: 6.5 },
   // The security blocks, each measured ALONE — with the shape checks, the
   // PEM pair, the backend contract and the errors it shares with the core,
   // which an app bundle holds once (4.2 / 2.0 / 3.6 measured; what each

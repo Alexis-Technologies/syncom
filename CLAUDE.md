@@ -374,6 +374,20 @@ docs/                     VitePress site
   splice patch gets `vals`, a changed marker a `setAt` patch (b-side index,
   after the splices). Never diff a text without the context where a slot may
   be: the inverse would lay a bare slot.
+- **`applyOp` reports what the reading shows.** `changes` (src/ops.js) are
+  in the write API's terms and the reading's indices: the path that applied
+  the op pushes its own — `put`, `inc`, `add`/`remove` (the elements that
+  came in and went out), a plugin's `change` from `apply` (a splice's cuts
+  in the indices before, last first, and its insert in the indices after,
+  both read from the rope by `S.spanOf` in O(log n); a tree's moves from the
+  folds before and after, the node with its parent and the sibling before
+  it) — and marks the field `covered`; `changesOf` completes the rest from
+  `delta` as a `reset` with a copy of the value, or an `unset`; `delete` and
+  `purge` are one change each. Never diff two readings on the op path. Every
+  announce hands them on: `change(op, via, { changes })`, `commit.changes`
+  and `commit.txn`, and ONE `transaction` event per turn (a commit, a
+  transaction, a peer's page, a joined snapshot) with the changes tagged by
+  id — built only while something listens.
 - **A payload the engine does not admit is never silent.** `applyOp` reports
   `reason: 'malformed'` in `rejected` (`malformed()` in `src/ops.js`): on the
   local path `refuse()` in `src/commit.js` throws a `TypeError` — the

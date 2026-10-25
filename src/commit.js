@@ -277,7 +277,7 @@ const assertUnique = async (core, id, entry) => {
 // changes nothing.
 const validateLocal = async (core, op, current, visible, ctx) => {
   const { id, type } = op;
-  let { entry, changed, delta, rejected } = applyOp(current, op, core.limits);
+  let { entry, changed, delta, rejected, changes } = applyOp(current, op, core.limits);
   refuse(core, id, rejected);
   if (!changed) return null;
   const def = core.definitionOf(entry.data);
@@ -290,13 +290,13 @@ const validateLocal = async (core, op, current, visible, ctx) => {
       if (type === 'write') op.data = validated;
       else op.data = foldSet(op.data, validated, visible ? project(def, id, await core.view(id, current)) : {});
       ctx.data = op.data;
-      ({ entry, changed, delta, rejected } = applyOp(current, op, core.limits));
+      ({ entry, changed, delta, rejected, changes } = applyOp(current, op, core.limits));
       refuse(core, id, rejected);
       if (!changed) return null;
     }
   }
   if (VALIDATED.has(type)) await assertUnique(core, id, entry);
-  return { entry, delta };
+  return { entry, delta, changes };
 };
 
 // Inside the queue: signed, then appended — the seq reserved, the ticket
@@ -359,7 +359,7 @@ const land = async (core, op, entry, { ticket, position }) => {
 // `change` listeners (the relay among them) hear about the op. `via` is null
 // for a local write; a merge made from a peer's snapshot names that peer, so
 // the relay does not hand its own state straight back to it.
-const announce = async (core, op, entry, delta, ctx, source, via, committed = null) => {
+const announce = async (core, op, entry, delta, ctx, source, via, committed = null, changes = []) => {
   const alive = isAlive(entry);
   try {
     await core.hook('afterWrite', ctx, op);
@@ -368,19 +368,31 @@ const announce = async (core, op, entry, delta, ctx, source, via, committed = nu
     // What an undo manager keeps of a local commit: the record before and
     // after, as copies, and every field's kind — built only for a listener.
     if (committed !== null && core.storage.listenerCount('commit') > 0) {
-      const { seq, before, previous } = committed;
+      const { seq, before, previous, txn } = committed;
       const kinds = { ...kindsOf(previous, core.plugins), ...kindsOf(entry, core.plugins) };
       const after = alive ? asJson(entry.data) : null;
-      const event = { op, seq, source, before: asJson(before), after, kinds };
+      const event = { op, seq, txn, source, before: asJson(before), after, kinds, changes };
       // What a field holds beside its reading (a text's embed markers), each
       // side: an inverse that lays a cut marker again needs its value.
       const embeds = { before: valuesOf(core.plugins, previous), after: alive ? valuesOf(core.plugins, entry) : null };
       if (embeds.before !== null || embeds.after !== null) event.embeds = embeds;
       notify(core.storage, core.logger, 'commit', event);
     }
-    notify(core.storage, core.logger, 'change', op, via);
+    notify(core.storage, core.logger, 'change', op, via, { changes });
   }
 };
+
+// One turn's worth of ops announced as a whole — a local write, a
+// transaction, a peer's page, a joined snapshot — with every change tagged
+// by its record: what a view updates itself by, once.
+const transacted = (core, { local, via, source, message, ops, changes }) => {
+  if (ops.length === 0 || core.storage.listenerCount('transaction') === 0) return;
+  const ts = ops[ops.length - 1].ts;
+  notify(core.storage, core.logger, 'transaction', { local, via, source, message, ops, changes, ts });
+};
+
+// The changes of an op tagged with its record, for a transaction event.
+const tagged = (op, changes) => changes.map((change) => ({ id: op.id, ...change }));
 
 // Per field, what a plugin's kind holds beside the reading — a text's
 // embed markers by index — or null when nothing does.
@@ -507,18 +519,21 @@ const prepare = async (core, type, id, payload, options) => {
   // The commit event's `before` is the record in the op model's terms — the
   // paths apart, as the entry holds them — what an undo takes a step back by.
   const before = previous !== null && isAlive(previous) ? previous.data : null;
-  return { op, entry: applied.entry, delta: applied.delta, ctx, source, via, before, previous };
+  const { entry, delta, changes } = applied;
+  return { op, entry, delta, changes, ctx, source, via, before, previous };
 };
 
 const commitLocal = async (core, type, id, payload, options) => {
   const prepared = await prepare(core, type, id, payload, options);
   const { op } = prepared;
   if (op === null || op === undefined || op === MISMATCH || prepared.sealed === true) return outcome(op);
-  const { entry, delta, ctx, source, via, before, previous } = prepared;
+  const { entry, delta, changes, ctx, source, via, before, previous } = prepared;
   const issued = await issue(core, op, entry);
   const done = core.landing(async () => {
     const seq = await land(core, op, entry, issued);
-    await announce(core, op, entry, delta, ctx, source, via, { seq, before, previous });
+    await announce(core, op, entry, delta, ctx, source, via, { seq, before, previous, txn: seq }, changes);
+    const message = op.msg ?? null;
+    transacted(core, { local: true, via, source, message, ops: [op], changes: tagged(op, changes) });
   });
   return outcome(op, done);
 };
@@ -637,10 +652,14 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
     }
     for (let i = 0; i < prepared.length; i++) core.settled(ops[i].id, positions[i]);
     core.flush();
+    const changes = [];
     for (let i = 0; i < prepared.length; i++) {
       const { op, entry, delta, ctx, before, previous } = prepared[i];
-      await announce(core, op, entry, delta, ctx, source, null, { seq: positions[i], before, previous });
+      const committed = { seq: positions[i], before, previous, txn: positions[0] };
+      await announce(core, op, entry, delta, ctx, source, null, committed, prepared[i].changes);
+      changes.push(...tagged(op, prepared[i].changes));
     }
+    transacted(core, { local: true, via: null, source, message: msg ?? null, ops, changes });
   });
   return { result, done, ops: prepared.length };
 };

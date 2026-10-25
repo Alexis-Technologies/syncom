@@ -83,7 +83,7 @@
 // data, agrees whatever the order of adds, removes and resets.
 
 const { compareClock, maxClock, floorOf } = require('./vector.js');
-const { deepEqual, OP_TYPES } = require('./shape.js');
+const { deepEqual, OP_TYPES, asJson } = require('./shape.js');
 const { limitsOf, HOME } = require('./plugin.js');
 const { isPath, ancestorsOf, under, MAX_PATHS } = require('./paths.js');
 
@@ -584,7 +584,7 @@ const applyUnset = (entry, fields, stamp, delta, plugins) => {
 
 // Sets register fields at `stamp`, honouring last-writer-wins per field. A
 // register outranks every other kind: whatever held the field goes.
-const applyFields = (entry, fields, stamp, delta, rejected, plugins) => {
+const applyFields = (entry, fields, stamp, delta, rejected, plugins, changes = null) => {
   const { meta, data } = entry;
   // Own keys only: `fields` may be a JSON-parsed peer payload, where
   // "__proto__" is an ordinary own key, or an in-process object with a
@@ -598,6 +598,10 @@ const applyFields = (entry, fields, stamp, delta, rejected, plugins) => {
     meta.clock[field] = stamp;
     data[field] = fields[field];
     delta[field] = fields[field];
+    if (changes !== null) {
+      changes.push({ action: 'put', field, value: fields[field] });
+      changes.covered.add(field);
+    }
     // A register written at a prefix resets what hangs under it below the stamp.
     pruneUnder(entry, field, stamp, delta, plugins);
   }
@@ -666,13 +670,14 @@ const malformed = (field, rejected) => {
   rejected.push({ field: typeof field === 'string' ? field : null, reason: 'malformed' });
 };
 
-const applySet = (entry, op, stamp, delta, rejected, plugins) => {
+const applySet = (entry, op, stamp, delta, rejected, plugins, changes) => {
   const { meta } = entry;
   const { key: field } = op;
   if (!isPath(field) || !isKey(op.origin) || !Array.isArray(op.value)) {
     return void malformed(field, rejected);
   }
   if (roomFor(entry, field, 'set', stamp, delta, rejected, plugins) !== null) return;
+  const before = Array.isArray(entry.data[field]) ? entry.data[field] : [];
   const moved = op.type === 'add' ? addElements(meta, field, op, stamp) : removeElements(meta, field, op);
   if (!moved) return;
   // A set holds its prefix alone.
@@ -680,6 +685,15 @@ const applySet = (entry, op, stamp, delta, rejected, plugins) => {
   // A tag that moved is news to persist even when the array reads the same.
   entry.data[field] = liveElements(meta.sets[field]);
   delta[field] = entry.data[field];
+  // What the reading shows of it: the elements now in, the elements now out.
+  const keyOf = (element) => JSON.stringify(element);
+  const was = new Set(before.map(keyOf));
+  const is = new Set(entry.data[field].map(keyOf));
+  const added = entry.data[field].filter((element) => !was.has(keyOf(element)));
+  const removed = before.filter((element) => !is.has(keyOf(element)));
+  if (added.length > 0) changes.push({ action: 'add', field, elements: asJson(added) });
+  if (removed.length > 0) changes.push({ action: 'remove', field, elements: asJson(removed) });
+  changes.covered.add(field);
 };
 
 // An op of a plugin's kind: the shape every block op shares is checked
@@ -689,7 +703,7 @@ const applySet = (entry, op, stamp, delta, rejected, plugins) => {
 // block, or none, and a refusal: `bound` with which bound, the count and
 // the limit; `malformed` as such — lands on the entry, and the field reads
 // as the plugin renders it. A block is never mutated in place.
-const applyBlock = (entry, op, stamp, delta, rejected, mod, limits) => {
+const applyBlock = (entry, op, stamp, delta, rejected, mod, limits, changes) => {
   const { meta } = entry;
   const { key: field, value: payload } = op;
   if (!isPath(field) || !isKey(op.origin) || !isPlainObject(payload)) {
@@ -712,6 +726,11 @@ const applyBlock = (entry, op, stamp, delta, rejected, mod, limits) => {
       delta[field] = undefined;
     }
     return;
+  }
+  // What the reading shows of the op, as the plugin read it from the block.
+  if (result.change !== undefined) {
+    for (const change of result.change) changes.push({ ...change, field });
+    changes.covered.add(field);
   }
   meta.blocks[field] = result.block;
   // Pending work is news to persist even when the field reads the same.
@@ -759,23 +778,35 @@ const applyOp = (previous, op, limits = null) => {
   const stamp = [op.ts, op.origin];
   const delta = {};
   const rejected = [];
+  // What the reading shows of the op, in the write API's terms — a `put`,
+  // an `inc`, an `add`, a `splice`… — by the path that applied it; a field
+  // changed another way (a reset, a kind outranked, a prefix pruned) reads
+  // as a `reset` with its value, or an `unset` (`changesOf`).
+  const changes = [];
+  changes.covered = new Set();
+  const outcome = (changed, whole = false) => {
+    if (whole) delete changes.covered;
+    else changesOf(entry, delta, changes, plugins);
+    return { entry, changed, delta, rejected, changes };
+  };
 
   // A purged record takes nothing more — not a newer write, not a revival.
   if (meta.purged && op.type !== 'purge' && op.type !== 'merge') {
-    return { entry, changed: false, delta, rejected };
+    return outcome(false, true);
   }
   if (op.type === 'purge') {
     erase(entry, stamp, delta);
     const before = previous ? previous.meta.purged : undefined;
     const changed = before === undefined || compareClock(meta.purged, before) > 0;
-    return { entry, changed, delta, rejected };
+    if (changed) changes.push({ action: 'purge' });
+    return outcome(changed, true);
   }
 
   if (op.type === 'set') {
     if (!isPlainObject(op.data)) malformed(null, rejected);
     else {
       if (!previous && Number.isInteger(op.v)) meta.v = op.v;
-      applyFields(entry, op.data, stamp, delta, rejected, plugins);
+      applyFields(entry, op.data, stamp, delta, rejected, plugins, changes);
     }
   } else if (op.type === 'unset') {
     if (!Array.isArray(op.value)) malformed(null, rejected);
@@ -789,13 +820,15 @@ const applyOp = (previous, op, limits = null) => {
       if (compareClock(meta.deleted, meta.base) < 0) meta.deleted = null;
       if (Number.isInteger(op.v)) meta.v = op.v;
       applyBase(entry, delta, plugins);
-      applyFields(entry, op.data, stamp, delta, rejected, plugins);
+      applyFields(entry, op.data, stamp, delta, rejected, plugins, changes);
     }
   } else if (op.type === 'delete') {
     if (compareClock(stamp, meta.base) > 0) {
       meta.base = stamp;
       meta.deleted = stamp;
       applyBase(entry, delta, plugins);
+      changes.push({ action: 'delete' });
+      return outcome(true, true);
     }
   } else if (op.type === 'merge') {
     // A whole entry joined in — how a snapshot page becomes log entries a
@@ -818,10 +851,11 @@ const applyOp = (previous, op, limits = null) => {
         const moved =
           joined.meta.base !== (before ? before.base : null) ||
           joined.meta.deleted !== (before ? before.deleted : null);
-        return { entry: joined, changed: true, delta, rejected, moved };
+        const gone = isAlive(joined) ? changesOf(joined, delta, changes, plugins) : [{ action: 'delete' }];
+        return { entry: joined, changed: true, delta, rejected, moved, changes: gone };
       }
     }
-    return { entry, changed: false, delta, rejected };
+    return outcome(false, true);
   } else if (op.type === 'inc') {
     const { key: field, value } = op;
     if (!isPath(field) || !isKey(op.origin) || !Number.isFinite(value)) {
@@ -839,16 +873,18 @@ const applyOp = (previous, op, limits = null) => {
           perOrigin[op.origin] = [op.seq, sum, op.ts];
           entry.data[field] = counterValue(perOrigin);
           delta[field] = entry.data[field];
+          changes.push({ action: 'inc', field, value });
+          changes.covered.add(field);
           // A counter holds its prefix alone.
           dropUnder(entry, field, delta, plugins);
         }
       }
     }
   } else if (op.type === 'add' || op.type === 'remove') {
-    applySet(entry, op, stamp, delta, rejected, plugins);
+    applySet(entry, op, stamp, delta, rejected, plugins, changes);
   } else if (!CORE_TYPES.has(op.type) && OP_TYPES.has(op.type)) {
     const mod = own(plugins.byType, op.type);
-    if (mod !== undefined) applyBlock(entry, op, stamp, delta, rejected, mod, bounds);
+    if (mod !== undefined) applyBlock(entry, op, stamp, delta, rejected, mod, bounds, changes);
     else {
       const field = typeof op.key === 'string' ? op.key : null;
       rejected.push({ field, reason: 'kind', kind: HOME[op.type] ?? op.type });
@@ -860,7 +896,21 @@ const applyOp = (previous, op, limits = null) => {
     Object.keys(delta).length > 0 ||
     meta.base !== (before ? before.base : null) ||
     meta.deleted !== (before ? before.deleted : null);
-  return { entry, changed, delta, rejected };
+  return outcome(changed);
+};
+
+// The changes of an op, completed from its delta: a field the op's own path
+// did not report — reset by a whole-record write, outranked by another
+// kind, pruned under a prefix, joined from a snapshot — reads as a `reset`
+// with its value (a copy), or an `unset` when it went.
+const changesOf = (entry, delta, changes, plugins) => {
+  for (const field of Object.keys(delta)) {
+    if (changes.covered.has(field)) continue;
+    if (delta[field] === undefined) changes.push({ action: 'unset', field });
+    else changes.push({ action: 'reset', field, kind: kindOf(entry, field, plugins), value: asJson(delta[field]) });
+  }
+  delete changes.covered;
+  return changes;
 };
 
 // Alive unless purged, or a tombstone stands and nothing newer has landed.

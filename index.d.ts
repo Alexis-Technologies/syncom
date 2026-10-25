@@ -294,6 +294,64 @@ export interface ApplyResult {
   changed: boolean;
   delta: Record<string, unknown>;
   rejected: Refusal[];
+  /** What the reading shows of the op, in the write API's terms and the reading's indices. */
+  changes: Change[];
+}
+
+/**
+ * What the reading shows of an op — in the write API's terms and the
+ * reading's indices, as the op was applied: a register's `put`, a counter's
+ * `inc`, a set's `add`/`remove`, a list's or text's `splice` (the cuts in the
+ * indices before the op, last first, the insert in the indices after),
+ * `setAt`, `move`, a mark over the indices its anchors fall at, a tree's
+ * moves (the node, its parent, the sibling before it) and removals; a field
+ * changed another way — reset by a whole-record write, outranked by another
+ * kind, pruned under a prefix, joined from a snapshot — as a `reset` with its
+ * value, or an `unset`; a record gone as `delete` or `purge`. Applied to the
+ * reading before the op, in order, they give the reading after.
+ */
+export type Change =
+  | { action: 'put'; field: string; value: unknown }
+  | { action: 'unset'; field: string }
+  | { action: 'reset'; field: string; kind: FieldKind; value: unknown }
+  | { action: 'inc'; field: string; value: number }
+  | { action: 'add'; field: string; elements: unknown[] }
+  | { action: 'remove'; field: string; elements: unknown[] }
+  | {
+      action: 'splice';
+      field: string;
+      index: number;
+      count: number;
+      content?: string | unknown[];
+      vals?: readonly (readonly [offset: number, marker: unknown])[];
+    }
+  | { action: 'setAt'; field: string; index: number; value: unknown }
+  | { action: 'move'; field: string; from: number; to: number }
+  | { action: 'mark'; field: string; start: number; end: number; name: string; value: unknown; markId: string; many?: true }
+  | { action: 'unmarkById'; field: string; markId: string; start: number; end: number; name: string }
+  | { action: 'treeMove'; field: string; node: string; parent: string | null; after: string | null }
+  | { action: 'treeRemove'; field: string; node: string }
+  | { action: 'delete' }
+  | { action: 'purge' };
+
+/** A change tagged with the record it is of. */
+export type RecordChange = Change & { id: string };
+
+/**
+ * One turn's worth of ops announced as a whole — a local write, a
+ * `transact()`, a peer's page, a joined snapshot — once durable: `local`
+ * whether the ops are this node's own, `via` the peer they came from or
+ * through, `source` and `message` the transaction's, every change tagged
+ * by its record, `ts` the last op's stamp.
+ */
+export interface TransactionEvent {
+  local: boolean;
+  via: PeerRef | null;
+  source: unknown;
+  message: string | null;
+  ops: SyncOp[];
+  changes: RecordChange[];
+  ts: number;
 }
 
 /** What a field is, once written: a register (last writer wins), a counter (`inc`), a set (`add`/`remove`), a list, a text or a tree. */
@@ -971,6 +1029,10 @@ export interface CommitEvent {
   before: Record<string, unknown> | null;
   after: Record<string, unknown> | null;
   kinds: { [field: string]: FieldKind };
+  /** The log position of the first op of the transaction this op was made in — its own `seq` for a single write. */
+  txn: number;
+  /** What the reading shows of the op. */
+  changes: Change[];
   /** The markers of a text's embed slots, by index, each side — present when a side holds any. */
   embeds?: { before: TextEmbeds | null; after: TextEmbeds | null };
 }
@@ -1383,9 +1445,11 @@ export interface ApplyRemoteResult {
 /** The events a Storage emits; listeners are contained. */
 export interface StorageEvents {
   /** Every op applied here — local (`via` null) or from a peer (`via` names it). */
-  change: (op: SyncOp, via: PeerRef | null) => void;
+  change: (op: SyncOp, via: PeerRef | null, detail: { changes: Change[] }) => void;
   /** A local op is durable: what it changed, as copies — built only when someone listens. */
   commit: (event: CommitEvent) => void;
+  /** One turn's ops durable and announced — a write, a transaction, a peer's page, a joined snapshot — with every change tagged by its record. */
+  transaction: (event: TransactionEvent) => void;
   /** The log sealed a segment (and maybe dropped old ones): `floor` is where a resume is still possible. */
   log: (event: { kind: 'roll'; sealed: number; dropped: number; floor: number; segments: number }) => void;
   /**

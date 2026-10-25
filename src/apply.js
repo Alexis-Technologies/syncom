@@ -45,6 +45,7 @@ const openBatch = (core, { via = null, scopes = null, peer = null, adoptFrom = n
     accepted: [],
     touched: new Map(),
     deltas: new Map(),
+    changes: new Map(),
     adopted: null,
     skipped: null,
     held: null,
@@ -304,7 +305,7 @@ const applyOne = async (batch, op) => {
   const verdict = await core.hook('beforeApply', { op, via: batch.via, peer: batch.peer, current: visible });
   if (verdict === false) return void skip(batch, op);
   core.clock.observe(op.ts);
-  const { entry, changed, delta, rejected } = applyOp(current, op, core.limits);
+  const { entry, changed, delta, rejected, changes } = applyOp(current, op, core.limits);
   if (rejected.length > 0) {
     const error = new SyncomError('OP_REFUSED', `Refused op on ${op.id}`, { op, rejected });
     report(batch, { event: 'sync.op.rejected', id: op.id, rejected }, rejected[0].reason, error);
@@ -327,6 +328,7 @@ const applyOne = async (batch, op) => {
   if (VALIDATED.has(op.type)) await reportConflicts(batch, op, entry);
   batch.touched.set(op.id, entry);
   batch.deltas.set(op.id, { ...(batch.deltas.get(op.id) ?? {}), ...delta });
+  batch.changes.set(op, changes);
 };
 
 // Log first, then the records, then the log is told the batch landed; a
@@ -359,7 +361,17 @@ const announce = async (batch, result) => {
       core.refresh(id, isAlive(entry) ? entry.data : null, batch.deltas.get(id), null, entry);
     }
     notify(core.storage, core.logger, 'apply', { via, peer, ops: accepted, ...result });
-    for (const op of accepted) notify(core.storage, core.logger, 'change', op, via);
+    const changes = [];
+    for (const op of accepted) {
+      const own = batch.changes.get(op) ?? [];
+      notify(core.storage, core.logger, 'change', op, via, { changes: own });
+      for (const change of own) changes.push({ id: op.id, ...change });
+    }
+    if (accepted.length > 0 && core.storage.listenerCount('transaction') > 0) {
+      const ts = accepted[accepted.length - 1].ts;
+      const event = { local: false, via, source: null, message: null, ops: accepted, changes, ts };
+      notify(core.storage, core.logger, 'transaction', event);
+    }
   }
 };
 

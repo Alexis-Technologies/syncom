@@ -258,19 +258,55 @@ each op as it is made, and one that throws on a later op rejects the call
 with its error and leaves nothing written — no version in `history()`, no
 op on its way to the peers.
 
+## Changes
+
+Every op announced — a `change` event's third argument, a `commit` event's
+`changes`, a `transaction` event's `changes` tagged by record — carries what
+the reading shows of it, in the write API's terms and the reading's indices:
+
+```js
+storage.on('change', (op, via, { changes }) => { … });
+// a keystroke:     [{ action: 'splice', field: 'body', index: 5, count: 0, content: 'x' }]
+// a cut:           [{ action: 'splice', field: 'body', index: 3, count: 2 }]
+// update():        [{ action: 'put', field: 'title', value: 'Final' }]
+// inc():           [{ action: 'inc', field: 'hits', value: 1 }]
+// add():           [{ action: 'add', field: 'tags', elements: ['x'] }]
+// setAt(), move(): [{ action: 'setAt', field: 'items', index: 1, value: 'b' }], [{ action: 'move', field: 'items', from: 0, to: 2 }]
+// mark():          [{ action: 'mark', field: 'body', start: 0, end: 5, name: 'bold', value: true, markId }]
+// treeMove():      [{ action: 'treeMove', field: 'outline', node: 'b', parent: 'r', after: 'a' }]
+// set():           [{ action: 'put', … }, { action: 'unset', field: 'old' }]
+// delete():        [{ action: 'delete' }]
+```
+
+A splice's cuts are in the indices before the op (last first), its insert in
+the indices after; a mark over the indices its anchors fall at; a tree move
+names the node, its parent and the sibling before it, and the nodes that
+followed it where it was and where it is. A field changed another way — reset
+by a whole-record write, outranked by another kind, pruned under a prefix,
+joined from a snapshot — reads as `{ action: 'reset', field, kind, value }`
+with its whole value, or `{ action: 'unset', field }` when it went. Applied
+to the reading before the op, in order, the changes give the reading after —
+what a view or an editor binding updates itself by without re-reading the
+record. They are computed as the op is applied, from the block it lands in
+(a splice's indices in O(log n)), never by diffing two readings; a peer's op
+reports what it changed *here*, which is less than it changed where it was
+made when a concurrent op had already taken part of it.
+
 ## The commit event
 
 ```js
-storage.on('commit', ({ op, seq, source, before, after, kinds }) => { … });
+storage.on('commit', ({ op, seq, txn, source, before, after, kinds, changes }) => { … });
 ```
 
 Every local write — a call of the write API, a `Record`'s `save()`,
 `applyPatches()`, `restore()`, `compact()` — raises `commit` once its op is
-durable: the op, its seq in the log, the `source` (the `Record` whose
-`save()` it was, or what `applyPatches()` was given; `null` otherwise), the
-record `before` and `after` as copies of what is stored (no lens), and every
-field's `kinds` (`register`, `counter`, `set`, `list`, `text`, `tree` — of
-the fields there before and after). It is what an undo stack keeps; the
+durable: the op, its seq in the log, `txn` (the seq of the first op of the
+transaction it was made in — its own for a single write), the `source` (the
+`Record` whose `save()` it was, or what `transact()`/`applyPatches()` was
+given; `null` otherwise), the record `before` and `after` as copies of what
+is stored (no lens), every field's `kinds` (`register`, `counter`, `set`,
+`list`, `text`, `tree` — of the fields there before and after) and its
+[`changes`](#changes). It is what an undo stack keeps; the
 copies are made only while something listens. A peer's op raises `change`,
 not `commit`, and so do the `merge` and `advance` ops a joined snapshot
 leaves (`mergeSnapshot()`, `adoptVector()`); an encrypted write makes no op

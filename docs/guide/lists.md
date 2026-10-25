@@ -400,6 +400,14 @@ BMP, an emoji — is never split: `splice()`, `mark()`, `unmark()` and
 `field`, `index`), `updateText()` diffs by code points where one is about,
 so its edits go around it, and a string with a lone half is a `TypeError`.
 
+The other way, from the storage to the editor, every op — a peer's as much
+as a local one — reports what the reading shows of it, in the reading's
+indices: `storage.on('change', (op, via, { changes }) => …)` hands an editor
+`{ action: 'splice', field, index, count, content }` per edit, `mark` over a
+range, `setAt` and `move` for a list, so it applies the edit to its own
+document without re-reading the field (see [Changes](./versions#changes)); a
+`transaction` event hands one turn's worth at once, tagged by record.
+
 ## Costs and limits
 
 - A record is read and written whole on every op, and a text lives three

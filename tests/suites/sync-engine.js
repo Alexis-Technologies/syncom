@@ -6,6 +6,7 @@
 // within one subtest (that is how the reopen case works).
 
 const { createMesh, settle, waitUntil, prng } = require('../utils/mesh.js');
+const { applyChanges, comparable } = require('../utils/changes.js');
 
 // Two nodes' clocks are independent: a write on B one tick after a write on
 // A is only "later" once the millisecond has moved on.
@@ -459,6 +460,16 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     const mesh = await createMesh(t2, names, edges, createStorage);
     const storages = names.map((name) => mesh.get(name));
     const random = prng(20260905);
+    // A shadow of every record per node, kept by the change reports alone
+    // (EVT-1): local ops and peers' alike, through what each node applies.
+    const shadows = new Map(storages.map((storage) => [storage, new Map()]));
+    for (const storage of storages) {
+      storage.on('change', (op, via, { changes }) => {
+        if (op.type === 'advance') return;
+        const own = shadows.get(storage);
+        own.set(op.id, applyChanges(own.has(op.id) ? own.get(op.id) : null, changes));
+      });
+    }
     // r1–r3 take every kind of write, resets included; c1 is never reset, so
     // its counter stays clear of the documented counter/reset straddle.
     const ids = ['r1', 'r2', 'r3'];
@@ -542,6 +553,13 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     }
     await settle(storages, { timeout: 10_000 });
     await assertConverged(storages);
+    // What the changes said is what the readings are, on every node.
+    for (const storage of storages) {
+      for (const [id, shadow] of shadows.get(storage)) {
+        const [a, b] = comparable(shadow, storage.getCachedData(id));
+        assert.deepStrictEqual(a, b, `${storage.nodeId.slice(0, 4)} ${id}: the shadow kept by the changes`);
+      }
+    }
     // The sequence blocks and the move logs agree too, not only what they read as.
     const blocks = async (storage) => {
       const out = {};

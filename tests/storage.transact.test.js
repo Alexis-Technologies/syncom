@@ -22,8 +22,10 @@ test('transactions', async (t) => {
       const storage = await open(t2, { defer: 0 });
       const events = [];
       const changes = [];
+      const turns = [];
       storage.on('commit', (event) => events.push(event));
       storage.on('change', (op) => changes.push(op));
+      storage.on('transaction', (event) => turns.push(event));
       const other = await storage.insert({ n: 0 });
       const logged = storage.log.length;
       const files = (await storage.fsi.list('/t/log/open')).length;
@@ -72,7 +74,35 @@ test('transactions', async (t) => {
         'consecutive positions',
       );
       assert.ok(mine.every((event) => event.op.msg === 'first' && event.source === source));
+      assert.ok(
+        mine.every((event) => event.txn === mine[0].seq),
+        'one transaction: one txn',
+      );
+      assert.strictEqual(events[0].txn, events[0].seq, 'a single write: its own seq');
+      assert.deepStrictEqual(mine[2].changes, [{ action: 'inc', field: 'hits', value: 2 }]);
       assert.ok(changes.slice(1).every((op) => op.msg === 'first'));
+      // One transaction event, after the commit events, every change tagged by its record.
+      assert.strictEqual(turns.length, 2);
+      const [, turn] = turns;
+      assert.deepStrictEqual(
+        [turn.local, turn.via, turn.source, turn.message, turn.ops.length, turn.ts],
+        [true, null, source, 'first', 10, turn.ops[9].ts],
+      );
+      assert.deepStrictEqual(
+        turn.changes.map((change) => [change.id === id ? 'id' : 'other', change.action]),
+        [
+          ['id', 'put'],
+          ['id', 'put'],
+          ['id', 'inc'],
+          ['id', 'add'],
+          ['id', 'splice'],
+          ['id', 'splice'],
+          ['id', 'mark'],
+          ['id', 'treeMove'],
+          ['other', 'put'],
+          ['other', 'unset'],
+        ],
+      );
       const { versions } = await storage.history(id);
       assert.deepStrictEqual(
         versions.map((version) => version.message),

@@ -38,6 +38,43 @@ const apply = (entry, field, held, op, stamp) => {
   const result = T.applyTreeMove(held ?? T.createTree(), stamp, op.value);
   const out = { block: result.changed ? result.tree : (held ?? null), changed: result.changed };
   if (result.reason !== undefined) out.reason = result.reason;
+  // What the reading shows of the move: the nodes whose place changed.
+  if (result.changed) out.change = treeChanges(held === undefined ? [] : T.renderTree(held), T.renderTree(result.tree));
+  return out;
+};
+
+// Every node's place: its parent and the sibling before it.
+const placements = (nodes) => {
+  const out = new Map();
+  const stack = [[nodes, null]];
+  while (stack.length > 0) {
+    const [children, parent] = stack.pop();
+    for (let i = 0; i < children.length; i++) {
+      const node = children[i];
+      out.set(node.id, { parent, after: i === 0 ? null : children[i - 1].id });
+      stack.push([node.children, node.id]);
+    }
+  }
+  return out;
+};
+
+// The nodes whose place changed between two readings — a moved node, and
+// the ones that followed it where it was and where it is — as `treeMove`
+// changes (`parent`, `after`); a node gone as `treeRemove`, the root of a
+// subtree alone.
+const treeChanges = (before, after) => {
+  const was = placements(before);
+  const is = placements(after);
+  const out = [];
+  for (const [node, place] of is) {
+    const prev = was.get(node);
+    if (prev === undefined || prev.parent !== place.parent || prev.after !== place.after) {
+      out.push({ action: 'treeMove', node, parent: place.parent, after: place.after });
+    }
+  }
+  for (const [node, place] of was) {
+    if (!is.has(node) && (place.parent === null || is.has(place.parent))) out.push({ action: 'treeRemove', node });
+  }
   return out;
 };
 

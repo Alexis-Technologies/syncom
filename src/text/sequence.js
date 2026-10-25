@@ -1020,6 +1020,22 @@ const positionOfSlot = (st, run, off) => {
   return { s: s + k, v: v + (seg.vis ? k : 0), vis: seg.vis };
 };
 
+/**
+ * The visible slots of `[off, off + len)` of run `run`, as the reading shows
+ * them: `{ index, count }` — where the first stands, how many are shown —
+ * or null when the run is not placed here. O(log n): what a change report
+ * (src/text/text.js) reads an op's cuts and inserts with.
+ */
+const spanOf = (block, run, off, len) => {
+  const st = ensureHead(block);
+  const r = runOf(st, run);
+  if (r === undefined || !r.placed || !Number.isInteger(off) || off < 0 || off >= r.len || !(len > 0)) return null;
+  const last = Math.min(off + len, r.len) - 1;
+  const a = positionOfSlot(st, r, off);
+  const b = last === off ? a : positionOfSlot(st, r, last);
+  return { index: a.v, count: b.v + (b.vis ? 1 : 0) - a.v };
+};
+
 // Where a cursor is now: the visible elements before its slot, plus one
 // for a slot still shown when the cursor sits after it. Null once the slot
 // is gone — its run not here, or dropped by a reset.
@@ -2198,6 +2214,8 @@ module.exports = {
   buildIndex,
   EMBED,
   heldAt,
+  spanOf,
+  isPlaceholder,
   lengthOf,
   totalOf,
   render,

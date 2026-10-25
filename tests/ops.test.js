@@ -512,6 +512,129 @@ test('ops module', async (t) => {
   });
 
   await t.test(
+    "applyOp reports what the reading shows of an op, in the write API's terms and the reading's indices",
+    () => {
+      const changesOf = (entry, o) => applyOp(entry, o).changes;
+      let r = applyOp(null, op('write', 1, 'A', { data: { a: 1, b: 2 } }));
+      assert.deepStrictEqual(r.changes, [
+        { action: 'put', field: 'a', value: 1 },
+        { action: 'put', field: 'b', value: 2 },
+      ]);
+      r = applyOp(r.entry, op('inc', 2, 'A', { key: 'n', value: 3 }));
+      assert.deepStrictEqual(r.changes, [{ action: 'inc', field: 'n', value: 3 }]);
+      r = applyOp(r.entry, op('add', 3, 'A', { key: 'tags', value: ['x', 'y'] }));
+      assert.deepStrictEqual(r.changes, [{ action: 'add', field: 'tags', elements: ['x', 'y'] }]);
+      assert.deepStrictEqual(changesOf(r.entry, op('add', 4, 'B', { key: 'tags', value: ['x'] })), [], 'already in');
+      r = applyOp(r.entry, op('remove', 4, 'A', { key: 'tags', value: [['x', { A: 3 }]] }));
+      assert.deepStrictEqual(r.changes, [{ action: 'remove', field: 'tags', elements: ['x'] }]);
+      // A text: the insert in the indices after, the cuts in the indices before, last first.
+      r = applyOp(r.entry, op('splice', 5, 'A', { key: 'body', value: { at: '^', content: 'hello' } }));
+      assert.deepStrictEqual(r.changes, [{ action: 'splice', field: 'body', index: 0, count: 0, content: 'hello' }]);
+      const replace = { cut: [['5:A', 1, 2]], content: 'EY', run: '5:A', from: 5 };
+      r = applyOp(r.entry, op('splice', 6, 'A', { key: 'body', value: replace }));
+      assert.deepStrictEqual(r.changes, [
+        { action: 'splice', field: 'body', index: 1, count: 2 },
+        { action: 'splice', field: 'body', index: 3, count: 0, content: 'EY' },
+      ]);
+      assert.strictEqual(r.entry.data.body, 'hloEY');
+      const atOnce = { cut: [['5:A', 0, 1]], content: 'J', at: '<5:0:A' };
+      r = applyOp(r.entry, op('splice', 7, 'B', { key: 'body', value: atOnce }));
+      assert.deepStrictEqual(
+        r.changes,
+        [{ action: 'splice', field: 'body', index: 0, count: 1, content: 'J' }],
+        'one splice',
+      );
+      assert.strictEqual(r.entry.data.body, 'JloEY');
+      const twice = {
+        cut: [
+          ['5:A', 4, 1],
+          ['5:A', 3, 1],
+        ],
+        content: '',
+      };
+      assert.deepStrictEqual(changesOf(r.entry, op('splice', 8, 'B', { key: 'body', value: twice })), [
+        { action: 'splice', field: 'body', index: 2, count: 1 },
+        { action: 'splice', field: 'body', index: 1, count: 1 },
+      ]);
+      assert.deepStrictEqual(
+        changesOf(r.entry, op('splice', 8, 'B', { key: 'body', value: { cut: [['5:A', 2, 2]], content: '' } })),
+        [{ action: 'splice', field: 'body', index: 1, count: 1 }],
+        'a cut over a slot already gone counts what the reading loses',
+      );
+      const mark = { start: '<5:3:A', end: '>5:4:A', key: 'bold', value: true };
+      r = applyOp(r.entry, op('mark', 8, 'A', { key: 'body', value: mark }));
+      assert.deepStrictEqual(r.changes, [
+        { action: 'mark', field: 'body', start: 1, end: 3, name: 'bold', value: true, markId: '8:A' },
+      ]);
+      r = applyOp(r.entry, op('mark', 9, 'A', { key: 'body', value: { off: '8:A' } }));
+      assert.deepStrictEqual(r.changes, [
+        { action: 'unmarkById', field: 'body', markId: '8:A', start: 1, end: 3, name: 'bold' },
+      ]);
+      assert.deepStrictEqual(
+        changesOf(r.entry, op('mark', 10, 'A', { key: 'body', value: { off: '99:Z' } })),
+        [],
+        'not here yet',
+      );
+      // A list: a splice, an assign as setAt, a move by its index before and after.
+      r = applyOp(r.entry, op('splice', 10, 'A', { key: 'items', value: { at: '^', content: [1, 2, 3] } }));
+      assert.deepStrictEqual(r.changes, [{ action: 'splice', field: 'items', index: 0, count: 0, content: [1, 2, 3] }]);
+      r = applyOp(r.entry, op('assign', 11, 'A', { key: 'items', value: { elem: '10:1:A', value: 'two' } }));
+      assert.deepStrictEqual(r.changes, [{ action: 'setAt', field: 'items', index: 1, value: 'two' }]);
+      const move = { elem: '10:0:A', cut: ['10:A', 0, 1], at: '>10:2:A', value: 1 };
+      r = applyOp(r.entry, op('move', 12, 'A', { key: 'items', value: move }));
+      assert.deepStrictEqual(r.changes, [{ action: 'move', field: 'items', from: 0, to: 2 }]);
+      assert.deepStrictEqual(r.entry.data.items, ['two', 3, 1]);
+      const waiting = { elem: '77:0:Z', value: 'v' };
+      assert.deepStrictEqual(
+        changesOf(r.entry, op('assign', 13, 'A', { key: 'items', value: waiting })),
+        [],
+        'an element not here',
+      );
+      // A tree: the node with its parent and the sibling before it; a removal.
+      r = applyOp(r.entry, op('tree', 13, 'A', { key: 'outline', value: { node: 'n', parent: null, fi: 'V' } }));
+      assert.deepStrictEqual(r.changes, [
+        { action: 'treeMove', field: 'outline', node: 'n', parent: null, after: null },
+      ]);
+      r = applyOp(r.entry, op('tree', 14, 'A', { key: 'outline', value: { node: 'm', parent: 'n', fi: 'V' } }));
+      assert.deepStrictEqual(r.changes, [
+        { action: 'treeMove', field: 'outline', node: 'm', parent: 'n', after: null },
+      ]);
+      r = applyOp(r.entry, op('tree', 15, 'A', { key: 'outline', value: { node: 'o', parent: null, fi: 'WV' } }));
+      assert.deepStrictEqual(r.changes, [
+        { action: 'treeMove', field: 'outline', node: 'o', parent: null, after: 'n' },
+      ]);
+      r = applyOp(r.entry, op('tree', 16, 'A', { key: 'outline', value: { node: 'n', parent: '$trash', fi: 'V' } }));
+      assert.deepStrictEqual(r.changes, [
+        { action: 'treeMove', field: 'outline', node: 'o', parent: null, after: null },
+        { action: 'treeRemove', field: 'outline', node: 'n' },
+      ]);
+      // Resets: an unset per field; a whole-record write puts and unsets; a delete, a purge.
+      r = applyOp(r.entry, op('unset', 17, 'A', { value: ['a', 'tags'] }));
+      assert.deepStrictEqual(r.changes, [
+        { action: 'unset', field: 'a' },
+        { action: 'unset', field: 'tags' },
+      ]);
+      r = applyOp(r.entry, op('write', 18, 'A', { data: { z: 1 } }));
+      assert.deepStrictEqual(r.changes[0], { action: 'put', field: 'z', value: 1 });
+      assert.deepStrictEqual(
+        r.changes.slice(1).map((change) => change.action),
+        ['unset', 'unset', 'unset', 'unset', 'unset'],
+      );
+      // A kind outranked reads as a reset with the winner's value; a merge as resets.
+      const list = replay([op('splice', 1, 'A', { key: 'f', value: { at: '^', content: [1] } })]);
+      assert.deepStrictEqual(changesOf(list, op('inc', 2, 'B', { key: 'f', value: 7 })), [
+        { action: 'inc', field: 'f', value: 7 },
+      ]);
+      const merged = applyOp(null, { ...op('merge', 3, 'M'), data: r.entry.data, meta: r.entry.meta });
+      assert.deepStrictEqual(merged.changes, [{ action: 'reset', field: 'z', kind: 'register', value: 1 }]);
+      r = applyOp(r.entry, op('delete', 19, 'A'));
+      assert.deepStrictEqual(r.changes, [{ action: 'delete' }]);
+      assert.deepStrictEqual(changesOf(r.entry, op('purge', 20, 'A')), [{ action: 'purge' }]);
+      assert.deepStrictEqual(changesOf(r.entry, op('delete', 18, 'B')), [], 'an older delete changes nothing');
+    },
+  );
+
+  await t.test(
     'packOps carries v, actor, sig, digest, nonce and msg in slots 13 to 18; older rows read without them',
     () => {
       const sig = 'S'.repeat(86);

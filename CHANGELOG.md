@@ -14,6 +14,15 @@ There is no released version section until then; everything below lands in it.
 
 ### Added
 
+- **Changes, and the `transaction` event.** Every op announced reports what
+  the reading shows of it, in the write API's terms and the reading's
+  indices: `applyOp()` returns `changes`, a `change` event carries them as its
+  third argument, a `commit` event as `changes` (with `txn`, the first seq
+  of the transaction it was made in), and a new `transaction` event hands
+  one turn's worth at once — a write, a `transact()`, a peer's page, a joined
+  snapshot — tagged by record. A splice's cuts and insert are read from the
+  rope in O(log n); a tree move names the node, its parent and the sibling
+  before it; a field changed another way is a `reset` with its value.
 - **Transactions.** `transact(fn, { actor, source, message })` runs `fn(tx)`
   inside the mutation queue — `tx` the write API less `purge()`, the plugins'
   methods included, plus `get()`/`has()` reading what the transaction wrote —

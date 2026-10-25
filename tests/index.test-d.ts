@@ -617,6 +617,18 @@ expectType<Promise<string>>(
 );
 expectType<Promise<number>>(storage.applyPatches('id', [], { message: 'm' }));
 expectType<Promise<number>>(storage.transact(() => 1));
+storage.on('change', (op, via, detail) => {
+  expectType<syncom.SyncOp>(op);
+  expectType<syncom.Change[]>(detail.changes);
+});
+storage.on('transaction', (event) => {
+  expectType<syncom.RecordChange[]>(event.changes);
+  expectType<string | null>(event.message);
+  expectType<boolean>(event.local);
+});
+expectAssignable<syncom.Change>({ action: 'splice', field: 'body', index: 0, count: 1, content: 'x' });
+expectAssignable<syncom.Change>({ action: 'treeMove', field: 'outline', node: 'n', parent: null, after: null });
+expectType<number>(({} as syncom.CommitEvent).txn);
 expectAssignable<syncom.TransactOptions>({ message: 'm' });
 expectAssignable<syncom.SyncOp>({ origin: 'a', seq: 1, ts: 1, type: 'set', id: 'r', msg: 'm' });
 expectType<string | null>(({} as syncom.HistoryVersion).message);

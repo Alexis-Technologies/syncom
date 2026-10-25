@@ -116,7 +116,7 @@ const mergeOne = async (batch, record) => {
   if (from) op.from = from;
   if (data !== undefined) op.data = data;
   if (meta !== undefined) op.meta = meta;
-  const { entry, changed, delta, rejected } = applyOp(current, op, core.limits);
+  const { entry, changed, delta, rejected, changes } = applyOp(current, op, core.limits);
   // A block of a kind no plugin here knows is left out of what this node
   // holds: told once per record, since the field is gone for its peers too.
   for (const refusal of rejected) {
@@ -135,7 +135,7 @@ const mergeOne = async (batch, record) => {
   // a peer's ops taken before the purge — is scrubbed once the batch is durable.
   if (entry.meta.purged) (batch.purged ??= new Set()).add(id);
   batch.deltas.set(id, { ...(batch.deltas.get(id) ?? {}), ...delta });
-  batch.pending.push({ ctx, op, started });
+  batch.pending.push({ ctx, op, started, changes });
 };
 
 /**
@@ -169,15 +169,22 @@ const mergeBatch = async (core, records, via, from) => {
   if (await core.persist(batch.touched, first, last)) core.log.applied(first, last);
   if (batch.purged) for (const id of batch.purged) await core.scrub(id);
   core.flush();
-  for (const { ctx, op, started } of batch.pending) {
+  const changes = [];
+  for (const { ctx, op, started, changes: own } of batch.pending) {
     try {
       await core.hook('afterWrite', ctx, op);
     } finally {
       const entry = batch.touched.get(op.id);
       core.refresh(op.id, isAlive(entry) ? entry.data : null, batch.deltas.get(op.id), null, entry);
-      notify(core.storage, core.logger, 'change', op, via);
+      notify(core.storage, core.logger, 'change', op, via, { changes: own });
+      for (const change of own) changes.push({ id: op.id, ...change });
       if (core.otel.enabled) core.otel.recordCommit('merge', 'applied', now() - started);
     }
+  }
+  if (core.storage.listenerCount('transaction') > 0) {
+    const ts = batch.ops[batch.ops.length - 1].ts;
+    const event = { local: true, via, source: null, message: null, ops: batch.ops, changes, ts };
+    notify(core.storage, core.logger, 'transaction', event);
   }
 };
 
