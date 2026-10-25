@@ -60,7 +60,10 @@
 // A LIST is also movable (Kleppmann et al., "Moving elements in list
 // CRDTs", 2020; Loro's MovableList): every element has, beside its place in
 // the tree, two registers keyed by its name — `pos`, the position it shows
-// at, and `vals`, its value — each last-writer-wins by stamp. A `move` cuts
+// at, and `vals`, its value — each last-writer-wins by stamp (a TEXT keeps
+// `vals` too: the marker of an embed slot, U+FFFC, set with the splice that
+// inserts the slot or by an `assign`; the engine knows no marker's shape,
+// src/text/text.js reads it). A `move` cuts
 // the slot the element showed at and adds a one-element POSITION run
 // (`[at, [[value]], elem]`) that names the element; the register then points
 // at that run. A slot shows iff it is alive and it is the position its
@@ -335,9 +338,10 @@ const normalizeJson = (raw) => {
   if (kind === 'l') {
     const pos = register(raw.pos, isRunKey);
     if (pos) seq.pos = pos;
-    const vals = register(raw.vals, isJson);
-    if (vals) seq.vals = vals;
   }
+  // A value per element: a list element's assigned value, a text's embed.
+  const vals = register(raw.vals, isJson);
+  if (vals) seq.vals = vals;
   if (kind === 't') {
     const marks = {};
     for (const key of keysOf(raw.marks)) {
@@ -832,6 +836,10 @@ const holdsElem = (st, key) => {
   return run !== undefined && e.offset < run.len;
 };
 
+// The character a text's embed sits in: U+FFFC, the object replacement
+// character; its value is the slot's entry in `vals`.
+const EMBED = '\uFFFC';
+
 /** How many visible elements the field reads as — what a reading asks first. */
 const lengthOf = (block) => STATE.get(block).root.v;
 /** Every slot of the walk, tombstones included. */
@@ -844,6 +852,13 @@ const shownAt = (st, i) => T.find(st.root, 'v', i);
 
 // The value at visible index `i`: a text's character; a list element's
 // assigned value when a register names one, else what its run holds.
+/** What the slot at visible index `i` holds — a text's character, a list's inserted element — before any value assigned to it. */
+const heldAt = (block, i) => {
+  const st = STATE.get(block);
+  const cursor = shownAt(st, i);
+  return cursor === null ? undefined : cursor.item.body[i - cursor.v];
+};
+
 const valueAt = (block, i) => {
   const st = STATE.get(block);
   const cursor = shownAt(st, i);
@@ -851,7 +866,9 @@ const valueAt = (block, i) => {
   const { item } = cursor;
   const k = i - cursor.v;
   const held = item.body[k];
-  if (isText(st.kind) || !block.vals) return held;
+  if (!block.vals) return held;
+  // A text's value is its embed's, at a slot that holds one.
+  if (isText(st.kind) && held !== EMBED) return held;
   const run = runOf(st, item.run);
   const assigned = own(block.vals, run.elem ?? elemKey(item.run, item.off + k));
   return assigned === undefined ? held : assigned[2];
@@ -1520,7 +1537,22 @@ const applySplice = (given, stamp, payload, base = null, pendingMax = PENDING_MA
   const [ts, origin] = stamp;
   const seq = asBlock(given, base);
   if (!payload || typeof payload !== 'object') return malformed(seq);
-  const { cut, at, run, from, content } = payload;
+  const { cut, at, run, from, content, vals } = payload;
+  // Values riding on the insertion — a text's embeds, each at an offset of
+  // the content: `[[offset, value]]`, landed with the slots they name.
+  if (vals !== undefined) {
+    if (!Array.isArray(vals) || content === undefined) return malformed(seq);
+    for (const pair of vals) {
+      if (!Array.isArray(pair) || pair.length !== 2 || !Number.isInteger(pair[0]) || pair[0] < 0) return malformed(seq);
+      if (pair[0] >= content.length || !isJson(pair[1]) || pair[1] === undefined) return malformed(seq);
+    }
+  }
+  const assignVals = (d, runKeyOf, from) => {
+    if (vals === undefined || vals.length === 0) return;
+    const next = { ...(d.vals ?? {}) };
+    for (const [offset, value] of vals) next[elemKey(runKeyOf, from + offset)] = [ts, origin, value];
+    d.vals = next;
+  };
   // `content` always names the kind — a string for a text, an array for a
   // list — and inserts when it is not empty.
   if (content === undefined || !present(seq.k, content)) return malformed(seq);
@@ -1607,6 +1639,7 @@ const applySplice = (given, stamp, payload, base = null, pendingMax = PENDING_MA
       const key = runKey(ts, origin);
       if (runOf(d ?? st, key) === undefined) {
         const record = recordOf(key, [at, isText(seq.k) ? [content] : [[...content]]], anchor);
+        if (vals !== undefined) assignVals(mutable(), key, 0);
         const parent = anchor.elem === null ? null : runOf(d ?? st, anchor.elem.run);
         const rooted = anchor.elem === null || belowBase(anchor.elem.ts, anchor.elem.origin, base);
         const resolved = rooted || (parent !== undefined && anchor.elem.offset < parent.len);
@@ -1645,6 +1678,7 @@ const applySplice = (given, stamp, payload, base = null, pendingMax = PENDING_MA
         if (len + content.length > MAX_RUN) return refused(seq, 'run', len + content.length, MAX_RUN);
         if (from === len) {
           const m = mutable();
+          assignVals(m, run, from);
           if (target.placed) extendRun(m, run, content);
           else {
             setRun(m, { ...target, rle: rleAppend(m.kind, target.rle, content), len: len + content.length });
@@ -1914,7 +1948,7 @@ const newer = (map, key, stamp) => {
 // An `assign`: the element's value register (lists only).
 const applyAssign = (given, stamp, payload, base = null, pendingMax = PENDING_MAX) => {
   const seq = asBlock(given, base);
-  if (seq.k !== 'l' || !payload || typeof payload !== 'object') return malformed(seq);
+  if (!payload || typeof payload !== 'object') return malformed(seq);
   const { elem, value } = payload;
   if (!isElemKey(elem) || !isJson(value) || value === undefined) return malformed(seq);
   if (!newer(seq.vals, elem, stamp)) return unchanged(seq);
@@ -2162,6 +2196,8 @@ module.exports = {
   normalizeSeq,
   hydrate,
   buildIndex,
+  EMBED,
+  heldAt,
   lengthOf,
   totalOf,
   render,

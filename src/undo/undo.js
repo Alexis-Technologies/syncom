@@ -57,10 +57,12 @@ const conflicting = (patch, types) => {
 // a tree it created is emptied instead — what to fall back on when the
 // reset would run into a peer's change. A set element goes as this node's
 // adds alone (`own`), so a concurrent add of it elsewhere survives.
-const invert = ({ before, after, kinds }, exact, plugins) =>
-  diffViews(after, kindsIn(after, kinds), before, kindsIn(before, kinds), { exact, plugins }).map((patch) =>
-    patch.action === 'remove' ? { ...patch, own: true } : patch,
+const invert = ({ before, after, kinds, embeds }, exact, plugins) => {
+  const context = { from: { embeds: embeds?.after ?? null }, to: { embeds: embeds?.before ?? null } };
+  return diffViews(after, kindsIn(after, kinds), before, kindsIn(before, kinds), { exact, plugins, context }).map(
+    (patch) => (patch.action === 'remove' ? { ...patch, own: true } : patch),
   );
+};
 
 const isWhole = (patches) => patches.some((patch) => patch.action === 'write' || patch.action === 'delete');
 
@@ -149,13 +151,18 @@ class UndoManager extends Emitter {
   // after), the kinds of every field seen — the inverse is made of those
   // when the step is taken back — and the seqs of its own ops on it.
   #record(step, event) {
-    const { op, seq, before, after, kinds } = event;
+    const { op, seq, before, after, kinds, embeds } = event;
     step.lastSeq = Math.max(step.lastSeq, seq);
     step.seqs.add(seq);
     const record = step.records.get(op.id);
-    if (record === undefined) step.records.set(op.id, { before, after, kinds: { ...kinds }, seqs: new Set([seq]) });
-    else {
+    if (record === undefined) {
+      const kept = { before, after, kinds: { ...kinds }, seqs: new Set([seq]) };
+      // A text's embed markers, each side: the inverse of a cut lays them again.
+      kept.embeds = { before: embeds?.before ?? null, after: embeds?.after ?? null };
+      step.records.set(op.id, kept);
+    } else {
       record.after = after;
+      record.embeds.after = embeds?.after ?? null;
       record.seqs.add(seq);
       Object.assign(record.kinds, kinds);
     }
@@ -261,7 +268,12 @@ class UndoManager extends Emitter {
       const partial = current === null ? undefined : collected.records.get(current);
       if (partial !== undefined && left.has(current)) {
         const record = left.get(current);
-        left.set(current, { ...record, after: partial.after, kinds: { ...record.kinds, ...partial.kinds } });
+        left.set(current, {
+          ...record,
+          after: partial.after,
+          embeds: { before: record.embeds.before, after: partial.embeds.after },
+          kinds: { ...record.kinds, ...partial.kinds },
+        });
       }
       if (left.size > 0) from.push({ ...step, records: left });
       if (collected.records.size > 0) to.push(collected);

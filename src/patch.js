@@ -13,17 +13,21 @@
 //   { action: 'remove', field, elements }           set elements removed, as this node observed them
 //   { action: 'remove', field, elements, own: true } …only this node's adds of them (an undo: a peer's stay)
 //   { action: 'remove', field, removals }           …or exactly these tags: `[[element, { origin: addTs }]]`
-//   { action: 'splice', field, index, count, content }   a list's or a text's edit (@alexify/syncom/text)
+//   { action: 'splice', field, index, count, content, vals? }  a list's or a text's edit (@alexify/syncom/text);
+//                                                   `vals` the markers of the embed slots (U+FFFC) the content holds
+//   { action: 'setAt', field, index, value }        a list element's value, a text's block marker or embed (an `assign` op)
 //   { action: 'mark', field, start, end, name, value, expand?, many? }  a text's style over [start, end)
 //   { action: 'treeMove', field, node, parent, after? }  a tree node placed (@alexify/syncom/tree)
 //   { action: 'treeRemove', field, node }
 //   { action: 'delete' }, { action: 'purge' }
 //
-// `diffViews(from, fromKinds, to, toKinds, { plugins })` is the list that
-// turns the record `from` (its data, and what kind each field is) into
-// `to`: per field by kind — a register's new value, a counter's delta, a
-// set's added and removed elements, and for a plugin's kind what its `diff`
-// says (a text's or a list's splices, a tree's moves) — a field gone is an
+// `diffViews(from, fromKinds, to, toKinds, { plugins, context })` is the
+// list that turns the record `from` (its data, and what kind each field is)
+// into `to`: per field by kind — a register's new value, a counter's delta,
+// a set's added and removed elements, and for a plugin's kind what its
+// `diff` says (a text's or a list's splices, a tree's moves; `context.from`
+// and `.to` hand it what the reading leaves out — the entries, or the
+// `embeds` a commit event carries — so a text's markers travel) — a field gone is an
 // `unset`, a field of another kind now an `unset` and the kind made again
 // whole, and a record that was not there a `write` of the registers with
 // the other kinds made again. A text's marks are not diffed; `compact()`
@@ -43,12 +47,12 @@ const asKeys = (elements) => new Map(elements.map((element) => [JSON.stringify(e
 const own = (object, key) => (Object.hasOwn(object, key) ? object[key] : undefined);
 
 // A field's content made again from nothing, by kind.
-const recreate = (field, kind, value, plugins) => {
+const recreate = (field, kind, value, plugins, context) => {
   // An inc of 0 makes a counter that reads 0: the field stays a counter.
   if (kind === 'counter') return [{ action: 'inc', field, value }];
   if (kind === 'set') return value.length === 0 ? [] : [{ action: 'add', field, elements: value }];
   const mod = own(plugins.byName, kind);
-  return mod === undefined ? [] : mod.recreate(field, kind, value);
+  return mod === undefined ? [] : mod.recreate(field, kind, value, context);
 };
 
 /**
@@ -62,7 +66,13 @@ const recreate = (field, kind, value, plugins) => {
  * `set` wins over it). `plugins` is the registry whose kinds the fields may
  * be of.
  */
-const diffViews = (from, fromKinds, to, toKinds, { purged = false, exact = true, plugins = EMPTY } = {}) => {
+const diffViews = (
+  from,
+  fromKinds,
+  to,
+  toKinds,
+  { purged = false, exact = true, plugins = EMPTY, context = {} } = {},
+) => {
   if (to === null) {
     if (purged) return [{ action: 'purge' }];
     return from === null ? [] : [{ action: 'delete' }];
@@ -74,7 +84,9 @@ const diffViews = (from, fromKinds, to, toKinds, { purged = false, exact = true,
   if (from === null) {
     patches.push({ action: 'write', data: registers });
     for (const field of Object.keys(toKinds)) {
-      if (toKinds[field] !== 'register') patches.push(...recreate(field, toKinds[field], to[field], plugins));
+      if (toKinds[field] !== 'register') {
+        patches.push(...recreate(field, toKinds[field], to[field], plugins, context));
+      }
     }
     return patches;
   }
@@ -90,7 +102,7 @@ const diffViews = (from, fromKinds, to, toKinds, { purged = false, exact = true,
       continue;
     }
     if (was !== undefined && now !== undefined && was !== now) {
-      patches.push({ action: 'unset', field }, ...recreate(field, now, value, plugins));
+      patches.push({ action: 'unset', field }, ...recreate(field, now, value, plugins, context));
       continue;
     }
     const kind = now ?? was;
@@ -108,7 +120,7 @@ const diffViews = (from, fromKinds, to, toKinds, { purged = false, exact = true,
       if (removed.length > 0) patches.push({ action: 'remove', field, elements: removed });
     } else {
       const mod = own(plugins.byName, kind);
-      if (mod !== undefined) patches.push(...mod.diff(field, kind, previous, value));
+      if (mod !== undefined) patches.push(...mod.diff(field, kind, previous, value, context));
     }
   }
   return patches;

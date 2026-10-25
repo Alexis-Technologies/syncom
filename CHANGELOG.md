@@ -14,6 +14,19 @@ There is no released version section until then; everything below lands in it.
 
 ### Added
 
+- **Embeds and blocks in a text.** A document is one text: what is not a
+  character — an image, a mention, the start of a paragraph or a heading —
+  is an embed slot (U+FFFC) whose value is a marker `{ type, parents, attrs,
+  isEmbed }` (Automerge's model). `insertEmbed()` and `splitBlock()` insert
+  a slot with its marker (a `splice` carrying `vals`), `updateBlock()` and
+  `setAt()` on a text replace it (an `assign`, last writer wins),
+  `joinBlock()` cuts a block marker, `block()` and `blocks()` read the
+  markers and the document by block, and `spans()` tells them apart: every
+  span now carries a `type` — `'text'`, `'embed'` (its marker and marks) or
+  `'block'`. `get()` reads a slot as the character; `updateText()`, `splice()`
+  and `push()` refuse a text that adds one. A diff hands a splice patch its
+  `vals` and a changed marker a `setAt` patch; `restore()`, `compact()` and
+  an undo lay the markers again; a `commit` event carries them as `embeds`.
 - **Paths: fields with stable segments.** A field name may be a path —
   `update(id, { 'profile/city': 'Kyiv' })`, `inc(id, 'stats/views')` — a
   field of its own under its prefix, merged on its own, so two nodes writing

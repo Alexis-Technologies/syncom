@@ -66,6 +66,42 @@ const runUndoTests = async (t, assert, createStorage) => {
     assert.strictEqual(undo.canUndo, false, 'stopped: nothing captured');
   });
 
+  await t.test('an undone joinBlock lays the marker again; an undone embed goes', async (t2) => {
+    const storage = await createStorage(t2, 'A');
+    const id = await storage.insert({ title: 'doc' });
+    await storage.updateText(id, 'body', 'hello world');
+    await storage.splitBlock(id, 'body', 0, { type: 'heading', attrs: { level: 2 } });
+    const undo = createUndo(storage, { mergeInterval: 0 });
+    await storage.insertEmbed(id, 'body', 6, { type: 'image', attrs: { src: 'a.png' } });
+    await tick();
+    await storage.joinBlock(id, 'body', 0);
+    assert.strictEqual((await storage.get(id)).body, 'hello\uFFFC world');
+    await undo.undo();
+    assert.strictEqual((await storage.get(id)).body, '\uFFFChello\uFFFC world');
+    assert.deepStrictEqual(await storage.block(id, 'body', 0), {
+      type: 'heading',
+      parents: [],
+      attrs: { level: 2 },
+      isEmbed: false,
+    });
+    await undo.undo();
+    assert.strictEqual((await storage.get(id)).body, '\uFFFChello world', 'the embed is gone');
+    await undo.redo();
+    assert.deepStrictEqual(await storage.block(id, 'body', 6), {
+      type: 'image',
+      parents: [],
+      attrs: { src: 'a.png' },
+      isEmbed: true,
+    });
+    // A marker changed and taken back: the old marker, by a setAt patch.
+    await tick();
+    await storage.updateBlock(id, 'body', 0, { type: 'paragraph' });
+    assert.strictEqual((await storage.block(id, 'body', 0)).type, 'paragraph');
+    await undo.undo();
+    assert.strictEqual((await storage.block(id, 'body', 0)).type, 'heading');
+    undo.stop();
+  });
+
   await t.test('steps merge within the interval, split at mark(); a new edit clears the redo stack', async (t2) => {
     const storage = await createStorage(t2, 'A');
     const undo = createUndo(storage, { mergeInterval: 60_000 });

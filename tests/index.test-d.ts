@@ -600,6 +600,16 @@ expectType<Promise<number>>(storage.applyPatches('id', [{ action: 'put', field: 
 expectType<Promise<number>>(storage.restore('id', { tag: 'v1' }, { actor: 'u2' }));
 expectAssignable<syncom.Patch>({ action: 'remove', field: 'tags', removals: [['x', { a: 1 }]] });
 expectAssignable<syncom.Patch>({ action: 'remove', field: 'tags', elements: ['x'], own: true });
+expectAssignable<syncom.Patch>({ action: 'setAt', field: 'body', index: 0, value: null });
+expectAssignable<syncom.Patch>({
+  action: 'splice',
+  field: 'body',
+  index: 0,
+  content: '\uFFFC',
+  vals: [[0, { type: 'p', parents: [], attrs: {}, isEmbed: false }]],
+});
+expectType<Promise<syncom.BlockMarker | null>>(record.block('body', 0));
+expectType<Promise<syncom.TextBlock[] | null>>(record.blocks('body'));
 expectAssignable<syncom.Patch>({ action: 'splice', field: 'body', index: 0, count: 2, content: 'hi' });
 expectAssignable<syncom.Patch>({ action: 'treeMove', field: 'outline', node: 'n', parent: null, after: 'm' });
 expectError(storage.applyPatches('id', [{ action: 'nope' }]));

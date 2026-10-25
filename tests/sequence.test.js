@@ -147,6 +147,79 @@ test('sequence engine', async (t) => {
     assert.deepStrictEqual(read(a), [0, { id: 1 }, 3]);
   });
 
+  await t.test("a splice carries the markers of its embed slots; an assign lands on a text's slot", () => {
+    const E = S.EMBED;
+    const p = { type: 'p', parents: [], attrs: {}, isEmbed: false };
+    const img = { type: 'img', parents: [], attrs: { src: 'a' }, isEmbed: true };
+    const a = node('A');
+    // A new run with two slots, each marker at its offset.
+    const first = {
+      ts: tick(),
+      origin: 'A',
+      payload: {
+        at: S.HEAD,
+        content: `${E}ab${E}c`,
+        vals: [
+          [0, p],
+          [3, img],
+        ],
+      },
+    };
+    apply(a, first);
+    const R = S.runKey(first.ts, 'A');
+    assert.strictEqual(read(a), `${E}ab${E}c`);
+    assert.deepStrictEqual(S.valueAt(index(a), 0), p);
+    assert.deepStrictEqual(S.valueAt(index(a), 3), img);
+    assert.strictEqual(S.valueAt(index(a), 1), 'a', 'a character reads as itself');
+    assert.strictEqual(S.heldAt(index(a), 0), E, 'the slot holds the character under its marker');
+    assert.deepStrictEqual(a.seq.vals, {
+      [S.elemKey(R, 0)]: [first.ts, 'A', p],
+      [S.elemKey(R, 3)]: [first.ts, 'A', img],
+    });
+    // The writer's run grown by a slot: the marker lands at the grown offset.
+    const more = { ts: tick(), origin: 'A', payload: { run: R, from: 5, content: `d${E}`, vals: [[1, p]] } };
+    apply(a, more);
+    assert.strictEqual(read(a), `${E}ab${E}cd${E}`);
+    assert.deepStrictEqual(S.valueAt(index(a), 6), p);
+    assert.strictEqual(a.seq.vals[S.elemKey(R, 6)][0], more.ts);
+    // A slot without a marker reads as the character; an assign gives it one, last writer wins.
+    const bare = { ts: tick(), origin: 'A', payload: { run: R, from: 7, content: E } };
+    apply(a, bare);
+    assert.strictEqual(S.valueAt(index(a), 7), E);
+    const slot = S.elemAt(index(a), 7);
+    const t1 = tick();
+    const t2 = tick();
+    const byA = S.applyAssign(a.seq, [t2, 'A'], { elem: slot, value: p });
+    const byB = S.applyAssign(byA.seq, [t1, 'B'], { elem: slot, value: img });
+    assert.strictEqual(byA.changed, true);
+    assert.strictEqual(byB.changed, false, 'the older assign loses');
+    const other = S.applyAssign(S.applyAssign(a.seq, [t1, 'B'], { elem: slot, value: img }).seq, [t2, 'A'], {
+      elem: slot,
+      value: p,
+    });
+    assert.deepStrictEqual(other.seq, byA.seq, 'the same whatever the order');
+    assert.deepStrictEqual(S.valueAt(S.buildIndex(other.seq), 7), p);
+    // Through JSON and a join the markers stay; a cut takes the slot and prunes nothing of the others.
+    const hydrated = S.normalizeSeq(JSON.parse(JSON.stringify(byA.seq)), null, 4096);
+    assert.deepStrictEqual(hydrated.vals, byA.seq.vals);
+    const joined = S.join(a.seq, byA.seq);
+    assert.deepStrictEqual(S.valueAt(S.buildIndex(joined), 7), p);
+    a.seq = byA.seq;
+    remove(a, 0, 1);
+    assert.strictEqual(read(a), `ab${E}cd${E}${E}`);
+    assert.deepStrictEqual(S.valueAt(index(a), 2), img);
+    // Malformed: vals without content, not a list, an offset past the content, a non-JSON marker.
+    for (const vals of [[[0, p]], 'x', [[9, p]], [[0, undefined]], [[-1, p]], [[0]], [0]]) {
+      const payload = vals === 'x' ? { at: S.HEAD, content: E, vals } : { at: S.HEAD, content: E, vals };
+      if (vals[0]?.[0] === 0 && vals[0]?.[1] === p && vals.length === 1) {
+        const { reason } = S.applySplice(a.seq, [tick(), 'C'], { cut: [[R, 1, 1]], content: '', vals });
+        assert.strictEqual(reason, 'malformed', 'vals ride on an insertion alone');
+        continue;
+      }
+      assert.strictEqual(S.applySplice(a.seq, [tick(), 'C'], payload).reason, 'malformed', JSON.stringify(vals));
+    }
+  });
+
   await t.test('a list moves and assigns: a position and a value register per element', () => {
     const a = node('A', 'l');
     const first = insert(a, 0, ['a', 'b', 'c']);
@@ -250,10 +323,14 @@ test('sequence engine', async (t) => {
     ]) {
       assert.strictEqual(S.applyMove(a.seq, [tick(), 'A'], bad).reason, 'malformed', JSON.stringify(bad));
     }
+    // An assign lands on a text too (an embed slot's marker); a move does not.
     const text = node('T');
     const t0 = insert(text, 0, 'ab');
+    const slot = S.elemKey(S.runKey(t0.ts, 'T'), 0);
+    assert.strictEqual(S.applyAssign(text.seq, [tick(), 'T'], { elem: slot, value: 'x' }).changed, true);
     assert.strictEqual(
-      S.applyAssign(text.seq, [tick(), 'T'], { elem: S.elemKey(S.runKey(t0.ts, 'T'), 0), value: 'x' }).reason,
+      S.applyMove(text.seq, [tick(), 'T'], { elem: slot, cut: [S.runKey(t0.ts, 'T'), 0, 1], at: '^', value: 'x' })
+        .reason,
       'malformed',
     );
     // prune drops registers below the base with their runs.

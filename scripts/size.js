@@ -191,13 +191,17 @@ const ENTRIES = [
   // 83.6 with field paths (src/paths.js, src/compose.js) and the prefix rules.
   // 85.3 with the children of a list's elements and a tree's nodes (the
   // members' seam, a compaction in rounds).
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 86 },
+  // 87.3 with embeds and blocks in a text (the markers, the typed spans and
+  // blocks, the diff context, the commit event's embeds).
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 88 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
   // 22.1 with the surrogate rule (the code-point diff, the refused indexes).
   // 22.6 with the field-path check every method takes (src/paths.js).
-  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 23 },
+  // 24.6 with embeds and blocks: the markers, the six methods, the typed
+  // spans and the diff that carries a slot's marker.
+  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 25 },
   // The tree kind alone, with the fractional indexes a place is made of and
   // the argument checks it shares with the core (5.1 measured).
   // 5.5 with the field-name check unset shares with it (src/args.js).

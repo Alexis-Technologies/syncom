@@ -1,6 +1,7 @@
 // The list and text kinds as a plugin: `open({ plugins: [text] })` adds
 // splice(), push(), updateText(), mark(), unmark(), unmarkById(), spans(),
-// cursor(), index(), setAt() and move() to the storage (TextMethods). The
+// cursor(), index(), setAt(), move(), insertEmbed(), splitBlock(),
+// joinBlock(), updateBlock(), block() and blocks() to the storage (TextMethods). The
 // op, block and payload types live in the root's index.d.ts and are
 // re-exported here for convenience.
 
@@ -14,6 +15,10 @@ import type {
   MarkPayload,
   MarkExpand,
   TextSpan,
+  TextMarks,
+  BlockMarker,
+  TextBlock,
+  TextEmbeds,
   CursorSide,
 } from '../../index.js';
 
@@ -27,6 +32,10 @@ export type {
   MarkPayload,
   MarkExpand,
   TextSpan,
+  TextMarks,
+  BlockMarker,
+  TextBlock,
+  TextEmbeds,
   CursorSide,
 };
 

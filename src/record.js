@@ -190,6 +190,36 @@ class Record extends Emitter {
     return this.#storage.spans(this.#id, key);
   }
 
+  /** Inserts an embed into a text field; the storage-level `insertEmbed` with this record's id. */
+  async insertEmbed(key, index, embed, options = {}) {
+    await this.#storage.insertEmbed(this.#id, key, index, embed, options);
+  }
+
+  /** Inserts a block marker into a text field; the storage-level `splitBlock` with this record's id. */
+  async splitBlock(key, index, block, options = {}) {
+    await this.#storage.splitBlock(this.#id, key, index, block, options);
+  }
+
+  /** Removes a block marker; the storage-level `joinBlock` with this record's id. */
+  async joinBlock(key, index, options = {}) {
+    await this.#storage.joinBlock(this.#id, key, index, options);
+  }
+
+  /** Replaces a block marker; the storage-level `updateBlock` with this record's id. */
+  async updateBlock(key, index, block, options = {}) {
+    await this.#storage.updateBlock(this.#id, key, index, block, options);
+  }
+
+  /** The marker at an index of a text field; the storage-level `block` with this record's id. */
+  async block(key, index) {
+    return this.#storage.block(this.#id, key, index);
+  }
+
+  /** A text field as its blocks; the storage-level `blocks` with this record's id. */
+  async blocks(key) {
+    return this.#storage.blocks(this.#id, key);
+  }
+
   /** A cursor into a list or text field; the storage-level `cursor` with this record's id. */
   /** The name of a list element; the storage-level `elementAt` with this record's id. */
   async elementAt(key, index) {

@@ -174,6 +174,64 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     assert.strictEqual(await b.get(first), null);
   });
 
+  await t.test(
+    'embeds and blocks merge: a slot once, its marker last-writer-wins, kept through compact, diff and restore',
+    async (t2) => {
+      const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage);
+      const a = mesh.get('A');
+      const b = mesh.get('B');
+      const E = '\uFFFC';
+      const id = await a.insert({ title: 'doc' });
+      await a.updateText(id, 'body', 'hello world');
+      await a.splitBlock(id, 'body', 0, { type: 'paragraph' });
+      await a.insertEmbed(id, 'body', 6, { type: 'image', attrs: { src: 'a.png' } });
+      await settle([a, b]);
+      assert.deepStrictEqual(await b.spans(id, 'body'), await a.spans(id, 'body'));
+      assert.deepStrictEqual(await b.block(id, 'body', 6), {
+        type: 'image',
+        parents: [],
+        attrs: { src: 'a.png' },
+        isEmbed: true,
+      });
+      const link = mesh.links.get('mem://B');
+      link.disconnect();
+      // Apart: both change the first marker, B later; A cuts the embed while B types beside it.
+      await a.updateBlock(id, 'body', 0, { type: 'heading', attrs: { level: 1 } });
+      await tick();
+      await b.updateBlock(id, 'body', 0, { type: 'heading', attrs: { level: 2 } });
+      await a.splice(id, 'body', 6, 1);
+      await b.splice(id, 'body', 7, 0, '!');
+      await link.reconnect();
+      await settle([a, b]);
+      await assertConverged([a, b]);
+      assert.strictEqual((await a.get(id)).body, `${E}hello! world`);
+      assert.deepStrictEqual(await a.block(id, 'body', 0), {
+        type: 'heading',
+        parents: [],
+        attrs: { level: 2 },
+        isEmbed: false,
+      });
+      assert.deepStrictEqual(await b.spans(id, 'body'), await a.spans(id, 'body'));
+      // A compaction on one node reads the same on the other; a restore lays the markers again everywhere.
+      const { versions } = await a.history(id);
+      // The version right after A's own marker change: level 1, the embed still there, no '!'.
+      const before = versions.filter((version) => version.type === 'assign').at(-1).eventId;
+      await a.compact(id);
+      await settle([a, b]);
+      assert.deepStrictEqual(await b.spans(id, 'body'), await a.spans(id, 'body'));
+      const back = await a.diff(id, undefined, before);
+      assert.ok(
+        back.some((patch) => patch.action === 'setAt' || patch.vals !== undefined),
+        JSON.stringify(back),
+      );
+      await a.restore(id, before);
+      await settle([a, b]);
+      await assertConverged([a, b]);
+      assert.deepStrictEqual(await b.spans(id, 'body'), await a.spans(id, 'body'));
+      assert.strictEqual((await b.block(id, 'body', 0)).attrs.level, 1);
+    },
+  );
+
   await t.test('lists and texts converge: concurrent inserts and cuts, each writer’s run whole', async (t2) => {
     const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage);
     const a = mesh.get('A');
@@ -275,7 +333,7 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(spansA[0].marks, { bold: true });
     assert.deepStrictEqual(
       spansA.find((s) => s.marks.em),
-      { text: 'world', marks: { em: true } },
+      { type: 'text', text: 'world', marks: { em: true } },
     );
     // A cursor taken here stays right under a peer's concurrent edits.
     await a.updateText(id, 'body', 'hello world');
@@ -442,8 +500,23 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
         } else if (roll < 0.4) await storage.add(id, 'tags', [`t${step % 4}`]);
         else if (roll < 0.48) await storage.remove(id, 'tags', [`t${step % 4}`]);
         else if (roll < 0.54) await storage.delete(id);
-        else if (roll < 0.72) await spliceAt(storage, id, 'body', letter(storage).repeat(1 + (step % 3)));
-        else if (roll < 0.8) await spliceAt(storage, id, 'items', [`${letter(storage)}${step}`]);
+        else if (roll < 0.72) {
+          // One keystroke in five is a block marker or an embed — inserted, changed or joined.
+          if (step % 5 !== 0) await spliceAt(storage, id, 'body', letter(storage).repeat(1 + (step % 3)));
+          else {
+            const body = (await storage.get(id))?.body;
+            const length = typeof body === 'string' ? body.length : 0;
+            const slots = [];
+            for (let i = 0; i < length; i++) if (body[i] === '\uFFFC') slots.push(i);
+            const at = Math.floor(random() * (length + 1));
+            if (slots.length > 0 && step % 2) {
+              const slot = slots[Math.floor(random() * slots.length)];
+              if (step % 4 === 1) await storage.joinBlock(id, 'body', slot);
+              else await storage.updateBlock(id, 'body', slot, { type: `b${step % 3}`, attrs: { step } });
+            } else if (step % 2) await storage.insertEmbed(id, 'body', at, { type: 'img', attrs: { step } });
+            else await storage.splitBlock(id, 'body', at, { type: 'p', parents: step % 3 ? ['ul'] : [] });
+          }
+        } else if (roll < 0.8) await spliceAt(storage, id, 'items', [`${letter(storage)}${step}`]);
         else if (roll < 0.88) {
           const items = (await storage.get(id))?.items ?? [];
           if (items.length === 0) await storage.push(id, 'items', [`${letter(storage)}${step}`]);
@@ -462,7 +535,9 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
       } catch (error) {
         // A record deleted or shortened elsewhere, a node moved under its
         // own subtree elsewhere: legitimate outcomes.
-        if (!/not found|out of range|takes a count|cannot go under/.test(error.message)) throw error;
+        if (!/not found|out of range|takes a count|cannot go under|holds no block marker/.test(error.message)) {
+          throw error;
+        }
       }
     }
     await settle(storages, { timeout: 10_000 });

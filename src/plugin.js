@@ -14,7 +14,7 @@
 //     core's, so a node without the module still admits, logs and relays the
 //     op), the patch actions it realizes, and the functions the core calls:
 //       takes(type, payload)                → the kinds the op may land on
-//       kindOfOp(op)                        → the op's kind, null if malformed
+//       kindOfOp(op)                        → the op's kind, from the op alone, null if malformed
 //       normalize(raw, base, limits)        → a peer's block, bounded, or null
 //       apply(entry, field, held, op, stamp, limits)
 //                                           → { block, changed, reason?, detail?, count?, max?, hint? }
@@ -23,11 +23,16 @@
 //       render(entry, field, block, hint)   → what data[field] reads as
 //       resolve(core, id, type, payload, current)
 //                                           → the op's value, inside the queue (null: nothing to write)
-//       diff(field, kind, from, to)         → the patches from one reading to another
-//       recreate(field, kind, value)        → the patches that make the field from nothing
+//       diff(field, kind, from, to, context)
+//                                           → the patches from one reading to another (`context.from`/`.to`:
+//                                             the entries, or what a commit event carries, when known)
+//       recreate(field, kind, value, context)
+//                                           → the patches that make the field from nothing
 //       realize(action, patch, method)      → [type, payload] for one of its patch actions
 //       migrate(kind, key, value)           → [[type, payload]…] that lay the field again
 //       compact(entry, field, kind)         → the patches a compaction lays after recreate
+//       values(entry, field)                → what the field holds beside its reading (a text's embed
+//                                             markers by index), for the commit event; optional
 //       methods                             → { name: (core, id, …args) }, the storage's methods
 //       hints                               → { kind: 'a text; use …' }, for FIELD_KIND
 //     A block is immutable once it is in an entry and carries `ts`, the
@@ -76,6 +81,12 @@ const HOME = Object.freeze({
   setAt: 'text',
   elementAt: 'text',
   elements: 'text',
+  insertEmbed: 'text',
+  splitBlock: 'text',
+  joinBlock: 'text',
+  updateBlock: 'text',
+  block: 'text',
+  blocks: 'text',
   treeMove: 'tree',
   treeRemove: 'tree',
   select: 'query',

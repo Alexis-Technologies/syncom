@@ -336,29 +336,30 @@ test('Storage replication model', async (t) => {
     const bold = await storage.mark(id, 'body', 0, 5, 'bold', true);
     assert.match(bold, /^\d+:/);
     assert.deepStrictEqual(await storage.spans(id, 'body'), [
-      { text: 'hello', marks: { bold: true } },
-      { text: ' world', marks: {} },
+      { type: 'text', text: 'hello', marks: { bold: true } },
+      { type: 'text', text: ' world', marks: {} },
     ]);
     await storage.splice(id, 'body', 5, 0, '!'); // at the end of the range: bold
     await storage.splice(id, 'body', 0, 0, '>'); // before it: not
     assert.deepStrictEqual(await storage.spans(id, 'body'), [
-      { text: '>', marks: {} },
-      { text: 'hello!', marks: { bold: true } },
-      { text: ' world', marks: {} },
+      { type: 'text', text: '>', marks: {} },
+      { type: 'text', text: 'hello!', marks: { bold: true } },
+      { type: 'text', text: ' world', marks: {} },
     ]);
     await storage.mark(id, 'body', 8, 13, 'link', 'https://x', { expand: 'none' });
     await storage.splice(id, 'body', 13, 0, '?');
     await storage.unmark(id, 'body', 0, 7, 'bold');
     assert.deepStrictEqual(await storage.spans(id, 'body'), [
-      { text: '>hello! ', marks: {} },
-      { text: 'world', marks: { link: 'https://x' } },
-      { text: '?', marks: {} },
+      { type: 'text', text: '>hello! ', marks: {} },
+      { type: 'text', text: 'world', marks: { link: 'https://x' } },
+      { type: 'text', text: '?', marks: {} },
     ]);
     const c1 = await storage.mark(id, 'body', 0, 3, 'comment', { by: 'ada' }, { many: true });
     const c2 = await storage.mark(id, 'body', 2, 5, 'comment', { by: 'bob' }, { many: true });
     assert.deepStrictEqual((await storage.spans(id, 'body')).slice(0, 3), [
-      { text: '>h', marks: { comment: [{ id: c1, value: { by: 'ada' } }] } },
+      { type: 'text', text: '>h', marks: { comment: [{ id: c1, value: { by: 'ada' } }] } },
       {
+        type: 'text',
         text: 'e',
         marks: {
           comment: [
@@ -367,12 +368,12 @@ test('Storage replication model', async (t) => {
           ],
         },
       },
-      { text: 'll', marks: { comment: [{ id: c2, value: { by: 'bob' } }] } },
+      { type: 'text', text: 'll', marks: { comment: [{ id: c2, value: { by: 'bob' } }] } },
     ]);
     await storage.unmarkById(id, 'body', c1);
     assert.deepStrictEqual((await storage.spans(id, 'body')).slice(0, 2), [
-      { text: '>h', marks: {} },
-      { text: 'ell', marks: { comment: [{ id: c2, value: { by: 'bob' } }] } },
+      { type: 'text', text: '>h', marks: {} },
+      { type: 'text', text: 'ell', marks: { comment: [{ id: c2, value: { by: 'bob' } }] } },
     ]);
     assert.strictEqual((await storage.get(id)).body, '>hello! world?', 'the field reads as the plain string');
     // Errors and arguments; spans of what is not a text.
@@ -397,7 +398,7 @@ test('Storage replication model', async (t) => {
     // Through a live Record.
     const record = await storage.record(id);
     const em = await record.mark('body', 0, 1, 'em', true);
-    assert.deepStrictEqual((await record.spans('body'))[0], { text: '>', marks: { em: true } });
+    assert.deepStrictEqual((await record.spans('body'))[0], { type: 'text', text: '>', marks: { em: true } });
     await record.unmarkById('body', em);
     assert.deepStrictEqual((await record.spans('body'))[0].marks, {});
     assert.strictEqual(await storage.validate(), true);
@@ -412,20 +413,176 @@ test('Storage replication model', async (t) => {
     const c2 = await storage.mark(id, 'body', 3, 8, 'note', 'second', { many: true });
     const stack = (...ids) => ids.map(([mid, value]) => ({ id: mid, value }));
     assert.deepStrictEqual(await storage.spans(id, 'body'), [
-      { text: 'hel', marks: { note: stack([c1, 'first']) } },
-      { text: 'lo', marks: { note: stack([c1, 'first'], [c2, 'second']) } },
-      { text: ' wo', marks: { note: stack([c2, 'second']) } },
-      { text: 'rld', marks: {} },
+      { type: 'text', text: 'hel', marks: { note: stack([c1, 'first']) } },
+      { type: 'text', text: 'lo', marks: { note: stack([c1, 'first'], [c2, 'second']) } },
+      { type: 'text', text: ' wo', marks: { note: stack([c2, 'second']) } },
+      { type: 'text', text: 'rld', marks: {} },
     ]);
     // A plain mark newer than the stack takes its place; the plain value is never pushed into.
     await storage.mark(id, 'body', 0, 3, 'note', ['again']);
-    assert.deepStrictEqual((await storage.spans(id, 'body'))[0], { text: 'hel', marks: { note: ['again'] } });
+    assert.deepStrictEqual((await storage.spans(id, 'body'))[0], {
+      type: 'text',
+      text: 'hel',
+      marks: { note: ['again'] },
+    });
     await storage.unmarkById(id, 'body', c1);
     assert.deepStrictEqual((await storage.spans(id, 'body')).slice(0, 2), [
-      { text: 'hel', marks: { note: ['again'] } },
-      { text: 'lo wo', marks: { note: stack([c2, 'second']) } },
+      { type: 'text', text: 'hel', marks: { note: ['again'] } },
+      { type: 'text', text: 'lo wo', marks: { note: stack([c2, 'second']) } },
     ]);
   });
+
+  await t.test(
+    'embeds and blocks: a slot with its marker, told apart by spans, by block, set and joined; a slot enters with its marker alone',
+    async (t2) => {
+      const { storage } = await openTemp(t2);
+      const E = '\uFFFC';
+      const events = [];
+      storage.on('commit', (event) => events.push(event));
+      const id = await storage.insert({ title: 'doc' });
+      await storage.updateText(id, 'body', 'hello world');
+      await storage.splitBlock(id, 'body', 0, { type: 'heading', attrs: { level: 1 } });
+      await storage.splitBlock(id, 'body', 6, { type: 'paragraph', parents: ['blockquote'] });
+      await storage.insertEmbed(id, 'body', 3, { type: 'image', attrs: { src: 'a.png' } });
+      await storage.mark(id, 'body', 1, 5, 'bold', true);
+      const heading = { type: 'heading', parents: [], attrs: { level: 1 }, isEmbed: false };
+      const paragraph = { type: 'paragraph', parents: ['blockquote'], attrs: {}, isEmbed: false };
+      const image = { type: 'image', parents: [], attrs: { src: 'a.png' }, isEmbed: true };
+      assert.strictEqual((await storage.get(id)).body, `${E}he${E}llo${E} world`, 'the slots read as the character');
+      assert.deepStrictEqual(await storage.spans(id, 'body'), [
+        { type: 'block', value: heading },
+        { type: 'text', text: 'he', marks: { bold: true } },
+        { type: 'embed', value: image, marks: { bold: true } },
+        { type: 'text', text: 'l', marks: { bold: true } },
+        { type: 'text', text: 'lo', marks: {} },
+        { type: 'block', value: paragraph },
+        { type: 'text', text: ' world', marks: {} },
+      ]);
+      assert.deepStrictEqual(await storage.blocks(id, 'body'), [
+        {
+          index: 0,
+          type: 'heading',
+          parents: [],
+          attrs: { level: 1 },
+          spans: [
+            { type: 'text', text: 'he', marks: { bold: true } },
+            { type: 'embed', value: image, marks: { bold: true } },
+            { type: 'text', text: 'l', marks: { bold: true } },
+            { type: 'text', text: 'lo', marks: {} },
+          ],
+        },
+        {
+          index: 7,
+          type: 'paragraph',
+          parents: ['blockquote'],
+          attrs: {},
+          spans: [{ type: 'text', text: ' world', marks: {} }],
+        },
+      ]);
+      assert.deepStrictEqual(await storage.block(id, 'body', 0), heading);
+      assert.deepStrictEqual(await storage.block(id, 'body', 3), image);
+      assert.strictEqual(await storage.block(id, 'body', 1), null, 'a character is no marker');
+      assert.strictEqual(await storage.block(id, 'body', 99), null);
+      assert.strictEqual(await storage.block(id, 'title', 0), null);
+      assert.strictEqual(await storage.blocks(id, 'title'), null);
+      // The ops: a splice carrying its marker, an assign for a change.
+      const types = events.map((event) => event.op.type);
+      assert.deepStrictEqual(types.slice(2, 5), ['splice', 'splice', 'splice']);
+      assert.deepStrictEqual(events[2].op.value.vals, [[0, heading]]);
+      assert.deepStrictEqual(events[4].embeds, {
+        before: {
+          body: [
+            [0, heading],
+            [6, paragraph],
+          ],
+        },
+        after: {
+          body: [
+            [0, heading],
+            [3, image],
+            [7, paragraph],
+          ],
+        },
+      });
+      assert.strictEqual(events[1].embeds, undefined, 'no slot, no embeds on the event');
+      // A marker changed: last writer wins; through setAt on a text too; null is a slot without one.
+      await storage.updateBlock(id, 'body', 7, { type: 'paragraph' });
+      assert.deepStrictEqual(await storage.block(id, 'body', 7), { ...paragraph, parents: [] });
+      assert.strictEqual(events.at(-1).op.type, 'assign');
+      await storage.setAt(id, 'body', 3, { type: 'image', attrs: { src: 'b.png' }, isEmbed: true });
+      assert.deepStrictEqual((await storage.block(id, 'body', 3)).attrs, { src: 'b.png' });
+      await storage.setAt(id, 'body', 3, null);
+      assert.strictEqual(await storage.block(id, 'body', 3), null);
+      assert.deepStrictEqual((await storage.spans(id, 'body'))[2], {
+        type: 'embed',
+        value: null,
+        marks: { bold: true },
+      });
+      // Joined: the block's text joins the one before; a plain character is no marker to join or set.
+      await storage.joinBlock(id, 'body', 7);
+      assert.strictEqual((await storage.get(id)).body, `${E}he${E}llo world`);
+      await assert.rejects(() => storage.joinBlock(id, 'body', 1), { code: 'NOT_FOUND', id, field: 'body', index: 1 });
+      await assert.rejects(() => storage.updateBlock(id, 'body', 1, { type: 'p' }), { code: 'NOT_FOUND' });
+      await assert.rejects(() => storage.setAt(id, 'body', 1, { type: 'p' }), { code: 'NOT_FOUND' });
+      await assert.rejects(() => storage.joinBlock(id, 'body', 99), { code: 'OUT_OF_RANGE' });
+      await assert.rejects(() => storage.splitBlock(id, 'body', 99, { type: 'p' }), { code: 'OUT_OF_RANGE' });
+      await assert.rejects(() => storage.insertEmbed(id, 'title', 0, { type: 'p' }), { code: 'FIELD_KIND' });
+      // A slot enters with its marker alone: not through splice, push or updateText — which keeps the ones it keeps.
+      await assert.rejects(() => storage.splice(id, 'body', 0, 0, E), /insertEmbed\(\) or splitBlock\(\)/);
+      await assert.rejects(() => storage.push(id, 'body', `x${E}`), TypeError);
+      await assert.rejects(() => storage.updateText(id, 'body', `${E}${E}hello`), TypeError);
+      const body = (await storage.get(id)).body;
+      await storage.updateText(id, 'body', body.replace('world', 'there'));
+      assert.strictEqual((await storage.get(id)).body, `${E}he${E}llo there`);
+      assert.deepStrictEqual(await storage.block(id, 'body', 0), heading);
+      await storage.splice(id, 'body', 3, 1);
+      assert.strictEqual((await storage.get(id)).body, `${E}hello there`, 'a cut takes a slot like a character');
+      // Arguments.
+      for (const bad of [
+        null,
+        'p',
+        { type: '' },
+        { type: 'p', parents: [1] },
+        { type: 'p', attrs: [] },
+        { type: 'p', isEmbed: 1 },
+      ]) {
+        await assert.rejects(() => storage.splitBlock(id, 'body', 0, bad), TypeError, JSON.stringify(bad));
+      }
+      await assert.rejects(() => storage.joinBlock(id, 'body', -1), TypeError);
+      await assert.rejects(() => storage.updateBlock(id, 7, 0, { type: 'p' }), TypeError);
+      await assert.rejects(() => storage.block(id, 'body', 1.5), TypeError);
+      // Compacted and restored, the markers stay with the slots; a hand-made slot without a marker reads as an embed of none.
+      await storage.splitBlock(id, 'body', 6, { type: 'paragraph' });
+      const spans = await storage.spans(id, 'body');
+      const { versions } = await storage.history(id);
+      assert.ok((await storage.compact(id)) >= 2);
+      assert.deepStrictEqual(await storage.spans(id, 'body'), spans);
+      const at = versions[1].eventId;
+      const back = await storage.diff(id, undefined, at);
+      assert.ok(
+        back.some((patch) => patch.action === 'splice' && patch.count === 1),
+        JSON.stringify(back),
+      );
+      await storage.restore(id, at);
+      assert.strictEqual((await storage.get(id)).body, `${E}hello there`);
+      // A stamp above the clock, which ran ahead of the wall under the ops above.
+      const ts = Date.now() + 5000;
+      await storage.applyRemote([
+        remoteOp('peer', 1, 'splice', id, { key: 'body', value: { at: '^', content: E }, ts }),
+      ]);
+      assert.ok((await storage.spans(id, 'body')).some((span) => span.type === 'embed' && span.value === null));
+      // Through a live Record.
+      const record = await storage.record(id);
+      await record.splitBlock('body', 0, { type: 'title' });
+      assert.deepStrictEqual((await record.block('body', 0)).type, 'title');
+      assert.strictEqual((await record.blocks('body')).length, 2, 'the bare slot is an embed inside the heading block');
+      await record.updateBlock('body', 0, { type: 'h1' });
+      await record.insertEmbed('body', 1, { type: 'img' });
+      await record.joinBlock('body', 0);
+      assert.deepStrictEqual((await record.block('body', 0)).type, 'img');
+      assert.strictEqual(await storage.validate(), true);
+    },
+  );
 
   await t.test('a cursor names a place that survives the edits around it', async (t2) => {
     const { storage } = await openTemp(t2);
@@ -626,8 +783,10 @@ test('Storage replication model', async (t) => {
     await assert.rejects(() => storage.move(id, 'items', 0, 3), { code: 'OUT_OF_RANGE', index: 3, length: 3 });
     await assert.rejects(() => storage.move(id, 'items', 5, 0), { code: 'OUT_OF_RANGE', index: 5, length: 3 });
     await storage.splice(id, 'body', 0, 0, 'text');
+    // On a text, setAt lands on an embed slot alone: a character is NOT_FOUND, a move is of a list.
+    await assert.rejects(() => storage.setAt(id, 'body', 0, 'x'), { code: 'NOT_FOUND', index: 0 });
     await assert.rejects(
-      () => storage.setAt(id, 'body', 0, 'x'),
+      () => storage.move(id, 'body', 0, 1),
       /text; use splice\(\), push\(\), updateText\(\) or mark\(\)/,
     );
     await storage.move(id, 'name', 0, 0); // from === to is nothing, even on a register

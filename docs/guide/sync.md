@@ -80,8 +80,8 @@ carries its argument in `value`: the amount of an `inc`, the elements of an
 `add`, each element with the add stamps its node had seen for a `remove`,
 and for the list, text and tree ops the payload
 [What travels](./lists#what-travels) describes —
-`splice` `{ cut, at | run + from, content }`,
-`assign` `{ elem, value }`,
+`splice` `{ cut, at | run + from, content, vals? }`,
+`assign` `{ elem, value, k? }`,
 `move` `{ elem, cut, at, value }`,
 `mark` `{ start, end, key, value, many? }` or `{ off }`,
 `tree` `{ node, parent, fi }`.

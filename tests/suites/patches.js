@@ -468,9 +468,9 @@ const runPatchTests = async (t, assert, createStorage) => {
       // typed at the end of the bold run (after) is bold.
       await a.splice(id, 'body', 3, 0, 'Z');
       assert.deepStrictEqual((await a.spans(id, 'body')).slice(0, 3), [
-        { text: '> ', marks: {} },
-        { text: 'hZ', marks: { bold: true } },
-        { text: 'e', marks: {} },
+        { type: 'text', text: '> ', marks: {} },
+        { type: 'text', text: 'hZ', marks: { bold: true } },
+        { type: 'text', text: 'e', marks: {} },
       ]);
       // A text longer than one run: two pushes of 600 000, compacted into two runs.
       const big = await a.insert({ title: 'big' });

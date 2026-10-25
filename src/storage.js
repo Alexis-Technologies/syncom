@@ -1452,6 +1452,30 @@ class Storage extends Emitter {
     return this.#api('elements')(this.#core, id, key);
   }
 
+  async insertEmbed(id, key, index, embed, options) {
+    await this.#api('insertEmbed')(this.#core, id, key, index, embed, options);
+  }
+
+  async splitBlock(id, key, index, block, options) {
+    await this.#api('splitBlock')(this.#core, id, key, index, block, options);
+  }
+
+  async joinBlock(id, key, index, options) {
+    await this.#api('joinBlock')(this.#core, id, key, index, options);
+  }
+
+  async updateBlock(id, key, index, block, options) {
+    await this.#api('updateBlock')(this.#core, id, key, index, block, options);
+  }
+
+  async block(id, key, index) {
+    return this.#api('block')(this.#core, id, key, index);
+  }
+
+  async blocks(id, key) {
+    return this.#api('blocks')(this.#core, id, key);
+  }
+
   async index(id, key, cursor) {
     return this.#api('index')(this.#core, id, key, cursor);
   }

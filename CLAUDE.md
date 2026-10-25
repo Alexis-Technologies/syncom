@@ -332,7 +332,7 @@ docs/                     VitePress site
   stamps, which is what makes it commute; do not add a path that decides a
   clash another way. The wire: `splice` is code `/` with `{ cut, at |
   run/from, content }` (`content` naming the kind even when empty), `assign`
-  `=` `{ elem, value }`, `move` `^` `{ elem, cut, at, value }`, `mark` `*`
+  `=` `{ elem, value, k? }` (`k: 't'` on a text's embed slot), `move` `^` `{ elem, cut, at, value }`, `mark` `*`
   `{ start, end, key, value, many? } | { off }`, `tree` `~` `{ node, parent,
   fi }`. An index, a sibling or a range is resolved in `prepareOp` INSIDE the
   queue (`resolveSplice`/`resolveMove`/`resolveMark`/`resolveTree` in
@@ -352,6 +352,26 @@ docs/                     VitePress site
   `MAX_RUN`, then a text's marks as `mark` patches (`marksIn` in
   src/text/sequence.js): a reset plus one op per field, one move per node —
   convergent through the reset rule.
+- **An embed is a character with a value.** A text's embed slot is U+FFFC in
+  the content (`EMBED` in `src/args.js`) and its marker `{ type, parents,
+  attrs, isEmbed }` an entry of the block's `vals` (as a list element's
+  value): a `splice` payload carries `vals: [[offset, marker]]` for the
+  slots its content holds and `applySplice` lands them with the slots; an
+  `assign` lands on a text's slot too, carrying `k: 't'` (`kindOfOp` reads
+  the op alone — a kind read from the held block would not commute — so a
+  text's assign ranks as a text and an unmarked one as a list). `spliceArgs`
+  refuses U+FFFC in plain content unless `{ embeds: true }` — only
+  `insertEmbed`/`splitBlock` and a patch with `vals` pass it — and
+  `updateText` refuses a hunk that inserts one. The engine knows no marker:
+  `S.valueAt` hands back what the slot holds, `markerOf` in
+  src/text/text.js normalizes it (another shape reads as none), `spans()`
+  types every span (`text`/`embed`/`block`). A diff needs what the reading
+  leaves out: `diffViews(..., { context: { from, to } })` hands the plugin
+  the entries (versions, compact) or the `embeds` a `commit` event carries
+  (undo; built by the plugin's `values(entry, field)` in `announce`) — a
+  splice patch gets `vals`, a changed marker a `setAt` patch (b-side index,
+  after the splices). Never diff a text without the context where a slot may
+  be: the inverse would lay a bare slot.
 - **A payload the engine does not admit is never silent.** `applyOp` reports
   `reason: 'malformed'` in `rejected` (`malformed()` in `src/ops.js`): on the
   local path `refuse()` in `src/commit.js` throws a `TypeError` — the

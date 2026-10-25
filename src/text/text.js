@@ -7,8 +7,21 @@
 // a local call's indices into anchors inside the queue, to diff two readings
 // into patches and realize them — and the storage methods the plugin adds
 // (splice, push, updateText, mark, unmark, unmarkById, spans, cursor, index,
-// setAt, move). Registered per instance with `open({ plugins: [text] })`;
+// setAt, move, insertEmbed, splitBlock, joinBlock, updateBlock, block,
+// blocks). Registered per instance with `open({ plugins: [text] })`;
 // src/plugin.js names the contract.
+//
+// A text's embeds and blocks (Automerge's model): a slot holding U+FFFC,
+// the object replacement character, whose value — a MARKER `{ type,
+// parents, attrs, isEmbed }` — is a register of the block (`vals`, as a
+// list element's). `isEmbed: false` is a block marker: a paragraph or a
+// heading boundary, the text after it up to the next marker its content,
+// `parents` the nesting (a list item's `['ordered-list']`). `isEmbed: true`
+// is an inline object — an image, a mention — a character wide. The field
+// still reads as the plain string, slots and all; `spans()` tells them
+// apart, `blocks()` reads the document by block. An editor's whole document
+// is one text, one Fugue tree: cursors, marks and presence count the slots
+// like any character.
 //
 // A block is its own index (the rope of ./sequence.js): a reading, a
 // position or a place to insert is answered from it in O(log n), and an op
@@ -17,8 +30,8 @@
 const S = require('./sequence.js');
 const { MAX_RUN } = require('./rle.js');
 const { diff: myers } = require('./myers.js');
-const { spliceArgs, markArgs, jsonValue } = require('../args.js');
-const { isRecordId, invalidId } = require('../shape.js');
+const { spliceArgs, markArgs, jsonValue, isJsonValue, EMBED } = require('../args.js');
+const { isRecordId, invalidId, isPlainObject, asJson, deepEqual } = require('../shape.js');
 const { floorOf } = require('../vector.js');
 const { SyncomError } = require('../errors.js');
 
@@ -26,7 +39,7 @@ const own = (object, key) => (Object.hasOwn(object, key) ? object[key] : undefin
 
 const KINDS = Object.freeze({ list: 3, text: 4 });
 const CODES = Object.freeze({ l: 'list', t: 'text' });
-const TAKES = Object.freeze({ splice: ['list', 'text'], assign: ['list'], move: ['list'], mark: ['text'] });
+const TAKES = Object.freeze({ splice: ['list', 'text'], assign: ['list', 'text'], move: ['list'], mark: ['text'] });
 const HINTS = Object.freeze({
   list: 'a list; use splice(), push(), setAt() or move() (an array, not a string)',
   text: 'a text; use splice(), push(), updateText() or mark() (a string, not an array)',
@@ -54,7 +67,11 @@ const kindOfOp = (op) => {
     const { content } = op.value;
     return typeof content === 'string' ? 'text' : Array.isArray(content) ? 'list' : null;
   }
-  return op.type === 'mark' ? 'text' : 'list';
+  if (op.type === 'mark') return 'text';
+  // An assign names its kind: `k: 't'` for a text's embed slot, a list's
+  // element otherwise — read from the op alone, so the precedence commutes.
+  if (op.type === 'assign') return op.value.k === 't' ? 'text' : 'list';
+  return 'list';
 };
 
 const normalize = (raw, base, limits) => S.normalizeSeq(raw, base, limits.pendingMax);
@@ -142,9 +159,9 @@ const wholeCharacters = (id, key, idx, ...indexes) => {
 };
 
 const resolveSplice = (core, id, payload, current) => {
-  const { key, index, count, content } = payload;
+  const { key, index, count, content, vals, marker } = payload;
   const held = current ? blockOf(current, key) : undefined;
-  const marker = content ?? (held?.k === 'l' ? [] : '');
+  const fill = content ?? (held?.k === 'l' ? [] : '');
   const idx = held === undefined ? null : S.indexOf(current, key);
   const length = idx === null ? 0 : S.lengthOf(idx);
   const at = index === null ? length : index;
@@ -154,12 +171,22 @@ const resolveSplice = (core, id, payload, current) => {
     throw new SyncomError('OUT_OF_RANGE', message, { id, field: key, index: at, count, length });
   }
   wholeCharacters(id, key, idx, at, at + count);
-  const value = { content: marker };
+  // joinBlock(): the one slot it cuts holds a block marker, or there is none to join.
+  if (marker === true && !(held?.k === 't' && S.heldAt(idx, at) === EMBED)) throw noMarker(id, key, at);
+  const value = { content: fill };
   if (count > 0) value.cut = S.rangesOf(idx, at, count);
-  if (marker.length > 0) {
-    Object.assign(value, idx === null ? { at: S.HEAD } : S.placeInsert(idx, at, core.nodeId, marker.length));
+  if (fill.length > 0) {
+    Object.assign(value, idx === null ? { at: S.HEAD } : S.placeInsert(idx, at, core.nodeId, fill.length));
   }
+  // The markers of the embed slots the content holds, each at its offset.
+  if (vals !== undefined && vals.length > 0) value.vals = vals;
   return value;
+};
+
+// A text's slot that is no block marker and no embed: nothing to set or join there.
+const noMarker = (id, field, index) => {
+  const message = `Index ${index} of text field ${field} of record ${id} holds no block marker or embed`;
+  return new SyncomError('NOT_FOUND', message, { id, field, index });
 };
 
 // A list's element, by its index: the name it keeps across moves. A field
@@ -178,7 +205,12 @@ const elementAt = (core, id, key, index, current) => {
 
 const resolveAssign = (core, id, payload, current) => {
   const { key, index, value } = payload;
-  return { elem: elementAt(core, id, key, index, current).elem, value };
+  const held = current ? blockOf(current, key) : undefined;
+  const { idx, elem } = elementAt(core, id, key, index, current);
+  if (held?.k !== 't') return { elem, value };
+  // A text: the slot is an embed slot, and what it takes is a marker (or none); the op names the kind.
+  if (S.heldAt(idx, index) !== EMBED) throw noMarker(id, key, index);
+  return { elem, value: value === null ? null : markerArgs('setAt', value), k: 't' };
 };
 
 // A move names two indices; what travels is the element, the slot it showed
@@ -231,14 +263,113 @@ const resolve = (core, id, type, payload, current) => {
 
 const inRuns = (patches) =>
   patches.flatMap((patch) => {
-    const { action, count, content } = patch;
+    const { action, count, content, vals } = patch;
     if (action !== 'splice' || count !== 0 || content === undefined || content.length <= MAX_RUN) return [patch];
     const runs = [];
     for (let at = 0; at < content.length; at += MAX_RUN) {
-      runs.push({ ...patch, index: patch.index + at, content: content.slice(at, at + MAX_RUN) });
+      const run = { ...patch, index: patch.index + at, content: content.slice(at, at + MAX_RUN) };
+      if (vals !== undefined) {
+        const part = vals.filter(([offset]) => offset >= at && offset < at + MAX_RUN);
+        if (part.length > 0) run.vals = part.map(([offset, marker]) => [offset - at, marker]);
+        else delete run.vals;
+      }
+      runs.push(run);
     }
     return runs;
   });
+
+// ---------------------------------------------------------------------------
+// Markers: what a text's embed slot holds, as the API spells it.
+
+/** The marker a value is, if any — normalized: parents the strings, attrs the object, `isEmbed` the flag. */
+const markerOf = (value) => {
+  if (!isPlainObject(value) || typeof value.type !== 'string') return null;
+  const { type, parents, attrs, isEmbed } = value;
+  return {
+    type,
+    parents: Array.isArray(parents) ? parents.filter((parent) => typeof parent === 'string') : [],
+    attrs: isPlainObject(attrs) ? asJson(attrs) : {},
+    isEmbed: isEmbed === true,
+  };
+};
+
+// A marker as a call gives it: a type, parents (block types, outermost
+// first), attrs (a JSON object); `embed` forces the flag, else the value's.
+const markerArgs = (method, given, embed) => {
+  if (!isPlainObject(given) || typeof given.type !== 'string' || given.type.length === 0) {
+    throw new TypeError(`${method}() takes a block marker: { type, parents?, attrs?, isEmbed? } with a type`);
+  }
+  const { type, parents = [], attrs = {}, isEmbed = false } = given;
+  if (!Array.isArray(parents) || parents.some((parent) => typeof parent !== 'string')) {
+    throw new TypeError(`${method}() takes parents as a list of block types`);
+  }
+  if (!isPlainObject(attrs) || !isJsonValue(attrs)) throw new TypeError(`${method}() takes attrs as a JSON object`);
+  if (typeof isEmbed !== 'boolean') throw new TypeError(`${method}() takes isEmbed as a boolean`);
+  return { type, parents: [...parents], attrs, isEmbed: embed ?? isEmbed };
+};
+
+// The markers riding on a splice patch: `[[offset, marker | null]]`, each
+// offset an embed slot of the content.
+const valsArgs = (method, vals, content) => {
+  if (!Array.isArray(vals)) throw new TypeError(`${method}() takes vals as [[offset, marker]]`);
+  for (const pair of vals) {
+    const [offset, marker] = Array.isArray(pair) && pair.length === 2 ? pair : [];
+    if (!Number.isInteger(offset) || offset < 0 || offset >= content.length || content[offset] !== EMBED) {
+      throw new TypeError(`${method}() takes vals at the embed slots (U+FFFC) of the content`);
+    }
+    if (marker !== null && !isJsonValue(marker)) throw new TypeError(`${method}() takes a JSON value per embed`);
+  }
+  return vals;
+};
+
+// The marker at visible index `i` of a text's block — null for a slot that
+// is no embed slot, or holds none the API can read.
+const markerAt = (idx, i) => (S.heldAt(idx, i) === EMBED ? markerOf(S.valueAt(idx, i)) : null);
+
+// The marker at `index` of one side of a diff: from the entry when the side
+// has one, from the `embeds` lists a commit event carries otherwise.
+const markerIn = (side, field, index) => {
+  if (side == null) return null;
+  if (side.entry != null) {
+    const held = blockOf(side.entry, field);
+    return held === undefined || held.k !== 't' ? null : markerAt(S.indexOf(side.entry, field), index);
+  }
+  const list = side.embeds?.[field];
+  if (Array.isArray(list)) for (const [at, marker] of list) if (at === index) return marker;
+  return null;
+};
+
+// Myers' hunks as splice patches, the markers of the embed slots they
+// insert riding on them (`vals`), and after them a `setAt` per slot both
+// sides keep whose marker changed — the hunks are in the before string's
+// coordinates, last first; the assigns in the after's.
+const embedPatches = (field, hunks, a, b, context) => {
+  const patches = hunks.map(([index, count, content]) => ({ action: 'splice', field, index, count, content }));
+  if (!a.includes(EMBED) && !b.includes(EMBED)) return patches;
+  const { from, to } = context ?? {};
+  const assigns = [];
+  let ai = 0;
+  let bi = 0;
+  const kept = (upTo) => {
+    for (; ai < upTo; ai++, bi++) {
+      if (a[ai] !== EMBED) continue;
+      const now = markerIn(to, field, bi);
+      if (!deepEqual(markerIn(from, field, ai), now)) assigns.push({ action: 'setAt', field, index: bi, value: now });
+    }
+  };
+  for (const patch of patches.slice().sort((x, y) => x.index - y.index)) {
+    kept(patch.index);
+    const vals = [];
+    for (let offset = 0; offset < patch.content.length; offset++) {
+      if (patch.content[offset] === EMBED) vals.push([offset, markerIn(to, field, bi + offset)]);
+    }
+    if (vals.length > 0) patch.vals = vals;
+    ai += patch.count;
+    bi += patch.content.length;
+  }
+  kept(a.length);
+  return [...patches, ...assigns];
+};
 
 // A list's elements as one character each, so Myers runs over them as over
 // a text; past the private-use plane it is one replacing splice.
@@ -274,23 +405,33 @@ const spliceList = (field, from, to) => {
   }));
 };
 
-const spliceText = (field, from, to) =>
-  myers(from, to).map(([index, count, content]) => ({ action: 'splice', field, index, count, content }));
+const spliceText = (field, from, to, context) => embedPatches(field, myers(from, to), from, to, context);
 
-const diff = (field, kind, from, to) =>
-  inRuns(kind === 'text' ? spliceText(field, from ?? '', to ?? '') : spliceList(field, from ?? [], to ?? []));
+const diff = (field, kind, from, to, context) =>
+  inRuns(kind === 'text' ? spliceText(field, from ?? '', to ?? '', context) : spliceList(field, from ?? [], to ?? []));
 
-const recreate = (field, kind, value) =>
-  value.length === 0 ? [] : inRuns([{ action: 'splice', field, index: 0, count: 0, content: value }]);
+const recreate = (field, kind, value, context) => {
+  if (value.length === 0) return [];
+  const whole = [[0, 0, value]];
+  if (kind === 'text') return inRuns(embedPatches(field, whole, '', value, context));
+  return inRuns([{ action: 'splice', field, index: 0, count: 0, content: value }]);
+};
 
 const realize = (action, patch, method) => {
   const { field } = patch;
   if (action === 'splice') {
-    const { index, count = 0, content } = patch;
-    const payload = spliceArgs(method, field, index, count, content);
+    const { index, count = 0, content, vals } = patch;
+    const payload = spliceArgs(method, field, index, count, content, { embeds: vals !== undefined });
+    if (vals !== undefined) payload.vals = valsArgs(method, vals, content);
     // A pure cut carries no content: the field's kind says what it is.
     if (payload.content !== undefined && payload.content.length === 0) delete payload.content;
     return ['splice', payload];
+  }
+  if (action === 'setAt') {
+    const { index, value } = patch;
+    if (typeof field !== 'string') throw new TypeError(`${method}() takes a field name`);
+    if (!Number.isInteger(index) || index < 0) throw new TypeError(`${method}() takes a non-negative integer index`);
+    return ['assign', { key: field, index, value: jsonValue(method, value) }];
   }
   const { start, end, name, value = null, expand = 'after' } = patch;
   markArgs(method, field, start, end, name, expand);
@@ -322,6 +463,19 @@ const compact = (entry, field, kind) => {
     patches.push(patch);
   }
   return patches;
+};
+
+// What a text holds beside its reading — the markers of its embed slots, by
+// index — for the commit event (src/commit.js), so an undo can lay a cut
+// marker again; null for a list and for a text without a slot.
+const values = (entry, field) => {
+  const held = blockOf(entry, field);
+  const text = entry.data[field];
+  if (held === undefined || held.k !== 't' || typeof text !== 'string' || !text.includes(EMBED)) return null;
+  const idx = S.indexOf(entry, field);
+  const out = [];
+  for (let i = 0; i < text.length; i++) if (text[i] === EMBED) out.push([i, markerAt(idx, i)]);
+  return out;
 };
 
 // ---------------------------------------------------------------------------
@@ -365,6 +519,14 @@ const updateText = async (core, id, key, text, { actor } = {}) => {
     const before = current && !current.encrypted && core.alive(current) ? current.data[key] : undefined;
     // Another kind under the field: the first splice is refused for it.
     const hunks = myers(typeof before === 'string' ? before : '', text);
+    // The slots the text keeps stay, markers and all; a new one has no marker to carry.
+    for (const [, , content] of hunks) {
+      if (content.includes(EMBED)) {
+        throw new TypeError(
+          'updateText() takes text; an embed (U+FFFC) is inserted with insertEmbed() or splitBlock()',
+        );
+      }
+    }
     let ops = 0;
     const landings = [];
     try {
@@ -432,16 +594,131 @@ const held = async (core, method, id, key) => {
   return seq === undefined ? null : { entry, seq, base: floorOf(entry.meta, key) };
 };
 
+// The engine's spans — runs of equal style — with the embed slots told
+// apart: a text span, an embed (a marker with `isEmbed`, under the marks of
+// its place) or a block marker.
+const typedSpans = (field, key) => {
+  const idx = S.indexOf(field.entry, key);
+  const out = [];
+  let i = 0;
+  for (const { text, marks } of S.spans(idx, field.seq, field.base)) {
+    let from = 0;
+    for (let k = 0; k < text.length; k++) {
+      if (text[k] !== EMBED) continue;
+      if (k > from) out.push({ type: 'text', text: text.slice(from, k), marks });
+      const marker = markerAt(idx, i + k);
+      if (marker !== null && !marker.isEmbed) out.push({ type: 'block', value: marker });
+      else out.push({ type: 'embed', value: marker, marks });
+      from = k + 1;
+    }
+    if (from < text.length) out.push({ type: 'text', text: text.slice(from), marks });
+    i += text.length;
+  }
+  return out;
+};
+
 /**
- * Text field `key` of record `id` as runs of equal style: `[{ text, marks }]`,
- * `marks` per name the winning value (a `many` name lists `{ id, value }`).
- * Raw: no lens, no read hooks. `null` when the record or the field is not
- * a text.
+ * Text field `key` of record `id` as runs of equal style: `[{ type: 'text',
+ * text, marks }]`, `marks` per name the winning value (a `many` name lists
+ * `{ id, value }`); an embed slot as `{ type: 'embed', value, marks }` or,
+ * for a block marker, `{ type: 'block', value }`. Raw: no lens, no read
+ * hooks. `null` when the record or the field is not a text.
  */
 const spans = async (core, id, key) => {
   const field = await held(core, 'spans', id, key);
   if (field === null || field.seq.k !== 't') return null;
-  return S.spans(S.indexOf(field.entry, key), field.seq, field.base);
+  return typedSpans(field, key);
+};
+
+/**
+ * The marker at `index` of text field `key` — `{ type, parents, attrs,
+ * isEmbed }` — or `null` when the slot there is no block marker and no
+ * embed, or the field is not a text.
+ */
+const block = async (core, id, key, index) => {
+  if (!Number.isInteger(index) || index < 0) throw new TypeError('block() takes a non-negative integer index');
+  const field = await held(core, 'block', id, key);
+  if (field === null || field.seq.k !== 't') return null;
+  const idx = S.indexOf(field.entry, key);
+  return index < S.lengthOf(idx) ? markerAt(idx, index) : null;
+};
+
+/**
+ * Text field `key` by block: per block marker, in order, its `index`,
+ * `type`, `parents` and `attrs` and the `spans` up to the next marker; text
+ * before the first marker is a block of `type` null at index null. `null`
+ * when the field is not a text.
+ */
+const blocks = async (core, id, key) => {
+  const field = await held(core, 'blocks', id, key);
+  if (field === null || field.seq.k !== 't') return null;
+  const out = [];
+  let current = null;
+  let index = 0;
+  for (const span of typedSpans(field, key)) {
+    if (span.type === 'block') {
+      const { type, parents, attrs } = span.value;
+      current = { index, type, parents, attrs, spans: [] };
+      out.push(current);
+      index++;
+      continue;
+    }
+    if (current === null) {
+      current = { index: null, type: null, parents: [], attrs: {}, spans: [] };
+      out.push(current);
+    }
+    current.spans.push(span);
+    index += span.type === 'text' ? span.text.length : 1;
+  }
+  return out;
+};
+
+/**
+ * Inserts an embed — an inline object, `{ type, attrs }` — at `index` of
+ * text field `key`: one slot (U+FFFC) a character wide, its marker
+ * `{ type, parents: [], attrs, isEmbed: true }` set with it (a `splice`
+ * op carrying `vals`). The field reads the slot as the character; `spans()`
+ * reads it as `{ type: 'embed', value, marks }`.
+ */
+const insertEmbed = async (core, id, key, index, embed, { actor } = {}) => {
+  const payload = spliceArgs('insertEmbed', key, index, 0, EMBED, { embeds: true });
+  payload.vals = [[0, markerArgs('insertEmbed', embed, true)]];
+  await core.commit('splice', id, payload, { actor });
+};
+
+/**
+ * Starts a block at `index` of text field `key`: a block marker
+ * `{ type, parents, attrs }` — a paragraph, a heading, a list item under
+ * its `parents` — in one slot (U+FFFC), the text after it up to the next
+ * marker its content. A `splice` op carrying the marker in `vals`.
+ */
+const splitBlock = async (core, id, key, index, block, { actor } = {}) => {
+  const payload = spliceArgs('splitBlock', key, index, 0, EMBED, { embeds: true });
+  payload.vals = [[0, markerArgs('splitBlock', block, false)]];
+  await core.commit('splice', id, payload, { actor });
+};
+
+/**
+ * Removes the block marker at `index` of text field `key`, joining its
+ * content to the block before (a `splice` cutting the slot); rejects with
+ * `NOT_FOUND` when the slot there is no marker.
+ */
+const joinBlock = async (core, id, key, index, { actor } = {}) => {
+  if (!Number.isInteger(index) || index < 0) throw new TypeError('joinBlock() takes a non-negative integer index');
+  const payload = spliceArgs('joinBlock', key, index, 1);
+  payload.marker = true;
+  await core.commit('splice', id, payload, { actor });
+};
+
+/**
+ * Replaces the marker at `index` of text field `key` with `{ type, parents,
+ * attrs, isEmbed? }` (an `assign` op: last writer wins); rejects with
+ * `NOT_FOUND` when the slot there is no marker.
+ */
+const updateBlock = async (core, id, key, index, block, { actor } = {}) => {
+  if (typeof key !== 'string') throw new TypeError('updateBlock() takes a field name');
+  if (!Number.isInteger(index) || index < 0) throw new TypeError('updateBlock() takes a non-negative integer index');
+  await core.commit('assign', id, { key, index, value: markerArgs('updateBlock', block) }, { actor });
 };
 
 /**
@@ -488,7 +765,9 @@ const index = async (core, id, key, cursor) => {
 /**
  * Replaces the element at `index` of list field `key` with `value` (an
  * `assign` op): a register per element, last writer wins, and the value
- * follows the element through a concurrent move.
+ * follows the element through a concurrent move. On a text, the marker of
+ * the embed slot at `index` (`{ type, parents, attrs, isEmbed }`, or null);
+ * rejects with `NOT_FOUND` for a slot that is no embed.
  */
 const setAt = async (core, id, key, index, value, { actor } = {}) => {
   if (typeof key !== 'string') throw new TypeError('setAt() takes a field name');
@@ -518,7 +797,7 @@ const text = Object.freeze({
   kinds: KINDS,
   codes: CODES,
   types: Object.freeze(['splice', 'assign', 'move', 'mark']),
-  actions: Object.freeze(['splice', 'mark']),
+  actions: Object.freeze(['splice', 'mark', 'setAt']),
   hints: HINTS,
   takes,
   kindOfOp,
@@ -533,6 +812,7 @@ const text = Object.freeze({
   realize,
   migrate,
   compact,
+  values,
   nests: NESTS,
   members,
   holds,
@@ -552,6 +832,12 @@ const text = Object.freeze({
     move,
     elementAt: elementName,
     elements,
+    insertEmbed,
+    splitBlock,
+    joinBlock,
+    updateBlock,
+    block,
+    blocks,
   }),
 });
 

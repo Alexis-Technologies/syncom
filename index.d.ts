@@ -96,12 +96,15 @@ export interface SplicePayload {
   run?: string;
   from?: number;
   content: string | readonly unknown[];
+  /** The markers of the embed slots (U+FFFC) the content holds, each at its offset. */
+  vals?: readonly (readonly [offset: number, marker: unknown])[];
 }
 
-/** What an `assign` carries: a list element by name and its new value. */
+/** What an `assign` carries: a list element (or a text's embed slot, `k: 't'`) by name and its new value. */
 export interface AssignPayload {
   elem: string;
   value: unknown;
+  k?: 't';
 }
 
 /**
@@ -167,10 +170,37 @@ export interface TreeBlock {
 /** Which side of its slot a cursor keeps to. */
 export type CursorSide = 'before' | 'after';
 
-/** A run of equal style in a text: `marks` per name, a `many` name listing every mark. */
-export interface TextSpan {
-  text: string;
-  marks: { [name: string]: unknown | readonly { id: string; value: unknown }[] };
+/** A text's styles over a run: per name the winning value, a `many` name listing every mark. */
+export type TextMarks = { [name: string]: unknown | readonly { id: string; value: unknown }[] };
+
+/**
+ * What a text's embed slot (U+FFFC) holds: a block marker (`isEmbed:
+ * false` — a paragraph, a heading, a list item under its `parents`), or an
+ * inline embed (`true` — an image, a mention), each with its `attrs`.
+ */
+export interface BlockMarker {
+  type: string;
+  parents: readonly string[];
+  attrs: { [name: string]: unknown };
+  isEmbed: boolean;
+}
+
+/**
+ * What `spans()` reads: a run of equal style, an embed under the marks of
+ * its place (`value` null for a slot without a marker), or a block marker.
+ */
+export type TextSpan =
+  | { type: 'text'; text: string; marks: TextMarks }
+  | { type: 'embed'; value: BlockMarker | null; marks: TextMarks }
+  | { type: 'block'; value: BlockMarker };
+
+/** A block of a text, as `blocks()` reads it: the marker's index and fields, and the spans up to the next marker; text before the first marker has `index` and `type` null. */
+export interface TextBlock {
+  index: number | null;
+  type: string | null;
+  parents: readonly string[];
+  attrs: { [name: string]: unknown };
+  spans: TextSpan[];
 }
 
 /**
@@ -903,7 +933,16 @@ export type Patch =
   | { action: 'add'; field: string; elements: readonly unknown[] }
   | { action: 'remove'; field: string; elements: readonly unknown[]; own?: true }
   | { action: 'remove'; field: string; removals: readonly SetRemoval[] }
-  | { action: 'splice'; field: string; index: number; count?: number; content?: string | readonly unknown[] }
+  | {
+      action: 'splice';
+      field: string;
+      index: number;
+      count?: number;
+      content?: string | readonly unknown[];
+      /** The markers of the embed slots the content holds: `[[offset, marker]]`. */
+      vals?: readonly (readonly [offset: number, marker: BlockMarker | null])[];
+    }
+  | { action: 'setAt'; field: string; index: number; value: unknown }
   | {
       action: 'mark';
       field: string;
@@ -928,7 +967,12 @@ export interface CommitEvent {
   before: Record<string, unknown> | null;
   after: Record<string, unknown> | null;
   kinds: { [field: string]: FieldKind };
+  /** The markers of a text's embed slots, by index, each side — present when a side holds any. */
+  embeds?: { before: TextEmbeds | null; after: TextEmbeds | null };
 }
+
+/** Per text field, its embed slots' markers by index. */
+export type TextEmbeds = { [field: string]: readonly (readonly [index: number, marker: BlockMarker | null])[] };
 
 /** A named version of the whole storage, kept on this node: the log position it was taken at. */
 export interface Tag {
@@ -1443,8 +1487,38 @@ export interface TextMethods {
   ): Promise<void>;
   /** Switches one mark off by its id (what `mark()` resolved to) — the only way for a `many` mark. */
   unmarkById(id: string, key: string, markId: string, options?: WriteOptions): Promise<void>;
-  /** Text field `key` as runs of equal style; raw (no lens, no read hooks); `null` unless the field is a text. */
+  /** Text field `key` as runs of equal style, its embed slots told apart; raw (no lens, no read hooks); `null` unless the field is a text. */
   spans(id: string, key: string): Promise<TextSpan[] | null>;
+  /** Inserts an inline embed — one slot (U+FFFC) holding `{ type, parents: [], attrs, isEmbed: true }` — at `index` of text field `key`. */
+  insertEmbed(
+    id: string,
+    key: string,
+    index: number,
+    embed: { type: string; attrs?: { [name: string]: unknown } },
+    options?: WriteOptions,
+  ): Promise<void>;
+  /** Starts a block at `index` of text field `key`: a block marker in one slot, the text after it up to the next marker its content. */
+  splitBlock(
+    id: string,
+    key: string,
+    index: number,
+    block: { type: string; parents?: readonly string[]; attrs?: { [name: string]: unknown } },
+    options?: WriteOptions,
+  ): Promise<void>;
+  /** Removes the block marker at `index`, joining its content to the block before; rejects with `NOT_FOUND` when the slot is no marker. */
+  joinBlock(id: string, key: string, index: number, options?: WriteOptions): Promise<void>;
+  /** Replaces the marker at `index` (last writer wins); rejects with `NOT_FOUND` when the slot is no marker. */
+  updateBlock(
+    id: string,
+    key: string,
+    index: number,
+    block: { type: string; parents?: readonly string[]; attrs?: { [name: string]: unknown }; isEmbed?: boolean },
+    options?: WriteOptions,
+  ): Promise<void>;
+  /** The marker at `index` of text field `key`; `null` when the slot is no block marker and no embed, or the field is not a text. */
+  block(id: string, key: string, index: number): Promise<BlockMarker | null>;
+  /** Text field `key` by block, in order; `null` unless the field is a text. */
+  blocks(id: string, key: string): Promise<TextBlock[] | null>;
   /** The name of the element at `index` of list field `key` — what a path under it is spelled with (`items/<name>/body`); `null` out of range or when the field is not a list. */
   elementAt(id: string, key: string, index: number): Promise<string | null>;
   /** The names of the elements of list field `key`, in order; `[]` when the field is not a list. */
@@ -1764,6 +1838,33 @@ export interface SyncomRecord {
   unmarkById(key: string, markId: string, options?: WriteOptions): Promise<void>;
   /** The text field as runs of equal style — `storage.spans` with this record's id. */
   spans(key: string): Promise<TextSpan[] | null>;
+  /** Inserts an inline embed into a text field — `storage.insertEmbed` with this record's id. */
+  insertEmbed(
+    key: string,
+    index: number,
+    embed: { type: string; attrs?: { [name: string]: unknown } },
+    options?: WriteOptions,
+  ): Promise<void>;
+  /** Starts a block in a text field — `storage.splitBlock` with this record's id. */
+  splitBlock(
+    key: string,
+    index: number,
+    block: { type: string; parents?: readonly string[]; attrs?: { [name: string]: unknown } },
+    options?: WriteOptions,
+  ): Promise<void>;
+  /** Removes a block marker — `storage.joinBlock` with this record's id. */
+  joinBlock(key: string, index: number, options?: WriteOptions): Promise<void>;
+  /** Replaces a marker — `storage.updateBlock` with this record's id. */
+  updateBlock(
+    key: string,
+    index: number,
+    block: { type: string; parents?: readonly string[]; attrs?: { [name: string]: unknown }; isEmbed?: boolean },
+    options?: WriteOptions,
+  ): Promise<void>;
+  /** The marker at an index of a text field — `storage.block` with this record's id. */
+  block(key: string, index: number): Promise<BlockMarker | null>;
+  /** A text field by block — `storage.blocks` with this record's id. */
+  blocks(key: string): Promise<TextBlock[] | null>;
   elementAt(key: string, index: number): Promise<string | null>;
   elements(key: string): Promise<string[]>;
   /** A cursor into a list or text field — `storage.cursor` with this record's id. */

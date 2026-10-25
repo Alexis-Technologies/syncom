@@ -175,11 +175,12 @@ renders:
 await storage.updateText(id, 'body', 'hello world');
 const bold = await storage.mark(id, 'body', 0, 5, 'bold', true);
 await storage.spans(id, 'body');
-// [{ text: 'hello', marks: { bold: true } }, { text: ' world', marks: {} }]
+// [{ type: 'text', text: 'hello', marks: { bold: true } }, { type: 'text', text: ' world', marks: {} }]
 
 await storage.splice(id, 'body', 5, 0, '!');   // typed at the end of the range: bold
 await storage.splice(id, 'body', 0, 0, '>');   // typed before it: not
-// [{ text: '>', marks: {} }, { text: 'hello!', marks: { bold: true } }, { text: ' world', marks: {} }]
+// [{ type: 'text', text: '>', marks: {} }, { type: 'text', text: 'hello!', marks: { bold: true } },
+//  { type: 'text', text: ' world', marks: {} }]
 
 await storage.mark(id, 'body', 8, 13, 'link', 'https://x', { expand: 'none' });
 await storage.unmark(id, 'body', 0, 7, 'bold');
@@ -205,8 +206,63 @@ await storage.unmark(id, 'body', 0, 7, 'bold');
   place of what is there, the stacked marks under it included, and a
   stacking mark newer than it starts a stack over it.
 - The field still reads as the plain string; `spans` is raw — no lens, no
-  read hooks. Blocks (paragraphs, headings) are records: a document is a
-  list of block ids, each block a record with a text field.
+  read hooks. Every span carries a `type`: `'text'` here, `'embed'` and
+  `'block'` for what the next section adds.
+
+## Embeds and blocks
+
+A document is one text. What is not a character in it — an image, a
+mention, the start of a paragraph or a heading — is an **embed slot**: one
+position holding U+FFFC, the object replacement character, whose value is a
+**marker** `{ type, parents, attrs, isEmbed }`, a register of the slot like
+a list element's value (Automerge's model). `isEmbed: false` is a **block
+marker**: it starts a block, the text after it up to the next marker is the
+block's content, `parents` the block types it nests under (a list item's
+`['ordered-list']`), `attrs` what the type needs (a heading's level). `isEmbed:
+true` is an **inline embed**, a character wide, with marks like any character.
+
+```js
+await storage.updateText(id, 'body', 'Title\nFirst paragraph.');
+await storage.splitBlock(id, 'body', 0, { type: 'heading', attrs: { level: 1 } });
+await storage.splitBlock(id, 'body', 7, { type: 'paragraph' });
+await storage.insertEmbed(id, 'body', 14, { type: 'image', attrs: { src: 'a.png' } });
+
+(await storage.get(id)).body;      // '\uFFFCTitle\n\uFFFCFirst \uFFFCparagraph.' — the slots read as the character
+await storage.block(id, 'body', 0); // { type: 'heading', parents: [], attrs: { level: 1 }, isEmbed: false }
+await storage.spans(id, 'body');
+// [{ type: 'block', value: { type: 'heading', parents: [], attrs: { level: 1 }, isEmbed: false } },
+//  { type: 'text', text: 'Title\n', marks: {} },
+//  { type: 'block', value: { type: 'paragraph', parents: [], attrs: {}, isEmbed: false } },
+//  { type: 'text', text: 'First ', marks: {} },
+//  { type: 'embed', value: { type: 'image', parents: [], attrs: { src: 'a.png' }, isEmbed: true }, marks: {} },
+//  { type: 'text', text: 'paragraph.', marks: {} }]
+await storage.blocks(id, 'body');  // per marker: { index, type, parents, attrs, spans } — the spans up to the next
+
+await storage.updateBlock(id, 'body', 7, { type: 'paragraph', parents: ['blockquote'] });
+await storage.joinBlock(id, 'body', 7); // the paragraph joins the heading's block
+```
+
+- **One tree.** A slot is an element of the text's Fugue tree like a
+  character: the merge rules, the marks, the cursors and `index()` count it,
+  and a concurrent insert beside it lands as beside any character. Its marker
+  travels with the `splice` that inserts the slot (`vals`, each at its offset
+  in the content) and changes by an `assign` — `updateBlock`, or `setAt` on a
+  text — last writer wins, as a list element's value.
+- **Through the string.** `get()` reads the slots as U+FFFC; `updateText`
+  keeps the ones its text keeps, markers and all, and refuses a text that
+  adds one (a `TypeError` — a slot enters with its marker, through
+  `insertEmbed` or `splitBlock`), as `splice()` and `push()` do. A cut takes
+  a slot like any character: `splice(id, key, index, 1)` removes an embed,
+  `joinBlock` is the same cut checked against a marker (`NOT_FOUND` for a
+  slot that holds none). A text before its first marker is a block of type
+  null in `blocks()`.
+- **Patches and versions.** `diff()` hands a splice patch its `vals`, a
+  changed marker a `setAt` patch, and `restore()`, `compact()` and an undo
+  lay the markers again with the slots; a `commit` event carries the markers
+  of each side as `embeds` beside the readings, which show the slots alone.
+- A slot a peer inserted without a marker — a hand-made op — reads as an
+  embed of value `null`; a marker of another shape than the API writes reads
+  as none.
 
 ## Cursors
 
@@ -289,12 +345,14 @@ Beresford and Gomes's (2021), the one Loro's movable tree follows:
 A `tree` op carries `{ node, parent, fi }` — the node, its parent and its
 fractional index. A `mark` op carries the two anchors, the name, the value and whether it
 stacks — or the id of a mark to switch off. An `assign` op carries `{ elem,
-value }`, a `move` op `{ elem, cut, at, value }` — the element's name, the
-slot it showed at, the anchor of its new place and its value. A `splice` op carries the cut ranges, `[run, offset, length]` per run, and
+value }` — and `k: 't'` when the element is a text's embed slot, so the op
+ranks as a text's — a `move` op `{ elem, cut, at, value }` — the element's
+name, the slot it showed at, the anchor of its new place and its value. A `splice` op carries the cut ranges, `[run, offset, length]` per run, and
 either the anchor of its new run (`at`: `^` the head, `>e` or `<e` the right
 or left child of element `e`, named `ts:offset:origin`) or the writer's own
 run to extend (`run`, `from`); `content` is the inserted string or array and,
-empty, names the kind of a call that only removes. One call is one op, signed
+empty, names the kind of a call that only removes; `vals`, when the content
+holds embed slots, their markers at their offsets. One call is one op, signed
 and logged like any other — an editor that types a word sends one op per
 keystroke unless it batches them (see below). A keystroke extending the
 writer's run adds its characters to the run and no key to the record's
@@ -347,8 +405,8 @@ so its edits go around it, and a string with a lone half is a `TypeError`.
 - A record is read and written whole on every op, and a text lives three
   times on the node: as the field's string, as the runs in the record's
   metadata, and as the ops in the log. Keep a text to what a record is for —
-  a note, a comment, a description, a block of a document — and make a long
-  document a list of block records rather than one field. The field itself
+  a note, a comment, a description, a document with its block markers — and
+  split what a record is not for across records. The field itself
   is a rope: every edit — a keystroke at the end of what you just typed, an
   insert anywhere, a cut, a peer's run with what hangs under it — lands in
   O(log n) and leaves the reading cached, so what an op costs the engine does

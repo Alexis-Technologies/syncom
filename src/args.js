@@ -61,8 +61,11 @@ const jsonValue = (method, value) => {
 
 // What splice()/push() take: a field name, an index (null: the end) and a
 // count, and content — a string for a text, an array of JSON values for a
-// list, absent when the call only cuts. Returns the payload.
-const spliceArgs = (method, key, index, count, content) => {
+// list, absent when the call only cuts. Returns the payload. A text's embed
+// slot (U+FFFC) enters with its value, through insertEmbed() or a patch
+// that carries `vals`, never as plain content.
+const EMBED = '\uFFFC';
+const spliceArgs = (method, key, index, count, content, { embeds = false } = {}) => {
   fieldName(method, key);
   if (index !== null && !(Number.isInteger(index) && index >= 0)) {
     throw new TypeError(`${method}() takes a non-negative integer index`);
@@ -74,6 +77,9 @@ const spliceArgs = (method, key, index, count, content) => {
   // A lone surrogate half would leave the text malformed for every reader.
   if (typeof content === 'string' && !content.isWellFormed()) {
     throw new TypeError(`${method}() takes well-formed text; the content holds a lone surrogate half`);
+  }
+  if (!embeds && typeof content === 'string' && content.includes(EMBED)) {
+    throw new TypeError(`${method}() takes text; an embed (U+FFFC) is inserted with insertEmbed() or splitBlock()`);
   }
   if (Array.isArray(content)) {
     for (const element of content) {
@@ -132,6 +138,7 @@ const setElements = (method, key, elements) => {
 };
 
 module.exports = {
+  EMBED,
   isNodeId,
   isJsonValue,
   jsonValue,

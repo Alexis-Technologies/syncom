@@ -66,7 +66,8 @@ type (`write`, `set`, `inc`, `add`, `remove`, `splice`, `assign`, `move`,
 `mark`, `tree`, `delete`, `purge`, `merge`), `data` is the whole record for a
 `write` and the delta for a `set`, `key`/`value` belong to an `inc` (the
 amount), an `add` or a `remove` (the elements), `key`/`index`/`count`/`content`
-to a `splice`, `key`/`index`/`value` to an `assign`, `key`/`index`/`to` to a
+(and `vals`, the markers of the embed slots the content holds) to a `splice`,
+`key`/`index`/`value` to an `assign`, `key`/`index`/`to` to a
 `move`, `key`/`start`/`end`/`name`/`value`/`expand`/`many` (or `off`) to a
 `mark`, `key`/`node`/`parent`/`after`/`before` to a `tree` — each the call as
 the caller made it, save that a `push()` is a `splice` with `index: null`

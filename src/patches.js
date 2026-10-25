@@ -82,8 +82,9 @@ const applyPatches = async (core, id, patches, { actor, source = null } = {}) =>
 /**
  * Rewrites record `id` as the ops its reading takes today — a `write` of
  * the registers, then one op per field of another kind: an `inc`, an
- * `add`, one `splice` (a text or a list becomes one run), one `tree` move
- * per node, and the marks of a text laid again — so what lies under it
+ * `add`, one `splice` (a text or a list becomes one run, a text's embed
+ * markers riding on it), one `tree` move per node, and the marks of a text
+ * laid again — so what lies under it
  * goes by the reset rule, here and on every peer alike: a text of ten
  * thousand runs is one (a run per MAX_RUN elements), a tree's move log is
  * one move per node, and the record reads the same — but a list, a text, a
@@ -105,7 +106,7 @@ const compact = async (core, id, { actor, source = null } = {}) => {
   // under a member that is not shown is unreachable and goes with the rewrite.
   const view = decompose(await core.view(id, entry), entry, plugins);
   for (const field of Object.keys(kinds)) if (!Object.hasOwn(view, field)) delete kinds[field];
-  const patches = diffViews(null, {}, view, kinds, { plugins });
+  const patches = diffViews(null, {}, view, kinds, { plugins, context: { to: { entry } } });
   // What a plugin lays after the field is made again (a text's marks).
   for (const field of Object.keys(kinds)) {
     const mod = plugins.byName[kinds[field]];

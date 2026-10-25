@@ -31,8 +31,10 @@ const entryAt = async (core, name, id) => {
   let { exists, raw } = await core.tags.readAt(name, id);
   if (!exists) return null;
   // No copy: nothing landed on the file since the tag. A record held since
-  // (a write whose file failed) reads as the file, which is still the
-  // tag's state; any other reads as it is.
+  // (a write whose file failed, or one deferred) reads as the file, which
+  // is still the tag's state — read in step with the landings, which write
+  // it (a landing in flight would hand back a half-written file); any other
+  // reads as it is.
   if (raw === null && core.entries.held(id)) raw = await core.entries.file(id);
   return raw === null ? core.entries.load(id) : core.entries.parse(id, raw);
 };
@@ -193,7 +195,8 @@ const diff = async (core, id, from, to) => {
   };
   const [[before, beforeKinds], [after, afterKinds]] = await Promise.all([live(was), live(now)]);
   const purged = now?.meta.purged != null;
-  return asJson(diffViews(before, beforeKinds, after, afterKinds, { purged, plugins: core.plugins }));
+  const context = { from: { entry: was }, to: { entry: now } };
+  return asJson(diffViews(before, beforeKinds, after, afterKinds, { purged, plugins: core.plugins, context }));
 };
 
 /**

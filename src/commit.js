@@ -371,10 +371,29 @@ const announce = async (core, op, entry, delta, ctx, source, via, committed = nu
       const { seq, before, previous } = committed;
       const kinds = { ...kindsOf(previous, core.plugins), ...kindsOf(entry, core.plugins) };
       const after = alive ? asJson(entry.data) : null;
-      notify(core.storage, core.logger, 'commit', { op, seq, source, before: asJson(before), after, kinds });
+      const event = { op, seq, source, before: asJson(before), after, kinds };
+      // What a field holds beside its reading (a text's embed markers), each
+      // side: an inverse that lays a cut marker again needs its value.
+      const embeds = { before: valuesOf(core.plugins, previous), after: alive ? valuesOf(core.plugins, entry) : null };
+      if (embeds.before !== null || embeds.after !== null) event.embeds = embeds;
+      notify(core.storage, core.logger, 'commit', event);
     }
     notify(core.storage, core.logger, 'change', op, via);
   }
+};
+
+// Per field, what a plugin's kind holds beside the reading — a text's
+// embed markers by index — or null when nothing does.
+const valuesOf = (plugins, entry) => {
+  if (entry === null || !isAlive(entry)) return null;
+  let out = null;
+  const kinds = kindsOf(entry, plugins);
+  for (const field of Object.keys(kinds)) {
+    const mod = Object.hasOwn(plugins.byName, kinds[field]) ? plugins.byName[kinds[field]] : undefined;
+    const values = mod?.values?.(entry, field);
+    if (values != null) (out ??= {})[field] = asJson(values);
+  }
+  return out;
 };
 
 // The payload taken as JSON — a copy, like the disk and the peers hold it —
@@ -387,6 +406,7 @@ const copyPayload = (payload) => {
   }
   if (payload.content !== undefined) payload = { ...payload, content: asJson(payload.content) };
   if (payload.removals !== undefined) payload = { ...payload, removals: asJson(payload.removals) };
+  if (payload.vals !== undefined) payload = { ...payload, vals: asJson(payload.vals) };
   return payload;
 };
 

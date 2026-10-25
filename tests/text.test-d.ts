@@ -1,6 +1,6 @@
 import { expectAssignable, expectType } from 'tsd';
 import { text } from '../src/text/text.js';
-import type { Plugin, TextMethods, SequenceBlock, TextSpan } from '../src/text/text.js';
+import type { Plugin, TextMethods, SequenceBlock, TextSpan, BlockMarker, TextBlock } from '../src/text/text.js';
 import { open } from '../index.js';
 
 expectType<Plugin<TextMethods>>(text);
@@ -9,5 +9,14 @@ expectType<Promise<void>>(storage.splice('id', 'body', 0, 0, 'hi'));
 expectType<Promise<TextSpan[] | null>>(storage.spans('id', 'body'));
 expectType<Promise<string | null>>(storage.elementAt('id', 'items', 0));
 expectType<Promise<string[]>>(storage.elements('id', 'items'));
+expectType<Promise<void>>(storage.insertEmbed('id', 'body', 0, { type: 'image', attrs: { src: 'a.png' } }));
+expectType<Promise<void>>(storage.splitBlock('id', 'body', 0, { type: 'paragraph', parents: ['list'] }));
+expectType<Promise<void>>(storage.joinBlock('id', 'body', 0));
+expectType<Promise<void>>(storage.updateBlock('id', 'body', 0, { type: 'heading', attrs: { level: 2 } }));
+expectType<Promise<BlockMarker | null>>(storage.block('id', 'body', 0));
+expectType<Promise<TextBlock[] | null>>(storage.blocks('id', 'body'));
+expectAssignable<TextSpan>({ type: 'text', text: 'a', marks: {} });
+expectAssignable<TextSpan>({ type: 'block', value: { type: 'p', parents: [], attrs: {}, isEmbed: false } });
+expectAssignable<TextSpan>({ type: 'embed', value: null, marks: {} });
 expectType<Promise<string>>(storage.insert({}));
 expectAssignable<SequenceBlock>({ k: 'l', ts: 0, runs: {} });
