@@ -124,3 +124,6 @@ dist
 docs/.vitepress/dist
 docs/.vitepress/cache
 /.claude/launch.json
+
+# The automerge-perf editing trace, downloaded at bench time (bench/compare/trace.js)
+bench/compare/.cache

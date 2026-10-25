@@ -124,9 +124,11 @@ what is measured: a syncom text is a field of a record, and every keystroke is o
 appended to the log and one record file written — whole, with the field's metadata, so a
 keystroke costs more the longer the text (the scenario grows its text past ten thousand
 characters, one run per character typed at the start) — where a document CRDT batches a
-transaction into one update and writes nothing. The editing-trace benchmark the CRDT libraries publish (a
-document of a hundred and eighty thousand keystrokes) is out of syncom's scope on purpose — a
-text is a note, a comment, a block of a document, not the document — and is not run here.
+transaction into one update and writes nothing. The editing-trace benchmark the CRDT libraries
+publish (automerge-perf: 259,778 keystrokes of a real paper, 182,315 inserts and 77,463 deletes)
+runs here as the `trace` scenario: the whole trace replayed into one text as an editor sends it —
+one keystroke after another, not waiting for each — and the text read back whole at the end. The
+trace is downloaded at bench time, not redistributed (CC-BY-4.0).
 
 ### Method
 

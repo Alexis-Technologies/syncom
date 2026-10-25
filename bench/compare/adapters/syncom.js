@@ -57,6 +57,7 @@ const variant = (chain, memory) => {
       const id = await store.storage.insert({ kind: 'text' });
       return {
         insert: (index, chars) => store.storage.splice(id, 'body', index, 0, chars),
+        delete: (index, count) => store.storage.splice(id, 'body', index, count, ''),
         read: async () => (await store.storage.get(id)).body ?? '',
       };
     },

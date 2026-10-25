@@ -20,6 +20,9 @@
  *            in memory only, and only the libraries with a text that merges
  *            by position take part (syncom's text field, Y.Text, Automerge's
  *            text, LoroText); the others show "—"
+ * - trace:   replay the automerge-perf editing trace (bench/compare/trace.js)
+ *            into one text; a round is the whole trace, the rate is
+ *            keystrokes per second
  *
  * Each runs on two lines:
  *
@@ -105,6 +108,16 @@ const KINDS = [
     description: 'Insert one character at a random position of the text (seeded).',
     unit: 'ops/s',
     type: 'ops',
+    lines: ['memory'],
+  },
+  {
+    id: 'trace',
+    title: 'Replay an editing trace',
+    description:
+      'The automerge-perf trace: 259,778 keystrokes of a real paper (182,315 inserts, 77,463 deletes) replayed ' +
+      'into one text as an editor would send them, the text read back whole at the end.',
+    unit: 'ops/s',
+    type: 'rounds',
     lines: ['memory'],
   },
 ];

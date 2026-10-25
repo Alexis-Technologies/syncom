@@ -4,9 +4,11 @@ syncom has no runtime dependencies. A few of its algorithms were adapted from
 other MIT-licensed projects, read at the commits named below; this file keeps
 their notices, as the MIT license asks, and says which syncom files carry the
 adaptation. Nothing was copied from json-joy (AGPL-3.0), Collabs or the
-`fugue/` directory of the Fugue repository (Apache-2.0), or from the
-`automerge-perf` editing trace (CC-BY-4.0): those were read as specifications
-only.
+`fugue/` directory of the Fugue repository (Apache-2.0): those were read as
+specifications only. The `automerge-perf` editing trace (CC-BY-4.0,
+https://github.com/automerge/automerge-perf) is not redistributed: `pnpm
+bench:compare` downloads it at bench time into a git-ignored cache
+(bench/compare/trace.js) and replays it in the `trace` scenario.
 
 ## Fugue — `fugue-simple` (reference implementation)
 

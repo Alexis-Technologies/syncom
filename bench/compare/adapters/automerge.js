@@ -49,13 +49,14 @@ const wrap = (A, state) => {
       return ids;
     },
     close: () => state.close(),
-    text: async () => {
+    text: async (name = 'text') => {
       await state.change((doc) => {
-        doc.text = '';
+        doc[name] = '';
       });
       return {
-        insert: (index, chars) => state.change((doc) => A.splice(doc, ['text'], index, 0, chars)),
-        read: () => state.doc().text,
+        insert: (index, chars) => state.change((doc) => A.splice(doc, [name], index, 0, chars)),
+        delete: (index, count) => state.change((doc) => A.splice(doc, [name], index, count)),
+        read: () => state.doc()[name],
       };
     },
   };
@@ -79,7 +80,7 @@ const memory = {
     const A = local('@automerge/automerge');
     return wrap(A, memoryState(A));
   },
-  text: (store) => store.text(),
+  text: (store, name) => store.text(name),
   openReplica: async () => {
     const A = local('@automerge/automerge');
     return wrap(A, memoryState(A, A.init()));

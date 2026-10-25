@@ -18,6 +18,7 @@ const path = require('node:path');
 const { getAdapter } = require('./adapters/index.js');
 const { getScenario, SEED, BULK, recordOf } = require('./scenarios.js');
 const { measureOps, measureRounds } = require('./measure.js');
+const { loadTrace } = require('./trace.js');
 
 const FIELDS = ['title', 'done', 'priority', 'owner', 'hits'];
 const TEXT_KINDS = new Set(['append', 'prepend', 'random']);
@@ -135,6 +136,47 @@ const measureKind = async (adapter, scenario, line, store, ids, dir, method) => 
       length++;
       return wait;
     }, method);
+  }
+  if (kind === 'trace') {
+    if (!line.text) return { unsupported: 'no text that merges by position' };
+    const { edits, finalText } = await loadTrace();
+    // The worker runs with --expose-gc: the heap the trace leaves behind,
+    // measured after a collection, goes out with the rate.
+    const gc = typeof globalThis.gc === 'function' ? globalThis.gc : null;
+    let memory = null;
+    const result = await measureRounds(
+      {
+        prepare: (r) => line.text(store, `trace-${r}`),
+        run: async (text) => {
+          if (gc) gc();
+          const before = process.memoryUsage().heapUsed;
+          // Keystrokes go out as an editor sends them: one after another,
+          // without waiting for each — a library that answers with a
+          // promise is awaited every thousand and at the end.
+          let pending = null;
+          for (let i = 0; i < edits.length; i++) {
+            const edit = edits[i];
+            if (edit[1] > 0) pending = text.delete(edit[0], edit[1]);
+            if (edit.length > 2) pending = text.insert(edit[0], edit.length === 3 ? edit[2] : edit.slice(2).join(''));
+            if ((i & 1023) === 1023 && pending && typeof pending.then === 'function') await pending;
+          }
+          await settle(pending);
+          if (gc) {
+            gc();
+            memory = process.memoryUsage().heapUsed - before;
+          }
+          return edits.length;
+        },
+        after: async (text) => {
+          const read = await settle(text.read());
+          if (read !== finalText) {
+            fail(adapter, scenario, `the trace reads back ${read.length} characters, expected ${finalText.length}`);
+          }
+        },
+      },
+      { rounds: method.traceRounds ?? 2, warmupRounds: method.traceWarmupRounds ?? 1 },
+    );
+    return memory === null ? result : { ...result, memory };
   }
   if (kind === 'sync') {
     if (!line.replicate) return { unsupported: line.noSync ?? 'no in-process sync' };

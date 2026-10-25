@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-24T17:17:53.619Z",
+  "generatedAt": "2026-10-25T10:43:34.591Z",
   "machine": {
     "cpu": "Apple M3 Max",
     "cores": 16,
@@ -14,6 +14,8 @@
     "maxOps": 5000,
     "rounds": 5,
     "warmupRounds": 1,
+    "traceRounds": 2,
+    "traceWarmupRounds": 1,
     "coldStartRuns": 10
   },
   "libraries": [
@@ -1003,6 +1005,38 @@
         "gun": "needs its storage adapter to answer in Node.js",
         "orbitdb": "no text that merges by position"
       },
+      "failed": {}
+    },
+    {
+      "id": "trace-memory",
+      "kind": "trace",
+      "kindTitle": "Replay an editing trace",
+      "line": "memory",
+      "lineTitle": "In memory",
+      "title": "Replay an editing trace, in memory",
+      "description": "The automerge-perf trace: 259,778 keystrokes of a real paper (182,315 inserts, 77,463 deletes) replayed into one text as an editor would send them, the text read back whole at the end. Nothing touches the disk.",
+      "unit": "ops/s",
+      "results": {
+        "yjs": {
+          "median": 52082.223884662555,
+          "min": 51844.708926949526,
+          "max": 52319.738842375584,
+          "memory": 3254632
+        },
+        "automerge": {
+          "median": 18087.124508254026,
+          "min": 17787.360272470934,
+          "max": 18386.88874403712,
+          "memory": 106176
+        },
+        "loro": {
+          "median": 470143.011829608,
+          "min": 469957.4714159121,
+          "max": 470328.552243304,
+          "memory": 528
+        }
+      },
+      "unsupported": {},
       "failed": {}
     }
   ],
