@@ -112,6 +112,7 @@ module.exports = {
   invalidId,
   isStreamName,
   isKeyId,
+  OP_TYPES,
   VALIDATED,
   wellFormed,
   deepEqual,

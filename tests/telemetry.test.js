@@ -17,7 +17,7 @@ const {
 } = require('@opentelemetry/sdk-metrics');
 const { AsyncLocalStorageContextManager } = require('@opentelemetry/context-async-hooks');
 
-const syncom = require('..');
+const syncom = require('../src/all/all.js');
 const { createTelemetry, DISABLED, SCOPE_NAME } = require('../src/telemetry.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const { createMesh, settle, waitUntil } = require('./utils/mesh.js');

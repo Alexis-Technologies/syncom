@@ -27,7 +27,7 @@ const { isSyncLink } = require('./link.js');
 const { createTelemetry, traced } = require('./telemetry.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
 const { GLOBAL_SCOPE, opInScope } = require('./scope.js');
-const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf } = require('./protocol.js');
+const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf, kindsOf } = require('./protocol.js');
 const { createUnit } = require('./hosting.js');
 const { SyncomError } = require('./errors.js');
 
@@ -473,6 +473,7 @@ class SyncManager extends Emitter {
       // wrpc `headers`/`authenticate` option) is the other way to carry it.
       token: node.token,
       schema: schemaOf(this.#storage.schemaInfo),
+      kinds: this.#storage.kinds,
     });
     if (peer.closed) return;
     if (!answer || typeof answer.node !== 'string') throw new SyncomError('BAD_HELLO', `Bad hello from ${node.url}`);
@@ -485,7 +486,7 @@ class SyncManager extends Emitter {
     // so our cursor is void and the subscription will say `bootstrap`.
     if (node.remote && node.remote.epoch !== answer.epoch) node.cursor = null;
     const schema = schemaOf(answer.schema);
-    peer.remote = { id: answer.node, vector: answer.vector ?? {}, epoch: answer.epoch };
+    peer.remote = { id: answer.node, vector: answer.vector ?? {}, epoch: answer.epoch, kinds: kindsOf(answer.kinds) };
     peer.ref.node = answer.node;
     node.remote = { id: answer.node, epoch: answer.epoch, schema };
     // Before anything is pushed: a rewound node moves its streams past what
@@ -807,6 +808,17 @@ class SyncManager extends Emitter {
       // the next handshake asks again.
       const verdict = await runHook(this.#hooks, 'beforeBootstrap', { url: peer.node.url, node: peer.remote.id });
       if (verdict === false) return;
+      // A host that holds fewer kinds than this node would hand over a
+      // snapshot without those fields, and the joined vector would say the
+      // ops behind them were seen: refused, reported, the feed left to
+      // resume. A host that named no kinds is from before plugins.
+      const theirs = peer.remote.kinds;
+      const missing = theirs === null ? [] : this.#storage.kinds.filter((kind) => !theirs.includes(kind));
+      if (missing.length > 0) {
+        const message = `${peer.node.url} cannot hold the ${missing.join(', ')} kind${missing.length > 1 ? 's' : ''}; not bootstrapping from it`;
+        this.#fail(peer, new SyncomError('KINDS_MISMATCH', message, { node: peer.remote.id, missing }));
+        return;
+      }
       const otel = this.#otel;
       if (!otel.enabled) return void (await this.#join(peer));
       const attributes = { 'syncom.peer.url': peer.node.url, 'syncom.peer.node': peer.remote.id };

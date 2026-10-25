@@ -19,6 +19,9 @@ const ENTRIES = [
   'src/branch/branch.js',
   'src/contracts/contracts.js',
   'src/idb/idb.js',
+  'src/all/all.js',
+  'src/text/text.js',
+  'src/tree/tree.js',
 ];
 
 for (const entry of ENTRIES) {

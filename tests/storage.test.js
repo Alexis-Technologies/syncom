@@ -5,7 +5,7 @@ const assert = require('node:assert');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { directoryExists } = require('../src/utils.js');
-const syncom = require('..');
+const syncom = require('../src/all/all.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 
 const mockSchema = {

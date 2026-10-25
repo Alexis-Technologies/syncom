@@ -31,6 +31,7 @@ const { HookError } = require('./hooks.js');
 const { ValidationError } = require('./schema.js');
 const { isSharedLog } = require('./shared-log.js');
 const { SyncomError } = require('./errors.js');
+const { createPlugins } = require('./plugin.js');
 
 module.exports = {
   ...require('./chain.js'),
@@ -61,4 +62,5 @@ module.exports = {
   ValidationError,
   isSharedLog,
   SyncomError,
+  createPlugins,
 };

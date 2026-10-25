@@ -14,6 +14,23 @@ There is no released version section until then; everything below lands in it.
 
 ### Added
 
+- **Plugins, and the package in blocks.** The kinds beyond registers, counters
+  and sets are plugins registered per storage — `open({ plugins: [text, tree] })`
+  with `text` from `@alexify/syncom/text` (lists and texts) and `tree` from
+  `@alexify/syncom/tree` — never process-wide; `@alexify/syncom/all` is the
+  core with every shipped plugin registered, the API as it was. The main
+  entry is the core alone (54 KB min+gzip, from 66). A method, a patch action
+  or a local op of a plugin the storage was not opened with is refused with
+  `PLUGIN_MISSING` naming the subpath; a peer's op of such a kind is refused as
+  `reason: 'kind'`, logged and relayed (a hub without the text plugin carries
+  the text between two nodes that have it), a snapshot block of it is left
+  out with a `sync.record.kind` warning; `hello` names the kinds both ways and
+  a node does not bootstrap from a host that lacks one of its own
+  (`KINDS_MISMATCH`); `node.json` remembers the kinds a directory ran with and
+  a reopen without one is refused. `storage.plugins`, `storage.kinds`,
+  `createPlugins()`. Every subpath is a folder under `src/` and the root holds
+  four files; `meta.seqs`/`meta.trees` became one `meta.blocks` slot keyed by
+  field, each block naming its kind (`k`).
 - **Lists and text.** A field can be a list — an array edited by position —
   or a text — a string typed into: `splice(id, key, index, count, content)`
   and `push(id, key, content)`, on the storage and on a live Record. Two

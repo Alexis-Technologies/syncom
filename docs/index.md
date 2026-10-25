@@ -64,8 +64,8 @@ features:
     link: /guide/telemetry
     linkText: OpenTelemetry
   - icon: 📦
-    title: Zero dependencies, about 66 KB
-    details: "Nothing is installed with it. The same API on Node.js and in the browser, picked by the browser export condition, and about 66 KB min+gzip for the browser — lists, text, trees, history, tags and diff included; undo and branches are subpaths — held to a budget in CI."
+    title: Zero dependencies, a core and blocks
+    details: "Nothing is installed with it. The same API on Node.js and in the browser, picked by the browser export condition. The core is about 54 KB min+gzip — records, log, queries, versions, sync — and the rest are blocks you import: lists and text, trees, undo, branches, search; all of it together about 68 KB, each held to a budget in CI."
     link: /guide/browser
     linkText: Browser
 ---

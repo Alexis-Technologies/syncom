@@ -8,7 +8,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs/promises');
-const syncom = require('..');
+const syncom = require('../src/all/all.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const { MemoryLink } = require('./utils/memory-link.js');
 const { waitUntil } = require('./utils/mesh.js');

@@ -17,7 +17,7 @@ const { opKey } = require('./vector.js');
 const { notify } = require('./hooks.js');
 const { GLOBAL_SCOPE, opInScope } = require('./scope.js');
 const { isKeyId } = require('./shape.js');
-const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf } = require('./protocol.js');
+const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf, kindsOf } = require('./protocol.js');
 
 const DEFAULT_PAGE_BYTES = 4 << 20;
 const TRACKED = Symbol.for('wrpc.tracked');
@@ -182,17 +182,18 @@ const hello = (host) => async (context, args) => {
   }
   const scopes = Array.isArray(args.scopes) ? args.scopes.filter((s) => typeof s === 'string') : [GLOBAL_SCOPE];
   const schema = schemaOf(args.schema);
+  const kinds = kindsOf(args.kinds);
   if (context?.client) {
     context.client.data ??= {};
     // A repeated hello keeps the rate bucket: greeting again is not a refill.
     const bucket = context.client.data.syncom?.bucket;
     const ref = { url: null, node: args.node };
-    context.client.data.syncom = { node: args.node, scopes, schema, bucket, ref };
+    context.client.data.syncom = { node: args.node, scopes, schema, kinds, bucket, ref };
     if (typeof context.client.join === 'function') {
       for (const scope of scopes) context.client.join(`syncom:${scope}`);
     }
   }
-  notify(host.manager, host.logger, 'hello', { node: args.node, scopes, schema });
+  notify(host.manager, host.logger, 'hello', { node: args.node, scopes, schema, kinds });
   host.drift(schema, { url: null, node: args.node });
   return {
     node: storage.nodeId,
@@ -200,6 +201,10 @@ const hello = (host) => async (context, args) => {
     epoch: storage.log.epoch,
     version: PROTOCOL,
     schema: schemaOf(storage.schemaInfo),
+    // The kinds this host can hold: a dialer that holds more does not
+    // bootstrap from here (KINDS_MISMATCH), since a snapshot of this host
+    // would lack those fields.
+    kinds: storage.kinds,
   };
 };
 

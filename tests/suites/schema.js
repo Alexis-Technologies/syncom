@@ -630,7 +630,7 @@ const runSchemaTests = async (t, assert, createStorage) => {
       authorize: (context, hello) => hello.schema?.version === 2,
     });
     await new MemoryLink(strict).call('syncom/hello', { node: 'x', version: 1, schema: { version: 2, hash: null } });
-    assert.deepStrictEqual(hellos, [{ node: 'x', scopes: ['*'], schema: { version: 2, hash: null } }]);
+    assert.deepStrictEqual(hellos, [{ node: 'x', scopes: ['*'], schema: { version: 2, hash: null }, kinds: null }]);
     await assert.rejects(
       () => new MemoryLink(strict).call('syncom/hello', { node: 'y', version: 1, schema: { version: 3, hash: 'h' } }),
       { code: 403 },
@@ -654,7 +654,7 @@ const runSchemaTests = async (t, assert, createStorage) => {
         schema: { version: 2, hash: b.schemaInfo.hash },
       },
     );
-    assert.deepStrictEqual(hellos.at(-1), { node: plain.nodeId, scopes: ['*'], schema: null });
+    assert.deepStrictEqual(hellos.at(-1), { node: plain.nodeId, scopes: ['*'], schema: null, kinds: plain.kinds });
     assert.deepStrictEqual(drifts.B.length, 1, 'no schema on one side: nothing to compare');
   });
 

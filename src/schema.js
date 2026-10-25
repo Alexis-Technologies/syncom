@@ -13,7 +13,7 @@
 // everything a validator returns or throws is normalized here, once, so the
 // write path sees `async (record) => validated` and nothing else.
 
-const { deepEqual } = require('./ops.js');
+const { deepEqual } = require('./shape.js');
 const { SyncomError } = require('./errors.js');
 
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);

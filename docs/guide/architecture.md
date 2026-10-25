@@ -234,23 +234,27 @@ the five functions an `fsi` implements.
 | Module | Role |
 | --- | --- |
 | `storage.js` | The facade: the open sequence, the mutation queue, the public API (a delegate per method of the two API modules), the `core` it lends |
-| `fields.js`, `versions.js` | The API of the field kinds beyond registers (`inc` … `treeRemove`, `spans`, `cursor`, `index`) and the versions API (`get(id, { at })`, `history`, `diff`, `applyPatches`, `restore`, `compact`, `tag`, `untag`, `at`), over the lent core |
+| `plugin.js` | The registry one `open({ plugins })` builds: kind modules and API modules, per storage, never process-wide; `PLUGIN_MISSING` |
+| `fields.js`, `versions.js` | The API of the core's kinds beyond registers (`inc`, `add`, `remove`) and the versions API (`get(id, { at })`, `history`, `diff`, `applyPatches`, `restore`, `compact`, `tag`, `untag`, `at`), over the lent core; a plugin's methods come with the plugin |
 | `commit.js`, `apply.js`, `bootstrap.js` | The three write paths |
 | `args.js`, `shape.js`, `options.js` | The checks at the edges: the write API's arguments (shared with the patches), record ids and a peer's op shape, `open()`'s options |
 | `entries.js`, `catalog.js`, `record.js` | Record files, the bounded cache, the catalog (ids, indexes, tombstones); `Record`, `Reference` and `Collection` |
 | `log.js`, `outbound.js` | `OpLog`, the persisted operation log: append, seal, retention, scrub, pins; the ops a receiver lacks, for a push and a branch merge |
-| `ops.js`, `vector.js` | The op model (`applyOp`, the kinds' precedence), clocks and version vectors |
-| `sequence.js`, `rle.js` | Lists and texts: Fugue runs, the walk and its cached index, a movable list's registers, marks, cursors; the run-length content of a run |
-| `tree.js`, `order.js` | Trees: every node's moves and their fold; fractional indexes, in the core for a node's place and the `@alexify/syncom/order` subpath |
-| `history.js`, `tags.js`, `patch.js`, `myers.js` | A version as a fold of the log; tags as copy-on-write record files; the patch vocabulary of `diff()` and `applyPatches()`; the Myers diff behind `updateText()` and the splices of a patch |
-| `undo.js`, `branch.js` | The `@alexify/syncom/undo` and `@alexify/syncom/branch` subpaths — over the public API, no engine bundled |
-| `chain.js`, `contract.js`, `crdt.js` | The hash-linked chain; the `@alexify/syncom/contracts` subpath; `diff`/`merge`/`apply` over plain objects |
+| `ops.js`, `vector.js` | The op model (`applyOp` over registers, counters, sets and one `blocks` slot per plugin kind; the kinds' precedence by the registry's ranks), clocks and version vectors |
+| `text/text.js`, `text/sequence.js`, `text/rle.js`, `text/myers.js` | The `@alexify/syncom/text` plugin: lists and texts — Fugue runs, the walk and its cached index, a movable list's registers, marks, cursors; the run-length content of a run; the Myers diff behind `updateText()` and the splices of a patch |
+| `tree/tree.js`, `tree/moves.js`, `order/order.js` | The `@alexify/syncom/tree` plugin: every node's moves and their fold; fractional indexes for a node's place and the `@alexify/syncom/order` subpath |
+| `all/all.js` | The `@alexify/syncom/all` entry: the core with every shipped plugin registered |
+| `history.js`, `tags.js`, `patch.js` | A version as a fold of the log; tags as copy-on-write record files; the patch vocabulary of `diff()` and `applyPatches()`, a plugin's kinds through the registry |
+| `undo/undo.js`, `branch/branch.js` | The `@alexify/syncom/undo` and `@alexify/syncom/branch` subpaths — over the public API, no engine bundled |
+| `chain.js`, `contracts/contracts.js`, `crdt.js` | The hash-linked chain; the `@alexify/syncom/contracts` subpath; `diff`/`merge`/`apply` over plain objects |
 | `schema.js`, `query.js` | Validators, versions and lenses; Mango cursors, `$text` among them |
-| `search.js` | The `@alexify/syncom/search` subpath: the trigram index behind `$text` — the core knows only its contract |
+| `search/search.js` | The `@alexify/syncom/search` subpath: the trigram index behind `$text` — the core knows only its contract |
 | `signing.js`, `keys.js`, `crypto.js` | What an op's signature covers, signing and verifying it; the key pairs on disk; hashing, sealing and signing |
-| `sync.js`, `hosting.js`, `link.js`, `wrpc.js`, `protocol.js`, `scope.js` | Dialing, hosting, the link contract, the wrpc adapter, what both halves agree on, what "in scope" means |
+| `sync.js`, `hosting.js`, `link.js`, `wrpc/wrpc.js`, `protocol.js`, `scope.js` | Dialing, hosting, the link contract, the wrpc adapter, what both halves agree on, what "in scope" means |
 | `hooks.js`, `emitter.js`, `logger.js`, `telemetry.js`, `errors.js` | Hooks and events, injected logging and OpenTelemetry, `SyncomError` |
-| `fsi.js`, `fsi.browser.js`, `idb.js`, `backend.js`, `lock.js` | `node:fs`, OPFS, IndexedDB and memory backends; one instance per directory |
+| `fsi.js`, `fsi.browser.js`, `idb/idb.js`, `backend.js`, `lock.js` | `node:fs`, OPFS, IndexedDB and memory backends; one instance per directory |
 
 The browser halves (`*.browser.js`) replace `fsi`, `crypto` and `utils` through the `browser`
-field of `package.json`; everything else is shared.
+field of `package.json`; everything else is shared. Every subpath is a folder under `src/` with
+its entry and its types beside it — the root holds `index.js`, `browser.js` and their `.d.ts`
+alone (see [Entry points](/guide/entry-points)).

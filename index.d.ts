@@ -174,6 +174,7 @@ export interface TreeNode {
  * skipped (Kleppmann et al., 2021).
  */
 export interface TreeBlock {
+  k: 'tree';
   /** The newest stamp the block holds. */
   ts: number;
   moves: { [node: string]: readonly (readonly [ts: number, origin: string, parent: string | null, fi: string])[] };
@@ -259,10 +260,8 @@ export interface EntryMeta {
    * is the greater.
    */
   sets: { [field: string]: { [elementKey: string]: { [origin: string]: readonly [number, number] } } };
-  /** A list or a text per field — see SequenceBlock. */
-  seqs: { [field: string]: SequenceBlock };
-  /** A tree per field — see TreeBlock. */
-  trees: { [field: string]: TreeBlock };
+  /** A field of a plugin's kind — a list or a text (SequenceBlock), a tree (TreeBlock) — by field; `k` names the kind, `ts` the newest stamp the block holds. */
+  blocks: { [field: string]: SequenceBlock | TreeBlock };
   /** The schema version of the last whole-record write (or of the `set` that created the entry). */
   v?: number;
   /** The stamp of a `purge`: the record is gone for good, whatever lands later. */
@@ -289,11 +288,12 @@ export type FieldKind = 'register' | 'counter' | 'set' | 'list' | 'text' | 'tree
  * (`'bound'`); a payload the engine does not admit (`'malformed'` — a
  * TypeError on the local path).
  */
-export type RefusalReason = FieldKind | 'bound' | 'malformed';
-/** One refused field: for `'bound'`, which bound (`detail`), the count and the limit. */
+export type RefusalReason = FieldKind | 'bound' | 'malformed' | 'kind';
+/** One refused field: for `'bound'`, which bound (`detail`), the count and the limit; for `'kind'`, the plugin the op needed (`kind`). */
 export interface Refusal {
   field: string | null;
   reason: RefusalReason;
+  kind?: string;
   detail?: 'pending' | 'run' | 'field' | 'counter';
   count?: number;
   max?: number;
@@ -322,6 +322,7 @@ export type SyncomErrorCode =
   | 'LOCKED'
   | 'KEYS_INCOMPLETE'
   | 'IDENTITY_MISMATCH'
+  | 'KINDS_MISMATCH'
   | 'BAD_SIGNATURE'
   | 'UNSIGNED'
   | 'BAD_ENVELOPE'
@@ -348,8 +349,8 @@ export type SyncomErrorCode =
 /**
  * What syncom rejects with when an operation cannot be done — as opposed to
  * a `TypeError`, which is a wrong argument, option or hook result and carries
- * no code (except `INVALID_ID`, `TYPE_IMMUTABLE`, `INVALID_VERSION` and
- * `NO_CHAIN`, whose value is data or configuration). `code` is one constant; the fields the code
+ * no code (except `INVALID_ID`, `TYPE_IMMUTABLE`, `INVALID_VERSION`,
+ * `NO_CHAIN` and `PLUGIN_MISSING`, whose value is data or configuration). `code` is one constant; the fields the code
  * documents (`op`, `cursor`, `rejected`…) ride on the error, `cause` is the
  * underlying one. A host's wire refusal is not one of these: it is a plain
  * `Error` with the numeric `code` the transport carries and a `reason`.
@@ -375,9 +376,13 @@ export class HookError extends SyncomError {
   readonly cause: unknown;
 }
 
-/** `limits.pendingMax` is the node's bound on a list or text field's pending work (`sync.pendingMax`). */
-export function applyOp(entry: Entry | null, op: SyncOp, limits?: { pendingMax?: number } | null): ApplyResult;
-export function mergeEntry(a: Entry | null, b: Entry | null): Entry | null;
+/** The node's bounds for a fold: `pendingMax`, a list or text field's pending work (`sync.pendingMax`), and `plugins`, the registry whose kinds the ops may be of (the core's alone when absent). */
+export interface FoldLimits {
+  pendingMax?: number;
+  plugins?: Plugins;
+}
+export function applyOp(entry: Entry | null, op: SyncOp, limits?: FoldLimits | null): ApplyResult;
+export function mergeEntry(a: Entry | null, b: Entry | null, limits?: FoldLimits | null): Entry | null;
 export function isAlive(entry: Entry | null): boolean;
 
 export interface LogEntry {
@@ -1168,6 +1173,12 @@ export interface StorageOptions<S extends Schema = Schema> {
   telemetry?: SyncomTelemetryOptions;
   /** Lifecycle hooks — see StorageHooks. */
   hooks?: StorageHooks;
+  /**
+   * The plugins this storage runs with — `text` from `@alexify/syncom/text`,
+   * `tree` from `/tree`… Registered per storage, never process-wide; a method
+   * of a plugin not given here throws `PLUGIN_MISSING` naming the subpath.
+   */
+  plugins?: readonly Plugin<any>[];
 }
 
 // The collections a schema turns into properties on the storage object:
@@ -1520,6 +1531,134 @@ export interface RecordEvents {
   update: (data: unknown, delta: unknown) => void;
 }
 
+// ---------------------------------------------------------------------------
+// Plugins (src/plugin.js)
+
+/**
+ * A plugin module, registered per storage with `open({ plugins })` — never
+ * process-wide. A kind module (`text` from `@alexify/syncom/text`, `tree`
+ * from `/tree`) brings field kinds, how their ops apply and the storage
+ * methods of its API; an API module brings methods and hooks over the core.
+ * `Api` is the methods the plugin adds to the storage: a compile-time
+ * shape, what `open()` intersects into its result.
+ */
+export interface Plugin<Api = {}> {
+  readonly name: string;
+  /** Phantom: the storage methods the plugin adds. Never read at run time. */
+  readonly api?: Api;
+}
+
+/** The registry `createPlugins()` builds — frozen, per storage: the names registered and every kind's rank in the precedence. */
+export interface Plugins {
+  readonly names: readonly string[];
+  readonly rank: { readonly [kind: string]: number };
+}
+
+/** Builds a registry from plugin modules; throws a TypeError naming what a module got wrong. */
+export function createPlugins(modules: readonly Plugin<any>[]): Plugins;
+
+type UnionToIntersection<U> = (U extends unknown ? (x: U) => void : never) extends (x: infer I) => void ? I : never;
+/** The methods the plugins of `P` add to a storage, intersected. */
+export type PluginMethods<P extends readonly Plugin<any>[]> = UnionToIntersection<
+  P[number] extends Plugin<infer A> ? A : never
+>;
+
+/** The storage methods the `text` plugin adds: lists and texts that merge by position (Fugue), marks, cursors. */
+export interface TextMethods {
+  /**
+   * Splices list or text field `key` at `index`: removes `count` elements
+   * and inserts `content` — an array for a list, a string for a text — in
+   * their place. The first write decides the kind; elements merge by
+   * position (Fugue), each writer's run whole. Creates the field, and the
+   * record, when absent; rejects with `OUT_OF_RANGE` past the length.
+   */
+  splice(
+    id: string,
+    key: string,
+    index: number,
+    count?: number,
+    content?: string | readonly unknown[],
+    options?: WriteOptions,
+  ): Promise<void>;
+  /** Appends `content` to list or text field `key` — a splice at the end. */
+  push(id: string, key: string, content: string | readonly unknown[], options?: WriteOptions): Promise<void>;
+  /**
+   * Makes text field `key` read as `text`: diffed inside the mutation queue
+   * (Myers), one `splice` per hunk, last first, in one turn of the queue.
+   * Resolves to how many ops it took.
+   */
+  updateText(id: string, key: string, text: string, options?: WriteOptions): Promise<number>;
+  /**
+   * Marks visible range `[start, end)` of text field `key` with `name: value`.
+   * `expand` says whether text typed at the edges takes the style ('after'
+   * by default); per name the newest mark wins; `many` makes it stack with
+   * every other of its name, removable only by id. Resolves to the mark's id.
+   */
+  mark(
+    id: string,
+    key: string,
+    start: number,
+    end: number,
+    name: string,
+    value: unknown,
+    options?: WriteOptions & { expand?: MarkExpand; many?: boolean },
+  ): Promise<string | null>;
+  /** Removes a style over `[start, end)` by name (under the reversed expand rule). */
+  unmark(
+    id: string,
+    key: string,
+    start: number,
+    end: number,
+    name: string,
+    options?: WriteOptions & { expand?: MarkExpand },
+  ): Promise<void>;
+  /** Switches one mark off by its id (what `mark()` resolved to) — the only way for a `many` mark. */
+  unmarkById(id: string, key: string, markId: string, options?: WriteOptions): Promise<void>;
+  /** Text field `key` as runs of equal style; raw (no lens, no read hooks); `null` unless the field is a text. */
+  spans(id: string, key: string): Promise<TextSpan[] | null>;
+  /**
+   * A cursor into list or text field `key`: a place that survives edits
+   * around it — before the element at `index`, or after the one before it.
+   * `null` out of range or when the field is not a list or a text.
+   */
+  cursor(id: string, key: string, index: number, options?: { side?: CursorSide }): Promise<string | null>;
+  /** Where `cursor` is now; `null` once its place is gone. */
+  index(id: string, key: string, cursor: string): Promise<number | null>;
+  /**
+   * Replaces the element at `index` of list field `key`: a register per
+   * element, last writer wins, following the element through a concurrent move.
+   */
+  setAt(id: string, key: string, index: number, value: unknown, options?: WriteOptions): Promise<void>;
+  /**
+   * Moves the element at `from` of list field `key` to `to`, its index once
+   * it is out. Two nodes moving one element concurrently leave it once, at
+   * the newer move's place; a move concurrent with a removal brings it back.
+   */
+  move(id: string, key: string, from: number, to: number, options?: WriteOptions): Promise<void>;
+}
+
+/** The storage methods the `tree` plugin adds: a movable tree per field. */
+export interface TreeMethods {
+  /**
+   * Puts node `node` of tree field `key` under `parent` (`null`: a root),
+   * after sibling `after`, before sibling `before`, or last. Creates the
+   * node, the field and the record when absent. Two nodes moving
+   * concurrently so that each would hang under the other: the newer move
+   * loses, on every node. Rejects with `CYCLE` for a parent under the node
+   * and `NOT_FOUND` for a sibling not under `parent`; no op when the node
+   * is already there.
+   */
+  treeMove(
+    id: string,
+    key: string,
+    node: string,
+    parent?: string | null,
+    options?: WriteOptions & { after?: string; before?: string },
+  ): Promise<void>;
+  /** Removes node `node` of tree field `key` with everything under it — a move under the trash. */
+  treeRemove(id: string, key: string, node: string, options?: WriteOptions): Promise<void>;
+}
+
 export interface Storage {
   /** The backend every file goes through — the adapter given to `open()` (wrapped when `durable`), or the platform's. */
   readonly fsi: Fsi;
@@ -1627,94 +1766,6 @@ export interface Storage {
   add(id: string, key: string, elements: readonly unknown[], options?: WriteOptions): Promise<void>;
   /** Removes from set field `key` the `elements` this node has seen added; one it never saw is left alone. */
   remove(id: string, key: string, elements: readonly unknown[], options?: WriteOptions): Promise<void>;
-  /**
-   * Splices list or text field `key` at `index`: removes `count` elements
-   * and inserts `content` — an array for a list, a string for a text — in
-   * their place. The first write decides the kind; elements merge by
-   * position (Fugue), each writer's run whole. Creates the field, and the
-   * record, when absent; rejects with `OUT_OF_RANGE` past the length.
-   */
-  splice(
-    id: string,
-    key: string,
-    index: number,
-    count?: number,
-    content?: string | readonly unknown[],
-    options?: WriteOptions,
-  ): Promise<void>;
-  /** Appends `content` to list or text field `key` — a splice at the end. */
-  push(id: string, key: string, content: string | readonly unknown[], options?: WriteOptions): Promise<void>;
-  /**
-   * Makes text field `key` read as `text`: diffed inside the mutation queue
-   * (Myers), one `splice` per hunk, last first, in one turn of the queue.
-   * Resolves to how many ops it took.
-   */
-  updateText(id: string, key: string, text: string, options?: WriteOptions): Promise<number>;
-  /**
-   * Marks visible range `[start, end)` of text field `key` with `name: value`.
-   * `expand` says whether text typed at the edges takes the style ('after'
-   * by default); per name the newest mark wins; `many` makes it stack with
-   * every other of its name, removable only by id. Resolves to the mark's id.
-   */
-  mark(
-    id: string,
-    key: string,
-    start: number,
-    end: number,
-    name: string,
-    value: unknown,
-    options?: WriteOptions & { expand?: MarkExpand; many?: boolean },
-  ): Promise<string | null>;
-  /** Removes a style over `[start, end)` by name (under the reversed expand rule). */
-  unmark(
-    id: string,
-    key: string,
-    start: number,
-    end: number,
-    name: string,
-    options?: WriteOptions & { expand?: MarkExpand },
-  ): Promise<void>;
-  /** Switches one mark off by its id (what `mark()` resolved to) — the only way for a `many` mark. */
-  unmarkById(id: string, key: string, markId: string, options?: WriteOptions): Promise<void>;
-  /** Text field `key` as runs of equal style; raw (no lens, no read hooks); `null` unless the field is a text. */
-  spans(id: string, key: string): Promise<TextSpan[] | null>;
-  /**
-   * A cursor into list or text field `key`: a place that survives edits
-   * around it — before the element at `index`, or after the one before it.
-   * `null` out of range or when the field is not a list or a text.
-   */
-  cursor(id: string, key: string, index: number, options?: { side?: CursorSide }): Promise<string | null>;
-  /** Where `cursor` is now; `null` once its place is gone. */
-  index(id: string, key: string, cursor: string): Promise<number | null>;
-  /**
-   * Replaces the element at `index` of list field `key`: a register per
-   * element, last writer wins, following the element through a concurrent move.
-   */
-  setAt(id: string, key: string, index: number, value: unknown, options?: WriteOptions): Promise<void>;
-  /**
-   * Moves the element at `from` of list field `key` to `to`, its index once
-   * it is out. Two nodes moving one element concurrently leave it once, at
-   * the newer move's place; a move concurrent with a removal brings it back.
-   */
-  move(id: string, key: string, from: number, to: number, options?: WriteOptions): Promise<void>;
-  /**
-   * Puts node `node` of tree field `key` under `parent` (`null`: a root),
-   * after sibling `after`, before sibling `before`, or last. Creates the
-   * node, the field and the record when absent. Two nodes moving
-   * concurrently so that each would hang under the other: the newer move
-   * loses, on every node. Rejects with `CYCLE` for a parent under the node
-   * and `NOT_FOUND` for a sibling not under `parent`; no op when the node
-   * is already there.
-   */
-  treeMove(
-    id: string,
-    key: string,
-    node: string,
-    parent?: string | null,
-    options?: WriteOptions & { after?: string; before?: string },
-  ): Promise<void>;
-  /** Removes node `node` of tree field `key` with everything under it — a move under the trash. */
-  treeRemove(id: string, key: string, node: string, options?: WriteOptions): Promise<void>;
   /**
    * Compare-and-swap: writes `changes` only if every field of `prev` still
    * holds its value, compared inside the mutation queue — two concurrent
@@ -1920,7 +1971,9 @@ export declare const SyncomRecordCtor: {
 
 export interface StorageConstructor {
   readonly prototype: Storage;
-  new <S extends Schema = Schema>(options?: StorageOptions<S>): Promise<Storage & Collections<S>>;
+  new <S extends Schema = Schema, const P extends readonly Plugin<any>[] = []>(
+    options?: StorageOptions<S> & { plugins?: P },
+  ): Promise<Storage & Collections<S> & PluginMethods<P>>;
   Collection: typeof SyncomCollection;
   Record: typeof SyncomRecordCtor;
   // The default `getId` — synchronous in both halves, unlike the crypto three.
@@ -1934,4 +1987,6 @@ export namespace Storage {
   export type StorageCollection = SyncomCollection;
 }
 
-export function open<S extends Schema = Schema>(options?: StorageOptions<S>): Promise<Storage & Collections<S>>;
+export function open<S extends Schema = Schema, const P extends readonly Plugin<any>[] = []>(
+  options?: StorageOptions<S> & { plugins?: P },
+): Promise<Storage & Collections<S> & PluginMethods<P>>;

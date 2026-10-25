@@ -5,7 +5,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const syncom = require('..');
+const syncom = require('../src/all/all.js');
 const { packOps, unpackOps } = require('../src/ops.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const { createMesh, settle, waitUntil } = require('./utils/mesh.js');

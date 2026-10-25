@@ -8,7 +8,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const syncom = require('..');
+const syncom = require('../src/all/all.js');
 const { typed } = require('../src/errors.js');
 const { createMemoryFsi } = require('../src/backend.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');

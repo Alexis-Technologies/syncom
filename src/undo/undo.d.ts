@@ -2,7 +2,7 @@
 // writes, fed by the storage's `commit` events, applied as new ops through
 // `applyPatches()` so an undo merges like any write. Platform-neutral.
 
-import type { Storage, SyncOp } from './index.js';
+import type { Storage, SyncOp } from '../../index.js';
 
 export interface UndoOptions {
   /** Commits within this many ms of a step's first merge into it; 500 by default. */

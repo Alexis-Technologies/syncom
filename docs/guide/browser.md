@@ -89,9 +89,11 @@ available in current Chrome, Edge, Firefox and Safari. Both APIs require a
 
 ## Bundle size
 
-The browser entry is measured on every CI run with a budget that fails the
-build when exceeded — 66 KB min+gzip — and so is every subpath, on its own row
-with its own budget, so what an app imports is what it ships:
+The browser entry — the core — is measured on every CI run with a budget
+that fails the build when exceeded — 54 KB min+gzip — and so is every
+subpath, on its own row with its own budget (`/text` 15 KB, `/tree` 5.5 KB,
+`/all`, everything registered, 68.5 KB), so what an app imports is what it
+ships (see [Entry points](/guide/entry-points)):
 
 ```bash
 pnpm size

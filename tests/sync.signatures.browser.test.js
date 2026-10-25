@@ -2,13 +2,13 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { installBrowserGlobals, requireBrowserBarrel } = require('./utils/browser-env.js');
+const { installBrowserGlobals, requireBrowserAll } = require('./utils/browser-env.js');
 const { runSignatureTests } = require('./suites/signatures.js');
 
 test('Signatures (browser halves)', async (t) => {
   const env = installBrowserGlobals();
   t.after(() => env.uninstall());
-  const browser = requireBrowserBarrel();
+  const browser = requireBrowserAll();
 
   let n = 0;
   await runSignatureTests(t, assert, async (t2, name, options = {}) => {

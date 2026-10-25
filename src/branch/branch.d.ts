@@ -2,7 +2,7 @@
 // new identity standing at the parent's state or at a tag of it — merged
 // back, or the parent into it, as ops. Platform-neutral; bundles no engine.
 
-import type { Storage, StorageOptions, VersionVector } from './index.js';
+import type { Storage, StorageOptions, VersionVector } from '../../index.js';
 
 export interface BranchOptions extends Omit<StorageOptions, 'path'> {
   /** The branch's directory — a new one. */

@@ -161,7 +161,7 @@ const runBranchTests = async (t, assert, createStorage, branchPath) => {
     assert.deepStrictEqual(await dump(child), await dump(parent));
     // The blocks agree, not only what they read as.
     const metas = async (storage) =>
-      (await storage.snapshot()).records.map((r) => [r.id, r.meta.seqs ?? {}, r.meta.counters]);
+      (await storage.snapshot()).records.map((r) => [r.id, r.meta.blocks ?? {}, r.meta.counters]);
     assert.deepStrictEqual(await metas(child), await metas(parent));
     const path = child.path;
     const { fsi } = child;

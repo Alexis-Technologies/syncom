@@ -12,9 +12,7 @@
 
 const { commit, rehearse } = require('./commit.js');
 const { snapshotPage } = require('./bootstrap.js');
-const { isAlive, deepEqual, kindsOf, seqIndexOf } = require('./ops.js');
-const { MAX_RUN } = require('./text/rle.js');
-const { marksIn } = require('./text/sequence.js');
+const { isAlive, deepEqual, kindsOf } = require('./ops.js');
 const { Cursor } = require('./query.js');
 const { appliedHere, parseVersion, within, exactStart, fold, gone } = require('./history.js');
 const { diffViews, realize } = require('./patch.js');
@@ -193,9 +191,10 @@ const diff = async (core, id, from, to) => {
   const [was, now] = await Promise.all([entryOf(core, id, from), entryOf(core, id, to)]);
   if (was?.encrypted || now?.encrypted) throw sealed(id);
   const live = async (entry) =>
-    entry !== null && isAlive(entry) ? [await core.view(id, entry), kindsOf(entry)] : [null, {}];
+    entry !== null && isAlive(entry) ? [await core.view(id, entry), kindsOf(entry, core.plugins)] : [null, {}];
   const [[before, beforeKinds], [after, afterKinds]] = await Promise.all([live(was), live(now)]);
-  return asJson(diffViews(before, beforeKinds, after, afterKinds, { purged: now?.meta.purged != null }));
+  const purged = now?.meta.purged != null;
+  return asJson(diffViews(before, beforeKinds, after, afterKinds, { purged, plugins: core.plugins }));
 };
 
 /**
@@ -210,7 +209,7 @@ const diff = async (core, id, from, to) => {
 const applyPatches = async (core, id, patches, { actor, source = null } = {}) => {
   if (!isRecordId(id)) throw invalidId(id);
   if (!Array.isArray(patches)) throw new TypeError('applyPatches() takes an array of patches');
-  const ops = patches.map(realize);
+  const ops = patches.map((patch) => realize(patch, core.plugins));
   const apply = async () => {
     // Every op resolved and applied over a scratch record first — an index
     // out of range, a kind clash, a cycle, a type change — so nothing is
@@ -243,36 +242,7 @@ const applyPatches = async (core, id, patches, { actor, source = null } = {}) =>
  */
 const restore = async (core, id, at, { actor, source = null } = {}) => {
   if (at === undefined) throw new TypeError('restore() takes a version');
-  return applyPatches(core, id, inRuns(await diff(core, id, undefined, at)), { actor, source });
-};
-
-// A field made again whole is laid in runs of at most MAX_RUN elements: one
-// splice is one run, and a run holds no more (src/rle.js).
-const inRuns = (patches) =>
-  patches.flatMap((patch) => {
-    const { action, count, content } = patch;
-    if (action !== 'splice' || count !== 0 || content === undefined || content.length <= MAX_RUN) return [patch];
-    const runs = [];
-    for (let at = 0; at < content.length; at += MAX_RUN) {
-      runs.push({ ...patch, index: patch.index + at, content: content.slice(at, at + MAX_RUN) });
-    }
-    return runs;
-  });
-
-// A text's marks laid again over the field `compact()` makes anew: the ones
-// in force, in stamp order, as `mark` patches (src/sequence.js marksIn).
-const marksOf = (entry, kinds) => {
-  const patches = [];
-  for (const field of Object.keys(kinds)) {
-    if (kinds[field] !== 'text') continue;
-    for (const m of marksIn(seqIndexOf(entry, field), entry.meta.seqs[field], entry.meta.base)) {
-      const patch = { action: 'mark', field, start: m.start, end: m.end, name: m.key, value: m.value };
-      patch.expand = m.expand;
-      if (m.many) patch.many = true;
-      patches.push(patch);
-    }
-  }
-  return patches;
+  return applyPatches(core, id, await diff(core, id, undefined, at), { actor, source });
 };
 
 /**
@@ -296,8 +266,13 @@ const compact = async (core, id, { actor, source = null } = {}) => {
   if (entry?.encrypted) throw sealed(id);
   if (entry === null || !isAlive(entry)) return 0;
   const view = await core.view(id, entry);
-  const kinds = kindsOf(entry);
-  const patches = [...inRuns(diffViews(null, {}, view, kinds)), ...marksOf(entry, kinds)];
+  const kinds = kindsOf(entry, core.plugins);
+  const patches = diffViews(null, {}, view, kinds, { plugins: core.plugins });
+  // What a plugin lays after the field is made again (a text's marks).
+  for (const field of Object.keys(kinds)) {
+    const mod = core.plugins.byName[kinds[field]];
+    if (mod !== undefined) patches.push(...mod.compact(entry, field, kinds[field]));
+  }
   return applyPatches(core, id, patches, { actor, source });
 };
 

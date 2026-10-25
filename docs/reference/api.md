@@ -1,6 +1,13 @@
 # API reference
 
-Everything below is exported from the package root, except seven subpaths: the
+Everything below is exported from the package root — the core: records with
+registers, counters and sets, the log, the write paths, queries, versions and
+sync — except the subpaths. The kinds beyond those are plugins:
+[`@alexify/syncom/text`](#text-subpath) (lists and texts) and
+[`@alexify/syncom/tree`](#tree-subpath), registered with `open({ plugins })`;
+[`@alexify/syncom/all`](#all-subpath) is the core with every shipped plugin
+registered — the API as one import (see [Entry points](../guide/entry-points)).
+The other subpaths: the
 wrpc adapter, [`@alexify/syncom/wrpc`](#wrpc-adapter), the smart contracts,
 [`@alexify/syncom/contracts`](#contracts-subpath), the IndexedDB backend,
 [`@alexify/syncom/idb`](#backends) (`createIdbFsi`), the text index,
@@ -35,11 +42,16 @@ Returns `Promise<Storage>`. Takes an options object only — `open('./dir')` is 
 [valid id](../guide/storage#custom-identifiers)), `logger`, `encrypted`,
 `sync` (see [Sync options](../guide/sync#options)), `telemetry` (see
 [OpenTelemetry](../guide/telemetry)), `hooks` (see
-[Hooks and events](../guide/hooks)).
+[Hooks and events](../guide/hooks)), `plugins` (the kind plugins this storage
+runs with — `[text, tree]` from their subpaths; see [Plugins](#plugins)).
 
 ### `Storage`
 
 `await new Storage(options)` — `open()` is the shorthand. Extends `Emitter`.
+The list, text and tree methods below (`splice` … `treeRemove`, `spans`,
+`cursor`, `index`) are the `text` and `tree` plugins' — on a storage opened
+without the plugin they reject with a `TypeError` `code: 'PLUGIN_MISSING'`
+naming the subpath; `@alexify/syncom/all` has both.
 
 | Method | Returns | Notes |
 | --- | --- | --- |
@@ -221,8 +233,8 @@ What syncom rejects with when an operation cannot be done: `name`
 `'SyncomError'`, a `code` from the table below, the fields the code lists,
 and `cause` when an underlying error exists. A `TypeError` is the other kind
 — a wrong argument, option or hook result, a bug in the calling code — and
-carries no code, except `INVALID_ID`, `TYPE_IMMUTABLE`, `INVALID_VERSION` and
-`NO_CHAIN`, whose value is data or configuration (the rows below say "a
+carries no code, except `INVALID_ID`, `TYPE_IMMUTABLE`, `INVALID_VERSION`,
+`NO_CHAIN` and `PLUGIN_MISSING`, whose value is data or configuration (the rows below say "a
 `TypeError`"). `HookError` and `ValidationError` are
 `SyncomError`s. Exported from the package root; the union of codes is the
 `SyncomErrorCode` type.
@@ -262,10 +274,12 @@ carries no code, except `INVALID_ID`, `TYPE_IMMUTABLE`, `INVALID_VERSION` and
 | `UNPERSISTED` | the storage's `error` event: ops were logged — the write stands, and replicates — but their record files (or chain block, or a tag's copy) could not be written; the records are held in memory and the next open replays the batch onto the files. Also `tag()` while a record is held: no file to copy from until it lands | `ids`, `cause` (the event's) |
 | `REWOUND` | the sync `error` event, at a hello: the host holds more of this node's own ops than its log does — a directory restored from an older copy, or another instance with this identity. The node moves its streams past the host's and bootstraps from it; writes made since the restore and before this hello are lost to the host | `url`, `local`, `remote` (vector keys of this node → seq) |
 | `UNDELIVERABLE` | the sync `error` event, once per hello: the host lacks ops of this node's own that its log no longer retains (written before any node was registered, and compacted since); they are not sent | `url`, `missing` (key → `{ host, retained }`) |
+| `KINDS_MISMATCH` | the sync `error` event, when a bootstrap would start: the host's `hello` named fewer kinds than this node runs with (a text node joining a core-only host), so its snapshot would lack those fields and the adopted vector would hide the ops behind them; nothing is joined, the feed is left to resume | `url`, `node`, `missing` (the kind names) |
 | `SKEW`, `OP_UNREADABLE`, `OP_REFUSED`, `OP_INVALID` | the storage `error` event — see [`Storage`](#storage) | `op`, plus `rejected` / `entity` + `issues`; `cause` for `OP_UNREADABLE` |
 | `INVALID_ID` | every writer, `repair()`, `diff()`, `applyPatches()`, `compact()`, `spans()`, `cursor()`, `index()` given an id that is not a [valid id](../guide/storage#custom-identifiers) — and `insert()` when `getId` mints one (a `TypeError`); `get()`, `has()` and `history()` answer as for an absent record | — |
 | `TYPE_IMMUTABLE` | a local `set()`, `update()`, `swap()`, `record.save()` or patch whose data names another `$type` than the record's (a `TypeError`) | — |
 | `NO_CHAIN` | `validate()` under `open({ chain: false })` (a `TypeError`) | — |
+| `PLUGIN_MISSING` | a method, a patch action or a local op of a kind the storage was not opened with — `splice()` without the `text` plugin — and `open()` of a directory that ran with a kind the call lacks (a `TypeError`; the message names the subpath) | — |
 | `HOOK_FAILED` | a `HookError` | `hook`, `cause` |
 | `VALIDATION_FAILED` | a `ValidationError` | `entity`, `issues`, `cause` |
 
@@ -333,7 +347,7 @@ event).
 | `flush()` | Seals the open files now (what `applied` allows) |
 | `close()` | Seals what can be sealed and writes the index |
 
-### `applyOp(entry, op, { pendingMax }?)` / `mergeEntry(a, b)` / `isAlive(entry)`
+### `applyOp(entry, op, { pendingMax, plugins }?)` / `mergeEntry(a, b, { plugins }?)` / `isAlive(entry)`
 
 The record-level model: apply one op to an entry (`{ entry, changed, delta,
 rejected }`, `rejected` the refused fields as the `error` event carries them;
@@ -451,6 +465,62 @@ server, OPFS in the browser — as those five functions, and:
 `@alexify/syncom/idb` is the IndexedDB backend: `createIdbFsi({ name, store,
 indexedDB }?)` returns an fsi over one object store, with a `close()` of its
 own (see [Browser](../guide/browser)).
+
+## Plugins
+
+### `createPlugins(modules)`
+
+The registry one `open({ plugins })` builds, frozen: `names`, `rank` (every
+kind's place in the precedence — register 0, counter 1, set 2, then the
+plugins' kinds) and what the core calls per module. A module that gets
+something wrong — a rank below 3 or taken, a block code or an op type claimed
+twice, a type the protocol has not, a `requires` not registered before it —
+is a `TypeError` naming it. `storage.plugins` lists the names a storage runs
+with, `storage.kinds` the kind plugins among them (what `hello` carries).
+
+A kind the storage was not opened with: a method, a patch action or a local
+op of it is a `TypeError` with `code: 'PLUGIN_MISSING'` naming the subpath; a
+peer's op of it is refused as `reason: 'kind'` — logged and relayed, so a hub
+without the plugin still carries it; a snapshot block of it is left out
+(`sync.record.kind`); a reopen of a directory that ran with it is refused the
+same way (`node.json` names the kinds); and the node does not bootstrap from a
+host that lacks one of its own (`KINDS_MISMATCH`).
+
+## All (subpath)
+
+```js
+const { open, Storage, applyOp, mergeEntry, text, tree, PLUGINS } = require('@alexify/syncom/all');
+```
+
+Everything the root exports, plus `open()`/`Storage` with every shipped plugin
+registered ahead of the caller's (`text`, `tree`; a plugin given twice is
+given once), `applyOp`/`mergeEntry` folding under the same registry, the
+plugins themselves and `PLUGINS`, the list. The API of the package before it
+was taken apart into blocks: what the tests and the examples open.
+
+## Text (subpath)
+
+```js
+const { text } = require('@alexify/syncom/text');
+const storage = await open({ plugins: [text] });
+```
+
+The `list` and `text` kinds: the sequence engine (Fugue runs, run-length
+content, marks, cursors) and the methods it adds — `splice`, `push`,
+`updateText`, `mark`, `unmark`, `unmarkById`, `spans`, `cursor`, `index`,
+`setAt`, `move` (see [Lists, text and trees](../guide/lists)). Patches of
+`splice` and `mark`, `migrate()` of the two kinds and `compact()`'s marks are
+its too.
+
+## Tree (subpath)
+
+```js
+const { tree } = require('@alexify/syncom/tree');
+const storage = await open({ plugins: [tree] });
+```
+
+The `tree` kind: a movable tree per field and `treeMove`, `treeRemove`; the
+`treeMove`/`treeRemove` patches and `migrate()` of trees.
 
 ## Order (subpath)
 

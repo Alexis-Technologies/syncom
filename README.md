@@ -76,19 +76,26 @@ npm install @alexify/syncom
 
 Measured by `pnpm size` on every CI run. Every browser entry carries a budget
 that fails the build when exceeded; a subpath is off the main entry, so an app
-pays for what it imports.
+pays for what it imports. The main entry is the core — records, the log,
+queries, versions, sync; lists, texts and trees are the `text` and `tree`
+plugins (`@alexify/syncom/text`, `/tree`), and `@alexify/syncom/all` is the
+core with every plugin registered (see
+[Entry points](https://syncomjs.vercel.app/guide/entry-points)).
 
 | Entry | raw | min | min+gzip | budget |
 | ----- | ---:| ---:| --------:| ------:|
-| main entry — browser (@alexify/syncom) | 456.0 KB | 193.2 KB | 66.0 KB | 66.0 KB |
-| main entry — node (@alexify/syncom) | 432.8 KB | 192.2 KB | 65.6 KB | — |
-| wrpc adapter — browser (@alexify/syncom/wrpc) | 3.4 KB | 1.4 KB | 0.7 KB | 2.0 KB |
-| contracts — browser (@alexify/syncom/contracts) | 3.7 KB | 1.6 KB | 0.8 KB | 1.0 KB |
-| idb backend — browser (@alexify/syncom/idb) | 3.7 KB | 1.7 KB | 0.8 KB | 2.0 KB |
-| search — browser (@alexify/syncom/search) | 4.2 KB | 1.7 KB | 0.9 KB | 2.0 KB |
-| order — browser (@alexify/syncom/order) | 4.9 KB | 2.3 KB | 1.0 KB | 1.5 KB |
-| undo — browser (@alexify/syncom/undo) | 36.1 KB | 16.3 KB | 6.1 KB | 6.5 KB |
-| branch — browser (@alexify/syncom/branch) | 14.8 KB | 7.4 KB | 3.2 KB | 3.5 KB |
+| main entry — browser (@alexify/syncom) | 380.0 KB | 158.1 KB | 53.7 KB | 54.0 KB |
+| main entry — node (@alexify/syncom) | 360.4 KB | 157.1 KB | 53.4 KB | — |
+| wrpc adapter — browser (@alexify/syncom/wrpc) | 3.2 KB | 1.4 KB | 0.7 KB | 2.0 KB |
+| contracts — browser (@alexify/syncom/contracts) | 3.5 KB | 1.6 KB | 0.8 KB | 1.0 KB |
+| idb backend — browser (@alexify/syncom/idb) | 3.5 KB | 1.6 KB | 0.8 KB | 2.0 KB |
+| search — browser (@alexify/syncom/search) | 4.1 KB | 1.6 KB | 0.9 KB | 2.0 KB |
+| order — browser (@alexify/syncom/order) | 4.7 KB | 2.2 KB | 1.0 KB | 1.5 KB |
+| undo — browser (@alexify/syncom/undo) | 34.5 KB | 16.2 KB | 6.0 KB | 6.5 KB |
+| branch — browser (@alexify/syncom/branch) | 15.4 KB | 7.7 KB | 3.4 KB | 3.5 KB |
+| all — browser (@alexify/syncom/all) | 468.6 KB | 199.5 KB | 68.3 KB | 68.5 KB |
+| text — browser (@alexify/syncom/text) | 82.8 KB | 39.3 KB | 14.3 KB | 15.0 KB |
+| tree — browser (@alexify/syncom/tree) | 27.6 KB | 13.3 KB | 5.1 KB | 5.5 KB |
 
 ## Quick Start
 

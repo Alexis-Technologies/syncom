@@ -62,6 +62,22 @@ const requireBrowserBarrel = () => {
   return require('../../src/index.browser.js');
 };
 
+// The same graph with every shipped plugin registered (src/all/all.js): the
+// barrel it requires is primed with the browser one first.
+const requireBrowserAll = () => {
+  const browser = requireBrowserBarrel();
+  const nodePath = path.join(ROOT, 'src', 'index.js');
+  if (!require.cache[nodePath]) {
+    const twin = new Module(nodePath, module);
+    twin.filename = nodePath;
+    twin.paths = Module._nodeModulePaths(path.dirname(nodePath));
+    twin.exports = browser;
+    twin.loaded = true;
+    require.cache[nodePath] = twin;
+  }
+  return require('../../src/all/all.js');
+};
+
 // A Web Locks API on the mock navigator: exclusive, by name, with the
 // `ifAvailable` answer of `null` — what src/lock.js reads of the real one.
 const installMockLocks = () => {
@@ -93,4 +109,4 @@ const installMockLocks = () => {
   };
 };
 
-module.exports = { installBrowserGlobals, requireBrowserBarrel, installMockLocks };
+module.exports = { installBrowserGlobals, requireBrowserBarrel, requireBrowserAll, installMockLocks };

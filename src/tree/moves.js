@@ -43,7 +43,7 @@ const own = (object, key) => (Object.hasOwn(object, key) ? object[key] : undefin
 const byStamp = (a, b) => compareClock([a[0], a[1]], [b[0], b[1]]);
 const byNode = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
-const createTree = () => ({ ts: 0, moves: {} });
+const createTree = () => ({ k: 'tree', ts: 0, moves: {} });
 
 const stampsMax = (tree) => {
   let ts = 0;
@@ -75,7 +75,7 @@ const normalizeTree = (raw) => {
   return tree;
 };
 
-const cloneTree = (tree) => ({ ts: tree.ts, moves: { ...tree.moves } });
+const cloneTree = (tree) => ({ k: 'tree', ts: tree.ts, moves: { ...tree.moves } });
 
 // A `tree` op: one more move of the node, kept in stamp order; the same
 // stamp twice changes nothing.

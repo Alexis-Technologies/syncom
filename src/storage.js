@@ -22,7 +22,7 @@ const F = require('./fields.js');
 const V = require('./versions.js');
 const { applyBatch } = require('./apply.js');
 const { snapshotPage, mergeBatch, adopt } = require('./bootstrap.js');
-const { applyOp, isAlive, isCounter, isSet, isSeq, isTree } = require('./ops.js');
+const { applyOp, isAlive, kindOf } = require('./ops.js');
 const { appliedHere } = require('./history.js');
 const { Tags } = require('./tags.js');
 const { Clock } = require('./vector.js');
@@ -36,7 +36,8 @@ const { createTelemetry, traced, now } = require('./telemetry.js');
 const { GLOBAL_SCOPE } = require('./scope.js');
 const { normalizeStorageOptions } = require('./options.js');
 const { isPlainObject, isRecordId, invalidId, isStreamName, isKeyId, VALIDATED } = require('./shape.js');
-const { COMMIT, REFRESH, SOURCE } = require('./symbols.js');
+const { COMMIT, REFRESH, SOURCE, PLUGINS } = require('./symbols.js');
+const { missing } = require('./plugin.js');
 const { SyncomError, typed } = require('./errors.js');
 
 const NODE_FILE = 'node.json';
@@ -100,6 +101,7 @@ class Storage extends Emitter {
   #scopeOf;
   #maxSkew;
   #limits;
+  #plugins;
   // Local writes whose record files wait (`open({ defer })`): id → the
   // entry to write and the log positions it covers; one timer for the flush.
   #defer = 0;
@@ -137,7 +139,8 @@ class Storage extends Emitter {
     this.#maxSkew = settings.maxSkew;
     // What the op model is told to bound (src/ops.js applyOp): the pending
     // work of a list or text field. Every fold of the log runs under it too.
-    this.#limits = { pendingMax: settings.pendingMax };
+    this.#plugins = settings.plugins;
+    this.#limits = { pendingMax: settings.pendingMax, plugins: settings.plugins };
     this.#defer = settings.defer;
     this.#signatures = settings.signatures;
     // Live Records, weakly: one the application still holds pins its cache
@@ -312,6 +315,7 @@ class Storage extends Emitter {
       ahead: this.#ahead,
       maxSkew: this.#maxSkew,
       limits: this.#limits,
+      plugins: this.#plugins,
       defer: this.#defer,
       deferred: (id, entry, position) => this.#deferWrite(id, entry, position),
       signatures: this.#signatures,
@@ -342,6 +346,10 @@ class Storage extends Emitter {
       entities: this.#entities,
       run: (task) => this.#run(task),
       commit: (type, id, payload, options) => this[COMMIT](type, id, payload, options),
+      // The same write from INSIDE a task of the queue (`core.run`), where
+      // `commit` would wait for itself; and whether an entry is live.
+      commitNow: (type, id, payload, options) => commit(this.#core, type, id, payload, options),
+      alive: isAlive,
       forget: (id) => this.#records.delete(id),
       flushDeferred: () => this.#flushDeferred(),
       // A purge reaches the log and the tags alike.
@@ -519,45 +527,32 @@ class Storage extends Emitter {
       if (entities !== null && !entities.includes(entry.data.$type)) continue;
       const view = await this.#view(id, entry);
       const data = {};
-      const counters = {};
-      const sets = {};
-      const seqs = {};
-      const trees = {};
+      const kinds = {};
       for (const key of Object.keys(view)) {
-        if (isCounter(entry.meta, key)) counters[key] = entry.data[key];
-        else if (isSet(entry.meta, key)) sets[key] = entry.data[key];
-        else if (isSeq(entry.meta, key)) seqs[key] = entry.data[key];
-        else if (isTree(entry.meta, key)) trees[key] = entry.data[key];
-        else data[key] = view[key];
+        const kind = kindOf(entry, key, this.#plugins);
+        if (kind === undefined || kind === 'register') data[key] = view[key];
+        else kinds[key] = kind;
       }
       await this[COMMIT]('write', id, { data }, { actor });
-      for (const key of Object.keys(counters)) {
-        await this[COMMIT]('inc', id, { key, value: counters[key] }, { actor });
-        result.counters++;
-      }
-      // A set with nothing live has nothing to add back: it is dropped.
-      for (const key of Object.keys(sets)) {
-        if (sets[key].length === 0) continue;
-        await this[COMMIT]('add', id, { key, value: sets[key] }, { actor });
-        result.sets++;
-      }
-      // A list or a text comes back as one run; an empty one is dropped.
-      for (const key of Object.keys(seqs)) {
-        if (seqs[key].length === 0) continue;
-        await this[COMMIT]('splice', id, { key, index: 0, count: 0, content: seqs[key] }, { actor });
-        if (typeof seqs[key] === 'string') result.texts++;
-        else result.lists++;
-      }
-      // A tree comes back as one move per node it reads with, parents
-      // first, in order; what hangs in the trash is dropped, and so is a
-      // tree with nothing to read.
-      for (const key of Object.keys(trees)) {
-        const stack = trees[key].map((root) => [root, null]).reverse();
-        if (stack.length > 0) result.trees++;
-        while (stack.length > 0) {
-          const [{ id: node, children }, parent] = stack.pop();
-          await this[COMMIT]('tree', id, { key, node, parent }, { actor });
-          for (let i = children.length - 1; i >= 0; i--) stack.push([children[i], node]);
+      for (const key of Object.keys(kinds)) {
+        const kind = kinds[key];
+        const value = entry.data[key];
+        if (kind === 'counter') {
+          await this[COMMIT]('inc', id, { key, value }, { actor });
+          result.counters++;
+        } else if (kind === 'set') {
+          // A set with nothing live has nothing to add back: it is dropped.
+          if (value.length === 0) continue;
+          await this[COMMIT]('add', id, { key, value }, { actor });
+          result.sets++;
+        } else {
+          // A plugin's field comes back as the ops its module lays — a list
+          // or a text as one run, a tree as one move per node, parents first
+          // — and one with nothing to read is dropped.
+          const ops = this.#plugins.byName[kind].migrate(kind, key, value);
+          if (ops.length === 0) continue;
+          for (const [type, payload] of ops) await this[COMMIT](type, id, payload, { actor });
+          result[`${kind}s`] = (result[`${kind}s`] ?? 0) + 1;
         }
       }
       result.migrated++;
@@ -577,28 +572,41 @@ class Storage extends Emitter {
   // with a warning. node.json naming ANOTHER key is refused: an id that
   // changed in silence would break SELF detection and every peer's echo
   // filter, and a key pair restored from elsewhere is a thing to be told.
+  // node.json also names the kind plugins the directory has run with: a
+  // reopen without one of them would hold records whose fields it cannot
+  // apply and lose them at the next write, so it is refused (PLUGIN_MISSING,
+  // naming the plugin); more plugins than before is fine and is recorded.
   async #loadIdentity() {
     const keyId = this.#signing.id;
+    const kinds = this.#plugins.kinds.map((mod) => mod.name);
+    let stored = null;
     if (await this.#fsi.exists(this.#path, NODE_FILE)) {
-      let id;
       try {
-        ({ id } = JSON.parse(await this.#fsi.read(this.#path, NODE_FILE)));
+        stored = JSON.parse(await this.#fsi.read(this.#path, NODE_FILE));
       } catch (error) {
         throw corrupt(NODE_FILE, error);
       }
+      const { id } = stored;
       if (!isStreamName(id)) throw corrupt(NODE_FILE, 'no node id in it');
+      const ran = Array.isArray(stored.plugins) ? stored.plugins.filter((name) => typeof name === 'string') : [];
+      const lacking = ran.filter((name) => !kinds.includes(name));
+      if (lacking.length > 0) {
+        const [name] = lacking;
+        const message = `${NODE_FILE} says this storage runs with the ${name} plugin: open({ plugins }) with it from '@alexify/syncom/${name}'`;
+        throw typed('PLUGIN_MISSING', message);
+      }
       if (id === keyId) {
         this.#nodeId = keyId;
-        return;
-      }
-      if (isKeyId(id)) {
+        if (lacking.length === 0 && ran.length === kinds.length) return;
+      } else if (isKeyId(id)) {
         const message = `${NODE_FILE} names node ${id}, but keys/sign-public.pem is ${keyId}`;
         throw new SyncomError('IDENTITY_MISMATCH', message, { id, key: keyId });
+      } else {
+        this.#logger.warn({ event: 'identity.rekeyed', from: id, to: keyId });
       }
-      this.#logger.warn({ event: 'identity.rekeyed', from: id, to: keyId });
     }
     this.#nodeId = keyId;
-    await this.#fsi.write(this.#path, NODE_FILE, JSON.stringify({ id: keyId }));
+    await this.#fsi.write(this.#path, NODE_FILE, JSON.stringify({ id: keyId, plugins: kinds }));
   }
 
   // The log is written before the record files are: a crash in between
@@ -740,6 +748,21 @@ class Storage extends Emitter {
   /** `'verify'`, `'require'` or `false` — `open({ sync: { signatures } })`. */
   get signatures() {
     return this.#signatures;
+  }
+
+  /** The names of the plugins this storage was opened with (`open({ plugins })`). */
+  get plugins() {
+    return this.#plugins.names;
+  }
+
+  /** The names of the kind plugins among them — what hello tells a peer this node can hold. */
+  get kinds() {
+    return this.#plugins.kinds.map((mod) => mod.name);
+  }
+
+  // The registry itself, for the subpaths that fold patches or open a fork.
+  get [PLUGINS]() {
+    return this.#plugins;
   }
 
   get path() {
@@ -1148,7 +1171,16 @@ class Storage extends Emitter {
   }
 
   // ---------------------------------------------------------------------
-  // The field kinds beyond registers — src/fields.js, one delegate each.
+  // The field kinds beyond registers: counters and sets from src/fields.js,
+  // one delegate each; a plugin's methods — lists, texts, trees — through
+  // its module (src/plugin.js). A method of a plugin this storage was not
+  // opened with rejects with PLUGIN_MISSING naming the subpath.
+
+  #api(name) {
+    const method = this.#plugins.methods[name];
+    if (method === undefined) throw missing(`${name}()`);
+    return method;
+  }
 
   inc(id, key, value, options) {
     return F.inc(this.#core, id, key, value, options);
@@ -1162,56 +1194,56 @@ class Storage extends Emitter {
     return F.remove(this.#core, id, key, elements, options);
   }
 
-  splice(id, key, index, count, content, options) {
-    return F.splice(this.#core, id, key, index, count, content, options);
+  async splice(id, key, index, count, content, options) {
+    return this.#api('splice')(this.#core, id, key, index, count, content, options);
   }
 
-  push(id, key, content, options) {
-    return F.push(this.#core, id, key, content, options);
+  async push(id, key, content, options) {
+    return this.#api('push')(this.#core, id, key, content, options);
   }
 
-  updateText(id, key, text, options) {
-    return F.updateText(this.#core, id, key, text, options);
+  async updateText(id, key, text, options) {
+    return this.#api('updateText')(this.#core, id, key, text, options);
   }
 
-  mark(id, key, start, end, name, value, options) {
-    return F.mark(this.#core, id, key, start, end, name, value, options);
+  async mark(id, key, start, end, name, value, options) {
+    return this.#api('mark')(this.#core, id, key, start, end, name, value, options);
   }
 
-  unmark(id, key, start, end, name, options) {
-    return F.unmark(this.#core, id, key, start, end, name, options);
+  async unmark(id, key, start, end, name, options) {
+    return this.#api('unmark')(this.#core, id, key, start, end, name, options);
   }
 
-  unmarkById(id, key, markId, options) {
-    return F.unmarkById(this.#core, id, key, markId, options);
+  async unmarkById(id, key, markId, options) {
+    return this.#api('unmarkById')(this.#core, id, key, markId, options);
   }
 
-  spans(id, key) {
-    return F.spans(this.#core, id, key);
+  async spans(id, key) {
+    return this.#api('spans')(this.#core, id, key);
   }
 
-  cursor(id, key, index, options) {
-    return F.cursor(this.#core, id, key, index, options);
+  async cursor(id, key, index, options) {
+    return this.#api('cursor')(this.#core, id, key, index, options);
   }
 
-  index(id, key, cursor) {
-    return F.index(this.#core, id, key, cursor);
+  async index(id, key, cursor) {
+    return this.#api('index')(this.#core, id, key, cursor);
   }
 
-  setAt(id, key, index, value, options) {
-    return F.setAt(this.#core, id, key, index, value, options);
+  async setAt(id, key, index, value, options) {
+    return this.#api('setAt')(this.#core, id, key, index, value, options);
   }
 
-  move(id, key, from, to, options) {
-    return F.move(this.#core, id, key, from, to, options);
+  async move(id, key, from, to, options) {
+    return this.#api('move')(this.#core, id, key, from, to, options);
   }
 
-  treeMove(id, key, node, parent, options) {
-    return F.treeMove(this.#core, id, key, node, parent, options);
+  async treeMove(id, key, node, parent, options) {
+    return this.#api('treeMove')(this.#core, id, key, node, parent, options);
   }
 
-  treeRemove(id, key, node, options) {
-    return F.treeRemove(this.#core, id, key, node, options);
+  async treeRemove(id, key, node, options) {
+    return this.#api('treeRemove')(this.#core, id, key, node, options);
   }
 
   /**

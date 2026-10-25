@@ -172,11 +172,6 @@ expectType<Promise<void>>(storage.remove('id', 'tags', ['a'] as const));
 expectError(storage.add('id', 'tags', 'a'));
 expectError(storage.add('id', 7, ['a']));
 expectError(storage.remove('id', 'tags'));
-expectType<Promise<void>>(storage.splice('id', 'body', 0, 0, 'hi', { actor: 'u2' }));
-expectType<Promise<void>>(storage.splice('id', 'items', 1, 2));
-expectType<Promise<void>>(storage.push('id', 'items', [1, { a: 2 }]));
-expectError(storage.splice('id', 'body', 'x', 0, 'hi'));
-expectError(storage.push('id', 'body', 5));
 expectAssignable<syncom.SyncOp>({
   origin: 'a',
   seq: 3,
@@ -187,17 +182,7 @@ expectAssignable<syncom.SyncOp>({
   value: { at: '^', content: 'hi' },
 });
 expectAssignable<syncom.SplicePayload>({ cut: [['1:a', 0, 2]], content: '' });
-expectType<Promise<void>>(storage.setAt('id', 'items', 0, { done: true }));
-expectType<Promise<number>>(storage.updateText('id', 'body', 'hello', { actor: 'u2' }));
-expectError(storage.updateText('id', 'body', 5));
 expectType<Promise<number>>(record.updateText('body', 'x'));
-expectType<Promise<string | null>>(storage.mark('id', 'body', 0, 5, 'bold', true, { expand: 'after' }));
-expectType<Promise<string | null>>(storage.mark('id', 'body', 0, 5, 'comment', { by: 'ada' }, { many: true }));
-expectType<Promise<void>>(storage.unmark('id', 'body', 0, 5, 'bold'));
-expectType<Promise<void>>(storage.unmarkById('id', 'body', '1:a'));
-expectError(storage.unmark('id', 'body', '1:a'));
-expectType<Promise<syncom.TextSpan[] | null>>(storage.spans('id', 'body'));
-expectError(storage.mark('id', 'body', 0, 5, 'bold', true, { expand: 'sideways' }));
 expectType<Promise<string | null>>(record.mark('body', 0, 1, 'em', true));
 expectType<Promise<syncom.TextSpan[] | null>>(record.spans('body'));
 expectAssignable<syncom.SyncOp>({
@@ -210,14 +195,8 @@ expectAssignable<syncom.SyncOp>({
   value: { start: '^', end: '$', key: 'bold', value: true },
 });
 expectAssignable<syncom.MarkPayload>({ off: '1:a' });
-expectType<Promise<string | null>>(storage.cursor('id', 'body', 3, { side: 'after' }));
-expectType<Promise<number | null>>(storage.index('id', 'body', '<1:0:a'));
-expectError(storage.cursor('id', 'body', 3, { side: 'left' }));
 expectType<Promise<string | null>>(record.cursor('body', 0));
 expectType<Promise<number | null>>(record.index('body', '^'));
-expectType<Promise<void>>(storage.move('id', 'items', 0, 2, { actor: 'u2' }));
-expectError(storage.setAt('id', 'items', 'x', 1));
-expectError(storage.move('id', 'items', 0));
 expectAssignable<syncom.SyncOp>({
   origin: 'a',
   seq: 4,
@@ -228,12 +207,8 @@ expectAssignable<syncom.SyncOp>({
   value: { elem: '1:0:a', value: 1 },
 });
 expectAssignable<syncom.MovePayload>({ elem: '1:0:a', cut: ['1:a', 0, 1], at: '^', value: 1 });
-expectType<syncom.SequenceBlock>(entry.meta.seqs.body);
-expectType<Promise<void>>(storage.treeMove('id', 'outline', 'n1'));
-expectType<Promise<void>>(storage.treeMove('id', 'outline', 'n2', 'n1', { after: 'n3', actor: 'u2' }));
-expectType<Promise<void>>(storage.treeRemove('id', 'outline', 'n2'));
-expectError(storage.treeMove('id', 'outline', 5));
-expectError(storage.treeMove('id', 'outline', 'n2', 'n1', { after: 3 }));
+expectType<syncom.SequenceBlock | syncom.TreeBlock>(entry.meta.blocks.body);
+expectAssignable<syncom.SequenceBlock>({ k: 't', ts: 1, runs: {} });
 expectType<Promise<void>>(record.treeMove('outline', 'n1', null, { before: 'n2' }));
 expectType<Promise<void>>(record.treeRemove('outline', 'n1'));
 expectAssignable<syncom.SyncOp>({
@@ -246,7 +221,8 @@ expectAssignable<syncom.SyncOp>({
   value: { node: 'n1', parent: null, fi: 'V' },
 });
 expectAssignable<syncom.TreePayload>({ node: 'n1', parent: '$trash', fi: 'V' });
-expectType<syncom.TreeBlock>(entry.meta.trees.outline);
+expectAssignable<syncom.TreeBlock>({ k: 'tree', ts: 1, moves: {} });
+expectError<syncom.TreeBlock>({ ts: 1, moves: {} });
 expectAssignable<syncom.TreeNode[]>([{ id: 'n1', children: [] }]);
 expectAssignable<syncom.FieldKind>('tree');
 expectAssignable<syncom.SyncomErrorCode>('CYCLE');
@@ -272,6 +248,8 @@ expectAssignable<syncom.FieldKind>('list');
 expectAssignable<syncom.FieldKind>('text');
 expectAssignable<syncom.RefusalReason>('bound');
 expectAssignable<syncom.RefusalReason>('malformed');
+expectAssignable<syncom.RefusalReason>('kind');
+expectAssignable<syncom.Refusal>({ field: 'body', reason: 'kind', kind: 'text' });
 expectAssignable<syncom.Refusal>({ field: 'body', reason: 'bound', detail: 'pending', count: 1, max: 4096 });
 expectAssignable<syncom.Refusal>({ field: 'n', reason: 'bound', detail: 'counter', count: 2 ** 53, max: 2 ** 53 - 1 });
 expectAssignable<syncom.Refusal>({ field: null, reason: 'malformed' });
@@ -360,6 +338,15 @@ expectType<number | undefined>(applied.entry.meta.v);
 expectType<syncom.Entry>(applied.entry);
 expectType<boolean>(applied.changed);
 expectType<syncom.Entry | null>(syncom.mergeEntry(entry, null));
+expectType<syncom.Entry | null>(syncom.mergeEntry(entry, null, { plugins: syncom.createPlugins([]) }));
+expectType<syncom.Plugins>(syncom.createPlugins([]));
+expectType<syncom.ApplyResult>(
+  syncom.applyOp(
+    null,
+    { origin: 'a', seq: 1, ts: 1, type: 'set', id: 'r', data: {} },
+    { pendingMax: 10, plugins: syncom.createPlugins([]) },
+  ),
+);
 expectType<boolean>(syncom.isAlive(entry));
 expectError(syncom.applyOp(null, { origin: 'a', seq: 1, ts: 1, type: 'nope', id: 'r' }));
 expectType<Promise<syncom.OpLog>>(new syncom.OpLog('base', { rollAfter: 8, retention: { ops: 100 } }));
@@ -756,3 +743,12 @@ typedSync.on('sync', (event) => expectType<number | undefined>(event.outOfScope)
 declare const removal: syncom.WriteContext;
 expectType<true | undefined>(removal.own);
 expectType<readonly syncom.SetRemoval[] | undefined>(removal.removals);
+
+// The core alone: the kinds a plugin brings are not on its storage.
+expectError(storage.splice('id', 'body', 0, 0, 'hi'));
+expectError(storage.treeMove('id', 'outline', 'n1'));
+expectAssignable<StorageOptions>({ plugins: [] });
+declare const somePlugin: syncom.Plugin<{ fly(): Promise<void> }>;
+const flown = await syncom.open({ plugins: [somePlugin] });
+expectType<Promise<void>>(flown.fly());
+expectType<Promise<string>>(flown.insert({}));

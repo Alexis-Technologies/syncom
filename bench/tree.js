@@ -11,7 +11,7 @@
 
 const { bench } = require('./support/harness.js');
 const T = require('../src/tree/moves.js');
-const { applyOp } = require('../src/ops.js');
+const { applyOp } = require('../src/all/all.js');
 const { createMemoryFsi } = require('../src/backend.js');
 const { open } = require('../src/storage.js');
 
@@ -31,7 +31,7 @@ const main = async () => {
     const parent = `n${(i * 7 + 3) % 1000}`;
     if (node !== parent) entry = applyOp(entry, op(++ts, 'B', { node, parent, fi: 'V' })).entry;
   }
-  const block = entry.meta.trees.outline;
+  const block = entry.meta.blocks.outline;
   await bench('applyOp — one move on a tree of 5 000 moves', () =>
     applyOp(entry, op(++ts, 'C', { node: 'n5', parent: 'root', fi: 'V' })));
   await bench('resolve — the fold of 5 000 moves, anew', () => T.resolve(block));

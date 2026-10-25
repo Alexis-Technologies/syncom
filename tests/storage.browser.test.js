@@ -6,12 +6,12 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { installBrowserGlobals, requireBrowserBarrel } = require('./utils/browser-env.js');
+const { installBrowserGlobals, requireBrowserAll } = require('./utils/browser-env.js');
 
 test('Storage on the browser halves', async (t) => {
   const env = installBrowserGlobals();
   t.after(() => env.uninstall());
-  const browser = requireBrowserBarrel();
+  const browser = requireBrowserAll();
 
   await t.test('the shared modules see the browser crypto and fsi', async () => {
     assert.ok(browser.calculateHash({ a: 1 }) instanceof Promise);
@@ -27,7 +27,10 @@ test('Storage on the browser halves', async (t) => {
     const storage = await browser.open({ path: 'store-identity' });
     assert.match(storage.nodeId, /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/);
     assert.strictEqual(storage.nodeId, (await browser.loadSigningKeys('store-identity/keys')).id);
-    assert.deepStrictEqual(JSON.parse(await browser.read('store-identity', 'node.json')), { id: storage.nodeId });
+    assert.deepStrictEqual(JSON.parse(await browser.read('store-identity', 'node.json')), {
+      id: storage.nodeId,
+      plugins: ['text', 'tree'],
+    });
     await storage.close();
     const reopened = await browser.open({ path: 'store-identity' });
     assert.strictEqual(reopened.nodeId, storage.nodeId);
@@ -55,7 +58,7 @@ test('Storage on the browser halves', async (t) => {
 test('Storage telemetry on the browser halves', async (t) => {
   const env = installBrowserGlobals();
   t.after(() => env.uninstall());
-  const browser = requireBrowserBarrel();
+  const browser = requireBrowserAll();
   const { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } = require('@opentelemetry/sdk-trace-base');
 
   await t.test('a commit is spanned with nothing but the injected tracer', async () => {

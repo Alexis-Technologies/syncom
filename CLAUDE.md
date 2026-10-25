@@ -16,14 +16,20 @@ object the caller hands in.
 ## Layout
 
 ```
-index.js / browser.js     two-line shims over src/index.js / src/index.browser.js
-wrpc.js / wrpc.d.ts       the @alexify/syncom/wrpc subpath (src/wrpc.js)
-contracts.js / .d.ts      the @alexify/syncom/contracts subpath (src/contract.js) — never back in the barrel
-idb.js / idb.d.ts         the @alexify/syncom/idb subpath (src/idb.js) — the IndexedDB backend, browser-only
-search.js / search.d.ts   the @alexify/syncom/search subpath (src/search.js) — the trigram text index behind `$text`; the core knows only the TextIndex contract
-order.js / order.d.ts     the @alexify/syncom/order subpath (src/order.js) — fractional indexes as strings, for ordering records
-undo.js / undo.d.ts       the @alexify/syncom/undo subpath (src/undo.js) — the undo stack over the commit event; requires patch.js, emitter.js only
-branch.js / branch.d.ts   the @alexify/syncom/branch subpath (src/branch.js) — fork a storage, merge either way; never requires storage.js
+index.js / browser.js     two-line shims over src/index.js / src/index.browser.js — the ROOT holds these two and their .d.ts, nothing else
+src/<name>/<name>.js      every subpath is a folder under src/ with its entry and its .d.ts beside it; package.json#exports points there
+src/all/all.js            @alexify/syncom/all — the core with every shipped plugin registered (text, tree): the API as it was before the blocks
+src/text/text.js          @alexify/syncom/text — the list and text kinds as a plugin, over src/text/{sequence,rle,myers}.js
+src/tree/tree.js          @alexify/syncom/tree — the tree kind as a plugin, over src/tree/moves.js and src/order/order.js
+src/plugin.js             createPlugins — the registry one open() builds: kind modules (ranks, block codes, op types, apply/join/prune/render/
+                          resolve/diff/realize/migrate/compact/methods) and API modules; PLUGIN_MISSING; PENDING_MAX — requires shape.js, errors.js
+src/wrpc/wrpc.js          the @alexify/syncom/wrpc subpath
+src/contracts/contracts.js the @alexify/syncom/contracts subpath — never back in the barrel
+src/idb/idb.js            the @alexify/syncom/idb subpath — the IndexedDB backend, browser-only
+src/search/search.js      the @alexify/syncom/search subpath — the trigram text index behind `$text`; the core knows only the TextIndex contract
+src/order/order.js        the @alexify/syncom/order subpath — fractional indexes as strings, for ordering records
+src/undo/undo.js          the @alexify/syncom/undo subpath — the undo stack over the commit event; requires patch.js, emitter.js, symbols.js only
+src/branch/branch.js      the @alexify/syncom/branch subpath — fork a storage, merge either way; never requires storage.js
 index.d.ts                the Node type surface (hand-written)
 browser.d.ts              re-exports index.d.ts, overrides the 5 async crypto fns
 THIRD_PARTY_NOTICES.md    the MIT notices of the algorithms adapted (Fugue, Yjs, list-positions…) and the files that carry them
@@ -36,14 +42,14 @@ src/signing.js            canonical form, signOp, verifyOp — what a signature 
 src/shape.js              isPlainObject, asJson, isRecordId, isStreamName, wellFormed — what enters is checked here
 src/args.js               spliceArgs, treeArgs, markArgs, setElements, jsonValue, isNodeId — the write API’s argument
                           checks, shared by Storage and realize() in patch.js — no requires
-src/rle.js                run-length content: a run's items and gaps, cut, append, merge, the canonical form under MAX_RUN —
+src/text/rle.js           run-length content: a run's items and gaps, cut, append, merge, the canonical form under MAX_RUN —
                           no requires; sequence.js is the caller and re-exports what the tests read
-src/sequence.js           the sequence engine behind the list and text kinds: Fugue runs, the walk, local placement, pending ops,
+src/text/sequence.js      the sequence engine behind the list and text kinds (indexOf: the index cached on entry.cache): Fugue runs, the walk, local placement, pending ops,
                           pos/vals/marks registers, cursors, prune and join — requires vector.js and rle.js only
-src/tree.js               the tree kind: per node its stamped moves, the fold in stamp order with the cycle check (Kleppmann
+src/tree/moves.js         the tree engine: per node its stamped moves, the fold in stamp order with the cycle check (Kleppmann
                           2021, Loro), MAX_DEPTH levels read, prune and join — requires vector.js and order.js (a place is a
                           fractional index or the move is malformed)
-src/order.js              fractional indexes over a 62-letter alphabet (Loro's rule, MIT) — no requires; the core uses it for a tree's places
+src/order/order.js        fractional indexes over a 62-letter alphabet (Loro's rule, MIT) — no requires; the tree plugin uses it for a node's place
 src/history.js            the past out of the log: a version (event id / stamp / vector) as a cut, the exact start above droppedTs, the fold
 src/tags.js               Tags — named versions kept locally: tags.json, a catalog per tag, copy-on-write record files in the newest tag
 src/patch.js              patches — the one vocabulary of diff()/applyPatches()/restore(): diffViews by kind, realize() to an op — requires shape.js, myers.js only
@@ -59,7 +65,7 @@ src/catalog.js            the record catalog: live ids, collections, indexed val
 src/query.js              compileQuery (Mango predicate), compareRows, Cursor — reads through storage[SOURCE]
 src/shared-log.js         isSharedLog — the reserved broker-log contract (wrpc BrokerLog shape), no consumer yet
 src/storage.js            Storage — the facade: open sequence, the mutation queue, the public API, the `core` it lends
-src/fields.js             the API of the field kinds beyond registers — inc/add/remove, splice…treeRemove, spans/cursor/index —
+src/fields.js             the API of the core's kinds beyond registers — inc/add/remove — over the lent core; a plugin's methods come with it —
                           over the lent core; Storage keeps a delegate per method
 src/versions.js           the versions API — get(id, { at }), history, diff/applyPatches/restore/compact, tag/untag/at — over the
                           lent core; Storage keeps a delegate per method
@@ -92,6 +98,20 @@ docs/                     VitePress site
 
 ## Rules that bite
 
+- **A kind is a plugin, registered per storage.** `open({ plugins })` builds one registry
+  (`src/plugin.js`) — nothing is global to the process. The core keeps registers, counters and sets
+  and one slot `meta.blocks[field] = { k, ts, … }` for every other kind; `k` names the plugin's block
+  code, `ts` the newest stamp it holds, and a block is never mutated in place. The op types and their
+  codes stay the protocol's (`OP_TYPES`, `TYPE_CODES`): a node without the plugin admits, logs and
+  relays the op and refuses it as `reason: 'kind'` (`OP_REFUSED`, a dirk, never a gap), drops a
+  snapshot block of that kind with `sync.record.kind`, refuses a local call or patch with
+  `PLUGIN_MISSING` (typed, like `NO_CHAIN`) naming the subpath, refuses a reopen of a directory that
+  ran with a kind it lacks, and never bootstraps from a host whose `hello.kinds` lack one of its own
+  (`KINDS_MISMATCH`). Precedence is the registry's ranks (register 0, counter 1, set 2, a plugin's ≥ 3,
+  unique), read alone. A plugin's methods are stubs on the facade (`Storage#api`); `applyOp`,
+  `mergeEntry`, `normalizeMeta`, `latestClock(meta, false, limits)`, `diffViews` and `realize` take
+  the registry through `limits.plugins` / `plugins`, and `/all` pre-binds them. Tests that need the
+  kinds open through `src/all/all.js` (`tests/sync.engine.lean.test.js` proves the explicit route).
 - **An adapted algorithm brings its notice.** Code or a rule taken from an MIT project is named in
   `THIRD_PARTY_NOTICES.md` (project, commit, the syncom files that carry it) with the upstream notice.
   Nothing is copied from json-joy (AGPL-3.0), Collabs or `fugue/fugue` (Apache-2.0) — those are read

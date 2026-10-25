@@ -349,7 +349,7 @@ which one a node plays on a given link is just who opened the connection.
 
 | Procedure | Direction | Purpose |
 | --- | --- | --- |
-| `hello` | dialer → host | Exchange node ids, vectors, log epochs, schemas and the protocol version; the host may `authorize` (and, requiring signatures, refuses a node id that is no key) |
+| `hello` | dialer → host | Exchange node ids, vectors, log epochs, schemas, the kinds each side runs with (`kinds`) and the protocol version; the host may `authorize` (and, requiring signatures, refuses a node id that is no key) |
 | `push` | dialer → host | Ops the host lacks, by its vector |
 | `changes` (subscription) | host → dialer | Everything that lands in the host's log from the cursor on, live |
 | `snapshot` | dialer → host | One page of the host's state, for bootstrap |
@@ -590,6 +590,14 @@ The `telemetry` option sits beside `sync` on `open()`, not inside it — see
 [OpenTelemetry](./telemetry) for the spans and metrics replication emits.
 
 ## Hosting
+
+A host runs the plugins its peers write with: an op of a kind the host has no
+plugin for is still admitted, logged and relayed (refused as `reason: 'kind'`
+for its own records), so a core-only hub between two text nodes carries the
+text — but a snapshot it serves lacks those fields, and a dialer that runs
+more kinds than the host named in `hello` does not bootstrap from it
+(`KINDS_MISMATCH`). A hosting unit that serves snapshots should have every
+kind its peers use (see [Entry points](/guide/entry-points)).
 
 The unit a wrpc server (or anything shaped like one) mounts:
 

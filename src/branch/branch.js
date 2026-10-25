@@ -16,6 +16,7 @@ const { outbound, unreachable } = require('../outbound.js');
 const { asJson } = require('../shape.js');
 const { DEFAULT_PAGE_SIZE } = require('../protocol.js');
 const { SyncomError } = require('../errors.js');
+const { PLUGINS } = require('../symbols.js');
 
 const FILE = 'branch.json';
 const FORMAT = 1;
@@ -107,7 +108,8 @@ const branch = async (parent, { path, from = null, ...options } = {}) => {
   }
   const sync = { ...options.sync, retention: { ...options.sync?.retention, ops: 0 }, autoStart: false };
   const Storage = parent.constructor;
-  const child = await new Storage({ ...options, fsi, path, sync });
+  const plugins = options.plugins ?? parent[PLUGINS].modules;
+  const child = await new Storage({ ...options, fsi, path, sync, plugins });
   const origin = parent.nodeId;
   let forkedAt;
   try {

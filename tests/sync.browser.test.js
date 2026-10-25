@@ -2,13 +2,13 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { installBrowserGlobals, requireBrowserBarrel } = require('./utils/browser-env.js');
+const { installBrowserGlobals, requireBrowserAll } = require('./utils/browser-env.js');
 const { runSyncManagerCoreTests } = require('./suites/sync-manager.js');
 
 test('SyncManager (browser)', async (t) => {
   const env = installBrowserGlobals();
   t.after(() => env.uninstall());
-  const browser = requireBrowserBarrel();
+  const browser = requireBrowserAll();
 
   // The registry lives in OPFS now, so the reopen case is real in the browser too.
   const dirs = new WeakMap();

@@ -13,7 +13,7 @@
 // The sequence engine behind the `list` and `text` field kinds: where an
 // element goes, what a field reads as, and how two nodes' pictures of one
 // field join. Pure functions over the plain JSON block Storage keeps in a
-// record's meta (`meta.seqs[field]`); no requires beyond ./vector.js and
+// record's meta (`meta.blocks[field]`); no requires beyond ./vector.js and
 // ./rle.js (the run-length content), so it ships to the browser as it is.
 //
 // The ordering rule is Fugue (Weidner & Kleppmann, "The Art of the Fugue",

@@ -157,6 +157,7 @@ export default withMermaid({
               { text: 'Benchmarks', link: '/guide/benchmarks' },
               { text: 'Getting Started', link: '/guide/getting-started' },
               { text: 'Architecture', link: '/guide/architecture' },
+              { text: 'Entry points', link: '/guide/entry-points' },
             ],
           },
           {

@@ -76,6 +76,7 @@
 // is a PROTOCOL bump once the package is published.
 
 const { compareClock } = require('../vector.js');
+const { PENDING_MAX } = require('../plugin.js');
 const {
   MAX_RUN,
   GAP,
@@ -93,9 +94,9 @@ const {
 
 // Pending work — runs waiting for their anchor, cuts and extensions waiting
 // for their run, registers and switched-off marks for elements and marks not
-// here — is bounded per field, on the op path and on the snapshot path
-// alike: beyond it an op is refused (`bound`) and a peer's block is dropped.
-const PENDING_MAX = 4096;
+// here — is bounded per field (PENDING_MAX, src/plugin.js), on the op path
+// and on the snapshot path alike: beyond it an op is refused (`bound`) and a
+// peer's block is dropped.
 // A field holds at most MAX_FIELD slots, tombstones included (and a run
 // MAX_RUN, src/rle.js's): the index allocates per slot, so a gap is the one
 // thing a peer could make expensive for nothing. A field at MAX_FIELD takes
@@ -1286,8 +1287,31 @@ const join = (a, b) => {
   return out;
 };
 
+// The index of a sequence field, kept on the entry under `entry.cache[field]`
+// — never persisted, never copied by value — and reused while the block
+// object and the base it was built against are the ones the entry holds; a
+// block replaced by an op is a new object. When the op only appended to a
+// run (`extended`: the held block, the run, where and what), the held
+// block's index is carried over instead of walked anew.
+const indexOf = (entry, field, extended = null) => {
+  const seq = own(entry.meta.blocks ?? {}, field);
+  if (seq === undefined) return null;
+  const base = entry.meta.base;
+  const cache = (entry.cache ??= {});
+  const hit = own(cache, field);
+  if (hit !== undefined && hit.seq === seq && hit.base === base) return hit.index;
+  let index = null;
+  if (extended !== null && hit !== undefined && hit.seq === extended.held && hit.base === base) {
+    index = extendIndex(hit.index, seq, extended);
+  }
+  if (index === null) index = buildIndex(seq, base);
+  cache[field] = { seq, base, index };
+  return index;
+};
+
 module.exports = {
   PENDING_MAX,
+  indexOf,
   MAX_RUN,
   MAX_FIELD,
   HEAD,

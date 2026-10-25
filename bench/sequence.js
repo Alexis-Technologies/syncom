@@ -11,7 +11,7 @@
 
 const { bench } = require('./support/harness.js');
 const S = require('../src/text/sequence.js');
-const { applyOp } = require('../src/ops.js');
+const { applyOp } = require('../src/all/all.js');
 const { diff } = require('../src/text/myers.js');
 const { createMemoryFsi } = require('../src/backend.js');
 const { open } = require('../src/storage.js');
@@ -46,9 +46,9 @@ const main = async () => {
       oneRun,
       op('merge', ++ts, 'M', undefined, undefined) && { ...op('merge', ts, 'M'), data: chain.data, meta: chain.meta },
     ));
-  const seq = oneRun.meta.seqs.body;
+  const seq = oneRun.meta.blocks.body;
   await bench('buildIndex + render — a 1 000-char text', () => S.render(S.buildIndex(seq)));
-  const big = applyOp(null, op('splice', 1, 'A', 'body', { at: '^', content: 'x'.repeat(100_000) })).entry.meta.seqs
+  const big = applyOp(null, op('splice', 1, 'A', 'body', { at: '^', content: 'x'.repeat(100_000) })).entry.meta.blocks
     .body;
   await bench('buildIndex + render — a 100 KB text (one run)', () => S.render(S.buildIndex(big)));
   // Ten thousand runs of ten characters, each anchored after the last
@@ -73,7 +73,7 @@ const main = async () => {
     deleted: null,
     counters: {},
     sets: {},
-    seqs: { body: { k: 't', ts: 10 + RUNS, runs: chainRuns } },
+    blocks: { body: { k: 't', ts: 10 + RUNS, runs: chainRuns } },
     trees: {},
   };
   const longText = applyOp(null, {
@@ -92,7 +92,7 @@ const main = async () => {
   await bench('applyOp — delete 10 chars from a 10 000-run text', () =>
     applyOp(longText, op('splice', ++ts, 'C', 'body', { cut: [cuts[k++ & 4095]], content: '' })));
   await bench('buildIndex + render — a 100 KB text (10 000 runs)', () =>
-    S.render(S.buildIndex(longText.meta.seqs.body)));
+    S.render(S.buildIndex(longText.meta.blocks.body)));
   let marked = oneRun;
   for (let i = 0; i < 50; i++) {
     const start = `<${S.elemKey(run, i * 10)}`;
@@ -102,7 +102,7 @@ const main = async () => {
       op('mark', 100 + i, 'A', 'body', { start, end, key: i % 2 ? 'bold' : 'em', value: true }),
     ).entry;
   }
-  const markedSeq = marked.meta.seqs.body;
+  const markedSeq = marked.meta.blocks.body;
   await bench('spans — 1 000 chars, 50 overlapping marks', () => S.spans(S.buildIndex(markedSeq), markedSeq));
   const before = 'the quick brown fox '.repeat(50);
   const after = `${before.slice(0, 500)}X${before.slice(500)}`;

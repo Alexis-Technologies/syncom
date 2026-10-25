@@ -2,9 +2,9 @@
 // browsers where OPFS is unavailable or unwanted. Give its result to
 // `open({ fsi })`.
 
-import type { Fsi } from './index.js';
+import type { Fsi } from '../../index.js';
 
-export type { Fsi } from './index.js';
+export type { Fsi } from '../../index.js';
 
 export interface IdbFsiOptions {
   /** The database name; default `'syncom'`. */

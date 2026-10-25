@@ -4,7 +4,7 @@
 // a process that never imports this subpath never executes a block's code
 // (see SECURITY.md).
 
-import type { Blockchain, Storage } from './index.js';
+import type { Blockchain, Storage } from '../../index.js';
 
 export interface ContractContext {
   storage: Storage;

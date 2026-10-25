@@ -414,14 +414,14 @@ const runPatchTests = async (t, assert, createStorage) => {
       const before = await a.get(id);
       const blocks = async (storage) => (await storage.snapshot()).records.find((r) => r.id === id).meta;
       const was = await blocks(a);
-      assert.strictEqual(Object.keys(was.seqs.body.runs).length, 5);
-      assert.ok(Object.values(was.trees.outline.moves).flat().length > 20, 'a move log worth compacting');
+      assert.strictEqual(Object.keys(was.blocks.body.runs).length, 5);
+      assert.ok(Object.values(was.blocks.outline.moves).flat().length > 20, 'a move log worth compacting');
       const ops = await a.compact(id);
       assert.strictEqual(ops, 10, 'a write, an inc, an add, a splice, six moves');
       assert.deepStrictEqual(await a.get(id), before, 'reads the same');
       const now = await blocks(a);
-      assert.strictEqual(Object.keys(now.seqs.body.runs).length, 1, 'one run');
-      assert.strictEqual(Object.values(now.trees.outline.moves).flat().length, 6, 'one move per node');
+      assert.strictEqual(Object.keys(now.blocks.body.runs).length, 1, 'one run');
+      assert.strictEqual(Object.values(now.blocks.outline.moves).flat().length, 6, 'one move per node');
       assert.strictEqual(Object.keys(now.counters.hits).length, 1, 'one slot: the sum as this node’s');
       await settle([a, b]);
       assert.deepStrictEqual(await b.get(id), before, 'the peer reads the same');

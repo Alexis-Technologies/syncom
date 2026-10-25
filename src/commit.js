@@ -10,10 +10,8 @@
 // lensed readers — see Storage#open.
 
 const { encrypt, calculateHash } = require('./crypto.js');
-const { applyOp, isAlive, latestClock, observedTags, kindOf, kindsOf, seqIndexOf } = require('./ops.js');
-const S = require('./text/sequence.js');
-const T = require('./tree/moves.js');
-const { between } = require('./order/order.js');
+const { applyOp, isAlive, latestClock, observedTags, kindOf, kindsOf } = require('./ops.js');
+const { missing } = require('./plugin.js');
 const { opKey } = require('./vector.js');
 const { notify } = require('./hooks.js');
 const { ValidationError, project, unproject, foldSet } = require('./schema.js');
@@ -40,20 +38,18 @@ const sameType = (type, id, data, current) => {
   return data;
 };
 
-// The field-kind rule, refused with a hint at the right call.
+// The field-kind rule, refused with a hint at the right call; a plugin's
+// kind brings its own hint (src/plugin.js `hints`).
 const HINTS = {
   register: 'a register; use update()',
   counter: 'a counter; use inc()',
   set: 'a set; use add() or remove()',
-  list: 'a list; use splice(), push(), setAt() or move() (an array, not a string)',
-  text: 'a text; use splice(), push(), updateText() or mark() (a string, not an array)',
-  tree: 'a tree; use treeMove() or treeRemove()',
   bound: "past a bound: pending work, a run, the field as a whole or a counter's range (see Costs and limits)",
 };
 // `malformed` is a payload the engine does not admit after the arguments
 // were checked — a bug in the caller or here, never a peer's doing on this
 // path — so it is a TypeError, not a coded failure.
-const refuse = (id, rejected) => {
+const refuse = (core, id, rejected) => {
   if (rejected.length === 0) return;
   const [{ field, reason, detail, count, max }] = rejected;
   if (reason === 'malformed') {
@@ -61,7 +57,8 @@ const refuse = (id, rejected) => {
   }
   const fields = { field, kind: reason };
   if (detail !== undefined) Object.assign(fields, { detail, count, max });
-  throw new SyncomError('FIELD_KIND', `Field ${field} of record ${id} is ${HINTS[reason]}`, fields);
+  const hint = HINTS[reason] ?? core.plugins.hints[reason] ?? `held by another kind (${reason})`;
+  throw new SyncomError('FIELD_KIND', `Field ${field} of record ${id} is ${hint}`, fields);
 };
 
 // A swap's expectation, checked inside the queue against the record as it
@@ -140,155 +137,6 @@ const assignScope = (core, op, data) => {
   op.seq = core.log.seqOf(opKey(op)) + 1;
 };
 
-// A splice names an index and a count; what travels is the anchor of the
-// new run (or the run of this origin to extend) and the ranges to cut, read
-// here, inside the queue — read outside it, a concurrent apply would shift
-// the indices. The content names the kind — a string for a text, an array
-// for a list — and a call that only cuts takes the field's.
-const resolveSplice = (core, id, payload, current) => {
-  const { key, index, count, content } = payload;
-  const meta = current?.meta;
-  const held = meta && Object.hasOwn(meta.seqs ?? {}, key) ? meta.seqs[key] : undefined;
-  const marker = content ?? (held?.k === 'l' ? [] : '');
-  const idx = held === undefined ? null : seqIndexOf(current, key);
-  const length = idx === null ? 0 : idx.length;
-  const at = index === null ? length : index;
-  if (at > length || at + count > length) {
-    const span = count > 0 ? `${at}..${at + count}` : String(at);
-    const message = `Index ${span} is out of range for field ${key} of record ${id} (length ${length})`;
-    throw new SyncomError('OUT_OF_RANGE', message, { id, field: key, index: at, count, length });
-  }
-  const value = { content: marker };
-  if (count > 0) value.cut = S.rangesOf(idx, at, count);
-  if (marker.length > 0) {
-    Object.assign(value, idx === null ? { at: S.HEAD } : S.placeInsert(idx, at, core.nodeId, marker.length));
-  }
-  return value;
-};
-
-// A list's element, by its index: the name it keeps across moves. A field
-// with no block has no elements (OUT_OF_RANGE); another kind under the field
-// was refused before this is read (`kindClash`).
-const elementAt = (core, id, key, index, current) => {
-  const meta = current?.meta;
-  const held = meta && Object.hasOwn(meta.seqs ?? {}, key) ? meta.seqs[key] : undefined;
-  const idx = held === undefined ? null : seqIndexOf(current, key);
-  const length = idx === null ? 0 : idx.length;
-  if (index >= length) {
-    const message = `Index ${index} is out of range for field ${key} of record ${id} (length ${length})`;
-    throw new SyncomError('OUT_OF_RANGE', message, { id, field: key, index, count: 0, length });
-  }
-  return { idx, elem: S.elemAt(idx, index) };
-};
-
-const resolveAssign = (core, id, payload, current) => {
-  const { key, index, value } = payload;
-  return { elem: elementAt(core, id, key, index, current).elem, value };
-};
-
-// A move names two indices; what travels is the element, the slot it showed
-// at and the anchor of its new position (`to` counts once it is out).
-const resolveMove = (core, id, payload, current) => {
-  const { key, index: from, to } = payload;
-  const { idx, elem } = elementAt(core, id, key, from, current);
-  if (to >= idx.length) {
-    const message = `Index ${to} is out of range for field ${key} of record ${id} (length ${idx.length})`;
-    throw new SyncomError('OUT_OF_RANGE', message, { id, field: key, index: to, count: 0, length: idx.length });
-  }
-  const place = S.placeInsert(idx, to < from ? to : to + 1, core.nodeId);
-  const at = place.at ?? `>${S.elemKey(place.run, place.from - 1)}`;
-  return { elem, cut: S.slotAt(idx, from), at, value: S.valueAt(idx, from) };
-};
-
-// A mark names a visible range and an expand rule; what travels is the pair
-// of anchors — an element and a side — the rule picks (src/sequence.js
-// markAnchors), or the id of the mark to switch off.
-const resolveMark = (core, id, payload, current) => {
-  const { key, off } = payload;
-  if (off !== undefined) return { off };
-  const { start, end, name, value, expand, many } = payload;
-  const meta = current?.meta;
-  const held = meta && Object.hasOwn(meta.seqs ?? {}, key) ? meta.seqs[key] : undefined;
-  const idx = held === undefined ? null : seqIndexOf(current, key);
-  const length = idx === null ? 0 : idx.length;
-  if (start > end || end > length) {
-    const message = `Range ${start}..${end} is out of range for field ${key} of record ${id} (length ${length})`;
-    throw new SyncomError('OUT_OF_RANGE', message, { id, field: key, index: start, count: end - start, length });
-  }
-  const [from, to] = idx === null ? [S.HEAD, S.END] : S.markAnchors(idx, start, end, expand);
-  const out = { start: from, end: to, key: name, value };
-  if (many) out.many = true;
-  return out;
-};
-
-// A tree move names a parent and a sibling to land after or before; what
-// travels is the place among the siblings as a fractional index
-// (src/order.js) between its neighbours — decided inside the queue, against
-// the tree as it is, folded once. A parent in the node's own subtree is
-// CYCLE, a sibling not under the parent NOT_FOUND; a move to where the node
-// already is makes no op (null). A move that would reach below the level a
-// tree reads (T.MAX_DEPTH), or a place with no room left between its
-// neighbours (an index past T.MAX_FI), is OUT_OF_RANGE. Siblings that share
-// an index order by stamp, and a node put after one of them lands after all
-// of them. Another kind under the field is left to applyOp to refuse.
-const resolveTree = (core, id, payload, current) => {
-  const { key, node, parent, after, before } = payload;
-  const meta = current?.meta;
-  const held = meta && Object.hasOwn(meta.trees ?? {}, key) ? meta.trees[key] : undefined;
-  const tree = held ?? T.createTree();
-  const folded = T.childrenOf(tree);
-  if (parent !== null && parent !== T.TRASH && T.subtree(tree, node, folded).has(parent)) {
-    const where = parent === node ? 'itself' : `${parent}, a node under it`;
-    const message = `Node ${node} of field ${key} of record ${id} cannot go under ${where}`;
-    throw new SyncomError('CYCLE', message, { id, field: key, node, parent });
-  }
-  const all = T.siblings(tree, parent, folded);
-  const was = all.findIndex((s) => s.id === node);
-  const sibs = was < 0 ? all : all.filter((s) => s.id !== node);
-  let at = sibs.length;
-  const next = after ?? before;
-  if (next !== undefined) {
-    const i = sibs.findIndex((s) => s.id === next);
-    if (i < 0) {
-      const message = `Node ${next} is not under ${parent ?? 'the root'} of field ${key} of record ${id}`;
-      throw new SyncomError('NOT_FOUND', message, { id, field: key, node: next });
-    }
-    at = after !== undefined ? i + 1 : i;
-  }
-  if (was >= 0 && (at === was || parent === T.TRASH)) return null;
-  if (parent !== T.TRASH) {
-    const depth = (parent === null ? 0 : T.depthOf(folded, parent)) + T.heightOf(folded, node);
-    if (depth > T.MAX_DEPTH) {
-      const message = `Node ${node} of field ${key} of record ${id} would reach level ${depth}; a tree reads ${T.MAX_DEPTH}`;
-      throw new SyncomError('OUT_OF_RANGE', message, { id, field: key, node, depth, max: T.MAX_DEPTH });
-    }
-  }
-  const lower = at > 0 ? sibs[at - 1].fi : null;
-  let upper = at < sibs.length ? sibs[at].fi : null;
-  if (lower !== null && upper !== null && upper <= lower) {
-    upper = null;
-    for (let i = at + 1; i < sibs.length; i++) {
-      if (sibs[i].fi > lower) {
-        upper = sibs[i].fi;
-        break;
-      }
-    }
-  }
-  const fi = between(lower, upper);
-  if (fi.length > T.MAX_FI) {
-    const message = `No room left between the neighbours of node ${node} in field ${key} of record ${id}; move a sibling away or reset the field`;
-    throw new SyncomError('OUT_OF_RANGE', message, {
-      id,
-      field: key,
-      node,
-      reason: 'fi',
-      length: fi.length,
-      max: T.MAX_FI,
-    });
-  }
-  return { node, parent, fi };
-};
-
 // Of a remove's observed tags, those of one origin; an element with none is left out.
 const ownTags = (removals, origin) => {
   const out = [];
@@ -312,30 +160,25 @@ const TAKES = {
   inc: ['counter'],
   add: ['set'],
   remove: ['set'],
-  splice: ['list', 'text'],
-  assign: ['list'],
-  move: ['list'],
-  mark: ['text'],
-  tree: ['tree'],
 };
-// A splice names its kind by its content — a string a text, an array a
-// list — and one that only removes takes the field's.
-const takesOf = (type, payload) =>
-  type === 'splice' && payload.content !== undefined ? [Array.isArray(payload.content) ? 'list' : 'text'] : TAKES[type];
-const kindClash = (type, payload, current) => {
-  const takes = takesOf(type, payload);
+// A plugin's op names the kinds it takes itself (a splice by its content —
+// a string a text, an array a list — and one that only removes takes the
+// field's).
+const takesOf = (type, payload, plugins) => plugins.byType[type]?.takes(type, payload) ?? TAKES[type];
+const kindClash = (type, payload, current, plugins) => {
+  const takes = takesOf(type, payload, plugins);
   if (takes === undefined || !current || current.encrypted) return [];
   const fields = type === 'write' || type === 'set' ? Object.keys(payload.data ?? {}) : [payload.key];
   const rejected = [];
   for (const field of fields) {
-    const kind = kindOf(current, field);
+    const kind = kindOf(current, field, plugins);
     if (kind !== undefined && !takes.includes(kind)) rejected.push({ field, reason: kind });
   }
   return rejected;
 };
 
 const prepareOp = (core, type, id, payload, current, who, from) => {
-  refuse(id, kindClash(type, payload, current));
+  refuse(core, id, kindClash(type, payload, current, core.plugins));
   core.observe(latestClock(current?.meta, true));
   const op = { origin: core.nodeId, seq: 0, ts: core.clock.now(), type, id };
   if (from) op.from = from;
@@ -356,13 +199,16 @@ const prepareOp = (core, type, id, payload, current, who, from) => {
     // and leaves what a peer added meanwhile.
     if (payload.own === true) op.value = ownTags(op.value, core.nodeId);
   }
-  if (type === 'splice') op.value = resolveSplice(core, id, payload, current);
-  if (type === 'assign') op.value = resolveAssign(core, id, payload, current);
-  if (type === 'move') op.value = resolveMove(core, id, payload, current);
-  if (type === 'mark') op.value = resolveMark(core, id, payload, current);
-  if (type === 'tree') op.value = resolveTree(core, id, payload, current);
+  // A plugin's op: what travels is resolved inside the queue, against the
+  // record as it is — an index into an anchor, a sibling into a place.
+  const mod = core.plugins.byType[type];
+  if (mod !== undefined) op.value = mod.resolve(core, id, type, payload, current);
+  else if (!Object.hasOwn(TAKES, type) && !CORE.has(type)) throw missing(`a ${type} op`);
   return op;
 };
+
+// The ops the core makes itself; every other type of the protocol is a plugin's.
+const CORE = new Set(['write', 'set', 'inc', 'add', 'remove', 'delete', 'purge', 'merge']);
 
 // A unique key another record holds: refused here, where one writer can be
 // told. Two concurrent writers on two nodes cannot be — see the `conflict`
@@ -388,7 +234,7 @@ const assertUnique = async (core, id, entry) => {
 const validateLocal = async (core, op, current, visible, ctx) => {
   const { id, type } = op;
   let { entry, changed, delta, rejected } = applyOp(current, op, core.limits);
-  refuse(id, rejected);
+  refuse(core, id, rejected);
   if (!changed) return null;
   const def = core.definitionOf(entry.data);
   if (def?.validator && VALIDATED.has(type)) {
@@ -401,7 +247,7 @@ const validateLocal = async (core, op, current, visible, ctx) => {
       else op.data = foldSet(op.data, validated, visible ? project(def, id, await core.view(id, current)) : {});
       ctx.data = op.data;
       ({ entry, changed, delta, rejected } = applyOp(current, op, core.limits));
-      refuse(id, rejected);
+      refuse(core, id, rejected);
       if (!changed) return null;
     }
   }
@@ -459,7 +305,7 @@ const announce = async (core, op, entry, delta, ctx, source, via, committed = nu
     // after, as copies, and every field's kind — built only for a listener.
     if (committed !== null && core.storage.listenerCount('commit') > 0) {
       const { seq, before, previous } = committed;
-      const kinds = { ...kindsOf(previous), ...kindsOf(entry) };
+      const kinds = { ...kindsOf(previous, core.plugins), ...kindsOf(entry, core.plugins) };
       const after = alive ? asJson(entry.data) : null;
       notify(core.storage, core.logger, 'commit', { op, seq, source, before: asJson(before), after, kinds });
     }
@@ -493,9 +339,10 @@ const rehearse = async (core, id, ops) => {
     const visible = current && isAlive(current) ? current.data : null;
     if (type === 'write' || type === 'set') payload.data = sameType(type, id, payload.data, visible);
     const op = prepareOp(core, type, id, payload, current, null, null);
-    if (type === 'tree' && op.value === null) continue;
+    // A plugin's op that resolved to nothing (a tree move to where the node is): nothing to write.
+    if (op.value === null) continue;
     const { entry, changed, rejected } = applyOp(current, op, core.limits);
-    refuse(id, rejected);
+    refuse(core, id, rejected);
     if (changed) current = entry;
   }
 };
@@ -532,9 +379,9 @@ const commitLocal = async (core, type, id, payload, options) => {
     payload = { ...payload, data: ctx.data };
   }
   const op = prepareOp(core, type, id, payload, current, who, from);
-  // A tree move to where the node already is: nothing to write (resolveTree
-  // hands back null instead of a place).
-  if (type === 'tree' && op.value === null) return null;
+  // A plugin's op that resolved to nothing — a tree move to where the node
+  // already is — writes nothing.
+  if (op.value === null && core.plugins.byType[type] !== undefined) return null;
   const applied = await validateLocal(core, op, current, visible, ctx);
   if (applied === null) return null;
   // The validator may have filled the field the scope reads (a default):

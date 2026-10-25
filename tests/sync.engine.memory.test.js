@@ -5,7 +5,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const syncom = require('..');
+const syncom = require('../src/all/all.js');
 const { runSyncEngineTests } = require('./suites/sync-engine.js');
 
 test('Sync engine (memory backend)', async (t) => {

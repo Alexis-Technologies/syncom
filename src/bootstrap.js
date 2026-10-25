@@ -87,7 +87,7 @@ const mergeOne = async (batch, record) => {
   const { id } = record;
   // A stamp beyond the skew allowed is refused here as an op's is in
   // applyRemote: a snapshot is the other way a clock reaches this node.
-  const latest = latestClock(record.meta);
+  const latest = latestClock(record.meta, false, core.limits);
   if (latest !== null && latest[0] > batch.horizon) {
     core.logger.warn({ event: 'sync.record.skew', id, ts: latest[0], ahead: latest[0] - batch.horizon });
     return;
@@ -116,7 +116,14 @@ const mergeOne = async (batch, record) => {
   if (from) op.from = from;
   if (data !== undefined) op.data = data;
   if (meta !== undefined) op.meta = meta;
-  const { entry, changed, delta } = applyOp(current, op, core.limits);
+  const { entry, changed, delta, rejected } = applyOp(current, op, core.limits);
+  // A block of a kind no plugin here knows is left out of what this node
+  // holds: told once per record, since the field is gone for its peers too.
+  for (const refusal of rejected) {
+    if (refusal.reason === 'kind') {
+      core.logger.warn({ event: 'sync.record.kind', id, field: refusal.field, kind: refusal.kind });
+    }
+  }
   if (!changed) {
     if (otel.enabled) otel.recordCommit('merge', 'noop', now() - started);
     return;

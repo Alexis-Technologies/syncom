@@ -128,8 +128,11 @@ const ENTRIES = [
   // content checked against the field's kind before the stamp — the raise to
   // 65.5 KB (65.0 measured); compact() laying a text's marks again
   // (sequence.js marksIn, the `mark` patch, long fields in runs) — the raise
-  // to 66 KB (65.6 measured). The rule stays: a raise names its feature here.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 66 },
+  // to 66 KB (65.6 measured). The kinds beyond registers, counters and sets
+  // became plugins (src/plugin.js; `/text`, `/tree` carry the engines) — the
+  // main entry is the core alone and came DOWN to 54 KB (53.4 measured); the
+  // whole of it is `/all`. The rule stays: a raise names its feature here.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 54 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -166,6 +169,17 @@ const ENTRIES = [
     platform: 'browser',
     budget: 3.5,
   },
+  // Everything in one import: the core with the text and tree plugins
+  // registered — what the main entry was before the kinds became plugins.
+  // 68.5 KB: what the 66 KB entry was, plus the registry and the plugins'
+  // own module shells (68.0 measured).
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 68.5 },
+  // The list and text kinds alone: the sequence engine, its patches and its
+  // methods; in an app bundle the core they stand on is shared.
+  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 15 },
+  // The tree kind alone, with the fractional indexes a place is made of and
+  // the argument checks it shares with the core (5.1 measured).
+  { label: 'tree — browser (@alexify/syncom/tree)', entry: 'src/tree/tree.js', platform: 'browser', budget: 5.5 },
 ];
 
 // A browser entry has to be self-contained: no node builtins, and no packages

@@ -12,120 +12,51 @@
 //   { action: 'remove', field, elements }           set elements removed, as this node observed them
 //   { action: 'remove', field, elements, own: true } …only this node's adds of them (an undo: a peer's stay)
 //   { action: 'remove', field, removals }           …or exactly these tags: `[[element, { origin: addTs }]]`
-//   { action: 'splice', field, index, count, content }   a list's or a text's edit
+//   { action: 'splice', field, index, count, content }   a list's or a text's edit (@alexify/syncom/text)
 //   { action: 'mark', field, start, end, name, value, expand?, many? }  a text's style over [start, end)
-//   { action: 'treeMove', field, node, parent, after? }  a tree node placed
+//   { action: 'treeMove', field, node, parent, after? }  a tree node placed (@alexify/syncom/tree)
 //   { action: 'treeRemove', field, node }
 //   { action: 'delete' }, { action: 'purge' }
 //
-// `diffViews(from, fromKinds, to, toKinds)` is the list that turns the
-// record `from` (its data, and what kind each field is) into `to`: per
-// field by kind — a register's new value, a counter's delta, a set's added
-// and removed elements, a text's or a list's splices (Myers), a tree's
-// moves and removals — and a reset when a register is gone or a field
-// changed kind, since no op removes one field: a `write` of the registers,
-// then the other kinds made again whole. A text's marks are not diffed;
-// `compact()` lays them again itself, as `mark` patches.
-// Pure over plain data; the kinds come from ops.js (`kindsOf`), so this
+// `diffViews(from, fromKinds, to, toKinds, { plugins })` is the list that
+// turns the record `from` (its data, and what kind each field is) into
+// `to`: per field by kind — a register's new value, a counter's delta, a
+// set's added and removed elements, and for a plugin's kind what its `diff`
+// says (a text's or a list's splices, a tree's moves) — and a reset when a
+// register is gone or a field changed kind, since no op removes one field:
+// a `write` of the registers, then the other kinds made again whole. A
+// text's marks are not diffed; `compact()` lays them again itself, through
+// the plugin. Pure over plain data; the kinds come from ops.js (`kindsOf`)
+// and the plugins from the storage's registry (src/plugin.js), so this
 // module and the undo subpath on it ship without the op model.
 
 const { deepEqual, isPlainObject } = require('./shape.js');
-const { diff: myers } = require('./text/myers.js');
-const { isJsonValue, jsonValue, spliceArgs, treeArgs, markArgs, setElements } = require('./args.js');
-
-// A list's elements as one character each, so Myers runs over them as over
-// a text; past the private-use plane it is one replacing splice.
-const PRIVATE = 0xe000;
-const MAX_DISTINCT = 0x1900;
-const spliceList = (field, from, to) => {
-  const codes = new Map();
-  const items = [];
-  const intern = (list) => {
-    let text = '';
-    for (const item of list) {
-      const key = JSON.stringify(item);
-      let code = codes.get(key);
-      if (code === undefined) {
-        if (items.length >= MAX_DISTINCT) return null;
-        code = PRIVATE + items.length;
-        codes.set(key, code);
-        items.push(item);
-      }
-      text += String.fromCharCode(code);
-    }
-    return text;
-  };
-  const a = intern(from);
-  const b = a === null ? null : intern(to);
-  if (b === null) return [{ action: 'splice', field, index: 0, count: from.length, content: to }];
-  return myers(a, b).map(([index, count, text]) => ({
-    action: 'splice',
-    field,
-    index,
-    count,
-    content: Array.from(text, (ch) => items[ch.charCodeAt(0) - PRIVATE]),
-  }));
-};
-
-const spliceText = (field, from, to) =>
-  myers(from, to).map(([index, count, content]) => ({ action: 'splice', field, index, count, content }));
-
-// A tree's nodes in reading order with their parent and the sibling before.
-const walk = (nodes, into = new Map(), parent = null) => {
-  let prev = null;
-  for (const { id, children } of nodes) {
-    into.set(id, { parent, prev });
-    walk(children, into, id);
-    prev = id;
-  }
-  return into;
-};
-
-// Moves that make `from` read as `to`: every child of a parent whose
-// children changed, in order — the first to the end, each next after the
-// one before, so the emitted order is the final one — then the nodes gone.
-const treePatches = (field, from, to) => {
-  const before = walk(from);
-  const after = walk(to);
-  const patches = [];
-  const changed = new Set();
-  for (const [node, place] of after) {
-    const was = before.get(node);
-    if (was === undefined || was.parent !== place.parent || was.prev !== place.prev) changed.add(place.parent);
-  }
-  for (const [node, { parent, prev }] of after) {
-    if (!changed.has(parent)) continue;
-    const patch = { action: 'treeMove', field, node, parent };
-    if (prev !== null) patch.after = prev;
-    patches.push(patch);
-  }
-  for (const node of before.keys()) if (!after.has(node)) patches.push({ action: 'treeRemove', field, node });
-  return patches;
-};
+const { isJsonValue, jsonValue, setElements } = require('./args.js');
+const { EMPTY, HOME, missing } = require('./plugin.js');
 
 const asKeys = (elements) => new Map(elements.map((element) => [JSON.stringify(element), element]));
 
+const own = (object, key) => (Object.hasOwn(object, key) ? object[key] : undefined);
+
 // A field's content made again from nothing, by kind.
-const recreate = (field, kind, value) => {
+const recreate = (field, kind, value, plugins) => {
   // An inc of 0 makes a counter that reads 0: the field stays a counter.
   if (kind === 'counter') return [{ action: 'inc', field, value }];
   if (kind === 'set') return value.length === 0 ? [] : [{ action: 'add', field, elements: value }];
-  if (kind === 'text' || kind === 'list') {
-    return value.length === 0 ? [] : [{ action: 'splice', field, index: 0, count: 0, content: value }];
-  }
-  if (kind === 'tree') return treePatches(field, [], value);
-  return [];
+  const mod = own(plugins.byName, kind);
+  return mod === undefined ? [] : mod.recreate(field, kind, value);
 };
 
 /**
  * The patches that turn the record `from` — its data (`null` when it was
  * not there) and the kind of each of its fields — into `to`. `purged` says
  * `to` is a purged record. `exact` (the default) makes `to` read exactly:
- * a field `to` lacks is gone through a reset; without it a counter, a set,
- * a list, a text or a tree `to` lacks is emptied instead — what an undo
- * wants, since a reset would take a peer's concurrent change with it.
+ * a field `to` lacks is gone through a reset; without it a counter, a set
+ * or a plugin's field `to` lacks is emptied instead — what an undo wants,
+ * since a reset would take a peer's concurrent change with it. `plugins`
+ * is the registry whose kinds the fields may be of.
  */
-const diffViews = (from, fromKinds, to, toKinds, { purged = false, exact = true } = {}) => {
+const diffViews = (from, fromKinds, to, toKinds, { purged = false, exact = true, plugins = EMPTY } = {}) => {
   if (to === null) {
     if (purged) return [{ action: 'purge' }];
     return from === null ? [] : [{ action: 'delete' }];
@@ -147,7 +78,7 @@ const diffViews = (from, fromKinds, to, toKinds, { purged = false, exact = true 
   if (reset) {
     patches.push({ action: 'write', data: registers });
     for (const field of Object.keys(toKinds)) {
-      if (toKinds[field] !== 'register') patches.push(...recreate(field, toKinds[field], to[field]));
+      if (toKinds[field] !== 'register') patches.push(...recreate(field, toKinds[field], to[field], plugins));
     }
     return patches;
   }
@@ -167,31 +98,18 @@ const diffViews = (from, fromKinds, to, toKinds, { purged = false, exact = true 
       const removed = [...before].filter(([key]) => !after.has(key)).map(([, element]) => element);
       if (added.length > 0) patches.push({ action: 'add', field, elements: added });
       if (removed.length > 0) patches.push({ action: 'remove', field, elements: removed });
-    } else if (kind === 'text') {
-      patches.push(...spliceText(field, previous ?? '', value ?? ''));
-    } else if (kind === 'list') {
-      patches.push(...spliceList(field, previous ?? [], value ?? []));
-    } else if (kind === 'tree') {
-      patches.push(...treePatches(field, previous ?? [], value ?? []));
+    } else {
+      const mod = own(plugins.byName, kind);
+      if (mod !== undefined) patches.push(...mod.diff(field, kind, previous, value));
     }
   }
   return patches;
 };
 
 const isField = (value) => typeof value === 'string' && value.length > 0;
-const ACTIONS = new Set([
-  'put',
-  'write',
-  'inc',
-  'add',
-  'remove',
-  'splice',
-  'mark',
-  'treeMove',
-  'treeRemove',
-  'delete',
-  'purge',
-]);
+// The actions the core realizes itself; a plugin's (`splice`, `mark`,
+// `treeMove`, `treeRemove`) come from the registry.
+const ACTIONS = new Set(['put', 'write', 'inc', 'add', 'remove', 'delete', 'purge']);
 
 // Exactly the tags a remove revokes: `[[element, { origin: addTs }]]`.
 const isRemovals = (list) =>
@@ -208,15 +126,21 @@ const isRemovals = (list) =>
 /**
  * A patch as the op the write path takes: `[type, payload]`, checked as the
  * method of the same name checks its arguments (src/args.js). A patch of the
- * wrong shape is a TypeError — it is the caller's data.
+ * wrong shape is a TypeError — it is the caller's data; one of a plugin's
+ * action with no plugin registered is PLUGIN_MISSING.
  */
-const realize = (patch) => {
+const realize = (patch, plugins = EMPTY) => {
   if (patch === null || typeof patch !== 'object') throw new TypeError('applyPatches(): a patch is an object');
   const { action, field } = patch;
-  if (!ACTIONS.has(action)) throw new TypeError(`applyPatches(): unknown action ${action}`);
+  const mod = typeof action === 'string' ? own(plugins.byAction, action) : undefined;
+  if (!ACTIONS.has(action) && mod === undefined) {
+    if (typeof action === 'string' && own(HOME, action) !== undefined) throw missing(`a ${action} patch`, HOME[action]);
+    throw new TypeError(`applyPatches(): unknown action ${action}`);
+  }
   const named = action !== 'write' && action !== 'delete' && action !== 'purge';
   if (named && !isField(field)) throw new TypeError(`applyPatches(): ${action} needs a field`);
   const method = 'applyPatches';
+  if (mod !== undefined) return mod.realize(action, patch, method);
   switch (action) {
     case 'put':
       return ['set', { data: { [field]: jsonValue(method, patch.value) } }];
@@ -239,31 +163,6 @@ const realize = (patch) => {
       if (patch.own === true) payload.own = true;
       return ['remove', payload];
     }
-    case 'splice': {
-      const { index, count = 0, content } = patch;
-      const payload = spliceArgs(method, field, index, count, content);
-      // A pure cut carries no content: the field's kind says what it is.
-      if (payload.content !== undefined && payload.content.length === 0) delete payload.content;
-      return ['splice', payload];
-    }
-    case 'mark': {
-      const { start, end, name, value = null, expand = 'after' } = patch;
-      markArgs(method, field, start, end, name, expand);
-      const payload = { key: field, start, end, name, value: jsonValue(method, value), expand };
-      if (patch.many === true) payload.many = true;
-      return ['mark', payload];
-    }
-    case 'treeMove': {
-      const parent = patch.parent ?? null;
-      treeArgs(method, field, patch.node, parent, { after: patch.after, before: patch.before });
-      const payload = { key: field, node: patch.node, parent };
-      if (patch.after !== undefined) payload.after = patch.after;
-      if (patch.before !== undefined) payload.before = patch.before;
-      return ['tree', payload];
-    }
-    case 'treeRemove':
-      treeArgs(method, field, patch.node, null);
-      return ['tree', { key: field, node: patch.node, parent: '$trash' }];
     case 'delete':
       return ['delete', {}];
     case 'purge':

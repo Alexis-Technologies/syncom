@@ -123,9 +123,22 @@ test('every exports entry point has a row in scripts/size.js', () => {
 });
 
 test('every runtime export is declared in the types', () => {
+  // A .d.ts that re-exports another whole (`export * from`) declares what
+  // that one declares.
+  const sourceOf = (types, seen = new Set()) => {
+    const file = path.join(ROOT, types);
+    if (seen.has(file)) return '';
+    seen.add(file);
+    let source = readFileSync(file, 'utf8');
+    for (const [, from] of source.matchAll(/^export \* from '([^']+)';/gm)) {
+      const target = path.relative(ROOT, path.resolve(path.dirname(file), from.replace(/\.js$/, '.d.ts')));
+      source += sourceOf(target, seen);
+    }
+    return source;
+  };
   const check = (entry, types) => {
     const runtime = Object.keys(require(path.join(ROOT, entry)));
-    const source = readFileSync(path.join(ROOT, types), 'utf8');
+    const source = sourceOf(types);
     for (const name of runtime) {
       const declared =
         new RegExp(`export (?:declare )?(?:function|const|class) ${name}\\b`).test(source) ||
@@ -143,6 +156,9 @@ test('every runtime export is declared in the types', () => {
   check('src/order/order.js', 'src/order/order.d.ts');
   check('src/undo/undo.js', 'src/undo/undo.d.ts');
   check('src/branch/branch.js', 'src/branch/branch.d.ts');
+  check('src/all/all.js', 'src/all/all.d.ts');
+  check('src/text/text.js', 'src/text/text.d.ts');
+  check('src/tree/tree.js', 'src/tree/tree.d.ts');
   // browser.js is only loadable under OPFS/WebCrypto globals, so compare its
   // barrel's names against the node one instead of requiring it here.
   check('index.js', 'browser.d.ts');

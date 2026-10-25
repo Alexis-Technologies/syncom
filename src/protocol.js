@@ -13,6 +13,11 @@
 const PROTOCOL = 1;
 const DEFAULT_PAGE_SIZE = 500;
 
+// The kind plugins a peer runs with, as hello carries them — names — or
+// null for a peer that said nothing (a hello from before plugins).
+const kindsOf = (value) =>
+  Array.isArray(value) ? value.filter((name) => typeof name === 'string' && name !== '__proto__') : null;
+
 // A peer's schema as hello carries it — `{ version, hash }` — or null for
 // a peer without one (or one speaking a shape this node does not read).
 const schemaOf = (value) => {
@@ -20,4 +25,4 @@ const schemaOf = (value) => {
   return { version: value.version, hash: typeof value.hash === 'string' ? value.hash : null };
 };
 
-module.exports = { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf };
+module.exports = { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf, kindsOf };

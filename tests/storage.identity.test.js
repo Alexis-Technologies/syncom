@@ -8,7 +8,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const syncom = require('..');
+const syncom = require('../src/all/all.js');
 const { loadSigningKeys, generateSigningKeys } = require('../src/crypto.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 
@@ -25,7 +25,10 @@ test('Storage identity', async (t) => {
       const { nodeId } = storage;
       assert.match(nodeId, KEY_ID);
       assert.strictEqual(nodeId, (await loadSigningKeys(path.join(dir, 'keys'))).id);
-      assert.deepStrictEqual(JSON.parse(await fs.readFile(path.join(dir, 'node.json'), 'utf8')), { id: nodeId });
+      assert.deepStrictEqual(JSON.parse(await fs.readFile(path.join(dir, 'node.json'), 'utf8')), {
+        id: nodeId,
+        plugins: ['text', 'tree'],
+      });
       for (const file of ['public.pem', 'private.pem', 'sign-public.pem', 'sign-private.pem']) {
         await fs.stat(path.join(dir, 'keys', file));
       }
@@ -62,7 +65,10 @@ test('Storage identity', async (t) => {
       warnings.map((entry) => [entry.event, entry.from, entry.to]),
       [['identity.rekeyed', 'legacy-uuid-1234', storage.nodeId]],
     );
-    assert.deepStrictEqual(JSON.parse(await fs.readFile(path.join(dir, 'node.json'), 'utf8')), { id: storage.nodeId });
+    assert.deepStrictEqual(JSON.parse(await fs.readFile(path.join(dir, 'node.json'), 'utf8')), {
+      id: storage.nodeId,
+      plugins: ['text', 'tree'],
+    });
     await storage.close();
     // Once: a reopen is quiet.
     const again = await syncom.open({ path: dir, logger });

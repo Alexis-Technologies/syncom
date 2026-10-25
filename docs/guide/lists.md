@@ -1,5 +1,11 @@
 # Lists, text and trees
 
+::: tip The kinds on this page are plugins
+Lists and texts are the `text` plugin (`@alexify/syncom/text`), trees the
+`tree` plugin (`/tree`): `open({ plugins: [text, tree] })`, or open through
+`@alexify/syncom/all`, which has both. See [Entry points](/guide/entry-points).
+:::
+
 A field can be a **list** — an array that nodes edit by position — or a
 **text** — a string they type into — or a **tree** — nodes moved under one
 another without ever forming a cycle ([Trees](#trees), below). Two nodes that insert at the same spot

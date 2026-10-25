@@ -5,7 +5,7 @@
 // modules. Every message names the option the way the caller wrote it.
 
 const { isPlainObject } = require('./shape.js');
-const { PENDING_MAX } = require('./text/sequence.js');
+const { PENDING_MAX, createPlugins } = require('./plugin.js');
 
 const DEFAULT_CACHE = 5000;
 const DEFAULT_FLUSH_EVERY = 64;
@@ -120,6 +120,10 @@ const normalizeStorageOptions = (options) => {
   if (signatures !== undefined && signatures !== 'verify' && signatures !== 'require' && signatures !== false) {
     throw new TypeError("open({ sync }): signatures must be 'verify', 'require' or false");
   }
+  // The plugins this storage runs with — the kinds beyond registers,
+  // counters and sets, and the API modules — as one registry per instance
+  // (src/plugin.js); nothing is registered process-wide.
+  const plugins = createPlugins(options.plugins ?? []);
   return {
     path: options.path || options.name || 'syncom',
     maxListeners,
@@ -140,6 +144,7 @@ const normalizeStorageOptions = (options) => {
     pendingMax: pendingMax ?? PENDING_MAX,
     defer: defer ?? 0,
     signatures: signatures ?? 'verify',
+    plugins,
   };
 };
 

@@ -2,9 +2,9 @@
 // Give `createSearch()` to `open({ search })`; the catalog feeds it each
 // searchable record's text and asks it to rank a query. Platform-neutral.
 
-import type { TextIndex } from './index.js';
+import type { TextIndex } from '../../index.js';
 
-export type { TextIndex } from './index.js';
+export type { TextIndex } from '../../index.js';
 
 export interface SearchOptions {
   /** The share (0 to 1) of a query's distinct trigrams a record must hold to match; 0.3 by default. */

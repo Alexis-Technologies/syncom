@@ -15,7 +15,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const S = require('../src/text/sequence.js');
 const O = require('./utils/walk-oracle.js');
-const { applyOp, seqIndexOf } = require('../src/ops.js');
+const { applyOp } = require('../src/all/all.js');
 
 const ORIGINS = ['A', 'B', 'C'];
 const SEEDS = 40;
@@ -30,7 +30,7 @@ const pick = (random, n) => Math.floor(random() * n);
 
 const op = (type, ts, origin, value) => ({ origin, seq: ts, ts, type, id: 'r', key: 'body', value });
 
-const indexOf = (entry) => (entry === null || entry.meta.seqs.body === undefined ? null : seqIndexOf(entry, 'body'));
+const indexOf = (entry) => (entry === null || entry.meta.blocks.body === undefined ? null : S.indexOf(entry, 'body'));
 
 // One step over the single-node state: an insert placed as a local write
 // places it (a new run, or an extension of the writer's own run), a cut, a
@@ -63,11 +63,11 @@ const step = (entry, ts, random) => {
 
 // Every reading of the engine against the oracle's over the same JSON.
 const agree = (entry, where) => {
-  const seq = entry.meta.seqs.body;
+  const seq = entry.meta.blocks.body;
   if (seq === undefined) return;
   const base = entry.meta.base;
   const json = JSON.parse(JSON.stringify(seq));
-  const index = seqIndexOf(entry, 'body');
+  const index = S.indexOf(entry, 'body');
   const oracle = O.buildIndex(json, base);
   assert.strictEqual(S.render(index), O.render(oracle), `${where}: render`);
   assert.strictEqual(entry.data.body, O.render(oracle), `${where}: data`);
@@ -127,8 +127,8 @@ test('the engine reads a text as the legacy walk does, after every op of a seede
     let other = null;
     for (const next of interleave(ops, random)) other = applyOp(other, next).entry;
     assert.deepStrictEqual(
-      JSON.parse(JSON.stringify(other.meta.seqs.body ?? null)),
-      JSON.parse(JSON.stringify(entry.meta.seqs.body ?? null)),
+      JSON.parse(JSON.stringify(other.meta.blocks.body ?? null)),
+      JSON.parse(JSON.stringify(entry.meta.blocks.body ?? null)),
       `seed ${seed}: blocks differ by order of arrival`,
     );
     assert.strictEqual(other.data.body, entry.data.body, `seed ${seed}: readings differ by order of arrival`);

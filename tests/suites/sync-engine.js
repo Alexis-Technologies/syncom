@@ -203,7 +203,7 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
       JSON.stringify(state[id].items),
     );
     // The blocks agree too, not only the readings.
-    const blocks = async (storage) => (await storage.snapshot()).records.find((r) => r.id === id).meta.seqs;
+    const blocks = async (storage) => (await storage.snapshot()).records.find((r) => r.id === id).meta.blocks;
     assert.deepStrictEqual(await blocks(a), await blocks(b));
     // Live again: a cut on one side, typing on the other, in one spot.
     await a.splice(id, 'body', 0, 4);
@@ -240,7 +240,7 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     const leaf = (name) => ({ id: name, children: [] });
     const cyc = await assertConverged([a, b]);
     assert.deepStrictEqual(cyc[id].outline, [{ id: 'r', children: [{ id: 'y', children: [leaf('x')] }] }]);
-    const trees = async (storage) => (await storage.snapshot()).records.find((r) => r.id === id).meta.trees;
+    const trees = async (storage) => (await storage.snapshot()).records.find((r) => r.id === id).meta.blocks;
     assert.deepStrictEqual(await trees(a), await trees(b), 'the move logs agree too');
     // A removal on one side, a move into the removed subtree on the other:
     // the mover is hidden with it, and comes back with it.
@@ -352,10 +352,10 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
       await a.splice(id, 'body', 0, 0, 'hello');
       await settle([a, b]);
       const record = (await a.snapshot()).records.find((r) => r.id === id);
-      const run = Object.keys(record.meta.seqs.body.runs)[0];
+      const run = Object.keys(record.meta.blocks.body.runs)[0];
       const forged = (edit) => {
         const copy = JSON.parse(JSON.stringify(record));
-        edit(copy.meta.seqs.body);
+        edit(copy.meta.blocks.body);
         return copy;
       };
       // A run with a 300-million-slot gap would be expanded element by
@@ -457,7 +457,7 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     const blocks = async (storage) => {
       const out = {};
       for (const record of (await storage.snapshot()).records) {
-        out[record.id] = { seqs: record.meta.seqs ?? {}, trees: record.meta.trees ?? {} };
+        out[record.id] = { blocks: record.meta.blocks ?? {} };
       }
       return out;
     };

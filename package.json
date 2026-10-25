@@ -48,6 +48,18 @@
       "types": "./src/branch/branch.d.ts",
       "default": "./src/branch/branch.js"
     },
+    "./all": {
+      "types": "./src/all/all.d.ts",
+      "default": "./src/all/all.js"
+    },
+    "./text": {
+      "types": "./src/text/text.d.ts",
+      "default": "./src/text/text.js"
+    },
+    "./tree": {
+      "types": "./src/tree/tree.d.ts",
+      "default": "./src/tree/tree.js"
+    },
     "./package.json": "./package.json"
   },
   "directories": {

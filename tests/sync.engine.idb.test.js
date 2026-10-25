@@ -6,14 +6,14 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { IDBFactory } = require('fake-indexeddb');
-const { installBrowserGlobals, requireBrowserBarrel } = require('./utils/browser-env.js');
+const { installBrowserGlobals, requireBrowserAll } = require('./utils/browser-env.js');
 const { createIdbFsi } = require('../src/idb/idb.js');
 const { runSyncEngineTests } = require('./suites/sync-engine.js');
 
 test('Sync engine (IndexedDB backend)', async (t) => {
   const env = installBrowserGlobals();
   t.after(() => env.uninstall());
-  const browser = requireBrowserBarrel();
+  const browser = requireBrowserAll();
   const factory = new IDBFactory();
 
   let n = 0;

@@ -134,6 +134,7 @@ test('tree', async (t) => {
     assert.deepStrictEqual(T.joinTrees(right, left), joined);
     const hostile = JSON.parse(
       JSON.stringify({
+        k: 'tree',
         ts: 1,
         moves: {
           r: [
@@ -151,6 +152,7 @@ test('tree', async (t) => {
     );
     const normalized = T.normalizeTree(hostile);
     assert.deepStrictEqual(normalized, {
+      k: 'tree',
       ts: r.op.ts,
       moves: { r: [[r.op.ts, 'A', null, 'V']], self: [[2, 'A', 'self', 'V']] },
     });

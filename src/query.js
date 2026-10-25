@@ -5,7 +5,7 @@
 // field it reads is indexed, from the records otherwise. No requires beyond
 // the engine's own: this file ships to the browser.
 
-const { deepEqual } = require('./ops.js');
+const { deepEqual } = require('./shape.js');
 const { valueOf } = require('./catalog.js');
 
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);

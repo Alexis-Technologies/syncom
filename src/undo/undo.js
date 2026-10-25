@@ -18,6 +18,7 @@
 
 const { diffViews } = require('../patch.js');
 const { Emitter } = require('../emitter.js');
+const { PLUGINS } = require('../symbols.js');
 
 const WHOLE = new Set(['write', 'delete', 'merge', 'purge']);
 const GLOBAL = '*';
@@ -56,8 +57,8 @@ const conflicting = (patch, types) => {
 // a tree it created is emptied instead — what to fall back on when the
 // reset would run into a peer's change. A set element goes as this node's
 // adds alone (`own`), so a concurrent add of it elsewhere survives.
-const invert = ({ before, after, kinds }, exact) =>
-  diffViews(after, kindsIn(after, kinds), before, kindsIn(before, kinds), { exact }).map((patch) =>
+const invert = ({ before, after, kinds }, exact, plugins) =>
+  diffViews(after, kindsIn(after, kinds), before, kindsIn(before, kinds), { exact, plugins }).map((patch) =>
     patch.action === 'remove' ? { ...patch, own: true } : patch,
   );
 
@@ -214,14 +215,15 @@ class UndoManager extends Emitter {
       for (const [id, record] of step.records) {
         current = id;
         const conflicts = this.#conflicts(step, id);
-        let patches = invert(record, true);
+        const plugins = this.#storage[PLUGINS];
+        let patches = invert(record, true, plugins);
         let kept = patches;
         if (!force) {
           // A whole-record patch leads the others (they make the record
           // again after the reset): with a change by others since, the
           // loose inverse is tried — fields emptied, not reset — and a
           // record that still needs the reset is left alone whole.
-          if (isWhole(patches) && conflicts !== null && conflicts.size > 0) patches = invert(record, false);
+          if (isWhole(patches) && conflicts !== null && conflicts.size > 0) patches = invert(record, false, plugins);
           if (conflicts === null || (isWhole(patches) && conflicts.size > 0)) kept = [];
           else kept = patches.filter((patch) => !conflicting(patch, conflicts.get(patch.field)));
         }
