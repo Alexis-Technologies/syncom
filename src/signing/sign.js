@@ -12,7 +12,7 @@
 // binds authorship and content to the origin's key, through any relay — it
 // proves nothing about delivery, and `actor` stays a claim the origin made.
 
-const { calculateHash, sign, verifyAsync } = require('./ed25519.js');
+const { calculateHash, sign, signAsync, verifyAsync } = require('./ed25519.js');
 const { generateUUID } = require('../utils.js');
 const { isKeyId, VERDICT } = require('../shape.js');
 
@@ -87,14 +87,15 @@ const signedMessage = (op) =>
 
 // Signs an op in place: `nonce` and `digest` when it carries a payload,
 // `sig` always. Called once the op is final — after validation rewrote its
-// data, after its seq was assigned — and before it is appended.
-const signOp = async (op, privateKey) => {
+// data, after its seq was assigned — and before it is written: `later`
+// signs on the thread pool (a write among others queued), else at once.
+const signOp = async (op, privateKey, later = false) => {
   const payload = payloadOf(op);
   if (payload !== null) {
     op.nonce = generateUUID();
     op.digest = await digestOf(op.nonce, payload);
   }
-  op.sig = await sign(signedMessage(op), privateKey);
+  op.sig = await (later ? signAsync : sign)(signedMessage(op), privateKey);
   return op;
 };
 

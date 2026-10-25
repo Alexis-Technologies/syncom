@@ -1,5 +1,7 @@
 'use strict';
 
+// Files land at once here (`defer: 0`): what these tests read of the disk is the engine's, not the window's — the window has tests of its own (storage.defer, storage.group).
+
 // The injected OpenTelemetry writer: what enables it, what it emits, and —
 // most of the file — that nothing a hostile tracer, meter, span or
 // instrument does can break a write.
@@ -67,7 +69,7 @@ const useActiveContext = (t) => {
 const openTemp = async (t, options = {}) => {
   const dir = await createTemp();
   t.after(() => cleanupTemp(dir));
-  const storage = await syncom.open({ path: dir, logger: false, ...options });
+  const storage = await syncom.open({ defer: 0, path: dir, logger: false, ...options });
   t.after(() => storage.close().catch(() => {}));
   return { dir, storage };
 };
@@ -582,7 +584,7 @@ test('Storage telemetry', async (t) => {
     assert.strictEqual(errors[0].code, 'UNPERSISTED');
     failing = false;
     await first.close();
-    const second = await syncom.open({ path: dir, logger: false, fsi, telemetry: { tracer, meter } });
+    const second = await syncom.open({ defer: 0, path: dir, logger: false, fsi, telemetry: { tracer, meter } });
     t2.after(() => second.close().catch(() => {}));
     assert.deepStrictEqual(await second.get(id), { n: 1 });
     const [span] = named('syncom.replay');
@@ -627,7 +629,13 @@ test('Sync telemetry', async (t) => {
     async (t2, name, options = {}) => {
       const dir = await createTemp();
       t2.after(() => cleanupTemp(dir));
-      const storage = await syncom.open({ path: dir, logger: false, telemetry: telemetryOf(name), ...options });
+      const storage = await syncom.open({
+        defer: 0,
+        path: dir,
+        logger: false,
+        telemetry: telemetryOf(name),
+        ...options,
+      });
       t2.after(() => storage.close().catch(() => {}));
       return storage;
     };
@@ -889,7 +897,7 @@ test('What the engine adds beyond the write path', async (t) => {
     // A rebuild: the catalog file gone, the next open scans data/ under a span.
     await storage.close();
     await require('node:fs/promises').rm(require('node:path').join(dir, 'index', 'catalog.json'));
-    const second = await syncom.open({ path: dir, logger: false, telemetry: { tracer, meter } });
+    const second = await syncom.open({ defer: 0, path: dir, logger: false, telemetry: { tracer, meter } });
     t2.after(() => second.close().catch(() => {}));
     // The first open rebuilt an empty directory too; the last span is this one.
     const rebuild = named('syncom.catalog.rebuild').at(-1);

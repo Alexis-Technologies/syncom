@@ -90,4 +90,7 @@ const loadSigningKeys = async (basePath = 'keys', { fsi = defaultFsi } = {}) => 
   return { publicKey: keys.publicKey, privateKey: keys.privateKey, id: signingId(keys.publicKey) };
 };
 
-module.exports = { calculateHash, generateSigningKeys, loadSigningKeys, sign, verify, verifyAsync };
+// Web Crypto signs off the main thread already.
+const signAsync = sign;
+
+module.exports = { calculateHash, generateSigningKeys, loadSigningKeys, sign, signAsync, verify, verifyAsync };

@@ -312,16 +312,26 @@ const updateText = async (core, id, key, text, { actor } = {}) => {
   if (typeof text !== 'string') throw new TypeError('updateText() takes a string');
   if (!isRecordId(id)) throw invalidId(id);
   return core.run(async () => {
-    const current = await core.entries.load(id);
+    const current = await core.current(id);
     const before = current && !current.encrypted && core.alive(current) ? current.data[key] : undefined;
     // Another kind under the field: the first splice is refused for it.
     const hunks = myers(typeof before === 'string' ? before : '', text);
     let ops = 0;
-    for (const [index, count, content] of hunks) {
-      const payload = { key, index, count };
-      if (content.length > 0) payload.content = content;
-      if ((await core.commitNow('splice', id, payload, { actor })) !== null) ops++;
+    const landings = [];
+    try {
+      for (const [index, count, content] of hunks) {
+        const payload = { key, index, count };
+        if (content.length > 0) payload.content = content;
+        const { op, done } = await core.commitNow('splice', id, payload, { actor });
+        if (op === null) continue;
+        ops++;
+        landings.push(done);
+      }
+    } finally {
+      // What landed before a refusal has landed when the call rejects.
+      await Promise.allSettled(landings);
     }
+    await Promise.all(landings);
     return ops;
   });
 };

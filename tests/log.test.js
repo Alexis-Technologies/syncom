@@ -494,3 +494,104 @@ test('latestTs rides in the index: a reopen with everything sealed still knows t
     await cleanupTemp(dir);
   }
 });
+
+test('a group commit: appends issued together land as one file, in order; a failed write takes its seqs back', async (t) => {
+  await t.test(
+    'appends that come while a file is written go as one file after it, published in seq order',
+    async () => {
+      const dir = await createTemp();
+      try {
+        const log = await new OpLog(dir, { rollAfter: 100, sealApplied: true });
+        // Three appends in one tick: seqs reserved at once, the vector ahead
+        // of the disk, one group — one file.
+        const first = log.append([op('A', 1)]);
+        const second = log.append([op('A', 2), op('B', 1)]);
+        const third = log.append([op('A', 3)]);
+        assert.deepStrictEqual(
+          first.entries.map((entry) => entry.seq),
+          [1],
+        );
+        assert.deepStrictEqual(
+          second.entries.map((entry) => entry.seq),
+          [2, 3],
+        );
+        assert.deepStrictEqual(
+          third.entries.map((entry) => entry.seq),
+          [4],
+        );
+        assert.deepStrictEqual(log.vector, { A: 3, B: 1 }, 'reserved: the vector moved before the disk');
+        assert.strictEqual(log.next, 5);
+        assert.strictEqual(log.length, 0, 'nothing published before the file is down');
+        const [a, b, c] = await Promise.all([first, second, third]);
+        assert.deepStrictEqual(
+          [...a, ...b, ...c].map((entry) => entry.seq),
+          [1, 2, 3, 4],
+        );
+        assert.strictEqual(log.length, 4);
+        const names = (await fs.readdir(path.join(dir, 'log', 'open'))).sort();
+        assert.deepStrictEqual(names, ['0000000001.json'], 'one file for the group');
+        // A fourth, alone, is its own file; the groups read back in order.
+        await log.append([op('B', 2)]);
+        assert.deepStrictEqual(
+          log.since(undefined).map((entry) => entry.seq),
+          [1, 2, 3, 4, 5],
+        );
+        // Applied one seq at a time, a group's file is sealed once every seq
+        // of it is; the roll stops short of what is not.
+        log.applied(1, 3);
+        await log.flush();
+        assert.strictEqual(log.segments, 0, 'seq 4 of the first file holds the line');
+        log.applied(4);
+        await log.flush();
+        assert.strictEqual(log.segments, 1);
+        assert.deepStrictEqual(
+          log.tail().map((entry) => entry.seq),
+          [5],
+        );
+        const reopened = await new OpLog(dir, { rollAfter: 100, sealApplied: true });
+        assert.deepStrictEqual(
+          reopened.since(undefined).map((entry) => entry.seq),
+          [1, 2, 3, 4, 5],
+        );
+        assert.deepStrictEqual(reopened.vector, { A: 3, B: 2 });
+      } finally {
+        await cleanupTemp(dir);
+      }
+    },
+  );
+
+  await t.test(
+    'a write that fails rejects its group and the one behind it; the seqs are handed out again',
+    async () => {
+      const dir = await createTemp();
+      try {
+        const fsi = require('../src/fsi.js');
+        let failing = false;
+        const flaky = {
+          ...fsi,
+          write: (...args) => (failing ? Promise.reject(new Error('disk full')) : fsi.write(...args)),
+        };
+        const log = await new OpLog(dir, { rollAfter: 100, fsi: flaky });
+        await log.append([op('A', 1)]);
+        failing = true;
+        const second = log.append([op('A', 2)]);
+        const third = log.append([op('A', 3)]);
+        assert.deepStrictEqual(log.vector, { A: 3 });
+        await assert.rejects(second, /disk full/);
+        await assert.rejects(third, /disk full/, 'the group gathered behind the failed one goes with it');
+        assert.strictEqual(log.length, 1, 'nothing of them published');
+        assert.strictEqual(log.next, 2, 'the seqs are taken back');
+        assert.deepStrictEqual(log.vector, { A: 1 }, 'and so is the vector');
+        failing = false;
+        const [{ seq }] = await log.append([op('A', 2)]);
+        assert.strictEqual(seq, 2, 'the next append gets the first of them again');
+        assert.deepStrictEqual(
+          log.since(undefined).map((entry) => entry.seq),
+          [1, 2],
+        );
+      } finally {
+        await cleanupTemp(dir);
+      }
+    },
+  );
+});

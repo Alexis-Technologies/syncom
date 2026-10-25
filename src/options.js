@@ -45,6 +45,9 @@ const positiveInteger = (value, message) => {
   return value;
 };
 
+// How long a record file may lag the log by default: one frame.
+const DEFAULT_DEFER = 16;
+
 const normalizeStorageOptions = (options) => {
   // `open('./path')` would otherwise open the default directory in silence.
   if (options === null || typeof options !== 'object') {
@@ -105,10 +108,10 @@ const normalizeStorageOptions = (options) => {
   if (pendingMax !== undefined && !((Number.isInteger(pendingMax) && pendingMax > 0) || pendingMax === Infinity)) {
     throw new TypeError('open({ sync }): pendingMax must be a positive integer (Infinity to disable)');
   }
-  // Record files may lag the log by this many ms (0: never): the log is
-  // durable at once and a crash replays the batch, so the writes of one
-  // record within the window coalesce into one file and one block — see
-  // Storage#deferWrite.
+  // Record files may lag the log by this many ms (0: never; 16 by default,
+  // a frame): the log is durable at once and a crash replays the batch, so
+  // the writes of one record within the window coalesce into one file and
+  // one block — see Storage#deferWrite.
   const defer = options.defer;
   if (defer !== undefined && !(Number.isInteger(defer) && defer >= 0)) {
     throw new TypeError('open({ defer }): defer must be a non-negative integer of milliseconds');
@@ -142,10 +145,10 @@ const normalizeStorageOptions = (options) => {
     scope: typeof scope === 'function' ? scope : null,
     maxSkew: maxSkew ?? DEFAULT_MAX_SKEW,
     pendingMax: pendingMax ?? PENDING_MAX,
-    defer: defer ?? 0,
+    defer: defer ?? DEFAULT_DEFER,
     signatures: signatures ?? 'verify',
     plugins,
   };
 };
 
-module.exports = { normalizeStorageOptions };
+module.exports = { normalizeStorageOptions, DEFAULT_DEFER };

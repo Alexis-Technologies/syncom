@@ -1,5 +1,7 @@
 'use strict';
 
+// Files land at once here (`defer: 0`): what these tests read of the disk is the engine's, not the window's — the window has tests of its own (storage.defer, storage.group).
+
 // The replication half of Storage: ops, counters, tombstones, the change
 // event, applying a peer's ops, snapshots, and what survives a reopen.
 
@@ -13,7 +15,7 @@ const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const openTemp = async (t, options = {}) => {
   const dir = await createTemp();
   t.after(() => cleanupTemp(dir));
-  const storage = await syncom.open({ path: dir, logger: false, ...options });
+  const storage = await syncom.open({ defer: 0, path: dir, logger: false, ...options });
   return { dir, storage };
 };
 
@@ -116,7 +118,7 @@ test('Storage replication model', async (t) => {
       await storage.inc(id, 'n', 1);
       assert.strictEqual((await storage.get(id)).n, Number.MAX_SAFE_INTEGER);
       await storage.close();
-      const again = await syncom.open({ path: dir, logger: false });
+      const again = await syncom.open({ defer: 0, path: dir, logger: false });
       t2.after(() => again.close());
       assert.strictEqual((await again.get(id)).n, Number.MAX_SAFE_INTEGER, 'a reopen reads the same');
     },
@@ -577,7 +579,7 @@ test('Storage replication model', async (t) => {
     // The tree survives a reopen, from the file and from the log alike.
     const outline = (await storage.get(id)).outline;
     await storage.close();
-    const again = await syncom.open({ path: dir, logger: false });
+    const again = await syncom.open({ defer: 0, path: dir, logger: false });
     t2.after(() => again.close());
     assert.deepStrictEqual((await again.get(id)).outline, outline);
     assert.ok((await again.repair(id)).ops > 0);
@@ -858,7 +860,7 @@ test('Storage replication model', async (t) => {
         return base.write(dir2, name, content, options);
       },
     };
-    const first = await syncom.open({ path: dir, logger: false, fsi, sync: { log: { rollAfter: 1 } } });
+    const first = await syncom.open({ defer: 0, path: dir, logger: false, fsi, sync: { log: { rollAfter: 1 } } });
     const errors = [];
     first.on('error', (error) => errors.push(error));
     const id = await first.insert({ n: 1 });
@@ -879,7 +881,7 @@ test('Storage replication model', async (t) => {
     await assert.rejects(() => first.insert({ n: 2 }), /closed/);
     assert.strictEqual(await fsi.exists(path.join(dir, 'data'), 'lost.json'), false);
 
-    const second = await syncom.open({ path: dir, logger: false, fsi });
+    const second = await syncom.open({ defer: 0, path: dir, logger: false, fsi });
     assert.strictEqual(second.nodeId, nodeId);
     assert.deepStrictEqual(second.vector, { [nodeId]: 2, peer: 1 });
     assert.deepStrictEqual(await second.get('lost'), { p: 1 }, 'replayed from the log');
@@ -891,7 +893,7 @@ test('Storage replication model', async (t) => {
     assert.strictEqual(ops[0].seq, 3, 'the own seq continues, never repeats');
     assert.strictEqual(await second.validate(), true);
     await second.close();
-    const third = await syncom.open({ path: dir, logger: false, fsi });
+    const third = await syncom.open({ defer: 0, path: dir, logger: false, fsi });
     assert.strictEqual(third.log.tail().length, 0, 'once every record is written, a clean close seals everything');
     await third.close();
   });
@@ -899,11 +901,11 @@ test('Storage replication model', async (t) => {
   await t.test('a record this node cannot read does not stop a page: its op is skipped and reported', async (t2) => {
     const dir = await createTemp();
     t2.after(() => cleanupTemp(dir));
-    const first = await syncom.open({ path: dir, logger: false });
+    const first = await syncom.open({ defer: 0, path: dir, logger: false });
     const bad = await first.insert({ n: 1 });
     await first.close();
     await fs.writeFile(path.join(dir, 'data', `${bad}.json`), '{not json');
-    const storage = await syncom.open({ path: dir, logger: false });
+    const storage = await syncom.open({ defer: 0, path: dir, logger: false });
     t2.after(() => storage.close().catch(() => {}));
     const errors = [];
     storage.on('error', (error) => errors.push(error));
@@ -1026,7 +1028,7 @@ test('Storage: the seams telemetry shares', async (t) => {
     const segment = (await fs.readdir(logDir)).find((name) => name.startsWith('seg-'));
     assert.ok(segment, 'a segment was sealed');
     await fs.writeFile(path.join(logDir, segment), '{not json');
-    await syncom.open({ path: dir, logger });
+    await syncom.open({ defer: 0, path: dir, logger });
     assert.strictEqual(
       events.some((entry) => entry.event === 'log.segment.unreadable'),
       true,
@@ -1317,12 +1319,12 @@ test('a snapshot page is joined as one batch', async (t) => {
     async (t2) => {
       const dir = await createTemp();
       t2.after(() => cleanupTemp(dir));
-      const first = await syncom.open({ path: dir, logger: false });
+      const first = await syncom.open({ defer: 0, path: dir, logger: false });
       const ids = [];
       for (let i = 0; i < 4; i++) ids.push(await first.insert({ i }));
       await first.close();
       await fs.writeFile(path.join(dir, 'data', `${ids[1]}.json`), '{not json');
-      const storage = await syncom.open({ path: dir, logger: false });
+      const storage = await syncom.open({ defer: 0, path: dir, logger: false });
       t2.after(() => storage.close().catch(() => {}));
       const page = await storage.snapshot({ limit: 10 });
       assert.deepStrictEqual(
@@ -1372,7 +1374,8 @@ test('Storage: the bounds of the sequence and tree engines', async (t) => {
         [['OP_REFUSED', [{ field: 'body', reason: 'bound', detail: 'pending', count: 2, max: 2 }]]],
       );
       assert.strictEqual((await storage.get(id)).body, 'ab');
-      const bad = (pendingMax) => syncom.open({ path: `${storage.path}-bad`, logger: false, sync: { pendingMax } });
+      const bad = (pendingMax) =>
+        syncom.open({ defer: 0, path: `${storage.path}-bad`, logger: false, sync: { pendingMax } });
       assert.throws(() => bad(0), TypeError);
       assert.throws(() => bad('many'), TypeError);
     },

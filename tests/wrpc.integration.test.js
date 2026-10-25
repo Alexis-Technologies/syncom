@@ -1,5 +1,7 @@
 'use strict';
 
+// Files land at once here (`defer: 0`): what these tests read of the disk is the engine's, not the window's — the window has tests of its own (storage.defer, storage.group).
+
 // The real thing: syncom nodes hosted by wrpc Servers, dialed through
 // WrpcClients over WebSocket. Skips (never fails) when @alexify/wrpc is not
 // installed, the way wrpc's own adapter suites treat their frameworks.
@@ -29,7 +31,7 @@ const { createChannelPair } = require('./utils/fake-channel.js');
 const openTemp = async (t, options = {}) => {
   const dir = await createTemp();
   t.after(() => cleanupTemp(dir));
-  const storage = await syncom.open({ path: dir, logger: false, ...options });
+  const storage = await syncom.open({ defer: 0, path: dir, logger: false, ...options });
   t.after(() => storage.close().catch(() => {}));
   return storage;
 };

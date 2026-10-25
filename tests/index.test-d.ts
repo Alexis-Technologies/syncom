@@ -288,6 +288,8 @@ expectType<Promise<void>>(storage.inc('id', 'hits'));
 expectType<Promise<void>>(storage.inc('id', 'hits', 2));
 expectType<Promise<string[]>>(storage.list());
 expectType<Promise<void>>(storage.close());
+expectType<Promise<void>>(storage.flush());
+expectType<number>(storage.stats().inflight);
 expectType<Promise<syncom.ApplyRemoteResult>>(storage.applyRemote([], { via: { url: 'ws://x', node: 'n' } }));
 expectType<Promise<syncom.SnapshotPage>>(storage.snapshot({ cursor: null, limit: 10 }));
 storage.on('change', (op, via) => {

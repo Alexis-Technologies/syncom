@@ -171,11 +171,15 @@ class EntryStore {
     this.#catalog.put(id, await this.row(id, entry));
   }
 
-  // A replicated entry: the file, the cache, the catalog row.
+  // A replicated entry: the file, the cache, the catalog row — unless the
+  // row is right already (the entry held by `hold` landing on its file: the
+  // catalog read it then, and a watcher must not hear of it twice).
   async write(id, entry, blockHash) {
     await this.#changing(id);
     const stored = { data: entry.data, meta: entry.meta, encrypted: false, timestamp: Date.now(), block: blockHash };
     await this.#fsi.write(this.#dir, `${id}.json`, JSON.stringify(stored));
+    const held = this.#held.has(id) ? this.#cache.get(id) : undefined;
+    const indexed = held !== undefined && held.data === entry.data && held.meta === entry.meta;
     this.#held.delete(id);
     const cached = { data: entry.data, meta: entry.meta, encrypted: false, block: blockHash };
     // What a plugin cached on the entry while applying (a sequence's index)
@@ -183,7 +187,7 @@ class EntryStore {
     // field through it.
     if (entry.cache !== undefined) cached.cache = entry.cache;
     this.remember(id, cached);
-    this.#catalog.put(id, await this.row(id, cached));
+    if (!indexed) this.#catalog.put(id, await this.row(id, cached));
   }
 
   // An entry whose op is logged but whose file (or chain block) could not be

@@ -86,6 +86,29 @@ test('open({ defer }): record files lag the log by the window, never the reads',
     assert.deepStrictEqual(await file(dir, id), written, 'no older entry was laid over the file');
   });
 
+  await t.test('a write landing while the window flushes keeps its slot: the file ends whole', async (t2) => {
+    // Record files take 30 ms to write: the window's flush is still writing
+    // the file when later keystrokes land (outside the queue), and their
+    // slot must not be settled by a file that does not hold them.
+    const node = require('../src/fsi.js');
+    const slow = {
+      ...node,
+      write: async (dir, name, text) => {
+        if (dir.endsWith('data')) await sleep(30);
+        return node.write(dir, name, text);
+      },
+    };
+    const { dir, storage } = await openTemp(t2, { defer: 20, fsi: slow });
+    const id = await storage.insert({ title: 'doc' });
+    for (const ch of 'hello') {
+      await storage.push(id, 'body', ch);
+      await sleep(8);
+    }
+    await sleep(200);
+    assert.deepStrictEqual(await file(dir, id), { title: 'doc', body: 'hello' }, 'every keystroke on disk');
+    assert.deepStrictEqual([storage.stats().deferred, storage.stats().held, storage.stats().inflight], [0, 0, 0]);
+  });
+
   await t.test('the option is a non-negative integer of milliseconds', async (t2) => {
     const dir = await createTemp();
     t2.after(() => cleanupTemp(dir));

@@ -223,7 +223,7 @@ recovered by replaying the log on the next open:
 
 ```
 log/
-├── open/<seq>.json     one file per appended batch, rewritten only by a scrub
+├── open/<seq>.json     one file per group of appends (the ops appended while the file before was written), rewritten only by a scrub
 ├── seg-<from>.json     sealed segments, rolled from open/ every `rollAfter` batches
 └── index.json          { epoch, floor, next, vector, segments, droppedHeld, latestTs, droppedTs }
 ```

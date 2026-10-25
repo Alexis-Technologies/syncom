@@ -1,5 +1,7 @@
 'use strict';
 
+// Files land at once here (`defer: 0`): what these tests read of the disk is the engine's, not the window's — the window has tests of its own (storage.defer, storage.group).
+
 // The dialing side's edges: registry toggles, manual sync, refusals from the
 // link factory, a host that already dials us, a link that cannot stream, and
 // failures on the way out.
@@ -14,7 +16,7 @@ const { waitUntil, settle } = require('./utils/mesh.js');
 const openTemp = async (t, options = {}) => {
   const dir = await createTemp();
   t.after(() => cleanupTemp(dir));
-  const storage = await syncom.open({ path: dir, logger: false, ...options });
+  const storage = await syncom.open({ defer: 0, path: dir, logger: false, ...options });
   t.after(() => storage.close().catch(() => {}));
   return storage;
 };
@@ -273,12 +275,12 @@ test('a torn registry file is reported and skipped, not fatal to the open', asyn
   t.after(() => cleanupTemp(dir));
   const warnings = [];
   const logger = { warn: (entry) => warnings.push(entry), debug() {}, info() {}, error() {} };
-  const first = await syncom.open({ path: dir, logger });
+  const first = await syncom.open({ defer: 0, path: dir, logger });
   await first.sync.addNode({ url: 'mem://a' });
   await first.sync.addNode({ url: 'mem://b' });
   await first.close();
   await fs.writeFile(path.join(dir, 'remote', `${encodeURIComponent('mem://a')}.json`), '{torn');
-  const second = await syncom.open({ path: dir, logger });
+  const second = await syncom.open({ defer: 0, path: dir, logger });
   t.after(() => second.close());
   assert.deepStrictEqual(
     second.sync.listNodes().map((node) => node.url),

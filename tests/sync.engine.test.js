@@ -1,5 +1,7 @@
 'use strict';
 
+// Files land at once here (`defer: 0`): what these tests read of the disk is the engine's, not the window's — the window has tests of its own (storage.defer, storage.group).
+
 const test = require('node:test');
 const assert = require('node:assert');
 const syncom = require('../src/all/all.js');
@@ -17,7 +19,7 @@ test('Sync engine (node)', async (t) => {
       dirs.set(key, dir);
       t2.after(() => cleanupTemp(dir));
     }
-    const storage = await syncom.open({ path: dir, logger: false, ...options });
+    const storage = await syncom.open({ defer: 0, path: dir, logger: false, ...options });
     t2.after(() => storage.close().catch(() => {}));
     return storage;
   });

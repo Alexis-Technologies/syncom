@@ -1,5 +1,7 @@
 'use strict';
 
+// Files land at once here (`defer: 0`): what these tests read of the disk is the engine's, not the window's — the window has tests of its own (storage.defer, storage.group).
+
 // The query suite over the lean core with the plugins given by hand —
 // `query` first, then what the suite's records and peers need (schema,
 // text, tree, sync, encryption; no signing: the node ids are UUIDs).
@@ -24,7 +26,7 @@ test('Queries (lean core, plugins by hand)', async (t) => {
     const key = `${t2.name}:${name}`;
     if (!paths.has(key)) paths.set(key, `query-${n++}-${name}`);
     const plugins = [query, schema, text, tree, sync, encryption];
-    const storage = await core.open({ path: paths.get(key), fsi, logger: false, plugins, ...options });
+    const storage = await core.open({ defer: 0, path: paths.get(key), fsi, logger: false, plugins, ...options });
     t2.after(() => storage.close().catch(() => {}));
     return storage;
   });

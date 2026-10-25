@@ -210,8 +210,10 @@ const restore = async (core, id, at, { actor, source = null } = {}) => {
  */
 const tag = async (core, name) => {
   if (!isRecordId(name)) throw new TypeError('tag() takes a name of the record-id form');
+  // What is in flight lands first (outside the queue), then the deferred
+  // files (inside it); what is held after that failed to write.
+  await core.drain();
   return core.run(async () => {
-    // Deferred files land first; what is held after that failed to write.
     await core.flushDeferred();
     // A record logged but not on disk has no file to copy from: the tag
     // waits for it to land (the next write of it, or the next open).

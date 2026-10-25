@@ -107,6 +107,14 @@ class Storage extends Emitter {
   #defer = 0;
   #deferred = new Map();
   #deferTimer = null;
+  // Local writes appended but not yet on disk: id → the entries the record's
+  // in-flight ops leave it as, oldest first, each with its log position —
+  // what the write paths build on while the disk is waited for outside the
+  // queue. The landings — the disk, the file, the hooks, the listeners —
+  // run one after another, in log order.
+  #inflight = new Map();
+  #inflightCount = 0;
+  #landings = Promise.resolve();
   #signatures;
   #encrypted;
   #hooks;
@@ -302,6 +310,9 @@ class Storage extends Emitter {
       sealApplied: true,
       // The floor moving is news to an operator: a peer below it bootstraps.
       onRoll: (roll) => notify(this, this.#logger, 'log', { kind: 'roll', ...roll }),
+      // A group that did not reach the disk: what was built on its seqs is
+      // dropped before the tickets reject, so the next write starts over.
+      onFail: (_error, from) => this.#takenBack(from),
     });
     // The clock picks up where the log left off: every stamp this node ever
     // logged is below what it will stamp next, whatever the wall clock says.
@@ -370,9 +381,22 @@ class Storage extends Emitter {
       plugins: this.#plugins,
       defer: this.#defer,
       deferred: (id, entry, position) => this.#deferWrite(id, entry, position),
+      // The record as the write paths see it: its newest in-flight entry,
+      // else the cache or the file; an op issued, its landing settled.
+      current: (id) => this.#current(id),
+      inflight: (id, entry, position) => this.#takeOff(id, entry, position),
+      settled: (id, position) => this.#settle(id, position),
+      landing: (step) => this.#landing(step),
+      drain: () => this.#landings,
       signatures: this.#signatures,
-      // Signs an op of this node's own, in place, once it is final.
-      sign: this.#signatures === false || this.#identity === null ? null : (op) => this.#identity.sign(op),
+      // Signs an op of this node's own, in place, once it is final —
+      // `later` on the thread pool, for a write with others queued behind it.
+      sign:
+        this.#signatures === false || this.#identity === null
+          ? null
+          : (op, later = false) => this.#identity.sign(op, later),
+      // Whether other writes wait on the queue behind the one running.
+      pipelined: () => this.#queued > 1,
       verify: this.#identity === null ? null : (op, mode) => this.#identity.verify(op, mode),
       hook: (name, ...args) => this.#hook(name, ...args),
       view: (id, entry) => this.#view(id, entry),
@@ -384,7 +408,7 @@ class Storage extends Emitter {
       definitionOf: (data) => this.#definitionOf(data),
       conflicts: (id, entry) => this.#conflicts(id, entry),
       invalid: (op, entry) => this.#invalid(op, entry),
-      persist: (touched, from, to) => this.#land(touched, from, to),
+      persist: (touched, from, to) => this.#landing(() => this.#land(touched, from, to)),
       unpersisted: (touched, error) => this.#unpersisted(touched, error),
       flush: () => this.#flushCatalog(),
       refresh: (id, data, delta, source, entry) => this.#emitUpdate(id, data, delta, source, entry),
@@ -793,7 +817,24 @@ class Storage extends Emitter {
   async #conflicts(id, entry) {
     const def = this.#definitionOf(entry.data);
     if (!def || def.unique.length === 0) return [];
-    return this.#catalog.uniqueConflicts(def.name, id, await this.#view(id, entry));
+    const view = await this.#view(id, entry);
+    const conflicts = this.#catalog.uniqueConflicts(def.name, id, view);
+    // The records in flight are not in the catalog yet: their newest entries
+    // are checked by hand.
+    for (const [other, stack] of this.#inflight) {
+      if (other === id || stack.length === 0) continue;
+      const held = stack[stack.length - 1].entry;
+      if (held.data.$type !== entry.data.$type || !isAlive(held)) continue;
+      const theirs = await this.#view(other, held);
+      for (const key of def.unique) {
+        const mine = this.#catalog.uniqueKey(view, key);
+        if (mine === null || mine !== this.#catalog.uniqueKey(theirs, key)) continue;
+        if (!conflicts.some((c) => c.other === other && c.fields.join(',') === key.join(','))) {
+          conflicts.push({ fields: [...key], other });
+        }
+      }
+    }
+    return conflicts;
   }
 
   // The entity definition a record belongs to, by its `$type`.
@@ -907,6 +948,7 @@ class Storage extends Emitter {
       // held after a write that failed (replayed at the next open).
       held: this.#entries.heldIds().size,
       deferred: this.#deferred.size,
+      inflight: this.#inflightCount,
       log: {
         length: log.length,
         floor: log.floor,
@@ -920,6 +962,52 @@ class Storage extends Emitter {
       chain: this.#chain ? { tail: this.#chain.tailHash } : null,
       lock: this.#lock ? { mode: this.#lockOptions.mode } : null,
     };
+  }
+
+  // The record as a write path reads it: the entry its newest in-flight op
+  // leaves it as, else what the cache or the file holds.
+  #current(id) {
+    const stack = this.#inflight.get(id);
+    if (stack !== undefined && stack.length > 0) return stack[stack.length - 1].entry;
+    return this.#entries.load(id);
+  }
+
+  #takeOff(id, entry, position) {
+    let stack = this.#inflight.get(id);
+    if (stack === undefined) this.#inflight.set(id, (stack = []));
+    stack.push({ entry, position });
+    this.#inflightCount++;
+  }
+
+  // The op at `position` landed (or failed): its entry is no longer in flight.
+  #settle(id, position) {
+    const stack = this.#inflight.get(id);
+    if (stack === undefined) return;
+    const i = stack.findIndex((held) => held.position === position);
+    if (i === -1) return;
+    stack.splice(i, 1);
+    this.#inflightCount--;
+    if (stack.length === 0) this.#inflight.delete(id);
+  }
+
+  // A group of appends failed: every in-flight entry at or past `from` was
+  // built on seqs taken back, and goes before any ticket rejects.
+  #takenBack(from) {
+    for (const [id, stack] of this.#inflight) {
+      while (stack.length > 0 && stack[stack.length - 1].position >= from) {
+        stack.pop();
+        this.#inflightCount--;
+      }
+      if (stack.length === 0) this.#inflight.delete(id);
+    }
+  }
+
+  // The landings go one after another, in log order, outside the queue; a
+  // failed one fails its own write alone.
+  #landing(step) {
+    const done = this.#landings.then(step, step);
+    this.#landings = done.catch(() => {});
+    return done;
   }
 
   // Every mutation passes through one queue: the chain's tail pointer, the
@@ -1031,13 +1119,15 @@ class Storage extends Emitter {
     // written from the cache, which held its deferred local ops too: those
     // are on disk now, so their slot goes and their positions are applied —
     // a later flush must not lay the older deferred entry over this file.
-    for (const id of touched.keys()) this.#settleDeferred(id);
+    // A slot made while this batch was landing (a later local write, its
+    // position past the batch) is not covered and stays.
+    for (const id of touched.keys()) this.#settleDeferred(id, toSeq);
     return true;
   }
 
-  #settleDeferred(id) {
+  #settleDeferred(id, toSeq) {
     const slot = this.#deferred.get(id);
-    if (slot === undefined) return;
+    if (slot === undefined || !slot.positions.every((position) => position <= toSeq)) return;
     this.#deferred.delete(id);
     for (const position of slot.positions) this.#log.applied(position);
   }
@@ -1057,19 +1147,25 @@ class Storage extends Emitter {
     if (this.#deferTimer === null) {
       this.#deferTimer = setTimeout(() => {
         this.#deferTimer = null;
-        this.#run(() => this.#flushDeferred()).catch(() => {});
+        this.#flushDeferred().catch(() => {});
       }, this.#defer);
       this.#deferTimer.unref?.();
     }
   }
 
-  // The deferred writes landed: one chain block, every file, the log told.
-  // Inside the mutation queue, or after it drained (close).
-  async #flushDeferred() {
+  // The deferred writes landed: one chain block, every file, the log told —
+  // as a step of the landings, after every write in flight before it (its
+  // slot is taken then, so a keystroke landing meanwhile is in it or waits
+  // for the next flush, and the cache never goes back to an older entry).
+  #flushDeferred() {
     if (this.#deferTimer !== null) {
       clearTimeout(this.#deferTimer);
       this.#deferTimer = null;
     }
+    return this.#landing(() => this.#landDeferred());
+  }
+
+  async #landDeferred() {
     if (this.#deferred.size === 0) return;
     const pending = this.#deferred;
     this.#deferred = new Map();
@@ -1109,9 +1205,13 @@ class Storage extends Emitter {
   // ---------------------------------------------------------------------
   // The one local write path — src/commit.js, inside the queue.
 
-  [COMMIT](type, id, payload, options = {}) {
-    if (!isRecordId(id)) return Promise.reject(invalidId(id));
-    return this.#run(() => commit(this.#core, type, id, payload, options));
+  async [COMMIT](type, id, payload, options = {}) {
+    if (!isRecordId(id)) throw invalidId(id);
+    const { op, done } = await this.#run(() => commit(this.#core, type, id, payload, options));
+    // The queue is free once the op is appended; the caller waits for the
+    // landing — the disk, the file, the hooks, the listeners.
+    if (done !== null) await done;
+    return op;
   }
 
   // ---------------------------------------------------------------------
@@ -1468,6 +1568,18 @@ class Storage extends Emitter {
     return this.#run(() => adopt(this.#core, vector, options));
   }
 
+  /**
+   * Lands what waits: the writes in flight (their disk, their files), then
+   * the record files deferred under `open({ defer })` — one block, every
+   * file — so what was written is on disk when this resolves. `close()` and
+   * `tag()` do the same first.
+   */
+  async flush() {
+    if (this.#closed) return;
+    await this.#landings;
+    await this.#run(() => this.#flushDeferred());
+  }
+
   /** Stops replication and seals the log. Further writes are refused — from the moment close() is called. */
   async close() {
     if (this.#closed) return;
@@ -1477,6 +1589,8 @@ class Storage extends Emitter {
     this.#closed = true;
     if (this.#sync !== null) await this.#sync.stop();
     const seal = async () => {
+      // What is in flight lands first.
+      await this.#landings;
       await this.#flushDeferred();
       await this.#catalogSave;
       await this.#catalog.save(this.#log.lastEventId);

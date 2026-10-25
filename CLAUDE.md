@@ -92,7 +92,7 @@ src/patches.js           reading, applyPatches, compact — the present and its 
                           lent core; Storage keeps a delegate per method
 src/entries.js            EntryStore — record files under data/, the bounded cache, the catalog row each change leaves
 src/record.js             Reference, Record, Collection — what the application holds; public API + the symbols only
-src/commit.js             the one local write path: prepare → validate → persist → announce (`storage[COMMIT]`)
+src/commit.js             the one local write path: prepare → validate → issue (in the queue) → land → announce (outside it, in log order) (`storage[COMMIT]`)
 src/apply.js              a peer's batch: admit → apply one by one → persist → announce (`storage.applyRemote`)
 src/bootstrap.js          snapshot pages out, merge pages in, adoptVector — the bootstrap write path
 src/schema/schema.js      @alexify/syncom/schema — the schema plugin: setup(ctx) hands the core the definitions and the lens (`schema` hook)
@@ -103,7 +103,7 @@ src/entity.js             project / unproject / foldSet — the record as its va
 src/errors.js             SyncomError, ValidationError, typed() — no requires
 src/ops.js                the record-level model: applyOp / mergeEntry / isAlive, packOps
 src/vector.js             clocks, version vectors, event ids
-src/log.js                OpLog — the persisted operation log over fsi
+src/log.js                OpLog — the persisted operation log over fsi: seqs reserved at append, groups written one file each
 src/sync/sync.js          @alexify/syncom/sync — the sync plugin: `open(ctx)` after the replay hands the core its SyncManager
 src/sync/manager.js       SyncManager — the dialing side; `unit()` delegates to hosting.js
 src/sync/hosting.js       createUnit — the hosting side: hello/push/snapshot/changes, limits, grant()
@@ -351,18 +351,47 @@ docs/                     VitePress site
   (`origin@scope` vector keys), and ops born from a snapshot (`merge`,
   `advance`) run in their own `origin@~` stream. `applyRemote` skips
   duplicates and gaps; resume from the last event id fills the gaps.
-- **Log first, then data.** `OpLog.append` resolves before the record file is
-  written and before the op is announced; a reopen replays the unsealed tail.
+- **Log first, then data — and the queue is free at the append.** `OpLog.append`
+  reserves the seqs and moves the vector AT ONCE (synchronously; the next op
+  of a stream is numbered after it before it is on disk) and returns a ticket
+  (`ticket.entries` from the start) that resolves once the GROUP is on disk:
+  every append that comes while a file is being written joins the next group,
+  written as one `open/<firstSeq>.json`; a failed group write takes its seqs
+  and the vector back (`#fail`, `onFail(error, from)` to the storage) and
+  rejects its tickets and the group behind it. `src/commit.js` splits at the
+  append: `issue` (in the queue: sign — on the thread pool when `core.pipelined()`,
+  the group's file waiting for `ready` — append, `core.inflight(id, entry,
+  position)`) and `land` (outside the queue, through `core.landing`, in log
+  order: `await ticket`, then the block and the file or the deferred slot,
+  `core.settled`, then `announce`). The write paths read a record through
+  `core.current(id)` — the newest in-flight entry, else the cache — never
+  `entries.load` directly; a read (`get`, a cursor) sees a write once it is
+  durable (`EntryStore.hold`/`write` at the landing). `core.persist` (a page,
+  a merge) goes through the same `#landing` chain, so files are written in
+  log order; unique keys are checked against the in-flight entries too
+  (`#conflicts`); `applyPatches`/`updateText` await their landings before
+  returning — and before rethrowing. `commit()` returns `{ op, done }`;
+  `storage[COMMIT]` awaits `done`. `close()`, `flush()` and `tag()` drain the
+  landings first; `stats().inflight` counts them. The log resolves a group
+  only after the roll its file triggered (`#roll` is O(1) when nothing can
+  be sealed: `#unappliedFrom`, the oldest open file not applied whole).
+  A reopen replays the unsealed tail.
   A node's own seq must never repeat — it is recovered from the log's vector.
   The storage opens its log with `sealApplied: true` and every write path
   calls `log.applied(from, to)` after `EntryStore.write`/`#persistBatch`; a roll then
   seals nothing from the oldest batch not yet applied onwards. A new path
   that appends must mark what it applied, or the tail grows forever. Under
-  `open({ defer })` a local write stops at the append: `persistLocal` hands
-  the entry to `Storage#deferWrite` — `EntryStore.hold` (cache, catalog,
-  held), a slot per record with its positions, one timer — and
-  `#flushDeferred` lands every slot through `#land` (one block, the files)
-  and marks the positions applied; `tag()` and `close()` flush first, and
+  `open({ defer })` — 16 ms BY DEFAULT (`DEFAULT_DEFER` in src/options.js;
+  the tests that read files open with `defer: 0`) — a local write stops at
+  the append: `land` hands the entry to `Storage#deferWrite` — `EntryStore.hold`
+  (cache, catalog, held), a slot per record with its positions, one timer —
+  and `#flushDeferred` is a STEP of the landing chain (`#landDeferred`: the
+  slots taken when the step runs, after every landing before it, so the
+  cache never goes back to an older entry and `#persistBatch` never runs
+  twice at once) that lands every slot through `#land` (one block, the files)
+  and marks the positions applied — `#settleDeferred(id, toSeq)` settles a
+  slot only when the landing covered its positions; `flush()`, `tag()` and
+  `close()` flush first, and
   `#land` on any other path (a peer's page, a replay) settles a slot of a
   record it wrote, so an older deferred entry is never laid over a newer
   file. Never write a record file from a deferred slot outside `#land`.
@@ -373,8 +402,8 @@ docs/                     VitePress site
   segments for such a reader and adds up; `retain` is one slot and the
   SyncManager's. The
   append is the commit point: a chain block or record file that fails after
-  it is never thrown through — `core.persist` (`Storage#land`) and
-  `persistLocal` hold the entries in memory (`EntryStore.hold`, never
+  it is never thrown through — `core.persist` (`Storage#land`) and `land` in
+  src/commit.js hold the entries in memory (`EntryStore.hold`, never
   evicted), leave the batch unapplied for the next open to replay, and
   report `UNPERSISTED`. A node that dials keeps its own ops past retention
   until every enabled registered node in their scope holds them

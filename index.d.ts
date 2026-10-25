@@ -1018,6 +1018,8 @@ export interface StorageStats {
   /** Records whose files lag the log: held after a write that failed (replayed at the next open), or deferred by `open({ defer })`. */
   held: number;
   deferred: number;
+  /** Local writes appended but not yet on disk — the queue is free from the append, the caller waits for the landing. */
+  inflight: number;
   chain: { tail: string } | null;
   lock: { mode: 'fail' | 'wait' } | null;
 }
@@ -1077,10 +1079,11 @@ export interface StorageOptions<S extends Schema = Schema> {
   /** Call the backend's `sync` after every write (fsync). A backend without one logs at debug and is as durable as it is. */
   durable?: boolean;
   /**
-   * Record files may lag the log by this many ms (0, the default: never).
-   * The log is durable at once, every read sees the write, a crash replays
-   * the batch at the next open, `tag()` and `close()` flush first; the writes
-   * of one record within the window coalesce into one file and one block.
+   * Record files may lag the log by this many ms (16, a frame, by default;
+   * 0: never). The log is durable at once, every read sees the write, a
+   * crash replays the batch at the next open, `flush()`, `tag()` and
+   * `close()` land the files first; the writes of one record within the
+   * window coalesce into one file and one block.
    */
   defer?: number;
   /**
@@ -1624,6 +1627,8 @@ export interface Storage {
   hasRecord(id: string): boolean;
   /** The node's health as an operator reads it — queue, cache, catalog, log, chain, lock. No I/O. */
   stats(): StorageStats;
+  /** Lands what waits — the writes in flight, then the deferred record files — so what was written is on disk. */
+  flush(): Promise<void>;
   /**
    * `adoptFrom`: the node id whose own `advance` ops may move this node's
    * vector — the host a subscription is read from. Absent, an `advance` is

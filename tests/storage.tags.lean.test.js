@@ -1,5 +1,7 @@
 'use strict';
 
+// Files land at once here (`defer: 0`): what these tests read of the disk is the engine's, not the window's — the window has tests of its own (storage.defer, storage.group).
+
 // The Tags suite over the lean core with the plugins given by hand —
 // `versions` first, then what the suite's records and peers need (text,
 // tree, sync, encryption, chain, schema, query; no signing: the node ids are
@@ -27,7 +29,7 @@ test('Tags (lean core, plugins by hand)', async (t) => {
     const key = `${t2.name}:${name}`;
     if (!paths.has(key)) paths.set(key, `tags-${n++}-${name}`);
     const plugins = [versions, text, tree, sync, encryption, chain, schema, query];
-    const storage = await core.open({ path: paths.get(key), fsi, logger: false, plugins, ...options });
+    const storage = await core.open({ defer: 0, path: paths.get(key), fsi, logger: false, plugins, ...options });
     t2.after(() => storage.close().catch(() => {}));
     return storage;
   });

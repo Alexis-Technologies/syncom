@@ -1,5 +1,7 @@
 'use strict';
 
+// Files land at once here (`defer: 0`): what these tests read of the disk is the engine's, not the window's — the window has tests of its own (storage.defer, storage.group).
+
 // The plugin registry: a kind this storage was not opened with is refused
 // locally with PLUGIN_MISSING naming the subpath, a peer's op of it is
 // refused as `reason: 'kind'` — logged and relayed, so a core-only hub
@@ -21,7 +23,7 @@ const { memory } = require('../src/memory/memory.js');
 
 const fsi = memory();
 let n = 0;
-const openLean = (options = {}) => core.open({ path: `kinds-${n++}`, fsi, logger: false, ...options });
+const openLean = (options = {}) => core.open({ defer: 0, path: `kinds-${n++}`, fsi, logger: false, ...options });
 
 test('createPlugins refuses what a module gets wrong, and names it', () => {
   const module_ = (over) => ({ name: 'x', kinds: { blob: 9 }, codes: { b: 'blob' }, types: ['splice'], ...over });
@@ -99,7 +101,7 @@ test('open({ plugins }) picks the kinds; the /all entry has every shipped one', 
   await withText.push(id, 'items', [1, 2]);
   assert.deepStrictEqual(await withText.get(id), { body: 'hello', items: [1, 2] });
   await assert.rejects(() => withText.treeMove(id, 'outline', 'n'), { code: 'PLUGIN_MISSING' });
-  const everything = await all.open({ path: `kinds-${n++}`, fsi, logger: false });
+  const everything = await all.open({ defer: 0, path: `kinds-${n++}`, fsi, logger: false });
   t.after(() => everything.close());
   assert.deepStrictEqual(everything.kinds, ['text', 'tree']);
   assert.deepStrictEqual(all.PLUGINS, [
@@ -130,7 +132,7 @@ test('open({ plugins }) picks the kinds; the /all entry has every shipped one', 
   await everything.treeMove(other, 'outline', 'r');
   assert.deepStrictEqual(await everything.get(other), { outline: [{ id: 'r', children: [] }] });
   // Giving a shipped plugin again is giving it once.
-  const twice = await all.open({ path: `kinds-${n++}`, fsi, logger: false, plugins: [text] });
+  const twice = await all.open({ defer: 0, path: `kinds-${n++}`, fsi, logger: false, plugins: [text] });
   t.after(() => twice.close());
   assert.deepStrictEqual(twice.kinds, ['text', 'tree']);
 });
@@ -166,6 +168,7 @@ test('a core-only hub between two text nodes logs and relays the text it cannot 
   const createStorage = async (t2, name, options) => {
     const plugins = name === 'B' ? [] : [text];
     const storage = await core.open({
+      defer: 0,
       path: `hub-${name}-${n++}`,
       fsi,
       logger: false,
@@ -217,6 +220,7 @@ test('a node does not bootstrap from a host that cannot hold one of its kinds: K
   const createStorage = async (t2, name, options) => {
     const plugins = name === 'A' ? [] : [text];
     const storage = await core.open({
+      defer: 0,
       path: `mismatch-${name}-${n++}`,
       fsi,
       logger: false,
@@ -262,11 +266,11 @@ test('a fork runs the parent plugins; node.json remembers the kinds a directory 
   assert.deepStrictEqual(await fork.get(id), { body: 'abcd' });
   // The directory remembers: a reopen without the kind is refused, with more kinds is fine.
   const path = `kinds-${n++}`;
-  const first = await core.open({ path, fsi, logger: false, plugins: [text] });
+  const first = await core.open({ defer: 0, path, fsi, logger: false, plugins: [text] });
   await first.close();
   assert.deepStrictEqual(JSON.parse(fsi.dump()[`${path}/node.json`]).plugins, ['text']);
-  await assert.rejects(() => core.open({ path, fsi, logger: false }), { code: 'PLUGIN_MISSING' });
-  const more = await core.open({ path, fsi, logger: false, plugins: [text, tree] });
+  await assert.rejects(() => core.open({ defer: 0, path, fsi, logger: false }), { code: 'PLUGIN_MISSING' });
+  const more = await core.open({ defer: 0, path, fsi, logger: false, plugins: [text, tree] });
   assert.deepStrictEqual(more.kinds, ['text', 'tree']);
   await more.close();
   assert.deepStrictEqual(JSON.parse(fsi.dump()[`${path}/node.json`]).plugins, ['text', 'tree']);

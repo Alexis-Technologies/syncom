@@ -164,12 +164,12 @@ const main = async () => {
   const after = `${before.slice(0, 500)}X${before.slice(500)}`;
   await bench('diff — one keystroke in a 1 KB text', () => diff(before, after));
 
-  const storage = await open({ path: '/bench', fsi: memory(), logger: false });
+  const storage = await open({ path: '/bench', fsi: memory(), logger: false, defer: 0 });
   const id = await storage.insert({});
   await storage.updateText(id, 'body', before);
-  await bench('storage.push — one char (memory fsi)', () => storage.push(id, 'body', 'z'));
+  await bench('storage.push — one char (memory fsi, defer: 0)', () => storage.push(id, 'body', 'z'));
   let n = 0;
-  await bench('storage.updateText — one keystroke in a 1 KB text (memory fsi)', async () => {
+  await bench('storage.updateText — one keystroke in a 1 KB text (memory fsi, defer: 0)', async () => {
     const current = (await storage.get(id)).body;
     n++;
     await storage.updateText(id, 'body', `${current.slice(0, 500 + (n % 7))}Q${current.slice(500 + (n % 7))}`);
@@ -180,18 +180,30 @@ const main = async () => {
     'items',
     Array.from({ length: 100 }, (_, i) => i),
   );
-  await bench('storage.move — in a 100-element list (memory fsi)', () => storage.move(list, 'items', n++ % 100, 50));
+  await bench('storage.move — in a 100-element list (memory fsi, defer: 0)', () =>
+    storage.move(list, 'items', n++ % 100, 50));
   // The record file written whole on every keystroke, against the same
-  // keystrokes under `defer`: the file and the block wait for the window.
+  // keystrokes under the default window: the file and the block wait for it.
   const long = await storage.insert({});
   await storage.updateText(long, 'body', 'x'.repeat(10_000));
-  await bench('storage.push — one char into a 10 KB text (memory fsi)', () => storage.push(long, 'body', 'z'));
+  await bench('storage.push — one char into a 10 KB text (memory fsi, defer: 0)', () =>
+    storage.push(long, 'body', 'z'));
   await storage.close();
-  const deferred = await open({ path: '/bench-defer', fsi: memory(), logger: false, defer: 50 });
+  const deferred = await open({ path: '/bench-defer', fsi: memory(), logger: false });
   const lazy = await deferred.insert({});
   await deferred.updateText(lazy, 'body', 'x'.repeat(10_000));
-  await bench('storage.push — one char into a 10 KB text, defer: 50 (memory fsi)', () =>
+  await bench('storage.push — one char into a 10 KB text (memory fsi, defer: 16, the default)', () =>
     deferred.push(lazy, 'body', 'z'));
+  // An editor's stream: a thousand keystrokes sent without waiting for each.
+  await bench(
+    'storage.push — one char into a 10 KB text, pipelined by 1 000 (memory fsi)',
+    async () => {
+      const writes = [];
+      for (let i = 0; i < 1000; i++) writes.push(deferred.push(lazy, 'body', 'z'));
+      await writes[writes.length - 1];
+    },
+    { opsPerIteration: 1000, warmup: 2 },
+  );
   await deferred.close();
 };
 

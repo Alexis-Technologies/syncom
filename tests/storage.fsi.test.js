@@ -1,5 +1,7 @@
 'use strict';
 
+// Files land at once here (`defer: 0`): what these tests read of the disk is the engine's, not the window's — the window has tests of its own (storage.defer, storage.group).
+
 // The storage over an injected backend: nothing touches the disk, a reopen
 // over the same memory backend is the same node, `durable` syncs.
 
@@ -15,7 +17,7 @@ const { memory } = require('../src/memory/memory.js');
 test('Storage over an injected fsi', async (t) => {
   await t.test('a memory backend: the whole lifecycle, nothing on disk, the same node on reopen', async () => {
     const fsi = memory();
-    const storage = await syncom.open({ path: 'mem-store', fsi, logger: false });
+    const storage = await syncom.open({ defer: 0, path: 'mem-store', fsi, logger: false });
     assert.strictEqual(storage.fsi, fsi);
     const id = await storage.insert({ title: 'Draft' });
     await storage.update(id, { title: 'Final' });
@@ -37,14 +39,14 @@ test('Storage over an injected fsi', async (t) => {
     assert.ok(fsi.size > 0);
     assert.ok(Object.keys(fsi.dump()).every((key) => key.startsWith('mem-store/')));
 
-    const reopened = await syncom.open({ path: 'mem-store', fsi, logger: false });
+    const reopened = await syncom.open({ defer: 0, path: 'mem-store', fsi, logger: false });
     assert.strictEqual(reopened.nodeId, nodeId);
     assert.deepStrictEqual(reopened.vector, vector);
     assert.deepStrictEqual(await reopened.get(id), { title: 'Final', hits: 1 });
     assert.strictEqual(reopened.sync.listNodes()[0].url, 'mem://peer', 'the registry is in the backend too');
     await reopened.close();
     // Another backend is another world.
-    const other = await syncom.open({ path: 'mem-store', fsi: memory(), logger: false });
+    const other = await syncom.open({ defer: 0, path: 'mem-store', fsi: memory(), logger: false });
     assert.notStrictEqual(other.nodeId, nodeId);
     assert.deepStrictEqual(await other.list(), []);
     await other.close();
@@ -67,11 +69,11 @@ test('Storage over an injected fsi', async (t) => {
   });
 
   await t.test('a backend without the contract is refused at open, by the method it lacks', async () => {
-    await assert.rejects(async () => syncom.open({ fsi: { read() {} } }), {
+    await assert.rejects(async () => syncom.open({ defer: 0, fsi: { read() {} } }), {
       name: 'TypeError',
       message: 'open({ fsi }): adapter has no write()',
     });
-    await assert.rejects(async () => syncom.open({ fsi: 'opfs' }), /adapter has no read\(\)/);
+    await assert.rejects(async () => syncom.open({ defer: 0, fsi: 'opfs' }), /adapter has no read\(\)/);
   });
 
   await t.test('durable: every write of an insert is synced on node:fs', async (t2) => {
@@ -79,7 +81,7 @@ test('Storage over an injected fsi', async (t) => {
     t2.after(() => cleanupTemp(dir));
     const synced = [];
     const spied = { ...nodeFsi, sync: (d, name) => synced.push(name) && nodeFsi.sync(d, name) };
-    const storage = await syncom.open({ path: dir, fsi: spied, durable: true, logger: false });
+    const storage = await syncom.open({ defer: 0, path: dir, fsi: spied, durable: true, logger: false });
     assert.notStrictEqual(storage.fsi, spied, 'wrapped');
     assert.strictEqual(typeof storage.fsi.sync, 'function');
     synced.length = 0;
@@ -95,6 +97,7 @@ test('Storage over an injected fsi', async (t) => {
   await t.test('durable over a backend without sync is a debug line, not an error', async () => {
     const debug = [];
     const storage = await syncom.open({
+      defer: 0,
       path: 'mem-durable',
       fsi: memory(),
       durable: true,
@@ -130,7 +133,7 @@ test('A backend that fails after the log append', async (t) => {
 
   await t.test('the write stands, is read back from memory, and lands at the next open', async () => {
     const { fsi, inner, control } = flakyFsi();
-    const storage = await syncom.open({ path: 'flaky', fsi, logger: false, cache: { max: 1 } });
+    const storage = await syncom.open({ defer: 0, path: 'flaky', fsi, logger: false, cache: { max: 1 } });
     const errors = [];
     storage.on('error', (error) => errors.push(error));
     const id = await storage.insert({ n: 1 });
@@ -148,7 +151,7 @@ test('A backend that fails after the log append', async (t) => {
     assert.strictEqual(JSON.parse(await inner.read('flaky/data', `${id}.json`)).data.n, 1, 'the file is behind');
     await storage.close();
     // The batch was left unapplied: the reopen replays it onto the file.
-    const reopened = await syncom.open({ path: 'flaky', fsi, logger: false });
+    const reopened = await syncom.open({ defer: 0, path: 'flaky', fsi, logger: false });
     assert.deepStrictEqual(await reopened.get(id), { n: 2 });
     assert.strictEqual(JSON.parse(await inner.read('flaky/data', `${id}.json`)).data.n, 2);
     await reopened.close();
@@ -156,7 +159,7 @@ test('A backend that fails after the log append', async (t) => {
 
   await t.test("a peer's batch whose files fail is held the same way", async () => {
     const { fsi, control } = flakyFsi();
-    const storage = await syncom.open({ path: 'flaky-peer', fsi, logger: false });
+    const storage = await syncom.open({ defer: 0, path: 'flaky-peer', fsi, logger: false });
     const errors = [];
     storage.on('error', (error) => errors.push(error));
     control.failing = true;
@@ -167,14 +170,14 @@ test('A backend that fails after the log append', async (t) => {
     assert.deepStrictEqual(await storage.get('r1'), { n: 1 });
     control.failing = false;
     await storage.close();
-    const reopened = await syncom.open({ path: 'flaky-peer', fsi, logger: false });
+    const reopened = await syncom.open({ defer: 0, path: 'flaky-peer', fsi, logger: false });
     assert.deepStrictEqual(await reopened.get('r1'), { n: 1 });
     await reopened.close();
   });
 
   await t.test('a torn record file is an INTEGRITY error, and repair(id) rebuilds it', async () => {
     const shared = memory();
-    const storage = await syncom.open({ path: 'torn', fsi: shared, logger: false, cache: { max: 1 } });
+    const storage = await syncom.open({ defer: 0, path: 'torn', fsi: shared, logger: false, cache: { max: 1 } });
     const id = await storage.insert({ n: 1 });
     await storage.insert({ other: true });
     await shared.write('torn/data', `${id}.json`, '{"data":{"n":');

@@ -23,7 +23,7 @@ const signing = Object.freeze({
     return {
       identity: {
         id: keys.id,
-        sign: (op) => signOp(op, keys.privateKey),
+        sign: (op, later = false) => signOp(op, keys.privateKey, later),
         verify: (op, mode) => verifyOp(op, mode),
         signMessage: (message) => sign(message, keys.privateKey),
       },

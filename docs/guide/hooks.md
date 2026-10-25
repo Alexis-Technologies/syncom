@@ -53,7 +53,7 @@ silently never runs.
 | Hook | Runs | Return | Throw |
 | --- | --- | --- | --- |
 | `beforeWrite(ctx)` | Inside every local write, after the current record is loaded and before the op is stamped and applied — once per op, so once per hunk of `updateText()`, per patch of `applyPatches()`, `restore()` and `compact()`, per op of `migrate()`, and per record a bootstrap joins (`merge`) | A plain object replaces `data` (`write` and `set` only; a `TypeError` for anything else) | The write is refused: nothing stamped, logged or written |
-| `afterWrite(ctx, op)` | After the write is durable — `op` is the op it became, `null` for an encrypted (local) write; not called when the write changed nothing (a tree move to where the node already is) or was refused | Ignored | The call rejects, but the op stays committed and is announced |
+| `afterWrite(ctx, op)` | After the write is durable — outside the mutation queue, in log order, before the call resolves; `op` is the op it became, `null` for an encrypted (local) write; not called when the write changed nothing (a tree move to where the node already is) or was refused | Ignored | The call rejects, but the op stays committed and is announced |
 | `beforeRead({ id, at? })` | Inside `get(id)`, before the read — with `at` for a read at a version (`{ tag }` for `at(name).get(id)`), once with `{ id, history: true }` for `history()` | Ignored | The read is refused |
 | `afterRead({ id, at? }, data)` | Inside `get(id)`, after the read — with `at` for a read at a version, and per version of `history()` (its event id) | Anything but `undefined` (including `null`) replaces what the caller sees | The read rejects |
 | `beforeApply(ctx)` | Inside `applyRemote`, once per op of any kind, after the signature, duplicate, gap and scope checks and before the op is applied; not for an op held for a newer schema (`ahead: 'hold'`) or one on a record this node keeps sealed | `false` skips the op *here* (see below) | The whole batch is aborted before anything is durable |
@@ -89,11 +89,13 @@ The order of a local write:
 
 ```
 load the record → beforeWrite → stamp → apply the op → validate → append to the log
+│ the queue moves on to the next write here; the rest follows, in log order, once the op is on disk
 → chain block → record file → afterWrite → Record 'update' → 'commit' → 'change'
 ```
 
-(under [`open({ defer })`](./storage#when-a-record-file-lags-the-log) the
-chain block and the record file wait for the flush, after the events), and of
+(under [`open({ defer })`](./storage#when-a-record-file-lags-the-log) — 16 ms
+by default — the chain block and the record file wait for the flush, after
+the events), and of
 a page from a peer:
 
 ```

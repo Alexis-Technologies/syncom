@@ -159,8 +159,11 @@ torn the same way reads as `INTEGRITY` until `repair(id)` rebuilds it.
 write's record file and chain block wait up to `ms` (one timer for all of
 them), so the writes of one record within the window land as one file, and
 everything due lands under one block. The log append is not deferred — a crash before the flush replays
-the batch at the next open, as after a failed file write — and `tag()` and
-`close()` flush first. It is `0`, off, by default.
+the batch at the next open, as after a failed file write — and `flush()`, `tag()` and
+`close()` land the files first. It is 16 ms, a frame, by default; `0` writes
+every file at once. The log's own files are written in groups: every op
+appended while a file is being written goes into the next one, so a burst of
+writes costs the backend a few files, not one per op.
 
 The log append is the commit point. A backend that fails after it — a full
 disk, a browser's `QuotaExceededError` on the record file or the chain block

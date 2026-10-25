@@ -1,5 +1,7 @@
 'use strict';
 
+// Files land at once here (`defer: 0`): what these tests read of the disk is the engine's, not the window's — the window has tests of its own (storage.defer, storage.group).
+
 // The convergence properties over the lean core with the blocks registered
 // by hand — `open({ plugins: [text, tree, signing, sync, versions] })` from
 // the root, no chain, no sealing — the way an application that picks its blocks opens a
@@ -25,6 +27,7 @@ test('Sync engine (lean core, plugins by hand)', async (t) => {
     const key = `${t2.name}:${name}`;
     if (!paths.has(key)) paths.set(key, `lean-${n++}-${name}`);
     const storage = await core.open({
+      defer: 0,
       path: paths.get(key),
       fsi,
       logger: false,

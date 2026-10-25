@@ -18,7 +18,7 @@ const storage = await open({ path: 'data' });
 | `name` | — | Alias for `path` |
 | `fsi` | `node:fs` / OPFS | The backend — any object with `read`, `write`, `exists`, `remove`, `list` (see [Backends](../reference/api#backends)) |
 | `durable` | `false` | fsync after every write, where the backend can (`node:fs`); OPFS and memory are as durable as they are |
-| `defer` | `0` | Record files may lag the log by this many ms (a non-negative integer) — the writes of one record within the window coalesce into one file and one block, what typing into a text or a list wants ([see below](#when-a-record-file-lags-the-log)) |
+| `defer` | `16` | Record files may lag the log by this many ms (a non-negative integer; `0` lands every write at once) — the writes of one record within the window coalesce into one file and one block, what typing into a text or a list wants; `flush()` lands them now ([see below](#when-a-record-file-lags-the-log)) |
 | `lock` | `'fail'` | One instance per directory: `'fail'` rejects a second `open()` (`code: 'LOCKED'`), `'wait'` waits, `false` leaves it to you ([see below](#one-instance-per-directory)) |
 | `cache` | `{ max: 5000 }` | How many entries stay in memory; a live `Record` pins its own ([see below](#the-catalog-and-the-cache)) |
 | `integrity` | `'verify'` | `'lazy'` trusts a record file on the cold read instead of re-verifying it against its block |
@@ -246,9 +246,12 @@ the cache holds the record — every read sees the write — and the log keeps
 the batch unapplied until the file lands, so a crash in between is replayed
 onto the file at the next open:
 
-- **`open({ defer })`.** The file waits up to `defer` ms, and the writes of
-  one record within the window land as one file and one block. `tag()` and
-  `close()` flush first, and a peer's write of the record lands it whole.
+- **`open({ defer })`** — 16 ms, a frame, by default. The file waits up to
+  `defer` ms, and the writes of one record within the window land as one
+  file and one block. `flush()`, `tag()` and `close()` land them first, and a
+  peer's write of the record lands it whole. `defer: 0` writes every file at
+  once — what a process that may be killed between a write and the next
+  frame wants, at the price of a file per op.
 - **A file write that failed** — a full disk, a quota. The write is not
   undone (it replicates from the log already); the record is held in memory
   until the next open, and the storage's `error` event fires with
@@ -261,7 +264,17 @@ const id = await storage.insert({ title: 'Notes' });
 for (const ch of 'hello') await storage.push(id, 'body', ch);
 await storage.get(id);   // { title: 'Notes', body: 'hello' } — six ops logged, no file yet
 storage.stats().deferred; // 1 — one record waiting; 0 once the window passed
+await storage.flush();    // or now: the file and its block
 ```
+
+The log itself is written in groups: a write's seq is reserved the moment
+its op is built, the mutation queue moves on to the next write at once, and
+every op appended while the previous group is being written goes to disk as
+one file with the others — what the caller awaits is the landing: the disk,
+then the file (or the deferred slot), the `afterWrite` hook and the events,
+in log order. The next write of a record builds on the one in flight before
+it; a read sees a write once it is durable. `stats().inflight` counts the
+writes between the append and the disk.
 
 ### Health
 
@@ -271,7 +284,8 @@ the storage is `closed`, how many writes wait on the mutation `queue`, the
 tombstones included, and `dirty` puts since the last save), the `tags`
 (`count`, and `corrupt` when `tags.json` could not be read at open), the
 records whose files lag the log (`held`, the deferred ones among them, and
-`deferred`), the `log` (`length`, `floor`, `next`, `epoch`, `segments`,
+`deferred`), the writes appended but not on disk yet (`inflight`), the `log`
+(`length`, `floor`, `next`, `epoch`, `segments`,
 `latestTs`, `droppedTs`, and `pins` — readers holding segments past
 retention, an undo stack mostly), the `chain`'s `tail` (or `null` under
 `chain: false`) and the `lock`'s `mode` (or `null` under `lock: false`). The

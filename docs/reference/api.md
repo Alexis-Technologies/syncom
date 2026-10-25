@@ -100,12 +100,13 @@ naming the subpath; `@alexify/syncom/all` has both.
 | `validate(id, data, blockHash)` | `Promise<boolean>` | One record against its block |
 | `getCachedData(id)` | `unknown \| null` | Synchronous cache peek, raw (no lens) |
 | `hasRecord(id)` | `boolean` | Whether the id is a live record — from the catalog, no I/O |
-| `stats()` | `{ closed, queue, cache: { size, max, pinned }, catalog: { entries, dirty }, tags: { count, corrupt }, held, deferred, log: { length, floor, next, epoch, segments, latestTs, droppedTs, pins }, chain: { tail } \| null, lock: { mode } \| null }` | The node's health, from memory — no I/O; `tags.corrupt` while `tags.json` could not be read; `held` records whose files lag the log — after a failed write, or waiting under `open({ defer })` — and `deferred` the latter alone; `log.pins` readers holding segments past retention |
+| `stats()` | `{ closed, queue, cache: { size, max, pinned }, catalog: { entries, dirty }, tags: { count, corrupt }, held, deferred, inflight, log: { length, floor, next, epoch, segments, latestTs, droppedTs, pins }, chain: { tail } \| null, lock: { mode } \| null }` | The node's health, from memory — no I/O; `tags.corrupt` while `tags.json` could not be read; `held` records whose files lag the log — after a failed write, or waiting under `open({ defer })` — and `deferred` the latter alone; `inflight` local writes appended but not on disk yet; `log.pins` readers holding segments past retention |
+| `flush()` | `Promise<void>` | Lands what waits: the writes in flight, then the record files deferred under `open({ defer })` — one block, every file — so what was written is on disk when it resolves |
 | `applyRemote(ops, { via, scopes, peer, adoptFrom, bound }?)` | `Promise<{ applied, skipped, duplicates, gaps, malformed, unsigned, forged, outOfScope }>` | Applies a peer's ops, in order per origin; `peer` is `{ url, node }` for the hooks; `malformed` ops (shape, id, a stamp beyond `sync.maxSkew`) and ops refused for their signature (`forged`; `unsigned` under `sync.signatures: 'require'`) are counted and dropped; an `advance` is adopted only when its origin is `adoptFrom`; under `bound` (a host's push passes the peer's granted scopes) an op whose record is outside them, before or after it, is counted `outOfScope` and dropped |
 | `snapshot({ cursor, limit, scopes }?)` | `Promise<{ records, cursor, eventId, vector }>` | One page of state, tombstones included |
 | `mergeSnapshot(records, { via, from }?)` | `Promise<void>` | Joins a page (as `merge` ops of this node) |
 | `adoptVector(vector, { via, from }?)` | `Promise<SyncOp \| null>` | Records what a joined snapshot covers (an `advance` op) |
-| `close()` | `Promise<void>` | Stops sync, lands deferred files and seals the log; further writes are refused (`CLOSED`) |
+| `close()` | `Promise<void>` | Stops sync, lands what is in flight and the deferred files, and seals the log; further writes are refused (`CLOSED`) |
 
 Properties: `fsi` (the backend given to `open()`, wrapped when `durable`, or
 the platform's), `schema`, `schemaInfo` (`{ version, hash, previous, held }`,

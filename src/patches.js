@@ -46,12 +46,25 @@ const applyPatches = async (core, id, patches, { actor, source = null } = {}) =>
     // the earlier ones committed (see applyPatches in the reference).
     await rehearse(core, id, ops);
     let count = 0;
-    for (const [type, payload] of ops) {
-      const op = await commit(core, type, id, payload, { actor, source });
-      if (op === null) continue;
-      count++;
-      if (type === 'purge') await core.scrub(id);
+    // The ops land in log order after the turn; the batch is done when the
+    // last has — and what landed before a refusal has landed when the call
+    // rejects.
+    const landings = [];
+    try {
+      for (const [type, payload] of ops) {
+        const { op, done } = await commit(core, type, id, payload, { actor, source });
+        if (op === null) continue;
+        count++;
+        landings.push(done);
+        if (type === 'purge') {
+          await done;
+          await core.scrub(id);
+        }
+      }
+    } finally {
+      await Promise.allSettled(landings);
     }
+    await Promise.all(landings);
     if (ops.some(([type]) => type === 'delete' || type === 'purge')) core.forget(id);
     return count;
   };

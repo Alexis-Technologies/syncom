@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-25T14:28:49.640Z",
+  "generatedAt": "2026-10-25T14:56:13.346Z",
   "machine": {
     "cpu": "Apple M3 Max",
     "cores": 16,
@@ -571,102 +571,107 @@
     {
       "subject": "sequence",
       "name": "applyOp — append one char to a 1 000-char text (one run)",
-      "opsPerSec": 470314
+      "opsPerSec": 467477
     },
     {
       "subject": "sequence",
       "name": "applyOp — insert one char at a random index of a 1 000-char text (one run)",
-      "opsPerSec": 88575
+      "opsPerSec": 89922
     },
     {
       "subject": "sequence",
       "name": "applyOp — replace one char at a random index of a 1 000-char text (a cut, an insert)",
-      "opsPerSec": 123921
+      "opsPerSec": 129402
     },
     {
       "subject": "sequence",
       "name": "applyOp — prepend one char to a 1 000-run text",
-      "opsPerSec": 112855
+      "opsPerSec": 114925
     },
     {
       "subject": "sequence",
       "name": "applyOp — append one char to an older block (a fork: the rope re-hinted)",
-      "opsPerSec": 406676
+      "opsPerSec": 414617
     },
     {
       "subject": "sequence",
       "name": "applyOp — merge two pictures of a 1 000-char text",
-      "opsPerSec": 241
+      "opsPerSec": 224
     },
     {
       "subject": "sequence",
       "name": "hydrate + render — a 1 000-char text from its JSON",
-      "opsPerSec": 231136
+      "opsPerSec": 216012
     },
     {
       "subject": "sequence",
       "name": "hydrate + render — a 100 KB text (one run) from its JSON",
-      "opsPerSec": 15842
+      "opsPerSec": 14950
     },
     {
       "subject": "sequence",
       "name": "applyOp — insert one char at a random index of a 100 KB text (one run)",
-      "opsPerSec": 55707
+      "opsPerSec": 59090
     },
     {
       "subject": "sequence",
       "name": "applyOp — insert one char at a random index of a 100 KB text (10 000 runs)",
-      "opsPerSec": 69601
+      "opsPerSec": 67363
     },
     {
       "subject": "sequence",
       "name": "applyOp — prepend one char to a 10 000-run text",
-      "opsPerSec": 105695
+      "opsPerSec": 88342
     },
     {
       "subject": "sequence",
       "name": "applyOp — replace one char at a random index of a 100 KB text (10 000 runs)",
-      "opsPerSec": 95040
+      "opsPerSec": 82233
     },
     {
       "subject": "sequence",
       "name": "hydrate + render — a 100 KB text (10 000 runs) from its JSON",
-      "opsPerSec": 53
+      "opsPerSec": 23
     },
     {
       "subject": "sequence",
       "name": "spans — 1 000 chars, 50 overlapping marks",
-      "opsPerSec": 6982
+      "opsPerSec": 7018
     },
     {
       "subject": "sequence",
       "name": "diff — one keystroke in a 1 KB text",
-      "opsPerSec": 304541
+      "opsPerSec": 282408
     },
     {
       "subject": "sequence",
-      "name": "storage.push — one char (memory fsi)",
-      "opsPerSec": 9184
+      "name": "storage.push — one char (memory fsi, defer: 0)",
+      "opsPerSec": 8963
     },
     {
       "subject": "sequence",
-      "name": "storage.updateText — one keystroke in a 1 KB text (memory fsi)",
-      "opsPerSec": 4875
+      "name": "storage.updateText — one keystroke in a 1 KB text (memory fsi, defer: 0)",
+      "opsPerSec": 4657
     },
     {
       "subject": "sequence",
-      "name": "storage.move — in a 100-element list (memory fsi)",
-      "opsPerSec": 796
+      "name": "storage.move — in a 100-element list (memory fsi, defer: 0)",
+      "opsPerSec": 922
     },
     {
       "subject": "sequence",
-      "name": "storage.push — one char into a 10 KB text (memory fsi)",
-      "opsPerSec": 7176
+      "name": "storage.push — one char into a 10 KB text (memory fsi, defer: 0)",
+      "opsPerSec": 7142
     },
     {
       "subject": "sequence",
-      "name": "storage.push — one char into a 10 KB text, defer: 50 (memory fsi)",
-      "opsPerSec": 6535
+      "name": "storage.push — one char into a 10 KB text (memory fsi, defer: 16, the default)",
+      "opsPerSec": 18957
+    },
+    {
+      "subject": "sequence",
+      "name": "storage.push — one char into a 10 KB text, pipelined by 1 000 (memory fsi)",
+      "opsPerSec": 44055
     }
   ]
 }

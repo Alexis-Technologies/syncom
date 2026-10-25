@@ -95,7 +95,7 @@ const mergeOne = async (batch, record) => {
   const started = otel.enabled ? now() : 0;
   const data = asJson(record.data);
   const meta = asJson(record.meta);
-  const current = batch.touched.get(id) ?? (await core.entries.load(id));
+  const current = batch.touched.get(id) ?? (await core.current(id));
   if (current?.encrypted) {
     // Sealed here for this node alone: a peer's state of it is not taken.
     core.logger.warn({ event: 'sync.record.encrypted', id });

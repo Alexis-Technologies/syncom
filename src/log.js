@@ -7,9 +7,11 @@
 // between "logged" and "written to data/" recoverable).
 //
 // Layout under `<path>/log/`, over fsi (whole-file read/write, no rename):
-//   open/<seq>.json     one file per append batch, rewritten only by a scrub
-//                       — a torn write can only damage the newest batch,
-//                       which has not been announced to anyone yet
+//   open/<seq>.json     one file per GROUP of appends — every append that
+//                       came while the file before it was being written,
+//                       named by its first seq — rewritten only by a scrub;
+//                       a torn write can only damage the newest group, which
+//                       has not been announced to anyone yet
 //   seg-<from>.json     sealed segments: the open files rolled together once
 //                       enough of them accumulate
 //   index.json          { epoch, floor, next, vector, segments, droppedHeld,
@@ -73,14 +75,23 @@ class OpLog {
   #pins = new Set();
   #torn = new Set();
   #writes = Promise.resolve();
-  // Batches appended whose records may not be written yet: first seq → last
-  // seq. Only kept under `sealApplied`; a roll stops short of the oldest.
+  // The group of appends being gathered (its entries, with their seqs
+  // reserved, and the promise its callers await) and whether a group is on
+  // its way to disk: appends that come while one is written join the next,
+  // which goes as one file once the first is down — group commit.
+  #group = null;
+  #flushing = false;
+  // Open files whose records may not be written yet: first seq → { first,
+  // last, left } with `left` the seqs not yet marked applied — kept in
+  // first-seq order, so the oldest is the first value. Only under
+  // `sealApplied`; a roll stops short of the oldest.
   #pending = new Map();
   #sealApplied;
   // Record id → the seqs of its entries: what a scrub rewrites, found
   // without a walk over everything retained.
   #byId = new Map();
   #onRoll = null;
+  #onFail = null;
   #seen = null;
 
   constructor(basePath, options = {}) {
@@ -98,6 +109,9 @@ class OpLog {
     this.#sealApplied = options.sealApplied === true;
     // Told after every seal — what the storage turns into its `log` event.
     this.#onRoll = typeof options.onRoll === 'function' ? options.onRoll : null;
+    // Told the moment a group fails, with the first seq taken back — before
+    // any ticket rejects — so the owner drops what it built on those seqs.
+    this.#onFail = typeof options.onFail === 'function' ? options.onFail : null;
     return this.#init();
   }
 
@@ -185,11 +199,18 @@ class OpLog {
       this.#openFiles.push(name);
       // Nothing says these records were written: pending until the owner's
       // replay says so.
-      if (this.#sealApplied && parsed.entries.length > 0) {
-        const seqs = parsed.entries.map((entry) => entry.seq).filter(Number.isInteger);
-        if (seqs.length > 0) this.#pending.set(Math.min(...seqs), Math.max(...seqs));
-      }
+      if (this.#sealApplied) this.#hold(parsed.entries.map((entry) => entry.seq).filter(Number.isInteger));
     }
+    // The files in seq order, like the groups that made them.
+    this.#openFiles.sort();
+    this.#pending = new Map([...this.#pending].sort((a, b) => a[0] - b[0]));
+  }
+
+  // An open file's seqs, waiting for their records.
+  #hold(seqs) {
+    if (seqs.length === 0) return;
+    const first = Math.min(...seqs);
+    this.#pending.set(first, { first, last: Math.max(...seqs), left: new Set(seqs) });
   }
 
   // Merges loaded entries in, deduplicating by seq (a crash mid-roll leaves
@@ -298,7 +319,18 @@ class OpLog {
    */
   applied(from, to = from) {
     if (!Number.isInteger(from) || !Number.isInteger(to)) return;
-    for (const [first, last] of this.#pending) if (first >= from && last <= to) this.#pending.delete(first);
+    for (const group of this.#pending.values()) {
+      if (group.last < from) continue;
+      if (group.first > to) break;
+      for (let seq = Math.max(from, group.first); seq <= Math.min(to, group.last); seq++) group.left.delete(seq);
+      if (group.left.size === 0) this.#pending.delete(group.first);
+    }
+  }
+
+  // The first seq of the oldest open file not applied whole, or Infinity.
+  get #unappliedFrom() {
+    for (const group of this.#pending.values()) return group.first;
+    return Infinity;
   }
 
   /** The id of the newest entry; resuming from it replays nothing. */
@@ -318,43 +350,129 @@ class OpLog {
   }
 
   /**
-   * Appends a batch; resolves once it is on disk. Returns the entries with
-   * their seqs, so the caller can announce them by id. Rolls the open files
-   * into a segment when enough have accumulated. Ops in `skipped` were
-   * accepted but not applied here (a beforeApply hook said no, the record
-   * failed its schema, or the op is from a newer schema version — then
-   * `held` maps it to that version): they are logged and served like any
-   * other, and flagged so a reopen's replay of the tail leaves them alone
-   * too; a held one is applied once this node runs its version.
+   * Appends a batch: the seqs are reserved at once — the vector moves, so
+   * the next op of a stream is numbered after this one before it is on
+   * disk — and the returned promise (a ticket: `ticket.entries` holds the
+   * entries with their seqs from the start) resolves once the batch is on
+   * disk, with the entries. Appends that come while a group is being
+   * written join the next group, written as one file when the first is
+   * down — a group commit — and are published (read, served, counted) in
+   * seq order, each group as its file lands. A write that fails rejects
+   * every ticket of its group and of the group gathered behind it, takes
+   * their seqs back and leaves nothing published: the next append gets the
+   * first of them again. Rolls the open files into a segment when enough
+   * have accumulated. Ops in `skipped` were accepted but not applied here
+   * (a beforeApply hook said no, the record failed its schema, or the op is
+   * from a newer schema version — then `held` maps it to that version):
+   * they are logged and served like any other, and flagged so a reopen's
+   * replay of the tail leaves them alone too; a held one is applied once
+   * this node runs its version.
    */
-  append(ops, { skipped = null, held = null } = {}) {
-    return this.#serialize(async () => {
-      if (ops.length === 0) return [];
-      const entries = [];
-      for (const op of ops) {
-        const seq = this.#next++;
-        const entry = { seq, op };
-        if (skipped?.has(op)) entry.skipped = true;
-        if (held?.has(op)) entry.held = held.get(op);
-        entries.push(entry);
-      }
-      const name = `${pad(entries[0].seq)}.json`;
-      const started = this.#otel.enabled ? now() : 0;
-      await this.#fsi.write(this.#openPath, name, JSON.stringify({ entries }));
-      if (started) this.#otel.recordAppend(now() - started);
-      for (const entry of entries) {
-        this.#entries.push(entry);
-        this.#indexEntry(entry);
-      }
-      for (const op of ops) {
-        vectorAdvance(this.#vector, op);
-        this.#observe(op);
-      }
-      this.#openFiles.push(name);
-      if (this.#sealApplied) this.#pending.set(entries[0].seq, entries[entries.length - 1].seq);
-      if (this.#openFiles.length >= this.#rollAfter) await this.#roll();
-      return entries;
+  append(ops, { skipped = null, held = null, ready = null } = {}) {
+    const entries = [];
+    if (ops.length === 0) {
+      const ticket = Promise.resolve(entries);
+      ticket.entries = entries;
+      return ticket;
+    }
+    const group = (this.#group ??= this.#newGroup());
+    for (const op of ops) {
+      const seq = this.#next++;
+      const entry = { seq, op };
+      if (skipped?.has(op)) entry.skipped = true;
+      if (held?.has(op)) entry.held = held.get(op);
+      entries.push(entry);
+      group.entries.push(entry);
+      vectorAdvance(this.#vector, op);
+      this.#observe(op);
+    }
+    // What the ops still wait for before they can be written (a signature
+    // being made): the group's file waits for it.
+    if (ready !== null) group.ready.push(ready);
+    this.#schedule();
+    const ticket = group.promise.then(() => entries);
+    ticket.entries = entries;
+    return ticket;
+  }
+
+  // A group to gather appends into: what the vector and the counter were
+  // before it, for a write that fails.
+  #newGroup() {
+    const group = {
+      entries: [],
+      ready: [],
+      from: this.#next,
+      vector: { ...this.#vector },
+      resolve: null,
+      reject: null,
+    };
+    group.promise = new Promise((resolve, reject) => {
+      group.resolve = resolve;
+      group.reject = reject;
     });
+    // A rejection nobody awaits yet is not unhandled: every ticket chains on it.
+    group.promise.catch(() => {});
+    return group;
+  }
+
+  // The groups go one after another, through the same lane as a scrub or a
+  // roll, until none is left to write.
+  #schedule() {
+    if (this.#flushing) return;
+    this.#flushing = true;
+    const drain = async () => {
+      try {
+        while (this.#group !== null) await this.#flushGroup();
+      } finally {
+        this.#flushing = false;
+      }
+    };
+    this.#serialize(drain).catch(() => {});
+  }
+
+  async #flushGroup() {
+    const group = this.#group;
+    this.#group = null;
+    const { entries } = group;
+    const name = `${pad(entries[0].seq)}.json`;
+    const started = this.#otel.enabled ? now() : 0;
+    try {
+      if (group.ready.length > 0) await Promise.all(group.ready);
+      await this.#fsi.write(this.#openPath, name, JSON.stringify({ entries }));
+    } catch (error) {
+      this.#fail(group, error);
+      return;
+    }
+    if (started) this.#otel.recordAppend(now() - started);
+    for (const entry of entries) {
+      this.#entries.push(entry);
+      this.#indexEntry(entry);
+    }
+    this.#openFiles.push(name);
+    if (this.#sealApplied) this.#hold(entries.map((entry) => entry.seq));
+    // A roll is what makes one append slow every `rollAfter` groups: its
+    // callers wait for it, as they did before groups.
+    if (this.#openFiles.length >= this.#rollAfter) await this.#roll();
+    group.resolve();
+  }
+
+  // A group that did not reach the disk, and the one gathered behind it
+  // (its seqs follow): their callers told, the counter and the vector put
+  // back to before the first of them, so the seqs are handed out again.
+  #fail(group, error) {
+    const later = this.#group;
+    this.#group = null;
+    this.#next = group.from;
+    this.#vector = group.vector;
+    if (this.#onFail !== null) {
+      try {
+        this.#onFail(error, group.from);
+      } catch (thrown) {
+        this.#log?.warn?.({ event: 'listener.error', name: 'log', err: thrown });
+      }
+    }
+    group.reject(error);
+    if (later !== null) later.reject(error);
   }
 
   // Sealing: write the segment, then the index, then remove the open files.
@@ -364,8 +482,9 @@ class OpLog {
   async #roll() {
     if (this.#openFiles.length === 0) return;
     const sealedFrom = this.#segments.length > 0 ? this.#segments[this.#segments.length - 1].to + 1 : this.#floor;
-    const limit = this.#sealApplied && this.#pending.size > 0 ? Math.min(...this.#pending.keys()) - 1 : Infinity;
-    const entries = this.#entries.filter((entry) => entry.seq >= sealedFrom && entry.seq <= limit);
+    const limit = this.#sealApplied ? this.#unappliedFrom - 1 : Infinity;
+    if (limit < sealedFrom) return;
+    const entries = this.#entries.slice(this.#lowerBound(sealedFrom), this.#lowerBound(limit + 1));
     if (entries.length === 0) return;
     const otel = this.#otel;
     if (!otel.enabled) return void (await this.#seal(entries));

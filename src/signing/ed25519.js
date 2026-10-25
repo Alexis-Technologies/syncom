@@ -59,6 +59,18 @@ const verifierOf = (id) => {
 const sign = (message, privateKey) =>
   crypto.sign(null, Buffer.from(message), signerOf(privateKey)).toString('base64url');
 
+// The same signature made on libuv's thread pool: for writes that queue
+// behind one another, so their signing overlaps instead of taking the
+// main thread's time one after another; a write awaited alone signs at
+// once (`sign`), the hop to the pool being longer than the signing.
+const signAsync = (message, privateKey) =>
+  new Promise((resolve, reject) => {
+    crypto.sign(null, Buffer.from(message), signerOf(privateKey), (error, signature) => {
+      if (error) reject(error);
+      else resolve(signature.toString('base64url'));
+    });
+  });
+
 // False, never a throw: an id that is no key, a signature of the wrong
 // length — a peer's claim, answered at the trust boundary.
 const verify = (message, signature, publicKey) => {
@@ -91,4 +103,4 @@ const loadSigningKeys = async (basePath, { fsi = defaultFsi } = {}) => {
   return { publicKey: keys.publicKey, privateKey: keys.privateKey, id: signingId(keys.publicKey) };
 };
 
-module.exports = { calculateHash, generateSigningKeys, loadSigningKeys, sign, verify, verifyAsync };
+module.exports = { calculateHash, generateSigningKeys, loadSigningKeys, sign, signAsync, verify, verifyAsync };

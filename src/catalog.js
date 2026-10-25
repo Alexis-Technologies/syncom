@@ -179,6 +179,16 @@ class Catalog {
     }
   }
 
+  /** What unique key `key` (a field list) reads as in `data` — null when a field is missing. */
+  uniqueKey(data, key) {
+    const fields = {};
+    for (const field of key) {
+      const value = valueOf(data, field);
+      if (value !== undefined) fields[field] = value;
+    }
+    return this.#uniqueKey(fields, key);
+  }
+
   #uniqueKey(fields, key) {
     const parts = [];
     for (const field of key) {

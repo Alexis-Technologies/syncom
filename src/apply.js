@@ -206,7 +206,7 @@ const admit = (batch, op) => {
 const currentOf = async (batch, op) => {
   const { core } = batch;
   try {
-    return batch.touched.get(op.id) ?? (await core.entries.load(op.id));
+    return batch.touched.get(op.id) ?? (await core.current(op.id));
   } catch (error) {
     const message = `Record ${op.id} is unreadable here; op ${op.origin}:${op.seq} skipped`;
     const reported = new SyncomError('OP_UNREADABLE', message, { cause: error, op });

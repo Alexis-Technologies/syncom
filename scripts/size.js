@@ -183,8 +183,9 @@ const ENTRIES = [
   // with the sync plugin's seam and the layered backend, 72.2 with the
   // schema, telemetry and query seams.
   // 79.8 with the rope under the sequence engine (the persistent tree, map
-  // and chunked list it is made of, the walk and the hydration).
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 80 },
+  // and chunked list it is made of, the walk and the hydration), 81.0 with
+  // the group commit, the queue freed at the append and the public flush.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 82 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).

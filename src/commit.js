@@ -256,19 +256,40 @@ const validateLocal = async (core, op, current, visible, ctx) => {
   return { entry, delta };
 };
 
-// Signed, then logged (the seq is durable from here), then the chain block,
-// then the record file; the log is told the batch landed. The signature is
-// made here and nowhere earlier: validateLocal rewrote `op.data`, and what
-// the peers receive is what must verify.
-const persistLocal = async (core, op, entry) => {
+// Inside the queue: signed, then appended — the seq reserved, the ticket
+// the durability — and the entry made the record's in-flight state, what
+// the next write of the record builds on. The signature is made here and
+// nowhere earlier: validateLocal rewrote `op.data`, and what the peers
+// receive is what must verify. The queue is free from here: the disk is
+// waited for outside it.
+const issue = async (core, op, entry) => {
+  // Alone, the op is signed here; with writes queued behind it, on the
+  // thread pool while the queue moves on — the group's file waits for it.
+  let ready = null;
+  if (core.sign !== null) {
+    if (core.pipelined()) ready = core.sign(op, true);
+    else await core.sign(op, false);
+  }
+  const ticket = core.log.append([op], ready === null ? undefined : { ready });
+  const position = ticket.entries[0].seq;
+  core.inflight(op.id, entry, position);
+  return { ticket, position };
+};
+
+// Outside the queue, in log order: once the op is on disk, the chain block
+// and the record file (or the deferred slot, under `open({ defer })`), the
+// log told the batch landed, the entry no longer in flight. A group that
+// did not reach the disk rejects the ticket — the storage has dropped the
+// in-flight entry already — and the write fails with it.
+const land = async (core, op, entry, { ticket, position }) => {
   const { id } = op;
-  if (core.sign !== null) await core.sign(op);
-  const [{ seq: position }] = await core.log.append([op]);
+  await ticket;
   // Logged: the write is durable from here and replicates from the log.
   // Under `open({ defer })` the file and the block wait for the flush
   // (Storage#deferWrite): held in memory, the batch unapplied until then.
   if (core.defer > 0) {
     await core.deferred(id, entry, position);
+    core.settled(id, position);
     core.flush();
     return position;
   }
@@ -282,12 +303,11 @@ const persistLocal = async (core, op, entry) => {
       blockHash = await core.chain.addBlock({ id, hash, from: core.log.formatId(position) });
     }
     await core.entries.write(id, entry, blockHash);
+    core.log.applied(position);
   } catch (error) {
     await core.unpersisted(new Map([[id, entry]]), error);
-    core.flush();
-    return position;
   }
-  core.log.applied(position);
+  core.settled(id, position);
   core.flush();
   return position;
 };
@@ -333,7 +353,7 @@ const copyPayload = (payload) => {
 // cycle or a type change refuses the batch whole. Hooks and validators are
 // not run here; they run on the real commits, which may still refuse.
 const rehearse = async (core, id, ops) => {
-  let current = await core.entries.load(id);
+  let current = await core.current(id);
   if (current?.encrypted) return;
   for (const [type, given] of ops) {
     const payload = copyPayload(given);
@@ -348,13 +368,19 @@ const rehearse = async (core, id, ops) => {
   }
 };
 
+// What a commit came to, for the facade: the op (or null, undefined,
+// MISMATCH — see commitResult) and `done`, the landing the caller awaits —
+// the disk, the file, the hooks and the listeners, in log order — or null
+// when nothing was appended.
+const outcome = (op, done = null) => ({ op, done });
+
 const commitLocal = async (core, type, id, payload, options) => {
   const { source = null, via = null, from = null, encrypted = false, actor, expect = null } = options;
-  const current = await core.entries.load(id);
+  const current = await core.current(id);
   if (encrypted && current && !current.encrypted) {
     throw new SyncomError('ENCRYPTED', `Record ${id} is replicated and cannot become encrypted`);
   }
-  if (expect !== null && !(await expectation(core, id, current, expect))) return MISMATCH;
+  if (expect !== null && !(await expectation(core, id, current, expect))) return outcome(MISMATCH);
   payload = copyPayload(payload);
   // Sealed: this write is encrypted, or the record already is. An
   // encrypted record has no op log — writes to it stay local.
@@ -374,7 +400,7 @@ const commitLocal = async (core, type, id, payload, options) => {
     actor: who,
   };
   payload = await replaced(core, type, payload, ctx);
-  if (sealed) return commitSealed(core, type, id, payload, current, ctx, source);
+  if (sealed) return outcome(await commitSealed(core, type, id, payload, current, ctx, source));
   if (type === 'write' || type === 'set') {
     ctx.data = sameType(type, id, payload.data, visible);
     payload = { ...payload, data: ctx.data };
@@ -382,41 +408,63 @@ const commitLocal = async (core, type, id, payload, options) => {
   const op = prepareOp(core, type, id, payload, current, who, from);
   // A plugin's op that resolved to nothing — a tree move to where the node
   // already is — writes nothing.
-  if (op.value === null && core.plugins.byType[type] !== undefined) return null;
+  if (op.value === null && core.plugins.byType[type] !== undefined) return outcome(null);
   const applied = await validateLocal(core, op, current, visible, ctx);
-  if (applied === null) return null;
+  if (applied === null) return outcome(null);
   // The validator may have filled the field the scope reads (a default):
   // the stream is the one of the record as it is written.
   if (type === 'write' || type === 'set') assignScope(core, op, applied.entry.data);
-  const seq = await persistLocal(core, op, applied.entry);
-  const committed = { seq, before: visible, previous: current && !current.encrypted ? current : null };
-  await announce(core, op, applied.entry, applied.delta, ctx, source, via, committed);
-  return op;
+  const issued = await issue(core, op, applied.entry);
+  const previous = current && !current.encrypted ? current : null;
+  const done = core.landing(async () => {
+    const seq = await land(core, op, applied.entry, issued);
+    await announce(core, op, applied.entry, applied.delta, ctx, source, via, { seq, before: visible, previous });
+  });
+  return outcome(op, done);
 };
 
 // The span starts when the write RUNS, not when it was queued: waiting on
 // the mutation queue is the caller's contention, not the write's cost. It
-// ends after the `change` listeners, because that is what the caller awaits.
-// (A bootstrap's merges are counted, never spanned.)
+// covers the queue's part — the op built, applied, validated, appended;
+// the duration recorded covers the landing too, up to the `change`
+// listeners, because that is what the caller awaits. (A bootstrap's merges
+// are counted, never spanned.)
 const tracedCommit = async (core, type, id, payload, options) => {
   const { otel } = core;
   const started = now();
-  let result = 'error';
+  let out;
   try {
     const task = () => commitLocal(core, type, id, payload, options);
     const attributes = { 'syncom.op.type': type, 'syncom.record.id': id };
-    const op = await traced(otel, 'syncom.commit', attributes, task, (op) => ({
+    out = await traced(otel, 'syncom.commit', attributes, task, ({ op }) => ({
       'syncom.result': commitResult(op),
       'syncom.scope': op ? (op.scope ?? GLOBAL_SCOPE) : undefined,
     }));
-    result = commitResult(op);
-    return op;
-  } finally {
-    otel.recordCommit(type, result, now() - started);
+  } catch (error) {
+    otel.recordCommit(type, 'error', now() - started);
+    throw error;
   }
+  const result = commitResult(out.op);
+  if (out.done === null) {
+    otel.recordCommit(type, result, now() - started);
+    return out;
+  }
+  const done = out.done.then(
+    () => otel.recordCommit(type, result, now() - started),
+    (error) => {
+      otel.recordCommit(type, 'error', now() - started);
+      throw error;
+    },
+  );
+  return outcome(out.op, done);
 };
 
-/** One local write, run inside the mutation queue. Returns the op, null, undefined or MISMATCH. */
+/**
+ * One local write, run inside the mutation queue: `{ op, done }` — the op
+ * (null, undefined or MISMATCH when nothing was appended) and the landing
+ * to await for it to be durable, written and announced (null when there
+ * is none).
+ */
 const commit = (core, type, id, payload, options = {}) => {
   if (!core.otel.enabled) return commitLocal(core, type, id, payload, options);
   return tracedCommit(core, type, id, payload, options);

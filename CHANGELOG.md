@@ -14,6 +14,17 @@ There is no released version section until then; everything below lands in it.
 
 ### Added
 
+- **The write path: group commit, a free queue, `defer: 16`.** The log reserves
+  an op's seq the moment it is appended and writes the ops appended while a
+  file is in flight as one file after it; the mutation queue moves on to the
+  next write at the append, which builds on the entry in flight, while the
+  disk, the record file, the `afterWrite` hook and the events follow in log
+  order — what the caller awaits (`stats().inflight`). Record files lag the
+  log by 16 ms by default (`open({ defer })`; `0` lands every write at once),
+  and `storage.flush()` lands them now. Writes queued behind one another are
+  signed on the thread pool. On the memory backend a text takes 44 000
+  keystrokes a second pipelined (from 5 000) and 19 000 awaited one by one
+  (from 9 000, where the log's roll was quadratic under a window).
 - **A rope under every list and text.** A sequence block is a persistent
   B+-tree over its runs' segments (`src/text/btree.js`), its run records in a
   persistent map and a placed run's segments and children in chunked lists:

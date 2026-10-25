@@ -80,8 +80,9 @@ sequenceDiagram
   Q->>C: run when the queue reaches it
   C->>C: beforeWrite hook · kind check · stamp from the clock · index resolved · applyOp
   C->>C: validator (folded into the op) · unique keys
-  C->>C: sign the op (Ed25519) — unless signatures: false
-  C->>L: append(op) — the seq is durable
+  C->>C: sign the op (Ed25519) — unless signatures: false; on the thread pool when writes queue behind
+  C->>L: append(op) — the seq reserved, the entry in flight; the queue moves on
+  L->>L: the group's file — every op appended meanwhile — written; the ticket resolves
   C->>B: addBlock(hash of the record) — unless chain: false
   C->>E: write the record file, put its catalog row
   C->>L: applied(seq)
@@ -95,10 +96,13 @@ The field's kind is checked before anything is stamped (`FIELD_KIND`), and an in
 or a range is resolved inside the queue, against the record as it is (`OUT_OF_RANGE`, `CYCLE`,
 `NOT_FOUND`). A write that changes nothing stops after `applyOp` and appends nothing; a tree
 move to where the node is stops before it. A record written with `encrypted: true` is sealed for
-this node's key and produces no op. The catalog file is saved off the queue, so a write never
-waits for it. Under `open({ defer })` steps 7 to 9 wait for a timer instead: the log is durable
+this node's key and produces no op. The mutation queue holds a write up to the append (step 6):
+from there the next write runs, building on the entry in flight, while the disk is waited for
+outside the queue; steps 7 to 12 come in log order once the op's group is on disk, and that is
+what the caller awaits. The catalog file is saved off the queue, so a write never
+waits for it. Under `open({ defer })` — 16 ms by default — steps 8 to 10 wait for a timer instead: the log is durable
 at once, the cache and the catalog read the entry meanwhile, and the writes of one record within
-the window land as one file, every record due under one block.
+the window land as one file, every record due under one block; `flush()` lands them now.
 
 ## Two nodes
 
