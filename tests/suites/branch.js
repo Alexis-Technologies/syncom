@@ -6,7 +6,7 @@
 // state, signatures are required and met, a branch is dropped.
 
 const { createMesh, settle } = require('../utils/mesh.js');
-const { branch, merge, branchInfo, drop } = require('../../branch.js');
+const { branch, merge, branchInfo, drop } = require('../../src/branch/branch.js');
 const { prng } = require('../utils/mesh.js');
 
 const dump = async (storage) => {

@@ -30,7 +30,7 @@
 // module and the undo subpath on it ship without the op model.
 
 const { deepEqual, isPlainObject } = require('./shape.js');
-const { diff: myers } = require('./myers.js');
+const { diff: myers } = require('./text/myers.js');
 const { isJsonValue, jsonValue, spliceArgs, treeArgs, markArgs, setElements } = require('./args.js');
 
 // A list's elements as one character each, so Myers runs over them as over

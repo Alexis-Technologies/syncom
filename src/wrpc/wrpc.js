@@ -17,7 +17,7 @@
 // the heartbeat, re-opening the `changes` subscription from its last event id
 // — is what a WrpcClient already does; the adapter only translates names.
 
-const { isSyncLink } = require('./link.js');
+const { isSyncLink } = require('../link.js');
 
 const UNIT = 'syncom';
 

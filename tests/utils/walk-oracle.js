@@ -1,6 +1,6 @@
 'use strict';
 
-// THE LEGACY WALK, KEPT AS AN ORACLE. This is src/sequence.js as of commit
+// THE LEGACY WALK, KEPT AS AN ORACLE. This is src/text/sequence.js as of commit
 // 358d812 (the typed-array index: buildIndex over the whole block per op,
 // render, anchorOrdinal, indexOfCursor, spans), copied verbatim with only its
 // requires rewired. tests/sequence.rope.test.js feeds the SAME block JSON to
@@ -99,7 +99,7 @@ const {
   sameRle,
   rleMerge,
   normalizeRle,
-} = require('../../src/rle.js');
+} = require('../../src/text/rle.js');
 
 // Pending work — runs waiting for their anchor, cuts and extensions waiting
 // for their run, registers and switched-off marks for elements and marks not
@@ -107,7 +107,7 @@ const {
 // alike: beyond it an op is refused (`bound`) and a peer's block is dropped.
 const PENDING_MAX = 4096;
 // A field holds at most MAX_FIELD slots, tombstones included (and a run
-// MAX_RUN, src/rle.js's): the index allocates per slot, so a gap is the one
+// MAX_RUN, src/text/rle.js's): the index allocates per slot, so a gap is the one
 // thing a peer could make expensive for nothing. A field at MAX_FIELD takes
 // nothing more until a reset.
 const MAX_FIELD = 1 << 22;

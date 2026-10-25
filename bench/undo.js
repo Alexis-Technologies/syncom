@@ -15,7 +15,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { bench } = require('./support/harness.js');
 const { open } = require('../src/storage.js');
-const { createUndo } = require('../src/undo.js');
+const { createUndo } = require('../src/undo/undo.js');
 
 const main = async () => {
   console.log(`Undo benchmark — Node ${process.version}\n`);

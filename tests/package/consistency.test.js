@@ -59,7 +59,9 @@ test('every root shim requires a file that exists', () => {
     for (const target of exportTargets(value)) {
       if (!target.endsWith('.js')) continue;
       const source = readFileSync(path.join(ROOT, target), 'utf8');
-      const match = source.match(/require\('([^']+)'\)/);
+      // A shim is one line: `module.exports = require('…')`; an entry that is
+      // a module of its own (a subpath under src/) is not one.
+      const match = source.match(/^module\.exports = require\('([^']+)'\);?$/m);
       if (!match) continue; // not a shim
       const required = path.join(ROOT, path.dirname(target), match[1]);
       assert.ok(existsSync(required), `${key} shim ${target} requires missing ${match[1]}`);
@@ -134,13 +136,13 @@ test('every runtime export is declared in the types', () => {
   };
   check('index.js', 'index.d.ts');
   // The subpaths: their runtime surface is small and loads without a browser.
-  check('wrpc.js', 'wrpc.d.ts');
-  check('contracts.js', 'contracts.d.ts');
-  check('idb.js', 'idb.d.ts');
-  check('search.js', 'search.d.ts');
-  check('order.js', 'order.d.ts');
-  check('undo.js', 'undo.d.ts');
-  check('branch.js', 'branch.d.ts');
+  check('src/wrpc/wrpc.js', 'src/wrpc/wrpc.d.ts');
+  check('src/contracts/contracts.js', 'src/contracts/contracts.d.ts');
+  check('src/idb/idb.js', 'src/idb/idb.d.ts');
+  check('src/search/search.js', 'src/search/search.d.ts');
+  check('src/order/order.js', 'src/order/order.d.ts');
+  check('src/undo/undo.js', 'src/undo/undo.d.ts');
+  check('src/branch/branch.js', 'src/branch/branch.d.ts');
   // browser.js is only loadable under OPFS/WebCrypto globals, so compare its
   // barrel's names against the node one instead of requiring it here.
   check('index.js', 'browser.d.ts');

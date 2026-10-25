@@ -7,7 +7,7 @@
 // the memory backend is wrapped to count reads, so "no I/O" is a number.
 
 const { createMemoryFsi } = require('../../src/backend.js');
-const { createSearch } = require('../../src/search.js');
+const { createSearch } = require('../../src/search/search.js');
 
 const counting = (fsi) => {
   const reads = [];

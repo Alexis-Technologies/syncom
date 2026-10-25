@@ -21,32 +21,32 @@
       "default": "./index.js"
     },
     "./wrpc": {
-      "types": "./wrpc.d.ts",
-      "default": "./wrpc.js"
+      "types": "./src/wrpc/wrpc.d.ts",
+      "default": "./src/wrpc/wrpc.js"
     },
     "./contracts": {
-      "types": "./contracts.d.ts",
-      "default": "./contracts.js"
+      "types": "./src/contracts/contracts.d.ts",
+      "default": "./src/contracts/contracts.js"
     },
     "./idb": {
-      "types": "./idb.d.ts",
-      "default": "./idb.js"
+      "types": "./src/idb/idb.d.ts",
+      "default": "./src/idb/idb.js"
     },
     "./search": {
-      "types": "./search.d.ts",
-      "default": "./search.js"
+      "types": "./src/search/search.d.ts",
+      "default": "./src/search/search.js"
     },
     "./order": {
-      "types": "./order.d.ts",
-      "default": "./order.js"
+      "types": "./src/order/order.d.ts",
+      "default": "./src/order/order.js"
     },
     "./undo": {
-      "types": "./undo.d.ts",
-      "default": "./undo.js"
+      "types": "./src/undo/undo.d.ts",
+      "default": "./src/undo/undo.js"
     },
     "./branch": {
-      "types": "./branch.d.ts",
-      "default": "./branch.js"
+      "types": "./src/branch/branch.d.ts",
+      "default": "./src/branch/branch.js"
     },
     "./package.json": "./package.json"
   },
@@ -160,20 +160,6 @@
     "index.d.ts",
     "browser.js",
     "browser.d.ts",
-    "wrpc.js",
-    "wrpc.d.ts",
-    "contracts.js",
-    "contracts.d.ts",
-    "idb.js",
-    "idb.d.ts",
-    "search.js",
-    "search.d.ts",
-    "order.js",
-    "order.d.ts",
-    "undo.js",
-    "undo.d.ts",
-    "branch.js",
-    "branch.d.ts",
     "src/",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",

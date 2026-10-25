@@ -1186,7 +1186,7 @@ test('ops: the kinds’ precedence on the op path', async (t) => {
 
 test('ops: a keystroke extends the held index', async (t) => {
   await t.test('appending to a run carries the held index and reading over; nothing before the new slot moves', () => {
-    const S = require('../src/sequence.js');
+    const S = require('../src/text/sequence.js');
     const splice = (ts, seq, value) => op('splice', ts, 'A', { seq, key: 'body', value });
     let entry = applyOp(null, splice(1, 1, { at: '^', content: 'ab' })).entry;
     const run = '1:A';

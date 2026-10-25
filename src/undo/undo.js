@@ -16,8 +16,8 @@
 // is this process's: nothing of it is written, a peer's ops are never
 // undone from here, and a purge forgets its record.
 
-const { diffViews } = require('./patch.js');
-const { Emitter } = require('./emitter.js');
+const { diffViews } = require('../patch.js');
+const { Emitter } = require('../emitter.js');
 
 const WHOLE = new Set(['write', 'delete', 'merge', 'purge']);
 const GLOBAL = '*';

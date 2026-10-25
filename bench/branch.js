@@ -13,7 +13,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { bench } = require('./support/harness.js');
 const { open } = require('../src/storage.js');
-const { branch, merge, drop } = require('../src/branch.js');
+const { branch, merge, drop } = require('../src/branch/branch.js');
 
 const RECORDS = 200;
 

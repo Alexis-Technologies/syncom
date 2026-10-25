@@ -11,9 +11,9 @@
 
 const { encrypt, calculateHash } = require('./crypto.js');
 const { applyOp, isAlive, latestClock, observedTags, kindOf, kindsOf, seqIndexOf } = require('./ops.js');
-const S = require('./sequence.js');
-const T = require('./tree.js');
-const { between } = require('./order.js');
+const S = require('./text/sequence.js');
+const T = require('./tree/moves.js');
+const { between } = require('./order/order.js');
 const { opKey } = require('./vector.js');
 const { notify } = require('./hooks.js');
 const { ValidationError, project, unproject, foldSet } = require('./schema.js');

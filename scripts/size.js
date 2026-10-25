@@ -134,28 +134,38 @@ const ENTRIES = [
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
   // guards it too.
-  { label: 'wrpc adapter — browser (@alexify/syncom/wrpc)', entry: 'wrpc.js', platform: 'browser', budget: 2 },
+  { label: 'wrpc adapter — browser (@alexify/syncom/wrpc)', entry: 'src/wrpc/wrpc.js', platform: 'browser', budget: 2 },
   // Smart contracts: off the main entry on purpose (a `new Function` over
   // chain data), so a node that never imports the subpath never pays for it
   // — in bytes or in attack surface.
-  { label: 'contracts — browser (@alexify/syncom/contracts)', entry: 'contracts.js', platform: 'browser', budget: 1 },
+  {
+    label: 'contracts — browser (@alexify/syncom/contracts)',
+    entry: 'src/contracts/contracts.js',
+    platform: 'browser',
+    budget: 1,
+  },
   // The IndexedDB backend: browser-only by nature, its own row so the main
   // entry pays nothing for it.
-  { label: 'idb backend — browser (@alexify/syncom/idb)', entry: 'idb.js', platform: 'browser', budget: 2 },
+  { label: 'idb backend — browser (@alexify/syncom/idb)', entry: 'src/idb/idb.js', platform: 'browser', budget: 2 },
   // The trigram text index behind `$text`: platform-neutral, off the main
   // entry so a node that never searches pays nothing for it.
-  { label: 'search — browser (@alexify/syncom/search)', entry: 'search.js', platform: 'browser', budget: 2 },
+  { label: 'search — browser (@alexify/syncom/search)', entry: 'src/search/search.js', platform: 'browser', budget: 2 },
   // Fractional indexes for ordering records: a helper off the main entry.
-  { label: 'order — browser (@alexify/syncom/order)', entry: 'order.js', platform: 'browser', budget: 1.5 },
+  { label: 'order — browser (@alexify/syncom/order)', entry: 'src/order/order.js', platform: 'browser', budget: 1.5 },
   // The undo manager with the patch vocabulary, Myers, the argument checks
   // realize() shares with the write API (src/args.js) and the Emitter it
   // stands on — measured alone; in an app bundle those are shared with the
   // core. 6 KB since the shared checks (5.9 measured); 6.5 KB since the
   // `mark` patch (6.0 measured).
-  { label: 'undo — browser (@alexify/syncom/undo)', entry: 'undo.js', platform: 'browser', budget: 6.5 },
+  { label: 'undo — browser (@alexify/syncom/undo)', entry: 'src/undo/undo.js', platform: 'browser', budget: 6.5 },
   // A fork opened through the parent's constructor, merged as ops: the
   // selection a push makes, the shape helpers, the protocol constants.
-  { label: 'branch — browser (@alexify/syncom/branch)', entry: 'branch.js', platform: 'browser', budget: 3.5 },
+  {
+    label: 'branch — browser (@alexify/syncom/branch)',
+    entry: 'src/branch/branch.js',
+    platform: 'browser',
+    budget: 3.5,
+  },
 ];
 
 // A browser entry has to be self-contained: no node builtins, and no packages

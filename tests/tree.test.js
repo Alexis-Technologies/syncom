@@ -5,7 +5,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const T = require('../src/tree.js');
+const T = require('../src/tree/moves.js');
 
 let clock = 0;
 const tick = () => ++clock;

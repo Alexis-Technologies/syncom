@@ -1381,7 +1381,7 @@ test('Storage: the bounds of the sequence and tree engines', async (t) => {
   await t.test(
     'treeMove refuses a node that would read below MAX_DEPTH levels, and a place with no room between its neighbours',
     async (t2) => {
-      const { MAX_DEPTH, MAX_FI } = require('../src/tree.js');
+      const { MAX_DEPTH, MAX_FI } = require('../src/tree/moves.js');
       const { storage } = await openTemp(t2);
       const id = await storage.insert({});
       let parent = null;

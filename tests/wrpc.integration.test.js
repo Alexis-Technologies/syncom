@@ -7,7 +7,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const syncom = require('..');
-const { createWrpcLink } = require('../wrpc.js');
+const { createWrpcLink } = require('../src/wrpc/wrpc.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const { settle, waitUntil } = require('./utils/mesh.js');
 

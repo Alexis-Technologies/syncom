@@ -7,7 +7,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { IDBFactory } = require('fake-indexeddb');
 const { installBrowserGlobals, requireBrowserBarrel } = require('./utils/browser-env.js');
-const { createIdbFsi } = require('../idb.js');
+const { createIdbFsi } = require('../src/idb/idb.js');
 const { runSyncEngineTests } = require('./suites/sync-engine.js');
 
 test('Sync engine (IndexedDB backend)', async (t) => {

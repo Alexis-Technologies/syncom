@@ -6,7 +6,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { createWrpcLink, isSyncLink, SYNC_INTROSPECTION } = require('../wrpc.js');
+const { createWrpcLink, isSyncLink, SYNC_INTROSPECTION } = require('../src/wrpc/wrpc.js');
 const { Emitter } = require('../src/utils.js');
 
 class FakeWrpcClient extends Emitter {

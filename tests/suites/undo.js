@@ -7,7 +7,7 @@
 // for the stack, a purge forgetting its record.
 
 const { createMesh, settle } = require('../utils/mesh.js');
-const { createUndo } = require('../../undo.js');
+const { createUndo } = require('../../src/undo/undo.js');
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 3));
 

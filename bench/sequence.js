@@ -10,9 +10,9 @@
 'use strict';
 
 const { bench } = require('./support/harness.js');
-const S = require('../src/sequence.js');
+const S = require('../src/text/sequence.js');
 const { applyOp } = require('../src/ops.js');
-const { diff } = require('../src/myers.js');
+const { diff } = require('../src/text/myers.js');
 const { createMemoryFsi } = require('../src/backend.js');
 const { open } = require('../src/storage.js');
 

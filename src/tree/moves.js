@@ -22,9 +22,9 @@
 // `between()` on every local move landing next to it) and ./args.js (the
 // node-id rule, the one the write API checks with).
 
-const { compareClock } = require('./vector.js');
-const { isKey } = require('./order.js');
-const { isNodeId } = require('./args.js');
+const { compareClock } = require('../vector.js');
+const { isKey } = require('../order/order.js');
+const { isNodeId } = require('../args.js');
 
 const TRASH = '$trash';
 const MAX_DEPTH = 512;

@@ -10,7 +10,7 @@
 'use strict';
 
 const { bench } = require('./support/harness.js');
-const T = require('../src/tree.js');
+const T = require('../src/tree/moves.js');
 const { applyOp } = require('../src/ops.js');
 const { createMemoryFsi } = require('../src/backend.js');
 const { open } = require('../src/storage.js');

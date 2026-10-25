@@ -1,6 +1,6 @@
 import { expectError, expectType } from 'tsd';
 import type { Storage } from '../index.js';
-import { branch, merge, branchInfo, drop, type BranchInfo, type MergeResult } from '../branch.js';
+import { branch, merge, branchInfo, drop, type BranchInfo, type MergeResult } from '../src/branch/branch.js';
 
 declare const parent: Storage;
 expectType<Promise<Storage>>(branch(parent, { path: '/tmp/b', from: { tag: 'v1' }, schema: { entities: {} } }));

@@ -13,8 +13,8 @@
 const { commit, rehearse } = require('./commit.js');
 const { snapshotPage } = require('./bootstrap.js');
 const { isAlive, deepEqual, kindsOf, seqIndexOf } = require('./ops.js');
-const { MAX_RUN } = require('./rle.js');
-const { marksIn } = require('./sequence.js');
+const { MAX_RUN } = require('./text/rle.js');
+const { marksIn } = require('./text/sequence.js');
 const { Cursor } = require('./query.js');
 const { appliedHere, parseVersion, within, exactStart, fold, gone } = require('./history.js');
 const { diffViews, realize } = require('./patch.js');

@@ -19,7 +19,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { bench } = require('./support/harness.js');
 const { open } = require('../src/storage.js');
-const { createSearch } = require('../src/search.js');
+const { createSearch } = require('../src/search/search.js');
 
 const RECORDS = 2000;
 const POOL = [];

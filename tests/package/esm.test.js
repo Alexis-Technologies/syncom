@@ -10,7 +10,16 @@ const assert = require('node:assert');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..', '..');
-const ENTRIES = ['index.js', 'wrpc.js', 'search.js', 'order.js', 'undo.js', 'branch.js', 'contracts.js', 'idb.js'];
+const ENTRIES = [
+  'index.js',
+  'src/wrpc/wrpc.js',
+  'src/search/search.js',
+  'src/order/order.js',
+  'src/undo/undo.js',
+  'src/branch/branch.js',
+  'src/contracts/contracts.js',
+  'src/idb/idb.js',
+];
 
 for (const entry of ENTRIES) {
   test(`ESM sees every export of ${entry}`, async () => {

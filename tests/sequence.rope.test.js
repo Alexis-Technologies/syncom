@@ -13,7 +13,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const S = require('../src/sequence.js');
+const S = require('../src/text/sequence.js');
 const O = require('./utils/walk-oracle.js');
 const { applyOp, seqIndexOf } = require('../src/ops.js');
 

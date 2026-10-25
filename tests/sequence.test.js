@@ -6,7 +6,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const S = require('../src/sequence.js');
+const S = require('../src/text/sequence.js');
 
 // A few nodes over one field, each holding its own block; ops are
 // `{ ts, origin, payload }` and stamps come from one monotonic clock.

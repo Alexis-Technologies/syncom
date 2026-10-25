@@ -21,7 +21,7 @@ const { applyOp, observedTags, packOps, unpackOps } = require('../src/ops.js');
 const { generateSigningKeys } = require('../src/crypto.js');
 const { signOp, verifyOp } = require('../src/signing.js');
 const { open } = require('../src/storage.js');
-const S = require('../src/sequence.js');
+const S = require('../src/text/sequence.js');
 
 const record = { name: 'Example', email: 'example@example.com', hits: 0, tags: ['a', 'b'], nested: { k: 1 } };
 

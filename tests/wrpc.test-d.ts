@@ -1,6 +1,6 @@
 import { expectAssignable, expectError, expectType } from 'tsd';
-import { createWrpcLink, isSyncLink, SYNC_INTROSPECTION } from '../wrpc.js';
-import type { SyncLink, WrpcClientLike, WrpcLink } from '../wrpc.js';
+import { createWrpcLink, isSyncLink, SYNC_INTROSPECTION } from '../src/wrpc/wrpc.js';
+import type { SyncLink, WrpcClientLike, WrpcLink } from '../src/wrpc/wrpc.js';
 
 declare const client: WrpcClientLike;
 const link = createWrpcLink(client);

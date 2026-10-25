@@ -68,8 +68,8 @@
 
 const { compareClock, maxClock } = require('./vector.js');
 const { deepEqual } = require('./shape.js');
-const S = require('./sequence.js');
-const T = require('./tree.js');
+const S = require('./text/sequence.js');
+const T = require('./tree/moves.js');
 
 const createEntry = () => ({
   data: {},

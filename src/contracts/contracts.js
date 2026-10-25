@@ -1,6 +1,6 @@
 'use strict';
 
-const { SyncomError } = require('./errors.js');
+const { SyncomError } = require('../errors.js');
 
 const deserializeFunction = (source) => {
   const arrowIndex = source.indexOf('=>');

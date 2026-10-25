@@ -1,6 +1,6 @@
 import { expectAssignable, expectError, expectType } from 'tsd';
-import { createSearch, normalize, trigrams } from '../search.js';
-import type { TextIndex } from '../search.js';
+import { createSearch, normalize, trigrams } from '../src/search/search.js';
+import type { TextIndex } from '../src/search/search.js';
 import { open } from '../index.js';
 import type { StorageOptions } from '../index.js';
 

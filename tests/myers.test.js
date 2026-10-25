@@ -6,7 +6,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { diff, patch } = require('../src/myers.js');
+const { diff, patch } = require('../src/text/myers.js');
 
 test('myers diff', async (t) => {
   await t.test('hunks are splices in the before string, last first', () => {

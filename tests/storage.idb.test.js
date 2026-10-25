@@ -7,7 +7,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { IDBFactory } = require('fake-indexeddb');
 const { installBrowserGlobals, requireBrowserBarrel } = require('./utils/browser-env.js');
-const { createIdbFsi } = require('../idb.js');
+const { createIdbFsi } = require('../src/idb/idb.js');
 
 test('Storage over IndexedDB', async (t) => {
   const env = installBrowserGlobals();

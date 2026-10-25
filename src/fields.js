@@ -13,9 +13,9 @@
 const { commit } = require('./commit.js');
 const { spliceArgs, treeArgs, markArgs, setElements, jsonValue } = require('./args.js');
 const { isAlive, seqIndexOf } = require('./ops.js');
-const { diff } = require('./myers.js');
-const S = require('./sequence.js');
-const { TRASH } = require('./tree.js');
+const { diff } = require('./text/myers.js');
+const S = require('./text/sequence.js');
+const { TRASH } = require('./tree/moves.js');
 const { isRecordId, invalidId } = require('./shape.js');
 
 /** Adds `value` to counter field `key` — the commutative alternative to update(). */

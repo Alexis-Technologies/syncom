@@ -5,7 +5,7 @@
 // modules. Every message names the option the way the caller wrote it.
 
 const { isPlainObject } = require('./shape.js');
-const { PENDING_MAX } = require('./sequence.js');
+const { PENDING_MAX } = require('./text/sequence.js');
 
 const DEFAULT_CACHE = 5000;
 const DEFAULT_FLUSH_EVERY = 64;

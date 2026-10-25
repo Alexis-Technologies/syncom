@@ -12,10 +12,10 @@
 // Nothing here requires storage.js: a branch is opened through the
 // parent's own constructor, so this subpath bundles no engine.
 
-const { outbound, unreachable } = require('./outbound.js');
-const { asJson } = require('./shape.js');
-const { DEFAULT_PAGE_SIZE } = require('./protocol.js');
-const { SyncomError } = require('./errors.js');
+const { outbound, unreachable } = require('../outbound.js');
+const { asJson } = require('../shape.js');
+const { DEFAULT_PAGE_SIZE } = require('../protocol.js');
+const { SyncomError } = require('../errors.js');
 
 const FILE = 'branch.json';
 const FORMAT = 1;

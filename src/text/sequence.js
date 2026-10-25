@@ -75,7 +75,7 @@
 // (a `rightOrigin` per run) changes the merge rule for new runs only, and
 // is a PROTOCOL bump once the package is published.
 
-const { compareClock } = require('./vector.js');
+const { compareClock } = require('../vector.js');
 const {
   MAX_RUN,
   GAP,
