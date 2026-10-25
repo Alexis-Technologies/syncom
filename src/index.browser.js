@@ -21,6 +21,7 @@ const { isSharedLog } = require('./shared-log.js');
 const { isSyncLink } = require('./link.js');
 const { OpLog } = require('./log.js');
 const { outbound } = require('./outbound.js');
+const { compareVectors } = require('./vector.js');
 const { SyncomError, ValidationError } = require('./errors.js');
 const { createPlugins } = require('./plugin.js');
 
@@ -42,6 +43,7 @@ module.exports = {
   isSharedLog,
   isSyncLink,
   outbound,
+  compareVectors,
   SyncomError,
   createPlugins,
 };

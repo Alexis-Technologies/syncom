@@ -421,7 +421,8 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
       const roll = random();
       try {
         if (roll < 0.12) await storage.set(id, { v: step, by: storage.nodeId.slice(0, 4) });
-        else if (roll < 0.24) await storage.update(id, { [`f${step % 3}`]: step });
+        else if (roll < 0.21) await storage.update(id, { [`f${step % 3}`]: step });
+        else if (roll < 0.24) await storage.unset(id, [`f${step % 3}`, step % 2 ? 'tags' : 'items']);
         else if (roll < 0.3) {
           await storage.inc('c1', 'count', 1);
           incs++;

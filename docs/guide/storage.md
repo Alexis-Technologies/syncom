@@ -82,7 +82,10 @@ kind only: a local write of another kind — `update()` or `set()` naming a
 counter, `inc()` on a set, `splice()` on a register, `treeMove()` on a list —
 throws a `SyncomError` with `code: 'FIELD_KIND'`, `field`, and `kind` the kind
 that holds it, before anything is stamped. A `set()` that leaves such a
-field out drops it, as it drops every field it does not name. From a peer the
+field out drops it, as it drops every field it does not name; `unset(id,
+fields)` removes named fields of any kind — the fields' own reset, which an
+older concurrent write of them loses to and a newer one makes them again, as
+whatever kind that write is. From a peer the
 kinds' precedence decides instead — a register outranks a counter, a counter
 a set, then a list, a text, a tree — see [Sync](./sync#registers-counters-sets-lists-and-text).
 The fields are the top-level ones: a nested object is one register, replaced

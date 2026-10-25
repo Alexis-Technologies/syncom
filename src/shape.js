@@ -47,6 +47,7 @@ const isKeyId = (value) => typeof value === 'string' && KEY_ID.test(value);
 const OP_TYPES = new Set([
   'write',
   'set',
+  'unset',
   'inc',
   'delete',
   'merge',
@@ -64,7 +65,19 @@ const OP_TYPES = new Set([
 // The ops an entity's validator sees: the ones that leave a record for the
 // application to read. A `merge` joins a peer's state as it is, a `delete`
 // leaves nothing to validate.
-const VALIDATED = new Set(['write', 'set', 'inc', 'add', 'remove', 'splice', 'assign', 'move', 'mark', 'tree']);
+const VALIDATED = new Set([
+  'write',
+  'set',
+  'unset',
+  'inc',
+  'add',
+  'remove',
+  'splice',
+  'assign',
+  'move',
+  'mark',
+  'tree',
+]);
 
 // A signature's three fields, by shape alone — whether they check is
 // src/signing/sign.js's business: 64 bytes base64url, 32 bytes hex, a nonce.

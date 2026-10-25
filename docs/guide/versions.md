@@ -235,10 +235,10 @@ kind: `put` (a register's new value — a `set`), `inc` (a counter's delta),
 adds this node observed, with `own: true` this node's adds alone, the way an
 undo revokes its own add and leaves a peer's concurrent one, with `removals`
 exactly the tags named), `splice` (a text's
-or a list's edits, by Myers), `treeMove` and `treeRemove`, `write` (the
-registers as a whole — a reset), `delete`, `purge`. No op removes one field,
-so a register that is gone, or a field that changed kind, makes the diff a
-`write` of the registers followed by the other kinds made again whole. A
+or a list's edits, by Myers), `treeMove` and `treeRemove`, `unset` (a field
+removed, of any kind), `write` (the registers as a whole — a reset; only for
+a record that was not there), `delete`, `purge`. A field that is gone is an
+`unset`; one that changed kind an `unset` and the kind made again whole. A
 text's marks are not diffed. The diff reads both versions through the schema
 lens, raw, without the read hooks, and rejects as `get(id, { at })` would
 for either version.
@@ -306,18 +306,18 @@ write and a peer sees it as one — and what those ops commit is the redo
 step. The rule is Yjs's, refuse to overwrite: a field anything but the
 step's own ops changed since — a peer's write, a write of this node's the
 stack does not hold — is left alone and counted in `skipped`, and a step
-whose way back needs a reset (one that added a register field, a `delete()`,
-an `insert()`) is skipped whole when anything else changed the record since;
-`undo({ force: true })` overrides. A skipped patch goes with its step — the
+whose way back is the whole record (an `insert()`, whose way back is a
+delete; a `delete()`, whose way back writes the record again) is skipped
+whole when anything else changed the record since; `undo({ force: true })`
+overrides. A skipped patch goes with its step — the
 redo step holds only what was applied — so `force` is chosen up front, not
 as a retry. What commutes is no conflict: a peer's increment of
 the same counter, or add to or remove from the same set, leaves the undo
 free; a peer's edit of the same list or text does not (the undo's positions
-are stale by then). A field the step created is gone again when nothing else
-changed since — a whole-record write (had the step above created `views`,
-its way back would be that one write); with a peer's change beside it the
-undo empties a counter, a set, a list, a text or a tree instead, so the
-peer's change stays. An undone `add` removes this node's adds of the element
+are stale by then). A field the step created is `unset` again when nothing
+else changed it since; with a peer's change beside it the undo takes a
+counter down, removes this node's set elements, or leaves a list, a text or
+a tree alone instead, so the peer's change stays. An undone `add` removes this node's adds of the element
 alone, so a peer's concurrent add of it survives; an undone `inc` is the
 increment back; a text comes back as new characters. A text's marks are not
 undone. An undo that fails partway — a hook refusing one record's inverse,

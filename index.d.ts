@@ -67,6 +67,7 @@ export type SyncOpType =
   | 'write'
   | 'set'
   | 'inc'
+  | 'unset'
   | 'add'
   | 'remove'
   | 'splice'
@@ -292,6 +293,7 @@ export type SyncomErrorCode =
   | 'FIELD_KIND'
   | 'OUT_OF_RANGE'
   | 'CYCLE'
+  | 'SURROGATE'
   | 'HISTORY_GONE'
   | 'INVALID_VERSION'
   | 'TAG_EXISTS'
@@ -894,6 +896,7 @@ export interface HistoryResult {
  */
 export type Patch =
   | { action: 'put'; field: string; value: unknown }
+  | { action: 'unset'; field: string }
   | { action: 'write'; data: Record<string, unknown> }
   | { action: 'inc'; field: string; value: number }
   | { action: 'add'; field: string; elements: readonly unknown[] }
@@ -1235,6 +1238,11 @@ export interface OutboundOptions {
  * needed.
  */
 export function outbound(log: OpLog, options: OutboundOptions): { ops: SyncOp[]; first: Record<string, number> };
+/**
+ * How two version vectors stand: -1 behind, 1 ahead, 0 equal, undefined
+ * when concurrent (each ahead somewhere); a key one side lacks reads as 0.
+ */
+export function compareVectors(a: VersionVector, b: VersionVector): -1 | 0 | 1 | undefined;
 
 /**
  * What the sync engine needs from a transport. Reconnecting, backing off and
@@ -1574,6 +1582,8 @@ export interface Storage {
   /** Forgets the record for good: a `purge` op no later write revives, and a scrub of its entries from the log — here and on every peer it reaches. */
   purge(id: string, options?: WriteOptions): Promise<void>;
   update(id: string, delta: unknown, options?: WriteOptions): Promise<void>;
+  /** Removes fields of any kind — one name or an array; a field the record does not hold is no op. An `unset` op: a register's tombstone an older concurrent `set` loses to. */
+  unset(id: string, fields: string | readonly string[], options?: WriteOptions): Promise<void>;
   inc(id: string, key: string, value?: number, options?: WriteOptions): Promise<void>;
   /**
    * Adds `elements` to set field `key` — an observed-remove set: two nodes
@@ -1721,6 +1731,8 @@ export interface SyncomRecord {
   data(): Promise<unknown>;
   delta(): Record<string, unknown>;
   save(options?: WriteOptions): Promise<void>;
+  /** Removes fields; the storage-level `unset` with this record's id. */
+  unset(fields: string | readonly string[], options?: WriteOptions): Promise<void>;
   inc(key: string, value?: number, options?: WriteOptions): Promise<void>;
   /** Adds to a set field — `storage.add` with this record's id. */
   add(key: string, elements: readonly unknown[], options?: WriteOptions): Promise<void>;
@@ -1782,6 +1794,7 @@ export declare class SyncomCollection {
   delete(id: string, options?: WriteOptions): Promise<void>;
   /** Sets the listed fields; `$type` may not be among them. */
   update(id: string, delta: unknown, options?: WriteOptions): Promise<void>;
+  unset(id: string, fields: string | readonly string[], options?: WriteOptions): Promise<void>;
   record(id: string): Promise<SyncomRecord>;
 }
 

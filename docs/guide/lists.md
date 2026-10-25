@@ -303,8 +303,11 @@ cannot, `open({ defer: 50 })` lets a record's file lag the log by that many
 milliseconds, so the keystrokes of one burst are one file write and one chain
 block (the log is durable at once, and every read sees every write — see
 [Storage](./storage)). Indices are UTF-16 code units, as
-`String#slice` counts them; a splice that splits a surrogate pair is the
-caller's to avoid.
+`String#slice` counts them, and a surrogate pair — a character outside the
+BMP, an emoji — is never split: `splice()`, `mark()`, `unmark()` and
+`cursor()` refuse an index between its halves with `SURROGATE` (`id`,
+`field`, `index`), `updateText()` diffs by code points where one is about,
+so its edits go around it, and a string with a lone half is a `TypeError`.
 
 ## Costs and limits
 

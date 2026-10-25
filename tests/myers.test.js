@@ -48,6 +48,25 @@ test('myers diff', async (t) => {
     }
   });
 
+  await t.test('a pair is never split: the diff runs by code points where a surrogate is about', () => {
+    const halves = (s) => /[\uD800-\uDFFF]/.test(s) && !s.isWellFormed();
+    for (const [a, b] of [
+      ['a😀b', 'a😁b'],
+      ['😀😀', '😀x😀'],
+      ['x😀', '😀'],
+      ['a😀😁😂b', 'a😂😁😀b'],
+      ['hello 😀 world', 'hello world'],
+    ]) {
+      const hunks = diff(a, b);
+      assert.strictEqual(patch(a, hunks), b, `${a} -> ${b}`);
+      for (const [index, count, text] of hunks) {
+        assert.ok(!halves(a.slice(index, index + count)), `${a} -> ${b}: cut ${index}..${index + count} splits a pair`);
+        assert.ok(!halves(text), `${a} -> ${b}: inserts a lone half`);
+      }
+    }
+    assert.deepStrictEqual(diff('a😀b', 'a😁b'), [[1, 2, '😁']], 'the whole character, two units');
+  });
+
   await t.test('indices are UTF-16 code units; past max edits one hunk replaces the middle', () => {
     assert.deepStrictEqual(diff('a😀b', 'ab'), [[1, 2, '']], 'the emoji is two units');
     const a = `keep ${'x'.repeat(3000)} keep`;

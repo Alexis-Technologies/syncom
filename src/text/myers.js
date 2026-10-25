@@ -11,7 +11,10 @@
 // string's coordinates, last first, so applying them one after another
 // leaves every earlier index as it was. A difference deeper than `max`
 // edit steps (a paste that replaces most of the text) is one hunk that
-// replaces the middle: exact, just not minimal.
+// replaces the middle: exact, just not minimal. The units are UTF-16, as
+// `String#slice` counts them, but a hunk never ends between the halves of
+// a surrogate pair: where either string holds one, the diff runs over code
+// points and its hunks are moved to units.
 
 const common = (a, b) => {
   let start = 0;
@@ -103,16 +106,43 @@ const hunksOf = (steps, x, y, start) => {
   return hunks.reverse();
 };
 
-const diff = (a, b, { max = 1000 } = {}) => {
-  if (typeof a !== 'string' || typeof b !== 'string') throw new TypeError('diff() takes two strings');
+// Whether a string holds a surrogate half — a character outside the BMP,
+// two UTF-16 units that one hunk must keep together.
+const SURROGATE = /[\uD800-\uDFFF]/;
+
+// The diff of two sequences (strings, or arrays of code points) as hunks
+// in `a`'s coordinates.
+const hunks = (a, b, max) => {
   const [start, endA, endB] = common(a, b);
   const x = a.slice(start, endA);
   const y = b.slice(start, endB);
+  const text = (units) => (typeof units === 'string' ? units : units.join(''));
   if (x.length === 0 && y.length === 0) return [];
-  if (x.length === 0 || y.length === 0) return [[start, x.length, y]];
+  if (x.length === 0 || y.length === 0) return [[start, x.length, text(y)]];
   const steps = shortestEdit(x, y, max);
-  if (steps === null) return [[start, x.length, y]];
+  if (steps === null) return [[start, x.length, text(y)]];
   return hunksOf(steps, x, y, start);
+};
+
+// The diff over code points, its hunks moved to UTF-16 units: a pair is one
+// item of the sequence, so no hunk ends between its halves.
+const byCodePoints = (a, b, max) => {
+  const points = Array.from(a);
+  const units = new Array(points.length + 1);
+  units[0] = 0;
+  for (let i = 0; i < points.length; i++) units[i + 1] = units[i] + points[i].length;
+  const out = hunks(points, Array.from(b), max);
+  for (const hunk of out) {
+    const [index, count] = hunk;
+    hunk[0] = units[index];
+    hunk[1] = units[index + count] - units[index];
+  }
+  return out;
+};
+
+const diff = (a, b, { max = 1000 } = {}) => {
+  if (typeof a !== 'string' || typeof b !== 'string') throw new TypeError('diff() takes two strings');
+  return SURROGATE.test(a) || SURROGATE.test(b) ? byCodePoints(a, b, max) : hunks(a, b, max);
 };
 
 // Applies hunks (last first) to `a`: what the diff promises to produce.

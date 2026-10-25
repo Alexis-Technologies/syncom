@@ -164,7 +164,8 @@ const ENTRIES = [
   // stands on — measured alone; in an app bundle those are shared with the
   // core. 6 KB since the shared checks (5.9 measured); 6.5 KB since the
   // `mark` patch (6.0 measured).
-  { label: 'undo — browser (@alexify/syncom/undo)', entry: 'src/undo/undo.js', platform: 'browser', budget: 6.5 },
+  // 6.5 with the unset patch and the loose inverse per field.
+  { label: 'undo — browser (@alexify/syncom/undo)', entry: 'src/undo/undo.js', platform: 'browser', budget: 7 },
   // A fork opened through the parent's constructor, merged as ops: the
   // selection a push makes, the shape helpers, the protocol constants.
   {
@@ -185,14 +186,17 @@ const ENTRIES = [
   // 79.8 with the rope under the sequence engine (the persistent tree, map
   // and chunked list it is made of, the walk and the hydration), 81.0 with
   // the group commit, the queue freed at the append and the public flush.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 82 },
+  // 82.0 with unset (the per-field reset), compareVectors and the surrogate rule.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 83 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
-  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 22 },
+  // 22.1 with the surrogate rule (the code-point diff, the refused indexes).
+  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 22.5 },
   // The tree kind alone, with the fractional indexes a place is made of and
   // the argument checks it shares with the core (5.1 measured).
-  { label: 'tree — browser (@alexify/syncom/tree)', entry: 'src/tree/tree.js', platform: 'browser', budget: 5.5 },
+  // 5.5 with the field-name check unset shares with it (src/args.js).
+  { label: 'tree — browser (@alexify/syncom/tree)', entry: 'src/tree/tree.js', platform: 'browser', budget: 5.75 },
   // The security blocks, each measured ALONE — with the shape checks, the
   // PEM pair, the backend contract and the errors it shares with the core,
   // which an app bundle holds once (4.2 / 2.0 / 3.6 measured; what each

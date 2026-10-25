@@ -216,18 +216,33 @@ class UndoManager extends Emitter {
         current = id;
         const conflicts = this.#conflicts(step, id);
         const plugins = this.#storage[PLUGINS];
-        let patches = invert(record, true, plugins);
+        const patches = invert(record, true, plugins);
         let kept = patches;
-        if (!force) {
-          // A whole-record patch leads the others (they make the record
-          // again after the reset): with a change by others since, the
-          // loose inverse is tried — fields emptied, not reset — and a
-          // record that still needs the reset is left alone whole.
-          if (isWhole(patches) && conflicts !== null && conflicts.size > 0) patches = invert(record, false, plugins);
-          if (conflicts === null || (isWhole(patches) && conflicts.size > 0)) kept = [];
-          else kept = patches.filter((patch) => !conflicting(patch, conflicts.get(patch.field)));
+        let skipped = 0;
+        if (!force && (conflicts === null || (isWhole(patches) && conflicts.size > 0))) {
+          // A whole-record patch (the record made again after a delete, or
+          // deleted again) with a change by others since: left alone whole.
+          kept = [];
+          skipped = patches.length;
+        } else if (!force) {
+          // Field by field: the exact way back where nothing else touched
+          // the field; where something did, the loose one — a counter taken
+          // down, this node's adds removed — when it commutes with what the
+          // others did, else the field is left alone.
+          const loose = invert(record, false, plugins);
+          kept = [];
+          for (const patch of patches) {
+            const types = conflicts.get(patch.field);
+            if (!conflicting(patch, types)) {
+              kept.push(patch);
+              continue;
+            }
+            const alternatives = loose.filter((alt) => alt.field === patch.field && !conflicting(alt, types));
+            if (alternatives.length === 0) skipped++;
+            else kept.push(...alternatives);
+          }
         }
-        result.skipped += patches.length - kept.length;
+        result.skipped += skipped;
         if (kept.length > 0) {
           result.applied += await this.#storage.applyPatches(id, kept, {
             source: this.#token,

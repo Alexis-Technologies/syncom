@@ -92,7 +92,7 @@ A push and a `changes` page carry ops packed: one positional array of 17
 slots per op — `origin`, `seq`, `ts`, `type`, `id`, `scope`, `data`, `meta`,
 `key`, `value`, `vector`, `from`, `v`, `actor`, `sig`, `digest`, `nonce` —
 with `null` for an absent field and the type as one character: `w` write,
-`s` set, `i` inc, `+` add, `-` remove, `/` splice, `=` assign, `^` move, `*`
+`s` set, `u` unset, `i` inc, `+` add, `-` remove, `/` splice, `=` assign, `^` move, `*`
 mark, `~` tree, `d` delete, `p` purge, `m` merge, `a` advance. Slots are
 appended, never reordered: a reader of fewer slots ignores the rest, a
 reader of more takes an absent one as `null`. The log itself keeps keyed

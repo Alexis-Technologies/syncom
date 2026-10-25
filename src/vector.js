@@ -21,6 +21,35 @@ const compareClock = (a, b) => {
 
 const maxClock = (a, b) => (compareClock(a, b) >= 0 ? a : b);
 
+// The floor under a field of a record: the record's reset watermark
+// (`meta.base`) or the field's own (`meta.gone[field]`, an `unset`),
+// whichever is newer — what an op on the field must be stamped above to
+// count, and what its state is pruned under.
+const floorOf = (meta, field) => {
+  const gone = meta.gone;
+  const own = gone && Object.hasOwn(gone, field) ? gone[field] : null;
+  return maxClock(meta.base ?? null, own);
+};
+
+/**
+ * How two version vectors stand to each other: -1 when `a` is behind `b`
+ * (every key of `a` at or below `b`'s, one below), 1 when ahead, 0 when
+ * equal, undefined when concurrent (each ahead somewhere). A key one side
+ * lacks reads as 0.
+ */
+const compareVectors = (a = {}, b = {}) => {
+  let ahead = false;
+  let behind = false;
+  for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    const x = a[key] ?? 0;
+    const y = b[key] ?? 0;
+    if (x > y) ahead = true;
+    else if (x < y) behind = true;
+  }
+  if (ahead && behind) return undefined;
+  return ahead ? 1 : behind ? -1 : 0;
+};
+
 const vectorMax = (a = {}, b = {}) => {
   const result = { ...a };
   for (const origin in b) {
@@ -96,6 +125,8 @@ class Clock {
 module.exports = {
   compareClock,
   maxClock,
+  floorOf,
+  compareVectors,
   vectorMax,
   vectorKey,
   opKey,

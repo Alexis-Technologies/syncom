@@ -128,6 +128,7 @@ export {
   apply,
   isSyncLink,
   outbound,
+  compareVectors,
   Storage,
   open,
   SyncomError,

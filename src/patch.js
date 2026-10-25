@@ -6,6 +6,7 @@
 // patch is plain JSON, in the terms of the write API, never of the op model:
 //
 //   { action: 'put', field, value }                 a register's new value (a `set` op)
+//   { action: 'unset', field }                      a field removed, of any kind (an `unset` op)
 //   { action: 'write', data }                       the registers as a whole — a reset; the other kinds follow it
 //   { action: 'inc', field, value }                 a counter moved by `value`
 //   { action: 'add', field, elements }              set elements added
@@ -22,16 +23,17 @@
 // turns the record `from` (its data, and what kind each field is) into
 // `to`: per field by kind — a register's new value, a counter's delta, a
 // set's added and removed elements, and for a plugin's kind what its `diff`
-// says (a text's or a list's splices, a tree's moves) — and a reset when a
-// register is gone or a field changed kind, since no op removes one field:
-// a `write` of the registers, then the other kinds made again whole. A
-// text's marks are not diffed; `compact()` lays them again itself, through
-// the plugin. Pure over plain data; the kinds come from ops.js (`kindsOf`)
-// and the plugins from the storage's registry (src/plugin.js), so this
-// module and the undo subpath on it ship without the op model.
+// says (a text's or a list's splices, a tree's moves) — a field gone is an
+// `unset`, a field of another kind now an `unset` and the kind made again
+// whole, and a record that was not there a `write` of the registers with
+// the other kinds made again. A text's marks are not diffed; `compact()`
+// lays them again itself, through the plugin. Pure over plain data; the
+// kinds come from ops.js (`kindsOf`) and the plugins from the storage's
+// registry (src/plugin.js), so this module and the undo subpath on it ship
+// without the op model.
 
 const { deepEqual, isPlainObject } = require('./shape.js');
-const { isJsonValue, jsonValue, setElements } = require('./args.js');
+const { isJsonValue, jsonValue, fieldNames, setElements } = require('./args.js');
 const { EMPTY, HOME, missing } = require('./plugin.js');
 
 const asKeys = (elements) => new Map(elements.map((element) => [JSON.stringify(element), element]));
@@ -51,10 +53,12 @@ const recreate = (field, kind, value, plugins) => {
  * The patches that turn the record `from` — its data (`null` when it was
  * not there) and the kind of each of its fields — into `to`. `purged` says
  * `to` is a purged record. `exact` (the default) makes `to` read exactly:
- * a field `to` lacks is gone through a reset; without it a counter, a set
- * or a plugin's field `to` lacks is emptied instead — what an undo wants,
- * since a reset would take a peer's concurrent change with it. `plugins`
- * is the registry whose kinds the fields may be of.
+ * a field `to` lacks is removed (`unset`); without it a counter, a set or
+ * a plugin's field `to` lacks is emptied instead — what an undo wants,
+ * since an unset outranks a peer's concurrent increment or add and would
+ * take it with it; a register gone is an unset either way (a peer's newer
+ * `set` wins over it). `plugins` is the registry whose kinds the fields may
+ * be of.
  */
 const diffViews = (from, fromKinds, to, toKinds, { purged = false, exact = true, plugins = EMPTY } = {}) => {
   if (to === null) {
@@ -63,19 +67,9 @@ const diffViews = (from, fromKinds, to, toKinds, { purged = false, exact = true,
   }
   const registers = {};
   for (const field of Object.keys(to)) if (toKinds[field] === 'register') registers[field] = to[field];
-  // A reset: a register gone, or a field that is another kind now. No op
-  // removes one field, so the registers are written whole and the rest made
-  // again from nothing.
-  let reset = from === null;
-  if (!reset) {
-    for (const field of Object.keys(fromKinds)) {
-      const was = fromKinds[field];
-      const now = toKinds[field];
-      if (now === undefined ? exact || was === 'register' : was !== now) reset = true;
-    }
-  }
   const patches = [];
-  if (reset) {
+  // A record that was not there: the registers written, the rest made again.
+  if (from === null) {
     patches.push({ action: 'write', data: registers });
     for (const field of Object.keys(toKinds)) {
       if (toKinds[field] !== 'register') patches.push(...recreate(field, toKinds[field], to[field], plugins));
@@ -83,9 +77,21 @@ const diffViews = (from, fromKinds, to, toKinds, { purged = false, exact = true,
     return patches;
   }
   for (const field of new Set([...Object.keys(toKinds), ...Object.keys(fromKinds)])) {
-    const kind = toKinds[field] ?? fromKinds[field];
+    const was = fromKinds[field];
+    const now = toKinds[field];
     const value = to[field];
     const previous = from[field];
+    // Gone: removed — or, loosely, emptied when the kind allows it. Another
+    // kind now: removed, then made again from nothing.
+    if (now === undefined && (exact || was === 'register')) {
+      patches.push({ action: 'unset', field });
+      continue;
+    }
+    if (was !== undefined && now !== undefined && was !== now) {
+      patches.push({ action: 'unset', field }, ...recreate(field, now, value, plugins));
+      continue;
+    }
+    const kind = now ?? was;
     if (kind === 'register') {
       if (!deepEqual(previous, value)) patches.push({ action: 'put', field, value });
     } else if (kind === 'counter') {
@@ -109,7 +115,7 @@ const diffViews = (from, fromKinds, to, toKinds, { purged = false, exact = true,
 const isField = (value) => typeof value === 'string' && value.length > 0;
 // The actions the core realizes itself; a plugin's (`splice`, `mark`,
 // `treeMove`, `treeRemove`) come from the registry.
-const ACTIONS = new Set(['put', 'write', 'inc', 'add', 'remove', 'delete', 'purge']);
+const ACTIONS = new Set(['put', 'unset', 'write', 'inc', 'add', 'remove', 'delete', 'purge']);
 
 // Exactly the tags a remove revokes: `[[element, { origin: addTs }]]`.
 const isRemovals = (list) =>
@@ -144,6 +150,8 @@ const realize = (patch, plugins = EMPTY) => {
   switch (action) {
     case 'put':
       return ['set', { data: { [field]: jsonValue(method, patch.value) } }];
+    case 'unset':
+      return ['unset', { value: fieldNames(method, field) }];
     case 'write':
       if (!isPlainObject(patch.data)) throw new TypeError('applyPatches(): write needs data: a plain object');
       return ['write', { data: patch.data }];

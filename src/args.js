@@ -31,6 +31,23 @@ const fieldName = (method, key) => {
   if (typeof key !== 'string') throw new TypeError(`${method}() takes a field name`);
 };
 
+// What unset() takes: a field name, or a non-empty array of them, each a
+// key of the record (never `__proto__`). Returns the names, each once.
+const fieldNames = (method, fields) => {
+  const list = typeof fields === 'string' ? [fields] : fields;
+  if (!Array.isArray(list) || list.length === 0) {
+    throw new TypeError(`${method}() takes a field name or a non-empty array of them`);
+  }
+  for (const field of list) {
+    if (typeof field !== 'string' || field.length === 0 || field === '__proto__') {
+      throw new TypeError(
+        `${method}() takes field names; got ${typeof field === 'string' ? JSON.stringify(field) : typeof field}`,
+      );
+    }
+  }
+  return [...new Set(list)];
+};
+
 /** `value` when JSON can carry it; a TypeError naming the method otherwise. */
 const jsonValue = (method, value) => {
   if (!isJsonValue(value)) throw new TypeError(`${method}() takes a JSON value; got ${typeof value}`);
@@ -48,6 +65,10 @@ const spliceArgs = (method, key, index, count, content) => {
   if (!Number.isInteger(count) || count < 0) throw new TypeError(`${method}() takes a non-negative integer count`);
   if (content !== undefined && typeof content !== 'string' && !Array.isArray(content)) {
     throw new TypeError(`${method}() takes a string for a text or an array for a list`);
+  }
+  // A lone surrogate half would leave the text malformed for every reader.
+  if (typeof content === 'string' && !content.isWellFormed()) {
+    throw new TypeError(`${method}() takes well-formed text; the content holds a lone surrogate half`);
   }
   if (Array.isArray(content)) {
     for (const element of content) {
@@ -105,4 +126,4 @@ const setElements = (method, key, elements) => {
   return elements;
 };
 
-module.exports = { isNodeId, isJsonValue, jsonValue, spliceArgs, treeArgs, markArgs, setElements };
+module.exports = { isNodeId, isJsonValue, jsonValue, fieldNames, spliceArgs, treeArgs, markArgs, setElements };

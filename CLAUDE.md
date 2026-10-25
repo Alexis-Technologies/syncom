@@ -272,7 +272,13 @@ docs/                     VitePress site
   as malformed and its stream stalls there — a new type, or a slot an older
   reader cannot take as null, is then a `PROTOCOL` bump (`src/protocol.js`).
 - **Every write is an op, and a field is a register, a counter, a set, a list, a text OR a tree.**
-  `insert`/`set` → `write`, `update`/`swap`/`record.save` → `set`, `inc` →
+  `insert`/`set` → `write`, `update`/`swap`/`record.save` → `set`, `unset` →
+  `unset` (code `u`, `value` the field names: each field's own reset
+  watermark `meta.gone[field]` — what the field held below it is pruned
+  like under `base`, `pruneField`; an op on the field stamped below it is
+  moot, one above it makes the field again as whatever kind it is;
+  `floorOf(meta, field)` in src/vector.js is the floor every op path and
+  every plugin reads, never `meta.base` alone), `inc` →
   `inc`, `add`/`remove` → `add`/`remove`, `splice`/`push`/`updateText` →
   `splice`, `setAt` → `assign`, `move` → `move`, `mark`/`unmark`/`unmarkById`
   → `mark`, `treeMove`/`treeRemove` → `tree`, `delete` → tombstone. Registers
@@ -304,7 +310,11 @@ docs/                     VitePress site
   `{ start, end, key, value, many? } | { off }`, `tree` `~` `{ node, parent,
   fi }`. An index, a sibling or a range is resolved in `prepareOp` INSIDE the
   queue (`resolveSplice`/`resolveMove`/`resolveMark`/`resolveTree` in
-  `src/commit.js`: `OUT_OF_RANGE`, `CYCLE`, `NOT_FOUND`; `resolveTree` folds
+  `src/commit.js`: `OUT_OF_RANGE`, `CYCLE`, `NOT_FOUND`, and `SURROGATE` for an
+  index of a text between the halves of a pair — `wholeCharacters` in
+  src/text/text.js, over the rendered text; `spliceArgs` refuses content with
+  a lone half; src/text/myers.js diffs by code points where a surrogate is
+  about, so `updateText` never makes one; `resolveTree` folds
   the tree ONCE and hands back `null` for a move to where the node is, and
   `commitLocal` returns before `applyOp` on it). `sync.pendingMax`
   (`PENDING_MAX`), `MAX_RUN` (`src/text/rle.js`), `MAX_FIELD`, `MAX_FI`, `MAX_DEPTH`

@@ -1225,3 +1225,81 @@ test('ops: a keystroke grows the rope in place', async (t) => {
     assert.strictEqual(S.render(more.meta.blocks.body), 'new!');
   });
 });
+
+test('ops: unset is a field’s own reset', async (t) => {
+  const { applyOp, mergeEntry, isAlive, kindsOf, packOps, unpackOps } = require('../src/ops.js');
+  const S = require('../src/text/sequence.js');
+  const at = (ts, origin, type, extra) => ({ origin, seq: ts, ts, type, id: 'r', ...extra });
+  await t.test('an older set loses to it, a newer one brings the field back; the tombstone persists', () => {
+    let entry = applyOp(null, at(1, 'A', 'write', { data: { a: 1, b: 2 } })).entry;
+    const unset = applyOp(entry, at(5, 'B', 'unset', { value: ['a', 'nope'] }));
+    assert.strictEqual(unset.changed, true);
+    assert.deepStrictEqual(unset.delta, { a: undefined, nope: undefined });
+    entry = unset.entry;
+    assert.deepStrictEqual(entry.data, { b: 2 });
+    assert.deepStrictEqual(entry.meta.gone, { a: [5, 'B'], nope: [5, 'B'] }, 'the watermarks, a field never set too');
+    assert.strictEqual(entry.meta.clock.a, undefined, 'the register went');
+    assert.deepStrictEqual(kindsOf(entry), { b: 'register' });
+    const older = applyOp(entry, at(3, 'C', 'set', { data: { a: 3 } }));
+    assert.strictEqual(older.changed, false, 'an older set loses');
+    const newer = applyOp(entry, at(7, 'C', 'set', { data: { a: 7 } })).entry;
+    assert.deepStrictEqual(newer.data, { a: 7, b: 2 });
+    // The same unset twice, and the two orders of the older set and the unset, agree.
+    assert.strictEqual(applyOp(entry, at(5, 'B', 'unset', { value: ['a'] })).changed, false);
+    const other = applyOp(
+      applyOp(applyOp(null, at(1, 'A', 'write', { data: { a: 1, b: 2 } })).entry, at(3, 'C', 'set', { data: { a: 3 } }))
+        .entry,
+      at(5, 'B', 'unset', { value: ['a', 'nope'] }),
+    ).entry;
+    assert.deepStrictEqual(other.data, entry.data);
+    assert.deepStrictEqual(other.meta, entry.meta);
+  });
+
+  await t.test('a counter, a set or a list under the field goes with it, and merges agree', () => {
+    let entry = applyOp(null, at(1, 'A', 'write', { data: { t: 1 } })).entry;
+    entry = applyOp(entry, at(2, 'A', 'inc', { key: 'hits', value: 3 })).entry;
+    entry = applyOp(entry, at(3, 'A', 'add', { key: 'tags', value: ['x'] })).entry;
+    entry = applyOp(entry, at(4, 'A', 'splice', { key: 'items', value: { at: S.HEAD, content: [1, 2] } })).entry;
+    const gone = applyOp(entry, at(6, 'B', 'unset', { value: ['hits', 'tags', 'items'] })).entry;
+    assert.deepStrictEqual(gone.data, { t: 1 });
+    assert.deepStrictEqual([gone.meta.counters, gone.meta.sets, gone.meta.blocks], [{}, {}, {}]);
+    // An increment stamped below the unset is moot; one above it makes the field a counter again.
+    const late = applyOp(gone, at(5, 'C', 'inc', { key: 'hits', value: 1 }));
+    assert.strictEqual(late.changed, false);
+    const again = applyOp(gone, at(7, 'C', 'inc', { key: 'hits', value: 1 })).entry;
+    assert.deepStrictEqual(again.data, { t: 1, hits: 1 });
+    // The two orders agree: the increments below the unset go, the one above stays.
+    let other = applyOp(entry, at(7, 'C', 'inc', { key: 'hits', value: 1 })).entry;
+    other = applyOp(other, at(6, 'B', 'unset', { value: ['hits', 'tags', 'items'] })).entry;
+    assert.deepStrictEqual(other.data, again.data);
+    assert.deepStrictEqual(other.meta, again.meta);
+    // A merge of the two pictures is the unset one, either way round.
+    const joined = mergeEntry(entry, gone);
+    assert.deepStrictEqual(joined.data, { t: 1 });
+    assert.deepStrictEqual(mergeEntry(gone, entry).meta, joined.meta);
+    assert.deepStrictEqual(joined.meta.gone.hits, [6, 'B']);
+    // A record reset above the unset forgets the watermark; one below leaves it.
+    const reset = applyOp(gone, at(9, 'A', 'write', { data: { fresh: true } })).entry;
+    assert.deepStrictEqual(reset.meta.gone, {});
+    const older = applyOp(gone, at(2, 'A', 'write', { data: { fresh: true } })).entry;
+    assert.deepStrictEqual(older.meta.gone, gone.meta.gone);
+  });
+
+  await t.test('an unset after a delete does not revive the record', () => {
+    let entry = applyOp(null, at(1, 'A', 'write', { data: { a: 1 } })).entry;
+    entry = applyOp(entry, at(2, 'A', 'delete', {})).entry;
+    assert.strictEqual(isAlive(entry), false);
+    const unset = applyOp(entry, at(3, 'B', 'unset', { value: ['a'] })).entry;
+    assert.strictEqual(isAlive(unset), false, 'a watermark is not a write');
+    const revived = applyOp(unset, at(4, 'B', 'set', { data: { a: 4 } })).entry;
+    assert.strictEqual(isAlive(revived), true);
+  });
+
+  await t.test('a malformed unset is reported, and the wire codes it as u', () => {
+    const bad = applyOp(null, at(1, 'A', 'unset', { value: 'a' }));
+    assert.deepStrictEqual(bad.rejected, [{ field: null, reason: 'malformed' }]);
+    const [row] = packOps([at(1, 'A', 'unset', { value: ['a'] })]);
+    assert.strictEqual(row[3], 'u');
+    assert.deepStrictEqual(unpackOps([row])[0].type, 'unset');
+  });
+});

@@ -8,7 +8,7 @@
 // `methods`); Storage keeps one delegate per method here, and a stub that
 // refuses with PLUGIN_MISSING for a plugin's method it was not opened with.
 
-const { setElements } = require('./args.js');
+const { fieldNames, setElements } = require('./args.js');
 
 /** Adds `value` to counter field `key` — the commutative alternative to update(). */
 const inc = async (core, id, key, value = 1, { actor } = {}) => {
@@ -31,4 +31,13 @@ const remove = async (core, id, key, elements, { actor } = {}) => {
   await core.commit('remove', id, { key, value: setElements('remove', key, elements) }, { actor });
 };
 
-module.exports = { inc, add, remove };
+/**
+ * Removes fields of record `id` — one name or an array of them — of any
+ * kind: a register's tombstone that an older concurrent `set` loses to and
+ * a newer one brings back. Fields the record does not hold are no op.
+ */
+const unset = async (core, id, fields, { actor } = {}) => {
+  await core.commit('unset', id, { value: fieldNames('unset', fields) }, { actor });
+};
+
+module.exports = { inc, add, remove, unset };

@@ -96,9 +96,16 @@ const runPatchTests = async (t, assert, createStorage) => {
     await storage.delete(id);
     assert.deepStrictEqual(await storage.diff(id, { tag: 'v1' }), [{ action: 'delete' }]);
     await storage.set(id, { title: 'only' });
-    const reset = await storage.diff(id, { tag: 'v1' });
-    assert.deepStrictEqual(reset[0], { action: 'write', data: { title: 'only' } });
-    assert.strictEqual(reset.length, 1, 'nothing else to make again');
+    const gone = await storage.diff(id, { tag: 'v1' });
+    assert.deepStrictEqual(gone[0], { action: 'put', field: 'title', value: 'only' });
+    assert.deepStrictEqual(
+      gone.slice(1).sort((a, b) => a.field.localeCompare(b.field)),
+      ['body', 'hits', 'items', 'n', 'outline', 'tags'].map((field) => ({ action: 'unset', field })),
+      'every other field, of any kind, is unset',
+    );
+    const way = await storage.diff(id, undefined, { tag: 'v1' });
+    assert.strictEqual(await storage.restore(id, { tag: 'v1' }), way.length, 'the fields made again');
+    assert.deepStrictEqual(await storage.diff(id, { tag: 'v1' }), []);
     const purged = await storage.insert({ p: 1 });
     await storage.tag('v2');
     await storage.purge(purged);

@@ -1473,3 +1473,65 @@ test('Storage: a sequence op on a field of another kind is refused before any in
     },
   );
 });
+
+test('unset() removes fields of any kind', async (t) => {
+  await t.test(
+    'through the storage, a collection, a Record and a patch; nothing it does not hold is an op',
+    async (t2) => {
+      const { storage } = await openTemp(t2, { schema: { entities: { Post: {} } } });
+      const id = await storage.insert({ $type: 'Post', title: 'a', n: 1 });
+      await storage.inc(id, 'hits', 2);
+      await storage.add(id, 'tags', ['x']);
+      await storage.push(id, 'body', 'hi');
+      const commits = [];
+      storage.on('commit', ({ op }) => commits.push(op.type));
+      await storage.unset(id, 'n');
+      assert.deepStrictEqual(await storage.get(id), { $type: 'Post', title: 'a', hits: 2, tags: ['x'], body: 'hi' });
+      await storage.unset(id, ['hits', 'tags']);
+      assert.deepStrictEqual(await storage.get(id), { $type: 'Post', title: 'a', body: 'hi' });
+      await storage.Post.unset(id, 'body');
+      const record = await storage.record(id);
+      await record.unset(['title', 'nope']);
+      assert.deepStrictEqual(await storage.get(id), { $type: 'Post' });
+      await storage.unset(id, 'nope');
+      assert.deepStrictEqual(commits, ['unset', 'unset', 'unset', 'unset'], 'an unset of nothing held is no op');
+      assert.strictEqual(
+        await storage.applyPatches(id, [
+          { action: 'put', field: 'z', value: 1 },
+          { action: 'unset', field: 'z' },
+        ]),
+        2,
+      );
+      assert.deepStrictEqual(await storage.get(id), { $type: 'Post' });
+      await assert.rejects(() => storage.unset(id, []), TypeError);
+      await assert.rejects(() => storage.unset(id, ['__proto__']), TypeError);
+      await assert.rejects(() => storage.applyPatches(id, [{ action: 'unset', field: '' }]), TypeError);
+    },
+  );
+});
+
+test('a surrogate pair is never split: splice, mark and cursor refuse an index inside it, updateText goes around it, a lone half is refused', async (t) => {
+  const { storage } = await openTemp(t);
+  const id = await storage.insert({});
+  await storage.push(id, 'body', 'a😀b');
+  const inside = { code: 'SURROGATE', id, field: 'body', index: 2 };
+  await assert.rejects(() => storage.splice(id, 'body', 2, 0, 'x'), inside);
+  await assert.rejects(() => storage.splice(id, 'body', 0, 2), inside, 'a cut ending inside the pair');
+  await assert.rejects(() => storage.mark(id, 'body', 0, 2, 'bold', true), inside);
+  await assert.rejects(() => storage.unmark(id, 'body', 2, 3, 'bold'), inside);
+  await assert.rejects(() => storage.cursor(id, 'body', 2), inside);
+  await assert.rejects(() => storage.push(id, 'body', '\uD83D'), TypeError, 'a lone high half');
+  await assert.rejects(() => storage.splice(id, 'body', 0, 0, '\uDE00x'), TypeError, 'a lone low half');
+  await assert.rejects(
+    () => storage.applyPatches(id, [{ action: 'splice', field: 'body', index: 0, count: 0, content: '\uD83D' }]),
+    TypeError,
+  );
+  // Around the pair everything goes; the diff keeps it whole.
+  await storage.splice(id, 'body', 1, 2, '😁');
+  assert.deepStrictEqual(await storage.get(id), { body: 'a😁b' });
+  await storage.updateText(id, 'body', 'a😂😁 b');
+  assert.deepStrictEqual(await storage.get(id), { body: 'a😂😁 b' });
+  await storage.updateText(id, 'body', 'ab');
+  assert.deepStrictEqual(await storage.get(id), { body: 'ab' });
+  assert.strictEqual(typeof (await storage.cursor(id, 'body', 1)), 'string');
+});

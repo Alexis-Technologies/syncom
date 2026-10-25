@@ -14,6 +14,19 @@ There is no released version section until then; everything below lands in it.
 
 ### Added
 
+- **A surrogate pair is never split.** `splice()`, `mark()`, `unmark()` and
+  `cursor()` refuse an index of a text between the two halves of a pair with
+  `SURROGATE` (`id`, `field`, `index`), `updateText()` diffs by code points
+  where a pair is about, and content with a lone half is a `TypeError`.
+- **`unset()`, and `compareVectors()`.** `unset(id, fields)` — on the storage,
+  a collection and a `Record`, and as the `unset` patch — removes fields of
+  any kind: an `unset` op (wire code `u`) moves the fields' own reset
+  watermark (`meta.gone`), so what they held below it goes, an older
+  concurrent write of them is moot and a newer one makes them again; a
+  field the record does not hold is no op. A diff removes a field with it
+  instead of a whole-record reset, so an undo of a step that added a field
+  is field by field. `compareVectors(a, b)` says how two version vectors
+  stand: behind, ahead, equal or concurrent.
 - **The write path: group commit, a free queue, `defer: 16`.** The log reserves
   an op's seq the moment it is appended and writes the ops appended while a
   file is in flight as one file after it; the mutation queue moves on to the

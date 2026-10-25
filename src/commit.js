@@ -126,6 +126,11 @@ const scopeData = (type, payload, current) => {
   const data = current?.data ?? {};
   if (type === 'write') return payload.data ?? data;
   if (type === 'set') return { ...data, ...payload.data };
+  if (type === 'unset') {
+    const left = { ...data };
+    for (const field of payload.value) delete left[field];
+    return left;
+  }
   return data;
 };
 
@@ -191,6 +196,10 @@ const prepareOp = (core, type, id, payload, current, who, from) => {
   if (payload.data !== undefined) op.data = payload.data;
   if (payload.key !== undefined) op.key = payload.key;
   if (payload.value !== undefined) op.value = payload.value;
+  // An unset names the fields the record holds; the others are nothing to remove.
+  if (type === 'unset') {
+    op.value = current && !current.encrypted ? payload.value.filter((field) => Object.hasOwn(current.data, field)) : [];
+  }
   // A remove names the tags this node observed, read here, inside the
   // queue — read outside it, a concurrent apply could add between the two —
   // or exactly the tags a patch names (an undo revokes its own add alone).
@@ -209,7 +218,7 @@ const prepareOp = (core, type, id, payload, current, who, from) => {
 };
 
 // The ops the core makes itself; every other type of the protocol is a plugin's.
-const CORE = new Set(['write', 'set', 'inc', 'add', 'remove', 'delete', 'purge', 'merge']);
+const CORE = new Set(['write', 'set', 'unset', 'inc', 'add', 'remove', 'delete', 'purge', 'merge']);
 
 // A unique key another record holds: refused here, where one writer can be
 // told. Two concurrent writers on two nodes cannot be — see the `conflict`
@@ -362,6 +371,7 @@ const rehearse = async (core, id, ops) => {
     const op = prepareOp(core, type, id, payload, current, null, null);
     // A plugin's op that resolved to nothing (a tree move to where the node is): nothing to write.
     if (op.value === null) continue;
+    if (type === 'unset' && op.value.length === 0) continue;
     const { entry, changed, rejected } = applyOp(current, op, core.limits);
     refuse(core, id, rejected);
     if (changed) current = entry;
@@ -409,6 +419,8 @@ const commitLocal = async (core, type, id, payload, options) => {
   // A plugin's op that resolved to nothing — a tree move to where the node
   // already is — writes nothing.
   if (op.value === null && core.plugins.byType[type] !== undefined) return outcome(null);
+  // An unset of nothing the record holds writes nothing.
+  if (type === 'unset' && op.value.length === 0) return outcome(null);
   const applied = await validateLocal(core, op, current, visible, ctx);
   if (applied === null) return outcome(null);
   // The validator may have filled the field the scope reads (a default):

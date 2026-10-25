@@ -148,8 +148,9 @@ const runUndoTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(await undo.undo(), { applied: 2, skipped: 0 });
     assert.deepStrictEqual(await a.get(id), { title: 'B', n: 2, hits: 1 }, 'the fields back, the peer’s counter kept');
     await settle([a, b]);
-    // A set that added a field is undone only by a whole-record write: with
-    // a concurrent change the step is skipped whole, unless forced.
+    // A set that added a field is undone field by field: the field it added
+    // is unset again, and a peer's concurrent increment beside it is kept —
+    // the counter the reset dropped comes back on top of it.
     link.disconnect();
     await a.set(id, { title: 'reset', extra: 1 });
     await tick();
@@ -157,30 +158,50 @@ const runUndoTests = async (t, assert, createStorage) => {
     await link.reconnect();
     await settle([a, b]);
     assert.deepStrictEqual(await a.get(id), { title: 'reset', extra: 1, hits: 1 });
+    assert.deepStrictEqual(await undo.undo(), { applied: 4, skipped: 0 }, 'two puts, an unset, an inc');
+    assert.deepStrictEqual(await a.get(id), { title: 'B', n: 2, hits: 2 }, 'the fields back, extra gone, hits made up');
+    await settle([a, b]);
+    const onB = await b.get(id);
+    assert.deepStrictEqual([onB.title, onB.n], ['B', 2]);
+    // B's own sum straddled the reset (the documented counter/reset case): it reads one more there.
+    assert.ok(onB.hits >= 2, `hits on B: ${onB.hits}`);
+    // A delete is undone only by a whole-record write: with a concurrent
+    // change the step is skipped whole, unless forced.
+    link.disconnect();
+    await a.delete(id);
+    await tick();
+    await b.inc(id, 'hits', 1);
+    await link.reconnect();
+    await settle([a, b]);
+    assert.deepStrictEqual(await a.get(id), { hits: 1 }, 'B’s increment revived the record');
     const before = undo.size.undo;
     assert.deepStrictEqual(
       await undo.undo(),
       { applied: 0, skipped: 2 },
       'the write and the counter it would make again',
     );
-    assert.deepStrictEqual(await a.get(id), { title: 'reset', extra: 1, hits: 1 }, 'left alone');
+    assert.deepStrictEqual(await a.get(id), { hits: 1 }, 'left alone');
     assert.strictEqual(undo.size.undo, before - 1, 'the step is spent either way');
     assert.strictEqual(undo.size.redo, 0, 'nothing was done, nothing to redo');
-    await a.set(id, { title: 'again', extra: 2, fresh: true });
+    await a.delete(id);
     await settle([a, b]);
     link.disconnect();
     await b.inc(id, 'hits', 1);
     await link.reconnect();
     await settle([a, b]);
-    assert.deepStrictEqual(await a.get(id), { title: 'again', extra: 2, fresh: true, hits: 1 });
+    assert.deepStrictEqual(await a.get(id), { hits: 1 });
     assert.deepStrictEqual(
       await undo.undo({ force: true }),
       { applied: 2, skipped: 0 },
       'the write and the counter made again',
     );
-    assert.deepStrictEqual(await a.get(id), { title: 'reset', extra: 1, hits: 1 }, 'B’s increment went with the reset');
+    assert.deepStrictEqual(
+      await a.get(id),
+      { hits: 1 },
+      'B’s increment went with the reset; the counter made again as it read',
+    );
     await settle([a, b]);
-    assert.deepStrictEqual(await b.get(id), { title: 'reset', extra: 1, hits: 1 });
+    assert.deepStrictEqual(await b.get(id), { hits: 1 });
     undo.stop();
   });
 

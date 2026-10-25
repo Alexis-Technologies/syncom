@@ -150,6 +150,11 @@ class Record extends Emitter {
     await this.#storage.remove(this.#id, key, elements, options);
   }
 
+  /** Removes fields; the storage-level `unset` with this record's id. */
+  async unset(fields, options = {}) {
+    await this.#storage.unset(this.#id, fields, options);
+  }
+
   /** Splices a list or text field; the storage-level `splice` with this record's id. */
   async splice(key, index, count = 0, content, options = {}) {
     await this.#storage.splice(this.#id, key, index, count, content, options);
@@ -287,6 +292,11 @@ class Collection {
     }
     this.#mine(id);
     return this.#storage.update(id, delta, options);
+  }
+
+  async unset(id, fields, options = {}) {
+    this.#mine(id);
+    return this.#storage.unset(id, fields, options);
   }
 
   async record(id) {

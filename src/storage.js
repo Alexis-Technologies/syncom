@@ -1403,6 +1403,11 @@ class Storage extends Emitter {
     return F.remove(this.#core, id, key, elements, options);
   }
 
+  /** Removes fields of any kind from a record — one name or an array; a field it does not hold is no op. */
+  unset(id, fields, options) {
+    return F.unset(this.#core, id, fields, options);
+  }
+
   async splice(id, key, index, count, content, options) {
     return this.#api('splice')(this.#core, id, key, index, count, content, options);
   }

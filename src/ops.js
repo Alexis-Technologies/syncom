@@ -9,6 +9,11 @@
 // An entry is `{ data, meta }`. `data` is what the application reads; `meta`
 // is the bookkeeping that makes merges commute:
 //   clock[f]    — [ts, origin] of the write that set register field f
+//   gone[f]     — the field's own reset watermark, set by an `unset`: what
+//                 the field held below it is pruned (a register, a counter's
+//                 slots, a set's tags, a block's runs — as under `base`), an
+//                 op on the field stamped below it is moot, one above it
+//                 makes the field again, of whatever kind the op is
 //   base        — the record-reset watermark: a field is visible only if its
 //                 clock is not below base. A `write` (whole-record write) and
 //                 a `delete` both raise it, which is what stops an older
@@ -67,20 +72,21 @@
 // and the same predicate guards each tag as it is applied — so meta, not only
 // data, agrees whatever the order of adds, removes and resets.
 
-const { compareClock, maxClock } = require('./vector.js');
+const { compareClock, maxClock, floorOf } = require('./vector.js');
 const { deepEqual, OP_TYPES } = require('./shape.js');
 const { limitsOf, HOME } = require('./plugin.js');
 
 const createEntry = () => ({
   data: {},
-  meta: { clock: {}, base: null, deleted: null, counters: {}, sets: {}, blocks: {} },
+  meta: { clock: {}, base: null, deleted: null, counters: {}, sets: {}, blocks: {}, gone: {} },
 });
 
-// An entry written before sets existed has no `sets` key; reading it as
-// empty is the whole compatibility story.
+// An entry written before sets existed has no `sets` key (nor `blocks`,
+// nor `gone`); reading it as empty is the whole compatibility story.
 const EMPTY = Object.freeze({});
 const setsOf = (meta) => meta.sets ?? EMPTY;
 const blocksOf = (meta) => meta.blocks ?? EMPTY;
+const goneOf = (meta) => meta.gone ?? EMPTY;
 
 const cloneSets = (sets) => {
   const copy = {};
@@ -110,6 +116,7 @@ const cloneEntry = (entry) => {
     // A block is never mutated in place (a plugin hands back a new one), so
     // the map is copied and the blocks are shared.
     blocks: { ...blocksOf(entry.meta) },
+    gone: { ...goneOf(entry.meta) },
   };
   if (entry.meta.v !== undefined) meta.v = entry.meta.v;
   if (entry.meta.purged !== undefined) meta.purged = entry.meta.purged;
@@ -264,9 +271,17 @@ const normalizeMeta = (meta, limits = null, dropped = null) => {
       if (Object.keys(elements).length > 0) sets[field] = elements;
     }
   }
-  // The reset watermark first: it decides which of a block's runs are
-  // orphans (read from the head) and which wait for an anchor (bounded).
+  // The reset watermarks first — the record's, and each field's own: they
+  // decide which of a block's runs are orphans (read from the head) and
+  // which wait for an anchor (bounded).
   const base = stampOf(meta.base);
+  const gone = {};
+  if (isPlainObject(meta.gone)) {
+    for (const field of Object.keys(meta.gone)) {
+      const stamp = stampOf(meta.gone[field]);
+      if (isKey(field) && stamp) gone[field] = stamp;
+    }
+  }
   const blocks = {};
   if (isPlainObject(meta.blocks)) {
     for (const field of Object.keys(meta.blocks)) {
@@ -277,11 +292,11 @@ const normalizeMeta = (meta, limits = null, dropped = null) => {
         if (dropped !== null) dropped.push({ field, reason: 'kind', kind: typeof raw.k === 'string' ? raw.k : null });
         continue;
       }
-      const block = mod.normalize(raw, base, bounds);
+      const block = mod.normalize(raw, floorOf({ base, gone }, field), bounds);
       if (block !== null) blocks[field] = block;
     }
   }
-  const normalized = { clock, base, deleted: stampOf(meta.deleted), counters, sets, blocks };
+  const normalized = { clock, base, deleted: stampOf(meta.deleted), counters, sets, blocks, gone };
   if (Number.isInteger(meta.v)) normalized.v = meta.v;
   const purged = stampOf(meta.purged);
   if (purged) normalized.purged = purged;
@@ -296,10 +311,11 @@ const normalizeMeta = (meta, limits = null, dropped = null) => {
 // holds); a peer's raw meta is rebuilt first, under `limits`.
 const latestClock = (meta, trusted = false, limits = null) => {
   if (!isPlainObject(meta)) return null;
-  const { clock, base, deleted, counters, sets, blocks, purged } = trusted
-    ? { ...meta, sets: setsOf(meta), blocks: blocksOf(meta) }
+  const { clock, base, deleted, counters, sets, blocks, gone, purged } = trusted
+    ? { ...meta, sets: setsOf(meta), blocks: blocksOf(meta), gone: goneOf(meta) }
     : normalizeMeta(meta, limits);
   let latest = maxClock(maxClock(base, deleted), purged ?? null);
+  for (const field of Object.keys(gone)) latest = maxClock(latest, gone[field]);
   for (const field of Object.keys(blocks)) latest = maxClock(latest, [blocks[field].ts, '']);
   for (const field of Object.keys(clock)) latest = maxClock(latest, clock[field]);
   for (const field of Object.keys(counters)) {
@@ -326,22 +342,24 @@ const dropBlock = (entry, field) => {
   if (entry.cache !== undefined) delete entry.cache[field];
 };
 
-// Drops every register, counter and set entry that fell below the (new)
-// base, and prunes every block under it (the plugin's rule), read again
-// whatever was dropped: a new base can bring an orphan run back to the head.
-const applyBase = (entry, delta, plugins) => {
+// Drops what `field` holds below `floor`: a register stamped under it, a
+// counter's slots, a set's tags (a surviving component under it clamped,
+// not kept: a tag the reset made moot must read the same whether it landed
+// before or after), and prunes a block under it (the plugin's rule), the
+// field read again whatever was dropped: a new floor can bring an orphan
+// run back to the head.
+const pruneField = (entry, field, floor, delta, plugins) => {
   const { meta, data } = entry;
-  for (const field of Object.keys(meta.clock)) {
-    if (compareClock(meta.clock[field], meta.base) < 0) {
-      delete meta.clock[field];
-      delete data[field];
-      delta[field] = undefined;
-    }
+  const clock = own(meta.clock, field);
+  if (clock !== undefined && compareClock(clock, floor) < 0) {
+    delete meta.clock[field];
+    delete data[field];
+    delta[field] = undefined;
   }
-  for (const field of Object.keys(meta.counters)) {
-    const perOrigin = meta.counters[field];
+  const perOrigin = own(meta.counters, field);
+  if (perOrigin !== undefined) {
     for (const origin of Object.keys(perOrigin)) {
-      if (compareClock([perOrigin[origin][2], origin], meta.base) < 0) delete perOrigin[origin];
+      if (compareClock([perOrigin[origin][2], origin], floor) < 0) delete perOrigin[origin];
     }
     if (isCounter(meta, field)) {
       const value = counterValue(perOrigin);
@@ -353,21 +371,19 @@ const applyBase = (entry, delta, plugins) => {
       delta[field] = undefined;
     }
   }
-  for (const field of Object.keys(meta.sets)) {
-    const elements = meta.sets[field];
+  const elements = own(meta.sets, field);
+  if (elements !== undefined) {
     for (const key of Object.keys(elements)) {
       const slots = elements[key];
       for (const origin of Object.keys(slots)) {
         const slot = slots[origin];
         const newest = slot[0] > slot[1] ? slot[0] : slot[1];
-        if (compareClock([newest, origin], meta.base) < 0) {
+        if (compareClock([newest, origin], floor) < 0) {
           delete slots[origin];
           continue;
         }
-        // A component below the base is clamped, not kept: a tag the reset
-        // made moot must read the same whether it landed before or after.
-        if (slot[0] > 0 && compareClock([slot[0], origin], meta.base) < 0) slot[0] = 0;
-        if (slot[1] > 0 && compareClock([slot[1], origin], meta.base) < 0) slot[1] = 0;
+        if (slot[0] > 0 && compareClock([slot[0], origin], floor) < 0) slot[0] = 0;
+        if (slot[1] > 0 && compareClock([slot[1], origin], floor) < 0) slot[1] = 0;
       }
       if (Object.keys(slots).length === 0) delete elements[key];
     }
@@ -375,27 +391,44 @@ const applyBase = (entry, delta, plugins) => {
       delete meta.sets[field];
       delete data[field];
       delta[field] = undefined;
-      continue;
+    } else {
+      const value = liveElements(elements);
+      if (!deepEqual(data[field], value)) delta[field] = value;
+      data[field] = value;
     }
-    const value = liveElements(elements);
-    if (!deepEqual(data[field], value)) delta[field] = value;
-    data[field] = value;
   }
-  for (const field of Object.keys(meta.blocks)) {
-    const block = meta.blocks[field];
+  const block = own(meta.blocks, field);
+  if (block !== undefined) {
     const mod = moduleOf(plugins, block);
-    const next = mod === undefined ? null : mod.prune(block, meta.base);
+    const next = mod === undefined ? null : mod.prune(block, floor);
     if (next === null) {
       dropBlock(entry, field);
       delete data[field];
       delta[field] = undefined;
-      continue;
+    } else {
+      meta.blocks[field] = next;
+      const value = mod.render(entry, field, next);
+      if (!deepEqual(data[field], value)) delta[field] = value;
+      data[field] = value;
     }
-    meta.blocks[field] = next;
-    const value = mod.render(entry, field, next);
-    if (!deepEqual(data[field], value)) delta[field] = value;
-    data[field] = value;
   }
+};
+
+// Every field pruned under its floor — the (new) record base, or its own
+// unset, whichever is newer; a field's own watermark below the base is moot
+// and goes.
+const applyBase = (entry, delta, plugins) => {
+  const { meta } = entry;
+  for (const field of Object.keys(meta.gone)) {
+    if (compareClock(meta.gone[field], meta.base) < 0) delete meta.gone[field];
+  }
+  const fields = new Set([
+    ...Object.keys(meta.clock),
+    ...Object.keys(meta.counters),
+    ...Object.keys(meta.sets),
+    ...Object.keys(meta.blocks),
+  ]);
+  for (const field of fields) pruneField(entry, field, floorOf(meta, field), delta, plugins);
 };
 
 // Drops what the kind `held` keeps of `field`; a register is never dropped
@@ -418,9 +451,28 @@ const dropKind = (entry, field, held, delta) => {
 const yieldTo = (entry, field, kind, stamp, delta, plugins) => {
   const held = kindOf(entry, field, plugins);
   if (held === undefined || held === kind) return null;
-  if (rankOf(plugins, held) < rankOf(plugins, kind) || compareClock(stamp, entry.meta.base) < 0) return held;
+  if (rankOf(plugins, held) < rankOf(plugins, kind) || compareClock(stamp, floorOf(entry.meta, field)) < 0) return held;
   dropKind(entry, field, held, delta);
   return null;
+};
+
+// Removes fields at `stamp`: each field's own reset watermark moves up to
+// it and what the field held below it goes, whatever its kind — an op on
+// the field stamped below the watermark is moot from then on, one above
+// it makes the field again. A field never set here takes the watermark too
+// (news to persist: a peer's older write of it must still lose), and reads
+// as removed in the delta.
+const applyUnset = (entry, fields, stamp, delta, plugins) => {
+  const { meta } = entry;
+  for (let i = 0; i < fields.length; i++) {
+    const field = fields[i];
+    if (typeof field !== 'string' || !isKey(field)) continue;
+    if (compareClock(stamp, meta.base) < 0) continue;
+    if (compareClock(own(meta.gone, field), stamp) >= 0) continue;
+    meta.gone[field] = stamp;
+    pruneField(entry, field, stamp, delta, plugins);
+    delta[field] = undefined;
+  }
 };
 
 // Sets register fields at `stamp`, honouring last-writer-wins per field. A
@@ -439,7 +491,7 @@ const applyFields = (entry, fields, stamp, delta, rejected, plugins) => {
       continue;
     }
     if (compareClock(own(meta.clock, field), stamp) >= 0) continue;
-    if (compareClock(stamp, meta.base) < 0) continue;
+    if (compareClock(stamp, floorOf(meta, field)) < 0) continue;
     meta.clock[field] = stamp;
     data[field] = fields[field];
     delta[field] = fields[field];
@@ -450,7 +502,7 @@ const applyFields = (entry, fields, stamp, delta, rejected, plugins) => {
 // op's stamp. Maps are created only when a slot is written — an empty map
 // left behind by a malformed payload would make two nodes' metas differ.
 const addElements = (meta, field, op, stamp) => {
-  if (compareClock(stamp, meta.base) < 0) return false;
+  if (compareClock(stamp, floorOf(meta, field)) < 0) return false;
   let moved = false;
   const { value } = op;
   for (let i = 0; i < value.length; i++) {
@@ -487,7 +539,7 @@ const removeElements = (meta, field, op) => {
     for (const origin of Object.keys(tags)) {
       const ts = tags[origin];
       if (!isKey(origin) || !Number.isSafeInteger(ts) || ts <= 0 || ts > op.ts) continue;
-      if (compareClock([ts, origin], meta.base) < 0) continue;
+      if (compareClock([ts, origin], floorOf(meta, field)) < 0) continue;
       const elements = own(meta.sets, field) ?? (meta.sets[field] = {});
       const slots = own(elements, key) ?? (elements[key] = {});
       const slot = own(slots, origin);
@@ -547,7 +599,7 @@ const applyBlock = (entry, op, stamp, delta, rejected, mod, limits) => {
     rejected.push({ field, reason: holder });
     return;
   }
-  if (compareClock(stamp, meta.base) < 0) return;
+  if (compareClock(stamp, floorOf(meta, field)) < 0) return;
   const held = own(meta.blocks, field);
   const result = mod.apply(entry, field, held, op, stamp, limits);
   if (result.reason === 'bound') {
@@ -577,6 +629,7 @@ const erase = (entry, stamp, delta) => {
   meta.counters = {};
   meta.sets = {};
   meta.blocks = {};
+  meta.gone = {};
   if (entry.cache !== undefined) entry.cache = {};
   // Canonical: whatever came before, a purged entry looks the same, so two
   // nodes that saw the purge and a write in either order hold one meta.
@@ -587,7 +640,7 @@ const erase = (entry, stamp, delta) => {
 
 // The op types the core applies itself; every other type of the protocol
 // is a plugin's (or, with no plugin for it here, a refusal).
-const CORE_TYPES = new Set(['purge', 'set', 'write', 'delete', 'merge', 'inc', 'add', 'remove']);
+const CORE_TYPES = new Set(['purge', 'set', 'unset', 'write', 'delete', 'merge', 'inc', 'add', 'remove']);
 
 /**
  * Applies one op to an entry (null for a record this node has never seen).
@@ -623,6 +676,9 @@ const applyOp = (previous, op, limits = null) => {
       if (!previous && Number.isInteger(op.v)) meta.v = op.v;
       applyFields(entry, op.data, stamp, delta, rejected, plugins);
     }
+  } else if (op.type === 'unset') {
+    if (!Array.isArray(op.value)) malformed(null, rejected);
+    else applyUnset(entry, op.value, stamp, delta, plugins);
   } else if (op.type === 'write') {
     if (!isPlainObject(op.data)) malformed(null, rejected);
     else if (compareClock(stamp, meta.base) > 0) {
@@ -673,7 +729,7 @@ const applyOp = (previous, op, limits = null) => {
       const holder = yieldTo(entry, field, 'counter', stamp, delta, plugins);
       if (holder !== null) {
         rejected.push({ field, reason: holder });
-      } else if (compareClock(stamp, meta.base) >= 0) {
+      } else if (compareClock(stamp, floorOf(meta, field)) >= 0) {
         const perOrigin = own(meta.counters, field) ?? (meta.counters[field] = {});
         const known = own(perOrigin, op.origin);
         const sum = (known ? known[1] : 0) + value;
@@ -761,6 +817,12 @@ const mergeEntry = (a, b, limits = null) => {
   meta.base = maxClock(a.meta.base, b.meta.base);
   meta.deleted = maxClock(a.meta.deleted, b.meta.deleted);
   if (compareClock(meta.deleted, meta.base) < 0) meta.deleted = null;
+  for (const source of [a, b]) {
+    const gone = goneOf(source.meta);
+    for (const field of Object.keys(gone)) {
+      if (isKey(field)) meta.gone[field] = maxClock(own(meta.gone, field) ?? null, gone[field]);
+    }
+  }
   if (a.meta.v !== undefined || b.meta.v !== undefined) meta.v = Math.max(a.meta.v ?? 0, b.meta.v ?? 0);
   // A purge on either side is the whole result: nothing to join.
   const purged = maxClock(a.meta.purged ?? null, b.meta.purged ?? null);
@@ -896,6 +958,7 @@ const observedTags = (meta, field, elements) => {
 const TYPE_CODES = {
   write: 'w',
   set: 's',
+  unset: 'u',
   inc: 'i',
   delete: 'd',
   merge: 'm',
@@ -912,6 +975,7 @@ const TYPE_CODES = {
 const CODE_TYPES = {
   w: 'write',
   s: 'set',
+  u: 'unset',
   i: 'inc',
   d: 'delete',
   m: 'merge',

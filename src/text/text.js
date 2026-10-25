@@ -19,6 +19,7 @@ const { MAX_RUN } = require('./rle.js');
 const { diff: myers } = require('./myers.js');
 const { spliceArgs, markArgs, jsonValue } = require('../args.js');
 const { isRecordId, invalidId } = require('../shape.js');
+const { floorOf } = require('../vector.js');
 const { SyncomError } = require('../errors.js');
 
 const own = (object, key) => (Object.hasOwn(object, key) ? object[key] : undefined);
@@ -64,7 +65,7 @@ const normalize = (raw, base, limits) => S.normalizeSeq(raw, base, limits.pendin
 // block is pruned at once: what fell below the base must look the same as
 // if it had never landed, whichever side of the reset it arrived on.
 const apply = (entry, field, held, op, stamp, limits) => {
-  const { base } = entry.meta;
+  const base = floorOf(entry.meta, field);
   const payload = op.value;
   const block = held ?? S.createSeq(codeOf(kindOfOp(op)));
   const { pendingMax } = limits;
@@ -94,6 +95,23 @@ const join = (a, b) => S.join(a, b);
 // here, inside the queue — read outside it, a concurrent apply would shift
 // the indices. The content names the kind — a string for a text, an array
 // for a list — and a call that only cuts takes the field's.
+// An index into a text between the two halves of a surrogate pair — a
+// character outside the BMP — names no place a reader could show: refused
+// here, inside the queue, against the text as it is.
+const isHigh = (unit) => unit >= 0xd800 && unit <= 0xdbff;
+const isLow = (unit) => unit >= 0xdc00 && unit <= 0xdfff;
+const wholeCharacter = (id, key, text, index) => {
+  if (index <= 0 || index >= text.length) return;
+  if (!isHigh(text.charCodeAt(index - 1)) || !isLow(text.charCodeAt(index))) return;
+  const message = `Index ${index} of field ${key} of record ${id} falls inside a surrogate pair`;
+  throw new SyncomError('SURROGATE', message, { id, field: key, index });
+};
+const wholeCharacters = (id, key, idx, ...indexes) => {
+  if (idx === null || idx.k !== 't') return;
+  const text = S.render(idx);
+  for (const index of indexes) wholeCharacter(id, key, text, index);
+};
+
 const resolveSplice = (core, id, payload, current) => {
   const { key, index, count, content } = payload;
   const held = current ? blockOf(current, key) : undefined;
@@ -106,6 +124,7 @@ const resolveSplice = (core, id, payload, current) => {
     const message = `Index ${span} is out of range for field ${key} of record ${id} (length ${length})`;
     throw new SyncomError('OUT_OF_RANGE', message, { id, field: key, index: at, count, length });
   }
+  wholeCharacters(id, key, idx, at, at + count);
   const value = { content: marker };
   if (count > 0) value.cut = S.rangesOf(idx, at, count);
   if (marker.length > 0) {
@@ -162,6 +181,7 @@ const resolveMark = (core, id, payload, current) => {
     const message = `Range ${start}..${end} is out of range for field ${key} of record ${id} (length ${length})`;
     throw new SyncomError('OUT_OF_RANGE', message, { id, field: key, index: start, count: end - start, length });
   }
+  wholeCharacters(id, key, idx, start, end);
   const [from, to] = idx === null ? [S.HEAD, S.END] : S.markAnchors(idx, start, end, expand);
   const out = { start: from, end: to, key: name, value };
   if (many) out.many = true;
@@ -266,7 +286,7 @@ const compact = (entry, field, kind) => {
   if (kind !== 'text') return [];
   const patches = [];
   const block = entry.meta.blocks[field];
-  for (const m of S.marksIn(S.indexOf(entry, field), block, entry.meta.base)) {
+  for (const m of S.marksIn(S.indexOf(entry, field), block, floorOf(entry.meta, field))) {
     const patch = { action: 'mark', field, start: m.start, end: m.end, name: m.key, value: m.value };
     patch.expand = m.expand;
     if (m.many) patch.many = true;
@@ -380,7 +400,7 @@ const held = async (core, method, id, key) => {
   const entry = await core.entries.load(id);
   if (!entry || entry.encrypted || !core.alive(entry)) return null;
   const seq = blockOf(entry, key);
-  return seq === undefined ? null : { entry, seq, base: entry.meta.base };
+  return seq === undefined ? null : { entry, seq, base: floorOf(entry.meta, key) };
 };
 
 /**
@@ -405,7 +425,10 @@ const spans = async (core, id, key) => {
 const cursor = async (core, id, key, index, { side = 'before' } = {}) => {
   if (side !== 'before' && side !== 'after') throw new TypeError("cursor() takes side: 'before' or 'after'");
   const field = await held(core, 'cursor', id, key);
-  return field === null ? null : S.cursorAt(S.indexOf(field.entry, key), index, side);
+  if (field === null) return null;
+  const idx = S.indexOf(field.entry, key);
+  wholeCharacters(id, key, idx, index);
+  return S.cursorAt(idx, index, side);
 };
 
 /** Where `cursor` is now in list or text field `key`; `null` once its place is gone (a reset, a field no longer a sequence). */
