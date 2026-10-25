@@ -20,7 +20,7 @@ const { traced, now } = require('./telemetry.js');
 const { GLOBAL_SCOPE } = require('./scope.js');
 const { isPlainObject, asJson, VALIDATED } = require('./shape.js');
 const { ancestorsOf, under } = require('./paths.js');
-const { compose } = require('./compose.js');
+const { compose, composeData } = require('./compose.js');
 const { SyncomError, typed } = require('./errors.js');
 
 // What a commit came to: an op, `null` for a write that changed nothing,
@@ -57,6 +57,11 @@ const refuse = (core, id, rejected) => {
   const [{ field, reason, detail, count, max }] = rejected;
   if (reason === 'malformed') {
     throw new TypeError(`Field ${field} of record ${id}: the engine does not admit this payload`);
+  }
+  if (reason === 'member') {
+    const { prefix, member } = rejected[0];
+    const message = `Field ${field} of record ${id}: ${prefix} has no element or node ${member}`;
+    throw new SyncomError('NOT_FOUND', message, { id, field: prefix, elem: member });
   }
   const fields = { field, kind: reason };
   if (detail !== undefined) Object.assign(fields, { detail, count, max });
@@ -142,7 +147,7 @@ const scopeData = (type, payload, current) => {
 // The op's stream: its scope, and the next seq there (seqs run per stream,
 // see vector.js opKey).
 const assignScope = (core, op, data) => {
-  const scope = core.scopeOf(op.id, compose(data));
+  const scope = core.scopeOf(op.id, composeData(data));
   if (scope === GLOBAL_SCOPE) delete op.scope;
   else op.scope = scope;
   op.seq = core.log.seqOf(opKey(op)) + 1;
@@ -183,13 +188,25 @@ const kindClash = (type, payload, current, plugins) => {
   const rejected = [];
   for (const field of fields) {
     if (typeof field !== 'string') continue;
-    // A prefix a counter, a set or a block holds refuses every op under it.
+    // A prefix a counter, a set or a text holds refuses every op under it;
+    // under a list or a tree the next segment must name a member that is
+    // there (NOT_FOUND otherwise, raised by the caller from `member`).
+    let member = null;
     for (const prefix of ancestorsOf(field)) {
-      const above = kindOf(current, prefix, plugins);
-      if (above !== undefined && above !== 'register') {
-        rejected.push({ field, reason: above, prefix });
-        break;
+      if (member !== null) {
+        member = null;
+        continue;
       }
+      const above = kindOf(current, prefix, plugins);
+      if (above === undefined || above === 'register') continue;
+      const mod = plugins.byName[above];
+      if (mod?.nests?.[above] === true) {
+        member = field.slice(prefix.length + 1).split('/')[0];
+        if (!mod.holds(current, prefix, member)) rejected.push({ field, reason: 'member', prefix, member });
+        continue;
+      }
+      rejected.push({ field, reason: above, prefix });
+      break;
     }
     if (takes === undefined) continue;
     const kind = kindOf(current, field, plugins);
@@ -383,7 +400,7 @@ const rehearse = async (core, id, ops) => {
   if (current?.encrypted) return;
   for (const [type, given] of ops) {
     const payload = copyPayload(given);
-    const visible = current && isAlive(current) ? compose(current.data) : null;
+    const visible = current && isAlive(current) ? compose(current, core.plugins) : null;
     if (type === 'write' || type === 'set') payload.data = sameType(type, id, payload.data, visible);
     const op = prepareOp(core, type, id, payload, current, null, null);
     // A plugin's op that resolved to nothing (a tree move to where the node is): nothing to write.
@@ -414,7 +431,7 @@ const commitLocal = async (core, type, id, payload, options) => {
   const sealed = encrypted || current?.encrypted === true;
   // The record as the application reads it — its paths composed — for the
   // hooks and the commit event; the op model keeps the paths apart.
-  const visible = current && (current.encrypted || isAlive(current)) ? compose(current.data) : null;
+  const visible = current && (current.encrypted || isAlive(current)) ? compose(current, core.plugins) : null;
   const who = await core.actorOf(actor);
   const ctx = {
     type,
@@ -450,9 +467,12 @@ const commitLocal = async (core, type, id, payload, options) => {
   if (type === 'write' || type === 'set') assignScope(core, op, applied.entry.data);
   const issued = await issue(core, op, applied.entry);
   const previous = current && !current.encrypted ? current : null;
+  // The commit event's `before` is the record in the op model's terms — the
+  // paths apart, as the entry holds them — what an undo takes a step back by.
+  const before = previous !== null && isAlive(previous) ? previous.data : null;
   const done = core.landing(async () => {
     const seq = await land(core, op, applied.entry, issued);
-    await announce(core, op, applied.entry, applied.delta, ctx, source, via, { seq, before: visible, previous });
+    await announce(core, op, applied.entry, applied.delta, ctx, source, via, { seq, before, previous });
   });
   return outcome(op, done);
 };

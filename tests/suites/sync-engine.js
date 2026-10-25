@@ -426,8 +426,16 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
           // A path under a prefix, or the prefix as a whole: both merge, by stamp.
           if (step % 3 === 0) await storage.update(id, { profile: { n: step } });
           else await storage.update(id, { [`profile/${step % 2 ? 'city' : 'geo/lat'}`]: step });
-        } else if (roll < 0.24) {
+        } else if (roll < 0.23) {
           await storage.unset(id, [step % 4 === 0 ? 'profile' : `f${step % 3}`, step % 2 ? 'tags' : 'items']);
+        } else if (roll < 0.24) {
+          // A field under a list element: composed inside it, merged on its own.
+          const names = await storage.elements(id, 'items');
+          if (names.length > 0) {
+            const name = names[Math.floor(random() * names.length)];
+            if (step % 2) await storage.update(id, { [`items/${name}/note`]: step });
+            else await storage.inc(id, `items/${name}/hits`, 1);
+          }
         } else if (roll < 0.3) {
           await storage.inc('c1', 'count', 1);
           incs++;

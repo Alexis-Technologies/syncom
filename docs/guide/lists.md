@@ -131,6 +131,39 @@ await storage.move(id, 'todo', 2, 0);              // ['ship', 'write', 'test it
 - `setAt()` and `move()` are for lists; a text has neither. A `move()` to
   where the element already is (`from === to`) makes no op.
 
+## Children of elements and nodes
+
+A list's element and a tree's node can carry fields of their own, named by
+a [path](./storage#paths) through the element's name or the node's id:
+`items/<name>/body`, `outline/<node>/title`. Such a field is a field like
+any other — a register, a counter, a set, a text, a list in its turn — and
+merges on its own; a read composes it into the element (over the element's
+value, which must be an object to keep it; a scalar gives way) or into the
+node's `data`:
+
+```js
+await storage.push(id, 'items', [{ kind: 'note' }, 'plain']);
+const [first] = await storage.elements(id, 'items');     // the elements' names, in order
+await storage.push(id, `items/${first}/body`, 'hello');  // a text inside the first element
+await storage.inc(id, `items/${first}/hits`, 1);
+(await storage.get(id)).items;  // [{ kind: 'note', body: 'hello', hits: 1 }, 'plain']
+
+await storage.treeMove(id, 'outline', 'a', 'r');
+await storage.update(id, { 'outline/a/title': 'Intro' });
+(await storage.get(id)).outline; // [{ id: 'r', children: [{ id: 'a', children: [], data: { title: 'Intro' } }] }]
+```
+
+`elementAt(id, key, index)` names the element at an index and `elements(id,
+key)` all of them; an element keeps its name across moves, so a path under
+it holds. A write under an element or a node that is not there is refused
+before anything is stamped (`NOT_FOUND` with `field` the list or tree and
+`elem` the name); from a peer such a field lands and waits. A field under an
+element that was removed, or a node under the trash, is *unreachable*: not
+read, not in a diff, kept in the record until [`compact()`](./storage#compact)
+rewrites it without. A text's characters carry nothing: a path under a text
+is `FIELD_KIND`. A `setAt()` of the element's value and the children under
+it are apart: the value is one register, the children theirs.
+
 ## Rich text
 
 A text carries **marks**: a style over a range, with a name and a value.

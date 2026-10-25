@@ -284,11 +284,18 @@ docs/                     VitePress site
   block holds its prefix alone: `roomFor` (`holderAbove`) refuses an op
   under it with `rejected.prefix` — locally `kindClash` does, before the
   stamp, as `FIELD_KIND { prefix }` — and `dropUnder` takes the subtree
-  where one lands (the mergeEntry tail does the same). The reader's view
-  is `compose(data)` (`Storage#view`, cached as `entry.composed`; the lens
+  where one lands (the mergeEntry tail does the same) — unless the kind
+  NESTS (`mod.nests[kind]`: a list's elements, a tree's nodes carry fields;
+  `members`/`holds`/`pick`/`nest` are the plugin's seam for src/compose.js;
+  a text does not): under it the next segment is a member, no field, and
+  `kindClash` refuses a member that is not there as `NOT_FOUND { field,
+  elem }` while a peer's lands unreachable — not composed, not in a diff
+  (`readAt`), dropped by `compact`). The reader's view
+  is `compose(entry, plugins)` (`Storage#view`, cached as `entry.composed`; the lens
   runs over it; `#scope`, a hook's `current` and the commit event's
-  `before`/`after` read it; `foldSet` folds a validator's output back by
-  path, `diffViews`/`kindsIn` read values by `valueAt`); `snapshot()`,
+  read it; `foldSet` folds a validator's output back by path; a diff, a
+  compaction and an undo take a reading back to the fields (`decompose`;
+  the `commit` event's `before`/`after` are flat already); `snapshot()`,
   `getCachedData()`, the ops and the log keep the paths apart.
 - **Every write is an op, and a field is a register, a counter, a set, a list, a text OR a tree.**
   `insert`/`set` → `write`, `update`/`swap`/`record.save` → `set`, `unset` →

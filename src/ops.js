@@ -482,13 +482,28 @@ const dropUnder = (entry, prefix, delta, plugins) => {
   }
 };
 
-// The prefix of `field` a counter, a set or a block holds, and its kind —
-// an op under it is refused — or null.
+// Whether the kind `kind` of `plugins` nests: a list's elements and a
+// tree's nodes carry fields of their own; a text, a counter, a set do not.
+const nests = (plugins, kind) => own(plugins.byName, kind)?.nests?.[kind] === true;
+
+// The prefix of `field` a counter, a set or a block that does not nest
+// holds, and its kind — an op under it is refused — or null. Under a kind
+// that nests, the next segment names a member, no field.
 const holderAbove = (entry, field, plugins) => {
   if (!field.includes('/')) return null;
+  let member = false;
   for (const prefix of ancestorsOf(field)) {
+    if (member) {
+      member = false;
+      continue;
+    }
     const kind = kindOf(entry, prefix, plugins);
-    if (kind !== undefined && kind !== 'register') return { prefix, kind };
+    if (kind === undefined || kind === 'register') continue;
+    if (nests(plugins, kind)) {
+      member = true;
+      continue;
+    }
+    return { prefix, kind };
   }
   return null;
 };
@@ -702,8 +717,8 @@ const applyBlock = (entry, op, stamp, delta, rejected, mod, limits) => {
   // Pending work is news to persist even when the field reads the same.
   entry.data[field] = mod.render(entry, field, result.block, result.hint ?? null);
   delta[field] = entry.data[field];
-  // A block holds its prefix alone.
-  dropUnder(entry, field, delta, limits.plugins);
+  // A block holds its prefix alone — unless its members carry fields.
+  if (!nests(limits.plugins, kind)) dropUnder(entry, field, delta, limits.plugins);
 };
 
 // Everything the entry held, gone: the purge, and a merge that meets one.
@@ -1003,10 +1018,13 @@ const mergeEntry = (a, b, limits = null) => {
       data[field] = liveElements(meta.sets[field]);
     }
   }
-  // A counter, a set or a block holds its prefix alone: what the other side
-  // hung under it goes, as it would have on the op path.
-  for (const map of [meta.counters, meta.sets, meta.blocks]) {
+  // A counter, a set or a block that does not nest holds its prefix alone:
+  // what the other side hung under it goes, as it would have on the op path.
+  for (const map of [meta.counters, meta.sets]) {
     for (const field of Object.keys(map)) if (own(map, field) !== undefined) dropUnder(entry, field, {}, plugins);
+  }
+  for (const field of Object.keys(meta.blocks)) {
+    if (!nests(plugins, kindOfBlock(plugins, meta.blocks[field]))) dropUnder(entry, field, {}, plugins);
   }
   return entry;
 };

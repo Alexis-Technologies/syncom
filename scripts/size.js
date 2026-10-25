@@ -189,7 +189,9 @@ const ENTRIES = [
   // the group commit, the queue freed at the append and the public flush.
   // 82.0 with unset (the per-field reset), compareVectors and the surrogate rule.
   // 83.6 with field paths (src/paths.js, src/compose.js) and the prefix rules.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 84 },
+  // 85.3 with the children of a list's elements and a tree's nodes (the
+  // members' seam, a compaction in rounds).
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 86 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -200,7 +202,8 @@ const ENTRIES = [
   // the argument checks it shares with the core (5.1 measured).
   // 5.5 with the field-name check unset shares with it (src/args.js).
   // 5.9 with the field-path check (src/paths.js).
-  { label: 'tree — browser (@alexify/syncom/tree)', entry: 'src/tree/tree.js', platform: 'browser', budget: 6 },
+  // 6.1 with a node's data (the members' seam).
+  { label: 'tree — browser (@alexify/syncom/tree)', entry: 'src/tree/tree.js', platform: 'browser', budget: 6.25 },
   // The security blocks, each measured ALONE — with the shape checks, the
   // PEM pair, the backend contract and the errors it shares with the core,
   // which an app bundle holds once (4.2 / 2.0 / 3.6 measured; what each
@@ -242,7 +245,12 @@ const ENTRIES = [
   { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 18 },
   // The schema: the definitions read once, the validator adapters, the lens.
   // 4.3 with a set folded back by path (src/entity.js over src/paths.js).
-  { label: 'schema — browser (@alexify/syncom/schema)', entry: 'src/schema/schema.js', platform: 'browser', budget: 4.5 },
+  {
+    label: 'schema — browser (@alexify/syncom/schema)',
+    entry: 'src/schema/schema.js',
+    platform: 'browser',
+    budget: 4.5,
+  },
   // The OpenTelemetry adapter: the tracer and meter resolved, the instruments, the gauges.
   {
     label: 'telemetry — browser (@alexify/syncom/telemetry)',

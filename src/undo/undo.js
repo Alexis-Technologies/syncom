@@ -17,7 +17,6 @@
 // undone from here, and a purge forgets its record.
 
 const { diffViews } = require('../patch.js');
-const { decompose } = require('../compose.js');
 const { Emitter } = require('../emitter.js');
 const { PLUGINS } = require('../symbols.js');
 
@@ -58,15 +57,10 @@ const conflicting = (patch, types) => {
 // a tree it created is emptied instead — what to fall back on when the
 // reset would run into a peer's change. A set element goes as this node's
 // adds alone (`own`), so a concurrent add of it elsewhere survives.
-const invert = ({ before, after, kinds }, exact, plugins) => {
-  // The commit event reads the record composed; the diff is over the fields.
-  const fields = Object.keys(kinds);
-  const was = before === null ? null : decompose(before, fields);
-  const left = after === null ? null : decompose(after, fields);
-  return diffViews(left, kindsIn(left, kinds), was, kindsIn(was, kinds), { exact, plugins }).map((patch) =>
+const invert = ({ before, after, kinds }, exact, plugins) =>
+  diffViews(after, kindsIn(after, kinds), before, kindsIn(before, kinds), { exact, plugins }).map((patch) =>
     patch.action === 'remove' ? { ...patch, own: true } : patch,
   );
-};
 
 const isWhole = (patches) => patches.some((patch) => patch.action === 'write' || patch.action === 'delete');
 

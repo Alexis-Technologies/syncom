@@ -26,6 +26,13 @@ There is no released version section until then; everything below lands in it.
   (`FIELD_KIND`, `kind: 'bound'`, `detail: 'paths'`). `/` is reserved for
   paths. A hook's `current`, a validator, a query and a `Record` see the
   paths composed; the ops, the log and a snapshot keep them apart.
+- **Children of elements and nodes.** A list's element and a tree's node
+  carry fields of their own, named through the element's name or the node's
+  id — `items/<name>/body`, `outline/<node>/title` — each a field like any
+  other, merged on its own, read composed into the element (over its value)
+  or as the node's `data`; `elementAt()` and `elements()` name a list's
+  elements. A write under an element or a node that is not there is
+  `NOT_FOUND`; a field under a removed one is unreachable until `compact()`.
 - **A surrogate pair is never split.** `splice()`, `mark()`, `unmark()` and
   `cursor()` refuse an index of a text between the two halves of a pair with
   `SURROGATE` (`id`, `field`, `index`), `updateText()` diffs by code points

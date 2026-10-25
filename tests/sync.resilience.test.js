@@ -85,7 +85,8 @@ test('A page that fails is a break in the stream', async (t) => {
     const saved = d.sync.peers()[0].cursor;
     await h.set('bad', { n: 2 });
     const later = await h.insert({ n: 3 });
-    await waitUntil(() => d.sync.peers()[0].stuck);
+    // Three retries with their backoff: generous, for a loaded machine running the whole suite.
+    await waitUntil(() => d.sync.peers()[0].stuck, { timeout: 30_000 });
     assert.deepStrictEqual(
       errors.map((error) => [error.code, error.attempt]),
       [

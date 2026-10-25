@@ -144,10 +144,11 @@ export interface TreePayload {
   fi: string;
 }
 
-/** A node of a tree field as it reads: its id and its children, in order. */
+/** A node of a tree field as it reads: its id, its children in order, and its data — the fields under `<field>/<id>/…` — when it has some. */
 export interface TreeNode {
   id: string;
   children: TreeNode[];
+  data?: Record<string, unknown>;
 }
 
 /**
@@ -1444,6 +1445,10 @@ export interface TextMethods {
   unmarkById(id: string, key: string, markId: string, options?: WriteOptions): Promise<void>;
   /** Text field `key` as runs of equal style; raw (no lens, no read hooks); `null` unless the field is a text. */
   spans(id: string, key: string): Promise<TextSpan[] | null>;
+  /** The name of the element at `index` of list field `key` — what a path under it is spelled with (`items/<name>/body`); `null` out of range or when the field is not a list. */
+  elementAt(id: string, key: string, index: number): Promise<string | null>;
+  /** The names of the elements of list field `key`, in order; `[]` when the field is not a list. */
+  elements(id: string, key: string): Promise<string[]>;
   /**
    * A cursor into list or text field `key`: a place that survives edits
    * around it — before the element at `index`, or after the one before it.
@@ -1759,6 +1764,8 @@ export interface SyncomRecord {
   unmarkById(key: string, markId: string, options?: WriteOptions): Promise<void>;
   /** The text field as runs of equal style — `storage.spans` with this record's id. */
   spans(key: string): Promise<TextSpan[] | null>;
+  elementAt(key: string, index: number): Promise<string | null>;
+  elements(key: string): Promise<string[]>;
   /** A cursor into a list or text field — `storage.cursor` with this record's id. */
   cursor(key: string, index: number, options?: { side?: CursorSide }): Promise<string | null>;
   /** Where a cursor is now — `storage.index` with this record's id. */

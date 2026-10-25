@@ -762,6 +762,8 @@ const hydrate = (seq, base) => {
     oldestAnchor,
     lineage,
     rendered: null,
+    elems: null,
+    elemSet: null,
     json: null,
   };
   const maps = { cuts: seq.cuts, ext: seq.ext, pos: seq.pos, vals: seq.vals, marks: seq.marks };
@@ -880,6 +882,27 @@ const render = (block) => {
   }
   st.rendered = out;
   return out;
+};
+
+// The names of the visible elements in order — a list's members, as the
+// children hung under them are composed — kept per version like the
+// reading; and whether an element shows.
+const elems = (block) => {
+  const st = STATE.get(block);
+  if (st.elems !== null) return st.elems;
+  const out = [];
+  for (const item of T.iterate(st.root)) {
+    if (!item.vis) continue;
+    const run = runOf(st, item.run);
+    for (let k = 0; k < item.len; k++) out.push(run.elem ?? elemKey(item.run, item.off + k));
+  }
+  st.elems = out;
+  return out;
+};
+const hasElem = (block, key) => {
+  const st = STATE.get(block);
+  st.elemSet ??= new Set(elems(block));
+  return st.elemSet.has(key);
 };
 
 // The element at visible index `i`: its name (a list element keeps it across
@@ -1053,6 +1076,8 @@ const finish = (d) => {
     oldestAnchor: d.oldestAnchor,
     lineage: d.lineage,
     rendered: null,
+    elems: null,
+    elemSet: null,
     json: null,
   };
   const block = createBlock(
@@ -2140,6 +2165,8 @@ module.exports = {
   lengthOf,
   totalOf,
   render,
+  elems,
+  hasElem,
   valueAt,
   elemAt,
   placeInsert,

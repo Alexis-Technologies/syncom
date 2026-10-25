@@ -1614,3 +1614,94 @@ test('paths: a field may be a path of stable segments, read composed', async (t)
     undo.stop();
   });
 });
+
+test('children of list elements and tree nodes: composed, reachable, named', async (t) => {
+  await t.test('a list element carries fields, read inside it; a removed element’s go unreachable', async (t2) => {
+    const { storage } = await openTemp(t2);
+    const id = await storage.insert({ title: 'doc' });
+    await storage.push(id, 'items', [{ kind: 'note' }, 'plain']);
+    const [first, second] = await storage.elements(id, 'items');
+    assert.strictEqual(await storage.elementAt(id, 'items', 1), second);
+    assert.strictEqual(await storage.elementAt(id, 'items', 2), null);
+    await storage.push(id, `items/${first}/body`, 'hello');
+    await storage.inc(id, `items/${first}/hits`, 2);
+    await storage.update(id, { [`items/${second}/body`]: 'x' });
+    assert.deepStrictEqual(await storage.get(id), {
+      title: 'doc',
+      items: [{ kind: 'note', body: 'hello', hits: 2 }, { body: 'x' }],
+    });
+    assert.deepStrictEqual(storage.getCachedData(id).items, [{ kind: 'note' }, 'plain'], 'raw: the list as it is');
+    const record = await storage.record(id);
+    assert.deepStrictEqual(record.items[0].body, 'hello');
+    assert.strictEqual(await record.elementAt('items', 0), first);
+    // A path under an element that is not there is refused before the stamp.
+    await assert.rejects(() => storage.update(id, { 'items/9:9:Z/body': 'nope' }), {
+      code: 'NOT_FOUND',
+      id,
+      field: 'items',
+      elem: '9:9:Z',
+    });
+    // A diff names the children as fields; a compaction keeps the reachable ones.
+    const v1 = await storage.tag('v1');
+    await storage.update(id, { [`items/${second}/body`]: 'y' });
+    assert.deepStrictEqual(await storage.diff(id, { tag: 'v1' }), [
+      { action: 'put', field: `items/${second}/body`, value: 'y' },
+    ]);
+    await storage.restore(id, v1.eventId);
+    assert.strictEqual((await storage.get(id)).items[1].body, 'x');
+    // The text inside the first element is a text: edited by position, not by a put.
+    await assert.rejects(() => storage.update(id, { [`items/${first}/body`]: 'bye' }), {
+      code: 'FIELD_KIND',
+      kind: 'text',
+    });
+    // The second element removed: its field is unreachable — not read, dropped by compact.
+    await storage.splice(id, 'items', 1, 1);
+    assert.deepStrictEqual((await storage.get(id)).items, [{ kind: 'note', body: 'hello', hits: 2 }]);
+    assert.ok(Object.hasOwn(storage.getCachedData(id), `items/${second}/body`), 'kept in the record until a rewrite');
+    await storage.compact(id);
+    assert.strictEqual(
+      Object.hasOwn(storage.getCachedData(id), `items/${second}/body`),
+      false,
+      'gone with the rewrite',
+    );
+    assert.deepStrictEqual((await storage.get(id)).items, [{ kind: 'note', body: 'hello', hits: 2 }]);
+    // The rewrite named the elements anew; the children followed them.
+    const [renamed] = await storage.elements(id, 'items');
+    assert.notStrictEqual(renamed, first);
+    assert.deepStrictEqual(Object.keys(storage.getCachedData(id)).sort(), [
+      'items',
+      `items/${renamed}/body`,
+      `items/${renamed}/hits`,
+      'title',
+    ]);
+    // Under a text nothing hangs.
+    await assert.rejects(() => storage.update(id, { [`items/${renamed}/body/1:0:A/x`]: 1 }), {
+      code: 'FIELD_KIND',
+      kind: 'text',
+    });
+  });
+
+  await t.test('a tree node carries data, read as its data', async (t2) => {
+    const { storage } = await openTemp(t2);
+    const id = await storage.insert({});
+    await storage.treeMove(id, 'outline', 'r');
+    await storage.treeMove(id, 'outline', 'a', 'r');
+    await storage.update(id, { 'outline/a/title': 'Intro', 'outline/r/title': 'Root' });
+    await storage.add(id, 'outline/a/tags', ['x']);
+    assert.deepStrictEqual((await storage.get(id)).outline, [
+      {
+        id: 'r',
+        children: [{ id: 'a', children: [], data: { title: 'Intro', tags: ['x'] } }],
+        data: { title: 'Root' },
+      },
+    ]);
+    await assert.rejects(() => storage.update(id, { 'outline/zz/title': 'nope' }), {
+      code: 'NOT_FOUND',
+      field: 'outline',
+      elem: 'zz',
+    });
+    await storage.treeRemove(id, 'outline', 'a');
+    assert.deepStrictEqual((await storage.get(id)).outline, [{ id: 'r', children: [], data: { title: 'Root' } }]);
+    // A query reaches the strings of a list's elements for $text — through the composed view.
+  });
+});

@@ -59,13 +59,14 @@ const keyOf = (value) => JSON.stringify(canonical(value));
 // record reads (the lens applied). Nothing else is a word.
 const textOf = (data, fields) => {
   const parts = [];
-  for (let i = 0; i < fields.length; i++) {
-    const value = valueOf(data, fields[i]);
+  // The strings of a value: itself, its array elements, and — four levels
+  // down, for a list's elements that carry fields — the strings of its objects.
+  const collect = (value, depth) => {
     if (typeof value === 'string') parts.push(value);
-    else if (Array.isArray(value)) {
-      for (let j = 0; j < value.length; j++) if (typeof value[j] === 'string') parts.push(value[j]);
-    }
-  }
+    else if (depth > 0 && Array.isArray(value)) for (let j = 0; j < value.length; j++) collect(value[j], depth - 1);
+    else if (depth > 0 && isObject(value)) for (const key of Object.keys(value)) collect(value[key], depth - 1);
+  };
+  for (let i = 0; i < fields.length; i++) collect(valueOf(data, fields[i]), 4);
   return parts.join(' ');
 };
 

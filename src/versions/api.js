@@ -186,7 +186,10 @@ const diff = async (core, id, from, to) => {
   const live = async (entry) => {
     if (entry === null || !isAlive(entry)) return [null, {}];
     const kinds = kindsOf(entry, core.plugins);
-    return [decompose(await core.view(id, entry), Object.keys(kinds)), kinds];
+    const flat = decompose(await core.view(id, entry), entry, core.plugins);
+    // A field not in the reading — under a member that is not shown — is no field of it.
+    for (const field of Object.keys(kinds)) if (!Object.hasOwn(flat, field)) delete kinds[field];
+    return [flat, kinds];
   };
   const [[before, beforeKinds], [after, afterKinds]] = await Promise.all([live(was), live(now)]);
   const purged = now?.meta.purged != null;

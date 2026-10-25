@@ -31,7 +31,7 @@ const { DISABLED, isWriter, traced, now } = require('./telemetry.js');
 const { GLOBAL_SCOPE } = require('./scope.js');
 const { normalizeStorageOptions } = require('./options.js');
 const { isPlainObject, isRecordId, invalidId, isStreamName, isKeyId, VALIDATED } = require('./shape.js');
-const { compose } = require('./compose.js');
+const { compose, composeData } = require('./compose.js');
 const { COMMIT, REFRESH, SOURCE, PLUGINS, CURSOR } = require('./symbols.js');
 const { missing } = require('./plugin.js');
 const { SyncomError, typed } = require('./errors.js');
@@ -582,7 +582,7 @@ class Storage extends Emitter {
   async #view(id, entry) {
     // The paths composed into nested objects, once per cached entry (the
     // data itself when it holds none); the lens over that.
-    const composed = (entry.composed ??= compose(entry.data));
+    const composed = (entry.composed ??= compose(entry, this.#plugins));
     if (this.#lens === null || (entry.meta.v ?? 1) >= this.#version) return composed;
     return (entry.view ??= await this.#lens(id, composed, entry.meta.v ?? 1));
   }
@@ -1090,7 +1090,7 @@ class Storage extends Emitter {
   }
 
   #scope(id, data) {
-    const scope = this.#scopeOf(id, compose(data));
+    const scope = this.#scopeOf(id, composeData(data));
     if (typeof scope !== 'string' || scope.length === 0 || scope === GLOBAL_SCOPE) return GLOBAL_SCOPE;
     if (!isStreamName(scope)) {
       throw new TypeError(`sync.scope(${id}) returned ${JSON.stringify(scope)}: a scope is a short name without '@'`);
@@ -1442,6 +1442,14 @@ class Storage extends Emitter {
 
   async cursor(id, key, index, options) {
     return this.#api('cursor')(this.#core, id, key, index, options);
+  }
+
+  async elementAt(id, key, index) {
+    return this.#api('elementAt')(this.#core, id, key, index);
+  }
+
+  async elements(id, key) {
+    return this.#api('elements')(this.#core, id, key);
   }
 
   async index(id, key, cursor) {

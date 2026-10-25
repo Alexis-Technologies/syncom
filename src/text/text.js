@@ -87,6 +87,35 @@ const apply = (entry, field, held, op, stamp, limits) => {
 };
 
 const render = (entry, field) => S.render(S.indexOf(entry, field));
+
+// A list's elements may hold fields of their own — `items/<element>/body` —
+// composed over the element's value for a reader (src/compose.js); a text's
+// characters may not. `members` are the element names in order, `holds`
+// whether one shows, `pick` the composed element the name reads as, `nest`
+// the list read with each element's children laid over its value (a plain
+// object spread, anything else giving way).
+const NESTS = Object.freeze({ list: true, text: false });
+const members = (entry, field) => {
+  const block = blockOf(entry, field);
+  return block === undefined || block.k !== 'l' ? [] : S.elems(S.indexOf(entry, field));
+};
+const holds = (entry, field, member) => {
+  const block = blockOf(entry, field);
+  return block !== undefined && block.k === 'l' && S.hasElem(S.indexOf(entry, field), member);
+};
+const pick = (entry, field, rendered, member) => {
+  const index = members(entry, field).indexOf(member);
+  return index === -1 || !Array.isArray(rendered) ? undefined : rendered[index];
+};
+const isPlain = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
+const nest = (entry, field, rendered, childrenOf) => {
+  const keys = members(entry, field);
+  return rendered.map((value, i) => {
+    const children = childrenOf(keys[i]);
+    if (children === undefined) return value;
+    return isPlain(value) ? { ...value, ...children } : { ...children };
+  });
+};
 const prune = (block, base) => S.prune(block, base);
 const join = (a, b) => S.join(a, b);
 
@@ -431,6 +460,24 @@ const cursor = async (core, id, key, index, { side = 'before' } = {}) => {
   return S.cursorAt(idx, index, side);
 };
 
+/**
+ * The name of the element at `index` of list field `key` — what a path
+ * under it is spelled with (`items/<name>/body`); a list element keeps its
+ * name across moves. `null` out of range or when the field is not a list.
+ */
+const elementName = async (core, id, key, index) => {
+  if (!Number.isInteger(index) || index < 0) throw new TypeError('elementAt() takes a non-negative integer index');
+  const field = await held(core, 'elementAt', id, key);
+  if (field === null || field.seq.k !== 'l') return null;
+  return S.elemAt(S.indexOf(field.entry, key), index);
+};
+
+/** The names of the elements of list field `key`, in order; `[]` when the field is not a list. */
+const elements = async (core, id, key) => {
+  const field = await held(core, 'elements', id, key);
+  return field === null || field.seq.k !== 'l' ? [] : [...S.elems(S.indexOf(field.entry, key))];
+};
+
 /** Where `cursor` is now in list or text field `key`; `null` once its place is gone (a reset, a field no longer a sequence). */
 const index = async (core, id, key, cursor) => {
   if (typeof cursor !== 'string' || !S.isAnchor(cursor)) throw new TypeError('index() takes a cursor');
@@ -486,7 +533,26 @@ const text = Object.freeze({
   realize,
   migrate,
   compact,
-  methods: Object.freeze({ splice, push, updateText, mark, unmark, unmarkById, spans, cursor, index, setAt, move }),
+  nests: NESTS,
+  members,
+  holds,
+  pick,
+  nest,
+  methods: Object.freeze({
+    splice,
+    push,
+    updateText,
+    mark,
+    unmark,
+    unmarkById,
+    spans,
+    cursor,
+    index,
+    setAt,
+    move,
+    elementAt: elementName,
+    elements,
+  }),
 });
 
 module.exports = { text };

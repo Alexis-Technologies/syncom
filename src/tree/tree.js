@@ -42,6 +42,43 @@ const apply = (entry, field, held, op, stamp) => {
 };
 
 const render = (entry, field, block) => T.renderTree(block);
+
+// A node may hold fields of its own — `outline/<node>/title` — read as the
+// node's `data` (src/compose.js); `members` are the nodes the tree shows,
+// `holds` whether one is there, `pick` a node's composed data, `nest` the
+// tree read with `data` on every node that has some.
+const NESTS = Object.freeze({ tree: true });
+const visitNodes = (nodes, visit) => {
+  const stack = [...nodes];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    visit(node);
+    for (const child of node.children) stack.push(child);
+  }
+};
+const members = (entry, field) => {
+  const out = [];
+  const block = own(entry.meta.blocks, field);
+  if (block !== undefined) visitNodes(T.renderTree(block), (node) => out.push(node.id));
+  return out;
+};
+const holds = (entry, field, member) => members(entry, field).includes(member);
+const pick = (entry, field, rendered, member) => {
+  let found;
+  visitNodes(rendered, (node) => {
+    if (node.id === member) found = node.data;
+  });
+  return found;
+};
+const nest = (entry, field, rendered, childrenOf) => {
+  const copy = (node) => {
+    const out = { id: node.id, children: node.children.map(copy) };
+    const data = childrenOf(node.id);
+    if (data !== undefined) out.data = data;
+    return out;
+  };
+  return rendered.map(copy);
+};
 const prune = (block, base) => T.pruneTree(block, base);
 const join = (a, b) => T.joinTrees(a, b);
 
@@ -233,6 +270,11 @@ const tree = Object.freeze({
   realize,
   migrate,
   compact,
+  nests: NESTS,
+  members,
+  holds,
+  pick,
+  nest,
   methods: Object.freeze({ treeMove, treeRemove }),
 });
 

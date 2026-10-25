@@ -1396,3 +1396,47 @@ test('ops: a field may be a path; a prefix holds what hangs under it', async (t)
     assert.strictEqual(normalized.clock['bad//path'], undefined);
   });
 });
+
+test('ops: a list’s elements and a tree’s nodes carry fields of their own', async (t) => {
+  const { applyOp, mergeEntry } = require('../src/all/all.js');
+  const S = require('../src/text/sequence.js');
+  const at = (ts, origin, type, extra) => ({ origin, seq: ts, ts, type, id: 'r', ...extra });
+  const orders = (ops) => {
+    const forward = ops.reduce((entry, op) => applyOp(entry, op).entry, null);
+    const backward = [...ops].reverse().reduce((entry, op) => applyOp(entry, op).entry, null);
+    assert.deepStrictEqual(backward.data, forward.data, 'the data agrees whatever the order');
+    assert.deepStrictEqual(backward.meta, forward.meta, 'and so does the meta');
+    return forward;
+  };
+
+  await t.test(
+    'a path under a list element or a tree node lands, under a text it is refused; a child is kept apart',
+    () => {
+      const list = at(1, 'A', 'splice', { key: 'items', value: { at: S.HEAD, content: ['a', { n: 1 }] } });
+      const [first, second] = ['1:0:A', '1:1:A'];
+      const child = at(2, 'B', 'set', { data: { [`items/${first}/body`]: 'hi', [`items/${second}/body`]: 'ho' } });
+      const counter = at(3, 'C', 'inc', { key: `items/${second}/hits`, value: 1 });
+      const entry = orders([list, child, counter]);
+      assert.deepStrictEqual(entry.data, {
+        items: ['a', { n: 1 }],
+        [`items/${first}/body`]: 'hi',
+        [`items/${second}/body`]: 'ho',
+        [`items/${second}/hits`]: 1,
+      });
+      const text = at(1, 'A', 'splice', { key: 'body', value: { at: S.HEAD, content: 'ab' } });
+      const under = applyOp(applyOp(null, text).entry, at(2, 'B', 'set', { data: { 'body/1:0:A/x': 1 } }));
+      assert.deepStrictEqual(under.rejected, [{ field: 'body/1:0:A/x', reason: 'text', prefix: 'body' }]);
+      // A tree node's data, in either order.
+      const move = at(1, 'A', 'tree', { key: 'outline', value: { node: 'n1', parent: null, fi: 'a' } });
+      const data = at(2, 'B', 'set', { data: { 'outline/n1/title': 'Intro' } });
+      const tree = orders([move, data]);
+      assert.strictEqual(tree.data['outline/n1/title'], 'Intro');
+      // A merge of two pictures agrees with the ops.
+      const base = applyOp(null, list).entry;
+      const left = applyOp(base, child).entry;
+      const right = applyOp(base, counter).entry;
+      assert.deepStrictEqual(mergeEntry(left, right).data, entry.data);
+      assert.deepStrictEqual(mergeEntry(right, left).meta, mergeEntry(left, right).meta);
+    },
+  );
+});

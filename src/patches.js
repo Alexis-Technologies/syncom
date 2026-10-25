@@ -11,6 +11,7 @@
 const { commit, rehearse } = require('./commit.js');
 const { isAlive, kindsOf } = require('./ops.js');
 const { decompose } = require('./compose.js');
+const { ancestorsOf, under } = require('./paths.js');
 const { diffViews, realize } = require('./patch.js');
 const { traced } = require('./telemetry.js');
 const { asJson, isRecordId, invalidId } = require('./shape.js');
@@ -35,40 +36,41 @@ const reading = async (core, id, entry) => {
  * to how many ops it took; a patch of the wrong shape is a TypeError and
  * nothing is written.
  */
+// A batch of realized ops run inside the mutation queue: every op resolved
+// and applied over a scratch record first — an index out of range, a kind
+// clash, a cycle, a type change — so nothing is appended unless all of them
+// can be: a restore lands whole or not at all. The ops land in log order
+// after the turn; the batch is done when the last has — and what landed
+// before a refusal has landed when the call rejects. A hook or a validator
+// that throws on a later op still leaves the earlier ones committed.
+const runOps = async (core, id, ops, { actor, source }) => {
+  await rehearse(core, id, ops);
+  let count = 0;
+  const landings = [];
+  try {
+    for (const [type, payload] of ops) {
+      const { op, done } = await commit(core, type, id, payload, { actor, source });
+      if (op === null) continue;
+      count++;
+      landings.push(done);
+      if (type === 'purge') {
+        await done;
+        await core.scrub(id);
+      }
+    }
+  } finally {
+    await Promise.allSettled(landings);
+  }
+  await Promise.all(landings);
+  if (ops.some(([type]) => type === 'delete' || type === 'purge')) core.forget(id);
+  return count;
+};
+
 const applyPatches = async (core, id, patches, { actor, source = null } = {}) => {
   if (!isRecordId(id)) throw invalidId(id);
   if (!Array.isArray(patches)) throw new TypeError('applyPatches() takes an array of patches');
   const ops = patches.map((patch) => realize(patch, core.plugins));
-  const apply = async () => {
-    // Every op resolved and applied over a scratch record first — an index
-    // out of range, a kind clash, a cycle, a type change — so nothing is
-    // appended unless all of them can be: a restore lands whole or not at
-    // all. A hook or a validator that throws on a later op still leaves
-    // the earlier ones committed (see applyPatches in the reference).
-    await rehearse(core, id, ops);
-    let count = 0;
-    // The ops land in log order after the turn; the batch is done when the
-    // last has — and what landed before a refusal has landed when the call
-    // rejects.
-    const landings = [];
-    try {
-      for (const [type, payload] of ops) {
-        const { op, done } = await commit(core, type, id, payload, { actor, source });
-        if (op === null) continue;
-        count++;
-        landings.push(done);
-        if (type === 'purge') {
-          await done;
-          await core.scrub(id);
-        }
-      }
-    } finally {
-      await Promise.allSettled(landings);
-    }
-    await Promise.all(landings);
-    if (ops.some(([type]) => type === 'delete' || type === 'purge')) core.forget(id);
-    return count;
-  };
+  const apply = () => runOps(core, id, ops, { actor, source });
   const { otel } = core;
   if (!otel.enabled) return core.run(apply);
   const attributes = { 'syncom.ops.count': ops.length };
@@ -97,16 +99,77 @@ const compact = async (core, id, { actor, source = null } = {}) => {
   const entry = await core.entries.load(id);
   if (entry?.encrypted) throw sealed(id);
   if (entry === null || !isAlive(entry)) return 0;
-  const kinds = kindsOf(entry, core.plugins);
-  // The reading in the op model's terms: flat, every path a field.
-  const view = decompose(await core.view(id, entry), Object.keys(kinds));
-  const patches = diffViews(null, {}, view, kinds, { plugins: core.plugins });
+  const { plugins } = core;
+  const kinds = kindsOf(entry, plugins);
+  // The reading in the op model's terms: flat, every path a field; a field
+  // under a member that is not shown is unreachable and goes with the rewrite.
+  const view = decompose(await core.view(id, entry), entry, plugins);
+  for (const field of Object.keys(kinds)) if (!Object.hasOwn(view, field)) delete kinds[field];
+  const patches = diffViews(null, {}, view, kinds, { plugins });
   // What a plugin lays after the field is made again (a text's marks).
   for (const field of Object.keys(kinds)) {
-    const mod = core.plugins.byName[kinds[field]];
+    const mod = plugins.byName[kinds[field]];
     if (mod !== undefined) patches.push(...mod.compact(entry, field, kinds[field]));
   }
-  return applyPatches(core, id, patches, { actor, source });
+  // A list made again names its elements anew, so what hangs under them is
+  // written once the new names are known: the patches go in rounds, by the
+  // members their field passes through, each round renaming the next.
+  const nests = (field) => {
+    const kind = kinds[field];
+    return kind !== undefined && plugins.byName[kind]?.nests?.[kind] === true;
+  };
+  const depthOf = (field) => {
+    if (field === undefined) return 0;
+    let depth = 0;
+    let member = false;
+    for (const prefix of ancestorsOf(field)) {
+      if (member) member = false;
+      else if (nests(prefix)) {
+        member = true;
+        depth++;
+      }
+    }
+    return depth;
+  };
+  const rounds = [];
+  for (const patch of patches) (rounds[depthOf(patch.field)] ??= []).push(patch);
+  const options = { actor, source };
+  return core.run(async () => {
+    const renames = [];
+    const rename = (field) => {
+      for (const [from, to] of renames) {
+        if (field === from) return to;
+        if (under(field, from)) return `${to}${field.slice(from.length)}`;
+      }
+      return field;
+    };
+    let count = 0;
+    for (const round of rounds) {
+      if (round === undefined || round.length === 0) continue;
+      const renamed = round.map((patch) =>
+        patch.field === undefined ? patch : { ...patch, field: rename(patch.field) },
+      );
+      count += await runOps(
+        core,
+        id,
+        renamed.map((patch) => realize(patch, plugins)),
+        options,
+      );
+      // The lists this round made again: their elements' new names, by position.
+      const now = await core.current(id);
+      for (const patch of round) {
+        if (patch.field === undefined || !nests(patch.field)) continue;
+        const mod = plugins.byName[kinds[patch.field]];
+        const at = rename(patch.field);
+        const was = mod.members(entry, patch.field);
+        const is = mod.members(now, at);
+        for (let i = 0; i < was.length && i < is.length; i++) {
+          if (was[i] !== is[i]) renames.unshift([`${at}/${was[i]}`, `${at}/${is[i]}`]);
+        }
+      }
+    }
+    return count;
+  });
 };
 
 module.exports = { sealed, reading, applyPatches, compact };

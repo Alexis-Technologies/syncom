@@ -129,7 +129,9 @@ The rules, the same on every node whatever the order the writes arrive in:
 
 The ops, the log, a `snapshot()` and `getCachedData()` keep the paths
 apart; `get()`, a `Record`, a query (`'profile.city'` as a dotted path), a
-hook's `current` and a validator see them composed. A `Record`'s properties
+hook's `current` and a validator see them composed. A list's element and a
+tree's node can carry fields too — `items/<name>/body`, `outline/<node>/title`
+— see [Children of elements and nodes](./lists#children-of-elements-and-nodes). A `Record`'s properties
 are the composed top-level fields: `record.profile = { … }` writes the
 object whole. A migration (`migrate()`) writes the registers as they read,
 composed.

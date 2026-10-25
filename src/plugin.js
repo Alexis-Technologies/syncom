@@ -74,6 +74,8 @@ const HOME = Object.freeze({
   cursor: 'text',
   index: 'text',
   setAt: 'text',
+  elementAt: 'text',
+  elements: 'text',
   treeMove: 'tree',
   treeRemove: 'tree',
   select: 'query',

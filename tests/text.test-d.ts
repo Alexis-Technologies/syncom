@@ -7,5 +7,7 @@ expectType<Plugin<TextMethods>>(text);
 const storage = await open({ plugins: [text] });
 expectType<Promise<void>>(storage.splice('id', 'body', 0, 0, 'hi'));
 expectType<Promise<TextSpan[] | null>>(storage.spans('id', 'body'));
+expectType<Promise<string | null>>(storage.elementAt('id', 'items', 0));
+expectType<Promise<string[]>>(storage.elements('id', 'items'));
 expectType<Promise<string>>(storage.insert({}));
 expectAssignable<SequenceBlock>({ k: 'l', ts: 0, runs: {} });

@@ -191,6 +191,16 @@ class Record extends Emitter {
   }
 
   /** A cursor into a list or text field; the storage-level `cursor` with this record's id. */
+  /** The name of a list element; the storage-level `elementAt` with this record's id. */
+  async elementAt(key, index) {
+    return this.#storage.elementAt(this.#id, key, index);
+  }
+
+  /** The names of a list's elements; the storage-level `elements` with this record's id. */
+  async elements(key) {
+    return this.#storage.elements(this.#id, key);
+  }
+
   async cursor(key, index, options = {}) {
     return this.#storage.cursor(this.#id, key, index, options);
   }
