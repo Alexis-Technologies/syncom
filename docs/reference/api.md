@@ -69,7 +69,7 @@ naming the subpath; `@alexify/syncom/all` has both.
 | `history(id, { limit = 50, before }?)` | `Promise<{ versions, complete, exact }>` | The record's past, newest first: `{ eventId, seq, ts, origin, actor, type, fields, data, scrubbed? }` per op this node applied, `data` the record after it through the lens and `afterRead` — run for the versions handed out alone; `limit` a positive integer or `Infinity`; `before` (an event id of this log — `HISTORY_GONE` `epoch` for another incarnation's) pages back to the versions older than it; `complete` when the page reaches the first op the node applied and nothing was dropped, `exact` when the versions are what the node held; rejects with `ENCRYPTED` for an encrypted record |
 | `has(id)` | `Promise<boolean>` | `false` for a tombstone |
 | `list()` | `Promise<string[]>` | Every live id, sorted — from the catalog, no I/O |
-| `check(entity, data)` | `Promise<unknown>` | Runs the entity's validator as a write would and returns its value; rejects with `ValidationError`; writes nothing |
+| `check(entity, data)` | `Promise<unknown>` | Runs the entity's validator as a write would and returns its value; rejects with `ValidationError`; writes nothing. The `schema` plugin's: `PLUGIN_MISSING` without it, as is `migrate()` |
 | `migrate({ entities, batch = 100, actor }?)` | `Promise<{ migrated, counters, sets, lists, texts, trees }>` | Rewrites records of an older schema version through the lens — a `write` of the view, then the counters and the sets added back, a list or a text as one run, a tree as one move per node (an empty one is dropped); idempotent; `actor` rides on the ops it writes; a `TypeError` without `open({ schema })` (see [Reading across versions](../guide/storage#reading-across-versions)) |
 | `set(id, data, options?)` | `Promise<void>` | Replaces the record (a `write` op); keeps `$type` — data naming another is a `TypeError` with `code: 'TYPE_IMMUTABLE'`; rejects with `FIELD_KIND` for a field held by another kind than a register. Every writer rejects an invalid id with `TypeError` `code: 'INVALID_ID'` |
 | `update(id, delta, { actor }?)` | `Promise<void>` | Sets the listed fields (a `set` op); rejects with `NOT_FOUND` when absent, `FIELD_KIND` on a counter, set, list, text or tree field |
@@ -512,6 +512,23 @@ RSA-OAEP (SHA-256) — identical on both platforms. `loadKeys` reads
 (`private.pem` owner-only where the backend has permissions) when neither
 exists, and rejecting with `code: 'KEYS_INCOMPLETE'` when only one does.
 
+## Schema (subpath)
+
+```js
+const { schema, ValidationError } = require('@alexify/syncom/schema');
+```
+
+`schema` is the plugin: `open({ plugins: [schema], schema, validator })` reads
+the entity definitions once — the validators adapted (Standard Schema, a
+function, what `validator.compile` gives), the id fields, the indexes and
+search fields, the migrations and the lens — and the core applies them:
+collections on the storage, validation on the write path, the catalog's
+indexes, `schemaInfo` for hello, `migrate()` and `check()` (see
+[Schema and validation](../guide/schema)). Without the plugin `open({ schema })`
+and `open({ validator })` are `PLUGIN_MISSING`, as are `migrate()` and
+`check()`, and records are untyped — `$type` a field like any other.
+`ValidationError` is the root's, re-exported.
+
 ## Backends
 
 A backend — an **fsi** — is five functions over "a directory and a file name":
@@ -562,10 +579,12 @@ host that lacks one of its own (`KINDS_MISMATCH`).
 
 A plugin that is not a kind sets the core up before the log opens — the
 identity (`signing`), the sealing of records (`encryption`), the chain
-(`chain`) — or once it is open (the manager of `sync`), and what the options
-ask for and no plugin provides is refused at `open()` the same way: `sync.signatures: 'require'` without `signing`,
+(`chain`), the definitions of `schema` — or once it is open (the manager of
+`sync`), and what the options ask for and no plugin provides is refused at
+`open()` the same way: `sync.signatures: 'require'` without `signing`,
 `chain: true` without `chain`, `encrypted: true` without `encryption` (and a
-per-call `{ encrypted: true }` at the call). Without them the node id is what
+per-call `{ encrypted: true }` at the call), `schema` or `validator` without
+`schema`. Without them the node id is what
 `getId` mints, ops go unsigned and unchecked, no block is written,
 `validate()` is `NO_CHAIN` and `storage.sync` is `PLUGIN_MISSING`.
 `storage.plugins` lists them all.
@@ -573,13 +592,14 @@ per-call `{ encrypted: true }` at the call). Without them the node id is what
 ## All (subpath)
 
 ```js
-const { open, Storage, applyOp, mergeEntry, text, tree, signing, chain, encryption, sync, PLUGINS } = require('@alexify/syncom/all');
+const { open, Storage, applyOp, mergeEntry, text, tree, signing, chain, encryption, sync, schema, PLUGINS } = require('@alexify/syncom/all');
 ```
 
 Everything the root and the `/signing`, `/chain`, `/encryption`, `/memory`,
-`/layered` and `/sync` subpaths export, plus `open()`/`Storage` with every
-shipped plugin registered ahead of the caller's (`text`, `tree`, `signing`,
-`chain`, `encryption`, `sync`; a plugin given twice is given once), `applyOp`/`mergeEntry` folding under the same
+`/layered`, `/sync` and `/schema` subpaths export, plus `open()`/`Storage`
+with every shipped plugin registered ahead of the caller's (`text`, `tree`,
+`signing`, `chain`, `encryption`, `sync`, `schema`; a plugin given twice is
+given once), `applyOp`/`mergeEntry` folding under the same
 registry, the plugins themselves and `PLUGINS`, the list. The API of the
 package before it was taken apart into blocks: what the tests and the
 examples open.

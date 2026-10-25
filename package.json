@@ -93,6 +93,10 @@
       "types": "./src/sync/sync.d.ts",
       "default": "./src/sync/sync.js"
     },
+    "./schema": {
+      "types": "./src/schema/schema.d.ts",
+      "default": "./src/schema/schema.js"
+    },
     "./package.json": "./package.json"
   },
   "directories": {

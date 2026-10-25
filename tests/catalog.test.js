@@ -7,7 +7,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { Catalog, valueOf } = require('../src/catalog.js');
 const { memory } = require('../src/memory/memory.js');
-const { normalizeSchema } = require('../src/schema.js');
+const { normalizeSchema } = require('../src/schema/define.js');
 
 const entitiesOf = (schema) => normalizeSchema(schema).entities;
 const catalogOf = (schema, fsi = memory()) => new Catalog({ fsi, path: 'store', entities: entitiesOf(schema) });

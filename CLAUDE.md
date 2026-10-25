@@ -67,7 +67,6 @@ src/patch.js              patches — the one vocabulary of diff()/applyPatches(
 src/undo.js               UndoManager — steps of inverse patches from `commit` events, refuse-to-overwrite, pins the log; the core does not use it
 src/outbound.js           outbound(log, { exclude, vector, scopes, own }) — the ops a receiver lacks, the first retained seq per own stream; a push and a merge both pick with it
 src/branch.js             branch/merge/branchInfo/drop — a fork opened through parent.constructor, merged as ops through applyRemote
-src/errors.js             SyncomError (an operational failure, with a code) and typed() — no requires
 src/symbols.js            COMMIT / REFRESH / SOURCE — the module-private seams between Storage and what it hands out — no requires
 src/options.js            normalizeStorageOptions — open()'s plain options checked and defaulted (lock, cache, chain, skew…)
 src/protocol.js           PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf — what both halves of the sync protocol agree on — no requires
@@ -85,7 +84,12 @@ src/record.js             Reference, Record, Collection — what the application
 src/commit.js             the one local write path: prepare → validate → persist → announce (`storage[COMMIT]`)
 src/apply.js              a peer's batch: admit → apply one by one → persist → announce (`storage.applyRemote`)
 src/bootstrap.js          snapshot pages out, merge pages in, adoptVector — the bootstrap write path
-src/schema.js             entity definitions, the injected validator (Standard Schema / ajv / compile), ValidationError
+src/schema/schema.js      @alexify/syncom/schema — the schema plugin: setup(ctx) hands the core the definitions and the lens (`schema` hook)
+src/schema/define.js      entity definitions, the injected validator (Standard Schema / ajv / compile) — normalizeSchema; requires errors.js only
+src/schema/lens.js        createLens — how an older record reads under this version (migrations, then the validator)
+src/entity.js             project / unproject / foldSet — the record as its validator sees it, the validated value as the op carries it;
+                          the core's, shared by commit.js and the lens; requires shape.js only
+src/errors.js             SyncomError, ValidationError, typed() — no requires
 src/ops.js                the record-level model: applyOp / mergeEntry / isAlive, packOps
 src/vector.js             clocks, version vectors, event ids
 src/log.js                OpLog — the persisted operation log over fsi
@@ -591,7 +595,9 @@ docs/                     VitePress site
   module-level `require('./fsi.js')` is only the default. A new `fsi.` call
   on the module object is a bug — it bypasses the adapter the caller gave.
 - **Validation is after `applyOp`, before `#log.append`.** An entity's
-  validator (`src/schema.js`, no requires — it ships to the browser) sees
+  validator (adapted in `src/schema/define.js`, the schema plugin's; the core
+  only applies what the plugin's `schema` hook handed it, through
+  `src/entity.js`) sees
   the record as the op leaves it, under `idField` and without `$type`, and
   for a local `write`/`set` what it returns is folded back INTO the op
   (defaults, aliases, stripped keys), so peers receive the validated record;
@@ -682,7 +688,7 @@ are the two pages that describe the protocol — keep them in step with
 `src/sync/manager.js` and `src/sync/hosting.js`, `docs/guide/hooks.md` with the hook and
 event surface of `src/commit.js`, `src/apply.js`, `src/bootstrap.js`,
 `src/storage.js` and `src/sync/manager.js`, `docs/guide/schema.md` with
-`src/schema.js` (metaschema is the first-class example there; zod/ajv/JSON
+`src/schema/` (metaschema is the first-class example there; zod/ajv/JSON
 Schema are the alternatives), `docs/guide/query.md` with `src/query.js` and
 `src/catalog.js`, `docs/guide/backends.md` with `src/backend.js`, `src/lock.js`
 and the two `fsi` halves. The browser-only WebRTC recipes in

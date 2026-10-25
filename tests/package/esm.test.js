@@ -28,6 +28,7 @@ const ENTRIES = [
   'src/memory/memory.js',
   'src/layered/layered.js',
   'src/sync/sync.js',
+  'src/schema/schema.js',
 ];
 
 for (const entry of ENTRIES) {

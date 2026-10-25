@@ -6,7 +6,10 @@ different versions of it keep working together. syncom validates through a
 contract, not a library: anything that implements
 [Standard Schema](https://standardschema.dev) (`~standard`), any compiled
 validator function, or any object a `validator` you inject can compile.
-Nothing is installed alongside it.
+Nothing is installed alongside it. The schema is the `schema` plugin —
+`@alexify/syncom/schema`, registered by `@alexify/syncom/all`; the core alone
+refuses `open({ schema })` and `open({ validator })` with `PLUGIN_MISSING`,
+and its records are untyped. The examples on this page open the core with it.
 
 ## A metaschema model
 
@@ -19,6 +22,7 @@ snapshot for versioning.
 
 ```js
 const { open } = require('@alexify/syncom');
+const { schema } = require('@alexify/syncom/schema');
 const { Model } = require('@alexify/metaschema');
 
 const model = new Model(
@@ -40,6 +44,7 @@ const model = new Model(
 );
 
 const storage = await open({
+  plugins: [schema],
   path: 'data',
   schema: {
     version: 2,

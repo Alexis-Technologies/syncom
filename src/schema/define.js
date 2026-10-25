@@ -1,8 +1,9 @@
 'use strict';
 
-// Entity definitions and the injected validator. No requires beyond ./ops.js
-// and ./errors.js: this file ships to the browser, and scripts/size.js fails
-// on any import that is not a relative file.
+// Entity definitions and the injected validator — what the schema plugin
+// (./schema.js) reads `open({ schema, validator })` into, once, at open. No
+// requires beyond the core's errors: this file ships to the browser, and
+// scripts/size.js fails on any import that is not a relative file.
 //
 // `open({ schema: { entities } })` names the collections. Each entity may
 // carry a `schema` — any Standard Schema (`~standard`: metaschema, zod,
@@ -13,8 +14,7 @@
 // everything a validator returns or throws is normalized here, once, so the
 // write path sees `async (record) => validated` and nothing else.
 
-const { deepEqual } = require('./shape.js');
-const { SyncomError } = require('./errors.js');
+const { ValidationError } = require('../errors.js');
 
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -24,24 +24,6 @@ const LENS = ['migrations', 'validate', 'both'];
 const ENTITY_KEYS = ['schema', 'idField', 'validate', 'index', 'unique', 'fields', 'search'];
 
 const fail = (entity, text) => new TypeError(`open({ schema }): entity ${entity}: ${text}`);
-
-const describe = (entity, issues) => {
-  const subject = entity === null ? 'Record' : entity;
-  const [first] = issues;
-  if (!first) return `${subject} failed validation`;
-  const where = first.path.length > 0 ? ` at ${first.path.join('.')}` : '';
-  const more = issues.length > 1 ? ` (+${issues.length - 1} more)` : '';
-  return `${subject} failed validation${where}: ${first.message}${more}`;
-};
-
-// What a write rejects with when the record would not pass its entity's
-// validator: `entity` names it, `issues` are `{ path, message, code? }`.
-class ValidationError extends SyncomError {
-  constructor(entity, issues) {
-    super('VALIDATION_FAILED', describe(entity, issues), { entity, issues });
-    this.name = 'ValidationError';
-  }
-}
 
 // One issue as syncom keeps it, from either shape it meets: a Standard
 // Schema issue (`path` of keys or `{ key }` segments) or an ajv error
@@ -335,100 +317,10 @@ const normalizeSchema = (schema, { validator } = {}) => {
   return { version, entities, snapshot: schema.snapshot, migrations, ahead, lens };
 };
 
-// ---------------------------------------------------------------------------
-// The lens: how a record written under an older version reads under this
-// one. Step 1, the migrations from the record's version up to this one;
-// step 2, the entity's Standard Schema validator — its aliases and defaults
-// are a rename and a fill for free, and metaschema's own `validate` is the
-// lens of its evolution model. Neither step writes anything: the record
-// stays as it is until `migrate()` rewrites it, and the view is cached on
-// the entry. A validator that refuses the record leaves step 1's result
-// (logged at debug); a migration that returns no object is a TypeError.
-
-const createLens = ({ version, entities, migrations, lens }, logger) => {
-  const chain = lens === 'validate' ? null : migrations;
-  const validates = lens !== 'migrations';
-  return async (id, data, from) => {
-    const type = data.$type;
-    const entity = typeof type === 'string' ? type : null;
-    let out = {};
-    for (const key of Object.keys(data)) if (key !== '$type') out[key] = data[key];
-    if (chain !== null) {
-      for (let to = from + 1; to <= version; to++) {
-        const step = chain.get(to);
-        const migration = step instanceof Map ? (entity === null ? undefined : step.get(entity)) : step;
-        if (!migration) continue;
-        out = await migration.up(out, { entity, id, from: to - 1, to });
-        if (!isObject(out)) throw new TypeError(`open({ schema }): migrations[${to}] must return an object (${id})`);
-      }
-    }
-    const def = entity === null ? undefined : entities.get(entity);
-    if (validates && def?.standard && def.validator) {
-      let output = null;
-      try {
-        output = await def.validator(project(def, id, out));
-      } catch (error) {
-        logger.debug({ event: 'schema.lens.issues', entity, id, issues: error.issues });
-      }
-      if (output !== null) return unproject(def, output, type);
-    }
-    if (type !== undefined) out.$type = type;
-    return out;
-  };
-};
-
-// ---------------------------------------------------------------------------
-// The record as the validator sees it, and the validated value as the op
-// carries it.
-
-// Under its id field, without `$type` — the collection is the engine's, not
-// the schema's. `id` null (check() on a value without one) passes no id.
-const project = (def, id, data) => {
-  const projected = {};
-  if (def.idField !== false && id !== null) projected[def.idField] = id;
-  for (const key of Object.keys(data)) if (key !== '$type') projected[key] = data[key];
-  return projected;
-};
-
-// Back: the id field dropped, `$type` restored — whatever the validator
-// stripped or renamed, a record never loses its collection. Taken as JSON:
-// an op is JSON in the log and on the wire, so a value only JSON can carry
-// (a Date from a decoder) is what the cache, the disk and the peers all see.
-const unproject = (def, output, type) => {
-  if (!isObject(output)) throw fail(def.name, 'the validator must return an object');
-  const plain = {};
-  for (const key of Object.keys(output)) if (key !== '$type' && key !== def.idField) plain[key] = output[key];
-  const data = JSON.parse(JSON.stringify(plain));
-  data.$type = type;
-  return data;
-};
-
-// A `set` carries only the fields it names. Of the validated record keep the
-// keys of the delta (in their validated form) and the keys whose value is
-// not what the record read as before the write (defaults, alias targets, a
-// migration's rename). A delta key the validator dropped drops out of the
-// delta — the op never carries it — and a key the validator left as it was
-// is never touched, so a `set` stays a `set`: promoting it to a whole-record
-// write would reset the record's base and erase concurrent sets and
-// counters from other peers.
-const foldSet = (delta, validated, before) => {
-  const next = {};
-  for (const key of Object.keys(validated)) {
-    if (key === '$type') continue;
-    if (Object.hasOwn(delta, key) || !deepEqual(validated[key], before[key])) next[key] = validated[key];
-  }
-  return next;
-};
-
 module.exports = {
-  ValidationError,
   normalizeSchema,
   normalizeValidator,
-  createLens,
   deriveIdField,
   derivedIndexes,
   toIssues,
-  project,
-  unproject,
-  foldSet,
 };

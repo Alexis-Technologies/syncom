@@ -72,6 +72,14 @@ There is no released version section until then; everything below lands in it.
   updates API a transport of the application's own carries. The options,
   the hooks, the link contract and the apply path stay in the core, which
   is 44 KB.
+- **Schema as a block.** The entity definitions — the validators adapted,
+  the id fields, the indexes, the migrations and the lens — are the `schema`
+  plugin, `@alexify/syncom/schema`, read once at `open()`; the core applies
+  them (collections, validation on the write path, the catalog's indexes,
+  `schemaInfo`, `migrate()`, `check()`) and keeps `ValidationError`. Without
+  the plugin `open({ schema })` and `open({ validator })` are
+  `PLUGIN_MISSING`, as are `migrate()` and `check()`, and records are
+  untyped. The core is 42 KB.
 - **Lists and text.** A field can be a list — an array edited by position —
   or a text — a string typed into: `splice(id, key, index, count, content)`
   and `push(id, key, content)`, on the storage and on a live Record. Two

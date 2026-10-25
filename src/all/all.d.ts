@@ -29,6 +29,7 @@ export * from '../encryption/encryption.js';
 export * from '../memory/memory.js';
 export * from '../layered/layered.js';
 export * from '../sync/sync.js';
+export * from '../schema/schema.js';
 
 /** The storage with every shipped plugin registered: the core's API and the text and tree methods. */
 export interface Storage extends CoreStorage, TextMethods, TreeMethods, SyncApi {}
@@ -54,6 +55,7 @@ export declare function mergeEntry(a: Entry | null, b: Entry | null, limits?: Fo
 export declare const text: Plugin<TextMethods>;
 export declare const tree: Plugin<TreeMethods>;
 export declare const sync: Plugin<SyncApi>;
+export declare const schema: Plugin;
 /** The plugins the package ships, in registration order. */
 export declare const PLUGINS: readonly [
   Plugin<TextMethods>,
@@ -62,4 +64,5 @@ export declare const PLUGINS: readonly [
   Plugin,
   Plugin,
   Plugin<SyncApi>,
+  Plugin,
 ];

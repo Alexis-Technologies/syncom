@@ -31,4 +31,24 @@ class SyncomError extends Error {
 // that called — the one kind of TypeError that carries a code.
 const typed = (code, message) => Object.assign(new TypeError(message), { code });
 
-module.exports = { SyncomError, typed };
+const describe = (entity, issues) => {
+  const subject = entity === null ? 'Record' : entity;
+  const [first] = issues;
+  if (!first) return `${subject} failed validation`;
+  const where = first.path.length > 0 ? ` at ${first.path.join('.')}` : '';
+  const more = issues.length > 1 ? ` (+${issues.length - 1} more)` : '';
+  return `${subject} failed validation${where}: ${first.message}${more}`;
+};
+
+// What a write rejects with when the record would not pass its entity's
+// validator, or holds a unique key another record has: `entity` names the
+// collection, `issues` are `{ path, message, code? }`. Thrown by the write
+// path and by the schema plugin's validator adapters, one class for both.
+class ValidationError extends SyncomError {
+  constructor(entity, issues) {
+    super('VALIDATION_FAILED', describe(entity, issues), { entity, issues });
+    this.name = 'ValidationError';
+  }
+}
+
+module.exports = { SyncomError, ValidationError, typed };

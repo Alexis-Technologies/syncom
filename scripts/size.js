@@ -171,7 +171,8 @@ const ENTRIES = [
     label: 'branch — browser (@alexify/syncom/branch)',
     entry: 'src/branch/branch.js',
     platform: 'browser',
-    budget: 3.5,
+    // 3.6 measured once ValidationError moved into the errors module it shares.
+    budget: 4,
   },
   // Everything in one import: the core with the text and tree plugins
   // registered — what the main entry was before the kinds became plugins.
@@ -226,6 +227,8 @@ const ENTRIES = [
   // telemetry writer they share with the core (17.7 measured; what it adds
   // to the core is the 6.8 KB the main entry came down by).
   { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 18 },
+  // The schema: the definitions read once, the validator adapters, the lens.
+  { label: 'schema — browser (@alexify/syncom/schema)', entry: 'src/schema/schema.js', platform: 'browser', budget: 4 },
 ];
 
 // A browser entry has to be self-contained: no node builtins, and no packages

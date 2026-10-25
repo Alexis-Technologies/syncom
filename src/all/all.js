@@ -19,9 +19,10 @@ const { encryption } = require('../encryption/encryption.js');
 const { memory } = require('../memory/memory.js');
 const { layered } = require('../layered/layered.js');
 const { sync } = require('../sync/sync.js');
+const { schema } = require('../schema/schema.js');
 
 /** The plugins the package ships, in registration order. */
-const PLUGINS = Object.freeze([text, tree, signing, chain, encryption, sync]);
+const PLUGINS = Object.freeze([text, tree, signing, chain, encryption, sync, schema]);
 const registry = createPlugins(PLUGINS);
 
 const withAll = (given = []) => {
@@ -62,5 +63,6 @@ module.exports = {
   chain,
   encryption,
   sync,
+  schema,
   PLUGINS,
 };

@@ -14,11 +14,10 @@ const { read, write, exists, remove, list } = require('./fsi.js');
 const { isFsi } = require('./backend.js');
 const { applyOp, mergeEntry, isAlive } = require('./ops.js');
 const { HookError } = require('./hooks.js');
-const { ValidationError } = require('./schema.js');
 const { isSharedLog } = require('./shared-log.js');
 const { isSyncLink } = require('./link.js');
 const { outbound } = require('./outbound.js');
-const { SyncomError } = require('./errors.js');
+const { SyncomError, ValidationError } = require('./errors.js');
 const { createPlugins } = require('./plugin.js');
 
 module.exports = {

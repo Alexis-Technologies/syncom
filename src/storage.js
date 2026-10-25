@@ -24,7 +24,7 @@ const { appliedHere } = require('./history.js');
 const { Tags } = require('./tags.js');
 const { Clock } = require('./vector.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
-const { normalizeSchema, createLens, project } = require('./schema.js');
+const { project } = require('./entity.js');
 const defaultFsi = require('./fsi.js');
 const { checkFsi, withSync } = require('./backend.js');
 const { acquireLock } = require('./lock.js');
@@ -39,6 +39,8 @@ const { SyncomError, typed } = require('./errors.js');
 
 const NODE_FILE = 'node.json';
 const SCHEMA_FILE = 'schema.json';
+// What a storage without the schema plugin runs with: no entities, version 1.
+const NO_SCHEMA = Object.freeze({ version: 1, entities: new Map(), snapshot: undefined, ahead: 'apply', view: null });
 
 // The hooks a storage accepts (`open({ hooks })`). Writes and reads run
 // their hooks inside this storage; the apply pair runs per peer batch.
@@ -59,6 +61,7 @@ class Storage extends Emitter {
   #identity = null;
   #seal = null;
   #chain = null;
+  #schemaHook = null;
   #settings;
   #log = null;
   #entries = null;
@@ -151,7 +154,6 @@ class Storage extends Emitter {
     this.#logger = createLogger(options.logger);
     this.#otel = createTelemetry(options.telemetry);
     this.#fsi = this.#backend(options, settings.durable);
-    this.#defineSchema(options, settings.search);
     this.#hooks = normalizeHooks(options.hooks, STORAGE_HOOKS, 'Storage');
     return this.#init();
   }
@@ -167,12 +169,18 @@ class Storage extends Emitter {
     return fsi;
   }
 
-  // The schema is kept as given (`storage.schema`) and read once into the
-  // entity definitions the write path consults: validators, id fields,
-  // indexes. A malformed one is refused here, not at the first write.
+  // The schema is the plugin's to read (`open({ schema, validator })` into
+  // the entity definitions the write path consults: validators, id fields,
+  // indexes) and the core's to apply; without the plugin a schema or a
+  // validator given is refused here, naming it, and records are untyped.
   #defineSchema(options, search) {
-    const schema = options.schema ?? null;
-    const normalized = normalizeSchema(schema, { validator: options.validator });
+    const given = this.#schemaHook;
+    if (given === null) {
+      if (options.schema !== undefined && options.schema !== null) throw missing('open({ schema })', 'schema');
+      if (options.validator !== undefined) throw missing('open({ validator })', 'schema');
+    }
+    const schema = given?.given ?? null;
+    const normalized = given ?? NO_SCHEMA;
     // A collection becomes a property of the storage: a name the storage
     // already answers to — a method, a getter, anything up its prototype
     // chain — would replace it or break the open. Refused before anything
@@ -206,7 +214,7 @@ class Storage extends Emitter {
     this.#version = normalized.version;
     this.#snapshot = normalized.snapshot;
     this.#ahead = normalized.ahead;
-    this.#lens = createLens(normalized, this.#logger);
+    this.#lens = normalized.view;
     // A held op lives in the log until this node runs its version;
     // retention that would drop it first makes the hold a silent loss.
     const retained = options.sync?.retention?.ops;
@@ -252,12 +260,14 @@ class Storage extends Emitter {
       if (hooks.identity) this.#identity = hooks.identity;
       if (hooks.seal) this.#seal = hooks.seal;
       if (hooks.chain) this.#chain = hooks.chain;
+      if (hooks.schema) this.#schemaHook = hooks.schema;
     }
     if (this.#signatures === 'require' && this.#identity === null) {
       throw missing("sync.signatures 'require'", 'signing');
     }
     if (this.#options.chain === true && this.#chain === null) throw missing('open({ chain: true })', 'chain');
     if (this.#encrypted && this.#seal === null) throw missing('open({ encrypted: true })', 'encryption');
+    this.#defineSchema(this.#options, this.#settings.search);
     this.#log = await new OpLog(this.#path, {
       ...this.#options.sync?.log,
       retention: this.#options.sync?.retention,
@@ -541,6 +551,7 @@ class Storage extends Emitter {
    * records go between turns of the event loop.
    */
   async migrate({ entities = null, batch = 100, actor } = {}) {
+    if (this.#schemaHook === null) throw missing('migrate()', 'schema');
     if (this.#version === null) throw new TypeError('migrate() needs open({ schema })');
     if (entities !== null && !(Array.isArray(entities) && entities.every((name) => typeof name === 'string'))) {
       throw new TypeError('migrate({ entities }) takes an array of entity names');
@@ -787,6 +798,7 @@ class Storage extends Emitter {
    * ValidationError; the storage is untouched either way.
    */
   async check(entity, data) {
+    if (this.#schemaHook === null) throw missing('check()', 'schema');
     const def = this.#entities.get(entity);
     if (!def) throw new TypeError(`Unknown entity ${entity}`);
     if (!isPlainObject(data)) throw new TypeError('check() takes a plain object');
