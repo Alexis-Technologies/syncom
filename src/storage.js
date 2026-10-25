@@ -238,7 +238,8 @@ class Storage extends Emitter {
     this.#lens = normalized.view;
     // A held op lives in the log until this node runs its version;
     // retention that would drop it first makes the hold a silent loss.
-    const retained = options.sync?.retention?.ops;
+    const retention = options.sync?.retention;
+    const retained = retention === 'all' ? Infinity : retention?.ops;
     if (this.#ahead === 'hold' && retained !== undefined && retained > 0 && retained < 1000) {
       throw new TypeError("open({ schema }): ahead 'hold' needs sync.retention.ops of 1000 or more, or 0");
     }
@@ -986,6 +987,7 @@ class Storage extends Emitter {
         segments: log.segments,
         latestTs: log.latestTs,
         droppedTs: log.droppedTs,
+        corrupt: log.corrupt,
         pins: log.pins,
       },
       chain: this.#chain ? { tail: this.#chain.tailHash } : null,

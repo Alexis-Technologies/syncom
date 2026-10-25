@@ -147,6 +147,75 @@ test('OpLog', async (t) => {
     }
   });
 
+  await t.test(
+    "a file whose checksum does not match is unreadable: an altered segment is lost and counted, an altered open file dropped; retention 'all' keeps every segment",
+    async () => {
+      const dir = await createTemp();
+      try {
+        const warnings = [];
+        const logger = { warn: (entry) => warnings.push(entry) };
+        const log = await new OpLog(dir, { rollAfter: 2, logger });
+        for (let seq = 1; seq <= 5; seq++) await log.append([op('A', seq)]);
+        await log.close();
+        const logDir = path.join(dir, 'log');
+        const [segment] = (await fs.readdir(logDir)).filter((name) => name.startsWith('seg-')).sort();
+        const sealed = JSON.parse(await fs.readFile(path.join(logDir, segment), 'utf8'));
+        assert.match(sealed.hash, /^[0-9a-f]{8}$/, 'every file carries its checksum');
+        // Altered on disk: the hash no longer matches, the segment is lost;
+        // an open batch with a wrong hash is dropped.
+        sealed.entries[0].op.data.n = 99;
+        await fs.writeFile(path.join(logDir, segment), JSON.stringify(sealed));
+        const batch = { entries: [{ seq: 6, op: op('A', 6) }], hash: '00000000' };
+        await fs.writeFile(path.join(logDir, 'open', '0000000006.json'), JSON.stringify(batch));
+        const reopened = await new OpLog(dir, { rollAfter: 2, logger });
+        assert.deepStrictEqual(
+          warnings.map((entry) => [entry.event, entry.reason]),
+          [
+            ['log.segment.unreadable', 'checksum'],
+            ['log.open.unreadable', 'checksum'],
+          ],
+        );
+        assert.strictEqual(reopened.corrupt, 2);
+        assert.deepStrictEqual(
+          reopened.since(reopened.formatId(0)).map((entry) => entry.seq),
+          [3, 4, 5],
+          'the altered files are gone whole, the rest stays',
+        );
+        assert.strictEqual(reopened.droppedTs, 5, 'an unreadable segment: the newest stamp held, as for a torn one');
+        await reopened.close();
+        // A file without a hash — an older format — is taken as it is.
+        const [last] = (await fs.readdir(logDir))
+          .filter((name) => name.startsWith('seg-'))
+          .sort()
+          .slice(-1);
+        const text = JSON.parse(await fs.readFile(path.join(logDir, last), 'utf8'));
+        delete text.hash;
+        await fs.writeFile(path.join(logDir, last), JSON.stringify(text));
+        const older = await new OpLog(dir, { rollAfter: 2, logger });
+        assert.deepStrictEqual(
+          older.since(older.formatId(0)).map((entry) => entry.seq),
+          [3, 4, 5],
+        );
+        assert.strictEqual(older.corrupt, 1, 'the altered segment is still on disk; the hashless one passes');
+        await older.close();
+      } finally {
+        await cleanupTemp(dir);
+      }
+      // retention 'all': nothing is ever dropped.
+      const keep = await createTemp();
+      try {
+        const log = await new OpLog(keep, { rollAfter: 2, retention: 'all' });
+        for (let seq = 1; seq <= 40; seq++) await log.append([op('A', seq)]);
+        assert.strictEqual(log.retainedOps, Infinity);
+        assert.strictEqual(log.floor, 1);
+        assert.strictEqual(log.since(log.formatId(0)).length, 40);
+        await log.close();
+      } finally {
+        await cleanupTemp(keep);
+      }
+    },
+  );
+
   await t.test('survives a torn open file, a lost index and a duplicated roll', async () => {
     const dir = await createTemp();
     try {

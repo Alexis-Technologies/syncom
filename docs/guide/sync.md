@@ -224,7 +224,7 @@ recovered by replaying the log on the next open:
 ```
 log/
 ├── open/<seq>.json     one file per group of appends (the ops appended while the file before was written), rewritten only by a scrub
-├── seg-<from>.json     sealed segments, rolled from open/ every `rollAfter` batches
+├── seg-<from>.json     sealed segments, rolled from open/ every `rollAfter` batches: { entries, hash }
 └── index.json          { epoch, floor, next, vector, segments, droppedHeld, latestTs, droppedTs }
 ```
 
@@ -235,6 +235,12 @@ of a record are its whole history only from a reset (`write`, `delete`,
 `purge`) stamped above `droppedTs`. `storage.log.pin(keep)` holds the
 segments such a reader needs, like `retain` does for the sync manager, until
 the function it returns is called.
+
+Every log file — a sealed segment, an open batch — carries `hash`, the
+xxHash32 of its entries' JSON (`src/hash.js`, pure JS, no key: a checksum,
+not a signature): a file torn on the way down or altered on disk does not
+match at open and is treated as unreadable — a segment lost and counted in
+`droppedTs`, an open file dropped — and `stats().log.corrupt` counts them.
 
 The log has two cursors, for two different questions.
 
@@ -621,6 +627,7 @@ once `close()` was called is refused at once.
 | `scope(id, data)` | `() => '*'` | The scope of a record |
 | `retention.ops` | `10000` | Ops kept in the log before the oldest segment is dropped |
 | `retention.days` | — | Age after which a segment is dropped |
+| `retention: 'all'` | — | Keep everything: no segment is ever dropped, so every version stays exact (`history()`, `get(id, { at })`, a fork at any version) |
 | `maxSkew` | `86400000` | How far ahead of this node's clock a peer's stamp may be, in ms; beyond it the op is `malformed`, and a snapshot record is left out of the join. `Infinity` disables |
 | `pendingMax` | `4096` | How much pending work a list or text field takes from a peer's ops that ran ahead of what they depend on — runs waiting for their anchor, cuts and extensions for their run, registers and switched-off marks for elements not here — before an op is refused (`OP_REFUSED`, reason `bound`, with `detail`, `count` and `max`). A refusal is final on this node, so a mesh with several hosts raises it rather than lowers it. `Infinity` disables. A snapshot block past it is not taken as state |
 | `signatures` | `'verify'` | `'verify'`, `'require'` or `false` — see [Signatures](#signatures) |

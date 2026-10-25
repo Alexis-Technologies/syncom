@@ -14,6 +14,13 @@ There is no released version section until then; everything below lands in it.
 
 ### Added
 
+- **Log checksums, `retention: 'all'`.** Every log file — a sealed segment,
+  an open batch — carries `hash`, the xxHash32 of its entries' JSON
+  (`src/hash.js`, pure JS, no dependency on the signing plugin); a file that
+  does not match at open is unreadable, as a torn one is: a segment lost
+  (`droppedTs` moves) and counted in `stats().log.corrupt`, an open file
+  dropped. `sync.retention: 'all'` keeps every segment, so every version
+  stays exact.
 - **Presence.** `@alexify/syncom/presence`: `createPresence(storage, { scope,
   timeout })` holds this node's ephemeral state and the states it heard of
   — who is here, what they edit, where their cursor is — per node, newest

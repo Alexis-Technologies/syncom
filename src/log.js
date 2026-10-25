@@ -28,6 +28,7 @@
 
 const defaultFsi = require('./fsi.js');
 const { formatEventId, parseEventId, vectorAdvance } = require('./vector.js');
+const { checksum } = require('./hash.js');
 const { GLOBAL_SCOPE, inScope } = require('./scope.js');
 const { writerOf, traced, now } = require('./telemetry.js');
 
@@ -45,6 +46,22 @@ const parseJson = (text) => {
   } catch {
     return null;
   }
+};
+
+// A log file: its entries and their checksum (xxHash32 of the entries'
+// JSON), so a torn or altered file is told from a whole one at open. A file
+// without one (an older format) is taken as it is.
+const fileOf = (entries) => {
+  const text = JSON.stringify(entries);
+  return `{"entries":${text},"hash":"${checksum(text)}"}`;
+};
+const readFile = (text) => {
+  const parsed = text === null ? null : parseJson(text);
+  if (!parsed || !Array.isArray(parsed.entries)) return { entries: null, reason: 'malformed' };
+  if (parsed.hash !== undefined && checksum(JSON.stringify(parsed.entries)) !== parsed.hash) {
+    return { entries: null, reason: 'checksum' };
+  }
+  return { entries: parsed.entries, reason: null };
 };
 
 class OpLog {
@@ -68,6 +85,8 @@ class OpLog {
   // could not read: what a reader of the past checks before it trusts the
   // log to be whole from some point on (see `droppedTs`).
   #droppedTs = 0;
+  // Files whose checksum did not match at open: altered or torn on disk.
+  #corrupt = 0;
   #lost = false;
   // Entries compaction keeps whatever the retention says (see `retain`),
   // and whatever a reader pinned for the time being (see `pin`).
@@ -99,7 +118,9 @@ class OpLog {
     this.#openPath = `${this.#path}/${OPEN}`;
     this.#fsi = options.fsi ?? defaultFsi;
     this.#rollAfter = options.rollAfter ?? DEFAULT_ROLL_AFTER;
-    this.#retention = { ops: DEFAULT_RETENTION_OPS, ...options.retention };
+    // `'all'` keeps everything: the log of a node that must answer any version.
+    const retention = options.retention === 'all' ? { ops: Infinity } : options.retention;
+    this.#retention = { ops: DEFAULT_RETENTION_OPS, ...retention };
     this.#log = options.logger ?? null;
     this.#otel = writerOf(options.telemetry);
     // The storage asks for `sealApplied`: a roll then seals only the batches
@@ -167,16 +188,17 @@ class OpLog {
     this.#segments.sort((a, b) => a.from - b.from);
     for (const segment of this.#segments) {
       const text = await this.#fsi.read(this.#path, segment.name).catch(() => null);
-      const parsed = text === null ? null : parseJson(text);
-      if (!parsed || !Array.isArray(parsed.entries)) {
-        this.#log?.warn?.({ event: 'log.segment.unreadable', segment: segment.name });
+      const { entries, reason } = readFile(text);
+      if (entries === null) {
+        this.#log?.warn?.({ event: 'log.segment.unreadable', segment: segment.name, reason });
         this.#lost = true;
+        if (reason === 'checksum') this.#corrupt++;
         continue;
       }
-      this.#adopt(parsed.entries);
-      if (parsed.entries.length > 0) {
-        segment.to = parsed.entries[parsed.entries.length - 1].seq;
-        segment.count = parsed.entries.length;
+      this.#adopt(entries);
+      if (entries.length > 0) {
+        segment.to = entries[entries.length - 1].seq;
+        segment.count = entries.length;
       }
     }
     // The floor is durable in the index; a fresh index means everything on
@@ -188,18 +210,19 @@ class OpLog {
     const names = await this.#fsi.list(this.#openPath);
     for (const name of names) {
       const text = await this.#fsi.read(this.#openPath, name).catch(() => null);
-      const parsed = text === null ? null : parseJson(text);
-      if (!parsed || !Array.isArray(parsed.entries)) {
+      const { entries, reason } = readFile(text);
+      if (entries === null) {
         // Torn on the way down: the batch was never announced, drop it.
-        this.#log?.warn?.({ event: 'log.open.unreadable', file: name });
+        this.#log?.warn?.({ event: 'log.open.unreadable', file: name, reason });
+        if (reason === 'checksum') this.#corrupt++;
         await this.#fsi.remove(this.#openPath, name);
         continue;
       }
-      this.#adopt(parsed.entries);
+      this.#adopt(entries);
       this.#openFiles.push(name);
       // Nothing says these records were written: pending until the owner's
       // replay says so.
-      if (this.#sealApplied) this.#hold(parsed.entries.map((entry) => entry.seq).filter(Number.isInteger));
+      if (this.#sealApplied) this.#hold(entries.map((entry) => entry.seq).filter(Number.isInteger));
     }
     // The files in seq order, like the groups that made them.
     this.#openFiles.sort();
@@ -438,7 +461,7 @@ class OpLog {
     const started = this.#otel.enabled ? now() : 0;
     try {
       if (group.ready.length > 0) await Promise.all(group.ready);
-      await this.#fsi.write(this.#openPath, name, JSON.stringify({ entries }));
+      await this.#fsi.write(this.#openPath, name, fileOf(entries));
     } catch (error) {
       this.#fail(group, error);
       return;
@@ -502,7 +525,7 @@ class OpLog {
   async #seal(entries) {
     const from = entries[0].seq;
     const name = segmentName(from);
-    await this.#fsi.write(this.#path, name, JSON.stringify({ entries }));
+    await this.#fsi.write(this.#path, name, fileOf(entries));
     this.#segments.push({ name, from, to: entries[entries.length - 1].seq, count: entries.length });
     const dropped = await this.#compact();
     await this.#writeIndex();
@@ -628,6 +651,11 @@ class OpLog {
     return this.#droppedTs;
   }
 
+  /** Files whose checksum did not match at this open — a segment lost or an open file dropped for it. */
+  get corrupt() {
+    return this.#corrupt;
+  }
+
   /** How many held entries compaction has dropped — lost for good — since the last reset. */
   get droppedHeld() {
     return this.#droppedHeld;
@@ -717,7 +745,7 @@ class OpLog {
       for (const segment of this.#segments) {
         if (!holds(segment.from, segment.to)) continue;
         const entries = this.#entries.filter((entry) => entry.seq >= segment.from && entry.seq <= segment.to);
-        await this.#fsi.write(this.#path, segment.name, JSON.stringify({ entries }));
+        await this.#fsi.write(this.#path, segment.name, fileOf(entries));
       }
       // An open file holds the seqs from its name up to the next file's.
       const sealedTo = this.#segments.length > 0 ? this.#segments[this.#segments.length - 1].to : this.#floor - 1;
@@ -727,7 +755,7 @@ class OpLog {
         const to = i + 1 < starts.length ? starts[i + 1] - 1 : Infinity;
         if (!holds(from, to)) continue;
         const entries = this.#entries.filter((entry) => entry.seq > sealedTo && entry.seq >= from && entry.seq <= to);
-        await this.#fsi.write(this.#openPath, `${pad(from)}.json`, JSON.stringify({ entries }));
+        await this.#fsi.write(this.#openPath, `${pad(from)}.json`, fileOf(entries));
       }
       this.#torn.delete(id);
       return fresh;

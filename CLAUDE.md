@@ -50,6 +50,7 @@ src/keys.js               loadKeyPair — the on-disk key pairs (RSA for sealing
 src/digest.js             sha256 — SHA-256 of a value's JSON through Web Crypto, async on both platforms: the chain's and the schema hash's — no requires
 src/pem.js                base64/PEM helpers over btoa/atob for the browser crypto halves — no requires
 src/scope.js              GLOBAL_SCOPE, inScope, opInScope — the one definition of "in scope" — no requires
+src/hash.js               xxHash32 in pure JS — the checksum every log file carries (`{ entries, hash }`); a checksum, never a signature — no requires
 src/signing/sign.js       canonical form, signOp, verifyOp — what a signature covers (the header + a salted payload digest) and the verdict on a peer's op
 src/shape.js              isPlainObject, asJson, isRecordId, isStreamName, wellFormed — what enters is checked here
 src/paths.js              field paths: isPath, ancestorsOf, under, valueAt, MAX_PATHS — no requires
@@ -496,6 +497,13 @@ docs/                     VitePress site
   replaced at hello, raised by push answers); a host behind what the log
   retains is `UNDELIVERABLE`, and a host ahead of the node's own stream at
   hello is `REWOUND` (adopt the host's own keys, then bootstrap from it).
+- **A log file is whole or it is nothing.** `fileOf`/`readFile` in src/log.js
+  are the ONLY writer and reader of a log file's text: `{ entries, hash }`,
+  the hash xxHash32 (src/hash.js) of the entries' JSON; a mismatch is
+  `log.segment.unreadable`/`log.open.unreadable` with `reason: 'checksum'`,
+  counted in `corrupt`, never read in part. A file without a hash is an
+  older format and taken as it is. `retention: 'all'` is `{ ops: Infinity }`
+  (`retainedOps` Infinity) — normalized in the OpLog constructor, nowhere else.
 - **A failed page is a break in the stream.** `#receive` runs pages one after
   another per peer (`peer.inbound`), numbered by `peer.feed`; a rejection goes
   to `#pageFailed`, which closes the feed (pages of the old feed are dropped),

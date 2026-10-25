@@ -575,6 +575,8 @@ export interface OpLog {
    * whole from a reset stamped above it.
    */
   readonly droppedTs: number;
+  /** Files whose checksum did not match at this open. */
+  readonly corrupt: number;
 }
 
 export interface OpLogConstructor {
@@ -1143,6 +1145,7 @@ export interface StorageStats {
     segments: number;
     latestTs: number;
     droppedTs: number;
+    corrupt: number;
     /** Readers holding segments past retention: undo managers, mostly. */
     pins: number;
   };
