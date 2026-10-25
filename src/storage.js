@@ -11,17 +11,15 @@
 
 const { Emitter, generateUUID, createLogger } = require('./utils.js');
 const { sha256 } = require('./digest.js');
-const { OpLog } = require('./log.js');
+const { OpLog, appliedHere } = require('./log.js');
 const { EntryStore } = require('./entries.js');
 const { Record, Collection } = require('./record.js');
 const { commit, MISMATCH } = require('./commit.js');
 const F = require('./fields.js');
-const V = require('./versions.js');
+const P = require('./patches.js');
 const { applyBatch } = require('./apply.js');
 const { snapshotPage, mergeBatch, adopt } = require('./bootstrap.js');
 const { applyOp, isAlive, kindOf } = require('./ops.js');
-const { appliedHere } = require('./history.js');
-const { Tags } = require('./tags.js');
 const { Clock } = require('./vector.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
 const { project } = require('./entity.js');
@@ -257,6 +255,9 @@ class Storage extends Emitter {
       options: this.#options,
       settings: this.#settings,
       storage: this,
+      // A catalog of a tag (the versions plugin's): the entities are read when
+      // it is made, after the schema is defined.
+      catalogOf: (path) => new Catalog({ fsi, path, entities: this.#entities, logger: this.#logger }),
     };
     let adapted = false;
     for (const mod of this.#plugins.apis) {
@@ -266,6 +267,7 @@ class Storage extends Emitter {
       if (hooks.chain) this.#chain = hooks.chain;
       if (hooks.schema) this.#schemaHook = hooks.schema;
       if (hooks.query) this.#cursor = hooks.query.cursor;
+      if (hooks.versions) this.#tags = hooks.versions.tags;
       if (Object.hasOwn(hooks, 'telemetry')) {
         this.#otel = hooks.telemetry;
         adapted = true;
@@ -285,6 +287,9 @@ class Storage extends Emitter {
     if (this.#options.chain === true && this.#chain === null) throw missing('open({ chain: true })', 'chain');
     if (this.#encrypted && this.#seal === null) throw missing('open({ encrypted: true })', 'encryption');
     this.#defineSchema(this.#options, this.#settings.search);
+    // A directory with tags needs the plugin that keeps their copies: opened
+    // without it, the next change would leave a tag reading what it was not.
+    if (this.#tags === null && (await this.#hasTags())) throw missing('a storage with tags', 'versions');
     this.#log = await new OpLog(this.#path, {
       ...this.#options.sync?.log,
       retention: this.#options.sync?.retention,
@@ -311,18 +316,12 @@ class Storage extends Emitter {
       verify: this.#verify && this.#chain !== null ? (id, data, block) => this.validate(id, data, block) : null,
       decrypt: (data) => this.#unseal(data),
       view: (id, entry) => this.#view(id, entry),
-      before: (id, file) => this.#tags.copyBefore(id, file),
+      before: this.#tags === null ? null : (id, file) => this.#tags.copyBefore(id, file),
     });
     await this.#loadIdentity();
     await this.#loadSchema();
     await this.#loadCatalog();
-    this.#tags = new Tags({
-      fsi,
-      path: this.#path,
-      logger: this.#logger,
-      catalogOf: (path) => new Catalog({ fsi, path, entities: this.#entities, logger: this.#logger }),
-    });
-    await this.#tags.load();
+    if (this.#tags !== null) await this.#tags.load();
     this.#core = this.#lend();
     await this.#replayTail();
     await this.#replayHeld();
@@ -410,7 +409,7 @@ class Storage extends Emitter {
       // A purge reaches the log and the tags alike.
       scrub: async (id) => {
         await this.#log.scrub(id);
-        await this.#tags.scrub(id);
+        if (this.#tags !== null) await this.#tags.scrub(id);
       },
     };
   }
@@ -903,7 +902,7 @@ class Storage extends Emitter {
       queue: this.#queued,
       cache: { size: this.#entries.size, max: this.#cacheMax, pinned },
       catalog: { entries: this.#catalog.size, dirty: this.#catalog.dirty },
-      tags: { count: this.#tags.size, corrupt: this.#tags.corrupt },
+      tags: this.#tags === null ? null : { count: this.#tags.size, corrupt: this.#tags.corrupt },
       // Records whose files lag the log: deferred by `open({ defer })`, or
       // held after a write that failed (replayed at the next open).
       held: this.#entries.heldIds().size,
@@ -1185,11 +1184,11 @@ class Storage extends Emitter {
   // `getCachedData()` and `snapshot()` are the raw objects, for callers that
   // know not to touch them.
   async #read(id) {
-    return V.reading(this.#core, id, await this.#entries.load(id));
+    return P.reading(this.#core, id, await this.#entries.load(id));
   }
 
   async get(id, { at } = {}) {
-    if (at !== undefined) return V.getAt(this.#core, id, at);
+    if (at !== undefined) return this.#api('getAt', 'get(id, { at })', 'versions')(this.#core, id, at);
     await runHook(this.#hooks, 'beforeRead', { id });
     const data = await this.#read(id);
     const replaced = await runHook(this.#hooks, 'afterRead', { id }, data);
@@ -1199,41 +1198,41 @@ class Storage extends Emitter {
   // ---------------------------------------------------------------------
   // Versions, patches and tags — src/versions.js, one delegate each.
 
-  diff(id, from, to) {
-    return V.diff(this.#core, id, from, to);
+  async diff(id, from, to) {
+    return this.#api('diff')(this.#core, id, from, to);
   }
 
   applyPatches(id, patches, options) {
-    return V.applyPatches(this.#core, id, patches, options);
+    return P.applyPatches(this.#core, id, patches, options);
   }
 
-  restore(id, at, options) {
-    return V.restore(this.#core, id, at, options);
+  async restore(id, at, options) {
+    return this.#api('restore')(this.#core, id, at, options);
   }
 
   compact(id, options) {
-    return V.compact(this.#core, id, options);
+    return P.compact(this.#core, id, options);
   }
 
-  tag(name) {
-    return V.tag(this.#core, name);
+  async tag(name) {
+    return this.#api('tag')(this.#core, name);
   }
 
-  untag(name) {
-    return V.untag(this.#core, name);
+  async untag(name) {
+    return this.#api('untag')(this.#core, name);
   }
 
   /** The tags, oldest first. */
   tags() {
-    return this.#tags.list();
+    return this.#api('tags')(this.#core);
   }
 
   at(name) {
-    return V.at(this.#core, name);
+    return this.#api('at')(this.#core, name);
   }
 
-  history(id, options) {
-    return V.history(this.#core, id, options);
+  async history(id, options) {
+    return this.#api('history')(this.#core, id, options);
   }
 
   /** Every live record id, sorted — tombstones excluded, encrypted records included. From the catalog: no I/O. */
@@ -1275,10 +1274,21 @@ class Storage extends Emitter {
   // its module (src/plugin.js). A method of a plugin this storage was not
   // opened with rejects with PLUGIN_MISSING naming the subpath.
 
-  #api(name) {
+  #api(name, what = `${name}()`, home = undefined) {
     const method = this.#plugins.methods[name];
-    if (method === undefined) throw missing(`${name}()`);
+    if (method === undefined) throw missing(what, home);
     return method;
+  }
+
+  // Whether the directory holds tags (tags.json with a tag, or unreadable).
+  async #hasTags() {
+    if (!(await this.#fsi.exists(this.#path, 'tags.json'))) return false;
+    try {
+      const parsed = JSON.parse(await this.#fsi.read(this.#path, 'tags.json'));
+      return !Array.isArray(parsed?.tags) || parsed.tags.length > 0;
+    } catch {
+      return true;
+    }
   }
 
   inc(id, key, value, options) {

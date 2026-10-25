@@ -31,6 +31,7 @@ const ENTRIES = [
   'src/schema/schema.js',
   'src/telemetry/telemetry.js',
   'src/query/query.js',
+  'src/versions/versions.js',
 ];
 
 for (const entry of ENTRIES) {

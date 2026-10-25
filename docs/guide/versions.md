@@ -4,7 +4,13 @@ Every op a node applies is in its log, so the past of a record is a fold of
 the log's entries of it — the same `applyOp` that built the record the first
 time, stopped at a version. `history(id)` lists the versions, `get(id, { at })`
 reads one back, and both say when the log can no longer vouch for what they
-give.
+give. The past is the `versions` plugin — `@alexify/syncom/versions`,
+registered by `@alexify/syncom/all`: `get(id, { at })`, `history()`, `diff()`
+between versions, `restore()` and the tags; without it those throw
+`PLUGIN_MISSING`, `stats().tags` is null, and a directory that holds tags
+is refused at `open()` (their copies would not be kept). `applyPatches()`
+and `compact()` — the present and its patches — are the core's. The examples
+on this page assume `open({ plugins: [versions] })`.
 
 ```js
 const id = await storage.insert({ title: 'Draft' });

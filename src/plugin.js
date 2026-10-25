@@ -79,6 +79,13 @@ const HOME = Object.freeze({
   select: 'query',
   count: 'query',
   watch: 'query',
+  diff: 'versions',
+  restore: 'versions',
+  tag: 'versions',
+  untag: 'versions',
+  tags: 'versions',
+  at: 'versions',
+  history: 'versions',
 });
 
 /** The refusal of a call, an op type or a patch action whose plugin is not registered here. */

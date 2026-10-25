@@ -22,9 +22,10 @@ const { sync } = require('../sync/sync.js');
 const { schema } = require('../schema/schema.js');
 const { telemetry, createTelemetry } = require('../telemetry/telemetry.js');
 const { query } = require('../query/query.js');
+const { versions } = require('../versions/versions.js');
 
 /** The plugins the package ships, in registration order. */
-const PLUGINS = Object.freeze([text, tree, signing, chain, encryption, sync, schema, telemetry, query]);
+const PLUGINS = Object.freeze([text, tree, signing, chain, encryption, sync, schema, telemetry, query, versions]);
 const registry = createPlugins(PLUGINS);
 
 const withAll = (given = []) => {
@@ -69,5 +70,6 @@ module.exports = {
   telemetry,
   createTelemetry,
   query,
+  versions,
   PLUGINS,
 };

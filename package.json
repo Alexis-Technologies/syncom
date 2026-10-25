@@ -105,6 +105,10 @@
       "types": "./src/query/query.d.ts",
       "default": "./src/query/query.js"
     },
+    "./versions": {
+      "types": "./src/versions/versions.d.ts",
+      "default": "./src/versions/versions.js"
+    },
     "./package.json": "./package.json"
   },
   "directories": {

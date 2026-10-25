@@ -19,6 +19,7 @@ const { applyOp, mergeEntry, isAlive } = require('./ops.js');
 const { HookError } = require('./hooks.js');
 const { isSharedLog } = require('./shared-log.js');
 const { isSyncLink } = require('./link.js');
+const { OpLog } = require('./log.js');
 const { outbound } = require('./outbound.js');
 const { SyncomError, ValidationError } = require('./errors.js');
 const { createPlugins } = require('./plugin.js');
@@ -32,7 +33,7 @@ module.exports = {
   list,
   isFsi,
   ...require('./storage.js'),
-  ...require('./log.js'),
+  OpLog,
   applyOp,
   mergeEntry,
   isAlive,

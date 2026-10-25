@@ -530,7 +530,7 @@ expectType<void>(log.retain(null));
 expectError(log.retain(true));
 expectType<number>(storage.stats().cache.pinned);
 expectType<{ tail: string } | null>(storage.stats().chain);
-expectType<{ count: number; corrupt: boolean }>(storage.stats().tags);
+expectType<{ count: number; corrupt: boolean } | null>(storage.stats().tags);
 expectType<number>(storage.stats().deferred);
 expectAssignable<StorageOptions>({ defer: 50 });
 expectError(syncom.open({ defer: '50ms' }));

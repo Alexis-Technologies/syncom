@@ -240,6 +240,15 @@ const ENTRIES = [
   // Queries: the predicate, the planner and the cursor, measured ALONE with
   // the catalog's value keys it shares with the core.
   { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 6 },
+  // Versions: the fold of the log, the tags, the view at a tag — measured
+  // ALONE with the write path, the snapshot pages and the patches it shares
+  // with the core.
+  {
+    label: 'versions — browser (@alexify/syncom/versions)',
+    entry: 'src/versions/versions.js',
+    platform: 'browser',
+    budget: 30,
+  },
 ];
 
 // A browser entry has to be self-contained: no node builtins, and no packages

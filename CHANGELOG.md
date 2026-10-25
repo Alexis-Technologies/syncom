@@ -95,6 +95,15 @@ There is no released version section until then; everything below lands in it.
   catalog, its indexes and the text index behind `$text` (`open({ search })`)
   stay in the core, kept whether or not anything queries them. The core is
   39 KB.
+- **Versions as a block.** The past — `get(id, { at })` and `history()`
+  folded from the log, `diff()` between versions, `restore()`, and the tags
+  (`tag`, `untag`, `tags`, `at`, copy-on-write at the record-file seam) — is
+  the `versions` plugin, `@alexify/syncom/versions`; `applyPatches()` and
+  `compact()`, the present and its patches, stay in the core (the undo
+  subpath stands on them). Without the plugin those methods throw
+  `PLUGIN_MISSING`, `stats().tags` is `null`, and a directory that holds tags
+  is refused at `open()`, since its copies would not be kept. The core is
+  35 KB — from 66 before the blocks.
 - **Lists and text.** A field can be a list — an array edited by position —
   or a text — a string typed into: `splice(id, key, index, count, content)`
   and `push(id, key, content)`, on the storage and on a live Record. Two

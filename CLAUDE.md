@@ -61,8 +61,8 @@ src/tree/moves.js         the tree engine: per node its stamped moves, the fold 
                           2021, Loro), MAX_DEPTH levels read, prune and join — requires vector.js and order.js (a place is a
                           fractional index or the move is malformed)
 src/order/order.js        fractional indexes over a 62-letter alphabet (Loro's rule, MIT) — no requires; the tree plugin uses it for a node's place
-src/history.js            the past out of the log: a version (event id / stamp / vector) as a cut, the exact start above droppedTs, the fold
-src/tags.js               Tags — named versions kept locally: tags.json, a catalog per tag, copy-on-write record files in the newest tag
+src/versions/history.js  the past out of the log: a version (event id / stamp / vector) as a cut, the exact start above droppedTs, the fold
+src/versions/tags.js     Tags — named versions kept locally: tags.json, a catalog per tag, copy-on-write record files in the newest tag
 src/patch.js              patches — the one vocabulary of diff()/applyPatches()/restore(): diffViews by kind, realize() to an op — requires shape.js, myers.js only
 src/undo.js               UndoManager — steps of inverse patches from `commit` events, refuse-to-overwrite, pins the log; the core does not use it
 src/outbound.js           outbound(log, { exclude, vector, scopes, own }) — the ops a receiver lacks, the first retained seq per own stream; a push and a merge both pick with it
@@ -79,7 +79,11 @@ src/shared-log.js         isSharedLog — the reserved broker-log contract (wrpc
 src/storage.js            Storage — the facade: open sequence, the mutation queue, the public API, the `core` it lends
 src/fields.js             the API of the core's kinds beyond registers — inc/add/remove — over the lent core; a plugin's methods come with it —
                           over the lent core; Storage keeps a delegate per method
-src/versions.js           the versions API — get(id, { at }), history, diff/applyPatches/restore/compact, tag/untag/at — over the
+src/versions/versions.js @alexify/syncom/versions — the versions plugin: setup hands the core its Tags (`versions` hook), `methods`
+                          are the facade's stubs (getAt, diff, restore, tag, untag, tags, at, history)
+src/versions/api.js      the versions API — get(id, { at }), history, diff/restore, tag/untag/at — over the lent core
+src/patches.js           reading, applyPatches, compact — the present and its patches, the core's (the undo subpath stands on
+                          applyPatches); appliedHere lives in log.js
                           lent core; Storage keeps a delegate per method
 src/entries.js            EntryStore — record files under data/, the bounded cache, the catalog row each change leaves
 src/record.js             Reference, Record, Collection — what the application holds; public API + the symbols only
@@ -296,7 +300,7 @@ docs/                     VitePress site
   and `MAX_COUNT` bound what a peer can make a node hold or read, on the op path
   and in `normalizeMeta` alike — a snapshot buys nothing an op could not. The
   fuzz in `tests/suites/sync-engine.js` compares the blocks and the move logs
-  across nodes, not only what they read as. `compact(id)` (`src/versions.js`)
+  across nodes, not only what they read as. `compact(id)` (`src/patches.js`)
   = `applyPatches(id, diffViews(null, {}, reading, kinds))` laid in runs of
   `MAX_RUN`, then a text's marks as `mark` patches (`marksIn` in
   src/sequence.js): a reset plus one op per field, one move per node —
@@ -464,8 +468,9 @@ docs/                     VitePress site
   rather than the exception. A new `event:` name goes into the table in
   `docs/guide/telemetry.md` — the names are a surface.
 - **A version is a fold of the retained log, exact only from a reset above
-  `droppedTs`.** The model is the header of `src/history.js`; the glue is
-  `src/versions.js` (`past`/`applied`/`present`), outside the queue:
+  `droppedTs`.** The model is the header of `src/versions/history.js`; the glue is
+  `src/versions/api.js` (`past`/`applied`/`present`), the versions plugin's,
+  outside the queue:
   `log.entriesOf(id)` filtered by `appliedHere` (skipped out, held in once
   the node runs the version), folded with `applyOp`. With `droppedTs > 0` the
   fold of everything retained must `deepEqual` the present (`present`) — the
@@ -475,7 +480,9 @@ docs/                     VitePress site
   file or the catalog, and never fold from an entry below the exact start.
 - **A tag is copy-on-write at the EntryStore seam.** The layout, the read
   walk, the untag move-down and the lazy read of an older tag are the header
-  of `src/tags.js`. What crosses modules: record files are copied by
+  of `src/versions/tags.js` (the versions plugin's: without the plugin
+  `core.tags` is null, `stats().tags` null, and a directory with tags is
+  refused at open — `#hasTags`). What crosses modules: record files are copied by
   `EntryStore.#changing` (`before(id, file)`) ahead of
   `write`/`writeSealed`/`remove`, into the NEWEST tag only, once per record,
   only for a record the tag's catalog holds live — so the newest tag is read
@@ -491,14 +498,14 @@ docs/                     VitePress site
   files, not directories. Every purge path goes through `core.scrub` (log +
   tags) — never `core.log.scrub` alone. The error field is `tag`, never
   `name` (it would overwrite `Error.name`). A view at a tag (`at(name)`,
-  `src/versions.js`) reads through `sourceAt`, a `storage[SOURCE]`-shaped seam
+  `src/versions/api.js`) reads through `sourceAt`, a `storage[SOURCE]`-shaped seam
   over the tag's catalog (`searches` false, `subscribe` throws), and pages
   through `snapshotPage` with a core of the tag's catalog, entries and
   position — the same `pageOf`, never a second page writer.
 - **A patch is in the write API's terms, and the only way back is new ops.**
   The vocabulary and the per-kind diff are the header of `src/patch.js`;
   `realize(patch)` maps to `[type, payload]` for `commit()`. `applyPatches`
-  (`src/versions.js`) rehearses, then runs them in ONE `#run` turn;
+  (`src/patches.js`, the core's) rehearses, then runs them in ONE `#run` turn;
   `restore(id, at)` = `applyPatches(diff(id, undefined, at))` — never rewrite
   the log or the file. A `remove` patch with `removals` goes out as given
   (`prepareOp` takes `payload.removals` over `observedTags`), one with `own:

@@ -16,14 +16,9 @@
 // still shows it. Pure over log entries; the storage runs the lens and the
 // hooks.
 
-const { applyOp } = require('./ops.js');
-const { parseEventId, vectorHas } = require('./vector.js');
-const { SyncomError, typed } = require('./errors.js');
-
-// Whether this node applied a log entry: not skipped, or held for a schema
-// version this node has since reached (and replayed).
-const appliedHere = (entry, version) =>
-  !entry.skipped || (entry.held !== undefined && version !== null && entry.held <= version);
+const { applyOp } = require('../ops.js');
+const { parseEventId, vectorHas } = require('../vector.js');
+const { SyncomError, typed } = require('../errors.js');
 
 // The ops that start a record over: what is stamped below them is gone from
 // the record, whatever the log holds before them. A scrubbed write has no
@@ -94,4 +89,4 @@ const fold = (entries, start, limits = null) => {
   return steps;
 };
 
-module.exports = { appliedHere, isReset, parseVersion, within, exactStart, fold, gone };
+module.exports = { isReset, parseVersion, within, exactStart, fold, gone };

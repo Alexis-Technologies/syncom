@@ -1013,7 +1013,8 @@ export interface StorageStats {
     pins: number;
   };
   /** The tags held; `corrupt` when `tags.json` could not be read at open (no tags, `tag()` refused until it is repaired). */
-  tags: { count: number; corrupt: boolean };
+  /** The tags kept here; `null` without the `versions` plugin. */
+  tags: { count: number; corrupt: boolean } | null;
   /** Records whose files lag the log: held after a write that failed (replayed at the next open), or deferred by `open({ defer })`. */
   held: number;
   deferred: number;

@@ -705,4 +705,10 @@ class OpLog {
   }
 }
 
-module.exports = { OpLog };
+// Whether this node applied a log entry: not skipped, or held for a schema
+// version this node has since reached (and replayed). What a replay, a
+// repair and a version of the past read the log by.
+const appliedHere = (entry, version) =>
+  !entry.skipped || (entry.held !== undefined && version !== null && entry.held <= version);
+
+module.exports = { OpLog, appliedHere };

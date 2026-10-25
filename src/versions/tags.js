@@ -28,8 +28,8 @@
 // emptied when a tag of that name is taken again (fsi lists files, not
 // directories, so an open cannot find it).
 
-const { SyncomError } = require('./errors.js');
-const { isRecordId } = require('./shape.js');
+const { SyncomError } = require('../errors.js');
+const { isRecordId } = require('../shape.js');
 
 const FILE = 'tags.json';
 // Where an unreadable tags.json is kept for a repair by hand, and where the

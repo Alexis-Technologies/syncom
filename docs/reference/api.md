@@ -57,16 +57,16 @@ naming the subpath; `@alexify/syncom/all` has both.
 | Method | Returns | Notes |
 | --- | --- | --- |
 | `insert(data, options?)` | `Promise<string>` | Generates an id via `getId` (a UUID by default) and writes; rejects with `code: 'INVALID_ID'` when the generator mints one that is not a [valid id](../guide/storage#custom-identifiers) |
-| `get(id, { at }?)` | `Promise<unknown>` | `null` when absent or deleted; verifies against the chain; a copy — editing it changes nothing. With `at` — an event id, a stamp (a number or a `Date`), `{ vector }` or `{ tag }` — the record at that version, folded from the log, or a tag's copy (see [Versions and history](../guide/versions)); rejects with `HISTORY_GONE` when the log cannot give it exactly, `INVALID_VERSION` for a malformed `at` or a seq not reached, `TAG_NOT_FOUND` for a tag this node has not, `ENCRYPTED` for an encrypted record (at a tag one reads as its data) |
-| `tag(name)` | `Promise<Tag>` | Names the storage as it is now — `{ name, eventId, seq, ts, vector, createdAt }`, kept on this node as the catalog of the moment plus a copy of each record's file taken before its first change after the tag (see [Tags](../guide/versions#tags)); `name` is of the record-id form (a `TypeError` otherwise); deferred files land first. Rejects with `TAG_EXISTS`, `UNPERSISTED` while a record's file lags the log after a failed write, `CORRUPT` while `tags.json` is unreadable |
-| `untag(name)` | `Promise<void>` | Drops a tag; the copies the next older tag needs move there; rejects with `TAG_NOT_FOUND` |
-| `tags()` | `Tag[]` | The tags, oldest first — from memory |
-| `at(name)` | `TagView` | The storage at a tag: its fields plus `get(id)` (the record as it was, through the lens and the read hooks with `at: { tag }`; `null` when it was not there), `has(id)` and `list()` (every live id then; promises — the tag's catalog is read at the view's first read), `collection(entity)` (`name`, `select()`, `count()`, `get()` as it was — `watch()` throws, no `$text`; an entity the schema has not is a `TypeError`) and `snapshot(options)` (pages like `snapshot()`, at the tag's position); throws `TAG_NOT_FOUND` |
-| `diff(id, from?, to?)` | `Promise<Patch[]>` | The patches that turn the record at `from` into the record at `to` (the present when omitted), per field by kind — see [Diff and restore](../guide/versions#diff-and-restore); raw, through the lens, no read hooks; a text's marks are not diffed; rejects as `get(id, { at })` would, `ENCRYPTED` for an encrypted record |
+| `get(id, { at }?)` | `Promise<unknown>` | `null` when absent or deleted; verifies against the chain; a copy — editing it changes nothing. With `at` (the `versions` plugin's) — an event id, a stamp (a number or a `Date`), `{ vector }` or `{ tag }` — the record at that version, folded from the log, or a tag's copy (see [Versions and history](../guide/versions)); rejects with `HISTORY_GONE` when the log cannot give it exactly, `INVALID_VERSION` for a malformed `at` or a seq not reached, `TAG_NOT_FOUND` for a tag this node has not, `ENCRYPTED` for an encrypted record (at a tag one reads as its data) |
+| `tag(name)` | `Promise<Tag>` | Names the storage as it is now — `{ name, eventId, seq, ts, vector, createdAt }`, kept on this node as the catalog of the moment plus a copy of each record's file taken before its first change after the tag (see [Tags](../guide/versions#tags)); `name` is of the record-id form (a `TypeError` otherwise); deferred files land first. Rejects with `TAG_EXISTS`, `UNPERSISTED` while a record's file lags the log after a failed write, `CORRUPT` while `tags.json` is unreadable; the `versions` plugin's (`PLUGIN_MISSING` without it) |
+| `untag(name)` | `Promise<void>` | Drops a tag; the copies the next older tag needs move there; rejects with `TAG_NOT_FOUND`; the `versions` plugin's (`PLUGIN_MISSING` without it) |
+| `tags()` | `Tag[]` | The tags, oldest first — from memory; the `versions` plugin's (`PLUGIN_MISSING` without it) |
+| `at(name)` | `TagView` | The storage at a tag: its fields plus `get(id)` (the record as it was, through the lens and the read hooks with `at: { tag }`; `null` when it was not there), `has(id)` and `list()` (every live id then; promises — the tag's catalog is read at the view's first read), `collection(entity)` (`name`, `select()`, `count()`, `get()` as it was — `watch()` throws, no `$text`; an entity the schema has not is a `TypeError`) and `snapshot(options)` (pages like `snapshot()`, at the tag's position); throws `TAG_NOT_FOUND`; the `versions` plugin's (`PLUGIN_MISSING` without it) |
+| `diff(id, from?, to?)` | `Promise<Patch[]>` | The patches that turn the record at `from` into the record at `to` (the present when omitted), per field by kind — see [Diff and restore](../guide/versions#diff-and-restore); raw, through the lens, no read hooks; a text's marks are not diffed; rejects as `get(id, { at })` would, `ENCRYPTED` for an encrypted record; the `versions` plugin's (`PLUGIN_MISSING` without it) |
 | `applyPatches(id, patches, { actor, source }?)` | `Promise<number>` | Realizes patches as ops of this node's own in one turn of the mutation queue (`put`, `write`, `inc`, `add`, `remove` with `elements` — `own: true` for this node's adds alone — or exact `removals`, `splice`, `treeMove`, `treeRemove`, `delete`, `purge`); `source` rides on the `commit` events; resolves to how many ops. A patch is checked as the method of its name checks its arguments — the wrong shape is a `TypeError` with nothing minted — and every patch is first resolved and applied over a scratch record, so an index out of range, a kind clash, a cycle or a type change refuses the whole batch with nothing written; a hook or a validator that throws on a later op leaves the earlier ones committed |
-| `restore(id, at, { actor, source }?)` | `Promise<number>` | Makes the record read as it did at `at` (required) with new ops that lead back — `diff(id, undefined, at)` applied; rejects as `diff()` would; lands whole or not at all (see `applyPatches`) |
+| `restore(id, at, { actor, source }?)` | `Promise<number>` | Makes the record read as it did at `at` (required) with new ops that lead back — `diff(id, undefined, at)` applied; rejects as `diff()` would; lands whole or not at all (see `applyPatches`); the `versions` plugin's (`PLUGIN_MISSING` without it) |
 | `compact(id, { actor, source }?)` | `Promise<number>` | Rewrites the record as the ops its reading takes today — a `write` of the registers, then one op per field of another kind: an `inc`, an `add`, one `splice` (a text or a list becomes one run), one `tree` move per node — so what lies under it goes by the reset rule here and on every peer, and `get()` and `spans()` read the same: a text's marks are laid again in the order they were made, with their expand rules, and a list or text over 1 048 576 elements is made again in several runs. It names every element anew, so the cursors into its lists and texts read `null` after, and a stacking mark has a new id; a list, text, set or tree that reads empty is left out. A peer's op stamped before the rewrite and arriving after it is dropped, as with any whole-record write. Resolves to how many ops; `0` for a record that is not there; `ENCRYPTED` for an encrypted one |
-| `history(id, { limit = 50, before }?)` | `Promise<{ versions, complete, exact }>` | The record's past, newest first: `{ eventId, seq, ts, origin, actor, type, fields, data, scrubbed? }` per op this node applied, `data` the record after it through the lens and `afterRead` — run for the versions handed out alone; `limit` a positive integer or `Infinity`; `before` (an event id of this log — `HISTORY_GONE` `epoch` for another incarnation's) pages back to the versions older than it; `complete` when the page reaches the first op the node applied and nothing was dropped, `exact` when the versions are what the node held; rejects with `ENCRYPTED` for an encrypted record |
+| `history(id, { limit = 50, before }?)` | `Promise<{ versions, complete, exact }>` | The record's past, newest first: `{ eventId, seq, ts, origin, actor, type, fields, data, scrubbed? }` per op this node applied, `data` the record after it through the lens and `afterRead` — run for the versions handed out alone; `limit` a positive integer or `Infinity`; `before` (an event id of this log — `HISTORY_GONE` `epoch` for another incarnation's) pages back to the versions older than it; `complete` when the page reaches the first op the node applied and nothing was dropped, `exact` when the versions are what the node held; rejects with `ENCRYPTED` for an encrypted record; the `versions` plugin's (`PLUGIN_MISSING` without it) |
 | `has(id)` | `Promise<boolean>` | `false` for a tombstone |
 | `list()` | `Promise<string[]>` | Every live id, sorted — from the catalog, no I/O |
 | `check(entity, data)` | `Promise<unknown>` | Runs the entity's validator as a write would and returns its value; rejects with `ValidationError`; writes nothing. The `schema` plugin's: `PLUGIN_MISSING` without it, as is `migrate()` |
@@ -546,6 +546,23 @@ indexes and the text index behind `$text` (`open({ search })`) are the
 core's, kept whether or not anything queries them; without the plugin
 `select()` and `count()` throw `PLUGIN_MISSING`.
 
+## Versions (subpath)
+
+```js
+const { versions } = require('@alexify/syncom/versions');
+```
+
+`versions` is the plugin: `open({ plugins: [versions] })` gives the storage
+its past — `get(id, { at })` and `history()` folded from the log, `diff()`
+between two versions and `restore()` the way back — and the tags (`tag`,
+`untag`, `tags`, `at`), named versions kept on this node, copy-on-write at
+the record-file seam (see [Versions and history](../guide/versions)). The
+present and its patches — `applyPatches()`, `compact()` — are the core's,
+and so is the `commit` event the undo subpath stands on. Without the plugin
+those methods throw `PLUGIN_MISSING`, `stats().tags` is `null`, and a
+directory that holds tags is refused at `open()`: its copies would not be
+kept.
+
 ## Telemetry (subpath)
 
 ```js
@@ -612,11 +629,13 @@ host that lacks one of its own (`KINDS_MISMATCH`).
 A plugin that is not a kind sets the core up before the log opens — the
 identity (`signing`), the sealing of records (`encryption`), the chain
 (`chain`), the definitions of `schema`, the writer of `telemetry`, the
-cursor of `query` — or once it is open (the manager of `sync`), and what the
-options ask for and no plugin provides is refused at `open()` the same way: `sync.signatures: 'require'` without `signing`,
+cursor of `query`, the tags of `versions` — or once it is open (the manager
+of `sync`), and what the options ask for and no plugin provides is refused at
+`open()` the same way: `sync.signatures: 'require'` without `signing`,
 `chain: true` without `chain`, `encrypted: true` without `encryption` (and a
 per-call `{ encrypted: true }` at the call), `schema` or `validator` without
-`schema`, an OpenTelemetry api or tracer without `telemetry`. Without them the node id is what
+`schema`, an OpenTelemetry api or tracer without `telemetry`, a directory
+that holds tags without `versions`. Without them the node id is what
 `getId` mints, ops go unsigned and unchecked, no block is written,
 `validate()` is `NO_CHAIN` and `storage.sync` is `PLUGIN_MISSING`.
 `storage.plugins` lists them all.
@@ -624,14 +643,15 @@ per-call `{ encrypted: true }` at the call), `schema` or `validator` without
 ## All (subpath)
 
 ```js
-const { open, Storage, applyOp, mergeEntry, text, tree, signing, chain, encryption, sync, schema, telemetry, query, PLUGINS } = require('@alexify/syncom/all');
+const { open, Storage, applyOp, mergeEntry, text, tree, signing, chain, encryption, sync, schema, telemetry, query, versions, PLUGINS } = require('@alexify/syncom/all');
 ```
 
 Everything the root and the `/signing`, `/chain`, `/encryption`, `/memory`,
-`/layered`, `/sync`, `/schema`, `/telemetry` and `/query` subpaths export,
-plus `open()`/`Storage` with every shipped plugin registered ahead of the
-caller's (`text`, `tree`, `signing`, `chain`, `encryption`, `sync`, `schema`,
-`telemetry`, `query`; a plugin given twice is given once), `applyOp`/`mergeEntry` folding under the same
+`/layered`, `/sync`, `/schema`, `/telemetry`, `/query` and `/versions`
+subpaths export, plus `open()`/`Storage` with every shipped plugin registered
+ahead of the caller's (`text`, `tree`, `signing`, `chain`, `encryption`,
+`sync`, `schema`, `telemetry`, `query`, `versions`; a plugin given twice is
+given once), `applyOp`/`mergeEntry` folding under the same
 registry, the plugins themselves and `PLUGINS`, the list. The API of the
 package before it was taken apart into blocks: what the tests and the
 examples open.

@@ -32,6 +32,7 @@ export * from '../sync/sync.js';
 export * from '../schema/schema.js';
 export * from '../telemetry/telemetry.js';
 export * from '../query/query.js';
+export * from '../versions/versions.js';
 
 /** The storage with every shipped plugin registered: the core's API and the text and tree methods. */
 export interface Storage extends CoreStorage, TextMethods, TreeMethods, SyncApi {}
@@ -60,6 +61,7 @@ export declare const sync: Plugin<SyncApi>;
 export declare const schema: Plugin;
 export declare const telemetry: Plugin;
 export declare const query: Plugin;
+export declare const versions: Plugin;
 /** The plugins the package ships, in registration order. */
 export declare const PLUGINS: readonly [
   Plugin<TextMethods>,
@@ -68,6 +70,7 @@ export declare const PLUGINS: readonly [
   Plugin,
   Plugin,
   Plugin<SyncApi>,
+  Plugin,
   Plugin,
   Plugin,
   Plugin,

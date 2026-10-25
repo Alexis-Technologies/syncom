@@ -112,6 +112,7 @@ test('open({ plugins }) picks the kinds; the /all entry has every shipped one', 
     all.schema,
     all.telemetry,
     all.query,
+    all.versions,
   ]);
   assert.deepStrictEqual(everything.plugins, [
     'text',
@@ -123,6 +124,7 @@ test('open({ plugins }) picks the kinds; the /all entry has every shipped one', 
     'schema',
     'telemetry',
     'query',
+    'versions',
   ]);
   const other = await everything.insert({});
   await everything.treeMove(other, 'outline', 'r');
