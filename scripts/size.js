@@ -193,7 +193,8 @@ const ENTRIES = [
   // members' seam, a compaction in rounds).
   // 87.3 with embeds and blocks in a text (the markers, the typed spans and
   // blocks, the diff context, the commit event's embeds).
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 88 },
+  // 88.6 with transactions (transact in src/commit.js, the facade's tx, the message slot).
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 90 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).

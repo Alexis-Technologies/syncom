@@ -14,7 +14,7 @@ const { sha256 } = require('./digest.js');
 const { OpLog, appliedHere } = require('./log.js');
 const { EntryStore } = require('./entries.js');
 const { Record, Collection } = require('./record.js');
-const { commit, MISMATCH } = require('./commit.js');
+const { commit, transact, MISMATCH } = require('./commit.js');
 const F = require('./fields.js');
 const P = require('./patches.js');
 const { applyBatch } = require('./apply.js');
@@ -389,6 +389,10 @@ class Storage extends Emitter {
       settled: (id, position) => this.#settle(id, position),
       landing: (step) => this.#landing(step),
       drain: () => this.#landings,
+      // A stream's last seq in the log, and a batch landed from inside a
+      // landing step (a transaction's: the chain block, the files, the slots).
+      seqOf: (key) => this.#log.seqOf(key),
+      land: (touched, from, to) => this.#land(touched, from, to),
       signatures: this.#signatures,
       // Signs an op of this node's own, in place, once it is final —
       // `later` on the thread pool, for a write with others queued behind it.
@@ -1545,6 +1549,80 @@ class Storage extends Emitter {
     if (!isPlainObject(changes) || !isPlainObject(prev)) throw new TypeError('swap() takes two plain objects');
     const op = await this[COMMIT]('set', id, { data: changes }, { actor, expect: prev });
     return op !== MISMATCH;
+  }
+
+  /**
+   * Runs `fn(tx)` as one transaction: every write made through `tx` — the
+   * write API less `purge()`, plus `get()`/`has()` reading the records as
+   * the transaction left them — is one op, prepared in one turn of the
+   * mutation queue and appended with the others as one group once `fn`
+   * returns: all durable or none, one chain block, each record's file
+   * written once, the `commit` events after. `message` rides on every op
+   * (signed, logged, listed by `history()`), `source` on their `commit`
+   * events. A throw from `fn` or a refused write leaves nothing appended.
+   * Resolves to what `fn` returned once the transaction has landed.
+   */
+  async transact(fn, options = {}) {
+    if (typeof fn !== 'function') throw new TypeError('transact() takes a function');
+    const run = () => transact(this.#core, (tx) => fn(this.#transaction(tx)), options);
+    const otel = this.#otel;
+    const { result, done } = await this.#run(
+      otel.enabled ? () => traced(otel, 'syncom.transact', {}, run, ({ ops }) => ({ 'syncom.ops.count': ops })) : run,
+    );
+    if (done !== null) await done;
+    return result;
+  }
+
+  // The write API over a transaction's core (src/commit.js transact): the
+  // facade's own methods bound to it, the field and plugin methods handed it
+  // as their core. Reads see the transaction's own writes, through the lens,
+  // without the read hooks (a hook that writes would wait for the queue).
+  #transaction(tx) {
+    const api = {};
+    for (const [name, method] of Object.entries({ ...F, ...this.#plugins.methods })) {
+      api[name] = (...args) => method(tx, ...args);
+    }
+    const current = async (id) => {
+      if (!isRecordId(id)) throw invalidId(id);
+      return tx.current(id);
+    };
+    api.get = async (id) => P.reading(tx, id, await current(id));
+    api.has = async (id) => {
+      const entry = await current(id);
+      return entry !== null && (entry.encrypted || isAlive(entry));
+    };
+    api.insert = async (data, options = {}) => {
+      const id = await this.#getId();
+      if (!isRecordId(id)) {
+        const error = invalidId(id);
+        error.message = `open({ getId }): ${error.message}`;
+        throw error;
+      }
+      await tx.commit('write', id, { data }, { actor: options.actor });
+      return id;
+    };
+    api.set = async (id, data, options = {}) => {
+      if (!isPlainObject(data)) throw new TypeError('set() takes a plain object');
+      await tx.commit('write', id, { data }, { actor: options.actor });
+    };
+    api.update = async (id, delta, options = {}) => {
+      if (!(await api.has(id))) throw new SyncomError('NOT_FOUND', `Record ${id} not found`, { id });
+      if (!isPlainObject(delta)) throw new TypeError('update() takes a plain object');
+      await tx.commit('set', id, { data: delta }, { actor: options.actor });
+    };
+    api.swap = async (id, changes, prev, options = {}) => {
+      if (!isPlainObject(changes) || !isPlainObject(prev)) throw new TypeError('swap() takes two plain objects');
+      const op = await tx.commit('set', id, { data: changes }, { actor: options.actor, expect: prev });
+      return op !== MISMATCH;
+    };
+    api.delete = async (id, options = {}) => {
+      await tx.commit('delete', id, {}, { actor: options.actor });
+      this.#records.delete(id);
+    };
+    api.purge = () => {
+      throw new TypeError('purge() is not transactional: it scrubs the log; call it on the storage');
+    };
+    return Object.freeze(api);
   }
 
   async record(id) {

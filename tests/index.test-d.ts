@@ -601,6 +601,25 @@ expectType<Promise<number>>(storage.restore('id', { tag: 'v1' }, { actor: 'u2' }
 expectAssignable<syncom.Patch>({ action: 'remove', field: 'tags', removals: [['x', { a: 1 }]] });
 expectAssignable<syncom.Patch>({ action: 'remove', field: 'tags', elements: ['x'], own: true });
 expectAssignable<syncom.Patch>({ action: 'setAt', field: 'body', index: 0, value: null });
+expectType<Promise<string>>(
+  storage.transact(
+    async (tx) => {
+      expectType<Promise<unknown>>(tx.get('id'));
+      expectType<Promise<boolean>>(tx.has('id'));
+      await tx.update('id', { n: 1 });
+      await tx.inc('id', 'hits', 1);
+      await tx.splice('id', 'body', 0, 0, 'x');
+      await tx.treeMove('id', 'outline', 'n');
+      return tx.insert({ n: 1 });
+    },
+    { message: 'm', source: 'x', actor: 'ada' },
+  ),
+);
+expectType<Promise<number>>(storage.applyPatches('id', [], { message: 'm' }));
+expectType<Promise<number>>(storage.transact(() => 1));
+expectAssignable<syncom.TransactOptions>({ message: 'm' });
+expectAssignable<syncom.SyncOp>({ origin: 'a', seq: 1, ts: 1, type: 'set', id: 'r', msg: 'm' });
+expectType<string | null>(({} as syncom.HistoryVersion).message);
 expectAssignable<syncom.Patch>({
   action: 'splice',
   field: 'body',

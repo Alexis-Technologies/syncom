@@ -103,6 +103,8 @@ export type {
   BlockMarker,
   TextBlock,
   TextEmbeds,
+  TransactOptions,
+  Transaction,
   CursorSide,
   MarkExpand,
   Version,

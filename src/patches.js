@@ -8,7 +8,7 @@
 // `applyPatches` and the `commit` event alone; the versions plugin
 // (src/versions/) reads the past and restores it through these.
 
-const { commit, rehearse } = require('./commit.js');
+const { transact, rehearse } = require('./commit.js');
 const { isAlive, kindsOf } = require('./ops.js');
 const { decompose } = require('./compose.js');
 const { ancestorsOf, under } = require('./paths.js');
@@ -36,41 +36,35 @@ const reading = async (core, id, entry) => {
  * to how many ops it took; a patch of the wrong shape is a TypeError and
  * nothing is written.
  */
-// A batch of realized ops run inside the mutation queue: every op resolved
-// and applied over a scratch record first — an index out of range, a kind
-// clash, a cycle, a type change — so nothing is appended unless all of them
-// can be: a restore lands whole or not at all. The ops land in log order
-// after the turn; the batch is done when the last has — and what landed
-// before a refusal has landed when the call rejects. A hook or a validator
-// that throws on a later op still leaves the earlier ones committed.
-const runOps = async (core, id, ops, { actor, source }) => {
+// A batch of realized ops, inside the mutation queue, as one transaction
+// (src/commit.js transact): every op resolved and applied over a scratch
+// record first — an index out of range, a kind clash, a cycle, a type change
+// — and then made for real, the hooks and the validator running on each,
+// and appended together once all of them are made: a restore lands whole or
+// not at all, a hook or a validator that throws on a later op leaves
+// nothing written. The batch is done when it has landed.
+const runOps = async (core, id, ops, { actor, source, message }) => {
   await rehearse(core, id, ops);
-  let count = 0;
-  const landings = [];
-  try {
-    for (const [type, payload] of ops) {
-      const { op, done } = await commit(core, type, id, payload, { actor, source });
-      if (op === null) continue;
-      count++;
-      landings.push(done);
-      if (type === 'purge') {
-        await done;
-        await core.scrub(id);
-      }
-    }
-  } finally {
-    await Promise.allSettled(landings);
-  }
-  await Promise.all(landings);
+  const { result: count, done } = await transact(
+    core,
+    async (tx) => {
+      let made = 0;
+      for (const [type, payload] of ops) if ((await tx.commit(type, id, payload, { actor })) !== null) made++;
+      return made;
+    },
+    { actor, source, message },
+  );
+  if (done !== null) await done;
+  if (ops.some(([type]) => type === 'purge')) await core.scrub(id);
   if (ops.some(([type]) => type === 'delete' || type === 'purge')) core.forget(id);
   return count;
 };
 
-const applyPatches = async (core, id, patches, { actor, source = null } = {}) => {
+const applyPatches = async (core, id, patches, { actor, source = null, message } = {}) => {
   if (!isRecordId(id)) throw invalidId(id);
   if (!Array.isArray(patches)) throw new TypeError('applyPatches() takes an array of patches');
   const ops = patches.map((patch) => realize(patch, core.plugins));
-  const apply = () => runOps(core, id, ops, { actor, source });
+  const apply = () => runOps(core, id, ops, { actor, source, message });
   const { otel } = core;
   if (!otel.enabled) return core.run(apply);
   const attributes = { 'syncom.ops.count': ops.length };
@@ -95,7 +89,7 @@ const applyPatches = async (core, id, patches, { actor, source = null } = {}) =>
  * with any whole-record write. Resolves to how many ops it took; `0` for
  * a record that is not there, `ENCRYPTED` for an encrypted one.
  */
-const compact = async (core, id, { actor, source = null } = {}) => {
+const compact = async (core, id, { actor, source = null, message } = {}) => {
   if (!isRecordId(id)) throw invalidId(id);
   const entry = await core.entries.load(id);
   if (entry?.encrypted) throw sealed(id);
@@ -134,7 +128,7 @@ const compact = async (core, id, { actor, source = null } = {}) => {
   };
   const rounds = [];
   for (const patch of patches) (rounds[depthOf(patch.field)] ??= []).push(patch);
-  const options = { actor, source };
+  const options = { actor, source, message };
   return core.run(async () => {
     const renames = [];
     const rename = (field) => {

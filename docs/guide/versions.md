@@ -252,10 +252,11 @@ and applied over a scratch record, so an index out of range, a kind clash, a
 cycle, a sibling not there or a type change refuses the whole list, with the
 error the method would have thrown (`OUT_OF_RANGE`, `FIELD_KIND`, `CYCLE`,
 `NOT_FOUND`, `TYPE_IMMUTABLE`), before anything is appended: a restore lands
-whole or not at all. Hooks and validators run on the real writes alone, so
-one that throws on a later op rejects the call with its error and leaves the
-earlier ops committed — versions in `history()`, ops on their way to the
-peers; restoring again from there lands what is left.
+whole or not at all. The patches then land as one
+[transaction](./storage#transactions): the hooks and the validator run on
+each op as it is made, and one that throws on a later op rejects the call
+with its error and leaves nothing written — no version in `history()`, no
+op on its way to the peers.
 
 ## The commit event
 
@@ -323,11 +324,10 @@ increment back; a text comes back as new characters. A text's marks are not
 undone. An undo that fails partway — a hook refusing one record's inverse,
 say — leaves the records it took back taken back, with their way back on the
 redo stack, and the rest on the undo stack for another try, so a record is
-not inverted twice. Within one record too: a hook or a validator that
-refuses a later op of its inverse leaves the earlier ones applied (the
-[`applyPatches()`](#diff-and-restore) rule), their way back goes to the redo
-stack, and the record waits on the undo stack from where those ops left it —
-the retry takes back the rest, not the whole record again.
+not inverted twice. Within one record a hook or a validator that refuses a
+later op of its inverse leaves nothing of that record applied (the
+[`applyPatches()`](#diff-and-restore) rule: one transaction per record), so
+the record waits on the undo stack whole, for another try.
 
 `createUndo(storage, options)` also takes `scope` — only the ops of that
 scope (`'*'` the global one) — `exclude(op)` — ops to leave out — and

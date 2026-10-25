@@ -345,6 +345,7 @@ const versions = async (core, id, limit, cut) => {
       ts: op.ts,
       origin: op.origin,
       actor: op.actor ?? null,
+      message: op.msg ?? null,
       type: op.type,
       fields: Object.keys(delta),
       data: null,

@@ -157,6 +157,46 @@ The comparison runs inside the mutation queue, against the record as it reads
 (the lens applied, the read hooks not run), so two concurrent swaps on the same
 expectation cannot both pass. An absent record rejects.
 
+### Transactions
+
+Several writes as one: `transact(fn)` runs `fn(tx)` inside the mutation
+queue, every write made through `tx` becomes an op, and once `fn` returns
+the ops are appended together — all durable or none, one chain block, each
+record's file written once, the `commit` events after, in order. A throw
+from `fn`, or a write refused (an index out of range, a validator), leaves
+nothing appended.
+
+```js
+const id = await storage.transact(
+  async (tx) => {
+    const id = await tx.insert({ title: 'Draft', status: 'new' });
+    await tx.inc('stats', 'drafts', 1);
+    await tx.push(id, 'body', 'Once upon a time');
+    (await tx.get(id)).body; // 'Once upon a time' — tx reads what it wrote
+    return id;
+  },
+  { message: 'new draft', source: editor },
+);
+```
+
+- **`tx` is the write API** — `insert`, `set`, `update`, `swap`, `delete`,
+  `unset`, `inc`, `add`, `remove` and the plugins' methods (`splice`,
+  `mark`, `treeMove`, …) — less `purge()`, which scrubs the log and stays on
+  the storage; plus `get(id)` and `has(id)`, reading the records as the
+  transaction left them, through the lens, without the read hooks (a hook
+  that writes would wait for the queue the transaction holds). An encrypted
+  write inside is `ENCRYPTED`: it makes no op.
+- **Hooks and validators** run as each op is made, inside the turn; what they
+  see is the record as the transaction left it. A refusal — theirs, or the
+  engine's — throws out of `fn`, and nothing of the transaction is written.
+- **`message`** (at most 1 024 characters) rides on every op of the
+  transaction — in the signed header, so a peer verifies it with the op —
+  and `history()` lists it per version; **`source`** rides on the `commit`
+  events, for a listener to tell its own (an undo manager's). A transaction
+  with no op makes none and resolves to what `fn` returned.
+- `applyPatches()`, `restore()` and `compact()` are transactions: a restore
+  lands whole or not at all.
+
 ### Purge
 
 `delete()` leaves a tombstone, and the record's history stays in the log —

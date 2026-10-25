@@ -3,7 +3,8 @@
 // What a signature covers and how one is checked — shared by the places a
 // node signs its own ops (src/commit.js, src/bootstrap.js) and the one place
 // a peer's are verified (src/apply.js). The HEADER — origin, seq, ts, type,
-// id, scope, from, v, actor — is signed as a positional JSON array under a
+// id, scope, from, v, actor, and the message of a transaction (`msg`) — is
+// signed as a positional JSON array under a
 // version number, together with a DIGEST of the payload: `data`, `meta`,
 // `key`, `value`, `vector`, serialized canonically and salted with a nonce.
 // The split is what lets a purge scrub the payload (and the nonce) and leave
@@ -83,6 +84,7 @@ const signedMessage = (op) =>
     op.v ?? null,
     op.actor ?? null,
     op.digest ?? null,
+    op.msg ?? null,
   ]);
 
 // Signs an op in place: `nonce` and `digest` when it carries a payload,

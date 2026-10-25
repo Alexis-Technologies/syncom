@@ -260,6 +260,8 @@ export interface SyncOp {
   digest?: string;
   /** The digest's salt; scrubbed with the payload. */
   nonce?: string;
+  /** The message of the transaction (or patch batch) the op was made in, at most 1 024 characters; in the signed header. */
+  msg?: string;
 }
 
 export interface EntryMeta {
@@ -903,6 +905,8 @@ export interface HistoryVersion {
   ts: number;
   origin: string;
   actor: string | null;
+  /** The message of the transaction the op was made in, or null. */
+  message: string | null;
   type: SyncOpType;
   /** The fields the op changed (removed ones included). */
   fields: string[];
@@ -1205,6 +1209,33 @@ export interface StorageDataOptions {
 
 export interface WriteOptions {
   actor?: string;
+}
+
+/** What a transaction (and a patch batch) takes: the actor of its ops, a `source` for their `commit` events, a `message` on every op (at most 1 024 characters, signed). */
+export interface TransactOptions extends WriteOptions {
+  source?: unknown;
+  message?: string;
+}
+
+/**
+ * The write API inside `transact()`: the storage's write methods — the
+ * plugins' included — less `purge()`, plus `get()` and `has()` reading the
+ * records as the transaction left them (through the lens, no read hooks).
+ */
+export interface Transaction extends TextMethods, TreeMethods {
+  get(id: string): Promise<unknown>;
+  has(id: string): Promise<boolean>;
+  insert(data: Record<string, unknown>, options?: WriteOptions): Promise<string>;
+  set(id: string, data: Record<string, unknown>, options?: WriteOptions): Promise<void>;
+  update(id: string, delta: Record<string, unknown>, options?: WriteOptions): Promise<void>;
+  swap(id: string, changes: Record<string, unknown>, prev: Record<string, unknown>, options?: WriteOptions): Promise<boolean>;
+  delete(id: string, options?: WriteOptions): Promise<void>;
+  unset(id: string, fields: string | readonly string[], options?: WriteOptions): Promise<void>;
+  inc(id: string, key: string, value?: number, options?: WriteOptions): Promise<void>;
+  add(id: string, key: string, elements: readonly unknown[], options?: WriteOptions): Promise<void>;
+  remove(id: string, key: string, elements: readonly unknown[], options?: WriteOptions): Promise<void>;
+  /** Never: a purge scrubs the log and is made on the storage. */
+  purge(): never;
 }
 
 export interface StorageEntry {
@@ -1641,10 +1672,19 @@ export interface Storage {
    * not diffed. Rejects as `get(id, { at })` would for either version.
    */
   diff(id: string, from?: Version, to?: Version): Promise<Patch[]>;
-  /** Realizes patches as ops of this node's own, in one turn of the mutation queue; resolves to how many. */
-  applyPatches(id: string, patches: readonly Patch[], options?: WriteOptions & { source?: unknown }): Promise<number>;
+  /** Realizes patches as ops of this node's own, as one transaction; resolves to how many. */
+  applyPatches(id: string, patches: readonly Patch[], options?: TransactOptions): Promise<number>;
   /** Makes the record read as it did at `at`, with new ops that lead back; resolves to how many. */
-  restore(id: string, at: Version, options?: WriteOptions & { source?: unknown }): Promise<number>;
+  restore(id: string, at: Version, options?: TransactOptions): Promise<number>;
+  /**
+   * Runs `fn(tx)` as one transaction: every write made through `tx` is one
+   * op, appended with the others as one group once `fn` returns — all
+   * durable or none, one chain block, each record's file written once, the
+   * `commit` events after; `tx.get()`/`tx.has()` read the records as the
+   * transaction left them. A throw from `fn` or a refused write leaves
+   * nothing appended. Resolves to what `fn` returned, once landed.
+   */
+  transact<T>(fn: (tx: Transaction) => T | Promise<T>, options?: TransactOptions): Promise<T>;
   /**
    * Rewrites the record as the ops its reading takes today — a `write` of
    * the registers, then one op per field of another kind (a text or a list
@@ -1655,7 +1695,7 @@ export interface Storage {
    * before reads null and a stacking mark has a new id.
    * Resolves to how many ops it took; `0` for a record that is not there.
    */
-  compact(id: string, options?: WriteOptions & { source?: unknown }): Promise<number>;
+  compact(id: string, options?: TransactOptions): Promise<number>;
   set(id: string, data: unknown, options?: StorageDataOptions): Promise<void>;
   delete(id: string, options?: WriteOptions): Promise<void>;
   /** Forgets the record for good: a `purge` op no later write revives, and a scrub of its entries from the log — here and on every peer it reaches. */

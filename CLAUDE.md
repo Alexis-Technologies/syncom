@@ -263,8 +263,10 @@ docs/                     VitePress site
   which rewrites files in place; `persist` in `src/apply.js` and `mergeBatch`
   in `src/bootstrap.js` scrub every id of the batch whose entry is purged,
   after the batch is durable and before the relay. Never log a payload for a purged id through another path.
-- **`packOps` is 17 positional slots, both halves together.** `v` (13),
-  `actor` (14), `sig`, `digest` and `nonce` (15–17) were appended; a reader
+- **`packOps` is 18 positional slots, both halves together.** `v` (13),
+  `actor` (14), `sig`, `digest` and `nonce` (15–17), `msg` (18, a
+  transaction's message, ≤ `MAX_MESSAGE` in `src/shape.js`, in the signed
+  header) were appended; a reader
   of fewer slots ignores the rest, a reader of more takes an absent slot as
   null. Append, never reorder — the
   shape is on the wire between every pair of peers (the log itself stores
@@ -496,7 +498,15 @@ docs/                     VitePress site
   `src/bootstrap.js` (a snapshot page, through `mergeSnapshot`) — all inside
   `#run`, all over the `core` Storage lends them (`#lend`), all ending in
   `#persistBatch` or `EntryStore.write`. Do not add a fourth, and do not
-  reach the storage's state from a path module except through `core`.
+  reach the storage's state from a path module except through `core`. A
+  transaction (`transact` in src/commit.js, what `storage.transact()`,
+  `applyPatches`/`restore`/`compact` run) is the first path over a core
+  whose `current` and `seqOf` see the ops made before — `prepare` per op,
+  ONE `log.append` of them all, one `core.land` (a chain block, the files),
+  the announces after; a throw from `fn` leaves nothing appended. A plugin
+  method takes the transaction's core as its `core`, so it needs no
+  transaction-aware code: it must only go through `core.commit`/`commitNow`
+  and `core.current`, never `core.log` or `core.entries` for a write.
 - **Reconnect/backoff/resume belong to the link.** `SyncManager` re-runs only
   `hello` + `push` on `reconnect`; a refused restored subscription (428 "say
   hello first" — wrpc gives a reconnect a NEW server-side client) triggers a

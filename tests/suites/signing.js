@@ -31,11 +31,11 @@ const runSigningTests = async (t, assert, signing, cryptoMod) => {
     assert.deepStrictEqual(payloadOf({ type: 'advance', vector: { B: 2 }, from: 'B' }), { vector: { B: 2 } });
     assert.strictEqual(
       signedMessage({ ...op, digest: 'd' }),
-      JSON.stringify([HEADER_VERSION, 'A', 3, 9, 'set', 'r', null, null, 2, 'u', 'd']),
+      JSON.stringify([HEADER_VERSION, 'A', 3, 9, 'set', 'r', null, null, 2, 'u', 'd', null]),
     );
     assert.strictEqual(
       signedMessage({ origin: 'A', seq: 1, ts: 1, type: 'advance', vector: {}, from: 'B' }),
-      '[1,"A",1,1,"advance",null,null,"B",null,null,null]',
+      '[1,"A",1,1,"advance",null,null,"B",null,null,null,null]',
     );
     // The same op with its keys in another order: the same message.
     const shuffled = { v: 2, data: { x: 1 }, actor: 'u', id: 'r', type: 'set', ts: 9, seq: 3, origin: 'A' };

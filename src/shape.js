@@ -81,6 +81,8 @@ const VALIDATED = new Set([
 
 // A signature's three fields, by shape alone — whether they check is
 // src/signing/sign.js's business: 64 bytes base64url, 32 bytes hex, a nonce.
+// A transaction's message rides on each of its ops, in the signed header.
+const MAX_MESSAGE = 1024;
 const SIGNATURE = /^[A-Za-z0-9_-]{86}$/;
 const DIGEST = /^[0-9a-f]{64}$/;
 const NONCE = /^[A-Za-z0-9_-]{16,64}$/;
@@ -102,6 +104,7 @@ const wellFormed = (op) =>
   (op.sig === undefined || (typeof op.sig === 'string' && SIGNATURE.test(op.sig))) &&
   (op.digest === undefined || (typeof op.digest === 'string' && DIGEST.test(op.digest))) &&
   (op.nonce === undefined || (typeof op.nonce === 'string' && NONCE.test(op.nonce))) &&
+  (op.msg === undefined || (typeof op.msg === 'string' && op.msg.length <= MAX_MESSAGE)) &&
   (op.type === 'advance' ? isPlainObject(op.vector) : isRecordId(op.id));
 
 // Structural equality over JSON values — own keys, in any order.
@@ -124,6 +127,7 @@ const VERDICT = Object.freeze({ OK: 'ok', UNSIGNED: 'unsigned', FORGED: 'forged'
 
 module.exports = {
   VERDICT,
+  MAX_MESSAGE,
   isPlainObject,
   asJson,
   isRecordId,

@@ -14,6 +14,18 @@ There is no released version section until then; everything below lands in it.
 
 ### Added
 
+- **Transactions.** `transact(fn, { actor, source, message })` runs `fn(tx)`
+  inside the mutation queue — `tx` the write API less `purge()`, the plugins'
+  methods included, plus `get()`/`has()` reading what the transaction wrote —
+  and appends the ops as one group once `fn` returns: all durable or none,
+  one chain block, each record's file written once, the `commit` events
+  after, in order; a throw or a refused write leaves nothing appended.
+  `message` (at most 1 024 characters) rides on every op in the signed
+  header — the 18th wire slot, `msg` — and `history()` lists it per version.
+  `applyPatches()`, `restore()` and `compact()` are transactions now: a hook
+  or a validator refusing a later op leaves nothing written (it used to
+  leave the earlier ops committed). Yjs's transaction *origin* is syncom's
+  `source`: `origin` names the node an op is from.
 - **Embeds and blocks in a text.** A document is one text: what is not a
   character — an image, a mention, the start of a paragraph or a heading —
   is an embed slot (U+FFFC) whose value is a marker `{ type, parents, attrs,

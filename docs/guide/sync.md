@@ -35,7 +35,7 @@ Every write becomes an **op** — the unit that travels between nodes and sits
 in the log:
 
 ```
-{ origin, seq, ts, type, id?, scope?, data?, meta?, key?, value?, vector?, from?, v?, actor?, sig?, digest?, nonce? }
+{ origin, seq, ts, type, id?, scope?, data?, meta?, key?, value?, vector?, from?, v?, actor?, sig?, digest?, nonce?, msg? }
 ```
 
 | `type` | Produced by | Effect on the record |
@@ -90,7 +90,7 @@ in `from` the node whose snapshot was joined.
 
 A push and a `changes` page carry ops packed: one positional array of 17
 slots per op — `origin`, `seq`, `ts`, `type`, `id`, `scope`, `data`, `meta`,
-`key`, `value`, `vector`, `from`, `v`, `actor`, `sig`, `digest`, `nonce` —
+`key`, `value`, `vector`, `from`, `v`, `actor`, `sig`, `digest`, `nonce`, `msg` —
 with `null` for an absent field and the type as one character: `w` write,
 `s` set, `u` unset, `i` inc, `+` add, `-` remove, `/` splice, `=` assign, `^` move, `*`
 mark, `~` tree, `d` delete, `p` purge, `m` merge, `a` advance. Slots are
