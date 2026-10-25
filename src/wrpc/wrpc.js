@@ -15,7 +15,10 @@
 //
 // Everything the engine leaves to the transport — reconnecting with backoff,
 // the heartbeat, re-opening the `changes` subscription from its last event id
-// — is what a WrpcClient already does; the adapter only translates names.
+// — is what a WrpcClient already does; the adapter only translates names. An
+// event the engine sends (`send('syncom/presence', update)`) is the client's
+// `sendEvent`; one it listens for (`on('syncom/presence', fn)`) is the unit's
+// — `client.api.syncom.on('presence', fn)`, the emitter `use()` scaffolds.
 
 const { isSyncLink } = require('../link.js');
 
@@ -80,8 +83,18 @@ const createWrpcLink = (client, { unit = UNIT } = {}) => {
     // A WrpcReadable is async-iterable; the engine reads the NDJSON page from it.
     stream: (id) => client.getStream(id),
 
-    on: (event, listener) => client.on(event, listener),
-    off: (event, listener) => client.off(event, listener),
+    // A fire-and-forget event to the host: presence.
+    send: (event, data) => client.sendEvent(target(event), data),
+    on: (event, listener) => {
+      if (event.startsWith(`${unit}/`) && typeof client.api?.[unit]?.on === 'function') {
+        client.api[unit].on(event.slice(unit.length + 1), listener);
+      } else client.on(event, listener);
+    },
+    off: (event, listener) => {
+      if (event.startsWith(`${unit}/`) && typeof client.api?.[unit]?.off === 'function') {
+        client.api[unit].off(event.slice(unit.length + 1), listener);
+      } else client.off(event, listener);
+    },
     close: () => client.close(),
     // The wrapped client, for callers that need to reach past the contract.
     client,

@@ -13,7 +13,7 @@
 // the plugin is PLUGIN_MISSING. The hook the core takes: `identity` — the
 // id, `sign(op)`, `verify(op, mode)` and `signMessage(text)` (presence).
 
-const { calculateHash, generateSigningKeys, loadSigningKeys, sign, verify } = require('./ed25519.js');
+const { calculateHash, generateSigningKeys, loadSigningKeys, sign, verify, verifyAsync } = require('./ed25519.js');
 const { signOp, verifyOp } = require('./sign.js');
 
 const signing = Object.freeze({
@@ -26,6 +26,7 @@ const signing = Object.freeze({
         sign: (op, later = false) => signOp(op, keys.privateKey, later),
         verify: (op, mode) => verifyOp(op, mode),
         signMessage: (message) => sign(message, keys.privateKey),
+        verifyMessage: (message, signature, keyId) => verifyAsync(message, signature, keyId),
       },
     };
   },

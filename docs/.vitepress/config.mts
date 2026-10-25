@@ -178,6 +178,7 @@ export default withMermaid({
             text: 'Replication',
             items: [
               { text: 'Sync', link: '/guide/sync' },
+              { text: 'Presence', link: '/guide/presence' },
               { text: 'wrpc transport', link: '/guide/wrpc' },
               { text: 'WebRTC', link: '/guide/webrtc' },
               { text: 'Scaling', link: '/guide/scaling' },

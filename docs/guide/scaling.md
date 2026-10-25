@@ -107,10 +107,14 @@ which is one snapshot of its scopes.
 ## Presence
 
 Who is online, who is editing what, where a cursor is — ephemeral state has
-no place in a durable, replicated log. On a hub it is a room:
-`context.server.to('presence:' + docId).except(context.client).emit(…)`;
-among [WebRTC](./webrtc) peers it is `mesh.broadcast('presence/state', …)`.
-Both are wrpc's, both cost nothing in the log.
+no place in a durable, replicated log. [`@alexify/syncom/presence`](./presence)
+keeps it per node and the hub relays it through wrpc's rooms: a peer's
+update comes in as the unit's `on.presence` event, checked (its own node, a
+scope it asked for, `unit({ presence: { rate } })` updates a second, signed
+under `'require'`) and goes to `syncom:<scope>` but the sender; the hub keeps
+the newest state per node for `presence.timeout` and hands them to a newcomer
+at hello. Nothing of it touches the log. Among [WebRTC](./webrtc) peers the
+same updates travel over the mesh.
 
 ## Several tabs
 

@@ -49,6 +49,10 @@
       "types": "./src/branch/branch.d.ts",
       "default": "./src/branch/branch.js"
     },
+    "./presence": {
+      "types": "./src/presence/presence.d.ts",
+      "default": "./src/presence/presence.js"
+    },
     "./all": {
       "types": "./src/all/all.d.ts",
       "default": "./src/all/all.js"

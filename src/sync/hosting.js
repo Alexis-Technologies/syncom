@@ -17,6 +17,7 @@ const { opKey } = require('../vector.js');
 const { notify } = require('../hooks.js');
 const { GLOBAL_SCOPE, opInScope } = require('../scope.js');
 const { isKeyId } = require('../shape.js');
+const { isUpdate: isPresenceUpdate } = require('../presence/presence.js');
 const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf, kindsOf } = require('../protocol.js');
 
 const DEFAULT_PAGE_BYTES = 4 << 20;
@@ -195,6 +196,7 @@ const hello = (host) => async (context, args) => {
   }
   notify(host.manager, host.logger, 'hello', { node: args.node, scopes, schema, kinds });
   host.drift(schema, { url: null, node: args.node });
+  handPresence(host, context, scopes);
   return {
     node: storage.nodeId,
     vector: storage.vector,
@@ -312,6 +314,74 @@ const changes = (host) =>
  * the transport presented. `drift(schema, peer)` is the manager's report of
  * a schema that disagrees with this node's.
  */
+// A peer's presence, the inbound event `syncom/presence`: the update must be
+// the peer's own (every entry the node that said hello), of a scope it
+// asked for, within the rate, signed when this host requires signatures —
+// else refused, counted and announced, never relayed. What passes goes to
+// everyone in the scope's room but the sender, to the host's own presence
+// when `storage.sync.presence()` registered one, and into the host's memory
+// of the room, which a newcomer is handed at hello.
+const presence = (host) => async (context, update) => {
+  const session = context?.client?.data?.syncom;
+  // Refused: counted by code, announced as `refused` with the reason, never relayed.
+  const no = (reason, code) => {
+    host.otel.recordRefusal(code);
+    announceRefused(host, session?.node ?? null, reason, 1);
+  };
+  if (!session) return void no('HELLO', 428);
+  const { node, scopes } = session;
+  const { rate, timeout } = host.presence;
+  const now = Date.now();
+  const bucket = (session.presenceBucket ??= { tokens: rate, at: now });
+  bucket.tokens = Math.min(rate, bucket.tokens + ((now - bucket.at) / 1000) * rate);
+  bucket.at = now;
+  if (bucket.tokens < 1) return void no('PRESENCE_RATE', 429);
+  bucket.tokens -= 1;
+  if (!isPresenceUpdate(update)) return void no('PRESENCE_MALFORMED', 400);
+  if (!scopes.includes(update.scope)) {
+    return void no('PRESENCE_SCOPE', 403);
+  }
+  for (const entry of update.s) {
+    if (!Array.isArray(entry) || entry[0] !== node) {
+      return void no('PRESENCE_FORGED', 403);
+    }
+    if (host.storage.signatures === 'require' && entry.length < 5) {
+      return void no('PRESENCE_UNSIGNED', 403);
+    }
+  }
+  // The room's memory: the newest state per node, dropped once stale.
+  let room = host.presence.rooms.get(update.scope);
+  if (room === undefined) host.presence.rooms.set(update.scope, (room = new Map()));
+  const floor = now - timeout;
+  for (const [other, held] of room) if (held[2] < floor) room.delete(other);
+  for (const entry of update.s) {
+    const held = room.get(node);
+    if (held !== undefined && held[1] >= entry[1]) continue;
+    if (entry[3] === null) room.delete(node);
+    else if (room.size < host.presence.max || room.has(node)) room.set(node, entry);
+  }
+  const server = context?.server;
+  if (server && typeof server.to === 'function') {
+    const target = server.to(`syncom:${update.scope}`);
+    const sent = typeof target.except === 'function' && context.client ? target.except(context.client) : target;
+    sent.emit('syncom/presence', update);
+  }
+  await host.manager.receivePresence(update, { node, url: null });
+};
+
+// What a newcomer is handed at hello: the room's states of every scope it asked for.
+const handPresence = (host, context, scopes) => {
+  const server = context?.server;
+  const client = context?.client;
+  if (!server || typeof server.sendTo !== 'function' || !client || client.id === undefined) return;
+  const floor = Date.now() - host.presence.timeout;
+  for (const [scope, room] of host.presence.rooms) {
+    if (!scopes.includes(scope)) continue;
+    const s = [...room.values()].filter((entry) => entry[2] >= floor && entry[0] !== client.data?.syncom?.node);
+    if (s.length > 0) server.sendTo(client.id, 'syncom/presence', { p: 1, scope, s });
+  }
+};
+
 const createUnit = (manager, options, { storage, otel, wakers, feeds, drift }) => {
   const {
     access = 'session',
@@ -321,6 +391,20 @@ const createUnit = (manager, options, { storage, otel, wakers, feeds, drift }) =
     pageBytes = DEFAULT_PAGE_BYTES,
     meta,
   } = options;
+  const presenceOptions = options.presence ?? {};
+  if (typeof presenceOptions !== 'object' || presenceOptions === null) {
+    throw new TypeError('unit({ presence }): presence must be an object');
+  }
+  const { timeout: presenceTimeout = 30_000, rate: presenceRate = 20, max: presenceMax = 1024 } = presenceOptions;
+  for (const [name, value] of [
+    ['timeout', presenceTimeout],
+    ['rate', presenceRate],
+    ['max', presenceMax],
+  ]) {
+    if (!Number.isFinite(value) || value <= 0) {
+      throw new TypeError(`unit({ presence: { ${name} } }): a positive number`);
+    }
+  }
   const limits = normalizeLimits(options.limits);
   if (meta !== undefined && (typeof meta !== 'object' || meta === null || Array.isArray(meta))) {
     throw new TypeError('unit({ meta }): meta must be an object');
@@ -339,6 +423,7 @@ const createUnit = (manager, options, { storage, otel, wakers, feeds, drift }) =
     pageBytes,
     logger: storage.logger,
     track: tracked ?? ((id, data) => ({ [TRACKED]: true, id: String(id), data })),
+    presence: { timeout: presenceTimeout, rate: presenceRate, max: presenceMax, rooms: new Map() },
   };
   // `meta` rides on every procedure: what a wrpc `onRequest` hook reads as
   // `context.procedure.meta` — a hub-wide policy (rate limits, audit) stays
@@ -349,6 +434,8 @@ const createUnit = (manager, options, { storage, otel, wakers, feeds, drift }) =
     push: procedure(push(host)),
     snapshot: procedure(snapshot(host)),
     changes: procedure(changes(host)),
+    // An inbound event (wrpc's `on` block): fire-and-forget, never answered.
+    on: { presence: procedure(presence(host)) },
   };
 };
 

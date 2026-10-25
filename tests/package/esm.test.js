@@ -17,6 +17,7 @@ const ENTRIES = [
   'src/order/order.js',
   'src/undo/undo.js',
   'src/branch/branch.js',
+  'src/presence/presence.js',
   'src/contracts/contracts.js',
   'src/idb/idb.js',
   'src/all/all.js',

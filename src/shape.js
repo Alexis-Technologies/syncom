@@ -107,6 +107,39 @@ const wellFormed = (op) =>
   (op.msg === undefined || (typeof op.msg === 'string' && op.msg.length <= MAX_MESSAGE)) &&
   (op.type === 'advance' ? isPlainObject(op.vector) : isRecordId(op.id));
 
+// A value's JSON with the keys of every object sorted — what JSON.stringify
+// would give were keys ordered — so a digest or a signature is a property of
+// the value, not of the order the keys were left in. An own `__proto__` key
+// from JSON.parse is a key like any other here; undefined, a function or a
+// symbol is left out of an object and null in an array, as JSON would.
+const canonical = (value) => {
+  if (value === null || typeof value !== 'object') {
+    if (value === undefined || typeof value === 'function' || typeof value === 'symbol') return undefined;
+    return JSON.stringify(value);
+  }
+  if (typeof value.toJSON === 'function') return canonical(value.toJSON());
+  if (Array.isArray(value)) {
+    let out = '[';
+    for (let i = 0; i < value.length; i++) {
+      if (i > 0) out += ',';
+      const item = canonical(value[i]);
+      out += item === undefined ? 'null' : item;
+    }
+    return `${out}]`;
+  }
+  const keys = Object.keys(value).sort();
+  let out = '{';
+  let first = true;
+  for (let i = 0; i < keys.length; i++) {
+    const item = canonical(value[keys[i]]);
+    if (item === undefined) continue;
+    if (!first) out += ',';
+    first = false;
+    out += `${JSON.stringify(keys[i])}:${item}`;
+  }
+  return `${out}}`;
+};
+
 // Structural equality over JSON values — own keys, in any order.
 const deepEqual = (a, b) => {
   if (a === b) return true;
@@ -138,4 +171,5 @@ module.exports = {
   VALIDATED,
   wellFormed,
   deepEqual,
+  canonical,
 };

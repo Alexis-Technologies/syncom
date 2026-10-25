@@ -167,7 +167,8 @@ const ENTRIES = [
   // 6.5 with the unset patch and the loose inverse per field.
   // 7.4 with the paths (a reading taken back to its fields, src/compose.js).
   // 7.8 with transaction steps, groups, step meta and the scoped stack (trackedSources, records, paths).
-  { label: 'undo — browser (@alexify/syncom/undo)', entry: 'src/undo/undo.js', platform: 'browser', budget: 8 },
+  // 8.0 with the canonical JSON in shape.js.
+  { label: 'undo — browser (@alexify/syncom/undo)', entry: 'src/undo/undo.js', platform: 'browser', budget: 8.5 },
   // A fork opened through the parent's constructor, merged as ops: the
   // selection a push makes, the shape helpers, the protocol constants.
   {
@@ -175,6 +176,15 @@ const ENTRIES = [
     entry: 'src/branch/branch.js',
     platform: 'browser',
     // 3.6 measured once ValidationError moved into the errors module it shares.
+    // 4.0 with the canonical JSON in shape.js.
+    budget: 4.5,
+  },
+  // Presence: the emitter, the bounds, the signed entries; the identity comes from the storage.
+  {
+    label: 'presence — browser (@alexify/syncom/presence)',
+    entry: 'src/presence/presence.js',
+    platform: 'browser',
+    // 3.8 measured: shape.js (the canonical JSON, the stream and key checks) comes with the emitter.
     budget: 4,
   },
   // Everything in one import: the core with the text and tree plugins
@@ -197,7 +207,8 @@ const ENTRIES = [
   // 88.6 with transactions (transact in src/commit.js, the facade's tx, the message slot).
   // 90.2 with the change reports (applyOp changes, the plugins' changeOf, the transaction event).
   // 92.0 with observe, the deltas (toDelta's compose, applyDelta) and the cursor positions.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 94 },
+  // 94.6 with presence carried by the sync plugin.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 96 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -253,14 +264,16 @@ const ENTRIES = [
   // the op model (packOps), the vectors, the hooks, the scopes and the
   // telemetry writer they share with the core (17.7 measured; what it adds
   // to the core is the 6.8 KB the main entry came down by).
-  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 18 },
+  // 20.4 with presence: the unit's inbound event, the room's memory, the manager's carrying.
+  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 21 },
   // The schema: the definitions read once, the validator adapters, the lens.
   // 4.3 with a set folded back by path (src/entity.js over src/paths.js).
   {
     label: 'schema — browser (@alexify/syncom/schema)',
     entry: 'src/schema/schema.js',
     platform: 'browser',
-    budget: 4.5,
+    // 4.6 with the canonical JSON in shape.js.
+    budget: 5,
   },
   // The OpenTelemetry adapter: the tracer and meter resolved, the instruments, the gauges.
   {

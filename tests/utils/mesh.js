@@ -5,15 +5,43 @@
 
 const { MemoryLink } = require('./memory-link.js');
 
+// What wrpc's `context.server` does for the links of one host: rooms the
+// clients joined at hello, `to(room).except(client).emit(name, data)` and
+// `sendTo(clientId, name, data)`.
+const createServer = () => {
+  const server = { links: new Set() };
+  const deliver = (rooms, except, name, data) => {
+    for (const link of server.links) {
+      if (except !== null && link.client === except) continue;
+      if (rooms !== null && !rooms.some((room) => link.client.rooms.has(room))) continue;
+      link.deliver(name, data);
+    }
+  };
+  const target = (rooms, except) => ({
+    to: (...more) => target([...(rooms ?? []), ...more], except),
+    except: (client) => target(rooms, client),
+    emit: (name, data) => void deliver(rooms, except, name, data),
+  });
+  server.to = (...rooms) => target(rooms, null);
+  server.except = (client) => target(null, client);
+  server.sendTo = (clientId, name, data) => {
+    for (const link of server.links) if (link.client.id === clientId) link.deliver(name, data);
+  };
+  return server;
+};
+
 const createMesh = async (t, names, edges, createStorage, options = {}) => {
   const units = new Map();
   const links = new Map();
   const storages = new Map();
+  const servers = new Map();
   const connect = (node) => {
     const [, host] = node.url.split('mem://');
     const unit = units.get(host);
     if (!unit) throw new Error(`no host ${host}`);
-    const link = new MemoryLink(unit, options.link);
+    let server = servers.get(host);
+    if (server === undefined) servers.set(host, (server = createServer()));
+    const link = new MemoryLink(unit, { ...options.link, server });
     links.set(node.url, link);
     return link;
   };
@@ -29,7 +57,7 @@ const createMesh = async (t, names, edges, createStorage, options = {}) => {
     await storages.get(from).sync.addNode({ url: `mem://${to}`, scopes: options.scopes?.[from] });
   }
   for (const storage of storages.values()) await storage.sync.start();
-  return { storages, links, units, connect, get: (name) => storages.get(name) };
+  return { storages, links, units, servers, connect, get: (name) => storages.get(name) };
 };
 
 const sameVectors = (storages) => {

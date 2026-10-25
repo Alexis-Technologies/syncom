@@ -238,7 +238,8 @@ Extends `Emitter`. See [Sync](../guide/sync).
 | `sync(url?)` | `Promise<Array<{ url, pushed }>>` | Pushes what the peers lack now |
 | `peers()` | `Array<{ url, node, connected, subscribed, cursor, lastSync, pending, behind, stuck, lastError }>` | Live view; `behind` after a failed push until the next recovery, `stuck` once a page failed three times in a row (see [Protocol](../guide/sync#protocol)), `lastError` `{ code, message, at }` or null |
 | `hosted()` | `Array<{ node, scopes, since, cursor }>` | Hosting side: every peer with a live `changes` feed here (`scopes` null means every scope) |
-| `unit({ access, authorize, tracked, pageSize, pageBytes, limits, meta }?)` | router unit | The procedures a host mounts: `hello`, `push`, `snapshot`, `changes` — see [Hosting](../guide/sync#hosting) |
+| `unit({ access, authorize, tracked, pageSize, pageBytes, limits, meta, presence }?)` | router unit | The procedures a host mounts: `hello`, `push`, `snapshot`, `changes`, and the inbound event `on.presence` — a peer's [presence](../guide/presence) update, checked (its own node, a scope it asked for, `presence.rate` per second — 20 — signed under `'require'`) and relayed to the scope's room but the sender; the host keeps the newest state per node (`presence.max` per scope, 1 024; for `presence.timeout` ms, 30 000) and hands them to a newcomer at hello — see [Hosting](../guide/sync#hosting) |
+| `presence(instance)` | `() => void` | Carries a [presence](../guide/presence) instance: its updates go to every connected host as the `syncom/presence` event, a host's come back to it, a host hands its room's at hello; returns the function that stops carrying it |
 
 Properties: `storage`, `started`.
 
@@ -741,6 +742,20 @@ vocabulary, Myers and Emitter are the core's. `UndoManager` is the class
 | `steps` | `{ undo, redo }` — the steps each way, newest last, `{ id, meta, records, at, source, message, txn }` each: `meta` the application's object, the same on every event of the step, carried to its redo step and back (a selection kept as cursor tokens, restored through `position()`) |
 | `clear()`, `stop()` | Drops the stacks; `stop()` also stops listening and lets the log compact |
 | `on('push' \| 'pop' \| 'change', fn)` | An `Emitter`: `push` `({ direction: 'undo', records, step })` a step began or grew; `pop` `({ direction, applied, skipped, step })` a step was undone or redone (`step` the one taken back or done again, its `meta` to read); `change` `()` after anything that moved the stacks — those two, `clear()`, a purge forgetting its record |
+
+## Presence (subpath)
+
+`@alexify/syncom/presence` — who is here and what they are doing, per node, never logged. See [Presence](../guide/presence).
+
+| Member | Notes |
+| --- | --- |
+| `createPresence(storage, { scope = '*', timeout = 30000 }?)` | `Presence` — an `Emitter` holding this node's state and the states it heard of, for one sync `scope`; a state lives `timeout` ms without a renewal (this node's renews itself); signed with the node's key when the [signing](#signing-subpath) plugin is registered; a wrong option is a `TypeError` |
+| `set(state)`, `delete()` | `Promise<PresenceUpdate>` — this node's state (a JSON object of at most 64 keys, 8 deep, 16 KiB as JSON; `PRESENCE_SIZE` otherwise), newer by this node's clock, announced as an `update` event; `delete()` leaves (a null state) |
+| `local`, `get(node)`, `states()`, `nodes()` | This node's state or null; a node's state or undefined; every state by node (`Map`); the nodes with a state |
+| `encode(nodes?)` | `PresenceUpdate` — `{ p: 1, scope, s: [[node, clock, ts, state, sig?]] }` of every state known here, for a newcomer; `nodes` narrows it |
+| `apply(update, { from }?)` | `Promise<{ applied, stale, forged, unsigned, refused }>` — takes what a transport brought: per node the newest by clock, a state older than the timeout is stale, a signature that does not verify is forged, an unsigned state under `sync.signatures: 'require'` is refused, a malformed or oversized entry too; with `from`, every entry must be that node's; another scope's update and this node's own entries are ignored |
+| `destroy()` | `Promise<void>` — leaves (a last `update` with a null state), clears the timers, forgets every state |
+| `on('change' \| 'update', fn)` | `change` `({ added, updated, removed })` the nodes whose state came, changed, went (an expiry included); `update` `(update)` this node's state to send — what `storage.sync.presence(instance)` carries |
 
 ## Branch (subpath)
 

@@ -79,6 +79,9 @@ class SyncManager extends Emitter {
   #feeds = new Set();
   #onChange = null;
   #started = false;
+  // The presence instances this manager carries (`presence()`): their
+  // updates go to every connected peer, a peer's come back to them.
+  #presences = new Set();
   #saving = new Map();
   #otel;
   #hooks;
@@ -381,6 +384,11 @@ class SyncManager extends Emitter {
         }
         peer.link = link;
         peer.handlers = {
+          // A host's presence event: its own, or what it relays of its
+          // room — the host checked who said what, a signature says the rest.
+          'syncom/presence': (update) => {
+            this.receivePresence(update, null).catch(() => {});
+          },
           open: () => {
             peer.connected = true;
           },
@@ -497,6 +505,8 @@ class SyncManager extends Emitter {
     await this.#saveNode(node);
     notify(this, this.#storage.logger, 'peer', { url: node.url, connected: true, node: answer.node, schema });
     this.#drift(schema, { url: node.url, node: answer.node });
+    // Greeted: the host learns this node's presence, and relays it.
+    this.#sendPresence(peer);
     try {
       await this.#push(peer, 'handshake');
       peer.behind = false;
@@ -950,6 +960,60 @@ class SyncManager extends Emitter {
 
   // ---------------------------------------------------------------------
   // The hosting side
+
+  /**
+   * Carries a presence instance (`@alexify/syncom/presence`): its updates
+   * go to every connected host as the `syncom/presence` event, a host's
+   * come back to it; a host hands its own and its room's to this node at
+   * hello. Several instances, one per scope. Returns the function that
+   * stops carrying it.
+   */
+  presence(instance) {
+    if (!instance || typeof instance.apply !== 'function' || typeof instance.on !== 'function') {
+      throw new TypeError('presence() takes a presence instance');
+    }
+    const onUpdate = (update) => this.#announcePresence(update);
+    instance.on('update', onUpdate);
+    this.#presences.add(instance);
+    for (const peer of this.#peers.values()) if (peer.remote) this.#sendPresence(peer, instance);
+    return () => {
+      instance.off('update', onUpdate);
+      this.#presences.delete(instance);
+    };
+  }
+
+  // A peer's presence update, from a dialed host or a greeted client: to
+  // every instance of its scope. Never logged.
+  async receivePresence(update, via) {
+    for (const instance of this.#presences) {
+      if (instance.scope === update?.scope) await instance.apply(update, { from: via?.node ?? null });
+    }
+  }
+
+  #announcePresence(update) {
+    for (const peer of this.#peers.values()) {
+      if (!peer.connected || !peer.remote || typeof peer.link?.send !== 'function') continue;
+      try {
+        peer.link.send('syncom/presence', update);
+      } catch (error) {
+        this.#storage.logger.warn({ event: 'sync.presence.send', url: peer.node.url, err: error });
+      }
+    }
+  }
+
+  // This node's own state to a host just greeted.
+  #sendPresence(peer, only = null) {
+    if (typeof peer.link?.send !== 'function') return;
+    for (const instance of this.#presences) {
+      if (only !== null && instance !== only) continue;
+      if (instance.local === null) continue;
+      try {
+        peer.link.send('syncom/presence', instance.encode([instance.node]));
+      } catch (error) {
+        this.#storage.logger.warn({ event: 'sync.presence.send', url: peer.node.url, err: error });
+      }
+    }
+  }
 
   /**
    * The router unit a wrpc server (or anything shaped like one) hosts:

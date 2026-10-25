@@ -34,7 +34,7 @@ const { isPlainObject, isRecordId, invalidId, isStreamName, isKeyId, VALIDATED }
 const { under } = require('./paths.js');
 const { fieldName } = require('./args.js');
 const { compose, composeData } = require('./compose.js');
-const { COMMIT, REFRESH, SOURCE, PLUGINS, CURSOR } = require('./symbols.js');
+const { COMMIT, REFRESH, SOURCE, PLUGINS, CURSOR, SIGNER } = require('./symbols.js');
 const { missing } = require('./plugin.js');
 const { SyncomError, typed } = require('./errors.js');
 
@@ -919,6 +919,13 @@ class Storage extends Emitter {
   // The registry itself, for the subpaths that fold patches or open a fork.
   get [PLUGINS]() {
     return this.#plugins;
+  }
+
+  // The node's identity for a subpath that signs what is not an op
+  // (presence): `{ id, signMessage, verifyMessage }`, or null without the
+  // signing plugin. Never the keys.
+  get [SIGNER]() {
+    return this.#identity;
   }
 
   get path() {

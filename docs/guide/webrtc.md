@@ -138,9 +138,11 @@ for (const orgId of myOrgIds) {
 ```
 
 Presence — who is editing what — is ephemeral and belongs next to the
-documents, not in them: `mesh.broadcast('presence/state', …)` in a room, or
-`context.server.to('presence:' + docId).except(context.client).emit(…)` on
-the hub.
+documents, not in them: [`@alexify/syncom/presence`](./presence) hands you
+`encode()` and `apply()`, so a room carries it as
+`mesh.broadcast('presence/state', presence.encode())` and every peer feeds
+what it hears to `presence.apply(update)`; with a hub, `storage.sync.presence(instance)`
+does the carrying over the syncom links.
 
 ## Reconnect and close
 

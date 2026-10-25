@@ -15,7 +15,7 @@
 
 const { calculateHash, sign, signAsync, verifyAsync } = require('./ed25519.js');
 const { generateUUID } = require('../utils.js');
-const { isKeyId, VERDICT } = require('../shape.js');
+const { isKeyId, VERDICT, canonical } = require('../shape.js');
 
 const HEADER_VERSION = 1;
 const PAYLOAD = ['data', 'meta', 'key', 'value', 'vector'];
@@ -26,33 +26,6 @@ const { OK, UNSIGNED, FORGED } = VERDICT;
 // would give were keys ordered — so the digest is a property of the value,
 // not of the order prepareOp, unpackOps or the log left the keys in. An own
 // `__proto__` key from JSON.parse is a key like any other here.
-const canonical = (value) => {
-  if (value === null || typeof value !== 'object') {
-    if (value === undefined || typeof value === 'function' || typeof value === 'symbol') return undefined;
-    return JSON.stringify(value);
-  }
-  if (typeof value.toJSON === 'function') return canonical(value.toJSON());
-  if (Array.isArray(value)) {
-    let out = '[';
-    for (let i = 0; i < value.length; i++) {
-      if (i > 0) out += ',';
-      const item = canonical(value[i]);
-      out += item === undefined ? 'null' : item;
-    }
-    return `${out}]`;
-  }
-  const keys = Object.keys(value).sort();
-  let out = '{';
-  let first = true;
-  for (let i = 0; i < keys.length; i++) {
-    const item = canonical(value[keys[i]]);
-    if (item === undefined) continue;
-    if (!first) out += ',';
-    first = false;
-    out += `${JSON.stringify(keys[i])}:${item}`;
-  }
-  return `${out}}`;
-};
 
 // The fields a digest covers, as the op carries them; null when it carries
 // none (a `delete`, a `purge`, a scrubbed op).

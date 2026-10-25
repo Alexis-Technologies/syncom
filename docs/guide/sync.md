@@ -661,6 +661,7 @@ const unit = storage.sync.unit({
 | `pageBytes` | `4 MiB` | Above this a page is sent inline rather than streamed |
 | `limits` | — | Per-peer push limits: `opsPerPush`, `bytesPerPush` (the JSON length of a page) and `opsPerSecond` — see below |
 | `meta` | — | Copied onto all four procedures, for a wrpc `onRequest` hook to read as `context.procedure.meta` |
+| `presence` | `{ timeout: 30000, rate: 20, max: 1024 }` | The unit's inbound event `on.presence` — a peer's [presence](./presence) update, its own node's and of a scope it asked for, at most `rate` a second, signed under `'require'` — relayed to the scope's room; the host keeps the newest state per node (`max` per scope, for `timeout` ms) and hands them to a newcomer at hello |
 
 `limits` are the host's own, checked in `push` — the one place that knows the
 ops and the bytes of a page, whatever transport carried it. A page over
@@ -706,11 +707,15 @@ interface SyncLink {
   call(method: string, args: unknown): Promise<unknown>;
   subscribe(method, args, { lastEventId, onData(value, eventId), onError, onEnd }): { unsubscribe() };
   stream?(id: string): AsyncIterable<Uint8Array>; // binary-capable transports
-  on(event: 'open' | 'close' | 'reconnect', listener): void;
+  send?(event: 'syncom/presence', data: unknown): void; // a fire-and-forget event to the host
+  on(event: 'open' | 'close' | 'reconnect' | 'syncom/presence', listener): void;
   off(event, listener): void;
   close(): void;
 }
 ```
+
+`send` and the `syncom/presence` event are what [presence](./presence)
+travels as; a link without them carries the ops alone.
 
 `tests/utils/memory-link.js` in the repository is an in-process implementation
 the engine's own tests run on.

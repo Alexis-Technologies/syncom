@@ -14,6 +14,18 @@ There is no released version section until then; everything below lands in it.
 
 ### Added
 
+- **Presence.** `@alexify/syncom/presence`: `createPresence(storage, { scope,
+  timeout })` holds this node's ephemeral state and the states it heard of
+  — who is here, what they edit, where their cursor is — per node, newest
+  by its clock, gone without a renewal, signed with the node's key when the
+  signing plugin is registered and verified on arrival (a forged or, under
+  `'require'`, an unsigned state is refused), never logged. The sync plugin
+  carries it: `storage.sync.presence(instance)` sends updates to every host
+  as the `syncom/presence` event; a host's unit checks them (the peer's own
+  node, its scopes, a rate), relays them to the scope's room and hands a
+  newcomer the room's states at hello. The link contract gains an optional
+  `send(event, data)`; the wrpc adapter maps it to `sendEvent` and the
+  unit's events.
 - **Undo: transactions, groups, step meta, a scoped stack.** A
   transaction's commits are one undo step whatever the interval;
   `group(fn)` (and `groupStart()`/`groupEnd()`) makes one step of everything

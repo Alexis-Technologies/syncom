@@ -58,6 +58,8 @@ export interface PeerView {
 export interface SyncUnitOptions {
   /** wrpc's access level for the four procedures (default `'session'`). */
   access?: string;
+  /** Presence on this host: how long a state is kept for newcomers (`timeout`, 30 000 ms), updates per second per peer (`rate`, 20), states per scope (`max`, 1 024). */
+  presence?: { timeout?: number; rate?: number; max?: number };
   /**
    * Gates a peer by whatever the transport presented, and by what hello says.
    * The `scopes` hello carries are what the peer may then write (`push`) and
@@ -104,6 +106,8 @@ export interface SyncUnit {
   push: SyncProcedure;
   snapshot: SyncProcedure;
   changes: SyncProcedure;
+  /** The inbound events (wrpc's `on` block): `presence`, a peer's presence update, relayed to its scope's room. */
+  on: { presence: SyncProcedure };
 }
 
 /** The events a SyncManager emits; listeners are contained. */
@@ -187,7 +191,25 @@ export interface SyncManager {
   peers(): PeerView[];
   /** Hosting side: every peer with a live `changes` feed here. */
   hosted(): HostedPeer[];
+  /**
+   * Carries a presence instance (`@alexify/syncom/presence`): its updates go
+   * to every connected host as the `syncom/presence` event, a host's come
+   * back to it, a host hands its room's to this node at hello. Returns the
+   * function that stops carrying it.
+   */
+  presence(instance: PresenceCarried): () => void;
   unit(options?: SyncUnitOptions): SyncUnit;
+}
+
+/** What `presence()` carries: the shape of a `Presence` of `@alexify/syncom/presence`. */
+export interface PresenceCarried {
+  readonly scope: string;
+  readonly node: string;
+  readonly local: Record<string, unknown> | null;
+  apply(update: unknown, options?: { from?: string | null }): Promise<unknown>;
+  encode(nodes?: readonly string[] | null): unknown;
+  on(event: 'update', listener: (update: any) => void): void;
+  off(event: 'update', listener?: (update: any) => void): void;
 }
 
 export interface SyncManagerConstructor {
