@@ -51,6 +51,48 @@ const main = async () => {
   const big = applyOp(null, op('splice', 1, 'A', 'body', { at: '^', content: 'x'.repeat(100_000) })).entry.meta.seqs
     .body;
   await bench('buildIndex + render — a 100 KB text (one run)', () => S.render(S.buildIndex(big)));
+  // Ten thousand runs of ten characters, each anchored after the last
+  // element of the one before — a 100 KB text as a long chain of right
+  // children, origins alternating so no run extends another. Built as a
+  // block and folded in through one merge: folding it in op by op is itself
+  // the slow path this measures. Edits land anywhere in it, at the head, and
+  // as a cut; the reading is built anew.
+  const RUNS = 10_000;
+  const chainRuns = {};
+  const anchors = [];
+  let last = null;
+  for (let i = 0; i < RUNS; i++) {
+    const key = S.runKey(10 + i, i % 2 ? 'B' : 'A');
+    chainRuns[key] = [last === null ? S.HEAD : `>${S.elemKey(last, 9)}`, ['xxxxxxxxxx']];
+    anchors.push(key);
+    last = key;
+  }
+  const longMeta = {
+    clock: {},
+    base: null,
+    deleted: null,
+    counters: {},
+    sets: {},
+    seqs: { body: { k: 't', ts: 10 + RUNS, runs: chainRuns } },
+    trees: {},
+  };
+  const longText = applyOp(null, {
+    ...op('merge', 20_000, 'M'),
+    data: { body: 'x'.repeat(RUNS * 10) },
+    meta: longMeta,
+  }).entry;
+  ts = Math.max(ts, 30_000);
+  const places = Array.from({ length: 4096 }, (_, i) => `<${S.elemKey(anchors[(i * 7919) % RUNS], (i * 31) % 10)}`);
+  const cuts = Array.from({ length: 4096 }, (_, i) => [anchors[(i * 7919) % RUNS], 0, 10]);
+  let k = 0;
+  await bench('applyOp — insert one char at a random place of a 100 KB text (10 000 runs)', () =>
+    applyOp(longText, op('splice', ++ts, 'C', 'body', { at: places[k++ & 4095], content: 'z' })));
+  await bench('applyOp — prepend one char to a 10 000-run text', () =>
+    applyOp(longText, op('splice', ++ts, 'C', 'body', { at: `<${S.elemKey(anchors[0], 0)}`, content: 'z' })));
+  await bench('applyOp — delete 10 chars from a 10 000-run text', () =>
+    applyOp(longText, op('splice', ++ts, 'C', 'body', { cut: [cuts[k++ & 4095]], content: '' })));
+  await bench('buildIndex + render — a 100 KB text (10 000 runs)', () =>
+    S.render(S.buildIndex(longText.meta.seqs.body)));
   let marked = oneRun;
   for (let i = 0; i < 50; i++) {
     const start = `<${S.elemKey(run, i * 10)}`;

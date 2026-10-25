@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-24T15:16:19.982Z",
+  "generatedAt": "2026-10-25T10:38:32.216Z",
   "machine": {
     "cpu": "Apple M3 Max",
     "cores": 16,
@@ -8,111 +8,6 @@
     "node": "v24.14.1"
   },
   "results": [
-    {
-      "subject": "apply",
-      "name": "applyOp — set one field on a 5-field entry",
-      "opsPerSec": 3878877
-    },
-    {
-      "subject": "apply",
-      "name": "applyOp — inc a counter",
-      "opsPerSec": 3785335
-    },
-    {
-      "subject": "apply",
-      "name": "applyOp — add to a 20-element set",
-      "opsPerSec": 215539
-    },
-    {
-      "subject": "apply",
-      "name": "applyOp — remove from a 20-element set",
-      "opsPerSec": 225366
-    },
-    {
-      "subject": "apply",
-      "name": "applyOp — write the whole record",
-      "opsPerSec": 749830
-    },
-    {
-      "subject": "apply",
-      "name": "applyOp — merge a peer entry",
-      "opsPerSec": 583583
-    },
-    {
-      "subject": "apply",
-      "name": "packOps — 500 writes",
-      "opsPerSec": 63907
-    },
-    {
-      "subject": "apply",
-      "name": "unpackOps — 500 writes",
-      "opsPerSec": 40107
-    },
-    {
-      "subject": "apply",
-      "name": "applyRemote — 100 writes, new records",
-      "opsPerSec": 6376
-    },
-    {
-      "subject": "apply",
-      "name": "applyRemote — 500 writes, new records",
-      "opsPerSec": 6638
-    },
-    {
-      "subject": "apply",
-      "name": "applyRemote — 100 signed writes, new records",
-      "opsPerSec": 5025
-    },
-    {
-      "subject": "apply",
-      "name": "verifyOp — 100 signed writes",
-      "opsPerSec": 37012
-    },
-    {
-      "subject": "apply",
-      "name": "applyRemote — 100 sets on cached records",
-      "opsPerSec": 10087
-    },
-    {
-      "subject": "apply",
-      "name": "applyRemote — 100 incs on cached records",
-      "opsPerSec": 9121
-    },
-    {
-      "subject": "apply",
-      "name": "applyRemote — 100 adds on cached records",
-      "opsPerSec": 6395
-    },
-    {
-      "subject": "apply",
-      "name": "applyRemote — 100 writes, new records (chain: false)",
-      "opsPerSec": 6742
-    },
-    {
-      "subject": "apply",
-      "name": "applyRemote — 500 writes, new records (chain: false)",
-      "opsPerSec": 6846
-    },
-    {
-      "subject": "apply",
-      "name": "applyRemote — 100 signed writes, new records (chain: false)",
-      "opsPerSec": 5092
-    },
-    {
-      "subject": "apply",
-      "name": "applyRemote — 100 sets on cached records (chain: false)",
-      "opsPerSec": 10696
-    },
-    {
-      "subject": "apply",
-      "name": "applyRemote — 100 incs on cached records (chain: false)",
-      "opsPerSec": 10091
-    },
-    {
-      "subject": "apply",
-      "name": "applyRemote — 100 adds on cached records (chain: false)",
-      "opsPerSec": 7060
-    },
     {
       "subject": "branch",
       "name": "branch — fork at the present (200 records)",
@@ -559,74 +454,209 @@
       "opsPerSec": 340
     },
     {
+      "subject": "apply",
+      "name": "applyOp — set one field on a 5-field entry",
+      "opsPerSec": 4050212
+    },
+    {
+      "subject": "apply",
+      "name": "applyOp — inc a counter",
+      "opsPerSec": 3805386
+    },
+    {
+      "subject": "apply",
+      "name": "applyOp — add to a 20-element set",
+      "opsPerSec": 215597
+    },
+    {
+      "subject": "apply",
+      "name": "applyOp — remove from a 20-element set",
+      "opsPerSec": 227159
+    },
+    {
+      "subject": "apply",
+      "name": "applyOp — write the whole record",
+      "opsPerSec": 776654
+    },
+    {
+      "subject": "apply",
+      "name": "applyOp — merge a peer entry",
+      "opsPerSec": 583092
+    },
+    {
+      "subject": "apply",
+      "name": "packOps — 500 writes",
+      "opsPerSec": 66596
+    },
+    {
+      "subject": "apply",
+      "name": "unpackOps — 500 writes",
+      "opsPerSec": 41412
+    },
+    {
+      "subject": "apply",
+      "name": "applyRemote — 100 writes, new records",
+      "opsPerSec": 6403
+    },
+    {
+      "subject": "apply",
+      "name": "applyRemote — 500 writes, new records",
+      "opsPerSec": 6399
+    },
+    {
+      "subject": "apply",
+      "name": "applyRemote — 100 signed writes, new records",
+      "opsPerSec": 4312
+    },
+    {
+      "subject": "apply",
+      "name": "verifyOp — 100 signed writes",
+      "opsPerSec": 37214
+    },
+    {
+      "subject": "apply",
+      "name": "applyRemote — 100 sets on cached records",
+      "opsPerSec": 9699
+    },
+    {
+      "subject": "apply",
+      "name": "applyRemote — 100 incs on cached records",
+      "opsPerSec": 10161
+    },
+    {
+      "subject": "apply",
+      "name": "applyRemote — 100 adds on cached records",
+      "opsPerSec": 6243
+    },
+    {
+      "subject": "apply",
+      "name": "applyRemote — 500 random inserts into a 5K text",
+      "opsPerSec": 764
+    },
+    {
+      "subject": "apply",
+      "name": "applyRemote — 100 writes, new records (chain: false)",
+      "opsPerSec": 6611
+    },
+    {
+      "subject": "apply",
+      "name": "applyRemote — 500 writes, new records (chain: false)",
+      "opsPerSec": 6634
+    },
+    {
+      "subject": "apply",
+      "name": "applyRemote — 100 signed writes, new records (chain: false)",
+      "opsPerSec": 5450
+    },
+    {
+      "subject": "apply",
+      "name": "applyRemote — 100 sets on cached records (chain: false)",
+      "opsPerSec": 10687
+    },
+    {
+      "subject": "apply",
+      "name": "applyRemote — 100 incs on cached records (chain: false)",
+      "opsPerSec": 10565
+    },
+    {
+      "subject": "apply",
+      "name": "applyRemote — 100 adds on cached records (chain: false)",
+      "opsPerSec": 6999
+    },
+    {
+      "subject": "apply",
+      "name": "applyRemote — 500 random inserts into a 5K text (chain: false)",
+      "opsPerSec": 751
+    },
+    {
       "subject": "sequence",
       "name": "applyOp — append one char to a 1 000-char text (one run)",
-      "opsPerSec": 158717
+      "opsPerSec": 171129
     },
     {
       "subject": "sequence",
       "name": "applyOp — insert one char into a 1 000-char text (new run)",
-      "opsPerSec": 25814
+      "opsPerSec": 26824
     },
     {
       "subject": "sequence",
       "name": "applyOp — delete 10 chars from a 1 000-char text",
-      "opsPerSec": 30325
+      "opsPerSec": 31596
     },
     {
       "subject": "sequence",
       "name": "applyOp — prepend one char to a 1 000-run text",
-      "opsPerSec": 2310
+      "opsPerSec": 2500
     },
     {
       "subject": "sequence",
       "name": "applyOp — merge two pictures of a 1 000-char text",
-      "opsPerSec": 434
+      "opsPerSec": 371
     },
     {
       "subject": "sequence",
       "name": "buildIndex + render — a 1 000-char text",
-      "opsPerSec": 38401
+      "opsPerSec": 39439
     },
     {
       "subject": "sequence",
       "name": "buildIndex + render — a 100 KB text (one run)",
-      "opsPerSec": 376
+      "opsPerSec": 383
+    },
+    {
+      "subject": "sequence",
+      "name": "applyOp — insert one char at a random place of a 100 KB text (10 000 runs)",
+      "opsPerSec": 98
+    },
+    {
+      "subject": "sequence",
+      "name": "applyOp — prepend one char to a 10 000-run text",
+      "opsPerSec": 98
+    },
+    {
+      "subject": "sequence",
+      "name": "applyOp — delete 10 chars from a 10 000-run text",
+      "opsPerSec": 110
+    },
+    {
+      "subject": "sequence",
+      "name": "buildIndex + render — a 100 KB text (10 000 runs)",
+      "opsPerSec": 160
     },
     {
       "subject": "sequence",
       "name": "spans — 1 000 chars, 50 overlapping marks",
-      "opsPerSec": 11429
+      "opsPerSec": 11509
     },
     {
       "subject": "sequence",
       "name": "diff — one keystroke in a 1 KB text",
-      "opsPerSec": 315083
+      "opsPerSec": 314650
     },
     {
       "subject": "sequence",
       "name": "storage.push — one char (memory fsi)",
-      "opsPerSec": 8051
+      "opsPerSec": 8172
     },
     {
       "subject": "sequence",
       "name": "storage.updateText — one keystroke in a 1 KB text (memory fsi)",
-      "opsPerSec": 2143
+      "opsPerSec": 2170
     },
     {
       "subject": "sequence",
       "name": "storage.move — in a 100-element list (memory fsi)",
-      "opsPerSec": 1216
+      "opsPerSec": 1251
     },
     {
       "subject": "sequence",
       "name": "storage.push — one char into a 10 KB text (memory fsi)",
-      "opsPerSec": 3233
+      "opsPerSec": 3279
     },
     {
       "subject": "sequence",
       "name": "storage.push — one char into a 10 KB text, defer: 50 (memory fsi)",
-      "opsPerSec": 3143
+      "opsPerSec": 3213
     }
   ]
 }
