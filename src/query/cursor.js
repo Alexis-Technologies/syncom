@@ -1,12 +1,13 @@
 'use strict';
 
-// Queries over a collection: a Mango-style predicate compiled once, and a
-// cursor that plans how to answer it — from the catalog alone when every
-// field it reads is indexed, from the records otherwise. No requires beyond
-// the engine's own: this file ships to the browser.
+// Queries over a collection (the query plugin's, ./query.js): a Mango-style
+// predicate compiled once, and a cursor that plans how to answer it — from
+// the catalog alone when every field it reads is indexed, from the records
+// otherwise. No requires beyond the engine's own: this file ships to the
+// browser.
 
-const { deepEqual } = require('./shape.js');
-const { valueOf } = require('./catalog.js');
+const { deepEqual } = require('../shape.js');
+const { valueOf } = require('../catalog.js');
 
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 const MAX_REGEX = 1000;

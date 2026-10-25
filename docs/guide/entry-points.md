@@ -20,6 +20,7 @@ given, and another storage in the same process may run with others.
 | `@alexify/syncom/sync` | the sync manager: nodes, links, pushes, the feed, the bootstrap, the hosting unit; the core keeps `applyRemote()` and `outbound()` | `open({ plugins: [sync] })` |
 | `@alexify/syncom/schema` | entity definitions: collections, validation, indexes, migrations and the lens, `migrate()`, `check()` | `open({ plugins: [schema], schema })` |
 | `@alexify/syncom/telemetry` | the OpenTelemetry adapter: `{ api }` or `{ tracer, meter }` into the writer the engine records through; `createTelemetry()` | `open({ plugins: [telemetry], telemetry })` |
+| `@alexify/syncom/query` | the cursor behind `select()`, `count()` and `watch()` on a collection; the catalog stays in the core | `open({ plugins: [query] })` |
 | `@alexify/syncom/all` | the core with every shipped plugin registered — the API as one import | `require('@alexify/syncom/all').open()` |
 | `@alexify/syncom/undo`, `/branch`, `/order` | the undo stack, forks and merges, fractional indexes | functions over a storage |
 | `@alexify/syncom/memory`, `/layered` | `memory()`, the backend in memory; `layered([top, …, bottom])`, one backend over several as a multi-level cache | `open({ fsi })` |
@@ -39,8 +40,9 @@ const id = await storage.insert({ kind: 'doc' });
 await storage.splice(id, 'body', 0, 0, 'hello');
 ```
 
-A **local-first database** with no text or tree fields opens the core alone;
-the lists, texts and trees ship nothing to it. The core alone has no key: the
+A **local-first database** opens the core with `schema` and `query` — the
+collections, and the cursor over them — and no text or tree fields: the
+lists, texts and trees ship nothing to it. The core alone has no key: the
 node id is what `getId` mints (a UUID by default), its ops go out unsigned,
 no chain is written. **Signed and audited** — the level of security the
 package had as one piece — is three plugins:
@@ -97,9 +99,9 @@ const { open } = require('@alexify/syncom/all'); // text, tree, signing, chain a
 ## Sizes
 
 `pnpm size` measures every entry on its own, min+gzip, against a budget: the
-core about 40 KB, `/text` 14 KB, `/tree` 5 KB, `/signing` 4 KB, `/chain`
+core about 39 KB, `/text` 14 KB, `/tree` 5 KB, `/signing` 4 KB, `/chain`
 2 KB, `/encryption` 4 KB, `/sync` 18 KB, `/schema` 4 KB, `/telemetry` 3 KB,
-`/all` 72 KB. In an app bundle the
+`/query` 5 KB, `/all` 72 KB. In an app bundle the
 modules the blocks share with the core are counted once, so core + `/text` is
 about 53 KB, the three security blocks add about 2 KB together and `/sync`
 about 7 KB — not the sum of the rows.

@@ -30,6 +30,7 @@ const ENTRIES = [
   'src/sync/sync.js',
   'src/schema/schema.js',
   'src/telemetry/telemetry.js',
+  'src/query/query.js',
 ];
 
 for (const entry of ENTRIES) {

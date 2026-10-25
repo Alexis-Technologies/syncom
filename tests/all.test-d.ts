@@ -56,8 +56,10 @@ expectType<
     syncom.Plugin<syncom.SyncApi>,
     syncom.Plugin,
     syncom.Plugin,
+    syncom.Plugin,
   ]
 >(syncom.PLUGINS);
+expectType<syncom.Plugin>(syncom.query);
 expectType<syncom.Plugin>(syncom.telemetry);
 expectType<syncom.SyncomTelemetryWriter>(syncom.createTelemetry({ api: {} }));
 expectType<syncom.Plugin>(syncom.schema);

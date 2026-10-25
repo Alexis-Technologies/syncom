@@ -76,6 +76,9 @@ const HOME = Object.freeze({
   setAt: 'text',
   treeMove: 'tree',
   treeRemove: 'tree',
+  select: 'query',
+  count: 'query',
+  watch: 'query',
 });
 
 /** The refusal of a call, an op type or a patch action whose plugin is not registered here. */

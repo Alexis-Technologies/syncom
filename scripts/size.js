@@ -180,8 +180,9 @@ const ENTRIES = [
   // own module shells (68.0 measured).
   // The core with every shipped plugin: 68.3 at the kinds epic, 70.2 with
   // the at-rest wrapper and the plugin seams of the security blocks, 71.3
-  // with the sync plugin's seam and the layered backend.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 72 },
+  // with the sync plugin's seam and the layered backend, 72.2 with the
+  // schema, telemetry and query seams.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 73 },
   // The list and text kinds alone: the sequence engine, its patches and its
   // methods; in an app bundle the core they stand on is shared.
   { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 15 },
@@ -236,6 +237,9 @@ const ENTRIES = [
     platform: 'browser',
     budget: 4,
   },
+  // Queries: the predicate, the planner and the cursor, measured ALONE with
+  // the catalog's value keys it shares with the core.
+  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 6 },
 ];
 
 // A browser entry has to be self-contained: no node builtins, and no packages

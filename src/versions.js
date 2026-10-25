@@ -13,7 +13,6 @@
 const { commit, rehearse } = require('./commit.js');
 const { snapshotPage } = require('./bootstrap.js');
 const { isAlive, deepEqual, kindsOf } = require('./ops.js');
-const { Cursor } = require('./query.js');
 const { appliedHere, parseVersion, within, exactStart, fold, gone } = require('./history.js');
 const { diffViews, realize } = require('./patch.js');
 const { runHook } = require('./hooks.js');
@@ -374,8 +373,8 @@ const at = (core, name) => {
           await ready();
           return tags.rowAt(name, id)?.type === entity ? get(id) : null;
         },
-        select: (query) => new Cursor(source, entity, query),
-        count: (query) => new Cursor(source, entity, query).count(),
+        select: (query) => core.cursor(source, entity, query),
+        count: (query) => core.cursor(source, entity, query).count(),
       };
     },
     snapshot: async (options) => {

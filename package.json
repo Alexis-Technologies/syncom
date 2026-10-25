@@ -101,6 +101,10 @@
       "types": "./src/telemetry/telemetry.d.ts",
       "default": "./src/telemetry/telemetry.js"
     },
+    "./query": {
+      "types": "./src/query/query.d.ts",
+      "default": "./src/query/query.js"
+    },
     "./package.json": "./package.json"
   },
   "directories": {

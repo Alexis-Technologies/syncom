@@ -88,6 +88,13 @@ There is no released version section until then; everything below lands in it.
   as it is, and refuses an api or a tracer without the plugin
   (`PLUGIN_MISSING`). An `OpLog` opened on its own takes a writer. The core
   is 40 KB.
+- **Queries as a block.** The cursor — the Mango predicate, the planner,
+  `fetch()`/`count()`/`one()`/`watch()` — is the `query` plugin,
+  `@alexify/syncom/query`: `select()` and `count()` on a collection, and on
+  a view at a tag, are its; without it they throw `PLUGIN_MISSING`. The
+  catalog, its indexes and the text index behind `$text` (`open({ search })`)
+  stay in the core, kept whether or not anything queries them. The core is
+  39 KB.
 - **Lists and text.** A field can be a list — an array edited by position —
   or a text — a string typed into: `splice(id, key, index, count, content)`
   and `push(id, key, content)`, on the storage and on a live Record. Two

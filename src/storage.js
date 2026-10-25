@@ -33,7 +33,7 @@ const { DISABLED, isWriter, traced, now } = require('./telemetry.js');
 const { GLOBAL_SCOPE } = require('./scope.js');
 const { normalizeStorageOptions } = require('./options.js');
 const { isPlainObject, isRecordId, invalidId, isStreamName, isKeyId, VALIDATED } = require('./shape.js');
-const { COMMIT, REFRESH, SOURCE, PLUGINS } = require('./symbols.js');
+const { COMMIT, REFRESH, SOURCE, PLUGINS, CURSOR } = require('./symbols.js');
 const { missing } = require('./plugin.js');
 const { SyncomError, typed } = require('./errors.js');
 
@@ -62,6 +62,7 @@ class Storage extends Emitter {
   #seal = null;
   #chain = null;
   #schemaHook = null;
+  #cursor = null;
   #settings;
   #log = null;
   #entries = null;
@@ -264,6 +265,7 @@ class Storage extends Emitter {
       if (hooks.seal) this.#seal = hooks.seal;
       if (hooks.chain) this.#chain = hooks.chain;
       if (hooks.schema) this.#schemaHook = hooks.schema;
+      if (hooks.query) this.#cursor = hooks.query.cursor;
       if (Object.hasOwn(hooks, 'telemetry')) {
         this.#otel = hooks.telemetry;
         adapted = true;
@@ -401,6 +403,7 @@ class Storage extends Emitter {
       // The same write from INSIDE a task of the queue (`core.run`), where
       // `commit` would wait for itself; and whether an entry is live.
       commitNow: (type, id, payload, options) => commit(this.#core, type, id, payload, options),
+      cursor: (source, entity, query) => this[CURSOR](entity, query, source),
       alive: isAlive,
       forget: (id) => this.#records.delete(id),
       flushDeferred: () => this.#flushDeferred(),
@@ -756,6 +759,15 @@ class Storage extends Emitter {
   /** The backend every file of this storage goes through — the adapter given to `open()`, or the platform's. */
   get fsi() {
     return this.#fsi;
+  }
+
+  // The cursor over a source seam (this storage's by default; a tag's for a
+  // view at a tag): the query plugin's, PLUGIN_MISSING without it.
+  get [CURSOR]() {
+    return (entity, query, source = this[SOURCE]) => {
+      if (this.#cursor === null) throw missing('select()');
+      return this.#cursor(source, entity, query);
+    };
   }
 
   // What a Cursor reads through: the catalog, and a record as it reads —

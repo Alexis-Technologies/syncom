@@ -11,6 +11,8 @@
 const COMMIT = Symbol('syncom.commit');
 const REFRESH = Symbol('syncom.refresh');
 const SOURCE = Symbol('syncom.source');
+// The cursor factory of the query plugin: `storage[CURSOR](entity, query, source?)`.
+const CURSOR = Symbol('syncom.cursor');
 const PLUGINS = Symbol('syncom.plugins');
 
-module.exports = { COMMIT, REFRESH, SOURCE, PLUGINS };
+module.exports = { COMMIT, REFRESH, SOURCE, CURSOR, PLUGINS };

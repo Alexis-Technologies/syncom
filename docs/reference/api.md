@@ -165,14 +165,16 @@ storage already answers to (`get`, `close`, `log`, `sync`…) is refused at
 `update(id, delta, { actor }?)` (refuses a delta naming `$type`),
 `delete(id, { actor }?)`, `record(id)` — `update`, `delete` and `record`
 reject with `NOT_FOUND` for a record of another collection —
-`select(query?)` → a cursor, `count(query?)`.
+`select(query?)` → a cursor, `count(query?)` (the `query` plugin's:
+`PLUGIN_MISSING` without it).
 Writes through a collection with a `schema` are validated — see
 [Validation](../guide/storage#validation); `unique` keys are refused with a
 `ValidationError` whose issue has `code: 'unique'` and `conflict`.
 
 #### `Cursor`
 
-`collection.select(query)` — see [Queries](../guide/query); `$text` in the
+`collection.select(query)` — the `query` plugin's (see
+[Queries](../guide/query) and [Query](#query-subpath)); `$text` in the
 query searches the entity's `search` fields, best first unless ordered.
 
 | Member | Notes |
@@ -531,6 +533,19 @@ and `open({ validator })` are `PLUGIN_MISSING`, as are `migrate()` and
 `check()`, and records are untyped — `$type` a field like any other.
 `ValidationError` is the root's, re-exported.
 
+## Query (subpath)
+
+```js
+const { query } = require('@alexify/syncom/query');
+```
+
+`query` is the plugin: `open({ plugins: [query] })` gives every collection
+its `select(query)` cursor, `count(query)` and `watch()`, and a view at a tag
+its `select()`/`count()` (see [Queries](../guide/query)). The catalog, its
+indexes and the text index behind `$text` (`open({ search })`) are the
+core's, kept whether or not anything queries them; without the plugin
+`select()` and `count()` throw `PLUGIN_MISSING`.
+
 ## Telemetry (subpath)
 
 ```js
@@ -596,9 +611,9 @@ host that lacks one of its own (`KINDS_MISMATCH`).
 
 A plugin that is not a kind sets the core up before the log opens — the
 identity (`signing`), the sealing of records (`encryption`), the chain
-(`chain`), the definitions of `schema`, the writer of `telemetry` — or once
-it is open (the manager of `sync`), and what the options ask for and no
-plugin provides is refused at `open()` the same way: `sync.signatures: 'require'` without `signing`,
+(`chain`), the definitions of `schema`, the writer of `telemetry`, the
+cursor of `query` — or once it is open (the manager of `sync`), and what the
+options ask for and no plugin provides is refused at `open()` the same way: `sync.signatures: 'require'` without `signing`,
 `chain: true` without `chain`, `encrypted: true` without `encryption` (and a
 per-call `{ encrypted: true }` at the call), `schema` or `validator` without
 `schema`, an OpenTelemetry api or tracer without `telemetry`. Without them the node id is what
@@ -609,14 +624,14 @@ per-call `{ encrypted: true }` at the call), `schema` or `validator` without
 ## All (subpath)
 
 ```js
-const { open, Storage, applyOp, mergeEntry, text, tree, signing, chain, encryption, sync, schema, telemetry, PLUGINS } = require('@alexify/syncom/all');
+const { open, Storage, applyOp, mergeEntry, text, tree, signing, chain, encryption, sync, schema, telemetry, query, PLUGINS } = require('@alexify/syncom/all');
 ```
 
 Everything the root and the `/signing`, `/chain`, `/encryption`, `/memory`,
-`/layered`, `/sync`, `/schema` and `/telemetry` subpaths export, plus
-`open()`/`Storage` with every shipped plugin registered ahead of the caller's
-(`text`, `tree`, `signing`, `chain`, `encryption`, `sync`, `schema`,
-`telemetry`; a plugin given twice is given once), `applyOp`/`mergeEntry` folding under the same
+`/layered`, `/sync`, `/schema`, `/telemetry` and `/query` subpaths export,
+plus `open()`/`Storage` with every shipped plugin registered ahead of the
+caller's (`text`, `tree`, `signing`, `chain`, `encryption`, `sync`, `schema`,
+`telemetry`, `query`; a plugin given twice is given once), `applyOp`/`mergeEntry` folding under the same
 registry, the plugins themselves and `PLUGINS`, the list. The API of the
 package before it was taken apart into blocks: what the tests and the
 examples open.

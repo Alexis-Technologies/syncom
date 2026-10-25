@@ -10,6 +10,7 @@ const assert = require('node:assert');
 const core = require('../index.js');
 const { memory } = require('../src/memory/memory.js');
 const { schema, ValidationError } = require('../src/schema/schema.js');
+const { query } = require('../src/query/query.js');
 
 const validator = (data) => {
   if (typeof data.title !== 'string') throw new Error('title must be a string');
@@ -61,7 +62,7 @@ test('schema as a plugin', async (t) => {
         path: 'typed',
         fsi,
         logger: false,
-        plugins: [schema],
+        plugins: [schema, query],
         schema: {
           version: 2,
           entities: { Post: { schema: validator, index: ['title'] } },
@@ -70,7 +71,7 @@ test('schema as a plugin', async (t) => {
       };
       const storage = await core.open(options);
       t2.after(() => storage.close().catch(() => {}));
-      assert.deepStrictEqual([storage.plugins, storage.kinds], [['schema'], []]);
+      assert.deepStrictEqual([storage.plugins, storage.kinds], [['schema', 'query'], []]);
       assert.deepStrictEqual(storage.schemaInfo, { version: 2, hash: null, previous: null, held: null });
       const { id } = await storage.Post.insert({ title: '  Hello  ' });
       assert.deepStrictEqual(

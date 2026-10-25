@@ -72,7 +72,9 @@ src/options.js            normalizeStorageOptions — open()'s plain options che
 src/protocol.js           PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf — what both halves of the sync protocol agree on — no requires
 src/lock.js               exclusive open: Web Locks or lock.json, stale by pid or age — no requires
 src/catalog.js            the record catalog: live ids, collections, indexed values; index/catalog.json — no requires
-src/query.js              compileQuery (Mango predicate), compareRows, Cursor — reads through storage[SOURCE]
+src/query/query.js        @alexify/syncom/query — the query plugin: setup hands the core a cursor factory (`query` hook); select()/count()
+                          on a Collection go through storage[CURSOR], PLUGIN_MISSING without it
+src/query/cursor.js       compileQuery (Mango predicate), compareRows, Cursor — reads through storage[SOURCE]
 src/shared-log.js         isSharedLog — the reserved broker-log contract (wrpc BrokerLog shape), no consumer yet
 src/storage.js            Storage — the facade: open sequence, the mutation queue, the public API, the `core` it lends
 src/fields.js             the API of the core's kinds beyond registers — inc/add/remove — over the lent core; a plugin's methods come with it —
@@ -554,7 +556,9 @@ docs/                     VitePress site
   route an encrypted entry through `applyOp`.
 - **A cursor reads through `storage[SOURCE]`, not through `get()`.** The
   seam hands it the catalog and a lensed, hook-free `load(id)` — like
-  `snapshot()` and `swap()`. `Cursor#matching` is the one place that reads
+  `snapshot()` and `swap()`; the cursor itself is the query plugin's
+  (`src/query/cursor.js`), made through `storage[CURSOR]` (a Collection's
+  `select()`, a tag view's through `core.cursor`). `Cursor#matching` is the one place that reads
   records for a query: sixteen at a time, in candidate order, into a `TopK`
   when the cursor is ordered and limited (the rows come back sorted, `fetch`
   must not sort again) or an `Every` otherwise; `Catalog.candidates` narrows
@@ -695,7 +699,7 @@ are the two pages that describe the protocol — keep them in step with
 event surface of `src/commit.js`, `src/apply.js`, `src/bootstrap.js`,
 `src/storage.js` and `src/sync/manager.js`, `docs/guide/schema.md` with
 `src/schema/` (metaschema is the first-class example there; zod/ajv/JSON
-Schema are the alternatives), `docs/guide/query.md` with `src/query.js` and
+Schema are the alternatives), `docs/guide/query.md` with `src/query/cursor.js` and
 `src/catalog.js`, `docs/guide/backends.md` with `src/backend.js`, `src/lock.js`
 and the two `fsi` halves. The browser-only WebRTC recipes in
 `docs/guide/webrtc.md` follow wrpc's documented API and the raw-channel

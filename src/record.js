@@ -7,9 +7,8 @@
 
 const { Emitter } = require('./emitter.js');
 const { notify } = require('./hooks.js');
-const { Cursor } = require('./query.js');
 const { isPlainObject } = require('./shape.js');
-const { COMMIT, REFRESH, SOURCE } = require('./symbols.js');
+const { COMMIT, REFRESH, SOURCE, CURSOR } = require('./symbols.js');
 const { SyncomError } = require('./errors.js');
 
 class Reference {
@@ -261,9 +260,9 @@ class Collection {
     return this.#storage.get(id, options);
   }
 
-  /** A cursor over this collection: `select(query).order(f).limit(n).fetch()`. */
+  /** A cursor over this collection: `select(query).order(f).limit(n).fetch()` — the query plugin's. */
   select(query) {
-    return new Cursor(this.#storage[SOURCE], this.#name, query);
+    return this.#storage[CURSOR](this.#name, query);
   }
 
   /** How many records of this collection match `query`. */
