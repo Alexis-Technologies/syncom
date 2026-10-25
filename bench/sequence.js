@@ -1,8 +1,14 @@
 /**
  * Lists and text: the sequence engine behind the two kinds — what one
- * keystroke costs the model (a fold over a block with a run per insert), a
- * reading, a snapshot join, a diff, and the same through the storage over
- * the memory backend.
+ * keystroke costs the model (the rope under a block: an op on the newest
+ * block, as the storage applies them, one after another), a reading, a
+ * block hydrated from its JSON, a snapshot join, a diff, and the same
+ * through the storage over the memory backend. An edit at an index goes
+ * where `placeInsert`/`rangesOf` send it, as `updateText` would — a new
+ * run under the element there, or the writer's own run grown; the text is
+ * read after every op, as the storage reads it. One row applies every op
+ * to the SAME older block — a fork, which re-hints the rope once per op —
+ * the cost of editing a version that is not the head.
  *
  * Run with `node bench/sequence.js` or `pnpm bench`.
  */
@@ -11,12 +17,29 @@
 
 const { bench } = require('./support/harness.js');
 const S = require('../src/text/sequence.js');
-const { applyOp } = require('../src/all/all.js');
+const { applyOp, open } = require('../src/all/all.js');
 const { diff } = require('../src/text/myers.js');
 const { memory } = require('../src/memory/memory.js');
-const { open } = require('../src/storage.js');
 
 const op = (type, ts, origin, key, value) => ({ origin, seq: ts, ts, type, id: 'r', key, value });
+
+// A seeded index: the same places every run.
+const rng = (seed) => () => {
+  seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+  return seed / 2 ** 32;
+};
+const random = rng(7);
+const indexIn = (entry) => Math.floor(random() * S.lengthOf(S.indexOf(entry, 'body')));
+// What a keystroke at `i` by `origin` sends: a splice placed by the engine.
+const insertAt = (entry, ts, origin, i, content = 'z') =>
+  applyOp(entry, op('splice', ts, origin, 'body', { ...S.placeInsert(S.indexOf(entry, 'body'), i, origin), content }))
+    .entry;
+// A character at `i` replaced by one of `origin`: a cut, then an insert there.
+const replaceAt = (entry, ts, origin, i) => {
+  const cut = S.rangesOf(S.indexOf(entry, 'body'), i, 1);
+  const next = applyOp(entry, op('splice', ts, origin, 'body', { cut, content: '' })).entry;
+  return insertAt(next, ts + 1, origin, i);
+};
 
 const main = async () => {
   console.log(`Sequence benchmark — Node ${process.version}\n`);
@@ -33,24 +56,49 @@ const main = async () => {
   }
   let ts = 5000;
   const run = S.runKey(1, 'A');
-  await bench('applyOp — append one char to a 1 000-char text (one run)', () =>
+  // Every row applies its ops to the newest entry, one after another.
+  let typed = oneRun;
+  let len = 1000;
+  await bench('applyOp — append one char to a 1 000-char text (one run)', () => {
+    typed = applyOp(typed, op('splice', ++ts, 'A', 'body', { run, from: len++, content: 'z' })).entry;
+  });
+  let inserted = oneRun;
+  await bench('applyOp — insert one char at a random index of a 1 000-char text (one run)', () => {
+    inserted = insertAt(inserted, ++ts, 'C', indexIn(inserted));
+  });
+  let replaced = oneRun;
+  await bench(
+    'applyOp — replace one char at a random index of a 1 000-char text (a cut, an insert)',
+    () => {
+      replaced = replaceAt(replaced, (ts += 2), 'C', indexIn(replaced));
+    },
+    { opsPerIteration: 2 },
+  );
+  let prepended = chain;
+  await bench('applyOp — prepend one char to a 1 000-run text', () => {
+    prepended = insertAt(prepended, ++ts, 'C', 0);
+  });
+  await bench('applyOp — append one char to an older block (a fork: the rope re-hinted)', () =>
     applyOp(oneRun, op('splice', ++ts, 'A', 'body', { run, from: 1000, content: 'z' })));
-  await bench('applyOp — insert one char into a 1 000-char text (new run)', () =>
-    applyOp(oneRun, op('splice', ++ts, 'C', 'body', { at: `<${S.elemKey(run, 500)}`, content: 'z' })));
-  await bench('applyOp — delete 10 chars from a 1 000-char text', () =>
-    applyOp(oneRun, op('splice', ++ts, 'C', 'body', { cut: [[run, 400, 10]], content: '' })));
-  await bench('applyOp — prepend one char to a 1 000-run text', () =>
-    applyOp(chain, op('splice', ++ts, 'C', 'body', { at: `<${S.elemKey(prev, 0)}`, content: 'z' })));
   await bench('applyOp — merge two pictures of a 1 000-char text', () =>
     applyOp(
       oneRun,
       op('merge', ++ts, 'M', undefined, undefined) && { ...op('merge', ts, 'M'), data: chain.data, meta: chain.meta },
     ));
-  const seq = oneRun.meta.blocks.body;
-  await bench('buildIndex + render — a 1 000-char text', () => S.render(S.buildIndex(seq)));
+  const seqJson = JSON.stringify(oneRun.meta.blocks.body);
+  await bench('hydrate + render — a 1 000-char text from its JSON', () =>
+    S.render(S.hydrate(JSON.parse(seqJson), null)));
   const big = applyOp(null, op('splice', 1, 'A', 'body', { at: '^', content: 'x'.repeat(100_000) })).entry.meta.blocks
     .body;
-  await bench('buildIndex + render — a 100 KB text (one run)', () => S.render(S.buildIndex(big)));
+  const bigJson = JSON.stringify(big);
+  await bench('hydrate + render — a 100 KB text (one run) from its JSON', () =>
+    S.render(S.hydrate(JSON.parse(bigJson), null)));
+  // A pasted document edited anywhere: every keystroke a new run under an
+  // element of the one big run.
+  let pasted = applyOp(null, op('splice', 1, 'A', 'body', { at: '^', content: 'x'.repeat(100_000) })).entry;
+  await bench('applyOp — insert one char at a random index of a 100 KB text (one run)', () => {
+    pasted = insertAt(pasted, ++ts, 'C', indexIn(pasted));
+  });
   // Ten thousand runs of ten characters, each anchored after the last
   // element of the one before — a 100 KB text as a long chain of right
   // children, origins alternating so no run extends another. Built as a
@@ -82,17 +130,25 @@ const main = async () => {
     meta: longMeta,
   }).entry;
   ts = Math.max(ts, 30_000);
-  const places = Array.from({ length: 4096 }, (_, i) => `<${S.elemKey(anchors[(i * 7919) % RUNS], (i * 31) % 10)}`);
-  const cuts = Array.from({ length: 4096 }, (_, i) => [anchors[(i * 7919) % RUNS], 0, 10]);
-  let k = 0;
-  await bench('applyOp — insert one char at a random place of a 100 KB text (10 000 runs)', () =>
-    applyOp(longText, op('splice', ++ts, 'C', 'body', { at: places[k++ & 4095], content: 'z' })));
-  await bench('applyOp — prepend one char to a 10 000-run text', () =>
-    applyOp(longText, op('splice', ++ts, 'C', 'body', { at: `<${S.elemKey(anchors[0], 0)}`, content: 'z' })));
-  await bench('applyOp — delete 10 chars from a 10 000-run text', () =>
-    applyOp(longText, op('splice', ++ts, 'C', 'body', { cut: [cuts[k++ & 4095]], content: '' })));
-  await bench('buildIndex + render — a 100 KB text (10 000 runs)', () =>
-    S.render(S.buildIndex(longText.meta.blocks.body)));
+  let anywhere = longText;
+  await bench('applyOp — insert one char at a random index of a 100 KB text (10 000 runs)', () => {
+    anywhere = insertAt(anywhere, ++ts, 'C', indexIn(anywhere));
+  });
+  let front = longText;
+  await bench('applyOp — prepend one char to a 10 000-run text', () => {
+    front = insertAt(front, ++ts, 'C', 0);
+  });
+  let over = longText;
+  await bench(
+    'applyOp — replace one char at a random index of a 100 KB text (10 000 runs)',
+    () => {
+      over = replaceAt(over, (ts += 2), 'C', indexIn(over));
+    },
+    { opsPerIteration: 2 },
+  );
+  const longJson = JSON.stringify(longText.meta.blocks.body);
+  await bench('hydrate + render — a 100 KB text (10 000 runs) from its JSON', () =>
+    S.render(S.hydrate(JSON.parse(longJson), null)));
   let marked = oneRun;
   for (let i = 0; i < 50; i++) {
     const start = `<${S.elemKey(run, i * 10)}`;
@@ -103,7 +159,7 @@ const main = async () => {
     ).entry;
   }
   const markedSeq = marked.meta.blocks.body;
-  await bench('spans — 1 000 chars, 50 overlapping marks', () => S.spans(S.buildIndex(markedSeq), markedSeq));
+  await bench('spans — 1 000 chars, 50 overlapping marks', () => S.spans(markedSeq, markedSeq));
   const before = 'the quick brown fox '.repeat(50);
   const after = `${before.slice(0, 500)}X${before.slice(500)}`;
   await bench('diff — one keystroke in a 1 KB text', () => diff(before, after));

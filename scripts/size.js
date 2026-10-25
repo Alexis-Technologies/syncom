@@ -182,10 +182,13 @@ const ENTRIES = [
   // the at-rest wrapper and the plugin seams of the security blocks, 71.3
   // with the sync plugin's seam and the layered backend, 72.2 with the
   // schema, telemetry and query seams.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 73 },
-  // The list and text kinds alone: the sequence engine, its patches and its
-  // methods; in an app bundle the core they stand on is shared.
-  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 15 },
+  // 79.8 with the rope under the sequence engine (the persistent tree, map
+  // and chunked list it is made of, the walk and the hydration).
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 80 },
+  // The list and text kinds alone: the sequence engine over its rope
+  // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
+  // in an app bundle the core they stand on is shared (21.4 measured).
+  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 22 },
   // The tree kind alone, with the fractional indexes a place is made of and
   // the argument checks it shares with the core (5.1 measured).
   { label: 'tree — browser (@alexify/syncom/tree)', entry: 'src/tree/tree.js', platform: 'browser', budget: 5.5 },

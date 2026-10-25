@@ -14,6 +14,22 @@ There is no released version section until then; everything below lands in it.
 
 ### Added
 
+- **A rope under every list and text.** A sequence block is a persistent
+  B+-tree over its runs' segments (`src/text/btree.js`), its run records in a
+  persistent map and a placed run's segments and children in chunked lists:
+  an op — a keystroke at the end of a run, an insert anywhere, a cut, a
+  peer's run with what hangs under it — lands in O(log n) and leaves a new
+  block, the one before reading as it did; a text's reading is cached on the
+  rope, so a keystroke costs the path it copied, never the text; a block is
+  hydrated from its JSON once, piece by piece, and serialized in walk order
+  when read; `placeInsert` reads the rope in O(log n). `bench/sequence.js`:
+  527 000 appends a second (from 171 000), 65 000 inserts at random places
+  of a 100 KB text of 10 000 runs (from 98), 120 000 prepends to a text of
+  10 000 runs (from 98), a 100 KB text hydrated and read 11 500 times a
+  second (from 383). A block object carries `k`, `ts`, the maps and `runs`
+  alone: `lengthOf(block)` and `totalOf(block)` replace its `length` and
+  `total` properties. The `text` entry's budget is 22 KB (21.5 measured), the
+  `all` entry's 80 KB.
 - **Plugins, and the package in blocks.** The kinds beyond registers, counters
   and sets are plugins registered per storage — `open({ plugins: [text, tree] })`
   with `text` from `@alexify/syncom/text` (lists and texts) and `tree` from

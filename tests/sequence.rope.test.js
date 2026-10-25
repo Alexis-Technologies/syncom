@@ -38,7 +38,7 @@ const indexOf = (entry) => (entry === null || entry.meta.blocks.body === undefin
 const step = (entry, ts, random) => {
   const origin = ORIGINS[pick(random, ORIGINS.length)];
   const idx = indexOf(entry);
-  const length = idx === null ? 0 : idx.length;
+  const length = idx === null ? 0 : S.lengthOf(idx);
   const roll = random();
   if (idx === null || length === 0 || roll < 0.5) {
     const at = pick(random, length + 1);
@@ -71,8 +71,8 @@ const agree = (entry, where) => {
   const oracle = O.buildIndex(json, base);
   assert.strictEqual(S.render(index), O.render(oracle), `${where}: render`);
   assert.strictEqual(entry.data.body, O.render(oracle), `${where}: data`);
-  assert.strictEqual(index.length, oracle.length, `${where}: length`);
-  for (let i = 0; i < index.length; i++) {
+  assert.strictEqual(S.lengthOf(index), oracle.length, `${where}: length`);
+  for (let i = 0; i < S.lengthOf(index); i++) {
     assert.strictEqual(S.elemAt(index, i), O.elemAt(oracle, i), `${where}: elemAt ${i}`);
     for (const side of ['before', 'after']) {
       const token = S.cursorAt(index, i, side);

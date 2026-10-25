@@ -1198,28 +1198,30 @@ test('ops: the kinds’ precedence on the op path', async (t) => {
   });
 });
 
-test('ops: a keystroke extends the held index', async (t) => {
-  await t.test('appending to a run carries the held index and reading over; nothing before the new slot moves', () => {
+test('ops: a keystroke grows the rope in place', async (t) => {
+  await t.test('appending to a run leaves a new block that reads one more; nothing is rebuilt, nothing walked', () => {
     const S = require('../src/text/sequence.js');
     const splice = (ts, seq, value) => op('splice', ts, 'A', { seq, key: 'body', value });
     let entry = applyOp(null, splice(1, 1, { at: '^', content: 'ab' })).entry;
     const run = '1:A';
+    const rebuilds = S.stats().rebuilds;
     for (let i = 0; i < 5; i++) {
-      const before = entry.cache.body.index;
+      const before = entry.meta.blocks.body;
       entry = applyOp(entry, splice(2 + i, 2 + i, { run, from: 2 + i, content: 'x' })).entry;
-      const after = entry.cache.body.index;
-      assert.strictEqual(after.length, before.length + 1);
-      assert.strictEqual(after.rendered, entry.data.body);
-      assert.strictEqual(after.runs[0].items.length, before.runs[0].items.length + 1);
-      assert.deepStrictEqual(Array.from(after.ordAt).slice(0, before.total), Array.from(before.ordAt));
+      const after = entry.meta.blocks.body;
+      assert.notStrictEqual(after, before, 'a new block');
+      assert.strictEqual(S.lengthOf(after), S.lengthOf(before) + 1);
+      assert.strictEqual(S.render(after), entry.data.body);
+      assert.strictEqual(S.render(before), entry.data.body.slice(0, -1), 'the block before reads as it did');
     }
     assert.strictEqual(entry.data.body, 'abxxxxx');
-    assert.strictEqual(S.render(S.buildIndex(entry.meta.blocks.body)), entry.data.body);
-    // After a reset the base changes: the next keystroke walks, then extends again.
+    assert.deepStrictEqual(entry.meta.blocks.body.runs, { [run]: ['^', ['abxxxxx']] });
+    assert.strictEqual(S.stats().rebuilds, rebuilds);
+    // After a reset the base changes: the next keystroke lands under it.
     const reset = applyOp(entry, op('write', 20, 'B', { data: { t: 1 } })).entry;
     const typed = applyOp(reset, splice(21, 7, { at: '^', content: 'new' })).entry;
     const more = applyOp(typed, splice(22, 8, { run: '21:A', from: 3, content: '!' })).entry;
     assert.strictEqual(more.data.body, 'new!');
-    assert.strictEqual(more.cache.body.index.rendered, 'new!');
+    assert.strictEqual(S.render(more.meta.blocks.body), 'new!');
   });
 });

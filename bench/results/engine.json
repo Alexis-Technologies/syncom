@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-25T10:38:32.216Z",
+  "generatedAt": "2026-10-25T14:28:49.640Z",
   "machine": {
     "cpu": "Apple M3 Max",
     "cores": 16,
@@ -571,92 +571,102 @@
     {
       "subject": "sequence",
       "name": "applyOp — append one char to a 1 000-char text (one run)",
-      "opsPerSec": 171129
+      "opsPerSec": 470314
     },
     {
       "subject": "sequence",
-      "name": "applyOp — insert one char into a 1 000-char text (new run)",
-      "opsPerSec": 26824
+      "name": "applyOp — insert one char at a random index of a 1 000-char text (one run)",
+      "opsPerSec": 88575
     },
     {
       "subject": "sequence",
-      "name": "applyOp — delete 10 chars from a 1 000-char text",
-      "opsPerSec": 31596
+      "name": "applyOp — replace one char at a random index of a 1 000-char text (a cut, an insert)",
+      "opsPerSec": 123921
     },
     {
       "subject": "sequence",
       "name": "applyOp — prepend one char to a 1 000-run text",
-      "opsPerSec": 2500
+      "opsPerSec": 112855
+    },
+    {
+      "subject": "sequence",
+      "name": "applyOp — append one char to an older block (a fork: the rope re-hinted)",
+      "opsPerSec": 406676
     },
     {
       "subject": "sequence",
       "name": "applyOp — merge two pictures of a 1 000-char text",
-      "opsPerSec": 371
+      "opsPerSec": 241
     },
     {
       "subject": "sequence",
-      "name": "buildIndex + render — a 1 000-char text",
-      "opsPerSec": 39439
+      "name": "hydrate + render — a 1 000-char text from its JSON",
+      "opsPerSec": 231136
     },
     {
       "subject": "sequence",
-      "name": "buildIndex + render — a 100 KB text (one run)",
-      "opsPerSec": 383
+      "name": "hydrate + render — a 100 KB text (one run) from its JSON",
+      "opsPerSec": 15842
     },
     {
       "subject": "sequence",
-      "name": "applyOp — insert one char at a random place of a 100 KB text (10 000 runs)",
-      "opsPerSec": 98
+      "name": "applyOp — insert one char at a random index of a 100 KB text (one run)",
+      "opsPerSec": 55707
+    },
+    {
+      "subject": "sequence",
+      "name": "applyOp — insert one char at a random index of a 100 KB text (10 000 runs)",
+      "opsPerSec": 69601
     },
     {
       "subject": "sequence",
       "name": "applyOp — prepend one char to a 10 000-run text",
-      "opsPerSec": 98
+      "opsPerSec": 105695
     },
     {
       "subject": "sequence",
-      "name": "applyOp — delete 10 chars from a 10 000-run text",
-      "opsPerSec": 110
+      "name": "applyOp — replace one char at a random index of a 100 KB text (10 000 runs)",
+      "opsPerSec": 95040
     },
     {
       "subject": "sequence",
-      "name": "buildIndex + render — a 100 KB text (10 000 runs)",
-      "opsPerSec": 160
+      "name": "hydrate + render — a 100 KB text (10 000 runs) from its JSON",
+      "opsPerSec": 53
     },
     {
       "subject": "sequence",
       "name": "spans — 1 000 chars, 50 overlapping marks",
-      "opsPerSec": 11509
+      "opsPerSec": 6982
     },
     {
       "subject": "sequence",
       "name": "diff — one keystroke in a 1 KB text",
-      "opsPerSec": 314650
+      "opsPerSec": 304541
     },
     {
       "subject": "sequence",
       "name": "storage.push — one char (memory fsi)",
-      "opsPerSec": 8172
+      "opsPerSec": 9184
     },
     {
       "subject": "sequence",
       "name": "storage.updateText — one keystroke in a 1 KB text (memory fsi)",
-      "opsPerSec": 2170
+      "opsPerSec": 4875
     },
     {
       "subject": "sequence",
       "name": "storage.move — in a 100-element list (memory fsi)",
-      "opsPerSec": 1251
+      "opsPerSec": 796
     },
     {
       "subject": "sequence",
       "name": "storage.push — one char into a 10 KB text (memory fsi)",
-      "opsPerSec": 3279
+      "opsPerSec": 7176
     },
     {
       "subject": "sequence",
       "name": "storage.push — one char into a 10 KB text, defer: 50 (memory fsi)",
-      "opsPerSec": 3213
+      "opsPerSec": 6535
     }
   ]
 }

@@ -304,28 +304,30 @@ chain, hashing, the CRDT helpers and the emitter. They are the numbers to watch 
 </details>
 
 <details>
-<summary>Lists and text — 18 rows</summary>
+<summary>Lists and text — 20 rows</summary>
 
 | Benchmark | ops/s | per operation |
 | --- | ---: | ---: |
-| applyOp — append one char to a 1 000-char text (one run) | 171,129 | 5.84 µs |
-| applyOp — insert one char into a 1 000-char text (new run) | 26,824 | 37.3 µs |
-| applyOp — delete 10 chars from a 1 000-char text | 31,596 | 31.6 µs |
-| applyOp — prepend one char to a 1 000-run text | 2,500 | 400 µs |
-| applyOp — merge two pictures of a 1 000-char text | 371 | 2.7 ms |
-| buildIndex + render — a 1 000-char text | 39,439 | 25.4 µs |
-| buildIndex + render — a 100 KB text (one run) | 383 | 2.61 ms |
-| applyOp — insert one char at a random place of a 100 KB text (10 000 runs) | 98 | 10.2 ms |
-| applyOp — prepend one char to a 10 000-run text | 98 | 10.2 ms |
-| applyOp — delete 10 chars from a 10 000-run text | 110 | 9.09 ms |
-| buildIndex + render — a 100 KB text (10 000 runs) | 160 | 6.25 ms |
-| spans — 1 000 chars, 50 overlapping marks | 11,509 | 86.9 µs |
-| diff — one keystroke in a 1 KB text | 314,650 | 3.18 µs |
-| storage.push — one char (memory fsi) | 8,172 | 122 µs |
-| storage.updateText — one keystroke in a 1 KB text (memory fsi) | 2,170 | 461 µs |
-| storage.move — in a 100-element list (memory fsi) | 1,251 | 799 µs |
-| storage.push — one char into a 10 KB text (memory fsi) | 3,279 | 305 µs |
-| storage.push — one char into a 10 KB text, defer: 50 (memory fsi) | 3,213 | 311 µs |
+| applyOp — append one char to a 1 000-char text (one run) | 470,314 | 2.13 µs |
+| applyOp — insert one char at a random index of a 1 000-char text (one run) | 88,575 | 11.3 µs |
+| applyOp — replace one char at a random index of a 1 000-char text (a cut, an insert) | 123,921 | 8.07 µs |
+| applyOp — prepend one char to a 1 000-run text | 112,855 | 8.86 µs |
+| applyOp — append one char to an older block (a fork: the rope re-hinted) | 406,676 | 2.46 µs |
+| applyOp — merge two pictures of a 1 000-char text | 241 | 4.15 ms |
+| hydrate + render — a 1 000-char text from its JSON | 231,136 | 4.33 µs |
+| hydrate + render — a 100 KB text (one run) from its JSON | 15,842 | 63.1 µs |
+| applyOp — insert one char at a random index of a 100 KB text (one run) | 55,707 | 18 µs |
+| applyOp — insert one char at a random index of a 100 KB text (10 000 runs) | 69,601 | 14.4 µs |
+| applyOp — prepend one char to a 10 000-run text | 105,695 | 9.46 µs |
+| applyOp — replace one char at a random index of a 100 KB text (10 000 runs) | 95,040 | 10.5 µs |
+| hydrate + render — a 100 KB text (10 000 runs) from its JSON | 53 | 18.9 ms |
+| spans — 1 000 chars, 50 overlapping marks | 6,982 | 143 µs |
+| diff — one keystroke in a 1 KB text | 304,541 | 3.28 µs |
+| storage.push — one char (memory fsi) | 9,184 | 109 µs |
+| storage.updateText — one keystroke in a 1 KB text (memory fsi) | 4,875 | 205 µs |
+| storage.move — in a 100-element list (memory fsi) | 796 | 1.26 ms |
+| storage.push — one char into a 10 KB text (memory fsi) | 7,176 | 139 µs |
+| storage.push — one char into a 10 KB text, defer: 50 (memory fsi) | 6,535 | 153 µs |
 
 </details>
 

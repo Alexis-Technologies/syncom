@@ -124,8 +124,8 @@ test('sequence engine', async (t) => {
     remove(a, 1, 4);
     assert.strictEqual(read(a), 'xllo');
     const idx = index(a);
-    assert.strictEqual(idx.total, 8, 'tombstones stay in the walk');
-    assert.strictEqual(idx.length, 4);
+    assert.strictEqual(S.totalOf(idx), 8, 'tombstones stay in the walk');
+    assert.strictEqual(S.lengthOf(idx), 4);
     insert(a, 4, '!');
     assert.strictEqual(read(a), 'xllo!');
     assert.strictEqual(S.elemAt(idx, 0), S.elemAt(index(a), 0));
@@ -813,102 +813,64 @@ test('sequence engine', async (t) => {
     assert.strictEqual(read(b), 'ab');
   });
 
-  await t.test(
-    'typing at the end of a run extends the held index: the same index as a walk, or null and a walk',
-    () => {
-      const same = (a, b) => {
-        assert.deepStrictEqual([a.kind, a.length, a.total], [b.kind, b.length, b.total]);
-        for (const name of ['ordRun', 'ordOff', 'visRun', 'visOff', 'ordAt', 'visAt', 'shown']) {
-          assert.deepStrictEqual(Array.from(a[name]), Array.from(b[name]), name);
-        }
-        assert.deepStrictEqual(a.visElem, b.visElem);
-        const runs = (x) => x.runs.map((r) => [r.key, r.len, r.items, r.start]);
-        assert.deepStrictEqual(runs(a), runs(b));
-        assert.deepStrictEqual([...a.byKey.keys()], [...b.byKey.keys()]);
-        assert.deepStrictEqual(
-          a.root.map((r) => r.key),
-          b.root.map((r) => r.key),
-        );
-        assert.deepStrictEqual(S.render(a), S.render(b));
-      };
-      const a = node('A');
-      const first = insert(a, 0, 'ab');
-      const run = S.runKey(first.ts, 'A');
-      let idx = index(a);
-      S.render(idx); // the reading is kept, and carried over
-      for (const ch of 'cdefg') {
-        const r = apply(a, { ts: tick(), origin: 'A', payload: { run, from: idx.length, content: ch } });
-        assert.deepStrictEqual(r.extended, { run, from: idx.length, content: ch });
-        const ext = S.extendIndex(idx, a.seq, r.extended);
-        assert.notStrictEqual(ext, null);
-        const walked = S.buildIndex(a.seq);
-        same(ext, walked);
-        assert.strictEqual(ext.rendered, S.render(walked));
-        idx = ext;
-      }
-      assert.strictEqual(read(a), 'abcdefg');
-      // The extended run's parse is registered: the next prune and slot count find it.
-      const b2 = apply(a, { ts: tick(), origin: 'A', payload: { run, from: 7, content: 'h' } });
-      assert.deepStrictEqual(b2.extended, { run, from: 7, content: 'h' });
-      // A list carries its elements, not its reading (a value register may name a new one).
-      const l = node('L', 'l');
-      const li = insert(l, 0, [1, 2]);
-      const lrun = S.runKey(li.ts, 'L');
-      const lidx = index(l);
-      const lr = apply(l, { ts: tick(), origin: 'L', payload: { run: lrun, from: 2, content: [3, { x: 4 }] } });
-      const lext = S.extendIndex(lidx, l.seq, lr.extended);
-      assert.strictEqual(lext.rendered, undefined, 'read again, not carried over');
-      same(lext, S.buildIndex(l.seq));
-      assert.deepStrictEqual(S.render(lext), [1, 2, 3, { x: 4 }]);
-      // Not an extension at all: a cut rides along, an extension waits, a waiting one settles.
-      const b = node('B');
-      const bf = insert(b, 0, 'xyz');
-      const brun = S.runKey(bf.ts, 'B');
-      const withCut = apply(b, {
-        ts: tick(),
-        origin: 'B',
-        payload: { run: brun, from: 3, content: 'w', cut: [[brun, 0, 1]] },
-      });
-      assert.strictEqual(withCut.extended, null);
-      const ahead = apply(b, { ts: tick(), origin: 'B', payload: { run: brun, from: 6, content: 'late' } });
-      assert.strictEqual(ahead.extended, null, 'an extension ahead of the run waits');
-      const fill = apply(b, { ts: tick(), origin: 'B', payload: { run: brun, from: 4, content: 'vv' } });
-      assert.strictEqual(fill.extended, null, 'the waiting extension settled: more than appended');
-      assert.strictEqual(read(b), 'yzwvvlate');
-      // An extension the index cannot take in place: another run after this one
-      // in key order, a run waiting for its anchor, a position register for a
-      // new element — null, and the caller walks.
-      const c = node('C');
-      const cf = insert(c, 0, 'ab');
-      const crun = S.runKey(cf.ts, 'C');
-      apply(c, { ts: tick(), origin: 'D', payload: { at: `>${S.elemKey(crun, 1)}`, content: 'Q' } });
-      const cidx = index(c);
-      const cr = apply(c, { ts: tick(), origin: 'C', payload: { run: crun, from: 2, content: 'c' } });
-      assert.strictEqual(S.extendIndex(cidx, c.seq, cr.extended), null, 'not the last run, not the last slot');
-      assert.strictEqual(read(c), 'abcQ');
-      const p = node('P');
-      const pf = insert(p, 0, 'ab');
-      const prun = S.runKey(pf.ts, 'P');
-      apply(p, { ts: tick(), origin: 'Z', payload: { at: '<5:0:Q', content: 'w' } });
-      const pidx = index(p);
-      const pr = apply(p, { ts: tick(), origin: 'P', payload: { run: prun, from: 2, content: 'c' } });
-      assert.strictEqual(S.extendIndex(pidx, p.seq, pr.extended), null, 'a run waits for its anchor');
-      const m = node('M', 'l');
-      const mf = insert(m, 0, [1, 2]);
-      const mrun = S.runKey(mf.ts, 'M');
-      const moved = S.applyMove(m.seq, [tick(), 'N'], {
-        elem: S.elemKey(mrun, 2),
-        cut: [mrun, 0, 1],
-        at: '^',
-        value: 9,
-      });
-      m.seq = moved.seq;
-      const midx = index(m);
-      const mr = apply(m, { ts: tick(), origin: 'M', payload: { run: mrun, from: 2, content: [3] } });
-      assert.strictEqual(S.extendIndex(midx, m.seq, mr.extended), null, 'a position register names the new element');
-      assert.deepStrictEqual(read(m), [2, 9], 'the moved-ahead element shows where its register says');
-    },
-  );
+  await t.test('typing at the end of a run grows it in place; what is more than an extension lands as it reads', () => {
+    const a = node('A');
+    const first = insert(a, 0, 'ab');
+    const run = S.runKey(first.ts, 'A');
+    const rebuilds = S.stats().rebuilds;
+    let held = a.seq;
+    for (const ch of 'cdefg') {
+      const r = apply(a, { ts: tick(), origin: 'A', payload: { run, from: S.lengthOf(index(a)), content: ch } });
+      assert.strictEqual(r.changed, true);
+      assert.notStrictEqual(a.seq, held, 'an op leaves a new block');
+      held = a.seq;
+    }
+    assert.strictEqual(read(a), 'abcdefg');
+    assert.strictEqual(Object.keys(a.seq.runs).length, 1, 'one run grew');
+    assert.deepStrictEqual(a.seq.runs[run], ['^', ['abcdefg']]);
+    assert.strictEqual(S.stats().rebuilds, rebuilds, 'the head is extended, never rebuilt');
+    // A list carries its elements: a value register may name a new one.
+    const l = node('L', 'l');
+    const li = insert(l, 0, [1, 2]);
+    const lrun = S.runKey(li.ts, 'L');
+    apply(l, { ts: tick(), origin: 'L', payload: { run: lrun, from: 2, content: [3, { x: 4 }] } });
+    assert.deepStrictEqual(read(l), [1, 2, 3, { x: 4 }]);
+    // Not a bare extension: a cut rides along, an extension waits, a waiting one settles.
+    const b = node('B');
+    const bf = insert(b, 0, 'xyz');
+    const brun = S.runKey(bf.ts, 'B');
+    apply(b, { ts: tick(), origin: 'B', payload: { run: brun, from: 3, content: 'w', cut: [[brun, 0, 1]] } });
+    assert.strictEqual(read(b), 'yzw');
+    const ahead = apply(b, { ts: tick(), origin: 'B', payload: { run: brun, from: 6, content: 'late' } });
+    assert.strictEqual(ahead.changed, true, 'an extension ahead of the run waits');
+    assert.deepStrictEqual(b.seq.ext, { [brun]: [[6, 'late']] });
+    apply(b, { ts: tick(), origin: 'B', payload: { run: brun, from: 4, content: 'vv' } });
+    assert.strictEqual(b.seq.ext, undefined, 'the waiting extension settled');
+    assert.strictEqual(read(b), 'yzwvvlate');
+    // A right child at the run's end sorts after the continuation that grows past it.
+    const c = node('C');
+    const cf = insert(c, 0, 'ab');
+    const crun = S.runKey(cf.ts, 'C');
+    apply(c, { ts: tick(), origin: 'D', payload: { at: `>${S.elemKey(crun, 1)}`, content: 'Q' } });
+    apply(c, { ts: tick(), origin: 'C', payload: { run: crun, from: 2, content: 'c' } });
+    assert.strictEqual(read(c), 'abcQ');
+    // A run waiting for its anchor stays out while the run it is not under grows.
+    const p = node('P');
+    const pf = insert(p, 0, 'ab');
+    const prun = S.runKey(pf.ts, 'P');
+    apply(p, { ts: tick(), origin: 'Z', payload: { at: '<5:0:Q', content: 'w' } });
+    apply(p, { ts: tick(), origin: 'P', payload: { run: prun, from: 2, content: 'c' } });
+    assert.strictEqual(read(p), 'abc');
+    assert.strictEqual(S.pendingCount(p.seq, index(p)), 1);
+    // A position register names an element the extension brings.
+    const m = node('M', 'l');
+    const mf = insert(m, 0, [1, 2]);
+    const mrun = S.runKey(mf.ts, 'M');
+    const moved = S.applyMove(m.seq, [tick(), 'N'], { elem: S.elemKey(mrun, 2), cut: [mrun, 0, 1], at: '^', value: 9 });
+    m.seq = moved.seq;
+    apply(m, { ts: tick(), origin: 'M', payload: { run: mrun, from: 2, content: [3] } });
+    assert.deepStrictEqual(read(m), [2, 9], 'the moved-ahead element shows where its register says');
+  });
 
   await t.test('spans by a sweep read as a per-character tally would, under random overlapping marks', () => {
     const text = node('T');
@@ -945,8 +907,8 @@ test('sequence engine', async (t) => {
     }
     marks.sort((p, q) => (p.key < q.key ? -1 : p.key > q.key ? 1 : p.ts - q.ts));
     const styles = [];
-    for (let i = 0; i < idx.length; i++) {
-      const ord = idx.ordAt[idx.runs[idx.visRun[i]].start + idx.visOff[i]];
+    for (let i = 0; i < S.lengthOf(idx); i++) {
+      const ord = S.anchorOrdinal(idx, `<${S.elemAt(idx, i)}`, null);
       let style = null;
       const stacks = {};
       for (const m of marks) {
@@ -966,7 +928,7 @@ test('sequence engine', async (t) => {
     }
     const tally = [];
     const rendered = S.render(idx);
-    for (let i = 0; i < idx.length; i++) {
+    for (let i = 0; i < S.lengthOf(idx); i++) {
       const last = tally[tally.length - 1];
       if (last && JSON.stringify(last.marks) === JSON.stringify(styles[i] ?? {})) last.text += rendered[i];
       else tally.push({ text: rendered[i], marks: styles[i] ?? {} });

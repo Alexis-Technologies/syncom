@@ -10,12 +10,9 @@
 // setAt, move). Registered per instance with `open({ plugins: [text] })`;
 // src/plugin.js names the contract.
 //
-// The index of a field (buildIndex) is kept on the entry under
-// `entry.cache[field]` — never persisted, carried by cloneEntry and by the
-// entry cache — and reused while the block object and the base it was built
-// against are the ones the entry holds; a block replaced by an op is a new
-// object. When the op only appended to a run, the held index is extended
-// instead of walked anew (the `hint` apply hands back).
+// A block is its own index (the rope of ./sequence.js): a reading, a
+// position or a place to insert is answered from it in O(log n), and an op
+// hands back a new block that shares what it did not touch.
 
 const S = require('./sequence.js');
 const { MAX_RUN } = require('./rle.js');
@@ -84,15 +81,11 @@ const apply = (entry, field, held, op, stamp, limits) => {
     Object.assign(out, { reason: result.reason, detail: result.detail, count: result.count, max: result.max });
   }
   if (!result.changed) return out;
-  const seq = S.prune(result.seq, base);
-  out.block = seq;
-  // The held block's index is extended when the op only appended to a run
-  // and the prune left the block as the op made it.
-  if (seq !== null && result.extended && seq === result.seq) out.hint = { ...result.extended, held };
+  out.block = S.prune(result.seq, base);
   return out;
 };
 
-const render = (entry, field, block, hint = null) => S.render(S.indexOf(entry, field, hint));
+const render = (entry, field) => S.render(S.indexOf(entry, field));
 const prune = (block, base) => S.prune(block, base);
 const join = (a, b) => S.join(a, b);
 
@@ -106,7 +99,7 @@ const resolveSplice = (core, id, payload, current) => {
   const held = current ? blockOf(current, key) : undefined;
   const marker = content ?? (held?.k === 'l' ? [] : '');
   const idx = held === undefined ? null : S.indexOf(current, key);
-  const length = idx === null ? 0 : idx.length;
+  const length = idx === null ? 0 : S.lengthOf(idx);
   const at = index === null ? length : index;
   if (at > length || at + count > length) {
     const span = count > 0 ? `${at}..${at + count}` : String(at);
@@ -127,7 +120,7 @@ const resolveSplice = (core, id, payload, current) => {
 const elementAt = (core, id, key, index, current) => {
   const held = current ? blockOf(current, key) : undefined;
   const idx = held === undefined ? null : S.indexOf(current, key);
-  const length = idx === null ? 0 : idx.length;
+  const length = idx === null ? 0 : S.lengthOf(idx);
   if (index >= length) {
     const message = `Index ${index} is out of range for field ${key} of record ${id} (length ${length})`;
     throw new SyncomError('OUT_OF_RANGE', message, { id, field: key, index, count: 0, length });
@@ -145,9 +138,10 @@ const resolveAssign = (core, id, payload, current) => {
 const resolveMove = (core, id, payload, current) => {
   const { key, index: from, to } = payload;
   const { idx, elem } = elementAt(core, id, key, from, current);
-  if (to >= idx.length) {
-    const message = `Index ${to} is out of range for field ${key} of record ${id} (length ${idx.length})`;
-    throw new SyncomError('OUT_OF_RANGE', message, { id, field: key, index: to, count: 0, length: idx.length });
+  const length = S.lengthOf(idx);
+  if (to >= length) {
+    const message = `Index ${to} is out of range for field ${key} of record ${id} (length ${length})`;
+    throw new SyncomError('OUT_OF_RANGE', message, { id, field: key, index: to, count: 0, length });
   }
   const place = S.placeInsert(idx, to < from ? to : to + 1, core.nodeId);
   const at = place.at ?? `>${S.elemKey(place.run, place.from - 1)}`;
@@ -163,7 +157,7 @@ const resolveMark = (core, id, payload, current) => {
   const { start, end, name, value, expand, many } = payload;
   const held = current ? blockOf(current, key) : undefined;
   const idx = held === undefined ? null : S.indexOf(current, key);
-  const length = idx === null ? 0 : idx.length;
+  const length = idx === null ? 0 : S.lengthOf(idx);
   if (start > end || end > length) {
     const message = `Range ${start}..${end} is out of range for field ${key} of record ${id} (length ${length})`;
     throw new SyncomError('OUT_OF_RANGE', message, { id, field: key, index: start, count: end - start, length });

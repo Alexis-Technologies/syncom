@@ -312,11 +312,15 @@ caller's to avoid.
   times on the node: as the field's string, as the runs in the record's
   metadata, and as the ops in the log. Keep a text to what a record is for —
   a note, a comment, a description, a block of a document — and make a long
-  document a list of block records rather than one field. A keystroke that
-  extends the newest run at the end of the field — typing on at the end of
-  what you just typed — carries the field's index and reading over instead
-  of rebuilding them; any other edit (an insert elsewhere, a cut, a peer's
-  run) rebuilds them, once per op.
+  document a list of block records rather than one field. The field itself
+  is a rope: every edit — a keystroke at the end of what you just typed, an
+  insert anywhere, a cut, a peer's run with what hangs under it — lands in
+  O(log n) and leaves the reading cached, so what an op costs the engine does
+  not grow with the text (`bench/sequence.js`: some 65 000 to 120 000
+  inserts a second into a 100 KB text of 10 000 runs, 500 000 appends). What
+  grows is around it: the record file written after the op, and the load of
+  the field from its JSON once per open (a 100 KB text of one run in under
+  a tenth of a millisecond, 10 000 runs in some 20 ms).
 - A `splice` larger than a host's `bytesPerPush` is refused for the whole
   page it rides in; a paste of megabytes belongs in several calls.
 - A move adds a position run to the record's metadata — one key, some two
@@ -344,8 +348,7 @@ caller's to avoid.
   `length`, `max`) — move a sibling away, or reset the field. A peer's place
   that is not a fractional index is malformed and never lands.
 - A run holds at most 1 048 576 slots and a field 4 194 304, tombstones
-  included — the index allocates per slot, so this is what a peer can make a
-  node allocate. One `splice()` inserts at most a run's worth; typing past a
+  included — the bound on what a peer can make a node hold and walk. One `splice()` inserts at most a run's worth; typing past a
   full run starts a new one and reads the same; a field at its bound takes
   nothing more until a reset — `set()` of the record, or `compact(id)`,
   which writes the field again without its tombstones. Locally

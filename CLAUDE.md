@@ -53,10 +53,15 @@ src/signing/sign.js       canonical form, signOp, verifyOp — what a signature 
 src/shape.js              isPlainObject, asJson, isRecordId, isStreamName, wellFormed — what enters is checked here
 src/args.js               spliceArgs, treeArgs, markArgs, setElements, jsonValue, isNodeId — the write API’s argument
                           checks, shared by Storage and realize() in patch.js — no requires
-src/text/rle.js           run-length content: a run's items and gaps, cut, append, merge, the canonical form under MAX_RUN —
+src/text/rle.js           run-length content: a run's pieces and gaps, cut, append, merge, the canonical form under MAX_RUN —
                           no requires; sequence.js is the caller and re-exports what the tests read
-src/text/sequence.js      the sequence engine behind the list and text kinds (indexOf: the index cached on entry.cache): Fugue runs, the walk, local placement, pending ops,
-                          pos/vals/marks registers, cursors, prune and join — requires vector.js and rle.js only
+src/text/btree.js         the rope: a persistent B+-tree over a block's segments and fences with two measures (slots, visible),
+                          path copying, hints tagged by lineage, a text cache per node — no requires
+src/text/pmap.js          a persistent hash map (HAMT): the run records of a block, one changed per keystroke — no requires
+src/text/plist.js         a persistent sorted list in chunks: a placed run's segments, the children at its offsets — no requires
+src/text/sequence.js      the sequence engine behind the list and text kinds (indexOf: the block hydrated once onto entry.cache):
+                          run records, the walk that places a subtree, local placement, pending ops, pos/vals/marks registers,
+                          cursors, prune and join — requires vector.js, plugin.js, rle.js, btree.js, pmap.js, plist.js
 src/tree/moves.js         the tree engine: per node its stamped moves, the fold in stamp order with the cycle check (Kleppmann
                           2021, Loro), MAX_DEPTH levels read, prune and join — requires vector.js and order.js (a place is a
                           fractional index or the move is malformed)
@@ -275,8 +280,8 @@ docs/                     VitePress site
   within ±`MAX_COUNT` and added up in origin order; a set
   is `meta.sets[field][elementKey][origin] = [added, removed]`, live while
   `added > removed`, read sorted by element text; a list or a text is
-  `meta.seqs[field]`, a block of `src/sequence.js`; a tree is
-  `meta.trees[field]`, a block of `src/tree.js` — how a block merges (Fugue,
+  `meta.blocks[field]` with `k: 'l'`/`'t'`, a block of `src/text/sequence.js`; a tree is
+  `meta.blocks[field]` with `k: 'tree'`, a block of `src/tree/moves.js` — how a block merges (Fugue,
   the run-length content, the pending ops, the movable list, the marks; the
   move log and its fold) is the header of its module, not repeated here.
   What crosses modules: a `remove` carries the tags this node observed
@@ -302,14 +307,14 @@ docs/                     VitePress site
   `src/commit.js`: `OUT_OF_RANGE`, `CYCLE`, `NOT_FOUND`; `resolveTree` folds
   the tree ONCE and hands back `null` for a move to where the node is, and
   `commitLocal` returns before `applyOp` on it). `sync.pendingMax`
-  (`PENDING_MAX`), `MAX_RUN` (`src/rle.js`), `MAX_FIELD`, `MAX_FI`, `MAX_DEPTH`
+  (`PENDING_MAX`), `MAX_RUN` (`src/text/rle.js`), `MAX_FIELD`, `MAX_FI`, `MAX_DEPTH`
   and `MAX_COUNT` bound what a peer can make a node hold or read, on the op path
   and in `normalizeMeta` alike — a snapshot buys nothing an op could not. The
   fuzz in `tests/suites/sync-engine.js` compares the blocks and the move logs
   across nodes, not only what they read as. `compact(id)` (`src/patches.js`)
   = `applyPatches(id, diffViews(null, {}, reading, kinds))` laid in runs of
   `MAX_RUN`, then a text's marks as `mark` patches (`marksIn` in
-  src/sequence.js): a reset plus one op per field, one move per node —
+  src/text/sequence.js): a reset plus one op per field, one move per node —
   convergent through the reset rule.
 - **A payload the engine does not admit is never silent.** `applyOp` reports
   `reason: 'malformed'` in `rejected` (`malformed()` in `src/ops.js`): on the
@@ -318,22 +323,30 @@ docs/                     VitePress site
   `OP_REFUSED{reason:'malformed'}`, counted in `syncom.ops.rejected`, the op
   still logged and relayed as a no-op (a dirk, never a gap). A `bound`
   refusal carries `detail` (`pending`/`run`/`field`/`counter`), `count` and `max`.
-- **A sequence block is never mutated in place; its index is cached by
-  identity.** Every change goes through `cloneSeq`, so a changed block is a
-  new object, and `seqIndexOf(entry, field)` in `src/ops.js` keeps
-  `buildIndex`'s result on the entry (`entry.seqIndex[field] = { seq, base,
-  index }`, carried by `cloneEntry` and into `EntryStore`'s cache, never into
-  the file) while `meta.seqs[field]` is the SAME object under the same base.
-  Read a sequence field through `seqIndexOf`, never through a bare
-  `buildIndex` on a path that runs per op; a keystroke carries the held index
-  over (`extendIndex`, on the `extended` hint `applySplice` returns — its
-  conditions are at its definition) and `render` keeps the reading on the
-  index, so never mutate an index or the array `render` hands back.
-  `parsedRun` memoizes a run tuple's parse by the tuple's identity (an
-  unchanged run shares its tuple between blocks; a tuple under another key is
-  parsed again). `latestClock(meta, true)` is the trusted path for an entry
-  this node holds — a peer's raw meta takes the untrusted one, which
-  normalizes first.
+- **A block IS the index, and it is never mutated in place.** A block of
+  `src/text/sequence.js` is a plain object — `k`, `ts`, the maps, and `runs`
+  as a getter that serializes the rope in walk order once per version — whose
+  engine state is in a module-private WeakMap: the rope (`src/text/btree.js`),
+  the run records (`src/text/pmap.js`; a placed record's segments and the
+  children at its offsets in `src/text/plist.js`), what waits, the counts the
+  bounds read. Nothing else is on the object (`lengthOf`, `totalOf`, `render`
+  are the engine's). Every op goes through `draft`/`finish`: a new block, the
+  structures path-copied, the block before reading as it did; `indexOf(entry,
+  field)` hydrates plain JSON once onto `entry.cache` and hands an engine
+  block back as it is. Hints — an item's leaf, a node's parent — are right
+  for the HEAD of a lineage only: an edit, a position or a neighbour asked of
+  an older block forks it into a lineage of its own (`ensureHead`,
+  `stats().rebuilds`) and the tree re-hints itself once (`T.stats().rehints`);
+  a top-down reading never reads a hint. A text's reading is the rope's
+  cache per node (`T.text`): after one op it costs the path the op copied,
+  never the text. A run is placed whole with what hangs under it
+  (`walkSubtree`, `placeRun`; a run under a parent not here yet is attached
+  to it, `attachChild`, and walked when the parent lands); a stretch of a run
+  with no child at it is emitted piece by piece (`emitPieces`), never slot by
+  slot. `prune` is O(1) through `oldest`/`oldestAnchor` and rebuilds from
+  JSON only under a base it has not seen. `latestClock(meta, true)` is the
+  trusted path for an entry this node holds — a peer's raw meta takes the
+  untrusted one, which normalizes first.
 - **Ops from one origin apply in seq order; seqs run per origin AND scope**
   (`origin@scope` vector keys), and ops born from a snapshot (`merge`,
   `advance`) run in their own `origin@~` stream. `applyRemote` skips
