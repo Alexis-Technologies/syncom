@@ -100,9 +100,12 @@ const { open } = require('@alexify/syncom/all'); // text, tree, signing, chain a
 ## Sizes
 
 `pnpm size` measures every entry on its own, min+gzip, against a budget: the
-core about 35 KB, `/text` 14 KB, `/tree` 5 KB, `/signing` 4 KB, `/chain`
-2 KB, `/encryption` 4 KB, `/sync` 18 KB, `/schema` 4 KB, `/telemetry` 3 KB,
-`/query` 5 KB, `/versions` 22 KB, `/all` 73 KB. In an app bundle the
-modules the blocks share with the core are counted once, so core + `/text` is
-about 53 KB, the three security blocks add about 2 KB together and `/sync`
-about 7 KB — not the sum of the rows.
+core about 35 KB (66 before the blocks), `/text` 14 KB, `/tree` 5 KB,
+`/signing` 4 KB, `/chain` 2 KB, `/encryption` 4 KB, `/sync` 16 KB, `/schema`
+4 KB, `/telemetry` 3 KB, `/query` 6 KB, `/versions` 22 KB, `/all` 73 KB. A
+block measured alone carries the core modules it stands on, so the rows do
+not add up: in an app bundle those are counted once, and the script checks
+it — the core and every block bundled together weigh what `/all` weighs,
+within a rounding. What a block adds is the difference the core came down
+by when it left: `/text` about 12 KB, `/sync` 7, `/versions` 4, `/signing`,
+`/chain` and `/encryption` about 2 together.

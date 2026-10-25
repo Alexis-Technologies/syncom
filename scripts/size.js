@@ -270,7 +270,9 @@ const selfContained = {
 
 async function bundle(entry, platform, minify) {
   const result = await esbuild.build({
-    entryPoints: [path.join(ROOT, entry)],
+    // A string entry is a file; an object is esbuild's stdin — a bundle of
+    // several entries at once, the composite below.
+    ...(typeof entry === 'string' ? { entryPoints: [path.join(ROOT, entry)] } : { stdin: entry }),
     bundle: true,
     minify,
     platform,
@@ -281,6 +283,33 @@ async function bundle(entry, platform, minify) {
   });
   return Buffer.from(result.outputFiles[0].contents);
 }
+
+// The core and every block `/all` registers, bundled together as an app
+// that imports each from its subpath: what `/all` is, built the other way.
+// The two must weigh the same within a rounding — a module reached twice
+// (a browser half under one path, the node half under another; a helper
+// duplicated between a block and the core) would show as the difference.
+const COMPOSITE = [
+  'index.js',
+  'src/text/text.js',
+  'src/tree/tree.js',
+  'src/signing/signing.js',
+  'src/chain/chain.js',
+  'src/encryption/encryption.js',
+  'src/sync/sync.js',
+  'src/schema/schema.js',
+  'src/telemetry/telemetry.js',
+  'src/query/query.js',
+  'src/versions/versions.js',
+  'src/memory/memory.js',
+  'src/layered/layered.js',
+];
+const COMPOSITE_TOLERANCE_KB = 0.3;
+const composite = () => ({
+  contents: COMPOSITE.map((entry, i) => `import * as m${i} from './${entry}'; globalThis.m${i} = m${i};`).join('\n'),
+  resolveDir: ROOT,
+  sourcefile: 'composite.js',
+});
 
 function kb(bytes) {
   return `${(bytes / 1024).toFixed(1)} KB`;
@@ -307,6 +336,23 @@ async function main() {
       budget: budget === undefined ? '—' : `${budget.toFixed(1)} KB`,
     });
   }
+
+  // The composite against `/all`: nothing bundled twice.
+  const allRow = rows.find((row) => row.label.startsWith('all — browser'));
+  const whole = gzipSync(await bundle(composite(), 'browser', true), { level: 9 }).length;
+  const allGzip = Number.parseFloat(allRow.gzip) * 1024;
+  if (Math.abs(whole - allGzip) > COMPOSITE_TOLERANCE_KB * 1024) {
+    over.push(
+      `the core and every block together weigh ${kb(whole)}, /all ${allRow.gzip}: more than ${COMPOSITE_TOLERANCE_KB} KB apart — something is bundled twice`,
+    );
+  }
+  rows.push({
+    label: 'core + every block, in one bundle (= /all)',
+    raw: '—',
+    min: '—',
+    gzip: kb(whole),
+    budget: `${allRow.gzip} ± ${COMPOSITE_TOLERANCE_KB}`,
+  });
 
   console.log('| Entry | raw | min | min+gzip | budget |');
   console.log('| ----- | ---:| ---:| --------:| ------:|');

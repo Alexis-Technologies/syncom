@@ -87,21 +87,29 @@ with every plugin registered (see
 
 | Entry | raw | min | min+gzip | budget |
 | ----- | ---:| ---:| --------:| ------:|
-| main entry — browser (@alexify/syncom) | 367.3 KB | 151.9 KB | 51.4 KB | 52.0 KB |
-| main entry — node (@alexify/syncom) | 351.1 KB | 152.0 KB | 51.5 KB | — |
+| main entry — browser (@alexify/syncom) | 248.8 KB | 101.3 KB | 34.5 KB | 52.0 KB |
+| main entry — node (@alexify/syncom) | 237.8 KB | 101.4 KB | 34.6 KB | — |
 | wrpc adapter — browser (@alexify/syncom/wrpc) | 3.2 KB | 1.4 KB | 0.7 KB | 2.0 KB |
-| contracts — browser (@alexify/syncom/contracts) | 3.5 KB | 1.6 KB | 0.8 KB | 1.0 KB |
+| contracts — browser (@alexify/syncom/contracts) | 4.2 KB | 1.9 KB | 1.0 KB | 1.0 KB |
 | idb backend — browser (@alexify/syncom/idb) | 3.5 KB | 1.6 KB | 0.8 KB | 2.0 KB |
 | search — browser (@alexify/syncom/search) | 4.1 KB | 1.6 KB | 0.9 KB | 2.0 KB |
 | order — browser (@alexify/syncom/order) | 4.7 KB | 2.2 KB | 1.0 KB | 1.5 KB |
-| undo — browser (@alexify/syncom/undo) | 34.7 KB | 16.3 KB | 6.1 KB | 6.5 KB |
-| branch — browser (@alexify/syncom/branch) | 15.5 KB | 7.8 KB | 3.4 KB | 3.5 KB |
-| all — browser (@alexify/syncom/all) | 479.5 KB | 204.8 KB | 70.2 KB | 71.0 KB |
-| text — browser (@alexify/syncom/text) | 82.9 KB | 39.4 KB | 14.3 KB | 15.0 KB |
-| tree — browser (@alexify/syncom/tree) | 27.6 KB | 13.3 KB | 5.1 KB | 5.5 KB |
-| signing — browser (@alexify/syncom/signing) | 21.7 KB | 10.1 KB | 4.2 KB | 4.5 KB |
-| chain — browser (@alexify/syncom/chain) | 10.5 KB | 4.6 KB | 2.0 KB | 2.5 KB |
-| encryption — browser (@alexify/syncom/encryption) | 19.0 KB | 9.0 KB | 3.7 KB | 4.0 KB |
+| undo — browser (@alexify/syncom/undo) | 35.7 KB | 16.8 KB | 6.3 KB | 6.5 KB |
+| branch — browser (@alexify/syncom/branch) | 16.2 KB | 8.2 KB | 3.6 KB | 4.0 KB |
+| all — browser (@alexify/syncom/all) | 492.6 KB | 210.6 KB | 72.8 KB | 73.0 KB |
+| text — browser (@alexify/syncom/text) | 83.8 KB | 39.9 KB | 14.5 KB | 15.0 KB |
+| tree — browser (@alexify/syncom/tree) | 28.3 KB | 13.7 KB | 5.3 KB | 5.5 KB |
+| signing — browser (@alexify/syncom/signing) | 22.3 KB | 10.4 KB | 4.4 KB | 4.5 KB |
+| chain — browser (@alexify/syncom/chain) | 9.5 KB | 4.3 KB | 1.9 KB | 2.5 KB |
+| encryption — browser (@alexify/syncom/encryption) | 18.0 KB | 8.6 KB | 3.6 KB | 4.0 KB |
+| memory — browser (@alexify/syncom/memory) | 2.1 KB | 0.8 KB | 0.5 KB | 0.8 KB |
+| layered — browser (@alexify/syncom/layered) | 6.8 KB | 2.9 KB | 1.3 KB | 1.5 KB |
+| sync — browser (@alexify/syncom/sync) | 104.7 KB | 44.7 KB | 16.2 KB | 18.0 KB |
+| schema — browser (@alexify/syncom/schema) | 20.9 KB | 10.6 KB | 4.0 KB | 4.0 KB |
+| telemetry — browser (@alexify/syncom/telemetry) | 15.7 KB | 6.6 KB | 2.6 KB | 4.0 KB |
+| query — browser (@alexify/syncom/query) | 36.4 KB | 14.7 KB | 5.6 KB | 6.0 KB |
+| versions — browser (@alexify/syncom/versions) | 145.5 KB | 62.8 KB | 22.0 KB | 30.0 KB |
+| core + every block, in one bundle (= /all) | — | — | 72.7 KB | 72.8 KB ± 0.3 |
 
 ## Quick Start
 

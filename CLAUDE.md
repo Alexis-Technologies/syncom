@@ -136,6 +136,12 @@ docs/                     VitePress site
   `mergeEntry`, `normalizeMeta`, `latestClock(meta, false, limits)`, `diffViews` and `realize` take
   the registry through `limits.plugins` / `plugins`, and `/all` pre-binds them. Tests that need the
   kinds open through `src/all/all.js` (`tests/sync.engine.lean.test.js` proves the explicit route).
+  The other blocks are api plugins over the seam of the next rule: `signing`, `chain`, `encryption`,
+  `schema`, `telemetry`, `query`, `versions` (`setup(ctx)`, before the log), `sync` (`open(ctx)`,
+  after the replay); `memory` and `layered` are backends, not plugins. Every suite of a block runs
+  twice — over `/all` and over the lean core with the plugins given by hand
+  (`tests/*.lean.test.js`) — and `scripts/size.js` checks that the core and every block bundled
+  together weigh what `/all` weighs (nothing bundled twice).
 - **An adapted algorithm brings its notice.** Code or a rule taken from an MIT project is named in
   `THIRD_PARTY_NOTICES.md` (project, commit, the syncom files that carry it) with the upstream notice.
   Nothing is copied from json-joy (AGPL-3.0), Collabs or `fugue/fugue` (Apache-2.0) — those are read

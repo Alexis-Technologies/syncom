@@ -103,7 +103,10 @@ There is no released version section until then; everything below lands in it.
   subpath stands on them). Without the plugin those methods throw
   `PLUGIN_MISSING`, `stats().tags` is `null`, and a directory that holds tags
   is refused at `open()`, since its copies would not be kept. The core is
-  35 KB — from 66 before the blocks.
+  35 KB — from 66 before the blocks; `pnpm size` checks that the core and
+  every block bundled together weigh what `/all` weighs, so nothing is
+  bundled twice, and every block's suite runs over the lean core with the
+  plugins given by hand as well as over `/all`.
 - **Lists and text.** A field can be a list — an array edited by position —
   or a text — a string typed into: `splice(id, key, index, count, content)`
   and `push(id, key, content)`, on the storage and on a live Record. Two
