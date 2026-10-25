@@ -14,6 +14,12 @@ There is no released version section until then; everything below lands in it.
 
 ### Added
 
+- **Devtools.** `@alexify/syncom/inspect`: `inspect(storage, id)` lays a
+  record out raw — the data in the op model's terms and the composed
+  reading, the reset stamps, every field with its kind, whether the reading
+  shows it and the kind's counts and stamps, the record's retained log
+  entries — and `anonymize(value, { salt, keys })` copies anything JSON
+  with every string hashed out, the shape kept, for a bug report.
 - **A fork at any version; who wrote what.** `branch(parent, { from: { at } })`
   forks at an event id, a stamp or a vector, through the new
   `storage.atVersion(at)` — every record folded to the version, its vector,

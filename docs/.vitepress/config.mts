@@ -193,7 +193,10 @@ export default withMermaid({
           },
           {
             text: 'Operations',
-            items: [{ text: 'OpenTelemetry', link: '/guide/telemetry' }],
+            items: [
+              { text: 'OpenTelemetry', link: '/guide/telemetry' },
+              { text: 'Devtools', link: '/guide/devtools' },
+            ],
           },
         ],
         '/reference/': [

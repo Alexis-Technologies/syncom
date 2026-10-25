@@ -761,6 +761,15 @@ vocabulary, Myers and Emitter are the core's. `UndoManager` is the class
 | `destroy()` | `Promise<void>` — leaves (a last `update` with a null state), clears the timers, forgets every state |
 | `on('change' \| 'update', fn)` | `change` `({ added, updated, removed })` the nodes whose state came, changed, went (an expiry included); `update` `(update)` this node's state to send — what `storage.sync.presence(instance)` carries |
 
+## Inspect (subpath)
+
+`@alexify/syncom/inspect` — a record's anatomy and an anonymized copy. See [Devtools](../guide/devtools).
+
+| Member | Notes |
+| --- | --- |
+| `inspect(storage, id)` | `Promise<Inspection>` — `{ id, present, encrypted, alive, data, reading, base, deleted, purged, v, fields, log }`: the data in the op model's terms and the composed reading (lens and hooks aside), the reset stamps, every field with its `kind`, whether it is `reachable` in the reading and the kind's counts and stamps (a register's `stamp`, a counter's `sums`, a set's `elements`/`live`, a block's `runs`/`cuts`/`ext`/`pos`/`vals`/`marks` or `nodes`/`moves`), and the record's retained log entries (`seq`, `eventId`, `type`, `origin`, `stream`, `ts`, `scope`, `field`, `actor`, `message`, `signed`, `skipped`, `scrubbed`); nothing written; `INVALID_ID` for an id that is none |
+| `anonymize(value, { salt = '', keys = false }?)` | A copy of any JSON value with every string replaced by a stable hash of it under `salt` (`~` and eight hex digits; the same string reads the same throughout), keys too when `keys` — numbers, booleans and nulls as they are; a value JSON cannot carry is a `TypeError` |
+
 ## Branch (subpath)
 
 ```js

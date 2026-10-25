@@ -53,6 +53,10 @@
       "types": "./src/presence/presence.d.ts",
       "default": "./src/presence/presence.js"
     },
+    "./inspect": {
+      "types": "./src/inspect/inspect.d.ts",
+      "default": "./src/inspect/inspect.js"
+    },
     "./all": {
       "types": "./src/all/all.d.ts",
       "default": "./src/all/all.js"

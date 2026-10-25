@@ -187,6 +187,13 @@ const ENTRIES = [
     // 3.8 measured: shape.js (the canonical JSON, the stream and key checks) comes with the emitter.
     budget: 4,
   },
+  // The inspector: a record's anatomy and an anonymized copy; the composition, the shapes and the hash come along (4.6 measured).
+  {
+    label: 'inspect — browser (@alexify/syncom/inspect)',
+    entry: 'src/inspect/inspect.js',
+    platform: 'browser',
+    budget: 5,
+  },
   // Everything in one import: the core with the text and tree plugins
   // registered — what the main entry was before the kinds became plugins.
   // 68.5 KB: what the 66 KB entry was, plus the registry and the plugins'

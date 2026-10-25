@@ -18,6 +18,7 @@ const ENTRIES = [
   'src/undo/undo.js',
   'src/branch/branch.js',
   'src/presence/presence.js',
+  'src/inspect/inspect.js',
   'src/contracts/contracts.js',
   'src/idb/idb.js',
   'src/all/all.js',

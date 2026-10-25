@@ -834,6 +834,9 @@ class Storage extends Emitter {
         if (entry === null || entry.encrypted || !isAlive(entry)) return null;
         return this.#view(id, entry);
       },
+      // The entry as it is — data and meta, a tombstone too — for the
+      // inspector (@alexify/syncom/inspect); never for a reader of data.
+      entry: (id) => this.#entries.load(id),
     };
   }
 

@@ -35,6 +35,7 @@ src/idb/idb.js            the @alexify/syncom/idb subpath — the IndexedDB back
 src/search/search.js      the @alexify/syncom/search subpath — the trigram text index behind `$text`; the core knows only the TextIndex contract
 src/order/order.js        the @alexify/syncom/order subpath — fractional indexes as strings, for ordering records
 src/undo/undo.js          the @alexify/syncom/undo subpath — the undo stack over the commit event; requires patch.js, emitter.js, symbols.js, paths.js only
+src/inspect/inspect.js    the @alexify/syncom/inspect subpath — a record's anatomy (through the [SOURCE] seam's raw `entry`) and anonymize; requires compose, shape, symbols, hash only
 src/presence/presence.js  the @alexify/syncom/presence subpath — ephemeral state per node, signed through storage[SIGNER]; requires emitter, shape, symbols, errors, scope only
 src/branch/branch.js      the @alexify/syncom/branch subpath — fork a storage, merge either way; never requires storage.js
 index.d.ts                the Node type surface (hand-written)
