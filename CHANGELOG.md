@@ -31,6 +31,30 @@ There is no released version section until then; everything below lands in it.
   `createPlugins()`. Every subpath is a folder under `src/` and the root holds
   four files; `meta.seqs`/`meta.trees` became one `meta.blocks` slot keyed by
   field, each block naming its kind (`k`).
+- **Security as blocks.** The identity and the signatures, the chain and the
+  sealing of records are plugins too, each what it was as one piece:
+  `signing` (`@alexify/syncom/signing`) makes the node id its Ed25519 key,
+  signs every own op and verifies a peer's under `sync.signatures`; `chain`
+  (`@alexify/syncom/chain`) writes a block per applied batch, checks a cold
+  read and gives `validate()` its walk; `encryption`
+  (`@alexify/syncom/encryption`) seals `{ encrypted: true }` records for this
+  node's RSA pair. The key functions — `calculateHash`, `generateSigningKeys`,
+  `loadSigningKeys`, `sign`, `verify`; `generateKeys`, `loadKeys`, `encrypt`,
+  `decrypt` — and `Blockchain` moved to those subpaths off the root, each
+  with its own browser types where Web Crypto is async. Without `signing` the
+  node id is what `getId` mints (a UUID by default; cuid, ulid… through
+  `open({ getId })`), nothing is signed or checked, and a directory keeps the
+  key it was given as its id (one born without the plugin is rekeyed once,
+  with `identity.rekeyed`, when it arrives); without `chain` no block is
+  written and `validate()` is `NO_CHAIN` naming the plugin. What the options
+  ask for and no plugin provides is `PLUGIN_MISSING` at `open()`:
+  `sync.signatures: 'require'` without `signing`, `chain: true` without
+  `chain`, `encrypted: true` without `encryption`. The chain and the schema
+  hash use SHA-256 through Web Crypto on both platforms (`src/digest.js`), so
+  the core has no crypto half. New: `atRest(fsi, { key | password, salt })`
+  — a backend wrapper (every file AES-256-GCM under one key, PBKDF2 from a
+  password, `DECRYPT_FAILED` with a `reason` for a file that is not the
+  key's). The main entry is 51 KB; `/all` registers all five plugins.
 - **Lists and text.** A field can be a list — an array edited by position —
   or a text — a string typed into: `splice(id, key, index, count, content)`
   and `push(id, key, content)`, on the storage and on a live Record. Two

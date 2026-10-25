@@ -11,26 +11,9 @@ export interface KeyPair {
   readonly privateKey: string;
 }
 
-export function generateKeys(): Promise<KeyPair>;
-export function encrypt(data: unknown, publicKey: string): string;
-export function decrypt(data: string, privateKey: string): unknown;
-export function loadKeys(basePath: string, options?: { fsi?: Fsi }): Promise<KeyPair>;
-
-/** The Ed25519 pair that signs a node's ops; `id` is the raw public key, base64url — the node id. */
-export interface SigningKeyPair extends KeyPair {
-  readonly id: string;
-}
-
-export function generateSigningKeys(): Promise<SigningKeyPair>;
-/** `sign-public.pem` and `sign-private.pem` under `basePath`: read, or made and written. */
-export function loadSigningKeys(basePath: string, options?: { fsi?: Fsi }): Promise<SigningKeyPair>;
-/** Signs `message` (UTF-8) with a PEM Ed25519 private key: 64 bytes, base64url. */
-export function sign(message: string, privateKey: string): string;
-/**
- * Whether `signature` is `publicKey`'s — a node id, the raw key base64url —
- * over `message`; `false`, never a throw, for a malformed key or signature.
- */
-export function verify(message: string, signature: string, publicKey: string): boolean;
+// The key functions — generateKeys/encrypt/decrypt/loadKeys, the signing
+// pair, sign/verify — are the `@alexify/syncom/encryption` and
+// `@alexify/syncom/signing` subpaths'; the core keeps the PEM pair shape.
 
 // ---------------------------------------------------------------------------
 // Backends (src/backend.js, src/fsi.js, src/fsi.browser.js)
@@ -321,6 +304,7 @@ export type SyncomErrorCode =
   | 'DOWNGRADE'
   | 'LOCKED'
   | 'KEYS_INCOMPLETE'
+  | 'DECRYPT_FAILED'
   | 'IDENTITY_MISMATCH'
   | 'KINDS_MISMATCH'
   | 'BAD_SIGNATURE'
@@ -576,38 +560,8 @@ export function apply(
   history: readonly CrdtHistoryRecord[],
 ): unknown;
 
-export interface Block<T = unknown> {
-  prev: string;
-  timestamp: number;
-  data: T;
-}
-
-export interface ChainDataEntry {
-  id: string;
-  hash: string;
-}
-
-export function calculateHash(data: JSONSafe): string;
-
-export interface Blockchain {
-  readonly path: string;
-  tailHash: string;
-
-  writeChain(): Promise<void>;
-  addBlock(data: unknown): Promise<string>;
-  writeBlock(block: Block): Promise<string>;
-  readBlock(hash: string): Promise<Block>;
-  validate(options?: { last?: number; from?: string }): Promise<boolean>;
-}
-
-export interface BlockchainConstructor {
-  readonly prototype: Blockchain;
-  new (basePath: string, options?: { fsi?: Fsi }): Promise<Blockchain>;
-}
-
-export const Blockchain: BlockchainConstructor;
-
-// Smart contracts live in the `@alexify/syncom/contracts` subpath (contracts.d.ts).
+// The chain — `Block`, `Blockchain`, the plugin — is the `@alexify/syncom/chain`
+// subpath (src/chain/chain.d.ts); smart contracts are `@alexify/syncom/contracts`.
 
 // ---------------------------------------------------------------------------
 // Schema (src/schema.js)

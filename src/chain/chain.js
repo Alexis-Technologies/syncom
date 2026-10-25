@@ -1,9 +1,19 @@
 'use strict';
 
-const defaultFsi = require('./fsi.js');
-const { calculateHash } = require('./crypto.js');
-const { checkFsi } = require('./backend.js');
-const { SyncomError } = require('./errors.js');
+// The hash-linked chain as a plugin (@alexify/syncom/chain): every applied
+// batch — a local write, a peer's page, a replay — appends a block naming
+// the hash of each record's data after it, and a record file is checked
+// against its block on a cold read (`integrity: 'verify'`); `validate()`
+// walks the chain. Blocks are SHA-256 of their JSON (../digest.js, Web
+// Crypto on both platforms); each node's chain is its own audit, not
+// shared. `open({ chain: false })` keeps the plugin registered and the
+// chain off — a hub that only replicates has nothing to audit and saves two
+// file writes per batch.
+
+const defaultFsi = require('../fsi.js');
+const { sha256 } = require('../digest.js');
+const { checkFsi } = require('../backend.js');
+const { SyncomError } = require('../errors.js');
 
 const BLOCKCHAIN = '.blockchain.json';
 
@@ -53,7 +63,7 @@ class Blockchain {
   }
 
   async writeBlock(block) {
-    const hash = await calculateHash(block);
+    const hash = await sha256(block);
     await this.#fsi.write(this.path, `${hash}.json`, JSON.stringify(block));
     return hash;
   }
@@ -75,7 +85,7 @@ class Blockchain {
       const known = await this.#fsi.exists(this.path, `${currentHash}.json`);
       if (!known) return false;
       const block = await this.readBlock(currentHash);
-      const expectedHash = await calculateHash(block);
+      const expectedHash = await sha256(block);
       const valid = currentHash === expectedHash;
       if (!valid) return false;
       count++;
@@ -87,4 +97,13 @@ class Blockchain {
   }
 }
 
-module.exports = { Blockchain };
+/** The chain plugin: `open({ plugins: [chain] })`; `chain: false` keeps it off. */
+const chain = Object.freeze({
+  name: 'chain',
+  async setup({ fsi, path, settings }) {
+    if (settings.chained === false) return {};
+    return { chain: await new Blockchain(`${path}/blockchain`, { fsi }) };
+  },
+});
+
+module.exports = { chain, Blockchain };

@@ -25,10 +25,13 @@ npm install @alexify/syncom
 
 ## Opening a storage
 
-`open()` is asynchronous: it generates or loads its two key pairs — RSA to
-seal encrypted records, Ed25519 to sign ops, whose public key is the node id —
-initialises the chain and the operation log, and returns once the storage is
-ready to use.
+`open()` is asynchronous: it sets its plugins up — with `@alexify/syncom/all`
+that generates or loads two key pairs, RSA to seal encrypted records and
+Ed25519 to sign ops, whose public key is the node id, and initialises the
+chain — opens the operation log, and returns once the storage is ready to
+use. The core alone (`@alexify/syncom`) has no key and no chain: its node id
+is a UUID, and the security blocks are plugins it takes
+(see [Entry points](./entry-points)).
 
 ```js
 'use strict';
@@ -131,7 +134,8 @@ await storage.validate();             // the whole chain
 ```
 
 Reading a record that no longer matches its block throws rather than returning
-the modified data. See [Blockchain log](./chain).
+the modified data. The chain is the `chain` plugin, registered by `/all`. See
+[Blockchain log](./chain).
 
 ## Syncing with other nodes
 

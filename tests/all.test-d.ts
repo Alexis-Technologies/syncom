@@ -45,7 +45,21 @@ expectType<Promise<void>>(flown.splice('id', 'body', 0, 0, 'x'));
 // The plugins and the registry-bound folds.
 expectType<syncom.Plugin<syncom.TextMethods>>(syncom.text);
 expectType<syncom.Plugin<syncom.TreeMethods>>(syncom.tree);
-expectType<readonly [syncom.Plugin<syncom.TextMethods>, syncom.Plugin<syncom.TreeMethods>]>(syncom.PLUGINS);
+expectType<
+  readonly [
+    syncom.Plugin<syncom.TextMethods>,
+    syncom.Plugin<syncom.TreeMethods>,
+    syncom.Plugin,
+    syncom.Plugin,
+    syncom.Plugin,
+  ]
+>(syncom.PLUGINS);
+expectType<syncom.Plugin>(syncom.signing);
+expectType<syncom.Plugin>(syncom.chain);
+expectType<syncom.Plugin>(syncom.encryption);
+expectType<string>(syncom.calculateHash({ a: 1 }));
+expectType<Promise<syncom.Blockchain>>(new syncom.Blockchain('base'));
+expectType<syncom.Fsi>(syncom.atRest(syncom.createMemoryFsi(), { key: new Uint8Array(32) }));
 declare const entry: syncom.Entry;
 expectType<syncom.ApplyResult>(
   syncom.applyOp(entry, {

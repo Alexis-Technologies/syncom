@@ -731,7 +731,7 @@
           "mark": "",
           "text": "node.js ≥ 22 (CI on 22 and 24); browsers through OPFS or IndexedDB",
           "note": "Nothing in the repository tests or claims Deno, Bun or React Native. The browser half needs Web Crypto with Ed25519, and OPFS or IndexedDB (`@alexify/syncom/idb`).",
-          "source": "package.json:6-12; package.json:151-152; .github/workflows/ci.yml:34; docs/guide/browser.md:84; src/crypto.browser.js:12-14"
+          "source": "package.json:6-12; package.json:151-152; .github/workflows/ci.yml:34; docs/guide/browser.md:84; src/signing/ed25519.browser.js"
         },
         "types": {
           "mark": "⚠️",
@@ -813,7 +813,7 @@
           "mark": "✅",
           "text": "`actor` on every op (`open({ actor })` or per write), signed and replicated",
           "note": "A claim the origin signs, not a proof of who the user is.",
-          "source": "index.d.ts:240-241; src/signing.js; docs/guide/sync.md#signatures"
+          "source": "src/signing/signing.d.ts; src/signing/sign.js; docs/guide/sync.md#signatures"
         },
         "opId": {
           "mark": "",
@@ -1397,13 +1397,13 @@
           "mark": "✅",
           "text": "Ed25519 per op; the node id is the key; verified on receipt",
           "note": "`'verify'` (the default) still takes unsigned ops; only `'require'` refuses them. The signature covers the header and a salted payload digest, so a scrubbed op still verifies.",
-          "source": "src/signing.js:1-13; src/apply.js:63-112; docs/guide/sync.md:237-304"
+          "source": "src/signing/sign.js:1-13; src/apply.js:63-112; docs/guide/sync.md:237-304"
         },
         "checksums": {
           "mark": "⚠️",
           "text": "a signed SHA-256 digest per op; record files checked against the chain",
           "note": "Log segments carry no checksum: a torn one is skipped at open and counted in `droppedTs`.",
-          "source": "src/signing.js:5-9; src/entries.js:125-140; src/log.js:150-182"
+          "source": "src/signing/sign.js:5-9; src/entries.js:125-140; src/log.js:150-182"
         },
         "malformed": {
           "mark": "✅",

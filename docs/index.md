@@ -55,7 +55,7 @@ features:
     linkText: Storage
   - icon: 🔗
     title: A signed log you can verify, read back and purge
-    details: "Every op is signed by its origin, whose node id is its Ed25519 key, so any peer verifies it through any relay, and writes can be committed to a hash-linked chain that reads re-check. The log reads back: a record at any version it retains, tags of the whole storage, diff and restore, an undo stack, branches that merge back. purge() scrubs a payload out of it, and repair(id) rebuilds a record from it."
+    details: "With the signing plugin every op is signed by its origin, whose node id is its Ed25519 key, so any peer verifies it through any relay; with the chain plugin writes are committed to a hash-linked chain that reads re-check. The log reads back: a record at any version it retains, tags of the whole storage, diff and restore, an undo stack, branches that merge back. purge() scrubs a payload out of it, and repair(id) rebuilds a record from it."
     link: /guide/versions
     linkText: Versions and history
   - icon: 📈

@@ -14,6 +14,9 @@ given, and another storage in the same process may run with others.
 | `@alexify/syncom` | the core | — |
 | `@alexify/syncom/text` | the `list` and `text` kinds: Fugue runs, marks, cursors, `splice` … `move` | `open({ plugins: [text] })` |
 | `@alexify/syncom/tree` | the `tree` kind: a movable tree per field, `treeMove`, `treeRemove` | `open({ plugins: [tree] })` |
+| `@alexify/syncom/signing` | the identity as an Ed25519 key, every own op signed, a peer's verified (`sync.signatures`); the key functions | `open({ plugins: [signing] })` |
+| `@alexify/syncom/chain` | the hash-linked chain: a block per applied batch, the check on a cold read, `validate()`; `Blockchain` | `open({ plugins: [chain] })` |
+| `@alexify/syncom/encryption` | records sealed for this node (`encrypted: true`), and `atRest()`, a backend wrapper that encrypts every file | `open({ plugins: [encryption] })`; `open({ fsi: atRest(fsi, …) })` |
 | `@alexify/syncom/all` | the core with every shipped plugin registered — the API as one import | `require('@alexify/syncom/all').open()` |
 | `@alexify/syncom/undo`, `/branch`, `/order` | the undo stack, forks and merges, fractional indexes | functions over a storage |
 | `@alexify/syncom/search`, `/idb`, `/wrpc`, `/contracts` | the text index behind `$text`, the IndexedDB backend, the wrpc link adapter, smart contracts | injected: `open({ search })`, `open({ fsi })`, `sync.connect` |
@@ -32,10 +35,25 @@ await storage.splice(id, 'body', 0, 0, 'hello');
 ```
 
 A **local-first database** with no text or tree fields opens the core alone;
-the lists, texts and trees ship nothing to it. **Everything** is `/all`:
+the lists, texts and trees ship nothing to it. The core alone has no key: the
+node id is what `getId` mints (a UUID by default), its ops go out unsigned,
+no chain is written. **Signed and audited** — the level of security the
+package had as one piece — is three plugins:
 
 ```js
-const { open } = require('@alexify/syncom/all'); // text and tree registered
+const { open } = require('@alexify/syncom');
+const { signing } = require('@alexify/syncom/signing');
+const { chain } = require('@alexify/syncom/chain');
+const { encryption } = require('@alexify/syncom/encryption');
+
+const storage = await open({ path: 'data', plugins: [signing, chain, encryption] });
+storage.nodeId; // the Ed25519 public key; every op signed, every write chained
+```
+
+**Everything** is `/all`:
+
+```js
+const { open } = require('@alexify/syncom/all'); // text, tree, signing, chain and encryption registered
 ```
 
 ## What a plugin changes, and what it does not
@@ -60,10 +78,21 @@ const { open } = require('@alexify/syncom/all'); // text and tree registered
   kinds — is the registry's declared ranks: the register, the counter, the
   set, then every plugin's kinds, unique. It reads kinds alone, so it
   commutes whatever the set of plugins.
+- Security is opt-in, not opt-out of a level: without `signing` a node's ops
+  are taken by a `'verify'` peer as unsigned ops always were, and a
+  `'require'` host refuses its hello (its id is no key). The configuration
+  that resists a stripped signature is `'require'` with `signing` on every
+  node — see [Signatures](./sync#signatures). What the options ask for and no
+  plugin provides is refused at `open()` with `PLUGIN_MISSING`:
+  `sync.signatures: 'require'` without `signing`, `chain: true` without
+  `chain`, `encrypted: true` without `encryption`. A directory keeps the key
+  it was given as its id when opened without `signing`; one born without it
+  is rekeyed once, with a warning, when the plugin arrives.
 
 ## Sizes
 
 `pnpm size` measures every entry on its own, min+gzip, against a budget: the
-core about 54 KB, `/text` 14 KB, `/tree` 5 KB, `/all` 68 KB. In an app
-bundle the modules the blocks share with the core are counted once, so
-core + `/text` is about 62 KB, not the sum of the rows.
+core about 51 KB, `/text` 14 KB, `/tree` 5 KB, `/signing` 4 KB, `/chain`
+2 KB, `/encryption` 4 KB, `/all` 70 KB. In an app bundle the modules the
+blocks share with the core are counted once, so core + `/text` is about 60 KB
+and the three security blocks add about 2 KB together, not the sum of the rows.

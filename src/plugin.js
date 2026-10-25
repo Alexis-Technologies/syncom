@@ -92,7 +92,7 @@ const isPlugin = (value) =>
   isPlainObject(value) &&
   typeof value.name === 'string' &&
   value.name.length > 0 &&
-  (isPlainObject(value.kinds) || typeof value.open === 'function');
+  (isPlainObject(value.kinds) || typeof value.open === 'function' || typeof value.setup === 'function');
 
 const refuse = (where, message) => {
   throw new TypeError(`${where}: ${message}`);

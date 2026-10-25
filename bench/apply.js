@@ -19,8 +19,8 @@ const path = require('node:path');
 const { bench } = require('./support/harness.js');
 const { observedTags, packOps, unpackOps } = require('../src/ops.js');
 const { applyOp } = require('../src/all/all.js');
-const { generateSigningKeys } = require('../src/crypto.js');
-const { signOp, verifyOp } = require('../src/signing.js');
+const { generateSigningKeys } = require('../src/signing/ed25519.js');
+const { signOp, verifyOp } = require('../src/signing/sign.js');
 const { open } = require('../src/storage.js');
 const S = require('../src/text/sequence.js');
 

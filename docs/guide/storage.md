@@ -333,10 +333,15 @@ history](./versions#diff-and-restore).
 
 ### Encryption at rest
 
-Open the storage with `encrypted: true`, or pass the flag per write:
+Sealed records are the `encryption` plugin — `@alexify/syncom/encryption`,
+registered by `@alexify/syncom/all`; without it `encrypted: true` is
+`PLUGIN_MISSING`. Open the storage with `encrypted: true`, or pass the flag
+per write:
 
 ```js
-const vault = await open({ path: 'vault', encrypted: true });
+const { encryption } = require('@alexify/syncom/encryption');
+
+const vault = await open({ path: 'vault', plugins: [encryption], encrypted: true });
 await vault.insert({ ssn: '...' });                       // sealed on disk
 
 await storage.insert({ ssn: '...' }, { encrypted: true }); // one record, in a plain storage
@@ -358,6 +363,11 @@ and `compact()`, which read the log it is not in. `update()`, `set()`,
 `delete()` and `purge()` still work; they simply stay here. A record never
 changes kind: an encrypted write over a replicated record is refused
 (`ENCRYPTED`), and a plain write to an encrypted one seals it again.
+
+A sealed record protects one record from the disk; the log, the catalog and
+the other records stay plain. To encrypt the directory whole, wrap the
+backend instead — `atRest()` from the same subpath, every file under one
+key, the engine none the wiser — see [Encrypted at rest](./backends#encrypted-at-rest).
 
 ## Records
 

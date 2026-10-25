@@ -57,8 +57,18 @@ on hot paths. See `bench/chain.js` for the numbers.
 
 ## Through storage
 
-`Storage` keeps its own chain, under `<path>/blockchain/`, and adds a block
-for every write it applies. A local write commits `{ id, hash, from }` — the
+The chain is the `chain` plugin — `@alexify/syncom/chain`, registered by
+`@alexify/syncom/all`:
+
+```js
+const { open } = require('@alexify/syncom');
+const { chain } = require('@alexify/syncom/chain');
+
+const storage = await open({ path: 'data', plugins: [chain] });
+```
+
+With it `Storage` keeps its own chain, under `<path>/blockchain/`, and adds a
+block for every write it applies. A local write commits `{ id, hash, from }` — the
 record, the hash of its data, and its position in the [log](./sync#the-log);
 an encrypted record's write, which has no op, commits `{ id, hash }`. A batch
 commits one block `{ records: { [id]: hash }, from, to }` for every record it
@@ -76,7 +86,10 @@ from a peer, and it is never compacted — the log is, the chain is the audit.
 A node that only replicates, a hub, has nothing to audit: `open({ chain:
 false })` keeps none, saves two file writes per record, reads records without
 re-verifying them (`integrity` is lazy, there is no block to check against),
-and `validate()` rejects with `code: 'NO_CHAIN'`.
+and `validate()` rejects with `code: 'NO_CHAIN'`. A storage opened without
+the plugin is the same, and its `NO_CHAIN` names the subpath; asking for the
+chain in so many words — `open({ chain: true })` — without the plugin is
+`PLUGIN_MISSING`.
 
 ```js
 await storage.validate({ last: 10 }); // delegates to the chain

@@ -565,7 +565,7 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
       await settle([a, b, c]);
       await assertConverged([a, b, c]);
       assert.deepStrictEqual(await c.get(id), { n: 1, m: 2, hits: 1, tags: ['x'] });
-      const { verifyOp } = require('../../src/signing.js');
+      const { verifyOp } = require('../../src/signing/sign.js');
       for (const storage of [a, b, c]) {
         const entries = storage.log.since(undefined);
         assert.ok(entries.length >= 5);

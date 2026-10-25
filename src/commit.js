@@ -9,7 +9,6 @@
 // the log, the clock, the chain, the entries, the hook runner and the
 // lensed readers — see Storage#open.
 
-const { encrypt, calculateHash } = require('./crypto.js');
 const { applyOp, isAlive, latestClock, observedTags, kindOf, kindsOf } = require('./ops.js');
 const { missing } = require('./plugin.js');
 const { opKey } = require('./vector.js');
@@ -87,8 +86,9 @@ const replaced = async (core, type, payload, ctx) => {
 // Encrypted at rest for THIS node's key: written directly, outside the op
 // log, because no peer could read it.
 const seal = async (core, id, data) => {
-  const record = await encrypt(data, core.keys.publicKey);
-  const blockHash = core.chain ? await core.chain.addBlock({ id, hash: await calculateHash(record) }) : null;
+  if (core.seal === null) throw missing('an encrypted record', 'encryption');
+  const record = await core.seal.encrypt(data);
+  const blockHash = core.chain ? await core.chain.addBlock({ id, hash: await core.hash(record) }) : null;
   await core.entries.writeSealed(id, record, data, blockHash);
   core.flush();
 };
@@ -277,7 +277,7 @@ const persistLocal = async (core, op, entry) => {
   try {
     let blockHash = null;
     if (core.chain) {
-      const hash = await calculateHash(entry.data);
+      const hash = await core.hash(entry.data);
       blockHash = await core.chain.addBlock({ id, hash, from: core.log.formatId(position) });
     }
     await core.entries.write(id, entry, blockHash);

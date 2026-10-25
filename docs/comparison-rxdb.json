@@ -1593,7 +1593,7 @@
         "browserReq": {
           "mark": "",
           "text": "secure context, OPFS, Web Crypto with Ed25519 and RSA-OAEP",
-          "source": "src/crypto.browser.js:12-14; src/fsi.browser.js:10, 50; docs/guide/browser.md#requirements",
+          "source": "src/signing/ed25519.browser.js; src/encryption/rsa.browser.js; src/fsi.browser.js:10, 50; docs/guide/browser.md#requirements",
           "detail": "docs/guide/browser.md names OPFS and Web Crypto but not Ed25519 specifically; which browser versions expose Ed25519 in Web Crypto was not checked here. OPFS writes use `createWritable()`."
         },
         "worker": {
@@ -2786,13 +2786,13 @@
         "encScope": {
           "mark": "",
           "text": "the record's whole data; its id, collection and timestamps stay readable",
-          "source": "src/entries.js:135-142; src/crypto.js:34-49",
+          "source": "src/entries.js:135-142; src/encryption/encryption.js (the plugin); src/encryption/rsa.js",
           "detail": "Checked by running: the record file is `{ data: <envelope>, meta: null, encrypted: true, timestamp, block }`; the file name is the id, the catalog row keeps `$type`, the chain block keeps the ciphertext's hash."
         },
         "cipher": {
           "mark": "✅",
           "text": "AES-256-GCM with a fresh key per record, wrapped by RSA-OAEP-256",
-          "source": "src/crypto.js:27-61; src/crypto.browser.js:102-139",
+          "source": "src/encryption/rsa.js; src/encryption/rsa.browser.js",
           "detail": "The same envelope on Node.js and in the browser, so ciphertext and keys move between them; an unknown envelope version is `BAD_ENVELOPE`."
         },
         "keyOffDisk": {
@@ -2832,18 +2832,18 @@
           "mark": "✅",
           "text": "Ed25519 per op: the header plus a salted payload digest",
           "note": "The default `'verify'` takes an unsigned op, so a relay can strip signatures; only `sync.signatures: 'require'` refuses them.",
-          "source": "src/signing.js:71-119; src/apply.js:60-114; docs/guide/sync.md#signatures"
+          "source": "src/signing/sign.js:71-119; src/apply.js:60-114; docs/guide/sync.md#signatures"
         },
         "nodeIdentity": {
           "mark": "✅",
           "text": "the node id is its Ed25519 public key; a swapped key is `IDENTITY_MISMATCH`",
-          "source": "src/storage.js:515-536; src/shape.js:40-45; src/crypto.js:65-78"
+          "source": "src/storage.js:515-536; src/shape.js:40-45; src/signing/ed25519.js"
         },
         "tamper": {
           "mark": "✅",
           "text": "hash-linked chain of what this node applied, unsigned (optional)",
           "note": "Whoever can write the directory can rebuild it: a read checks a record against the block its file names, not that the block is on the chain, so a planted block passes and `validate()` still answers true (checked). The ops in the log are what is signed.",
-          "source": "src/chain.js:45-87; src/storage.js:833-866; src/entries.js:86-89; docs/guide/chain.md",
+          "source": "src/chain/chain.js (the plugin); src/storage.js:833-866; src/entries.js:86-89; docs/guide/chain.md",
           "detail": "Script: change a record's data, write a block `{ prev: '0', data: { id, hash } }` under its own hash, point the record at it: `get()` returns the forged data. `chain: false` keeps no chain."
         },
         "authn": {
@@ -2915,7 +2915,7 @@
         "proto": {
           "mark": "✅",
           "text": "own keys only; `__proto__` is never a field",
-          "source": "src/ops.js:147-152; src/signing.js:26-29",
+          "source": "src/ops.js:147-152; src/signing/sign.js:26-29",
           "detail": "Checked by running: `insert`, `update` and `applyRemote` with own `__proto__` keys left `Object.prototype` clean; the key is dropped."
         },
         "malformed": {

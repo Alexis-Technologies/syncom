@@ -1,12 +1,12 @@
 'use strict';
 
-// Runs the SHARED modules (storage.js, chain.js, ...) the way a bundler that
+// Runs the SHARED modules (storage.js, log.js, ...) the way a bundler that
 // honours package.json#browser would: every `./src/x.js` the map redirects is
 // primed in require.cache with its `x.browser.js` twin BEFORE the shared
 // module is loaded, so its nested requires resolve to the browser halves.
 // Requiring `src/index.browser.js` alone does not do that under Node — it
-// names the browser variants directly, but storage.js still says
-// `require('./crypto.js')`, which Node resolves literally.
+// names the browser variants directly, but log.js still says
+// `require('./fsi.js')`, which Node resolves literally.
 //
 // Use this from a test file that never loads the node barrel: the cache
 // priming is process-wide, and `node --test` gives every file its own process.

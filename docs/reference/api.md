@@ -42,8 +42,9 @@ Returns `Promise<Storage>`. Takes an options object only — `open('./dir')` is 
 [valid id](../guide/storage#custom-identifiers)), `logger`, `encrypted`,
 `sync` (see [Sync options](../guide/sync#options)), `telemetry` (see
 [OpenTelemetry](../guide/telemetry)), `hooks` (see
-[Hooks and events](../guide/hooks)), `plugins` (the kind plugins this storage
-runs with — `[text, tree]` from their subpaths; see [Plugins](#plugins)).
+[Hooks and events](../guide/hooks)), `plugins` (the plugins this storage runs
+with — `text`, `tree`, `signing`, `chain`, `encryption` from their subpaths;
+see [Plugins](#plugins)).
 
 ### `Storage`
 
@@ -95,7 +96,7 @@ naming the subpath; `@alexify/syncom/all` has both.
 | `record(id)` | `Promise<Record>` | Cached per id |
 | `saveData(id, data, options?)` | `Promise<void>` | `{ encrypted: true }` seals the record for this node only; `{ actor }` names the writer |
 | `loadData(id)` | `Promise<unknown>` | Alias of `get()`; throws if the record no longer matches its block |
-| `validate(options?)` | `Promise<boolean>` | `{ last, from }`; no argument walks the whole chain; rejects with `code: 'NO_CHAIN'` under `open({ chain: false })` |
+| `validate(options?)` | `Promise<boolean>` | `{ last, from }`; no argument walks the whole chain; rejects with `code: 'NO_CHAIN'` under `open({ chain: false })` or without the `chain` plugin (the message says which) |
 | `validate(id, data, blockHash)` | `Promise<boolean>` | One record against its block |
 | `getCachedData(id)` | `unknown \| null` | Synchronous cache peek, raw (no lens) |
 | `hasRecord(id)` | `boolean` | Whether the id is a live record — from the catalog, no I/O |
@@ -257,12 +258,13 @@ carries no code, except `INVALID_ID`, `TYPE_IMMUTABLE`, `INVALID_VERSION`,
 | `CORRUPT` | `open()` when `node.json`, `schema.json` or `.blockchain.json` cannot be read; `tag()` while `tags.json` cannot be read — the open went on without tags, kept the file as `tags.corrupt.json` and keeps the copies the tags would need under `tags/.pending/` until the file is repaired; `branchInfo()` and `drop()` (`@alexify/syncom/branch`) when `branch.json` cannot be read or is no branch file | `cause`; `file` from `tag()` |
 | `DOWNGRADE` | `open()` with `ahead: 'hold'` and a schema version below the one the directory ran | — |
 | `LOCKED` | `open()` while another instance holds the directory — at once under `lock: 'fail'`, after `lock.timeout` ms under `'wait'` | `path` |
-| `KEYS_INCOMPLETE` | `open()`, `loadKeys()`, `loadSigningKeys()` when one file of a pair (RSA or signing) is missing | — |
-| `IDENTITY_MISMATCH` | `open()` when `node.json` names another signing key than `keys/sign-public.pem` — a key pair replaced or restored under a signed identity | `id` (what `node.json` names), `key` (the pair on disk) |
+| `KEYS_INCOMPLETE` | `open()` with the `encryption` or `signing` plugin, `loadKeys()` (`@alexify/syncom/encryption`), `loadSigningKeys()` (`@alexify/syncom/signing`) when one file of a pair (RSA or signing) is missing | — |
+| `IDENTITY_MISMATCH` | `open()` with the `signing` plugin when `node.json` names another signing key than `keys/sign-public.pem` — a key pair replaced or restored under a signed identity | `id` (what `node.json` names), `key` (the pair on disk) |
 | `BAD_SIGNATURE` | the storage's `error` event, once per page: a peer's op whose signature does not verify against its origin, or whose payload its digest does not match (`sync.signatures` `'verify'` or `'require'`) | `op` (the first refused), `count` |
 | `UNSIGNED` | the storage's `error` event, once per page, under `sync.signatures: 'require'`: a peer's op with no signature, or whose origin is no signing key | `op`, `count` |
-| `BAD_ENVELOPE` | `decrypt()` of a ciphertext this version does not read | — |
-| `BLOCK_NOT_FOUND` | `Blockchain.readBlock()`, `SmartContract.load()` | `hash` |
+| `BAD_ENVELOPE` | `decrypt()` (`@alexify/syncom/encryption`) of a ciphertext this version does not read | — |
+| `DECRYPT_FAILED` | a read through `atRest()` (`@alexify/syncom/encryption`) of a file that is not the key's: `reason` `'key'` (another key, or a torn ciphertext), `'plain'` (not encrypted), `'torn'` (not base64); through a storage the first such file fails `open()` — as `CORRUPT` with this as its `cause` when it is `node.json`, as is otherwise | `path`, `reason`, `cause` |
+| `BLOCK_NOT_FOUND` | `Blockchain.readBlock()` (`@alexify/syncom/chain`), `SmartContract.load()` | `hash` |
 | `NOT_CONTRACT` | `SmartContract.load()` of a block that is not a contract | `hash` |
 | `NODE_EXISTS` | `addNode()` of a registered url | `url` |
 | `NODE_NOT_FOUND` | `removeNode()`, `enableNode()` of an unknown url | `url` |
@@ -278,8 +280,8 @@ carries no code, except `INVALID_ID`, `TYPE_IMMUTABLE`, `INVALID_VERSION`,
 | `SKEW`, `OP_UNREADABLE`, `OP_REFUSED`, `OP_INVALID` | the storage `error` event — see [`Storage`](#storage) | `op`, plus `rejected` / `entity` + `issues`; `cause` for `OP_UNREADABLE` |
 | `INVALID_ID` | every writer, `repair()`, `diff()`, `applyPatches()`, `compact()`, `spans()`, `cursor()`, `index()` given an id that is not a [valid id](../guide/storage#custom-identifiers) — and `insert()` when `getId` mints one (a `TypeError`); `get()`, `has()` and `history()` answer as for an absent record | — |
 | `TYPE_IMMUTABLE` | a local `set()`, `update()`, `swap()`, `record.save()` or patch whose data names another `$type` than the record's (a `TypeError`) | — |
-| `NO_CHAIN` | `validate()` under `open({ chain: false })` (a `TypeError`) | — |
-| `PLUGIN_MISSING` | a method, a patch action or a local op of a kind the storage was not opened with — `splice()` without the `text` plugin — and `open()` of a directory that ran with a kind the call lacks (a `TypeError`; the message names the subpath) | — |
+| `NO_CHAIN` | `validate()` under `open({ chain: false })` or without the `chain` plugin (a `TypeError`; the message says which) | — |
+| `PLUGIN_MISSING` | a method, a patch action or a local op of a kind the storage was not opened with — `splice()` without the `text` plugin — and `open()` of a directory that ran with a kind the call lacks; `open()` asking for what no registered plugin provides — `sync.signatures: 'require'` without `signing`, `chain: true` without `chain`, `encrypted: true` without `encryption` — and a per-call `{ encrypted: true }` without it (a `TypeError`; the message names the subpath) | — |
 | `HOOK_FAILED` | a `HookError` | `hook`, `cause` |
 | `VALIDATION_FAILED` | a `ValidationError` | `entity`, `issues`, `cause` |
 
@@ -366,11 +368,23 @@ entries, and whether an entry is a live record or a tombstone. Pure functions;
 See [CRDT deltas](../guide/crdt) for the merge rules — numbers add rather than
 replace.
 
-## Chain
+## Chain (subpath)
+
+```js
+const { chain, Blockchain } = require('@alexify/syncom/chain');
+```
+
+`chain` is the plugin: `open({ plugins: [chain] })` writes a block per applied
+batch, checks a record file against its block on a cold read and gives
+`validate()` something to walk (see [Blockchain log](../guide/chain)); without
+it no block is written, `stats().chain` is `null` and `validate()` rejects
+with `NO_CHAIN` naming the plugin, `open({ chain: true })` is `PLUGIN_MISSING`.
+`open({ chain: false })` keeps the plugin registered and the chain off.
+Blocks are SHA-256 of their JSON through Web Crypto on both platforms.
 
 ### `Blockchain`
 
-`await new Blockchain(basePath)`.
+`await new Blockchain(basePath, { fsi }?)` — the chain on its own.
 
 | Method | Returns |
 | --- | --- |
@@ -381,11 +395,6 @@ replace.
 | `validate(options?)` | `Promise<boolean>` — `{ last, from }`; an unknown `from` is `false` |
 
 Properties: `path`, `tailHash`. A block is `{ prev, timestamp, data }`.
-
-### `calculateHash(data)`
-
-SHA-256 over `JSON.stringify(data)`, hex-encoded. Synchronous in Node.js,
-`Promise<string>` in the browser.
 
 ## Contracts (subpath)
 
@@ -410,19 +419,72 @@ chain, and a process that never imports the subpath never does.
 `new DataReader(storage)`; `get(id)` returns `Promise<unknown>`. The only
 storage access a contract has.
 
-## Crypto
+## Signing (subpath)
+
+```js
+const { signing, calculateHash, generateSigningKeys, loadSigningKeys, sign, verify } = require('@alexify/syncom/signing');
+```
+
+`signing` is the plugin: `open({ plugins: [signing] })` makes the node id its
+Ed25519 public key (`keys/sign-public.pem`, made at the first open), signs
+every op the node makes and verifies a peer's against its origin under
+`sync.signatures` (see [Signatures](../guide/sync#signatures)). Without it
+the node id is what `getId` mints (a UUID by default), nothing is signed and
+nothing is checked — the semantics of an unsigned op under `'verify'`, now for
+every op — and `sync.signatures: 'require'` is `PLUGIN_MISSING` at `open()`.
+A directory that ran with the plugin keeps the key as its id without it; one
+born without it is rekeyed once, with an `identity.rekeyed` warning, when the
+plugin arrives.
+
+| Function | Node.js | Browser |
+| --- | --- | --- |
+| `calculateHash(data)` | `string` | `Promise<string>` |
+| `generateSigningKeys()` | `Promise<SigningKeyPair>` | `Promise<SigningKeyPair>` |
+| `loadSigningKeys(basePath, { fsi }?)` | `Promise<SigningKeyPair>` | `Promise<SigningKeyPair>` |
+| `sign(message, privateKey)` | `string` | `Promise<string>` |
+| `verify(message, signature, publicKey)` | `boolean` | `Promise<boolean>` |
+
+`calculateHash` is SHA-256 over `JSON.stringify(data)`, hex-encoded.
+`SigningKeyPair` is `{ publicKey, privateKey, id }`: a PEM-encoded Ed25519 pair
+and `id`, the raw public key in base64url (43 characters) — the node id of a
+storage that loaded it. `loadSigningKeys` reads `sign-public.pem` /
+`sign-private.pem` from `basePath`, generating and writing them when neither
+exists, and rejecting with `code: 'KEYS_INCOMPLETE'` when only one does.
+`sign` takes a string (UTF-8) and gives the 64-byte signature in base64url;
+`verify` takes the message, that signature and an `id`, and answers `false` —
+never a throw — for an id that is no key or a signature of the wrong shape.
+
+## Encryption (subpath)
+
+```js
+const { encryption, atRest, generateKeys, loadKeys, encrypt, decrypt } = require('@alexify/syncom/encryption');
+```
+
+`encryption` is the plugin behind `{ encrypted: true }` — a record sealed for
+this node's RSA pair (`keys/public.pem`, `keys/private.pem`), written outside
+the op log, never replicated (see [Encryption at rest](../guide/storage#encryption-at-rest));
+without it `open({ encrypted: true })` and a per-call `{ encrypted: true }` are
+`PLUGIN_MISSING`.
+
+`atRest(fsi, { key | password, salt, iterations })` wraps a backend so that
+every file a storage writes through it — the records, the log, the catalog,
+the tags, `node.json`, the lock, the keys — is AES-256-GCM ciphertext under one
+key (`enc1:` and base64 of iv ‖ ciphertext ‖ tag), decrypted on the way back;
+`exists`, `remove`, `list`, `sync` and `create` pass through. `key` is 32
+bytes (a `Uint8Array`) or a Web Crypto AES-GCM `CryptoKey`; `password` with a
+`salt` of 8 characters or more derives one by PBKDF2-SHA-256 (`iterations`
+600 000 by default, 1 000 at least). The key is never written. A file that
+is not the key's is `DECRYPT_FAILED` (`reason` `'key'`, `'plain'`, `'torn'`);
+through a storage the first such file fails `open()`. The options are
+checked when the wrapper is made (a `TypeError`). See
+[Backends](../guide/backends#encrypted-at-rest).
 
 | Function | Node.js | Browser |
 | --- | --- | --- |
 | `generateKeys()` | `Promise<KeyPair>` | `Promise<KeyPair>` |
-| `loadKeys(basePath)` | `Promise<KeyPair>` | `Promise<KeyPair>` |
+| `loadKeys(basePath, { fsi }?)` | `Promise<KeyPair>` | `Promise<KeyPair>` |
 | `encrypt(data, publicKey)` | `string` | `Promise<string>` |
 | `decrypt(data, privateKey)` | `unknown` | `Promise<unknown>` |
-| `calculateHash(data)` | `string` | `Promise<string>` |
-| `generateSigningKeys()` | `Promise<SigningKeyPair>` | `Promise<SigningKeyPair>` |
-| `loadSigningKeys(basePath)` | `Promise<SigningKeyPair>` | `Promise<SigningKeyPair>` |
-| `sign(message, privateKey)` | `string` | `Promise<string>` |
-| `verify(message, signature, publicKey)` | `boolean` | `Promise<boolean>` |
 
 `KeyPair` is `{ publicKey, privateKey }`, PEM-encoded RSA-2048. `encrypt`
 returns a JSON envelope — AES-256-GCM under a fresh key, that key wrapped with
@@ -430,15 +492,6 @@ RSA-OAEP (SHA-256) — identical on both platforms. `loadKeys` reads
 `public.pem` / `private.pem` from `basePath`, generating and writing them
 (`private.pem` owner-only where the backend has permissions) when neither
 exists, and rejecting with `code: 'KEYS_INCOMPLETE'` when only one does.
-
-`SigningKeyPair` is `{ publicKey, privateKey, id }`: a PEM-encoded Ed25519 pair
-and `id`, the raw public key in base64url (43 characters) — the node id of a
-storage that loaded it. `loadSigningKeys` reads `sign-public.pem` /
-`sign-private.pem` the way `loadKeys` reads the RSA pair. `sign` takes a
-string (UTF-8) and gives the 64-byte signature in base64url; `verify` takes
-the message, that signature and an `id`, and answers `false` — never a throw —
-for an id that is no key or a signature of the wrong shape. The op-level use
-of both is [Signatures](../guide/sync#signatures) in the Sync guide.
 
 ## Backends
 
@@ -460,7 +513,8 @@ server, OPFS in the browser — as those five functions, and:
 | `create(dir, file, content)` *(optional)* | Exclusive create (`EEXIST` when the file is there) — `node:fs` and the memory backend have it; the directory lock uses it to make a race deterministic |
 | `isFsi(value)` | Whether `value` has the five functions |
 | `createMemoryFsi()` | A backend in memory: `size`, `dump()`; two storages opened over one share it |
-| `loadKeys(base, { fsi })`, `new Blockchain(base, { fsi })`, `new OpLog(base, { fsi })` | The pieces take the backend too |
+| `new OpLog(base, { fsi })`, `loadKeys(base, { fsi })` (`/encryption`), `loadSigningKeys(base, { fsi })` (`/signing`), `new Blockchain(base, { fsi })` (`/chain`) | The pieces take the backend too |
+| `atRest(fsi, options)` (`/encryption`) | A wrapper: every file through it is ciphertext under one key — see [Encryption](#encryption-subpath) |
 
 `@alexify/syncom/idb` is the IndexedDB backend: `createIdbFsi({ name, store,
 indexedDB }?)` returns an fsi over one object store, with a `close()` of its
@@ -486,17 +540,28 @@ without the plugin still carries it; a snapshot block of it is left out
 same way (`node.json` names the kinds); and the node does not bootstrap from a
 host that lacks one of its own (`KINDS_MISMATCH`).
 
+A plugin that is not a kind sets the core up before the log opens — the
+identity (`signing`), the sealing of records (`encryption`), the chain
+(`chain`) — and what the options ask for and no plugin provides is refused at
+`open()` the same way: `sync.signatures: 'require'` without `signing`,
+`chain: true` without `chain`, `encrypted: true` without `encryption` (and a
+per-call `{ encrypted: true }` at the call). Without them the node id is what
+`getId` mints, ops go unsigned and unchecked, no block is written and
+`validate()` is `NO_CHAIN`. `storage.plugins` lists them all.
+
 ## All (subpath)
 
 ```js
-const { open, Storage, applyOp, mergeEntry, text, tree, PLUGINS } = require('@alexify/syncom/all');
+const { open, Storage, applyOp, mergeEntry, text, tree, signing, chain, encryption, PLUGINS } = require('@alexify/syncom/all');
 ```
 
-Everything the root exports, plus `open()`/`Storage` with every shipped plugin
-registered ahead of the caller's (`text`, `tree`; a plugin given twice is
-given once), `applyOp`/`mergeEntry` folding under the same registry, the
-plugins themselves and `PLUGINS`, the list. The API of the package before it
-was taken apart into blocks: what the tests and the examples open.
+Everything the root and the `/signing`, `/chain` and `/encryption` subpaths
+export, plus `open()`/`Storage` with every shipped plugin registered ahead of
+the caller's (`text`, `tree`, `signing`, `chain`, `encryption`; a plugin
+given twice is given once), `applyOp`/`mergeEntry` folding under the same
+registry, the plugins themselves and `PLUGINS`, the list. The API of the
+package before it was taken apart into blocks: what the tests and the
+examples open.
 
 ## Text (subpath)
 

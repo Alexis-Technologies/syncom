@@ -159,6 +159,9 @@ test('every runtime export is declared in the types', () => {
   check('src/all/all.js', 'src/all/all.d.ts');
   check('src/text/text.js', 'src/text/text.d.ts');
   check('src/tree/tree.js', 'src/tree/tree.d.ts');
+  check('src/signing/signing.js', 'src/signing/signing.d.ts');
+  check('src/chain/chain.js', 'src/chain/chain.d.ts');
+  check('src/encryption/encryption.js', 'src/encryption/encryption.d.ts');
   // browser.js is only loadable under OPFS/WebCrypto globals, so compare its
   // barrel's names against the node one instead of requiring it here.
   check('index.js', 'browser.d.ts');

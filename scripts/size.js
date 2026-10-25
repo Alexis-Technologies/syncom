@@ -131,8 +131,12 @@ const ENTRIES = [
   // to 66 KB (65.6 measured). The kinds beyond registers, counters and sets
   // became plugins (src/plugin.js; `/text`, `/tree` carry the engines) — the
   // main entry is the core alone and came DOWN to 54 KB (53.4 measured); the
-  // whole of it is `/all`. The rule stays: a raise names its feature here.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 54 },
+  // whole of it is `/all`. The identity and the signatures (`/signing`), the
+  // chain (`/chain`) and the sealing of records (`/encryption`) became
+  // plugins too — the core keeps the hooks and SHA-256 through Web Crypto
+  // (src/digest.js) — and came down to 52 KB (51.4 measured). The rule
+  // stays: a raise names its feature here.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 52 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -173,13 +177,35 @@ const ENTRIES = [
   // registered — what the main entry was before the kinds became plugins.
   // 68.5 KB: what the 66 KB entry was, plus the registry and the plugins'
   // own module shells (68.0 measured).
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 68.5 },
+  // The core with every shipped plugin: 68.3 at the kinds epic, 70.2 with
+  // the at-rest wrapper and the plugin seams of the security blocks.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 71 },
   // The list and text kinds alone: the sequence engine, its patches and its
   // methods; in an app bundle the core they stand on is shared.
   { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 15 },
   // The tree kind alone, with the fractional indexes a place is made of and
   // the argument checks it shares with the core (5.1 measured).
   { label: 'tree — browser (@alexify/syncom/tree)', entry: 'src/tree/tree.js', platform: 'browser', budget: 5.5 },
+  // The security blocks, each measured ALONE — with the shape checks, the
+  // PEM pair, the backend contract and the errors it shares with the core,
+  // which an app bundle holds once (4.2 / 2.0 / 3.6 measured; what each
+  // adds to the core is the difference `/all` shows).
+  // Signed ops: the Ed25519 half, the canonical form and the verdict.
+  {
+    label: 'signing — browser (@alexify/syncom/signing)',
+    entry: 'src/signing/signing.js',
+    platform: 'browser',
+    budget: 4.5,
+  },
+  // The chain: the blocks, SHA-256 through Web Crypto, the plugin.
+  { label: 'chain — browser (@alexify/syncom/chain)', entry: 'src/chain/chain.js', platform: 'browser', budget: 2.5 },
+  // Sealed records (the RSA half) and the at-rest wrapper (AES-GCM, PBKDF2).
+  {
+    label: 'encryption — browser (@alexify/syncom/encryption)',
+    entry: 'src/encryption/encryption.js',
+    platform: 'browser',
+    budget: 4,
+  },
 ];
 
 // A browser entry has to be self-contained: no node builtins, and no packages

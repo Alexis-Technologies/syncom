@@ -22,6 +22,9 @@ const ENTRIES = [
   'src/all/all.js',
   'src/text/text.js',
   'src/tree/tree.js',
+  'src/signing/signing.js',
+  'src/chain/chain.js',
+  'src/encryption/encryption.js',
 ];
 
 for (const entry of ENTRIES) {

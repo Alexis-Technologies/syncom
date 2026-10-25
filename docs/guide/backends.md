@@ -34,8 +34,8 @@ const { open, createMemoryFsi } = require('@alexify/syncom');
 const fsi = createMemoryFsi();
 const storage = await open({ path: 'app', fsi });     // nothing touches the disk
 await storage.insert({ a: 1 });
-fsi.size;                                              // 13 files: keys, chain, log, data, catalog, lock…
-Object.keys(fsi.dump());                               // ['app/lock.json', 'app/keys/public.pem', …]
+fsi.size;                                              // 6 files: lock, node.json, log, data, catalog
+Object.keys(fsi.dump());                               // ['app/lock.json', 'app/log/index.json', 'app/node.json', …]
 ```
 
 The memory backend is what a test, a server-side render, or a benchmark
@@ -52,6 +52,37 @@ const storage = await open({ path: 'data', fsi: idb });
 await storage.close();
 await idb.close();                                     // the backend's own
 ```
+
+## Encrypted at rest
+
+`atRest()` from `@alexify/syncom/encryption` wraps any backend so that every
+file written through it — the records, the log, the catalog, the tags,
+`node.json`, the lock, the keys — is AES-256-GCM ciphertext under one key,
+and reads decrypt on the way back. The storage is none the wiser: the same
+directory opens over the wrapper with the key and over the bare backend not
+at all.
+
+```js
+const { open } = require('@alexify/syncom');
+const { atRest } = require('@alexify/syncom/encryption');
+
+// a key the application holds: 32 bytes, or a Web Crypto AES-GCM CryptoKey
+const storage = await open({ path: 'data', fsi: atRest(fsi, { key }) });
+
+// or a password: the key is derived by PBKDF2-SHA-256 under a salt the
+// application keeps (8 characters or more), 600 000 rounds by default
+const vault = await open({ path: 'data', fsi: atRest(fsi, { password, salt }) });
+```
+
+The key is never written. A file that is not the key's is refused as
+`DECRYPT_FAILED` with a `reason` — `'key'` (another key, or a torn
+ciphertext), `'plain'` (a file that was never encrypted), `'torn'` (not
+base64) — and the first such file fails `open()`. `exists`, `remove`, `list`,
+`sync` and `create` pass through, so a lock and a `durable` open work as they
+do on the bare backend; the wrapper composes with any adapter, the IndexedDB
+one included. Sealed records (`encrypted: true`) are the other block of the
+same subpath: one record for this node's key, outside the log — the two are
+independent.
 
 ## Your own
 

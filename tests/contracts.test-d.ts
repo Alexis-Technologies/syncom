@@ -1,6 +1,7 @@
 import { expectError, expectType } from 'tsd';
 import { DataReader, SmartContract } from '../src/contracts/contracts.js';
-import type { Blockchain, Storage } from '../index.js';
+import type { Storage } from '../index.js';
+import type { Blockchain } from '../src/chain/chain.js';
 
 declare const storage: Storage;
 declare const chain: Blockchain;

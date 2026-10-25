@@ -6,9 +6,10 @@
   "browser": {
     "./index.js": "./browser.js",
     "./src/index.js": "./src/index.browser.js",
-    "./src/crypto.js": "./src/crypto.browser.js",
     "./src/fsi.js": "./src/fsi.browser.js",
-    "./src/utils.js": "./src/utils.browser.js"
+    "./src/utils.js": "./src/utils.browser.js",
+    "./src/signing/ed25519.js": "./src/signing/ed25519.browser.js",
+    "./src/encryption/rsa.js": "./src/encryption/rsa.browser.js"
   },
   "types": "index.d.ts",
   "exports": {
@@ -59,6 +60,26 @@
     "./tree": {
       "types": "./src/tree/tree.d.ts",
       "default": "./src/tree/tree.js"
+    },
+    "./signing": {
+      "browser": {
+        "types": "./src/signing/signing.browser.d.ts",
+        "default": "./src/signing/signing.js"
+      },
+      "types": "./src/signing/signing.d.ts",
+      "default": "./src/signing/signing.js"
+    },
+    "./chain": {
+      "types": "./src/chain/chain.d.ts",
+      "default": "./src/chain/chain.js"
+    },
+    "./encryption": {
+      "browser": {
+        "types": "./src/encryption/encryption.browser.d.ts",
+        "default": "./src/encryption/encryption.js"
+      },
+      "types": "./src/encryption/encryption.d.ts",
+      "default": "./src/encryption/encryption.js"
     },
     "./package.json": "./package.json"
   },

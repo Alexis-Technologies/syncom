@@ -10,9 +10,7 @@
 // both over the same lent core: this file keeps a delegate per method.
 
 const { Emitter, generateUUID, createLogger } = require('./utils.js');
-const { decrypt, loadKeys, loadSigningKeys, calculateHash } = require('./crypto.js');
-const { signOp } = require('./signing.js');
-const { Blockchain } = require('./chain.js');
+const { sha256 } = require('./digest.js');
 const { SyncManager } = require('./sync.js');
 const { OpLog } = require('./log.js');
 const { EntryStore } = require('./entries.js');
@@ -59,9 +57,10 @@ const corrupt = (file, cause) =>
 
 class Storage extends Emitter {
   #path;
-  #keys = null;
-  #signing = null;
+  #identity = null;
+  #seal = null;
   #chain = null;
+  #settings;
   #log = null;
   #entries = null;
   #tags = null;
@@ -75,7 +74,6 @@ class Storage extends Emitter {
   #sync = null;
   #cacheMax;
   #verify;
-  #chained;
   #catalog = null;
   #catalogSave = null;
   #flushEvery;
@@ -126,10 +124,10 @@ class Storage extends Emitter {
     const settings = normalizeStorageOptions(options);
     super({ maxListeners: settings.maxListeners });
     this.#options = options;
+    this.#settings = settings;
     this.#path = settings.path;
     this.#lockOptions = settings.lock;
     this.#cacheMax = settings.cacheMax;
-    this.#chained = settings.chained;
     this.#verify = settings.verify;
     this.#flushEvery = settings.flushEvery;
     this.#getId = settings.getId ?? Storage.generateId;
@@ -238,9 +236,29 @@ class Storage extends Emitter {
 
   async #open() {
     const fsi = this.#fsi;
-    this.#keys = await loadKeys(`${this.#path}/keys`, { fsi });
-    this.#signing = await loadSigningKeys(`${this.#path}/keys`, { fsi });
-    this.#chain = this.#chained ? await new Blockchain(`${this.#path}/blockchain`, { fsi }) : null;
+    // The API plugins set up before the log opens — the identity (signing),
+    // the sealing of records (encryption), the chain — each handing back the
+    // hooks the core takes; what the options ask for and no plugin provides
+    // is refused here, naming the subpath.
+    const ctx = {
+      fsi,
+      path: this.#path,
+      logger: this.#logger,
+      options: this.#options,
+      settings: this.#settings,
+      storage: this,
+    };
+    for (const mod of this.#plugins.apis) {
+      const hooks = (await mod.setup?.(ctx)) ?? {};
+      if (hooks.identity) this.#identity = hooks.identity;
+      if (hooks.seal) this.#seal = hooks.seal;
+      if (hooks.chain) this.#chain = hooks.chain;
+    }
+    if (this.#signatures === 'require' && this.#identity === null) {
+      throw missing("sync.signatures 'require'", 'signing');
+    }
+    if (this.#options.chain === true && this.#chain === null) throw missing('open({ chain: true })', 'chain');
+    if (this.#encrypted && this.#seal === null) throw missing('open({ encrypted: true })', 'encryption');
     this.#log = await new OpLog(this.#path, {
       ...this.#options.sync?.log,
       retention: this.#options.sync?.retention,
@@ -264,8 +282,8 @@ class Storage extends Emitter {
       logger: this.#logger,
       catalog: this.#catalog,
       pinned: (id) => this.#live(id) !== undefined,
-      verify: this.#verify ? (id, data, block) => this.validate(id, data, block) : null,
-      decrypt: (data) => decrypt(data, this.#keys.privateKey),
+      verify: this.#verify && this.#chain !== null ? (id, data, block) => this.validate(id, data, block) : null,
+      decrypt: (data) => this.#unseal(data),
       view: (id, entry) => this.#view(id, entry),
       before: (id, file) => this.#tags.copyBefore(id, file),
     });
@@ -306,7 +324,11 @@ class Storage extends Emitter {
       otel: this.#otel,
       log: this.#log,
       chain: this.#chain,
-      keys: this.#keys,
+      // The hooks the plugins set up: the sealing of records, the hash
+      // (SHA-256 of a value's JSON, Web Crypto), the signature of an op.
+      seal: this.#seal,
+      hash: sha256,
+      identity: this.#identity,
       clock: this.#clock,
       entries: this.#entries,
       catalog: this.#catalog,
@@ -320,7 +342,8 @@ class Storage extends Emitter {
       deferred: (id, entry, position) => this.#deferWrite(id, entry, position),
       signatures: this.#signatures,
       // Signs an op of this node's own, in place, once it is final.
-      sign: this.#signatures === false ? null : (op) => signOp(op, this.#signing.privateKey),
+      sign: this.#signatures === false || this.#identity === null ? null : (op) => this.#identity.sign(op),
+      verify: this.#identity === null ? null : (op, mode) => this.#identity.verify(op, mode),
       hook: (name, ...args) => this.#hook(name, ...args),
       view: (id, entry) => this.#view(id, entry),
       scopeOf: (id, data) => this.#scope(id, data),
@@ -433,7 +456,7 @@ class Storage extends Emitter {
   // its author keeps it.
   async #loadSchema() {
     if (this.#version === null) return;
-    if (this.#snapshot !== undefined) this.#schemaHash = await calculateHash(this.#snapshot);
+    if (this.#snapshot !== undefined) this.#schemaHash = await sha256(this.#snapshot);
     const version = this.#version;
     const hash = this.#schemaHash;
     let stored = null;
@@ -572,12 +595,23 @@ class Storage extends Emitter {
   // with a warning. node.json naming ANOTHER key is refused: an id that
   // changed in silence would break SELF detection and every peer's echo
   // filter, and a key pair restored from elsewhere is a thing to be told.
+  // The node id is the signing key when the signing plugin is registered —
+  // minted with the pair, never changed — and node.json names it for the
+  // operator; without the plugin it is what the directory already names, or
+  // what `open({ getId })` mints for a fresh one (a UUID by default; cuid,
+  // ulid… as the application has it). The own sequence numbers live in the
+  // log's vector, which survives compaction, so a seq is durable the moment
+  // its op is appended, before anyone hears of it. A directory from before
+  // signing (a UUID in node.json) is rekeyed once, with a warning, when the
+  // plugin arrives. node.json naming ANOTHER key is refused: an id that
+  // changed in silence would break SELF detection and every peer's echo
+  // filter, and a key pair restored from elsewhere is a thing to be told.
   // node.json also names the kind plugins the directory has run with: a
   // reopen without one of them would hold records whose fields it cannot
   // apply and lose them at the next write, so it is refused (PLUGIN_MISSING,
   // naming the plugin); more plugins than before is fine and is recorded.
   async #loadIdentity() {
-    const keyId = this.#signing.id;
+    const keyId = this.#identity?.id ?? null;
     const kinds = this.#plugins.kinds.map((mod) => mod.name);
     let stored = null;
     if (await this.#fsi.exists(this.#path, NODE_FILE)) {
@@ -595,18 +629,35 @@ class Storage extends Emitter {
         const message = `${NODE_FILE} says this storage runs with the ${name} plugin: open({ plugins }) with it from '@alexify/syncom/${name}'`;
         throw typed('PLUGIN_MISSING', message);
       }
-      if (id === keyId) {
-        this.#nodeId = keyId;
-        if (lacking.length === 0 && ran.length === kinds.length) return;
+      const same = ran.length === kinds.length && ran.every((name) => kinds.includes(name));
+      if (keyId === null || id === keyId) {
+        this.#nodeId = id;
+        if (same) return;
       } else if (isKeyId(id)) {
         const message = `${NODE_FILE} names node ${id}, but keys/sign-public.pem is ${keyId}`;
         throw new SyncomError('IDENTITY_MISMATCH', message, { id, key: keyId });
       } else {
         this.#logger.warn({ event: 'identity.rekeyed', from: id, to: keyId });
+        this.#nodeId = keyId;
       }
+    } else if (keyId !== null) {
+      this.#nodeId = keyId;
+    } else {
+      const minted = await this.#getId();
+      if (!isStreamName(minted)) {
+        throw new TypeError(
+          `open({ getId }): ${JSON.stringify(minted)} cannot be a node id (a short name without '@')`,
+        );
+      }
+      this.#nodeId = minted;
     }
-    this.#nodeId = keyId;
-    await this.#fsi.write(this.#path, NODE_FILE, JSON.stringify({ id: keyId, plugins: kinds }));
+    await this.#fsi.write(this.#path, NODE_FILE, JSON.stringify({ id: this.#nodeId, plugins: kinds }));
+  }
+
+  // A sealed record's data, through the encryption plugin's key — or none.
+  #unseal(text) {
+    if (this.#seal === null) throw missing('an encrypted record', 'encryption');
+    return this.#seal.decrypt(text);
   }
 
   // The log is written before the record files are: a crash in between
@@ -1002,7 +1053,7 @@ class Storage extends Emitter {
     let blockHash = null;
     if (this.#chain) {
       const records = {};
-      for (const [id, entry] of touched) records[id] = await calculateHash(entry.data);
+      for (const [id, entry] of touched) records[id] = await sha256(entry.data);
       const from = this.#log.formatId(fromSeq);
       const to = this.#log.formatId(toSeq);
       blockHash = await this.#chain.addBlock({ records, from, to });
@@ -1037,7 +1088,10 @@ class Storage extends Emitter {
     // id is always a string, so that is the discriminator.
     const isChainValidation = typeof idOrOptions !== 'string' && !data && !blockHash;
     if (this.#chain === null) {
-      throw typed('NO_CHAIN', 'open({ chain: false }): this storage keeps no chain to validate against');
+      const why = this.#plugins.names.includes('chain')
+        ? 'open({ chain: false })'
+        : "the chain plugin is not registered (open({ plugins: [chain] }) from '@alexify/syncom/chain')";
+      throw typed('NO_CHAIN', `${why}: this storage keeps no chain to validate against`);
     }
     if (isChainValidation) {
       return await this.#chain.validate(idOrOptions);
@@ -1045,11 +1099,11 @@ class Storage extends Emitter {
     const id = idOrOptions;
     try {
       const block = await this.#chain.readBlock(blockHash);
-      const expectedHash = await calculateHash(data);
+      const expectedHash = await sha256(data);
       if (!block) return false;
       // The block must be the one it is filed under: a file planted beside
       // the chain with the right `records` map is not a commit.
-      if ((await calculateHash(block)) !== blockHash) return false;
+      if ((await sha256(block)) !== blockHash) return false;
       // A local write commits `{ id, hash }`; a replicated batch commits
       // `{ records: { [id]: hash } }` for every record it touched.
       if (block.data.records) return block.data.records[id] === expectedHash;

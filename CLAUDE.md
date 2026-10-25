@@ -18,7 +18,13 @@ object the caller hands in.
 ```
 index.js / browser.js     two-line shims over src/index.js / src/index.browser.js — the ROOT holds these two and their .d.ts, nothing else
 src/<name>/<name>.js      every subpath is a folder under src/ with its entry and its .d.ts beside it; package.json#exports points there
-src/all/all.js            @alexify/syncom/all — the core with every shipped plugin registered (text, tree): the API as it was before the blocks
+src/all/all.js            @alexify/syncom/all — the core with every shipped plugin registered (text, tree, signing, chain, encryption): the
+                          API as it was before the blocks
+src/signing/signing.js    @alexify/syncom/signing — the identity plugin (nodeId = the Ed25519 key, sign/verify) over src/signing/{ed25519,
+                          ed25519.browser, sign}.js; the key functions off the root
+src/chain/chain.js        @alexify/syncom/chain — the chain plugin and Blockchain; SHA-256 through src/digest.js
+src/encryption/encryption.js  @alexify/syncom/encryption — the sealing plugin (encrypted: true) over src/encryption/{rsa,rsa.browser}.js,
+                          and atRest(fsi, …), the AES-256-GCM backend wrapper
 src/text/text.js          @alexify/syncom/text — the list and text kinds as a plugin, over src/text/{sequence,rle,myers}.js
 src/tree/tree.js          @alexify/syncom/tree — the tree kind as a plugin, over src/tree/moves.js and src/order/order.js
 src/plugin.js             createPlugins — the registry one open() builds: kind modules (ranks, block codes, op types, apply/join/prune/render/
@@ -31,14 +37,16 @@ src/order/order.js        the @alexify/syncom/order subpath — fractional index
 src/undo/undo.js          the @alexify/syncom/undo subpath — the undo stack over the commit event; requires patch.js, emitter.js, symbols.js only
 src/branch/branch.js      the @alexify/syncom/branch subpath — fork a storage, merge either way; never requires storage.js
 index.d.ts                the Node type surface (hand-written)
-browser.d.ts              re-exports index.d.ts, overrides the 5 async crypto fns
+browser.d.ts              re-exports index.d.ts (the files layer differs; the crypto halves' types are the subpaths' *.browser.d.ts)
 THIRD_PARTY_NOTICES.md    the MIT notices of the algorithms adapted (Fugue, Yjs, list-positions…) and the files that carry them
 src/backend.js            the fsi contract (isFsi/checkFsi), createMemoryFsi, withSync — no requires
 src/emitter.js            the Emitter both halves extend — no requires
 src/logger.js             createLogger, the duck-typed logger writer — no requires
 src/keys.js               loadKeyPair — the on-disk key pairs (RSA for sealing, Ed25519 for signing), generator injected by each crypto half — no requires
+src/digest.js             sha256 — SHA-256 of a value's JSON through Web Crypto, async on both platforms: the chain's and the schema hash's — no requires
+src/pem.js                base64/PEM helpers over btoa/atob for the browser crypto halves — no requires
 src/scope.js              GLOBAL_SCOPE, inScope, opInScope — the one definition of "in scope" — no requires
-src/signing.js            canonical form, signOp, verifyOp — what a signature covers (the header + a salted payload digest) and the verdict on a peer's op
+src/signing/sign.js       canonical form, signOp, verifyOp — what a signature covers (the header + a salted payload digest) and the verdict on a peer's op
 src/shape.js              isPlainObject, asJson, isRecordId, isStreamName, wellFormed — what enters is checked here
 src/args.js               spliceArgs, treeArgs, markArgs, setElements, jsonValue, isNodeId — the write API’s argument
                           checks, shared by Storage and realize() in patch.js — no requires
@@ -121,11 +129,25 @@ docs/                     VitePress site
   fails at resolve time on any bare import reaching a browser bundle, so a
   stray `require('some-pkg')` in shared code breaks `pnpm size`, not just the
   dependency count.
-- **Browser halves are `*.browser.js`** (dot, not dash): `fsi`, `crypto`,
-  `utils`. Everything else (storage, chain, log, ops, sync, wrpc adapter,
-  and the require-free `emitter`, `logger`, `keys`, `scope`) is shared; the
-  two `utils` halves only re-export `Emitter`/`createLogger` and add the
-  platform's own bits. Adding a split means three edits: the file, `package.json#browser`,
+- **The security blocks are api plugins over one seam.** A plugin that is not a kind has
+  `setup(ctx)` — `{ fsi, path, logger, options, settings, storage }`, run in `#open` before the
+  log opens, in registration order — and hands back hooks the core takes: `identity` (`{ id,
+  sign, verify, signMessage }`, the signing plugin), `seal` (`{ encrypt, decrypt }`, the
+  encryption plugin), `chain` (a Blockchain, the chain plugin). The core reads them as
+  `core.identity`/`core.sign`/`core.verify`, `core.seal`, `core.chain`, and `core.hash` is
+  `sha256` from `src/digest.js` (Web Crypto, async on both platforms — the core has no crypto
+  half). Without a hook: the node id is what `getId` mints (checked by `isStreamName`), ops are
+  neither signed nor verified (`verifyPage` answers OK for every op), `block: null`, and an
+  encrypted write is `PLUGIN_MISSING`. What the options ask for and no plugin provides is
+  refused in `#open` with `missing()` — `signatures: 'require'`, `chain: true`, `encrypted` —
+  never silently downgraded. A new api plugin adds a hook name here and a line in
+  `docs/reference/api.md` Plugins; it never reaches the storage's state except through `ctx`
+  and the hooks.
+- **Browser halves are `*.browser.js`** (dot, not dash): `fsi` and `utils` in the core,
+  `signing/ed25519` and `encryption/rsa` in their subpaths. Everything else (storage, log, ops,
+  sync, chain, wrpc adapter, and the require-free `emitter`, `logger`, `keys`, `scope`,
+  `digest`, `pem`) is shared; the two `utils` halves only re-export `Emitter`/`createLogger`
+  and add the platform's own bits. Adding a split means three edits: the file, `package.json#browser`,
   and `src/index.browser.js`. `tests/package/consistency.test.js` catches a
   missed one. To run shared code against the browser halves under Node, load
   it through `tests/utils/browser-env.js` — requiring `src/index.browser.js`
@@ -187,10 +209,11 @@ docs/                     VitePress site
   node's `pendingMax`), and `mergeEntry` joins a side alone with an empty
   entry rather than copy it, so data its meta does not back never comes
   along. A `for...in` or a bare `obj[key]` over peer-shaped data is a bug.
-- **The chain is optional, the log is not.** `open({ chain: false })` leaves
-  `core.chain` null: `persistLocal`/`seal` in `src/commit.js` and
-  `#persistBatch` write `block: null`, `verify` is forced off, `validate()`
-  throws `NO_CHAIN`. A new place that reads the chain must take null.
+- **The chain is optional, the log is not.** Without the `chain` plugin, or under
+  `open({ chain: false })` with it, `core.chain` is null: `persistLocal`/`seal` in
+  `src/commit.js` and `#persistBatch` write `block: null`, `verify` is forced off,
+  `validate()` throws `NO_CHAIN` (the message says which of the two). A new place that reads
+  the chain must take null.
 - **`via` is a descriptor, never the link.** `peer.ref` (`{ url, node }`,
   `node` filled by hello) is what `change`, `apply` and the apply hooks get
   on the dialing side; the host's is `state.ref` (`url` null). `#fanOut`
@@ -361,23 +384,25 @@ docs/                     VitePress site
   page in `#receive`, an op in `#fanOut`) or on `sync()`, backed off by a
   timestamp. Every push goes through `#serializePush` — never call
   `#sendPages` from a new place.
-- **Async asymmetry is real.** `calculateHash`, `encrypt`, `decrypt`, `sign`
-  and `verify` are synchronous in `src/crypto.js` and promise-returning in
-  `src/crypto.browser.js`. Shared code must `await` them; `browser.d.ts`
-  exists to declare that difference. Do not "fix" it by making the Node half
-  async. The one async function of the Node half is `verifyAsync` — the
-  engine's verify, `crypto.verify` with a callback, on libuv's thread pool —
-  and it is not on the package root: both barrels leave it out by name, and
-  `src/signing.js` is its only caller. In the browser it is `verify` itself.
+- **Async asymmetry is real.** `calculateHash`, `sign` and `verify` are synchronous in
+  `src/signing/ed25519.js` and promise-returning in `src/signing/ed25519.browser.js`; so are
+  `encrypt` and `decrypt` in `src/encryption/rsa.js` against `rsa.browser.js`. Shared code must
+  `await` them; each subpath's `*.browser.d.ts` (the `browser` types condition of its export)
+  exists to declare that difference. Do not "fix" it by making the Node half async. The one
+  async function of the Node half is `verifyAsync` — the engine's verify, `crypto.verify` with
+  a callback, on libuv's thread pool — and it is not on the subpath's surface: `signing.js`
+  leaves it out by name, and `src/signing/sign.js` is its only caller. In the browser it is
+  `verify` itself. The core's own hash, `sha256` in `src/digest.js`, is async on both.
   The barrels spell every export out — a required module spread whole, the
   rest by name, never a spread of a local — because that is the shape Node's
   cjs-module-lexer reads for an ESM importer (`tests/package/esm.test.js`).
 - **Signed ops: the id is the key, the signature is the header plus a salted
-  digest.** `nodeId` = the Ed25519 public key (`isKeyId`: 43 base64url chars,
-  canonical last char — a non-canonical one is the same key under another
-  id); `keys/sign-*.pem` next to the RSA pair, `node.json` names the id
-  (a UUID there is rekeyed once with `identity.rekeyed`; another key id is
-  `IDENTITY_MISMATCH`, never silent). `src/signing.js` signs
+  digest.** With the `signing` plugin `nodeId` = the Ed25519 public key (`isKeyId`: 43
+  base64url chars, canonical last char — a non-canonical one is the same key under another
+  id); `keys/sign-*.pem` next to the RSA pair, `node.json` names the id (a non-key id there —
+  a UUID from before signing, or a directory opened without the plugin — is rekeyed once with
+  `identity.rekeyed`; another key id is `IDENTITY_MISMATCH`, never silent). Without the plugin
+  the id is what `node.json` names or `getId` mints, and a key id stays the id. `src/signing/sign.js` signs
   `[1, origin, seq, ts, type, id, scope, from, v, actor, digest]` with
   `digest = sha256(nonce + canonical(payload))` — three sign sites, `core.sign`
   in `persistLocal` (after `validateLocal` rewrote `op.data`), `mergeBatch`
@@ -391,7 +416,8 @@ docs/                     VitePress site
   A refused op is a gap, like a malformed one. `'verify'` is the default
   because ~70 call sites inject unsigned hand-made ops; `'require'` is the
   only mode that resists stripping — say so wherever signatures are
-  documented. Never put the key or a signature into a metric label.
+  documented — and so is the plugin on every node, since a node without it
+  signs nothing. Never put the key or a signature into a metric label.
 - **A `.d.ts` change and its `tsd` test land together** (`tests/*.test-d.ts`).
 - **`tests/package/consistency.test.js` guards the metadata.** If it goes red
   after you add an entry point, update `exports`, `files`, the `browser` map,

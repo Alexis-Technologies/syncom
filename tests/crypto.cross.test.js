@@ -8,12 +8,12 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { installBrowserGlobals } = require('./utils/browser-env.js');
 const { createMemoryFsi } = require('../src/backend.js');
-const node = require('../src/crypto.js');
+const node = { ...require('../src/encryption/rsa.js'), ...require('../src/signing/ed25519.js') };
 
 test('crypto halves interoperate', async (t) => {
   const env = installBrowserGlobals();
   t.after(() => env.uninstall());
-  const browser = require('../src/crypto.browser.js');
+  const browser = { ...require('../src/encryption/rsa.browser.js'), ...require('../src/signing/ed25519.browser.js') };
   const payload = { secret: 'both ways', n: 42, nested: { list: [1, 2, 3] }, long: 'y'.repeat(5000) };
 
   for (const [label, keys] of [

@@ -67,7 +67,7 @@ const OP_TYPES = new Set([
 const VALIDATED = new Set(['write', 'set', 'inc', 'add', 'remove', 'splice', 'assign', 'move', 'mark', 'tree']);
 
 // A signature's three fields, by shape alone — whether they check is
-// src/signing.js's business: 64 bytes base64url, 32 bytes hex, a nonce.
+// src/signing/sign.js's business: 64 bytes base64url, 32 bytes hex, a nonce.
 const SIGNATURE = /^[A-Za-z0-9_-]{86}$/;
 const DIGEST = /^[0-9a-f]{64}$/;
 const NONCE = /^[A-Za-z0-9_-]{16,64}$/;
@@ -105,7 +105,12 @@ const deepEqual = (a, b) => {
   return true;
 };
 
+// The verdict on a peer's op's signature (the signing plugin answers, the
+// apply path reads): OK, UNSIGNED under 'require', FORGED.
+const VERDICT = Object.freeze({ OK: 'ok', UNSIGNED: 'unsigned', FORGED: 'forged' });
+
 module.exports = {
+  VERDICT,
   isPlainObject,
   asJson,
   isRecordId,

@@ -13,9 +13,10 @@ const { vectorHas, vectorNext, vectorAdvance, keyScope } = require('./vector.js'
 const { notify } = require('./hooks.js');
 const { inScope } = require('./scope.js');
 const { traced, now } = require('./telemetry.js');
-const { isPlainObject, VALIDATED, wellFormed } = require('./shape.js');
+const { isPlainObject, VALIDATED, wellFormed, VERDICT } = require('./shape.js');
 const { SyncomError } = require('./errors.js');
-const { verifyOp, OK, FORGED } = require('./signing.js');
+
+const { OK, FORGED } = VERDICT;
 
 const NOTHING = { applied: 0, skipped: 0, duplicates: 0, gaps: 0, malformed: 0, unsigned: 0, forged: 0, outOfScope: 0 };
 // Signatures are verified this many at a time under Promise.all: the
@@ -67,16 +68,18 @@ const openBatch = (core, { via = null, scopes = null, peer = null, adoptFrom = n
 // keeps an unsigned page — an older peer's, a test's — at a property check
 // per op. A malformed op is left to `admit` to count.
 const verifyPage = async (batch, ops) => {
-  const { signatures } = batch;
+  const { signatures, core } = batch;
   const verdicts = new Array(ops.length).fill(OK);
-  if (signatures === false) return verdicts;
+  // No signing plugin: nothing to check against — a peer's signature rides
+  // along unread, the 'verify' semantics for an unsigned op.
+  if (signatures === false || core.verify === null) return verdicts;
   const pending = [];
   for (let start = 0; start < ops.length; start += VERIFY_CHUNK) {
     pending.length = 0;
     for (let i = start; i < ops.length && i < start + VERIFY_CHUNK; i++) {
       const op = ops[i];
       if (!wellFormed(op) || (op.sig === undefined && signatures !== 'require')) continue;
-      pending.push(verifyOp(op, signatures).then((verdict) => void (verdicts[i] = verdict)));
+      pending.push(core.verify(op, signatures).then((verdict) => void (verdicts[i] = verdict)));
     }
     if (pending.length > 0) await Promise.all(pending);
   }

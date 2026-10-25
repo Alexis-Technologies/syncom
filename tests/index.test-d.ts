@@ -1,14 +1,11 @@
 import { expectAssignable, expectError, expectType } from 'tsd';
 import * as syncom from '../index.js';
 import type {
-  Block,
-  Blockchain,
   CrdtDelta,
   EntityDefinition,
   Fsi,
   KeyPair,
   Node,
-  SigningKeyPair,
   Reference,
   Schema,
   Storage,
@@ -21,13 +18,8 @@ import type {
   SyncomTelemetryOptions,
 } from '../index.js';
 
-// crypto — node:crypto is synchronous, unlike the browser half.
-expectType<string>(syncom.calculateHash({ a: 1 }));
-expectType<Promise<KeyPair>>(syncom.generateKeys());
-expectType<string>(syncom.encrypt({ a: 1 }, 'pub'));
-expectType<unknown>(syncom.decrypt('cipher', 'priv'));
-expectType<Promise<KeyPair>>(syncom.loadKeys('keys'));
-expectError(syncom.calculateHash(() => 1));
+// The key functions are the signing and encryption subpaths'; the pair shape stays here.
+expectAssignable<KeyPair>({ publicKey: 'pub', privateKey: 'priv' });
 
 // backends
 expectAssignable<Fsi>(syncom.createMemoryFsi());
@@ -52,15 +44,6 @@ expectAssignable<StorageOptions>({ cache: { max: 100 }, integrity: 'lazy', catal
 expectError(syncom.open({ integrity: 'trust' }));
 expectError(syncom.open({ cache: { max: 'many' } }));
 expectType<Fsi>(storage.fsi);
-expectType<Promise<KeyPair>>(syncom.loadKeys('keys', { fsi: syncom.createMemoryFsi() }));
-expectType<Promise<SigningKeyPair>>(syncom.generateSigningKeys());
-expectType<Promise<SigningKeyPair>>(syncom.loadSigningKeys('keys', { fsi: syncom.createMemoryFsi() }));
-expectType<string>(syncom.sign('message', 'private'));
-expectType<boolean>(syncom.verify('message', 'signature', 'id'));
-declare const signing: SigningKeyPair;
-expectType<string>(signing.id);
-expectAssignable<KeyPair>(signing);
-expectType<Promise<Blockchain>>(new syncom.Blockchain('base', { fsi: syncom.createMemoryFsi() }));
 expectType<Promise<syncom.OpLog>>(new syncom.OpLog('base', { fsi: syncom.createMemoryFsi() }));
 
 // fsi
@@ -75,14 +58,6 @@ expectType<CrdtDelta>(syncom.diff({ a: 1 }, { a: 2 }));
 expectType<unknown>(syncom.merge({ a: 1 }, { a: 2 }));
 expectType<unknown>(syncom.apply({}, [{ type: 'inc', key: 'hits', value: 1 }]));
 expectError(syncom.apply({}, [{ type: 'nope' }]));
-
-// chain — the constructor returns a promise, the class is async-initialised.
-expectType<Promise<Blockchain>>(new syncom.Blockchain('base'));
-declare const chain: Blockchain;
-expectType<Promise<string>>(chain.addBlock({ id: 'r1', hash: 'h' }));
-expectType<Promise<Block>>(chain.readBlock('hash'));
-expectType<Promise<boolean>>(chain.validate({ last: 10 }));
-expectType<Promise<boolean>>(chain.validate());
 
 // storage
 declare const storage: Storage;

@@ -274,11 +274,26 @@ and that hello reused seqs the host had, and are lost to it.
 
 ## Signatures
 
-Every op a node makes is signed with its Ed25519 key, and the node's id **is**
-that key — the raw public key, 43 characters of base64url — so a peer verifies
-an op against its `origin` with no key to look up, through any number of
-relays. The pair lives in `<path>/keys/sign-public.pem` and `sign-private.pem`,
-made at the first open, next to the RSA pair that seals records.
+Signatures are the `signing` plugin — `@alexify/syncom/signing`, registered by
+`@alexify/syncom/all`:
+
+```js
+const { open } = require('@alexify/syncom');
+const { signing } = require('@alexify/syncom/signing');
+
+const storage = await open({ path: 'data', plugins: [signing] });
+```
+
+With it every op a node makes is signed with its Ed25519 key, and the node's
+id **is** that key — the raw public key, 43 characters of base64url — so a
+peer verifies an op against its `origin` with no key to look up, through any
+number of relays. The pair lives in `<path>/keys/sign-public.pem` and
+`sign-private.pem`, made at the first open. Without the plugin the node id is
+what `getId` mints (a UUID by default), its ops go out unsigned, and it
+checks nothing of a peer's — the last row of the table below; a directory
+keeps the key it was given as its id when opened without the plugin, and one
+born without it is rekeyed once, with an `identity.rekeyed` warning, when the
+plugin arrives.
 
 The signature covers the op's **header** — `origin`, `seq`, `ts`, `type`,
 `id`, `scope`, `from`, `v`, `actor` — as a positional JSON array under a
@@ -305,6 +320,10 @@ a payload like any other. The three fields ride in `packOps` slots 15 to 17.
 | `'verify'` (default) | signs | verified; refused when it does not check | taken |
 | `'require'` | signs | verified; refused when it does not check | refused — as is one whose origin is no key |
 | `false` | signs nothing | taken, unverified | taken |
+| without the plugin (`'verify'`) | signs nothing — its id is no key | taken, unverified | taken |
+
+`'require'` without the plugin is refused at `open()` (`PLUGIN_MISSING`): the
+mode has nothing to check with.
 
 A refused op is counted (`forged`, `unsigned` in the apply result and the
 `syncom.ops.rejected` metric) and reported once per page as an `error` event
@@ -326,8 +345,9 @@ of the key its origin names, whatever path it took. What it does not:
   own key. Under `'require'` that is the one way unverified state enters a
   node — from a host it chose, and `beforeBootstrap` let through.
 - Under `'verify'`, a relay can strip a signature and the op is taken as an
-  unsigned one. Only `'require'` resists that, and it is for a mesh where
-  every node signs.
+  unsigned one — and a node without the plugin takes every op that way. Only
+  `'require'` resists that, and it is for a mesh where every node signs: the
+  plugin on every node, `'require'` on every node.
 - Delivery is not proved: a peer can withhold an op (a gap, which you see),
   or strip its payload and nonce and present it as scrubbed, which applies as
   a no-op — suppression, not forgery.

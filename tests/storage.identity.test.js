@@ -9,7 +9,7 @@ const assert = require('node:assert');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const syncom = require('../src/all/all.js');
-const { loadSigningKeys, generateSigningKeys } = require('../src/crypto.js');
+const { loadSigningKeys, generateSigningKeys } = require('../src/signing/ed25519.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 
 const KEY_ID = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;

@@ -44,7 +44,7 @@ test('Storage replication model', async (t) => {
     assert.deepStrictEqual(storage.vector, { [storage.nodeId]: 4 });
     assert.strictEqual(storage.log.length, 4);
     // Every op is signed under the node's key; a payload carries a salted digest.
-    const { verifyOp } = require('../src/signing.js');
+    const { verifyOp } = require('../src/signing/sign.js');
     for (const { op } of ops) {
       assert.match(op.sig, /^[A-Za-z0-9_-]{86}$/, op.type);
       assert.strictEqual(await verifyOp(op, 'require'), 'ok', op.type);
@@ -61,7 +61,7 @@ test('Storage replication model', async (t) => {
   await t.test(
     'every op this node mints is signed: a snapshot’s merges, the advance, a validated write',
     async (t2) => {
-      const { verifyOp } = require('../src/signing.js');
+      const { verifyOp } = require('../src/signing/sign.js');
       const { storage: a } = await openTemp(t2);
       const id = await a.insert({ n: 1 });
       await a.inc(id, 'hits', 2);

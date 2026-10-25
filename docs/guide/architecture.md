@@ -212,8 +212,8 @@ A storage is one directory, through whichever `fsi` it was given:
 
 ```
 data/
-├── node.json      this node's identity: its signing key
-├── keys/          two key pairs: RSA (encryption at rest), Ed25519 (signing ops)
+├── node.json      this node's identity: its signing key with the signing plugin, else what getId minted
+├── keys/          two key pairs when their plugins run: RSA (encryption at rest), Ed25519 (signing ops)
 ├── blockchain/    one block per write, and the tail (unless chain: false)
 ├── lock.json      while an instance holds the directory
 ├── schema.json    the schema version this directory last ran
@@ -246,15 +246,16 @@ the five functions an `fsi` implements.
 | `all/all.js` | The `@alexify/syncom/all` entry: the core with every shipped plugin registered |
 | `history.js`, `tags.js`, `patch.js` | A version as a fold of the log; tags as copy-on-write record files; the patch vocabulary of `diff()` and `applyPatches()`, a plugin's kinds through the registry |
 | `undo/undo.js`, `branch/branch.js` | The `@alexify/syncom/undo` and `@alexify/syncom/branch` subpaths — over the public API, no engine bundled |
-| `chain.js`, `contracts/contracts.js`, `crdt.js` | The hash-linked chain; the `@alexify/syncom/contracts` subpath; `diff`/`merge`/`apply` over plain objects |
+| `chain/chain.js`, `contracts/contracts.js`, `crdt.js` | The hash-linked chain, a plugin (`@alexify/syncom/chain`); the `@alexify/syncom/contracts` subpath; `diff`/`merge`/`apply` over plain objects |
 | `schema.js`, `query.js` | Validators, versions and lenses; Mango cursors, `$text` among them |
 | `search/search.js` | The `@alexify/syncom/search` subpath: the trigram index behind `$text` — the core knows only its contract |
-| `signing.js`, `keys.js`, `crypto.js` | What an op's signature covers, signing and verifying it; the key pairs on disk; hashing, sealing and signing |
+| `signing/signing.js`, `signing/sign.js`, `signing/ed25519.js`, `keys.js`, `digest.js` | The identity plugin (`@alexify/syncom/signing`); what an op's signature covers, signing and verifying it; the Ed25519 half; the key pairs on disk; the core's SHA-256 through Web Crypto |
+| `encryption/encryption.js`, `encryption/rsa.js` | The sealing plugin and the at-rest backend wrapper (`@alexify/syncom/encryption`); the RSA half |
 | `sync.js`, `hosting.js`, `link.js`, `wrpc/wrpc.js`, `protocol.js`, `scope.js` | Dialing, hosting, the link contract, the wrpc adapter, what both halves agree on, what "in scope" means |
 | `hooks.js`, `emitter.js`, `logger.js`, `telemetry.js`, `errors.js` | Hooks and events, injected logging and OpenTelemetry, `SyncomError` |
 | `fsi.js`, `fsi.browser.js`, `idb/idb.js`, `backend.js`, `lock.js` | `node:fs`, OPFS, IndexedDB and memory backends; one instance per directory |
 
-The browser halves (`*.browser.js`) replace `fsi`, `crypto` and `utils` through the `browser`
+The browser halves (`*.browser.js`) replace `fsi` and `utils` in the core, `signing/ed25519` and `encryption/rsa` in their subpaths, through the `browser`
 field of `package.json`; everything else is shared. Every subpath is a folder under `src/` with
 its entry and its types beside it — the root holds `index.js`, `browser.js` and their `.d.ts`
 alone (see [Entry points](/guide/entry-points)).

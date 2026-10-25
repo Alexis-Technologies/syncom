@@ -41,11 +41,11 @@ test('browser barrel', async (t) => {
   });
 
   await t.test('picks the browser half of every split module', () => {
-    // The node calculateHash is synchronous; the WebCrypto one returns a
-    // promise. That difference is the cheapest proof the swap happened.
-    const hash = browser.calculateHash({ a: 1 });
-    assert.ok(hash instanceof Promise);
-    return hash.then((value) => assert.match(value, /^[0-9a-f]{64}$/));
+    // The fsi half is the one split the root still has (the crypto halves
+    // are the signing and encryption subpaths'): OPFS here, node:fs there.
+    assert.notStrictEqual(browser.read, node.read);
+    assert.strictEqual(browser.read, require('../src/fsi.browser.js').read);
+    assert.strictEqual(node.read, require('../src/fsi.js').read);
   });
 
   await t.test('the crdt half is shared, not duplicated; contracts are a subpath, not here', () => {

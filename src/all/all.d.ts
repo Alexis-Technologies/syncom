@@ -1,8 +1,9 @@
 // Everything in one import: the core with every plugin the package ships
-// registered — the lists, the texts and the trees. The types of the core
-// (`export *`) plus a Storage that has every plugin's methods, an `open()`
-// that returns it, and `applyOp`/`mergeEntry` that fold under the same
-// registry.
+// registered — the lists, the texts and the trees; signed ops under the
+// node's key, the chain, the sealing of records. The types of the core and
+// of those subpaths (`export *`) plus a Storage that has every plugin's
+// methods, an `open()` that returns it, and `applyOp`/`mergeEntry` that fold
+// under the same registry.
 
 import type {
   Storage as CoreStorage,
@@ -21,6 +22,9 @@ import type {
 } from '../../index.js';
 
 export * from '../../index.js';
+export * from '../signing/signing.js';
+export * from '../chain/chain.js';
+export * from '../encryption/encryption.js';
 
 /** The storage with every shipped plugin registered: the core's API and the text and tree methods. */
 export interface Storage extends CoreStorage, TextMethods, TreeMethods {}
@@ -45,5 +49,5 @@ export declare function mergeEntry(a: Entry | null, b: Entry | null, limits?: Fo
 
 export declare const text: Plugin<TextMethods>;
 export declare const tree: Plugin<TreeMethods>;
-/** The plugins the package ships, in registration order. */
-export declare const PLUGINS: readonly [Plugin<TextMethods>, Plugin<TreeMethods>];
+/** The plugins the package ships, in registration order: the kinds, then the identity, the chain and the sealing. */
+export declare const PLUGINS: readonly [Plugin<TextMethods>, Plugin<TreeMethods>, Plugin, Plugin, Plugin];

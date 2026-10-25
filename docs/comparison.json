@@ -381,20 +381,20 @@
         "tamper": {
           "mark": "✅",
           "text": "hash-linked chain, unsigned (optional)",
-          "source": "src/chain.js; docs/guide/chain.md",
+          "source": "src/chain/chain.js (the plugin); docs/guide/chain.md",
           "note": "Whoever can write the directory can rebuild the chain; a read checks a record against the block its file names, so a block planted beside the chain passes. The ops in the log are what is signed."
         },
         "signing": {
           "mark": "✅",
           "text": "Ed25519 per op; the node id is the key; `'require'` to enforce",
-          "source": "src/signing.js, src/apply.js (verifyPage); docs/guide/sync.md#signatures",
+          "source": "src/signing/signing.js, src/signing/sign.js, src/apply.js (verifyPage); docs/guide/sync.md#signatures",
           "note": "The default `'verify'` takes an unsigned op; `sync.signatures: 'require'` refuses it. A bootstrap re-signs the host's state under the joiner's key, and `hello` does not yet prove possession of the key."
         },
         "atRest": {
-          "mark": "⚠️",
-          "text": "per record (`encrypted: true`), never synced",
-          "source": "docs/guide/storage.md#encryption-at-rest",
-          "note": "The RSA key pair that unseals the records sits unprotected in `<path>/keys/`, beside the data."
+          "mark": "✅",
+          "text": "`atRest(fsi, { key | password })`: every file AES-256-GCM under one key; per record `encrypted: true`",
+          "source": "src/encryption/encryption.js (atRest, PBKDF2-SHA-256, DECRYPT_FAILED); docs/guide/backends.md#encrypted-at-rest",
+          "note": "A backend wrapper from `@alexify/syncom/encryption`: the key is given or derived from a password and a salt, never written; the sealed-record form (one record for this node's RSA pair, outside the log) is the other block of the same subpath."
         },
         "e2ee": {
           "mark": "⚠️",

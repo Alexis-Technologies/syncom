@@ -6,8 +6,8 @@
 // first, and the signer must sign with the half the storage verifies with.
 
 const createSigner = async () => {
-  const { generateSigningKeys } = require('../../src/crypto.js');
-  const { signOp } = require('../../src/signing.js');
+  const { generateSigningKeys } = require('../../src/signing/ed25519.js');
+  const { signOp } = require('../../src/signing/sign.js');
   const keys = await generateSigningKeys();
   return { id: keys.id, sign: (op) => signOp({ ...op, origin: keys.id }, keys.privateKey) };
 };

@@ -12,16 +12,14 @@
 // binds authorship and content to the origin's key, through any relay — it
 // proves nothing about delivery, and `actor` stays a claim the origin made.
 
-const { calculateHash, sign, verifyAsync } = require('./crypto.js');
-const { generateUUID } = require('./utils.js');
-const { isKeyId } = require('./shape.js');
+const { calculateHash, sign, verifyAsync } = require('./ed25519.js');
+const { generateUUID } = require('../utils.js');
+const { isKeyId, VERDICT } = require('../shape.js');
 
 const HEADER_VERSION = 1;
 const PAYLOAD = ['data', 'meta', 'key', 'value', 'vector'];
 
-const OK = 'ok';
-const UNSIGNED = 'unsigned';
-const FORGED = 'forged';
+const { OK, UNSIGNED, FORGED } = VERDICT;
 
 // JSON.stringify with every object's keys sorted — the text JSON.stringify
 // would give were keys ordered — so the digest is a property of the value,

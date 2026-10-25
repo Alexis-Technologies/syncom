@@ -13,9 +13,12 @@ const core = require('../index.js');
 const { createPlugins } = require('../plugin.js');
 const { text } = require('../text/text.js');
 const { tree } = require('../tree/tree.js');
+const { signing } = require('../signing/signing.js');
+const { chain } = require('../chain/chain.js');
+const { encryption } = require('../encryption/encryption.js');
 
 /** The plugins the package ships, in registration order. */
-const PLUGINS = Object.freeze([text, tree]);
+const PLUGINS = Object.freeze([text, tree, signing, chain, encryption]);
 const registry = createPlugins(PLUGINS);
 
 const withAll = (given = []) => {
@@ -40,11 +43,17 @@ const mergeEntry = (a, b, limits = null) => core.mergeEntry(a, b, { ...limits, p
 
 module.exports = {
   ...require('../index.js'),
+  ...require('../signing/signing.js'),
+  ...require('../chain/chain.js'),
+  ...require('../encryption/encryption.js'),
   Storage,
   open,
   applyOp,
   mergeEntry,
   text,
   tree,
+  signing,
+  chain,
+  encryption,
   PLUGINS,
 };

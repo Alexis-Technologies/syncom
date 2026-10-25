@@ -1,25 +1,19 @@
 // The browser half of the package, reached through the `browser` export
 // condition (see package.json#exports and #browser).
 //
-// Everything that is platform-agnostic — CRDT, chain, storage, schema and
-// their types — is re-exported from ./index.js unchanged (smart contracts are
-// the `@alexify/syncom/contracts` subpath). What differs is the
-// crypto and OPFS layer: node:crypto is synchronous, the Web Crypto API is
-// not, so `calculateHash`, `encrypt`, `decrypt`, `sign` and `verify` return
-// promises here and are declared below rather than re-exported.
-
-import type { JSONSafe as JSONSafeValue } from './index.js';
+// Everything that is platform-agnostic — CRDT, storage, schema and their
+// types — is re-exported from ./index.js unchanged (smart contracts are the
+// `@alexify/syncom/contracts` subpath). What differs is the files layer:
+// OPFS here, node:fs there, behind the same `Fsi`. The crypto halves — Web
+// Crypto async where node:crypto is not — are the `@alexify/syncom/signing`
+// and `@alexify/syncom/encryption` subpaths', under their own browser types.
 
 export type {
   JSONSafe,
   KeyPair,
-  SigningKeyPair,
   Fsi,
   CrdtDelta,
   CrdtHistoryRecord,
-  Block,
-  ChainDataEntry,
-  BlockchainConstructor,
   SchemaEntity,
   SchemaEntities,
   Schema,
@@ -125,10 +119,6 @@ export type {
 } from './index.js';
 
 export {
-  generateKeys,
-  loadKeys,
-  generateSigningKeys,
-  loadSigningKeys,
   read,
   write,
   exists,
@@ -144,7 +134,6 @@ export {
   diff,
   merge,
   apply,
-  Blockchain,
   SyncManager,
   isSyncLink,
   Storage,
@@ -154,10 +143,3 @@ export {
   ValidationError,
   isSharedLog,
 } from './index.js';
-
-// Web Crypto: async where node:crypto is sync.
-export function calculateHash(data: JSONSafeValue): Promise<string>;
-export function encrypt(data: unknown, publicKey: string): Promise<string>;
-export function decrypt(data: string, privateKey: string): Promise<unknown>;
-export function sign(message: string, privateKey: string): Promise<string>;
-export function verify(message: string, signature: string, publicKey: string): Promise<boolean>;

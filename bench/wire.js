@@ -12,8 +12,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { packOps } = require('../src/ops.js');
-const { generateSigningKeys } = require('../src/crypto.js');
-const { signOp } = require('../src/signing.js');
+const { generateSigningKeys } = require('../src/signing/ed25519.js');
+const { signOp } = require('../src/signing/sign.js');
 const { runKey } = require('../src/text/sequence.js');
 
 const OUT = path.join(__dirname, 'results', 'wire.json');
