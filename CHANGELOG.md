@@ -14,6 +14,14 @@ There is no released version section until then; everything below lands in it.
 
 ### Added
 
+- **Observe, deltas and positions.** `observe(id, path?, listener)` — on a
+  `Record` too — hands a listener one record's changes a turn at a time,
+  under a path or whole, local and a peer's alike, until the returned
+  function is called. The `text` plugin adds `toDelta(changes, field?)`,
+  composing a text's changes into one delta in Quill's form (an embed slot as
+  `{ insert: { embed: marker } }`, a reset as `null`), `applyDelta(id, key,
+  delta)`, making a delta the field's edits as one transaction, and
+  `position(id, key, cursor)` / `positions()`, a cursor's index and side.
 - **Changes, and the `transaction` event.** Every op announced reports what
   the reading shows of it, in the write API's terms and the reading's
   indices: `applyOp()` returns `changes`, a `change` event carries them as its

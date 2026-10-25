@@ -836,6 +836,287 @@ const index = async (core, id, key, cursor) => {
   return field === null ? null : S.indexOfCursor(S.indexOf(field.entry, key), cursor);
 };
 
+// A cursor token's side: the head keeps after nothing, the end before
+// nothing, an anchor the side it names.
+const sideOf = (cursor) => (cursor === S.HEAD || cursor.startsWith('>') ? 'after' : 'before');
+
+/**
+ * Where `cursor` is now and which side it keeps to: `{ index, side }` — what
+ * a selection is restored from after edits around it — or `null` once its
+ * place is gone.
+ */
+const position = async (core, id, key, cursor) => {
+  if (typeof cursor !== 'string' || !S.isAnchor(cursor)) throw new TypeError('position() takes a cursor');
+  const field = await held(core, 'position', id, key);
+  if (field === null) return null;
+  const at = S.indexOfCursor(S.indexOf(field.entry, key), cursor);
+  return at === null ? null : { index: at, side: sideOf(cursor) };
+};
+
+/** `position()` of several cursors at once, in one read of the field: an array, `null` per cursor whose place is gone. */
+const positions = async (core, id, key, cursors) => {
+  if (!Array.isArray(cursors)) throw new TypeError('positions() takes an array of cursors');
+  for (const cursor of cursors) {
+    if (typeof cursor !== 'string' || !S.isAnchor(cursor)) throw new TypeError('positions() takes cursors');
+  }
+  const field = await held(core, 'positions', id, key);
+  if (field === null) return cursors.map(() => null);
+  const idx = S.indexOf(field.entry, key);
+  return cursors.map((cursor) => {
+    const at = S.indexOfCursor(idx, cursor);
+    return at === null ? null : { index: at, side: sideOf(cursor) };
+  });
+};
+
+// ---------------------------------------------------------------------------
+// Deltas (Quill's form): `[{ retain, attributes? }, { insert, attributes? },
+// { delete }]` — what an editor binding exchanges. `toDelta` composes a
+// text's changes into one; `applyDelta` makes a delta the field's edits, as
+// one transaction. An embed slot travels as `{ insert: { embed: marker } }`,
+// a marker changed as `{ retain: 1, attributes: { embed: marker } }`.
+
+const lengthOfOp = (op) => op.delete ?? op.retain ?? (typeof op.insert === 'string' ? op.insert.length : 1);
+
+// A cursor over a delta's ops: `peek()` the length left in the current op,
+// `next(n)` the next `n` of it as an op of its own.
+const walker = (ops) => {
+  let i = 0;
+  let used = 0;
+  return {
+    done: () => i >= ops.length,
+    peekType: () => (ops[i].delete !== undefined ? 'delete' : ops[i].insert !== undefined ? 'insert' : 'retain'),
+    peek: () => lengthOfOp(ops[i]) - used,
+    next(n = Infinity) {
+      const op = ops[i];
+      const left = lengthOfOp(op) - used;
+      const take = Math.min(n, left);
+      let out;
+      if (op.delete !== undefined) out = { delete: take };
+      else if (typeof op.insert === 'string') out = { insert: op.insert.slice(used, used + take) };
+      else if (op.insert !== undefined) out = { insert: op.insert };
+      else out = { retain: take };
+      if (op.attributes !== undefined && out.delete === undefined) out.attributes = op.attributes;
+      used += take;
+      if (used >= lengthOfOp(op)) {
+        i++;
+        used = 0;
+      }
+      return out;
+    },
+  };
+};
+
+const sameAttributes = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
+// Pushes an op, joining it to the last of its kind with the same attributes.
+const pushOp = (ops, op) => {
+  const last = ops[ops.length - 1];
+  if (last !== undefined) {
+    if (op.delete !== undefined && last.delete !== undefined) return void (last.delete += op.delete);
+    if (op.retain !== undefined && last.retain !== undefined && sameAttributes(op.attributes, last.attributes)) {
+      return void (last.retain += op.retain);
+    }
+    if (
+      typeof op.insert === 'string' &&
+      typeof last.insert === 'string' &&
+      sameAttributes(op.attributes, last.attributes)
+    ) {
+      return void (last.insert += op.insert);
+    }
+  }
+  ops.push({ ...op });
+};
+
+// The attributes of a retain composed over an insert's or a retain's: the
+// later ones win, a null one removes.
+const composeAttributes = (a, b, keepNull) => {
+  const out = { ...(a ?? {}), ...(b ?? {}) };
+  if (!keepNull) for (const key of Object.keys(out)) if (out[key] === null) delete out[key];
+  return Object.keys(out).length > 0 ? out : undefined;
+};
+
+/** `a` then `b` as one delta: Quill's compose, over retain, insert and delete. */
+const compose = (a, b) => {
+  const left = walker(a);
+  const right = walker(b);
+  const out = [];
+  while (!left.done() || !right.done()) {
+    if (!right.done() && right.peekType() === 'insert') {
+      pushOp(out, right.next());
+    } else if (!left.done() && left.peekType() === 'delete') {
+      pushOp(out, left.next());
+    } else if (left.done()) {
+      pushOp(out, right.next());
+    } else if (right.done()) {
+      pushOp(out, left.next());
+    } else {
+      const n = Math.min(left.peek(), right.peek());
+      const x = left.next(n);
+      const y = right.next(n);
+      if (y.retain !== undefined) {
+        const op = x.insert !== undefined ? { insert: x.insert } : { retain: n };
+        const attributes = composeAttributes(x.attributes, y.attributes, x.retain !== undefined);
+        if (attributes !== undefined) op.attributes = attributes;
+        pushOp(out, op);
+      } else if (y.delete !== undefined && x.retain !== undefined) pushOp(out, y);
+      // y deletes what x inserted: nothing of either stays.
+    }
+  }
+  // A trailing plain retain says nothing.
+  const last = out[out.length - 1];
+  if (last !== undefined && last.retain !== undefined && last.attributes === undefined) out.pop();
+  return out;
+};
+
+// The content of an insert as delta ops: the text, its embed slots as
+// `{ insert: { embed: marker } }`.
+const insertsOf = (content, vals) => {
+  const out = [];
+  const markers = new Map(vals ?? []);
+  let from = 0;
+  for (let i = 0; i < content.length; i++) {
+    if (content[i] !== EMBED) continue;
+    if (i > from) out.push({ insert: content.slice(from, i) });
+    out.push({ insert: { embed: markers.get(i) ?? null } });
+    from = i + 1;
+  }
+  if (from < content.length) out.push({ insert: content.slice(from) });
+  return out;
+};
+
+// One change of a text as a delta, or null for a change a delta cannot say
+// (a reset, an unset, a list's): the caller reads the field again.
+const deltaOf = (change) => {
+  const { action } = change;
+  if (action === 'splice') {
+    if (Array.isArray(change.content)) return null;
+    const out = [];
+    if (change.index > 0) out.push({ retain: change.index });
+    if (change.count > 0) out.push({ delete: change.count });
+    if (change.content !== undefined && change.content.length > 0) out.push(...insertsOf(change.content, change.vals));
+    return out;
+  }
+  if (action === 'mark' || action === 'unmarkById') {
+    const out = [];
+    if (change.start > 0) out.push({ retain: change.start });
+    const value = action === 'mark' ? change.value : null;
+    out.push({ retain: change.end - change.start, attributes: { [change.name]: value } });
+    return out;
+  }
+  if (action === 'setAt' && !Array.isArray(change.value)) {
+    const out = [];
+    if (change.index > 0) out.push({ retain: change.index });
+    out.push({ retain: 1, attributes: { embed: change.value } });
+    return out;
+  }
+  return null;
+};
+
+/**
+ * The changes of text field `field` (every text change when `field` is not
+ * given) composed into one delta — `[{ retain, attributes? }, { insert,
+ * attributes? }, { delete }]`, Quill's form, over the reading before them:
+ * a splice's cut and insert, a mark as attributes over its range (`null` to
+ * remove), an embed slot as `{ insert: { embed: marker } }`, a marker
+ * changed as `{ retain: 1, attributes: { embed } }`. `null` when a change
+ * is no edit a delta can say — a reset, an unset, a list's — so the caller
+ * reads the field again.
+ */
+const toDelta = (core, changes, field) => {
+  if (!Array.isArray(changes)) throw new TypeError('toDelta() takes an array of changes');
+  let delta = [];
+  for (const change of changes) {
+    if (field !== undefined && change.field !== field) continue;
+    const { action } = change;
+    if (action === 'delete' || action === 'purge') return null;
+    if (change.field === undefined) continue;
+    if (field === undefined) {
+      // Every text field at once: what is no text's edit is left out, a
+      // text reset or a field gone makes the whole no delta.
+      if (action === 'reset' && change.kind !== 'text') continue;
+      if (action === 'unset' || action === 'reset') return null;
+      if (action === 'splice' && Array.isArray(change.content)) continue;
+      if (action !== 'splice' && action !== 'mark' && action !== 'unmarkById' && action !== 'setAt') continue;
+    }
+    const step = deltaOf(change);
+    if (step === null) return null;
+    delta = compose(delta, step);
+  }
+  return delta;
+};
+
+const isDeltaOp = (op) =>
+  isPlainObject(op) &&
+  ((Number.isInteger(op.retain) && op.retain > 0) ||
+    (Number.isInteger(op.delete) && op.delete > 0) ||
+    typeof op.insert === 'string' ||
+    (isPlainObject(op.insert) && Object.hasOwn(op.insert, 'embed'))) &&
+  (op.attributes === undefined || isPlainObject(op.attributes));
+
+/**
+ * Makes `delta` the edits of text field `key`, as one transaction: a
+ * `retain` moves on (with `attributes`, a mark — or an unmark, for a null —
+ * over what it retains; `{ embed }` sets the slot's marker), an `insert`
+ * splices text in (an `{ embed: marker }` inserts a slot with it) and marks
+ * it with its attributes, a `delete` cuts. Resolves to how many ops it took.
+ */
+const applyDelta = async (core, id, key, delta, { actor, message } = {}) => {
+  if (typeof key !== 'string') throw new TypeError('applyDelta() takes a field name');
+  if (!Array.isArray(delta) || !delta.every(isDeltaOp)) {
+    throw new TypeError('applyDelta() takes a delta: [{ retain, attributes? } | { insert, attributes? } | { delete }]');
+  }
+  if (!isRecordId(id)) throw invalidId(id);
+  const { result, done } = await core.transact(
+    async (tx) => {
+      let at = 0;
+      let ops = 0;
+      const marks = async (start, end, attributes) => {
+        for (const name of Object.keys(attributes)) {
+          const value = attributes[name];
+          if (name === 'embed') {
+            if (end - start !== 1) throw new TypeError('applyDelta() sets an embed marker over one slot');
+            const marker = value === null ? null : markerArgs('applyDelta', value, value.isEmbed ?? true);
+            ops += (await tx.commit('assign', id, { key, index: start, value: marker }, { actor })) ? 1 : 0;
+          } else {
+            // A delta says every insert's attributes itself: a mark it lays
+            // grows over nothing typed later (`expand: 'none'`), nor does
+            // its removal.
+            markArgs('applyDelta', key, start, end, name, 'none');
+            const marked = value === null ? null : jsonValue('applyDelta', value);
+            const payload = { key, start, end, name, value: marked, expand: 'none' };
+            ops += (await tx.commit('mark', id, payload, { actor })) ? 1 : 0;
+          }
+        }
+      };
+      for (const op of delta) {
+        if (op.delete !== undefined) {
+          ops += (await tx.commit('splice', id, spliceArgs('applyDelta', key, at, op.delete), { actor })) ? 1 : 0;
+        } else if (op.retain !== undefined) {
+          if (op.attributes !== undefined) await marks(at, at + op.retain, op.attributes);
+          at += op.retain;
+        } else if (typeof op.insert === 'string') {
+          if (op.insert.length === 0) continue;
+          ops += (await tx.commit('splice', id, spliceArgs('applyDelta', key, at, 0, op.insert), { actor })) ? 1 : 0;
+          if (op.attributes !== undefined) await marks(at, at + op.insert.length, op.attributes);
+          at += op.insert.length;
+        } else {
+          const { embed } = op.insert;
+          const marker = embed === null ? null : markerArgs('applyDelta', embed, embed.isEmbed ?? true);
+          const payload = spliceArgs('applyDelta', key, at, 0, EMBED, { embeds: true });
+          payload.vals = [[0, marker]];
+          ops += (await tx.commit('splice', id, payload, { actor })) ? 1 : 0;
+          if (op.attributes !== undefined) await marks(at, at + 1, op.attributes);
+          at += 1;
+        }
+      }
+      return ops;
+    },
+    { actor, message },
+  );
+  if (done !== null) await done;
+  return result;
+};
+
 /**
  * Replaces the element at `index` of list field `key` with `value` (an
  * `assign` op): a register per element, last writer wins, and the value
@@ -912,6 +1193,10 @@ const text = Object.freeze({
     updateBlock,
     block,
     blocks,
+    position,
+    positions,
+    toDelta,
+    applyDelta,
   }),
 });
 

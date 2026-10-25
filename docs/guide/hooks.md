@@ -224,6 +224,14 @@ default) on the storage and on its sync manager; one more throws.
 A `Record` emits `update` `(data, delta)` on a staged assignment and when the
 record changes in storage (`null` data once deleted).
 
+To follow one record rather than every op, `observe(id, path?, listener)`
+calls the listener after every turn that changed the record — with its
+[changes](./versions#changes) of that turn and the `transaction` event they
+came in — and, under a `path`, with the changes of that field, of what hangs
+under it and of a prefix of it; a `Record` has `observe(path?, listener)`
+too. Observers stand apart from the listener count: a view per record is
+the intended scale.
+
 ### SyncManager
 
 | Event | Payload | When |

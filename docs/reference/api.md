@@ -99,6 +99,10 @@ naming the subpath; `@alexify/syncom/all` has both.
 | `blocks(id, key)` | `Promise<TextBlock[] \| null>` | The text field by block: per marker, in order, `{ index, type, parents, attrs, spans }` — the spans up to the next marker; text before the first marker as a block with `index` and `type` null; `null` unless the field is a text; the `text` plugin's |
 | `cursor(id, key, index, { side }?)` | `Promise<string \| null>` | A cursor into a list or text field — a place that survives edits around it, before the element at `index` (`'before'`, the default) or after the one before it; `null` out of range or when the field is not a sequence |
 | `index(id, key, cursor)` | `Promise<number \| null>` | Where a cursor is now; `null` once its place is gone (a reset) |
+| `position(id, key, cursor)` | `Promise<{ index, side } \| null>` | Where a cursor is now and which side it keeps to (`'before'`, `'after'`) — what a selection is restored from; `null` once its place is gone; the `text` plugin's |
+| `positions(id, key, cursors)` | `Promise<({ index, side } \| null)[]>` | `position()` of several cursors in one read of the field; the `text` plugin's |
+| `toDelta(changes, field?)` | `DeltaOp[] \| null` | The [changes](../guide/versions#changes) of text field `field` (every text change when not given) composed into one delta in Quill's form — `[{ retain, attributes? }, { insert, attributes? }, { delete }]` — over the reading before them: a splice's cut and insert, a mark as attributes over its range (`null` removes), an embed slot as `{ insert: { embed: marker } }`, a marker changed as `{ retain: 1, attributes: { embed } }`; `null` when a change is no edit a delta can say (a reset, an unset): read the field again then; the `text` plugin's |
+| `applyDelta(id, key, delta, { actor, message }?)` | `Promise<number>` | Makes `delta` the edits of text field `key`, as one [transaction](../guide/storage#transactions): a `retain` moves on (with `attributes`, a mark — or an unmark, for a null — over what it retains; `{ embed }` sets the slot's marker), an `insert` splices text in (`{ embed: marker }` a slot with it) and marks it with its attributes, a `delete` cuts; every mark it lays has `expand: 'none'` — a delta says each insert's attributes itself; resolves to how many ops; a delta of the wrong shape is a `TypeError` with nothing written; the `text` plugin's |
 | `swap(id, changes, prev, { actor }?)` | `Promise<boolean>` | CAS, compared inside the mutation queue — `false`, and no write, on mismatch; rejects with `NOT_FOUND` when absent |
 | `repair(id)` | `Promise<{ ops, alive }>` | Rebuilds a record whose file fails its integrity check from the log's entries of it (see [Repair](../guide/storage#repair)); rejects with `code: 'UNRECOVERABLE'` when the log holds no whole-record op for it |
 | `delete(id, { actor }?)` | `Promise<void>` | Leaves a tombstone |
@@ -116,6 +120,7 @@ naming the subpath; `@alexify/syncom/all` has both.
 | `snapshot({ cursor, limit, scopes }?)` | `Promise<{ records, cursor, eventId, vector }>` | One page of state, tombstones included |
 | `mergeSnapshot(records, { via, from }?)` | `Promise<void>` | Joins a page (as `merge` ops of this node) |
 | `adoptVector(vector, { via, from }?)` | `Promise<SyncOp \| null>` | Records what a joined snapshot covers (an `advance` op) |
+| `observe(id, path?, listener)` | `() => void` | Watches record `id`: `listener(changes, event)` after every turn that changed it — a local write, a transaction, a peer's page, a joined snapshot — with the record's [changes](../guide/versions#changes) of that turn, tagged by `id`, and the `transaction` event they came in; under `path` (a field or a [path](../guide/storage#paths)), the changes of that field, of what hangs under it and of a prefix of it (a reset above), and the whole record's (a delete, a purge). A listener is contained like an event listener; a throw or a rejection is logged (`listener.error`). Returns the function that stops watching |
 | `close()` | `Promise<void>` | Stops sync, lands what is in flight and the deferred files, and seals the log; further writes are refused (`CLOSED`) |
 
 Properties: `fsi` (the backend given to `open()`, wrapped when `durable`, or
@@ -161,7 +166,8 @@ assignment, and when the record changes in storage (`null` data once deleted).
 `unmark(key, start, end, name, options?)`, `unmarkById(key, markId, { actor }?)`, `spans(key)`,
 `insertEmbed(key, index, embed, { actor }?)`, `splitBlock(key, index, block, { actor }?)`,
 `joinBlock(key, index, { actor }?)`, `updateBlock(key, index, block, { actor }?)`, `block(key, index)`,
-`blocks(key)`, `cursor(key, index, options?)`, `index(key, cursor)`,
+`blocks(key)`, `cursor(key, index, options?)`, `index(key, cursor)`, `position(key, cursor)`,
+`observe(path?, listener)`,
 `treeMove(key, node, parent?, { after, before, actor }?)`, `treeRemove(key, node, { actor }?)`,
 `delete({ actor }?)`, plus a
 live property per field of the loaded object.

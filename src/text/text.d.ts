@@ -20,6 +20,8 @@ import type {
   TextBlock,
   TextEmbeds,
   CursorSide,
+  CursorPosition,
+  DeltaOp,
 } from '../../index.js';
 
 export type {
@@ -37,6 +39,8 @@ export type {
   TextBlock,
   TextEmbeds,
   CursorSide,
+  CursorPosition,
+  DeltaOp,
 };
 
 /** The list and text kinds — Fugue runs, marks, cursors — registered per storage. */

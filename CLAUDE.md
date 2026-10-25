@@ -388,6 +388,17 @@ docs/                     VitePress site
   and `commit.txn`, and ONE `transaction` event per turn (a commit, a
   transaction, a peer's page, a joined snapshot) with the changes tagged by
   id — built only while something listens.
+- **`observe` is a registry over the `transaction` event, not listeners.**
+  `Storage#observers` (per id, `{ path, listener }`) is fed by ONE
+  `transaction` listener attached at the first `observe()` (the event is
+  built only with a listener, so observers cost nothing before); `touches`
+  decides a path's share (the field, under it, a prefix of it, the whole
+  record); a listener is contained like an event listener. `toDelta` in
+  src/text/text.js composes changes with a small Quill `compose` (retain /
+  insert / delete, attributes; an embed slot as `{ insert: { embed } }`);
+  `applyDelta` is ONE transaction through `core.transact` (lent for the
+  plugins' methods: a transaction from outside the queue) — never a commit
+  per op.
 - **A payload the engine does not admit is never silent.** `applyOp` reports
   `reason: 'malformed'` in `rejected` (`malformed()` in `src/ops.js`): on the
   local path `refuse()` in `src/commit.js` throws a `TypeError` — the

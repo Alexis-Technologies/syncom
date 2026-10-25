@@ -170,6 +170,26 @@ export interface TreeBlock {
 /** Which side of its slot a cursor keeps to. */
 export type CursorSide = 'before' | 'after';
 
+/** Where a cursor is now and which side it keeps to. */
+export interface CursorPosition {
+  index: number;
+  side: CursorSide;
+}
+
+/**
+ * One op of a delta (Quill's form): `retain` moves on — with `attributes`,
+ * marks over what it retains (`null` removes one; `embed` sets the slot's
+ * marker) — `insert` splices text in, or an embed slot as `{ embed: marker }`,
+ * `delete` cuts.
+ */
+export type DeltaOp =
+  | { retain: number; attributes?: { [name: string]: unknown } }
+  | { insert: string | { embed: BlockMarker | null }; attributes?: { [name: string]: unknown } }
+  | { delete: number };
+
+/** What `observe()` calls: the record's changes of one turn, and the `transaction` event they came in. */
+export type Observer = (changes: RecordChange[], event: TransactionEvent) => void | Promise<void>;
+
 /** A text's styles over a run: per name the winning value, a `many` name listing every mark. */
 export type TextMarks = { [name: string]: unknown | readonly { id: string; value: unknown }[] };
 
@@ -1626,6 +1646,18 @@ export interface TextMethods {
   cursor(id: string, key: string, index: number, options?: { side?: CursorSide }): Promise<string | null>;
   /** Where `cursor` is now; `null` once its place is gone. */
   index(id: string, key: string, cursor: string): Promise<number | null>;
+  /** Where `cursor` is now and which side it keeps to — `{ index, side }` — or `null` once its place is gone. */
+  position(id: string, key: string, cursor: string): Promise<CursorPosition | null>;
+  /** `position()` of several cursors, in one read of the field. */
+  positions(id: string, key: string, cursors: readonly string[]): Promise<(CursorPosition | null)[]>;
+  /**
+   * The changes of text field `field` (every text change when not given) composed into one delta
+   * (Quill's form) over the reading before them; `null` when a change is no edit a delta can say
+   * (a reset, an unset) — read the field again then.
+   */
+  toDelta(changes: readonly Change[], field?: string): DeltaOp[] | null;
+  /** Makes `delta` the edits of text field `key`, as one transaction; resolves to how many ops it took. */
+  applyDelta(id: string, key: string, delta: readonly DeltaOp[], options?: TransactOptions): Promise<number>;
   /**
    * Replaces the element at `index` of list field `key`: a register per
    * element, last writer wins, following the element through a concurrent move.
@@ -1740,6 +1772,15 @@ export interface Storage {
   applyPatches(id: string, patches: readonly Patch[], options?: TransactOptions): Promise<number>;
   /** Makes the record read as it did at `at`, with new ops that lead back; resolves to how many. */
   restore(id: string, at: Version, options?: TransactOptions): Promise<number>;
+  /**
+   * Watches record `id`: `listener(changes, event)` after every turn that
+   * changed it — a local write, a transaction, a peer's page, a joined
+   * snapshot — with the record's changes of that turn; under `path`, the
+   * changes of that field, of what hangs under it and of a prefix of it,
+   * and the whole record's. Returns the function that stops watching.
+   */
+  observe(id: string, path: string | null, listener: Observer): () => void;
+  observe(id: string, listener: Observer): () => void;
   /**
    * Runs `fn(tx)` as one transaction: every write made through `tx` is one
    * op, appended with the others as one group once `fn` returns — all
@@ -1975,6 +2016,11 @@ export interface SyncomRecord {
   cursor(key: string, index: number, options?: { side?: CursorSide }): Promise<string | null>;
   /** Where a cursor is now — `storage.index` with this record's id. */
   index(key: string, cursor: string): Promise<number | null>;
+  /** A cursor's index and side — `storage.position` with this record's id. */
+  position(key: string, cursor: string): Promise<CursorPosition | null>;
+  /** Watches this record — `storage.observe` with this record's id; returns the function that stops it. */
+  observe(path: string | null, listener: Observer): () => void;
+  observe(listener: Observer): () => void;
   /** Replaces an element of a list field — `storage.setAt` with this record's id. */
   setAt(key: string, index: number, value: unknown, options?: WriteOptions): Promise<void>;
   /** Moves an element of a list field — `storage.move` with this record's id. */

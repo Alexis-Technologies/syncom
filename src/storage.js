@@ -31,6 +31,8 @@ const { DISABLED, isWriter, traced, now } = require('./telemetry.js');
 const { GLOBAL_SCOPE } = require('./scope.js');
 const { normalizeStorageOptions } = require('./options.js');
 const { isPlainObject, isRecordId, invalidId, isStreamName, isKeyId, VALIDATED } = require('./shape.js');
+const { under } = require('./paths.js');
+const { fieldName } = require('./args.js');
 const { compose, composeData } = require('./compose.js');
 const { COMMIT, REFRESH, SOURCE, PLUGINS, CURSOR } = require('./symbols.js');
 const { missing } = require('./plugin.js');
@@ -55,6 +57,11 @@ const corrupt = (file, cause) =>
     cause,
   });
 
+// Whether a change of a record concerns `path`: the field itself, what
+// hangs under it, a prefix of it (a reset above), or the whole record.
+const touches = (change, path) =>
+  change.field === undefined || change.field === path || under(change.field, path) || under(path, change.field);
+
 class Storage extends Emitter {
   #path;
   #identity = null;
@@ -69,6 +76,11 @@ class Storage extends Emitter {
   #core = null;
   #records = null;
   #reaper = null;
+  // The observers of records (`observe()`): per id, what to call with the
+  // changes of a turn; one `transaction` listener of the storage's own
+  // feeds them, attached at the first observer.
+  #observers = new Map();
+  #observing = null;
   // Live Records refreshed as get() reads — the lens, the read hooks —
   // after the write that changed them, one after another.
   #refreshed = Promise.resolve();
@@ -393,6 +405,8 @@ class Storage extends Emitter {
       // landing step (a transaction's: the chain block, the files, the slots).
       seqOf: (key) => this.#log.seqOf(key),
       land: (touched, from, to) => this.#land(touched, from, to),
+      // Several writes as one, from outside the queue (a plugin's method).
+      transact: (fn, options) => this.#run(() => transact(this.#core, fn, options)),
       signatures: this.#signatures,
       // Signs an op of this node's own, in place, once it is final —
       // `later` on the thread pool, for a write with others queued behind it.
@@ -1476,6 +1490,22 @@ class Storage extends Emitter {
     return this.#api('block')(this.#core, id, key, index);
   }
 
+  async position(id, key, cursor) {
+    return this.#api('position')(this.#core, id, key, cursor);
+  }
+
+  async positions(id, key, cursors) {
+    return this.#api('positions')(this.#core, id, key, cursors);
+  }
+
+  toDelta(changes, field) {
+    return this.#api('toDelta')(this.#core, changes, field);
+  }
+
+  async applyDelta(id, key, delta, options) {
+    return this.#api('applyDelta')(this.#core, id, key, delta, options);
+  }
+
   async blocks(id, key) {
     return this.#api('blocks')(this.#core, id, key);
   }
@@ -1571,6 +1601,61 @@ class Storage extends Emitter {
     );
     if (done !== null) await done;
     return result;
+  }
+
+  /**
+   * Watches record `id`: `listener(changes, event)` after every turn that
+   * changed it — a local write, a transaction, a peer's page, a joined
+   * snapshot — with the record's changes of that turn and the `transaction`
+   * event they came in. With a `path`, the changes of that field, of what
+   * hangs under it and of a prefix of it (a reset above it), and the whole
+   * record's (a delete, a purge). Returns the function that stops watching.
+   */
+  observe(id, path, listener) {
+    if (typeof path === 'function' && listener === undefined) [path, listener] = [null, path];
+    if (!isRecordId(id)) throw invalidId(id);
+    if (path !== null && path !== undefined) fieldName('observe', path);
+    if (typeof listener !== 'function') throw new TypeError('observe() takes a listener');
+    const watch = { path: path ?? null, listener };
+    let set = this.#observers.get(id);
+    if (set === undefined) this.#observers.set(id, (set = new Set()));
+    set.add(watch);
+    if (this.#observing === null) {
+      this.#observing = (event) => this.#observed(event);
+      this.on('transaction', this.#observing);
+    }
+    return () => {
+      set.delete(watch);
+      if (set.size === 0 && this.#observers.get(id) === set) this.#observers.delete(id);
+    };
+  }
+
+  // A turn's changes handed to the observers of the records they are of,
+  // each listener contained like an event listener.
+  #observed(event) {
+    const byId = new Map();
+    for (const change of event.changes) {
+      if (!this.#observers.has(change.id)) continue;
+      let list = byId.get(change.id);
+      if (list === undefined) byId.set(change.id, (list = []));
+      list.push(change);
+    }
+    for (const [id, list] of byId) {
+      for (const { path, listener } of [...this.#observers.get(id)]) {
+        const mine = path === null ? list : list.filter((change) => touches(change, path));
+        if (mine.length === 0) continue;
+        try {
+          const out = listener(mine, event);
+          if (out && typeof out.then === 'function') out.catch((err) => this.#warnObserver(id, err));
+        } catch (err) {
+          this.#warnObserver(id, err);
+        }
+      }
+    }
+  }
+
+  #warnObserver(id, err) {
+    this.#logger.warn({ event: 'listener.error', name: 'observe', id, err });
   }
 
   // The write API over a transaction's core (src/commit.js transact): the

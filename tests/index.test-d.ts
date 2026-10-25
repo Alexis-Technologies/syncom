@@ -629,6 +629,14 @@ storage.on('transaction', (event) => {
 expectAssignable<syncom.Change>({ action: 'splice', field: 'body', index: 0, count: 1, content: 'x' });
 expectAssignable<syncom.Change>({ action: 'treeMove', field: 'outline', node: 'n', parent: null, after: null });
 expectType<number>(({} as syncom.CommitEvent).txn);
+const stop = storage.observe('id', 'body', (changes, event) => {
+  expectType<syncom.RecordChange[]>(changes);
+  expectType<syncom.TransactionEvent>(event);
+});
+expectType<() => void>(stop);
+expectType<() => void>(storage.observe('id', () => {}));
+expectType<() => void>(record.observe('body', () => {}));
+expectType<Promise<syncom.CursorPosition | null>>(record.position('body', '^'));
 expectAssignable<syncom.TransactOptions>({ message: 'm' });
 expectAssignable<syncom.SyncOp>({ origin: 'a', seq: 1, ts: 1, type: 'set', id: 'r', msg: 'm' });
 expectType<string | null>(({} as syncom.HistoryVersion).message);

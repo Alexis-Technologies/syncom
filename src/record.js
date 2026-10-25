@@ -240,6 +240,16 @@ class Record extends Emitter {
     return this.#storage.index(this.#id, key, cursor);
   }
 
+  /** A cursor's index and side; the storage-level `position` with this record's id. */
+  async position(key, cursor) {
+    return this.#storage.position(this.#id, key, cursor);
+  }
+
+  /** Watches this record; the storage-level `observe` with this record's id. Returns the function that stops it. */
+  observe(path, listener) {
+    return this.#storage.observe(this.#id, path, listener);
+  }
+
   /** Replaces an element of a list field; the storage-level `setAt` with this record's id. */
   async setAt(key, index, value, options = {}) {
     await this.#storage.setAt(this.#id, key, index, value, options);

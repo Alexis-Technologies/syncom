@@ -195,7 +195,8 @@ const ENTRIES = [
   // blocks, the diff context, the commit event's embeds).
   // 88.6 with transactions (transact in src/commit.js, the facade's tx, the message slot).
   // 90.2 with the change reports (applyOp changes, the plugins' changeOf, the transaction event).
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 92 },
+  // 92.0 with observe, the deltas (toDelta's compose, applyDelta) and the cursor positions.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 94 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -204,7 +205,8 @@ const ENTRIES = [
   // 24.6 with embeds and blocks: the markers, the six methods, the typed
   // spans and the diff that carries a slot's marker.
   // 25.2 with the change reports (changeOf: a splice's spans, marks, moves; S.spanOf).
-  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 26 },
+  // 26.7 with the deltas (a Quill compose, toDelta, applyDelta) and the cursor positions.
+  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 27.5 },
   // The tree kind alone, with the fractional indexes a place is made of and
   // the argument checks it shares with the core (5.1 measured).
   // 5.5 with the field-name check unset shares with it (src/args.js).
