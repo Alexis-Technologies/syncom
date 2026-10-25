@@ -15,10 +15,21 @@
 // node's adds alone, so a peer's concurrent add of it survives. The stack
 // is this process's: nothing of it is written, a peer's ops are never
 // undone from here, and a purge forgets its record.
+//
+// A transaction's commits are one step whatever the interval (`txn`), and
+// `group(fn)` makes one of everything committed while `fn` runs. A step
+// carries `meta`, the application's — a selection as cursor tokens, say,
+// put there on `push` and read back on `pop`, where `position()` restores
+// it — and the meta of a step taken back travels to its redo step and
+// back. `trackedSources`, `records` and `paths` keep the stack to the
+// commits they name: the `source` of a transaction, the records, the
+// fields (and what hangs under them; a whole-record change is then none
+// of the manager's business).
 
 const { diffViews } = require('../patch.js');
 const { Emitter } = require('../emitter.js');
 const { PLUGINS } = require('../symbols.js');
+const { under } = require('../paths.js');
 
 const WHOLE = new Set(['write', 'delete', 'merge', 'purge']);
 const GLOBAL = '*';
@@ -35,6 +46,19 @@ const touchedBy = (op) => {
 const kindsIn = (data, kinds) => {
   const out = {};
   if (data !== null) for (const field of Object.keys(data)) out[field] = kinds[field];
+  return out;
+};
+
+// The types of the ops others made since on a field, on what hangs under
+// it and on a prefix of it (a write at `profile` is a change of
+// `profile/city`): what a patch of the field runs into.
+const typesAround = (conflicts, field) => {
+  let out;
+  for (const [other, types] of conflicts) {
+    if (other !== field && !under(other, field) && !under(field, other)) continue;
+    out ??= new Set();
+    for (const type of types) out.add(type);
+  }
   return out;
 };
 
@@ -66,12 +90,41 @@ const invert = ({ before, after, kinds, embeds }, exact, plugins) => {
 
 const isWhole = (patches) => patches.some((patch) => patch.action === 'write' || patch.action === 'delete');
 
+// Whether a field is one of the tracked `paths`, or hangs under one.
+const tracked = (field, paths) => paths.some((path) => field === path || under(field, path));
+
+// Whether a commit's changes reach a tracked path: the field, what hangs
+// under it, or a prefix of it; a whole-record change reaches none.
+const reaches = (changes, paths) =>
+  changes.some(
+    (change) =>
+      change.field !== undefined &&
+      paths.some((path) => change.field === path || under(change.field, path) || under(path, change.field)),
+  );
+
+// What a step shows of itself: its meta — the application's object, the
+// same one every time, so what a `push` listener puts there a `pop`
+// listener finds — and what it is of.
+const stepView = (step) => ({
+  id: step.id,
+  meta: step.meta,
+  records: [...step.records.keys()],
+  at: step.at,
+  source: step.source,
+  message: step.message,
+  txn: step.txn,
+});
+
 class UndoManager extends Emitter {
   #storage;
   #options;
   #token = Symbol('undo');
   #undo = [];
   #redo = [];
+  #nextId = 1;
+  // `group()`: how deep, and the step everything committed meanwhile joins.
+  #grouping = 0;
+  #grouped = null;
   // The seqs of the manager's own ops: an undo's ops never stand in the way
   // of an older step (undoing two steps in a row), only everyone else's do.
   // Those below the oldest step stand in nobody's way and are forgotten.
@@ -91,6 +144,8 @@ class UndoManager extends Emitter {
     this.#options = options;
     storage.on('commit', this.#onCommit);
     storage.on('close', this.#onClose);
+    if (options.onPush) this.on('push', options.onPush);
+    if (options.onPop) this.on('pop', options.onPop);
     // What a step's conflicts are read from must stay in the log.
     this.#unpin = storage.log.pin((entry) => entry.seq >= this.#oldestSeq);
   }
@@ -128,22 +183,49 @@ class UndoManager extends Emitter {
       if (this.#collecting !== null) this.#record(this.#collecting, event);
       return;
     }
-    const { scope, exclude } = this.#options;
+    const { scope, exclude, trackedSources, records, paths } = this.#options;
     if (op.type === 'purge') return this.#forget(op.id);
     if (scope !== undefined && (op.scope ?? GLOBAL) !== scope) return;
     if (exclude !== null && exclude(op)) return;
+    if (trackedSources !== null && !trackedSources.has(event.source)) return;
+    if (records !== null && !(typeof records === 'function' ? records(op.id) : records.has(op.id))) return;
+    if (paths !== null && !reaches(event.changes ?? [], paths)) return;
     const top = this.#undo[this.#undo.length - 1];
     let step = top;
-    if (top === undefined || top.closed || op.ts - top.at > this.#options.mergeInterval) {
-      step = { at: op.ts, lastSeq: seq, seqs: new Set(), taken: new Set(), records: new Map(), closed: false };
+    // The open group takes everything; a transaction's commits are one
+    // step; else commits within the interval of the step's first join it.
+    if (this.#grouping > 0 && this.#grouped !== null) step = this.#grouped;
+    else if (
+      top === undefined ||
+      top.closed ||
+      (top.txn !== event.txn && op.ts - top.at > this.#options.mergeInterval)
+    ) {
+      step = this.#newStep(op.ts, event);
       this.#undo.push(step);
       while (this.#undo.length > this.#options.limit) this.#undo.shift();
+      if (this.#grouping > 0) this.#grouped = step;
     }
     this.#record(step, event);
     if (this.#redo.length > 0) this.#redo = [];
     this.#refreshOldest();
-    this.emit('push', { direction: 'undo', records: step.records.size });
+    this.emit('push', { direction: 'undo', records: step.records.size, step: stepView(step) });
     this.emit('change');
+  }
+
+  #newStep(at, event = null) {
+    return {
+      id: this.#nextId++,
+      at,
+      lastSeq: event === null ? 0 : event.seq,
+      txn: event === null ? null : event.txn,
+      seqs: new Set(),
+      taken: new Set(),
+      records: new Map(),
+      closed: false,
+      meta: {},
+      source: event === null ? null : event.source,
+      message: event === null ? null : (event.op.msg ?? null),
+    };
   }
 
   // One commit into a step: per record the step keeps how it found the
@@ -209,9 +291,16 @@ class UndoManager extends Emitter {
     const result = { applied: 0, skipped: 0 };
     // The step of the other stack: what this one's ops commit, and the seqs
     // of the records it took back (they no longer stand in an older step's
-    // way) — record by record, so a step taken back in part is accounted in part.
-    const collected = { at: step.at, lastSeq: 0, seqs: new Set(), taken: new Set(), records: new Map(), closed: true };
+    // way) — record by record, so a step taken back in part is accounted in
+    // part. Its meta is this step's: what the application put on the step
+    // comes back with its redo, and with the undo of that.
+    const collected = this.#newStep(step.at);
+    collected.closed = true;
+    collected.meta = step.meta;
+    collected.source = step.source;
+    collected.message = step.message;
     this.#collecting = collected;
+    const { paths } = this.#options;
     const left = new Map(step.records);
     const took = (id, record) => {
       left.delete(id);
@@ -223,7 +312,11 @@ class UndoManager extends Emitter {
         current = id;
         const conflicts = this.#conflicts(step, id);
         const plugins = this.#storage[PLUGINS];
-        const patches = invert(record, true, plugins);
+        // Under `paths`, the fields the manager is of alone: a whole-record
+        // way back is none of its business.
+        const scoped = (list) =>
+          paths === null ? list : list.filter((patch) => patch.field !== undefined && tracked(patch.field, paths));
+        const patches = scoped(invert(record, true, plugins));
         let kept = patches;
         let skipped = 0;
         if (!force && (conflicts === null || (isWhole(patches) && conflicts.size > 0))) {
@@ -236,10 +329,10 @@ class UndoManager extends Emitter {
           // the field; where something did, the loose one — a counter taken
           // down, this node's adds removed — when it commutes with what the
           // others did, else the field is left alone.
-          const loose = invert(record, false, plugins);
+          const loose = scoped(invert(record, false, plugins));
           kept = [];
           for (const patch of patches) {
-            const types = conflicts.get(patch.field);
+            const types = typesAround(conflicts, patch.field);
             if (!conflicting(patch, types)) {
               kept.push(patch);
               continue;
@@ -285,9 +378,39 @@ class UndoManager extends Emitter {
     }
     if (collected.records.size > 0) to.push(collected);
     this.#refreshOldest();
-    this.emit('pop', { direction, ...result });
+    this.emit('pop', { direction, ...result, step: stepView(step) });
     this.emit('change');
     return result;
+  }
+
+  /**
+   * Everything committed while `fn` runs is one step, whatever the
+   * interval; resolves to what `fn` returned. Nests: the outermost group
+   * is the step.
+   */
+  async group(fn) {
+    if (typeof fn !== 'function') throw new TypeError('group() takes a function');
+    this.groupStart();
+    try {
+      return await fn();
+    } finally {
+      this.groupEnd();
+    }
+  }
+
+  /** Opens a group: the next commits are one step until `groupEnd()`. */
+  groupStart() {
+    this.#grouping++;
+  }
+
+  /** Closes the group opened by `groupStart()`; the outermost close ends the step. */
+  groupEnd() {
+    if (this.#grouping === 0) return;
+    this.#grouping--;
+    if (this.#grouping === 0) {
+      if (this.#grouped !== null) this.#grouped.closed = true;
+      this.#grouped = null;
+    }
   }
 
   /** Takes the newest step back; `{ applied, skipped }` ops. A field changed since by anyone else is left alone; `force` overrides. */
@@ -304,6 +427,12 @@ class UndoManager extends Emitter {
   mark() {
     const top = this.#undo[this.#undo.length - 1];
     if (top !== undefined) top.closed = true;
+    if (this.#grouping > 0) this.#grouped = null;
+  }
+
+  /** The steps each way, newest last: `{ id, meta, records, at, source, message, txn }` per step. */
+  get steps() {
+    return { undo: this.#undo.map(stepView), redo: this.#redo.map(stepView) };
   }
 
   clear() {
@@ -330,18 +459,52 @@ class UndoManager extends Emitter {
  * An undo manager over `storage`'s own writes. `mergeInterval` (ms, 500 by
  * default) merges commits close together into one step, `limit` (100) is
  * how many steps are kept, `scope` keeps to ops of one scope, `exclude(op)`
- * leaves ops out, `actor` is who the undo's ops say made them.
+ * leaves ops out, `actor` is who the undo's ops say made them;
+ * `trackedSources` (the `source` of a transaction or a Record's save),
+ * `records` (ids, or a predicate) and `paths` (fields, with what hangs
+ * under them) keep the stack to the commits they name; `onPush(event)` and
+ * `onPop(event)` are the `push` and `pop` listeners.
  */
 const createUndo = (storage, options = {}) => {
-  const { mergeInterval = 500, limit = 100, scope, exclude = null, actor } = options;
+  const { mergeInterval = 500, limit = 100, scope, exclude = null, actor, onPush, onPop } = options;
+  const { trackedSources = null, records = null, paths = null } = options;
   if (!Number.isFinite(mergeInterval) || mergeInterval < 0) {
     throw new TypeError('createUndo(): mergeInterval is ms ≥ 0');
   }
   if (!Number.isInteger(limit) || limit < 1) throw new TypeError('createUndo(): limit is a positive integer');
   if (exclude !== null && typeof exclude !== 'function') throw new TypeError('createUndo(): exclude is a function');
   if (scope !== undefined && typeof scope !== 'string') throw new TypeError('createUndo(): scope is a string');
+  if (trackedSources !== null && typeof trackedSources?.[Symbol.iterator] !== 'function') {
+    throw new TypeError('createUndo(): trackedSources is a list of sources');
+  }
+  if (records !== null && typeof records !== 'function' && typeof records?.[Symbol.iterator] !== 'function') {
+    throw new TypeError('createUndo(): records is a list of ids, or a predicate');
+  }
+  if (
+    paths !== null &&
+    (!Array.isArray(paths) || paths.some((path) => typeof path !== 'string') || paths.length === 0)
+  ) {
+    throw new TypeError('createUndo(): paths is a list of field paths');
+  }
+  for (const [name, fn] of [
+    ['onPush', onPush],
+    ['onPop', onPop],
+  ]) {
+    if (fn !== undefined && typeof fn !== 'function') throw new TypeError(`createUndo(): ${name} is a function`);
+  }
   if (!storage || typeof storage.on !== 'function' || !storage.log) throw new TypeError('createUndo() takes a storage');
-  return new UndoManager(storage, { mergeInterval, limit, scope, exclude, actor });
+  return new UndoManager(storage, {
+    mergeInterval,
+    limit,
+    scope,
+    exclude,
+    actor,
+    onPush,
+    onPop,
+    trackedSources: trackedSources === null ? null : new Set(trackedSources),
+    records: records === null || typeof records === 'function' ? records : new Set(records),
+    paths,
+  });
 };
 
 module.exports = { createUndo, UndoManager };

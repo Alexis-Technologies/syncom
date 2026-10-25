@@ -166,7 +166,8 @@ const ENTRIES = [
   // `mark` patch (6.0 measured).
   // 6.5 with the unset patch and the loose inverse per field.
   // 7.4 with the paths (a reading taken back to its fields, src/compose.js).
-  { label: 'undo — browser (@alexify/syncom/undo)', entry: 'src/undo/undo.js', platform: 'browser', budget: 7.5 },
+  // 7.8 with transaction steps, groups, step meta and the scoped stack (trackedSources, records, paths).
+  { label: 'undo — browser (@alexify/syncom/undo)', entry: 'src/undo/undo.js', platform: 'browser', budget: 8 },
   // A fork opened through the parent's constructor, merged as ops: the
   // selection a push makes, the shape helpers, the protocol constants.
   {

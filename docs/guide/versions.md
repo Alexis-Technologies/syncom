@@ -376,6 +376,36 @@ record on every step. The manager pins the log from the oldest step it holds
 (conflicts are read from the log's entries), so a long stack holds segments
 past retention until `clear()` or `stop()`.
 
+A [transaction](./storage#transactions)'s commits are one step whatever the
+interval, and `group(fn)` — or `groupStart()` … `groupEnd()` — makes one of
+everything committed while `fn` runs. Every step carries `meta`, an object
+of the application's: put there on `push`, read back on `pop`, carried to
+the redo step and back — the way an editor keeps its selection across an
+undo, as [cursor tokens](./lists#cursors) that `position()` restores:
+
+```js
+let selection = null;                                 // the caret, as a cursor token, before each edit
+const undo = createUndo(storage, {
+  trackedSources: ['editor'],                         // the editor's transactions alone
+  paths: ['body'],                                    // its field alone: a title change is not undone here
+  onPush: ({ step }) => { step.meta.selection ??= selection; },
+  onPop: async ({ step }) => {
+    const at = await storage.position(id, 'body', step.meta.selection);
+    if (at !== null) editor.setSelection(at.index);
+  },
+});
+selection = await storage.cursor(id, 'body', editor.getSelection().index);
+await storage.transact((tx) => tx.splice(id, 'body', 5, 0, ' there'), { source: 'editor' });
+```
+
+`trackedSources` keeps the stack to commits whose `source` is one of them (a
+transaction's, a `Record`'s save), `records` to these ids (or a predicate on
+the id), `paths` to these fields and what hangs under them: a step's inverse
+then keeps to those fields, and a whole-record change — an insert, a delete
+— is not the manager's business. A write at a prefix of a step's field, or
+under it, counts as a change of the field. `steps` lists the steps each
+way, `{ id, meta, records, at, source, message, txn }` each.
+
 ## Branches
 
 `@alexify/syncom/branch` forks a storage into another directory — a new

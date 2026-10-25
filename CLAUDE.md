@@ -34,7 +34,7 @@ src/contracts/contracts.js the @alexify/syncom/contracts subpath — never back 
 src/idb/idb.js            the @alexify/syncom/idb subpath — the IndexedDB backend, browser-only
 src/search/search.js      the @alexify/syncom/search subpath — the trigram text index behind `$text`; the core knows only the TextIndex contract
 src/order/order.js        the @alexify/syncom/order subpath — fractional indexes as strings, for ordering records
-src/undo/undo.js          the @alexify/syncom/undo subpath — the undo stack over the commit event; requires patch.js, emitter.js, symbols.js only
+src/undo/undo.js          the @alexify/syncom/undo subpath — the undo stack over the commit event; requires patch.js, emitter.js, symbols.js, paths.js only
 src/branch/branch.js      the @alexify/syncom/branch subpath — fork a storage, merge either way; never requires storage.js
 index.d.ts                the Node type surface (hand-written)
 browser.d.ts              re-exports index.d.ts (the files layer differs; the crypto halves' types are the subpaths' *.browser.d.ts)
@@ -72,6 +72,7 @@ src/versions/history.js  the past out of the log: a version (event id / stamp / 
 src/versions/tags.js     Tags — named versions kept locally: tags.json, a catalog per tag, copy-on-write record files in the newest tag
 src/patch.js              patches — the one vocabulary of diff()/applyPatches()/restore(): diffViews by kind, realize() to an op — requires shape.js, myers.js only
 src/undo.js               UndoManager — steps of inverse patches from `commit` events, refuse-to-overwrite, pins the log; the core does not use it
+                          (requires patch.js, emitter.js, symbols.js, paths.js)
 src/outbound.js           outbound(log, { exclude, vector, scopes, own }) — the ops a receiver lacks, the first retained seq per own stream; a push and a merge both pick with it
 src/branch.js             branch/merge/branchInfo/drop — a fork opened through parent.constructor, merged as ops through applyRemote
 src/symbols.js            COMMIT / REFRESH / SOURCE — the module-private seams between Storage and what it hands out — no requires
@@ -653,6 +654,16 @@ docs/                     VitePress site
   is LOCAL ops only, built only when `listenerCount('commit') > 0`, with
   `before`/`after` as copies and the kinds of both sides; a peer's op raises
   `change`, never `commit`.
+- **A step of the undo stack is a transaction's worth, with the app's meta.**
+  `#commit` in src/undo/undo.js joins a commit to the top step when the open
+  `group()` takes it, when its `txn` is the step's, or within `mergeInterval`;
+  `trackedSources`/`records`/`paths` filter commits first (`reaches` reads
+  the commit's `changes`; a whole-record change reaches no path). The step's
+  `meta` object is handed out as it is (`stepView`) and copied by reference
+  to the opposite stack's step on undo/redo — never cloned. Under `paths` the
+  inverse is `scoped` to the tracked fields before the conflict check;
+  `typesAround` counts a change at a prefix or under the field as the
+  field's.
 - **Undo is a subpath over `commit`, never inside the engine.** The model —
   steps of inverse patches, refuse-to-overwrite, the exact and the loose
   inversion — is the header of `src/undo.js`. What crosses modules: the

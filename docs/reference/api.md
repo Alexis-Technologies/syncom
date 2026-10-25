@@ -733,12 +733,14 @@ vocabulary, Myers and Emitter are the core's. `UndoManager` is the class
 
 | Member | Notes |
 | --- | --- |
-| `createUndo(storage, { mergeInterval = 500, limit = 100, scope, exclude, actor }?)` | `UndoManager` — commits within `mergeInterval` ms of a step's first make one step, `limit` steps are kept, `scope` keeps to one scope's ops (`'*'` the global one), `exclude(op)` leaves ops out, `actor` is who the undo's ops say made them; holds the log from its oldest step (`log.pins`); stops itself on `close()`; a wrong option is a `TypeError` |
+| `createUndo(storage, { mergeInterval = 500, limit = 100, scope, exclude, actor, trackedSources, records, paths, onPush, onPop }?)` | `UndoManager` — commits within `mergeInterval` ms of a step's first make one step (a [transaction](../guide/storage#transactions)'s commits one whatever the interval), `limit` steps are kept, `scope` keeps to one scope's ops (`'*'` the global one), `exclude(op)` leaves ops out, `actor` is who the undo's ops say made them; `trackedSources` keeps to commits whose `source` (a transaction's, a `Record`'s save) is one of them, `records` to these ids (or a predicate on the id), `paths` to these fields and what hangs under them (a step's inverse keeps to them; a whole-record change is then not tracked); `onPush`/`onPop` are the `push`/`pop` listeners; holds the log from its oldest step (`log.pins`); stops itself on `close()`; a wrong option is a `TypeError` |
 | `undo({ force }?)`, `redo({ force }?)` | `Promise<{ applied, skipped }>` — the newest step taken back (done again) as new ops; a field anyone else changed since is left alone and counted in `skipped`, a whole-record step with such a conflict is skipped whole, unless `force` |
 | `canUndo`, `canRedo`, `size` | `boolean`, `boolean`, `{ undo, redo }` |
 | `mark()` | Closes the current step: the next commit starts a new one |
+| `group(fn)`, `groupStart()`, `groupEnd()` | Everything committed while `fn` runs — or between `groupStart()` and the outermost `groupEnd()` — is one step, whatever the interval; `group()` resolves to what `fn` returned |
+| `steps` | `{ undo, redo }` — the steps each way, newest last, `{ id, meta, records, at, source, message, txn }` each: `meta` the application's object, the same on every event of the step, carried to its redo step and back (a selection kept as cursor tokens, restored through `position()`) |
 | `clear()`, `stop()` | Drops the stacks; `stop()` also stops listening and lets the log compact |
-| `on('push' \| 'pop' \| 'change', fn)` | An `Emitter`: `push` `({ direction: 'undo', records })` a step began or grew; `pop` `({ direction, applied, skipped })` a step was undone or redone; `change` `()` after anything that moved the stacks — those two, `clear()`, a purge forgetting its record |
+| `on('push' \| 'pop' \| 'change', fn)` | An `Emitter`: `push` `({ direction: 'undo', records, step })` a step began or grew; `pop` `({ direction, applied, skipped, step })` a step was undone or redone (`step` the one taken back or done again, its `meta` to read); `change` `()` after anything that moved the stacks — those two, `clear()`, a purge forgetting its record |
 
 ## Branch (subpath)
 

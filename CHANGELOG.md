@@ -14,6 +14,17 @@ There is no released version section until then; everything below lands in it.
 
 ### Added
 
+- **Undo: transactions, groups, step meta, a scoped stack.** A
+  transaction's commits are one undo step whatever the interval;
+  `group(fn)` (and `groupStart()`/`groupEnd()`) makes one step of everything
+  committed meanwhile; every step carries `meta`, the application's object —
+  a selection kept as cursor tokens, say, put there on `push` and restored
+  on `pop` through `position()` — which travels to its redo step and back;
+  `steps` lists them. `createUndo()` takes `trackedSources` (a
+  transaction's `source`), `records` (ids or a predicate) and `paths`
+  (fields, with what hangs under them; a step's inverse then keeps to
+  them), and `onPush`/`onPop`. A write at a prefix of a step's field, or
+  under it, counts as a change of the field.
 - **Observe, deltas and positions.** `observe(id, path?, listener)` — on a
   `Record` too — hands a listener one record's changes a turn at a time,
   under a path or whole, local and a peer's alike, until the returned
