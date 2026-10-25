@@ -15,6 +15,7 @@ const { snapshotPage } = require('../bootstrap.js');
 const { isAlive, deepEqual, kindsOf } = require('../ops.js');
 const { decompose } = require('../compose.js');
 const { parseVersion, within, exactStart, fold, gone } = require('./history.js');
+const { opKey } = require('../vector.js');
 const { appliedHere } = require('../log.js');
 const { diffViews } = require('../patch.js');
 const { runHook } = require('../hooks.js');
@@ -320,6 +321,88 @@ const at = (core, name) => {
   };
 };
 
+// The storage at a version that is no tag — an event id, a stamp, a vector
+// — read out of the log: every record folded to it, the vector of the ops
+// within it, and the pages another storage joins to stand there
+// (`branch(parent, { from: { at } })`). Exact only while the log retains
+// what the version needs: a record compacted past it is HISTORY_GONE on
+// the read, and so is a stream cut by compaction with nothing of it inside
+// the version — under `retention: 'all'`, never.
+const atVersion = (core, given) => {
+  const version = parseVersion(given);
+  if (version.kind === 'tag') return at(core, version.name);
+  const { log } = core;
+  if (version.kind === 'event') {
+    if (version.epoch !== log.epoch) throw gone(null, 'epoch');
+    if (version.seq >= log.next) {
+      throw typed('INVALID_VERSION', `at: ${log.formatId(version.seq)} is not in this log yet`);
+    }
+  }
+  // Everything the log retains, from its floor: below it is compacted.
+  const retained = log.since(log.formatId(Math.max(0, log.floor - 1))) ?? [];
+  const inside = [];
+  const streams = new Map();
+  const adopted = {};
+  for (const entry of retained) {
+    if (entry.skipped) continue;
+    const key = opKey(entry.op);
+    const stream = streams.get(key) ?? { within: 0, outside: false };
+    if (within(version, entry)) {
+      inside.push(entry);
+      stream.within = Math.max(stream.within, entry.op.seq);
+      if (entry.op.type === 'advance') {
+        for (const name of Object.keys(entry.op.vector)) {
+          adopted[name] = Math.max(adopted[name] ?? 0, entry.op.vector[name]);
+        }
+      }
+    } else stream.outside = true;
+    streams.set(key, stream);
+  }
+  // The vector at the version: per stream, the newest op inside it among
+  // what the log retains; a stream the log holds nothing of was dropped
+  // whole below the floor — all of it inside the version; one retained
+  // only past the version was cut by compaction: what came before is gone.
+  const vector = {};
+  for (const key of Object.keys(log.vector)) {
+    const stream = streams.get(key);
+    if (stream === undefined) vector[key] = log.vector[key];
+    else if (stream.within > 0) vector[key] = stream.within;
+    else if (log.floor > 1) throw gone(null, 'compacted');
+  }
+  for (const key of Object.keys(adopted)) vector[key] = Math.max(vector[key] ?? 0, adopted[key]);
+  const last = inside.length > 0 ? inside[inside.length - 1] : null;
+  const eventId = version.kind === 'event' ? log.formatId(version.seq) : log.formatId(last === null ? 0 : last.seq);
+  const ts = last === null ? 0 : last.op.ts;
+  const ids = [...new Set([...log.ids(), ...core.catalog.all()])].sort();
+  const entries = { load: async (id) => (await versionEntry(core, id, version)).entry };
+  const paging = {
+    catalog: { all: () => ids, row: () => null },
+    log: { lastEventId: eventId, vector },
+    entries,
+    scopeOf: core.scopeOf,
+    logger: core.logger,
+    otel: core.otel,
+  };
+  const live = async (id) => {
+    const entry = isRecordId(id) ? await entries.load(id) : null;
+    return entry !== null && isAlive(entry);
+  };
+  return {
+    eventId,
+    vector,
+    ts,
+    at: given,
+    get: (id) => getAt(core, id, given),
+    has: live,
+    list: async () => {
+      const out = [];
+      for (const id of ids) if (await live(id)) out.push(id);
+      return out;
+    },
+    snapshot: (options) => snapshotPage(paging, options),
+  };
+};
+
 // The fold and the versions handed out — `folded`, how many entries, for the span.
 const versions = async (core, id, limit, cut) => {
   await runHook(core.hooks, 'beforeRead', { id, history: true });
@@ -402,4 +485,4 @@ const history = async (core, id, { limit = 50, before } = {}) => {
   return result;
 };
 
-module.exports = { getAt, diff, restore, tag, untag, at, history };
+module.exports = { getAt, diff, restore, tag, untag, at, atVersion, history };

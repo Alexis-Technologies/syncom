@@ -102,7 +102,9 @@ const HOME = Object.freeze({
   untag: 'versions',
   tags: 'versions',
   at: 'versions',
+  atVersion: 'versions',
   history: 'versions',
+  editorOf: 'text',
 });
 
 /** The refusal of a call, an op type or a patch action whose plugin is not registered here. */

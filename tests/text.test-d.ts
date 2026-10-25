@@ -30,6 +30,7 @@ expectAssignable<TextSpan>({ type: 'embed', value: null, marks: {} });
 expectType<Promise<CursorPosition | null>>(storage.position('id', 'body', '^'));
 expectType<Promise<(CursorPosition | null)[]>>(storage.positions('id', 'body', ['^', '$']));
 expectType<DeltaOp[] | null>(storage.toDelta([], 'body'));
+expectType<Promise<{ origin: string; ts: number } | null>>(storage.editorOf('id', 'body', 0));
 expectType<Promise<number>>(
   storage.applyDelta('id', 'body', [{ insert: 'x' }, { retain: 1, attributes: { bold: true } }]),
 );

@@ -131,6 +131,72 @@ const runBranchTests = async (t, assert, createStorage, branchPath) => {
     },
   );
 
+  await t.test('a fork at a version stands where the parent stood; compaction past it refuses the fork', async (t2) => {
+    const parent = await createStorage(t2, 'A');
+    const id = await parent.insert({ title: 'a', n: 1 });
+    await parent.inc(id, 'hits', 2);
+    await parent.splice(id, 'body', 0, 0, 'hello');
+    await parent.treeMove(id, 'outline', 'r');
+    const other = await parent.insert({ x: 1 });
+    const mid = parent.log.lastEventId;
+    const then = await parent.get(id);
+    await parent.update(id, { title: 'b' });
+    await parent.delete(other);
+    await parent.push(id, 'body', '!');
+    const later = await parent.insert({ born: 'later' });
+    // The view: what was live then, as it read then.
+    const view = parent.atVersion(mid);
+    assert.strictEqual(view.eventId, mid);
+    assert.deepStrictEqual(await view.list(), [id, other].sort());
+    assert.deepStrictEqual(await view.get(id), then);
+    assert.deepStrictEqual([await view.has(other), await view.has(later)], [true, false]);
+    // The fork: the parent's state at the version, under a new identity; merges go both ways after.
+    const child = await branch(parent, { path: branchPath(t2, 'at'), from: { at: mid } });
+    t2.after(() => child.close().catch(() => {}));
+    assert.deepStrictEqual(await child.get(id), then);
+    assert.deepStrictEqual(await child.get(other), { x: 1 });
+    assert.strictEqual(await child.get(later), null);
+    const info = await branchInfo(child);
+    assert.deepStrictEqual([info.forkedAt.eventId, info.forkedAt.tag, info.forkedAt.at], [mid, null, mid]);
+    assert.deepStrictEqual(info.forkedAt.vector, view.vector);
+    await child.update(id, { n: 2 });
+    const up = await merge(child, { into: parent });
+    assert.strictEqual(up.ops, 1);
+    assert.deepStrictEqual(await parent.get(id), {
+      title: 'b',
+      n: 2,
+      hits: 2,
+      body: 'hello!',
+      outline: [{ id: 'r', children: [] }],
+    });
+    const down = await merge(parent, { into: child });
+    assert.ok(down.ops >= 3);
+    assert.deepStrictEqual(await child.get(id), await parent.get(id));
+    assert.strictEqual(await child.get(other), null, 'the delete reached the branch');
+    // A stamp and a vector name a version too; a wrong `from` is a TypeError.
+    const byStamp = await branch(parent, {
+      path: branchPath(t2, 'stamp'),
+      from: { at: then.hits === 2 ? Date.now() + 1000 : 0 },
+    });
+    t2.after(() => byStamp.close().catch(() => {}));
+    assert.deepStrictEqual(await byStamp.get(id), await parent.get(id));
+    await assert.rejects(() => branch(parent, { path: branchPath(t2, 'bad'), from: { nope: 1 } }), TypeError);
+    await assert.rejects(() => branch(parent, { path: branchPath(t2, 'bad2'), from: { at: 'not an id' } }), {
+      code: 'INVALID_VERSION',
+    });
+    // Compacted past the version: the fork is refused, nothing is left behind.
+    const short = await createStorage(t2, 'S', { sync: { log: { rollAfter: 1 }, retention: { ops: 4 } } });
+    const r = await short.insert({ n: 0 });
+    const early = short.log.lastEventId;
+    for (let i = 1; i <= 30; i++) await short.update(r, { n: i });
+    await short.log.flush();
+    assert.ok(short.log.floor > 1, 'compacted');
+    await assert.rejects(() => branch(short, { path: branchPath(t2, 'gone'), from: { at: early } }), {
+      code: 'HISTORY_GONE',
+    });
+    assert.strictEqual(await branchInfo(short), null);
+  });
+
   await t.test('edits on both sides, merged in random order, converge; drop() removes the branch', async (t2) => {
     const parent = await createStorage(t2, 'A');
     const ids = [];

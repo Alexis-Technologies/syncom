@@ -656,6 +656,11 @@ class OpLog {
     return this.#corrupt;
   }
 
+  /** Every record id the retained entries name, unsorted. */
+  ids() {
+    return [...this.#byId.keys()];
+  }
+
   /** How many held entries compaction has dropped — lost for good — since the last reset. */
   get droppedHeld() {
     return this.#droppedHeld;

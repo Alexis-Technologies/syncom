@@ -406,23 +406,53 @@ then keeps to those fields, and a whole-record change — an insert, a delete
 under it, counts as a change of the field. `steps` lists the steps each
 way, `{ id, meta, records, at, source, message, txn }` each.
 
+## Who wrote what
+
+A record's metadata names its writers: `lastEditorOf(id, field)` is
+`{ origin, ts }` — the node and the stamp of a register's value, of a
+counter's newest increment, of a list's, text's or tree's newest run, mark
+or move (`null` for a set, whose slots carry counts and no stamps);
+`editorsOf(id)` every node that wrote something the record still carries;
+and the text plugin's `editorOf(id, key, index)` who inserted the element
+at `index` of a list or a text, and when. All of it is read from the record
+as it is, no log needed; `history()` is the way to who did what and when
+across time. `origin` is a node id — the signing key, where ops are signed —
+not a person: who sits at a node is the application's map, and the `actor`
+on every op is its word.
+
+```js
+await storage.lastEditorOf(id, 'title');   // { origin: 'ClY1…', ts: 1792950114557 }
+await storage.editorsOf(id);               // ['ClY1…', 'udzk…']
+await storage.editorOf(id, 'body', 5);     // who typed the character at 5
+```
+
 ## Branches
 
 `@alexify/syncom/branch` forks a storage into another directory — a new
-identity, its own keys and log, standing at the parent's state or at a tag
-of it — and merges the two as ops, either way:
+identity, its own keys and log, standing at the parent's state, at a tag of
+it, or at any version its log can still give exactly — and merges the two
+as ops, either way:
 
 ```js
 import { branch, merge, branchInfo, drop } from '@alexify/syncom/branch';
 
 const draft = await branch(storage, { path: './data-draft', schema });      // at the present
 const fromV1 = await branch(storage, { path: './data-v1', from: { tag: 'v1' } });
+const before = await branch(storage, { path: './data-before', from: { at: eventId } }); // any version
 await draft.update(id, { title: 'Reworked' });                          // a storage like any other
 await merge(draft, { into: storage });   // { ops: 1, pages: 1, joined: false }
 await merge(storage, { into: draft });   // the parent's news, the other way
 await branchInfo(draft);                 // { parent, forkedAt: { eventId, vector, ts, tag }, createdAt }
 await drop(draft);                       // closed, files removed
 ```
+
+A fork at a version — an event id, a stamp, a vector — is read out of the
+log (`storage.atVersion(at)`: every record folded to the version, the
+vector of the ops within it, pages to join), so it is exact only while the
+log retains what the version needs: a record compacted past it, or a stream
+cut by compaction with nothing of it inside the version, is `HISTORY_GONE`
+— never under `retention: 'all'`. `branchInfo().forkedAt.at` keeps the
+version as given.
 
 A branch is opened with the options you give it (the schema it should run
 with, hooks, a logger), on the parent's `fsi` unless they name another; its

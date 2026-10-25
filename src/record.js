@@ -240,6 +240,21 @@ class Record extends Emitter {
     return this.#storage.index(this.#id, key, cursor);
   }
 
+  /** Who last wrote a field; the storage-level `lastEditorOf` with this record's id. */
+  lastEditorOf(field) {
+    return this.#storage.lastEditorOf(this.#id, field);
+  }
+
+  /** Every node that wrote something this record carries; the storage-level `editorsOf`. */
+  editorsOf() {
+    return this.#storage.editorsOf(this.#id);
+  }
+
+  /** Who inserted an element of a list or text field; the storage-level `editorOf`. */
+  async editorOf(key, index) {
+    return this.#storage.editorOf(this.#id, key, index);
+  }
+
   /** A cursor's index and side; the storage-level `position` with this record's id. */
   async position(key, cursor) {
     return this.#storage.position(this.#id, key, cursor);

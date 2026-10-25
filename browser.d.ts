@@ -111,6 +111,8 @@ export type {
   CursorPosition,
   DeltaOp,
   Observer,
+  Editor,
+  VersionView,
   CursorSide,
   MarkExpand,
   Version,

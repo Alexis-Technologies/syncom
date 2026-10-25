@@ -1088,6 +1088,33 @@ export interface TagCollection {
  * first read (an open reads the newest tag's alone); a reader of a tag whose
  * catalog is gone is told `TAG_NOT_FOUND` then.
  */
+/** Who wrote a field or an element: the node, and the stamp of its write. */
+export interface Editor {
+  origin: string;
+  ts: number;
+}
+
+/**
+ * The storage at a version that is no tag — an event id, a stamp, a vector
+ * — read out of the log: what `branch(parent, { from: { at } })` pages.
+ * Exact only while the log retains what the version needs (`HISTORY_GONE`
+ * otherwise; never under `retention: 'all'`).
+ */
+export interface VersionView {
+  eventId: string;
+  vector: VersionVector;
+  ts: number;
+  /** The version as given. */
+  at: Version;
+  /** The record as it was at the version, through the lens and the read hooks; `null` when it was not there. */
+  get(id: string): Promise<unknown>;
+  has(id: string): Promise<boolean>;
+  /** Every live id at the version, sorted. */
+  list(): Promise<string[]>;
+  /** One page of the storage as it was at the version — what another storage's `mergeSnapshot` joins to stand there. */
+  snapshot(options?: { cursor?: string | null; limit?: number; scopes?: readonly string[] | null }): Promise<SnapshotPage>;
+}
+
 export interface TagView extends Tag {
   /** The record as it was at the tag, through the lens and the read hooks (`at: { tag }`); `null` when it was not there. */
   get(id: string): Promise<unknown>;
@@ -1653,6 +1680,8 @@ export interface TextMethods {
   position(id: string, key: string, cursor: string): Promise<CursorPosition | null>;
   /** `position()` of several cursors, in one read of the field. */
   positions(id: string, key: string, cursors: readonly string[]): Promise<(CursorPosition | null)[]>;
+  /** Who inserted the element at `index` of list or text field `key` — the node and the stamp of its run; `null` out of range or when the field is not a list or a text. */
+  editorOf(id: string, key: string, index: number): Promise<Editor | null>;
   /**
    * The changes of text field `field` (every text change when not given) composed into one delta
    * (Quill's form) over the reading before them; `null` when a change is no edit a delta can say
@@ -1765,6 +1794,16 @@ export interface Storage {
   tags(): Tag[];
   /** The storage as it was at tag `name`; throws `TAG_NOT_FOUND`. */
   at(name: string): TagView;
+  /** The storage at any version the log can still give exactly — an event id, a stamp, `{ vector }` or `{ tag }` (then a `TagView`); the `versions` plugin's. */
+  atVersion(at: Version): VersionView | TagView;
+  /**
+   * Who last wrote `field`: `{ origin, ts }` — the writer and stamp of a register's value, a counter's newest
+   * increment, a list's, text's or tree's newest run, mark or move; `null` for a set (no stamps), a field the
+   * record has not, a record that is not there. From the record's metadata, no I/O beyond the record.
+   */
+  lastEditorOf(id: string, field: string): Promise<Editor | null>;
+  /** Every node that wrote something the record still carries, sorted; `[]` for a record that is not there. */
+  editorsOf(id: string): Promise<string[]>;
   /**
    * The patches that turn the record as it was at `from` into how it is at
    * `to` (the present when omitted) — raw, no read hooks; a text's marks are
@@ -2021,6 +2060,12 @@ export interface SyncomRecord {
   index(key: string, cursor: string): Promise<number | null>;
   /** A cursor's index and side — `storage.position` with this record's id. */
   position(key: string, cursor: string): Promise<CursorPosition | null>;
+  /** Who last wrote a field — `storage.lastEditorOf` with this record's id. */
+  lastEditorOf(field: string): Promise<Editor | null>;
+  /** Every node that wrote something this record carries — `storage.editorsOf` with this record's id. */
+  editorsOf(): Promise<string[]>;
+  /** Who inserted an element of a list or text field — `storage.editorOf` with this record's id. */
+  editorOf(key: string, index: number): Promise<Editor | null>;
   /** Watches this record — `storage.observe` with this record's id; returns the function that stops it. */
   observe(path: string | null, listener: Observer): () => void;
   observe(listener: Observer): () => void;

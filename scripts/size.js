@@ -208,7 +208,8 @@ const ENTRIES = [
   // 90.2 with the change reports (applyOp changes, the plugins' changeOf, the transaction event).
   // 92.0 with observe, the deltas (toDelta's compose, applyDelta) and the cursor positions.
   // 94.6 with presence carried by the sync plugin.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 96 },
+  // 96.5 with a fork at any version (atVersion) and blame.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 98 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).

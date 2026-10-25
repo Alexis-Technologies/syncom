@@ -27,6 +27,7 @@ const versions = Object.freeze({
     untag: api.untag,
     tags: (core) => core.tags.list(),
     at: api.at,
+    atVersion: api.atVersion,
     history: api.history,
   },
 });

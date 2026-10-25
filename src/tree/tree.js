@@ -80,6 +80,20 @@ const treeChanges = (before, after) => {
 
 const render = (entry, field, block) => T.renderTree(block);
 
+// Who moved what: every move's origin, the newest as `last`.
+const editors = (entry, field) => {
+  const block = entry.meta.blocks[field];
+  const all = new Set();
+  let last = null;
+  for (const node of Object.keys(block?.moves ?? {})) {
+    for (const [ts, origin] of block.moves[node]) {
+      all.add(origin);
+      if (last === null || ts > last.ts) last = { origin, ts };
+    }
+  }
+  return { last, all: [...all] };
+};
+
 // A node may hold fields of its own — `outline/<node>/title` — read as the
 // node's `data` (src/compose.js); `members` are the nodes the tree shows,
 // `holds` whether one is there, `pick` a node's composed data, `nest` the
@@ -307,6 +321,7 @@ const tree = Object.freeze({
   realize,
   migrate,
   compact,
+  editors,
   nests: NESTS,
   members,
   holds,

@@ -89,8 +89,8 @@ const merge = async (source, { into } = {}) => {
 const branch = async (parent, { path, from = null, ...options } = {}) => {
   if (!isStorage(parent) || typeof parent.constructor !== 'function') throw new TypeError('branch() takes a storage');
   if (typeof path !== 'string' || path.length === 0) throw new TypeError('branch() takes a path for the branch');
-  if (from !== null && (typeof from !== 'object' || typeof from.tag !== 'string')) {
-    throw new TypeError('branch(): from is { tag }');
+  if (from !== null && (typeof from !== 'object' || (typeof from.tag !== 'string' && from.at === undefined))) {
+    throw new TypeError('branch(): from is { tag } or { at }');
   }
   const fsi = options.fsi ?? parent.fsi;
   if (await fsi.exists(path, FILE)) throw new SyncomError('BRANCH_EXISTS', `${path} holds a branch already`, { path });
@@ -114,10 +114,12 @@ const branch = async (parent, { path, from = null, ...options } = {}) => {
   let forkedAt;
   try {
     if (from !== null) {
-      const view = parent.at(from.tag);
+      // At a tag, or at any version the parent's log can still give exactly.
+      const view = typeof from.tag === 'string' ? parent.at(from.tag) : parent.atVersion(from.at);
       await join(child, (cursor) => view.snapshot({ cursor }), origin);
       await child.adoptVector(view.vector, { from: origin });
-      forkedAt = { eventId: view.eventId, vector: view.vector, ts: view.ts, tag: from.tag };
+      const tag = typeof from.tag === 'string' ? from.tag : null;
+      forkedAt = { eventId: view.eventId, vector: view.vector, ts: view.ts, tag, at: tag === null ? from.at : null };
     } else {
       // The parent's position before paging; what lands while the pages go
       // out is caught up as ops, so the branch stands at one cut.
@@ -125,7 +127,13 @@ const branch = async (parent, { path, from = null, ...options } = {}) => {
       await join(child, (cursor) => parent.snapshot({ cursor }), origin);
       await child.adoptVector(vector, { from: origin });
       await merge(parent, { into: child });
-      forkedAt = { eventId: parent.log.lastEventId, vector: parent.vector, ts: parent.log.latestTs, tag: null };
+      forkedAt = {
+        eventId: parent.log.lastEventId,
+        vector: parent.vector,
+        ts: parent.log.latestTs,
+        tag: null,
+        at: null,
+      };
     }
     const info = { format: FORMAT, parent: origin, forkedAt, createdAt: Date.now() };
     await fsi.write(path, FILE, JSON.stringify(info));

@@ -637,6 +637,16 @@ expectType<() => void>(stop);
 expectType<() => void>(storage.observe('id', () => {}));
 expectType<() => void>(record.observe('body', () => {}));
 expectType<Promise<syncom.CursorPosition | null>>(record.position('body', '^'));
+expectType<Promise<syncom.Editor | null>>(storage.lastEditorOf('id', 'title'));
+expectType<Promise<string[]>>(storage.editorsOf('id'));
+expectType<Promise<syncom.Editor | null>>(record.lastEditorOf('title'));
+expectType<Promise<string[]>>(record.editorsOf());
+expectType<Promise<syncom.Editor | null>>(record.editorOf('body', 0));
+const view = storage.atVersion('epoch.1');
+if (!('name' in view)) {
+  expectType<syncom.VersionVector>(view.vector);
+  expectType<Promise<string[]>>(view.list());
+}
 expectAssignable<syncom.TransactOptions>({ message: 'm' });
 expectAssignable<syncom.SyncOp>({ origin: 'a', seq: 1, ts: 1, type: 'set', id: 'r', msg: 'm' });
 expectType<string | null>(({} as syncom.HistoryVersion).message);

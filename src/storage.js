@@ -17,6 +17,7 @@ const { Record, Collection } = require('./record.js');
 const { commit, transact, MISMATCH } = require('./commit.js');
 const F = require('./fields.js');
 const P = require('./patches.js');
+const B = require('./blame.js');
 const { applyBatch } = require('./apply.js');
 const { snapshotPage, mergeBatch, adopt } = require('./bootstrap.js');
 const { applyOp, isAlive, kindOf } = require('./ops.js');
@@ -1360,6 +1361,24 @@ class Storage extends Emitter {
 
   at(name) {
     return this.#api('at')(this.#core, name);
+  }
+
+  atVersion(at) {
+    return this.#api('atVersion')(this.#core, at);
+  }
+
+  /** Who last wrote a field: `{ origin, ts }`, or null — see src/blame.js. */
+  lastEditorOf(id, field) {
+    return B.lastEditorOf(this.#core, id, field);
+  }
+
+  /** Every node that wrote something the record still carries, sorted. */
+  editorsOf(id) {
+    return B.editorsOf(this.#core, id);
+  }
+
+  async editorOf(id, key, index) {
+    return this.#api('editorOf')(this.#core, id, key, index);
   }
 
   async history(id, options) {

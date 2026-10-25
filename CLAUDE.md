@@ -50,6 +50,7 @@ src/keys.js               loadKeyPair — the on-disk key pairs (RSA for sealing
 src/digest.js             sha256 — SHA-256 of a value's JSON through Web Crypto, async on both platforms: the chain's and the schema hash's — no requires
 src/pem.js                base64/PEM helpers over btoa/atob for the browser crypto halves — no requires
 src/scope.js              GLOBAL_SCOPE, inScope, opInScope — the one definition of "in scope" — no requires
+src/blame.js              lastEditorOf, editorsOf — who wrote what, from a record's meta (registers' clocks, counters' sums, sets' slots, the plugins' `editors` hook); never the log
 src/hash.js               xxHash32 in pure JS — the checksum every log file carries (`{ entries, hash }`); a checksum, never a signature — no requires
 src/signing/sign.js       canonical form, signOp, verifyOp — what a signature covers (the header + a salted payload digest) and the verdict on a peer's op
 src/shape.js              isPlainObject, asJson, isRecordId, isStreamName, wellFormed — what enters is checked here
@@ -497,6 +498,16 @@ docs/                     VitePress site
   replaced at hello, raised by push answers); a host behind what the log
   retains is `UNDELIVERABLE`, and a host ahead of the node's own stream at
   hello is `REWOUND` (adopt the host's own keys, then bootstrap from it).
+- **A version is folded, a fork at one is paged.** `atVersion` in
+  src/versions/api.js folds every id the log retains entries for (`log.ids()`)
+  and every catalog id through `versionEntry`, and computes the vector at the
+  version per stream from the retained entries (a stream with nothing retained
+  was dropped whole below the floor — inside the version; one retained only
+  past the version is `HISTORY_GONE compacted`); its `snapshot` is `pageOf`
+  over a synthetic catalog — never a second page writer. `branch()` takes
+  `from: { at }` through it. Blame (src/blame.js, the plugins' `editors`
+  hook, the text plugin's `editorOf`) reads the metadata alone: an `origin`
+  is a node id, never resolved to a person here.
 - **A log file is whole or it is nothing.** `fileOf`/`readFile` in src/log.js
   are the ONLY writer and reader of a log file's text: `{ entries, hash }`,
   the hash xxHash32 (src/hash.js) of the entries' JSON; a mismatch is

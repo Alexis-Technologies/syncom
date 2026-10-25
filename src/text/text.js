@@ -539,6 +539,46 @@ const compact = (entry, field, kind) => {
   return patches;
 };
 
+// Who wrote the field: every run's, mark's and register's origin (the
+// stamps the block keeps), the newest among them as `last`.
+const editors = (entry, field) => {
+  const block = blockOf(entry, field);
+  const all = new Set();
+  let last = null;
+  const seen = (ts, origin) => {
+    all.add(origin);
+    if (last === null || ts > last.ts) last = { origin, ts };
+  };
+  if (block === undefined) return { last, all: [] };
+  for (const key of Object.keys(block.runs)) {
+    const run = S.parseRun(key);
+    if (run !== null) seen(run.ts, run.origin);
+  }
+  for (const key of Object.keys(block.marks ?? {})) {
+    const mark = S.parseRun(key);
+    if (mark !== null) seen(mark.ts, mark.origin);
+  }
+  for (const map of [block.vals, block.pos]) {
+    for (const key of Object.keys(map ?? {})) seen(map[key][0], map[key][1]);
+  }
+  return { last, all: [...all] };
+};
+
+/**
+ * Who inserted the element at `index` of list or text field `key`:
+ * `{ origin, ts }` of its run — the node, and the stamp of the splice —
+ * or `null` out of range, or when the field is not a list or a text.
+ */
+const editorOf = async (core, id, key, index) => {
+  if (!Number.isInteger(index) || index < 0) throw new TypeError('editorOf() takes a non-negative integer index');
+  const field = await held(core, 'editorOf', id, key);
+  if (field === null) return null;
+  const elem = S.elemAt(S.indexOf(field.entry, key), index);
+  if (elem === null) return null;
+  const parsed = S.parseElem(elem);
+  return parsed === null ? null : { origin: parsed.origin, ts: parsed.ts };
+};
+
 // What a text holds beside its reading — the markers of its embed slots, by
 // index — for the commit event (src/commit.js), so an undo can lay a cut
 // marker again; null for a list and for a text without a slot.
@@ -1168,6 +1208,7 @@ const text = Object.freeze({
   migrate,
   compact,
   values,
+  editors,
   nests: NESTS,
   members,
   holds,
@@ -1197,6 +1238,7 @@ const text = Object.freeze({
     positions,
     toDelta,
     applyDelta,
+    editorOf,
   }),
 });
 

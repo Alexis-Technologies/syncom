@@ -14,6 +14,13 @@ There is no released version section until then; everything below lands in it.
 
 ### Added
 
+- **A fork at any version; who wrote what.** `branch(parent, { from: { at } })`
+  forks at an event id, a stamp or a vector, through the new
+  `storage.atVersion(at)` — every record folded to the version, its vector,
+  pages to join; `HISTORY_GONE` when the log no longer gives it exactly.
+  `lastEditorOf(id, field)` and `editorsOf(id)` read a record's writers from
+  its metadata, and the text plugin's `editorOf(id, key, index)` who
+  inserted an element — `{ origin, ts }`, a node and a stamp.
 - **Log checksums, `retention: 'all'`.** Every log file — a sealed segment,
   an open batch — carries `hash`, the xxHash32 of its entries' JSON
   (`src/hash.js`, pure JS, no dependency on the signing plugin); a file that
