@@ -88,7 +88,7 @@ and for the list, text and tree ops the payload
 A `merge` carries `data` and `meta`, an `advance` a `vector`, and both name
 in `from` the node whose snapshot was joined.
 
-A push and a `changes` page carry ops packed: one positional array of 17
+A push and a `changes` page carry ops packed: one positional array of 18
 slots per op — `origin`, `seq`, `ts`, `type`, `id`, `scope`, `data`, `meta`,
 `key`, `value`, `vector`, `from`, `v`, `actor`, `sig`, `digest`, `nonce`, `msg` —
 with `null` for an absent field and the type as one character: `w` write,
@@ -96,7 +96,9 @@ with `null` for an absent field and the type as one character: `w` write,
 mark, `~` tree, `d` delete, `p` purge, `m` merge, `a` advance. Slots are
 appended, never reordered: a reader of fewer slots ignores the rest, a
 reader of more takes an absent one as `null`. The log itself keeps keyed
-`{ seq, op }` JSON; packing is for the wire.
+`{ seq, op }` JSON; packing is for the wire. [Wire format](../reference/wire)
+is the byte-level reference: every slot, payload, file and procedure, with
+examples.
 
 `hello` carries the protocol version both ways, and a host answers a hello
 of another version with 400 (`PROTOCOL`). Version 1 is the wire as the first

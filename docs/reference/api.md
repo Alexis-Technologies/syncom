@@ -221,6 +221,10 @@ query searches the entity's `search` fields, best first unless ordered.
 | `watch(listener, { onError }?)` | Runs now and after every change to the collection; returns the stop function |
 | `[Symbol.asyncIterator]` | `for await (const row of cursor)` |
 
+The shapes on the wire and on disk — the op's slots, the payloads, the
+signed header, the log and record files, the procedures — are in
+[Wire format](./wire).
+
 ## Sync (subpath)
 
 ```js

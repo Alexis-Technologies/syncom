@@ -14,6 +14,13 @@ There is no released version section until then; everything below lands in it.
 
 ### Added
 
+- **Wire format reference.** `docs/reference/wire.md`: the op and its
+  eighteen slots, every type's code and payload, what a signature covers
+  (the header array, the salted digest), the log files and their checksums,
+  the record file and its `meta`, the chain block, the four procedures with
+  their arguments, answers and refusal codes, the presence event, the
+  bounds a node holds a peer to, and the compatibility policy — every
+  example run against the package.
 - **Typed records.** A collection's records are typed by the schema: from the
   entity's Standard Schema (`~standard.types` — zod, valibot, arktype:
   `SchemaOutput<S>` is what a record reads as, `SchemaInput<S>` what a write

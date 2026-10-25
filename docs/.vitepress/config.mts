@@ -203,7 +203,10 @@ export default withMermaid({
         '/reference/': [
           {
             text: 'Reference',
-            items: [{ text: 'API', link: '/reference/api' }],
+            items: [
+              { text: 'API', link: '/reference/api' },
+              { text: 'Wire format', link: '/reference/wire' },
+            ],
           },
         ],
       },

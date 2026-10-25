@@ -892,7 +892,10 @@ running it before writing it down — several examples inherited from the legacy
 repo were wrong in exactly that way. A new page needs a sidebar entry in
 `docs/.vitepress/config.mts`; `docs/guide/sync.md` and `docs/guide/wrpc.md`
 are the two pages that describe the protocol — keep them in step with
-`src/sync/manager.js` and `src/sync/hosting.js`, `docs/guide/hooks.md` with the hook and
+`src/sync/manager.js` and `src/sync/hosting.js`, and `docs/reference/wire.md` is the
+byte-level reference (slots, codes, payloads, the signed header, the log and record
+files, the procedures, the bounds): a change to `packOps`, `wellFormed`, `signedMessage`,
+a file format, a procedure or a bound lands with its row there — `docs/guide/hooks.md` with the hook and
 event surface of `src/commit.js`, `src/apply.js`, `src/bootstrap.js`,
 `src/storage.js` and `src/sync/manager.js`, `docs/guide/schema.md` with
 `src/schema/` (metaschema is the first-class example there; zod/ajv/JSON

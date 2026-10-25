@@ -381,7 +381,8 @@ staying local, no proof of key possession at `hello` — are on the
 - [Browser](https://syncomjs.vercel.app/guide/browser) ·
   [Backends](https://syncomjs.vercel.app/guide/backends) ·
   [OpenTelemetry](https://syncomjs.vercel.app/guide/telemetry)
-- [API reference](https://syncomjs.vercel.app/reference/api)
+- [API reference](https://syncomjs.vercel.app/reference/api) ·
+  [Wire format](https://syncomjs.vercel.app/reference/wire)
 
 ## Contributing
 
