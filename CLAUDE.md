@@ -967,10 +967,10 @@ bootstrap stream never reaches the node it bootstrapped from.
 Coverage thresholds (95/95/90/95) are enforced in CI. They currently pass with
 headroom; do not lower them to land a change.
 
-`INVARIANTS.md` names, for every guarantee (`SYNC-n`, `OPS-n`, `LIST-n`, `SEQ-n`, `RLE-n`,
-`TREE-n`, `BOUND-n`, `LOG-n`, `VER-n`, `TAG-n`, `PATCH-n`, `UNDO-n`, `BRANCH-n`), the tests
-that hold it; `tests/package/invariants.test.js` fails when an id names no test or a named
-title is gone. Rename a test and its row together; a new
+`INVARIANTS.md` names, for every guarantee (an id `PREFIX-n`, the prefix from the
+prefix registry at its top), the tests that hold it; `tests/package/invariants.test.js` fails when an
+id names no test, a named title is gone, a prefix is not in the registry or a row is out of
+the registry's order. Rename a test and its row together; a new
 guarantee gets an id, a test and a row. Only plain-string titles are citable. The
 hazard walk in `tests/suites/sync-engine.js` (drops, duplicate pages through
 `tests/utils/memory-link.js`'s `duplicate` hook, a reopen) is the one that must stay

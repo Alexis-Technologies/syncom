@@ -59,3 +59,23 @@ test('every invariant names at least one test, and every test it names exists', 
     for (const name of tests) assert.ok(known.has(name), `${id}: no test titled "${name}"`);
   }
 });
+
+test('every id has a prefix the registry lists, and the rows keep the registry’s order', () => {
+  const text = readFileSync(path.join(ROOT, 'INVARIANTS.md'), 'utf8');
+  const registry = [...text.matchAll(/^\| `([A-Z]+)` \| .+ \|$/gm)].map((m) => m[1]);
+  assert.ok(registry.length >= 20, 'the prefix registry');
+  const rank = new Map();
+  for (let i = 0; i < registry.length; i++) rank.set(registry[i], i);
+  let last = [-1, 0];
+  for (const { id } of rows()) {
+    const [prefix, number] = id.split('-');
+    assert.ok(rank.has(prefix), `${id}: the prefix ${prefix} is not in the registry`);
+    const at = [rank.get(prefix), Number(number)];
+    assert.ok(at[0] > last[0] || (at[0] === last[0] && at[1] > last[1]), `${id} is out of order`);
+    last = at;
+  }
+  // The guides point at the registry rather than list the prefixes themselves.
+  for (const guide of ['CLAUDE.md', 'CONTRIBUTING.md']) {
+    assert.ok(readFileSync(path.join(ROOT, guide), 'utf8').includes('prefix registry'), guide);
+  }
+});

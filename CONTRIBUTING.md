@@ -93,10 +93,10 @@ bundler honouring `package.json#browser` would. The sync engine is tested over
 client at the boundary (JSON across, resume from the last event id on
 reconnect), and once more over real wrpc in `tests/wrpc.integration.test.js`.
 
-`INVARIANTS.md` names every guarantee — `SYNC-n`, `OPS-n`, `LIST-n`, `SEQ-n`,
-`TREE-n`, `RLE-n`, `BOUND-n`, `LOG-n`, `VER-n`, `TAG-n`, `PATCH-n`, `UNDO-n`,
-`BRANCH-n` — with the tests that hold it, and `tests/package/invariants.test.js`
-fails when an id names no test or a named title is gone: rename a test and its
+`INVARIANTS.md` names every guarantee — an id `PREFIX-n`, its prefix from the
+prefix registry at the top of the file — with the tests that hold it, and
+`tests/package/invariants.test.js` fails when an id names no test, a named
+title is gone, a prefix is unregistered or a row is out of order: rename a test and its
 row together, and give a new guarantee an id, a test and a row. The seeded
 hazard walk in `tests/suites/sync-engine.js` — dropped and duplicated pages, a
 reopen mid-walk — is the one that must stay green whatever else moves.
