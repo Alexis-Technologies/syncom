@@ -157,6 +157,27 @@ test('A backend that fails after the log append', async (t) => {
     await reopened.close();
   });
 
+  await t.test(
+    'a batch of many records that fails is one error line: the first ids by name, and how many',
+    async () => {
+      const { fsi, control } = flakyFsi();
+      const lines = [];
+      const logger = { error: (entry) => lines.push(entry), warn() {}, info() {}, debug() {} };
+      const storage = await syncom.open({ defer: 0, path: 'flaky-many', fsi, logger });
+      storage.on('error', () => {});
+      control.failing = true;
+      const ops = [];
+      for (let i = 1; i <= 50; i++) {
+        ops.push({ origin: 'peer', seq: i, ts: Date.now(), type: 'write', id: `r${i}`, data: { i } });
+      }
+      await storage.applyRemote(ops);
+      const [line] = lines.filter((entry) => entry.event === 'storage.unpersisted');
+      assert.deepStrictEqual([line.ids.length, line.count], [32, 50]);
+      control.failing = false;
+      await storage.close();
+    },
+  );
+
   await t.test("a peer's batch whose files fail is held the same way", async () => {
     const { fsi, control } = flakyFsi();
     const storage = await syncom.open({ defer: 0, path: 'flaky-peer', fsi, logger: false });

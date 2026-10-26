@@ -155,7 +155,7 @@ test('OpLog', async (t) => {
       const dir = await createTemp();
       try {
         const warnings = [];
-        const logger = { warn: (entry) => warnings.push(entry) };
+        const logger = { warn: (entry) => warnings.push(entry), error: (entry) => warnings.push(entry) };
         const log = await new OpLog(dir, { rollAfter: 2, logger });
         for (let seq = 1; seq <= 5; seq++) await log.append([op('A', seq)]);
         await log.close();
@@ -222,7 +222,7 @@ test('OpLog', async (t) => {
     const dir = await createTemp();
     try {
       const warnings = [];
-      const logger = { warn: (entry) => warnings.push(entry) };
+      const logger = { warn: (entry) => warnings.push(entry), error: (entry) => warnings.push(entry) };
       const log = await new OpLog(dir, { rollAfter: 3, logger });
       for (let seq = 1; seq <= 4; seq++) await log.append([op('A', seq)]);
       const { epoch } = log;
@@ -699,7 +699,12 @@ test('a journal: a line per group, a torn last line left out, a failed line shad
   await t.test('a torn last line is left out; a line inside that does not read is counted lost', async () => {
     const dir = await createTemp();
     const warnings = [];
-    const logger = { warn: (entry) => warnings.push(entry.event), info() {}, debug() {}, error() {} };
+    const logger = {
+      warn: (entry) => warnings.push(entry.event),
+      info: (entry) => warnings.push(entry.event),
+      error: (entry) => warnings.push(entry.event),
+      debug() {},
+    };
     try {
       const log = await new OpLog(dir, { rollAfter: 100, sealApplied: true });
       await log.append([op('A', 1)]);

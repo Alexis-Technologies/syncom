@@ -243,8 +243,10 @@ alert to key on:
 | warn | `sync.op.rejected`, `sync.op.invalid`, `sync.op.unreadable`, `sync.op.encrypted`, `sync.op.lens` | a peer's op not applied here, by reason |
 | warn | `sync.op.refused`, `sync.op.scope`, `sync.hello.refused` | hosting side: ops of a peer refused — outside its scopes (`sync.op.scope`: the scope function threw on a pushed record, and the op was refused), forged, unsigned, equivocating — a call refused by code |
 | warn | `sync.gaps`, `sync.push.gaps`, `sync.error`, `sync.outbox.dropped`, `sync.record.malformed`, `sync.record.skew`, `sync.record.encrypted`, `sync.record.kind` | a page with gaps (received, or answered by the host to a push), a failure on the way to a peer (`REWOUND` and `UNDELIVERABLE` among them), a dropped backlog, a snapshot record left out, a field of a kind this node has no plugin for |
-| warn | `log.epoch.new` (when a log was there), `log.segment.unreadable`, `log.open.unreadable`, `log.open.torn` | the log changed epoch or lost a file, or a line of its journal (`torn`: the last line, whose append was never acknowledged) |
-| warn | `storage.unpersisted` | logged ops whose record files could not be written, held in memory until the next open; also an `error` event (`UNPERSISTED`) |
+| error | `log.segment.unreadable`, `log.open.unreadable` | the log lost a file, or a line inside a journal: what it held is gone from this node (counted in `droppedTs`) |
+| warn | `log.epoch.new` (when a log was there) | the log changed epoch |
+| info | `log.open.torn` | a journal's last line did not read: its append was never acknowledged, so nothing that was answered is lost |
+| error | `storage.unpersisted` | logged ops whose record files could not be written, held in memory until the next open (`ids`, the first 32, and `count`); also an `error` event (`UNPERSISTED`) |
 | warn | `catalog.skipped`, `catalog.lens`, `catalog.save`, `catalog.search`, `snapshot.skipped`, `replay.skipped`, `record.shadowed`, `record.refresh` | derived state could not follow a record (`catalog.search`: the injected text index threw); a field shadowing a method; a live `Record` not refreshed after a change, a read hook having thrown |
 | warn | `listener.error`, `watch.error`, `schema.drift` | an event listener or a watcher threw; two builds of one schema version |
 | warn | `editor.binding` | an editor binding (`@alexify/syncom/editor`) failed to send a delta or to reload, or its editor refused a peer's change, and has no `onError`; it reloads the editor from the field (five in a row stop it: `onStop`) |
@@ -253,7 +255,8 @@ alert to key on:
 | warn | `sync.presence.send` | a presence update could not be sent to a peer (`url`); the next renewal tries again |
 | warn | `sync.presence.refused`, `sync.presence.receive` | a host refused a peer's presence update (`node`, `reason`: `HELLO`, `PRESENCE_RATE`, `PRESENCE_MALFORMED`, `PRESENCE_SCOPE`, `PRESENCE_FORGED`, `PRESENCE_UNSIGNED`; also a `refused` event); a host's relay could not be taken (`url`) |
 | warn | `identity.rekeyed` | a directory from before signing: `node.json` held a UUID, the node is now its signing key (once) |
-| warn | `tags.dropped`, `tags.unreadable`, `sync.node.unreadable` | a `tags.json` line dropped (`reason`: `name` — not a record id, at open; `catalog` — the tag's catalog unreadable, found at open for the newest tag and at its first read for an older one); `tags.json` itself unreadable — kept as `tags.corrupt.json`, the storage open without tags until it is repaired; a registry entry that cannot be read, skipped |
+| error | `tags.unreadable` | `tags.json` unreadable — kept as `tags.corrupt.json`, the storage open without tags until it is repaired |
+| warn | `tags.dropped`, `sync.node.unreadable` | a `tags.json` line dropped (`reason`: `name` — not a record id, at open; `catalog` — the tag's catalog unreadable, found at open for the newest tag and at its first read for an older one); a registry entry that cannot be read, skipped |
 | info | `schema.upgrade`, `schema.changed`, `schema.held`, `record.repaired` | what a reopen found about the schema; a record rebuilt from the log |
 | debug | `catalog.rebuild`, `durable.noop`, `log.epoch.new` (a brand-new log), `schema.lens.issues` | routine |
 

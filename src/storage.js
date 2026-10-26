@@ -40,6 +40,8 @@ const { compose, composeData } = require('./compose.js');
 // its timer: records, and log positions (keystrokes into one record).
 const DEFER_RECORDS = 1024;
 const DEFER_POSITIONS = 8192;
+// The ids a `storage.unpersisted` line names; past them it says how many.
+const UNPERSISTED_NAMED = 32;
 const { COMMIT, REFRESH, SOURCE, PLUGINS, CURSOR, SIGNER, REWIND } = require('./symbols.js');
 const { missing, HOME } = require('./plugin.js');
 const { SyncomError, typed } = require('./errors.js');
@@ -1343,7 +1345,9 @@ class Storage extends Emitter {
   async #unpersisted(touched, error) {
     for (const [id, entry] of touched) await this.#entries.hold(id, entry);
     const ids = [...touched.keys()];
-    this.#logger.warn({ event: 'storage.unpersisted', ids, err: error });
+    // The ids by name up to a bound, and how many: a batch of thousands is one line, not a page.
+    const named = ids.length > UNPERSISTED_NAMED ? ids.slice(0, UNPERSISTED_NAMED) : ids;
+    this.#logger.error({ event: 'storage.unpersisted', ids: named, count: ids.length, err: error });
     const message = `${ids.join(', ')}: logged, but not written; held until the next open`;
     notify(this, this.#logger, 'error', new SyncomError('UNPERSISTED', message, { ids, cause: error }));
   }

@@ -1213,7 +1213,7 @@ test('Storage: the seams telemetry shares', async (t) => {
 
   await t.test('the storage logger reaches the op log', async (t2) => {
     const events = [];
-    const logger = { warn: (entry) => events.push(entry) };
+    const logger = { warn: (entry) => events.push(entry), error: (entry) => events.push(entry) };
     const { dir, storage } = await openTemp(t2, { logger, sync: { log: { rollAfter: 1 } } });
     await storage.insert({ n: 1 });
     await storage.close();

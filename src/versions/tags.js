@@ -255,7 +255,7 @@ class Tags {
     this.#corrupt = true;
     const event = { event: 'tags.unreadable', file: FILE, kept: CORRUPT_FILE };
     if (cause !== null) event.err = cause;
-    this.#logger?.warn(event);
+    this.#logger?.error?.(event);
     if (text !== null) await this.#fsi.write(this.#path, CORRUPT_FILE, text);
     for (const name of await this.#names(this.#pendingDir)) {
       if (name.endsWith('.json')) this.#pending.add(name.slice(0, -5));

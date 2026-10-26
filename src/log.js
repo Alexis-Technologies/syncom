@@ -243,7 +243,7 @@ class OpLog {
       const text = await this.#fsi.read(this.#path, segment.name).catch(() => null);
       const { entries, reason } = readFile(text);
       if (entries === null) {
-        this.#log?.warn?.({ event: 'log.segment.unreadable', segment: segment.name, reason });
+        this.#log?.error?.({ event: 'log.segment.unreadable', segment: segment.name, reason });
         this.#lost = true;
         if (reason === 'checksum') this.#corrupt++;
         continue;
@@ -277,7 +277,7 @@ class OpLog {
       const { entries, reason } = readFile(text);
       if (entries === null) {
         // Torn on the way down: the batch was never announced, drop it.
-        this.#log?.warn?.({ event: 'log.open.unreadable', file: name, reason });
+        this.#log?.error?.({ event: 'log.open.unreadable', file: name, reason });
         if (reason === 'checksum') this.#corrupt++;
         await this.#fsi.remove(this.#openPath, name);
         continue;
@@ -323,7 +323,7 @@ class OpLog {
   // was shadowed.
   #loadJournal(name, text, sealedTo) {
     if (text === null) {
-      this.#log?.warn?.({ event: 'log.open.unreadable', file: name, reason: 'unreadable' });
+      this.#log?.error?.({ event: 'log.open.unreadable', file: name, reason: 'unreadable' });
       this.#lost = true;
       return false;
     }
@@ -341,9 +341,9 @@ class OpLog {
       }
       if (reason === 'checksum') this.#corrupt++;
       if (i === end - 1) {
-        this.#log?.warn?.({ event: 'log.open.torn', file: name, reason });
+        this.#log?.info?.({ event: 'log.open.torn', file: name, reason });
       } else {
-        this.#log?.warn?.({ event: 'log.open.unreadable', file: name, reason });
+        this.#log?.error?.({ event: 'log.open.unreadable', file: name, reason });
         this.#lost = true;
       }
     }

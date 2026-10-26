@@ -1611,6 +1611,13 @@ There is no released version section until then; everything below lands in it.
 
 ### Changed
 
+- **Lost data is logged at `error`.** `log.segment.unreadable`,
+  `log.open.unreadable`, `storage.unpersisted` and `tags.unreadable` were
+  warnings, like a peer's refused op; they are errors now, and
+  `log.open.torn` — a last line whose append was never acknowledged, so
+  nothing answered is lost — is `info`. `storage.unpersisted` names the
+  first 32 ids and says how many (`count`), not every id of a batch. The
+  telemetry page's level column is checked against the code.
 - **Marked texts, long lists, long typed runs and a cold record cost what
   the op touches.** A keystroke into a text read every mark (5 000 marks:
   3.4 ms → 31 µs): the marks' anchors are an index in walk order, kept
