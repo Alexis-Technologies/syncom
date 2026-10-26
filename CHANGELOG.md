@@ -1427,6 +1427,11 @@ There is no released version section until then; everything below lands in it.
 
 ### Changed
 
+- **More than eight storages in a process no longer reopen their log files.**
+  The `node:fs` backend held eight append descriptors for the whole process;
+  a ninth log appending made them take turns opening and closing their files
+  (about fifteen times the cost of a held write). It holds one per directory
+  — a log appends to its newest journal alone — and 64 in all.
 - **An undo manager no longer costs the record on every keystroke.** The
   `commit` event copied the record before and after every local write, and
   scanned a text for its embed slots, though an undo step keeps only its

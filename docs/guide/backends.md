@@ -24,7 +24,7 @@ backend it was handed — two storages may share one.
 
 | Backend | Where | How |
 | --- | --- | --- |
-| `node:fs/promises` | Node.js | The default under Node; `sync` is `fsync`; `append` writes through a descriptor held open (eight at most, the least recently used closed first; `remove` closes its own) |
+| `node:fs/promises` | Node.js | The default under Node; `sync` is `fsync`; `append` writes through a descriptor held open (one per directory — a log appends to its newest journal alone — and 64 at most in the process, the least recently used closed first; `remove` closes its own) |
 | OPFS | The browser | The default in a browser bundle (`fsi.browser.js`); durable when a writable closes, no `sync`, no `append` |
 | `@alexify/syncom/idb` | The browser | `createIdbFsi({ name, store, indexedDB })` — see [Browser](./browser#opfs-or-indexeddb) |
 | `@alexify/syncom/memory` | Anywhere | `memory()` — a Map; nothing survives the process |

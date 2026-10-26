@@ -44,18 +44,23 @@ const create = async (dir, filename, content) => {
 // Descriptors held open for appends. A log appends to one file for a while,
 // and an open, a write and a close per append cost about ten times a write
 // on a held descriptor (a new file and its unlink 170 µs, a held write 11 µs
-// on an SSD). A few are held, the least recently used closed first, and a
-// remove closes its own first; each has a lane, so a close waits for the
-// write before it. A descriptor opened in append mode writes at the end of
-// whatever the file holds, so a `write` that rewrites the file in place
-// leaves it right.
-const MAX_HELD = 8;
+// on an SSD). One is held per directory — a log appends to its newest
+// journal alone, so a new file there releases the one before — and at most
+// MAX_HELD in all, the least recently used closed first (eight once, shared
+// by every storage of the process: nine logs appending took turns reopening
+// their files); a remove closes its own first; each has a lane, so a close
+// waits for the write before it. A descriptor opened in append mode writes
+// at the end of whatever the file holds, so a `write` that rewrites the file
+// in place leaves it right.
+const MAX_HELD = 64;
 const held = new Map();
+const heldIn = new Map();
 
 const release = (target) => {
   const entry = held.get(target);
   if (entry === undefined) return Promise.resolve();
   held.delete(target);
+  if (heldIn.get(entry.dir) === target) heldIn.delete(entry.dir);
   return entry.lane
     .then(() => entry.handle)
     .then((handle) => handle.close())
@@ -69,9 +74,13 @@ const heldFor = (target) => {
     held.set(target, entry);
     return entry;
   }
-  entry = { handle: fs.open(target, 'a'), lane: Promise.resolve() };
+  const dir = path.dirname(target);
+  const before = heldIn.get(dir);
+  if (before !== undefined) void release(before);
+  entry = { handle: fs.open(target, 'a'), lane: Promise.resolve(), dir };
   entry.handle.catch(() => {});
   held.set(target, entry);
+  heldIn.set(dir, target);
   if (held.size > MAX_HELD) void release(held.keys().next().value);
   return entry;
 };
