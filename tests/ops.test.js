@@ -1622,3 +1622,29 @@ test('ops: a list’s elements and a tree’s nodes carry fields of their own', 
     },
   );
 });
+
+test('a field named like an Object.prototype member is a field: a join copies only what a side owns, a merge reports it gone', () => {
+  const one = applyOp(null, op('write', 1, 'A', { data: { title: 't' } })).entry;
+  const other = applyOp(null, op('set', 2, 'B', { data: { constructor: 'mine', toString: 'too' } })).entry;
+  const joined = mergeEntry(one, other);
+  assert.strictEqual(joined.data.constructor, 'mine');
+  assert.strictEqual(joined.data.toString, 'too');
+  // A side whose clock names a field its data does not hold brings no inherited value.
+  const hollow = { data: {}, meta: { ...other.meta, clock: { ...other.meta.clock, valueOf: [3, 'B'] } } };
+  const fromHollow = mergeEntry(one, hollow);
+  assert.strictEqual(
+    Object.hasOwn(fromHollow.data, 'valueOf') ? typeof fromHollow.data.valueOf : 'absent',
+    'undefined',
+  );
+  // A merge op that leaves a prototype-named field out reports it gone from the delta.
+  const held = applyOp(null, op('write', 1, 'A', { data: { toString: 'x' } })).entry;
+  const merged = applyOp(
+    held,
+    op('merge', 5, 'C', {
+      seq: 1,
+      data: {},
+      meta: { clock: {}, base: [5, 'C'], deleted: null, counters: {}, sets: {} },
+    }),
+  );
+  assert.ok(Object.hasOwn(merged.delta, 'toString'), 'the field went: the delta says so');
+});

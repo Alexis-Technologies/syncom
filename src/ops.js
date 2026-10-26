@@ -886,7 +886,8 @@ const applyOp = (previous, op, limits = null) => {
           if (!previous || previous.data[field] !== joined.data[field]) delta[field] = joined.data[field];
         }
         if (previous) {
-          for (const field of Object.keys(previous.data)) if (!(field in joined.data)) delta[field] = undefined;
+          for (const field of Object.keys(previous.data))
+            if (!Object.hasOwn(joined.data, field)) delta[field] = undefined;
         }
         const before = previous ? previous.meta : null;
         const moved =
@@ -1029,7 +1030,7 @@ const mergeEntry = (a, b, limits = null) => {
       if (!isKey(field)) continue;
       if (compareClock(source.meta.clock[field], own(meta.clock, field)) > 0) {
         meta.clock[field] = source.meta.clock[field];
-        data[field] = source.data[field];
+        data[field] = own(source.data, field);
       }
     }
     for (const field of Object.keys(source.meta.counters)) {
@@ -1084,7 +1085,7 @@ const mergeEntry = (a, b, limits = null) => {
   for (const field of Object.keys(meta.counters)) {
     if (own(meta.clock, field) !== undefined) {
       delete meta.counters[field];
-      data[field] = a.meta.clock[field] === meta.clock[field] ? a.data[field] : b.data[field];
+      data[field] = a.meta.clock[field] === meta.clock[field] ? own(a.data, field) : own(b.data, field);
     }
   }
   // A set that is a register or a counter on the other side: the register,
@@ -1092,7 +1093,7 @@ const mergeEntry = (a, b, limits = null) => {
   for (const field of Object.keys(meta.sets)) {
     if (own(meta.clock, field) !== undefined) {
       delete meta.sets[field];
-      data[field] = a.meta.clock[field] === meta.clock[field] ? a.data[field] : b.data[field];
+      data[field] = a.meta.clock[field] === meta.clock[field] ? own(a.data, field) : own(b.data, field);
     } else if (isCounter(meta, field)) {
       delete meta.sets[field];
       data[field] = counterValue(meta.counters[field]);
@@ -1103,7 +1104,7 @@ const mergeEntry = (a, b, limits = null) => {
   for (const field of Object.keys(meta.blocks)) {
     if (own(meta.clock, field) !== undefined) {
       dropBlock(entry, field);
-      data[field] = a.meta.clock[field] === meta.clock[field] ? a.data[field] : b.data[field];
+      data[field] = a.meta.clock[field] === meta.clock[field] ? own(a.data, field) : own(b.data, field);
     } else if (isCounter(meta, field)) {
       dropBlock(entry, field);
       data[field] = counterValue(meta.counters[field]);

@@ -62,10 +62,16 @@ const compareVectors = (a = {}, b = {}) => {
   return ahead ? 1 : behind ? -1 : 0;
 };
 
+// A peer's vector is the peer's word: its own keys alone, a seq a safe
+// integer, never `__proto__` (it would re-prototype the result).
 const vectorMax = (a = {}, b = {}) => {
   const result = { ...a };
-  for (const origin in b) {
-    if (!(result[origin] >= b[origin])) result[origin] = b[origin];
+  const keys = Object.keys(b);
+  for (let i = 0; i < keys.length; i++) {
+    const origin = keys[i];
+    const seq = b[origin];
+    if (origin === '__proto__' || !Number.isSafeInteger(seq)) continue;
+    if (!(Object.hasOwn(result, origin) && result[origin] >= seq)) result[origin] = seq;
   }
   return result;
 };

@@ -954,6 +954,12 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **A field named like an `Object.prototype` member could take its value.**
+  A join read a side's data without checking that it owned the field, so a
+  clock naming `valueOf` over data that did not hold it copied the inherited
+  function into the record; a merge that dropped a field named `toString`
+  did not report it gone; a peer's vector with a `__proto__` key
+  re-prototyped the copy the sync manager kept. Own keys alone, everywhere.
 - **An encrypted file could stand in for another.** `atRest()` sealed every
   file under one key with nothing tying a ciphertext to its file, so one
   record's file copied over another's decrypted as that one. Ciphertexts are
