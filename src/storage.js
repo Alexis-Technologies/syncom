@@ -1154,7 +1154,9 @@ class Storage extends Emitter {
           ? (entry.composed ??= compose(entry, this.#plugins))
           : composeData(data);
     if (!lensed && !hooked && this.#refreshing === 0) {
-      record[REFRESH](shown, delta, source);
+      // The reading itself: the Record may lay the delta's fields over what it
+      // holds rather than copy the whole record again.
+      record[REFRESH](shown, delta, source, entry !== null && !entry.encrypted);
       return;
     }
     this.#refreshing += 1;

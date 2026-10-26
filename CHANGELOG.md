@@ -1427,6 +1427,13 @@ There is no released version section until then; everything below lands in it.
 
 ### Changed
 
+- **A live `Record` no longer copies the whole record on every write.** It
+  took a JSON copy of the record, walked it for references and redefined its
+  accessors on every change — a 200 KB text made each keystroke of another
+  field cost the text. It lays the fields the write changed over what it
+  holds now (a path, a lens or a read hook still take the whole reading):
+  275 → 58 µs per write of a record with a 200 KB text, under the default
+  window.
 - **A delete no longer re-hints the whole text.** The change report of a
   splice read the stretches it cut from the block before it — after the
   splice had made the new block the head of the rope's lineage, so the old

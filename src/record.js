@@ -52,9 +52,43 @@ class Record extends Emitter {
     this.#defineProperties();
   }
 
+  // A field's value as the Record holds it: a copy, a string naming a record
+  // made a Reference.
+  #own(value) {
+    if (typeof value === 'string') return this.#storage.hasRecord(value) ? new Reference(value, this.#storage) : value;
+    if (!value || typeof value !== 'object') return value;
+    const copy = JSON.parse(JSON.stringify(value));
+    this.#convertToReferences(copy);
+    return copy;
+  }
+
+  // The fields a write changed laid over what the Record holds, from the
+  // reading — never the whole record copied again (a 400 KB text made every
+  // keystroke cost the record). False when the delta cannot say it: a path
+  // (`profile/city` is a field of `profile`'s), or nothing to lay it on.
+  #patch(data, delta) {
+    if (this.#data === null || !isPlainObject(delta)) return false;
+    const keys = Object.keys(delta);
+    for (let i = 0; i < keys.length; i++) if (keys[i].includes('/')) return false;
+    let added = false;
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      if (!Object.hasOwn(data, key)) {
+        delete this.#data[key];
+        continue;
+      }
+      if (!Object.hasOwn(this.#data, key)) added = true;
+      this.#data[key] = this.#own(data[key]);
+    }
+    if (added) this.#defineProperties();
+    return true;
+  }
+
   #convertToReferences(data) {
     if (!data || typeof data !== 'object') return;
-    for (const key in data) {
+    const keys = Object.keys(data);
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
       const value = data[key];
       if (typeof value === 'string') {
         if (this.#storage.hasRecord(value)) {
@@ -74,7 +108,9 @@ class Record extends Emitter {
   }
 
   #defineProperties() {
-    for (const key in this.#data) {
+    const keys = Object.keys(this.#data);
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
       if (key === 'id') continue;
       if (key in this) {
         // An accessor from an earlier adopt reads #data live. A field named
@@ -108,15 +144,16 @@ class Record extends Emitter {
   // its own save landing. The view is rebuilt from the authoritative data,
   // unsaved local edits are laid back on top (they are still pending), and
   // listeners hear about it unless the record itself caused the change.
-  [REFRESH](data, delta, source) {
+  [REFRESH](data, delta, source, plain = false) {
     if (data === null) {
       this.#data = null;
       this.#changes = {};
       if (source !== this) notify(this, this.#storage.logger, 'update', null, delta);
       return;
     }
-    this.#adopt(data);
-    for (const key in this.#changes) this.#data[key] = this.#changes[key];
+    if (!plain || !this.#patch(data, delta)) this.#adopt(data);
+    const pending = Object.keys(this.#changes);
+    for (let i = 0; i < pending.length; i++) this.#data[pending[i]] = this.#changes[pending[i]];
     if (source !== this) notify(this, this.#storage.logger, 'update', this.#data, delta);
   }
 

@@ -346,3 +346,43 @@ test('observe and deltas', async (t) => {
     assert.deepStrictEqual(seen, [2]);
   });
 });
+
+test('a live Record lays a write’s fields over what it holds: it reads as get() after every op of a seeded walk', async () => {
+  const { memory } = require('../src/memory/memory.js');
+  const syncomAll = require('../src/all/all.js');
+  const { Reference } = require('../src/record.js');
+  const storage = await syncomAll.open({ fsi: memory(), lock: false, defer: 0, logger: false });
+  const other = await storage.insert({ name: 'other' });
+  const id = await storage.insert({ title: 'a', n: 1 });
+  const record = await storage.record(id);
+  let seed = 11;
+  const random = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+  const fields = ['title', 'n', 'tags', 'body', 'link', 'list'];
+  for (let step = 0; step < 300; step++) {
+    const field = fields[Math.floor(random() * fields.length)];
+    const roll = random();
+    try {
+      if (field === 'n') await (roll < 0.5 ? storage.inc(id, 'n', 1) : storage.update(id, { n: step }));
+      else if (field === 'tags') {
+        const tag = [`t${step % 5}`];
+        await (roll < 0.5 ? storage.add(id, 'tags', tag) : storage.remove(id, 'tags', tag));
+      } else if (field === 'body') await storage.push(id, 'body', 'x');
+      else if (field === 'list') await storage.push(id, 'list', [{ step }]);
+      else if (field === 'link') await storage.update(id, { link: roll < 0.5 ? other : 'nobody' });
+      else if (roll < 0.2) await storage.unset(id, [field]);
+      else await storage.update(id, { [field]: { nested: { step } } });
+    } catch (error) {
+      // A field of another kind now (an unset counter written as a register…): the walk goes on.
+      if (error.code !== 'FIELD_KIND') throw error;
+    }
+    const held = await record.data();
+    const read = await storage.get(id);
+    const plain = JSON.parse(JSON.stringify(held, (key, value) => (value instanceof Reference ? 'ref' : value)));
+    for (const key of Object.keys(read)) {
+      if (key === 'link' && read.link === other) assert.ok(held.link instanceof Reference, `step ${step}`);
+      else assert.deepStrictEqual(plain[key], read[key], `step ${step}: ${key}`);
+    }
+    for (const key of Object.keys(plain)) assert.ok(Object.hasOwn(read, key), `step ${step}: ${key} lingers`);
+  }
+  await storage.close();
+});
