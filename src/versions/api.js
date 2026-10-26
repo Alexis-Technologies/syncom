@@ -395,7 +395,19 @@ const atVersion = (core, given) => {
   const listed = core.catalog.all();
   for (let i = 0; i < listed.length; i++) known.add(listed[i]);
   const ids = [...known].sort();
-  const entries = { load: async (id) => (await versionEntry(core, id, version)).entry };
+  // Each record folded once for the view: `has`, `list` and the snapshot's
+  // pages ask again and again (a failed fold is asked anew).
+  const folded = new Map();
+  const load = (id) => {
+    let entry = folded.get(id);
+    if (entry === undefined) {
+      entry = versionEntry(core, id, version).then((result) => result.entry);
+      entry.catch(() => folded.delete(id));
+      folded.set(id, entry);
+    }
+    return entry;
+  };
+  const entries = { load };
   const paging = {
     catalog: { all: () => ids, row: () => null },
     log: { lastEventId: eventId, vector },
