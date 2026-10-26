@@ -376,18 +376,51 @@ const announce = async (core, op, entry, delta, ctx, source, via, committed = nu
     // What an undo manager keeps of a local commit: the record before and
     // after, as copies, and every field's kind — built only for a listener.
     if (committed !== null && core.storage.listenerCount('commit') > 0) {
-      const { seq, before, previous, txn } = committed;
-      const kinds = { ...kindsOf(previous, core.plugins), ...kindsOf(entry, core.plugins) };
-      const after = alive ? asJson(entry.data) : null;
-      const event = { op, seq, txn, source, before: asJson(before), after, kinds, changes };
-      // What a field holds beside its reading (a text's embed markers), each
-      // side: an inverse that lays a cut marker again needs its value.
-      const embeds = { before: valuesOf(core.plugins, previous), after: alive ? valuesOf(core.plugins, entry) : null };
-      if (embeds.before !== null || embeds.after !== null) event.embeds = embeds;
-      notify(core.storage, core.logger, 'commit', event);
+      notify(core.storage, core.logger, 'commit', commitEvent(core, op, entry, alive, committed, source, changes));
     }
     notify(core.storage, core.logger, 'change', op, via, { changes });
   }
+};
+
+// The `commit` event: `before` and `after` are copies of the record and
+// `embeds` what its fields hold beside the reading (a text's markers), each
+// side — all three taken at the first read and kept, never on the write
+// path: an undo manager keeps a step's first `before` and last `after`, and
+// copying a large record twice per keystroke cost the record (the data
+// objects are never changed in place, so a late copy is the same copy).
+const commitEvent = (core, op, entry, alive, committed, source, changes) => {
+  const { seq, before, previous, txn } = committed;
+  const data = alive ? entry.data : null;
+  const kinds = { ...kindsOf(previous, core.plugins), ...kindsOf(entry, core.plugins) };
+  let beforeCopy;
+  let afterCopy;
+  let embeds;
+  return {
+    op,
+    seq,
+    txn,
+    source,
+    kinds,
+    changes,
+    get before() {
+      if (beforeCopy === undefined) beforeCopy = asJson(before) ?? null;
+      return beforeCopy;
+    },
+    get after() {
+      if (afterCopy === undefined) afterCopy = data === null ? null : asJson(data);
+      return afterCopy;
+    },
+    // What a field holds beside its reading, each side — null on both when
+    // nothing does: an inverse that lays a cut marker again needs its value.
+    get embeds() {
+      if (embeds === undefined) {
+        const was = valuesOf(core.plugins, previous);
+        const now = alive ? valuesOf(core.plugins, entry) : null;
+        embeds = was === null && now === null ? null : { before: was, after: now };
+      }
+      return embeds ?? undefined;
+    },
+  };
 };
 
 // One turn's worth of ops announced as a whole — a local write, a

@@ -255,7 +255,9 @@ const ENTRIES = [
   // in the turn that inserted it). 98.5, raised by name.
   // 100.7 with src/ in procedural loops (no array callbacks — a loop is longer than a callback; 2026-10-26). 101, raised by name.
   // 101.1 with a contained telemetry writer and a log that answers every durable group (2026-10-26). 101.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 101.5 },
+  // 101.6 with the review's performance fixes (a lazy commit event, the lazy text index, the log's pending groups
+  // searched by halves, a live Record patched by its delta). 102, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 102 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).

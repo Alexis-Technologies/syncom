@@ -234,13 +234,14 @@ const runSearchTests = async (t, assert, createStorage) => {
     const lost = await storage.Post.insert({ title: 'not indexed' });
     const kept = await storage.Post.insert({ title: 'indexed' });
     assert.ok((await storage.list()).includes(lost.id), 'the write landed');
-    assert.deepStrictEqual(
-      warnings.filter((entry) => entry.event === 'catalog.search').map((entry) => [entry.id, entry.err.message]),
-      [[lost.id, 'index full']],
-    );
+    // The index follows when a $text query asks: that is when it throws.
     assert.deepStrictEqual(
       (await storage.Post.select({ $text: 'indexed' }).fetch()).map((row) => row.id),
       [kept.id],
+    );
+    assert.deepStrictEqual(
+      warnings.filter((entry) => entry.event === 'catalog.search').map((entry) => [entry.id, entry.err.message]),
+      [[lost.id, 'index full']],
     );
   });
 };

@@ -146,6 +146,32 @@ const stepView = (step) => ({
   txn: step.txn,
 });
 
+// What a step keeps of one record: how the first commit found it, how the
+// last left it, the kinds of every field seen, its own seqs. The commits'
+// events hold the copies, taken when the step is inverted — never one per
+// keystroke (a large record was copied twice for every commit).
+class Kept {
+  constructor(event) {
+    this.first = event;
+    this.last = event;
+    this.kinds = { ...event.kinds };
+    this.seqs = new Set([event.seq]);
+  }
+
+  get before() {
+    return this.first.before;
+  }
+
+  get after() {
+    return this.last.after;
+  }
+
+  // A text's embed markers, each side: the inverse of a cut lays them again.
+  get embeds() {
+    return { before: this.first.embeds?.before ?? null, after: this.last.embeds?.after ?? null };
+  }
+}
+
 class UndoManager extends Emitter {
   #storage;
   #options;
@@ -266,18 +292,13 @@ class UndoManager extends Emitter {
   // after), the kinds of every field seen — the inverse is made of those
   // when the step is taken back — and the seqs of its own ops on it.
   #record(step, event) {
-    const { op, seq, before, after, kinds, embeds } = event;
+    const { op, seq, kinds } = event;
     step.lastSeq = Math.max(step.lastSeq, seq);
     step.seqs.add(seq);
     const record = step.records.get(op.id);
-    if (record === undefined) {
-      const kept = { before, after, kinds: { ...kinds }, seqs: new Set([seq]) };
-      // A text's embed markers, each side: the inverse of a cut lays them again.
-      kept.embeds = { before: embeds?.before ?? null, after: embeds?.after ?? null };
-      step.records.set(op.id, kept);
-    } else {
-      record.after = after;
-      record.embeds.after = embeds?.after ?? null;
+    if (record === undefined) step.records.set(op.id, new Kept(event));
+    else {
+      record.last = event;
       record.seqs.add(seq);
       Object.assign(record.kinds, kinds);
     }
@@ -408,10 +429,11 @@ class UndoManager extends Emitter {
       if (partial !== undefined && left.has(current)) {
         const record = left.get(current);
         left.set(current, {
-          ...record,
+          before: record.before,
           after: partial.after,
           embeds: { before: record.embeds.before, after: partial.embeds.after },
           kinds: { ...record.kinds, ...partial.kinds },
+          seqs: record.seqs,
         });
       }
       if (left.size > 0) from.push({ ...step, records: left });

@@ -1427,6 +1427,13 @@ There is no released version section until then; everything below lands in it.
 
 ### Changed
 
+- **An undo manager no longer costs the record on every keystroke.** The
+  `commit` event copied the record before and after every local write, and
+  scanned a text for its embed slots, though an undo step keeps only its
+  first `before` and its last `after`. The copies are taken at their first
+  read now and the manager keeps the events, copying when it takes a step
+  back: 1 027 → 76 µs per keystroke into a 400 KB text with an undo manager
+  listening.
 - **Marking writes applied no longer walks every open group.** The log kept
   the groups waiting for their records in a map it walked from the oldest on
   every mark, once per written position: a deferred flush of a busy window

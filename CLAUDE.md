@@ -754,8 +754,12 @@ docs/                     VitePress site
   true` keeps this node's tags alone (`ownTags`): an undo revokes this node's
   adds and leaves a peer's. The `commit` event (`announce` in src/commit.js)
   is LOCAL ops only, built only when `listenerCount('commit') > 0`, with
-  `before`/`after` as copies and the kinds of both sides; a peer's op raises
-  `change`, never `commit`.
+  `before`/`after` as copies and the kinds of both sides — the copies (and
+  `embeds`) taken at their first read, never on the write path (`commitEvent`;
+  the data objects are never changed in place, so a late copy is the same);
+  the undo manager keeps the events (`Kept`: a step's first `before`, last
+  `after`) and copies only when it inverts. A peer's op raises `change`,
+  never `commit`.
 - **A step of the undo stack is a transaction's worth, with the app's meta.**
   `#commit` in src/undo/undo.js joins a commit to the top step when the open
   `group()` takes it, when its `txn` is the step's, or within `mergeInterval`;
