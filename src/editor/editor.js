@@ -39,6 +39,8 @@
 // `spansToDelta`/`deltaToSpans`; selections as cursor tokens that survive
 // the edits around them, and a presence room's cursors resolved to
 // indices. Requires the text plugin's Myers diff and the vector keys only.
+// The delta algebra (`iterate`, `compose`, `transform`, `transformIndex`)
+// follows quill-delta's (BSD-3-Clause; THIRD_PARTY_NOTICES.md).
 
 const { diff: myers } = require('../text/myers.js');
 const { opKey } = require('../vector.js');

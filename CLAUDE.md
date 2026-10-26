@@ -162,7 +162,7 @@ docs/                     VitePress site
   twice — over `/all` and over the lean core with the plugins given by hand
   (`tests/*.lean.test.js`) — and `scripts/size.js` checks that the core and every block bundled
   together weigh what `/all` weighs (nothing bundled twice).
-- **An adapted algorithm brings its notice.** Code or a rule taken from an MIT project is named in
+- **An adapted algorithm brings its notice.** Code or a rule taken from an MIT or BSD project is named in
   `THIRD_PARTY_NOTICES.md` (project, commit, the syncom files that carry it) with the upstream notice.
   Nothing is copied from json-joy (AGPL-3.0), Collabs or `fugue/fugue` (Apache-2.0) — those are read
   as specifications only; the clones live in `../../open-source/local-first-alternatives/`.

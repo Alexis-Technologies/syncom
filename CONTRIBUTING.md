@@ -72,8 +72,8 @@ with `node --test --test-name-pattern 'swap'`.
   the kinds alone, the same on the op path and in a snapshot merge. Do not add
   a path that decides a clash another way.
 - **An adapted algorithm brings its notice.** Code or a rule taken from an MIT
-  project is named in `THIRD_PARTY_NOTICES.md` — the project, the commit, the
-  files that carry it — with the upstream notice. Projects under other
+  or BSD project is named in `THIRD_PARTY_NOTICES.md` — the project, the commit,
+  the files that carry it — with the upstream notice. Projects under other
   licences (json-joy, Collabs, `fugue/fugue`) are read as specifications only;
   nothing is copied from them.
 

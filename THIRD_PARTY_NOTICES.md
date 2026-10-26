@@ -1,9 +1,9 @@
 # Third-party notices
 
 syncom has no runtime dependencies. A few of its algorithms were adapted from
-other MIT-licensed projects, read at the commits named below; this file keeps
-their notices, as the MIT license asks, and says which syncom files carry the
-adaptation. Nothing was copied from json-joy (AGPL-3.0), Collabs or the
+other MIT- and BSD-licensed projects, read at the commits named below; this
+file keeps their notices, as those licenses ask, and says which syncom files
+carry the adaptation. Nothing was copied from json-joy (AGPL-3.0), Collabs or the
 `fugue/` directory of the Fugue repository (Apache-2.0): those were read as
 specifications only. The `automerge-perf` editing trace (CC-BY-4.0,
 https://github.com/automerge/automerge-perf) is not redistributed: `pnpm
@@ -216,3 +216,45 @@ follows `Order.createPositions` (`src/order/order.ts`).
 > LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 > OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 > SOFTWARE.
+
+## quill-delta
+
+Repository: https://github.com/slab/delta — `src/Delta.ts` and
+`src/OpIterator.ts`. The delta format the editor bindings exchange
+(`[{ retain, attributes? }, { insert, attributes? }, { delete }]`) is Quill's,
+and its algebra follows quill-delta's: the iterator that hands a delta out in
+pieces (`hasNext`, `peekLength`, `peekType`, `next(n)`), `compose`,
+`transform` with its priority at a tie and `transformIndex` (quill-delta's
+`transformPosition`) in `src/editor/editor.js`, and the `compose` that
+`toDelta` builds on in `src/text/text.js`. syncom's versions are its own
+JavaScript over the same rules (an embed is one unit, an attribute set to
+null removes it). The license:
+
+> BSD 3-Clause License
+>
+> Copyright (c) 2022, Slab, Inc.
+>
+> Redistribution and use in source and binary forms, with or without
+> modification, are permitted provided that the following conditions are met:
+>
+> 1. Redistributions of source code must retain the above copyright notice, this
+>    list of conditions and the following disclaimer.
+>
+> 2. Redistributions in binary form must reproduce the above copyright notice,
+>    this list of conditions and the following disclaimer in the documentation
+>    and/or other materials provided with the distribution.
+>
+> 3. Neither the name of the copyright holder nor the names of its
+>    contributors may be used to endorse or promote products derived from
+>    this software without specific prior written permission.
+>
+> THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+> AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+> IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+> DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+> FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+> DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+> SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+> CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+> OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+> OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.

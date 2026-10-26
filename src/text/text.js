@@ -1095,7 +1095,7 @@ const composeAttributes = (a, b, keepNull) => {
   return Object.keys(out).length > 0 ? out : undefined;
 };
 
-/** `a` then `b` as one delta: Quill's compose, over retain, insert and delete. */
+/** `a` then `b` as one delta: quill-delta's compose (THIRD_PARTY_NOTICES.md), over retain, insert and delete. */
 const compose = (a, b) => {
   const left = walker(a);
   const right = walker(b);
