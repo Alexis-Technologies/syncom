@@ -14,6 +14,15 @@ There is no released version section until then; everything below lands in it.
 
 ### Added
 
+- **CodeMirror.** `@alexify/syncom/codemirror`: `createCodeMirror(storage,
+  id, path, { state, view })` — CodeMirror's own modules, injected — gives
+  an extension for the editor's state and `attach(view)`. An edit's
+  ChangeSet leaves as a delta of exact splices; a peer's delta lands as a
+  ChangeSet, so the selection maps through it; what CodeMirror makes of the
+  text otherwise (`\r\n` read as a line break) is sent as an edit, so the
+  field holds what the editor shows. `cursors(presence)` and
+  `commands(manager)` as for ProseMirror; `keys` for `keymap.of()`.
+  CodeMirror is an optional peer dependency (types only).
 - **ProseMirror.** `@alexify/syncom/prosemirror`: `createProseMirror(storage,
   id, path, { model, state, transform, view })` — ProseMirror's own modules,
   injected — gives a plugin for the editor's state and `attach(view)`. The

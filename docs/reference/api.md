@@ -810,6 +810,15 @@ builds on. See [Editors](../guide/editors).
 | `docToSpans(doc)`, `spansToDoc(spans, schema)` | A document as typed spans — a marker `{ type, parents, attrs }` per block-level node in document order, a textblock's text and inline nodes after it — and back; what the schema cannot hold is left out |
 | `indexOfPos(doc, pos)`, `posOfIndex(doc, index)` | A document position as a text index of the field, and back |
 
+## CodeMirror (subpath)
+
+`@alexify/syncom/codemirror` — a CodeMirror 6 editor bound to a text field. See [Editors](../guide/editors#codemirror).
+
+| Member | Notes |
+| --- | --- |
+| `createCodeMirror(storage, id, path, { state, view? }, options?)` | The @codemirror modules are the caller's, injected. `{ extension, source, binding, attach(view), cursors(presence, { field, className, render }?) → { extension, stop() }, commands(undoManager) → { undo, redo, keys }, stop() }`; `options` as `createTextBinding`'s |
+| `deltaOfChanges(changeSet)`, `changesOfDelta(delta)` | A ChangeSet as a delta over the document before it, and a delta as change specs |
+
 ## Store (subpath)
 
 `@alexify/syncom/store` — a source of syncom's as a framework store. See [Frameworks](../guide/frameworks).

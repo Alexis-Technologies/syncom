@@ -196,6 +196,15 @@ const ENTRIES = [
     platform: 'browser',
     budget: 6,
   },
+  // The CodeMirror adapter: the editor binding it stands on (4.9), a ChangeSet as a delta and back, the cursors'
+  // decorations, the undo commands. CodeMirror itself is injected, never bundled. The plan said 3; the binding
+  // under it is most of it, so 7, raised by name (6.6 measured).
+  {
+    label: 'codemirror — browser (@alexify/syncom/codemirror)',
+    entry: 'src/codemirror/codemirror.js',
+    platform: 'browser',
+    budget: 7,
+  },
   // The ProseMirror adapter: the editor binding it stands on (4.9) and the document as one text with block
   // markers, the replace step, the cursors' decorations, the undo commands. ProseMirror itself is injected, never
   // bundled. The plan said 6; the binding under it is most of it, so 8, raised by name (7.5 measured).

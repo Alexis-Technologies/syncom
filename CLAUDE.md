@@ -41,6 +41,9 @@ src/editor/editor.js      the @alexify/syncom/editor subpath — the editor-agno
 src/prosemirror/prosemirror.js  the @alexify/syncom/prosemirror subpath — ProseMirror (injected `{ model, state, transform, view? }`)
                           over the editor binding: the document as one text with a marker per block-level node, the replace
                           step, cursors as decorations, undo commands over /undo; requires editor/editor.js only
+src/codemirror/codemirror.js  the @alexify/syncom/codemirror subpath — CodeMirror 6 (injected `{ state, view? }`) over the editor
+                          binding: a ChangeSet as a delta and back, line breaks fitted, cursors as decorations, undo commands;
+                          requires editor/editor.js only
 src/store/store.js        the @alexify/syncom/store subpath — toStore/fromEvents: one store object for Svelte's contract and
                           React's useSyncExternalStore over a cursor, a Record, get(), a presence or an emitter — no requires
 src/inspect/inspect.js    the @alexify/syncom/inspect subpath — a record's anatomy (through the [SOURCE] seam's raw `entry`) and anonymize; requires compose, shape, symbols, hash only

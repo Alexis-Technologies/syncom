@@ -22,6 +22,7 @@ const ENTRIES = [
   'src/editor/editor.js',
   'src/store/store.js',
   'src/prosemirror/prosemirror.js',
+  'src/codemirror/codemirror.js',
   'src/contracts/contracts.js',
   'src/idb/idb.js',
   'src/all/all.js',

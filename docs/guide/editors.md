@@ -178,6 +178,40 @@ await pm.attach(editor).ready;
 position into an index of the field and back, for code of your own that
 speaks to the storage directly.
 
+## CodeMirror
+
+`@alexify/syncom/codemirror` binds a CodeMirror 6 editor the same way, its
+modules handed in:
+
+```js
+import * as state from '@codemirror/state';
+import * as view from '@codemirror/view';
+import { createCodeMirror } from '@alexify/syncom/codemirror';
+import { createUndo } from '@alexify/syncom/undo';
+
+const cm = createCodeMirror(storage, id, 'body', { state, view });
+const { keys } = cm.commands(createUndo(storage, { trackedSources: [cm.source], records: [id] }));
+const cursors = cm.cursors(presence);
+
+const editor = new view.EditorView({
+  parent: element,
+  state: state.EditorState.create({ doc: '', extensions: [cm.extension, cursors.extension, view.keymap.of(keys)] }),
+});
+await cm.attach(editor).ready;
+```
+
+A CodeMirror document is the field's text as it is. An edit's ChangeSet
+leaves as a delta of exact splices (`deltaOfChanges`), one transaction each;
+a peer's delta lands as a ChangeSet (`changesOfDelta`), annotated so it is
+not sent back and kept out of any history, and the selection maps through
+it as through any change. Marks are not CodeMirror's and are left alone; an
+embed slot reads as U+FFFC. CodeMirror reads `\r\n` and `\r` as line
+breaks: the adapter sends what the editor shows as an edit, so the field
+comes to hold `\n`. Leave CodeMirror's history out — `commands(manager)`
+gives undo and redo over the storage's stack and the `keys` for
+`keymap.of()` — and `cursors(presence)` shows a room's cursors as
+decorations and publishes this editor's selection, as for ProseMirror.
+
 ## Selections
 
 A selection kept as indices is wrong after the next edit around it; kept as
