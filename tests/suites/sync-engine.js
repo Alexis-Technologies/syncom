@@ -899,7 +899,7 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     await assert.rejects(() => link.call('syncom/hello', { node: 'peer', token: 'no' }), /Not authorized/);
     await assert.rejects(() => link.call('syncom/hello', { node: 'peer', token: 'ok', version: 99 }), /protocol/);
     await assert.rejects(() => link.call('syncom/hello', {}), /node id/);
-    const hello = await link.call('syncom/hello', { node: 'peer', token: 'ok', version: 1 });
+    const hello = await link.call('syncom/hello', { node: 'peer', token: 'ok', version: 2 });
     assert.strictEqual(hello.node, a.nodeId);
     assert.strictEqual(hello.epoch, a.log.epoch);
     assert.strictEqual(unit.hello.access, 'session', 'the default access is wrpc’s default');

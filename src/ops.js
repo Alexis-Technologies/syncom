@@ -1153,8 +1153,9 @@ const observedTags = (meta, field, elements) => {
 // single character, absent fields as null — no key names repeated per op. A
 // slot may be appended (the writer's schema version was the 13th, the actor
 // the 14th, the signature, its payload digest and the digest's nonce the
-// 15th to 17th, a transaction's message the 18th): a reader of an older
-// shape ignores slots it does not know,
+// 15th to 17th, a transaction's message the 18th, the fingerprint of the op
+// before it in its stream the 19th): a reader of an older shape ignores slots
+// it does not know,
 // a reader of a newer one takes an absent slot as null. The codes are the
 // protocol's, not a plugin's: a node without the plugin for a type still
 // reads, logs and relays the op.
@@ -1216,6 +1217,7 @@ const packOps = (ops) => {
       op.digest === undefined ? null : op.digest,
       op.nonce === undefined ? null : op.nonce,
       op.msg === undefined ? null : op.msg,
+      op.prev === undefined ? null : op.prev,
     ];
   }
   return packed;
@@ -1226,8 +1228,27 @@ const unpackOps = (packed) => {
   const ops = [];
   for (const row of packed) {
     if (!Array.isArray(row) || row.length < 5) continue;
-    const [origin, seq, ts, code, id, scope, data, meta, key, value, vector, from, v, actor, sig, digest, nonce, msg] =
-      row;
+    const [
+      origin,
+      seq,
+      ts,
+      code,
+      id,
+      scope,
+      data,
+      meta,
+      key,
+      value,
+      vector,
+      from,
+      v,
+      actor,
+      sig,
+      digest,
+      nonce,
+      msg,
+      prev,
+    ] = row;
     const op = { origin, seq, ts, type: own(CODE_TYPES, code) ?? code };
     if (id !== null && id !== undefined) op.id = id;
     if (v !== null && v !== undefined) op.v = v;
@@ -1236,6 +1257,7 @@ const unpackOps = (packed) => {
     if (digest !== null && digest !== undefined) op.digest = digest;
     if (nonce !== null && nonce !== undefined) op.nonce = nonce;
     if (msg !== null && msg !== undefined) op.msg = msg;
+    if (prev !== null && prev !== undefined) op.prev = prev;
     if (vector !== null && vector !== undefined) op.vector = vector;
     if (from !== null && from !== undefined) op.from = from;
     if (scope !== null && scope !== undefined) op.scope = scope;

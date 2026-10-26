@@ -296,6 +296,7 @@ const push = (host) => async (context, args) => {
   if (result.outOfScope > 0) refuseOps(host, node, 'scope', result.outOfScope);
   if (result.forged > 0) announceRefused(host, node, 'forged', result.forged);
   if (result.unsigned > 0) announceRefused(host, node, 'unsigned', result.unsigned);
+  if (result.equivocations > 0) announceRefused(host, node, 'equivocation', result.equivocations);
   // The vector the dialer merges in: the keys this page touched, not the
   // whole thing — a hub's has a key per client and scope.
   const whole = storage.vector;

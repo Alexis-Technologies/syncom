@@ -1,15 +1,17 @@
 'use strict';
 
 // A peer's batch, applied: `storage.applyRemote(ops)` lands here, inside the
-// mutation queue. Every op's signature is checked first (a pre-pass over
-// the page), then every op is admitted (well-formed, inside the skew
-// horizon, the next of its stream), applied one by one, and the batch is
-// then made durable — log first, then the records — and announced. This is
-// the trust boundary: nothing below `admit` reads a field it did not check.
-// `core` is what Storage lends its write paths — see Storage#open.
+// mutation queue. Every op's signature is checked and its fingerprint taken
+// first (a pre-pass over the page), then every op is admitted (well-formed,
+// inside the skew horizon, the next of its stream, following the op this
+// node holds before it), applied one by one, and the batch is then made
+// durable — log first, then the records — and announced. This is the trust
+// boundary: nothing below `admit` reads a field it did not check. `core` is
+// what Storage lends its write paths — see Storage#open.
 
 const { applyOp, isAlive, latestClock } = require('./ops.js');
-const { vectorHas, vectorNext, vectorAdvance, keyScope } = require('./vector.js');
+const { vectorHas, vectorNext, vectorAdvance, keyScope, opKey } = require('./vector.js');
+const { fingerprintOf } = require('./header.js');
 const { notify } = require('./hooks.js');
 const { inScope } = require('./scope.js');
 const { traced, now } = require('./telemetry.js');
@@ -18,7 +20,17 @@ const { SyncomError } = require('./errors.js');
 
 const { OK, FORGED } = VERDICT;
 
-const NOTHING = { applied: 0, skipped: 0, duplicates: 0, gaps: 0, malformed: 0, unsigned: 0, forged: 0, outOfScope: 0 };
+const NOTHING = {
+  applied: 0,
+  skipped: 0,
+  duplicates: 0,
+  gaps: 0,
+  malformed: 0,
+  unsigned: 0,
+  forged: 0,
+  outOfScope: 0,
+  equivocations: 0,
+};
 // Signatures are verified this many at a time under Promise.all: the
 // verdicts are independent, and both halves verify off the main thread —
 // node:crypto on libuv's thread pool, Web Crypto on its own — so a chunk is
@@ -28,8 +40,10 @@ const VERIFY_CHUNK = 64;
 // What one batch accumulates: the ops it accepts (logged, whether or not
 // they changed anything), the entries it touched and their deltas, and the
 // counts the result reports. `vector` is this node's, advanced as ops are
-// accepted so the next op of a stream is seen as the next. `bound` is the
-// scopes of the peer that pushed the page, on a host: the records it may write.
+// accepted so the next op of a stream is seen as the next; `fps` the
+// fingerprints of the ops admitted, `prints` of the ones accepted, by stream
+// and seq, what this log holds once they are appended. `bound` is the scopes
+// of the peer that pushed the page, on a host: the records it may write.
 const openBatch = (core, { via = null, scopes = null, peer = null, adoptFrom = null, bound = null } = {}) => {
   const at = Date.now();
   return {
@@ -40,6 +54,8 @@ const openBatch = (core, { via = null, scopes = null, peer = null, adoptFrom = n
     adoptFrom,
     bound,
     vector: core.log.vector,
+    fps: new Map(),
+    prints: null,
     now: at,
     horizon: at + core.maxSkew,
     accepted: [],
@@ -57,8 +73,10 @@ const openBatch = (core, { via = null, scopes = null, peer = null, adoptFrom = n
     unsigned: 0,
     forged: 0,
     outOfScope: 0,
+    equivocations: 0,
     firstUnsigned: null,
     firstForged: null,
+    firstEquivocation: null,
   };
 };
 
@@ -74,29 +92,48 @@ const verdictOf = async (core, op, signatures) => {
   }
 };
 
-// The verdict on every op of the page before any is admitted — `admit` must
-// stay sequential (each accept moves the vector), verification need not.
-// Only a well-formed op that carries a signature is checked, and under
-// 'require' every well-formed one; the rest is OK by rule, which is what
-// keeps an unsigned page — an older peer's, a test's — at a property check
-// per op. A malformed op is left to `admit` to count. Never throws.
-const verifyPage = async (batch, ops) => {
+// An op's fingerprint (src/header.js) — a string in Node.js, a promise in
+// the browser — or null when it cannot be taken: a value JSON cannot read,
+// as malformed as a shape that does not check.
+const printOf = (op) => {
+  try {
+    return fingerprintOf(op);
+  } catch {
+    return null;
+  }
+};
+
+// The verdict on every op of the page and its fingerprint, before any is
+// admitted — `admit` must stay sequential (each accept moves the vector),
+// verification and hashing need not. A malformed op has no fingerprint
+// (null), which `admit` counts. Only a well-formed op that carries a
+// signature is verified, and under 'require' every well-formed one; the
+// rest is OK by rule, which is what keeps an unsigned page — an older
+// peer's, a test's — at a property check and a hash per op. Never throws.
+const checkPage = async (batch, ops) => {
   const { signatures, core } = batch;
-  const verdicts = new Array(ops.length).fill(OK);
   // No signing plugin: nothing to check against — a peer's signature rides
   // along unread, the 'verify' semantics for an unsigned op.
-  if (signatures === false || core.verify === null) return verdicts;
+  const verifying = signatures !== false && core.verify !== null;
+  const verdicts = [];
+  const fps = [];
   const pending = [];
   for (let start = 0; start < ops.length; start += VERIFY_CHUNK) {
     pending.length = 0;
     for (let i = start; i < ops.length && i < start + VERIFY_CHUNK; i++) {
       const op = ops[i];
-      if (!wellFormed(op) || (op.sig === undefined && signatures !== 'require')) continue;
+      verdicts.push(OK);
+      fps.push(null);
+      if (!wellFormed(op)) continue;
+      const fp = printOf(op);
+      if (fp === null || typeof fp === 'string') fps[i] = fp;
+      else pending.push(fp.then((value) => void (fps[i] = value)).catch(() => {}));
+      if (!verifying || (op.sig === undefined && signatures !== 'require')) continue;
       pending.push(verdictOf(core, op, signatures).then((verdict) => void (verdicts[i] = verdict)));
     }
     if (pending.length > 0) await Promise.all(pending);
   }
-  return verdicts;
+  return { verdicts, fps };
 };
 
 // Refused before admission: counted per op (the metric), remembered once
@@ -132,10 +169,19 @@ const reportSignatures = (batch) => {
   }
 };
 
-// Accepted: logged and relayed, the vector moves.
+// The fingerprint this node holds for the op at `seq` of the stream `key`:
+// one accepted earlier in this batch, else the log's — or undefined.
+const heldAt = (batch, key, seq) => batch.prints?.get(key)?.get(seq) ?? batch.core.log.fingerprintOf(key, seq);
+
+// Accepted: logged and relayed, the vector moves, and its fingerprint is
+// what the stream's next op is held to.
 const accept = (batch, op) => {
   vectorAdvance(batch.vector, op);
   batch.accepted.push(op);
+  const key = opKey(op);
+  let seqs = (batch.prints ??= new Map()).get(key);
+  if (seqs === undefined) batch.prints.set(key, (seqs = new Map()));
+  seqs.set(op.seq, batch.fps.get(op));
 };
 
 // Accepted but not applied HERE: still logged (flagged `skipped`, so a
@@ -179,6 +225,34 @@ const adopt = (batch, op) => {
   }
 };
 
+// Equivocation: the op's writer made two ops at one seq of one stream — this
+// node holds the other (`reason: 'seq'`) — or this op follows another op at
+// the seq before it than the one held here (`'chain'`: its `prev` names
+// another fingerprint, or none where it is signed). A directory restored
+// from a backup, a second instance under one identity, or a key holder that
+// lies. Refused like a forged op — neither logged nor relayed, the vector
+// unmoved — counted per op, reported once per page with both fingerprints.
+const equivocates = (batch, op, reason, held, received) => {
+  batch.equivocations++;
+  batch.firstEquivocation ??= { op, reason, held, received };
+  batch.core.otel.recordRejected(reason === 'chain' ? 'chain' : 'equivocation');
+  return false;
+};
+
+const reportEquivocations = (batch) => {
+  if (batch.equivocations === 0) return;
+  const { core } = batch;
+  const { op, reason, held, received } = batch.firstEquivocation;
+  const count = batch.equivocations;
+  const fields = { origin: op.origin, scope: op.scope ?? null, seq: op.seq, reason, held, received, count };
+  core.logger.warn({ event: 'sync.op.equivocation', ...fields });
+  const message =
+    reason === 'chain'
+      ? `Op ${op.origin}:${op.seq} does not follow the op this node holds at seq ${op.seq - 1} (${count} in this page)`
+      : `Op ${op.origin}:${op.seq} is not the op this node holds at that seq (${count} in this page)`;
+  notify(core.storage, core.logger, 'error', new SyncomError('EQUIVOCATION', message, { op, ...fields }));
+};
+
 // The newest stamp a merge's meta holds — a peer's whole meta, every stamp
 // of it observed once the record is written here — or null.
 const newestHeld = (core, op) => {
@@ -204,11 +278,17 @@ const skewed = (batch, op, ts) => {
 // stream: a duplicate costs no fold of its meta) — are counted and dropped
 // (not observed: this node's clock stays where it is); what the vector
 // already covers is a duplicate, what skips ahead a gap — the peer will be
-// asked again from the last position. An advance is accepted here, with
-// nothing to apply.
-const admit = (batch, op) => {
+// asked again from the last position. Held to the fingerprints this node
+// keeps (`fp`, from checkPage — null for a malformed op): a duplicate that
+// is another op than the one held at its seq, and a next op whose `prev` is
+// not the one held at the seq before it, are equivocation. A next op this
+// node holds no predecessor for — the stream starts with it, or came by a
+// snapshot — is taken, and the chain held from it; so is an unsigned op that
+// names none (a hand-made one, an older writer's). An advance is accepted
+// here, with nothing to apply.
+const admit = (batch, op, fp) => {
   const { core, vector } = batch;
-  if (!wellFormed(op)) {
+  if (fp === null) {
     const shape = isPlainObject(op) ? { origin: op.origin, seq: op.seq, type: op.type, id: op.id } : typeof op;
     core.logger.warn({ event: 'sync.op.malformed', op: shape });
     core.otel.recordMalformed();
@@ -216,7 +296,10 @@ const admit = (batch, op) => {
     return false;
   }
   if (op.ts > batch.horizon) return skewed(batch, op, op.ts);
+  const key = opKey(op);
   if (op.origin === core.nodeId || vectorHas(vector, op)) {
+    const held = heldAt(batch, key, op.seq);
+    if (held !== undefined && held !== fp) return equivocates(batch, op, 'seq', held, fp);
     batch.duplicates++;
     return false;
   }
@@ -224,6 +307,11 @@ const admit = (batch, op) => {
     batch.gaps++;
     return false;
   }
+  const before = op.seq > 1 ? heldAt(batch, key, op.seq - 1) : undefined;
+  if (before !== undefined && op.prev !== before && (op.prev !== undefined || op.sig !== undefined)) {
+    return equivocates(batch, op, 'chain', before, op.prev ?? null);
+  }
+  batch.fps.set(op, fp);
   if (op.type === 'merge') {
     const held = newestHeld(core, op);
     if (held !== null && held > batch.horizon) return skewed(batch, op, held);
@@ -373,7 +461,7 @@ const applyOne = async (batch, op) => {
 const persist = async (batch) => {
   const { core, accepted, touched } = batch;
   if (accepted.length === 0) return;
-  const entries = await core.log.append(accepted, { skipped: batch.skipped, held: batch.held });
+  const entries = await core.log.append(accepted, { skipped: batch.skipped, held: batch.held, fps: batch.fps });
   const first = entries[0].seq;
   const last = entries[entries.length - 1].seq;
   if (batch.adopted) await core.log.advance(batch.adopted);
@@ -414,16 +502,17 @@ const announce = async (batch, result) => {
 
 const applyRemote = async (core, ops, options) => {
   const batch = openBatch(core, options);
-  const verdicts = await verifyPage(batch, ops);
+  const { verdicts, fps } = await checkPage(batch, ops);
   for (let i = 0; i < ops.length; i++) {
     const op = ops[i];
     if (verdicts[i] !== OK) {
       refuseSignature(batch, op, verdicts[i]);
       continue;
     }
-    if (admit(batch, op)) await applyOne(batch, op);
+    if (admit(batch, op, fps[i])) await applyOne(batch, op);
   }
   reportSignatures(batch);
+  reportEquivocations(batch);
   const result = {
     applied: batch.accepted.length,
     skipped: batch.skipped?.size ?? 0,
@@ -433,6 +522,7 @@ const applyRemote = async (core, ops, options) => {
     unsigned: batch.unsigned,
     forged: batch.forged,
     outOfScope: batch.outOfScope,
+    equivocations: batch.equivocations,
   };
   await persist(batch);
   await announce(batch, result);
@@ -459,6 +549,7 @@ const tracedApply = async (core, ops, options) => {
         'syncom.ops.unsigned': r.unsigned,
         'syncom.ops.forged': r.forged,
         'syncom.ops.out_of_scope': r.outOfScope,
+        'syncom.ops.equivocations': r.equivocations,
       }),
     );
     return result;

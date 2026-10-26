@@ -11,6 +11,8 @@
 
 const { applyOp, isAlive, latestClock } = require('./ops.js');
 const { opKey } = require('./vector.js');
+const { fingerprintOf } = require('./header.js');
+const { link } = require('./commit.js');
 const { notify } = require('./hooks.js');
 const { traced, now } = require('./telemetry.js');
 const { GLOBAL_SCOPE, inScope } = require('./scope.js');
@@ -169,11 +171,13 @@ const mergeBatch = async (core, records, via, from) => {
   };
   for (const record of records) await mergeOne(batch, record);
   if (batch.ops.length === 0) return;
-  // Signed here, not in mergeOne: an op's seq is assigned after applyOp,
-  // and the signature covers it. The joiner signs the host's state as its
-  // own — a snapshot record carries no provenance to sign over.
+  // Chained and signed here, not in mergeOne: an op's seq is assigned after
+  // applyOp, and the link and the signature cover it. The joiner signs the
+  // host's state as its own — a snapshot record carries no provenance to
+  // sign over.
+  const fps = await link(batch.ops, core.fingerprintOf, core.sign !== null);
   if (core.sign !== null) for (const op of batch.ops) await core.sign(op);
-  const entries = await core.log.append(batch.ops);
+  const entries = await core.log.append(batch.ops, { fps });
   const first = entries[0].seq;
   const last = entries[entries.length - 1].seq;
   if (await core.persist(batch.touched, first, last)) core.log.applied(first, last);
@@ -213,9 +217,12 @@ const ownKey = (core, key) => key === core.nodeId || key.startsWith(`${core.node
  * also learns which ops they cover — and does not report the next live op
  * of those origins as a gap. This node's own streams are not a peer's to
  * move: their keys are left out — but with `own`, the REWOUND path, which
- * takes them alone, up to MAX_ADOPTED (src/sync/manager.js `#rewind`).
+ * takes them alone, up to MAX_ADOPTED (src/sync/manager.js `#rewind`), with
+ * the ops its proof carried (`proofs`, checked there): each the head of its
+ * stream from now on, what the next op of it chains to — a stream taken
+ * without one names no predecessor.
  */
-const adopt = async (core, vector, { via = null, from = null, own = false } = {}) => {
+const adopt = async (core, vector, { via = null, from = null, own = false, proofs = null } = {}) => {
   const known = core.log.vector;
   const news = {};
   // A peer's vector: own keys alone, read as values.
@@ -226,14 +233,20 @@ const adopt = async (core, vector, { via = null, from = null, own = false } = {}
     if ((known[key] ?? 0) < seq) news[key] = seq;
   }
   if (Object.keys(news).length === 0) return null;
+  if (own && proofs !== null) {
+    const heads = {};
+    for (const proof of proofs) heads[opKey(proof)] = [proof.seq, await fingerprintOf(proof)];
+    core.log.adoptHeads(heads);
+  }
   const op = { origin: core.nodeId, seq: 0, ts: core.clock.now(), type: 'advance', vector: news };
   if (from) op.from = from;
   // Numbered after what it adopts of its own stream (REWOUND on `@~`): the
   // seqs below are the host's already.
   const key = opKey(op);
   op.seq = Math.max(known[key] ?? 0, news[key] ?? 0) + 1;
+  const fps = await link([op], core.fingerprintOf, core.sign !== null);
   if (core.sign !== null) await core.sign(op);
-  const [{ seq }] = await core.log.append([op]);
+  const [{ seq }] = await core.log.append([op], { fps });
   await core.log.advance(news);
   core.log.applied(seq);
   notify(core.storage, core.logger, 'change', op, via);

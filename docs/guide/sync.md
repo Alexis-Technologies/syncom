@@ -88,21 +88,24 @@ and for the list, text and tree ops the payload
 A `merge` carries `data` and `meta`, an `advance` a `vector`, and both name
 in `from` the node whose snapshot was joined.
 
-A push and a `changes` page carry ops packed: one positional array of 18
+A push and a `changes` page carry ops packed: one positional array of 19
 slots per op — `origin`, `seq`, `ts`, `type`, `id`, `scope`, `data`, `meta`,
-`key`, `value`, `vector`, `from`, `v`, `actor`, `sig`, `digest`, `nonce`, `msg` —
+`key`, `value`, `vector`, `from`, `v`, `actor`, `sig`, `digest`, `nonce`, `msg`,
+`prev` —
 with `null` for an absent field and the type as one character: `w` write,
 `s` set, `u` unset, `i` inc, `+` add, `-` remove, `/` splice, `=` assign, `^` move, `*`
 mark, `~` tree, `d` delete, `p` purge, `m` merge, `a` advance. Slots are
 appended, never reordered: a reader of fewer slots ignores the rest, a
 reader of more takes an absent one as `null`. The log itself keeps keyed
-`{ seq, op }` JSON; packing is for the wire. [Wire format](../reference/wire)
+`{ seq, op, fp }` JSON (`fp` the op's [fingerprint](#equivocation)); packing
+is for the wire. [Wire format](../reference/wire)
 is the byte-level reference: every slot, payload, file and procedure, with
 examples.
 
 `hello` carries the protocol version both ways, and a host answers a hello
-of another version with 400 (`PROTOCOL`). Version 1 is the wire as the first
-publication will have it, with every type and slot above. After that, a new
+of another version with 400 (`PROTOCOL`). Version 2 is the wire as the first
+publication will have it, with every type and slot above and the per-stream
+chain ([Equivocation](#equivocation)). After that, a new
 type — which an older reader counts as malformed, so the stream that carries
 it stops there — or a slot an older reader cannot take as `null` is a new
 version.
@@ -232,8 +235,13 @@ log/
 │                             once its groups are sealed, rewritten only by a scrub
 ├── open/<seq>.json           a group in a file of its own, where the backend has no `append` (OPFS, IndexedDB, atRest)
 ├── seg-<from>.json           sealed segments, rolled from open/ every `rollAfter` groups: { entries, hash }
-└── index.json                { epoch, floor, next, vector, segments, droppedHeld, latestTs, droppedTs }
+└── index.json                { epoch, floor, next, vector, heads, segments, droppedHeld, latestTs, droppedTs }
 ```
+
+An entry is `{ seq, op, fp }`: `fp` is the op's fingerprint, and `heads` the
+fingerprint of the newest op of every stream the log held — what a stream's
+next op is held to once the op itself is compacted away (see
+[Equivocation](#equivocation)).
 
 `droppedTs` is the newest stamp among the ops the log no longer holds —
 compacted away, or in a segment an open could not read — and `0` while nothing
@@ -304,7 +312,10 @@ for what it holds). `open({ sync: { rewind: 'adopt' } })` takes the host's
 word instead: the stream moves without proof (up to
 `Number.MAX_SAFE_INTEGER − 2^32`, never past it). Decide before the node
 writes on that stream again: a write made meanwhile takes a seq the host
-already holds another op under.
+already holds another op under — two ops at one seq, which every node that
+holds one reports when it is handed the other ([Equivocation](#equivocation)).
+A proven stream chains on from the op the proof carried: the node's next op
+of it names that op's fingerprint as `prev`.
 
 ## Without the plugin
 
@@ -350,22 +361,28 @@ born without it is rekeyed once, with an `identity.rekeyed` warning, when the
 plugin arrives.
 
 The signature covers the op's **header** — `origin`, `seq`, `ts`, `type`,
-`id`, `scope`, `from`, `v`, `actor` — as a positional JSON array under a
-version number, together with a **digest** of the payload (`data`, `meta`,
-`key`, `value`, `vector`) serialized with sorted keys and salted with a random
-`nonce`:
+`id`, `scope`, `from`, `v`, `actor`, a transaction's `msg` and `prev`, the
+fingerprint of the op before it in its stream (see [Equivocation](#equivocation))
+— as a positional JSON array under a version number, together with a
+**digest** of the payload (`data`, `meta`, `key`, `value`, `vector`)
+serialized with sorted keys and salted with a random `nonce`:
 
 ```
-sig    = Ed25519( [1, origin, seq, ts, type, id, scope, from, v, actor, digest] )
+sig    = Ed25519( [2, origin, seq, ts, type, id, scope, from, v, actor, digest, msg, prev] )
 digest = SHA-256( nonce + "\n" + canonical(payload) )
 ```
+
+`prev` is made by every node, signing or not, and so is an op's fingerprint
+(below); the digest by a node that signs, which is how a signed op's
+fingerprint covers its payload as well as its header.
 
 The split is what lets a [purge](./storage#purge) scrub the payload and the
 nonce out of the log and leave an op whose header still verifies — a resuming
 peer takes the scrubbed op as the no-op it is — and the nonce is what keeps a
 scrubbed op's digest from giving a low-entropy payload away by brute force. A
 `delete` and a `purge` carry no payload, so no digest; an `advance`'s vector is
-a payload like any other. The three fields ride in `packOps` slots 15 to 17.
+a payload like any other. The three fields ride in `packOps` slots 15 to 17,
+and `prev` in the nineteenth.
 
 `open({ sync: { signatures } })` picks the mode:
 
@@ -414,6 +431,50 @@ spends on libuv's thread pool (four threads unless `UV_THREADPOOL_SIZE` says
 otherwise) and the browser inside Web Crypto, sixty-four ops of a page at a
 time; some tens of microseconds per write signed, on the main thread; and some
 190 bytes per op on the wire and in the log — `bytesPerPush` counts them.
+
+### Equivocation
+
+A writer can make two ops at one seq of one stream: a directory restored
+from an older copy, a second instance under the same identity, or a key
+holder that lies — `mallory:1` with `{ title: 'x' }` to one host and with
+`{ title: 'y' }` to another. Each host's vector then covers the other's op,
+which would be dropped as a duplicate: the records would differ for good
+with equal vectors. So every op is named by its **fingerprint** — SHA-256 of
+its header, a signed op's digest included — and names the fingerprint of the
+op before it in its stream as `prev`: a hash chain per stream
+(`origin@scope`, and the `@~` stream of a bootstrap's ops), under the
+signature. The log keeps the fingerprint of every op it retains and, per
+stream, of the newest it ever held. Then:
+
+- an op at a seq this node holds, with another fingerprint, is refused;
+- the next op of a stream whose `prev` is not the fingerprint this node holds
+  at the seq before it — or that names none, when it is signed — is refused:
+  it continues another branch than the one held here;
+- the next op of a stream where this node holds no op before it (the stream
+  starts there, or this node joined it by a snapshot) is taken, and the chain
+  held from it; so is an unsigned op that names none — a hand-made one, an
+  older writer's.
+
+A refused op is neither logged nor relayed and the vector does not move: a
+gap for its stream, like a forged op. It is counted (`equivocations` in the
+apply result, `syncom.ops.rejected` with `reason` `equivocation` or `chain`)
+and reported once per page as an `error` event with `code: 'EQUIVOCATION'`:
+the op, `origin`, `scope`, `seq`, `reason` (`'seq'` or `'chain'`), `held`
+(the fingerprint this node holds) and `received` (the op's, or the `prev` it
+names), and `count`. A host announces it through the `refused` event with
+`reason: 'equivocation'`, tied to the client that pushed.
+
+What it guarantees: a fork is detected at the first honest node that holds
+one branch and is handed the other — or the next op of the other — and
+contained there: each node keeps the branch it took first and never mixes
+the two. Under `'require'` neither `prev` nor the digest can be changed or
+stripped (the op is then `forged`). Without signatures the fingerprint is
+the header alone, with no digest of the payload: it tells a restored copy's
+op from the original by its stamp, but not a liar, nor two ops that differ in
+payload alone. What it does not: heal the fork. The nodes that took
+different branches stay apart and say so whenever they meet; the writer's
+identity is the one to retire. And a node that joined the stream by a
+snapshot takes its next op as given.
 
 ## Protocol
 
@@ -605,7 +666,7 @@ storage.sync.on('peer', ({ url, connected, node, reconnected, schema }) => {});
 storage.sync.on('sync', ({ url, pushed, received, applied, skipped, duplicates, gaps, malformed, unsigned, forged }) => {});
 storage.sync.on('bootstrap', ({ url, records }) => {});
 storage.sync.on('error', (error) => {}); // error.url names the peer; error.code: a string below, or a host's numeric refusal
-storage.sync.on('refused', ({ node, reason, count }) => {}); // hosting side: a peer's ops refused — 'scope' | 'forged' | 'unsigned'
+storage.sync.on('refused', ({ node, reason, count }) => {}); // hosting side: a peer's ops refused — 'scope' | 'forged' | 'unsigned' | 'equivocation'
 storage.sync.on('start', () => {});
 storage.sync.on('stop', () => {});
 storage.sync.on('node', ({ url, action }) => {}); // 'add' | 'remove' | 'enable' | 'disable'
@@ -818,6 +879,12 @@ the engine's own tests run on.
   [Costs and limits](./lists#costs-and-limits).
 - **A node's own sequence never repeats.** The log is written before the op is
   announced, so a crash cannot mint two different ops with one number.
+- **A fork of a stream is caught, not healed.** Two ops at one seq of one
+  stream — a restored copy, a second instance, a lying key holder — are told
+  apart by their fingerprints, and an op that continues another branch than
+  the one held by its `prev`: refused at the first node that holds one and is
+  handed the other (`EQUIVOCATION`), so no node mixes two branches. The nodes
+  that took different branches stay apart — see [Equivocation](#equivocation).
 - **Logged means applied, eventually.** The record files are written after
   the log; a reopen replays the unsealed tail onto them, and the log seals a
   batch only once its records were written — a crash between the two, or a

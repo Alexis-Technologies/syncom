@@ -569,7 +569,10 @@ class SyncManager extends Emitter {
   // under `sync.rewind: 'adopt'`. Reported either way, with what moved
   // (`adopted`); a stream that did not move goes to that host no more until
   // the next hello. Writes made since the restore and before this hello are
-  // lost to the host. True when something moved: the bootstrap follows.
+  // lost to the host. A proven op is also what the stream's next op chains
+  // to (its fingerprint, the stream's head); a stream adopted without one
+  // names no predecessor for it. True when something moved: the bootstrap
+  // follows.
   async #rewind(peer, answer) {
     const { log } = this.#storage;
     const { vector } = answer;
@@ -587,10 +590,11 @@ class SyncManager extends Emitter {
       local[key] = held;
     }
     if (remote === null) return false;
-    const taking = this.#options.rewind === 'adopt' ? remote : await this.#proven(remote, answer.proof);
+    const { proven, proofs } = await this.#proven(remote, answer.proof);
+    const taking = this.#options.rewind === 'adopt' ? remote : proven;
     let op = null;
     if (Object.keys(taking).length > 0) {
-      op = await this.#storage[REWIND](taking, { via: peer.ref, from: peer.remote.id });
+      op = await this.#storage[REWIND](taking, { via: peer.ref, from: peer.remote.id, proofs });
     }
     const adopted = op === null ? {} : { ...op.vector };
     const stays = Object.keys(remote);
@@ -604,12 +608,14 @@ class SyncManager extends Emitter {
 
   // Of a host's claims on this node's own streams, the ones its hello
   // proves: the op it holds at the seq it claims, this node's own (origin,
-  // stream, seq) and signed by this node's key — what no host can make.
+  // stream, seq) and signed by this node's key — what no host can make —
+  // and the ops themselves (`proofs`), what the streams chain on from.
   // Nothing is proven without the signing plugin: the key is the proof.
   async #proven(remote, proof) {
     const identity = this.#storage[SIGNER];
     const proven = {};
-    if (!identity || !Array.isArray(proof)) return proven;
+    const proofs = [];
+    if (!identity || !Array.isArray(proof)) return { proven, proofs };
     const ops = unpackOps(proof);
     for (let i = 0; i < ops.length; i++) {
       const op = ops[i];
@@ -617,12 +623,14 @@ class SyncManager extends Emitter {
       const key = opKey(op);
       if (!Object.hasOwn(remote, key) || remote[key] !== op.seq) continue;
       try {
-        if ((await identity.verify(op, 'require')) === VERDICT.OK) proven[key] = op.seq;
+        if ((await identity.verify(op, 'require')) !== VERDICT.OK) continue;
+        proven[key] = op.seq;
+        proofs.push(op);
       } catch {
         // A proof that cannot be checked proves nothing.
       }
     }
-    return proven;
+    return { proven, proofs };
   }
 
   // Every push to a peer — handshake, manual, relay, recovery — runs on one

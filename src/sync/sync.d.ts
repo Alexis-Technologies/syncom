@@ -133,19 +133,23 @@ export interface SyncEvents {
     unsigned?: number;
     forged?: number;
     outOfScope?: number;
+    equivocations?: number;
   }) => void;
   bootstrap: (event: { url: string; records: number }) => void;
   /**
    * Hosting side: ops of a peer this node would not take — outside the
    * scopes its hello granted (`scope`), signed but not by their origin
-   * (`forged`), or unsigned under `sync.signatures: 'require'` (`unsigned`).
+   * (`forged`), unsigned under `sync.signatures: 'require'` (`unsigned`), or
+   * another op than the one this node holds at their seq, or after the one
+   * before it (`equivocation`).
    */
   /**
    * Hosting side: what a peer sent was refused. Ops — out of scope, forged,
-   * unsigned under 'require' (`node` the pusher); a presence update — not the
-   * peer's own, of a scope it did not ask for, past the rate, malformed or
-   * unsigned (`PRESENCE_*`, one each); a presence update before hello
-   * (`HELLO`, `node` null).
+   * unsigned under 'require', or a fork of a stream (`equivocation`: another
+   * op at a seq this node holds, or a broken chain; `node` the pusher); a
+   * presence update — not the peer's own, of a scope it did not ask for,
+   * past the rate, malformed or unsigned (`PRESENCE_*`, one each); a presence
+   * update before hello (`HELLO`, `node` null).
    */
   refused: (event: {
     node: string | null;
@@ -153,6 +157,7 @@ export interface SyncEvents {
       | 'scope'
       | 'forged'
       | 'unsigned'
+      | 'equivocation'
       | 'HELLO'
       | 'PRESENCE_RATE'
       | 'PRESENCE_MALFORMED'

@@ -321,7 +321,8 @@ const createTelemetry = (telemetry) => {
       if (skipped > 0) add(opsReceived, skipped, OUTCOME_SKIPPED);
       if (result.duplicates > 0) add(opsReceived, result.duplicates, OUTCOME_DUPLICATE);
       if (result.gaps > 0) add(opsReceived, result.gaps, OUTCOME_GAP);
-      const refused = (result.forged ?? 0) + (result.unsigned ?? 0) + (result.outOfScope ?? 0);
+      const refused =
+        (result.forged ?? 0) + (result.unsigned ?? 0) + (result.outOfScope ?? 0) + (result.equivocations ?? 0);
       if (refused > 0) add(opsReceived, refused, OUTCOME_REFUSED);
       record(writeDuration, elapsed, PATH_APPLY);
     },

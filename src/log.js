@@ -19,8 +19,8 @@
 //                       backend cannot append (and from before journals)
 //   seg-<from>.json     sealed segments: the open files rolled together once
 //                       enough of them accumulate
-//   index.json          { epoch, floor, next, vector, segments, droppedHeld,
-//                       latestTs, droppedTs } — a summary;
+//   index.json          { epoch, floor, next, vector, heads, segments,
+//                       droppedHeld, latestTs, droppedTs } — a summary;
 //                       the files are the source of truth and anything the
 //                       index lacks is rebuilt from a directory listing
 //
@@ -30,9 +30,18 @@
 // coincidence. `floor` is the lowest seq still retained: below it, and for an
 // unknown epoch, `since()` answers null — "I cannot resume you, take a
 // snapshot" — never a silent gap.
+//
+// Every entry an append is handed a fingerprint for keeps it (`fp`, the
+// SHA-256 of the op's header, src/header.js), and the log knows, by stream
+// (`origin@scope`, vector.js opKey) and seq, the fingerprint of every op it
+// retains — and of the newest op of every stream it ever held, its HEAD, kept
+// in the index beside the vector, so a stream compacted away still has one.
+// Both move with the vector, at the append, and go back with it when a group
+// fails: what a writer chains its next op to (`prev`), and what a peer's op is
+// held to (src/apply.js).
 
 const defaultFsi = require('./fsi.js');
-const { formatEventId, parseEventId, vectorAdvance } = require('./vector.js');
+const { formatEventId, parseEventId, vectorAdvance, opKey } = require('./vector.js');
 const { checksum } = require('./hash.js');
 const { GLOBAL_SCOPE, inScope } = require('./scope.js');
 const { writerOf, traced, now } = require('./telemetry.js');
@@ -42,6 +51,9 @@ const JOURNAL = '.jsonl';
 const INDEX = 'index.json';
 const DEFAULT_ROLL_AFTER = 64;
 const DEFAULT_RETENTION_OPS = 10_000;
+
+// SHA-256 as base64url (src/digest.js `hashOf`), as src/shape.js checks an op's `prev`.
+const FINGERPRINT = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
 
 const pad = (n) => String(n).padStart(10, '0');
 const segmentName = (from) => `seg-${pad(from)}.json`;
@@ -103,6 +115,10 @@ class OpLog {
   #floor = 1;
   #epoch = null;
   #vector = {};
+  // Stream → seq → fingerprint, of every op retained (and every op reserved);
+  // stream → [seq, fingerprint] of the newest op ever held, compacted or not.
+  #prints = new Map();
+  #heads = new Map();
   #rollAfter;
   #retention;
   #log;
@@ -178,6 +194,7 @@ class OpLog {
       this.#epoch = index.epoch;
       this.#floor = index.floor ?? 1;
       this.#vector = index.vector ?? {};
+      this.#takeHeads(index.heads);
       this.#segments = Array.isArray(index.segments) ? index.segments : [];
       this.#droppedHeld = Number.isInteger(index.droppedHeld) ? index.droppedHeld : 0;
       // Seeded from the index; what the files hold only moves it up.
@@ -410,9 +427,51 @@ class OpLog {
         vectorAdvance(this.#vector, entry.op);
         this.#observe(entry.op);
         this.#indexEntry(entry);
+        if (typeof entry.fp === 'string') this.#print(entry);
       }
     }
     if (added) this.#entries.sort((a, b) => a.seq - b.seq);
+  }
+
+  // An entry's fingerprint, by its stream and seq; the stream's head moves
+  // to it when it is the newest.
+  #print(entry) {
+    const { op, fp } = entry;
+    const key = opKey(op);
+    let seqs = this.#prints.get(key);
+    if (seqs === undefined) this.#prints.set(key, (seqs = new Map()));
+    seqs.set(op.seq, fp);
+    // The head moves in place: a group keeps a copy of what it was (`append`).
+    const head = this.#heads.get(key);
+    if (head === undefined) this.#heads.set(key, [op.seq, fp]);
+    else if (head[0] <= op.seq) {
+      head[0] = op.seq;
+      head[1] = fp;
+    }
+  }
+
+  #unprint(entry) {
+    if (entry.fp === undefined || !entry.op) return;
+    const key = opKey(entry.op);
+    const seqs = this.#prints.get(key);
+    if (seqs === undefined) return;
+    seqs.delete(entry.op.seq);
+    if (seqs.size === 0) this.#prints.delete(key);
+  }
+
+  // Heads as the index or a REWOUND proof hands them — `{ key: [seq, fp] }`
+  // — own keys, a positive safe seq, a fingerprint's shape; newer than what
+  // is held.
+  #takeHeads(heads) {
+    if (heads === null || typeof heads !== 'object' || Array.isArray(heads)) return;
+    const keys = Object.keys(heads);
+    for (let i = 0; i < keys.length; i++) {
+      const head = heads[keys[i]];
+      if (!Array.isArray(head) || !Number.isSafeInteger(head[0]) || head[0] < 1) continue;
+      if (typeof head[1] !== 'string' || !FINGERPRINT.test(head[1])) continue;
+      const held = this.#heads.get(keys[i]);
+      if (held === undefined || held[0] < head[0]) this.#heads.set(keys[i], [head[0], head[1]]);
+    }
   }
 
   #indexEntry(entry) {
@@ -483,6 +542,33 @@ class OpLog {
   /** One key of the vector, without copying it: what a local write mints its seq from. */
   seqOf(key) {
     return this.#vector[key] ?? 0;
+  }
+
+  /**
+   * The fingerprint of the op at `seq` of the stream `key` (an `opKey`), as
+   * this log holds it — retained, reserved, or the stream's head — or
+   * undefined.
+   */
+  fingerprintOf(key, seq) {
+    const fp = this.#prints.get(key)?.get(seq);
+    if (fp !== undefined) return fp;
+    const head = this.#heads.get(key);
+    return head !== undefined && head[0] === seq ? head[1] : undefined;
+  }
+
+  /** `[seq, fingerprint]` of the newest op of the stream `key` this log held, or undefined. */
+  headOf(key) {
+    const head = this.#heads.get(key);
+    return head === undefined ? undefined : [head[0], head[1]];
+  }
+
+  /**
+   * Heads of streams whose ops this log does not hold — this node's own, taken
+   * back from a host on its proof (REWOUND) — `{ key: [seq, fingerprint] }`;
+   * persisted with the next index. A head older than the one held is left.
+   */
+  adoptHeads(heads) {
+    this.#takeHeads(heads);
   }
 
   get length() {
@@ -570,7 +656,7 @@ class OpLog {
    * replay of the tail leaves them alone too; a held one is applied once
    * this node runs its version.
    */
-  append(ops, { skipped = null, held = null, ready = null } = {}) {
+  append(ops, { skipped = null, held = null, ready = null, fps = null } = {}) {
     const entries = [];
     if (ops.length === 0) {
       const ticket = Promise.resolve(entries);
@@ -583,9 +669,20 @@ class OpLog {
       const entry = { seq, op };
       if (skipped?.has(op)) entry.skipped = true;
       if (held?.has(op)) entry.held = held.get(op);
+      const fp = fps?.get(op);
       entries.push(entry);
       group.entries.push(entry);
       vectorAdvance(this.#vector, op);
+      if (fp !== undefined) {
+        entry.fp = fp;
+        // The stream's head before the group, once: what a failure puts back.
+        const key = opKey(op);
+        if (!group.heads.has(key)) {
+          const head = this.#heads.get(key);
+          group.heads.set(key, head === undefined ? undefined : [head[0], head[1]]);
+        }
+        this.#print(entry);
+      }
       this.#observe(op);
     }
     // What the ops still wait for before they can be written (a signature
@@ -598,13 +695,15 @@ class OpLog {
   }
 
   // A group to gather appends into: what the vector and the counter were
-  // before it, for a write that fails.
+  // before it, and the heads of the streams it touches, for a write that
+  // fails.
   #newGroup() {
     const group = {
       entries: [],
       ready: [],
       from: this.#next,
       vector: { ...this.#vector },
+      heads: new Map(),
       resolve: null,
       reject: null,
     };
@@ -691,13 +790,22 @@ class OpLog {
   }
 
   // A group that did not reach the disk, and the one gathered behind it
-  // (its seqs follow): their callers told, the counter and the vector put
-  // back to before the first of them, so the seqs are handed out again.
+  // (its seqs follow): their callers told, the counter, the vector and the
+  // heads put back to before the first of them, so the seqs are handed out
+  // again and the next op of a stream chains to what is durable.
   #fail(group, error) {
     const later = this.#group;
     this.#group = null;
     this.#next = group.from;
     this.#vector = group.vector;
+    // The later group first: the heads before the first are the ones kept.
+    for (const failed of later === null ? [group] : [later, group]) {
+      for (const entry of failed.entries) this.#unprint(entry);
+      for (const [key, head] of failed.heads) {
+        if (head === undefined) this.#heads.delete(key);
+        else this.#heads.set(key, head);
+      }
+    }
     if (this.#onFail !== null) {
       try {
         this.#onFail(error, group.from);
@@ -789,6 +897,7 @@ class OpLog {
         if (entry.held !== undefined) this.#droppedHeld++;
         if (typeof entry.op?.ts === 'number' && entry.op.ts > this.#droppedTs) this.#droppedTs = entry.op.ts;
         this.#unindexEntry(entry);
+        this.#unprint(entry);
       }
       this.#entries = this.#entries.slice(this.#lowerBound(oldest.to + 1));
       this.#floor = oldest.to + 1;
@@ -845,6 +954,7 @@ class OpLog {
       floor: this.#floor,
       next: this.#next,
       vector: this.#vector,
+      heads: Object.fromEntries(this.#heads),
       segments: this.#segments,
       droppedHeld: this.#droppedHeld,
       latestTs: this.#latestTs,

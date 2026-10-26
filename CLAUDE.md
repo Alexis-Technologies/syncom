@@ -60,12 +60,17 @@ src/layered/layered.js    @alexify/syncom/layered — layered([top, …, bottom]
 src/emitter.js            the Emitter both halves extend — no requires
 src/logger.js             createLogger, the duck-typed logger writer — no requires
 src/keys.js               loadKeyPair — the on-disk key pairs (RSA for sealing, Ed25519 for signing), generator injected by each crypto half — requires errors.js only
-src/digest.js             sha256 — SHA-256 of a value's JSON through Web Crypto, async on both platforms: the chain's and the schema hash's — no requires
+src/digest.js             sha256, hashOf — SHA-256 of a value's JSON as hex: the chain's, the schema hash's, an op's digest and fingerprint;
+                          node:crypto here, Web Crypto in src/digest.browser.js; `sha256` async on both, `hashOf` at once in Node.js and a
+                          promise in the browser (the write path names every op with it)
 src/pem.js                base64/PEM helpers over btoa/atob for the browser crypto halves — no requires
 src/scope.js              GLOBAL_SCOPE, inScope, opInScope — the one definition of "in scope" — no requires
 src/blame.js              lastEditorOf, editorsOf — who wrote what, from a record's meta (registers' clocks, counters' sums, sets' slots, the plugins' `editors` hook); never the log
 src/hash.js               xxHash32 in pure JS — the checksum every log file carries (`{ entries, hash }`); a checksum, never a signature — no requires
 src/signing/sign.js       canonical form, signOp, verifyOp — what a signature covers (the header + a salted payload digest) and the verdict on a peer's op
+src/header.js             what names an op, the core's: the header (v2, `prev` last), payloadOf, the salted digest every node mints
+                          (`digest`), the fingerprint (SHA-256 of the header) — requires digest.js and shape.js only (the signing subpath
+                          ships it); `link` in src/commit.js sets an op's `prev` from the op before it in its stream
 src/shape.js              isPlainObject, asJson, isRecordId, isStreamName, wellFormed — what enters is checked here
 src/paths.js              field paths: isPath, ancestorsOf, under, valueAt, MAX_PATHS — no requires
 src/compose.js            compose (the paths nested for a reader), decompose (a reading back to the fields) — requires paths.js
@@ -180,18 +185,18 @@ docs/                     VitePress site
   options, settings, logger }`, run after the replay — hands back `sync` (the SyncManager, the
   sync plugin: `storage.sync` is PLUGIN_MISSING without it). The core reads them as
   `core.identity`/`core.sign`/`core.verify`, `core.seal`, `core.chain`, and `core.hash` is
-  `sha256` from `src/digest.js` (Web Crypto, async on both platforms — the core has no crypto
-  half). Without a hook: the node id is what `getId` mints (checked by `isStreamName`), ops are
-  neither signed nor verified (`verifyPage` answers OK for every op), `block: null`, and an
+  `sha256` from `src/digest.js` (async on both platforms; its one crypto half is the hash —
+  signing and sealing are the plugins'). Without a hook: the node id is what `getId` mints (checked by `isStreamName`), ops are
+  neither signed nor verified (`checkPage` answers OK for every op), `block: null`, and an
   encrypted write is `PLUGIN_MISSING`. What the options ask for and no plugin provides is
   refused in `#open` with `missing()` — `signatures: 'require'`, `chain: true`, `encrypted` —
   never silently downgraded. A new api plugin adds a hook name here and a line in
   `docs/reference/api.md` Plugins; it never reaches the storage's state except through `ctx`
   and the hooks.
-- **Browser halves are `*.browser.js`** (dot, not dash): `fsi` and `utils` in the core,
+- **Browser halves are `*.browser.js`** (dot, not dash): `fsi`, `utils` and `digest` in the core,
   `signing/ed25519` and `encryption/rsa` in their subpaths. Everything else (storage, log, ops,
   sync, chain, wrpc adapter, and the require-free `emitter`, `logger`, `keys`, `scope`,
-  `digest`, `pem`) is shared; the two `utils` halves only re-export `Emitter`/`createLogger`
+  `pem`) is shared; the two `utils` halves only re-export `Emitter`/`createLogger`
   and add the platform's own bits. Adding a split means three edits: the file, `package.json#browser`,
   and `src/index.browser.js`. `tests/package/consistency.test.js` catches a
   missed one. To run shared code against the browser halves under Node, load
@@ -236,7 +241,7 @@ docs/                     VitePress site
   integers), `type`, `v` and the id before reading anything else (`actor`
   and `from` are claims, carried as they are), and how deep every field
   nests (`MAX_WIRE_DEPTH`, `nestsWithin` — iterative: the readers after it
-  recurse; `verifyPage` runs after `wellFormed` and never throws, a throwing
+  recurse; `checkPage` runs after `wellFormed` and never throws, a throwing
   check is that op's FORGED); a stamp beyond `sync.maxSkew` ahead of
   `Date.now()` — the op's `ts` or any stamp a `merge`'s meta holds
   (`latestClock`) — is refused the same way (`SKEW`), never observed into
@@ -288,14 +293,15 @@ docs/                     VitePress site
   which rewrites files in place; `persist` in `src/apply.js` and `mergeBatch`
   in `src/bootstrap.js` scrub every id of the batch whose entry is purged,
   after the batch is durable and before the relay. Never log a payload for a purged id through another path.
-- **`packOps` is 18 positional slots, both halves together.** `v` (13),
+- **`packOps` is 19 positional slots, both halves together.** `v` (13),
   `actor` (14), `sig`, `digest` and `nonce` (15–17), `msg` (18, a
   transaction's message, ≤ `MAX_MESSAGE` in `src/shape.js`, in the signed
-  header) were appended; a reader
+  header), `prev` (19, the fingerprint of the op before it in its stream, in
+  the signed header) were appended; a reader
   of fewer slots ignores the rest, a reader of more takes an absent slot as
   null. Append, never reorder — the
   shape is on the wire between every pair of peers (the log itself stores
-  keyed `{ seq, op }` JSON; `packOps` is for `push` and `changes` only). An
+  keyed `{ seq, op, fp }` JSON; `packOps` is for `push` and `changes` only). An
   op type is one character in `TYPE_CODES`/`CODE_TYPES` (`+`/`-` are the set
   ops). Once the package is published, an older reader counts an unknown type
   as malformed and its stream stalls there — a new type, or a slot an older
@@ -637,7 +643,8 @@ docs/                     VitePress site
   async function of the Node half is `verifyAsync` — the engine's verify, `crypto.verify` with
   a callback, on libuv's thread pool — and it is not on the subpath's surface: `signing.js`
   leaves it out by name, and `src/signing/sign.js` is its only caller. In the browser it is
-  `verify` itself. The core's own hash, `sha256` in `src/digest.js`, is async on both.
+  `verify` itself. The core's own hash, `sha256` in `src/digest.js`, is async on both;
+  `hashOf` beside it is the write path's, at once in Node.js and a promise in the browser.
   The barrels spell every export out — a required module spread whole, the
   rest by name, never a spread of a local — because that is the shape Node's
   cjs-module-lexer reads for an ESM importer (`tests/package/esm.test.js`).
@@ -648,11 +655,14 @@ docs/                     VitePress site
   a UUID from before signing, or a directory opened without the plugin — is rekeyed once with
   `identity.rekeyed`; another key id is `IDENTITY_MISMATCH`, never silent). Without the plugin
   the id is what `node.json` names or `getId` mints, and a key id stays the id. `src/signing/sign.js` signs
-  `[1, origin, seq, ts, type, id, scope, from, v, actor, digest]` with
-  `digest = sha256(nonce + canonical(payload))` — three sign sites, `core.sign`
-  in `persistLocal` (after `validateLocal` rewrote `op.data`), `mergeBatch`
-  (after the seq is assigned) and `adopt`, all before the append. A peer's
-  page is verified in `verifyPage` (src/apply.js) BEFORE the sequential
+  `[2, origin, seq, ts, type, id, scope, from, v, actor, digest, msg, prev]`
+  (`headerOf` in src/header.js) with `digest = sha256(nonce + canonical(payload))`
+  — `prev` minted by the core for every op, the digest where the node signs
+  (`link`), at the four sites that make an op of this node's own: `issue` and
+  `transact` in src/commit.js (after `validateLocal` rewrote `op.data`),
+  `mergeBatch` (after the seq is assigned) and `adopt` in src/bootstrap.js —
+  then `core.sign`, all before the append. A peer's
+  page is verified in `checkPage` (src/apply.js) BEFORE the sequential
   `admit`, sixty-four at a time through `verifyAsync` (the thread pool in
   Node.js — a synchronous verify there would hold a page to one check at a
   time); it never throws (a throw there would be `PAGE_FAILED`, a
@@ -663,6 +673,23 @@ docs/                     VitePress site
   only mode that resists stripping — say so wherever signatures are
   documented — and so is the plugin on every node, since a node without it
   signs nothing. Never put the key or a signature into a metric label.
+- **A stream is a hash chain; a fork is refused, never healed.** An op's
+  fingerprint is the SHA-256 of its header (`fingerprintOf`, src/header.js) —
+  the same on every node, whole after a scrub — and it names the one before it
+  in its stream (`opKey`, the `@~` stream too) as `prev`. The log keeps `fp` on
+  every entry it is handed one for (`append({ fps })` — every write path hands
+  them), an index stream → seq → fp of what it retains and reserves, and a head
+  per stream (`[seq, fp]`, in index.json beside the vector, kept past
+  compaction); both move at the append and go back with the vector in `#fail`.
+  `admit` (src/apply.js) holds a peer's op to them: a duplicate with another
+  fingerprint, and a next op whose `prev` is not the one held at seq − 1 (or
+  none, signed), are `EQUIVOCATION` (`reason` `'seq'`/`'chain'`) — not logged,
+  not relayed, a gap, reported once per page, never a throw. Where nothing is
+  held at seq − 1 (a stream joined by snapshot, a REWOUND stream without its
+  proof op) the op is taken and the chain held from it; an unsigned op without
+  `prev` is a hand-made one, taken. A REWOUND proof's op becomes the stream's
+  head (`log.adoptHeads`). A new path that mints an op of this node's own goes
+  through `link` before it signs, or its next op names the wrong predecessor.
 - **A `.d.ts` change and its `tsd` test land together** (`tests/*.test-d.ts`).
 - **An editor binding sends one delta at a time, with `expect`.** `applyDelta(id, key,
   delta, { expect })` compares the field's text inside the queue and refuses `STALE` before

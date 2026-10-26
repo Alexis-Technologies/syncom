@@ -31,12 +31,14 @@ const runSigningTests = async (t, assert, signing, cryptoMod) => {
     assert.deepStrictEqual(payloadOf({ type: 'advance', vector: { B: 2 }, from: 'B' }), { vector: { B: 2 } });
     assert.strictEqual(
       signedMessage({ ...op, digest: 'd' }),
-      JSON.stringify([HEADER_VERSION, 'A', 3, 9, 'set', 'r', null, null, 2, 'u', 'd', null]),
+      JSON.stringify([HEADER_VERSION, 'A', 3, 9, 'set', 'r', null, null, 2, 'u', 'd', null, null]),
     );
     assert.strictEqual(
       signedMessage({ origin: 'A', seq: 1, ts: 1, type: 'advance', vector: {}, from: 'B' }),
-      '[1,"A",1,1,"advance",null,null,"B",null,null,null,null]',
+      '[2,"A",1,1,"advance",null,null,"B",null,null,null,null,null]',
     );
+    // The fingerprint of the op before it in its stream is signed last.
+    assert.strictEqual(JSON.parse(signedMessage({ ...op, prev: 'p' }))[12], 'p');
     // The same op with its keys in another order: the same message.
     const shuffled = { v: 2, data: { x: 1 }, actor: 'u', id: 'r', type: 'set', ts: 9, seq: 3, origin: 'A' };
     assert.strictEqual(signedMessage(shuffled), signedMessage(op));
@@ -59,7 +61,7 @@ const runSigningTests = async (t, assert, signing, cryptoMod) => {
       'type',
     ]);
     assert.match(op.sig, /^[A-Za-z0-9_-]{86}$/);
-    assert.match(op.digest, /^[0-9a-f]{64}$/);
+    assert.match(op.digest, /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/);
     assert.match(op.nonce, /^[A-Za-z0-9_-]{16,64}$/);
     assert.strictEqual(await verifyOp(op, 'verify'), OK);
     assert.strictEqual(await verifyOp(op, 'require'), OK);

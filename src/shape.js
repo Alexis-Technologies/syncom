@@ -81,11 +81,14 @@ const VALIDATED = new Set([
 ]);
 
 // A signature's three fields, by shape alone — whether they check is
-// src/signing/sign.js's business: 64 bytes base64url, 32 bytes hex, a nonce.
-// A transaction's message rides on each of its ops, in the signed header.
+// src/signing/sign.js's business: 64 bytes base64url, 32 bytes base64url, a
+// nonce. `prev`, the fingerprint of the op before it in its stream, is 32
+// bytes base64url too (src/header.js). A transaction's message rides on each of its ops, in
+// the signed header.
 const MAX_MESSAGE = 1024;
 const SIGNATURE = /^[A-Za-z0-9_-]{86}$/;
-const DIGEST = /^[0-9a-f]{64}$/;
+// SHA-256 as base64url: 43 characters, the last carrying four bits (one spelling per digest).
+const DIGEST = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
 const NONCE = /^[A-Za-z0-9_-]{16,64}$/;
 
 // How deep what the write API takes may nest — a record's data, an array of
@@ -141,6 +144,7 @@ const wellFormed = (op) =>
   (op.v === undefined || (Number.isInteger(op.v) && op.v >= 1)) &&
   (op.sig === undefined || (typeof op.sig === 'string' && SIGNATURE.test(op.sig))) &&
   (op.digest === undefined || (typeof op.digest === 'string' && DIGEST.test(op.digest))) &&
+  (op.prev === undefined || (typeof op.prev === 'string' && DIGEST.test(op.prev))) &&
   (op.nonce === undefined || (typeof op.nonce === 'string' && NONCE.test(op.nonce))) &&
   (op.msg === undefined || (typeof op.msg === 'string' && op.msg.length <= MAX_MESSAGE)) &&
   (op.type === 'advance' ? isPlainObject(op.vector) : isRecordId(op.id)) &&

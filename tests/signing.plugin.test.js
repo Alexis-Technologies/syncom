@@ -150,7 +150,7 @@ test('signing as a plugin', async (t) => {
     const strict = await createStorage(t2, 'S', { plugins: [signing], sync: { signatures: 'require' } });
     strict.on('error', () => {});
     const link = new MemoryLink(strict.sync.unit({ access: 'public' }));
-    await assert.rejects(() => link.call('syncom/hello', { node: a.nodeId, version: 1 }), {
+    await assert.rejects(() => link.call('syncom/hello', { node: a.nodeId, version: 2 }), {
       code: 403,
       reason: 'UNSIGNED',
     });

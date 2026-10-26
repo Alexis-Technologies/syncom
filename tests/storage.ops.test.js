@@ -861,7 +861,10 @@ test('Storage replication model', async (t) => {
     const changes = [];
     storage.on('change', (op, via) => changes.push({ op, via }));
 
-    const first = await storage.applyRemote([remoteOp('peer', 1, 'write', 'r1', { data: { a: 1 } })], { via: 'L' });
+    // The same op again is a duplicate: one made anew at its seq, with
+    // another stamp, would be another op there (EQUIVOCATION).
+    const written = remoteOp('peer', 1, 'write', 'r1', { data: { a: 1 } });
+    const first = await storage.applyRemote([written], { via: 'L' });
     assert.deepStrictEqual(first, {
       applied: 1,
       skipped: 0,
@@ -871,13 +874,14 @@ test('Storage replication model', async (t) => {
       unsigned: 0,
       forged: 0,
       outOfScope: 0,
+      equivocations: 0,
     });
     assert.deepStrictEqual(await storage.get('r1'), { a: 1 });
     assert.deepStrictEqual(changes[0].via, 'L');
     assert.strictEqual(changes[0].op.origin, 'peer');
 
     const again = await storage.applyRemote([
-      remoteOp('peer', 1, 'write', 'r1', { data: { a: 1 } }),
+      written,
       remoteOp('peer', 3, 'set', 'r1', { data: { b: 1 } }),
       { origin: storage.nodeId, seq: 1, ts: 1, type: 'write', id: 'x', data: {} },
       'garbage',
@@ -891,6 +895,7 @@ test('Storage replication model', async (t) => {
       unsigned: 0,
       forged: 0,
       outOfScope: 0,
+      equivocations: 0,
     });
     assert.deepStrictEqual(await storage.get('r1'), { a: 1 });
 
@@ -908,6 +913,7 @@ test('Storage replication model', async (t) => {
       unsigned: 0,
       forged: 0,
       outOfScope: 0,
+      equivocations: 0,
     });
     assert.strictEqual(await storage.get('r1'), null);
     assert.deepStrictEqual(storage.vector, { peer: 4 });
@@ -1109,6 +1115,7 @@ test('Storage replication model', async (t) => {
       unsigned: 0,
       forged: 0,
       outOfScope: 0,
+      equivocations: 0,
     });
     assert.strictEqual(errors.length, 1);
     assert.strictEqual(errors[0].code, 'OP_UNREADABLE');
@@ -1316,8 +1323,9 @@ test("Storage: what a peer's op must look like", async (t) => {
       { ...ok, seq: 2, sig: 'short' },
       { ...ok, seq: 2, sig: 42 },
       { ...ok, seq: 2, sig: `${'S'.repeat(85)}=` },
-      { ...ok, seq: 2, digest: 'D'.repeat(64) },
-      { ...ok, seq: 2, digest: 'd'.repeat(63) },
+      { ...ok, seq: 2, digest: 'd'.repeat(43) },
+      { ...ok, seq: 2, digest: 'd'.repeat(42) },
+      { ...ok, seq: 2, digest: 'f'.repeat(64) },
       { ...ok, seq: 2, nonce: 'short' },
       { ...ok, seq: 2, nonce: 'n'.repeat(65) },
       { ...ok, seq: 2, nonce: 'has space in it!' },
@@ -1332,6 +1340,7 @@ test("Storage: what a peer's op must look like", async (t) => {
       unsigned: 0,
       forged: 0,
       outOfScope: 0,
+      equivocations: 0,
     });
     assert.strictEqual(storage.log.length, 1, 'only the good op is in the log');
     assert.deepStrictEqual(storage.vector, { peer: 1 });
@@ -1357,6 +1366,7 @@ test("Storage: what a peer's op must look like", async (t) => {
       unsigned: 0,
       forged: 0,
       outOfScope: 0,
+      equivocations: 0,
     });
     assert.strictEqual(errors.length, 1);
     assert.strictEqual(errors[0].code, 'SKEW');

@@ -272,7 +272,7 @@ export interface SyncOp {
   v?: number;
   /** Who made it — `open({ actor })` or the write's own; a claim the origin signed, not a proof of identity. Absent on `merge`/`advance`. */
   actor?: string;
-  /** The origin's Ed25519 signature over the header and `digest` (base64url); absent under `sync.signatures: false` and on ops of older peers. */
+  /** The origin's Ed25519 signature over the header and `digest` (base64url); absent under `sync.signatures: false`, without the signing plugin and on ops of older peers. */
   sig?: string;
   /** SHA-256 of the payload (`data`, `meta`, `key`, `value`, `vector`) in canonical JSON, salted with `nonce`; stays after a purge scrubbed the payload. */
   digest?: string;
@@ -280,6 +280,13 @@ export interface SyncOp {
   nonce?: string;
   /** The message of the transaction (or patch batch) the op was made in, at most 1 024 characters; in the signed header. */
   msg?: string;
+  /**
+   * The fingerprint (SHA-256 of the header, hex) of the op before it in its
+   * stream — `origin@scope`, or the `@~` stream of `merge`/`advance`; absent
+   * on a stream's first op and where the writer holds no op before it. In
+   * the signed header.
+   */
+  prev?: string;
 }
 
 export interface EntryMeta {
@@ -429,6 +436,7 @@ export type SyncomErrorCode =
   | 'KINDS_MISMATCH'
   | 'BAD_SIGNATURE'
   | 'UNSIGNED'
+  | 'EQUIVOCATION'
   | 'BAD_ENVELOPE'
   | 'BLOCK_NOT_FOUND'
   | 'NOT_CONTRACT'
@@ -513,6 +521,8 @@ export interface LogEntry {
   held?: number;
   /** The payload was scrubbed (a purge): `data`, `meta`, `key` and `value` are gone. */
   scrubbed?: true;
+  /** The op's fingerprint — SHA-256 of its header, hex — as the append was handed it; what its stream's next op names as `prev`. */
+  fp?: string;
 }
 
 export interface OpLogOptions {
@@ -543,7 +553,12 @@ export interface OpLog {
   formatId(seq: number): string;
   append(
     ops: readonly SyncOp[],
-    options?: { skipped?: ReadonlySet<SyncOp> | null; held?: ReadonlyMap<SyncOp, number> | null },
+    options?: {
+      skipped?: ReadonlySet<SyncOp> | null;
+      held?: ReadonlyMap<SyncOp, number> | null;
+      /** Each op's fingerprint, kept on its entry (`fp`) and by its stream and seq. */
+      fps?: ReadonlyMap<SyncOp, string> | null;
+    },
   ): Promise<LogEntry[]>;
   /** The entries held for a newer schema version, oldest first. */
   held(): LogEntry[];
@@ -589,6 +604,12 @@ export interface OpLog {
   applied(from: number, to?: number): void;
   /** One key of the vector (`origin` or `origin@scope`), without copying the whole. */
   seqOf(key: string): number;
+  /** The fingerprint of the op at `seq` of the stream `key`, as this log holds it — retained, in flight, or the stream's head — or undefined. */
+  fingerprintOf(key: string, seq: number): string | undefined;
+  /** `[seq, fingerprint]` of the newest op of the stream `key` this log held — compacted or not, kept in the index — or undefined. */
+  headOf(key: string): [number, string] | undefined;
+  /** Heads of streams whose ops this log does not hold (a REWOUND proof's), `{ key: [seq, fingerprint] }`; an older one than held is left. */
+  adoptHeads(heads: Record<string, readonly [number, string]>): void;
   /** How many ops the log keeps at least (`retention.ops`); `Infinity` when no count bounds it. */
   readonly retainedOps: number;
   /** Sealed segments on disk. */
@@ -1654,6 +1675,13 @@ export interface ApplyRemoteResult {
    * node's `sync.scope` reads it; neither logged nor relayed.
    */
   outOfScope: number;
+  /**
+   * Refused as equivocation (`EQUIVOCATION`): another op than the one this
+   * node holds at its seq of its stream, or one whose `prev` is not the
+   * fingerprint of the op this node holds at the seq before it; neither
+   * logged nor relayed.
+   */
+  equivocations: number;
 }
 
 /** The events a Storage emits; listeners are contained. */
@@ -1672,7 +1700,10 @@ export interface StorageEvents {
    * validator (`OP_INVALID`, `entity`, `issues`), refused for a stamp
    * beyond `sync.maxSkew` (`SKEW`), or refused for its signature — once per
    * page, `op` the first refused and `count` how many (`BAD_SIGNATURE`,
-   * `UNSIGNED`).
+   * `UNSIGNED`). `EQUIVOCATION`: a writer made two ops at one seq of one
+   * stream — once per page, with the fingerprint held here and the one
+   * received (`reason: 'seq'`), or the one held at the seq before and the
+   * `prev` the op names (`'chain'`).
    */
   error: (
     error:
@@ -1683,6 +1714,17 @@ export interface StorageEvents {
           rejected?: Refusal[];
           entity?: string | null;
           issues?: ValidationIssue[];
+        })
+      | (SyncomError & {
+          code: 'EQUIVOCATION';
+          op: SyncOp;
+          reason: 'seq' | 'chain';
+          origin: string;
+          scope: string | null;
+          seq: number;
+          held: string;
+          received: string | null;
+          count: number;
         })
       /** Records logged but not written — held in memory until they land (see Health). */
       | (SyncomError & { code: 'UNPERSISTED'; ids: string[] }),

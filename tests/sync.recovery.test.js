@@ -166,7 +166,7 @@ test('What a push and a page say about the vector', async (t) => {
     for (let i = 0; i < 3; i++) await host.insert({ i });
     const unit = host.sync.unit({ access: 'public', pageSize: 2 });
     const link = new MemoryLink(unit);
-    await link.call('syncom/hello', { node: 'peer', version: 1 });
+    await link.call('syncom/hello', { node: 'peer', version: 2 });
     const answer = await link.call('syncom/push', {
       ops: packOps([remoteOp('a', 1, 'write', 'a1', { data: {} }), remoteOp('b', 1, 'write', 'b1', { data: {} })]),
     });

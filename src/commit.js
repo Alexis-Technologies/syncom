@@ -12,6 +12,7 @@
 const { applyOp, isAlive, latestClock, observedTags, kindOf, kindsOf } = require('./ops.js');
 const { missing } = require('./plugin.js');
 const { opKey } = require('./vector.js');
+const { digest, fingerprintOf } = require('./header.js');
 const { notify } = require('./hooks.js');
 const { ValidationError } = require('./errors.js');
 const { project, unproject, foldSet } = require('./entity.js');
@@ -309,13 +310,45 @@ const validateLocal = async (core, op, current, visible, ctx) => {
   return { entry, delta, changes };
 };
 
-// Inside the queue: signed, then appended — the seq reserved, the ticket
-// the durability — and the entry made the record's in-flight state, what
-// the next write of the record builds on. The signature is made here and
+/**
+ * Ops of this node's own, final but for the chain, linked in order: each
+ * names as `prev` the fingerprint of the op before it in its stream — one
+ * before it in `ops`, else what `held(key, seq)` answers (the log's), nothing
+ * when the stream starts there or this node does not hold that op — has its
+ * payload digested when the node signs (`signs`: the digest is how the
+ * header, and so the fingerprint, covers the payload — src/header.js), and
+ * is fingerprinted. Before the op is signed and appended, at every place
+ * that mints one: here, a transaction, a bootstrap's merges and advance
+ * (src/bootstrap.js). Returns op → fingerprint, what the log keeps.
+ */
+const link = async (ops, held, signs) => {
+  const fps = new Map();
+  let last = null;
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i];
+    const key = opKey(op);
+    const before = last?.get(key);
+    const prev = before !== undefined && before[0] === op.seq - 1 ? before[1] : held(key, op.seq - 1);
+    if (prev !== undefined) op.prev = prev;
+    if (signs) await digest(op);
+    // A string in Node.js, a promise in the browser: awaited only there.
+    let fp = fingerprintOf(op);
+    if (typeof fp !== 'string') fp = await fp;
+    fps.set(op, fp);
+    (last ??= new Map()).set(key, [op.seq, fp]);
+  }
+  return fps;
+};
+
+// Inside the queue: chained, signed, then appended — the seq reserved, the
+// ticket the durability — and the entry made the record's in-flight state,
+// what the next write of the record builds on. The digest, the link to the
+// op before it in its stream (`prev`) and the signature are made here and
 // nowhere earlier: validateLocal rewrote `op.data`, and what the peers
 // receive is what must verify. The queue is free from here: the disk is
 // waited for outside it.
 const issue = async (core, op, entry) => {
+  const fps = await link([op], core.fingerprintOf, core.sign !== null);
   // Alone, the op is signed here; with writes queued behind it, on the
   // thread pool while the queue moves on — the group's file waits for it.
   let ready = null;
@@ -323,7 +356,7 @@ const issue = async (core, op, entry) => {
     if (core.pipelined()) ready = core.sign(op, true);
     else await core.sign(op, false);
   }
-  const ticket = core.log.append([op], ready === null ? undefined : { ready });
+  const ticket = core.log.append([op], { ready, fps });
   const position = ticket.entries[0].seq;
   core.inflight(op.id, entry, position);
   return { ticket, position };
@@ -708,18 +741,19 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
   const result = await fn(tx);
   if (prepared.length === 0) return { result, done: null, ops: 0 };
   const count = prepared.length;
-  // Signed once every op is final: on the thread pool when there are
-  // several, or writes queued behind; alone and unhurried, here.
-  const signing = core.sign !== null && (count > 1 || core.pipelined()) ? [] : null;
   const ops = [];
-  for (let i = 0; i < count; i++) {
-    ops.push(prepared[i].op);
-    if (signing !== null) signing.push(core.sign(ops[i], true));
-  }
+  for (let i = 0; i < count; i++) ops.push(prepared[i].op);
+  // Chained in order once every op is final — an op names the one made
+  // before it in its stream, here or in the log — then signed: on the thread
+  // pool when there are several, or writes queued behind; alone and
+  // unhurried, here.
+  const fps = await link(ops, core.fingerprintOf, core.sign !== null);
+  const signing = core.sign !== null && (count > 1 || core.pipelined()) ? [] : null;
+  if (signing !== null) for (let i = 0; i < count; i++) signing.push(core.sign(ops[i], true));
   let ready = null;
   if (signing !== null) ready = Promise.all(signing);
   else if (core.sign !== null) await core.sign(ops[0], false);
-  const ticket = core.log.append(ops, ready === null ? undefined : { ready });
+  const ticket = core.log.append(ops, { ready, fps });
   const positions = [];
   for (let i = 0; i < count; i++) {
     positions.push(ticket.entries[i].seq);
@@ -796,4 +830,4 @@ const commit = (core, type, id, payload, options = {}) => {
   return tracedCommit(core, type, id, payload, options);
 };
 
-module.exports = { commit, transact, rehearse, MISMATCH };
+module.exports = { commit, transact, rehearse, link, MISMATCH };

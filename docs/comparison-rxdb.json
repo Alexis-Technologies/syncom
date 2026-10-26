@@ -2435,9 +2435,9 @@
         },
         "protocolVersion": {
           "mark": "✅",
-          "text": "`PROTOCOL` 1 in `hello`; another version is refused with 400",
-          "source": "src/protocol.js:8; src/sync/hosting.js",
-          "detail": "The 17 `packOps` slots are appended, never reordered; a reader of fewer slots ignores the rest (CLAUDE.md)."
+          "text": "`PROTOCOL` 2 in `hello`; another version is refused with 400",
+          "source": "src/protocol.js; src/sync/hosting.js (hello)",
+          "detail": "The 19 `packOps` slots are appended, never reordered; a reader of fewer slots ignores the rest (CLAUDE.md)."
         },
         "schemaHandshake": {
           "mark": "✅",

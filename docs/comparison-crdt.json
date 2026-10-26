@@ -1282,12 +1282,12 @@
         },
         "format": {
           "mark": "",
-          "text": "JSON: `{ entries, hash }` log files of keyed `{ seq, op }`; 18-slot arrays on the wire",
+          "text": "JSON: `{ entries, hash }` log files of keyed `{ seq, op, fp }`; 19-slot arrays on the wire",
           "source": "src/log.js:54 (fileOf); src/ops.js (packOps); docs/reference/wire.md"
         },
         "spec": {
           "mark": "✅",
-          "text": "`docs/reference/wire.md`: the 18 slots, codes, payloads, signed header, files, procedures, bounds",
+          "text": "`docs/reference/wire.md`: the 19 slots, codes, payloads, signed header, files, procedures, bounds",
           "source": "docs/reference/wire.md"
         },
         "snapshot": {

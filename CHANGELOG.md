@@ -889,6 +889,26 @@ There is no released version section until then; everything below lands in it.
 
 ### Security
 
+- **A fork of a stream is refused, never healed in silence.** Two ops of
+  one `origin` and `seq` that differ — a restored backup minting seqs again,
+  a cloned directory, an equivocating signer — were taken first-come and the
+  other dropped as a duplicate, so nodes diverged for good. Every op now
+  names the fingerprint of the op before it in its stream (`prev`, the
+  SHA-256 of its header, slot 19 of `packOps`, in the signed header —
+  `HEADER_VERSION` 2, `PROTOCOL` 2), and the log keeps each op's
+  fingerprint and every stream's head (`index.json` `heads`, kept past
+  compaction). A peer's op at a seq this node holds under another
+  fingerprint, or one whose `prev` is not the held predecessor's, is
+  refused as `EQUIVOCATION` (`reason: 'seq'` / `'chain'`): not logged, not
+  relayed, counted (`equivocations` in an apply or push result,
+  `syncom.ops.rejected{equivocation|chain}`), an `error` event with both
+  fingerprints, `refused` on a host. An unsigned op carries no digest, so
+  its fingerprint covers its header alone: two unsigned ops that differ in
+  payload only are one op to it. A digest and a fingerprint are 43
+  base64url characters. Cost: about 2.5 µs per local op on the unsigned
+  path (a keystroke in memory 14.5 → 17 µs; the editing trace 47.8k → 42.1k
+  ops/s), 3% on the signed one; on disk within noise. Budgets: `/all`
+  108.5 KB, `/versions` 33.5 KB.
 - **Lists, texts and trees are bounded against a peer.** A peer's op or
   block could cost a node more than it says, or split the mesh: a `[3e8]`
   gap in a snapshot run was expanded element by element; any origin could

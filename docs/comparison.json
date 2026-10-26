@@ -387,7 +387,7 @@
         "signing": {
           "mark": "✅",
           "text": "Ed25519 per op; the node id is the key; `'require'` to enforce",
-          "source": "src/signing/signing.js, src/signing/sign.js, src/apply.js (verifyPage); docs/guide/sync.md#signatures",
+          "source": "src/signing/signing.js, src/signing/sign.js, src/apply.js (checkPage); docs/guide/sync.md#signatures",
           "note": "The default `'verify'` takes an unsigned op; `sync.signatures: 'require'` refuses it. A bootstrap re-signs the host's state under the joiner's key, and `hello` does not yet prove possession of the key."
         },
         "atRest": {

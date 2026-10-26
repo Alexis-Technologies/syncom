@@ -4,8 +4,8 @@
 // batch — a local write, a peer's page, a replay — appends a block naming
 // the hash of each record's data after it, and a record file is checked
 // against its block on a cold read (`integrity: 'verify'`); `validate()`
-// walks the chain. Blocks are SHA-256 of their JSON (../digest.js, Web
-// Crypto on both platforms); each node's chain is its own audit, not
+// walks the chain. Blocks are SHA-256 of their JSON (../digest.js:
+// node:crypto, Web Crypto in the browser); each node's chain is its own audit, not
 // shared. `open({ chain: false })` keeps the plugin registered and the
 // chain off — a hub that only replicates has nothing to audit and saves two
 // file writes per batch.

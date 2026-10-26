@@ -78,7 +78,7 @@ wrpc's spans around the actual calls.
 | Span | When | Attributes |
 | --- | --- | --- |
 | `syncom.commit` | one local write — of any op type, a list, text or tree op as much as a `set` — from the moment it runs to after the `change` listeners; inside a transaction, the op built, applied and validated (the append and the landing are the transaction's) | `syncom.op.type`, `syncom.record.id`†, `syncom.result` (`applied` / `noop` / `encrypted`), `syncom.scope` |
-| `syncom.apply` | one batch of a peer's ops | `syncom.ops.count`, `syncom.ops.applied`, `syncom.ops.skipped`, `syncom.ops.duplicates`, `syncom.ops.gaps`, `syncom.ops.malformed`, `syncom.ops.unsigned`, `syncom.ops.forged`, `syncom.ops.out_of_scope` |
+| `syncom.apply` | one batch of a peer's ops | `syncom.ops.count`, `syncom.ops.applied`, `syncom.ops.skipped`, `syncom.ops.duplicates`, `syncom.ops.gaps`, `syncom.ops.malformed`, `syncom.ops.unsigned`, `syncom.ops.forged`, `syncom.ops.out_of_scope`, `syncom.ops.equivocations` |
 | `syncom.replay` | the unsealed log tail replayed at open | `syncom.ops.count`, `syncom.records` |
 | `syncom.push` | one push to a peer, all its pages | `syncom.push.reason` (`handshake` / `manual` / `relay` / `recover` — a peer that fell behind, caught up from the vector), `syncom.ops.count`, `syncom.pages`, `syncom.peer.url`†, `syncom.peer.node`† |
 | `syncom.bootstrap` | the whole snapshot walk from a peer | `syncom.peer.url`†, `syncom.peer.node`†, `syncom.pages`, `syncom.records` |
@@ -117,7 +117,7 @@ appears on one.
 | `syncom.commits` | Counter | `{op}` | `syncom.op.type`, `syncom.result` (`applied` / `noop` / `encrypted` / `error`) |
 | `syncom.write.duration` | Histogram | `ms` | `syncom.path` (`commit` / `apply` / `replay`) |
 | `syncom.ops.received` | Counter | `{op}` | `syncom.outcome` (`applied` / `skipped` — accepted but not applied here: a hook, the schema, an unreadable record / `duplicate` / `gap` / `malformed` — the last includes a stamp beyond `maxSkew` / `refused` — a signature that does not check, or none under `'require'`, or on a host a record outside the pushing peer's scopes) |
-| `syncom.ops.rejected` | Counter | `{op}` | `syncom.reason` (`register` / `counter` / `set` / `list` / `text` / `tree` — the kind that holds the field and outranks the op's / `bound` — past a list's or a text's limit / `malformed` — a payload the engine does not admit / `validation` / `scope` / `unreadable` / `forged` / `unsigned`) |
+| `syncom.ops.rejected` | Counter | `{op}` | `syncom.reason` (`register` / `counter` / `set` / `list` / `text` / `tree` — the kind that holds the field and outranks the op's / `bound` — past a list's or a text's limit / `malformed` — a payload the engine does not admit / `validation` / `scope` / `unreadable` / `forged` / `unsigned` / `equivocation` — another op than the one held at its seq / `chain` — a `prev` that is not the fingerprint held at the seq before it) |
 | `syncom.conflicts` | Counter | `{conflict}` | `syncom.kind` (`unique`) |
 | `syncom.ops.limited` | Counter | `{push}` | `syncom.reason` (`ops` / `bytes` / `rate`) |
 | `syncom.replication.lag` | Histogram | `ms` | — |
@@ -239,8 +239,9 @@ alert to key on:
 | warn | `sync.op.malformed`, `sync.op.skew` | a peer's op refused before it was read; the latter also an `error` event (`SKEW`) — its own stamp, or one its merge meta holds, beyond `sync.maxSkew` |
 | warn | `clock.skew.ignored` | a record holds a stamp beyond `sync.maxSkew` (taken under `maxSkew: Infinity`, or before merge metas were checked): not observed into the clock, so a write to the record stamps below it and loses the fields it holds; once per record (`id`, `ts`, `ahead`) |
 | warn | `sync.op.forged`, `sync.op.unsigned` | a page with ops refused for their signature, once per page with the count; also an `error` event (`BAD_SIGNATURE`, `UNSIGNED`) |
+| warn | `sync.op.equivocation` | a page with ops refused as equivocation — another op than the one held at its seq (`reason: 'seq'`), or one whose `prev` is not the fingerprint held at the seq before it (`'chain'`) — once per page with `origin`, `scope`, `seq`, `held`, `received` and the count; also an `error` event (`EQUIVOCATION`) |
 | warn | `sync.op.rejected`, `sync.op.invalid`, `sync.op.unreadable`, `sync.op.encrypted`, `sync.op.lens` | a peer's op not applied here, by reason |
-| warn | `sync.op.refused`, `sync.op.scope`, `sync.hello.refused` | hosting side: ops outside a peer's scopes (`sync.op.scope`: the scope function threw on a pushed record, and the op was refused), a call refused by code |
+| warn | `sync.op.refused`, `sync.op.scope`, `sync.hello.refused` | hosting side: ops of a peer refused — outside its scopes (`sync.op.scope`: the scope function threw on a pushed record, and the op was refused), forged, unsigned, equivocating — a call refused by code |
 | warn | `sync.gaps`, `sync.push.gaps`, `sync.error`, `sync.outbox.dropped`, `sync.record.malformed`, `sync.record.skew`, `sync.record.encrypted`, `sync.record.kind` | a page with gaps (received, or answered by the host to a push), a failure on the way to a peer (`REWOUND` and `UNDELIVERABLE` among them), a dropped backlog, a snapshot record left out, a field of a kind this node has no plugin for |
 | warn | `log.epoch.new` (when a log was there), `log.segment.unreadable`, `log.open.unreadable`, `log.open.torn` | the log changed epoch or lost a file, or a line of its journal (`torn`: the last line, whose append was never acknowledged) |
 | warn | `storage.unpersisted` | logged ops whose record files could not be written, held in memory until the next open; also an `error` event (`UNPERSISTED`) |

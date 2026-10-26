@@ -366,6 +366,7 @@ const runSchemaTests = async (t, assert, createStorage) => {
       unsigned: 0,
       forged: 0,
       outOfScope: 0,
+      equivocations: 0,
     });
     assert.strictEqual(await storage.get('r1'), null, 'the invalid op did not touch the record');
     assert.deepStrictEqual(await storage.get('r2'), { n: 2, $type: 'Post' });
@@ -388,6 +389,7 @@ const runSchemaTests = async (t, assert, createStorage) => {
       unsigned: 0,
       forged: 0,
       outOfScope: 0,
+      equivocations: 0,
     });
     assert.deepStrictEqual(await storage.get('r2'), { n: 2, $type: 'Post' });
     // A reopen replays the unsealed tail and leaves the skipped ops alone.
@@ -629,13 +631,13 @@ const runSchemaTests = async (t, assert, createStorage) => {
       access: 'public',
       authorize: (context, hello) => hello.schema?.version === 2,
     });
-    await new MemoryLink(strict).call('syncom/hello', { node: 'x', version: 1, schema: { version: 2, hash: null } });
+    await new MemoryLink(strict).call('syncom/hello', { node: 'x', version: 2, schema: { version: 2, hash: null } });
     assert.deepStrictEqual(hellos, [{ node: 'x', scopes: ['*'], schema: { version: 2, hash: null }, kinds: null }]);
     await assert.rejects(
-      () => new MemoryLink(strict).call('syncom/hello', { node: 'y', version: 1, schema: { version: 3, hash: 'h' } }),
+      () => new MemoryLink(strict).call('syncom/hello', { node: 'y', version: 2, schema: { version: 3, hash: 'h' } }),
       { code: 403 },
     );
-    await assert.rejects(() => new MemoryLink(strict).call('syncom/hello', { node: 'z', version: 1 }), { code: 403 });
+    await assert.rejects(() => new MemoryLink(strict).call('syncom/hello', { node: 'z', version: 2 }), { code: 403 });
     // A dialer without a schema says so; a peer event carries what hello learned.
     const events = [];
     const plain = await createStorage(t2, 'P', {

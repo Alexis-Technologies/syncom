@@ -262,7 +262,9 @@ const ENTRIES = [
   // 106.4 with the text engine's indexes (the marks by anchor in walk order, pos/vals/marks in persistent maps,
   // a list's reading derived from the one before, bodies capped at SEG_MAX, one hydration per plain block;
   // 2026-10-27). 107, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 107 },
+  // 108.0 with a hash chain per stream (src/header.js: the fingerprint, `prev`, the fork refused as
+  // EQUIVOCATION; the log's fingerprints and heads; PROTOCOL 2). 108.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 108.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -358,7 +360,8 @@ const ENTRIES = [
     label: 'versions — browser (@alexify/syncom/versions)',
     entry: 'src/versions/versions.js',
     platform: 'browser',
-    budget: 32,
+    // 32.9 with the write path's hash chain (src/header.js, the log's fingerprints). 33.5, raised by name.
+    budget: 33.5,
   },
 ];
 

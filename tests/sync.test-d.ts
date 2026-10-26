@@ -47,6 +47,7 @@ storage.sync.on('refused', (event) => {
     | 'scope'
     | 'forged'
     | 'unsigned'
+    | 'equivocation'
     | 'HELLO'
     | 'PRESENCE_RATE'
     | 'PRESENCE_MALFORMED'
@@ -97,3 +98,4 @@ expectType<Record<string, unknown> | undefined>(sync.unit().push.meta);
 expectError(sync.unit({ meta: 'x' }));
 expectError(sync.unit({ limits: { opsPerMinute: 1 } }));
 typedSync.on('sync', (event) => expectType<number | undefined>(event.outOfScope));
+typedSync.on('sync', (event) => expectType<number | undefined>(event.equivocations));

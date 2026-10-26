@@ -441,6 +441,13 @@ storage.once('apply', (batch) => {
 });
 storage.on('error', (error) => {
   if (error.code === 'UNPERSISTED') return void expectType<string[]>(error.ids);
+  if (error.code === 'EQUIVOCATION') {
+    expectType<'seq' | 'chain'>(error.reason);
+    expectType<string>(error.held);
+    expectType<string | null>(error.received);
+    expectType<string | null>(error.scope);
+    return void expectType<number>(error.seq);
+  }
   expectType<syncom.SyncOp>(error.op);
   expectType<syncom.ValidationIssue[] | undefined>(error.issues);
   expectType<syncom.RefusalReason | undefined>(error.rejected?.[0]?.reason);
@@ -498,11 +505,12 @@ storage.applyRemote([], { adoptFrom: 'host' }).then((result) => {
 });
 storage.applyRemote([], { bound: ['Doc'] }).then((result) => {
   expectType<number>(result.outOfScope);
+  expectType<number>(result.equivocations);
 });
 expectError(storage.applyRemote([], { bound: 'Doc' }));
 storage.on('error', (error) => {
   expectAssignable<SyncomError>(error);
-  if (error.code === 'UNPERSISTED') return;
+  if (error.code === 'UNPERSISTED' || error.code === 'EQUIVOCATION') return;
   expectType<'OP_REFUSED' | 'OP_INVALID' | 'OP_UNREADABLE' | 'SKEW' | 'BAD_SIGNATURE' | 'UNSIGNED'>(error.code);
   expectType<string>(error.op.origin);
 });
@@ -528,6 +536,14 @@ expectError(syncom.open({ sync: { maxOutbox: 'lots' } }));
 expectAssignable<StorageOptions>({ chain: false });
 expectError(syncom.open({ chain: 'no' }));
 expectType<number>(log.seqOf('origin@scope'));
+// The per-stream hash chain: fingerprints, heads, the op's link.
+expectAssignable<SyncomErrorCode>('EQUIVOCATION');
+expectType<string | undefined>(log.fingerprintOf('origin@scope', 3));
+expectType<[number, string] | undefined>(log.headOf('origin'));
+log.adoptHeads({ origin: [3, `${'f'.repeat(42)}A`] });
+expectError(log.adoptHeads({ origin: 3 }));
+expectType<string | undefined>(({} as syncom.SyncOp).prev);
+expectType<string | undefined>(({} as syncom.LogEntry).fp);
 
 // E5b: introspection
 expectType<syncom.StorageStats>(storage.stats());

@@ -425,9 +425,12 @@ class Storage extends Emitter {
       settled: (id, position) => this.#settle(id, position),
       landing: (step) => this.#landing(step),
       drain: () => this.#landings,
-      // A stream's last seq in the log, and a batch landed from inside a
-      // landing step (a transaction's: the chain block, the files, the slots).
+      // A stream's last seq in the log, the fingerprint the log holds at a
+      // seq of it (what an op of this node's chains to), and a batch landed
+      // from inside a landing step (a transaction's: the chain block, the
+      // files, the slots).
       seqOf: (key) => this.#log.seqOf(key),
+      fingerprintOf: (key, seq) => this.#log.fingerprintOf(key, seq),
       land: (touched, from, to) => this.#land(touched, from, to),
       // Several writes as one, from outside the queue (a plugin's method).
       transact: (fn, options) => this.#run(() => transact(this.#core, fn, options)),
@@ -1961,10 +1964,12 @@ class Storage extends Emitter {
 
   // The streams of this node's own a host holds more of (REWOUND), moved
   // past it — for the sync manager alone, once the host proved it or the
-  // application said to take its word (`sync.rewind`). The advance op it
-  // logs, or null; its `vector` is what moved.
+  // application said to take its word (`sync.rewind`), with the ops the
+  // proof carried (`proofs`): what each stream chains on from. The advance
+  // op it logs, or null; its `vector` is what moved.
   [REWIND](vector, options = {}) {
-    return this.#run(() => adopt(this.#core, vector, { via: options.via, from: options.from, own: true }));
+    const { via, from, proofs = null } = options;
+    return this.#run(() => adopt(this.#core, vector, { via, from, own: true, proofs }));
   }
 
   /**

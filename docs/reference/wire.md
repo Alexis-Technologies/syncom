@@ -1,9 +1,10 @@
 # Wire format
 
 What travels between two nodes and what lies on disk, byte by byte: the op
-and its eighteen slots, the payload of every type, what a signature covers,
-the log and record files, the four procedures and the presence event, the
-bounds a node holds a peer to, and what may change without breaking a peer.
+and its nineteen slots, the payload of every type, what a signature covers,
+the per-stream chain, the log and record files, the four procedures and the
+presence event, the bounds a node holds a peer to, and what may change
+without breaking a peer.
 Every example on this page was run against the package as it is
 (`@alexify/syncom/all` over `memory()`); node ids, signatures and digests
 are shortened to fit. The concepts are in [Sync](../guide/sync); this page
@@ -14,7 +15,7 @@ is the shape.
 Every write is one op, a plain JSON object:
 
 ```
-{ origin, seq, ts, type, id?, scope?, data?, meta?, key?, value?, vector?, from?, v?, actor?, sig?, digest?, nonce?, msg? }
+{ origin, seq, ts, type, id?, scope?, data?, meta?, key?, value?, vector?, from?, v?, actor?, sig?, digest?, nonce?, msg?, prev? }
 ```
 
 | Field | Type | Meaning |
@@ -34,12 +35,13 @@ Every write is one op, a plain JSON object:
 | `v` | integer ≥ 1 | The writer's schema version; absent without a schema and on `merge`/`advance` |
 | `actor` | string | Who made it, as the writer claims — signed, never verified |
 | `sig` | string | 86 base64url characters: the Ed25519 signature of the [header](#what-a-signature-covers) |
-| `digest` | string | 64 hex characters: sha256 of the nonce and the canonical payload |
+| `digest` | string | 43 base64url characters (canonical last character): SHA-256 of the nonce and the canonical payload |
 | `nonce` | string | 16 to 64 base64url characters (a UUID, as written); gone with the payload when the op is scrubbed |
 | `msg` | string | A transaction's message, at most 1 024 characters, on every op of the transaction, signed |
+| `prev` | string | 43 base64url characters: the [fingerprint](#the-per-stream-chain) of the op before it in its stream, signed; absent on a stream's first op, and where the writer holds no op before it |
 
 `origin`, `seq`, `ts`, `type`, `scope`, `v`, `id` (or an `advance`'s
-`vector`), `sig`, `digest`, `nonce` and `msg` are checked by shape, and every
+`vector`), `sig`, `digest`, `nonce`, `msg` and `prev` are checked by shape, and every
 field by how deep it nests (80 levels, `MAX_WIRE_DEPTH`), before a peer's op
 is read at all — its signature included (`wellFormed` in `src/shape.js`); one
 that fails is `malformed` — counted, not logged, not relayed, a gap in its
@@ -75,23 +77,27 @@ as the log keeps them (the `write` and the `purge` of `p2` are scrubbed —
 the payload and the nonce gone, the header and its signature kept):
 
 ```json
-{"seq":1,"op":{"origin":"-PlUD3E…","seq":1,"ts":1792951837466,"type":"write","id":"p1","v":1,"data":{"title":"Draft","note":"tmp","$type":"Post"},"nonce":"718f22bc-…","digest":"e06a7085…","sig":"TwB74Pp…"}}
-{"seq":2,"op":{"origin":"-PlUD3E…","seq":2,"ts":1792951837469,"type":"set","id":"p1","v":1,"data":{"title":"Final"},"nonce":"d2baa276-…","digest":"08631891…","sig":"0Ee9Kg2…"}}
-{"seq":3,"op":{"origin":"-PlUD3E…","seq":3,"ts":1792951837470,"type":"unset","id":"p1","v":1,"value":["note"],"nonce":"dcfd2b33-…","digest":"685fba58…","sig":"LmGK0_t…"}}
-{"seq":4,"op":{"origin":"-PlUD3E…","seq":4,"ts":1792951837471,"type":"inc","id":"p1","v":1,"key":"views","value":1,"nonce":"ac56d761-…","digest":"d4171987…","sig":"aPqM54G…"}}
-{"seq":5,"op":{"origin":"-PlUD3E…","seq":5,"ts":1792951837472,"type":"add","id":"p1","v":1,"key":"tags","value":["bug"],"nonce":"e024f81c-…","digest":"33bd5500…","sig":"aAzk3Ls…"}}
-{"seq":6,"op":{"origin":"-PlUD3E…","seq":6,"ts":1792951837473,"type":"remove","id":"p1","v":1,"key":"tags","value":[["bug",{"-PlUD3E…":1792951837472}]],"nonce":"ead127da-…","digest":"9efaa838…","sig":"5GpYEPv…"}}
-{"seq":7,"op":{"origin":"-PlUD3E…","seq":7,"ts":1792951837474,"type":"splice","id":"p1","v":1,"key":"body","value":{"content":"hello","at":"^"},"nonce":"831b7f99-…","digest":"ef743b75…","sig":"5bA9z39…"}}
-{"seq":8,"op":{"origin":"-PlUD3E…","seq":8,"ts":1792951837475,"type":"splice","id":"p1","v":1,"key":"items","value":{"content":[1,2],"at":"^"},"nonce":"f108f26b-…","digest":"2ec8be5f…","sig":"UCF0DuJ…"}}
-{"seq":9,"op":{"origin":"-PlUD3E…","seq":9,"ts":1792951837476,"type":"assign","id":"p1","v":1,"key":"items","value":{"elem":"1792951837475:0:-PlUD3E…","value":9},"nonce":"5d134186-…","digest":"4111c993…","sig":"itDHNzN…"}}
-{"seq":10,"op":{"origin":"-PlUD3E…","seq":10,"ts":1792951837477,"type":"move","id":"p1","v":1,"key":"items","value":{"elem":"1792951837475:0:-PlUD3E…","cut":["1792951837475:-PlUD3E…",0,1],"at":">1792951837475:1:-PlUD3E…","value":9},"nonce":"8c6bf9a5-…","digest":"c741b2be…","sig":"MUz3ZG8…"}}
-{"seq":11,"op":{"origin":"-PlUD3E…","seq":11,"ts":1792951837478,"type":"mark","id":"p1","v":1,"key":"body","value":{"start":"<1792951837474:0:-PlUD3E…","end":"$","key":"bold","value":true},"nonce":"e7fe7c62-…","digest":"1d0798d6…","sig":"nmWkL0k…"}}
-{"seq":12,"op":{"origin":"-PlUD3E…","seq":12,"ts":1792951837479,"type":"tree","id":"p1","v":1,"key":"outline","value":{"node":"n1","parent":null,"fi":"V"},"nonce":"9738cc33-…","digest":"bad306da…","sig":"PSEOFN3…"}}
-{"seq":13,"op":{"origin":"-PlUD3E…","seq":13,"ts":1792951837480,"type":"set","id":"p1","v":1,"actor":"ada","data":{"n":1},"msg":"one more","nonce":"29fcc8f5-…","digest":"e6755bd6…","sig":"b6QdTUG…"}}
-{"seq":14,"op":{"origin":"-PlUD3E…","seq":14,"ts":1792951837481,"type":"delete","id":"p1","v":1,"sig":"IbCEZRb…"}}
-{"seq":15,"op":{"origin":"-PlUD3E…","seq":15,"ts":1792951837482,"type":"write","id":"p2","v":1,"digest":"ab6b6659…","sig":"uhwRs9F…"},"scrubbed":true}
-{"seq":16,"op":{"origin":"-PlUD3E…","seq":16,"ts":1792951837483,"type":"purge","id":"p2","v":1,"sig":"hw4ptYo…"},"scrubbed":true}
+{"seq":1,"op":{"origin":"P7dOcrN…","seq":1,"ts":1793053996251,"type":"write","id":"p1","v":1,"data":{"$type":"Post","title":"Draft","note":"tmp"},"nonce":"87dfd3f0-…","digest":"HAPz-F8K…","sig":"VI89hgS…"},"fp":"VgjIBSHJ…"}
+{"seq":2,"op":{"origin":"P7dOcrN…","seq":2,"ts":1793053996257,"type":"set","id":"p1","v":1,"data":{"title":"Final"},"prev":"VgjIBSHJ…","nonce":"c39deabf-…","digest":"qAwzPrfd…","sig":"7mi3WYB…"},"fp":"064vOco2…"}
+{"seq":3,"op":{"origin":"P7dOcrN…","seq":3,"ts":1793053996260,"type":"unset","id":"p1","v":1,"value":["note"],"prev":"064vOco2…","nonce":"68a57b19-…","digest":"P7zOwRgB…","sig":"Z1CpQih…"},"fp":"iIOi1w79…"}
+{"seq":4,"op":{"origin":"P7dOcrN…","seq":4,"ts":1793053996263,"type":"inc","id":"p1","v":1,"key":"views","value":1,"prev":"iIOi1w79…","nonce":"ef7f2a0f-…","digest":"I-B2uzwI…","sig":"3Exwncn…"},"fp":"YlcL2h50…"}
+{"seq":5,"op":{"origin":"P7dOcrN…","seq":5,"ts":1793053996266,"type":"add","id":"p1","v":1,"key":"tags","value":["bug"],"prev":"YlcL2h50…","nonce":"d6092527-…","digest":"lGWta3Yf…","sig":"wkpiBVK…"},"fp":"M89Kun1U…"}
+{"seq":6,"op":{"origin":"P7dOcrN…","seq":6,"ts":1793053996269,"type":"remove","id":"p1","v":1,"key":"tags","value":[["bug",{"P7dOcrN…":1793053996266}]],"prev":"M89Kun1U…","nonce":"cbb28d79-…","digest":"Sos6L31w…","sig":"ZlSYNqI…"},"fp":"XUbvFc5D…"}
+{"seq":7,"op":{"origin":"P7dOcrN…","seq":7,"ts":1793053996272,"type":"splice","id":"p1","v":1,"key":"body","value":{"content":"hello","at":"^"},"prev":"XUbvFc5D…","nonce":"34ab659b-…","digest":"tY9Dbvte…","sig":"L8fU7DN…"},"fp":"8Mr1-LAD…"}
+{"seq":8,"op":{"origin":"P7dOcrN…","seq":8,"ts":1793053996278,"type":"splice","id":"p1","v":1,"key":"items","value":{"content":[1,2],"at":"^"},"prev":"8Mr1-LAD…","nonce":"e094d4a5-…","digest":"TE_J3-ZX…","sig":"Tu2BfqQ…"},"fp":"jxo-R52D…"}
+{"seq":9,"op":{"origin":"P7dOcrN…","seq":9,"ts":1793053996281,"type":"assign","id":"p1","v":1,"key":"items","value":{"elem":"1793053996278:0:P7dOcrN…","value":9},"prev":"jxo-R52D…","nonce":"826d9393-…","digest":"R4a_X2Ck…","sig":"467j48_…"},"fp":"PStsoPR3…"}
+{"seq":10,"op":{"origin":"P7dOcrN…","seq":10,"ts":1793053996284,"type":"move","id":"p1","v":1,"key":"items","value":{"elem":"1793053996278:0:P7dOcrN…","cut":["1793053996278:P7dOcrN…",0,1],"at":">1793053996278:1:P7dOcrN…","value":9},"prev":"PStsoPR3…","nonce":"ce1ef401-…","digest":"WsNmkeOi…","sig":"p7gACrZ…"},"fp":"3OB2HcPM…"}
+{"seq":11,"op":{"origin":"P7dOcrN…","seq":11,"ts":1793053996288,"type":"mark","id":"p1","v":1,"key":"body","value":{"start":"<1793053996272:0:P7dOcrN…","end":"$","key":"bold","value":true},"prev":"3OB2HcPM…","nonce":"0705c9bb-…","digest":"QKzYvPg5…","sig":"5UyQqrN…"},"fp":"p9BTynq7…"}
+{"seq":12,"op":{"origin":"P7dOcrN…","seq":12,"ts":1793053996291,"type":"tree","id":"p1","v":1,"key":"outline","value":{"node":"n1","parent":null,"fi":"V"},"prev":"p9BTynq7…","nonce":"2b63250e-…","digest":"CnMODGwU…","sig":"zedo0Ub…"},"fp":"IhGDrPzQ…"}
+{"seq":13,"op":{"origin":"P7dOcrN…","seq":13,"ts":1793053996295,"type":"set","id":"p1","v":1,"actor":"ada","data":{"n":1},"msg":"one more","prev":"IhGDrPzQ…","nonce":"f19610c6-…","digest":"xUulRS5y…","sig":"GIusDIN…"},"fp":"kl8HKLFV…"}
+{"seq":14,"op":{"origin":"P7dOcrN…","seq":14,"ts":1793053996298,"type":"delete","id":"p1","v":1,"prev":"kl8HKLFV…","sig":"-m-OqTs…"},"fp":"X4F_F1VQ…"}
+{"seq":15,"op":{"origin":"P7dOcrN…","seq":15,"ts":1793053996301,"type":"write","id":"p2","v":1,"prev":"X4F_F1VQ…","digest":"8H6KynNe…","sig":"903czsW…"},"fp":"lEpfEvG3…","scrubbed":true}
+{"seq":16,"op":{"origin":"P7dOcrN…","seq":16,"ts":1793053996304,"type":"purge","id":"p2","v":1,"prev":"lEpfEvG3…","sig":"nCcPtQw…"},"fp":"z-hdJgrE…","scrubbed":true}
 ```
+
+Each op names the fingerprint of the one before it (`prev`), and the log
+keeps each op's own beside it (`fp`): the stream is a hash chain, whole
+after the scrub — see [The per-stream chain](#the-per-stream-chain).
 
 An element's name is `ts:offset:origin` — the run it was inserted in and
 its offset there — and a run's `ts:origin`; an anchor is `^` (the head),
@@ -99,7 +105,7 @@ its offset there — and a run's `ts:origin`; an anchor is `^` (the head),
 `e`); a cut is `[run, offset, length]`. A `remove`'s add stamp is the `ts`
 of the `add` this node had seen, per origin.
 
-### Packed: the eighteen slots
+### Packed: the nineteen slots
 
 A push and a `changes` page carry ops packed — one positional array per
 op, the type as its code, `null` for an absent field, no key names
@@ -113,39 +119,41 @@ repeated per op:
 | 4 | `type` (code) | 10 | `value` | 16 | `digest` |
 | 5 | `id` | 11 | `vector` | 17 | `nonce` |
 | 6 | `scope` | 12 | `from` | 18 | `msg` |
+| | | | | 19 | `prev` |
 
 The ops above, packed (`packOps` in `src/ops.js`; `unpackOps` is the way
 back, and takes a row of fewer than five slots as nothing):
 
 ```json
-["-PlUD3E…",1,1792951837466,"w","p1",null,{"title":"Draft","note":"tmp","$type":"Post"},null,null,null,null,null,1,null,"TwB74Pp…","e06a7085…","718f22bc-…",null]
-["-PlUD3E…",4,1792951837471,"i","p1",null,null,null,"views",1,null,null,1,null,"aPqM54G…","d4171987…","ac56d761-…",null]
-["-PlUD3E…",7,1792951837474,"/","p1",null,null,null,"body",{"content":"hello","at":"^"},null,null,1,null,"5bA9z39…","ef743b75…","831b7f99-…",null]
-["-PlUD3E…",13,1792951837480,"s","p1",null,{"n":1},null,null,null,null,null,1,"ada","b6QdTUG…","e6755bd6…","29fcc8f5-…","one more"]
-["-PlUD3E…",14,1792951837481,"d","p1",null,null,null,null,null,null,null,1,null,"IbCEZRb…",null,null,null]
-["-PlUD3E…",16,1792951837483,"p","p2",null,null,null,null,null,null,null,1,null,"hw4ptYo…",null,null,null]
+["P7dOcrN…",1,1793053996251,"w","p1",null,{"$type":"Post","title":"Draft","note":"tmp"},null,null,null,null,null,1,null,"VI89hgS…","HAPz-F8K…","87dfd3f0-…",null,null]
+["P7dOcrN…",4,1793053996263,"i","p1",null,null,null,"views",1,null,null,1,null,"3Exwncn…","I-B2uzwI…","ef7f2a0f-…",null,"iIOi1w79…"]
+["P7dOcrN…",7,1793053996272,"/","p1",null,null,null,"body",{"content":"hello","at":"^"},null,null,1,null,"L8fU7DN…","tY9Dbvte…","34ab659b-…",null,"XUbvFc5D…"]
+["P7dOcrN…",13,1793053996295,"s","p1",null,{"n":1},null,null,null,null,null,1,"ada","GIusDIN…","xUulRS5y…","f19610c6-…","one more","IhGDrPzQ…"]
+["P7dOcrN…",14,1793053996298,"d","p1",null,null,null,null,null,null,null,1,null,"-m-OqTs…",null,null,null,"kl8HKLFV…"]
+["P7dOcrN…",16,1793053996304,"p","p2",null,null,null,null,null,null,null,1,null,"nCcPtQw…",null,null,null,"lEpfEvG3…"]
 ```
 
 Slots were appended in this order — `v` was the thirteenth, `actor` the
 fourteenth, the signature's three the fifteenth to seventeenth, `msg` the
-eighteenth — and are never reordered: a reader of fewer slots ignores the
-rest, a reader of more takes an absent slot as `null`. The log itself keeps
-the keyed form; packing is for the wire.
+eighteenth, `prev` the nineteenth — and are never reordered: a reader of
+fewer slots ignores the rest, a reader of more takes an absent slot as
+`null`. The log itself keeps the keyed form; packing is for the wire.
 
 ## What a signature covers
 
-A signing node (the `signing` plugin, registered by `@alexify/syncom/all`)
-signs every op of its own before the append, in three parts:
+Every node links its own ops into their streams before the append (`prev`,
+signing or not — `src/header.js`), and a signing node (the `signing` plugin,
+registered by `@alexify/syncom/all`) signs them, in three parts:
 
 1. **The payload** — `data`, `meta`, `key`, `value`, `vector`, whichever the
    op carries, as one object — serialized canonically (every object's keys
    sorted at every depth, `canonical` in `src/shape.js`), salted with a
-   fresh `nonce` and hashed: `digest = sha256(nonce + "\n" + canonical)`.
-   An op without a payload (a `delete`, a `purge`) has no digest and no
-   nonce.
+   fresh `nonce` and hashed: `digest = sha256(nonce + "\n" + canonical)`
+   (the hash of that text as a JSON string, as 43 base64url characters). An op without a payload (a
+   `delete`, a `purge`) has no digest and no nonce.
 2. **The header** — a positional JSON array under a version number, `null`
    for an absent field:
-   `[1, origin, seq, ts, type, id, scope, from, v, actor, digest, msg]`.
+   `[2, origin, seq, ts, type, id, scope, from, v, actor, digest, msg, prev]`.
 3. **The signature** — Ed25519 over the header's text, as 86 base64url
    characters in `sig`. The key is the origin: the node id *is* the public
    key.
@@ -153,10 +161,10 @@ signs every op of its own before the append, in three parts:
 The `set` op above, taken apart:
 
 ```
-header     [1,"-PlUD3E…",2,1792951837469,"set","p1",null,null,1,null,"086318918f6cf9a1795b783e3d51f5416cbb559ef9b013a95487643fd7570039",null]
+header     [2,"P7dOcrN…",2,1793053996257,"set","p1",null,null,1,null,"qAwzPrfdoPzWRirifj_yPUAuBto9QZpRWTNVZ991blU",null,"VgjIBSHJo8E9oMmFZtyOwX6KbhJqbsZW7UbEruGhuQg"]
 canonical  {"data":{"title":"Final"}}
-nonce      d2baa276-c812-4339-9f2e-2158bfdfbbc6
-digest     086318918f6cf9a1795b783e3d51f5416cbb559ef9b013a95487643fd7570039
+nonce      c39deabf-ed6f-4454-9395-9d6f38c27825
+digest     qAwzPrfdoPzWRirifj_yPUAuBto9QZpRWTNVZ991blU
 ```
 
 A receiver verifies before it applies: an origin that is no key, a payload
@@ -166,9 +174,56 @@ an unsigned op is taken under `sync.signatures: 'verify'` (the default) and
 refused under `'require'`. The split is what lets a `purge` scrub the
 payload and the nonce and leave an op whose header still verifies — the
 `write` of `p2` above — and the nonce is what keeps a scrubbed digest from
-giving a short payload away by brute force. A signature binds authorship
-and content to the origin's key through any relay; it proves nothing about
-delivery, and `actor` stays the origin's claim.
+giving a short payload away by brute force. A signature binds authorship,
+content and the op's place in its stream to the origin's key through any
+relay; it proves nothing about delivery, and `actor` stays the origin's
+claim.
+
+## The per-stream chain
+
+An op's **fingerprint** is the SHA-256 of its header's text, as 43 base64url
+characters — `fp` of the `set` above is `064vOco2…`. It is the same on
+every node, signing or not, and whole after a scrub: the header keeps the
+digest. A signed op's header carries the digest, so its fingerprint covers
+the payload too; an unsigned op's covers the header alone — its stamp, seq,
+type and record — so two unsigned ops that differ in payload alone are one
+op to it. Every op names the fingerprint of the op before it in its
+**stream** (`origin`, `origin@scope`, or `origin@~` for the `merge` and
+`advance` ops a bootstrap makes) as `prev` — the `set`'s `prev` is the
+`write`'s fingerprint, `VgjIBSHJ…` — so a fingerprint covers the whole
+stream up to its op: a hash chain per stream, under the signature. A
+stream's first op names none, and so does an op whose writer holds no op
+at the seq before it.
+
+A node keeps the fingerprint of every op its log retains (`fp`, beside the
+op) and, per stream, of the newest op it ever held (`heads` in the
+[index](#the-log)), and holds what it is handed to them, after the shape and
+the signature:
+
+| A peer's op | Verdict |
+| --- | --- |
+| at a seq this node holds, with another fingerprint | `EQUIVOCATION`, `reason: 'seq'` |
+| the next of its stream, naming another `prev` than the fingerprint held at the seq before it — or none, when it is signed | `EQUIVOCATION`, `reason: 'chain'` |
+| the next of its stream, unsigned and naming none — a hand-made op, an older writer's | taken |
+| the next of its stream where this node holds no op before it — the stream starts there, or this node joined it by a [snapshot](#snapshot) | taken; the chain is held from it |
+
+An op refused as `EQUIVOCATION` is neither logged nor relayed and the vector
+does not move: like a forged op, it is a gap for its stream. It is counted
+(`equivocations` in the apply result, `syncom.ops.rejected` with `reason`
+`equivocation` or `chain`) and reported once per page — the storage's
+`error` event with the op, `origin`, `scope`, `seq`, `reason`, `held` (the
+fingerprint this node holds: at the op's seq, or at the one before it) and
+`received` (the op's own, or the `prev` it names), and `count`.
+
+What it gives: a writer that made two ops at one seq — a directory restored
+from an older copy, a second instance under one identity, a key holder that
+lies — is caught at the first node that holds one and is handed the other,
+or the next op of the other branch; each node keeps the branch it took
+first, and none mixes the two. Under signatures `prev` cannot be changed or
+stripped (the op is then `forged`). What it does not: heal the fork — the
+nodes that took different branches stay apart, and report it every time they
+meet — or check what a node never held: a node that joined a stream by a
+snapshot takes its next op as given.
 
 ## The log
 
@@ -180,7 +235,7 @@ write, no rename):
 | `open/<seq>-<token>.jsonl` | A journal, where the backend has `append`: one log file per line, a line per group of appends; named by its first seq (ten digits zero-padded) and a token unique to the open and the journal; begun again at every roll and after a failed append, removed once every group in it is sealed, rewritten only by a scrub |
 | `open/<seq>.json` | A group in a file of its own, where the backend has no `append`; named by its first seq |
 | `seg-<from>.json` | A sealed segment: the open groups rolled together once 64 of them accumulate (`log.rollAfter`) |
-| `index.json` | `{ epoch, floor, next, vector, segments, droppedHeld, latestTs, droppedTs }` — a summary; the files are the truth, and what the index lacks is rebuilt from a listing |
+| `index.json` | `{ epoch, floor, next, vector, heads, segments, droppedHeld, latestTs, droppedTs }` — a summary; the files are the truth, and what the index lacks is rebuilt from a listing |
 
 Every log file is `{ "entries": [...], "hash": "<xxh32>" }` — the
 entries' JSON and its xxHash32 as eight hex characters, computed over the
@@ -199,21 +254,24 @@ seqs back, and the group that took them went to a newer journal. A later open
 never appends to an older journal.
 
 ```json
-{"entries":[{"seq":2,"op":{"origin":"-PlUD3E…","seq":2,"ts":1792951837469,"type":"set","id":"p1","v":1,"data":{"title":"Final"},"nonce":"d2baa276-…","digest":"08631891…","sig":"0Ee9Kg2…"}}],"hash":"38727f2a"}
+{"entries":[{"seq":2,"op":{"origin":"P7dOcrN…","seq":2,"ts":1793053996257,"type":"set","id":"p1","v":1,"data":{"title":"Final"},"prev":"VgjIBSHJ…","nonce":"c39deabf-…","digest":"qAwzPrfd…","sig":"7mi3WYB…"},"fp":"064vOco2…"}],"hash":"bea5b98b"}
 ```
 
-An entry is `{ seq, op }`, plus `skipped: true` for a peer's op a
+An entry is `{ seq, op, fp }` — `fp` the op's [fingerprint](#the-per-stream-chain),
+taken when it was logged — plus `skipped: true` for a peer's op a
 `beforeApply` hook or a validator declined (accepted into the log, never
 applied here, so a reopen does not apply it either), `held: <version>` for
 an op of a newer schema version kept for the node that runs it, and
-`scrubbed: true` once a purge took its payload. The index after a clean
-close, with the sixteen ops sealed into one segment:
+`scrubbed: true` once a purge took its payload. An entry without `fp` is
+read; its op is then nothing a chain is held to. The index after a clean
+close, with the sixteen ops sealed into one segment — `heads` the stream's
+newest op and its fingerprint, kept once the op itself is compacted away:
 
 ```json
-{"epoch":"mvo58q1gu75ziu","floor":1,"next":17,"vector":{"W_Ym_o9…":16},"segments":[{"name":"seg-0000000001.json","from":1,"to":16,"count":16}],"droppedHeld":0,"latestTs":1792951855847,"droppedTs":0}
+{"epoch":"mvpu1y3d6zl7op","floor":1,"next":17,"vector":{"P7dOcrN…":16},"heads":{"P7dOcrN…":[16,"z-hdJgrE…"]},"segments":[{"name":"seg-0000000001.json","from":1,"to":16,"count":16}],"droppedHeld":0,"latestTs":1793053996304,"droppedTs":0}
 ```
 
-An **event id** is `<epoch>.<seq>` — `mvo58q1gu75ziu.16` — the epoch
+An **event id** is `<epoch>.<seq>` — `mvpu1y3d6zl7op.16` — the epoch
 minted once when the log is created, so a cursor from a wiped or restored
 directory is told to bootstrap rather than fed a coincidence. `floor` is
 the lowest seq retained: below it, or under another epoch, a resume is
@@ -294,8 +352,8 @@ naming the check.
 ### `hello`
 
 ```
-→ { node, version: 1, vector, scopes, token?, schema, kinds }
-← { node, vector, epoch, version: 1, schema, kinds, duplicate?, proof? }
+→ { node, version: 2, vector, scopes, token?, schema, kinds }
+← { node, vector, epoch, version: 2, schema, kinds, duplicate?, proof? }
 ```
 
 `vector` is the caller's whole version vector; `scopes` the scopes it
@@ -307,16 +365,17 @@ the names of the kind plugins it runs.
 host's `vector` holds more of one of the caller's own streams (`node`,
 `node@scope`, `node@~`) than the caller's `vector` says — a directory
 restored from an older copy. It is the newest op of each such stream the
-host's log still retains, packed in the [eighteen slots](#packed-the-eighteen-slots):
+host's log still retains, packed in the [nineteen slots](#packed-the-nineteen-slots):
 the caller's own op at the seq the host claims, signed by the caller's key.
 The caller moves a stream past the host's (`REWOUND`) only when that op is
 well formed, its origin, stream and seq are the claim's and its signature
 verifies under the caller's own key — or under `sync.rewind: 'adopt'`
-without it. A host can claim, never prove, what it did not receive. The
-answer, from the run above:
+without it. A host can claim, never prove, what it did not receive. A proven
+op's fingerprint is the stream's head from then on: what the caller's next
+op of it names as `prev`. The answer, from the run above:
 
 ```json
-{"node":"W_Ym_o9…","vector":{"W_Ym_o9…":16},"epoch":"mvo58q1gu75ziu","version":1,"schema":{"version":1,"hash":null},"kinds":["text","tree"]}
+{"node":"P7dOcrN…","vector":{"P7dOcrN…":16},"epoch":"mvpu1y3d6zl7op","version":2,"schema":{"version":1,"hash":null},"kinds":["text","tree"]}
 ```
 
 | Code | `reason` | When |
@@ -331,12 +390,14 @@ answer, from the run above:
 
 ```
 → { ops: [packed…] }
-← { vector, applied, skipped, duplicates, gaps, malformed, unsigned, forged, outOfScope }
+← { vector, applied, skipped, duplicates, gaps, malformed, unsigned, forged, outOfScope, equivocations }
 ```
 
 `vector` carries the keys the page touched, not the host's whole vector.
 An op outside the scopes hello granted is refused before anything reads it
-(`outOfScope`), and so is one whose record the host reads as outside them.
+(`outOfScope`), and so is one whose record the host reads as outside them;
+one that [equivocates](#the-per-stream-chain) is refused too
+(`equivocations`, the host's `refused` event with `reason: 'equivocation'`).
 
 | Code | `reason` | When |
 | --- | --- | --- |
@@ -426,12 +487,14 @@ a snapshot buys nothing an op could not:
 
 ## Compatibility
 
-`hello` carries `version: 1` both ways, and a host answers another version
-with 400 `PROTOCOL`. Version 1 is the wire as the first publication will
-have it: the fifteen types and the eighteen slots above, the header under
-its version number `1`, the log file with its hash, the presence format
-`p: 1`. Before that publication the shapes on this page may change
-without a bump; after it:
+`hello` carries `version: 2` both ways, and a host answers another version
+with 400 `PROTOCOL`. Version 2 is the wire as the first publication will
+have it: the fifteen types and the nineteen slots above, the header under
+its version number `2` with `prev` in it, the log file with its hash, the
+presence format `p: 1`. (Version 1, before the per-stream chain, signed a
+header without `prev`; a node of it would relay a forked stream unchecked.)
+Before that publication the shapes on this page may change without a bump;
+after it:
 
 - **A slot is appended, never reordered or removed.** A reader of fewer
   slots ignores the rest; a reader of more takes an absent slot as `null`.
@@ -442,8 +505,8 @@ without a bump; after it:
   entry is optional** — absent reads as before.
 - **A file format gains fields, never loses them**: a log file without a
   hash, an index without a field, a record file without a block are read.
-- **The header's version number** (`1`) and the digest's construction
-  change only with a new version.
+- **The header's version number** (`2`), the digest's construction and
+  the fingerprint's change only with a new version.
 - **A version bump is a major release** of the package; an appended slot
   or an optional field is a minor one.
 

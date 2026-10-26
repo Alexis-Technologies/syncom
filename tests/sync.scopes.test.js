@@ -29,7 +29,7 @@ test('Hosting scopes', async (t) => {
     host.sync.on('refused', (event) => refused.push(event));
     const unit = host.sync.unit({ access: 'public' });
     const link = new MemoryLink(unit);
-    await link.call('syncom/hello', { node: 'tenant-a', version: 1, scopes: ['A'] });
+    await link.call('syncom/hello', { node: 'tenant-a', version: 2, scopes: ['A'] });
     const answer = await link.call('syncom/push', {
       ops: packOps([
         remoteOp('tenant-a', 1, 'write', 'a1', { data: { $type: 'A' }, scope: 'A' }),
@@ -44,7 +44,7 @@ test('Hosting scopes', async (t) => {
     assert.deepStrictEqual(refused, [{ node: 'tenant-a', reason: 'scope', count: 1 }]);
     // A peer granted everything is bound by nothing.
     const admin = new MemoryLink(unit);
-    await admin.call('syncom/hello', { node: 'admin', version: 1 });
+    await admin.call('syncom/hello', { node: 'admin', version: 2 });
     const ops = packOps([remoteOp('admin', 1, 'write', 'b2', { data: { $type: 'B' }, scope: 'B' })]);
     const all = await admin.call('syncom/push', { ops });
     assert.strictEqual(all.outOfScope, 0);
@@ -58,7 +58,7 @@ test('Hosting scopes', async (t) => {
     await host.insert({ n: 3 });
     const unit = host.sync.unit({ access: 'public' });
     const link = new MemoryLink(unit);
-    await link.call('syncom/hello', { node: 'tenant-a', version: 1, scopes: ['A'] });
+    await link.call('syncom/hello', { node: 'tenant-a', version: 2, scopes: ['A'] });
     const types = (page) => page.records.map((r) => r.data.$type ?? '*').sort();
     assert.deepStrictEqual(types(await link.call('syncom/snapshot', {})), ['*', 'A'], 'nothing asked: its scopes');
     assert.deepStrictEqual(types(await link.call('syncom/snapshot', { scopes: ['*'] })), ['*', 'A'], "'*': its scopes");
@@ -89,7 +89,7 @@ test('Hosting scopes', async (t) => {
     assert.ok(!seen.includes(b2), 'B never does');
     // Unrestricted: as asked.
     const admin = new MemoryLink(unit);
-    await admin.call('syncom/hello', { node: 'admin', version: 1 });
+    await admin.call('syncom/hello', { node: 'admin', version: 2 });
     assert.deepStrictEqual(types(await admin.call('syncom/snapshot', {})), ['*', '*', 'A', 'A', 'B', 'B']);
     assert.deepStrictEqual(types(await admin.call('syncom/snapshot', { scopes: ['B'] })), ['*', '*', 'B', 'B']);
   });
@@ -98,7 +98,7 @@ test('Hosting scopes', async (t) => {
     const host = await openTemp(t2, { sync: { autoStart: false, scope } });
     const unit = host.sync.unit({ access: 'public' });
     const link = new MemoryLink(unit);
-    await link.call('syncom/hello', { node: 'tenant-a', version: 1, scopes: ['A'] });
+    await link.call('syncom/hello', { node: 'tenant-a', version: 2, scopes: ['A'] });
     const pages = [];
     link.subscribe(
       'syncom/changes',
@@ -172,7 +172,7 @@ test('Scopes bound the records an op writes', async (t) => {
     const doc = await host.insert({ $type: 'Doc', title: 'secret' });
     const unit = host.sync.unit({ access: 'public' });
     const link = new MemoryLink(unit);
-    await link.call('syncom/hello', { node: 'tenant-o', version: 1, scopes: ['Other'] });
+    await link.call('syncom/hello', { node: 'tenant-o', version: 2, scopes: ['Other'] });
     const push = (op) => link.call('syncom/push', { ops: packOps([op]) });
     // A set declared global, on a Doc record: what the scope bug let through.
     const set = await push(remoteOp('o1', 1, 'set', doc, { data: { title: 'stub', owner: 'mallory' } }));
@@ -210,7 +210,7 @@ test('Scopes bound the records an op writes', async (t) => {
     const doc = await host.insert({ $type: 'Doc', title: 'secret' });
     const unit = host.sync.unit({ access: 'public' });
     const link = new MemoryLink(unit);
-    await link.call('syncom/hello', { node: 'tenant-o', version: 1, scopes: ['Other'] });
+    await link.call('syncom/hello', { node: 'tenant-o', version: 2, scopes: ['Other'] });
     const op = remoteOp('o1', 1, 'set', doc, { data: { title: 'later' }, v: 9 });
     const answer = await link.call('syncom/push', { ops: packOps([op]) });
     assert.strictEqual(answer.outOfScope, 1);
@@ -222,7 +222,7 @@ test('Scopes bound the records an op writes', async (t) => {
     const doc = await host.insert({ $type: 'Doc', title: 'v1' });
     const unit = host.sync.unit({ access: 'public' });
     const admin = new MemoryLink(unit);
-    await admin.call('syncom/hello', { node: 'admin', version: 1 });
+    await admin.call('syncom/hello', { node: 'admin', version: 2 });
     const ops = packOps([remoteOp('a1', 1, 'set', doc, { data: { title: 'v2' }, scope: 'Doc' })]);
     assert.strictEqual((await admin.call('syncom/push', { ops })).applied, 1);
     // applyRemote without `bound` (a feed the dialer reads) checks nothing.
@@ -239,7 +239,7 @@ test('Scopes bound the records an op writes', async (t) => {
     const host = await openTemp(t2, { sync: { scope: picky } });
     const unit = host.sync.unit({ access: 'public' });
     const link = new MemoryLink(unit);
-    await link.call('syncom/hello', { node: 'tenant-o', version: 1, scopes: ['Other'] });
+    await link.call('syncom/hello', { node: 'tenant-o', version: 2, scopes: ['Other'] });
     const op = remoteOp('o1', 1, 'write', 'r1', { data: { boom: true } });
     const answer = await link.call('syncom/push', { ops: packOps([op]) });
     assert.strictEqual(answer.outOfScope, 1);
