@@ -110,14 +110,7 @@ const apply = (entry, field, held, op, stamp, limits) => {
 
 // The marks over the character at `index` of a block: what an insert's run
 // reads as — it lands whole, inside or outside each mark, so one style.
-const marksAt = (block, index, base) => {
-  let at = 0;
-  for (const span of S.spans(block, block, base)) {
-    if (index < at + span.text.length) return span.marks;
-    at += span.text.length;
-  }
-  return {};
-};
+const marksAt = (block, index, base) => S.styleAt(block, index, base) ?? {};
 
 // An op as the reading shows it, in the write API's terms and the reading's
 // indices (src/patch.js's vocabulary, a `move` and an `unmarkById` beside):

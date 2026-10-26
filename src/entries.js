@@ -14,6 +14,9 @@ const { isRecordId } = require('./shape.js');
 const { isAlive } = require('./ops.js');
 const { SyncomError } = require('./errors.js');
 
+// How many of the oldest cached entries one write looks at for one to evict.
+const EVICT_SCAN = 64;
+
 class EntryStore {
   #fsi;
   #dir;
@@ -87,14 +90,18 @@ class EntryStore {
     this.#cache.delete(id);
   }
 
-  // The newest entries stay; a live Record pins its own. Absent ids are
-  // never cached — the catalog knows what exists.
+  // The newest entries stay; a live Record pins its own, a held one stays
+  // until it lands. Absent ids are never cached — the catalog knows what
+  // exists. The oldest are looked at a few at a time: what cannot go is
+  // passed over, so a cache over its bound by what it must keep stays over
+  // it, and a write never walks the whole cache.
   remember(id, entry) {
     this.#cache.delete(id);
     this.#cache.set(id, entry);
     if (this.#cache.size <= this.#max) return;
+    let looked = 0;
     for (const key of this.#cache.keys()) {
-      if (this.#cache.size <= this.#max) break;
+      if (this.#cache.size <= this.#max || looked++ >= EVICT_SCAN) break;
       if (this.#pinned(key) || this.#held.has(key)) continue;
       this.#cache.delete(key);
     }

@@ -1042,3 +1042,42 @@ test('sequence engine', async (t) => {
     assert.deepStrictEqual(S.spans(S.buildIndex(ab), ab), [{ text: 'abc', marks: {} }], 'and off is off');
   });
 });
+
+// styleAt (one index, O(marks × log n)) reads what spans() reads at every index.
+test('styleAt reads the style spans() shows at every index, marks, stacks and unmarks included', async () => {
+  const all = require('../src/all/all.js');
+  const { memory } = require('../src/memory/memory.js');
+  const { floorOf } = require('../src/vector.js');
+  const { SOURCE } = require('../src/symbols.js');
+  for (let seed = 1; seed <= 20; seed++) {
+    let x = seed;
+    const random = () => (x = (Math.imul(x, 1664525) + 1013904223) >>> 0) / 2 ** 32;
+    const storage = await all.open({ path: `/style-${seed}`, fsi: memory(), logger: false, defer: 0 });
+    const id = await storage.insert({});
+    await storage.splice(id, 'body', 0, 0, 'hello world, a text to style');
+    for (let i = 0; i < 40; i++) {
+      const length = (await storage.get(id)).body.length;
+      const a = Math.floor(random() * length);
+      const b = Math.min(length, a + 1 + Math.floor(random() * 6));
+      const roll = random();
+      if (roll < 0.3) await storage.splice(id, 'body', Math.floor(random() * (length + 1)), 0, 'xy');
+      else if (roll < 0.4 && length > 3) await storage.splice(id, 'body', a, Math.min(2, length - a));
+      else if (roll < 0.65) {
+        const expand = ['none', 'after', 'before', 'both'][Math.floor(random() * 4)];
+        await storage.mark(id, 'body', a, b, random() < 0.5 ? 'bold' : 'em', random() < 0.8 ? true : 'x', { expand });
+      } else if (roll < 0.75) await storage.mark(id, 'body', a, b, 'comment', { n: i }, { many: true });
+      else await storage.unmark(id, 'body', a, b, random() < 0.5 ? 'bold' : 'em');
+    }
+    const entry = await storage[SOURCE].entry(id);
+    const block = S.indexOf(entry, 'body');
+    const base = floorOf(entry.meta, 'body');
+    let index = 0;
+    for (const span of S.spans(block, block, base)) {
+      for (let k = 0; k < span.text.length; k++, index++) {
+        assert.deepStrictEqual(S.styleAt(block, index, base) ?? {}, span.marks, `seed ${seed}, index ${index}`);
+      }
+    }
+    assert.strictEqual(S.styleAt(block, index, base), null, 'past the end');
+    await storage.close();
+  }
+});

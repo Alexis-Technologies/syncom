@@ -232,8 +232,13 @@ class OpLog {
   // An open file's seqs, waiting for their records.
   #hold(seqs) {
     if (seqs.length === 0) return;
-    const first = Math.min(...seqs);
-    this.#pending.set(first, { first, last: Math.max(...seqs), left: new Set(seqs) });
+    let first = Infinity;
+    let last = -Infinity;
+    for (const seq of seqs) {
+      if (seq < first) first = seq;
+      if (seq > last) last = seq;
+    }
+    this.#pending.set(first, { first, last, left: new Set(seqs) });
   }
 
   // Merges loaded entries in, deduplicating by seq (a crash mid-roll leaves

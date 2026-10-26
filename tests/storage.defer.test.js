@@ -46,6 +46,39 @@ test('open({ defer }): record files lag the log by the window, never the reads',
     },
   );
 
+  await t.test(
+    'a writer that never yields to the timers lands its window by count, and the cache stays by its bound',
+    async (t2) => {
+      const { memory } = require('../src/memory/memory.js');
+      // Over memory() every await settles in a microtask: the window's timer never fires inside the loop.
+      const storage = await syncom.open({
+        path: '/busy',
+        fsi: memory(),
+        logger: false,
+        defer: 16,
+        cache: { max: 200 },
+      });
+      t2.after(() => storage.close().catch(() => {}));
+      const id = await storage.insert({});
+      let most = { deferred: 0, held: 0, cache: 0 };
+      for (let i = 0; i < 3000; i++) {
+        await storage.insert({ n: i });
+        await storage.splice(id, 'body', i, 0, 'x');
+        const { deferred, held, cache } = storage.stats();
+        most = {
+          deferred: Math.max(most.deferred, deferred),
+          held: Math.max(most.held, held),
+          cache: Math.max(most.cache, cache.size),
+        };
+      }
+      assert.ok(most.deferred <= 1024, `the window held ${most.deferred} records`);
+      assert.ok(most.held <= 1025, `${most.held} held`);
+      assert.ok(most.cache <= 200 + 1025, `the cache grew to ${most.cache}`);
+      assert.strictEqual((await storage.get(id)).body.length, 3000);
+      assert.strictEqual((await storage.list()).length, 3001);
+    },
+  );
+
   await t.test('tag() and close() flush first; the file is whole on disk after close', async (t2) => {
     const { dir, storage } = await openTemp(t2, { defer: 10_000 });
     const id = await storage.insert({ n: 1 });

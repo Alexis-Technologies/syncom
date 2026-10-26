@@ -918,6 +918,16 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **A writer that never yielded slowed down with every write.** Over
+  `memory()` an await loop never lets the deferred window's timer fire, so
+  every record it wrote stayed held in the cache, and each write walked all
+  of them looking for one to evict: inserts fell from about 45,000 a second
+  to 2,000 within twenty thousand. The window now also lands by count (1,024
+  records or 8,192 positions), a write looks at a bounded few of the oldest
+  entries to evict, and the log and the landing take a range's ends with a
+  loop rather than a spread an argument list cannot hold. A text insert's
+  marks are read at its index alone (`styleAt`, one walk of the marks and
+  the rope's measures), never from the whole text's spans.
 - **`applyDelta` refused a marker set over two slots.** A delta that sets two
   neighbouring block markers alike composes into one retain over both;
   `applyDelta` sets the marker of every slot of the range now. And an editor

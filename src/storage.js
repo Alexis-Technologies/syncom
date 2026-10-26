@@ -35,6 +35,11 @@ const { isPlainObject, isRecordId, invalidId, isStreamName, isKeyId, VALIDATED }
 const { under } = require('./paths.js');
 const { fieldName } = require('./args.js');
 const { compose, composeData } = require('./compose.js');
+
+// What a deferred window holds at most before it lands without waiting for
+// its timer: records, and log positions (keystrokes into one record).
+const DEFER_RECORDS = 1024;
+const DEFER_POSITIONS = 8192;
 const { COMMIT, REFRESH, SOURCE, PLUGINS, CURSOR, SIGNER } = require('./symbols.js');
 const { missing } = require('./plugin.js');
 const { SyncomError, typed } = require('./errors.js');
@@ -120,6 +125,7 @@ class Storage extends Emitter {
   // entry to write and the log positions it covers; one timer for the flush.
   #defer = 0;
   #deferred = new Map();
+  #deferredPositions = 0;
   #deferTimer = null;
   // Local writes appended but not yet on disk: id → the entries the record's
   // in-flight ops leave it as, oldest first, each with its log position —
@@ -1187,6 +1193,14 @@ class Storage extends Emitter {
       slot.entry = entry;
       slot.positions.push(position);
     } else this.#deferred.set(id, { entry, positions: [position] });
+    this.#deferredPositions++;
+    // The window is time, and a count too: a writer that never yields to the
+    // timers (an await loop over memory()) would hold every record it wrote
+    // in the cache and every position in a slot until it stopped.
+    if (this.#deferred.size >= DEFER_RECORDS || this.#deferredPositions >= DEFER_POSITIONS) {
+      void this.#flushDeferred().catch(() => {});
+      return;
+    }
     if (this.#deferTimer === null) {
       this.#deferTimer = setTimeout(() => {
         this.#deferTimer = null;
@@ -1212,13 +1226,20 @@ class Storage extends Emitter {
     if (this.#deferred.size === 0) return;
     const pending = this.#deferred;
     this.#deferred = new Map();
+    this.#deferredPositions = 0;
     const touched = new Map();
     const positions = [];
+    let from = Infinity;
+    let to = -Infinity;
     for (const [id, slot] of pending) {
       touched.set(id, slot.entry);
-      positions.push(...slot.positions);
+      for (const position of slot.positions) {
+        positions.push(position);
+        if (position < from) from = position;
+        if (position > to) to = position;
+      }
     }
-    if (await this.#land(touched, Math.min(...positions), Math.max(...positions))) {
+    if (await this.#land(touched, from, to)) {
       for (const position of positions) this.#log.applied(position);
     }
     this.#flushCatalog();

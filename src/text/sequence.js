@@ -1853,6 +1853,46 @@ const styleOf = (active) => {
   return marks && Object.keys(marks).length > 0 ? marks : null;
 };
 
+// Where an anchor falls in the walk, read from the rope's measures (the
+// head version's hints): the ordinal of its slot, plus one after it. As
+// walkMarks reads it — the head for an anchor below the base, null for one
+// whose run is not placed here.
+const ordinalAt = (st, token, base) => {
+  if (token === HEAD) return 0;
+  if (token === END) return st.root.s;
+  const { side, elem } = parseAnchor(token);
+  if (belowBase(elem.ts, elem.origin, base)) return 0;
+  const run = runOf(st, elem.run);
+  if (run === undefined || !run.placed || elem.offset >= run.len) return null;
+  return positionOfSlot(st, run, elem.offset).s + (side === 'L' ? 0 : 1);
+};
+
+/**
+ * The style of the visible element at `index` — what `spans()` reads there:
+ * per key the newest value, a stack listed — or null with none. O(marks ×
+ * log n): what a change report reads an insert's marks with, never a walk.
+ */
+const styleAt = (block, index, base = null) => {
+  const ids = keysOf(block.marks);
+  if (ids.length === 0) return null;
+  const st = ensureHead(block);
+  if (!Number.isInteger(index) || index < 0 || index >= st.root.v) return null;
+  const found = shownAt(st, index);
+  const offset = found.item.off + (index - found.v);
+  const ordinal = positionOfSlot(st, runOf(st, found.item.run), offset).s;
+  const active = [];
+  for (const id of ids) {
+    const [from, to, key, value, flags] = block.marks[id];
+    if ((flags & OFF) !== 0) continue;
+    const lo = ordinalAt(st, from, base);
+    const hi = ordinalAt(st, to, base);
+    if (lo === null || hi === null || lo > ordinal || ordinal >= hi) continue;
+    const { ts, origin } = parseRun(id);
+    active.push({ id, ts, origin, key, value, many: (flags & MANY) !== 0 });
+  }
+  return styleOf(active);
+};
+
 // The ordinal of every anchor the marks name, and the ordinal and visible
 // index of every visible slot — read in one walk of the rope, no hints, so
 // a block of any version reads its spans.
@@ -2269,6 +2309,7 @@ module.exports = {
   anchorOrdinal,
   marksIn,
   spans,
+  styleAt,
   slotAt,
   cursorAt,
   indexOfCursor,
