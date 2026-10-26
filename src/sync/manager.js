@@ -29,11 +29,11 @@ const { notify, runHook, normalizeHooks } = require('../hooks.js');
 const { GLOBAL_SCOPE, inScope, opInScope } = require('../scope.js');
 const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf, kindsOf } = require('../protocol.js');
 const { createUnit } = require('./hosting.js');
+const { NodeRegistry } = require('./registry.js');
 const { SyncomError } = require('../errors.js');
 const { wellFormed, VERDICT } = require('../shape.js');
 const { SIGNER, REWIND } = require('../symbols.js');
 
-const REMOTE = 'remote';
 // A page that fails this many times in a row leaves its peer `stuck`.
 const MAX_PAGE_RETRIES = 3;
 // A host that answers 428 to this many fresh hellos in a row is not going to
@@ -61,8 +61,6 @@ const NOT_DIALLED = Symbol('syncom.notDialled');
 // Node registry entries are keyed by url; the file name is the url itself,
 // percent-encoded — unlike the old `<host>.json`, two peers on one host or a
 // url without a port cannot collide.
-const fileName = (url) => `${encodeURIComponent(url)}.json`;
-
 // The part of a vector that concerns `scopes`: global keys (`origin`) and
 // the `origin@scope` keys of the scopes asked for.
 const scopedVector = (vector, scopes) => {
@@ -80,7 +78,6 @@ const scopedVector = (vector, scopes) => {
 
 class SyncManager extends Emitter {
   #storage;
-  #path;
   #options;
   #nodes = new Map();
   #peers = new Map();
@@ -91,10 +88,10 @@ class SyncManager extends Emitter {
   // The presence instances this manager carries (`presence()`): their
   // updates go to every connected peer, a peer's come back to them.
   #presences = new Set();
-  #saving = new Map();
+  // The nodes on disk (src/sync/registry.js).
+  #registry;
   #otel;
   #hooks;
-  #fsi;
   #maxOutbox = DEFAULT_MAX_OUTBOX;
   #maxPageBytes = DEFAULT_MAX_PAGE_BYTES;
 
@@ -121,26 +118,12 @@ class SyncManager extends Emitter {
       throw new TypeError('sync.sharedLog is reserved: the shared-log hub mode is not in this version');
     }
     // The registry lives where the storage does: over its backend.
-    this.#fsi = storage.fsi;
-    this.#path = `${storage.path}/${REMOTE}`;
+    this.#registry = new NodeRegistry(storage.fsi, storage.path, storage.logger);
     return this.#init();
   }
 
   async #init() {
-    const files = await this.#fsi.list(this.#path);
-    for (const file of files) {
-      if (!file.endsWith('.json')) continue;
-      // A registry file is rewritten on every page received; one torn by a
-      // crash is reported and skipped, not fatal to the open.
-      let node = null;
-      try {
-        node = JSON.parse(await this.#fsi.read(this.#path, file));
-      } catch (error) {
-        this.#storage.logger.warn({ event: 'sync.node.unreadable', file, err: error });
-        continue;
-      }
-      if (node && typeof node.url === 'string') this.#nodes.set(node.url, node);
-    }
+    this.#nodes = await this.#registry.load();
     // One listener for both halves: the dialing side's fan-out to its
     // links, and the hosting side's wake-up of every live `changes` feed.
     this.#onChange = (op, via) => this.#fanOut(op, via);
@@ -185,7 +168,7 @@ class SyncManager extends Emitter {
       remote: null,
     };
     this.#nodes.set(url, node);
-    await this.#fsi.write(this.#path, fileName(url), JSON.stringify(node), { atomic: true });
+    await this.#registry.write(node);
     notify(this, this.#storage.logger, 'node', { url, action: 'add' });
     if (this.#started) this.#connect(node);
   }
@@ -195,7 +178,7 @@ class SyncManager extends Emitter {
     if (!node) throw new SyncomError('NODE_NOT_FOUND', `Node with URL ${url} not found`, { url });
     this.#nodes.delete(url);
     this.#disconnect(url);
-    await this.#fsi.remove(this.#path, fileName(url));
+    await this.#registry.remove(url);
     notify(this, this.#storage.logger, 'node', { url, action: 'remove' });
   }
 
@@ -215,31 +198,10 @@ class SyncManager extends Emitter {
     else if (this.#started) this.#connect(node);
   }
 
-  // Registry writes are coalesced AND serialized per node: cursors move on
-  // every batch, so calls that land while a write is pending share it, and
-  // one that lands while a write is in flight runs after it — two writes to
-  // one file interleaving is how a reopen reads half a JSON document.
+  // A node's file saved, coalesced and serialized per node (src/sync/registry.js).
   #saveNode(node) {
-    const { url } = node;
-    if (!this.#nodes.has(url)) return Promise.resolve();
-    let state = this.#saving.get(url);
-    if (!state) {
-      state = { last: Promise.resolve(), next: null };
-      this.#saving.set(url, state);
-    }
-    if (state.next) return state.next;
-    const write = state.last.then(async () => {
-      state.next = null;
-      if (!this.#nodes.has(url)) return;
-      await this.#fsi.write(this.#path, fileName(url), JSON.stringify(node), { atomic: true });
-    });
-    state.next = write;
-    state.last = write
-      .catch(() => {})
-      .then(() => {
-        if (state.next === null) this.#saving.delete(url);
-      });
-    return write;
+    if (!this.#nodes.has(node.url)) return Promise.resolve();
+    return this.#registry.save(node, (url) => this.#nodes.has(url));
   }
 
   // Whether `key` of a peer's vector is one of this node's own streams
@@ -298,9 +260,7 @@ class SyncManager extends Emitter {
   async stop() {
     this.#started = false;
     for (const url of [...this.#peers.keys()]) this.#disconnect(url);
-    const writes = [];
-    for (const state of this.#saving.values()) writes.push(state.last);
-    await Promise.all(writes);
+    await this.#registry.drain();
     notify(this, this.#storage.logger, 'stop');
   }
 

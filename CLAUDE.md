@@ -134,6 +134,7 @@ src/vector.js             clocks, version vectors, event ids
 src/log.js                OpLog — the persisted operation log over fsi: seqs reserved at append, groups written one file each
 src/sync/sync.js          @alexify/syncom/sync — the sync plugin: `open(ctx)` after the replay hands the core its SyncManager
 src/sync/manager.js       SyncManager — the dialing side; `unit()` delegates to hosting.js
+src/sync/registry.js      NodeRegistry — the dialed nodes on disk (remote/<url>.json), saves coalesced per node — no requires
 src/sync/hosting.js       createUnit — the hosting side: hello/push/snapshot/changes, limits, grant()
 src/link.js               isSyncLink — the link contract check
 src/telemetry.js          the telemetry writer contract: DISABLED, writerOf, traced — what every write path records through; no requires
