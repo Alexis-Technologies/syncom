@@ -49,6 +49,7 @@ const { checksum } = require('./hash.js');
 const { GLOBAL_SCOPE, inScope } = require('./scope.js');
 const { writerOf, traced, now } = require('./telemetry.js');
 const { SyncomError } = require('./errors.js');
+const { scrubOp } = require('./header.js');
 
 const OPEN = 'open';
 const CORRUPT = 'corrupt';
@@ -681,7 +682,7 @@ class OpLog {
    * replay of the tail leaves them alone too; a held one is applied once
    * this node runs its version.
    */
-  append(ops, { skipped = null, held = null, ready = null, fps = null } = {}) {
+  append(ops, { skipped = null, held = null, ready = null, fps = null, scrubbed = null } = {}) {
     const entries = [];
     if (ops.length === 0) {
       const ticket = Promise.resolve(entries);
@@ -693,6 +694,8 @@ class OpLog {
       const seq = this.#next++;
       const entry = { seq, op };
       if (skipped?.has(op)) entry.skipped = true;
+      // Logged as a scrub leaves it (the caller took the payload): no rewrite to come.
+      if (scrubbed?.has(op)) entry.scrubbed = true;
       if (held?.has(op)) entry.held = held.get(op);
       const fp = fps?.get(op);
       entries.push(entry);
@@ -1098,22 +1101,28 @@ class OpLog {
       // marked torn, and the next scrub rewrites them whether or not
       // anything is fresh.
       const seqs = this.#byId.get(id) ?? new Set();
+      const torn = this.#torn.has(id);
+      // The files to rewrite are the ones holding what this scrub takes —
+      // every file of the id only after a rewrite that failed: a file whose
+      // entries of the id were scrubbed before is as it should be, and a peer
+      // that sends op after op for a purged id must not cost a rewrite of
+      // every segment that ever held it.
+      const taken = [];
       let fresh = 0;
       for (const seq of seqs) {
         const entry = this.#entryAt(seq);
-        if (!entry || entry.scrubbed) continue;
-        delete entry.op.data;
-        delete entry.op.meta;
-        delete entry.op.key;
-        delete entry.op.value;
-        delete entry.op.nonce;
-        entry.scrubbed = true;
-        fresh++;
+        if (!entry) continue;
+        if (!entry.scrubbed) {
+          scrubOp(entry.op);
+          entry.scrubbed = true;
+          fresh++;
+          taken.push(seq);
+        } else if (torn) taken.push(seq);
       }
-      if (fresh === 0 && !this.#torn.has(id)) return 0;
+      if (taken.length === 0) return 0;
       this.#torn.add(id);
       // The lane is this scrub's: no append or roll changes `seqs` meanwhile.
-      const sorted = [...seqs].sort((a, b) => a - b);
+      const sorted = taken.sort((a, b) => a - b);
       for (const segment of this.#segments) {
         if (!anyWithin(sorted, segment.from, segment.to)) continue;
         const entries = this.#entries.slice(this.#lowerBound(segment.from), this.#lowerBound(segment.to + 1));
@@ -1262,4 +1271,7 @@ class OpLog {
 const appliedHere = (entry, version) =>
   !entry.skipped || (entry.held !== undefined && version !== null && entry.held <= version);
 
-module.exports = { OpLog, appliedHere };
+module.exports = {
+  OpLog,
+  appliedHere,
+};

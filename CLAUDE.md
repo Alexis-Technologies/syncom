@@ -290,9 +290,12 @@ docs/                     VitePress site
 - **A purge is a scrub, not a delete.** `purge` wins at any stamp and a
   purged entry takes nothing but another purge or a merge (`applyOp`
   returns early). The payload leaves the log through `OpLog.scrub(id)`,
-  which rewrites files in place; `persist` in `src/apply.js` and `mergeBatch`
-  in `src/bootstrap.js` scrub every id of the batch whose entry is purged,
-  after the batch is durable and before the relay. Never log a payload for a purged id through another path.
+  which rewrites the files holding what it takes (every file of the id only after a failed
+  rewrite); `persist` in `src/apply.js` and `mergeBatch` in `src/bootstrap.js` scrub every id
+  of the batch whose entry the batch purged, after the batch is durable and before the relay,
+  and an op that lands on a record purged BEFORE it is stripped (`scrubOp`, src/header.js) and
+  appended `scrubbed` — never logged or relayed with its payload. Never log a payload for a
+  purged id through another path.
 - **`packOps` is 19 positional slots, both halves together.** `v` (13),
   `actor` (14), `sig`, `digest` and `nonce` (15–17), `msg` (18, a
   transaction's message, ≤ `MAX_MESSAGE` in `src/shape.js`, in the signed

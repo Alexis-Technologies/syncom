@@ -225,6 +225,41 @@ test('OpLog', async (t) => {
     },
   );
 
+  await t.test(
+    'a scrub rewrites the files that hold what it takes: an id scrubbed before costs nothing more',
+    async () => {
+      const dir = await createTemp();
+      try {
+        const written = [];
+        const fsi = {
+          ...nodeFsi,
+          write: (at, name, content, options) => {
+            written.push(name);
+            return nodeFsi.write(at, name, content, options);
+          },
+        };
+        const log = await new OpLog(dir, { rollAfter: 2, fsi });
+        for (let seq = 1; seq <= 6; seq++) await log.append([op('A', seq, { id: seq % 2 === 0 ? 'x' : `r${seq}` })]);
+        assert.strictEqual(await log.scrub('x'), 3);
+        written.length = 0;
+        // One more op of x, open still: the second scrub takes it alone.
+        await log.append([op('A', 7, { id: 'x' })]);
+        written.length = 0;
+        assert.strictEqual(await log.scrub('x'), 1);
+        assert.ok(written.length > 0, 'the file of the new op is rewritten');
+        for (const name of written) {
+          assert.ok(!name.startsWith('seg-'), `${name}: a segment scrubbed before is left alone`);
+        }
+        written.length = 0;
+        assert.strictEqual(await log.scrub('x'), 0);
+        assert.deepStrictEqual(written, [], 'nothing fresh: nothing written');
+        await log.close();
+      } finally {
+        await fs.rm(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
   await t.test('a log file that is there but cannot be read fails the open, and is kept', async () => {
     const dir = await createTemp();
     try {

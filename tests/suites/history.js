@@ -279,7 +279,8 @@ const runHistoryTests = async (t, assert, createStorage) => {
   });
 
   await t.test('a counter incremented across the reset compaction crossed makes the past inexact', async (t2) => {
-    const storage = await createStorage(t2, 'A', { sync: { log: { rollAfter: 1 }, retention: { ops: 4 } } });
+    // defer: 0 — what the log compacts follows what landed; under load a deferred window still open sealed nothing.
+    const storage = await createStorage(t2, 'A', { defer: 0, sync: { log: { rollAfter: 1 }, retention: { ops: 4 } } });
     const id = await storage.insert({ n: 0 });
     await storage.inc(id, 'hits', 10);
     await tick();

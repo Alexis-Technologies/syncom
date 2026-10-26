@@ -889,6 +889,15 @@ There is no released version section until then; everything below lands in it.
 
 ### Security
 
+- **An op on a purged record no longer costs a rewrite of the log, nor
+  carries the payload on.** A peer's op that landed on a record purged
+  before it was logged with its payload, relayed with it to every peer this
+  node relays to, then scrubbed — and the scrub rewrote every log file that
+  had ever held the id, so a peer sending op after op for a purged id made
+  this node rewrite all those segments each time. Such an op is now
+  stripped before the append (the header, digest and signature stay, so it
+  still verifies) and logged `scrubbed`; a scrub rewrites only the files
+  holding entries it takes.
 - **A fork of a stream is refused, never healed in silence.** Two ops of
   one `origin` and `seq` that differ — a restored backup minting seqs again,
   a cloned directory, an equivocating signer — were taken first-come and the

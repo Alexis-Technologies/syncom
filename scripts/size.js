@@ -264,7 +264,9 @@ const ENTRIES = [
   // 2026-10-27). 107, raised by name.
   // 108.0 with a hash chain per stream (src/header.js: the fingerprint, `prev`, the fork refused as
   // EQUIVOCATION; the log's fingerprints and heads; PROTOCOL 2). 108.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 108.5 },
+  // 108.6 with presence refusals reported, unreadable log files kept and failing the open, a scrub that rewrites
+  // what it takes and an op on a purged record stripped before the append (2026-10-27). 109, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 109 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).

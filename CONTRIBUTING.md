@@ -131,7 +131,7 @@ on every browser entry — the main one and each subpath. The budget is a
 the bytes, and say why in a comment next to the number. Since the core and
 blocks plan (2026-10-25) the main entry is the core alone (budget 52 KB, about
 44 measured) and every block a subpath with a budget of its own; `/all` is
-held to 108.5 KB, and a composite row checks that the core and every block
+held to 109 KB, and a composite row checks that the core and every block
 bundled together weigh what `/all` weighs — nothing bundled twice. Every
 raise names its feature, and a raise of more than a kilobyte is a design
 decision (an engine subpath, an injected kind), taken in a plan, not in the

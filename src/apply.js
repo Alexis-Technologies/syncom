@@ -11,7 +11,7 @@
 
 const { applyOp, isAlive, latestClock } = require('./ops.js');
 const { vectorHas, vectorNext, vectorAdvance, keyScope, opKey } = require('./vector.js');
-const { fingerprintOf } = require('./header.js');
+const { fingerprintOf, scrubOp } = require('./header.js');
 const { notify } = require('./hooks.js');
 const { inScope } = require('./scope.js');
 const { traced, now } = require('./telemetry.js');
@@ -412,6 +412,15 @@ const applyOne = async (batch, op) => {
   }
   const current = await currentOf(batch, op);
   if (current === undefined) return;
+  // What lands on a record purged before it is logged and relayed as a scrub
+  // leaves it — the header and the signature, never the payload: scrubbing
+  // it after the append rewrote log files on any peer's say, and the
+  // payload went on to every peer this node relays to. A merge is the purge
+  // stamp's way across, and a purge has no payload.
+  if (current?.meta?.purged != null && op.type !== 'purge' && op.type !== 'merge') {
+    scrubOp(op);
+    (batch.stripped ??= new Set()).add(op);
+  }
   if (current?.encrypted) {
     // Sealed here for this node alone: the op is logged and relayed, never
     // applied — flagged skipped, so neither a replay nor a fold of the log
@@ -445,7 +454,7 @@ const applyOne = async (batch, op) => {
   core.otel.recordLag(op.ts);
   // A purge, and anything that lands on a purged record, is scrubbed from
   // this log too, once the batch is durable.
-  if (entry.meta.purged) (batch.purged ??= new Set()).add(op.id);
+  if (entry.meta.purged && !batch.stripped?.has(op)) (batch.purged ??= new Set()).add(op.id);
   if (!changed) return;
   if (VALIDATED.has(op.type)) await reportConflicts(batch, op, entry);
   batch.touched.set(op.id, entry);
@@ -461,7 +470,12 @@ const applyOne = async (batch, op) => {
 const persist = async (batch) => {
   const { core, accepted, touched } = batch;
   if (accepted.length === 0) return;
-  const entries = await core.log.append(accepted, { skipped: batch.skipped, held: batch.held, fps: batch.fps });
+  const entries = await core.log.append(accepted, {
+    skipped: batch.skipped,
+    held: batch.held,
+    fps: batch.fps,
+    scrubbed: batch.stripped ?? null,
+  });
   const first = entries[0].seq;
   const last = entries[entries.length - 1].seq;
   if (batch.adopted) await core.log.advance(batch.adopted);

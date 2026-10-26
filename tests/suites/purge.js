@@ -78,6 +78,12 @@ const runPurgeTests = async (t, assert, createStorage) => {
     ]);
     assert.strictEqual(await storage.get(person.id), null);
     assert.strictEqual(await holdsSecret(storage), false, 'the peer’s op was scrubbed on arrival');
+    const arrived = storage.log.since(undefined).at(-1);
+    assert.deepStrictEqual(
+      [arrived.op.origin, arrived.scrubbed, 'data' in arrived.op, ops.at(-1).data],
+      ['peer', true, false, undefined],
+      'logged and relayed as a scrub leaves it: no payload, no rewrite to come',
+    );
     assert.strictEqual(storage.vector.peer, 1, 'but counted');
     await storage.purge(person.id);
     assert.strictEqual(await storage.get(person.id), null, 'idempotent');

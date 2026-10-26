@@ -60,6 +60,18 @@ const signedMessage = (op) => JSON.stringify(headerOf(op));
 const digestOf = (nonce, payload) => hashOf(`${nonce}\n${canonical(payload)}`);
 const fingerprintOf = (op) => hashOf(headerOf(op));
 
+// What a scrub takes from an op, in place: its payload and the nonce that
+// salted its digest. The header, the digest and the signature stay — a
+// scrubbed op still verifies (src/log.js #scrub, and src/apply.js for an op
+// that lands on a purged record).
+const scrubOp = (op) => {
+  delete op.data;
+  delete op.meta;
+  delete op.key;
+  delete op.value;
+  delete op.nonce;
+};
+
 // The op's payload digested under a fresh nonce, once: an op that has its
 // digest keeps it.
 const digest = async (op) => {
@@ -70,4 +82,4 @@ const digest = async (op) => {
   op.digest = await digestOf(op.nonce, payload);
 };
 
-module.exports = { HEADER_VERSION, payloadOf, headerOf, signedMessage, digestOf, fingerprintOf, digest };
+module.exports = { HEADER_VERSION, payloadOf, headerOf, signedMessage, digestOf, fingerprintOf, digest, scrubOp };
