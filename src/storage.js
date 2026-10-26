@@ -401,8 +401,13 @@ class Storage extends Emitter {
   // share. Built once the log, the identity and the catalog are loaded;
   // every member is fixed from then on.
   #lend() {
-    return {
-      storage: this,
+    // Frozen: a path module reads what it is lent and changes none of it
+    // (tests/package/core-surface.test.js names every member).
+    return Object.freeze({
+      // An event of the storage's, contained like every one (src/hooks.js
+      // notify), and whether anything listens — a commit event is built only then.
+      emit: (event, ...args) => notify(this, this.#logger, event, ...args),
+      listening: (event) => this.listenerCount(event) > 0,
       logger: this.#logger,
       otel: this.#otel,
       log: this.#log,
@@ -411,7 +416,6 @@ class Storage extends Emitter {
       // (SHA-256 of a value's JSON, Web Crypto), the signature of an op.
       seal: this.#seal,
       hash: sha256,
-      identity: this.#identity,
       clock: this.#clock,
       entries: this.#entries,
       catalog: this.#catalog,
@@ -462,7 +466,8 @@ class Storage extends Emitter {
       invalid: (op, entry) => this.#invalid(op, entry),
       persist: (touched, from, to) => this.#landing(() => this.#land(touched, from, to)),
       unpersisted: (touched, error) => this.#unpersisted(touched, error),
-      flush: () => this.#flushCatalog(),
+      // The catalog saved off the queue (one save in flight at a time).
+      saveCatalog: () => this.#flushCatalog(),
       refresh: (id, data, delta, source, entry) => this.#emitUpdate(id, data, delta, source, entry),
       // For the API modules (src/fields.js, src/versions/api.js), which stand
       // outside the queue: the hooks (their read hooks run outside it), the
@@ -487,7 +492,7 @@ class Storage extends Emitter {
         await this.#log.scrub(id);
         if (this.#tags !== null) await this.#tags.scrub(id);
       },
-    };
+    });
   }
 
   // The catalog is derived from the records: the persisted one is reused

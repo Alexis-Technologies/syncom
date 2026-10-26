@@ -13,7 +13,6 @@ const { applyOp, isAlive, latestClock, latestHeld, settleMeta } = require('./ops
 const { opKey } = require('./vector.js');
 const { fingerprintOf } = require('./header.js');
 const { link } = require('./commit.js');
-const { notify } = require('./hooks.js');
 const { traced, now } = require('./telemetry.js');
 const { GLOBAL_SCOPE, inScope } = require('./scope.js');
 const { isPlainObject, asJson, isRecordId, nestsWithin, MAX_WIRE_DEPTH } = require('./shape.js');
@@ -197,7 +196,7 @@ const mergeBatch = async (core, records, via, from) => {
   const last = entries[entries.length - 1].seq;
   if (await core.persist(batch.touched, first, last)) core.log.applied(first, last);
   if (batch.purged) for (const id of batch.purged) await core.scrub(id);
-  core.flush();
+  core.saveCatalog();
   const changes = [];
   for (const { ctx, op, started, changes: own } of batch.pending) {
     try {
@@ -205,15 +204,15 @@ const mergeBatch = async (core, records, via, from) => {
     } finally {
       const entry = batch.touched.get(op.id);
       core.refresh(op.id, isAlive(entry) ? entry.data : null, batch.deltas.get(op.id), null, entry);
-      notify(core.storage, core.logger, 'change', op, via, { changes: own });
+      core.emit('change', op, via, { changes: own });
       for (const change of own) changes.push({ id: op.id, ...change });
       if (core.otel.enabled) core.otel.recordCommit('merge', 'applied', now() - started);
     }
   }
-  if (core.storage.listenerCount('transaction') > 0) {
+  if (core.listening('transaction')) {
     const ts = batch.ops[batch.ops.length - 1].ts;
     const event = { local: true, via, source: null, message: null, ops: batch.ops, changes, ts };
-    notify(core.storage, core.logger, 'transaction', event);
+    core.emit('transaction', event);
   }
 };
 
@@ -264,7 +263,7 @@ const adopt = async (core, vector, { via = null, from = null, own = false, proof
   const [{ seq }] = await core.log.append([op], { fps });
   await core.log.advance(news);
   core.log.applied(seq);
-  notify(core.storage, core.logger, 'change', op, via);
+  core.emit('change', op, via);
   return op;
 };
 

@@ -13,7 +13,6 @@ const { applyOp, isAlive, latestHeld, observedTags, kindOf, kindsOf } = require(
 const { missing } = require('./plugin.js');
 const { opKey } = require('./vector.js');
 const { digest, fingerprintOf } = require('./header.js');
-const { notify } = require('./hooks.js');
 const { ValidationError } = require('./errors.js');
 const { project, unproject, foldSet } = require('./entity.js');
 const { fieldName } = require('./args.js');
@@ -104,12 +103,12 @@ const seal = async (core, id, data) => {
   const record = await core.seal.encrypt(data);
   const blockHash = core.chain ? await core.chain.addBlock({ id, hash: await core.hash(record) }) : null;
   await core.entries.writeSealed(id, record, data, blockHash);
-  core.flush();
+  core.saveCatalog();
 };
 
 const unseal = async (core, id) => {
   await core.entries.remove(id);
-  core.flush();
+  core.saveCatalog();
 };
 
 // A write to a sealed record: set and write map onto the encrypted save, a
@@ -377,7 +376,7 @@ const land = async (core, op, entry, { ticket, position }) => {
   if (core.defer > 0) {
     await core.deferred(id, entry, position);
     core.settled(id, position);
-    core.flush();
+    core.saveCatalog();
     return position;
   }
   // A block or a file that fails now holds the entry in memory, leaves the
@@ -395,7 +394,7 @@ const land = async (core, op, entry, { ticket, position }) => {
     await core.unpersisted(new Map([[id, entry]]), error);
   }
   core.settled(id, position);
-  core.flush();
+  core.saveCatalog();
   return position;
 };
 
@@ -414,11 +413,11 @@ const announce = async (core, op, entry, delta, ctx, source, via, committed = nu
     if (refresh) core.refresh(op.id, isAlive(entry) ? entry.data : null, delta, source, entry);
     // What an undo manager keeps of a local commit: the record before and
     // after, as copies, and every field's kind — built only for a listener.
-    if (committed !== null && entry !== null && core.storage.listenerCount('commit') > 0) {
+    if (committed !== null && entry !== null && core.listening('commit')) {
       const event = commitEvent(core, op, entry, isAlive(entry), committed, source, changes);
-      notify(core.storage, core.logger, 'commit', event);
+      core.emit('commit', event);
     }
-    notify(core.storage, core.logger, 'change', op, via, { changes });
+    core.emit('change', op, via, { changes });
   }
 };
 
@@ -467,9 +466,9 @@ const commitEvent = (core, op, entry, alive, committed, source, changes) => {
 // transaction, a peer's page, a joined snapshot — with every change tagged
 // by its record: what a view updates itself by, once.
 const transacted = (core, { local, via, source, message, ops, changes }) => {
-  if (ops.length === 0 || core.storage.listenerCount('transaction') === 0) return;
+  if (ops.length === 0 || !core.listening('transaction')) return;
   const ts = ops[ops.length - 1].ts;
-  notify(core.storage, core.logger, 'transaction', { local, via, source, message, ops, changes, ts });
+  core.emit('transaction', { local, via, source, message, ops, changes, ts });
 };
 
 // The changes of an op tagged with its record, for a transaction event:
@@ -724,7 +723,7 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
   const release = (made) => {
     made.delta = null;
     if (!core.hooks.afterWrite) made.ctx = null;
-    if (core.storage.listenerCount('commit') === 0) {
+    if (!core.listening('commit')) {
       made.entry = null;
       made.before = null;
       made.previous = null;
@@ -801,7 +800,7 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
       core.log.applied(from, to);
     }
     for (const [id, last] of lastOf) core.settled(id, positions[last]);
-    core.flush();
+    core.saveCatalog();
     const changes = [];
     for (let i = 0; i < count; i++) {
       const { op, entry, ctx, before, previous } = prepared[i];

@@ -184,7 +184,7 @@ docs/                     VitePress site
   encryption plugin), `chain` (a Blockchain, the chain plugin) — and `open(ctx)` — `{ storage,
   options, settings, logger }`, run after the replay — hands back `sync` (the SyncManager, the
   sync plugin: `storage.sync` is PLUGIN_MISSING without it). The core reads them as
-  `core.identity`/`core.sign`/`core.verify`, `core.seal`, `core.chain`, and `core.hash` is
+  `core.sign`/`core.verify`, `core.seal`, `core.chain`, and `core.hash` is
   `sha256` from `src/digest.js` (async on both platforms; its one crypto half is the hash —
   signing and sealing are the plugins'). Without a hook: the node id is what `getId` mints (checked by `isStreamName`), ops are
   neither signed nor verified (`checkPage` answers OK for every op), `block: null`, and an
@@ -623,7 +623,8 @@ docs/                     VitePress site
   null). There are exactly three write paths — `src/commit.js` (a local op,
   through `[COMMIT]`), `src/apply.js` (a peer's page, through `applyRemote`),
   `src/bootstrap.js` (a snapshot page, through `mergeSnapshot`) — all inside
-  `#run`, all over the `core` Storage lends them (`#lend`), all ending in
+  `#run`, all over the `core` Storage lends them (`#lend`: frozen, its members listed by
+  `tests/package/core-surface.test.js` — a new one changes that list on purpose), all ending in
   `#persistBatch` or `EntryStore.write`. Do not add a fourth, and do not
   reach the storage's state from a path module except through `core`. A
   transaction (`transact` in src/commit.js, what `storage.transact()`,
@@ -932,7 +933,7 @@ docs/                     VitePress site
   (`src/entries.js`) is the only place that `catalog.put`: `write` (every
   write path goes through it), `writeSealed`, `remove` and `index`; it
   indexes the lensed view and never fails a write (a throwing lens is logged
-  and the raw data indexed). `#flushCatalog` (`core.flush`) saves it OFF the
+  and the raw data indexed). `#flushCatalog` (`core.saveCatalog`) saves it OFF the
   mutation queue — `Catalog.save` takes the rows and the stamp before its
   first await, one save in flight at a time, `close()` awaits it — so a write
   never waits for the catalog file. Do not `await` a save inside a write path.
@@ -975,7 +976,7 @@ docs/                     VitePress site
   scopes are the per-peer filter). Only the hooks that run inside the
   mutation queue go through `#hook` (`core.hook`) and its `#inHook` guard;
   `beforeRead`/`afterRead` call `runHook` directly — a write from a read hook
-  queues. Every event leaves through `notify()`:
+  queues. Every event leaves through `notify()` (a path module's through `core.emit`, which is it):
   never `await this.emit(...)`, never emit `error` any other way (the Emitter
   throws on an unheard `error`, and that throw used to fail a push before the
   vector moved). A remote op a `beforeApply` skipped is still appended, with

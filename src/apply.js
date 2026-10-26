@@ -12,7 +12,6 @@
 const { applyOp, isAlive, latestClock, settleMeta } = require('./ops.js');
 const { keyScope, opKey } = require('./vector.js');
 const { fingerprintOf, scrubOp } = require('./header.js');
-const { notify } = require('./hooks.js');
 const { inScope } = require('./scope.js');
 const { traced, now } = require('./telemetry.js');
 const { isPlainObject, VALIDATED, wellFormed, VERDICT } = require('./shape.js');
@@ -161,14 +160,14 @@ const reportSignatures = (batch) => {
     const count = batch.forged;
     core.logger.warn({ event: 'sync.op.forged', origin: op.origin, seq: op.seq, count });
     const message = `Op ${op.origin}:${op.seq} does not verify against its origin (${count} in this page)`;
-    notify(core.storage, core.logger, 'error', new SyncomError('BAD_SIGNATURE', message, { op, count }));
+    core.emit('error', new SyncomError('BAD_SIGNATURE', message, { op, count }));
   }
   if (batch.unsigned > 0) {
     const op = batch.firstUnsigned;
     const count = batch.unsigned;
     core.logger.warn({ event: 'sync.op.unsigned', origin: op.origin, seq: op.seq, count });
     const message = `Op ${op.origin}:${op.seq} carries no signature; sync.signatures is 'require' (${count} in this page)`;
-    notify(core.storage, core.logger, 'error', new SyncomError('UNSIGNED', message, { op, count }));
+    core.emit('error', new SyncomError('UNSIGNED', message, { op, count }));
   }
 };
 
@@ -193,7 +192,7 @@ const reportKinds = (batch) => {
   const kinds = [...names];
   core.logger.warn({ event: 'sync.op.rejected', id: op.id, rejected, count, kinds });
   const message = `Refused ${count} op${count > 1 ? 's' : ''} of a kind this node runs no plugin for (${kinds.join(', ')})`;
-  notify(core.storage, core.logger, 'error', new SyncomError('OP_REFUSED', message, { op, rejected, count, kinds }));
+  core.emit('error', new SyncomError('OP_REFUSED', message, { op, rejected, count, kinds }));
 };
 
 // The fingerprint this node holds for the op at `seq` of the stream `key`:
@@ -233,7 +232,7 @@ const report = (batch, event, reason, error) => {
   const { core } = batch;
   core.logger.warn(event);
   core.otel.recordRejected(reason);
-  notify(core.storage, core.logger, 'error', error);
+  core.emit('error', error);
 };
 
 // The peer joined a snapshot covering these seqs; so, through its merges,
@@ -284,7 +283,7 @@ const reportEquivocations = (batch) => {
     reason === 'chain'
       ? `Op ${op.origin}:${op.seq} does not follow the op this node holds at seq ${op.seq - 1} (${count} in this page)`
       : `Op ${op.origin}:${op.seq} is not the op this node holds at that seq (${count} in this page)`;
-  notify(core.storage, core.logger, 'error', new SyncomError('EQUIVOCATION', message, { op, ...fields }));
+  core.emit('error', new SyncomError('EQUIVOCATION', message, { op, ...fields }));
 };
 
 // The newest stamp a merge's meta holds — a peer's whole meta, every stamp
@@ -305,7 +304,7 @@ const skewed = (batch, op, ts) => {
   core.otel.recordMalformed();
   batch.malformed++;
   const message = `Op ${op.origin}:${op.seq} carries a stamp ${ahead} ms ahead of this node (maxSkew ${core.maxSkew})`;
-  notify(core.storage, core.logger, 'error', new SyncomError('SKEW', message, { op }));
+  core.emit('error', new SyncomError('SKEW', message, { op }));
   return false;
 };
 
@@ -420,7 +419,7 @@ const reportConflicts = async (batch, op, entry) => {
   for (const { fields, other } of conflicts) {
     core.otel.recordConflict('unique');
     const entity = entry.data.$type;
-    notify(core.storage, core.logger, 'conflict', { kind: 'unique', entity, fields, id: op.id, other, op });
+    core.emit('conflict', { kind: 'unique', entity, fields, id: op.id, other, op });
   }
 };
 
@@ -443,7 +442,7 @@ const applyOne = async (batch, op) => {
   if (ahead && core.ahead === 'hold') {
     skip(batch, op);
     (batch.held ??= new Map()).set(op, op.v);
-    notify(core.storage, core.logger, 'schema', { kind: 'ahead', op, held: true });
+    core.emit('schema', { kind: 'ahead', op, held: true });
     return;
   }
   const current = await currentOf(batch, op);
@@ -488,7 +487,7 @@ const applyOne = async (batch, op) => {
     report(batch, { event: 'sync.op.invalid', id: op.id, ...invalid }, 'validation', error);
     return void skip(batch, op);
   }
-  if (ahead) notify(core.storage, core.logger, 'schema', { kind: 'ahead', op, held: false });
+  if (ahead) core.emit('schema', { kind: 'ahead', op, held: false });
   accept(batch, op);
   core.otel.recordLag(op.ts);
   // A purge, and anything that lands on a purged record, is scrubbed from
@@ -521,7 +520,7 @@ const persist = async (batch) => {
   let landed = true;
   if (touched.size > 0) {
     landed = await core.persist(touched, first, last);
-    core.flush();
+    core.saveCatalog();
   }
   // Unapplied, a batch whose records did not land is replayed at the next open.
   if (landed) core.log.applied(first, last);
@@ -538,17 +537,17 @@ const announce = async (batch, result) => {
     for (const [id, entry] of touched) {
       core.refresh(id, isAlive(entry) ? entry.data : null, batch.deltas.get(id), null, entry);
     }
-    notify(core.storage, core.logger, 'apply', { via, peer, ops: accepted, ...result });
+    core.emit('apply', { via, peer, ops: accepted, ...result });
     const changes = [];
     for (const op of accepted) {
       const own = batch.changes.get(op) ?? [];
-      notify(core.storage, core.logger, 'change', op, via, { changes: own });
+      core.emit('change', op, via, { changes: own });
       for (const change of own) changes.push({ id: op.id, ...change });
     }
-    if (accepted.length > 0 && core.storage.listenerCount('transaction') > 0) {
+    if (accepted.length > 0 && core.listening('transaction')) {
       const ts = accepted[accepted.length - 1].ts;
       const event = { local: false, via, source: null, message: null, ops: accepted, changes, ts };
-      notify(core.storage, core.logger, 'transaction', event);
+      core.emit('transaction', event);
     }
   }
 };
