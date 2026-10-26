@@ -1,7 +1,7 @@
 import { expectError, expectType } from 'tsd';
 import type { Storage } from '../index.js';
 import type { SyncManager } from '../src/sync/sync.js';
-import { createPresence, Presence } from '../src/presence/presence.js';
+import { createPresence, Presence, isEntry, sized, MAX_AHEAD } from '../src/presence/presence.js';
 import type { PresenceUpdate, PresenceApplied } from '../src/presence/presence.js';
 
 declare const storage: Storage & { sync: SyncManager };
@@ -21,3 +21,6 @@ presence.on('change', ({ added, removed }) => {
 presence.on('update', (update) => expectType<PresenceUpdate>(update));
 expectType<() => void>(storage.sync.presence(presence));
 expectError(createPresence(storage, { timeout: 'long' }));
+expectType<boolean>(isEntry(['node', 1, 1, null]));
+expectType<boolean>(sized({ name: 'ada' }));
+expectType<60000>(MAX_AHEAD);

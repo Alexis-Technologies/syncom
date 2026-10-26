@@ -954,6 +954,16 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **A presence state could be pinned, and a room filled, for good.** An
+  entry's stamp had no upper bound, so a state stamped hours ahead outlived
+  every timeout; the host stored and relayed entries without the checks a
+  receiver makes; a repeated hello refilled the presence rate; the scopes a
+  hello asked for were neither checked nor bounded; empty rooms stayed; and a
+  state nested thousands deep threw out of the depth check. A stamp more than
+  60 s ahead is refused, the host checks every entry as a receiver does
+  before it keeps or relays it, the rate bucket survives a hello, a hello asks
+  for 256 scopes at most (stream names or `*`, each once), an empty room
+  goes, and the depth is checked without recursion.
 - **A layered backend's background failure surfaced in an unrelated read.**
   Under `write: 'back'`, a lower layer's failed write was kept and thrown
   from whatever next waited for the queue — a read that missed the top, an

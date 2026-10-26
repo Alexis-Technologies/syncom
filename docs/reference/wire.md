@@ -421,7 +421,8 @@ a snapshot buys nothing an op could not:
 | A tree field's moves (`MAX_MOVES`), every node's together | 65 536 | `OP_REFUSED` `detail: 'moves'`; a snapshot block past it is not taken; a join keeps the oldest in the fold's order |
 | Ops per push, bytes per push, ops per second | `unit({ limits })`, none by default | 413, 429 |
 | Records per snapshot page, ops per `changes` page | `unit({ pageSize })`, 500 | — |
-| Presence state | 16 KiB, 64 keys, 8 deep; 1 024 entries per update; 20 updates a second | refused |
+| Presence state | 16 KiB, 64 keys, 8 deep; a stamp no more than 60 s ahead; 1 024 entries per update; 20 updates a second (kept across a repeated hello) | refused — by the receiver and by the host, which keeps and relays nothing it would refuse |
+| Scopes a hello asks for | 256, each a stream name or `*`, each once | `BAD_HELLO` |
 
 ## Compatibility
 

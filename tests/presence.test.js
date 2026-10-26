@@ -18,6 +18,29 @@ const open = async (t, name, options = {}) => {
   return storage;
 };
 
+test('presence refuses a stamp far ahead and a state nested past the bound, without a throw', async (t) => {
+  const storage = await open(t, 'bounds');
+  const presence = createPresence(storage, { timeout: 1000 });
+  t.after(() => presence.destroy());
+  let deep = { leaf: 1 };
+  for (let i = 0; i < 20_000; i++) deep = { deep };
+  const out = await presence.apply({
+    p: 1,
+    scope: '*',
+    s: [
+      ['ahead', 1, Date.now() + 3_600_000, { name: 'pin' }],
+      ['deep', 1, Date.now(), deep],
+      ['fine', 1, Date.now(), { name: 'ok' }],
+    ],
+  });
+  assert.deepStrictEqual([out.refused, out.applied], [2, 1]);
+  assert.deepStrictEqual(
+    presence.nodes(),
+    [storage.nodeId, 'fine'].filter((node) => presence.get(node) !== undefined),
+  );
+  assert.strictEqual(presence.get('ahead'), undefined);
+});
+
 test('presence', async (t) => {
   await t.test(
     'presence: a state is set, renewed, expired and left; the newest by clock wins; a forged or unsigned state is refused; nothing is logged',
@@ -174,9 +197,26 @@ test('presence', async (t) => {
       link.send('syncom/presence', 'nonsense');
       await waitUntil(() => refused.length >= 3);
       assert.deepStrictEqual(refused.slice(0, 3), ['PRESENCE_FORGED', 'PRESENCE_SCOPE', 'PRESENCE_MALFORMED']);
+      // The rate refilled: a stamp far ahead (it would outlive its timeout everywhere) and a state nested past
+      // the bound are malformed — never kept or relayed.
+      await wait(1000);
+      link.send('syncom/presence', { p: 1, scope: '*', s: [[b.nodeId, 100, Date.now() + 3_600_000, { name: 'pin' }]] });
+      let deep = { leaf: 1 };
+      for (let i = 0; i < 100; i++) deep = { deep };
+      link.send('syncom/presence', { p: 1, scope: '*', s: [[b.nodeId, 101, Date.now(), deep]] });
+      await waitUntil(() => refused.length >= 5);
+      assert.deepStrictEqual(refused.slice(3, 5), ['PRESENCE_MALFORMED', 'PRESENCE_MALFORMED']);
       assert.deepStrictEqual(pc.get(a.nodeId), undefined, 'the forgery went nowhere');
+      assert.notStrictEqual(pa.get(b.nodeId)?.name, 'pin', 'the pinned state went nowhere');
       for (let i = 0; i < 8; i++) await pb.set({ name: 'bob', i });
       await waitUntil(() => refused.includes('PRESENCE_RATE'));
+      // Greeting again is no refill of the presence rate.
+      const session = link.client.data.syncom;
+      const tokens = session.presenceBucket.tokens;
+      const { presenceBucket } = session;
+      await b.sync.sync();
+      assert.strictEqual(link.client.data.syncom.presenceBucket, presenceBucket);
+      assert.ok(link.client.data.syncom.presenceBucket.tokens <= tokens + 5);
       // A stopped carrier sends and hears nothing more.
       const stop = c.sync.presence(pc);
       stop();

@@ -30,19 +30,33 @@ const MAX_KEYS = 64;
 const MAX_DEPTH = 8;
 const MAX_STATES = 1024;
 const DEFAULT_TIMEOUT = 30_000;
+// How far ahead of this node's clock a state's stamp may be: past it, the
+// state would outlive its timeout — pinned in every room it reached.
+const MAX_AHEAD = 60_000;
 const SIGNATURE = /^[A-Za-z0-9_-]{86}$/;
 
-const depthOf = (value, depth = 1) => {
-  if (value === null || typeof value !== 'object') return depth;
-  let deepest = depth;
-  for (const key of Object.keys(value)) deepest = Math.max(deepest, depthOf(value[key], depth + 1));
-  return deepest;
+// Whether `value` nests within MAX_DEPTH, walked with a stack of its own —
+// a state nested thousands deep would overflow a recursive walk — and no
+// further than a state within MAX_STATE_BYTES could hold (every value is two
+// bytes of JSON at least).
+const shallow = (value) => {
+  const stack = [value, 1];
+  let seen = 0;
+  while (stack.length > 0) {
+    const depth = stack.pop();
+    const item = stack.pop();
+    if (item === null || typeof item !== 'object') continue;
+    if (depth > MAX_DEPTH || ++seen > MAX_STATE_BYTES / 2) return false;
+    const keys = Object.keys(item);
+    for (let i = 0; i < keys.length; i++) stack.push(item[keys[i]], depth + 1);
+  }
+  return true;
 };
 
 // A state's JSON when its size, keys and depth are within the bounds, else null.
 const boundedJson = (state) => {
   if (!isPlainObject(state) || Object.keys(state).length > MAX_KEYS) return null;
-  if (depthOf(state) > MAX_DEPTH) return null;
+  if (!shallow(state)) return null;
   const text = JSON.stringify(state);
   return typeof text === 'string' && text.length <= MAX_STATE_BYTES ? text : null;
 };
@@ -69,6 +83,7 @@ const isEntry = (entry) =>
   entry[1] >= 1 &&
   Number.isSafeInteger(entry[2]) &&
   entry[2] > 0 &&
+  entry[2] <= Date.now() + MAX_AHEAD &&
   (entry[3] === null || isPlainObject(entry[3])) &&
   (entry.length === 4 || (typeof entry[4] === 'string' && SIGNATURE.test(entry[4])));
 
@@ -318,4 +333,15 @@ const createPresence = (storage, { scope = GLOBAL_SCOPE, timeout = DEFAULT_TIMEO
   return new Presence(storage, { scope, timeout });
 };
 
-module.exports = { createPresence, Presence, isUpdate, MAX_STATE_BYTES, MAX_KEYS, MAX_DEPTH, MAX_STATES };
+module.exports = {
+  createPresence,
+  Presence,
+  isUpdate,
+  isEntry,
+  sized,
+  MAX_STATE_BYTES,
+  MAX_KEYS,
+  MAX_DEPTH,
+  MAX_STATES,
+  MAX_AHEAD,
+};

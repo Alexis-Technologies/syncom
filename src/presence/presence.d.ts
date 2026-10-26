@@ -86,6 +86,12 @@ export declare class Presence {
 export function createPresence(storage: Storage, options?: PresenceOptions): Presence;
 /** Whether a value is a presence update of the wire format. */
 export function isUpdate(value: unknown): value is PresenceUpdate;
+/** Whether a value is one entry of an update: the shape, a stamp no more than `MAX_AHEAD` ahead. */
+export function isEntry(value: unknown): value is PresenceEntry;
+/** Whether a state is within the bounds (bytes, keys, depth); `null` — a leave — is. */
+export function sized(state: unknown): boolean;
+/** How far ahead of the receiver's clock an entry's stamp may be, in milliseconds. */
+export declare const MAX_AHEAD: 60000;
 export declare const MAX_STATE_BYTES: 16384;
 export declare const MAX_KEYS: 64;
 export declare const MAX_DEPTH: 8;

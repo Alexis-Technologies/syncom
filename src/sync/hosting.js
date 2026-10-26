@@ -16,8 +16,11 @@ const { packOps, unpackOps } = require('../ops.js');
 const { opKey } = require('../vector.js');
 const { notify } = require('../hooks.js');
 const { GLOBAL_SCOPE, opInScope } = require('../scope.js');
-const { isKeyId, isPlainObject } = require('../shape.js');
-const { isUpdate: isPresenceUpdate } = require('../presence/presence.js');
+const { isKeyId, isPlainObject, isStreamName } = require('../shape.js');
+
+// The scopes a hello may ask for: every op of a feed is matched against them.
+const MAX_SCOPES = 256;
+const { isUpdate: isPresenceUpdate, isEntry: isPresenceEntry, sized } = require('../presence/presence.js');
 const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf, kindsOf } = require('../protocol.js');
 
 const DEFAULT_PAGE_BYTES = 4 << 20;
@@ -220,17 +223,29 @@ const hello = (host) => async (context, args) => {
   }
   let scopes = [GLOBAL_SCOPE];
   if (Array.isArray(args.scopes)) {
+    // A scope is a stream name or the global one, each once, MAX_SCOPES at
+    // most: every op of a feed is matched against them.
+    if (args.scopes.length > MAX_SCOPES) {
+      throw refuse(host, `hello asks for more than ${MAX_SCOPES} scopes`, 400, 'BAD_HELLO', args.node);
+    }
     scopes = [];
-    for (let i = 0; i < args.scopes.length; i++) if (typeof args.scopes[i] === 'string') scopes.push(args.scopes[i]);
+    const asked = new Set();
+    for (let i = 0; i < args.scopes.length; i++) {
+      const scope = args.scopes[i];
+      if (asked.has(scope) || (scope !== GLOBAL_SCOPE && !isStreamName(scope))) continue;
+      asked.add(scope);
+      scopes.push(scope);
+    }
   }
   const schema = schemaOf(args.schema);
   const kinds = kindsOf(args.kinds);
   if (context?.client) {
     context.client.data ??= {};
-    // A repeated hello keeps the rate bucket: greeting again is not a refill.
+    // A repeated hello keeps the rate buckets: greeting again is not a refill.
     const bucket = context.client.data.syncom?.bucket;
+    const presenceBucket = context.client.data.syncom?.presenceBucket;
     const ref = { url: null, node: args.node };
-    context.client.data.syncom = { node: args.node, scopes, schema, kinds, bucket, ref };
+    context.client.data.syncom = { node: args.node, scopes, schema, kinds, bucket, presenceBucket, ref };
     if (typeof context.client.join === 'function') {
       for (const scope of scopes) context.client.join(`syncom:${scope}`);
     }
@@ -386,7 +401,10 @@ const presence = (host) => async (context, update) => {
     return void no('PRESENCE_SCOPE', 403);
   }
   for (const entry of update.s) {
-    if (!Array.isArray(entry) || entry[0] !== node) {
+    // Checked as a receiver checks it — the shape, a stamp not ahead, the
+    // bounds — before the host keeps or relays a byte of it.
+    if (!isPresenceEntry(entry) || !sized(entry[3])) return void no('PRESENCE_MALFORMED', 400);
+    if (entry[0] !== node) {
       return void no('PRESENCE_FORGED', 403);
     }
     if (host.storage.signatures === 'require' && entry.length < 5) {
@@ -404,6 +422,7 @@ const presence = (host) => async (context, update) => {
     if (entry[3] === null) room.delete(node);
     else if (room.size < host.presence.max || room.has(node)) room.set(node, entry);
   }
+  if (room.size === 0) host.presence.rooms.delete(update.scope);
   const server = context?.server;
   if (server && typeof server.to === 'function') {
     const target = server.to(`syncom:${update.scope}`);
