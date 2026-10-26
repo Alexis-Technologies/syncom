@@ -199,11 +199,115 @@ test('tree', async (t) => {
     for (let at = rendered; at.length > 0; at = at[0].children) depth++;
     assert.strictEqual(depth, T.MAX_DEPTH);
     assert.ok(JSON.stringify(rendered).length > 0, 'and it serializes');
-    assert.strictEqual(T.resolve(tree).parentOf.get('n3999'), 'n3998', 'the fold keeps every move');
+    const { parentOf } = T.resolve(tree);
+    assert.strictEqual(parentOf.get(`n${T.MAX_WALK}`), `n${T.MAX_WALK - 1}`, 'the fold keeps every move it can walk');
+    assert.strictEqual(parentOf.has(`n${T.MAX_WALK + 1}`), false, 'a parent past MAX_WALK ancestors: moot');
     assert.deepStrictEqual(T.renderTree(T.joinTrees(tree, tree)), rendered);
     const up = move(tree, 'B', 'n3999', null, 'ZV');
     assert.ok(flat(T.renderTree(up.tree)).includes('n3999'), 'moved up, the deep node shows again');
   });
+
+  await t.test('a chain of 10 000 nodes folds in at most MAX_WALK steps a move, never the chain per move', () => {
+    assert.ok(T.MAX_WALK >= T.MAX_DEPTH, 'every parent the tree reads is within the walk');
+    const moves = {};
+    let parent = null;
+    for (let i = 0; i < 10_000; i++) {
+      moves[`n${i}`] = [[i + 1, 'A', parent, 'V']];
+      parent = `n${i}`;
+    }
+    // One snapshot block (some 330 KB): the fold of it walked 50 million
+    // ancestors, four seconds, on every op that changed the field.
+    const chain = T.normalizeTree({ k: 'tree', ts: 10_000, moves });
+    const before = T.walks.steps;
+    T.resolve(chain);
+    const steps = T.walks.steps - before;
+    assert.ok(steps <= 10_000 * T.MAX_WALK, `${steps} steps`);
+    let depth = 0;
+    for (let at = T.renderTree(chain); at.length > 0; at = at[0].children) depth++;
+    assert.strictEqual(depth, T.MAX_DEPTH, 'it reads as it did');
+  });
+
+  await t.test('a move whose parent sits past MAX_WALK ancestors is moot, on every node and in any order', () => {
+    const K = T.MAX_WALK;
+    // A chain n0 … nK by A: n(K-1) sits at level K, nK at level K + 1.
+    const ops = [];
+    let parent = null;
+    for (let i = 0; i <= K; i++) {
+      ops.push({ ts: tick(), origin: 'A', node: `n${i}`, parent, fi: 'V' });
+      parent = `n${i}`;
+    }
+    // B: z a root, then z under nK — K + 1 ancestors to walk: moot, z stays a
+    // root, like a move that would make a cycle; w under n(K-1) — K: it takes.
+    ops.push({ ts: tick(), origin: 'B', node: 'z', parent: null, fi: 'WV' });
+    ops.push({ ts: tick(), origin: 'B', node: 'z', parent: `n${K}`, fi: 'V' });
+    ops.push({ ts: tick(), origin: 'B', node: 'w', parent: `n${K - 1}`, fi: 'V' });
+    const forward = replay(ops);
+    const shuffled = [...ops];
+    let seed = 7;
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      const j = seed % (i + 1);
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    const halves = T.joinTrees(replay(ops.filter((op, i) => i % 2 === 0)), replay(ops.filter((op, i) => i % 2 === 1)));
+    for (const tree of [replay([...ops].reverse()), replay(shuffled), halves]) {
+      assert.deepStrictEqual(tree, forward);
+    }
+    for (const tree of [forward, halves]) {
+      const { parentOf } = T.resolve(tree);
+      assert.strictEqual(parentOf.get(`n${K}`), `n${K - 1}`, 'K ancestors: the move takes');
+      assert.strictEqual(parentOf.get('z'), null, 'K + 1 ancestors: moot, z stays where it was');
+      assert.strictEqual(parentOf.get('w'), `n${K - 1}`);
+      assert.deepStrictEqual(
+        T.renderTree(tree).map((node) => node.id),
+        ['n0', 'z'],
+      );
+    }
+    // Moved up the chain, the same move of z takes.
+    const later = move(forward, 'C', `n${K}`, 'n0', 'XV');
+    const again = move(later.tree, 'C', 'z', `n${K}`);
+    assert.strictEqual(T.resolve(again.tree).parentOf.get('z'), `n${K}`);
+  });
+
+  await t.test(
+    'a tree field holds MAX_MOVES moves: one more is a bound refusal, a block past it is not taken, a join keeps the oldest',
+    () => {
+      const moves = {};
+      for (let i = 0; i < T.MAX_MOVES; i++) moves[`m${i}`] = [[i + 2, 'A', null, 'V']];
+      const full = T.normalizeTree({ k: 'tree', ts: T.MAX_MOVES + 1, moves });
+      assert.ok(full !== null, 'at the bound a block is taken');
+      const ts = T.MAX_MOVES + 2;
+      const over = T.applyTreeMove(full, [ts, 'B'], { node: 'x', parent: null, fi: 'V' });
+      assert.deepStrictEqual(over, {
+        tree: full,
+        changed: false,
+        reason: 'bound',
+        detail: 'moves',
+        count: T.MAX_MOVES + 1,
+        max: T.MAX_MOVES,
+      });
+      const held = T.applyTreeMove(full, [2, 'A'], { node: 'm0', parent: null, fi: 'V' });
+      assert.deepStrictEqual([held.changed, held.reason], [false, null], 'a move it holds already is no refusal');
+      // A peer's block of one move more is not taken as state.
+      const past = { k: 'tree', ts, moves: { ...moves, x: [[ts, 'B', null, 'V']] } };
+      assert.strictEqual(T.normalizeTree(past), null);
+      // Two pictures joined past it keep the oldest MAX_MOVES moves in the
+      // fold's order, whichever side holds them: the newest is what the op
+      // path would have refused.
+      const newer = replay([{ ts, origin: 'B', node: 'x', parent: null, fi: 'V' }]);
+      assert.deepStrictEqual(T.joinTrees(full, newer), full);
+      assert.deepStrictEqual(T.joinTrees(newer, full), full);
+      const older = replay([{ ts: 1, origin: 'B', node: 'x', parent: null, fi: 'V' }]);
+      const joined = T.joinTrees(full, older);
+      assert.deepStrictEqual(joined, T.joinTrees(older, full));
+      assert.deepStrictEqual(joined.moves.x, [[1, 'B', null, 'V']]);
+      assert.strictEqual(joined.moves[`m${T.MAX_MOVES - 1}`], undefined, 'the newest move went');
+      assert.strictEqual(joined.ts, T.MAX_MOVES);
+      // A reset frees the field.
+      const pruned = T.pruneTree(full, [T.MAX_MOVES, 'A']);
+      assert.strictEqual(T.applyTreeMove(pruned, [ts, 'B'], { node: 'x', parent: null, fi: 'V' }).changed, true);
+    },
+  );
 
   await t.test('a place is a fractional index, or the move is malformed — from an op and from a snapshot alike', () => {
     const r = move(T.createTree(), 'A', 'r', null);

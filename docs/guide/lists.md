@@ -455,7 +455,12 @@ delta cannot say — a reset, an unset — makes it `null`: read the field again
 - A tree keeps every move of every node until a reset — some eighty bytes
   each — and folds all of them once per op that changes the field. Keep a
   tree to the hundreds of nodes an outline or a folder pane shows, not the
-  hundreds of thousands a file system holds.
+  hundreds of thousands a file system holds. A field holds 65 536 moves,
+  every node's together: past them `treeMove()` and `treeRemove()` reject
+  with `FIELD_KIND`, `kind: 'bound'`, `detail: 'moves'`, a peer's move is
+  refused (`OP_REFUSED`) and a snapshot block holding more is not taken —
+  `compact(id)` (below) writes the field again as one move per node. A fold
+  at the bound takes some 25 ms, 100 ms in the worst shape (`bench/tree.js`).
 - [`compact(id)`](./versions#costs) is the reset that keeps what the fields
   read as: it rewrites the record as a `write` of its registers and one op
   per field of another kind — a text or a list as one run, a tree as one move per node —
@@ -466,7 +471,11 @@ delta cannot say — a reset, an unset — makes it `null`: read the field again
   — and fields that read empty (see [Costs](./versions#costs)).
 - A tree reads 512 levels: a node that would hang deeper is folded but not
   shown, on every node alike, and `treeMove()` refuses a move that would reach
-  there (`OUT_OF_RANGE` with `node`, `depth` and `max`). A place among
+  there (`OUT_OF_RANGE` with `node`, `depth` and `max`). The fold's cycle check
+  walks 512 ancestors up from a move's parent at most: a peer's move under a
+  node deeper than that is moot, like a move that would make a cycle, the same
+  on every node — so a chain of thousands of nodes costs an op no more than a
+  tree 512 levels deep. A place among
   siblings is a fractional index of at most 1 024 characters: after some
   thirty thousand inserts at one spot — the end of a parent's children
   included — the next `treeMove()` there is `OUT_OF_RANGE` (`reason: 'fi'`,

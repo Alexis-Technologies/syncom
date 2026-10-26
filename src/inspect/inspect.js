@@ -4,7 +4,7 @@
 // of, and a copy of anything with the names and words taken out.
 // `inspect(storage, id)` reads the record raw — the data in the op model's
 // terms, every field with its kind, what its metadata holds for it (a
-// register's stamp, a counter's sums per origin, a set's slots, a block's
+// register's stamp, a counter's sums per stream, a set's slots, a block's
 // runs and marks by count), whether it is reachable in the composed
 // reading — and the log's entries of it, by seq. `anonymize(value)` hands
 // back the same shape with every string replaced by a stable hash — ids,

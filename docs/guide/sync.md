@@ -142,7 +142,9 @@ A field is a **register**, a **counter**, a **set**, a **list**, a **text** or a
   concurrently agree on the winner by `(ts, origin)`, so both end up with the
   same value.
 - A counter is a sum. Two nodes each adding 1 concurrently end up at +2 on
-  both, because the sum keeps one running total per origin and adds them up.
+  both, because the sum keeps one running total per origin and adds them up —
+  per stream, in fact (the origin, or `origin@scope`): a record that moves to
+  another scope keeps counting there.
 - A set is an array of JSON values that nodes add to and remove from. Two
   nodes adding different elements concurrently keep both; an element one node
   removes while another re-adds it survives, because a remove names the adds
@@ -800,16 +802,20 @@ the engine's own tests run on.
   for their anchor, cuts and extensions waiting for their run, registers and
   switched-off marks for elements not here — `sync.pendingMax` (4096). An op
   past a bound is refused for that field (`OP_REFUSED`, `reason` `'bound'`,
-  with `detail` — `'pending'`, `'run'`, `'field'`, or `'counter'` for a
-  counter's range (above) — `count` and `max`),
+  with `detail` — `'pending'`, `'run'`, `'field'`, `'moves'` for a tree,
+  or `'counter'` for a counter's range (above) — `count` and `max`),
   then logged and relayed: the vector moves past it, so this node never takes
   it, and each node it reaches decides by its own bounds. Pending work
   depends on the order ops arrive in, so two nodes can disagree there, and
   then read the field differently: the bound is a defence against a hostile
   peer, and a mesh where honest ops run far ahead of what they depend on
   raises it. A tree shows 512 levels (what hangs deeper is folded, not
-  shown, the same everywhere) and a place of more than 1 024 characters is
-  malformed. See [Costs and limits](./lists#costs-and-limits).
+  shown, the same everywhere), its fold walks 512 ancestors up from a move's
+  parent at most (a move under a parent deeper than that is moot, as one that
+  would make a cycle is, on every node), a tree field holds 65 536 moves
+  (past it `detail: 'moves'`; a snapshot block past it is not taken) and a
+  place of more than 1 024 characters is malformed. See
+  [Costs and limits](./lists#costs-and-limits).
 - **A node's own sequence never repeats.** The log is written before the op is
   announced, so a crash cannot mint two different ops with one number.
 - **Logged means applied, eventually.** The record files are written after

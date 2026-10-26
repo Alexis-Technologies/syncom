@@ -48,7 +48,8 @@ const HINTS = {
   register: 'a register; use update()',
   counter: 'a counter; use inc()',
   set: 'a set; use add() or remove()',
-  bound: "past a bound: pending work, a run, the field as a whole or a counter's range (see Costs and limits)",
+  bound:
+    "past a bound: pending work, a run, the field as a whole, a tree's moves or a counter's range (see Costs and limits)",
 };
 // `malformed` is a payload the engine does not admit after the arguments
 // were checked — a bug in the caller or here, never a peer's doing on this

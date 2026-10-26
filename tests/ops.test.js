@@ -139,6 +139,36 @@ test('ops module', async (t) => {
     assert.deepStrictEqual(back.data, { n: 1 });
   });
 
+  await t.test('an inc counts in its stream: one origin’s incs in two scopes commute, and both count', () => {
+    // Seqs run per stream (`origin@scope`): A's second op in scope a, its first in scope b.
+    const inA = op('inc', 1, 'A', { seq: 2, scope: 'a', key: 'n', value: 1 });
+    const inB = op('inc', 2, 'A', { seq: 1, scope: 'b', key: 'n', value: 1 });
+    const ab = replay([inA, inB]);
+    const ba = replay([inB, inA]);
+    assert.deepStrictEqual([ab.data.n, ba.data.n], [2, 2]);
+    assert.deepStrictEqual(ab.meta, ba.meta);
+    assert.deepStrictEqual(ab.meta.counters.n, { 'A@a': [2, 1, 1], 'A@b': [1, 1, 2] });
+    // A seq seen again in its own stream is a duplicate, whatever another stream holds.
+    assert.strictEqual(applyOp(ab, inB).changed, false);
+    assert.strictEqual(applyOp(ab, op('inc', 3, 'A', { seq: 2, scope: 'b', key: 'n', value: 1 })).changed, true);
+    // The global stream's slot is the bare origin, as it always was: a slot
+    // written before streams were told apart reads, counts on and joins.
+    const before = { data: { n: 4 }, meta: { ...createEntry().meta, counters: { n: { A: [6, 4, 3] } } } };
+    const global = applyOp(before, op('inc', 4, 'A', { seq: 7, key: 'n', value: 1 }));
+    assert.deepStrictEqual([global.changed, global.entry.meta.counters.n], [true, { A: [7, 5, 4] }]);
+    assert.strictEqual(applyOp(before, op('inc', 4, 'A', { seq: 6, key: 'n', value: 1 })).changed, false);
+    const joined = mergeEntry(global.entry, ab);
+    assert.deepStrictEqual(joined.meta.counters.n, { A: [7, 5, 4], 'A@a': [2, 1, 1], 'A@b': [1, 1, 2] });
+    assert.deepStrictEqual([joined.data.n, mergeEntry(ab, global.entry).data.n], [7, 7]);
+    // A peer's picture keeps a stream's slot; the stamp a slot carries is its origin's.
+    const merged = applyOp(null, op('merge', 9, 'H', { seq: 1, data: {}, meta: { counters: ab.meta.counters } }));
+    assert.deepStrictEqual(merged.entry.meta.counters, ab.meta.counters);
+    assert.deepStrictEqual(latestClock(ab.meta, true), [2, 'A']);
+    // A reset at a stamp between the two incs drops the older slot alone.
+    const reset = applyOp(ab, op('write', 1, 'Z', { seq: 1, data: {} })).entry;
+    assert.deepStrictEqual([reset.meta.counters.n, reset.data.n], [{ 'A@b': [1, 1, 2] }, 1]);
+  });
+
   await t.test('a field is a register or a counter, never both', () => {
     const register = replay([op('set', 1, 'A', { data: { n: 1 } })]);
     const incOnRegister = applyOp(register, op('inc', 2, 'B', { seq: 1, key: 'n', value: 1 }));

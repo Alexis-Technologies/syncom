@@ -80,8 +80,8 @@ src/text/sequence.js      the sequence engine behind the list and text kinds (in
                           run records, the walk that places a subtree, local placement, pending ops, pos/vals/marks registers,
                           cursors, prune and join — requires vector.js, plugin.js, rle.js, btree.js, pmap.js, plist.js
 src/tree/moves.js         the tree engine: per node its stamped moves, the fold in stamp order with the cycle check (Kleppmann
-                          2021, Loro), MAX_DEPTH levels read, prune and join — requires vector.js and order.js (a place is a
-                          fractional index or the move is malformed)
+                          2021, Loro) walking MAX_WALK ancestors at most, MAX_DEPTH levels read, MAX_MOVES a field, prune and
+                          join — requires vector.js and order.js (a place is a fractional index or the move is malformed)
 src/order/order.js        fractional indexes over a 62-letter alphabet (Loro's rule, MIT) — no requires; the tree plugin uses it for a node's place
 src/versions/history.js  the past out of the log: a version (event id / stamp / vector) as a cut, the exact start above droppedTs, the fold
 src/versions/tags.js     Tags — named versions kept locally: tags.json, a catalog per tag, copy-on-write record files in the newest tag
@@ -334,8 +334,11 @@ docs/                     VitePress site
   `inc`, `add`/`remove` → `add`/`remove`, `splice`/`push`/`updateText` →
   `splice`, `setAt` → `assign`, `move` → `move`, `mark`/`unmark`/`unmarkById`
   → `mark`, `treeMove`/`treeRemove` → `tree`, `delete` → tombstone. Registers
-  are last-writer-wins by `(ts, origin)`; counters are per-origin sums, each
-  within ±`MAX_COUNT` and added up in origin order; a set
+  are last-writer-wins by `(ts, origin)`; counters are per-stream sums — a
+  slot per vector key, `origin` or `origin@scope` (`opKey`: seqs run per
+  stream, so a seq is only ever compared within its stream; a bare-origin
+  slot is the global stream's) — each within ±`MAX_COUNT` and added up in
+  slot-key order; a set
   is `meta.sets[field][elementKey][origin] = [added, removed]`, live while
   `added > removed`, read sorted by element text; a list or a text is
   `meta.blocks[field]` with `k: 'l'`/`'t'`, a block of `src/text/sequence.js`; a tree is
@@ -369,8 +372,10 @@ docs/                     VitePress site
   about, so `updateText` never makes one; `resolveTree` folds
   the tree ONCE and hands back `null` for a move to where the node is, and
   `commitLocal` returns before `applyOp` on it). `sync.pendingMax`
-  (`PENDING_MAX`), `MAX_RUN` (`src/text/rle.js`), `MAX_FIELD`, `MAX_FI`, `MAX_DEPTH`
-  and `MAX_COUNT` bound what a peer can make a node hold or read, on the op path
+  (`PENDING_MAX`), `MAX_RUN` (`src/text/rle.js`), `MAX_FIELD`, `MAX_FI`, `MAX_DEPTH`,
+  `MAX_MOVES` (a tree field's moves; a join keeps the oldest) and `MAX_COUNT` bound
+  what a peer can make a node hold or read — and `MAX_WALK` what a fold walks: a
+  move under a parent deeper than it is moot, like a cycle — on the op path
   and in `normalizeMeta` alike — a snapshot buys nothing an op could not. The
   fuzz in `tests/suites/sync-engine.js` compares the blocks and the move logs
   across nodes, not only what they read as. `compact(id)` (`src/patches.js`)

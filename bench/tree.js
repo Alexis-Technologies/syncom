@@ -1,8 +1,9 @@
 /**
  * Trees: the movable tree behind the tree kind — one move folded over a
  * block of thousands of moves, the fold read anew and read from the block
- * that keeps it, and a move among many siblings through the storage over
- * the memory backend.
+ * that keeps it, one move after a chain of 10 000 nodes, the fold of a
+ * block at MAX_MOVES in its worst shape, and a move among many siblings
+ * through the storage over the memory backend.
  *
  * Run with `node bench/tree.js` or `pnpm bench`.
  */
@@ -11,9 +12,8 @@
 
 const { bench } = require('./support/harness.js');
 const T = require('../src/tree/moves.js');
-const { applyOp } = require('../src/all/all.js');
+const { applyOp, open } = require('../src/all/all.js');
 const { memory } = require('../src/memory/memory.js');
-const { open } = require('../src/storage.js');
 
 const op = (ts, origin, value) => ({ origin, seq: ts, ts, type: 'tree', id: 'r', key: 'outline', value });
 
@@ -36,6 +36,34 @@ const main = async () => {
     applyOp(entry, op(++ts, 'C', { node: 'n5', parent: 'root', fi: 'V' })));
   await bench('resolve — the fold of 5 000 moves, anew', () => T.resolve(block));
   await bench('renderTree — the fold kept by the block', () => T.renderTree(block));
+
+  // A chain of 10 000 nodes, one snapshot block: the fold walked every
+  // node's ancestors, 50 million steps, until the walk stopped at MAX_WALK.
+  const chain = {};
+  let parent = null;
+  for (let i = 0; i < 10_000; i++) {
+    chain[`c${i}`] = [[i + 1, 'A', parent, 'V']];
+    parent = `c${i}`;
+  }
+  const meta = { clock: {}, counters: {}, blocks: { outline: { k: 'tree', ts: 10_000, moves: chain } } };
+  const deep = applyOp(null, { origin: 'A', seq: 1, ts: 1, type: 'merge', id: 'r', data: {}, meta }).entry;
+  let at = 10_000;
+  await bench(
+    'applyOp — one move after a chain of 10 000 nodes',
+    () => applyOp(deep, op(++at, 'C', { node: 'x', parent: null, fi: 'V' })),
+    { warmup: 5 },
+  );
+  // MAX_MOVES moves in the shape the walk costs most: a chain MAX_WALK deep, every other move under its last node.
+  const worst = {};
+  let last = null;
+  for (let i = 0; i < T.MAX_MOVES; i++) {
+    worst[`w${i}`] = [[i + 1, 'A', last, 'V']];
+    if (i < T.MAX_WALK) last = `w${i}`;
+  }
+  const full = T.normalizeTree({ k: 'tree', ts: T.MAX_MOVES, moves: worst });
+  await bench(`resolve — the fold of MAX_MOVES (${T.MAX_MOVES}) moves, the worst shape`, () => T.resolve(full), {
+    warmup: 3,
+  });
 
   const storage = await open({ path: '/bench', fsi: memory(), logger: false });
   const id = await storage.insert({});

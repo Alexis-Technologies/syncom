@@ -20,9 +20,14 @@
 //                 concurrent `set` from resurrecting a field they removed.
 //   deleted     — the tombstone stamp; the record is alive again as soon as
 //                 something newer than it lands (see isAlive)
-//   counters[f] — { [origin]: [seq, sum, ts] }: a PN-counter, one running sum
-//                 per origin, so re-applying an `inc` (seq already seen) is a
-//                 no-op and two snapshots join by taking the higher seq; a sum
+//   counters[f] — { [stream]: [seq, sum, ts] }: a PN-counter, one running sum
+//                 per STREAM — the op's vector key, `origin` or `origin@scope`
+//                 (src/vector.js opKey), since seqs run per stream: re-applying
+//                 an `inc` (seq already seen in its stream) is a no-op, two
+//                 snapshots join by taking the higher seq per stream, and one
+//                 node's incs in two scopes are two sums. A slot written before
+//                 streams were told apart is keyed by the bare origin — the
+//                 global stream's key, so global data reads as it did. A sum
 //                 stays within ±MAX_COUNT, an inc past it is a `bound` refusal
 //   sets[f]     — { [elementKey]: { [origin]: [added, removed] } }: an
 //                 observed-remove set. elementKey is the element's JSON text;
@@ -82,7 +87,7 @@
 // and the same predicate guards each tag as it is applied — so meta, not only
 // data, agrees whatever the order of adds, removes and resets.
 
-const { compareClock, maxClock, floorOf } = require('./vector.js');
+const { compareClock, maxClock, floorOf, opKey } = require('./vector.js');
 const { deepEqual, OP_TYPES, asJson } = require('./shape.js');
 const { limitsOf, HOME } = require('./plugin.js');
 const { isPath, ancestorsOf, under, MAX_PATHS } = require('./paths.js');
@@ -138,23 +143,31 @@ const cloneEntry = (entry) => {
   return out;
 };
 
-// What one origin's running sum may reach, either way: past it a float
+// What one stream's running sum may reach, either way: past it a float
 // would no longer count an increment of 1, and the next step is Infinity,
-// which JSON keeps as null. Each sum depends on its origin's ops alone, so a
+// which JSON keeps as null. Each sum depends on its stream's ops alone, so a
 // bound on it refuses the same op on every node.
 const MAX_COUNT = Number.MAX_SAFE_INTEGER;
 
-// The sums added up in origin order: floats round by the order they are
-// added in, and the order of arrival differs between nodes.
-const counterValue = (perOrigin) => {
+// The sums added up in the order of their slots' keys: floats round by the
+// order they are added in, and the order of arrival differs between nodes.
+const counterValue = (perStream) => {
   let sum = 0;
-  for (const origin of Object.keys(perOrigin).sort()) sum += perOrigin[origin][1];
+  for (const stream of Object.keys(perStream).sort()) sum += perStream[stream][1];
   return sum;
 };
 
+// The origin of a counter slot's stream (an origin never holds `@`), and
+// the slot's stamp: its newest inc's, under that origin.
+const streamOrigin = (stream) => {
+  const at = stream.indexOf('@');
+  return at === -1 ? stream : stream.slice(0, at);
+};
+const slotStamp = (stream, count) => [count[2], streamOrigin(stream)];
+
 const isCounter = (meta, field) => {
-  const perOrigin = own(meta.counters, field);
-  return Boolean(perOrigin) && Object.keys(perOrigin).length > 0;
+  const perStream = own(meta.counters, field);
+  return Boolean(perStream) && Object.keys(perStream).length > 0;
 };
 
 const isSet = (meta, field) => {
@@ -241,7 +254,7 @@ const isSlot = (value) =>
 
 // A peer-supplied meta, rebuilt into the shape the rest of this module
 // trusts: own keys only, stamps as `[ts, origin]`, counters as `[seq, sum,
-// ts]` per origin, set slots as `[added, removed]` per element and origin
+// ts]` per stream, set slots as `[added, removed]` per element and origin
 // under a canonical JSON key, each block normalized by its plugin under the
 // node's bounds, anything else dropped. A copy, so nothing of the peer's
 // object is kept by reference and a `__proto__` key in it reaches nothing.
@@ -261,12 +274,12 @@ const normalizeMeta = (meta, limits = null, dropped = null) => {
     for (const field of Object.keys(meta.counters)) {
       const source = meta.counters[field];
       if (!isKey(field) || !isPlainObject(source)) continue;
-      const perOrigin = {};
-      for (const origin of Object.keys(source)) {
-        const count = source[origin];
-        if (isKey(origin) && isCount(count)) perOrigin[origin] = [count[0], count[1], count[2]];
+      const perStream = {};
+      for (const stream of Object.keys(source)) {
+        const count = source[stream];
+        if (isKey(stream) && isCount(count)) perStream[stream] = [count[0], count[1], count[2]];
       }
-      if (Object.keys(perOrigin).length > 0) counters[field] = perOrigin;
+      if (Object.keys(perStream).length > 0) counters[field] = perStream;
     }
   }
   const sets = {};
@@ -353,8 +366,8 @@ const latestClock = (meta, trusted = false, limits = null) => {
   for (const field of Object.keys(blocks)) latest = maxClock(latest, [blocks[field].ts, '']);
   for (const field of Object.keys(clock)) latest = maxClock(latest, clock[field]);
   for (const field of Object.keys(counters)) {
-    const perOrigin = counters[field];
-    for (const origin of Object.keys(perOrigin)) latest = maxClock(latest, [perOrigin[origin][2], origin]);
+    const perStream = counters[field];
+    for (const stream of Object.keys(perStream)) latest = maxClock(latest, slotStamp(stream, perStream[stream]));
   }
   for (const field of Object.keys(sets)) {
     const elements = sets[field];
@@ -390,13 +403,13 @@ const pruneField = (entry, field, floor, delta, plugins) => {
     delete data[field];
     delta[field] = undefined;
   }
-  const perOrigin = own(meta.counters, field);
-  if (perOrigin !== undefined) {
-    for (const origin of Object.keys(perOrigin)) {
-      if (compareClock([perOrigin[origin][2], origin], floor) < 0) delete perOrigin[origin];
+  const perStream = own(meta.counters, field);
+  if (perStream !== undefined) {
+    for (const stream of Object.keys(perStream)) {
+      if (compareClock(slotStamp(stream, perStream[stream]), floor) < 0) delete perStream[stream];
     }
     if (isCounter(meta, field)) {
-      const value = counterValue(perOrigin);
+      const value = counterValue(perStream);
       if (data[field] !== value) delta[field] = value;
       data[field] = value;
     } else {
@@ -890,16 +903,19 @@ const applyOp = (previous, op, limits = null) => {
       malformed(field, rejected);
     } else if (roomFor(entry, field, 'counter', stamp, delta, rejected, plugins) === null) {
       if (compareClock(stamp, floorOf(meta, field)) >= 0) {
-        const perOrigin = own(meta.counters, field) ?? (meta.counters[field] = {});
-        const known = own(perOrigin, op.origin);
+        // The slot of the op's stream: its seq is only ever compared with
+        // the seqs of that stream.
+        const stream = opKey(op);
+        const perStream = own(meta.counters, field) ?? (meta.counters[field] = {});
+        const known = own(perStream, stream);
         const sum = (known ? known[1] : 0) + value;
         const fresh = !known || known[0] < op.seq;
         if (fresh && !(Math.abs(sum) <= MAX_COUNT)) {
           rejected.push({ field, reason: 'bound', detail: 'counter', count: sum, max: MAX_COUNT });
-          if (Object.keys(perOrigin).length === 0) delete meta.counters[field];
+          if (Object.keys(perStream).length === 0) delete meta.counters[field];
         } else if (fresh) {
-          perOrigin[op.origin] = [op.seq, sum, op.ts];
-          entry.data[field] = counterValue(perOrigin);
+          perStream[stream] = [op.seq, sum, op.ts];
+          entry.data[field] = counterValue(perStream);
           delta[field] = entry.data[field];
           changes.push({ action: 'inc', field, value });
           changes.covered.add(field);
@@ -951,9 +967,9 @@ const isAlive = (entry) => {
     if (compareClock(meta.clock[field], meta.deleted) > 0) return true;
   }
   for (const field of Object.keys(meta.counters)) {
-    const perOrigin = meta.counters[field];
-    for (const origin of Object.keys(perOrigin)) {
-      if (compareClock([perOrigin[origin][2], origin], meta.deleted) > 0) return true;
+    const perStream = meta.counters[field];
+    for (const stream of Object.keys(perStream)) {
+      if (compareClock(slotStamp(stream, perStream[stream]), meta.deleted) > 0) return true;
     }
   }
   // An add newer than the tombstone revives, live or since removed — like a
@@ -1018,11 +1034,11 @@ const mergeEntry = (a, b, limits = null) => {
     }
     for (const field of Object.keys(source.meta.counters)) {
       if (!isKey(field)) continue;
-      const perOrigin = own(meta.counters, field) ?? (meta.counters[field] = {});
+      const perStream = own(meta.counters, field) ?? (meta.counters[field] = {});
       const from = source.meta.counters[field];
-      for (const origin of Object.keys(from)) {
-        const held = own(perOrigin, origin);
-        if (isKey(origin) && (!held || held[0] < from[origin][0])) perOrigin[origin] = from[origin];
+      for (const stream of Object.keys(from)) {
+        const held = own(perStream, stream);
+        if (isKey(stream) && (!held || held[0] < from[stream][0])) perStream[stream] = from[stream];
       }
     }
     const sets = setsOf(source.meta);
@@ -1267,6 +1283,7 @@ module.exports = {
   mergeEntry,
   isAlive,
   isCounter,
+  streamOrigin,
   isSet,
   isBlock,
   kindOf,

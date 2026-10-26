@@ -954,6 +954,20 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **One peer could stall a node with a deep tree.** Every tree op refolded
+  every move of the field, and the cycle check walked each move up to the
+  root: a 10 000-node chain made every later op on that field take 4 s inside
+  the mutation queue. The walk stops at 512 ancestors (`MAX_WALK`; a move past
+  it is moot, like one that would make a cycle — the same on every node), the
+  fold walks an index array, and a field holds 65 536 moves at most
+  (`MAX_MOVES`: one more is a `bound` refusal, a snapshot block past it is not
+  taken, a join keeps the oldest). One op after a 10 000-node chain: ~15 ms.
+- **A counter could lose increments, or diverge, across scopes.** A counter
+  kept one slot per origin and compared its stream's seqs: once a record
+  moved to another scope, its node's `inc`s were silently nothing, and two
+  incs of one node in two scopes summed differently by arrival order. The
+  slot is per stream (`origin@scope`) now; a slot keyed by a bare origin reads
+  as the global stream's.
 - **A peer could push this node's clock years ahead.** A `merge` op was checked
   for the skew of its own stamp, not of the stamps its `meta` carried; the
   first local write to that record then observed them, and every op the node

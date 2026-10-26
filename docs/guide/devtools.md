@@ -19,8 +19,9 @@ report.log;                     // every retained log entry of the record, by se
 - `present`, `encrypted`, `alive`; `base`, `deleted` and `purged`, the
   reset stamps; `v`, the schema version the record was written under.
 - `fields`: every field the metadata holds, sorted — a register with its
-  `stamp` (`[ts, origin]`), a counter with its `sums` per origin, a set with
-  its `elements` (slots) and how many are `live`, a list or a text with its
+  `stamp` (`[ts, origin]`), a counter with its `sums` per stream (the
+  origin, or `origin@scope`), a set with its `elements` (slots) and how many
+  are `live`, a list or a text with its
   block code `k`, newest stamp `ts` and how many `runs`, `cuts`, `ext`,
   `pos`, `vals` and `marks` it holds, a tree with its `nodes` and `moves` —
   and `reachable`, whether the composed reading shows it (a field under a

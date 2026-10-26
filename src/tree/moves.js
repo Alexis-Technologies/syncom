@@ -16,7 +16,15 @@
 // `$trash`; what hangs there is not read.
 // A tree reads MAX_DEPTH levels: what hangs deeper is folded but not shown,
 // the same on every node (a 4 000-deep chain would throw in the render and
-// in JSON.stringify, and a throw on the apply path stops a stream). Pure
+// in JSON.stringify, and a throw on the apply path stops a stream). The
+// fold's cycle check walks up from a move's parent MAX_WALK ancestors at
+// most: a move whose parent sits deeper than that, at that point of the
+// fold, is moot like one that would make a cycle — a function of the moves
+// alone, so every node folds it the same. A field holds MAX_MOVES moves,
+// every node's together: a move past it is a `bound` refusal, a peer's
+// block holding more is not taken, and a join keeps the oldest MAX_MOVES in
+// the fold's order. The two bound what every op that changes the field
+// pays — the fold, O(moves · log moves + moves · MAX_WALK). Pure
 // functions over plain JSON; requires ./vector.js, ./order.js (a place
 // among siblings must be a fractional index: anything else would throw in
 // `between()` on every local move landing next to it) and ./args.js (the
@@ -29,6 +37,22 @@ const { isNodeId } = require('../args.js');
 const TRASH = '$trash';
 const MAX_DEPTH = 512;
 const MAX_FI = 1024;
+// The ancestors the cycle check walks: a parent the tree reads (MAX_DEPTH
+// levels) is never past it, and a local move under one deeper is refused
+// anyway (OUT_OF_RANGE), so only a peer's move under a node no reading
+// shows is moot by it. Unbounded, a chain of n nodes cost the fold n²/2
+// steps — 10 000 nodes, one snapshot block of 330 KB, four seconds of the
+// mutation queue on every later op of the field.
+const MAX_WALK = MAX_DEPTH;
+// The moves a field holds. Every op that changes the field folds all of
+// them — sorted, then at worst (a chain MAX_WALK deep, every other move
+// under its last node) MAX_WALK steps each. At 2¹⁶ a fold takes some
+// 25 ms under a root or a random tree and 100 ms at worst, an op through
+// applyOp 30 to 130 ms (bench/tree.js); at 2¹⁷ twice that. An outline of
+// thousands of nodes moved about a few times each fits; a field at the
+// bound takes nothing more until a reset — `compact(id)` makes one move
+// per node.
+const MAX_MOVES = 1 << 16;
 
 const hasControl = (value) => {
   for (let i = 0; i < value.length; i++) if (value.charCodeAt(i) < 32) return true;
@@ -40,7 +64,8 @@ const isOrigin = (value) =>
   typeof value === 'string' && value.length > 0 && value.length <= 128 && !value.includes('@') && !hasControl(value);
 const isFi = (value) => typeof value === 'string' && value.length <= MAX_FI && isKey(value);
 const own = (object, key) => (Object.hasOwn(object, key) ? object[key] : undefined);
-const byStamp = (a, b) => compareClock([a[0], a[1]], [b[0], b[1]]);
+// A move is `[ts, origin, …]`: a stamp as compareClock reads one.
+const byStamp = (a, b) => compareClock(a, b);
 const byNode = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
 const createTree = () => ({ k: 'tree', ts: 0, moves: {} });
@@ -51,12 +76,24 @@ const stampsMax = (tree) => {
   return ts;
 };
 
+// How many moves a block holds: a walk of its nodes, like the copy every
+// move makes of them.
+const movesOf = (tree) => {
+  let count = 0;
+  for (const node of Object.keys(tree.moves)) count += tree.moves[node].length;
+  return count;
+};
+
+// The steps the folds' walks took, for the tests and the bench.
+const walks = { steps: 0 };
+
 // A peer's block rebuilt into the trusted shape: node ids and parents of
 // the right form, moves sorted by stamp with duplicates dropped. Null when
-// nothing is left.
+// nothing is left, or more than MAX_MOVES moves are.
 const normalizeTree = (raw) => {
   if (!raw || typeof raw !== 'object' || !raw.moves || typeof raw.moves !== 'object') return null;
   const tree = createTree();
+  let total = 0;
   for (const node of Object.keys(raw.moves)) {
     if (!isNodeId(node) || !Array.isArray(raw.moves[node])) continue;
     const list = [];
@@ -73,9 +110,11 @@ const normalizeTree = (raw) => {
       if (i === 0 || byStamp(list[i], list[i - 1]) !== 0) list[kept++] = list[i];
     }
     list.length = kept;
+    total += kept;
+    if (total > MAX_MOVES) return null;
     if (kept > 0) tree.moves[node] = list;
   }
-  if (Object.keys(tree.moves).length === 0) return null;
+  if (total === 0) return null;
   tree.ts = stampsMax(tree);
   return tree;
 };
@@ -97,7 +136,8 @@ const firstFrom = (moves, ts, origin) => {
 };
 
 // A `tree` op: one more move of the node, kept in stamp order; the same
-// stamp twice changes nothing.
+// stamp twice changes nothing, and a move past MAX_MOVES is refused
+// (`bound`, with the count and the limit).
 const applyTreeMove = (tree, stamp, payload) => {
   if (!payload || typeof payload !== 'object') return { tree, changed: false, reason: 'malformed' };
   const { node, parent, fi } = payload;
@@ -108,6 +148,8 @@ const applyTreeMove = (tree, stamp, payload) => {
   const held = own(tree.moves, node) ?? [];
   const at = firstFrom(held, move[0], move[1]);
   if (at < held.length && byStamp(held[at], move) === 0) return { tree, changed: false, reason: null };
+  const count = movesOf(tree) + 1;
+  if (count > MAX_MOVES) return { tree, changed: false, reason: 'bound', detail: 'moves', count, max: MAX_MOVES };
   const moves = [];
   for (let i = 0; i < at; i++) moves.push(held[i]);
   moves.push(move);
@@ -136,9 +178,38 @@ const pruneTree = (tree, base) => {
   return out;
 };
 
-// Two nodes' pictures of one tree: the union of moves.
-const joinTrees = (a, b) => {
+// Every move as `[node, move, i]` in the fold's order — by stamp, then
+// (two moves of different nodes with one stamp, forged: a clock never
+// repeats) by node id, so the order is a function of the moves alone —
+// and the index `i` of every node.
+const folding = (tree) => {
+  const index = new Map();
+  const all = [];
+  for (const node of Object.keys(tree.moves)) {
+    const i = index.size;
+    index.set(node, i);
+    for (const move of tree.moves[node]) all.push([node, move, i]);
+  }
+  all.sort((x, y) => byStamp(x[1], y[1]) || byNode(x[0], y[0]));
+  return [all, index];
+};
+
+// The oldest MAX_MOVES of a tree's moves, in the fold's order.
+const oldest = (tree) => {
+  const [all] = folding(tree);
   const out = createTree();
+  for (let i = 0; i < MAX_MOVES; i++) {
+    const [node, move] = all[i];
+    (own(out.moves, node) ?? (out.moves[node] = [])).push(move);
+  }
+  return out;
+};
+
+// Two nodes' pictures of one tree: the union of moves — past MAX_MOVES,
+// the oldest of it in the fold's order (the same whichever side holds
+// which: the newest is what the op path would have refused).
+const joinTrees = (a, b) => {
+  let out = createTree();
   for (const node of Object.keys(a.moves)) out.moves[node] = a.moves[node];
   for (const node of Object.keys(b.moves)) {
     const mine = own(out.moves, node);
@@ -163,32 +234,42 @@ const joinTrees = (a, b) => {
     }
     out.moves[node] = all;
   }
+  if (movesOf(out) > MAX_MOVES) out = oldest(out);
   out.ts = stampsMax(out);
   return out;
 };
 
-// The fold: every move in stamp order — two moves of different nodes with
-// one stamp (forged: a clock never repeats) by node id, so the order is a
-// function of the moves alone — a move that would put a node under itself
-// skipped. Gives each node's parent and place, and whether each move took.
+// The fold: every move in the fold's order (`folding`), a move skipped that
+// would put a node under itself or under a parent more than MAX_WALK
+// ancestors deep at that point. Gives each node's parent and place.
+// The walk needs no set of the names it has seen: the parent map is a
+// forest — a node's parent is set only when the walk up from the new
+// parent ended (at a root, the trash or a name no move places) without
+// meeting the node, so no move closes a loop, and every walk ends. A node
+// is an index and the walk reads an Int32Array: a step of it through a
+// Map took 35 ns — a second and more a fold at MAX_MOVES, at worst.
 const resolve = (tree) => {
-  const all = [];
-  for (const node of Object.keys(tree.moves)) for (const move of tree.moves[node]) all.push([node, move]);
-  all.sort((x, y) => byStamp(x[1], y[1]) || byNode(x[0], y[0]));
+  const [all, index] = folding(tree);
+  // Each node's parent as an index; -1 where a walk ends: a root, the
+  // trash, a name no move places, a node not placed yet.
+  const up = new Int32Array(index.size).fill(-1);
   const parentOf = new Map();
   const placeOf = new Map();
-  const isUnder = (ancestor, node) => {
-    let at = node;
-    const seen = new Set();
-    while (at !== null && at !== TRASH && at !== undefined && !seen.has(at)) {
-      if (at === ancestor) return true;
-      seen.add(at);
-      at = parentOf.get(at) ?? null;
+  for (let i = 0; i < all.length; i++) {
+    const [node, [ts, origin, parent, fi], self] = all[i];
+    // Null and the trash are no node's id: no index, like a name no move places.
+    const to = index.get(parent) ?? -1;
+    // Up from the parent: `at` turns -1 at the top, or stays on the node
+    // itself (a cycle) or on the first ancestor past the walk (moot).
+    let at = to;
+    let walked = 0;
+    while (at >= 0 && at !== self && walked < MAX_WALK) {
+      walked++;
+      at = up[at];
     }
-    return false;
-  };
-  for (const [node, [ts, origin, parent, fi]] of all) {
-    if (parent !== null && parent !== TRASH && isUnder(node, parent)) continue;
+    walks.steps += walked;
+    if (at >= 0) continue;
+    up[self] = to;
     parentOf.set(node, parent);
     placeOf.set(node, [fi, ts, origin]);
   }
@@ -306,6 +387,9 @@ module.exports = {
   TRASH,
   MAX_DEPTH,
   MAX_FI,
+  MAX_WALK,
+  MAX_MOVES,
+  walks,
   isNodeId,
   createTree,
   normalizeTree,

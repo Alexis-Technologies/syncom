@@ -33,11 +33,13 @@ const kindOfOp = () => 'tree';
 const normalize = (raw) => T.normalizeTree(raw);
 
 // One more move in the field's log; a move that did not take is news to
-// persist: a later move can make it count.
+// persist: a later move can make it count. A move past MAX_MOVES is a
+// `bound` refusal, with the count and the limit.
 const apply = (entry, field, held, op, stamp) => {
   const result = T.applyTreeMove(held ?? T.createTree(), stamp, op.value);
-  const out = { block: result.changed ? result.tree : (held ?? null), changed: result.changed };
-  if (result.reason !== undefined) out.reason = result.reason;
+  // What the move says comes as it is: changed, and a refusal's reason (for
+  // a bound, its detail, count and limit).
+  const out = { ...result, block: result.changed ? result.tree : (held ?? null) };
   // What the reading shows of the move: the nodes whose place changed.
   if (result.changed) out.change = treeChanges(held === undefined ? [] : T.renderTree(held), T.renderTree(result.tree));
   return out;

@@ -796,6 +796,51 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     assert.ok(mesh.links.get('mem://B').client.rooms.has('syncom:Doc'));
   });
 
+  await t.test(
+    'counters converge across scopes: one node’s incs in two streams, the record moving between them (seeded)',
+    async (t2) => {
+      const names = ['A', 'B', 'C'];
+      const rooms = ['a', 'b'];
+      const mesh = await createMesh(
+        t2,
+        names,
+        [
+          ['A', 'B'],
+          ['B', 'C'],
+          ['C', 'A'],
+        ],
+        createStorage,
+        { sync: { scope: (id, data) => data.room ?? '*' }, scopes: { A: rooms, B: rooms, C: rooms } },
+      );
+      const storages = names.map((name) => mesh.get(name));
+      const random = prng(20261026);
+      const ids = ['k1', 'k2'];
+      for (const id of ids) await storages[0].set(id, { room: 'a' });
+      await settle(storages);
+      const counted = { k1: 0, k2: 0 };
+      let moves = 0;
+      for (let step = 0; step < 60; step++) {
+        const storage = storages[Math.floor(random() * storages.length)];
+        const id = ids[Math.floor(random() * ids.length)];
+        const roll = random();
+        if (roll < 0.2) {
+          // The record moves: to a room, or out of every one (the global scope).
+          if (roll < 0.05) await storage.unset(id, ['room']);
+          else await storage.update(id, { room: rooms[Math.floor(random() * rooms.length)] });
+          moves++;
+        } else {
+          await storage.inc(id, 'hits', 1);
+          counted[id]++;
+        }
+        if (random() < 0.3) await settle(storages);
+      }
+      await settle(storages, { timeout: 10_000 });
+      const expected = await assertConverged(storages);
+      for (const id of ids) assert.strictEqual(expected[id].hits, counted[id], `${id}: every inc counted once`);
+      assert.ok(moves > 3, 'the records moved between scopes');
+    },
+  );
+
   await t.test('a live Record on one node follows writes made on another', async (t2) => {
     const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage);
     const a = mesh.get('A');

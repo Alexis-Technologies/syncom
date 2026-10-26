@@ -1,10 +1,4 @@
-export type JSONSafe =
-  | string
-  | number
-  | boolean
-  | null
-  | { readonly [key: string]: JSONSafe }
-  | readonly JSONSafe[];
+export type JSONSafe = string | number | boolean | null | { readonly [key: string]: JSONSafe } | readonly JSONSafe[];
 
 export interface KeyPair {
   readonly publicKey: string;
@@ -236,7 +230,9 @@ export interface SequenceBlock {
   k: 'l' | 't';
   /** The newest stamp the block holds. */
   ts: number;
-  runs: { [run: string]: readonly [at: string, content: readonly (string | number | readonly unknown[])[], elem?: string] };
+  runs: {
+    [run: string]: readonly [at: string, content: readonly (string | number | readonly unknown[])[], elem?: string];
+  };
   cuts?: { [run: string]: readonly (readonly [offset: number, length: number])[] };
   ext?: { [run: string]: readonly (readonly [from: number, content: string | readonly unknown[]])[] };
   pos?: { [elem: string]: readonly [ts: number, origin: string, run: string] };
@@ -349,7 +345,16 @@ export type Change =
     }
   | { action: 'setAt'; field: string; index: number; value: unknown }
   | { action: 'move'; field: string; from: number; to: number }
-  | { action: 'mark'; field: string; start: number; end: number; name: string; value: unknown; markId: string; many?: true }
+  | {
+      action: 'mark';
+      field: string;
+      start: number;
+      end: number;
+      name: string;
+      value: unknown;
+      markId: string;
+      many?: true;
+    }
   | { action: 'unmarkById'; field: string; markId: string; start: number; end: number; name: string }
   | { action: 'treeMove'; field: string; node: string; parent: string | null; after: string | null }
   | { action: 'treeRemove'; field: string; node: string }
@@ -380,7 +385,8 @@ export interface TransactionEvent {
 export type FieldKind = 'register' | 'counter' | 'set' | 'list' | 'text' | 'tree';
 /**
  * Why a field of an op was refused: another kind holds the field; work past
- * a bound of a list or text field, or a counter's sum past the safe range
+ * a bound of a list or text field, a tree field's moves past `MAX_MOVES`, a
+ * counter's sum past the safe range or a record's paths past `MAX_PATHS`
  * (`'bound'`); a payload the engine does not admit (`'malformed'` — a
  * TypeError on the local path).
  */
@@ -390,7 +396,7 @@ export interface Refusal {
   field: string | null;
   reason: RefusalReason;
   kind?: string;
-  detail?: 'pending' | 'run' | 'field' | 'counter';
+  detail?: 'pending' | 'run' | 'field' | 'moves' | 'counter' | 'paths';
   count?: number;
   max?: number;
 }
@@ -543,7 +549,10 @@ export interface OpLog {
     options?: { scopes?: readonly string[] | null; limit?: number },
   ): { entries: LogEntry[]; last: number | null } | null;
   /** `read(...).entries`, or null when the position cannot be resumed. */
-  since(eventId: string | null | undefined, options?: { scopes?: readonly string[] | null; limit?: number }): LogEntry[] | null;
+  since(
+    eventId: string | null | undefined,
+    options?: { scopes?: readonly string[] | null; limit?: number },
+  ): LogEntry[] | null;
   /** Every retained entry of the record `id`, oldest first — what `Storage.repair()` rebuilds from. */
   entriesOf(id: string): LogEntry[];
   advance(vector: VersionVector): Promise<void>;
@@ -708,10 +717,7 @@ export type CrdtHistoryRecord =
 
 export function diff(source: unknown, target: unknown): CrdtDelta;
 export function merge(source: unknown, delta: unknown): unknown;
-export function apply(
-  source: unknown,
-  history: readonly CrdtHistoryRecord[],
-): unknown;
+export function apply(source: unknown, history: readonly CrdtHistoryRecord[]): unknown;
 
 // The chain — `Block`, `Blockchain`, the plugin — is the `@alexify/syncom/chain`
 // subpath (src/chain/chain.d.ts); smart contracts are `@alexify/syncom/contracts`.
@@ -836,9 +842,7 @@ export interface TextIndex {
 }
 
 export type SchemaEntity = EntityDefinition;
-export type SchemaEntities =
-  | { readonly [entityName: string]: EntityDefinition }
-  | Map<string, EntityDefinition>;
+export type SchemaEntities = { readonly [entityName: string]: EntityDefinition } | Map<string, EntityDefinition>;
 
 export interface MigrationContext {
   /** The record's `$type`, or `null` outside any collection. */
@@ -850,9 +854,15 @@ export interface MigrationContext {
 
 /** One step of the up-chain: the record (without `$type`) as it was under `from`, returned as it is under `to`. */
 export interface Migration {
-  up(data: Record<string, unknown>, context: MigrationContext): Record<string, unknown> | Promise<Record<string, unknown>>;
+  up(
+    data: Record<string, unknown>,
+    context: MigrationContext,
+  ): Record<string, unknown> | Promise<Record<string, unknown>>;
   /** Reserved. */
-  down?(data: Record<string, unknown>, context: MigrationContext): Record<string, unknown> | Promise<Record<string, unknown>>;
+  down?(
+    data: Record<string, unknown>,
+    context: MigrationContext,
+  ): Record<string, unknown> | Promise<Record<string, unknown>>;
 }
 
 export interface Schema<T extends { readonly [K in keyof T]: object } = {}> {
@@ -1196,7 +1206,11 @@ export interface VersionView {
   /** Every live id at the version, sorted. */
   list(): Promise<string[]>;
   /** One page of the storage as it was at the version — what another storage's `mergeSnapshot` joins to stand there. */
-  snapshot(options?: { cursor?: string | null; limit?: number; scopes?: readonly string[] | null }): Promise<SnapshotPage>;
+  snapshot(options?: {
+    cursor?: string | null;
+    limit?: number;
+    scopes?: readonly string[] | null;
+  }): Promise<SnapshotPage>;
 }
 
 export interface TagView extends Tag {
@@ -1209,7 +1223,11 @@ export interface TagView extends Tag {
   /** A collection at the tag; throws for an entity the schema has not. `R` types its records (`collection<Post>('Post')`). */
   collection<R = RecordData>(name: string): TagCollection<R>;
   /** One page of the storage as it was at the tag — what another storage's `mergeSnapshot` joins to stand at the tag. */
-  snapshot(options?: { cursor?: string | null; limit?: number; scopes?: readonly string[] | null }): Promise<SnapshotPage>;
+  snapshot(options?: {
+    cursor?: string | null;
+    limit?: number;
+    scopes?: readonly string[] | null;
+  }): Promise<SnapshotPage>;
 }
 
 /** What a remote op faces before it is applied here. */
@@ -1496,8 +1514,15 @@ export interface SharedLogRead extends AsyncIterable<SharedLogEntry> {
 
 export interface SharedLog {
   name?: string;
-  append(topic: string, value: string | Uint8Array, options?: { headers?: Record<string, string>; key?: string }): Promise<string>;
-  read(topic: string, options?: { after?: string | null; from?: 'latest' | 'earliest'; signal?: AbortSignal | null }): SharedLogRead;
+  append(
+    topic: string,
+    value: string | Uint8Array,
+    options?: { headers?: Record<string, string>; key?: string },
+  ): Promise<string>;
+  read(
+    topic: string,
+    options?: { after?: string | null; from?: 'latest' | 'earliest'; signal?: AbortSignal | null },
+  ): SharedLogRead;
   parseId(text: unknown): string | null;
 }
 
@@ -1634,7 +1659,14 @@ export interface StorageEvents {
    * A peer's op left a unique key shared by two records: `id` (the op's)
    * and `other`. Both are kept — the application decides which yields.
    */
-  conflict: (event: { kind: 'unique'; entity: string; fields: string[]; id: string; other: string; op: SyncOp }) => void;
+  conflict: (event: {
+    kind: 'unique';
+    entity: string;
+    fields: string[];
+    id: string;
+    other: string;
+    op: SyncOp;
+  }) => void;
   /**
    * `drift`: a peer runs this node's schema version with another snapshot
    * hash — two builds of "the same" schema that disagree. Reported after
@@ -1870,11 +1902,7 @@ export interface Storage {
   /** Drops every listener of `event`, or of every event. */
   clear(event?: keyof StorageEvents): void;
 
-  saveData(
-    id: string,
-    data: unknown,
-    options?: StorageDataOptions,
-  ): Promise<void>;
+  saveData(id: string, data: unknown, options?: StorageDataOptions): Promise<void>;
   loadData(id: string): Promise<unknown | null>;
   validate(options?: { last?: number; from?: string }): Promise<boolean>;
   validate(id: string, data: unknown, blockHash: string): Promise<boolean>;
@@ -2038,8 +2066,15 @@ export interface Storage {
     },
   ): Promise<ApplyRemoteResult>;
   adoptVector(vector: VersionVector, options?: { via?: PeerRef | null; from?: string }): Promise<SyncOp | null>;
-  snapshot(options?: { cursor?: string | null; limit?: number; scopes?: readonly string[] | null }): Promise<SnapshotPage>;
-  mergeSnapshot(records: readonly (Entry & { id: string })[], options?: { via?: PeerRef | null; from?: string }): Promise<void>;
+  snapshot(options?: {
+    cursor?: string | null;
+    limit?: number;
+    scopes?: readonly string[] | null;
+  }): Promise<SnapshotPage>;
+  mergeSnapshot(
+    records: readonly (Entry & { id: string })[],
+    options?: { via?: PeerRef | null; from?: string },
+  ): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -2132,7 +2167,13 @@ export interface SyncomRecordApi<R = RecordData> {
   /** Removes from a set field — `storage.remove` with this record's id. */
   remove(key: string, elements: readonly unknown[], options?: WriteOptions): Promise<void>;
   /** Splices a list or text field — `storage.splice` with this record's id. */
-  splice(key: string, index: number, count?: number, content?: string | readonly unknown[], options?: WriteOptions): Promise<void>;
+  splice(
+    key: string,
+    index: number,
+    count?: number,
+    content?: string | readonly unknown[],
+    options?: WriteOptions,
+  ): Promise<void>;
   /** Appends to a list or text field — `storage.push` with this record's id. */
   push(key: string, content: string | readonly unknown[], options?: WriteOptions): Promise<void>;
   /** Makes a text field read as `text` — `storage.updateText` with this record's id. */
@@ -2147,7 +2188,13 @@ export interface SyncomRecordApi<R = RecordData> {
     options?: WriteOptions & { expand?: MarkExpand; many?: boolean },
   ): Promise<string | null>;
   /** Removes a style from a text field — `storage.unmark` with this record's id. */
-  unmark(key: string, start: number, end: number, name: string, options?: WriteOptions & { expand?: MarkExpand }): Promise<void>;
+  unmark(
+    key: string,
+    start: number,
+    end: number,
+    name: string,
+    options?: WriteOptions & { expand?: MarkExpand },
+  ): Promise<void>;
   /** Switches one mark off by its id — `storage.unmarkById` with this record's id. */
   unmarkById(key: string, markId: string, options?: WriteOptions): Promise<void>;
   /** The text field as runs of equal style — `storage.spans` with this record's id. */

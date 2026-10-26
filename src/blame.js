@@ -1,14 +1,15 @@
 'use strict';
 
 // Who wrote what — read from the metadata a record carries, never from the
-// log: a register's clock names the writer of its value, a counter's
-// per-origin sums the contributors and their newest stamp, a set's slots
-// the origins that added, a list's or a text's runs the writer of every
-// element (the plugin's `editors`), a tree's moves the movers. `origin` is
-// a node id — the signing key where ops are signed — not a user: who sat
-// at the node is the application's map, as `actor` on the ops says.
+// log: a register's clock names the writer of its value, a counter's sums
+// per stream the contributors (each stream's origin) and their newest
+// stamp, a set's slots the origins that added, a list's or a text's runs
+// the writer of every element (the plugin's `editors`), a tree's moves the
+// movers. `origin` is a node id — the signing key where ops are signed —
+// not a user: who sat at the node is the application's map, as `actor` on
+// the ops says.
 
-const { kindOf, isAlive } = require('./ops.js');
+const { kindOf, isAlive, streamOrigin } = require('./ops.js');
 const { fieldName } = require('./args.js');
 const { isRecordId, invalidId } = require('./shape.js');
 
@@ -34,7 +35,7 @@ const lastOf = (core, entry, field) => {
   if (kind === 'counter') {
     let best = null;
     const sums = own(meta.counters, field) ?? {};
-    for (const origin of Object.keys(sums)) best = newest(best, { origin, ts: sums[origin][2] });
+    for (const stream of Object.keys(sums)) best = newest(best, { origin: streamOrigin(stream), ts: sums[stream][2] });
     return best;
   }
   if (kind === undefined || kind === 'set') return null;
@@ -69,7 +70,7 @@ const editorsOf = async (core, id) => {
   const origins = new Set();
   for (const field of Object.keys(meta.clock)) origins.add(meta.clock[field][1]);
   for (const field of Object.keys(meta.counters)) {
-    for (const origin of Object.keys(meta.counters[field])) origins.add(origin);
+    for (const stream of Object.keys(meta.counters[field])) origins.add(streamOrigin(stream));
   }
   for (const field of Object.keys(meta.sets)) {
     const slots = meta.sets[field];

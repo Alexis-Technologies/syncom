@@ -1006,6 +1006,33 @@ test('Storage replication model', async (t) => {
     );
   });
 
+  await t.test('an inc counts in the record’s stream: after a move to another scope it still lands', async (t2) => {
+    const { storage } = await openTemp(t2, { sync: { scope: (id, data) => data.room ?? '*' } });
+    const id = await storage.insert({ room: 'a' });
+    for (let i = 0; i < 5; i++) await storage.inc(id, 'hits', 1);
+    await storage.update(id, { room: 'b' });
+    const ops = [];
+    storage.on('change', (op) => ops.push(op));
+    await storage.inc(id, 'hits', 1);
+    await storage.inc(id, 'hits', 1);
+    assert.deepStrictEqual(
+      ops.map((op) => [op.type, op.scope, op.seq]),
+      [
+        ['inc', 'b', 2],
+        ['inc', 'b', 3],
+      ],
+    );
+    assert.strictEqual((await storage.get(id)).hits, 7);
+    const [record] = (await storage.snapshot()).records;
+    assert.deepStrictEqual(Object.keys(record.meta.counters.hits).sort(), [
+      `${storage.nodeId}@a`,
+      `${storage.nodeId}@b`,
+    ]);
+    // Blame names the node, whichever stream it counted in.
+    assert.strictEqual((await storage.lastEditorOf(id, 'hits')).origin, storage.nodeId);
+    assert.deepStrictEqual(await storage.editorsOf(id), [storage.nodeId]);
+  });
+
   await t.test('identity, seq and vector survive a reopen; what was logged but not written is replayed', async (t2) => {
     const dir = await createTemp();
     t2.after(() => cleanupTemp(dir));
@@ -1600,6 +1627,49 @@ test('Storage: the bounds of the sequence and tree engines', async (t) => {
       await storage.treeMove(id, 'outline', 'next', null, { before: 'edge' });
       const roots = (await storage.get(id)).outline.map((node) => node.id);
       assert.deepStrictEqual(roots.slice(-2), ['next', 'edge']);
+    },
+  );
+
+  await t.test(
+    'a tree field holds MAX_MOVES moves: one more is bound here and from a peer, a snapshot past it is not taken',
+    async (t2) => {
+      const { MAX_MOVES } = require('../src/tree/moves.js');
+      const { storage } = await openTemp(t2);
+      const errors = [];
+      storage.on('error', (error) => errors.push(error));
+      const moves = {};
+      for (let i = 0; i < MAX_MOVES; i++) moves[`m${i}`] = [[i + 1, 'peer', null, 'V']];
+      const meta = (extra) => ({ clock: {}, base: null, deleted: null, counters: {}, ...extra });
+      const block = (more = {}) => ({ k: 'tree', ts: MAX_MOVES + 1, moves: { ...moves, ...more } });
+      await storage.mergeSnapshot([
+        { id: 'full', data: {}, meta: meta({ blocks: { outline: block() } }) },
+        {
+          id: 'past',
+          data: {},
+          meta: meta({
+            clock: { n: [1, 'peer'] },
+            blocks: { outline: block({ x: [[MAX_MOVES + 1, 'peer', null, 'V']] }) },
+          }),
+        },
+      ]);
+      assert.strictEqual((await storage.get('full')).outline.length, MAX_MOVES);
+      assert.strictEqual((await storage.get('past')).outline, undefined, 'a block past the bound is not taken');
+      const seq = storage.log.lastSeq;
+      const bound = { field: 'outline', kind: 'bound', detail: 'moves', count: MAX_MOVES + 1, max: MAX_MOVES };
+      await assert.rejects(() => storage.treeMove('full', 'outline', 'x'), { code: 'FIELD_KIND', ...bound });
+      assert.strictEqual(storage.log.lastSeq, seq, 'nothing logged');
+      const value = { node: 'y', parent: null, fi: 'V' };
+      await storage.applyRemote([remoteOp('peer', 1, 'tree', 'full', { key: 'outline', value })]);
+      assert.deepStrictEqual(
+        errors.map((error) => [error.code, error.rejected]),
+        [
+          [
+            'OP_REFUSED',
+            [{ field: 'outline', reason: 'bound', detail: 'moves', count: MAX_MOVES + 1, max: MAX_MOVES }],
+          ],
+        ],
+      );
+      assert.strictEqual((await storage.get('full')).outline.length, MAX_MOVES, 'the field as it was');
     },
   );
 });

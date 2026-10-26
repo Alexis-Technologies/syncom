@@ -250,7 +250,7 @@ merge:
 | `base` | The record's reset watermark: the stamp of its last whole-record write, delete or purge |
 | `deleted` | The tombstone's stamp, or `null` |
 | `purged` | The purge's stamp, once purged — nothing but another purge or a merge lands after it |
-| `counters` | Per field, per origin, `[seq, sum, ts]` — the origin's running sum, within ±2⁵³ |
+| `counters` | Per field, per stream — the op's vector key, `origin` or `origin@scope`, since seqs run per stream — `[seq, sum, ts]`: the stream's running sum, within ±2⁵³; a slot keyed by the bare origin is the global stream's |
 | `sets` | Per field, per element (its canonical JSON as the key), per origin, `[added, removed]` stamps; live while `added > removed` |
 | `blocks` | Per list, text or tree field, the kind plugin's block under its code `k` — `t` text, `l` list, `tree` — with the block's `ts`; a text's or list's `runs` (`[anchor, content, extendedFrom?]` per `ts:origin`), `cuts`, `ext`, `pos`, `vals`, `marks`, `pending`; a tree's `moves` (`[ts, origin, parent, fi]` per node) |
 | `gone` | Per field removed by `unset`, the stamp of the removal — a register's tombstone an older `set` loses to |
@@ -413,10 +413,12 @@ a snapshot buys nothing an op could not:
 | How deep a field of an op, or a snapshot record's `data` or `meta`, nests | 80 levels (`MAX_WIRE_DEPTH`; every object or array on the deepest path a level) | `malformed`; a snapshot record left out |
 | How deep what a local write takes nests | 64 levels (`MAX_JSON_DEPTH`): the 16 between leave room for what an op and a meta wrap around a value | `TypeError` |
 | A seq taken for a node's own stream from a host (`REWOUND`) | 2⁵³ − 1 − 2³² | not taken |
-| A counter's sum per origin | ±2⁵³ − 1 | `OP_REFUSED` `detail: 'counter'` |
+| A counter's sum per stream | ±2⁵³ − 1 | `OP_REFUSED` `detail: 'counter'` |
 | A run's length | 2²⁰ elements | `OP_REFUSED` `detail: 'run'` |
 | Pending ops per block | `sync.pendingMax`, 4 096 | `OP_REFUSED` `detail: 'pending'` |
 | A tree's depth read, a fractional index | 512 levels, 1 024 characters | the deeper levels unread; `malformed` |
+| The fold's walk up from a move's parent (`MAX_WALK`) | 512 ancestors | the move is moot, like one that would make a cycle — the same on every node |
+| A tree field's moves (`MAX_MOVES`), every node's together | 65 536 | `OP_REFUSED` `detail: 'moves'`; a snapshot block past it is not taken; a join keeps the oldest in the fold's order |
 | Ops per push, bytes per push, ops per second | `unit({ limits })`, none by default | 413, 429 |
 | Records per snapshot page, ops per `changes` page | `unit({ pageSize })`, 500 | — |
 | Presence state | 16 KiB, 64 keys, 8 deep; 1 024 entries per update; 20 updates a second | refused |

@@ -231,6 +231,8 @@ expectAssignable<syncom.RefusalReason>('kind');
 expectAssignable<syncom.Refusal>({ field: 'body', reason: 'kind', kind: 'text' });
 expectAssignable<syncom.Refusal>({ field: 'body', reason: 'bound', detail: 'pending', count: 1, max: 4096 });
 expectAssignable<syncom.Refusal>({ field: 'n', reason: 'bound', detail: 'counter', count: 2 ** 53, max: 2 ** 53 - 1 });
+expectAssignable<syncom.Refusal>({ field: 'outline', reason: 'bound', detail: 'moves', count: 65537, max: 65536 });
+expectAssignable<syncom.Refusal>({ field: 'x', reason: 'bound', detail: 'paths', count: 4097, max: 4096 });
 expectAssignable<syncom.Refusal>({ field: null, reason: 'malformed' });
 expectError<syncom.FieldKind>('map');
 expectAssignable<syncom.SetRemoval>(['x', { a: 1 }]);
