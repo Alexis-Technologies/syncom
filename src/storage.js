@@ -41,7 +41,7 @@ const { compose, composeData } = require('./compose.js');
 const DEFER_RECORDS = 1024;
 const DEFER_POSITIONS = 8192;
 const { COMMIT, REFRESH, SOURCE, PLUGINS, CURSOR, SIGNER, REWIND } = require('./symbols.js');
-const { missing } = require('./plugin.js');
+const { missing, HOME } = require('./plugin.js');
 const { SyncomError, typed } = require('./errors.js');
 
 const NODE_FILE = 'node.json';
@@ -331,6 +331,7 @@ class Storage extends Emitter {
     if (this.#options.chain === true && this.#chain === null) throw missing('open({ chain: true })', 'chain');
     if (this.#encrypted && this.#seal === null) throw missing('open({ encrypted: true })', 'encryption');
     this.#defineSchema(this.#options, this.#settings.search);
+    this.#installMethods();
     // A directory with tags needs the plugin that keeps their copies: opened
     // without it, the next change would leave a tag reading what it was not.
     if (this.#tags === null && (await this.#hasTags())) throw missing('a storage with tags', 'versions');
@@ -1543,6 +1544,28 @@ class Storage extends Emitter {
   // one delegate each; a plugin's methods — lists, texts, trees — through
   // its module (src/plugin.js). A method of a plugin this storage was not
   // opened with rejects with PLUGIN_MISSING naming the subpath.
+
+  // A plugin's method the facade has no stub for (a plugin of the
+  // application's) goes on this storage as it is on a transaction's: called
+  // with the lent core first. One named like a member of the storage (or
+  // `then`, which would make it a thenable) is refused at open.
+  #installMethods() {
+    const { methods } = this.#plugins;
+    for (const name of Object.keys(methods)) {
+      // A stub of the facade reaches the registry already.
+      if (Object.hasOwn(HOME, name) && name in this) continue;
+      if (name in this || name === 'then') {
+        throw new TypeError(`open(): a plugin's method ${name}() is a member of the storage already`);
+      }
+      const method = methods[name];
+      Object.defineProperty(this, name, {
+        value: (...args) => method(this.#core, ...args),
+        configurable: true,
+        enumerable: false,
+        writable: false,
+      });
+    }
+  }
 
   #api(name, what = `${name}()`, home = undefined) {
     const method = this.#plugins.methods[name];

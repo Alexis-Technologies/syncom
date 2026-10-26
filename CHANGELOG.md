@@ -954,6 +954,11 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **An application's plugin had no methods on the storage.** The facade
+  carried a stub for every shipped plugin's method and nothing else, so a
+  plugin of the application's reached its methods inside a transaction only,
+  though the types promised them on `open()`'s storage. They are installed at
+  open now (a name that would shadow a member of the storage is refused).
 - **`INVALID_VERSION` was typed as a `SyncomError` code it never is.** It is
   a `TypeError`'s (`typed()`), so `error instanceof SyncomError && error.code
   === 'INVALID_VERSION'` was never true. The codes of the typed `TypeError`s

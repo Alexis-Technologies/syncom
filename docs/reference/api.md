@@ -682,6 +682,12 @@ that holds tags without `versions`. Without them the node id is what
 `validate()` is `NO_CHAIN` and `storage.sync` is `PLUGIN_MISSING`.
 `storage.plugins` lists them all.
 
+A plugin's `methods` (`{ name: (core, …args) }`) are the storage's: the
+shipped ones through the facade's own methods, an application's plugin's
+installed at `open()` — `storage.greet(id, word)` calls `greet(core, id,
+word)` — and a transaction's alike (`tx.greet(…)`, inside it). A method named
+like a member of the storage, or `then`, is a `TypeError` at `open()`.
+
 ## All (subpath)
 
 ```js
