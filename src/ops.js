@@ -886,8 +886,9 @@ const applyOp = (previous, op, limits = null) => {
           if (!previous || previous.data[field] !== joined.data[field]) delta[field] = joined.data[field];
         }
         if (previous) {
-          for (const field of Object.keys(previous.data))
+          for (const field of Object.keys(previous.data)) {
             if (!Object.hasOwn(joined.data, field)) delta[field] = undefined;
+          }
         }
         const before = previous ? previous.meta : null;
         const moved =

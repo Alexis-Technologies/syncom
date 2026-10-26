@@ -258,7 +258,8 @@ const ENTRIES = [
   // 101.6 with the review's performance fixes (a lazy commit event, the lazy text index, the log's pending groups
   // searched by halves, a live Record patched by its delta). 102, raised by name.
   // 102.8 with the review's security fixes (merge-meta skew, own streams moved only with proof, a nesting bound) and the editors' containment (2026-10-26). 103.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 103.5 },
+  // 103.6 with the tree's bounded fold and the counters per stream. 104.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 104.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -281,7 +282,7 @@ const ENTRIES = [
   // 6.1 with a node's data (the members' seam).
   // 6.3 with the change reports (treeChanges: the placements before and after).
   // 6.8 with src/ in procedural loops (no array callbacks — a loop is longer than a callback; 2026-10-26).
-  { label: 'tree — browser (@alexify/syncom/tree)', entry: 'src/tree/tree.js', platform: 'browser', budget: 7 },
+  { label: 'tree — browser (@alexify/syncom/tree)', entry: 'src/tree/tree.js', platform: 'browser', budget: 7.5 },
   // The security blocks, each measured ALONE — with the shape checks, the
   // PEM pair, the backend contract and the errors it shares with the core,
   // which an app bundle holds once (4.2 / 2.0 / 3.6 measured; what each
@@ -352,7 +353,7 @@ const ENTRIES = [
     label: 'versions — browser (@alexify/syncom/versions)',
     entry: 'src/versions/versions.js',
     platform: 'browser',
-    budget: 31.5,
+    budget: 32,
   },
 ];
 
