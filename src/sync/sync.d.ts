@@ -140,7 +140,27 @@ export interface SyncEvents {
    * scopes its hello granted (`scope`), signed but not by their origin
    * (`forged`), or unsigned under `sync.signatures: 'require'` (`unsigned`).
    */
-  refused: (event: { node: string; reason: 'scope' | 'forged' | 'unsigned'; count: number }) => void;
+  /**
+   * Hosting side: what a peer sent was refused. Ops — out of scope, forged,
+   * unsigned under 'require' (`node` the pusher); a presence update — not the
+   * peer's own, of a scope it did not ask for, past the rate, malformed or
+   * unsigned (`PRESENCE_*`, one each); a presence update before hello
+   * (`HELLO`, `node` null).
+   */
+  refused: (event: {
+    node: string | null;
+    reason:
+      | 'scope'
+      | 'forged'
+      | 'unsigned'
+      | 'HELLO'
+      | 'PRESENCE_RATE'
+      | 'PRESENCE_MALFORMED'
+      | 'PRESENCE_SCOPE'
+      | 'PRESENCE_FORGED'
+      | 'PRESENCE_UNSIGNED';
+    count: number;
+  }) => void;
   /**
    * A failure on the way to a peer; `url` names it. A page of the feed that
    * could not be applied comes as `code: 'PAGE_FAILED'` (with `cursor`, the

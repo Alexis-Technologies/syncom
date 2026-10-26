@@ -271,7 +271,7 @@ expectType<Promise<SyncomRecord>>(storage.record('id'));
 expectType<boolean>(storage.hasRecord('id'));
 
 // The record/collection pair reached through the Storage namespace.
-expectAssignable<typeof SyncomCollection>(syncom.Storage.Collection);
+expectAssignable<syncom.SyncomCollectionConstructor>(syncom.Storage.Collection);
 declare const record: SyncomRecord;
 expectType<string>(record.id);
 expectType<Promise<RecordData | null>>(record.data());
@@ -679,7 +679,7 @@ storage.on('commit', (event) => {
 expectType<() => void>(log.pin((entry) => entry.seq > 1));
 expectError(log.pin(null));
 expectType<number>(storage.stats().log.droppedTs);
-expectType<typeof syncom.SyncomCollection>(syncom.Storage.Collection);
+expectType<syncom.SyncomCollectionConstructor>(syncom.Storage.Collection);
 expectType<number>(storage.listenerCount('change'));
 expectType<(keyof syncom.StorageEvents)[]>(storage.eventNames());
 expectType<Promise<syncom.SyncOp>>(storage.toPromise('change'));

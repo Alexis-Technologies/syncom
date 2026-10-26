@@ -43,9 +43,19 @@ expectType<SyncUnit>(
 );
 
 storage.sync.on('refused', (event) => {
-  expectType<'scope' | 'forged' | 'unsigned'>(event.reason);
+  expectType<
+    | 'scope'
+    | 'forged'
+    | 'unsigned'
+    | 'HELLO'
+    | 'PRESENCE_RATE'
+    | 'PRESENCE_MALFORMED'
+    | 'PRESENCE_SCOPE'
+    | 'PRESENCE_FORGED'
+    | 'PRESENCE_UNSIGNED'
+  >(event.reason);
   expectType<number>(event.count);
-  expectType<string>(event.node);
+  expectType<string | null>(event.node);
 });
 storage.sync.on('sync', (event) => {
   expectType<number | undefined>(event.malformed);

@@ -1294,8 +1294,11 @@ export interface StorageStats {
     /** Readers holding segments past retention: undo managers, mostly. */
     pins: number;
   };
-  /** The tags held; `corrupt` when `tags.json` could not be read at open (no tags, `tag()` refused until it is repaired). */
-  /** The tags kept here; `null` without the `versions` plugin. */
+  /**
+   * The tags kept here; `null` without the `versions` plugin. `corrupt` when
+   * `tags.json` could not be read at open (no tags, `tag()` refused until it
+   * is repaired).
+   */
   tags: { count: number; corrupt: boolean } | null;
   /** Records whose files lag the log: held after a write that failed (replayed at the next open), or deferred by `open({ defer })`. */
   held: number;
@@ -1896,6 +1899,10 @@ export interface Storage {
   readonly path: string;
   readonly log: OpLog;
   readonly vector: VersionVector;
+  /** The names of the plugins this storage was opened with (`open({ plugins })`), in registration order. */
+  readonly plugins: readonly string[];
+  /** The names of the kind plugins among them — what `hello` tells a peer this node can hold. */
+  readonly kinds: string[];
   /** The writer built from `open({ logger })`: every level a function, `false` silenced it. */
   readonly logger: Logger;
   /**
@@ -2286,8 +2293,7 @@ export type SyncomRecord<R = RecordData> = SyncomRecordApi<R> & { -readonly [K i
  * a write takes — a Standard Schema's input, defaults and aliases not yet
  * applied; both `RecordData` unless the schema says more (see `Collections`).
  */
-export declare class SyncomCollection<R = RecordData, I = R> {
-  constructor(storage: Storage, name: string);
+export interface SyncomCollection<R = RecordData, I = R> {
   readonly name: string;
   insert(data: I, options?: StorageDataOptions): Promise<SyncomRecord<R>>;
   get(id: string, options?: { at?: Version }): Promise<R | null>;
@@ -2303,18 +2309,25 @@ export declare class SyncomCollection<R = RecordData, I = R> {
   record(id: string): Promise<SyncomRecord<R>>;
 }
 
-export declare const SyncomRecordCtor: {
+/** `Storage.Collection`: what `storage.<Entity>` is an instance of (a type, not an export of the package). */
+export interface SyncomCollectionConstructor {
+  readonly prototype: SyncomCollection;
+  new <R = RecordData, I = R>(storage: Storage, name: string): SyncomCollection<R, I>;
+}
+
+/** `Storage.Record`: what `storage.record(id)` resolves to an instance of (a type, not an export of the package). */
+export interface SyncomRecordConstructor {
   readonly prototype: SyncomRecord;
   new <R = RecordData>(id: string, storage: Storage): Promise<SyncomRecord<R>>;
-};
+}
 
 export interface StorageConstructor {
   readonly prototype: Storage;
   new <S extends Schema = Schema, const P extends readonly Plugin<any>[] = []>(
     options?: StorageOptions<S> & { plugins?: P },
   ): Promise<Storage & Collections<S> & PluginMethods<P>>;
-  Collection: typeof SyncomCollection;
-  Record: typeof SyncomRecordCtor;
+  Collection: SyncomCollectionConstructor;
+  Record: SyncomRecordConstructor;
   // The default `getId` — synchronous in both halves, unlike the crypto three.
   generateId(): string;
 }

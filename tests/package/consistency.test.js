@@ -7,7 +7,7 @@
 // those a red test instead.
 
 const path = require('node:path');
-const { existsSync, readFileSync } = require('node:fs');
+const { existsSync, readFileSync, readdirSync } = require('node:fs');
 const { test } = require('node:test');
 const assert = require('node:assert');
 
@@ -178,6 +178,27 @@ test('every runtime export is declared in the types', () => {
   // browser.js is only loadable under OPFS/WebCrypto globals, so compare its
   // barrel's names against the node one instead of requiring it here.
   check('index.js', 'browser.d.ts');
+});
+
+// The other way: a value a .d.ts declares at its top level (a const, a function, a class) is one the module
+// exports — a type that only reads as a value would compile an import that is undefined at run time.
+test('every value a .d.ts declares, its module exports', () => {
+  const pairs = [['index.js', 'index.d.ts']];
+  for (const name of readdirSync(path.join(ROOT, 'src'))) {
+    const types = path.join('src', name, `${name}.d.ts`);
+    if (existsSync(path.join(ROOT, types)) && existsSync(path.join(ROOT, 'src', name, `${name}.js`))) {
+      pairs.push([path.join('src', name, `${name}.js`), types]);
+    }
+  }
+  const missing = [];
+  for (const [entry, types] of pairs) {
+    const runtime = require(path.join(ROOT, entry));
+    const source = readFileSync(path.join(ROOT, types), 'utf8');
+    for (const match of source.matchAll(/^export (?:declare )?(?:const|function|class) (\w+)/gm)) {
+      if (!Object.hasOwn(runtime, match[1])) missing.push(`${types} declares ${match[1]}, ${entry} does not export it`);
+    }
+  }
+  assert.deepStrictEqual(missing, []);
 });
 
 test('every type index.d.ts exports, browser.d.ts exports too', () => {
