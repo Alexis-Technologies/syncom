@@ -166,12 +166,26 @@ const branchInfo = async (storage) => {
 // directories, so the tags' are named from the storage before it closes.
 const DIRS = ['', 'keys', 'blockchain', 'index', 'data', 'log', 'log/open', 'remote', 'tags/.pending/data'];
 
+// The tags a storage holds — none without the versions plugin, which keeps
+// them (a branch opened without it has no tags of its own to sweep).
+const tagsOf = (storage) => {
+  try {
+    return storage.tags();
+  } catch {
+    return [];
+  }
+};
+
 // Closes a storage and removes its files — every file of the known layout,
 // the tags' included. The empty directories stay: no backend has rmdir.
+// `branch.json` goes last: a sweep cut short leaves a directory `drop()`
+// still takes, to finish it.
 const sweep = async (storage) => {
   const { fsi, path } = storage;
   const dirs = [...DIRS];
-  for (const { name } of storage.tags()) dirs.push(`tags/${name}/data`, `tags/${name}/index`);
+  const tags = tagsOf(storage);
+  for (let i = 0; i < tags.length; i++) dirs.push(`tags/${tags[i].name}/data`, `tags/${tags[i].name}/index`);
+  // Closed first — whatever else fails — so its lock goes with it.
   await storage.close();
   for (const dir of dirs) {
     const full = dir === '' ? path : `${path}/${dir}`;
@@ -181,8 +195,9 @@ const sweep = async (storage) => {
     } catch {
       continue;
     }
-    for (const name of names) await fsi.remove(full, name);
+    for (const name of names) if (dir !== '' || name !== FILE) await fsi.remove(full, name);
   }
+  if (await fsi.exists(path, FILE)) await fsi.remove(path, FILE);
 };
 
 /**

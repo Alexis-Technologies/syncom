@@ -954,6 +954,13 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **`drop()` needed the versions plugin, and a failed `branch()` stayed
+  open.** Sweeping a branch asked for its tags before closing it — a
+  `PLUGIN_MISSING` on the lean core, which left the branch open and locked
+  (a failed `branch()` sweeps the same way) — and removed `branch.json` first,
+  so a sweep cut short left a directory neither `drop()` nor `branch()` would
+  take. The branch closes first, its tags are read only where the plugin
+  keeps them, and `branch.json` goes last.
 - **A crash or a reader could catch a log index, a segment or `node.json`
   half written.** The `node:fs` backend truncated a file and then wrote it:
   a crash in between left a torn file, and a torn `log/index.json` opened as

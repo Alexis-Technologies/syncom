@@ -33,3 +33,32 @@ test('Branches (node)', async (t) => {
   };
   await runBranchTests(t, assert, createStorage, branchPath);
 });
+
+test('drop() on the lean core, and a drop cut short: the branch closes first, its branch.json goes last', async () => {
+  const { memory } = require('../src/memory/memory.js');
+  const { branch, drop, branchInfo } = require('../src/branch/branch.js');
+  const { open } = require('../src/index.js');
+  const fsi = memory();
+  // The lean core: no versions plugin, so no tags() — drop must not need it.
+  const parent = await open({ path: 'p', fsi, logger: false, defer: 0, lock: false });
+  await parent.insert({ n: 1 });
+  const child = await branch(parent, { path: 'b', fsi, logger: false, defer: 0 });
+  await drop(child);
+  assert.deepStrictEqual(await fsi.list('b'), [], 'every file of the branch went');
+  // A drop whose removal fails half way leaves branch.json, so drop() takes it again.
+  const again = await branch(parent, { path: 'c', fsi, logger: false, defer: 0 });
+  const remove = fsi.remove;
+  let failing = true;
+  fsi.remove = async (dir, name) => {
+    if (failing && dir === 'c/log') throw new Error('disk gone');
+    return remove(dir, name);
+  };
+  await assert.rejects(drop(again), /disk gone/);
+  failing = false;
+  assert.ok(await fsi.exists('c', 'branch.json'), 'branch.json stays until the end');
+  const reopened = await open({ path: 'c', fsi, logger: false, defer: 0 });
+  assert.notStrictEqual(await branchInfo(reopened), null);
+  await drop(reopened);
+  assert.strictEqual(await fsi.exists('c', 'branch.json'), false);
+  await parent.close();
+});
