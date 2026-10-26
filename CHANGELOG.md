@@ -954,6 +954,17 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **A list run of more than about 130 000 elements threw `RangeError`.** A run
+  of a list's elements may hold `MAX_RUN` (1 048 576) of them, but joining two
+  pieces of one spread the second into `push(...)`'s arguments, which V8 caps:
+  a peer's snapshot with such a run, or an extension of a run whose parent had
+  not arrived yet, failed the page. The same spread sat on eight other paths
+  (a transaction's changes, a diff's patches, a compaction's mark patches, an
+  undo step, a delta of many embeds, a block's spans). None is left.
+- **`merge()` threw on a field named like an `Object.prototype` member.**
+  `merge({}, { constructor: [2] })` read the inherited `constructor` and threw
+  a `TypeError`; it reads the target's own keys only now.
+
 - **Two ProseMirror editors could answer each other without end.** Where
   concurrent edits merged into a structure the schema could not hold, both
   adapters fitted the field at once, the field kept both fits, the doubled
@@ -1390,6 +1401,19 @@ There is no released version section until then; everything below lands in it.
 - `examples/main.js` required a `globalstorage.js` that does not exist.
 
 ### Changed
+
+- **`src/` is written in loops.** No array method that takes a callback
+  (`map`, `filter`, `find`, `some`, `every`, `flatMap`, `forEach`, `reduce`…)
+  and no `Array.from` is left in the published code; `pnpm lint` refuses them
+  in `src/**` (`no-restricted-properties`). Walks that ran twice run once (a
+  set's added and removed elements, a transaction's ops, positions and
+  signatures, a version's applied entries, purges and merges, a scrub's
+  segments), membership tests inside loops are `Set`s, and a few searches
+  became indexes: a list block's elements by key, a tree block's members, the
+  hydration of a run's children, the cuts and extensions a join collects, a
+  rope leaf's item index, the move list of a tree node (a binary search where
+  it was a sort). The bundles grow with it: `/all` 98.3 → 100.7 KB min+gzip,
+  `/text` 28.1 → 28.7, `/tree` 6.4 → 6.8; their budgets are raised by name.
 
 - **A tag is read at its first use.** An open read every tag's catalog and
   copy listing, so its time grew with the tags times their records; it reads

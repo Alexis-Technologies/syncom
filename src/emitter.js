@@ -12,6 +12,9 @@
 // avoiding in tests. `open({ maxListeners })` tunes the storage's.
 const DEFAULT_MAX_LISTENERS = 100;
 
+// A listener's call as a promise: a throw becomes a rejection.
+const invoke = async (fn, args) => fn(...args);
+
 class Emitter {
   #events = new Map();
   #maxListeners = DEFAULT_MAX_LISTENERS;
@@ -27,7 +30,8 @@ class Emitter {
       throw new Error('Unhandled error');
     }
     const listeners = event.on.slice();
-    const promises = listeners.map(async (fn) => fn(...args));
+    const promises = [];
+    for (let i = 0; i < listeners.length; i++) promises.push(invoke(listeners[i], args));
     if (event.once.size > 0) {
       const len = event.on.length;
       const remaining = new Array(len);
@@ -107,7 +111,7 @@ class Emitter {
   }
 
   eventNames() {
-    return Array.from(this.#events.keys());
+    return [...this.#events.keys()];
   }
 }
 

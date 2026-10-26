@@ -15,8 +15,15 @@ const DEFAULT_PAGE_SIZE = 500;
 
 // The kind plugins a peer runs with, as hello carries them — names — or
 // null for a peer that said nothing (a hello from before plugins).
-const kindsOf = (value) =>
-  Array.isArray(value) ? value.filter((name) => typeof name === 'string' && name !== '__proto__') : null;
+const kindsOf = (value) => {
+  if (!Array.isArray(value)) return null;
+  const names = [];
+  for (let i = 0; i < value.length; i++) {
+    const name = value[i];
+    if (typeof name === 'string' && name !== '__proto__') names.push(name);
+  }
+  return names;
+};
 
 // A peer's schema as hello carries it — `{ version, hash }` — or null for
 // a peer without one (or one speaking a shape this node does not read).

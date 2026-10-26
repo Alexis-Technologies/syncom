@@ -121,6 +121,9 @@ class Storage extends Emitter {
   #maxSkew;
   #limits;
   #plugins;
+  // What a transaction's `tx` carries (#transaction): `[name, method]`, the
+  // field methods and the plugins' — a plugin's in place of a field's.
+  #txMethods = [];
   // Local writes whose record files wait (`open({ defer })`): id → the
   // entry to write and the log positions it covers; one timer for the flush.
   #defer = 0;
@@ -176,6 +179,8 @@ class Storage extends Emitter {
     // What the op model is told to bound (src/ops.js applyOp): the pending
     // work of a list or text field. Every fold of the log runs under it too.
     this.#plugins = settings.plugins;
+    const methods = { ...F, ...settings.plugins.methods };
+    for (const name of Object.keys(methods)) this.#txMethods.push([name, methods[name]]);
     this.#limits = { pendingMax: settings.pendingMax, plugins: settings.plugins };
     this.#defer = settings.defer;
     this.#signatures = settings.signatures;
@@ -599,7 +604,9 @@ class Storage extends Emitter {
   async #replayHeld() {
     if (this.#version === null) return;
     const lost = this.#log.droppedHeld;
-    const entries = this.#log.held().filter((entry) => entry.held <= this.#version);
+    const held = this.#log.held();
+    const entries = [];
+    for (let i = 0; i < held.length; i++) if (held[i].held <= this.#version) entries.push(held[i]);
     if (entries.length === 0 && lost === 0) return;
     const touched = await this.#fold(entries);
     if (touched.size > 0) {
@@ -632,8 +639,16 @@ class Storage extends Emitter {
   async migrate({ entities = null, batch = 100, actor } = {}) {
     if (this.#schemaHook === null) throw missing('migrate()', 'schema');
     if (this.#version === null) throw new TypeError('migrate() needs open({ schema })');
-    if (entities !== null && !(Array.isArray(entities) && entities.every((name) => typeof name === 'string'))) {
-      throw new TypeError('migrate({ entities }) takes an array of entity names');
+    let names = null;
+    if (entities !== null) {
+      if (!Array.isArray(entities)) throw new TypeError('migrate({ entities }) takes an array of entity names');
+      names = new Set();
+      for (let i = 0; i < entities.length; i++) {
+        if (typeof entities[i] !== 'string') {
+          throw new TypeError('migrate({ entities }) takes an array of entity names');
+        }
+        names.add(entities[i]);
+      }
     }
     if (!Number.isInteger(batch) || batch < 1) throw new TypeError('migrate({ batch }) takes a positive integer');
     const result = { migrated: 0, counters: 0, sets: 0, lists: 0, texts: 0, trees: 0 };
@@ -641,7 +656,7 @@ class Storage extends Emitter {
     for (const id of await this.list()) {
       const entry = await this.#entries.load(id);
       if (!entry || entry.encrypted || (entry.meta.v ?? 1) >= this.#version) continue;
-      if (entities !== null && !entities.includes(entry.data.$type)) continue;
+      if (names !== null && !names.has(entry.data.$type)) continue;
       const view = await this.#view(id, entry);
       const data = {};
       const kinds = {};
@@ -706,7 +721,7 @@ class Storage extends Emitter {
   // naming the plugin); more plugins than before is fine and is recorded.
   async #loadIdentity() {
     const keyId = this.#identity?.id ?? null;
-    const kinds = this.#plugins.kinds.map((mod) => mod.name);
+    const kinds = this.kinds;
     let stored = null;
     if (await this.#fsi.exists(this.#path, NODE_FILE)) {
       try {
@@ -716,14 +731,21 @@ class Storage extends Emitter {
       }
       const { id } = stored;
       if (!isStreamName(id)) throw corrupt(NODE_FILE, 'no node id in it');
-      const ran = Array.isArray(stored.plugins) ? stored.plugins.filter((name) => typeof name === 'string') : [];
-      const lacking = ran.filter((name) => !kinds.includes(name));
-      if (lacking.length > 0) {
-        const [name] = lacking;
-        const message = `${NODE_FILE} says this storage runs with the ${name} plugin: open({ plugins }) with it from '@alexify/syncom/${name}'`;
-        throw typed('PLUGIN_MISSING', message);
+      // Every plugin it ran with is here (the first one missing is refused);
+      // the same set when it names as many.
+      const known = new Set(kinds);
+      const ran = Array.isArray(stored.plugins) ? stored.plugins : [];
+      let count = 0;
+      for (let i = 0; i < ran.length; i++) {
+        const name = ran[i];
+        if (typeof name !== 'string') continue;
+        if (!known.has(name)) {
+          const message = `${NODE_FILE} says this storage runs with the ${name} plugin: open({ plugins }) with it from '@alexify/syncom/${name}'`;
+          throw typed('PLUGIN_MISSING', message);
+        }
+        count++;
       }
-      const same = ran.length === kinds.length && ran.every((name) => kinds.includes(name));
+      const same = count === kinds.length;
       if (keyId === null || id === keyId) {
         this.#nodeId = id;
         if (same) return;
@@ -781,7 +803,9 @@ class Storage extends Emitter {
   // applied when it arrived (beforeApply said no, or it is held for a newer
   // schema) is left alone — that flag is what keeps it from landing here.
   async #replay(tail) {
-    const touched = await this.#fold(tail.filter((entry) => !entry.skipped));
+    const applied = [];
+    for (let i = 0; i < tail.length; i++) if (!tail[i].skipped) applied.push(tail[i]);
+    const touched = await this.#fold(applied);
     if (touched.size > 0) await this.#persistBatch(touched, tail[0].seq, tail[tail.length - 1].seq);
     this.#log.applied(tail[0].seq, tail[tail.length - 1].seq);
     return touched.size;
@@ -860,6 +884,9 @@ class Storage extends Emitter {
     if (!def || def.unique.length === 0) return [];
     const view = await this.#view(id, entry);
     const conflicts = this.#catalog.uniqueConflicts(def.name, id, view);
+    // Each (holder, key) once.
+    const seen = new Set();
+    for (let i = 0; i < conflicts.length; i++) seen.add(`${conflicts[i].other}\0${conflicts[i].fields.join(',')}`);
     // The records in flight are not in the catalog yet: their newest entries
     // are checked by hand.
     for (const [other, stack] of this.#inflight) {
@@ -870,9 +897,10 @@ class Storage extends Emitter {
       for (const key of def.unique) {
         const mine = this.#catalog.uniqueKey(view, key);
         if (mine === null || mine !== this.#catalog.uniqueKey(theirs, key)) continue;
-        if (!conflicts.some((c) => c.other === other && c.fields.join(',') === key.join(','))) {
-          conflicts.push({ fields: [...key], other });
-        }
+        const pair = `${other}\0${key.join(',')}`;
+        if (seen.has(pair)) continue;
+        seen.add(pair);
+        conflicts.push({ fields: [...key], other });
       }
     }
     return conflicts;
@@ -932,7 +960,10 @@ class Storage extends Emitter {
 
   /** The names of the kind plugins among them — what hello tells a peer this node can hold. */
   get kinds() {
-    return this.#plugins.kinds.map((mod) => mod.name);
+    const mods = this.#plugins.kinds;
+    const names = [];
+    for (let i = 0; i < mods.length; i++) names.push(mods[i].name);
+    return names;
   }
 
   // The registry itself, for the subpaths that fold patches or open a fork.
@@ -984,7 +1015,8 @@ class Storage extends Emitter {
    */
   stats() {
     let pinned = 0;
-    for (const id of Array.from(this.#records.keys())) if (this.#live(id) !== undefined) pinned++;
+    // #live deletes the slot it reads when its Record is gone: safe mid-walk.
+    for (const id of this.#records.keys()) if (this.#live(id) !== undefined) pinned++;
     const log = this.#log;
     return {
       closed: this.#closed,
@@ -1032,8 +1064,9 @@ class Storage extends Emitter {
   #settle(id, position) {
     const stack = this.#inflight.get(id);
     if (stack === undefined) return;
-    const i = stack.findIndex((held) => held.position === position);
-    if (i === -1) return;
+    let i = 0;
+    while (i < stack.length && stack[i].position !== position) i++;
+    if (i === stack.length) return;
     stack.splice(i, 1);
     this.#inflightCount--;
     if (stack.length === 0) this.#inflight.delete(id);
@@ -1184,7 +1217,8 @@ class Storage extends Emitter {
 
   #settleDeferred(id, toSeq) {
     const slot = this.#deferred.get(id);
-    if (slot === undefined || !slot.positions.every((position) => position <= toSeq)) return;
+    if (slot === undefined) return;
+    for (let i = 0; i < slot.positions.length; i++) if (!(slot.positions[i] <= toSeq)) return;
     this.#deferred.delete(id);
     for (const position of slot.positions) this.#log.applied(position);
   }
@@ -1636,9 +1670,17 @@ class Storage extends Emitter {
   }
 
   async #repair(id) {
-    const entries = this.#log.entriesOf(id).filter((entry) => appliedHere(entry, this.#version));
-    const whole = ({ op, scrubbed }) => op.type === 'purge' || (!scrubbed && WHOLE.has(op.type));
-    const start = entries.findIndex(whole);
+    // The entries applied here, and the first whole-record op among them.
+    const retained = this.#log.entriesOf(id);
+    const entries = [];
+    let start = -1;
+    for (let i = 0; i < retained.length; i++) {
+      const held = retained[i];
+      if (!appliedHere(held, this.#version)) continue;
+      const { type } = held.op;
+      if (start === -1 && (type === 'purge' || (!held.scrubbed && WHOLE.has(type)))) start = entries.length;
+      entries.push(held);
+    }
     if (start === -1) {
       const message = `Record ${id} cannot be rebuilt: the log holds no whole-record op for it`;
       throw new SyncomError('UNRECOVERABLE', message, { id });
@@ -1731,7 +1773,11 @@ class Storage extends Emitter {
     }
     for (const [id, list] of byId) {
       for (const { path, listener } of [...this.#observers.get(id)]) {
-        const mine = path === null ? list : list.filter((change) => touches(change, path));
+        let mine = list;
+        if (path !== null) {
+          mine = [];
+          for (let i = 0; i < list.length; i++) if (touches(list[i], path)) mine.push(list[i]);
+        }
         if (mine.length === 0) continue;
         try {
           const out = listener(mine, event);
@@ -1753,8 +1799,10 @@ class Storage extends Emitter {
   // without the read hooks (a hook that writes would wait for the queue).
   #transaction(tx) {
     const api = {};
-    for (const [name, method] of Object.entries({ ...F, ...this.#plugins.methods })) {
-      api[name] = (...args) => method(tx, ...args);
+    const methods = this.#txMethods;
+    for (let i = 0; i < methods.length; i++) {
+      const method = methods[i][1];
+      api[methods[i][0]] = (...args) => method(tx, ...args);
     }
     const current = async (id) => {
       if (!isRecordId(id)) throw invalidId(id);

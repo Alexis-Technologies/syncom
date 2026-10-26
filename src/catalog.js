@@ -43,11 +43,24 @@ const valueOf = (data, path) => {
 // `{ b, a }` are equal to the query's predicate, so they share a key. A
 // prototype-less copy, so a `__proto__` field stays a field.
 const canonical = (value) => {
-  if (Array.isArray(value)) return value.map(canonical);
+  if (Array.isArray(value)) {
+    const out = [];
+    for (let i = 0; i < value.length; i++) out.push(canonical(value[i]));
+    return out;
+  }
   if (!isObject(value)) return value;
   const out = Object.create(null);
   for (const key of Object.keys(value).sort()) out[key] = canonical(value[key]);
   return out;
+};
+
+// What `result` and `found` both hold, in `result`'s order (the `$text`
+// ranking rides on it); `found` itself when there is no result yet.
+const meet = (result, found) => {
+  if (result === null) return found;
+  const next = new Set();
+  for (const id of result) if (found.has(id)) next.add(id);
+  return next;
 };
 
 // Arrays and objects are keyed as values; an array is posted under each of
@@ -210,10 +223,18 @@ class Catalog {
     const def = row.type === null ? undefined : this.#defs.get(row.type);
     if (!def) return;
     let eq = this.#eq.get(row.type);
-    if (!eq) this.#eq.set(row.type, (eq = new Map(def.fields.map((field) => [field, new Map()]))));
+    if (!eq) {
+      eq = new Map();
+      for (let i = 0; i < def.fields.length; i++) eq.set(def.fields[i], new Map());
+      this.#eq.set(row.type, eq);
+    }
     for (const field of Object.keys(row.fields)) post(eq.get(field), row.fields[field], id, add);
     let unique = this.#unique.get(row.type);
-    if (!unique) this.#unique.set(row.type, (unique = new Map(def.unique.map((key) => [key.join(','), new Map()]))));
+    if (!unique) {
+      unique = new Map();
+      for (let i = 0; i < def.unique.length; i++) unique.set(def.unique[i].join(','), new Map());
+      this.#unique.set(row.type, unique);
+    }
     for (const key of def.unique) {
       const value = this.#uniqueKey(row.fields, key);
       if (value !== null) add(unique.get(key.join(',')), value, id);
@@ -342,16 +363,13 @@ class Catalog {
 
   #narrow(eq, query, seed = null) {
     let result = seed;
-    const meet = (found) => {
-      result = result === null ? found : new Set([...result].filter((id) => found.has(id)));
-    };
     for (const key of Object.keys(query)) {
       const condition = query[key];
       if (key === '$and') {
         if (!Array.isArray(condition)) continue;
         for (const sub of condition) {
           const found = isObject(sub) && !Array.isArray(sub) ? this.#narrow(eq, sub) : null;
-          if (found !== null) meet(found);
+          if (found !== null) result = meet(result, found);
         }
       } else if (key === '$or') {
         // One branch that cannot narrow is the whole collection.
@@ -366,7 +384,7 @@ class Catalog {
           }
           for (const id of found) union.add(id);
         }
-        if (!whole) meet(union);
+        if (!whole) result = meet(result, union);
       } else if (eq.has(key)) {
         let values;
         if (!isObject(condition) || Array.isArray(condition)) values = [condition];
@@ -376,7 +394,7 @@ class Catalog {
         const posting = eq.get(key);
         const found = new Set();
         for (const value of values) for (const id of posting.get(keyOf(value)) ?? []) found.add(id);
-        meet(found);
+        result = meet(result, found);
       }
       if (result !== null && result.size === 0) break;
     }

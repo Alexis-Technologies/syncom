@@ -47,7 +47,12 @@ const floorOf = (meta, field) => {
 const compareVectors = (a = {}, b = {}) => {
   let ahead = false;
   let behind = false;
-  for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+  // Every key of `a`, then the keys of `b` that `a` lacks.
+  const keysA = Object.keys(a);
+  const keysB = Object.keys(b);
+  for (let i = 0; i < keysA.length + keysB.length; i++) {
+    const key = i < keysA.length ? keysA[i] : keysB[i - keysA.length];
+    if (i >= keysA.length && Object.hasOwn(a, key)) continue;
     const x = a[key] ?? 0;
     const y = b[key] ?? 0;
     if (x > y) ahead = true;

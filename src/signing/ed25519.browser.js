@@ -13,12 +13,16 @@ const ED25519 = { name: 'Ed25519' };
 // An Ed25519 SPKI is a fixed 12-byte header and the 32-byte key.
 const SPKI_HEADER_BYTES = 12;
 
+const HEX = [];
+for (let i = 0; i < 256; i++) HEX.push(i.toString(16).padStart(2, '0'));
+
 const calculateHash = async (data) => {
   const block = JSON.stringify(data);
   const dataBuffer = new TextEncoder().encode(block);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', dataBuffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+  const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', dataBuffer));
+  let hex = '';
+  for (let i = 0; i < hash.length; i++) hex += HEX[hash[i]];
+  return hex;
 };
 
 // The signing key is imported once per PEM and kept, like the verifiers.

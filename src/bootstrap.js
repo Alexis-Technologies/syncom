@@ -134,7 +134,10 @@ const mergeOne = async (batch, record) => {
   // A record the snapshot carries as purged: what this node held of it —
   // a peer's ops taken before the purge — is scrubbed once the batch is durable.
   if (entry.meta.purged) (batch.purged ??= new Set()).add(id);
-  batch.deltas.set(id, { ...(batch.deltas.get(id) ?? {}), ...delta });
+  // The batch's own object, joined in place (a path is never `__proto__`).
+  let joined = batch.deltas.get(id);
+  if (joined === undefined) batch.deltas.set(id, (joined = {}));
+  Object.assign(joined, delta);
   batch.pending.push({ ctx, op, started, changes });
 };
 

@@ -42,10 +42,20 @@ const trigrams = (text) => {
   return grams;
 };
 
-// Trigram → how many times, over one text.
-const countOf = (grams) => {
+// Trigram → how many times, over one text: the walk of `trigrams`, counted
+// as it goes.
+const countOf = (text) => {
   const counts = new Map();
-  for (let i = 0; i < grams.length; i++) counts.set(grams[i], (counts.get(grams[i]) ?? 0) + 1);
+  const words = normalize(text).split(' ');
+  for (let w = 0; w < words.length; w++) {
+    const word = words[w];
+    if (word.length === 0) continue;
+    const padded = ` ${word} `;
+    for (let i = 0; i + 3 <= padded.length; i++) {
+      const gram = padded.slice(i, i + 3);
+      counts.set(gram, (counts.get(gram) ?? 0) + 1);
+    }
+  }
   return counts;
 };
 
@@ -74,15 +84,18 @@ class TrigramIndex {
 
   put(id, text) {
     this.remove(id);
-    const grams = trigrams(text);
-    if (grams.length === 0) return;
-    const counts = countOf(grams);
+    const counts = countOf(text);
+    if (counts.size === 0) return;
+    const grams = [];
+    let length = 0;
     for (const entry of counts) {
       let ids = this.#postings.get(entry[0]);
       if (!ids) this.#postings.set(entry[0], (ids = new Map()));
       ids.set(id, entry[1]);
+      grams.push(entry[0]);
+      length += entry[1];
     }
-    this.#docs.set(id, { grams: [...counts.keys()], length: grams.length });
+    this.#docs.set(id, { grams, length });
   }
 
   remove(id) {
@@ -97,7 +110,7 @@ class TrigramIndex {
   }
 
   query(text) {
-    const counts = countOf(trigrams(text));
+    const counts = countOf(text);
     const hits = new Map();
     const total = this.#docs.size;
     for (const entry of counts) {

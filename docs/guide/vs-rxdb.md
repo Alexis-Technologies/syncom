@@ -178,7 +178,7 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr><td>TypeScript types</td><td>✅ hand-written <code>.d.ts</code>, tsd-tested; a collection's records typed from its Standard Schema or <code>Schema&lt;Shapes&gt;</code></td><td>✅ generated from the source; document type inferred from the schema</td></tr>
 <tr><td>Browser bundle, minimal store</td><td>43.5 KB min+gzip the core (browser); 97.4 KB <code>@alexify/syncom/all</code>, everything</td><td>80.4 KB min+gzip: <code>createRxDatabase</code> with Dexie; 44.9 KB with localStorage</td></tr>
 <tr><td>Browser bundle with sync</td><td>53.6 KB min+gzip: the core, the sync plugin and the wrpc link adapter</td><td>90.1 KB min+gzip with Dexie and <code>replicateRxCollection</code></td></tr>
-<tr><td>Size budget in CI</td><td>✅ <code>pnpm size</code> fails CI when any entry passes its budget (the core 52 KB, <code>/all</code> 98 KB, each subpath its own)</td><td>⚠️ CI prints a webpack build size; no limit in 17.6.0</td></tr>
+<tr><td>Size budget in CI</td><td>✅ <code>pnpm size</code> fails CI when any entry passes its budget (the core 52 KB, <code>/all</code> 101 KB, each subpath its own)</td><td>⚠️ CI prints a webpack build size; no limit in 17.6.0</td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Runtimes</strong></td></tr>
 <tr><td>Node.js</td><td>✅ ≥22; persists with <code>node:fs</code>; CI on Node 22 and 24</td><td>⚠️ ≥20; free disk persistence only via MongoDB or FoundationDB servers, or the capped SQLite trial<sup>4</sup></td></tr>
 <tr><td>Deno</td><td>❌ not tested; <code>engines</code> names Node.js only</td><td>✅ <code>rxdb/plugins/storage-denokv</code>; CI runs the Dexie and DenoKV suites on Deno 2.6.5</td></tr>

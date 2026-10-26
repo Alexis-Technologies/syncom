@@ -67,8 +67,13 @@ const normalizeTree = (raw) => {
       list.push([ts, origin, parent, fi]);
     }
     list.sort(byStamp);
-    const unique = list.filter((move, i) => i === 0 || byStamp(move, list[i - 1]) !== 0);
-    if (unique.length > 0) tree.moves[node] = unique;
+    // A stamp seen twice is one move: the list compacted in place.
+    let kept = 0;
+    for (let i = 0; i < list.length; i++) {
+      if (i === 0 || byStamp(list[i], list[i - 1]) !== 0) list[kept++] = list[i];
+    }
+    list.length = kept;
+    if (kept > 0) tree.moves[node] = list;
   }
   if (Object.keys(tree.moves).length === 0) return null;
   tree.ts = stampsMax(tree);
@@ -76,6 +81,20 @@ const normalizeTree = (raw) => {
 };
 
 const cloneTree = (tree) => ({ k: 'tree', ts: tree.ts, moves: { ...tree.moves } });
+
+// The first of a node's moves (in stamp order, as every list is kept) not
+// older than the stamp `[ts, origin]`: a binary search.
+const firstFrom = (moves, ts, origin) => {
+  let lo = 0;
+  let hi = moves.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    const m = moves[mid];
+    if (m[0] < ts || (m[0] === ts && m[1] < origin)) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+};
 
 // A `tree` op: one more move of the node, kept in stamp order; the same
 // stamp twice changes nothing.
@@ -87,9 +106,14 @@ const applyTreeMove = (tree, stamp, payload) => {
   }
   const move = [stamp[0], stamp[1], parent, fi];
   const held = own(tree.moves, node) ?? [];
-  if (held.some((m) => byStamp(m, move) === 0)) return { tree, changed: false, reason: null };
+  const at = firstFrom(held, move[0], move[1]);
+  if (at < held.length && byStamp(held[at], move) === 0) return { tree, changed: false, reason: null };
+  const moves = [];
+  for (let i = 0; i < at; i++) moves.push(held[i]);
+  moves.push(move);
+  for (let i = at; i < held.length; i++) moves.push(held[i]);
   const next = cloneTree(tree);
-  next.moves[node] = [...held, move].sort(byStamp);
+  next.moves[node] = moves;
   next.ts = Math.max(next.ts, stamp[0]);
   return { tree: next, changed: true, reason: null };
 };
@@ -99,11 +123,12 @@ const pruneTree = (tree, base) => {
   if (base === null) return tree;
   let next = null;
   for (const node of Object.keys(tree.moves)) {
-    const kept = tree.moves[node].filter((move) => compareClock([move[0], move[1]], base) >= 0);
-    if (kept.length === tree.moves[node].length) continue;
+    const moves = tree.moves[node];
+    const first = firstFrom(moves, base[0], base[1]);
+    if (first === 0) continue;
     next ??= cloneTree(tree);
-    if (kept.length === 0) delete next.moves[node];
-    else next.moves[node] = kept;
+    if (first === moves.length) delete next.moves[node];
+    else next.moves[node] = moves.slice(first);
   }
   const out = next ?? tree;
   if (Object.keys(out.moves).length === 0) return null;
@@ -121,8 +146,22 @@ const joinTrees = (a, b) => {
       out.moves[node] = b.moves[node];
       continue;
     }
-    const all = [...mine, ...b.moves[node]].sort(byStamp);
-    out.moves[node] = all.filter((move, i) => i === 0 || byStamp(move, all[i - 1]) !== 0);
+    // Both lists in stamp order, merged; a stamp both hold is kept once, as mine.
+    const theirs = b.moves[node];
+    const all = [];
+    let i = 0;
+    let j = 0;
+    while (i < mine.length || j < theirs.length) {
+      let move;
+      if (j >= theirs.length) move = mine[i++];
+      else if (i >= mine.length) move = theirs[j++];
+      else {
+        const order = byStamp(mine[i], theirs[j]);
+        move = order <= 0 ? mine[i++] : theirs[j++];
+      }
+      if (all.length === 0 || byStamp(move, all[all.length - 1]) !== 0) all.push(move);
+    }
+    out.moves[node] = all;
   }
   out.ts = stampsMax(out);
   return out;
@@ -191,8 +230,13 @@ const childrenOf = (tree) => {
 // an unknown parent or below the last level is not there.
 const renderTree = (tree) => {
   const { children } = childrenOf(tree);
-  const roots = (children.get(null) ?? []).map((id) => ({ id, children: [] }));
-  const stack = roots.map((node) => [node, 1]);
+  const ids = children.get(null) ?? [];
+  const roots = [];
+  const stack = [];
+  for (let i = 0; i < ids.length; i++) {
+    roots.push({ id: ids[i], children: [] });
+    stack.push([roots[i], 1]);
+  }
   while (stack.length > 0) {
     const [node, depth] = stack.pop();
     if (depth >= MAX_DEPTH) continue;
@@ -229,7 +273,10 @@ const subtree = (tree, node, folded = childrenOf(tree)) => {
 // that names a sibling to land after or before.
 const siblings = (tree, parent, folded = childrenOf(tree)) => {
   const { children, placeOf } = folded;
-  return (children.get(parent ?? null) ?? []).map((id) => ({ id, fi: placeOf.get(id)[0] }));
+  const ids = children.get(parent ?? null) ?? [];
+  const out = [];
+  for (let i = 0; i < ids.length; i++) out.push({ id: ids[i], fi: placeOf.get(ids[i])[0] });
+  return out;
 };
 
 // The level `node` sits at in the fold — a root is 1, a node under a parent

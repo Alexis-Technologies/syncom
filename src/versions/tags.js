@@ -100,7 +100,9 @@ class Tags {
 
   /** The tags, oldest first — copies. */
   list() {
-    return this.#tags.map(info);
+    const tags = [];
+    for (let i = 0; i < this.#tags.length; i++) tags.push(info(this.#tags[i]));
+    return tags;
   }
 
   has(name) {
@@ -290,7 +292,7 @@ class Tags {
   }
 
   async #save() {
-    const text = JSON.stringify({ format: FORMAT, tags: this.#tags.map(info) });
+    const text = JSON.stringify({ format: FORMAT, tags: this.list() });
     await this.#fsi.write(this.#path, FILE, text);
   }
 

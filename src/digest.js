@@ -6,7 +6,8 @@
 // Node.js 20 and every browser), so the core needs no crypto half: the
 // signing and sealing of records are plugins. Async on both. No requires.
 
-const HEX = Array.from({ length: 256 }, (_, i) => i.toString(16).padStart(2, '0'));
+const HEX = [];
+for (let i = 0; i < 256; i++) HEX.push(i.toString(16).padStart(2, '0'));
 
 const sha256 = async (data) => {
   const bytes = new TextEncoder().encode(JSON.stringify(data));

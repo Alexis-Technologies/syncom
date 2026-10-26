@@ -40,12 +40,20 @@ const detail = (meta, field, kind) => {
   if (kind === 'counter') return { sums: asJson(meta.counters[field]) };
   if (kind === 'set') {
     const slots = meta.sets[field];
+    const elements = Object.keys(slots);
     let live = 0;
-    for (const element of Object.keys(slots)) {
+    for (const element of elements) {
       const origins = slots[element];
-      if (Object.keys(origins).some((origin) => origins[origin][0] > origins[origin][1])) live++;
+      const keys = Object.keys(origins);
+      for (let i = 0; i < keys.length; i++) {
+        const slot = origins[keys[i]];
+        if (slot[0] > slot[1]) {
+          live++;
+          break;
+        }
+      }
     }
-    return { elements: Object.keys(slots).length, live };
+    return { elements: elements.length, live };
   }
   const block = meta.blocks[field];
   const out = { k: block.k, ts: block.ts };
@@ -76,9 +84,12 @@ const inspect = async (storage, id) => {
   if (!isStorage(storage)) throw new TypeError('inspect() takes a storage');
   if (!isRecordId(id)) throw invalidId(id);
   const { log } = storage;
-  const entries = log.entriesOf(id).map((entry) => {
+  const logged = log.entriesOf(id);
+  const entries = [];
+  for (let i = 0; i < logged.length; i++) {
+    const entry = logged[i];
     const { op } = entry;
-    return {
+    entries.push({
       seq: entry.seq,
       eventId: log.formatId(entry.seq),
       type: op.type,
@@ -92,8 +103,8 @@ const inspect = async (storage, id) => {
       signed: op.sig !== undefined,
       skipped: entry.skipped === true,
       scrubbed: entry.scrubbed === true,
-    };
-  });
+    });
+  }
   const entry = await storage[SOURCE].entry(id);
   const out = {
     id,
@@ -119,13 +130,12 @@ const inspect = async (storage, id) => {
   out.purged = meta.purged ?? null;
   out.v = meta.v ?? null;
   const shown = out.alive ? decompose(out.reading, entry, plugins) : {};
-  const names = new Set([
-    ...Object.keys(entry.data),
-    ...Object.keys(meta.clock),
-    ...Object.keys(meta.counters),
-    ...Object.keys(meta.sets),
-    ...Object.keys(meta.blocks),
-  ]);
+  const names = new Set();
+  const maps = [entry.data, meta.clock, meta.counters, meta.sets, meta.blocks];
+  for (let i = 0; i < maps.length; i++) {
+    const keys = Object.keys(maps[i]);
+    for (let j = 0; j < keys.length; j++) names.add(keys[j]);
+  }
   for (const field of [...names].sort()) {
     const kind = kindOf(meta, field, plugins);
     out.fields.push({ field, kind, reachable: Object.hasOwn(shown, field), ...detail(meta, field, kind) });
@@ -150,7 +160,11 @@ const anonymize = (value, { salt = '', keys = false } = {}) => {
   const walk = (item) => {
     if (typeof item === 'string') return hashed(item, salt);
     if (item === null || typeof item === 'number' || typeof item === 'boolean') return item;
-    if (Array.isArray(item)) return item.map(walk);
+    if (Array.isArray(item)) {
+      const out = [];
+      for (let i = 0; i < item.length; i++) out.push(walk(item[i]));
+      return out;
+    }
     if (isPlainObject(item)) {
       const out = {};
       for (const key of Object.keys(item)) out[keys ? hashed(key, salt) : key] = walk(item[key]);

@@ -37,9 +37,26 @@ const compare = (a, b) => {
 
 // Equality as a query means it: the value itself, or — for an array field
 // and a scalar — any of its elements.
-const matches = (actual, expected) =>
-  deepEqual(actual, expected) ||
-  (Array.isArray(actual) && !Array.isArray(expected) && actual.some((item) => deepEqual(item, expected)));
+const matches = (actual, expected) => {
+  if (deepEqual(actual, expected)) return true;
+  if (!Array.isArray(actual) || Array.isArray(expected)) return false;
+  for (let i = 0; i < actual.length; i++) if (deepEqual(actual[i], expected)) return true;
+  return false;
+};
+
+// The predicates together: every one of them, or any one.
+const allOf = (tests) => {
+  if (tests.length === 1) return tests[0];
+  return (value) => {
+    for (let i = 0; i < tests.length; i++) if (!tests[i](value)) return false;
+    return true;
+  };
+};
+
+const anyOf = (tests) => (value) => {
+  for (let i = 0; i < tests.length; i++) if (tests[i](value)) return true;
+  return false;
+};
 
 const comparison = (op, expected) => {
   const rank = rankOf(expected);
@@ -51,7 +68,11 @@ const comparison = (op, expected) => {
     if (op === '$lt') return value < expected;
     return value <= expected;
   };
-  return (value) => (Array.isArray(value) ? value.some(holds) : holds(value));
+  return (value) => {
+    if (!Array.isArray(value)) return holds(value);
+    for (let i = 0; i < value.length; i++) if (holds(value[i])) return true;
+    return false;
+  };
 };
 
 const regexOf = (expected, options) => {
@@ -69,17 +90,22 @@ const regexOf = (expected, options) => {
 };
 
 const compileField = (path, condition) => {
-  const operators = isObject(condition) ? Object.keys(condition).filter((key) => key.startsWith('$')) : [];
-  if (operators.length === 0) return (row) => matches(valueOf(row, path), condition);
+  if (!isObject(condition)) return (row) => matches(valueOf(row, path), condition);
   const tests = [];
   const options = typeof condition.$options === 'string' ? condition.$options : undefined;
-  for (const op of operators) {
+  let operators = 0;
+  for (const op of Object.keys(condition)) {
+    if (!op.startsWith('$')) continue;
+    operators++;
     const expected = condition[op];
     if (op === '$eq') tests.push((value) => matches(value, expected));
     else if (op === '$ne') tests.push((value) => !matches(value, expected));
     else if (op === '$in' || op === '$nin') {
       if (!Array.isArray(expected)) throw new TypeError(`select(): ${op} takes an array`);
-      const hit = (value) => expected.some((item) => matches(value, item));
+      const hit = (value) => {
+        for (let i = 0; i < expected.length; i++) if (matches(value, expected[i])) return true;
+        return false;
+      };
       tests.push(op === '$in' ? hit : (value) => !hit(value));
     } else if (op === '$gt' || op === '$gte' || op === '$lt' || op === '$lte') tests.push(comparison(op, expected));
     else if (op === '$exists') {
@@ -88,13 +114,16 @@ const compileField = (path, condition) => {
     } else if (op === '$regex') {
       const regex = regexOf(expected, options);
       const hit = (value) => typeof value === 'string' && regex.test(value);
-      tests.push((value) => (Array.isArray(value) ? value.some(hit) : hit(value)));
+      tests.push((value) => {
+        if (!Array.isArray(value)) return hit(value);
+        for (let i = 0; i < value.length; i++) if (hit(value[i])) return true;
+        return false;
+      });
     } else if (op !== '$options') throw new TypeError(`select(): unknown operator ${op}`);
   }
-  return (row) => {
-    const value = valueOf(row, path);
-    return tests.every((test) => test(value));
-  };
+  if (operators === 0) return (row) => matches(valueOf(row, path), condition);
+  const test = allOf(tests);
+  return (row) => test(valueOf(row, path));
 };
 
 // `$text` is a string, bounded like a pattern; it is the catalog's to
@@ -118,8 +147,9 @@ const compileQuery = (query = {}, nested = false) => {
     const value = query[key];
     if (key === '$and' || key === '$or') {
       if (!Array.isArray(value)) throw new TypeError(`select(): ${key} takes an array of queries`);
-      const subs = value.map((sub) => compileQuery(sub, true));
-      tests.push(key === '$and' ? (row) => subs.every((sub) => sub(row)) : (row) => subs.some((sub) => sub(row)));
+      const subs = [];
+      for (let i = 0; i < value.length; i++) subs.push(compileQuery(value[i], true));
+      tests.push(key === '$and' ? allOf(subs) : anyOf(subs));
     } else if (key === '$not') {
       const sub = compileQuery(value, true);
       tests.push((row) => !sub(row));
@@ -130,7 +160,7 @@ const compileQuery = (query = {}, nested = false) => {
     } else if (key.startsWith('$')) throw new TypeError(`select(): unknown operator ${key}`);
     else tests.push(compileField(key, value));
   }
-  return (row) => tests.every((test) => test(row));
+  return allOf(tests);
 };
 
 // The fields a query reads, dotted paths as given — what decides whether
@@ -262,9 +292,9 @@ class Cursor {
 
   /** The fields each row carries (plus `id`); a dotted field comes back under its dotted name. */
   projection(fields) {
-    if (!Array.isArray(fields) || !fields.every((field) => typeof field === 'string' && field !== '__proto__')) {
-      throw new TypeError('projection() takes an array of field names');
-    }
+    let valid = Array.isArray(fields);
+    for (let i = 0; valid && i < fields.length; i++) valid = typeof fields[i] === 'string' && fields[i] !== '__proto__';
+    if (!valid) throw new TypeError('projection() takes an array of field names');
     this.#projection = fields;
     return this;
   }
@@ -315,7 +345,9 @@ class Cursor {
     // scan reads sixteen.
     const batch = [];
     const read = async () => {
-      const records = await Promise.all(batch.map((id) => load(id)));
+      const pending = [];
+      for (let i = 0; i < batch.length; i++) pending.push(load(batch[i]));
+      const records = await Promise.all(pending);
       for (let i = 0; i < batch.length; i++) if (records[i] !== null) take({ id: batch[i], ...records[i] });
       batch.length = 0;
     };
@@ -345,10 +377,13 @@ class Cursor {
   // `limit` is the call's own: `one()` asks for one row without leaving a
   // limit on the cursor for the next `fetch()`.
   async #fetch(limit) {
-    let { rows, sorted } = await this.#matching(true, limit);
+    const { rows, sorted } = await this.#matching(true, limit);
     if (this.#order.length > 0 && !sorted) rows.sort(compareRows(this.#order));
-    if (this.#offset > 0 || limit !== Infinity) rows = rows.slice(this.#offset, this.#offset + limit);
-    return rows.map((row) => JSON.parse(JSON.stringify(this.#project(row))));
+    const start = this.#offset;
+    const end = Math.min(start + limit, rows.length);
+    const out = [];
+    for (let i = start; i < end; i++) out.push(JSON.parse(JSON.stringify(this.#project(rows[i]))));
+    return out;
   }
 
   async count() {

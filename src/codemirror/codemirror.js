@@ -294,6 +294,7 @@ const createCodeMirror = (storage, id, path, cm, options = {}) => {
         for (const effect of tr.effects) if (effect.is(set)) return effect.value;
         // This editor's selection moved, or the text did: publish once the queue is through.
         if (tr.selection !== undefined || tr.docChanged) queueMicrotask(() => void publish());
+        // oxlint-disable-next-line no-restricted-properties -- RangeSet.map (CodeMirror), not an Array
         return tr.docChanged ? value.map(tr.changes) : value;
       },
       provide: (self) => EditorView.decorations.from(self),

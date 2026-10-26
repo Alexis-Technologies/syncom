@@ -227,3 +227,9 @@ test('diff and merge take own keys only: __proto__ is never a field', () => {
   assert.deepStrictEqual(changed, { a: 1 });
   assert.strictEqual({}.polluted, undefined);
 });
+
+test('merge reads only the target’s own keys: a field named like a prototype member is a field', () => {
+  assert.deepStrictEqual(syncom.merge({}, { constructor: [2] }), { constructor: [2] });
+  assert.deepStrictEqual(syncom.merge({}, { toString: { a: 1 } }), { toString: { a: 1 } });
+  assert.deepStrictEqual(syncom.merge({ constructor: [1] }, { constructor: [2] }), { constructor: [1, 2] });
+});

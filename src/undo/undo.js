@@ -68,11 +68,21 @@ const typesAround = (conflicts, field) => {
 // only what is not an add or a remove — those commute with the patch.
 const conflicting = (patch, types) => {
   if (types === undefined) return false;
-  if (patch.action === 'inc') return [...types].some((type) => type !== 'inc');
+  if (patch.action === 'inc') {
+    for (const type of types) if (type !== 'inc') return true;
+    return false;
+  }
   if (patch.action === 'add' || (patch.action === 'remove' && patch.own === true)) {
-    return [...types].some((type) => type !== 'add' && type !== 'remove');
+    for (const type of types) if (type !== 'add' && type !== 'remove') return true;
+    return false;
   }
   return true;
+};
+
+// Whether a field is one of the tracked `paths`, or hangs under one.
+const tracked = (field, paths) => {
+  for (let i = 0; i < paths.length; i++) if (field === paths[i] || under(field, paths[i])) return true;
+  return false;
 };
 
 // The patches that take a record of a step back: from how the step left it
@@ -80,27 +90,48 @@ const conflicting = (patch, types) => {
 // reset, when no op removes it); loose, a counter, a set, a list, a text or
 // a tree it created is emptied instead — what to fall back on when the
 // reset would run into a peer's change. A set element goes as this node's
-// adds alone (`own`), so a concurrent add of it elsewhere survives.
-const invert = ({ before, after, kinds, embeds }, exact, plugins) => {
+// adds alone (`own`), so a concurrent add of it elsewhere survives. Under
+// `paths`, the tracked fields alone: a whole-record way back is none of
+// the manager's business.
+const invert = ({ before, after, kinds, embeds }, exact, plugins, paths) => {
   const context = { from: { embeds: embeds?.after ?? null }, to: { embeds: embeds?.before ?? null } };
-  return diffViews(after, kindsIn(after, kinds), before, kindsIn(before, kinds), { exact, plugins, context }).map(
-    (patch) => (patch.action === 'remove' ? { ...patch, own: true } : patch),
-  );
+  const patches = diffViews(after, kindsIn(after, kinds), before, kindsIn(before, kinds), { exact, plugins, context });
+  const out = [];
+  for (let i = 0; i < patches.length; i++) {
+    const patch = patches[i];
+    if (paths !== null && (patch.field === undefined || !tracked(patch.field, paths))) continue;
+    out.push(patch.action === 'remove' ? { ...patch, own: true } : patch);
+  }
+  return out;
 };
 
-const isWhole = (patches) => patches.some((patch) => patch.action === 'write' || patch.action === 'delete');
-
-// Whether a field is one of the tracked `paths`, or hangs under one.
-const tracked = (field, paths) => paths.some((path) => field === path || under(field, path));
+const isWhole = (patches) => {
+  for (let i = 0; i < patches.length; i++) {
+    if (patches[i].action === 'write' || patches[i].action === 'delete') return true;
+  }
+  return false;
+};
 
 // Whether a commit's changes reach a tracked path: the field, what hangs
 // under it, or a prefix of it; a whole-record change reaches none.
-const reaches = (changes, paths) =>
-  changes.some(
-    (change) =>
-      change.field !== undefined &&
-      paths.some((path) => change.field === path || under(change.field, path) || under(path, change.field)),
-  );
+const reaches = (changes, paths) => {
+  for (let i = 0; i < changes.length; i++) {
+    const { field } = changes[i];
+    if (field === undefined) continue;
+    for (let j = 0; j < paths.length; j++) {
+      const path = paths[j];
+      if (field === path || under(field, path) || under(path, field)) return true;
+    }
+  }
+  return false;
+};
+
+// A non-empty list of strings.
+const isPathList = (paths) => {
+  if (!Array.isArray(paths) || paths.length === 0) return false;
+  for (let i = 0; i < paths.length; i++) if (typeof paths[i] !== 'string') return false;
+  return true;
+};
 
 // What a step shows of itself: its meta — the application's object, the
 // same one every time, so what a `push` listener puts there a `pop`
@@ -208,7 +239,9 @@ class UndoManager extends Emitter {
     this.#record(step, event);
     if (this.#redo.length > 0) this.#redo = [];
     this.#refreshOldest();
-    this.emit('push', { direction: 'undo', records: step.records.size, step: stepView(step) });
+    if (this.listenerCount('push') > 0) {
+      this.emit('push', { direction: 'undo', records: step.records.size, step: stepView(step) });
+    }
     this.emit('change');
   }
 
@@ -253,10 +286,13 @@ class UndoManager extends Emitter {
   // A purged record is gone for good: nothing of it stays here.
   #forget(id) {
     for (const stack of [this.#undo, this.#redo]) {
-      for (const step of stack) step.records.delete(id);
-      const kept = stack.filter((step) => step.records.size > 0);
-      stack.length = 0;
-      stack.push(...kept);
+      let kept = 0;
+      for (let i = 0; i < stack.length; i++) {
+        const step = stack[i];
+        step.records.delete(id);
+        if (step.records.size > 0) stack[kept++] = step;
+      }
+      stack.length = kept;
     }
     this.#refreshOldest();
     this.emit('change');
@@ -312,11 +348,7 @@ class UndoManager extends Emitter {
         current = id;
         const conflicts = this.#conflicts(step, id);
         const plugins = this.#storage[PLUGINS];
-        // Under `paths`, the fields the manager is of alone: a whole-record
-        // way back is none of its business.
-        const scoped = (list) =>
-          paths === null ? list : list.filter((patch) => patch.field !== undefined && tracked(patch.field, paths));
-        const patches = scoped(invert(record, true, plugins));
+        const patches = invert(record, true, plugins, paths);
         let kept = patches;
         let skipped = 0;
         if (!force && (conflicts === null || (isWhole(patches) && conflicts.size > 0))) {
@@ -329,7 +361,14 @@ class UndoManager extends Emitter {
           // the field; where something did, the loose one — a counter taken
           // down, this node's adds removed — when it commutes with what the
           // others did, else the field is left alone.
-          const loose = scoped(invert(record, false, plugins));
+          const loose = invert(record, false, plugins, paths);
+          const byField = new Map();
+          for (let i = 0; i < loose.length; i++) {
+            const alt = loose[i];
+            const list = byField.get(alt.field);
+            if (list === undefined) byField.set(alt.field, [alt]);
+            else list.push(alt);
+          }
           kept = [];
           for (const patch of patches) {
             const types = typesAround(conflicts, patch.field);
@@ -337,9 +376,16 @@ class UndoManager extends Emitter {
               kept.push(patch);
               continue;
             }
-            const alternatives = loose.filter((alt) => alt.field === patch.field && !conflicting(alt, types));
-            if (alternatives.length === 0) skipped++;
-            else kept.push(...alternatives);
+            const alternatives = byField.get(patch.field);
+            let taken = 0;
+            if (alternatives !== undefined) {
+              for (let i = 0; i < alternatives.length; i++) {
+                if (conflicting(alternatives[i], types)) continue;
+                kept.push(alternatives[i]);
+                taken++;
+              }
+            }
+            if (taken === 0) skipped++;
           }
         }
         result.skipped += skipped;
@@ -378,7 +424,7 @@ class UndoManager extends Emitter {
     }
     if (collected.records.size > 0) to.push(collected);
     this.#refreshOldest();
-    this.emit('pop', { direction, ...result, step: stepView(step) });
+    if (this.listenerCount('pop') > 0) this.emit('pop', { direction, ...result, step: stepView(step) });
     this.emit('change');
     return result;
   }
@@ -432,7 +478,11 @@ class UndoManager extends Emitter {
 
   /** The steps each way, newest last: `{ id, meta, records, at, source, message, txn }` per step. */
   get steps() {
-    return { undo: this.#undo.map(stepView), redo: this.#redo.map(stepView) };
+    const undo = [];
+    for (let i = 0; i < this.#undo.length; i++) undo.push(stepView(this.#undo[i]));
+    const redo = [];
+    for (let i = 0; i < this.#redo.length; i++) redo.push(stepView(this.#redo[i]));
+    return { undo, redo };
   }
 
   clear() {
@@ -480,12 +530,7 @@ const createUndo = (storage, options = {}) => {
   if (records !== null && typeof records !== 'function' && typeof records?.[Symbol.iterator] !== 'function') {
     throw new TypeError('createUndo(): records is a list of ids, or a predicate');
   }
-  if (
-    paths !== null &&
-    (!Array.isArray(paths) || paths.some((path) => typeof path !== 'string') || paths.length === 0)
-  ) {
-    throw new TypeError('createUndo(): paths is a list of field paths');
-  }
+  if (paths !== null && !isPathList(paths)) throw new TypeError('createUndo(): paths is a list of field paths');
   for (const [name, fn] of [
     ['onPush', onPush],
     ['onPop', onPop],

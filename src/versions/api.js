@@ -48,9 +48,16 @@ const applied = async (core, id) => {
   if (!isRecordId(id)) return { entries: [], purged: null, current: null };
   const current = await core.entries.load(id);
   if (current?.encrypted) throw sealed(id, '; it has no history');
-  const entries = core.log.entriesOf(id).filter((entry) => appliedHere(entry, core.version));
-  const purge = entries.find((entry) => entry.op.type === 'purge');
-  const purged = purge ? purge.seq : current?.meta?.purged ? 0 : null;
+  const logged = core.log.entriesOf(id);
+  const entries = [];
+  let purge = null;
+  for (let i = 0; i < logged.length; i++) {
+    const entry = logged[i];
+    if (!appliedHere(entry, core.version)) continue;
+    entries.push(entry);
+    if (purge === null && entry.op.type === 'purge') purge = entry;
+  }
+  const purged = purge !== null ? purge.seq : current?.meta?.purged ? 0 : null;
   return { entries, purged, current };
 };
 
@@ -77,15 +84,23 @@ const past = async (core, id, version) => {
     }
   }
   const { entries, purged, current } = await applied(core, id);
-  const inside = entries.filter((entry) => within(version, entry));
+  const inside = [];
+  let purgeInside = false;
+  let mergeAfter = false;
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    if (within(version, entry)) {
+      inside.push(entry);
+      if (entry.seq === purged) purgeInside = true;
+    }
+    if (version.kind === 'stamp' && entry.op.type === 'merge' && entry.op.ts > version.ts) mergeAfter = true;
+  }
   if (purged !== null) {
     // After the purge, nothing; before it, nothing readable.
-    if (purged === 0 || inside.some((entry) => entry.seq === purged)) return null;
+    if (purged === 0 || purgeInside) return null;
     throw gone(id, 'scrubbed');
   }
-  if (version.kind === 'stamp' && entries.some((entry) => entry.op.type === 'merge' && entry.op.ts > version.ts)) {
-    throw gone(id, 'merge');
-  }
+  if (mergeAfter) throw gone(id, 'merge');
   const droppedTs = log.droppedTs;
   if (inside.length === 0) {
     if (droppedTs === 0 || core.catalog.row(id) === null) return null;
@@ -342,7 +357,7 @@ const atVersion = (core, given) => {
   const retained = log.since(log.formatId(Math.max(0, log.floor - 1))) ?? [];
   const inside = [];
   const streams = new Map();
-  const adopted = {};
+  const adopted = new Map();
   for (const entry of retained) {
     if (entry.skipped) continue;
     const key = opKey(entry.op);
@@ -352,7 +367,7 @@ const atVersion = (core, given) => {
       stream.within = Math.max(stream.within, entry.op.seq);
       if (entry.op.type === 'advance') {
         for (const name of Object.keys(entry.op.vector)) {
-          adopted[name] = Math.max(adopted[name] ?? 0, entry.op.vector[name]);
+          adopted.set(name, Math.max(adopted.get(name) ?? 0, entry.op.vector[name]));
         }
       }
     } else stream.outside = true;
@@ -363,17 +378,23 @@ const atVersion = (core, given) => {
   // whole below the floor — all of it inside the version; one retained
   // only past the version was cut by compaction: what came before is gone.
   const vector = {};
-  for (const key of Object.keys(log.vector)) {
+  const held = log.vector;
+  for (const key of Object.keys(held)) {
     const stream = streams.get(key);
-    if (stream === undefined) vector[key] = log.vector[key];
+    if (stream === undefined) vector[key] = held[key];
     else if (stream.within > 0) vector[key] = stream.within;
     else if (log.floor > 1) throw gone(null, 'compacted');
   }
-  for (const key of Object.keys(adopted)) vector[key] = Math.max(vector[key] ?? 0, adopted[key]);
+  for (const [key, seq] of adopted) vector[key] = Math.max(vector[key] ?? 0, seq);
   const last = inside.length > 0 ? inside[inside.length - 1] : null;
   const eventId = version.kind === 'event' ? log.formatId(version.seq) : log.formatId(last === null ? 0 : last.seq);
   const ts = last === null ? 0 : last.op.ts;
-  const ids = [...new Set([...log.ids(), ...core.catalog.all()])].sort();
+  const known = new Set();
+  const logged = log.ids();
+  for (let i = 0; i < logged.length; i++) known.add(logged[i]);
+  const listed = core.catalog.all();
+  for (let i = 0; i < listed.length; i++) known.add(listed[i]);
+  const ids = [...known].sort();
   const entries = { load: async (id) => (await versionEntry(core, id, version)).entry };
   const paging = {
     catalog: { all: () => ids, row: () => null },
@@ -414,8 +435,11 @@ const versions = async (core, id, limit, cut) => {
   // lens and afterRead run for the versions handed out alone.
   let upto = steps.length;
   if (cut !== null) {
-    const found = steps.findIndex((step) => step.logged.seq >= cut.seq);
-    if (found !== -1) upto = found;
+    for (let i = 0; i < steps.length; i++) {
+      if (steps[i].logged.seq < cut.seq) continue;
+      upto = i;
+      break;
+    }
   }
   const first = Math.max(0, upto - limit);
   const shown = steps.slice(first, upto);

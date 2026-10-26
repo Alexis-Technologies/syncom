@@ -95,7 +95,9 @@ const createIdbFsi = ({ name = 'syncom', store = 'files', indexedDB = globalThis
     },
     async list(dir) {
       const keys = await run('readonly', (files) => files.index('dir').getAllKeys(dir));
-      return keys.map((key) => key[1]).sort();
+      const names = [];
+      for (let i = 0; i < keys.length; i++) names.push(keys[i][1]);
+      return names.sort();
     },
     async close() {
       if (opening === null) return;

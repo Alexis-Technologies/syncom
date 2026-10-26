@@ -310,10 +310,17 @@ const normalizeMeta = (meta, limits = null, dropped = null) => {
   const normalized = { clock, base, deleted: stampOf(meta.deleted), counters, sets, blocks, gone };
   // Fields are paths, at most MAX_PATHS of them: the first in sorted order stay.
   const fields = new Set();
-  for (const map of [clock, counters, sets, blocks, gone]) for (const field of Object.keys(map)) fields.add(field);
-  const kept = [...fields].filter(isPath).sort();
+  const kept = [];
+  for (const map of [clock, counters, sets, blocks, gone]) {
+    for (const field of Object.keys(map)) {
+      if (fields.has(field)) continue;
+      fields.add(field);
+      if (isPath(field)) kept.push(field);
+    }
+  }
   if (kept.length < fields.size || kept.length > MAX_PATHS) {
-    const allowed = new Set(kept.slice(0, MAX_PATHS));
+    kept.sort();
+    const allowed = new Set(kept.length > MAX_PATHS ? kept.slice(0, MAX_PATHS) : kept);
     for (const map of [clock, counters, sets, blocks, gone]) {
       for (const field of Object.keys(map)) if (!allowed.has(field)) delete map[field];
     }
@@ -685,12 +692,24 @@ const applySet = (entry, op, stamp, delta, rejected, plugins, changes) => {
   // A tag that moved is news to persist even when the array reads the same.
   entry.data[field] = liveElements(meta.sets[field]);
   delta[field] = entry.data[field];
-  // What the reading shows of it: the elements now in, the elements now out.
-  const keyOf = (element) => JSON.stringify(element);
-  const was = new Set(before.map(keyOf));
-  const is = new Set(entry.data[field].map(keyOf));
-  const added = entry.data[field].filter((element) => !was.has(keyOf(element)));
-  const removed = before.filter((element) => !is.has(keyOf(element)));
+  // What the reading shows of it: the elements now in, the elements now out
+  // — each element's text made once.
+  const now = entry.data[field];
+  const beforeKeys = [];
+  const was = new Set();
+  for (let i = 0; i < before.length; i++) {
+    beforeKeys.push(JSON.stringify(before[i]));
+    was.add(beforeKeys[i]);
+  }
+  const is = new Set();
+  const added = [];
+  for (let i = 0; i < now.length; i++) {
+    const key = JSON.stringify(now[i]);
+    is.add(key);
+    if (!was.has(key)) added.push(now[i]);
+  }
+  const removed = [];
+  for (let i = 0; i < before.length; i++) if (!is.has(beforeKeys[i])) removed.push(before[i]);
   if (added.length > 0) changes.push({ action: 'add', field, elements: asJson(added) });
   if (removed.length > 0) changes.push({ action: 'remove', field, elements: asJson(removed) });
   changes.covered.add(field);
@@ -1223,8 +1242,12 @@ const kindOf = (entry, field, plugins = null) => {
 const kindsOf = (entry, plugins = null) => {
   const kinds = {};
   if (!entry) return kinds;
-  for (const field of new Set([...Object.keys(entry.data), ...Object.keys(entry.meta.clock)])) {
-    kinds[field] = kindOf(entry, field, plugins);
+  const { data } = entry;
+  const fields = Object.keys(data);
+  for (let i = 0; i < fields.length; i++) kinds[fields[i]] = kindOf(entry, fields[i], plugins);
+  const clocked = Object.keys(entry.meta.clock);
+  for (let i = 0; i < clocked.length; i++) {
+    if (!Object.hasOwn(data, clocked[i])) kinds[clocked[i]] = kindOf(entry, clocked[i], plugins);
   }
   return kinds;
 };

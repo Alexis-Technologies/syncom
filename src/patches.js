@@ -55,15 +55,27 @@ const runOps = async (core, id, ops, { actor, source, message }) => {
     { actor, source, message },
   );
   if (done !== null) await done;
-  if (ops.some(([type]) => type === 'purge')) await core.scrub(id);
-  if (ops.some(([type]) => type === 'delete' || type === 'purge')) core.forget(id);
+  let purged = false;
+  let gone = false;
+  for (let i = 0; i < ops.length; i++) {
+    const type = ops[i][0];
+    if (type === 'purge') {
+      purged = true;
+      gone = true;
+      break;
+    }
+    if (type === 'delete') gone = true;
+  }
+  if (purged) await core.scrub(id);
+  if (gone) core.forget(id);
   return count;
 };
 
 const applyPatches = async (core, id, patches, { actor, source = null, message } = {}) => {
   if (!isRecordId(id)) throw invalidId(id);
   if (!Array.isArray(patches)) throw new TypeError('applyPatches() takes an array of patches');
-  const ops = patches.map((patch) => realize(patch, core.plugins));
+  const ops = [];
+  for (let i = 0; i < patches.length; i++) ops.push(realize(patches[i], core.plugins));
   const apply = () => runOps(core, id, ops, { actor, source, message });
   const { otel } = core;
   if (!otel.enabled) return core.run(apply);
@@ -104,7 +116,9 @@ const compact = async (core, id, { actor, source = null, message } = {}) => {
   // What a plugin lays after the field is made again (a text's marks).
   for (const field of Object.keys(kinds)) {
     const mod = plugins.byName[kinds[field]];
-    if (mod !== undefined) patches.push(...mod.compact(entry, field, kinds[field]));
+    if (mod === undefined) continue;
+    const laid = mod.compact(entry, field, kinds[field]);
+    for (let i = 0; i < laid.length; i++) patches.push(laid[i]);
   }
   // A list made again names its elements anew, so what hangs under them is
   // written once the new names are known: the patches go in rounds, by the
@@ -130,9 +144,12 @@ const compact = async (core, id, { actor, source = null, message } = {}) => {
   for (const patch of patches) (rounds[depthOf(patch.field)] ??= []).push(patch);
   const options = { actor, source, message };
   return core.run(async () => {
+    // [from, to] in the order found; read newest first.
     const renames = [];
     const rename = (field) => {
-      for (const [from, to] of renames) {
+      for (let i = renames.length - 1; i >= 0; i--) {
+        const from = renames[i][0];
+        const to = renames[i][1];
         if (field === from) return to;
         if (under(field, from)) return `${to}${field.slice(from.length)}`;
       }
@@ -141,15 +158,12 @@ const compact = async (core, id, { actor, source = null, message } = {}) => {
     let count = 0;
     for (const round of rounds) {
       if (round === undefined || round.length === 0) continue;
-      const renamed = round.map((patch) =>
-        patch.field === undefined ? patch : { ...patch, field: rename(patch.field) },
-      );
-      count += await runOps(
-        core,
-        id,
-        renamed.map((patch) => realize(patch, plugins)),
-        options,
-      );
+      const ops = [];
+      for (let i = 0; i < round.length; i++) {
+        const patch = round[i];
+        ops.push(realize(patch.field === undefined ? patch : { ...patch, field: rename(patch.field) }, plugins));
+      }
+      count += await runOps(core, id, ops, options);
       // The lists this round made again: their elements' new names, by position.
       const now = await core.current(id);
       for (const patch of round) {
@@ -159,7 +173,7 @@ const compact = async (core, id, { actor, source = null, message } = {}) => {
         const was = mod.members(entry, patch.field);
         const is = mod.members(now, at);
         for (let i = 0; i < was.length && i < is.length; i++) {
-          if (was[i] !== is[i]) renames.unshift([`${at}/${was[i]}`, `${at}/${is[i]}`]);
+          if (was[i] !== is[i]) renames.push([`${at}/${was[i]}`, `${at}/${is[i]}`]);
         }
       }
     }

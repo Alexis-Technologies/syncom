@@ -32,7 +32,10 @@ const builder = (kind) => {
       else if (typeof seg === 'number') typeof out[last] === 'number' ? (out[last] += seg) : out.push(seg);
       else if (typeof out[last] === 'number') out.push(isText(kind) ? seg : [...seg]);
       else if (isText(kind)) out[last] += seg;
-      else out[last].push(...seg);
+      else {
+        const held = out[last];
+        for (let i = 0; i < seg.length; i++) held.push(seg[i]);
+      }
     },
     done: () => out,
   };
@@ -53,11 +56,6 @@ const rleExpand = (rle) => {
     else for (let i = 0; i < seg.length; i++) out.push(seg[i]);
   }
   return out;
-};
-const rleCollapse = (kind, items) => {
-  const b = builder(kind);
-  for (const item of items) b.push(item === GAP ? 1 : isText(kind) ? item : [item]);
-  return b.done();
 };
 
 const rleAppend = (kind, rle, content) => {
@@ -92,21 +90,53 @@ const sameSeg = (a, b) =>
   typeof a === 'number' || typeof a === 'string'
     ? a === b
     : Array.isArray(b) && JSON.stringify(a) === JSON.stringify(b);
-const sameRle = (a, b) => a.length === b.length && a.every((seg, i) => sameSeg(seg, b[i]));
+const sameRle = (a, b) => {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (!sameSeg(a[i], b[i])) return false;
+  return true;
+};
+
+// The part of a piece from slot `from` on.
+const restOf = (seg, from) => (typeof seg === 'number' ? seg - from : seg.slice(from));
 
 // Two pictures of one run: the longer one's length, an element alive only
-// where both have it alive (a cut seen anywhere happened).
+// where both have it alive (a cut seen anywhere happened). Both are walked
+// piece by piece, never slot by slot: a gap of a million slots is one step.
 const rleMerge = (kind, a, b) => {
-  const x = rleExpand(a);
-  const y = rleExpand(b);
-  const n = Math.max(x.length, y.length);
-  const out = new Array(n);
-  for (let i = 0; i < n; i++) {
-    if (i >= x.length) out[i] = y[i];
-    else if (i >= y.length) out[i] = x[i];
-    else out[i] = x[i] === GAP || y[i] === GAP ? GAP : x[i];
+  const out = builder(kind);
+  let i = 0;
+  let j = 0;
+  // The slots of a[i] and b[j] already taken.
+  let x = 0;
+  let y = 0;
+  for (;;) {
+    while (i < a.length && x >= segLength(a[i])) {
+      i++;
+      x = 0;
+    }
+    while (j < b.length && y >= segLength(b[j])) {
+      j++;
+      y = 0;
+    }
+    if (i >= a.length) {
+      if (j >= b.length) break;
+      out.push(restOf(b[j], y));
+      y = segLength(b[j]);
+      continue;
+    }
+    if (j >= b.length) {
+      out.push(restOf(a[i], x));
+      x = segLength(a[i]);
+      continue;
+    }
+    const segA = a[i];
+    const segB = b[j];
+    const n = Math.min(segLength(segA) - x, segLength(segB) - y);
+    out.push(typeof segA === 'number' || typeof segB === 'number' ? n : segA.slice(x, x + n));
+    x += n;
+    y += n;
   }
-  return rleCollapse(kind, out);
+  return out.done();
 };
 
 // Whether a run's content is well-formed for its kind and within MAX_RUN;

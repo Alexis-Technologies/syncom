@@ -31,7 +31,12 @@ const registry = createPlugins(PLUGINS);
 const withAll = (given = []) => {
   if (!Array.isArray(given)) return given;
   const plugins = [...PLUGINS];
-  for (const plugin of given) if (!plugins.includes(plugin)) plugins.push(plugin);
+  const seen = new Set(PLUGINS);
+  for (const plugin of given) {
+    if (seen.has(plugin)) continue;
+    seen.add(plugin);
+    plugins.push(plugin);
+  }
   return plugins;
 };
 

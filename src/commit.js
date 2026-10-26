@@ -19,7 +19,7 @@ const { fieldName } = require('./args.js');
 const { traced, now } = require('./telemetry.js');
 const { GLOBAL_SCOPE } = require('./scope.js');
 const { isPlainObject, asJson, VALIDATED, MAX_MESSAGE, isRecordId, invalidId } = require('./shape.js');
-const { ancestorsOf, under } = require('./paths.js');
+const { ancestorsOf } = require('./paths.js');
 const { compose, composeData } = require('./compose.js');
 const { SyncomError, typed } = require('./errors.js');
 
@@ -231,8 +231,17 @@ const prepareOp = (core, type, id, payload, current, who, from) => {
   // An unset names the fields the record holds — or has something under
   // (a prefix of paths); the others are nothing to remove.
   if (type === 'unset') {
-    const held = current && !current.encrypted ? Object.keys(current.data) : [];
-    op.value = payload.value.filter((field) => held.some((key) => key === field || under(key, field)));
+    const held = new Set();
+    if (current && !current.encrypted) {
+      for (const key of Object.keys(current.data)) {
+        held.add(key);
+        const above = ancestorsOf(key);
+        for (let i = 0; i < above.length; i++) held.add(above[i]);
+      }
+    }
+    const fields = [];
+    for (let i = 0; i < payload.value.length; i++) if (held.has(payload.value[i])) fields.push(payload.value[i]);
+    op.value = fields;
   }
   // A remove names the tags this node observed, read here, inside the
   // queue — read outside it, a concurrent apply could add between the two —
@@ -260,12 +269,11 @@ const CORE = new Set(['write', 'set', 'unset', 'inc', 'add', 'remove', 'delete',
 const assertUnique = async (core, id, entry) => {
   const conflicts = await core.conflicts(id, entry);
   if (conflicts.length === 0) return;
-  const issues = conflicts.map(({ fields, other }) => ({
-    path: fields,
-    message: `is not unique (held by ${other})`,
-    code: 'unique',
-    conflict: other,
-  }));
+  const issues = [];
+  for (let i = 0; i < conflicts.length; i++) {
+    const { fields, other } = conflicts[i];
+    issues.push({ path: fields, message: `is not unique (held by ${other})`, code: 'unique', conflict: other });
+  }
   throw new ValidationError(entry.data.$type, issues);
 };
 
@@ -391,8 +399,12 @@ const transacted = (core, { local, via, source, message, ops, changes }) => {
   notify(core.storage, core.logger, 'transaction', { local, via, source, message, ops, changes, ts });
 };
 
-// The changes of an op tagged with its record, for a transaction event.
-const tagged = (op, changes) => changes.map((change) => ({ id: op.id, ...change }));
+// The changes of an op tagged with its record, for a transaction event:
+// pushed onto `into`.
+const tagged = (op, changes, into = []) => {
+  for (let i = 0; i < changes.length; i++) into.push({ id: op.id, ...changes[i] });
+  return into;
+};
 
 // Per field, what a plugin's kind holds beside the reading — a text's
 // embed markers by index — or null when nothing does.
@@ -546,15 +558,19 @@ const conflictsIn = async (core, touched, id, entry) => {
   const def = core.definitionOf(entry.data);
   if (!def || def.unique.length === 0) return found;
   const view = await core.view(id, entry);
+  // Each (holder, key) once: the storage's own finds first.
+  const seen = new Set();
+  for (let i = 0; i < found.length; i++) seen.add(`${found[i].other}\0${found[i].fields.join(',')}`);
   for (const [other, held] of touched) {
     if (other === id || !isAlive(held) || held.data.$type !== entry.data.$type) continue;
     const theirs = await core.view(other, held);
     for (const key of def.unique) {
       const mine = core.catalog.uniqueKey(view, key);
       if (mine === null || mine !== core.catalog.uniqueKey(theirs, key)) continue;
-      if (!found.some((c) => c.other === other && c.fields.join(',') === key.join(','))) {
-        found.push({ fields: [...key], other });
-      }
+      const pair = `${other}\0${key.join(',')}`;
+      if (seen.has(pair)) continue;
+      seen.add(pair);
+      found.push({ fields: [...key], other });
     }
   }
   return found;
@@ -635,17 +651,24 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
   tx.transact = async (inner) => ({ result: await inner(tx), done: null, ops: 0 });
   const result = await fn(tx);
   if (prepared.length === 0) return { result, done: null, ops: 0 };
-  const ops = prepared.map((made) => made.op);
+  const count = prepared.length;
   // Signed once every op is final: on the thread pool when there are
   // several, or writes queued behind; alone and unhurried, here.
-  let ready = null;
-  if (core.sign !== null) {
-    if (ops.length > 1 || core.pipelined()) ready = Promise.all(ops.map((op) => core.sign(op, true)));
-    else await core.sign(ops[0], false);
+  const signing = core.sign !== null && (count > 1 || core.pipelined()) ? [] : null;
+  const ops = [];
+  for (let i = 0; i < count; i++) {
+    ops.push(prepared[i].op);
+    if (signing !== null) signing.push(core.sign(ops[i], true));
   }
+  let ready = null;
+  if (signing !== null) ready = Promise.all(signing);
+  else if (core.sign !== null) await core.sign(ops[0], false);
   const ticket = core.log.append(ops, ready === null ? undefined : { ready });
-  const positions = ticket.entries.map((entry) => entry.seq);
-  for (let i = 0; i < prepared.length; i++) core.inflight(ops[i].id, prepared[i].entry, positions[i]);
+  const positions = [];
+  for (let i = 0; i < count; i++) {
+    positions.push(ticket.entries[i].seq);
+    core.inflight(ops[i].id, prepared[i].entry, positions[i]);
+  }
   const done = core.landing(async () => {
     await ticket;
     const from = positions[0];
@@ -653,7 +676,8 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
     if (core.defer > 0) {
       for (let i = 0; i < prepared.length; i++) await core.deferred(ops[i].id, prepared[i].entry, positions[i]);
     } else if (await core.land(touched, from, to)) {
-      for (const position of positions) core.log.applied(position);
+      // One append: the positions run from `from` to `to` without a gap.
+      core.log.applied(from, to);
     }
     for (let i = 0; i < prepared.length; i++) core.settled(ops[i].id, positions[i]);
     core.flush();
@@ -662,7 +686,7 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
       const { op, entry, delta, ctx, before, previous } = prepared[i];
       const committed = { seq: positions[i], before, previous, txn: positions[0] };
       await announce(core, op, entry, delta, ctx, source, null, committed, prepared[i].changes);
-      changes.push(...tagged(op, prepared[i].changes));
+      tagged(op, prepared[i].changes, changes);
     }
     transacted(core, { local: true, via: null, source, message: msg ?? null, ops, changes });
   });

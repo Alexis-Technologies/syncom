@@ -142,15 +142,19 @@ const createPlugins = (modules, where = 'open({ plugins })') => {
   const methods = {};
   const hints = {};
   const names = [];
+  const named = new Set();
+  const taken = new Set();
+  for (const kind of Object.keys(rank)) taken.add(rank[kind]);
   const kinds = [];
   const apis = [];
   for (const mod of modules) {
     if (!isPlugin(mod)) refuse(where, 'not a plugin module (a name, and kinds or open())');
-    if (names.includes(mod.name)) refuse(where, `plugin '${mod.name}' given twice`);
+    if (named.has(mod.name)) refuse(where, `plugin '${mod.name}' given twice`);
     for (const need of mod.requires ?? []) {
-      if (!names.includes(need)) refuse(where, `plugin '${mod.name}' needs '${need}' registered before it`);
+      if (!named.has(need)) refuse(where, `plugin '${mod.name}' needs '${need}' registered before it`);
     }
     names.push(mod.name);
+    named.add(mod.name);
     if (isPlainObject(mod.kinds)) {
       for (const kind of Object.keys(mod.kinds)) {
         const r = mod.kinds[kind];
@@ -158,8 +162,9 @@ const createPlugins = (modules, where = 'open({ plugins })') => {
           refuse(where, `plugin '${mod.name}': kind ${kind} needs an integer rank of 3 or more`);
         }
         if (Object.hasOwn(rank, kind)) refuse(where, `plugin '${mod.name}': kind ${kind} is already registered`);
-        if (Object.values(rank).includes(r)) refuse(where, `plugin '${mod.name}': rank ${r} of ${kind} is taken`);
+        if (taken.has(r)) refuse(where, `plugin '${mod.name}': rank ${r} of ${kind} is taken`);
         rank[kind] = r;
+        taken.add(r);
         byName[kind] = mod;
       }
       if (!isPlainObject(mod.codes)) refuse(where, `plugin '${mod.name}' names no block codes`);

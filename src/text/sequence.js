@@ -191,7 +191,8 @@ const isAnchor = (token) => parseAnchor(token) !== null;
 const own = (object, key) => (Object.hasOwn(object, key) ? object[key] : undefined);
 const keysOf = (object) => (object && typeof object === 'object' ? Object.keys(object) : []);
 const isStamp = (value) => Number.isSafeInteger(value) && value > 0;
-const isJson = (value) => value === null || ['string', 'number', 'boolean', 'object'].includes(typeof value);
+const JSON_TYPES = new Set(['string', 'number', 'boolean', 'object']);
+const isJson = (value) => value === null || JSON_TYPES.has(typeof value);
 const byOrigin = (a, b) => (a.origin < b.origin ? -1 : a.origin > b.origin ? 1 : a.ts - b.ts);
 const minStamp = (a, b) => (a === null || compareClock(b, a) < 0 ? b : a);
 // The older of a stamp and `[ts, origin]`: the stamp itself while it is not newer.
@@ -293,6 +294,7 @@ const normalizeJson = (raw) => {
   if (kind === null) return null;
   const seq = { k: kind, ts: 0, runs: {} };
   let slots = 0;
+  let runs = 0;
   for (const key of keysOf(raw.runs)) {
     const run = raw.runs[key];
     const made = parseRun(key);
@@ -305,14 +307,18 @@ const normalizeJson = (raw) => {
     slots += rleLength(content);
     if (slots > MAX_FIELD) return null;
     seq.runs[key] = run.length === 3 ? [run[0], content, run[2]] : [run[0], content];
+    runs++;
   }
-  const ranges = (list) =>
-    Array.isArray(list)
-      ? list.filter((r) => Array.isArray(r) && r.length === 2 && Number.isInteger(r[0]) && r[0] >= 0 && isGap(r[1]))
-      : [];
   for (const key of keysOf(raw.cuts)) {
-    if (!isRunKey(key)) continue;
-    const list = ranges(raw.cuts[key]).map(([o, n]) => [o, n]);
+    const given = raw.cuts[key];
+    if (!isRunKey(key) || !Array.isArray(given)) continue;
+    const list = [];
+    for (let i = 0; i < given.length; i++) {
+      const r = given[i];
+      if (Array.isArray(r) && r.length === 2 && Number.isInteger(r[0]) && r[0] >= 0 && isGap(r[1])) {
+        list.push([r[0], r[1]]);
+      }
+    }
     if (list.length > 0) (seq.cuts ??= {})[key] = list;
   }
   for (const key of keysOf(raw.ext)) {
@@ -327,13 +333,15 @@ const normalizeJson = (raw) => {
   }
   const register = (raw2, check) => {
     const out = {};
+    let n = 0;
     for (const key of keysOf(raw2)) {
       const v = raw2[key];
       if (isElemKey(key) && Array.isArray(v) && v.length === 3 && isStamp(v[0]) && isOrigin(v[1]) && check(v[2])) {
         out[key] = [v[0], v[1], v[2]];
+        n++;
       }
     }
-    return Object.keys(out).length > 0 ? out : null;
+    return n > 0 ? out : null;
   };
   if (kind === 'l') {
     const pos = register(raw.pos, isRunKey);
@@ -344,6 +352,7 @@ const normalizeJson = (raw) => {
   if (vals) seq.vals = vals;
   if (kind === 't') {
     const marks = {};
+    let n = 0;
     for (const key of keysOf(raw.marks)) {
       const m = raw.marks[key];
       const made = parseRun(key);
@@ -355,10 +364,11 @@ const normalizeJson = (raw) => {
       if ((from.elem !== null && from.elem.ts >= made.ts) || (to.elem !== null && to.elem.ts >= made.ts)) continue;
       if (!Number.isInteger(m[4]) || m[4] < 0 || m[4] > 3) continue;
       marks[key] = [m[0], m[1], m[2], m[3], m[4]];
+      n++;
     }
-    if (Object.keys(marks).length > 0) seq.marks = marks;
+    if (n > 0) seq.marks = marks;
   }
-  const empty = Object.keys(seq.runs).length === 0 && !seq.cuts && !seq.ext && !seq.marks && !seq.pos && !seq.vals;
+  const empty = runs === 0 && !seq.cuts && !seq.ext && !seq.marks && !seq.pos && !seq.vals;
   if (empty) return null;
   return seq;
 };
@@ -518,6 +528,7 @@ const segmentsOf = (kind, pos, run, from, content) => {
 // The keys of the children hung at offset `off` on one side of a run (its
 // `L` or `R` list, ./plist.js entries `{ off, keys }`), or undefined.
 const childrenAt = (list, off) => (list === null ? undefined : SL.get(list, off)?.keys);
+const NONE = Object.freeze([]);
 const byOff = (a, b) => a.off - b.off;
 // One side's children from its entries as they were gathered: each list
 // by origin, the entries by offset.
@@ -693,6 +704,8 @@ const hydrate = (seq, base) => {
   for (const key of Object.keys(seq.runs)) records.set(key, recordOf(key, seq.runs[key]));
   const roots = [];
   const pending = new Map();
+  // The entry of each offset, per list of entries a side gathers.
+  const atOffset = new Map();
   let pendingRuns = 0;
   let slots = 0;
   let oldest = null;
@@ -721,11 +734,20 @@ const hydrate = (seq, base) => {
     }
     // Gathered as entries, in order of arrival; sorted once below.
     const side = anchor.side;
-    const entries = (parent[side] ??= []);
-    let entry = null;
-    for (const held of entries) if (held.off === e.offset) entry = held;
-    if (entry !== null) entry.keys.push(run.key);
-    else entries.push({ off: e.offset, keys: [run.key] });
+    let entries = parent[side];
+    let offsets;
+    if (entries === null) {
+      entries = parent[side] = [];
+      offsets = new Map();
+      atOffset.set(entries, offsets);
+    } else offsets = atOffset.get(entries);
+    const entry = offsets.get(e.offset);
+    if (entry !== undefined) entry.keys.push(run.key);
+    else {
+      const made = { off: e.offset, keys: [run.key] };
+      entries.push(made);
+      offsets.set(e.offset, made);
+    }
   }
   roots.sort(byOrigin);
   const sorter = (a, b) => byOrigin(records.get(a), records.get(b));
@@ -748,7 +770,11 @@ const hydrate = (seq, base) => {
   // walked is replaced by its placed copy.
   const items = [];
   const getRun = (key) => records.get(key);
-  for (const top of roots) walkSubtree(getRun, kind, pos, top.key, items, records, true);
+  const rootKeys = [];
+  for (let i = 0; i < roots.length; i++) {
+    rootKeys.push(roots[i].key);
+    walkSubtree(getRun, kind, pos, rootKeys[i], items, records, true);
+  }
   const lineage = { head: null };
   const root = T.fromItems(items, lineage);
   for (const run of records.values()) Object.freeze(run);
@@ -758,7 +784,7 @@ const hydrate = (seq, base) => {
     base,
     root,
     runs,
-    roots: roots.map((r) => r.key),
+    roots: rootKeys,
     pending,
     pendingRuns,
     slots,
@@ -767,7 +793,7 @@ const hydrate = (seq, base) => {
     lineage,
     rendered: null,
     elems: null,
-    elemSet: null,
+    elemIndex: null,
     json: null,
   };
   const maps = { cuts: seq.cuts, ext: seq.ext, pos: seq.pos, vals: seq.vals, marks: seq.marks };
@@ -916,10 +942,21 @@ const elems = (block) => {
   st.elems = out;
   return out;
 };
-const hasElem = (block, key) => {
+// The index of each visible element by its name (the first, were one shown twice), kept per version.
+const elemIndexOf = (block) => {
   const st = STATE.get(block);
-  st.elemSet ??= new Set(elems(block));
-  return st.elemSet.has(key);
+  if (st.elemIndex !== null) return st.elemIndex;
+  const list = elems(block);
+  const index = new Map();
+  for (let i = 0; i < list.length; i++) if (!index.has(list[i])) index.set(list[i], i);
+  st.elemIndex = index;
+  return index;
+};
+const hasElem = (block, key) => elemIndexOf(block).has(key);
+/** Where the element `key` shows in the reading, or -1. */
+const indexOfElem = (block, key) => {
+  const i = elemIndexOf(block).get(key);
+  return i === undefined ? -1 : i;
 };
 
 // The element at visible index `i`: its name (a list element keeps it across
@@ -1144,7 +1181,7 @@ const finish = (d) => {
     lineage: d.lineage,
     rendered: null,
     elems: null,
-    elemSet: null,
+    elemIndex: null,
     json: null,
   };
   const block = createBlock(
@@ -1263,17 +1300,21 @@ const placeRun = (d, run) => {
           parent.segs = replacedIn(parent.segs, seg, 1, [a, b]);
         }
       }
-      if (!siblings.includes(run.key)) parent.L = withChild(d, parent.L, e.offset, run.key, run);
+      // The siblings are sorted by origin, so the run, were it among them, sits at its rank.
+      if (siblings[j] !== run.key) parent.L = withChild(d, parent.L, e.offset, run.key, run);
     } else {
-      const explicit = (childrenAt(parent.R, e.offset) ?? []).filter((key) => key !== run.key);
+      const held = childrenAt(parent.R, e.offset) ?? NONE;
       const cont = e.offset + 1 < parent.len;
-      // The virtual siblings: the explicit ones with the continuation among
-      // them by origin — before the first that sorts after the parent.
+      // The virtual siblings: the explicit ones (the run itself left out)
+      // with the continuation among them by origin — before the first that
+      // sorts after the parent.
       let pred = null; // a run key, 'cont', or null
       let succ = null;
       let contPlaced = false;
       const afterCont = cont && byOrigin(parent, run) < 0;
-      for (const key of explicit) {
+      for (let i = 0; i < held.length; i++) {
+        const key = held[i];
+        if (key === run.key) continue;
         const c = runOf(d, key);
         if (cont && !contPlaced && byOrigin(parent, c) < 0) {
           contPlaced = true;
@@ -1309,7 +1350,6 @@ const placeRun = (d, run) => {
         const tail = parent.tails > 0 ? firstTailChild(d, parent, e.offset) : null;
         d.root = T.insertBefore(d.root, tail === null ? parent.close : tail.open, items, d.lineage);
       }
-      const held = childrenAt(parent.R, e.offset) ?? [];
       if (!held.includes(run.key)) {
         if (afterCont) parent.tails++;
         parent.R = withChild(d, parent.R, e.offset, run.key, run);
@@ -1437,7 +1477,8 @@ const cutRun = (d, key, offset, length) => {
     }
     d.root = T.replace(d.root, seg, pieces, d.lineage);
     run = replaceSeg(d, key, seg, pieces);
-    // A gap beside a gap of the same run is one gap.
+    // The gap made, joined to its neighbours of the same run: one gap.
+    let last = gap;
     const prev = T.before(d.root, gap, d.lineage);
     if (
       prev !== null &&
@@ -1452,9 +1493,8 @@ const cutRun = (d, key, offset, length) => {
       run = copyRun(run);
       run.segs = replacedIn(run.segs, prev, 2, [joined]);
       run = setRun(d, run);
-      pieces.splice(pieces.indexOf(gap), 1, joined);
+      last = joined;
     }
-    const last = pieces[pieces.indexOf(pieces.find((p) => p.body === null && p.off <= at && at < p.off + p.len))];
     const following = T.after(d.root, last, d.lineage);
     if (
       following !== null &&
@@ -1499,8 +1539,14 @@ const settleRun = (d, key) => {
     if (!list) break;
     const run = runOf(d, key);
     const len = run.len;
-    const hit = list.find(([from]) => from === len);
-    const rest = list.filter(([from]) => from > len);
+    // The extension that continues the run, and what lies past it still.
+    let hit;
+    const rest = [];
+    for (let i = 0; i < list.length; i++) {
+      const from = list[i][0];
+      if (from === len) hit ??= list[i];
+      else if (from > len) rest.push(list[i]);
+    }
     d.ext = { ...d.ext };
     if (rest.length > 0) d.ext[key] = rest;
     else {
@@ -1567,7 +1613,9 @@ const unchanged = (seq) => ({ seq, changed: false, reason: null });
 // Whether the block already waits to cut exactly this range of `key`.
 const hasRange = (cuts, key, offset, length) => {
   const held = cuts ? own(cuts, key) : undefined;
-  return held !== undefined && held.some(([o, n]) => o === offset && n === length);
+  if (held === undefined) return false;
+  for (let i = 0; i < held.length; i++) if (held[i][0] === offset && held[i][1] === length) return true;
+  return false;
 };
 
 const addRange = (d, key, offset, length) => {
@@ -1742,8 +1790,11 @@ const applySplice = (given, stamp, payload, base = null, pendingMax = PENDING_MA
           const stop = full();
           if (stop !== null) return stop;
           const m = mutable();
-          const list = m.ext && own(m.ext, run) ? [...m.ext[run]] : [];
-          if (!list.some(([f]) => f === from)) {
+          const held = (m.ext && own(m.ext, run)) || NONE;
+          let known = false;
+          for (let i = 0; i < held.length && !known; i++) known = held[i][0] === from;
+          if (!known) {
+            const list = held.slice();
             list.push([from, isText(m.kind) ? content : [...content]]);
             m.ext = { ...(m.ext ?? {}), [run]: list };
             m.oldest = minStamp(m.oldest, stampOfKey(run));
@@ -2197,7 +2248,12 @@ const prune = (given, base) => {
   }
   const plain = plainOf(seq);
   const out = { k: plain.k, ts: 0, runs: {} };
-  for (const key of Object.keys(plain.runs)) if (!below(key, base)) out.runs[key] = plain.runs[key];
+  let runs = 0;
+  for (const key of Object.keys(plain.runs)) {
+    if (below(key, base)) continue;
+    out.runs[key] = plain.runs[key];
+    runs++;
+  }
   for (const map of ['cuts', 'ext', 'marks']) {
     for (const key of keysOf(plain[map])) if (!below(key, base)) (out[map] ??= {})[key] = plain[map][key];
   }
@@ -2207,7 +2263,7 @@ const prune = (given, base) => {
       if (compareClock([ts, origin], base) >= 0) (out[map] ??= {})[key] = plain[map][key];
     }
   }
-  const empty = Object.keys(out.runs).length === 0 && !out.cuts && !out.ext && !out.marks && !out.pos && !out.vals;
+  const empty = runs === 0 && !out.cuts && !out.ext && !out.marks && !out.pos && !out.vals;
   if (empty) return null;
   out.ts = stampsMax(out);
   return hydrate(out, base);
@@ -2230,17 +2286,41 @@ const join = (givenA, givenB) => {
         mine.length === 3 || theirs.length === 3 ? [mine[0], content, mine[2] ?? theirs[2]] : [mine[0], content];
     }
   }
-  const addCut = (key, o, n) => {
-    if (hasRange(out.cuts, key, o, n)) return;
-    const held = out.cuts && own(out.cuts, key);
-    (out.cuts ??= {})[key] = held ? [...held, [o, n]] : [[o, n]];
-  };
+  // The union's lists are its own: per run key, the ranges and the
+  // extension offsets it holds already.
+  const rangesHeld = new Map();
+  const fromsHeld = new Map();
   for (const side of [a, b]) {
-    for (const key of keysOf(side.cuts)) for (const [o, n] of side.cuts[key]) addCut(key, o, n);
+    for (const key of keysOf(side.cuts)) {
+      let held = rangesHeld.get(key);
+      if (held === undefined) {
+        held = new Set();
+        rangesHeld.set(key, held);
+      }
+      const ranges = side.cuts[key];
+      for (let i = 0; i < ranges.length; i++) {
+        const [o, n] = ranges[i];
+        const range = `${o},${n}`;
+        if (held.has(range)) continue;
+        held.add(range);
+        if (held.size === 1) (out.cuts ??= {})[key] = [[o, n]];
+        else out.cuts[key].push([o, n]);
+      }
+    }
     for (const key of keysOf(side.ext)) {
-      const list = out.ext && own(out.ext, key) ? out.ext[key] : [];
-      for (const item of side.ext[key]) if (!list.some(([f]) => f === item[0])) list.push(item);
-      (out.ext ??= {})[key] = list;
+      let froms = fromsHeld.get(key);
+      if (froms === undefined) {
+        froms = new Set();
+        fromsHeld.set(key, froms);
+        (out.ext ??= {})[key] = [];
+      }
+      const list = out.ext[key];
+      const items = side.ext[key];
+      for (let i = 0; i < items.length; i++) {
+        if (froms.has(items[i][0])) continue;
+        froms.add(items[i][0]);
+        list.push(items[i]);
+      }
     }
     for (const map of ['pos', 'vals']) {
       for (const key of keysOf(side[map])) {
@@ -2324,6 +2404,7 @@ module.exports = {
   render,
   elems,
   hasElem,
+  indexOfElem,
   valueAt,
   elemAt,
   placeInsert,

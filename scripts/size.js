@@ -203,7 +203,7 @@ const ENTRIES = [
     label: 'codemirror — browser (@alexify/syncom/codemirror)',
     entry: 'src/codemirror/codemirror.js',
     platform: 'browser',
-    budget: 7,
+    budget: 7.5,
   },
   // The ProseMirror adapter: the editor binding it stands on (4.9) and the document as one text with block
   // markers, the replace step, the cursors' decorations, the undo commands. ProseMirror itself is injected, never
@@ -253,7 +253,8 @@ const ENTRIES = [
   // 96.5 with a fork at any version (atVersion) and blame.
   // 98.3 with the change reports exact under concurrency (a mark less what newer ones hold, a marker set
   // in the turn that inserted it). 98.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 98.5 },
+  // 100.7 with src/ in procedural loops (no array callbacks — a loop is longer than a callback; 2026-10-26). 101, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 101 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -267,24 +268,27 @@ const ENTRIES = [
   // in its change and exact in applyDelta, applyDelta's `expect` (STALE). 28, raised by name.
   // 28.1 with a mark's change less what newer marks of its key hold (S.newerRanges) and a marker set in
   // the turn that inserted it composed into the insert. 28.5, raised by name.
-  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 28.5 },
+  // 28.7 with src/ in procedural loops (no array callbacks — a loop is longer than a callback; 2026-10-26).
+  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 29 },
   // The tree kind alone, with the fractional indexes a place is made of and
   // the argument checks it shares with the core (5.1 measured).
   // 5.5 with the field-name check unset shares with it (src/args.js).
   // 5.9 with the field-path check (src/paths.js).
   // 6.1 with a node's data (the members' seam).
   // 6.3 with the change reports (treeChanges: the placements before and after).
-  { label: 'tree — browser (@alexify/syncom/tree)', entry: 'src/tree/tree.js', platform: 'browser', budget: 6.5 },
+  // 6.8 with src/ in procedural loops (no array callbacks — a loop is longer than a callback; 2026-10-26).
+  { label: 'tree — browser (@alexify/syncom/tree)', entry: 'src/tree/tree.js', platform: 'browser', budget: 7 },
   // The security blocks, each measured ALONE — with the shape checks, the
   // PEM pair, the backend contract and the errors it shares with the core,
   // which an app bundle holds once (4.2 / 2.0 / 3.6 measured; what each
   // adds to the core is the difference `/all` shows).
   // Signed ops: the Ed25519 half, the canonical form and the verdict.
+  // 4.5 with src/ in procedural loops (no array callbacks — a loop is longer than a callback; 2026-10-26) (a hex table in the browser half).
   {
     label: 'signing — browser (@alexify/syncom/signing)',
     entry: 'src/signing/signing.js',
     platform: 'browser',
-    budget: 4.5,
+    budget: 5,
   },
   // The chain: the blocks, SHA-256 through Web Crypto, the plugin.
   { label: 'chain — browser (@alexify/syncom/chain)', entry: 'src/chain/chain.js', platform: 'browser', budget: 2.5 },
@@ -333,7 +337,8 @@ const ENTRIES = [
   },
   // Queries: the predicate, the planner and the cursor, measured ALONE with
   // the catalog's value keys it shares with the core.
-  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 6 },
+  // 6.0 with src/ in procedural loops (no array callbacks — a loop is longer than a callback; 2026-10-26).
+  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 6.5 },
   // Versions: the fold of the log, the tags, the view at a tag — measured
   // ALONE with the write path, the snapshot pages and the patches it shares
   // with the core.
@@ -341,7 +346,7 @@ const ENTRIES = [
     label: 'versions — browser (@alexify/syncom/versions)',
     entry: 'src/versions/versions.js',
     platform: 'browser',
-    budget: 30,
+    budget: 30.5,
   },
 ];
 

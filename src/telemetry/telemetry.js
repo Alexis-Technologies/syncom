@@ -21,6 +21,8 @@
 
 const { DISABLED, SCOPE_NAME, SPAN_STATUS_ERROR, IDENTITY_KEYS, hasMethod, isWriter } = require('../telemetry.js');
 
+const IDENTITY = new Set(IDENTITY_KEYS);
+
 /**
  * Two injection modes:
  * - `{ api }` — the @opentelemetry/api module, from which syncom derives its
@@ -94,10 +96,12 @@ const endSpanHandle = (handle, attributes, includeIdentity) => {
     const span = handle?.span;
     if (!span) return;
     if (attributes) {
-      for (const key in attributes) {
+      const keys = Object.keys(attributes);
+      for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
         const value = attributes[key];
         if (value === undefined || value === null) continue;
-        if (!includeIdentity && IDENTITY_KEYS.includes(key)) continue;
+        if (!includeIdentity && IDENTITY.has(key)) continue;
         span.setAttribute?.(key, value);
       }
     }
@@ -226,13 +230,13 @@ const createTelemetry = (telemetry) => {
       // `gauges(read)` registers. Optional — a meter without the factory
       // keeps the counters and histograms.
       if (hasMethod(meter, 'createObservableGauge')) {
-        gauges = GAUGES.map(([name, key, description]) => [
-          meter.createObservableGauge(name, {
-            unit: key === 'log' || key === 'catalog' ? '{entry}' : '{op}',
-            description,
-          }),
-          key,
-        ]);
+        const made = [];
+        for (let i = 0; i < GAUGES.length; i++) {
+          const [name, key, description] = GAUGES[i];
+          const unit = key === 'log' || key === 'catalog' ? '{entry}' : '{op}';
+          made.push([meter.createObservableGauge(name, { unit, description }), key]);
+        }
+        gauges = made;
       }
     } catch {
       commits = null;

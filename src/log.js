@@ -70,6 +70,18 @@ const readFile = (text) => {
   return { entries: parsed.entries, reason: null };
 };
 
+// Whether the ascending `seqs` hold one in [from, to].
+const anyWithin = (seqs, from, to) => {
+  let low = 0;
+  let high = seqs.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (seqs[mid] < from) low = mid + 1;
+    else high = mid;
+  }
+  return low < seqs.length && seqs[low] <= to;
+};
+
 class OpLog {
   #path;
   #openPath;
@@ -190,7 +202,8 @@ class OpLog {
   }
 
   async #loadSegments(hasIndex) {
-    const known = new Set(this.#segments.map((segment) => segment.name));
+    const known = new Set();
+    for (let i = 0; i < this.#segments.length; i++) known.add(this.#segments[i].name);
     const names = await this.#fsi.list(this.#path);
     for (const name of names) {
       if (!name.startsWith('seg-') || known.has(name)) continue;
@@ -285,16 +298,17 @@ class OpLog {
     this.#adopt(entries);
     let first = Infinity;
     let last = -Infinity;
-    const seqs = [];
+    // The seqs a segment does not have yet, for the hold.
+    const unsealed = [];
     for (const entry of entries) {
       if (!Number.isInteger(entry.seq)) continue;
-      seqs.push(entry.seq);
+      if (entry.seq > sealedTo) unsealed.push(entry.seq);
       if (entry.seq < first) first = entry.seq;
       if (entry.seq > last) last = entry.seq;
     }
-    if (seqs.length === 0) return;
+    if (first === Infinity) return;
     this.#open.push({ first, last, file });
-    if (this.#sealApplied) this.#hold(seqs.filter((seq) => seq > sealedTo));
+    if (this.#sealApplied) this.#hold(unsealed);
   }
 
   // The newest seq a segment holds, or below the floor when none does.
@@ -324,7 +338,12 @@ class OpLog {
   // the same batch both sealed and open) and keeping the order by seq.
   #adopt(entries) {
     // The seqs already held, built once per open rather than once per file.
-    const seen = (this.#seen ??= new Set(this.#entries.map((entry) => entry.seq)));
+    let seen = this.#seen;
+    if (seen === null) {
+      seen = new Set();
+      for (let i = 0; i < this.#entries.length; i++) seen.add(this.#entries[i].seq);
+      this.#seen = seen;
+    }
     let added = false;
     for (const entry of entries) {
       if (!entry || !Number.isInteger(entry.seq) || seen.has(entry.seq)) continue;
@@ -563,12 +582,14 @@ class OpLog {
       return;
     }
     if (started) this.#otel.recordAppend(now() - started);
+    const seqs = this.#sealApplied ? [] : null;
     for (const entry of entries) {
       this.#entries.push(entry);
       this.#indexEntry(entry);
+      if (seqs !== null) seqs.push(entry.seq);
     }
     this.#open.push({ first, last, file });
-    if (this.#sealApplied) this.#hold(entries.map((entry) => entry.seq));
+    if (seqs !== null) this.#hold(seqs);
     // A roll is what makes one append slow every `rollAfter` groups: its
     // callers wait for it, as they did before groups.
     if (this.#open.length >= this.#rollAfter) await this.#roll();
@@ -663,7 +684,7 @@ class OpLog {
     while (this.#segments.length > 1) {
       const oldest = this.#segments[0];
       const overOps = ops ? this.#entries.length - oldest.count >= ops : false;
-      const lastTs = this.#entries.find((entry) => entry.seq === oldest.to)?.op?.ts ?? Infinity;
+      const lastTs = this.#entryAt(oldest.to)?.op?.ts ?? Infinity;
       const overAge = cutoff !== null && lastTs < cutoff;
       const tooMany = ops ? this.#entries.length > ops : false;
       if (!(tooMany && overOps) && !overAge) break;
@@ -675,7 +696,7 @@ class OpLog {
         if (typeof entry.op?.ts === 'number' && entry.op.ts > this.#droppedTs) this.#droppedTs = entry.op.ts;
         this.#unindexEntry(entry);
       }
-      this.#entries = this.#entries.filter((entry) => entry.seq > oldest.to);
+      this.#entries = this.#entries.slice(this.#lowerBound(oldest.to + 1));
       this.#floor = oldest.to + 1;
       await this.#fsi.remove(this.#path, oldest.name);
       dropped++;
@@ -740,7 +761,11 @@ class OpLog {
 
   /** The entries held for a newer schema version, oldest first. */
   held() {
-    return this.#entries.filter((entry) => entry.held !== undefined);
+    const held = [];
+    for (let i = 0; i < this.#entries.length; i++) {
+      if (this.#entries[i].held !== undefined) held.push(this.#entries[i]);
+    }
+    return held;
   }
 
   /**
@@ -787,7 +812,9 @@ class OpLog {
   advance(vector) {
     return this.#serialize(async () => {
       let moved = false;
-      for (const key in vector) {
+      const keys = Object.keys(vector);
+      for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
         const seq = vector[key];
         if (Number.isInteger(seq) && (this.#vector[key] ?? 0) < seq) {
           this.#vector[key] = seq;
@@ -851,10 +878,11 @@ class OpLog {
       }
       if (fresh === 0 && !this.#torn.has(id)) return 0;
       this.#torn.add(id);
-      const holds = (from, to) => [...seqs].some((seq) => seq >= from && seq <= to);
+      // The lane is this scrub's: no append or roll changes `seqs` meanwhile.
+      const sorted = [...seqs].sort((a, b) => a - b);
       for (const segment of this.#segments) {
-        if (!holds(segment.from, segment.to)) continue;
-        const entries = this.#entries.filter((entry) => entry.seq >= segment.from && entry.seq <= segment.to);
+        if (!anyWithin(sorted, segment.from, segment.to)) continue;
+        const entries = this.#entries.slice(this.#lowerBound(segment.from), this.#lowerBound(segment.to + 1));
         await this.#fsi.write(this.#path, segment.name, fileOf(entries));
       }
       // An open file is rewritten whole: a journal a line per group it holds
@@ -867,13 +895,22 @@ class OpLog {
         groups.push(group);
       }
       for (const [file, groups] of byFile) {
-        if (!groups.some((group) => holds(group.first, group.last))) continue;
-        const texts = [];
+        let touched = false;
+        for (let i = 0; !touched && i < groups.length; i++) {
+          touched = anyWithin(sorted, groups[i].first, groups[i].last);
+        }
+        if (!touched) continue;
+        const journal = file.endsWith(JOURNAL);
+        let content = '';
         for (const group of groups) {
           const from = Math.max(group.first, sealedTo + 1);
-          texts.push(fileOf(this.#entries.slice(this.#lowerBound(from), this.#lowerBound(group.last + 1))));
+          const text = fileOf(this.#entries.slice(this.#lowerBound(from), this.#lowerBound(group.last + 1)));
+          if (!journal) {
+            content = text;
+            break;
+          }
+          content += `${text}\n`;
         }
-        const content = file.endsWith(JOURNAL) ? texts.map((text) => `${text}\n`).join('') : texts[0];
         await this.#fsi.write(this.#openPath, file, content);
       }
       this.#torn.delete(id);
@@ -958,8 +995,7 @@ class OpLog {
 
   /** The unsealed tail — what a reopen replays onto the records. */
   tail() {
-    const sealedTo = this.#sealedTo;
-    return this.#entries.filter((entry) => entry.seq > sealedTo);
+    return this.#entries.slice(this.#lowerBound(this.#sealedTo + 1));
   }
 
   /** Seals what can be sealed and writes the index: a reopen after a clean close replays nothing it need not. */

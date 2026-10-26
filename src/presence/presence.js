@@ -39,14 +39,16 @@ const depthOf = (value, depth = 1) => {
   return deepest;
 };
 
-// A state's size, keys and depth within the bounds; null is a leave.
-const sized = (state) => {
-  if (state === null) return true;
-  if (!isPlainObject(state) || Object.keys(state).length > MAX_KEYS) return false;
-  if (depthOf(state) > MAX_DEPTH) return false;
+// A state's JSON when its size, keys and depth are within the bounds, else null.
+const boundedJson = (state) => {
+  if (!isPlainObject(state) || Object.keys(state).length > MAX_KEYS) return null;
+  if (depthOf(state) > MAX_DEPTH) return null;
   const text = JSON.stringify(state);
-  return typeof text === 'string' && text.length <= MAX_STATE_BYTES;
+  return typeof text === 'string' && text.length <= MAX_STATE_BYTES ? text : null;
 };
+
+// A state's size, keys and depth within the bounds; null is a leave.
+const sized = (state) => state === null || boundedJson(state) !== null;
 
 // What a signature covers: the format, the node, its clock and stamp, the
 // state in canonical JSON — positional, so key order plays no part.
@@ -141,13 +143,14 @@ class Presence extends Emitter {
    */
   async set(state) {
     if (this.#destroyed) throw new TypeError('presence was destroyed');
-    if (!sized(state)) {
+    const text = state === null ? null : boundedJson(state);
+    if (state !== null && text === null) {
       throw typed(
         'PRESENCE_SIZE',
         `A presence state is a JSON object of at most ${MAX_KEYS} keys, ${MAX_DEPTH} deep, ${MAX_STATE_BYTES} bytes`,
       );
     }
-    const copy = state === null ? null : JSON.parse(JSON.stringify(state));
+    const copy = text === null ? null : JSON.parse(text);
     const update = await this.#announce(copy);
     if (copy === null) this.#stopRenewing();
     else if (this.#renew === null) {
@@ -215,9 +218,10 @@ class Presence extends Emitter {
    * newcomer is handed; `nodes` narrows it.
    */
   encode(nodes = null) {
+    const wanted = nodes === null ? null : new Set(nodes);
     const s = [];
     for (const [node, held] of this.#states) {
-      if (held.state === null || (nodes !== null && !nodes.includes(node))) continue;
+      if (held.state === null || (wanted !== null && !wanted.has(node))) continue;
       const entry = [node, held.clock, held.ts, held.state];
       if (held.sig !== undefined) entry.push(held.sig);
       s.push(entry);

@@ -44,7 +44,8 @@ const layered = (layers, options = {}) => {
   if (!Array.isArray(layers) || layers.length === 0) {
     throw new TypeError('layered() takes an array of one backend or more');
   }
-  const stack = layers.map((layer, i) => checkFsi(layer, `layered() layer ${i}`));
+  const stack = [];
+  for (let i = 0; i < layers.length; i++) stack.push(checkFsi(layers[i], `layered() layer ${i}`));
   if (options === null || typeof options !== 'object') throw new TypeError('layered() takes an options object');
   const { write = 'through', fill = true, queue = 1024 } = options;
   if (write !== 'through' && write !== 'back') throw new TypeError("layered(): write must be 'through' or 'back'");
@@ -157,13 +158,19 @@ const layered = (layers, options = {}) => {
       for (const layer of stack) if (typeof layer.close === 'function') await layer.close();
     },
   };
-  if (stack.some((layer) => typeof layer.sync === 'function')) {
+  let anySync = false;
+  let allAppend = true;
+  for (let i = 0; i < stack.length; i++) {
+    if (typeof stack[i].sync === 'function') anySync = true;
+    if (typeof stack[i].append !== 'function') allAppend = false;
+  }
+  if (anySync) {
     wrapped.sync = async (dir, name) => {
       await drain();
       for (const layer of stack) if (typeof layer.sync === 'function') await layer.sync(dir, name);
     };
   }
-  if (stack.every((layer) => typeof layer.append === 'function')) {
+  if (allAppend) {
     wrapped.append = async (dir, name, content) => {
       // A file the top lacks may be below it: its head goes up first.
       if (!(await top.exists(dir, name))) {

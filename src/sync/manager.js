@@ -21,12 +21,12 @@
 
 const { Emitter } = require('../utils.js');
 const { packOps, unpackOps } = require('../ops.js');
-const { vectorHas, vectorAdvance, vectorMax, keyScope, opKey } = require('../vector.js');
+const { vectorAdvance, vectorMax, keyScope, opKey } = require('../vector.js');
 const { outbound, unreachable } = require('../outbound.js');
 const { isSyncLink } = require('../link.js');
 const { writerOf, traced } = require('../telemetry.js');
 const { notify, runHook, normalizeHooks } = require('../hooks.js');
-const { GLOBAL_SCOPE, opInScope } = require('../scope.js');
+const { GLOBAL_SCOPE, inScope, opInScope } = require('../scope.js');
 const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf, kindsOf } = require('../protocol.js');
 const { createUnit } = require('./hosting.js');
 const { SyncomError } = require('../errors.js');
@@ -61,10 +61,13 @@ const fileName = (url) => `${encodeURIComponent(url)}.json`;
 // the `origin@scope` keys of the scopes asked for.
 const scopedVector = (vector, scopes) => {
   if (!scopes || scopes.includes(GLOBAL_SCOPE)) return vector;
+  const asked = new Set(scopes);
   const out = {};
-  for (const key in vector) {
+  const keys = Object.keys(vector);
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
     const scope = keyScope(key);
-    if (scope === null || scopes.includes(scope)) out[key] = vector[key];
+    if (scope === null || asked.has(scope)) out[key] = vector[key];
   }
   return out;
 };
@@ -152,8 +155,11 @@ class SyncManager extends Emitter {
     const { url, token, scopes } = nodeData ?? {};
     if (typeof url !== 'string' || url.length === 0) throw new TypeError('Node URL is required');
     if (this.#nodes.has(url)) throw new SyncomError('NODE_EXISTS', `Node with URL ${url} already exists`, { url });
-    if (scopes !== undefined && !(Array.isArray(scopes) && scopes.every((s) => typeof s === 'string'))) {
-      throw new TypeError('Node scopes must be an array of strings');
+    if (scopes !== undefined) {
+      if (!Array.isArray(scopes)) throw new TypeError('Node scopes must be an array of strings');
+      for (let i = 0; i < scopes.length; i++) {
+        if (typeof scopes[i] !== 'string') throw new TypeError('Node scopes must be an array of strings');
+      }
     }
     const node = {
       url,
@@ -180,7 +186,9 @@ class SyncManager extends Emitter {
   }
 
   listNodes() {
-    return Array.from(this.#nodes.values(), (node) => ({ ...node }));
+    const out = [];
+    for (const node of this.#nodes.values()) out.push({ ...node });
+    return out;
   }
 
   async enableNode(url, enabled = true) {
@@ -220,16 +228,11 @@ class SyncManager extends Emitter {
     return write;
   }
 
-  // This node's own streams in a peer's vector (`origin`, `origin@scope`)
-  // and the seqs the peer holds of them.
-  #own(vector) {
+  // Whether `key` of a peer's vector is one of this node's own streams
+  // (`origin`, `origin@scope`) and `seq` a seq the peer holds of it.
+  #owns(key, seq) {
     const own = this.#storage.nodeId;
-    const out = {};
-    for (const key of vector && typeof vector === 'object' ? Object.keys(vector) : []) {
-      const seq = vector[key];
-      if ((key === own || key.startsWith(`${own}@`)) && Number.isSafeInteger(seq) && seq > 0) out[key] = seq;
-    }
-    return out;
+    return (key === own || key.startsWith(`${own}@`)) && Number.isSafeInteger(seq) && seq > 0;
   }
 
   // What a peer is known to hold of this node's own streams: replaced by a
@@ -238,7 +241,12 @@ class SyncManager extends Emitter {
   // right ops across a restart too.
   #ack(node, vector, replace = false) {
     const acked = replace ? {} : { ...node.acked };
-    for (const [key, seq] of Object.entries(this.#own(vector))) if (!(acked[key] >= seq)) acked[key] = seq;
+    const keys = vector && typeof vector === 'object' ? Object.keys(vector) : [];
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      const seq = vector[key];
+      if (this.#owns(key, seq) && !(acked[key] >= seq)) acked[key] = seq;
+    }
     node.acked = acked;
   }
 
@@ -275,8 +283,10 @@ class SyncManager extends Emitter {
 
   async stop() {
     this.#started = false;
-    for (const url of Array.from(this.#peers.keys())) this.#disconnect(url);
-    await Promise.all(Array.from(this.#saving.values(), (state) => state.last));
+    for (const url of [...this.#peers.keys()]) this.#disconnect(url);
+    const writes = [];
+    for (const state of this.#saving.values()) writes.push(state.last);
+    await Promise.all(writes);
     notify(this, this.#storage.logger, 'stop');
   }
 
@@ -288,7 +298,13 @@ class SyncManager extends Emitter {
         if (node.enabled && (url === undefined || node.url === url)) this.#connect(node);
       }
     }
-    const peers = url ? [this.#peers.get(url)].filter(Boolean) : Array.from(this.#peers.values());
+    let peers;
+    if (url) {
+      const peer = this.#peers.get(url);
+      peers = peer ? [peer] : [];
+    } else {
+      peers = [...this.#peers.values()];
+    }
     const results = [];
     for (const peer of peers) {
       if (!peer.remote) continue;
@@ -308,23 +324,29 @@ class SyncManager extends Emitter {
 
   /** Live view of every dialed peer. */
   peers() {
-    return Array.from(this.#peers.values(), (peer) => ({
-      url: peer.node.url,
-      node: peer.remote?.id ?? null,
-      connected: peer.connected,
-      subscribed: Boolean(peer.subscription),
-      cursor: peer.node.cursor,
-      lastSync: peer.node.lastSync,
-      pending: peer.outbox.length + (peer.inflight ? 1 : 0),
-      behind: peer.behind,
-      stuck: peer.stuck,
-      lastError: peer.lastError,
-    }));
+    const out = [];
+    for (const peer of this.#peers.values()) {
+      out.push({
+        url: peer.node.url,
+        node: peer.remote?.id ?? null,
+        connected: peer.connected,
+        subscribed: Boolean(peer.subscription),
+        cursor: peer.node.cursor,
+        lastSync: peer.node.lastSync,
+        pending: peer.outbox.length + (peer.inflight ? 1 : 0),
+        behind: peer.behind,
+        stuck: peer.stuck,
+        lastError: peer.lastError,
+      });
+    }
+    return out;
   }
 
   /** Hosting side: every peer with a live `changes` feed on this node. */
   hosted() {
-    return Array.from(this.#feeds, (feed) => ({ ...feed, scopes: feed.scopes === null ? null : [...feed.scopes] }));
+    const out = [];
+    for (const feed of this.#feeds) out.push({ ...feed, scopes: feed.scopes === null ? null : [...feed.scopes] });
+    return out;
   }
 
   #connect(node) {
@@ -405,7 +427,8 @@ class SyncManager extends Emitter {
             this.#handshake(peer, { resubscribe: !peer.subscription }).catch((error) => this.#fail(peer, error));
           },
         };
-        for (const event in peer.handlers) link.on(event, peer.handlers[event]);
+        const events = Object.keys(peer.handlers);
+        for (let i = 0; i < events.length; i++) link.on(events[i], peer.handlers[events[i]]);
         peer.connected = true;
         notify(this, this.#storage.logger, 'connect', { url: node.url });
         return this.#handshake(peer, { resubscribe: true });
@@ -424,7 +447,10 @@ class SyncManager extends Emitter {
     peer.closed = true;
     this.#peers.delete(url);
     if (peer.link) {
-      if (peer.handlers) for (const event in peer.handlers) peer.link.off(event, peer.handlers[event]);
+      if (peer.handlers) {
+        const events = Object.keys(peer.handlers);
+        for (let i = 0; i < events.length; i++) peer.link.off(events[i], peer.handlers[events[i]]);
+      }
       peer.subscription?.unsubscribe?.();
       try {
         peer.link.close();
@@ -535,10 +561,15 @@ class SyncManager extends Emitter {
     const { log } = this.#storage;
     const local = {};
     let remote = null;
-    for (const [key, seq] of Object.entries(this.#own(vector))) {
-      if (seq <= log.seqOf(key)) continue;
+    const keys = vector && typeof vector === 'object' ? Object.keys(vector) : [];
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      const seq = vector[key];
+      if (!this.#owns(key, seq)) continue;
+      const held = log.seqOf(key);
+      if (seq <= held) continue;
       (remote ??= {})[key] = seq;
-      local[key] = log.seqOf(key);
+      local[key] = held;
     }
     if (remote === null) return false;
     const message = `${peer.node.url} holds more of this node's ops than its log: a restored copy, or a second instance`;
@@ -610,19 +641,20 @@ class SyncManager extends Emitter {
       own: this.#storage.nodeId,
     });
     const missing = this.#lost(peer, first);
-    return this.#send(
-      peer,
-      ops.filter((op) => !Object.hasOwn(missing, opKey(op))),
-      reason,
-    );
+    if (missing === null) return this.#send(peer, ops, reason);
+    const sending = [];
+    for (let i = 0; i < ops.length; i++) if (!Object.hasOwn(missing, opKey(ops[i]))) sending.push(ops[i]);
+    return this.#send(peer, sending, reason);
   }
 
-  // Our own streams the host cannot be caught up on from this log: what it
-  // holds stops short of the first op retained here. Reported once per
-  // hello; their ops stay unsent — every one would be a gap at the host.
+  // Our own streams the host cannot be caught up on from this log (null
+  // when none): what it holds stops short of the first op retained here.
+  // Reported once per hello; their ops stay unsent — every one would be a
+  // gap at the host.
   #lost(peer, first) {
     const missing = unreachable(first, peer.remote.vector);
-    if (Object.keys(missing).length > 0 && !peer.undeliverable) {
+    if (Object.keys(missing).length === 0) return null;
+    if (!peer.undeliverable) {
       peer.undeliverable = true;
       const message = `${peer.node.url} lacks ops of this node that its log no longer holds`;
       this.#fail(peer, new SyncomError('UNDELIVERABLE', message, { missing }));
@@ -823,7 +855,12 @@ class SyncManager extends Emitter {
       // ops behind them were seen: refused, reported, the feed left to
       // resume. A host that named no kinds is from before plugins.
       const theirs = peer.remote.kinds;
-      const missing = theirs === null ? [] : this.#storage.kinds.filter((kind) => !theirs.includes(kind));
+      const missing = [];
+      if (theirs !== null) {
+        const held = new Set(theirs);
+        const kinds = this.#storage.kinds;
+        for (let i = 0; i < kinds.length; i++) if (!held.has(kinds[i])) missing.push(kinds[i]);
+      }
       if (missing.length > 0) {
         const message = `${peer.node.url} cannot hold the ${missing.join(', ')} kind${missing.length > 1 ? 's' : ''}; not bootstrapping from it`;
         this.#fail(peer, new SyncomError('KINDS_MISMATCH', message, { node: peer.remote.id, missing }));
@@ -916,7 +953,10 @@ class SyncManager extends Emitter {
   // One op landed here (locally or from a peer): wake the hosting feeds, and
   // queue it for every dialed peer except the one it came from.
   #fanOut(op, via) {
-    for (const wake of Array.from(this.#wakers)) wake();
+    if (this.#wakers.size > 0) for (const wake of [...this.#wakers]) wake();
+    if (this.#peers.size === 0) return;
+    const key = opKey(op);
+    const scope = op.scope ?? GLOBAL_SCOPE;
     for (const peer of this.#peers.values()) {
       if (peer.ref === via || !peer.remote || !peer.connected) continue;
       if (peer.behind) {
@@ -926,8 +966,8 @@ class SyncManager extends Emitter {
         continue;
       }
       if (op.origin === peer.remote.id || op.from === peer.remote.id) continue;
-      if (vectorHas(peer.remote.vector, op)) continue;
-      if (!opInScope(op, peer.node.scopes)) continue;
+      if ((peer.remote.vector[key] ?? 0) >= op.seq) continue;
+      if (!inScope(scope, peer.node.scopes)) continue;
       peer.outbox.push(op);
       if (peer.outbox.length > this.#maxOutbox) {
         this.#storage.logger.warn({ event: 'sync.outbox.dropped', url: peer.node.url, ops: peer.outbox.length });

@@ -60,9 +60,13 @@ const composeAt = (entry, plugins, prefix, data, paths, base) => {
         const tails = byMember.get(member);
         if (tails === undefined) return undefined;
         const here = `${full}/${member}`;
-        const ownValue = tails.includes('') ? data[here] : undefined;
-        const deeper = tails.filter((tail) => tail !== '');
-        return composeAt(entry, plugins, here, data, deeper, ownValue);
+        let holdsOwn = false;
+        const deeper = [];
+        for (let i = 0; i < tails.length; i++) {
+          if (tails[i] === '') holdsOwn = true;
+          else deeper.push(tails[i]);
+        }
+        return composeAt(entry, plugins, here, data, deeper, holdsOwn ? data[here] : undefined);
       };
       out[head] = mod.nest(entry, full, own ?? entry.data[full], childrenOf);
     } else out[head] = composeAt(entry, plugins, full, data, group.deeper, own);
@@ -80,11 +84,12 @@ const composeAt = (entry, plugins, prefix, data, paths, base) => {
  */
 const compose = (entry, plugins = null) => {
   const { data } = entry;
+  const keys = Object.keys(data);
   let paths = null;
-  for (const key of Object.keys(data)) if (key.includes('/')) (paths ??= []).push(key);
+  for (let i = 0; i < keys.length; i++) if (keys[i].includes('/')) (paths ??= []).push(keys[i]);
   if (paths === null) return data;
   const plain = {};
-  for (const key of Object.keys(data)) if (!key.includes('/')) plain[key] = data[key];
+  for (let i = 0; i < keys.length; i++) if (!keys[i].includes('/')) plain[keys[i]] = data[keys[i]];
   return composeAt(entry, plugins, '', data, paths, plain);
 };
 

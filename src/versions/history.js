@@ -36,10 +36,15 @@ const gone = (id, reason) => {
   return new SyncomError('HISTORY_GONE', `History of record ${id} is gone: ${why[reason]}`, { id, reason });
 };
 
-const isVector = (value) =>
-  value !== null &&
-  typeof value === 'object' &&
-  Object.keys(value).every((key) => Number.isSafeInteger(value[key]) && value[key] >= 0);
+const isVector = (value) => {
+  if (value === null || typeof value !== 'object') return false;
+  const keys = Object.keys(value);
+  for (let i = 0; i < keys.length; i++) {
+    const n = value[keys[i]];
+    if (!Number.isSafeInteger(n) || n < 0) return false;
+  }
+  return true;
+};
 
 // `at`, checked: an event id (a string), a stamp (a number or a Date),
 // `{ vector }` or `{ tag }`. The shape is data, so a wrong one is INVALID_VERSION.
@@ -71,8 +76,11 @@ const within = (version, entry) => {
 // the first reset stamped above what was.
 const exactStart = (entries, droppedTs) => {
   if (droppedTs === 0) return { start: 0, exact: true };
-  const start = entries.findIndex((entry) => isReset(entry) && entry.op.ts > droppedTs);
-  return start === -1 ? { start: 0, exact: false } : { start, exact: true };
+  for (let start = 0; start < entries.length; start++) {
+    const entry = entries[start];
+    if (isReset(entry) && entry.op.ts > droppedTs) return { start, exact: true };
+  }
+  return { start: 0, exact: false };
 };
 
 // The fold of `entries` from `start`: one step per entry — the entry of the

@@ -42,7 +42,11 @@ const { isJsonValue, jsonValue, fieldNames, setElements } = require('./args.js')
 const { isPath } = require('./paths.js');
 const { EMPTY, HOME, missing } = require('./plugin.js');
 
-const asKeys = (elements) => new Map(elements.map((element) => [JSON.stringify(element), element]));
+const asKeys = (elements) => {
+  const keys = new Map();
+  for (let i = 0; i < elements.length; i++) keys.set(JSON.stringify(elements[i]), elements[i]);
+  return keys;
+};
 
 const own = (object, key) => (Object.hasOwn(object, key) ? object[key] : undefined);
 
@@ -85,12 +89,15 @@ const diffViews = (
     patches.push({ action: 'write', data: registers });
     for (const field of Object.keys(toKinds)) {
       if (toKinds[field] !== 'register') {
-        patches.push(...recreate(field, toKinds[field], to[field], plugins, context));
+        const made = recreate(field, toKinds[field], to[field], plugins, context);
+        for (let i = 0; i < made.length; i++) patches.push(made[i]);
       }
     }
     return patches;
   }
-  for (const field of new Set([...Object.keys(toKinds), ...Object.keys(fromKinds)])) {
+  const fields = new Set(Object.keys(toKinds));
+  for (const field of Object.keys(fromKinds)) fields.add(field);
+  for (const field of fields) {
     const was = fromKinds[field];
     const now = toKinds[field];
     const value = to[field];
@@ -102,7 +109,9 @@ const diffViews = (
       continue;
     }
     if (was !== undefined && now !== undefined && was !== now) {
-      patches.push({ action: 'unset', field }, ...recreate(field, now, value, plugins, context));
+      patches.push({ action: 'unset', field });
+      const made = recreate(field, now, value, plugins, context);
+      for (let i = 0; i < made.length; i++) patches.push(made[i]);
       continue;
     }
     const kind = now ?? was;
@@ -114,13 +123,18 @@ const diffViews = (
     } else if (kind === 'set') {
       const before = asKeys(previous ?? []);
       const after = asKeys(value ?? []);
-      const added = [...after].filter(([key]) => !before.has(key)).map(([, element]) => element);
-      const removed = [...before].filter(([key]) => !after.has(key)).map(([, element]) => element);
+      const added = [];
+      for (const entry of after) if (!before.has(entry[0])) added.push(entry[1]);
+      const removed = [];
+      for (const entry of before) if (!after.has(entry[0])) removed.push(entry[1]);
       if (added.length > 0) patches.push({ action: 'add', field, elements: added });
       if (removed.length > 0) patches.push({ action: 'remove', field, elements: removed });
     } else {
       const mod = own(plugins.byName, kind);
-      if (mod !== undefined) patches.push(...mod.diff(field, kind, previous, value, context));
+      if (mod !== undefined) {
+        const made = mod.diff(field, kind, previous, value, context);
+        for (let i = 0; i < made.length; i++) patches.push(made[i]);
+      }
     }
   }
   return patches;
@@ -132,16 +146,20 @@ const isField = (value) => isPath(value);
 const ACTIONS = new Set(['put', 'unset', 'write', 'inc', 'add', 'remove', 'delete', 'purge']);
 
 // Exactly the tags a remove revokes: `[[element, { origin: addTs }]]`.
-const isRemovals = (list) =>
-  Array.isArray(list) &&
-  list.every(
-    (pair) =>
-      Array.isArray(pair) &&
-      pair.length === 2 &&
-      isJsonValue(pair[0]) &&
-      isPlainObject(pair[1]) &&
-      Object.keys(pair[1]).every((origin) => Number.isSafeInteger(pair[1][origin]) && pair[1][origin] > 0),
-  );
+const isRemovals = (list) => {
+  if (!Array.isArray(list)) return false;
+  for (let i = 0; i < list.length; i++) {
+    const pair = list[i];
+    if (!Array.isArray(pair) || pair.length !== 2 || !isJsonValue(pair[0]) || !isPlainObject(pair[1])) return false;
+    const tags = pair[1];
+    const origins = Object.keys(tags);
+    for (let j = 0; j < origins.length; j++) {
+      const ts = tags[origins[j]];
+      if (!Number.isSafeInteger(ts) || ts <= 0) return false;
+    }
+  }
+  return true;
+};
 
 /**
  * A patch as the op the write path takes: `[type, payload]`, checked as the

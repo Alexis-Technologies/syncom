@@ -327,7 +327,10 @@ const applyOne = async (batch, op) => {
   if (!changed) return;
   if (VALIDATED.has(op.type)) await reportConflicts(batch, op, entry);
   batch.touched.set(op.id, entry);
-  batch.deltas.set(op.id, { ...(batch.deltas.get(op.id) ?? {}), ...delta });
+  // The batch's own object, joined in place (a path is never `__proto__`).
+  let joined = batch.deltas.get(op.id);
+  if (joined === undefined) batch.deltas.set(op.id, (joined = {}));
+  Object.assign(joined, delta);
   batch.changes.set(op, changes);
 };
 

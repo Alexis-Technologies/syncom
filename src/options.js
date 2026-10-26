@@ -15,6 +15,7 @@ const DEFAULT_FLUSH_EVERY = 64;
 const DEFAULT_MAX_SKEW = 86_400_000;
 
 const LOCK_KEYS = ['staleAfter', 'poll', 'timeout'];
+const LOCK_KNOWN = new Set(LOCK_KEYS);
 
 // `open({ lock })`: `'fail'` (the default), `'wait'`, `false`, or an object
 // `{ mode, staleAfter, poll, timeout }` for the lockfile's knobs. `null`
@@ -35,7 +36,7 @@ const normalizeLock = (lock) => {
     options[key] = value;
   }
   for (const key of Object.keys(rest)) {
-    if (!LOCK_KEYS.includes(key)) throw new TypeError(`open({ lock }): unknown key '${key}'`);
+    if (!LOCK_KNOWN.has(key)) throw new TypeError(`open({ lock }): unknown key '${key}'`);
   }
   return options;
 };

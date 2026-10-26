@@ -37,6 +37,12 @@ with `node --test --test-name-pattern 'swap'`.
 
 - **CommonJS, `'use strict'`.** No build step, no transpilation. `src/` is what
   gets published.
+- **Loops, not array callbacks, in `src/`.** No `map`/`filter`/`find`/`some`/
+  `every`/`forEach`/`reduce`/`flatMap`/`Array.from` there — `pnpm lint` fails on
+  them (`no-restricted-properties` for `src/**`). One walk does what it can, a
+  membership test in a loop is a `Set`, a data array is never spread into
+  arguments (`push(...items)` throws past ~130 000 elements), and a new array
+  is `[]` + `push` (`new Array(n)` stays holey and slower to read).
 - **Zero runtime dependencies.** Everything in `package.json` is a
   devDependency, and `scripts/size.js` fails the run if a bare import reaches
   a browser bundle. If you need a helper, write it in `src/utils.js`.
@@ -122,7 +128,7 @@ on every browser entry — the main one and each subpath. The budget is a
 the bytes, and say why in a comment next to the number. Since the core and
 blocks plan (2026-10-25) the main entry is the core alone (budget 52 KB, about
 44 measured) and every block a subpath with a budget of its own; `/all` is
-held to 98 KB, and a composite row checks that the core and every block
+held to 101 KB, and a composite row checks that the core and every block
 bundled together weigh what `/all` weighs — nothing bundled twice. Every
 raise names its feature, and a raise of more than a kilobyte is a design
 decision (an engine subpath, an injected kind), taken in a plan, not in the

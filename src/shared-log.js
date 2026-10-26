@@ -11,7 +11,12 @@
 const METHODS = ['append', 'read', 'parseId'];
 
 /** Whether `value` has the three functions of the shared-log contract. */
-const isSharedLog = (value) =>
-  typeof value === 'object' && value !== null && METHODS.every((name) => typeof value[name] === 'function');
+const isSharedLog = (value) => {
+  if (typeof value !== 'object' || value === null) return false;
+  for (let i = 0; i < METHODS.length; i++) {
+    if (typeof value[METHODS[i]] !== 'function') return false;
+  }
+  return true;
+};
 
 module.exports = { isSharedLog };

@@ -242,17 +242,21 @@ const holds = (entry, field, member) => {
   return block !== undefined && block.k === 'l' && S.hasElem(S.indexOf(entry, field), member);
 };
 const pick = (entry, field, rendered, member) => {
-  const index = members(entry, field).indexOf(member);
+  const block = blockOf(entry, field);
+  const index = block === undefined || block.k !== 'l' ? -1 : S.indexOfElem(S.indexOf(entry, field), member);
   return index === -1 || !Array.isArray(rendered) ? undefined : rendered[index];
 };
 const isPlain = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 const nest = (entry, field, rendered, childrenOf) => {
   const keys = members(entry, field);
-  return rendered.map((value, i) => {
+  const out = [];
+  for (let i = 0; i < rendered.length; i++) {
+    const value = rendered[i];
     const children = childrenOf(keys[i]);
-    if (children === undefined) return value;
-    return isPlain(value) ? { ...value, ...children } : { ...children };
-  });
+    if (children === undefined) out.push(value);
+    else out.push(isPlain(value) ? { ...value, ...children } : { ...children });
+  }
+  return out;
 };
 const prune = (block, base) => S.prune(block, base);
 const join = (a, b) => S.join(a, b);
@@ -387,22 +391,32 @@ const resolve = (core, id, type, payload, current) => {
 // splices (Myers), laid in runs of at most MAX_RUN elements — one splice is
 // one run, and a run holds no more (src/rle.js).
 
-const inRuns = (patches) =>
-  patches.flatMap((patch) => {
+const inRuns = (patches) => {
+  const out = [];
+  for (let p = 0; p < patches.length; p++) {
+    const patch = patches[p];
     const { action, count, content, vals } = patch;
-    if (action !== 'splice' || count !== 0 || content === undefined || content.length <= MAX_RUN) return [patch];
-    const runs = [];
+    if (action !== 'splice' || count !== 0 || content === undefined || content.length <= MAX_RUN) {
+      out.push(patch);
+      continue;
+    }
     for (let at = 0; at < content.length; at += MAX_RUN) {
       const run = { ...patch, index: patch.index + at, content: content.slice(at, at + MAX_RUN) };
       if (vals !== undefined) {
-        const part = vals.filter(([offset]) => offset >= at && offset < at + MAX_RUN);
-        if (part.length > 0) run.vals = part.map(([offset, marker]) => [offset - at, marker]);
+        // The markers of this run's slots, at its own offsets.
+        const part = [];
+        for (let i = 0; i < vals.length; i++) {
+          const [offset, marker] = vals[i];
+          if (offset >= at && offset < at + MAX_RUN) part.push([offset - at, marker]);
+        }
+        if (part.length > 0) run.vals = part;
         else delete run.vals;
       }
-      runs.push(run);
+      out.push(run);
     }
-    return runs;
-  });
+  }
+  return out;
+};
 
 // ---------------------------------------------------------------------------
 // Markers: what a text's embed slot holds, as the API spells it.
@@ -411,9 +425,13 @@ const inRuns = (patches) =>
 const markerOf = (value) => {
   if (!isPlainObject(value) || typeof value.type !== 'string') return null;
   const { type, parents, attrs, isEmbed } = value;
+  const strings = [];
+  if (Array.isArray(parents)) {
+    for (let i = 0; i < parents.length; i++) if (typeof parents[i] === 'string') strings.push(parents[i]);
+  }
   return {
     type,
-    parents: Array.isArray(parents) ? parents.filter((parent) => typeof parent === 'string') : [],
+    parents: strings,
     attrs: isPlainObject(attrs) ? asJson(attrs) : {},
     isEmbed: isEmbed === true,
   };
@@ -426,12 +444,16 @@ const markerArgs = (method, given, embed) => {
     throw new TypeError(`${method}() takes a block marker: { type, parents?, attrs?, isEmbed? } with a type`);
   }
   const { type, parents = [], attrs = {}, isEmbed = false } = given;
-  if (!Array.isArray(parents) || parents.some((parent) => typeof parent !== 'string')) {
-    throw new TypeError(`${method}() takes parents as a list of block types`);
+  if (!Array.isArray(parents)) throw new TypeError(`${method}() takes parents as a list of block types`);
+  // Checked and copied in one pass; a hole is no block type.
+  const copy = [];
+  for (let i = 0; i < parents.length; i++) {
+    if (typeof parents[i] !== 'string') throw new TypeError(`${method}() takes parents as a list of block types`);
+    copy.push(parents[i]);
   }
   if (!isPlainObject(attrs) || !isJsonValue(attrs)) throw new TypeError(`${method}() takes attrs as a JSON object`);
   if (typeof isEmbed !== 'boolean') throw new TypeError(`${method}() takes isEmbed as a boolean`);
-  return { type, parents: [...parents], attrs, isEmbed: embed ?? isEmbed };
+  return { type, parents: copy, attrs, isEmbed: embed ?? isEmbed };
 };
 
 // The markers riding on a splice patch: `[[offset, marker | null]]`, each
@@ -452,17 +474,30 @@ const valsArgs = (method, vals, content) => {
 // is no embed slot, or holds none the API can read.
 const markerAt = (idx, i) => (S.heldAt(idx, i) === EMBED ? markerOf(S.valueAt(idx, i)) : null);
 
-// The marker at `index` of one side of a diff: from the entry when the side
-// has one, from the `embeds` lists a commit event carries otherwise.
-const markerIn = (side, field, index) => {
+// One side of a diff, for `markerIn`: its block when the side has an entry,
+// else a Map of the markers of the `embeds` list a commit event carries, by
+// index (the first one listed at an index); null when it has neither.
+const markersOf = (side, field) => {
   if (side == null) return null;
   if (side.entry != null) {
     const held = blockOf(side.entry, field);
-    return held === undefined || held.k !== 't' ? null : markerAt(S.indexOf(side.entry, field), index);
+    return held === undefined || held.k !== 't' ? null : S.indexOf(side.entry, field);
   }
   const list = side.embeds?.[field];
-  if (Array.isArray(list)) for (const [at, marker] of list) if (at === index) return marker;
-  return null;
+  if (!Array.isArray(list)) return null;
+  const byIndex = new Map();
+  for (let i = 0; i < list.length; i++) {
+    const [at, marker] = list[i];
+    if (!byIndex.has(at)) byIndex.set(at, marker);
+  }
+  return byIndex;
+};
+
+// The marker at `index` of one side of a diff (`markersOf`).
+const markerIn = (side, index) => {
+  if (side === null) return null;
+  if (!(side instanceof Map)) return markerAt(side, index);
+  return side.has(index) ? side.get(index) : null;
 };
 
 // Myers' hunks as splice patches, the markers of the embed slots they
@@ -470,31 +505,39 @@ const markerIn = (side, field, index) => {
 // sides keep whose marker changed — the hunks are in the before string's
 // coordinates, last first; the assigns in the after's.
 const embedPatches = (field, hunks, a, b, context) => {
-  const patches = hunks.map(([index, count, content]) => ({ action: 'splice', field, index, count, content }));
+  const patches = [];
+  for (let i = 0; i < hunks.length; i++) {
+    const [index, count, content] = hunks[i];
+    patches.push({ action: 'splice', field, index, count, content });
+  }
   if (!a.includes(EMBED) && !b.includes(EMBED)) return patches;
-  const { from, to } = context ?? {};
+  const from = markersOf(context?.from, field);
+  const to = markersOf(context?.to, field);
   const assigns = [];
   let ai = 0;
   let bi = 0;
   const kept = (upTo) => {
     for (; ai < upTo; ai++, bi++) {
       if (a[ai] !== EMBED) continue;
-      const now = markerIn(to, field, bi);
-      if (!deepEqual(markerIn(from, field, ai), now)) assigns.push({ action: 'setAt', field, index: bi, value: now });
+      const now = markerIn(to, bi);
+      if (!deepEqual(markerIn(from, ai), now)) assigns.push({ action: 'setAt', field, index: bi, value: now });
     }
   };
-  for (const patch of patches.slice().sort((x, y) => x.index - y.index)) {
+  // The hunks come last first: walked backwards, in the order of the text.
+  for (let h = patches.length - 1; h >= 0; h--) {
+    const patch = patches[h];
     kept(patch.index);
     const vals = [];
     for (let offset = 0; offset < patch.content.length; offset++) {
-      if (patch.content[offset] === EMBED) vals.push([offset, markerIn(to, field, bi + offset)]);
+      if (patch.content[offset] === EMBED) vals.push([offset, markerIn(to, bi + offset)]);
     }
     if (vals.length > 0) patch.vals = vals;
     ai += patch.count;
     bi += patch.content.length;
   }
   kept(a.length);
-  return [...patches, ...assigns];
+  for (let i = 0; i < assigns.length; i++) patches.push(assigns[i]);
+  return patches;
 };
 
 // A list's elements as one character each, so Myers runs over them as over
@@ -522,13 +565,16 @@ const spliceList = (field, from, to) => {
   const a = intern(from);
   const b = a === null ? null : intern(to);
   if (b === null) return [{ action: 'splice', field, index: 0, count: from.length, content: to }];
-  return myers(a, b).map(([index, count, text]) => ({
-    action: 'splice',
-    field,
-    index,
-    count,
-    content: Array.from(text, (ch) => items[ch.charCodeAt(0) - PRIVATE]),
-  }));
+  const hunks = myers(a, b);
+  const out = [];
+  for (let h = 0; h < hunks.length; h++) {
+    const [index, count, text] = hunks[h];
+    // One private-use unit per element: no surrogate pairs to keep together.
+    const content = [];
+    for (let i = 0; i < text.length; i++) content.push(items[text.charCodeAt(i) - PRIVATE]);
+    out.push({ action: 'splice', field, index, count, content });
+  }
+  return out;
 };
 
 const spliceText = (field, from, to, context) => embedPatches(field, myers(from, to), from, to, context);
@@ -568,13 +614,15 @@ const realize = (action, patch, method) => {
 
 // A list or a text comes back as one run (a run per MAX_RUN elements); an
 // empty one is dropped.
-const migrate = (kind, key, value) =>
-  value.length === 0
-    ? []
-    : inRuns([{ action: 'splice', field: key, index: 0, count: 0, content: value }]).map((patch) => [
-        'splice',
-        { key, index: patch.index, count: 0, content: patch.content },
-      ]);
+const migrate = (kind, key, value) => {
+  if (value.length === 0) return [];
+  const runs = inRuns([{ action: 'splice', field: key, index: 0, count: 0, content: value }]);
+  const out = [];
+  for (let i = 0; i < runs.length; i++) {
+    out.push(['splice', { key, index: runs[i].index, count: 0, content: runs[i].content }]);
+  }
+  return out;
+};
 
 // A text's marks laid again over the field `compact()` makes anew: the ones
 // in force, in stamp order, as `mark` patches (src/sequence.js marksIn).
@@ -952,12 +1000,18 @@ const positions = async (core, id, key, cursors) => {
     if (typeof cursor !== 'string' || !S.isAnchor(cursor)) throw new TypeError('positions() takes cursors');
   }
   const field = await held(core, 'positions', id, key);
-  if (field === null) return cursors.map(() => null);
+  if (field === null) {
+    const none = [];
+    for (let i = 0; i < cursors.length; i++) none.push(null);
+    return none;
+  }
   const idx = S.indexOf(field.entry, key);
-  return cursors.map((cursor) => {
-    const at = S.indexOfCursor(idx, cursor);
-    return at === null ? null : { index: at, side: sideOf(cursor) };
-  });
+  const out = [];
+  for (let i = 0; i < cursors.length; i++) {
+    const at = S.indexOfCursor(idx, cursors[i]);
+    out.push(at === null ? null : { index: at, side: sideOf(cursors[i]) });
+  }
+  return out;
 };
 
 // ---------------------------------------------------------------------------
@@ -1069,10 +1123,9 @@ const compose = (a, b) => {
   return out;
 };
 
-// The content of an insert as delta ops: the text, its embed slots as
-// `{ insert: { embed: marker } }`.
-const insertsOf = (content, vals, marks) => {
-  const out = [];
+// The content of an insert as delta ops, pushed onto `out`: the text, its
+// embed slots as `{ insert: { embed: marker } }`.
+const insertsOf = (content, vals, marks, out) => {
   const markers = new Map(vals ?? []);
   const attributes = marks !== undefined && Object.keys(marks).length > 0 ? marks : undefined;
   const add = (insert) => void out.push(attributes === undefined ? { insert } : { insert, attributes });
@@ -1097,7 +1150,7 @@ const deltaOf = (change) => {
     if (change.index > 0) out.push({ retain: change.index });
     if (change.count > 0) out.push({ delete: change.count });
     if (change.content !== undefined && change.content.length > 0) {
-      out.push(...insertsOf(change.content, change.vals, change.marks));
+      insertsOf(change.content, change.vals, change.marks, out);
     }
     return out;
   }
@@ -1175,9 +1228,10 @@ const isDeltaOp = (op) =>
  */
 const applyDelta = async (core, id, key, delta, { actor, message, source, expect } = {}) => {
   if (typeof key !== 'string') throw new TypeError('applyDelta() takes a field name');
-  if (!Array.isArray(delta) || !delta.every(isDeltaOp)) {
-    throw new TypeError('applyDelta() takes a delta: [{ retain, attributes? } | { insert, attributes? } | { delete }]');
-  }
+  const shape = 'applyDelta() takes a delta: [{ retain, attributes? } | { insert, attributes? } | { delete }]';
+  if (!Array.isArray(delta)) throw new TypeError(shape);
+  // A hole is no op.
+  for (let i = 0; i < delta.length; i++) if (!isDeltaOp(delta[i])) throw new TypeError(shape);
   if (expect !== undefined && typeof expect !== 'string') {
     throw new TypeError('applyDelta() takes expect as the text the delta was made over');
   }

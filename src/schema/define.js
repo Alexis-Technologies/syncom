@@ -18,10 +18,11 @@ const { ValidationError } = require('../errors.js');
 
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const SCHEMA_KEYS = ['version', 'entities', 'snapshot', 'migrations', 'ahead', 'lens'];
-const AHEAD = ['apply', 'hold'];
-const LENS = ['migrations', 'validate', 'both'];
+const SCHEMA_KEYS = new Set(['version', 'entities', 'snapshot', 'migrations', 'ahead', 'lens']);
+const AHEAD = new Set(['apply', 'hold']);
+const LENS = new Set(['migrations', 'validate', 'both']);
 const ENTITY_KEYS = ['schema', 'idField', 'validate', 'index', 'unique', 'fields', 'search'];
+const ENTITY_KEY = new Set(ENTITY_KEYS);
 
 const fail = (entity, text) => new TypeError(`open({ schema }): entity ${entity}: ${text}`);
 
@@ -33,26 +34,34 @@ const segment = (part) => {
   return typeof key === 'symbol' ? String(key) : key;
 };
 
-const pointer = (text) =>
-  text
-    .split('/')
-    .filter(Boolean)
-    .map((part) => part.replaceAll('~1', '/').replaceAll('~0', '~'));
+const pointer = (text) => {
+  const parts = text.split('/');
+  const path = [];
+  for (let i = 0; i < parts.length; i++) {
+    if (parts[i] !== '') path.push(parts[i].replaceAll('~1', '/').replaceAll('~0', '~'));
+  }
+  return path;
+};
 
 const toIssue = (issue) => {
   if (!isObject(issue)) return { path: [], message: String(issue) };
-  const path = Array.isArray(issue.path)
-    ? issue.path.map(segment)
-    : typeof issue.instancePath === 'string'
-      ? pointer(issue.instancePath)
-      : [];
+  let path = [];
+  if (Array.isArray(issue.path)) {
+    for (let i = 0; i < issue.path.length; i++) path.push(segment(issue.path[i]));
+  } else if (typeof issue.instancePath === 'string') {
+    path = pointer(issue.instancePath);
+  }
   const message = typeof issue.message === 'string' ? issue.message : 'invalid';
   const code = typeof issue.code === 'string' ? issue.code : issue.keyword;
   return typeof code === 'string' ? { path, message, code } : { path, message };
 };
 
-const toIssues = (issues) =>
-  Array.isArray(issues) && issues.length > 0 ? issues.map(toIssue) : [{ path: [], message: 'invalid' }];
+const toIssues = (issues) => {
+  if (!Array.isArray(issues) || issues.length === 0) return [{ path: [], message: 'invalid' }];
+  const out = [];
+  for (let i = 0; i < issues.length; i++) out.push(toIssue(issues[i]));
+  return out;
+};
 
 // Whatever a validator threw, as a ValidationError: its own, one carrying
 // ajv-style `errors`, or anything else as a single issue with the cause kept.
@@ -142,28 +151,43 @@ const deriveIdField = (schema, entity) => {
 };
 
 const isField = (value) => typeof value === 'string' && value.length > 0;
-const isFieldList = (value) => Array.isArray(value) && value.length > 0 && value.every(isField);
 
-const explicitIndex = (value, entity) => {
-  if (!Array.isArray(value) || !value.every(isField)) throw fail(entity, 'index must be an array of field names');
-  return [...new Set(value)];
+// A copy of a non-empty array of field names, or null.
+const fieldList = (value) => {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const list = [];
+  for (let i = 0; i < value.length; i++) {
+    if (!isField(value[i])) return null;
+    list.push(value[i]);
+  }
+  return list;
 };
+
+// An array of field names, each once, in the order first given.
+const fieldNames = (value, entity, what) => {
+  if (!Array.isArray(value)) throw fail(entity, `${what} must be an array of field names`);
+  const names = new Set();
+  for (let i = 0; i < value.length; i++) {
+    if (!isField(value[i])) throw fail(entity, `${what} must be an array of field names`);
+    names.add(value[i]);
+  }
+  return [...names];
+};
+
+const explicitIndex = (value, entity) => fieldNames(value, entity, 'index');
 
 // The fields `$text` searches, joined into the record's catalog row and
 // handed to the injected text index (`open({ search })`); never derived from
 // a schema — no validator has a notion of "searchable".
-const explicitSearch = (value, entity) => {
-  if (!Array.isArray(value) || !value.every(isField)) throw fail(entity, 'search must be an array of field names');
-  return [...new Set(value)];
-};
+const explicitSearch = (value, entity) => fieldNames(value, entity, 'search');
 
 const explicitUnique = (value, entity) => {
   if (!Array.isArray(value)) throw fail(entity, 'unique must be an array');
   const keys = [];
   for (const key of value) {
-    if (isField(key)) keys.push([key]);
-    else if (isFieldList(key)) keys.push([...key]);
-    else throw fail(entity, 'unique takes field names and arrays of them');
+    const list = isField(key) ? [key] : fieldList(key);
+    if (list === null) throw fail(entity, 'unique takes field names and arrays of them');
+    keys.push(list);
   }
   return keys;
 };
@@ -178,15 +202,24 @@ const derivedIndexes = (schema) => {
   const unique = [];
   if (!isObject(schema)) return { index, unique };
   if (isObject(schema.indexes)) {
-    for (const spec of Object.values(schema.indexes)) {
+    const names = Object.keys(schema.indexes);
+    for (let i = 0; i < names.length; i++) {
+      const spec = schema.indexes[names[i]];
       if (!isObject(spec)) continue;
-      if (isFieldList(spec.unique)) unique.push([...spec.unique]);
-      else if (isFieldList(spec.index)) for (const field of spec.index) index.add(field);
-      else if (isFieldList(spec.primary)) for (const field of spec.primary) index.add(field);
+      const keys = fieldList(spec.unique);
+      if (keys !== null) {
+        unique.push(keys);
+        continue;
+      }
+      const fields = fieldList(spec.index) ?? fieldList(spec.primary);
+      if (fields !== null) for (let j = 0; j < fields.length; j++) index.add(fields[j]);
     }
   }
   if (isObject(schema.fields)) {
-    for (const [field, spec] of Object.entries(schema.fields)) {
+    const names = Object.keys(schema.fields);
+    for (let i = 0; i < names.length; i++) {
+      const field = names[i];
+      const spec = schema.fields[field];
       if (!isObject(spec)) continue;
       if (spec.unique === true) unique.push([field]);
       else if (spec.index === true) index.add(field);
@@ -210,7 +243,7 @@ const dedupe = (keys) => {
 const normalizeEntity = (name, def, validator) => {
   if (!isObject(def)) throw fail(name, 'must be an object');
   for (const key of Object.keys(def)) {
-    if (!ENTITY_KEYS.includes(key)) throw fail(name, `unknown key '${key}' (expected ${ENTITY_KEYS.join(', ')})`);
+    if (!ENTITY_KEY.has(key)) throw fail(name, `unknown key '${key}' (expected ${ENTITY_KEYS.join(', ')})`);
   }
   const { schema, validate, fields } = def;
   if (validate !== undefined && validate !== false) throw fail(name, 'validate may only be false');
@@ -232,6 +265,11 @@ const normalizeEntity = (name, def, validator) => {
     fields: fields ?? null,
     search: def.search === undefined ? [] : explicitSearch(def.search, name),
   };
+};
+
+const addEntity = (entities, name, def, compiler) => {
+  if (!isField(name)) throw new TypeError('open({ schema }): entity names must be non-empty strings');
+  entities.set(name, normalizeEntity(name, def, compiler));
 };
 
 const isMigration = (value) =>
@@ -259,7 +297,10 @@ const normalizeMigrations = (migrations, version) => {
       throw new TypeError(`open({ schema }): migrations[${key}] must be { up } or { [entity]: { up } }`);
     }
     const perEntity = new Map();
-    for (const [entity, migration] of Object.entries(value)) {
+    const entities = Object.keys(value);
+    for (let i = 0; i < entities.length; i++) {
+      const entity = entities[i];
+      const migration = value[entity];
       if (!isMigration(migration)) throw new TypeError(`open({ schema }): migrations[${key}].${entity} must be { up }`);
       perEntity.set(entity, { up: migration.up });
     }
@@ -290,28 +331,29 @@ const normalizeSchema = (schema, { validator } = {}) => {
   }
   if (!isObject(schema)) throw new TypeError('open({ schema }): schema must be an object');
   for (const key of Object.keys(schema)) {
-    if (!SCHEMA_KEYS.includes(key)) throw new TypeError(`open({ schema }): unknown key '${key}'`);
+    if (!SCHEMA_KEYS.has(key)) throw new TypeError(`open({ schema }): unknown key '${key}'`);
   }
   const version = schema.version === undefined ? 1 : schema.version;
   if (!Number.isInteger(version) || version < 1) {
     throw new TypeError('open({ schema }): version must be a positive integer');
   }
   const ahead = schema.ahead === undefined ? 'apply' : schema.ahead;
-  if (!AHEAD.includes(ahead)) throw new TypeError("open({ schema }): ahead must be 'apply' or 'hold'");
+  if (!AHEAD.has(ahead)) throw new TypeError("open({ schema }): ahead must be 'apply' or 'hold'");
   const lens = schema.lens === undefined ? 'both' : schema.lens;
-  if (!LENS.includes(lens)) throw new TypeError("open({ schema }): lens must be 'migrations', 'validate' or 'both'");
+  if (!LENS.has(lens)) throw new TypeError("open({ schema }): lens must be 'migrations', 'validate' or 'both'");
   const migrations = normalizeMigrations(schema.migrations, version);
   if (lens === 'validate' && migrations !== null) {
     throw new TypeError("open({ schema }): lens 'validate' skips the migrations the schema declares");
   }
   const source = schema.entities;
   if (source !== undefined && source !== null) {
-    const pairs =
-      typeof source.entries === 'function' ? [...source.entries()] : isObject(source) ? Object.entries(source) : null;
-    if (pairs === null) throw new TypeError('open({ schema }): entities must be an object or a Map');
-    for (const [name, def] of pairs) {
-      if (!isField(name)) throw new TypeError('open({ schema }): entity names must be non-empty strings');
-      entities.set(name, normalizeEntity(name, def, compiler));
+    if (typeof source.entries === 'function') {
+      for (const [name, def] of source.entries()) addEntity(entities, name, def, compiler);
+    } else if (isObject(source)) {
+      const names = Object.keys(source);
+      for (let i = 0; i < names.length; i++) addEntity(entities, names[i], source[names[i]], compiler);
+    } else {
+      throw new TypeError('open({ schema }): entities must be an object or a Map');
     }
   }
   return { version, entities, snapshot: schema.snapshot, migrations, ahead, lens };

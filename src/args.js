@@ -9,7 +9,7 @@
 const { isPath, MAX_PATH_DEPTH, MAX_PATH } = require('./paths.js');
 
 const MAX_NODE_ID = 128;
-const EXPANDS = ['before', 'after', 'both', 'none'];
+const EXPANDS = new Set(['before', 'after', 'both', 'none']);
 
 const hasControl = (value) => {
   for (let i = 0; i < value.length; i++) if (value.charCodeAt(i) < 32) return true;
@@ -49,8 +49,12 @@ const fieldNames = (method, fields) => {
   if (!Array.isArray(list) || list.length === 0) {
     throw new TypeError(`${method}() takes a field name or a non-empty array of them`);
   }
-  for (const field of list) fieldName(method, field);
-  return [...new Set(list)];
+  const names = new Set();
+  for (const field of list) {
+    fieldName(method, field);
+    names.add(field);
+  }
+  return [...names];
 };
 
 /** `value` when JSON can carry it; a TypeError naming the method otherwise. */
@@ -121,7 +125,7 @@ const markArgs = (method, key, start, end, name, expand) => {
     throw new TypeError(`${method}() takes a range: 0 <= start <= end`);
   }
   if (typeof name !== 'string' || name.length === 0) throw new TypeError(`${method}() takes a style name`);
-  if (!EXPANDS.includes(expand)) throw new TypeError(`${method}() takes expand: before, after, both or none`);
+  if (!EXPANDS.has(expand)) throw new TypeError(`${method}() takes expand: before, after, both or none`);
 };
 
 // What add()/remove() take: a field name and a non-empty array of JSON

@@ -22,6 +22,7 @@ const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf, kindsOf } = require('../protocol.
 
 const DEFAULT_PAGE_BYTES = 4 << 20;
 const TRACKED = Symbol.for('wrpc.tracked');
+const encoder = new TextEncoder();
 
 // A refusal as it goes on the wire: the numeric `code` a transport carries
 // (wrpc sends code and message), and `reason` — a constant naming which
@@ -34,7 +35,7 @@ const coded = (message, code, reason) => {
   return error;
 };
 
-const LIMIT_KEYS = ['opsPerPush', 'bytesPerPush', 'opsPerSecond'];
+const LIMIT_KEYS = new Set(['opsPerPush', 'bytesPerPush', 'opsPerSecond']);
 
 // `unit({ limits })`: each a positive number, unknown keys refused.
 const normalizeLimits = (limits) => {
@@ -42,7 +43,7 @@ const normalizeLimits = (limits) => {
   if (typeof limits !== 'object') throw new TypeError('unit({ limits }): limits must be an object');
   const normalized = {};
   for (const key of Object.keys(limits)) {
-    if (!LIMIT_KEYS.includes(key)) throw new TypeError(`unit({ limits }): unknown limit '${key}'`);
+    if (!LIMIT_KEYS.has(key)) throw new TypeError(`unit({ limits }): unknown limit '${key}'`);
     const value = limits[key];
     if (value === undefined) continue;
     if (!Number.isFinite(value) || value <= 0) {
@@ -58,10 +59,18 @@ const normalizeLimits = (limits) => {
 // everything); one granted a list reads the intersection — asking for `'*'`
 // or for nothing is asking for its list, asking only for others is 403.
 const grant = (asked, granted) => {
-  const wanted = Array.isArray(asked) ? asked.filter((scope) => typeof scope === 'string') : null;
-  if (granted.includes(GLOBAL_SCOPE)) return wanted;
-  if (wanted === null || wanted.includes(GLOBAL_SCOPE)) return granted;
-  const scopes = wanted.filter((scope) => granted.includes(scope));
+  const everything = granted.includes(GLOBAL_SCOPE);
+  if (!Array.isArray(asked)) return everything ? null : granted;
+  const held = everything ? null : new Set(granted);
+  const scopes = [];
+  for (let i = 0; i < asked.length; i++) {
+    const scope = asked[i];
+    if (typeof scope !== 'string') continue;
+    if (held === null) scopes.push(scope);
+    else if (scope === GLOBAL_SCOPE) return granted;
+    else if (held.has(scope)) scopes.push(scope);
+  }
+  if (held === null) return scopes;
   if (scopes.length === 0) throw coded('Scopes not granted', 403, 'SCOPES');
   return scopes;
 };
@@ -94,7 +103,7 @@ const limit = (otel, state, args, ops, limits) => {
     throw coded(`Push of ${ops.length} ops exceeds opsPerPush ${opsPerPush}`, 413, 'OPS_PER_PUSH');
   }
   if (bytesPerPush !== undefined) {
-    const bytes = new TextEncoder().encode(JSON.stringify(args?.ops ?? null)).length;
+    const bytes = encoder.encode(JSON.stringify(args?.ops ?? null)).length;
     if (bytes > bytesPerPush) {
       otel.recordLimited('bytes');
       throw coded(`Push of ${bytes} bytes exceeds bytesPerPush ${bytesPerPush}`, 413, 'BYTES_PER_PUSH');
@@ -122,7 +131,7 @@ const streamed = (client, page, pageBytes) => {
   if (!canStream || page.records.length === 0) return page;
   let text = '';
   for (const record of page.records) text += `${JSON.stringify(record)}\n`;
-  const bytes = new TextEncoder().encode(text);
+  const bytes = encoder.encode(text);
   if (bytes.length > pageBytes) return page;
   const stream = client.createStream('syncom/snapshot', bytes.length);
   // The opening packet is already out; writing in this tick would race the
@@ -181,7 +190,11 @@ const hello = (host) => async (context, args) => {
   if (host.authorize && !(await host.authorize(context, args))) {
     throw refuse(host, 'Not authorized to sync', 403, 'UNAUTHORIZED', args.node);
   }
-  const scopes = Array.isArray(args.scopes) ? args.scopes.filter((s) => typeof s === 'string') : [GLOBAL_SCOPE];
+  let scopes = [GLOBAL_SCOPE];
+  if (Array.isArray(args.scopes)) {
+    scopes = [];
+    for (let i = 0; i < args.scopes.length; i++) if (typeof args.scopes[i] === 'string') scopes.push(args.scopes[i]);
+  }
   const schema = schemaOf(args.schema);
   const kinds = kindsOf(args.kinds);
   if (context?.client) {
@@ -375,9 +388,17 @@ const handPresence = (host, context, scopes) => {
   const client = context?.client;
   if (!server || typeof server.sendTo !== 'function' || !client || client.id === undefined) return;
   const floor = Date.now() - host.presence.timeout;
-  for (const [scope, room] of host.presence.rooms) {
-    if (!scopes.includes(scope)) continue;
-    const s = [...room.values()].filter((entry) => entry[2] >= floor && entry[0] !== client.data?.syncom?.node);
+  const self = client.data?.syncom?.node;
+  const { rooms } = host.presence;
+  const seen = new Set();
+  for (let i = 0; i < scopes.length; i++) {
+    const scope = scopes[i];
+    if (seen.has(scope)) continue;
+    seen.add(scope);
+    const room = rooms.get(scope);
+    if (room === undefined) continue;
+    const s = [];
+    for (const entry of room.values()) if (entry[2] >= floor && entry[0] !== self) s.push(entry);
     if (s.length > 0) server.sendTo(client.id, 'syncom/presence', { p: 1, scope, s });
   }
 };

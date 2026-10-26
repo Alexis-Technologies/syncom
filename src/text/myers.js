@@ -40,7 +40,7 @@ const shortestEdit = (x, y, max) => {
   const trace = [];
   for (let d = 0; d <= limit; d++) {
     // The frontier as this round found it; the round then moves `v` on.
-    trace.push(Int32Array.from(v));
+    trace.push(v.slice());
     for (let k = -d; k <= d; k += 2) {
       let i;
       if (k === -d || (k !== d && v[offset + k - 1] < v[offset + k + 1])) i = v[offset + k + 1];
@@ -127,11 +127,14 @@ const hunks = (a, b, max) => {
 // The diff over code points, its hunks moved to UTF-16 units: a pair is one
 // item of the sequence, so no hunk ends between its halves.
 const byCodePoints = (a, b, max) => {
-  const points = Array.from(a);
-  const units = new Array(points.length + 1);
-  units[0] = 0;
-  for (let i = 0; i < points.length; i++) units[i + 1] = units[i] + points[i].length;
-  const out = hunks(points, Array.from(b), max);
+  // The code points of `a` and where each starts in units, in one pass.
+  const points = [];
+  const units = [0];
+  for (const point of a) {
+    points.push(point);
+    units.push(units[units.length - 1] + point.length);
+  }
+  const out = hunks(points, [...b], max);
   for (const hunk of out) {
     const [index, count] = hunk;
     hunk[0] = units[index];

@@ -90,9 +90,26 @@ const build = (record) => {
   }
 };
 
+// A schema's first textblock type in declaration order; a schema never changes, so it is found once.
+const textblocks = new WeakMap();
+const firstTextblockOf = (schema) => {
+  if (textblocks.has(schema)) return textblocks.get(schema);
+  let found;
+  const names = Object.keys(schema.nodes);
+  for (let i = 0; i < names.length; i++) {
+    const type = schema.nodes[names[i]];
+    if (type.isTextblock) {
+      found = type;
+      break;
+    }
+  }
+  textblocks.set(schema, found);
+  return found;
+};
+
 /** Typed spans as a document of `schema`, the markers' parents opened as containers; what the schema cannot hold is left out. */
 const spansToDoc = (spans, schema) => {
-  const firstTextblock = Object.values(schema.nodes).find((type) => type.isTextblock);
+  const firstTextblock = firstTextblockOf(schema);
   const textblockIn = (type) => {
     const fit = type.contentMatch.defaultType;
     return fit !== undefined && fit !== null && fit.isTextblock ? fit : firstTextblock;
@@ -257,7 +274,15 @@ const createProseMirror = (storage, id, path, pm, options = {}) => {
     // The editor's own edits, as the delta between the documents — after
     // what the field lacked of the document before, held till now.
     appendTransaction(trs, before, after) {
-      if (report === null || !trs.some((tr) => tr.docChanged && tr.getMeta(key) === undefined)) return null;
+      if (report === null) return null;
+      let edited = false;
+      for (let i = 0; i < trs.length; i++) {
+        if (trs[i].docChanged && trs[i].getMeta(key) === undefined) {
+          edited = true;
+          break;
+        }
+      }
+      if (!edited) return null;
       const now = docToSpans(after.doc);
       const local = diffSpans(docToSpans(before.doc), now);
       const delta = unfit.length === 0 ? local : compose(unfit, local);
@@ -315,17 +340,17 @@ const createProseMirror = (storage, id, path, pm, options = {}) => {
       const { state } = view;
       const { selection } = state;
       // The selection as field indices through the delta, before the field moves.
-      const at =
-        selection instanceof TextSelection
-          ? [selection.anchor, selection.head].map((pos) =>
-              transformIndex(toField(indexOfPos(state.doc, pos)), delta, true),
-            )
-          : null;
+      let at = null;
+      if (selection instanceof TextSelection) {
+        const anchor = transformIndex(toField(indexOfPos(state.doc, selection.anchor)), delta, true);
+        const head = transformIndex(toField(indexOfPos(state.doc, selection.head)), delta, true);
+        at = [anchor, head];
+      }
       base = deltaToSpans(compose(spansToDelta(base ?? docToSpans(state.doc)), delta));
       const doc = spansToDoc(base, state.schema);
       unfit = diffSpans(base, docToSpans(doc));
       back = null;
-      land(doc, at === null ? null : at.map(toDoc));
+      land(doc, at === null ? null : [toDoc(at[0]), toDoc(at[1])]);
     },
     onChange: (listener) => {
       report = listener;
@@ -364,6 +389,7 @@ const createProseMirror = (storage, id, path, pm, options = {}) => {
       key: cursorKey,
       state: {
         init: () => DecorationSet.empty,
+        // oxlint-disable-next-line no-restricted-properties -- DecorationSet.map (ProseMirror), not an Array
         apply: (tr, set) => tr.getMeta(cursorKey) ?? set.map(tr.mapping, tr.doc),
       },
       props: { decorations: (state) => cursorKey.getState(state) },

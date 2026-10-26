@@ -72,8 +72,9 @@ const set = (node, pair, hash, depth, added, owner) => {
   const own = owner !== null && node.owner === owner;
   if (node.pairs !== undefined) {
     const pairs = own ? node.pairs : node.pairs.slice();
-    const i = pairs.findIndex((held) => held[0] === key);
-    if (i === -1) {
+    let i = 0;
+    while (i < pairs.length && pairs[i][0] !== key) i++;
+    if (i === pairs.length) {
       pairs.push(pair);
       added.n = 1;
     } else pairs[i] = pair;

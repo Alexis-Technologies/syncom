@@ -91,7 +91,7 @@ const chunked = (held) => {
  * An empty list takes (0, 0).
  */
 const splice = (list, c, i, remove, entries) => {
-  const chunks = list.chunks.slice();
+  const { chunks } = list;
   if (chunks.length === 0) return { chunks: chunked(entries.slice()), size: entries.length };
   // The position right after what is removed: (k, j), k past the end when
   // the removal reaches it.
@@ -113,8 +113,10 @@ const splice = (list, c, i, remove, entries) => {
   for (const entry of entries) held.push(entry);
   const last = Math.min(k, chunks.length - 1);
   if (k < chunks.length) for (let m = j; m < chunks[k].length; m++) held.push(chunks[k][m]);
-  chunks.splice(c, last - c + 1, ...chunked(held));
-  return { chunks, size: list.size - (remove - left) + entries.length };
+  // Chunks c..last give way to the pieces of `held`, the rest shared (native
+  // copies: a list's chunks can be many).
+  const out = chunks.slice(0, c).concat(chunked(held), chunks.slice(last + 1));
+  return { chunks: out, size: list.size - (remove - left) + entries.length };
 };
 
 /** The list with `entries` (ascending, past the last held) appended. */

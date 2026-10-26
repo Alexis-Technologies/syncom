@@ -71,26 +71,36 @@ const chunks = (list) => {
   return out;
 };
 
+// `list` cut into chunks, each made a leaf (`leaf`) or an internal node.
+const nodesOf = (list, leaf, tag) => {
+  const pieces = chunks(list);
+  for (let i = 0; i < pieces.length; i++) pieces[i] = leaf ? leafOf(pieces[i], tag) : internalOf(pieces[i], tag);
+  return pieces;
+};
+
 /** The tree of `items`, in order, tagged for `tag`: bottom-up, O(n). An empty list is an empty leaf. */
 const fromItems = (items, tag) => {
   if (items.length === 0) return leafOf([], tag);
-  let level = chunks(items).map((chunk) => leafOf(chunk, tag));
-  while (level.length > 1) level = chunks(level).map((chunk) => internalOf(chunk, tag));
+  let level = nodesOf(items, true, tag);
+  while (level.length > 1) level = nodesOf(level, false, tag);
   return level[0];
 };
 
 /** The root of a tree built anew around a root that overflowed: the parent of its pieces. */
 const rootOf = (nodes, tag) => (nodes.length === 1 ? nodes[0] : internalOf(nodes, tag));
 
-// Whether the hints from `item` up carry `tag` and reach `root`.
-const trusted = (root, item, tag) => {
+// Where `item` stands in its leaf when the hints from it up carry `tag` and
+// reach `root`; -1 when they do not.
+const trustedAt = (root, item, tag) => {
   let node = item.node;
-  if (node === null || node.lineage !== tag || !node.items.includes(item)) return false;
+  if (node === null || node.lineage !== tag) return -1;
+  const i = node.items.indexOf(item);
+  if (i === -1) return -1;
   while (node.parent !== null) {
     node = node.parent;
-    if (node.lineage !== tag) return false;
+    if (node.lineage !== tag) return -1;
   }
-  return node === root;
+  return node === root ? i : -1;
 };
 
 // Every hint of the tree set again for `tag`: the parents, the leaves, the tag.
@@ -112,9 +122,12 @@ const rehint = (root, tag) => {
   }
 };
 
-// The hints `item` needs, trusted or made anew.
+// The hints `item` needs, trusted or made anew; where it stands in its leaf.
 const ensure = (root, item, tag) => {
-  if (!trusted(root, item, tag)) rehint(root, tag);
+  const i = trustedAt(root, item, tag);
+  if (i !== -1) return i;
+  rehint(root, tag);
+  return item.node.items.indexOf(item);
 };
 
 // ---- going down ---------------------------------------------------------
@@ -282,14 +295,14 @@ const text = (root) => textOf(root);
 
 /** The slots and visible slots before `item` of the tree `root` tagged `tag` — through the hints. */
 const positionOf = (root, item, tag) => {
-  ensure(root, item, tag);
+  const i = ensure(root, item, tag);
   let s = 0;
   let v = 0;
   let node = item.node;
-  for (const other of node.items) {
-    if (other === item) break;
-    s += measureOf(other);
-    v += visibleOf(other);
+  const { items } = node;
+  for (let k = 0; k < i; k++) {
+    s += measureOf(items[k]);
+    v += visibleOf(items[k]);
   }
   for (let parent = node.parent; parent !== null; node = parent, parent = node.parent) {
     for (const child of parent.children) {
@@ -341,8 +354,11 @@ const locateItem = (root, item) => {
 
 // ---- editing (path copying) --------------------------------------------
 
-// `list` as one node of `make`, or split evenly when it overflows.
-const pieced = (list, make) => (list.length <= MAX_ITEMS ? [make(list)] : chunks(list).map(make));
+// `list` as one node — a leaf (`leaf`) or an internal one — or split evenly when it overflows.
+const pieced = (list, leaf, tag) => {
+  if (list.length > MAX_ITEMS) return nodesOf(list, leaf, tag);
+  return [leaf ? leafOf(list, tag) : internalOf(list, tag)];
+};
 
 // The leaf `leaf` with its items replaced by `items`, and the path above it
 // copied: the new root. An overflowing leaf splits, and so does a parent
@@ -351,11 +367,10 @@ const pieced = (list, make) => (list.length <= MAX_ITEMS ? [make(list)] : chunks
 // a walk steps leaf to leaf and must never land on an empty one.
 const rebuild = (leaf, items, tag) => {
   let replaced = leaf;
-  let pieces = items.length === 0 && leaf.parent !== null ? [] : pieced(items, (chunk) => leafOf(chunk, tag));
+  let pieces = items.length === 0 && leaf.parent !== null ? [] : pieced(items, true, tag);
   for (let parent = leaf.parent; parent !== null; parent = replaced.parent) {
-    const children = parent.children.slice();
-    children.splice(children.indexOf(replaced), 1, ...pieces);
-    if (children.length > 0) pieces = pieced(children, (chunk) => internalOf(chunk, tag));
+    const children = spliced(parent.children, parent.children.indexOf(replaced), 1, pieces);
+    if (children.length > 0) pieces = pieced(children, false, tag);
     else pieces = parent.parent !== null ? [] : [leafOf([], tag)];
     replaced = parent;
   }
@@ -374,23 +389,20 @@ const spliced = (held, i, remove, items) => {
 
 /** The new root of `root` (tagged `tag`) with `items` inserted before `item`. */
 const insertBefore = (root, item, items, tag) => {
-  ensure(root, item, tag);
-  const held = item.node.items;
-  return rebuild(item.node, spliced(held, held.indexOf(item), 0, items), tag);
+  const i = ensure(root, item, tag);
+  return rebuild(item.node, spliced(item.node.items, i, 0, items), tag);
 };
 
 /** The new root of `root` (tagged `tag`) with `items` inserted after `item`. */
 const insertAfter = (root, item, items, tag) => {
-  ensure(root, item, tag);
-  const held = item.node.items;
-  return rebuild(item.node, spliced(held, held.indexOf(item) + 1, 0, items), tag);
+  const i = ensure(root, item, tag);
+  return rebuild(item.node, spliced(item.node.items, i + 1, 0, items), tag);
 };
 
 /** The new root of `root` (tagged `tag`) with `item` replaced by `items` — none to remove it. */
 const replace = (root, item, items, tag) => {
-  ensure(root, item, tag);
-  const held = item.node.items;
-  return rebuild(item.node, spliced(held, held.indexOf(item), 1, items), tag);
+  const i = ensure(root, item, tag);
+  return rebuild(item.node, spliced(item.node.items, i, 1, items), tag);
 };
 
 /** The new root of `root` (tagged `tag`) with `items` appended at the end. */
@@ -398,15 +410,14 @@ const append = (root, items, tag) => {
   if (root.s === 0 && root.leaf && root.items.length === 0) return fromItems(items, tag);
   let node = root;
   while (!node.leaf) node = node.children[node.children.length - 1];
-  if (!trusted(root, node.items[node.items.length - 1], tag)) rehint(root, tag);
+  if (trustedAt(root, node.items[node.items.length - 1], tag) === -1) rehint(root, tag);
   return rebuild(node, spliced(node.items, node.items.length, 0, items), tag);
 };
 
 /** The item before `item` in order, or null. */
 const before = (root, item, tag) => {
-  ensure(root, item, tag);
+  const i = ensure(root, item, tag);
   const held = item.node.items;
-  const i = held.indexOf(item);
   if (i > 0) return held[i - 1];
   let node = item.node;
   for (let parent = node.parent; parent !== null; node = parent, parent = node.parent) {
@@ -422,9 +433,8 @@ const before = (root, item, tag) => {
 
 /** The item after `item` in order, or null. */
 const after = (root, item, tag) => {
-  ensure(root, item, tag);
+  const i = ensure(root, item, tag);
   const held = item.node.items;
-  const i = held.indexOf(item);
   if (i + 1 < held.length) return held[i + 1];
   let node = item.node;
   for (let parent = node.parent; parent !== null; node = parent, parent = node.parent) {

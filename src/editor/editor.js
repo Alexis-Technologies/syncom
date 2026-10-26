@@ -54,7 +54,7 @@ const MAX_FAILURES = 5;
 const lengthOf = (op) => op.delete ?? op.retain ?? (typeof op.insert === 'string' ? op.insert.length : 1);
 const typeOf = (op) =>
   op === undefined ? 'retain' : op.delete !== undefined ? 'delete' : op.retain !== undefined ? 'retain' : 'insert';
-const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+const same = (a, b) => a === b || JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
 const isOp = (op) =>
   op !== null &&
@@ -64,7 +64,9 @@ const isOp = (op) =>
     typeof op.insert === 'string' ||
     (op.insert !== null && typeof op.insert === 'object' && Object.hasOwn(op.insert, 'embed')));
 const checkDelta = (name, delta) => {
-  if (!Array.isArray(delta) || !delta.every(isOp)) throw new TypeError(`${name}() takes a delta`);
+  let ok = Array.isArray(delta);
+  for (let i = 0; ok && i < delta.length; i++) ok = isOp(delta[i]);
+  if (!ok) throw new TypeError(`${name}() takes a delta`);
 };
 
 // Hands a delta out in pieces: `next(n)` is the next op cut to `n` units,
@@ -233,20 +235,20 @@ const transformIndex = (index, delta, priority = false) => {
 const applyToText = (text, delta) => {
   if (typeof text !== 'string') throw new TypeError('applyToText() takes a string');
   checkDelta('applyToText', delta);
+  // One pass: `at` is where the delta stands in `text`, `out` what it made before there.
   let at = 0;
-  let out = text;
+  let out = '';
   for (const op of delta) {
     if (op.delete !== undefined) {
-      out = out.slice(0, at) + out.slice(at + op.delete);
+      at += op.delete;
     } else if (op.retain !== undefined) {
+      out += text.slice(at, at + op.retain);
       at += op.retain;
     } else {
-      const inserted = typeof op.insert === 'string' ? op.insert : EMBED;
-      out = out.slice(0, at) + inserted + out.slice(at);
-      at += inserted.length;
+      out += typeof op.insert === 'string' ? op.insert : EMBED;
     }
   }
-  return out;
+  return out + text.slice(at);
 };
 
 // ---------------------------------------------------------------------------
@@ -320,7 +322,7 @@ const blocksToSpans = (blocks) => {
       };
       spans.push({ type: 'block', value });
     }
-    spans.push(...block.spans);
+    for (let i = 0; i < block.spans.length; i++) spans.push(block.spans[i]);
   }
   return spans;
 };
@@ -365,7 +367,8 @@ const diffSpans = (before, after) => {
   if (!Array.isArray(before) || !Array.isArray(after)) throw new TypeError('diffSpans() takes two readings');
   const a = flatten(before);
   const b = flatten(after);
-  const hunks = myers(a.text, b.text).sort((x, y) => x[0] - y[0]);
+  // Myers hands its hunks back last first: read from the end, they come in order.
+  const hunks = myers(a.text, b.text);
   const ops = [];
   let ai = 0;
   let bi = 0;
@@ -383,7 +386,8 @@ const diffSpans = (before, after) => {
     ai += count;
     bi += count;
   };
-  for (const [index, count, text] of hunks) {
+  for (let h = hunks.length - 1; h >= 0; h--) {
+    const [index, count, text] = hunks[h];
     retain(index - ai);
     if (count > 0) {
       push(ops, { delete: count });
@@ -453,11 +457,19 @@ const presenceCursors = async (presence, storage, id, path, { key = 'cursor' } =
 // ---------------------------------------------------------------------------
 // The binding
 
-const textOf = (spans) =>
-  spans === null ? '' : spans.map((span) => (span.type === 'text' ? span.text : EMBED)).join('');
+const textOf = (spans) => {
+  if (spans === null) return '';
+  let text = '';
+  for (let i = 0; i < spans.length; i++) text += spans[i].type === 'text' ? spans[i].text : EMBED;
+  return text;
+};
 
 // Whether every op of a turn is within the vector: the load holds it.
-const covered = (event, vector) => event.ops.every((op) => (vector[opKey(op)] ?? 0) >= op.seq);
+const covered = (event, vector) => {
+  const { ops } = event;
+  for (let i = 0; i < ops.length; i++) if (!((vector[opKey(ops[i])] ?? 0) >= ops[i].seq)) return false;
+  return true;
+};
 
 /**
  * Binds an editor, through `adapter`, to text field `path` of record `id`:

@@ -986,8 +986,9 @@ v1.0.5 skills that `metaschema` carries: `js-conventions`, `js-data-structures`,
 
 - **`js-conventions` is adapted to this repo:** oxlint/oxfmt, pnpm, 120 columns, `'use strict'`
   in every `src/` file, `node:` prefix and `.js` in relative requires, no runtime dependencies,
-  and the error and hot-path rules of this engine. `forEach` and `reduce` are avoided by
-  convention here, not by a lint rule.
+  and the error and hot-path rules of this engine. In `src/` no array method takes a callback
+  and `Array.from` is not used — loops, enforced by oxlint's `no-restricted-properties` for
+  `src/**` (`.oxlintrc.json` `overrides`); a data array is never spread into arguments.
 - **`npm-publish` is adapted to the release checklist in CONTRIBUTING.md:** the CI gates, the
   hand-synced docs nav version, the size table, and the first-release notes (nothing is
   published yet). It never publishes.
@@ -1001,3 +1002,13 @@ they ever disagree.
 
 `oxlint` + `oxfmt`, not eslint/prettier. `printWidth` is 120. Run
 `pnpm format` before committing; CI runs `format:check`.
+
+`src/` is written in a procedural style, and the linter holds it there: no `map`, `filter`,
+`find`, `findIndex`, `findLast(Index)`, `some`, `every`, `flatMap`, `forEach`, `reduce(Right)`
+or `Array.from` — an indexed `for` over an array, `for...of` over a Map, a Set or an iterator.
+One walk does what it can (no `filter().map()`, no second pass for a count), a membership test
+inside a loop is a `Set`, and `push(...items)` / `fn(...array)` never takes a data array (it
+throws `RangeError` past ~130 000 elements; a list run holds up to `MAX_RUN`). A new array is
+`[]` + `push`, never `new Array(n)` filled by index (holey for good, slower to read), and a bulk
+copy stays native (`slice`, `concat`). The two editor APIs named `map` (`RangeSet.map`,
+`DecorationSet.map`) carry a disable comment.

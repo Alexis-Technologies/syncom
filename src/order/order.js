@@ -20,18 +20,27 @@ const BASE = ALPHABET.length;
 const TERMINATOR = 31;
 const MAX = BASE - 1;
 
+// The digit of each character code of the alphabet, -1 for any other below 128.
+const DIGITS = new Int8Array(128).fill(-1);
+for (let i = 0; i < BASE; i++) DIGITS[ALPHABET.charCodeAt(i)] = i;
+
 const digitsOf = (key) => {
   if (typeof key !== 'string' || key.length === 0) throw new TypeError('a fractional index is a non-empty string');
   const digits = [];
   for (let i = 0; i < key.length; i++) {
-    const digit = ALPHABET.indexOf(key[i]);
+    const code = key.charCodeAt(i);
+    const digit = code < 128 ? DIGITS[code] : -1;
     if (digit === -1) throw new TypeError(`not a fractional index: ${JSON.stringify(key)}`);
     digits.push(digit);
   }
   if (digits[digits.length - 1] !== TERMINATOR) throw new TypeError(`not a fractional index: ${JSON.stringify(key)}`);
   return digits;
 };
-const keyOf = (digits) => digits.map((d) => ALPHABET[d]).join('');
+const keyOf = (digits) => {
+  let out = '';
+  for (let i = 0; i < digits.length; i++) out += ALPHABET[digits[i]];
+  return out;
+};
 const isKey = (key) => {
   try {
     digitsOf(key);

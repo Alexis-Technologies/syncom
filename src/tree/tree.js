@@ -99,36 +99,54 @@ const editors = (entry, field) => {
 // `holds` whether one is there, `pick` a node's composed data, `nest` the
 // tree read with `data` on every node that has some.
 const NESTS = Object.freeze({ tree: true });
-const visitNodes = (nodes, visit) => {
-  const stack = [...nodes];
+// The nodes a block shows, in the order of a walk down the reading (the
+// last root first) — kept per block, which is never mutated.
+const SHOWN = new WeakMap();
+const shownOf = (block) => {
+  let shown = SHOWN.get(block);
+  if (shown !== undefined) return shown;
+  const list = [];
+  const stack = [...T.renderTree(block)];
   while (stack.length > 0) {
     const node = stack.pop();
-    visit(node);
+    list.push(node.id);
     for (const child of node.children) stack.push(child);
   }
+  shown = { list, set: new Set(list) };
+  SHOWN.set(block, shown);
+  return shown;
 };
 const members = (entry, field) => {
-  const out = [];
   const block = own(entry.meta.blocks, field);
-  if (block !== undefined) visitNodes(T.renderTree(block), (node) => out.push(node.id));
-  return out;
+  return block === undefined ? [] : shownOf(block).list.slice();
 };
-const holds = (entry, field, member) => members(entry, field).includes(member);
+const holds = (entry, field, member) => {
+  const block = own(entry.meta.blocks, field);
+  return block !== undefined && shownOf(block).set.has(member);
+};
 const pick = (entry, field, rendered, member) => {
   let found;
-  visitNodes(rendered, (node) => {
+  const stack = [...rendered];
+  while (stack.length > 0) {
+    const node = stack.pop();
     if (node.id === member) found = node.data;
-  });
+    for (const child of node.children) stack.push(child);
+  }
   return found;
 };
 const nest = (entry, field, rendered, childrenOf) => {
   const copy = (node) => {
-    const out = { id: node.id, children: node.children.map(copy) };
+    const kids = node.children;
+    const children = [];
+    for (let i = 0; i < kids.length; i++) children.push(copy(kids[i]));
+    const out = { id: node.id, children };
     const data = childrenOf(node.id);
     if (data !== undefined) out.data = data;
     return out;
   };
-  return rendered.map(copy);
+  const out = [];
+  for (let i = 0; i < rendered.length; i++) out.push(copy(rendered[i]));
+  return out;
 };
 const prune = (block, base) => T.pruneTree(block, base);
 const join = (a, b) => T.joinTrees(a, b);
@@ -153,13 +171,24 @@ const resolve = (core, id, type, payload, current) => {
     const message = `Node ${node} of field ${key} of record ${id} cannot go under ${where}`;
     throw new SyncomError('CYCLE', message, { id, field: key, node, parent });
   }
+  // The siblings without the node in one pass: where it was, and where the
+  // sibling it lands after or before is among the others.
   const all = T.siblings(tree, parent, folded);
-  const was = all.findIndex((s) => s.id === node);
-  const sibs = was < 0 ? all : all.filter((s) => s.id !== node);
-  let at = sibs.length;
   const next = after ?? before;
+  const sibs = [];
+  let was = -1;
+  let i = -1;
+  for (let k = 0; k < all.length; k++) {
+    const sibling = all[k].id;
+    if (sibling === node) {
+      if (was < 0) was = k;
+      continue;
+    }
+    if (i < 0 && sibling === next) i = sibs.length;
+    sibs.push(all[k]);
+  }
+  let at = sibs.length;
   if (next !== undefined) {
-    const i = sibs.findIndex((s) => s.id === next);
     if (i < 0) {
       const message = `Node ${next} is not under ${parent ?? 'the root'} of field ${key} of record ${id}`;
       throw new SyncomError('NOT_FOUND', message, { id, field: key, node: next });
@@ -258,7 +287,8 @@ const realize = (action, patch, method) => {
 // to read.
 const migrate = (kind, key, value) => {
   const ops = [];
-  const stack = value.map((root) => [root, null]).reverse();
+  const stack = [];
+  for (let i = value.length - 1; i >= 0; i--) stack.push([value[i], null]);
   while (stack.length > 0) {
     const [{ id: node, children }, parent] = stack.pop();
     ops.push(['tree', { key, node, parent }]);

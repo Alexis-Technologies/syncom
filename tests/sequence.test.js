@@ -1081,3 +1081,17 @@ test('styleAt reads the style spans() shows at every index, marks, stacks and un
     await storage.close();
   }
 });
+
+test('normalizeRle takes a list run of 200 000 items in one segment', () => {
+  const items = new Array(200_000).fill(7);
+  const out = S.normalizeRle('l', [[1], items]);
+  assert.strictEqual(out.length, 1);
+  assert.deepStrictEqual(out[0], [1].concat(items));
+});
+
+test('rleAppend extends a list run by 200 000 items', () => {
+  const items = new Array(200_000).fill(7);
+  const out = S.rleAppend('l', [[1]], items);
+  assert.strictEqual(out.length, 1);
+  assert.deepStrictEqual(out[0], [1].concat(items));
+});
