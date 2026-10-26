@@ -196,6 +196,14 @@ const ENTRIES = [
     platform: 'browser',
     budget: 6,
   },
+  // Framework stores: one object for Svelte's contract and React's useSyncExternalStore, over a cursor, a
+  // Record, get(), a presence or any emitter; no requires.
+  {
+    label: 'store — browser (@alexify/syncom/store)',
+    entry: 'src/store/store.js',
+    platform: 'browser',
+    budget: 1.5,
+  },
   // The inspector: a record's anatomy and an anonymized copy; the composition, the shapes and the hash come along (4.6 measured).
   {
     label: 'inspect — browser (@alexify/syncom/inspect)',

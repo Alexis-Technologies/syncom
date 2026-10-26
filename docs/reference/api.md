@@ -800,6 +800,20 @@ builds on. See [Editors](../guide/editors).
 | `selectionToTokens(storage, id, path, { anchor, head? })`, `tokensToSelection(storage, tokens)` | A selection as cursor tokens `{ id, field, anchor, head }` that survive the edits around it, and back to indices (`null` once a place is gone) |
 | `presenceCursors(presence, storage, id, path, { key }?)` | The cursors a presence room holds on the field — each state's `key` (`cursor`) as tokens — resolved: `[{ node, state, anchor, head }]` |
 
+## Store (subpath)
+
+`@alexify/syncom/store` — a source of syncom's as a framework store. See [Frameworks](../guide/frameworks).
+
+| Member | Notes |
+| --- | --- |
+| `toStore(cursor, options?)` | A query's rows, as `watch()` gives them; `undefined` until the first fetch |
+| `toStore(record, options?)` | A live `Record`'s data — a copy per change; `null` once deleted |
+| `toStore(presence, options?)` | A presence room's states, a `Map` by node |
+| `toStore(storage, id, { path }?)` | The record as `get()` reads it — or the field at `path` (`'profile/city'`) — read again after every turn that changed it; the newest read wins |
+| `fromEvents(emitter, events, read, options?)` | `read()` (a value or a promise of one) at the start and after each of `events` — the sync manager's `peers()` on `peer` and `sync`, say |
+
+A store is `{ subscribe(run), getSnapshot(), value, error, ready }`: `subscribe` calls `run(value)` at once and on every change and returns the stop function (Svelte's contract); `getSnapshot()` keeps its identity until a change (React's `useSyncExternalStore`). The source is watched from the first subscriber to the last; without one the store answers the last value it saw. `options`: `initial` (what the store holds before the source gave anything), `onError` (a failure of the source; `error` holds it until the next value).
+
 ## Branch (subpath)
 
 ```js

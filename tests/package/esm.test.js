@@ -20,6 +20,7 @@ const ENTRIES = [
   'src/presence/presence.js',
   'src/inspect/inspect.js',
   'src/editor/editor.js',
+  'src/store/store.js',
   'src/contracts/contracts.js',
   'src/idb/idb.js',
   'src/all/all.js',

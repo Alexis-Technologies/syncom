@@ -1097,14 +1097,22 @@ class Storage extends Emitter {
     const lensed =
       data !== null && entry !== null && !entry.encrypted && this.#lens !== null && (entry.meta.v ?? 1) < this.#version;
     const hooked = this.#hooks.beforeRead !== null || this.#hooks.afterRead !== null;
+    // The Record reads as get() does: the paths composed (`profile/city` under
+    // `profile`, a list element's fields on it), never the fields apart.
+    const shown =
+      data === null
+        ? null
+        : entry !== null && !entry.encrypted
+          ? (entry.composed ??= compose(entry, this.#plugins))
+          : composeData(data);
     if (!lensed && !hooked && this.#refreshing === 0) {
-      record[REFRESH](data, delta, source);
+      record[REFRESH](shown, delta, source);
       return;
     }
     this.#refreshing += 1;
     this.#refreshed = this.#refreshed.then(async () => {
       try {
-        let view = lensed ? await this.#view(id, entry) : data;
+        let view = lensed ? await this.#view(id, entry) : shown;
         if (view !== null && hooked) {
           await runHook(this.#hooks, 'beforeRead', { id });
           const replaced = await runHook(this.#hooks, 'afterRead', { id }, view);
@@ -1596,7 +1604,7 @@ class Storage extends Emitter {
     const ops = entries.length - start;
     const alive = isAlive(entry);
     this.#logger.info({ event: 'record.repaired', id, ops, alive });
-    this.#emitUpdate(id, alive ? entry.data : null, alive ? { ...entry.data } : {});
+    this.#emitUpdate(id, alive ? entry.data : null, alive ? { ...entry.data } : {}, null, entry);
     return { ops, alive };
   }
 

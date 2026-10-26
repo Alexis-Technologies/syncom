@@ -38,6 +38,8 @@ src/undo/undo.js          the @alexify/syncom/undo subpath — the undo stack ov
 src/editor/editor.js      the @alexify/syncom/editor subpath — the editor-agnostic binding (shadow, one delta in
                           flight, STALE and the rebase), delta compose/transform, diffSpans/diffBlocks, spans↔blocks,
                           selections as tokens, presence cursors; requires text/myers.js and vector.js only
+src/store/store.js        the @alexify/syncom/store subpath — toStore/fromEvents: one store object for Svelte's contract and
+                          React's useSyncExternalStore over a cursor, a Record, get(), a presence or an emitter — no requires
 src/inspect/inspect.js    the @alexify/syncom/inspect subpath — a record's anatomy (through the [SOURCE] seam's raw `entry`) and anonymize; requires compose, shape, symbols, hash only
 src/presence/presence.js  the @alexify/syncom/presence subpath — ephemeral state per node, signed through storage[SIGNER]; requires emitter, shape, symbols, errors, scope only
 src/branch/branch.js      the @alexify/syncom/branch subpath — fork a storage, merge either way; never requires storage.js

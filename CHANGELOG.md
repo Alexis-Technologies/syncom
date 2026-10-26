@@ -14,6 +14,14 @@ There is no released version section until then; everything below lands in it.
 
 ### Added
 
+- **Framework stores.** `@alexify/syncom/store`: `toStore(source)` makes a
+  query cursor (its rows), a live `Record` (its data), a presence (its
+  states) or a storage and a record id (the record as `get()` reads it, or
+  one field by path) one store object — `subscribe(run)` with Svelte's
+  contract, `getSnapshot()` stable for React's `useSyncExternalStore`, the
+  source watched from the first subscriber to the last; `fromEvents(emitter,
+  events, read)` for anything else. No framework is imported;
+  docs/guide/frameworks.md has React, Svelte, Vue and Solid.
 - **Editor binding.** `@alexify/syncom/editor`: `createTextBinding(storage,
   id, path, adapter)` keeps an editor's document and a text field the same
   through deltas — the editor's edits reach the field as one transaction
@@ -887,6 +895,11 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **A live Record read a path write as a field of its own.** After
+  `update(id, { 'profile/city': 'Kyiv' })` a Record held both the old
+  `profile` and a `profile/city` property, where `get()` reads
+  `{ profile: { city: 'Kyiv' } }`. A Record is now refreshed with the
+  composed reading on every path, a repair's included.
 - **A cut across a peer's insert reported the insert as cut.** A `splice`
   that cut a range of a run another node had typed inside (unseen by the
   cutter) was reported as one change from the first cut slot to the last —

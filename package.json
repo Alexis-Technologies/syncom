@@ -61,6 +61,10 @@
       "types": "./src/editor/editor.d.ts",
       "default": "./src/editor/editor.js"
     },
+    "./store": {
+      "types": "./src/store/store.d.ts",
+      "default": "./src/store/store.js"
+    },
     "./all": {
       "types": "./src/all/all.d.ts",
       "default": "./src/all/all.js"

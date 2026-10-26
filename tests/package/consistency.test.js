@@ -159,6 +159,7 @@ test('every runtime export is declared in the types', () => {
   check('src/presence/presence.js', 'src/presence/presence.d.ts');
   check('src/inspect/inspect.js', 'src/inspect/inspect.d.ts');
   check('src/editor/editor.js', 'src/editor/editor.d.ts');
+  check('src/store/store.js', 'src/store/store.d.ts');
   check('src/all/all.js', 'src/all/all.d.ts');
   check('src/text/text.js', 'src/text/text.d.ts');
   check('src/tree/tree.js', 'src/tree/tree.d.ts');
