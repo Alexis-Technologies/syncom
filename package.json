@@ -139,8 +139,8 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "node --test",
-    "test:coverage": "c8 --all --include 'src/**' --check-coverage --lines 95 --statements 95 --branches 90 --functions 95 --reporter text --reporter lcov node --test",
+    "test": "node --test --test-timeout=120000",
+    "test:coverage": "c8 --all --include 'src/**' --check-coverage --lines 95 --statements 95 --branches 90 --functions 95 --reporter text --reporter lcov node --test --test-timeout=120000",
     "test:types": "tsd",
     "bench": "node bench/run-all.js",
     "bench:compare:install": "pnpm --dir bench/compare install --ignore-workspace",
