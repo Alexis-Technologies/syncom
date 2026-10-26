@@ -44,6 +44,13 @@ export interface CodeMirrorBinding {
   cursors(presence: Presence, options?: CodeMirrorCursorOptions): { extension: CMState.Extension; stop(): void };
   /** CodeMirror commands over an undo manager of the storage's, and the keys for `keymap.of()`. */
   commands(manager: UndoManager): { undo: CMView.Command; redo: CMView.Command; keys: CMView.KeyBinding[] };
+  /**
+   * The field's index at document offset `pos`, through the line breaks the
+   * editor reads otherwise until its next edit sends them; after `attach()`.
+   */
+  indexOf(pos: number): number;
+  /** The document offset at the field's index `index`; after `attach()`. */
+  posOf(index: number): number;
   stop(): void;
 }
 

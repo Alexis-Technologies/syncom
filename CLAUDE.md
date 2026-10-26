@@ -663,7 +663,11 @@ docs/                     VitePress site
   local)`) — two editors that each fitted a merge sent the same structure twice, unfit again,
   and answered each other without end. Until then the adapter's `base` is the binding's view
   and every index crosses `unfit` (`toDoc`/`toField`: the selection, the cursors,
-  `indexOf`/`posOf`) — a delta in the document's indices lands askew. A send
+  `indexOf`/`posOf`) — a delta in the document's indices lands askew. `/codemirror` does
+  the same for line breaks: `lineBreaks(text)` is the fit and its way back (an insert before
+  a delete, so an index beside a break stays beside it — a Myers diff pairs it with another
+  `\n`), and a peer's delta over a held fit lands as the field's text read again
+  (`state.toText`, then the diff), never transformed over the fit: both would insert the `\n`. A send
   that fails other than STALE reloads the editor after a growing pause and the binding stops
   after `MAX_FAILURES` in a row: never retry in a microtask loop (it starved the event loop
   for hours once).

@@ -95,10 +95,10 @@ test('CodeMirror', { skip }, async (t) => {
       await Promise.all([a.attach(va).ready, b.attach(vb).ready]);
       await Promise.all([a.binding.flush(), b.binding.flush()]);
       await settle([sa, sb]);
-      // CodeMirror reads `\r\n` as a line break: the field comes to hold what the editors show.
-      await waitUntil(
-        async () =>
-          (await sa.get(id)).body === 'line one\nline two' && vb.state.doc.toString() === 'line one\nline two',
+      // CodeMirror reads `\r\n` as a line break; the field holds it until an editor's first edit.
+      assert.deepStrictEqual(
+        [(await sa.get(id)).body, va.state.doc.toString(), vb.state.doc.toString()],
+        ['line one\r\nline two', 'line one\nline two', 'line one\nline two'],
       );
       const same = async () => {
         const text = (await sa.get(id)).body;
@@ -127,6 +127,78 @@ test('CodeMirror', { skip }, async (t) => {
       assert.throws(() => c.attach(viewOf([])), TypeError, 'a state without the extension');
     },
   );
+
+  await t.test(
+    'line breaks CodeMirror reads otherwise reach the field with an editor’s next edit, never as an answer, once',
+    async (t2) => {
+      const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], open);
+      const [sa, sb] = ['A', 'B'].map((name) => mesh.get(name));
+      const id = await sa.insert({});
+      // A lone `\r` and a `\r\n`: CodeMirror shows both as `\n`.
+      await sa.updateText(id, 'body', 'a\rb\r\nc');
+      await settle([sa, sb]);
+      const a = CM.createCodeMirror(sa, id, 'body', cm);
+      const b = CM.createCodeMirror(sb, id, 'body', cm);
+      assert.throws(() => a.indexOf(0), { name: 'TypeError', message: 'indexOf(): attach() first' });
+      assert.throws(() => a.posOf(0), { name: 'TypeError', message: 'posOf(): attach() first' });
+      const va = viewOf([a.extension]);
+      const vb = viewOf([b.extension]);
+      t2.after(() => a.stop());
+      t2.after(() => b.stop());
+      const own = () => [sa.vector[sa.nodeId] ?? 0, sb.vector[sb.nodeId] ?? 0];
+      const quiet = own();
+      await Promise.all([a.attach(va).ready, b.attach(vb).ready]);
+      await Promise.all([a.binding.flush(), b.binding.flush()]);
+      for (let i = 0; i < 5; i++) await tick();
+      await settle([sa, sb]);
+      assert.deepStrictEqual(own(), quiet, 'opening the editors wrote nothing');
+      assert.deepStrictEqual(
+        [(await sa.get(id)).body, va.state.doc.toString(), vb.state.doc.toString()],
+        ['a\rb\r\nc', 'a\nb\nc', 'a\nb\nc'],
+      );
+      // The document's offsets against the field's indices: `c` is at 4 in one, 5 in the other.
+      assert.deepStrictEqual([a.indexOf(4), a.posOf(5), a.indexOf(2), a.posOf(2)], [5, 4, 2, 2]);
+      // A's edit carries the line breaks; B lays it over what it held and holds nothing more.
+      va.dispatch({ changes: { from: 5, insert: 'X' } });
+      await a.binding.flush();
+      await settle([sa, sb]);
+      await waitUntil(() => vb.state.doc.toString() === 'a\nb\ncX');
+      assert.strictEqual((await sb.get(id)).body, 'a\nb\ncX');
+      assert.deepStrictEqual([b.indexOf(4), b.posOf(4)], [4, 4], 'fitted: the indices agree');
+      vb.dispatch({ changes: { from: 0, insert: 'Y' } });
+      await b.binding.flush();
+      await settle([sa, sb]);
+      await waitUntil(() => va.state.doc.toString() === 'Ya\nb\ncX');
+      assert.deepStrictEqual(
+        [(await sa.get(id)).body, (await sb.get(id)).body, vb.state.doc.toString()],
+        ['Ya\nb\ncX', 'Ya\nb\ncX', 'Ya\nb\ncX'],
+        'one line break where each was',
+      );
+      const after = own();
+      for (let i = 0; i < 5; i++) await tick();
+      await settle([sa, sb]);
+      assert.deepStrictEqual(own(), after, 'nothing answered the edits');
+    },
+  );
+
+  await t.test('an editor with a line separator of its own fits the field the same way', async (t2) => {
+    const storage = await open(t2, 'separator');
+    const id = await storage.insert({});
+    await storage.updateText(id, 'body', 'a\r\nb');
+    const c = CM.createCodeMirror(storage, id, 'body', cm);
+    // `\r` alone separates lines: `\r\n` reads as a break and a `\n` of the next line.
+    const view = viewOf([c.extension, cm.state.EditorState.lineSeparator.of('\r')]);
+    t2.after(() => c.stop());
+    const written = storage.vector[storage.nodeId];
+    await c.attach(view).ready;
+    await c.binding.flush();
+    assert.strictEqual(storage.vector[storage.nodeId], written, 'opening the editor wrote nothing');
+    assert.deepStrictEqual([view.state.doc.toString(), (await storage.get(id)).body], ['a\n\nb', 'a\r\nb']);
+    assert.deepStrictEqual([c.indexOf(3), c.posOf(3)], [3, 3]);
+    view.dispatch({ changes: { from: 3, insert: '!' } });
+    await c.binding.flush();
+    assert.deepStrictEqual([view.state.doc.toString(), (await storage.get(id)).body], ['a\n\n!b', 'a\n\n!b']);
+  });
 
   await t.test(
     'undo and redo are the storage’s commands; a presence room’s cursors are decorations and this editor’s selection is published',

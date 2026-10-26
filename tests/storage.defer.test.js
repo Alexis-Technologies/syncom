@@ -10,6 +10,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const syncom = require('../src/all/all.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
+const { waitUntil } = require('./utils/mesh.js');
 
 const openTemp = async (t, options = {}) => {
   const dir = await createTemp();
@@ -39,7 +40,8 @@ test('open({ defer }): record files lag the log by the window, never the reads',
       assert.strictEqual(await file(dir, id), null, 'no file yet');
       assert.deepStrictEqual([storage.stats().deferred, storage.stats().held], [1, 1]);
       assert.strictEqual(storage.log.length, 6, 'six ops in the log already');
-      await sleep(120);
+      // The window, then the flush: waited for, not slept — a busy machine stretches both.
+      await waitUntil(async () => (await file(dir, id)) !== null);
       assert.deepStrictEqual(await file(dir, id), { title: 'doc', body: 'hello' }, 'one file, the final state');
       assert.deepStrictEqual([storage.stats().deferred, storage.stats().held], [0, 0]);
       assert.strictEqual(await storage.validate(), true, 'one block covers the six ops');

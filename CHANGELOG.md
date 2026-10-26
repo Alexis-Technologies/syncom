@@ -14,11 +14,11 @@ There is no released version section until then; everything below lands in it.
 
 ### Added
 
-- **ProseMirror: `indexOf(pos)` and `posOf(index)`.** A position of the
-  attached editor's document as an index of the field and back, through
-  what the field lacks of the document until the editor's next edit sends
-  it — for code that speaks to the storage directly. `indexOfPos` and
-  `posOfIndex` stay the document's own.
+- **ProseMirror and CodeMirror: `indexOf(pos)` and `posOf(index)`.** A
+  position of the attached editor's document as an index of the field and
+  back, through what the field lacks of the document until the editor's
+  next edit sends it — for code that speaks to the storage directly.
+  ProseMirror's `indexOfPos` and `posOfIndex` stay the document's own.
 - **The log appends to a journal.** A backend may offer `append(dir, name,
   content)`; `node:fs` does (through a few descriptors it holds open, the
   least recently used closed first), and so do `memory()`, `layered()`
@@ -962,6 +962,12 @@ There is no released version section until then; everything below lands in it.
   every reader builds the same document from the field, and what the field
   lacks of it goes out with the editor's next edit. Opening an editor
   writes nothing.
+- **Two CodeMirror editors could make two line breaks of one.** CodeMirror
+  reads `\r\n` and a lone `\r` as a line break, and each adapter sent the
+  `\n` it showed as soon as a peer's change brought the `\r`: a lone `\r`
+  fitted on two nodes at once became two breaks. The fit now goes out with
+  the editor's next edit, as ProseMirror's does; until then a peer's change
+  shows as the field's text read again, each break where it was.
 - **A marker inserted and changed in one turn read as its first value.**
   `toDelta` composed the change onto the insert as an `embed` attribute,
   which a reader takes for a mark: an editor bound to the field kept the

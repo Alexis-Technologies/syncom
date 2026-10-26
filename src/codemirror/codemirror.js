@@ -11,13 +11,19 @@
 // again, so the selection maps through it as through any change. Marks are
 // not CodeMirror's and are left alone; an embed slot reads as U+FFFC. What
 // the editor makes of a text otherwise — CodeMirror reads `\r\n` and `\r`
-// as line breaks — is sent as an edit of the adapter's own, so the field
-// holds what the editor shows. Undo is the storage's
+// as line breaks — goes to the field with the editor's next edit, never as
+// an answer to a peer's change: two editors that each fitted a lone `\r`
+// at once made two line breaks of it. Until that edit the adapter holds the
+// difference (`unfit`), shows a peer's change as the field's text read
+// again, and maps an index of the document to the field's through it. Undo
+// is the storage's
 // (`@alexify/syncom/undo` over the binding's `source`): leave CodeMirror's
 // history out. A presence room's cursors are decorations.
 
 const {
   createTextBinding,
+  compose,
+  transformIndex,
   diffSpans,
   applyToText,
   selectionToTokens,
@@ -51,6 +57,34 @@ const changesOfDelta = (delta) => {
     } else changes.push({ from: at, insert: typeof op.insert === 'string' ? op.insert : EMBED });
   }
   return changes;
+};
+
+// The delta that makes text `a` text `b`.
+const diffText = (a, b) => diffSpans([{ type: 'text', text: a, marks: {} }], [{ type: 'text', text: b, marks: {} }]);
+
+// What CodeMirror makes of a text's line breaks — `\r\n` and a lone `\r`
+// read as `\n` — as a delta over the text (`fit`), and back over what it
+// shows: each break where it was, an insert before a delete, so an index
+// beside a break stays beside it (a diff could pair it with another `\n`).
+const lineBreaks = (text) => {
+  const fit = [];
+  const back = [];
+  let done = 0;
+  for (let i = text.indexOf('\r'); i !== -1; i = text.indexOf('\r', i + 1)) {
+    if (i > done) {
+      fit.push({ retain: i - done });
+      back.push({ retain: i - done });
+    }
+    if (text[i + 1] === '\n') {
+      fit.push({ delete: 1 });
+      back.push({ insert: '\r' });
+    } else {
+      fit.push({ insert: '\n' }, { delete: 1 });
+      back.push({ insert: '\r' }, { delete: 1 });
+    }
+    done = i + 1;
+  }
+  return { fit, back };
 };
 
 const textOf = (ops) => {
@@ -87,39 +121,78 @@ const createCodeMirror = (storage, id, path, cm, options = {}) => {
   let report = null;
   let text = null;
   const started = [];
+  // What the document differs from the field by — the binding's view, held
+  // as `base` while they differ — and the way back, made when asked. Both
+  // are empty while the editor shows the field as it is: a keystroke reads
+  // no text then.
+  let unfit = [];
+  let base = null;
+  let back = null;
+  const settle = (expected) => {
+    const shown = view.state.doc.toString();
+    unfit = [];
+    base = null;
+    back = null;
+    if (shown === expected) return;
+    base = expected;
+    const breaks = lineBreaks(expected);
+    if (applyToText(expected, breaks.fit) === shown) ({ fit: unfit, back } = breaks);
+    // Another `lineSeparator`: the smallest difference.
+    else unfit = diffText(expected, shown);
+  };
+  // A field index as the document's, and back.
+  const toDoc = (index) => (unfit.length === 0 ? index : transformIndex(index, unfit, true));
+  const toField = (index) => {
+    if (unfit.length === 0) return index;
+    back ??= diffText(view.state.doc.toString(), base);
+    return transformIndex(index, back, true);
+  };
 
-  // The editor's own edits, as each transaction applies.
+  // The editor's own edits, as each transaction applies — after what the
+  // field lacked of the document before, held till now.
   const reporter = StateField.define({
     create: () => null,
     update: (value, tr) => {
       if (tr.docChanged && report !== null && tr.annotation(remote) === undefined) {
-        const delta = deltaOfChanges(tr.changes);
+        const local = deltaOfChanges(tr.changes);
+        const delta = unfit.length === 0 ? local : compose(unfit, local);
+        unfit = [];
+        base = null;
+        back = null;
         if (delta.length > 0) report(delta);
       }
       return value;
     },
   });
 
-  // Lands changes in the editor without reporting them, then sends what the
-  // editor made of the text otherwise (line breaks) as an edit of its own.
+  // Lands changes in the editor without reporting them; what the editor
+  // makes of the text otherwise (line breaks) is held, never sent for it.
   const land = (changes, expected) => {
     view.dispatch({
       changes,
       annotations: [remote.of(true), Transaction.addToHistory.of(false)],
     });
-    const shown = view.state.doc.toString();
-    if (shown !== expected && report !== null) {
-      report(diffSpans([{ type: 'text', text: expected, marks: {} }], [{ type: 'text', text: shown, marks: {} }]));
-    }
+    settle(expected);
   };
 
+  // A peer's change is never answered with an edit.
   const adapter = {
     setContents: (ops) => {
       const expected = textOf(ops);
       land({ from: 0, to: view.state.doc.length, insert: expected }, expected);
     },
     updateContents: (delta) => {
-      land(changesOfDelta(delta), applyToText(view.state.doc.toString(), delta));
+      if (unfit.length === 0) {
+        land(changesOfDelta(delta), applyToText(view.state.doc.toString(), delta));
+        return;
+      }
+      // The field moved under a document that reads it otherwise: the
+      // document becomes the field's text as CodeMirror reads it. The peer's
+      // delta laid over the held difference would read a break the peer
+      // fitted too as two.
+      const expected = applyToText(base, delta);
+      const target = view.state.toText(expected).toString();
+      land(changesOfDelta(diffText(view.state.doc.toString(), target)), expected);
     },
     onChange: (listener) => {
       report = listener;
@@ -180,8 +253,8 @@ const createCodeMirror = (storage, id, path, cm, options = {}) => {
       const ranges = [];
       for (const cursor of found) {
         if (cursor.node === presence.node) continue;
-        const head = Math.min(cursor.head, length);
-        const anchor = Math.min(cursor.anchor, length);
+        const head = Math.min(toDoc(cursor.head), length);
+        const anchor = Math.min(toDoc(cursor.anchor), length);
         ranges.push(Decoration.widget({ widget: new Caret(cursor), side: 1 }).range(head));
         if (anchor !== head) {
           const attributes = { 'data-node': cursor.node };
@@ -199,7 +272,7 @@ const createCodeMirror = (storage, id, path, cm, options = {}) => {
         await text.flush();
         if (stopped) return;
         const { anchor, head } = view.state.selection.main;
-        const tokens = await selectionToTokens(storage, id, path, { anchor, head });
+        const tokens = await selectionToTokens(storage, id, path, { anchor: toField(anchor), head: toField(head) });
         const next = JSON.stringify(tokens);
         if (stopped || tokens === null || next === published) return;
         published = next;
@@ -258,12 +331,26 @@ const createCodeMirror = (storage, id, path, cm, options = {}) => {
     };
   };
 
+  const attached = (name) => {
+    if (view === null) throw new TypeError(`${name}(): attach() first`);
+  };
+
   return Object.freeze({
     extension: reporter,
     source,
     attach,
     cursors,
     commands,
+    /** The field's index at document offset `pos` — through what the field lacks of the document, until an edit sends it. */
+    indexOf: (pos) => {
+      attached('indexOf');
+      return toField(pos);
+    },
+    /** The document offset at the field's index `index`. */
+    posOf: (index) => {
+      attached('posOf');
+      return toDoc(index);
+    },
     get binding() {
       return text;
     },

@@ -18,6 +18,9 @@ const editor = new view.EditorView({
 });
 expectType<TextBinding>(cmb.attach(editor));
 expectType<TextBinding | null>(cmb.binding);
+expectType<number>(cmb.indexOf(4));
+expectType<number>(cmb.posOf(5));
+expectError(cmb.posOf('5'));
 const { undo, redo, keys } = cmb.commands(createUndo(storage, { trackedSources: [cmb.source] }));
 expectType<boolean>(undo(editor));
 expectType<view.Command>(redo);

@@ -223,8 +223,12 @@ a peer's delta lands as a ChangeSet (`changesOfDelta`), annotated so it is
 not sent back and kept out of any history, and the selection maps through
 it as through any change. Marks are not CodeMirror's and are left alone; an
 embed slot reads as U+FFFC. CodeMirror reads `\r\n` and `\r` as line
-breaks: the adapter sends what the editor shows as an edit, so the field
-comes to hold `\n`. Leave CodeMirror's history out — `commands(manager)`
+breaks: the field comes to hold `\n` with the editor's next edit, never as
+an answer to a peer's change — two editors that each fitted a lone `\r` at
+once made two line breaks of it. Until then a peer's change shows as the
+field's text read again, and `cm.indexOf(pos)`/`cm.posOf(index)` map a
+document offset to the field's index and back; opening an editor writes
+nothing. Leave CodeMirror's history out — `commands(manager)`
 gives undo and redo over the storage's stack and the `keys` for
 `keymap.of()` — and `cursors(presence)` shows a room's cursors as
 decorations and publishes this editor's selection, as for ProseMirror.
