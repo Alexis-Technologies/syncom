@@ -187,6 +187,15 @@ const ENTRIES = [
     // 3.8 measured: shape.js (the canonical JSON, the stream and key checks) comes with the emitter.
     budget: 4,
   },
+  // The editor binding: deltas composed and transformed, the diff between two readings (the text plugin's Myers
+  // comes along, and the vector keys), the binding itself, selections and presence cursors. The plan said 4; the
+  // transform and the diff are what an editor needs, so 6, raised by name (4.9 measured).
+  {
+    label: 'editor — browser (@alexify/syncom/editor)',
+    entry: 'src/editor/editor.js',
+    platform: 'browser',
+    budget: 6,
+  },
   // The inspector: a record's anatomy and an anonymized copy; the composition, the shapes and the hash come along (4.6 measured).
   {
     label: 'inspect — browser (@alexify/syncom/inspect)',
@@ -226,7 +235,9 @@ const ENTRIES = [
   // spans and the diff that carries a slot's marker.
   // 25.2 with the change reports (changeOf: a splice's spans, marks, moves; S.spanOf).
   // 26.7 with the deltas (a Quill compose, toDelta, applyDelta) and the cursor positions.
-  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 27.5 },
+  // 27.6 with the editor binding's needs: a cut read as one splice per stretch (spansOf), an insert's marks
+  // in its change and exact in applyDelta, applyDelta's `expect` (STALE). 28, raised by name.
+  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 28 },
   // The tree kind alone, with the fractional indexes a place is made of and
   // the argument checks it shares with the core (5.1 measured).
   // 5.5 with the field-name check unset shares with it (src/args.js).

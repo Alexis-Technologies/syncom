@@ -168,6 +168,7 @@ export default withMermaid({
               { text: 'TypeScript', link: '/guide/typescript' },
               { text: 'Queries', link: '/guide/query' },
               { text: 'Lists, text and trees', link: '/guide/lists' },
+              { text: 'Editors', link: '/guide/editors' },
               { text: 'Versions and history', link: '/guide/versions' },
               { text: 'Hooks and events', link: '/guide/hooks' },
               { text: 'CRDT deltas', link: '/guide/crdt' },

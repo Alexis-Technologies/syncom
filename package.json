@@ -57,6 +57,10 @@
       "types": "./src/inspect/inspect.d.ts",
       "default": "./src/inspect/inspect.js"
     },
+    "./editor": {
+      "types": "./src/editor/editor.d.ts",
+      "default": "./src/editor/editor.js"
+    },
     "./all": {
       "types": "./src/all/all.d.ts",
       "default": "./src/all/all.js"

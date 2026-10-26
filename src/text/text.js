@@ -84,7 +84,10 @@ const normalize = (raw, base, limits) => S.normalizeSeq(raw, base, limits.pendin
 const apply = (entry, field, held, op, stamp, limits) => {
   const base = floorOf(entry.meta, field);
   const payload = op.value;
-  const block = held ?? S.createSeq(codeOf(kindOfOp(op)));
+  // The engine's block, hydrated once: a block read from a file is plain
+  // JSON, and both the op and the change report read the engine's state.
+  const before = held === undefined ? undefined : S.asBlock(held, base);
+  const block = before ?? S.createSeq(codeOf(kindOfOp(op)));
   const { pendingMax } = limits;
   const result =
     op.type === 'splice'
@@ -101,8 +104,19 @@ const apply = (entry, field, held, op, stamp, limits) => {
   if (!result.changed) return out;
   out.block = S.prune(result.seq, base);
   // What the reading shows of the op, in its indices — none when the field went.
-  if (out.block !== null) out.change = changeOf(op, stamp, held, out.block);
+  if (out.block !== null) out.change = changeOf(op, stamp, before, out.block, base);
   return out;
+};
+
+// The marks over the character at `index` of a block: what an insert's run
+// reads as — it lands whole, inside or outside each mark, so one style.
+const marksAt = (block, index, base) => {
+  let at = 0;
+  for (const span of S.spans(block, block, base)) {
+    if (index < at + span.text.length) return span.marks;
+    at += span.text.length;
+  }
+  return {};
 };
 
 // An op as the reading shows it, in the write API's terms and the reading's
@@ -112,31 +126,51 @@ const apply = (entry, field, held, op, stamp, limits) => {
 // `setAt`; a move by its index before and after; a mark over the indices
 // its anchors fall at. What the reading does not show — a slot born dead,
 // an element not placed here — is no change.
-const changeOf = (op, stamp, held, block) => {
+const changeOf = (op, stamp, held, block, base = null) => {
   const payload = op.value;
   const [ts, origin] = stamp;
   if (op.type === 'splice') {
     const out = [];
+    // A cut range of a run is as many stretches of the reading as others
+    // inserted inside it: one splice each, in the indices before, last first.
+    let cut = 0;
     if (held !== undefined && Array.isArray(payload.cut)) {
       const cuts = [];
       for (const [run, off, len] of payload.cut) {
-        const span = S.spanOf(held, run, off, len);
-        if (span !== null && span.count > 0) cuts.push(span);
+        for (const span of S.spansOf(held, run, off, len) ?? []) cuts.push(span);
       }
       cuts.sort((x, y) => y.index - x.index);
-      for (const { index, count } of cuts) out.push({ action: 'splice', index, count });
+      for (const { index, count } of cuts) {
+        out.push({ action: 'splice', index, count });
+        cut += count;
+      }
     }
     const { content } = payload;
     if (content !== undefined && content.length > 0) {
       const run = payload.at !== undefined ? S.runKey(ts, origin) : payload.run;
-      const span = S.spanOf(block, run, payload.at !== undefined ? 0 : payload.from, content.length);
-      if (span !== null && span.count > 0) {
-        const shown = S.render(block).slice(span.index, span.index + span.count);
+      const spans = S.spansOf(block, run, payload.at !== undefined ? 0 : payload.from, content.length) ?? [];
+      // What the op made visible: its own slots — and, where it was the
+      // anchor a waiting op needed, that op's too. Those stand around and
+      // between the run's slots; no splice of the run's own says them, so
+      // the field reads as a reset (the caller reads it again).
+      const shown = S.lengthOf(block) - ((held === undefined ? 0 : S.lengthOf(held)) - cut);
+      let own = 0;
+      for (const span of spans) own += span.count;
+      if (own !== shown || spans.length > 1) return undefined;
+      const span = spans[0];
+      if (span !== undefined && span.count > 0) {
+        const inserted = S.render(block).slice(span.index, span.index + span.count);
         const last = out[out.length - 1];
         // One cut at the insertion point and the insert: one splice, as the call made it.
-        if (out.length === 1 && last.index === span.index) last.content = shown;
-        else out.push({ action: 'splice', index: span.index, count: 0, content: shown });
-        if (payload.vals !== undefined && span.count === content.length) out[out.length - 1].vals = payload.vals;
+        if (out.length === 1 && last.index === span.index) last.content = inserted;
+        else out.push({ action: 'splice', index: span.index, count: 0, content: inserted });
+        const change = out[out.length - 1];
+        if (payload.vals !== undefined && span.count === content.length) change.vals = payload.vals;
+        // The marks the inserted run reads with — a mark it landed inside, one that grew over it.
+        if (block.k === 't') {
+          const marks = marksAt(block, span.index, base);
+          if (Object.keys(marks).length > 0) change.marks = marks;
+        }
       }
     }
     return out;
@@ -1010,17 +1044,19 @@ const compose = (a, b) => {
 
 // The content of an insert as delta ops: the text, its embed slots as
 // `{ insert: { embed: marker } }`.
-const insertsOf = (content, vals) => {
+const insertsOf = (content, vals, marks) => {
   const out = [];
   const markers = new Map(vals ?? []);
+  const attributes = marks !== undefined && Object.keys(marks).length > 0 ? marks : undefined;
+  const add = (insert) => void out.push(attributes === undefined ? { insert } : { insert, attributes });
   let from = 0;
   for (let i = 0; i < content.length; i++) {
     if (content[i] !== EMBED) continue;
-    if (i > from) out.push({ insert: content.slice(from, i) });
-    out.push({ insert: { embed: markers.get(i) ?? null } });
+    if (i > from) add(content.slice(from, i));
+    add({ embed: markers.get(i) ?? null });
     from = i + 1;
   }
-  if (from < content.length) out.push({ insert: content.slice(from) });
+  if (from < content.length) add(content.slice(from));
   return out;
 };
 
@@ -1033,7 +1069,9 @@ const deltaOf = (change) => {
     const out = [];
     if (change.index > 0) out.push({ retain: change.index });
     if (change.count > 0) out.push({ delete: change.count });
-    if (change.content !== undefined && change.content.length > 0) out.push(...insertsOf(change.content, change.vals));
+    if (change.content !== undefined && change.content.length > 0) {
+      out.push(...insertsOf(change.content, change.vals, change.marks));
+    }
     return out;
   }
   if (action === 'mark' || action === 'unmarkById') {
@@ -1066,10 +1104,15 @@ const toDelta = (core, changes, field) => {
   if (!Array.isArray(changes)) throw new TypeError('toDelta() takes an array of changes');
   let delta = [];
   for (const change of changes) {
-    if (field !== undefined && change.field !== field) continue;
     const { action } = change;
+    // The record gone, or the field reset from above (a prefix written or
+    // unset): no delta says it — whichever field was asked for.
     if (action === 'delete' || action === 'purge') return null;
     if (change.field === undefined) continue;
+    if (field !== undefined && change.field !== field) {
+      if (field.startsWith(`${change.field}/`)) return null;
+      continue;
+    }
     if (field === undefined) {
       // Every text field at once: what is no text's edit is left out, a
       // text reset or a field gone makes the whole no delta.
@@ -1099,17 +1142,47 @@ const isDeltaOp = (op) =>
  * over what it retains; `{ embed }` sets the slot's marker), an `insert`
  * splices text in (an `{ embed: marker }` inserts a slot with it) and marks
  * it with its attributes, a `delete` cuts. Resolves to how many ops it took.
+ * `expect` is the field's text the delta was made over: a field that reads
+ * otherwise inside the queue — a peer's edit landed first — rejects with
+ * `STALE` before any op, so the caller rebases and sends again.
  */
-const applyDelta = async (core, id, key, delta, { actor, message } = {}) => {
+const applyDelta = async (core, id, key, delta, { actor, message, source, expect } = {}) => {
   if (typeof key !== 'string') throw new TypeError('applyDelta() takes a field name');
   if (!Array.isArray(delta) || !delta.every(isDeltaOp)) {
     throw new TypeError('applyDelta() takes a delta: [{ retain, attributes? } | { insert, attributes? } | { delete }]');
   }
+  if (expect !== undefined && typeof expect !== 'string') {
+    throw new TypeError('applyDelta() takes expect as the text the delta was made over');
+  }
   if (!isRecordId(id)) throw invalidId(id);
   const { result, done } = await core.transact(
     async (tx) => {
+      if (expect !== undefined) {
+        const entry = await tx.current(id);
+        const shown = entry && !entry.encrypted && blockOf(entry, key) !== undefined ? render(entry, key) : '';
+        const text = typeof shown === 'string' ? shown : '';
+        if (text !== expect) {
+          throw new SyncomError('STALE', `Field ${key} of ${id} changed under the delta`, { id, field: key });
+        }
+      }
       let at = 0;
       let ops = 0;
+      // The marks the inserted run reads with after its splice — the ones it
+      // landed inside, the ones that grew over it: what the delta's
+      // attributes replace, a name at a time.
+      const inserted = async (start, length, attributes) => {
+        const entry = await tx.current(id);
+        const idx = entry === null ? null : S.indexOf(entry, key);
+        const have = idx === null ? {} : marksAt(idx, start, floorOf(entry.meta, key));
+        const want = { ...(attributes ?? {}) };
+        for (const name of Object.keys(have)) {
+          if (want[name] === undefined && name !== 'embed') want[name] = null;
+        }
+        for (const name of Object.keys(want)) {
+          if (name !== 'embed' && deepEqual(have[name], want[name])) delete want[name];
+        }
+        if (Object.keys(want).length > 0) await marks(start, start + length, want);
+      };
       const marks = async (start, end, attributes) => {
         for (const name of Object.keys(attributes)) {
           const value = attributes[name];
@@ -1137,7 +1210,7 @@ const applyDelta = async (core, id, key, delta, { actor, message } = {}) => {
         } else if (typeof op.insert === 'string') {
           if (op.insert.length === 0) continue;
           ops += (await tx.commit('splice', id, spliceArgs('applyDelta', key, at, 0, op.insert), { actor })) ? 1 : 0;
-          if (op.attributes !== undefined) await marks(at, at + op.insert.length, op.attributes);
+          await inserted(at, op.insert.length, op.attributes);
           at += op.insert.length;
         } else {
           const { embed } = op.insert;
@@ -1145,13 +1218,13 @@ const applyDelta = async (core, id, key, delta, { actor, message } = {}) => {
           const payload = spliceArgs('applyDelta', key, at, 0, EMBED, { embeds: true });
           payload.vals = [[0, marker]];
           ops += (await tx.commit('splice', id, payload, { actor })) ? 1 : 0;
-          if (op.attributes !== undefined) await marks(at, at + 1, op.attributes);
+          await inserted(at, 1, op.attributes);
           at += 1;
         }
       }
       return ops;
     },
-    { actor, message },
+    { actor, message, source },
   );
   if (done !== null) await done;
   return result;

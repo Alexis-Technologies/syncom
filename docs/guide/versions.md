@@ -267,6 +267,7 @@ the reading shows of it, in the write API's terms and the reading's indices:
 ```js
 storage.on('change', (op, via, { changes }) => { … });
 // a keystroke:     [{ action: 'splice', field: 'body', index: 5, count: 0, content: 'x' }]
+// one in bold:     [{ action: 'splice', field: 'body', index: 5, count: 0, content: 'x', marks: { bold: true } }]
 // a cut:           [{ action: 'splice', field: 'body', index: 3, count: 2 }]
 // update():        [{ action: 'put', field: 'title', value: 'Final' }]
 // inc():           [{ action: 'inc', field: 'hits', value: 1 }]
@@ -279,7 +280,9 @@ storage.on('change', (op, via, { changes }) => { … });
 ```
 
 A splice's cuts are in the indices before the op (last first), its insert in
-the indices after; a mark over the indices its anchors fall at; a tree move
+the indices after, with the `marks` a text's insert reads with — one it
+landed inside, one that grew over it; a mark over the indices its anchors
+fall at; a tree move
 names the node, its parent and the sibling before it, and the nodes that
 followed it where it was and where it is. A field changed another way — reset
 by a whole-record write, outranked by another kind, pruned under a prefix,

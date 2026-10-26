@@ -417,10 +417,16 @@ await storage.position(id, 'body', caret);                               // { in
 ```
 
 `toDelta()` composes the changes into one delta — `[{ retain, attributes? },
-{ insert, attributes? }, { delete }]` — a splice as a delete and an insert, a
-mark as attributes over its range (`null` removes one), an embed slot as
+{ insert, attributes? }, { delete }]` — a splice as a delete and an insert
+(the insert with the marks it reads with as attributes), a mark as
+attributes over its range (`null` removes one), an embed slot as
 `{ insert: { embed: marker } }`; `applyDelta()` makes a delta the field's
-edits as one transaction, so a peer sees them land together. A change a
+edits as one transaction, so a peer sees them land together — an insert's
+attributes are exactly its marks, a mark that would have grown over it is
+taken off it — and with
+`expect`, the text the delta was made over, refuses with `STALE` when the
+field moved under it, before any op. `@alexify/syncom/editor` does all of
+this for an editor — see [Editors](./editors). A change a
 delta cannot say — a reset, an unset — makes it `null`: read the field again.
 `position()` restores a selection from the cursors kept across edits, and
 `positions()` several at once.

@@ -14,6 +14,26 @@ There is no released version section until then; everything below lands in it.
 
 ### Added
 
+- **Editor binding.** `@alexify/syncom/editor`: `createTextBinding(storage,
+  id, path, adapter)` keeps an editor's document and a text field the same
+  through deltas — the editor's edits reach the field as one transaction
+  each, a peer's reach the editor rebased over what it holds beyond the
+  field — with a shadow of the field, one delta in flight at a time and
+  `applyDelta`'s new `expect`: a delta the field moved under is refused as
+  `STALE` before any op and sent again rebased. `compose`, `transform`,
+  `transformIndex`, `applyToText` over Quill-form deltas; `spansToDelta`,
+  `deltaToSpans`, `spansToBlocks`, `blocksToSpans`; `diffSpans`/`diffBlocks`,
+  the delta between two readings, markers and marks included;
+  `selectionToTokens`/`tokensToSelection`, a selection as cursor tokens;
+  `presenceCursors`, a room's cursors resolved to indices. A plugin method
+  that transacts, called inside a transaction, now runs within it.
+- **A text insert's change carries its marks.** A `splice` change of a text
+  now has `marks` — the marks its content reads with, one it landed inside
+  or one that grew over it — and `toDelta` puts them on the insert as
+  attributes, so a delta composed over the reading before gives the reading
+  after, rich, not only the string. `applyDelta` sets an insert's attributes
+  exactly: a mark that would have grown over typed text is taken off it.
+
 - **Wire format reference.** `docs/reference/wire.md`: the op and its
   eighteen slots, every type's code and payload, what a signature covers
   (the header array, the salted digest), the log files and their checksums,
@@ -867,6 +887,18 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **A cut across a peer's insert reported the insert as cut.** A `splice`
+  that cut a range of a run another node had typed inside (unseen by the
+  cutter) was reported as one change from the first cut slot to the last —
+  the peer's characters between them included — so a view or an editor
+  following the changes dropped text the field kept. A cut now reads as one
+  splice per stretch of the reading (`spansOf` in the sequence engine), and
+  an insert that also brings a waiting op's elements into view reads as a
+  `reset` of the field.
+- **`toDelta(changes, field)` missed a deleted record.** Asked for one
+  field, it skipped the whole-record `delete`/`purge` change (it has no
+  field) and a reset of a prefix of the field, and answered an empty delta
+  where it must answer `null` — read the field again.
 - **A refused handshake push no longer closes the inbound half, and a failed
   dial is retried.** A push the host refused during the handshake (a rate
   limit, a page over `opsPerPush`) stopped the handshake before the

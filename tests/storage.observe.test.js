@@ -8,6 +8,7 @@ const assert = require('node:assert');
 const syncom = require('../src/all/all.js');
 const { memory } = require('../src/memory/memory.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
+const { compose, spansToDelta } = require('../src/editor/editor.js');
 
 const open = async (t, options = {}) => {
   const storage = await syncom.open({ path: '/o', fsi: memory(), logger: false, ...options });
@@ -108,6 +109,39 @@ test('observe and deltas', async (t) => {
   );
 
   await t.test(
+    'a cut of a run that a peer inserted inside reads as one splice per stretch, and its delta gives the reading after',
+    async (t2) => {
+      const a = await open(t2, { defer: 0 });
+      const b = await syncom.open({ path: '/b', fsi: memory(), logger: false, defer: 0 });
+      t2.after(() => b.close().catch(() => {}));
+      const exchange = async (from, to) => {
+        await to.applyRemote(from.log.since(null).map((entry) => entry.op));
+      };
+      const id = await a.insert({});
+      await a.splice(id, 'body', 0, 0, 'abcd'); // one run of a's
+      await exchange(a, b);
+      // b types inside a's run; a, not having seen it, cuts `bc` out of its run: [run, 1, 2].
+      await b.splice(id, 'body', 2, 0, 'X');
+      await a.splice(id, 'body', 1, 2);
+      const before = (await b.get(id)).body;
+      let turn = null;
+      b.on('transaction', (event) => (turn = event));
+      await exchange(a, b);
+      const after = (await b.get(id)).body;
+      assert.deepStrictEqual([before, after], ['abXcd', 'aXd']);
+      assert.deepStrictEqual(
+        turn.changes.map(({ action, index, count }) => [action, index, count]),
+        [
+          ['splice', 3, 1],
+          ['splice', 1, 1],
+        ],
+        'the stretch after X, then the one before: the indices before the op, last first',
+      );
+      assert.strictEqual(applyQuill(before, b.toDelta(turn.changes, 'body')), after);
+    },
+  );
+
+  await t.test(
     'toDelta() composes a turn’s changes into Quill’s form; applyDelta() makes a delta the field’s edits as one transaction',
     async (t2) => {
       const storage = await open(t2, { defer: 0 });
@@ -129,17 +163,28 @@ test('observe and deltas', async (t) => {
         { retain: 1, attributes: { bold: null } },
         { delete: 2 },
         { insert: 'E', attributes: { bold: true } },
-        { insert: { embed: img } },
+        { insert: { embed: img }, attributes: { bold: true } },
         { insert: 'Y', attributes: { bold: true } },
         { retain: 5 },
         { insert: '!' },
       ]);
       assert.strictEqual(applyQuill(before, delta), (await storage.get(id)).body);
+      // Rich, not only the string: the reading before, composed with the delta, is the reading after —
+      // the embed typed inside the bold range reads bold, and its insert says so.
+      assert.deepStrictEqual(
+        compose([], compose([{ insert: 'hello world' }], delta)),
+        compose([], spansToDelta(await storage.spans(id, 'body'))),
+      );
       assert.deepStrictEqual(storage.toDelta(turn.changes), delta, 'the one text field');
       assert.deepStrictEqual(storage.toDelta(turn.changes, 'other'), []);
       // A reset is no delta; a list's splice neither; arguments.
       assert.strictEqual(storage.toDelta([{ action: 'reset', field: 'body', kind: 'text', value: 'x' }]), null);
       assert.strictEqual(storage.toDelta([{ action: 'delete' }]), null);
+      // Asked for one field: the record gone, or the field reset from above, is still no delta.
+      assert.strictEqual(storage.toDelta([{ action: 'delete' }], 'body'), null);
+      assert.strictEqual(storage.toDelta([{ action: 'purge' }], 'body'), null);
+      assert.strictEqual(storage.toDelta([{ action: 'unset', field: 'doc' }], 'doc/body'), null);
+      assert.deepStrictEqual(storage.toDelta([{ action: 'unset', field: 'docs' }], 'doc/body'), []);
       assert.strictEqual(
         storage.toDelta([{ action: 'splice', field: 'items', index: 0, count: 0, content: [1] }], 'items'),
         null,

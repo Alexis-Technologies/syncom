@@ -628,6 +628,11 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
   };
   tx.commit = commitIn;
   tx.commitNow = async (type, id, payload, options) => outcome(await commitIn(type, id, payload, options));
+  // A plugin method that transacts (`applyDelta`), called inside a
+  // transaction, runs within it: one append, the outer's actor, source and
+  // message. (The storage's `transact` would queue a second turn — behind
+  // the one this transaction holds.)
+  tx.transact = async (inner) => ({ result: await inner(tx), done: null, ops: 0 });
   const result = await fn(tx);
   if (prepared.length === 0) return { result, done: null, ops: 0 };
   const ops = prepared.map((made) => made.op);

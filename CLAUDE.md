@@ -35,6 +35,9 @@ src/idb/idb.js            the @alexify/syncom/idb subpath — the IndexedDB back
 src/search/search.js      the @alexify/syncom/search subpath — the trigram text index behind `$text`; the core knows only the TextIndex contract
 src/order/order.js        the @alexify/syncom/order subpath — fractional indexes as strings, for ordering records
 src/undo/undo.js          the @alexify/syncom/undo subpath — the undo stack over the commit event; requires patch.js, emitter.js, symbols.js, paths.js only
+src/editor/editor.js      the @alexify/syncom/editor subpath — the editor-agnostic binding (shadow, one delta in
+                          flight, STALE and the rebase), delta compose/transform, diffSpans/diffBlocks, spans↔blocks,
+                          selections as tokens, presence cursors; requires text/myers.js and vector.js only
 src/inspect/inspect.js    the @alexify/syncom/inspect subpath — a record's anatomy (through the [SOURCE] seam's raw `entry`) and anonymize; requires compose, shape, symbols, hash only
 src/presence/presence.js  the @alexify/syncom/presence subpath — ephemeral state per node, signed through storage[SIGNER]; requires emitter, shape, symbols, errors, scope only
 src/branch/branch.js      the @alexify/syncom/branch subpath — fork a storage, merge either way; never requires storage.js
@@ -598,6 +601,14 @@ docs/                     VitePress site
   documented — and so is the plugin on every node, since a node without it
   signs nothing. Never put the key or a signature into a metric label.
 - **A `.d.ts` change and its `tsd` test land together** (`tests/*.test-d.ts`).
+- **An editor binding sends one delta at a time, with `expect`.** `applyDelta(id, key,
+  delta, { expect })` compares the field's text inside the queue and refuses `STALE` before
+  any op; `src/editor/editor.js` keeps a shadow of the field, rebases a refused delta over
+  the peer's (`transform`, the peer's insert first at a tie — the storage's order) and
+  sends it again, and rebases a peer's delta over what the editor holds beyond the shadow
+  before handing it over. A binding or adapter that resolves an editor's indices against
+  the storage without `expect` races a peer's edit; a nested `transact` (a plugin method
+  inside a transaction) runs within the enclosing one.
 - **Record types are phantom.** `Schema<Shapes>` (`shapes?`) and a Standard Schema's
   `~standard.types` are read by `index.d.ts` alone — `Collections<S>` maps them to
   `SyncomCollection<R, I>` — and nothing at run time reads `shapes`; `RecordData` is the

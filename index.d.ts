@@ -405,6 +405,7 @@ export type SyncomErrorCode =
   | 'OUT_OF_RANGE'
   | 'CYCLE'
   | 'SURROGATE'
+  | 'STALE'
   | 'HISTORY_GONE'
   | 'INVALID_VERSION'
   | 'TAG_EXISTS'
@@ -1067,6 +1068,8 @@ export type Patch =
       content?: string | readonly unknown[];
       /** The markers of the embed slots the content holds: `[[offset, marker]]`. */
       vals?: readonly (readonly [offset: number, marker: BlockMarker | null])[];
+      /** A text's: the marks the inserted content reads with — one it landed inside, one that grew over it. */
+      marks?: TextMarks;
     }
   | { action: 'setAt'; field: string; index: number; value: unknown }
   | {
@@ -1747,7 +1750,15 @@ export interface TextMethods {
    */
   toDelta(changes: readonly Change[], field?: string): DeltaOp[] | null;
   /** Makes `delta` the edits of text field `key`, as one transaction; resolves to how many ops it took. */
-  applyDelta(id: string, key: string, delta: readonly DeltaOp[], options?: TransactOptions): Promise<number>;
+  applyDelta(
+    id: string,
+    key: string,
+    delta: readonly DeltaOp[],
+    options?: TransactOptions & {
+      /** The field's text the delta was made over: a field that reads otherwise inside the queue rejects with `STALE` before any op. */
+      expect?: string;
+    },
+  ): Promise<number>;
   /**
    * Replaces the element at `index` of list field `key`: a register per
    * element, last writer wins, following the element through a concurrent move.

@@ -1036,6 +1036,40 @@ const spanOf = (block, run, off, len) => {
   return { index: a.v, count: b.v + (b.vis ? 1 : 0) - a.v };
 };
 
+/**
+ * The visible slots of `[off, off + len)` of run `run` as the reading shows
+ * them, one `{ index, count }` per stretch: a run's slots read in offset
+ * order, but what others inserted inside the run stands between them, so a
+ * range of a run is several stretches of the reading. Merged where two
+ * meet; ascending; an empty array when none shows; null when the run is
+ * not placed here. O(segments × log n).
+ */
+const spansOf = (block, run, off, len) => {
+  const st = ensureHead(block);
+  const r = runOf(st, run);
+  if (r === undefined || !r.placed || !Number.isInteger(off) || off < 0 || off >= r.len || !(len > 0)) return null;
+  const end = Math.min(off + len, r.len);
+  const out = [];
+  const found = SL.find(r.segs, off);
+  if (found === null) return out;
+  const { chunks } = r.segs;
+  for (let c = found.c, i = found.i; c < chunks.length; c++, i = 0) {
+    const chunk = chunks[c];
+    for (; i < chunk.length; i++) {
+      const seg = chunk[i];
+      if (seg.off >= end) return out;
+      const lo = Math.max(off, seg.off);
+      const hi = Math.min(end, seg.off + seg.len);
+      if (!seg.vis || hi <= lo) continue;
+      const index = T.positionOf(st.root, seg, st.lineage).v + (lo - seg.off);
+      const prev = out[out.length - 1];
+      if (prev !== undefined && prev.index + prev.count === index) prev.count += hi - lo;
+      else out.push({ index, count: hi - lo });
+    }
+  }
+  return out;
+};
+
 // Where a cursor is now: the visible elements before its slot, plus one
 // for a slot still shown when the cursor sits after it. Null once the slot
 // is gone — its run not here, or dropped by a reset.
@@ -2211,10 +2245,12 @@ module.exports = {
   createSeq,
   normalizeSeq,
   hydrate,
+  asBlock,
   buildIndex,
   EMBED,
   heldAt,
   spanOf,
+  spansOf,
   isPlaceholder,
   lengthOf,
   totalOf,
