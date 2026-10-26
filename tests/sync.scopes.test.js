@@ -244,4 +244,33 @@ test('Scopes bound the records an op writes', async (t) => {
     const answer = await link.call('syncom/push', { ops: packOps([op]) });
     assert.strictEqual(answer.outOfScope, 1);
   });
+
+  await t.test(
+    'a scope function that throws on a record leaves it out of a snapshot page, not the page',
+    async (t2) => {
+      const warned = [];
+      const logger = { warn: (entry) => warned.push(entry), info() {}, debug() {}, error() {} };
+      const picky = (id, data) => {
+        if (data.boom) throw new Error('no scope for this');
+        return data.$type ?? '*';
+      };
+      // Written under a scope function that read every record; opened again under one that does not.
+      const dir = await createTemp();
+      t2.after(() => cleanupTemp(dir));
+      const before = await syncom.open({ path: dir, logger: false });
+      const fine = await before.insert({ $type: 'Other', n: 1 });
+      await before.insert({ $type: 'Other', boom: true });
+      await before.close();
+      const host = await syncom.open({ path: dir, logger, sync: { scope: picky } });
+      t2.after(() => host.close().catch(() => {}));
+      const page = await host.snapshot({ scopes: ['Other'] });
+      assert.deepStrictEqual(
+        page.records.map((record) => record.id),
+        [fine],
+      );
+      assert.ok(warned.some((entry) => entry.event === 'snapshot.skipped' && entry.reason === 'scope'));
+      // A page for every scope asks no record its scope: both are in it.
+      assert.strictEqual((await host.snapshot()).records.length, 2);
+    },
+  );
 });

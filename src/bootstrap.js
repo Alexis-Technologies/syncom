@@ -55,7 +55,20 @@ const pageOf = async (core, { cursor = null, limit = DEFAULT_LIMIT, scopes = nul
       continue;
     }
     if (!entry || entry.encrypted) continue;
-    if (!inScope(core.scopeOf(id, entry.data), scopes)) continue;
+    // A page for every scope reads no record's scope; one for some does, and a
+    // scope function that throws on a record leaves that record out — never
+    // the page, which would fail every snapshot of this node while the record
+    // is there.
+    if (scopes !== null) {
+      let scope;
+      try {
+        scope = core.scopeOf(id, entry.data);
+      } catch (error) {
+        core.logger.warn({ event: 'snapshot.skipped', id, reason: 'scope', err: error });
+        continue;
+      }
+      if (!inScope(scope, scopes)) continue;
+    }
     records.push({ id, data: entry.data, meta: entry.meta });
     if (records.length >= limit) return { records, cursor: last, eventId: log.lastEventId, vector: log.vector };
   }

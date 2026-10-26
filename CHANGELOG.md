@@ -991,6 +991,12 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **A scope function that threw on one record failed every snapshot.**
+  `snapshot()` asked every record its scope and let a throw out, so one
+  record the scope function could not read stopped every peer's bootstrap
+  from this node. A record it throws on is left out of the page
+  (`snapshot.skipped`, `reason: 'scope'`), and a page for every scope no
+  longer asks any record its scope.
 - **An open of the log could delete what it failed to read.** A read error
   of an open group's file (EIO, EMFILE) was taken for a torn write and the
   file removed, and a group file that failed its checksum — whole once, so

@@ -253,7 +253,9 @@ docs/                     VitePress site
   keep them apart. Payload shape is `applyOp`'s business.
 - **Scopes are enforced by the host.** `unit().push` drops out-of-scope ops
   before `applyRemote` (`refused` event, `syncom.ops.rejected{scope}`);
-  `snapshot`/`changes` serve `grant(asked, granted)`. The scope an op declares
+  `snapshot`/`changes` serve `grant(asked, granted)` — a page for every scope reads no record's
+  scope, and a scope function that throws on a record leaves that record out of the page
+  (`snapshot.skipped`, `reason: 'scope'`), never the page. The scope an op declares
   is the peer's word: `push` also passes the grant as `bound`, and
   `applyRemote` refuses an op whose RECORD — before the op and after it, as
   this node's `sync.scope` reads it — is outside it (`outOfScope`, not logged,
