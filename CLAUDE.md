@@ -89,7 +89,10 @@ src/text/sequence.js      the sequence engine behind the list and text kinds (in
                           cursors, prune and join — requires vector.js, plugin.js, rle.js, btree.js, pmap.js, plist.js
 src/tree/moves.js         the tree engine: per node its stamped moves, the fold in stamp order with the cycle check (Kleppmann
                           2021, Loro) walking MAX_WALK ancestors at most, MAX_DEPTH levels read, MAX_MOVES a field, prune and
-                          join — requires vector.js and order.js (a place is a fractional index or the move is malformed)
+                          join; the fold kept per block in a WeakMap and handed to the block an op makes (the head of its
+                          lineage), an older move landed by undo–do–redo, the reading path-copied, the change report read
+                          from what moved — requires vector.js, order.js (a place is a fractional index or the move is
+                          malformed) and args.js
 src/order/order.js        fractional indexes over a 62-letter alphabet (Loro's rule, MIT) — no requires; the tree plugin uses it for a node's place
 src/versions/history.js  the past out of the log: a version (event id / stamp / vector) as a cut, the exact start above droppedTs, the fold
 src/versions/tags.js     Tags — named versions kept locally: tags.json, a catalog per tag, copy-on-write record files in the newest tag
@@ -390,8 +393,8 @@ docs/                     VitePress site
   index of a text between the halves of a pair — `wholeCharacters` in
   src/text/text.js, over the rendered text; `spliceArgs` refuses content with
   a lone half; src/text/myers.js diffs by code points where a surrogate is
-  about, so `updateText` never makes one; `resolveTree` folds
-  the tree ONCE and hands back `null` for a move to where the node is, and
+  about, so `updateText` never makes one; the tree plugin's `resolve` reads
+  the fold the block keeps and hands back `null` for a move to where the node is, and
   `commitLocal` returns before `applyOp` on it). `sync.pendingMax`
   (`PENDING_MAX`), `MAX_RUN` (`src/text/rle.js`), `MAX_FIELD`, `MAX_FI`, `MAX_DEPTH`,
   `MAX_MOVES` (a tree field's moves; a join keeps the oldest) and `MAX_COUNT` bound
@@ -430,8 +433,10 @@ docs/                     VitePress site
   came in and went out), a plugin's `change` from `apply` (a splice's cuts
   in the indices before, last first, and its insert in the indices after,
   both read from the rope by `S.spanOf` in O(log n); a tree's moves from the
-  folds before and after, the node with its parent and the sibling before
-  it; a mark over its anchors' range less what a newer mark of its key holds, `S.newerRanges` — a
+  fold as the op found it and as it leaves it — the nodes that moved, the
+  siblings next to them, the levels that cross a cut — the node with its
+  parent and the sibling before it, in the order the two readings diffed would
+  list them; a mark over its anchors' range less what a newer mark of its key holds, `S.newerRanges` — a
   peer's older mark changes no character a newer one decides) — and marks the field `covered`;
   `changesOf` completes the rest from
   `delta` as a `reset` with a copy of the value, or an `unset`; `delete` and

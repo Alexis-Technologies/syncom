@@ -454,14 +454,22 @@ delta cannot say — a reset, an unset — makes it `null`: read the field again
   its position register — and the old slot stays as a tombstone: a list
   reordered thousands of times carries that history until a reset.
 - A tree keeps every move of every node until a reset — some eighty bytes
-  each — and folds all of them once per op that changes the field. Keep a
-  tree to the hundreds of nodes an outline or a folder pane shows, not the
-  hundreds of thousands a file system holds. A field holds 65 536 moves,
-  every node's together: past them `treeMove()` and `treeRemove()` reject
-  with `FIELD_KIND`, `kind: 'bound'`, `detail: 'moves'`, a peer's move is
-  refused (`OP_REFUSED`) and a snapshot block holding more is not taken —
-  `compact(id)` (below) writes the field again as one move per node. A fold
-  at the bound takes some 25 ms, 100 ms in the worst shape (`bench/tree.js`).
+  each — and keeps its fold with the field: a move — a local one, a peer's
+  arriving in stamp order, each move of an outline built in one transaction
+  — is one step of the fold (its walk up from the parent, the siblings it
+  leaves and joins), and the reading is made anew only along its path, so
+  what a move costs does not grow with the tree (`bench/tree.js`: some
+  16 000 `treeMove()` calls a second through the storage at 2 000 nodes as
+  at 32 000; an outline of 8 000 nodes built in one transaction in a quarter
+  of a second). A peer's move stamped before others undoes and redoes those.
+  A field read from its JSON — a record loaded from its file, a snapshot, a
+  merge — is folded whole once: some 1 ms at 5 000 moves; at the bound 25 ms
+  under one root, 50 ms in a random tree, 100 ms in the worst shape. A field
+  holds 65 536 moves, every node's together: past them `treeMove()` and
+  `treeRemove()` reject with `FIELD_KIND`, `kind: 'bound'`,
+  `detail: 'moves'`, a peer's move is refused (`OP_REFUSED`) and a snapshot
+  block holding more is not taken — `compact(id)` (below) writes the field
+  again as one move per node.
 - [`compact(id)`](./versions#costs) is the reset that keeps what the fields
   read as: it rewrites the record as a `write` of its registers and one op
   per field of another kind — a text or a list as one run, a tree as one move per node —

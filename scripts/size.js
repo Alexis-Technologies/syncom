@@ -274,7 +274,8 @@ const ENTRIES = [
   // page. 110, raised by name: room for the review's remaining fixes, measured again at the end of it.
   // 110.4 with sets shared between versions, a hub's vector read key by key, the log's groups and the deferred
   // window measured (stats, three gauges, three instruments). 111.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 111.5 },
+  // 113.0 with the tree's kept fold (+1.6) and a ProseMirror edit sent from its steps. 113.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 113.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -299,7 +300,9 @@ const ENTRIES = [
   // 6.1 with a node's data (the members' seam).
   // 6.3 with the change reports (treeChanges: the placements before and after).
   // 6.8 with src/ in procedural loops (no array callbacks — a loop is longer than a callback; 2026-10-26).
-  { label: 'tree — browser (@alexify/syncom/tree)', entry: 'src/tree/tree.js', platform: 'browser', budget: 7.5 },
+  // 8.6 with the fold kept per block and moved one step a move (the undo–do–redo of an older one, the reading
+  // path-copied, the change report from what the move changed; 2026-10-27). 9, raised by name.
+  { label: 'tree — browser (@alexify/syncom/tree)', entry: 'src/tree/tree.js', platform: 'browser', budget: 9 },
   // The security blocks, each measured ALONE — with the shape checks, the
   // PEM pair, the backend contract and the errors it shares with the core,
   // which an app bundle holds once (4.2 / 2.0 / 3.6 measured; what each

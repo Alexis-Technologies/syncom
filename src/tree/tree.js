@@ -2,12 +2,13 @@
 
 // The `tree` kind as a plugin (@alexify/syncom/tree): the movable tree
 // (./moves.js — per node its stamped moves, the fold in stamp order with
-// the cycle check) behind a record's tree fields — what the core calls to
-// apply a move, to normalize and join a peer's block, to read the field, to
-// resolve a local call's parent and sibling into a place inside the queue,
-// to diff two readings into moves — and the storage methods the plugin adds
-// (treeMove, treeRemove). Registered per instance with
-// `open({ plugins: [tree] })`; src/plugin.js names the contract.
+// the cycle check, kept by the block and handed on to the block an op makes)
+// behind a record's tree fields — what the core calls to apply a move and
+// say what the reading shows of it, to normalize and join a peer's block, to
+// read the field, to resolve a local call's parent and sibling into a place
+// inside the queue, to diff two readings into moves — and the storage
+// methods the plugin adds (treeMove, treeRemove). Registered per instance
+// with `open({ plugins: [tree] })`; src/plugin.js names the contract.
 
 const T = require('./moves.js');
 const { between } = require('../order/order.js');
@@ -34,50 +35,16 @@ const normalize = (raw) => T.normalizeTree(raw);
 
 // One more move in the field's log; a move that did not take is news to
 // persist: a later move can make it count. A move past MAX_MOVES is a
-// `bound` refusal, with the count and the limit.
+// `bound` refusal, with the count and the limit. What the move says comes
+// as it is: changed, a refusal's reason (for a bound, its detail, count and
+// limit) and what the reading shows of it (`change`: the nodes whose place
+// changed — the moved node, the ones that followed it where it was and
+// where it is — as `treeMove` changes, `parent` and `after`; a node gone as
+// `treeRemove`, the root of a subtree alone), read from the fold the block
+// hands on (./moves.js).
 const apply = (entry, field, held, op, stamp) => {
   const result = T.applyTreeMove(held ?? T.createTree(), stamp, op.value);
-  // What the move says comes as it is: changed, and a refusal's reason (for
-  // a bound, its detail, count and limit).
-  const out = { ...result, block: result.changed ? result.tree : (held ?? null) };
-  // What the reading shows of the move: the nodes whose place changed.
-  if (result.changed) out.change = treeChanges(held === undefined ? [] : T.renderTree(held), T.renderTree(result.tree));
-  return out;
-};
-
-// Every node's place: its parent and the sibling before it.
-const placements = (nodes) => {
-  const out = new Map();
-  const stack = [[nodes, null]];
-  while (stack.length > 0) {
-    const [children, parent] = stack.pop();
-    for (let i = 0; i < children.length; i++) {
-      const node = children[i];
-      out.set(node.id, { parent, after: i === 0 ? null : children[i - 1].id });
-      stack.push([node.children, node.id]);
-    }
-  }
-  return out;
-};
-
-// The nodes whose place changed between two readings — a moved node, and
-// the ones that followed it where it was and where it is — as `treeMove`
-// changes (`parent`, `after`); a node gone as `treeRemove`, the root of a
-// subtree alone.
-const treeChanges = (before, after) => {
-  const was = placements(before);
-  const is = placements(after);
-  const out = [];
-  for (const [node, place] of is) {
-    const prev = was.get(node);
-    if (prev === undefined || prev.parent !== place.parent || prev.after !== place.after) {
-      out.push({ action: 'treeMove', node, parent: place.parent, after: place.after });
-    }
-  }
-  for (const [node, place] of was) {
-    if (!is.has(node) && (place.parent === null || is.has(place.parent))) out.push({ action: 'treeRemove', node });
-  }
-  return out;
+  return { ...result, block: result.changed ? result.tree : (held ?? null) };
 };
 
 const render = (entry, field, block) => T.renderTree(block);
@@ -102,29 +69,22 @@ const editors = (entry, field) => {
 // tree read with `data` on every node that has some.
 const NESTS = Object.freeze({ tree: true });
 // The nodes a block shows, in the order of a walk down the reading (the
-// last root first) — kept per block, which is never mutated.
-const SHOWN = new WeakMap();
-const shownOf = (block) => {
-  let shown = SHOWN.get(block);
-  if (shown !== undefined) return shown;
+// last root first); whether one shows is read from the fold, up from it.
+const members = (entry, field) => {
+  const block = own(entry.meta.blocks, field);
   const list = [];
-  const stack = [...T.renderTree(block)];
+  if (block === undefined) return list;
+  const stack = T.renderTree(block).slice();
   while (stack.length > 0) {
     const node = stack.pop();
     list.push(node.id);
     for (const child of node.children) stack.push(child);
   }
-  shown = { list, set: new Set(list) };
-  SHOWN.set(block, shown);
-  return shown;
-};
-const members = (entry, field) => {
-  const block = own(entry.meta.blocks, field);
-  return block === undefined ? [] : shownOf(block).list.slice();
+  return list;
 };
 const holds = (entry, field, member) => {
   const block = own(entry.meta.blocks, field);
-  return block !== undefined && shownOf(block).set.has(member);
+  return block !== undefined && T.shows(block, member);
 };
 const pick = (entry, field, rendered, member) => {
   let found;
@@ -156,26 +116,25 @@ const join = (a, b) => T.joinTrees(a, b);
 // A tree move names a parent and a sibling to land after or before; what
 // travels is the place among the siblings as a fractional index
 // (@alexify/syncom/order) between its neighbours — decided inside the
-// queue, against the tree as it is, folded once. A parent in the node's own
-// subtree is CYCLE, a sibling not under the parent NOT_FOUND; a move to
-// where the node already is makes no op (null). A move that would reach
-// below the level a tree reads (MAX_DEPTH), or a place with no room left
-// between its neighbours (an index past MAX_FI), is OUT_OF_RANGE. Siblings
-// that share an index order by stamp, and a node put after one of them
-// lands after all of them.
+// queue, against the fold the block keeps. A parent in the node's own
+// subtree is CYCLE (up from the parent), a sibling not under the parent
+// NOT_FOUND; a move to where the node already is makes no op (null). A move
+// that would reach below the level a tree reads (MAX_DEPTH), or a place with
+// no room left between its neighbours (an index past MAX_FI), is
+// OUT_OF_RANGE. Siblings that share an index order by stamp, and a node put
+// after one of them lands after all of them.
 const resolve = (core, id, type, payload, current) => {
   const { key, node, parent, after, before } = payload;
   const held = current ? blockOf(current, key) : undefined;
-  const tree = held ?? T.createTree();
-  const folded = T.childrenOf(tree);
-  if (parent !== null && parent !== T.TRASH && T.subtree(tree, node, folded).has(parent)) {
+  const s = T.stateOf(held ?? T.createTree());
+  if (T.under(s, node, parent)) {
     const where = parent === node ? 'itself' : `${parent}, a node under it`;
     const message = `Node ${node} of field ${key} of record ${id} cannot go under ${where}`;
     throw new SyncomError('CYCLE', message, { id, field: key, node, parent });
   }
   // The siblings without the node in one pass: where it was, and where the
   // sibling it lands after or before is among the others.
-  const all = T.siblings(tree, parent, folded);
+  const all = T.kidsOf(s, parent);
   const next = after ?? before;
   const sibs = [];
   let was = -1;
@@ -187,7 +146,7 @@ const resolve = (core, id, type, payload, current) => {
       continue;
     }
     if (i < 0 && sibling === next) i = sibs.length;
-    sibs.push(all[k]);
+    sibs.push(all[k].place[3]);
   }
   let at = sibs.length;
   if (next !== undefined) {
@@ -199,19 +158,19 @@ const resolve = (core, id, type, payload, current) => {
   }
   if (was >= 0 && (at === was || parent === T.TRASH)) return null;
   if (parent !== T.TRASH) {
-    const depth = (parent === null ? 0 : T.depthOf(folded, parent)) + T.heightOf(folded, node);
+    const depth = (parent === null ? 0 : T.depthOf(s, parent)) + T.heightOf(s, node);
     if (depth > T.MAX_DEPTH) {
       const message = `Node ${node} of field ${key} of record ${id} would reach level ${depth}; a tree reads ${T.MAX_DEPTH}`;
       throw new SyncomError('OUT_OF_RANGE', message, { id, field: key, node, depth, max: T.MAX_DEPTH });
     }
   }
-  const lower = at > 0 ? sibs[at - 1].fi : null;
-  let upper = at < sibs.length ? sibs[at].fi : null;
+  const lower = at > 0 ? sibs[at - 1] : null;
+  let upper = at < sibs.length ? sibs[at] : null;
   if (lower !== null && upper !== null && upper <= lower) {
     upper = null;
     for (let i = at + 1; i < sibs.length; i++) {
-      if (sibs[i].fi > lower) {
-        upper = sibs[i].fi;
+      if (sibs[i] > lower) {
+        upper = sibs[i];
         break;
       }
     }

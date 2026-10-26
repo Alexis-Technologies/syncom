@@ -43,6 +43,12 @@ const assertCommutes = (ops, expected) => {
     assert.deepStrictEqual(tree, results[0]);
   }
 };
+// Every node's parent in the fold the block keeps (undefined: the node is not placed).
+const parentsOf = (tree) => {
+  const out = new Map();
+  for (const n of T.stateOf(tree).nodes.values()) if (n.parent !== undefined) out.set(n.id, n.parent);
+  return out;
+};
 const flat = (nodes, depth = 0) =>
   nodes.flatMap((n) => [`${'  '.repeat(depth)}${n.id}`, ...flat(n.children, depth + 1)]);
 
@@ -55,10 +61,14 @@ test('tree', async (t) => {
     ({ tree } = move(tree, 'A', 'c1', 'c'));
     assert.deepStrictEqual(flat(T.renderTree(tree)), ['root', '  a', '  b', '  c', '    c1']);
     assert.deepStrictEqual(
-      T.siblings(tree, 'root').map((s) => s.id),
+      T.kidsOf(T.stateOf(tree), 'root').map((s) => s.id),
       ['a', 'b', 'c'],
     );
-    assert.deepStrictEqual([...T.subtree(tree, 'c')].sort(), ['c', 'c1']);
+    const folded = T.stateOf(tree);
+    assert.deepStrictEqual(
+      ['root', 'a', 'b', 'c', 'c1', 'ghost'].filter((name) => T.under(folded, 'c', name)),
+      ['c', 'c1'],
+    );
     ({ tree } = move(tree, 'A', 'c', 'a'));
     assert.deepStrictEqual(flat(T.renderTree(tree)), ['root', '  a', '    c', '      c1', '  b']);
     ({ tree } = move(tree, 'A', 'c', T.TRASH));
@@ -199,7 +209,7 @@ test('tree', async (t) => {
     for (let at = rendered; at.length > 0; at = at[0].children) depth++;
     assert.strictEqual(depth, T.MAX_DEPTH);
     assert.ok(JSON.stringify(rendered).length > 0, 'and it serializes');
-    const { parentOf } = T.resolve(tree);
+    const parentOf = parentsOf(tree);
     assert.strictEqual(parentOf.get(`n${T.MAX_WALK}`), `n${T.MAX_WALK - 1}`, 'the fold keeps every move it can walk');
     assert.strictEqual(parentOf.has(`n${T.MAX_WALK + 1}`), false, 'a parent past MAX_WALK ancestors: moot');
     assert.deepStrictEqual(T.renderTree(T.joinTrees(tree, tree)), rendered);
@@ -219,7 +229,7 @@ test('tree', async (t) => {
     // ancestors, four seconds, on every op that changed the field.
     const chain = T.normalizeTree({ k: 'tree', ts: 10_000, moves });
     const before = T.walks.steps;
-    T.resolve(chain);
+    T.stateOf(chain);
     const steps = T.walks.steps - before;
     assert.ok(steps <= 10_000 * T.MAX_WALK, `${steps} steps`);
     let depth = 0;
@@ -254,7 +264,7 @@ test('tree', async (t) => {
       assert.deepStrictEqual(tree, forward);
     }
     for (const tree of [forward, halves]) {
-      const { parentOf } = T.resolve(tree);
+      const parentOf = parentsOf(tree);
       assert.strictEqual(parentOf.get(`n${K}`), `n${K - 1}`, 'K ancestors: the move takes');
       assert.strictEqual(parentOf.get('z'), null, 'K + 1 ancestors: moot, z stays where it was');
       assert.strictEqual(parentOf.get('w'), `n${K - 1}`);
@@ -266,7 +276,7 @@ test('tree', async (t) => {
     // Moved up the chain, the same move of z takes.
     const later = move(forward, 'C', `n${K}`, 'n0', 'XV');
     const again = move(later.tree, 'C', 'z', `n${K}`);
-    assert.strictEqual(T.resolve(again.tree).parentOf.get('z'), `n${K}`);
+    assert.strictEqual(parentsOf(again.tree).get('z'), `n${K}`);
   });
 
   await t.test(

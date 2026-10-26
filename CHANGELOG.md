@@ -1648,6 +1648,18 @@ There is no released version section until then; everything below lands in it.
 
 ### Changed
 
+- **A tree move costs one step, not the tree.** Every op of a tree field
+  folded every move again (a sort, the cycle walks), rendered both readings
+  whole and diffed them: a move cost 2 ms at 2 000 nodes and 52 ms at
+  32 000, and an 8 000-node outline built in one transaction took 44 s.
+  The fold is kept per block and handed to the block an op derives from
+  it: a move newest in the fold is one step, an older one undoes the newer
+  moves and does them again (Kleppmann et al.'s undo–do–redo), the reading
+  is path-copied and the change report comes from what the move changed —
+  the same reading and report, op for op, as the full fold (a seeded
+  differential test against it). A local move at 2 000 / 8 000 / 32 000
+  nodes: 78 / 96 / 133 µs; the 8 000-node outline 0.25 s. The block's JSON
+  is unchanged. Budgets: `/tree` 9 KB, `/all` 113.5 KB.
 - **A ProseMirror keystroke costs where it is, not the document.** Every
   local edit read both documents whole and diffed them; typing, a cut or
   inline content pasted inside one textblock is now sent from its steps,

@@ -92,8 +92,8 @@ in its rules — a removal is a move under a trash node, siblings order by a
 fractional index then by stamp, a move that would make a cycle is kept and
 skipped — over the algorithm of Kleppmann, Mulligan, Beresford and Gomes, "A
 highly-available move operation for replicated trees" (2021); the fold itself
-is written for syncom's stamped move log and shares no code with Loro's
-undo-do-redo. The rope under a block — `src/text/btree.js`, read by
+— kept per block, a move older than others landed by the paper's undo–do–redo —
+is written for syncom's stamped move log and shares no code with Loro's. The rope under a block — `src/text/btree.js`, read by
 `src/text/sequence.js` — follows the rules of `loro-js/src/runtime/ordered-index.ts`
 and `sequence-index.ts`: a tree whose nodes carry the measures of what hangs
 under them (here slots and visible slots), found by descending the measures
