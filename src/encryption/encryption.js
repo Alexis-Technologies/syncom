@@ -41,7 +41,11 @@ const encryption = Object.freeze({
 // ---------------------------------------------------------------------------
 // At rest
 
-const PREFIX = 'enc1:';
+// `enc2:` binds each ciphertext to its file name (the additional data of
+// AES-GCM): a file copied over another one of the store does not decrypt.
+// `enc1:` (no binding) is read still, written never.
+const PREFIX = 'enc2:';
+const UNBOUND = 'enc1:';
 const IV_BYTES = 12;
 const DEFAULT_ITERATIONS = 600_000;
 const subtle = () => globalThis.crypto.subtle;
@@ -117,17 +121,21 @@ const atRest = (fsi, options = {}) => {
   ready.catch(() => {});
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
-  const seal = async (text) => {
+  // The name, not the directory: a store moved elsewhere still opens.
+  const bound = (filename) => ({ additionalData: encoder.encode(filename) });
+  const seal = async (filename, text) => {
     const key = await ready;
     const iv = globalThis.crypto.getRandomValues(new Uint8Array(IV_BYTES));
-    const body = new Uint8Array(await subtle().encrypt({ name: 'AES-GCM', iv }, key, encoder.encode(text)));
+    const params = { name: 'AES-GCM', iv, ...bound(filename) };
+    const body = new Uint8Array(await subtle().encrypt(params, key, encoder.encode(text)));
     const out = new Uint8Array(iv.length + body.length);
     out.set(iv, 0);
     out.set(body, iv.length);
     return PREFIX + toBase64(out);
   };
   const open = async (dir, filename, text) => {
-    if (typeof text !== 'string' || !text.startsWith(PREFIX)) throw failed(dir, filename, 'plain');
+    const unbound = typeof text === 'string' && text.startsWith(UNBOUND);
+    if (typeof text !== 'string' || (!unbound && !text.startsWith(PREFIX))) throw failed(dir, filename, 'plain');
     const key = await ready;
     let bytes;
     try {
@@ -137,7 +145,8 @@ const atRest = (fsi, options = {}) => {
     }
     try {
       const iv = bytes.subarray(0, IV_BYTES);
-      const plain = await subtle().decrypt({ name: 'AES-GCM', iv }, key, bytes.subarray(IV_BYTES));
+      const params = unbound ? { name: 'AES-GCM', iv } : { name: 'AES-GCM', iv, ...bound(filename) };
+      const plain = await subtle().decrypt(params, key, bytes.subarray(IV_BYTES));
       return decoder.decode(plain);
     } catch (error) {
       throw failed(dir, filename, 'key', error);
@@ -146,14 +155,14 @@ const atRest = (fsi, options = {}) => {
   const wrapped = {
     read: async (dir, filename) => open(dir, filename, await inner.read(dir, filename)),
     write: async (dir, filename, content, writeOptions) =>
-      inner.write(dir, filename, await seal(content), writeOptions),
+      inner.write(dir, filename, await seal(filename, content), writeOptions),
     exists: (dir, filename) => inner.exists(dir, filename),
     remove: (dir, filename) => inner.remove(dir, filename),
     list: (dir) => inner.list(dir),
   };
   if (typeof inner.sync === 'function') wrapped.sync = (dir, filename) => inner.sync(dir, filename);
   if (typeof inner.create === 'function') {
-    wrapped.create = async (dir, filename, content) => inner.create(dir, filename, await seal(content));
+    wrapped.create = async (dir, filename, content) => inner.create(dir, filename, await seal(filename, content));
   }
   return wrapped;
 };

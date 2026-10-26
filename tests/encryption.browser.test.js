@@ -22,14 +22,14 @@ test('encryption (browser)', async (t) => {
   assert.deepStrictEqual(await storage.get(sealed), { title: 'Sealed' });
   assert.strictEqual(await storage.validate(), true);
   await storage.close();
-  // The mock OPFS holds enc1: text and no plain word.
+  // The mock OPFS holds enc2: text and no plain word.
   for (const [dir, file] of [
     ['enc-store/data', `${id}.json`],
     ['enc-store', 'node.json'],
     ['enc-store/keys', 'sign-public.pem'],
   ]) {
     const text = await opfs.read(dir, file);
-    assert.ok(text.startsWith('enc1:') && !text.includes('Secret') && !text.includes('BEGIN'), `${dir}/${file}`);
+    assert.ok(text.startsWith('enc2:') && !text.includes('Secret') && !text.includes('BEGIN'), `${dir}/${file}`);
   }
   const again = await browser.open({ path: 'enc-store', fsi, logger: false });
   assert.deepStrictEqual(await again.get(id), { title: 'Secret' });

@@ -46,7 +46,7 @@ test('encryption as blocks', async (t) => {
   });
 
   await t.test(
-    'atRest: every file through the wrapper is enc1: ciphertext, nothing plain in the backend, and the key reads it back',
+    'atRest: every file through the wrapper is enc2: ciphertext, nothing plain in the backend, and the key reads it back',
     async () => {
       const raw = memory();
       // A file is one ciphertext: the wrapper has no append, even over a backend that does, so the
@@ -59,7 +59,7 @@ test('encryption as blocks', async (t) => {
       const files = raw.dump();
       assert.ok(Object.keys(files).length >= 3, 'node.json, the log, the record');
       for (const [name, content] of Object.entries(files)) {
-        assert.ok(content.startsWith('enc1:'), name);
+        assert.ok(content.startsWith('enc2:'), name);
         assert.ok(!content.includes('Secret') && !content.includes(storage.nodeId), name);
       }
       const again = await core.open({ path: 's', fsi: atRest(raw, { key: KEY }), logger: false });
@@ -111,9 +111,31 @@ test('encryption as blocks', async (t) => {
     assert.strictEqual(await raw.exists('d', 'plain.json'), false);
     assert.deepStrictEqual((await mine.list('d')).sort(), ['f.json', 'g.json', 'short.json', 'torn.json']);
     await mine.create('d', 'made.json', '1');
-    assert.ok((await raw.read('d', 'made.json')).startsWith('enc1:'));
+    assert.ok((await raw.read('d', 'made.json')).startsWith('enc2:'));
     assert.strictEqual(await mine.read('d', 'made.json'), '1');
     await assert.rejects(() => mine.create('d', 'made.json', '2'), { code: 'EEXIST' });
+  });
+
+  await t.test('a ciphertext is bound to its file name: one copied over another does not decrypt', async () => {
+    const raw = memory();
+    const mine = atRest(raw, { key: KEY });
+    await mine.write('data', 'alice.json', '{"balance":10}');
+    await mine.write('data', 'bob.json', '{"balance":99}');
+    await raw.write('data', 'alice.json', await raw.read('data', 'bob.json'));
+    await assert.rejects(() => mine.read('data', 'alice.json'), { code: 'DECRYPT_FAILED', reason: 'key' });
+    assert.strictEqual(await mine.read('data', 'bob.json'), '{"balance":99}');
+    // The directory is not bound: a store moved elsewhere opens.
+    await raw.write('elsewhere', 'bob.json', await raw.read('data', 'bob.json'));
+    assert.strictEqual(await mine.read('elsewhere', 'bob.json'), '{"balance":99}');
+    // An enc1: file (unbound, from before) still reads.
+    const subtle = globalThis.crypto.subtle;
+    const key = await subtle.importKey('raw', KEY, 'AES-GCM', false, ['encrypt']);
+    const iv = new Uint8Array(12);
+    const body = new Uint8Array(await subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode('old')));
+    const bytes = new Uint8Array(12 + body.length);
+    bytes.set(body, 12);
+    await raw.write('data', 'old.json', `enc1:${Buffer.from(bytes).toString('base64')}`);
+    assert.strictEqual(await mine.read('data', 'old.json'), 'old');
   });
 
   await t.test('the options are checked when the wrapper is made', () => {

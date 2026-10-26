@@ -954,6 +954,12 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **An encrypted file could stand in for another.** `atRest()` sealed every
+  file under one key with nothing tying a ciphertext to its file, so one
+  record's file copied over another's decrypted as that one. Ciphertexts are
+  bound to their file name now (`enc2:`; an `enc1:` file still reads); the
+  docs say what stays visible (names, sizes) and what a key cannot tell (an
+  older copy put back).
 - **`anonymize()` left what it promised to hide.** Keys stayed by default —
   a set's elements (an email), the origins of a clock, the streams of a
   vector — the salt was empty by default, and the hash 32 bits wide. Keys are

@@ -130,6 +130,14 @@ const storage = await open({ path: 'data', fsi: atRest(fsi, { key }) });
 const vault = await open({ path: 'data', fsi: atRest(fsi, { password, salt }) });
 ```
 
+Each ciphertext is bound to its file name (the additional data of
+AES-GCM): a file copied over another one of the store — one record's over
+another's — does not decrypt. The directory is not bound, so a store moved
+elsewhere opens. What the wrapper does not hide or prevent: the names of the
+files (record ids, tag names, the log's seqs) and their sizes, and an older
+copy of a file put back in its place — that is a backup restored, as far as
+the key can tell.
+
 The key is never written. A file that is not the key's is refused as
 `DECRYPT_FAILED` with a `reason` — `'key'` (another key, or a torn
 ciphertext), `'plain'` (a file that was never encrypted), `'torn'` (not
