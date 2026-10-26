@@ -9,7 +9,7 @@
 // state covers. `core` is what Storage lends its write paths — see
 // Storage#open.
 
-const { applyOp, isAlive, latestClock, latestHeld } = require('./ops.js');
+const { applyOp, isAlive, latestClock, latestHeld, settleMeta } = require('./ops.js');
 const { opKey } = require('./vector.js');
 const { fingerprintOf } = require('./header.js');
 const { link } = require('./commit.js');
@@ -109,14 +109,14 @@ const mergeOne = async (batch, record) => {
   const { id } = record;
   // A stamp beyond the skew allowed is refused here as an op's is in
   // applyRemote: a snapshot is the other way a clock reaches this node.
-  const latest = latestClock(record.meta, false, core.limits);
+  const started = otel.enabled ? now() : 0;
+  const data = asJson(record.data);
+  const meta = settleMeta(asJson(record.meta));
+  const latest = latestClock(meta, false, core.limits);
   if (latest !== null && latest[0] > batch.horizon) {
     core.logger.warn({ event: 'sync.record.skew', id, ts: latest[0], ahead: latest[0] - batch.horizon });
     return;
   }
-  const started = otel.enabled ? now() : 0;
-  const data = asJson(record.data);
-  const meta = asJson(record.meta);
   const current = batch.touched.get(id) ?? (await core.current(id));
   if (current?.encrypted) {
     // Sealed here for this node alone: a peer's state of it is not taken.
@@ -132,7 +132,9 @@ const mergeOne = async (batch, record) => {
   }
   const scope = core.scopeOf(id, data ?? current?.data ?? {});
   core.observe(latestHeld(current?.meta), id);
-  core.observe(latestClock(meta), id);
+  // The meta normalized for the skew check above is the one asked here and
+  // joined below (src/ops.js normalizeMeta keeps it per object): one walk.
+  core.observe(latestClock(meta, false, core.limits), id);
   const op = { origin: core.nodeId, seq: 0, ts: core.clock.now(), type: 'merge', id };
   if (scope !== GLOBAL_SCOPE) op.scope = scope;
   if (from) op.from = from;

@@ -9,7 +9,7 @@
 // boundary: nothing below `admit` reads a field it did not check. `core` is
 // what Storage lends its write paths — see Storage#open.
 
-const { applyOp, isAlive, latestClock } = require('./ops.js');
+const { applyOp, isAlive, latestClock, settleMeta } = require('./ops.js');
 const { vectorHas, vectorNext, vectorAdvance, keyScope, opKey } = require('./vector.js');
 const { fingerprintOf, scrubOp } = require('./header.js');
 const { notify } = require('./hooks.js');
@@ -280,7 +280,9 @@ const reportEquivocations = (batch) => {
 // The newest stamp a merge's meta holds — a peer's whole meta, every stamp
 // of it observed once the record is written here — or null.
 const newestHeld = (core, op) => {
-  const latest = latestClock(op.meta, false, core.limits);
+  // A peer's op is its page's, never changed after it arrived: its meta is
+  // normalized once for this check and the join that follows.
+  const latest = latestClock(settleMeta(op.meta), false, core.limits);
   return latest === null ? null : latest[0];
 };
 

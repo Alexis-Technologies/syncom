@@ -1639,6 +1639,11 @@ There is no released version section until then; everything below lands in it.
 
 ### Changed
 
+- **A snapshot record is normalized once, not three times.** Joining one
+  read its meta for the skew check, again for the clock and again for the
+  join, hydrating its blocks each time; a peer's merge op twice. A meta its
+  holder will not change (`settleMeta`) is now normalized once per object:
+  joining 400 records of 2 000-character texts took 840 ms, now 550.
 - **A write no longer reads its record for a scope nobody asked for.**
   Every local write merged the record with its data and composed it —
   twice — to ask a scope function, even with no `sync.scope` given; now the

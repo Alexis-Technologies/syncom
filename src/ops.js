@@ -318,8 +318,34 @@ const isSlot = (value) =>
 // object is kept by reference and a `__proto__` key in it reaches nothing.
 // A block of a kind no plugin here knows is left out and, when `dropped` is
 // given, reported there as `{ field, reason: 'kind', kind }`.
+// A peer's meta normalized once per object and bounds, where its holder
+// says it will not change (`settleMeta`: a snapshot record's copy, an op's
+// meta): a snapshot record is asked its newest stamp (the skew check, then
+// the clock) and then joined — three walks of it, its blocks hydrated three
+// times. The result is shared and read-only (mergeEntry copies what it
+// keeps); the kinds it dropped are told again to every caller that asks.
+const SETTLED = new WeakSet();
+const NORMALIZED = new WeakMap();
+const settleMeta = (meta) => {
+  if (isPlainObject(meta)) SETTLED.add(meta);
+  return meta;
+};
 const normalizeMeta = (meta, limits = null, dropped = null) => {
   const bounds = limitsOf(limits);
+  if (!SETTLED.has(meta)) return normalizeOnce(meta, bounds, dropped);
+  const memo = NORMALIZED.get(meta);
+  if (memo !== undefined && memo.pendingMax === bounds.pendingMax && memo.plugins === bounds.plugins) {
+    if (dropped !== null) for (let i = 0; i < memo.dropped.length; i++) dropped.push(memo.dropped[i]);
+    return memo.normalized;
+  }
+  const told = [];
+  const normalized = normalizeOnce(meta, bounds, told);
+  if (dropped !== null) for (let i = 0; i < told.length; i++) dropped.push(told[i]);
+  NORMALIZED.set(meta, { pendingMax: bounds.pendingMax, plugins: bounds.plugins, normalized, dropped: told });
+  return normalized;
+};
+
+const normalizeOnce = (meta, bounds, dropped) => {
   const clock = {};
   if (isPlainObject(meta.clock)) {
     for (const field of Object.keys(meta.clock)) {
@@ -1442,6 +1468,7 @@ module.exports = {
   observedTags,
   latestClock,
   latestHeld,
+  settleMeta,
   normalizeMeta,
   deepEqual,
   packOps,
