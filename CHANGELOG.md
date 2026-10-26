@@ -1639,6 +1639,10 @@ There is no released version section until then; everything below lands in it.
 
 ### Changed
 
+- **A write no longer reads its record for a scope nobody asked for.**
+  Every local write merged the record with its data and composed it —
+  twice — to ask a scope function, even with no `sync.scope` given; now the
+  record is read only where one is, and composed once.
 - **A large set no longer slows down every op of its record.** Every op
   copied every set of its record whole, walked it for the newest stamp and
   listed its keys for a kind check, and an add or a remove sorted and parsed

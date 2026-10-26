@@ -449,6 +449,9 @@ class Storage extends Emitter {
       hook: (name, ...args) => this.#hook(name, ...args),
       view: (id, entry) => this.#view(id, entry),
       scopeOf: (id, data) => this.#scope(id, data),
+      // Whether a scope function was given: without one every record is in
+      // the global scope, and no write path composes a record to ask.
+      scoped: this.#settings.scope !== null,
       actorOf: (given) => this.#actorOf(given),
       observe: (stamp, id) => this.#observeHeld(stamp, id),
       definitionOf: (data) => this.#definitionOf(data),

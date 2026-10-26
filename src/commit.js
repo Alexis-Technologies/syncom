@@ -22,7 +22,7 @@ const { GLOBAL_SCOPE } = require('./scope.js');
 const { isPlainObject, asJson, VALIDATED, MAX_MESSAGE, isRecordId, invalidId } = require('./shape.js');
 const { nestsWithin, MAX_JSON_DEPTH, MAX_WIRE_DEPTH } = require('./shape.js');
 const { ancestorsOf } = require('./paths.js');
-const { compose, composeData } = require('./compose.js');
+const { compose } = require('./compose.js');
 const { SyncomError, typed } = require('./errors.js');
 
 // What a commit came to: an op, `null` for a write that changed nothing,
@@ -148,9 +148,10 @@ const scopeData = (type, payload, current) => {
 };
 
 // The op's stream: its scope, and the next seq there (seqs run per stream,
-// see vector.js opKey).
-const assignScope = (core, op, data) => {
-  const scope = core.scopeOf(op.id, composeData(data));
+// see vector.js opKey). The record (`dataOf()`) is read for it only where a
+// scope function was given (`core.scoped`); `scopeOf` composes it.
+const assignScope = (core, op, dataOf) => {
+  const scope = core.scoped ? core.scopeOf(op.id, dataOf()) : GLOBAL_SCOPE;
   if (scope === GLOBAL_SCOPE) delete op.scope;
   else op.scope = scope;
   op.seq = core.seqOf(opKey(op)) + 1;
@@ -227,7 +228,7 @@ const prepareOp = (core, type, id, payload, current, who, from) => {
   // version lenses the record through.
   if (core.version !== null) op.v = core.version;
   if (who !== null) op.actor = who;
-  assignScope(core, op, scopeData(type, payload, current));
+  assignScope(core, op, () => scopeData(type, payload, current));
   if (payload.data !== undefined) op.data = payload.data;
   if (payload.key !== undefined) op.key = payload.key;
   if (payload.value !== undefined) op.value = payload.value;
@@ -616,7 +617,7 @@ const prepare = async (core, type, id, payload, options) => {
   }
   // The validator may have filled the field the scope reads (a default):
   // the stream is the one of the record as it is written.
-  if (type === 'write' || type === 'set') assignScope(core, op, applied.entry.data);
+  if (type === 'write' || type === 'set') assignScope(core, op, () => applied.entry.data);
   const previous = current && !current.encrypted ? current : null;
   // The commit event's `before` is the record in the op model's terms — the
   // paths apart, as the entry holds them — what an undo takes a step back by.
