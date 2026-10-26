@@ -42,6 +42,10 @@ const MAX_REHELLOS = 5;
 // Ops queued for a peer beyond this are dropped — the vector-based push that
 // recovers the peer carries what it lacks, and memory is not a buffer.
 const DEFAULT_MAX_OUTBOX = 10_000;
+// The bytes a streamed snapshot page may carry: a host's page is bounded by
+// its own pageSize, and a host that streams without end must not take this
+// node's memory with it.
+const DEFAULT_MAX_PAGE_BYTES = 256 * 1024 * 1024;
 // A failed recovery waits this long (doubling, by timestamp) before the next.
 const RECOVER_BACKOFF = 1000;
 const MAX_RECOVER_BACKOFF = 60_000;
@@ -92,6 +96,7 @@ class SyncManager extends Emitter {
   #hooks;
   #fsi;
   #maxOutbox = DEFAULT_MAX_OUTBOX;
+  #maxPageBytes = DEFAULT_MAX_PAGE_BYTES;
 
   constructor(storage, options = {}) {
     super({ maxListeners: options?.maxListeners });
@@ -103,6 +108,13 @@ class SyncManager extends Emitter {
       throw new TypeError('sync.maxOutbox must be a positive integer');
     }
     if (maxOutbox !== undefined) this.#maxOutbox = maxOutbox;
+    const { maxPageBytes } = this.#options;
+    if (maxPageBytes !== undefined) {
+      if (!((Number.isInteger(maxPageBytes) && maxPageBytes > 0) || maxPageBytes === Infinity)) {
+        throw new TypeError('sync.maxPageBytes must be a positive integer (Infinity to disable)');
+      }
+      this.#maxPageBytes = maxPageBytes;
+    }
     this.#otel = writerOf(storage.telemetry);
     // Reserved for the broker-backed hub mode (see src/shared-log.js).
     if (this.#options.sharedLog !== undefined) {
@@ -960,16 +972,25 @@ class SyncManager extends Emitter {
     let startVector = null;
     let pages = 0;
     let total = 0;
+    // The host pages; this node checks it moves on: a cursor that does not
+    // pass the last one (record ids, in order) would page for ever.
+    const bad = (reason, message) => new SyncomError('BAD_PAGE', `${node.url}: ${message}`, { url: node.url, reason });
     do {
       const page = await link.call('syncom/snapshot', { cursor, scopes: node.scopes });
       pages++;
       if (peer.closed) return { pages, records: total };
+      if (page === null || typeof page !== 'object') throw bad('shape', 'a snapshot page that is no object');
       startEventId ??= page.eventId;
       startVector ??= page.vector ?? null;
-      const records = page.id !== undefined ? await this.#readSnapshot(link, page) : page.records;
+      const records = page.id !== undefined ? await this.#readSnapshot(link, page, bad) : page.records;
+      if (!Array.isArray(records)) throw bad('shape', 'a snapshot page without its records');
+      const next = page.cursor ?? null;
+      if (next !== null && (typeof next !== 'string' || (cursor !== null && next <= cursor))) {
+        throw bad('cursor', `a snapshot cursor that does not move on (${JSON.stringify(next)} after ${cursor})`);
+      }
       await this.#storage.mergeSnapshot(records, { via: peer.ref, from: peer.remote.id });
       total += records.length;
-      cursor = page.cursor ?? null;
+      cursor = next;
     } while (cursor !== null);
     // Everything up to the host's vector at the FIRST page is inside what
     // was joined; adopting it (for the scopes asked for) means nobody
@@ -989,14 +1010,19 @@ class SyncManager extends Emitter {
   // A streamed page: NDJSON, one `{ id, data, meta }` per line, parsed line
   // by line as the chunks arrive; the records are collected and handed to
   // mergeSnapshot as one page — a page is bounded by the host's `pageSize`.
-  async #readSnapshot(link, page) {
+  async #readSnapshot(link, page, bad) {
     if (typeof link.stream !== 'function') {
       throw new SyncomError('STREAMS_UNSUPPORTED', 'The host streamed a snapshot but the link cannot read streams');
     }
     const decoder = new TextDecoder();
     const records = [];
     let rest = '';
+    let bytes = 0;
     for await (const chunk of link.stream(page.id)) {
+      bytes += chunk.length;
+      if (bytes > this.#maxPageBytes) {
+        throw bad('bytes', `a streamed snapshot page past sync.maxPageBytes (${this.#maxPageBytes})`);
+      }
       rest += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
       let newline = rest.indexOf('\n');
       while (newline !== -1) {

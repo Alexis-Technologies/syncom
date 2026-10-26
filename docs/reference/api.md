@@ -326,6 +326,7 @@ carries no code, except `INVALID_ID`, `TYPE_IMMUTABLE`, `INVALID_VERSION`,
 | `NODE_EXISTS` | `addNode()` of a registered url | `url` |
 | `NODE_NOT_FOUND` | `removeNode()`, `enableNode()` of an unknown url | `url` |
 | `BAD_HELLO` | the sync `error` event: the host's hello answer has no node id | `url` |
+| `BAD_PAGE` | the sync `error` event, bootstrapping: the host's snapshot page is no object or has no records (`reason: 'shape'`), its cursor does not move past the last one (`'cursor'` — it would page for ever), or a streamed page passed `sync.maxPageBytes` (`'bytes'`); nothing more is joined from that page on | `url`, `reason` |
 | `HANDSHAKE_LOOP` | the sync `error` event: five fresh hellos answered 428 in a row | `url`, `cause` |
 | `PAGE_FAILED`, `STUCK` | the sync `error` event: a page of the feed could not be applied; the third in a row | `url`, `cursor`, `attempt`, `cause` |
 | `STREAMS_UNSUPPORTED` | the sync `error` event: the host streamed a snapshot and the link cannot read streams | `url` |

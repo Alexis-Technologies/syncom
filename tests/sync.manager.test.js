@@ -172,6 +172,59 @@ test('SyncManager edges', async (t) => {
     assert.strictEqual(errors[0].code, 'STREAMS_UNSUPPORTED');
   });
 
+  await t.test(
+    'a bootstrap stops with BAD_PAGE on a page without records, a cursor that does not move on, a stream past maxPageBytes',
+    async (t2) => {
+      const host = await openTemp(t2, { sync: { log: { rollAfter: 2 }, retention: { ops: 4 } } });
+      for (let i = 0; i < 8; i++) await host.insert({ i });
+      const unit = host.sync.unit({ access: 'public', pageSize: 2 });
+      const reasons = async (Link, sync = {}) => {
+        const errors = [];
+        const dialer = await openTemp(t2, { sync: { autoStart: false, connect: () => new Link(unit), ...sync } });
+        dialer.sync.on('error', (error) => errors.push(error));
+        await dialer.sync.addNode({ url: 'mem://host' });
+        await dialer.sync.start();
+        await waitUntil(() => errors.some((error) => error.code === 'BAD_PAGE'));
+        const bad = errors.find((error) => error.code === 'BAD_PAGE');
+        assert.strictEqual(bad.url, 'mem://host');
+        return bad.reason;
+      };
+      // The host's second page comes back with the cursor it was asked from: it would page for ever.
+      class Loop extends MemoryLink {
+        async call(method, args) {
+          const answer = await super.call(method, args);
+          return method === 'syncom/snapshot' && args.cursor !== null ? { ...answer, cursor: args.cursor } : answer;
+        }
+      }
+      assert.strictEqual(await reasons(Loop), 'cursor');
+      class Bare extends MemoryLink {
+        async call(method, args) {
+          const answer = await super.call(method, args);
+          if (method !== 'syncom/snapshot') return answer;
+          const { records, ...rest } = answer;
+          void records;
+          return rest;
+        }
+      }
+      assert.strictEqual(await reasons(Bare), 'shape');
+      // A streamed page that never ends.
+      class Endless extends MemoryLink {
+        async call(method, args) {
+          const answer = await super.call(method, args);
+          return method === 'syncom/snapshot'
+            ? { id: 's1', eventId: answer.eventId, vector: answer.vector, cursor: null }
+            : answer;
+        }
+
+        async *stream() {
+          for (;;) yield `${JSON.stringify({ id: 'x', data: { pad: 'p'.repeat(1000) }, meta: {} })}\n`;
+        }
+      }
+      assert.strictEqual(await reasons(Endless, { maxPageBytes: 64 * 1024 }), 'bytes');
+      await assert.rejects(() => openTemp(t2, { sync: { autoStart: false, maxPageBytes: 0 } }), TypeError);
+    },
+  );
+
   await t.test('a push that fails mid-flight is reported and recomputed from the vector', async (t2) => {
     const host = await openTemp(t2);
     const unit = host.sync.unit({ access: 'public' });

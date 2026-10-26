@@ -718,6 +718,7 @@ once `close()` was called is refused at once.
 | `signatures` | `'verify'` | `'verify'`, `'require'` or `false` — see [Signatures](#signatures) |
 | `rewind` | `'report'` | A host that holds more of this node's own streams than its log (`REWOUND`): `'report'` moves them past the host's only on proof — this node's own op at the seq, signed by its key — `'adopt'` on the host's word. See [The log](#the-log) |
 | `maxOutbox` | `10000` | Ops queued for one peer beyond this are dropped and the peer is `behind`; the recovery pushes what it lacks from the vector |
+| `maxPageBytes` | `268435456` (256 MiB) | The bytes one streamed snapshot page may carry while bootstrapping; past it — or a page without records, or a cursor that does not move on — the bootstrap stops with `BAD_PAGE` |
 | `log.rollAfter` | `64` | Groups of appends per sealed segment |
 | `pageSize` | `500` | Ops per push. What a host serves per page — snapshot records, `changes` ops — is its own `unit({ pageSize })` |
 | `hooks` | — | `beforeConnect`, `beforeBootstrap` — see [Hooks and events](./hooks#sync-hooks) |

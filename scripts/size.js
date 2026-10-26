@@ -334,7 +334,9 @@ const ENTRIES = [
   // to the core is the 6.8 KB the main entry came down by).
   // 20.4 with presence: the unit's inbound event, the room's memory, the manager's carrying.
   // 21.1 with a contained telemetry writer and a log that answers every durable group (2026-10-26).
-  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 22.5 },
+  // 22.5 with the review's sync fixes: proof for own streams, the hash chain's heads, presence refusals reported,
+  // a bootstrap's pages checked (BAD_PAGE, maxPageBytes; 2026-10-27). 23, raised by name.
+  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 23 },
   // The schema: the definitions read once, the validator adapters, the lens.
   // 4.3 with a set folded back by path (src/entity.js over src/paths.js).
   {

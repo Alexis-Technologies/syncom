@@ -889,6 +889,12 @@ There is no released version section until then; everything below lands in it.
 
 ### Security
 
+- **A host could keep a bootstrapping node paging for ever.** The dialing
+  side took the host's snapshot cursor as it came — one that did not move
+  on was asked again and again — and read a streamed page to its end,
+  however long. A page without records, a cursor that does not pass the
+  last one, or a streamed page past `sync.maxPageBytes` (new, 256 MiB by
+  default) now stop the bootstrap with `BAD_PAGE` (`url`, `reason`).
 - **An op on a purged record no longer costs a rewrite of the log, nor
   carries the payload on.** A peer's op that landed on a record purged
   before it was logged with its payload, relayed with it to every peer this

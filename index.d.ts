@@ -443,6 +443,7 @@ export type SyncomErrorCode =
   | 'NODE_EXISTS'
   | 'NODE_NOT_FOUND'
   | 'BAD_HELLO'
+  | 'BAD_PAGE'
   | 'HANDSHAKE_LOOP'
   | 'PAGE_FAILED'
   | 'STUCK'
@@ -1048,6 +1049,12 @@ export interface SyncOptions {
    * what it lacks.
    */
   maxOutbox?: number;
+  /**
+   * The bytes one streamed snapshot page may carry (default 256 MiB,
+   * `Infinity` for no bound); past it — or a page without its records, or a
+   * cursor that does not move on — the bootstrap stops with `BAD_PAGE`.
+   */
+  maxPageBytes?: number;
   /** Lifecycle hooks — see SyncHooks. */
   hooks?: SyncHooks;
   /** Reserved for the broker-backed hub mode; refused in this version. See SharedLog. */

@@ -531,6 +531,8 @@ expectError(storage.swap('id', 'text', { a: 1 }));
 // E3: behind peers, the outbox bound
 expectAssignable<StorageOptions>({ sync: { maxOutbox: 500 } });
 expectError(syncom.open({ sync: { maxOutbox: 'lots' } }));
+expectAssignable<StorageOptions>({ sync: { maxPageBytes: 1 << 20 } });
+expectError(syncom.open({ sync: { maxPageBytes: 'big' } }));
 
 // E4a: no chain, seqOf
 expectAssignable<StorageOptions>({ chain: false });
