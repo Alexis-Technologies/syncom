@@ -169,6 +169,30 @@ const reportSignatures = (batch) => {
   }
 };
 
+// A field of a kind this node runs no plugin for: every op of it is refused
+// the same way — a hub without the text plugin refuses every keystroke it
+// relays — so the metric counts each, and the warn and the `error` event
+// come once per page, with the count and the kinds.
+const onlyKinds = (rejected) => {
+  for (let i = 0; i < rejected.length; i++) if (rejected[i].reason !== 'kind') return false;
+  return true;
+};
+const refuseKind = (batch, op, rejected) => {
+  batch.core.otel.recordRejected('kind');
+  if (batch.kinds === undefined) batch.kinds = { op, rejected, count: 0, names: new Set() };
+  batch.kinds.count++;
+  for (let i = 0; i < rejected.length; i++) batch.kinds.names.add(rejected[i].kind);
+};
+const reportKinds = (batch) => {
+  if (batch.kinds === undefined) return;
+  const { core } = batch;
+  const { op, rejected, count, names } = batch.kinds;
+  const kinds = [...names];
+  core.logger.warn({ event: 'sync.op.rejected', id: op.id, rejected, count, kinds });
+  const message = `Refused ${count} op${count > 1 ? 's' : ''} of a kind this node runs no plugin for (${kinds.join(', ')})`;
+  notify(core.storage, core.logger, 'error', new SyncomError('OP_REFUSED', message, { op, rejected, count, kinds }));
+};
+
 // The fingerprint this node holds for the op at `seq` of the stream `key`:
 // one accepted earlier in this batch, else the log's — or undefined.
 const heldAt = (batch, key, seq) => batch.prints?.get(key)?.get(seq) ?? batch.core.log.fingerprintOf(key, seq);
@@ -438,8 +462,11 @@ const applyOne = async (batch, op) => {
   core.clock.observe(op.ts);
   const { entry, changed, delta, rejected, changes } = applyOp(current, op, core.limits);
   if (rejected.length > 0) {
-    const error = new SyncomError('OP_REFUSED', `Refused op on ${op.id}`, { op, rejected });
-    report(batch, { event: 'sync.op.rejected', id: op.id, rejected }, rejected[0].reason, error);
+    if (onlyKinds(rejected)) refuseKind(batch, op, rejected);
+    else {
+      const error = new SyncomError('OP_REFUSED', `Refused op on ${op.id}`, { op, rejected });
+      report(batch, { event: 'sync.op.rejected', id: op.id, rejected }, rejected[0].reason, error);
+    }
   }
   // Invalid under this node's schema: skipped like a beforeApply `false` —
   // logged, relayed, replay-safe — and reported.
@@ -527,6 +554,7 @@ const applyRemote = async (core, ops, options) => {
   }
   reportSignatures(batch);
   reportEquivocations(batch);
+  reportKinds(batch);
   const result = {
     applied: batch.accepted.length,
     skipped: batch.skipped?.size ?? 0,

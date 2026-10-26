@@ -213,6 +213,30 @@ test('a core-only hub between two text nodes logs and relays the text it cannot 
   assert.strictEqual(record.meta.blocks.body, undefined);
 });
 
+test('a page of ops of a kind this node lacks is one refusal: the metric counts each, the error comes once', async (t) => {
+  const full = await all.open({ defer: 0, path: `kinds-${n++}`, fsi, logger: false });
+  t.after(() => full.close().catch(() => {}));
+  const id = await full.insert({ title: 'doc' });
+  for (let i = 0; i < 5; i++) await full.splice(id, 'body', i, 0, 'x');
+  const ops = full.log.since(null).map((entry) => entry.op);
+  const counted = [];
+  const telemetry = {
+    enabled: true,
+    withSpan: (_n, _a, fn) => fn(null),
+    recordRejected: (reason) => counted.push(reason),
+  };
+  const lean = await openLean({ telemetry });
+  t.after(() => lean.close().catch(() => {}));
+  const errors = [];
+  lean.on('error', (error) => errors.push(error));
+  const result = await lean.applyRemote(ops);
+  assert.strictEqual(result.applied, 6, 'every op logged, to be relayed');
+  assert.deepStrictEqual(counted, ['kind', 'kind', 'kind', 'kind', 'kind']);
+  assert.strictEqual(errors.length, 1);
+  assert.deepStrictEqual([errors[0].code, errors[0].count, errors[0].kinds], ['OP_REFUSED', 5, ['text']]);
+  assert.strictEqual(errors[0].rejected[0].reason, 'kind');
+});
+
 test('a node does not bootstrap from a host that cannot hold one of its kinds: KINDS_MISMATCH', async (t) => {
   // The host A runs the core alone and compacts; B, with the text kind, must
   // bootstrap to catch up — and refuses to, since a snapshot of A would lack

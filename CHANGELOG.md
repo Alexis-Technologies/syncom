@@ -1639,6 +1639,17 @@ There is no released version section until then; everything below lands in it.
 
 ### Changed
 
+- **A host refuses a push past 10 000 ops unless told otherwise.** With no
+  `limits`, a peer could push a page of any length; `opsPerPush` now
+  defaults to 10 000 (twenty pages of a dialer's default size), checked on
+  the length before anything is read — `limits: { opsPerPush: Infinity }`
+  lifts it. The bytes and the rate stay opt-in.
+- **A node without a kind's plugin reports its refusals once per page.**
+  A core-only hub relaying a text raised an `OP_REFUSED` and a warning per
+  keystroke; the metric still counts each op (`reason: 'kind'`), and the
+  warning and the error come once per page, with `count` and `kinds`. A
+  bootstrap refused for `KINDS_MISMATCH` counts in `syncom.bootstraps` as
+  `refused`.
 - **Lost data is logged at `error`.** `log.segment.unreadable`,
   `log.open.unreadable`, `storage.unpersisted` and `tags.unreadable` were
   warnings, like a peer's refused op; they are errors now, and

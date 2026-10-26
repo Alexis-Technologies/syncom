@@ -936,6 +936,7 @@ class SyncManager extends Emitter {
       }
       if (missing.length > 0) {
         const message = `${peer.node.url} cannot hold the ${missing.join(', ')} kind${missing.length > 1 ? 's' : ''}; not bootstrapping from it`;
+        this.#otel.recordBootstrap('refused');
         this.#fail(peer, new SyncomError('KINDS_MISMATCH', message, { node: peer.remote.id, missing }));
         return;
       }

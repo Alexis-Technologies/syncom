@@ -54,7 +54,8 @@ Three layers, each its own:
 - `unit({ limits: { opsPerPush, bytesPerPush, opsPerSecond } })` bounds what
   a peer pushes, in `push`, whatever transport carried it: 413 for a page too
   large, 429 for a peer too fast — codes the dialer reports and recovers
-  from, never a hang-up ([Hosting](./sync#hosting));
+  from, never a hang-up ([Hosting](./sync#hosting)); `opsPerPush` is 10 000
+  when not given;
 - wrpc's own `maxCalls`, `maxSubscriptions`, `maxBatch`, `maxPayload` bound
   the wire;
 - a hub-wide policy — a rate limit per session across every unit, an audit

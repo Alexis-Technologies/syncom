@@ -40,19 +40,27 @@ const coded = (message, code, reason) => {
 
 const LIMIT_KEYS = new Set(['opsPerPush', 'bytesPerPush', 'opsPerSecond']);
 
-// `unit({ limits })`: each a positive number, unknown keys refused.
+// The ops one push may carry when the host says nothing: twenty pages of a
+// dialer's default size. A page that size is a peer gone wrong — or one
+// that wants this node's memory — and is refused at a length check, before
+// a byte of it is read. `limits: { opsPerPush: Infinity }` lifts it; the
+// bytes and the rate have no default (the byte count serializes every page).
+const DEFAULT_OPS_PER_PUSH = 10_000;
+
+// `unit({ limits })`: each a positive number (Infinity for none), unknown keys refused.
 const normalizeLimits = (limits) => {
-  if (limits === undefined || limits === null) return null;
+  const normalized = { opsPerPush: DEFAULT_OPS_PER_PUSH };
+  if (limits === undefined || limits === null) return normalized;
   if (typeof limits !== 'object') throw new TypeError('unit({ limits }): limits must be an object');
-  const normalized = {};
   for (const key of Object.keys(limits)) {
     if (!LIMIT_KEYS.has(key)) throw new TypeError(`unit({ limits }): unknown limit '${key}'`);
     const value = limits[key];
     if (value === undefined) continue;
-    if (!Number.isFinite(value) || value <= 0) {
+    if (typeof value !== 'number' || Number.isNaN(value) || value <= 0) {
       throw new TypeError(`unit({ limits }): ${key} must be a positive number`);
     }
-    normalized[key] = value;
+    if (value === Infinity) delete normalized[key];
+    else normalized[key] = value;
   }
   return normalized;
 };
@@ -274,7 +282,7 @@ const push = (host) => async (context, args) => {
   const state = peerOf(host, context);
   const { node, scopes } = state;
   const ops = unpackOps(args?.ops);
-  if (limits !== null) limit(host.otel, state, args, ops, limits);
+  limit(host.otel, state, args, ops, limits);
   // The scopes hello granted bound what a peer writes here, not only what
   // it reads: an op outside them is refused before anything sees it. No
   // stream is harmed — seqs run per scope, and a dialer that honours its
