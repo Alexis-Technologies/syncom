@@ -266,7 +266,7 @@
         "browser": {
           "mark": "✅",
           "text": "OPFS, IndexedDB (`/idb`), memory",
-          "source": "src/fsi.browser.js; src/idb.js; src/backend.js"
+          "source": "src/fsi.browser.js; src/idb/idb.js; src/backend.js"
         },
         "mobile": {
           "mark": "❌",
@@ -276,7 +276,7 @@
         "server": {
           "mark": "✅",
           "text": "none — any node can host",
-          "source": "src/hosting.js; docs/guide/sync.md"
+          "source": "src/sync/hosting.js; docs/guide/sync.md"
         },
         "model": {
           "mark": "",
@@ -286,7 +286,7 @@
         "schema": {
           "mark": "✅",
           "text": "metaschema, Standard Schema, ajv; local writes and peers' ops",
-          "source": "src/schema.js; src/apply.js; docs/guide/schema.md",
+          "source": "src/schema/define.js; src/apply.js; docs/guide/schema.md",
           "note": "A snapshot merge (bootstrap) and an op from a newer schema version (`ahead: 'apply'`, the default) are applied unvalidated, and a record outside any collection has no validator."
         },
         "migrations": {
@@ -297,7 +297,7 @@
         "queries": {
           "mark": "✅",
           "text": "Mango `select()`, order, top-k",
-          "source": "src/query.js; docs/guide/query.md"
+          "source": "src/query/cursor.js; docs/guide/query.md"
         },
         "indexes": {
           "mark": "✅",
@@ -312,18 +312,18 @@
         "live": {
           "mark": "✅",
           "text": "`watch()`, `change` events",
-          "source": "src/query.js; docs/guide/hooks.md"
+          "source": "src/query/cursor.js; docs/guide/hooks.md"
         },
         "text": {
           "mark": "✅",
           "text": "text fields: `splice()`/`updateText()` merge by position (Fugue); marks with expand rules, stacking comments, cursors",
-          "source": "src/sequence.js; src/ops.js; docs/guide/lists.md",
+          "source": "src/text/sequence.js; src/ops.js; docs/guide/lists.md",
           "note": "A text is a field of a record — a persistent rope, O(log n) per keystroke — and a document for an editor is one text with block markers, bound through `/prosemirror` or `/codemirror`."
         },
         "lists": {
           "mark": "✅",
           "text": "list fields: `splice()`, `setAt()`, `move()` (Fugue; a concurrent move lands once)",
-          "source": "src/sequence.js; src/ops.js; docs/guide/lists.md"
+          "source": "src/text/sequence.js; src/ops.js; docs/guide/lists.md"
         },
         "counters": {
           "mark": "✅",
@@ -339,7 +339,7 @@
         "transport": {
           "mark": "✅",
           "text": "injected link; wrpc WebSocket/WebRTC",
-          "source": "src/link.js; src/wrpc.js"
+          "source": "src/link.js; src/wrpc/wrpc.js"
         },
         "webrtc": {
           "mark": "✅",
@@ -349,12 +349,12 @@
         "partial": {
           "mark": "✅",
           "text": "scopes per peer, enforced by the host on the record",
-          "source": "src/scope.js; src/hosting.js; src/apply.js"
+          "source": "src/scope.js; src/sync/hosting.js; src/apply.js"
         },
         "resume": {
           "mark": "✅",
           "text": "from the last event id",
-          "source": "src/sync.js; docs/guide/sync.md"
+          "source": "src/sync/manager.js; docs/guide/sync.md"
         },
         "bootstrap": {
           "mark": "✅",
@@ -369,13 +369,13 @@
         "offline": {
           "mark": "✅",
           "text": "local op log, kept until the hosts have it",
-          "source": "src/log.js; src/sync.js",
+          "source": "src/log.js; src/sync/manager.js",
           "note": "Ops written before any node was registered, and compacted since, cannot reach a host (`UNDELIVERABLE`)."
         },
         "serverAuth": {
           "mark": "⚠️",
           "text": "out-of-scope and unsigned ops stop at the host; one its validator or `beforeApply` skips is relayed",
-          "source": "src/apply.js; src/hosting.js; docs/guide/hooks.md#skipping-a-peers-op",
+          "source": "src/apply.js; src/sync/hosting.js; docs/guide/hooks.md#skipping-a-peers-op",
           "note": "A withheld op would leave a gap in its origin's stream, so a host that skips an op still relays it and every node re-checks it; a throwing `beforeApply` refuses the whole page instead."
         },
         "tamper": {
@@ -404,7 +404,7 @@
         "access": {
           "mark": "✅",
           "text": "host scopes for reads and writes, `authorize`",
-          "source": "src/hosting.js; docs/guide/wrpc.md"
+          "source": "src/sync/hosting.js; docs/guide/wrpc.md"
         },
         "purge": {
           "mark": "✅",
@@ -415,7 +415,7 @@
         "history": {
           "mark": "✅",
           "text": "`history(id)` and `get(id, { at })` — by event id, stamp or version vector; exact within log retention, from the last reset",
-          "source": "src/history.js; docs/guide/versions.md"
+          "source": "src/versions/history.js; docs/guide/versions.md"
         },
         "hooks": {
           "mark": "✅",
@@ -445,42 +445,42 @@
         "richText": {
           "mark": "✅",
           "text": "`mark()`/`unmark()`/`spans()` on text fields: anchors with expand rules, newest per name; blocks are records in a movable list",
-          "source": "src/sequence.js (markAnchors, applyMark, spans); docs/guide/lists.md#rich-text"
+          "source": "src/text/sequence.js (markAnchors, applyMark, spans); docs/guide/lists.md#rich-text"
         },
         "marksStack": {
           "mark": "✅",
           "text": "`mark(…, { many: true })` stacks every mark of a name; removable by id (comments)",
-          "source": "src/sequence.js (MANY, OFF flags); docs/guide/lists.md#rich-text"
+          "source": "src/text/sequence.js (MANY, OFF flags); docs/guide/lists.md#rich-text"
         },
         "cursors": {
           "mark": "✅",
           "text": "`cursor(id, key, index, { side })` / `index(id, key, cursor)` — an element and a side; survives edits",
-          "source": "src/sequence.js (cursorAt, indexOfCursor); docs/guide/lists.md#cursors"
+          "source": "src/text/sequence.js (cursorAt, indexOfCursor); docs/guide/lists.md#cursors"
         },
         "move": {
           "mark": "✅",
           "text": "`move(id, key, from, to)`: a position register per element; a concurrent move lands once",
-          "source": "src/sequence.js (applyMove, pos registers); src/commit.js (resolveMove); docs/guide/lists.md#moving-and-assigning"
+          "source": "src/text/sequence.js (applyMove, pos registers); src/commit.js (resolveMove); docs/guide/lists.md#moving-and-assigning"
         },
         "trees": {
           "mark": "✅",
           "text": "`treeMove()`/`treeRemove()`: a tree field, moves folded in stamp order, a cycle never forms (Kleppmann 2021)",
-          "source": "src/tree.js; src/ops.js (applyTree); docs/guide/lists.md#trees"
+          "source": "src/tree/moves.js; src/ops.js (applyTree); docs/guide/lists.md#trees"
         },
         "undo": {
           "mark": "✅",
           "text": "`@alexify/syncom/undo`: steps over the `commit` event, applied as new ops; refuse-to-overwrite; a peer sees an undo as a write",
-          "source": "src/undo.js; docs/guide/versions.md#undo-and-redo"
+          "source": "src/undo/undo.js; docs/guide/versions.md#undo-and-redo"
         },
         "tags": {
           "mark": "✅",
           "text": "`tag(name)` / `at(name)`: the whole storage as it was, copy-on-write; queries and a snapshot at the tag",
-          "source": "src/tags.js; docs/guide/versions.md#tags"
+          "source": "src/versions/tags.js; docs/guide/versions.md#tags"
         },
         "branches": {
           "mark": "✅",
           "text": "`@alexify/syncom/branch`: fork a storage (at the present or a tag) under a new identity, merge either way as ops",
-          "source": "src/branch.js; src/outbound.js; docs/guide/versions.md#branches"
+          "source": "src/branch/branch.js; src/outbound.js; docs/guide/versions.md#branches"
         }
       }
     },

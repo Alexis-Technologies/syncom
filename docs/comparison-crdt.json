@@ -793,7 +793,7 @@
           "mark": "✅",
           "text": "entity schemas, injected validator (Standard Schema, a function, `compile`)",
           "note": "Validates local writes (defaults folded into the op) and every peer's op (an invalid one is skipped here, still relayed); schema versions with a lens and `migrate()`.",
-          "source": "src/schema.js:3-14; docs/guide/schema.md:119-142; docs/guide/schema.md:143-222"
+          "source": "src/schema/define.js; docs/guide/schema.md:119-142; docs/guide/schema.md:143-222"
         },
         "replicaId": {
           "mark": "",
@@ -804,7 +804,7 @@
           "mark": "⚠️",
           "text": "one open per directory (lock); `SELF` and `REWOUND` caught at hello",
           "note": "A host refuses a hello from its own id (409 `SELF`), and a node whose stream a host holds more of is told `REWOUND` and moves past it. Two live copies writing at once mint the same seqs: whichever op arrives second under a seq is dropped as a duplicate.",
-          "source": "src/hosting.js:171; src/sync.js:510-519; src/apply.js:185-188; src/lock.js:1-20"
+          "source": "src/sync/hosting.js; src/sync/manager.js; src/apply.js:185-188; src/lock.js:1-20"
         },
         "author": {
           "mark": "✅",
@@ -816,7 +816,7 @@
           "mark": "",
           "text": "`(origin, seq)` per origin and scope stream, plus its stamp `ts`",
           "note": "Vector keys are `origin@scope`; list and text elements are named `ts:offset:origin`, runs `ts:origin`; a log position is an event id `<epoch>.<seq>`.",
-          "source": "src/vector.js:32-45; src/sequence.js:102-108; src/vector.js:67"
+          "source": "src/vector.js:32-45; src/text/sequence.js; src/vector.js:67"
         },
         "clock": {
           "mark": "",
@@ -834,7 +834,7 @@
           "mark": "",
           "text": "a version vector `{ 'origin@scope': seq }` as JSON; event ids, stamps, tags",
           "note": "`get(id, { at })` takes an event id (`'<epoch>.<seq>'`, a position in this node's log), a stamp, `{ vector }` or `{ tag }`.",
-          "source": "index.d.ts:81-82; index.d.ts:887; src/history.js:47-60; docs/guide/versions.md:28-44"
+          "source": "index.d.ts:81-82; index.d.ts:887; src/versions/history.js; docs/guide/versions.md:28-44"
         },
         "versionCmp": {
           "mark": "✅",
@@ -888,7 +888,7 @@
           "mark": "",
           "text": "a reset drops increments stamped below it; a register outranks the counter",
           "note": "A peer's register write takes the field whatever its stamp (locally `update()` of a counter throws `FIELD_KIND`). A counter one origin incremented both before and after a concurrent reset does not converge — documented and left so.",
-          "source": "docs/guide/sync.md:155-157; src/ops.js:337-360; src/ops.js:448-454; src/history.js:12-15"
+          "source": "docs/guide/sync.md:155-157; src/ops.js:337-360; src/ops.js:448-454; src/versions/history.js"
         },
         "set": {
           "mark": "✅",
@@ -905,7 +905,7 @@
           "mark": "",
           "text": "Fugue (Weidner & Kleppmann 2023), not FugueMax; movable per Kleppmann 2020",
           "note": "The placement rule is adapted from `fugue-simple` (MIT); the movable list follows Loro's MovableList.",
-          "source": "src/sequence.js:9-22; src/sequence.js:40-50; src/sequence.js:66-69; THIRD_PARTY_NOTICES.md:11-17"
+          "source": "src/text/sequence.js; THIRD_PARTY_NOTICES.md:11-17"
         },
         "interleave": {
           "mark": "✅",
@@ -922,19 +922,19 @@
           "mark": "✅",
           "text": "`setAt(id, key, index, value)`: a value register per element, newer stamp wins",
           "note": "The value follows the element through a concurrent move.",
-          "source": "src/fields.js:171-182; src/sequence.js:1089-1103; docs/guide/lists.md:93-114"
+          "source": "src/fields.js:171-182; src/text/sequence.js; docs/guide/lists.md:93-114"
         },
         "listMove": {
           "mark": "✅",
           "text": "`move(id, key, from, to)`; two concurrent moves leave the element once",
           "note": "At the newer move's place (tests and probe).",
-          "source": "src/sequence.js:1105-1147; docs/guide/lists.md:104-108; INVARIANTS.md:27"
+          "source": "src/text/sequence.js; docs/guide/lists.md:104-108; INVARIANTS.md:27"
         },
         "moveDelete": {
           "mark": "",
           "text": "the move wins: the element comes back at the new place",
           "note": "The removal took the old slot, the move made a new one; a removal made after the move takes the element away (probe confirmed).",
-          "source": "docs/guide/lists.md:109-111; src/sequence.js:40-50"
+          "source": "docs/guide/lists.md:109-111; src/text/sequence.js"
         },
         "listNested": {
           "mark": "✅",
@@ -945,7 +945,7 @@
           "mark": "✅",
           "text": "content run-length encoded; a writer's next keystroke extends its own run",
           "note": "`[\"ab\", 3, \"c\"]`: items alternate with tombstone lengths (list-positions' form); an extension adds no key to the record.",
-          "source": "src/rle.js:1-17; src/sequence.js:19-30; THIRD_PARTY_NOTICES.md:149-156"
+          "source": "src/text/rle.js; src/text/sequence.js; THIRD_PARTY_NOTICES.md:149-156"
         },
         "text": {
           "mark": "✅",
@@ -960,7 +960,7 @@
         "textUnits": {
           "mark": "",
           "text": "UTF-16 code units, as `String#slice` counts them; no other units",
-          "source": "docs/guide/lists.md:265-267; src/myers.js:3-8"
+          "source": "docs/guide/lists.md:265-267; src/text/myers.js"
         },
         "surrogates": {
           "mark": "✅",
@@ -976,7 +976,7 @@
           "mark": "✅",
           "text": "`updateText(id, key, text)`: Myers over UTF-16, one splice per hunk",
           "note": "Diffed inside the mutation queue after the common prefix and suffix; past 1 000 edit steps it is one splice replacing the middle.",
-          "source": "src/fields.js:68-93; src/myers.js:1-14; src/myers.js:106"
+          "source": "src/fields.js:68-93; src/text/myers.js"
         },
         "delta": {
           "mark": "✅",
@@ -996,7 +996,7 @@
         "marks": {
           "mark": "✅",
           "text": "`mark()`, `unmark()`, `unmarkById()`, `spans()`: ranges between two anchors",
-          "source": "src/fields.js:95-150; src/sequence.js:52-62; src/sequence.js:930-1000"
+          "source": "src/fields.js:95-150; src/text/sequence.js"
         },
         "markExpand": {
           "mark": "✅",
@@ -1008,7 +1008,7 @@
           "mark": "✅",
           "text": "`{ many: true }` marks stack, each with its own id and value",
           "note": "Without `many`, one value per name and character: the newest covering mark (Peritext's `allowMultiple` rule).",
-          "source": "src/sequence.js:59-62; docs/guide/lists.md:147-150; THIRD_PARTY_NOTICES.md:120-125"
+          "source": "src/text/sequence.js; docs/guide/lists.md:147-150; THIRD_PARTY_NOTICES.md:120-125"
         },
         "unmark": {
           "mark": "✅",
@@ -1019,7 +1019,7 @@
         "markWinner": {
           "mark": "",
           "text": "the newest stamp `(ts, origin)` covering the character",
-          "source": "src/sequence.js:58-60; docs/guide/lists.md:144-146"
+          "source": "src/text/sequence.js; docs/guide/lists.md:144-146"
         },
         "blocks": {
           "mark": "✅",
@@ -1039,50 +1039,50 @@
         "cursor": {
           "mark": "✅",
           "text": "`cursor(id, key, index)` → a string; `index(id, key, cursor)` reads it back",
-          "source": "src/fields.js:153-169; src/sequence.js:1053-1073"
+          "source": "src/fields.js:153-169; src/text/sequence.js"
         },
         "cursorSide": {
           "mark": "✅",
           "text": "`side: 'before'` (the default) or `'after'`",
-          "source": "src/sequence.js:1053-1058; docs/guide/lists.md:166-168"
+          "source": "src/text/sequence.js; docs/guide/lists.md:166-168"
         },
         "cursorValue": {
           "mark": "✅",
           "text": "a string (`<elem`, `>elem`, `^`, `$`) to keep or send",
-          "source": "src/sequence.js:1053-1058; index.d.ts:1648"
+          "source": "src/text/sequence.js; index.d.ts:1648"
         },
         "cursorDeleted": {
           "mark": "",
           "text": "the next visible element; `null` once a reset (or `compact`) dropped it",
           "note": "In a list a cursor anchors the slot, not the element: a move leaves it behind.",
-          "source": "docs/guide/lists.md:168-171; src/sequence.js:1060-1073"
+          "source": "docs/guide/lists.md:168-171; src/text/sequence.js"
         },
         "fractional": {
           "mark": "✅",
           "text": "`@alexify/syncom/order`: `between`, `spread`, `compare`, `isKey`",
-          "source": "order.d.ts:1-22; src/order.js:35-136; THIRD_PARTY_NOTICES.md:77-88"
+          "source": "order.d.ts:1-22; src/order/order.js; THIRD_PARTY_NOTICES.md:77-88"
         },
         "tree": {
           "mark": "✅",
           "text": "tree field: `treeMove(id, key, node, parent, { after | before })`, `treeRemove`",
-          "source": "src/fields.js:203-224; src/tree.js:1-25; docs/guide/lists.md:173-190"
+          "source": "src/fields.js:203-224; src/tree/moves.js; docs/guide/lists.md:173-190"
         },
         "treeCycle": {
           "mark": "",
           "text": "Kleppmann et al. 2021: moves fold in stamp order, the cyclic one skipped",
           "note": "The older move stands on every node; the lost move is kept and can count later. Locally a move under a descendant throws `CYCLE`.",
-          "source": "src/tree.js:3-16; docs/guide/lists.md:201-206; tests/tree.test.js:113"
+          "source": "src/tree/moves.js; docs/guide/lists.md:201-206; tests/tree.test.js:113"
         },
         "treeOrder": {
           "mark": "",
           "text": "ordered: a fractional index per move, ties broken by stamp",
-          "source": "src/tree.js:13-15; docs/guide/lists.md:196-200; docs/guide/lists.md:210-211"
+          "source": "src/tree/moves.js; docs/guide/lists.md:196-200; docs/guide/lists.md:210-211"
         },
         "treeDelete": {
           "mark": "✅",
           "text": "`treeRemove` moves it under `$trash` with its subtree; moving it out restores it",
           "note": "A move into a subtree removed concurrently is hidden with it (probe).",
-          "source": "src/tree.js:15-16; docs/guide/lists.md:207-209"
+          "source": "src/tree/moves.js; docs/guide/lists.md:207-209"
         },
         "treeData": {
           "mark": "✅",
@@ -1152,7 +1152,7 @@
         "applyPatches": {
           "mark": "✅",
           "text": "`applyPatches(id, patches)`: new ops, rehearsed, all or none on a refusal",
-          "source": "src/versions.js:206-233; docs/guide/versions.md:203-211"
+          "source": "src/versions/api.js; docs/guide/versions.md:203-211"
         },
         "pathSub": {
           "mark": "✅",
@@ -1174,36 +1174,36 @@
           "mark": "✅",
           "text": "`history(id, { limit, before })`: versions with type, origin, actor, fields, data",
           "note": "Per record, newest first, 50 by default; `log.entriesOf(id)` gives the raw entries.",
-          "source": "src/versions.js:434-455; index.d.ts:890-916"
+          "source": "src/versions/api.js; index.d.ts:890-916"
         },
         "timeTravel": {
           "mark": "✅",
           "text": "`get(id, { at })` by event id, stamp, vector or tag; `at(tag)` views",
-          "source": "src/versions.js:141-185; src/history.js:47-60; docs/guide/versions.md:9-44"
+          "source": "src/versions/api.js; src/versions/history.js; docs/guide/versions.md:9-44"
         },
         "timeTravelNeeds": {
           "mark": "⚠️",
           "text": "the retained log: a fold of the record's ops, exact from a reset",
           "note": "Once compaction ran, a version is exact only from a reset stamped above `droppedTs`, else `HISTORY_GONE`; the cost is one `applyOp` per retained op of the record. A tag costs a copied file per record changed after it.",
-          "source": "src/history.js:1-17; docs/guide/versions.md:56-91; docs/guide/versions.md:324-333"
+          "source": "src/versions/history.js; docs/guide/versions.md:56-91; docs/guide/versions.md:324-333"
         },
         "versionDiff": {
           "mark": "✅",
           "text": "`diff(id, from, to)` between any two versions, as patches",
           "note": "Marks are not diffed, and a list's moves come back as splices.",
-          "source": "src/versions.js:187-204; src/patch.js:20-28"
+          "source": "src/versions/api.js; src/patch.js:20-28"
         },
         "revert": {
           "mark": "✅",
           "text": "`restore(id, at)`: new ops that lead back, whole or not at all",
           "note": "A text's marks are not restored, since they are not diffed.",
-          "source": "src/versions.js:240-243; docs/guide/versions.md:177-211"
+          "source": "src/versions/api.js; docs/guide/versions.md:177-211"
         },
         "tags": {
           "mark": "✅",
           "text": "`tag(name)`, `untag`, `tags()`, `at(name)`: the whole storage, copy-on-write",
           "note": "Local to the node: tags do not replicate.",
-          "source": "src/tags.js:1-22; src/versions.js:275-330; docs/guide/versions.md:93-175"
+          "source": "src/versions/tags.js; src/versions/api.js; docs/guide/versions.md:93-175"
         },
         "blame": {
           "mark": "✅",
@@ -1214,7 +1214,7 @@
           "mark": "✅",
           "text": "log retention drops old segments; `compact(id)` rewrites a record's metadata",
           "note": "Before what compaction dropped a version is `HISTORY_GONE`, and a peer behind the floor bootstraps from a snapshot. `compact()` lays a text's marks again; it names the elements anew, so old cursors read `null` and a stacking mark has a new id.",
-          "source": "docs/guide/sync.md#the-log; src/versions.js (compact, marksOf, inRuns); docs/guide/versions.md#costs"
+          "source": "docs/guide/sync.md#the-log; src/versions/api.js (compact, marksOf, inRuns); docs/guide/versions.md#costs"
         },
         "purge": {
           "mark": "✅",
@@ -1226,7 +1226,7 @@
           "mark": "✅",
           "text": "`branch(parent, { path })` (`@alexify/syncom/branch`): a new storage, new identity",
           "note": "The fork has its own key pair and log, and forks the whole storage, not one record.",
-          "source": "src/branch.js:88-137; branch.d.ts:1-40"
+          "source": "src/branch/branch.js; branch.d.ts:1-40"
         },
         "forkAt": {
           "mark": "✅",
@@ -1237,7 +1237,7 @@
           "mark": "✅",
           "text": "`merge(source, { into })`, either way, as ops through `applyRemote`",
           "note": "Joins as state when the source compacted past what the other needs (`joined: true`).",
-          "source": "src/branch.js:51-86; docs/guide/versions.md:302-313"
+          "source": "src/branch/branch.js; docs/guide/versions.md:302-313"
         },
         "detached": {
           "mark": "⚠️",
@@ -1247,17 +1247,17 @@
         "suggestions": {
           "mark": "❌",
           "text": "none; a branch (`/branch`) merges back whole",
-          "source": "src/branch.js"
+          "source": "src/branch/branch.js"
         },
         "undo": {
           "mark": "✅",
           "text": "`createUndo(storage)` from `@alexify/syncom/undo`: `undo()`, `redo()`",
-          "source": "undo.d.ts:1-60; src/undo.js:1-17; src/undo.js:296-308"
+          "source": "undo.d.ts:1-60; src/undo/undo.js"
         },
         "undoLocal": {
           "mark": "✅",
           "text": "this node's own commits only; an undone `add` revokes its own adds alone",
-          "source": "src/undo.js:1-17; docs/guide/versions.md:269-274"
+          "source": "src/undo/undo.js; docs/guide/versions.md:269-274"
         },
         "undoGroup": {
           "mark": "✅",
@@ -1278,7 +1278,7 @@
           "mark": "",
           "text": "skipped (refuse to overwrite); `force` overrides; counters and sets commute",
           "note": "A peer's edit of the same list or text blocks undoing it; a whole-record step with a conflict is skipped whole.",
-          "source": "src/undo.js:40-57; docs/guide/versions.md:251-264"
+          "source": "src/undo/undo.js; docs/guide/versions.md:251-264"
         },
         "format": {
           "mark": "",
@@ -1328,19 +1328,19 @@
         "syncProto": {
           "mark": "✅",
           "text": "built in: `hello`, `push`, `changes`, `snapshot` over an injected link",
-          "source": "src/hosting.js:309-349; docs/guide/sync.md:306-344"
+          "source": "src/sync/hosting.js; docs/guide/sync.md:306-344"
         },
         "reconnect": {
           "mark": "",
           "text": "vectors and log epochs at hello, then ops past the vector; the feed resumes",
           "note": "The subscription resumes from the saved last event id; a node below the host's log floor bootstraps from a snapshot. Duplicates are dropped by vector.",
-          "source": "docs/guide/sync.md:306-354; docs/guide/sync.md:368-377; src/hosting.js:164-205"
+          "source": "docs/guide/sync.md:306-354; docs/guide/sync.md:368-377; src/sync/hosting.js"
         },
         "outOfOrder": {
           "mark": "✅",
           "text": "a gap in one origin's stream is dropped and fetched again",
           "note": "Across origins, a list or text op whose anchor has not arrived is held as pending work, 4 096 per field.",
-          "source": "src/apply.js:185-193; docs/guide/sync.md:205-210; src/sequence.js:88-95"
+          "source": "src/apply.js:185-193; docs/guide/sync.md:205-210; src/text/sequence.js"
         },
         "duplicate": {
           "mark": "✅",
@@ -1351,13 +1351,13 @@
           "mark": "✅",
           "text": "an injected `SyncLink`; `@alexify/syncom/wrpc` for WebSocket and WebRTC",
           "note": "Messages are JSON values over call and subscribe, not raw bytes; WebRTC goes through wrpc's peer links. No BroadcastChannel adapter.",
-          "source": "src/link.js; src/wrpc.js; docs/guide/sync.md:569-585; docs/guide/webrtc.md"
+          "source": "src/link.js; src/wrpc/wrpc.js; docs/guide/sync.md:569-585; docs/guide/webrtc.md"
         },
         "server": {
           "mark": "✅",
           "text": "no separate server: any storage hosts with `sync.unit()` on wrpc",
           "note": "The host checks `authorize`, scopes, push limits, op shape, skew and signatures, and runs its own validators and hooks.",
-          "source": "src/hosting.js:1-40; src/hosting.js:84-110; docs/guide/sync.md:522-567"
+          "source": "src/sync/hosting.js; docs/guide/sync.md:522-567"
         },
         "storage": {
           "mark": "✅",
@@ -1400,7 +1400,7 @@
           "mark": "✅",
           "text": "pending work, run and field slots, tree depth and index, counter range, skew, push limits",
           "note": "`pendingMax` 4 096 per field (snapshot blocks too), a run 2^20 and a field 2^22 slots, trees 512 levels and 1 024-character indexes, an origin's counter sum ±2^53−1, `maxSkew` 24 h, per-peer `opsPerPush`, `bytesPerPush` and `opsPerSecond`. Nothing else caps a set's size or a tree's move count.",
-          "source": "src/sequence.js:88-100; src/rle.js:11-17; src/tree.js:28-30; src/options.js:15; src/hosting.js:84-110"
+          "source": "src/text/sequence.js; src/text/rle.js; src/tree/moves.js; src/options.js:15; src/sync/hosting.js"
         },
         "remoteValidation": {
           "mark": "✅",
@@ -1421,7 +1421,7 @@
         "proofs": {
           "mark": "❌",
           "text": "none; cites the papers, and `INVARIANTS.md` maps each guarantee to tests",
-          "source": "INVARIANTS.md:1-10; src/sequence.js:9-10; src/tree.js:3-6"
+          "source": "INVARIANTS.md:1-10; src/text/sequence.js; src/tree/moves.js"
         },
         "errors": {
           "mark": "✅",

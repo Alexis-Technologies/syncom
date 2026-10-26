@@ -55,8 +55,9 @@ There is no released version section until then; everything below lands in it.
   an extension for the editor's state and `attach(view)`. An edit's
   ChangeSet leaves as a delta of exact splices; a peer's delta lands as a
   ChangeSet, so the selection maps through it; what CodeMirror makes of the
-  text otherwise (`\r\n` read as a line break) is sent as an edit, so the
-  field holds what the editor shows. `cursors(presence)` and
+  text otherwise (`\r\n` read as a line break) is held and goes out with the
+  editor's next edit, so the field comes to hold what the editor shows and
+  opening an editor writes nothing. `cursors(presence)` and
   `commands(manager)` as for ProseMirror; `keys` for `keymap.of()`.
   CodeMirror is an optional peer dependency (types only).
 - **ProseMirror.** `@alexify/syncom/prosemirror`: `createProseMirror(storage,
@@ -1520,8 +1521,6 @@ There is no released version section until then; everything below lands in it.
 - `OpLog` now receives the storage `logger`, so an unreadable segment or open
   file is reported rather than silently skipped.
 
-### Fixed
-
 - `Storage.saveData()` did not await `encrypt`/`decrypt`, so encryption at
   rest in the browser stored a serialized promise (`{}`) instead of ciphertext.
 - `apply()` ignored the data of a `write` record and only understood `delete`
@@ -1664,10 +1663,9 @@ There is no released version section until then; everything below lands in it.
   live in `src/entries.js` (`EntryStore`); `Reference`/`Record`/`Collection`
   in `src/record.js`; `open()`'s option checks in `src/options.js`; the
   entrance checks (ids, stream names, a peer's op shape) in `src/shape.js`;
-  the hosting side of replication in `src/hosting.js` (`createUnit`), with
+  the hosting side of replication in `src/sync/hosting.js` (`createUnit`), with
   `src/protocol.js` for what both halves share. No public name, error
-  message, event, hook signature or on-disk format changed; every function
-  in the engine is now under 60 lines. The browser budget was raised
+  message, event, hook signature or on-disk format changed. The browser budget was raised
   33.5 → 35.5 KB: a class's private names minify to one letter, the property
   names of a seam shared between modules do not (+2.3 KB min+gzip).
 

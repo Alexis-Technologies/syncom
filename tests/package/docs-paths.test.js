@@ -87,3 +87,28 @@ test('every src/ path a comment in src/ names exists', () => {
   walk(path.join(ROOT, 'src'));
   assert.deepStrictEqual(missing, []);
 });
+
+// A matrix cell's `source` is what it was decided from: a path of this
+// repository there exists. A segment that names another package
+// (`@alexify/wrpc@2.0.1 src/…`) is that package's path, not ours.
+test('every path the syncom column of a comparison matrix cites exists', () => {
+  const missing = [];
+  const pattern = /(?<![\w./@-])((?:src|tests|docs|bench|scripts)\/[\w./-]*\w|[\w-]+\.(?:md|json))(?::[\d,-]+)?/g;
+  for (const name of ['comparison', 'comparison-rxdb', 'comparison-crdt']) {
+    const matrix = JSON.parse(readFileSync(path.join(ROOT, 'docs', `${name}.json`), 'utf8'));
+    let syncom = null;
+    for (const library of matrix.libraries) if (library.id === 'syncom') syncom = library;
+    assert.ok(syncom, `${name}.json has a syncom column`);
+    for (const id of Object.keys(syncom.cells)) {
+      const source = syncom.cells[id].source;
+      if (typeof source !== 'string') continue;
+      for (const segment of source.split('; ')) {
+        if (segment.startsWith('@')) continue;
+        for (const match of segment.matchAll(pattern)) {
+          if (!existsSync(path.join(ROOT, match[1]))) missing.push(`${name}.json ${id}: ${match[1]}`);
+        }
+      }
+    }
+  }
+  assert.deepStrictEqual(missing, []);
+});
