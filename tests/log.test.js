@@ -796,3 +796,123 @@ test('a journal: a line per group, a torn last line left out, a failed line shad
     }
   });
 });
+
+test('a roll that fails after the append never holds up the group: the appends land, the next roll seals', async () => {
+  const { memory } = require('../src/memory/memory.js');
+  const base = memory();
+  let failing = true;
+  const fsi = {
+    ...base,
+    write: async (dir, name, text) => {
+      if (failing && name.startsWith('seg-')) throw Object.assign(new Error('no space left'), { code: 'ENOSPC' });
+      return base.write(dir, name, text);
+    },
+  };
+  const events = [];
+  const logger = { warn: (event) => events.push(event), error: (event) => events.push(event), info() {}, debug() {} };
+  const log = await new OpLog('store', { fsi, rollAfter: 2, logger });
+  const within = (promise) =>
+    Promise.race([
+      promise,
+      new Promise((resolve, reject) => setTimeout(() => reject(new Error('still pending')), 2000).unref()),
+    ]);
+  // The second group triggers a roll; its segment cannot be written.
+  await within(log.append([op('A', 1)]));
+  await within(log.append([op('A', 2)]));
+  await within(log.append([op('A', 3)]));
+  assert.strictEqual(log.segments, 0, 'nothing sealed while the disk refuses');
+  assert.ok(
+    events.some((event) => event.event === 'log.roll.failed'),
+    'the failed roll is said out loud',
+  );
+  assert.deepStrictEqual(
+    log.since(undefined).map((entry) => entry.seq),
+    [1, 2, 3],
+  );
+  // The disk is back: the next append's roll seals what waited.
+  failing = false;
+  await within(log.append([op('A', 4)]));
+  assert.strictEqual(log.segments, 1);
+  const reopened = await new OpLog('store', { fsi, rollAfter: 2 });
+  assert.deepStrictEqual(
+    reopened.since(undefined).map((entry) => entry.seq),
+    [1, 2, 3, 4],
+  );
+});
+
+test('a scrub cut short as it rewrites a journal loses no group and leaves no payload: the copy goes under a new name', async () => {
+  const { memory } = require('../src/memory/memory.js');
+  const base = memory();
+  let tearNext = false;
+  const fsi = {
+    ...base,
+    write: async (dir, name, text) => {
+      if (tearNext && name.endsWith('.jsonl')) {
+        tearNext = false;
+        // The process dies half way through the file.
+        await base.write(dir, name, text.slice(0, Math.floor(text.length / 2)));
+        throw new Error('killed');
+      }
+      return base.write(dir, name, text);
+    },
+  };
+  const onDisk = async () => {
+    let text = '';
+    for (const name of await fsi.list('store/log/open')) text += await fsi.read('store/log/open', name);
+    return text;
+  };
+  const log = await new OpLog('store', { fsi, rollAfter: 100 });
+  for (let seq = 1; seq <= 6; seq++) {
+    await log.append([op('me', seq, seq === 2 ? { id: 'secret', data: { pin: 987654 } } : {})]);
+  }
+  assert.deepStrictEqual(log.vector, { me: 6 });
+  tearNext = true;
+  await assert.rejects(log.scrub('secret'), /killed/);
+  assert.ok((await onDisk()).includes('987654'), 'the old journal still has it');
+  const reopened = await new OpLog('store', { fsi, rollAfter: 100 });
+  assert.strictEqual(reopened.next, 7, 'no seq of this node handed out twice');
+  assert.deepStrictEqual(reopened.vector, { me: 6 });
+  assert.deepStrictEqual(
+    reopened.since(undefined).map((entry) => entry.seq),
+    [1, 2, 3, 4, 5, 6],
+  );
+  assert.ok(!(await onDisk()).includes('987654'), 'the copy the scrub left behind went at the open');
+  const again = await new OpLog('store', { fsi, rollAfter: 100 });
+  assert.deepStrictEqual(
+    again.since(undefined).map((entry) => entry.seq),
+    [1, 2, 3, 4, 5, 6],
+  );
+  assert.strictEqual(again.since(undefined)[1].op.data, undefined, 'the payload stays scrubbed');
+});
+
+test('a journal line is a group whole or not at all: a failed group the group after it shadowed in part does not come back', async () => {
+  const { memory } = require('../src/memory/memory.js');
+  const base = memory();
+  let failNext = false;
+  const fsi = {
+    ...base,
+    append: async (dir, name, text) => {
+      await base.append(dir, name, text);
+      if (failNext) {
+        failNext = false;
+        // The bytes landed, the call failed (a lower layer refused it).
+        throw new Error('layer down');
+      }
+    },
+  };
+  const log = await new OpLog('store', { fsi, rollAfter: 100 });
+  await log.append([op('me', 1)]);
+  failNext = true;
+  await assert.rejects(log.append([op('me', 2), op('me', 3), op('me', 4)]), /layer down/);
+  // The seqs go back: the next group is 2 alone.
+  const [entry] = await log.append([op('me', 2, { id: 'after' })]);
+  assert.strictEqual(entry.seq, 2);
+  const reopened = await new OpLog('store', { fsi, rollAfter: 100 });
+  assert.deepStrictEqual(
+    reopened.since(undefined).map((e) => e.seq),
+    [1, 2],
+  );
+  assert.strictEqual(reopened.since(undefined)[1].op.id, 'after');
+  assert.strictEqual(reopened.next, 3, 'the failed group’s tail is not adopted');
+  assert.deepStrictEqual(reopened.vector, { me: 2 });
+});

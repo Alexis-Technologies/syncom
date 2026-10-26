@@ -961,3 +961,77 @@ test('What the engine adds beyond the write path', async (t) => {
     observed({ observe: hostile });
   });
 });
+
+test("containment: an application's writer that lacks a method or throws never breaks or holds up a write", async (t) => {
+  const open = (telemetry) =>
+    syncom.open({ fsi: require('../src/memory/memory.js').memory(), lock: false, defer: 0, telemetry });
+  const within = (promise, label) =>
+    Promise.race([
+      promise,
+      new Promise((resolve, reject) => setTimeout(() => reject(new Error(`${label}: still pending`)), 2000).unref()),
+    ]);
+
+  await t.test('a writer with only enabled and withSpan', async () => {
+    const storage = await open({ enabled: true, withSpan: (_name, _attributes, fn) => fn(null) });
+    t.after(() => storage.close().catch(() => {}));
+    const id = await within(storage.insert({ n: 1 }), 'insert');
+    await within(storage.update(id, { n: 2 }), 'update');
+    assert.strictEqual((await storage.get(id)).n, 2);
+  });
+
+  await t.test('a writer whose every recording method throws', async () => {
+    const thrower = () => {
+      throw new Error('writer down');
+    };
+    const writer = { enabled: true, withSpan: (_name, _attributes, fn) => fn(null) };
+    for (const name of require('../src/telemetry.js').METHODS) writer[name] = thrower;
+    const storage = await open(writer);
+    t.after(() => storage.close().catch(() => {}));
+    const id = await within(storage.insert({ n: 1 }), 'insert');
+    await within(storage.flush(), 'flush');
+    assert.strictEqual((await storage.get(id)).n, 1);
+  });
+
+  await t.test('withSpan that throws, never calls, or calls twice runs the work once and returns its result', () => {
+    const { writerOf } = require('../src/telemetry.js');
+    const run = (withSpan) => {
+      let runs = 0;
+      const result = writerOf({ enabled: true, withSpan }).withSpan('syncom.commit', {}, () => {
+        runs++;
+        return 'done';
+      });
+      return { runs, result };
+    };
+    const thrown = () => {
+      throw new Error('down');
+    };
+    assert.deepStrictEqual(run(thrown), { runs: 1, result: 'done' });
+    assert.deepStrictEqual(
+      run(() => 'ignored'),
+      { runs: 1, result: 'done' },
+    );
+    assert.deepStrictEqual(
+      run((_n, _a, fn) => {
+        fn(null);
+        return fn(null);
+      }),
+      { runs: 1, result: 'done' },
+    );
+    assert.deepStrictEqual(
+      run((_n, _a, fn) => {
+        fn(null);
+        throw new Error('after the work');
+      }),
+      { runs: 1, result: 'done' },
+    );
+    const failing = writerOf({ enabled: true, withSpan: (_n, _a, fn) => fn(null) });
+    assert.throws(
+      () =>
+        failing.withSpan('x', {}, () => {
+          throw new Error('the work failed');
+        }),
+      /the work failed/,
+    );
+    assert.strictEqual(writerOf(failing), failing, 'a contained writer is not wrapped twice');
+  });
+});

@@ -6,10 +6,12 @@
 // writer from the `@opentelemetry/api` module or pre-built tracer/meter
 // instances is the telemetry plugin's (src/telemetry/telemetry.js,
 // @alexify/syncom/telemetry); the core takes a writer given to
-// `open({ telemetry })` as it is (duck-typed: `enabled` and `withSpan`) and
-// records nothing otherwise. Every recording path is contained — a writer
-// that throws must never break a write. The one thing NOT swallowed is an
-// error thrown by the work the span brackets.
+// `open({ telemetry })` (duck-typed: `enabled` and `withSpan`) through
+// `writerOf`, which contains it: a method it lacks records nothing, a method
+// that throws is swallowed — a writer must never break a write, or hang one
+// (a write path that threw after its append once left every write behind it
+// waiting). The one thing NOT swallowed is an error thrown by the work the
+// span brackets.
 
 // 0 = UNSET, 1 = OK, 2 = ERROR. Frozen by the OTel specification, so
 // hardcoding it is what avoids importing @opentelemetry/api for a constant.
@@ -63,10 +65,97 @@ const DISABLED = Object.freeze({
 
 const isWriter = (value) => typeof value.enabled === 'boolean' && typeof value.withSpan === 'function';
 
-// A writer given as it is — the storage hands its own down to the log and
-// the sync manager, an application may hand one of its own in — or the
-// disabled one. The OpenTelemetry adapter is the telemetry plugin's.
-const writerOf = (value) => (value && typeof value === 'object' && isWriter(value) ? value : DISABLED);
+// The recording methods of a writer, beside `enabled` and `withSpan`.
+const METHODS = Object.freeze([
+  'recordError',
+  'endSpan',
+  'recordCommit',
+  'recordApply',
+  'recordMalformed',
+  'recordRejected',
+  'recordConflict',
+  'recordLimited',
+  'recordLag',
+  'recordReplay',
+  'recordPush',
+  'recordBootstrap',
+  'recordLogRoll',
+  'recordAppend',
+  'recordHook',
+  'recordLockWait',
+  'recordRefusal',
+  'gauges',
+]);
+
+// Writers that need no wrapping: the disabled one, the OpenTelemetry
+// adapter's (contained method by method), and every writer `writerOf` made.
+const CONTAINED = new WeakSet([DISABLED]);
+
+/** Marks a writer whose every method is contained already (the adapter's). */
+const contained = (writer) => {
+  CONTAINED.add(writer);
+  return writer;
+};
+
+const containMethod = (given, name) => {
+  const method = given[name];
+  if (typeof method !== 'function') return noop;
+  return (a, b, c) => {
+    try {
+      return method.call(given, a, b, c);
+    } catch {
+      // A writer that throws records nothing; the write goes on.
+      return undefined;
+    }
+  };
+};
+
+// A writer of the application's, contained: `withSpan` runs the work exactly
+// once whatever the writer does around it — throws before or after it, never
+// calls it, calls it twice — and hands back the work's own result or error;
+// a missing or throwing method records nothing.
+const contain = (given) => {
+  const out = {
+    enabled: given.enabled,
+    withSpan(name, attributes, fn) {
+      // 0: not run, 1: returned `value`, 2: threw `failure`.
+      let state = 0;
+      let value;
+      let failure;
+      const once = (handle) => {
+        if (state === 0) {
+          try {
+            value = fn(handle);
+            state = 1;
+          } catch (error) {
+            failure = error;
+            state = 2;
+          }
+        }
+        if (state === 2) throw failure;
+        return value;
+      };
+      try {
+        given.withSpan(name, attributes, once);
+      } catch {
+        // The writer's own throw, or the work's rethrown: decided below.
+      }
+      if (state === 0) return fn(null);
+      if (state === 2) throw failure;
+      return value;
+    },
+  };
+  for (let i = 0; i < METHODS.length; i++) out[METHODS[i]] = containMethod(given, METHODS[i]);
+  return contained(Object.freeze(out));
+};
+
+// A writer — the storage hands its own down to the log and the sync manager,
+// an application may hand one of its own in — contained, or the disabled
+// one. The OpenTelemetry adapter is the telemetry plugin's.
+const writerOf = (value) => {
+  if (!value || typeof value !== 'object' || !isWriter(value)) return DISABLED;
+  return CONTAINED.has(value) ? value : contain(value);
+};
 
 /**
  * Runs `task()` inside a span: `attributes` open it, `after(result)` supplies
@@ -90,6 +179,8 @@ const traced = (otel, name, attributes, task, after) =>
 module.exports = {
   writerOf,
   isWriter,
+  contained,
+  METHODS,
   traced,
   now,
   DISABLED,

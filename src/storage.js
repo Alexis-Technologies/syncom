@@ -28,7 +28,7 @@ const defaultFsi = require('./fsi.js');
 const { checkFsi, withSync } = require('./backend.js');
 const { acquireLock } = require('./lock.js');
 const { Catalog, isTextIndex } = require('./catalog.js');
-const { DISABLED, isWriter, traced, now } = require('./telemetry.js');
+const { DISABLED, isWriter, writerOf, traced, now } = require('./telemetry.js');
 const { GLOBAL_SCOPE } = require('./scope.js');
 const { normalizeStorageOptions } = require('./options.js');
 const { isPlainObject, isRecordId, invalidId, isStreamName, isKeyId, VALIDATED } = require('./shape.js');
@@ -311,7 +311,7 @@ class Storage extends Emitter {
       if (hooks.query) this.#cursor = hooks.query.cursor;
       if (hooks.versions) this.#tags = hooks.versions.tags;
       if (Object.hasOwn(hooks, 'telemetry')) {
-        this.#otel = hooks.telemetry;
+        this.#otel = writerOf(hooks.telemetry);
         adapted = true;
       }
     }
@@ -319,7 +319,7 @@ class Storage extends Emitter {
     // takes; an OpenTelemetry api or tracer needs the plugin to adapt it.
     const given = this.#options.telemetry;
     if (!adapted && given && typeof given === 'object') {
-      if (isWriter(given)) this.#otel = given;
+      if (isWriter(given)) this.#otel = writerOf(given);
       else throw missing('open({ telemetry })', 'telemetry');
     }
     if (this.#lockWait > 0 && this.#otel.enabled) this.#otel.recordLockWait(this.#lockWait);
@@ -1038,6 +1038,7 @@ class Storage extends Emitter {
         latestTs: log.latestTs,
         droppedTs: log.droppedTs,
         corrupt: log.corrupt,
+        rollFailures: log.rollFailures,
         pins: log.pins,
       },
       chain: this.#chain ? { tail: this.#chain.tailHash } : null,

@@ -19,7 +19,16 @@
 // contained — a tracer, meter, span or instrument that throws must never
 // break a write.
 
-const { DISABLED, SCOPE_NAME, SPAN_STATUS_ERROR, IDENTITY_KEYS, hasMethod, isWriter } = require('../telemetry.js');
+const {
+  DISABLED,
+  SCOPE_NAME,
+  SPAN_STATUS_ERROR,
+  IDENTITY_KEYS,
+  hasMethod,
+  isWriter,
+  writerOf,
+  contained,
+} = require('../telemetry.js');
 
 const IDENTITY = new Set(IDENTITY_KEYS);
 
@@ -138,7 +147,7 @@ const SEGMENT_DROPPED = Object.freeze({ 'syncom.log.event': 'dropped' });
  */
 const createTelemetry = (telemetry) => {
   if (!telemetry || typeof telemetry !== 'object') return DISABLED;
-  if (isWriter(telemetry)) return telemetry;
+  if (isWriter(telemetry)) return writerOf(telemetry);
 
   let tracer = null;
   let meter = null;
@@ -268,7 +277,7 @@ const createTelemetry = (telemetry) => {
     } catch {}
   };
 
-  return {
+  return contained({
     enabled: true,
 
     /**
@@ -384,7 +393,7 @@ const createTelemetry = (telemetry) => {
         } catch {}
       }
     },
-  };
+  });
 };
 
 /** The plugin: the writer built from `open({ telemetry })`, handed to the core. */

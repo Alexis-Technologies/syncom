@@ -580,6 +580,8 @@ export interface OpLog {
   readonly droppedTs: number;
   /** Files whose checksum did not match at this open. */
   readonly corrupt: number;
+  /** Rolls that failed since the open (`log.roll.failed`); what they would have sealed stays open, durable. */
+  readonly rollFailures: number;
 }
 
 export interface OpLogConstructor {
@@ -667,9 +669,32 @@ export interface SyncomTelemetryOptions {
  * is without the plugin. `enabled` false is the frozen disabled writer, whose
  * `withSpan` still runs its callback.
  */
+/**
+ * A telemetry writer handed in as it is. `enabled` and `withSpan` make one;
+ * every recording method is optional — one that is missing records nothing,
+ * and one that throws is swallowed: a writer never breaks or holds up a write.
+ */
 export interface SyncomTelemetryWriter {
   readonly enabled: boolean;
   withSpan<T>(name: string, attributes: Record<string, unknown>, fn: (handle: unknown) => T): T;
+  recordError?(handle: unknown, error: unknown): void;
+  endSpan?(handle: unknown, attributes?: Record<string, unknown>): void;
+  recordCommit?(type: string, result: string, elapsed: number): void;
+  recordApply?(result: string, elapsed: number): void;
+  recordMalformed?(): void;
+  recordRejected?(reason: string): void;
+  recordConflict?(kind: string): void;
+  recordLimited?(reason: string): void;
+  recordLag?(ts: number): void;
+  recordReplay?(elapsed: number): void;
+  recordPush?(reason: string, result: string, count: number): void;
+  recordBootstrap?(result: string): void;
+  recordLogRoll?(sealed: number, dropped: number): void;
+  recordAppend?(elapsed: number): void;
+  recordHook?(name: string, elapsed: number): void;
+  recordLockWait?(elapsed: number): void;
+  recordRefusal?(code: number | string): void;
+  gauges?(read: () => Record<string, number>): void;
 }
 
 export type CrdtDelta = Record<string, unknown>;
@@ -1220,6 +1245,8 @@ export interface StorageStats {
     latestTs: number;
     droppedTs: number;
     corrupt: number;
+    /** Rolls that failed since the open; the next append rolls again. */
+    rollFailures: number;
     /** Readers holding segments past retention: undo managers, mostly. */
     pins: number;
   };

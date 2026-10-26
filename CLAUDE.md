@@ -690,8 +690,11 @@ docs/                     VitePress site
 - **Telemetry is injected, never required.** `createTelemetry` in
   `src/telemetry/telemetry.js` (the telemetry plugin's) duck-types whatever
   `open({ telemetry })` was given and returns a writer the plugin's `setup`
-  hands the core (`telemetry` hook); the core takes a writer given as it is
-  (`isWriter`) and refuses an api or a tracer without the plugin; the lock
+  hands the core (`telemetry` hook); the core takes a writer given to it
+  (`isWriter`) CONTAINED by `writerOf` — a missing method is a no-op, a
+  throwing one is swallowed, `withSpan` runs the work exactly once (a writer
+  that threw after an append once hung every write) — and refuses an api or
+  a tracer without the plugin; the lock
   wait is measured in `#init` and recorded once the writer is there.
   `DISABLED` (src/telemetry.js) is a frozen null-object whose `withSpan` still
   runs its callback, so call sites bracket work the same way on or off (but

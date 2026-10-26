@@ -199,3 +199,38 @@ test('A backend that fails after the log append', async (t) => {
     await storage.close();
   });
 });
+
+test('a log roll the disk refuses holds up no write: every write lands, flush answers, a reopen has them', async () => {
+  const base = memory();
+  let failing = false;
+  const fsi = {
+    ...base,
+    write: async (dir, name, text) => {
+      if (failing && name.startsWith('seg-')) throw Object.assign(new Error('no space left'), { code: 'ENOSPC' });
+      return base.write(dir, name, text);
+    },
+  };
+  const events = [];
+  const logger = { warn: (event) => events.push(event), error: (event) => events.push(event), info() {}, debug() {} };
+  const within = (promise, label) =>
+    Promise.race([
+      promise,
+      new Promise((resolve, reject) => setTimeout(() => reject(new Error(`${label}: still pending`)), 2000).unref()),
+    ]);
+  const storage = await syncom.open({ defer: 0, path: 'store', fsi, logger, sync: { log: { rollAfter: 2 } } });
+  const first = await storage.insert({ n: 1 });
+  failing = true;
+  const ids = [];
+  for (let i = 0; i < 4; i++) ids.push(await within(storage.insert({ n: i }), `insert ${i}`));
+  await within(storage.update(first, { n: 2 }), 'update');
+  await within(storage.flush(), 'flush');
+  assert.ok(storage.stats().log.rollFailures > 0, 'the failed rolls are counted');
+  assert.ok(events.some((event) => event.event === 'log.roll.failed'));
+  failing = false;
+  await within(storage.insert({ n: 9 }), 'insert after the disk came back');
+  await storage.close();
+  const reopened = await syncom.open({ defer: 0, path: 'store', fsi, logger: false });
+  assert.strictEqual((await reopened.get(first)).n, 2);
+  for (const id of ids) assert.ok(await reopened.get(id));
+  await reopened.close();
+});

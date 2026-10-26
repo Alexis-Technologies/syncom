@@ -254,7 +254,8 @@ const ENTRIES = [
   // 98.3 with the change reports exact under concurrency (a mark less what newer ones hold, a marker set
   // in the turn that inserted it). 98.5, raised by name.
   // 100.7 with src/ in procedural loops (no array callbacks — a loop is longer than a callback; 2026-10-26). 101, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 101 },
+  // 101.1 with a contained telemetry writer and a log that answers every durable group (2026-10-26). 101.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 101.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -318,7 +319,8 @@ const ENTRIES = [
   // telemetry writer they share with the core (17.7 measured; what it adds
   // to the core is the 6.8 KB the main entry came down by).
   // 20.4 with presence: the unit's inbound event, the room's memory, the manager's carrying.
-  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 21 },
+  // 21.1 with a contained telemetry writer and a log that answers every durable group (2026-10-26).
+  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 21.5 },
   // The schema: the definitions read once, the validator adapters, the lens.
   // 4.3 with a set folded back by path (src/entity.js over src/paths.js).
   {
@@ -346,7 +348,7 @@ const ENTRIES = [
     label: 'versions — browser (@alexify/syncom/versions)',
     entry: 'src/versions/versions.js',
     platform: 'browser',
-    budget: 30.5,
+    budget: 31,
   },
 ];
 

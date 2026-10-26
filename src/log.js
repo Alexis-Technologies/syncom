@@ -103,6 +103,7 @@ class OpLog {
   #rollAfter;
   #retention;
   #log;
+  #rollFailures = 0;
   #otel;
   #fsi;
   #droppedHeld = 0;
@@ -240,10 +241,12 @@ class OpLog {
     // end of a journal, and the group that took its seqs back went to a
     // newer file — #adopt keeps the first copy of a seq it sees.
     names.sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
+    // Journals a newer one shadows a line of: rewritten below.
+    const stale = new Set();
     for (const name of names) {
       const text = await this.#fsi.read(this.#openPath, name).catch(() => null);
       if (name.endsWith(JOURNAL)) {
-        this.#loadJournal(name, text, sealedTo);
+        if (this.#loadJournal(name, text, sealedTo)) stale.add(name);
         continue;
       }
       const { entries, reason } = readFile(text);
@@ -259,26 +262,56 @@ class OpLog {
     // The groups in seq order, like the appends that made them.
     this.#open.sort((a, b) => a.first - b.first);
     this.#pending = new Map([...this.#pending].sort((a, b) => a[0] - b[0]));
+    // A shadowed line is a copy left behind — by a scrub or a group's
+    // failed append cut short — and may hold a payload a scrub took away:
+    // its journal goes, rewritten with the groups it still holds.
+    for (const name of stale) await this.#rewriteJournal(name, sealedTo);
+  }
+
+  // A journal written again under a new name with the groups of it still
+  // open, then removed: never rewritten in place (see #scrub).
+  async #rewriteJournal(file, sealedTo) {
+    const groups = [];
+    for (const group of this.#open) if (group.file === file) groups.push(group);
+    if (groups.length > 0) {
+      let content = '';
+      for (const group of groups) {
+        const from = Math.max(group.first, sealedTo + 1);
+        content += `${fileOf(this.#entries.slice(this.#lowerBound(from), this.#lowerBound(group.last + 1)))}\n`;
+      }
+      const copy = this.#journalName(groups[0].first);
+      await this.#fsi.write(this.#openPath, copy, content);
+      for (const group of groups) group.file = copy;
+      if (this.#journal === file) this.#journal = null;
+    }
+    await this.#fsi.remove(this.#openPath, file);
   }
 
   // A journal read back, line by line. Its last line may be torn — its group
   // was never acknowledged, and its seqs were handed out again — and is left
   // out; a line before it that does not read was acknowledged once and is
   // lost now. A journal is never appended to by a later open.
+  // A line is a group, whole or not at all: one with a seq a newer journal
+  // holds already is shadowed — the line of a group whose append failed
+  // (its seqs went to the group after it, which may be shorter), or a copy
+  // a scrub left behind — and none of it comes back. Answers whether a line
+  // was shadowed.
   #loadJournal(name, text, sealedTo) {
     if (text === null) {
       this.#log?.warn?.({ event: 'log.open.unreadable', file: name, reason: 'unreadable' });
       this.#lost = true;
-      return;
+      return false;
     }
     const lines = text.split('\n');
     let end = lines.length;
     while (end > 0 && lines[end - 1] === '') end--;
+    let shadowed = false;
     for (let i = 0; i < end; i++) {
       if (lines[i] === '') continue;
       const { entries, reason } = readFile(lines[i]);
       if (entries !== null) {
-        this.#opened(name, entries, sealedTo);
+        if (this.#shadowed(entries, sealedTo)) shadowed = true;
+        else this.#opened(name, entries, sealedTo);
         continue;
       }
       if (reason === 'checksum') this.#corrupt++;
@@ -289,6 +322,20 @@ class OpLog {
         this.#lost = true;
       }
     }
+    return shadowed;
+  }
+
+  // Whether a group read from a journal has a seq past the segments that a
+  // newer journal gave already (a seq a segment holds is a roll cut short,
+  // not a shadow).
+  #shadowed(entries, sealedTo) {
+    const seen = this.#seen;
+    if (seen === null) return false;
+    for (let i = 0; i < entries.length; i++) {
+      const seq = entries[i]?.seq;
+      if (Number.isInteger(seq) && seq > sealedTo && seen.has(seq)) return true;
+    }
+    return false;
   }
 
   // A group read back from an open file: adopted, kept with its file, and
@@ -553,7 +600,9 @@ class OpLog {
         this.#flushing = false;
       }
     };
-    this.#serialize(drain).catch(() => {});
+    // `#flushGroup` settles every group it takes; what could still throw
+    // here is a bug, said out loud rather than lost.
+    this.#serialize(drain).catch((error) => this.#log?.error?.({ event: 'log.flush.failed', err: error }));
   }
 
   async #flushGroup() {
@@ -581,18 +630,34 @@ class OpLog {
       this.#fail(group, error);
       return;
     }
-    if (started) this.#otel.recordAppend(now() - started);
-    const seqs = this.#sealApplied ? [] : null;
-    for (const entry of entries) {
-      this.#entries.push(entry);
-      this.#indexEntry(entry);
-      if (seqs !== null) seqs.push(entry.seq);
+    // The group is on disk: from here on its callers are answered whatever
+    // happens — a throw past this point would leave them, and every write
+    // landing behind them in log order, waiting for good.
+    try {
+      if (started) this.#otel.recordAppend(now() - started);
+      const seqs = this.#sealApplied ? [] : null;
+      for (const entry of entries) {
+        this.#entries.push(entry);
+        this.#indexEntry(entry);
+        if (seqs !== null) seqs.push(entry.seq);
+      }
+      this.#open.push({ first, last, file });
+      if (seqs !== null) this.#hold(seqs);
+      // A roll is what makes one append slow every `rollAfter` groups: its
+      // callers wait for it, as they did before groups. A roll that fails
+      // (the disk full as a segment is written) seals nothing: the groups
+      // stay open, durable, and the next append rolls again.
+      if (this.#open.length >= this.#rollAfter) {
+        try {
+          await this.#roll();
+        } catch (error) {
+          this.#rollFailures++;
+          this.#log?.error?.({ event: 'log.roll.failed', err: error, open: this.#open.length });
+        }
+      }
+    } catch (error) {
+      this.#log?.error?.({ event: 'internal.error', name: 'log', err: error });
     }
-    this.#open.push({ first, last, file });
-    if (seqs !== null) this.#hold(seqs);
-    // A roll is what makes one append slow every `rollAfter` groups: its
-    // callers wait for it, as they did before groups.
-    if (this.#open.length >= this.#rollAfter) await this.#roll();
     group.resolve();
   }
 
@@ -786,6 +851,11 @@ class OpLog {
     return this.#corrupt;
   }
 
+  /** Rolls that failed since the open (`log.roll.failed`): the groups they would have sealed stay open and durable. */
+  get rollFailures() {
+    return this.#rollFailures;
+  }
+
   /** Every record id the retained entries name, unsorted. */
   ids() {
     return [...this.#byId.keys()];
@@ -816,7 +886,7 @@ class OpLog {
       for (let i = 0; i < keys.length; i++) {
         const key = keys[i];
         const seq = vector[key];
-        if (Number.isInteger(seq) && (this.#vector[key] ?? 0) < seq) {
+        if (Number.isSafeInteger(seq) && (this.#vector[key] ?? 0) < seq) {
           this.#vector[key] = seq;
           moved = true;
         }
@@ -887,6 +957,13 @@ class OpLog {
       }
       // An open file is rewritten whole: a journal a line per group it holds
       // (a torn last line goes with the rewrite), a file of its own its group.
+      // A journal is never rewritten in place — a write cut short there would
+      // read back as a torn last line and take acknowledged groups with it
+      // (their seqs then handed out again): the copy goes under a new name,
+      // which a reopen reads first, and the old journal is removed after it.
+      // Cut short between the two, both are there and the newer shadows the
+      // older seq by seq; cut short inside the copy, its torn last line is
+      // left out and the old journal still has that group.
       const sealedTo = this.#sealedTo;
       const byFile = new Map();
       for (const group of this.#open) {
@@ -911,7 +988,15 @@ class OpLog {
           }
           content += `${text}\n`;
         }
-        await this.#fsi.write(this.#openPath, file, content);
+        if (!journal) {
+          await this.#fsi.write(this.#openPath, file, content);
+          continue;
+        }
+        const copy = this.#journalName(groups[0].first);
+        await this.#fsi.write(this.#openPath, copy, content);
+        for (const group of groups) group.file = copy;
+        if (this.#journal === file) this.#journal = null;
+        await this.#fsi.remove(this.#openPath, file);
       }
       this.#torn.delete(id);
       return fresh;

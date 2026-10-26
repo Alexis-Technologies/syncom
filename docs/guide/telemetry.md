@@ -30,10 +30,12 @@ const traced = await open({ path: 'data', plugins: [telemetry], telemetry: { tra
 ```
 
 The core itself records through a **writer** — `enabled` and `withSpan`,
-duck-typed — and takes one given to `open({ telemetry })` as it is, plugin
-or not: `createTelemetry({ api })` from the same subpath builds one by hand,
-to share with an `OpLog` opened on its own (`new OpLog(path, { telemetry:
-writer })`) or with a second storage.
+duck-typed — and takes one given to `open({ telemetry })`, plugin or not,
+contained: a recording method it lacks records nothing, one that throws is
+swallowed, and `withSpan` runs the work exactly once whatever the writer does
+around it — a writer never breaks or holds up a write. `createTelemetry({ api })`
+from the same subpath builds one by hand, to share with an `OpLog` opened on
+its own (`new OpLog(path, { telemetry: writer })`) or with a second storage.
 
 `includeIdentity: false` keeps record ids, peer urls/node ids and scopes off
 spans, and records a failure's `code` (or class) as the span status instead
@@ -231,6 +233,8 @@ alert to key on:
 
 | Level | `event` | When |
 | --- | --- | --- |
+| error | `log.roll.failed` | sealing the log failed (a segment or the index not written — the disk full); nothing was lost: the groups stay open and durable, the next append rolls again, and `stats().log.rollFailures` counts it |
+| error | `log.flush.failed`, `internal.error` | a bug: the log's write lane or its bookkeeping after an append threw; the writes it held are answered all the same |
 | warn | `sync.op.malformed`, `sync.op.skew` | a peer's op refused before it was read; the latter also an `error` event (`SKEW`) |
 | warn | `sync.op.forged`, `sync.op.unsigned` | a page with ops refused for their signature, once per page with the count; also an `error` event (`BAD_SIGNATURE`, `UNSIGNED`) |
 | warn | `sync.op.rejected`, `sync.op.invalid`, `sync.op.unreadable`, `sync.op.encrypted`, `sync.op.lens` | a peer's op not applied here, by reason |

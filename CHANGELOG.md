@@ -954,6 +954,31 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **A log roll the disk refused hung every write for good.** Once a group of
+  ops was on disk, the log rolled — sealing a segment, writing its index — and
+  only then answered the group's writers; a roll that threw (the disk full as
+  the segment was written) answered no one, and every write landing behind
+  them in log order waited forever, `flush()` and `close()` with them, even
+  after the disk came back. The group is answered whatever follows its append
+  now: a failed roll seals nothing, is logged (`log.roll.failed`, at `error`),
+  counted (`stats().log.rollFailures`), and the next append rolls again.
+- **A telemetry writer of the application's could hang the same way.** The
+  core took a writer given to `open({ telemetry })` as it was, checked for
+  `enabled` and `withSpan` alone, and called some twenty methods on it: one
+  missing or throwing after an append left the writes waiting. A given writer
+  is contained now — a method it lacks records nothing, one that throws is
+  swallowed, `withSpan` runs the work exactly once whatever the writer does.
+- **A scrub cut short could lose acknowledged groups.** A purge rewrote the
+  journal holding the id's ops in place; a crash half way through read back at
+  the next open as a torn last line, and every group after the tear was gone —
+  the node then handed out its own seqs again, which its peers dropped as
+  duplicates. The copy goes under a new name now, which an open reads first,
+  and the old journal is removed after it; a copy a scrub left behind is
+  removed at the next open, so no payload the scrub took survives it.
+- **A failed group could come back in part.** A journal line was taken seq by
+  seq: a group whose append failed after its bytes landed, followed by a
+  shorter group that took its seqs back, came back at the next open with the
+  failed group's tail. A line is a group whole or not at all now.
 - **A list run of more than about 130 000 elements threw `RangeError`.** A run
   of a list's elements may hold `MAX_RUN` (1 048 576) of them, but joining two
   pieces of one spread the second into `push(...)`'s arguments, which V8 caps:
