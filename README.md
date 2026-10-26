@@ -285,8 +285,8 @@ timed. The method and the interactive charts are on the
 
 | Library | Insert a record<br><sub>ops/s</sub> | Update a field<br><sub>ops/s</sub> | Read a record<br><sub>ops/s</sub> | Increment a counter<br><sub>ops/s</sub> | Insert 1,000 at once<br><sub>records/s</sub> | Replicate a store<br><sub>records/s</sub> | Type at the end of a text<br><sub>ops/s</sub> | Type at the start of a text<br><sub>ops/s</sub> | Type anywhere in a text<br><sub>ops/s</sub> |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| **syncom**<br><sub>core + text + sync, node:fs · v0.0.1</sub> | 2,930 | 3,450 | 866,000 | 3,380 | 7,050 | 7,420 | 4,870 | 1,120 | 1,900 |
-| **syncom**<br><sub>/all: signed, chained, node:fs · v0.0.1</sub> | 2,470 | 2,860 | 903,000 | 2,810 | 5,990 | 5,520 | 3,980 | 1,050 | 1,770 |
+| **syncom**<br><sub>core + text + sync, node:fs · v0.0.1</sub> | 5,550 | 19,800 | 865,000 | 19,900 | 7,110 | 7,280 | 21,200 | 9,010 | 8,540 |
+| **syncom**<br><sub>/all: signed, chained, node:fs · v0.0.1</sub> | 4,060 | 6,390 | 885,000 | 6,670 | 5,670 | 5,360 | 9,700 | 4,860 | 4,600 |
 | Yjs<br><sub>y-leveldb · v13.6.33</sub> | 18,900 | 20,900 | 3,780,000 | — | 141,000 | 53,400 | 22,500 | 23,800 | 14,600 |
 | Automerge<br><sub>automerge-repo, NodeFS storage · v3.5.0</sub> | 485 | 1,220 | 10,500,000 | 1,170 | 7,690 | 3,130 | 3,350 | 3,330 | 3,270 |
 | Loro<br><sub>updates appended to a file · v1.16.4</sub> | 19,000 | 42,300 | 277,000 | 42,200 | 63,400 | 103,000 | 46,600 | 45,600 | 41,200 |

@@ -142,6 +142,41 @@ test('open({ defer }): record files lag the log by the window, never the reads',
     assert.deepStrictEqual([storage.stats().deferred, storage.stats().held, storage.stats().inflight], [0, 0, 0]);
   });
 
+  await t.test(
+    'a flush slower than the window never runs back to back with the next: the window stretches to what it took',
+    async (t2) => {
+      // A record file takes 40 ms to write, the window is 5: a window armed while a flush was
+      // queued or writing fired inside it, and the flushes ran back to back, each with a
+      // keystroke or two, each writing the whole record while the writer waited behind it.
+      const { memory } = require('../src/memory/memory.js');
+      const inner = memory();
+      let files = 0;
+      const slow = {
+        ...inner,
+        write: async (dir, name, text) => {
+          if (dir.endsWith('/data')) {
+            files++;
+            await sleep(40);
+          }
+          return inner.write(dir, name, text);
+        },
+      };
+      const storage = await syncom.open({ path: '/slow', fsi: slow, logger: false, defer: 5 });
+      t2.after(() => storage.close().catch(() => {}));
+      const id = await storage.insert({ title: 'doc' });
+      await storage.flush();
+      files = 0;
+      for (let i = 0; i < 60; i++) {
+        await storage.splice(id, 'body', 0, 0, 'x');
+        await sleep(1);
+      }
+      await storage.flush();
+      assert.strictEqual((await storage.get(id)).body.length, 60);
+      assert.strictEqual(JSON.parse(await inner.read('/slow/data', `${id}.json`)).data.body.length, 60);
+      assert.ok(files <= 10, `${files} record files for 60 keystrokes`);
+    },
+  );
+
   await t.test('the option is a non-negative integer of milliseconds', async (t2) => {
     const dir = await createTemp();
     t2.after(() => cleanupTemp(dir));

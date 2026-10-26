@@ -14,6 +14,7 @@ own is the default; any other goes in through `open({ fsi })`.
 | `list(dir)` | File names, sorted; an absent directory is `[]` |
 | `sync(dir, name)` *(optional)* | fsync — what `durable: true` calls after every write |
 | `create(dir, name, content)` *(optional)* | Exclusive create: rejects with `code: 'EEXIST'` when the file is there; what the directory lock uses when present (`node:fs` and the memory backend have it) |
+| `append(dir, name, content)` *(optional)* | Adds `content` at the end of the file, making the file and the directory when absent; what the op log writes with when present — a line per group of ops into one journal, not a file per group (`node:fs` and the memory backend have it) |
 
 `isFsi(value)` tells whether an object has the five. The check runs at
 `open()`, naming the method that is missing, and the storage never closes a
@@ -23,8 +24,8 @@ backend it was handed — two storages may share one.
 
 | Backend | Where | How |
 | --- | --- | --- |
-| `node:fs/promises` | Node.js | The default under Node; `sync` is `fsync` |
-| OPFS | The browser | The default in a browser bundle (`fsi.browser.js`); durable when a writable closes, no `sync` |
+| `node:fs/promises` | Node.js | The default under Node; `sync` is `fsync`; `append` writes through a descriptor held open (eight at most, the least recently used closed first; `remove` closes its own) |
+| OPFS | The browser | The default in a browser bundle (`fsi.browser.js`); durable when a writable closes, no `sync`, no `append` |
 | `@alexify/syncom/idb` | The browser | `createIdbFsi({ name, store, indexedDB })` — see [Browser](./browser#opfs-or-indexeddb) |
 | `@alexify/syncom/memory` | Anywhere | `memory()` — a Map; nothing survives the process |
 | `@alexify/syncom/layered` | Anywhere | `layered([top, …, bottom], options)` — one backend over several, a multi-level cache; see [Layers](#layers) |
@@ -98,6 +99,10 @@ await fsi.flush(); // what the queue still holds
   the file: a `lock.json` on the disk is a lock whatever the memory above it
   holds. `sync` reaches every layer that has one, so `durable` reaches the
   disk.
+- `append` is there when every layer has one, and lands like a write, on
+  every layer in order. A file the top lacks and a lower layer holds is
+  copied up first (the queue drained), so the top never holds the tail of a
+  file without its head.
 
 The layers are any adapters — `layered([memory(), createIdbFsi()])` in the
 browser, `atRest(layered([memory(), disk]), { key })` for a cache over an
@@ -130,8 +135,9 @@ The key is never written. A file that is not the key's is refused as
 ciphertext), `'plain'` (a file that was never encrypted), `'torn'` (not
 base64) — and the first such file fails `open()`. `exists`, `remove`, `list`,
 `sync` and `create` pass through, so a lock and a `durable` open work as they
-do on the bare backend; the wrapper composes with any adapter, the IndexedDB
-one included. Sealed records (`encrypted: true`) are the other block of the
+do on the bare backend. There is no `append` — a file is one ciphertext — so
+the log under the wrapper writes a sealed file per group. The wrapper
+composes with any adapter, the IndexedDB one included. Sealed records (`encrypted: true`) are the other block of the
 same subpath: one record for this node's key, outside the log — the two are
 independent.
 
@@ -143,27 +149,39 @@ the engine relies on: `write` is whole-file and visible to the next `read`
 once it resolves, and `list` names files only, sorted. `tests/suites/fsi.js`
 is the contract as a test — run it against yours.
 
+`append` is worth adding where the medium appends cheaply — a file, an
+append-only object. The log then writes its groups of ops as lines of one
+journal (`log/open/<seq>-<token>.jsonl`), begun again at every roll and
+removed once the roll has sealed its groups, instead of a file per group
+and its removal; on `node:fs` an append to a held descriptor costs about a
+tenth of a new file and its unlink. An adapter without it changes nothing
+but the count of files.
+
 ## Durability
 
 Files are written with the platform's default durability. `open({ durable:
 true })` follows every write with the backend's `sync`; on `node:fs` that is
 an fsync per file — the log batch, the chain block, the record — and the
-price is the write latency of the disk. A backend without `sync` (OPFS,
-IndexedDB, memory) is as durable as it is, and `durable` logs a debug line
-and does nothing. What a crash can tear is the newest, unannounced batch:
+price is the write latency of the disk; an `append` is followed by `sync`
+too. A backend without `sync` (OPFS, IndexedDB, memory) is as durable as it
+is, and `durable` logs a debug line and does nothing. What a crash can tear is the newest, unannounced batch:
 the log is written before the record, a reopen replays its unsealed tail,
-and a torn open file is dropped before anyone was told of it. A record file
-torn the same way reads as `INTEGRITY` until `repair(id)` rebuilds it.
+and a torn open file — or a journal's torn last line — is dropped before
+anyone was told of it. A record file torn the same way reads as `INTEGRITY`
+until `repair(id)` rebuilds it.
 
 `open({ defer: ms })` trades the record files' timing for fewer writes: a local
 write's record file and chain block wait up to `ms` (one timer for all of
 them), so the writes of one record within the window land as one file, and
-everything due lands under one block. The log append is not deferred — a crash before the flush replays
+everything due lands under one block; a flush that took longer than `ms` (a
+large record's file) makes the next window as long as it took. The log
+append is not deferred — a crash before the flush replays
 the batch at the next open, as after a failed file write — and `flush()`, `tag()` and
 `close()` land the files first. It is 16 ms, a frame, by default; `0` writes
-every file at once. The log's own files are written in groups: every op
-appended while a file is being written goes into the next one, so a burst of
-writes costs the backend a few files, not one per op.
+every file at once. The log's own writes are grouped: every op appended
+while a group is being written goes into the next one, so a burst of writes
+costs the backend a few writes, not one per op — a line appended to a journal
+where the backend has `append`, a file of its own where it does not.
 
 The log append is the commit point. A backend that fails after it — a full
 disk, a browser's `QuotaExceededError` on the record file or the chain block

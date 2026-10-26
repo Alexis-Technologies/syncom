@@ -8,6 +8,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const syncom = require('../src/all/all.js');
 const { memory } = require('../src/memory/memory.js');
+const { openGroups } = require('./utils/groups.js');
 
 const open = async (t, options = {}) => {
   const storage = await syncom.open({ path: '/t', fsi: memory(), logger: false, ...options });
@@ -28,7 +29,7 @@ test('transactions', async (t) => {
       storage.on('transaction', (event) => turns.push(event));
       const other = await storage.insert({ n: 0 });
       const logged = storage.log.length;
-      const files = (await storage.fsi.list('/t/log/open')).length;
+      const files = await openGroups(storage.fsi, '/t/log/open');
       const source = { tag: 'editor' };
       let seen;
       const id = await storage.transact(
@@ -57,7 +58,7 @@ test('transactions', async (t) => {
         false,
       ]);
       assert.strictEqual(storage.log.length - logged, 10, 'every write is one op');
-      assert.strictEqual((await storage.fsi.list('/t/log/open')).length - files, 1, 'one group file');
+      assert.strictEqual((await openGroups(storage.fsi, '/t/log/open')) - files, 1, 'one group');
       assert.deepStrictEqual(await storage.get(id), seen[0]);
       assert.deepStrictEqual(await storage.get(other), {});
       assert.strictEqual(storage.stats().inflight, 0);

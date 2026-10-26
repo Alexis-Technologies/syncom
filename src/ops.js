@@ -728,7 +728,10 @@ const applyBlock = (entry, op, stamp, delta, rejected, mod, limits, changes) => 
     return;
   }
   // What the reading shows of the op, as the plugin read it from the block.
-  if (result.change !== undefined) {
+  // A field the op makes reads as something even when no change of the
+  // plugin's says so (a tree whose only node went to the trash reads `[]`):
+  // then it is left to `changesOf`, which reports it whole.
+  if (result.change !== undefined && (result.change.length > 0 || held !== undefined)) {
     for (const change of result.change) changes.push({ ...change, field });
     changes.covered.add(field);
   }

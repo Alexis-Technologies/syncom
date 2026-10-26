@@ -14,6 +14,22 @@ There is no released version section until then; everything below lands in it.
 
 ### Added
 
+- **The log appends to a journal.** A backend may offer `append(dir, name,
+  content)`; `node:fs` does (through a few descriptors it holds open, the
+  least recently used closed first), and so do `memory()`, `layered()`
+  over layers that all have it, and `durable` (an append followed by
+  `sync`). Over it the log writes each group of ops as one line of a
+  journal, `log/open/<seq>-<token>.jsonl`, begun again at every roll and
+  removed once the roll has sealed its groups, instead of a file per group
+  made and later unlinked. A torn last line is left out at open
+  (`log.open.torn`); a line inside that does not read is lost and counted
+  like an unreadable segment; the files are read newest first, so a group
+  whose append failed after its line landed is shadowed by the group that
+  took its seqs. OPFS, IndexedDB and `atRest` (a file is one ciphertext)
+  write a file per group as before. With the window fix under Fixed, on
+  disk the pure build inserts about 5,500 records a second (from 2,900), updates and increments about 20,000
+  (from 3,400), and types 21,000 characters a second at the end of a text
+  (from 4,900) and 8,500 to 9,000 elsewhere (from 1,100 to 1,900).
 - **Benchmarks by build, and a durable line.** The cross-library comparison
   measures syncom as two builds — the pure CRDT (the core with `text` and
   `sync`, no signatures, no chain, `defer: 16`) and `@alexify/syncom/all`,
@@ -933,6 +949,20 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **A deferred window could run its flushes back to back.** A window armed
+  while the previous flush was queued or writing fired inside it, so once a
+  record's file took longer to write than the window (a text of thousands
+  of runs on disk), the flushes ran one after another, each with a
+  keystroke or two, each writing the whole record while the writer waited
+  behind it: typing at the start of a text fell to about 40 characters a
+  second past 12,000 of them. A window is now armed when the flush before
+  it is done, and is as long as that flush took when it took longer than
+  `defer`; the same typing holds at about 12,000 a second.
+- **A list, text or tree field a peer's first op made empty was not
+  reported.** An op on a field this node did not hold that left it reading
+  as `[]` — a tree move of an unknown node into the trash — made the
+  field, but the turn's changes left it out, so an observer's reading
+  lacked it. It is reported as a reset to the empty value now.
 - **A writer that never yielded slowed down with every write.** Over
   `memory()` an await loop never lets the deferred window's timer fire, so
   every record it wrote stayed held in the cache, and each write walked all

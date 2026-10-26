@@ -22,6 +22,9 @@
 //   the file, else written to every layer at once — a lock on the disk is a
 //   lock, whatever the memory above it holds.
 // - `sync`: every layer that has one, so `durable` reaches the disk.
+// - `append`: when every layer has one, every layer in order, as a write. A
+//   file only a lower layer holds is copied up first, so the top never
+//   holds the tail of a file without its head.
 //
 // Under 'back' a queued write or removal has not reached the lower layers
 // yet, so an operation that would consult them — a read that misses the
@@ -158,6 +161,20 @@ const layered = (layers, options = {}) => {
     wrapped.sync = async (dir, name) => {
       await drain();
       for (const layer of stack) if (typeof layer.sync === 'function') await layer.sync(dir, name);
+    };
+  }
+  if (stack.every((layer) => typeof layer.append === 'function')) {
+    wrapped.append = async (dir, name, content) => {
+      // A file the top lacks may be below it: its head goes up first.
+      if (!(await top.exists(dir, name))) {
+        await drain();
+        for (let i = 1; i < stack.length; i++) {
+          if (!(await stack[i].exists(dir, name))) continue;
+          await fillUp(i, dir, name, await stack[i].read(dir, name));
+          break;
+        }
+      }
+      await spread((layer) => layer.append(dir, name, content));
     };
   }
   return wrapped;

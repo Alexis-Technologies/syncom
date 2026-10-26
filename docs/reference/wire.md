@@ -175,8 +175,9 @@ write, no rename):
 
 | File | Holds |
 | --- | --- |
-| `open/<seq>.json` | One file per group of appends, named by its first seq, ten digits zero-padded; rewritten only by a scrub |
-| `seg-<from>.json` | A sealed segment: the open files rolled together once 64 of them accumulate (`log.rollAfter`) |
+| `open/<seq>-<token>.jsonl` | A journal, where the backend has `append`: one log file per line, a line per group of appends; named by its first seq (ten digits zero-padded) and a token unique to the open and the journal; begun again at every roll and after a failed append, removed once every group in it is sealed, rewritten only by a scrub |
+| `open/<seq>.json` | A group in a file of its own, where the backend has no `append`; named by its first seq |
+| `seg-<from>.json` | A sealed segment: the open groups rolled together once 64 of them accumulate (`log.rollAfter`) |
 | `index.json` | `{ epoch, floor, next, vector, segments, droppedHeld, latestTs, droppedTs }` — a summary; the files are the truth, and what the index lacks is rebuilt from a listing |
 
 Every log file is `{ "entries": [...], "hash": "<xxh32>" }` — the
@@ -185,6 +186,15 @@ same text. A file whose hash does not match is unreadable at open
 (`log.segment.unreadable`, `reason: 'checksum'`, counted in
 `stats().log.corrupt`); a file without a hash, from before checksums, is
 taken as it is.
+
+A journal is read line by line, each line a log file of its own. Its last
+line is the one a crash can tear — its group was never acknowledged — and is
+left out (`log.open.torn`); a line before it that does not read was
+acknowledged once and is lost (`log.open.unreadable`, counted in `droppedTs`).
+The open files are read newest name first, and the first copy of a seq read
+is the one kept: a group whose append failed after its line landed gave its
+seqs back, and the group that took them went to a newer journal. A later open
+never appends to an older journal.
 
 ```json
 {"entries":[{"seq":2,"op":{"origin":"-PlUD3E…","seq":2,"ts":1792951837469,"type":"set","id":"p1","v":1,"data":{"title":"Final"},"nonce":"d2baa276-…","digest":"08631891…","sig":"0Ee9Kg2…"}}],"hash":"38727f2a"}

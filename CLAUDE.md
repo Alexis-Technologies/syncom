@@ -52,8 +52,8 @@ src/branch/branch.js      the @alexify/syncom/branch subpath — fork a storage,
 index.d.ts                the Node type surface (hand-written)
 browser.d.ts              re-exports index.d.ts (the files layer differs; the crypto halves' types are the subpaths' *.browser.d.ts)
 THIRD_PARTY_NOTICES.md    the MIT notices of the algorithms adapted (Fugue, Yjs, list-positions…) and the files that carry them
-src/backend.js            the fsi contract (isFsi/checkFsi), withSync — no requires
-src/memory/memory.js      @alexify/syncom/memory — memory(), the backend in memory (a Map; size, dump, the exclusive create) — no requires
+src/backend.js            the fsi contract (isFsi/checkFsi; sync, create and append optional), withSync — no requires
+src/memory/memory.js      @alexify/syncom/memory — memory(), the backend in memory (a Map; size, dump, the exclusive create, append) — no requires
 src/layered/layered.js    @alexify/syncom/layered — layered([top, …, bottom], { write, fill, queue }): one fsi over several, a multi-level
                           cache; 'back' drains its queue before any lower layer is consulted; create is exclusive across layers
 src/emitter.js            the Emitter both halves extend — no requires
@@ -464,8 +464,9 @@ docs/                     VitePress site
   reserves the seqs and moves the vector AT ONCE (synchronously; the next op
   of a stream is numbered after it before it is on disk) and returns a ticket
   (`ticket.entries` from the start) that resolves once the GROUP is on disk:
-  every append that comes while a file is being written joins the next group,
-  written as one `open/<firstSeq>.json`; a failed group write takes its seqs
+  every append that comes while a group is being written joins the next one,
+  written as one LINE of a journal where the backend has `append` (below) or
+  as one `open/<firstSeq>.json` where it has not; a failed group write takes its seqs
   and the vector back (`#fail`, `onFail(error, from)` to the storage) and
   rejects its tickets and the group behind it. `src/commit.js` splits at the
   append: `issue` (in the queue: sign — on the thread pool when `core.pipelined()`,
@@ -483,7 +484,7 @@ docs/                     VitePress site
   `storage[COMMIT]` awaits `done`. `close()`, `flush()` and `tag()` drain the
   landings first; `stats().inflight` counts them. The log resolves a group
   only after the roll its file triggered (`#roll` is O(1) when nothing can
-  be sealed: `#unappliedFrom`, the oldest open file not applied whole).
+  be sealed: `#unappliedFrom`, the oldest open group not applied whole).
   A reopen replays the unsealed tail.
   A node's own seq must never repeat — it is recovered from the log's vector.
   The storage opens its log with `sealApplied: true` and every write path
@@ -499,8 +500,12 @@ docs/                     VitePress site
   cache never goes back to an older entry and `#persistBatch` never runs
   twice at once) that lands every slot through `#land` (one block, the files)
   and marks the positions applied — `#settleDeferred(id, toSeq)` settles a
-  slot only when the landing covered its positions; `flush()`, `tag()` and
-  `close()` flush first, and
+  slot only when the landing covered its positions. While a deferred landing
+  is queued or running (`#flushing`) a write arms no timer — the landing arms
+  the next window when it is done, `max(defer, #flushCost)` long — or the
+  flushes of a large record run back to back, a keystroke or two each, with
+  the writer waiting behind them (it was measured: 139 ops/s at 13 000 runs).
+  `flush()`, `tag()` and `close()` flush first, and
   `#land` on any other path (a peer's page, a replay) settles a slot of a
   record it wrote, so an older deferred entry is never laid over a newer
   file. Never write a record file from a deferred slot outside `#land`.
@@ -537,6 +542,18 @@ docs/                     VitePress site
   counted in `corrupt`, never read in part. A file without a hash is an
   older format and taken as it is. `retention: 'all'` is `{ ops: Infinity }`
   (`retainedOps` Infinity) — normalized in the OpLog constructor, nowhere else.
+  Where the fsi has `append` the open groups are a JOURNAL, a log file per
+  line: `open/<pad(first)>-<session><counter>.jsonl` — a name no failed
+  group's line is in, begun again at every roll (`#seal`) and after a failed
+  append (`#flushGroup`), removed once none of its groups is open. `#open`
+  holds the groups `{ first, last, file }`, never the files. `#loadOpen`
+  reads the names NEWEST FIRST and `#adopt` keeps the first copy of a seq —
+  that is what shadows the line of a group whose append failed after it
+  landed (its seqs went to a newer journal); a torn LAST line is left out
+  (`log.open.torn`), a line inside that does not read is `#lost`; a later
+  open never appends to an older journal. `#scrub` rewrites a journal whole,
+  a line per group it holds. A wrapper that cannot append a file in place
+  (`atRest`: one ciphertext per file) must not pass `append` through.
 - **A failed page is a break in the stream.** `#receive` runs pages one after
   another per peer (`peer.inbound`), numbered by `peer.feed`; a rejection goes
   to `#pageFailed`, which closes the feed (pages of the old feed are dropped),

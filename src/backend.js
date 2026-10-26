@@ -10,8 +10,9 @@
 // `@alexify/syncom/memory` (tests, SSR, benchmarks) and the `layered()`
 // combinator of `@alexify/syncom/layered` are subpaths. An adapter may add
 // `sync(dir, name)` — fsync — which `open({ durable: true })` calls after
-// every write, and `create(dir, name, content)` — exclusive — which the lock
-// prefers.
+// every write, `create(dir, name, content)` — exclusive — which the lock
+// prefers, and `append(dir, name, content)` — at the end of the file, made
+// when absent — which the log's journal prefers to a file per group.
 
 const METHODS = ['read', 'write', 'exists', 'remove', 'list'];
 
@@ -49,6 +50,12 @@ const withSync = (fsi) => {
   if (typeof fsi.create === 'function') {
     wrapped.create = async (dir, name, content) => {
       await fsi.create(dir, name, content);
+      await fsi.sync(dir, name);
+    };
+  }
+  if (typeof fsi.append === 'function') {
+    wrapped.append = async (dir, name, content) => {
+      await fsi.append(dir, name, content);
       await fsi.sync(dir, name);
     };
   }

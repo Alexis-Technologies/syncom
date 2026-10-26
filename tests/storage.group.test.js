@@ -97,10 +97,13 @@ test('a group commit on the storage', async (t) => {
     async (t2) => {
       const inner = memory();
       let failing = false;
+      // The log's open files fail, as a journal's append or a file per group.
       const fsi = {
         ...inner,
         write: (dir, name, text) =>
           failing && dir.endsWith('/log/open') ? Promise.reject(new Error('disk full')) : inner.write(dir, name, text),
+        append: (dir, name, text) =>
+          failing && dir.endsWith('/log/open') ? Promise.reject(new Error('disk full')) : inner.append(dir, name, text),
       };
       const storage = await syncom.open({ path: '/f', fsi, logger: false, defer: 0 });
       t2.after(() => storage.close().catch(() => {}));

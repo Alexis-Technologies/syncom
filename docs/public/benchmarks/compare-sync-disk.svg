@@ -87,24 +87,24 @@ tinybase@10.0.1</title>
 <text class="value" x="485.9208457740415" y="268">10.9k</text>
 </g>
 <g><title>syncom · core + text + sync, node:fs · v0.0.1
-7,424 records/s
-135 µs per record
-samples 7,109 – 7,599
+7,278 records/s
+137 µs per record
+samples 7,041 – 7,311
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="299">syncom</text>
 <text class="sublabel" x="20" y="314">core + text + sync, node:fs · v0.0.1</text>
-<path class="bar primary" d="M276,295H459.0662228789988A4,4 0 0 1 463.0662228789988,299V305A4,4 0 0 1 459.0662228789988,309H276Z"/>
-<text class="value" x="469.0662228789988" y="308">7,424</text>
+<path class="bar primary" d="M276,295H458.200879160094A4,4 0 0 1 462.200879160094,299V305A4,4 0 0 1 458.200879160094,309H276Z"/>
+<text class="value" x="468.200879160094" y="308">7,278</text>
 </g>
 <g><title>syncom · /all: signed, chained, node:fs · v0.0.1
-5,521 records/s
-181 µs per record
-samples 5,327 – 5,644
+5,363 records/s
+186 µs per record
+samples 5,260 – 5,506
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="339">syncom</text>
 <text class="sublabel" x="20" y="354">/all: signed, chained, node:fs · v0.0.1</text>
-<path class="bar secondary" d="M276,335H446.2005918048506A4,4 0 0 1 450.2005918048506,339V345A4,4 0 0 1 446.2005918048506,349H276Z"/>
-<text class="value" x="456.2005918048506" y="348">5,521</text>
+<path class="bar secondary" d="M276,335H444.94314979825344A4,4 0 0 1 448.94314979825344,339V345A4,4 0 0 1 444.94314979825344,349H276Z"/>
+<text class="value" x="454.94314979825344" y="348">5,363</text>
 </g>
 <g><title>Automerge · automerge-repo, NodeFS storage · v3.5.0
 3,130 records/s

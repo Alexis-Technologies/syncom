@@ -761,7 +761,7 @@ O(log n), and the record file written once per deferred window — in the secure
 The pure build types in Automerge's range; Yjs and Loro stay one to two orders of magnitude
 ahead, Loro most of all. The keystroke that extends the writer's own run at the end is the
 cheapest (about 36 000 a second); one at the start or at random places a new run (about 20 000).
-On disk, every keystroke awaited until it is stored, syncom types 1 100 to 4 900 a second,
+On disk, every keystroke awaited until it is stored, syncom types 8 500 to 21 000 a second,
 Automerge about 3 300, Yjs 15 000 to 24 000 and Loro 41 000 to 47 000 (the `disk` line of the
 same chart on [Benchmarks](/guide/benchmarks)).
 

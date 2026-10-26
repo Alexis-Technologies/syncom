@@ -22,6 +22,11 @@ const memory = () => {
     async write(dir, name, content) {
       files.set(keyOf(dir, name), String(content));
     },
+    // At the end of the file, made when absent: what the log's journal appends with.
+    async append(dir, name, content) {
+      const key = keyOf(dir, name);
+      files.set(key, (files.get(key) ?? '') + String(content));
+    },
     async exists(dir, name) {
       return files.has(keyOf(dir, name));
     },

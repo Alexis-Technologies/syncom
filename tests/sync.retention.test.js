@@ -50,6 +50,7 @@ test('A dialer keeps its own ops until the nodes it syncs with have them', async
     assert.strictEqual(dialer.sync.listNodes()[0].acked[dialer.nodeId], 100);
     // Delivered: the next roll compacts as retention says.
     await dialer.insert({ i: 100 });
+    await dialer.flush();
     await dialer.log.flush();
     assert.ok(dialer.log.floor > 1, 'compacted once acknowledged');
   });
@@ -72,6 +73,7 @@ test('A dialer keeps its own ops until the nodes it syncs with have them', async
     for (let i = 0; i < 60; i++) await reopened.insert({ i });
     await reopened.sync.start();
     await waitUntil(async () => (await host.list()).length === 61);
+    await reopened.flush();
     await reopened.log.flush();
     assert.ok(reopened.log.floor > 1);
   });
@@ -80,6 +82,8 @@ test('A dialer keeps its own ops until the nodes it syncs with have them', async
     const host = await openAt(t2, await tempDir(t2));
     const dialer = await openAt(t2, await tempDir(t2), dialerOptions(host));
     for (let i = 0; i < 100; i++) await dialer.insert({ i });
+    // The deferred window lands first (the records written, the ops applied), then the roll seals them.
+    await dialer.flush();
     await dialer.log.flush();
     assert.ok(dialer.log.floor > 1, 'compacted: no node was waiting for them');
     const errors = [];

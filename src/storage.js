@@ -127,6 +127,14 @@ class Storage extends Emitter {
   #deferred = new Map();
   #deferredPositions = 0;
   #deferTimer = null;
+  // A deferred landing is queued or running: a write that comes meanwhile
+  // goes into it, or waits behind it, and arms no timer of its own — the
+  // landing arms the next window once it is done. And how long the last one
+  // took (ms): the next window is no shorter, so the files of a large record
+  // never land back to back, each with a keystroke or two, while the writer
+  // waits behind them.
+  #flushing = false;
+  #flushCost = 0;
   // Local writes appended but not yet on disk: id → the entries the record's
   // in-flight ops leave it as, oldest first, each with its log position —
   // what the write paths build on while the disk is waited for outside the
@@ -1194,6 +1202,7 @@ class Storage extends Emitter {
       slot.positions.push(position);
     } else this.#deferred.set(id, { entry, positions: [position] });
     this.#deferredPositions++;
+    if (this.#flushing) return;
     // The window is time, and a count too: a writer that never yields to the
     // timers (an await loop over memory()) would hold every record it wrote
     // in the cache and every position in a slot until it stopped.
@@ -1201,13 +1210,20 @@ class Storage extends Emitter {
       void this.#flushDeferred().catch(() => {});
       return;
     }
-    if (this.#deferTimer === null) {
-      this.#deferTimer = setTimeout(() => {
+    this.#armDeferred();
+  }
+
+  // The next window: `defer` ms, or as long as the last landing took.
+  #armDeferred() {
+    if (this.#deferTimer !== null) return;
+    this.#deferTimer = setTimeout(
+      () => {
         this.#deferTimer = null;
         this.#flushDeferred().catch(() => {});
-      }, this.#defer);
-      this.#deferTimer.unref?.();
-    }
+      },
+      Math.max(this.#defer, this.#flushCost),
+    );
+    this.#deferTimer.unref?.();
   }
 
   // The deferred writes landed: one chain block, every file, the log told —
@@ -1219,11 +1235,24 @@ class Storage extends Emitter {
       clearTimeout(this.#deferTimer);
       this.#deferTimer = null;
     }
+    this.#flushing = true;
     return this.#landing(() => this.#landDeferred());
   }
 
   async #landDeferred() {
-    if (this.#deferred.size === 0) return;
+    try {
+      if (this.#deferred.size > 0) {
+        const started = Date.now();
+        await this.#landSlots();
+        this.#flushCost = Date.now() - started;
+      }
+    } finally {
+      this.#flushing = false;
+      if (this.#deferred.size > 0) this.#armDeferred();
+    }
+  }
+
+  async #landSlots() {
     const pending = this.#deferred;
     this.#deferred = new Map();
     this.#deferredPositions = 0;

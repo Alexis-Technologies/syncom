@@ -11,6 +11,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const syncom = require('../src/all/all.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
+const { openGroups } = require('./utils/groups.js');
 
 const openTemp = async (t, options = {}) => {
   const dir = await createTemp();
@@ -1448,7 +1449,7 @@ test('a snapshot page is joined as one batch', async (t) => {
     assert.strictEqual(hooks.filter(([when]) => when === 'before').length, 6);
     assert.strictEqual(hooks.filter(([when]) => when === 'after').length, 6);
     assert.strictEqual(c.log.length, 6);
-    assert.strictEqual((await c.fsi.list(`${c.path}/log/open`)).length, 1, 'one append for the page');
+    assert.strictEqual(await openGroups(c.fsi, `${c.path}/log/open`), 1, 'one append for the page');
     const blocks = (await c.fsi.list(`${c.path}/blockchain`)).filter((n) => !n.startsWith('.'));
     assert.strictEqual(blocks.length, 2, 'the genesis block and one for the page');
     assert.deepStrictEqual((await c.list()).sort(), ids.slice(0, 5).sort());

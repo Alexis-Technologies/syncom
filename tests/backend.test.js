@@ -78,4 +78,19 @@ test('withSync', async (t) => {
     };
     await assert.rejects(() => durable.write('d', 'g', 'x'), /disk full/);
   });
+
+  await t.test('an append is followed by sync too; a backend without append gets none', async () => {
+    const calls = [];
+    const inner = memory();
+    const durable = withSync({ ...inner, sync: async (dir, name) => void calls.push([dir, name]) });
+    await durable.append('d', 'j.jsonl', 'a\n');
+    await durable.append('d', 'j.jsonl', 'b\n');
+    assert.strictEqual(await durable.read('d', 'j.jsonl'), 'a\nb\n');
+    assert.deepStrictEqual(calls, [
+      ['d', 'j.jsonl'],
+      ['d', 'j.jsonl'],
+    ]);
+    const { append, ...withoutAppend } = inner;
+    assert.strictEqual(withSync({ ...withoutAppend, sync: async () => {} }).append, undefined);
+  });
 });

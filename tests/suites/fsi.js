@@ -61,6 +61,32 @@ const runFsiTests = async (t, fsi, options = {}) => {
     }
   });
 
+  // The optional append: what the op log's journal writes with.
+  if (typeof fsi.append === 'function') {
+    await t.test('append makes the file and its directory, adds in call order, and builds on a write', async () => {
+      const root = await getRoot();
+      try {
+        const nested = joinPath(root, 'j', 'k');
+        await fsi.append(nested, 'a.jsonl', 'one\n');
+        assert.strictEqual(await fsi.read(nested, 'a.jsonl'), 'one\n');
+        await Promise.all(['two\n', 'three\n', 'four\n'].map((line) => fsi.append(nested, 'a.jsonl', line)));
+        assert.strictEqual(await fsi.read(nested, 'a.jsonl'), 'one\ntwo\nthree\nfour\n');
+        // A write replaces the file; the next append adds to what it wrote.
+        await fsi.write(nested, 'a.jsonl', 'w\n');
+        await fsi.append(nested, 'a.jsonl', 'x\n');
+        assert.strictEqual(await fsi.read(nested, 'a.jsonl'), 'w\nx\n');
+        // A removed file is gone; the next append begins it again.
+        await fsi.remove(nested, 'a.jsonl');
+        assert.strictEqual(await fsi.exists(nested, 'a.jsonl'), false);
+        await fsi.append(nested, 'a.jsonl', 'y\n');
+        assert.strictEqual(await fsi.read(nested, 'a.jsonl'), 'y\n');
+        assert.deepStrictEqual(await fsi.list(nested), ['a.jsonl']);
+      } finally {
+        await finish(root);
+      }
+    });
+  }
+
   await t.test('read when missing rejects', async () => {
     const dir = await getRoot();
     try {

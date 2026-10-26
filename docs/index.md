@@ -80,11 +80,11 @@ syncom is measured against Yjs, Automerge, Loro, TinyBase, PouchDB, RxDB, Firepr
 OrbitDB on the same scenarios, in memory and on disk. Each library runs in a fresh process, is used
 the way its documentation shows, and is checked to give the right answer before it is timed. The
 chart shows an empty replica pulling a store of 1,000 records; pick another scenario or storage.
-syncom has the fastest cold start (about 40 ms) and serves about a million reads a second from
+syncom has the fastest cold start (about 50 ms) and serves about 900,000 reads a second from
 its cache. Its writes cost more, because each one is signed, logged, filed, catalogued and
-chained — on disk about 1,300 a second, where the LevelDB-backed libraries do about 20,000 — and
-a replica verifies every op it receives, which holds a pull in memory to about 25,000 records a
-second, where Yjs and Loro do 100,000.
+chained — on disk about 4,000 new records a second, where the LevelDB-backed libraries do about
+20,000 — and a replica verifies every op it receives, which holds a pull in memory to about
+17,000 records a second, where Yjs and Loro do 90,000 to 100,000.
 
 <BenchCompare kind="sync" line="memory" />
 

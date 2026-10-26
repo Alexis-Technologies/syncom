@@ -49,6 +49,10 @@ test('encryption as blocks', async (t) => {
     'atRest: every file through the wrapper is enc1: ciphertext, nothing plain in the backend, and the key reads it back',
     async () => {
       const raw = memory();
+      // A file is one ciphertext: the wrapper has no append, even over a backend that does, so the
+      // log writes a sealed file per group rather than a journal of plain lines.
+      assert.strictEqual(typeof raw.append, 'function');
+      assert.strictEqual(atRest(raw, { key: KEY }).append, undefined);
       const storage = await core.open({ path: 's', fsi: atRest(raw, { key: KEY }), logger: false });
       const id = await storage.insert({ title: 'Secret' });
       await storage.close();

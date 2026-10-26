@@ -77,24 +77,24 @@ yjs@13.6.33</title>
 <text class="value" x="624.1266612045836" y="194">18.9k</text>
 </g>
 <g><title>syncom · core + text + sync, node:fs · v0.0.1
-2,929 ops/s
-341 µs per operation
-samples 2,880 – 3,057
+5,548 ops/s
+180 µs per operation
+samples 4,995 – 6,464
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="225">syncom</text>
 <text class="sublabel" x="20" y="240">core + text + sync, node:fs · v0.0.1</text>
-<path class="bar primary" d="M276,221H549.3431953550892A4,4 0 0 1 553.3431953550892,225V231A4,4 0 0 1 549.3431953550892,235H276Z"/>
-<text class="value" x="559.3431953550892" y="234">2,929</text>
+<path class="bar primary" d="M276,221H571.5313826755279A4,4 0 0 1 575.5313826755279,225V231A4,4 0 0 1 571.5313826755279,235H276Z"/>
+<text class="value" x="581.5313826755279" y="234">5,548</text>
 </g>
 <g><title>syncom · /all: signed, chained, node:fs · v0.0.1
-2,468 ops/s
-405 µs per operation
-samples 2,274 – 2,586
+4,056 ops/s
+247 µs per operation
+samples 3,729 – 4,394
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="265">syncom</text>
 <text class="sublabel" x="20" y="280">/all: signed, chained, node:fs · v0.0.1</text>
-<path class="bar secondary" d="M276,261H543.3937669407907A4,4 0 0 1 547.3937669407907,265V271A4,4 0 0 1 543.3937669407907,275H276Z"/>
-<text class="value" x="553.3937669407907" y="274">2,468</text>
+<path class="bar secondary" d="M276,261H560.6476083268689A4,4 0 0 1 564.6476083268689,265V271A4,4 0 0 1 560.6476083268689,275H276Z"/>
+<text class="value" x="570.6476083268689" y="274">4,056</text>
 </g>
 <g><title>OrbitDB · documents, LevelDB · v4.0.0
 906 ops/s

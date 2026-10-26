@@ -51,8 +51,8 @@ spread of the samples and the exact version.
 
 | Library | Insert a record<br><sub>ops/s</sub> | Update a field<br><sub>ops/s</sub> | Read a record<br><sub>ops/s</sub> | Increment a counter<br><sub>ops/s</sub> | Insert 1,000 at once<br><sub>records/s</sub> | Replicate a store<br><sub>records/s</sub> | Type at the end of a text<br><sub>ops/s</sub> | Type at the start of a text<br><sub>ops/s</sub> | Type anywhere in a text<br><sub>ops/s</sub> |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| **syncom**<br><sub>core + text + sync, node:fs · v0.0.1</sub> | 2,930 | 3,450 | 866,000 | 3,380 | 7,050 | 7,420 | 4,870 | 1,120 | 1,900 |
-| **syncom**<br><sub>/all: signed, chained, node:fs · v0.0.1</sub> | 2,470 | 2,860 | 903,000 | 2,810 | 5,990 | 5,520 | 3,980 | 1,050 | 1,770 |
+| **syncom**<br><sub>core + text + sync, node:fs · v0.0.1</sub> | 5,550 | 19,800 | 865,000 | 19,900 | 7,110 | 7,280 | 21,200 | 9,010 | 8,540 |
+| **syncom**<br><sub>/all: signed, chained, node:fs · v0.0.1</sub> | 4,060 | 6,390 | 885,000 | 6,670 | 5,670 | 5,360 | 9,700 | 4,860 | 4,600 |
 | Yjs<br><sub>y-leveldb · v13.6.33</sub> | 18,900 | 20,900 | 3,780,000 | — | 141,000 | 53,400 | 22,500 | 23,800 | 14,600 |
 | Automerge<br><sub>automerge-repo, NodeFS storage · v3.5.0</sub> | 485 | 1,220 | 10,500,000 | 1,170 | 7,690 | 3,130 | 3,350 | 3,330 | 3,270 |
 | Loro<br><sub>updates appended to a file · v1.16.4</sub> | 19,000 | 42,300 | 277,000 | 42,200 | 63,400 | 103,000 | 46,600 | 45,600 | 41,200 |
@@ -83,9 +83,12 @@ signed, hosted mesh opens.
   second and the secure one about 12,000: signatures and the chain cost about three quarters of
   a write there. A peer's page is verified on Node's thread pool — about 36,000 ops a second
   (the `verifyOp` row of [syncom's own](#syncom-s-own-benchmarks) benchmarks).
-- **Writes on disk are where syncom pays.** About 2,900 inserts a second (2,500 secure), where
-  the LevelDB-backed Yjs and PouchDB and Loro's single append do 19,000 to 26,000: what is left
-  is the log's file per group of appends and the record files. Further down the disk chart:
+- **New records on disk are where syncom pays.** About 5,500 inserts a second (4,100 secure),
+  where the LevelDB-backed Yjs and PouchDB and Loro's single append do 19,000 to 26,000: every
+  new record is a file of its own, written within the deferred window. A change to a record that
+  is there costs a line appended to the log's journal and, once per window, the record's file:
+  updates and increments run at about 20,000 a second (6,400 to 6,700 secure), beside Yjs
+  (21,000), ahead of PouchDB (8,100), behind Loro (42,000). Further down the disk chart:
   TinyBase's file persister rewrites the whole store on every save (about 170 a second),
   Automerge's change cost grows with the document, and GUN waits for RAD's 250 ms flush before
   it acknowledges a write (about 4 a second).
@@ -97,14 +100,15 @@ signed, hosted mesh opens.
   in memory, through the same path a WebSocket peer takes (hello, push, a feed of pages, JSON
   across the boundary) — beside Loro (102,000) and Yjs (89,000), ahead of RxDB (62,000). The
   secure build checks every op's signature on the way in and pulls about 17,000. On disk the
-  replica writes every record's file too: 7,400 a second (5,500 secure), behind Loro (103,000,
+  replica writes every record's file too: 7,300 a second (5,400 secure), behind Loro (103,000,
   one append), Yjs (53,000), PouchDB (17,000) and TinyBase (11,000), ahead of Automerge (3,100).
 - **Batches.** syncom has no batch write: 1,000 inserts are 1,000 ops (about 43,000 a second in
-  memory, 7,100 on disk — the ops group into one log file each while a write is in flight).
+  memory, 7,100 on disk — the ops group into one log line each while a write is in flight).
   RxDB's in-memory `bulkInsert` (2.2 million) and a Yjs transaction (141,000 to 219,000) write
   the batch at once. `transact()` writes several records as one append when they belong together.
 - **Counters.** Loro's `LoroCounter` is the fastest (333,000 a second in memory, 42,000 on disk).
-  syncom does 43,000 in memory (15,000 secure) and 3,400 on disk, and Automerge about 1,900. The
+  syncom does 43,000 in memory (15,000 secure) and 19,900 on disk (6,700 secure), and Automerge
+  about 1,200 to 1,900. The
   others have no counter that converges, so they are not in this chart.
 - **Cold start.** syncom opens a store of 1,000 records and reads one in about 49 ms (60 ms
   secure, which loads its key pairs), the fastest here: its catalog is one JSON file, and nothing
@@ -126,9 +130,10 @@ types 12,000 to 14,000.
 
 **On disk** is the durable line: every keystroke awaited until the library reports it stored —
 y-leveldb's `storeUpdate`, Loro's update appended to a file, automerge-repo's flush, syncom's log
-append. syncom types 4,900 characters a second at the end and 1,100 to 1,900 elsewhere (a
-keystroke elsewhere is a new run of the record's metadata, written with the file), Automerge
-about 3,300, Yjs 15,000 to 24,000 and Loro 41,000 to 47,000.
+append. syncom types 21,000 characters a second at the end and 8,500 to 9,000 elsewhere (a
+keystroke elsewhere is a new run of the record's metadata, written with the file once per
+window; 4,600 to 9,700 secure), Automerge about 3,300, Yjs 15,000 to 24,000 and Loro 41,000 to
+47,000.
 
 The editing-trace benchmark the CRDT libraries publish (automerge-perf: 259,778 keystrokes of a
 real paper, 182,315 inserts and 77,463 deletes) runs as the `trace` scenario: the whole trace

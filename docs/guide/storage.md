@@ -221,8 +221,8 @@ await storage.purge(id);          // nothing of it left here
 await storage.purge(id, { actor: 'dpo' });
 ```
 
-Two limits. Scrubbing rewrites a log file in place — no backend has a
-rename — so a crash in the middle tears it, and a peer resuming through it
+Two limits. Scrubbing rewrites a log file in place — a journal line by line
+— and no backend has a rename, so a crash in the middle tears it, and a peer resuming through it
 bootstraps instead; `purge()` is idempotent, so run it again. And what a
 peer that never comes back holds is theirs.
 
@@ -333,8 +333,11 @@ onto the file at the next open:
 
 - **`open({ defer })`** — 16 ms, a frame, by default. The file waits up to
   `defer` ms, and the writes of one record within the window land as one
-  file and one block. `flush()`, `tag()` and `close()` land them first, and a
-  peer's write of the record lands it whole. `defer: 0` writes every file at
+  file and one block. A flush that took longer than `defer` — a large record,
+  a slow disk — makes the next window as long as it took, so the files never
+  land back to back while the writer waits behind them. `flush()`, `tag()`
+  and `close()` land them first, and a peer's write of the record lands it
+  whole. `defer: 0` writes every file at
   once — what a process that may be killed between a write and the next
   frame wants, at the price of a file per op.
 - **A file write that failed** — a full disk, a quota. The write is not

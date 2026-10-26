@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-26T14:31:15.268Z",
+  "generatedAt": "2026-10-26T15:28:27.563Z",
   "machine": {
     "cpu": "Apple M3 Max",
     "cores": 16,
@@ -217,9 +217,9 @@
       "unit": "ops/s",
       "results": {
         "syncom": {
-          "median": 2929.475983661096,
-          "min": 2880.098186117535,
-          "max": 3056.6381694744787
+          "median": 5548.074490568647,
+          "min": 4995.041770646569,
+          "max": 6464.096765291005
         },
         "yjs": {
           "median": 18905.28657822172,
@@ -262,9 +262,9 @@
           "max": 927.991223059012
         },
         "syncom-secure": {
-          "median": 2468.4372229384503,
-          "min": 2274.481713464256,
-          "max": 2586.2807633768875
+          "median": 4055.9734556025014,
+          "min": 3729.3862641741734,
+          "max": 4393.843675779772
         }
       },
       "unsupported": {
@@ -349,9 +349,9 @@
       "unit": "ops/s",
       "results": {
         "syncom": {
-          "median": 3451.781565940361,
-          "min": 3069.6636022907064,
-          "max": 3574.3890647279213
+          "median": 19842.80184177929,
+          "min": 14895.702822182759,
+          "max": 20922.611647731053
         },
         "yjs": {
           "median": 20948.105989711836,
@@ -394,9 +394,9 @@
           "max": 17.09452509200301
         },
         "syncom-secure": {
-          "median": 2860.5799392544845,
-          "min": 2508.9698944777097,
-          "max": 2967.709781725025
+          "median": 6393.394516914976,
+          "min": 5966.453635945551,
+          "max": 8650.814349746255
         }
       },
       "unsupported": {
@@ -481,9 +481,9 @@
       "unit": "ops/s",
       "results": {
         "syncom": {
-          "median": 866297.6582679955,
-          "min": 808760.1998364195,
-          "max": 889862.5622914764
+          "median": 865215.0796680058,
+          "min": 803583.7953874737,
+          "max": 898385.1001427585
         },
         "yjs": {
           "median": 3778162.112303043,
@@ -526,9 +526,9 @@
           "max": 107.51042440486634
         },
         "syncom-secure": {
-          "median": 903180.6246587974,
-          "min": 897810.8845541349,
-          "max": 912588.0560582379
+          "median": 884951.9282705355,
+          "min": 878137.6107667984,
+          "max": 886196.4517524744
         }
       },
       "unsupported": {
@@ -589,9 +589,9 @@
       "unit": "ops/s",
       "results": {
         "syncom": {
-          "median": 3382.8183274331345,
-          "min": 3339.8323067602014,
-          "max": 3611.2899750500405
+          "median": 19859.379125871063,
+          "min": 10553.628599873473,
+          "max": 20564.10546184494
         },
         "automerge": {
           "median": 1170.7985663183958,
@@ -604,9 +604,9 @@
           "max": 42355.11223532039
         },
         "syncom-secure": {
-          "median": 2812.530250483537,
-          "min": 2550.1193509149743,
-          "max": 2919.619232018617
+          "median": 6674.245161523215,
+          "min": 6125.401704782489,
+          "max": 7430.906944931592
         }
       },
       "unsupported": {
@@ -697,9 +697,9 @@
       "unit": "records/s",
       "results": {
         "syncom": {
-          "median": 7054.205083250307,
-          "min": 6672.777819019252,
-          "max": 7591.069107195385
+          "median": 7107.333168680115,
+          "min": 6875.222744325873,
+          "max": 7211.284974470715
         },
         "yjs": {
           "median": 141037.91494059755,
@@ -737,9 +737,9 @@
           "max": 963.6814555882602
         },
         "syncom-secure": {
-          "median": 5990.938705208375,
-          "min": 5074.210326018013,
-          "max": 6304.381873860625
+          "median": 5669.211433949083,
+          "min": 5555.94524338165,
+          "max": 5950.691062381575
         }
       },
       "unsupported": {
@@ -822,9 +822,9 @@
       "unit": "records/s",
       "results": {
         "syncom": {
-          "median": 7424.414816904648,
-          "min": 7108.535154894517,
-          "max": 7598.801055090489
+          "median": 7277.945374303861,
+          "min": 7041.160604078352,
+          "max": 7311.159619517896
         },
         "yjs": {
           "median": 53385.53157068192,
@@ -857,9 +857,9 @@
           "max": 197.50216055019743
         },
         "syncom-secure": {
-          "median": 5520.849623865344,
-          "min": 5326.8133138371995,
-          "max": 5643.834534059132
+          "median": 5363.292686278884,
+          "min": 5259.973064098736,
+          "max": 5506.342618403577
         }
       },
       "unsupported": {
@@ -876,7 +876,7 @@
       "line": "memory",
       "lineTitle": "In memory",
       "title": "Type at the end of a text, in memory",
-      "description": "Insert one character at the end of a text that merges by position \u2014 the common keystroke. Nothing touches the disk.",
+      "description": "Insert one character at the end of a text that merges by position — the common keystroke. Nothing touches the disk.",
       "unit": "ops/s",
       "results": {
         "syncom": {
@@ -922,18 +922,18 @@
       "line": "disk",
       "lineTitle": "On disk",
       "title": "Type at the end of a text, on disk",
-      "description": "Insert one character at the end of a text that merges by position \u2014 the common keystroke. Each library's own persistence on node:fs, every write awaited.",
+      "description": "Insert one character at the end of a text that merges by position — the common keystroke. Each library's own persistence on node:fs, every write awaited.",
       "unit": "ops/s",
       "results": {
         "syncom": {
-          "median": 4873.065019344344,
-          "min": 4789.752785444698,
-          "max": 5029.133021079178
+          "median": 21196.24840839719,
+          "min": 19773.207567547197,
+          "max": 23270.21853704584
         },
         "syncom-secure": {
-          "median": 3979.078210517081,
-          "min": 3502.0722563099375,
-          "max": 4046.554202602397
+          "median": 9698.96676471845,
+          "min": 8765.631944863611,
+          "max": 10472.261330330668
         },
         "yjs": {
           "median": 22506.154026491615,
@@ -968,7 +968,7 @@
       "line": "memory",
       "lineTitle": "In memory",
       "title": "Type at the start of a text, in memory",
-      "description": "Insert one character at the start of the text \u2014 every insert anchors into the same spot. Nothing touches the disk.",
+      "description": "Insert one character at the start of the text — every insert anchors into the same spot. Nothing touches the disk.",
       "unit": "ops/s",
       "results": {
         "syncom": {
@@ -1014,18 +1014,18 @@
       "line": "disk",
       "lineTitle": "On disk",
       "title": "Type at the start of a text, on disk",
-      "description": "Insert one character at the start of the text \u2014 every insert anchors into the same spot. Each library's own persistence on node:fs, every write awaited.",
+      "description": "Insert one character at the start of the text — every insert anchors into the same spot. Each library's own persistence on node:fs, every write awaited.",
       "unit": "ops/s",
       "results": {
         "syncom": {
-          "median": 1115.9289983917604,
-          "min": 513.1352417493831,
-          "max": 2793.215976696598
+          "median": 9007.747789067074,
+          "min": 8389.847226041635,
+          "max": 10128.080390372088
         },
         "syncom-secure": {
-          "median": 1047.094438175749,
-          "min": 317.02900233325926,
-          "max": 2301.4787300512294
+          "median": 4857.67244004026,
+          "min": 4767.522227028977,
+          "max": 5267.135629477876
         },
         "yjs": {
           "median": 23816.51459449967,
@@ -1110,14 +1110,14 @@
       "unit": "ops/s",
       "results": {
         "syncom": {
-          "median": 1900.089693314835,
-          "min": 1101.0065459685977,
-          "max": 3533.6486501161853
+          "median": 8541.474497392619,
+          "min": 7728.713187445875,
+          "max": 9180.577107628504
         },
         "syncom-secure": {
-          "median": 1769.9426132981441,
-          "min": 920.3598684426779,
-          "max": 2772.496144325267
+          "median": 4601.951310246595,
+          "min": 4473.140841576304,
+          "max": 6064.372917630613
         },
         "yjs": {
           "median": 14628.151680992642,

@@ -225,9 +225,12 @@ recovered by replaying the log on the next open:
 
 ```
 log/
-├── open/<seq>.json     one file per group of appends (the ops appended while the file before was written), rewritten only by a scrub
-├── seg-<from>.json     sealed segments, rolled from open/ every `rollAfter` batches: { entries, hash }
-└── index.json          { epoch, floor, next, vector, segments, droppedHeld, latestTs, droppedTs }
+├── open/<seq>-<token>.jsonl  a journal, where the backend has `append`: a line per group of appends (the ops
+│                             appended while the group before was written); begun again at every roll, removed
+│                             once its groups are sealed, rewritten only by a scrub
+├── open/<seq>.json           a group in a file of its own, where the backend has no `append` (OPFS, IndexedDB, atRest)
+├── seg-<from>.json           sealed segments, rolled from open/ every `rollAfter` groups: { entries, hash }
+└── index.json                { epoch, floor, next, vector, segments, droppedHeld, latestTs, droppedTs }
 ```
 
 `droppedTs` is the newest stamp among the ops the log no longer holds —
@@ -238,11 +241,12 @@ of a record are its whole history only from a reset (`write`, `delete`,
 segments such a reader needs, like `retain` does for the sync manager, until
 the function it returns is called.
 
-Every log file — a sealed segment, an open batch — carries `hash`, the
-xxHash32 of its entries' JSON (`src/hash.js`, pure JS, no key: a checksum,
-not a signature): a file torn on the way down or altered on disk does not
-match at open and is treated as unreadable — a segment lost and counted in
-`droppedTs`, an open file dropped — and `stats().log.corrupt` counts them.
+Every log file — a sealed segment, an open group, a journal's line —
+carries `hash`, the xxHash32 of its entries' JSON (`src/hash.js`, pure JS,
+no key: a checksum, not a signature): a file torn on the way down or altered
+on disk does not match at open and is treated as unreadable — a segment lost
+and counted in `droppedTs`, an open file or a journal's torn last line
+dropped — and `stats().log.corrupt` counts them.
 
 The log has two cursors, for two different questions.
 
@@ -634,7 +638,7 @@ once `close()` was called is refused at once.
 | `pendingMax` | `4096` | How much pending work a list or text field takes from a peer's ops that ran ahead of what they depend on — runs waiting for their anchor, cuts and extensions for their run, registers and switched-off marks for elements not here — before an op is refused (`OP_REFUSED`, reason `bound`, with `detail`, `count` and `max`). A refusal is final on this node, so a mesh with several hosts raises it rather than lowers it. `Infinity` disables. A snapshot block past it is not taken as state |
 | `signatures` | `'verify'` | `'verify'`, `'require'` or `false` — see [Signatures](#signatures) |
 | `maxOutbox` | `10000` | Ops queued for one peer beyond this are dropped and the peer is `behind`; the recovery pushes what it lacks from the vector |
-| `log.rollAfter` | `64` | Appended batches per sealed segment |
+| `log.rollAfter` | `64` | Groups of appends per sealed segment |
 | `pageSize` | `500` | Ops per push. What a host serves per page — snapshot records, `changes` ops — is its own `unit({ pageSize })` |
 | `hooks` | — | `beforeConnect`, `beforeBootstrap` — see [Hooks and events](./hooks#sync-hooks) |
 | `sharedLog` | — | Reserved for a hub mode on a broker's log; refused in this version — see [Scaling](./scaling#hubs) |

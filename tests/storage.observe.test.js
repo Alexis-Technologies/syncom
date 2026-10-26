@@ -9,6 +9,7 @@ const syncom = require('../src/all/all.js');
 const { memory } = require('../src/memory/memory.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const { compose, spansToDelta } = require('../src/editor/editor.js');
+const { openGroups } = require('./utils/groups.js');
 
 const open = async (t, options = {}) => {
   const storage = await syncom.open({ path: '/o', fsi: memory(), logger: false, ...options });
@@ -222,7 +223,7 @@ test('observe and deltas', async (t) => {
       }
       // applyDelta: one transaction (one group file), marks and embeds included; a bad delta writes nothing.
       const other = await storage.insert({});
-      const files = (await storage.fsi.list('/o/log/open')).length;
+      const files = await openGroups(storage.fsi, '/o/log/open');
       const marker = { type: 'img', attrs: { src: 'b' } };
       const made = await storage.applyDelta(
         other,
@@ -231,7 +232,7 @@ test('observe and deltas', async (t) => {
         { message: 'typed' },
       );
       assert.strictEqual(made, 4);
-      assert.strictEqual((await storage.fsi.list('/o/log/open')).length - files, 1, 'one group');
+      assert.strictEqual((await openGroups(storage.fsi, '/o/log/open')) - files, 1, 'one group');
       assert.deepStrictEqual(await storage.spans(other, 'body'), [
         { type: 'text', text: 'Hi ', marks: {} },
         { type: 'text', text: 'there', marks: { bold: true } },

@@ -67,8 +67,9 @@ engine also covers what an application keeps next to replication:
 The [benchmarks](/guide/benchmarks) put a number on all of this. syncom opens a store and reads
 a record in about 49 ms, the fastest cold start of the ten libraries measured, and serves a read
 from its cache at about 890,000 a second. A write is logged, filed and catalogued: about 44,000 a
-second in memory as a pure CRDT, 12,000 signed and chained (`/all`), and about 2,900 on disk,
-where the LevelDB-backed Yjs and PouchDB do 19,000 to 26,000. An empty replica pulls about 88,000
+second in memory as a pure CRDT, 12,000 signed and chained (`/all`), and about 5,500 new records
+a second on disk, where the LevelDB-backed Yjs and PouchDB do 19,000 to 26,000 — a change to a
+record that is there, about 20,000. An empty replica pulls about 88,000
 records a second in memory, beside Yjs and Loro (89,000 to 102,000); checking every op's signature
 on the way in brings that to 17,000. Typing into a text runs at 19,000 to 36,000 keystrokes a
 second in memory, Automerge's range.

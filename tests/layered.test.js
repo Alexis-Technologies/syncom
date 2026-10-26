@@ -174,6 +174,24 @@ test('layered backends', async (t) => {
     },
   );
 
+  await t.test(
+    'append lands on every layer; a file only below is copied up first; none unless every layer has it',
+    async () => {
+      const top = memory();
+      const bottom = memory();
+      await bottom.write('d', 'j.jsonl', 'head\n');
+      const fsi = layered([top, bottom], { write: 'back' });
+      await fsi.append('d', 'j.jsonl', 'tail\n');
+      await fsi.flush();
+      assert.strictEqual(await top.read('d', 'j.jsonl'), 'head\ntail\n', 'the head came up before the tail');
+      assert.strictEqual(await bottom.read('d', 'j.jsonl'), 'head\ntail\n');
+      await fsi.append('d', 'new.jsonl', 'a\n');
+      await fsi.flush();
+      assert.deepStrictEqual([await top.read('d', 'new.jsonl'), await bottom.read('d', 'new.jsonl')], ['a\n', 'a\n']);
+      assert.strictEqual(layered([memory(), over(memory())]).append, undefined, 'a layer without append: none');
+    },
+  );
+
   await t.test('sync reaches every layer that has one; the options are checked', async () => {
     const synced = [];
     const withSync = over(memory(), { sync: async (dir, name) => void synced.push(`${dir}/${name}`) });

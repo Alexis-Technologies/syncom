@@ -81,24 +81,24 @@ tinybase@10.0.1</title>
 <text class="value" x="576.144162045484" y="194">1.4M</text>
 </g>
 <g><title>syncom · /all: signed, chained, node:fs · v0.0.1
-903,181 ops/s
-1.11 µs per operation
-samples 898k – 913k
+884,952 ops/s
+1.13 µs per operation
+samples 878k – 886k
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="225">syncom</text>
 <text class="sublabel" x="20" y="240">/all: signed, chained, node:fs · v0.0.1</text>
-<path class="bar secondary" d="M276,221H555.1871207075623A4,4 0 0 1 559.1871207075623,225V231A4,4 0 0 1 555.1871207075623,235H276Z"/>
-<text class="value" x="565.1871207075623" y="234">903k</text>
+<path class="bar secondary" d="M276,221H554.6811245658565A4,4 0 0 1 558.6811245658565,225V231A4,4 0 0 1 554.6811245658565,235H276Z"/>
+<text class="value" x="564.6811245658565" y="234">885k</text>
 </g>
 <g><title>syncom · core + text + sync, node:fs · v0.0.1
-866,298 ops/s
-1.15 µs per operation
-samples 809k – 890k
+865,215 ops/s
+1.16 µs per operation
+samples 804k – 898k
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="265">syncom</text>
 <text class="sublabel" x="20" y="280">core + text + sync, node:fs · v0.0.1</text>
-<path class="bar primary" d="M276,261H554.1524080250125A4,4 0 0 1 558.1524080250125,265V271A4,4 0 0 1 554.1524080250125,275H276Z"/>
-<text class="value" x="564.1524080250125" y="274">866k</text>
+<path class="bar primary" d="M276,261H554.1213760039091A4,4 0 0 1 558.1213760039091,265V271A4,4 0 0 1 554.1213760039091,275H276Z"/>
+<text class="value" x="564.1213760039091" y="274">865k</text>
 </g>
 <g><title>Loro · updates appended to a file · v1.16.4
 277,058 ops/s

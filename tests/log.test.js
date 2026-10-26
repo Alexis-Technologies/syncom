@@ -6,6 +6,8 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { OpLog } = require('../src/log.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
+const { openGroups, withoutAppend } = require('./utils/groups.js');
+const nodeFsi = require('../src/fsi.js');
 
 const op = (origin, seq, extra = {}) => ({
   type: 'set',
@@ -568,9 +570,16 @@ test('a group commit: appends issued together land as one file, in order; a fail
   await t.test(
     'appends that come while a file is written go as one file after it, published in seq order',
     async () => {
+      for (const journaled of [true, false]) await groupCommit(journaled);
+    },
+  );
+  // Both ways a group reaches the disk: a line of a journal, or a file of its own.
+  async function groupCommit(journaled) {
+    {
       const dir = await createTemp();
+      const fsi = journaled ? nodeFsi : withoutAppend(nodeFsi);
       try {
-        const log = await new OpLog(dir, { rollAfter: 100, sealApplied: true });
+        const log = await new OpLog(dir, { rollAfter: 100, sealApplied: true, fsi });
         // Three appends in one tick: seqs reserved at once, the vector ahead
         // of the disk, one group — one file.
         const first = log.append([op('A', 1)]);
@@ -598,7 +607,11 @@ test('a group commit: appends issued together land as one file, in order; a fail
         );
         assert.strictEqual(log.length, 4);
         const names = (await fs.readdir(path.join(dir, 'log', 'open'))).sort();
-        assert.deepStrictEqual(names, ['0000000001.json'], 'one file for the group');
+        if (journaled) {
+          assert.strictEqual(names.length, 1, 'one journal');
+          assert.match(names[0], /^0000000001-[0-9a-z]+\.jsonl$/, 'named by its first seq');
+          assert.strictEqual(await openGroups(fsi, path.join(dir, 'log', 'open')), 1, 'one line for the group');
+        } else assert.deepStrictEqual(names, ['0000000001.json'], 'one file for the group');
         // A fourth, alone, is its own file; the groups read back in order.
         await log.append([op('B', 2)]);
         assert.deepStrictEqual(
@@ -617,29 +630,40 @@ test('a group commit: appends issued together land as one file, in order; a fail
           log.tail().map((entry) => entry.seq),
           [5],
         );
-        const reopened = await new OpLog(dir, { rollAfter: 100, sealApplied: true });
+        // The journal holds the unsealed group 5 too: it stays until that one is sealed.
+        const still = await fs.readdir(path.join(dir, 'log', 'open'));
+        assert.strictEqual(still.length, 1, journaled ? 'the journal stays for group 5' : 'the file of group 5');
+        const reopened = await new OpLog(dir, { rollAfter: 100, sealApplied: true, fsi });
         assert.deepStrictEqual(
           reopened.since(undefined).map((entry) => entry.seq),
           [1, 2, 3, 4, 5],
         );
         assert.deepStrictEqual(reopened.vector, { A: 3, B: 2 });
+        // Sealed whole, the journal goes.
+        reopened.applied(5);
+        await reopened.flush();
+        assert.deepStrictEqual(await fs.readdir(path.join(dir, 'log', 'open')), [], 'every group sealed: no open file');
       } finally {
         await cleanupTemp(dir);
       }
-    },
-  );
+    }
+  }
 
   await t.test(
     'a write that fails rejects its group and the one behind it; the seqs are handed out again',
     async () => {
+      for (const journaled of [true, false]) await failedWrite(journaled);
+    },
+  );
+  async function failedWrite(journaled) {
+    {
       const dir = await createTemp();
       try {
-        const fsi = require('../src/fsi.js');
+        const fsi = journaled ? nodeFsi : withoutAppend(nodeFsi);
         let failing = false;
-        const flaky = {
-          ...fsi,
-          write: (...args) => (failing ? Promise.reject(new Error('disk full')) : fsi.write(...args)),
-        };
+        const fail = (call) => (failing ? Promise.reject(new Error('disk full')) : call());
+        const flaky = { ...fsi, write: (...args) => fail(() => fsi.write(...args)) };
+        if (journaled) flaky.append = (...args) => fail(() => fsi.append(...args));
         const log = await new OpLog(dir, { rollAfter: 100, fsi: flaky });
         await log.append([op('A', 1)]);
         failing = true;
@@ -661,6 +685,114 @@ test('a group commit: appends issued together land as one file, in order; a fail
       } finally {
         await cleanupTemp(dir);
       }
+    }
+  }
+});
+
+test('a journal: a line per group, a torn last line left out, a failed line shadowed by the group that took its seqs', async (t) => {
+  const lines = async (dir) => {
+    const open = path.join(dir, 'log', 'open');
+    const names = (await fs.readdir(open)).filter((name) => name.endsWith('.jsonl')).sort();
+    return names.map((name) => path.join(open, name));
+  };
+
+  await t.test('a torn last line is left out; a line inside that does not read is counted lost', async () => {
+    const dir = await createTemp();
+    const warnings = [];
+    const logger = { warn: (entry) => warnings.push(entry.event), info() {}, debug() {}, error() {} };
+    try {
+      const log = await new OpLog(dir, { rollAfter: 100, sealApplied: true });
+      await log.append([op('A', 1)]);
+      await log.append([op('A', 2)]);
+      await log.append([op('A', 3)]);
+      const [journal] = await lines(dir);
+      // A crash in the middle of the next append: half a line at the end.
+      await fs.appendFile(journal, '{"entries":[{"seq":4,"op":');
+      const torn = await new OpLog(dir, { rollAfter: 100, sealApplied: true, logger });
+      assert.deepStrictEqual(
+        torn.since(undefined).map((entry) => entry.seq),
+        [1, 2, 3],
+      );
+      assert.deepStrictEqual(warnings, ['log.open.torn']);
+      assert.strictEqual(torn.droppedTs, 0, 'nothing acknowledged was lost');
+      // The next append goes to a journal of its own, never after the torn line.
+      await torn.append([op('A', 4)]);
+      assert.strictEqual((await lines(dir)).length, 2);
+      // A line inside a journal altered on the disk: the rest still read, the loss is told.
+      const text = await fs.readFile(journal, 'utf8');
+      const [first, second, ...rest] = text.split('\n');
+      await fs.writeFile(journal, [first, second.replace('"A"', '"Z"'), ...rest].join('\n'));
+      warnings.length = 0;
+      const altered = await new OpLog(dir, { rollAfter: 100, sealApplied: true, logger });
+      assert.deepStrictEqual(
+        altered.since(undefined).map((entry) => entry.seq),
+        [1, 3, 4],
+      );
+      assert.deepStrictEqual(warnings.sort(), ['log.open.torn', 'log.open.unreadable']);
+      assert.strictEqual(altered.corrupt, 1, 'the checksum told it');
+      assert.ok(altered.droppedTs > 0, 'what was lost is past what an exact read of the past can vouch for');
+    } finally {
+      await cleanupTemp(dir);
+    }
+  });
+
+  await t.test(
+    'a group whose append failed after its line landed is shadowed by the group that took its seqs',
+    async () => {
+      const dir = await createTemp();
+      try {
+        let lying = false;
+        // An append that writes its line, then reports a failure: the line is whole on the disk.
+        const fsi = {
+          ...nodeFsi,
+          append: async (...args) => {
+            await nodeFsi.append(...args);
+            if (lying) throw new Error('disk said no');
+          },
+        };
+        const log = await new OpLog(dir, { rollAfter: 100, sealApplied: true, fsi });
+        await log.append([op('A', 1)]);
+        lying = true;
+        await assert.rejects(log.append([op('A', 2, { id: 'stale' })]), /disk said no/);
+        lying = false;
+        const [{ seq }] = await log.append([op('B', 1, { id: 'fresh' })]);
+        assert.strictEqual(seq, 2, 'the seq was handed out again');
+        assert.strictEqual((await lines(dir)).length, 2, 'into a journal of its own');
+        const reopened = await new OpLog(dir, { rollAfter: 100, sealApplied: true });
+        assert.deepStrictEqual(
+          reopened.since(undefined).map((entry) => [entry.seq, entry.op.origin, entry.op.id]),
+          [
+            [1, 'A', 'r1'],
+            [2, 'B', 'fresh'],
+          ],
+          'the newer journal is read first: the failed line is a duplicate',
+        );
+      } finally {
+        await cleanupTemp(dir);
+      }
     },
   );
+
+  await t.test('a scrub rewrites a journal a line per group; a roll begins a new one', async () => {
+    const dir = await createTemp();
+    try {
+      const log = await new OpLog(dir, { rollAfter: 3, sealApplied: true });
+      await log.append([op('A', 1, { id: 'secret', data: { pin: 1234 } })]);
+      await log.append([op('A', 2, { id: 'other', data: { n: 1 } })]);
+      assert.strictEqual(await log.scrub('secret'), 1);
+      const [journal] = await lines(dir);
+      const text = await fs.readFile(journal, 'utf8');
+      assert.ok(!text.includes('1234'), 'the payload left the journal');
+      assert.strictEqual(text.split('\n').filter(Boolean).length, 2, 'a line per group still');
+      log.applied(1, 2);
+      await log.append([op('A', 3, { id: 'other' })]);
+      // The third group rolled: 1 and 2 sealed, 3 waits for its record.
+      assert.strictEqual(log.segments, 1);
+      await log.append([op('A', 4, { id: 'other' })]);
+      const names = await lines(dir);
+      assert.strictEqual(names.length, 2, 'the journal of group 3, and a new one begun after the roll');
+    } finally {
+      await cleanupTemp(dir);
+    }
+  });
 });

@@ -40,6 +40,8 @@ export interface Fsi {
   sync?(dir: string, filename: string): Promise<void>;
   /** Exclusive create — rejects with `code: 'EEXIST'` when the file is there; what the directory lock uses when present. */
   create?(dir: string, filename: string, content: string): Promise<void>;
+  /** At the end of the file, made when absent; what the op log's journal writes with when present (a file per group without it). */
+  append?(dir: string, filename: string, content: string): Promise<void>;
 }
 
 /** Whether `value` has the five functions of the backend contract. */
@@ -1292,7 +1294,8 @@ export interface StorageOptions<S extends Schema = Schema> {
    * 0: never). The log is durable at once, every read sees the write, a
    * crash replays the batch at the next open, `flush()`, `tag()` and
    * `close()` land the files first; the writes of one record within the
-   * window coalesce into one file and one block.
+   * window coalesce into one file and one block. A flush that took longer
+   * than the window makes the next window as long as it took.
    */
   defer?: number;
   /**

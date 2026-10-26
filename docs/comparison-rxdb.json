@@ -1785,8 +1785,8 @@
         },
         "writeFootprint": {
           "mark": "",
-          "text": "one log file per group of appends; the record file and its chain block once per deferred window (16 ms)",
-          "source": "src/log.js (group commit); src/storage.js (#deferWrite); docs/guide/storage.md"
+          "text": "one log line per group of appends (a journal, where the backend appends; a file per group where it does not); the record file and its chain block once per deferred window (16 ms)",
+          "source": "src/log.js (group commit, the journal); src/storage.js (#deferWrite); docs/guide/backends.md"
         },
         "compression": {
           "mark": "❌",

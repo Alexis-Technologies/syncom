@@ -62,35 +62,35 @@ yjs@13.6.33</title>
 <path class="bar" d="M271,175H502.9508646251369A4,4 0 0 1 506.9508646251369,179V185A4,4 0 0 1 502.9508646251369,189H271Z"/>
 <text class="value" x="512.9508646251369" y="188">14.6k</text>
 </g>
+<g><title>syncom · core + text + sync, node:fs · v0.0.1
+8,541 ops/s
+117 µs per operation
+samples 7,729 – 9,181
+@alexify/syncom@0.0.1</title>
+<text class="label primary" x="20" y="219">syncom</text>
+<text class="sublabel" x="20" y="234">core + text + sync, node:fs · v0.0.1</text>
+<path class="bar primary" d="M271,215H455.6354018283534A4,4 0 0 1 459.6354018283534,219V225A4,4 0 0 1 455.6354018283534,229H271Z"/>
+<text class="value" x="465.6354018283534" y="228">8,541</text>
+</g>
+<g><title>syncom · /all: signed, chained, node:fs · v0.0.1
+4,602 ops/s
+217 µs per operation
+samples 4,473 – 6,064
+@alexify/syncom@0.0.1</title>
+<text class="label secondary" x="20" y="259">syncom</text>
+<text class="sublabel" x="20" y="274">/all: signed, chained, node:fs · v0.0.1</text>
+<path class="bar secondary" d="M271,255H401.2457589318815A4,4 0 0 1 405.2457589318815,259V265A4,4 0 0 1 401.2457589318815,269H271Z"/>
+<text class="value" x="411.2457589318815" y="268">4,602</text>
+</g>
 <g><title>Automerge · automerge-repo, NodeFS storage · v3.5.0
 3,267 ops/s
 306 µs per operation
 samples 3,170 – 3,355
 @automerge/automerge@3.5.0</title>
-<text class="label" x="20" y="219">Automerge</text>
-<text class="sublabel" x="20" y="234">automerge-repo, NodeFS storage · v3.5.0</text>
-<path class="bar" d="M271,215H371.11202378661477A4,4 0 0 1 375.11202378661477,219V225A4,4 0 0 1 371.11202378661477,229H271Z"/>
-<text class="value" x="381.11202378661477" y="228">3,267</text>
-</g>
-<g><title>syncom · core + text + sync, node:fs · v0.0.1
-1,900 ops/s
-526 µs per operation
-samples 1,101 – 3,534
-@alexify/syncom@0.0.1</title>
-<text class="label primary" x="20" y="259">syncom</text>
-<text class="sublabel" x="20" y="274">core + text + sync, node:fs · v0.0.1</text>
-<path class="bar primary" d="M271,255H323.4517556979157A4,4 0 0 1 327.4517556979157,259V265A4,4 0 0 1 323.4517556979157,269H271Z"/>
-<text class="value" x="333.4517556979157" y="268">1,900</text>
-</g>
-<g><title>syncom · /all: signed, chained, node:fs · v0.0.1
-1,770 ops/s
-565 µs per operation
-samples 920 – 2,772
-@alexify/syncom@0.0.1</title>
-<text class="label secondary" x="20" y="299">syncom</text>
-<text class="sublabel" x="20" y="314">/all: signed, chained, node:fs · v0.0.1</text>
-<path class="bar secondary" d="M271,295H317.211735062997A4,4 0 0 1 321.211735062997,299V305A4,4 0 0 1 317.211735062997,309H271Z"/>
-<text class="value" x="327.211735062997" y="308">1,770</text>
+<text class="label" x="20" y="299">Automerge</text>
+<text class="sublabel" x="20" y="314">automerge-repo, NodeFS storage · v3.5.0</text>
+<path class="bar" d="M271,295H371.11202378661477A4,4 0 0 1 375.11202378661477,299V305A4,4 0 0 1 371.11202378661477,309H271Z"/>
+<text class="value" x="381.11202378661477" y="308">3,267</text>
 </g>
 <text class="caption" x="20" y="363">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
 <text class="caption" x="20" y="379">in a fresh process · 2026-10-26</text>

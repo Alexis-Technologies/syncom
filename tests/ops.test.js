@@ -515,6 +515,14 @@ test('ops module', async (t) => {
     "applyOp reports what the reading shows of an op, in the write API's terms and the reading's indices",
     () => {
       const changesOf = (entry, o) => applyOp(entry, o).changes;
+      // A field an op makes reads as something even when nothing in it shows: a tree whose only node
+      // went to the trash reads `[]`, and the field is reported whole.
+      const trashed = applyOp(
+        null,
+        op('tree', 1, 'P', { key: 'outline', value: { node: 'n', parent: '$trash', fi: 'V' } }),
+      );
+      assert.deepStrictEqual(trashed.entry.data.outline, []);
+      assert.deepStrictEqual(trashed.changes, [{ action: 'reset', field: 'outline', kind: 'tree', value: [] }]);
       let r = applyOp(null, op('write', 1, 'A', { data: { a: 1, b: 2 } }));
       assert.deepStrictEqual(r.changes, [
         { action: 'put', field: 'a', value: 1 },
