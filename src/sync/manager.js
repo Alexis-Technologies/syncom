@@ -20,7 +20,7 @@
 // reach, with ops relayed transitively and de-duplicated by version vector.
 
 const { Emitter } = require('../utils.js');
-const { packOps, unpackOps } = require('../ops.js');
+const { packOps, unpackOps } = require('../wire.js');
 const { vectorAdvance, vectorMerge, keyScope, opKey } = require('../vector.js');
 const { outbound, unreachable } = require('../outbound.js');
 const { isSyncLink } = require('../link.js');

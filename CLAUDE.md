@@ -128,7 +128,8 @@ src/schema/lens.js        createLens — how an older record reads under this ve
 src/entity.js             project / unproject / foldSet — the record as its validator sees it, the validated value as the op carries it;
                           the core's, shared by commit.js and the lens; requires shape.js, paths.js only
 src/errors.js             SyncomError, ValidationError, typed() — no requires
-src/ops.js                the record-level model: applyOp / mergeEntry / isAlive, packOps
+src/ops.js                the record-level model: applyOp / mergeEntry / isAlive
+src/wire.js               packOps / unpackOps and the type codes — the ops as they cross between peers — no requires
 src/vector.js             clocks, version vectors, event ids
 src/log.js                OpLog — the persisted operation log over fsi: seqs reserved at append, groups written one file each
 src/sync/sync.js          @alexify/syncom/sync — the sync plugin: `open(ctx)` after the replay hands the core its SyncManager
@@ -311,7 +312,7 @@ docs/                     VitePress site
   of fewer slots ignores the rest, a reader of more takes an absent slot as
   null. Append, never reorder — the
   shape is on the wire between every pair of peers (the log itself stores
-  keyed `{ seq, op, fp }` JSON; `packOps` is for `push` and `changes` only). An
+  keyed `{ seq, op, fp }` JSON; `packOps` — src/wire.js — is for `push` and `changes` only). An
   op type is one character in `TYPE_CODES`/`CODE_TYPES` (`+`/`-` are the set
   ops). Once the package is published, an older reader counts an unknown type
   as malformed and its stream stalls there — a new type, or a slot an older
