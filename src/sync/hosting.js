@@ -417,16 +417,23 @@ const presence = (host) => async (context, update) => {
     if (entry[0] !== node) return void no('PRESENCE_FORGED');
     if (host.storage.signatures === 'require' && entry.length < 5) return void no('PRESENCE_UNSIGNED');
   }
-  // The room's memory: the newest state per node, dropped once stale.
+  // The room's memory: the newest state per node, in the order of the last
+  // update — so the stale are at the head, and an update looks at them
+  // alone, not the room (one renewal per node per room, every few seconds,
+  // made each a walk of every node once). One older than its place says
+  // waits until it is at the head; the newcomer's hand drops it anyway.
   let room = host.presence.rooms.get(update.scope);
   if (room === undefined) host.presence.rooms.set(update.scope, (room = new Map()));
   const floor = now - timeout;
-  for (const [other, held] of room) if (held[2] < floor) room.delete(other);
+  for (const [other, held] of room) {
+    if (held[2] >= floor) break;
+    room.delete(other);
+  }
   for (const entry of update.s) {
     const held = room.get(node);
     if (held !== undefined && held[1] >= entry[1]) continue;
-    if (entry[3] === null) room.delete(node);
-    else if (room.size < host.presence.max || room.has(node)) room.set(node, entry);
+    room.delete(node);
+    if (entry[3] !== null && room.size < host.presence.max) room.set(node, entry);
   }
   if (room.size === 0) host.presence.rooms.delete(update.scope);
   const server = context?.server;
