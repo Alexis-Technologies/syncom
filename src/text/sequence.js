@@ -324,7 +324,18 @@ const rleOf = (kind, run) => {
   return out;
 };
 
-const tupleOf = (kind, run) => (run.elem !== null ? [run.at, rleOf(kind, run), run.elem] : [run.at, rleOf(kind, run)]);
+// A run's JSON tuple, made once per run record: a record is frozen when it
+// is set and replaced when it changes, so a version's `runs` reuses the
+// tuple of every run the op left alone — rebuilding them all cost a large
+// record's landing tens of milliseconds.
+const TUPLES = new WeakMap();
+const tupleOf = (kind, run) => {
+  const known = TUPLES.get(run);
+  if (known !== undefined) return known;
+  const tuple = run.elem !== null ? [run.at, rleOf(kind, run), run.elem] : [run.at, rleOf(kind, run)];
+  if (Object.isFrozen(run)) TUPLES.set(run, tuple);
+  return tuple;
+};
 
 // The `runs` map of a block, in walk order then the pending ones by key;
 // made once per version.
