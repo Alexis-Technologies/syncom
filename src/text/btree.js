@@ -260,16 +260,16 @@ function* iterate(root, cursor = first(root)) {
 
 // The visible bodies under `node` as one string, kept on the node: a node
 // never changes, so after an edit only the copied path concatenates again
-// and shares the rest — a leaf's bodies joined flat, the levels above as
-// a concatenation of long strings, which is a rope in V8 until it is
-// read, so the whole is never copied here.
+// and shares the rest — a leaf's bodies and the levels above alike as a
+// concatenation, which is a rope in V8 until it is read, so the whole is
+// never copied here. (A join would copy: a run typed into grows one body
+// a keystroke at a time, and a leaf that holds it with others would copy
+// it whole on every keystroke.)
 const textOf = (node) => {
   if (node.text !== null) return node.text;
   let out = '';
   if (node.leaf) {
-    const bodies = [];
-    for (const item of node.items) if (item.vis) bodies.push(item.body);
-    out = bodies.join('');
+    for (const item of node.items) if (item.vis) out += item.body;
   } else for (const child of node.children) out += textOf(child);
   node.text = out;
   return out;

@@ -152,7 +152,10 @@ const changeOf = (op, stamp, held, block, base = null) => {
       if (own !== shown || spans.length > 1) return undefined;
       const span = spans[0];
       if (span !== undefined && span.count > 0) {
-        const inserted = S.render(block).slice(span.index, span.index + span.count);
+        // Every slot the op inserted shows: what it reads as is the content
+        // itself — never a slice of the whole reading, which a rope would flatten.
+        const inserted =
+          span.count === content.length ? content.slice() : S.render(block).slice(span.index, span.index + span.count);
         const last = out[out.length - 1];
         // One cut at the insertion point and the insert: one splice, as the call made it.
         if (out.length === 1 && last.index === span.index) last.content = inserted;
@@ -247,16 +250,21 @@ const join = (a, b) => S.join(a, b);
 // here, inside the queue, against the text as it is.
 const isHigh = (unit) => unit >= 0xd800 && unit <= 0xdbff;
 const isLow = (unit) => unit >= 0xdc00 && unit <= 0xdfff;
-const wholeCharacter = (id, key, text, index) => {
-  if (index <= 0 || index >= text.length) return;
-  if (!isHigh(text.charCodeAt(index - 1)) || !isLow(text.charCodeAt(index))) return;
-  const message = `Index ${index} of field ${key} of record ${id} falls inside a surrogate pair`;
-  throw new SyncomError('SURROGATE', message, { id, field: key, index });
+// The two units around an index read from the rope, O(log n) each — never
+// from the whole reading, which a rope flattens on its first read.
+const unitAt = (idx, index) => {
+  const held = S.heldAt(idx, index);
+  return typeof held === 'string' ? held.charCodeAt(0) : -1;
 };
 const wholeCharacters = (id, key, idx, ...indexes) => {
   if (idx === null || idx.k !== 't') return;
-  const text = S.render(idx);
-  for (const index of indexes) wholeCharacter(id, key, text, index);
+  const length = S.lengthOf(idx);
+  for (const index of indexes) {
+    if (index <= 0 || index >= length) continue;
+    if (!isHigh(unitAt(idx, index - 1)) || !isLow(unitAt(idx, index))) continue;
+    const message = `Index ${index} of field ${key} of record ${id} falls inside a surrogate pair`;
+    throw new SyncomError('SURROGATE', message, { id, field: key, index });
+  }
 };
 
 const resolveSplice = (core, id, payload, current) => {
