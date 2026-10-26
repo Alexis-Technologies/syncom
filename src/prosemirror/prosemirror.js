@@ -43,6 +43,9 @@ const {
   transformIndex,
   selectionToTokens,
   presenceCursors,
+  createFit,
+  undoSteps,
+  failureReporter,
 } = require('../editor/editor.js');
 
 const marksOf = (marks) => {
@@ -252,16 +255,18 @@ const createProseMirror = (storage, id, path, pm, options = {}) => {
   let report = null;
   let text = null;
   // The field as the binding sees it (its text, and the editor's edits sent
-  // and not landed yet), as spans; what the editor's document differs from
-  // it by, held for the next edit; and the way back, made when asked.
-  let base = null;
-  let unfit = [];
-  let back = null;
+  // and not landed yet), as spans — `fit.base` — and what the editor's
+  // document differs from it by, held for the next edit.
+  const fit = createFit(() => docToSpans(view.state.doc), diffSpans);
+  const toDoc = (index) => fit.toDoc(index);
+  const toField = (index) => fit.toField(index);
+  const failed = failureReporter(storage, id, path);
   // What the schema could not hold is dropped from the document — and goes
   // to every peer with the next edit: said, never silent (`onUnfit` hears
   // the delta from the field to the document; a warn once otherwise).
   let warned = false;
   const tell = () => {
+    const { unfit } = fit;
     if (unfit.length === 0) return;
     if (typeof options.onUnfit === 'function') {
       try {
@@ -274,22 +279,10 @@ const createProseMirror = (storage, id, path, pm, options = {}) => {
       storage.logger?.warn?.({ event: 'editor.unfit', id, field: path, ops: unfit.length });
     }
   };
-  // A failure of the adapter's own work (cursors, undo): `onError`, or a warn.
-  const failed = (event, onError) => (error) => {
-    if (typeof onError === 'function') onError(error);
-    else storage.logger?.warn?.({ event, id, field: path, err: error });
-  };
-  const hold = (doc) => {
-    unfit = diffSpans(base, docToSpans(doc));
-    back = null;
+  // The document `doc` built from the field `base`: what it differs by is held.
+  const hold = (base, doc) => {
+    fit.hold(base, diffSpans(base, docToSpans(doc)));
     tell();
-  };
-  // A field index as the document's, and back.
-  const toDoc = (index) => (unfit.length === 0 ? index : transformIndex(index, unfit, true));
-  const toField = (index) => {
-    if (unfit.length === 0) return index;
-    back ??= diffSpans(docToSpans(view.state.doc), base);
-    return transformIndex(index, back, true);
   };
 
   const plugin = new Plugin({
@@ -307,11 +300,7 @@ const createProseMirror = (storage, id, path, pm, options = {}) => {
       }
       if (!edited) return null;
       const now = docToSpans(after.doc);
-      const local = diffSpans(docToSpans(before.doc), now);
-      const delta = unfit.length === 0 ? local : compose(unfit, local);
-      base = now;
-      unfit = [];
-      back = null;
+      const delta = fit.send(diffSpans(docToSpans(before.doc), now), now);
       if (delta.length > 0) report(delta);
       return null;
     },
@@ -354,10 +343,10 @@ const createProseMirror = (storage, id, path, pm, options = {}) => {
   // from the field, and what it differs from the field by is held.
   const adapter = {
     setContents: (ops) => {
-      base = deltaToSpans(ops);
+      const base = deltaToSpans(ops);
       const doc = spansToDoc(base, view.state.schema);
       land(doc, [0, 0]);
-      hold(doc);
+      hold(base, doc);
     },
     updateContents: (delta) => {
       const { state } = view;
@@ -369,11 +358,9 @@ const createProseMirror = (storage, id, path, pm, options = {}) => {
         const head = transformIndex(toField(indexOfPos(state.doc, selection.head)), delta, true);
         at = [anchor, head];
       }
-      base = deltaToSpans(compose(spansToDelta(base ?? docToSpans(state.doc)), delta));
+      const base = deltaToSpans(compose(spansToDelta(fit.base ?? docToSpans(state.doc)), delta));
       const doc = spansToDoc(base, state.schema);
-      unfit = diffSpans(base, docToSpans(doc));
-      back = null;
-      tell();
+      hold(base, doc);
       land(doc, at === null ? null : [toDoc(at[0]), toDoc(at[1])]);
     },
     onChange: (listener) => {
@@ -479,19 +466,11 @@ const createProseMirror = (storage, id, path, pm, options = {}) => {
   // ProseMirror commands over an undo manager of the storage's: the field's
   // edits taken back after every edit sent has landed.
   const commands = (manager, { onError } = {}) => {
-    if (!manager || typeof manager.undo !== 'function' || typeof manager.redo !== 'function') {
-      throw new TypeError('commands() takes an undo manager: createUndo() from @alexify/syncom/undo');
-    }
-    const report = failed('editor.undo', onError);
-    const command = (name, can) => (_state, dispatch) => {
-      if (!manager[can]) return false;
-      if (dispatch) {
-        const settled = text === null ? Promise.resolve() : text.flush();
-        void settled.then(() => manager[name]()).catch(report);
-      }
-      return true;
+    const steps = undoSteps(manager, () => text, failed('editor.undo', onError));
+    return {
+      undo: (_state, dispatch) => steps.undo(Boolean(dispatch)),
+      redo: (_state, dispatch) => steps.redo(Boolean(dispatch)),
     };
-    return { undo: command('undo', 'canUndo'), redo: command('redo', 'canRedo') };
   };
 
   const attached = (name) => {

@@ -22,12 +22,13 @@
 
 const {
   createTextBinding,
-  compose,
-  transformIndex,
   diffSpans,
   applyToText,
   selectionToTokens,
   presenceCursors,
+  createFit,
+  undoSteps,
+  failureReporter,
   EMBED,
 } = require('../editor/editor.js');
 
@@ -117,40 +118,27 @@ const createCodeMirror = (storage, id, path, cm, options = {}) => {
   const { StateField, StateEffect, Annotation, Transaction } = cm.state;
   const remote = Annotation.define();
   const source = options.source ?? Symbol('codemirror');
-  // A failure of the adapter's own work (cursors, undo): `onError`, or a warn.
-  const failed = (event, onError) => (error) => {
-    if (typeof onError === 'function') onError(error);
-    else storage.logger?.warn?.({ event, id, field: path, err: error });
-  };
+  const failed = failureReporter(storage, id, path);
   let view = null;
   let report = null;
   let text = null;
   const started = [];
   // What the document differs from the field by — the binding's view, held
-  // as `base` while they differ — and the way back, made when asked. Both
-  // are empty while the editor shows the field as it is: a keystroke reads
-  // no text then.
-  let unfit = [];
-  let base = null;
-  let back = null;
+  // as `fit.base` while they differ. Both are empty while the editor shows
+  // the field as it is: a keystroke reads no text then.
+  const fit = createFit(() => view.state.doc.toString(), diffText);
+  const toDoc = (index) => fit.toDoc(index);
+  const toField = (index) => fit.toField(index);
   const settle = (expected) => {
     const shown = view.state.doc.toString();
-    unfit = [];
-    base = null;
-    back = null;
-    if (shown === expected) return;
-    base = expected;
+    if (shown === expected) {
+      fit.hold(null);
+      return;
+    }
     const breaks = lineBreaks(expected);
-    if (applyToText(expected, breaks.fit) === shown) ({ fit: unfit, back } = breaks);
+    if (applyToText(expected, breaks.fit) === shown) fit.hold(expected, breaks.fit, breaks.back);
     // Another `lineSeparator`: the smallest difference.
-    else unfit = diffText(expected, shown);
-  };
-  // A field index as the document's, and back.
-  const toDoc = (index) => (unfit.length === 0 ? index : transformIndex(index, unfit, true));
-  const toField = (index) => {
-    if (unfit.length === 0) return index;
-    back ??= diffText(view.state.doc.toString(), base);
-    return transformIndex(index, back, true);
+    else fit.hold(expected, diffText(expected, shown));
   };
 
   // The editor's own edits, as each transaction applies — after what the
@@ -159,11 +147,7 @@ const createCodeMirror = (storage, id, path, cm, options = {}) => {
     create: () => null,
     update: (value, tr) => {
       if (tr.docChanged && report !== null && tr.annotation(remote) === undefined) {
-        const local = deltaOfChanges(tr.changes);
-        const delta = unfit.length === 0 ? local : compose(unfit, local);
-        unfit = [];
-        base = null;
-        back = null;
+        const delta = fit.send(deltaOfChanges(tr.changes), null);
         if (delta.length > 0) report(delta);
       }
       return value;
@@ -187,7 +171,7 @@ const createCodeMirror = (storage, id, path, cm, options = {}) => {
       land({ from: 0, to: view.state.doc.length, insert: expected }, expected);
     },
     updateContents: (delta) => {
-      if (unfit.length === 0) {
+      if (fit.unfit.length === 0) {
         land(changesOfDelta(delta), applyToText(view.state.doc.toString(), delta));
         return;
       }
@@ -195,7 +179,7 @@ const createCodeMirror = (storage, id, path, cm, options = {}) => {
       // document becomes the field's text as CodeMirror reads it. The peer's
       // delta laid over the held difference would read a break the peer
       // fitted too as two.
-      const expected = applyToText(base, delta);
+      const expected = applyToText(fit.base, delta);
       const target = view.state.toText(expected).toString();
       land(changesOfDelta(diffText(view.state.doc.toString(), target)), expected);
     },
@@ -318,18 +302,9 @@ const createCodeMirror = (storage, id, path, cm, options = {}) => {
   // CodeMirror commands over an undo manager of the storage's: the field's
   // edits taken back after every edit sent has landed.
   const commands = (manager, { onError } = {}) => {
-    if (!manager || typeof manager.undo !== 'function' || typeof manager.redo !== 'function') {
-      throw new TypeError('commands() takes an undo manager: createUndo() from @alexify/syncom/undo');
-    }
-    const report = failed('editor.undo', onError);
-    const command = (name, can) => () => {
-      if (!manager[can]) return false;
-      const settled = text === null ? Promise.resolve() : text.flush();
-      void settled.then(() => manager[name]()).catch(report);
-      return true;
-    };
-    const undo = command('undo', 'canUndo');
-    const redo = command('redo', 'canRedo');
+    const steps = undoSteps(manager, () => text, failed('editor.undo', onError));
+    const undo = () => steps.undo(true);
+    const redo = () => steps.redo(true);
     return {
       undo,
       redo,

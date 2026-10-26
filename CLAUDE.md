@@ -37,7 +37,8 @@ src/order/order.js        the @alexify/syncom/order subpath — fractional index
 src/undo/undo.js          the @alexify/syncom/undo subpath — the undo stack over the commit event; requires patch.js, emitter.js, symbols.js, paths.js only
 src/editor/editor.js      the @alexify/syncom/editor subpath — the editor-agnostic binding (shadow, one delta in
                           flight, STALE and the rebase), delta compose/transform, diffSpans/diffBlocks, spans↔blocks,
-                          selections as tokens, presence cursors; requires text/myers.js and vector.js only
+                          selections as tokens, presence cursors, what an adapter shares (createFit, undoSteps,
+                          failureReporter); requires text/myers.js and vector.js only
 src/prosemirror/prosemirror.js  the @alexify/syncom/prosemirror subpath — ProseMirror (injected `{ model, state, transform, view? }`)
                           over the editor binding: the document as one text with a marker per block-level node, the replace
                           step, cursors as decorations, undo commands over /undo; requires editor/editor.js only
@@ -680,8 +681,8 @@ docs/                     VitePress site
   their types. A ProseMirror document is a marker per block-level node in document order
   (`docToSpans`/`spansToDoc`); what the schema cannot hold is left out when it is read back.
   The adapter NEVER answers a peer's change with an edit: what the document differs from the
-  field by (`unfit`) is held and goes out composed with the editor's next edit (`compose(unfit,
-  local)`) — two editors that each fitted a merge sent the same structure twice, unfit again,
+  field by (`unfit`, a `createFit` of src/editor/editor.js) is held and goes out composed with the
+  editor's next edit (`fit.send`) — two editors that each fitted a merge sent the same structure twice, unfit again,
   and answered each other without end. Until then the adapter's `base` is the binding's view
   and every index crosses `unfit` (`toDoc`/`toField`: the selection, the cursors,
   `indexOf`/`posOf`) — a delta in the document's indices lands askew. `/codemirror` does

@@ -583,6 +583,78 @@ const runEditorTests = async (t, assert, createStorage) => {
       await assert.rejects(() => E.presenceCursors({}, storage, id, 'body'), TypeError);
     },
   );
+
+  await t.test('an adapter’s fit holds what its document differs by, and maps indices across it', () => {
+    const plain = (text) => [{ type: 'text', text, marks: {} }];
+    let shown = 'ab\r\ncd';
+    const fit = E.createFit(() => plain(shown), E.diffSpans);
+    assert.throws(() => E.createFit(null, E.diffSpans), TypeError);
+    assert.strictEqual(fit.toDoc(3), 3, 'nothing held: an index is the same on both sides');
+    assert.strictEqual(fit.toField(3), 3);
+    // The field reads `ab\ncd`; the document shows a `\r` more before the break.
+    fit.hold(plain('ab\ncd'), [{ retain: 2 }, { insert: '\r' }]);
+    assert.strictEqual(fit.toDoc(3), 4, 'after the break, one further in the document');
+    assert.strictEqual(fit.toField(4), 3, 'and back, through the delta made from the document');
+    // The editor's next edit takes what was held with it, in front.
+    const delta = fit.send([{ retain: 6 }, { insert: '!' }], null);
+    assert.deepStrictEqual(delta, [{ retain: 2 }, { insert: '\r' }, { retain: 3 }, { insert: '!' }]);
+    assert.deepStrictEqual(fit.unfit, []);
+    assert.strictEqual(fit.base, null);
+    shown = 'x';
+    assert.strictEqual(fit.toField(9), 9, 'nothing held again: the document is not read');
+  });
+
+  await t.test('undo steps answer whether there is a step and take it once the binding’s edits landed', async () => {
+    assert.throws(
+      () =>
+        E.undoSteps(
+          {},
+          () => null,
+          () => {},
+        ),
+      TypeError,
+    );
+    const taken = [];
+    const failures = [];
+    const manager = {
+      canUndo: true,
+      canRedo: false,
+      undo: async () => taken.push('undo'),
+      redo: async () => {
+        throw new Error('redo failed');
+      },
+    };
+    let flushed = 0;
+    let binding = null;
+    const steps = E.undoSteps(
+      manager,
+      () => binding,
+      (error) => failures.push(error.message),
+    );
+    assert.strictEqual(steps.redo(true), false, 'no step to redo: nothing runs');
+    assert.strictEqual(steps.undo(false), true, 'a dry run answers and takes nothing');
+    await tick();
+    assert.deepStrictEqual(taken, []);
+    assert.strictEqual(steps.undo(true), true);
+    binding = { flush: async () => void flushed++ };
+    assert.strictEqual(steps.undo(true), true);
+    manager.canRedo = true;
+    steps.redo(true);
+    await tick();
+    assert.deepStrictEqual(taken, ['undo', 'undo']);
+    assert.strictEqual(flushed, 2, 'the binding flushed before each step it was there for');
+    assert.deepStrictEqual(failures, ['redo failed'], 'a step that fails is reported, never thrown');
+    const warned = [];
+    const report = E.failureReporter({ logger: { warn: (entry) => warned.push(entry) } }, 'r', 'body');
+    const heard = [];
+    report('editor.undo', (error) => heard.push(error.message))(new Error('one'));
+    report('editor.cursors')(new Error('two'));
+    assert.deepStrictEqual(heard, ['one']);
+    assert.deepStrictEqual(
+      warned.map(({ event, id, field, err }) => [event, id, field, err.message]),
+      [['editor.cursors', 'r', 'body', 'two']],
+    );
+  });
 };
 
 const textOf = (spans) => spans.map((span) => (span.type === 'text' ? span.text : E.EMBED)).join('');

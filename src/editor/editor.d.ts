@@ -148,3 +148,59 @@ export declare function createTextBinding(
   adapter: EditorAdapter,
   options?: TextBindingOptions,
 ): TextBinding;
+
+/**
+ * What an adapter's document differs from the field by, for an editor whose
+ * schema cannot hold all a field does or that reads its text otherwise:
+ * held — never sent for itself — and composed in front of the editor's next
+ * edit. `Base` is the adapter's reading of the field (spans, a string).
+ */
+export interface Fit<Base> {
+  /** The delta from the field (`base`) to the document; empty while the document shows the field as it is. */
+  readonly unfit: DeltaOp[];
+  /** The field as the binding sees it while the document differs from it. */
+  readonly base: Base | null;
+  /** The field reads as `base`, the document differs from it by `unfit` (`back` the other way, when known). */
+  hold(base: Base | null, unfit?: DeltaOp[], back?: DeltaOp[] | null): void;
+  /** The delta to send for the editor's edit `local`: what the field lacked of the document, then the edit. */
+  send(local: DeltaOp[], base: Base | null): DeltaOp[];
+  /** A field index as the document's. */
+  toDoc(index: number): number;
+  /** A document index as the field's. */
+  toField(index: number): number;
+}
+
+/** A fit over the document `read()` reads, `diff(from, to)` the delta between two of its readings. */
+export declare function createFit<Base>(read: () => Base, diff: (from: Base, to: Base) => DeltaOp[]): Fit<Base>;
+
+/** What `undoSteps` takes: an undo manager of the storage's (`createUndo()` of @alexify/syncom/undo). */
+export interface UndoStepsManager {
+  readonly canUndo: boolean;
+  readonly canRedo: boolean;
+  undo(): unknown;
+  redo(): unknown;
+}
+
+/** Whether there is a step to take; with `run`, it is taken once the binding's edits have landed. */
+export interface UndoSteps {
+  undo(run: boolean): boolean;
+  redo(run: boolean): boolean;
+}
+
+/**
+ * Undo and redo for an adapter's commands: a step is taken once every edit
+ * the binding (`binding()`, null before it is made) sent has landed; a
+ * failure goes to `report`.
+ */
+export declare function undoSteps(
+  manager: UndoStepsManager,
+  binding: () => TextBinding | null,
+  report: (error: Error) => void,
+): UndoSteps;
+
+/** How an adapter reports a failure of its own work (cursors, undo): to `onError`, or a warn `event` on the storage's logger. */
+export declare function failureReporter(
+  storage: Storage,
+  id: string,
+  path: string,
+): (event: string, onError?: (error: Error) => void) => (error: Error) => void;

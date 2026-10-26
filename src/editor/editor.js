@@ -38,7 +38,9 @@
 // hands over a whole document; `spansToBlocks`/`blocksToSpans` and
 // `spansToDelta`/`deltaToSpans`; selections as cursor tokens that survive
 // the edits around them, and a presence room's cursors resolved to
-// indices. Requires the text plugin's Myers diff and the vector keys only.
+// indices. For an adapter: `createFit` (what its document differs from the
+// field by), `undoSteps` (its undo commands), `failureReporter`.
+// Requires the text plugin's Myers diff and the vector keys only.
 // The delta algebra (`iterate`, `compose`, `transform`, `transformIndex`)
 // follows quill-delta's (BSD-3-Clause; THIRD_PARTY_NOTICES.md).
 
@@ -738,6 +740,90 @@ const createTextBinding = (storage, id, path, adapter, options = {}) => {
   });
 };
 
+// ---------------------------------------------------------------------------
+// For adapters
+
+// What an adapter's document differs from the field by, for an editor whose
+// schema cannot hold all a field does (ProseMirror) or that reads its text
+// otherwise (CodeMirror's line breaks). `unfit` is the delta from the field
+// as the binding sees it (`base`) to the document: held — never sent for
+// itself, so a peer's change is never answered with an edit — and composed
+// in front of the editor's next edit (`send`). `toDoc`/`toField` map an
+// index across it; the way back is `diff(read(), base)`, made when asked.
+class Fit {
+  #read;
+  #diff;
+  #back = null;
+  unfit = [];
+  base = null;
+
+  constructor(read, diff) {
+    this.#read = read;
+    this.#diff = diff;
+  }
+
+  /** The field reads as `base`, the document differs from it by `unfit` (`back` the other way, when known). */
+  hold(base, unfit = [], back = null) {
+    this.base = base;
+    this.unfit = unfit;
+    this.#back = unfit.length === 0 ? null : back;
+  }
+
+  /** The delta to send for the editor's edit `local`: what the field lacked of the document, then the edit. */
+  send(local, base) {
+    const delta = this.unfit.length === 0 ? local : compose(this.unfit, local);
+    this.hold(base);
+    return delta;
+  }
+
+  /** A field index as the document's. */
+  toDoc(index) {
+    return this.unfit.length === 0 ? index : transformIndex(index, this.unfit, true);
+  }
+
+  /** A document index as the field's. */
+  toField(index) {
+    if (this.unfit.length === 0) return index;
+    this.#back ??= this.#diff(this.#read(), this.base);
+    return transformIndex(index, this.#back, true);
+  }
+}
+
+/** A fit over the document `read()` reads, `diff(from, to)` the delta between two of its readings. */
+const createFit = (read, diff) => {
+  if (typeof read !== 'function' || typeof diff !== 'function') throw new TypeError('createFit() takes read and diff');
+  return new Fit(read, diff);
+};
+
+/**
+ * Undo and redo over an undo manager of the storage's (`createUndo()` of
+ * @alexify/syncom/undo) for an adapter's commands: `undo(run)`/`redo(run)`
+ * answer whether there is a step to take and, when `run`, take it once
+ * every edit the binding (`binding()`, null before it is made) sent has
+ * landed; a failure goes to `report`.
+ */
+const undoSteps = (manager, binding, report) => {
+  if (!manager || typeof manager.undo !== 'function' || typeof manager.redo !== 'function') {
+    throw new TypeError('commands() takes an undo manager: createUndo() from @alexify/syncom/undo');
+  }
+  const step = (name, can) => (run) => {
+    if (!manager[can]) return false;
+    if (run) {
+      const text = binding();
+      const settled = text === null ? Promise.resolve() : text.flush();
+      void settled.then(() => manager[name]()).catch(report);
+    }
+    return true;
+  };
+  return { undo: step('undo', 'canUndo'), redo: step('redo', 'canRedo') };
+};
+
+/** How an adapter reports a failure of its own work (cursors, undo): to `onError`, or a warn `event` on the storage's logger. */
+const failureReporter = (storage, id, path) => (event, onError) => (error) => {
+  if (typeof onError === 'function') onError(error);
+  else storage.logger?.warn?.({ event, id, field: path, err: error });
+};
+
 module.exports = {
   EMBED,
   compose,
@@ -754,4 +840,7 @@ module.exports = {
   tokensToSelection,
   presenceCursors,
   createTextBinding,
+  createFit,
+  undoSteps,
+  failureReporter,
 };

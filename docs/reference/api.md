@@ -806,6 +806,9 @@ builds on. See [Editors](../guide/editors).
 | `diffSpans(before, after)`, `diffBlocks(before, after)` | The delta that takes one reading to another — cuts and inserts, a marker changed as `{ retain: 1, attributes: { embed } }`, marks changed over what stays — for `applyDelta()` |
 | `selectionToTokens(storage, id, path, { anchor, head? })`, `tokensToSelection(storage, tokens)` | A selection as cursor tokens `{ id, field, anchor, head }` that survive the edits around it, and back to indices (`null` once a place is gone) |
 | `presenceCursors(presence, storage, id, path, { key }?)` | The cursors a presence room holds on the field — each state's `key` (`cursor`) as tokens — resolved: `[{ node, state, anchor, head }]` |
+| `createFit(read, diff)` | For an adapter: what its document differs from the field by, held for the editor's next edit — `{ unfit, base, hold(base, unfit?, back?), send(local, base), toDoc(index), toField(index) }` |
+| `undoSteps(manager, binding, report)` | For an adapter's commands: `{ undo(run), redo(run) }` over an undo manager — whether there is a step and, with `run`, the step taken once the binding's edits have landed; a failure to `report` |
+| `failureReporter(storage, id, path)` | `(event, onError?) => (error) => void`: a failure of an adapter's own work to `onError`, or a warn `event` |
 
 ## ProseMirror (subpath)
 

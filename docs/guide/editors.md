@@ -278,6 +278,24 @@ same whichever came first, `a`'s insert first at a tie when `priority`;
 `applyToText(text, delta)` is a text once a delta applied. They are what
 Quill's `Delta` does, written here so the subpath needs no dependency.
 
+Three more are what the ProseMirror and CodeMirror adapters share, for an
+adapter of another editor:
+
+- `createFit(read, diff)` holds what the editor's document differs from the
+  field by — what its schema cannot hold, the line breaks it reads its own
+  way — and never sends it for itself: `fit.hold(base, unfit)` after the
+  document was built from the field (`base`, the adapter's reading of it),
+  `fit.send(local, base)` the delta to send for the editor's own edit (what
+  was held, then the edit), `fit.toDoc(index)` / `fit.toField(index)` an
+  index across the difference — the way back is `diff(read(), base)`, made
+  when first asked.
+- `undoSteps(manager, () => binding, report)` turns an undo manager of
+  `@alexify/syncom/undo` into commands: `steps.undo(run)` answers whether
+  there is a step and, with `run`, takes it once the binding's edits have
+  landed; a failure goes to `report`.
+- `failureReporter(storage, id, path)(event, onError)` is a failure of the
+  adapter's own work handed to `onError`, or logged as a warn `event`.
+
 ## Limits
 
 - The binding is for a **text** field; a list is read and written through

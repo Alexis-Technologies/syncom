@@ -14,6 +14,13 @@ There is no released version section until then; everything below lands in it.
 
 ### Added
 
+- **What an editor adapter shares: `createFit`, `undoSteps`,
+  `failureReporter`** (`@alexify/syncom/editor`). The fit — what an
+  editor's document differs from the field by, held for its next edit, and
+  the index maps across it —, the undo commands that wait for the binding's
+  edits, and the failure report were written twice, in the ProseMirror and
+  the CodeMirror adapter; both use these now, and an adapter of another
+  editor can.
 - **ProseMirror and CodeMirror: `indexOf(pos)` and `posOf(index)`.** A
   position of the attached editor's document as an index of the field and
   back, through what the field lacks of the document until the editor's

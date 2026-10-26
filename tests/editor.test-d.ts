@@ -14,6 +14,9 @@ import {
   selectionToTokens,
   tokensToSelection,
   presenceCursors,
+  createFit,
+  undoSteps,
+  failureReporter,
   EMBED,
 } from '../src/editor/editor.js';
 import type {
@@ -24,6 +27,8 @@ import type {
   DeltaOp,
   TextSpan,
   TextBlock,
+  Fit,
+  UndoSteps,
 } from '../src/editor/editor.js';
 import type { Storage } from '../src/all/all.js';
 import { createPresence } from '../src/presence/presence.js';
@@ -75,3 +80,30 @@ const quillLike: EditorAdapter = {
   },
 };
 createTextBinding(storage, 'id', 'body', quillLike);
+
+const fit = createFit(
+  () => 'text',
+  (a: string, b: string) => diffSpans([{ type: 'text', text: a, marks: {} }], [{ type: 'text', text: b, marks: {} }]),
+);
+expectType<Fit<string>>(fit);
+expectType<string | null>(fit.base);
+expectType<DeltaOp[]>(fit.send([{ insert: 'a' }], null));
+expectType<number>(fit.toField(fit.toDoc(1)));
+fit.hold('text', [{ retain: 1 }]);
+expectError(fit.hold(1));
+const steps = undoSteps(
+  { canUndo: true, canRedo: false, undo: () => {}, redo: () => {} },
+  () => binding,
+  (e) => e.message,
+);
+expectType<UndoSteps>(steps);
+expectType<boolean>(steps.undo(true));
+expectError(
+  undoSteps(
+    {},
+    () => null,
+    () => {},
+  ),
+);
+const reporter = failureReporter(storage, 'id', 'body');
+reporter('editor.undo', (e) => expectType<Error>(e))(new Error('x'));
