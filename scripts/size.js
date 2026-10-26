@@ -229,7 +229,8 @@ const ENTRIES = [
     label: 'inspect — browser (@alexify/syncom/inspect)',
     entry: 'src/inspect/inspect.js',
     platform: 'browser',
-    budget: 5,
+    // 5.0 with own() from shape.js and the checksum's reused buffer (2026-10-27). 5.5, raised by name.
+    budget: 5.5,
   },
   // Everything in one import: the core with the text and tree plugins
   // registered — what the main entry was before the kinds became plugins.

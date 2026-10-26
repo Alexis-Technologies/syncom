@@ -635,7 +635,10 @@ const commitLocal = async (core, type, id, payload, options) => {
     const seq = await land(core, op, entry, issued);
     await announce(core, op, entry, delta, ctx, source, via, { seq, before, previous, txn: seq }, changes);
     const message = op.msg ?? null;
-    transacted(core, { local: true, via, source, message, ops: [op], changes: tagged(op, changes) });
+    // Built only while something listens (`transacted` says nothing otherwise).
+    if (core.listening('transaction')) {
+      transacted(core, { local: true, via, source, message, ops: [op], changes: tagged(op, changes) });
+    }
   });
   return outcome(op, done);
 };
@@ -801,6 +804,8 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
     }
     for (const [id, last] of lastOf) core.settled(id, positions[last]);
     core.saveCatalog();
+    // The transaction event's changes, built only while something listens.
+    const listening = core.listening('transaction');
     const changes = [];
     for (let i = 0; i < count; i++) {
       const { op, entry, ctx, before, previous } = prepared[i];
@@ -808,7 +813,7 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
       const committed = { seq: positions[i], before, previous, txn: positions[0] };
       const delta = last ? deltas.get(op.id) : null;
       await announce(core, op, entry, delta, ctx, source, null, committed, prepared[i].changes, last);
-      tagged(op, prepared[i].changes, changes);
+      if (listening) tagged(op, prepared[i].changes, changes);
     }
     transacted(core, { local: true, via: null, source, message: msg ?? null, ops, changes });
   });

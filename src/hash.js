@@ -41,12 +41,32 @@ const bytesOf = (text) => {
   return Uint8Array.from(out);
 };
 
+// One buffer the strings are encoded into, grown as a longer one comes: a
+// fresh array per checksum (every log line, every group) was a fifth of what
+// the checksum cost. Safe to share: the hash is synchronous.
+let scratch = new Uint8Array(4096);
+const encodeIn = (text) => {
+  // UTF-8 takes at most three bytes per UTF-16 unit.
+  if (scratch.length < text.length * 3) scratch = new Uint8Array(Math.max(text.length * 3, scratch.length * 2));
+  return encoder.encodeInto(text, scratch).written;
+};
+
 const readLE = (bytes, i) => (bytes[i] | (bytes[i + 1] << 8) | (bytes[i + 2] << 16) | (bytes[i + 3] << 24)) >>> 0;
 
 /** xxHash32 of `input` — a string (its UTF-8 bytes) or bytes — under `seed`, as an unsigned 32-bit number. */
 const xxh32 = (input, seed = 0) => {
-  const bytes = typeof input === 'string' ? bytesOf(input) : input;
-  const length = bytes.length;
+  let bytes;
+  let length;
+  if (typeof input !== 'string') {
+    bytes = input;
+    length = input.length;
+  } else if (encoder !== null && typeof encoder.encodeInto === 'function') {
+    length = encodeIn(input);
+    bytes = scratch;
+  } else {
+    bytes = bytesOf(input);
+    length = bytes.length;
+  }
   let i = 0;
   let hash;
   if (length >= 16) {
