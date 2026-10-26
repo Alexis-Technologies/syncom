@@ -249,6 +249,9 @@ class UndoManager extends Emitter {
     if (paths !== null && !reaches(event.changes ?? [], paths)) return;
     const top = this.#undo[this.#undo.length - 1];
     let step = top;
+    // The oldest seq a step holds moves only when a step leaves: a commit
+    // adds the newest seq there is — no walk of the stacks per keystroke.
+    let left = this.#redo.length > 0;
     // The open group takes everything; a transaction's commits are one
     // step; else commits within the interval of the step's first join it.
     if (this.#grouping > 0 && this.#grouped !== null) step = this.#grouped;
@@ -259,12 +262,15 @@ class UndoManager extends Emitter {
     ) {
       step = this.#newStep(op.ts, event);
       this.#undo.push(step);
-      while (this.#undo.length > this.#options.limit) this.#undo.shift();
+      while (this.#undo.length > this.#options.limit) {
+        this.#undo.shift();
+        left = true;
+      }
       if (this.#grouping > 0) this.#grouped = step;
     }
     this.#record(step, event);
     if (this.#redo.length > 0) this.#redo = [];
-    this.#refreshOldest();
+    if (left || this.#oldestSeq === Infinity) this.#refreshOldest();
     if (this.listenerCount('push') > 0) {
       this.emit('push', { direction: 'undo', records: step.records.size, step: stepView(step) });
     }
