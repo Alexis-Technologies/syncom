@@ -862,6 +862,53 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     const solo = await createStorage(t2, 'solo');
     await assert.rejects(() => solo.sync.start(), /connect/);
   });
+
+  await t.test(
+    'a merge op whose meta is stamped beyond maxSkew is refused as SKEW; the clock stays below the horizon',
+    async (t2) => {
+      const a = await createStorage(t2, 'A');
+      const errors = [];
+      a.on('error', (error) => errors.push(error));
+      const id = await a.insert({ title: 'mine', hits: 0 });
+      const logged = a.log.length;
+      // Ten years ahead, in every place a meta holds a stamp: a register, a
+      // counter, a set's slot, the reset watermark. The op's own stamp is now.
+      const far = Date.now() + 10 * 365 * 86_400_000;
+      const merge = (origin, meta) => ({
+        origin,
+        seq: 1,
+        ts: Date.now(),
+        type: 'merge',
+        id,
+        data: { title: origin },
+        meta,
+      });
+      const page = [
+        merge('m1', { clock: { title: [far, 'm1'] } }),
+        merge('m2', { counters: { hits: { m2: [1, 5, far] } } }),
+        merge('m3', { sets: { tags: { '"x"': { m3: [far, 0] } } } }),
+        merge('m4', { base: [far, 'm4'] }),
+      ];
+      const result = await a.applyRemote(page);
+      assert.deepStrictEqual([result.applied, result.malformed], [0, 4]);
+      assert.deepStrictEqual(
+        errors.map((error) => error.code),
+        ['SKEW', 'SKEW', 'SKEW', 'SKEW'],
+      );
+      assert.strictEqual(a.log.length, logged, 'not logged, so not relayed');
+      assert.deepStrictEqual(Object.keys(a.vector), [a.nodeId], 'no stream moved');
+      // The next writes — to the record and to another — are stamped near now:
+      // nothing of the refused meta reached the clock.
+      const ops = [];
+      a.on('change', (op) => ops.push(op));
+      await a.update(id, { title: 'again' });
+      await a.insert({ other: true });
+      const horizon = Date.now() + 86_400_000;
+      assert.strictEqual(ops.length, 2);
+      for (const op of ops) assert.ok(op.ts <= horizon, `${op.type} stamped ${op.ts - Date.now()} ms ahead`);
+      assert.deepStrictEqual(await a.get(id), { title: 'again', hits: 0 });
+    },
+  );
 };
 
 module.exports = { runSyncEngineTests };

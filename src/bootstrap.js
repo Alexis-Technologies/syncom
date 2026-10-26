@@ -14,7 +14,7 @@ const { opKey } = require('./vector.js');
 const { notify } = require('./hooks.js');
 const { traced, now } = require('./telemetry.js');
 const { GLOBAL_SCOPE, inScope } = require('./scope.js');
-const { isPlainObject, asJson, isRecordId } = require('./shape.js');
+const { isPlainObject, asJson, isRecordId, nestsWithin, MAX_WIRE_DEPTH } = require('./shape.js');
 
 const DEFAULT_LIMIT = 500;
 
@@ -80,7 +80,14 @@ const snapshotPage = (core, options = {}) => {
 const mergeOne = async (batch, record) => {
   const { core, via, from } = batch;
   const { otel } = core;
-  if (!isPlainObject(record) || !isRecordId(record.id)) {
+  // Nested past what an op may carry, the merge op made of it would be
+  // malformed at every peer: a gap in this node's own stream for good.
+  const shaped =
+    isPlainObject(record) &&
+    isRecordId(record.id) &&
+    nestsWithin(record.data, MAX_WIRE_DEPTH) &&
+    nestsWithin(record.meta, MAX_WIRE_DEPTH);
+  if (!shaped) {
     core.logger.warn({ event: 'sync.record.malformed', id: isPlainObject(record) ? record.id : typeof record });
     return;
   }
@@ -109,8 +116,8 @@ const mergeOne = async (batch, record) => {
     throw new TypeError('beforeWrite may only replace data for write and set');
   }
   const scope = core.scopeOf(id, data ?? current?.data ?? {});
-  core.observe(latestClock(current?.meta, true));
-  core.observe(latestClock(meta));
+  core.observe(latestClock(current?.meta, true), id);
+  core.observe(latestClock(meta), id);
   const op = { origin: core.nodeId, seq: 0, ts: core.clock.now(), type: 'merge', id };
   if (scope !== GLOBAL_SCOPE) op.scope = scope;
   if (from) op.from = from;
@@ -191,25 +198,40 @@ const mergeBatch = async (core, records, via, from) => {
   }
 };
 
+// The highest seq this node takes for a stream of its own from a host
+// (REWOUND): room left for 2^32 more ops before a seq is no safe integer —
+// past that every peer would refuse its ops as malformed.
+const MAX_ADOPTED = Number.MAX_SAFE_INTEGER - 2 ** 32;
+
+// Whether `key` is a stream of this node's own: `origin`, `origin@scope`.
+const ownKey = (core, key) => key === core.nodeId || key.startsWith(`${core.nodeId}@`);
+
 /**
  * Records that everything up to `vector` is reflected in this node's state
  * (a snapshot of it was just joined). It travels as an `advance` op in this
  * node's own log, so a peer replaying the merges that carried the state
  * also learns which ops they cover — and does not report the next live op
- * of those origins as a gap.
+ * of those origins as a gap. This node's own streams are not a peer's to
+ * move: their keys are left out — but with `own`, the REWOUND path, which
+ * takes them alone, up to MAX_ADOPTED (src/sync/manager.js `#rewind`).
  */
-const adopt = async (core, vector, { via = null, from = null } = {}) => {
+const adopt = async (core, vector, { via = null, from = null, own = false } = {}) => {
   const known = core.log.vector;
   const news = {};
   // A peer's vector: own keys alone, read as values.
   for (const key of Object.keys(vector)) {
-    if (key === '__proto__') continue;
-    if (Number.isInteger(vector[key]) && (known[key] ?? 0) < vector[key]) news[key] = vector[key];
+    const seq = vector[key];
+    if (key === '__proto__' || ownKey(core, key) !== own) continue;
+    if (!Number.isSafeInteger(seq) || seq <= 0 || (own && seq > MAX_ADOPTED)) continue;
+    if ((known[key] ?? 0) < seq) news[key] = seq;
   }
   if (Object.keys(news).length === 0) return null;
   const op = { origin: core.nodeId, seq: 0, ts: core.clock.now(), type: 'advance', vector: news };
   if (from) op.from = from;
-  op.seq = (known[opKey(op)] ?? 0) + 1;
+  // Numbered after what it adopts of its own stream (REWOUND on `@~`): the
+  // seqs below are the host's already.
+  const key = opKey(op);
+  op.seq = Math.max(known[key] ?? 0, news[key] ?? 0) + 1;
   if (core.sign !== null) await core.sign(op);
   const [{ seq }] = await core.log.append([op]);
   await core.log.advance(news);

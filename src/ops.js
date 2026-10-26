@@ -215,8 +215,14 @@ const isPlainObject = (value) => typeof value === 'object' && value !== null && 
 const isKey = (key) => key !== '__proto__';
 const own = (object, key) => (Object.hasOwn(object, key) ? object[key] : undefined);
 
+// A stamp is `[ts, origin]`, ts a positive safe integer like an op's: what a
+// peer's meta holds otherwise (a float, 1e300, Infinity) is no stamp.
 const isStamp = (value) =>
-  Array.isArray(value) && value.length === 2 && typeof value[0] === 'number' && typeof value[1] === 'string';
+  Array.isArray(value) &&
+  value.length === 2 &&
+  Number.isSafeInteger(value[0]) &&
+  value[0] > 0 &&
+  typeof value[1] === 'string';
 const stampOf = (value) => (isStamp(value) ? [value[0], value[1]] : null);
 const isCount = (value) =>
   Array.isArray(value) &&

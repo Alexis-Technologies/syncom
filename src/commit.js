@@ -19,6 +19,7 @@ const { fieldName } = require('./args.js');
 const { traced, now } = require('./telemetry.js');
 const { GLOBAL_SCOPE } = require('./scope.js');
 const { isPlainObject, asJson, VALIDATED, MAX_MESSAGE, isRecordId, invalidId } = require('./shape.js');
+const { nestsWithin, MAX_JSON_DEPTH, MAX_WIRE_DEPTH } = require('./shape.js');
 const { ancestorsOf } = require('./paths.js');
 const { compose, composeData } = require('./compose.js');
 const { SyncomError, typed } = require('./errors.js');
@@ -217,7 +218,7 @@ const kindClash = (type, payload, current, plugins) => {
 
 const prepareOp = (core, type, id, payload, current, who, from) => {
   refuse(core, id, kindClash(type, payload, current, core.plugins));
-  core.observe(latestClock(current?.meta, true));
+  core.observe(latestClock(current?.meta, true), id);
   const op = { origin: core.nodeId, seq: 0, ts: core.clock.now(), type, id };
   if (from) op.from = from;
   // The writer's schema version rides on the op: what a reader on another
@@ -453,10 +454,23 @@ const valuesOf = (plugins, entry) => {
   return out;
 };
 
+// What a write takes nests at most MAX_JSON_DEPTH levels — the data, a
+// value, a content, the markers, the tags a remove names, each as given —
+// checked before the copy, which would recurse into it.
+const PAYLOAD = ['data', 'value', 'content', 'vals', 'removals'];
+const shallow = (payload) => {
+  for (let i = 0; i < PAYLOAD.length; i++) {
+    const name = PAYLOAD[i];
+    if (nestsWithin(payload[name], MAX_JSON_DEPTH)) continue;
+    throw new TypeError(`A write's ${name} nests deeper than ${MAX_JSON_DEPTH} levels`);
+  }
+};
+
 // The payload taken as JSON — a copy, like the disk and the peers hold it —
 // before anything keeps a reference to it: the data, a value, a content, the
 // tags a remove names.
 const copyPayload = (payload) => {
+  shallow(payload);
   if (payload.data !== undefined) payload = { ...payload, data: asJson(payload.data) };
   if (payload.value !== undefined && typeof payload.value === 'object') {
     payload = { ...payload, value: asJson(payload.value) };
@@ -557,6 +571,11 @@ const prepare = async (core, type, id, payload, options) => {
   if (type === 'unset' && op.value.length === 0) return { op: null };
   const applied = await validateLocal(core, op, current, visible, ctx);
   if (applied === null) return { op: null };
+  // The data a beforeWrite hook or a validator handed back, as the op
+  // carries it: never deeper than a peer takes.
+  if (op.data !== undefined && !nestsWithin(op.data, MAX_WIRE_DEPTH)) {
+    throw new TypeError(`Record ${id}: its data nests deeper than ${MAX_WIRE_DEPTH} levels`);
+  }
   // The validator may have filled the field the scope reads (a default):
   // the stream is the one of the record as it is written.
   if (type === 'write' || type === 'set') assignScope(core, op, applied.entry.data);

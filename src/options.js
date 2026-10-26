@@ -124,6 +124,14 @@ const normalizeStorageOptions = (options) => {
   if (signatures !== undefined && signatures !== 'verify' && signatures !== 'require' && signatures !== false) {
     throw new TypeError("open({ sync }): signatures must be 'verify', 'require' or false");
   }
+  // A host that says at hello it holds more of this node's own streams than
+  // its log (REWOUND): 'report' moves them past the host's only on proof —
+  // this node's own op at that seq, signed by its key — 'adopt' on the
+  // host's word. See src/sync/manager.js.
+  const rewind = options.sync?.rewind;
+  if (rewind !== undefined && rewind !== 'report' && rewind !== 'adopt') {
+    throw new TypeError("open({ sync }): rewind must be 'report' or 'adopt'");
+  }
   // The plugins this storage runs with — the kinds beyond registers,
   // counters and sets, and the API modules — as one registry per instance
   // (src/plugin.js); nothing is registered process-wide.
@@ -148,6 +156,7 @@ const normalizeStorageOptions = (options) => {
     pendingMax: pendingMax ?? PENDING_MAX,
     defer: defer ?? DEFAULT_DEFER,
     signatures: signatures ?? 'verify',
+    rewind: rewind ?? 'report',
     plugins,
   };
 };

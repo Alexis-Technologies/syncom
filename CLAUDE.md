@@ -233,10 +233,18 @@ docs/                     VitePress site
 - **A peer's op is `wellFormed` or it is nothing.** `admit` (`src/apply.js`) checks
   `origin`/`scope` (no `@`, no control characters), `seq`/`ts` (positive safe
   integers), `type`, `v` and the id before reading anything else (`actor`
-  and `from` are claims, carried as they are); a stamp beyond `sync.maxSkew`
-  ahead of `Date.now()` is refused the
-  same way (`SKEW`), never observed into the clock. `malformed` ops are
-  counted, not logged, not relayed. Payload shape is `applyOp`'s business.
+  and `from` are claims, carried as they are), and how deep every field
+  nests (`MAX_WIRE_DEPTH`, `nestsWithin` — iterative: the readers after it
+  recurse; `verifyPage` runs after `wellFormed` and never throws, a throwing
+  check is that op's FORGED); a stamp beyond `sync.maxSkew` ahead of
+  `Date.now()` — the op's `ts` or any stamp a `merge`'s meta holds
+  (`latestClock`) — is refused the same way (`SKEW`), never observed into
+  the clock, and a stamp a record already holds past it is not observed by a
+  write either (`core.observe`, `clock.skew.ignored`). `malformed` ops are
+  counted, not logged, not relayed. A local write deeper than
+  `MAX_JSON_DEPTH` is a TypeError (`copyPayload` in src/commit.js); the 16
+  levels between the bounds are what an op and a meta wrap around a value —
+  keep them apart. Payload shape is `applyOp`'s business.
 - **Scopes are enforced by the host.** `unit().push` drops out-of-scope ops
   before `applyRemote` (`refused` event, `syncom.ops.rejected{scope}`);
   `snapshot`/`changes` serve `grant(asked, granted)`. The scope an op declares
@@ -528,7 +536,15 @@ docs/                     VitePress site
   (`OpLog.retain(keep)`, `node.acked` — the own keys of a peer's vector,
   replaced at hello, raised by push answers); a host behind what the log
   retains is `UNDELIVERABLE`, and a host ahead of the node's own stream at
-  hello is `REWOUND` (adopt the host's own keys, then bootstrap from it).
+  hello is `REWOUND`. A node's own streams move by its own writes alone: a
+  feed's `advance` and `adoptVector` leave their keys out (and any seq that is
+  no positive safe integer); `#rewind` in src/sync/manager.js moves them past
+  the host's (`storage[REWIND]`, up to `MAX_SAFE_INTEGER − 2^32`, then
+  bootstrap) only on PROOF — the hello answer's `proof`, the host's newest op
+  of the stream, this node's own at the claimed seq and verified under its
+  key (`storage[SIGNER]`) — or under `sync.rewind: 'adopt'`; unproven, the
+  stream stays, `REWOUND` says `adopted: {}` and `peer.rewound` keeps it from
+  that host until the next hello. Never adopt a host's word on own keys.
 - **A version is folded, a fork at one is paged.** `atVersion` in
   src/versions/api.js folds every id the log retains entries for (`log.ids()`)
   and every catalog id through `versionEntry`, and computes the vector at the

@@ -945,8 +945,10 @@ export interface SyncOptions {
   log?: { rollAfter?: number };
   /**
    * How far ahead of this node's clock a peer's stamp may be, in
-   * milliseconds (default 24 hours; `Infinity` disables). Beyond it the op is
-   * refused as malformed rather than observed into the clock.
+   * milliseconds (default 24 hours; `Infinity` disables) — an op's own, or
+   * any a merge op's meta holds. Beyond it the op is refused as malformed
+   * rather than observed into the clock, and a stamp a record already holds
+   * beyond it is not observed by a local write either.
    */
   maxSkew?: number;
   /**
@@ -968,6 +970,16 @@ export interface SyncOptions {
    * is signed or verified. The node id is the signing key in every mode.
    */
   signatures?: 'verify' | 'require' | false;
+  /**
+   * A host that says at hello it holds more of this node's own streams than
+   * its log does (`REWOUND`: a directory restored from an older copy, a
+   * second instance — or a host that lies). `'report'` (the default): a
+   * stream moves past the host's only on proof — the host hands the op it
+   * holds at that seq, and it is this node's own, signed by its key (the
+   * signing plugin) — else it stays, and goes to that host no more until the
+   * next hello. `'adopt'`: the host's word is taken without proof.
+   */
+  rewind?: 'report' | 'adopt';
   /**
    * Ops queued for one peer beyond this (default 10 000) are dropped and the
    * peer is marked `behind`; the vector-based push that recovers it carries
@@ -1568,7 +1580,9 @@ export interface ApplyRemoteResult {
   /**
    * Refused before anything read them, neither logged nor relayed: not the
    * shape of an op (origin, seq, ts, type, a valid record id or an advance
-   * vector), or a stamp beyond `sync.maxSkew` ahead of this node's clock.
+   * vector, no field nested deeper than 80 levels), or a stamp beyond
+   * `sync.maxSkew` ahead of this node's clock — its own, or one its merge
+   * meta holds.
    */
   malformed: number;
   /** Refused under `sync.signatures: 'require'` for carrying no signature, or an origin that is no key; neither logged nor relayed. */

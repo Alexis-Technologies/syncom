@@ -283,10 +283,26 @@ reached holds its ops back until it is removed or disabled.
 
 A directory restored from an older copy is noticed at the next hello: the
 host holds more of the node's own stream than its log does. The node reports
-`code: 'REWOUND'`, moves its streams past what the host holds — so nothing it
-mints collides with an op the host already has — and bootstraps from the
-host to get back what the lost ops wrote. Writes made between the restore
-and that hello reused seqs the host had, and are lost to it.
+`code: 'REWOUND'` — with `local` and `remote`, what each side holds of each
+stream, and `adopted`, what moved. A host could say the same and lie: a stream
+moved on its word alone would be a gap at every other peer (or run past a safe
+integer, and every op of it malformed everywhere). So the node moves a stream
+only on **proof**: the host's hello answer carries `proof`, the newest op of
+that stream it holds — this node's own op at the seq it claims, and with the
+[signing](#signatures) plugin signed by this node's key, which no host can
+forge. Proven, the node moves its streams past what the host holds — so
+nothing it mints collides with an op the host already has — and bootstraps
+from the host to get back what the lost ops wrote. Writes made between the
+restore and that hello reused seqs the host had, and are lost to it.
+
+Without proof — no signing plugin, `signatures: false`, or a host whose log no
+longer retains that op — the stream stays where the node's log has it, and
+nothing of it goes to that host until the next hello (the host would take it
+for what it holds). `open({ sync: { rewind: 'adopt' } })` takes the host's
+word instead: the stream moves without proof (up to
+`Number.MAX_SAFE_INTEGER − 2^32`, never past it). Decide before the node
+writes on that stream again: a write made meanwhile takes a seq the host
+already holds another op under.
 
 ## Without the plugin
 
@@ -405,7 +421,7 @@ which one a node plays on a given link is just who opened the connection.
 
 | Procedure | Direction | Purpose |
 | --- | --- | --- |
-| `hello` | dialer → host | Exchange node ids, vectors, log epochs, schemas, the kinds each side runs with (`kinds`) and the protocol version; the host may `authorize` (and, requiring signatures, refuses a node id that is no key) |
+| `hello` | dialer → host | Exchange node ids, vectors, log epochs, schemas, the kinds each side runs with (`kinds`) and the protocol version; the host may `authorize` (and, requiring signatures, refuses a node id that is no key). A host that holds more of the dialer's own streams than the dialer's vector says adds `proof`: the newest op of each it holds, packed like a page — see [The log](#the-log) |
 | `push` | dialer → host | Ops the host lacks, by its vector |
 | `changes` (subscription) | host → dialer | Everything that lands in the host's log from the cursor on, live |
 | `snapshot` | dialer → host | One page of the host's state, for bootstrap |
@@ -416,7 +432,7 @@ sequenceDiagram
   participant D as dialer
   participant H as host
   D->>H: hello { node, vector, version, scopes, token, schema }
-  H-->>D: { node, vector, epoch, version, schema }
+  H-->>D: { node, vector, epoch, version, schema, kinds, proof? }
   D->>H: push { ops the host lacks }
   D->>H: subscribe changes { scopes } from lastEventId
   H-->>D: data × n (replay from the cursor)
@@ -634,9 +650,10 @@ once `close()` was called is refused at once.
 | `retention.ops` | `10000` | Ops kept in the log before the oldest segment is dropped |
 | `retention.days` | — | Age after which a segment is dropped |
 | `retention: 'all'` | — | Keep everything: no segment is ever dropped, so every version stays exact (`history()`, `get(id, { at })`, a fork at any version) |
-| `maxSkew` | `86400000` | How far ahead of this node's clock a peer's stamp may be, in ms; beyond it the op is `malformed`, and a snapshot record is left out of the join. `Infinity` disables |
+| `maxSkew` | `86400000` | How far ahead of this node's clock a peer's stamp may be, in ms — an op's own, every stamp a merge op's meta holds; beyond it the op is `malformed`, and a snapshot record is left out of the join. A stamp a record already holds past it is not observed by a local write either (`clock.skew.ignored`). `Infinity` disables |
 | `pendingMax` | `4096` | How much pending work a list or text field takes from a peer's ops that ran ahead of what they depend on — runs waiting for their anchor, cuts and extensions for their run, registers and switched-off marks for elements not here — before an op is refused (`OP_REFUSED`, reason `bound`, with `detail`, `count` and `max`). A refusal is final on this node, so a mesh with several hosts raises it rather than lowers it. `Infinity` disables. A snapshot block past it is not taken as state |
 | `signatures` | `'verify'` | `'verify'`, `'require'` or `false` — see [Signatures](#signatures) |
+| `rewind` | `'report'` | A host that holds more of this node's own streams than its log (`REWOUND`): `'report'` moves them past the host's only on proof — this node's own op at the seq, signed by its key — `'adopt'` on the host's word. See [The log](#the-log) |
 | `maxOutbox` | `10000` | Ops queued for one peer beyond this are dropped and the peer is `behind`; the recovery pushes what it lacks from the vector |
 | `log.rollAfter` | `64` | Groups of appends per sealed segment |
 | `pageSize` | `500` | Ops per push. What a host serves per page — snapshot records, `changes` ops — is its own `unit({ pageSize })` |
@@ -751,11 +768,23 @@ the engine's own tests run on.
 - **A peer's op is checked before it is read.** `origin`, `seq`, `ts`, `type`,
   `scope`, `v`, the record id (or an `advance`'s vector) and the signature's
   three fields must have their shape (`actor` and `from` are claims, carried
-  as they are), and a stamp more than `sync.maxSkew` (24 hours) ahead of
-  this node's clock is a broken clock, not a concurrent write. Either is
-  `malformed`: counted, reported (`error` with `code: 'SKEW'` for the latter),
-  neither logged nor relayed, and never observed into this node's clock — a
-  gap in its stream, as an op of a type this version does not know is.
+  as they are), no field may nest deeper than 80 levels (`MAX_WIRE_DEPTH`),
+  and a stamp more than `sync.maxSkew` (24 hours) ahead of this node's clock
+  — the op's own, or any a merge op's meta holds — is a broken clock, not a
+  concurrent write. Any of these is `malformed`: counted, reported (`error`
+  with `code: 'SKEW'` for a stamp), neither logged nor relayed, and never
+  observed into this node's clock — a gap in its stream, as an op of a type
+  this version does not know is. A signature is checked only after, and a
+  check that throws is that op's `BAD_SIGNATURE`, never the page's failure.
+- **What a write takes nests at most 64 levels** (`MAX_JSON_DEPTH`): the data
+  of `insert()`/`update()`, the array of elements of `add()`/`push()`, a value
+  of `setAt()` or `mark()` (an embed's marker rides in `[[offset, marker]]`,
+  two levels down) — each object or array on the deepest path a level, the
+  record object or the array counted.
+  Deeper is a `TypeError` where the write is made, so a node never logs what
+  its peers would refuse; the 16 levels between the two bounds are what an op
+  and a record's meta wrap around a value. A snapshot record whose data or
+  meta nests past 80 is left out of the join (`sync.record.malformed`).
 - **A payload is checked where it lands.** An op whose payload the engine
   does not admit — a `write` or a `set` without a plain object, an `inc` of no
   finite number, an `add` or a `remove` without an array, a `content` that

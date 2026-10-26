@@ -39,13 +39,15 @@ Every write is one op, a plain JSON object:
 | `msg` | string | A transaction's message, at most 1 024 characters, on every op of the transaction, signed |
 
 `origin`, `seq`, `ts`, `type`, `scope`, `v`, `id` (or an `advance`'s
-`vector`), `sig`, `digest`, `nonce` and `msg` are checked by shape before a
-peer's op is read at all (`wellFormed` in `src/shape.js`); one that fails
-is `malformed` — counted, not logged, not relayed, a gap in its stream. A
-stamp more than `sync.maxSkew` (24 hours) ahead of the receiver's clock is
-refused the same way (`SKEW`). The payload fields are checked where they
-land: an op the engine does not admit changes nothing, is reported as
-`OP_REFUSED` with `reason: 'malformed'`, and is still logged and relayed.
+`vector`), `sig`, `digest`, `nonce` and `msg` are checked by shape, and every
+field by how deep it nests (80 levels, `MAX_WIRE_DEPTH`), before a peer's op
+is read at all — its signature included (`wellFormed` in `src/shape.js`); one
+that fails is `malformed` — counted, not logged, not relayed, a gap in its
+stream. A stamp more than `sync.maxSkew` (24 hours) ahead of the receiver's
+clock — the op's `ts`, or any stamp a `merge`'s `meta` holds — is refused the
+same way (`SKEW`). The payload fields are checked where they land: an op the
+engine does not admit changes nothing, is reported as `OP_REFUSED` with
+`reason: 'malformed'`, and is still logged and relayed.
 
 ### Types and payloads
 
@@ -293,13 +295,25 @@ naming the check.
 
 ```
 → { node, version: 1, vector, scopes, token?, schema, kinds }
-← { node, vector, epoch, version: 1, schema, kinds, duplicate? }
+← { node, vector, epoch, version: 1, schema, kinds, duplicate?, proof? }
 ```
 
 `vector` is the caller's whole version vector; `scopes` the scopes it
 asks to be held to (`['*']` for all); `token` its registered credential,
 for the host's `authorize`; `schema` `{ version, hash }` or `null`; `kinds`
-the names of the kind plugins it runs. The answer, from the run above:
+the names of the kind plugins it runs.
+
+`proof` is there only when the caller's node id is a signing key and the
+host's `vector` holds more of one of the caller's own streams (`node`,
+`node@scope`, `node@~`) than the caller's `vector` says — a directory
+restored from an older copy. It is the newest op of each such stream the
+host's log still retains, packed in the [eighteen slots](#packed-the-eighteen-slots):
+the caller's own op at the seq the host claims, signed by the caller's key.
+The caller moves a stream past the host's (`REWOUND`) only when that op is
+well formed, its origin, stream and seq are the claim's and its signature
+verifies under the caller's own key — or under `sync.rewind: 'adopt'`
+without it. A host can claim, never prove, what it did not receive. The
+answer, from the run above:
 
 ```json
 {"node":"W_Ym_o9…","vector":{"W_Ym_o9…":16},"epoch":"mvo58q1gu75ziu","version":1,"schema":{"version":1,"hash":null},"kinds":["text","tree"]}
@@ -395,7 +409,10 @@ a snapshot buys nothing an op could not:
 | Field path | 16 segments, 512 characters, no empty segment, no `__proto__` | refused |
 | Fields per record | 4 096 paths; the first in sorted order stay | `OP_REFUSED` `detail: 'paths'` |
 | `msg` | 1 024 characters | `malformed` |
-| Stamp ahead of the receiver | `sync.maxSkew`, 24 hours | `SKEW` |
+| Stamp ahead of the receiver | `sync.maxSkew`, 24 hours — an op's `ts`, every stamp a `merge`'s `meta` holds | `SKEW` |
+| How deep a field of an op, or a snapshot record's `data` or `meta`, nests | 80 levels (`MAX_WIRE_DEPTH`; every object or array on the deepest path a level) | `malformed`; a snapshot record left out |
+| How deep what a local write takes nests | 64 levels (`MAX_JSON_DEPTH`): the 16 between leave room for what an op and a meta wrap around a value | `TypeError` |
+| A seq taken for a node's own stream from a host (`REWOUND`) | 2⁵³ − 1 − 2³² | not taken |
 | A counter's sum per origin | ±2⁵³ − 1 | `OP_REFUSED` `detail: 'counter'` |
 | A run's length | 2²⁰ elements | `OP_REFUSED` `detail: 'run'` |
 | Pending ops per block | `sync.pendingMax`, 4 096 | `OP_REFUSED` `detail: 'pending'` |

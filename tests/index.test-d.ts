@@ -362,6 +362,9 @@ expectAssignable<SyncomErrorCode>('UNSIGNED');
 expectAssignable<StorageOptions>({ sync: { signatures: 'require' } });
 expectAssignable<StorageOptions>({ sync: { signatures: false } });
 expectError(syncom.open({ sync: { signatures: 'yes' } }));
+expectAssignable<StorageOptions>({ sync: { rewind: 'report' } });
+expectAssignable<StorageOptions>({ sync: { rewind: 'adopt' } });
+expectError(syncom.open({ sync: { rewind: true } }));
 expectType<'verify' | 'require' | false>(storage.signatures);
 expectAssignable<syncom.SyncOp>({
   origin: 'a',

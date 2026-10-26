@@ -16,7 +16,7 @@ const { packOps, unpackOps } = require('../ops.js');
 const { opKey } = require('../vector.js');
 const { notify } = require('../hooks.js');
 const { GLOBAL_SCOPE, opInScope } = require('../scope.js');
-const { isKeyId } = require('../shape.js');
+const { isKeyId, isPlainObject } = require('../shape.js');
 const { isUpdate: isPresenceUpdate } = require('../presence/presence.js');
 const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf, kindsOf } = require('../protocol.js');
 
@@ -172,6 +172,34 @@ const refuseOps = (host, node, reason, count) => {
   announceRefused(host, node, reason, count);
 };
 
+// What a dialer that lost part of its log needs to move its streams past
+// what this host holds of them (REWOUND, src/sync/manager.js `#rewind`): for
+// each of its own streams this host is ahead on, the newest op of it held
+// here — signed by the dialer's own key, so the claim carries its proof. For
+// a dialer whose id is a key (one that signs), only when its hello says it
+// holds less, and only what the log still retains: packed like a page, or
+// null. One pass over the log, on a hello that is behind on its own streams.
+const proofOf = (storage, node, claimed, held) => {
+  if (!isKeyId(node) || !isPlainObject(claimed)) return null;
+  const wanted = new Map();
+  for (const key of Object.keys(held)) {
+    if (key !== node && !key.startsWith(`${node}@`)) continue;
+    const theirs = Object.hasOwn(claimed, key) && Number.isSafeInteger(claimed[key]) ? claimed[key] : 0;
+    if (held[key] > theirs) wanted.set(key, held[key]);
+  }
+  if (wanted.size === 0) return null;
+  const ops = [];
+  for (const { op } of storage.log.scan()) {
+    if (op.origin !== node) continue;
+    const key = opKey(op);
+    if (wanted.get(key) !== op.seq) continue;
+    ops.push(op);
+    wanted.delete(key);
+    if (wanted.size === 0) break;
+  }
+  return ops.length === 0 ? null : packOps(ops);
+};
+
 const hello = (host) => async (context, args) => {
   const { storage } = host;
   if (!args || typeof args.node !== 'string') throw refuse(host, 'hello needs a node id', 400, 'BAD_HELLO');
@@ -210,7 +238,7 @@ const hello = (host) => async (context, args) => {
   notify(host.manager, host.logger, 'hello', { node: args.node, scopes, schema, kinds });
   host.drift(schema, { url: null, node: args.node });
   handPresence(host, context, scopes);
-  return {
+  const answer = {
     node: storage.nodeId,
     vector: storage.vector,
     epoch: storage.log.epoch,
@@ -221,6 +249,9 @@ const hello = (host) => async (context, args) => {
     // would lack those fields.
     kinds: storage.kinds,
   };
+  const proof = proofOf(storage, args.node, args.vector, answer.vector);
+  if (proof !== null) answer.proof = proof;
+  return answer;
 };
 
 const push = (host) => async (context, args) => {

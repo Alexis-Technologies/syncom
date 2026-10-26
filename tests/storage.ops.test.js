@@ -1365,6 +1365,37 @@ test("Storage: what a peer's op must look like", async (t) => {
     await assert.rejects(() => openTemp(t2, { sync: { maxSkew: 0 } }), TypeError);
   });
 
+  await t.test('a stamp a record holds beyond maxSkew is never observed into the clock', async (t2) => {
+    // A record that took a far stamp while the check was off — maxSkew
+    // Infinity, or a node from before merge metas were checked — reopened
+    // under the default: a write to it does not carry the clock along.
+    const { dir, storage: loose } = await openTemp(t2, { sync: { maxSkew: Infinity } });
+    const far = Date.now() + 10 * 365 * 86_400_000;
+    const meta = { clock: { title: [far, 'm'] } };
+    const poisoned = remoteOp('m', 1, 'merge', 'shared', { ts: Date.now(), data: { title: 'theirs' }, meta });
+    assert.strictEqual((await loose.applyRemote([poisoned])).applied, 1);
+    await loose.close();
+    const warnings = [];
+    const logger = { warn: (entry) => warnings.push(entry), info() {}, debug() {}, error() {} };
+    const storage = await syncom.open({ defer: 0, path: dir, logger });
+    t2.after(() => storage.close().catch(() => {}));
+    const ops = [];
+    storage.on('change', (op) => ops.push(op));
+    // The held stamp wins the field until the wall clock reaches it: the
+    // write is stale there, and says so once per record.
+    await storage.update('shared', { title: 'mine' });
+    await storage.update('shared', { title: 'mine again' });
+    await storage.insert({ other: true });
+    await storage.add('shared', 'tags', ['x']);
+    const horizon = Date.now() + 86_400_000;
+    assert.ok(ops.length >= 2);
+    for (const op of ops) assert.ok(op.ts <= horizon, `${op.type} stamped ${op.ts - Date.now()} ms ahead`);
+    const ignored = warnings.filter((entry) => entry.event === 'clock.skew.ignored');
+    assert.strictEqual(ignored.length, 1);
+    assert.deepStrictEqual([ignored[0].id, ignored[0].ts], ['shared', far]);
+    assert.deepStrictEqual(await storage.get('shared'), { title: 'theirs', tags: ['x'] });
+  });
+
   await t.test('error events carry a code', async (t2) => {
     const valid = (data) => !('secret' in data) && !(Array.isArray(data.tags) && data.tags.length > 1);
     const schema = { entities: { Post: { schema: valid } } };

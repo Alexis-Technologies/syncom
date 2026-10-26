@@ -40,7 +40,7 @@ const { compose, composeData } = require('./compose.js');
 // its timer: records, and log positions (keystrokes into one record).
 const DEFER_RECORDS = 1024;
 const DEFER_POSITIONS = 8192;
-const { COMMIT, REFRESH, SOURCE, PLUGINS, CURSOR, SIGNER } = require('./symbols.js');
+const { COMMIT, REFRESH, SOURCE, PLUGINS, CURSOR, SIGNER, REWIND } = require('./symbols.js');
 const { missing } = require('./plugin.js');
 const { SyncomError, typed } = require('./errors.js');
 
@@ -119,6 +119,8 @@ class Storage extends Emitter {
   #clock = new Clock();
   #scopeOf;
   #maxSkew;
+  // The records whose held stamp ran past the skew allowed, told once each.
+  #skewed = new Set();
   #limits;
   #plugins;
   // What a transaction's `tx` carries (#transaction): `[name, method]`, the
@@ -442,9 +444,7 @@ class Storage extends Emitter {
       view: (id, entry) => this.#view(id, entry),
       scopeOf: (id, data) => this.#scope(id, data),
       actorOf: (given) => this.#actorOf(given),
-      observe: (stamp) => {
-        if (stamp) this.#clock.observe(stamp[0]);
-      },
+      observe: (stamp, id) => this.#observeHeld(stamp, id),
       definitionOf: (data) => this.#definitionOf(data),
       conflicts: (id, entry) => this.#conflicts(id, entry),
       invalid: (op, entry) => this.#invalid(op, entry),
@@ -1190,6 +1190,23 @@ class Storage extends Emitter {
     return scope;
   }
 
+  // What a write path observes of a record it holds before it stamps — the
+  // newest stamp there — unless it lies beyond the skew allowed: a peer's
+  // meta taken before merge metas were checked, or under `maxSkew: Infinity`.
+  // Observed, it would carry every later stamp of this node, on any record,
+  // past what its peers take (SKEW everywhere, for good: the log seeds the
+  // clock at the next open). Left out, a write to that record stamps below
+  // it and loses the fields it holds until the wall clock gets there. Told
+  // once per record.
+  #observeHeld(stamp, id) {
+    if (!stamp) return;
+    const at = Date.now();
+    if (stamp[0] <= at + this.#maxSkew) return void this.#clock.observe(stamp[0]);
+    if (this.#skewed.has(id)) return;
+    this.#skewed.add(id);
+    this.#logger.warn({ event: 'clock.skew.ignored', id, ts: stamp[0], ahead: stamp[0] - at });
+  }
+
   // The actor of one write: the call's own, else the storage's (asked when
   // it is a function), else none. A string on the op, never in the record.
   async #actorOf(given) {
@@ -1910,9 +1927,19 @@ class Storage extends Emitter {
    * Records that everything up to `vector` is reflected in this node's state
    * (a snapshot of it was just joined), as an `advance` op in this node's
    * own log — so a peer replaying the merges also learns which ops they cover.
+   * The keys of this node's own streams are left out, and any seq that is
+   * not a positive safe integer.
    */
   adoptVector(vector, options = {}) {
-    return this.#run(() => adopt(this.#core, vector, options));
+    return this.#run(() => adopt(this.#core, vector, { via: options.via, from: options.from }));
+  }
+
+  // The streams of this node's own a host holds more of (REWOUND), moved
+  // past it — for the sync manager alone, once the host proved it or the
+  // application said to take its word (`sync.rewind`). The advance op it
+  // logs, or null; its `vector` is what moved.
+  [REWIND](vector, options = {}) {
+    return this.#run(() => adopt(this.#core, vector, { via: options.via, from: options.from, own: true }));
   }
 
   /**

@@ -7,6 +7,9 @@ expectType<Plugin<SyncApi>>(syncPlugin);
 expectType<boolean>(isSyncLink({}));
 const storage = await open({ plugins: [syncPlugin] });
 expectType<SyncManager>(storage.sync);
+// What a REWOUND host may move of this node's own streams: on proof, or on its word.
+expectType<SyncManager>((await open({ plugins: [syncPlugin], sync: { rewind: 'adopt' } })).sync);
+expectError(open({ plugins: [syncPlugin], sync: { rewind: 'trust' } }));
 // The core alone has no sync property in its type.
 expectError((await open()).sync);
 

@@ -30,6 +30,8 @@ const { GLOBAL_SCOPE, inScope, opInScope } = require('../scope.js');
 const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf, kindsOf } = require('../protocol.js');
 const { createUnit } = require('./hosting.js');
 const { SyncomError } = require('../errors.js');
+const { wellFormed, VERDICT } = require('../shape.js');
+const { SIGNER, REWIND } = require('../symbols.js');
 
 const REMOTE = 'remote';
 // A page that fails this many times in a row leaves its peer `stuck`.
@@ -387,6 +389,9 @@ class SyncManager extends Emitter {
       stuck: false,
       // The dial itself failed — no link: the next sync() dials again.
       failed: false,
+      // Streams of this node's own the host claimed more of at the last
+      // hello, without proof: nothing of them goes to it (see #rewind).
+      rewound: null,
     };
     this.#peers.set(node.url, peer);
     Promise.resolve()
@@ -525,7 +530,7 @@ class SyncManager extends Emitter {
     node.remote = { id: answer.node, epoch: answer.epoch, schema };
     // Before anything is pushed: a rewound node moves its streams past what
     // the host holds, then takes the host's state back in a bootstrap.
-    const rewound = await this.#rewind(peer, answer.vector);
+    const rewound = await this.#rewind(peer, answer);
     this.#ack(node, answer.vector, true);
     peer.undeliverable = false;
     await this.#saveNode(node);
@@ -554,13 +559,21 @@ class SyncManager extends Emitter {
   // The host holds more of this node's own streams than its log does: the
   // directory was restored from an older copy (or another instance runs
   // with its identity), and ops minted from here would reuse seqs the host
-  // already has — dropped there as duplicates. Reported, then the streams
-  // move past the host's, so nothing minted from now on collides. Writes
-  // made since the restore and before this hello are lost to the host.
-  async #rewind(peer, vector) {
+  // already has — dropped there as duplicates. Or the host says so and
+  // lies: a stream moved on its word is a gap at every other peer, or past
+  // a safe integer and malformed everywhere. So a stream moves past the
+  // host's on proof alone — the op the host holds at the seq it claims,
+  // this node's own and signed by its key (`answer.proof`, hosting.js) — or
+  // under `sync.rewind: 'adopt'`. Reported either way, with what moved
+  // (`adopted`); a stream that did not move goes to that host no more until
+  // the next hello. Writes made since the restore and before this hello are
+  // lost to the host. True when something moved: the bootstrap follows.
+  async #rewind(peer, answer) {
     const { log } = this.#storage;
+    const { vector } = answer;
     const local = {};
     let remote = null;
+    peer.rewound = null;
     const keys = vector && typeof vector === 'object' ? Object.keys(vector) : [];
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];
@@ -572,10 +585,42 @@ class SyncManager extends Emitter {
       local[key] = held;
     }
     if (remote === null) return false;
-    const message = `${peer.node.url} holds more of this node's ops than its log: a restored copy, or a second instance`;
-    this.#fail(peer, new SyncomError('REWOUND', message, { local, remote }));
-    await this.#storage.adoptVector(remote, { via: peer.ref, from: peer.remote.id });
-    return true;
+    const taking = this.#options.rewind === 'adopt' ? remote : await this.#proven(remote, answer.proof);
+    let op = null;
+    if (Object.keys(taking).length > 0) {
+      op = await this.#storage[REWIND](taking, { via: peer.ref, from: peer.remote.id });
+    }
+    const adopted = op === null ? {} : { ...op.vector };
+    const stays = Object.keys(remote);
+    for (let i = 0; i < stays.length; i++) {
+      if (!Object.hasOwn(adopted, stays[i])) (peer.rewound ??= new Set()).add(stays[i]);
+    }
+    const message = `${peer.node.url} holds more of this node's ops than its log: a restored copy, a second instance or a false claim`;
+    this.#fail(peer, new SyncomError('REWOUND', message, { local, remote, adopted }));
+    return op !== null;
+  }
+
+  // Of a host's claims on this node's own streams, the ones its hello
+  // proves: the op it holds at the seq it claims, this node's own (origin,
+  // stream, seq) and signed by this node's key — what no host can make.
+  // Nothing is proven without the signing plugin: the key is the proof.
+  async #proven(remote, proof) {
+    const identity = this.#storage[SIGNER];
+    const proven = {};
+    if (!identity || !Array.isArray(proof)) return proven;
+    const ops = unpackOps(proof);
+    for (let i = 0; i < ops.length; i++) {
+      const op = ops[i];
+      if (!wellFormed(op) || op.origin !== this.#storage.nodeId || op.sig === undefined) continue;
+      const key = opKey(op);
+      if (!Object.hasOwn(remote, key) || remote[key] !== op.seq) continue;
+      try {
+        if ((await identity.verify(op, 'require')) === VERDICT.OK) proven[key] = op.seq;
+      } catch {
+        // A proof that cannot be checked proves nothing.
+      }
+    }
+    return proven;
   }
 
   // Every push to a peer — handshake, manual, relay, recovery — runs on one
@@ -641,9 +686,15 @@ class SyncManager extends Emitter {
       own: this.#storage.nodeId,
     });
     const missing = this.#lost(peer, first);
-    if (missing === null) return this.#send(peer, ops, reason);
+    const { rewound } = peer;
+    if (missing === null && rewound === null) return this.#send(peer, ops, reason);
     const sending = [];
-    for (let i = 0; i < ops.length; i++) if (!Object.hasOwn(missing, opKey(ops[i]))) sending.push(ops[i]);
+    for (let i = 0; i < ops.length; i++) {
+      const key = opKey(ops[i]);
+      if (missing !== null && Object.hasOwn(missing, key)) continue;
+      if (rewound !== null && rewound.has(key)) continue;
+      sending.push(ops[i]);
+    }
     return this.#send(peer, sending, reason);
   }
 
@@ -966,7 +1017,7 @@ class SyncManager extends Emitter {
         continue;
       }
       if (op.origin === peer.remote.id || op.from === peer.remote.id) continue;
-      if ((peer.remote.vector[key] ?? 0) >= op.seq) continue;
+      if ((peer.remote.vector[key] ?? 0) >= op.seq || peer.rewound?.has(key)) continue;
       if (!inScope(scope, peer.node.scopes)) continue;
       peer.outbox.push(op);
       if (peer.outbox.length > this.#maxOutbox) {

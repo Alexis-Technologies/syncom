@@ -8,7 +8,7 @@
 // the trust boundary: nothing below `admit` reads a field it did not check.
 // `core` is what Storage lends its write paths — see Storage#open.
 
-const { applyOp, isAlive } = require('./ops.js');
+const { applyOp, isAlive, latestClock } = require('./ops.js');
 const { vectorHas, vectorNext, vectorAdvance, keyScope } = require('./vector.js');
 const { notify } = require('./hooks.js');
 const { inScope } = require('./scope.js');
@@ -62,12 +62,24 @@ const openBatch = (core, { via = null, scopes = null, peer = null, adoptFrom = n
   };
 };
 
+// One op's verdict, contained: a check that throws — synchronously or not —
+// is a signature that does not check, FORGED for that op alone. A throw out
+// of the page would fail it whole (PAGE_FAILED, then STUCK): one hostile op
+// would stop the stream it rides on.
+const verdictOf = async (core, op, signatures) => {
+  try {
+    return await core.verify(op, signatures);
+  } catch {
+    return FORGED;
+  }
+};
+
 // The verdict on every op of the page before any is admitted — `admit` must
 // stay sequential (each accept moves the vector), verification need not.
 // Only a well-formed op that carries a signature is checked, and under
 // 'require' every well-formed one; the rest is OK by rule, which is what
 // keeps an unsigned page — an older peer's, a test's — at a property check
-// per op. A malformed op is left to `admit` to count.
+// per op. A malformed op is left to `admit` to count. Never throws.
 const verifyPage = async (batch, ops) => {
   const { signatures, core } = batch;
   const verdicts = new Array(ops.length).fill(OK);
@@ -80,7 +92,7 @@ const verifyPage = async (batch, ops) => {
     for (let i = start; i < ops.length && i < start + VERIFY_CHUNK; i++) {
       const op = ops[i];
       if (!wellFormed(op) || (op.sig === undefined && signatures !== 'require')) continue;
-      pending.push(core.verify(op, signatures).then((verdict) => void (verdicts[i] = verdict)));
+      pending.push(verdictOf(core, op, signatures).then((verdict) => void (verdicts[i] = verdict)));
     }
     if (pending.length > 0) await Promise.all(pending);
   }
@@ -148,26 +160,52 @@ const report = (batch, event, reason, error) => {
 // have we — when the op is that peer's own and came down its feed (the
 // merges came first), for the scopes we take from it. Pushed or relayed, an
 // advance is logged and passed on but grants nothing: the vector is the one
-// thing a peer must not be able to move on another node's behalf.
+// thing a peer must not be able to move on another node's behalf. Nor this
+// node's own streams, whoever says so: a seq moved there is a gap at every
+// other peer, or a stream past a safe integer and malformed everywhere.
 const adopt = (batch, op) => {
   if (batch.adoptFrom === null || op.origin !== batch.adoptFrom) return;
-  const { vector } = batch;
+  const { vector, core } = batch;
+  const own = `${core.nodeId}@`;
   for (const key of Object.keys(op.vector)) {
     const seq = op.vector[key];
+    if (key === '__proto__' || key === core.nodeId || key.startsWith(own)) continue;
     const scope = keyScope(key);
     const taken = scope === null || inScope(scope, batch.scopes);
-    if (taken && key !== '__proto__' && Number.isSafeInteger(seq) && (vector[key] ?? 0) < seq) {
+    if (taken && Number.isSafeInteger(seq) && seq > 0 && (vector[key] ?? 0) < seq) {
       vector[key] = seq;
       (batch.adopted ??= {})[key] = seq;
     }
   }
 };
 
-// Whether `op` goes on to be applied. Malformed ops and skewed stamps are
-// counted and dropped (not observed: this node's clock stays where it is);
-// what the vector already covers is a duplicate, what skips ahead a gap —
-// the peer will be asked again from the last position. An advance is
-// accepted here, with nothing to apply.
+// The newest stamp a merge's meta holds — a peer's whole meta, every stamp
+// of it observed once the record is written here — or null.
+const newestHeld = (core, op) => {
+  const latest = latestClock(op.meta, false, core.limits);
+  return latest === null ? null : latest[0];
+};
+
+// A stamp beyond the horizon: a broken clock or a poisoned one, never a
+// concurrent write. Counted with the malformed, reported, never observed.
+const skewed = (batch, op, ts) => {
+  const { core } = batch;
+  const ahead = ts - batch.now;
+  core.logger.warn({ event: 'sync.op.skew', origin: op.origin, seq: op.seq, ts, ahead });
+  core.otel.recordMalformed();
+  batch.malformed++;
+  const message = `Op ${op.origin}:${op.seq} carries a stamp ${ahead} ms ahead of this node (maxSkew ${core.maxSkew})`;
+  notify(core.storage, core.logger, 'error', new SyncomError('SKEW', message, { op }));
+  return false;
+};
+
+// Whether `op` goes on to be applied. Malformed ops and skewed stamps — the
+// op's own, or one its merge meta holds (read once the op is the next of its
+// stream: a duplicate costs no fold of its meta) — are counted and dropped
+// (not observed: this node's clock stays where it is); what the vector
+// already covers is a duplicate, what skips ahead a gap — the peer will be
+// asked again from the last position. An advance is accepted here, with
+// nothing to apply.
 const admit = (batch, op) => {
   const { core, vector } = batch;
   if (!wellFormed(op)) {
@@ -177,15 +215,7 @@ const admit = (batch, op) => {
     batch.malformed++;
     return false;
   }
-  if (op.ts > batch.horizon) {
-    const ahead = op.ts - batch.now;
-    core.logger.warn({ event: 'sync.op.skew', origin: op.origin, seq: op.seq, ts: op.ts, ahead });
-    core.otel.recordMalformed();
-    batch.malformed++;
-    const message = `Op ${op.origin}:${op.seq} is stamped ${ahead} ms ahead of this node (maxSkew ${core.maxSkew})`;
-    notify(core.storage, core.logger, 'error', new SyncomError('SKEW', message, { op }));
-    return false;
-  }
+  if (op.ts > batch.horizon) return skewed(batch, op, op.ts);
   if (op.origin === core.nodeId || vectorHas(vector, op)) {
     batch.duplicates++;
     return false;
@@ -193,6 +223,10 @@ const admit = (batch, op) => {
   if (!vectorNext(vector, op)) {
     batch.gaps++;
     return false;
+  }
+  if (op.type === 'merge') {
+    const held = newestHeld(core, op);
+    if (held !== null && held > batch.horizon) return skewed(batch, op, held);
   }
   if (op.type !== 'advance') return true;
   adopt(batch, op);

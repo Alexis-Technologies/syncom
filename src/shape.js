@@ -87,10 +87,47 @@ const SIGNATURE = /^[A-Za-z0-9_-]{86}$/;
 const DIGEST = /^[0-9a-f]{64}$/;
 const NONCE = /^[A-Za-z0-9_-]{16,64}$/;
 
+// How deep what the write API takes may nest — a record's data, an array of
+// elements, a value: every object or array on the deepest path is a level
+// (`{ a: 1 }` is one, `{ a: [1] }` two). Deeper is a TypeError where the
+// write is made (src/commit.js), so a node never logs what a peer refuses.
+const MAX_JSON_DEPTH = 64;
+// How deep a field of a peer's op — data, meta, key, value, vector, actor —
+// or a snapshot record's data or meta may nest: room for what an op and a
+// record's meta wrap around such a value (a block holds an element six
+// levels down its meta). Deeper is malformed. The readers on the apply path
+// that recurse — a digest's canonical form, a diff, JSON itself — then stay
+// thousands of levels clear of the stack.
+const MAX_WIRE_DEPTH = MAX_JSON_DEPTH + 16;
+
+// Whether `value` nests at most `max` levels — walked with a stack of its
+// own, never by recursion: the depth is what is in question.
+const nestsWithin = (value, max) => {
+  if (value === null || typeof value !== 'object') return true;
+  if (max < 1) return false;
+  const values = [value];
+  const depths = [1];
+  while (values.length > 0) {
+    const current = values.pop();
+    const next = depths.pop() + 1;
+    const keys = Array.isArray(current) ? null : Object.keys(current);
+    const count = keys === null ? current.length : keys.length;
+    for (let i = 0; i < count; i++) {
+      const item = keys === null ? current[i] : current[keys[i]];
+      if (item === null || typeof item !== 'object') continue;
+      if (next > max) return false;
+      values.push(item);
+      depths.push(next);
+    }
+  }
+  return true;
+};
+
 // The fields the engine indexes a peer's op by, checked before anything here
-// reads them. Payloads (`data`, `meta`, `key`, `value`, `vector`) are the
-// business of applyOp and normalizeMeta, which take garbage as a no-op;
-// `actor` and `from` are claims, carried as they are.
+// reads them, and how deep it nests (MAX_WIRE_DEPTH a field: the op itself
+// is one level more). Payloads (`data`, `meta`, `key`, `value`, `vector`)
+// are otherwise the business of applyOp and normalizeMeta, which take
+// garbage as a no-op; `actor` and `from` are claims, carried as they are.
 const wellFormed = (op) =>
   isPlainObject(op) &&
   isStreamName(op.origin) &&
@@ -105,7 +142,8 @@ const wellFormed = (op) =>
   (op.digest === undefined || (typeof op.digest === 'string' && DIGEST.test(op.digest))) &&
   (op.nonce === undefined || (typeof op.nonce === 'string' && NONCE.test(op.nonce))) &&
   (op.msg === undefined || (typeof op.msg === 'string' && op.msg.length <= MAX_MESSAGE)) &&
-  (op.type === 'advance' ? isPlainObject(op.vector) : isRecordId(op.id));
+  (op.type === 'advance' ? isPlainObject(op.vector) : isRecordId(op.id)) &&
+  nestsWithin(op, MAX_WIRE_DEPTH + 1);
 
 // A value's JSON with the keys of every object sorted — what JSON.stringify
 // would give were keys ordered — so a digest or a signature is a property of
@@ -161,6 +199,9 @@ const VERDICT = Object.freeze({ OK: 'ok', UNSIGNED: 'unsigned', FORGED: 'forged'
 module.exports = {
   VERDICT,
   MAX_MESSAGE,
+  MAX_JSON_DEPTH,
+  MAX_WIRE_DEPTH,
+  nestsWithin,
   isPlainObject,
   asJson,
   isRecordId,

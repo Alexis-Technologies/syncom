@@ -954,6 +954,28 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **A peer could push this node's clock years ahead.** A `merge` op was checked
+  for the skew of its own stamp, not of the stamps its `meta` carried; the
+  first local write to that record then observed them, and every op the node
+  made afterwards — on any record — was refused as `SKEW` everywhere,
+  through a restart. A merge op whose meta is stamped beyond `sync.maxSkew` is
+  `SKEW` now (malformed, never logged or relayed), a stamp must be a positive
+  safe integer, and a stamp a record already holds beyond the horizon is
+  never observed into the clock (`clock.skew.ignored`, once per record).
+- **The host a node dialed could renumber the node's own streams.** A host's
+  `advance` and a joined vector were adopted for this node's own keys, and a
+  hello's claim that the host held more of them moved them at once: a gap in
+  the node's stream forever, or a seq past the safe integers and a node no
+  peer would hear. Own keys never move by `advance` or a join now; a hello's
+  claim (`REWOUND`) is adopted under `/signing` only with proof — the host
+  hands this node's own signed op at that seq — and otherwise only with the new
+  `sync.rewind: 'adopt'` (`'report'` by default; `REWOUND` carries `adopted`).
+- **A deeply nested payload stopped every signing dialer.** Verifying a
+  page's signatures recursed through each op and overflowed the stack on one
+  nested a few thousand levels deep — `PAGE_FAILED`, then `STUCK`. An op nested
+  past 80 levels is malformed before anything reads it, a verify that throws is
+  that op `FORGED` alone, and a local write nested past 64 levels is a
+  `TypeError`.
 - **One unreadable cursor in a room hid every cursor, and the rejection went
   unhandled.** A peer's presence state with a cursor token the field could
   not read made `presenceCursors` throw, and the ProseMirror and CodeMirror

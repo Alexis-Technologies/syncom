@@ -168,7 +168,7 @@ const ENTRIES = [
   // 7.4 with the paths (a reading taken back to its fields, src/compose.js).
   // 7.8 with transaction steps, groups, step meta and the scoped stack (trackedSources, records, paths).
   // 8.0 with the canonical JSON in shape.js.
-  { label: 'undo — browser (@alexify/syncom/undo)', entry: 'src/undo/undo.js', platform: 'browser', budget: 8.5 },
+  { label: 'undo — browser (@alexify/syncom/undo)', entry: 'src/undo/undo.js', platform: 'browser', budget: 9 },
   // A fork opened through the parent's constructor, merged as ops: the
   // selection a push makes, the shape helpers, the protocol constants.
   {
@@ -185,7 +185,7 @@ const ENTRIES = [
     entry: 'src/presence/presence.js',
     platform: 'browser',
     // 3.8 measured: shape.js (the canonical JSON, the stream and key checks) comes with the emitter.
-    budget: 4,
+    budget: 4.5,
   },
   // The editor binding: deltas composed and transformed, the diff between two readings (the text plugin's Myers
   // comes along, and the vector keys), the binding itself, selections and presence cursors. The plan said 4; the
@@ -212,7 +212,7 @@ const ENTRIES = [
     label: 'prosemirror — browser (@alexify/syncom/prosemirror)',
     entry: 'src/prosemirror/prosemirror.js',
     platform: 'browser',
-    budget: 8,
+    budget: 8.5,
   },
   // Framework stores: one object for Svelte's contract and React's useSyncExternalStore, over a cursor, a
   // Record, get(), a presence or any emitter; no requires.
@@ -257,7 +257,8 @@ const ENTRIES = [
   // 101.1 with a contained telemetry writer and a log that answers every durable group (2026-10-26). 101.5, raised by name.
   // 101.6 with the review's performance fixes (a lazy commit event, the lazy text index, the log's pending groups
   // searched by halves, a live Record patched by its delta). 102, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 102 },
+  // 102.8 with the review's security fixes (merge-meta skew, own streams moved only with proof, a nesting bound) and the editors' containment (2026-10-26). 103.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 103.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -322,7 +323,7 @@ const ENTRIES = [
   // to the core is the 6.8 KB the main entry came down by).
   // 20.4 with presence: the unit's inbound event, the room's memory, the manager's carrying.
   // 21.1 with a contained telemetry writer and a log that answers every durable group (2026-10-26).
-  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 21.5 },
+  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 22 },
   // The schema: the definitions read once, the validator adapters, the lens.
   // 4.3 with a set folded back by path (src/entity.js over src/paths.js).
   {
@@ -350,7 +351,7 @@ const ENTRIES = [
     label: 'versions — browser (@alexify/syncom/versions)',
     entry: 'src/versions/versions.js',
     platform: 'browser',
-    budget: 31,
+    budget: 31.5,
   },
 ];
 
