@@ -150,7 +150,7 @@ test('Catalog', async (t) => {
   });
 
   await t.test(
-    'the search text: a cell on the row, handed to the injected index and replayed from the file',
+    'the search text: a cell on the row, handed to the injected index when a $text query asks, and replayed from the file',
     async () => {
       const calls = [];
       const fake = () => ({
@@ -171,6 +171,8 @@ test('Catalog', async (t) => {
       assert.strictEqual(catalog.row('p1').text, 'Hello x y', 'strings and string elements, joined');
       assert.strictEqual('text' in catalog.row('p3'), false, 'no searchable string: no cell');
       assert.strictEqual('text' in catalog.row('t1'), false);
+      assert.deepStrictEqual(calls, [], 'the index follows lazily: nothing until a $text query');
+      catalog.candidates('Post', { $text: 'w' });
       assert.deepStrictEqual(calls, [
         ['put', 'p1', 'Hello x y'],
         ['put', 'p2', 'World'],
@@ -192,12 +194,23 @@ test('Catalog', async (t) => {
       catalog.put('p2', { type: 'Post', v: 1, gone: true });
       catalog.put('p3', { type: 'Post', encrypted: true });
       catalog.put('p1', null);
+      assert.deepStrictEqual(calls, []);
+      catalog.candidates('Post', { $text: 'w' });
+      // The last word per id: p1 replaced then removed is one removal.
       assert.deepStrictEqual(calls, [
         ['remove', 'p1'],
-        ['put', 'p1', 'Again'],
         ['remove', 'p2'],
-        ['remove', 'p1'],
       ]);
+      // A put that leaves the row as it was is nothing for the index.
+      catalog.put('p4', { type: 'Post', v: 1, data: { orgId: 'o4', title: 'Same', n: 1 } });
+      catalog.candidates('Post', { $text: 'w' });
+      calls.length = 0;
+      const dirty = catalog.dirty;
+      catalog.put('p4', { type: 'Post', v: 1, data: { orgId: 'o4', title: 'Same', n: 2 } });
+      catalog.candidates('Post', { $text: 'w' });
+      assert.deepStrictEqual(calls, [], 'a field the catalog does not hold changed: the row stayed');
+      assert.strictEqual(catalog.dirty, dirty, 'nothing to save either');
+      catalog.put('p4', null);
       // The file: a sixth cell `false` and the text as the seventh; a tombstone's is `true`.
       catalog.put('p1', { type: 'Post', v: 2, data: { orgId: 'o1', title: 'Again' } });
       await catalog.save('e.9');
@@ -217,6 +230,7 @@ test('Catalog', async (t) => {
         text: new Map([['Post', { put: (id, t) => void replayed.push([id, t]), remove() {}, query: () => [] }]]),
       });
       assert.deepStrictEqual(await again.load(), { stamp: 'e.9' });
+      again.candidates('Post', { $text: 'a' });
       assert.deepStrictEqual(replayed, [['p1', 'Again']]);
       assert.strictEqual(again.row('p1').text, 'Again');
       // Other search fields make the file unusable: a rebuild.
@@ -240,12 +254,14 @@ test('Catalog', async (t) => {
       const guarded = new Catalog({ fsi, path: 'guarded', entities: entitiesOf(searchable), text: throwing, logger });
       guarded.put('p9', { type: 'Post', v: 1, data: { title: 'x' } });
       assert.strictEqual(guarded.has('p9'), true);
+      guarded.candidates('Post', { $text: 'x' });
       assert.deepStrictEqual(
         warnings.map((entry) => [entry.event, entry.id, entry.err.message]),
         [['catalog.search', 'p9', 'boom']],
       );
       const quiet = new Catalog({ fsi, path: 'quiet', entities: entitiesOf(searchable), text: throwing });
       quiet.put('p9', { type: 'Post', v: 1, data: { title: 'x' } });
+      quiet.candidates('Post', { $text: 'x' });
       assert.strictEqual(quiet.has('p9'), true, 'without a logger there is nowhere to say it');
     },
   );

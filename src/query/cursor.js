@@ -421,8 +421,10 @@ class Cursor {
         if (dirty && !stopped) queueMicrotask(run);
       }
     };
-    const wake = () => {
-      if (dirty) return;
+    // A change that left the record's catalog row as it was cannot move a
+    // cursor that reads nothing else (covered); any other cursor runs again.
+    const wake = (changed) => {
+      if (dirty || (changed === false && this.#covered(true))) return;
       dirty = true;
       if (!running) queueMicrotask(run);
     };

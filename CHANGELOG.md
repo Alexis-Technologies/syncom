@@ -1427,6 +1427,13 @@ There is no released version section until then; everything below lands in it.
 
 ### Changed
 
+- **A searchable text is no longer re-indexed on every keystroke.** The
+  catalog handed the text index the whole joined text of a record at every
+  write; it keeps the last word per record now and hands it over when a
+  `$text` query asks — 2.5 ms → 78 µs per keystroke in a 40 KB searchable
+  text. A write that leaves a record's catalog row as it was (a field the
+  catalog does not hold) posts nothing, saves nothing, and does not run a
+  watch the catalog covers.
 - **A live `Record` no longer copies the whole record on every write.** It
   took a JSON copy of the record, walked it for references and redefined its
   accessors on every change — a 200 KB text made each keystroke of another

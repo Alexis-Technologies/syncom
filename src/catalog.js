@@ -67,6 +67,24 @@ const meet = (result, found) => {
 // its elements too (see `post`). Unique keys compare the whole value.
 const keyOf = (value) => JSON.stringify(canonical(value));
 
+// Whether two catalog rows say the same: type, version, flags, text and every
+// indexed value.
+const sameRow = (a, b) => {
+  if (a.type !== b.type || a.v !== b.v || a.encrypted !== b.encrypted || a.gone !== b.gone || a.text !== b.text) {
+    return false;
+  }
+  const keys = Object.keys(a.fields);
+  if (keys.length !== Object.keys(b.fields).length) return false;
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    if (!Object.hasOwn(b.fields, key)) return false;
+    const x = a.fields[key];
+    const y = b.fields[key];
+    if (x !== y && (typeof x !== 'object' || typeof y !== 'object' || keyOf(x) !== keyOf(y))) return false;
+  }
+  return true;
+};
+
 // The text `$text` searches a record by: its string fields among `fields`,
 // and the string elements of its array fields, joined by a space — as the
 // record reads (the lens applied). Nothing else is a word.
@@ -129,6 +147,7 @@ class Catalog {
   #sorted = null;
   #sortedIds = new Map();
   #text;
+  #textPending = new Map();
   #logger;
 
   constructor({ fsi, path, entities, text = new Map(), logger = null }) {
@@ -151,16 +170,26 @@ class Catalog {
   // The row's text into the entity's text index, or out of it. Derived
   // state never fails a write — the record is durable by now — so an index
   // that throws is logged (where there is a logger) and left as it is.
+  // The text index follows the rows lazily: a put or a removal waits here,
+  // the last one per id, until a `$text` query asks — re-indexing a text on
+  // every keystroke cost the whole text each time.
   #index(id, row, kept) {
-    if (row.text === undefined) return;
-    const index = this.#text.get(row.type);
-    if (index === undefined) return;
-    try {
-      if (kept) index.put(id, row.text);
-      else index.remove(id);
-    } catch (error) {
-      this.#logger?.warn({ event: 'catalog.search', id, err: error });
+    if (row.text === undefined || !this.#text.has(row.type)) return;
+    this.#textPending.set(id, { type: row.type, text: kept ? row.text : null });
+  }
+
+  #flushText() {
+    if (this.#textPending.size === 0) return;
+    for (const [id, { type, text }] of this.#textPending) {
+      const index = this.#text.get(type);
+      try {
+        if (text === null) index.remove(id);
+        else index.put(id, text);
+      } catch (error) {
+        this.#logger?.warn({ event: 'catalog.search', id, err: error });
+      }
     }
+    this.#textPending.clear();
   }
 
   get size() {
@@ -250,27 +279,36 @@ class Catalog {
   put(id, view) {
     const was = this.#rows.get(id);
     const before = was && !was.gone ? was.type : null;
-    this.#remove(id);
-    this.#dirty++;
     const gone = view !== null && view.gone === true;
     const type = view === null ? null : typeof view.type === 'string' ? view.type : null;
-    if (before !== null) this.#wake(before);
-    if (!gone && type !== null && type !== before) this.#wake(type);
-    if (view === null) return;
-    const row = { type, v: view.v ?? null, encrypted: view.encrypted === true, fields: {} };
-    if (gone) row.gone = true;
-    const def = type === null || gone ? undefined : this.#defs.get(type);
-    if (def && !row.encrypted) {
-      for (const field of def.fields) {
-        const value = valueOf(view.data, field);
-        if (value !== undefined) row.fields[field] = value;
-      }
-      if (def.search.length > 0) {
-        const text = textOf(view.data, def.search);
-        if (text.length > 0) row.text = text;
+    let row = null;
+    if (view !== null) {
+      row = { type, v: view.v ?? null, encrypted: view.encrypted === true, fields: {} };
+      if (gone) row.gone = true;
+      const def = type === null || gone ? undefined : this.#defs.get(type);
+      if (def && !row.encrypted) {
+        for (const field of def.fields) {
+          const value = valueOf(view.data, field);
+          if (value !== undefined) row.fields[field] = value;
+        }
+        if (def.search.length > 0) {
+          const text = textOf(view.data, def.search);
+          if (text.length > 0) row.text = text;
+        }
       }
     }
-    this.#insert(id, row);
+    // The row the catalog holds already: nothing to post again, nothing to
+    // sort or save — but a watcher reads more than the row, so it hears of
+    // the change (`false`: the row stayed; a covered cursor need not run).
+    if (was !== undefined && row !== null && sameRow(was, row)) {
+      if (before !== null) this.#wake(before, false);
+      return;
+    }
+    this.#remove(id);
+    this.#dirty++;
+    if (before !== null) this.#wake(before, true);
+    if (!gone && type !== null && type !== before) this.#wake(type, true);
+    if (row !== null) this.#insert(id, row);
   }
 
   /** Whether `$text` can be asked of this collection: it has search fields and an index. */
@@ -295,7 +333,11 @@ class Catalog {
     return this.#defs.get(type)?.indexed ?? new Set();
   }
 
-  /** Calls `fn` after every change to a record of `type`; returns the unsubscribe. */
+  /**
+   * Calls `fn(changed)` after every change to a record of `type` — `changed`
+   * false when the record's catalog row stayed as it was; returns the
+   * unsubscribe.
+   */
   subscribe(type, fn) {
     let fns = this.#watchers.get(type);
     if (!fns) this.#watchers.set(type, (fns = new Set()));
@@ -306,9 +348,9 @@ class Catalog {
     };
   }
 
-  #wake(type) {
+  #wake(type, changed) {
     const fns = this.#watchers.get(type);
-    if (fns) for (const fn of [...fns]) fn();
+    if (fns) for (const fn of [...fns]) fn(changed);
   }
 
   row(id) {
@@ -348,6 +390,7 @@ class Catalog {
     // `$text` seeds the candidates with the index's ranking, best first;
     // every equality then narrows that order rather than replacing it.
     const index = this.#text.get(entity);
+    if (index !== undefined && typeof query.$text === 'string') this.#flushText();
     const ranked = index !== undefined && typeof query.$text === 'string' ? this.#ranked(index, query.$text) : null;
     const eq = this.#eq.get(entity);
     if (!eq) return ranked;
