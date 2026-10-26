@@ -233,8 +233,11 @@ loads is counted with the JavaScript, gzipped too.
 
 `pnpm bench` runs one script per subject in `bench/`: the storage API end to end, a peer's
 page as it is applied, replication over the in-process link, full-text search, the op log, the
-chain, hashing, the CRDT helpers and the emitter. They are the numbers to watch for a regression, and
-`pnpm bench --save` records them.
+chain, hashing, the CRDT helpers, the emitter, and the list and text engine — a keystroke, a
+reading, a hydration, and the same at a size where a cost per element would show: a text under
+5,000 marks, a list of 50,000 elements, a run typed 200,000 characters long, the first op on a
+record read from its JSON. They are the numbers to watch for a regression, and `pnpm bench --save`
+records them.
 
 <BenchEngine />
 

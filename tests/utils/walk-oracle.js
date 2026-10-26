@@ -988,7 +988,9 @@ const anchorOrdinal = (index, token, base) => {
   if (base !== null && compareClock([elem.ts, elem.origin], base) < 0) return 0;
   const r = index.byKey.get(elem.run);
   if (r === undefined || elem.offset >= r.len) return null;
-  return index.ordAt[r.start + elem.offset] + (side === 'L' ? 0 : 1);
+  // A slot of a run waiting for its anchor is out of the walk (-1): not here yet.
+  const ord = index.ordAt[r.start + elem.offset];
+  return ord < 0 ? null : ord + (side === 'L' ? 0 : 1);
 };
 
 // Marks by key, then by stamp: the order their values are laid over one
@@ -1136,6 +1138,8 @@ const indexOfCursor = (index, token) => {
   const r = index.byKey.get(anchor.elem.run);
   if (r === undefined || anchor.elem.offset >= r.len) return null;
   const slot = r.start + anchor.elem.offset;
+  // Out of the walk (-1): not here yet.
+  if (index.visAt[slot] < 0) return null;
   return index.visAt[slot] + (anchor.side === 'R' ? index.shown[slot] : 0);
 };
 

@@ -77,7 +77,7 @@ src/text/btree.js         the rope: a persistent B+-tree over a block's segments
                           path copying, hints tagged by lineage, a text cache per node — no requires
 src/text/pmap.js          a persistent hash map (HAMT): the run records of a block, one changed per keystroke — no requires
 src/text/plist.js         a persistent sorted list in chunks: a placed run's segments, the children at its offsets — no requires
-src/text/sequence.js      the sequence engine behind the list and text kinds (indexOf: the block hydrated once onto entry.cache):
+src/text/sequence.js      the sequence engine behind the list and text kinds (indexOf: a plain block hydrated once, a WeakMap keyed by it):
                           run records, the walk that places a subtree, local placement, pending ops, pos/vals/marks registers,
                           cursors, prune and join — requires vector.js, plugin.js, rle.js, btree.js, pmap.js, plist.js
 src/tree/moves.js         the tree engine: per node its stamped moves, the fold in stamp order with the cycle check (Kleppmann
@@ -449,8 +449,10 @@ docs/                     VitePress site
   bounds read. Nothing else is on the object (`lengthOf`, `totalOf`, `render`
   are the engine's). Every op goes through `draft`/`finish`: a new block, the
   structures path-copied, the block before reading as it did; `indexOf(entry,
-  field)` hydrates plain JSON once onto `entry.cache` and hands an engine
-  block back as it is. Hints — an item's leaf, a node's parent — are right
+  field)` hydrates plain JSON once (a WeakMap keyed by the plain block, under the field's floor:
+  the reading before an op and the op share it) and hands an engine block back as it is. A
+  marks index (anchors in walk order) rides in the engine state across every op that leaves the
+  marks; a body grows by `SEG_MAX` slots at most; a list's reading is derived from the one before. Hints — an item's leaf, a node's parent — are right
   for the HEAD of a lineage only: an edit, a position or a neighbour asked of
   an older block forks it into a lineage of its own (`ensureHead`,
   `stats().rebuilds`) and the tree re-hints itself once (`T.stats().rehints`);

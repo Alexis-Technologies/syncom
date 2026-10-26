@@ -259,7 +259,10 @@ const ENTRIES = [
   // searched by halves, a live Record patched by its delta). 102, raised by name.
   // 102.8 with the review's security fixes (merge-meta skew, own streams moved only with proof, a nesting bound) and the editors' containment (2026-10-26). 103.5, raised by name.
   // 103.6 with the tree's bounded fold and the counters per stream. 104.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 104.5 },
+  // 106.4 with the text engine's indexes (the marks by anchor in walk order, pos/vals/marks in persistent maps,
+  // a list's reading derived from the one before, bodies capped at SEG_MAX, one hydration per plain block;
+  // 2026-10-27). 107, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 107 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -274,7 +277,9 @@ const ENTRIES = [
   // 28.1 with a mark's change less what newer marks of its key hold (S.newerRanges) and a marker set in
   // the turn that inserted it composed into the insert. 28.5, raised by name.
   // 28.7 with src/ in procedural loops (no array callbacks — a loop is longer than a callback; 2026-10-26).
-  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 29 },
+  // 30.9 with the engine's indexes (the marks by anchor, persistent pos/vals/marks, a list's reading
+  // derived, bodies capped at SEG_MAX, one hydration per plain block; 2026-10-27). 31.5, raised by name.
+  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 31.5 },
   // The tree kind alone, with the fractional indexes a place is made of and
   // the argument checks it shares with the core (5.1 measured).
   // 5.5 with the field-name check unset shares with it (src/args.js).

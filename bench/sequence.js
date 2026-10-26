@@ -8,7 +8,11 @@
  * run under the element there, or the writer's own run grown; the text is
  * read after every op, as the storage reads it. One row applies every op
  * to the SAME older block — a fork, which re-hints the rope once per op —
- * the cost of editing a version that is not the head.
+ * the cost of editing a version that is not the head. The rows at size are
+ * where a cost per element would show: a keystroke and a mark in a text
+ * under 5 000 marks, setAt, move and push in a list of 50 000, typing into
+ * a run 200 000 long while reading inside it, the first op on a record read
+ * from its JSON.
  *
  * Run with `node bench/sequence.js` or `pnpm bench`.
  */
@@ -160,6 +164,83 @@ const main = async () => {
   }
   const markedSeq = marked.meta.blocks.body;
   await bench('spans — 1 000 chars, 50 overlapping marks', () => S.spans(markedSeq, markedSeq));
+  // An op of the rows at size: its value, then the field (`body` unless named).
+  const edit = (type, stamp, origin, value, key = 'body') => op(type, stamp, origin, key, value);
+  // A text of 20 000 characters under 5 000 marks: a keystroke reads the
+  // style it lands in from the index of the marks, a mark goes into it.
+  let rich = applyOp(null, edit('splice', ++ts, 'A', { at: '^', content: 'x'.repeat(20_000) })).entry;
+  const richRun = S.runKey(ts, 'A');
+  for (let i = 0; i < 5000; i++) {
+    const a = Math.floor(random() * 19_000);
+    const start = `<${S.elemKey(richRun, a)}`;
+    const end = `<${S.elemKey(richRun, a + 1 + Math.floor(random() * 200))}`;
+    const key = ['bold', 'em', 'link', 'code'][i % 4];
+    rich = applyOp(rich, edit('mark', ++ts, 'A', { start, end, key, value: true })).entry;
+  }
+  await bench('applyOp — insert one char mid-text into 20 000 chars under 5 000 marks', () => {
+    const length = S.lengthOf(S.indexOf(rich, 'body'));
+    rich = insertAt(rich, ++ts, 'C', Math.floor(length / 4 + random() * (length / 2)));
+  });
+  await bench('applyOp — a mark over 20 000 chars under 5 000 marks', () => {
+    const idx = S.indexOf(rich, 'body');
+    const a = Math.floor(random() * (S.lengthOf(idx) - 10));
+    const [start, end] = S.markAnchors(idx, a, a + 5, 'after');
+    rich = applyOp(rich, edit('mark', ++ts, 'C', { start, end, key: 'em', value: true })).entry;
+  });
+  // A list of 50 000 elements, values assigned: an op reads its index off
+  // the rope and derives the reading from the one before.
+  const many = [];
+  for (let i = 0; i < 50_000; i++) many.push(i);
+  let big50 = applyOp(null, edit('splice', ++ts, 'A', { at: '^', content: many }, 'items')).entry;
+  const elementAt = (i) => S.elemAt(S.indexOf(big50, 'items'), i);
+  big50 = applyOp(big50, edit('assign', ++ts, 'A', { elem: elementAt(0), value: -1 }, 'items')).entry;
+  await bench('applyOp — setAt in a 50 000-element list', () => {
+    const elem = elementAt(Math.floor(random() * 50_000));
+    big50 = applyOp(big50, edit('assign', ++ts, 'A', { elem, value: ts }, 'items')).entry;
+  });
+  await bench('applyOp — move in a 50 000-element list', () => {
+    const idx = S.indexOf(big50, 'items');
+    const length = S.lengthOf(idx);
+    const from = Math.floor(random() * length);
+    const to = (from + 1 + Math.floor(random() * (length - 1))) % length;
+    const place = S.placeInsert(idx, to < from ? to : to + 1, 'A');
+    const at = place.at ?? `>${S.elemKey(place.run, place.from - 1)}`;
+    const value = S.valueAt(idx, from);
+    const payload = { elem: S.elemAt(idx, from), cut: S.slotAt(idx, from), at, value };
+    big50 = applyOp(big50, edit('move', ++ts, 'A', payload, 'items')).entry;
+  });
+  await bench('applyOp — push onto a 50 000-element list', () => {
+    const idx = S.indexOf(big50, 'items');
+    const place = S.placeInsert(idx, S.lengthOf(idx), 'A', 1);
+    big50 = applyOp(big50, edit('splice', ++ts, 'A', { ...place, content: [ts] }, 'items')).entry;
+  });
+  // A run typed 200 000 characters long, its middle read on each keystroke
+  // (a selection, a mark's edge): the body is held in sealed segments, so
+  // the read never copies what was typed.
+  let typedLong = oneRun;
+  for (let i = 0; i < 200_000; i++) typedLong = insertAt(typedLong, ++ts, 'D', 500 + i);
+  let typedAt = 500 + 200_000;
+  await bench('applyOp — type into a run 200 000 long, a char inside it read per keystroke', () => {
+    const idx = S.indexOf(typedLong, 'body');
+    S.heldAt(idx, 500 + Math.floor(random() * 200_000));
+    typedLong = insertAt(typedLong, ++ts, 'D', typedAt++);
+  });
+  // A record of an editing trace read from its JSON: the first op hydrates
+  // the block once, for the reading before it and the op alike.
+  let traced = oneRun;
+  for (let i = 0; i < 20_000; i++) {
+    const length = S.lengthOf(S.indexOf(traced, 'body'));
+    traced = insertAt(traced, ++ts, ['A', 'B', 'C'][i % 3], Math.floor(random() * (length + 1)), 'abc');
+  }
+  const tracedJson = JSON.stringify({ data: traced.data, meta: traced.meta });
+  await bench(
+    'applyOp — the first op on a record read from its JSON (20 000 edits)',
+    () => {
+      const loaded = JSON.parse(tracedJson);
+      insertAt(loaded, ++ts, 'E', Math.floor(S.lengthOf(S.indexOf(loaded, 'body')) / 2));
+    },
+    { warmup: 5 },
+  );
   const before = 'the quick brown fox '.repeat(50);
   const after = `${before.slice(0, 500)}X${before.slice(500)}`;
   await bench('diff — one keystroke in a 1 KB text', () => diff(before, after));

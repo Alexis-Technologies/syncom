@@ -5,10 +5,11 @@
 // field join. The block Storage keeps in a record's meta (`meta.blocks[field]`)
 // reads as plain JSON — `{ k, ts, runs, cuts, ext, pos, vals, marks }` — and
 // serializes as such, but is a ROPE underneath: the walk of the Fugue tree
-// kept as a persistent B+-tree of segments (./btree.js), the run records in
-// a persistent map (./pmap.js), so a keystroke, a cut, a cursor and a
-// reading are O(log n) and never walk the field again. No requires beyond
-// ../vector.js, ../plugin.js, ./rle.js and those two.
+// kept as a persistent B+-tree of segments (./btree.js), the run records, the
+// registers and the marks in persistent maps (./pmap.js), so a keystroke, a
+// cut, an assign, a move, a mark, a cursor and a reading are O(log n) and
+// never walk the field or copy a map again. No requires beyond ../vector.js,
+// ../plugin.js, ./rle.js and those three.
 //
 // The ordering rule is Fugue (Weidner & Kleppmann, "The Art of the Fugue",
 // 2023; reference: fugue-simple, MIT): every element has one place in a
@@ -38,7 +39,16 @@
 // tree, the run map and the block are copied by path: an op leaves a new
 // block and shares what it did not touch, and an older block reads as it
 // was. The JSON of a block (`runs`) is made from the rope when asked and
-// kept for that version; its key order is the walk's.
+// kept for that version; its key order is the walk's. A body grows by
+// SEG_MAX slots at most: a run typed long is what was typed, sealed flat,
+// and the end being typed (`sealText`), a list's run segments of SEG_MAX;
+// the JSON joins them, one RLE a run. The registers and the marks (`pos`, `vals`, `marks`) are the
+// engine's maps too, the plain objects the block shows made from them when
+// read; the marks in force are also indexed in walk order (the index of the
+// marks, below), so the style at a character is read from O(log m) of
+// their anchors. A list's reading is derived from the one before and what
+// the op changed (`derive`); a block read from a file is hydrated once per
+// plain block (`HYDRATED`).
 //
 // Content is run-length encoded, list-positions style: `["ab", 3, "c"]`
 // alternates present items (a string of a text, an array of a list) with
@@ -63,14 +73,18 @@
 // at, and `vals`, its value — each last-writer-wins by stamp (a TEXT keeps
 // `vals` too: the marker of an embed slot, U+FFFC, set with the splice that
 // inserts the slot or by an `assign`; the engine knows no marker's shape,
-// src/text/text.js reads it). A `move` cuts
-// the slot the element showed at and adds a one-element POSITION run
+// src/text/text.js reads it; the splice's marker is a register like an
+// assign's, so the newer of the two wins whichever arrives first). A `move`
+// cuts the slot the element showed at and adds a one-element POSITION run
 // (`[at, [[value]], elem]`) that names the element; the register then points
-// at that run. A slot shows iff it is alive and it is the position its
-// element's register names (its own slot, when no move has named one), so
-// two concurrent moves leave the element once, at the newer one's place, and
-// a move concurrent with a cut of the old slot brings the element back at the
-// new one. An `assign` sets the value register; a cut element keeps neither.
+// at that run. A position run holds its element alone: nothing extends it
+// (an extension of one is malformed, a longer one in a peer's block is left
+// out), or every slot it took would show as that element. A slot shows
+// iff it is alive and it is the position its element's register names (its
+// own slot, when no move has named one), so two concurrent moves leave the
+// element once, at the newer one's place, and a move concurrent with a cut
+// of the old slot brings the element back at the new one. An `assign` sets
+// the value register; a cut element keeps neither.
 //
 // A TEXT carries MARKS (Peritext, Litt et al. 2022; Loro's rich text): a
 // mark is the range between two anchors — an element and a side, `<e` or
@@ -98,7 +112,7 @@
 // (a `rightOrigin` per run) changes the merge rule for new runs only, and
 // is a PROTOCOL bump once the package is published.
 
-const { compareClock } = require('../vector.js');
+const { compareClock, floorOf } = require('../vector.js');
 const { PENDING_MAX } = require('../plugin.js');
 const T = require('./btree.js');
 const P = require('./pmap.js');
@@ -205,18 +219,63 @@ const olderOf = (a, ts, origin) => (a === null || ts < a[0] || (ts === a[0] && o
 // the lineage and what is cached for this version.
 const STATE = new WeakMap();
 
-// How many blocks were rebuilt from their JSON because they were asked a
-// position or an edit while no longer the head of their lineage.
-const counters = { rebuilds: 0 };
+// What the engine did that costs more than the path an op copies — counted
+// so a test can say it did not happen: blocks forked because they were asked
+// a position or an edit while no longer the head of their lineage
+// (`rebuilds`), blocks hydrated from JSON (`hydrations`), indexes of the
+// marks made whole (`markIndexes`) and the anchors they and the queries read
+// from the rope (`anchorReads`), lists read whole (`listRenders`) and their
+// names listed (`elemLists`), full segments sealed (`seals`).
+const counters = {
+  rebuilds: 0,
+  hydrations: 0,
+  markIndexes: 0,
+  anchorReads: 0,
+  listRenders: 0,
+  elemLists: 0,
+  seals: 0,
+};
 
 // A block as the record meta holds it: `k` and `ts` as fields, `runs` as
-// the walk-order JSON of the rope, made when read, the other maps as given
-// (absent when empty) — the shape a peer's block has, in the key order
+// the walk-order JSON of the rope, made when read, `cuts` and `ext` as
+// given, and the registers and the marks — `pos`, `vals`, `marks` — as
+// plain objects made from the engine's persistent maps when read (`viewOf`),
+// each absent when empty: the shape a peer's block has, in the key order
 // `plainOf` gives, so deepEqual, JSON.stringify, the signed form and a
 // snapshot see a plain block; nothing else is on it (what it reads as is
-// asked of the engine: `lengthOf`, `totalOf`, `render`).
+// asked of the engine: `lengthOf`, `totalOf`, `render`). Nothing on an
+// op's path reads those views: an op reads and writes the maps.
 const MAPS = ['cuts', 'ext', 'pos', 'vals', 'marks'];
-const createBlock = (kind, ts, maps, state) => {
+const REGISTERS = ['pos', 'vals', 'marks'];
+// Whether an engine-built object holds a key — never a peer's object.
+const hasAny = (map) => {
+  if (map === undefined || map === null) return false;
+  for (const key in map) if (Object.hasOwn(map, key)) return true;
+  return false;
+};
+// A register map or the marks as the record holds them: a plain object,
+// made from the engine's persistent map once per version, when asked.
+const viewOf = (block, name) => {
+  const st = STATE.get(block);
+  const views = (st.views ??= { pos: null, vals: null, marks: null });
+  if (views[name] !== null) return views[name];
+  const out = {};
+  for (const [key, value] of P.entries(st[name])) out[key] = value;
+  views[name] = out;
+  return out;
+};
+// The getter of each view, one descriptor per map, shared by every block.
+const VIEW = {};
+for (const name of REGISTERS) {
+  VIEW[name] = {
+    get() {
+      return viewOf(this, name);
+    },
+    enumerable: true,
+    configurable: true,
+  };
+}
+const createBlock = (kind, ts, cuts, ext, state) => {
   const block = {
     k: kind,
     ts,
@@ -224,12 +283,20 @@ const createBlock = (kind, ts, maps, state) => {
       return runsJson(this);
     },
   };
-  for (const name of MAPS) {
-    const map = maps[name];
-    if (map !== undefined && map !== null && Object.keys(map).length > 0) block[name] = map;
-  }
+  if (hasAny(cuts)) block.cuts = cuts;
+  if (hasAny(ext)) block.ext = ext;
+  for (const name of REGISTERS) if (state[name].size > 0) Object.defineProperty(block, name, VIEW[name]);
   STATE.set(block, state);
   return block;
+};
+
+// A plain register map or marks (a peer's block, normalized) as the
+// engine's persistent map: fresh pairs, the tuples as they are.
+const mapOf = (plain) => {
+  if (plain === undefined || plain === null) return P.EMPTY;
+  const pairs = [];
+  for (const key of Object.keys(plain)) pairs.push([key, plain[key]]);
+  return pairs.length === 0 ? P.EMPTY : P.fromEntries(pairs);
 };
 
 const plainOf = (block) => {
@@ -303,7 +370,8 @@ const normalizeJson = (raw) => {
     if (anchor === null || run[0] === END || (anchor.elem !== null && anchor.elem.ts >= made.ts)) continue;
     const content = normalizeRle(kind, run[1]);
     if (content === null) continue;
-    if (run.length === 3 && (kind !== 'l' || !isElemKey(run[2]))) continue;
+    // A position run (a move's) names its element and holds it alone.
+    if (run.length === 3 && (kind !== 'l' || !isElemKey(run[2]) || rleLength(content) !== 1)) continue;
     slots += rleLength(content);
     if (slots > MAX_FIELD) return null;
     seq.runs[key] = run.length === 3 ? [run[0], content, run[2]] : [run[0], content];
@@ -433,11 +501,12 @@ const recordOf = (key, tuple, anchor = parseAnchor(tuple[0])) => {
 
 // Whether slot `off` of `run` shows, beside being alive: a list slot shows
 // when it is the position its element's register names — its own slot when
-// no move named one, else the position run the newest move made.
+// no move named one, else the position run the newest move made. `pos` is
+// the register map (./pmap.js).
 const showsAt = (kind, pos, run, off) => {
-  if (!isText(kind) && kind !== 't') {
+  if (!isText(kind)) {
     const elem = run.elem ?? elemKey(run.key, off);
-    const winner = pos ? own(pos, elem) : undefined;
+    const winner = P.get(pos, elem);
     if (winner === undefined) return run.elem === null;
     return run.elem === elem && run.key === winner[2];
   }
@@ -468,9 +537,34 @@ const pieceAt = (starts, off) => {
   return lo;
 };
 
+// A body grows by SEG_MAX slots at most. A text's body grown a keystroke
+// at a time is a chain of concatenations — a rope of the engine's own, some
+// 32 bytes a unit — that the first read inside it copies whole: past the cap
+// the next slots start a segment of their own, and the full one is sealed
+// flat, joined to the sealed one before it (`sealText`), so a read inside
+// what was typed never copies it again. A list's body is copied whole
+// whenever it grows or is split: a list's segment holds SEG_MAX slots at
+// most, its content cut to that size when it is laid (a gap is any length,
+// a text's piece from a file is one flat string). What a block serializes
+// as does not see it: a run's content is one RLE whatever segments it is
+// read from.
+const SEG_MAX = 2048;
+
+// What sealing a body read last: kept, so that no compiler drops the read.
+let sealed = 0;
+// A text's body read once in the middle: an engine that keeps a
+// concatenation as a rope (V8's cons strings) flattens it there, in place —
+// the same string, one buffer — and every version that shares it gains.
+const seal = (body) => {
+  counters.seals++;
+  if (typeof body === 'string' && body.length > 0) sealed ^= body.charCodeAt(body.length >> 1);
+};
+
 // A segment of `len` slots of `r` at `off` after the items `out` holds,
 // joined to the last when it continues it (same run, next slot, shown
-// alike, both alive or both gaps); a new one goes into the run's `segs` too.
+// alike, both alive or both gaps) and the two hold SEG_MAX slots at most;
+// a new one goes into the run's `segs` too — a list's content past the cap
+// in segments of SEG_MAX, a text's piece whole.
 const pushSeg = (r, off, len, vis, body, out) => {
   const last = out[out.length - 1];
   if (
@@ -479,7 +573,8 @@ const pushSeg = (r, off, len, vis, body, out) => {
     last.run === r.key &&
     last.off + last.len === off &&
     last.vis === vis &&
-    (last.body === null) === (body === null)
+    (last.body === null) === (body === null) &&
+    (body === null || last.len + len <= SEG_MAX)
   ) {
     last.len += len;
     if (body !== null) {
@@ -488,9 +583,18 @@ const pushSeg = (r, off, len, vis, body, out) => {
     }
     return;
   }
-  const seg = { run: r.key, off, len, vis, body, node: null };
-  out.push(seg);
-  r.segs.push(seg);
+  if (body === null || len <= SEG_MAX || typeof body === 'string') {
+    const seg = { run: r.key, off, len, vis, body, node: null };
+    out.push(seg);
+    r.segs.push(seg);
+    return;
+  }
+  for (let at = 0; at < len; at += SEG_MAX) {
+    const n = Math.min(SEG_MAX, len - at);
+    const seg = { run: r.key, off: off + at, len: n, vis, body: body.slice(at, at + n), node: null };
+    out.push(seg);
+    r.segs.push(seg);
+  }
 };
 
 // The segments of slots [from, to) of `r`, from its content pieces (`r.rle`,
@@ -500,7 +604,7 @@ const pushSeg = (r, off, len, vis, body, out) => {
 const emitPieces = (kind, pos, r, starts, from, to, out) => {
   const pieces = r.rle;
   const text = isText(kind);
-  const perSlot = !text && pos !== null;
+  const perSlot = !text && pos.size > 0;
   for (let p = pieceAt(starts, from); p < pieces.length; p++) {
     const start = starts[p];
     if (start >= to) break;
@@ -698,8 +802,9 @@ const walkSubtree = (getRun, kind, pos, topKey, items = [], copies = new Map(), 
 // records, where each stands — a root, a child, or waiting — and the walk as
 // the rope, in one pass.
 const hydrate = (seq, base) => {
+  counters.hydrations++;
   const kind = seq.k;
-  const pos = seq.pos ?? null;
+  const pos = mapOf(seq.pos);
   const records = new Map();
   for (const key of Object.keys(seq.runs)) records.set(key, recordOf(key, seq.runs[key]));
   const roots = [];
@@ -791,13 +896,17 @@ const hydrate = (seq, base) => {
     oldest,
     oldestAnchor,
     lineage,
+    pos,
+    vals: mapOf(seq.vals),
+    marks: mapOf(seq.marks),
+    marksIndex: null,
+    views: null,
     rendered: null,
     elems: null,
     elemIndex: null,
     json: null,
   };
-  const maps = { cuts: seq.cuts, ext: seq.ext, pos: seq.pos, vals: seq.vals, marks: seq.marks };
-  const block = createBlock(kind, seq.ts, maps, state);
+  const block = createBlock(kind, seq.ts, seq.cuts, seq.ext, state);
   lineage.head = block;
   return block;
 };
@@ -807,16 +916,31 @@ const stampOfKey = (key) => {
   return [ts, origin];
 };
 
+// The engine's block of each plain block it was asked for, with the base it
+// was built under: a block read from a file is hydrated once — by the first
+// reading and the op after it alike — and nothing keeps the pair alive but
+// the plain block itself (an entry that moved on to the engine's block
+// lets both go).
+const HYDRATED = new WeakMap();
+
 // A block as the engine holds it, from whatever was given: a block of this
 // engine (rebuilt under `base` when it was built under another), or plain
-// JSON (a test's literal, a block from before this engine) hydrated.
+// JSON (a block read from a file, a test's literal) hydrated — once per
+// plain block and base.
 const asBlock = (seq, base = null) => {
   const st = STATE.get(seq);
   if (st === undefined) {
+    const hit = HYDRATED.get(seq);
+    if (hit !== undefined && sameBase(hit.base, base)) return hit.block;
     const plain = normalizeJson(seq);
-    if (plain === null) return hydrate({ k: seq.k === 'l' ? 'l' : 't', ts: 0, runs: {} }, base);
-    plain.ts = Number.isSafeInteger(seq.ts) ? seq.ts : stampsMax(plain);
-    return hydrate(plain, base);
+    let block;
+    if (plain === null) block = hydrate({ k: seq.k === 'l' ? 'l' : 't', ts: 0, runs: {} }, base);
+    else {
+      plain.ts = Number.isSafeInteger(seq.ts) ? seq.ts : stampsMax(plain);
+      block = hydrate(plain, base);
+    }
+    if (seq !== null && typeof seq === 'object') HYDRATED.set(seq, { base, block });
+    return block;
   }
   if (st.base !== base && (base !== null || st.base !== null) && !sameBase(st.base, base)) {
     const plain = plainOf(seq);
@@ -885,46 +1009,116 @@ const heldAt = (block, i) => {
   return cursor === null ? undefined : cursor.item.body[i - cursor.v];
 };
 
+// The value of the slot of `item` at `k`: what an assignment set, else what
+// it holds (a text's value is its embed's, at a slot that holds one).
+const valueOf = (st, item, k) => {
+  const held = item.body[k];
+  if (st.vals.size === 0 || (isText(st.kind) && held !== EMBED)) return held;
+  const run = runOf(st, item.run);
+  const assigned = P.get(st.vals, run.elem ?? elemKey(item.run, item.off + k));
+  return assigned === undefined ? held : assigned[2];
+};
+
 const valueAt = (block, i) => {
   const st = STATE.get(block);
   const cursor = shownAt(st, i);
-  if (cursor === null) return undefined;
-  const { item } = cursor;
-  const k = i - cursor.v;
-  const held = item.body[k];
-  if (!block.vals) return held;
-  // A text's value is its embed's, at a slot that holds one.
-  if (isText(st.kind) && held !== EMBED) return held;
-  const run = runOf(st, item.run);
-  const assigned = own(block.vals, run.elem ?? elemKey(item.run, item.off + k));
-  return assigned === undefined ? held : assigned[2];
+  return cursor === null ? undefined : valueOf(st, cursor.item, i - cursor.v);
+};
+
+/**
+ * What visible [i, i + count) reads as, from the rope in O(log n + count): a
+ * text's characters, a list's values (an assigned one where one is).
+ */
+const valuesAt = (block, i, count) => {
+  const st = STATE.get(block);
+  const text = isText(st.kind);
+  let out = text ? '' : [];
+  const cursor = count > 0 ? visibleAt(st, i) : null;
+  if (cursor === null) return out;
+  let k = i - cursor.v;
+  for (let item = cursor.item; item !== null && out.length < count; item = T.next(cursor), k = 0) {
+    if (!item.vis) continue;
+    const n = Math.min(item.len - k, count - out.length);
+    if (text) out += item.body.slice(k, k + n);
+    else for (let j = k; j < k + n; j++) out.push(valueOf(st, item, j));
+  }
+  return out;
+};
+
+// The runs an element of which holds an assigned value: a full reading
+// looks values up there alone — every other element reads as it was
+// inserted, its name never made.
+const assignedRuns = (st) => {
+  const out = new Set();
+  for (const [key] of P.entries(st.vals)) {
+    const e = parseElem(key);
+    if (e !== null) out.add(e.run);
+  }
+  return out;
 };
 
 // What the field reads as: the visible elements in order — kept per
 // version; a text's comes from the rope's own cache (./btree.js), so after
-// one op it costs the path the op copied, not the text.
+// one op it costs the path the op copied, not the text. A list's is made
+// whole when nothing gave it from the version before (`derive`).
 const render = (block) => {
   const st = STATE.get(block);
   if (st.rendered !== null) return st.rendered;
   let out;
   if (isText(st.kind)) out = T.text(st.root);
   else {
+    counters.listRenders++;
     out = [];
-    const { vals } = block;
+    const flagged = st.vals.size > 0 ? assignedRuns(st) : null;
     for (const item of T.iterate(st.root)) {
       if (!item.vis) continue;
-      const run = vals ? runOf(st, item.run) : null;
-      for (let k = 0; k < item.len; k++) {
-        const held = item.body[k];
-        if (vals) {
-          const assigned = own(vals, run.elem ?? elemKey(item.run, item.off + k));
-          out.push(assigned === undefined ? held : assigned[2]);
-        } else out.push(held);
-      }
+      const run = flagged === null ? null : runOf(st, item.run);
+      if (run === null || (run.elem === null && !flagged.has(item.run))) {
+        for (let k = 0; k < item.len; k++) out.push(item.body[k]);
+      } else for (let k = 0; k < item.len; k++) out.push(valueOf(st, item, k));
     }
   }
   st.rendered = out;
   return out;
+};
+
+/**
+ * A list's reading after an op, derived from the reading before it and what
+ * the op changed (src/text/text.js `changeOf`: splices in the indices the
+ * reading had when each applied, a `setAt`, a `move`) instead of made
+ * whole: the array before copied once (a native copy), the change laid on
+ * it, the values it brings read from the rope. Kept as the block's reading
+ * when its length is the block's; nothing when `before` was never read.
+ */
+const derive = (before, block, changes) => {
+  const st = STATE.get(block);
+  const prev = STATE.get(before).rendered;
+  if (isText(st.kind) || st.rendered !== null || prev === null || !Array.isArray(changes)) return;
+  // Native slices joined by one concat: the elements copied twice, never
+  // moved one by one (a splice or a copyWithin on a copy is slower here).
+  let out = prev;
+  for (const change of changes) {
+    const { action, index } = change;
+    if (action === 'splice') {
+      const added = change.content === undefined ? 0 : change.content.length;
+      const values = added === 0 ? [] : valuesAt(block, index, added);
+      const rest = index + change.count;
+      if (index === out.length) out = out.concat(values);
+      else if (rest >= out.length) out = out.slice(0, index).concat(values);
+      else out = out.slice(0, index).concat(values, out.slice(rest));
+    } else if (action === 'setAt') {
+      if (out === prev) out = prev.slice();
+      out[index] = valueAt(block, index);
+    } else if (action === 'move') {
+      const { from, to } = change;
+      const value = [valueAt(block, to)];
+      out =
+        from < to
+          ? out.slice(0, from).concat(out.slice(from + 1, to + 1), value, out.slice(to + 1))
+          : out.slice(0, to).concat(value, out.slice(to, from), out.slice(from + 1));
+    } else return;
+  }
+  if (out.length === st.root.v) st.rendered = out;
 };
 
 // The names of the visible elements in order — a list's members, as the
@@ -933,6 +1127,7 @@ const render = (block) => {
 const elems = (block) => {
   const st = STATE.get(block);
   if (st.elems !== null) return st.elems;
+  counters.elemLists++;
   const out = [];
   for (const item of T.iterate(st.root)) {
     if (!item.vis) continue;
@@ -952,12 +1147,31 @@ const elemIndexOf = (block) => {
   st.elemIndex = index;
   return index;
 };
-const hasElem = (block, key) => elemIndexOf(block).has(key);
-/** Where the element `key` shows in the reading, or -1. */
+/**
+ * Where the element `key` shows in the reading, or -1: its showing slot —
+ * the position run the newest move named, else its own — read from the
+ * rope, O(log n), on the head of its lineage; an older version reads its
+ * list of names, made once, rather than fork the head's hints.
+ */
 const indexOfElem = (block, key) => {
-  const i = elemIndexOf(block).get(key);
-  return i === undefined ? -1 : i;
+  const st = STATE.get(block);
+  if (st.lineage.head !== block) {
+    const i = elemIndexOf(block).get(key);
+    return i === undefined ? -1 : i;
+  }
+  const e = parseElem(key);
+  if (e === null) return -1;
+  const winner = P.get(st.pos, key);
+  const run = runOf(st, winner === undefined ? e.run : winner[2]);
+  const off = winner === undefined ? e.offset : 0;
+  // A slot shows under the name its run gives it: a position run's, the moved element's.
+  if (run === undefined || run.elem !== (winner === undefined ? null : key) || !run.placed || off >= run.len) {
+    return -1;
+  }
+  const at = positionOfSlot(st, run, off);
+  return at.vis ? at.v : -1;
 };
+const hasElem = (block, key) => indexOfElem(block, key) !== -1;
 
 // The element at visible index `i`: its name (a list element keeps it across
 // moves; a text element's is its slot) or null out of range.
@@ -999,7 +1213,9 @@ const placeInsert = (block, i, origin, len = 1) => {
   const k = i - 1 - cursor.v;
   const off = cursor.item.off + k;
   if (childrenAt(r.R, off) === undefined && off + 1 >= r.len) {
-    if (r.origin === origin && r.len + len <= MAX_RUN) return { run: r.key, from: r.len };
+    // A position run (a move's) holds its element alone: what is typed after
+    // it is a run of its own, or every slot added would show as that element.
+    if (r.origin === origin && r.elem === null && r.len + len <= MAX_RUN) return { run: r.key, from: r.len };
     return { at: `>${elemKey(r.key, off)}` };
   }
   return { at: `<${elemAtSlot(st, cursor.s + k + 1)}` };
@@ -1157,9 +1373,12 @@ const draft = (block) => {
     ts: block.ts,
     cuts: block.cuts ?? null,
     ext: block.ext ?? null,
-    pos: block.pos ?? null,
-    vals: block.vals ?? null,
-    marks: block.marks ?? null,
+    pos: st.pos,
+    vals: st.vals,
+    marks: st.marks,
+    // The index of the marks holds across an op that leaves them (./marks
+    // below): the order of the slots their anchors name never changes.
+    marksIndex: st.marksIndex,
     lineage: st.lineage,
     copiedPending: false,
     copiedRoots: false,
@@ -1179,17 +1398,17 @@ const finish = (d) => {
     oldest: d.oldest,
     oldestAnchor: d.oldestAnchor,
     lineage: d.lineage,
+    pos: d.pos,
+    vals: d.vals,
+    marks: d.marks,
+    marksIndex: d.marksIndex,
+    views: null,
     rendered: null,
     elems: null,
     elemIndex: null,
     json: null,
   };
-  const block = createBlock(
-    d.kind,
-    d.ts,
-    { cuts: d.cuts, ext: d.ext, pos: d.pos, vals: d.vals, marks: d.marks },
-    state,
-  );
+  const block = createBlock(d.kind, d.ts, d.cuts, d.ext, state);
   d.lineage.head = block;
   return block;
 };
@@ -1357,7 +1576,10 @@ const placeRun = (d, run) => {
     }
     setRun(d, parent);
   }
-  for (const copy of copies.values()) setRun(d, copy);
+  for (const copy of copies.values()) {
+    setRun(d, copy);
+    arrived(d, copy.key);
+  }
   for (const key of copies.keys()) {
     settleChildren(d, key, 0);
     settleRun(d, key);
@@ -1428,7 +1650,17 @@ const extendRun = (d, key, content) => {
   if (pred === null) {
     const last = SL.last(run.segs);
     const first = items[0];
-    if (last.vis === first.vis && (last.body === null) === (first.body === null) && last.off + last.len === from) {
+    const follows =
+      last.vis === first.vis && (last.body === null) === (first.body === null) && last.off + last.len === from;
+    if (follows && last.body !== null && last.len + first.len > SEG_MAX) {
+      // The last segment is full: the keystroke starts the next — a text's
+      // full one sealed, and joined to the sealed one before it.
+      if (isText(d.kind)) sealText(d, run, last, items);
+      else {
+        d.root = T.insertAfter(d.root, last, items, d.lineage);
+        run.segs = SL.append(run.segs, items);
+      }
+    } else if (follows) {
       // The common keystroke: the last segment grows.
       const grown = {
         ...last,
@@ -1449,9 +1681,38 @@ const extendRun = (d, key, content) => {
   run.len = from + content.length;
   run.tails += tails;
   setRun(d, run);
+  arrived(d, key);
   d.slots += content.length;
   settleChildren(d, key, from);
   settleRun(d, key);
+};
+
+// A text's full segment `last` of `run`, the next slots `items` after it:
+// joined to the segment before it when the two are one stretch of the rope
+// (contiguous, shown alike, nothing between them) into one flat body, else
+// sealed flat alone. A run typed long is then two segments — what was typed,
+// one buffer, and the end being typed, a concatenation of SEG_MAX slots at
+// most — for one copy of the run per SEG_MAX keystrokes.
+const sealText = (d, run, last, items) => {
+  const found = last.off > 0 ? SL.find(run.segs, last.off - 1) : null;
+  const prev = found === null ? null : found.entry;
+  const joins =
+    prev !== null &&
+    prev.body !== null &&
+    prev.vis === last.vis &&
+    prev.off + prev.len === last.off &&
+    T.before(d.root, last, d.lineage) === prev;
+  if (!joins) {
+    seal(last.body);
+    d.root = T.insertAfter(d.root, last, items, d.lineage);
+    run.segs = SL.append(run.segs, items);
+    return;
+  }
+  const joined = { ...prev, len: prev.len + last.len, body: prev.body + last.body, node: null };
+  seal(joined.body);
+  d.root = T.replace(d.root, last, items, d.lineage);
+  d.root = T.replace(d.root, prev, [joined], d.lineage);
+  run.segs = replacedIn(run.segs, prev, 2, [joined, ...items]);
 };
 
 // A cut of [offset, offset + length) of a placed run: the segments it
@@ -1539,10 +1800,11 @@ const settleRun = (d, key) => {
     if (!list) break;
     const run = runOf(d, key);
     const len = run.len;
-    // The extension that continues the run, and what lies past it still.
+    // The extension that continues the run, and what lies past it still —
+    // none for a position run (a move's), which holds its element alone.
     let hit;
     const rest = [];
-    for (let i = 0; i < list.length; i++) {
+    for (let i = 0; i < list.length && run.elem === null; i++) {
       const from = list[i][0];
       if (from === len) hit ??= list[i];
       else if (from > len) rest.push(list[i]);
@@ -1587,21 +1849,21 @@ const settleRun = (d, key) => {
 // they arrived — each one a thing a peer could pile up for nothing.
 const pendingCount = (block) => {
   const st = STATE.get(block);
-  let n = st.pendingRuns;
-  for (const key of keysOf(block.cuts)) n += block.cuts[key].length;
-  for (const key of keysOf(block.ext)) n += block.ext[key].length;
-  for (const map of ['pos', 'vals']) for (const key of keysOf(block[map])) if (!holdsElem(st, key)) n++;
-  for (const key of keysOf(block.marks)) if (isPlaceholder(block.marks[key])) n++;
-  return n;
+  return waiting(st, block.cuts, block.ext);
 };
 
 // The same over a draft: what the op has added so far counts.
-const pendingOfDraft = (d) => {
-  let n = d.pendingRuns;
-  for (const key of keysOf(d.cuts)) n += d.cuts[key].length;
-  for (const key of keysOf(d.ext)) n += d.ext[key].length;
-  for (const map of ['pos', 'vals']) for (const key of keysOf(d[map])) if (!holdsElem(d, key)) n++;
-  for (const key of keysOf(d.marks)) if (isPlaceholder(d.marks[key])) n++;
+const pendingOfDraft = (d) => waiting(d, d.cuts, d.ext);
+
+// What waits in a state (a block's or a draft's): an op that might add to it
+// asks, which is an op about something not here yet.
+const waiting = (st, cuts, ext) => {
+  let n = st.pendingRuns;
+  for (const key of keysOf(cuts)) n += cuts[key].length;
+  for (const key of keysOf(ext)) n += ext[key].length;
+  for (const [key] of P.entries(st.pos)) if (!holdsElem(st, key)) n++;
+  for (const [key] of P.entries(st.vals)) if (!holdsElem(st, key)) n++;
+  for (const [, mark] of P.entries(st.marks)) if (isPlaceholder(mark)) n++;
   return n;
 };
 
@@ -1645,10 +1907,16 @@ const applySplice = (given, stamp, payload, base = null, pendingMax = PENDING_MA
       if (pair[0] >= content.length || !isJson(pair[1]) || pair[1] === undefined) return malformed(seq);
     }
   }
+  // A register like any other, last writer wins: an assign to one of these
+  // slots that came first — from a node that saw the splice — keeps its
+  // value when it is the newer, whichever arrived first.
   const assignVals = (d, runKeyOf, from) => {
     if (vals === undefined || vals.length === 0) return;
-    const next = { ...(d.vals ?? {}) };
-    for (const [offset, value] of vals) next[elemKey(runKeyOf, from + offset)] = [ts, origin, value];
+    let next = d.vals;
+    for (const [offset, value] of vals) {
+      const elem = elemKey(runKeyOf, from + offset);
+      if (newer(next, elem, stamp)) next = P.set(next, elem, [ts, origin, value]);
+    }
     d.vals = next;
   };
   // `content` always names the kind — a string for a text, an array for a
@@ -1771,6 +2039,9 @@ const applySplice = (given, stamp, payload, base = null, pendingMax = PENDING_MA
       }
     } else {
       const target = runOf(d ?? st, run);
+      // A position run (a move's) holds its element alone: grown, every
+      // slot it took would show as that element.
+      if (target !== undefined && target.elem !== null) return malformed(seq);
       if (target !== undefined) {
         const len = target.len;
         if (len + content.length > MAX_RUN) return refused(seq, 'run', len + content.length, MAX_RUN);
@@ -1839,10 +2110,11 @@ const applyMark = (given, stamp, payload, base = null, pendingMax = PENDING_MAX)
   const [ts, origin] = stamp;
   const seq = asBlock(given, base);
   if (seq.k !== 't' || !payload || typeof payload !== 'object') return malformed(seq);
+  const st = STATE.get(seq);
   if (payload.off !== undefined) {
     const named = parseRun(payload.off);
     if (named === null) return malformed(seq);
-    const held = seq.marks && own(seq.marks, payload.off);
+    const held = P.get(st.marks, payload.off);
     if (held !== undefined && (held[4] & OFF) !== 0) return unchanged(seq);
     if (held === undefined) {
       if (belowBase(named.ts, named.origin, base)) return unchanged(seq);
@@ -1850,8 +2122,10 @@ const applyMark = (given, stamp, payload, base = null, pendingMax = PENDING_MAX)
       if (n >= pendingMax) return refused(seq, 'pending', n, pendingMax);
     }
     const d = draft(seq);
-    d.marks = { ...(d.marks ?? {}) };
-    d.marks[payload.off] = held === undefined ? [...PLACEHOLDER] : [held[0], held[1], held[2], held[3], held[4] | OFF];
+    const flagged = held === undefined ? [...PLACEHOLDER] : [held[0], held[1], held[2], held[3], held[4] | OFF];
+    d.marks = P.set(d.marks, payload.off, flagged);
+    // A mark in force switched off leaves the index; a placeholder was never in it.
+    if (held !== undefined) d.marksIndex = withoutMark(d.marksIndex, payload.off);
     d.ts = Math.max(d.ts, named.ts);
     d.oldest = minStamp(d.oldest, [named.ts, named.origin]);
     return { seq: finish(d), changed: true, reason: null };
@@ -1865,14 +2139,241 @@ const applyMark = (given, stamp, payload, base = null, pendingMax = PENDING_MAX)
   }
   if (many !== undefined && many !== true) return malformed(seq);
   const id = runKey(ts, origin);
-  const held = seq.marks && own(seq.marks, id);
+  const held = P.get(st.marks, id);
   if (held !== undefined && !isPlaceholder(held)) return unchanged(seq);
   const d = draft(seq);
-  d.marks = { ...(d.marks ?? {}) };
-  d.marks[id] = [start, end, key, value, (many ? MANY : 0) | (held === undefined ? 0 : OFF)];
+  const mark = [start, end, key, value, (many ? MANY : 0) | (held === undefined ? 0 : OFF)];
+  d.marks = P.set(d.marks, id, mark);
+  // A mark that lands on its placeholder stays off: the index holds the marks in force.
+  if (held === undefined) d.marksIndex = withMark(d, d.marksIndex, id, mark, base);
   d.ts = Math.max(d.ts, ts);
   d.oldest = minStamp(d.oldest, [ts, origin]);
   return { seq: finish(d), changed: true, reason: null };
+};
+
+/** The mark `id` of a text's block — `[from, to, key, value, flags]` — or undefined. */
+const markOf = (block, id) => (typeof id === 'string' ? P.get(STATE.get(block).marks, id) : undefined);
+
+// ---- the index of the marks ------------------------------------------------
+//
+// What a keystroke into a marked text asks — the style at one character
+// (`styleAt`, an insert's change report), the marks of a key newer than an
+// arriving one (`newerRanges`) — answered without reading every mark. The
+// index keeps the anchors of the marks in force sorted in walk order. An
+// anchor is a boundary beside a slot — `>e` right after `e`, `<e` right
+// before it, the head, the end — and the slots never change order: an op
+// adds slots between them and a cut leaves its slots as gaps. So an order
+// made once holds for every version after it, whatever is typed, and an op
+// that leaves the marks hands the index on as it is (`draft`). As a number,
+// an anchor at ordinal o is 2o + 1 before a slot and 2o after one (the head
+// 0, the end 2·total + 1): two anchors of one number name one boundary for
+// good, and a slot inserted at o goes between the two kinds.
+//
+// A mark changes it by one insertion or removal (`withMark`, `withoutMark`:
+// O(anchors) copied as flat arrays, O(log anchors × log n) read from the
+// rope); the run an anchor waited for arriving, a reset or another base drop
+// it, and the next query makes it again (O(anchors × log n)). A query reads
+// the ordinals of O(log anchors) anchors from the rope to count those at or
+// before a character — `p` — and the marks in force there are those that
+// open below `p` and close at or past it: a max segment tree over the
+// opening anchors in order, each node the latest close under it, gives them
+// in O(k log m). Per key, the marks in stamp order, the newest last.
+
+// An anchor as the index keeps it: the slot it is beside (`run`, `offset`)
+// and on which side (`after`), or `run` null for the head (after) and the end
+// (before) — an anchor below the base reads as the head; null while its slot
+// is not placed here (`waits` names the run).
+const anchorEnd = (st, token, base, m, open, waits) => {
+  if (token === HEAD) return { m, open, run: null, offset: 0, after: true };
+  if (token === END) return { m, open, run: null, offset: 0, after: false };
+  const { side, elem } = parseAnchor(token);
+  if (belowBase(elem.ts, elem.origin, base)) return { m, open, run: null, offset: 0, after: true };
+  const run = runOf(st, elem.run);
+  if (run === undefined || !run.placed || elem.offset >= run.len) {
+    waits.add(elem.run);
+    return null;
+  }
+  return { m, open, run: elem.run, offset: elem.offset, after: side === 'R' };
+};
+
+// An anchor's place in the current version, as a number (the head's hints).
+const endKey = (st, end) => {
+  counters.anchorReads++;
+  if (end.run === null) return end.after ? 0 : 2 * st.root.s + 1;
+  return 2 * positionOfSlot(st, runOf(st, end.run), end.offset).s + (end.after ? 2 : 1);
+};
+
+// A mark as the index holds it; `n` numbers it within the index (below
+// `next`), so a pass over the anchors finds a mark's close without a map.
+const markEntry = (id, mark, n) => {
+  const { ts, origin } = parseRun(id);
+  const many = (mark[4] & MANY) !== 0;
+  return { id, n, ts, origin, from: mark[0], to: mark[1], key: mark[2], value: mark[3], many };
+};
+
+// The search part of an index over its sorted anchors: the opening anchors
+// in order (`opens`, with where each opens, `A`) and a max segment tree over
+// where each closes (`tree`, its leaves from `size` on, -1 past the last).
+const searchOf = (ends, next) => {
+  const closeAt = new Int32Array(next);
+  for (let i = 0; i < ends.length; i++) if (!ends[i].open) closeAt[ends[i].m.n] = i;
+  const count = ends.length >> 1;
+  let size = 1;
+  while (size < count) size <<= 1;
+  const tree = new Int32Array(2 * size).fill(-1);
+  const opens = [];
+  const A = new Int32Array(count);
+  for (let i = 0; i < ends.length; i++) {
+    if (!ends[i].open) continue;
+    A[opens.length] = i;
+    tree[size + opens.length] = closeAt[ends[i].m.n];
+    opens.push(ends[i].m);
+  }
+  for (let i = size - 1; i >= 1; i--) tree[i] = Math.max(tree[2 * i], tree[2 * i + 1]);
+  return { opens, A, tree, size };
+};
+
+// The marks of a key in stamp order, `entry` among them.
+const byStamp = (x, y) => compareClock([x.ts, x.origin], [y.ts, y.origin]);
+const keyedWith = (byKey, entry) => {
+  const out = new Map(byKey);
+  const held = byKey.get(entry.key);
+  const list = held === undefined ? [] : held.slice();
+  let i = list.length;
+  while (i > 0 && byStamp(list[i - 1], entry) > 0) i--;
+  list.splice(i, 0, entry);
+  out.set(entry.key, list);
+  return out;
+};
+
+// The index of the marks in force of a version, made whole: every anchor
+// placed, sorted by its number.
+const buildMarks = (st, base) => {
+  counters.markIndexes++;
+  const waits = new Set();
+  const ends = [];
+  const keys = [];
+  const byKey = new Map();
+  let next = 0;
+  for (const [id, mark] of P.entries(st.marks)) {
+    if ((mark[4] & OFF) !== 0) continue;
+    const m = markEntry(id, mark, next);
+    const from = anchorEnd(st, m.from, base, m, true, waits);
+    const to = anchorEnd(st, m.to, base, m, false, waits);
+    if (from === null || to === null) continue;
+    next++;
+    ends.push(from, to);
+    keys.push(endKey(st, from), endKey(st, to));
+    const list = byKey.get(m.key);
+    if (list === undefined) byKey.set(m.key, [m]);
+    else list.push(m);
+  }
+  const order = [];
+  for (let i = 0; i < ends.length; i++) order.push(i);
+  order.sort((x, y) => keys[x] - keys[y]);
+  const sorted = [];
+  for (let i = 0; i < order.length; i++) sorted.push(ends[order[i]]);
+  for (const list of byKey.values()) list.sort(byStamp);
+  return { base, ends: sorted, byKey, waits, next, ...searchOf(sorted, next) };
+};
+
+// Where an anchor of number `key` goes among the sorted anchors: after
+// every one at or below it.
+const insertionOf = (st, ends, key) => {
+  let lo = 0;
+  let hi = ends.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (endKey(st, ends[mid]) <= key) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+};
+
+// The index with mark `id` in force added — over the draft of the op that
+// makes it, whose rope is the version's; null when there was none to add to.
+const withMark = (d, index, id, mark, base) => {
+  if (index === null || !sameBase(index.base, base)) return null;
+  const m = markEntry(id, mark, index.next);
+  const waits = new Set();
+  const from = anchorEnd(d, m.from, base, m, true, waits);
+  const to = anchorEnd(d, m.to, base, m, false, waits);
+  if (from === null || to === null) {
+    // Waiting for an anchor: in the index once its run is here.
+    for (const run of index.waits) waits.add(run);
+    return { ...index, waits };
+  }
+  const ends = index.ends.slice();
+  const a = endKey(d, from);
+  const b = endKey(d, to);
+  ends.splice(insertionOf(d, ends, a), 0, from);
+  ends.splice(insertionOf(d, ends, b), 0, to);
+  const next = index.next + 1;
+  return { base, ends, byKey: keyedWith(index.byKey, m), waits: index.waits, next, ...searchOf(ends, next) };
+};
+
+// The index with mark `id` switched off.
+const withoutMark = (index, id) => {
+  if (index === null) return null;
+  const ends = [];
+  let entry = null;
+  for (const end of index.ends) {
+    if (end.m.id === id) entry = end.m;
+    else ends.push(end);
+  }
+  if (entry === null) return index;
+  const byKey = new Map(index.byKey);
+  const list = [];
+  for (const m of byKey.get(entry.key)) if (m !== entry) list.push(m);
+  if (list.length > 0) byKey.set(entry.key, list);
+  else byKey.delete(entry.key);
+  const { base, waits, next } = index;
+  return { base, ends, byKey, waits, next, ...searchOf(ends, next) };
+};
+
+// The index a run's arrival (placed, or grown) leaves: none when an anchor
+// waited for it — the next query makes it again.
+const arrived = (d, key) => {
+  if (d.marksIndex !== null && d.marksIndex.waits.has(key)) d.marksIndex = null;
+};
+
+// The head version's index for `base`, made when it has none.
+const marksIndexOf = (st, base) => {
+  if (st.marksIndex === null || !sameBase(st.marksIndex.base, base)) st.marksIndex = buildMarks(st, base);
+  return st.marksIndex;
+};
+
+// The marks in force at the slot of ordinal `ordinal`: opened at or below
+// it, closed past it.
+const marksOver = (st, index, ordinal) => {
+  const { ends, opens, A, tree, size } = index;
+  // How many anchors lie at or before the slot: numbers up to 2·ordinal + 1.
+  const p = insertionOf(st, ends, 2 * ordinal + 1);
+  // How many marks open below `p`: a prefix of `opens`.
+  let count = 0;
+  let top = opens.length;
+  while (count < top) {
+    const mid = (count + top) >> 1;
+    if (A[mid] < p) count = mid + 1;
+    else top = mid;
+  }
+  // Of those, the ones that close at or past `p`: down the tree where the
+  // latest close under a node reaches it, within the prefix.
+  const out = [];
+  const stack = [1, 0, size];
+  while (stack.length > 0) {
+    const width = stack.pop();
+    const from = stack.pop();
+    const node = stack.pop();
+    if (from >= count || tree[node] < p) continue;
+    if (width === 1) {
+      out.push(opens[from]);
+      continue;
+    }
+    const half = width >> 1;
+    stack.push(2 * node + 1, from + half, half, 2 * node, from, half);
+  }
+  return out;
 };
 
 // Marks by key, then by stamp: the order their values are laid over one
@@ -1904,72 +2405,62 @@ const styleOf = (active) => {
   return marks && Object.keys(marks).length > 0 ? marks : null;
 };
 
-// Where an anchor falls in the walk, read from the rope's measures (the
-// head version's hints): the ordinal of its slot, plus one after it. As
-// walkMarks reads it — the head for an anchor below the base, null for one
-// whose run is not placed here.
-const ordinalAt = (st, token, base) => {
-  if (token === HEAD) return 0;
-  if (token === END) return st.root.s;
-  const { side, elem } = parseAnchor(token);
-  if (belowBase(elem.ts, elem.origin, base)) return 0;
-  const run = runOf(st, elem.run);
-  if (run === undefined || !run.placed || elem.offset >= run.len) return null;
-  return positionOfSlot(st, run, elem.offset).s + (side === 'L' ? 0 : 1);
-};
-
 /**
  * The style of the visible element at `index` — what `spans()` reads there:
- * per key the newest value, a stack listed — or null with none. O(marks ×
- * log n): what a change report reads an insert's marks with, never a walk.
+ * per key the newest value, a stack listed — or null with none. O(log m ×
+ * log n + k) over the index of the marks (made once, kept across the ops
+ * that leave the marks): what a change report reads an insert's marks
+ * with, never a walk and never every mark.
  */
 const styleAt = (block, index, base = null) => {
-  const ids = keysOf(block.marks);
-  if (ids.length === 0) return null;
+  if (STATE.get(block).marks.size === 0) return null;
   const st = ensureHead(block);
   if (!Number.isInteger(index) || index < 0 || index >= st.root.v) return null;
   const found = shownAt(st, index);
   const offset = found.item.off + (index - found.v);
   const ordinal = positionOfSlot(st, runOf(st, found.item.run), offset).s;
-  const active = [];
-  for (const id of ids) {
-    const [from, to, key, value, flags] = block.marks[id];
-    if ((flags & OFF) !== 0) continue;
-    const lo = ordinalAt(st, from, base);
-    const hi = ordinalAt(st, to, base);
-    if (lo === null || hi === null || lo > ordinal || ordinal >= hi) continue;
-    const { ts, origin } = parseRun(id);
-    active.push({ id, ts, origin, key, value, many: (flags & MANY) !== 0 });
-  }
-  return styleOf(active);
+  const active = marksOver(st, marksIndexOf(st, base), ordinal);
+  return active.length === 0 ? null : styleOf(active);
+};
+
+// Where an anchor of the index stands in the reading: the visible slots
+// before it — as a cursor there reads (`indexOfCursor`).
+const visibleOfEnd = (st, end) => {
+  if (end.run === null) return end.after ? 0 : st.root.v;
+  const at = positionOfSlot(st, runOf(st, end.run), end.offset);
+  return at.v + (end.after && at.vis ? 1 : 0);
 };
 
 // Where a mark of `key` stamped `stamp` does not decide the reading: the
 // visible ranges `[start, end)` of the marks of the key in force that are
 // newer — any newer one replaces a plain mark, a newer plain one a stacked
-// mark (styleOf) — sorted by start. O(marks × log n): a change report reads
-// it, so a peer's older mark is never reported over text a newer one holds.
+// mark (styleOf) — sorted by start. O(newer × log n) over the index's marks
+// of the key in stamp order: a change report reads it, so a peer's older
+// mark is never reported over text a newer one holds — and a mark made
+// here, the newest, reads none.
 const newerRanges = (block, key, stamp, stacked, base = null) => {
   const out = [];
-  if (!block.marks) return out;
-  const indexAt = (token) => {
-    if (token !== HEAD && token !== END) {
-      const anchor = parseAnchor(token);
-      if (anchor !== null && belowBase(anchor.elem.ts, anchor.elem.origin, base)) return 0;
-    }
-    return indexOfCursor(block, token);
-  };
-  for (const id of keysOf(block.marks)) {
-    const [from, to, k, , flags] = block.marks[id];
-    if (k !== key || (flags & OFF) !== 0 || (stacked && (flags & MANY) !== 0)) continue;
-    const { ts, origin } = parseRun(id);
-    if (compareClock([ts, origin], stamp) <= 0) continue;
-    const start = indexAt(from);
-    const end = indexAt(to);
-    if (start !== null && end !== null && start < end) out.push([start, end]);
+  if (STATE.get(block).marks.size === 0) return out;
+  const st = ensureHead(block);
+  const index = marksIndexOf(st, base);
+  const list = index.byKey.get(key);
+  if (list === undefined) return out;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const m = list[i];
+    if (compareClock([m.ts, m.origin], stamp) <= 0) break;
+    if (stacked && m.many) continue;
+    const from = anchorEnd(st, m.from, base, m, true, NO_WAITS);
+    const to = anchorEnd(st, m.to, base, m, false, NO_WAITS);
+    if (from === null || to === null) continue;
+    const start = visibleOfEnd(st, from);
+    const end = visibleOfEnd(st, to);
+    if (start < end) out.push([start, end]);
   }
   return out.sort((x, y) => x[0] - y[0]);
 };
+
+// Where a reading that only asks puts the runs an anchor waits for: nowhere.
+const NO_WAITS = Object.freeze({ add: () => {} });
 
 // The ordinal of every anchor the marks name, and the ordinal and visible
 // index of every visible slot — read in one walk of the rope, no hints, so
@@ -1978,8 +2469,8 @@ const walkMarks = (block, base) => {
   const st = STATE.get(block);
   const wanted = new Map(); // "run:offset" → ordinal of the slot, filled by the walk
   const marks = [];
-  for (const id of keysOf(block.marks)) {
-    const [from, to, key, value, flags] = block.marks[id];
+  for (const [id, mark] of P.entries(st.marks)) {
+    const [from, to, key, value, flags] = mark;
     if ((flags & OFF) !== 0) continue;
     const { ts, origin } = parseRun(id);
     marks.push({ id, ts, origin, from, to, key, value, many: (flags & MANY) !== 0 });
@@ -2024,7 +2515,7 @@ const walkMarks = (block, base) => {
 // character is left out. What `compact()` lays again over a text.
 const marksIn = (block, seq = block, base = null) => {
   const length = lengthOf(block);
-  if (length === 0 || !block.marks) return [];
+  if (length === 0 || STATE.get(block).marks.size === 0) return [];
   const { marks, ords, ordinalOf } = walkMarks(block, base);
   // How many visible characters sit below an ordinal: they read in ordinal order.
   const below = (ordinal) => {
@@ -2107,26 +2598,26 @@ const spans = (block, seq = block, base = null) => {
 
 // ---- registers: assign and move -------------------------------------------
 
-// A register write, LWW by stamp: null when the held one is as new.
+// A register write, LWW by stamp: false when the one the map holds is as new.
 const newer = (map, key, stamp) => {
-  const held = map && own(map, key);
+  const held = P.get(map, key);
   return held === undefined || compareClock([held[0], held[1]], stamp) < 0;
 };
 
-// An `assign`: the element's value register (lists only).
+// An `assign`: the element's value register (a list's element, a text's embed slot).
 const applyAssign = (given, stamp, payload, base = null, pendingMax = PENDING_MAX) => {
   const seq = asBlock(given, base);
   if (!payload || typeof payload !== 'object') return malformed(seq);
   const { elem, value } = payload;
   if (!isElemKey(elem) || !isJson(value) || value === undefined) return malformed(seq);
-  if (!newer(seq.vals, elem, stamp)) return unchanged(seq);
   const st = STATE.get(seq);
-  if (!(seq.vals && own(seq.vals, elem) !== undefined) && !holdsElem(st, elem)) {
+  if (!newer(st.vals, elem, stamp)) return unchanged(seq);
+  if (P.get(st.vals, elem) === undefined && !holdsElem(st, elem)) {
     const n = pendingCount(seq);
     if (n >= pendingMax) return refused(seq, 'pending', n, pendingMax);
   }
   const d = draft(seq);
-  d.vals = { ...(d.vals ?? {}), [elem]: [stamp[0], stamp[1], value] };
+  d.vals = P.set(d.vals, elem, [stamp[0], stamp[1], value]);
   d.ts = Math.max(d.ts, stamp[0]);
   d.oldest = minStamp(d.oldest, stamp);
   return { seq: finish(d), changed: true, reason: null };
@@ -2135,7 +2626,7 @@ const applyAssign = (given, stamp, payload, base = null, pendingMax = PENDING_MA
 // The slot an element shows at under `pos`: its position run's one slot
 // when a move named one, else its own; null when that run is not here.
 const slotShowing = (d, elem) => {
-  const winner = d.pos ? own(d.pos, elem) : undefined;
+  const winner = P.get(d.pos, elem);
   if (winner === undefined) {
     const e = parseElem(elem);
     const run = runOf(d, e.run);
@@ -2161,8 +2652,8 @@ const applyMove = (given, stamp, payload, base = null, pendingMax = PENDING_MAX)
   if (!isJson(value) || value === undefined) return malformed(seq);
   const key = runKey(ts, origin);
   const st = STATE.get(seq);
-  const moving = newer(seq.pos, elem, stamp);
-  if (moving && !(seq.pos && own(seq.pos, elem) !== undefined) && !holdsElem(st, elem)) {
+  const moving = newer(st.pos, elem, stamp);
+  if (moving && P.get(st.pos, elem) === undefined && !holdsElem(st, elem)) {
     const n = pendingCount(seq);
     if (n >= pendingMax) return refused(seq, 'pending', n, pendingMax);
   }
@@ -2188,7 +2679,7 @@ const applyMove = (given, stamp, payload, base = null, pendingMax = PENDING_MAX)
     // The register first, so the new run's slot shows or hides as it should.
     if (moving) {
       const was = slotShowing(d, elem);
-      d.pos = { ...(d.pos ?? {}), [elem]: [ts, origin, key] };
+      d.pos = P.set(d.pos, elem, [ts, origin, key]);
       if (was !== null) {
         const r = runOf(d, was[0]);
         if (r.placed) setShown(d, was[0], was[1], false);
@@ -2212,7 +2703,7 @@ const applyMove = (given, stamp, payload, base = null, pendingMax = PENDING_MAX)
   } else if (moving) {
     d = draft(current);
     const was = slotShowing(d, elem);
-    d.pos = { ...(d.pos ?? {}), [elem]: [ts, origin, key] };
+    d.pos = P.set(d.pos, elem, [ts, origin, key]);
     if (was !== null) {
       const r = runOf(d, was[0]);
       if (r.placed) setShown(d, was[0], was[1], false);
@@ -2351,23 +2842,36 @@ const join = (givenA, givenB) => {
 
 /**
  * The block of a sequence field as the engine reads it — the block itself,
- * hydrated under the entry's base when it is plain JSON (kept on the entry
- * under `entry.cache[field]` then). The third argument is of the old walk.
+ * or, when the record holds plain JSON (read from a file), its hydration
+ * under the field's floor: made once per plain block (`HYDRATED`), shared
+ * with the op that lands on it next.
  */
 const indexOf = (entry, field) => {
   const seq = own(entry.meta.blocks ?? {}, field);
   if (seq === undefined) return null;
   if (STATE.has(seq)) return seq;
-  const cache = (entry.cache ??= {});
-  const hit = own(cache, field);
-  if (hit !== undefined && hit.seq === seq) return hit.block;
-  const block = asBlock(seq, entry.meta.base);
-  cache[field] = { seq, block };
-  return block;
+  return asBlock(seq, floorOf(entry.meta, field));
 };
 
-/** What the engine counted: blocks forked from an older version (`rebuilds`), trees re-hinted after one (`rehints`). */
+/**
+ * What the engine counted (`counters` above): blocks forked from an older
+ * version (`rebuilds`), trees re-hinted after one (`rehints`), hydrations,
+ * mark indexes made whole and anchors read, lists read whole and their names
+ * listed, segments sealed.
+ */
 const stats = () => ({ ...counters, rehints: T.stats().rehints });
+
+/**
+ * The segments of placed run `run` of a block, in offset order — `[off, len,
+ * alive]` — what holds its slots, for a test to read; null when it is not placed.
+ */
+const segmentsIn = (block, run) => {
+  const r = runOf(STATE.get(block), run);
+  if (r === undefined || !r.placed) return null;
+  const out = [];
+  for (const seg of SL.iterate(r.segs)) out.push([seg.off, seg.len, seg.body !== null]);
+  return out;
+};
 
 module.exports = {
   PENDING_MAX,
@@ -2406,6 +2910,9 @@ module.exports = {
   hasElem,
   indexOfElem,
   valueAt,
+  valuesAt,
+  derive,
+  markOf,
   elemAt,
   placeInsert,
   rangesOf,
@@ -2429,4 +2936,6 @@ module.exports = {
   join,
   pendingCount,
   stats,
+  SEG_MAX,
+  segmentsIn,
 };

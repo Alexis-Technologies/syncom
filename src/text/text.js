@@ -85,14 +85,16 @@ const apply = (entry, field, held, op, stamp, limits) => {
   const base = floorOf(entry.meta, field);
   const payload = op.value;
   // The engine's block, hydrated once: a block read from a file is plain
-  // JSON, and both the op and the change report read the engine's state.
+  // JSON, and both the op and the change report read the engine's state —
+  // the hydration the reading before the op made (resolve), not another.
   const before = held === undefined ? undefined : S.asBlock(held, base);
   const block = before ?? S.createSeq(codeOf(kindOfOp(op)));
   // A splice's cuts read from the block before it, while that block is still
   // the head of its lineage: read after the splice, the old block is a fork
   // — the rope re-hinted whole, O(n), for every delete (two thirds of an
-  // editing trace's time went there).
+  // editing trace's time went there). A move's index before it, the same way.
   const cuts = op.type === 'splice' && before !== undefined ? cutSpansOf(before, op.value.cut) : null;
+  const from = op.type === 'move' && before !== undefined ? S.indexOfElem(before, op.value?.elem) : -1;
   const { pendingMax } = limits;
   const result =
     op.type === 'splice'
@@ -109,7 +111,12 @@ const apply = (entry, field, held, op, stamp, limits) => {
   if (!result.changed) return out;
   out.block = S.prune(result.seq, base);
   // What the reading shows of the op, in its indices — none when the field went.
-  if (out.block !== null) out.change = changeOf(op, stamp, before, out.block, base, cuts);
+  if (out.block !== null) out.change = changeOf(op, stamp, before, out.block, base, cuts, from);
+  // A list's reading from the one before and the change, not made whole
+  // again (a text's is the rope's own cache): when nothing was reset.
+  if (out.change !== undefined && before !== undefined && out.block === result.seq) {
+    S.derive(before, out.block, out.change);
+  }
   return out;
 };
 
@@ -138,7 +145,7 @@ const marksAt = (block, index, base) => S.styleAt(block, index, base) ?? {};
 // `setAt`; a move by its index before and after; a mark over the indices
 // its anchors fall at. What the reading does not show — a slot born dead,
 // an element not placed here — is no change.
-const changeOf = (op, stamp, held, block, base = null, cuts = null) => {
+const changeOf = (op, stamp, held, block, base = null, cuts = null, from = -1) => {
   const payload = op.value;
   const [ts, origin] = stamp;
   if (op.type === 'splice') {
@@ -166,10 +173,14 @@ const changeOf = (op, stamp, held, block, base = null, cuts = null) => {
       if (own !== shown || spans.length > 1) return undefined;
       const span = spans[0];
       if (span !== undefined && span.count > 0) {
-        // Every slot the op inserted shows: what it reads as is the content
-        // itself — never a slice of the whole reading, which a rope would flatten.
+        // Every slot of a text the op inserted shows: what it reads as is the
+        // content itself — never a slice of the whole reading, which a rope
+        // would flatten. A list's reads its values off the rope (a value an
+        // assign set before the slot arrived is the one it shows).
         const inserted =
-          span.count === content.length ? content.slice() : S.render(block).slice(span.index, span.index + span.count);
+          span.count === content.length && block.k === 't'
+            ? content.slice()
+            : S.valuesAt(block, span.index, span.count);
         const last = out[out.length - 1];
         // One cut at the insertion point and the insert: one splice, as the call made it.
         if (out.length === 1 && last.index === span.index) last.content = inserted;
@@ -186,27 +197,27 @@ const changeOf = (op, stamp, held, block, base = null, cuts = null) => {
     return out;
   }
   if (op.type === 'assign') {
-    const { elem, value } = payload;
-    let index = -1;
-    if (block.k === 't') {
-      const parsed = S.parseElem(elem);
-      const span = parsed === null ? null : S.spanOf(block, parsed.run, parsed.offset, 1);
-      if (span !== null && span.count === 1) index = span.index;
-    } else index = S.elems(block).indexOf(elem);
-    return index < 0 ? [] : [{ action: 'setAt', index, value }];
+    // Where the element shows, O(log n): its slot's place in the rope.
+    const index = S.indexOfElem(block, payload.elem);
+    return index < 0 ? [] : [{ action: 'setAt', index, value: payload.value }];
   }
   if (op.type === 'move') {
-    const from = held === undefined ? -1 : S.elems(held).indexOf(payload.elem);
-    const to = S.elems(block).indexOf(payload.elem);
-    if (from === to) return [];
-    if (from < 0) return [{ action: 'splice', index: to, count: 0, content: [S.render(block)[to]] }];
-    if (to < 0) return [{ action: 'splice', index: from, count: 1 }];
-    return [{ action: 'move', from, to }];
+    // Before (read from the block before the op, while it was the head) and
+    // after; a move shows its element with the value its slot carries, so a
+    // value that differs from the one shown before is a `setAt` too (a move
+    // that came before the assign whose value it carries).
+    const to = S.indexOfElem(block, payload.elem);
+    if (to < 0) return from < 0 ? [] : [{ action: 'splice', index: from, count: 1 }];
+    const value = S.valueAt(block, to);
+    if (from < 0) return [{ action: 'splice', index: to, count: 0, content: [value] }];
+    const out = from === to ? [] : [{ action: 'move', from, to }];
+    if (!deepEqual(S.valueAt(held, from), value)) out.push({ action: 'setAt', index: to, value });
+    return out;
   }
   // A mark: over the indices its anchors fall at; switched off by id, with
   // the range it covered when the mark is here.
   if (payload.off !== undefined) {
-    const mark = block.marks?.[payload.off];
+    const mark = S.markOf(block, payload.off);
     if (mark === undefined || S.isPlaceholder(mark)) return [];
     const start = S.indexOfCursor(block, mark[0]);
     const end = S.indexOfCursor(block, mark[1]);

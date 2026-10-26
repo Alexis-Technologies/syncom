@@ -962,6 +962,19 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **A list that a move and a push touched could show an element twice.**
+  A local push after a move extended the move's position run, so every
+  pushed slot read as the moved element (duplicate names, wrong values). A
+  position run is never extended now; a peer's extension of one is
+  malformed, and a longer one in a peer's block is left out.
+- **A splice's embed markers could overwrite a newer `setAt`.** When the
+  assign to a slot arrived before the splice that laid it, the splice's
+  marker won; both settle by stamp now, so either order reads the same.
+- **A move that carried a value from an assign not yet here reported no
+  value change**; it reports a `setAt` with the move.
+- **A field anchored below an `unset` read as missing after a reopen.**
+  A block read from a file was hydrated under the record's base rather than
+  the field's own floor.
 - **A refused presence update was heard by no one, or as a refused
   hello.** The dialing side dropped what a host's relay carried that did
   not verify (`.catch(() => {})`), and a host counted its presence refusals
@@ -1568,6 +1581,18 @@ There is no released version section until then; everything below lands in it.
 
 ### Changed
 
+- **Marked texts, long lists, long typed runs and a cold record cost what
+  the op touches.** A keystroke into a text read every mark (5 000 marks:
+  3.4 ms → 31 µs): the marks' anchors are an index in walk order, kept
+  across every op that leaves the marks, and pos/vals/marks live in
+  persistent maps. `setAt`, `move` and `push` on a list read it whole
+  (50 000 elements: 9.2 / 9.5 / 5.0 ms → 100 / 189 / 128 µs): an element's
+  index comes from the rope, the reading is derived from the one before. A
+  body grows by `SEG_MAX` (2 048) slots at most, so a read inside a long
+  typed run no longer flattens it (200 000 characters: 7.3 → 1.4 MB held).
+  A block read from a file is hydrated once (first op on a 1.75 MB record:
+  322 → 153 ms). The block's JSON is unchanged. Budgets: `/all` 107 KB,
+  `/text` 31.5 KB.
 - **More than eight storages in a process no longer reopen their log files.**
   The `node:fs` backend held eight append descriptors for the whole process;
   a ninth log appending made them take turns opening and closing their files

@@ -2,10 +2,12 @@
 
 // A persistent map from string keys to values — the run records of a
 // sequence block (./sequence.js), one of which changes per keystroke while
-// thousands stay. A hash array mapped trie: 32-way bitmap nodes over the
-// bits of a 32-bit hash, path-copied on write, so a `set` allocates O(1)
-// nodes and every older version reads as it was. Keys that share a hash
-// sit in one bucket at the bottom. No requires.
+// thousands stay, and its registers and marks. A hash array mapped trie:
+// 32-way bitmap nodes over the bits of a 32-bit hash, path-copied on write,
+// so a `set` allocates O(1) nodes and every older version reads as it was.
+// Keys that share a hash sit in one bucket at the bottom, sorted. Its shape
+// — and so the order `entries` walks — is a function of the keys it holds.
+// No requires.
 
 const BITS = 5;
 const MASK = 31;
@@ -54,9 +56,11 @@ const get = (node, key, hash, depth) => {
   }
 };
 
-// Two pairs under one node at `depth`: split until their hashes part.
+// Two pairs under one node at `depth`: split until their hashes part. A
+// bucket keeps its pairs sorted by key, so the order a map iterates in is
+// a function of its keys, never of the order they were set in.
 const merge = (a, hashA, b, hashB, depth, owner) => {
-  if (depth >= DEPTH) return { pairs: [a, b], owner };
+  if (depth >= DEPTH) return { pairs: a[0] < b[0] ? [a, b] : [b, a], owner };
   const ia = (hashA >>> (depth * BITS)) & MASK;
   const ib = (hashB >>> (depth * BITS)) & MASK;
   if (ia === ib) return { bitmap: 1 << ia, slots: [merge(a, hashA, b, hashB, depth + 1, owner)], owner };
@@ -73,11 +77,12 @@ const set = (node, pair, hash, depth, added, owner) => {
   if (node.pairs !== undefined) {
     const pairs = own ? node.pairs : node.pairs.slice();
     let i = 0;
-    while (i < pairs.length && pairs[i][0] !== key) i++;
-    if (i === pairs.length) {
-      pairs.push(pair);
+    while (i < pairs.length && pairs[i][0] < key) i++;
+    if (i < pairs.length && pairs[i][0] === key) pairs[i] = pair;
+    else {
+      pairs.splice(i, 0, pair);
       added.n = 1;
-    } else pairs[i] = pair;
+    }
     return own ? node : { pairs, owner };
   }
   const bit = 1 << ((hash >>> (depth * BITS)) & MASK);

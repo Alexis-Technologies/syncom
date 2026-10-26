@@ -136,11 +136,11 @@ const cloneEntry = (entry) => {
   };
   if (entry.meta.v !== undefined) meta.v = entry.meta.v;
   if (entry.meta.purged !== undefined) meta.purged = entry.meta.purged;
-  const out = { data: { ...entry.data }, meta };
-  // What a plugin cached on the entry (a sequence's index) comes along: an
-  // unchanged block reads through its own.
-  if (entry.cache !== undefined) out.cache = { ...entry.cache };
-  return out;
+  // Nothing a plugin cached on the entry comes along: a block read from a
+  // file is hydrated once through the plugin's own cache, keyed by the plain
+  // block (src/text/sequence.js), and the copy that outlived it held the
+  // parsed JSON and an old index for as long as the record lived.
+  return { data: { ...entry.data }, meta };
 };
 
 // What one stream's running sum may reach, either way: past it a float
@@ -383,10 +383,9 @@ const latestClock = (meta, trusted = false, limits = null) => {
   return latest;
 };
 
-// Drops a block field and what a plugin cached for it.
+// Drops a block field.
 const dropBlock = (entry, field) => {
   delete entry.meta.blocks[field];
-  if (entry.cache !== undefined) delete entry.cache[field];
 };
 
 // Drops what `field` holds below `floor`: a register stamped under it, a
@@ -791,7 +790,6 @@ const erase = (entry, stamp, delta) => {
   meta.sets = {};
   meta.blocks = {};
   meta.gone = {};
-  if (entry.cache !== undefined) entry.cache = {};
   // Canonical: whatever came before, a purged entry looks the same, so two
   // nodes that saw the purge and a write in either order hold one meta.
   meta.purged = maxClock(meta.purged ?? null, stamp);

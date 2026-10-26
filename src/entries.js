@@ -189,10 +189,6 @@ class EntryStore {
     const indexed = held !== undefined && held.data === entry.data && held.meta === entry.meta;
     this.#held.delete(id);
     const cached = { data: entry.data, meta: entry.meta, encrypted: false, block: blockHash };
-    // What a plugin cached on the entry while applying (a sequence's index)
-    // comes along into the cache, never into the file: the next op reads the
-    // field through it.
-    if (entry.cache !== undefined) cached.cache = entry.cache;
     this.remember(id, cached);
     if (!indexed) this.#catalog.put(id, await this.row(id, cached));
   }
@@ -203,7 +199,6 @@ class EntryStore {
   // the next open replays the log.
   async hold(id, entry) {
     const cached = { data: entry.data, meta: entry.meta, encrypted: false, block: null };
-    if (entry.cache !== undefined) cached.cache = entry.cache;
     this.#held.add(id);
     this.remember(id, cached);
     this.#catalog.put(id, await this.row(id, cached));
