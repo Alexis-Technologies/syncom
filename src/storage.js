@@ -888,15 +888,18 @@ class Storage extends Emitter {
     const seen = new Set();
     for (let i = 0; i < conflicts.length; i++) seen.add(`${conflicts[i].other}\0${conflicts[i].fields.join(',')}`);
     // The records in flight are not in the catalog yet: their newest entries
-    // are checked by hand.
+    // are checked by hand — against this record's keys, read once.
+    if (this.#inflight.size === 0) return conflicts;
+    const mine = [];
+    for (const key of def.unique) mine.push(this.#catalog.uniqueKey(view, key));
     for (const [other, stack] of this.#inflight) {
       if (other === id || stack.length === 0) continue;
       const held = stack[stack.length - 1].entry;
       if (held.data.$type !== entry.data.$type || !isAlive(held)) continue;
       const theirs = await this.#view(other, held);
-      for (const key of def.unique) {
-        const mine = this.#catalog.uniqueKey(view, key);
-        if (mine === null || mine !== this.#catalog.uniqueKey(theirs, key)) continue;
+      for (let k = 0; k < def.unique.length; k++) {
+        const key = def.unique[k];
+        if (mine[k] === null || mine[k] !== this.#catalog.uniqueKey(theirs, key)) continue;
         const pair = `${other}\0${key.join(',')}`;
         if (seen.has(pair)) continue;
         seen.add(pair);

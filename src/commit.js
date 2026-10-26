@@ -594,12 +594,15 @@ const conflictsIn = async (core, touched, id, entry) => {
   // Each (holder, key) once: the storage's own finds first.
   const seen = new Set();
   for (let i = 0; i < found.length; i++) seen.add(`${found[i].other}\0${found[i].fields.join(',')}`);
+  // This record's keys, read once for every record the transaction touched.
+  const mine = [];
+  for (const key of def.unique) mine.push(core.catalog.uniqueKey(view, key));
   for (const [other, held] of touched) {
     if (other === id || !isAlive(held) || held.data.$type !== entry.data.$type) continue;
     const theirs = await core.view(other, held);
-    for (const key of def.unique) {
-      const mine = core.catalog.uniqueKey(view, key);
-      if (mine === null || mine !== core.catalog.uniqueKey(theirs, key)) continue;
+    for (let k = 0; k < def.unique.length; k++) {
+      const key = def.unique[k];
+      if (mine[k] === null || mine[k] !== core.catalog.uniqueKey(theirs, key)) continue;
       const pair = `${other}\0${key.join(',')}`;
       if (seen.has(pair)) continue;
       seen.add(pair);
