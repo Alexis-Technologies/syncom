@@ -28,8 +28,12 @@
 //
 // Under 'back' a queued write or removal has not reached the lower layers
 // yet, so an operation that would consult them — a read that misses the
-// top, `exists`, `list`, `create`, `sync` — first drains the queue: nothing
-// stale is ever read from below, and a read that hits the top never waits.
+// top, `exists`, `list`, `create`, `sync` — first waits for the queue:
+// nothing stale is ever read from below, and a read that hits the top never
+// waits. A queued call that fails is told to `onError` (every one) and
+// counted (`failed`); it fails `flush()`, `sync()` and `close()` — the calls
+// that promise the lower layers have the files — never a read that happened
+// to wait for the queue.
 // Requires the backend contract only.
 
 const { checkFsi } = require('../backend.js');
@@ -47,7 +51,8 @@ const layered = (layers, options = {}) => {
   const stack = [];
   for (let i = 0; i < layers.length; i++) stack.push(checkFsi(layers[i], `layered() layer ${i}`));
   if (options === null || typeof options !== 'object') throw new TypeError('layered() takes an options object');
-  const { write = 'through', fill = true, queue = 1024 } = options;
+  const { write = 'through', fill = true, queue = 1024, onError = null } = options;
+  if (onError !== null && typeof onError !== 'function') throw new TypeError('layered(): onError must be a function');
   if (write !== 'through' && write !== 'back') throw new TypeError("layered(): write must be 'through' or 'back'");
   if (typeof fill !== 'boolean') throw new TypeError('layered(): fill must be a boolean');
   if (!Number.isInteger(queue) || queue < 1) throw new TypeError('layered(): queue must be a positive integer');
@@ -60,6 +65,7 @@ const layered = (layers, options = {}) => {
   let chain = Promise.resolve();
   let waiting = 0;
   let pending = 0;
+  let failed = 0;
   let failure = null;
   const room = [];
   const enqueue = async (task) => {
@@ -76,15 +82,27 @@ const layered = (layers, options = {}) => {
       try {
         await task();
       } catch (error) {
+        failed++;
         failure ??= error;
+        if (onError !== null) {
+          try {
+            onError(error);
+          } catch {
+            // The listener's own failure: the queue goes on.
+          }
+        }
       } finally {
         pending--;
       }
     });
   };
+  // What the queue holds, done — a failure of it stays for `drain`.
+  const settle = async () => {
+    if (back) await chain;
+  };
+  // Done, and the first failure since the last drain thrown.
   const drain = async () => {
-    if (!back) return;
-    await chain;
+    await settle();
     if (failure !== null) {
       const error = failure;
       failure = null;
@@ -110,9 +128,13 @@ const layered = (layers, options = {}) => {
     get pending() {
       return pending;
     },
+    /** Calls of the write-back queue that failed since the backend was made (each told to `onError`). */
+    get failed() {
+      return failed;
+    },
     async read(dir, name) {
       if (await top.exists(dir, name)) return top.read(dir, name);
-      await drain();
+      await settle();
       for (let i = 1; i < stack.length; i++) {
         if (!(await stack[i].exists(dir, name))) continue;
         const content = await stack[i].read(dir, name);
@@ -127,7 +149,7 @@ const layered = (layers, options = {}) => {
     },
     async exists(dir, name) {
       if (await top.exists(dir, name)) return true;
-      await drain();
+      await settle();
       for (const layer of lower) if (await layer.exists(dir, name)) return true;
       return false;
     },
@@ -135,13 +157,13 @@ const layered = (layers, options = {}) => {
       await spread((layer) => layer.remove(dir, name));
     },
     async list(dir) {
-      await drain();
+      await settle();
       const names = new Set();
       for (const layer of stack) for (const name of await layer.list(dir)) names.add(name);
       return [...names].sort();
     },
     async create(dir, name, content) {
-      await drain();
+      await settle();
       for (const layer of stack) if (await layer.exists(dir, name)) throw exists(`${dir}/${name}`);
       for (const layer of stack) {
         if (typeof layer.create === 'function') await layer.create(dir, name, content);
@@ -174,7 +196,7 @@ const layered = (layers, options = {}) => {
     wrapped.append = async (dir, name, content) => {
       // A file the top lacks may be below it: its head goes up first.
       if (!(await top.exists(dir, name))) {
-        await drain();
+        await settle();
         for (let i = 1; i < stack.length; i++) {
           if (!(await stack[i].exists(dir, name))) continue;
           await fillUp(i, dir, name, await stack[i].read(dir, name));

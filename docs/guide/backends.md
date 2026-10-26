@@ -86,9 +86,12 @@ await fsi.flush(); // what the queue still holds
   it — durability is the bottom's. Under `write: 'back'` it resolves when the
   first layer has it, and the lower layers are written from a queue, one call
   at a time, at most `queue` calls waiting (1024 by default; the next write
-  waits for room). `flush()` awaits the queue and rejects with the first
-  queued call that failed; `close()` flushes and closes every layer that has
-  a `close()` (the IndexedDB one). What the queue holds is lost with the
+  waits for room). A queued call that fails is told to `onError(error)`,
+  each one, and counted (`failed`); `flush()` awaits the queue and rejects
+  with the first failure since the last flush, `sync()` and `close()` too —
+  the calls that promise the lower layers have the files — and a read, an
+  `exists` or a `list` that waited for the queue never throws one; `close()`
+  flushes and closes every layer that has a `close()` (the IndexedDB one). What the queue holds is lost with the
   process — the window is the queue — so `'back'` is for a node that
   answers from memory and can afford to replay, not for a server of record.
 - Under `'back'` nothing stale is ever read from below: an operation that

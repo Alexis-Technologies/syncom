@@ -175,6 +175,38 @@ test('layered backends', async (t) => {
   );
 
   await t.test(
+    'back: every queued failure is told to onError and counted; a read that waits for the queue never throws one',
+    async () => {
+      const top = memory();
+      const bottom = memory();
+      let failing = true;
+      const flaky = over(bottom, {
+        async write(dir, name, content) {
+          if (failing) throw new Error(`disk full: ${name}`);
+          return bottom.write(dir, name, content);
+        },
+      });
+      const told = [];
+      const fsi = layered([top, flaky], { write: 'back', onError: (error) => told.push(error.message) });
+      await fsi.write('d', 'a.json', '1');
+      await fsi.write('d', 'b.json', '2');
+      // A miss at the top waits for the queue — and reads, whatever the queue's failures.
+      await assert.rejects(() => fsi.read('d', 'none.json'), { code: 'ENOENT' });
+      assert.strictEqual(await fsi.exists('d', 'a.json'), true);
+      assert.deepStrictEqual(await fsi.list('d'), ['a.json', 'b.json']);
+      assert.deepStrictEqual(told, ['disk full: a.json', 'disk full: b.json'], 'each failure told');
+      assert.strictEqual(fsi.failed, 2);
+      // flush() is the call that promises the lower layers: it reports the first.
+      await assert.rejects(() => fsi.flush(), { message: 'disk full: a.json' });
+      failing = false;
+      await fsi.write('d', 'c.json', '3');
+      await fsi.flush();
+      assert.strictEqual(await bottom.read('d', 'c.json'), '3');
+      assert.throws(() => layered([memory()], { onError: 1 }), TypeError);
+    },
+  );
+
+  await t.test(
     'append lands on every layer; a file only below is copied up first; none unless every layer has it',
     async () => {
       const top = memory();

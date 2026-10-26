@@ -14,6 +14,8 @@ export interface LayeredOptions {
   fill?: boolean;
   /** Under `'back'`: how many calls may wait in the queue before the next write waits for room (default 1024). */
   queue?: number;
+  /** Under `'back'`: every queued call that failed, as it fails (it also fails the next `flush()`, `sync()` or `close()`). */
+  onError?: (error: Error) => void;
 }
 
 export interface LayeredFsi extends Fsi {
@@ -21,6 +23,8 @@ export interface LayeredFsi extends Fsi {
   readonly layers: readonly Fsi[];
   /** Calls queued or running under `write: 'back'`. */
   readonly pending: number;
+  /** Queued calls that failed since the backend was made; a read that waited for the queue never throws them. */
+  readonly failed: number;
   /** Exclusive create: `EEXIST` when any layer has the file, else written to every layer. */
   create(dir: string, name: string, content: string): Promise<void>;
   /** Present when a layer has one: drains the queue, then syncs every layer that syncs. */

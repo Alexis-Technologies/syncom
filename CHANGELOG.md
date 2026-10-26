@@ -954,6 +954,12 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **A layered backend's background failure surfaced in an unrelated read.**
+  Under `write: 'back'`, a lower layer's failed write was kept and thrown
+  from whatever next waited for the queue — a read that missed the top, an
+  `exists`, a `list` — and every failure after the first was lost. Each is
+  told to the new `onError` and counted (`failed`); only `flush()`, `sync()`
+  and `close()` throw it.
 - **`drop()` needed the versions plugin, and a failed `branch()` stayed
   open.** Sweeping a branch asked for its tags before closing it — a
   `PLUGIN_MISSING` on the lean core, which left the branch open and locked
