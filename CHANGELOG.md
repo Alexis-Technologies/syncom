@@ -1427,6 +1427,11 @@ There is no released version section until then; everything below lands in it.
 
 ### Changed
 
+- **Marking writes applied no longer walks every open group.** The log kept
+  the groups waiting for their records in a map it walked from the oldest on
+  every mark, once per written position: a deferred flush of a busy window
+  cost positions × groups. They are a sorted array searched by halves now —
+  8 192 marks over interleaved records, 49 ms → 2.7 ms.
 - **A searchable text is no longer re-indexed on every keystroke.** The
   catalog handed the text index the whole joined text of a record at every
   write; it keeps the last word per record now and hands it over when a

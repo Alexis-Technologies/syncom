@@ -916,3 +916,33 @@ test('a journal line is a group whole or not at all: a failed group the group af
   assert.strictEqual(reopened.next, 3, 'the failed group’s tail is not adopted');
   assert.deepStrictEqual(reopened.vector, { me: 2 });
 });
+
+test('groups applied out of order: a roll seals up to the oldest group not applied, whatever the holes after it', async () => {
+  const { memory } = require('../src/memory/memory.js');
+  const log = await new OpLog('store', { fsi: memory(), rollAfter: 1000, sealApplied: true });
+  for (let seq = 1; seq <= 6; seq++) await log.append([op('A', seq)]);
+  log.applied(2);
+  log.applied(4, 5);
+  await log.flush();
+  assert.strictEqual(log.segments, 0, 'group 1 holds the roll');
+  log.applied(1);
+  await log.flush();
+  assert.deepStrictEqual(
+    log.tail().map((entry) => entry.seq),
+    [3, 4, 5, 6],
+    '1 and 2 sealed; 3 holds the rest',
+  );
+  log.applied(3);
+  log.applied(6);
+  await log.flush();
+  assert.deepStrictEqual(log.tail(), []);
+  // A seq marked twice, or outside every group, changes nothing.
+  log.applied(3);
+  log.applied(100);
+  await log.append([op('A', 7)]);
+  await log.flush();
+  assert.deepStrictEqual(
+    log.tail().map((entry) => entry.seq),
+    [7],
+  );
+});

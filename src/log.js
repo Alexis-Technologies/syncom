@@ -130,7 +130,12 @@ class OpLog {
   // last, left } with `left` the seqs not yet marked applied — kept in
   // first-seq order, so the oldest is the first value. Only under
   // `sealApplied`; a roll stops short of the oldest.
-  #pending = new Map();
+  // The open groups not applied whole, in seq order: a sorted array read
+  // from `#pendingHead` (the groups before it are applied and dropped
+  // lazily), so `applied` finds its groups by binary search — a Map walked
+  // from its oldest group made marking a flush O(positions × groups).
+  #pending = [];
+  #pendingHead = 0;
   #sealApplied;
   // Record id → the seqs of its entries: what a scrub rewrites, found
   // without a walk over everything retained.
@@ -261,7 +266,7 @@ class OpLog {
     }
     // The groups in seq order, like the appends that made them.
     this.#open.sort((a, b) => a.first - b.first);
-    this.#pending = new Map([...this.#pending].sort((a, b) => a[0] - b[0]));
+    this.#pending.sort((a, b) => a.first - b.first);
     // A shadowed line is a copy left behind — by a scrub or a group's
     // failed append cut short — and may hold a payload a scrub took away:
     // its journal goes, rewritten with the groups it still holds.
@@ -378,7 +383,7 @@ class OpLog {
       if (seq < first) first = seq;
       if (seq > last) last = seq;
     }
-    this.#pending.set(first, { first, last, left: new Set(seqs) });
+    this.#pending.push({ first, last, left: new Set(seqs) });
   }
 
   // Merges loaded entries in, deduplicating by seq (a crash mid-roll leaves
@@ -492,17 +497,38 @@ class OpLog {
    */
   applied(from, to = from) {
     if (!Number.isInteger(from) || !Number.isInteger(to)) return;
-    for (const group of this.#pending.values()) {
-      if (group.last < from) continue;
-      if (group.first > to) break;
-      for (let seq = Math.max(from, group.first); seq <= Math.min(to, group.last); seq++) group.left.delete(seq);
-      if (group.left.size === 0) this.#pending.delete(group.first);
+    const pending = this.#pending;
+    // The first group that may hold `from`: its last seq at or past it.
+    let low = this.#pendingHead;
+    let high = pending.length;
+    while (low < high) {
+      const mid = (low + high) >>> 1;
+      if (pending[mid].last < from) low = mid + 1;
+      else high = mid;
     }
+    for (let i = low; i < pending.length; i++) {
+      const group = pending[i];
+      if (group.first > to) break;
+      if (group.left.size === 0) continue;
+      const end = Math.min(to, group.last);
+      for (let seq = Math.max(from, group.first); seq <= end; seq++) group.left.delete(seq);
+    }
+    // Applied whole at the front: dropped; the array compacted now and then.
+    let head = this.#pendingHead;
+    while (head < pending.length && pending[head].left.size === 0) head++;
+    if (head === pending.length) {
+      this.#pending = [];
+      this.#pendingHead = 0;
+    } else if (head > 1024 && head * 2 > pending.length) {
+      this.#pending = pending.slice(head);
+      this.#pendingHead = 0;
+    } else this.#pendingHead = head;
   }
 
   // The first seq of the oldest open file not applied whole, or Infinity.
   get #unappliedFrom() {
-    for (const group of this.#pending.values()) return group.first;
+    const pending = this.#pending;
+    for (let i = this.#pendingHead; i < pending.length; i++) if (pending[i].left.size > 0) return pending[i].first;
     return Infinity;
   }
 
