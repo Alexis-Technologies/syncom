@@ -954,6 +954,18 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **A crash or a reader could catch a log index, a segment or `node.json`
+  half written.** The `node:fs` backend truncated a file and then wrote it:
+  a crash in between left a torn file, and a torn `log/index.json` opened as
+  a new epoch (every peer re-bootstraps), a torn `node.json` did not open at
+  all. `write(dir, name, content, { atomic: true })` stages the content and
+  renames it into place — the log's index and its segments (a scrub rewrites
+  them), `node.json`, the schema file, `tags.json`, the catalog, the chain's
+  index, the sync registry and `branch.json` ask for it; a record file does
+  not (the log's replay mends a torn one, and a rename per landing cost a
+  third of the disk's write rate). A temporary file is never listed. A read
+  of a tag's record that met a file half written by a landing reads again
+  once the landings are down (the flake of the patches suite).
 - **A field named like an `Object.prototype` member could take its value.**
   A join read a side's data without checking that it owned the field, so a
   clock naming `valueOf` over data that did not hold it copied the inherited

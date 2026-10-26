@@ -82,6 +82,9 @@ const anyWithin = (seqs, from, to) => {
   return low < seqs.length && seqs[low] <= to;
 };
 
+// What the log does not replay is written whole or not at all (see src/fsi.js).
+const ATOMIC = Object.freeze({ atomic: true });
+
 class OpLog {
   #path;
   #openPath;
@@ -733,7 +736,7 @@ class OpLog {
   async #seal(entries) {
     const from = entries[0].seq;
     const name = segmentName(from);
-    await this.#fsi.write(this.#path, name, fileOf(entries));
+    await this.#fsi.write(this.#path, name, fileOf(entries), ATOMIC);
     this.#segments.push({ name, from, to: entries[entries.length - 1].seq, count: entries.length });
     const dropped = await this.#compact();
     await this.#writeIndex();
@@ -847,7 +850,7 @@ class OpLog {
       latestTs: this.#latestTs,
       droppedTs: this.#droppedTs,
     };
-    await this.#fsi.write(this.#path, INDEX, JSON.stringify(index));
+    await this.#fsi.write(this.#path, INDEX, JSON.stringify(index), ATOMIC);
   }
 
   /** The entries held for a newer schema version, oldest first. */
@@ -979,7 +982,7 @@ class OpLog {
       for (const segment of this.#segments) {
         if (!anyWithin(sorted, segment.from, segment.to)) continue;
         const entries = this.#entries.slice(this.#lowerBound(segment.from), this.#lowerBound(segment.to + 1));
-        await this.#fsi.write(this.#path, segment.name, fileOf(entries));
+        await this.#fsi.write(this.#path, segment.name, fileOf(entries), ATOMIC);
       }
       // An open file is rewritten whole: a journal a line per group it holds
       // (a torn last line goes with the rewrite), a file of its own its group.

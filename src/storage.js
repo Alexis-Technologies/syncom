@@ -583,7 +583,7 @@ class Storage extends Emitter {
     // `migrated`: when this version first ran here — kept across a snapshot
     // change of the same version.
     const migrated = stored?.version === version && Number.isInteger(stored.migrated) ? stored.migrated : Date.now();
-    await this.#fsi.write(this.#path, SCHEMA_FILE, JSON.stringify({ version, migrated, hash }));
+    await this.#fsi.write(this.#path, SCHEMA_FILE, JSON.stringify({ version, migrated, hash }), { atomic: true });
   }
 
   /**
@@ -767,7 +767,9 @@ class Storage extends Emitter {
       }
       this.#nodeId = minted;
     }
-    await this.#fsi.write(this.#path, NODE_FILE, JSON.stringify({ id: this.#nodeId, plugins: kinds }));
+    await this.#fsi.write(this.#path, NODE_FILE, JSON.stringify({ id: this.#nodeId, plugins: kinds }), {
+      atomic: true,
+    });
   }
 
   // A sealed record's data, through the encryption plugin's key — or none.

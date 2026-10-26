@@ -293,7 +293,7 @@ class Tags {
 
   async #save() {
     const text = JSON.stringify({ format: FORMAT, tags: this.list() });
-    await this.#fsi.write(this.#path, FILE, text);
+    await this.#fsi.write(this.#path, FILE, text, { atomic: true });
   }
 
   // Every file of a tag directory; the directories stay (fsi has no rmdir).

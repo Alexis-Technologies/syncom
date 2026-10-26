@@ -173,7 +173,7 @@ class SyncManager extends Emitter {
       remote: null,
     };
     this.#nodes.set(url, node);
-    await this.#fsi.write(this.#path, fileName(url), JSON.stringify(node));
+    await this.#fsi.write(this.#path, fileName(url), JSON.stringify(node), { atomic: true });
     notify(this, this.#storage.logger, 'node', { url, action: 'add' });
     if (this.#started) this.#connect(node);
   }
@@ -219,7 +219,7 @@ class SyncManager extends Emitter {
     const write = state.last.then(async () => {
       state.next = null;
       if (!this.#nodes.has(url)) return;
-      await this.#fsi.write(this.#path, fileName(url), JSON.stringify(node));
+      await this.#fsi.write(this.#path, fileName(url), JSON.stringify(node), { atomic: true });
     });
     state.next = write;
     state.last = write

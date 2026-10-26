@@ -49,7 +49,7 @@ class Blockchain {
 
   async writeChain() {
     const chain = { tailHash: this.tailHash };
-    await this.#fsi.write(this.path, BLOCKCHAIN, JSON.stringify(chain));
+    await this.#fsi.write(this.path, BLOCKCHAIN, JSON.stringify(chain), { atomic: true });
   }
 
   async addBlock(data) {

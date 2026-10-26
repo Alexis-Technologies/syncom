@@ -136,7 +136,7 @@ const branch = async (parent, { path, from = null, ...options } = {}) => {
       };
     }
     const info = { format: FORMAT, parent: origin, forkedAt, createdAt: Date.now() };
-    await fsi.write(path, FILE, JSON.stringify(info));
+    await fsi.write(path, FILE, JSON.stringify(info), { atomic: true });
   } catch (error) {
     // Nothing half-made stays: a retry opens a new identity, not this one.
     await sweep(child).catch(() => {});

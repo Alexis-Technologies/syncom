@@ -27,16 +27,26 @@ const { sealed, reading, applyPatches } = require('../patches.js');
 // The record at a tag, as an entry: its file as it was — the tag's copy,
 // or the file as it is when nothing changed it since — parsed; `null`
 // when it was not there.
-const entryAt = async (core, name, id) => {
+const entryAt = async (core, name, id, again = false) => {
   if (!isRecordId(id)) return null;
   let { exists, raw } = await core.tags.readAt(name, id);
   if (!exists) return null;
   // No copy: nothing landed on the file since the tag. A record held since
   // (a write whose file failed, or one deferred) reads as the file, which
-  // is still the tag's state — read in step with the landings, which write
-  // it (a landing in flight would hand back a half-written file); any other
-  // reads as it is.
-  if (raw === null && core.entries.held(id)) raw = await core.entries.file(id);
+  // is still the tag's state; any other reads as it is.
+  if (raw === null && core.entries.held(id)) {
+    raw = await core.entries.file(id);
+    try {
+      return await core.entries.parse(id, raw);
+    } catch (error) {
+      // A landing was writing the file as it was read (a record file is not
+      // written atomically — the log mends a crash): once the landings in
+      // flight are down, the tag has its copy, or the file is whole.
+      if (again || error?.code !== 'INTEGRITY') throw error;
+      await core.landing(() => undefined);
+      return entryAt(core, name, id, true);
+    }
+  }
   return raw === null ? core.entries.load(id) : core.entries.parse(id, raw);
 };
 

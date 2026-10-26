@@ -65,3 +65,31 @@ test('fsi write makes the directory once, and again when it went away', async ()
     await cleanupTemp(dir);
   }
 });
+
+test('fsi write { atomic } lands whole: a rename puts it in place, a temporary is never listed, an append after it goes to the new file', async () => {
+  const assert = require('node:assert');
+  const fs = require('node:fs/promises');
+  const path = require('node:path');
+  const dir = await createTemp();
+  try {
+    await fsi.write(dir, 'r.json', 'one');
+    // A reader racing a write sees the old file or the new one, whole.
+    const reads = [];
+    const writing = fsi.write(dir, 'r.json', 'two'.repeat(100000), { atomic: true });
+    for (let i = 0; i < 20; i++) reads.push(fsi.read(dir, 'r.json'));
+    await writing;
+    for (const text of await Promise.all(reads)) {
+      assert.ok(text === 'one' || text === 'two'.repeat(100000), text.length);
+    }
+    // A temporary left by a crash is not a file of the store.
+    await fs.writeFile(path.join(dir, 'r.json.123-1.tmp~'), 'half');
+    assert.deepStrictEqual(await fsi.list(dir), ['r.json']);
+    // A file appended through a held descriptor, then written whole: the next append lands in what was written.
+    await fsi.append(dir, 'j.jsonl', 'a\n');
+    await fsi.write(dir, 'j.jsonl', 'b\n', { atomic: true });
+    await fsi.append(dir, 'j.jsonl', 'c\n');
+    assert.strictEqual(await fsi.read(dir, 'j.jsonl'), 'b\nc\n');
+  } finally {
+    await cleanupTemp(dir);
+  }
+});

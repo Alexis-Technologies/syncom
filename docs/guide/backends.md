@@ -8,7 +8,7 @@ own is the default; any other goes in through `open({ fsi })`.
 | Function | Meaning |
 | --- | --- |
 | `read(dir, name)` | `Promise<string>`; a missing file rejects (`code: 'ENOENT'` or `name: 'NotFoundError'`) |
-| `write(dir, name, content, options?)` | Creates the directory; whole-file, no rename. `options.mode` is a permissions hint (the private keys ask for `0o600`); an adapter without permissions ignores it |
+| `write(dir, name, content, options?)` | Creates the directory; whole-file. `options.mode` is a permissions hint (the private keys ask for `0o600`); an adapter without permissions ignores it. `options.atomic` asks for the file to land whole or not at all — on `node:fs` a temporary file renamed into place (never listed); OPFS, IndexedDB and memory are whole already. The engine asks it for the files the log does not replay (its index, its segments, `node.json`, `tags.json`, the catalog) |
 | `exists(dir, name)` | `Promise<boolean>` |
 | `remove(dir, name)` | A no-op when absent |
 | `list(dir)` | File names, sorted; an absent directory is `[]` |

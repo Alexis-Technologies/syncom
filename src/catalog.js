@@ -538,7 +538,8 @@ class Catalog {
       rows.push(cells);
     }
     const saved = this.#dirty;
-    await this.#fsi.write(this.#dir, FILE, JSON.stringify({ format: FORMAT, indexes: this.#indexKey, stamp, rows }));
+    const text = JSON.stringify({ format: FORMAT, indexes: this.#indexKey, stamp, rows });
+    await this.#fsi.write(this.#dir, FILE, text, { atomic: true });
     this.#dirty -= saved;
   }
 }
