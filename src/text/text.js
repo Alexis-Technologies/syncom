@@ -88,6 +88,11 @@ const apply = (entry, field, held, op, stamp, limits) => {
   // JSON, and both the op and the change report read the engine's state.
   const before = held === undefined ? undefined : S.asBlock(held, base);
   const block = before ?? S.createSeq(codeOf(kindOfOp(op)));
+  // A splice's cuts read from the block before it, while that block is still
+  // the head of its lineage: read after the splice, the old block is a fork
+  // — the rope re-hinted whole, O(n), for every delete (two thirds of an
+  // editing trace's time went there).
+  const cuts = op.type === 'splice' && before !== undefined ? cutSpansOf(before, op.value.cut) : null;
   const { pendingMax } = limits;
   const result =
     op.type === 'splice'
@@ -104,8 +109,22 @@ const apply = (entry, field, held, op, stamp, limits) => {
   if (!result.changed) return out;
   out.block = S.prune(result.seq, base);
   // What the reading shows of the op, in its indices — none when the field went.
-  if (out.block !== null) out.change = changeOf(op, stamp, before, out.block, base);
+  if (out.block !== null) out.change = changeOf(op, stamp, before, out.block, base, cuts);
   return out;
+};
+
+// The stretches of the reading a splice's cut ranges cover in `held`, last
+// first: a cut range of a run is as many stretches as others inserted
+// inside it.
+const cutSpansOf = (held, cut) => {
+  if (!Array.isArray(cut)) return null;
+  const cuts = [];
+  for (let i = 0; i < cut.length; i++) {
+    const spans = S.spansOf(held, cut[i][0], cut[i][1], cut[i][2]);
+    if (spans !== null) for (let k = 0; k < spans.length; k++) cuts.push(spans[k]);
+  }
+  cuts.sort((x, y) => y.index - x.index);
+  return cuts;
 };
 
 // The marks over the character at `index` of a block: what an insert's run
@@ -119,23 +138,18 @@ const marksAt = (block, index, base) => S.styleAt(block, index, base) ?? {};
 // `setAt`; a move by its index before and after; a mark over the indices
 // its anchors fall at. What the reading does not show — a slot born dead,
 // an element not placed here — is no change.
-const changeOf = (op, stamp, held, block, base = null) => {
+const changeOf = (op, stamp, held, block, base = null, cuts = null) => {
   const payload = op.value;
   const [ts, origin] = stamp;
   if (op.type === 'splice') {
     const out = [];
-    // A cut range of a run is as many stretches of the reading as others
-    // inserted inside it: one splice each, in the indices before, last first.
+    // The cut stretches (read before the splice — `cutSpansOf`): one splice
+    // each, in the indices before, last first.
     let cut = 0;
-    if (held !== undefined && Array.isArray(payload.cut)) {
-      const cuts = [];
-      for (const [run, off, len] of payload.cut) {
-        for (const span of S.spansOf(held, run, off, len) ?? []) cuts.push(span);
-      }
-      cuts.sort((x, y) => y.index - x.index);
-      for (const { index, count } of cuts) {
-        out.push({ action: 'splice', index, count });
-        cut += count;
+    if (held !== undefined && cuts !== null) {
+      for (let i = 0; i < cuts.length; i++) {
+        out.push({ action: 'splice', index: cuts[i].index, count: cuts[i].count });
+        cut += cuts[i].count;
       }
     }
     const { content } = payload;

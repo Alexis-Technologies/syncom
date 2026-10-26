@@ -1427,6 +1427,14 @@ There is no released version section until then; everything below lands in it.
 
 ### Changed
 
+- **A delete no longer re-hints the whole text.** The change report of a
+  splice read the stretches it cut from the block before it — after the
+  splice had made the new block the head of the rope's lineage, so the old
+  block was a fork, and the rope re-hinted every item of it, O(n), on every
+  delete: two thirds of an editing trace's time. The cut is read while the
+  old block is still the head now. The automerge-perf trace replays at
+  35 600 keystrokes/s in memory (12 700 before), 25 600 with `/all`
+  (11 000).
 - **`src/` is written in loops.** No array method that takes a callback
   (`map`, `filter`, `find`, `some`, `every`, `flatMap`, `forEach`, `reduce`…)
   and no `Array.from` is left in the published code; `pnpm lint` refuses them

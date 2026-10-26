@@ -135,3 +135,26 @@ test('the engine reads a text as the legacy walk does, after every op of a seede
     agree(other, `seed ${seed} shuffled`);
   }
 });
+
+test('a delete reads its cut from the head: no block is forked, no rope re-hinted', () => {
+  const op = (ts, value) => ({ origin: 'A', seq: ts, ts, type: 'splice', id: 'r', key: 'body', value });
+  let entry = applyOp(null, op(1, { at: '^', content: 'x'.repeat(2000) })).entry;
+  let ts = 1;
+  // Typing and deleting across the text, as an editor does.
+  for (let i = 0; i < 50; i++) {
+    const idx = S.indexOf(entry, 'body');
+    entry = applyOp(entry, op(++ts, { ...S.placeInsert(idx, 100 + i * 10, 'A'), content: 'y' })).entry;
+  }
+  const before = S.stats();
+  for (let i = 0; i < 50; i++) {
+    const idx = S.indexOf(entry, 'body');
+    const { entry: next, changes } = applyOp(entry, op(++ts, { cut: S.rangesOf(idx, 100 + i * 5, 3), content: '' }));
+    let cut = 0;
+    for (const change of changes) if (change.action === 'splice') cut += change.count;
+    assert.strictEqual(cut, 3, 'the three characters, in as many stretches as the runs cut');
+    entry = next;
+  }
+  const after = S.stats();
+  assert.strictEqual(after.rebuilds - before.rebuilds, 0, 'no fork of the block before the delete');
+  assert.strictEqual(after.rehints - before.rehints, 0, 'no rope re-hinted');
+});
