@@ -151,7 +151,7 @@ export interface TreeNode {
 }
 
 /**
- * A tree field's block (src/tree.js): per node the moves made of it, each
+ * A tree field's block (src/tree/moves.js): per node the moves made of it, each
  * `[ts, origin, parent, fi]`, in stamp order. The field reads as the fold of
  * every move in stamp order, a move that would put a node under itself
  * skipped (Kleppmann et al., 2021).
@@ -220,7 +220,7 @@ export interface TextBlock {
 }
 
 /**
- * A list or text field's block (src/sequence.js): the runs by key
+ * A list or text field's block (src/text/sequence.js): the runs by key
  * (`ts:origin`) as `[anchor, content, element?]`, with content run-length
  * encoded — present items (a string or an array) alternating with gap
  * lengths (tombstones); pending cuts and extensions; a movable list's
@@ -729,15 +729,30 @@ export type CrdtHistoryRecord =
   | { type: 'inc'; key: string; value: number }
   | { type: 'dec'; key: string; value: number };
 
+/**
+ * The plain-object delta from `source` to `target` — what `merge(source,
+ * delta)` reads back: a key added or changed with its new value, a removed
+ * one as `undefined`, nested objects as nested deltas, an array or a Set as
+ * the elements added only. Not how a storage replicates (its op model is),
+ * and not `storage.diff(id, from, to)` — the versions plugin's patches in
+ * the write API's terms — nor `diffSpans`/`diffBlocks` of
+ * `@alexify/syncom/editor`, the delta between two readings of a text.
+ */
 export function diff(source: unknown, target: unknown): CrdtDelta;
+/**
+ * `source` with `delta` laid over it: keys replaced or removed (`undefined`),
+ * nested objects merged, arrays and Sets as unions — and numbers ADDED
+ * (`merge({ hits: 10 }, { hits: 1 })` is `{ hits: 11 }`: a counter, on purpose).
+ */
 export function merge(source: unknown, delta: unknown): unknown;
+/** `source` with a history of records folded over it, in order: a `write`, a `delta`, a `delete`, an `inc`, a `dec`. */
 export function apply(source: unknown, history: readonly CrdtHistoryRecord[]): unknown;
 
 // The chain — `Block`, `Blockchain`, the plugin — is the `@alexify/syncom/chain`
 // subpath (src/chain/chain.d.ts); smart contracts are `@alexify/syncom/contracts`.
 
 // ---------------------------------------------------------------------------
-// Schema (src/schema.js)
+// Schema (src/schema/)
 
 /** One problem a validator found: `path` from the record root, `code` as the library names it. */
 export interface ValidationIssue {
@@ -2100,7 +2115,7 @@ export interface Storage {
 }
 
 // ---------------------------------------------------------------------------
-// Queries (src/query.js)
+// Queries (src/query/)
 
 export interface MangoOperators {
   $eq?: unknown;

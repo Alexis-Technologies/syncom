@@ -429,7 +429,10 @@ entries, and whether an entry is a live record or a tombstone. Pure functions;
 | `apply(source, history)` | The state after replaying an operation log |
 
 See [CRDT deltas](../guide/crdt) for the merge rules — numbers add rather than
-replace.
+replace. These are plain-object deltas, not how a storage replicates (its
+op model is), and this `diff` is neither `storage.diff(id, from, to)` — the
+versions plugin's [patches](#versions-subpath) — nor the editor's
+`diffSpans`/`diffBlocks`, a delta between two readings of a text.
 
 ## Chain (subpath)
 

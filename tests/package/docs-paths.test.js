@@ -71,20 +71,22 @@ test('what a CLAUDE.md layout line says a file requires, it requires', () => {
   assert.deepStrictEqual(wrong, []);
 });
 
-test('every src/ path a comment in src/ names exists', () => {
+test('every src/ path a comment in src/ or a declaration file names exists', () => {
   const missing = [];
+  const check = (full) => {
+    for (const match of readFileSync(full, 'utf8').matchAll(/src\/[A-Za-z0-9_./-]+\.js/g)) {
+      if (!existsSync(path.join(ROOT, match[0]))) missing.push(`${path.relative(ROOT, full)}: ${match[0]}`);
+    }
+  };
   const walk = (dir) => {
     for (const name of readdirSync(dir)) {
       const full = path.join(dir, name);
       if (statSync(full).isDirectory()) walk(full);
-      else if (full.endsWith('.js')) {
-        for (const match of readFileSync(full, 'utf8').matchAll(/src\/[A-Za-z0-9_./-]+\.js/g)) {
-          if (!existsSync(path.join(ROOT, match[0]))) missing.push(`${path.relative(ROOT, full)}: ${match[0]}`);
-        }
-      }
+      else if (full.endsWith('.js') || full.endsWith('.d.ts')) check(full);
     }
   };
   walk(path.join(ROOT, 'src'));
+  for (const name of ['index.d.ts', 'browser.d.ts']) check(path.join(ROOT, name));
   assert.deepStrictEqual(missing, []);
 });
 
