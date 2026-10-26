@@ -39,14 +39,20 @@ is; `inspect()` says what a record is.
 ## Handing a case over
 
 `anonymize(value, { salt, keys })` copies anything JSON — a report, a
-snapshot page, an op, a whole dump — with every string replaced by a stable
-hash of it: the same id, origin or word reads the same throughout the
-copy, so the structure of a case survives, and nothing of its words
-leaves. Numbers, booleans and nulls stay (counts, stamps, lengths are the
-shape); keys stay unless `keys: true`. Change the `salt` and every hash
-changes, so two copies cannot be lined up.
+snapshot page, an op, a whole dump — with every string and every key
+replaced by a stable hash of it: the same id, origin or word reads the same
+throughout the copy, so the structure of a case survives. Keys are hashed
+too because a set's elements, the origins of a clock and the streams of a
+vector are keys; `keys: false` keeps them (field names, for a readable
+report). Without a `salt` each call takes a fresh random one; give one to
+line two copies up, and keep it to yourself.
+
+It is pseudonymization, not anonymization: numbers, booleans and nulls stay
+(counts, stamps, lengths are the shape), and the hash — two xxHash32, 64
+bits — is not cryptographic: whoever holds the salt finds a short or
+guessable string again by trying it.
 
 ```js
 const page = await storage.snapshot();
-const safe = anonymize({ report: await inspect(storage, id), page }, { salt: 'case-42' });
+const safe = anonymize({ report: await inspect(storage, id), page }, { keys: false });
 ```

@@ -144,19 +144,34 @@ const inspect = async (storage, id) => {
 };
 
 // A string's stand-in: stable for one salt, so the same id or word reads
-// the same everywhere in the copy, and nothing of the word stays.
-const hashed = (text, salt) => `~${checksum(`${salt}\n${text}`)}`;
+// the same everywhere in the copy. Two xxHash32 under the salt — 64 bits, so
+// the stand-ins of a large dump do not collide; not a cryptographic hash: a
+// short word is found again by anyone who has the salt and guesses it.
+const hashed = (text, salt) => `~${checksum(`${salt}\n${text}`)}${checksum(`${salt}\r${text}`)}`;
+
+// A salt no one else has, for a copy that needs no stable hashes across calls.
+const freshSalt = () => {
+  const bytes = new Uint8Array(16);
+  globalThis.crypto.getRandomValues(bytes);
+  let out = '';
+  for (let i = 0; i < bytes.length; i++) out += (bytes[i] < 16 ? '0' : '') + bytes[i].toString(16);
+  return out;
+};
 
 /**
  * A copy of `value` — a dump, a snapshot page, an op, anything JSON — with
  * every string replaced by a stable hash of it under `salt` (the same
- * string reads the same throughout; nothing of it stays), the keys too
- * when `keys` is true; numbers, booleans and nulls as they are, so the
- * shape, the counts and the stamps survive for a bug report. A value JSON
- * cannot carry is a `TypeError`.
+ * string reads the same throughout), every key too unless `keys` is false
+ * (a set's element is a key, and so is an origin in a clock or a vector);
+ * numbers, booleans and nulls as they are, so the shape, the counts and the
+ * stamps survive for a bug report. Pseudonymous, not anonymous: lengths and
+ * numbers stay, and a guessable string is found again by whoever holds the
+ * salt — a fresh random one when none is given. A value JSON cannot carry is
+ * a `TypeError`.
  */
-const anonymize = (value, { salt = '', keys = false } = {}) => {
-  if (typeof salt !== 'string') throw new TypeError('anonymize(): salt is a string');
+const anonymize = (value, { salt, keys = true } = {}) => {
+  if (salt === undefined) salt = freshSalt();
+  else if (typeof salt !== 'string') throw new TypeError('anonymize(): salt is a string');
   const walk = (item) => {
     if (typeof item === 'string') return hashed(item, salt);
     if (item === null || typeof item === 'number' || typeof item === 'boolean') return item;

@@ -96,23 +96,28 @@ test('inspect() lays a record out by field and kind with its log; anonymize() ke
   assert.deepStrictEqual([hidden.encrypted, hidden.alive, hidden.data, hidden.log], [true, true, { secret: 1 }, []]);
   await assert.rejects(() => inspect(storage, 'bad id!'), { code: 'INVALID_ID' });
   await assert.rejects(() => inspect({}, id), TypeError);
-  // anonymize: the shape stays, every string is a stable hash, keys when asked, nothing else touched.
+  // anonymize: the shape stays, every string and every key is a stable hash, nothing else touched.
   const page = await storage.snapshot();
-  const copy = anonymize(page, { salt: 'bug-42' });
+  const copy = anonymize(page, { salt: 'bug-42', keys: false });
   assert.strictEqual(copy.records.length, page.records.length);
   assert.notStrictEqual(copy.records[0].id, page.records[0].id);
-  assert.match(copy.records[0].id, /^~[0-9a-f]{8}$/);
+  assert.match(copy.records[0].id, /^~[0-9a-f]{16}$/);
   assert.strictEqual(copy.records[0].id, anonymize(page.records[0].id, { salt: 'bug-42' }), 'stable under one salt');
   assert.notStrictEqual(copy.records[0].id, anonymize(page.records[0].id, { salt: 'other' }));
   assert.strictEqual(JSON.stringify(copy).includes('Kyiv'), false);
-  assert.deepStrictEqual(anonymize({ n: 1, ok: true, nothing: null, list: [1, 'x'] }), {
+  const plain = { n: 1, ok: true, nothing: null, list: [1, 'x'] };
+  assert.deepStrictEqual(anonymize(plain, { salt: 's', keys: false }), {
     n: 1,
     ok: true,
     nothing: null,
-    list: [1, anonymize('x')],
+    list: [1, anonymize('x', { salt: 's' })],
   });
-  const keyed = anonymize({ title: 'a' }, { keys: true });
-  assert.deepStrictEqual(Object.keys(keyed), [anonymize('title')]);
+  // Keys by default: a set's element, an origin in a clock, a vector's streams are keys.
+  const keyed = anonymize({ title: 'a', sets: { tags: { 'ada@example.com': {} } } }, { salt: 's' });
+  assert.deepStrictEqual(Object.keys(keyed), [anonymize('title', { salt: 's' }), anonymize('sets', { salt: 's' })]);
+  assert.strictEqual(JSON.stringify(keyed).includes('example.com'), false);
+  // No salt given: a fresh one each call, so two copies cannot be lined up.
+  assert.notStrictEqual(anonymize('ada'), anonymize('ada'));
   assert.throws(() => anonymize({ f: () => 1 }), TypeError);
   assert.throws(() => anonymize('x', { salt: 7 }), TypeError);
 });

@@ -70,4 +70,9 @@ export function inspect(storage: Storage, id: string): Promise<Inspection>;
  * A copy of `value` with every string replaced by a stable hash of it under `salt` — the keys too when `keys` is true —
  * and numbers, booleans and nulls as they are: the shape for a bug report, none of the words.
  */
+/**
+ * A copy of any JSON value with every string — and every key, unless `keys` is false — replaced by a stable
+ * 64-bit hash under `salt` (a fresh random one when none is given). Pseudonymous: numbers, lengths and the
+ * shape stay, and a guessable string is found again by whoever holds the salt.
+ */
 export function anonymize<T>(value: T, options?: { salt?: string; keys?: boolean }): T;

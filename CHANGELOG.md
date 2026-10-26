@@ -954,6 +954,13 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **`anonymize()` left what it promised to hide.** Keys stayed by default —
+  a set's elements (an email), the origins of a clock, the streams of a
+  vector — the salt was empty by default, and the hash 32 bits wide. Keys are
+  hashed by default now (`keys: false` keeps them), a call without a `salt`
+  takes a fresh random one, the hash is 64 bits, and the docs say what it is:
+  pseudonymization — the shape, lengths and numbers stay, and a guessable
+  string is found again by whoever holds the salt.
 - **An op could be signed by a key no one holds.** A node id passed as an
   Ed25519 key by its format alone; the all-zero key and the other points of
   small order verify a forged signature for a share of all messages, so ops

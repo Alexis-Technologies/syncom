@@ -784,7 +784,7 @@ vocabulary, Myers and Emitter are the core's. `UndoManager` is the class
 | Member | Notes |
 | --- | --- |
 | `inspect(storage, id)` | `Promise<Inspection>` — `{ id, present, encrypted, alive, data, reading, base, deleted, purged, v, fields, log }`: the data in the op model's terms and the composed reading (lens and hooks aside), the reset stamps, every field with its `kind`, whether it is `reachable` in the reading and the kind's counts and stamps (a register's `stamp`, a counter's `sums`, a set's `elements`/`live`, a block's `runs`/`cuts`/`ext`/`pos`/`vals`/`marks` or `nodes`/`moves`), and the record's retained log entries (`seq`, `eventId`, `type`, `origin`, `stream`, `ts`, `scope`, `field`, `actor`, `message`, `signed`, `skipped`, `scrubbed`); nothing written; `INVALID_ID` for an id that is none |
-| `anonymize(value, { salt = '', keys = false }?)` | A copy of any JSON value with every string replaced by a stable hash of it under `salt` (`~` and eight hex digits; the same string reads the same throughout), keys too when `keys` — numbers, booleans and nulls as they are; a value JSON cannot carry is a `TypeError` |
+| `anonymize(value, { salt, keys = true }?)` | A copy of any JSON value with every string — and every key unless `keys: false` — replaced by a stable hash of it under `salt` (`~` and sixteen hex digits, two xxHash32; the same string reads the same throughout; a fresh random salt when none is given); numbers, booleans and nulls as they are. Pseudonymous, not anonymous: the shape, lengths and numbers stay, and a guessable string is found again by whoever holds the salt. A value JSON cannot carry is a `TypeError` |
 
 ## Editor (subpath)
 
