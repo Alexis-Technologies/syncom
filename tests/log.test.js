@@ -150,7 +150,7 @@ test('OpLog', async (t) => {
   });
 
   await t.test(
-    "a file whose checksum does not match is unreadable: an altered segment is lost and counted, an altered open file dropped; retention 'all' keeps every segment",
+    "a file whose checksum does not match is unreadable: an altered segment is lost and counted, an altered open file kept aside as evidence; retention 'all' keeps every segment",
     async () => {
       const dir = await createTemp();
       try {
@@ -182,6 +182,13 @@ test('OpLog', async (t) => {
           reopened.since(reopened.formatId(0)).map((entry) => entry.seq),
           [3, 4, 5],
           'the altered files are gone whole, the rest stays',
+        );
+        // The altered open batch was answered once: kept under corrupt/, out of open/.
+        assert.deepStrictEqual(await fs.readdir(path.join(logDir, 'corrupt')), ['0000000006.json']);
+        assert.ok(!(await fs.readdir(path.join(logDir, 'open'))).includes('0000000006.json'));
+        assert.deepStrictEqual(
+          JSON.parse(await fs.readFile(path.join(logDir, 'corrupt', '0000000006.json'), 'utf8')),
+          batch,
         );
         assert.strictEqual(reopened.droppedTs, 5, 'an unreadable segment: the newest stamp held, as for a torn one');
         await reopened.close();
@@ -218,11 +225,53 @@ test('OpLog', async (t) => {
     },
   );
 
+  await t.test('a log file that is there but cannot be read fails the open, and is kept', async () => {
+    const dir = await createTemp();
+    try {
+      const log = await new OpLog(dir, { rollAfter: 100 });
+      for (let seq = 1; seq <= 3; seq++) await log.append([op('A', seq)]);
+      await log.close();
+      const real = require('../src/fsi.js');
+      const failing = {
+        ...real,
+        read: async (at, name) => {
+          // Every file but the index: the close sealed the ops into a segment.
+          if (name !== 'index.json') throw Object.assign(new Error('EIO: i/o error'), { code: 'EIO' });
+          return real.read(at, name);
+        },
+      };
+      await assert.rejects(
+        () => new OpLog(dir, { rollAfter: 100, fsi: failing }),
+        (error) => {
+          assert.strictEqual(error.code, 'CORRUPT');
+          assert.strictEqual(error.cause.code, 'EIO');
+          return true;
+        },
+      );
+      // Nothing was taken for torn: the next open reads every op.
+      const reopened = await new OpLog(dir, { rollAfter: 100 });
+      assert.deepStrictEqual(
+        reopened.since(reopened.formatId(0)).map((entry) => entry.seq),
+        [1, 2, 3],
+      );
+      // Groups still open (a journal, not sealed): their read failing fails the open too.
+      for (let seq = 4; seq <= 5; seq++) await reopened.append([op('A', seq)]);
+      await assert.rejects(() => new OpLog(dir, { rollAfter: 100, fsi: failing }), { code: 'CORRUPT' });
+      await reopened.close();
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   await t.test('survives a torn open file, a lost index and a duplicated roll', async () => {
     const dir = await createTemp();
     try {
       const warnings = [];
-      const logger = { warn: (entry) => warnings.push(entry), error: (entry) => warnings.push(entry) };
+      const logger = {
+        warn: (entry) => warnings.push(entry),
+        error: (entry) => warnings.push(entry),
+        info: (entry) => warnings.push(entry),
+      };
       const log = await new OpLog(dir, { rollAfter: 3, logger });
       for (let seq = 1; seq <= 4; seq++) await log.append([op('A', seq)]);
       const { epoch } = log;
@@ -243,7 +292,10 @@ test('OpLog', async (t) => {
         [1, 2, 3, 4],
       );
       assert.strictEqual(reopened.next, 5, 'the torn batch must not advance the seq');
-      assert.ok(warnings.some((entry) => entry.event === 'log.open.unreadable'));
+      assert.ok(
+        warnings.some((entry) => entry.event === 'log.open.torn'),
+        'a write never finished: torn, not lost',
+      );
       await reopened.close();
 
       // A lost index is a new epoch: old ids cannot resume, data is kept.

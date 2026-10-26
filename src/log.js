@@ -19,6 +19,9 @@
 //                       backend cannot append (and from before journals)
 //   seg-<from>.json     sealed segments: the open files rolled together once
 //                       enough of them accumulate
+//   corrupt/<name>      an open group file that read whole but failed its
+//                       checksum: kept aside as the evidence, its entries
+//                       lost from this node (`droppedTs`, `corrupt`)
 //   index.json          { epoch, floor, next, vector, heads, segments,
 //                       droppedHeld, latestTs, droppedTs } — a summary;
 //                       the files are the source of truth and anything the
@@ -45,8 +48,10 @@ const { formatEventId, parseEventId, vectorAdvance, opKey } = require('./vector.
 const { checksum } = require('./hash.js');
 const { GLOBAL_SCOPE, inScope } = require('./scope.js');
 const { writerOf, traced, now } = require('./telemetry.js');
+const { SyncomError } = require('./errors.js');
 
 const OPEN = 'open';
+const CORRUPT = 'corrupt';
 const JOURNAL = '.jsonl';
 const INDEX = 'index.json';
 const DEFAULT_ROLL_AFTER = 64;
@@ -73,6 +78,20 @@ const fileOf = (entries) => {
   const text = JSON.stringify(entries);
   return `{"entries":${text},"hash":"${checksum(text)}"}`;
 };
+// A file the listing or the index names that is not there — removed
+// between the two — reads as nothing. Any other failure to read it (EIO,
+// EMFILE, a quota) fails the open: one that went on without it could hand
+// its seqs out again, and a transient error would cost what it held.
+const isAbsent = (error) => error?.code === 'ENOENT' || error?.name === 'NotFoundError';
+const readOrNull = async (fsi, dir, name) => {
+  try {
+    return await fsi.read(dir, name);
+  } catch (error) {
+    if (isAbsent(error)) return null;
+    throw new SyncomError('CORRUPT', `The log file ${dir}/${name} cannot be read`, { cause: error, file: name });
+  }
+};
+
 const readFile = (text) => {
   const parsed = text === null ? null : parseJson(text);
   if (!parsed || !Array.isArray(parsed.entries)) return { entries: null, reason: 'malformed' };
@@ -240,7 +259,7 @@ class OpLog {
     }
     this.#segments.sort((a, b) => a.from - b.from);
     for (const segment of this.#segments) {
-      const text = await this.#fsi.read(this.#path, segment.name).catch(() => null);
+      const text = await readOrNull(this.#fsi, this.#path, segment.name);
       const { entries, reason } = readFile(text);
       if (entries === null) {
         this.#log?.error?.({ event: 'log.segment.unreadable', segment: segment.name, reason });
@@ -269,16 +288,27 @@ class OpLog {
     // Journals a newer one shadows a line of: rewritten below.
     const stale = new Set();
     for (const name of names) {
-      const text = await this.#fsi.read(this.#openPath, name).catch(() => null);
+      const text = await readOrNull(this.#fsi, this.#openPath, name);
+      // Gone since the listing: nothing to read.
+      if (text === null) continue;
       if (name.endsWith(JOURNAL)) {
         if (this.#loadJournal(name, text, sealedTo)) stale.add(name);
         continue;
       }
       const { entries, reason } = readFile(text);
       if (entries === null) {
-        // Torn on the way down: the batch was never announced, drop it.
-        this.#log?.error?.({ event: 'log.open.unreadable', file: name, reason });
-        if (reason === 'checksum') this.#corrupt++;
+        if (reason === 'checksum') {
+          // Whole once — its hash is there — and changed since: answered
+          // entries, lost here. Kept aside as the evidence, never deleted.
+          this.#log?.error?.({ event: 'log.open.unreadable', file: name, reason, kept: `${CORRUPT}/${name}` });
+          this.#corrupt++;
+          this.#lost = true;
+          await this.#fsi.write(`${this.#path}/${CORRUPT}`, name, text);
+        } else {
+          // Torn on the way down: its write never finished, so its batch was
+          // never announced — dropped.
+          this.#log?.info?.({ event: 'log.open.torn', file: name, reason });
+        }
         await this.#fsi.remove(this.#openPath, name);
         continue;
       }
@@ -322,11 +352,6 @@ class OpLog {
   // a scrub left behind — and none of it comes back. Answers whether a line
   // was shadowed.
   #loadJournal(name, text, sealedTo) {
-    if (text === null) {
-      this.#log?.error?.({ event: 'log.open.unreadable', file: name, reason: 'unreadable' });
-      this.#lost = true;
-      return false;
-    }
     const lines = text.split('\n');
     let end = lines.length;
     while (end > 0 && lines[end - 1] === '') end--;

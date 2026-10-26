@@ -982,6 +982,13 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **An open of the log could delete what it failed to read.** A read error
+  of an open group's file (EIO, EMFILE) was taken for a torn write and the
+  file removed, and a group file that failed its checksum — whole once, so
+  answered — was removed too. A file that is there and cannot be read now
+  fails `open()` with `CORRUPT` (its `cause`), and a group file that fails
+  its checksum is moved to `log/corrupt/` and counted as lost. A torn one,
+  never answered, is still dropped (`log.open.torn`).
 - **A transaction of many ops on one large record held a copy of the
   record per op.** Every op kept the record it left, its delta and its hook
   context until the transaction landed: 2 000 moves of one tree held

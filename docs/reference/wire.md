@@ -241,8 +241,14 @@ Every log file is `{ "entries": [...], "hash": "<xxh32>" }` — the
 entries' JSON and its xxHash32 as eight hex characters, computed over the
 same text. A file whose hash does not match is unreadable at open
 (`log.segment.unreadable`, `reason: 'checksum'`, counted in
-`stats().log.corrupt`); a file without a hash, from before checksums, is
-taken as it is.
+`stats().log.corrupt`, its entries lost — `droppedTs`); an open group file
+that fails its checksum was whole once, so it is moved to `log/corrupt/`
+as the evidence, never deleted; one that does not parse was torn by its
+own write, never acknowledged, and is dropped (`log.open.torn`). A file
+without a hash, from before checksums, is taken as it is. A file that is
+there and cannot be read at all — an I/O error, not a missing file — fails
+`open()` with `CORRUPT`: an open that went on without it could hand its
+seqs out again.
 
 A journal is read line by line, each line a log file of its own. Its last
 line is the one a crash can tear — its group was never acknowledged — and is

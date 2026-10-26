@@ -573,7 +573,8 @@ docs/                     VitePress site
   are the ONLY writer and reader of a log file's text: `{ entries, hash }`,
   the hash xxHash32 (src/hash.js) of the entries' JSON; a mismatch is
   `log.segment.unreadable`/`log.open.unreadable` with `reason: 'checksum'`,
-  counted in `corrupt`, never read in part. A file without a hash is an
+  counted in `corrupt`, never read in part — an open group file so is moved to `log/corrupt/`,
+  never deleted; a read that fails other than ENOENT fails the open (`readOrNull`, `CORRUPT`). A file without a hash is an
   older format and taken as it is. `retention: 'all'` is `{ ops: Infinity }`
   (`retainedOps` Infinity) — normalized in the OpLog constructor, nowhere else.
   Where the fsi has `append` the open groups are a JOURNAL, a log file per
