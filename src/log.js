@@ -1134,86 +1134,84 @@ class OpLog {
   }
 
   async #scrub(id) {
-    {
-      // Every entry of the id (from the index, not a walk), for the files to
-      // rewrite; the ones still holding a payload, for the count. A rewrite
-      // that failed last time left the files behind memory: the id stays
-      // marked torn, and the next scrub rewrites them whether or not
-      // anything is fresh.
-      const seqs = this.#byId.get(id) ?? new Set();
-      const torn = this.#torn.has(id);
-      // The files to rewrite are the ones holding what this scrub takes —
-      // every file of the id only after a rewrite that failed: a file whose
-      // entries of the id were scrubbed before is as it should be, and a peer
-      // that sends op after op for a purged id must not cost a rewrite of
-      // every segment that ever held it.
-      const taken = [];
-      let fresh = 0;
-      for (const seq of seqs) {
-        const entry = this.#entryAt(seq);
-        if (!entry) continue;
-        if (!entry.scrubbed) {
-          scrubOp(entry.op);
-          entry.scrubbed = true;
-          fresh++;
-          taken.push(seq);
-        } else if (torn) taken.push(seq);
-      }
-      if (taken.length === 0) return 0;
-      this.#torn.add(id);
-      // The lane is this scrub's: no append or roll changes `seqs` meanwhile.
-      const sorted = taken.sort((a, b) => a - b);
-      for (const segment of this.#segments) {
-        if (!anyWithin(sorted, segment.from, segment.to)) continue;
-        const entries = this.#entries.slice(this.#lowerBound(segment.from), this.#lowerBound(segment.to + 1));
-        await this.#fsi.write(this.#path, segment.name, fileOf(entries), ATOMIC);
-      }
-      // An open file is rewritten whole: a journal a line per group it holds
-      // (a torn last line goes with the rewrite), a file of its own its group.
-      // A journal is never rewritten in place — a write cut short there would
-      // read back as a torn last line and take acknowledged groups with it
-      // (their seqs then handed out again): the copy goes under a new name,
-      // which a reopen reads first, and the old journal is removed after it.
-      // Cut short between the two, both are there and the newer shadows the
-      // older seq by seq; cut short inside the copy, its torn last line is
-      // left out and the old journal still has that group.
-      const sealedTo = this.#sealedTo;
-      const byFile = new Map();
-      for (const group of this.#open) {
-        let groups = byFile.get(group.file);
-        if (groups === undefined) byFile.set(group.file, (groups = []));
-        groups.push(group);
-      }
-      for (const [file, groups] of byFile) {
-        let touched = false;
-        for (let i = 0; !touched && i < groups.length; i++) {
-          touched = anyWithin(sorted, groups[i].first, groups[i].last);
-        }
-        if (!touched) continue;
-        const journal = file.endsWith(JOURNAL);
-        let content = '';
-        for (const group of groups) {
-          const from = Math.max(group.first, sealedTo + 1);
-          const text = fileOf(this.#entries.slice(this.#lowerBound(from), this.#lowerBound(group.last + 1)));
-          if (!journal) {
-            content = text;
-            break;
-          }
-          content += `${text}\n`;
-        }
-        if (!journal) {
-          await this.#fsi.write(this.#openPath, file, content);
-          continue;
-        }
-        const copy = this.#journalName(groups[0].first);
-        await this.#fsi.write(this.#openPath, copy, content);
-        for (const group of groups) group.file = copy;
-        if (this.#journal === file) this.#journal = null;
-        await this.#fsi.remove(this.#openPath, file);
-      }
-      this.#torn.delete(id);
-      return fresh;
+    // Every entry of the id (from the index, not a walk), for the files to
+    // rewrite; the ones still holding a payload, for the count. A rewrite
+    // that failed last time left the files behind memory: the id stays
+    // marked torn, and the next scrub rewrites them whether or not
+    // anything is fresh.
+    const seqs = this.#byId.get(id) ?? new Set();
+    const torn = this.#torn.has(id);
+    // The files to rewrite are the ones holding what this scrub takes —
+    // every file of the id only after a rewrite that failed: a file whose
+    // entries of the id were scrubbed before is as it should be, and a peer
+    // that sends op after op for a purged id must not cost a rewrite of
+    // every segment that ever held it.
+    const taken = [];
+    let fresh = 0;
+    for (const seq of seqs) {
+      const entry = this.#entryAt(seq);
+      if (!entry) continue;
+      if (!entry.scrubbed) {
+        scrubOp(entry.op);
+        entry.scrubbed = true;
+        fresh++;
+        taken.push(seq);
+      } else if (torn) taken.push(seq);
     }
+    if (taken.length === 0) return 0;
+    this.#torn.add(id);
+    // The lane is this scrub's: no append or roll changes `seqs` meanwhile.
+    const sorted = taken.sort((a, b) => a - b);
+    for (const segment of this.#segments) {
+      if (!anyWithin(sorted, segment.from, segment.to)) continue;
+      const entries = this.#entries.slice(this.#lowerBound(segment.from), this.#lowerBound(segment.to + 1));
+      await this.#fsi.write(this.#path, segment.name, fileOf(entries), ATOMIC);
+    }
+    // An open file is rewritten whole: a journal a line per group it holds
+    // (a torn last line goes with the rewrite), a file of its own its group.
+    // A journal is never rewritten in place — a write cut short there would
+    // read back as a torn last line and take acknowledged groups with it
+    // (their seqs then handed out again): the copy goes under a new name,
+    // which a reopen reads first, and the old journal is removed after it.
+    // Cut short between the two, both are there and the newer shadows the
+    // older seq by seq; cut short inside the copy, its torn last line is
+    // left out and the old journal still has that group.
+    const sealedTo = this.#sealedTo;
+    const byFile = new Map();
+    for (const group of this.#open) {
+      let groups = byFile.get(group.file);
+      if (groups === undefined) byFile.set(group.file, (groups = []));
+      groups.push(group);
+    }
+    for (const [file, groups] of byFile) {
+      let touched = false;
+      for (let i = 0; !touched && i < groups.length; i++) {
+        touched = anyWithin(sorted, groups[i].first, groups[i].last);
+      }
+      if (!touched) continue;
+      const journal = file.endsWith(JOURNAL);
+      let content = '';
+      for (const group of groups) {
+        const from = Math.max(group.first, sealedTo + 1);
+        const text = fileOf(this.#entries.slice(this.#lowerBound(from), this.#lowerBound(group.last + 1)));
+        if (!journal) {
+          content = text;
+          break;
+        }
+        content += `${text}\n`;
+      }
+      if (!journal) {
+        await this.#fsi.write(this.#openPath, file, content);
+        continue;
+      }
+      const copy = this.#journalName(groups[0].first);
+      await this.#fsi.write(this.#openPath, copy, content);
+      for (const group of groups) group.file = copy;
+      if (this.#journal === file) this.#journal = null;
+      await this.#fsi.remove(this.#openPath, file);
+    }
+    this.#torn.delete(id);
+    return fresh;
   }
 
   /**

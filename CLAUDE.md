@@ -71,7 +71,7 @@ src/signing/sign.js       canonical form, signOp, verifyOp — what a signature 
 src/header.js             what names an op, the core's: the header (v2, `prev` last), payloadOf, the salted digest every node mints
                           (`digest`), the fingerprint (SHA-256 of the header) — requires digest.js and shape.js only (the signing subpath
                           ships it); `link` in src/commit.js sets an op's `prev` from the op before it in its stream
-src/shape.js              isPlainObject, asJson, isRecordId, isStreamName, wellFormed — what enters is checked here
+src/shape.js              isPlainObject, own, asJson, isRecordId, isStreamName, wellFormed — what enters is checked here
 src/paths.js              field paths: isPath, ancestorsOf, under, valueAt, MAX_PATHS — no requires
 src/compose.js            compose (the paths nested for a reader), decompose (a reading back to the fields) — requires paths.js
 src/args.js               spliceArgs, treeArgs, markArgs, setElements, jsonValue, isNodeId — the write API’s argument

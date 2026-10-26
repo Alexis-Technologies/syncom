@@ -11,9 +11,7 @@
 
 const { kindOf, isAlive, streamOrigin } = require('./ops.js');
 const { fieldName } = require('./args.js');
-const { isRecordId, invalidId } = require('./shape.js');
-
-const own = (object, key) => (object !== undefined && Object.hasOwn(object, key) ? object[key] : undefined);
+const { isRecordId, invalidId, own } = require('./shape.js');
 
 const loaded = async (core, id) => {
   if (!isRecordId(id)) throw invalidId(id);

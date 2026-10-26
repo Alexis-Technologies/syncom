@@ -8,11 +8,11 @@
 // `methods`); Storage keeps one delegate per method here, and a stub that
 // refuses with PLUGIN_MISSING for a plugin's method it was not opened with.
 
-const { fieldNames, setElements } = require('./args.js');
+const { fieldName, fieldNames, setElements } = require('./args.js');
 
 /** Adds `value` to counter field `key` — the commutative alternative to update(). */
 const inc = async (core, id, key, value = 1, { actor } = {}) => {
-  if (typeof key !== 'string') throw new TypeError('inc() takes a field name');
+  fieldName('inc', key);
   if (!Number.isFinite(value)) throw new TypeError('inc() takes a finite number');
   await core.commit('inc', id, { key, value }, { actor });
 };

@@ -49,7 +49,7 @@
 // and relayed — a dirk, never a gap. No requires beyond the protocol's op
 // types and the error helpers: the registry ships to every entry.
 
-const { OP_TYPES } = require('./shape.js');
+const { OP_TYPES, isPlainObject } = require('./shape.js');
 const { typed } = require('./errors.js');
 
 // Pending work — runs waiting for their anchor, cuts and extensions waiting
@@ -113,8 +113,6 @@ const missing = (what, home = HOME[what.endsWith('()') ? what.slice(0, -2) : wha
     home === null ? 'a plugin' : `the ${home} plugin: open({ plugins: [${home}] }) from '@alexify/syncom/${home}'`;
   return typed('PLUGIN_MISSING', `${what} needs ${where}`);
 };
-
-const isPlainObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /** A plugin module: a frozen object with a name, and either kinds (a kind module) or an open() (an API module). */
 const isPlugin = (value) =>

@@ -88,7 +88,7 @@
 // data, agrees whatever the order of adds, removes and resets.
 
 const { compareClock, maxClock, floorOf, opKey } = require('./vector.js');
-const { deepEqual, OP_TYPES, asJson } = require('./shape.js');
+const { deepEqual, OP_TYPES, asJson, isPlainObject, own } = require('./shape.js');
 const { limitsOf, HOME } = require('./plugin.js');
 const { isPath, ancestorsOf, under, MAX_PATHS } = require('./paths.js');
 
@@ -277,14 +277,11 @@ const placeOf = (values, key) => {
   return low;
 };
 
-const isPlainObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
-
 // A key a JSON payload may carry that must never become a property name
 // here: assigning under it would replace the object's prototype. Every
 // other name — `constructor`, `toString` — is a field like any other, which
 // is why lookups below go through `own` rather than the prototype chain.
 const isKey = (key) => key !== '__proto__';
-const own = (object, key) => (Object.hasOwn(object, key) ? object[key] : undefined);
 
 // A stamp is `[ts, origin]`, ts a positive safe integer like an op's: what a
 // peer's meta holds otherwise (a float, 1e300, Infinity) is no stamp.

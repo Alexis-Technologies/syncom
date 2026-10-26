@@ -6,6 +6,9 @@ const { typed } = require('./errors.js');
 // that boundary. No requires beyond ./errors.js: this file ships to the browser as it is.
 
 const isPlainObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
+// A key's value when the object holds it as its own, else undefined: never
+// what the prototype answers for `constructor` or `toString`.
+const own = (object, key) => (object != null && Object.hasOwn(object, key) ? object[key] : undefined);
 
 // Data crosses the boundary as JSON — what the disk, the log and the peers
 // hold. A copy on the way in (a caller mutating its object after `set()`)
@@ -208,6 +211,7 @@ module.exports = {
   MAX_WIRE_DEPTH,
   nestsWithin,
   isPlainObject,
+  own,
   asJson,
   isRecordId,
   invalidId,

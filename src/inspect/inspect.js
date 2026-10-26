@@ -13,12 +13,10 @@
 // composition, the symbols and the hash: nothing of the engine.
 
 const { compose, decompose } = require('../compose.js');
-const { asJson, isRecordId, invalidId, isPlainObject } = require('../shape.js');
+const { asJson, isRecordId, invalidId, isPlainObject, own } = require('../shape.js');
 const { SOURCE, PLUGINS } = require('../symbols.js');
 const { checksum } = require('../hash.js');
 
-const own = (object, key) =>
-  object !== undefined && object !== null && Object.hasOwn(object, key) ? object[key] : undefined;
 const count = (object) => (object ? Object.keys(object).length : 0);
 
 // A field's kind from the metadata alone: a counter, a set, a block of a

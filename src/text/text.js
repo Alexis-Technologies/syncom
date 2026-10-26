@@ -30,12 +30,10 @@
 const S = require('./sequence.js');
 const { MAX_RUN } = require('./rle.js');
 const { diff: myers } = require('./myers.js');
-const { spliceArgs, markArgs, jsonValue, isJsonValue, EMBED } = require('../args.js');
-const { isRecordId, invalidId, isPlainObject, asJson, deepEqual } = require('../shape.js');
+const { spliceArgs, markArgs, jsonValue, isJsonValue, fieldName, EMBED } = require('../args.js');
+const { isRecordId, invalidId, isPlainObject, asJson, deepEqual, own } = require('../shape.js');
 const { floorOf } = require('../vector.js');
 const { SyncomError } = require('../errors.js');
-
-const own = (object, key) => (Object.hasOwn(object, key) ? object[key] : undefined);
 
 const KINDS = Object.freeze({ list: 3, text: 4 });
 const CODES = Object.freeze({ l: 'list', t: 'text' });
@@ -750,7 +748,7 @@ const push = async (core, id, key, content, { actor } = {}) => {
  * replacing the middle.
  */
 const updateText = async (core, id, key, text, { actor } = {}) => {
-  if (typeof key !== 'string') throw new TypeError('updateText() takes a field name');
+  fieldName('updateText', key);
   if (typeof text !== 'string') throw new TypeError('updateText() takes a string');
   if (!isRecordId(id)) throw invalidId(id);
   return core.run(async () => {
@@ -818,7 +816,7 @@ const unmark = async (core, id, key, start, end, name, { expand = 'after', actor
  * resolved to — the only way for a `many` mark.
  */
 const unmarkById = async (core, id, key, markId, { actor } = {}) => {
-  if (typeof key !== 'string') throw new TypeError('unmarkById() takes a field name');
+  fieldName('unmarkById', key);
   if (!S.isRunKey(markId)) throw new TypeError('unmarkById() takes a mark id');
   await core.commit('mark', id, { key, off: markId }, { actor });
 };
@@ -826,7 +824,7 @@ const unmarkById = async (core, id, key, markId, { actor } = {}) => {
 // A sequence field as the record holds it — raw, no lens, no hooks — or null.
 const held = async (core, method, id, key) => {
   if (!isRecordId(id)) throw invalidId(id);
-  if (typeof key !== 'string') throw new TypeError(`${method}() takes a field name`);
+  fieldName(method, key);
   const entry = await core.entries.load(id);
   if (!entry || entry.encrypted || !core.alive(entry)) return null;
   const seq = blockOf(entry, key);
@@ -955,7 +953,7 @@ const joinBlock = async (core, id, key, index, { actor } = {}) => {
  * `NOT_FOUND` when the slot there is no marker.
  */
 const updateBlock = async (core, id, key, index, block, { actor } = {}) => {
-  if (typeof key !== 'string') throw new TypeError('updateBlock() takes a field name');
+  fieldName('updateBlock', key);
   if (!Number.isInteger(index) || index < 0) throw new TypeError('updateBlock() takes a non-negative integer index');
   await core.commit('assign', id, { key, index, value: markerArgs('updateBlock', block) }, { actor });
 };
@@ -1252,7 +1250,7 @@ const isDeltaOp = (op) =>
  * `STALE` before any op, so the caller rebases and sends again.
  */
 const applyDelta = async (core, id, key, delta, { actor, message, source, expect } = {}) => {
-  if (typeof key !== 'string') throw new TypeError('applyDelta() takes a field name');
+  fieldName('applyDelta', key);
   const shape = 'applyDelta() takes a delta: [{ retain, attributes? } | { insert, attributes? } | { delete }]';
   if (!Array.isArray(delta)) throw new TypeError(shape);
   // A hole is no op.
@@ -1347,7 +1345,7 @@ const applyDelta = async (core, id, key, delta, { actor, message, source, expect
  * rejects with `NOT_FOUND` for a slot that is no embed.
  */
 const setAt = async (core, id, key, index, value, { actor } = {}) => {
-  if (typeof key !== 'string') throw new TypeError('setAt() takes a field name');
+  fieldName('setAt', key);
   if (!Number.isInteger(index) || index < 0) throw new TypeError('setAt() takes a non-negative integer index');
   jsonValue('setAt', value);
   await core.commit('assign', id, { key, index, value }, { actor });
@@ -1360,7 +1358,7 @@ const setAt = async (core, id, key, index, value, { actor } = {}) => {
  * the element brings it back.
  */
 const move = async (core, id, key, from, to, { actor } = {}) => {
-  if (typeof key !== 'string') throw new TypeError('move() takes a field name');
+  fieldName('move', key);
   if (!Number.isInteger(from) || from < 0 || !Number.isInteger(to) || to < 0) {
     throw new TypeError('move() takes non-negative integer indices');
   }

@@ -37,7 +37,7 @@
 // (`kindsOf`) and the plugins from the storage's registry (src/plugin.js),
 // so this module and the undo subpath on it ship without the op model.
 
-const { deepEqual, isPlainObject } = require('./shape.js');
+const { deepEqual, isPlainObject, own } = require('./shape.js');
 const { isJsonValue, jsonValue, fieldNames, setElements } = require('./args.js');
 const { isPath } = require('./paths.js');
 const { EMPTY, HOME, missing } = require('./plugin.js');
@@ -47,8 +47,6 @@ const asKeys = (elements) => {
   for (let i = 0; i < elements.length; i++) keys.set(JSON.stringify(elements[i]), elements[i]);
   return keys;
 };
-
-const own = (object, key) => (Object.hasOwn(object, key) ? object[key] : undefined);
 
 // A field's content made again from nothing, by kind.
 const recreate = (field, kind, value, plugins, context) => {
