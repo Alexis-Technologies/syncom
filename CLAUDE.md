@@ -352,7 +352,9 @@ docs/                     VitePress site
   slot is the global stream's) — each within ±`MAX_COUNT` and added up in
   slot-key order; a set
   is `meta.sets[field][elementKey][origin] = [added, removed]`, live while
-  `added > removed`, read sorted by element text; a list or a text is
+  `added > removed`, read sorted by element text — a field's elements map shared between an entry
+  and the one an op derives from it until the op writes it (`writableSet` in src/ops.js: every
+  in-place write of a set goes through it), the reading moved by the elements the op names; a list or a text is
   `meta.blocks[field]` with `k: 'l'`/`'t'`, a block of `src/text/sequence.js`; a tree is
   `meta.blocks[field]` with `k: 'tree'`, a block of `src/tree/moves.js` — how a block merges (Fugue,
   the run-length content, the pending ops, the movable list, the marks; the

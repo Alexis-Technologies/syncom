@@ -10,6 +10,7 @@ const {
   isBlock,
   observedTags,
   latestClock,
+  latestHeld,
   packOps,
   unpackOps,
   MAX_COUNT,
@@ -1647,4 +1648,64 @@ test('a field named like an Object.prototype member is a field: a join copies on
     }),
   );
   assert.ok(Object.hasOwn(merged.delta, 'toString'), 'the field went: the delta says so');
+});
+
+test('a set is shared until an op writes it: the entry before reads as it did, every other op copies nothing of it', () => {
+  let entry = null;
+  for (let i = 0; i < 50; i++) entry = applyOp(entry, op('add', 10 + i, 'A', { key: 'tags', value: [`t${i}`] })).entry;
+  const before = JSON.stringify(entry.meta.sets.tags);
+  const other = applyOp(entry, op('set', 100, 'A', { data: { title: 'x' } })).entry;
+  assert.strictEqual(other.meta.sets.tags, entry.meta.sets.tags, 'a register write shares the set');
+  const added = applyOp(other, op('add', 101, 'B', { key: 'tags', value: ['t0', 'new'] })).entry;
+  assert.notStrictEqual(added.meta.sets.tags, other.meta.sets.tags, 'the add writes its own copy');
+  assert.strictEqual(JSON.stringify(entry.meta.sets.tags), before, 'the entry before reads as it did');
+  assert.strictEqual(JSON.stringify(other.meta.sets.tags), before);
+  assert.ok(isSet(added.meta, 'tags'));
+});
+
+test('a set reads after every add and remove as its live elements read whole, in a seeded walk', () => {
+  let seed = 11;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  let entry = null;
+  const origins = ['A', 'B', 'C'];
+  for (let i = 0; i < 600; i++) {
+    const origin = origins[Math.floor(rnd() * 3)];
+    const ts = 10 + i;
+    const pick = () => {
+      const r = rnd();
+      return r < 0.7 ? `e${Math.floor(rnd() * 40)}` : r < 0.85 ? Math.floor(rnd() * 5) : { k: Math.floor(rnd() * 3) };
+    };
+    const count = rnd() < 0.1 ? 40 : 1 + Math.floor(rnd() * 3);
+    const elements = [];
+    for (let k = 0; k < count; k++) elements.push(pick());
+    let next;
+    if (rnd() < 0.6) next = op('add', ts, origin, { key: 's', value: elements });
+    else {
+      const value = [];
+      for (const element of elements) {
+        const tags = observedTags(entry === null ? null : entry.meta, 's', [element]);
+        value.push([element, tags.length > 0 ? tags[0][1] : {}]);
+      }
+      next = op('remove', ts, origin, { key: 's', value });
+    }
+    if (rnd() < 0.03) next = op('write', ts, origin, { data: {} });
+    const result = applyOp(entry, next);
+    entry = result.entry;
+    const live = [];
+    const elementsHeld = entry.meta.sets.s ?? {};
+    for (const key of Object.keys(elementsHeld)) {
+      const slots = elementsHeld[key];
+      if (Object.keys(slots).some((origin_) => slots[origin_][0] > slots[origin_][1])) live.push(key);
+    }
+    live.sort();
+    assert.deepStrictEqual(
+      (entry.data.s ?? []).map((value) => JSON.stringify(value)),
+      Object.keys(elementsHeld).length === 0 ? [] : live,
+      `after op ${i} (${next.type})`,
+    );
+    // Known without a walk, never below what the walk finds nor above the newest op applied.
+    const held = latestHeld(entry.meta)?.[0] ?? 0;
+    const walked = latestClock(entry.meta, true)?.[0] ?? 0;
+    assert.ok(held >= walked && held <= ts, `the newest ts after op ${i}: ${held} vs ${walked}`);
+  }
 });

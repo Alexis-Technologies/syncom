@@ -9,7 +9,7 @@
 // state covers. `core` is what Storage lends its write paths — see
 // Storage#open.
 
-const { applyOp, isAlive, latestClock } = require('./ops.js');
+const { applyOp, isAlive, latestClock, latestHeld } = require('./ops.js');
 const { opKey } = require('./vector.js');
 const { fingerprintOf } = require('./header.js');
 const { link } = require('./commit.js');
@@ -131,7 +131,7 @@ const mergeOne = async (batch, record) => {
     throw new TypeError('beforeWrite may only replace data for write and set');
   }
   const scope = core.scopeOf(id, data ?? current?.data ?? {});
-  core.observe(latestClock(current?.meta, true), id);
+  core.observe(latestHeld(current?.meta), id);
   core.observe(latestClock(meta), id);
   const op = { origin: core.nodeId, seq: 0, ts: core.clock.now(), type: 'merge', id };
   if (scope !== GLOBAL_SCOPE) op.scope = scope;

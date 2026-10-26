@@ -9,7 +9,7 @@
 // the log, the clock, the chain, the entries, the hook runner and the
 // lensed readers — see Storage#open.
 
-const { applyOp, isAlive, latestClock, observedTags, kindOf, kindsOf } = require('./ops.js');
+const { applyOp, isAlive, latestHeld, observedTags, kindOf, kindsOf } = require('./ops.js');
 const { missing } = require('./plugin.js');
 const { opKey } = require('./vector.js');
 const { digest, fingerprintOf } = require('./header.js');
@@ -220,7 +220,7 @@ const kindClash = (type, payload, current, plugins) => {
 
 const prepareOp = (core, type, id, payload, current, who, from) => {
   refuse(core, id, kindClash(type, payload, current, core.plugins));
-  core.observe(latestClock(current?.meta, true), id);
+  core.observe(latestHeld(current?.meta), id);
   const op = { origin: core.nodeId, seq: 0, ts: core.clock.now(), type, id };
   if (from) op.from = from;
   // The writer's schema version rides on the op: what a reader on another

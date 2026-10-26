@@ -338,7 +338,8 @@ const ENTRIES = [
   // 21.1 with a contained telemetry writer and a log that answers every durable group (2026-10-26).
   // 22.5 with the review's sync fixes: proof for own streams, the hash chain's heads, presence refusals reported,
   // a bootstrap's pages checked (BAD_PAGE, maxPageBytes; 2026-10-27). 23, raised by name.
-  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 23 },
+  // 23.0 with sets shared between versions (the core's ops.js it bundles). 23.5, raised by name.
+  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 23.5 },
   // The schema: the definitions read once, the validator adapters, the lens.
   // 4.3 with a set folded back by path (src/entity.js over src/paths.js).
   {
@@ -367,7 +368,9 @@ const ENTRIES = [
     entry: 'src/versions/versions.js',
     platform: 'browser',
     // 32.9 with the write path's hash chain (src/header.js, the log's fingerprints). 33.5, raised by name.
-    budget: 33.5,
+    // 33.8 with the review's write-path fixes it bundles (a transaction's records held once, sets shared
+    // between versions, an op on a purged record stripped). 34.5, raised by name.
+    budget: 34.5,
   },
 ];
 

@@ -1639,6 +1639,15 @@ There is no released version section until then; everything below lands in it.
 
 ### Changed
 
+- **A large set no longer slows down every op of its record.** Every op
+  copied every set of its record whole, walked it for the newest stamp and
+  listed its keys for a kind check, and an add or a remove sorted and parsed
+  the whole set again. A set field is now shared between versions until an
+  op writes it, the newest stamp is carried from op to op, a set's emptiness
+  is remembered, and an add or a remove moves the reading by the elements it
+  names. On a record holding 20 000 elements: a register write 5.4 ms →
+  71 µs, an add 20 → 3.6 ms, a remove 19.4 → 3.1 ms (what is left is the one
+  copy of the set the op writes).
 - **A host refuses a push past 10 000 ops unless told otherwise.** With no
   `limits`, a peer could push a page of any length; `opsPerPush` now
   defaults to 10 000 (twenty pages of a dialer's default size), checked on

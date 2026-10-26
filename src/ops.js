@@ -104,20 +104,53 @@ const setsOf = (meta) => meta.sets ?? EMPTY;
 const blocksOf = (meta) => meta.blocks ?? EMPTY;
 const goneOf = (meta) => meta.gone ?? EMPTY;
 
-const cloneSets = (sets) => {
-  const copy = {};
-  for (const field of Object.keys(sets)) {
-    const elements = {};
-    const from = sets[field];
-    for (const key of Object.keys(from)) {
-      const slots = {};
-      const theirs = from[key];
-      for (const origin of Object.keys(theirs)) slots[origin] = [theirs[origin][0], theirs[origin][1]];
-      elements[key] = slots;
-    }
-    copy[field] = elements;
+// Whether an object holds an own key: `Object.keys(x).length > 0` built
+// the array of every key to answer — the whole of a set of 20 000 elements
+// per op, for a kind check. The walk stops at the first own key; an
+// inherited one (there is none on the trusted shapes) is skipped.
+const hasAny = (object) => {
+  // oxlint-disable-next-line guard-for-in -- every key is checked to be own
+  for (const key in object) if (Object.hasOwn(object, key)) return true;
+  return false;
+};
+
+// A set field's elements, copied whole: the map, every slot map and slot.
+const cloneElements = (from) => {
+  const elements = {};
+  for (const key of Object.keys(from)) {
+    const slots = {};
+    const theirs = from[key];
+    for (const origin of Object.keys(theirs)) slots[origin] = [theirs[origin][0], theirs[origin][1]];
+    elements[key] = slots;
   }
-  return copy;
+  return elements;
+};
+
+// A set field's elements map that holds an element — remembered per map: a
+// key walk of a dictionary-mode object lists every key even to find the
+// first (20 000 elements, half a millisecond per kind check). Only a yes is
+// kept: a map is written only as this meta's own copy (`writableSet`), and a
+// write never empties one — a prune that does removes the map.
+const FILLED = new WeakSet();
+
+// The set fields an op derived entry owns: `cloneEntry` shares every set
+// field with the entry it copies — a set of thousands of elements was copied
+// whole by every op of its record, a keystroke in another field included —
+// and the first write of a field copies it (`writableSet`), per meta.
+const OWNED_SETS = new WeakMap();
+
+// The elements of set `field` of `meta`, this meta's own: created, or
+// copied from the entry it was cloned from, at the first write.
+const writableSet = (meta, field) => {
+  let owned = OWNED_SETS.get(meta);
+  if (owned === undefined) OWNED_SETS.set(meta, (owned = new Set()));
+  if (owned.has(field)) return meta.sets[field];
+  const held = own(meta.sets, field);
+  const elements = held === undefined ? {} : cloneElements(held);
+  if (held !== undefined && FILLED.has(held)) FILLED.add(elements);
+  meta.sets[field] = elements;
+  owned.add(field);
+  return elements;
 };
 
 const cloneEntry = (entry) => {
@@ -128,7 +161,8 @@ const cloneEntry = (entry) => {
     base: entry.meta.base,
     deleted: entry.meta.deleted,
     counters,
-    sets: cloneSets(setsOf(entry.meta)),
+    // Shared, field by field, until an op writes one (writableSet).
+    sets: { ...setsOf(entry.meta) },
     // A block is never mutated in place (a plugin hands back a new one), so
     // the map is copied and the blocks are shared.
     blocks: { ...blocksOf(entry.meta) },
@@ -167,12 +201,16 @@ const slotStamp = (stream, count) => [count[2], streamOrigin(stream)];
 
 const isCounter = (meta, field) => {
   const perStream = own(meta.counters, field);
-  return Boolean(perStream) && Object.keys(perStream).length > 0;
+  return Boolean(perStream) && hasAny(perStream);
 };
 
 const isSet = (meta, field) => {
   const elements = own(setsOf(meta), field);
-  return Boolean(elements) && Object.keys(elements).length > 0;
+  if (!elements) return false;
+  if (FILLED.has(elements)) return true;
+  if (!hasAny(elements)) return false;
+  FILLED.add(elements);
+  return true;
 };
 
 // A field a plugin's block holds — a list, a text, a tree.
@@ -214,9 +252,29 @@ const liveElements = (elements) => {
     }
   }
   keys.sort();
-  const values = new Array(keys.length);
-  for (let i = 0; i < keys.length; i++) values[i] = JSON.parse(keys[i]);
+  const values = [];
+  for (let i = 0; i < keys.length; i++) values.push(JSON.parse(keys[i]));
   return values;
+};
+
+// Whether an element's slots hold a live add.
+const isLive = (slots) => {
+  if (slots === undefined) return false;
+  for (const origin of Object.keys(slots)) if (slots[origin][0] > slots[origin][1]) return true;
+  return false;
+};
+
+// Where `key` is, or would go, among the live elements `values` (sorted by
+// their text): a binary search, an element's text made per step.
+const placeOf = (values, key) => {
+  let low = 0;
+  let high = values.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (elementKey(values[mid]) < key) low = mid + 1;
+    else high = mid;
+  }
+  return low;
 };
 
 const isPlainObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -383,6 +441,25 @@ const latestClock = (meta, trusted = false, limits = null) => {
   return latest;
 };
 
+// The newest ts of a meta this node holds — what a write path observes into
+// the clock before it stamps (the clock reads a stamp's ts alone) — as a
+// stamp `[ts, '']`, or null. Known without a walk once an entry has been
+// asked: an op's result takes its source's and the op's ts (no stamp an op
+// lays is newer than its own — a remove's tags, an inc's slot, a block's
+// runs); a meta read from a file or joined in a merge is walked once. The
+// walk went over every set element of the record on every local write.
+const LATEST = new WeakMap();
+const latestHeld = (meta) => {
+  if (!isPlainObject(meta)) return null;
+  let ts = LATEST.get(meta);
+  if (ts === undefined) {
+    const latest = latestClock(meta, true);
+    ts = latest === null ? 0 : latest[0];
+    LATEST.set(meta, ts);
+  }
+  return ts > 0 ? [ts, ''] : null;
+};
+
 // Drops a block field.
 const dropBlock = (entry, field) => {
   delete entry.meta.blocks[field];
@@ -417,8 +494,8 @@ const pruneField = (entry, field, floor, delta, plugins) => {
       delta[field] = undefined;
     }
   }
-  const elements = own(meta.sets, field);
-  if (elements !== undefined) {
+  if (own(meta.sets, field) !== undefined) {
+    const elements = writableSet(meta, field);
     for (const key of Object.keys(elements)) {
       const slots = elements[key];
       for (const origin of Object.keys(slots)) {
@@ -642,11 +719,12 @@ const addElements = (meta, field, op, stamp) => {
   for (let i = 0; i < value.length; i++) {
     const key = elementKey(value[i]);
     if (key === undefined || !isKey(key)) continue;
-    const elements = own(meta.sets, field) ?? (meta.sets[field] = {});
+    const elements = writableSet(meta, field);
     const slots = own(elements, key) ?? (elements[key] = {});
     const slot = own(slots, op.origin);
     if (!slot) {
       slots[op.origin] = [op.ts, 0];
+      FILLED.add(elements);
       moved = true;
     } else if (slot[0] < op.ts) {
       slot[0] = op.ts;
@@ -674,11 +752,12 @@ const removeElements = (meta, field, op) => {
       const ts = tags[origin];
       if (!isKey(origin) || !Number.isSafeInteger(ts) || ts <= 0 || ts > op.ts) continue;
       if (compareClock([ts, origin], floorOf(meta, field)) < 0) continue;
-      const elements = own(meta.sets, field) ?? (meta.sets[field] = {});
+      const elements = writableSet(meta, field);
       const slots = own(elements, key) ?? (elements[key] = {});
       const slot = own(slots, origin);
       if (!slot) {
         slots[origin] = [0, ts];
+        FILLED.add(elements);
         moved = true;
       } else if (slot[1] < ts) {
         slot[1] = ts;
@@ -695,6 +774,29 @@ const malformed = (field, rejected) => {
   rejected.push({ field: typeof field === 'string' ? field : null, reason: 'malformed' });
 };
 
+// The elements an add or a remove names, each by its text, once.
+const namedElements = (op) => {
+  const out = [];
+  const seen = new Set();
+  const { value } = op;
+  for (let i = 0; i < value.length; i++) {
+    let element = value[i];
+    if (op.type === 'remove') {
+      if (!Array.isArray(element) || element.length !== 2 || !isPlainObject(element[1])) continue;
+      element = element[0];
+    }
+    const key = elementKey(element);
+    if (key === undefined || !isKey(key) || seen.has(key)) continue;
+    seen.add(key);
+    out.push(key);
+  }
+  return out;
+};
+
+// Past this many elements in and out, the reading is made again whole
+// rather than laid one element at a time into the one before.
+const SET_STEPS = 32;
+
 const applySet = (entry, op, stamp, delta, rejected, plugins, changes) => {
   const { meta } = entry;
   const { key: field } = op;
@@ -702,34 +804,55 @@ const applySet = (entry, op, stamp, delta, rejected, plugins, changes) => {
     return void malformed(field, rejected);
   }
   if (roomFor(entry, field, 'set', stamp, delta, rejected, plugins) !== null) return;
-  const before = Array.isArray(entry.data[field]) ? entry.data[field] : [];
+  // What the op names, and which of it was live: the reading moves by what
+  // came in and went out, never by a walk of the set — a set of 20 000
+  // elements read and sorted whole on every add made each one milliseconds.
+  const held = own(meta.sets, field);
+  const before = Array.isArray(entry.data[field]) ? entry.data[field] : null;
+  const named = namedElements(op);
+  const was = [];
+  for (let i = 0; i < named.length; i++) was.push(held !== undefined && isLive(own(held, named[i])));
   const moved = op.type === 'add' ? addElements(meta, field, op, stamp) : removeElements(meta, field, op);
   if (!moved) return;
   // A set holds its prefix alone.
   dropUnder(entry, field, delta, plugins);
-  // A tag that moved is news to persist even when the array reads the same.
-  entry.data[field] = liveElements(meta.sets[field]);
-  delta[field] = entry.data[field];
-  // What the reading shows of it: the elements now in, the elements now out
-  // — each element's text made once.
-  const now = entry.data[field];
-  const beforeKeys = [];
-  const was = new Set();
-  for (let i = 0; i < before.length; i++) {
-    beforeKeys.push(JSON.stringify(before[i]));
-    was.add(beforeKeys[i]);
-  }
-  const is = new Set();
+  const elements = meta.sets[field];
   const added = [];
-  for (let i = 0; i < now.length; i++) {
-    const key = JSON.stringify(now[i]);
-    is.add(key);
-    if (!was.has(key)) added.push(now[i]);
-  }
   const removed = [];
-  for (let i = 0; i < before.length; i++) if (!is.has(beforeKeys[i])) removed.push(before[i]);
-  if (added.length > 0) changes.push({ action: 'add', field, elements: asJson(added) });
-  if (removed.length > 0) changes.push({ action: 'remove', field, elements: asJson(removed) });
+  for (let i = 0; i < named.length; i++) {
+    const live = isLive(own(elements, named[i]));
+    if (live && !was[i]) added.push(named[i]);
+    else if (!live && was[i]) removed.push(named[i]);
+  }
+  added.sort();
+  removed.sort();
+  let now;
+  if (before === null || added.length + removed.length > SET_STEPS) {
+    now = liveElements(elements);
+  } else if (added.length + removed.length === 0) {
+    now = before;
+  } else {
+    now = before.slice();
+    for (let i = 0; i < removed.length; i++) {
+      const at = placeOf(now, removed[i]);
+      if (at < now.length && elementKey(now[at]) === removed[i]) now.splice(at, 1);
+    }
+    for (let i = 0; i < added.length; i++) now.splice(placeOf(now, added[i]), 0, JSON.parse(added[i]));
+  }
+  // A tag that moved is news to persist even when the array reads the same.
+  entry.data[field] = now;
+  delta[field] = now;
+  // What the reading shows of it: the elements now in, the elements now out.
+  if (added.length > 0) {
+    const values = [];
+    for (let i = 0; i < added.length; i++) values.push(JSON.parse(added[i]));
+    changes.push({ action: 'add', field, elements: values });
+  }
+  if (removed.length > 0) {
+    const values = [];
+    for (let i = 0; i < removed.length; i++) values.push(JSON.parse(removed[i]));
+    changes.push({ action: 'remove', field, elements: values });
+  }
   changes.covered.add(field);
 };
 
@@ -826,6 +949,12 @@ const applyOp = (previous, op, limits = null) => {
   const outcome = (changed, whole = false) => {
     if (whole) delete changes.covered;
     else changesOf(entry, delta, changes, plugins);
+    // The newest stamp, carried: the source's and this op's (a merge joins
+    // another meta's stamps — walked when asked).
+    if (op.type !== 'merge') {
+      const known = previous ? LATEST.get(previous.meta) : 0;
+      if (known !== undefined) LATEST.set(meta, Math.max(known, op.ts));
+    }
     return { entry, changed, delta, rejected, changes };
   };
 
@@ -1312,6 +1441,7 @@ module.exports = {
   kindsOf,
   observedTags,
   latestClock,
+  latestHeld,
   normalizeMeta,
   deepEqual,
   packOps,
