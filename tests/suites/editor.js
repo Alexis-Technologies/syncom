@@ -584,6 +584,52 @@ const runEditorTests = async (t, assert, createStorage) => {
     },
   );
 
+  await t.test('the delta algebra keeps its laws over random deltas; one style in any key order is one op', () => {
+    const rnd = prng(29);
+    const randomDelta = (length) => {
+      const ops = [];
+      let at = 0;
+      for (let step = 0; step < 32; step++) {
+        const r = rnd();
+        if (r < 0.3) ops.push({ insert: 'xyz'.slice(0, 1 + Math.floor(rnd() * 3)) });
+        else if (at < length && r < 0.6) {
+          const n = 1 + Math.floor(rnd() * Math.min(3, length - at));
+          ops.push({ delete: n });
+          at += n;
+        } else if (at < length) {
+          const n = 1 + Math.floor(rnd() * Math.min(4, length - at));
+          ops.push({ retain: n });
+          at += n;
+        }
+        if (at >= length && rnd() < 0.5) break;
+      }
+      return ops;
+    };
+    const lengthAfter = (length, delta) => E.applyToText('a'.repeat(length), delta).length;
+    for (let i = 0; i < 300; i++) {
+      const text = 'abcdefghij'.slice(0, Math.floor(rnd() * 10));
+      const a = randomDelta(text.length);
+      const b = randomDelta(lengthAfter(text.length, a));
+      assert.strictEqual(
+        E.applyToText(E.applyToText(text, a), b),
+        E.applyToText(text, E.compose(a, b)),
+        `compose: ${JSON.stringify([text, a, b])}`,
+      );
+      const c = randomDelta(text.length);
+      const left = E.applyToText(E.applyToText(text, a), E.transform(a, c, true));
+      const right = E.applyToText(E.applyToText(text, c), E.transform(c, a, false));
+      assert.strictEqual(left, right, `transform: ${JSON.stringify([text, a, c])}`);
+    }
+    assert.deepStrictEqual(
+      E.compose(
+        [{ insert: 'a', attributes: { bold: true, italic: true } }],
+        [{ retain: 1 }, { insert: 'b', attributes: { italic: true, bold: true } }],
+      ),
+      [{ insert: 'ab', attributes: { bold: true, italic: true } }],
+      'two inserts of one style, keys in another order: one op',
+    );
+  });
+
   await t.test('an adapter’s fit holds what its document differs by, and maps indices across it', () => {
     const plain = (text) => [{ type: 'text', text, marks: {} }];
     let shown = 'ab\r\ncd';

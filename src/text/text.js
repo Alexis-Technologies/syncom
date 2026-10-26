@@ -31,6 +31,7 @@ const S = require('./sequence.js');
 const { MAX_RUN } = require('./rle.js');
 const { diff: myers } = require('./myers.js');
 const { spliceArgs, markArgs, jsonValue, isJsonValue, fieldName, EMBED } = require('../args.js');
+const { compose } = require('../delta.js');
 const { isRecordId, invalidId, isPlainObject, asJson, deepEqual, own } = require('../shape.js');
 const { floorOf } = require('../vector.js');
 const { SyncomError } = require('../errors.js');
@@ -1043,108 +1044,6 @@ const positions = async (core, id, key, cursors) => {
 // text's changes into one; `applyDelta` makes a delta the field's edits, as
 // one transaction. An embed slot travels as `{ insert: { embed: marker } }`,
 // a marker changed as `{ retain: 1, attributes: { embed: marker } }`.
-
-const lengthOfOp = (op) => op.delete ?? op.retain ?? (typeof op.insert === 'string' ? op.insert.length : 1);
-
-// A cursor over a delta's ops: `peek()` the length left in the current op,
-// `next(n)` the next `n` of it as an op of its own.
-const walker = (ops) => {
-  let i = 0;
-  let used = 0;
-  return {
-    done: () => i >= ops.length,
-    peekType: () => (ops[i].delete !== undefined ? 'delete' : ops[i].insert !== undefined ? 'insert' : 'retain'),
-    peek: () => lengthOfOp(ops[i]) - used,
-    next(n = Infinity) {
-      const op = ops[i];
-      const left = lengthOfOp(op) - used;
-      const take = Math.min(n, left);
-      let out;
-      if (op.delete !== undefined) out = { delete: take };
-      else if (typeof op.insert === 'string') out = { insert: op.insert.slice(used, used + take) };
-      else if (op.insert !== undefined) out = { insert: op.insert };
-      else out = { retain: take };
-      if (op.attributes !== undefined && out.delete === undefined) out.attributes = op.attributes;
-      used += take;
-      if (used >= lengthOfOp(op)) {
-        i++;
-        used = 0;
-      }
-      return out;
-    },
-  };
-};
-
-const sameAttributes = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
-
-// Pushes an op, joining it to the last of its kind with the same attributes.
-const pushOp = (ops, op) => {
-  const last = ops[ops.length - 1];
-  if (last !== undefined) {
-    if (op.delete !== undefined && last.delete !== undefined) return void (last.delete += op.delete);
-    if (op.retain !== undefined && last.retain !== undefined && sameAttributes(op.attributes, last.attributes)) {
-      return void (last.retain += op.retain);
-    }
-    if (
-      typeof op.insert === 'string' &&
-      typeof last.insert === 'string' &&
-      sameAttributes(op.attributes, last.attributes)
-    ) {
-      return void (last.insert += op.insert);
-    }
-  }
-  ops.push({ ...op });
-};
-
-// The attributes of a retain composed over an insert's or a retain's: the
-// later ones win, a null one removes.
-const composeAttributes = (a, b, keepNull) => {
-  const out = { ...(a ?? {}), ...(b ?? {}) };
-  if (!keepNull) for (const key of Object.keys(out)) if (out[key] === null) delete out[key];
-  return Object.keys(out).length > 0 ? out : undefined;
-};
-
-/** `a` then `b` as one delta: quill-delta's compose (THIRD_PARTY_NOTICES.md), over retain, insert and delete. */
-const compose = (a, b) => {
-  const left = walker(a);
-  const right = walker(b);
-  const out = [];
-  while (!left.done() || !right.done()) {
-    if (!right.done() && right.peekType() === 'insert') {
-      pushOp(out, right.next());
-    } else if (!left.done() && left.peekType() === 'delete') {
-      pushOp(out, left.next());
-    } else if (left.done()) {
-      pushOp(out, right.next());
-    } else if (right.done()) {
-      pushOp(out, left.next());
-    } else {
-      const n = Math.min(left.peek(), right.peek());
-      const x = left.next(n);
-      const y = right.next(n);
-      if (y.retain !== undefined) {
-        const op = x.insert !== undefined ? { insert: x.insert } : { retain: n };
-        let after = y.attributes;
-        // A marker changed over a slot the turn inserted: the insert carries
-        // the marker it ends with — an `embed` attribute on an insert is
-        // read as a mark, and the reader keeps the marker it was inserted with.
-        if (after !== undefined && after.embed !== undefined && typeof x.insert === 'object') {
-          op.insert = { embed: after.embed };
-          const { embed, ...rest } = after;
-          after = Object.keys(rest).length > 0 ? rest : undefined;
-        }
-        const attributes = composeAttributes(x.attributes, after, x.retain !== undefined);
-        if (attributes !== undefined) op.attributes = attributes;
-        pushOp(out, op);
-      } else if (y.delete !== undefined && x.retain !== undefined) pushOp(out, y);
-      // y deletes what x inserted: nothing of either stays.
-    }
-  }
-  // A trailing plain retain says nothing.
-  const last = out[out.length - 1];
-  if (last !== undefined && last.retain !== undefined && last.attributes === undefined) out.pop();
-  return out;
-};
 
 // The content of an insert as delta ops, pushed onto `out`: the text, its
 // embed slots as `{ insert: { embed: marker } }`.

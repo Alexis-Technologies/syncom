@@ -38,7 +38,9 @@ src/undo/undo.js          the @alexify/syncom/undo subpath — the undo stack ov
 src/editor/editor.js      the @alexify/syncom/editor subpath — the editor-agnostic binding (shadow, one delta in
                           flight, STALE and the rebase), delta compose/transform, diffSpans/diffBlocks, spans↔blocks,
                           selections as tokens, presence cursors, what an adapter shares (createFit, undoSteps,
-                          failureReporter); requires text/myers.js and vector.js only
+                          failureReporter); requires text/myers.js, vector.js and delta.js only
+src/delta.js              Quill-form deltas and their algebra, once — compose, transform, transformIndex (quill-delta's
+                          rules): the text plugin's toDelta and the editor binding both stand on it — no requires
 src/prosemirror/prosemirror.js  the @alexify/syncom/prosemirror subpath — ProseMirror (injected `{ model, state, transform, view? }`)
                           over the editor binding: the document as one text with a marker per block-level node, the replace
                           step, cursors as decorations, undo commands over /undo; requires editor/editor.js only

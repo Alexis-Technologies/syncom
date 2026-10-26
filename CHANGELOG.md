@@ -1648,6 +1648,11 @@ There is no released version section until then; everything below lands in it.
 
 ### Changed
 
+- **One delta algebra.** The text plugin's `toDelta` and the editor
+  binding each had their own Quill-form `compose` — with different edge
+  rules — and both compared a style by its JSON, so `{ bold, italic }` and
+  `{ italic, bold }` stayed two ops. Both stand on `src/delta.js` now, which
+  compares a style whatever its key order; a property test holds the laws.
 - **A hub's vector is no longer copied per page.** Applying a peer's page
   copied the whole version vector (a key per client and scope — thousands
   on a hub), so did every log group (for a rollback it rarely needed), the

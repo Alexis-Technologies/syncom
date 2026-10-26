@@ -213,7 +213,8 @@ const ENTRIES = [
     label: 'prosemirror — browser (@alexify/syncom/prosemirror)',
     entry: 'src/prosemirror/prosemirror.js',
     platform: 'browser',
-    budget: 8.5,
+    // 8.6 with the one delta algebra it shares with the text plugin (src/delta.js; 2026-10-27). 9, raised by name.
+    budget: 9,
   },
   // Framework stores: one object for Svelte's contract and React's useSyncExternalStore, over a cursor, a
   // Record, get(), a presence or any emitter; no requires.
