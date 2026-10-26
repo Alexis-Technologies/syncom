@@ -151,6 +151,54 @@ test('ProseMirror', { skip }, async (t) => {
   });
 
   await t.test(
+    'typing, a cut and inline content pasted inside a textblock are sent from the steps, and land as the diff would',
+    async (t2) => {
+      const schema = schemaOf();
+      const storage = await open(t2, 'steps');
+      const id = await storage.insert({ title: 'doc' });
+      const editor = PM.createProseMirror(storage, id, 'body', pm);
+      const view = viewOf(schema, [editor.plugin]);
+      t2.after(() => editor.stop());
+      await editor.attach(view).ready;
+      const p = (text) => schema.node('paragraph', null, text ? schema.text(text) : null);
+      const list = schema.node('bullet_list', null, [schema.node('list_item', null, [p('in a list')])]);
+      view.dispatch(view.state.tr.replaceWith(0, view.state.doc.content.size, [p('first line'), list, p('last one')]));
+      await editor.binding.flush();
+      const random = prng(17);
+      const strong = schema.marks.strong.create();
+      for (let i = 0; i < 200; i++) {
+        const positions = [];
+        view.state.doc.descendants((node, pos) => {
+          if (node.isTextblock) for (let k = 0; k <= node.content.size; k++) positions.push([pos + 1 + k, node]);
+        });
+        const [at, block] = positions[Math.floor(random() * positions.length)];
+        const tr = view.state.tr;
+        const r = random();
+        if (r < 0.5) tr.insertText('ab'.slice(0, 1 + Math.floor(random() * 2)), at);
+        else if (r < 0.7) tr.insert(at, schema.text('B', [strong]));
+        else if (r < 0.8) tr.insert(at, schema.nodes.hard_break.create());
+        else {
+          const $at = view.state.doc.resolve(at);
+          const end = Math.min($at.end(), at + 1 + Math.floor(random() * 3));
+          if (end > at) tr.delete(at, end);
+          else tr.insertText('c', at);
+        }
+        void block;
+        view.dispatch(tr);
+        if (i % 20 === 19) {
+          await editor.binding.flush();
+          assert.ok(
+            PM.spansToDoc(await storage.spans(id, 'body'), schema).eq(view.state.doc),
+            `the field is the document, edit ${i}`,
+          );
+        }
+      }
+      await editor.binding.flush();
+      assert.ok(PM.spansToDoc(await storage.spans(id, 'body'), schema).eq(view.state.doc));
+    },
+  );
+
+  await t.test(
     'two editors on two nodes stay the same as the field through typing, Enter, marks and lists',
     async (t2) => {
       const schema = schemaOf();

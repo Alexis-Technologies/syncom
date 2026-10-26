@@ -207,6 +207,39 @@ const layoutOf = (doc) => {
   return { blocks, length: index };
 };
 
+// What a block-level node takes in the field: its marker and what it holds
+// (a textblock's content, a container's blocks). Kept per node: a document
+// is immutable and shares every node an edit did not touch with the one
+// before, so a keystroke sums the cached sizes of the siblings before it.
+const SIZES = new WeakMap();
+const fieldSize = (node) => {
+  let size = SIZES.get(node);
+  if (size !== undefined) return size;
+  if (node.isTextblock) size = 1 + node.content.size;
+  else if (node.isLeaf) size = 1;
+  else {
+    size = 1;
+    for (let i = 0; i < node.childCount; i++) size += fieldSize(node.child(i));
+  }
+  SIZES.set(node, size);
+  return size;
+};
+
+// The field index of a position inside a textblock's content (`$pos`
+// resolved there): the blocks before it at every level, the markers of the
+// blocks it is in, and its offset in the textblock.
+const indexInTextblock = ($pos) => {
+  let index = 0;
+  let node = $pos.node(0);
+  for (let depth = 0; depth < $pos.depth; depth++) {
+    const at = $pos.index(depth);
+    for (let i = 0; i < at; i++) index += fieldSize(node.child(i));
+    index += 1;
+    node = node.child(at);
+  }
+  return index + $pos.parentOffset;
+};
+
 /** The text index a document position stands at. */
 const indexOfPos = (doc, pos) => {
   const { blocks, length } = layoutOf(doc);
@@ -299,12 +332,57 @@ const createProseMirror = (storage, id, path, pm, options = {}) => {
         }
       }
       if (!edited) return null;
+      // Typing, a cut, inline content pasted inside one textblock: the delta
+      // read from the steps, at the cost of where they are — the documents
+      // read whole and diffed made a keystroke in 5 000 paragraphs 15 ms.
+      // Anything else (a split, a join, a mark, a node set) is diffed.
+      const stepped = fit.unfit.length === 0 ? deltaOfSteps(trs) : null;
+      if (stepped !== null) {
+        if (stepped.length > 0) report(fit.send(stepped, null));
+        return null;
+      }
       const now = docToSpans(after.doc);
       const delta = fit.send(diffSpans(docToSpans(before.doc), now), now);
       if (delta.length > 0) report(delta);
       return null;
     },
   });
+
+  // The delta of local transactions made of replace steps inside one
+  // textblock each, inline content alone — or null for any other.
+  const deltaOfSteps = (trs) => {
+    let delta = null;
+    for (let t = 0; t < trs.length; t++) {
+      const tr = trs[t];
+      if (!tr.docChanged) continue;
+      if (tr.getMeta(key) !== undefined) return null;
+      for (let i = 0; i < tr.steps.length; i++) {
+        const step = tr.steps[i];
+        if (!(step instanceof ReplaceStep) || step.slice.openStart !== 0 || step.slice.openEnd !== 0) return null;
+        const doc = tr.docs[i];
+        const $from = doc.resolve(step.from);
+        const $to = doc.resolve(step.to);
+        if (!$from.parent.isTextblock || !$from.sameParent($to)) return null;
+        const ops = [];
+        const at = indexInTextblock($from);
+        if (at > 0) ops.push({ retain: at });
+        if (step.to > step.from) ops.push({ delete: step.to - step.from });
+        const { content } = step.slice;
+        for (let k = 0; k < content.childCount; k++) {
+          const inline = content.child(k);
+          if (!inline.isInline) return null;
+          const marks = marksOf(inline.marks);
+          const op = inline.isText
+            ? { insert: inline.text }
+            : { insert: { embed: { type: inline.type.name, parents: [], attrs: { ...inline.attrs }, isEmbed: true } } };
+          if (Object.keys(marks).length > 0) op.attributes = marks;
+          ops.push(op);
+        }
+        delta = delta === null ? ops : compose(delta, ops);
+      }
+    }
+    return delta ?? [];
+  };
 
   // Lands `doc` in the editor without reporting it: the smallest replace
   // step the two documents differ by, the whole document where that step

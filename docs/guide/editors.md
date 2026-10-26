@@ -301,8 +301,10 @@ adapter of another editor:
 - The binding is for a **text** field; a list is read and written through
   the [list API](./lists) directly.
 - A ProseMirror document is rebuilt from the field on every peer's edit —
-  linear in the document's size — and diffed on every edit of its own; a
-  document of many thousands of blocks is past what this is for.
+  linear in the document's size. Its own edits are sent from their steps
+  where they are typing, a cut or inline content inside one textblock
+  (a keystroke in 5 000 paragraphs: 0.06 ms); a split, a join, a mark or a
+  node set is a diff of the two documents, linear again.
 - A reset drops what was not sent. An editor that must keep it reads
   `binding.shadow` in `onReset` and decides.
 - `applyDelta` makes one op per insert, cut and mark; a delta of many

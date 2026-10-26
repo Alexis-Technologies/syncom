@@ -1648,6 +1648,12 @@ There is no released version section until then; everything below lands in it.
 
 ### Changed
 
+- **A ProseMirror keystroke costs where it is, not the document.** Every
+  local edit read both documents whole and diffed them; typing, a cut or
+  inline content pasted inside one textblock is now sent from its steps,
+  the field index of a position summed from block sizes kept per node. A
+  keystroke in 100 / 1 000 / 5 000 paragraphs: 0.27 / 2.7 / 15 ms →
+  0.018 / 0.026 / 0.055 ms. Anything else is still diffed.
 - **One delta algebra.** The text plugin's `toDelta` and the editor
   binding each had their own Quill-form `compose` — with different edge
   rules — and both compared a style by its JSON, so `{ bold, italic }` and

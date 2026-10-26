@@ -214,7 +214,8 @@ const ENTRIES = [
     entry: 'src/prosemirror/prosemirror.js',
     platform: 'browser',
     // 8.6 with the one delta algebra it shares with the text plugin (src/delta.js; 2026-10-27). 9, raised by name.
-    budget: 9,
+    // 9.0 with an edit sent from its steps (block sizes kept per node). 9.5, raised by name.
+    budget: 9.5,
   },
   // Framework stores: one object for Svelte's contract and React's useSyncExternalStore, over a cursor, a
   // Record, get(), a presence or any emitter; no requires.
