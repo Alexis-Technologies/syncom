@@ -29,6 +29,9 @@ const target = {
 };
 expectType<TextBinding>(pm.attach(target));
 expectType<TextBinding | null>(pm.binding);
+expectType<number>(pm.indexOf(1));
+expectType<number>(pm.posOf(0));
+expectError(pm.indexOf('1'));
 const { undo, redo } = pm.commands(createUndo(storage, { trackedSources: [pm.source] }));
 expectType<state.Command>(undo);
 expectType<boolean>(redo(editorState));

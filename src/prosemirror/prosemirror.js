@@ -15,9 +15,16 @@
 // one, so two list items are two markers and one item with two paragraphs
 // is one. Reading it back opens a container where the parents name one that
 // is not open, and wraps text that stands outside a textblock in the
-// schema's default one; what the schema cannot hold is left out — and the
-// binding sends the document as it was built, so the field comes to fit
-// the schema (y-prosemirror does the same).
+// schema's default one; what the schema cannot hold is left out.
+//
+// The field comes to fit the schema with the editor's next edit, never as an
+// answer to a peer's: what the document differs from the field by (`unfit`)
+// is held, and goes out composed with that edit. Two editors that answered a
+// merge each with a fit of their own sent the same structure twice, or each
+// a part of it — a field neither fit, answered again, without end. Until the
+// edit, the adapter maps an index of the document to the field's through
+// `unfit` (`indexOf`, `posOf`, the selection, the cursors); every reader of
+// the field builds the same document from it.
 //
 // An edit in the editor reaches the field as the delta between the
 // document before and after it (`diffSpans`), one transaction each; a
@@ -227,13 +234,36 @@ const createProseMirror = (storage, id, path, pm, options = {}) => {
   let view = null;
   let report = null;
   let text = null;
+  // The field as the binding sees it (its text, and the editor's edits sent
+  // and not landed yet), as spans; what the editor's document differs from
+  // it by, held for the next edit; and the way back, made when asked.
+  let base = null;
+  let unfit = [];
+  let back = null;
+  const hold = (doc) => {
+    unfit = diffSpans(base, docToSpans(doc));
+    back = null;
+  };
+  // A field index as the document's, and back.
+  const toDoc = (index) => (unfit.length === 0 ? index : transformIndex(index, unfit, true));
+  const toField = (index) => {
+    if (unfit.length === 0) return index;
+    back ??= diffSpans(docToSpans(view.state.doc), base);
+    return transformIndex(index, back, true);
+  };
 
   const plugin = new Plugin({
     key,
-    // The editor's own edits, as the delta between the documents.
+    // The editor's own edits, as the delta between the documents — after
+    // what the field lacked of the document before, held till now.
     appendTransaction(trs, before, after) {
       if (report === null || !trs.some((tr) => tr.docChanged && tr.getMeta(key) === undefined)) return null;
-      const delta = diffSpans(docToSpans(before.doc), docToSpans(after.doc));
+      const now = docToSpans(after.doc);
+      const local = diffSpans(docToSpans(before.doc), now);
+      const delta = unfit.length === 0 ? local : compose(unfit, local);
+      base = now;
+      unfit = [];
+      back = null;
       if (delta.length > 0) report(delta);
       return null;
     },
@@ -272,31 +302,30 @@ const createProseMirror = (storage, id, path, pm, options = {}) => {
     view.dispatch(tr);
   };
 
-  // What the schema could not hold, sent as an edit of the editor's own.
-  const fit = (given) => {
-    const delta = diffSpans(given, docToSpans(view.state.doc));
-    if (delta.length > 0 && report !== null) report(delta);
-  };
-
+  // A peer's change is never answered with an edit: the document is built
+  // from the field, and what it differs from the field by is held.
   const adapter = {
     setContents: (ops) => {
-      const given = deltaToSpans(ops);
-      land(spansToDoc(given, view.state.schema), [0, 0]);
-      fit(given);
+      base = deltaToSpans(ops);
+      const doc = spansToDoc(base, view.state.schema);
+      land(doc, [0, 0]);
+      hold(doc);
     },
     updateContents: (delta) => {
       const { state } = view;
-      const given = deltaToSpans(compose(spansToDelta(docToSpans(state.doc)), delta));
       const { selection } = state;
+      // The selection as field indices through the delta, before the field moves.
       const at =
         selection instanceof TextSelection
-          ? [
-              transformIndex(indexOfPos(state.doc, selection.anchor), delta, true),
-              transformIndex(indexOfPos(state.doc, selection.head), delta, true),
-            ]
+          ? [selection.anchor, selection.head].map((pos) =>
+              transformIndex(toField(indexOfPos(state.doc, pos)), delta, true),
+            )
           : null;
-      land(spansToDoc(given, state.schema), at);
-      fit(given);
+      base = deltaToSpans(compose(spansToDelta(base ?? docToSpans(state.doc)), delta));
+      const doc = spansToDoc(base, state.schema);
+      unfit = diffSpans(base, docToSpans(doc));
+      back = null;
+      land(doc, at === null ? null : at.map(toDoc));
     },
     onChange: (listener) => {
       report = listener;
@@ -350,8 +379,8 @@ const createProseMirror = (storage, id, path, pm, options = {}) => {
           const decorations = [];
           for (const cursor of cursors) {
             if (cursor.node === presence.node) continue;
-            const head = posOfIndex(doc, cursor.head);
-            const anchor = posOfIndex(doc, cursor.anchor);
+            const head = posOfIndex(doc, toDoc(cursor.head));
+            const anchor = posOfIndex(doc, toDoc(cursor.anchor));
             decorations.push(Decoration.widget(head, () => (render ?? caret)(cursor), { key: cursor.node }));
             if (anchor !== head) {
               const attrs = { class: className, 'data-node': cursor.node };
@@ -366,8 +395,8 @@ const createProseMirror = (storage, id, path, pm, options = {}) => {
           if (stopped) return;
           const { doc, selection } = editor.state;
           const tokens = await selectionToTokens(storage, id, path, {
-            anchor: indexOfPos(doc, selection.anchor),
-            head: indexOfPos(doc, selection.head),
+            anchor: toField(indexOfPos(doc, selection.anchor)),
+            head: toField(indexOfPos(doc, selection.head)),
           });
           const next = JSON.stringify(tokens);
           if (stopped || tokens === null || next === published) return;
@@ -408,6 +437,10 @@ const createProseMirror = (storage, id, path, pm, options = {}) => {
     return { undo: command('undo', 'canUndo'), redo: command('redo', 'canRedo') };
   };
 
+  const attached = (name) => {
+    if (view === null) throw new TypeError(`${name}(): attach() first`);
+  };
+
   return Object.freeze({
     key,
     plugin,
@@ -415,6 +448,16 @@ const createProseMirror = (storage, id, path, pm, options = {}) => {
     attach,
     cursorPlugin,
     commands,
+    /** The field's index at document position `pos` — through what the field lacks of the document, until an edit sends it. */
+    indexOf: (pos) => {
+      attached('indexOf');
+      return toField(indexOfPos(view.state.doc, pos));
+    },
+    /** The document position at the field's index `index`. */
+    posOf: (index) => {
+      attached('posOf');
+      return posOfIndex(view.state.doc, toDoc(index));
+    },
     get binding() {
       return text;
     },

@@ -78,10 +78,20 @@ flight**, and what was typed since, **pending**.
   peer's by the time that delta reached the editor — the peer's insert first
   where both inserted at one index, the order the storage holds them in —
   and sends it again. Two editors on one storage, or on two nodes, converge
-  on the field whatever the interleaving.
+  on the field whatever the interleaving. `expect` compares text: a peer's
+  change made of the characters it replaced (a letter cut and typed again)
+  passes it, and the delta lands by index over the new characters. The
+  binding reads what landed against the delta as it rebased it, and where
+  they differ it reloads the editor rather than leave it apart from the
+  field.
 - **A reset.** A change no delta can say — the record written whole, the
   field unset, the record deleted or purged — reloads the editor from the
-  field and drops what was not sent; `onReset` hears it.
+  field and drops what was not sent; `onReset` hears it. What is typed
+  while the field is being read again goes with the contents it replaces.
+- **A failure.** A send that fails other than `STALE` reloads the editor
+  after a pause that grows with each failure in a row, and nothing is sent
+  until it has; after five in a row the binding stops (`onError` hears
+  each).
 
 `binding.pending` says whether an edit is on its way, `binding.shadow` what
 the field reads as, `flush()` resolves once every edit reported so far has
@@ -152,12 +162,17 @@ await pm.attach(editor).ready;
   node is an embed. A container's marker opens a new one, so two list items
   are two markers and one item with two paragraphs is one: lists, items and
   quotes read back as they were (`docToSpans`, `spansToDoc`).
-- **The field fits the schema.** Text outside a textblock is wrapped in the
-  schema's default one, a container a marker names but none opened is
-  opened, and what the schema cannot hold — a node or mark type it lacks, an
-  attribute it refuses — is left out. The adapter sends the document as it
-  was built as an edit of its own, so the field comes to fit the schema, as
-  y-prosemirror does with a Yjs document. Bind one field to one schema.
+- **The field fits the schema with the next edit.** Text outside a
+  textblock is wrapped in the schema's default one, a container a marker
+  names but none opened is opened, and what the schema cannot hold — a node
+  or mark type it lacks, an attribute it refuses — is left out. What the
+  document differs from the field by goes out with the editor's next edit,
+  never as an answer to a peer's change: two editors that each answered a
+  merge with a fit of their own sent the same structure twice, which fit no
+  better, and answered again without end. Until that edit every reader
+  builds the same document from the field, and the adapter maps the
+  document's indices to the field's through the difference. Opening an
+  editor writes nothing. Bind one field to one schema.
 - **Edits.** An edit leaves as the delta between the document before and
   after it; a peer's lands as one replace step, the smallest the two
   documents differ by, with the selection carried through the delta by
@@ -174,9 +189,11 @@ await pm.attach(editor).ready;
 - The view's `dispatch` must apply a transaction at once, as `EditorView`'s
   does: the adapter reads `view.state` when a peer's edit arrives.
 
-`indexOfPos(doc, pos)` and `posOfIndex(doc, index)` turn a document
-position into an index of the field and back, for code of your own that
-speaks to the storage directly.
+`pm.indexOf(pos)` and `pm.posOf(index)` turn a position of the attached
+editor's document into an index of the field and back, through what the
+field lacks of the document — for code of your own that speaks to the
+storage directly. `indexOfPos(doc, pos)` and `posOfIndex(doc, index)` are
+the document's own indices, the field's once it fits.
 
 ## CodeMirror
 

@@ -583,6 +583,23 @@ test('ops module', async (t) => {
         [],
         'not here yet',
       );
+      // A peer's mark older than one of its key the field holds changes only what the newer one leaves: the
+      // reading over the newer one's range is that one's (an editor told otherwise showed the older value).
+      const length = r.entry.data.body.length;
+      const off = { start: '<5:3:A', end: '>5:3:A', key: 'em', value: null };
+      const newer = applyOp(r.entry, op('mark', 21, 'A', { key: 'body', value: off }));
+      const all = { start: '^', end: '$', key: 'em', value: true };
+      const older = applyOp(newer.entry, op('mark', 20, 'B', { key: 'body', value: all }));
+      assert.deepStrictEqual(older.changes, [
+        { action: 'mark', field: 'body', start: 0, end: 1, name: 'em', value: true, markId: '20:B' },
+        { action: 'mark', field: 'body', start: 2, end: length, name: 'em', value: true, markId: '20:B' },
+      ]);
+      // Under a newer one whole, nothing; newer than every one of its key, all of it.
+      const covered = { start: '<5:3:A', end: '>5:3:A', key: 'em', value: true };
+      assert.deepStrictEqual(changesOf(older.entry, op('mark', 19, 'C', { key: 'body', value: covered })), []);
+      assert.deepStrictEqual(changesOf(older.entry, op('mark', 22, 'C', { key: 'body', value: covered })), [
+        { action: 'mark', field: 'body', start: 1, end: 2, name: 'em', value: true, markId: '22:C' },
+      ]);
       // A list: a splice, an assign as setAt, a move by its index before and after.
       r = applyOp(r.entry, op('splice', 10, 'A', { key: 'items', value: { at: '^', content: [1, 2, 3] } }));
       assert.deepStrictEqual(r.changes, [{ action: 'splice', field: 'items', index: 0, count: 0, content: [1, 2, 3] }]);

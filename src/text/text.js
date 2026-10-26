@@ -202,9 +202,26 @@ const changeOf = (op, stamp, held, block, base = null) => {
   const start = S.indexOfCursor(block, payload.start);
   const end = S.indexOfCursor(block, payload.end);
   if (start === null || end === null || start >= end) return [];
-  const change = { action: 'mark', start, end, name: payload.key, value: payload.value, markId: S.runKey(ts, origin) };
-  if (payload.many === true) change.many = true;
-  return [change];
+  const markId = S.runKey(ts, origin);
+  const many = payload.many === true;
+  const piece = (from, to) => {
+    const change = { action: 'mark', start: from, end: to, name: payload.key, value: payload.value, markId };
+    if (many) change.many = true;
+    return change;
+  };
+  // Where a newer mark of the key holds the text, the reading is that one's:
+  // a peer's older mark arriving late changes the rest of its range alone.
+  const out = [];
+  let at = start;
+  for (const [from, to] of S.newerRanges(block, payload.key, stamp, many, base)) {
+    if (to <= at) continue;
+    if (from >= end) break;
+    if (from > at) out.push(piece(at, from));
+    at = Math.max(at, to);
+    if (at >= end) break;
+  }
+  if (at < end) out.push(piece(at, end));
+  return out;
 };
 
 const render = (entry, field) => S.render(S.indexOf(entry, field));
@@ -1030,7 +1047,16 @@ const compose = (a, b) => {
       const y = right.next(n);
       if (y.retain !== undefined) {
         const op = x.insert !== undefined ? { insert: x.insert } : { retain: n };
-        const attributes = composeAttributes(x.attributes, y.attributes, x.retain !== undefined);
+        let after = y.attributes;
+        // A marker changed over a slot the turn inserted: the insert carries
+        // the marker it ends with — an `embed` attribute on an insert is
+        // read as a mark, and the reader keeps the marker it was inserted with.
+        if (after !== undefined && after.embed !== undefined && typeof x.insert === 'object') {
+          op.insert = { embed: after.embed };
+          const { embed, ...rest } = after;
+          after = Object.keys(rest).length > 0 ? rest : undefined;
+        }
+        const attributes = composeAttributes(x.attributes, after, x.retain !== undefined);
         if (attributes !== undefined) op.attributes = attributes;
         pushOp(out, op);
       } else if (y.delete !== undefined && x.retain !== undefined) pushOp(out, y);

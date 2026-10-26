@@ -397,7 +397,9 @@ docs/                     VitePress site
   in the indices before, last first, and its insert in the indices after,
   both read from the rope by `S.spanOf` in O(log n); a tree's moves from the
   folds before and after, the node with its parent and the sibling before
-  it) — and marks the field `covered`; `changesOf` completes the rest from
+  it; a mark over its anchors' range less what a newer mark of its key holds, `S.newerRanges` — a
+  peer's older mark changes no character a newer one decides) — and marks the field `covered`;
+  `changesOf` completes the rest from
   `delta` as a `reset` with a copy of the value, or an `unset`; `delete` and
   `purge` are one change each. Never diff two readings on the op path. Every
   announce hands them on: `change(op, via, { changes })`, `commit.changes`
@@ -411,7 +413,9 @@ docs/                     VitePress site
   decides a path's share (the field, under it, a prefix of it, the whole
   record); a listener is contained like an event listener. `toDelta` in
   src/text/text.js composes changes with a small Quill `compose` (retain /
-  insert / delete, attributes; an embed slot as `{ insert: { embed } }`);
+  insert / delete, attributes; an embed slot as `{ insert: { embed } }`, and
+  an `embed` attribute over a slot the turn inserted replaces its marker —
+  never an attribute on the insert, which a reader takes for a mark);
   `applyDelta` is ONE transaction through `core.transact` (lent for the
   plugins' methods: a transaction from outside the queue) — never a commit
   per op.
@@ -643,14 +647,23 @@ docs/                     VitePress site
   sends it again, and rebases a peer's delta over what the editor holds beyond the shadow
   before handing it over. A binding or adapter that resolves an editor's indices against
   the storage without `expect` races a peer's edit; a nested `transact` (a plugin method
-  inside a transaction) runs within the enclosing one.
+  inside a transaction) runs within the enclosing one. `expect` compares text alone: a peer's
+  change made of the characters it replaced passes it, and the delta lands by index over the new
+  ones — so a binding that rebased its delta in flight (`rebased`) reads its own event against
+  the rebased delta and reloads where they differ. A send that failed holds every later send until
+  its reload (`reloading`), and `load()` drops `pending` before `setContents`: what was typed
+  over the old contents is never sent over the new.
 - **An editor adapter injects its editor and fits the field to its schema.** `/prosemirror`
   (and `/codemirror`) take the editor's modules as an argument and require nothing of them
   — the packages are devDependencies for skip-guarded tests and optional peerDependencies for
   their types. A ProseMirror document is a marker per block-level node in document order
-  (`docToSpans`/`spansToDoc`); what the schema cannot hold is left out when it is read back,
-  and the adapter sends that as an edit of its own (`fit`), so the field comes to fit the schema
-  — the editor's text must always be the binding's, or every delta after lands askew. A send
+  (`docToSpans`/`spansToDoc`); what the schema cannot hold is left out when it is read back.
+  The adapter NEVER answers a peer's change with an edit: what the document differs from the
+  field by (`unfit`) is held and goes out composed with the editor's next edit (`compose(unfit,
+  local)`) — two editors that each fitted a merge sent the same structure twice, unfit again,
+  and answered each other without end. Until then the adapter's `base` is the binding's view
+  and every index crosses `unfit` (`toDoc`/`toField`: the selection, the cursors,
+  `indexOf`/`posOf`) — a delta in the document's indices lands askew. A send
   that fails other than STALE reloads the editor after a growing pause and the binding stops
   after `MAX_FAILURES` in a row: never retry in a microtask loop (it starved the event loop
   for hours once).

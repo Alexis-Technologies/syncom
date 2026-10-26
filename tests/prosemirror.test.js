@@ -182,15 +182,17 @@ test('ProseMirror', { skip }, async (t) => {
         await settle([sa, sb]);
         await waitUntil(same);
       }
-      // A caret moves with a peer's insert before it, and stays before one at it.
+      // A caret moves with a peer's insert before it, and stays before one at it. The field's
+      // indices go through what the field lacks of the document: it fits with the next edit.
       const at = posOf(va.state.doc, 'a', 0) ?? 1;
       va.dispatch(va.state.tr.setSelection(pm.state.TextSelection.create(va.state.doc, at)));
-      const index = PM.indexOfPos(va.state.doc, at);
+      const index = a.indexOf(at);
       await sb.splice(id, 'body', index - 1, 0, 'xyz');
       await sb.splice(id, 'body', index + 3, 0, 'Q');
       await settle([sa, sb]);
       await waitUntil(() => va.state.doc.textContent.includes('Q'));
-      assert.strictEqual(PM.indexOfPos(va.state.doc, va.state.selection.head), index + 3);
+      assert.strictEqual(a.indexOf(va.state.selection.head), index + 3);
+      assert.strictEqual(a.posOf(index + 3), va.state.selection.head);
       assert.throws(() => a.attach(va), TypeError, 'once');
       assert.throws(() => PM.createProseMirror(sa, id, 'body', {}), TypeError);
       const c = PM.createProseMirror(sa, id, 'body', pm);
@@ -199,23 +201,94 @@ test('ProseMirror', { skip }, async (t) => {
     },
   );
 
-  await t.test('a field the schema cannot hold is made to fit it, as an edit of the editor’s own', async (t2) => {
-    const schema = schemaOf();
-    const storage = await open(t2, 'fit');
-    const id = await storage.insert({});
-    await storage.updateText(id, 'body', 'plain text, no block');
-    const pmb = PM.createProseMirror(storage, id, 'body', pm);
-    const view = viewOf(schema, [pmb.plugin]);
-    t2.after(() => pmb.stop());
-    await pmb.attach(view).ready;
-    await pmb.binding.flush();
-    const spans = await storage.spans(id, 'body');
-    assert.deepStrictEqual(spans[0].value.type, 'paragraph', 'the default textblock laid in the field');
-    assert.ok(PM.spansToDoc(spans, schema).eq(view.state.doc));
-    // A reset: the field written whole reloads the editor.
-    await storage.set(id, {});
-    await waitUntil(() => view.state.doc.eq(schema.topNodeType.createAndFill()));
-  });
+  await t.test(
+    'a peer’s change is never answered with an edit: editors over a field the schema cannot hold stay quiet until they edit',
+    async (t2) => {
+      const schema = schemaOf();
+      const mesh = await createMesh(
+        t2,
+        ['A', 'B', 'C'],
+        [
+          ['A', 'B'],
+          ['B', 'C'],
+          ['A', 'C'],
+        ],
+        open,
+      );
+      const [sa, sb, sc] = ['A', 'B', 'C'].map((name) => mesh.get(name));
+      const id = await sc.insert({ title: 'doc' });
+      await settle([sa, sb, sc]);
+      const a = PM.createProseMirror(sa, id, 'body', pm);
+      const b = PM.createProseMirror(sb, id, 'body', pm);
+      const va = viewOf(schema, [a.plugin]);
+      const vb = viewOf(schema, [b.plugin]);
+      t2.after(() => a.stop());
+      t2.after(() => b.stop());
+      await Promise.all([a.attach(va).ready, b.attach(vb).ready]);
+      const own = () => [sa.vector[sa.nodeId] ?? 0, sb.vector[sb.nodeId] ?? 0];
+      const quiet = own();
+      // A node with no editor writes what neither schema holds: text in no block, an item in no list.
+      await sc.updateText(id, 'body', 'loose');
+      await sc.splitBlock(id, 'body', 5, { type: 'list_item', parents: ['bullet_list'], attrs: {} });
+      await sc.splice(id, 'body', 6, 0, 'item');
+      await settle([sa, sb, sc]);
+      const read = async () => PM.spansToDoc(await sc.spans(id, 'body'), schema);
+      await waitUntil(async () => (await read()).eq(va.state.doc) && (await read()).eq(vb.state.doc));
+      for (let i = 0; i < 5; i++) await tick();
+      await settle([sa, sb, sc]);
+      assert.deepStrictEqual(own(), quiet, 'neither editor answered with an edit');
+      assert.strictEqual(va.state.doc.childCount, 2, 'a paragraph and a list');
+      // Both edit at once: each edit carries what the field lacked, and then all is quiet.
+      va.dispatch(va.state.tr.insertText('A', 1));
+      vb.dispatch(vb.state.tr.insertText('B', vb.state.doc.content.size - 3));
+      await Promise.all([a.binding.flush(), b.binding.flush()]);
+      await settle([sa, sb, sc]);
+      await waitUntil(async () => (await read()).eq(va.state.doc) && (await read()).eq(vb.state.doc));
+      const after = own();
+      assert.ok(after[0] > quiet[0] && after[1] > quiet[1], 'each sent its edit');
+      for (let i = 0; i < 5; i++) await tick();
+      await settle([sa, sb, sc]);
+      assert.deepStrictEqual(own(), after, 'nothing answered the edits');
+      assert.ok(va.state.doc.textContent.includes('A') && va.state.doc.textContent.includes('B'));
+    },
+  );
+
+  await t.test(
+    'a field the schema cannot hold reads as the schema has it, and fits with the editor’s next edit',
+    async (t2) => {
+      const schema = schemaOf();
+      const storage = await open(t2, 'fit');
+      const id = await storage.insert({});
+      await storage.updateText(id, 'body', 'plain text, no block');
+      const pmb = PM.createProseMirror(storage, id, 'body', pm);
+      assert.throws(() => pmb.indexOf(1), { name: 'TypeError', message: 'indexOf(): attach() first' });
+      assert.throws(() => pmb.posOf(0), { name: 'TypeError', message: 'posOf(): attach() first' });
+      const view = viewOf(schema, [pmb.plugin]);
+      t2.after(() => pmb.stop());
+      const written = storage.vector[storage.nodeId];
+      await pmb.attach(view).ready;
+      await pmb.binding.flush();
+      assert.strictEqual(storage.vector[storage.nodeId], written, 'opening the editor writes nothing');
+      assert.strictEqual(view.state.doc.textContent, 'plain text, no block');
+      assert.deepStrictEqual((await storage.spans(id, 'body'))[0].type, 'text', 'the field as it was');
+      // Position 1 is the default paragraph's start: index 1 of the document, index 0 of the field.
+      assert.strictEqual(PM.indexOfPos(view.state.doc, 1), 1);
+      assert.strictEqual(pmb.indexOf(1), 0);
+      assert.strictEqual(pmb.posOf(0), 1);
+      assert.strictEqual(pmb.posOf(5), 6);
+      // The next edit carries the paragraph the field lacked.
+      view.dispatch(view.state.tr.insertText('!', view.state.doc.content.size - 1));
+      await pmb.binding.flush();
+      const spans = await storage.spans(id, 'body');
+      assert.deepStrictEqual(spans[0].value.type, 'paragraph', 'the default textblock laid in the field');
+      assert.ok(PM.spansToDoc(spans, schema).eq(view.state.doc));
+      assert.strictEqual(view.state.doc.textContent, 'plain text, no block!');
+      assert.strictEqual(pmb.indexOf(1), 1, 'fitted: the indices agree');
+      // A reset: the field written whole reloads the editor.
+      await storage.set(id, {});
+      await waitUntil(() => view.state.doc.eq(schema.topNodeType.createAndFill()));
+    },
+  );
 
   await t.test(
     'undo and redo are the storage’s commands; a presence room’s cursors are decorations and this editor’s selection is published',

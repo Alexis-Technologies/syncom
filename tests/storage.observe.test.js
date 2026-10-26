@@ -201,11 +201,28 @@ test('observe and deltas', async (t) => {
         (await storage.blocks(doc, 'body')).map((block) => block.parents),
         [['blockquote'], ['blockquote']],
       );
-      // Random edits: the composed delta of each turn takes the text before it to the text after.
+      // A slot inserted and its marker changed in one turn: the insert carries the marker it ends with
+      // (it read as the marker it was inserted with, the change an `embed` mark on it, and an editor
+      // bound to the field kept the old block).
+      const nested = await storage.insert({});
+      await storage.updateText(nested, 'body', 'ab');
+      await storage.transact(async (tx) => {
+        await tx.splitBlock(nested, 'body', 1, { type: 'paragraph' });
+        await tx.mark(nested, 'body', 1, 2, 'em', true);
+        await tx.updateBlock(nested, 'body', 1, { type: 'heading', attrs: { level: 2 } });
+      });
+      const heading = { type: 'heading', parents: [], attrs: { level: 2 }, isEmbed: false };
+      assert.deepStrictEqual(storage.toDelta(turn.changes, 'body'), [
+        { retain: 1 },
+        { insert: { embed: heading }, attributes: { em: true } },
+      ]);
+      // Random edits: the composed delta of each turn takes the reading before it to the reading after,
+      // markers and marks included.
       let seed = 11;
       const random = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 2 ** 32;
       for (let round = 0; round < 25; round++) {
         const was = (await storage.get(id)).body;
+        const rich = await storage.spans(id, 'body');
         await storage.transact(async (tx) => {
           for (let i = 0; i < 1 + Math.floor(random() * 4); i++) {
             const length = (await tx.get(id)).body.length;
@@ -214,12 +231,26 @@ test('observe and deltas', async (t) => {
             const roll = random();
             if (roll < 0.5) await tx.splice(id, 'body', at, count, 'abc'.slice(0, 1 + Math.floor(random() * 3)));
             else if (roll < 0.7 && at < length) await tx.mark(id, 'body', at, at + 1, 'em', round);
-            else if (roll < 0.85) await tx.insertEmbed(id, 'body', at, { type: 'x' });
-            else if (count > 0) await tx.splice(id, 'body', at, count);
+            else if (roll < 0.8) await tx.insertEmbed(id, 'body', at, { type: 'x' });
+            else if (roll < 0.9) {
+              // A block started and, as often as not, changed in the same turn.
+              await tx.splitBlock(id, 'body', at, { type: 'paragraph' });
+              if (random() < 0.5) await tx.updateBlock(id, 'body', at, { type: 'heading', attrs: { level: round } });
+            } else if (count > 0) await tx.splice(id, 'body', at, count);
           }
         });
         const composed = storage.toDelta(turn.changes, 'body');
         assert.strictEqual(applyQuill(was, composed), (await storage.get(id)).body, `round ${round}`);
+        // A block marker's slot takes the marks of the range it is typed in; a reading of blocks leaves them out.
+        const rich2 = (ops) =>
+          compose([], ops).map(({ attributes, ...op }) =>
+            op.insert?.embed?.isEmbed === false || attributes === undefined ? op : { ...op, attributes },
+          );
+        assert.deepStrictEqual(
+          rich2(compose(spansToDelta(rich), composed)),
+          rich2(spansToDelta(await storage.spans(id, 'body'))),
+          `round ${round}: the rich reading`,
+        );
       }
       // applyDelta: one transaction (one group file), marks and embeds included; a bad delta writes nothing.
       const other = await storage.insert({});

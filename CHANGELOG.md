@@ -14,6 +14,11 @@ There is no released version section until then; everything below lands in it.
 
 ### Added
 
+- **ProseMirror: `indexOf(pos)` and `posOf(index)`.** A position of the
+  attached editor's document as an index of the field and back, through
+  what the field lacks of the document until the editor's next edit sends
+  it — for code that speaks to the storage directly. `indexOfPos` and
+  `posOfIndex` stay the document's own.
 - **The log appends to a journal.** A backend may offer `append(dir, name,
   content)`; `node:fs` does (through a few descriptors it holds open, the
   least recently used closed first), and so do `memory()`, `layered()`
@@ -949,6 +954,32 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **Two ProseMirror editors could answer each other without end.** Where
+  concurrent edits merged into a structure the schema could not hold, both
+  adapters fitted the field at once, the field kept both fits, the doubled
+  structure fit no better, and both fitted again, the document growing
+  every round. The adapter now never answers a peer's change with an edit:
+  every reader builds the same document from the field, and what the field
+  lacks of it goes out with the editor's next edit. Opening an editor
+  writes nothing.
+- **A marker inserted and changed in one turn read as its first value.**
+  `toDelta` composed the change onto the insert as an `embed` attribute,
+  which a reader takes for a mark: an editor bound to the field kept the
+  block it was inserted as. The insert now carries the marker it ends with.
+- **A peer's older mark was reported over text a newer one holds.** A mark
+  arriving after a newer one of its name was reported over its whole range,
+  so an observer, or an editor binding, showed it where the reading shows
+  the newer one. It is reported over what the newer ones leave.
+- **An editor binding could drift from its field.** `expect` compares
+  text, and a peer's change made of the characters it replaced — a letter
+  cut and typed again — let a delta land by index over the new characters,
+  not as the binding had rebased it: the binding now reads its own event
+  against the delta it rebased and reloads where they differ. A send right
+  after a failure went out over the delta the failure dropped, and its
+  reload never came: sends now wait for it. And what was typed while the
+  field was being read again was sent over the contents that replaced it:
+  it now goes with them. Each left an editor apart from the field until
+  the next reset; under load the two-editor tests failed one run in seven.
 - **A deferred window could run its flushes back to back.** A window armed
   while the previous flush was queued or writing fired inside it, so once a
   record's file took longer to write than the window (a text of thousands

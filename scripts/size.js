@@ -251,7 +251,9 @@ const ENTRIES = [
   // 92.0 with observe, the deltas (toDelta's compose, applyDelta) and the cursor positions.
   // 94.6 with presence carried by the sync plugin.
   // 96.5 with a fork at any version (atVersion) and blame.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 98 },
+  // 98.3 with the change reports exact under concurrency (a mark less what newer ones hold, a marker set
+  // in the turn that inserted it). 98.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 98.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -263,7 +265,9 @@ const ENTRIES = [
   // 26.7 with the deltas (a Quill compose, toDelta, applyDelta) and the cursor positions.
   // 27.6 with the editor binding's needs: a cut read as one splice per stretch (spansOf), an insert's marks
   // in its change and exact in applyDelta, applyDelta's `expect` (STALE). 28, raised by name.
-  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 28 },
+  // 28.1 with a mark's change less what newer marks of its key hold (S.newerRanges) and a marker set in
+  // the turn that inserted it composed into the insert. 28.5, raised by name.
+  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 28.5 },
   // The tree kind alone, with the fractional indexes a place is made of and
   // the argument checks it shares with the core (5.1 measured).
   // 5.5 with the field-name check unset shares with it (src/args.js).

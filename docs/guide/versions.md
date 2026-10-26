@@ -282,7 +282,9 @@ storage.on('change', (op, via, { changes }) => { … });
 A splice's cuts are in the indices before the op (last first), its insert in
 the indices after, with the `marks` a text's insert reads with — one it
 landed inside, one that grew over it; a mark over the indices its anchors
-fall at; a tree move
+fall at, less those a newer mark of its name holds (a peer's older mark
+arriving late changes what that one leaves); a slot inserted and its marker
+changed in one turn as the insert of the marker it ends with; a tree move
 names the node, its parent and the sibling before it, and the nodes that
 followed it where it was and where it is. A field changed another way — reset
 by a whole-record write, outranked by another kind, pruned under a prefix,

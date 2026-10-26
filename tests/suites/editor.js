@@ -255,6 +255,126 @@ const runEditorTests = async (t, assert, createStorage) => {
   );
 
   await t.test(
+    'a peer’s change made of the same characters, landing while a delta is in flight, reloads the editor rather than leave it apart',
+    async (t2) => {
+      const storage = await createStorage(t2, 'A');
+      const id = await storage.insert({});
+      await storage.updateText(id, 'body', 'abcdef');
+      // Between the send and the delta's turn, another writer cuts the 'c' and types a 'c' again: the text
+      // the delta expects is there, and the delta lands by index over the new letter.
+      let first = true;
+      const racing = new Proxy(storage, {
+        get: (target, name) => {
+          if (name === 'applyDelta') {
+            return async (...args) => {
+              if (first) {
+                first = false;
+                await target.splice(id, 'body', 2, 1, 'c');
+                await tick();
+              }
+              return target.applyDelta(...args);
+            };
+          }
+          const value = target[name];
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+      const editor = createEditor();
+      const resets = [];
+      const binding = E.createTextBinding(racing, id, 'body', editor, { onReset: () => resets.push(editor.text()) });
+      t2.after(() => binding.stop());
+      await binding.ready;
+      editor.erase(2, 1);
+      await waitUntil(() => resets.length === 1);
+      await binding.flush();
+      const field = (await storage.get(id)).body;
+      assert.strictEqual(field, 'abdef', 'the delta cut the letter at its index');
+      assert.deepStrictEqual([editor.text(), binding.shadow], [field, field], 'read again from the field');
+    },
+  );
+
+  await t.test('what is typed while the field is read again goes with the contents it replaces', async (t2) => {
+    const storage = await createStorage(t2, 'A');
+    const id = await storage.insert({});
+    await storage.updateText(id, 'body', 'before');
+    // The read of the field waits for a gate, so an edit lands while it is in progress.
+    let gate = Promise.resolve();
+    let open = () => {};
+    const slow = new Proxy(storage, {
+      get: (target, name) => {
+        if (name === 'transact') {
+          return async (...args) => {
+            await gate;
+            return target.transact(...args);
+          };
+        }
+        const value = target[name];
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const editor = createEditor();
+    const resets = [];
+    const binding = E.createTextBinding(slow, id, 'body', editor, { onReset: () => resets.push(editor.text()) });
+    t2.after(() => binding.stop());
+    await binding.ready;
+    gate = new Promise((resolve) => (open = resolve));
+    await storage.set(id, { title: 'reset' });
+    await tick();
+    editor.type(0, 'lost ');
+    open();
+    await waitUntil(() => resets.length === 1);
+    await binding.flush();
+    assert.deepStrictEqual([editor.text(), (await storage.get(id)).body], ['', undefined], 'dropped, never sent');
+    await storage.updateText(id, 'body', 'after');
+    await waitUntil(() => editor.text() === 'after');
+    editor.type(5, '!');
+    await binding.flush();
+    assert.deepStrictEqual([editor.text(), (await storage.get(id)).body], ['after!', 'after!']);
+  });
+
+  await t.test('a send that failed holds what follows until the editor is read again', async (t2) => {
+    const storage = await createStorage(t2, 'A');
+    const id = await storage.insert({});
+    await storage.updateText(id, 'body', 'base');
+    let refuse = true;
+    const flaky = new Proxy(storage, {
+      get: (target, name) => {
+        if (name === 'applyDelta') {
+          return async (...args) => {
+            if (refuse) {
+              refuse = false;
+              throw new TypeError('a delta the field refuses');
+            }
+            return target.applyDelta(...args);
+          };
+        }
+        const value = target[name];
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const editor = createEditor();
+    const errors = [];
+    const resets = [];
+    const binding = E.createTextBinding(flaky, id, 'body', editor, {
+      onError: (error) => errors.push(error.message),
+      onReset: () => resets.push(editor.text()),
+    });
+    t2.after(() => binding.stop());
+    await binding.ready;
+    editor.type(0, 'x');
+    await waitUntil(() => errors.length === 1);
+    // Typed before the reload: it was sent over the delta the failure dropped, and the reload never came.
+    editor.type(0, 'y');
+    assert.strictEqual(binding.pending, true, 'held for the reload');
+    await waitUntil(() => resets.length === 1);
+    await binding.flush();
+    assert.deepStrictEqual([editor.text(), (await storage.get(id)).body], ['base', 'base']);
+    editor.type(4, '!');
+    await binding.flush();
+    assert.deepStrictEqual([editor.text(), (await storage.get(id)).body], ['base!', 'base!']);
+  });
+
+  await t.test(
     'diffSpans and diffBlocks give the delta between two readings; spans, blocks and deltas round-trip; transforms agree with the storage’s order',
     async (t2) => {
       const storage = await createStorage(t2, 'A');

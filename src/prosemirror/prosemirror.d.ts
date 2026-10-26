@@ -49,6 +49,14 @@ export interface ProseMirrorBinding {
   cursorPlugin(presence: Presence, options?: CursorPluginOptions): PMState.Plugin;
   /** ProseMirror commands over an undo manager of the storage's (`createUndo({ trackedSources: [binding.source] })`). */
   commands(manager: UndoManager): { undo: PMState.Command; redo: PMState.Command };
+  /**
+   * The field's index at document position `pos`, through what the field
+   * lacks of the document until the editor's next edit sends it; after
+   * `attach()`. `indexOfPos` is the document's own.
+   */
+  indexOf(pos: number): number;
+  /** The document position at the field's index `index`; after `attach()`. */
+  posOf(index: number): number;
   stop(): void;
 }
 

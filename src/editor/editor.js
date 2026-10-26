@@ -495,9 +495,15 @@ const createTextBinding = (storage, id, path, adapter, options = {}) => {
   let flight = 0;
   let failures = 0;
   let scheduled = false;
+  // A reload is due (a send failed): nothing goes out until it is done — a
+  // send in between would build on the delta the failure dropped.
+  let reloading = false;
+  // A peer's change came in while the delta in flight was unanswered, and
+  // the delta was rebased over it.
+  let rebased = false;
   const waiting = [];
 
-  const idle = () => inflight === null && pending.length === 0 && !stale;
+  const idle = () => inflight === null && pending.length === 0 && !stale && !reloading;
   const settle = () => {
     if (!idle()) return;
     for (const resolve of waiting.splice(0)) resolve();
@@ -508,11 +514,12 @@ const createTextBinding = (storage, id, path, adapter, options = {}) => {
   };
 
   const send = () => {
-    if (stopped || !loaded || inflight !== null || stale || pending.length === 0) return;
+    if (stopped || !loaded || inflight !== null || stale || reloading || pending.length === 0) return;
     const mine = ++flight;
     const since = epoch;
     inflight = pending;
     pending = [];
+    rebased = false;
     storage.applyDelta(id, path, inflight, { source, expect: shadow }).then(
       (count) => {
         // No op made (a mark already there): no event comes to free the slot.
@@ -547,6 +554,7 @@ const createTextBinding = (storage, id, path, adapter, options = {}) => {
     failures++;
     fail(error);
     if (failures >= MAX_FAILURES) return void halt();
+    reloading = true;
     const mine = ++flight;
     setTimeout(
       () => {
@@ -577,6 +585,9 @@ const createTextBinding = (storage, id, path, adapter, options = {}) => {
     }));
     if (stopped) return;
     shadow = textOf(spans);
+    // What was typed into the editor while the field was read is over the
+    // contents the field replaces: it goes with them, never sent over these.
+    pending = [];
     adapter.setContents(spansToDelta(spans ?? []));
     loaded = true;
     const events = buffered;
@@ -590,6 +601,7 @@ const createTextBinding = (storage, id, path, adapter, options = {}) => {
     inflight = null;
     pending = [];
     stale = false;
+    reloading = false;
     try {
       await load();
     } catch (error) {
@@ -602,8 +614,14 @@ const createTextBinding = (storage, id, path, adapter, options = {}) => {
   const handle = (changes, event) => {
     const delta = storage.toDelta(changes, path);
     if (delta === null) return void reload();
+    const before = shadow;
     shadow = applyToText(shadow, delta);
     if (event.source === source) {
+      // `expect` compares text: a peer's change made of the characters it
+      // replaced — a letter cut and typed again — passes it, and the delta
+      // lands by index over the new ones, not as it was rebased over the
+      // peer's. What landed says so; the editor is read again.
+      if (rebased && inflight !== null && applyToText(before, inflight) !== shadow) return void reload();
       failures = 0;
       inflight = null;
       settle();
@@ -616,6 +634,7 @@ const createTextBinding = (storage, id, path, adapter, options = {}) => {
       const next = transform(inflight, remote, false);
       inflight = transform(remote, inflight, true);
       remote = next;
+      rebased = true;
     }
     if (pending.length > 0) {
       const next = transform(pending, remote, false);

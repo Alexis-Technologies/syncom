@@ -1893,6 +1893,33 @@ const styleAt = (block, index, base = null) => {
   return styleOf(active);
 };
 
+// Where a mark of `key` stamped `stamp` does not decide the reading: the
+// visible ranges `[start, end)` of the marks of the key in force that are
+// newer — any newer one replaces a plain mark, a newer plain one a stacked
+// mark (styleOf) — sorted by start. O(marks × log n): a change report reads
+// it, so a peer's older mark is never reported over text a newer one holds.
+const newerRanges = (block, key, stamp, stacked, base = null) => {
+  const out = [];
+  if (!block.marks) return out;
+  const indexAt = (token) => {
+    if (token !== HEAD && token !== END) {
+      const anchor = parseAnchor(token);
+      if (anchor !== null && belowBase(anchor.elem.ts, anchor.elem.origin, base)) return 0;
+    }
+    return indexOfCursor(block, token);
+  };
+  for (const id of keysOf(block.marks)) {
+    const [from, to, k, , flags] = block.marks[id];
+    if (k !== key || (flags & OFF) !== 0 || (stacked && (flags & MANY) !== 0)) continue;
+    const { ts, origin } = parseRun(id);
+    if (compareClock([ts, origin], stamp) <= 0) continue;
+    const start = indexAt(from);
+    const end = indexAt(to);
+    if (start !== null && end !== null && start < end) out.push([start, end]);
+  }
+  return out.sort((x, y) => x[0] - y[0]);
+};
+
 // The ordinal of every anchor the marks name, and the ordinal and visible
 // index of every visible slot — read in one walk of the rope, no hints, so
 // a block of any version reads its spans.
@@ -2310,6 +2337,7 @@ module.exports = {
   marksIn,
   spans,
   styleAt,
+  newerRanges,
   slotAt,
   cursorAt,
   indexOfCursor,
