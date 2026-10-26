@@ -269,7 +269,9 @@ const ENTRIES = [
   // what it takes and an op on a purged record stripped before the append (2026-10-27). 109, raised by name.
   // 109.1 with a bootstrap's pages checked (BAD_PAGE), a default opsPerPush and kind refusals reported once a
   // page. 110, raised by name: room for the review's remaining fixes, measured again at the end of it.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 110 },
+  // 110.4 with sets shared between versions, a hub's vector read key by key, the log's groups and the deferred
+  // window measured (stats, three gauges, three instruments). 111.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 111.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).

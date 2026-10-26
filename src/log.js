@@ -153,6 +153,10 @@ class OpLog {
   // Files whose checksum did not match at open: altered or torn on disk.
   #corrupt = 0;
   #lost = false;
+  // Journal lines left out at open as torn (their append never answered),
+  // and groups whose write failed since this open: what `stats().log` says.
+  #tornLines = 0;
+  #appendFailures = 0;
   // Entries compaction keeps whatever the retention says (see `retain`),
   // and whatever a reader pinned for the time being (see `pin`).
   #keep = null;
@@ -309,6 +313,7 @@ class OpLog {
           // Torn on the way down: its write never finished, so its batch was
           // never announced — dropped.
           this.#log?.info?.({ event: 'log.open.torn', file: name, reason });
+          this.#tornLines++;
         }
         await this.#fsi.remove(this.#openPath, name);
         continue;
@@ -368,6 +373,7 @@ class OpLog {
       if (reason === 'checksum') this.#corrupt++;
       if (i === end - 1) {
         this.#log?.info?.({ event: 'log.open.torn', file: name, reason });
+        this.#tornLines++;
       } else {
         this.#log?.error?.({ event: 'log.open.unreadable', file: name, reason });
         this.#lost = true;
@@ -797,7 +803,7 @@ class OpLog {
     // happens — a throw past this point would leave them, and every write
     // landing behind them in log order, waiting for good.
     try {
-      if (started) this.#otel.recordAppend(now() - started);
+      if (started) this.#otel.recordAppend(now() - started, entries.length);
       const seqs = this.#sealApplied ? [] : null;
       for (const entry of entries) {
         this.#entries.push(entry);
@@ -829,6 +835,9 @@ class OpLog {
   // heads put back to before the first of them, so the seqs are handed out
   // again and the next op of a stream chains to what is durable.
   #fail(group, error) {
+    this.#appendFailures++;
+    this.#otel.recordAppendFailure();
+    this.#log?.error?.({ event: 'log.append.failed', from: group.from, ops: group.entries.length, err: error });
     const later = this.#group;
     this.#group = null;
     this.#next = group.from;
@@ -1031,6 +1040,27 @@ class OpLog {
   /** Rolls that failed since the open (`log.roll.failed`): the groups they would have sealed stay open and durable. */
   get rollFailures() {
     return this.#rollFailures;
+  }
+
+  /**
+   * What the open groups are — `{ journaled, open, unapplied, torn, lost,
+   * appendFailures }`: whether the backend appends (a journal) or each
+   * group is a file, the groups not sealed yet, those not yet applied to
+   * the records (a reopen replays them), the journal lines an open left out
+   * as torn, whether an open lost entries it could not read, and the groups
+   * whose write failed since this open.
+   */
+  get health() {
+    let unapplied = 0;
+    for (let i = this.#pendingHead; i < this.#pending.length; i++) if (this.#pending[i].left.size > 0) unapplied++;
+    return {
+      journaled: typeof this.#fsi.append === 'function',
+      open: this.#open.length,
+      unapplied,
+      torn: this.#tornLines,
+      lost: this.#lost,
+      appendFailures: this.#appendFailures,
+    };
   }
 
   /** Every record id the retained entries name, unsorted. */

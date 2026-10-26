@@ -735,7 +735,12 @@ export interface SyncomTelemetryWriter {
   recordPush?(reason: string, result: string, count: number): void;
   recordBootstrap?(result: string): void;
   recordLogRoll?(sealed: number, dropped: number): void;
-  recordAppend?(elapsed: number): void;
+  /** One group written to the log: how long it took and how many ops it held. */
+  recordAppend?(elapsed: number, ops?: number): void;
+  /** A group the log could not write. */
+  recordAppendFailure?(): void;
+  /** The deferred window landed: how long it took and how many records it wrote. */
+  recordFlush?(elapsed: number, records?: number): void;
   recordHook?(name: string, elapsed: number): void;
   recordLockWait?(elapsed: number): void;
   recordRefusal?(code: number | string): void;
@@ -1320,6 +1325,8 @@ export interface LockOptions {
 /** What `storage.stats()` answers — every number from memory, no I/O. */
 export interface StorageStats {
   closed: boolean;
+  /** The plugins this storage was opened with, by name, in registration order. */
+  plugins: string[];
   /** Writes waiting on, or running in, the mutation queue. */
   queue: number;
   cache: { size: number; max: number; pinned: number };
@@ -1338,6 +1345,18 @@ export interface StorageStats {
     rollFailures: number;
     /** Readers holding segments past retention: undo managers, mostly. */
     pins: number;
+    /** Whether the backend appends: the open groups are lines of a journal, else a file each. */
+    journaled: boolean;
+    /** Groups not sealed into a segment yet. */
+    open: number;
+    /** Groups not applied to the records yet: what a reopen would replay. */
+    unapplied: number;
+    /** Journal lines the open left out as torn: their append was never answered. */
+    torn: number;
+    /** Whether the open lost entries it could not read (`droppedTs` moved). */
+    lost: boolean;
+    /** Groups whose write failed since the open: their seqs taken back, their writes rejected. */
+    appendFailures: number;
   };
   /**
    * The tags kept here; `null` without the `versions` plugin. `corrupt` when
@@ -1350,6 +1369,14 @@ export interface StorageStats {
   deferred: number;
   /** Local writes appended but not yet on disk — the queue is free from the append, the caller waits for the landing. */
   inflight: number;
+  /**
+   * The deferred window: `window` as `open({ defer })` gave it (ms), what
+   * the last deferred landing took (`flushCost`: the next window is at least
+   * that) and the log positions waiting for it.
+   */
+  defer: { window: number; flushCost: number; positions: number };
+  /** Listeners registered through `observe()`. */
+  observers: number;
   chain: { tail: string } | null;
   lock: { mode: 'fail' | 'wait' } | null;
 }

@@ -762,6 +762,7 @@ test('a group commit: appends issued together land as one file, in order; a fail
         assert.strictEqual(log.length, 1, 'nothing of them published');
         assert.strictEqual(log.next, 2, 'the seqs are taken back');
         assert.deepStrictEqual(log.vector, { A: 1 }, 'and so is the vector: a stream the groups opened is gone');
+        assert.strictEqual(log.health.appendFailures, 1, 'one failed write, counted');
         failing = false;
         const [{ seq }] = await log.append([op('A', 2)]);
         assert.strictEqual(seq, 2, 'the next append gets the first of them again');

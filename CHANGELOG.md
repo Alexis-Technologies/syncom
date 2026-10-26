@@ -14,6 +14,15 @@ There is no released version section until then; everything below lands in it.
 
 ### Added
 
+- **What the log and the deferred window do is measured.** New metrics:
+  `syncom.log.group.ops` (ops per group the log wrote),
+  `syncom.log.append.failures`, `syncom.defer.flush.duration`, and the gauges
+  `syncom.inflight`, `syncom.deferred`, `syncom.held`; a group that cannot
+  be written logs `log.append.failed`. `stats()` adds `plugins`, `defer: {
+  window, flushCost, positions }`, `observers`, and in `log` the open and
+  unapplied groups, the torn lines and lost entries of the open, and the
+  failed appends. The writer contract gains `recordAppendFailure` and
+  `recordFlush`, and `recordAppend` the group's size.
 - **What an editor adapter shares: `createFit`, `undoSteps`,
   `failureReporter`** (`@alexify/syncom/editor`). The fit — what an
   editor's document differs from the field by, held for its next edit, and

@@ -814,6 +814,8 @@ test('OpLog telemetry', async (t) => {
     assert.strictEqual(point(segments, { 'syncom.log.event': 'sealed' }).value, 4);
     assert.strictEqual(point(segments, { 'syncom.log.event': 'dropped' }).value, 2);
     assert.strictEqual((await points('syncom.log.append.duration'))[0].value.count, 8);
+    const groups = (await points('syncom.log.group.ops'))[0].value;
+    assert.deepStrictEqual([groups.count, groups.sum], [8, 8], 'one op a group, each its own');
   });
 
   await t.test('an empty append is neither measured nor spanned', async (t2) => {
@@ -859,6 +861,9 @@ test('What the engine adds beyond the write path', async (t) => {
     assert.strictEqual((await points('syncom.log.length'))[0].value, 2);
     assert.strictEqual((await points('syncom.queue.depth'))[0].value, 0);
     assert.strictEqual((await points('syncom.outbox.size'))[0].value, 0);
+    for (const name of ['syncom.inflight', 'syncom.deferred', 'syncom.held']) {
+      assert.strictEqual((await points(name))[0].value, 0, name);
+    }
     assertNoIdentityLabels(
       await (async () => {
         const { collect } = createMetrics();
@@ -954,8 +959,8 @@ test('What the engine adds beyond the write path', async (t) => {
       throw new Error('read boom');
     });
     assert.doesNotThrow(() => observed({ observe: hostile }), 'a reader that throws is contained');
-    // The last gauge registered reads the log length.
-    createTelemetry({ meter: observing }).gauges(() => ({ log: 3, cache: 'not a number' }));
+    // The last gauge registered reads the held records.
+    createTelemetry({ meter: observing }).gauges(() => ({ held: 3, cache: 'not a number' }));
     const seen = [];
     observed({ observe: (value) => seen.push(value) });
     assert.deepStrictEqual(seen, [3]);

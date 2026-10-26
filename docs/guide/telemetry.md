@@ -125,6 +125,9 @@ appears on one.
 | `syncom.bootstraps` | Counter | `{bootstrap}` | `syncom.result` (`ok` / `error` / `refused` — a host that cannot hold one of this node's kinds, `KINDS_MISMATCH`) |
 | `syncom.log.segments` | Counter | `{segment}` | `syncom.log.event` (`sealed` / `dropped`) |
 | `syncom.log.append.duration` | Histogram | `ms` | — |
+| `syncom.log.group.ops` | Histogram | `{op}` | — (ops in one group the log wrote: every append that came while the group before it was being written) |
+| `syncom.log.append.failures` | Counter | `{group}` | — (groups the log could not write — their seqs taken back, their writes rejected; also `log.append.failed`) |
+| `syncom.defer.flush.duration` | Histogram | `ms` | — (landing the deferred window: the records' files and one chain block; the next window is at least as long) |
 | `syncom.hook.duration` | Histogram | `ms` | `syncom.hook` (`beforeWrite` / `afterWrite` / `beforeApply` / `afterApply` — the hooks that run in the mutation queue; read and sync hooks are not timed) |
 | `syncom.lock.wait` | Histogram | `ms` | — (what `open()` spent taking the directory lock) |
 | `syncom.hello.refused` | Counter | `{call}` | `syncom.code` (`400` / `403` / `409` / `428`) — calls a hosted unit refused before the handler |
@@ -134,6 +137,9 @@ appears on one.
 | `syncom.cache.size` | Observable gauge | `{entry}` | — |
 | `syncom.catalog.size` | Observable gauge | `{entry}` | — (rows, tombstones included) |
 | `syncom.log.length` | Observable gauge | `{entry}` | — (entries retained) |
+| `syncom.inflight` | Observable gauge | `{op}` | — (local ops appended and not landed yet) |
+| `syncom.deferred` | Observable gauge | `{record}` | — (records whose files wait for the deferred window) |
+| `syncom.held` | Observable gauge | `{record}` | — (records held in memory after a file write failed, replayed at the next open) |
 
 The gauges are observable: the SDK reads them when it collects, through a
 callback the storage registers at open. **One storage per meter** for those —
@@ -234,6 +240,7 @@ alert to key on:
 
 | Level | `event` | When |
 | --- | --- | --- |
+| error | `log.append.failed` | a group could not be written (`from`, `ops`): its seqs are taken back and its writes, with the group gathered behind it, reject; counted in `stats().log.appendFailures` |
 | error | `log.roll.failed` | sealing the log failed (a segment or the index not written — the disk full); nothing was lost: the groups stay open and durable, the next append rolls again, and `stats().log.rollFailures` counts it |
 | error | `log.flush.failed`, `internal.error` | a bug: the log's write lane or its bookkeeping after an append threw; the writes it held are answered all the same |
 | warn | `sync.op.malformed`, `sync.op.skew` | a peer's op refused before it was read; the latter also an `error` event (`SKEW`) — its own stamp, or one its merge meta holds, beyond `sync.maxSkew` |

@@ -179,6 +179,34 @@ test('open({ defer }): record files lag the log by the window, never the reads',
     },
   );
 
+  await t.test(
+    'stats() says what the window, the log groups and the plugins are; a deferred landing is timed',
+    async (t2) => {
+      const durations = [];
+      const telemetry = {
+        enabled: true,
+        withSpan: (_name, _attributes, fn) => fn(null),
+        recordFlush: (elapsed, records) => durations.push([typeof elapsed, records]),
+      };
+      const { storage } = await openTemp(t2, { defer: 20, telemetry });
+      const id = await storage.insert({ n: 1 });
+      storage.observe(id, () => {});
+      const stats = storage.stats();
+      assert.deepStrictEqual(stats.plugins, storage.plugins);
+      assert.deepStrictEqual([stats.defer.window, stats.defer.positions >= 1, stats.observers], [20, true, 1]);
+      assert.deepStrictEqual(
+        [stats.log.journaled, stats.log.torn, stats.log.lost, stats.log.appendFailures],
+        [true, 0, false, 0],
+      );
+      assert.ok(stats.log.open >= 1 && stats.log.unapplied >= 1, 'the write is open and not applied to its file yet');
+      await storage.flush();
+      assert.deepStrictEqual(durations, [['number', 1]]);
+      const after = storage.stats();
+      assert.deepStrictEqual([after.defer.positions, after.log.unapplied], [0, 0]);
+      assert.ok(after.defer.flushCost >= 0);
+    },
+  );
+
   await t.test('the option is a non-negative integer of milliseconds', async (t2) => {
     const dir = await createTemp();
     t2.after(() => cleanupTemp(dir));

@@ -125,6 +125,9 @@ const GAUGES = Object.freeze([
   ['syncom.cache.size', 'cache', 'Entries in the record cache'],
   ['syncom.catalog.size', 'catalog', 'Rows in the record catalog, tombstones included'],
   ['syncom.log.length', 'log', 'Entries retained in the operation log'],
+  ['syncom.inflight', 'inflight', 'Local ops appended and not landed yet'],
+  ['syncom.deferred', 'deferred', 'Records whose files wait for the deferred window'],
+  ['syncom.held', 'held', 'Records held in memory after a file write failed'],
 ]);
 
 // Label sets for the fixed-attribute samples, built once: they ride on every
@@ -171,6 +174,9 @@ const createTelemetry = (telemetry) => {
   let bootstraps = null;
   let logSegments = null;
   let appendDuration = null;
+  let groupOps = null;
+  let appendFailures = null;
+  let flushDuration = null;
   let hookDuration = null;
   let lockWait = null;
   let refused = null;
@@ -224,6 +230,18 @@ const createTelemetry = (telemetry) => {
         unit: 'ms',
         description: 'Duration of writing a batch to the open log',
       });
+      groupOps = meter.createHistogram('syncom.log.group.ops', {
+        unit: '{op}',
+        description: 'Ops in one group the log wrote: every append that came while the one before was written',
+      });
+      appendFailures = meter.createCounter('syncom.log.append.failures', {
+        unit: '{group}',
+        description: 'Groups the log could not write: their seqs taken back, their writes rejected',
+      });
+      flushDuration = meter.createHistogram('syncom.defer.flush.duration', {
+        unit: 'ms',
+        description: 'Duration of landing the deferred window: the records files, one chain block',
+      });
       hookDuration = meter.createHistogram('syncom.hook.duration', {
         unit: 'ms',
         description: 'Duration of a storage hook, by hook name',
@@ -265,6 +283,9 @@ const createTelemetry = (telemetry) => {
       bootstraps = null;
       logSegments = null;
       appendDuration = null;
+      groupOps = null;
+      appendFailures = null;
+      flushDuration = null;
       hookDuration = null;
       lockWait = null;
       refused = null;
@@ -366,8 +387,17 @@ const createTelemetry = (telemetry) => {
       if (dropped > 0) add(logSegments, dropped, SEGMENT_DROPPED);
     },
 
-    recordAppend(elapsed) {
+    recordAppend(elapsed, ops) {
       record(appendDuration, elapsed);
+      if (typeof ops === 'number') record(groupOps, ops);
+    },
+
+    recordAppendFailure() {
+      add(appendFailures, 1);
+    },
+
+    recordFlush(elapsed) {
+      record(flushDuration, elapsed);
     },
 
     recordHook(name, elapsed) {

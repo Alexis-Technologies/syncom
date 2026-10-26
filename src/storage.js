@@ -390,6 +390,9 @@ class Storage extends Emitter {
       cache: this.#entries.size,
       catalog: this.#catalog.size,
       log: this.#log.length,
+      inflight: this.#inflightCount,
+      deferred: this.#deferred.size,
+      held: this.#entries.heldIds().size,
     }));
   }
 
@@ -1031,9 +1034,13 @@ class Storage extends Emitter {
     let pinned = 0;
     // #live deletes the slot it reads when its Record is gone: safe mid-walk.
     for (const id of this.#records.keys()) if (this.#live(id) !== undefined) pinned++;
+    let observers = 0;
+    for (const set of this.#observers.values()) observers += set.size;
     const log = this.#log;
+    const health = log.health;
     return {
       closed: this.#closed,
+      plugins: this.plugins,
       queue: this.#queued,
       cache: { size: this.#entries.size, max: this.#cacheMax, pinned },
       catalog: { entries: this.#catalog.size, dirty: this.#catalog.dirty },
@@ -1043,6 +1050,10 @@ class Storage extends Emitter {
       held: this.#entries.heldIds().size,
       deferred: this.#deferred.size,
       inflight: this.#inflightCount,
+      // The window `open({ defer })` gave, what the last deferred landing
+      // took (the next window is at least that), and the positions waiting.
+      defer: { window: this.#defer, flushCost: this.#flushCost, positions: this.#deferredPositions },
+      observers,
       log: {
         length: log.length,
         floor: log.floor,
@@ -1054,6 +1065,12 @@ class Storage extends Emitter {
         corrupt: log.corrupt,
         rollFailures: log.rollFailures,
         pins: log.pins,
+        journaled: health.journaled,
+        open: health.open,
+        unapplied: health.unapplied,
+        torn: health.torn,
+        lost: health.lost,
+        appendFailures: health.appendFailures,
       },
       chain: this.#chain ? { tail: this.#chain.tailHash } : null,
       lock: this.#lock ? { mode: this.#lockOptions.mode } : null,
@@ -1314,8 +1331,10 @@ class Storage extends Emitter {
     try {
       if (this.#deferred.size > 0) {
         const started = Date.now();
+        const records = this.#deferred.size;
         await this.#landSlots();
         this.#flushCost = Date.now() - started;
+        this.#otel.recordFlush(this.#flushCost, records);
       }
     } finally {
       this.#flushing = false;
