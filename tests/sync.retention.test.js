@@ -86,10 +86,11 @@ test('A dialer keeps its own ops until the nodes it syncs with have them', async
 
   await t.test('ops compacted before any node was registered are reported UNDELIVERABLE', async (t2) => {
     const host = await openAt(t2, await tempDir(t2));
-    const dialer = await openAt(t2, await tempDir(t2), dialerOptions(host));
+    // defer: 0 — each write lands at once, so every roll seals a few ops and
+    // compaction drops whole segments; inside one deferred window the hundred
+    // ops would seal as one segment, which retention cannot cut.
+    const dialer = await openAt(t2, await tempDir(t2), { ...dialerOptions(host), defer: 0 });
     for (let i = 0; i < 100; i++) await dialer.insert({ i });
-    // The deferred window lands first (the records written, the ops applied), then the roll seals them.
-    await dialer.flush();
     await dialer.log.flush();
     assert.ok(dialer.log.floor > 1, 'compacted: no node was waiting for them');
     const errors = [];
