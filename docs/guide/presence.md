@@ -45,8 +45,9 @@ event `syncom/presence`, a host's events come back to it, and at `hello` a
 host hands this node what its room holds. On the host, the unit's inbound
 event `on.presence` checks an update — every entry the greeted node's own,
 of a scope the peer asked for, within `unit({ presence: { rate } })` updates
-a second (20), signed under `'require'` — refuses what fails (counted,
-announced as `refused`, never relayed), relays the rest to the wrpc room
+a second (20), signed under `'require'` — refuses what fails (counted as
+`syncom.presence.refused`, logged as `sync.presence.refused`, announced as
+`refused` on `storage.sync`, never relayed), relays the rest to the wrpc room
 `syncom:<scope>` but the sender, and keeps the newest state per node (at
 most `presence.max`, 1 024, per scope; for `presence.timeout`, 30 000 ms) to
 hand to the next newcomer. A hub that only relays needs no instance of its
@@ -72,7 +73,10 @@ mesh.on('presence/state', (update) => presence.apply(update)); // the newest per
 
 `apply()` resolves to what it counted — `{ applied, stale, forged, unsigned,
 refused }` — and with `{ from: node }` refuses an entry that is not that
-node's, which is how a host holds a peer to its own name.
+node's, which is how a host holds a peer to its own name. An update with
+entries refused raises `refused` on the instance — `{ from, forged,
+unsigned, refused }` — and, carried by `storage.sync`, counts them in
+`syncom.presence.refused`: a stale state is routine, a forged one is not.
 
 ## Cursors in a state
 

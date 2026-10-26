@@ -128,6 +128,7 @@ appears on one.
 | `syncom.hook.duration` | Histogram | `ms` | `syncom.hook` (`beforeWrite` / `afterWrite` / `beforeApply` / `afterApply` — the hooks that run in the mutation queue; read and sync hooks are not timed) |
 | `syncom.lock.wait` | Histogram | `ms` | — (what `open()` spent taking the directory lock) |
 | `syncom.hello.refused` | Counter | `{call}` | `syncom.code` (`400` / `403` / `409` / `428`) — calls a hosted unit refused before the handler |
+| `syncom.presence.refused` | Counter | `{entry}` | `syncom.reason` — on a host (`hello` / `rate` / `malformed` / `scope` / `forged` / `unsigned`: an update refused whole, never relayed) and on a receiver (`forged` / `unsigned` / `invalid` — malformed, past the bounds, not the sender's own, the room full: entries refused) |
 | `syncom.outbox.size` | Observable gauge | `{op}` | — (ops queued for peers, over every dialed peer) |
 | `syncom.queue.depth` | Observable gauge | `{op}` | — (writes waiting on, or in, the mutation queue) |
 | `syncom.cache.size` | Observable gauge | `{entry}` | — |
@@ -249,6 +250,7 @@ alert to key on:
 | warn | `editor.cursors`, `editor.undo` | an editor adapter (ProseMirror, CodeMirror) failed to show the room's cursors or publish its selection, or an undo/redo command failed, and has no `onError` |
 | warn | `editor.unfit` | the ProseMirror schema cannot hold what the field does (a mark, a node): the document leaves it out and the next edit sends that to every peer; once per binding, without `onUnfit` |
 | warn | `sync.presence.send` | a presence update could not be sent to a peer (`url`); the next renewal tries again |
+| warn | `sync.presence.refused`, `sync.presence.receive` | a host refused a peer's presence update (`node`, `reason`: `HELLO`, `PRESENCE_RATE`, `PRESENCE_MALFORMED`, `PRESENCE_SCOPE`, `PRESENCE_FORGED`, `PRESENCE_UNSIGNED`; also a `refused` event); a host's relay could not be taken (`url`) |
 | warn | `identity.rekeyed` | a directory from before signing: `node.json` held a UUID, the node is now its signing key (once) |
 | warn | `tags.dropped`, `tags.unreadable`, `sync.node.unreadable` | a `tags.json` line dropped (`reason`: `name` — not a record id, at open; `catalog` — the tag's catalog unreadable, found at open for the newest tag and at its first read for an older one); `tags.json` itself unreadable — kept as `tags.corrupt.json`, the storage open without tags until it is repaired; a registry entry that cannot be read, skipped |
 | info | `schema.upgrade`, `schema.changed`, `schema.held`, `record.repaired` | what a reopen found about the schema; a record rebuilt from the log |

@@ -41,6 +41,45 @@ test('presence refuses a stamp far ahead and a state nested past the bound, with
   assert.strictEqual(presence.get('ahead'), undefined);
 });
 
+test('a refused update is heard: the instance’s refused event, the counter, a throwing listener logged', async (t) => {
+  const counted = [];
+  const telemetry = {
+    enabled: true,
+    withSpan: (_name, _attributes, fn) => fn(null),
+    recordPresenceRefused: (reason, count) => counted.push([reason, count]),
+  };
+  const warned = [];
+  const logger = { warn: (entry) => warned.push(entry), info() {}, debug() {}, error() {} };
+  const storage = await open(t, 'refused', { telemetry, logger, sync: { autoStart: false } });
+  const presence = createPresence(storage, { timeout: 1000 });
+  t.after(() => presence.destroy());
+  storage.sync.presence(presence);
+  const heard = [];
+  presence.on('refused', (event) => heard.push(event));
+  presence.on('change', () => {
+    throw new Error('a listener that throws');
+  });
+  await storage.sync.receivePresence(
+    {
+      p: 1,
+      scope: '*',
+      s: [
+        ['ahead', 1, Date.now() + 3_600_000, { name: 'pin' }],
+        ['fine', 1, Date.now(), { name: 'ok' }],
+      ],
+    },
+    null,
+  );
+  assert.deepStrictEqual(heard, [{ from: null, forged: 0, unsigned: 0, refused: 1 }]);
+  assert.deepStrictEqual(counted, [['invalid', 1]]);
+  await wait(5);
+  assert.deepStrictEqual(
+    warned.filter((entry) => entry.event === 'listener.error').map(({ name, err }) => [name, err.message]),
+    [['presence', 'a listener that throws']],
+    'the change listener threw: logged, no rejection left unheard',
+  );
+});
+
 test('presence', async (t) => {
   await t.test(
     'presence: a state is set, renewed, expired and left; the newest by clock wins; a forged or unsigned state is refused; nothing is logged',
@@ -109,7 +148,9 @@ test('presence', async (t) => {
       });
       await assert.rejects(() => pa.set('x'), { code: 'PRESENCE_SIZE' });
       // Expiry: a state not renewed goes; this node's renews itself. Nothing reached the log.
+      // A sweep runs every timeout / 2: a state goes within 1.5 timeouts of its stamp — waited for, not timed.
       await wait(450);
+      await waitUntil(() => pb.nodes().length === 0);
       assert.deepStrictEqual(pb.nodes(), [], 'expired on b');
       assert.deepStrictEqual(pa.local, { name: 'ada', cursor: 4 }, 'renewed on a');
       assert.ok(updates.length > 2, 'renewals announced');
@@ -146,7 +187,16 @@ test('presence', async (t) => {
   await t.test(
     'presence over a hub: fan-out to the room but the sender, a newcomer handed the room, a leave reaching everyone, forgery and another scope refused',
     async (t2) => {
-      const createStorage = (t3, name, options) => open(t3, name, options);
+      // The hub counts what it refuses as presence refusals, never as refused hellos.
+      const counted = [];
+      const hellos = [];
+      const telemetry = {
+        enabled: true,
+        withSpan: (_name, _attributes, fn) => fn(null),
+        recordPresenceRefused: (reason, count) => counted.push([reason, count]),
+        recordRefusal: (code) => hellos.push(code),
+      };
+      const createStorage = (t3, name, options) => open(t3, name, name === 'H' ? { ...options, telemetry } : options);
       const mesh = await createMesh(
         t2,
         ['H', 'A', 'B'],
@@ -210,6 +260,13 @@ test('presence', async (t) => {
       assert.notStrictEqual(pa.get(b.nodeId)?.name, 'pin', 'the pinned state went nowhere');
       for (let i = 0; i < 8; i++) await pb.set({ name: 'bob', i });
       await waitUntil(() => refused.includes('PRESENCE_RATE'));
+      const reasons = new Set();
+      for (const [reason, count] of counted) {
+        assert.strictEqual(count, 1);
+        reasons.add(reason);
+      }
+      assert.deepStrictEqual([...reasons].sort(), ['forged', 'malformed', 'rate', 'scope']);
+      assert.deepStrictEqual(hellos, [], 'no presence refusal is a refused hello');
       // Greeting again is no refill of the presence rate.
       const session = link.client.data.syncom;
       const tokens = session.presenceBucket.tokens;

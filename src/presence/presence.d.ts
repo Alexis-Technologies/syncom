@@ -39,6 +39,13 @@ export interface PresenceEvents {
   change: (event: { added: string[]; updated: string[]; removed: string[] }) => void;
   /** This node's state to send — what `storage.sync.presence()` carries. */
   update: (update: PresenceUpdate) => void;
+  /**
+   * An update with entries refused: `forged` (a signature that does not
+   * verify), `unsigned` (none, under 'require'), `refused` (malformed, past
+   * the bounds, not the sender's own, the room full); `from` the node that
+   * sent it, null for a host's relay.
+   */
+  refused: (event: { from: string | null; forged: number; unsigned: number; refused: number }) => void;
 }
 
 export declare class Presence {

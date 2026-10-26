@@ -174,6 +174,7 @@ const createTelemetry = (telemetry) => {
   let hookDuration = null;
   let lockWait = null;
   let refused = null;
+  let presenceRefused = null;
   let gauges = null;
 
   if (hasMethod(meter, 'createCounter') && hasMethod(meter, 'createHistogram')) {
@@ -234,6 +235,11 @@ const createTelemetry = (telemetry) => {
       refused = meter.createCounter('syncom.hello.refused', {
         unit: '{call}',
         description: 'Calls a hosted unit refused before the handler, by code (400, 403, 409, 428)',
+      });
+      presenceRefused = meter.createCounter('syncom.presence.refused', {
+        unit: '{entry}',
+        description:
+          'Presence a host or a receiver refused, by reason: hello, rate, malformed, scope, forged, unsigned, invalid',
       });
       // Observable: read when the SDK collects, through the callbacks
       // `gauges(read)` registers. Optional — a meter without the factory
@@ -373,6 +379,10 @@ const createTelemetry = (telemetry) => {
 
     recordRefusal(code) {
       add(refused, 1, { 'syncom.code': String(code) });
+    },
+
+    recordPresenceRefused(reason, count) {
+      add(presenceRefused, count, { 'syncom.reason': reason });
     },
 
     /**

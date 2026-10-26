@@ -60,6 +60,7 @@ const DISABLED = Object.freeze({
   recordHook: noop,
   recordLockWait: noop,
   recordRefusal: noop,
+  recordPresenceRefused: noop,
   gauges: noop,
 });
 
@@ -84,6 +85,7 @@ const METHODS = Object.freeze([
   'recordHook',
   'recordLockWait',
   'recordRefusal',
+  'recordPresenceRefused',
   'gauges',
 ]);
 

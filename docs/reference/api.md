@@ -785,7 +785,7 @@ vocabulary, Myers and Emitter are the core's. `UndoManager` is the class
 | `encode(nodes?)` | `PresenceUpdate` — `{ p: 1, scope, s: [[node, clock, ts, state, sig?]] }` of every state known here, for a newcomer; `nodes` narrows it |
 | `apply(update, { from }?)` | `Promise<{ applied, stale, forged, unsigned, refused }>` — takes what a transport brought: per node the newest by clock, a state older than the timeout is stale, a signature that does not verify is forged, an unsigned state under `sync.signatures: 'require'` is refused, a malformed or oversized entry too; with `from`, every entry must be that node's; another scope's update and this node's own entries are ignored |
 | `destroy()` | `Promise<void>` — leaves (a last `update` with a null state), clears the timers, forgets every state |
-| `on('change' \| 'update', fn)` | `change` `({ added, updated, removed })` the nodes whose state came, changed, went (an expiry included); `update` `(update)` this node's state to send — what `storage.sync.presence(instance)` carries |
+| `on('change' \| 'update' \| 'refused', fn)` | `change` `({ added, updated, removed })` the nodes whose state came, changed, went (an expiry included); `update` `(update)` this node's state to send — what `storage.sync.presence(instance)` carries; `refused` `({ from, forged, unsigned, refused })` an update `apply()` refused entries of (a listener that throws is logged as `listener.error`) |
 
 ## Inspect (subpath)
 

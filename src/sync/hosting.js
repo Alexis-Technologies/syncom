@@ -380,36 +380,42 @@ const changes = (host) =>
 // everyone in the scope's room but the sender, to the host's own presence
 // when `storage.sync.presence()` registered one, and into the host's memory
 // of the room, which a newcomer is handed at hello.
+// The `syncom.presence.refused` label of a host's refusal.
+const PRESENCE_REASONS = Object.freeze({
+  HELLO: 'hello',
+  PRESENCE_RATE: 'rate',
+  PRESENCE_MALFORMED: 'malformed',
+  PRESENCE_SCOPE: 'scope',
+  PRESENCE_FORGED: 'forged',
+  PRESENCE_UNSIGNED: 'unsigned',
+});
+
 const presence = (host) => async (context, update) => {
   const session = context?.client?.data?.syncom;
-  // Refused: counted by code, announced as `refused` with the reason, never relayed.
-  const no = (reason, code) => {
-    host.otel.recordRefusal(code);
-    announceRefused(host, session?.node ?? null, reason, 1);
+  // Refused: counted by reason, logged, announced as `refused`, never relayed.
+  const no = (reason) => {
+    const node = session?.node ?? null;
+    host.otel.recordPresenceRefused(PRESENCE_REASONS[reason], 1);
+    host.logger.warn({ event: 'sync.presence.refused', node, reason });
+    notify(host.manager, host.logger, 'refused', { node, reason, count: 1 });
   };
-  if (!session) return void no('HELLO', 428);
+  if (!session) return void no('HELLO');
   const { node, scopes } = session;
   const { rate, timeout } = host.presence;
   const now = Date.now();
   const bucket = (session.presenceBucket ??= { tokens: rate, at: now });
   bucket.tokens = Math.min(rate, bucket.tokens + ((now - bucket.at) / 1000) * rate);
   bucket.at = now;
-  if (bucket.tokens < 1) return void no('PRESENCE_RATE', 429);
+  if (bucket.tokens < 1) return void no('PRESENCE_RATE');
   bucket.tokens -= 1;
-  if (!isPresenceUpdate(update)) return void no('PRESENCE_MALFORMED', 400);
-  if (!scopes.includes(update.scope)) {
-    return void no('PRESENCE_SCOPE', 403);
-  }
+  if (!isPresenceUpdate(update)) return void no('PRESENCE_MALFORMED');
+  if (!scopes.includes(update.scope)) return void no('PRESENCE_SCOPE');
   for (const entry of update.s) {
     // Checked as a receiver checks it — the shape, a stamp not ahead, the
     // bounds — before the host keeps or relays a byte of it.
-    if (!isPresenceEntry(entry) || !sized(entry[3])) return void no('PRESENCE_MALFORMED', 400);
-    if (entry[0] !== node) {
-      return void no('PRESENCE_FORGED', 403);
-    }
-    if (host.storage.signatures === 'require' && entry.length < 5) {
-      return void no('PRESENCE_UNSIGNED', 403);
-    }
+    if (!isPresenceEntry(entry) || !sized(entry[3])) return void no('PRESENCE_MALFORMED');
+    if (entry[0] !== node) return void no('PRESENCE_FORGED');
+    if (host.storage.signatures === 'require' && entry.length < 5) return void no('PRESENCE_UNSIGNED');
   }
   // The room's memory: the newest state per node, dropped once stale.
   let room = host.presence.rooms.get(update.scope);

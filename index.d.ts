@@ -717,6 +717,8 @@ export interface SyncomTelemetryWriter {
   recordHook?(name: string, elapsed: number): void;
   recordLockWait?(elapsed: number): void;
   recordRefusal?(code: number | string): void;
+  /** Presence a host or a receiver refused: `reason` (`hello`, `rate`, `malformed`, `scope`, `forged`, `unsigned`, `invalid`), how many entries. */
+  recordPresenceRefused?(reason: string, count: number): void;
   gauges?(read: () => Record<string, number>): void;
 }
 

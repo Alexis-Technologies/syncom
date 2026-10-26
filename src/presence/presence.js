@@ -93,6 +93,7 @@ class Presence extends Emitter {
   #timeout;
   #signer;
   #require;
+  #logger;
   #clock = 0;
   // Per node: `{ clock, ts, state, sig? }`; this node's among them while it is set.
   #states = new Map();
@@ -107,6 +108,7 @@ class Presence extends Emitter {
     this.#timeout = timeout;
     this.#signer = storage[SIGNER] ?? null;
     this.#require = storage.signatures === 'require';
+    this.#logger = storage.logger ?? null;
     this.#sweep = setInterval(() => this.#expire(), Math.max(50, Math.floor(timeout / 2)));
     if (typeof this.#sweep.unref === 'function') this.#sweep.unref();
   }
@@ -212,7 +214,14 @@ class Presence extends Emitter {
 
   #changed(added, updated, removed) {
     if (added.length + updated.length + removed.length === 0) return;
-    void this.emit('change', { added, updated, removed });
+    this.#notify('change', { added, updated, removed });
+  }
+
+  // A listener that throws is the listener's: logged, never a rejection left unheard.
+  #notify(name, event) {
+    this.emit(name, event).catch((error) => {
+      this.#logger?.warn?.({ event: 'listener.error', name: 'presence', err: error });
+    });
   }
 
   // A state not renewed within the timeout is gone — not this node's,
@@ -302,6 +311,9 @@ class Presence extends Emitter {
       out.applied++;
     }
     this.#changed(added, updated, removed);
+    if (out.forged + out.unsigned + out.refused > 0) {
+      this.#notify('refused', { from, forged: out.forged, unsigned: out.unsigned, refused: out.refused });
+    }
     return out;
   }
 

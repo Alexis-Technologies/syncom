@@ -414,7 +414,9 @@ class SyncManager extends Emitter {
           // A host's presence event: its own, or what it relays of its
           // room — the host checked who said what, a signature says the rest.
           'syncom/presence': (update) => {
-            this.receivePresence(update, null).catch(() => {});
+            this.receivePresence(update, null).catch((error) => {
+              this.#storage.logger.warn({ event: 'sync.presence.receive', url: peer.node.url, err: error });
+            });
           },
           open: () => {
             peer.connected = true;
@@ -1077,7 +1079,12 @@ class SyncManager extends Emitter {
   // every instance of its scope. Never logged.
   async receivePresence(update, via) {
     for (const instance of this.#presences) {
-      if (instance.scope === update?.scope) await instance.apply(update, { from: via?.node ?? null });
+      if (instance.scope !== update?.scope) continue;
+      const counts = await instance.apply(update, { from: via?.node ?? null });
+      if (!this.#otel.enabled) continue;
+      if (counts.forged > 0) this.#otel.recordPresenceRefused('forged', counts.forged);
+      if (counts.unsigned > 0) this.#otel.recordPresenceRefused('unsigned', counts.unsigned);
+      if (counts.refused > 0) this.#otel.recordPresenceRefused('invalid', counts.refused);
     }
   }
 

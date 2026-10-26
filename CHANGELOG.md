@@ -962,6 +962,15 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **A refused presence update was heard by no one, or as a refused
+  hello.** The dialing side dropped what a host's relay carried that did
+  not verify (`.catch(() => {})`), and a host counted its presence refusals
+  under `syncom.hello.refused` and logged them as `sync.op.refused`. A
+  presence instance now raises `refused` (`{ from, forged, unsigned,
+  refused }`), both sides count `syncom.presence.refused` by reason, a host
+  logs `sync.presence.refused`, and a relay that cannot be taken is logged
+  (`sync.presence.receive`). A `change` listener that throws is logged
+  (`listener.error`) instead of leaving a rejection unheard.
 - **An application's plugin had no methods on the storage.** The facade
   carried a stub for every shipped plugin's method and nothing else, so a
   plugin of the application's reached its methods inside a transaction only,
