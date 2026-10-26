@@ -350,7 +350,8 @@ ranks as a text's — a `move` op `{ elem, cut, at, value }` — the element's
 name, the slot it showed at, the anchor of its new place and its value. A `splice` op carries the cut ranges, `[run, offset, length]` per run, and
 either the anchor of its new run (`at`: `^` the head, `>e` or `<e` the right
 or left child of element `e`, named `ts:offset:origin`) or the writer's own
-run to extend (`run`, `from`); `content` is the inserted string or array and,
+run to extend (`run`, `from` — never a move's position run, which holds its
+element alone: a peer's extension of one is malformed); `content` is the inserted string or array and,
 empty, names the kind of a call that only removes; `vals`, when the content
 holds embed slots, their markers at their offsets. One call is one op, signed
 and logged like any other — an editor that types a word sends one op per

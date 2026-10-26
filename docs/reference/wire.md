@@ -59,7 +59,7 @@ engine does not admit changes nothing, is reported as `OP_REFUSED` with
 | `inc` | `i` | `key`, `value` | A finite number to add to the counter |
 | `add` | `+` | `key`, `value` | `unknown[]` — the elements to add to the set |
 | `remove` | `-` | `key`, `value` | `[element, { origin: addStamp }][]` — each element with the add stamps this node had seen for it |
-| `splice` | `/` | `key`, `value` | `{ cut?, at \| run + from, content, vals? }` — see [What travels](../guide/lists#what-travels) |
+| `splice` | `/` | `key`, `value` | `{ cut?, at \| run + from, content, vals? }` — `run + from` extends the writer's own run, never a move's position run (malformed); see [What travels](../guide/lists#what-travels) |
 | `assign` | `=` | `key`, `value` | `{ elem, value, k? }` — `k: 't'` when the element is a text's embed slot |
 | `move` | `^` | `key`, `value` | `{ elem, cut, at, value }` |
 | `mark` | `*` | `key`, `value` | `{ start, end, key, value, many? }` or `{ off }` |
