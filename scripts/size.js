@@ -203,7 +203,8 @@ const ENTRIES = [
     label: 'codemirror — browser (@alexify/syncom/codemirror)',
     entry: 'src/codemirror/codemirror.js',
     platform: 'browser',
-    budget: 7.5,
+    // 7.5 with what the adapters share (createFit, undoSteps, failureReporter in editor.js; 2026-10-27). 8, raised by name.
+    budget: 8,
   },
   // The ProseMirror adapter: the editor binding it stands on (4.9) and the document as one text with block
   // markers, the replace step, the cursors' decorations, the undo commands. ProseMirror itself is injected, never

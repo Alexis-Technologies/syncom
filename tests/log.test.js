@@ -755,13 +755,13 @@ test('a group commit: appends issued together land as one file, in order; a fail
         await log.append([op('A', 1)]);
         failing = true;
         const second = log.append([op('A', 2)]);
-        const third = log.append([op('A', 3)]);
-        assert.deepStrictEqual(log.vector, { A: 3 });
+        const third = log.append([op('A', 3), op('B', 1)]);
+        assert.deepStrictEqual(log.vector, { A: 3, B: 1 });
         await assert.rejects(second, /disk full/);
         await assert.rejects(third, /disk full/, 'the group gathered behind the failed one goes with it');
         assert.strictEqual(log.length, 1, 'nothing of them published');
         assert.strictEqual(log.next, 2, 'the seqs are taken back');
-        assert.deepStrictEqual(log.vector, { A: 1 }, 'and so is the vector');
+        assert.deepStrictEqual(log.vector, { A: 1 }, 'and so is the vector: a stream the groups opened is gone');
         failing = false;
         const [{ seq }] = await log.append([op('A', 2)]);
         assert.strictEqual(seq, 2, 'the next append gets the first of them again');

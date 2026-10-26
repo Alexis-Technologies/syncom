@@ -307,11 +307,11 @@ const push = (host) => async (context, args) => {
   if (result.equivocations > 0) announceRefused(host, node, 'equivocation', result.equivocations);
   // The vector the dialer merges in: the keys this page touched, not the
   // whole thing — a hub's has a key per client and scope.
-  const whole = storage.vector;
   const vector = {};
   for (const op of granted) {
     const key = opKey(op);
-    if (whole[key] !== undefined) vector[key] = whole[key];
+    const seq = storage.log.seqOf(key);
+    if (seq > 0) vector[key] = seq;
   }
   return { vector, ...result, outOfScope: outOfScope + result.outOfScope };
 };

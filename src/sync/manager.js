@@ -21,7 +21,7 @@
 
 const { Emitter } = require('../utils.js');
 const { packOps, unpackOps } = require('../ops.js');
-const { vectorAdvance, vectorMax, keyScope, opKey } = require('../vector.js');
+const { vectorAdvance, vectorMerge, keyScope, opKey } = require('../vector.js');
 const { outbound, unreachable } = require('../outbound.js');
 const { isSyncLink } = require('../link.js');
 const { writerOf, traced } = require('../telemetry.js');
@@ -776,7 +776,7 @@ class SyncManager extends Emitter {
       const answer = await peer.link.call('syncom/push', { ops: packOps(page) });
       // The host answers with the keys the page touched; merged, never replaced.
       if (answer?.vector) {
-        peer.remote.vector = vectorMax(peer.remote.vector, answer.vector);
+        vectorMerge(peer.remote.vector, answer.vector);
         this.#ack(peer.node, answer.vector);
       }
       if (answer?.gaps > 0) {

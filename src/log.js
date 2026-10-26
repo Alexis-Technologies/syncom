@@ -700,6 +700,10 @@ class OpLog {
       const fp = fps?.get(op);
       entries.push(entry);
       group.entries.push(entry);
+      const stream = opKey(op);
+      if (!group.undo.has(stream)) {
+        group.undo.set(stream, Object.hasOwn(this.#vector, stream) ? this.#vector[stream] : undefined);
+      }
       vectorAdvance(this.#vector, op);
       if (fp !== undefined) {
         entry.fp = fp;
@@ -730,7 +734,10 @@ class OpLog {
       entries: [],
       ready: [],
       from: this.#next,
-      vector: { ...this.#vector },
+      // What a failure puts back, key by key: the seq each stream the group
+      // moved held before it (undefined: none). The whole vector was copied
+      // for every group — thousands of streams on a hub, for each append.
+      undo: new Map(),
       heads: new Map(),
       resolve: null,
       reject: null,
@@ -825,9 +832,12 @@ class OpLog {
     const later = this.#group;
     this.#group = null;
     this.#next = group.from;
-    this.#vector = group.vector;
-    // The later group first: the heads before the first are the ones kept.
+    // The later group first: the seqs and heads before the first are the ones kept.
     for (const failed of later === null ? [group] : [later, group]) {
+      for (const [stream, seq] of failed.undo) {
+        if (seq === undefined) delete this.#vector[stream];
+        else this.#vector[stream] = seq;
+      }
       for (const entry of failed.entries) this.#unprint(entry);
       for (const [key, head] of failed.heads) {
         if (head === undefined) this.#heads.delete(key);

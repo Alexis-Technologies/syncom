@@ -10,7 +10,7 @@
 // what Storage lends its write paths — see Storage#open.
 
 const { applyOp, isAlive, latestClock, settleMeta } = require('./ops.js');
-const { vectorHas, vectorNext, vectorAdvance, keyScope, opKey } = require('./vector.js');
+const { keyScope, opKey } = require('./vector.js');
 const { fingerprintOf, scrubOp } = require('./header.js');
 const { notify } = require('./hooks.js');
 const { inScope } = require('./scope.js');
@@ -53,7 +53,10 @@ const openBatch = (core, { via = null, scopes = null, peer = null, adoptFrom = n
     scopes,
     adoptFrom,
     bound,
-    vector: core.log.vector,
+    // The seqs this batch moved, by stream; every other is the log's, read
+    // one key at a time (`seqIn`) — a hub's vector, thousands of streams,
+    // was copied whole for every page.
+    vector: {},
     fps: new Map(),
     prints: null,
     now: at,
@@ -197,10 +200,17 @@ const reportKinds = (batch) => {
 // one accepted earlier in this batch, else the log's — or undefined.
 const heldAt = (batch, key, seq) => batch.prints?.get(key)?.get(seq) ?? batch.core.log.fingerprintOf(key, seq);
 
+// The seq this node holds of stream `key`, as the batch has moved it.
+const seqIn = (batch, key) => (Object.hasOwn(batch.vector, key) ? batch.vector[key] : batch.core.log.seqOf(key));
+const advanceIn = (batch, op) => {
+  const key = opKey(op);
+  if (seqIn(batch, key) < op.seq) batch.vector[key] = op.seq;
+};
+
 // Accepted: logged and relayed, the vector moves, and its fingerprint is
 // what the stream's next op is held to.
 const accept = (batch, op) => {
-  vectorAdvance(batch.vector, op);
+  advanceIn(batch, op);
   batch.accepted.push(op);
   const key = opKey(op);
   let seqs = (batch.prints ??= new Map()).get(key);
@@ -242,7 +252,7 @@ const adopt = (batch, op) => {
     if (key === '__proto__' || key === core.nodeId || key.startsWith(own)) continue;
     const scope = keyScope(key);
     const taken = scope === null || inScope(scope, batch.scopes);
-    if (taken && Number.isSafeInteger(seq) && seq > 0 && (vector[key] ?? 0) < seq) {
+    if (taken && Number.isSafeInteger(seq) && seq > 0 && seqIn(batch, key) < seq) {
       vector[key] = seq;
       (batch.adopted ??= {})[key] = seq;
     }
@@ -313,7 +323,7 @@ const skewed = (batch, op, ts) => {
 // names none (a hand-made one, an older writer's). An advance is accepted
 // here, with nothing to apply.
 const admit = (batch, op, fp) => {
-  const { core, vector } = batch;
+  const { core } = batch;
   if (fp === null) {
     const shape = isPlainObject(op) ? { origin: op.origin, seq: op.seq, type: op.type, id: op.id } : typeof op;
     core.logger.warn({ event: 'sync.op.malformed', op: shape });
@@ -323,13 +333,13 @@ const admit = (batch, op, fp) => {
   }
   if (op.ts > batch.horizon) return skewed(batch, op, op.ts);
   const key = opKey(op);
-  if (op.origin === core.nodeId || vectorHas(vector, op)) {
+  if (op.origin === core.nodeId || seqIn(batch, key) >= op.seq) {
     const held = heldAt(batch, key, op.seq);
     if (held !== undefined && held !== fp) return equivocates(batch, op, 'seq', held, fp);
     batch.duplicates++;
     return false;
   }
-  if (!vectorNext(vector, op)) {
+  if (seqIn(batch, key) + 1 !== op.seq) {
     batch.gaps++;
     return false;
   }

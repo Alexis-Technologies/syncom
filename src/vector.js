@@ -76,6 +76,19 @@ const vectorMax = (a = {}, b = {}) => {
   return result;
 };
 
+// `b` laid into `a` in place, the higher seq per key kept: what a push
+// answer's few keys do to a peer's vector, which on a hub has thousands.
+const vectorMerge = (a, b) => {
+  const keys = Object.keys(b);
+  for (let i = 0; i < keys.length; i++) {
+    const origin = keys[i];
+    const seq = b[origin];
+    if (origin === '__proto__' || !Number.isSafeInteger(seq)) continue;
+    if (!(Object.hasOwn(a, origin) && a[origin] >= seq)) a[origin] = seq;
+  }
+  return a;
+};
+
 // Sequence numbers run per ORIGIN AND SCOPE, so a peer that syncs one scope
 // still sees every seq of that scope in order — a global counter would show
 // it holes wherever an op of another scope sat. The vector key spells that
@@ -146,6 +159,7 @@ module.exports = {
   floorOf,
   compareVectors,
   vectorMax,
+  vectorMerge,
   vectorKey,
   opKey,
   keyScope,

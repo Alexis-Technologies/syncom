@@ -1639,6 +1639,13 @@ There is no released version section until then; everything below lands in it.
 
 ### Changed
 
+- **A hub's vector is no longer copied per page.** Applying a peer's page
+  copied the whole version vector (a key per client and scope — thousands
+  on a hub), so did every log group (for a rollback it rarely needed), the
+  host's push answer and the dialer's merge of it. A page now reads seqs
+  key by key over what it moved, a group records only the keys it moves,
+  and the answers merge in place: one peer's one-op page on a hub holding
+  20 000 streams went from 9.6 ms to 153 µs.
 - **A snapshot record is normalized once, not three times.** Joining one
   read its meta for the skew check, again for the clock and again for the
   join, hydrating its blocks each time; a peer's merge op twice. A meta its
