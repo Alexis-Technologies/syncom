@@ -211,6 +211,50 @@ const runEditorTests = async (t, assert, createStorage) => {
   });
 
   await t.test(
+    'a send that keeps failing reloads the editor later each time and stops after five in a row, a STALE no event explains alike',
+    async (t2) => {
+      const storage = await createStorage(t2, 'A');
+      const id = await storage.insert({});
+      await storage.updateText(id, 'body', 'base');
+      for (const failure of [
+        () => new TypeError('a delta the field refuses'),
+        () => Object.assign(new Error('changed under the delta'), { code: 'STALE' }),
+      ]) {
+        // The storage as the binding sees it, but a send never lands.
+        const failing = new Proxy(storage, {
+          get: (target, name) => {
+            if (name === 'applyDelta') return async () => Promise.reject(failure());
+            const value = target[name];
+            return typeof value === 'function' ? value.bind(target) : value;
+          },
+        });
+        const editor = createEditor();
+        const errors = [];
+        const resets = [];
+        const binding = E.createTextBinding(failing, id, 'body', editor, {
+          onError: (error) => errors.push(error.code ?? error.name),
+          // An editor that types again after every reload — what makes a failure repeat.
+          onReset: () => {
+            resets.push(editor.text());
+            editor.type(0, 'x');
+          },
+        });
+        t2.after(() => binding.stop());
+        await binding.ready;
+        editor.type(0, 'x');
+        await waitUntil(() => errors.length === 5, { timeout: 3000 });
+        await binding.flush();
+        assert.deepStrictEqual(resets, ['base', 'base', 'base', 'base'], 'a reload between them, the edit dropped');
+        assert.strictEqual(editor.text(), 'xbase', 'typed after the last reload, never sent');
+        assert.strictEqual((await storage.get(id)).body, 'base');
+        editor.type(0, 'y');
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        assert.strictEqual(errors.length, 5, 'nothing after the stop');
+      }
+    },
+  );
+
+  await t.test(
     'diffSpans and diffBlocks give the delta between two readings; spans, blocks and deltas round-trip; transforms agree with the storage’s order',
     async (t2) => {
       const storage = await createStorage(t2, 'A');

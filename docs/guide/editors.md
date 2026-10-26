@@ -116,6 +116,68 @@ delta is in the write API's terms, so `applyDelta` applies it as one
 transaction and a peer sees the edit land whole — and under `expect` it is
 refused rather than misplaced when the field moved meanwhile.
 
+## ProseMirror
+
+`@alexify/syncom/prosemirror` binds a ProseMirror editor through the binding
+above. ProseMirror's own modules are handed in, so the subpath bundles none
+of it:
+
+```js
+import * as model from 'prosemirror-model';
+import * as state from 'prosemirror-state';
+import * as transform from 'prosemirror-transform';
+import * as view from 'prosemirror-view';
+import { keymap } from 'prosemirror-keymap';
+import { createProseMirror } from '@alexify/syncom/prosemirror';
+import { createUndo } from '@alexify/syncom/undo';
+
+const pm = createProseMirror(storage, id, 'body', { model, state, transform, view });
+const undo = createUndo(storage, { trackedSources: [pm.source], records: [id] });
+const { undo: undoCommand, redo: redoCommand } = pm.commands(undo);
+
+const editor = new view.EditorView(element, {
+  state: state.EditorState.create({
+    schema,
+    plugins: [pm.plugin, pm.cursorPlugin(presence), keymap({ 'Mod-z': undoCommand, 'Mod-Shift-z': redoCommand })],
+  }),
+});
+await pm.attach(editor).ready;
+```
+
+- **The document is one text.** Every block-level node, in document order,
+  is a [block marker](./lists#embeds-and-blocks) — a container (a list, a
+  list item, a quote), a textblock, a leaf (a rule) — with its attributes
+  and `parents`, the containers it sits in; a textblock's text follows its
+  marker, with its marks (a mark's attributes, or `true`), and an inline
+  node is an embed. A container's marker opens a new one, so two list items
+  are two markers and one item with two paragraphs is one: lists, items and
+  quotes read back as they were (`docToSpans`, `spansToDoc`).
+- **The field fits the schema.** Text outside a textblock is wrapped in the
+  schema's default one, a container a marker names but none opened is
+  opened, and what the schema cannot hold — a node or mark type it lacks, an
+  attribute it refuses — is left out. The adapter sends the document as it
+  was built as an edit of its own, so the field comes to fit the schema, as
+  y-prosemirror does with a Yjs document. Bind one field to one schema.
+- **Edits.** An edit leaves as the delta between the document before and
+  after it; a peer's lands as one replace step, the smallest the two
+  documents differ by, with the selection carried through the delta by
+  text index (a caret stays before text a peer typed at it).
+- **Undo is the storage's.** Leave ProseMirror's history plugin out:
+  `commands(manager)` are ProseMirror commands over an undo stack of
+  `@alexify/syncom/undo` that tracks the adapter's `source`, so an undo takes
+  back this editor's edits and leaves a peer's.
+- **Cursors.** `cursorPlugin(presence, { field, render, className })` shows a
+  [presence](./presence) room's cursors on this field as decorations — a
+  caret widget (`span.syncom-caret[data-node]`, or what `render` makes) and
+  the selection as `.syncom-selection` — and publishes this editor's
+  selection as cursor tokens under `field` (`cursor`).
+- The view's `dispatch` must apply a transaction at once, as `EditorView`'s
+  does: the adapter reads `view.state` when a peer's edit arrives.
+
+`indexOfPos(doc, pos)` and `posOfIndex(doc, index)` turn a document
+position into an index of the field and back, for code of your own that
+speaks to the storage directly.
+
 ## Selections
 
 A selection kept as indices is wrong after the next edit around it; kept as
@@ -165,6 +227,9 @@ Quill's `Delta` does, written here so the subpath needs no dependency.
 
 - The binding is for a **text** field; a list is read and written through
   the [list API](./lists) directly.
+- A ProseMirror document is rebuilt from the field on every peer's edit —
+  linear in the document's size — and diffed on every edit of its own; a
+  document of many thousands of blocks is past what this is for.
 - A reset drops what was not sent. An editor that must keep it reads
   `binding.shadow` in `onReset` and decides.
 - `applyDelta` makes one op per insert, cut and mark; a delta of many

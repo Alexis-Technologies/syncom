@@ -1187,9 +1187,12 @@ const applyDelta = async (core, id, key, delta, { actor, message, source, expect
         for (const name of Object.keys(attributes)) {
           const value = attributes[name];
           if (name === 'embed') {
-            if (end - start !== 1) throw new TypeError('applyDelta() sets an embed marker over one slot');
+            // Every slot of the range takes the marker: two neighbours set
+            // alike are one retain, as a delta composes them.
             const marker = value === null ? null : markerArgs('applyDelta', value, value.isEmbed ?? true);
-            ops += (await tx.commit('assign', id, { key, index: start, value: marker }, { actor })) ? 1 : 0;
+            for (let index = start; index < end; index++) {
+              ops += (await tx.commit('assign', id, { key, index, value: marker }, { actor })) ? 1 : 0;
+            }
           } else {
             // A delta says every insert's attributes itself: a mark it lays
             // grows over nothing typed later (`expand: 'none'`), nor does

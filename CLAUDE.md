@@ -38,6 +38,9 @@ src/undo/undo.js          the @alexify/syncom/undo subpath — the undo stack ov
 src/editor/editor.js      the @alexify/syncom/editor subpath — the editor-agnostic binding (shadow, one delta in
                           flight, STALE and the rebase), delta compose/transform, diffSpans/diffBlocks, spans↔blocks,
                           selections as tokens, presence cursors; requires text/myers.js and vector.js only
+src/prosemirror/prosemirror.js  the @alexify/syncom/prosemirror subpath — ProseMirror (injected `{ model, state, transform, view? }`)
+                          over the editor binding: the document as one text with a marker per block-level node, the replace
+                          step, cursors as decorations, undo commands over /undo; requires editor/editor.js only
 src/store/store.js        the @alexify/syncom/store subpath — toStore/fromEvents: one store object for Svelte's contract and
                           React's useSyncExternalStore over a cursor, a Record, get(), a presence or an emitter — no requires
 src/inspect/inspect.js    the @alexify/syncom/inspect subpath — a record's anatomy (through the [SOURCE] seam's raw `entry`) and anonymize; requires compose, shape, symbols, hash only
@@ -611,6 +614,16 @@ docs/                     VitePress site
   before handing it over. A binding or adapter that resolves an editor's indices against
   the storage without `expect` races a peer's edit; a nested `transact` (a plugin method
   inside a transaction) runs within the enclosing one.
+- **An editor adapter injects its editor and fits the field to its schema.** `/prosemirror`
+  (and `/codemirror`) take the editor's modules as an argument and require nothing of them
+  — the packages are devDependencies for skip-guarded tests and optional peerDependencies for
+  their types. A ProseMirror document is a marker per block-level node in document order
+  (`docToSpans`/`spansToDoc`); what the schema cannot hold is left out when it is read back,
+  and the adapter sends that as an edit of its own (`fit`), so the field comes to fit the schema
+  — the editor's text must always be the binding's, or every delta after lands askew. A send
+  that fails other than STALE reloads the editor after a growing pause and the binding stops
+  after `MAX_FAILURES` in a row: never retry in a microtask loop (it starved the event loop
+  for hours once).
 - **Record types are phantom.** `Schema<Shapes>` (`shapes?`) and a Standard Schema's
   `~standard.types` are read by `index.d.ts` alone — `Collections<S>` maps them to
   `SyncomCollection<R, I>` — and nothing at run time reads `shapes`; `RecordData` is the

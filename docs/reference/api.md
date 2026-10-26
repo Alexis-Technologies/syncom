@@ -800,6 +800,16 @@ builds on. See [Editors](../guide/editors).
 | `selectionToTokens(storage, id, path, { anchor, head? })`, `tokensToSelection(storage, tokens)` | A selection as cursor tokens `{ id, field, anchor, head }` that survive the edits around it, and back to indices (`null` once a place is gone) |
 | `presenceCursors(presence, storage, id, path, { key }?)` | The cursors a presence room holds on the field — each state's `key` (`cursor`) as tokens — resolved: `[{ node, state, anchor, head }]` |
 
+## ProseMirror (subpath)
+
+`@alexify/syncom/prosemirror` — a ProseMirror editor bound to a text field. See [Editors](../guide/editors#prosemirror).
+
+| Member | Notes |
+| --- | --- |
+| `createProseMirror(storage, id, path, { model, state, transform, view? }, options?)` | The prosemirror-* modules are the caller's, injected. `{ key, plugin, source, binding, attach(view), cursorPlugin(presence, { field, render, className }?), commands(undoManager), stop() }`; `options` as `createTextBinding`'s |
+| `docToSpans(doc)`, `spansToDoc(spans, schema)` | A document as typed spans — a marker `{ type, parents, attrs }` per block-level node in document order, a textblock's text and inline nodes after it — and back; what the schema cannot hold is left out |
+| `indexOfPos(doc, pos)`, `posOfIndex(doc, index)` | A document position as a text index of the field, and back |
+
 ## Store (subpath)
 
 `@alexify/syncom/store` — a source of syncom's as a framework store. See [Frameworks](../guide/frameworks).

@@ -14,6 +14,20 @@ There is no released version section until then; everything below lands in it.
 
 ### Added
 
+- **ProseMirror.** `@alexify/syncom/prosemirror`: `createProseMirror(storage,
+  id, path, { model, state, transform, view })` — ProseMirror's own modules,
+  injected — gives a plugin for the editor's state and `attach(view)`. The
+  document is one text with a block marker per block-level node in
+  document order (a container, a textblock, a leaf; `parents` the
+  containers it sits in), so lists, items and quotes round-trip;
+  `docToSpans`/`spansToDoc` and `indexOfPos`/`posOfIndex` are exported. An
+  edit leaves as the delta between the documents, a peer's lands as one
+  replace step with the selection carried by text index; what the schema
+  cannot hold is left out and sent as an edit, so the field comes to fit
+  the schema. `cursorPlugin(presence)` shows a room's cursors as
+  decorations and publishes this editor's selection; `commands(manager)`
+  are undo and redo over the storage's undo stack. ProseMirror is an
+  optional peer dependency (types only).
 - **Framework stores.** `@alexify/syncom/store`: `toStore(source)` makes a
   query cursor (its rows), a live `Record` (its data), a presence (its
   states) or a storage and a record id (the record as `get()` reads it, or
@@ -895,6 +909,13 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **`applyDelta` refused a marker set over two slots.** A delta that sets two
+  neighbouring block markers alike composes into one retain over both;
+  `applyDelta` sets the marker of every slot of the range now. And an editor
+  binding whose sends keep failing no longer retries in a loop that holds
+  the event loop: it reloads after a growing pause and stops after five
+  failures in a row (`onError`), and a `STALE` that no event explains reloads
+  instead of waiting forever.
 - **A live Record read a path write as a field of its own.** After
   `update(id, { 'profile/city': 'Kyiv' })` a Record held both the old
   `profile` and a `profile/city` property, where `get()` reads

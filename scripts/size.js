@@ -196,6 +196,15 @@ const ENTRIES = [
     platform: 'browser',
     budget: 6,
   },
+  // The ProseMirror adapter: the editor binding it stands on (4.9) and the document as one text with block
+  // markers, the replace step, the cursors' decorations, the undo commands. ProseMirror itself is injected, never
+  // bundled. The plan said 6; the binding under it is most of it, so 8, raised by name (7.5 measured).
+  {
+    label: 'prosemirror — browser (@alexify/syncom/prosemirror)',
+    entry: 'src/prosemirror/prosemirror.js',
+    platform: 'browser',
+    budget: 8,
+  },
   // Framework stores: one object for Svelte's contract and React's useSyncExternalStore, over a cursor, a
   // Record, get(), a presence or any emitter; no requires.
   {

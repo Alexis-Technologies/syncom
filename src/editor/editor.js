@@ -44,6 +44,9 @@ const { diff: myers } = require('../text/myers.js');
 const { opKey } = require('../vector.js');
 
 const EMBED = '￼';
+// A send that fails other than STALE reloads the editor, later each time;
+// this many in a row and the binding stops (`onError` hears why).
+const MAX_FAILURES = 5;
 
 // ---------------------------------------------------------------------------
 // Deltas
@@ -490,6 +493,7 @@ const createTextBinding = (storage, id, path, adapter, options = {}) => {
   // The number of the delta in flight: a remote event rebases `inflight`
   // into a new array, so the send's callbacks know their delta by this.
   let flight = 0;
+  let failures = 0;
   let scheduled = false;
   const waiting = [];
 
@@ -522,14 +526,33 @@ const createTextBinding = (storage, id, path, adapter, options = {}) => {
         if (error && error.code === 'STALE') {
           // A peer's delta reached the field first. Its event rebases
           // `inflight`; once it is here (it may be already), send again.
-          if (epoch !== since) resend();
-          else stale = true;
+          if (epoch !== since) return void resend();
+          stale = true;
+          // Every landing announced and still no event: the shadow is not
+          // the field's. Reload rather than wait for an event that will not come.
+          void Promise.resolve(storage.flush?.()).then(() => {
+            if (stale && mine === flight && epoch === since && !stopped) broken(error);
+          });
           return;
         }
-        inflight = null;
-        fail(error);
-        void reload();
+        broken(error);
       },
+    );
+  };
+  // A send that failed: reload — after a pause that grows, so a failure that
+  // repeats never holds the event loop — and stop after MAX_FAILURES in a row.
+  const broken = (error) => {
+    inflight = null;
+    stale = false;
+    failures++;
+    fail(error);
+    if (failures >= MAX_FAILURES) return void halt();
+    const mine = ++flight;
+    setTimeout(
+      () => {
+        if (mine === flight && !stopped) void reload();
+      },
+      2 ** failures * 10,
     );
   };
   const resend = () => {
@@ -581,6 +604,7 @@ const createTextBinding = (storage, id, path, adapter, options = {}) => {
     if (delta === null) return void reload();
     shadow = applyToText(shadow, delta);
     if (event.source === source) {
+      failures = 0;
       inflight = null;
       settle();
       send();
@@ -613,6 +637,12 @@ const createTextBinding = (storage, id, path, adapter, options = {}) => {
     pending = compose(pending, delta);
     if (pending.length > 0) schedule();
   });
+  const halt = () => {
+    stopped = true;
+    stopObserve();
+    unsubscribe();
+    for (const resolve of waiting.splice(0)) resolve();
+  };
   const ready = load().catch((error) => {
     fail(error);
     throw error;
@@ -634,12 +664,7 @@ const createTextBinding = (storage, id, path, adapter, options = {}) => {
         if (idle()) resolve();
         else waiting.push(resolve);
       }),
-    stop: () => {
-      stopped = true;
-      stopObserve();
-      unsubscribe();
-      for (const resolve of waiting.splice(0)) resolve();
-    },
+    stop: () => halt(),
   });
 };
 

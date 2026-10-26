@@ -190,6 +190,16 @@ test('observe and deltas', async (t) => {
         null,
       );
       assert.throws(() => storage.toDelta('x'), TypeError);
+      // One retain over two slots sets the marker of each, as a delta composes two alike.
+      const doc = await storage.insert({});
+      await storage.splitBlock(doc, 'body', 0, { type: 'paragraph' });
+      await storage.splitBlock(doc, 'body', 1, { type: 'paragraph' });
+      const quote = { type: 'paragraph', parents: ['blockquote'], attrs: {}, isEmbed: false };
+      assert.strictEqual(await storage.applyDelta(doc, 'body', [{ retain: 2, attributes: { embed: quote } }]), 2);
+      assert.deepStrictEqual(
+        (await storage.blocks(doc, 'body')).map((block) => block.parents),
+        [['blockquote'], ['blockquote']],
+      );
       // Random edits: the composed delta of each turn takes the text before it to the text after.
       let seed = 11;
       const random = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 2 ** 32;

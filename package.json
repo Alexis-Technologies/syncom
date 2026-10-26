@@ -65,6 +65,10 @@
       "types": "./src/store/store.d.ts",
       "default": "./src/store/store.js"
     },
+    "./prosemirror": {
+      "types": "./src/prosemirror/prosemirror.d.ts",
+      "default": "./src/prosemirror/prosemirror.js"
+    },
     "./all": {
       "types": "./src/all/all.d.ts",
       "default": "./src/all/all.js"
@@ -202,6 +206,26 @@
     "url": "https://github.com/Alexis-Technologies/syncom/issues"
   },
   "homepage": "https://syncomjs.vercel.app/",
+  "peerDependencies": {
+    "prosemirror-model": "^1.19.0",
+    "prosemirror-state": "^1.4.0",
+    "prosemirror-transform": "^1.7.0",
+    "prosemirror-view": "^1.30.0"
+  },
+  "peerDependenciesMeta": {
+    "prosemirror-model": {
+      "optional": true
+    },
+    "prosemirror-state": {
+      "optional": true
+    },
+    "prosemirror-transform": {
+      "optional": true
+    },
+    "prosemirror-view": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@alexify/metaschema": "^3.4.0",
     "@alexify/wrpc": "2.0.1",
@@ -220,6 +244,12 @@
     "oxfmt": "^0.62.0",
     "oxlint": "^1.77.0",
     "pino": "^10.3.1",
+    "prosemirror-model": "^1.25.12",
+    "prosemirror-schema-basic": "^1.2.5",
+    "prosemirror-schema-list": "^1.5.1",
+    "prosemirror-state": "^1.4.4",
+    "prosemirror-transform": "^1.12.4",
+    "prosemirror-view": "^1.42.8",
     "tsd": "^0.33.0",
     "typescript": "^7.0.2",
     "vitepress": "^1.6.4",
