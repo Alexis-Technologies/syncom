@@ -1546,29 +1546,28 @@
         },
         "entryPoints": {
           "mark": "",
-          "text": "root plus 7 subpaths: `/wrpc`, `/idb`, `/search`, `/order`, `/undo`, `/branch`, `/contracts`",
-          "source": "package.json:14-40"
+          "text": "the core plus 26 subpaths: `/text`, `/tree`, `/signing`, `/chain`, `/encryption`, `/sync`, `/schema`, `/query`, `/versions`, `/telemetry`, `/memory`, `/layered`, `/idb`, `/wrpc`, `/search`, `/order`, `/undo`, `/branch`, `/presence`, `/inspect`, `/editor`, `/store`, `/prosemirror`, `/codemirror`, `/contracts`, `/all`",
+          "source": "package.json (exports); docs/guide/entry-points.md"
         },
         "types": {
-          "mark": "⚠️",
-          "text": "hand-written `.d.ts`, tsd-tested; collection names typed, record data `unknown`",
-          "source": "index.d.ts:827-831, 1185-1188, 1341-1354; tests/*.test-d.ts"
+          "mark": "✅",
+          "text": "hand-written `.d.ts`, tsd-tested; a collection's records typed from its Standard Schema or `Schema<Shapes>`",
+          "source": "index.d.ts (Collections, SyncomCollection<R, I>); docs/guide/typescript.md"
         },
         "size": {
           "mark": "",
-          "text": "66.0 KB min+gzip: the browser entry, the whole engine",
-          "source": "pnpm size (scripts/size.js, esbuild), browser.js",
-          "detail": "Measured by `pnpm size` on 2026-10-24 (features/enhance-crdt-engine, after the docs audit's fixes). CommonJS is not tree-shaken, so storage, schema, queries, the op log, signing, the sync protocol and the list, text and tree engines all come with `open()`. No validator library is included in either column (injected / wrapped separately)."
+          "text": "43.5 KB min+gzip the core (browser); 97.4 KB `@alexify/syncom/all`, everything",
+          "source": "scripts/size.js; pnpm size"
         },
         "sizeSync": {
           "mark": "",
-          "text": "66.6 KB min+gzip with the wrpc link adapter",
-          "source": "bench/results/size.json (pnpm bench:size)"
+          "text": "53.6 KB min+gzip: the core, the sync plugin and the wrpc link adapter",
+          "source": "bench/compare/size.js; bench/results/size.json"
         },
         "sizeGate": {
           "mark": "✅",
-          "text": "`pnpm size` fails CI when the browser entry passes 66 KB",
-          "source": "scripts/size.js:86; .github/workflows/ci.yml:20-24"
+          "text": "`pnpm size` fails CI when any entry passes its budget (the core 52 KB, `/all` 98 KB, each subpath its own)",
+          "source": "scripts/size.js"
         },
         "node": {
           "mark": "✅",
@@ -1721,9 +1720,9 @@
           "source": "package.json; LICENSE"
         },
         "storageWrappers": {
-          "mark": "⚠️",
-          "text": "an `fsi` can wrap an `fsi` (bytes only); document transforms are hooks",
-          "source": "src/backend.js:84-105 (withSync); docs/guide/hooks.md"
+          "mark": "✅",
+          "text": "an `fsi` wraps an `fsi`: `atRest()` (AES-256-GCM), `layered()` (memory over disk), `durable` (fsync); document transforms are hooks",
+          "source": "src/encryption/encryption.js (atRest); src/layered/layered.js; src/backend.js (withSync); docs/guide/backends.md"
         },
         "remoteStorage": {
           "mark": "❌",
@@ -1736,9 +1735,9 @@
           "source": "src/"
         },
         "memoryMapped": {
-          "mark": "❌",
-          "text": "none; `cache.max` entries and the catalog stay in memory",
-          "source": "docs/guide/storage.md#the-catalog-and-the-cache"
+          "mark": "✅",
+          "text": "`layered([memory(), fsi], { write: 'through' | 'back' })`: memory read first, the disk under it",
+          "source": "src/layered/layered.js; docs/guide/backends.md"
         },
         "openCost": {
           "mark": "",
@@ -1786,10 +1785,8 @@
         },
         "writeFootprint": {
           "mark": "",
-          "text": "three per local write: log batch, chain block, record (two with `chain: false`)",
-          "note": "The chain is never compacted: one block file per local write and per applied batch, kept for good.",
-          "source": "docs/guide/chain.md#through-storage; docs/guide/architecture.md#a-local-write",
-          "detail": "Measured: a record holding 45 bytes of data is a 509-byte file, its per-field clocks each carrying the 43-character node id."
+          "text": "one log file per group of appends; the record file and its chain block once per deferred window (16 ms)",
+          "source": "src/log.js (group commit); src/storage.js (#deferWrite); docs/guide/storage.md"
         },
         "compression": {
           "mark": "❌",
@@ -1916,9 +1913,9 @@
           "source": "src/storage.js:661-669; docs/guide/schema.md#the-reference"
         },
         "tsInference": {
-          "mark": "❌",
-          "text": "records are `unknown`; only collection names are typed",
-          "source": "index.d.ts:827-831,1185-1188,1341-1355"
+          "mark": "✅",
+          "text": "from the entity's Standard Schema (`~standard.types`: zod, valibot, arktype), or a `Schema<{ Post: Post }>` annotation",
+          "source": "index.d.ts (SchemaOutput, SchemaInput, Shapes); docs/guide/typescript.md"
         },
         "defaults": {
           "mark": "✅",
@@ -1931,10 +1928,9 @@
           "source": "docs/guide/storage.md#validation"
         },
         "nested": {
-          "mark": "⚠️",
-          "text": "stored and validated; merged as one top-level register",
-          "note": "Concurrent edits to two keys of one nested object keep only one side, and `update({ 'a.b': 1 })` writes a top-level field named `a.b` (both documented in the Storage and Sync guides).",
-          "source": "src/ops.js:320-345 (applyFields over top-level keys); docs/guide/sync.md#registers-counters-sets-lists-and-text"
+          "mark": "✅",
+          "text": "a nested object is one register; a field by path (`profile/city`) merges on its own, each of any kind",
+          "source": "src/paths.js; src/compose.js; docs/guide/storage.md#paths"
         },
         "schemaVersion": {
           "mark": "✅",
@@ -1979,10 +1975,9 @@
           "source": "src/storage.js:927-931; src/record.js:131-136"
         },
         "unsetField": {
-          "mark": "❌",
-          "text": "only by a whole-record `set()`; `undefined` in a delta is dropped",
-          "source": "src/commit.js:218; src/shape.js:14",
-          "detail": "Checked by running: `update(id, { a: undefined })` left `a` as it was; `null` stores `null`."
+          "mark": "✅",
+          "text": "`unset(id, fields)`: an `unset` op, a tombstone an older concurrent `set` loses to",
+          "source": "src/storage.js (unset); docs/guide/storage.md"
         },
         "modifyFn": {
           "mark": "❌",
@@ -2011,9 +2006,9 @@
           "source": "src/storage.js:738-762; src/commit.js:209-245"
         },
         "transactions": {
-          "mark": "❌",
-          "text": "none; every write is one op on one record",
-          "source": "docs/guide/sync.md#operations"
+          "mark": "✅",
+          "text": "`transact(fn)`: several writes over several records, one log append, all or none",
+          "source": "src/commit.js (transact); docs/guide/storage.md#transactions"
         },
         "changeAndDelete": {
           "mark": "❌",
@@ -2197,9 +2192,9 @@
           "detail": "A misspelled field matches nothing, silently (verified)."
         },
         "typedQueries": {
-          "mark": "⚠️",
-          "text": "`MangoQuery` is untyped; rows are `QueryRow` (`Record<string, unknown>`)",
-          "source": "index.d.ts:1284-1311; index.d.ts:827-831"
+          "mark": "✅",
+          "text": "`MangoQuery<R>` names the record's fields, `id` or a dotted path; rows are `QueryRow<R>`",
+          "source": "index.d.ts (MangoQuery, QueryRow); docs/guide/typescript.md"
         },
         "immutableQueries": {
           "mark": "❌",
@@ -2412,9 +2407,9 @@
           "source": "src/record.js:99-120; index.d.ts:1139-1142"
         },
         "reactivityPrimitive": {
-          "mark": "⚠️",
-          "text": "callbacks and events; no observable or signal adapter",
-          "source": "src/query.js:359; src/emitter.js"
+          "mark": "✅",
+          "text": "a store (`/store`): `subscribe` with Svelte's contract, `getSnapshot` stable for React",
+          "source": "src/store/store.js"
         },
         "liveRemote": {
           "mark": "✅",
@@ -2778,10 +2773,9 @@
           "source": "docs/guide/scaling.md#hubs"
         },
         "atRest": {
-          "mark": "⚠️",
-          "text": "per record (`{ encrypted: true }`) or the whole storage; such records never sync",
-          "note": "The RSA key pair that unseals the records sits unprotected in `<path>/keys/`, beside the data: whoever can read the directory can read the records.",
-          "source": "src/commit.js:74-104; src/options.js:116-118; docs/guide/storage.md#encryption-at-rest"
+          "mark": "✅",
+          "text": "`atRest(fsi, { key | password })`: every file AES-256-GCM, and the records sync as ever; per record `encrypted: true` stays local",
+          "source": "src/encryption/encryption.js; docs/guide/backends.md"
         },
         "encScope": {
           "mark": "",
@@ -2796,10 +2790,9 @@
           "detail": "The same envelope on Node.js and in the browser, so ciphertext and keys move between them; an unknown envelope version is `BAD_ENVELOPE`."
         },
         "keyOffDisk": {
-          "mark": "❌",
-          "text": "the RSA private key is a file in `<path>/keys/`, beside the data",
-          "note": "Mode 0600 where the backend has permissions; in OPFS or IndexedDB a plain entry. No passphrase, KMS or injected key.",
-          "source": "src/keys.js:25-37; src/storage.js:226-227; docs/guide/storage.md#encryption-at-rest"
+          "mark": "⚠️",
+          "text": "the at-rest key or password is the caller's, never written; the RSA pair that seals a record is a file in `keys/`",
+          "source": "src/encryption/encryption.js:12-19, :76-88"
         },
         "keyRotation": {
           "mark": "❌",
@@ -2959,16 +2952,14 @@
           "detail": "Listeners are never awaited; a throwing one is logged (`listener.error`) and an `error` with no listener is silent."
         },
         "plugins": {
-          "mark": "❌",
-          "text": "none; per-instance injection: `fsi`, `validator`, `search`, `telemetry`, `logger`, `connect`",
-          "source": "src/options.js:47-123; docs/reference/api.md#open-options",
-          "detail": "Subpaths (`/wrpc`, `/contracts`, `/idb`, `/search`) are separate modules, not plugins; nothing is global to the process."
+          "mark": "✅",
+          "text": "`open({ plugins })`, per instance, nothing global: the kinds (`/text`, `/tree`) and the blocks (`/signing`, `/chain`, `/sync`, `/schema`, `/query`, …); a missing one is `PLUGIN_MISSING`",
+          "source": "src/plugin.js (createPlugins); docs/guide/entry-points.md"
         },
         "errors": {
           "mark": "✅",
-          "text": "`SyncomError.code`: 30 codes, plus 3 on `TypeError`s; full messages",
-          "source": "src/errors.js:20-32; index.d.ts:158-188; docs/reference/api.md#syncomerror",
-          "detail": "A host's wire refusal is a plain error with wrpc's numeric code (400–429) and a `reason` constant."
+          "text": "`SyncomError.code`: 44 codes, plus 3 on `TypeError`s; full messages",
+          "source": "index.d.ts (SyncomErrorCode); docs/reference/api.md"
         },
         "logging": {
           "mark": "✅",
@@ -2992,14 +2983,14 @@
           "detail": "Log lines name record ids and origins, never payloads; `error` events carry the op as a field."
         },
         "react": {
-          "mark": "❌",
-          "text": "none",
-          "source": "package.json; docs/guide/why.md:76"
+          "mark": "✅",
+          "text": "`/store`: `useSyncExternalStore(store.subscribe, store.getSnapshot)` over a query, a record or a presence",
+          "source": "src/store/store.js; docs/guide/frameworks.md#react"
         },
         "vue": {
-          "mark": "❌",
-          "text": "none",
-          "source": "package.json"
+          "mark": "⚠️",
+          "text": "a documented three-line `shallowRef` over `/store`; no package of its own",
+          "source": "docs/guide/frameworks.md#vue"
         },
         "angular": {
           "mark": "❌",
@@ -3007,14 +2998,14 @@
           "source": "package.json"
         },
         "svelte": {
-          "mark": "❌",
-          "text": "none",
-          "source": "package.json"
+          "mark": "✅",
+          "text": "`/store`: a store is a Svelte store (`$store`)",
+          "source": "src/store/store.js; docs/guide/frameworks.md#svelte"
         },
         "signals": {
-          "mark": "❌",
-          "text": "none",
-          "source": "package.json"
+          "mark": "⚠️",
+          "text": "Solid's `from(store)` over `/store`; another signal library wraps `subscribe` the same way",
+          "source": "docs/guide/frameworks.md#solid"
         },
         "tanstack": {
           "mark": "❌",

@@ -110,6 +110,7 @@ const memory = {
 
 const disk = {
   variant: 'updates appended to a file',
+  text: (store, name) => store.text(name),
   open: async (dir) => {
     const L = local('loro-crdt');
     await fs.mkdir(dir, { recursive: true });

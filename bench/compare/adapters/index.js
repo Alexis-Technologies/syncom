@@ -4,8 +4,8 @@
 const syncom = require('./syncom.js');
 
 const ADAPTERS = [
-  syncom.chained,
-  syncom.unchained,
+  syncom.pure,
+  syncom.secure,
   require('./yjs.js'),
   require('./automerge.js'),
   require('./loro.js'),

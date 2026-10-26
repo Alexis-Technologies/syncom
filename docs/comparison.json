@@ -318,7 +318,7 @@
           "mark": "✅",
           "text": "text fields: `splice()`/`updateText()` merge by position (Fugue); marks with expand rules, stacking comments, cursors",
           "source": "src/sequence.js; src/ops.js; docs/guide/lists.md",
-          "note": "Fields of a record, not whole documents: a record is read and written whole per op, and a long document is a list of block records. No editor bindings yet."
+          "note": "A text is a field of a record — a persistent rope, O(log n) per keystroke — and a document for an editor is one text with block markers, bound through `/prosemirror` or `/codemirror`."
         },
         "lists": {
           "mark": "✅",
@@ -433,14 +433,14 @@
           "source": "src/errors.js"
         },
         "types": {
-          "mark": "⚠️",
-          "text": "hand-written `.d.ts`; record data `unknown`",
-          "source": "index.d.ts"
+          "mark": "✅",
+          "text": "hand-written `.d.ts`; records typed from a Standard Schema or `Schema<Shapes>`",
+          "source": "index.d.ts; docs/guide/typescript.md"
         },
         "ui": {
-          "mark": "❌",
-          "text": "none",
-          "source": "package.json"
+          "mark": "✅",
+          "text": "`/store` for React, Svelte, Vue and Solid; `/prosemirror`, `/codemirror` and `/editor` for editors",
+          "source": "src/store/store.js; src/prosemirror/prosemirror.js; src/codemirror/codemirror.js; docs/guide/frameworks.md; docs/guide/editors.md"
         },
         "richText": {
           "mark": "✅",

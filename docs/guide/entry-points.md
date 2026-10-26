@@ -1,11 +1,13 @@
 # Entry points
 
 syncom is a core and blocks. The core — `@alexify/syncom` — keeps records
-with registers, counters and sets, the op log, the three write paths, the
-catalog and queries, versions and tags, and the sync of ops. Everything
-beyond that is a subpath you import when you need it, and nothing is
-registered process-wide: a storage runs with the plugins its `open()` was
-given, and another storage in the same process may run with others.
+with registers, counters and sets (fields by path among them), the op log,
+the three write paths, transactions, the catalog, the present's patches and
+the changes every op reports, and the ops a peer sends or lacks
+(`applyRemote()`, `outbound()`). Everything beyond that is a subpath you
+import when you need it, and nothing is registered process-wide: a storage
+runs with the plugins its `open()` was given, and another storage in the
+same process may run with others.
 
 ## The blocks
 
@@ -24,6 +26,10 @@ given, and another storage in the same process may run with others.
 | `@alexify/syncom/versions` | the past: `get(id, { at })`, `history()`, `diff()` between versions, `restore()`, the tags; `applyPatches()` and `compact()` stay in the core | `open({ plugins: [versions] })` |
 | `@alexify/syncom/all` | the core with every shipped plugin registered — the API as one import | `require('@alexify/syncom/all').open()` |
 | `@alexify/syncom/undo`, `/branch`, `/order` | the undo stack, forks and merges, fractional indexes | functions over a storage |
+| `@alexify/syncom/presence` | who is here and what they point at: a state per node, signed, relayed by a host's rooms, never logged | `createPresence(storage)`; carried by `storage.sync.presence()` |
+| `@alexify/syncom/editor`, `/prosemirror`, `/codemirror` | an editor bound to a text field: the generic binding and its deltas, and adapters for ProseMirror and CodeMirror 6 (their modules injected) | functions over a storage |
+| `@alexify/syncom/store` | a query, a record or a presence as one store — Svelte's contract and React's `useSyncExternalStore` | `toStore(source)` |
+| `@alexify/syncom/inspect` | a record's anatomy, raw, and an anonymized copy for a bug report | functions over a storage |
 | `@alexify/syncom/memory`, `/layered` | `memory()`, the backend in memory; `layered([top, …, bottom])`, one backend over several as a multi-level cache | `open({ fsi })` |
 | `@alexify/syncom/search`, `/idb`, `/wrpc`, `/contracts` | the text index behind `$text`, the IndexedDB backend, the wrpc link adapter, smart contracts | injected: `open({ search })`, `open({ fsi })`, `sync.connect` |
 
@@ -61,7 +67,7 @@ storage.nodeId; // the Ed25519 public key; every op signed, every write chained
 **Everything** is `/all`:
 
 ```js
-const { open } = require('@alexify/syncom/all'); // text, tree, signing, chain and encryption registered
+const { open } = require('@alexify/syncom/all'); // every plugin: text, tree, signing, chain, encryption, sync, schema, telemetry, query, versions
 ```
 
 ## What a plugin changes, and what it does not
@@ -99,13 +105,24 @@ const { open } = require('@alexify/syncom/all'); // text, tree, signing, chain a
 
 ## Sizes
 
-`pnpm size` measures every entry on its own, min+gzip, against a budget: the
-core about 35 KB (66 before the blocks), `/text` 14 KB, `/tree` 5 KB,
-`/signing` 4 KB, `/chain` 2 KB, `/encryption` 4 KB, `/sync` 16 KB, `/schema`
-4 KB, `/telemetry` 3 KB, `/query` 6 KB, `/versions` 22 KB, `/all` 73 KB. A
-block measured alone carries the core modules it stands on, so the rows do
+`pnpm size` measures every entry on its own, min+gzip, against a budget:
+
+| Entry | min+gzip | Entry | min+gzip |
+| --- | ---: | --- | ---: |
+| the core | 43.5 KB | `/all` | 97.4 KB |
+| `/text` | 27.8 KB | `/tree` | 6.4 KB |
+| `/sync` | 20.4 KB | `/versions` | 29.2 KB |
+| `/signing` | 4.5 KB | `/chain` | 1.9 KB |
+| `/encryption` | 3.6 KB | `/schema` | 4.6 KB |
+| `/query` | 5.8 KB | `/telemetry` | 2.6 KB |
+| `/undo` | 8.0 KB | `/branch` | 4.1 KB |
+| `/presence` | 3.9 KB | `/inspect` | 4.6 KB |
+| `/editor` | 5.1 KB | `/store` | 1.0 KB |
+| `/prosemirror` | 7.5 KB | `/codemirror` | 6.6 KB |
+| `/memory` | 0.5 KB | `/layered` | 1.3 KB |
+
+A block measured alone carries the core modules it stands on, so the rows do
 not add up: in an app bundle those are counted once, and the script checks
 it — the core and every block bundled together weigh what `/all` weighs,
-within a rounding. What a block adds is the difference the core came down
-by when it left: `/text` about 12 KB, `/sync` 7, `/versions` 4, `/signing`,
-`/chain` and `/encryption` about 2 together.
+within a rounding. The editor adapters carry the generic binding under them
+(`/editor`, 5 KB), and neither bundles its editor.

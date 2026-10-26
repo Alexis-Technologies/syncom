@@ -446,6 +446,16 @@ docs/                     VitePress site
   JSON only under a base it has not seen. `latestClock(meta, true)` is the
   trusted path for an entry this node holds — a peer's raw meta takes the
   untrusted one, which normalizes first.
+- **Nothing on an op's path reads the whole text or walks the whole cache.** A change report,
+  a check or a resolve reads the rope: `S.spansOf`/`S.spanOf` for a run's stretches, `S.styleAt`
+  for the marks at one index, `S.heldAt` for a unit — never `S.render(...)` sliced or `S.spans`
+  (a fresh reading is a V8 rope, and a slice or a `charCodeAt` flattens it), and the rope's
+  leaves concatenate their bodies, never `join` (src/text/btree.js `textOf`). `EntryStore.remember`
+  looks at `EVICT_SCAN` of the oldest entries at most, and the deferred window lands by count as
+  well as by time (`DEFER_RECORDS`, `DEFER_POSITIONS`): an await loop over `memory()` never lets
+  a timer fire. Each of these was once O(n) per op and took a typing rate from tens of thousands
+  to a few thousand; `bench/compare` (fresh process, thousands of awaited ops) is what shows it —
+  a short microbenchmark inside one deferred window does not.
 - **Ops from one origin apply in seq order; seqs run per origin AND scope**
   (`origin@scope` vector keys), and ops born from a snapshot (`merge`,
   `advance`) run in their own `origin@~` stream. `applyRemote` skips

@@ -17,9 +17,10 @@
  *            the last record in place
  * - append, prepend, random: type one character into a text — at its end,
  *            at its start, anywhere (seeded) — the keystrokes of an editor;
- *            in memory only, and only the libraries with a text that merges
- *            by position take part (syncom's text field, Y.Text, Automerge's
- *            text, LoroText); the others show "—"
+ *            only the libraries with a text that merges by position take part
+ *            (syncom's text field, Y.Text, Automerge's text, LoroText); the
+ *            others show "—". On disk this is the durable line: every
+ *            keystroke awaited until the library reports it stored
  * - trace:   replay the automerge-perf editing trace (bench/compare/trace.js)
  *            into one text; a round is the whole trace, the rate is
  *            keystrokes per second
@@ -30,7 +31,9 @@
  *   CRDT libraries' documents, the databases' in-memory storages;
  * - disk: each library's own persistence on node:fs, every write awaited
  *   until the library reports it written (no fsync for anyone: syncom's
- *   `durable` is off by default, and so is LevelDB's `sync`).
+ *   `durable` is off by default, and so is LevelDB's `sync`) — for a text,
+ *   every keystroke: y-leveldb's `storeUpdate`, Loro's update appended to a
+ *   file, automerge-repo's flush, syncom's log append.
  *
  * The cold start (load the library, open a store of SEED records on disk,
  * read one) runs in bench/compare/coldstart-worker.js.
@@ -92,7 +95,6 @@ const KINDS = [
     description: 'Insert one character at the end of a text that merges by position — the common keystroke.',
     unit: 'ops/s',
     type: 'ops',
-    lines: ['memory'],
   },
   {
     id: 'prepend',
@@ -100,7 +102,6 @@ const KINDS = [
     description: 'Insert one character at the start of the text — every insert anchors into the same spot.',
     unit: 'ops/s',
     type: 'ops',
-    lines: ['memory'],
   },
   {
     id: 'random',
@@ -108,7 +109,6 @@ const KINDS = [
     description: 'Insert one character at a random position of the text (seeded).',
     unit: 'ops/s',
     type: 'ops',
-    lines: ['memory'],
   },
   {
     id: 'trace',

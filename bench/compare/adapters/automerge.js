@@ -146,6 +146,7 @@ const repoAutomerge = async () => import(local.resolve('@automerge/automerge-rep
 
 const disk = {
   variant: 'automerge-repo, NodeFS storage',
+  text: (store, name) => store.text(name),
   open: async (dir) => wrap(await repoAutomerge(), await repoState(dir)),
   openReplica: async (dir, source) => {
     const { MessageChannelNetworkAdapter } = await import(

@@ -14,6 +14,21 @@ There is no released version section until then; everything below lands in it.
 
 ### Added
 
+- **Benchmarks by build, and a durable line.** The cross-library comparison
+  measures syncom as two builds — the pure CRDT (the core with `text` and
+  `sync`, no signatures, no chain, `defer: 16`) and `@alexify/syncom/all`,
+  signed and chained — in place of the chain-on and chain-off rows; typing
+  into a text now runs on disk too, every keystroke awaited until each
+  library reports it stored (y-leveldb, Loro's appended updates,
+  automerge-repo's flush, syncom's log append); and the bundle sizes count
+  the core, the core with `text`, and `/all`, resolving the subpaths through
+  the package's `exports`. The matrices are decided again from this code:
+  in the CRDT comparison syncom now has nested fields, children of list
+  elements and tree nodes, embeds, blocks, deltas, events by path, editor
+  and UI bindings, transactions, origins and messages, presence, scoped
+  undo with cursors, version comparison, forks at any version, blame,
+  `unset`, surrogate checks, typed records, a wire spec, checksums and
+  anonymized dumps.
 - **CodeMirror.** `@alexify/syncom/codemirror`: `createCodeMirror(storage,
   id, path, { state, view })` — CodeMirror's own modules, injected — gives
   an extension for the editor's state and `attach(view)`. An edit's

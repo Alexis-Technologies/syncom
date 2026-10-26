@@ -20,7 +20,8 @@ a title, a flag, a priority, an owner, a counter) and are asked to do what an ap
 with it. They insert a record into a store of 1,000, update a field, read a record, increment a
 counter that converges, insert 1,000 at once, and replicate the whole store to an empty replica.
 Each scenario runs twice: **in memory**, where nothing touches the disk, and **on disk**, where
-every library uses its own persistence on `node:fs` and every write is awaited. Each library is
+every library uses its own persistence on `node:fs` and every write is awaited — typing into a
+text too, which makes the disk line the durable one. Each library is
 used the way its documentation shows; the adapters are in
 [`bench/compare/adapters/`](https://github.com/Alexis-Technologies/syncom/tree/main/bench/compare/adapters).
 Pick a scenario and a storage; hover over or focus a bar to see the time of one operation, the
@@ -35,100 +36,108 @@ spread of the samples and the exact version.
 
 | Library | Insert a record<br><sub>ops/s</sub> | Update a field<br><sub>ops/s</sub> | Read a record<br><sub>ops/s</sub> | Increment a counter<br><sub>ops/s</sub> | Insert 1,000 at once<br><sub>records/s</sub> | Replicate a store<br><sub>records/s</sub> | Type at the end of a text<br><sub>ops/s</sub> | Type at the start of a text<br><sub>ops/s</sub> | Type anywhere in a text<br><sub>ops/s</sub> | Replay an editing trace<br><sub>ops/s</sub> |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| **syncom**<br><sub>default, memory() · v0.0.1</sub> | 15,200 | 17,200 | 845,000 | 17,100 | 15,800 | 25,100 | 1,800 | 388 | 537 | 138 |
-| **syncom**<br><sub>chain: false, memory() · v0.0.1</sub> | 16,700 | 19,400 | 885,000 | 18,800 | 16,900 | 25,800 | 1,820 | 391 | 550 | 162 |
-| Yjs<br><sub>Y.Doc, a Y.Map per record · v13.6.33</sub> | 235,000 | 382,000 | 3,680,000 | — | 275,000 | 99,700 | 346,000 | 525,000 | 30,400 | 52,100 |
-| Automerge<br><sub>Automerge.change, Counter · v3.5.0</sub> | 512 | 1,990 | 10,600,000 | 1,950 | 8,960 | 20,900 | 23,700 | 21,600 | 20,600 | 18,100 |
-| Loro<br><sub>LoroDoc, a LoroMap per record · v1.16.4</sub> | 31,300 | 412,000 | 313,000 | 349,000 | 83,100 | 105,000 | 619,000 | 444,000 | 311,000 | 470,000 |
-| TinyBase<br><sub>MergeableStore · v10.0.1</sub> | 22,900 | 108,000 | 1,460,000 | — | 23,700 | 11,500 | — | — | — | — |
-| PouchDB<br><sub>pouchdb-adapter-memory · v9.0.0</sub> | 20,300 | 8,310 | 30,100 | — | 74,000 | 17,800 | — | — | — | — |
-| RxDB<br><sub>memory storage · v17.6.0</sub> | 16,700 | 50,400 | 281,000 | — | 2,220,000 | 64,100 | — | — | — | — |
-| Fireproof<br><sub>memory:// store · v0.24.19</sub> | 310 | 377 | 726 | — | 22,300 | — | — | — | — | — |
-| OrbitDB<br><sub>documents, memory blockstore · v4.0.0</sub> | 1,080 | 31.1 | 81.4 | — | 1,090 | 220 | — | — | — | — |
+| **syncom**<br><sub>core + text + sync, memory() · v0.0.1</sub> | 44,100 | 42,600 | 897,000 | 43,400 | 42,700 | 88,100 | 35,800 | 20,900 | 19,100 | 12,700 |
+| **syncom**<br><sub>/all: signed, chained, memory() · v0.0.1</sub> | 12,100 | 15,100 | 891,000 | 14,800 | 15,100 | 16,700 | 14,000 | 11,800 | 11,600 | 10,700 |
+| Yjs<br><sub>Y.Doc, a Y.Map per record · v13.6.33</sub> | 221,000 | 398,000 | 3,690,000 | — | 219,000 | 89,400 | 363,000 | 537,000 | 31,100 | 53,000 |
+| Automerge<br><sub>Automerge.change, Counter · v3.5.0</sub> | 510 | 1,960 | 10,500,000 | 1,880 | 8,970 | 22,000 | 24,300 | 22,700 | 22,100 | 18,400 |
+| Loro<br><sub>LoroDoc, a LoroMap per record · v1.16.4</sub> | 32,200 | 404,000 | 260,000 | 333,000 | 83,800 | 102,000 | 624,000 | 453,000 | 320,000 | 482,000 |
+| TinyBase<br><sub>MergeableStore · v10.0.1</sub> | 23,800 | 104,000 | 1,430,000 | — | 23,400 | 11,700 | — | — | — | — |
+| PouchDB<br><sub>pouchdb-adapter-memory · v9.0.0</sub> | 20,200 | 8,240 | 30,500 | — | 73,300 | 17,800 | — | — | — | — |
+| RxDB<br><sub>memory storage · v17.6.0</sub> | 38,200 | 49,500 | 299,000 | — | 2,210,000 | 61,900 | — | — | — | — |
+| Fireproof<br><sub>memory:// store · v0.24.19</sub> | 353 | 372 | 710 | — | 22,200 | — | — | — | — | — |
+| OrbitDB<br><sub>documents, memory blockstore · v4.0.0</sub> | 1,070 | 29.8 | 80.3 | — | 1,070 | 219 | — | — | — | — |
 
 **On disk**
 
-| Library | Insert a record<br><sub>ops/s</sub> | Update a field<br><sub>ops/s</sub> | Read a record<br><sub>ops/s</sub> | Increment a counter<br><sub>ops/s</sub> | Insert 1,000 at once<br><sub>records/s</sub> | Replicate a store<br><sub>records/s</sub> |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| **syncom**<br><sub>default, node:fs · v0.0.1</sub> | 1,320 | 1,530 | 891,000 | 1,210 | 1,620 | 5,310 |
-| **syncom**<br><sub>chain: false, node:fs · v0.0.1</sub> | 2,420 | 2,840 | 875,000 | 2,960 | 2,640 | 5,910 |
-| Yjs<br><sub>y-leveldb · v13.6.33</sub> | 19,200 | 22,400 | 3,690,000 | — | 155,000 | 53,700 |
-| Automerge<br><sub>automerge-repo, NodeFS storage · v3.5.0</sub> | 490 | 1,250 | 10,500,000 | 1,200 | 7,820 | 3,100 |
-| Loro<br><sub>updates appended to a file · v1.16.4</sub> | 19,500 | 43,300 | 285,000 | 42,600 | 66,900 | 108,000 |
-| TinyBase<br><sub>MergeableStore, file persister · v10.0.1</sub> | 172 | 304 | 1,390,000 | — | 15,400 | 11,100 |
-| PouchDB<br><sub>LevelDB (Node default) · v9.0.0</sub> | 26,400 | 8,810 | 42,000 | — | 65,500 | 16,500 |
-| Fireproof<br><sub>file:// store · v0.24.19</sub> | 300 | 335 | 720 | — | 20,700 | — |
-| GUN<br><sub>RAD on node:fs · v0.2020.1241</sub> | 3.63 | 3.77 | 749 | — | failed | — |
-| OrbitDB<br><sub>documents, LevelDB · v4.0.0</sub> | 952 | 17.4 | 82.4 | — | 921 | 193 |
+| Library | Insert a record<br><sub>ops/s</sub> | Update a field<br><sub>ops/s</sub> | Read a record<br><sub>ops/s</sub> | Increment a counter<br><sub>ops/s</sub> | Insert 1,000 at once<br><sub>records/s</sub> | Replicate a store<br><sub>records/s</sub> | Type at the end of a text<br><sub>ops/s</sub> | Type at the start of a text<br><sub>ops/s</sub> | Type anywhere in a text<br><sub>ops/s</sub> |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **syncom**<br><sub>core + text + sync, node:fs · v0.0.1</sub> | 2,930 | 3,450 | 866,000 | 3,380 | 7,050 | 7,420 | 4,870 | 1,120 | 1,900 |
+| **syncom**<br><sub>/all: signed, chained, node:fs · v0.0.1</sub> | 2,470 | 2,860 | 903,000 | 2,810 | 5,990 | 5,520 | 3,980 | 1,050 | 1,770 |
+| Yjs<br><sub>y-leveldb · v13.6.33</sub> | 18,900 | 20,900 | 3,780,000 | — | 141,000 | 53,400 | 22,500 | 23,800 | 14,600 |
+| Automerge<br><sub>automerge-repo, NodeFS storage · v3.5.0</sub> | 485 | 1,220 | 10,500,000 | 1,170 | 7,690 | 3,130 | 3,350 | 3,330 | 3,270 |
+| Loro<br><sub>updates appended to a file · v1.16.4</sub> | 19,000 | 42,300 | 277,000 | 42,200 | 63,400 | 103,000 | 46,600 | 45,600 | 41,200 |
+| TinyBase<br><sub>MergeableStore, file persister · v10.0.1</sub> | 165 | 297 | 1,400,000 | — | 15,400 | 10,900 | — | — | — |
+| PouchDB<br><sub>LevelDB (Node default) · v9.0.0</sub> | 25,700 | 8,070 | 41,500 | — | 69,300 | 17,100 | — | — | — |
+| Fireproof<br><sub>file:// store · v0.24.19</sub> | 296 | 307 | 703 | — | 19,600 | — | — | — | — |
+| GUN<br><sub>RAD on node:fs · v0.2020.1241</sub> | 3.67 | 3.74 | 755 | — | failed | — | — | — | — |
+| OrbitDB<br><sub>documents, LevelDB · v4.0.0</sub> | 906 | 17 | 80.6 | — | 945 | 196 | — | — | — |
 
-_Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library in a fresh process · 2026-10-25. Medians, rounded to three significant figures; — where the library has no such operation, no such storage, or no in-process sync, failed where it did not finish twice (the chart above says why)._
+_Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library in a fresh process · 2026-10-26. Medians, rounded to three significant figures; — where the library has no such operation, no such storage, or no in-process sync, failed where it did not finish twice (the chart above says why)._
 
 <!-- bench:compare:end -->
 
 ### How to read it
 
 The libraries do different work for one call, so read the charts as a price list, not a ranking.
+syncom runs as two builds. **syncom** is the pure CRDT: the core with the `text` and `sync`
+plugins, no signatures and no chain, record files a frame behind the log (`defer: 16`) — what
+an editor that only merges opens. **syncom-secure** is `@alexify/syncom/all`: every op signed
+with the node's Ed25519 key, every write a block of the hash-linked chain — what a node of a
+signed, hosted mesh opens.
 
 - **A syncom write does more.** A Yjs or Loro write changes a document in memory and, on disk,
-  appends one update. A syncom write is an op, [signed](/guide/sync#signatures) with the node's
-  Ed25519 key, appended to the op log, the record's own file, its catalog row and, unless
-  `chain: false`, a block in the chain. That is four file writes per write with the chain and
-  two without, and it is what lets a record be checked, purged, repaired, replicated by scope,
-  queried and verified by every peer. The `chain: false` rows show what the chain costs: about
-  half of a write on disk, about a tenth in memory.
-- **Signatures are the price in memory.** Every write is signed and every op a peer sends is
-  verified against its origin, and in memory that is most of what a write costs: syncom does
-  about 15,000 inserts a second there, where it did about 37,500 before ops were signed. A
-  peer's page is verified on Node's thread pool, four checks at a time by default — about 36,000
-  ops a second (the `verifyOp` row of [syncom's own](#syncom-s-own-benchmarks) benchmarks).
-  `sync.signatures: false` skips both, for a mesh that trusts its transport.
-- **Writes on disk are where syncom pays.** It does about 1,300 inserts a second (2,400 without
-  the chain), where the LevelDB-backed Yjs and PouchDB and Loro's single append do 19,000 to
-  26,000: what is left is the file writes themselves. A write does not cost more as the store
-  grows: the catalog is saved every sixteenth of its size rather than whole every 64 writes.
-  Further down the disk chart: TinyBase's file persister rewrites the whole store
-  on every save (about 170 a second), Automerge's change cost grows with the document, and GUN
-  waits for RAD's 250 ms flush before it acknowledges a write (about 4 a second).
-- **Reads come from a cache.** syncom answers 850,000 to 890,000 reads a second on both lines, each a
-  JSON copy of the record. Automerge (10.6 million) and Yjs (3.7 million) read their
-  materialized documents, and TinyBase reads 1.4 million. PouchDB (30,000 to 42,000), Fireproof
+  appends one update. A syncom write is an op appended to the op log; its record file and
+  catalog row land within the deferred window, and in the secure build it is also signed and
+  chained. That is what lets a record be queried, replicated by scope, purged and repaired —
+  and, signed, verified by every peer. In memory the pure build inserts about 44,000 records a
+  second and the secure one about 12,000: signatures and the chain cost about three quarters of
+  a write there. A peer's page is verified on Node's thread pool — about 36,000 ops a second
+  (the `verifyOp` row of [syncom's own](#syncom-s-own-benchmarks) benchmarks).
+- **Writes on disk are where syncom pays.** About 2,900 inserts a second (2,500 secure), where
+  the LevelDB-backed Yjs and PouchDB and Loro's single append do 19,000 to 26,000: what is left
+  is the log's file per group of appends and the record files. Further down the disk chart:
+  TinyBase's file persister rewrites the whole store on every save (about 170 a second),
+  Automerge's change cost grows with the document, and GUN waits for RAD's 250 ms flush before
+  it acknowledges a write (about 4 a second).
+- **Reads come from a cache.** syncom answers about 890,000 reads a second on both lines, each a
+  JSON copy of the record. Automerge (10.5 million) and Yjs (3.7 million) read their
+  materialized documents, and TinyBase reads 1.4 million. PouchDB (31,000 to 42,000), Fireproof
   (about 700) and OrbitDB (about 80) go to their storage; OrbitDB walks its log for every read.
-- **Replication is bound by verification.** An empty syncom replica pulls 1,000 records at
-  25,000 to 26,000 a second in memory, through the same path a WebSocket peer takes (hello, push,
-  a feed of pages, JSON across the boundary), checking every op's signature on the way in, on
-  Node's thread pool (before ops were signed, the same pull ran at 108,000 to 127,000 a second).
-  Loro manages 105,000, Yjs 100,000 and RxDB 64,000; Automerge (21,000), PouchDB (18,000) and
-  TinyBase (11,500) come behind, and OrbitDB, over loopback TCP, 220. On disk the replica also
-  writes every record's file and one chain block per page, and manages 5,300 to 5,900 a second:
-  behind Loro (108,000, one append), Yjs (54,000), PouchDB (16,500) and TinyBase (11,100), ahead
-  of Automerge (3,100) and OrbitDB (193).
-- **Batches.** syncom has no batch write: 1,000 inserts are 1,000 ops, each appended on its own
-  (15,800 to 16,900 a second in memory, 1,620 to 2,640 on disk), each signed. RxDB's in-memory `bulkInsert` (2.2 million) and
-  a Yjs transaction (155,000 to 275,000) write the batch at once. GUN has no number: in two
-  attempts, a batch of 1,000 concurrent puts left a write without its acknowledgement for 30 s.
-- **Counters.** Loro's `LoroCounter` is the fastest (349,000 a second in memory, 43,000 on
-  disk). syncom does 17,100 to 18,800 in memory and 1,210 to 2,970 on disk, and Automerge
-  about 2,000. The others have no counter that converges, so they are not in this chart.
-- **Cold start.** syncom opens a store of 1,000 records and reads one in 40 to 41 ms, the fastest here:
-  its catalog is one JSON file, and nothing compiles WebAssembly or starts a network stack.
-  Loro and TinyBase take about 51 ms, Yjs and PouchDB about 83 to 85 ms (LevelDB), Automerge
-  183 ms (WebAssembly), Fireproof 240 ms and OrbitDB 577 ms (libp2p and Helia).
+- **Replication.** An empty replica of the pure build pulls 1,000 records at about 88,000 a second
+  in memory, through the same path a WebSocket peer takes (hello, push, a feed of pages, JSON
+  across the boundary) — beside Loro (102,000) and Yjs (89,000), ahead of RxDB (62,000). The
+  secure build checks every op's signature on the way in and pulls about 17,000. On disk the
+  replica writes every record's file too: 7,400 a second (5,500 secure), behind Loro (103,000,
+  one append), Yjs (53,000), PouchDB (17,000) and TinyBase (11,000), ahead of Automerge (3,100).
+- **Batches.** syncom has no batch write: 1,000 inserts are 1,000 ops (about 43,000 a second in
+  memory, 7,100 on disk — the ops group into one log file each while a write is in flight).
+  RxDB's in-memory `bulkInsert` (2.2 million) and a Yjs transaction (141,000 to 219,000) write
+  the batch at once. `transact()` writes several records as one append when they belong together.
+- **Counters.** Loro's `LoroCounter` is the fastest (333,000 a second in memory, 42,000 on disk).
+  syncom does 43,000 in memory (15,000 secure) and 3,400 on disk, and Automerge about 1,900. The
+  others have no counter that converges, so they are not in this chart.
+- **Cold start.** syncom opens a store of 1,000 records and reads one in about 49 ms (60 ms
+  secure, which loads its key pairs), the fastest here: its catalog is one JSON file, and nothing
+  compiles WebAssembly or starts a network stack. Loro and TinyBase take about 58 ms, Yjs and
+  PouchDB 89 to 96 ms (LevelDB), Automerge 187 ms (WebAssembly), Fireproof 258 ms and OrbitDB
+  602 ms (libp2p and Helia).
 
 ### Lists and text against the CRDT libraries
 
 Three of the scenarios type into a text: one character at the end (the common keystroke), at the
-start (every insert anchors into the same spot) and anywhere (seeded). They run in memory, and
-only the libraries with a text that merges by position take part — syncom's text field, `Y.Text`,
-Automerge's text, `LoroText`; the databases and the stores show "—". The framing is honest about
-what is measured: a syncom text is a field of a record, and every keystroke is one signed op
-appended to the log and one record file written — whole, with the field's metadata, so a
-keystroke costs more the longer the text (the scenario grows its text past ten thousand
-characters, one run per character typed at the start) — where a document CRDT batches a
-transaction into one update and writes nothing. The editing-trace benchmark the CRDT libraries
-publish (automerge-perf: 259,778 keystrokes of a real paper, 182,315 inserts and 77,463 deletes)
-runs here as the `trace` scenario: the whole trace replayed into one text as an editor sends it —
-one keystroke after another, not waiting for each — and the text read back whole at the end. The
-trace is downloaded at bench time, not redistributed (CC-BY-4.0).
+start (every insert anchors into the same spot) and anywhere (seeded). Only the libraries with a
+text that merges by position take part — syncom's text field, `Y.Text`, Automerge's text,
+`LoroText`; the databases and the stores show "—". A syncom keystroke is an op appended to the
+log, its text a persistent rope (O(log n) per keystroke), the record file written once per
+deferred window. In memory the pure build types about 36,000 characters a second at the end,
+21,000 at the start and 19,000 at random — Automerge's range (22,000 to 24,000) — where Yjs
+types 31,000 to 537,000 and Loro 320,000 to 624,000; the secure build, signing every keystroke,
+types 12,000 to 14,000.
+
+**On disk** is the durable line: every keystroke awaited until the library reports it stored —
+y-leveldb's `storeUpdate`, Loro's update appended to a file, automerge-repo's flush, syncom's log
+append. syncom types 4,900 characters a second at the end and 1,100 to 1,900 elsewhere (a
+keystroke elsewhere is a new run of the record's metadata, written with the file), Automerge
+about 3,300, Yjs 15,000 to 24,000 and Loro 41,000 to 47,000.
+
+The editing-trace benchmark the CRDT libraries publish (automerge-perf: 259,778 keystrokes of a
+real paper, 182,315 inserts and 77,463 deletes) runs as the `trace` scenario: the whole trace
+replayed into one text as an editor sends it — one keystroke after another, not waiting for
+each — and the text read back whole at the end. The pure build replays it in about 20 seconds
+(12,700 keystrokes a second; 24 seconds secure), Automerge in 14, Yjs in 5 and Loro in half a
+second; the JS heap the trace leaves is about 8 MB for syncom and 3 MB for Yjs (Automerge's and
+Loro's live in WebAssembly memory, which that number does not count). The trace is downloaded at
+bench time, not redistributed (CC-BY-4.0).
 
 ### Method
 
@@ -174,16 +183,16 @@ command-line tool, a serverless function or a page that reloads pays once.
 
 | Library | Load and open | First read | Total |
 | --- | ---: | ---: | ---: |
-| **syncom**<br><sub>chain: false, node:fs · v0.0.1</sub> | 39.4 ms | 0.5 ms | 39.9 ms |
-| **syncom**<br><sub>default, node:fs · v0.0.1</sub> | 40.3 ms | 1.1 ms | 41.3 ms |
-| TinyBase<br><sub>MergeableStore, file persister · v10.0.1</sub> | 50.7 ms | 0.1 ms | 50.8 ms |
-| Loro<br><sub>updates appended to a file · v1.16.4</sub> | 51.2 ms | 0.7 ms | 51.9 ms |
-| Yjs<br><sub>y-leveldb · v13.6.33</sub> | 82.7 ms | 0.1 ms | 82.7 ms |
-| GUN<br><sub>RAD on node:fs · v0.2020.1241</sub> | 56.5 ms | 28.0 ms | 84.6 ms |
-| PouchDB<br><sub>LevelDB (Node default) · v9.0.0</sub> | 81.6 ms | 3.2 ms | 85.1 ms |
-| Automerge<br><sub>automerge-repo, NodeFS storage · v3.5.0</sub> | 182.7 ms | 0.0 ms | 182.7 ms |
-| Fireproof<br><sub>file:// store · v0.24.19</sub> | 158.2 ms | 81.8 ms | 239.6 ms |
-| OrbitDB<br><sub>documents, LevelDB · v4.0.0</sub> | 531.9 ms | 45.1 ms | 577.4 ms |
+| **syncom**<br><sub>core + text + sync, node:fs · v0.0.1</sub> | 48.3 ms | 0.4 ms | 48.8 ms |
+| Loro<br><sub>updates appended to a file · v1.16.4</sub> | 56.9 ms | 0.7 ms | 57.6 ms |
+| TinyBase<br><sub>MergeableStore, file persister · v10.0.1</sub> | 58.7 ms | 0.1 ms | 58.7 ms |
+| **syncom**<br><sub>/all: signed, chained, node:fs · v0.0.1</sub> | 57.1 ms | 2.7 ms | 59.8 ms |
+| Yjs<br><sub>y-leveldb · v13.6.33</sub> | 88.4 ms | 0.1 ms | 88.5 ms |
+| PouchDB<br><sub>LevelDB (Node default) · v9.0.0</sub> | 92.8 ms | 3.2 ms | 96.2 ms |
+| GUN<br><sub>RAD on node:fs · v0.2020.1241</sub> | 69.7 ms | 28.5 ms | 98.1 ms |
+| Automerge<br><sub>automerge-repo, NodeFS storage · v3.5.0</sub> | 187.1 ms | 0.0 ms | 187.1 ms |
+| Fireproof<br><sub>file:// store · v0.24.19</sub> | 170.5 ms | 87.0 ms | 257.8 ms |
+| OrbitDB<br><sub>documents, LevelDB · v4.0.0</sub> | 558.1 ms | 43.6 ms | 601.7 ms |
 
 <!-- bench:coldstart:end -->
 
@@ -206,7 +215,7 @@ loads is counted with the JavaScript, gzipped too.
 | TinyBase<br><sub>tinybase@10.0.1</sub> | MergeableStore + IndexedDB persister + custom synchronizer | 56.4 KB | 23.8 KB |  |
 | Yjs<br><sub>yjs@13.6.33, y-indexeddb@9.0.12, y-protocols@1.0.7</sub> | yjs + y-indexeddb + y-protocols/sync | 80.2 KB | 24.5 KB |  |
 | PouchDB<br><sub>pouchdb-browser@9.0.0</sub> | pouchdb-browser | 117.8 KB | 40.4 KB | pouchdb-browser carries its HTTP adapter (the CouchDB client) with it |
-| **syncom**<br><sub>@alexify/syncom@0.0.1</sub> | open() over OPFS + the wrpc link adapter | 195.0 KB | 66.6 KB | storage, schema, queries, the op log and the sync protocol are one entry |
+| **syncom**<br><sub>@alexify/syncom@0.0.1</sub> | the core over OPFS + the sync plugin + the wrpc link adapter | 156.8 KB | 53.6 KB | records, counters and sets, the op log and the sync protocol; texts and schemas are plugins of their own |
 | RxDB<br><sub>rxdb@17.6.0, dexie@4.4.6, rxjs@7.8.2</sub> | rxdb + Dexie storage + replication | 282.3 KB | 90.1 KB |  |
 | Fireproof<br><sub>@fireproof/core@0.24.19</sub> | @fireproof/core | 784.2 KB | 204.0 KB |  |
 | OrbitDB<br><sub>@orbitdb/core@4.0.0, helia@6.1.4, libp2p@3.5.1, @libp2p/gossipsub@15.0.23, blockstore-idb@4.0.1</sub> | @orbitdb/core + helia + libp2p, IndexedDB blockstore | 1185.6 KB | 353.7 KB | createHelia brings Helia's default libp2p configuration with it |

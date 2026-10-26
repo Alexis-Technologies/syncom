@@ -81,6 +81,7 @@ const memory = {
 
 const disk = {
   variant: 'y-leveldb',
+  text: (store, name) => store.text(name),
   open: async (dir) => {
     const Y = local('yjs');
     const { LeveldbPersistence } = local('y-leveldb');

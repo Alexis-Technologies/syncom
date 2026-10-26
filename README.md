@@ -204,9 +204,9 @@ InstantDB) meet. The [comparison](https://syncomjs.vercel.app/guide/comparison) 
 nineteen in one table of forty-eight features, each cell decided from the published source. In short:
 syncom is a database that merges field by field — and whose list, text and tree fields merge by
 position, with marks, cursors and moves, like a text CRDT's — with tags, history, undo and
-branches on top. It syncs with no service to run, its hosts
-validate and scope what peers send, and its log is verifiable and purgeable. It has no editor
-bindings and no UI bindings yet, and it is a pre-release, not on npm yet.
+branches on top, bound to ProseMirror, CodeMirror and the UI frameworks through subpaths. It syncs
+with no service to run, its hosts validate and scope what peers send, and its log is verifiable and
+purgeable. It is a pre-release, not on npm yet.
 RxDB, the closest of them, is compared [feature by feature](https://syncomjs.vercel.app/guide/vs-rxdb)
 in 300 rows, from its code and every page of its docs, and Yjs, Automerge and Loro
 [as CRDT libraries](https://syncomjs.vercel.app/guide/vs-crdt) in 141 rows, from their code.
@@ -228,7 +228,7 @@ timed. The method and the interactive charts are on the
 <img src="https://syncomjs.vercel.app/benchmarks/compare-insert-disk.svg" alt="Insert a record, on disk: Add one record to a store of 1,000. Each library's own persistence on node:fs, every write awaited. ops/s, log scale, higher is better. Not shown: RxDB (Node.js disk storages are Premium)." width="760" />
 
 <details>
-<summary>14 more scenarios</summary>
+<summary>17 more scenarios</summary>
 
 <img src="https://syncomjs.vercel.app/benchmarks/compare-insert-memory.svg" alt="Insert a record, in memory: Add one record to a store of 1,000. Nothing touches the disk. ops/s, log scale, higher is better. Not shown: GUN (needs its storage adapter to answer in Node.js)." width="760" />
 
@@ -252,11 +252,17 @@ timed. The method and the interactive charts are on the
 
 <img src="https://syncomjs.vercel.app/benchmarks/compare-append-memory.svg" alt="Type at the end of a text, in memory: Insert one character at the end of a text that merges by position — the common keystroke. Nothing touches the disk. ops/s, log scale, higher is better. Not shown: TinyBase (no text that merges by position); PouchDB (no text that merges by position); RxDB (no text that merges by position); Fireproof (no text that merges by position); GUN (needs its storage adapter to answer in Node.js); OrbitDB (no text that merges by position)." width="760" />
 
+<img src="https://syncomjs.vercel.app/benchmarks/compare-append-disk.svg" alt="Type at the end of a text, on disk: Insert one character at the end of a text that merges by position — the common keystroke. Each library's own persistence on node:fs, every write awaited. ops/s, log scale, higher is better. Not shown: TinyBase (no text that merges by position); PouchDB (no text that merges by position); RxDB (Node.js disk storages are Premium); Fireproof (no text that merges by position); GUN (no text that merges by position); OrbitDB (no text that merges by position)." width="760" />
+
 <img src="https://syncomjs.vercel.app/benchmarks/compare-prepend-memory.svg" alt="Type at the start of a text, in memory: Insert one character at the start of the text — every insert anchors into the same spot. Nothing touches the disk. ops/s, log scale, higher is better. Not shown: TinyBase (no text that merges by position); PouchDB (no text that merges by position); RxDB (no text that merges by position); Fireproof (no text that merges by position); GUN (needs its storage adapter to answer in Node.js); OrbitDB (no text that merges by position)." width="760" />
+
+<img src="https://syncomjs.vercel.app/benchmarks/compare-prepend-disk.svg" alt="Type at the start of a text, on disk: Insert one character at the start of the text — every insert anchors into the same spot. Each library's own persistence on node:fs, every write awaited. ops/s, log scale, higher is better. Not shown: TinyBase (no text that merges by position); PouchDB (no text that merges by position); RxDB (Node.js disk storages are Premium); Fireproof (no text that merges by position); GUN (no text that merges by position); OrbitDB (no text that merges by position)." width="760" />
 
 <img src="https://syncomjs.vercel.app/benchmarks/compare-random-memory.svg" alt="Type anywhere in a text, in memory: Insert one character at a random position of the text (seeded). Nothing touches the disk. ops/s, log scale, higher is better. Not shown: TinyBase (no text that merges by position); PouchDB (no text that merges by position); RxDB (no text that merges by position); Fireproof (no text that merges by position); GUN (needs its storage adapter to answer in Node.js); OrbitDB (no text that merges by position)." width="760" />
 
-<img src="https://syncomjs.vercel.app/benchmarks/compare-trace-memory.svg" alt="Replay an editing trace, in memory: The automerge-perf trace: 259,778 keystrokes of a real paper (182,315 inserts, 77,463 deletes) replayed into one text as an editor would send them, the text read back whole at the end. Nothing touches the disk. ops/s, log scale, higher is better. Not shown: TinyBase; PouchDB; RxDB; Fireproof; GUN; OrbitDB." width="760" />
+<img src="https://syncomjs.vercel.app/benchmarks/compare-random-disk.svg" alt="Type anywhere in a text, on disk: Insert one character at a random position of the text (seeded). Each library's own persistence on node:fs, every write awaited. ops/s, log scale, higher is better. Not shown: TinyBase (no text that merges by position); PouchDB (no text that merges by position); RxDB (Node.js disk storages are Premium); Fireproof (no text that merges by position); GUN (no text that merges by position); OrbitDB (no text that merges by position)." width="760" />
+
+<img src="https://syncomjs.vercel.app/benchmarks/compare-trace-memory.svg" alt="Replay an editing trace, in memory: The automerge-perf trace: 259,778 keystrokes of a real paper (182,315 inserts, 77,463 deletes) replayed into one text as an editor would send them, the text read back whole at the end. Nothing touches the disk. ops/s, log scale, higher is better. Not shown: TinyBase (no text that merges by position); PouchDB (no text that merges by position); RxDB (no text that merges by position); Fireproof (no text that merges by position); GUN (needs its storage adapter to answer in Node.js); OrbitDB (no text that merges by position)." width="760" />
 
 </details>
 
@@ -264,33 +270,33 @@ timed. The method and the interactive charts are on the
 
 | Library | Insert a record<br><sub>ops/s</sub> | Update a field<br><sub>ops/s</sub> | Read a record<br><sub>ops/s</sub> | Increment a counter<br><sub>ops/s</sub> | Insert 1,000 at once<br><sub>records/s</sub> | Replicate a store<br><sub>records/s</sub> | Type at the end of a text<br><sub>ops/s</sub> | Type at the start of a text<br><sub>ops/s</sub> | Type anywhere in a text<br><sub>ops/s</sub> | Replay an editing trace<br><sub>ops/s</sub> |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| **syncom**<br><sub>default, memory() · v0.0.1</sub> | 15,200 | 17,200 | 845,000 | 17,100 | 15,800 | 25,100 | 1,800 | 388 | 537 | 138 |
-| **syncom**<br><sub>chain: false, memory() · v0.0.1</sub> | 16,700 | 19,400 | 885,000 | 18,800 | 16,900 | 25,800 | 1,820 | 391 | 550 | 162 |
-| Yjs<br><sub>Y.Doc, a Y.Map per record · v13.6.33</sub> | 235,000 | 382,000 | 3,680,000 | — | 275,000 | 99,700 | 346,000 | 525,000 | 30,400 | 52,100 |
-| Automerge<br><sub>Automerge.change, Counter · v3.5.0</sub> | 512 | 1,990 | 10,600,000 | 1,950 | 8,960 | 20,900 | 23,700 | 21,600 | 20,600 | 18,100 |
-| Loro<br><sub>LoroDoc, a LoroMap per record · v1.16.4</sub> | 31,300 | 412,000 | 313,000 | 349,000 | 83,100 | 105,000 | 619,000 | 444,000 | 311,000 | 470,000 |
-| TinyBase<br><sub>MergeableStore · v10.0.1</sub> | 22,900 | 108,000 | 1,460,000 | — | 23,700 | 11,500 | — | — | — | — |
-| PouchDB<br><sub>pouchdb-adapter-memory · v9.0.0</sub> | 20,300 | 8,310 | 30,100 | — | 74,000 | 17,800 | — | — | — | — |
-| RxDB<br><sub>memory storage · v17.6.0</sub> | 16,700 | 50,400 | 281,000 | — | 2,220,000 | 64,100 | — | — | — | — |
-| Fireproof<br><sub>memory:// store · v0.24.19</sub> | 310 | 377 | 726 | — | 22,300 | — | — | — | — | — |
-| OrbitDB<br><sub>documents, memory blockstore · v4.0.0</sub> | 1,080 | 31.1 | 81.4 | — | 1,090 | 220 | — | — | — | — |
+| **syncom**<br><sub>core + text + sync, memory() · v0.0.1</sub> | 44,100 | 42,600 | 897,000 | 43,400 | 42,700 | 88,100 | 35,800 | 20,900 | 19,100 | 12,700 |
+| **syncom**<br><sub>/all: signed, chained, memory() · v0.0.1</sub> | 12,100 | 15,100 | 891,000 | 14,800 | 15,100 | 16,700 | 14,000 | 11,800 | 11,600 | 10,700 |
+| Yjs<br><sub>Y.Doc, a Y.Map per record · v13.6.33</sub> | 221,000 | 398,000 | 3,690,000 | — | 219,000 | 89,400 | 363,000 | 537,000 | 31,100 | 53,000 |
+| Automerge<br><sub>Automerge.change, Counter · v3.5.0</sub> | 510 | 1,960 | 10,500,000 | 1,880 | 8,970 | 22,000 | 24,300 | 22,700 | 22,100 | 18,400 |
+| Loro<br><sub>LoroDoc, a LoroMap per record · v1.16.4</sub> | 32,200 | 404,000 | 260,000 | 333,000 | 83,800 | 102,000 | 624,000 | 453,000 | 320,000 | 482,000 |
+| TinyBase<br><sub>MergeableStore · v10.0.1</sub> | 23,800 | 104,000 | 1,430,000 | — | 23,400 | 11,700 | — | — | — | — |
+| PouchDB<br><sub>pouchdb-adapter-memory · v9.0.0</sub> | 20,200 | 8,240 | 30,500 | — | 73,300 | 17,800 | — | — | — | — |
+| RxDB<br><sub>memory storage · v17.6.0</sub> | 38,200 | 49,500 | 299,000 | — | 2,210,000 | 61,900 | — | — | — | — |
+| Fireproof<br><sub>memory:// store · v0.24.19</sub> | 353 | 372 | 710 | — | 22,200 | — | — | — | — | — |
+| OrbitDB<br><sub>documents, memory blockstore · v4.0.0</sub> | 1,070 | 29.8 | 80.3 | — | 1,070 | 219 | — | — | — | — |
 
 **On disk**
 
-| Library | Insert a record<br><sub>ops/s</sub> | Update a field<br><sub>ops/s</sub> | Read a record<br><sub>ops/s</sub> | Increment a counter<br><sub>ops/s</sub> | Insert 1,000 at once<br><sub>records/s</sub> | Replicate a store<br><sub>records/s</sub> |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| **syncom**<br><sub>default, node:fs · v0.0.1</sub> | 1,320 | 1,530 | 891,000 | 1,210 | 1,620 | 5,310 |
-| **syncom**<br><sub>chain: false, node:fs · v0.0.1</sub> | 2,420 | 2,840 | 875,000 | 2,960 | 2,640 | 5,910 |
-| Yjs<br><sub>y-leveldb · v13.6.33</sub> | 19,200 | 22,400 | 3,690,000 | — | 155,000 | 53,700 |
-| Automerge<br><sub>automerge-repo, NodeFS storage · v3.5.0</sub> | 490 | 1,250 | 10,500,000 | 1,200 | 7,820 | 3,100 |
-| Loro<br><sub>updates appended to a file · v1.16.4</sub> | 19,500 | 43,300 | 285,000 | 42,600 | 66,900 | 108,000 |
-| TinyBase<br><sub>MergeableStore, file persister · v10.0.1</sub> | 172 | 304 | 1,390,000 | — | 15,400 | 11,100 |
-| PouchDB<br><sub>LevelDB (Node default) · v9.0.0</sub> | 26,400 | 8,810 | 42,000 | — | 65,500 | 16,500 |
-| Fireproof<br><sub>file:// store · v0.24.19</sub> | 300 | 335 | 720 | — | 20,700 | — |
-| GUN<br><sub>RAD on node:fs · v0.2020.1241</sub> | 3.63 | 3.77 | 749 | — | failed | — |
-| OrbitDB<br><sub>documents, LevelDB · v4.0.0</sub> | 952 | 17.4 | 82.4 | — | 921 | 193 |
+| Library | Insert a record<br><sub>ops/s</sub> | Update a field<br><sub>ops/s</sub> | Read a record<br><sub>ops/s</sub> | Increment a counter<br><sub>ops/s</sub> | Insert 1,000 at once<br><sub>records/s</sub> | Replicate a store<br><sub>records/s</sub> | Type at the end of a text<br><sub>ops/s</sub> | Type at the start of a text<br><sub>ops/s</sub> | Type anywhere in a text<br><sub>ops/s</sub> |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **syncom**<br><sub>core + text + sync, node:fs · v0.0.1</sub> | 2,930 | 3,450 | 866,000 | 3,380 | 7,050 | 7,420 | 4,870 | 1,120 | 1,900 |
+| **syncom**<br><sub>/all: signed, chained, node:fs · v0.0.1</sub> | 2,470 | 2,860 | 903,000 | 2,810 | 5,990 | 5,520 | 3,980 | 1,050 | 1,770 |
+| Yjs<br><sub>y-leveldb · v13.6.33</sub> | 18,900 | 20,900 | 3,780,000 | — | 141,000 | 53,400 | 22,500 | 23,800 | 14,600 |
+| Automerge<br><sub>automerge-repo, NodeFS storage · v3.5.0</sub> | 485 | 1,220 | 10,500,000 | 1,170 | 7,690 | 3,130 | 3,350 | 3,330 | 3,270 |
+| Loro<br><sub>updates appended to a file · v1.16.4</sub> | 19,000 | 42,300 | 277,000 | 42,200 | 63,400 | 103,000 | 46,600 | 45,600 | 41,200 |
+| TinyBase<br><sub>MergeableStore, file persister · v10.0.1</sub> | 165 | 297 | 1,400,000 | — | 15,400 | 10,900 | — | — | — |
+| PouchDB<br><sub>LevelDB (Node default) · v9.0.0</sub> | 25,700 | 8,070 | 41,500 | — | 69,300 | 17,100 | — | — | — |
+| Fireproof<br><sub>file:// store · v0.24.19</sub> | 296 | 307 | 703 | — | 19,600 | — | — | — | — |
+| GUN<br><sub>RAD on node:fs · v0.2020.1241</sub> | 3.67 | 3.74 | 755 | — | failed | — | — | — | — |
+| OrbitDB<br><sub>documents, LevelDB · v4.0.0</sub> | 906 | 17 | 80.6 | — | 945 | 196 | — | — | — |
 
-_Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library in a fresh process · 2026-10-25. Medians, rounded to three significant figures; — where the library has no such operation, no such storage, or no in-process sync, failed where it did not finish twice (the chart above says why)._
+_Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library in a fresh process · 2026-10-26. Medians, rounded to three significant figures; — where the library has no such operation, no such storage, or no in-process sync, failed where it did not finish twice (the chart above says why)._
 
 <!-- bench:compare:end -->
 
@@ -316,7 +322,7 @@ _Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 roun
 | TinyBase<br><sub>tinybase@10.0.1</sub> | MergeableStore + IndexedDB persister + custom synchronizer | 56.4 KB | 23.8 KB |  |
 | Yjs<br><sub>yjs@13.6.33, y-indexeddb@9.0.12, y-protocols@1.0.7</sub> | yjs + y-indexeddb + y-protocols/sync | 80.2 KB | 24.5 KB |  |
 | PouchDB<br><sub>pouchdb-browser@9.0.0</sub> | pouchdb-browser | 117.8 KB | 40.4 KB | pouchdb-browser carries its HTTP adapter (the CouchDB client) with it |
-| **syncom**<br><sub>@alexify/syncom@0.0.1</sub> | open() over OPFS + the wrpc link adapter | 195.0 KB | 66.6 KB | storage, schema, queries, the op log and the sync protocol are one entry |
+| **syncom**<br><sub>@alexify/syncom@0.0.1</sub> | the core over OPFS + the sync plugin + the wrpc link adapter | 156.8 KB | 53.6 KB | records, counters and sets, the op log and the sync protocol; texts and schemas are plugins of their own |
 | RxDB<br><sub>rxdb@17.6.0, dexie@4.4.6, rxjs@7.8.2</sub> | rxdb + Dexie storage + replication | 282.3 KB | 90.1 KB |  |
 | Fireproof<br><sub>@fireproof/core@0.24.19</sub> | @fireproof/core | 784.2 KB | 204.0 KB |  |
 | OrbitDB<br><sub>@orbitdb/core@4.0.0, helia@6.1.4, libp2p@3.5.1, @libp2p/gossipsub@15.0.23, blockstore-idb@4.0.1</sub> | @orbitdb/core + helia + libp2p, IndexedDB blockstore | 1185.6 KB | 353.7 KB | createHelia brings Helia's default libp2p configuration with it |

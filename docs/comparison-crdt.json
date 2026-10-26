@@ -686,9 +686,9 @@
       "cells": {
         "version": {
           "mark": "",
-          "text": "`@alexify/syncom` 0.0.1 at `7be9388`; never published to npm",
-          "note": "Branch `features/enhance-crdt-engine`. 0.0.1 is a development placeholder, so there is no npm `latest` to differ from.",
-          "source": "package.json:2-3; CHANGELOG.md:8-13"
+          "text": "`@alexify/syncom` 0.0.1 at `de85f88`; never published to npm",
+          "source": "package.json:2-3; CHANGELOG.md:8-13",
+          "note": "Branch `features/enhance-crdt-engine-part2`. 0.0.1 is a development placeholder, so there is no npm `latest` to differ from."
         },
         "status": {
           "mark": "",
@@ -698,7 +698,7 @@
         "license": {
           "mark": "",
           "text": "MIT, every subpath included; wrpc, the transport, MIT too",
-          "note": "Sync, the storage backends, undo and branches ship inside the one package; there are no editor bindings to license.",
+          "note": "Every block is a subpath of the one package, MIT like the rest: sync, the storage backends, undo, branches, presence and the ProseMirror and CodeMirror bindings.",
           "source": "LICENSE:1-3; package.json:123; node_modules/@alexify/wrpc/package.json (license)"
         },
         "maintainer": {
@@ -734,10 +734,9 @@
           "source": "package.json:6-12; package.json:151-152; .github/workflows/ci.yml:34; docs/guide/browser.md:84; src/signing/ed25519.browser.js"
         },
         "types": {
-          "mark": "⚠️",
-          "text": "hand-written `.d.ts`, `tsd`-tested; records typed `unknown`",
-          "note": "A schema types the collection names (`storage.Post`), not the shape of a record: `get()` resolves to `unknown`.",
-          "source": "index.d.ts:1158-1162; index.d.ts:1539; tests/index.test-d.ts"
+          "mark": "✅",
+          "text": "hand-written, `tsd`-tested; records typed from the entity's Standard Schema or `Schema<Shapes>`",
+          "source": "index.d.ts (Collections, SchemaOutput, SyncomCollection<R, I>); docs/guide/typescript.md"
         },
         "apiStyle": {
           "mark": "",
@@ -762,10 +761,9 @@
           "source": "index.d.ts:285; src/ops.js:45-53; src/ops.js:427"
         },
         "nesting": {
-          "mark": "❌",
-          "text": "no nested containers: every kind is a record's top-level field",
-          "note": "A nested object or array is one register, and a list holds plain JSON values. Structures compose by id: a tree's nodes and a document's blocks are record ids.",
-          "source": "docs/guide/sync.md:614-618; docs/guide/lists.md:151-153; docs/guide/lists.md:176-179"
+          "mark": "✅",
+          "text": "fields by path (`profile/city`), each of any kind; a list element or a tree node holds fields under its id",
+          "source": "src/paths.js:29 (isPath), :17 (MAX_PATHS 4096); src/compose.js:81; docs/guide/storage.md#paths; docs/guide/lists.md#children-of-elements-and-nodes"
         },
         "roots": {
           "mark": "",
@@ -799,9 +797,8 @@
         },
         "replicaId": {
           "mark": "",
-          "text": "`nodeId`: the Ed25519 public key, 43 base64url characters, minted at first open",
-          "note": "Not an option: the pair lives in `keys/`, and a `node.json` naming another key is refused (`IDENTITY_MISMATCH`).",
-          "source": "src/storage.js:567-597; src/shape.js:45; docs/guide/sync.md:239-243"
+          "text": "`nodeId`: with `/signing`, the Ed25519 public key (43 base64url characters); without it, what `getId` mints",
+          "source": "src/signing/signing.js; src/storage.js (#loadIdentity); docs/guide/sync.md#signatures"
         },
         "idReuse": {
           "mark": "⚠️",
@@ -840,9 +837,9 @@
           "source": "index.d.ts:81-82; index.d.ts:887; src/history.js:47-60; docs/guide/versions.md:28-44"
         },
         "versionCmp": {
-          "mark": "❌",
-          "text": "no API: a vector is a plain object, compared key by key",
-          "source": "src/index.js:31-62; src/vector.js:52-58"
+          "mark": "✅",
+          "text": "`compareVectors(a, b)`: -1, 0, 1, or undefined when concurrent",
+          "source": "src/vector.js:47 (compareVectors); docs/reference/api.md"
         },
         "map": {
           "mark": "✅",
@@ -860,10 +857,9 @@
           "source": "src/ops.js:458-480; docs/guide/versions.md:9-26"
         },
         "deleteKey": {
-          "mark": "⚠️",
-          "text": "no per-field delete: `set()` rewrites the record without the field",
-          "note": "`set()` is a reset: a concurrent `update()` stamped after it keeps its fields, one stamped before loses them. `update({ k: undefined })` makes no op (probe). `delete(id)` tombstones the record; a newer write revives it with only the newer fields.",
-          "source": "docs/guide/versions.md:199-201; docs/guide/sync.md:147-153; src/ops.js:713-731"
+          "mark": "✅",
+          "text": "`unset(id, fields)`: an `unset` op, a tombstone an older concurrent `set` loses to",
+          "source": "src/storage.js:1489 (unset); src/ops.js (unset); docs/guide/storage.md"
         },
         "clear": {
           "mark": "✅",
@@ -941,9 +937,9 @@
           "source": "docs/guide/lists.md:109-111; src/sequence.js:40-50"
         },
         "listNested": {
-          "mark": "❌",
-          "text": "elements are JSON values, each atomic; no containers inside",
-          "source": "src/args.js:26-38; docs/guide/lists.md:22-24"
+          "mark": "✅",
+          "text": "an element holds fields of any kind under its id: `items/<element>/title`, `items/<element>/body` a text",
+          "source": "src/text/text.js:219 (members); src/ops.js:487 (nests); docs/guide/lists.md#children-of-elements-and-nodes"
         },
         "rle": {
           "mark": "✅",
@@ -958,8 +954,8 @@
         },
         "textAlgo": {
           "mark": "",
-          "text": "Fugue, the same engine as lists (`src/sequence.js`)",
-          "source": "src/sequence.js:1-22; docs/guide/lists.md:7-11"
+          "text": "Fugue, the same engine as lists (`src/text/sequence.js`)",
+          "source": "src/text/sequence.js"
         },
         "textUnits": {
           "mark": "",
@@ -967,10 +963,9 @@
           "source": "docs/guide/lists.md:265-267; src/myers.js:3-8"
         },
         "surrogates": {
-          "mark": "❌",
-          "text": "not checked: a split pair leaves lone surrogates",
-          "note": "A probe inserting at index 2 of `a😀b` read `a\\ud83dZ\\ude00b`; the docs leave it to the caller.",
-          "source": "docs/guide/lists.md:265-267; src/args.js:40-60"
+          "mark": "✅",
+          "text": "refused: an index between the halves of a pair is `SURROGATE`; `updateText` diffs by code points",
+          "source": "src/text/text.js:259 (wholeCharacters); src/text/myers.js; docs/guide/lists.md#binding-an-editor"
         },
         "splice": {
           "mark": "✅",
@@ -984,21 +979,19 @@
           "source": "src/fields.js:68-93; src/myers.js:1-14; src/myers.js:106"
         },
         "delta": {
-          "mark": "❌",
-          "text": "no deltas; `spans()` reads runs of `{ text, marks }`",
-          "source": "src/sequence.js:1002-1050; index.d.ts:186-189"
+          "mark": "✅",
+          "text": "`toDelta(changes)` and `applyDelta(id, key, delta)`: Quill's form, embeds and marks included",
+          "source": "src/text/text.js:1104 (toDelta), :1150 (applyDelta); docs/guide/lists.md#binding-an-editor"
         },
         "embeds": {
-          "mark": "❌",
-          "text": "a text holds characters only",
-          "source": "src/args.js:40-60; src/ops.js:570-576"
+          "mark": "✅",
+          "text": "`insertEmbed(id, key, index, { type, attrs })`: a slot (U+FFFC) whose marker is a register, marked like a character",
+          "source": "src/text/text.js:832 (insertEmbed), :394 (markerOf); docs/guide/lists.md#embeds-and-blocks"
         },
         "longText": {
-          "mark": "⚠️",
-          "text": "the whole record is read and written per op; slow on long texts",
-          "note": "A text lives three times: the field, its runs in the record's metadata, the log. In the benchmarks below it types about 1 800 characters a second at the end, 390 at the start and 540 at random places of a text past ten thousand characters; the docs advise a long document as a list of block records.",
-          "source": "docs/guide/lists.md#costs-and-limits; bench/results/compare.json (append-, prepend-, random-memory)",
-          "detail": "Scratch probe, memory fsi, M3 Max, through storage.push/splice: a 100k-character text took ~720 appends/s and ~200 random inserts/s; a 1M-character text ~78 and ~19, its record file ~2 MB. The bench text grows from 3 characters over up to 5 000 ops per sample."
+          "mark": "",
+          "text": "a persistent rope, O(log n) per keystroke; the B4 trace (260k edits) in about 20 s, 8 MB of JS heap after it",
+          "source": "src/text/btree.js; src/text/sequence.js; bench/results/compare.json (trace-memory); docs/guide/benchmarks.md"
         },
         "marks": {
           "mark": "✅",
@@ -1029,9 +1022,9 @@
           "source": "src/sequence.js:58-60; docs/guide/lists.md:144-146"
         },
         "blocks": {
-          "mark": "❌",
-          "text": "no block type; the docs model blocks as records in a list",
-          "source": "docs/guide/lists.md:151-153"
+          "mark": "✅",
+          "text": "block markers in the text (`splitBlock`, `joinBlock`, `updateBlock`, `blocks()`), `{ type, parents, attrs }`",
+          "source": "src/text/text.js:844 (splitBlock), :801 (blocks); docs/guide/lists.md#embeds-and-blocks"
         },
         "xml": {
           "mark": "❌",
@@ -1039,9 +1032,9 @@
           "source": "index.d.ts:285"
         },
         "editors": {
-          "mark": "❌",
-          "text": "none; `updateText()` plus `change` events are the binding point",
-          "source": "docs/guide/lists.md:246-267"
+          "mark": "✅",
+          "text": "`/prosemirror` and `/codemirror` (the editor's modules injected), `/editor` for any editor through a three-function adapter",
+          "source": "src/prosemirror/prosemirror.js:221; src/codemirror/codemirror.js:81; src/editor/editor.js:469; docs/guide/editors.md"
         },
         "cursor": {
           "mark": "✅",
@@ -1092,15 +1085,14 @@
           "source": "src/tree.js:15-16; docs/guide/lists.md:207-209"
         },
         "treeData": {
-          "mark": "⚠️",
-          "text": "none on the node: a node is a name, usually a record id",
-          "source": "docs/guide/lists.md:176-179; index.d.ts:158-168"
+          "mark": "✅",
+          "text": "a node holds fields under its id (`outline/<node>/title`); the tree reads as `{ id, data, children }`",
+          "source": "src/tree/tree.js:110 (members); src/compose.js:81; docs/guide/lists.md#children-of-elements-and-nodes"
         },
         "txn": {
-          "mark": "⚠️",
-          "text": "one call is one op; `applyPatches` runs a record's ops in one turn",
-          "note": "`update()` writes many fields of a record as one op. `applyPatches()` rehearses its ops and lands all or none on a refusal, but each stays its own op and event for observers and peers; nothing spans records.",
-          "source": "src/versions.js:206-233; docs/guide/versions.md:203-211"
+          "mark": "✅",
+          "text": "`transact(fn)`: several writes, several records, one log append, all or none",
+          "source": "src/commit.js:601 (transact); src/storage.js:1655; docs/guide/storage.md#transactions"
         },
         "autoCommit": {
           "mark": "",
@@ -1109,20 +1101,20 @@
           "source": "src/commit.js:1-10; index.d.ts:1100-1106; docs/guide/sync.md:602-610"
         },
         "commitMeta": {
-          "mark": "⚠️",
-          "text": "`actor` (signed, replicated), `ts`, schema `v`; no message or custom fields",
-          "source": "index.d.ts:210-247; docs/guide/sync.md:54-66"
+          "mark": "✅",
+          "text": "`message` (≤ 1,024 characters, signed, replicated), `actor`, `ts`, the schema `v`; no free-form fields",
+          "source": "src/shape.js:85 (MAX_MESSAGE); src/signing/sign.js:47 (signedMessage); docs/reference/wire.md"
         },
         "origin": {
-          "mark": "⚠️",
-          "text": "a local `source` on `commit` events; `actor` replicates",
-          "note": "`source` is taken by `applyPatches()`, `restore()` and `compact()` and set by `record.save()`; the undo manager tells its own ops by it. `via` on `change` names the peer an op came from.",
-          "source": "index.d.ts:932-941; index.d.ts:1565-1575; src/undo.js:66-79"
+          "mark": "✅",
+          "text": "a `source` per write and per transaction, on the `commit` and `transaction` events (local); `actor` replicates",
+          "source": "src/commit.js:601 (transact { source }); docs/guide/versions.md#changes",
+          "detail": "The plan named it `origin`; it stays `source`, because a syncom op's `origin` is the node id."
         },
         "multiDoc": {
-          "mark": "❌",
-          "text": "no: an op touches one record",
-          "source": "src/commit.js:1-10; index.d.ts:210-247"
+          "mark": "✅",
+          "text": "`transact(fn)` writes several records as one append, all or none",
+          "source": "src/commit.js:601 (transact); docs/guide/storage.md#transactions"
         },
         "preCommit": {
           "mark": "✅",
@@ -1137,15 +1129,14 @@
           "source": "index.d.ts:1082-1088; docs/guide/schema.md:136-142; src/apply.js:297-318; docs/guide/sync.md:619-625"
         },
         "events": {
-          "mark": "⚠️",
-          "text": "storage `change` per op, `Record` `update`, `Cursor.watch()`; no per-field observers",
-          "source": "index.d.ts:1437-1442; index.d.ts:1483-1486; index.d.ts:1792"
+          "mark": "✅",
+          "text": "every op reports `changes` in the write API's terms and the reading's indices; one `transaction` event per turn",
+          "source": "src/ops.js (changes, changesOf); src/commit.js (announce, transacted); docs/guide/versions.md#changes"
         },
         "eventBody": {
           "mark": "",
-          "text": "the op itself; `commit` adds `before` / `after` copies and the kinds",
-          "note": "A `Record`'s `update` carries `(data, delta)`; no encoded bytes.",
-          "source": "index.d.ts:1437-1442; index.d.ts:932-941; src/commit.js:445-461"
+          "text": "the op and its `changes`; `commit` adds `before` / `after` copies and the kinds; `transaction` the turn's changes by record",
+          "source": "src/commit.js (announce, transacted); docs/guide/hooks.md; docs/guide/versions.md#changes"
         },
         "localRemote": {
           "mark": "✅",
@@ -1164,9 +1155,9 @@
           "source": "src/versions.js:206-233; docs/guide/versions.md:203-211"
         },
         "pathSub": {
-          "mark": "⚠️",
-          "text": "per record (`record(id).on('update')`) or per query (`watch`); no field paths",
-          "source": "index.d.ts:1483-1486; index.d.ts:1792; docs/guide/storage.md:280-312"
+          "mark": "✅",
+          "text": "`observe(id, path, listener)`: the changes of a field, of what hangs under it and of a prefix of it",
+          "source": "src/storage.js:1674 (observe); docs/guide/hooks.md; docs/guide/lists.md#binding-an-editor"
         },
         "eventTiming": {
           "mark": "",
@@ -1176,9 +1167,8 @@
         },
         "historyKept": {
           "mark": "⚠️",
-          "text": "the op log, bounded by retention (10 000 ops by default)",
-          "note": "Retention compacts sealed segments (`retention.ops`, `retention.days`); a dialing node keeps its own ops until its hosts hold them. The record keeps deleted text only as lengths.",
-          "source": "src/log.js:35; docs/guide/sync.md:212-228; src/sequence.js:24-27"
+          "text": "the op log, bounded by retention (10,000 ops by default; `retention: 'all'` keeps everything)",
+          "source": "src/log.js:122 (retention 'all'); docs/guide/sync.md"
         },
         "historyList": {
           "mark": "✅",
@@ -1216,9 +1206,9 @@
           "source": "src/tags.js:1-22; src/versions.js:275-330; docs/guide/versions.md:93-175"
         },
         "blame": {
-          "mark": "⚠️",
-          "text": "per op: `history()` names `origin`, `actor` and fields; no per-character API",
-          "source": "index.d.ts:890-903; src/sequence.js:102-108"
+          "mark": "✅",
+          "text": "`lastEditorOf(id, field)`, `editorsOf(id)`, and per element `editorOf(id, key, index)` → `{ origin, ts }`",
+          "source": "src/blame.js:52, :65; src/text/text.js:607 (editorOf); docs/guide/versions.md#who-wrote-what"
         },
         "trim": {
           "mark": "✅",
@@ -1239,9 +1229,9 @@
           "source": "src/branch.js:88-137; branch.d.ts:1-40"
         },
         "forkAt": {
-          "mark": "⚠️",
-          "text": "at a tag only: `branch(parent, { from: { tag } })`",
-          "source": "branch.d.ts:7-12; src/branch.js:88-137"
+          "mark": "✅",
+          "text": "`branch(parent, { from: { at } })`: an event id, a stamp or a vector, exact while the log retains it",
+          "source": "src/branch/branch.js:89 (branch); src/versions/api.js:331 (atVersion); docs/guide/versions.md"
         },
         "mergeBack": {
           "mark": "✅",
@@ -1251,8 +1241,8 @@
         },
         "detached": {
           "mark": "⚠️",
-          "text": "views of the past are read-only; edit through `restore()` or a branch at a tag",
-          "source": "index.d.ts:968-979; src/versions.js:240-243"
+          "text": "views of the past are read-only; edit through `restore()` or a branch at any version",
+          "source": "src/versions/api.js:331 (atVersion); src/branch/branch.js:89"
         },
         "suggestions": {
           "mark": "❌",
@@ -1271,18 +1261,18 @@
         },
         "undoGroup": {
           "mark": "✅",
-          "text": "`mergeInterval` (500 ms), `mark()` closes a step, `limit` 100",
-          "source": "src/undo.js:130-140; src/undo.js:296-305"
+          "text": "`mergeInterval` (500 ms), a transaction is one step, `group(fn)`, `mark()` closes a step, `limit` 100",
+          "source": "src/undo/undo.js:391 (group); docs/guide/versions.md"
         },
         "undoScope": {
-          "mark": "⚠️",
-          "text": "`scope` (one sync scope) and `exclude(op)`; no list of tracked fields",
-          "source": "src/undo.js:128-131; src/undo.js:296-305"
+          "mark": "✅",
+          "text": "`trackedSources`, `records` and `paths`: a stack over what they name, the inverse kept to those fields",
+          "source": "src/undo/undo.js:468-470 (createUndo); docs/guide/versions.md"
         },
         "undoCursor": {
-          "mark": "❌",
-          "text": "no selection metadata on a step",
-          "source": "undo.d.ts:1-60"
+          "mark": "✅",
+          "text": "a step's `meta` keeps the application's cursor tokens and travels to its redo; `position()` restores the selection",
+          "source": "src/undo/undo.d.ts:30-33 (meta); src/text/text.js:923 (position); tests/suites/undo.js (UNDO-2)"
         },
         "undoConflict": {
           "mark": "",
@@ -1292,14 +1282,13 @@
         },
         "format": {
           "mark": "",
-          "text": "JSON: keyed `{ seq, op }` in the log, 17-slot arrays on the wire",
-          "note": "Snapshots travel as JSON pages, streamed as NDJSON on binary-capable links. No binary encoding.",
-          "source": "src/ops.js:976-1058; docs/guide/sync.md:368-377"
+          "text": "JSON: `{ entries, hash }` log files of keyed `{ seq, op }`; 18-slot arrays on the wire",
+          "source": "src/log.js:54 (fileOf); src/ops.js (packOps); docs/reference/wire.md"
         },
         "spec": {
-          "mark": "⚠️",
-          "text": "op shape and slots in the guides and types; no standalone spec",
-          "source": "index.d.ts:210-247; src/ops.js:976-1013; src/protocol.js:1-13"
+          "mark": "✅",
+          "text": "`docs/reference/wire.md`: the 18 slots, codes, payloads, signed header, files, procedures, bounds",
+          "source": "docs/reference/wire.md"
         },
         "snapshot": {
           "mark": "✅",
@@ -1333,9 +1322,8 @@
         },
         "compat": {
           "mark": "⚠️",
-          "text": "no promise yet: unpublished, and `PROTOCOL` 1 is the first release's wire",
-          "note": "The rules for after publication: slots only appended, a new op type bumps `PROTOCOL`; a host refuses a hello of another version (400).",
-          "source": "src/protocol.js:6-13; src/hosting.js:167-168; src/ops.js:976-981"
+          "text": "a written policy (slots appended, a new type a `PROTOCOL` bump); unpublished, so no version kept yet",
+          "source": "docs/reference/wire.md:397 (Compatibility); src/protocol.js"
         },
         "syncProto": {
           "mark": "✅",
@@ -1373,13 +1361,13 @@
         },
         "storage": {
           "mark": "✅",
-          "text": "built in: `node:fs`, OPFS, IndexedDB (`/idb`), memory, or an injected `fsi`",
-          "source": "src/backend.js; src/fsi.js; src/fsi.browser.js; src/idb.js:1-10"
+          "text": "built in: `node:fs`, OPFS, IndexedDB (`/idb`), `/memory`, `/layered`, encrypted at rest (`/encryption`), or an injected `fsi`",
+          "source": "src/backend.js; src/memory/memory.js; src/layered/layered.js; src/encryption/encryption.js; docs/guide/backends.md"
         },
         "awareness": {
-          "mark": "❌",
-          "text": "none",
-          "source": "index.d.ts:1296-1335"
+          "mark": "✅",
+          "text": "`/presence`: a state per node, signed, renewed and expired, relayed by a host's rooms, never logged",
+          "source": "src/presence/presence.js:308 (createPresence); src/sync/hosting.js (presence); docs/guide/presence.md"
         },
         "partial": {
           "mark": "✅",
@@ -1389,21 +1377,18 @@
         },
         "hashes": {
           "mark": "⚠️",
-          "text": "a per-node hash-linked chain of applied writes, checked on cold reads",
-          "note": "Optional (`chain: false`), and each node's chain is its own audit, not shared. Ops are named by `(origin, seq)`, not by hashes.",
-          "source": "docs/guide/chain.md:1-6; docs/guide/chain.md:58-62; index.d.ts:1116-1122; docs/guide/sync.md:636-637"
+          "text": "with `/chain`, a per-node hash-linked chain of applied writes, checked on cold reads",
+          "source": "src/chain/chain.js; docs/guide/chain.md"
         },
         "signatures": {
           "mark": "✅",
-          "text": "Ed25519 per op; the node id is the key; verified on receipt",
-          "note": "`'verify'` (the default) still takes unsigned ops; only `'require'` refuses them. The signature covers the header and a salted payload digest, so a scrubbed op still verifies.",
-          "source": "src/signing/sign.js:1-13; src/apply.js:63-112; docs/guide/sync.md:237-304"
+          "text": "with `/signing` (in `/all`): Ed25519 per op, the node id is the key, verified on receipt",
+          "source": "src/signing/signing.js; src/signing/sign.js; docs/guide/sync.md#signatures"
         },
         "checksums": {
-          "mark": "⚠️",
-          "text": "a signed SHA-256 digest per op; record files checked against the chain",
-          "note": "Log segments carry no checksum: a torn one is skipped at open and counted in `droppedTs`.",
-          "source": "src/signing/sign.js:5-9; src/entries.js:125-140; src/log.js:150-182"
+          "mark": "✅",
+          "text": "every log file carries an xxHash32 of its entries; a signed SHA-256 digest per op with `/signing`",
+          "source": "src/log.js:54 (fileOf); src/hash.js:85 (checksum); src/signing/sign.js"
         },
         "malformed": {
           "mark": "✅",
@@ -1440,23 +1425,23 @@
         },
         "errors": {
           "mark": "✅",
-          "text": "`SyncomError` with a `code` (40 codes); `TypeError` for a wrong argument",
-          "source": "index.d.ts:305-365; src/errors.js"
+          "text": "`SyncomError` with a `code` (44 codes); `TypeError` for a wrong argument",
+          "source": "src/errors.js; index.d.ts (SyncomErrorCode); docs/reference/api.md"
         },
         "devtools": {
           "mark": "⚠️",
-          "text": "no inspector; `stats()`, an injected logger, OpenTelemetry spans and metrics",
-          "source": "index.d.ts:1010-1037; src/telemetry.js; docs/guide/telemetry.md"
+          "text": "`/inspect`: a record's anatomy raw; `stats()`, an injected logger, OpenTelemetry; no visual inspector",
+          "source": "src/inspect/inspect.js:75 (inspect); docs/guide/devtools.md"
         },
         "anonymize": {
-          "mark": "❌",
-          "text": "none",
-          "source": "src/ (no such API)"
+          "mark": "✅",
+          "text": "`anonymize(value, { salt, keys })` from `/inspect`: every string hashed, the shape kept",
+          "source": "src/inspect/inspect.js:148 (anonymize); docs/guide/devtools.md"
         },
         "frameworks": {
-          "mark": "❌",
-          "text": "none; `Cursor.watch()` and `Record` events to wire one",
-          "source": "index.d.ts:1792; index.d.ts:1483-1486"
+          "mark": "✅",
+          "text": "`/store`: a query, a record or a presence as one store — Svelte's contract and React's `useSyncExternalStore`; Vue and Solid wrap it",
+          "source": "src/store/store.js:143 (toStore); docs/guide/frameworks.md"
         },
         "docs": {
           "mark": "✅",
@@ -1465,9 +1450,8 @@
         },
         "tests": {
           "mark": "",
-          "text": "958 `node:test` tests, 9 `tsd` files; CI on Node 22, 24",
-          "note": "Coverage is enforced at 95/95/90/95 (lines, statements, branches, functions); a run here passed 957 with 1 skipped.",
-          "source": "package.json (test, test:coverage); .github/workflows/ci.yml; tests/"
+          "text": "1,228 `node:test` tests, 30 `tsd` files; CI on Node 22, 24",
+          "source": "tests/; .github/workflows"
         }
       }
     },
