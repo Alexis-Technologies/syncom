@@ -1257,14 +1257,17 @@ class Storage extends Emitter {
   // in `defer` ms, or at once ahead of tag() and close(). The log is durable
   // already; a crash before the flush replays the batch at the next open,
   // as it does after a file write that failed.
-  async #deferWrite(id, entry, position) {
+  // `positions`: the op's, or a transaction's ops of the record, in order —
+  // the entry is the newest's.
+  async #deferWrite(id, entry, positions) {
     await this.#entries.hold(id, entry);
     const slot = this.#deferred.get(id);
-    if (slot !== undefined) {
-      slot.entry = entry;
-      slot.positions.push(position);
-    } else this.#deferred.set(id, { entry, positions: [position] });
-    this.#deferredPositions++;
+    if (slot === undefined) this.#deferred.set(id, { entry, positions: [] });
+    else slot.entry = entry;
+    const held = this.#deferred.get(id).positions;
+    if (typeof positions === 'number') held.push(positions);
+    else for (let i = 0; i < positions.length; i++) held.push(positions[i]);
+    this.#deferredPositions += typeof positions === 'number' ? 1 : positions.length;
     if (this.#flushing) return;
     // The window is time, and a count too: a writer that never yields to the
     // timers (an await loop over memory()) would hold every record it wrote

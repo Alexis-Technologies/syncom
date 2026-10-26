@@ -194,6 +194,12 @@ const id = await storage.transact(
   and `history()` lists it per version; **`source`** rides on the `commit`
   events, for a listener to tell its own (an undo manager's). A transaction
   with no op makes none and resolves to what `fn` returned.
+- **Each record once.** A live `Record` the transaction changed emits one
+  `update`, with the delta of all its ops; `commit` and `change` still fire
+  per op. The transaction holds each record it touches as its last op left
+  it — not a copy per op — unless something listens for `commit`, whose
+  events carry every op's `before` and `after` (an undo manager over a
+  transaction of thousands of ops on one large record holds them all).
 - `applyPatches()`, `restore()` and `compact()` are transactions: a restore
   lands whole or not at all.
 

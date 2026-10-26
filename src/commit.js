@@ -402,16 +402,20 @@ const land = async (core, op, entry, { ticket, position }) => {
 // `change` listeners (the relay among them) hear about the op. `via` is null
 // for a local write; a merge made from a peer's snapshot names that peer, so
 // the relay does not hand its own state straight back to it.
-const announce = async (core, op, entry, delta, ctx, source, via, committed = null, changes = []) => {
-  const alive = isAlive(entry);
+// `refresh` false: a transaction's op that a later op of its record
+// follows — the live Record is refreshed once, by the last (`transact`).
+// `entry` null: an op that kept nothing of the record (no `commit` listener
+// when it was made) — no commit event for it.
+const announce = async (core, op, entry, delta, ctx, source, via, committed = null, changes = [], refresh = true) => {
   try {
     await core.hook('afterWrite', ctx, op);
   } finally {
-    core.refresh(op.id, alive ? entry.data : null, delta, source, entry);
+    if (refresh) core.refresh(op.id, isAlive(entry) ? entry.data : null, delta, source, entry);
     // What an undo manager keeps of a local commit: the record before and
     // after, as copies, and every field's kind — built only for a listener.
-    if (committed !== null && core.storage.listenerCount('commit') > 0) {
-      notify(core.storage, core.logger, 'commit', commitEvent(core, op, entry, alive, committed, source, changes));
+    if (committed !== null && entry !== null && core.storage.listenerCount('commit') > 0) {
+      const event = commitEvent(core, op, entry, isAlive(entry), committed, source, changes);
+      notify(core.storage, core.logger, 'commit', event);
     }
     notify(core.storage, core.logger, 'change', op, via, { changes });
   }
@@ -708,6 +712,23 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
   const prepared = [];
   const touched = new Map();
   const reserved = new Map();
+  // Per record: the index of its newest op here, and its ops' deltas laid
+  // one over the other — what the live Record is refreshed by, once.
+  const lastOf = new Map();
+  const deltas = new Map();
+  // An op a later op of its record follows keeps its op and its changes
+  // until the landing; the record it left only for a `commit` listener, its
+  // hook context only for an `afterWrite` hook. Kept whole, N ops of one
+  // large record held N copies of it — 2 000 moves of a tree, 926 MB.
+  const release = (made) => {
+    made.delta = null;
+    if (!core.hooks.afterWrite) made.ctx = null;
+    if (core.storage.listenerCount('commit') === 0) {
+      made.entry = null;
+      made.before = null;
+      made.previous = null;
+    }
+  };
   const tx = {
     ...core,
     current: (id) => (touched.has(id) ? touched.get(id) : core.current(id)),
@@ -726,6 +747,10 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
     const made = await tracedPrepare(tx, type, id, payload, given);
     const { op } = made;
     if (op === null || op === undefined || op === MISMATCH) return op;
+    const was = lastOf.get(id);
+    if (was !== undefined) release(prepared[was]);
+    lastOf.set(id, prepared.length);
+    deltas.set(id, Object.assign(deltas.get(id) ?? {}, made.delta));
     prepared.push(made);
     touched.set(id, made.entry);
     reserved.set(opKey(op), op.seq);
@@ -755,27 +780,34 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
   else if (core.sign !== null) await core.sign(ops[0], false);
   const ticket = core.log.append(ops, { ready, fps });
   const positions = [];
-  for (let i = 0; i < count; i++) {
-    positions.push(ticket.entries[i].seq);
-    core.inflight(ops[i].id, prepared[i].entry, positions[i]);
-  }
+  for (let i = 0; i < count; i++) positions.push(ticket.entries[i].seq);
+  // A record in flight is its newest entry, at its newest position.
+  for (const [id, last] of lastOf) core.inflight(id, touched.get(id), positions[last]);
   const done = core.landing(async () => {
     await ticket;
     const from = positions[0];
     const to = positions[positions.length - 1];
     if (core.defer > 0) {
-      for (let i = 0; i < prepared.length; i++) await core.deferred(ops[i].id, prepared[i].entry, positions[i]);
+      const held = new Map();
+      for (let i = 0; i < count; i++) {
+        const list = held.get(ops[i].id);
+        if (list === undefined) held.set(ops[i].id, [positions[i]]);
+        else list.push(positions[i]);
+      }
+      for (const [id, list] of held) await core.deferred(id, touched.get(id), list);
     } else if (await core.land(touched, from, to)) {
       // One append: the positions run from `from` to `to` without a gap.
       core.log.applied(from, to);
     }
-    for (let i = 0; i < prepared.length; i++) core.settled(ops[i].id, positions[i]);
+    for (const [id, last] of lastOf) core.settled(id, positions[last]);
     core.flush();
     const changes = [];
-    for (let i = 0; i < prepared.length; i++) {
-      const { op, entry, delta, ctx, before, previous } = prepared[i];
+    for (let i = 0; i < count; i++) {
+      const { op, entry, ctx, before, previous } = prepared[i];
+      const last = lastOf.get(op.id) === i;
       const committed = { seq: positions[i], before, previous, txn: positions[0] };
-      await announce(core, op, entry, delta, ctx, source, null, committed, prepared[i].changes);
+      const delta = last ? deltas.get(op.id) : null;
+      await announce(core, op, entry, delta, ctx, source, null, committed, prepared[i].changes, last);
       tagged(op, prepared[i].changes, changes);
     }
     transacted(core, { local: true, via: null, source, message: msg ?? null, ops, changes });

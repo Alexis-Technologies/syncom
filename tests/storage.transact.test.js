@@ -279,4 +279,55 @@ test('transactions', async (t) => {
       );
     },
   );
+
+  await t.test(
+    'a transaction refreshes a live Record once per record, with the delta of all its ops; each op still has its commit event',
+    async (t2) => {
+      for (const defer of [0, 16]) {
+        const storage = await open(t2, { defer, path: `/refresh-${defer}` });
+        const id = await storage.insert({ a: 0, b: 0 });
+        const record = await storage.record(id);
+        const updates = [];
+        record.on('update', (data, delta) => updates.push([{ ...data }, Object.keys(delta).sort()]));
+        const commits = [];
+        storage.on('commit', (event) => commits.push([event.before?.a ?? null, event.after?.a ?? null]));
+        await storage.transact(async (tx) => {
+          await tx.update(id, { a: 1 });
+          await tx.update(id, { b: 2 });
+          await tx.update(id, { a: 3 });
+        });
+        assert.deepStrictEqual(updates, [[{ a: 3, b: 2 }, ['a', 'b']]], `defer ${defer}: one refresh`);
+        assert.deepStrictEqual(
+          commits,
+          [
+            [0, 1],
+            [1, 1],
+            [1, 3],
+          ],
+          'every op its own before and after',
+        );
+        assert.deepStrictEqual(await storage.get(id), { a: 3, b: 2 });
+      }
+    },
+  );
+
+  await t.test('a transaction of many ops on one large record holds the record once, not once per op', async (t2) => {
+    // gc through the flag set at run time: the heap is read after a collection.
+    require('node:v8').setFlagsFromString('--expose-gc');
+    const gc = require('node:vm').runInNewContext('gc');
+    const storage = await open(t2, { defer: 0, path: '/large' });
+    const id = await storage.insert({ title: 't' });
+    gc();
+    const before = process.memoryUsage().heapUsed;
+    let held = 0;
+    await storage.transact(async (tx) => {
+      // 600 tree moves: every version of the tree is a fresh reading of up to 600 nodes, and its fold.
+      for (let i = 0; i < 600; i++) await tx.treeMove(id, 'outline', `n${i}`, i === 0 ? null : `n${i >> 1}`);
+      gc();
+      held = process.memoryUsage().heapUsed - before;
+    });
+    // Held per op, every version: some 80 MB; held once: a few.
+    assert.ok(held < 20e6, `${(held / 1e6).toFixed(1)} MB held by the transaction`);
+    assert.strictEqual((await storage.get(id)).outline.length, 1);
+  });
 });

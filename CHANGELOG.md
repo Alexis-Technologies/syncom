@@ -982,6 +982,16 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **A transaction of many ops on one large record held a copy of the
+  record per op.** Every op kept the record it left, its delta and its hook
+  context until the transaction landed: 2 000 moves of one tree held
+  926 MB, 8 000 pushes onto one list 348 MB, and an 8 000-node outline built
+  in one transaction ran out of memory. An op a later op of its record
+  follows now keeps its op and its changes alone (the record it left only
+  while a `commit` listener exists, the hook context only with an
+  `afterWrite` hook) — 4.8 MB and 10 MB — and the record is in flight,
+  deferred and refreshed once, as its last op left it: a live `Record`
+  emits one `update` per transaction, with the delta of all its ops.
 - **A list that a move and a push touched could show an element twice.**
   A local push after a move extended the move's position run, so every
   pushed slot read as the moved element (duplicate names, wrong values). A

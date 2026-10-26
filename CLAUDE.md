@@ -622,7 +622,11 @@ docs/                     VitePress site
   `applyPatches`/`restore`/`compact` run) is the first path over a core
   whose `current` and `seqOf` see the ops made before — `prepare` per op,
   ONE `log.append` of them all, one `core.land` (a chain block, the files),
-  the announces after; a throw from `fn` leaves nothing appended. A plugin
+  the announces after; a throw from `fn` leaves nothing appended. An op its
+  record's later op follows keeps its op and changes alone (`release`): the entry only while a
+  `commit` listener exists, the hook ctx only with an `afterWrite` hook — N copies of a large
+  record were N² memory — and a record is in flight, deferred and refreshed ONCE, as its last op
+  left it (the live Record with the deltas laid over each other). A plugin
   method takes the transaction's core as its `core`, so it needs no
   transaction-aware code: it must only go through `core.commit`/`commitNow`
   and `core.current`, never `core.log` or `core.entries` for a write.

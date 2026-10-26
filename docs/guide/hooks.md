@@ -224,7 +224,8 @@ default) on the storage and on its sync manager; one more throws.
 | `close` | — | After `close()` sealed the log |
 
 A `Record` emits `update` `(data, delta)` on a staged assignment and when the
-record changes in storage (`null` data once deleted).
+record changes in storage (`null` data once deleted) — once per transaction
+that changed it, with the delta of all its ops.
 
 To follow one record rather than every op, `observe(id, path?, listener)`
 calls the listener after every turn that changed the record — with its
