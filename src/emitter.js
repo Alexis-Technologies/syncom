@@ -57,7 +57,7 @@ class Emitter {
     if (event && event.on.includes(listener)) throw new Error('Duplicate listeners detected');
     if ((event ? event.on.length : 0) + 1 > this.#maxListeners) {
       throw new Error(
-        `MaxListenersExceededWarning: Possible memory leak. ` + `Current maxListeners is ${this.#maxListeners}.`,
+        `MaxListenersExceededWarning: Possible memory leak. Current maxListeners is ${this.#maxListeners}.`,
       );
     }
     if (!event) {

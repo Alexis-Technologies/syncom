@@ -6,7 +6,7 @@
     "import"
   ],
   "categories": {
-    "correctness": "off"
+    "correctness": "error"
   },
   "env": {
     "builtin": true,
@@ -253,7 +253,9 @@
     "getter-return": "error",
     "no-setter-return": "error",
     "no-unused-private-class-members": "error",
-    "no-constant-binary-expression": "error"
+    "no-constant-binary-expression": "error",
+    "preserve-caught-error": "error",
+    "no-useless-concat": "error"
   },
   "overrides": [
     {

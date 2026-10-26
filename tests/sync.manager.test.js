@@ -235,6 +235,7 @@ test('SyncManager edges', async (t) => {
     await waitUntil(() => dialer.sync.peers()[0]?.subscribed);
     // Break the feed from the host side: the generator throws on its next pull.
     const original = unit.changes.handler;
+    // oxlint-disable-next-line require-yield -- a feed that fails before its first page
     unit.changes.handler = async function* () {
       throw new Error('feed broke');
     };

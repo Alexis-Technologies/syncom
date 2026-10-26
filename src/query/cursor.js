@@ -85,7 +85,7 @@ const regexOf = (expected, options) => {
   try {
     return new RegExp(source, flags);
   } catch (error) {
-    throw new TypeError(`select(): $regex is invalid — ${error.message}`);
+    throw new TypeError(`select(): $regex is invalid — ${error.message}`, { cause: error });
   }
 };
 
