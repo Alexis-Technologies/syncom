@@ -954,6 +954,24 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **One unreadable cursor in a room hid every cursor, and the rejection went
+  unhandled.** A peer's presence state with a cursor token the field could
+  not read made `presenceCursors` throw, and the ProseMirror and CodeMirror
+  adapters called it as `void refresh()`. The token is that peer's cursor
+  left out now; the adapters' cursor, selection and undo work report through
+  `onError` (or warn `editor.cursors` / `editor.undo`).
+- **An editor binding could part ways with its editor, or hang.** An editor
+  that threw on a peer's change left the binding's shadow ahead of the
+  editor, and later edits landed at the wrong indices; a first load the editor
+  refused left the binding buffering the field's events for good; `flush()`
+  after a stop never answered — and the adapters' undo waits for it. The
+  binding reloads the editor when it throws, a first load that fails stops
+  it (`ready` rejects), `flush()` answers at once once stopped, and `stopped`
+  and `onStop(reason)` say so.
+- **ProseMirror dropped what its schema could not hold without a word.** The
+  document left out a mark or a node the field held, and the next edit sent
+  that loss to every peer. `onUnfit(delta)` hears it now (a warn,
+  `editor.unfit`, without one).
 - **A log roll the disk refused hung every write for good.** Once a group of
   ops was on disk, the log rolled — sealing a segment, writing its index — and
   only then answered the group's writers; a roll that threw (the disk full as

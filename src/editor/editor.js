@@ -448,7 +448,15 @@ const presenceCursors = async (presence, storage, id, path, { key = 'cursor' } =
   for (const [node, state] of presence.states()) {
     const tokens = state?.[key];
     if (!tokens || tokens.id !== id || tokens.field !== path || typeof tokens.anchor !== 'string') continue;
-    const selection = await tokensToSelection(storage, tokens);
+    if (tokens.head !== undefined && typeof tokens.head !== 'string') continue;
+    // A peer's state is the peer's word: a token this field cannot read is
+    // that peer's cursor left out, never every cursor of the room.
+    let selection = null;
+    try {
+      selection = await tokensToSelection(storage, tokens);
+    } catch {
+      continue;
+    }
     if (selection !== null) out.push({ node, state, ...selection });
   }
   return out;
@@ -493,7 +501,7 @@ const createTextBinding = (storage, id, path, adapter, options = {}) => {
   ) {
     throw new TypeError('createTextBinding() takes an adapter: setContents, updateContents, onChange');
   }
-  const { source = Symbol('editor'), onError = null, onReset = null } = options;
+  const { source = Symbol('editor'), onError = null, onReset = null, onStop = null } = options;
   let shadow = '';
   let inflight = null;
   let pending = [];
@@ -565,7 +573,7 @@ const createTextBinding = (storage, id, path, adapter, options = {}) => {
     stale = false;
     failures++;
     fail(error);
-    if (failures >= MAX_FAILURES) return void halt();
+    if (failures >= MAX_FAILURES) return void halt(error);
     reloading = true;
     const mine = ++flight;
     setTimeout(
@@ -617,7 +625,10 @@ const createTextBinding = (storage, id, path, adapter, options = {}) => {
     try {
       await load();
     } catch (error) {
-      fail(error);
+      // The editor would not take the field (setContents threw), or the
+      // field would not read: a failure like a send's — another try after a
+      // pause, and a stop after MAX_FAILURES in a row.
+      return void broken(error);
     }
     if (onReset !== null) onReset();
     settle();
@@ -653,7 +664,16 @@ const createTextBinding = (storage, id, path, adapter, options = {}) => {
       pending = transform(remote, pending, true);
       remote = next;
     }
-    if (remote.length > 0) adapter.updateContents(remote);
+    if (remote.length > 0) {
+      try {
+        adapter.updateContents(remote);
+      } catch (error) {
+        // The editor did not take the peer's change: the shadow did, so the
+        // two part ways — the editor is loaded from the field again.
+        fail(error);
+        return void reload();
+      }
+    }
     if (stale) resend();
   };
 
@@ -668,14 +688,27 @@ const createTextBinding = (storage, id, path, adapter, options = {}) => {
     pending = compose(pending, delta);
     if (pending.length > 0) schedule();
   });
-  const halt = () => {
+  // Stopped — by `stop()`, or after MAX_FAILURES in a row (`reason` the last
+  // failure): nothing more is sent or taken, and `flush()` answers at once.
+  const halt = (reason = null) => {
+    if (stopped) return;
     stopped = true;
     stopObserve();
     unsubscribe();
     for (const resolve of waiting.splice(0)) resolve();
+    if (onStop !== null) {
+      try {
+        onStop(reason);
+      } catch (error) {
+        storage.logger?.warn?.({ event: 'listener.error', name: 'editor', err: error });
+      }
+    }
   };
+  // A first load that fails stops the binding: nothing would ever be taken
+  // from the editor, and the field's events would only pile up.
   const ready = load().catch((error) => {
     fail(error);
+    halt(error);
     throw error;
   });
 
@@ -688,11 +721,15 @@ const createTextBinding = (storage, id, path, adapter, options = {}) => {
       return shadow;
     },
     get pending() {
-      return !idle();
+      return !stopped && !idle();
+    },
+    /** Whether the binding stopped — `stop()`, or failures in a row; what was not sent stays unsent. */
+    get stopped() {
+      return stopped;
     },
     flush: () =>
       new Promise((resolve) => {
-        if (idle()) resolve();
+        if (stopped || idle()) resolve();
         else waiting.push(resolve);
       }),
     stop: () => halt(),

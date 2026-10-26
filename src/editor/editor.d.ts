@@ -110,6 +110,11 @@ export interface TextBindingOptions {
   onReset?: () => void;
   /** A failure that reloaded the editor; logged at warn without one. */
   onError?: (error: Error) => void;
+  /**
+   * The binding stopped: `stop()` (`null`), five failures in a row, or a
+   * first load that failed (the last failure). Nothing more is sent or taken.
+   */
+  onStop?: (reason: Error | null) => void;
 }
 
 export interface TextBinding {
@@ -122,7 +127,9 @@ export interface TextBinding {
   readonly shadow: string;
   /** Whether an edit is on its way to the field. */
   readonly pending: boolean;
-  /** Resolves once every edit reported so far has landed. */
+  /** Whether the binding stopped; what was not sent then stays unsent. */
+  readonly stopped: boolean;
+  /** Resolves once every edit reported so far has landed — or at once when the binding stopped (see `stopped`). */
   flush(): Promise<void>;
   stop(): void;
 }

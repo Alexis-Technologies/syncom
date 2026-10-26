@@ -254,13 +254,14 @@ test('ProseMirror', { skip }, async (t) => {
   );
 
   await t.test(
-    'a field the schema cannot hold reads as the schema has it, and fits with the editor’s next edit',
+    'a field the schema cannot hold reads as the schema has it, says so, and fits with the editor’s next edit',
     async (t2) => {
       const schema = schemaOf();
       const storage = await open(t2, 'fit');
       const id = await storage.insert({});
       await storage.updateText(id, 'body', 'plain text, no block');
-      const pmb = PM.createProseMirror(storage, id, 'body', pm);
+      const unfit = [];
+      const pmb = PM.createProseMirror(storage, id, 'body', pm, { onUnfit: (delta) => unfit.push(delta) });
       assert.throws(() => pmb.indexOf(1), { name: 'TypeError', message: 'indexOf(): attach() first' });
       assert.throws(() => pmb.posOf(0), { name: 'TypeError', message: 'posOf(): attach() first' });
       const view = viewOf(schema, [pmb.plugin]);
@@ -269,6 +270,8 @@ test('ProseMirror', { skip }, async (t) => {
       await pmb.attach(view).ready;
       await pmb.binding.flush();
       assert.strictEqual(storage.vector[storage.nodeId], written, 'opening the editor writes nothing');
+      assert.strictEqual(unfit.length, 1, 'what the schema cannot hold is said');
+      assert.ok(unfit[0].length > 0);
       assert.strictEqual(view.state.doc.textContent, 'plain text, no block');
       assert.deepStrictEqual((await storage.spans(id, 'body'))[0].type, 'text', 'the field as it was');
       // Position 1 is the default paragraph's start: index 1 of the document, index 0 of the field.

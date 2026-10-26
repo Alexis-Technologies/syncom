@@ -231,8 +231,10 @@ const runEditorTests = async (t, assert, createStorage) => {
         const editor = createEditor();
         const errors = [];
         const resets = [];
+        const stops = [];
         const binding = E.createTextBinding(failing, id, 'body', editor, {
           onError: (error) => errors.push(error.code ?? error.name),
+          onStop: (reason) => stops.push(reason?.code ?? reason?.name ?? null),
           // An editor that types again after every reload — what makes a failure repeat.
           onReset: () => {
             resets.push(editor.text());
@@ -247,12 +249,74 @@ const runEditorTests = async (t, assert, createStorage) => {
         assert.deepStrictEqual(resets, ['base', 'base', 'base', 'base'], 'a reload between them, the edit dropped');
         assert.strictEqual(editor.text(), 'xbase', 'typed after the last reload, never sent');
         assert.strictEqual((await storage.get(id)).body, 'base');
+        assert.strictEqual(binding.stopped, true);
+        assert.deepStrictEqual(stops, [errors[4]], 'onStop hears the last failure, once');
         editor.type(0, 'y');
+        // A stopped binding answers flush() at once, whatever was typed after it.
+        await Promise.race([
+          binding.flush(),
+          new Promise((resolve, reject) => setTimeout(() => reject(new Error('flush hangs')), 200)),
+        ]);
+        assert.strictEqual(binding.pending, false);
         await new Promise((resolve) => setTimeout(resolve, 400));
         assert.strictEqual(errors.length, 5, 'nothing after the stop');
       }
     },
   );
+
+  await t.test(
+    'an editor that throws on a peer’s change is loaded from the field again, never left apart',
+    async (t2) => {
+      const storage = await createStorage(t2, 'A');
+      const id = await storage.insert({});
+      await storage.updateText(id, 'body', 'base');
+      const editor = createEditor();
+      let throwNext = false;
+      const update = editor.updateContents;
+      editor.updateContents = (delta) => {
+        if (throwNext) {
+          throwNext = false;
+          throw new Error('the view is busy');
+        }
+        update(delta);
+      };
+      const errors = [];
+      const resets = [];
+      const binding = E.createTextBinding(storage, id, 'body', editor, {
+        onError: (error) => errors.push(error.message),
+        onReset: () => resets.push(editor.text()),
+      });
+      t2.after(() => binding.stop());
+      await binding.ready;
+      throwNext = true;
+      await storage.splice(id, 'body', 4, 0, '!');
+      await waitUntil(() => resets.length === 1, { timeout: 2000 });
+      assert.deepStrictEqual(errors, ['the view is busy']);
+      assert.strictEqual(editor.text(), 'base!', 'the editor holds the field');
+      editor.type(0, '>');
+      await binding.flush();
+      assert.strictEqual((await storage.get(id)).body, '>base!', 'and edits it as before');
+    },
+  );
+
+  await t.test('a first load the editor refuses stops the binding: ready rejects, onStop hears why', async (t2) => {
+    const storage = await createStorage(t2, 'A');
+    const id = await storage.insert({});
+    await storage.updateText(id, 'body', 'base');
+    const editor = createEditor();
+    editor.setContents = () => {
+      throw new Error('no document');
+    };
+    const stops = [];
+    const binding = E.createTextBinding(storage, id, 'body', editor, {
+      onError: () => {},
+      onStop: (reason) => stops.push(reason.message),
+    });
+    await assert.rejects(binding.ready, /no document/);
+    assert.strictEqual(binding.stopped, true);
+    assert.deepStrictEqual(stops, ['no document']);
+    await binding.flush();
+  });
 
   await t.test(
     'a peer’s change made of the same characters, landing while a delta is in flight, reloads the editor rather than leave it apart',
@@ -496,11 +560,22 @@ const runEditorTests = async (t, assert, createStorage) => {
         scope: '*',
         s: [['other', 1, Date.now(), { cursor: { id: 'x', field: 'body', anchor: tokens.anchor } }]],
       });
+      // A peer whose token this field cannot read: its cursor alone is left out.
+      await presence.apply({
+        p: 1,
+        scope: '*',
+        s: [['broken', 1, Date.now(), { cursor: { id, field: 'body', anchor: 'x' } }]],
+      });
+      await presence.apply({
+        p: 1,
+        scope: '*',
+        s: [['odd', 1, Date.now(), { cursor: { id, field: 'body', anchor: fresh.anchor, head: 7 } }]],
+      });
       const cursors = await E.presenceCursors(presence, storage, id, 'body');
       assert.deepStrictEqual(
         cursors.map(({ node, anchor, head }) => [node, anchor, head]),
         [[storage.nodeId, 3, 3]],
-        'this node’s caret; the other’s place is gone, the third is on another record',
+        'this node’s caret; the other’s place is gone, the third is on another record, the broken tokens left out',
       );
       assert.strictEqual(cursors[0].state.name, 'ada');
       await assert.rejects(() => E.tokensToSelection(storage, { id }), TypeError);

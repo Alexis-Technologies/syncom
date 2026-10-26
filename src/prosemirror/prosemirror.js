@@ -257,9 +257,32 @@ const createProseMirror = (storage, id, path, pm, options = {}) => {
   let base = null;
   let unfit = [];
   let back = null;
+  // What the schema could not hold is dropped from the document — and goes
+  // to every peer with the next edit: said, never silent (`onUnfit` hears
+  // the delta from the field to the document; a warn once otherwise).
+  let warned = false;
+  const tell = () => {
+    if (unfit.length === 0) return;
+    if (typeof options.onUnfit === 'function') {
+      try {
+        options.onUnfit(unfit);
+      } catch (error) {
+        storage.logger?.warn?.({ event: 'listener.error', name: 'prosemirror', err: error });
+      }
+    } else if (!warned) {
+      warned = true;
+      storage.logger?.warn?.({ event: 'editor.unfit', id, field: path, ops: unfit.length });
+    }
+  };
+  // A failure of the adapter's own work (cursors, undo): `onError`, or a warn.
+  const failed = (event, onError) => (error) => {
+    if (typeof onError === 'function') onError(error);
+    else storage.logger?.warn?.({ event, id, field: path, err: error });
+  };
   const hold = (doc) => {
     unfit = diffSpans(base, docToSpans(doc));
     back = null;
+    tell();
   };
   // A field index as the document's, and back.
   const toDoc = (index) => (unfit.length === 0 ? index : transformIndex(index, unfit, true));
@@ -350,6 +373,7 @@ const createProseMirror = (storage, id, path, pm, options = {}) => {
       const doc = spansToDoc(base, state.schema);
       unfit = diffSpans(base, docToSpans(doc));
       back = null;
+      tell();
       land(doc, at === null ? null : [toDoc(at[0]), toDoc(at[1])]);
     },
     onChange: (listener) => {
@@ -373,7 +397,10 @@ const createProseMirror = (storage, id, path, pm, options = {}) => {
 
   // A presence room's cursors as decorations, and this editor's selection
   // published to it — `pm.view` (prosemirror-view) is needed for the first.
-  const cursorPlugin = (presence, { field = 'cursor', render = null, className = 'syncom-selection' } = {}) => {
+  const cursorPlugin = (
+    presence,
+    { field = 'cursor', render = null, className = 'syncom-selection', onError } = {},
+  ) => {
     if (typeof pm.view?.Decoration?.widget !== 'function') {
       throw new TypeError('cursorPlugin() needs pm.view: the prosemirror-view module');
     }
@@ -429,13 +456,16 @@ const createProseMirror = (storage, id, path, pm, options = {}) => {
           published = next;
           await presence.set({ ...(presence.local ?? {}), [field]: tokens });
         };
-        const changed = () => void refresh();
+        const report = failed('editor.cursors', onError);
+        const changed = () => void refresh().catch(report);
         presence.on('change', changed);
-        void refresh();
+        changed();
         return {
           update: (_editor, before) => {
-            if (!before.selection.eq(editor.state.selection) || !before.doc.eq(editor.state.doc)) void publish();
-            if (!before.doc.eq(editor.state.doc)) void refresh();
+            if (!before.selection.eq(editor.state.selection) || !before.doc.eq(editor.state.doc)) {
+              void publish().catch(report);
+            }
+            if (!before.doc.eq(editor.state.doc)) changed();
           },
           destroy: () => {
             stopped = true;
@@ -448,15 +478,16 @@ const createProseMirror = (storage, id, path, pm, options = {}) => {
 
   // ProseMirror commands over an undo manager of the storage's: the field's
   // edits taken back after every edit sent has landed.
-  const commands = (manager) => {
+  const commands = (manager, { onError } = {}) => {
     if (!manager || typeof manager.undo !== 'function' || typeof manager.redo !== 'function') {
       throw new TypeError('commands() takes an undo manager: createUndo() from @alexify/syncom/undo');
     }
+    const report = failed('editor.undo', onError);
     const command = (name, can) => (_state, dispatch) => {
       if (!manager[can]) return false;
       if (dispatch) {
         const settled = text === null ? Promise.resolve() : text.flush();
-        void settled.then(() => manager[name]());
+        void settled.then(() => manager[name]()).catch(report);
       }
       return true;
     };

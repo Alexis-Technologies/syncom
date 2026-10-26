@@ -29,6 +29,8 @@ export interface CodeMirrorCursorOptions {
   className?: string;
   /** The caret of another node; a `<span class="syncom-caret" data-node>` by default. */
   render?: (cursor: PresenceCursor) => HTMLElement;
+  /** A failure to show the cursors or publish the selection; a warn (`editor.cursors`) without one. */
+  onError?: (error: Error) => void;
 }
 
 export interface CodeMirrorBinding {
@@ -43,7 +45,10 @@ export interface CodeMirrorBinding {
   /** A presence room's cursors as decorations, and this editor's selection published to it. Needs `view`. */
   cursors(presence: Presence, options?: CodeMirrorCursorOptions): { extension: CMState.Extension; stop(): void };
   /** CodeMirror commands over an undo manager of the storage's, and the keys for `keymap.of()`. */
-  commands(manager: UndoManager): { undo: CMView.Command; redo: CMView.Command; keys: CMView.KeyBinding[] };
+  commands(
+    manager: UndoManager,
+    options?: { onError?: (error: Error) => void },
+  ): { undo: CMView.Command; redo: CMView.Command; keys: CMView.KeyBinding[] };
   /**
    * The field's index at document offset `pos`, through the line breaks the
    * editor reads otherwise until its next edit sends them; after `attach()`.

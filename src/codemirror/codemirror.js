@@ -117,6 +117,11 @@ const createCodeMirror = (storage, id, path, cm, options = {}) => {
   const { StateField, StateEffect, Annotation, Transaction } = cm.state;
   const remote = Annotation.define();
   const source = options.source ?? Symbol('codemirror');
+  // A failure of the adapter's own work (cursors, undo): `onError`, or a warn.
+  const failed = (event, onError) => (error) => {
+    if (typeof onError === 'function') onError(error);
+    else storage.logger?.warn?.({ event, id, field: path, err: error });
+  };
   let view = null;
   let report = null;
   let text = null;
@@ -218,7 +223,7 @@ const createCodeMirror = (storage, id, path, cm, options = {}) => {
 
   // A presence room's cursors as decorations, and this editor's selection
   // published to it — `cm.view` (@codemirror/view) is needed for them.
-  const cursors = (presence, { field = 'cursor', className = 'syncom-selection', render = null } = {}) => {
+  const cursors = (presence, { field = 'cursor', className = 'syncom-selection', render = null, onError } = {}) => {
     if (typeof cm.view?.Decoration?.mark !== 'function' || typeof cm.view?.WidgetType !== 'function') {
       throw new TypeError('cursors() needs cm.view: the @codemirror/view module');
     }
@@ -281,11 +286,13 @@ const createCodeMirror = (storage, id, path, cm, options = {}) => {
         publishing = false;
       }
     };
-    const changed = () => void refresh();
+    const report = failed('editor.cursors', onError);
+    const changed = () => void refresh().catch(report);
+    const share = () => void publish().catch(report);
     started.push(() => {
       presence.on('change', changed);
-      void refresh();
-      void publish();
+      changed();
+      share();
     });
     if (view !== null) started[started.length - 1]();
     const decorations = StateField.define({
@@ -293,7 +300,7 @@ const createCodeMirror = (storage, id, path, cm, options = {}) => {
       update: (value, tr) => {
         for (const effect of tr.effects) if (effect.is(set)) return effect.value;
         // This editor's selection moved, or the text did: publish once the queue is through.
-        if (tr.selection !== undefined || tr.docChanged) queueMicrotask(() => void publish());
+        if (tr.selection !== undefined || tr.docChanged) queueMicrotask(share);
         // oxlint-disable-next-line no-restricted-properties -- RangeSet.map (CodeMirror), not an Array
         return tr.docChanged ? value.map(tr.changes) : value;
       },
@@ -310,14 +317,15 @@ const createCodeMirror = (storage, id, path, cm, options = {}) => {
 
   // CodeMirror commands over an undo manager of the storage's: the field's
   // edits taken back after every edit sent has landed.
-  const commands = (manager) => {
+  const commands = (manager, { onError } = {}) => {
     if (!manager || typeof manager.undo !== 'function' || typeof manager.redo !== 'function') {
       throw new TypeError('commands() takes an undo manager: createUndo() from @alexify/syncom/undo');
     }
+    const report = failed('editor.undo', onError);
     const command = (name, can) => () => {
       if (!manager[can]) return false;
       const settled = text === null ? Promise.resolve() : text.flush();
-      void settled.then(() => manager[name]());
+      void settled.then(() => manager[name]()).catch(report);
       return true;
     };
     const undo = command('undo', 'canUndo');

@@ -38,8 +38,10 @@ const binding = createTextBinding(storage, 'id', 'body', adapter, {
   source: 'editor',
   onReset: () => {},
   onError: (e) => e.message,
+  onStop: (reason) => expectType<Error | null>(reason),
 });
 expectType<TextBinding>(binding);
+expectType<boolean>(binding.stopped);
 expectType<Promise<void>>(binding.ready);
 expectType<string>(binding.shadow);
 expectType<boolean>(binding.pending);

@@ -8,7 +8,7 @@ import type * as PMState from 'prosemirror-state';
 import type * as PMTransform from 'prosemirror-transform';
 import type * as PMView from 'prosemirror-view';
 import type { Storage, TextMethods, TextSpan } from '../../index.js';
-import type { TextBinding, TextBindingOptions, PresenceCursor } from '../editor/editor.js';
+import type { DeltaOp, TextBinding, TextBindingOptions, PresenceCursor } from '../editor/editor.js';
 import type { Presence } from '../presence/presence.js';
 import type { UndoManager } from '../undo/undo.js';
 
@@ -33,6 +33,19 @@ export interface CursorPluginOptions {
   render?: (cursor: PresenceCursor) => HTMLElement | null;
   /** The class of another node's selection; `syncom-selection` by default. */
   className?: string;
+  /** A failure to show the cursors or publish the selection; a warn (`editor.cursors`) without one. */
+  onError?: (error: Error) => void;
+}
+
+/** The binding's options, and what the schema could not hold. */
+export interface ProseMirrorOptions extends TextBindingOptions {
+  /**
+   * The field holds what this schema cannot (a mark, a node): the editor's
+   * document leaves it out, and the next edit sends that change to every
+   * peer — the delta from the field to the document. A warn
+   * (`editor.unfit`, once) without one.
+   */
+  onUnfit?: (delta: DeltaOp[]) => void;
 }
 
 export interface ProseMirrorBinding {
@@ -48,7 +61,10 @@ export interface ProseMirrorBinding {
   /** A presence room's cursors as decorations, and this editor's selection published to it. Needs `view`. */
   cursorPlugin(presence: Presence, options?: CursorPluginOptions): PMState.Plugin;
   /** ProseMirror commands over an undo manager of the storage's (`createUndo({ trackedSources: [binding.source] })`). */
-  commands(manager: UndoManager): { undo: PMState.Command; redo: PMState.Command };
+  commands(
+    manager: UndoManager,
+    options?: { onError?: (error: Error) => void },
+  ): { undo: PMState.Command; redo: PMState.Command };
   /**
    * The field's index at document position `pos`, through what the field
    * lacks of the document until the editor's next edit sends it; after
@@ -66,7 +82,7 @@ export declare function createProseMirror(
   id: string,
   path: string,
   pm: ProseMirrorModules,
-  options?: TextBindingOptions,
+  options?: ProseMirrorOptions,
 ): ProseMirrorBinding;
 
 /** A document as typed spans: a marker per block-level node in document order, a textblock's inline content after it. */
