@@ -58,7 +58,7 @@ src/layered/layered.js    @alexify/syncom/layered — layered([top, …, bottom]
                           cache; 'back' drains its queue before any lower layer is consulted; create is exclusive across layers
 src/emitter.js            the Emitter both halves extend — no requires
 src/logger.js             createLogger, the duck-typed logger writer — no requires
-src/keys.js               loadKeyPair — the on-disk key pairs (RSA for sealing, Ed25519 for signing), generator injected by each crypto half — no requires
+src/keys.js               loadKeyPair — the on-disk key pairs (RSA for sealing, Ed25519 for signing), generator injected by each crypto half — requires errors.js only
 src/digest.js             sha256 — SHA-256 of a value's JSON through Web Crypto, async on both platforms: the chain's and the schema hash's — no requires
 src/pem.js                base64/PEM helpers over btoa/atob for the browser crypto halves — no requires
 src/scope.js              GLOBAL_SCOPE, inScope, opInScope — the one definition of "in scope" — no requires
@@ -69,7 +69,7 @@ src/shape.js              isPlainObject, asJson, isRecordId, isStreamName, wellF
 src/paths.js              field paths: isPath, ancestorsOf, under, valueAt, MAX_PATHS — no requires
 src/compose.js            compose (the paths nested for a reader), decompose (a reading back to the fields) — requires paths.js
 src/args.js               spliceArgs, treeArgs, markArgs, setElements, jsonValue, isNodeId — the write API’s argument
-                          checks, shared by Storage and realize() in patch.js — no requires
+                          checks, shared by Storage and realize() in patch.js — requires paths.js only
 src/text/rle.js           run-length content: a run's pieces and gaps, cut, append, merge, the canonical form under MAX_RUN —
                           no requires; sequence.js is the caller and re-exports what the tests read
 src/text/btree.js         the rope: a persistent B+-tree over a block's segments and fences with two measures (slots, visible),
@@ -85,15 +85,13 @@ src/tree/moves.js         the tree engine: per node its stamped moves, the fold 
 src/order/order.js        fractional indexes over a 62-letter alphabet (Loro's rule, MIT) — no requires; the tree plugin uses it for a node's place
 src/versions/history.js  the past out of the log: a version (event id / stamp / vector) as a cut, the exact start above droppedTs, the fold
 src/versions/tags.js     Tags — named versions kept locally: tags.json, a catalog per tag, copy-on-write record files in the newest tag
-src/patch.js              patches — the one vocabulary of diff()/applyPatches()/restore(): diffViews by kind, realize() to an op — requires shape.js, myers.js only
-src/undo.js               UndoManager — steps of inverse patches from `commit` events, refuse-to-overwrite, pins the log; the core does not use it
+src/patch.js              patches — the one vocabulary of diff()/applyPatches()/restore(): diffViews by kind, realize() to an op — requires shape.js, args.js, paths.js, plugin.js only
                           (requires patch.js, emitter.js, symbols.js, paths.js)
 src/outbound.js           outbound(log, { exclude, vector, scopes, own }) — the ops a receiver lacks, the first retained seq per own stream; a push and a merge both pick with it
-src/branch.js             branch/merge/branchInfo/drop — a fork opened through parent.constructor, merged as ops through applyRemote
 src/symbols.js            COMMIT / REFRESH / SOURCE — the module-private seams between Storage and what it hands out — no requires
 src/options.js            normalizeStorageOptions — open()'s plain options checked and defaulted (lock, cache, chain, skew…)
 src/protocol.js           PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf — what both halves of the sync protocol agree on — no requires
-src/lock.js               exclusive open: Web Locks or lock.json, stale by pid or age — no requires
+src/lock.js               exclusive open: Web Locks or lock.json, stale by pid or age — requires errors.js only
 src/catalog.js            the record catalog: live ids, collections, indexed values; index/catalog.json — no requires
 src/query/query.js        @alexify/syncom/query — the query plugin: setup hands the core a cursor factory (`query` hook); select()/count()
                           on a Collection go through storage[CURSOR], PLUGIN_MISSING without it
@@ -117,7 +115,7 @@ src/schema/schema.js      @alexify/syncom/schema — the schema plugin: setup(ct
 src/schema/define.js      entity definitions, the injected validator (Standard Schema / ajv / compile) — normalizeSchema; requires errors.js only
 src/schema/lens.js        createLens — how an older record reads under this version (migrations, then the validator)
 src/entity.js             project / unproject / foldSet — the record as its validator sees it, the validated value as the op carries it;
-                          the core's, shared by commit.js and the lens; requires shape.js only
+                          the core's, shared by commit.js and the lens; requires shape.js, paths.js only
 src/errors.js             SyncomError, ValidationError, typed() — no requires
 src/ops.js                the record-level model: applyOp / mergeEntry / isAlive, packOps
 src/vector.js             clocks, version vectors, event ids
@@ -126,7 +124,6 @@ src/sync/sync.js          @alexify/syncom/sync — the sync plugin: `open(ctx)` 
 src/sync/manager.js       SyncManager — the dialing side; `unit()` delegates to hosting.js
 src/sync/hosting.js       createUnit — the hosting side: hello/push/snapshot/changes, limits, grant()
 src/link.js               isSyncLink — the link contract check
-src/wrpc.js               createWrpcLink — a WrpcClient as a SyncLink (no wrpc import)
 src/telemetry.js          the telemetry writer contract: DISABLED, writerOf, traced — what every write path records through; no requires
 src/telemetry/telemetry.js  @alexify/syncom/telemetry — the OpenTelemetry adapter (createTelemetry: { api } | { tracer, meter } → writer,
                           duck-typed; @opentelemetry/* only devDeps) and the plugin whose setup hands the core the writer
@@ -207,7 +204,7 @@ docs/                     VitePress site
   by hand. Anything WebRTC-shaped that seems missing belongs in wrpc.
 - **wrpc is injected, never required.** Nothing under `src/` may
   `require('@alexify/wrpc')`; `scripts/size.js` fails on any bare import in a
-  browser bundle anyway. `src/wrpc.js` duck-types the client it is handed, and
+  browser bundle anyway. `src/wrpc/wrpc.js` duck-types the client it is handed, and
   `unit()` (`src/sync/hosting.js`) builds plain `{ access, handler }` objects that
   `defineRouter` accepts without wrpc's `procedure()`. The `tracked` shape it emits is
   `Symbol.for('wrpc.tracked')` — part of wrpc's frozen wire protocol.
@@ -700,6 +697,9 @@ docs/                     VitePress site
   `SyncomCollection<R, I>` — and nothing at run time reads `shapes`; `RecordData` is the
   type wherever the schema says no more. A reader of a record takes `R` (`get<R>`,
   `record<R>`) rather than returning `unknown`; a new one does the same.
+- **`tests/package/docs-paths.test.js` guards the guides.** Every `src/…` path CLAUDE.md, CONTRIBUTING.md, a skill or a
+  comment in `src/` names exists, and every "no requires" / "requires X only" of a layout line above is what the
+  file requires — move a file or add a require and the line moves with it.
 - **`tests/package/consistency.test.js` guards the metadata.** If it goes red
   after you add an entry point, update `exports`, `files`, the `browser` map,
   `scripts/size.js` `ENTRIES` and the docs keywords — the test is right.
@@ -810,7 +810,7 @@ docs/                     VitePress site
   Record; `receivePresence` feeds the registered instances alone.
 - **Undo is a subpath over `commit`, never inside the engine.** The model —
   steps of inverse patches, refuse-to-overwrite, the exact and the loose
-  inversion — is the header of `src/undo.js`. What crosses modules: the
+  inversion — is the header of `src/undo/undo.js`. What crosses modules: the
   manager applies through `storage.applyPatches(id, kept, { source: token })`
   and tells its own commits by the token; every `remove` it makes is `own:
   true`; conflicts are read from `log.entriesOf(id)` after the step's
@@ -819,7 +819,7 @@ docs/                     VitePress site
   lives in ops.js (it needs the predicates) and `deepEqual` in shape.js, so
   patch.js and the subpath ship without the op model — keep it that way. The
   stack is memory only; a `purge` forgets the record on every step.
-- **A branch is a storage; a merge is a push.** `src/branch.js` opens the
+- **A branch is a storage; a merge is a push.** `src/branch/branch.js` opens the
   fork through `parent.constructor` (the subpath bundles no engine), never
   copies the directory (a copied identity is `SELF`/`REWOUND`), gives it
   `retention: { ops: 0 }` + `autoStart: false`, joins the parent's (or the
@@ -885,7 +885,7 @@ docs/                     VitePress site
   intersection comes after, and `count()` needs every match), never persist
   the index — `load()` replays the rows through `#insert` (into the pending
   map) — and never let the
-  core normalize text: that is `src/search.js`'s, a subpath with no requires.
+  core normalize text: that is `src/search/search.js`'s, a subpath with no requires.
 - **The catalog is derived state, kept at one seam.** `EntryStore`
   (`src/entries.js`) is the only place that `catalog.put`: `write` (every
   write path goes through it), `writeSealed`, `remove` and `index`; it
@@ -923,8 +923,8 @@ docs/                     VitePress site
   immutable on the local path and restored after every fold. Validators are
   `~standard`, a function, or `validator.compile` — do not add a fourth
   duck-type.
-- **Hooks run inside the operation; events never do.** `src/hooks.js` (no
-  requires — it ships to the browser) is the whole mechanism. Storage hooks
+- **Hooks run inside the operation; events never do.** `src/hooks.js` (it
+  requires errors.js only — it ships to the browser) is the whole mechanism. Storage hooks
   go through `#hook()` inside the mutation queue, and `#run` refuses a write
   while one is running — a write from a hook would wait for the hook that
   waits for it. Hook calls live in `src/commit.js`, `src/bootstrap.js`

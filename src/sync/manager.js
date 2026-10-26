@@ -11,7 +11,7 @@
 //   does all three); on `reconnect` the manager only repeats hello + push,
 //   the outbound half a transport cannot know about.
 //
-//   unit() — the HOSTING side, built in src/hosting.js: a plain object of
+//   unit() — the HOSTING side, built in src/sync/hosting.js: a plain object of
 //   `{ access, handler }` procedures shaped for wrpc's defineRouter, with no
 //   import of wrpc. The manager lends it the storage, the wakers every live
 //   `changes` feed waits on, and the set `hosted()` lists.
@@ -1111,7 +1111,7 @@ class SyncManager extends Emitter {
    * `defineRouter({ syncom: storage.sync.unit({ access: 'public' }) })`.
    * `access` defaults to wrpc's own default, 'session'; `authorize(context,
    * hello)` gates a peer by whatever the transport presented. Built in
-   * src/hosting.js from what both halves share.
+   * src/sync/hosting.js from what both halves share.
    */
   unit(options = {}) {
     return createUnit(this, options, {

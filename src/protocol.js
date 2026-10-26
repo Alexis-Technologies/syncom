@@ -2,8 +2,8 @@
 
 // What both halves of the sync protocol agree on: the version hello carries,
 // the page size a host serves and a dialer pushes by, and the shape of a
-// peer's schema in hello. The dialing side is src/sync.js, the hosting side
-// src/hosting.js. No requires.
+// peer's schema in hello. The dialing side is src/sync/manager.js, the hosting side
+// src/sync/hosting.js. No requires.
 
 // PROTOCOL 1 is the wire as of the first publication: every op type (`/`,
 // `=`, `^`, `*`, `~` among them) and every packOps slot added before it is

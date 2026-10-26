@@ -61,7 +61,7 @@ with `node --test --test-name-pattern 'swap'`.
   before writing it down.
 - **wrpc is injected, never required.** `@alexify/wrpc` is a devDependency for
   `tests/wrpc.integration.test.js` only, which skips when it is missing; nothing
-  under `src/` may `require` it. The adapter in `src/wrpc.js` duck-types the
+  under `src/` may `require` it. The adapter in `src/wrpc/wrpc.js` duck-types the
   client it is handed.
 - **A field is one kind: a register, a counter, a set, a list, a text or a
   tree.** `set`/`update` write registers, `inc` counters, `add`/`remove` sets,

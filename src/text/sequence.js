@@ -123,7 +123,7 @@ const {
 // and on the snapshot path alike: beyond it an op is refused (`bound`) and a
 // peer's block is dropped.
 // A field holds at most MAX_FIELD slots, tombstones included (and a run
-// MAX_RUN, src/rle.js's): a gap is the one thing a peer could make expensive
+// MAX_RUN, src/text/rle.js's): a gap is the one thing a peer could make expensive
 // for nothing. A field at MAX_FIELD takes nothing more until a reset.
 const MAX_FIELD = 1 << 22;
 

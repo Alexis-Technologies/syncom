@@ -104,7 +104,7 @@ const normalizeStorageOptions = (options) => {
     throw new TypeError('open({ sync }): maxSkew must be a positive number of milliseconds (Infinity to disable)');
   }
   // How much pending work a list or text field takes from ops that ran ahead
-  // of what they depend on before an op is refused — see src/sequence.js.
+  // of what they depend on before an op is refused — see src/text/sequence.js.
   const pendingMax = options.sync?.pendingMax;
   if (pendingMax !== undefined && !((Number.isInteger(pendingMax) && pendingMax > 0) || pendingMax === Infinity)) {
     throw new TypeError('open({ sync }): pendingMax must be a positive integer (Infinity to disable)');

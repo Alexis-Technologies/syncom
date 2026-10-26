@@ -1,8 +1,8 @@
 'use strict';
 
 // What one log has that another node lacks: the ops to hand over, by that
-// node's version vector — the selection a push makes (src/sync.js) and a
-// branch merge makes (src/branch.js), in one place. Ops of the receiver's
+// node's version vector — the selection a push makes (src/sync/manager.js) and a
+// branch merge makes (src/branch/branch.js), in one place. Ops of the receiver's
 // own origin, and the merges made from its snapshot, are left out: it has
 // those by definition. `first` is the first seq this log retains of each of
 // the sender's own streams (the bootstrap stream apart — it holds holes by

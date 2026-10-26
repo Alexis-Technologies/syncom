@@ -262,7 +262,7 @@ const dataAfter = (op, current) => {
 };
 
 // A peer pushing to a host writes only records it may read: the scope the
-// op declares is the peer's claim (src/hosting.js holds it to the grant);
+// op declares is the peer's claim (src/sync/hosting.js holds it to the grant);
 // the record's own, before the op and after it, is what this node's
 // `sync.scope` makes of the data. Outside the grant — or a scope function
 // that throws on it — the op is refused like a forged one: not logged, not

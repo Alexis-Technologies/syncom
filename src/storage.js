@@ -6,7 +6,7 @@
 // a peer's batch in src/apply.js, a bootstrap page in src/bootstrap.js.
 // Records live in src/entries.js, what the application holds in
 // src/record.js, the options in src/options.js. The API of the field kinds
-// beyond registers is src/fields.js and the versions API src/versions.js,
+// beyond registers is src/fields.js and the versions API src/versions/api.js,
 // both over the same lent core: this file keeps a delegate per method.
 
 const { Emitter, generateUUID, createLogger } = require('./utils.js');
@@ -452,7 +452,7 @@ class Storage extends Emitter {
       unpersisted: (touched, error) => this.#unpersisted(touched, error),
       flush: () => this.#flushCatalog(),
       refresh: (id, data, delta, source, entry) => this.#emitUpdate(id, data, delta, source, entry),
-      // For the API modules (src/fields.js, src/versions.js), which stand
+      // For the API modules (src/fields.js, src/versions/api.js), which stand
       // outside the queue: the hooks (their read hooks run outside it), the
       // tags, the entities, a task run in the queue, a local op committed
       // through it (`storage[COMMIT]`), a Record forgotten, the deferred
@@ -1448,7 +1448,7 @@ class Storage extends Emitter {
   }
 
   // ---------------------------------------------------------------------
-  // Versions, patches and tags — src/versions.js, one delegate each.
+  // Versions, patches and tags — src/versions/api.js, one delegate each.
 
   async diff(id, from, to) {
     return this.#api('diff')(this.#core, id, from, to);

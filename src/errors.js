@@ -14,7 +14,7 @@
 //   - a TypeError is a bug in the calling code — a wrong argument, option
 //     or hook result — and carries no code, except where the value is data
 //     (`INVALID_ID`, `TYPE_IMMUTABLE`) or configuration (`NO_CHAIN`).
-//   - a wire refusal (src/hosting.js) is a plain Error with the numeric
+//   - a wire refusal (src/sync/hosting.js) is a plain Error with the numeric
 //     `code` wrpc transports (400–429) and a `reason` constant beside it.
 
 class SyncomError extends Error {

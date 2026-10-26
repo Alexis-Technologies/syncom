@@ -76,7 +76,7 @@ const kindOfOp = (op) => {
 
 const normalize = (raw, base, limits) => S.normalizeSeq(raw, base, limits.pendingMax);
 
-// A `splice` lands on the block (src/sequence.js), an `assign`, a `move` or
+// A `splice` lands on the block (src/text/sequence.js), an `assign`, a `move` or
 // a `mark` on its registers; a register or a mark for a field with no block
 // yet names its kind and waits, like a cut that comes before its run. The
 // block is pruned at once: what fell below the base must look the same as
@@ -373,7 +373,7 @@ const resolveMove = (core, id, payload, current) => {
 };
 
 // A mark names a visible range and an expand rule; what travels is the pair
-// of anchors — an element and a side — the rule picks (src/sequence.js
+// of anchors — an element and a side — the rule picks (src/text/sequence.js
 // markAnchors), or the id of the mark to switch off.
 const resolveMark = (core, id, payload, current) => {
   const { key, off } = payload;
@@ -403,7 +403,7 @@ const resolve = (core, id, type, payload, current) => {
 // ---------------------------------------------------------------------------
 // Patches (src/patch.js diffViews / realize): a text's or a list's edits as
 // splices (Myers), laid in runs of at most MAX_RUN elements — one splice is
-// one run, and a run holds no more (src/rle.js).
+// one run, and a run holds no more (src/text/rle.js).
 
 const inRuns = (patches) => {
   const out = [];
@@ -639,7 +639,7 @@ const migrate = (kind, key, value) => {
 };
 
 // A text's marks laid again over the field `compact()` makes anew: the ones
-// in force, in stamp order, as `mark` patches (src/sequence.js marksIn).
+// in force, in stamp order, as `mark` patches (src/text/sequence.js marksIn).
 const compact = (entry, field, kind) => {
   if (kind !== 'text') return [];
   const patches = [];

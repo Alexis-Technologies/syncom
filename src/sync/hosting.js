@@ -8,7 +8,7 @@
 // shape (Symbol.for('wrpc.tracked'), part of wrpc's frozen wire protocol),
 // so a resuming subscriber replays exactly what it missed.
 //
-// The dialing side is src/sync.js; `SyncManager.unit()` builds the unit here
+// The dialing side is src/sync/manager.js; `SyncManager.unit()` builds the unit here
 // with what the two halves share: the storage, the telemetry writer, the
 // wakers every live feed waits on and the set `hosted()` lists.
 
@@ -98,7 +98,7 @@ const waitFor = (wakers, signal) =>
 // `opsPerSecond` is 429 — a token bucket in its state, refilled at that
 // rate, holding one second's worth. Codes, not a hang-up: the dialer
 // reports them, marks the host behind and pushes again from the vector at
-// the next sign of life on the link (`#recover` in src/sync.js).
+// the next sign of life on the link (`#recover` in src/sync/manager.js).
 const limit = (otel, state, args, ops, limits) => {
   const { opsPerPush, bytesPerPush, opsPerSecond } = limits;
   if (opsPerPush !== undefined && ops.length > opsPerPush) {

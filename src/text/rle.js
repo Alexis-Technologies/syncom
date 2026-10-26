@@ -1,7 +1,7 @@
 'use strict';
 
 // Run-length content — the form a sequence run's content takes in a block
-// (src/sequence.js): `["ab", 3, "c"]` alternates present items (a string of
+// (src/text/sequence.js): `["ab", 3, "c"]` alternates present items (a string of
 // a text, an array of a list) with gaps, tombstones collapsed to a length
 // (Yjs's deleted content; list-positions' form — THIRD_PARTY_NOTICES.md). A
 // gap keeps the place, so an anchor, a mark or a cursor into a deleted

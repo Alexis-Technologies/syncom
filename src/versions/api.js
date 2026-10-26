@@ -155,7 +155,7 @@ const entryOf = async (core, id, at) => {
  * `get(id, { at })`: the record at a version — an event id (as this node
  * held it after that entry), a stamp (every op stamped at or below it),
  * `{ vector }` (every op it covers) or `{ tag }` — folded from the log
- * (src/history.js) or read from the tag's copy, through the lens and the
+ * (src/versions/history.js) or read from the tag's copy, through the lens and the
  * read hooks, which see `at`.
  */
 const getAt = async (core, id, at) => {
