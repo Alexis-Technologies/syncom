@@ -106,6 +106,9 @@ src/query/query.js        @alexify/syncom/query — the query plugin: setup hand
 src/query/cursor.js       compileQuery (Mango predicate), compareRows, Cursor — reads through storage[SOURCE]
 src/shared-log.js         isSharedLog — the reserved broker-log contract (wrpc BrokerLog shape), no consumer yet
 src/storage.js            Storage — the facade: open sequence, the mutation queue, the public API, the `core` it lends
+src/defer.js              DeferredWindow — `open({ defer })`'s slots, timer and landing step — no requires
+src/identity.js           loadIdentity — which node a directory is (the signing key, node.json, getId) — requires errors.js, shape.js only
+src/observe.js            Observers — `observe()`'s registry over the `transaction` event — requires paths.js only
 src/fields.js             the API of the core's kinds beyond registers — inc/add/remove — over the lent core; a plugin's methods come with it —
                           over the lent core; Storage keeps a delegate per method
 src/versions/versions.js @alexify/syncom/versions — the versions plugin: setup hands the core its Tags (`versions` hook), `methods`
@@ -436,7 +439,7 @@ docs/                     VitePress site
   transaction, a peer's page, a joined snapshot) with the changes tagged by
   id — built only while something listens.
 - **`observe` is a registry over the `transaction` event, not listeners.**
-  `Storage#observers` (per id, `{ path, listener }`) is fed by ONE
+  `Observers` (src/observe.js; per id, `{ path, listener }`) is fed by ONE
   `transaction` listener attached at the first `observe()` (the event is
   built only with a listener, so observers cost nothing before); `touches`
   decides a path's share (the field, under it, a prefix of it, the whole
@@ -528,16 +531,16 @@ docs/                     VitePress site
   that appends must mark what it applied, or the tail grows forever. Under
   `open({ defer })` — 16 ms BY DEFAULT (`DEFAULT_DEFER` in src/options.js;
   the tests that read files open with `defer: 0`) — a local write stops at
-  the append: `land` hands the entry to `Storage#deferWrite` — `EntryStore.hold`
+  the append: `land` hands the entry to the `DeferredWindow` (src/defer.js, `write`) — `EntryStore.hold`
   (cache, catalog, held), a slot per record with its positions, one timer —
-  and `#flushDeferred` is a STEP of the landing chain (`#landDeferred`: the
+  and its `flush()` is a STEP of the landing chain (the
   slots taken when the step runs, after every landing before it, so the
   cache never goes back to an older entry and `#persistBatch` never runs
   twice at once) that lands every slot through `#land` (one block, the files)
-  and marks the positions applied — `#settleDeferred(id, toSeq)` settles a
+  and marks the positions applied — `settle(id, toSeq)` settles a
   slot only when the landing covered its positions. While a deferred landing
-  is queued or running (`#flushing`) a write arms no timer — the landing arms
-  the next window when it is done, `max(defer, #flushCost)` long — or the
+  is queued or running a write arms no timer — the landing arms
+  the next window when it is done, `max(defer, cost)` long — or the
   flushes of a large record run back to back, a keystroke or two each, with
   the writer waiting behind them (it was measured: 139 ops/s at 13 000 runs).
   `flush()`, `tag()` and `close()` flush first, and

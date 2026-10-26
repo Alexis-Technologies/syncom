@@ -31,22 +31,19 @@ const { Catalog, isTextIndex } = require('./catalog.js');
 const { DISABLED, isWriter, writerOf, traced, now } = require('./telemetry.js');
 const { GLOBAL_SCOPE } = require('./scope.js');
 const { normalizeStorageOptions } = require('./options.js');
-const { isPlainObject, isRecordId, invalidId, isStreamName, isKeyId, VALIDATED } = require('./shape.js');
-const { under } = require('./paths.js');
+const { isPlainObject, isRecordId, invalidId, isStreamName, VALIDATED } = require('./shape.js');
+const { Observers } = require('./observe.js');
+const { DeferredWindow } = require('./defer.js');
 const { fieldName } = require('./args.js');
 const { compose, composeData } = require('./compose.js');
 
-// What a deferred window holds at most before it lands without waiting for
-// its timer: records, and log positions (keystrokes into one record).
-const DEFER_RECORDS = 1024;
-const DEFER_POSITIONS = 8192;
 // The ids a `storage.unpersisted` line names; past them it says how many.
 const UNPERSISTED_NAMED = 32;
 const { COMMIT, REFRESH, SOURCE, PLUGINS, CURSOR, SIGNER, REWIND } = require('./symbols.js');
 const { missing, HOME } = require('./plugin.js');
 const { SyncomError, typed } = require('./errors.js');
+const { loadIdentity, corruptFile } = require('./identity.js');
 
-const NODE_FILE = 'node.json';
 const SCHEMA_FILE = 'schema.json';
 // What a storage without the schema plugin runs with: no entities, version 1.
 const NO_SCHEMA = Object.freeze({ version: 1, entities: new Map(), snapshot: undefined, ahead: 'apply', view: null });
@@ -59,16 +56,7 @@ const STORAGE_HOOKS = ['beforeWrite', 'afterWrite', 'beforeRead', 'afterRead', '
 // can start replaying from. A purge counts even scrubbed; the others not.
 const WHOLE = new Set(['write', 'merge', 'delete']);
 
-// A service file this storage wrote itself and cannot read any more.
-const corrupt = (file, cause) =>
-  new SyncomError('CORRUPT', `${file} is unreadable (${cause?.message ?? cause}); restore it or remove the directory`, {
-    cause,
-  });
-
-// Whether a change of a record concerns `path`: the field itself, what
-// hangs under it, a prefix of it (a reset above), or the whole record.
-const touches = (change, path) =>
-  change.field === undefined || change.field === path || under(change.field, path) || under(path, change.field);
+const corrupt = corruptFile;
 
 class Storage extends Emitter {
   #path;
@@ -84,11 +72,8 @@ class Storage extends Emitter {
   #core = null;
   #records = null;
   #reaper = null;
-  // The observers of records (`observe()`): per id, what to call with the
-  // changes of a turn; one `transaction` listener of the storage's own
-  // feeds them, attached at the first observer.
-  #observers = new Map();
-  #observing = null;
+  // The observers of records (`observe()`, src/observe.js).
+  #observers = new Observers(this, () => this.#logger);
   // Live Records refreshed as get() reads — the lens, the read hooks —
   // after the write that changed them, one after another.
   #refreshed = Promise.resolve();
@@ -128,20 +113,9 @@ class Storage extends Emitter {
   // What a transaction's `tx` carries (#transaction): `[name, method]`, the
   // field methods and the plugins' — a plugin's in place of a field's.
   #txMethods = [];
-  // Local writes whose record files wait (`open({ defer })`): id → the
-  // entry to write and the log positions it covers; one timer for the flush.
+  // Local writes whose record files wait (`open({ defer })`, src/defer.js).
   #defer = 0;
-  #deferred = new Map();
-  #deferredPositions = 0;
-  #deferTimer = null;
-  // A deferred landing is queued or running: a write that comes meanwhile
-  // goes into it, or waits behind it, and arms no timer of its own — the
-  // landing arms the next window once it is done. And how long the last one
-  // took (ms): the next window is no shorter, so the files of a large record
-  // never land back to back, each with a keystroke or two, while the writer
-  // waits behind them.
-  #flushing = false;
-  #flushCost = 0;
+  #window = null;
   // Local writes appended but not yet on disk: id → the entries the record's
   // in-flight ops leave it as, oldest first, each with its log position —
   // what the write paths build on while the disk is waited for outside the
@@ -187,6 +161,14 @@ class Storage extends Emitter {
     for (const name of Object.keys(methods)) this.#txMethods.push([name, methods[name]]);
     this.#limits = { pendingMax: settings.pendingMax, plugins: settings.plugins };
     this.#defer = settings.defer;
+    this.#window = new DeferredWindow(settings.defer, {
+      hold: (id, entry) => this.#entries.hold(id, entry),
+      landing: (task) => this.#landing(task),
+      land: (touched, from, to) => this.#land(touched, from, to),
+      applied: (position) => this.#log.applied(position),
+      saveCatalog: () => this.#flushCatalog(),
+      recordFlush: (elapsed, records) => this.#otel.recordFlush(elapsed, records),
+    });
     this.#signatures = settings.signatures;
     // Live Records, weakly: one the application still holds pins its cache
     // entry and follows the record; one it dropped is collected, and its
@@ -391,7 +373,7 @@ class Storage extends Emitter {
       catalog: this.#catalog.size,
       log: this.#log.length,
       inflight: this.#inflightCount,
-      deferred: this.#deferred.size,
+      deferred: this.#window.size,
       held: this.#entries.heldIds().size,
     }));
   }
@@ -426,7 +408,7 @@ class Storage extends Emitter {
       limits: this.#limits,
       plugins: this.#plugins,
       defer: this.#defer,
-      deferred: (id, entry, position) => this.#deferWrite(id, entry, position),
+      deferred: (id, entry, position) => this.#window.write(id, entry, position),
       // The record as the write paths see it: its newest in-flight entry,
       // else the cache or the file; an op issued, its landing settled.
       current: (id) => this.#current(id),
@@ -713,79 +695,15 @@ class Storage extends Emitter {
     return result;
   }
 
-  // The node id is the signing key — minted with the pair, never changed —
-  // and node.json names it for the operator; the own sequence numbers (one
-  // per scope) live in the log's vector, which survives compaction, so a seq
-  // is durable the moment its op is appended, before anyone hears of it. A
-  // directory from before signing (a UUID in node.json) is rekeyed once,
-  // with a warning. node.json naming ANOTHER key is refused: an id that
-  // changed in silence would break SELF detection and every peer's echo
-  // filter, and a key pair restored from elsewhere is a thing to be told.
-  // The node id is the signing key when the signing plugin is registered —
-  // minted with the pair, never changed — and node.json names it for the
-  // operator; without the plugin it is what the directory already names, or
-  // what `open({ getId })` mints for a fresh one (a UUID by default; cuid,
-  // ulid… as the application has it). The own sequence numbers live in the
-  // log's vector, which survives compaction, so a seq is durable the moment
-  // its op is appended, before anyone hears of it. A directory from before
-  // signing (a UUID in node.json) is rekeyed once, with a warning, when the
-  // plugin arrives. node.json naming ANOTHER key is refused: an id that
-  // changed in silence would break SELF detection and every peer's echo
-  // filter, and a key pair restored from elsewhere is a thing to be told.
-  // node.json also names the kind plugins the directory has run with: a
-  // reopen without one of them would hold records whose fields it cannot
-  // apply and lose them at the next write, so it is refused (PLUGIN_MISSING,
-  // naming the plugin); more plugins than before is fine and is recorded.
+  // Which node this directory is (src/identity.js: the signing key, node.json, or getId).
   async #loadIdentity() {
-    const keyId = this.#identity?.id ?? null;
-    const kinds = this.kinds;
-    let stored = null;
-    if (await this.#fsi.exists(this.#path, NODE_FILE)) {
-      try {
-        stored = JSON.parse(await this.#fsi.read(this.#path, NODE_FILE));
-      } catch (error) {
-        throw corrupt(NODE_FILE, error);
-      }
-      const { id } = stored;
-      if (!isStreamName(id)) throw corrupt(NODE_FILE, 'no node id in it');
-      // Every plugin it ran with is here (the first one missing is refused);
-      // the same set when it names as many.
-      const known = new Set(kinds);
-      const ran = Array.isArray(stored.plugins) ? stored.plugins : [];
-      let count = 0;
-      for (let i = 0; i < ran.length; i++) {
-        const name = ran[i];
-        if (typeof name !== 'string') continue;
-        if (!known.has(name)) {
-          const message = `${NODE_FILE} says this storage runs with the ${name} plugin: open({ plugins }) with it from '@alexify/syncom/${name}'`;
-          throw typed('PLUGIN_MISSING', message);
-        }
-        count++;
-      }
-      const same = count === kinds.length;
-      if (keyId === null || id === keyId) {
-        this.#nodeId = id;
-        if (same) return;
-      } else if (isKeyId(id)) {
-        const message = `${NODE_FILE} names node ${id}, but keys/sign-public.pem is ${keyId}`;
-        throw new SyncomError('IDENTITY_MISMATCH', message, { id, key: keyId });
-      } else {
-        this.#logger.warn({ event: 'identity.rekeyed', from: id, to: keyId });
-        this.#nodeId = keyId;
-      }
-    } else if (keyId !== null) {
-      this.#nodeId = keyId;
-    } else {
-      const minted = await this.#getId();
-      if (!isStreamName(minted)) {
-        throw new TypeError(
-          `open({ getId }): ${JSON.stringify(minted)} cannot be a node id (a short name without '@')`,
-        );
-      }
-      this.#nodeId = minted;
-    }
-    await this.#fsi.write(this.#path, NODE_FILE, JSON.stringify({ id: this.#nodeId, plugins: kinds }), {
-      atomic: true,
+    this.#nodeId = await loadIdentity({
+      fsi: this.#fsi,
+      path: this.#path,
+      keyId: this.#identity?.id ?? null,
+      kinds: this.kinds,
+      getId: this.#getId,
+      logger: this.#logger,
     });
   }
 
@@ -1039,8 +957,7 @@ class Storage extends Emitter {
     let pinned = 0;
     // #live deletes the slot it reads when its Record is gone: safe mid-walk.
     for (const id of this.#records.keys()) if (this.#live(id) !== undefined) pinned++;
-    let observers = 0;
-    for (const set of this.#observers.values()) observers += set.size;
+    const observers = this.#observers.count;
     const log = this.#log;
     const health = log.health;
     return {
@@ -1053,11 +970,11 @@ class Storage extends Emitter {
       // Records whose files lag the log: deferred by `open({ defer })`, or
       // held after a write that failed (replayed at the next open).
       held: this.#entries.heldIds().size,
-      deferred: this.#deferred.size,
+      deferred: this.#window.size,
       inflight: this.#inflightCount,
       // The window `open({ defer })` gave, what the last deferred landing
       // took (the next window is at least that), and the positions waiting.
-      defer: { window: this.#defer, flushCost: this.#flushCost, positions: this.#deferredPositions },
+      defer: { window: this.#defer, flushCost: this.#window.cost, positions: this.#window.positions },
       observers,
       log: {
         length: log.length,
@@ -1267,106 +1184,13 @@ class Storage extends Emitter {
     // a later flush must not lay the older deferred entry over this file.
     // A slot made while this batch was landing (a later local write, its
     // position past the batch) is not covered and stays.
-    for (const id of touched.keys()) this.#settleDeferred(id, toSeq);
+    for (const id of touched.keys()) this.#window.settle(id, toSeq);
     return true;
   }
 
-  #settleDeferred(id, toSeq) {
-    const slot = this.#deferred.get(id);
-    if (slot === undefined) return;
-    for (let i = 0; i < slot.positions.length; i++) if (!(slot.positions[i] <= toSeq)) return;
-    this.#deferred.delete(id);
-    for (const position of slot.positions) this.#log.applied(position);
-  }
-
-  // A local write under `open({ defer })`: the entry is held — the cache and
-  // the catalog read it, the file and the block wait — and the flush is due
-  // in `defer` ms, or at once ahead of tag() and close(). The log is durable
-  // already; a crash before the flush replays the batch at the next open,
-  // as it does after a file write that failed.
-  // `positions`: the op's, or a transaction's ops of the record, in order —
-  // the entry is the newest's.
-  async #deferWrite(id, entry, positions) {
-    await this.#entries.hold(id, entry);
-    const slot = this.#deferred.get(id);
-    if (slot === undefined) this.#deferred.set(id, { entry, positions: [] });
-    else slot.entry = entry;
-    const held = this.#deferred.get(id).positions;
-    if (typeof positions === 'number') held.push(positions);
-    else for (let i = 0; i < positions.length; i++) held.push(positions[i]);
-    this.#deferredPositions += typeof positions === 'number' ? 1 : positions.length;
-    if (this.#flushing) return;
-    // The window is time, and a count too: a writer that never yields to the
-    // timers (an await loop over memory()) would hold every record it wrote
-    // in the cache and every position in a slot until it stopped.
-    if (this.#deferred.size >= DEFER_RECORDS || this.#deferredPositions >= DEFER_POSITIONS) {
-      void this.#flushDeferred().catch(() => {});
-      return;
-    }
-    this.#armDeferred();
-  }
-
-  // The next window: `defer` ms, or as long as the last landing took.
-  #armDeferred() {
-    if (this.#deferTimer !== null) return;
-    this.#deferTimer = setTimeout(
-      () => {
-        this.#deferTimer = null;
-        this.#flushDeferred().catch(() => {});
-      },
-      Math.max(this.#defer, this.#flushCost),
-    );
-    this.#deferTimer.unref?.();
-  }
-
-  // The deferred writes landed: one chain block, every file, the log told —
-  // as a step of the landings, after every write in flight before it (its
-  // slot is taken then, so a keystroke landing meanwhile is in it or waits
-  // for the next flush, and the cache never goes back to an older entry).
+  // The deferred window lands every slot now (tag(), close(), flush()).
   #flushDeferred() {
-    if (this.#deferTimer !== null) {
-      clearTimeout(this.#deferTimer);
-      this.#deferTimer = null;
-    }
-    this.#flushing = true;
-    return this.#landing(() => this.#landDeferred());
-  }
-
-  async #landDeferred() {
-    try {
-      if (this.#deferred.size > 0) {
-        const started = Date.now();
-        const records = this.#deferred.size;
-        await this.#landSlots();
-        this.#flushCost = Date.now() - started;
-        this.#otel.recordFlush(this.#flushCost, records);
-      }
-    } finally {
-      this.#flushing = false;
-      if (this.#deferred.size > 0) this.#armDeferred();
-    }
-  }
-
-  async #landSlots() {
-    const pending = this.#deferred;
-    this.#deferred = new Map();
-    this.#deferredPositions = 0;
-    const touched = new Map();
-    const positions = [];
-    let from = Infinity;
-    let to = -Infinity;
-    for (const [id, slot] of pending) {
-      touched.set(id, slot.entry);
-      for (const position of slot.positions) {
-        positions.push(position);
-        if (position < from) from = position;
-        if (position > to) to = position;
-      }
-    }
-    if (await this.#land(touched, from, to)) {
-      for (const position of positions) this.#log.applied(position);
-    }
-    this.#flushCatalog();
+    return this.#window.flush();
   }
 
   async #unpersisted(touched, error) {
@@ -1832,50 +1656,7 @@ class Storage extends Emitter {
     if (!isRecordId(id)) throw invalidId(id);
     if (path !== null && path !== undefined) fieldName('observe', path);
     if (typeof listener !== 'function') throw new TypeError('observe() takes a listener');
-    const watch = { path: path ?? null, listener };
-    let set = this.#observers.get(id);
-    if (set === undefined) this.#observers.set(id, (set = new Set()));
-    set.add(watch);
-    if (this.#observing === null) {
-      this.#observing = (event) => this.#observed(event);
-      this.on('transaction', this.#observing);
-    }
-    return () => {
-      set.delete(watch);
-      if (set.size === 0 && this.#observers.get(id) === set) this.#observers.delete(id);
-    };
-  }
-
-  // A turn's changes handed to the observers of the records they are of,
-  // each listener contained like an event listener.
-  #observed(event) {
-    const byId = new Map();
-    for (const change of event.changes) {
-      if (!this.#observers.has(change.id)) continue;
-      let list = byId.get(change.id);
-      if (list === undefined) byId.set(change.id, (list = []));
-      list.push(change);
-    }
-    for (const [id, list] of byId) {
-      for (const { path, listener } of [...this.#observers.get(id)]) {
-        let mine = list;
-        if (path !== null) {
-          mine = [];
-          for (let i = 0; i < list.length; i++) if (touches(list[i], path)) mine.push(list[i]);
-        }
-        if (mine.length === 0) continue;
-        try {
-          const out = listener(mine, event);
-          if (out && typeof out.then === 'function') out.catch((err) => this.#warnObserver(id, err));
-        } catch (err) {
-          this.#warnObserver(id, err);
-        }
-      }
-    }
-  }
-
-  #warnObserver(id, err) {
-    this.#logger.warn({ event: 'listener.error', name: 'observe', id, err });
+    return this.#observers.add(id, path ?? null, listener);
   }
 
   // The write API over a transaction's core (src/commit.js transact): the
