@@ -86,6 +86,7 @@ export type {
   SnapshotPage,
   ApplyRemoteResult,
   SyncomErrorCode,
+  TypedErrorCode,
   SyncomRecordCtor,
   StorageStats,
   LockOptions,

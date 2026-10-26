@@ -193,3 +193,77 @@ test('every type index.d.ts exports, browser.d.ts exports too', () => {
   const missing = [...node].filter((name) => !browser.has(name));
   assert.deepStrictEqual(missing, [], 'a TypeScript user under the browser condition imports these from browser.d.ts');
 });
+
+// Every code src/ raises is in its union and in the API reference's table, and nothing is there that src/ does not
+// raise: a SyncomError's in `SyncomErrorCode`, a typed TypeError's in `TypedErrorCode` — each code read off the
+// first argument of `new SyncomError(…)`, a `super(…)` of a class extending it, or `typed(…)`, a conditional's
+// codes included, a call over several lines too.
+test('every error code src/ raises is in its union and in the reference table, and nothing else is', () => {
+  const fs = require('node:fs');
+  const nodePath = require('node:path');
+  const root = nodePath.join(__dirname, '..', '..');
+  const files = [];
+  const walk = (dir) => {
+    for (const name of fs.readdirSync(dir)) {
+      const full = nodePath.join(dir, name);
+      if (fs.statSync(full).isDirectory()) walk(full);
+      else if (full.endsWith('.js')) files.push(full);
+    }
+  };
+  walk(nodePath.join(root, 'src'));
+  // The text of a call's first argument: up to the first comma at depth 0.
+  const firstArgument = (text, from) => {
+    let depth = 0;
+    for (let i = from; i < text.length; i++) {
+      const c = text[i];
+      if (c === '(' || c === '[' || c === '{') depth++;
+      else if (c === ')' || c === ']' || c === '}') {
+        if (depth === 0) return text.slice(from, i);
+        depth--;
+      } else if (c === ',' && depth === 0) return text.slice(from, i);
+    }
+    return '';
+  };
+  const codesIn = (text, pattern) => {
+    const out = new Set();
+    for (const match of text.matchAll(pattern)) {
+      for (const code of firstArgument(text, match.index + match[0].length).matchAll(/'([A-Z][A-Z_]+)'/g)) {
+        out.add(code[1]);
+      }
+    }
+    return out;
+  };
+  const raised = new Set();
+  const typedCodes = new Set();
+  for (const file of files) {
+    const text = fs.readFileSync(file, 'utf8');
+    for (const code of codesIn(text, /new SyncomError\(/g)) raised.add(code);
+    if (/extends (SyncomError|HookError)/.test(text)) for (const code of codesIn(text, /\bsuper\(/g)) raised.add(code);
+    for (const code of codesIn(text, /\btyped\(/g)) typedCodes.add(code);
+  }
+  const types = fs.readFileSync(nodePath.join(root, 'index.d.ts'), 'utf8');
+  const unionOf = (name) => {
+    const at = types.indexOf(`export type ${name} =`);
+    assert.ok(at >= 0, name);
+    return new Set([...types.slice(at, types.indexOf(';', at)).matchAll(/'([A-Z_]+)'/g)].map((m) => m[1]));
+  };
+  const sorted = (set) => [...set].sort();
+  assert.deepStrictEqual(sorted(unionOf('SyncomErrorCode')), sorted(raised), 'SyncomErrorCode is what src/ raises');
+  assert.deepStrictEqual(
+    sorted(unionOf('TypedErrorCode')),
+    sorted(typedCodes),
+    'TypedErrorCode is what typed() raises',
+  );
+  const api = fs.readFileSync(nodePath.join(root, 'docs', 'reference', 'api.md'), 'utf8');
+  const section = api.slice(api.indexOf('### `SyncomError`'), api.indexOf('### `HookError`'));
+  const documented = new Set();
+  for (const line of section.split('\n')) {
+    if (!line.startsWith('| `')) continue;
+    for (const code of line.split('|')[1].matchAll(/`([A-Z][A-Z_]+)`/g)) documented.add(code[1]);
+  }
+  assert.deepStrictEqual(
+    sorted(documented),
+    sorted(new Set([...raised, ...typedCodes])),
+    'the table names every code once',
+  );
+});

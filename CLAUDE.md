@@ -218,7 +218,10 @@ docs/                     VitePress site
   in `docs/reference/api.md` (one row per code: who raises it, which fields
   ride on it). A wrong argument, option or hook result is a `TypeError`
   without a code, except `typed(code, message)` for a value that is data
-  (`INVALID_ID`, `TYPE_IMMUTABLE`) or configuration (`NO_CHAIN`). A host's
+  (`INVALID_ID`, `TYPE_IMMUTABLE`, `INVALID_VERSION`, `PRESENCE_SIZE`) or
+  configuration (`NO_CHAIN`, `PLUGIN_MISSING`) — the `TypedErrorCode` union,
+  never in `SyncomErrorCode`; `tests/package/consistency.test.js` reads every
+  code off `src/` and checks both unions and the `api.md` table. A host's
   wire refusal (`coded` in `src/sync/hosting.js`) keeps the numeric code wrpc
   carries and names the check in `reason`. `HookError` and `ValidationError`
   extend `SyncomError`. Never `new Error(...)` for something a caller may

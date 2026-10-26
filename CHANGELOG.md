@@ -954,6 +954,12 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **`INVALID_VERSION` was typed as a `SyncomError` code it never is.** It is
+  a `TypeError`'s (`typed()`), so `error instanceof SyncomError && error.code
+  === 'INVALID_VERSION'` was never true. The codes of the typed `TypeError`s
+  are their own union now, `TypedErrorCode` (`PRESENCE_SIZE` among them,
+  which had no row in the reference either); a test reads every code `src/`
+  raises and holds both unions and the reference table to it.
 - **A presence state could be pinned, and a room filled, for good.** An
   entry's stamp had no upper bound, so a state stamped hours ahead outlived
   every timeout; the host stored and relayed entries without the checks a

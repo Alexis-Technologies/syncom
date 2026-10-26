@@ -415,7 +415,6 @@ export type SyncomErrorCode =
   | 'SURROGATE'
   | 'STALE'
   | 'HISTORY_GONE'
-  | 'INVALID_VERSION'
   | 'TAG_EXISTS'
   | 'TAG_NOT_FOUND'
   | 'BRANCH_EXISTS'
@@ -452,10 +451,25 @@ export type SyncomErrorCode =
   | 'VALIDATION_FAILED';
 
 /**
+ * The codes a `TypeError` carries where the value it refuses is data or
+ * configuration rather than the calling code's mistake (`typed()`): an id,
+ * a `$type`, a version, the chain or a plugin missing, a presence state past
+ * its bounds. Never on a `SyncomError`.
+ */
+export type TypedErrorCode =
+  | 'INVALID_ID'
+  | 'TYPE_IMMUTABLE'
+  | 'INVALID_VERSION'
+  | 'NO_CHAIN'
+  | 'PLUGIN_MISSING'
+  | 'PRESENCE_SIZE';
+
+/**
  * What syncom rejects with when an operation cannot be done — as opposed to
  * a `TypeError`, which is a wrong argument, option or hook result and carries
- * no code (except `INVALID_ID`, `TYPE_IMMUTABLE`, `INVALID_VERSION`,
- * `NO_CHAIN` and `PLUGIN_MISSING`, whose value is data or configuration). `code` is one constant; the fields the code
+ * no code (except a `TypedErrorCode`: `INVALID_ID`, `TYPE_IMMUTABLE`,
+ * `INVALID_VERSION`, `NO_CHAIN`, `PLUGIN_MISSING`, `PRESENCE_SIZE`, whose
+ * value is data or configuration). `code` is one constant; the fields the code
  * documents (`op`, `cursor`, `rejected`…) ride on the error, `cause` is the
  * underlying one. A host's wire refusal is not one of these: it is a plain
  * `Error` with the numeric `code` the transport carries and a `reason`.

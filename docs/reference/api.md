@@ -287,8 +287,8 @@ What syncom rejects with when an operation cannot be done: `name`
 and `cause` when an underlying error exists. A `TypeError` is the other kind
 — a wrong argument, option or hook result, a bug in the calling code — and
 carries no code, except `INVALID_ID`, `TYPE_IMMUTABLE`, `INVALID_VERSION`,
-`NO_CHAIN` and `PLUGIN_MISSING`, whose value is data or configuration (the rows below say "a
-`TypeError`"). `HookError` and `ValidationError` are
+`NO_CHAIN`, `PLUGIN_MISSING` and `PRESENCE_SIZE`, whose value is data or configuration (the rows below say "a
+`TypeError`"; their union is the `TypedErrorCode` type). `HookError` and `ValidationError` are
 `SyncomError`s. Exported from the package root; the union of codes is the
 `SyncomErrorCode` type.
 
@@ -336,6 +336,7 @@ carries no code, except `INVALID_ID`, `TYPE_IMMUTABLE`, `INVALID_VERSION`,
 | `TYPE_IMMUTABLE` | a local `set()`, `update()`, `swap()`, `record.save()` or patch whose data names another `$type` than the record's (a `TypeError`) | — |
 | `NO_CHAIN` | `validate()` under `open({ chain: false })` or without the `chain` plugin (a `TypeError`; the message says which) | — |
 | `PLUGIN_MISSING` | a method, a patch action or a local op of a kind the storage was not opened with — `splice()` without the `text` plugin — and `open()` of a directory that ran with a kind the call lacks; `open()` asking for what no registered plugin provides — `sync.signatures: 'require'` without `signing`, `chain: true` without `chain`, `encrypted: true` without `encryption` — and a per-call `{ encrypted: true }` without it (a `TypeError`; the message names the subpath) | — |
+| `PRESENCE_SIZE` | a presence `set()` whose state is past its bounds — 16 KiB, 64 keys, 8 deep (a `TypeError`) | — |
 | `HOOK_FAILED` | a `HookError` | `hook`, `cause` |
 | `VALIDATION_FAILED` | a `ValidationError` | `entity`, `issues`, `cause` |
 
