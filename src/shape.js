@@ -42,6 +42,7 @@ const isStreamName = (value) =>
 // sixteen of the sixty-four are canonical — a non-canonical one decodes to
 // the same key, and would make one key four origins.
 const KEY_ID = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
+
 const isKeyId = (value) => typeof value === 'string' && KEY_ID.test(value);
 
 const OP_TYPES = new Set([

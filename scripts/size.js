@@ -288,11 +288,12 @@ const ENTRIES = [
   // adds to the core is the difference `/all` shows).
   // Signed ops: the Ed25519 half, the canonical form and the verdict.
   // 4.5 with src/ in procedural loops (no array callbacks — a loop is longer than a callback; 2026-10-26) (a hex table in the browser half).
+  // 5.1 with the keys no one holds refused (the points of small order, a y past the prime).
   {
     label: 'signing — browser (@alexify/syncom/signing)',
     entry: 'src/signing/signing.js',
     platform: 'browser',
-    budget: 5,
+    budget: 5.5,
   },
   // The chain: the blocks, SHA-256 through Web Crypto, the plugin.
   { label: 'chain — browser (@alexify/syncom/chain)', entry: 'src/chain/chain.js', platform: 'browser', budget: 2.5 },

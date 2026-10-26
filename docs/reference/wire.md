@@ -19,7 +19,7 @@ Every write is one op, a plain JSON object:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `origin` | string | The node that made it — its Ed25519 public key (43 base64url characters, canonical last character) when the node signs, else its `getId()` id; a stream name: 1 to 128 characters, no `@`, no control character |
+| `origin` | string | The node that made it — its Ed25519 public key (43 base64url characters, canonical last character; a point of small order or a y past the prime is no key — no one holds its private half — and an op signed under one is forged) when the node signs, else its `getId()` id; a stream name: 1 to 128 characters, no `@`, no control character |
 | `seq` | integer ≥ 1 | Its sequence number on that origin, per scope: the vector key is `origin@scope` (`origin` alone for the global scope `*`), and the ops born of a snapshot run in `origin@~` |
 | `ts` | integer ≥ 1 | `Date.now()` when made, never below a stamp the node had seen |
 | `type` | string | One of the fifteen below |

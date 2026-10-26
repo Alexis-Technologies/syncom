@@ -119,6 +119,38 @@ const runSigningTests = async (t, assert, signing, cryptoMod) => {
     assert.strictEqual(await verifyOp(advance, 'require'), OK);
     assert.strictEqual(await verifyOp({ ...advance, vector: { B: 4 } }, 'require'), FORGED);
   });
+
+  await t.test(
+    'a key no one holds — a point of small order, a y past the prime — is no node id: its ops are forged',
+    async () => {
+      const { isHeldKey } = signing;
+      const named = (hex) => {
+        let bin = '';
+        for (let i = 0; i < hex.length; i += 2) bin += String.fromCharCode(parseInt(hex.slice(i, i + 2), 16));
+        return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      };
+      const weak = [
+        '0000000000000000000000000000000000000000000000000000000000000000',
+        '0100000000000000000000000000000000000000000000000000000000000000',
+        '0000000000000000000000000000000000000000000000000000000000000080',
+        '26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05',
+        '26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc85',
+        'c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a',
+        'c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa',
+        'ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f',
+        'edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f',
+        'eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f',
+        'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
+      ];
+      for (const hex of weak) assert.strictEqual(isHeldKey(named(hex)), false, hex);
+      const keys = await Promise.resolve(cryptoMod.generateSigningKeys());
+      assert.strictEqual(isHeldKey(keys.id), true, 'a real key stays one');
+      // The all-zero key with an all-zero signature verified for about one message in four.
+      const zero = named(weak[0]);
+      const forged = { origin: zero, seq: 1, ts: 1, type: 'delete', id: 'r', sig: 'A'.repeat(86) };
+      assert.notStrictEqual(await verifyOp(forged, 'require'), OK);
+    },
+  );
 };
 
 module.exports = { runSigningTests };

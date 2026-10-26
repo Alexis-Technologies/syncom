@@ -954,6 +954,13 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **An op could be signed by a key no one holds.** A node id passed as an
+  Ed25519 key by its format alone; the all-zero key and the other points of
+  small order verify a forged signature for a share of all messages, so ops
+  "signed" by such an id — anyone's to write — went through under
+  `signatures: 'require'`, and presence states too. The signing plugin
+  refuses those keys (and a y past the field's prime, a second name of a key)
+  as forged.
 - **One peer could stall a node with a deep tree.** Every tree op refolded
   every move of the field, and the cycle check walked each move up to the
   root: a 10 000-node chain made every later op on that field take 4 s inside
