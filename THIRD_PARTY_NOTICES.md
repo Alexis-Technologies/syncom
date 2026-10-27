@@ -229,7 +229,7 @@ and its algebra follows quill-delta's: the iterator that hands a delta out in
 pieces (`hasNext`, `peekLength`, `peekType`, `next(n)`), `compose`,
 `transform` with its priority at a tie and `transformIndex` (quill-delta's
 `transformPosition`) in `src/delta.js`, which the editor binding
-(`src/editor/editor.js`) and the text plugin's `toDelta` (`src/text/text.js`)
+(`src/editor/editor.js`) and the text plugin's `toDelta` (`src/text/deltas.js`)
 both stand on. syncom's versions are its own
 JavaScript over the same rules (an embed is one unit, an attribute set to
 null removes it). The license:

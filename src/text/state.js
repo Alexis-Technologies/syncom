@@ -901,7 +901,7 @@ const render = (block) => {
 
 /**
  * A list's reading after an op, derived from the reading before it and what
- * the op changed (src/text/text.js `changeOf`: splices in the indices the
+ * the op changed (src/text/kind.js `changeOf`: splices in the indices the
  * reading had when each applied, a `setAt`, a `move`) instead of made
  * whole: the array before copied once (a native copy), the change laid on
  * it, the values it brings read from the rope. Kept as the block's reading
@@ -1094,7 +1094,7 @@ const positionOfSlot = (st, run, off) => {
  * The visible slots of `[off, off + len)` of run `run`, as the reading shows
  * them: `{ index, count }` — where the first stands, how many are shown —
  * or null when the run is not placed here. O(log n): what a change report
- * (src/text/text.js) reads an op's cuts and inserts with.
+ * (src/text/kind.js) reads an op's cuts and inserts with.
  */
 const spanOf = (block, run, off, len) => {
   const st = ensureHead(block);

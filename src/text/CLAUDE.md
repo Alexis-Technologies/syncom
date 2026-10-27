@@ -5,7 +5,14 @@ The sequence engine and its rope, embeds, marks, what an op may never read whole
 ## Layout
 
 ```
-src/text/text.js          @alexify/syncom/text — the list and text kinds as a plugin, over src/text/{sequence,rle,myers}.js
+src/text/text.js          @alexify/syncom/text — the list and text kinds as a plugin: the plugin object over the four modules below
+src/text/kind.js          what the core calls of the kinds: codes and ranks, apply/join/prune/render/resolve and the change an op
+                          reports, the index resolved into what travels, a list's members' seam, the embed markers
+src/text/diffs.js         the kinds' patches: the diff of two readings as splices (src/text/myers.js), realize, recreate, migrate,
+                          compact, who wrote the field (editors), what it holds beside its reading (values)
+src/text/methods.js       the storage methods of the kinds (splice, push, updateText, mark, spans, cursors, blocks, setAt, move…)
+                          over the lent core
+src/text/deltas.js        toDelta and applyDelta: a turn's changes as a Quill delta, a delta as one transaction (src/delta.js)
 src/text/rle.js           run-length content: a run's pieces and gaps, cut, append, merge, the canonical form under MAX_RUN —
                           no requires; sequence.js is the caller and re-exports what the tests read
 src/text/btree.js         the rope: a persistent B+-tree over a block's segments and fences with two measures (slots, visible),
@@ -38,7 +45,7 @@ attrs, isEmbed }` an entry of the block's `vals` (as a list element's
   `insertEmbed`/`splitBlock` and a patch with `vals` pass it — and
   `updateText` refuses a hunk that inserts one. The engine knows no marker:
   `S.valueAt` hands back what the slot holds, `markerOf` in
-  src/text/text.js normalizes it (another shape reads as none), `spans()`
+  src/text/kind.js normalizes it (another shape reads as none), `spans()`
   types every span (`text`/`embed`/`block`). A diff needs what the reading
   leaves out: `diffViews(..., { context: { from, to } })` hands the plugin
   the entries (versions, compact) or the `embeds` a `commit` event carries

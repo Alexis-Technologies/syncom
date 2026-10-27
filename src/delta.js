@@ -4,7 +4,7 @@
 // { delete }]`, an embed slot as `{ insert: { embed: marker } }`, a marker
 // changed as `{ retain: 1, attributes: { embed: marker } }` — and their
 // algebra, once: what the text plugin composes a turn's changes with
-// (`toDelta`, src/text/text.js) and what the editor binding composes,
+// (`toDelta`, src/text/deltas.js) and what the editor binding composes,
 // transforms and maps indices through (src/editor/editor.js, which checks
 // what it is handed). It follows quill-delta's (BSD-3-Clause; see
 // THIRD_PARTY_NOTICES.md). No requires.

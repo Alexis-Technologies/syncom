@@ -254,7 +254,7 @@ fi }`. An index, a sibling or a range is resolved in `prepareOp` INSIDE the
   queue (`resolveSplice`/`resolveMove`/`resolveMark`/`resolveTree` in
   `src/commit.js`: `OUT_OF_RANGE`, `CYCLE`, `NOT_FOUND`, and `SURROGATE` for an
   index of a text between the halves of a pair — `wholeCharacters` in
-  src/text/text.js, over the rendered text; `spliceArgs` refuses content with
+  src/text/kind.js, over the rendered text; `spliceArgs` refuses content with
   a lone half; src/text/myers.js diffs by code points where a surrogate is
   about, so `updateText` never makes one; the tree plugin's `resolve` reads
   the fold the block keeps and hands back `null` for a move to where the node is, and
@@ -294,7 +294,7 @@ fi }`. An index, a sibling or a range is resolved in `prepareOp` INSIDE the
   built only with a listener, so observers cost nothing before); `touches`
   decides a path's share (the field, under it, a prefix of it, the whole
   record); a listener is contained like an event listener. `toDelta` in
-  src/text/text.js composes changes with a small Quill `compose` (retain /
+  src/text/deltas.js composes changes with a small Quill `compose` (retain /
   insert / delete, attributes; an embed slot as `{ insert: { embed } }`, and
   an `embed` attribute over a slot the turn inserted replaces its marker —
   never an attribute on the insert, which a reader takes for a mark);

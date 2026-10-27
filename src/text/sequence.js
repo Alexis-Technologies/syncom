@@ -73,7 +73,7 @@
 // at, and `vals`, its value — each last-writer-wins by stamp (a TEXT keeps
 // `vals` too: the marker of an embed slot, U+FFFC, set with the splice that
 // inserts the slot or by an `assign`; the engine knows no marker's shape,
-// src/text/text.js reads it; the splice's marker is a register like an
+// src/text/kind.js reads it; the splice's marker is a register like an
 // assign's, so the newer of the two wins whichever arrives first). A `move`
 // cuts the slot the element showed at and adds a one-element POSITION run
 // (`[at, [[value]], elem]`) that names the element; the register then points

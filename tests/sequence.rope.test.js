@@ -290,7 +290,7 @@ const listOp = (type, ts, origin, value) => ({ origin, seq: ts, ts, type, id: 'r
 const listOf = (entry) => (entry === null || entry.meta.blocks.items === undefined ? null : S.indexOf(entry, 'items'));
 
 // One step over a list: inserts, cuts, assigns and moves as the local calls
-// resolve them (src/text/text.js), and resets.
+// resolve them (src/text/kind.js), and resets.
 const listStep = (entry, ts, random) => {
   const origin = ORIGINS[pick(random, ORIGINS.length)];
   const idx = listOf(entry);
