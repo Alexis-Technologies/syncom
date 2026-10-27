@@ -150,4 +150,21 @@ const fromEntries = (entries) => {
   return { root, size };
 };
 
-module.exports = { EMPTY, hashOf, get: getOf, set: setOf, entries: entriesOf, fromEntries };
+/**
+ * The 32 children of the root, by the first five bits of a key's hash: a
+ * node, a lone `[key, value]`, or null — what a large block is written in
+ * pieces by (src/entries.js). A `set` path-copies one of them; the rest are
+ * the same objects in every version that shares them.
+ */
+const childrenOf = (map) => {
+  const { root } = map;
+  const out = [];
+  let at = 0;
+  for (let bit = 0; bit < 32; bit++) out.push((root.bitmap & (1 << bit)) === 0 ? null : root.slots[at++]);
+  return out;
+};
+
+/** Every `[key, value]` under one of `childrenOf`'s children. */
+const pairsUnder = (child) => (isNode(child) ? pairsOf(child) : [child]);
+
+module.exports = { EMPTY, hashOf, get: getOf, set: setOf, entries: entriesOf, fromEntries, childrenOf, pairsUnder };

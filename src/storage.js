@@ -347,6 +347,7 @@ class Storage extends Emitter {
       decrypt: (data) => this.#unseal(data),
       view: (id, entry) => this.#view(id, entry),
       before: this.#tags === null ? null : (id, file) => this.#tags.copyBefore(id, file),
+      plugins: this.#plugins,
     });
     await this.#loadIdentity();
     await this.#loadSchema();
@@ -490,7 +491,8 @@ class Storage extends Emitter {
       const rebuild = async () => {
         let count = 0;
         for (const name of await this.#fsi.list(`${this.#path}/data`)) {
-          if (!name.endsWith('.json')) continue;
+          // A record's file, never one of its pieces (`<id>~<n>.json`).
+          if (!name.endsWith('.json') || !isRecordId(name.slice(0, -5))) continue;
           await this.#entries.index(name.slice(0, -5));
           count++;
         }

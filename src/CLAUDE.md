@@ -58,7 +58,8 @@ src/fields.js             the API of the core's kinds beyond registers — inc/a
                           come with it; Storage keeps a delegate per method
 src/patches.js           reading, applyPatches, compact — the present and its patches, the core's (the undo subpath stands on
                           applyPatches); appliedHere lives in log.js
-src/entries.js            EntryStore — record files under data/, the bounded cache, the catalog row each change leaves
+src/entries.js            EntryStore — record files under data/ (a large block's runs in pieces beside them: `<id>~<n>.json`),
+                          the bounded cache, the catalog row each change leaves
 src/record.js             Reference, Record, Collection — what the application holds; public API + the symbols only
 src/commit.js             the one local write path: prepare → validate → issue (in the queue) → land → announce (outside it, in log order) (`storage[COMMIT]`)
 src/apply.js              a peer's batch: admit → apply one by one → persist → announce (`storage.applyRemote`)

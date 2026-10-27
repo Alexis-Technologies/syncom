@@ -180,6 +180,54 @@ const runsJson = (block, keep = true) => {
   return out;
 };
 
+// ---- a block in pieces ---------------------------------------------------
+
+// A block of PIECES_MIN runs or more is written in pieces (src/entries.js):
+// its runs by the 32 children of the run map's root — the first five bits
+// of a run key's hash (./pmap.js) — a piece a child, the rest of the block
+// whole beside them (`head`). A keystroke path-copies one child, so one
+// piece is new and the file of every other stays; a piece's `key` is its
+// child, what tells it is the same. A plain block (read from a file) is
+// grouped by the same bits, its pieces keyed by the groups made here.
+const PIECES_MIN = 1024;
+const piecesOf = (block) => {
+  const st = STATE.get(block);
+  const head = {};
+  for (const name of Object.keys(block)) if (name !== 'runs') head[name] = block[name];
+  const slots = [];
+  if (st === undefined) {
+    const keys = keysOf(block.runs);
+    if (keys.length < PIECES_MIN) return null;
+    const groups = [];
+    for (let i = 0; i < 32; i++) groups.push(null);
+    for (let i = 0; i < keys.length; i++) {
+      const at = P.hashOf(keys[i]) & 31;
+      if (groups[at] === null) groups[at] = {};
+      groups[at][keys[i]] = block.runs[keys[i]];
+    }
+    for (let i = 0; i < 32; i++) {
+      const group = groups[i];
+      slots.push(group === null ? null : { key: group, text: () => JSON.stringify(group) });
+    }
+    return { head, slots };
+  }
+  if (st.runs.size < PIECES_MIN) return null;
+  const children = P.childrenOf(st.runs);
+  const { kind } = st;
+  for (let i = 0; i < 32; i++) {
+    const child = children[i];
+    slots.push(child === null ? null : { key: child, text: () => pieceText(kind, child) });
+  }
+  return { head, slots };
+};
+
+// One piece's runs as JSON text, each run as the `runs` map holds it.
+const pieceText = (kind, child) => {
+  const out = {};
+  for (const [key, run] of P.pairsUnder(child)) out[key] = tupleOf(kind, run, true);
+  return JSON.stringify(out);
+};
+
 /** An empty block of a kind. */
 const createSeq = (kind) => hydrate({ k: kind, ts: 0, runs: {} }, null);
 
@@ -1282,4 +1330,6 @@ module.exports = {
   indexOf,
   stats,
   segmentsIn,
+  PIECES_MIN,
+  piecesOf,
 };

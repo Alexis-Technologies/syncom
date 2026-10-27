@@ -320,6 +320,27 @@ merge:
 | `gone` | Per field removed by `unset`, the stamp of the removal — a register's tombstone an older `set` loses to |
 | `v` | The schema version of the last whole-record write |
 
+A list or text block of 1 024 runs or more (`PIECES_MIN`) is written in
+**pieces**: its `runs` leave the record file for files beside it,
+`<id>~<n>.json`, each the runs of one of the 32 children of the run map's
+root — the first five bits of a run key's FNV-1a hash
+(`src/text/pmap.js`) — and the block names them in their place, a slot
+each, `null` where none:
+
+```json
+"body":{"k":"t","ts":1793090489785,"parts":[null,"p1~3.json","p1~17.json",…,"p1~9.json"]}
+```
+
+and the record file carries `"gen"`, the counter `n` runs on. A write
+makes the file of a piece whose child is new — a keystroke path-copies
+one child, so one piece of 32 — then the record file, then removes the
+pieces it no longer names: a crash leaves the old record file whole with
+its pieces, or the new one with its. New pieces a crash left unnamed are
+written over as `n` reaches them again; old ones it left after the record
+file stay on disk, never read. A read assembles the block whole
+(a piece gone is `INTEGRITY`); a tag's copy of a record is whole, never
+in pieces.
+
 A peer's `meta` is never trusted as it comes: a snapshot's is rebuilt into
 this shape key by key (`normalizeMeta` in `src/ops.js`), own keys only,
 each block through its plugin under the node's bounds, anything else

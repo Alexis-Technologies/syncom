@@ -225,6 +225,9 @@ const changeOf = (op, stamp, held, block, base = null, cuts = null, from = -1) =
 
 const render = (entry, field) => S.render(S.indexOf(entry, field));
 
+// A large block as its file holds it: the runs in pieces (src/entries.js).
+const pieces = (block) => S.piecesOf(block);
+
 // What a list or text field reads as, as a token: a number per engine block,
 // handed out the first time one is asked for (0 for no such field) — the
 // same block, the same reading. A new block may read the same (an op that
@@ -467,6 +470,7 @@ module.exports = {
   apply,
   marksAt,
   render,
+  pieces,
   revisionOf,
   NESTS,
   members,

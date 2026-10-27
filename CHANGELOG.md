@@ -1652,6 +1652,16 @@ There is no released version section until then; everything below lands in it.
 
 ### Changed
 
+- **A large text is written in pieces, not whole at every flush.** A list
+  or text block of 1 024 runs or more keeps its runs in up to 32 files
+  beside the record file (`<id>~<n>.json`), by the first level of the run
+  map; a flush writes the piece a keystroke changed, the record file, and
+  removes what it no longer names. A text of 25 000 inserts: a keystroke
+  under `defer: 0` 33.2 ms and 3 MB written → 1.35 ms and 242 KB (8 000:
+  9.1 → 0.7 ms); under the default window, at 8 000, 231 → 146 µs and
+  9.7 → 0.9 KB. A read assembles the block
+  whole; `file()` (a tag's copy) hands it whole; a piece gone is
+  `INTEGRITY`. The kind plugin hook is `pieces(block)`.
 - **A push reads what the receiver lacks, not the whole log, and a roll
   writes no index.** The log keeps its retained entries by stream; a push on
   a handshake or a recovery, a branch merge and a host's REWOUND proof pick
