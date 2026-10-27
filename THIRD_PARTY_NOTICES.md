@@ -13,8 +13,10 @@ bench:compare` downloads it at bench time into a git-ignored cache
 ## Fugue — `fugue-simple` (reference implementation)
 
 Repository: https://github.com/mweidner037/fugue — `fugue-simple/src/index.ts`
-(commit 31e74fe). The placement rule (`placeInsert`), the sibling order and
-the iterative walk of `src/text/sequence.js` are adapted from it. The paper:
+(commit 31e74fe). The placement rule (`placeInsert`, `src/text/state.js`), the
+sibling order (`rankAmong`, `src/text/splice.js`) and the iterative walk
+(`walkSubtree`, `src/text/state.js`) of the sequence engine (`src/text/sequence.js`)
+are adapted from it. The paper:
 Matthew Weidner and Martin Kleppmann, "The Art of the Fugue: Minimizing
 Interleaving in Collaborative Text Editing" (2023), arXiv:2305.00583.
 
@@ -43,7 +45,8 @@ Interleaving in Collaborative Text Editing" (2023), arXiv:2305.00583.
 ## Yjs
 
 Repository: https://github.com/yjs/yjs (commit 0e0dc34). Three ideas of
-`src/text/sequence.js` follow Yjs: deleted content collapsed to a length that
+the sequence engine (`src/text/sequence.js`, its op path in `src/text/splice.js`)
+follow Yjs: deleted content collapsed to a length that
 keeps the place (`ContentDeleted`; the run-length form is `src/text/rle.js`), consecutive inserts by one writer stored
 as one run (`Item.mergeWith`), and an op whose dependency has not arrived
 kept until it does (`pendingStructs`). The undo manager of `src/undo/undo.js`
@@ -79,12 +82,12 @@ copied.
 ## Loro and loro-js
 
 Repository: https://github.com/loro-dev/loro (commit 75e4bf2). Three rules of
-`src/text/sequence.js` follow Loro's: the movable list (a move cuts the slot the
+the sequence engine follow Loro's: the movable list (`src/text/splice.js`) (a move cuts the slot the
 element showed at, adds a one-element position run and points the element's
 position register at it; `crates/loro-internal/src/state/movable_list_state.rs`,
 `context/loro-js-movable-list.md`), the expand rule that picks a mark's anchor
-sides and reverses under removal (`crates/loro-internal/src/container/richtext.rs`),
-and the stable cursor as an element id with a side (`crates/loro-internal/src/cursor.rs`).
+sides and reverses under removal (`src/text/marks.js`; `crates/loro-internal/src/container/richtext.rs`),
+and the stable cursor (`src/text/state.js`) as an element id with a side (`crates/loro-internal/src/cursor.rs`).
 `src/order/order.js` is an adaptation of `loro-js/src/runtime/fractional-index.ts`
 from bytes to a 62-letter alphabet. `src/tree/moves.js` follows Loro's movable tree
 (`crates/loro-internal/src/state/tree_state.rs`, `loro-js/src/runtime/tree-moves.ts`)
@@ -94,7 +97,7 @@ skipped — over the algorithm of Kleppmann, Mulligan, Beresford and Gomes, "A
 highly-available move operation for replicated trees" (2021); the fold itself
 — kept per block, a move older than others landed by the paper's undo–do–redo —
 is written for syncom's stamped move log and shares no code with Loro's. The rope under a block — `src/text/btree.js`, read by
-`src/text/sequence.js` — follows the rules of `loro-js/src/runtime/ordered-index.ts`
+`src/text/state.js` — follows the rules of `loro-js/src/runtime/ordered-index.ts`
 and `sequence-index.ts`: a tree whose nodes carry the measures of what hangs
 under them (here slots and visible slots), found by descending the measures
 and positioned by climbing the hints an item keeps to its node and a node to
@@ -129,7 +132,7 @@ shares no code with Loro's treap.
 ## Peritext
 
 Repository: https://github.com/inkandswitch/peritext (commit 89c162d). The
-stacking marks of `src/text/sequence.js` — a mark flagged `many` that never
+stacking marks of `src/text/marks.js` — a mark flagged `many` that never
 replaces another of its key and goes only by its own id — follow Peritext's
 `allowMultiple` (`src/schema.ts`, `src/peritext.ts`). No code was copied.
 
@@ -190,7 +193,7 @@ algorithm's author asks:
 
 Repository: https://github.com/mweidner037/list-positions (commit 383b844).
 The run-length form of a sequence's content in `src/text/rle.js` (read by
-`src/text/sequence.js`) — `["ab", 3, "c"]`, present items alternating with gap lengths — is the save
+`src/text/state.js` and `src/text/splice.js`) — `["ab", 3, "c"]`, present items alternating with gap lengths — is the save
 format of its `List` and `Text` (`src/lists/list.ts`, `src/lists/text.ts`),
 and the rule that a writer extends its own run instead of anchoring a new one
 follows `Order.createPositions` (`src/order/order.ts`).

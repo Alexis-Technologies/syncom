@@ -12,9 +12,16 @@ src/text/btree.js         the rope: a persistent B+-tree over a block's segments
                           path copying, hints tagged by lineage, a text cache per node — no requires
 src/text/pmap.js          a persistent hash map (HAMT): the run records of a block, one changed per keystroke — no requires
 src/text/plist.js         a persistent sorted list in chunks: a placed run's segments, the children at its offsets — no requires
-src/text/sequence.js      the sequence engine behind the list and text kinds (indexOf: a plain block hydrated once, a WeakMap keyed by it):
-                          run records, the walk that places a subtree, local placement, pending ops, pos/vals/marks registers,
-                          cursors, prune and join — requires vector.js, plugin.js, rle.js, btree.js, pmap.js, plist.js
+src/text/sequence.js      the sequence engine behind the list and text kinds: its design (the header) and its public names, over the
+                          five modules below — the one file the rest of syncom requires of the engine
+src/text/keys.js          the engine's names: run and element keys, anchors, the checks a peer's block is read through, the refusals
+                          an op reports, a mark's flags — requires vector.js only
+src/text/state.js         a block's engine state (the WeakMap beside the plain object), a plain block's JSON made whole and hydrated
+                          into the rope (indexOf: once per plain block), every reading — elements, values, positions, cursors, what waits
+src/text/splice.js        what an op does: the draft, a run placed with what hangs under it (walkSubtree, placeRun), cuts and
+                          extensions, pending ops, a splice; the pos/vals registers — assign and move
+src/text/marks.js         marks: the anchors of a range, a mark applied or switched off, the index of the marks in force (styleAt)
+src/text/join.js          a block as a snapshot carries it: a peer's block normalized under the bounds, prune (the reset rule), join
 ```
 
 ## Rules
@@ -42,7 +49,7 @@ attrs, isEmbed }` an entry of the block's `vals` (as a list element's
 - **A block IS the index, and it is never mutated in place.** A block of
   `src/text/sequence.js` is a plain object — `k`, `ts`, the maps, and `runs`
   as a getter that serializes the rope in walk order once per version — whose
-  engine state is in a module-private WeakMap: the rope (`src/text/btree.js`),
+  engine state is in a WeakMap of src/text/state.js (the engine's modules alone read it): the rope (`src/text/btree.js`),
   the run records (`src/text/pmap.js`; a placed record's segments and the
   children at its offsets in `src/text/plist.js`), what waits, the counts the
   bounds read. Nothing else is on the object (`lengthOf`, `totalOf`, `render`

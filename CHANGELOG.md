@@ -1652,6 +1652,14 @@ There is no released version section until then; everything below lands in it.
 
 ### Changed
 
+- **The sequence engine is five modules, not one file of 2 957 lines.**
+  `src/text/sequence.js` keeps the design and the public names; the code is
+  `keys.js` (names, anchors, refusals), `state.js` (the block, hydration,
+  every reading), `splice.js` (what an op does, the registers), `marks.js`
+  (the marks and their index) and `join.js` (a snapshot's block normalized,
+  pruned, joined), layered without a cycle. Nothing a caller reads changed;
+  the names that cross a module are not minified, so `/text` is 1.3 KB
+  larger (31.5 → 32.8 KB).
 - **`migrate()` and `check()` are the schema plugin's, and so is
   `schema.json`.** The facade keeps a stub for each (PLUGIN_MISSING
   without the plugin, as before); the code, and the reading and writing of

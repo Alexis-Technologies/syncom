@@ -275,7 +275,9 @@ const ENTRIES = [
   // 110.4 with sets shared between versions, a hub's vector read key by key, the log's groups and the deferred
   // window measured (stats, three gauges, three instruments). 111.5, raised by name.
   // 113.0 with the tree's kept fold (+1.6) and a ProseMirror edit sent from its steps. 113.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 113.5 },
+  // 114.6 with the sequence engine in five modules (src/text/{keys,state,splice,marks,join}.js: the names that
+  // cross a module stay whole; 2026-10-27). 115, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 115 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -292,7 +294,8 @@ const ENTRIES = [
   // 28.7 with src/ in procedural loops (no array callbacks — a loop is longer than a callback; 2026-10-26).
   // 30.9 with the engine's indexes (the marks by anchor, persistent pos/vals/marks, a list's reading
   // derived, bodies capped at SEG_MAX, one hydration per plain block; 2026-10-27). 31.5, raised by name.
-  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 31.5 },
+  // 32.8 with the engine in five modules (the names that cross a module are not minified). 33, raised by name.
+  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 33 },
   // The tree kind alone, with the fractional indexes a place is made of and
   // the argument checks it shares with the core (5.1 measured).
   // 5.5 with the field-name check unset shares with it (src/args.js).
