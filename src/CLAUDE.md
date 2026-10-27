@@ -390,8 +390,9 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   the hash xxHash32 (src/hash.js) of the entries' JSON; a mismatch is
   `log.segment.unreadable`/`log.open.unreadable` with `reason: 'checksum'`,
   counted in `corrupt`, never read in part — an open group file so is moved to `log/corrupt/`,
-  never deleted; a read that fails other than ENOENT fails the open (`readOrNull`, `CORRUPT`). A file without a hash is an
-  older format and taken as it is. `retention: 'all'` is `{ ops: Infinity }`
+  never deleted; a read that fails other than ENOENT fails the open (`readOrNull`, `CORRUPT`). A file without a hash is not
+  whole. The segments are what the directory lists — the index names none and is written where
+  compaction dropped something; a gap among them is `log.segment.missing`. `retention: 'all'` is `{ ops: Infinity }`
   (`retainedOps` Infinity) — normalized in the OpLog constructor, nowhere else.
   Where the fsi has `append` the open groups are a JOURNAL, a log file per
   line: `open/<pad(first)>-<session><counter>.jsonl` — a name no failed

@@ -235,7 +235,7 @@ write, no rename):
 | `open/<seq>-<token>.jsonl` | A journal, where the backend has `append`: one log file per line, a line per group of appends; named by its first seq (ten digits zero-padded) and a token unique to the open and the journal; begun again at every roll and after a failed append, removed once every group in it is sealed, rewritten only by a scrub |
 | `open/<seq>.json` | A group in a file of its own, where the backend has no `append`; named by its first seq |
 | `seg-<from>.json` | A sealed segment: the open groups rolled together once 64 of them accumulate (`log.rollAfter`) |
-| `index.json` | `{ epoch, floor, next, vector, heads, segments, droppedHeld, latestTs, droppedTs }` — a summary; the files are the truth, and what the index lacks is rebuilt from a listing |
+| `index.json` | `{ epoch, floor, next, vector, heads, droppedHeld, latestTs, droppedTs }` — what the files cannot say: the epoch, the floor, and the vector, heads and stamps of what compaction dropped; written where compaction dropped something and at a close, not at every roll. The segments are what the directory lists, each read whole; one whose start does not meet the floor or the end of the one before is a file gone (`log.segment.missing`), one wholly below the floor was compacted and is removed |
 
 Every log file is `{ "entries": [...], "hash": "<xxh32>" }` — the
 entries' JSON and its xxHash32 as eight hex characters, computed over the
@@ -245,7 +245,7 @@ same text. A file whose hash does not match is unreadable at open
 that fails its checksum was whole once, so it is moved to `log/corrupt/`
 as the evidence, never deleted; one that does not parse was torn by its
 own write, never acknowledged, and is dropped (`log.open.torn`). A file
-without a hash, from before checksums, is taken as it is. A file that is
+without a hash is not whole: unreadable, as one that fails it. A file that is
 there and cannot be read at all — an I/O error, not a missing file — fails
 `open()` with `CORRUPT`: an open that went on without it could hand its
 seqs out again.
@@ -274,7 +274,7 @@ close, with the sixteen ops sealed into one segment — `heads` the stream's
 newest op and its fingerprint, kept once the op itself is compacted away:
 
 ```json
-{"epoch":"mvqe40dinmi2cx","floor":1,"next":17,"vector":{"VLH7Ywu…":16},"heads":{"VLH7Ywu…":[16,"vP8rexFGNozvq4vFd4wYEitJ9-7aoVUnJYyLenq1g8o"]},"segments":[{"name":"seg-0000000001.json","from":1,"to":16,"count":16}],"droppedHeld":0,"latestTs":1793087684892,"droppedTs":0}
+{"epoch":"mvqe40dinmi2cx","floor":1,"next":17,"vector":{"VLH7Ywu…":16},"heads":{"VLH7Ywu…":[16,"vP8rexFGNozvq4vFd4wYEitJ9-7aoVUnJYyLenq1g8o"]},"droppedHeld":0,"latestTs":1793087684892,"droppedTs":0}
 ```
 
 An **event id** is `<epoch>.<seq>` — `mvqe40dinmi2cx.16` — the epoch

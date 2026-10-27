@@ -12,7 +12,7 @@
 // every stream (`allStreams`) and joins as state when one is out of reach.
 
 const { opInScope } = require('./scope.js');
-const { vectorHas, opKey, isBootstrapOp } = require('./vector.js');
+const { isBootstrapOp } = require('./vector.js');
 
 /**
  * `{ ops, first }` from `log` for a receiver `exclude` (its node id) that
@@ -20,17 +20,42 @@ const { vectorHas, opKey, isBootstrapOp } = require('./vector.js');
  * node id; `allStreams` takes `first` of every origin, not the sender's alone.
  */
 const outbound = (log, { exclude, vector, scopes = null, own, allStreams = false }) => {
-  const ops = [];
   const first = {};
-  // One pass over what the log retains, no copy of it: a push and a merge
-  // run this on every call.
-  for (const { op } of log.scan()) {
-    if (op.origin === exclude || op.from === exclude) continue;
-    if (!opInScope(op, scopes)) continue;
-    if ((allStreams || op.origin === own) && !isBootstrapOp(op)) first[opKey(op)] ??= op.seq;
-    if (vectorHas(vector, op)) continue;
-    ops.push(op);
+  const picked = [];
+  // By stream, not over the whole log: a binary search for what the
+  // receiver holds of each, the rest taken — what it lacks, not what the
+  // log retains (a handshake with a log of a million ops read them all).
+  for (const [key, list, from] of log.streams()) {
+    const lead = list[from].op;
+    if (lead.origin === exclude) continue;
+    // A stream other than the bootstrap one is of one scope: its first op's.
+    const boot = isBootstrapOp(lead);
+    if (!boot && !opInScope(lead, scopes)) continue;
+    if (!boot && (allStreams || lead.origin === own)) {
+      for (let i = from; i < list.length; i++) {
+        if (list[i].op.from === exclude) continue;
+        first[key] = list[i].op.seq;
+        break;
+      }
+    }
+    const held = Object.hasOwn(vector, key) && Number.isSafeInteger(vector[key]) ? vector[key] : 0;
+    let low = from;
+    let high = list.length;
+    while (low < high) {
+      const mid = (low + high) >>> 1;
+      if (list[mid].op.seq <= held) low = mid + 1;
+      else high = mid;
+    }
+    for (let i = low; i < list.length; i++) {
+      const { op } = list[i];
+      if (op.from === exclude || (boot && !opInScope(op, scopes))) continue;
+      picked.push(list[i]);
+    }
   }
+  // In log order, as the log holds them.
+  picked.sort((a, b) => a.seq - b.seq);
+  const ops = [];
+  for (let i = 0; i < picked.length; i++) ops.push(picked[i].op);
   return { ops, first };
 };
 

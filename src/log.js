@@ -98,7 +98,7 @@ const readOrNull = async (fsi, dir, name) => {
 const indexOf = (index) => {
   if (index === null || typeof index !== 'object' || Array.isArray(index)) return null;
   if (typeof index.epoch !== 'string' || !Number.isSafeInteger(index.floor) || index.floor < 1) return null;
-  if (!isMap(index.vector) || !isMap(index.heads) || !Array.isArray(index.segments)) return null;
+  if (!isMap(index.vector) || !isMap(index.heads)) return null;
   if (!Number.isSafeInteger(index.droppedHeld) || index.droppedHeld < 0) return null;
   if (typeof index.latestTs !== 'number' || typeof index.droppedTs !== 'number') return null;
   return index;
@@ -151,6 +151,11 @@ class OpLog {
   // stream → [seq, fingerprint] of the newest op ever held, compacted or not.
   #prints = new Map();
   #heads = new Map();
+  // Stream → its retained entries in log order (`entries`, the live ones
+  // from `head`): what a push picks the ops a peer lacks from — a binary
+  // search per stream for the seq it holds — without walking the log.
+  // Compaction drops a stream's first entries; a failed group never got here.
+  #streams = new Map();
   #rollAfter;
   #retention;
   #log;
@@ -231,7 +236,6 @@ class OpLog {
       this.#floor = index.floor;
       this.#vector = index.vector;
       this.#takeHeads(index.heads);
-      this.#segments = index.segments;
       this.#droppedHeld = index.droppedHeld;
       // Seeded from the index; what the files hold only moves it up.
       this.#latestTs = index.latestTs;
@@ -240,11 +244,13 @@ class OpLog {
       // No (readable) index: a new incarnation. Existing segments are still
       // picked up below, but their ids belong to an epoch nobody can resume.
       this.#epoch = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-      this.#segments = [];
     }
     await this.#loadSegments(index !== null);
     await this.#loadOpen();
     this.#seen = null;
+    // The files were read out of order (the journals newest first): the
+    // streams are made from the sorted entries, once.
+    for (let i = 0; i < this.#entries.length; i++) this.#stream(this.#entries[i]);
     // Entries this open could not read, or an incarnation that starts above
     // seq 1 without an index to say what it dropped: as good as compacted,
     // up to the newest stamp known.
@@ -260,32 +266,49 @@ class OpLog {
     return this;
   }
 
+  // The sealed segments are what the directory lists (`seg-<from>.json`),
+  // each read whole: the index names none of them — it was rewritten whole
+  // at every roll, a list as long as the history under `retention: 'all'`.
+  // A segment's start not meeting the floor or the end of the one before is
+  // a file this log should hold and does not (`log.segment.missing`); one
+  // wholly below the floor was compacted, its removal cut short.
   async #loadSegments(indexed) {
-    const known = new Set();
-    for (let i = 0; i < this.#segments.length; i++) known.add(this.#segments[i].name);
+    const segments = [];
     const names = await this.#fsi.list(this.#path);
     for (const name of names) {
-      if (!name.startsWith('seg-') || known.has(name)) continue;
-      // A segment the index does not know: rolled, then crashed before the
-      // index was rewritten. Adopt it.
+      if (!name.startsWith('seg-')) continue;
       const from = Number(name.slice(4, -5));
-      if (Number.isInteger(from)) this.#segments.push({ name, from, to: from, count: 0 });
+      if (Number.isInteger(from)) segments.push({ name, from, to: from, count: 0 });
     }
-    this.#segments.sort((a, b) => a.from - b.from);
-    for (const segment of this.#segments) {
+    segments.sort((a, b) => a.from - b.from);
+    // Where the next segment should start: unknown past one that did not read.
+    let next = indexed ? this.#floor : null;
+    for (const segment of segments) {
       const text = await readOrNull(this.#fsi, this.#path, segment.name);
       const { entries, reason } = readFile(text);
       if (entries === null) {
         this.#log?.error?.({ event: 'log.segment.unreadable', segment: segment.name, reason });
         this.#lost = true;
         if (reason === 'checksum') this.#corrupt++;
+        this.#segments.push(segment);
+        next = null;
         continue;
       }
-      this.#adopt(entries);
       if (entries.length > 0) {
         segment.to = entries[entries.length - 1].seq;
         segment.count = entries.length;
       }
+      if (indexed && segment.to < this.#floor) {
+        await this.#fsi.remove(this.#path, segment.name);
+        continue;
+      }
+      if (next !== null && segment.from > next) {
+        this.#log?.error?.({ event: 'log.segment.missing', from: next, to: segment.from - 1 });
+        this.#lost = true;
+      }
+      next = segment.to + 1;
+      this.#adopt(entries);
+      this.#segments.push(segment);
     }
     // The floor is durable in the index; without one that reads (none, or
     // one that is not this log's) everything on disk is retained from its
@@ -531,6 +554,63 @@ class OpLog {
     if (!seqs) return;
     seqs.delete(entry.seq);
     if (seqs.size === 0) this.#byId.delete(id);
+  }
+
+  // An entry joins its stream: last, as seqs run up a stream in log order —
+  // one that would not (a log fed by hand) goes where its seq sorts.
+  #stream(entry) {
+    const { op } = entry;
+    if (!op) return;
+    const key = opKey(op);
+    let stream = this.#streams.get(key);
+    if (stream === undefined) this.#streams.set(key, (stream = { entries: [], head: 0 }));
+    const list = stream.entries;
+    let at = list.length;
+    while (at > stream.head && list[at - 1].op.seq > op.seq) at--;
+    if (at === list.length) list.push(entry);
+    else list.splice(at, 0, entry);
+  }
+
+  // An entry compaction dropped leaves its stream: its first, as a rule.
+  #unstream(entry) {
+    const { op } = entry;
+    if (!op) return;
+    const key = opKey(op);
+    const stream = this.#streams.get(key);
+    if (stream === undefined) return;
+    if (stream.entries[stream.head] === entry) stream.head++;
+    else {
+      const at = stream.entries.indexOf(entry, stream.head);
+      if (at !== -1) stream.entries.splice(at, 1);
+    }
+    if (stream.head === stream.entries.length) this.#streams.delete(key);
+    else if (stream.head >= 64 && stream.head * 2 > stream.entries.length) {
+      stream.entries = stream.entries.slice(stream.head);
+      stream.head = 0;
+    }
+  }
+
+  /**
+   * Every stream the log retains an entry of, as `[key, entries, from]`:
+   * its entries in log order from index `from` on — read, never changed.
+   */
+  *streams() {
+    for (const [key, stream] of this.#streams) yield [key, stream.entries, stream.head];
+  }
+
+  /** The retained entry of stream `key` at seq `seq` (its op's), or undefined — a binary search. */
+  entryOf(key, seq) {
+    const stream = this.#streams.get(key);
+    if (stream === undefined) return undefined;
+    const list = stream.entries;
+    let low = stream.head;
+    let high = list.length;
+    while (low < high) {
+      const mid = (low + high) >>> 1;
+      if (list[mid].op.seq < seq) low = mid + 1;
+      else high = mid;
+    }
+    return low < list.length && list[low].op.seq === seq ? list[low] : undefined;
   }
 
   // The entry with `seq`, or undefined.
@@ -818,6 +898,7 @@ class OpLog {
       for (const entry of entries) {
         this.#entries.push(entry);
         this.#indexEntry(entry);
+        this.#stream(entry);
         if (seqs !== null) seqs.push(entry.seq);
       }
       this.#open.push({ first, last, file });
@@ -903,8 +984,11 @@ class OpLog {
     const name = segmentName(from);
     await this.#fsi.write(this.#path, name, fileOf(entries), ATOMIC);
     this.#segments.push({ name, from, to: entries[entries.length - 1].seq, count: entries.length });
+    // The index changes at a roll only where compaction dropped something:
+    // the vector, the heads and the newest stamp a reopen reads from the
+    // files, the segment among them.
     const dropped = await this.#compact();
-    await this.#writeIndex();
+    if (dropped > 0) await this.#writeIndex();
     // A group is applied whole, so the cut never falls inside one: a group
     // is sealed with the segment or kept, and a file goes once every group
     // it holds is sealed. A journal is begun again at every roll, so it
@@ -955,6 +1039,7 @@ class OpLog {
         if (typeof entry.op?.ts === 'number' && entry.op.ts > this.#droppedTs) this.#droppedTs = entry.op.ts;
         this.#unindexEntry(entry);
         this.#unprint(entry);
+        this.#unstream(entry);
       }
       this.#entries = this.#entries.slice(this.#lowerBound(oldest.to + 1));
       this.#floor = oldest.to + 1;
@@ -1012,7 +1097,6 @@ class OpLog {
       next: this.#next,
       vector: this.#vector,
       heads: Object.fromEntries(this.#heads),
-      segments: this.#segments,
       droppedHeld: this.#droppedHeld,
       latestTs: this.#latestTs,
       droppedTs: this.#droppedTs,

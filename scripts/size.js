@@ -177,7 +177,8 @@ const ENTRIES = [
     platform: 'browser',
     // 3.6 measured once ValidationError moved into the errors module it shares.
     // 4.0 with the canonical JSON in shape.js.
-    budget: 4.5,
+    // 4.6 with the log's stream index (a push and a merge pick by stream; 2026-10-27). 5, raised by name.
+    budget: 5,
   },
   // Presence: the emitter, the bounds, the signed entries; the identity comes from the storage.
   {
@@ -389,7 +390,8 @@ const ENTRIES = [
     // 32.9 with the write path's hash chain (src/header.js, the log's fingerprints). 33.5, raised by name.
     // 33.8 with the review's write-path fixes it bundles (a transaction's records held once, sets shared
     // between versions, an op on a purged record stripped). 34.5, raised by name.
-    budget: 34.5,
+    // 34.8 with the log's stream index and the segments read from the listing; 2026-10-27. 35, raised by name.
+    budget: 35,
   },
 ];
 

@@ -1042,3 +1042,63 @@ test('groups applied out of order: a roll seals up to the oldest group not appli
     [7],
   );
 });
+
+test('the index is written where compaction dropped something; the segments are what the directory lists', async () => {
+  const { memory } = require('../src/memory/memory.js');
+  const fsi = memory();
+  let writes = 0;
+  const write = fsi.write.bind(fsi);
+  fsi.write = (dir, name, text, options) => {
+    if (name === 'index.json') writes++;
+    return write(dir, name, text, options);
+  };
+  const log = await new OpLog('/l', { fsi, rollAfter: 2, retention: 'all', logger: false });
+  const opened = writes;
+  for (let seq = 1; seq <= 12; seq++) await log.append([op('A', seq)]);
+  await log.flush();
+  assert.ok(log.segments >= 4, `rolled (${log.segments} segments)`);
+  assert.strictEqual(writes, opened, 'a roll that dropped nothing writes no index');
+  await log.close();
+  const index = JSON.parse(await fsi.read('/l/log', 'index.json'));
+  assert.strictEqual(index.segments, undefined, 'the index names no segment');
+  // A reopen reads the segments from the listing, and the vector and heads from them.
+  const again = await new OpLog('/l', { fsi, rollAfter: 2, retention: 'all', logger: false });
+  assert.strictEqual(again.segments, log.segments);
+  assert.deepStrictEqual(
+    again.since(again.formatId(0)).map((entry) => entry.seq),
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+  );
+  assert.deepStrictEqual(again.vector, { A: 12 });
+  assert.strictEqual(again.droppedTs, 0);
+  await again.close();
+  // A segment gone from the middle: a gap the next one's start shows.
+  const names = (await fsi.list('/l/log')).filter((name) => name.startsWith('seg-')).sort();
+  await fsi.remove('/l/log', names[1]);
+  const events = [];
+  const logger = { error: (event) => events.push(event), warn() {}, info() {}, debug() {} };
+  const gapped = await new OpLog('/l', { fsi, rollAfter: 2, retention: 'all', logger });
+  assert.strictEqual(events.filter((event) => event.event === 'log.segment.missing').length, 1);
+  assert.strictEqual(gapped.droppedTs, gapped.latestTs, 'what it held is vouched for by nothing');
+  await gapped.close();
+});
+
+test('a segment wholly below the floor is a compaction cut short: removed at open, never read back', async () => {
+  const { memory } = require('../src/memory/memory.js');
+  const fsi = memory();
+  const log = await new OpLog('/l', { fsi, rollAfter: 1, retention: { ops: 2 }, logger: false });
+  for (let seq = 1; seq <= 6; seq++) await log.append([op('A', seq)]);
+  await log.close();
+  const floor = log.floor;
+  assert.ok(floor > 1);
+  // The file of seqs before the floor comes back (a removal the crash cut short).
+  const { checksum } = require('../src/hash.js');
+  const entries = JSON.stringify([{ seq: 1, op: op('A', 1) }]);
+  await fsi.write('/l/log', 'seg-0000000001.json', `{"entries":${entries},"hash":"${checksum(entries)}"}`);
+  const reopened = await new OpLog('/l', { fsi, rollAfter: 1, retention: { ops: 2 }, logger: false });
+  assert.strictEqual(reopened.floor, floor);
+  assert.ok(!(await fsi.list('/l/log')).includes('seg-0000000001.json'));
+  assert.ok(reopened.since(reopened.formatId(floor - 1)).every((entry) => entry.seq >= floor));
+  assert.strictEqual(reopened.since(reopened.formatId(0)), null, 'below the floor: a bootstrap, as before');
+  assert.strictEqual(reopened.droppedTs, log.droppedTs, 'nothing lost');
+  await reopened.close();
+});

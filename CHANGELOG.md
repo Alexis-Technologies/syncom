@@ -1652,6 +1652,15 @@ There is no released version section until then; everything below lands in it.
 
 ### Changed
 
+- **A push reads what the receiver lacks, not the whole log, and a roll
+  writes no index.** The log keeps its retained entries by stream; a push on
+  a handshake or a recovery, a branch merge and a host's REWOUND proof pick
+  from it by a binary search per stream (200 000 ops retained over 1 000
+  streams: 18.7 → 0.17 ms a handshake). `index.json` names no segment any
+  more — they are what the directory lists, a gap among them is
+  `log.segment.missing` — and is written where compaction dropped
+  something, not at every roll: with one op a group it was rewritten every
+  64 ops and grew with the history (272 KB under `retention: 'all'`).
 - **An editor's send no longer compares the whole text.** `applyDelta()`
   resolves to `{ ops, revision }` (it was the op count) and takes
   `revision` beside `expect`: while the field is still at that revision —

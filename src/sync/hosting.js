@@ -189,7 +189,7 @@ const refuseOps = (host, node, reason, count) => {
 // here — signed by the dialer's own key, so the claim carries its proof. For
 // a dialer whose id is a key (one that signs), only when its hello says it
 // holds less, and only what the log still retains: packed like a page, or
-// null. One pass over the log, on a hello that is behind on its own streams.
+// null. One lookup per stream (`log.entryOf`), on a hello behind on its own streams.
 const proofOf = (storage, node, claimed, held) => {
   if (!isKeyId(node) || !isPlainObject(claimed)) return null;
   const wanted = new Map();
@@ -200,13 +200,9 @@ const proofOf = (storage, node, claimed, held) => {
   }
   if (wanted.size === 0) return null;
   const ops = [];
-  for (const { op } of storage.log.scan()) {
-    if (op.origin !== node) continue;
-    const key = opKey(op);
-    if (wanted.get(key) !== op.seq) continue;
-    ops.push(op);
-    wanted.delete(key);
-    if (wanted.size === 0) break;
+  for (const [key, seq] of wanted) {
+    const entry = storage.log.entryOf(key, seq);
+    if (entry !== undefined) ops.push(entry.op);
   }
   return ops.length === 0 ? null : packOps(ops);
 };
