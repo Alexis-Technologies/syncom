@@ -4,11 +4,13 @@
 // the op carries it — what the write path (src/commit.js) does with a
 // definition the schema plugin handed it. The definitions themselves — the
 // validators adapted, the id field derived, the indexes read off a schema —
-// are the plugin's (src/schema/define.js); the core only applies them.
-// Requires shape.js only: it ships to the browser.
+// are the plugin's (src/schema/define.js); the core only applies them. The
+// core's side of the schema, so it lives with the schema: commit.js and
+// storage.js require it without the plugin, the lens with it. Requires
+// shape.js and paths.js only: it ships to the browser.
 
-const { deepEqual } = require('./shape.js');
-const { valueAt, ancestorsOf } = require('./paths.js');
+const { deepEqual } = require('../shape.js');
+const { valueAt, ancestorsOf } = require('../paths.js');
 
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 

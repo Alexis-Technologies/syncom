@@ -13,7 +13,7 @@ const { applyOp, isAlive, latestClock, settleMeta } = require('./ops.js');
 const { keyScope, opKey } = require('./vector.js');
 const { fingerprintOf, scrubOp } = require('./header.js');
 const { inScope } = require('./scope.js');
-const { traced, now } = require('./telemetry.js');
+const { traced, now } = require('./telemetry/writer.js');
 const { isPlainObject, VALIDATED, wellFormed, VERDICT } = require('./shape.js');
 const { SyncomError } = require('./errors.js');
 

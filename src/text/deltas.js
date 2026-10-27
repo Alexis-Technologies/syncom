@@ -2,11 +2,11 @@
 
 // A text's changes as Quill deltas and a delta as one transaction
 // (src/text/text.js is the plugin): toDelta and applyDelta over the algebra
-// of src/delta.js.
+// of src/text/quill.js.
 
 const S = require('./sequence.js');
 const { spliceArgs, markArgs, jsonValue, fieldName, EMBED } = require('../args.js');
-const { compose } = require('../delta.js');
+const { compose } = require('./quill.js');
 const { isRecordId, invalidId, isPlainObject, deepEqual } = require('../shape.js');
 const { floorOf } = require('../vector.js');
 const { SyncomError } = require('../errors.js');

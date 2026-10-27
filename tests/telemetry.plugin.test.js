@@ -10,7 +10,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const core = require('../index.js');
 const { memory } = require('../src/memory/memory.js');
-const { DISABLED } = require('../src/telemetry.js');
+const { DISABLED } = require('../src/telemetry/writer.js');
 const { telemetry, createTelemetry } = require('../src/telemetry/telemetry.js');
 
 // A tracer of the duck-typed shape: every span it starts is kept.

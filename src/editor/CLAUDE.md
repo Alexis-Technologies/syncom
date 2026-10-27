@@ -8,7 +8,7 @@ One delta at a time with `expect`, the rebase, what the adapters share and never
 src/editor/editor.js      the @alexify/syncom/editor subpath — the editor-agnostic binding (shadow, one delta in
                           flight, STALE and the rebase), delta compose/transform, diffSpans/diffBlocks, spans↔blocks,
                           selections as tokens, presence cursors, what an adapter shares (createFit, undoSteps,
-                          failureReporter); requires text/myers.js, vector.js and delta.js only
+                          failureReporter); requires text/myers.js, text/quill.js and vector.js only
 ```
 
 ## Rules

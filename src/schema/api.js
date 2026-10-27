@@ -8,7 +8,7 @@
 
 const { SyncomError } = require('../errors.js');
 const { isPlainObject } = require('../shape.js');
-const { project } = require('../entity.js');
+const { project } = require('./entity.js');
 
 const SCHEMA_FILE = 'schema.json';
 

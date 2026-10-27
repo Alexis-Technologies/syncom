@@ -13,7 +13,7 @@ const { applyOp, isAlive, latestClock, latestHeld, settleMeta } = require('./ops
 const { opKey } = require('./vector.js');
 const { fingerprintOf } = require('./header.js');
 const { link } = require('./commit.js');
-const { traced, now } = require('./telemetry.js');
+const { traced, now } = require('./telemetry/writer.js');
 const { GLOBAL_SCOPE, inScope } = require('./scope.js');
 const { isPlainObject, asJson, isRecordId, nestsWithin, MAX_WIRE_DEPTH } = require('./shape.js');
 

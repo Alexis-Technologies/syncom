@@ -20,7 +20,7 @@
 // `sendEvent`; one it listens for (`on('syncom/presence', fn)`) is the unit's
 // — `client.api.syncom.on('presence', fn)`, the emitter `use()` scaffolds.
 
-const { isSyncLink } = require('../link.js');
+const { isSyncLink } = require('../sync/link.js');
 
 const UNIT = 'syncom';
 

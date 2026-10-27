@@ -207,7 +207,7 @@ flowchart TB
   inverse patches of every `commit` event and applies them with `applyPatches()`;
   `@alexify/syncom/branch` opens a fork through the parent's constructor — another storage
   with its own identity — and merges either way as the ops one side lacks, picked by
-  `src/outbound.js` as a push picks them, through `applyRemote()`.
+  `src/sync/outbound.js` as a push picks them, through `applyRemote()`.
 
 See [Versions and history](/guide/versions).
 
@@ -244,7 +244,7 @@ the five functions an `fsi` implements.
 | `commit.js`, `apply.js`, `bootstrap.js` | The three write paths |
 | `args.js`, `shape.js`, `options.js` | The checks at the edges: the write API's arguments (shared with the patches), record ids and a peer's op shape, `open()`'s options |
 | `entries.js`, `catalog.js`, `record.js` | Record files, the bounded cache, the catalog (ids, indexes, tombstones); `Record`, `Reference` and `Collection` |
-| `log.js`, `outbound.js` | `OpLog`, the persisted operation log: append, seal, retention, scrub, pins; the ops a receiver lacks, for a push and a branch merge |
+| `log.js`, `sync/outbound.js` | `OpLog`, the persisted operation log: append, seal, retention, scrub, pins; the ops a receiver lacks, for a push and a branch merge |
 | `ops.js`, `vector.js` | The op model (`applyOp` over registers, counters, sets and one `blocks` slot per plugin kind; the kinds' precedence by the registry's ranks), clocks and version vectors |
 | `text/text.js`, `text/sequence.js`, `text/btree.js`, `text/pmap.js`, `text/plist.js`, `text/rle.js`, `text/myers.js` | The `@alexify/syncom/text` plugin: lists and texts — Fugue runs placed by a walk into a persistent rope (a B+-tree with two measures, path-copied per op, a text cache per node), the run records in a persistent map, a placed run's segments and children in chunked lists; a movable list's registers, marks, cursors; the run-length content of a run; the Myers diff behind `updateText()` and the splices of a patch |
 | `tree/tree.js`, `tree/moves.js`, `order/order.js` | The `@alexify/syncom/tree` plugin: every node's moves and their fold, kept by the block and handed on to the block an op makes (an older move landed by undo–do–redo, the reading path-copied); fractional indexes for a node's place and the `@alexify/syncom/order` subpath |
@@ -252,16 +252,16 @@ the five functions an `fsi` implements.
 | `versions/history.js`, `versions/tags.js`, `patch.js` | A version as a fold of the log; tags as copy-on-write record files (the versions plugin's); the patch vocabulary of `diff()` and `applyPatches()`, a plugin's kinds through the registry |
 | `undo/undo.js`, `branch/branch.js` | The `@alexify/syncom/undo` and `@alexify/syncom/branch` subpaths — over the public API, no engine bundled |
 | `chain/chain.js`, `contracts/contracts.js`, `crdt.js` | The hash-linked chain, a plugin (`@alexify/syncom/chain`); the `@alexify/syncom/contracts` subpath; `diff`/`merge`/`apply` over plain objects |
-| `schema/schema.js`, `schema/define.js`, `schema/lens.js`, `entity.js` | The `@alexify/syncom/schema` plugin: validators, versions and lenses read once; the record as its validator sees it (the core's) |
+| `schema/schema.js`, `schema/define.js`, `schema/lens.js`, `schema/entity.js` | The `@alexify/syncom/schema` plugin: validators, versions and lenses read once; the record as its validator sees it (the core's) |
 | `query/query.js`, `query/cursor.js` | The `@alexify/syncom/query` plugin: Mango cursors, `$text` among them |
 | `search/search.js` | The `@alexify/syncom/search` subpath: the trigram index behind `$text` — the core knows only its contract |
-| `signing/signing.js`, `signing/sign.js`, `signing/ed25519.js`, `keys.js`, `header.js`, `digest.js` | The identity plugin (`@alexify/syncom/signing`); signing an op and verifying it; the Ed25519 half; the key pairs on disk; what names an op — its header, its payload's digest, its fingerprint, the core's whether a node signs or not; the core's SHA-256 (node:crypto, Web Crypto in the browser) |
+| `signing/signing.js`, `signing/sign.js`, `signing/ed25519.js`, `crypto/keys.js`, `crypto/pem.js`, `header.js`, `crypto/digest.js` | The identity plugin (`@alexify/syncom/signing`); signing an op and verifying it; the Ed25519 half; the key pairs on disk and their PEM (shared with the encryption plugin); what names an op — its header, its payload's digest, its fingerprint, the core's whether a node signs or not; the core's SHA-256 (node:crypto, Web Crypto in the browser) |
 | `encryption/encryption.js`, `encryption/rsa.js` | The sealing plugin and the at-rest backend wrapper (`@alexify/syncom/encryption`); the RSA half |
-| `sync/sync.js`, `sync/manager.js`, `sync/hosting.js`, `outbound.js`, `link.js`, `wrpc/wrpc.js`, `protocol.js`, `scope.js` | The sync plugin (`@alexify/syncom/sync`): dialing and hosting; the selection a push makes (the core's updates API); the link contract, the wrpc adapter, what both halves agree on, what "in scope" means |
-| `hooks.js`, `emitter.js`, `logger.js`, `telemetry.js`, `telemetry/telemetry.js`, `errors.js` | Hooks and events, injected logging, the telemetry writer contract and the `@alexify/syncom/telemetry` adapter, `SyncomError` |
+| `sync/sync.js`, `sync/manager.js`, `sync/hosting.js`, `sync/outbound.js`, `sync/link.js`, `sync/wire.js`, `sync/protocol.js`, `wrpc/wrpc.js`, `scope.js` | The sync plugin (`@alexify/syncom/sync`): dialing and hosting; the selection a push makes (the core's updates API); the link contract, the ops as they cross, the wrpc adapter, what both halves agree on, what "in scope" means |
+| `hooks.js`, `emitter.js`, `logger.js`, `telemetry/writer.js`, `telemetry/telemetry.js`, `errors.js` | Hooks and events, injected logging, the telemetry writer contract and the `@alexify/syncom/telemetry` adapter, `SyncomError` |
 | `fsi.js`, `fsi.browser.js`, `idb/idb.js`, `memory/memory.js`, `layered/layered.js`, `backend.js`, `lock.js` | `node:fs`, OPFS, IndexedDB and memory backends, the layered combinator; the contract; one instance per directory |
 
-The browser halves (`*.browser.js`) replace `fsi` and `utils` in the core, `signing/ed25519` and `encryption/rsa` in their subpaths, through the `browser`
+The browser halves (`*.browser.js`) replace `fsi`, `utils` and `crypto/digest` in the core, `signing/ed25519` and `encryption/rsa` in their subpaths, through the `browser`
 field of `package.json`; everything else is shared. Every subpath is a folder under `src/` with
-its entry and its types beside it — the root holds `index.js`, `browser.js` and their `.d.ts`
+its entry and its types beside it, and a folder is a zone: a module of its zone lives there even where the core requires it (`telemetry/writer.js`, `sync/wire.js`, `schema/entity.js`; `crypto/` is a zone with no subpath). The package root holds `index.js`, `browser.js` and their `.d.ts`
 alone (see [Entry points](/guide/entry-points)).

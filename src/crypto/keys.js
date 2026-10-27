@@ -5,9 +5,9 @@
 // and `sign-private.pem` — the Ed25519 pair that signs ops and whose public
 // key is the node id — under `basePath`. A pair is read when both halves are
 // there, made when neither is, refused when one is. No requires beyond
-// ./errors.js: the generator and the backend are handed in.
+// ../errors.js: the generator and the backend are handed in.
 
-const { SyncomError } = require('./errors.js');
+const { SyncomError } = require('../errors.js');
 
 const KEY_FILES = { public: 'public.pem', private: 'private.pem' };
 const SIGNING_FILES = { public: 'sign-public.pem', private: 'sign-private.pem' };

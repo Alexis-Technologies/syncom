@@ -681,7 +681,7 @@ The closest counterpart of each building block, in each library. The Yjs column 
 228. State without history, tombstones included; <code>at(tag).snapshot()</code> pages a past state.
 229. Yjs keeps no history to leave out; deleted content is included only with <code>gc: false</code>.
 230. <code>toJS(doc)</code> gives the plain JSON value.
-231. <code>log.since(eventId)</code> is the public reader; the selection by vector (<code>src/outbound.js</code>) is internal.
+231. <code>log.since(eventId)</code> is the public reader; the selection by vector (<code>src/sync/outbound.js</code>) is internal.
 232. The whole delete set always goes along.
 233. Ops need no merging: a batch is a list deduplicated by <code>(origin, seq)</code>, and <code>applyOp(entry, op)</code> is pure too.
 234. v14 adds <code>intersectUpdateWithContentIds</code> and marks <code>diffUpdate</code> deprecated.

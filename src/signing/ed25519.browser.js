@@ -5,9 +5,9 @@
 // both platforms — the raw public key, base64url, derived the same way.
 
 const defaultFsi = require('../fsi.browser.js');
-const { loadKeyPair, SIGNING_FILES } = require('../keys.js');
-const { PUBLIC_KEY_HEADER, PUBLIC_KEY_FOOTER, PRIVATE_KEY_HEADER, PRIVATE_KEY_FOOTER } = require('../pem.js');
-const { toBase64Url, fromBase64, toPem, cleanPem } = require('../pem.js');
+const { loadKeyPair, SIGNING_FILES } = require('../crypto/keys.js');
+const { PUBLIC_KEY_HEADER, PUBLIC_KEY_FOOTER, PRIVATE_KEY_HEADER, PRIVATE_KEY_FOOTER } = require('../crypto/pem.js');
+const { toBase64Url, fromBase64, toPem, cleanPem } = require('../crypto/pem.js');
 
 const ED25519 = { name: 'Ed25519' };
 // An Ed25519 SPKI is a fixed 12-byte header and the 32-byte key.

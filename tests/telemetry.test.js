@@ -20,7 +20,7 @@ const {
 const { AsyncLocalStorageContextManager } = require('@opentelemetry/context-async-hooks');
 
 const syncom = require('../src/all/all.js');
-const { DISABLED, SCOPE_NAME } = require('../src/telemetry.js');
+const { DISABLED, SCOPE_NAME } = require('../src/telemetry/writer.js');
 const { createTelemetry } = require('../src/telemetry/telemetry.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const { createMesh, settle, waitUntil } = require('./utils/mesh.js');
@@ -990,7 +990,7 @@ test("containment: an application's writer that lacks a method or throws never b
       throw new Error('writer down');
     };
     const writer = { enabled: true, withSpan: (_name, _attributes, fn) => fn(null) };
-    for (const name of require('../src/telemetry.js').METHODS) writer[name] = thrower;
+    for (const name of require('../src/telemetry/writer.js').METHODS) writer[name] = thrower;
     const storage = await open(writer);
     t.after(() => storage.close().catch(() => {}));
     const id = await within(storage.insert({ n: 1 }), 'insert');
@@ -999,7 +999,7 @@ test("containment: an application's writer that lacks a method or throws never b
   });
 
   await t.test('withSpan that throws, never calls, or calls twice runs the work once and returns its result', () => {
-    const { writerOf } = require('../src/telemetry.js');
+    const { writerOf } = require('../src/telemetry/writer.js');
     const run = (withSpan) => {
       let runs = 0;
       const result = writerOf({ enabled: true, withSpan }).withSpan('syncom.commit', {}, () => {

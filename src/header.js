@@ -17,7 +17,7 @@
 // seq before it follows another branch: both are equivocation, refused at
 // src/apply.js `admit`.
 
-const { hashOf } = require('./digest.js');
+const { hashOf } = require('./crypto/digest.js');
 const { canonical } = require('./shape.js');
 
 const HEADER_VERSION = 1;

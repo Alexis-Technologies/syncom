@@ -2436,7 +2436,7 @@
         "protocolVersion": {
           "mark": "✅",
           "text": "`PROTOCOL` 1 in `hello`; another version is refused with 400",
-          "source": "src/protocol.js; src/sync/hosting.js (hello)",
+          "source": "src/sync/protocol.js; src/sync/hosting.js (hello)",
           "detail": "The 19 `packOps` slots are appended, never reordered; a reader of fewer slots ignores the rest (src/CLAUDE.md)."
         },
         "schemaHandshake": {
@@ -2453,7 +2453,7 @@
         "customTransport": {
           "mark": "✅",
           "text": "`SyncLink`: `call`, `subscribe` with `lastEventId`, `on`/`off`, `close`; optional `stream`",
-          "source": "src/link.js:7-13; docs/guide/sync.md#the-link-contract; tests/utils/memory-link.js",
+          "source": "src/sync/link.js:7-13; docs/guide/sync.md#the-link-contract; tests/utils/memory-link.js",
           "detail": "The link only carries the four procedures; the far end still runs syncom."
         },
         "roundTrips": {
@@ -2672,7 +2672,7 @@
         "batch": {
           "mark": "",
           "text": "`pageSize` 500 ops per push and per page; 500 records per snapshot page",
-          "source": "src/protocol.js:9; src/sync/hosting.js 304-312; docs/guide/sync.md#options",
+          "source": "src/sync/protocol.js:9; src/sync/hosting.js 304-312; docs/guide/sync.md#options",
           "detail": "`pageBytes` (4 MiB): a snapshot page above it is sent inline rather than streamed."
         },
         "flow": {
@@ -2797,7 +2797,7 @@
         "keyRotation": {
           "mark": "❌",
           "text": "no rotation API; a replaced key pair cannot open sealed records",
-          "source": "src/keys.js:20-37; docs/guide/storage.md#encryption-at-rest"
+          "source": "src/crypto/keys.js:20-37; docs/guide/storage.md#encryption-at-rest"
         },
         "encAttachments": {
           "mark": "—",
@@ -2969,7 +2969,7 @@
         "otel": {
           "mark": "✅",
           "text": "spans and metrics through an injected API; no OpenTelemetry dependency",
-          "source": "src/telemetry.js; docs/guide/telemetry.md"
+          "source": "src/telemetry/writer.js; docs/guide/telemetry.md"
         },
         "stats": {
           "mark": "✅",
@@ -2979,7 +2979,7 @@
         "diagPII": {
           "mark": "✅",
           "text": "no id, origin, scope or key as a metric label; `includeIdentity: false` for spans",
-          "source": "src/telemetry.js:28-31,93-122; docs/guide/telemetry.md#metrics",
+          "source": "src/telemetry/writer.js:28-31,93-122; docs/guide/telemetry.md#metrics",
           "detail": "Log lines name record ids and origins, never payloads; `error` events carry the op as a field."
         },
         "react": {
@@ -3044,7 +3044,7 @@
           "mark": "",
           "text": "none yet: 0.0.1, never published",
           "source": "CHANGELOG.md; package.json",
-          "detail": "The wire carries `PROTOCOL = 1` and a host refuses another version with 400 `PROTOCOL` (src/protocol.js; src/sync/hosting.js). `packOps` slots are append-only and a new op type is a PROTOCOL bump (src/CLAUDE.md). The catalog is derived state: a catalog.json of an older format (now 3) is rebuilt once at open (src/catalog.js:25,403; CHANGELOG.md)."
+          "detail": "The wire carries `PROTOCOL = 1` and a host refuses another version with 400 `PROTOCOL` (src/sync/protocol.js; src/sync/hosting.js). `packOps` slots are append-only and a new op type is a PROTOCOL bump (src/CLAUDE.md). The catalog is derived state: a catalog.json of an older format (now 3) is rebuilt once at open (src/catalog.js:25,403; CHANGELOG.md)."
         },
         "releaseCadence": {
           "mark": "",

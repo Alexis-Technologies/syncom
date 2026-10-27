@@ -9,7 +9,7 @@
 
 const crypto = require('node:crypto');
 const defaultFsi = require('../fsi.js');
-const { loadKeyPair } = require('../keys.js');
+const { loadKeyPair } = require('../crypto/keys.js');
 const { SyncomError } = require('../errors.js');
 
 const ALG = 'RSA-OAEP-256+A256GCM';

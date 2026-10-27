@@ -8,7 +8,7 @@
     "./src/index.js": "./src/index.browser.js",
     "./src/fsi.js": "./src/fsi.browser.js",
     "./src/utils.js": "./src/utils.browser.js",
-    "./src/digest.js": "./src/digest.browser.js",
+    "./src/crypto/digest.js": "./src/crypto/digest.browser.js",
     "./src/signing/ed25519.js": "./src/signing/ed25519.browser.js",
     "./src/encryption/rsa.js": "./src/encryption/rsa.browser.js"
   },

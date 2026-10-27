@@ -13,7 +13,7 @@
 //
 // The `telemetry` plugin builds the writer from `open({ telemetry })` —
 // `{ api }` or `{ tracer, meter }` — and hands it to the core, which records
-// through the contract of src/telemetry.js (DISABLED, `traced`). Without the
+// through the contract of src/telemetry/writer.js (DISABLED, `traced`). Without the
 // plugin `open({ telemetry: { api } })` is PLUGIN_MISSING; a writer given as
 // it is the core takes without the plugin. Every recording path is
 // contained — a tracer, meter, span or instrument that throws must never
@@ -28,7 +28,7 @@ const {
   isWriter,
   writerOf,
   contained,
-} = require('../telemetry.js');
+} = require('./writer.js');
 
 const IDENTITY = new Set(IDENTITY_KEYS);
 

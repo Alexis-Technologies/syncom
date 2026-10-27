@@ -5,10 +5,10 @@
 // the same key pair.
 
 const defaultFsi = require('../fsi.browser.js');
-const { loadKeyPair } = require('../keys.js');
+const { loadKeyPair } = require('../crypto/keys.js');
 const { SyncomError } = require('../errors.js');
-const { PUBLIC_KEY_HEADER, PUBLIC_KEY_FOOTER, PRIVATE_KEY_HEADER, PRIVATE_KEY_FOOTER } = require('../pem.js');
-const { toBase64, fromBase64, toPem, cleanPem } = require('../pem.js');
+const { PUBLIC_KEY_HEADER, PUBLIC_KEY_FOOTER, PRIVATE_KEY_HEADER, PRIVATE_KEY_FOOTER } = require('../crypto/pem.js');
+const { toBase64, fromBase64, toPem, cleanPem } = require('../crypto/pem.js');
 
 const RSA = { name: 'RSA-OAEP', hash: 'SHA-256' };
 const AES = 'AES-GCM';

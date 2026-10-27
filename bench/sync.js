@@ -19,7 +19,7 @@ const path = require('node:path');
 const { bench } = require('./support/harness.js');
 const { open } = require('../src/all/all.js');
 const { MemoryLink } = require('../tests/utils/memory-link.js');
-const { PROTOCOL } = require('../src/protocol.js');
+const { PROTOCOL } = require('../src/sync/protocol.js');
 
 const record = { name: 'Example', email: 'example@example.com', hits: 0 };
 

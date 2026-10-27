@@ -10,7 +10,7 @@
 // both over the same lent core: this file keeps a delegate per method.
 
 const { Emitter, generateUUID, createLogger } = require('./utils.js');
-const { sha256 } = require('./digest.js');
+const { sha256 } = require('./crypto/digest.js');
 const { OpLog, appliedHere } = require('./log.js');
 const { EntryStore } = require('./entries.js');
 const { Record, Collection } = require('./record.js');
@@ -23,12 +23,12 @@ const { snapshotPage, mergeBatch, adopt } = require('./bootstrap.js');
 const { applyOp, isAlive, kindOf } = require('./ops.js');
 const { Clock } = require('./vector.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
-const { project } = require('./entity.js');
+const { project } = require('./schema/entity.js');
 const defaultFsi = require('./fsi.js');
 const { checkFsi, withSync } = require('./backend.js');
 const { acquireLock } = require('./lock.js');
 const { Catalog, isTextIndex } = require('./catalog.js');
-const { DISABLED, isWriter, writerOf, traced, now } = require('./telemetry.js');
+const { DISABLED, isWriter, writerOf, traced, now } = require('./telemetry/writer.js');
 const { GLOBAL_SCOPE } = require('./scope.js');
 const { normalizeStorageOptions } = require('./options.js');
 const { isPlainObject, isRecordId, invalidId, isStreamName, VALIDATED } = require('./shape.js');
@@ -278,7 +278,7 @@ class Storage extends Emitter {
       options: this.#options,
       settings: this.#settings,
       storage: this,
-      // SHA-256 of a value's JSON (src/digest.js), the core's: a plugin
+      // SHA-256 of a value's JSON (src/crypto/digest.js), the core's: a plugin
       // hashes with it rather than bundle a digest of its own.
       hash: sha256,
       // A catalog of a tag (the versions plugin's): the entities are read when

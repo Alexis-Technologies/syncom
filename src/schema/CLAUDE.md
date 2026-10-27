@@ -9,6 +9,9 @@ src/schema/schema.js      @alexify/syncom/schema — the schema plugin: setup(ct
 src/schema/define.js      entity definitions, the injected validator (Standard Schema / ajv / compile) — normalizeSchema; requires errors.js only
 src/schema/lens.js        createLens — how an older record reads under this version (migrations, then the validator)
 src/schema/api.js         what the plugin does over the lent core: loadVersion (schema.json, at open), migrate() and check()
+src/schema/entity.js      project / unproject / foldSet — the record as its validator sees it, the validated value as the op carries it;
+                          the core's side of the schema (commit.js and storage.js require it), shared with the lens — requires shape.js,
+                          paths.js only
 ```
 
 ## Rules
@@ -16,7 +19,7 @@ src/schema/api.js         what the plugin does over the lent core: loadVersion (
 - **Validation is after `applyOp`, before `#log.append`.** An entity's
   validator (adapted in `src/schema/define.js`, the schema plugin's; the core
   only applies what the plugin's `schema` hook handed it, through
-  `src/entity.js`) sees
+  `src/schema/entity.js`) sees
   the record as the op leaves it, under `idField` and without `$type`, and
   for a local `write`/`set` what it returns is folded back INTO the op
   (defaults, aliases, stripped keys), so peers receive the validated record;

@@ -1299,8 +1299,8 @@
         "incremental": {
           "mark": "✅",
           "text": "a push sends ops past the host's vector; `changes` resumes from an event id",
-          "note": "`log.since(eventId)` is the public reader; the selection by vector (`src/outbound.js`) is internal.",
-          "source": "src/outbound.js:1-35; docs/reference/api.md:308-309; docs/guide/sync.md:312-344"
+          "note": "`log.since(eventId)` is the public reader; the selection by vector (`src/sync/outbound.js`) is internal.",
+          "source": "src/sync/outbound.js:1-35; docs/reference/api.md:308-309; docs/guide/sync.md:312-344"
         },
         "mergeUpdates": {
           "mark": "✅",
@@ -1323,7 +1323,7 @@
         "compat": {
           "mark": "⚠️",
           "text": "a written policy (slots appended, a new type a `PROTOCOL` bump); unpublished, so no version kept yet",
-          "source": "docs/reference/wire.md:397 (Compatibility); src/protocol.js"
+          "source": "docs/reference/wire.md:397 (Compatibility); src/sync/protocol.js"
         },
         "syncProto": {
           "mark": "✅",
@@ -1351,7 +1351,7 @@
           "mark": "✅",
           "text": "an injected `SyncLink`; `@alexify/syncom/wrpc` for WebSocket and WebRTC",
           "note": "Messages are JSON values over call and subscribe, not raw bytes; WebRTC goes through wrpc's peer links. No BroadcastChannel adapter.",
-          "source": "src/link.js; src/wrpc/wrpc.js; docs/guide/sync.md:569-585; docs/guide/webrtc.md"
+          "source": "src/sync/link.js; src/wrpc/wrpc.js; docs/guide/sync.md:569-585; docs/guide/webrtc.md"
         },
         "server": {
           "mark": "✅",

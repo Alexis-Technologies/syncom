@@ -11,7 +11,7 @@
 // file writes per batch.
 
 const defaultFsi = require('../fsi.js');
-const { sha256 } = require('../digest.js');
+const { sha256 } = require('../crypto/digest.js');
 const { checkFsi } = require('../backend.js');
 const { SyncomError } = require('../errors.js');
 

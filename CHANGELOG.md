@@ -319,7 +319,7 @@ There is no released version section until then; everything below lands in it.
   ask for and no plugin provides is `PLUGIN_MISSING` at `open()`:
   `sync.signatures: 'require'` without `signing`, `chain: true` without
   `chain`, `encrypted: true` without `encryption`. The chain and the schema
-  hash use SHA-256 through Web Crypto on both platforms (`src/digest.js`), so
+  hash use SHA-256 through Web Crypto on both platforms (`src/crypto/digest.js`), so
   the core has no crypto half. New: `atRest(fsi, { key | password, salt })`
   — a backend wrapper (every file AES-256-GCM under one key, PBKDF2 from a
   password, `DECRYPT_FAILED` with a `reason` for a file that is not the
@@ -490,7 +490,7 @@ There is no released version section until then; everything below lands in it.
   identity, standing at the parent's state or at a tag of it (its snapshot
   pages joined, its vector adopted, `branch.json` written); `merge(source,
   { into })` hands either side what the other lacks as ops through
-  `applyRemote` — `src/outbound.js`, the selection a push makes, now shared
+  `applyRemote` — `src/sync/outbound.js`, the selection a push makes, now shared
   with the sync manager, asked for every stream, a third node's included —
   or, when one of those streams is out of the source's log, as a join of
   state (`joined: true`); `branchInfo()`, `drop()`. A branch is a storage
@@ -1477,7 +1477,7 @@ There is no released version section until then; everything below lands in it.
 
 - **The debt that had no decision attached.** The `Emitter`, the logger
   and `loadKeys` lived twice (once per platform half); they are
-  `src/emitter.js`, `src/logger.js` and `src/keys.js` now, shared, and
+  `src/emitter.js`, `src/logger.js` and `src/crypto/keys.js` now, shared, and
   "in scope" is defined once in `src/scope.js`. The directory lock uses an
   exclusive create where the backend has one (`fsi.create`, on `node:fs`
   and the memory backend), so openers racing for a free lock lose
@@ -1652,6 +1652,15 @@ There is no released version section until then; everything below lands in it.
 
 ### Changed
 
+- **A folder of `src/` is a zone, not only a subpath.** A module lives in the
+  folder of what it is about even where the core requires it: the telemetry
+  writer contract is `src/telemetry/writer.js`; the wire shape, the protocol
+  constants, the link check, the outbound selection and the shared-log
+  contract are in `src/sync/`; the validator's projection is
+  `src/schema/entity.js`; the Quill delta algebra is `src/text/quill.js`; the
+  key pairs, PEM and SHA-256 are `src/crypto/` (a zone with no subpath). The
+  root of `src/` holds the core alone. No export, entry point or bundle
+  changed.
 - **A large text is written in pieces, not whole at every flush.** A list
   or text block of 1 024 runs or more keeps its runs in up to 32 files
   beside the record file (`<id>~<n>.json`), by the first level of the run
@@ -1728,7 +1737,7 @@ There is no released version section until then; everything below lands in it.
 - **One delta algebra.** The text plugin's `toDelta` and the editor
   binding each had their own Quill-form `compose` — with different edge
   rules — and both compared a style by its JSON, so `{ bold, italic }` and
-  `{ italic, bold }` stayed two ops. Both stand on `src/delta.js` now, which
+  `{ italic, bold }` stayed two ops. Both stand on `src/text/quill.js` now, which
   compares a style whatever its key order; a property test holds the laws.
 - **A hub's vector is no longer copied per page.** Applying a peer's page
   copied the whole version vector (a key per client and scope — thousands
@@ -1898,7 +1907,7 @@ There is no released version section until then; everything below lands in it.
   in `src/record.js`; `open()`'s option checks in `src/options.js`; the
   entrance checks (ids, stream names, a peer's op shape) in `src/shape.js`;
   the hosting side of replication in `src/sync/hosting.js` (`createUnit`), with
-  `src/protocol.js` for what both halves share. No public name, error
+  `src/sync/protocol.js` for what both halves share. No public name, error
   message, event, hook signature or on-disk format changed. The browser budget was raised
   33.5 → 35.5 KB: a class's private names minify to one letter, the property
   names of a seam shared between modules do not (+2.3 KB min+gzip).

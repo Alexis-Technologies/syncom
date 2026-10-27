@@ -5,16 +5,16 @@ Every top-level module of `src/` and the rules that span the core: plugins and t
 ## Layout
 
 ```
-src/<name>/<name>.js      every subpath is a folder under src/ with its entry and its .d.ts beside it; package.json#exports points there
+src/<name>/<name>.js      every subpath is a folder under src/ with its entry and its .d.ts beside it; package.json#exports points there.
+                          A folder is a zone: a module of its zone lives in it even where the core requires it (src/telemetry/writer.js,
+                          src/sync/wire.js, src/schema/entity.js), and the root holds the core alone; src/crypto/ is a zone with no subpath
 src/all/all.js            @alexify/syncom/all — the core with every shipped plugin registered (text, tree, signing, chain, encryption): the
                           API as it was before the blocks
-src/chain/chain.js        @alexify/syncom/chain — the chain plugin and Blockchain; SHA-256 through src/digest.js
+src/chain/chain.js        @alexify/syncom/chain — the chain plugin and Blockchain; SHA-256 through src/crypto/digest.js
 src/plugin.js             createPlugins — the registry one open() builds: kind modules (ranks, block codes, op types, apply/join/prune/render/
                           resolve/diff/realize/migrate/compact/methods) and API modules; PLUGIN_MISSING; PENDING_MAX — requires shape.js, errors.js
 src/contracts/contracts.js the @alexify/syncom/contracts subpath — never back in the barrel
 src/idb/idb.js            the @alexify/syncom/idb subpath — the IndexedDB backend, browser-only
-src/delta.js              Quill-form deltas and their algebra, once — compose, transform, transformIndex (quill-delta's
-                          rules): the text plugin's toDelta and the editor binding both stand on it — no requires
 src/store/store.js        the @alexify/syncom/store subpath — toStore/fromEvents: one store object for Svelte's contract and
                           React's useSyncExternalStore over a cursor, a Record, get(), a presence or an emitter — no requires
 src/inspect/inspect.js    the @alexify/syncom/inspect subpath — a record's anatomy (through the [SOURCE] seam's raw `entry`) and anonymize; requires compose, shape, symbols, hash only
@@ -24,11 +24,12 @@ src/layered/layered.js    @alexify/syncom/layered — layered([top, …, bottom]
                           cache; 'back' drains its queue before any lower layer is consulted; create is exclusive across layers
 src/emitter.js            the Emitter both halves extend — no requires
 src/logger.js             createLogger, the duck-typed logger writer — no requires
-src/keys.js               loadKeyPair — the on-disk key pairs (RSA for sealing, Ed25519 for signing), generator injected by each crypto half — requires errors.js only
-src/digest.js             sha256, hashOf — SHA-256 of a value's JSON as hex: the chain's, the schema hash's, an op's digest and fingerprint;
-                          node:crypto here, Web Crypto in src/digest.browser.js; `sha256` async on both, `hashOf` at once in Node.js and a
+src/crypto/digest.js      sha256, hashOf — SHA-256 of a value's JSON as hex: the chain's, the schema hash's, an op's digest and fingerprint;
+                          node:crypto here, Web Crypto in src/crypto/digest.browser.js; `sha256` async on both, `hashOf` at once in Node.js and a
                           promise in the browser (the write path names every op with it)
-src/pem.js                base64/PEM helpers over btoa/atob for the browser crypto halves — no requires
+src/crypto/keys.js        loadKeyPair — the on-disk key pairs (RSA for sealing, Ed25519 for signing), generator injected by each crypto
+                          half; the signing and encryption subpaths share it — requires errors.js only
+src/crypto/pem.js         base64/PEM helpers over btoa/atob for the browser crypto halves of signing and encryption — no requires
 src/scope.js              GLOBAL_SCOPE, inScope, opInScope — the one definition of "in scope" — no requires
 src/blame.js              lastEditorOf, editorsOf — who wrote what, from a record's meta (registers' clocks, counters' sums, sets' slots, the plugins' `editors` hook); never the log
 src/hash.js               xxHash32 in pure JS — the checksum every log file carries (`{ entries, hash }`); a checksum, never a signature — no requires
@@ -43,13 +44,10 @@ src/args.js               spliceArgs, treeArgs, markArgs, setElements, jsonValue
 src/order/order.js        the @alexify/syncom/order subpath — fractional indexes over a 62-letter alphabet (Loro's rule, MIT), as
                           strings, for ordering records — no requires; the tree plugin uses it for a node's place
 src/patch.js              patches — the one vocabulary of diff()/applyPatches()/restore(): diffViews by kind, realize() to an op — requires shape.js, args.js, paths.js, plugin.js only
-src/outbound.js           outbound(log, { exclude, vector, scopes, own }) — the ops a receiver lacks, the first retained seq per own stream; a push and a merge both pick with it
 src/symbols.js            COMMIT / REFRESH / SOURCE — the module-private seams between Storage and what it hands out — no requires
 src/options.js            normalizeStorageOptions — open()'s plain options checked and defaulted (lock, cache, chain, skew…)
-src/protocol.js           PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf — what both halves of the sync protocol agree on — no requires
 src/lock.js               exclusive open: Web Locks or lock.json, stale by pid or age — requires errors.js only
 src/catalog.js            the record catalog: live ids, collections, indexed values; index/catalog.json — no requires
-src/shared-log.js         isSharedLog — the reserved broker-log contract (wrpc BrokerLog shape), no consumer yet
 src/storage.js            Storage — the facade: open sequence, the mutation queue, the public API, the `core` it lends
 src/defer.js              DeferredWindow — `open({ defer })`'s slots, timer and landing step — no requires
 src/identity.js           loadIdentity — which node a directory is (the signing key, node.json, getId) — requires errors.js, shape.js only
@@ -64,15 +62,10 @@ src/record.js             Reference, Record, Collection — what the application
 src/commit.js             the one local write path: prepare → validate → issue (in the queue) → land → announce (outside it, in log order) (`storage[COMMIT]`)
 src/apply.js              a peer's batch: admit → apply one by one → persist → announce (`storage.applyRemote`)
 src/bootstrap.js          snapshot pages out, merge pages in, adoptVector — the bootstrap write path
-src/entity.js             project / unproject / foldSet — the record as its validator sees it, the validated value as the op carries it;
-                          the core's, shared by commit.js and the lens; requires shape.js, paths.js only
 src/errors.js             SyncomError, ValidationError, typed() — no requires
 src/ops.js                the record-level model: applyOp / mergeEntry / isAlive
-src/wire.js               packOps / unpackOps and the type codes — the ops as they cross between peers — no requires
 src/vector.js             clocks, version vectors, event ids
 src/log.js                OpLog — the persisted operation log over fsi: seqs reserved at append, groups written one file each
-src/link.js               isSyncLink — the link contract check
-src/telemetry.js          the telemetry writer contract: DISABLED, writerOf, traced — what every write path records through; no requires
 src/                      ships as-is — no build step, CommonJS, 'use strict'
 ```
 
@@ -106,7 +99,7 @@ sign, verify, signMessage }`, the signing plugin), `seal` (`{ encrypt, decrypt }
 options, settings, logger }`, run after the replay — hands back `sync` (the SyncManager, the
   sync plugin: `storage.sync` is PLUGIN_MISSING without it). The core reads them as
   `core.sign`/`core.verify`, `core.seal`, `core.chain`, and `core.hash` is
-  `sha256` from `src/digest.js` (async on both platforms; its one crypto half is the hash —
+  `sha256` from `src/crypto/digest.js` (async on both platforms; its one crypto half is the hash —
   signing and sealing are the plugins'). Without a hook: the node id is what `getId` mints (checked by `isStreamName`), ops are
   neither signed nor verified (`checkPage` answers OK for every op), `block: null`, and an
   encrypted write is `PLUGIN_MISSING`. What the options ask for and no plugin provides is
@@ -114,10 +107,10 @@ options, settings, logger }`, run after the replay — hands back `sync` (the Sy
   never silently downgraded. A new api plugin adds a hook name here and a line in
   `docs/reference/api.md` Plugins; it never reaches the storage's state except through `ctx`
   and the hooks.
-- **Browser halves are `*.browser.js`** (dot, not dash): `fsi`, `utils` and `digest` in the core,
+- **Browser halves are `*.browser.js`** (dot, not dash): `fsi`, `utils` and `crypto/digest` in the core,
   `signing/ed25519` and `encryption/rsa` in their subpaths. Everything else (storage, log, ops,
-  sync, chain, wrpc adapter, and the require-free `emitter`, `logger`, `keys`, `scope`,
-  `pem`) is shared; the two `utils` halves only re-export `Emitter`/`createLogger`
+  sync, chain, wrpc adapter, and the require-free `emitter`, `logger`, `scope`, `crypto/keys`,
+  `crypto/pem`) is shared; the two `utils` halves only re-export `Emitter`/`createLogger`
   and add the platform's own bits. Adding a split means three edits: the file, `package.json#browser`,
   and `src/index.browser.js`. `tests/package/consistency.test.js` catches a
   missed one. To run shared code against the browser halves under Node, load
@@ -180,11 +173,11 @@ options, settings, logger }`, run after the replay — hands back `sync` (the Sy
   of fewer slots ignores the rest, a reader of more takes an absent slot as
   null. Append, never reorder — the
   shape is on the wire between every pair of peers (the log itself stores
-  keyed `{ seq, op, fp }` JSON; `packOps` — src/wire.js — is for `push` and `changes` only). An
+  keyed `{ seq, op, fp }` JSON; `packOps` — src/sync/wire.js — is for `push` and `changes` only). An
   op type is one character in `TYPE_CODES`/`CODE_TYPES` (`+`/`-` are the set
   ops). Once the package is published, an older reader counts an unknown type
   as malformed and its stream stalls there — a new type, or a slot an older
-  reader cannot take as null, is then a `PROTOCOL` bump (`src/protocol.js`).
+  reader cannot take as null, is then a `PROTOCOL` bump (`src/sync/protocol.js`).
 - **A field may be a path; the op model keeps every path apart.** `profile/city`
   is a field of its own in every map of the meta (src/paths.js `isPath`:
   segments by `/`, at most MAX_PATH_DEPTH 16 and MAX_PATH 512, never

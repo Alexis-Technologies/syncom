@@ -15,7 +15,7 @@ const {
   toIssues,
 } = require('../src/schema/define.js');
 const { createLens } = require('../src/schema/lens.js');
-const { project, unproject, foldSet } = require('../src/entity.js');
+const { project, unproject, foldSet } = require('../src/schema/entity.js');
 
 const standard = (validate) => ({ '~standard': { version: 1, vendor: 'test', validate } });
 const typeError = (message) => ({ name: 'TypeError', message });

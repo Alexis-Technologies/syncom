@@ -31,7 +31,7 @@ const ENTRIES = [
   // earns the bytes. 5 KB was the migrated storage/chain/crdt core; the
   // replication engine (the op model, the persisted log, the sync protocol
   // that makes `storage.sync` move data) earned the raise to 14 KB; the
-  // injected OpenTelemetry writer (src/telemetry.js and its call sites in
+  // injected OpenTelemetry writer (src/telemetry/writer.js and its call sites in
   // storage, log and sync) the raise to 17 KB; hooks (src/hooks.js and the
   // write, read, apply and sync seams they run in) the raise to 18 KB; the
   // schema layer (src/schema.js: entity definitions, the injected validator
@@ -134,7 +134,7 @@ const ENTRIES = [
   // whole of it is `/all`. The identity and the signatures (`/signing`), the
   // chain (`/chain`) and the sealing of records (`/encryption`) became
   // plugins too — the core keeps the hooks and SHA-256 through Web Crypto
-  // (src/digest.js) — and came down to 52 KB (51.4 measured). The rule
+  // (src/crypto/digest.js) — and came down to 52 KB (51.4 measured). The rule
   // stays: a raise names its feature here.
   { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 52 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
@@ -215,7 +215,7 @@ const ENTRIES = [
     label: 'prosemirror — browser (@alexify/syncom/prosemirror)',
     entry: 'src/prosemirror/prosemirror.js',
     platform: 'browser',
-    // 8.6 with the one delta algebra it shares with the text plugin (src/delta.js; 2026-10-27). 9, raised by name.
+    // 8.6 with the one delta algebra it shares with the text plugin (src/text/quill.js; 2026-10-27). 9, raised by name.
     // 9.0 with an edit sent from its steps (block sizes kept per node). 9.5, raised by name.
     budget: 9.5,
   },
@@ -360,7 +360,7 @@ const ENTRIES = [
   // 23.0 with sets shared between versions (the core's ops.js it bundles). 23.5, raised by name.
   { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 23.5 },
   // The schema: the definitions read once, the validator adapters, the lens.
-  // 4.3 with a set folded back by path (src/entity.js over src/paths.js).
+  // 4.3 with a set folded back by path (src/schema/entity.js over src/paths.js).
   {
     label: 'schema — browser (@alexify/syncom/schema)',
     entry: 'src/schema/schema.js',

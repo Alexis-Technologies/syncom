@@ -9,9 +9,9 @@
 // the entry. A validator that refuses the record leaves step 1's result
 // (logged at debug); a migration that returns no object is a TypeError.
 
-// Requires the core's projections (src/entity.js) only.
+// Requires the core's projections (src/schema/entity.js) only.
 
-const { project, unproject } = require('../entity.js');
+const { project, unproject } = require('./entity.js');
 
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 

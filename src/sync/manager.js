@@ -20,14 +20,14 @@
 // reach, with ops relayed transitively and de-duplicated by version vector.
 
 const { Emitter } = require('../utils.js');
-const { packOps, unpackOps } = require('../wire.js');
+const { packOps, unpackOps } = require('./wire.js');
 const { vectorAdvance, vectorMerge, keyScope, opKey } = require('../vector.js');
-const { outbound, unreachable } = require('../outbound.js');
-const { isSyncLink } = require('../link.js');
-const { writerOf, traced } = require('../telemetry.js');
+const { outbound, unreachable } = require('./outbound.js');
+const { isSyncLink } = require('./link.js');
+const { writerOf, traced } = require('../telemetry/writer.js');
 const { notify, runHook, normalizeHooks } = require('../hooks.js');
 const { GLOBAL_SCOPE, inScope, opInScope } = require('../scope.js');
-const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf, kindsOf } = require('../protocol.js');
+const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf, kindsOf } = require('./protocol.js');
 const { createUnit } = require('./hosting.js');
 const { NodeRegistry } = require('./registry.js');
 const { SyncomError } = require('../errors.js');
@@ -113,7 +113,7 @@ class SyncManager extends Emitter {
       this.#maxPageBytes = maxPageBytes;
     }
     this.#otel = writerOf(storage.telemetry);
-    // Reserved for the broker-backed hub mode (see src/shared-log.js).
+    // Reserved for the broker-backed hub mode (see src/sync/shared-log.js).
     if (this.#options.sharedLog !== undefined) {
       throw new TypeError('sync.sharedLog is reserved: the shared-log hub mode is not in this version');
     }
@@ -656,7 +656,7 @@ class SyncManager extends Emitter {
   }
 
   // Everything in our log the host has not seen, by its vector — ops of its
-  // own origin excluded (it has those by definition); src/outbound.js picks
+  // own origin excluded (it has those by definition); src/sync/outbound.js picks
   // them, as a branch merge does. A host that is behind what we still
   // retain cannot be caught up from here; it will bootstrap from a node
   // that dials it, or we from it.

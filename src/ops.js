@@ -88,8 +88,8 @@
 
 const { compareClock, maxClock, floorOf, opKey } = require('./vector.js');
 const { deepEqual, OP_TYPES, asJson, isPlainObject, own } = require('./shape.js');
-// The wire's packing is src/wire.js's; re-exported for the readers of this module.
-const { packOps, unpackOps } = require('./wire.js');
+// The wire's packing is src/sync/wire.js's; re-exported for the readers of this module.
+const { packOps, unpackOps } = require('./sync/wire.js');
 const { limitsOf, HOME } = require('./plugin.js');
 const { isPath, ancestorsOf, under, MAX_PATHS } = require('./paths.js');
 

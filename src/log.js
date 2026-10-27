@@ -47,7 +47,7 @@ const defaultFsi = require('./fsi.js');
 const { formatEventId, parseEventId, vectorAdvance, opKey } = require('./vector.js');
 const { checksum } = require('./hash.js');
 const { GLOBAL_SCOPE, inScope } = require('./scope.js');
-const { writerOf, traced, now } = require('./telemetry.js');
+const { writerOf, traced, now } = require('./telemetry/writer.js');
 const { SyncomError } = require('./errors.js');
 const { scrubOp } = require('./header.js');
 
@@ -58,7 +58,7 @@ const INDEX = 'index.json';
 const DEFAULT_ROLL_AFTER = 64;
 const DEFAULT_RETENTION_OPS = 10_000;
 
-// SHA-256 as base64url (src/digest.js `hashOf`), as src/shape.js checks an op's `prev`.
+// SHA-256 as base64url (src/crypto/digest.js `hashOf`), as src/shape.js checks an op's `prev`.
 const FINGERPRINT = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
 
 const pad = (n) => String(n).padStart(10, '0');
@@ -1354,7 +1354,7 @@ class OpLog {
     return this.read(eventId, options)?.entries ?? null;
   }
 
-  /** Every retained entry, oldest first, without a copy — for a selection over the whole log (src/outbound.js). */
+  /** Every retained entry, oldest first, without a copy — for a selection over the whole log (src/sync/outbound.js). */
   *scan() {
     yield* this.#entries;
   }

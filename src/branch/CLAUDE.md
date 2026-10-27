@@ -18,7 +18,7 @@ src/branch/branch.js      the @alexify/syncom/branch subpath — fork a storage,
 { exclude: into.nodeId, vector: into.vector, own: source.nodeId,
 allStreams: true })` → `into.applyRemote(page, { via: { url: null, node },
 adoptFrom: source })` — the one selection `#pushFromLog` uses too
-  (`src/outbound.js`; change one, change both: a push asks `first` of the
+  (`src/sync/outbound.js`; change one, change both: a push asks `first` of the
   sender's own streams, a merge of EVERY stream, and joins as state when one
   is out of reach). No-echo is `exclude` on `origin`/`from` plus `vectorHas`;
   never add a third filter. `drop()` refuses a storage without `branch.json`

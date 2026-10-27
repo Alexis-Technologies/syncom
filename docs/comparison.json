@@ -339,7 +339,7 @@
         "transport": {
           "mark": "✅",
           "text": "injected link; wrpc WebSocket/WebRTC",
-          "source": "src/link.js; src/wrpc/wrpc.js"
+          "source": "src/sync/link.js; src/wrpc/wrpc.js"
         },
         "webrtc": {
           "mark": "✅",
@@ -425,7 +425,7 @@
         "observability": {
           "mark": "✅",
           "text": "OpenTelemetry spans and metrics (injected), `stats()`",
-          "source": "src/telemetry.js"
+          "source": "src/telemetry/writer.js"
         },
         "errors": {
           "mark": "✅",
@@ -480,7 +480,7 @@
         "branches": {
           "mark": "✅",
           "text": "`@alexify/syncom/branch`: fork a storage (at the present or a tag) under a new identity, merge either way as ops",
-          "source": "src/branch/branch.js; src/outbound.js; docs/guide/versions.md#branches"
+          "source": "src/branch/branch.js; src/sync/outbound.js; docs/guide/versions.md#branches"
         }
       }
     },

@@ -12,7 +12,7 @@
 // takes: `sync` — the manager, built once the log is open.
 
 const { SyncManager } = require('./manager.js');
-const { isSyncLink } = require('../link.js');
+const { isSyncLink } = require('./link.js');
 
 const sync = Object.freeze({
   name: 'sync',

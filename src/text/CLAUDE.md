@@ -12,7 +12,9 @@ src/text/diffs.js         the kinds' patches: the diff of two readings as splice
                           compact, who wrote the field (editors), what it holds beside its reading (values)
 src/text/methods.js       the storage methods of the kinds (splice, push, updateText, mark, spans, cursors, blocks, setAt, move…)
                           over the lent core
-src/text/deltas.js        toDelta and applyDelta: a turn's changes as a Quill delta, a delta as one transaction (src/delta.js)
+src/text/deltas.js        toDelta and applyDelta: a turn's changes as a Quill delta, a delta as one transaction (src/text/quill.js)
+src/text/quill.js         Quill-form deltas and their algebra, once — compose, transform, transformIndex (quill-delta's rules): the
+                          plugin's toDelta and the editor binding (src/editor/editor.js) both stand on it — no requires
 src/text/rle.js           run-length content: a run's pieces and gaps, cut, append, merge, the canonical form under MAX_RUN —
                           no requires; sequence.js is the caller and re-exports what the tests read
 src/text/btree.js         the rope: a persistent B+-tree over a block's segments and fences with two measures (slots, visible),

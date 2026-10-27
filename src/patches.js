@@ -13,7 +13,7 @@ const { isAlive, kindsOf } = require('./ops.js');
 const { decompose } = require('./compose.js');
 const { ancestorsOf, under } = require('./paths.js');
 const { diffViews, realize } = require('./patch.js');
-const { traced } = require('./telemetry.js');
+const { traced } = require('./telemetry/writer.js');
 const { asJson, isRecordId, invalidId } = require('./shape.js');
 const { SyncomError } = require('./errors.js');
 

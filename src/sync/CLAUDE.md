@@ -9,6 +9,13 @@ src/sync/sync.js          @alexify/syncom/sync — the sync plugin: `open(ctx)` 
 src/sync/manager.js       SyncManager — the dialing side; `unit()` delegates to hosting.js
 src/sync/registry.js      NodeRegistry — the dialed nodes on disk (remote/<url>.json), saves coalesced per node — no requires
 src/sync/hosting.js       createUnit — the hosting side: hello/push/snapshot/changes, limits, grant()
+src/sync/protocol.js      PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf, kindsOf — what both halves of the sync protocol agree on — no requires
+src/sync/wire.js          packOps / unpackOps and the type codes — the ops as they cross between peers; the core's ops.js re-exports
+                          them — no requires
+src/sync/link.js          isSyncLink — the link contract check; the root barrel and the wrpc adapter take it from here — no requires
+src/sync/outbound.js      outbound(log, { exclude, vector, scopes, own }) — the ops a receiver lacks, the first retained seq per own
+                          stream; a push and a branch merge both pick with it — requires scope.js, vector.js only
+src/sync/shared-log.js    isSharedLog — the reserved broker-log contract (wrpc BrokerLog shape), no consumer yet — no requires
 ```
 
 ## Rules

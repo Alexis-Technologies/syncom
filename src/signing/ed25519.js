@@ -7,7 +7,7 @@
 
 const crypto = require('node:crypto');
 const defaultFsi = require('../fsi.js');
-const { loadKeyPair, SIGNING_FILES } = require('../keys.js');
+const { loadKeyPair, SIGNING_FILES } = require('../crypto/keys.js');
 
 const calculateHash = (data) => {
   const block = JSON.stringify(data);

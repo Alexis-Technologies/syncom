@@ -11,8 +11,8 @@
 // the host another way; a branch merge has no other way, so it asks for
 // every stream (`allStreams`) and joins as state when one is out of reach.
 
-const { opInScope } = require('./scope.js');
-const { isBootstrapOp } = require('./vector.js');
+const { opInScope } = require('../scope.js');
+const { isBootstrapOp } = require('../vector.js');
 
 /**
  * `{ ops, first }` from `log` for a receiver `exclude` (its node id) that

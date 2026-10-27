@@ -6,15 +6,15 @@
 // storage like any other — it dials, hosts, tags, has a history — and it
 // is merged back, or the parent into it, as ops: what one log has that the
 // other lacks, by the other's version vector, handed over through
-// `applyRemote` the way a peer's push lands (src/outbound.js picks them,
+// `applyRemote` the way a peer's push lands (src/sync/outbound.js picks them,
 // as a push does). A source that compacted past what the other holds is
 // joined as state instead — its snapshot pages, then its vector adopted.
 // Nothing here requires storage.js: a branch is opened through the
 // parent's own constructor, so this subpath bundles no engine.
 
-const { outbound, unreachable } = require('../outbound.js');
+const { outbound, unreachable } = require('../sync/outbound.js');
 const { asJson } = require('../shape.js');
-const { DEFAULT_PAGE_SIZE } = require('../protocol.js');
+const { DEFAULT_PAGE_SIZE } = require('../sync/protocol.js');
 const { SyncomError } = require('../errors.js');
 const { PLUGINS } = require('../symbols.js');
 

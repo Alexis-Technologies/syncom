@@ -121,7 +121,7 @@ repeated per op:
 | 6 | `scope` | 12 | `from` | 18 | `msg` |
 | | | | | 19 | `prev` |
 
-The ops above, packed (`packOps` in `src/wire.js`; `unpackOps` is the way
+The ops above, packed (`packOps` in `src/sync/wire.js`; `unpackOps` is the way
 back, and takes a row of fewer than five slots as nothing):
 
 ```json
