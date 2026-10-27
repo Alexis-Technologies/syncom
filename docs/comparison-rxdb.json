@@ -2437,7 +2437,7 @@
           "mark": "✅",
           "text": "`PROTOCOL` 2 in `hello`; another version is refused with 400",
           "source": "src/protocol.js; src/sync/hosting.js (hello)",
-          "detail": "The 19 `packOps` slots are appended, never reordered; a reader of fewer slots ignores the rest (CLAUDE.md)."
+          "detail": "The 19 `packOps` slots are appended, never reordered; a reader of fewer slots ignores the rest (src/CLAUDE.md)."
         },
         "schemaHandshake": {
           "mark": "✅",
@@ -3044,7 +3044,7 @@
           "mark": "",
           "text": "none yet: 0.0.1, never published",
           "source": "CHANGELOG.md; package.json",
-          "detail": "The wire carries `PROTOCOL = 1` and a host refuses another version with 400 `PROTOCOL` (src/protocol.js:8; src/hosting.js:167-168). `packOps` slots are append-only and a new op type is a PROTOCOL bump (CLAUDE.md). The catalog is derived state: a catalog.json of an older format (now 3) is rebuilt once at open (src/catalog.js:25,403; CHANGELOG.md)."
+          "detail": "The wire carries `PROTOCOL = 2` and a host refuses another version with 400 `PROTOCOL` (src/protocol.js; src/sync/hosting.js). `packOps` slots are append-only and a new op type is a PROTOCOL bump (src/CLAUDE.md). The catalog is derived state: a catalog.json of an older format (now 3) is rebuilt once at open (src/catalog.js:25,403; CHANGELOG.md)."
         },
         "releaseCadence": {
           "mark": "",

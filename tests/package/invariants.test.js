@@ -75,7 +75,7 @@ test('every id has a prefix the registry lists, and the rows keep the registryâ€
     last = at;
   }
   // The guides point at the registry rather than list the prefixes themselves.
-  for (const guide of ['CLAUDE.md', 'CONTRIBUTING.md']) {
+  for (const guide of ['tests/CLAUDE.md', 'CONTRIBUTING.md']) {
     assert.ok(readFileSync(path.join(ROOT, guide), 'utf8').includes('prefix registry'), guide);
   }
 });

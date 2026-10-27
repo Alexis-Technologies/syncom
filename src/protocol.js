@@ -10,8 +10,8 @@
 // pre-release. 2 is the per-stream hash chain — `prev` in slot 19, in the
 // signed header under version 2 — which a node of 1 would relay unchecked
 // and could not verify. After publication a new type, or a slot an older
-// reader cannot take as null, bumps this number (see CLAUDE.md, "packOps is
-// 19 positional slots").
+// reader cannot take as null, bumps this number (see src/CLAUDE.md, "packOps
+// is 19 positional slots").
 const PROTOCOL = 2;
 const DEFAULT_PAGE_SIZE = 500;
 

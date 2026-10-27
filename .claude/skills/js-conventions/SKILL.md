@@ -7,7 +7,7 @@ description: Apply the Alexis JavaScript style (Metarhia-derived, linted by oxli
      oxlint + oxfmt instead of ESLint + Prettier, pnpm instead of npm, 120 columns instead of 80,
      'use strict' in every src file (metaschema omits it), and comments that explain why.
      The syncom-specific rules (op model, browser halves, hooks, no runtime dependencies) live in
-     CLAUDE.md, which wins if the two ever disagree. -->
+     the CLAUDE.md notes — the root's and the nested one of the folder at hand — which win if the two ever disagree. -->
 
 # JavaScript Code Style
 
@@ -42,7 +42,7 @@ Use following conventions for JavaScript and TypeScript code.
 - Always include the `.js` extension in relative requires (`require('./ops.js')`)
 - No runtime dependencies: the only bare `require` allowed in `src/` is a `node:` built-in, and
   none at all in a file that reaches the browser bundle (put helpers in `src/utils.js`)
-- A platform split is a `*.browser.js` file (dot, not dash); see CLAUDE.md for the three edits it needs
+- A platform split is a `*.browser.js` file (dot, not dash); see src/CLAUDE.md for the three edits it needs
 
 ## Naming
 

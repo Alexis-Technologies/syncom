@@ -11,8 +11,23 @@ const assert = require('node:assert');
 
 const ROOT = path.join(__dirname, '..', '..');
 
+// Every CLAUDE.md of the repository: the root's and the nested ones it indexes.
+const notes = () => {
+  const out = [];
+  const walk = (dir) => {
+    for (const name of readdirSync(path.join(ROOT, dir))) {
+      if (name === 'node_modules' || name.startsWith('.')) continue;
+      const rel = dir === '' ? name : `${dir}/${name}`;
+      if (statSync(path.join(ROOT, rel)).isDirectory()) walk(rel);
+      else if (name === 'CLAUDE.md') out.push(rel);
+    }
+  };
+  walk('');
+  return out.sort();
+};
+
 const guides = () => {
-  const out = ['CLAUDE.md', 'CONTRIBUTING.md'];
+  const out = [...notes(), 'CONTRIBUTING.md'];
   const skills = path.join(ROOT, '.claude', 'skills');
   if (existsSync(skills)) {
     for (const name of readdirSync(skills)) {
@@ -36,12 +51,18 @@ test('every src/ path the guides name exists', () => {
 });
 
 test('what a CLAUDE.md layout line says a file requires, it requires', () => {
-  const text = readFileSync(path.join(ROOT, 'CLAUDE.md'), 'utf8');
-  const layout = text.slice(text.indexOf('## Layout'), text.indexOf('## Rules that bite'));
   // A layout entry: a line naming a path at its start, and the indented lines that continue it.
   const entries = [];
   let current = null;
-  for (const line of layout.split('\n')) {
+  let lines = [];
+  for (const note of notes()) {
+    const text = readFileSync(path.join(ROOT, note), 'utf8');
+    const start = text.indexOf('## Layout');
+    if (start === -1) continue;
+    const end = text.indexOf('\n## ', start + 1);
+    lines = lines.concat(text.slice(start, end === -1 ? text.length : end).split('\n'), ['']);
+  }
+  for (const line of lines) {
     if (/^src\/\S+\.js/.test(line)) {
       if (current !== null) entries.push(current);
       current = line;
@@ -113,4 +134,22 @@ test('every path the syncom column of a comparison matrix cites exists', () => {
     }
   }
   assert.deepStrictEqual(missing, []);
+});
+
+// The notes are split by folder: the root indexes every nested CLAUDE.md, and
+// none grows past what an agent reads at once (src/CLAUDE.md, the core's, is
+// the one allowed more).
+test('the root CLAUDE.md indexes every nested one, and each stays within its length', () => {
+  const root = readFileSync(path.join(ROOT, 'CLAUDE.md'), 'utf8');
+  const unlisted = [];
+  const long = [];
+  for (const note of notes()) {
+    const length = readFileSync(path.join(ROOT, note), 'utf8').split('\n').length;
+    const limit = note === 'CLAUDE.md' ? 250 : note === 'src/CLAUDE.md' ? 560 : 300;
+    if (length > limit) long.push(`${note}: ${length} lines, past ${limit}`);
+    if (note !== 'CLAUDE.md' && !root.includes(`](./${note})`)) unlisted.push(note);
+  }
+  assert.ok(notes().length > 5, 'the notes are split');
+  assert.deepStrictEqual(unlisted, []);
+  assert.deepStrictEqual(long, []);
 });
