@@ -10,7 +10,7 @@ const { compose } = require('../delta.js');
 const { isRecordId, invalidId, isPlainObject, deepEqual } = require('../shape.js');
 const { floorOf } = require('../vector.js');
 const { SyncomError } = require('../errors.js');
-const { blockOf, render, marksAt, markerArgs } = require('./kind.js');
+const { blockOf, render, revisionOf, marksAt, markerArgs } = require('./kind.js');
 
 // ---------------------------------------------------------------------------
 // Deltas (Quill's form): `[{ retain, attributes? }, { insert, attributes? },
@@ -117,12 +117,15 @@ const isDeltaOp = (op) =>
  * `retain` moves on (with `attributes`, a mark — or an unmark, for a null —
  * over what it retains; `{ embed }` sets the slot's marker), an `insert`
  * splices text in (an `{ embed: marker }` inserts a slot with it) and marks
- * it with its attributes, a `delete` cuts. Resolves to how many ops it took.
+ * it with its attributes, a `delete` cuts. Resolves to `{ ops, revision }`:
+ * how many ops it took, and the field's revision after them.
  * `expect` is the field's text the delta was made over: a field that reads
  * otherwise inside the queue — a peer's edit landed first — rejects with
- * `STALE` before any op, so the caller rebases and sends again.
+ * `STALE` before any op, so the caller rebases and sends again. `revision`,
+ * a revision this call or `revision()` handed back for that text, spares
+ * the comparison while the field still is at it (O(1) instead of the text).
  */
-const applyDelta = async (core, id, key, delta, { actor, message, source, expect } = {}) => {
+const applyDelta = async (core, id, key, delta, { actor, message, source, expect, revision } = {}) => {
   fieldName('applyDelta', key);
   const shape = 'applyDelta() takes a delta: [{ retain, attributes? } | { insert, attributes? } | { delete }]';
   if (!Array.isArray(delta)) throw new TypeError(shape);
@@ -131,15 +134,22 @@ const applyDelta = async (core, id, key, delta, { actor, message, source, expect
   if (expect !== undefined && typeof expect !== 'string') {
     throw new TypeError('applyDelta() takes expect as the text the delta was made over');
   }
+  if (revision !== undefined && (!Number.isSafeInteger(revision) || revision < 0)) {
+    throw new TypeError('applyDelta() takes revision as what applyDelta() or revision() handed back');
+  }
   if (!isRecordId(id)) throw invalidId(id);
   const { result, done } = await core.transact(
     async (tx) => {
       if (expect !== undefined) {
         const entry = await tx.current(id);
-        const shown = entry && !entry.encrypted && blockOf(entry, key) !== undefined ? render(entry, key) : '';
-        const text = typeof shown === 'string' ? shown : '';
-        if (text !== expect) {
-          throw new SyncomError('STALE', `Field ${key} of ${id} changed under the delta`, { id, field: key });
+        // The field still at the revision the text was read at: it reads as
+        // that text, and the comparison — O(n), a rope flattened — is spared.
+        if (revision === undefined || revisionOf(entry, key) !== revision) {
+          const shown = entry && !entry.encrypted && blockOf(entry, key) !== undefined ? render(entry, key) : '';
+          const text = typeof shown === 'string' ? shown : '';
+          if (text !== expect) {
+            throw new SyncomError('STALE', `Field ${key} of ${id} changed under the delta`, { id, field: key });
+          }
         }
       }
       let at = 0;
@@ -202,7 +212,7 @@ const applyDelta = async (core, id, key, delta, { actor, message, source, expect
           at += 1;
         }
       }
-      return ops;
+      return { ops, revision: revisionOf(await tx.current(id), key) };
     },
     { actor, message, source },
   );

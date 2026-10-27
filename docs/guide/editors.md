@@ -61,10 +61,13 @@ holds the shadow plus its own edits not yet landed — one delta **in
 flight**, and what was typed since, **pending**.
 
 - **Editor → field.** An edit reported is composed into `pending`; one
-  delta at a time goes to `applyDelta(id, path, delta, { expect })` with
+  delta at a time goes to `applyDelta(id, path, delta, { expect, revision })` with
   `expect` the shadow it was made over — one transaction, one log append,
-  `source` the binding's. Its own `transaction` event moves the shadow on
-  and frees the next send.
+  `source` the binding's. Its own `transaction` event moves the shadow on;
+  the answer — `{ ops, revision }` — frees the next send, which goes with
+  that revision while nothing else moved the shadow: a field still at it is
+  not compared with `expect`, so typing alone costs no read of the text,
+  however long.
 - **Field → editor.** `observe(id, path)` hands the field's changes a turn
   at a time — a local write, a peer's page, a joined snapshot — and
   `toDelta` composes them into one delta over the shadow. A peer's delta is
@@ -73,8 +76,9 @@ flight**, and what was typed since, **pending**.
   never sees it in the shadow's indices.
 - **The race.** A peer's edit may land in the field between the shadow the
   binding read and the delta it sent. Inside the mutation queue,
-  `applyDelta` compares the field's text with `expect` and refuses with
-  `STALE` before any op; the binding has rebased the refused delta over the
+  `applyDelta` compares the field's text with `expect` — the revision the
+  send carries is one the field moved past — and refuses with `STALE`
+  before any op; the binding has rebased the refused delta over the
   peer's by the time that delta reached the editor — the peer's insert first
   where both inserted at one index, the order the storage holds them in —
   and sends it again. Two editors on one storage, or on two nodes, converge

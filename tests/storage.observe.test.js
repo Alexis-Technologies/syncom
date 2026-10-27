@@ -196,7 +196,7 @@ test('observe and deltas', async (t) => {
       await storage.splitBlock(doc, 'body', 0, { type: 'paragraph' });
       await storage.splitBlock(doc, 'body', 1, { type: 'paragraph' });
       const quote = { type: 'paragraph', parents: ['blockquote'], attrs: {}, isEmbed: false };
-      assert.strictEqual(await storage.applyDelta(doc, 'body', [{ retain: 2, attributes: { embed: quote } }]), 2);
+      assert.strictEqual((await storage.applyDelta(doc, 'body', [{ retain: 2, attributes: { embed: quote } }])).ops, 2);
       assert.deepStrictEqual(
         (await storage.blocks(doc, 'body')).map((block) => block.parents),
         [['blockquote'], ['blockquote']],
@@ -262,7 +262,7 @@ test('observe and deltas', async (t) => {
         [{ insert: 'Hi ' }, { insert: 'there', attributes: { bold: true } }, { insert: { embed: marker } }],
         { message: 'typed' },
       );
-      assert.strictEqual(made, 4);
+      assert.strictEqual(made.ops, 4);
       assert.strictEqual((await openGroups(storage.fsi, '/o/log/open')) - files, 1, 'one group');
       assert.deepStrictEqual(await storage.spans(other, 'body'), [
         { type: 'text', text: 'Hi ', marks: {} },
@@ -276,12 +276,14 @@ test('observe and deltas', async (t) => {
         'the message on every op of the delta; the insert before it has none',
       );
       assert.strictEqual(
-        await storage.applyDelta(other, 'body', [
-          { retain: 3 },
-          { retain: 5, attributes: { bold: null, em: 1 } },
-          { delete: 1 },
-          { insert: '' },
-        ]),
+        (
+          await storage.applyDelta(other, 'body', [
+            { retain: 3 },
+            { retain: 5, attributes: { bold: null, em: 1 } },
+            { delete: 1 },
+            { insert: '' },
+          ])
+        ).ops,
         3,
       );
       assert.deepStrictEqual(await storage.spans(other, 'body'), [
@@ -302,6 +304,22 @@ test('observe and deltas', async (t) => {
         attrs: {},
         isEmbed: true,
       });
+      // A revision handed back spares comparing the text while the field is at it; a stale one is
+      // compared as `expect` alone would be.
+      const shown = (await storage.get(other)).body;
+      const at = await storage.revision(other, 'body');
+      const typed = await storage.applyDelta(other, 'body', [{ insert: 'a' }], { expect: shown, revision: at });
+      assert.notStrictEqual(typed.revision, at, 'a new reading, a new revision');
+      assert.strictEqual(typed.revision, await storage.revision(other, 'body'));
+      await assert.rejects(
+        () => storage.applyDelta(other, 'body', [{ insert: 'b' }], { expect: shown, revision: at }),
+        { code: 'STALE' },
+        'a stale revision: the text is compared, and it moved',
+      );
+      const again = await storage.applyDelta(other, 'body', [{ insert: 'b' }], { expect: `a${shown}`, revision: at });
+      assert.strictEqual(again.ops, 1, 'a stale revision over the right text lands');
+      assert.strictEqual(await storage.revision(other, 'nothing'), 0, 'no such field');
+      await assert.rejects(() => storage.applyDelta(other, 'body', [{ insert: 'c' }], { revision: -1 }), TypeError);
       const logged = storage.log.length;
       await assert.rejects(() => storage.applyDelta(other, 'body', [{ retain: 99 }, { delete: 1 }]), {
         code: 'OUT_OF_RANGE',

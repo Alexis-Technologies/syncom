@@ -9,7 +9,9 @@
 //   editor → field   the adapter reports a local edit as a delta; the
 //                    binding composes it into `pending` and sends one delta
 //                    at a time through `applyDelta` with `expect`, the
-//                    field's text the delta was made over. A delta the
+//                    field's text the delta was made over, and `revision`,
+//                    what the last answer handed back for it — a field
+//                    still there is not compared at all. A delta the
 //                    field moved under — a peer's edit landed first — is
 //                    refused as STALE before any op; the binding rebases it
 //                    over the peer's delta as that reaches the editor, and
@@ -388,6 +390,19 @@ const createTextBinding = (storage, id, path, adapter, options = {}) => {
   // A peer's change came in while the delta in flight was unanswered, and
   // the delta was rebased over it.
   let rebased = false;
+  // The shadow's version — moved by every change it takes — and the field's
+  // revision when the shadow was at `revisionAt`: sent beside `expect` while
+  // the two still match, it spares the storage comparing the text. A peer's
+  // change leaves it behind; the next send compares and hands a new one back.
+  let version = 0;
+  let revision = 0;
+  let revisionAt = -1;
+  // The shadow's version the event of the delta in flight left it at: the
+  // send's answer — the revision after it, a few microtasks behind the
+  // event — is kept for it while nothing moved the shadow since, and the
+  // next send waits for that answer (`holding`) so it can go with it.
+  let answered = -1;
+  let holding = false;
   const waiting = [];
 
   const idle = () => inflight === null && pending.length === 0 && !stale && !reloading;
@@ -401,22 +416,46 @@ const createTextBinding = (storage, id, path, adapter, options = {}) => {
   };
 
   const send = () => {
-    if (stopped || !loaded || inflight !== null || stale || reloading || pending.length === 0) return;
+    if (stopped || !loaded || inflight !== null || holding || stale || reloading || pending.length === 0) return;
     const mine = ++flight;
     const since = epoch;
     inflight = pending;
     pending = [];
     rebased = false;
-    storage.applyDelta(id, path, inflight, { source, expect: shadow }).then(
-      (count) => {
-        // No op made (a mark already there): no event comes to free the slot.
-        if (mine !== flight || inflight === null || count !== 0) return;
+    const known = revisionAt === version ? revision : undefined;
+    const sentAt = version;
+    storage.applyDelta(id, path, inflight, { source, expect: shadow, revision: known }).then(
+      (result) => {
+        if (mine !== flight) return;
+        if (holding) {
+          // Its event is in: the shadow is the field after the delta, unless
+          // a peer's change moved it since.
+          holding = false;
+          if (answered === version) {
+            revision = result.revision;
+            revisionAt = version;
+          }
+          send();
+          return;
+        }
+        // No op made (a mark already there): no event comes to free the slot,
+        // and the field is where the shadow is.
+        if (inflight === null || result.ops !== 0) return;
+        if (sentAt === version) {
+          revision = result.revision;
+          revisionAt = version;
+        }
         inflight = null;
         settle();
         send();
       },
       (error) => {
-        if (mine !== flight || inflight === null) return;
+        if (mine !== flight) return;
+        if (holding) {
+          holding = false;
+          return void send();
+        }
+        if (inflight === null) return;
         if (error && error.code === 'STALE') {
           // A peer's delta reached the field first. Its event rebases
           // `inflight`; once it is here (it may be already), send again.
@@ -437,6 +476,7 @@ const createTextBinding = (storage, id, path, adapter, options = {}) => {
   // repeats never holds the event loop — and stop after MAX_FAILURES in a row.
   const broken = (error) => {
     inflight = null;
+    holding = false;
     stale = false;
     failures++;
     fail(error);
@@ -466,12 +506,20 @@ const createTextBinding = (storage, id, path, adapter, options = {}) => {
   };
 
   const load = async () => {
-    const { spans, vector } = await storage.transact(async (tx) => ({
+    const {
+      spans,
+      vector,
+      revision: read,
+    } = await storage.transact(async (tx) => ({
       spans: await tx.spans(id, path),
+      revision: await tx.revision(id, path),
       vector: { ...storage.vector },
     }));
     if (stopped) return;
     shadow = textOf(spans);
+    version++;
+    revision = read;
+    revisionAt = version;
     // What was typed into the editor while the field was read is over the
     // contents the field replaces: it goes with them, never sent over these.
     pending = [];
@@ -486,6 +534,7 @@ const createTextBinding = (storage, id, path, adapter, options = {}) => {
     loaded = false;
     flight++;
     inflight = null;
+    holding = false;
     pending = [];
     stale = false;
     reloading = false;
@@ -506,6 +555,7 @@ const createTextBinding = (storage, id, path, adapter, options = {}) => {
     if (delta === null) return void reload();
     const before = shadow;
     shadow = applyToText(shadow, delta);
+    version++;
     if (event.source === source) {
       // `expect` compares text: a peer's change made of the characters it
       // replaced — a letter cut and typed again — passes it, and the delta
@@ -513,6 +563,8 @@ const createTextBinding = (storage, id, path, adapter, options = {}) => {
       // peer's. What landed says so; the editor is read again.
       if (rebased && inflight !== null && applyToText(before, inflight) !== shadow) return void reload();
       failures = 0;
+      answered = version;
+      holding = true;
       inflight = null;
       settle();
       send();

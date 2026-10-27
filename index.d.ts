@@ -1881,6 +1881,12 @@ export interface TextMethods {
   unmarkById(id: string, key: string, markId: string, options?: WriteOptions): Promise<void>;
   /** Text field `key` as runs of equal style, its embed slots told apart; raw (no lens, no read hooks); `null` unless the field is a text. */
   spans(id: string, key: string): Promise<TextSpan[] | null>;
+  /**
+   * What list or text field `key` reads as now, as a token (0 for no such field): given to
+   * `applyDelta({ expect, revision })` with the text read beside it, it spares comparing the text
+   * while the field is still there. The same token, the same reading; a new one may read the same.
+   */
+  revision(id: string, key: string): Promise<number>;
   /** Inserts an inline embed — one slot (U+FFFC) holding `{ type, parents: [], attrs, isEmbed: true }` — at `index` of text field `key`. */
   insertEmbed(
     id: string,
@@ -1935,7 +1941,10 @@ export interface TextMethods {
    * (a reset, an unset) — read the field again then.
    */
   toDelta(changes: readonly Change[], field?: string): DeltaOp[] | null;
-  /** Makes `delta` the edits of text field `key`, as one transaction; resolves to how many ops it took. */
+  /**
+   * Makes `delta` the edits of text field `key`, as one transaction; resolves to how many ops it took
+   * and the field's revision after them.
+   */
   applyDelta(
     id: string,
     key: string,
@@ -1943,8 +1952,10 @@ export interface TextMethods {
     options?: TransactOptions & {
       /** The field's text the delta was made over: a field that reads otherwise inside the queue rejects with `STALE` before any op. */
       expect?: string;
+      /** The revision handed back with that text (`applyDelta`, `revision()`): while the field is at it, the text is not compared. */
+      revision?: number;
     },
-  ): Promise<number>;
+  ): Promise<{ ops: number; revision: number }>;
   /**
    * Replaces the element at `index` of list field `key`: a register per
    * element, last writer wins, following the element through a concurrent move.

@@ -9,7 +9,7 @@ const { diff: myers } = require('./myers.js');
 const { spliceArgs, markArgs, jsonValue, fieldName, EMBED } = require('../args.js');
 const { isRecordId, invalidId } = require('../shape.js');
 const { floorOf } = require('../vector.js');
-const { blockOf, markerAt, markerArgs, wholeCharacters } = require('./kind.js');
+const { blockOf, revisionOf, markerAt, markerArgs, wholeCharacters } = require('./kind.js');
 
 /**
  * Who inserted the element at `index` of list or text field `key`:
@@ -176,6 +176,16 @@ const spans = async (core, id, key) => {
   const field = await held(core, 'spans', id, key);
   if (field === null || field.seq.k !== 't') return null;
   return typedSpans(field, key);
+};
+
+/**
+ * What list or text field `key` of `id` reads as now, as a token (0 for no
+ * such field): given to `applyDelta({ expect, revision })` with the text read
+ * beside it, it spares comparing the text while the field is still there.
+ */
+const revision = async (core, id, key) => {
+  const field = await held(core, 'revision', id, key);
+  return field === null ? 0 : revisionOf(field.entry, key);
 };
 
 /**
@@ -386,6 +396,7 @@ module.exports = {
   unmark,
   unmarkById,
   spans,
+  revision,
   block,
   blocks,
   insertEmbed,

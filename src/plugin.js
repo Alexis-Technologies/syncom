@@ -76,6 +76,7 @@ const HOME = Object.freeze({
   unmark: 'text',
   unmarkById: 'text',
   spans: 'text',
+  revision: 'text',
   cursor: 'text',
   index: 'text',
   setAt: 'text',

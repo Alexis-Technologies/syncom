@@ -119,6 +119,62 @@ const runEditorTests = async (t, assert, createStorage) => {
   );
 
   await t.test(
+    'a send goes with the revision the last one handed back, sparing the text compare; a peer’s edit sends the next without',
+    async (t2) => {
+      const storage = await createStorage(t2, 'A');
+      const id = await storage.insert({});
+      await storage.updateText(id, 'body', 'base');
+      // Every send's options, in order; a peer types between two of them once asked to.
+      const sent = [];
+      let peer = null;
+      const spying = new Proxy(storage, {
+        get: (target, name) => {
+          if (name === 'applyDelta') {
+            return async (...args) => {
+              sent.push(args[3]);
+              if (peer !== null) {
+                const text = peer;
+                peer = null;
+                await target.splice(id, 'body', 0, 0, text);
+              }
+              return target.applyDelta(...args);
+            };
+          }
+          const value = target[name];
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+      const editor = createEditor();
+      const binding = E.createTextBinding(spying, id, 'body', editor);
+      t2.after(() => binding.stop());
+      await binding.ready;
+      for (const letter of 'abc') {
+        editor.type(editor.text().length, letter);
+        await binding.flush();
+      }
+      assert.strictEqual(sent.length, 3);
+      for (let i = 0; i < 3; i++) assert.ok(Number.isSafeInteger(sent[i].revision), `send ${i} with a revision`);
+      assert.notStrictEqual(sent[1].revision, sent[2].revision, 'each the revision its predecessor left');
+      // A peer's edit lands before the next send's turn: the revision it carries is stale, the text
+      // is compared (STALE), the delta rebased and sent again without one, then with one again.
+      peer = '>';
+      editor.type(editor.text().length, 'd');
+      await binding.flush();
+      await waitUntil(() => editor.text() === '>baseabcd');
+      editor.type(editor.text().length, 'e');
+      await binding.flush();
+      assert.strictEqual((await storage.get(id)).body, '>baseabcde');
+      const after = sent.slice(3);
+      assert.ok(
+        after.some((options) => options.revision === undefined),
+        'a send after the peer’s edit compares the text',
+      );
+      assert.ok(Number.isSafeInteger(after[after.length - 1].revision), 'and the one after it has a revision again');
+      assert.strictEqual(binding.shadow, '>baseabcde');
+    },
+  );
+
+  await t.test(
     'two editors on one storage converge: an edit landing while another is in flight leaves the first STALE, rebased and sent again, nothing lost',
     async (t2) => {
       const storage = await createStorage(t2, 'A');

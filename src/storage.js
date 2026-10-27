@@ -1388,6 +1388,10 @@ class Storage extends Emitter {
     return this.#api('spans')(this.#core, id, key);
   }
 
+  async revision(id, key) {
+    return this.#api('revision')(this.#core, id, key);
+  }
+
   async cursor(id, key, index, options) {
     return this.#api('cursor')(this.#core, id, key, index, options);
   }

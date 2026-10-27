@@ -1652,6 +1652,15 @@ There is no released version section until then; everything below lands in it.
 
 ### Changed
 
+- **An editor's send no longer compares the whole text.** `applyDelta()`
+  resolves to `{ ops, revision }` (it was the op count) and takes
+  `revision` beside `expect`: while the field is still at that revision —
+  a token per engine block, `revision(id, key)` reads it — the text is not
+  compared (it was O(n), the rope flattened, on every send). A field that
+  moved past it is compared as before, so `STALE` and the rebase are what
+  they were. The editor binding sends the revision the last answer handed
+  back while its shadow has not moved since: typing alone into a 1 MB text
+  costs a send 193 µs instead of 376 µs (100 KB: 81 instead of 96).
 - **The sequence engine is five modules, not one file of 2 957 lines, and the
   text plugin four.**
   `src/text/sequence.js` keeps the design and the public names; the code is

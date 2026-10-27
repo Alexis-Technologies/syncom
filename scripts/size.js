@@ -194,7 +194,8 @@ const ENTRIES = [
     label: 'editor — browser (@alexify/syncom/editor)',
     entry: 'src/editor/editor.js',
     platform: 'browser',
-    budget: 6,
+    // 6.0 with a send's revision (the shadow's version, the answer held for). 6.5, raised by name.
+    budget: 6.5,
   },
   // The CodeMirror adapter: the editor binding it stands on (4.9), a ChangeSet as a delta and back, the cursors'
   // decorations, the undo commands. CodeMirror itself is injected, never bundled. The plan said 3; the binding
@@ -278,7 +279,8 @@ const ENTRIES = [
   // 114.6 with the sequence engine in five modules (src/text/{keys,state,splice,marks,join}.js: the names that
   // cross a module stay whole; 2026-10-27). 115, raised by name.
   // 115.3 with the text plugin in four modules beside it (src/text/{kind,diffs,methods,deltas}.js). 115.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 115.5 },
+  // 115.5 with a field's revision (applyDelta's fast path past `expect`, the binding's send). 116, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 116 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -297,7 +299,8 @@ const ENTRIES = [
   // derived, bodies capped at SEG_MAX, one hydration per plain block; 2026-10-27). 31.5, raised by name.
   // 32.8 with the engine in five modules (the names that cross a module are not minified). 33, raised by name.
   // 33.4 with the plugin in four modules beside text.js. 33.5, raised by name.
-  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 33.5 },
+  // 33.6 with revision() and applyDelta's revision. 34, raised by name.
+  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 34 },
   // The tree kind alone, with the fractional indexes a place is made of and
   // the argument checks it shares with the core (5.1 measured).
   // 5.5 with the field-name check unset shares with it (src/args.js).

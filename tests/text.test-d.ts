@@ -31,8 +31,12 @@ expectType<Promise<CursorPosition | null>>(storage.position('id', 'body', '^'));
 expectType<Promise<(CursorPosition | null)[]>>(storage.positions('id', 'body', ['^', '$']));
 expectType<DeltaOp[] | null>(storage.toDelta([], 'body'));
 expectType<Promise<{ origin: string; ts: number } | null>>(storage.editorOf('id', 'body', 0));
-expectType<Promise<number>>(
+expectType<Promise<{ ops: number; revision: number }>>(
   storage.applyDelta('id', 'body', [{ insert: 'x' }, { retain: 1, attributes: { bold: true } }]),
 );
+expectType<Promise<{ ops: number; revision: number }>>(
+  storage.applyDelta('id', 'body', [{ insert: 'x' }], { expect: '', revision: 3 }),
+);
+expectType<Promise<number>>(storage.revision('id', 'body'));
 expectType<Promise<string>>(storage.insert({}));
 expectAssignable<SequenceBlock>({ k: 'l', ts: 0, runs: {} });

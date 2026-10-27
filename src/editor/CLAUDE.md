@@ -14,8 +14,12 @@ src/editor/editor.js      the @alexify/syncom/editor subpath — the editor-agno
 ## Rules
 
 - **An editor binding sends one delta at a time, with `expect`.** `applyDelta(id, key,
-delta, { expect })` compares the field's text inside the queue and refuses `STALE` before
-  any op; `src/editor/editor.js` keeps a shadow of the field, rebases a refused delta over
+delta, { expect, revision })` compares the field's text inside the queue and refuses `STALE` before
+  any op — unless the field is still at `revision`, a token per engine block that the last
+  answer (or `revision()` at the load) handed back for that text: the binding sends it only while
+  its shadow has not moved since (`version`, `revisionAt`), and holds the next send until the
+  answer is in (`holding`: the own event comes a few microtasks before it), or typing alone would
+  compare the whole text on every send; `src/editor/editor.js` keeps a shadow of the field, rebases a refused delta over
   the peer's (`transform`, the peer's insert first at a tie — the storage's order) and
   sends it again, and rebases a peer's delta over what the editor holds beyond the shadow
   before handing it over. A binding or adapter that resolves an editor's indices against

@@ -225,6 +225,21 @@ const changeOf = (op, stamp, held, block, base = null, cuts = null, from = -1) =
 
 const render = (entry, field) => S.render(S.indexOf(entry, field));
 
+// What a list or text field reads as, as a token: a number per engine block,
+// handed out the first time one is asked for (0 for no such field) — the
+// same block, the same reading. A new block may read the same (an op that
+// changed only what is not shown, a record read again from its file), so a
+// token is a shortcut past comparing two readings, never a proof they differ.
+const REVISIONS = new WeakMap();
+let revisions = 0;
+const revisionOf = (entry, field) => {
+  if (!entry || entry.encrypted || blockOf(entry, field) === undefined) return 0;
+  const block = S.indexOf(entry, field);
+  let revision = REVISIONS.get(block);
+  if (revision === undefined) REVISIONS.set(block, (revision = ++revisions));
+  return revision;
+};
+
 // A list's elements may hold fields of their own — `items/<element>/body` —
 // composed over the element's value for a reader (src/compose.js); a text's
 // characters may not. `members` are the element names in order, `holds`
@@ -452,6 +467,7 @@ module.exports = {
   apply,
   marksAt,
   render,
+  revisionOf,
   NESTS,
   members,
   holds,
