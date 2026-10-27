@@ -42,9 +42,8 @@ const UNPERSISTED_NAMED = 32;
 const { COMMIT, REFRESH, SOURCE, PLUGINS, CURSOR, SIGNER, REWIND } = require('./symbols.js');
 const { missing, HOME } = require('./plugin.js');
 const { SyncomError, typed } = require('./errors.js');
-const { loadIdentity, corruptFile } = require('./identity.js');
+const { loadIdentity } = require('./identity.js');
 
-const SCHEMA_FILE = 'schema.json';
 // What a storage without the schema plugin runs with: no entities, version 1.
 const NO_SCHEMA = Object.freeze({ version: 1, entities: new Map(), snapshot: undefined, ahead: 'apply', view: null });
 
@@ -55,8 +54,6 @@ const STORAGE_HOOKS = ['beforeWrite', 'afterWrite', 'beforeRead', 'afterRead', '
 // The ops that leave a record's whole state behind them — where a repair
 // can start replaying from. A purge counts even scrubbed; the others not.
 const WHOLE = new Set(['write', 'merge', 'delete']);
-
-const corrupt = corruptFile;
 
 class Storage extends Emitter {
   #path;
@@ -90,7 +87,6 @@ class Storage extends Emitter {
   #schema = null;
   #entities = null;
   #version = null;
-  #snapshot = undefined;
   #schemaHash = null;
   #schemaPrevious = null;
   #lens = null;
@@ -239,7 +235,6 @@ class Storage extends Emitter {
     // without stamps nothing, and nothing in hello says what it runs.
     if (schema === null) return;
     this.#version = normalized.version;
-    this.#snapshot = normalized.snapshot;
     this.#ahead = normalized.ahead;
     this.#lens = normalized.view;
     // A held op lives in the log until this node runs its version;
@@ -283,6 +278,9 @@ class Storage extends Emitter {
       options: this.#options,
       settings: this.#settings,
       storage: this,
+      // SHA-256 of a value's JSON (src/digest.js), the core's: a plugin
+      // hashes with it rather than bundle a digest of its own.
+      hash: sha256,
       // A catalog of a tag (the versions plugin's): the entities are read when
       // it is made, after the schema is defined.
       catalogOf: (path) => new Catalog({ fsi, path, entities: this.#entities, logger: this.#logger }),
@@ -467,6 +465,8 @@ class Storage extends Emitter {
       commitNow: (type, id, payload, options) => commit(this.#core, type, id, payload, options),
       cursor: (source, entity, query) => this[CURSOR](entity, query, source),
       alive: isAlive,
+      // A field's kind in an entry, under this storage's registry (src/ops.js kindOf).
+      kindOf: (entry, field) => kindOf(entry, field, this.#plugins),
       forget: (id) => this.#records.delete(id),
       flushDeferred: () => this.#flushDeferred(),
       // A purge reaches the log and the tags alike.
@@ -542,47 +542,14 @@ class Storage extends Emitter {
     return record;
   }
 
-  // `schema.json` remembers the version (and the snapshot's hash) this
-  // directory last ran: a change since is reported as `schemaInfo.previous`
-  // — a fact the caller reads after open, where an event at open would find
-  // no listener yet. The hash is of the snapshot's JSON; metaschema's
-  // `model.toJSON()` is deterministic, a hand-written one is as stable as
-  // its author keeps it.
+  // The version this directory last ran, read and written by the schema
+  // plugin (src/schema/api.js loadVersion) once the definitions are checked:
+  // the snapshot's hash, and what ran before when it differs.
   async #loadSchema() {
     if (this.#version === null) return;
-    if (this.#snapshot !== undefined) this.#schemaHash = await sha256(this.#snapshot);
-    const version = this.#version;
-    const hash = this.#schemaHash;
-    let stored = null;
-    if (await this.#fsi.exists(this.#path, SCHEMA_FILE)) {
-      let raw;
-      try {
-        raw = JSON.parse(await this.#fsi.read(this.#path, SCHEMA_FILE));
-      } catch (error) {
-        throw corrupt(SCHEMA_FILE, error);
-      }
-      if (isPlainObject(raw) && Number.isInteger(raw.version)) {
-        stored = { version: raw.version, hash: typeof raw.hash === 'string' ? raw.hash : null, migrated: raw.migrated };
-      }
-    }
-    if (stored && stored.version === version && stored.hash === hash) return;
-    if (stored) {
-      this.#schemaPrevious = { version: stored.version, hash: stored.hash };
-      const event = stored.version === version ? 'schema.changed' : 'schema.upgrade';
-      this.#logger[stored.version > version ? 'warn' : 'info']({ event, from: stored.version, to: version });
-      // Holding ops from a version this directory already ran makes no
-      // sense: its own records are of that version.
-      if (stored.version > version && this.#ahead === 'hold') {
-        throw new SyncomError(
-          'DOWNGRADE',
-          `Schema version ${version} is below the ${stored.version} this directory ran; ahead 'hold' cannot downgrade`,
-        );
-      }
-    }
-    // `migrated`: when this version first ran here — kept across a snapshot
-    // change of the same version.
-    const migrated = stored?.version === version && Number.isInteger(stored.migrated) ? stored.migrated : Date.now();
-    await this.#fsi.write(this.#path, SCHEMA_FILE, JSON.stringify({ version, migrated, hash }), { atomic: true });
+    const { hash, previous } = await this.#schemaHook.load();
+    this.#schemaHash = hash;
+    this.#schemaPrevious = previous;
   }
 
   /**
@@ -627,72 +594,9 @@ class Storage extends Emitter {
     return (entry.view ??= await this.#lens(id, composed, entry.meta.v ?? 1));
   }
 
-  /**
-   * Rewrites every record of an older version as this one, through the
-   * lens: a whole-record write of the view, then the counters and the sets
-   * added back (a write resets them). One designated node runs it; peers receive
-   * ordinary ops. Idempotent — a record already of this version is left
-   * alone. `entities` limits it to those collections; `batch` is how many
-   * records go between turns of the event loop.
-   */
-  async migrate({ entities = null, batch = 100, actor } = {}) {
-    if (this.#schemaHook === null) throw missing('migrate()', 'schema');
-    if (this.#version === null) throw new TypeError('migrate() needs open({ schema })');
-    let names = null;
-    if (entities !== null) {
-      if (!Array.isArray(entities)) throw new TypeError('migrate({ entities }) takes an array of entity names');
-      names = new Set();
-      for (let i = 0; i < entities.length; i++) {
-        if (typeof entities[i] !== 'string') {
-          throw new TypeError('migrate({ entities }) takes an array of entity names');
-        }
-        names.add(entities[i]);
-      }
-    }
-    if (!Number.isInteger(batch) || batch < 1) throw new TypeError('migrate({ batch }) takes a positive integer');
-    const result = { migrated: 0, counters: 0, sets: 0, lists: 0, texts: 0, trees: 0 };
-    let since = 0;
-    for (const id of await this.list()) {
-      const entry = await this.#entries.load(id);
-      if (!entry || entry.encrypted || (entry.meta.v ?? 1) >= this.#version) continue;
-      if (names !== null && !names.has(entry.data.$type)) continue;
-      const view = await this.#view(id, entry);
-      const data = {};
-      const kinds = {};
-      for (const key of Object.keys(view)) {
-        const kind = kindOf(entry, key, this.#plugins);
-        if (kind === undefined || kind === 'register') data[key] = view[key];
-        else kinds[key] = kind;
-      }
-      await this[COMMIT]('write', id, { data }, { actor });
-      for (const key of Object.keys(kinds)) {
-        const kind = kinds[key];
-        const value = entry.data[key];
-        if (kind === 'counter') {
-          await this[COMMIT]('inc', id, { key, value }, { actor });
-          result.counters++;
-        } else if (kind === 'set') {
-          // A set with nothing live has nothing to add back: it is dropped.
-          if (value.length === 0) continue;
-          await this[COMMIT]('add', id, { key, value }, { actor });
-          result.sets++;
-        } else {
-          // A plugin's field comes back as the ops its module lays — a list
-          // or a text as one run, a tree as one move per node, parents first
-          // — and one with nothing to read is dropped.
-          const ops = this.#plugins.byName[kind].migrate(kind, key, value);
-          if (ops.length === 0) continue;
-          for (const [type, payload] of ops) await this[COMMIT](type, id, payload, { actor });
-          result[`${kind}s`] = (result[`${kind}s`] ?? 0) + 1;
-        }
-      }
-      result.migrated++;
-      if (++since >= batch) {
-        since = 0;
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
-    }
-    return result;
+  /** Rewrites every record of an older version as this one, through the lens — the schema plugin's (src/schema/api.js). */
+  async migrate(options) {
+    return this.#api('migrate')(this.#core, options);
   }
 
   // Which node this directory is (src/identity.js: the signing key, node.json, or getId).
@@ -874,13 +778,7 @@ class Storage extends Emitter {
    * ValidationError; the storage is untouched either way.
    */
   async check(entity, data) {
-    if (this.#schemaHook === null) throw missing('check()', 'schema');
-    const def = this.#entities.get(entity);
-    if (!def) throw new TypeError(`Unknown entity ${entity}`);
-    if (!isPlainObject(data)) throw new TypeError('check() takes a plain object');
-    if (!def.validator) return data;
-    const id = def.idField !== false && typeof data[def.idField] === 'string' ? data[def.idField] : null;
-    return def.validator(project(def, id, data));
+    return this.#api('check')(this.#core, entity, data);
   }
 
   /** This node's stable identity — the `origin` of every op it creates. */

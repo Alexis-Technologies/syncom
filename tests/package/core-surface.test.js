@@ -37,6 +37,7 @@ const MEMBERS = [
   'hooks',
   'inflight',
   'invalid',
+  'kindOf',
   'land',
   'landing',
   'limits',

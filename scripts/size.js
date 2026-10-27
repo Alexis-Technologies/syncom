@@ -356,7 +356,9 @@ const ENTRIES = [
     entry: 'src/schema/schema.js',
     platform: 'browser',
     // 4.6 with the canonical JSON in shape.js.
-    budget: 5,
+    // 5.9 with migrate(), check() and schema.json moved out of the core (the
+    // main entry 50.8 → 50.1; 2026-10-27). 6, raised by name.
+    budget: 6,
   },
   // The OpenTelemetry adapter: the tracer and meter resolved, the instruments, the gauges.
   {

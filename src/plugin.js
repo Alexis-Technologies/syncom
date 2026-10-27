@@ -105,6 +105,8 @@ const HOME = Object.freeze({
   atVersion: 'versions',
   history: 'versions',
   editorOf: 'text',
+  migrate: 'schema',
+  check: 'schema',
 });
 
 /** The refusal of a call, an op type or a patch action whose plugin is not registered here. */

@@ -1652,6 +1652,12 @@ There is no released version section until then; everything below lands in it.
 
 ### Changed
 
+- **`migrate()` and `check()` are the schema plugin's, and so is
+  `schema.json`.** The facade keeps a stub for each (PLUGIN_MISSING
+  without the plugin, as before); the code, and the reading and writing of
+  the version file, moved to `src/schema/api.js` — the core 0.7 KB lighter
+  (50.8 → 50.1 KB), `/schema` 4.9 → 5.9 KB. A plugin's `setup(ctx)` gets
+  `hash`, the core's SHA-256; the lent core gets `kindOf`.
 - **Nothing reads a shape from before the first publication.** The wire,
   the signed header and the files are version 1 as that publication will
   have them (`PROTOCOL` 1, the header's version `1`, `enc1:` bound to its

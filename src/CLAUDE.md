@@ -98,7 +98,7 @@ src/                      ships as-is — no build step, CommonJS, 'use strict'
   (`tests/*.lean.test.js`) — and `scripts/size.js` checks that the core and every block bundled
   together weigh what `/all` weighs (nothing bundled twice).
 - **The security blocks are api plugins over one seam.** A plugin that is not a kind has
-  `setup(ctx)` — `{ fsi, path, logger, options, settings, storage }`, run in `#open` before the
+  `setup(ctx)` — `{ fsi, path, logger, options, settings, storage, hash, catalogOf }`, run in `#open` before the
   log opens, in registration order — and hands back hooks the core takes: `identity` (`{ id,
 sign, verify, signMessage }`, the signing plugin), `seal` (`{ encrypt, decrypt }`, the
   encryption plugin), `chain` (a Blockchain, the chain plugin) — and `open(ctx)` — `{ storage,

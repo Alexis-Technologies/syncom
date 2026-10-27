@@ -12,20 +12,26 @@
 // PLUGIN_MISSING, as are `migrate()` and `check()`; records are untyped.
 // The hook the core takes: `schema` — the normalized definitions plus
 // `view`, the lens as a function (null without migrations or validators to
-// read through).
+// read through), and `load()`, the version file read and written once the
+// open has checked the definitions (./api.js loadVersion). The methods are
+// stubs on the facade.
 
 const { normalizeSchema } = require('./define.js');
 const { createLens } = require('./lens.js');
+const { loadVersion, migrate, check } = require('./api.js');
 const { ValidationError } = require('../errors.js');
 
 const schema = Object.freeze({
   name: 'schema',
-  setup({ options, logger }) {
+  setup(ctx) {
+    const { options, logger } = ctx;
     const given = options.schema ?? null;
     const normalized = normalizeSchema(given, { validator: options.validator });
     const view = given === null ? null : createLens(normalized, logger);
-    return { schema: { ...normalized, given, view } };
+    const load = () => loadVersion(ctx, normalized);
+    return { schema: { ...normalized, given, view, load } };
   },
+  methods: { migrate, check },
 });
 
 module.exports = { schema, ValidationError };

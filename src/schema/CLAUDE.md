@@ -8,6 +8,7 @@ The validator after `applyOp`, the lens. The rules of the core — the op model,
 src/schema/schema.js      @alexify/syncom/schema — the schema plugin: setup(ctx) hands the core the definitions and the lens (`schema` hook)
 src/schema/define.js      entity definitions, the injected validator (Standard Schema / ajv / compile) — normalizeSchema; requires errors.js only
 src/schema/lens.js        createLens — how an older record reads under this version (migrations, then the validator)
+src/schema/api.js         what the plugin does over the lent core: loadVersion (schema.json, at open), migrate() and check()
 ```
 
 ## Rules
