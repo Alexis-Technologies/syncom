@@ -820,7 +820,7 @@ data/
 ├── lock.json      { pid, id, since } — while an instance holds the directory (not with Web Locks)
 ├── schema.json    { version, migrated, hash } — the schema this directory last ran
 ├── index/         catalog.json — the record catalog as of a log position, search text included (derived; rebuilt when missing)
-├── data/          <id>.json per record: { data, meta, encrypted, timestamp, block }
+├── data/          <id>.json per record: { data, meta, encrypted, timestamp, block, gen? }; a list or text of 1 024 runs or more keeps its runs in <id>~<n>.json beside it, a piece of 32 each
 ├── log/           the operation log (see Sync)
 ├── tags.json      { format, tags } — the tags taken here (see Versions and history › Tags); tags.corrupt.json beside it once it could not be read
 ├── tags/          <name>/index/catalog.json and <name>/data/<id>.json — a tag's catalog and the record files copied before their first change after it; .pending/data/ while tags.json is unreadable

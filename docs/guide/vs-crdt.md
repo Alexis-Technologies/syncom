@@ -67,7 +67,7 @@ compares all four, row by row, from their source code: 141 rows in seven section
 - **Size depends on what is counted.** Yjs ships 28 KB min+gzip, all of it. Automerge and Loro
   ship about 1.1 MB each, almost all of it WebAssembly. syncom's core is 51 KB and the core with
   the `text` plugin 78 KB — the core carries the storage and the op log, which the three do not;
-  everything, with the sync protocol, queries, versions and signatures, is 113 KB.
+  everything, with the sync protocol, queries, versions and signatures, is 117 KB.
 - **History is kept four ways.** Automerge keeps every change forever, in a graph of SHA-256
   hashes, and never drops any. Loro keeps every change too, until you export a shallow snapshot.
   Yjs keeps the current state and the ids of what was deleted, not the changes; reading the past

@@ -223,7 +223,7 @@ data/
 ├── lock.json      while an instance holds the directory
 ├── schema.json    the schema version this directory last ran
 ├── index/         catalog.json — derived (ids, indexes, search text), rebuilt when missing
-├── data/          <id>.json per record: data, meta, the block that committed it
+├── data/          <id>.json per record: data, meta, the block that committed it; a large text's runs in pieces beside it
 ├── log/           the operation log: open files and sealed segments
 ├── tags.json      the tags taken here, once there is one
 ├── tags/          per tag: its catalog, and the record files copied before their first change
