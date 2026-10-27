@@ -975,9 +975,12 @@ const applyOp = (previous, op, limits = null) => {
     if (whole) delete changes.covered;
     else changesOf(entry, delta, changes, plugins);
     // The newest stamp, carried: the source's and this op's (a merge joins
-    // another meta's stamps — walked when asked).
-    if (op.type !== 'merge') {
-      const known = previous ? LATEST.get(previous.meta) : 0;
+    // another meta's stamps — walked when asked). Only along a line a write
+    // path has asked (`latestHeld`): an entry made from nothing, or folded by
+    // a reader no one stamps after, would add an entry to the weak map per op
+    // for nothing — a fifth of a register write's cost.
+    if (op.type !== 'merge' && previous) {
+      const known = LATEST.get(previous.meta);
       if (known !== undefined) LATEST.set(meta, Math.max(known, op.ts));
     }
     return { entry, changed, delta, rejected, changes };

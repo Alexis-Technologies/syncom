@@ -299,8 +299,10 @@ const mapOf = (plain) => {
   return pairs.length === 0 ? P.EMPTY : P.fromEntries(pairs);
 };
 
+// A block as plain JSON, to hydrate again (a base it has not seen, a prune, a
+// join): read once, so its runs' tuples are not kept (`tupleOf`).
 const plainOf = (block) => {
-  const out = { k: block.k, ts: block.ts, runs: runsJson(block) };
+  const out = { k: block.k, ts: block.ts, runs: runsJson(block, false) };
   for (const name of MAPS) if (block[name] !== undefined) out[name] = block[name];
   return out;
 };
@@ -327,31 +329,34 @@ const rleOf = (kind, run) => {
 // A run's JSON tuple, made once per run record: a record is frozen when it
 // is set and replaced when it changes, so a version's `runs` reuses the
 // tuple of every run the op left alone — rebuilding them all cost a large
-// record's landing tens of milliseconds.
+// record's landing tens of milliseconds. Kept only where a version is
+// serialized (`keep`, the `runs` of a block): a block read once to hydrate
+// again (a join of a peer's picture) made an entry per run that no version
+// read again, and the weak map's upkeep slowed the merge by a fifth.
 const TUPLES = new WeakMap();
-const tupleOf = (kind, run) => {
+const tupleOf = (kind, run, keep) => {
   const known = TUPLES.get(run);
   if (known !== undefined) return known;
   const tuple = run.elem !== null ? [run.at, rleOf(kind, run), run.elem] : [run.at, rleOf(kind, run)];
-  if (Object.isFrozen(run)) TUPLES.set(run, tuple);
+  if (keep && Object.isFrozen(run)) TUPLES.set(run, tuple);
   return tuple;
 };
 
 // The `runs` map of a block, in walk order then the pending ones by key;
 // made once per version.
-const runsJson = (block) => {
+const runsJson = (block, keep = true) => {
   const st = STATE.get(block);
   if (st.json !== null) return st.json;
   const out = {};
   for (const item of T.iterate(st.root)) {
-    if (item.fence === 1) out[item.run] = tupleOf(st.kind, P.get(st.runs, item.run));
+    if (item.fence === 1) out[item.run] = tupleOf(st.kind, P.get(st.runs, item.run), keep);
   }
   // What is not in the walk — a run waiting for its anchor, and what waits
   // under it — by key.
   const waiting = [];
   for (const [key, run] of P.entries(st.runs)) if (!run.placed) waiting.push(key);
   waiting.sort();
-  for (const key of waiting) out[key] = tupleOf(st.kind, P.get(st.runs, key));
+  for (const key of waiting) out[key] = tupleOf(st.kind, P.get(st.runs, key), keep);
   st.json = out;
   return out;
 };
