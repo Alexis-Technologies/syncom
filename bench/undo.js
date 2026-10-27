@@ -14,7 +14,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { bench } = require('./support/harness.js');
-const { open } = require('../src/storage.js');
+const { open } = require('../src/all/all.js');
 const { createUndo } = require('../src/undo/undo.js');
 
 const main = async () => {

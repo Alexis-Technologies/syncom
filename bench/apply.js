@@ -18,10 +18,9 @@ const os = require('node:os');
 const path = require('node:path');
 const { bench } = require('./support/harness.js');
 const { observedTags, packOps, unpackOps } = require('../src/ops.js');
-const { applyOp } = require('../src/all/all.js');
+const { applyOp, open } = require('../src/all/all.js');
 const { generateSigningKeys } = require('../src/signing/ed25519.js');
 const { signOp, verifyOp } = require('../src/signing/sign.js');
-const { open } = require('../src/storage.js');
 const S = require('../src/text/sequence.js');
 
 const record = { name: 'Example', email: 'example@example.com', hits: 0, tags: ['a', 'b'], nested: { k: 1 } };

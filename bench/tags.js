@@ -11,7 +11,7 @@
 
 const { bench } = require('./support/harness.js');
 const { memory } = require('../src/memory/memory.js');
-const { open } = require('../src/storage.js');
+const { open } = require('../src/all/all.js');
 
 const main = async () => {
   console.log(`Tags benchmark — Node ${process.version}\n`);

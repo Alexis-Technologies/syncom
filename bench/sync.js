@@ -17,8 +17,9 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { bench } = require('./support/harness.js');
-const { open } = require('../src/storage.js');
+const { open } = require('../src/all/all.js');
 const { MemoryLink } = require('../tests/utils/memory-link.js');
+const { PROTOCOL } = require('../src/protocol.js');
 
 const record = { name: 'Example', email: 'example@example.com', hits: 0 };
 
@@ -122,7 +123,7 @@ const main = async () => {
     });
     const unit = scoped.sync.unit({ access: 'public' });
     const link = new MemoryLink(unit);
-    await link.call('syncom/hello', { node: 'listener', version: 1, scopes: ['a'] });
+    await link.call('syncom/hello', { node: 'listener', version: PROTOCOL, scopes: ['a'] });
     link.subscribe('syncom/changes', { scopes: ['a'] }, { onData() {} });
     let k = 0;
     await bench(
