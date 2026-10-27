@@ -990,7 +990,7 @@
         },
         "longText": {
           "mark": "",
-          "text": "a persistent rope, O(log n) per keystroke; the B4 trace (260k edits) in about 20 s, 8 MB of JS heap after it",
+          "text": "a persistent rope, O(log n) per keystroke; the B4 trace (260k edits) in about 6 s, 8 MB of JS heap after it",
           "source": "src/text/btree.js; src/text/sequence.js; bench/results/compare.json (trace-memory); docs/guide/benchmarks.md"
         },
         "marks": {

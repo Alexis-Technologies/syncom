@@ -44,59 +44,59 @@
 <text class="tick" x="676" y="355" text-anchor="middle">1M</text>
 <line class="axis" x1="276" y1="139" x2="276" y2="339"/>
 <g><title>Loro · LoroDoc, a LoroMap per record · v1.16.4
-482,006 ops/s
-2.07 µs per operation
-samples 481k – 483k
+480,595 ops/s
+2.08 µs per operation
+samples 480k – 482k
 JS heap after the trace 0.0 MB
 loro-crdt@1.16.4</title>
 <text class="label" x="20" y="156">Loro</text>
 <text class="sublabel" x="20" y="171">LoroDoc, a LoroMap per record · v1.16.4</text>
-<path class="bar" d="M276,152H608.6105623506238A4,4 0 0 1 612.6105623506238,156V162A4,4 0 0 1 608.6105623506238,166H276Z"/>
-<text class="value" x="618.6105623506238" y="165">482k</text>
+<path class="bar" d="M276,152H608.355823609935A4,4 0 0 1 612.355823609935,156V162A4,4 0 0 1 608.355823609935,166H276Z"/>
+<text class="value" x="618.355823609935" y="165">481k</text>
 </g>
 <g><title>Yjs · Y.Doc, a Y.Map per record · v13.6.33
-53,005 ops/s
-18.9 µs per operation
-samples 52.6k – 53.4k
+53,264 ops/s
+18.8 µs per operation
+samples 52.9k – 53.7k
 JS heap after the trace 3.1 MB
 yjs@13.6.33</title>
 <text class="label" x="20" y="196">Yjs</text>
 <text class="sublabel" x="20" y="211">Y.Doc, a Y.Map per record · v13.6.33</text>
-<path class="bar" d="M276,192H416.8634228332281A4,4 0 0 1 420.8634228332281,196V202A4,4 0 0 1 416.8634228332281,206H276Z"/>
-<text class="value" x="426.8634228332281" y="205">53k</text>
-</g>
-<g><title>Automerge · Automerge.change, Counter · v3.5.0
-18,371 ops/s
-54.4 µs per operation
-samples 18.1k – 18.6k
-JS heap after the trace 0.1 MB
-@automerge/automerge@3.5.0</title>
-<text class="label" x="20" y="236">Automerge</text>
-<text class="sublabel" x="20" y="251">Automerge.change, Counter · v3.5.0</text>
-<path class="bar" d="M276,232H324.8277897124871A4,4 0 0 1 328.8277897124871,236V242A4,4 0 0 1 324.8277897124871,246H276Z"/>
-<text class="value" x="334.8277897124871" y="245">18.4k</text>
+<path class="bar" d="M276,192H417.2866795038053A4,4 0 0 1 421.2866795038053,196V202A4,4 0 0 1 417.2866795038053,206H276Z"/>
+<text class="value" x="427.2866795038053" y="205">53.3k</text>
 </g>
 <g><title>syncom · core + text + sync, memory() · v0.0.1
-12,697 ops/s
-78.8 µs per operation
-samples 12.5k – 12.9k
-JS heap after the trace 7.8 MB
+44,168 ops/s
+22.6 µs per operation
+samples 43.8k – 44.5k
+JS heap after the trace 7.4 MB
 @alexify/syncom@0.0.1</title>
-<text class="label primary" x="20" y="276">syncom</text>
-<text class="sublabel" x="20" y="291">core + text + sync, memory() · v0.0.1</text>
-<path class="bar primary" d="M276,272H292.7422771696748A4,4 0 0 1 296.7422771696748,276V282A4,4 0 0 1 292.7422771696748,286H276Z"/>
-<text class="value" x="302.7422771696748" y="285">12.7k</text>
+<text class="label primary" x="20" y="236">syncom</text>
+<text class="sublabel" x="20" y="251">core + text + sync, memory() · v0.0.1</text>
+<path class="bar primary" d="M276,232H401.02195729029893A4,4 0 0 1 405.02195729029893,236V242A4,4 0 0 1 401.02195729029893,246H276Z"/>
+<text class="value" x="411.02195729029893" y="245">44.2k</text>
 </g>
 <g><title>syncom · /all: signed, chained, memory() · v0.0.1
-10,718 ops/s
-93.3 µs per operation
-samples 10.5k – 10.9k
+29,991 ops/s
+33.3 µs per operation
+samples 29.8k – 30.2k
 @alexify/syncom@0.0.1</title>
-<text class="label secondary" x="20" y="316">syncom</text>
-<text class="sublabel" x="20" y="331">/all: signed, chained, memory() · v0.0.1</text>
-<path class="bar secondary" d="M276,312H278.0203940133942A4,4 0 0 1 282.0203940133942,316V322A4,4 0 0 1 278.0203940133942,326H276Z"/>
-<text class="value" x="288.0203940133942" y="325">10.7k</text>
+<text class="label secondary" x="20" y="276">syncom</text>
+<text class="sublabel" x="20" y="291">/all: signed, chained, memory() · v0.0.1</text>
+<path class="bar secondary" d="M276,272H367.39924753668527A4,4 0 0 1 371.39924753668527,276V282A4,4 0 0 1 367.39924753668527,286H276Z"/>
+<text class="value" x="377.39924753668527" y="285">30k</text>
+</g>
+<g><title>Automerge · Automerge.change, Counter · v3.5.0
+18,273 ops/s
+54.7 µs per operation
+samples 18k – 18.6k
+JS heap after the trace 0.1 MB
+@automerge/automerge@3.5.0</title>
+<text class="label" x="20" y="316">Automerge</text>
+<text class="sublabel" x="20" y="331">Automerge.change, Counter · v3.5.0</text>
+<path class="bar" d="M276,312H324.3596248078171A4,4 0 0 1 328.3596248078171,316V322A4,4 0 0 1 324.3596248078171,326H276Z"/>
+<text class="value" x="334.3596248078171" y="325">18.3k</text>
 </g>
 <text class="caption" x="20" y="380">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
-<text class="caption" x="20" y="396">in a fresh process · 2026-10-26</text>
+<text class="caption" x="20" y="396">in a fresh process · 2026-10-27</text>
 </svg>

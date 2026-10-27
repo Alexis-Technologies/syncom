@@ -442,8 +442,8 @@ delta cannot say — a reset, an unset — makes it `null`: read the field again
   is a rope: every edit — a keystroke at the end of what you just typed, an
   insert anywhere, a cut, a peer's run with what hangs under it — lands in
   O(log n) and leaves the reading cached, so what an op costs the engine does
-  not grow with the text (`bench/sequence.js`: some 65 000 to 120 000
-  inserts a second into a 100 KB text of 10 000 runs, 500 000 appends). What
+  not grow with the text (`bench/sequence.js`: some 60 000 to 90 000
+  inserts a second into a 100 KB text of 10 000 runs, 390 000 appends). What
   grows is around it: the record file written after the op, and the load of
   the field from its JSON once per open (a 100 KB text of one run in under
   a tenth of a millisecond, 10 000 runs in some 20 ms).

@@ -44,55 +44,55 @@
 <text class="tick" x="676" y="355" text-anchor="middle">100k</text>
 <line class="axis" x1="271" y1="139" x2="271" y2="339"/>
 <g><title>Loro · updates appended to a file · v1.16.4
-45,643 ops/s
+45,673 ops/s
 21.9 µs per operation
-samples 45.2k – 46.6k
+samples 45.1k – 46k
 loro-crdt@1.16.4</title>
 <text class="label" x="20" y="156">Loro</text>
 <text class="sublabel" x="20" y="171">updates appended to a file · v1.16.4</text>
-<path class="bar" d="M271,152H603.0225744182546A4,4 0 0 1 607.0225744182546,156V162A4,4 0 0 1 603.0225744182546,166H271Z"/>
-<text class="value" x="613.0225744182546" y="165">45.6k</text>
+<path class="bar" d="M271,152H603.0811253370092A4,4 0 0 1 607.0811253370092,156V162A4,4 0 0 1 603.0811253370092,166H271Z"/>
+<text class="value" x="613.0811253370092" y="165">45.7k</text>
 </g>
 <g><title>Yjs · y-leveldb · v13.6.33
-23,817 ops/s
-42 µs per operation
-samples 20.3k – 24k
+23,921 ops/s
+41.8 µs per operation
+samples 22.8k – 24.2k
 yjs@13.6.33</title>
 <text class="label" x="20" y="196">Yjs</text>
 <text class="sublabel" x="20" y="211">y-leveldb · v13.6.33</text>
-<path class="bar" d="M271,192H545.817836589056A4,4 0 0 1 549.817836589056,196V202A4,4 0 0 1 545.817836589056,206H271Z"/>
-<text class="value" x="555.817836589056" y="205">23.8k</text>
+<path class="bar" d="M271,192H546.2012392071572A4,4 0 0 1 550.2012392071572,196V202A4,4 0 0 1 546.2012392071572,206H271Z"/>
+<text class="value" x="556.2012392071572" y="205">23.9k</text>
 </g>
 <g><title>syncom · core + text + sync, node:fs · v0.0.1
-9,008 ops/s
-111 µs per operation
-samples 8,390 – 10.1k
+11,109 ops/s
+90 µs per operation
+samples 10k – 11.4k
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="236">syncom</text>
 <text class="sublabel" x="20" y="251">core + text + sync, node:fs · v0.0.1</text>
-<path class="bar primary" d="M271,232H460.30978408861176A4,4 0 0 1 464.30978408861176,236V242A4,4 0 0 1 460.30978408861176,246H271Z"/>
-<text class="value" x="470.30978408861176" y="245">9,008</text>
+<path class="bar primary" d="M271,232H478.75088607820385A4,4 0 0 1 482.75088607820385,236V242A4,4 0 0 1 478.75088607820385,246H271Z"/>
+<text class="value" x="488.75088607820385" y="245">11.1k</text>
 </g>
 <g><title>syncom · /all: signed, chained, node:fs · v0.0.1
-4,858 ops/s
-206 µs per operation
-samples 4,768 – 5,267
+5,609 ops/s
+178 µs per operation
+samples 5,182 – 5,927
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="276">syncom</text>
 <text class="sublabel" x="20" y="291">/all: signed, chained, node:fs · v0.0.1</text>
-<path class="bar secondary" d="M271,272H406.0017158346841A4,4 0 0 1 410.0017158346841,276V282A4,4 0 0 1 406.0017158346841,286H271Z"/>
-<text class="value" x="416.0017158346841" y="285">4,858</text>
+<path class="bar secondary" d="M271,272H418.65684562871223A4,4 0 0 1 422.65684562871223,276V282A4,4 0 0 1 418.65684562871223,286H271Z"/>
+<text class="value" x="428.65684562871223" y="285">5,609</text>
 </g>
 <g><title>Automerge · automerge-repo, NodeFS storage · v3.5.0
-3,326 ops/s
+3,324 ops/s
 301 µs per operation
-samples 3,114 – 3,399
+samples 3,231 – 3,376
 @automerge/automerge@3.5.0</title>
 <text class="label" x="20" y="316">Automerge</text>
 <text class="sublabel" x="20" y="331">automerge-repo, NodeFS storage · v3.5.0</text>
-<path class="bar" d="M271,312H372.6989039580204A4,4 0 0 1 376.6989039580204,316V322A4,4 0 0 1 372.6989039580204,326H271Z"/>
-<text class="value" x="382.6989039580204" y="325">3,326</text>
+<path class="bar" d="M271,312H372.6339505134999A4,4 0 0 1 376.6339505134999,316V322A4,4 0 0 1 372.6339505134999,326H271Z"/>
+<text class="value" x="382.6339505134999" y="325">3,324</text>
 </g>
 <text class="caption" x="20" y="380">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
-<text class="caption" x="20" y="396">in a fresh process · 2026-10-26</text>
+<text class="caption" x="20" y="396">in a fresh process · 2026-10-27</text>
 </svg>

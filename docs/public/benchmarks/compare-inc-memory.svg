@@ -45,45 +45,45 @@
 <text class="tick" x="676" y="298" text-anchor="middle">1M</text>
 <line class="axis" x1="276" y1="122" x2="276" y2="282"/>
 <g><title>Loro · LoroDoc, a LoroMap per record · v1.16.4
-333,004 ops/s
-3 µs per operation
-samples 59.4k – 352k
+352,250 ops/s
+2.84 µs per operation
+samples 252k – 361k
 loro-crdt@1.16.4</title>
 <text class="label" x="20" y="139">Loro</text>
 <text class="sublabel" x="20" y="154">LoroDoc, a LoroMap per record · v1.16.4</text>
-<path class="bar" d="M276,135H608.3266126946879A4,4 0 0 1 612.3266126946879,139V145A4,4 0 0 1 608.3266126946879,149H276Z"/>
-<text class="value" x="618.3266126946879" y="148">333k</text>
+<path class="bar" d="M276,135H611.5801033329813A4,4 0 0 1 615.5801033329813,139V145A4,4 0 0 1 611.5801033329813,149H276Z"/>
+<text class="value" x="621.5801033329813" y="148">352k</text>
 </g>
 <g><title>syncom · core + text + sync, memory() · v0.0.1
-43,380 ops/s
-23.1 µs per operation
-samples 41.2k – 93.7k
+82,000 ops/s
+12.2 µs per operation
+samples 63k – 104k
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="179">syncom</text>
 <text class="sublabel" x="20" y="194">core + text + sync, memory() · v0.0.1</text>
-<path class="bar primary" d="M276,175H490.30543501443293A4,4 0 0 1 494.30543501443293,179V185A4,4 0 0 1 490.30543501443293,189H276Z"/>
-<text class="value" x="500.30543501443293" y="188">43.4k</text>
+<path class="bar primary" d="M276,175H527.1748300761642A4,4 0 0 1 531.1748300761642,179V185A4,4 0 0 1 527.1748300761642,189H276Z"/>
+<text class="value" x="537.1748300761642" y="188">82k</text>
 </g>
 <g><title>syncom · /all: signed, chained, memory() · v0.0.1
-14,818 ops/s
-67.5 µs per operation
-samples 14.3k – 19.4k
+18,659 ops/s
+53.6 µs per operation
+samples 18.1k – 19.8k
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="219">syncom</text>
 <text class="sublabel" x="20" y="234">/all: signed, chained, memory() · v0.0.1</text>
-<path class="bar secondary" d="M276,215H428.1071456292948A4,4 0 0 1 432.1071456292948,219V225A4,4 0 0 1 428.1071456292948,229H276Z"/>
-<text class="value" x="438.1071456292948" y="228">14.8k</text>
+<path class="bar secondary" d="M276,215H441.4512757731857A4,4 0 0 1 445.4512757731857,219V225A4,4 0 0 1 441.4512757731857,229H276Z"/>
+<text class="value" x="451.4512757731857" y="228">18.7k</text>
 </g>
 <g><title>Automerge · Automerge.change, Counter · v3.5.0
-1,882 ops/s
-531 µs per operation
-samples 1,846 – 1,896
+1,953 ops/s
+512 µs per operation
+samples 1,931 – 1,956
 @automerge/automerge@3.5.0</title>
 <text class="label" x="20" y="259">Automerge</text>
 <text class="sublabel" x="20" y="274">Automerge.change, Counter · v3.5.0</text>
-<path class="bar" d="M276,255H308.6138253909027A4,4 0 0 1 312.6138253909027,259V265A4,4 0 0 1 308.6138253909027,269H276Z"/>
-<text class="value" x="318.6138253909027" y="268">1,882</text>
+<path class="bar" d="M276,255H310.7532973151426A4,4 0 0 1 314.7532973151426,259V265A4,4 0 0 1 310.7532973151426,269H276Z"/>
+<text class="value" x="320.7532973151426" y="268">1,953</text>
 </g>
 <text class="caption" x="20" y="323">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
-<text class="caption" x="20" y="339">in a fresh process · 2026-10-26</text>
+<text class="caption" x="20" y="339">in a fresh process · 2026-10-27</text>
 </svg>

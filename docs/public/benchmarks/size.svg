@@ -80,14 +80,14 @@ pouchdb-browser carries its HTTP adapter (the CouchDB client) with it</title>
 <text class="value" x="386.18266666666665" y="234">40.4 KB</text>
 </g>
 <g><title>syncom · the core over OPFS + the sync plugin + the wrpc link adapter
-53.6 KB min+gzip
-156.8 KB minified
+62.5 KB min+gzip
+181.5 KB minified
 @alexify/syncom@0.0.1
 records, counters and sets, the op log and the sync protocol; texts and schemas are plugins of their own</title>
 <text class="label primary" x="20" y="265">syncom</text>
 <text class="sublabel" x="20" y="280">the core over OPFS + the sync plugin + the wrpc link ada…</text>
-<path class="bar primary" d="M372,261H378.8695833333333A4,4 0 0 1 382.8695833333333,265V271A4,4 0 0 1 378.8695833333333,275H372Z"/>
-<text class="value" x="388.8695833333333" y="274">53.6 KB</text>
+<path class="bar primary" d="M372,261H380.65954166666666A4,4 0 0 1 384.65954166666666,265V271A4,4 0 0 1 380.65954166666666,275H372Z"/>
+<text class="value" x="390.65954166666666" y="274">62.5 KB</text>
 </g>
 <g><title>RxDB · rxdb + Dexie storage + replication
 90.1 KB min+gzip
@@ -135,5 +135,5 @@ loro-crdt@1.16.4</title>
 <path class="bar" d="M372,461H605.5116770833333A4,4 0 0 1 609.5116770833333,465V471A4,4 0 0 1 605.5116770833333,475H372Z"/>
 <text class="value" x="615.5116770833333" y="474">1172 KB</text>
 </g>
-<text class="caption" x="20" y="529">esbuild 0.28.2 · 2026-10-26</text>
+<text class="caption" x="20" y="529">esbuild 0.28.2 · 2026-10-27</text>
 </svg>

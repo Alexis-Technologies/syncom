@@ -61,27 +61,28 @@ engine also covers what an application keeps next to replication:
 - **Zero dependencies, one API for Node.js and the browser.** Nothing is installed with it.
   `node:fs` and `node:crypto` on the server, OPFS (or IndexedDB) and Web Crypto in the browser,
   picked by the `browser` export condition. CommonJS without a build step, hand-written typings
-  that type the records from their schema, and a core of about 44 KB min+gzip, every block a
-  subpath of its own (everything together, `/all`, about 97 KB), each held to a budget in CI.
+  that type the records from their schema, and a core of about 51 KB min+gzip, every block a
+  subpath of its own (everything together, `/all`, about 113 KB), each held to a budget in CI.
 
 The [benchmarks](/guide/benchmarks) put a number on all of this. syncom opens a store and reads
-a record in about 49 ms, the fastest cold start of the ten libraries measured, and serves a read
-from its cache at about 890,000 a second. A write is logged, filed and catalogued: about 44,000 a
-second in memory as a pure CRDT, 12,000 signed and chained (`/all`), and about 5,500 new records
-a second on disk, where the LevelDB-backed Yjs and PouchDB do 19,000 to 26,000 — a change to a
-record that is there, about 20,000. An empty replica pulls about 88,000
-records a second in memory, beside Yjs and Loro (89,000 to 102,000); checking every op's signature
-on the way in brings that to 17,000. Typing into a text runs at 19,000 to 36,000 keystrokes a
-second in memory, Automerge's range.
+a record in about 52 ms, the fastest cold start of the ten libraries measured, and serves a read
+from its cache at about 890,000 a second. A write is logged, filed and catalogued: about 46,000 a
+second in memory as a pure CRDT, 15,000 signed and chained (`/all`), and about 5,900 new records
+a second on disk, where the LevelDB-backed Yjs and PouchDB do 18,000 to 27,000 — a change to a
+record that is there, 18,000 to 21,000. An empty replica pulls about 82,000
+records a second in memory, behind Yjs and Loro (98,000 to 107,000); checking every op's signature
+on the way in brings that to 22,000. Typing into a text runs at 23,000 to 49,000 keystrokes a
+second in memory, ahead of Automerge.
 
 ## When something else fits better
 
 - **Very long documents typed into by many at once.** syncom's [list and text fields](/guide/lists)
   merge by position — Fugue, with marks, embeds, block markers and cursors — and bind to
-  ProseMirror and CodeMirror ([Editors](/guide/editors)), typing at Automerge's speed. Yjs and Loro
-  type one to two orders of magnitude faster and replay the automerge-perf editing trace in 5
-  seconds and half a second, where syncom takes about 20 ([benchmarks](/guide/benchmarks)); they
-  also ship bindings for Monaco, Quill, Lexical and Tiptap.
+  ProseMirror and CodeMirror ([Editors](/guide/editors)), typing a little faster than Automerge.
+  Yjs types seven to twenty times faster at either end of a text and about as fast in the middle,
+  Loro thirteen to twenty times faster anywhere; Loro replays the automerge-perf editing trace in half a second, Yjs in 5
+  seconds, syncom in about 6 ([benchmarks](/guide/benchmarks)); they also ship bindings for
+  Monaco, Quill, Lexical and Tiptap.
 - **Postgres is your source of truth.** ElectricSQL, PowerSync and Zero replicate a server
   database's tables to clients and send writes through your API. syncom keeps its own records
   and has no Postgres connector.

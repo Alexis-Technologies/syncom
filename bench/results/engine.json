@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-25T14:56:13.346Z",
+  "generatedAt": "2026-10-27T00:30:34.960Z",
   "machine": {
     "cpu": "Apple M3 Max",
     "cores": 16,
@@ -11,377 +11,502 @@
     {
       "subject": "branch",
       "name": "branch — fork at the present (200 records)",
-      "opsPerSec": 9
+      "opsPerSec": 20
     },
     {
       "subject": "branch",
       "name": "merge — 20 ops from the branch into the parent",
-      "opsPerSec": 72
+      "opsPerSec": 317
     },
     {
       "subject": "branch",
       "name": "merge — nothing to hand over",
-      "opsPerSec": 13398
+      "opsPerSec": 1805
     },
     {
       "subject": "chain",
       "name": "addBlock — small payload",
-      "opsPerSec": 4704
+      "opsPerSec": 2706
     },
     {
       "subject": "chain",
       "name": "addBlock — 4 KB payload",
-      "opsPerSec": 4915
+      "opsPerSec": 2498
     },
     {
       "subject": "chain",
       "name": "readBlock — single block",
-      "opsPerSec": 13199
+      "opsPerSec": 12973
     },
     {
       "subject": "chain",
       "name": "validate — last 1 block",
-      "opsPerSec": 10929
+      "opsPerSec": 11303
     },
     {
       "subject": "chain",
       "name": "validate — last 10 blocks",
-      "opsPerSec": 1062
+      "opsPerSec": 1136
     },
     {
       "subject": "chain",
       "name": "validate — last 100 blocks",
-      "opsPerSec": 115
+      "opsPerSec": 114
     },
     {
       "subject": "chain",
       "name": "validate — full 200-block chain",
-      "opsPerSec": 53
+      "opsPerSec": 56
     },
     {
       "subject": "crdt",
       "name": "diff — 20 flat keys, all changed",
-      "opsPerSec": 346219
+      "opsPerSec": 330974
     },
     {
       "subject": "crdt",
       "name": "diff — 20 flat keys, one changed",
-      "opsPerSec": 454782
+      "opsPerSec": 446530
     },
     {
       "subject": "crdt",
       "name": "diff — depth 3, width 4",
-      "opsPerSec": 35140
+      "opsPerSec": 36356
     },
     {
       "subject": "crdt",
       "name": "diff — array as a grow-only set",
-      "opsPerSec": 2818983
+      "opsPerSec": 3434112
     },
     {
       "subject": "crdt",
       "name": "merge — 20 flat keys",
-      "opsPerSec": 600095
+      "opsPerSec": 601279
     },
     {
       "subject": "crdt",
       "name": "merge — depth 3, width 4",
-      "opsPerSec": 2954591
+      "opsPerSec": 2773402
     },
     {
       "subject": "crdt",
       "name": "merge — numeric counter increment",
-      "opsPerSec": 6532773
+      "opsPerSec": 6586021
     },
     {
       "subject": "crdt",
       "name": "apply — 100 inc records",
-      "opsPerSec": 131050
+      "opsPerSec": 129641
     },
     {
       "subject": "crdt",
       "name": "apply — 100 delta records",
-      "opsPerSec": 8357
+      "opsPerSec": 8632
     },
     {
       "subject": "emitter",
       "name": "emit awaited — 0 listeners",
-      "opsPerSec": 15752588
+      "opsPerSec": 15626221
     },
     {
       "subject": "emitter",
       "name": "emit awaited — 1 sync listener",
-      "opsPerSec": 3823928
+      "opsPerSec": 3725975
     },
     {
       "subject": "emitter",
       "name": "emit awaited — 1 listener, (data, delta)",
-      "opsPerSec": 3825533
+      "opsPerSec": 3832564
     },
     {
       "subject": "emitter",
       "name": "emit awaited — 1 async listener",
-      "opsPerSec": 3554343
+      "opsPerSec": 3453688
     },
     {
       "subject": "emitter",
       "name": "emit awaited — 2 sync listeners",
-      "opsPerSec": 3253767
+      "opsPerSec": 3211679
     },
     {
       "subject": "emitter",
       "name": "emit fire-and-forget — 1 sync listener",
-      "opsPerSec": 4661204
+      "opsPerSec": 4742342
     },
     {
       "subject": "hash",
       "name": "calculateHash — empty genesis block",
-      "opsPerSec": 1199887
+      "opsPerSec": 1219096
     },
     {
       "subject": "hash",
       "name": "calculateHash — small record (5 x 16 B)",
-      "opsPerSec": 1059801
+      "opsPerSec": 1085931
     },
     {
       "subject": "hash",
       "name": "calculateHash — medium record (50 x 64 B)",
-      "opsPerSec": 134989
+      "opsPerSec": 139518
     },
     {
       "subject": "hash",
       "name": "calculateHash — large record (200 x 256 B)",
-      "opsPerSec": 14218
+      "opsPerSec": 14795
     },
     {
       "subject": "hash",
       "name": "calculateHash — deeply nested record",
-      "opsPerSec": 629742
-    },
-    {
-      "subject": "history",
-      "name": "history(id, { limit: 50 }) — a record with 2 000 ops",
-      "opsPerSec": 1817
-    },
-    {
-      "subject": "history",
-      "name": "history(id, { limit: Infinity }) — every version materialized",
-      "opsPerSec": 665
-    },
-    {
-      "subject": "history",
-      "name": "get(id, { at: eventId }) — 1 000 ops back",
-      "opsPerSec": 2997
-    },
-    {
-      "subject": "history",
-      "name": "get(id, { at: { vector } }) — the present, folded",
-      "opsPerSec": 1814
-    },
-    {
-      "subject": "history",
-      "name": "diff(id, at) — against 1 000 ops back",
-      "opsPerSec": 2976
+      "opsPerSec": 656992
     },
     {
       "subject": "log",
       "name": "append — one op",
-      "opsPerSec": 5351
+      "opsPerSec": 33950
     },
     {
       "subject": "log",
       "name": "append — batch of 100",
-      "opsPerSec": 315328
+      "opsPerSec": 683817
     },
     {
       "subject": "log",
       "name": "since — last 500 entries",
-      "opsPerSec": 623608
+      "opsPerSec": 632336
     },
     {
       "subject": "log",
       "name": "since — everything (no cursor)",
-      "opsPerSec": 1573
+      "opsPerSec": 484
     },
     {
       "subject": "log",
       "name": "since — 20 from the middle, scoped",
-      "opsPerSec": 3430272
+      "opsPerSec": 3500742
     },
     {
       "subject": "log",
       "name": "append with a roll every 8 batches",
-      "opsPerSec": 4989
+      "opsPerSec": 9174
     },
     {
       "subject": "log",
       "name": "reopen — index + segments + tail",
-      "opsPerSec": 11
+      "opsPerSec": 2
+    },
+    {
+      "subject": "tree",
+      "name": "applyOp — one move on a tree of 5 000 moves",
+      "opsPerSec": 432642
+    },
+    {
+      "subject": "tree",
+      "name": "the fold of 5 000 moves from the block’s JSON, anew",
+      "opsPerSec": 929
+    },
+    {
+      "subject": "tree",
+      "name": "renderTree — the reading the block keeps",
+      "opsPerSec": 9690374
+    },
+    {
+      "subject": "tree",
+      "name": "applyOp — one move on a random tree of 2,000 nodes",
+      "opsPerSec": 478611
+    },
+    {
+      "subject": "tree",
+      "name": "applyOp — one move on a random tree of 8,000 nodes",
+      "opsPerSec": 306651
+    },
+    {
+      "subject": "tree",
+      "name": "applyOp — one move on a random tree of 32,000 nodes",
+      "opsPerSec": 110499
+    },
+    {
+      "subject": "tree",
+      "name": "applyOp — a peer’s page of 100 moves in stamp order, 8 000 nodes",
+      "opsPerSec": 373169
+    },
+    {
+      "subject": "tree",
+      "name": "applyOp — a move, then a peer’s ten moves late, 8 000 nodes (the pair)",
+      "opsPerSec": 17662
+    },
+    {
+      "subject": "tree",
+      "name": "applyOp — one move after a chain of 10 000 nodes",
+      "opsPerSec": 831771
+    },
+    {
+      "subject": "tree",
+      "name": "the fold of MAX_MOVES (65536) moves from JSON, the worst shape",
+      "opsPerSec": 12
+    },
+    {
+      "subject": "tree",
+      "name": "storage.treeMove — among 300 siblings (memory fsi)",
+      "opsPerSec": 15513
+    },
+    {
+      "subject": "tree",
+      "name": "storage.treeMove — a random tree of 2,000 nodes (memory fsi)",
+      "opsPerSec": 16084
+    },
+    {
+      "subject": "tree",
+      "name": "storage.treeMove — a random tree of 8,000 nodes (memory fsi)",
+      "opsPerSec": 18069
+    },
+    {
+      "subject": "tree",
+      "name": "storage.treeMove — a random tree of 32,000 nodes (memory fsi)",
+      "opsPerSec": 16638
+    },
+    {
+      "subject": "tree",
+      "name": "storage.transact — an outline of 2,000 nodes in one transaction (per move)",
+      "opsPerSec": 38352
+    },
+    {
+      "subject": "tree",
+      "name": "storage.transact — an outline of 8,000 nodes in one transaction (per move)",
+      "opsPerSec": 38258
+    },
+    {
+      "subject": "history",
+      "name": "history(id, { limit: 50 }) — a record with 2 000 ops",
+      "opsPerSec": 588
+    },
+    {
+      "subject": "history",
+      "name": "history(id, { limit: Infinity }) — every version materialized",
+      "opsPerSec": 361
+    },
+    {
+      "subject": "history",
+      "name": "get(id, { at: eventId }) — 1 000 ops back",
+      "opsPerSec": 1148
+    },
+    {
+      "subject": "history",
+      "name": "get(id, { at: { vector } }) — the present, folded",
+      "opsPerSec": 587
+    },
+    {
+      "subject": "history",
+      "name": "diff(id, at) — against 1 000 ops back",
+      "opsPerSec": 1125
     },
     {
       "subject": "search",
       "name": "index.put — a 43-word record",
-      "opsPerSec": 16389
+      "opsPerSec": 18107
     },
     {
       "subject": "search",
       "name": "index.query — one word over 2000",
-      "opsPerSec": 1769
+      "opsPerSec": 1762
     },
     {
       "subject": "search",
       "name": "index.query — two words over 2000",
-      "opsPerSec": 1434
+      "opsPerSec": 1472
     },
     {
       "subject": "search",
       "name": "index.query — a typo over 2000",
-      "opsPerSec": 7733
+      "opsPerSec": 7961
     },
     {
       "subject": "search",
       "name": "insert — 2 search fields (43 words)",
-      "opsPerSec": 1482
+      "opsPerSec": 3914
     },
     {
       "subject": "search",
       "name": "select — $text one word over 2000, limit 20",
-      "opsPerSec": 1342
+      "opsPerSec": 1457
     },
     {
       "subject": "search",
       "name": "select — $text + eq narrowing over 2000",
-      "opsPerSec": 1080
+      "opsPerSec": 1211
     },
     {
       "subject": "search",
       "name": "count — $text over 2000",
-      "opsPerSec": 1129
+      "opsPerSec": 1237
     },
     {
       "subject": "search",
       "name": "open — catalog reloaded with text (2000 records)",
-      "opsPerSec": 11
+      "opsPerSec": 83
     },
     {
       "subject": "storage",
       "name": "insert — small record",
-      "opsPerSec": 1649
+      "opsPerSec": 4674
+    },
+    {
+      "subject": "storage",
+      "name": "insert — small record, layered([memory(), node:fs], write: back)",
+      "opsPerSec": 4468
     },
     {
       "subject": "storage",
       "name": "get — cached",
-      "opsPerSec": 187466
+      "opsPerSec": 51559
     },
     {
       "subject": "storage",
       "name": "get — cold (re-verifies the block)",
-      "opsPerSec": 162
+      "opsPerSec": 50
     },
     {
       "subject": "storage",
       "name": "update — one field",
-      "opsPerSec": 1863
+      "opsPerSec": 8034
     },
     {
       "subject": "storage",
       "name": "history — 50 versions",
-      "opsPerSec": 19862
+      "opsPerSec": 9673
     },
     {
       "subject": "storage",
       "name": "tag",
-      "opsPerSec": 986
+      "opsPerSec": 466
     },
     {
       "subject": "storage",
       "name": "get — at a tag (a copy)",
-      "opsPerSec": 6936
+      "opsPerSec": 4921
     },
     {
       "subject": "storage",
       "name": "get — at an event id (25 ops back)",
-      "opsPerSec": 85541
+      "opsPerSec": 10166
     },
     {
       "subject": "storage",
       "name": "set — whole record",
-      "opsPerSec": 1599
+      "opsPerSec": 9646
     },
     {
       "subject": "storage",
       "name": "swap — match (writes)",
-      "opsPerSec": 1829
+      "opsPerSec": 10201
     },
     {
       "subject": "storage",
       "name": "swap — mismatch (reads only)",
-      "opsPerSec": 192470
+      "opsPerSec": 48938
     },
     {
       "subject": "storage",
       "name": "has — existing id",
-      "opsPerSec": 212612
+      "opsPerSec": 51515
     },
     {
       "subject": "storage",
       "name": "record — cached Record instance",
-      "opsPerSec": 9078536
+      "opsPerSec": 8968880
     },
     {
       "subject": "storage",
       "name": "list — 2000 ids (catalog)",
-      "opsPerSec": 11799479
+      "opsPerSec": 11851685
     },
     {
       "subject": "storage",
       "name": "hasRecord — 2000 ids (catalog)",
-      "opsPerSec": 14482625
+      "opsPerSec": 14733213
     },
     {
       "subject": "storage",
       "name": "select — covered eq over 2000",
-      "opsPerSec": 21151
+      "opsPerSec": 21915
     },
     {
       "subject": "storage",
       "name": "select — eq + order + limit over 2000",
-      "opsPerSec": 11185
+      "opsPerSec": 11589
     },
     {
       "subject": "storage",
       "name": "select — uncovered filter over 2000",
-      "opsPerSec": 972
+      "opsPerSec": 1009
     },
     {
       "subject": "storage",
       "name": "open — catalog caught up from the log (2000 records)",
-      "opsPerSec": 3
+      "opsPerSec": 25
     },
     {
       "subject": "storage",
       "name": "open — catalog rebuilt from a scan (2000 records, integrity lazy)",
-      "opsPerSec": 3
+      "opsPerSec": 24
+    },
+    {
+      "subject": "tags",
+      "name": "tag() + untag() — over 1 000 records (memory fsi)",
+      "opsPerSec": 2900
+    },
+    {
+      "subject": "tags",
+      "name": "update — under a tag; the first write of a record copies its file",
+      "opsPerSec": 18687
+    },
+    {
+      "subject": "tags",
+      "name": "at(tag).get — a record copied at the tag",
+      "opsPerSec": 2431
+    },
+    {
+      "subject": "tags",
+      "name": "get(id, { at: { tag } }) — through the read hooks",
+      "opsPerSec": 2461
+    },
+    {
+      "subject": "tags",
+      "name": "at(tag).list — the tag’s catalog, 1 000 ids",
+      "opsPerSec": 799036
+    },
+    {
+      "subject": "undo",
+      "name": "update — no undo manager",
+      "opsPerSec": 12888
+    },
+    {
+      "subject": "undo",
+      "name": "update — captured by the undo manager",
+      "opsPerSec": 13029
+    },
+    {
+      "subject": "undo",
+      "name": "undo + redo — one step of four kinds",
+      "opsPerSec": 811
     },
     {
       "subject": "sync",
       "name": "write on A, applied on B (one hop)",
-      "opsPerSec": 739
+      "opsPerSec": 841
     },
     {
       "subject": "sync",
       "name": "write on A, applied on C (two hops)",
-      "opsPerSec": 787
+      "opsPerSec": 884
     },
     {
       "subject": "sync",
       "name": "update on A, applied on C (two hops)",
-      "opsPerSec": 585
+      "opsPerSec": 1009
     },
     {
       "subject": "sync",
       "name": "snapshot — one page of 500 out of 2000 (host side)",
-      "opsPerSec": 9406
+      "opsPerSec": 9236
     },
     {
       "subject": "sync",
@@ -391,287 +516,262 @@
     {
       "subject": "sync",
       "name": "append of another scope's op while a scoped feed listens",
-      "opsPerSec": 1549
-    },
-    {
-      "subject": "tags",
-      "name": "tag() + untag() — over 1 000 records (memory fsi)",
-      "opsPerSec": 1932
-    },
-    {
-      "subject": "tags",
-      "name": "update — under a tag; the first write of a record copies its file",
-      "opsPerSec": 17511
-    },
-    {
-      "subject": "tags",
-      "name": "at(tag).get — a record copied at the tag",
-      "opsPerSec": 142544
-    },
-    {
-      "subject": "tags",
-      "name": "get(id, { at: { tag } }) — through the read hooks",
-      "opsPerSec": 157133
-    },
-    {
-      "subject": "tags",
-      "name": "at(tag).list — the tag’s catalog, 1 000 ids",
-      "opsPerSec": 1364874
-    },
-    {
-      "subject": "tree",
-      "name": "applyOp — one move on a tree of 5 000 moves",
-      "opsPerSec": 277
-    },
-    {
-      "subject": "tree",
-      "name": "resolve — the fold of 5 000 moves, anew",
-      "opsPerSec": 309
-    },
-    {
-      "subject": "tree",
-      "name": "renderTree — the fold kept by the block",
-      "opsPerSec": 13978
-    },
-    {
-      "subject": "tree",
-      "name": "storage.treeMove — among 300 siblings (memory fsi)",
-      "opsPerSec": 1528
-    },
-    {
-      "subject": "undo",
-      "name": "update — no undo manager",
-      "opsPerSec": 1983
-    },
-    {
-      "subject": "undo",
-      "name": "update — captured by the undo manager",
-      "opsPerSec": 1919
-    },
-    {
-      "subject": "undo",
-      "name": "undo + redo — one step of four kinds",
-      "opsPerSec": 340
+      "opsPerSec": 4284
     },
     {
       "subject": "apply",
       "name": "applyOp — set one field on a 5-field entry",
-      "opsPerSec": 4050212
+      "opsPerSec": 1751865
     },
     {
       "subject": "apply",
       "name": "applyOp — inc a counter",
-      "opsPerSec": 3805386
+      "opsPerSec": 1323387
     },
     {
       "subject": "apply",
       "name": "applyOp — add to a 20-element set",
-      "opsPerSec": 215597
+      "opsPerSec": 331171
     },
     {
       "subject": "apply",
       "name": "applyOp — remove from a 20-element set",
-      "opsPerSec": 227159
+      "opsPerSec": 326676
     },
     {
       "subject": "apply",
       "name": "applyOp — write the whole record",
-      "opsPerSec": 776654
+      "opsPerSec": 266340
     },
     {
       "subject": "apply",
       "name": "applyOp — merge a peer entry",
-      "opsPerSec": 583092
+      "opsPerSec": 384622
     },
     {
       "subject": "apply",
       "name": "packOps — 500 writes",
-      "opsPerSec": 66596
+      "opsPerSec": 60346
     },
     {
       "subject": "apply",
       "name": "unpackOps — 500 writes",
-      "opsPerSec": 41412
+      "opsPerSec": 40101
     },
     {
       "subject": "apply",
       "name": "applyRemote — 100 writes, new records",
-      "opsPerSec": 6403
+      "opsPerSec": 6848
     },
     {
       "subject": "apply",
       "name": "applyRemote — 500 writes, new records",
-      "opsPerSec": 6399
+      "opsPerSec": 6944
     },
     {
       "subject": "apply",
       "name": "applyRemote — 100 signed writes, new records",
-      "opsPerSec": 4312
+      "opsPerSec": 20528
     },
     {
       "subject": "apply",
       "name": "verifyOp — 100 signed writes",
-      "opsPerSec": 37214
+      "opsPerSec": 36629
     },
     {
       "subject": "apply",
       "name": "applyRemote — 100 sets on cached records",
-      "opsPerSec": 9699
+      "opsPerSec": 10798
     },
     {
       "subject": "apply",
       "name": "applyRemote — 100 incs on cached records",
-      "opsPerSec": 10161
+      "opsPerSec": 10590
     },
     {
       "subject": "apply",
       "name": "applyRemote — 100 adds on cached records",
-      "opsPerSec": 6243
+      "opsPerSec": 7843
     },
     {
       "subject": "apply",
       "name": "applyRemote — 500 random inserts into a 5K text",
-      "opsPerSec": 764
+      "opsPerSec": 18524
     },
     {
       "subject": "apply",
       "name": "applyRemote — 100 writes, new records (chain: false)",
-      "opsPerSec": 6611
+      "opsPerSec": 7355
     },
     {
       "subject": "apply",
       "name": "applyRemote — 500 writes, new records (chain: false)",
-      "opsPerSec": 6634
+      "opsPerSec": 6896
     },
     {
       "subject": "apply",
       "name": "applyRemote — 100 signed writes, new records (chain: false)",
-      "opsPerSec": 5450
+      "opsPerSec": 20468
     },
     {
       "subject": "apply",
       "name": "applyRemote — 100 sets on cached records (chain: false)",
-      "opsPerSec": 10687
+      "opsPerSec": 10814
     },
     {
       "subject": "apply",
       "name": "applyRemote — 100 incs on cached records (chain: false)",
-      "opsPerSec": 10565
+      "opsPerSec": 10784
     },
     {
       "subject": "apply",
       "name": "applyRemote — 100 adds on cached records (chain: false)",
-      "opsPerSec": 6999
+      "opsPerSec": 8182
     },
     {
       "subject": "apply",
       "name": "applyRemote — 500 random inserts into a 5K text (chain: false)",
-      "opsPerSec": 751
+      "opsPerSec": 18922
     },
     {
       "subject": "sequence",
       "name": "applyOp — append one char to a 1 000-char text (one run)",
-      "opsPerSec": 467477
+      "opsPerSec": 389968
     },
     {
       "subject": "sequence",
       "name": "applyOp — insert one char at a random index of a 1 000-char text (one run)",
-      "opsPerSec": 89922
+      "opsPerSec": 92584
     },
     {
       "subject": "sequence",
       "name": "applyOp — replace one char at a random index of a 1 000-char text (a cut, an insert)",
-      "opsPerSec": 129402
+      "opsPerSec": 115447
     },
     {
       "subject": "sequence",
       "name": "applyOp — prepend one char to a 1 000-run text",
-      "opsPerSec": 114925
+      "opsPerSec": 122760
     },
     {
       "subject": "sequence",
       "name": "applyOp — append one char to an older block (a fork: the rope re-hinted)",
-      "opsPerSec": 414617
+      "opsPerSec": 278533
     },
     {
       "subject": "sequence",
       "name": "applyOp — merge two pictures of a 1 000-char text",
-      "opsPerSec": 224
+      "opsPerSec": 175
     },
     {
       "subject": "sequence",
       "name": "hydrate + render — a 1 000-char text from its JSON",
-      "opsPerSec": 216012
+      "opsPerSec": 301594
     },
     {
       "subject": "sequence",
       "name": "hydrate + render — a 100 KB text (one run) from its JSON",
-      "opsPerSec": 14950
+      "opsPerSec": 12335
     },
     {
       "subject": "sequence",
       "name": "applyOp — insert one char at a random index of a 100 KB text (one run)",
-      "opsPerSec": 59090
+      "opsPerSec": 60453
     },
     {
       "subject": "sequence",
       "name": "applyOp — insert one char at a random index of a 100 KB text (10 000 runs)",
-      "opsPerSec": 67363
+      "opsPerSec": 59629
     },
     {
       "subject": "sequence",
       "name": "applyOp — prepend one char to a 10 000-run text",
-      "opsPerSec": 88342
+      "opsPerSec": 120054
     },
     {
       "subject": "sequence",
       "name": "applyOp — replace one char at a random index of a 100 KB text (10 000 runs)",
-      "opsPerSec": 82233
+      "opsPerSec": 93243
     },
     {
       "subject": "sequence",
       "name": "hydrate + render — a 100 KB text (10 000 runs) from its JSON",
-      "opsPerSec": 23
+      "opsPerSec": 57
     },
     {
       "subject": "sequence",
       "name": "spans — 1 000 chars, 50 overlapping marks",
-      "opsPerSec": 7018
+      "opsPerSec": 6723
+    },
+    {
+      "subject": "sequence",
+      "name": "applyOp — insert one char mid-text into 20 000 chars under 5 000 marks",
+      "opsPerSec": 42192
+    },
+    {
+      "subject": "sequence",
+      "name": "applyOp — a mark over 20 000 chars under 5 000 marks",
+      "opsPerSec": 1341
+    },
+    {
+      "subject": "sequence",
+      "name": "applyOp — setAt in a 50 000-element list",
+      "opsPerSec": 2035
+    },
+    {
+      "subject": "sequence",
+      "name": "applyOp — move in a 50 000-element list",
+      "opsPerSec": 3969
+    },
+    {
+      "subject": "sequence",
+      "name": "applyOp — push onto a 50 000-element list",
+      "opsPerSec": 1980
+    },
+    {
+      "subject": "sequence",
+      "name": "applyOp — type into a run 200 000 long, a char inside it read per keystroke",
+      "opsPerSec": 233303
+    },
+    {
+      "subject": "sequence",
+      "name": "applyOp — the first op on a record read from its JSON (20 000 edits)",
+      "opsPerSec": 19
     },
     {
       "subject": "sequence",
       "name": "diff — one keystroke in a 1 KB text",
-      "opsPerSec": 282408
+      "opsPerSec": 284071
     },
     {
       "subject": "sequence",
       "name": "storage.push — one char (memory fsi, defer: 0)",
-      "opsPerSec": 8963
+      "opsPerSec": 9911
     },
     {
       "subject": "sequence",
       "name": "storage.updateText — one keystroke in a 1 KB text (memory fsi, defer: 0)",
-      "opsPerSec": 4657
+      "opsPerSec": 5333
     },
     {
       "subject": "sequence",
       "name": "storage.move — in a 100-element list (memory fsi, defer: 0)",
-      "opsPerSec": 922
+      "opsPerSec": 1099
     },
     {
       "subject": "sequence",
       "name": "storage.push — one char into a 10 KB text (memory fsi, defer: 0)",
-      "opsPerSec": 7142
+      "opsPerSec": 8209
     },
     {
       "subject": "sequence",
       "name": "storage.push — one char into a 10 KB text (memory fsi, defer: 16, the default)",
-      "opsPerSec": 18957
+      "opsPerSec": 16892
     },
     {
       "subject": "sequence",
       "name": "storage.push — one char into a 10 KB text, pipelined by 1 000 (memory fsi)",
-      "opsPerSec": 44055
+      "opsPerSec": 27263
     }
   ]
 }

@@ -35,34 +35,36 @@
 <text class="subtitle" x="20" y="73">ops/s, log scale, higher is better.</text>
 <line class="grid" x1="206" y1="88" x2="206" y2="208"/>
 <text class="tick" x="206" y="224" text-anchor="middle">100</text>
-<line class="grid" x1="441" y1="88" x2="441" y2="208"/>
-<text class="tick" x="441" y="224" text-anchor="middle">1,000</text>
+<line class="grid" x1="362.66666666666663" y1="88" x2="362.66666666666663" y2="208"/>
+<text class="tick" x="362.66666666666663" y="224" text-anchor="middle">1,000</text>
+<line class="grid" x1="519.3333333333333" y1="88" x2="519.3333333333333" y2="208"/>
+<text class="tick" x="519.3333333333333" y="224" text-anchor="middle">10k</text>
 <line class="grid" x1="676" y1="88" x2="676" y2="208"/>
-<text class="tick" x="676" y="224" text-anchor="middle">10k</text>
+<text class="tick" x="676" y="224" text-anchor="middle">100k</text>
 <line class="axis" x1="206" y1="88" x2="206" y2="208"/>
 <g><title>update · no undo manager
-1,983 ops/s
-504 µs per operation</title>
+12,888 ops/s
+77.6 µs per operation</title>
 <text class="label primary" x="20" y="105">update</text>
 <text class="sublabel" x="20" y="120">no undo manager</text>
-<path class="bar primary" d="M206,101H506.87083783824613A4,4 0 0 1 510.87083783824613,105V111A4,4 0 0 1 506.87083783824613,115H206Z"/>
-<text class="value" x="516.8708378382462" y="114">1,983</text>
+<path class="bar primary" d="M206,101H532.5957326277486A4,4 0 0 1 536.5957326277486,105V111A4,4 0 0 1 532.5957326277486,115H206Z"/>
+<text class="value" x="542.5957326277486" y="114">12.9k</text>
 </g>
 <g><title>update · captured by the undo manager
-1,919 ops/s
-521 µs per operation</title>
+13,029 ops/s
+76.8 µs per operation</title>
 <text class="label primary" x="20" y="145">update</text>
 <text class="sublabel" x="20" y="160">captured by the undo manager</text>
-<path class="bar primary" d="M206,141H503.5226190628358A4,4 0 0 1 507.5226190628358,145V151A4,4 0 0 1 503.5226190628358,155H206Z"/>
-<text class="value" x="513.5226190628358" y="154">1,919</text>
+<path class="bar primary" d="M206,141H533.3360698394964A4,4 0 0 1 537.3360698394964,145V151A4,4 0 0 1 533.3360698394964,155H206Z"/>
+<text class="value" x="543.3360698394964" y="154">13k</text>
 </g>
 <g><title>undo + redo · one step of four kinds
-340 ops/s
-2.94 ms per operation</title>
+811 ops/s
+1.23 ms per operation</title>
 <text class="label primary" x="20" y="185">undo + redo</text>
 <text class="sublabel" x="20" y="200">one step of four kinds</text>
-<path class="bar primary" d="M206,181H326.8975455049299A4,4 0 0 1 330.8975455049299,185V191A4,4 0 0 1 326.8975455049299,195H206Z"/>
-<text class="value" x="336.8975455049299" y="194">340</text>
+<path class="bar primary" d="M206,181H344.41326715974776A4,4 0 0 1 348.41326715974776,185V191A4,4 0 0 1 344.41326715974776,195H206Z"/>
+<text class="value" x="354.41326715974776" y="194">811</text>
 </g>
-<text class="caption" x="20" y="249">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-25</text>
+<text class="caption" x="20" y="249">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-27</text>
 </svg>

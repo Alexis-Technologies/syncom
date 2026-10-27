@@ -35,54 +35,52 @@
 <text class="subtitle" x="20" y="73">ops/s, log scale, higher is better.</text>
 <line class="grid" x1="371" y1="88" x2="371" y2="288"/>
 <text class="tick" x="371" y="304" text-anchor="middle">1,000</text>
-<line class="grid" x1="447.25" y1="88" x2="447.25" y2="288"/>
-<text class="tick" x="447.25" y="304" text-anchor="middle">10k</text>
-<line class="grid" x1="523.5" y1="88" x2="523.5" y2="288"/>
-<text class="tick" x="523.5" y="304" text-anchor="middle">100k</text>
-<line class="grid" x1="599.75" y1="88" x2="599.75" y2="288"/>
-<text class="tick" x="599.75" y="304" text-anchor="middle">1M</text>
+<line class="grid" x1="472.66666666666663" y1="88" x2="472.66666666666663" y2="288"/>
+<text class="tick" x="472.66666666666663" y="304" text-anchor="middle">10k</text>
+<line class="grid" x1="574.3333333333333" y1="88" x2="574.3333333333333" y2="288"/>
+<text class="tick" x="574.3333333333333" y="304" text-anchor="middle">100k</text>
 <line class="grid" x1="676" y1="88" x2="676" y2="288"/>
-<text class="tick" x="676" y="304" text-anchor="middle">10M</text>
+<text class="tick" x="676" y="304" text-anchor="middle">1M</text>
 <line class="axis" x1="371" y1="88" x2="371" y2="288"/>
 <g><title>tag() + untag() · over 1 000 records (memory fsi)
-1,932 ops/s
-518 µs per operation</title>
+2,900 ops/s
+345 µs per operation</title>
 <text class="label primary" x="20" y="105">tag() + untag()</text>
 <text class="sublabel" x="20" y="120">over 1 000 records (memory fsi)</text>
-<path class="bar primary" d="M371,101H388.8080430585599A4,4 0 0 1 392.8080430585599,105V111A4,4 0 0 1 388.8080430585599,115H371Z"/>
-<text class="value" x="398.8080430585599" y="114">1,932</text>
+<path class="bar primary" d="M371,101H414.0104631197272A4,4 0 0 1 418.0104631197272,105V111A4,4 0 0 1 414.0104631197272,115H371Z"/>
+<text class="value" x="424.0104631197272" y="114">2,900</text>
 </g>
 <g><title>update · under a tag; the first write of a record copies its file
-17,511 ops/s
-57.1 µs per operation</title>
+18,687 ops/s
+53.5 µs per operation</title>
 <text class="label primary" x="20" y="145">update</text>
 <text class="sublabel" x="20" y="160">under a tag; the first write of a record copies its file</text>
-<path class="bar primary" d="M371,141H461.80245978727396A4,4 0 0 1 465.80245978727396,145V151A4,4 0 0 1 461.80245978727396,155H371Z"/>
-<text class="value" x="471.80245978727396" y="154">17.5k</text>
+<path class="bar primary" d="M371,141H496.2731912020367A4,4 0 0 1 500.2731912020367,145V151A4,4 0 0 1 496.2731912020367,155H371Z"/>
+<text class="value" x="506.2731912020367" y="154">18.7k</text>
 </g>
 <g><title>at(tag).get · a record copied at the tag
-142,544 ops/s
-7.02 µs per operation</title>
+2,431 ops/s
+411 µs per operation</title>
 <text class="label primary" x="20" y="185">at(tag).get</text>
 <text class="sublabel" x="20" y="200">a record copied at the tag</text>
-<path class="bar primary" d="M371,181H531.238606796332A4,4 0 0 1 535.238606796332,185V191A4,4 0 0 1 531.238606796332,195H371Z"/>
-<text class="value" x="541.238606796332" y="194">143k</text>
+<path class="bar primary" d="M371,181H406.2214708157391A4,4 0 0 1 410.2214708157391,185V191A4,4 0 0 1 406.2214708157391,195H371Z"/>
+<text class="value" x="416.2214708157391" y="194">2,431</text>
 </g>
 <g><title>get(id, { at: { tag } }) · through the read hooks
-157,133 ops/s
-6.36 µs per operation</title>
+2,461 ops/s
+406 µs per operation</title>
 <text class="label primary" x="20" y="225">get(id, { at: { tag } })</text>
 <text class="sublabel" x="20" y="240">through the read hooks</text>
-<path class="bar primary" d="M371,221H534.4653894163097A4,4 0 0 1 538.4653894163097,225V231A4,4 0 0 1 534.4653894163097,235H371Z"/>
-<text class="value" x="544.4653894163097" y="234">157k</text>
+<path class="bar primary" d="M371,221H406.7630140597849A4,4 0 0 1 410.7630140597849,225V231A4,4 0 0 1 406.7630140597849,235H371Z"/>
+<text class="value" x="416.7630140597849" y="234">2,461</text>
 </g>
 <g><title>at(tag).list · the tag’s catalog, 1 000 ids
-1,364,874 ops/s
-733 ns per operation</title>
+799,036 ops/s
+1.25 µs per operation</title>
 <text class="label primary" x="20" y="265">at(tag).list</text>
 <text class="sublabel" x="20" y="280">the tag’s catalog, 1 000 ids</text>
-<path class="bar primary" d="M371,261H606.0508077613817A4,4 0 0 1 610.0508077613817,265V271A4,4 0 0 1 606.0508077613817,275H371Z"/>
-<text class="value" x="616.0508077613817" y="274">1.36M</text>
+<path class="bar primary" d="M371,261H662.0942452360914A4,4 0 0 1 666.0942452360914,265V271A4,4 0 0 1 662.0942452360914,275H371Z"/>
+<text class="value" x="672.0942452360914" y="274">799k</text>
 </g>
-<text class="caption" x="20" y="329">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-25</text>
+<text class="caption" x="20" y="329">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-27</text>
 </svg>

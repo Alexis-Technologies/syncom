@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-26T14:16:37.192Z",
+  "generatedAt": "2026-10-27T00:12:23.095Z",
   "esbuild": "0.28.2",
   "libraries": [
     {
@@ -9,8 +9,8 @@
       "packages": [
         "@alexify/syncom@0.0.1"
       ],
-      "min": 160554,
-      "gzip": 54920,
+      "min": 185864,
+      "gzip": 63964,
       "note": "records, counters and sets, the op log and the sync protocol; texts and schemas are plugins of their own"
     },
     {
@@ -126,8 +126,8 @@
       "packages": [
         "@alexify/syncom@0.0.1"
       ],
-      "min": 131054,
-      "gzip": 44765
+      "min": 151747,
+      "gzip": 52218
     },
     {
       "id": "syncom-text",
@@ -136,8 +136,8 @@
       "packages": [
         "@alexify/syncom@0.0.1"
       ],
-      "min": 200368,
-      "gzip": 68831
+      "min": 230463,
+      "gzip": 79603
     },
     {
       "id": "syncom-all",
@@ -146,8 +146,8 @@
       "packages": [
         "@alexify/syncom@0.0.1"
       ],
-      "min": 290225,
-      "gzip": 99980
+      "min": 334365,
+      "gzip": 115916
     },
     {
       "id": "yjs",

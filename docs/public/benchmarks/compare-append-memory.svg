@@ -43,55 +43,55 @@
 <text class="tick" x="676" y="338" text-anchor="middle">1M</text>
 <line class="axis" x1="276" y1="122" x2="276" y2="322"/>
 <g><title>Loro · LoroDoc, a LoroMap per record · v1.16.4
-623,915 ops/s
-1.6 µs per operation
-samples 619k – 626k
+634,670 ops/s
+1.58 µs per operation
+samples 632k – 637k
 loro-crdt@1.16.4</title>
 <text class="label" x="20" y="139">Loro</text>
 <text class="sublabel" x="20" y="154">LoroDoc, a LoroMap per record · v1.16.4</text>
-<path class="bar" d="M276,135H631.0250435084575A4,4 0 0 1 635.0250435084575,139V145A4,4 0 0 1 631.0250435084575,149H276Z"/>
-<text class="value" x="641.0250435084575" y="148">624k</text>
+<path class="bar" d="M276,135H632.5095619825004A4,4 0 0 1 636.5095619825004,139V145A4,4 0 0 1 632.5095619825004,149H276Z"/>
+<text class="value" x="642.5095619825004" y="148">635k</text>
 </g>
 <g><title>Yjs · Y.Doc, a Y.Map per record · v13.6.33
-362,999 ops/s
-2.75 µs per operation
-samples 354k – 366k
+365,674 ops/s
+2.73 µs per operation
+samples 356k – 366k
 yjs@13.6.33</title>
 <text class="label" x="20" y="179">Yjs</text>
 <text class="sublabel" x="20" y="194">Y.Doc, a Y.Map per record · v13.6.33</text>
-<path class="bar" d="M276,175H583.9810846753221A4,4 0 0 1 587.9810846753221,179V185A4,4 0 0 1 583.9810846753221,189H276Z"/>
-<text class="value" x="593.9810846753221" y="188">363k</text>
+<path class="bar" d="M276,175H584.6189069272629A4,4 0 0 1 588.6189069272629,179V185A4,4 0 0 1 584.6189069272629,189H276Z"/>
+<text class="value" x="594.6189069272629" y="188">366k</text>
 </g>
 <g><title>syncom · core + text + sync, memory() · v0.0.1
-35,832 ops/s
-27.9 µs per operation
-samples 35.7k – 44.4k
+49,070 ops/s
+20.4 µs per operation
+samples 47k – 55.6k
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="219">syncom</text>
 <text class="sublabel" x="20" y="234">core + text + sync, memory() · v0.0.1</text>
-<path class="bar primary" d="M276,215H382.8530794240585A4,4 0 0 1 386.8530794240585,219V225A4,4 0 0 1 382.8530794240585,229H276Z"/>
-<text class="value" x="392.8530794240585" y="228">35.8k</text>
+<path class="bar primary" d="M276,215H410.1637907118836A4,4 0 0 1 414.1637907118836,219V225A4,4 0 0 1 410.1637907118836,229H276Z"/>
+<text class="value" x="420.1637907118836" y="228">49.1k</text>
 </g>
 <g><title>Automerge · Automerge.change, Counter · v3.5.0
-24,331 ops/s
-41.1 µs per operation
-samples 23.9k – 24.4k
+24,781 ops/s
+40.4 µs per operation
+samples 24.4k – 24.8k
 @automerge/automerge@3.5.0</title>
 <text class="label" x="20" y="259">Automerge</text>
 <text class="sublabel" x="20" y="274">Automerge.change, Counter · v3.5.0</text>
-<path class="bar" d="M276,255H349.23053873604397A4,4 0 0 1 353.23053873604397,259V265A4,4 0 0 1 349.23053873604397,269H276Z"/>
-<text class="value" x="359.23053873604397" y="268">24.3k</text>
+<path class="bar" d="M276,255H350.82322146886213A4,4 0 0 1 354.82322146886213,259V265A4,4 0 0 1 350.82322146886213,269H276Z"/>
+<text class="value" x="360.82322146886213" y="268">24.8k</text>
 </g>
 <g><title>syncom · /all: signed, chained, memory() · v0.0.1
-14,013 ops/s
-71.4 µs per operation
-samples 13.8k – 15.8k
+15,528 ops/s
+64.4 µs per operation
+samples 15k – 17.1k
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="299">syncom</text>
 <text class="sublabel" x="20" y="314">/all: signed, chained, memory() · v0.0.1</text>
-<path class="bar secondary" d="M276,295H301.30351405732773A4,4 0 0 1 305.30351405732773,299V305A4,4 0 0 1 301.30351405732773,309H276Z"/>
-<text class="value" x="311.30351405732773" y="308">14k</text>
+<path class="bar secondary" d="M276,295H310.2225023121459A4,4 0 0 1 314.2225023121459,299V305A4,4 0 0 1 310.2225023121459,309H276Z"/>
+<text class="value" x="320.2225023121459" y="308">15.5k</text>
 </g>
 <text class="caption" x="20" y="363">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
-<text class="caption" x="20" y="379">in a fresh process · 2026-10-26</text>
+<text class="caption" x="20" y="379">in a fresh process · 2026-10-27</text>
 </svg>

@@ -87,29 +87,35 @@ with every plugin registered (see
 
 | Entry | raw | min | min+gzip | budget |
 | ----- | ---:| ---:| --------:| ------:|
-| main entry — browser (@alexify/syncom) | 248.8 KB | 101.3 KB | 34.5 KB | 52.0 KB |
-| main entry — node (@alexify/syncom) | 237.8 KB | 101.4 KB | 34.6 KB | — |
-| wrpc adapter — browser (@alexify/syncom/wrpc) | 3.2 KB | 1.4 KB | 0.7 KB | 2.0 KB |
+| main entry — browser (@alexify/syncom) | 367.5 KB | 147.7 KB | 50.8 KB | 52.0 KB |
+| main entry — node (@alexify/syncom) | 352.8 KB | 148.5 KB | 51.0 KB | — |
+| wrpc adapter — browser (@alexify/syncom/wrpc) | 3.7 KB | 1.6 KB | 0.7 KB | 2.0 KB |
 | contracts — browser (@alexify/syncom/contracts) | 4.2 KB | 1.9 KB | 1.0 KB | 1.0 KB |
-| idb backend — browser (@alexify/syncom/idb) | 3.5 KB | 1.6 KB | 0.8 KB | 2.0 KB |
-| search — browser (@alexify/syncom/search) | 4.1 KB | 1.6 KB | 0.9 KB | 2.0 KB |
-| order — browser (@alexify/syncom/order) | 4.7 KB | 2.2 KB | 1.0 KB | 1.5 KB |
-| undo — browser (@alexify/syncom/undo) | 35.7 KB | 16.8 KB | 6.3 KB | 6.5 KB |
-| branch — browser (@alexify/syncom/branch) | 16.2 KB | 8.2 KB | 3.6 KB | 4.0 KB |
-| all — browser (@alexify/syncom/all) | 492.6 KB | 210.6 KB | 72.8 KB | 73.0 KB |
-| text — browser (@alexify/syncom/text) | 83.8 KB | 39.9 KB | 14.5 KB | 15.0 KB |
-| tree — browser (@alexify/syncom/tree) | 28.3 KB | 13.7 KB | 5.3 KB | 5.5 KB |
-| signing — browser (@alexify/syncom/signing) | 22.3 KB | 10.4 KB | 4.4 KB | 4.5 KB |
-| chain — browser (@alexify/syncom/chain) | 9.5 KB | 4.3 KB | 1.9 KB | 2.5 KB |
-| encryption — browser (@alexify/syncom/encryption) | 18.0 KB | 8.6 KB | 3.6 KB | 4.0 KB |
-| memory — browser (@alexify/syncom/memory) | 2.1 KB | 0.8 KB | 0.5 KB | 0.8 KB |
-| layered — browser (@alexify/syncom/layered) | 6.8 KB | 2.9 KB | 1.3 KB | 1.5 KB |
-| sync — browser (@alexify/syncom/sync) | 104.7 KB | 44.7 KB | 16.2 KB | 18.0 KB |
-| schema — browser (@alexify/syncom/schema) | 20.9 KB | 10.6 KB | 4.0 KB | 4.0 KB |
-| telemetry — browser (@alexify/syncom/telemetry) | 15.7 KB | 6.6 KB | 2.6 KB | 4.0 KB |
-| query — browser (@alexify/syncom/query) | 36.4 KB | 14.7 KB | 5.6 KB | 6.0 KB |
-| versions — browser (@alexify/syncom/versions) | 145.5 KB | 62.8 KB | 22.0 KB | 30.0 KB |
-| core + every block, in one bundle (= /all) | — | — | 72.7 KB | 72.8 KB ± 0.3 |
+| idb backend — browser (@alexify/syncom/idb) | 3.6 KB | 1.6 KB | 0.8 KB | 2.0 KB |
+| search — browser (@alexify/syncom/search) | 4.4 KB | 1.8 KB | 0.9 KB | 2.0 KB |
+| order — browser (@alexify/syncom/order) | 5.0 KB | 2.4 KB | 1.0 KB | 1.5 KB |
+| undo — browser (@alexify/syncom/undo) | 50.7 KB | 23.5 KB | 8.6 KB | 9.0 KB |
+| branch — browser (@alexify/syncom/branch) | 21.3 KB | 10.4 KB | 4.5 KB | 4.5 KB |
+| presence — browser (@alexify/syncom/presence) | 23.9 KB | 10.3 KB | 4.3 KB | 4.5 KB |
+| editor — browser (@alexify/syncom/editor) | 35.2 KB | 15.3 KB | 5.9 KB | 6.0 KB |
+| codemirror — browser (@alexify/syncom/codemirror) | 46.1 KB | 20.0 KB | 7.7 KB | 8.0 KB |
+| prosemirror — browser (@alexify/syncom/prosemirror) | 54.9 KB | 23.5 KB | 9.0 KB | 9.5 KB |
+| store — browser (@alexify/syncom/store) | 5.6 KB | 2.3 KB | 1.0 KB | 1.5 KB |
+| inspect — browser (@alexify/syncom/inspect) | 25.0 KB | 11.6 KB | 5.0 KB | 5.5 KB |
+| all — browser (@alexify/syncom/all) | 769.1 KB | 326.0 KB | 113.0 KB | 113.5 KB |
+| text — browser (@alexify/syncom/text) | 195.2 KB | 89.3 KB | 31.5 KB | 31.5 KB |
+| tree — browser (@alexify/syncom/tree) | 46.8 KB | 22.5 KB | 8.6 KB | 9.0 KB |
+| signing — browser (@alexify/syncom/signing) | 23.1 KB | 11.3 KB | 4.6 KB | 5.5 KB |
+| chain — browser (@alexify/syncom/chain) | 10.3 KB | 4.7 KB | 2.1 KB | 2.5 KB |
+| encryption — browser (@alexify/syncom/encryption) | 18.6 KB | 8.9 KB | 3.6 KB | 4.0 KB |
+| memory — browser (@alexify/syncom/memory) | 2.4 KB | 0.9 KB | 0.5 KB | 0.8 KB |
+| layered — browser (@alexify/syncom/layered) | 8.3 KB | 3.5 KB | 1.5 KB | 1.5 KB |
+| sync — browser (@alexify/syncom/sync) | 106.6 KB | 44.5 KB | 16.4 KB | 23.5 KB |
+| schema — browser (@alexify/syncom/schema) | 26.9 KB | 13.2 KB | 4.9 KB | 5.0 KB |
+| telemetry — browser (@alexify/syncom/telemetry) | 20.0 KB | 8.7 KB | 3.3 KB | 4.0 KB |
+| query — browser (@alexify/syncom/query) | 42.6 KB | 17.2 KB | 6.4 KB | 6.5 KB |
+| versions — browser (@alexify/syncom/versions) | 228.4 KB | 95.9 KB | 34.4 KB | 34.5 KB |
+| core + every block, in one bundle (= /all) | — | — | 112.9 KB | 113.0 KB ± 0.3 |
 
 ## Quick Start
 
@@ -246,7 +252,7 @@ timed. The method and the interactive charts are on the
 
 <img src="https://syncomjs.vercel.app/benchmarks/compare-bulk-memory.svg" alt="Insert 1,000 at once, in memory: Add 1,000 records in one call or transaction. Nothing touches the disk. records/s, log scale, higher is better. Not shown: GUN (needs its storage adapter to answer in Node.js)." width="760" />
 
-<img src="https://syncomjs.vercel.app/benchmarks/compare-bulk-disk.svg" alt="Insert 1,000 at once, on disk: Add 1,000 records in one call or transaction. Each library's own persistence on node:fs, every write awaited. records/s, log scale, higher is better. Not shown: RxDB (Node.js disk storages are Premium); GUN (failed: no acknowledgement in 30000 ms)." width="760" />
+<img src="https://syncomjs.vercel.app/benchmarks/compare-bulk-disk.svg" alt="Insert 1,000 at once, on disk: Add 1,000 records in one call or transaction. Each library's own persistence on node:fs, every write awaited. records/s, log scale, higher is better. Not shown: RxDB (Node.js disk storages are Premium)." width="760" />
 
 <img src="https://syncomjs.vercel.app/benchmarks/compare-sync-disk.svg" alt="Replicate a store, on disk: An empty replica pulls a store of 1,000 records, in process, through the library's own sync protocol, until every record reads back. Each library's own persistence on node:fs, every write awaited. records/s, log scale, higher is better. Not shown: RxDB (Node.js disk storages are Premium); Fireproof (syncs through a cloud or self-hosted gateway only); GUN (syncs over its WebSocket/WebRTC mesh only)." width="760" />
 
@@ -270,33 +276,33 @@ timed. The method and the interactive charts are on the
 
 | Library | Insert a record<br><sub>ops/s</sub> | Update a field<br><sub>ops/s</sub> | Read a record<br><sub>ops/s</sub> | Increment a counter<br><sub>ops/s</sub> | Insert 1,000 at once<br><sub>records/s</sub> | Replicate a store<br><sub>records/s</sub> | Type at the end of a text<br><sub>ops/s</sub> | Type at the start of a text<br><sub>ops/s</sub> | Type anywhere in a text<br><sub>ops/s</sub> | Replay an editing trace<br><sub>ops/s</sub> |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| **syncom**<br><sub>core + text + sync, memory() · v0.0.1</sub> | 44,100 | 42,600 | 897,000 | 43,400 | 42,700 | 88,100 | 35,800 | 20,900 | 19,100 | 12,700 |
-| **syncom**<br><sub>/all: signed, chained, memory() · v0.0.1</sub> | 12,100 | 15,100 | 891,000 | 14,800 | 15,100 | 16,700 | 14,000 | 11,800 | 11,600 | 10,700 |
-| Yjs<br><sub>Y.Doc, a Y.Map per record · v13.6.33</sub> | 221,000 | 398,000 | 3,690,000 | — | 219,000 | 89,400 | 363,000 | 537,000 | 31,100 | 53,000 |
-| Automerge<br><sub>Automerge.change, Counter · v3.5.0</sub> | 510 | 1,960 | 10,500,000 | 1,880 | 8,970 | 22,000 | 24,300 | 22,700 | 22,100 | 18,400 |
-| Loro<br><sub>LoroDoc, a LoroMap per record · v1.16.4</sub> | 32,200 | 404,000 | 260,000 | 333,000 | 83,800 | 102,000 | 624,000 | 453,000 | 320,000 | 482,000 |
-| TinyBase<br><sub>MergeableStore · v10.0.1</sub> | 23,800 | 104,000 | 1,430,000 | — | 23,400 | 11,700 | — | — | — | — |
-| PouchDB<br><sub>pouchdb-adapter-memory · v9.0.0</sub> | 20,200 | 8,240 | 30,500 | — | 73,300 | 17,800 | — | — | — | — |
-| RxDB<br><sub>memory storage · v17.6.0</sub> | 38,200 | 49,500 | 299,000 | — | 2,210,000 | 61,900 | — | — | — | — |
-| Fireproof<br><sub>memory:// store · v0.24.19</sub> | 353 | 372 | 710 | — | 22,200 | — | — | — | — | — |
-| OrbitDB<br><sub>documents, memory blockstore · v4.0.0</sub> | 1,070 | 29.8 | 80.3 | — | 1,070 | 219 | — | — | — | — |
+| **syncom**<br><sub>core + text + sync, memory() · v0.0.1</sub> | 45,600 | 79,100 | 887,000 | 82,000 | 42,700 | 82,200 | 49,100 | 23,300 | 25,900 | 44,200 |
+| **syncom**<br><sub>/all: signed, chained, memory() · v0.0.1</sub> | 15,000 | 18,700 | 898,000 | 18,700 | 24,400 | 22,000 | 15,500 | 13,500 | 12,800 | 30,000 |
+| Yjs<br><sub>Y.Doc, a Y.Map per record · v13.6.33</sub> | 230,000 | 393,000 | 3,780,000 | — | 277,000 | 98,300 | 366,000 | 531,000 | 31,700 | 53,300 |
+| Automerge<br><sub>Automerge.change, Counter · v3.5.0</sub> | 520 | 2,000 | 10,400,000 | 1,950 | 9,200 | 21,500 | 24,800 | 22,300 | 21,900 | 18,300 |
+| Loro<br><sub>LoroDoc, a LoroMap per record · v1.16.4</sub> | 36,300 | 355,000 | 311,000 | 352,000 | 84,600 | 107,000 | 635,000 | 452,000 | 343,000 | 481,000 |
+| TinyBase<br><sub>MergeableStore · v10.0.1</sub> | 24,600 | 111,000 | 1,440,000 | — | 24,700 | 11,600 | — | — | — | — |
+| PouchDB<br><sub>pouchdb-adapter-memory · v9.0.0</sub> | 20,800 | 7,980 | 31,600 | — | 77,000 | 18,700 | — | — | — | — |
+| RxDB<br><sub>memory storage · v17.6.0</sub> | 9,490 | 53,500 | 282,000 | — | 2,390,000 | 61,400 | — | — | — | — |
+| Fireproof<br><sub>memory:// store · v0.24.19</sub> | 331 | 400 | 727 | — | 22,700 | — | — | — | — | — |
+| OrbitDB<br><sub>documents, memory blockstore · v4.0.0</sub> | 1,100 | 30.3 | 84.2 | — | 1,090 | 224 | — | — | — | — |
 
 **On disk**
 
 | Library | Insert a record<br><sub>ops/s</sub> | Update a field<br><sub>ops/s</sub> | Read a record<br><sub>ops/s</sub> | Increment a counter<br><sub>ops/s</sub> | Insert 1,000 at once<br><sub>records/s</sub> | Replicate a store<br><sub>records/s</sub> | Type at the end of a text<br><sub>ops/s</sub> | Type at the start of a text<br><sub>ops/s</sub> | Type anywhere in a text<br><sub>ops/s</sub> |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| **syncom**<br><sub>core + text + sync, node:fs · v0.0.1</sub> | 5,550 | 19,800 | 865,000 | 19,900 | 7,110 | 7,280 | 21,200 | 9,010 | 8,540 |
-| **syncom**<br><sub>/all: signed, chained, node:fs · v0.0.1</sub> | 4,060 | 6,390 | 885,000 | 6,670 | 5,670 | 5,360 | 9,700 | 4,860 | 4,600 |
-| Yjs<br><sub>y-leveldb · v13.6.33</sub> | 18,900 | 20,900 | 3,780,000 | — | 141,000 | 53,400 | 22,500 | 23,800 | 14,600 |
-| Automerge<br><sub>automerge-repo, NodeFS storage · v3.5.0</sub> | 485 | 1,220 | 10,500,000 | 1,170 | 7,690 | 3,130 | 3,350 | 3,330 | 3,270 |
-| Loro<br><sub>updates appended to a file · v1.16.4</sub> | 19,000 | 42,300 | 277,000 | 42,200 | 63,400 | 103,000 | 46,600 | 45,600 | 41,200 |
-| TinyBase<br><sub>MergeableStore, file persister · v10.0.1</sub> | 165 | 297 | 1,400,000 | — | 15,400 | 10,900 | — | — | — |
-| PouchDB<br><sub>LevelDB (Node default) · v9.0.0</sub> | 25,700 | 8,070 | 41,500 | — | 69,300 | 17,100 | — | — | — |
-| Fireproof<br><sub>file:// store · v0.24.19</sub> | 296 | 307 | 703 | — | 19,600 | — | — | — | — |
-| GUN<br><sub>RAD on node:fs · v0.2020.1241</sub> | 3.67 | 3.74 | 755 | — | failed | — | — | — | — |
-| OrbitDB<br><sub>documents, LevelDB · v4.0.0</sub> | 906 | 17 | 80.6 | — | 945 | 196 | — | — | — |
+| **syncom**<br><sub>core + text + sync, node:fs · v0.0.1</sub> | 5,870 | 17,900 | 894,000 | 21,400 | 6,980 | 7,270 | 28,400 | 11,100 | 9,530 |
+| **syncom**<br><sub>/all: signed, chained, node:fs · v0.0.1</sub> | 4,790 | 6,460 | 887,000 | 7,080 | 6,960 | 5,770 | 12,400 | 5,610 | 5,490 |
+| Yjs<br><sub>y-leveldb · v13.6.33</sub> | 18,100 | 22,400 | 3,760,000 | — | 156,000 | 52,400 | 15,500 | 23,900 | 14,200 |
+| Automerge<br><sub>automerge-repo, NodeFS storage · v3.5.0</sub> | 485 | 1,230 | 10,400,000 | 1,190 | 7,560 | 3,070 | 3,400 | 3,320 | 3,220 |
+| Loro<br><sub>updates appended to a file · v1.16.4</sub> | 20,300 | 41,500 | 301,000 | 40,800 | 67,500 | 106,000 | 30,000 | 45,700 | 29,800 |
+| TinyBase<br><sub>MergeableStore, file persister · v10.0.1</sub> | 175 | 303 | 1,420,000 | — | 15,200 | 10,900 | — | — | — |
+| PouchDB<br><sub>LevelDB (Node default) · v9.0.0</sub> | 26,800 | 8,690 | 42,800 | — | 69,300 | 16,700 | — | — | — |
+| Fireproof<br><sub>file:// store · v0.24.19</sub> | 308 | 317 | 720 | — | 21,400 | — | — | — | — |
+| GUN<br><sub>RAD on node:fs · v0.2020.1241</sub> | 3.61 | 3.73 | 758 | — | 2,040 | — | — | — | — |
+| OrbitDB<br><sub>documents, LevelDB · v4.0.0</sub> | 899 | 16.4 | 84.5 | — | 868 | 191 | — | — | — |
 
-_Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library in a fresh process · 2026-10-26. Medians, rounded to three significant figures; — where the library has no such operation, no such storage, or no in-process sync, failed where it did not finish twice (the chart above says why)._
+_Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library in a fresh process · 2026-10-27. Medians, rounded to three significant figures; — where the library has no such operation, no such storage, or no in-process sync, failed where it did not finish twice (the chart above says why)._
 
 <!-- bench:compare:end -->
 
@@ -322,7 +328,7 @@ _Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 roun
 | TinyBase<br><sub>tinybase@10.0.1</sub> | MergeableStore + IndexedDB persister + custom synchronizer | 56.4 KB | 23.8 KB |  |
 | Yjs<br><sub>yjs@13.6.33, y-indexeddb@9.0.12, y-protocols@1.0.7</sub> | yjs + y-indexeddb + y-protocols/sync | 80.2 KB | 24.5 KB |  |
 | PouchDB<br><sub>pouchdb-browser@9.0.0</sub> | pouchdb-browser | 117.8 KB | 40.4 KB | pouchdb-browser carries its HTTP adapter (the CouchDB client) with it |
-| **syncom**<br><sub>@alexify/syncom@0.0.1</sub> | the core over OPFS + the sync plugin + the wrpc link adapter | 156.8 KB | 53.6 KB | records, counters and sets, the op log and the sync protocol; texts and schemas are plugins of their own |
+| **syncom**<br><sub>@alexify/syncom@0.0.1</sub> | the core over OPFS + the sync plugin + the wrpc link adapter | 181.5 KB | 62.5 KB | records, counters and sets, the op log and the sync protocol; texts and schemas are plugins of their own |
 | RxDB<br><sub>rxdb@17.6.0, dexie@4.4.6, rxjs@7.8.2</sub> | rxdb + Dexie storage + replication | 282.3 KB | 90.1 KB |  |
 | Fireproof<br><sub>@fireproof/core@0.24.19</sub> | @fireproof/core | 784.2 KB | 204.0 KB |  |
 | OrbitDB<br><sub>@orbitdb/core@4.0.0, helia@6.1.4, libp2p@3.5.1, @libp2p/gossipsub@15.0.23, blockstore-idb@4.0.1</sub> | @orbitdb/core + helia + libp2p, IndexedDB blockstore | 1185.6 KB | 353.7 KB | createHelia brings Helia's default libp2p configuration with it |
