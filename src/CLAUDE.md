@@ -32,7 +32,7 @@ src/pem.js                base64/PEM helpers over btoa/atob for the browser cryp
 src/scope.js              GLOBAL_SCOPE, inScope, opInScope — the one definition of "in scope" — no requires
 src/blame.js              lastEditorOf, editorsOf — who wrote what, from a record's meta (registers' clocks, counters' sums, sets' slots, the plugins' `editors` hook); never the log
 src/hash.js               xxHash32 in pure JS — the checksum every log file carries (`{ entries, hash }`); a checksum, never a signature — no requires
-src/header.js             what names an op, the core's: the header (v2, `prev` last), payloadOf, the salted digest every node mints
+src/header.js             what names an op, the core's: the header (v1, `prev` last), payloadOf, the salted digest every node mints
                           (`digest`), the fingerprint (SHA-256 of the header) — requires digest.js and shape.js only (the signing subpath
                           ships it); `link` in src/commit.js sets an op's `prev` from the op before it in its stream
 src/shape.js              isPlainObject, own, asJson, isRecordId, isStreamName, wellFormed — what enters is checked here

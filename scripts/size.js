@@ -267,7 +267,7 @@ const ENTRIES = [
   // a list's reading derived from the one before, bodies capped at SEG_MAX, one hydration per plain block;
   // 2026-10-27). 107, raised by name.
   // 108.0 with a hash chain per stream (src/header.js: the fingerprint, `prev`, the fork refused as
-  // EQUIVOCATION; the log's fingerprints and heads; PROTOCOL 2). 108.5, raised by name.
+  // EQUIVOCATION; the log's fingerprints and heads). 108.5, raised by name.
   // 108.6 with presence refusals reported, unreadable log files kept and failing the open, a scrub that rewrites
   // what it takes and an op on a purged record stripped before the append (2026-10-27). 109, raised by name.
   // 109.1 with a bootstrap's pages checked (BAD_PAGE), a default opsPerPush and kind refusals reported once a

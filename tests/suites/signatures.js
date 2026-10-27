@@ -209,7 +209,7 @@ const runSignatureTests = async (t, assert, createStorage) => {
       host.on('error', () => {});
       const peer = await createSigner();
       const link = new MemoryLink(host.sync.unit({ access: 'public' }));
-      await link.call('syncom/hello', { node: peer.id, version: 2 });
+      await link.call('syncom/hello', { node: peer.id, version: 1 });
       const good = await peer.sign(unsignedOp(null, 1, 'r1', { a: 1 }));
       const bad = tamper(await peer.sign(unsignedOp(null, 2, 'r1', { a: 2 })));
       const answer = await link.call('syncom/push', { ops: packOps([good, bad]) });
@@ -218,18 +218,18 @@ const runSignatureTests = async (t, assert, createStorage) => {
       assert.deepStrictEqual(await host.get('r1'), { a: 1 });
       // A 'verify' host greets anyone; a 'require' one needs a key for a node id.
       const plain = new MemoryLink(host.sync.unit({ access: 'public' }));
-      await plain.call('syncom/hello', { node: 'peer', version: 2 });
+      await plain.call('syncom/hello', { node: 'peer', version: 1 });
       const strict = await createStorage(t2, 'S', { sync: { signatures: 'require' } });
       strict.on('error', () => {});
       const strictRefused = [];
       strict.sync.on('refused', (event) => strictRefused.push(event));
       const unit = strict.sync.unit({ access: 'public' });
-      await assert.rejects(() => new MemoryLink(unit).call('syncom/hello', { node: 'peer', version: 2 }), {
+      await assert.rejects(() => new MemoryLink(unit).call('syncom/hello', { node: 'peer', version: 1 }), {
         code: 403,
         reason: 'UNSIGNED',
       });
       const keyed = new MemoryLink(unit);
-      await keyed.call('syncom/hello', { node: peer.id, version: 2 });
+      await keyed.call('syncom/hello', { node: peer.id, version: 1 });
       const ops = packOps([good, unsignedOp(peer.id, 2, 'r1', { b: 1 })]);
       const pushed = await keyed.call('syncom/push', { ops });
       assert.deepStrictEqual([pushed.applied, pushed.unsigned], [1, 1]);

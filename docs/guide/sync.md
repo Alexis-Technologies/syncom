@@ -103,9 +103,10 @@ is the byte-level reference: every slot, payload, file and procedure, with
 examples.
 
 `hello` carries the protocol version both ways, and a host answers a hello
-of another version with 400 (`PROTOCOL`). Version 2 is the wire as the first
+of another version with 400 (`PROTOCOL`). Version 1 is the wire as the first
 publication will have it, with every type and slot above and the per-stream
-chain ([Equivocation](#equivocation)). After that, a new
+chain ([Equivocation](#equivocation)); nothing reads a shape from before it.
+After that, a new
 type — which an older reader counts as malformed, so the stream that carries
 it stops there — or a slot an older reader cannot take as `null` is a new
 version.
@@ -368,7 +369,7 @@ fingerprint of the op before it in its stream (see [Equivocation](#equivocation)
 serialized with sorted keys and salted with a random `nonce`:
 
 ```
-sig    = Ed25519( [2, origin, seq, ts, type, id, scope, from, v, actor, digest, msg, prev] )
+sig    = Ed25519( [1, origin, seq, ts, type, id, scope, from, v, actor, digest, msg, prev] )
 digest = SHA-256( nonce + "\n" + canonical(payload) )
 ```
 

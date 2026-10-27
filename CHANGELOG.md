@@ -918,8 +918,8 @@ There is no released version section until then; everything below lands in it.
   a cloned directory, an equivocating signer — were taken first-come and the
   other dropped as a duplicate, so nodes diverged for good. Every op now
   names the fingerprint of the op before it in its stream (`prev`, the
-  SHA-256 of its header, slot 19 of `packOps`, in the signed header —
-  `HEADER_VERSION` 2, `PROTOCOL` 2), and the log keeps each op's
+  SHA-256 of its header, slot 19 of `packOps`, in the signed header; still
+  `PROTOCOL` 1, the wire of the first publication), and the log keeps each op's
   fingerprint and every stream's head (`index.json` `heads`, kept past
   compaction). A peer's op at a seq this node holds under another
   fingerprint, or one whose `prev` is not the held predecessor's, is
@@ -1006,6 +1006,10 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **An unreadable `index.json` vouched for the whole log.** With no index
+  the floor is the first seq on disk; with one that did not read it stayed
+  at 1, so a log compacted past seq 1 claimed to hold what it had dropped
+  and `droppedTs` stayed 0. An index that does not read is now no index.
 - **A scope function that threw on one record failed every snapshot.**
   `snapshot()` asked every record its scope and let a throw out, so one
   record the scope function could not read stopped every peer's bootstrap
@@ -1106,7 +1110,7 @@ There is no released version section until then; everything below lands in it.
 - **An encrypted file could stand in for another.** `atRest()` sealed every
   file under one key with nothing tying a ciphertext to its file, so one
   record's file copied over another's decrypted as that one. Ciphertexts are
-  bound to their file name now (`enc2:`; an `enc1:` file still reads); the
+  bound to their file name now (the additional data of AES-GCM); the
   docs say what stays visible (names, sizes) and what a key cannot tell (an
   older copy put back).
 - **`anonymize()` left what it promised to hide.** Keys stayed by default —
@@ -1647,6 +1651,15 @@ There is no released version section until then; everything below lands in it.
 - `examples/main.js` required a `globalstorage.js` that does not exist.
 
 ### Changed
+
+- **Nothing reads a shape from before the first publication.** The wire,
+  the signed header and the files are version 1 as that publication will
+  have them (`PROTOCOL` 1, the header's version `1`, `enc1:` bound to its
+  file name), and the readers of the shapes before it are gone: a log file
+  without a hash is unreadable (`checksum`), an `index.json` with a field
+  missing is no index (a new epoch, as for an unreadable one), an unbound
+  `enc1:` ciphertext is `DECRYPT_FAILED`, and a hello that names no kinds
+  holds none (a dialer that runs a kind does not bootstrap from it).
 
 - **A tree move costs one step, not the tree.** Every op of a tree field
   folded every move again (a sort, the cycle walks), rendered both readings

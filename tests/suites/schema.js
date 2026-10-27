@@ -631,13 +631,13 @@ const runSchemaTests = async (t, assert, createStorage) => {
       access: 'public',
       authorize: (context, hello) => hello.schema?.version === 2,
     });
-    await new MemoryLink(strict).call('syncom/hello', { node: 'x', version: 2, schema: { version: 2, hash: null } });
-    assert.deepStrictEqual(hellos, [{ node: 'x', scopes: ['*'], schema: { version: 2, hash: null }, kinds: null }]);
+    await new MemoryLink(strict).call('syncom/hello', { node: 'x', version: 1, schema: { version: 2, hash: null } });
+    assert.deepStrictEqual(hellos, [{ node: 'x', scopes: ['*'], schema: { version: 2, hash: null }, kinds: [] }]);
     await assert.rejects(
-      () => new MemoryLink(strict).call('syncom/hello', { node: 'y', version: 2, schema: { version: 3, hash: 'h' } }),
+      () => new MemoryLink(strict).call('syncom/hello', { node: 'y', version: 1, schema: { version: 3, hash: 'h' } }),
       { code: 403 },
     );
-    await assert.rejects(() => new MemoryLink(strict).call('syncom/hello', { node: 'z', version: 2 }), { code: 403 });
+    await assert.rejects(() => new MemoryLink(strict).call('syncom/hello', { node: 'z', version: 1 }), { code: 403 });
     // A dialer without a schema says so; a peer event carries what hello learned.
     const events = [];
     const plain = await createStorage(t2, 'P', {

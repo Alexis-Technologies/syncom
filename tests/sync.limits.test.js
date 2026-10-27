@@ -30,7 +30,7 @@ test('Hosting limits', async (t) => {
     const host = await openTemp(t2);
     const unit = host.sync.unit({ access: 'public', limits: { opsPerPush: 3, bytesPerPush: 400 } });
     const link = new MemoryLink(unit);
-    await link.call('syncom/hello', { node: 'peer', version: 2 });
+    await link.call('syncom/hello', { node: 'peer', version: 1 });
     await assert.rejects(() => link.call('syncom/push', { ops: packOps(ops('peer', 1, 4)) }), {
       code: 413,
       reason: 'OPS_PER_PUSH',
@@ -52,7 +52,7 @@ test('Hosting limits', async (t) => {
     const host = await openTemp(t2);
     const unit = host.sync.unit({ access: 'public', limits: { opsPerSecond: 10 } });
     const link = new MemoryLink(unit);
-    await link.call('syncom/hello', { node: 'peer', version: 2 });
+    await link.call('syncom/hello', { node: 'peer', version: 1 });
     assert.strictEqual((await link.call('syncom/push', { ops: packOps(ops('peer', 1, 10)) })).applied, 10);
     await assert.rejects(() => link.call('syncom/push', { ops: packOps(ops('peer', 11, 1)) }), {
       code: 429,
@@ -63,7 +63,7 @@ test('Hosting limits', async (t) => {
     assert.strictEqual((await link.call('syncom/push', { ops: packOps(ops('peer', 11, 1)) })).applied, 1, 'refilled');
     // Another peer has its own bucket.
     const other = new MemoryLink(unit);
-    await other.call('syncom/hello', { node: 'other', version: 2 });
+    await other.call('syncom/hello', { node: 'other', version: 1 });
     assert.strictEqual((await other.call('syncom/push', { ops: packOps(ops('other', 1, 10)) })).applied, 10);
   });
 
@@ -71,14 +71,14 @@ test('Hosting limits', async (t) => {
     const host = await openTemp(t2);
     const unit = host.sync.unit({ access: 'public' });
     const link = new MemoryLink(unit);
-    await link.call('syncom/hello', { node: 'peer', version: 2 });
+    await link.call('syncom/hello', { node: 'peer', version: 1 });
     await assert.rejects(() => link.call('syncom/push', { ops: packOps(ops('peer', 1, 10_001)) }), {
       code: 413,
       reason: 'OPS_PER_PUSH',
     });
     assert.deepStrictEqual(host.vector, {}, 'refused at the length, nothing applied');
     const open = new MemoryLink(host.sync.unit({ access: 'public', limits: { opsPerPush: Infinity } }));
-    await open.call('syncom/hello', { node: 'wide', version: 2 });
+    await open.call('syncom/hello', { node: 'wide', version: 1 });
     assert.strictEqual((await open.call('syncom/push', { ops: packOps(ops('wide', 1, 10_001)) })).applied, 10_001);
   });
 

@@ -192,7 +192,7 @@ test('OpLog', async (t) => {
         );
         assert.strictEqual(reopened.droppedTs, 5, 'an unreadable segment: the newest stamp held, as for a torn one');
         await reopened.close();
-        // A file without a hash — an older format — is taken as it is.
+        // A file without a hash is not whole: unreadable like an altered one.
         const [last] = (await fs.readdir(logDir))
           .filter((name) => name.startsWith('seg-'))
           .sort()
@@ -200,13 +200,14 @@ test('OpLog', async (t) => {
         const text = JSON.parse(await fs.readFile(path.join(logDir, last), 'utf8'));
         delete text.hash;
         await fs.writeFile(path.join(logDir, last), JSON.stringify(text));
-        const older = await new OpLog(dir, { rollAfter: 2, logger });
+        const hashless = await new OpLog(dir, { rollAfter: 2, logger });
         assert.deepStrictEqual(
-          older.since(older.formatId(0)).map((entry) => entry.seq),
-          [3, 4, 5],
+          hashless.since(hashless.formatId(0)).map((entry) => entry.seq),
+          [3, 4],
+          'seq 5 was in the hashless segment',
         );
-        assert.strictEqual(older.corrupt, 1, 'the altered segment is still on disk; the hashless one passes');
-        await older.close();
+        assert.strictEqual(hashless.corrupt, 2, 'the altered segment and the hashless one');
+        await hashless.close();
       } finally {
         await cleanupTemp(dir);
       }
@@ -571,12 +572,14 @@ test('droppedTs is the newest stamp compaction dropped; a pin holds a segment pa
     const reopened = await new OpLog(dir, { rollAfter: 1, retention: { ops: 2 } });
     assert.strictEqual(reopened.droppedTs, 10);
     await reopened.close();
-    // An index from before droppedTs existed, with something compacted:
-    // what went is unknown, so everything retained is vouched for by nothing.
+    // An index with a field missing is no index of this log's: a new
+    // incarnation, and with something compacted what went is unknown, so
+    // everything retained is vouched for by nothing.
     const stale = JSON.parse(await fs.readFile(path.join(dir, 'log', 'index.json'), 'utf8'));
     delete stale.droppedTs;
     await fs.writeFile(path.join(dir, 'log', 'index.json'), JSON.stringify(stale));
-    const old = await new OpLog(dir, { rollAfter: 1, retention: { ops: 2 } });
+    const old = await new OpLog(dir, { rollAfter: 1, retention: { ops: 2 }, logger: false });
+    assert.notStrictEqual(old.epoch, stale.epoch, 'a new incarnation');
     assert.strictEqual(old.droppedTs, old.latestTs);
     await old.close();
     // A segment that cannot be read is as good as dropped.

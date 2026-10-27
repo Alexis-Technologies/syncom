@@ -41,11 +41,9 @@ const encryption = Object.freeze({
 // ---------------------------------------------------------------------------
 // At rest
 
-// `enc2:` binds each ciphertext to its file name (the additional data of
+// `enc1:` binds each ciphertext to its file name (the additional data of
 // AES-GCM): a file copied over another one of the store does not decrypt.
-// `enc1:` (no binding) is read still, written never.
-const PREFIX = 'enc2:';
-const UNBOUND = 'enc1:';
+const PREFIX = 'enc1:';
 const IV_BYTES = 12;
 const DEFAULT_ITERATIONS = 600_000;
 const subtle = () => globalThis.crypto.subtle;
@@ -134,8 +132,7 @@ const atRest = (fsi, options = {}) => {
     return PREFIX + toBase64(out);
   };
   const open = async (dir, filename, text) => {
-    const unbound = typeof text === 'string' && text.startsWith(UNBOUND);
-    if (typeof text !== 'string' || (!unbound && !text.startsWith(PREFIX))) throw failed(dir, filename, 'plain');
+    if (typeof text !== 'string' || !text.startsWith(PREFIX)) throw failed(dir, filename, 'plain');
     const key = await ready;
     let bytes;
     try {
@@ -145,7 +142,7 @@ const atRest = (fsi, options = {}) => {
     }
     try {
       const iv = bytes.subarray(0, IV_BYTES);
-      const params = unbound ? { name: 'AES-GCM', iv } : { name: 'AES-GCM', iv, ...bound(filename) };
+      const params = { name: 'AES-GCM', iv, ...bound(filename) };
       const plain = await subtle().decrypt(params, key, bytes.subarray(IV_BYTES));
       return decoder.decode(plain);
     } catch (error) {

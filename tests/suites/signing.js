@@ -35,7 +35,7 @@ const runSigningTests = async (t, assert, signing, cryptoMod) => {
     );
     assert.strictEqual(
       signedMessage({ origin: 'A', seq: 1, ts: 1, type: 'advance', vector: {}, from: 'B' }),
-      '[2,"A",1,1,"advance",null,null,"B",null,null,null,null,null]',
+      '[1,"A",1,1,"advance",null,null,"B",null,null,null,null,null]',
     );
     // The fingerprint of the op before it in its stream is signed last.
     assert.strictEqual(JSON.parse(signedMessage({ ...op, prev: 'p' }))[12], 'p');

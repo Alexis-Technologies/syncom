@@ -20,7 +20,7 @@
 const { hashOf } = require('./digest.js');
 const { canonical } = require('./shape.js');
 
-const HEADER_VERSION = 2;
+const HEADER_VERSION = 1;
 const PAYLOAD = ['data', 'meta', 'key', 'value', 'vector'];
 
 // The fields a digest covers, as the op carries them; null when it carries

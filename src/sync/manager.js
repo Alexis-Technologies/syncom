@@ -886,14 +886,11 @@ class SyncManager extends Emitter {
       // A host that holds fewer kinds than this node would hand over a
       // snapshot without those fields, and the joined vector would say the
       // ops behind them were seen: refused, reported, the feed left to
-      // resume. A host that named no kinds is from before plugins.
-      const theirs = peer.remote.kinds;
+      // resume.
+      const held = new Set(peer.remote.kinds);
+      const kinds = this.#storage.kinds;
       const missing = [];
-      if (theirs !== null) {
-        const held = new Set(theirs);
-        const kinds = this.#storage.kinds;
-        for (let i = 0; i < kinds.length; i++) if (!held.has(kinds[i])) missing.push(kinds[i]);
-      }
+      for (let i = 0; i < kinds.length; i++) if (!held.has(kinds[i])) missing.push(kinds[i]);
       if (missing.length > 0) {
         const message = `${peer.node.url} cannot hold the ${missing.join(', ')} kind${missing.length > 1 ? 's' : ''}; not bootstrapping from it`;
         this.#otel.recordBootstrap('refused');

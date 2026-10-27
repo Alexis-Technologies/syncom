@@ -490,7 +490,7 @@ test('Storage telemetry', async (t) => {
     const { packOps } = require('../src/ops.js');
     const { storage } = await openTemp(t2, { telemetry: { meter } });
     const link = new MemoryLink(storage.sync.unit({ access: 'public', limits: { opsPerPush: 1 } }));
-    await link.call('syncom/hello', { node: 'peer', version: 2 });
+    await link.call('syncom/hello', { node: 'peer', version: 1 });
     const ops = packOps([
       remoteOp('peer', 1, 'write', 'r1', { data: {} }),
       remoteOp('peer', 2, 'write', 'r2', { data: {} }),

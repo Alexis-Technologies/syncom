@@ -32,7 +32,7 @@ src/signing/sign.js       canonical form, signOp, verifyOp — what a signature 
   a UUID from before signing, or a directory opened without the plugin — is rekeyed once with
   `identity.rekeyed`; another key id is `IDENTITY_MISMATCH`, never silent). Without the plugin
   the id is what `node.json` names or `getId` mints, and a key id stays the id. `src/signing/sign.js` signs
-  `[2, origin, seq, ts, type, id, scope, from, v, actor, digest, msg, prev]`
+  `[1, origin, seq, ts, type, id, scope, from, v, actor, digest, msg, prev]`
   (`headerOf` in src/header.js) with `digest = sha256(nonce + canonical(payload))`
   — `prev` minted by the core for every op, the digest where the node signs
   (`link`), at the four sites that make an op of this node's own: `issue` and

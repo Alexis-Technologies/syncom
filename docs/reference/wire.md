@@ -77,22 +77,22 @@ as the log keeps them (the `write` and the `purge` of `p2` are scrubbed —
 the payload and the nonce gone, the header and its signature kept):
 
 ```json
-{"seq":1,"op":{"origin":"P7dOcrN…","seq":1,"ts":1793053996251,"type":"write","id":"p1","v":1,"data":{"$type":"Post","title":"Draft","note":"tmp"},"nonce":"87dfd3f0-…","digest":"HAPz-F8K…","sig":"VI89hgS…"},"fp":"VgjIBSHJ…"}
-{"seq":2,"op":{"origin":"P7dOcrN…","seq":2,"ts":1793053996257,"type":"set","id":"p1","v":1,"data":{"title":"Final"},"prev":"VgjIBSHJ…","nonce":"c39deabf-…","digest":"qAwzPrfd…","sig":"7mi3WYB…"},"fp":"064vOco2…"}
-{"seq":3,"op":{"origin":"P7dOcrN…","seq":3,"ts":1793053996260,"type":"unset","id":"p1","v":1,"value":["note"],"prev":"064vOco2…","nonce":"68a57b19-…","digest":"P7zOwRgB…","sig":"Z1CpQih…"},"fp":"iIOi1w79…"}
-{"seq":4,"op":{"origin":"P7dOcrN…","seq":4,"ts":1793053996263,"type":"inc","id":"p1","v":1,"key":"views","value":1,"prev":"iIOi1w79…","nonce":"ef7f2a0f-…","digest":"I-B2uzwI…","sig":"3Exwncn…"},"fp":"YlcL2h50…"}
-{"seq":5,"op":{"origin":"P7dOcrN…","seq":5,"ts":1793053996266,"type":"add","id":"p1","v":1,"key":"tags","value":["bug"],"prev":"YlcL2h50…","nonce":"d6092527-…","digest":"lGWta3Yf…","sig":"wkpiBVK…"},"fp":"M89Kun1U…"}
-{"seq":6,"op":{"origin":"P7dOcrN…","seq":6,"ts":1793053996269,"type":"remove","id":"p1","v":1,"key":"tags","value":[["bug",{"P7dOcrN…":1793053996266}]],"prev":"M89Kun1U…","nonce":"cbb28d79-…","digest":"Sos6L31w…","sig":"ZlSYNqI…"},"fp":"XUbvFc5D…"}
-{"seq":7,"op":{"origin":"P7dOcrN…","seq":7,"ts":1793053996272,"type":"splice","id":"p1","v":1,"key":"body","value":{"content":"hello","at":"^"},"prev":"XUbvFc5D…","nonce":"34ab659b-…","digest":"tY9Dbvte…","sig":"L8fU7DN…"},"fp":"8Mr1-LAD…"}
-{"seq":8,"op":{"origin":"P7dOcrN…","seq":8,"ts":1793053996278,"type":"splice","id":"p1","v":1,"key":"items","value":{"content":[1,2],"at":"^"},"prev":"8Mr1-LAD…","nonce":"e094d4a5-…","digest":"TE_J3-ZX…","sig":"Tu2BfqQ…"},"fp":"jxo-R52D…"}
-{"seq":9,"op":{"origin":"P7dOcrN…","seq":9,"ts":1793053996281,"type":"assign","id":"p1","v":1,"key":"items","value":{"elem":"1793053996278:0:P7dOcrN…","value":9},"prev":"jxo-R52D…","nonce":"826d9393-…","digest":"R4a_X2Ck…","sig":"467j48_…"},"fp":"PStsoPR3…"}
-{"seq":10,"op":{"origin":"P7dOcrN…","seq":10,"ts":1793053996284,"type":"move","id":"p1","v":1,"key":"items","value":{"elem":"1793053996278:0:P7dOcrN…","cut":["1793053996278:P7dOcrN…",0,1],"at":">1793053996278:1:P7dOcrN…","value":9},"prev":"PStsoPR3…","nonce":"ce1ef401-…","digest":"WsNmkeOi…","sig":"p7gACrZ…"},"fp":"3OB2HcPM…"}
-{"seq":11,"op":{"origin":"P7dOcrN…","seq":11,"ts":1793053996288,"type":"mark","id":"p1","v":1,"key":"body","value":{"start":"<1793053996272:0:P7dOcrN…","end":"$","key":"bold","value":true},"prev":"3OB2HcPM…","nonce":"0705c9bb-…","digest":"QKzYvPg5…","sig":"5UyQqrN…"},"fp":"p9BTynq7…"}
-{"seq":12,"op":{"origin":"P7dOcrN…","seq":12,"ts":1793053996291,"type":"tree","id":"p1","v":1,"key":"outline","value":{"node":"n1","parent":null,"fi":"V"},"prev":"p9BTynq7…","nonce":"2b63250e-…","digest":"CnMODGwU…","sig":"zedo0Ub…"},"fp":"IhGDrPzQ…"}
-{"seq":13,"op":{"origin":"P7dOcrN…","seq":13,"ts":1793053996295,"type":"set","id":"p1","v":1,"actor":"ada","data":{"n":1},"msg":"one more","prev":"IhGDrPzQ…","nonce":"f19610c6-…","digest":"xUulRS5y…","sig":"GIusDIN…"},"fp":"kl8HKLFV…"}
-{"seq":14,"op":{"origin":"P7dOcrN…","seq":14,"ts":1793053996298,"type":"delete","id":"p1","v":1,"prev":"kl8HKLFV…","sig":"-m-OqTs…"},"fp":"X4F_F1VQ…"}
-{"seq":15,"op":{"origin":"P7dOcrN…","seq":15,"ts":1793053996301,"type":"write","id":"p2","v":1,"prev":"X4F_F1VQ…","digest":"8H6KynNe…","sig":"903czsW…"},"fp":"lEpfEvG3…","scrubbed":true}
-{"seq":16,"op":{"origin":"P7dOcrN…","seq":16,"ts":1793053996304,"type":"purge","id":"p2","v":1,"prev":"lEpfEvG3…","sig":"nCcPtQw…"},"fp":"z-hdJgrE…","scrubbed":true}
+{"seq":1,"op":{"origin":"VLH7Ywu…","seq":1,"ts":1793087684840,"type":"write","id":"p1","v":1,"data":{"$type":"Post","title":"Draft","note":"tmp"},"nonce":"55b902dd-…","digest":"pNpYxfs6…","sig":"YE3frhE…"},"fp":"SmNVKTkH…"}
+{"seq":2,"op":{"origin":"VLH7Ywu…","seq":2,"ts":1793087684846,"type":"set","id":"p1","v":1,"data":{"title":"Final"},"prev":"SmNVKTkH…","nonce":"1258f80d-…","digest":"CY61ahM3…","sig":"hEvgr7g…"},"fp":"3GmlODml…"}
+{"seq":3,"op":{"origin":"VLH7Ywu…","seq":3,"ts":1793087684849,"type":"unset","id":"p1","v":1,"value":["note"],"prev":"3GmlODml…","nonce":"5813af09-…","digest":"aW5z0E8A…","sig":"1wiJRzm…"},"fp":"UuNQx9vT…"}
+{"seq":4,"op":{"origin":"VLH7Ywu…","seq":4,"ts":1793087684852,"type":"inc","id":"p1","v":1,"key":"views","value":1,"prev":"UuNQx9vT…","nonce":"00a3ef68-…","digest":"4nQUrOQo…","sig":"se88RPf…"},"fp":"VY9jdnUE…"}
+{"seq":5,"op":{"origin":"VLH7Ywu…","seq":5,"ts":1793087684855,"type":"add","id":"p1","v":1,"key":"tags","value":["bug"],"prev":"VY9jdnUE…","nonce":"3887133a-…","digest":"vDdi0F3k…","sig":"us6GHE9…"},"fp":"q49yF0IJ…"}
+{"seq":6,"op":{"origin":"VLH7Ywu…","seq":6,"ts":1793087684858,"type":"remove","id":"p1","v":1,"key":"tags","value":[["bug",{"VLH7Ywu…":1793087684855}]],"prev":"q49yF0IJ…","nonce":"6556dcfe-…","digest":"SjDF-Rzq…","sig":"WXfaw6w…"},"fp":"9z2V-22e…"}
+{"seq":7,"op":{"origin":"VLH7Ywu…","seq":7,"ts":1793087684861,"type":"splice","id":"p1","v":1,"key":"body","value":{"content":"hello","at":"^"},"prev":"9z2V-22e…","nonce":"0438623a-…","digest":"e8xPy71S…","sig":"fldcPee…"},"fp":"HEbXDRV7…"}
+{"seq":8,"op":{"origin":"VLH7Ywu…","seq":8,"ts":1793087684866,"type":"splice","id":"p1","v":1,"key":"items","value":{"content":[1,2],"at":"^"},"prev":"HEbXDRV7…","nonce":"be90dd02-…","digest":"rRDJp_Dt…","sig":"IUE0qCZ…"},"fp":"guFO1EOS…"}
+{"seq":9,"op":{"origin":"VLH7Ywu…","seq":9,"ts":1793087684869,"type":"assign","id":"p1","v":1,"key":"items","value":{"elem":"1793087684866:0:VLH7Ywu…","value":9},"prev":"guFO1EOS…","nonce":"94a8f651-…","digest":"lpwSpgyW…","sig":"LUGj4mI…"},"fp":"chF-Ks1c…"}
+{"seq":10,"op":{"origin":"VLH7Ywu…","seq":10,"ts":1793087684872,"type":"move","id":"p1","v":1,"key":"items","value":{"elem":"1793087684866:0:VLH7Ywu…","cut":["1793087684866:VLH7Ywu…",0,1],"at":">1793087684866:1:VLH7Ywu…","value":9},"prev":"chF-Ks1c…","nonce":"a7e7a486-…","digest":"pn6qODgP…","sig":"3n9P52d…"},"fp":"MqBO8DgA…"}
+{"seq":11,"op":{"origin":"VLH7Ywu…","seq":11,"ts":1793087684876,"type":"mark","id":"p1","v":1,"key":"body","value":{"start":"<1793087684861:0:VLH7Ywu…","end":"$","key":"bold","value":true},"prev":"MqBO8DgA…","nonce":"13602c95-…","digest":"aU9shwrn…","sig":"Njs14Zx…"},"fp":"HhhOhsgk…"}
+{"seq":12,"op":{"origin":"VLH7Ywu…","seq":12,"ts":1793087684879,"type":"tree","id":"p1","v":1,"key":"outline","value":{"node":"n1","parent":null,"fi":"V"},"prev":"HhhOhsgk…","nonce":"a70b7608-…","digest":"jII5zyZ1…","sig":"DqM2boN…"},"fp":"7vowLgJ6…"}
+{"seq":13,"op":{"origin":"VLH7Ywu…","seq":13,"ts":1793087684884,"type":"set","id":"p1","v":1,"actor":"ada","data":{"n":1},"msg":"one more","prev":"7vowLgJ6…","nonce":"7b4cf045-…","digest":"Y-MlFI9f…","sig":"YG0eHAr…"},"fp":"PjeIYmkg…"}
+{"seq":14,"op":{"origin":"VLH7Ywu…","seq":14,"ts":1793087684887,"type":"delete","id":"p1","v":1,"prev":"PjeIYmkg…","sig":"yUCV5eu…"},"fp":"ATQP-EcP…"}
+{"seq":15,"op":{"origin":"VLH7Ywu…","seq":15,"ts":1793087684890,"type":"write","id":"p2","v":1,"prev":"ATQP-EcP…","digest":"4mS7e6Hf…","sig":"-JJKGYi…"},"fp":"DtsVxUAd…","scrubbed":true}
+{"seq":16,"op":{"origin":"VLH7Ywu…","seq":16,"ts":1793087684892,"type":"purge","id":"p2","v":1,"prev":"DtsVxUAd…","sig":"UkSuqji…"},"fp":"vP8rexFG…","scrubbed":true}
 ```
 
 Each op names the fingerprint of the one before it (`prev`), and the log
@@ -125,12 +125,12 @@ The ops above, packed (`packOps` in `src/wire.js`; `unpackOps` is the way
 back, and takes a row of fewer than five slots as nothing):
 
 ```json
-["P7dOcrN…",1,1793053996251,"w","p1",null,{"$type":"Post","title":"Draft","note":"tmp"},null,null,null,null,null,1,null,"VI89hgS…","HAPz-F8K…","87dfd3f0-…",null,null]
-["P7dOcrN…",4,1793053996263,"i","p1",null,null,null,"views",1,null,null,1,null,"3Exwncn…","I-B2uzwI…","ef7f2a0f-…",null,"iIOi1w79…"]
-["P7dOcrN…",7,1793053996272,"/","p1",null,null,null,"body",{"content":"hello","at":"^"},null,null,1,null,"L8fU7DN…","tY9Dbvte…","34ab659b-…",null,"XUbvFc5D…"]
-["P7dOcrN…",13,1793053996295,"s","p1",null,{"n":1},null,null,null,null,null,1,"ada","GIusDIN…","xUulRS5y…","f19610c6-…","one more","IhGDrPzQ…"]
-["P7dOcrN…",14,1793053996298,"d","p1",null,null,null,null,null,null,null,1,null,"-m-OqTs…",null,null,null,"kl8HKLFV…"]
-["P7dOcrN…",16,1793053996304,"p","p2",null,null,null,null,null,null,null,1,null,"nCcPtQw…",null,null,null,"lEpfEvG3…"]
+["VLH7Ywu…",1,1793087684840,"w","p1",null,{"$type":"Post","title":"Draft","note":"tmp"},null,null,null,null,null,1,null,"YE3frhE…","pNpYxfs6…","55b902dd-…",null,null]
+["VLH7Ywu…",4,1793087684852,"i","p1",null,null,null,"views",1,null,null,1,null,"se88RPf…","4nQUrOQo…","00a3ef68-…",null,"UuNQx9vT…"]
+["VLH7Ywu…",7,1793087684861,"/","p1",null,null,null,"body",{"content":"hello","at":"^"},null,null,1,null,"fldcPee…","e8xPy71S…","0438623a-…",null,"9z2V-22e…"]
+["VLH7Ywu…",13,1793087684884,"s","p1",null,{"n":1},null,null,null,null,null,1,"ada","YG0eHAr…","Y-MlFI9f…","7b4cf045-…","one more","7vowLgJ6…"]
+["VLH7Ywu…",14,1793087684887,"d","p1",null,null,null,null,null,null,null,1,null,"yUCV5eu…",null,null,null,"PjeIYmkg…"]
+["VLH7Ywu…",16,1793087684892,"p","p2",null,null,null,null,null,null,null,1,null,"UkSuqji…",null,null,null,"DtsVxUAd…"]
 ```
 
 Slots were appended in this order — `v` was the thirteenth, `actor` the
@@ -153,7 +153,7 @@ registered by `@alexify/syncom/all`) signs them, in three parts:
    `delete`, a `purge`) has no digest and no nonce.
 2. **The header** — a positional JSON array under a version number, `null`
    for an absent field:
-   `[2, origin, seq, ts, type, id, scope, from, v, actor, digest, msg, prev]`.
+   `[1, origin, seq, ts, type, id, scope, from, v, actor, digest, msg, prev]`.
 3. **The signature** — Ed25519 over the header's text, as 86 base64url
    characters in `sig`. The key is the origin: the node id *is* the public
    key.
@@ -161,10 +161,10 @@ registered by `@alexify/syncom/all`) signs them, in three parts:
 The `set` op above, taken apart:
 
 ```
-header     [2,"P7dOcrN…",2,1793053996257,"set","p1",null,null,1,null,"qAwzPrfdoPzWRirifj_yPUAuBto9QZpRWTNVZ991blU",null,"VgjIBSHJo8E9oMmFZtyOwX6KbhJqbsZW7UbEruGhuQg"]
+header     [1,"VLH7Ywu…",2,1793087684846,"set","p1",null,null,1,null,"CY61ahM3kCZRiP8NjcNFOKsUj8haWFXCsRxfU8zRjeI",null,"SmNVKTkHmv5uaHCQYAlseskUcAzpyIPphUrGPIcSbZc"]
 canonical  {"data":{"title":"Final"}}
-nonce      c39deabf-ed6f-4454-9395-9d6f38c27825
-digest     qAwzPrfdoPzWRirifj_yPUAuBto9QZpRWTNVZ991blU
+nonce      1258f80d-6064-41cb-8e78-cafc70f87074
+digest     CY61ahM3kCZRiP8NjcNFOKsUj8haWFXCsRxfU8zRjeI
 ```
 
 A receiver verifies before it applies: an origin that is no key, a payload
@@ -182,7 +182,7 @@ claim.
 ## The per-stream chain
 
 An op's **fingerprint** is the SHA-256 of its header's text, as 43 base64url
-characters — `fp` of the `set` above is `064vOco2…`. It is the same on
+characters — `fp` of the `set` above is `3GmlODml…`. It is the same on
 every node, signing or not, and whole after a scrub: the header keeps the
 digest. A signed op's header carries the digest, so its fingerprint covers
 the payload too; an unsigned op's covers the header alone — its stamp, seq,
@@ -190,7 +190,7 @@ type and record — so two unsigned ops that differ in payload alone are one
 op to it. Every op names the fingerprint of the op before it in its
 **stream** (`origin`, `origin@scope`, or `origin@~` for the `merge` and
 `advance` ops a bootstrap makes) as `prev` — the `set`'s `prev` is the
-`write`'s fingerprint, `VgjIBSHJ…` — so a fingerprint covers the whole
+`write`'s fingerprint, `SmNVKTkH…` — so a fingerprint covers the whole
 stream up to its op: a hash chain per stream, under the signature. A
 stream's first op names none, and so does an op whose writer holds no op
 at the seq before it.
@@ -260,7 +260,7 @@ seqs back, and the group that took them went to a newer journal. A later open
 never appends to an older journal.
 
 ```json
-{"entries":[{"seq":2,"op":{"origin":"P7dOcrN…","seq":2,"ts":1793053996257,"type":"set","id":"p1","v":1,"data":{"title":"Final"},"prev":"VgjIBSHJ…","nonce":"c39deabf-…","digest":"qAwzPrfd…","sig":"7mi3WYB…"},"fp":"064vOco2…"}],"hash":"bea5b98b"}
+{"entries":[{"seq":2,"op":{"origin":"VLH7Ywu…","seq":2,"ts":1793087684846,"type":"set","id":"p1","v":1,"data":{"title":"Final"},"prev":"SmNVKTkH…","nonce":"1258f80d-…","digest":"CY61ahM3…","sig":"hEvgr7g…"},"fp":"3GmlODml…"}],"hash":"9722285a"}
 ```
 
 An entry is `{ seq, op, fp }` — `fp` the op's [fingerprint](#the-per-stream-chain),
@@ -274,10 +274,10 @@ close, with the sixteen ops sealed into one segment — `heads` the stream's
 newest op and its fingerprint, kept once the op itself is compacted away:
 
 ```json
-{"epoch":"mvpu1y3d6zl7op","floor":1,"next":17,"vector":{"P7dOcrN…":16},"heads":{"P7dOcrN…":[16,"z-hdJgrE…"]},"segments":[{"name":"seg-0000000001.json","from":1,"to":16,"count":16}],"droppedHeld":0,"latestTs":1793053996304,"droppedTs":0}
+{"epoch":"mvqe40dinmi2cx","floor":1,"next":17,"vector":{"VLH7Ywu…":16},"heads":{"VLH7Ywu…":[16,"vP8rexFGNozvq4vFd4wYEitJ9-7aoVUnJYyLenq1g8o"]},"segments":[{"name":"seg-0000000001.json","from":1,"to":16,"count":16}],"droppedHeld":0,"latestTs":1793087684892,"droppedTs":0}
 ```
 
-An **event id** is `<epoch>.<seq>` — `mvpu1y3d6zl7op.16` — the epoch
+An **event id** is `<epoch>.<seq>` — `mvqe40dinmi2cx.16` — the epoch
 minted once when the log is created, so a cursor from a wiped or restored
 directory is told to bootstrap rather than fed a coincidence. `floor` is
 the lowest seq retained: below it, or under another epoch, a resume is
@@ -358,8 +358,8 @@ naming the check.
 ### `hello`
 
 ```
-→ { node, version: 2, vector, scopes, token?, schema, kinds }
-← { node, vector, epoch, version: 2, schema, kinds, duplicate?, proof? }
+→ { node, version: 1, vector, scopes, token?, schema, kinds }
+← { node, vector, epoch, version: 1, schema, kinds, duplicate?, proof? }
 ```
 
 `vector` is the caller's whole version vector; `scopes` the scopes it
@@ -381,7 +381,7 @@ op's fingerprint is the stream's head from then on: what the caller's next
 op of it names as `prev`. The answer, from the run above:
 
 ```json
-{"node":"P7dOcrN…","vector":{"P7dOcrN…":16},"epoch":"mvpu1y3d6zl7op","version":2,"schema":{"version":1,"hash":null},"kinds":["text","tree"]}
+{"node":"VLH7Ywu…","vector":{"VLH7Ywu…":16},"epoch":"mvqe40dinmi2cx","version":1,"schema":{"version":1,"hash":null},"kinds":["text","tree"]}
 ```
 
 | Code | `reason` | When |
@@ -493,14 +493,15 @@ a snapshot buys nothing an op could not:
 
 ## Compatibility
 
-`hello` carries `version: 2` both ways, and a host answers another version
-with 400 `PROTOCOL`. Version 2 is the wire as the first publication will
+`hello` carries `version: 1` both ways, and a host answers another version
+with 400 `PROTOCOL`. Version 1 is the wire as the first publication will
 have it: the fifteen types and the nineteen slots above, the header under
-its version number `2` with `prev` in it, the log file with its hash, the
-presence format `p: 1`. (Version 1, before the per-stream chain, signed a
-header without `prev`; a node of it would relay a forked stream unchecked.)
-Before that publication the shapes on this page may change without a bump;
-after it:
+its version number `1` with `prev` in it, the log file with its hash, the
+index with every field it is written with, the `enc1:` ciphertext bound to
+its file name, the presence format `p: 1`. Nothing reads a shape from
+before that publication: a log file without a hash is unreadable, an index
+with a field missing is no index (a new epoch). Before the publication the
+shapes on this page may change without a bump; after it:
 
 - **A slot is appended, never reordered or removed.** A reader of fewer
   slots ignores the rest; a reader of more takes an absent slot as `null`.
@@ -509,9 +510,9 @@ after it:
   type as `malformed`, and the stream that carries it stops there.
 - **A new field of an op, a procedure's argument or answer, or a presence
   entry is optional** — absent reads as before.
-- **A file format gains fields, never loses them**: a log file without a
-  hash, an index without a field, a record file without a block are read.
-- **The header's version number** (`2`), the digest's construction and
+- **A file format gains fields, never loses them**: a field added after
+  version 1 is optional to its reader — a file written without it is read.
+- **The header's version number** (`1`), the digest's construction and
   the fingerprint's change only with a new version.
 - **A version bump is a major release** of the package; an appended slot
   or an optional field is a minor one.

@@ -25,9 +25,8 @@
 //                 (src/vector.js opKey), since seqs run per stream: re-applying
 //                 an `inc` (seq already seen in its stream) is a no-op, two
 //                 snapshots join by taking the higher seq per stream, and one
-//                 node's incs in two scopes are two sums. A slot written before
-//                 streams were told apart is keyed by the bare origin — the
-//                 global stream's key, so global data reads as it did. A sum
+//                 node's incs in two scopes are two sums; the global stream's
+//                 slot is keyed by the bare origin. A sum
 //                 stays within ±MAX_COUNT, an inc past it is a `bound` refusal
 //   sets[f]     — { [elementKey]: { [origin]: [added, removed] } }: an
 //                 observed-remove set. elementKey is the element's JSON text;
@@ -99,8 +98,8 @@ const createEntry = () => ({
   meta: { clock: {}, base: null, deleted: null, counters: {}, sets: {}, blocks: {}, gone: {} },
 });
 
-// An entry written before sets existed has no `sets` key (nor `blocks`,
-// nor `gone`); reading it as empty is the whole compatibility story.
+// A meta without a `sets`, `blocks` or `gone` key — a peer's raw one, read
+// before it is normalized — reads it as empty.
 const EMPTY = Object.freeze({});
 const setsOf = (meta) => meta.sets ?? EMPTY;
 const blocksOf = (meta) => meta.blocks ?? EMPTY;

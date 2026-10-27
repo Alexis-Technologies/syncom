@@ -110,8 +110,8 @@ const printOf = (op) => {
 // verification and hashing need not. A malformed op has no fingerprint
 // (null), which `admit` counts. Only a well-formed op that carries a
 // signature is verified, and under 'require' every well-formed one; the
-// rest is OK by rule, which is what keeps an unsigned page — an older
-// peer's, a test's — at a property check and a hash per op. Never throws.
+// rest is OK by rule, which is what keeps an unsigned page — a node's
+// without the signing plugin — at a property check and a hash per op. Never throws.
 const checkPage = async (batch, ops) => {
   const { signatures, core } = batch;
   // No signing plugin: nothing to check against — a peer's signature rides
@@ -319,7 +319,7 @@ const skewed = (batch, op, ts) => {
 // not the one held at the seq before it, are equivocation. A next op this
 // node holds no predecessor for — the stream starts with it, or came by a
 // snapshot — is taken, and the chain held from it; so is an unsigned op that
-// names none (a hand-made one, an older writer's). An advance is accepted
+// names none (a hand-made one: `applyRemote` takes what a caller built). An advance is accepted
 // here, with nothing to apply.
 const admit = (batch, op, fp) => {
   const { core } = batch;

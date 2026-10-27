@@ -16,7 +16,7 @@
 //                       write can only damage its last line, whose group was
 //                       never announced to anyone
 //   open/<seq>.json     the same group as a file of its own, where the
-//                       backend cannot append (and from before journals)
+//                       backend cannot append
 //   seg-<from>.json     sealed segments: the open files rolled together once
 //                       enough of them accumulate
 //   corrupt/<name>      an open group file that read whole but failed its
@@ -74,7 +74,7 @@ const parseJson = (text) => {
 
 // A log file: its entries and their checksum (xxHash32 of the entries'
 // JSON), so a torn or altered file is told from a whole one at open. A file
-// without one (an older format) is taken as it is.
+// without one is not whole.
 const fileOf = (entries) => {
   const text = JSON.stringify(entries);
   return `{"entries":${text},"hash":"${checksum(text)}"}`;
@@ -93,10 +93,22 @@ const readOrNull = async (fsi, dir, name) => {
   }
 };
 
+// index.json as `#writeIndex` writes it, or null: an index with a field
+// missing or of another shape is no index of this log's.
+const indexOf = (index) => {
+  if (index === null || typeof index !== 'object' || Array.isArray(index)) return null;
+  if (typeof index.epoch !== 'string' || !Number.isSafeInteger(index.floor) || index.floor < 1) return null;
+  if (!isMap(index.vector) || !isMap(index.heads) || !Array.isArray(index.segments)) return null;
+  if (!Number.isSafeInteger(index.droppedHeld) || index.droppedHeld < 0) return null;
+  if (typeof index.latestTs !== 'number' || typeof index.droppedTs !== 'number') return null;
+  return index;
+};
+const isMap = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+
 const readFile = (text) => {
   const parsed = text === null ? null : parseJson(text);
   if (!parsed || !Array.isArray(parsed.entries)) return { entries: null, reason: 'malformed' };
-  if (parsed.hash !== undefined && checksum(JSON.stringify(parsed.entries)) !== parsed.hash) {
+  if (typeof parsed.hash !== 'string' || checksum(JSON.stringify(parsed.entries)) !== parsed.hash) {
     return { entries: null, reason: 'checksum' };
   }
   return { entries: parsed.entries, reason: null };
@@ -213,27 +225,24 @@ class OpLog {
 
   async #init() {
     const hasIndex = await this.#fsi.exists(this.#path, INDEX);
-    const index = hasIndex ? parseJson(await this.#fsi.read(this.#path, INDEX)) : null;
+    const index = hasIndex ? indexOf(parseJson(await this.#fsi.read(this.#path, INDEX))) : null;
     if (index) {
       this.#epoch = index.epoch;
-      this.#floor = index.floor ?? 1;
-      this.#vector = index.vector ?? {};
+      this.#floor = index.floor;
+      this.#vector = index.vector;
       this.#takeHeads(index.heads);
-      this.#segments = Array.isArray(index.segments) ? index.segments : [];
-      this.#droppedHeld = Number.isInteger(index.droppedHeld) ? index.droppedHeld : 0;
+      this.#segments = index.segments;
+      this.#droppedHeld = index.droppedHeld;
       // Seeded from the index; what the files hold only moves it up.
-      if (typeof index.latestTs === 'number') this.#latestTs = index.latestTs;
-      // An index from before droppedTs was kept, with something already
-      // compacted: what went is unknown, so nothing retained is vouched for.
-      if (typeof index.droppedTs === 'number') this.#droppedTs = index.droppedTs;
-      else if (this.#floor > 1) this.#lost = true;
+      this.#latestTs = index.latestTs;
+      this.#droppedTs = index.droppedTs;
     } else {
       // No (readable) index: a new incarnation. Existing segments are still
       // picked up below, but their ids belong to an epoch nobody can resume.
       this.#epoch = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
       this.#segments = [];
     }
-    await this.#loadSegments(hasIndex);
+    await this.#loadSegments(index !== null);
     await this.#loadOpen();
     this.#seen = null;
     // Entries this open could not read, or an incarnation that starts above
@@ -251,7 +260,7 @@ class OpLog {
     return this;
   }
 
-  async #loadSegments(hasIndex) {
+  async #loadSegments(indexed) {
     const known = new Set();
     for (let i = 0; i < this.#segments.length; i++) known.add(this.#segments[i].name);
     const names = await this.#fsi.list(this.#path);
@@ -278,9 +287,10 @@ class OpLog {
         segment.count = entries.length;
       }
     }
-    // The floor is durable in the index; a fresh index means everything on
-    // disk is retained from its first entry.
-    if (!hasIndex && this.#entries.length > 0) this.#floor = this.#entries[0].seq;
+    // The floor is durable in the index; without one that reads (none, or
+    // one that is not this log's) everything on disk is retained from its
+    // first entry.
+    if (!indexed && this.#entries.length > 0) this.#floor = this.#entries[0].seq;
   }
 
   async #loadOpen() {
