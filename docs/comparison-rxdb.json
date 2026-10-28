@@ -1506,7 +1506,7 @@
         "serverLicense": {
           "mark": "",
           "text": "MIT: hosting (`sync.unit()`) is in the same package",
-          "source": "src/hosting.js; LICENSE"
+          "source": "src/sync/hosting.js; LICENSE"
         },
         "price": {
           "mark": "—",
@@ -1526,12 +1526,12 @@
         "collectionLimit": {
           "mark": "✅",
           "text": "none",
-          "source": "src/schema.js (no cap); scratch check: open() with 40 entities over createMemoryFsi()"
+          "source": "src/schema/define.js (no cap); scratch check: open() with 40 entities over memory()"
         },
         "phoneHome": {
           "mark": "",
           "text": "none: no network code beyond the injected transport",
-          "source": "src/ (no fetch, iframe or beacon); src/wrpc.js"
+          "source": "src/ (no fetch, iframe or beacon); src/wrpc/wrpc.js"
         },
         "deps": {
           "mark": "✅",
@@ -1546,29 +1546,28 @@
         },
         "entryPoints": {
           "mark": "",
-          "text": "root plus 7 subpaths: `/wrpc`, `/idb`, `/search`, `/order`, `/undo`, `/branch`, `/contracts`",
-          "source": "package.json:14-40"
+          "text": "the core plus 26 subpaths: `/text`, `/tree`, `/signing`, `/chain`, `/encryption`, `/sync`, `/schema`, `/query`, `/versions`, `/telemetry`, `/memory`, `/layered`, `/idb`, `/wrpc`, `/search`, `/order`, `/undo`, `/branch`, `/presence`, `/inspect`, `/editor`, `/store`, `/prosemirror`, `/codemirror`, `/contracts`, `/all`",
+          "source": "package.json (exports); docs/guide/entry-points.md"
         },
         "types": {
-          "mark": "⚠️",
-          "text": "hand-written `.d.ts`, tsd-tested; collection names typed, record data `unknown`",
-          "source": "index.d.ts:827-831, 1185-1188, 1341-1354; tests/*.test-d.ts"
+          "mark": "✅",
+          "text": "hand-written `.d.ts`, tsd-tested; a collection's records typed from its Standard Schema or `Schema<Shapes>`",
+          "source": "index.d.ts (Collections, SyncomCollection<R, I>); docs/guide/typescript.md"
         },
         "size": {
           "mark": "",
-          "text": "66.0 KB min+gzip: the browser entry, the whole engine",
-          "source": "pnpm size (scripts/size.js, esbuild), browser.js",
-          "detail": "Measured by `pnpm size` on 2026-10-24 (features/enhance-crdt-engine, after the docs audit's fixes). CommonJS is not tree-shaken, so storage, schema, queries, the op log, signing, the sync protocol and the list, text and tree engines all come with `open()`. No validator library is included in either column (injected / wrapped separately)."
+          "text": "43.5 KB min+gzip the core (browser); 97.4 KB `@alexify/syncom/all`, everything",
+          "source": "scripts/size.js; pnpm size"
         },
         "sizeSync": {
           "mark": "",
-          "text": "66.6 KB min+gzip with the wrpc link adapter",
-          "source": "bench/results/size.json (pnpm bench:size)"
+          "text": "53.6 KB min+gzip: the core, the sync plugin and the wrpc link adapter",
+          "source": "bench/compare/size.js; bench/results/size.json"
         },
         "sizeGate": {
           "mark": "✅",
-          "text": "`pnpm size` fails CI when the browser entry passes 66 KB",
-          "source": "scripts/size.js:86; .github/workflows/ci.yml:20-24"
+          "text": "`pnpm size` fails CI when any entry passes its budget (the core 52 KB, `/all` 98 KB, each subpath its own)",
+          "source": "scripts/size.js"
         },
         "node": {
           "mark": "✅",
@@ -1588,12 +1587,12 @@
         "browser": {
           "mark": "✅",
           "text": "OPFS (default), IndexedDB (`/idb`), memory",
-          "source": "src/fsi.browser.js; src/idb.js; src/backend.js:40; docs/guide/browser.md"
+          "source": "src/fsi.browser.js; src/idb/idb.js; src/backend.js:40; docs/guide/browser.md"
         },
         "browserReq": {
           "mark": "",
           "text": "secure context, OPFS, Web Crypto with Ed25519 and RSA-OAEP",
-          "source": "src/crypto.browser.js:12-14; src/fsi.browser.js:10, 50; docs/guide/browser.md#requirements",
+          "source": "src/signing/ed25519.browser.js; src/encryption/rsa.browser.js; src/fsi.browser.js:10, 50; docs/guide/browser.md#requirements",
           "detail": "docs/guide/browser.md names OPFS and Web Crypto but not Ed25519 specifically; which browser versions expose Ed25519 in Web Crypto was not checked here. OPFS writes use `createWritable()`."
         },
         "worker": {
@@ -1659,14 +1658,14 @@
         },
         "memoryBackend": {
           "mark": "✅",
-          "text": "`createMemoryFsi()`: a `Map` of files; Node and browser",
+          "text": "`memory()`: a `Map` of files; Node and browser",
           "source": "src/backend.js:35-82; docs/guide/backends.md#the-four-that-ship",
           "detail": "Files are kept as JSON strings, so reads still parse; two storages over one memory fsi with different paths form a mesh in one process (how the sync-engine suite runs)."
         },
         "indexeddb": {
           "mark": "✅",
           "text": "`@alexify/syncom/idb` `createIdbFsi()`: each file a row keyed `[dir, name]`",
-          "source": "src/idb.js:8-37; docs/guide/browser.md#opfs-or-indexeddb",
+          "source": "src/idb/idb.js; docs/guide/browser.md#opfs-or-indexeddb",
           "detail": "One IndexedDB transaction per file write, resolved on `complete`; `durable: true` is a no-op there."
         },
         "opfs": {
@@ -1721,14 +1720,14 @@
           "source": "package.json; LICENSE"
         },
         "storageWrappers": {
-          "mark": "⚠️",
-          "text": "an `fsi` can wrap an `fsi` (bytes only); document transforms are hooks",
-          "source": "src/backend.js:84-105 (withSync); docs/guide/hooks.md"
+          "mark": "✅",
+          "text": "an `fsi` wraps an `fsi`: `atRest()` (AES-256-GCM), `layered()` (memory over disk), `durable` (fsync); document transforms are hooks",
+          "source": "src/encryption/encryption.js (atRest); src/layered/layered.js; src/backend.js (withSync); docs/guide/backends.md"
         },
         "remoteStorage": {
           "mark": "❌",
           "text": "none; a peer replicates a copy instead",
-          "source": "src/sync.js; docs/guide/sync.md"
+          "source": "src/sync/manager.js; docs/guide/sync.md"
         },
         "sharding": {
           "mark": "❌",
@@ -1736,9 +1735,9 @@
           "source": "src/"
         },
         "memoryMapped": {
-          "mark": "❌",
-          "text": "none; `cache.max` entries and the catalog stay in memory",
-          "source": "docs/guide/storage.md#the-catalog-and-the-cache"
+          "mark": "✅",
+          "text": "`layered([memory(), fsi], { write: 'through' | 'back' })`: memory read first, the disk under it",
+          "source": "src/layered/layered.js; docs/guide/backends.md"
         },
         "openCost": {
           "mark": "",
@@ -1786,10 +1785,8 @@
         },
         "writeFootprint": {
           "mark": "",
-          "text": "three per local write: log batch, chain block, record (two with `chain: false`)",
-          "note": "The chain is never compacted: one block file per local write and per applied batch, kept for good.",
-          "source": "docs/guide/chain.md#through-storage; docs/guide/architecture.md#a-local-write",
-          "detail": "Measured: a record holding 45 bytes of data is a 509-byte file, its per-field clocks each carrying the 43-character node id."
+          "text": "one log line per group of appends (a journal, where the backend appends; a file per group where it does not); the record file and its chain block once per deferred window (16 ms)",
+          "source": "src/log.js (group commit, the journal); src/storage.js (#deferWrite); docs/guide/backends.md"
         },
         "compression": {
           "mark": "❌",
@@ -1832,7 +1829,7 @@
           "mark": "❌",
           "text": "no API; the Node directory is plain JSON, copy it closed",
           "note": "Restoring an older copy of a node's directory is caught at the next hello (`REWOUND`): the node moves past the seqs its host holds and bootstraps the lost state back; writes made between the restore and that hello are lost to the host.",
-          "source": "docs/guide/sync.md#the-log; src/sync.js (#rewound, #rewind); tests/sync.retention.test.js"
+          "source": "docs/guide/sync.md#the-log; src/sync/manager.js (#rewound, #rewind); tests/sync.retention.test.js"
         },
         "jsonDump": {
           "mark": "⚠️",
@@ -1849,7 +1846,7 @@
         "schemaless": {
           "mark": "✅",
           "text": "no schema needed; `{}` is a bare collection",
-          "source": "docs/guide/storage.md#collections; src/schema.js:331"
+          "source": "docs/guide/storage.md#collections; src/schema/define.js"
         },
         "collectionNames": {
           "mark": "✅",
@@ -1865,13 +1862,13 @@
         "primaryKey": {
           "mark": "✅",
           "text": "the record id, outside the data; the validator sees it under `idField`",
-          "source": "src/schema.js:386-404; docs/guide/storage.md#validation",
+          "source": "src/schema/define.js; docs/guide/storage.md#validation",
           "detail": "An `id` passed inside the data is not the record id: with a validator it is dropped from what is written, without one it is stored as a plain field (checked by running). Choose the id with `set(id, data)`."
         },
         "compositeKey": {
           "mark": "❌",
           "text": "none; a composite `unique` key instead",
-          "source": "src/schema.js (explicitUnique); docs/guide/query.md#unique-keys"
+          "source": "src/schema/define.js (explicitUnique); docs/guide/query.md#unique-keys"
         },
         "idGeneration": {
           "mark": "✅",
@@ -1891,13 +1888,13 @@
         "schemaFormat": {
           "mark": "✅",
           "text": "none of its own: a Standard Schema, a function, or `validator.compile()`",
-          "source": "src/schema.js:89-125; docs/guide/schema.md#other-validators",
+          "source": "src/schema/define.js; docs/guide/schema.md#other-validators",
           "detail": "metaschema is the first-class fit (indexes, unique keys and the id field read off it); zod, valibot, arktype through `~standard`; JSON Schema or TypeBox through an injected Ajv."
         },
         "validators": {
           "mark": "✅",
           "text": "whatever you inject: metaschema, zod, valibot, arktype, ajv, TypeBox; none bundled",
-          "source": "src/schema.js:1-14,89-125; docs/guide/schema.md"
+          "source": "src/schema/define.js; docs/guide/schema.md"
         },
         "validationDefault": {
           "mark": "✅",
@@ -1908,7 +1905,7 @@
         "validatorOutput": {
           "mark": "✅",
           "text": "its value is written: defaults, aliases, stripped keys, decoders",
-          "source": "src/commit.js:153-202; src/schema.js:393-404; docs/guide/schema.md#how-a-write-is-validated"
+          "source": "src/commit.js:153-202; src/schema/define.js; docs/guide/schema.md#how-a-write-is-validated"
         },
         "checkOnly": {
           "mark": "✅",
@@ -1916,9 +1913,9 @@
           "source": "src/storage.js:661-669; docs/guide/schema.md#the-reference"
         },
         "tsInference": {
-          "mark": "❌",
-          "text": "records are `unknown`; only collection names are typed",
-          "source": "index.d.ts:827-831,1185-1188,1341-1355"
+          "mark": "✅",
+          "text": "from the entity's Standard Schema (`~standard.types`: zod, valibot, arktype), or a `Schema<{ Post: Post }>` annotation",
+          "source": "index.d.ts (SchemaOutput, SchemaInput, Shapes); docs/guide/typescript.md"
         },
         "defaults": {
           "mark": "✅",
@@ -1931,10 +1928,9 @@
           "source": "docs/guide/storage.md#validation"
         },
         "nested": {
-          "mark": "⚠️",
-          "text": "stored and validated; merged as one top-level register",
-          "note": "Concurrent edits to two keys of one nested object keep only one side, and `update({ 'a.b': 1 })` writes a top-level field named `a.b` (both documented in the Storage and Sync guides).",
-          "source": "src/ops.js:320-345 (applyFields over top-level keys); docs/guide/sync.md#registers-counters-sets-lists-and-text"
+          "mark": "✅",
+          "text": "a nested object is one register; a field by path (`profile/city`) merges on its own, each of any kind",
+          "source": "src/paths.js; src/compose.js; docs/guide/storage.md#paths"
         },
         "schemaVersion": {
           "mark": "✅",
@@ -1944,7 +1940,7 @@
         "migration": {
           "mark": "✅",
           "text": "lens on read (migrations, then the validator); `migrate()` rewrites, idempotent",
-          "source": "src/schema.js:348-378; src/storage.js:453-505; docs/guide/schema.md#rewriting-migrate",
+          "source": "src/schema/define.js; src/storage.js:453-505; docs/guide/schema.md#rewriting-migrate",
           "detail": "`migrate()` re-adds counters and sets after the whole-record write (checked by running: `{ migrated: 1, counters: 1 }`, then `{ migrated: 0 }`)."
         },
         "readOld": {
@@ -1979,10 +1975,9 @@
           "source": "src/storage.js:927-931; src/record.js:131-136"
         },
         "unsetField": {
-          "mark": "❌",
-          "text": "only by a whole-record `set()`; `undefined` in a delta is dropped",
-          "source": "src/commit.js:218; src/shape.js:14",
-          "detail": "Checked by running: `update(id, { a: undefined })` left `a` as it was; `null` stores `null`."
+          "mark": "✅",
+          "text": "`unset(id, fields)`: an `unset` op, a tombstone an older concurrent `set` loses to",
+          "source": "src/storage.js (unset); docs/guide/storage.md"
         },
         "modifyFn": {
           "mark": "❌",
@@ -1997,7 +1992,7 @@
         "byQuery": {
           "mark": "❌",
           "text": "none; `select().fetch()`, then one write per row",
-          "source": "index.d.ts (Cursor); src/query.js"
+          "source": "index.d.ts (Cursor); src/query/cursor.js"
         },
         "cas": {
           "mark": "✅",
@@ -2011,9 +2006,9 @@
           "source": "src/storage.js:738-762; src/commit.js:209-245"
         },
         "transactions": {
-          "mark": "❌",
-          "text": "none; every write is one op on one record",
-          "source": "docs/guide/sync.md#operations"
+          "mark": "✅",
+          "text": "`transact(fn)`: several writes over several records, one log append, all or none",
+          "source": "src/commit.js (transact); docs/guide/storage.md#transactions"
         },
         "changeAndDelete": {
           "mark": "❌",
@@ -2034,12 +2029,12 @@
         "lists": {
           "mark": "✅",
           "text": "list fields: `splice()`, `setAt()`, `move()` (Fugue; a concurrent move lands once)",
-          "source": "src/sequence.js; src/ops.js; docs/guide/lists.md"
+          "source": "src/text/sequence.js; src/ops.js; docs/guide/lists.md"
         },
         "text": {
           "mark": "✅",
           "text": "text fields: `splice()`/`updateText()` merge by position (Fugue); marks, cursors",
-          "source": "src/sequence.js; src/ops.js; docs/guide/lists.md"
+          "source": "src/text/sequence.js; src/ops.js; docs/guide/lists.md"
         },
         "crdtModel": {
           "mark": "✅",
@@ -2124,125 +2119,125 @@
         "pipeline": {
           "mark": "❌",
           "text": "none; `afterWrite`, `change` and `watch()` are not checkpointed",
-          "source": "docs/guide/hooks.md; src/query.js"
+          "source": "docs/guide/hooks.md; src/query/cursor.js"
         },
         "contracts": {
           "mark": "⚠️",
           "text": "`@alexify/syncom/contracts`: arrow functions stored in the chain, run by `new Function`",
           "note": "Load contracts only from a chain you control; the parser takes a single arrow function, and the result is written with `saveData()`.",
-          "source": "src/contract.js; docs/guide/contracts.md"
+          "source": "src/contracts/contracts.js; docs/guide/contracts.md"
         },
         "queryLanguage": {
           "mark": "✅",
           "text": "Mango-shaped selector: `collection.select(query)`, then cursor builders",
-          "source": "src/query.js:106-133; docs/guide/query.md#the-query"
+          "source": "src/query/cursor.js; docs/guide/query.md#the-query"
         },
         "queryBuilder": {
           "mark": "⚠️",
           "text": "cursor chains `order()`, `desc()`, `limit()`, `offset()`, `filter()`, `projection()`; the predicate is JSON only",
-          "source": "src/query.js:231-269; index.d.ts:1296-1311"
+          "source": "src/query/cursor.js; index.d.ts:1296-1311"
         },
         "opComparison": {
           "mark": "✅",
           "text": "all six; `$gt`…`$lte` hold only within one kind (number, string, boolean)",
-          "source": "src/query.js:43-54,77-83",
+          "source": "src/query/cursor.js",
           "detail": "`{ priority: { $gt: '2' } }` over numbers matches nothing (verified). On an array field, any element may match."
         },
         "opSet": {
           "mark": "⚠️",
           "text": "`$in`, `$nin`; no `$all` (an `$and` of equalities instead)",
-          "source": "src/query.js:79-82,91",
+          "source": "src/query/cursor.js",
           "detail": "`{ tags: { $all: [...] } }` is `TypeError: select(): unknown operator $all` (verified)."
         },
         "opExistence": {
           "mark": "⚠️",
           "text": "`$exists` only (`null` counts as present); no `$type`",
-          "source": "src/query.js:84-86; docs/guide/query.md#the-query"
+          "source": "src/query/cursor.js; docs/guide/query.md#the-query"
         },
         "opArray": {
           "mark": "⚠️",
           "text": "a scalar matches any element; no `$elemMatch`, no `$size` (`filter()` instead)",
-          "source": "src/query.js:37-41,91; docs/guide/query.md#the-query"
+          "source": "src/query/cursor.js; docs/guide/query.md#the-query"
         },
         "opRegex": {
           "mark": "✅",
           "text": "`RegExp` or source string, `$options` flags; 1000 characters at most; `g`/`y` dropped",
-          "source": "src/query.js:56-68,87-90"
+          "source": "src/query/cursor.js"
         },
         "opLogical": {
           "mark": "✅",
           "text": "`$and`, `$or`, and `$not` over a whole query; no `$nor`, no field-level `$not`",
-          "source": "src/query.js:118-124",
+          "source": "src/query/cursor.js",
           "detail": "`$nor: [a, b]` is written `$not: { $or: [a, b] }`; `{ f: { $not: { $gt: 5 } } }` is `$not: { f: { $gt: 5 } }`. A field-level `$not` is `unknown operator` (verified)."
         },
         "opMod": {
           "mark": "❌",
           "text": "not supported (`filter()` instead)",
-          "source": "src/query.js:91"
+          "source": "src/query/cursor.js"
         },
         "jsPredicate": {
           "mark": "✅",
           "text": "`filter(fn)` over the loaded row, applied before `limit()`",
-          "source": "src/query.js:255-260,298-300"
+          "source": "src/query/cursor.js"
         },
         "dottedPaths": {
           "mark": "✅",
           "text": "in queries, `order()`, `projection()`, `index` and `search`; `items.0.n` reaches into arrays",
-          "source": "src/catalog.js:29-40; src/query.js:146-152,328-333"
+          "source": "src/catalog.js:29-40; src/query/cursor.js"
         },
         "queryValidation": {
           "mark": "✅",
           "text": "unknown operator or bad argument: `TypeError` at `select()`; field names are not checked",
-          "source": "src/query.js:70-133; docs/guide/query.md#the-query",
+          "source": "src/query/cursor.js; docs/guide/query.md#the-query",
           "detail": "A misspelled field matches nothing, silently (verified)."
         },
         "typedQueries": {
-          "mark": "⚠️",
-          "text": "`MangoQuery` is untyped; rows are `QueryRow` (`Record<string, unknown>`)",
-          "source": "index.d.ts:1284-1311; index.d.ts:827-831"
+          "mark": "✅",
+          "text": "`MangoQuery<R>` names the record's fields, `id` or a dotted path; rows are `QueryRow<R>`",
+          "source": "index.d.ts (MangoQuery, QueryRow); docs/guide/typescript.md"
         },
         "immutableQueries": {
           "mark": "❌",
           "text": "builders change the cursor in place (`one()` leaves it as it was)",
-          "source": "src/query.js:231-253,349-352"
+          "source": "src/query/cursor.js"
         },
         "docMatch": {
           "mark": "❌",
           "text": "the compiled predicate is internal (`compileQuery` is not exported)",
-          "source": "src/query.js:398; src/index.js"
+          "source": "src/query/cursor.js; src/index.js"
         },
         "sort": {
           "mark": "✅",
           "text": "`order()`/`desc()`: several keys, any field, dotted; stable",
-          "source": "src/query.js:17-35,146-152; docs/guide/query.md#the-cursor",
+          "source": "src/query/cursor.js; docs/guide/query.md#the-cursor",
           "detail": "Order: absent/null, booleans, numbers, strings; arrays and objects keep their place. With no `order()`, rows come in id order, or `$text` rank."
         },
         "sortIndex": {
           "mark": "❌",
           "text": "no sorted index: every candidate is read, then ordered",
-          "source": "src/query.js:291-326; docs/guide/query.md#the-plan",
+          "source": "src/query/cursor.js; docs/guide/query.md#the-plan",
           "detail": "Except a covered cursor (order and projection on indexed fields), ordered from the catalog with no record read. Verified: `order('a').limit(2)` read 40 of 40 records; with `projection(['a'])`, 0."
         },
         "topK": {
           "mark": "✅",
           "text": "`TopK` keeps the best `offset + limit` rows as candidates stream by",
-          "source": "src/query.js:172-203,297"
+          "source": "src/query/cursor.js"
         },
         "skipLimit": {
           "mark": "✅",
           "text": "`offset(n)`, `limit(n)`; an unordered cursor stops reading at enough matches",
-          "source": "src/query.js:245-253,294-296,319-322",
+          "source": "src/query/cursor.js",
           "detail": "Verified: an unordered `limit(2)` over 50 records read 2."
         },
         "streaming": {
           "mark": "❌",
           "text": "`for await` yields an already fetched array; keyset paging by hand",
-          "source": "src/query.js:393-395"
+          "source": "src/query/cursor.js"
         },
         "count": {
           "mark": "✅",
           "text": "`count(query)` for any query; from the catalog alone when every field is indexed",
-          "source": "src/query.js:345-347; src/record.js:189-191",
+          "source": "src/query/cursor.js; src/record.js:189-191",
           "detail": "Verified: an indexed range count read 0 records; any other count reads the candidates. `limit`/`offset` are ignored."
         },
         "findById": {
@@ -2259,17 +2254,17 @@
         "findOne": {
           "mark": "✅",
           "text": "`cursor.one()` → the row or `null`",
-          "source": "src/query.js:349-352"
+          "source": "src/query/cursor.js"
         },
         "projection": {
           "mark": "✅",
           "text": "`projection(fields)`; answered from the catalog when they are indexed",
-          "source": "src/query.js:262-282,328-333"
+          "source": "src/query/cursor.js"
         },
         "resultObjects": {
           "mark": "",
           "text": "plain JSON copies `{ id, ...data }`, the lens applied; new objects per `fetch()`",
-          "source": "src/query.js:335-343; docs/guide/query.md#the-cursor",
+          "source": "src/query/cursor.js; docs/guide/query.md#the-cursor",
           "detail": "A cursor does not run `beforeRead`/`afterRead`; `get(id)` does."
         },
         "aggregation": {
@@ -2285,7 +2280,7 @@
         "encryptedFields": {
           "mark": "❌",
           "text": "an `{ encrypted: true }` record is listed, never a query row",
-          "source": "src/catalog.js:10-13; src/query.js:305; docs/guide/query.md#the-cursor"
+          "source": "src/catalog.js:10-13; src/query/cursor.js; docs/guide/query.md#the-cursor"
         },
         "secondaryIndexes": {
           "mark": "✅",
@@ -2339,12 +2334,12 @@
         "coveredQueries": {
           "mark": "✅",
           "text": "query, order and projection all indexed: answered from the catalog, no record read",
-          "source": "src/query.js:271-282,301-309"
+          "source": "src/query/cursor.js"
         },
         "explain": {
           "mark": "❌",
           "text": "no explain API; the plan is private to the cursor",
-          "source": "src/query.js:273-282"
+          "source": "src/query/cursor.js"
         },
         "queryOptimizer": {
           "mark": "❌",
@@ -2354,7 +2349,7 @@
         "queryCache": {
           "mark": "❌",
           "text": "none; each `fetch()` re-runs, records come from the bounded entry cache",
-          "source": "src/query.js:338-343; docs/guide/storage.md#the-catalog-and-the-cache"
+          "source": "src/query/cursor.js; docs/guide/storage.md#the-catalog-and-the-cache"
         },
         "unique": {
           "mark": "✅",
@@ -2365,7 +2360,7 @@
         "fulltext": {
           "mark": "✅",
           "text": "`$text` with `createSearch()` (`@alexify/syncom/search`): trigram TF-IDF, typo-tolerant",
-          "source": "src/search.js; docs/guide/query.md#full-text-search; tests/suites/search.js",
+          "source": "src/search/search.js; docs/guide/query.md#full-text-search; tests/suites/search.js",
           "detail": "Diacritics and case folded; ranked best first; postings in memory, rebuilt at open from the text kept in catalog.json; no phrases or boolean text operators; a custom `TextIndex` can replace it."
         },
         "fulltextInQuery": {
@@ -2376,29 +2371,29 @@
         "vector": {
           "mark": "❌",
           "text": "none",
-          "source": "src/query.js"
+          "source": "src/query/cursor.js"
         },
         "liveQueries": {
           "mark": "✅",
           "text": "`cursor.watch(listener)`: runs now, then after every change to the collection",
-          "source": "src/query.js:354-391; docs/guide/query.md#watch",
+          "source": "src/query/cursor.js; docs/guide/query.md#watch",
           "detail": "Changes that land while a run is in flight coalesce into one more run; a peer's batch is one run. No time-based throttle."
         },
         "liveIncremental": {
           "mark": "❌",
           "text": "every wake re-runs the whole cursor",
-          "source": "src/query.js:359-391"
+          "source": "src/query/cursor.js"
         },
         "liveDistinct": {
           "mark": "❌",
           "text": "the listener runs after any change to the collection, same rows or not",
-          "source": "src/query.js:365-372",
+          "source": "src/query/cursor.js",
           "detail": "Verified: updating a record outside the result called the listener with the same rows."
         },
         "liveCount": {
           "mark": "❌",
           "text": "no; `watch()` hands rows (`rows.length`)",
-          "source": "src/query.js:345-391"
+          "source": "src/query/cursor.js"
         },
         "collectionStream": {
           "mark": "⚠️",
@@ -2412,9 +2407,9 @@
           "source": "src/record.js:99-120; index.d.ts:1139-1142"
         },
         "reactivityPrimitive": {
-          "mark": "⚠️",
-          "text": "callbacks and events; no observable or signal adapter",
-          "source": "src/query.js:359; src/emitter.js"
+          "mark": "✅",
+          "text": "a store (`/store`): `subscribe` with Svelte's contract, `getSnapshot` stable for React",
+          "source": "src/store/store.js"
         },
         "liveRemote": {
           "mark": "✅",
@@ -2429,53 +2424,53 @@
         "wire": {
           "mark": "",
           "text": "ops as positional `packOps` arrays, signed; a `set` carries only its delta",
-          "source": "src/ops.js (packOps); src/hosting.js:205-236; docs/guide/sync.md#operations",
+          "source": "src/ops.js (packOps); src/sync/hosting.js; docs/guide/sync.md#operations",
           "detail": "About 190 bytes of signature fields per op (docs/guide/sync.md#signatures). A bootstrap snapshot is the exception: whole records with their merge metadata."
         },
         "replHistory": {
           "mark": "✅",
           "text": "every retained op travels, intermediate writes included",
-          "source": "src/sync.js:503-517; src/log.js:558-586",
+          "source": "src/sync/manager.js; src/log.js:558-586",
           "detail": "Past `retention.ops` (default 10 000) the oldest sealed segments go; a peer the log no longer covers bootstraps from a snapshot."
         },
         "protocolVersion": {
           "mark": "✅",
           "text": "`PROTOCOL` 1 in `hello`; another version is refused with 400",
-          "source": "src/protocol.js:8; src/hosting.js:167-169",
-          "detail": "The 17 `packOps` slots are appended, never reordered; a reader of fewer slots ignores the rest (CLAUDE.md)."
+          "source": "src/sync/protocol.js; src/sync/hosting.js (hello)",
+          "detail": "The 19 `packOps` slots are appended, never reordered; a reader of fewer slots ignores the rest (src/CLAUDE.md)."
         },
         "schemaHandshake": {
           "mark": "✅",
           "text": "`hello` swaps `{ version, hash }`; same version, other hash emits `schema` drift",
-          "source": "src/sync.js:380-397; src/hosting.js:183-201; docs/guide/sync.md#schemas",
+          "source": "src/sync/manager.js; src/sync/hosting.js; docs/guide/sync.md#schemas",
           "detail": "A different version is not refused: every op carries `v`, older records are lensed, newer ops applied or held (`ahead`)."
         },
         "foreignBackend": {
           "mark": "❌",
           "text": "none: the far end must be a syncom node hosting `unit()`",
-          "source": "docs/guide/sync.md#protocol; src/hosting.js:304-342"
+          "source": "docs/guide/sync.md#protocol; src/sync/hosting.js"
         },
         "customTransport": {
           "mark": "✅",
           "text": "`SyncLink`: `call`, `subscribe` with `lastEventId`, `on`/`off`, `close`; optional `stream`",
-          "source": "src/link.js:7-13; docs/guide/sync.md#the-link-contract; tests/utils/memory-link.js",
+          "source": "src/sync/link.js:7-13; docs/guide/sync.md#the-link-contract; tests/utils/memory-link.js",
           "detail": "The link only carries the four procedures; the far end still runs syncom."
         },
         "roundTrips": {
           "mark": "",
           "text": "`hello`, then one `push` per 500 ops, then one `changes` subscription",
-          "source": "src/sync.js:409-447, 552-569, 571-608",
+          "source": "src/sync/manager.js 552-569, 571-608",
           "detail": "Live, ops landing in one tick go as one push and the host streams pages on the subscription. A bootstrap adds one `snapshot` call per 500 records."
         },
         "collectionsPerLink": {
           "mark": "✅",
           "text": "one link carries every collection of the storage, filtered by scope",
-          "source": "src/sync.js:503-517; src/hosting.js:251-296"
+          "source": "src/sync/manager.js; src/sync/hosting.js"
         },
         "replMeta": {
           "mark": "",
           "text": "a cursor per peer, the version vector, the op log within retention",
-          "source": "src/sync.js:54-57, 150-158; src/log.js:15-17; docs/guide/sync.md#the-registry"
+          "source": "src/sync/manager.js 150-158; src/log.js:15-17; docs/guide/sync.md#the-registry"
         },
         "topology": {
           "mark": "",
@@ -2485,12 +2480,12 @@
         "multiMaster": {
           "mark": "✅",
           "text": "any node hosts `unit()`; peers dial each other directly",
-          "source": "src/hosting.js; docs/guide/webrtc.md#a-mesh-of-a-room"
+          "source": "src/sync/hosting.js; docs/guide/webrtc.md#a-mesh-of-a-room"
         },
         "relay": {
           "mark": "✅",
           "text": "ops relayed hop by hop; the version vector drops what a node has",
-          "source": "src/sync.js:785-807; tests/suites/sync-engine.js:52-90",
+          "source": "src/sync/manager.js; tests/suites/sync-engine.js:52-90",
           "detail": "An op reaches a node at most once per link (docs/guide/sync.md#protocol)."
         },
         "browserHosts": {
@@ -2528,59 +2523,59 @@
         "websocket": {
           "mark": "✅",
           "text": "a wrpc `WrpcClient` through `createWrpcLink` (`@alexify/syncom/wrpc`)",
-          "source": "src/wrpc.js:49-90; tests/wrpc.integration.test.js:59-160"
+          "source": "src/wrpc/wrpc.js; tests/wrpc.integration.test.js:59-160"
         },
         "http": {
           "mark": "⚠️",
           "text": "no request–response sync; wrpc's SSE transport untested in the repo",
-          "source": "src/wrpc.js; scratchpad/replication/verify/syncom-over-sse.js",
+          "source": "src/wrpc/wrpc.js; scratchpad/replication/verify/syncom-over-sse.js",
           "note": "In a one-off check over wrpc 2.0.1, `transport: 'sse'` synced both ways with a live update; plain `http` cannot (the subscription is refused, then every call answers 428)."
         },
         "graphql": {
           "mark": "❌",
           "text": "none",
-          "source": "docs/guide/sync.md#protocol; src/hosting.js:304-342"
+          "source": "docs/guide/sync.md#protocol; src/sync/hosting.js"
         },
         "couchdb": {
           "mark": "❌",
           "text": "none",
-          "source": "docs/guide/sync.md#protocol; src/hosting.js:304-342"
+          "source": "docs/guide/sync.md#protocol; src/sync/hosting.js"
         },
         "firestore": {
           "mark": "❌",
           "text": "none",
-          "source": "docs/guide/sync.md#protocol; src/hosting.js:304-342"
+          "source": "docs/guide/sync.md#protocol; src/sync/hosting.js"
         },
         "supabase": {
           "mark": "❌",
           "text": "none",
-          "source": "docs/guide/sync.md#protocol; src/hosting.js:304-342"
+          "source": "docs/guide/sync.md#protocol; src/sync/hosting.js"
         },
         "appwrite": {
           "mark": "❌",
           "text": "none",
-          "source": "docs/guide/sync.md#protocol; src/hosting.js:304-342"
+          "source": "docs/guide/sync.md#protocol; src/sync/hosting.js"
         },
         "mongodb": {
           "mark": "❌",
           "text": "none",
-          "source": "docs/guide/sync.md#protocol; src/hosting.js:304-342"
+          "source": "docs/guide/sync.md#protocol; src/sync/hosting.js"
         },
         "nats": {
           "mark": "❌",
           "text": "none",
-          "source": "docs/guide/sync.md#protocol; src/hosting.js:304-342",
+          "source": "docs/guide/sync.md#protocol; src/sync/hosting.js",
           "detail": "wrpc has a NATS broker transport; syncom does not use it (the shared-log hub mode is reserved)."
         },
         "gdrive": {
           "mark": "❌",
           "text": "none",
-          "source": "docs/guide/sync.md#protocol; src/hosting.js:304-342"
+          "source": "docs/guide/sync.md#protocol; src/sync/hosting.js"
         },
         "onedrive": {
           "mark": "❌",
           "text": "none",
-          "source": "docs/guide/sync.md#protocol; src/hosting.js:304-342"
+          "source": "docs/guide/sync.md#protocol; src/sync/hosting.js"
         },
         "conflictDetect": {
           "mark": "—",
@@ -2627,27 +2622,27 @@
         "live": {
           "mark": "✅",
           "text": "built in: the host's `changes` subscription pushes ops as they land",
-          "source": "src/hosting.js:251-296; src/sync.js:571-608"
+          "source": "src/sync/hosting.js; src/sync/manager.js"
         },
         "resume": {
           "mark": "✅",
           "text": "the link resumes the subscription from its last event id; push by vector",
-          "source": "src/wrpc.js:63-78; src/sync.js:333-347; docs/guide/sync.md#protocol"
+          "source": "src/wrpc/wrpc.js; src/sync/manager.js; docs/guide/sync.md#protocol"
         },
         "restart": {
           "mark": "✅",
           "text": "cursor, remote identity and vector are on disk; no bootstrap",
-          "source": "src/sync.js:108-130; tests/suites/sync-engine.js:370-397"
+          "source": "src/sync/manager.js; tests/suites/sync-engine.js:370-397"
         },
         "reconnect": {
           "mark": "✅",
           "text": "the link's: wrpc reconnects with backoff and a heartbeat; syncom greets again",
-          "source": "docs/guide/wrpc.md#dialing-a-node; src/sync.js:341-347"
+          "source": "docs/guide/wrpc.md#dialing-a-node; src/sync/manager.js"
         },
         "retry": {
           "mark": "✅",
           "text": "a failed push leaves the peer `behind`, caught up later; backoff 1 s to 60 s",
-          "source": "src/sync.js:465-493; tests/sync.recovery.test.js",
+          "source": "src/sync/manager.js; tests/sync.recovery.test.js",
           "detail": "A page that fails to apply is retried from the saved cursor; three failures in a row leave the peer `stuck` (src/sync.js:616-634)."
         },
         "dup": {
@@ -2659,43 +2654,43 @@
         "offline": {
           "mark": "✅",
           "text": "own ops kept until the registered nodes hold them; pushed when a peer is back",
-          "source": "src/sync.js (#undelivered, #lost); src/log.js (retain); tests/sync.retention.test.js",
+          "source": "src/sync/manager.js (#undelivered, #lost); src/log.js (retain); tests/sync.retention.test.js",
           "note": "Ops written before any node was registered, and compacted since, cannot reach a host; it is reported once per hello (`UNDELIVERABLE`).",
           "detail": "scratchpad/replication/verify/syncom-offline-retention.js: retention 50, 300 offline inserts → the host holds 0 records, and a later write does not land either; the dialer reports no error."
         },
         "bootstrap": {
           "mark": "✅",
           "text": "replays the host's log, or past its retention a streamed snapshot",
-          "source": "src/sync.js:686-756; src/bootstrap.js:37-61; docs/guide/sync.md#bootstrap",
+          "source": "src/sync/manager.js; src/bootstrap.js:37-61; docs/guide/sync.md#bootstrap",
           "detail": "Snapshot records carry their merge metadata, arrive as NDJSON over a wrpc binary stream, and join as `merge` ops, so a bootstrap is transitive."
         },
         "longOffline": {
           "mark": "✅",
           "text": "a snapshot of its scopes once the host's log no longer covers it",
-          "source": "src/log.js:558-575; src/hosting.js:264-268; docs/guide/sync.md#the-log"
+          "source": "src/log.js:558-575; src/sync/hosting.js; docs/guide/sync.md#the-log"
         },
         "batch": {
           "mark": "",
           "text": "`pageSize` 500 ops per push and per page; 500 records per snapshot page",
-          "source": "src/protocol.js:9; src/hosting.js:22, 304-312; docs/guide/sync.md#options",
+          "source": "src/sync/protocol.js:9; src/sync/hosting.js 304-312; docs/guide/sync.md#options",
           "detail": "`pageBytes` (4 MiB): a snapshot page above it is sent inline rather than streamed."
         },
         "flow": {
           "mark": "✅",
           "text": "per-peer outbox capped (`maxOutbox` 10 000); pages applied one at a time",
-          "source": "src/sync.js:39-41, 581-585, 785-807",
+          "source": "src/sync/manager.js 581-585, 785-807",
           "detail": "Beyond the cap the backlog is dropped and the peer recovers from the vector. Snapshot pages stream with wrpc backpressure."
         },
         "partial": {
           "mark": "✅",
           "text": "per-record scopes; the host bounds a peer's reads and writes by the record's scope",
-          "source": "src/commit.js (scopeData); src/apply.js (outOfBounds); src/hosting.js; tests/sync.scopes.test.js",
+          "source": "src/commit.js (scopeData); src/apply.js (outOfBounds); src/sync/hosting.js; tests/sync.scopes.test.js",
           "detail": "src/commit.js:110-115 computes the scope from `payload.data` (the delta of a `set`). scratchpad/replication/verify/syncom-scope-of-set2.js: a peer granted only `Other` receives `{ title: \"secret v2\" }` of a `Doc` record. scratchpad/replication/verify/syncom-scope-write.js: the same peer overwrites the host's `Doc` record. tests/suites/sync-engine.js:327-350 covers inserts only."
         },
         "partialLive": {
           "mark": "✅",
           "text": "one subscription serves the granted scopes; other scopes' ops are skipped",
-          "source": "src/hosting.js:251-296; tests/sync.scopes.test.js:97"
+          "source": "src/sync/hosting.js; tests/sync.scopes.test.js:97"
         },
         "revoke": {
           "mark": "❌",
@@ -2705,7 +2700,7 @@
         "oneWay": {
           "mark": "❌",
           "text": "every link pushes and subscribes; scopes bound both directions alike",
-          "source": "src/sync.js:409-447; src/hosting.js:205-236"
+          "source": "src/sync/manager.js; src/sync/hosting.js"
         },
         "deletes": {
           "mark": "✅",
@@ -2721,23 +2716,23 @@
         "lifecycle": {
           "mark": "✅",
           "text": "`sync.start()`/`stop()` for all peers; `enableNode(url, false)` per peer",
-          "source": "src/sync.js:178-186, 218-235"
+          "source": "src/sync/manager.js 218-235"
         },
         "awaitSync": {
           "mark": "⚠️",
           "text": "`sync(url?)` resolves once pushed; nothing awaits the inbound side",
-          "source": "src/sync.js:237-248; index.d.ts (SyncManager.sync)",
+          "source": "src/sync/manager.js; index.d.ts (SyncManager.sync)",
           "detail": "`storage.sync.toPromise('sync')` resolves on the next push or received page."
         },
         "resync": {
           "mark": "✅",
           "text": "`sync()` pushes what peers lack; `enableNode` off and on greets again",
-          "source": "src/sync.js:178-186, 237-248"
+          "source": "src/sync/manager.js 237-248"
         },
         "status": {
           "mark": "✅",
           "text": "`peers()`: connected, cursor, pending, behind, stuck, lastError; `hosted()`; events",
-          "source": "src/sync.js:257-276; docs/guide/sync.md#lifecycle-and-events",
+          "source": "src/sync/manager.js; docs/guide/sync.md#lifecycle-and-events",
           "detail": "Events `peer`, `sync`, `bootstrap`, `error`, `refused`, `hello`, `node`; storage `change` and `apply`; OpenTelemetry spans and a replication-lag metric."
         },
         "replMultiTab": {
@@ -2749,7 +2744,7 @@
         "serverProduct": {
           "mark": "✅",
           "text": "`sync.unit()`: four procedures for any wrpc router, in the same MIT package",
-          "source": "src/hosting.js:304-342; docs/guide/wrpc.md#hosting-a-node"
+          "source": "src/sync/hosting.js; docs/guide/wrpc.md#hosting-a-node"
         },
         "serverRuntime": {
           "mark": "✅",
@@ -2765,12 +2760,12 @@
         "endpoints": {
           "mark": "",
           "text": "`hello`, `push`, `snapshot`, `changes` (a resumable subscription)",
-          "source": "src/hosting.js:336-341; docs/guide/sync.md#protocol"
+          "source": "src/sync/hosting.js; docs/guide/sync.md#protocol"
         },
         "remoteQuery": {
           "mark": "❌",
           "text": "none: a client replicates its scopes and queries locally",
-          "source": "src/hosting.js"
+          "source": "src/sync/hosting.js"
         },
         "serverStorage": {
           "mark": "",
@@ -2778,33 +2773,31 @@
           "source": "docs/guide/scaling.md#hubs"
         },
         "atRest": {
-          "mark": "⚠️",
-          "text": "per record (`{ encrypted: true }`) or the whole storage; such records never sync",
-          "note": "The RSA key pair that unseals the records sits unprotected in `<path>/keys/`, beside the data: whoever can read the directory can read the records.",
-          "source": "src/commit.js:74-104; src/options.js:116-118; docs/guide/storage.md#encryption-at-rest"
+          "mark": "✅",
+          "text": "`atRest(fsi, { key | password })`: every file AES-256-GCM, and the records sync as ever; per record `encrypted: true` stays local",
+          "source": "src/encryption/encryption.js; docs/guide/backends.md"
         },
         "encScope": {
           "mark": "",
           "text": "the record's whole data; its id, collection and timestamps stay readable",
-          "source": "src/entries.js:135-142; src/crypto.js:34-49",
+          "source": "src/entries.js:135-142; src/encryption/encryption.js (the plugin); src/encryption/rsa.js",
           "detail": "Checked by running: the record file is `{ data: <envelope>, meta: null, encrypted: true, timestamp, block }`; the file name is the id, the catalog row keeps `$type`, the chain block keeps the ciphertext's hash."
         },
         "cipher": {
           "mark": "✅",
           "text": "AES-256-GCM with a fresh key per record, wrapped by RSA-OAEP-256",
-          "source": "src/crypto.js:27-61; src/crypto.browser.js:102-139",
+          "source": "src/encryption/rsa.js; src/encryption/rsa.browser.js",
           "detail": "The same envelope on Node.js and in the browser, so ciphertext and keys move between them; an unknown envelope version is `BAD_ENVELOPE`."
         },
         "keyOffDisk": {
-          "mark": "❌",
-          "text": "the RSA private key is a file in `<path>/keys/`, beside the data",
-          "note": "Mode 0600 where the backend has permissions; in OPFS or IndexedDB a plain entry. No passphrase, KMS or injected key.",
-          "source": "src/keys.js:25-37; src/storage.js:226-227; docs/guide/storage.md#encryption-at-rest"
+          "mark": "⚠️",
+          "text": "the at-rest key or password is the caller's, never written; the RSA pair that seals a record is a file in `keys/`",
+          "source": "src/encryption/encryption.js:12-19, :76-88"
         },
         "keyRotation": {
           "mark": "❌",
           "text": "no rotation API; a replaced key pair cannot open sealed records",
-          "source": "src/keys.js:20-37; docs/guide/storage.md#encryption-at-rest"
+          "source": "src/crypto/keys.js:20-37; docs/guide/storage.md#encryption-at-rest"
         },
         "encAttachments": {
           "mark": "—",
@@ -2832,43 +2825,43 @@
           "mark": "✅",
           "text": "Ed25519 per op: the header plus a salted payload digest",
           "note": "The default `'verify'` takes an unsigned op, so a relay can strip signatures; only `sync.signatures: 'require'` refuses them.",
-          "source": "src/signing.js:71-119; src/apply.js:60-114; docs/guide/sync.md#signatures"
+          "source": "src/signing/sign.js:71-119; src/apply.js:60-114; docs/guide/sync.md#signatures"
         },
         "nodeIdentity": {
           "mark": "✅",
           "text": "the node id is its Ed25519 public key; a swapped key is `IDENTITY_MISMATCH`",
-          "source": "src/storage.js:515-536; src/shape.js:40-45; src/crypto.js:65-78"
+          "source": "src/storage.js:515-536; src/shape.js:40-45; src/signing/ed25519.js"
         },
         "tamper": {
           "mark": "✅",
           "text": "hash-linked chain of what this node applied, unsigned (optional)",
           "note": "Whoever can write the directory can rebuild it: a read checks a record against the block its file names, not that the block is on the chain, so a planted block passes and `validate()` still answers true (checked). The ops in the log are what is signed.",
-          "source": "src/chain.js:45-87; src/storage.js:833-866; src/entries.js:86-89; docs/guide/chain.md",
+          "source": "src/chain/chain.js (the plugin); src/storage.js:833-866; src/entries.js:86-89; docs/guide/chain.md",
           "detail": "Script: change a record's data, write a block `{ prev: '0', data: { id, hash } }` under its own hash, point the record at it: `get()` returns the forged data. `chain: false` keeps no chain."
         },
         "authn": {
           "mark": "✅",
           "text": "`unit({ authorize })` gates `hello`; `access: 'session'` refuses everyone by default",
           "note": "`hello` does not prove the peer holds its key, and the dialer's `token` sits in plain text in `<path>/remote/`.",
-          "source": "src/hosting.js:164-181,304-311; src/sync.js:143-160; docs/guide/wrpc.md#hosting-a-node"
+          "source": "src/sync/hosting.js; src/sync/manager.js; docs/guide/wrpc.md#hosting-a-node"
         },
         "peerValidation": {
           "mark": "⚠️",
           "text": "host `authorize`; dialer `beforeConnect`, `beforeBootstrap`; key possession not proven",
-          "source": "src/hosting.js:173-181; docs/guide/hooks.md#sync-hooks; docs/guide/sync.md#signatures",
+          "source": "src/sync/hosting.js; docs/guide/hooks.md#sync-hooks; docs/guide/sync.md#signatures",
           "detail": "Under `'require'` a host refuses a `hello` whose node id is no key (403 `UNSIGNED`); a peer greeting with someone else's key then fails every push as `forged`."
         },
         "access": {
           "mark": "✅",
           "text": "per-record scopes (`sync.scope`); a peer reads only the scopes `hello` granted",
           "note": "The peer names its scopes, and naming none means everything: `authorize` must check `hello.scopes`.",
-          "source": "src/hosting.js; src/apply.js (outOfBounds); docs/guide/sync.md#scopes"
+          "source": "src/sync/hosting.js; src/apply.js (outOfBounds); docs/guide/sync.md#scopes"
         },
         "writeRules": {
           "mark": "⚠️",
           "text": "ops outside granted scopes refused, by the op's scope and its record's; `beforeApply({ op, peer })` can skip one",
           "note": "A finer rule than scopes lives in `beforeApply`: a skip is local (the op is still logged and relayed), a throw refuses the whole page.",
-          "source": "src/hosting.js; src/apply.js; tests/sync.scopes.test.js"
+          "source": "src/sync/hosting.js; src/apply.js; tests/sync.scopes.test.js"
         },
         "serverValidation": {
           "mark": "✅",
@@ -2880,12 +2873,12 @@
           "mark": "⚠️",
           "text": "out-of-scope (by the op or its record), unsigned and malformed ops stop at the host; one its validator or `beforeApply` skips is relayed",
           "note": "Checked with three nodes: an op the middle node's validator or `beforeApply` skipped still reached the node behind it, because a withheld op would leave a gap in its origin's stream; every node re-checks it. A throwing `beforeApply` refuses the whole page instead, and the sender offers it again later.",
-          "source": "src/apply.js:116-129,253-272; src/hosting.js:215-224; docs/guide/hooks.md#skipping-a-peers-op"
+          "source": "src/apply.js:116-129,253-272; src/sync/hosting.js; docs/guide/hooks.md#skipping-a-peers-op"
         },
         "limits": {
           "mark": "✅",
           "text": "`unit({ limits })`: `opsPerPush`, `bytesPerPush` (413), `opsPerSecond` (429)",
-          "source": "src/hosting.js:36-112; docs/guide/sync.md#hosting"
+          "source": "src/sync/hosting.js; docs/guide/sync.md#hosting"
         },
         "purge": {
           "mark": "✅",
@@ -2903,7 +2896,7 @@
         "history": {
           "mark": "✅",
           "text": "`history(id)`, `get(id, { at })`, `diff`/`restore`, tags of the whole storage",
-          "source": "src/history.js; src/versions.js; src/tags.js; docs/guide/versions.md",
+          "source": "src/versions/history.js; src/versions/api.js; src/versions/tags.js; docs/guide/versions.md",
           "detail": "A version is a fold of the retained log: exact from the last whole-record write above what retention dropped, otherwise `HISTORY_GONE`. `retention.ops` defaults to 10 000; a tag keeps the whole storage as it was, copy-on-write."
         },
         "audit": {
@@ -2915,7 +2908,7 @@
         "proto": {
           "mark": "✅",
           "text": "own keys only; `__proto__` is never a field",
-          "source": "src/ops.js:147-152; src/signing.js:26-29",
+          "source": "src/ops.js:147-152; src/signing/sign.js:26-29",
           "detail": "Checked by running: `insert`, `update` and `applyRemote` with own `__proto__` keys left `Object.prototype` clean; the key is dropped."
         },
         "malformed": {
@@ -2955,20 +2948,18 @@
         "errorEvents": {
           "mark": "✅",
           "text": "`error` with a code per refused peer op; `conflict`; host `refused`, `hello`",
-          "source": "src/apply.js:98-138,159-181; src/hosting.js:149-162; docs/reference/api.md#storage",
+          "source": "src/apply.js:98-138,159-181; src/sync/hosting.js; docs/reference/api.md#storage",
           "detail": "Listeners are never awaited; a throwing one is logged (`listener.error`) and an `error` with no listener is silent."
         },
         "plugins": {
-          "mark": "❌",
-          "text": "none; per-instance injection: `fsi`, `validator`, `search`, `telemetry`, `logger`, `connect`",
-          "source": "src/options.js:47-123; docs/reference/api.md#open-options",
-          "detail": "Subpaths (`/wrpc`, `/contracts`, `/idb`, `/search`) are separate modules, not plugins; nothing is global to the process."
+          "mark": "✅",
+          "text": "`open({ plugins })`, per instance, nothing global: the kinds (`/text`, `/tree`) and the blocks (`/signing`, `/chain`, `/sync`, `/schema`, `/query`, …); a missing one is `PLUGIN_MISSING`",
+          "source": "src/plugin.js (createPlugins); docs/guide/entry-points.md"
         },
         "errors": {
           "mark": "✅",
-          "text": "`SyncomError.code`: 30 codes, plus 3 on `TypeError`s; full messages",
-          "source": "src/errors.js:20-32; index.d.ts:158-188; docs/reference/api.md#syncomerror",
-          "detail": "A host's wire refusal is a plain error with wrpc's numeric code (400–429) and a `reason` constant."
+          "text": "`SyncomError.code`: 44 codes, plus 3 on `TypeError`s; full messages",
+          "source": "index.d.ts (SyncomErrorCode); docs/reference/api.md"
         },
         "logging": {
           "mark": "✅",
@@ -2978,7 +2969,7 @@
         "otel": {
           "mark": "✅",
           "text": "spans and metrics through an injected API; no OpenTelemetry dependency",
-          "source": "src/telemetry.js; docs/guide/telemetry.md"
+          "source": "src/telemetry/writer.js; docs/guide/telemetry.md"
         },
         "stats": {
           "mark": "✅",
@@ -2988,18 +2979,18 @@
         "diagPII": {
           "mark": "✅",
           "text": "no id, origin, scope or key as a metric label; `includeIdentity: false` for spans",
-          "source": "src/telemetry.js:28-31,93-122; docs/guide/telemetry.md#metrics",
+          "source": "src/telemetry/writer.js:28-31,93-122; docs/guide/telemetry.md#metrics",
           "detail": "Log lines name record ids and origins, never payloads; `error` events carry the op as a field."
         },
         "react": {
-          "mark": "❌",
-          "text": "none",
-          "source": "package.json; docs/guide/why.md:76"
+          "mark": "✅",
+          "text": "`/store`: `useSyncExternalStore(store.subscribe, store.getSnapshot)` over a query, a record or a presence",
+          "source": "src/store/store.js; docs/guide/frameworks.md#react"
         },
         "vue": {
-          "mark": "❌",
-          "text": "none",
-          "source": "package.json"
+          "mark": "⚠️",
+          "text": "a documented three-line `shallowRef` over `/store`; no package of its own",
+          "source": "docs/guide/frameworks.md#vue"
         },
         "angular": {
           "mark": "❌",
@@ -3007,14 +2998,14 @@
           "source": "package.json"
         },
         "svelte": {
-          "mark": "❌",
-          "text": "none",
-          "source": "package.json"
+          "mark": "✅",
+          "text": "`/store`: a store is a Svelte store (`$store`)",
+          "source": "src/store/store.js; docs/guide/frameworks.md#svelte"
         },
         "signals": {
-          "mark": "❌",
-          "text": "none",
-          "source": "package.json"
+          "mark": "⚠️",
+          "text": "Solid's `from(store)` over `/store`; another signal library wraps `subscribe` the same way",
+          "source": "docs/guide/frameworks.md#solid"
         },
         "tanstack": {
           "mark": "❌",
@@ -3028,7 +3019,7 @@
         },
         "testing": {
           "mark": "⚠️",
-          "text": "`createMemoryFsi()` for in-memory stores; contract suites stay in the repo",
+          "text": "`memory()` for in-memory stores; contract suites stay in the repo",
           "source": "src/backend.js:10, 40; package.json#files (no tests/); tests/suites/fsi.js; docs/guide/backends.md#your-own",
           "detail": "tests/utils/memory-link.js (an in-process link) and tests/utils/mesh.js (N storages, `settle()`) are repo-only."
         },
@@ -3053,7 +3044,7 @@
           "mark": "",
           "text": "none yet: 0.0.1, never published",
           "source": "CHANGELOG.md; package.json",
-          "detail": "The wire carries `PROTOCOL = 1` and a host refuses another version with 400 `PROTOCOL` (src/protocol.js:8; src/hosting.js:167-168). `packOps` slots are append-only and a new op type is a PROTOCOL bump (CLAUDE.md). The catalog is derived state: a catalog.json of an older format (now 3) is rebuilt once at open (src/catalog.js:25,403; CHANGELOG.md)."
+          "detail": "The wire carries `PROTOCOL = 1` and a host refuses another version with 400 `PROTOCOL` (src/sync/protocol.js; src/sync/hosting.js). `packOps` slots are append-only and a new op type is a PROTOCOL bump (src/CLAUDE.md). The catalog is derived state: a catalog.json of an older format (now 3) is rebuilt once at open (src/catalog.js:25,403; CHANGELOG.md)."
         },
         "releaseCadence": {
           "mark": "",

@@ -2,13 +2,13 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { installBrowserGlobals, requireBrowserBarrel } = require('./utils/browser-env.js');
+const { installBrowserGlobals, requireBrowserAll } = require('./utils/browser-env.js');
 const { runPatchTests } = require('./suites/patches.js');
 
 test('Patches (browser halves)', async (t) => {
   const env = installBrowserGlobals();
   t.after(() => env.uninstall());
-  const browser = requireBrowserBarrel();
+  const browser = requireBrowserAll();
 
   let n = 0;
   const paths = new Map();

@@ -19,19 +19,23 @@ Three parties, three levels of trust:
 
 - **The local process** owns everything under `<path>`: the records, the log,
   the private key, the tokens. Nothing protects the storage from the process
-  that opened it; the chain makes tampering *evident*, not impossible.
+  that opened it; the chain (the `chain` plugin) makes tampering *evident*,
+  not impossible.
 - **An authorized peer** — one that passed the unit's `access`, your
   `authorize(context, hello)` and the transport's own authentication — may
   write and read every record **in the scopes its hello named**, and nothing
-  outside them. Every op is signed by its origin's Ed25519 key, and a node's
-  id is that key, so an op's header (`actor` among it) and content are bound
-  to the key that made them through any relay. What is still a claim: that
+  outside them. With the `signing` plugin every op is signed by its origin's
+  Ed25519 key, and a node's id is that key, so an op's header (`actor` among
+  it) and content are bound to the key that made them through any relay; a
+  node without the plugin signs nothing and checks nothing, and its id is
+  what `getId` mints. What is still a claim: that
   `actor` names a user (hold it to what `authorize` established, in
   `beforeApply`); that the node greeting is the holder of the key it names
   (there is no hello challenge yet — its pushes fail as `forged` otherwise);
   and, under the default `sync.signatures: 'verify'`, that an unsigned op
   came from a node that does not sign — only `'require'` refuses unsigned
-  ops, and so resists a relay stripping signatures. It cannot move another node's
+  ops, and so resists a relay stripping signatures: `'require'` with the
+  `signing` plugin on every node is the configuration that resists it. It cannot move another node's
   version vector (an `advance` is adopted only from the host a subscription is
   read from, and only that host's own), cannot move another node's clock more
   than `sync.maxSkew` ahead, cannot make a dialer step over a page it could

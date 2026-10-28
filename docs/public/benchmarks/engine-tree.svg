@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="760" height="308" viewBox="0 0 760 308" role="img" aria-label="Trees: syncom's own benchmarks. The movable tree behind tree fields: one move folded over a block of thousands, the fold read anew and read kept. ops/s, log scale, higher is better.">
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="788" viewBox="0 0 760 788" role="img" aria-label="Trees: syncom's own benchmarks. The movable tree behind tree fields: one move folded over a block of thousands, the fold read anew and read kept. ops/s, log scale, higher is better.">
 <style>
   text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
   .title { font-size: 15px; font-weight: 700; fill: #1b1c1e; }
@@ -33,46 +33,146 @@
 <text class="title" x="20" y="35">Trees: syncom's own benchmarks</text>
 <text class="subtitle" x="20" y="56">The movable tree behind tree fields: one move folded over a block of thousands, the fold read anew and read</text>
 <text class="subtitle" x="20" y="73">kept. ops/s, log scale, higher is better.</text>
-<line class="grid" x1="235" y1="88" x2="235" y2="248"/>
-<text class="tick" x="235" y="264" text-anchor="middle">100</text>
-<line class="grid" x1="382" y1="88" x2="382" y2="248"/>
-<text class="tick" x="382" y="264" text-anchor="middle">1,000</text>
-<line class="grid" x1="529" y1="88" x2="529" y2="248"/>
-<text class="tick" x="529" y="264" text-anchor="middle">10k</text>
-<line class="grid" x1="676" y1="88" x2="676" y2="248"/>
-<text class="tick" x="676" y="264" text-anchor="middle">100k</text>
-<line class="axis" x1="235" y1="88" x2="235" y2="248"/>
+<line class="grid" x1="372" y1="88" x2="372" y2="728"/>
+<text class="tick" x="372" y="744" text-anchor="middle">10</text>
+<line class="grid" x1="422.6666666666667" y1="88" x2="422.6666666666667" y2="728"/>
+<text class="tick" x="422.6666666666667" y="744" text-anchor="middle">100</text>
+<line class="grid" x1="473.3333333333333" y1="88" x2="473.3333333333333" y2="728"/>
+<text class="tick" x="473.3333333333333" y="744" text-anchor="middle">1,000</text>
+<line class="grid" x1="524" y1="88" x2="524" y2="728"/>
+<text class="tick" x="524" y="744" text-anchor="middle">10k</text>
+<line class="grid" x1="574.6666666666666" y1="88" x2="574.6666666666666" y2="728"/>
+<text class="tick" x="574.6666666666666" y="744" text-anchor="middle">100k</text>
+<line class="grid" x1="625.3333333333334" y1="88" x2="625.3333333333334" y2="728"/>
+<text class="tick" x="625.3333333333334" y="744" text-anchor="middle">1M</text>
+<line class="grid" x1="676" y1="88" x2="676" y2="728"/>
+<text class="tick" x="676" y="744" text-anchor="middle">10M</text>
+<line class="axis" x1="372" y1="88" x2="372" y2="728"/>
 <g><title>applyOp · one move on a tree of 5 000 moves
-277 ops/s
-3.61 ms per operation</title>
+432,642 ops/s
+2.31 µs per operation</title>
 <text class="label primary" x="20" y="105">applyOp</text>
 <text class="sublabel" x="20" y="120">one move on a tree of 5 000 moves</text>
-<path class="bar primary" d="M235,101H296.04452605247394A4,4 0 0 1 300.04452605247394,105V111A4,4 0 0 1 296.04452605247394,115H235Z"/>
-<text class="value" x="306.04452605247394" y="114">277</text>
+<path class="bar primary" d="M372,101H602.8971863301723A4,4 0 0 1 606.8971863301723,105V111A4,4 0 0 1 602.8971863301723,115H372Z"/>
+<text class="value" x="612.8971863301723" y="114">433k</text>
 </g>
-<g><title>resolve · the fold of 5 000 moves, anew
-309 ops/s
-3.24 ms per operation</title>
-<text class="label primary" x="20" y="145">resolve</text>
-<text class="sublabel" x="20" y="160">the fold of 5 000 moves, anew</text>
-<path class="bar primary" d="M235,141H303.02389647545067A4,4 0 0 1 307.02389647545067,145V151A4,4 0 0 1 303.02389647545067,155H235Z"/>
-<text class="value" x="313.02389647545067" y="154">309</text>
+<g><title>the fold of 5 000 moves from the block’s JSON, anew
+929 ops/s
+1.08 ms per operation</title>
+<text class="label primary" x="20" y="152">the fold of 5 000 moves from the block’s JSON,…</text>
+<path class="bar primary" d="M372,141H467.71279617567785A4,4 0 0 1 471.71279617567785,145V151A4,4 0 0 1 467.71279617567785,155H372Z"/>
+<text class="value" x="477.71279617567785" y="154">929</text>
 </g>
-<g><title>renderTree · the fold kept by the block
-13,978 ops/s
-71.5 µs per operation</title>
+<g><title>renderTree · the reading the block keeps
+9,690,374 ops/s
+103 ns per operation</title>
 <text class="label primary" x="20" y="185">renderTree</text>
-<text class="sublabel" x="20" y="200">the fold kept by the block</text>
-<path class="bar primary" d="M235,181H546.3804203122573A4,4 0 0 1 550.3804203122573,185V191A4,4 0 0 1 546.3804203122573,195H235Z"/>
-<text class="value" x="556.3804203122573" y="194">14k</text>
+<text class="sublabel" x="20" y="200">the reading the block keeps</text>
+<path class="bar primary" d="M372,181H671.3079206411696A4,4 0 0 1 675.3079206411696,185V191A4,4 0 0 1 671.3079206411696,195H372Z"/>
+<text class="value" x="681.3079206411696" y="194">9.69M</text>
+</g>
+<g><title>applyOp · one move on a random tree of 2,000 nodes
+478,611 ops/s
+2.09 µs per operation</title>
+<text class="label primary" x="20" y="225">applyOp</text>
+<text class="sublabel" x="20" y="240">one move on a random tree of 2,000 nodes</text>
+<path class="bar primary" d="M372,221H605.1191222434652A4,4 0 0 1 609.1191222434652,225V231A4,4 0 0 1 605.1191222434652,235H372Z"/>
+<text class="value" x="615.1191222434652" y="234">479k</text>
+</g>
+<g><title>applyOp · one move on a random tree of 8,000 nodes
+306,651 ops/s
+3.26 µs per operation</title>
+<text class="label primary" x="20" y="265">applyOp</text>
+<text class="sublabel" x="20" y="280">one move on a random tree of 8,000 nodes</text>
+<path class="bar primary" d="M372,261H595.3233155206422A4,4 0 0 1 599.3233155206422,265V271A4,4 0 0 1 595.3233155206422,275H372Z"/>
+<text class="value" x="605.3233155206422" y="274">307k</text>
+</g>
+<g><title>applyOp · one move on a random tree of 32,000 nodes
+110,499 ops/s
+9.05 µs per operation</title>
+<text class="label primary" x="20" y="305">applyOp</text>
+<text class="sublabel" x="20" y="320">one move on a random tree of 32,000 nodes</text>
+<path class="bar primary" d="M372,301H572.8634896186513A4,4 0 0 1 576.8634896186513,305V311A4,4 0 0 1 572.8634896186513,315H372Z"/>
+<text class="value" x="582.8634896186513" y="314">110k</text>
+</g>
+<g><title>applyOp · a peer’s page of 100 moves in stamp order, 8 000 nodes
+373,169 ops/s
+2.68 µs per operation</title>
+<text class="label primary" x="20" y="345">applyOp</text>
+<text class="sublabel" x="20" y="360">a peer’s page of 100 moves in stamp order, 8 000 nodes</text>
+<path class="bar primary" d="M372,341H599.6432149761453A4,4 0 0 1 603.6432149761453,345V351A4,4 0 0 1 599.6432149761453,355H372Z"/>
+<text class="value" x="609.6432149761453" y="354">373k</text>
+</g>
+<g><title>applyOp · a move, then a peer’s ten moves late, 8 000 nodes (the pair)
+17,662 ops/s
+56.6 µs per operation</title>
+<text class="label primary" x="20" y="385">applyOp</text>
+<text class="sublabel" x="20" y="400">a move, then a peer’s ten moves late, 8 000 nodes (the p…</text>
+<path class="bar primary" d="M372,381H532.5166872751072A4,4 0 0 1 536.5166872751072,385V391A4,4 0 0 1 532.5166872751072,395H372Z"/>
+<text class="value" x="542.5166872751072" y="394">17.7k</text>
+</g>
+<g><title>applyOp · one move after a chain of 10 000 nodes
+831,771 ops/s
+1.2 µs per operation</title>
+<text class="label primary" x="20" y="425">applyOp</text>
+<text class="sublabel" x="20" y="440">one move after a chain of 10 000 nodes</text>
+<path class="bar primary" d="M372,421H617.2801912391541A4,4 0 0 1 621.2801912391541,425V431A4,4 0 0 1 617.2801912391541,435H372Z"/>
+<text class="value" x="627.2801912391541" y="434">832k</text>
+</g>
+<g><title>the fold of MAX_MOVES (65536) moves from JSON, the worst shape
+12 ops/s
+83.3 ms per operation</title>
+<text class="label primary" x="20" y="472">the fold of MAX_MOVES (65536) moves from JSON,…</text>
+<path class="bar primary" d="M372,461H372.0118497997463A4,4 0 0 1 376.0118497997463,465V471A4,4 0 0 1 372.0118497997463,475H372Z"/>
+<text class="value" x="382.0118497997463" y="474">12</text>
 </g>
 <g><title>storage.treeMove · among 300 siblings (memory fsi)
-1,528 ops/s
-654 µs per operation</title>
-<text class="label primary" x="20" y="225">storage.treeMove</text>
-<text class="sublabel" x="20" y="240">among 300 siblings (memory fsi)</text>
-<path class="bar primary" d="M235,221H405.06613307323164A4,4 0 0 1 409.06613307323164,225V231A4,4 0 0 1 405.06613307323164,235H235Z"/>
-<text class="value" x="415.06613307323164" y="234">1,528</text>
+15,513 ops/s
+64.5 µs per operation</title>
+<text class="label primary" x="20" y="505">storage.treeMove</text>
+<text class="sublabel" x="20" y="520">among 300 siblings (memory fsi)</text>
+<path class="bar primary" d="M372,501H529.6619201529145A4,4 0 0 1 533.6619201529145,505V511A4,4 0 0 1 529.6619201529145,515H372Z"/>
+<text class="value" x="539.6619201529145" y="514">15.5k</text>
 </g>
-<text class="caption" x="20" y="289">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-24</text>
+<g><title>storage.treeMove · a random tree of 2,000 nodes (memory fsi)
+16,084 ops/s
+62.2 µs per operation</title>
+<text class="label primary" x="20" y="545">storage.treeMove</text>
+<text class="sublabel" x="20" y="560">a random tree of 2,000 nodes (memory fsi)</text>
+<path class="bar primary" d="M372,541H530.4572992644976A4,4 0 0 1 534.4572992644976,545V551A4,4 0 0 1 530.4572992644976,555H372Z"/>
+<text class="value" x="540.4572992644976" y="554">16.1k</text>
+</g>
+<g><title>storage.treeMove · a random tree of 8,000 nodes (memory fsi)
+18,069 ops/s
+55.3 µs per operation</title>
+<text class="label primary" x="20" y="585">storage.treeMove</text>
+<text class="sublabel" x="20" y="600">a random tree of 8,000 nodes (memory fsi)</text>
+<path class="bar primary" d="M372,581H533.0179953064389A4,4 0 0 1 537.0179953064389,585V591A4,4 0 0 1 533.0179953064389,595H372Z"/>
+<text class="value" x="543.0179953064389" y="594">18.1k</text>
+</g>
+<g><title>storage.treeMove · a random tree of 32,000 nodes (memory fsi)
+16,638 ops/s
+60.1 µs per operation</title>
+<text class="label primary" x="20" y="625">storage.treeMove</text>
+<text class="sublabel" x="20" y="640">a random tree of 32,000 nodes (memory fsi)</text>
+<path class="bar primary" d="M372,621H531.2024567447163A4,4 0 0 1 535.2024567447163,625V631A4,4 0 0 1 531.2024567447163,635H372Z"/>
+<text class="value" x="541.2024567447163" y="634">16.6k</text>
+</g>
+<g><title>storage.transact · an outline of 2,000 nodes in one transaction (per move)
+38,352 ops/s
+26.1 µs per operation</title>
+<text class="label primary" x="20" y="665">storage.transact</text>
+<text class="sublabel" x="20" y="680">an outline of 2,000 nodes in one transaction (per move)</text>
+<path class="bar primary" d="M372,661H549.5785928456053A4,4 0 0 1 553.5785928456053,665V671A4,4 0 0 1 549.5785928456053,675H372Z"/>
+<text class="value" x="559.5785928456053" y="674">38.4k</text>
+</g>
+<g><title>storage.transact · an outline of 8,000 nodes in one transaction (per move)
+38,258 ops/s
+26.1 µs per operation</title>
+<text class="label primary" x="20" y="705">storage.transact</text>
+<text class="sublabel" x="20" y="720">an outline of 8,000 nodes in one transaction (per move)</text>
+<path class="bar primary" d="M372,701H549.5245946497959A4,4 0 0 1 553.5245946497959,705V711A4,4 0 0 1 549.5245946497959,715H372Z"/>
+<text class="value" x="559.5245946497959" y="714">38.3k</text>
+</g>
+<text class="caption" x="20" y="769">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-27</text>
 </svg>

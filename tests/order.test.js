@@ -4,7 +4,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { between, spread, compare, isKey } = require('../order.js');
+const { between, spread, compare, isKey } = require('../src/order/order.js');
 
 const sorted = (keys) => keys.every((key, i) => i === 0 || keys[i - 1] < key);
 

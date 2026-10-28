@@ -31,7 +31,7 @@ const ENTRIES = [
   // earns the bytes. 5 KB was the migrated storage/chain/crdt core; the
   // replication engine (the op model, the persisted log, the sync protocol
   // that makes `storage.sync` move data) earned the raise to 14 KB; the
-  // injected OpenTelemetry writer (src/telemetry.js and its call sites in
+  // injected OpenTelemetry writer (src/telemetry/writer.js and its call sites in
   // storage, log and sync) the raise to 17 KB; hooks (src/hooks.js and the
   // write, read, apply and sync seams they run in) the raise to 18 KB; the
   // schema layer (src/schema.js: entity definitions, the injected validator
@@ -128,34 +128,272 @@ const ENTRIES = [
   // content checked against the field's kind before the stamp — the raise to
   // 65.5 KB (65.0 measured); compact() laying a text's marks again
   // (sequence.js marksIn, the `mark` patch, long fields in runs) — the raise
-  // to 66 KB (65.6 measured). The rule stays: a raise names its feature here.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 66 },
+  // to 66 KB (65.6 measured). The kinds beyond registers, counters and sets
+  // became plugins (src/plugin.js; `/text`, `/tree` carry the engines) — the
+  // main entry is the core alone and came DOWN to 54 KB (53.4 measured); the
+  // whole of it is `/all`. The identity and the signatures (`/signing`), the
+  // chain (`/chain`) and the sealing of records (`/encryption`) became
+  // plugins too — the core keeps the hooks and SHA-256 through Web Crypto
+  // (src/crypto/digest.js) — and came down to 52 KB (51.4 measured). The rule
+  // stays: a raise names its feature here.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 52 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
   // guards it too.
-  { label: 'wrpc adapter — browser (@alexify/syncom/wrpc)', entry: 'wrpc.js', platform: 'browser', budget: 2 },
+  { label: 'wrpc adapter — browser (@alexify/syncom/wrpc)', entry: 'src/wrpc/wrpc.js', platform: 'browser', budget: 2 },
   // Smart contracts: off the main entry on purpose (a `new Function` over
   // chain data), so a node that never imports the subpath never pays for it
   // — in bytes or in attack surface.
-  { label: 'contracts — browser (@alexify/syncom/contracts)', entry: 'contracts.js', platform: 'browser', budget: 1 },
+  {
+    label: 'contracts — browser (@alexify/syncom/contracts)',
+    entry: 'src/contracts/contracts.js',
+    platform: 'browser',
+    budget: 1,
+  },
   // The IndexedDB backend: browser-only by nature, its own row so the main
   // entry pays nothing for it.
-  { label: 'idb backend — browser (@alexify/syncom/idb)', entry: 'idb.js', platform: 'browser', budget: 2 },
+  { label: 'idb backend — browser (@alexify/syncom/idb)', entry: 'src/idb/idb.js', platform: 'browser', budget: 2 },
   // The trigram text index behind `$text`: platform-neutral, off the main
   // entry so a node that never searches pays nothing for it.
-  { label: 'search — browser (@alexify/syncom/search)', entry: 'search.js', platform: 'browser', budget: 2 },
+  { label: 'search — browser (@alexify/syncom/search)', entry: 'src/search/search.js', platform: 'browser', budget: 2 },
   // Fractional indexes for ordering records: a helper off the main entry.
-  { label: 'order — browser (@alexify/syncom/order)', entry: 'order.js', platform: 'browser', budget: 1.5 },
+  { label: 'order — browser (@alexify/syncom/order)', entry: 'src/order/order.js', platform: 'browser', budget: 1.5 },
   // The undo manager with the patch vocabulary, Myers, the argument checks
   // realize() shares with the write API (src/args.js) and the Emitter it
   // stands on — measured alone; in an app bundle those are shared with the
   // core. 6 KB since the shared checks (5.9 measured); 6.5 KB since the
   // `mark` patch (6.0 measured).
-  { label: 'undo — browser (@alexify/syncom/undo)', entry: 'undo.js', platform: 'browser', budget: 6.5 },
+  // 6.5 with the unset patch and the loose inverse per field.
+  // 7.4 with the paths (a reading taken back to its fields, src/compose.js).
+  // 7.8 with transaction steps, groups, step meta and the scoped stack (trackedSources, records, paths).
+  // 8.0 with the canonical JSON in shape.js.
+  { label: 'undo — browser (@alexify/syncom/undo)', entry: 'src/undo/undo.js', platform: 'browser', budget: 9 },
   // A fork opened through the parent's constructor, merged as ops: the
   // selection a push makes, the shape helpers, the protocol constants.
-  { label: 'branch — browser (@alexify/syncom/branch)', entry: 'branch.js', platform: 'browser', budget: 3.5 },
+  {
+    label: 'branch — browser (@alexify/syncom/branch)',
+    entry: 'src/branch/branch.js',
+    platform: 'browser',
+    // 3.6 measured once ValidationError moved into the errors module it shares.
+    // 4.0 with the canonical JSON in shape.js.
+    // 4.6 with the log's stream index (a push and a merge pick by stream; 2026-10-27). 5, raised by name.
+    budget: 5,
+  },
+  // Presence: the emitter, the bounds, the signed entries; the identity comes from the storage.
+  {
+    label: 'presence — browser (@alexify/syncom/presence)',
+    entry: 'src/presence/presence.js',
+    platform: 'browser',
+    // 3.8 measured: shape.js (the canonical JSON, the stream and key checks) comes with the emitter.
+    budget: 4.5,
+  },
+  // The editor binding: deltas composed and transformed, the diff between two readings (the text plugin's Myers
+  // comes along, and the vector keys), the binding itself, selections and presence cursors. The plan said 4; the
+  // transform and the diff are what an editor needs, so 6, raised by name (4.9 measured).
+  {
+    label: 'editor — browser (@alexify/syncom/editor)',
+    entry: 'src/editor/editor.js',
+    platform: 'browser',
+    // 6.0 with a send's revision (the shadow's version, the answer held for). 6.5, raised by name.
+    budget: 6.5,
+  },
+  // The CodeMirror adapter: the editor binding it stands on (4.9), a ChangeSet as a delta and back, the cursors'
+  // decorations, the undo commands. CodeMirror itself is injected, never bundled. The plan said 3; the binding
+  // under it is most of it, so 7, raised by name (6.6 measured).
+  {
+    label: 'codemirror — browser (@alexify/syncom/codemirror)',
+    entry: 'src/codemirror/codemirror.js',
+    platform: 'browser',
+    // 7.5 with what the adapters share (createFit, undoSteps, failureReporter in editor.js; 2026-10-27). 8, raised by name.
+    budget: 8,
+  },
+  // The ProseMirror adapter: the editor binding it stands on (4.9) and the document as one text with block
+  // markers, the replace step, the cursors' decorations, the undo commands. ProseMirror itself is injected, never
+  // bundled. The plan said 6; the binding under it is most of it, so 8, raised by name (7.5 measured).
+  {
+    label: 'prosemirror — browser (@alexify/syncom/prosemirror)',
+    entry: 'src/prosemirror/prosemirror.js',
+    platform: 'browser',
+    // 8.6 with the one delta algebra it shares with the text plugin (src/text/quill.js; 2026-10-27). 9, raised by name.
+    // 9.0 with an edit sent from its steps (block sizes kept per node). 9.5, raised by name.
+    budget: 9.5,
+  },
+  // Framework stores: one object for Svelte's contract and React's useSyncExternalStore, over a cursor, a
+  // Record, get(), a presence or any emitter; no requires.
+  {
+    label: 'store — browser (@alexify/syncom/store)',
+    entry: 'src/store/store.js',
+    platform: 'browser',
+    budget: 1.5,
+  },
+  // The inspector: a record's anatomy and an anonymized copy; the composition, the shapes and the hash come along (4.6 measured).
+  {
+    label: 'inspect — browser (@alexify/syncom/inspect)',
+    entry: 'src/inspect/inspect.js',
+    platform: 'browser',
+    // 5.0 with own() from shape.js and the checksum's reused buffer (2026-10-27). 5.5, raised by name.
+    budget: 5.5,
+  },
+  // Everything in one import: the core with the text and tree plugins
+  // registered — what the main entry was before the kinds became plugins.
+  // 68.5 KB: what the 66 KB entry was, plus the registry and the plugins'
+  // own module shells (68.0 measured).
+  // The core with every shipped plugin: 68.3 at the kinds epic, 70.2 with
+  // the at-rest wrapper and the plugin seams of the security blocks, 71.3
+  // with the sync plugin's seam and the layered backend, 72.2 with the
+  // schema, telemetry and query seams.
+  // 79.8 with the rope under the sequence engine (the persistent tree, map
+  // and chunked list it is made of, the walk and the hydration), 81.0 with
+  // the group commit, the queue freed at the append and the public flush.
+  // 82.0 with unset (the per-field reset), compareVectors and the surrogate rule.
+  // 83.6 with field paths (src/paths.js, src/compose.js) and the prefix rules.
+  // 85.3 with the children of a list's elements and a tree's nodes (the
+  // members' seam, a compaction in rounds).
+  // 87.3 with embeds and blocks in a text (the markers, the typed spans and
+  // blocks, the diff context, the commit event's embeds).
+  // 88.6 with transactions (transact in src/commit.js, the facade's tx, the message slot).
+  // 90.2 with the change reports (applyOp changes, the plugins' changeOf, the transaction event).
+  // 92.0 with observe, the deltas (toDelta's compose, applyDelta) and the cursor positions.
+  // 94.6 with presence carried by the sync plugin.
+  // 96.5 with a fork at any version (atVersion) and blame.
+  // 98.3 with the change reports exact under concurrency (a mark less what newer ones hold, a marker set
+  // in the turn that inserted it). 98.5, raised by name.
+  // 100.7 with src/ in procedural loops (no array callbacks — a loop is longer than a callback; 2026-10-26). 101, raised by name.
+  // 101.1 with a contained telemetry writer and a log that answers every durable group (2026-10-26). 101.5, raised by name.
+  // 101.6 with the review's performance fixes (a lazy commit event, the lazy text index, the log's pending groups
+  // searched by halves, a live Record patched by its delta). 102, raised by name.
+  // 102.8 with the review's security fixes (merge-meta skew, own streams moved only with proof, a nesting bound) and the editors' containment (2026-10-26). 103.5, raised by name.
+  // 103.6 with the tree's bounded fold and the counters per stream. 104.5, raised by name.
+  // 106.4 with the text engine's indexes (the marks by anchor in walk order, pos/vals/marks in persistent maps,
+  // a list's reading derived from the one before, bodies capped at SEG_MAX, one hydration per plain block;
+  // 2026-10-27). 107, raised by name.
+  // 108.0 with a hash chain per stream (src/header.js: the fingerprint, `prev`, the fork refused as
+  // EQUIVOCATION; the log's fingerprints and heads). 108.5, raised by name.
+  // 108.6 with presence refusals reported, unreadable log files kept and failing the open, a scrub that rewrites
+  // what it takes and an op on a purged record stripped before the append (2026-10-27). 109, raised by name.
+  // 109.1 with a bootstrap's pages checked (BAD_PAGE), a default opsPerPush and kind refusals reported once a
+  // page. 110, raised by name: room for the review's remaining fixes, measured again at the end of it.
+  // 110.4 with sets shared between versions, a hub's vector read key by key, the log's groups and the deferred
+  // window measured (stats, three gauges, three instruments). 111.5, raised by name.
+  // 113.0 with the tree's kept fold (+1.6) and a ProseMirror edit sent from its steps. 113.5, raised by name.
+  // 114.6 with the sequence engine in five modules (src/text/{keys,state,splice,marks,join}.js: the names that
+  // cross a module stay whole; 2026-10-27). 115, raised by name.
+  // 115.3 with the text plugin in four modules beside it (src/text/{kind,diffs,methods,deltas}.js). 115.5, raised by name.
+  // 115.5 with a field's revision (applyDelta's fast path past `expect`, the binding's send). 116, raised by name.
+  // 117.1 with a large block written in pieces (src/entries.js, the text plugin's `pieces`). 117.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 117.5 },
+  // The list and text kinds alone: the sequence engine over its rope
+  // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
+  // in an app bundle the core they stand on is shared (21.4 measured).
+  // 22.1 with the surrogate rule (the code-point diff, the refused indexes).
+  // 22.6 with the field-path check every method takes (src/paths.js).
+  // 24.6 with embeds and blocks: the markers, the six methods, the typed
+  // spans and the diff that carries a slot's marker.
+  // 25.2 with the change reports (changeOf: a splice's spans, marks, moves; S.spanOf).
+  // 26.7 with the deltas (a Quill compose, toDelta, applyDelta) and the cursor positions.
+  // 27.6 with the editor binding's needs: a cut read as one splice per stretch (spansOf), an insert's marks
+  // in its change and exact in applyDelta, applyDelta's `expect` (STALE). 28, raised by name.
+  // 28.1 with a mark's change less what newer marks of its key hold (S.newerRanges) and a marker set in
+  // the turn that inserted it composed into the insert. 28.5, raised by name.
+  // 28.7 with src/ in procedural loops (no array callbacks — a loop is longer than a callback; 2026-10-26).
+  // 30.9 with the engine's indexes (the marks by anchor, persistent pos/vals/marks, a list's reading
+  // derived, bodies capped at SEG_MAX, one hydration per plain block; 2026-10-27). 31.5, raised by name.
+  // 32.8 with the engine in five modules (the names that cross a module are not minified). 33, raised by name.
+  // 33.4 with the plugin in four modules beside text.js. 33.5, raised by name.
+  // 33.6 with revision() and applyDelta's revision. 34, raised by name.
+  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 34 },
+  // The tree kind alone, with the fractional indexes a place is made of and
+  // the argument checks it shares with the core (5.1 measured).
+  // 5.5 with the field-name check unset shares with it (src/args.js).
+  // 5.9 with the field-path check (src/paths.js).
+  // 6.1 with a node's data (the members' seam).
+  // 6.3 with the change reports (treeChanges: the placements before and after).
+  // 6.8 with src/ in procedural loops (no array callbacks — a loop is longer than a callback; 2026-10-26).
+  // 8.6 with the fold kept per block and moved one step a move (the undo–do–redo of an older one, the reading
+  // path-copied, the change report from what the move changed; 2026-10-27). 9, raised by name.
+  { label: 'tree — browser (@alexify/syncom/tree)', entry: 'src/tree/tree.js', platform: 'browser', budget: 9 },
+  // The security blocks, each measured ALONE — with the shape checks, the
+  // PEM pair, the backend contract and the errors it shares with the core,
+  // which an app bundle holds once (4.2 / 2.0 / 3.6 measured; what each
+  // adds to the core is the difference `/all` shows).
+  // Signed ops: the Ed25519 half, the canonical form and the verdict.
+  // 4.5 with src/ in procedural loops (no array callbacks — a loop is longer than a callback; 2026-10-26) (a hex table in the browser half).
+  // 5.1 with the keys no one holds refused (the points of small order, a y past the prime).
+  {
+    label: 'signing — browser (@alexify/syncom/signing)',
+    entry: 'src/signing/signing.js',
+    platform: 'browser',
+    budget: 5.5,
+  },
+  // The chain: the blocks, SHA-256 through Web Crypto, the plugin.
+  { label: 'chain — browser (@alexify/syncom/chain)', entry: 'src/chain/chain.js', platform: 'browser', budget: 2.5 },
+  // Sealed records (the RSA half) and the at-rest wrapper (AES-GCM, PBKDF2).
+  {
+    label: 'encryption — browser (@alexify/syncom/encryption)',
+    entry: 'src/encryption/encryption.js',
+    platform: 'browser',
+    budget: 4,
+  },
+  // The backends as blocks: the Map in memory; the multi-level cache over
+  // several (with the contract check it shares with the core).
+  {
+    label: 'memory — browser (@alexify/syncom/memory)',
+    entry: 'src/memory/memory.js',
+    platform: 'browser',
+    budget: 0.75,
+  },
+  {
+    label: 'layered — browser (@alexify/syncom/layered)',
+    entry: 'src/layered/layered.js',
+    platform: 'browser',
+    budget: 1.5,
+  },
+  // The sync of ops: the manager and the hosting unit, measured ALONE with
+  // the op model (packOps), the vectors, the hooks, the scopes and the
+  // telemetry writer they share with the core (17.7 measured; what it adds
+  // to the core is the 6.8 KB the main entry came down by).
+  // 20.4 with presence: the unit's inbound event, the room's memory, the manager's carrying.
+  // 21.1 with a contained telemetry writer and a log that answers every durable group (2026-10-26).
+  // 22.5 with the review's sync fixes: proof for own streams, the hash chain's heads, presence refusals reported,
+  // a bootstrap's pages checked (BAD_PAGE, maxPageBytes; 2026-10-27). 23, raised by name.
+  // 23.0 with sets shared between versions (the core's ops.js it bundles). 23.5, raised by name.
+  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 23.5 },
+  // The schema: the definitions read once, the validator adapters, the lens.
+  // 4.3 with a set folded back by path (src/schema/entity.js over src/paths.js).
+  {
+    label: 'schema — browser (@alexify/syncom/schema)',
+    entry: 'src/schema/schema.js',
+    platform: 'browser',
+    // 4.6 with the canonical JSON in shape.js.
+    // 5.9 with migrate(), check() and schema.json moved out of the core (the
+    // main entry 50.8 → 50.1; 2026-10-27). 6, raised by name.
+    budget: 6,
+  },
+  // The OpenTelemetry adapter: the tracer and meter resolved, the instruments, the gauges.
+  {
+    label: 'telemetry — browser (@alexify/syncom/telemetry)',
+    entry: 'src/telemetry/telemetry.js',
+    platform: 'browser',
+    budget: 4,
+  },
+  // Queries: the predicate, the planner and the cursor, measured ALONE with
+  // the catalog's value keys it shares with the core.
+  // 6.0 with src/ in procedural loops (no array callbacks — a loop is longer than a callback; 2026-10-26).
+  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 6.5 },
+  // Versions: the fold of the log, the tags, the view at a tag — measured
+  // ALONE with the write path, the snapshot pages and the patches it shares
+  // with the core.
+  {
+    label: 'versions — browser (@alexify/syncom/versions)',
+    entry: 'src/versions/versions.js',
+    platform: 'browser',
+    // 32.9 with the write path's hash chain (src/header.js, the log's fingerprints). 33.5, raised by name.
+    // 33.8 with the review's write-path fixes it bundles (a transaction's records held once, sets shared
+    // between versions, an op on a purged record stripped). 34.5, raised by name.
+    // 34.8 with the log's stream index and the segments read from the listing; 2026-10-27. 35, raised by name.
+    budget: 35,
+  },
 ];
 
 // A browser entry has to be self-contained: no node builtins, and no packages
@@ -177,7 +415,9 @@ const selfContained = {
 
 async function bundle(entry, platform, minify) {
   const result = await esbuild.build({
-    entryPoints: [path.join(ROOT, entry)],
+    // A string entry is a file; an object is esbuild's stdin — a bundle of
+    // several entries at once, the composite below.
+    ...(typeof entry === 'string' ? { entryPoints: [path.join(ROOT, entry)] } : { stdin: entry }),
     bundle: true,
     minify,
     platform,
@@ -188,6 +428,33 @@ async function bundle(entry, platform, minify) {
   });
   return Buffer.from(result.outputFiles[0].contents);
 }
+
+// The core and every block `/all` registers, bundled together as an app
+// that imports each from its subpath: what `/all` is, built the other way.
+// The two must weigh the same within a rounding — a module reached twice
+// (a browser half under one path, the node half under another; a helper
+// duplicated between a block and the core) would show as the difference.
+const COMPOSITE = [
+  'index.js',
+  'src/text/text.js',
+  'src/tree/tree.js',
+  'src/signing/signing.js',
+  'src/chain/chain.js',
+  'src/encryption/encryption.js',
+  'src/sync/sync.js',
+  'src/schema/schema.js',
+  'src/telemetry/telemetry.js',
+  'src/query/query.js',
+  'src/versions/versions.js',
+  'src/memory/memory.js',
+  'src/layered/layered.js',
+];
+const COMPOSITE_TOLERANCE_KB = 0.3;
+const composite = () => ({
+  contents: COMPOSITE.map((entry, i) => `import * as m${i} from './${entry}'; globalThis.m${i} = m${i};`).join('\n'),
+  resolveDir: ROOT,
+  sourcefile: 'composite.js',
+});
 
 function kb(bytes) {
   return `${(bytes / 1024).toFixed(1)} KB`;
@@ -214,6 +481,23 @@ async function main() {
       budget: budget === undefined ? '—' : `${budget.toFixed(1)} KB`,
     });
   }
+
+  // The composite against `/all`: nothing bundled twice.
+  const allRow = rows.find((row) => row.label.startsWith('all — browser'));
+  const whole = gzipSync(await bundle(composite(), 'browser', true), { level: 9 }).length;
+  const allGzip = Number.parseFloat(allRow.gzip) * 1024;
+  if (Math.abs(whole - allGzip) > COMPOSITE_TOLERANCE_KB * 1024) {
+    over.push(
+      `the core and every block together weigh ${kb(whole)}, /all ${allRow.gzip}: more than ${COMPOSITE_TOLERANCE_KB} KB apart — something is bundled twice`,
+    );
+  }
+  rows.push({
+    label: 'core + every block, in one bundle (= /all)',
+    raw: '—',
+    min: '—',
+    gzip: kb(whole),
+    budget: `${allRow.gzip} ± ${COMPOSITE_TOLERANCE_KB}`,
+  });
 
   console.log('| Entry | raw | min | min+gzip | budget |');
   console.log('| ----- | ---:| ---:| --------:| ------:|');

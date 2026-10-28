@@ -54,7 +54,8 @@ Three layers, each its own:
 - `unit({ limits: { opsPerPush, bytesPerPush, opsPerSecond } })` bounds what
   a peer pushes, in `push`, whatever transport carried it: 413 for a page too
   large, 429 for a peer too fast — codes the dialer reports and recovers
-  from, never a hang-up ([Hosting](./sync#hosting));
+  from, never a hang-up ([Hosting](./sync#hosting)); `opsPerPush` is 10 000
+  when not given;
 - wrpc's own `maxCalls`, `maxSubscriptions`, `maxBatch`, `maxPayload` bound
   the wire;
 - a hub-wide policy — a rate limit per session across every unit, an audit
@@ -107,10 +108,14 @@ which is one snapshot of its scopes.
 ## Presence
 
 Who is online, who is editing what, where a cursor is — ephemeral state has
-no place in a durable, replicated log. On a hub it is a room:
-`context.server.to('presence:' + docId).except(context.client).emit(…)`;
-among [WebRTC](./webrtc) peers it is `mesh.broadcast('presence/state', …)`.
-Both are wrpc's, both cost nothing in the log.
+no place in a durable, replicated log. [`@alexify/syncom/presence`](./presence)
+keeps it per node and the hub relays it through wrpc's rooms: a peer's
+update comes in as the unit's `on.presence` event, checked (its own node, a
+scope it asked for, `unit({ presence: { rate } })` updates a second, signed
+under `'require'`) and goes to `syncom:<scope>` but the sender; the hub keeps
+the newest state per node for `presence.timeout` and hands them to a newcomer
+at hello. Nothing of it touches the log. Among [WebRTC](./webrtc) peers the
+same updates travel over the mesh.
 
 ## Several tabs
 

@@ -9,17 +9,19 @@
 // the log, the clock, the chain, the entries, the hook runner and the
 // lensed readers — see Storage#open.
 
-const { encrypt, calculateHash } = require('./crypto.js');
-const { applyOp, isAlive, latestClock, observedTags, kindOf, kindsOf, seqIndexOf } = require('./ops.js');
-const S = require('./sequence.js');
-const T = require('./tree.js');
-const { between } = require('./order.js');
+const { applyOp, isAlive, latestHeld, observedTags, kindOf, kindsOf } = require('./ops.js');
+const { missing } = require('./plugin.js');
 const { opKey } = require('./vector.js');
-const { notify } = require('./hooks.js');
-const { ValidationError, project, unproject, foldSet } = require('./schema.js');
-const { traced, now } = require('./telemetry.js');
+const { digest, fingerprintOf } = require('./header.js');
+const { ValidationError } = require('./errors.js');
+const { project, unproject, foldSet } = require('./schema/entity.js');
+const { fieldName } = require('./args.js');
+const { traced, now } = require('./telemetry/writer.js');
 const { GLOBAL_SCOPE } = require('./scope.js');
-const { isPlainObject, asJson, VALIDATED } = require('./shape.js');
+const { isPlainObject, asJson, VALIDATED, MAX_MESSAGE, isRecordId, invalidId } = require('./shape.js');
+const { nestsWithin, MAX_JSON_DEPTH, MAX_WIRE_DEPTH } = require('./shape.js');
+const { ancestorsOf } = require('./paths.js');
+const { compose } = require('./compose.js');
 const { SyncomError, typed } = require('./errors.js');
 
 // What a commit came to: an op, `null` for a write that changed nothing,
@@ -40,28 +42,35 @@ const sameType = (type, id, data, current) => {
   return data;
 };
 
-// The field-kind rule, refused with a hint at the right call.
+// The field-kind rule, refused with a hint at the right call; a plugin's
+// kind brings its own hint (src/plugin.js `hints`).
 const HINTS = {
   register: 'a register; use update()',
   counter: 'a counter; use inc()',
   set: 'a set; use add() or remove()',
-  list: 'a list; use splice(), push(), setAt() or move() (an array, not a string)',
-  text: 'a text; use splice(), push(), updateText() or mark() (a string, not an array)',
-  tree: 'a tree; use treeMove() or treeRemove()',
-  bound: "past a bound: pending work, a run, the field as a whole or a counter's range (see Costs and limits)",
+  bound:
+    "past a bound: pending work, a run, the field as a whole, a tree's moves or a counter's range (see Costs and limits)",
 };
 // `malformed` is a payload the engine does not admit after the arguments
 // were checked — a bug in the caller or here, never a peer's doing on this
 // path — so it is a TypeError, not a coded failure.
-const refuse = (id, rejected) => {
+const refuse = (core, id, rejected) => {
   if (rejected.length === 0) return;
   const [{ field, reason, detail, count, max }] = rejected;
   if (reason === 'malformed') {
     throw new TypeError(`Field ${field} of record ${id}: the engine does not admit this payload`);
   }
+  if (reason === 'member') {
+    const { prefix, member } = rejected[0];
+    const message = `Field ${field} of record ${id}: ${prefix} has no element or node ${member}`;
+    throw new SyncomError('NOT_FOUND', message, { id, field: prefix, elem: member });
+  }
   const fields = { field, kind: reason };
   if (detail !== undefined) Object.assign(fields, { detail, count, max });
-  throw new SyncomError('FIELD_KIND', `Field ${field} of record ${id} is ${HINTS[reason]}`, fields);
+  if (rejected[0].prefix !== undefined) fields.prefix = rejected[0].prefix;
+  const hint = HINTS[reason] ?? core.plugins.hints[reason] ?? `held by another kind (${reason})`;
+  const where = fields.prefix === undefined ? `Field ${field}` : `Field ${field} lies under ${fields.prefix}, which`;
+  throw new SyncomError('FIELD_KIND', `${where} of record ${id} is ${hint}`, fields);
 };
 
 // A swap's expectation, checked inside the queue against the record as it
@@ -90,15 +99,16 @@ const replaced = async (core, type, payload, ctx) => {
 // Encrypted at rest for THIS node's key: written directly, outside the op
 // log, because no peer could read it.
 const seal = async (core, id, data) => {
-  const record = await encrypt(data, core.keys.publicKey);
-  const blockHash = core.chain ? await core.chain.addBlock({ id, hash: await calculateHash(record) }) : null;
+  if (core.seal === null) throw missing('an encrypted record', 'encryption');
+  const record = await core.seal.encrypt(data);
+  const blockHash = core.chain ? await core.chain.addBlock({ id, hash: await core.hash(record) }) : null;
   await core.entries.writeSealed(id, record, data, blockHash);
-  core.flush();
+  core.saveCatalog();
 };
 
 const unseal = async (core, id) => {
   await core.entries.remove(id);
-  core.flush();
+  core.saveCatalog();
 };
 
 // A write to a sealed record: set and write map onto the encrypted save, a
@@ -128,165 +138,22 @@ const scopeData = (type, payload, current) => {
   const data = current?.data ?? {};
   if (type === 'write') return payload.data ?? data;
   if (type === 'set') return { ...data, ...payload.data };
+  if (type === 'unset') {
+    const left = { ...data };
+    for (const field of payload.value) delete left[field];
+    return left;
+  }
   return data;
 };
 
 // The op's stream: its scope, and the next seq there (seqs run per stream,
-// see vector.js opKey).
-const assignScope = (core, op, data) => {
-  const scope = core.scopeOf(op.id, data);
+// see vector.js opKey). The record (`dataOf()`) is read for it only where a
+// scope function was given (`core.scoped`); `scopeOf` composes it.
+const assignScope = (core, op, dataOf) => {
+  const scope = core.scoped ? core.scopeOf(op.id, dataOf()) : GLOBAL_SCOPE;
   if (scope === GLOBAL_SCOPE) delete op.scope;
   else op.scope = scope;
-  op.seq = core.log.seqOf(opKey(op)) + 1;
-};
-
-// A splice names an index and a count; what travels is the anchor of the
-// new run (or the run of this origin to extend) and the ranges to cut, read
-// here, inside the queue — read outside it, a concurrent apply would shift
-// the indices. The content names the kind — a string for a text, an array
-// for a list — and a call that only cuts takes the field's.
-const resolveSplice = (core, id, payload, current) => {
-  const { key, index, count, content } = payload;
-  const meta = current?.meta;
-  const held = meta && Object.hasOwn(meta.seqs ?? {}, key) ? meta.seqs[key] : undefined;
-  const marker = content ?? (held?.k === 'l' ? [] : '');
-  const idx = held === undefined ? null : seqIndexOf(current, key);
-  const length = idx === null ? 0 : idx.length;
-  const at = index === null ? length : index;
-  if (at > length || at + count > length) {
-    const span = count > 0 ? `${at}..${at + count}` : String(at);
-    const message = `Index ${span} is out of range for field ${key} of record ${id} (length ${length})`;
-    throw new SyncomError('OUT_OF_RANGE', message, { id, field: key, index: at, count, length });
-  }
-  const value = { content: marker };
-  if (count > 0) value.cut = S.rangesOf(idx, at, count);
-  if (marker.length > 0) {
-    Object.assign(value, idx === null ? { at: S.HEAD } : S.placeInsert(idx, at, core.nodeId, marker.length));
-  }
-  return value;
-};
-
-// A list's element, by its index: the name it keeps across moves. A field
-// with no block has no elements (OUT_OF_RANGE); another kind under the field
-// was refused before this is read (`kindClash`).
-const elementAt = (core, id, key, index, current) => {
-  const meta = current?.meta;
-  const held = meta && Object.hasOwn(meta.seqs ?? {}, key) ? meta.seqs[key] : undefined;
-  const idx = held === undefined ? null : seqIndexOf(current, key);
-  const length = idx === null ? 0 : idx.length;
-  if (index >= length) {
-    const message = `Index ${index} is out of range for field ${key} of record ${id} (length ${length})`;
-    throw new SyncomError('OUT_OF_RANGE', message, { id, field: key, index, count: 0, length });
-  }
-  return { idx, elem: S.elemAt(idx, index) };
-};
-
-const resolveAssign = (core, id, payload, current) => {
-  const { key, index, value } = payload;
-  return { elem: elementAt(core, id, key, index, current).elem, value };
-};
-
-// A move names two indices; what travels is the element, the slot it showed
-// at and the anchor of its new position (`to` counts once it is out).
-const resolveMove = (core, id, payload, current) => {
-  const { key, index: from, to } = payload;
-  const { idx, elem } = elementAt(core, id, key, from, current);
-  if (to >= idx.length) {
-    const message = `Index ${to} is out of range for field ${key} of record ${id} (length ${idx.length})`;
-    throw new SyncomError('OUT_OF_RANGE', message, { id, field: key, index: to, count: 0, length: idx.length });
-  }
-  const place = S.placeInsert(idx, to < from ? to : to + 1, core.nodeId);
-  const at = place.at ?? `>${S.elemKey(place.run, place.from - 1)}`;
-  return { elem, cut: S.slotAt(idx, from), at, value: S.valueAt(idx, from) };
-};
-
-// A mark names a visible range and an expand rule; what travels is the pair
-// of anchors — an element and a side — the rule picks (src/sequence.js
-// markAnchors), or the id of the mark to switch off.
-const resolveMark = (core, id, payload, current) => {
-  const { key, off } = payload;
-  if (off !== undefined) return { off };
-  const { start, end, name, value, expand, many } = payload;
-  const meta = current?.meta;
-  const held = meta && Object.hasOwn(meta.seqs ?? {}, key) ? meta.seqs[key] : undefined;
-  const idx = held === undefined ? null : seqIndexOf(current, key);
-  const length = idx === null ? 0 : idx.length;
-  if (start > end || end > length) {
-    const message = `Range ${start}..${end} is out of range for field ${key} of record ${id} (length ${length})`;
-    throw new SyncomError('OUT_OF_RANGE', message, { id, field: key, index: start, count: end - start, length });
-  }
-  const [from, to] = idx === null ? [S.HEAD, S.END] : S.markAnchors(idx, start, end, expand);
-  const out = { start: from, end: to, key: name, value };
-  if (many) out.many = true;
-  return out;
-};
-
-// A tree move names a parent and a sibling to land after or before; what
-// travels is the place among the siblings as a fractional index
-// (src/order.js) between its neighbours — decided inside the queue, against
-// the tree as it is, folded once. A parent in the node's own subtree is
-// CYCLE, a sibling not under the parent NOT_FOUND; a move to where the node
-// already is makes no op (null). A move that would reach below the level a
-// tree reads (T.MAX_DEPTH), or a place with no room left between its
-// neighbours (an index past T.MAX_FI), is OUT_OF_RANGE. Siblings that share
-// an index order by stamp, and a node put after one of them lands after all
-// of them. Another kind under the field is left to applyOp to refuse.
-const resolveTree = (core, id, payload, current) => {
-  const { key, node, parent, after, before } = payload;
-  const meta = current?.meta;
-  const held = meta && Object.hasOwn(meta.trees ?? {}, key) ? meta.trees[key] : undefined;
-  const tree = held ?? T.createTree();
-  const folded = T.childrenOf(tree);
-  if (parent !== null && parent !== T.TRASH && T.subtree(tree, node, folded).has(parent)) {
-    const where = parent === node ? 'itself' : `${parent}, a node under it`;
-    const message = `Node ${node} of field ${key} of record ${id} cannot go under ${where}`;
-    throw new SyncomError('CYCLE', message, { id, field: key, node, parent });
-  }
-  const all = T.siblings(tree, parent, folded);
-  const was = all.findIndex((s) => s.id === node);
-  const sibs = was < 0 ? all : all.filter((s) => s.id !== node);
-  let at = sibs.length;
-  const next = after ?? before;
-  if (next !== undefined) {
-    const i = sibs.findIndex((s) => s.id === next);
-    if (i < 0) {
-      const message = `Node ${next} is not under ${parent ?? 'the root'} of field ${key} of record ${id}`;
-      throw new SyncomError('NOT_FOUND', message, { id, field: key, node: next });
-    }
-    at = after !== undefined ? i + 1 : i;
-  }
-  if (was >= 0 && (at === was || parent === T.TRASH)) return null;
-  if (parent !== T.TRASH) {
-    const depth = (parent === null ? 0 : T.depthOf(folded, parent)) + T.heightOf(folded, node);
-    if (depth > T.MAX_DEPTH) {
-      const message = `Node ${node} of field ${key} of record ${id} would reach level ${depth}; a tree reads ${T.MAX_DEPTH}`;
-      throw new SyncomError('OUT_OF_RANGE', message, { id, field: key, node, depth, max: T.MAX_DEPTH });
-    }
-  }
-  const lower = at > 0 ? sibs[at - 1].fi : null;
-  let upper = at < sibs.length ? sibs[at].fi : null;
-  if (lower !== null && upper !== null && upper <= lower) {
-    upper = null;
-    for (let i = at + 1; i < sibs.length; i++) {
-      if (sibs[i].fi > lower) {
-        upper = sibs[i].fi;
-        break;
-      }
-    }
-  }
-  const fi = between(lower, upper);
-  if (fi.length > T.MAX_FI) {
-    const message = `No room left between the neighbours of node ${node} in field ${key} of record ${id}; move a sibling away or reset the field`;
-    throw new SyncomError('OUT_OF_RANGE', message, {
-      id,
-      field: key,
-      node,
-      reason: 'fi',
-      length: fi.length,
-      max: T.MAX_FI,
-    });
-  }
-  return { node, parent, fi };
+  op.seq = core.seqOf(opKey(op)) + 1;
 };
 
 // Of a remove's observed tags, those of one origin; an element with none is left out.
@@ -312,41 +179,73 @@ const TAKES = {
   inc: ['counter'],
   add: ['set'],
   remove: ['set'],
-  splice: ['list', 'text'],
-  assign: ['list'],
-  move: ['list'],
-  mark: ['text'],
-  tree: ['tree'],
 };
-// A splice names its kind by its content — a string a text, an array a
-// list — and one that only removes takes the field's.
-const takesOf = (type, payload) =>
-  type === 'splice' && payload.content !== undefined ? [Array.isArray(payload.content) ? 'list' : 'text'] : TAKES[type];
-const kindClash = (type, payload, current) => {
-  const takes = takesOf(type, payload);
-  if (takes === undefined || !current || current.encrypted) return [];
+// A plugin's op names the kinds it takes itself (a splice by its content —
+// a string a text, an array a list — and one that only removes takes the
+// field's).
+const takesOf = (type, payload, plugins) => plugins.byType[type]?.takes(type, payload) ?? TAKES[type];
+const kindClash = (type, payload, current, plugins) => {
+  const takes = takesOf(type, payload, plugins);
+  if (!current || current.encrypted) return [];
   const fields = type === 'write' || type === 'set' ? Object.keys(payload.data ?? {}) : [payload.key];
   const rejected = [];
   for (const field of fields) {
-    const kind = kindOf(current, field);
+    if (typeof field !== 'string') continue;
+    // A prefix a counter, a set or a text holds refuses every op under it;
+    // under a list or a tree the next segment must name a member that is
+    // there (NOT_FOUND otherwise, raised by the caller from `member`).
+    let member = null;
+    for (const prefix of ancestorsOf(field)) {
+      if (member !== null) {
+        member = null;
+        continue;
+      }
+      const above = kindOf(current, prefix, plugins);
+      if (above === undefined || above === 'register') continue;
+      const mod = plugins.byName[above];
+      if (mod?.nests?.[above] === true) {
+        member = field.slice(prefix.length + 1).split('/')[0];
+        if (!mod.holds(current, prefix, member)) rejected.push({ field, reason: 'member', prefix, member });
+        continue;
+      }
+      rejected.push({ field, reason: above, prefix });
+      break;
+    }
+    if (takes === undefined) continue;
+    const kind = kindOf(current, field, plugins);
     if (kind !== undefined && !takes.includes(kind)) rejected.push({ field, reason: kind });
   }
   return rejected;
 };
 
 const prepareOp = (core, type, id, payload, current, who, from) => {
-  refuse(id, kindClash(type, payload, current));
-  core.observe(latestClock(current?.meta, true));
+  refuse(core, id, kindClash(type, payload, current, core.plugins));
+  core.observe(latestHeld(current?.meta), id);
   const op = { origin: core.nodeId, seq: 0, ts: core.clock.now(), type, id };
   if (from) op.from = from;
   // The writer's schema version rides on the op: what a reader on another
   // version lenses the record through.
   if (core.version !== null) op.v = core.version;
   if (who !== null) op.actor = who;
-  assignScope(core, op, scopeData(type, payload, current));
+  assignScope(core, op, () => scopeData(type, payload, current));
   if (payload.data !== undefined) op.data = payload.data;
   if (payload.key !== undefined) op.key = payload.key;
   if (payload.value !== undefined) op.value = payload.value;
+  // An unset names the fields the record holds — or has something under
+  // (a prefix of paths); the others are nothing to remove.
+  if (type === 'unset') {
+    const held = new Set();
+    if (current && !current.encrypted) {
+      for (const key of Object.keys(current.data)) {
+        held.add(key);
+        const above = ancestorsOf(key);
+        for (let i = 0; i < above.length; i++) held.add(above[i]);
+      }
+    }
+    const fields = [];
+    for (let i = 0; i < payload.value.length; i++) if (held.has(payload.value[i])) fields.push(payload.value[i]);
+    op.value = fields;
+  }
   // A remove names the tags this node observed, read here, inside the
   // queue — read outside it, a concurrent apply could add between the two —
   // or exactly the tags a patch names (an undo revokes its own add alone).
@@ -356,13 +255,16 @@ const prepareOp = (core, type, id, payload, current, who, from) => {
     // and leaves what a peer added meanwhile.
     if (payload.own === true) op.value = ownTags(op.value, core.nodeId);
   }
-  if (type === 'splice') op.value = resolveSplice(core, id, payload, current);
-  if (type === 'assign') op.value = resolveAssign(core, id, payload, current);
-  if (type === 'move') op.value = resolveMove(core, id, payload, current);
-  if (type === 'mark') op.value = resolveMark(core, id, payload, current);
-  if (type === 'tree') op.value = resolveTree(core, id, payload, current);
+  // A plugin's op: what travels is resolved inside the queue, against the
+  // record as it is — an index into an anchor, a sibling into a place.
+  const mod = core.plugins.byType[type];
+  if (mod !== undefined) op.value = mod.resolve(core, id, type, payload, current);
+  else if (!Object.hasOwn(TAKES, type) && !CORE.has(type)) throw missing(`a ${type} op`);
   return op;
 };
+
+// The ops the core makes itself; every other type of the protocol is a plugin's.
+const CORE = new Set(['write', 'set', 'unset', 'inc', 'add', 'remove', 'delete', 'purge', 'merge']);
 
 // A unique key another record holds: refused here, where one writer can be
 // told. Two concurrent writers on two nodes cannot be — see the `conflict`
@@ -370,12 +272,11 @@ const prepareOp = (core, type, id, payload, current, who, from) => {
 const assertUnique = async (core, id, entry) => {
   const conflicts = await core.conflicts(id, entry);
   if (conflicts.length === 0) return;
-  const issues = conflicts.map(({ fields, other }) => ({
-    path: fields,
-    message: `is not unique (held by ${other})`,
-    code: 'unique',
-    conflict: other,
-  }));
+  const issues = [];
+  for (let i = 0; i < conflicts.length; i++) {
+    const { fields, other } = conflicts[i];
+    issues.push({ path: fields, message: `is not unique (held by ${other})`, code: 'unique', conflict: other });
+  }
   throw new ValidationError(entry.data.$type, issues);
 };
 
@@ -387,8 +288,8 @@ const assertUnique = async (core, id, entry) => {
 // changes nothing.
 const validateLocal = async (core, op, current, visible, ctx) => {
   const { id, type } = op;
-  let { entry, changed, delta, rejected } = applyOp(current, op, core.limits);
-  refuse(id, rejected);
+  let { entry, changed, delta, rejected, changes } = applyOp(current, op, core.limits);
+  refuse(core, id, rejected);
   if (!changed) return null;
   const def = core.definitionOf(entry.data);
   if (def?.validator && VALIDATED.has(type)) {
@@ -400,29 +301,82 @@ const validateLocal = async (core, op, current, visible, ctx) => {
       if (type === 'write') op.data = validated;
       else op.data = foldSet(op.data, validated, visible ? project(def, id, await core.view(id, current)) : {});
       ctx.data = op.data;
-      ({ entry, changed, delta, rejected } = applyOp(current, op, core.limits));
-      refuse(id, rejected);
+      ({ entry, changed, delta, rejected, changes } = applyOp(current, op, core.limits));
+      refuse(core, id, rejected);
       if (!changed) return null;
     }
   }
   if (VALIDATED.has(type)) await assertUnique(core, id, entry);
-  return { entry, delta };
+  return { entry, delta, changes };
 };
 
-// Signed, then logged (the seq is durable from here), then the chain block,
-// then the record file; the log is told the batch landed. The signature is
-// made here and nowhere earlier: validateLocal rewrote `op.data`, and what
-// the peers receive is what must verify.
-const persistLocal = async (core, op, entry) => {
+/**
+ * Ops of this node's own, final but for the chain, linked in order: each
+ * names as `prev` the fingerprint of the op before it in its stream — one
+ * before it in `ops`, else what `held(key, seq)` answers (the log's), nothing
+ * when the stream starts there or this node does not hold that op — has its
+ * payload digested when the node signs (`signs`: the digest is how the
+ * header, and so the fingerprint, covers the payload — src/header.js), and
+ * is fingerprinted. Before the op is signed and appended, at every place
+ * that mints one: here, a transaction, a bootstrap's merges and advance
+ * (src/bootstrap.js). Returns op → fingerprint, what the log keeps.
+ */
+const link = async (ops, held, signs) => {
+  const fps = new Map();
+  let last = null;
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i];
+    const key = opKey(op);
+    const before = last?.get(key);
+    const prev = before !== undefined && before[0] === op.seq - 1 ? before[1] : held(key, op.seq - 1);
+    if (prev !== undefined) op.prev = prev;
+    if (signs) await digest(op);
+    // A string in Node.js, a promise in the browser: awaited only there.
+    let fp = fingerprintOf(op);
+    if (typeof fp !== 'string') fp = await fp;
+    fps.set(op, fp);
+    (last ??= new Map()).set(key, [op.seq, fp]);
+  }
+  return fps;
+};
+
+// Inside the queue: chained, signed, then appended — the seq reserved, the
+// ticket the durability — and the entry made the record's in-flight state,
+// what the next write of the record builds on. The digest, the link to the
+// op before it in its stream (`prev`) and the signature are made here and
+// nowhere earlier: validateLocal rewrote `op.data`, and what the peers
+// receive is what must verify. The queue is free from here: the disk is
+// waited for outside it.
+const issue = async (core, op, entry) => {
+  const fps = await link([op], core.fingerprintOf, core.sign !== null);
+  // Alone, the op is signed here; with writes queued behind it, on the
+  // thread pool while the queue moves on — the group's file waits for it.
+  let ready = null;
+  if (core.sign !== null) {
+    if (core.pipelined()) ready = core.sign(op, true);
+    else await core.sign(op, false);
+  }
+  const ticket = core.log.append([op], { ready, fps });
+  const position = ticket.entries[0].seq;
+  core.inflight(op.id, entry, position);
+  return { ticket, position };
+};
+
+// Outside the queue, in log order: once the op is on disk, the chain block
+// and the record file (or the deferred slot, under `open({ defer })`), the
+// log told the batch landed, the entry no longer in flight. A group that
+// did not reach the disk rejects the ticket — the storage has dropped the
+// in-flight entry already — and the write fails with it.
+const land = async (core, op, entry, { ticket, position }) => {
   const { id } = op;
-  if (core.sign !== null) await core.sign(op);
-  const [{ seq: position }] = await core.log.append([op]);
+  await ticket;
   // Logged: the write is durable from here and replicates from the log.
   // Under `open({ defer })` the file and the block wait for the flush
   // (Storage#deferWrite): held in memory, the batch unapplied until then.
   if (core.defer > 0) {
     await core.deferred(id, entry, position);
-    core.flush();
+    core.settled(id, position);
+    core.saveCatalog();
     return position;
   }
   // A block or a file that fails now holds the entry in memory, leaves the
@@ -431,17 +385,16 @@ const persistLocal = async (core, op, entry) => {
   try {
     let blockHash = null;
     if (core.chain) {
-      const hash = await calculateHash(entry.data);
+      const hash = await core.hash(entry.data);
       blockHash = await core.chain.addBlock({ id, hash, from: core.log.formatId(position) });
     }
     await core.entries.write(id, entry, blockHash);
+    core.log.applied(position);
   } catch (error) {
     await core.unpersisted(new Map([[id, entry]]), error);
-    core.flush();
-    return position;
   }
-  core.log.applied(position);
-  core.flush();
+  core.settled(id, position);
+  core.saveCatalog();
   return position;
 };
 
@@ -449,21 +402,105 @@ const persistLocal = async (core, op, entry) => {
 // `change` listeners (the relay among them) hear about the op. `via` is null
 // for a local write; a merge made from a peer's snapshot names that peer, so
 // the relay does not hand its own state straight back to it.
-const announce = async (core, op, entry, delta, ctx, source, via, committed = null) => {
-  const alive = isAlive(entry);
+// `refresh` false: a transaction's op that a later op of its record
+// follows — the live Record is refreshed once, by the last (`transact`).
+// `entry` null: an op that kept nothing of the record (no `commit` listener
+// when it was made) — no commit event for it.
+const announce = async (core, op, entry, delta, ctx, source, via, committed = null, changes = [], refresh = true) => {
   try {
     await core.hook('afterWrite', ctx, op);
   } finally {
-    core.refresh(op.id, alive ? entry.data : null, delta, source, entry);
+    if (refresh) core.refresh(op.id, isAlive(entry) ? entry.data : null, delta, source, entry);
     // What an undo manager keeps of a local commit: the record before and
     // after, as copies, and every field's kind — built only for a listener.
-    if (committed !== null && core.storage.listenerCount('commit') > 0) {
-      const { seq, before, previous } = committed;
-      const kinds = { ...kindsOf(previous), ...kindsOf(entry) };
-      const after = alive ? asJson(entry.data) : null;
-      notify(core.storage, core.logger, 'commit', { op, seq, source, before: asJson(before), after, kinds });
+    if (committed !== null && entry !== null && core.listening('commit')) {
+      const event = commitEvent(core, op, entry, isAlive(entry), committed, source, changes);
+      core.emit('commit', event);
     }
-    notify(core.storage, core.logger, 'change', op, via);
+    core.emit('change', op, via, { changes });
+  }
+};
+
+// The `commit` event: `before` and `after` are copies of the record and
+// `embeds` what its fields hold beside the reading (a text's markers), each
+// side — all three taken at the first read and kept, never on the write
+// path: an undo manager keeps a step's first `before` and last `after`, and
+// copying a large record twice per keystroke cost the record (the data
+// objects are never changed in place, so a late copy is the same copy).
+const commitEvent = (core, op, entry, alive, committed, source, changes) => {
+  const { seq, before, previous, txn } = committed;
+  const data = alive ? entry.data : null;
+  const kinds = { ...kindsOf(previous, core.plugins), ...kindsOf(entry, core.plugins) };
+  let beforeCopy;
+  let afterCopy;
+  let embeds;
+  return {
+    op,
+    seq,
+    txn,
+    source,
+    kinds,
+    changes,
+    get before() {
+      if (beforeCopy === undefined) beforeCopy = asJson(before) ?? null;
+      return beforeCopy;
+    },
+    get after() {
+      if (afterCopy === undefined) afterCopy = data === null ? null : asJson(data);
+      return afterCopy;
+    },
+    // What a field holds beside its reading, each side — null on both when
+    // nothing does: an inverse that lays a cut marker again needs its value.
+    get embeds() {
+      if (embeds === undefined) {
+        const was = valuesOf(core.plugins, previous);
+        const now = alive ? valuesOf(core.plugins, entry) : null;
+        embeds = was === null && now === null ? null : { before: was, after: now };
+      }
+      return embeds ?? undefined;
+    },
+  };
+};
+
+// One turn's worth of ops announced as a whole — a local write, a
+// transaction, a peer's page, a joined snapshot — with every change tagged
+// by its record: what a view updates itself by, once.
+const transacted = (core, { local, via, source, message, ops, changes }) => {
+  if (ops.length === 0 || !core.listening('transaction')) return;
+  const ts = ops[ops.length - 1].ts;
+  core.emit('transaction', { local, via, source, message, ops, changes, ts });
+};
+
+// The changes of an op tagged with its record, for a transaction event:
+// pushed onto `into`.
+const tagged = (op, changes, into = []) => {
+  for (let i = 0; i < changes.length; i++) into.push({ id: op.id, ...changes[i] });
+  return into;
+};
+
+// Per field, what a plugin's kind holds beside the reading — a text's
+// embed markers by index — or null when nothing does.
+const valuesOf = (plugins, entry) => {
+  if (entry === null || !isAlive(entry)) return null;
+  let out = null;
+  const kinds = kindsOf(entry, plugins);
+  for (const field of Object.keys(kinds)) {
+    const mod = Object.hasOwn(plugins.byName, kinds[field]) ? plugins.byName[kinds[field]] : undefined;
+    const values = mod?.values?.(entry, field);
+    if (values != null) (out ??= {})[field] = asJson(values);
+  }
+  return out;
+};
+
+// What a write takes nests at most MAX_JSON_DEPTH levels — the data, a
+// value, a content, the markers, the tags a remove names, each as given —
+// checked before the copy, which would recurse into it.
+const PAYLOAD = ['data', 'value', 'content', 'vals', 'removals'];
+const shallow = (payload) => {
+  for (let i = 0; i < PAYLOAD.length; i++) {
+    const name = PAYLOAD[i];
+    if (nestsWithin(payload[name], MAX_JSON_DEPTH)) continue;
+    throw new TypeError(`A write's ${name} nests deeper than ${MAX_JSON_DEPTH} levels`);
   }
 };
 
@@ -471,12 +508,14 @@ const announce = async (core, op, entry, delta, ctx, source, via, committed = nu
 // before anything keeps a reference to it: the data, a value, a content, the
 // tags a remove names.
 const copyPayload = (payload) => {
+  shallow(payload);
   if (payload.data !== undefined) payload = { ...payload, data: asJson(payload.data) };
   if (payload.value !== undefined && typeof payload.value === 'object') {
     payload = { ...payload, value: asJson(payload.value) };
   }
   if (payload.content !== undefined) payload = { ...payload, content: asJson(payload.content) };
   if (payload.removals !== undefined) payload = { ...payload, removals: asJson(payload.removals) };
+  if (payload.vals !== undefined) payload = { ...payload, vals: asJson(payload.vals) };
   return payload;
 };
 
@@ -486,32 +525,59 @@ const copyPayload = (payload) => {
 // cycle or a type change refuses the batch whole. Hooks and validators are
 // not run here; they run on the real commits, which may still refuse.
 const rehearse = async (core, id, ops) => {
-  let current = await core.entries.load(id);
+  let current = await core.current(id);
   if (current?.encrypted) return;
   for (const [type, given] of ops) {
     const payload = copyPayload(given);
-    const visible = current && isAlive(current) ? current.data : null;
+    const visible = current && isAlive(current) ? compose(current, core.plugins) : null;
     if (type === 'write' || type === 'set') payload.data = sameType(type, id, payload.data, visible);
     const op = prepareOp(core, type, id, payload, current, null, null);
-    if (type === 'tree' && op.value === null) continue;
+    // A plugin's op that resolved to nothing (a tree move to where the node is): nothing to write.
+    if (op.value === null) continue;
+    if (type === 'unset' && op.value.length === 0) continue;
     const { entry, changed, rejected } = applyOp(current, op, core.limits);
-    refuse(id, rejected);
+    refuse(core, id, rejected);
     if (changed) current = entry;
   }
 };
 
-const commitLocal = async (core, type, id, payload, options) => {
-  const { source = null, via = null, from = null, encrypted = false, actor, expect = null } = options;
-  const current = await core.entries.load(id);
+// What a commit came to, for the facade: the op (or null, undefined,
+// MISMATCH — see commitResult) and `done`, the landing the caller awaits —
+// the disk, the file, the hooks and the listeners, in log order — or null
+// when nothing was appended.
+const outcome = (op, done = null) => ({ op, done });
+
+// A message on the ops of a transaction or a patch batch: a string of at
+// most MAX_MESSAGE characters, in the signed header, listed by history().
+const messageArg = (message) => {
+  if (message === undefined || message === null) return undefined;
+  if (typeof message !== 'string' || message.length > MAX_MESSAGE) {
+    throw new TypeError(`message takes a string of at most ${MAX_MESSAGE} characters`);
+  }
+  return message;
+};
+
+// The op of a local write, made and applied inside the queue — the hooks,
+// the validator, the unique keys — up to the append: `{ op }` alone when
+// nothing is to be appended (null, undefined or MISMATCH, see
+// commitResult; `sealed` for an encrypted write, which is on disk already),
+// else the op with the entry it leaves, the delta, the hook context and
+// what the commit event needs.
+const prepare = async (core, type, id, payload, options) => {
+  const { source = null, via = null, from = null, encrypted = false, actor, expect = null, message } = options;
+  const msg = messageArg(message);
+  const current = await core.current(id);
   if (encrypted && current && !current.encrypted) {
     throw new SyncomError('ENCRYPTED', `Record ${id} is replicated and cannot become encrypted`);
   }
-  if (expect !== null && !(await expectation(core, id, current, expect))) return MISMATCH;
+  if (expect !== null && !(await expectation(core, id, current, expect))) return { op: MISMATCH };
   payload = copyPayload(payload);
   // Sealed: this write is encrypted, or the record already is. An
   // encrypted record has no op log — writes to it stay local.
   const sealed = encrypted || current?.encrypted === true;
-  const visible = current && (current.encrypted || isAlive(current)) ? current.data : null;
+  // The record as the application reads it — its paths composed — for the
+  // hooks and the commit event; the op model keeps the paths apart.
+  const visible = current && (current.encrypted || isAlive(current)) ? compose(current, core.plugins) : null;
   const who = await core.actorOf(actor);
   const ctx = {
     type,
@@ -526,52 +592,279 @@ const commitLocal = async (core, type, id, payload, options) => {
     actor: who,
   };
   payload = await replaced(core, type, payload, ctx);
-  if (sealed) return commitSealed(core, type, id, payload, current, ctx, source);
+  if (sealed) return { op: await commitSealed(core, type, id, payload, current, ctx, source), sealed: true };
   if (type === 'write' || type === 'set') {
+    // Every key a field name or a path of them: a key that is neither would
+    // be left out of the op without a word.
+    for (const key of Object.keys(payload.data ?? {})) fieldName(type === 'write' ? 'set' : 'update', key);
     ctx.data = sameType(type, id, payload.data, visible);
     payload = { ...payload, data: ctx.data };
   }
   const op = prepareOp(core, type, id, payload, current, who, from);
-  // A tree move to where the node already is: nothing to write (resolveTree
-  // hands back null instead of a place).
-  if (type === 'tree' && op.value === null) return null;
+  if (msg !== undefined) op.msg = msg;
+  // A plugin's op that resolved to nothing — a tree move to where the node
+  // already is — writes nothing.
+  if (op.value === null && core.plugins.byType[type] !== undefined) return { op: null };
+  // An unset of nothing the record holds writes nothing.
+  if (type === 'unset' && op.value.length === 0) return { op: null };
   const applied = await validateLocal(core, op, current, visible, ctx);
-  if (applied === null) return null;
+  if (applied === null) return { op: null };
+  // The data a beforeWrite hook or a validator handed back, as the op
+  // carries it: never deeper than a peer takes.
+  if (op.data !== undefined && !nestsWithin(op.data, MAX_WIRE_DEPTH)) {
+    throw new TypeError(`Record ${id}: its data nests deeper than ${MAX_WIRE_DEPTH} levels`);
+  }
   // The validator may have filled the field the scope reads (a default):
   // the stream is the one of the record as it is written.
-  if (type === 'write' || type === 'set') assignScope(core, op, applied.entry.data);
-  const seq = await persistLocal(core, op, applied.entry);
-  const committed = { seq, before: visible, previous: current && !current.encrypted ? current : null };
-  await announce(core, op, applied.entry, applied.delta, ctx, source, via, committed);
-  return op;
+  if (type === 'write' || type === 'set') assignScope(core, op, () => applied.entry.data);
+  const previous = current && !current.encrypted ? current : null;
+  // The commit event's `before` is the record in the op model's terms — the
+  // paths apart, as the entry holds them — what an undo takes a step back by.
+  const before = previous !== null && isAlive(previous) ? previous.data : null;
+  const { entry, delta, changes } = applied;
+  return { op, entry, delta, changes, ctx, source, via, before, previous };
+};
+
+const commitLocal = async (core, type, id, payload, options) => {
+  const prepared = await prepare(core, type, id, payload, options);
+  const { op } = prepared;
+  if (op === null || op === undefined || op === MISMATCH || prepared.sealed === true) return outcome(op);
+  const { entry, delta, changes, ctx, source, via, before, previous } = prepared;
+  const issued = await issue(core, op, entry);
+  const done = core.landing(async () => {
+    const seq = await land(core, op, entry, issued);
+    await announce(core, op, entry, delta, ctx, source, via, { seq, before, previous, txn: seq }, changes);
+    const message = op.msg ?? null;
+    // Built only while something listens (`transacted` says nothing otherwise).
+    if (core.listening('transaction')) {
+      transacted(core, { local: true, via, source, message, ops: [op], changes: tagged(op, changes) });
+    }
+  });
+  return outcome(op, done);
+};
+
+// The unique keys a transaction's own writes would share: the records it
+// touched are not in the catalog nor in flight yet, so they are checked by
+// hand, after the storage's own check.
+const conflictsIn = async (core, touched, id, entry) => {
+  const found = await core.conflicts(id, entry);
+  const def = core.definitionOf(entry.data);
+  if (!def || def.unique.length === 0) return found;
+  const view = await core.view(id, entry);
+  // Each (holder, key) once: the storage's own finds first.
+  const seen = new Set();
+  for (let i = 0; i < found.length; i++) seen.add(`${found[i].other}\0${found[i].fields.join(',')}`);
+  // This record's keys, read once for every record the transaction touched.
+  const mine = [];
+  for (const key of def.unique) mine.push(core.catalog.uniqueKey(view, key));
+  for (const [other, held] of touched) {
+    if (other === id || !isAlive(held) || held.data.$type !== entry.data.$type) continue;
+    const theirs = await core.view(other, held);
+    for (let k = 0; k < def.unique.length; k++) {
+      const key = def.unique[k];
+      if (mine[k] === null || mine[k] !== core.catalog.uniqueKey(theirs, key)) continue;
+      const pair = `${other}\0${key.join(',')}`;
+      if (seen.has(pair)) continue;
+      seen.add(pair);
+      found.push({ fields: [...key], other });
+    }
+  }
+  return found;
+};
+
+/**
+ * Several writes as one, inside the queue: `fn(tx)` runs over a core whose
+ * `current` sees the writes made before it and whose `commit` makes an op
+ * without appending it — the hooks, the validator and the unique keys run
+ * as each op is made. When `fn` returns, the ops are signed, appended as
+ * one group, landed as one batch (one chain block, each touched record's
+ * file written once) and announced in order, the `message` on every op. A
+ * throw from `fn`, or a refusal of any op, leaves nothing appended. Resolves
+ * to `{ result, done }`: what `fn` returned and the landing (null when no op
+ * was made).
+ */
+// An op made inside a transaction is a `syncom.commit` span of its own —
+// the op built, applied, validated — and a commit metric; the append and
+// the landing are the transaction's.
+const tracedPrepare = async (core, type, id, payload, options) => {
+  const { otel } = core;
+  if (!otel.enabled) return prepare(core, type, id, payload, options);
+  const started = now();
+  try {
+    const attributes = { 'syncom.op.type': type, 'syncom.record.id': id };
+    const made = await traced(
+      otel,
+      'syncom.commit',
+      attributes,
+      () => prepare(core, type, id, payload, options),
+      ({ op }) => ({
+        'syncom.result': commitResult(op),
+        'syncom.scope': op && op !== MISMATCH ? (op.scope ?? GLOBAL_SCOPE) : undefined,
+      }),
+    );
+    otel.recordCommit(type, commitResult(made.op), now() - started);
+    return made;
+  } catch (error) {
+    otel.recordCommit(type, 'error', now() - started);
+    throw error;
+  }
+};
+
+const transact = async (core, fn, { actor, source = null, message } = {}) => {
+  const msg = messageArg(message);
+  const prepared = [];
+  const touched = new Map();
+  const reserved = new Map();
+  // Per record: the index of its newest op here, and its ops' deltas laid
+  // one over the other — what the live Record is refreshed by, once.
+  const lastOf = new Map();
+  const deltas = new Map();
+  // An op a later op of its record follows keeps its op and its changes
+  // until the landing; the record it left only for a `commit` listener, its
+  // hook context only for an `afterWrite` hook. Kept whole, N ops of one
+  // large record held N copies of it — 2 000 moves of a tree, 926 MB.
+  const release = (made) => {
+    made.delta = null;
+    if (!core.hooks.afterWrite) made.ctx = null;
+    if (!core.listening('commit')) {
+      made.entry = null;
+      made.before = null;
+      made.previous = null;
+    }
+  };
+  const tx = {
+    ...core,
+    current: (id) => (touched.has(id) ? touched.get(id) : core.current(id)),
+    // A stream's seq counts the ops made here and not yet appended.
+    seqOf: (key) => Math.max(core.seqOf(key), reserved.get(key) ?? 0),
+    run: (task) => task(),
+    conflicts: (id, entry) => conflictsIn(core, touched, id, entry),
+  };
+  const commitIn = async (type, id, payload, options = {}) => {
+    if (!isRecordId(id)) throw invalidId(id);
+    if (options.encrypted === true || (await tx.current(id))?.encrypted === true) {
+      throw new SyncomError('ENCRYPTED', `Record ${id} is encrypted: an encrypted write stays outside a transaction`);
+    }
+    const given = { ...options, source, message: msg };
+    if (given.actor === undefined) given.actor = actor;
+    const made = await tracedPrepare(tx, type, id, payload, given);
+    const { op } = made;
+    if (op === null || op === undefined || op === MISMATCH) return op;
+    const was = lastOf.get(id);
+    if (was !== undefined) release(prepared[was]);
+    lastOf.set(id, prepared.length);
+    deltas.set(id, Object.assign(deltas.get(id) ?? {}, made.delta));
+    prepared.push(made);
+    touched.set(id, made.entry);
+    reserved.set(opKey(op), op.seq);
+    return op;
+  };
+  tx.commit = commitIn;
+  tx.commitNow = async (type, id, payload, options) => outcome(await commitIn(type, id, payload, options));
+  // A plugin method that transacts (`applyDelta`), called inside a
+  // transaction, runs within it: one append, the outer's actor, source and
+  // message. (The storage's `transact` would queue a second turn — behind
+  // the one this transaction holds.)
+  tx.transact = async (inner) => ({ result: await inner(tx), done: null, ops: 0 });
+  const result = await fn(tx);
+  if (prepared.length === 0) return { result, done: null, ops: 0 };
+  const count = prepared.length;
+  const ops = [];
+  for (let i = 0; i < count; i++) ops.push(prepared[i].op);
+  // Chained in order once every op is final — an op names the one made
+  // before it in its stream, here or in the log — then signed: on the thread
+  // pool when there are several, or writes queued behind; alone and
+  // unhurried, here.
+  const fps = await link(ops, core.fingerprintOf, core.sign !== null);
+  const signing = core.sign !== null && (count > 1 || core.pipelined()) ? [] : null;
+  if (signing !== null) for (let i = 0; i < count; i++) signing.push(core.sign(ops[i], true));
+  let ready = null;
+  if (signing !== null) ready = Promise.all(signing);
+  else if (core.sign !== null) await core.sign(ops[0], false);
+  const ticket = core.log.append(ops, { ready, fps });
+  const positions = [];
+  for (let i = 0; i < count; i++) positions.push(ticket.entries[i].seq);
+  // A record in flight is its newest entry, at its newest position.
+  for (const [id, last] of lastOf) core.inflight(id, touched.get(id), positions[last]);
+  const done = core.landing(async () => {
+    await ticket;
+    const from = positions[0];
+    const to = positions[positions.length - 1];
+    if (core.defer > 0) {
+      const held = new Map();
+      for (let i = 0; i < count; i++) {
+        const list = held.get(ops[i].id);
+        if (list === undefined) held.set(ops[i].id, [positions[i]]);
+        else list.push(positions[i]);
+      }
+      for (const [id, list] of held) await core.deferred(id, touched.get(id), list);
+    } else if (await core.land(touched, from, to)) {
+      // One append: the positions run from `from` to `to` without a gap.
+      core.log.applied(from, to);
+    }
+    for (const [id, last] of lastOf) core.settled(id, positions[last]);
+    core.saveCatalog();
+    // The transaction event's changes, built only while something listens.
+    const listening = core.listening('transaction');
+    const changes = [];
+    for (let i = 0; i < count; i++) {
+      const { op, entry, ctx, before, previous } = prepared[i];
+      const last = lastOf.get(op.id) === i;
+      const committed = { seq: positions[i], before, previous, txn: positions[0] };
+      const delta = last ? deltas.get(op.id) : null;
+      await announce(core, op, entry, delta, ctx, source, null, committed, prepared[i].changes, last);
+      if (listening) tagged(op, prepared[i].changes, changes);
+    }
+    transacted(core, { local: true, via: null, source, message: msg ?? null, ops, changes });
+  });
+  return { result, done, ops: prepared.length };
 };
 
 // The span starts when the write RUNS, not when it was queued: waiting on
 // the mutation queue is the caller's contention, not the write's cost. It
-// ends after the `change` listeners, because that is what the caller awaits.
-// (A bootstrap's merges are counted, never spanned.)
+// covers the queue's part — the op built, applied, validated, appended;
+// the duration recorded covers the landing too, up to the `change`
+// listeners, because that is what the caller awaits. (A bootstrap's merges
+// are counted, never spanned.)
 const tracedCommit = async (core, type, id, payload, options) => {
   const { otel } = core;
   const started = now();
-  let result = 'error';
+  let out;
   try {
     const task = () => commitLocal(core, type, id, payload, options);
     const attributes = { 'syncom.op.type': type, 'syncom.record.id': id };
-    const op = await traced(otel, 'syncom.commit', attributes, task, (op) => ({
+    out = await traced(otel, 'syncom.commit', attributes, task, ({ op }) => ({
       'syncom.result': commitResult(op),
       'syncom.scope': op ? (op.scope ?? GLOBAL_SCOPE) : undefined,
     }));
-    result = commitResult(op);
-    return op;
-  } finally {
-    otel.recordCommit(type, result, now() - started);
+  } catch (error) {
+    otel.recordCommit(type, 'error', now() - started);
+    throw error;
   }
+  const result = commitResult(out.op);
+  if (out.done === null) {
+    otel.recordCommit(type, result, now() - started);
+    return out;
+  }
+  const done = out.done.then(
+    () => otel.recordCommit(type, result, now() - started),
+    (error) => {
+      otel.recordCommit(type, 'error', now() - started);
+      throw error;
+    },
+  );
+  return outcome(out.op, done);
 };
 
-/** One local write, run inside the mutation queue. Returns the op, null, undefined or MISMATCH. */
+/**
+ * One local write, run inside the mutation queue: `{ op, done }` — the op
+ * (null, undefined or MISMATCH when nothing was appended) and the landing
+ * to await for it to be durable, written and announced (null when there
+ * is none).
+ */
 const commit = (core, type, id, payload, options = {}) => {
   if (!core.otel.enabled) return commitLocal(core, type, id, payload, options);
   return tracedCommit(core, type, id, payload, options);
 };
 
-module.exports = { commit, rehearse, MISMATCH };
+module.exports = { commit, transact, rehearse, link, MISMATCH };

@@ -1,27 +1,45 @@
 'use strict';
 
 /**
- * syncom, from this checkout. `insert` mints the id, `update` is a `set` op
- * of the changed fields, `inc` a counter op. A field is a register or a
- * counter, and a counter is born with its first `inc()` (docs/guide/storage.md),
- * so the record goes in without `hits` and reads back with `hits: 0` until
- * the counter exists. There is no batch write, so a
- * batch is the inserts issued at once (the mutation queue runs them in
- * order). A replica dials the source over tests/utils/memory-link.js — the
- * in-process link the engine tests run on: JSON across the boundary, like a
- * wrpc client, no socket — and catches up from the source's op log.
+ * syncom, from this checkout, in two builds — what an application opens:
  *
- * Two variants: the default (the hash-linked chain on) and `chain: false`,
- * what a node that only replicates can run.
+ * - `syncom`: the pure CRDT — the core with the `text` and `sync` plugins,
+ *   no signatures and no chain, record files a frame behind the log
+ *   (`defer: 16`, the default): what an editor that only merges documents
+ *   opens;
+ * - `syncom-secure`: `@alexify/syncom/all` — every op signed with the node's
+ *   Ed25519 key, every write a block of the hash-linked chain: what a node of
+ *   a signed, hosted mesh opens.
+ *
+ * `insert` mints the id, `update` is a `set` op of the changed fields, `inc`
+ * a counter op. A field is a register or a counter, and a counter is born
+ * with its first `inc()` (docs/guide/storage.md), so the record goes in
+ * without `hits` and reads back with `hits: 0` until the counter exists.
+ * There is no batch write, so a batch is the inserts issued at once (the
+ * mutation queue runs them in order). A text is a field of a record, typed
+ * into with splice(). A replica dials the source over
+ * tests/utils/memory-link.js — the in-process link the engine tests run on:
+ * JSON across the boundary, like a wrpc client, no socket — and catches up
+ * from the source's op log.
  */
 
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..', '..', '..');
+const src = (file) => require(path.join(ROOT, 'src', file));
 
 // Loaded on first use, like every other adapter's library, so the cold start
 // counts loading syncom.
-const engine = () => require(path.join(ROOT, 'index.js'));
+const builds = {
+  pure: () => {
+    const { open } = require(path.join(ROOT, 'index.js'));
+    const { text } = src('text/text.js');
+    const { sync } = src('sync/sync.js');
+    return (options) => open({ ...options, plugins: [text, sync] });
+  },
+  secure: () => src('all/all.js').open,
+};
+const memoryFsi = () => src('memory/memory.js').memory();
 const memoryLink = (unit) => {
   const { MemoryLink } = require(path.join(ROOT, 'tests', 'utils', 'memory-link.js'));
   return new MemoryLink(unit);
@@ -41,36 +59,36 @@ const wrap = (storage) => ({
   close: () => storage.close(),
 });
 
-const variant = (chain, memory) => {
+const variant = (build, memory) => {
   const options = (dir) => ({
     path: dir,
-    chain,
     logger: false,
     lock: false,
-    ...(memory ? { fsi: engine().createMemoryFsi() } : {}),
+    ...(memory ? { fsi: memoryFsi() } : {}),
   });
   const units = new WeakMap();
   return {
-    open: async (dir) => wrap(await engine().open(options(dir))),
+    open: async (dir) => wrap(await builds[build]()(options(dir))),
     // A text is a field of a record: one record, typed into with splice().
     text: async (store) => {
       const id = await store.storage.insert({ kind: 'text' });
       return {
         insert: (index, chars) => store.storage.splice(id, 'body', index, 0, chars),
+        delete: (index, count) => store.storage.splice(id, 'body', index, count, ''),
         read: async () => (await store.storage.get(id)).body ?? '',
       };
     },
     openReplica: async (dir, source) => {
       if (!units.has(source)) units.set(source, source.storage.sync.unit({ access: 'public' }));
       const unit = units.get(source);
-      const storage = await engine().open({
+      const storage = await builds[build]()({
         ...options(dir),
         sync: { connect: () => memoryLink(unit), autoStart: false },
       });
       return wrap(storage);
     },
     replicate: async (source, replica) => {
-      const want = source.storage.list ? (await source.storage.list()).length : 0;
+      const want = (await source.storage.list()).length;
       const seen = new Set();
       const done = new Promise((resolve) => {
         const onChange = (op) => {
@@ -91,19 +109,19 @@ const variant = (chain, memory) => {
 
 const ownVersion = () => require(path.join(ROOT, 'package.json')).version;
 
-const adapter = (id, chain, label) => ({
+const adapter = (id, build, label) => ({
   id,
   name: 'syncom',
   package: '@alexify/syncom',
   version: ownVersion,
   url: 'https://github.com/Alexis-Technologies/syncom',
   lines: {
-    memory: { ...variant(chain, true), variant: `${label}, createMemoryFsi()` },
-    disk: { ...variant(chain, false), variant: `${label}, node:fs` },
+    memory: { ...variant(build, true), variant: `${label}, memory()` },
+    disk: { ...variant(build, false), variant: `${label}, node:fs` },
   },
 });
 
 module.exports = {
-  chained: adapter('syncom', true, 'default'),
-  unchained: adapter('syncom-nochain', false, 'chain: false'),
+  pure: adapter('syncom', 'pure', 'core + text + sync'),
+  secure: adapter('syncom-secure', 'secure', '/all: signed, chained'),
 };

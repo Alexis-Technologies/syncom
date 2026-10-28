@@ -11,17 +11,31 @@ and that is the point of the design, see
 
 ## Two injection modes
 
+The adapter that turns an OpenTelemetry api or tracer into what the engine
+records through is the `telemetry` plugin — `@alexify/syncom/telemetry`,
+registered by `@alexify/syncom/all`; without it `open({ telemetry: { api } })`
+is `PLUGIN_MISSING`, and a node that never traces ships none of the adapter.
+
 ```js
 const otelApi = require('@opentelemetry/api');
 const { open } = require('@alexify/syncom');
+const { telemetry } = require('@alexify/syncom/telemetry');
 
 // The api module: syncom derives its own tracer and meter, so spans carry
 // the `@alexify/syncom` instrumentation scope.
-const storage = await open({ path: 'data', telemetry: { api: otelApi } });
+const storage = await open({ path: 'data', plugins: [telemetry], telemetry: { api: otelApi } });
 
 // Or pre-built instances — either alone is fine.
-const traced = await open({ path: 'data', telemetry: { tracer, meter } });
+const traced = await open({ path: 'data', plugins: [telemetry], telemetry: { tracer, meter } });
 ```
+
+The core itself records through a **writer** — `enabled` and `withSpan`,
+duck-typed — and takes one given to `open({ telemetry })`, plugin or not,
+contained: a recording method it lacks records nothing, one that throws is
+swallowed, and `withSpan` runs the work exactly once whatever the writer does
+around it — a writer never breaks or holds up a write. `createTelemetry({ api })`
+from the same subpath builds one by hand, to share with an `OpLog` opened on
+its own (`new OpLog(path, { telemetry: writer })`) or with a second storage.
 
 `includeIdentity: false` keeps record ids, peer urls/node ids and scopes off
 spans, and records a failure's `code` (or class) as the span status instead
@@ -63,8 +77,8 @@ wrpc's spans around the actual calls.
 
 | Span | When | Attributes |
 | --- | --- | --- |
-| `syncom.commit` | one local write — of any op type, a list, text or tree op as much as a `set` — from the moment it runs to after the `change` listeners | `syncom.op.type`, `syncom.record.id`†, `syncom.result` (`applied` / `noop` / `encrypted`), `syncom.scope` |
-| `syncom.apply` | one batch of a peer's ops | `syncom.ops.count`, `syncom.ops.applied`, `syncom.ops.skipped`, `syncom.ops.duplicates`, `syncom.ops.gaps`, `syncom.ops.malformed`, `syncom.ops.unsigned`, `syncom.ops.forged`, `syncom.ops.out_of_scope` |
+| `syncom.commit` | one local write — of any op type, a list, text or tree op as much as a `set` — from the moment it runs to after the `change` listeners; inside a transaction, the op built, applied and validated (the append and the landing are the transaction's) | `syncom.op.type`, `syncom.record.id`†, `syncom.result` (`applied` / `noop` / `encrypted`), `syncom.scope` |
+| `syncom.apply` | one batch of a peer's ops | `syncom.ops.count`, `syncom.ops.applied`, `syncom.ops.skipped`, `syncom.ops.duplicates`, `syncom.ops.gaps`, `syncom.ops.malformed`, `syncom.ops.unsigned`, `syncom.ops.forged`, `syncom.ops.out_of_scope`, `syncom.ops.equivocations` |
 | `syncom.replay` | the unsealed log tail replayed at open | `syncom.ops.count`, `syncom.records` |
 | `syncom.push` | one push to a peer, all its pages | `syncom.push.reason` (`handshake` / `manual` / `relay` / `recover` — a peer that fell behind, caught up from the vector), `syncom.ops.count`, `syncom.pages`, `syncom.peer.url`†, `syncom.peer.node`† |
 | `syncom.bootstrap` | the whole snapshot walk from a peer | `syncom.peer.url`†, `syncom.peer.node`†, `syncom.pages`, `syncom.records` |
@@ -76,7 +90,8 @@ wrpc's spans around the actual calls.
 | `syncom.untag` | a tag dropped: the copies the older tag needs moved, the rest removed | — |
 | `syncom.history` | `history()`: the record's retained entries folded, the versions handed out | `syncom.ops.count` (every retained entry, whatever the `limit`), `syncom.versions`, `syncom.exact` |
 | `syncom.version` | `get(id, { at })`, and each version `diff()` and `restore()` name: one version folded out of the log (a tag's copy is a file read, not a fold, and has no span) | `syncom.ops.count` (the entries inside the cut) |
-| `syncom.patches` | `applyPatches()`, and so `restore()` and `compact()`: the batch rehearsed, then every op committed (each a `syncom.commit` child) | `syncom.ops.count`, `syncom.ops.applied` |
+| `syncom.patches` | `applyPatches()`, and so `restore()` and `compact()`: the batch rehearsed, then every op made (each a `syncom.commit` child) and appended as one transaction | `syncom.ops.count`, `syncom.ops.applied` |
+| `syncom.transact` | `transact()`: `fn` run, every op made (each a `syncom.commit` child), the group appended | `syncom.ops.count` |
 
 † off the span when `includeIdentity` is false (so is `syncom.scope`).
 
@@ -102,22 +117,29 @@ appears on one.
 | `syncom.commits` | Counter | `{op}` | `syncom.op.type`, `syncom.result` (`applied` / `noop` / `encrypted` / `error`) |
 | `syncom.write.duration` | Histogram | `ms` | `syncom.path` (`commit` / `apply` / `replay`) |
 | `syncom.ops.received` | Counter | `{op}` | `syncom.outcome` (`applied` / `skipped` — accepted but not applied here: a hook, the schema, an unreadable record / `duplicate` / `gap` / `malformed` — the last includes a stamp beyond `maxSkew` / `refused` — a signature that does not check, or none under `'require'`, or on a host a record outside the pushing peer's scopes) |
-| `syncom.ops.rejected` | Counter | `{op}` | `syncom.reason` (`register` / `counter` / `set` / `list` / `text` / `tree` — the kind that holds the field and outranks the op's / `bound` — past a list's or a text's limit / `malformed` — a payload the engine does not admit / `validation` / `scope` / `unreadable` / `forged` / `unsigned`) |
+| `syncom.ops.rejected` | Counter | `{op}` | `syncom.reason` (`register` / `counter` / `set` / `list` / `text` / `tree` — the kind that holds the field and outranks the op's / `kind` — a field of a kind this node runs no plugin for, counted per op, reported once per page / `bound` — past a list's or a text's limit / `malformed` — a payload the engine does not admit / `validation` / `scope` / `unreadable` / `forged` / `unsigned` / `equivocation` — another op than the one held at its seq / `chain` — a `prev` that is not the fingerprint held at the seq before it) |
 | `syncom.conflicts` | Counter | `{conflict}` | `syncom.kind` (`unique`) |
 | `syncom.ops.limited` | Counter | `{push}` | `syncom.reason` (`ops` / `bytes` / `rate`) |
 | `syncom.replication.lag` | Histogram | `ms` | — |
 | `syncom.push.ops` | Histogram | `{op}` | `syncom.push.reason` (as on the span), `syncom.result` (`ok` / `error`) |
-| `syncom.bootstraps` | Counter | `{bootstrap}` | `syncom.result` |
+| `syncom.bootstraps` | Counter | `{bootstrap}` | `syncom.result` (`ok` / `error` / `refused` — a host that cannot hold one of this node's kinds, `KINDS_MISMATCH`) |
 | `syncom.log.segments` | Counter | `{segment}` | `syncom.log.event` (`sealed` / `dropped`) |
 | `syncom.log.append.duration` | Histogram | `ms` | — |
+| `syncom.log.group.ops` | Histogram | `{op}` | — (ops in one group the log wrote: every append that came while the group before it was being written) |
+| `syncom.log.append.failures` | Counter | `{group}` | — (groups the log could not write — their seqs taken back, their writes rejected; also `log.append.failed`) |
+| `syncom.defer.flush.duration` | Histogram | `ms` | — (landing the deferred window: the records' files and one chain block; the next window is at least as long) |
 | `syncom.hook.duration` | Histogram | `ms` | `syncom.hook` (`beforeWrite` / `afterWrite` / `beforeApply` / `afterApply` — the hooks that run in the mutation queue; read and sync hooks are not timed) |
 | `syncom.lock.wait` | Histogram | `ms` | — (what `open()` spent taking the directory lock) |
 | `syncom.hello.refused` | Counter | `{call}` | `syncom.code` (`400` / `403` / `409` / `428`) — calls a hosted unit refused before the handler |
+| `syncom.presence.refused` | Counter | `{entry}` | `syncom.reason` — on a host (`hello` / `rate` / `malformed` / `scope` / `forged` / `unsigned`: an update refused whole, never relayed) and on a receiver (`forged` / `unsigned` / `invalid` — malformed, past the bounds, not the sender's own, the room full: entries refused) |
 | `syncom.outbox.size` | Observable gauge | `{op}` | — (ops queued for peers, over every dialed peer) |
 | `syncom.queue.depth` | Observable gauge | `{op}` | — (writes waiting on, or in, the mutation queue) |
 | `syncom.cache.size` | Observable gauge | `{entry}` | — |
 | `syncom.catalog.size` | Observable gauge | `{entry}` | — (rows, tombstones included) |
 | `syncom.log.length` | Observable gauge | `{entry}` | — (entries retained) |
+| `syncom.inflight` | Observable gauge | `{op}` | — (local ops appended and not landed yet) |
+| `syncom.deferred` | Observable gauge | `{record}` | — (records whose files wait for the deferred window) |
+| `syncom.held` | Observable gauge | `{record}` | — (records held in memory after a file write failed, replayed at the next open) |
 
 The gauges are observable: the SDK reads them when it collects, through a
 callback the storage registers at open. **One storage per meter** for those —
@@ -168,18 +190,21 @@ syncom.commit            (node A)
 const otelApi = require('@opentelemetry/api');
 const { Server, WrpcClient, defineRouter } = require('@alexify/wrpc');
 const { open } = require('@alexify/syncom');
+const { sync } = require('@alexify/syncom/sync');
 const { createWrpcLink } = require('@alexify/syncom/wrpc');
 
+const { telemetry: otel } = require('@alexify/syncom/telemetry');
 const telemetry = { api: otelApi };
 
 // the host
-const hub = await open({ path: 'hub', telemetry });
+const hub = await open({ path: 'hub', plugins: [sync, otel], telemetry });
 const router = defineRouter({ syncom: hub.sync.unit({ access: 'public' }) });
 await new Server({ router, host: '0.0.0.0', port: 8000, protocol: 'http', telemetry }).listen();
 
 // a node
 const node = await open({
   path: 'node',
+  plugins: [sync, otel],
   telemetry,
   sync: { connect: async (peer) => createWrpcLink(await WrpcClient.connect(peer.url, { telemetry })) },
 });
@@ -215,17 +240,32 @@ alert to key on:
 
 | Level | `event` | When |
 | --- | --- | --- |
-| warn | `sync.op.malformed`, `sync.op.skew` | a peer's op refused before it was read; the latter also an `error` event (`SKEW`) |
+| error | `log.append.failed` | a group could not be written (`from`, `ops`): its seqs are taken back and its writes, with the group gathered behind it, reject; counted in `stats().log.appendFailures` |
+| error | `log.roll.failed` | sealing the log failed (a segment or the index not written — the disk full); nothing was lost: the groups stay open and durable, the next append rolls again, and `stats().log.rollFailures` counts it |
+| error | `log.flush.failed`, `internal.error` | a bug: the log's write lane or its bookkeeping after an append threw; the writes it held are answered all the same |
+| warn | `sync.op.malformed`, `sync.op.skew` | a peer's op refused before it was read; the latter also an `error` event (`SKEW`) — its own stamp, or one its merge meta holds, beyond `sync.maxSkew` |
+| warn | `clock.skew.ignored` | a record holds a stamp beyond `sync.maxSkew` (taken under `maxSkew: Infinity`, or before merge metas were checked): not observed into the clock, so a write to the record stamps below it and loses the fields it holds; once per record (`id`, `ts`, `ahead`) |
 | warn | `sync.op.forged`, `sync.op.unsigned` | a page with ops refused for their signature, once per page with the count; also an `error` event (`BAD_SIGNATURE`, `UNSIGNED`) |
+| warn | `sync.op.equivocation` | a page with ops refused as equivocation — another op than the one held at its seq (`reason: 'seq'`), or one whose `prev` is not the fingerprint held at the seq before it (`'chain'`) — once per page with `origin`, `scope`, `seq`, `held`, `received` and the count; also an `error` event (`EQUIVOCATION`) |
 | warn | `sync.op.rejected`, `sync.op.invalid`, `sync.op.unreadable`, `sync.op.encrypted`, `sync.op.lens` | a peer's op not applied here, by reason |
-| warn | `sync.op.refused`, `sync.op.scope`, `sync.hello.refused` | hosting side: ops outside a peer's scopes (`sync.op.scope`: the scope function threw on a pushed record, and the op was refused), a call refused by code |
-| warn | `sync.gaps`, `sync.push.gaps`, `sync.error`, `sync.outbox.dropped`, `sync.record.malformed`, `sync.record.skew`, `sync.record.encrypted` | a page with gaps (received, or answered by the host to a push), a failure on the way to a peer (`REWOUND` and `UNDELIVERABLE` among them), a dropped backlog, a snapshot record left out |
-| warn | `log.epoch.new` (when a log was there), `log.segment.unreadable`, `log.open.unreadable` | the log changed epoch or lost a file |
-| warn | `storage.unpersisted` | logged ops whose record files could not be written, held in memory until the next open; also an `error` event (`UNPERSISTED`) |
-| warn | `catalog.skipped`, `catalog.lens`, `catalog.save`, `catalog.search`, `snapshot.skipped`, `replay.skipped`, `record.shadowed`, `record.refresh` | derived state could not follow a record (`catalog.search`: the injected text index threw); a field shadowing a method; a live `Record` not refreshed after a change, a read hook having thrown |
+| warn | `sync.op.refused`, `sync.op.scope`, `sync.hello.refused` | hosting side: ops of a peer refused — outside its scopes (`sync.op.scope`: the scope function threw on a pushed record, and the op was refused), forged, unsigned, equivocating — a call refused by code |
+| warn | `sync.gaps`, `sync.push.gaps`, `sync.error`, `sync.outbox.dropped`, `sync.record.malformed`, `sync.record.skew`, `sync.record.encrypted`, `sync.record.kind` | a page with gaps (received, or answered by the host to a push), a failure on the way to a peer (`REWOUND` and `UNDELIVERABLE` among them), a dropped backlog, a snapshot record left out, a field of a kind this node has no plugin for |
+| error | `log.segment.unreadable`, `log.open.unreadable` | the log lost a file, or a line inside a journal: what it held is gone from this node (counted in `droppedTs`); an open group file that failed its checksum is kept under `log/corrupt/` (`kept`) |
+| error | `log.segment.missing` | the sealed segments on disk skip seqs — `from` to `to` — that the floor or the segment before says the log holds: a file gone; what it held is gone from this node (counted in `droppedTs`) |
+| warn | `log.epoch.new` (when a log was there) | the log changed epoch |
+| info | `log.open.torn` | a journal's last line did not read: its append was never acknowledged, so nothing that was answered is lost |
+| error | `storage.unpersisted` | logged ops whose record files could not be written, held in memory until the next open (`ids`, the first 32, and `count`); also an `error` event (`UNPERSISTED`) |
+| warn | `storage.piece.unremoved` | a piece of a large record (`<id>~<n>.json`) its file no longer names could not be removed (`id`, `name`): left on disk, written over when the record's counter reaches it again |
+| warn | `catalog.skipped`, `catalog.lens`, `catalog.save`, `catalog.search`, `snapshot.skipped` (`reason: 'scope'` when the scope function threw on the record), `replay.skipped`, `record.shadowed`, `record.refresh` | derived state could not follow a record (`catalog.search`: the injected text index threw); a field shadowing a method; a live `Record` not refreshed after a change, a read hook having thrown |
 | warn | `listener.error`, `watch.error`, `schema.drift` | an event listener or a watcher threw; two builds of one schema version |
+| warn | `editor.binding` | an editor binding (`@alexify/syncom/editor`) failed to send a delta or to reload, or its editor refused a peer's change, and has no `onError`; it reloads the editor from the field (five in a row stop it: `onStop`) |
+| warn | `editor.cursors`, `editor.undo` | an editor adapter (ProseMirror, CodeMirror) failed to show the room's cursors or publish its selection, or an undo/redo command failed, and has no `onError` |
+| warn | `editor.unfit` | the ProseMirror schema cannot hold what the field does (a mark, a node): the document leaves it out and the next edit sends that to every peer; once per binding, without `onUnfit` |
+| warn | `sync.presence.send` | a presence update could not be sent to a peer (`url`); the next renewal tries again |
+| warn | `sync.presence.refused`, `sync.presence.receive` | a host refused a peer's presence update (`node`, `reason`: `HELLO`, `PRESENCE_RATE`, `PRESENCE_MALFORMED`, `PRESENCE_SCOPE`, `PRESENCE_FORGED`, `PRESENCE_UNSIGNED`; also a `refused` event); a host's relay could not be taken (`url`) |
 | warn | `identity.rekeyed` | a directory from before signing: `node.json` held a UUID, the node is now its signing key (once) |
-| warn | `tags.dropped`, `tags.unreadable`, `sync.node.unreadable` | a `tags.json` line dropped (`reason`: `name` — not a record id, at open; `catalog` — the tag's catalog unreadable, found at open for the newest tag and at its first read for an older one); `tags.json` itself unreadable — kept as `tags.corrupt.json`, the storage open without tags until it is repaired; a registry entry that cannot be read, skipped |
+| error | `tags.unreadable` | `tags.json` unreadable — kept as `tags.corrupt.json`, the storage open without tags until it is repaired |
+| warn | `tags.dropped`, `sync.node.unreadable` | a `tags.json` line dropped (`reason`: `name` — not a record id, at open; `catalog` — the tag's catalog unreadable, found at open for the newest tag and at its first read for an older one); a registry entry that cannot be read, skipped |
 | info | `schema.upgrade`, `schema.changed`, `schema.held`, `record.repaired` | what a reopen found about the schema; a record rebuilt from the log |
 | debug | `catalog.rebuild`, `durable.noop`, `log.epoch.new` (a brand-new log), `schema.lens.issues` | routine |
 

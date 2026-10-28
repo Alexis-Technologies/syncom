@@ -7,7 +7,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { IDBFactory } = require('fake-indexeddb');
-const { createIdbFsi } = require('../idb.js');
+const { createIdbFsi } = require('../src/idb/idb.js');
 const { runFsiTests } = require('./suites/fsi.js');
 
 test('createIdbFsi', async (t) => {

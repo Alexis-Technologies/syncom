@@ -342,6 +342,7 @@ const runHooksTests = async (t, assert, createStorage) => {
       unsigned: 0,
       forged: 0,
       outOfScope: 0,
+      equivocations: 0,
     });
     assert.strictEqual(await storage.get('r1'), null, 'the skipped op did not touch the record');
     assert.deepStrictEqual(await storage.get('r2'), { n: 2 });
@@ -404,13 +405,11 @@ const runHooksTests = async (t, assert, createStorage) => {
     });
     const events = [];
     storage.on('apply', (batch) => events.push(batch.applied));
-    await assert.rejects(
-      () => storage.applyRemote([remoteOp('peer', 1, 'write', 'r1', { data: { n: 1 } })]),
-      hookError('afterApply'),
-    );
+    const written = remoteOp('peer', 1, 'write', 'r1', { data: { n: 1 } });
+    await assert.rejects(() => storage.applyRemote([written]), hookError('afterApply'));
     assert.deepStrictEqual(await storage.get('r1'), { n: 1 }, 'the batch is committed');
     assert.deepStrictEqual(events, [1], 'and announced');
-    const empty = await storage.applyRemote([remoteOp('peer', 1, 'write', 'r1', { data: { n: 1 } })]);
+    const empty = await storage.applyRemote([written]);
     assert.deepStrictEqual(empty, {
       applied: 0,
       skipped: 0,
@@ -420,6 +419,7 @@ const runHooksTests = async (t, assert, createStorage) => {
       unsigned: 0,
       forged: 0,
       outOfScope: 0,
+      equivocations: 0,
     });
     assert.strictEqual(batches.length, 2, 'an empty batch runs the hook too');
     assert.deepStrictEqual(batches[1].ops, []);
@@ -659,8 +659,8 @@ const runHooksTests = async (t, assert, createStorage) => {
       ],
     );
     assert.deepStrictEqual(hellos, [
-      { node: dialer.nodeId, scopes: ['docs'], schema: null },
-      { node: dialer.nodeId, scopes: ['docs'], schema: null },
+      { node: dialer.nodeId, scopes: ['docs'], schema: null, kinds: dialer.kinds },
+      { node: dialer.nodeId, scopes: ['docs'], schema: null, kinds: dialer.kinds },
     ]);
   });
 

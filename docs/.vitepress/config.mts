@@ -86,6 +86,8 @@ export default withMermaid({
     cleanUrls: true,
     lastUpdated: true,
     sitemap: { hostname },
+    // docs/CLAUDE.md holds the rules for agents who edit these pages; it is not a page of the site.
+    srcExclude: ['**/CLAUDE.md'],
 
     head: [
       ['link', { rel: 'icon', type: 'image/svg+xml', href: `${base}logo-mark.svg` }],
@@ -157,6 +159,7 @@ export default withMermaid({
               { text: 'Benchmarks', link: '/guide/benchmarks' },
               { text: 'Getting Started', link: '/guide/getting-started' },
               { text: 'Architecture', link: '/guide/architecture' },
+              { text: 'Entry points', link: '/guide/entry-points' },
             ],
           },
           {
@@ -164,8 +167,11 @@ export default withMermaid({
             items: [
               { text: 'Storage', link: '/guide/storage' },
               { text: 'Schema and validation', link: '/guide/schema' },
+              { text: 'TypeScript', link: '/guide/typescript' },
               { text: 'Queries', link: '/guide/query' },
               { text: 'Lists, text and trees', link: '/guide/lists' },
+              { text: 'Editors', link: '/guide/editors' },
+              { text: 'Frameworks', link: '/guide/frameworks' },
               { text: 'Versions and history', link: '/guide/versions' },
               { text: 'Hooks and events', link: '/guide/hooks' },
               { text: 'CRDT deltas', link: '/guide/crdt' },
@@ -177,6 +183,7 @@ export default withMermaid({
             text: 'Replication',
             items: [
               { text: 'Sync', link: '/guide/sync' },
+              { text: 'Presence', link: '/guide/presence' },
               { text: 'wrpc transport', link: '/guide/wrpc' },
               { text: 'WebRTC', link: '/guide/webrtc' },
               { text: 'Scaling', link: '/guide/scaling' },
@@ -191,13 +198,19 @@ export default withMermaid({
           },
           {
             text: 'Operations',
-            items: [{ text: 'OpenTelemetry', link: '/guide/telemetry' }],
+            items: [
+              { text: 'OpenTelemetry', link: '/guide/telemetry' },
+              { text: 'Devtools', link: '/guide/devtools' },
+            ],
           },
         ],
         '/reference/': [
           {
             text: 'Reference',
-            items: [{ text: 'API', link: '/reference/api' }],
+            items: [
+              { text: 'API', link: '/reference/api' },
+              { text: 'Wire format', link: '/reference/wire' },
+            ],
           },
         ],
       },

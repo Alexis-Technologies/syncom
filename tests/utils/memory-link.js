@@ -13,12 +13,15 @@ const { Emitter } = require('../../src/utils.js');
 const TRACKED = Symbol.for('wrpc.tracked');
 const clone = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
 
+let nextClientId = 1;
+
 class MemoryLink extends Emitter {
   #unit;
   #subscriptions = new Set();
   #down = false;
   #options;
   calls = [];
+  sent = [];
 
   constructor(unit, options = {}) {
     super();
@@ -26,12 +29,40 @@ class MemoryLink extends Emitter {
     this.#options = options;
     // What wrpc's `context.client` looks like from a handler's point of view.
     this.client = {
+      id: `c${nextClientId++}`,
       data: {},
       binary: false,
       rooms: new Set(),
       join: (room) => void this.client.rooms.add(room),
     };
-    this.context = { client: this.client };
+    // The host's server (tests/utils/mesh.js): rooms and `sendTo` over the
+    // links of one host, so a handler's relay reaches the other links.
+    this.context = { client: this.client, server: options.server ?? null };
+    options.server?.links.add(this);
+  }
+
+  /** Whether the socket is down. */
+  get down() {
+    return this.#down;
+  }
+
+  /** A fire-and-forget event to the host: the unit's `on` handler, as wrpc would call it. */
+  send(event, data) {
+    if (this.#down) throw Object.assign(new Error('Connection closed'), { code: 503 });
+    const name = event.split('/')[1];
+    const handler = this.#unit.on?.[name]?.handler;
+    if (!handler) throw Object.assign(new Error(`Unknown event ${event}`), { code: 404 });
+    this.sent.push(event);
+    const delay = this.#options.latency ? new Promise((resolve) => setTimeout(resolve, this.#options.latency)) : null;
+    Promise.resolve(delay)
+      .then(() => handler(this.context, clone(data)))
+      .catch(() => {});
+  }
+
+  /** The host's event to this client — what wrpc's `client.api.syncom.on` hears. */
+  deliver(event, data) {
+    if (this.#down) return;
+    void this.emit(event, clone(data));
   }
 
   async call(method, args) {

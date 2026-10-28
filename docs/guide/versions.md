@@ -4,7 +4,13 @@ Every op a node applies is in its log, so the past of a record is a fold of
 the log's entries of it — the same `applyOp` that built the record the first
 time, stopped at a version. `history(id)` lists the versions, `get(id, { at })`
 reads one back, and both say when the log can no longer vouch for what they
-give.
+give. The past is the `versions` plugin — `@alexify/syncom/versions`,
+registered by `@alexify/syncom/all`: `get(id, { at })`, `history()`, `diff()`
+between versions, `restore()` and the tags; without it those throw
+`PLUGIN_MISSING`, `stats().tags` is null, and a directory that holds tags
+is refused at `open()` (their copies would not be kept). `applyPatches()`
+and `compact()` — the present and its patches — are the core's. The examples
+on this page assume `open({ plugins: [versions] })`.
 
 ```js
 const id = await storage.insert({ title: 'Draft' });
@@ -229,10 +235,10 @@ kind: `put` (a register's new value — a `set`), `inc` (a counter's delta),
 adds this node observed, with `own: true` this node's adds alone, the way an
 undo revokes its own add and leaves a peer's concurrent one, with `removals`
 exactly the tags named), `splice` (a text's
-or a list's edits, by Myers), `treeMove` and `treeRemove`, `write` (the
-registers as a whole — a reset), `delete`, `purge`. No op removes one field,
-so a register that is gone, or a field that changed kind, makes the diff a
-`write` of the registers followed by the other kinds made again whole. A
+or a list's edits, by Myers), `treeMove` and `treeRemove`, `unset` (a field
+removed, of any kind), `write` (the registers as a whole — a reset; only for
+a record that was not there), `delete`, `purge`. A field that is gone is an
+`unset`; one that changed kind an `unset` and the kind made again whole. A
 text's marks are not diffed. The diff reads both versions through the schema
 lens, raw, without the read hooks, and rejects as `get(id, { at })` would
 for either version.
@@ -246,24 +252,66 @@ and applied over a scratch record, so an index out of range, a kind clash, a
 cycle, a sibling not there or a type change refuses the whole list, with the
 error the method would have thrown (`OUT_OF_RANGE`, `FIELD_KIND`, `CYCLE`,
 `NOT_FOUND`, `TYPE_IMMUTABLE`), before anything is appended: a restore lands
-whole or not at all. Hooks and validators run on the real writes alone, so
-one that throws on a later op rejects the call with its error and leaves the
-earlier ops committed — versions in `history()`, ops on their way to the
-peers; restoring again from there lands what is left.
+whole or not at all. The patches then land as one
+[transaction](./storage#transactions): the hooks and the validator run on
+each op as it is made, and one that throws on a later op rejects the call
+with its error and leaves nothing written — no version in `history()`, no
+op on its way to the peers.
+
+## Changes
+
+Every op announced — a `change` event's third argument, a `commit` event's
+`changes`, a `transaction` event's `changes` tagged by record — carries what
+the reading shows of it, in the write API's terms and the reading's indices:
+
+```js
+storage.on('change', (op, via, { changes }) => { … });
+// a keystroke:     [{ action: 'splice', field: 'body', index: 5, count: 0, content: 'x' }]
+// one in bold:     [{ action: 'splice', field: 'body', index: 5, count: 0, content: 'x', marks: { bold: true } }]
+// a cut:           [{ action: 'splice', field: 'body', index: 3, count: 2 }]
+// update():        [{ action: 'put', field: 'title', value: 'Final' }]
+// inc():           [{ action: 'inc', field: 'hits', value: 1 }]
+// add():           [{ action: 'add', field: 'tags', elements: ['x'] }]
+// setAt(), move(): [{ action: 'setAt', field: 'items', index: 1, value: 'b' }], [{ action: 'move', field: 'items', from: 0, to: 2 }]
+// mark():          [{ action: 'mark', field: 'body', start: 0, end: 5, name: 'bold', value: true, markId }]
+// treeMove():      [{ action: 'treeMove', field: 'outline', node: 'b', parent: 'r', after: 'a' }]
+// set():           [{ action: 'put', … }, { action: 'unset', field: 'old' }]
+// delete():        [{ action: 'delete' }]
+```
+
+A splice's cuts are in the indices before the op (last first), its insert in
+the indices after, with the `marks` a text's insert reads with — one it
+landed inside, one that grew over it; a mark over the indices its anchors
+fall at, less those a newer mark of its name holds (a peer's older mark
+arriving late changes what that one leaves); a slot inserted and its marker
+changed in one turn as the insert of the marker it ends with; a tree move
+names the node, its parent and the sibling before it, and the nodes that
+followed it where it was and where it is. A field changed another way — reset
+by a whole-record write, outranked by another kind, pruned under a prefix,
+joined from a snapshot — reads as `{ action: 'reset', field, kind, value }`
+with its whole value, or `{ action: 'unset', field }` when it went. Applied
+to the reading before the op, in order, the changes give the reading after —
+what a view or an editor binding updates itself by without re-reading the
+record. They are computed as the op is applied, from the block it lands in
+(a splice's indices in O(log n)), never by diffing two readings; a peer's op
+reports what it changed *here*, which is less than it changed where it was
+made when a concurrent op had already taken part of it.
 
 ## The commit event
 
 ```js
-storage.on('commit', ({ op, seq, source, before, after, kinds }) => { … });
+storage.on('commit', ({ op, seq, txn, source, before, after, kinds, changes }) => { … });
 ```
 
 Every local write — a call of the write API, a `Record`'s `save()`,
 `applyPatches()`, `restore()`, `compact()` — raises `commit` once its op is
-durable: the op, its seq in the log, the `source` (the `Record` whose
-`save()` it was, or what `applyPatches()` was given; `null` otherwise), the
-record `before` and `after` as copies of what is stored (no lens), and every
-field's `kinds` (`register`, `counter`, `set`, `list`, `text`, `tree` — of
-the fields there before and after). It is what an undo stack keeps; the
+durable: the op, its seq in the log, `txn` (the seq of the first op of the
+transaction it was made in — its own for a single write), the `source` (the
+`Record` whose `save()` it was, or what `transact()`/`applyPatches()` was
+given; `null` otherwise), the record `before` and `after` as copies of what
+is stored (no lens), every field's `kinds` (`register`, `counter`, `set`,
+`list`, `text`, `tree` — of the fields there before and after) and its
+[`changes`](#changes). It is what an undo stack keeps; the
 copies are made only while something listens. A peer's op raises `change`,
 not `commit`, and so do the `merge` and `advance` ops a joined snapshot
 leaves (`mergeSnapshot()`, `adoptVector()`); an encrypted write makes no op
@@ -300,28 +348,27 @@ write and a peer sees it as one — and what those ops commit is the redo
 step. The rule is Yjs's, refuse to overwrite: a field anything but the
 step's own ops changed since — a peer's write, a write of this node's the
 stack does not hold — is left alone and counted in `skipped`, and a step
-whose way back needs a reset (one that added a register field, a `delete()`,
-an `insert()`) is skipped whole when anything else changed the record since;
-`undo({ force: true })` overrides. A skipped patch goes with its step — the
+whose way back is the whole record (an `insert()`, whose way back is a
+delete; a `delete()`, whose way back writes the record again) is skipped
+whole when anything else changed the record since; `undo({ force: true })`
+overrides. A skipped patch goes with its step — the
 redo step holds only what was applied — so `force` is chosen up front, not
 as a retry. What commutes is no conflict: a peer's increment of
 the same counter, or add to or remove from the same set, leaves the undo
 free; a peer's edit of the same list or text does not (the undo's positions
-are stale by then). A field the step created is gone again when nothing else
-changed since — a whole-record write (had the step above created `views`,
-its way back would be that one write); with a peer's change beside it the
-undo empties a counter, a set, a list, a text or a tree instead, so the
-peer's change stays. An undone `add` removes this node's adds of the element
+are stale by then). A field the step created is `unset` again when nothing
+else changed it since; with a peer's change beside it the undo takes a
+counter down, removes this node's set elements, or leaves a list, a text or
+a tree alone instead, so the peer's change stays. An undone `add` removes this node's adds of the element
 alone, so a peer's concurrent add of it survives; an undone `inc` is the
 increment back; a text comes back as new characters. A text's marks are not
 undone. An undo that fails partway — a hook refusing one record's inverse,
 say — leaves the records it took back taken back, with their way back on the
 redo stack, and the rest on the undo stack for another try, so a record is
-not inverted twice. Within one record too: a hook or a validator that
-refuses a later op of its inverse leaves the earlier ones applied (the
-[`applyPatches()`](#diff-and-restore) rule), their way back goes to the redo
-stack, and the record waits on the undo stack from where those ops left it —
-the retry takes back the rest, not the whole record again.
+not inverted twice. Within one record a hook or a validator that refuses a
+later op of its inverse leaves nothing of that record applied (the
+[`applyPatches()`](#diff-and-restore) rule: one transaction per record), so
+the record waits on the undo stack whole, for another try.
 
 `createUndo(storage, options)` also takes `scope` — only the ops of that
 scope (`'*'` the global one) — `exclude(op)` — ops to leave out — and
@@ -334,23 +381,83 @@ record on every step. The manager pins the log from the oldest step it holds
 (conflicts are read from the log's entries), so a long stack holds segments
 past retention until `clear()` or `stop()`.
 
+A [transaction](./storage#transactions)'s commits are one step whatever the
+interval, and `group(fn)` — or `groupStart()` … `groupEnd()` — makes one of
+everything committed while `fn` runs. Every step carries `meta`, an object
+of the application's: put there on `push`, read back on `pop`, carried to
+the redo step and back — the way an editor keeps its selection across an
+undo, as [cursor tokens](./lists#cursors) that `position()` restores:
+
+```js
+let selection = null;                                 // the caret, as a cursor token, before each edit
+const undo = createUndo(storage, {
+  trackedSources: ['editor'],                         // the editor's transactions alone
+  paths: ['body'],                                    // its field alone: a title change is not undone here
+  onPush: ({ step }) => { step.meta.selection ??= selection; },
+  onPop: async ({ step }) => {
+    const at = await storage.position(id, 'body', step.meta.selection);
+    if (at !== null) editor.setSelection(at.index);
+  },
+});
+selection = await storage.cursor(id, 'body', editor.getSelection().index);
+await storage.transact((tx) => tx.splice(id, 'body', 5, 0, ' there'), { source: 'editor' });
+```
+
+`trackedSources` keeps the stack to commits whose `source` is one of them (a
+transaction's, a `Record`'s save), `records` to these ids (or a predicate on
+the id), `paths` to these fields and what hangs under them: a step's inverse
+then keeps to those fields, and a whole-record change — an insert, a delete
+— is not the manager's business. A write at a prefix of a step's field, or
+under it, counts as a change of the field. `steps` lists the steps each
+way, `{ id, meta, records, at, source, message, txn }` each.
+
+## Who wrote what
+
+A record's metadata names its writers: `lastEditorOf(id, field)` is
+`{ origin, ts }` — the node and the stamp of a register's value, of a
+counter's newest increment, of a list's, text's or tree's newest run, mark
+or move (`null` for a set, whose slots carry counts and no stamps);
+`editorsOf(id)` every node that wrote something the record still carries;
+and the text plugin's `editorOf(id, key, index)` who inserted the element
+at `index` of a list or a text, and when. All of it is read from the record
+as it is, no log needed; `history()` is the way to who did what and when
+across time. `origin` is a node id — the signing key, where ops are signed —
+not a person: who sits at a node is the application's map, and the `actor`
+on every op is its word.
+
+```js
+await storage.lastEditorOf(id, 'title');   // { origin: 'ClY1…', ts: 1792950114557 }
+await storage.editorsOf(id);               // ['ClY1…', 'udzk…']
+await storage.editorOf(id, 'body', 5);     // who typed the character at 5
+```
+
 ## Branches
 
 `@alexify/syncom/branch` forks a storage into another directory — a new
-identity, its own keys and log, standing at the parent's state or at a tag
-of it — and merges the two as ops, either way:
+identity, its own keys and log, standing at the parent's state, at a tag of
+it, or at any version its log can still give exactly — and merges the two
+as ops, either way:
 
 ```js
 import { branch, merge, branchInfo, drop } from '@alexify/syncom/branch';
 
 const draft = await branch(storage, { path: './data-draft', schema });      // at the present
 const fromV1 = await branch(storage, { path: './data-v1', from: { tag: 'v1' } });
+const before = await branch(storage, { path: './data-before', from: { at: eventId } }); // any version
 await draft.update(id, { title: 'Reworked' });                          // a storage like any other
 await merge(draft, { into: storage });   // { ops: 1, pages: 1, joined: false }
 await merge(storage, { into: draft });   // the parent's news, the other way
 await branchInfo(draft);                 // { parent, forkedAt: { eventId, vector, ts, tag }, createdAt }
 await drop(draft);                       // closed, files removed
 ```
+
+A fork at a version — an event id, a stamp, a vector — is read out of the
+log (`storage.atVersion(at)`: every record folded to the version, the
+vector of the ops within it, pages to join), so it is exact only while the
+log retains what the version needs: a record compacted past it, or a stream
+cut by compaction with nothing of it inside the version, is `HISTORY_GONE`
+— never under `retention: 'all'`. `branchInfo().forkedAt.at` keeps the
+version as given.
 
 A branch is opened with the options you give it (the schema it should run
 with, hooks, a logger), on the parent's `fsi` unless they name another; its

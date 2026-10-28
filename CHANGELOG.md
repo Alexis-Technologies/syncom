@@ -14,6 +14,368 @@ There is no released version section until then; everything below lands in it.
 
 ### Added
 
+- **What the log and the deferred window do is measured.** New metrics:
+  `syncom.log.group.ops` (ops per group the log wrote),
+  `syncom.log.append.failures`, `syncom.defer.flush.duration`, and the gauges
+  `syncom.inflight`, `syncom.deferred`, `syncom.held`; a group that cannot
+  be written logs `log.append.failed`. `stats()` adds `plugins`, `defer: {
+  window, flushCost, positions }`, `observers`, and in `log` the open and
+  unapplied groups, the torn lines and lost entries of the open, and the
+  failed appends. The writer contract gains `recordAppendFailure` and
+  `recordFlush`, and `recordAppend` the group's size.
+- **What an editor adapter shares: `createFit`, `undoSteps`,
+  `failureReporter`** (`@alexify/syncom/editor`). The fit — what an
+  editor's document differs from the field by, held for its next edit, and
+  the index maps across it —, the undo commands that wait for the binding's
+  edits, and the failure report were written twice, in the ProseMirror and
+  the CodeMirror adapter; both use these now, and an adapter of another
+  editor can.
+- **ProseMirror and CodeMirror: `indexOf(pos)` and `posOf(index)`.** A
+  position of the attached editor's document as an index of the field and
+  back, through what the field lacks of the document until the editor's
+  next edit sends it — for code that speaks to the storage directly.
+  ProseMirror's `indexOfPos` and `posOfIndex` stay the document's own.
+- **The log appends to a journal.** A backend may offer `append(dir, name,
+  content)`; `node:fs` does (through a few descriptors it holds open, the
+  least recently used closed first), and so do `memory()`, `layered()`
+  over layers that all have it, and `durable` (an append followed by
+  `sync`). Over it the log writes each group of ops as one line of a
+  journal, `log/open/<seq>-<token>.jsonl`, begun again at every roll and
+  removed once the roll has sealed its groups, instead of a file per group
+  made and later unlinked. A torn last line is left out at open
+  (`log.open.torn`); a line inside that does not read is lost and counted
+  like an unreadable segment; the files are read newest first, so a group
+  whose append failed after its line landed is shadowed by the group that
+  took its seqs. OPFS, IndexedDB and `atRest` (a file is one ciphertext)
+  write a file per group as before. With the window fix under Fixed, on
+  disk the pure build inserts about 5,500 records a second (from 2,900), updates and increments about 20,000
+  (from 3,400), and types 21,000 characters a second at the end of a text
+  (from 4,900) and 8,500 to 9,000 elsewhere (from 1,100 to 1,900).
+- **Benchmarks by build, and a durable line.** The cross-library comparison
+  measures syncom as two builds — the pure CRDT (the core with `text` and
+  `sync`, no signatures, no chain, `defer: 16`) and `@alexify/syncom/all`,
+  signed and chained — in place of the chain-on and chain-off rows; typing
+  into a text now runs on disk too, every keystroke awaited until each
+  library reports it stored (y-leveldb, Loro's appended updates,
+  automerge-repo's flush, syncom's log append); and the bundle sizes count
+  the core, the core with `text`, and `/all`, resolving the subpaths through
+  the package's `exports`. The matrices are decided again from this code:
+  in the CRDT comparison syncom now has nested fields, children of list
+  elements and tree nodes, embeds, blocks, deltas, events by path, editor
+  and UI bindings, transactions, origins and messages, presence, scoped
+  undo with cursors, version comparison, forks at any version, blame,
+  `unset`, surrogate checks, typed records, a wire spec, checksums and
+  anonymized dumps.
+- **CodeMirror.** `@alexify/syncom/codemirror`: `createCodeMirror(storage,
+  id, path, { state, view })` — CodeMirror's own modules, injected — gives
+  an extension for the editor's state and `attach(view)`. An edit's
+  ChangeSet leaves as a delta of exact splices; a peer's delta lands as a
+  ChangeSet, so the selection maps through it; what CodeMirror makes of the
+  text otherwise (`\r\n` read as a line break) is held and goes out with the
+  editor's next edit, so the field comes to hold what the editor shows and
+  opening an editor writes nothing. `cursors(presence)` and
+  `commands(manager)` as for ProseMirror; `keys` for `keymap.of()`.
+  CodeMirror is an optional peer dependency (types only).
+- **ProseMirror.** `@alexify/syncom/prosemirror`: `createProseMirror(storage,
+  id, path, { model, state, transform, view })` — ProseMirror's own modules,
+  injected — gives a plugin for the editor's state and `attach(view)`. The
+  document is one text with a block marker per block-level node in
+  document order (a container, a textblock, a leaf; `parents` the
+  containers it sits in), so lists, items and quotes round-trip;
+  `docToSpans`/`spansToDoc` and `indexOfPos`/`posOfIndex` are exported. An
+  edit leaves as the delta between the documents, a peer's lands as one
+  replace step with the selection carried by text index; what the schema
+  cannot hold is left out and sent as an edit, so the field comes to fit
+  the schema. `cursorPlugin(presence)` shows a room's cursors as
+  decorations and publishes this editor's selection; `commands(manager)`
+  are undo and redo over the storage's undo stack. ProseMirror is an
+  optional peer dependency (types only).
+- **Framework stores.** `@alexify/syncom/store`: `toStore(source)` makes a
+  query cursor (its rows), a live `Record` (its data), a presence (its
+  states) or a storage and a record id (the record as `get()` reads it, or
+  one field by path) one store object — `subscribe(run)` with Svelte's
+  contract, `getSnapshot()` stable for React's `useSyncExternalStore`, the
+  source watched from the first subscriber to the last; `fromEvents(emitter,
+  events, read)` for anything else. No framework is imported;
+  docs/guide/frameworks.md has React, Svelte, Vue and Solid.
+- **Editor binding.** `@alexify/syncom/editor`: `createTextBinding(storage,
+  id, path, adapter)` keeps an editor's document and a text field the same
+  through deltas — the editor's edits reach the field as one transaction
+  each, a peer's reach the editor rebased over what it holds beyond the
+  field — with a shadow of the field, one delta in flight at a time and
+  `applyDelta`'s new `expect`: a delta the field moved under is refused as
+  `STALE` before any op and sent again rebased. `compose`, `transform`,
+  `transformIndex`, `applyToText` over Quill-form deltas; `spansToDelta`,
+  `deltaToSpans`, `spansToBlocks`, `blocksToSpans`; `diffSpans`/`diffBlocks`,
+  the delta between two readings, markers and marks included;
+  `selectionToTokens`/`tokensToSelection`, a selection as cursor tokens;
+  `presenceCursors`, a room's cursors resolved to indices. A plugin method
+  that transacts, called inside a transaction, now runs within it.
+- **A text insert's change carries its marks.** A `splice` change of a text
+  now has `marks` — the marks its content reads with, one it landed inside
+  or one that grew over it — and `toDelta` puts them on the insert as
+  attributes, so a delta composed over the reading before gives the reading
+  after, rich, not only the string. `applyDelta` sets an insert's attributes
+  exactly: a mark that would have grown over typed text is taken off it.
+
+- **Wire format reference.** `docs/reference/wire.md`: the op and its
+  eighteen slots, every type's code and payload, what a signature covers
+  (the header array, the salted digest), the log files and their checksums,
+  the record file and its `meta`, the chain block, the four procedures with
+  their arguments, answers and refusal codes, the presence event, the
+  bounds a node holds a peer to, and the compatibility policy — every
+  example run against the package.
+- **Typed records.** A collection's records are typed by the schema: from the
+  entity's Standard Schema (`~standard.types` — zod, valibot, arktype:
+  `SchemaOutput<S>` is what a record reads as, `SchemaInput<S>` what a write
+  takes) or from a `Schema<{ Post: Post }>` annotation (`Shapes`, a phantom
+  the types alone read). `SyncomCollection<R, I>`: `get` is `R | null`,
+  `insert`/`set` take `I`, `update` a `Partial<I>` plus any field by path,
+  `select`/`count` a `MangoQuery<R>` that names the record's fields, `id` or a
+  dotted path, a cursor of `QueryRow<R>`; `SyncomRecord<R>` has a property
+  per field, `data()` as `R | null`, `delta()` as `Partial<R>`. The storage's
+  own readers take the type — `get<R>`, `record<R>`, `getCachedData<R>`, a
+  tag view's `get<R>`/`collection<R>`, a transaction's `get<R>` — or infer it
+  from the annotation; `RecordData` (`Record<string, unknown>`) wherever the
+  schema says no more. `insert`, `set` and `update` take `object`.
+  [TypeScript](https://syncomjs.vercel.app/guide/typescript) is the page.
+- **Devtools.** `@alexify/syncom/inspect`: `inspect(storage, id)` lays a
+  record out raw — the data in the op model's terms and the composed
+  reading, the reset stamps, every field with its kind, whether the reading
+  shows it and the kind's counts and stamps, the record's retained log
+  entries — and `anonymize(value, { salt, keys })` copies anything JSON
+  with every string hashed out, the shape kept, for a bug report.
+- **A fork at any version; who wrote what.** `branch(parent, { from: { at } })`
+  forks at an event id, a stamp or a vector, through the new
+  `storage.atVersion(at)` — every record folded to the version, its vector,
+  pages to join; `HISTORY_GONE` when the log no longer gives it exactly.
+  `lastEditorOf(id, field)` and `editorsOf(id)` read a record's writers from
+  its metadata, and the text plugin's `editorOf(id, key, index)` who
+  inserted an element — `{ origin, ts }`, a node and a stamp.
+- **Log checksums, `retention: 'all'`.** Every log file — a sealed segment,
+  an open batch — carries `hash`, the xxHash32 of its entries' JSON
+  (`src/hash.js`, pure JS, no dependency on the signing plugin); a file that
+  does not match at open is unreadable, as a torn one is: a segment lost
+  (`droppedTs` moves) and counted in `stats().log.corrupt`, an open file
+  dropped. `sync.retention: 'all'` keeps every segment, so every version
+  stays exact.
+- **Presence.** `@alexify/syncom/presence`: `createPresence(storage, { scope,
+  timeout })` holds this node's ephemeral state and the states it heard of
+  — who is here, what they edit, where their cursor is — per node, newest
+  by its clock, gone without a renewal, signed with the node's key when the
+  signing plugin is registered and verified on arrival (a forged or, under
+  `'require'`, an unsigned state is refused), never logged. The sync plugin
+  carries it: `storage.sync.presence(instance)` sends updates to every host
+  as the `syncom/presence` event; a host's unit checks them (the peer's own
+  node, its scopes, a rate), relays them to the scope's room and hands a
+  newcomer the room's states at hello. The link contract gains an optional
+  `send(event, data)`; the wrpc adapter maps it to `sendEvent` and the
+  unit's events.
+- **Undo: transactions, groups, step meta, a scoped stack.** A
+  transaction's commits are one undo step whatever the interval;
+  `group(fn)` (and `groupStart()`/`groupEnd()`) makes one step of everything
+  committed meanwhile; every step carries `meta`, the application's object —
+  a selection kept as cursor tokens, say, put there on `push` and restored
+  on `pop` through `position()` — which travels to its redo step and back;
+  `steps` lists them. `createUndo()` takes `trackedSources` (a
+  transaction's `source`), `records` (ids or a predicate) and `paths`
+  (fields, with what hangs under them; a step's inverse then keeps to
+  them), and `onPush`/`onPop`. A write at a prefix of a step's field, or
+  under it, counts as a change of the field.
+- **Observe, deltas and positions.** `observe(id, path?, listener)` — on a
+  `Record` too — hands a listener one record's changes a turn at a time,
+  under a path or whole, local and a peer's alike, until the returned
+  function is called. The `text` plugin adds `toDelta(changes, field?)`,
+  composing a text's changes into one delta in Quill's form (an embed slot as
+  `{ insert: { embed: marker } }`, a reset as `null`), `applyDelta(id, key,
+  delta)`, making a delta the field's edits as one transaction, and
+  `position(id, key, cursor)` / `positions()`, a cursor's index and side.
+- **Changes, and the `transaction` event.** Every op announced reports what
+  the reading shows of it, in the write API's terms and the reading's
+  indices: `applyOp()` returns `changes`, a `change` event carries them as its
+  third argument, a `commit` event as `changes` (with `txn`, the first seq
+  of the transaction it was made in), and a new `transaction` event hands
+  one turn's worth at once — a write, a `transact()`, a peer's page, a joined
+  snapshot — tagged by record. A splice's cuts and insert are read from the
+  rope in O(log n); a tree move names the node, its parent and the sibling
+  before it; a field changed another way is a `reset` with its value.
+- **Transactions.** `transact(fn, { actor, source, message })` runs `fn(tx)`
+  inside the mutation queue — `tx` the write API less `purge()`, the plugins'
+  methods included, plus `get()`/`has()` reading what the transaction wrote —
+  and appends the ops as one group once `fn` returns: all durable or none,
+  one chain block, each record's file written once, the `commit` events
+  after, in order; a throw or a refused write leaves nothing appended.
+  `message` (at most 1 024 characters) rides on every op in the signed
+  header — the 18th wire slot, `msg` — and `history()` lists it per version.
+  `applyPatches()`, `restore()` and `compact()` are transactions now: a hook
+  or a validator refusing a later op leaves nothing written (it used to
+  leave the earlier ops committed). Yjs's transaction *origin* is syncom's
+  `source`: `origin` names the node an op is from.
+- **Embeds and blocks in a text.** A document is one text: what is not a
+  character — an image, a mention, the start of a paragraph or a heading —
+  is an embed slot (U+FFFC) whose value is a marker `{ type, parents, attrs,
+  isEmbed }` (Automerge's model). `insertEmbed()` and `splitBlock()` insert
+  a slot with its marker (a `splice` carrying `vals`), `updateBlock()` and
+  `setAt()` on a text replace it (an `assign`, last writer wins),
+  `joinBlock()` cuts a block marker, `block()` and `blocks()` read the
+  markers and the document by block, and `spans()` tells them apart: every
+  span now carries a `type` — `'text'`, `'embed'` (its marker and marks) or
+  `'block'`. `get()` reads a slot as the character; `updateText()`, `splice()`
+  and `push()` refuse a text that adds one. A diff hands a splice patch its
+  `vals` and a changed marker a `setAt` patch; `restore()`, `compact()` and
+  an undo lay the markers again; a `commit` event carries them as `embeds`.
+- **Paths: fields with stable segments.** A field name may be a path —
+  `update(id, { 'profile/city': 'Kyiv' })`, `inc(id, 'stats/views')` — a
+  field of its own under its prefix, merged on its own, so two nodes writing
+  different children of one prefix both keep theirs; a read composes the
+  paths into nested objects over the register at the prefix. A register
+  written at a prefix resets what hangs under it below its stamp (a later
+  child survives), an unset of the prefix takes the subtree, a counter, a
+  set or a block holds its prefix alone (`FIELD_KIND` with `prefix`; from a
+  peer, what hung under it goes), and a record holds at most 4 096 fields
+  (`FIELD_KIND`, `kind: 'bound'`, `detail: 'paths'`). `/` is reserved for
+  paths. A hook's `current`, a validator, a query and a `Record` see the
+  paths composed; the ops, the log and a snapshot keep them apart.
+- **Children of elements and nodes.** A list's element and a tree's node
+  carry fields of their own, named through the element's name or the node's
+  id — `items/<name>/body`, `outline/<node>/title` — each a field like any
+  other, merged on its own, read composed into the element (over its value)
+  or as the node's `data`; `elementAt()` and `elements()` name a list's
+  elements. A write under an element or a node that is not there is
+  `NOT_FOUND`; a field under a removed one is unreachable until `compact()`.
+- **A surrogate pair is never split.** `splice()`, `mark()`, `unmark()` and
+  `cursor()` refuse an index of a text between the two halves of a pair with
+  `SURROGATE` (`id`, `field`, `index`), `updateText()` diffs by code points
+  where a pair is about, and content with a lone half is a `TypeError`.
+- **`unset()`, and `compareVectors()`.** `unset(id, fields)` — on the storage,
+  a collection and a `Record`, and as the `unset` patch — removes fields of
+  any kind: an `unset` op (wire code `u`) moves the fields' own reset
+  watermark (`meta.gone`), so what they held below it goes, an older
+  concurrent write of them is moot and a newer one makes them again; a
+  field the record does not hold is no op. A diff removes a field with it
+  instead of a whole-record reset, so an undo of a step that added a field
+  is field by field. `compareVectors(a, b)` says how two version vectors
+  stand: behind, ahead, equal or concurrent.
+- **The write path: group commit, a free queue, `defer: 16`.** The log reserves
+  an op's seq the moment it is appended and writes the ops appended while a
+  file is in flight as one file after it; the mutation queue moves on to the
+  next write at the append, which builds on the entry in flight, while the
+  disk, the record file, the `afterWrite` hook and the events follow in log
+  order — what the caller awaits (`stats().inflight`). Record files lag the
+  log by 16 ms by default (`open({ defer })`; `0` lands every write at once),
+  and `storage.flush()` lands them now. Writes queued behind one another are
+  signed on the thread pool. On the memory backend a text takes 44 000
+  keystrokes a second pipelined (from 5 000) and 19 000 awaited one by one
+  (from 9 000, where the log's roll was quadratic under a window).
+- **A rope under every list and text.** A sequence block is a persistent
+  B+-tree over its runs' segments (`src/text/btree.js`), its run records in a
+  persistent map and a placed run's segments and children in chunked lists:
+  an op — a keystroke at the end of a run, an insert anywhere, a cut, a
+  peer's run with what hangs under it — lands in O(log n) and leaves a new
+  block, the one before reading as it did; a text's reading is cached on the
+  rope, so a keystroke costs the path it copied, never the text; a block is
+  hydrated from its JSON once, piece by piece, and serialized in walk order
+  when read; `placeInsert` reads the rope in O(log n). `bench/sequence.js`:
+  527 000 appends a second (from 171 000), 65 000 inserts at random places
+  of a 100 KB text of 10 000 runs (from 98), 120 000 prepends to a text of
+  10 000 runs (from 98), a 100 KB text hydrated and read 11 500 times a
+  second (from 383). A block object carries `k`, `ts`, the maps and `runs`
+  alone: `lengthOf(block)` and `totalOf(block)` replace its `length` and
+  `total` properties. The `text` entry's budget is 22 KB (21.5 measured), the
+  `all` entry's 80 KB.
+- **Plugins, and the package in blocks.** The kinds beyond registers, counters
+  and sets are plugins registered per storage — `open({ plugins: [text, tree] })`
+  with `text` from `@alexify/syncom/text` (lists and texts) and `tree` from
+  `@alexify/syncom/tree` — never process-wide; `@alexify/syncom/all` is the
+  core with every shipped plugin registered, the API as it was. The main
+  entry is the core alone (54 KB min+gzip, from 66). A method, a patch action
+  or a local op of a plugin the storage was not opened with is refused with
+  `PLUGIN_MISSING` naming the subpath; a peer's op of such a kind is refused as
+  `reason: 'kind'`, logged and relayed (a hub without the text plugin carries
+  the text between two nodes that have it), a snapshot block of it is left
+  out with a `sync.record.kind` warning; `hello` names the kinds both ways and
+  a node does not bootstrap from a host that lacks one of its own
+  (`KINDS_MISMATCH`); `node.json` remembers the kinds a directory ran with and
+  a reopen without one is refused. `storage.plugins`, `storage.kinds`,
+  `createPlugins()`. Every subpath is a folder under `src/` and the root holds
+  four files; `meta.seqs`/`meta.trees` became one `meta.blocks` slot keyed by
+  field, each block naming its kind (`k`).
+- **Security as blocks.** The identity and the signatures, the chain and the
+  sealing of records are plugins too, each what it was as one piece:
+  `signing` (`@alexify/syncom/signing`) makes the node id its Ed25519 key,
+  signs every own op and verifies a peer's under `sync.signatures`; `chain`
+  (`@alexify/syncom/chain`) writes a block per applied batch, checks a cold
+  read and gives `validate()` its walk; `encryption`
+  (`@alexify/syncom/encryption`) seals `{ encrypted: true }` records for this
+  node's RSA pair. The key functions — `calculateHash`, `generateSigningKeys`,
+  `loadSigningKeys`, `sign`, `verify`; `generateKeys`, `loadKeys`, `encrypt`,
+  `decrypt` — and `Blockchain` moved to those subpaths off the root, each
+  with its own browser types where Web Crypto is async. Without `signing` the
+  node id is what `getId` mints (a UUID by default; cuid, ulid… through
+  `open({ getId })`), nothing is signed or checked, and a directory keeps the
+  key it was given as its id (one born without the plugin is rekeyed once,
+  with `identity.rekeyed`, when it arrives); without `chain` no block is
+  written and `validate()` is `NO_CHAIN` naming the plugin. What the options
+  ask for and no plugin provides is `PLUGIN_MISSING` at `open()`:
+  `sync.signatures: 'require'` without `signing`, `chain: true` without
+  `chain`, `encrypted: true` without `encryption`. The chain and the schema
+  hash use SHA-256 through Web Crypto on both platforms (`src/crypto/digest.js`), so
+  the core has no crypto half. New: `atRest(fsi, { key | password, salt })`
+  — a backend wrapper (every file AES-256-GCM under one key, PBKDF2 from a
+  password, `DECRYPT_FAILED` with a `reason` for a file that is not the
+  key's). The main entry is 51 KB; `/all` registers all five plugins.
+- **Backends as blocks.** `memory()` — the backend in memory, what
+  `createMemoryFsi()` was — is `@alexify/syncom/memory`, off the root; the
+  core keeps the contract (`isFsi`). New: `layered([top, …, bottom], { write,
+  fill, queue })` from `@alexify/syncom/layered`, one backend over several —
+  a read is the first hit top down, filled upward; a write lands on every
+  layer in list order, `'through'` (the default) or `'back'` from a queue the
+  top answers ahead of (`flush()`, `close()`, `pending`); `create` is
+  exclusive across the layers, so a lock on the disk is a lock whatever the
+  memory above it holds, and under `'back'` nothing stale is read from below.
+- **Sync as a block.** The sync manager — the dialing side and the hosting
+  unit — is the `sync` plugin, `@alexify/syncom/sync` (`SyncManager` and
+  `isSyncLink` with it); without it `storage.sync` is `PLUGIN_MISSING`, and
+  the core still takes a peer's page through `applyRemote()` and selects
+  what a peer lacks with `outbound()`, now exported from the root — the
+  updates API a transport of the application's own carries. The options,
+  the hooks, the link contract and the apply path stay in the core, which
+  is 44 KB.
+- **Schema as a block.** The entity definitions — the validators adapted,
+  the id fields, the indexes, the migrations and the lens — are the `schema`
+  plugin, `@alexify/syncom/schema`, read once at `open()`; the core applies
+  them (collections, validation on the write path, the catalog's indexes,
+  `schemaInfo`, `migrate()`, `check()`) and keeps `ValidationError`. Without
+  the plugin `open({ schema })` and `open({ validator })` are
+  `PLUGIN_MISSING`, as are `migrate()` and `check()`, and records are
+  untyped. The core is 42 KB.
+- **Telemetry as a block.** The OpenTelemetry adapter — `{ api }` or
+  `{ tracer, meter }` into the writer the engine records through — is the
+  `telemetry` plugin, `@alexify/syncom/telemetry`, with `createTelemetry()`
+  to build a writer by hand; the core keeps the writer contract, the
+  disabled writer and `traced`, takes a writer given to `open({ telemetry })`
+  as it is, and refuses an api or a tracer without the plugin
+  (`PLUGIN_MISSING`). An `OpLog` opened on its own takes a writer. The core
+  is 40 KB.
+- **Queries as a block.** The cursor — the Mango predicate, the planner,
+  `fetch()`/`count()`/`one()`/`watch()` — is the `query` plugin,
+  `@alexify/syncom/query`: `select()` and `count()` on a collection, and on
+  a view at a tag, are its; without it they throw `PLUGIN_MISSING`. The
+  catalog, its indexes and the text index behind `$text` (`open({ search })`)
+  stay in the core, kept whether or not anything queries them. The core is
+  39 KB.
+- **Versions as a block.** The past — `get(id, { at })` and `history()`
+  folded from the log, `diff()` between versions, `restore()`, and the tags
+  (`tag`, `untag`, `tags`, `at`, copy-on-write at the record-file seam) — is
+  the `versions` plugin, `@alexify/syncom/versions`; `applyPatches()` and
+  `compact()`, the present and its patches, stay in the core (the undo
+  subpath stands on them). Without the plugin those methods throw
+  `PLUGIN_MISSING`, `stats().tags` is `null`, and a directory that holds tags
+  is refused at `open()`, since its copies would not be kept. The core is
+  35 KB — from 66 before the blocks; `pnpm size` checks that the core and
+  every block bundled together weigh what `/all` weighs, so nothing is
+  bundled twice, and every block's suite runs over the lean core with the
+  plugins given by hand as well as over `/all`.
 - **Lists and text.** A field can be a list — an array edited by position —
   or a text — a string typed into: `splice(id, key, index, count, content)`
   and `push(id, key, content)`, on the storage and on a live Record. Two
@@ -128,7 +490,7 @@ There is no released version section until then; everything below lands in it.
   identity, standing at the parent's state or at a tag of it (its snapshot
   pages joined, its vector adopted, `branch.json` written); `merge(source,
   { into })` hands either side what the other lacks as ops through
-  `applyRemote` — `src/outbound.js`, the selection a push makes, now shared
+  `applyRemote` — `src/sync/outbound.js`, the selection a push makes, now shared
   with the sync manager, asked for every stream, a third node's included —
   or, when one of those streams is out of the source's log, as a join of
   state (`joined: true`); `branchInfo()`, `drop()`. A branch is a storage
@@ -397,7 +759,7 @@ There is no released version section until then; everything below lands in it.
   five functions of the contract (`read`, `write`, `exists`, `remove`,
   `list`) and routes the records, the log, the chain, the keys and the
   registry through it; `storage.fsi` is what the storage uses. `isFsi()`,
-  `createMemoryFsi()` (a backend in memory, for tests, SSR and benchmarks —
+  `memory()` (a backend in memory, for tests, SSR and benchmarks —
   two storages opened over one share it), and `open({ durable: true })`:
   every write followed by the backend's `sync` (fsync on `node:fs`; a
   backend without one logs at debug). `loadKeys`, `Blockchain` and `OpLog`
@@ -536,6 +898,41 @@ There is no released version section until then; everything below lands in it.
 
 ### Security
 
+- **A host could keep a bootstrapping node paging for ever.** The dialing
+  side took the host's snapshot cursor as it came — one that did not move
+  on was asked again and again — and read a streamed page to its end,
+  however long. A page without records, a cursor that does not pass the
+  last one, or a streamed page past `sync.maxPageBytes` (new, 256 MiB by
+  default) now stop the bootstrap with `BAD_PAGE` (`url`, `reason`).
+- **An op on a purged record no longer costs a rewrite of the log, nor
+  carries the payload on.** A peer's op that landed on a record purged
+  before it was logged with its payload, relayed with it to every peer this
+  node relays to, then scrubbed — and the scrub rewrote every log file that
+  had ever held the id, so a peer sending op after op for a purged id made
+  this node rewrite all those segments each time. Such an op is now
+  stripped before the append (the header, digest and signature stay, so it
+  still verifies) and logged `scrubbed`; a scrub rewrites only the files
+  holding entries it takes.
+- **A fork of a stream is refused, never healed in silence.** Two ops of
+  one `origin` and `seq` that differ — a restored backup minting seqs again,
+  a cloned directory, an equivocating signer — were taken first-come and the
+  other dropped as a duplicate, so nodes diverged for good. Every op now
+  names the fingerprint of the op before it in its stream (`prev`, the
+  SHA-256 of its header, slot 19 of `packOps`, in the signed header; still
+  `PROTOCOL` 1, the wire of the first publication), and the log keeps each op's
+  fingerprint and every stream's head (`index.json` `heads`, kept past
+  compaction). A peer's op at a seq this node holds under another
+  fingerprint, or one whose `prev` is not the held predecessor's, is
+  refused as `EQUIVOCATION` (`reason: 'seq'` / `'chain'`): not logged, not
+  relayed, counted (`equivocations` in an apply or push result,
+  `syncom.ops.rejected{equivocation|chain}`), an `error` event with both
+  fingerprints, `refused` on a host. An unsigned op carries no digest, so
+  its fingerprint covers its header alone: two unsigned ops that differ in
+  payload only are one op to it. A digest and a fingerprint are 43
+  base64url characters. Cost: about 2.5 µs per local op on the unsigned
+  path (a keystroke in memory 14.5 → 17 µs; the editing trace 47.8k → 42.1k
+  ops/s), 3% on the signed one; on disk within noise. Budgets: `/all`
+  108.5 KB, `/versions` 33.5 KB.
 - **Lists, texts and trees are bounded against a peer.** A peer's op or
   block could cost a node more than it says, or split the mesh: a `[3e8]`
   gap in a snapshot run was expanded element by element; any origin could
@@ -609,6 +1006,297 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **An unreadable `index.json` vouched for the whole log.** With no index
+  the floor is the first seq on disk; with one that did not read it stayed
+  at 1, so a log compacted past seq 1 claimed to hold what it had dropped
+  and `droppedTs` stayed 0. An index that does not read is now no index.
+- **A scope function that threw on one record failed every snapshot.**
+  `snapshot()` asked every record its scope and let a throw out, so one
+  record the scope function could not read stopped every peer's bootstrap
+  from this node. A record it throws on is left out of the page
+  (`snapshot.skipped`, `reason: 'scope'`), and a page for every scope no
+  longer asks any record its scope.
+- **An open of the log could delete what it failed to read.** A read error
+  of an open group's file (EIO, EMFILE) was taken for a torn write and the
+  file removed, and a group file that failed its checksum — whole once, so
+  answered — was removed too. A file that is there and cannot be read now
+  fails `open()` with `CORRUPT` (its `cause`), and a group file that fails
+  its checksum is moved to `log/corrupt/` and counted as lost. A torn one,
+  never answered, is still dropped (`log.open.torn`).
+- **A transaction of many ops on one large record held a copy of the
+  record per op.** Every op kept the record it left, its delta and its hook
+  context until the transaction landed: 2 000 moves of one tree held
+  926 MB, 8 000 pushes onto one list 348 MB, and an 8 000-node outline built
+  in one transaction ran out of memory. An op a later op of its record
+  follows now keeps its op and its changes alone (the record it left only
+  while a `commit` listener exists, the hook context only with an
+  `afterWrite` hook) — 4.8 MB and 10 MB — and the record is in flight,
+  deferred and refreshed once, as its last op left it: a live `Record`
+  emits one `update` per transaction, with the delta of all its ops.
+- **A list that a move and a push touched could show an element twice.**
+  A local push after a move extended the move's position run, so every
+  pushed slot read as the moved element (duplicate names, wrong values). A
+  position run is never extended now; a peer's extension of one is
+  malformed, and a longer one in a peer's block is left out.
+- **A splice's embed markers could overwrite a newer `setAt`.** When the
+  assign to a slot arrived before the splice that laid it, the splice's
+  marker won; both settle by stamp now, so either order reads the same.
+- **A move that carried a value from an assign not yet here reported no
+  value change**; it reports a `setAt` with the move.
+- **A field anchored below an `unset` read as missing after a reopen.**
+  A block read from a file was hydrated under the record's base rather than
+  the field's own floor.
+- **A refused presence update was heard by no one, or as a refused
+  hello.** The dialing side dropped what a host's relay carried that did
+  not verify (`.catch(() => {})`), and a host counted its presence refusals
+  under `syncom.hello.refused` and logged them as `sync.op.refused`. A
+  presence instance now raises `refused` (`{ from, forged, unsigned,
+  refused }`), both sides count `syncom.presence.refused` by reason, a host
+  logs `sync.presence.refused`, and a relay that cannot be taken is logged
+  (`sync.presence.receive`). A `change` listener that throws is logged
+  (`listener.error`) instead of leaving a rejection unheard.
+- **An application's plugin had no methods on the storage.** The facade
+  carried a stub for every shipped plugin's method and nothing else, so a
+  plugin of the application's reached its methods inside a transaction only,
+  though the types promised them on `open()`'s storage. They are installed at
+  open now (a name that would shadow a member of the storage is refused).
+- **`INVALID_VERSION` was typed as a `SyncomError` code it never is.** It is
+  a `TypeError`'s (`typed()`), so `error instanceof SyncomError && error.code
+  === 'INVALID_VERSION'` was never true. The codes of the typed `TypeError`s
+  are their own union now, `TypedErrorCode` (`PRESENCE_SIZE` among them,
+  which had no row in the reference either); a test reads every code `src/`
+  raises and holds both unions and the reference table to it.
+- **A presence state could be pinned, and a room filled, for good.** An
+  entry's stamp had no upper bound, so a state stamped hours ahead outlived
+  every timeout; the host stored and relayed entries without the checks a
+  receiver makes; a repeated hello refilled the presence rate; the scopes a
+  hello asked for were neither checked nor bounded; empty rooms stayed; and a
+  state nested thousands deep threw out of the depth check. A stamp more than
+  60 s ahead is refused, the host checks every entry as a receiver does
+  before it keeps or relays it, the rate bucket survives a hello, a hello asks
+  for 256 scopes at most (stream names or `*`, each once), an empty room
+  goes, and the depth is checked without recursion.
+- **A layered backend's background failure surfaced in an unrelated read.**
+  Under `write: 'back'`, a lower layer's failed write was kept and thrown
+  from whatever next waited for the queue — a read that missed the top, an
+  `exists`, a `list` — and every failure after the first was lost. Each is
+  told to the new `onError` and counted (`failed`); only `flush()`, `sync()`
+  and `close()` throw it.
+- **`drop()` needed the versions plugin, and a failed `branch()` stayed
+  open.** Sweeping a branch asked for its tags before closing it — a
+  `PLUGIN_MISSING` on the lean core, which left the branch open and locked
+  (a failed `branch()` sweeps the same way) — and removed `branch.json` first,
+  so a sweep cut short left a directory neither `drop()` nor `branch()` would
+  take. The branch closes first, its tags are read only where the plugin
+  keeps them, and `branch.json` goes last.
+- **A crash or a reader could catch a log index, a segment or `node.json`
+  half written.** The `node:fs` backend truncated a file and then wrote it:
+  a crash in between left a torn file, and a torn `log/index.json` opened as
+  a new epoch (every peer re-bootstraps), a torn `node.json` did not open at
+  all. `write(dir, name, content, { atomic: true })` stages the content and
+  renames it into place — the log's index and its segments (a scrub rewrites
+  them), `node.json`, the schema file, `tags.json`, the catalog, the chain's
+  index, the sync registry and `branch.json` ask for it; a record file does
+  not (the log's replay mends a torn one, and a rename per landing cost a
+  third of the disk's write rate). A temporary file is never listed. A read
+  of a tag's record that met a file half written by a landing reads again
+  once the landings are down (the flake of the patches suite).
+- **A field named like an `Object.prototype` member could take its value.**
+  A join read a side's data without checking that it owned the field, so a
+  clock naming `valueOf` over data that did not hold it copied the inherited
+  function into the record; a merge that dropped a field named `toString`
+  did not report it gone; a peer's vector with a `__proto__` key
+  re-prototyped the copy the sync manager kept. Own keys alone, everywhere.
+- **An encrypted file could stand in for another.** `atRest()` sealed every
+  file under one key with nothing tying a ciphertext to its file, so one
+  record's file copied over another's decrypted as that one. Ciphertexts are
+  bound to their file name now (the additional data of AES-GCM); the
+  docs say what stays visible (names, sizes) and what a key cannot tell (an
+  older copy put back).
+- **`anonymize()` left what it promised to hide.** Keys stayed by default —
+  a set's elements (an email), the origins of a clock, the streams of a
+  vector — the salt was empty by default, and the hash 32 bits wide. Keys are
+  hashed by default now (`keys: false` keeps them), a call without a `salt`
+  takes a fresh random one, the hash is 64 bits, and the docs say what it is:
+  pseudonymization — the shape, lengths and numbers stay, and a guessable
+  string is found again by whoever holds the salt.
+- **An op could be signed by a key no one holds.** A node id passed as an
+  Ed25519 key by its format alone; the all-zero key and the other points of
+  small order verify a forged signature for a share of all messages, so ops
+  "signed" by such an id — anyone's to write — went through under
+  `signatures: 'require'`, and presence states too. The signing plugin
+  refuses those keys (and a y past the field's prime, a second name of a key)
+  as forged.
+- **One peer could stall a node with a deep tree.** Every tree op refolded
+  every move of the field, and the cycle check walked each move up to the
+  root: a 10 000-node chain made every later op on that field take 4 s inside
+  the mutation queue. The walk stops at 512 ancestors (`MAX_WALK`; a move past
+  it is moot, like one that would make a cycle — the same on every node), the
+  fold walks an index array, and a field holds 65 536 moves at most
+  (`MAX_MOVES`: one more is a `bound` refusal, a snapshot block past it is not
+  taken, a join keeps the oldest). One op after a 10 000-node chain: ~15 ms.
+- **A counter could lose increments, or diverge, across scopes.** A counter
+  kept one slot per origin and compared its stream's seqs: once a record
+  moved to another scope, its node's `inc`s were silently nothing, and two
+  incs of one node in two scopes summed differently by arrival order. The
+  slot is per stream (`origin@scope`) now; a slot keyed by a bare origin reads
+  as the global stream's.
+- **A peer could push this node's clock years ahead.** A `merge` op was checked
+  for the skew of its own stamp, not of the stamps its `meta` carried; the
+  first local write to that record then observed them, and every op the node
+  made afterwards — on any record — was refused as `SKEW` everywhere,
+  through a restart. A merge op whose meta is stamped beyond `sync.maxSkew` is
+  `SKEW` now (malformed, never logged or relayed), a stamp must be a positive
+  safe integer, and a stamp a record already holds beyond the horizon is
+  never observed into the clock (`clock.skew.ignored`, once per record).
+- **The host a node dialed could renumber the node's own streams.** A host's
+  `advance` and a joined vector were adopted for this node's own keys, and a
+  hello's claim that the host held more of them moved them at once: a gap in
+  the node's stream forever, or a seq past the safe integers and a node no
+  peer would hear. Own keys never move by `advance` or a join now; a hello's
+  claim (`REWOUND`) is adopted under `/signing` only with proof — the host
+  hands this node's own signed op at that seq — and otherwise only with the new
+  `sync.rewind: 'adopt'` (`'report'` by default; `REWOUND` carries `adopted`).
+- **A deeply nested payload stopped every signing dialer.** Verifying a
+  page's signatures recursed through each op and overflowed the stack on one
+  nested a few thousand levels deep — `PAGE_FAILED`, then `STUCK`. An op nested
+  past 80 levels is malformed before anything reads it, a verify that throws is
+  that op `FORGED` alone, and a local write nested past 64 levels is a
+  `TypeError`.
+- **One unreadable cursor in a room hid every cursor, and the rejection went
+  unhandled.** A peer's presence state with a cursor token the field could
+  not read made `presenceCursors` throw, and the ProseMirror and CodeMirror
+  adapters called it as `void refresh()`. The token is that peer's cursor
+  left out now; the adapters' cursor, selection and undo work report through
+  `onError` (or warn `editor.cursors` / `editor.undo`).
+- **An editor binding could part ways with its editor, or hang.** An editor
+  that threw on a peer's change left the binding's shadow ahead of the
+  editor, and later edits landed at the wrong indices; a first load the editor
+  refused left the binding buffering the field's events for good; `flush()`
+  after a stop never answered — and the adapters' undo waits for it. The
+  binding reloads the editor when it throws, a first load that fails stops
+  it (`ready` rejects), `flush()` answers at once once stopped, and `stopped`
+  and `onStop(reason)` say so.
+- **ProseMirror dropped what its schema could not hold without a word.** The
+  document left out a mark or a node the field held, and the next edit sent
+  that loss to every peer. `onUnfit(delta)` hears it now (a warn,
+  `editor.unfit`, without one).
+- **A log roll the disk refused hung every write for good.** Once a group of
+  ops was on disk, the log rolled — sealing a segment, writing its index — and
+  only then answered the group's writers; a roll that threw (the disk full as
+  the segment was written) answered no one, and every write landing behind
+  them in log order waited forever, `flush()` and `close()` with them, even
+  after the disk came back. The group is answered whatever follows its append
+  now: a failed roll seals nothing, is logged (`log.roll.failed`, at `error`),
+  counted (`stats().log.rollFailures`), and the next append rolls again.
+- **A telemetry writer of the application's could hang the same way.** The
+  core took a writer given to `open({ telemetry })` as it was, checked for
+  `enabled` and `withSpan` alone, and called some twenty methods on it: one
+  missing or throwing after an append left the writes waiting. A given writer
+  is contained now — a method it lacks records nothing, one that throws is
+  swallowed, `withSpan` runs the work exactly once whatever the writer does.
+- **A scrub cut short could lose acknowledged groups.** A purge rewrote the
+  journal holding the id's ops in place; a crash half way through read back at
+  the next open as a torn last line, and every group after the tear was gone —
+  the node then handed out its own seqs again, which its peers dropped as
+  duplicates. The copy goes under a new name now, which an open reads first,
+  and the old journal is removed after it; a copy a scrub left behind is
+  removed at the next open, so no payload the scrub took survives it.
+- **A failed group could come back in part.** A journal line was taken seq by
+  seq: a group whose append failed after its bytes landed, followed by a
+  shorter group that took its seqs back, came back at the next open with the
+  failed group's tail. A line is a group whole or not at all now.
+- **A list run of more than about 130 000 elements threw `RangeError`.** A run
+  of a list's elements may hold `MAX_RUN` (1 048 576) of them, but joining two
+  pieces of one spread the second into `push(...)`'s arguments, which V8 caps:
+  a peer's snapshot with such a run, or an extension of a run whose parent had
+  not arrived yet, failed the page. The same spread sat on eight other paths
+  (a transaction's changes, a diff's patches, a compaction's mark patches, an
+  undo step, a delta of many embeds, a block's spans). None is left.
+- **`merge()` threw on a field named like an `Object.prototype` member.**
+  `merge({}, { constructor: [2] })` read the inherited `constructor` and threw
+  a `TypeError`; it reads the target's own keys only now.
+
+- **Two ProseMirror editors could answer each other without end.** Where
+  concurrent edits merged into a structure the schema could not hold, both
+  adapters fitted the field at once, the field kept both fits, the doubled
+  structure fit no better, and both fitted again, the document growing
+  every round. The adapter now never answers a peer's change with an edit:
+  every reader builds the same document from the field, and what the field
+  lacks of it goes out with the editor's next edit. Opening an editor
+  writes nothing.
+- **Two CodeMirror editors could make two line breaks of one.** CodeMirror
+  reads `\r\n` and a lone `\r` as a line break, and each adapter sent the
+  `\n` it showed as soon as a peer's change brought the `\r`: a lone `\r`
+  fitted on two nodes at once became two breaks. The fit now goes out with
+  the editor's next edit, as ProseMirror's does; until then a peer's change
+  shows as the field's text read again, each break where it was.
+- **A marker inserted and changed in one turn read as its first value.**
+  `toDelta` composed the change onto the insert as an `embed` attribute,
+  which a reader takes for a mark: an editor bound to the field kept the
+  block it was inserted as. The insert now carries the marker it ends with.
+- **A peer's older mark was reported over text a newer one holds.** A mark
+  arriving after a newer one of its name was reported over its whole range,
+  so an observer, or an editor binding, showed it where the reading shows
+  the newer one. It is reported over what the newer ones leave.
+- **An editor binding could drift from its field.** `expect` compares
+  text, and a peer's change made of the characters it replaced — a letter
+  cut and typed again — let a delta land by index over the new characters,
+  not as the binding had rebased it: the binding now reads its own event
+  against the delta it rebased and reloads where they differ. A send right
+  after a failure went out over the delta the failure dropped, and its
+  reload never came: sends now wait for it. And what was typed while the
+  field was being read again was sent over the contents that replaced it:
+  it now goes with them. Each left an editor apart from the field until
+  the next reset; under load the two-editor tests failed one run in seven.
+- **A deferred window could run its flushes back to back.** A window armed
+  while the previous flush was queued or writing fired inside it, so once a
+  record's file took longer to write than the window (a text of thousands
+  of runs on disk), the flushes ran one after another, each with a
+  keystroke or two, each writing the whole record while the writer waited
+  behind it: typing at the start of a text fell to about 40 characters a
+  second past 12,000 of them. A window is now armed when the flush before
+  it is done, and is as long as that flush took when it took longer than
+  `defer`; the same typing holds at about 12,000 a second.
+- **A list, text or tree field a peer's first op made empty was not
+  reported.** An op on a field this node did not hold that left it reading
+  as `[]` — a tree move of an unknown node into the trash — made the
+  field, but the turn's changes left it out, so an observer's reading
+  lacked it. It is reported as a reset to the empty value now.
+- **A writer that never yielded slowed down with every write.** Over
+  `memory()` an await loop never lets the deferred window's timer fire, so
+  every record it wrote stayed held in the cache, and each write walked all
+  of them looking for one to evict: inserts fell from about 45,000 a second
+  to 2,000 within twenty thousand. The window now also lands by count (1,024
+  records or 8,192 positions), a write looks at a bounded few of the oldest
+  entries to evict, and the log and the landing take a range's ends with a
+  loop rather than a spread an argument list cannot hold. A text insert's
+  marks are read at its index alone (`styleAt`, one walk of the marks and
+  the rope's measures), never from the whole text's spans.
+- **`applyDelta` refused a marker set over two slots.** A delta that sets two
+  neighbouring block markers alike composes into one retain over both;
+  `applyDelta` sets the marker of every slot of the range now. And an editor
+  binding whose sends keep failing no longer retries in a loop that holds
+  the event loop: it reloads after a growing pause and stops after five
+  failures in a row (`onError`), and a `STALE` that no event explains reloads
+  instead of waiting forever.
+- **A live Record read a path write as a field of its own.** After
+  `update(id, { 'profile/city': 'Kyiv' })` a Record held both the old
+  `profile` and a `profile/city` property, where `get()` reads
+  `{ profile: { city: 'Kyiv' } }`. A Record is now refreshed with the
+  composed reading on every path, a repair's included.
+- **A cut across a peer's insert reported the insert as cut.** A `splice`
+  that cut a range of a run another node had typed inside (unseen by the
+  cutter) was reported as one change from the first cut slot to the last —
+  the peer's characters between them included — so a view or an editor
+  following the changes dropped text the field kept. A cut now reads as one
+  splice per stretch of the reading (`spansOf` in the sequence engine), and
+  an insert that also brings a waiting op's elements into view reads as a
+  `reset` of the field.
+- **`toDelta(changes, field)` missed a deleted record.** Asked for one
+  field, it skipped the whole-record `delete`/`purge` change (it has no
+  field) and a reset of a prefix of the field, and answered an empty delta
+  where it must answer `null` — read the field again.
 - **A refused handshake push no longer closes the inbound half, and a failed
   dial is retried.** A push the host refused during the handshake (a rate
   limit, a page over `opsPerPush`) stopped the handshake before the
@@ -789,7 +1477,7 @@ There is no released version section until then; everything below lands in it.
 
 - **The debt that had no decision attached.** The `Emitter`, the logger
   and `loadKeys` lived twice (once per platform half); they are
-  `src/emitter.js`, `src/logger.js` and `src/keys.js` now, shared, and
+  `src/emitter.js`, `src/logger.js` and `src/crypto/keys.js` now, shared, and
   "in scope" is defined once in `src/scope.js`. The directory lock uses an
   exclusive create where the backend has one (`fsi.create`, on `node:fs`
   and the memory backend), so openers racing for a free lock lose
@@ -933,8 +1621,6 @@ There is no released version section until then; everything below lands in it.
 - `OpLog` now receives the storage `logger`, so an unreadable segment or open
   file is reported rather than silently skipped.
 
-### Fixed
-
 - `Storage.saveData()` did not await `encrypt`/`decrypt`, so encryption at
   rest in the browser stored a serialized promise (`{}`) instead of ciphertext.
 - `apply()` ignored the data of a `write` record and only understood `delete`
@@ -965,6 +1651,201 @@ There is no released version section until then; everything below lands in it.
 - `examples/main.js` required a `globalstorage.js` that does not exist.
 
 ### Changed
+
+- **A folder of `src/` is a zone, not only a subpath.** A module lives in the
+  folder of what it is about even where the core requires it: the telemetry
+  writer contract is `src/telemetry/writer.js`; the wire shape, the protocol
+  constants, the link check, the outbound selection and the shared-log
+  contract are in `src/sync/`; the validator's projection is
+  `src/schema/entity.js`; the Quill delta algebra is `src/text/quill.js`; the
+  key pairs, PEM and SHA-256 are `src/crypto/` (a zone with no subpath). The
+  root of `src/` holds the core alone. No export, entry point or bundle
+  changed.
+- **A large text is written in pieces, not whole at every flush.** A list
+  or text block of 1 024 runs or more keeps its runs in up to 32 files
+  beside the record file (`<id>~<n>.json`), by the first level of the run
+  map; a flush writes the piece a keystroke changed, the record file, and
+  removes what it no longer names. A text of 25 000 inserts: a keystroke
+  under `defer: 0` 33.2 ms and 3 MB written → 1.35 ms and 242 KB (8 000:
+  9.1 → 0.7 ms); under the default window, at 8 000, 231 → 146 µs and
+  9.7 → 0.9 KB. A read assembles the block
+  whole; `file()` (a tag's copy) hands it whole; a piece gone is
+  `INTEGRITY`. The kind plugin hook is `pieces(block)`.
+- **A push reads what the receiver lacks, not the whole log, and a roll
+  writes no index.** The log keeps its retained entries by stream; a push on
+  a handshake or a recovery, a branch merge and a host's REWOUND proof pick
+  from it by a binary search per stream (200 000 ops retained over 1 000
+  streams: 18.7 → 0.17 ms a handshake). `index.json` names no segment any
+  more — they are what the directory lists, a gap among them is
+  `log.segment.missing` — and is written where compaction dropped
+  something, not at every roll: with one op a group it was rewritten every
+  64 ops and grew with the history (272 KB under `retention: 'all'`).
+- **An editor's send no longer compares the whole text.** `applyDelta()`
+  resolves to `{ ops, revision }` (it was the op count) and takes
+  `revision` beside `expect`: while the field is still at that revision —
+  a token per engine block, `revision(id, key)` reads it — the text is not
+  compared (it was O(n), the rope flattened, on every send). A field that
+  moved past it is compared as before, so `STALE` and the rebase are what
+  they were. The editor binding sends the revision the last answer handed
+  back while its shadow has not moved since: typing alone into a 1 MB text
+  costs a send 193 µs instead of 376 µs (100 KB: 81 instead of 96).
+- **The sequence engine is five modules, not one file of 2 957 lines, and the
+  text plugin four.**
+  `src/text/sequence.js` keeps the design and the public names; the code is
+  `keys.js` (names, anchors, refusals), `state.js` (the block, hydration,
+  every reading), `splice.js` (what an op does, the registers), `marks.js`
+  (the marks and their index) and `join.js` (a snapshot's block normalized,
+  pruned, joined), layered without a cycle. The text plugin likewise:
+  `src/text/text.js` is the plugin object over `kind.js` (what the core
+  calls), `diffs.js` (the patches), `methods.js` (the storage methods) and
+  `deltas.js` (Quill deltas). Nothing a caller reads changed; the names that
+  cross a module are not minified, so `/text` is 1.9 KB larger (31.5 →
+  33.4 KB).
+- **`migrate()` and `check()` are the schema plugin's, and so is
+  `schema.json`.** The facade keeps a stub for each (PLUGIN_MISSING
+  without the plugin, as before); the code, and the reading and writing of
+  the version file, moved to `src/schema/api.js` — the core 0.7 KB lighter
+  (50.8 → 50.1 KB), `/schema` 4.9 → 5.9 KB. A plugin's `setup(ctx)` gets
+  `hash`, the core's SHA-256; the lent core gets `kindOf`.
+- **Nothing reads a shape from before the first publication.** The wire,
+  the signed header and the files are version 1 as that publication will
+  have them (`PROTOCOL` 1, the header's version `1`, `enc1:` bound to its
+  file name), and the readers of the shapes before it are gone: a log file
+  without a hash is unreadable (`checksum`), an `index.json` with a field
+  missing is no index (a new epoch, as for an unreadable one), an unbound
+  `enc1:` ciphertext is `DECRYPT_FAILED`, and a hello that names no kinds
+  holds none (a dialer that runs a kind does not bootstrap from it).
+
+- **A tree move costs one step, not the tree.** Every op of a tree field
+  folded every move again (a sort, the cycle walks), rendered both readings
+  whole and diffed them: a move cost 2 ms at 2 000 nodes and 52 ms at
+  32 000, and an 8 000-node outline built in one transaction took 44 s.
+  The fold is kept per block and handed to the block an op derives from
+  it: a move newest in the fold is one step, an older one undoes the newer
+  moves and does them again (Kleppmann et al.'s undo–do–redo), the reading
+  is path-copied and the change report comes from what the move changed —
+  the same reading and report, op for op, as the full fold (a seeded
+  differential test against it). A local move at 2 000 / 8 000 / 32 000
+  nodes: 78 / 96 / 133 µs; the 8 000-node outline 0.25 s. The block's JSON
+  is unchanged. Budgets: `/tree` 9 KB, `/all` 113.5 KB.
+- **A ProseMirror keystroke costs where it is, not the document.** Every
+  local edit read both documents whole and diffed them; typing, a cut or
+  inline content pasted inside one textblock is now sent from its steps,
+  the field index of a position summed from block sizes kept per node. A
+  keystroke in 100 / 1 000 / 5 000 paragraphs: 0.27 / 2.7 / 15 ms →
+  0.018 / 0.026 / 0.055 ms. Anything else is still diffed.
+- **One delta algebra.** The text plugin's `toDelta` and the editor
+  binding each had their own Quill-form `compose` — with different edge
+  rules — and both compared a style by its JSON, so `{ bold, italic }` and
+  `{ italic, bold }` stayed two ops. Both stand on `src/text/quill.js` now, which
+  compares a style whatever its key order; a property test holds the laws.
+- **A hub's vector is no longer copied per page.** Applying a peer's page
+  copied the whole version vector (a key per client and scope — thousands
+  on a hub), so did every log group (for a rollback it rarely needed), the
+  host's push answer and the dialer's merge of it. A page now reads seqs
+  key by key over what it moved, a group records only the keys it moves,
+  and the answers merge in place: one peer's one-op page on a hub holding
+  20 000 streams went from 9.6 ms to 153 µs.
+- **A snapshot record is normalized once, not three times.** Joining one
+  read its meta for the skew check, again for the clock and again for the
+  join, hydrating its blocks each time; a peer's merge op twice. A meta its
+  holder will not change (`settleMeta`) is now normalized once per object:
+  joining 400 records of 2 000-character texts took 840 ms, now 550.
+- **A write no longer reads its record for a scope nobody asked for.**
+  Every local write merged the record with its data and composed it —
+  twice — to ask a scope function, even with no `sync.scope` given; now the
+  record is read only where one is, and composed once.
+- **A large set no longer slows down every op of its record.** Every op
+  copied every set of its record whole, walked it for the newest stamp and
+  listed its keys for a kind check, and an add or a remove sorted and parsed
+  the whole set again. A set field is now shared between versions until an
+  op writes it, the newest stamp is carried from op to op along a record a
+  write path reads (a fold no one stamps after carries nothing, so a plain
+  register op costs what it did), a set's emptiness is remembered, and an add
+  or a remove moves the reading by the elements it names. On a record holding 20 000 elements: a register write 5.4 ms →
+  71 µs, an add 20 → 3.6 ms, a remove 19.4 → 3.1 ms (what is left is the one
+  copy of the set the op writes).
+- **A host refuses a push past 10 000 ops unless told otherwise.** With no
+  `limits`, a peer could push a page of any length; `opsPerPush` now
+  defaults to 10 000 (twenty pages of a dialer's default size), checked on
+  the length before anything is read — `limits: { opsPerPush: Infinity }`
+  lifts it. The bytes and the rate stay opt-in.
+- **A node without a kind's plugin reports its refusals once per page.**
+  A core-only hub relaying a text raised an `OP_REFUSED` and a warning per
+  keystroke; the metric still counts each op (`reason: 'kind'`), and the
+  warning and the error come once per page, with `count` and `kinds`. A
+  bootstrap refused for `KINDS_MISMATCH` counts in `syncom.bootstraps` as
+  `refused`.
+- **Lost data is logged at `error`.** `log.segment.unreadable`,
+  `log.open.unreadable`, `storage.unpersisted` and `tags.unreadable` were
+  warnings, like a peer's refused op; they are errors now, and
+  `log.open.torn` — a last line whose append was never acknowledged, so
+  nothing answered is lost — is `info`. `storage.unpersisted` names the
+  first 32 ids and says how many (`count`), not every id of a batch. The
+  telemetry page's level column is checked against the code.
+- **Marked texts, long lists, long typed runs and a cold record cost what
+  the op touches.** A keystroke into a text read every mark (5 000 marks:
+  3.4 ms → 31 µs): the marks' anchors are an index in walk order, kept
+  across every op that leaves the marks, and pos/vals/marks live in
+  persistent maps. `setAt`, `move` and `push` on a list read it whole
+  (50 000 elements: 9.2 / 9.5 / 5.0 ms → 100 / 189 / 128 µs): an element's
+  index comes from the rope, the reading is derived from the one before. A
+  body grows by `SEG_MAX` (2 048) slots at most, so a read inside a long
+  typed run no longer flattens it (200 000 characters: 7.3 → 1.4 MB held).
+  A block read from a file is hydrated once (first op on a 1.75 MB record:
+  322 → 153 ms). The block's JSON is unchanged. Budgets: `/all` 107 KB,
+  `/text` 31.5 KB.
+- **More than eight storages in a process no longer reopen their log files.**
+  The `node:fs` backend held eight append descriptors for the whole process;
+  a ninth log appending made them take turns opening and closing their files
+  (about fifteen times the cost of a held write). It holds one per directory
+  — a log appends to its newest journal alone — and 64 in all.
+- **An undo manager no longer costs the record on every keystroke.** The
+  `commit` event copied the record before and after every local write, and
+  scanned a text for its embed slots, though an undo step keeps only its
+  first `before` and its last `after`. The copies are taken at their first
+  read now and the manager keeps the events, copying when it takes a step
+  back: 1 027 → 76 µs per keystroke into a 400 KB text with an undo manager
+  listening.
+- **Marking writes applied no longer walks every open group.** The log kept
+  the groups waiting for their records in a map it walked from the oldest on
+  every mark, once per written position: a deferred flush of a busy window
+  cost positions × groups. They are a sorted array searched by halves now —
+  8 192 marks over interleaved records, 49 ms → 2.7 ms.
+- **A searchable text is no longer re-indexed on every keystroke.** The
+  catalog handed the text index the whole joined text of a record at every
+  write; it keeps the last word per record now and hands it over when a
+  `$text` query asks — 2.5 ms → 78 µs per keystroke in a 40 KB searchable
+  text. A write that leaves a record's catalog row as it was (a field the
+  catalog does not hold) posts nothing, saves nothing, and does not run a
+  watch the catalog covers.
+- **A live `Record` no longer copies the whole record on every write.** It
+  took a JSON copy of the record, walked it for references and redefined its
+  accessors on every change — a 200 KB text made each keystroke of another
+  field cost the text. It lays the fields the write changed over what it
+  holds now (a path, a lens or a read hook still take the whole reading):
+  275 → 58 µs per write of a record with a 200 KB text, under the default
+  window.
+- **A delete no longer re-hints the whole text.** The change report of a
+  splice read the stretches it cut from the block before it — after the
+  splice had made the new block the head of the rope's lineage, so the old
+  block was a fork, and the rope re-hinted every item of it, O(n), on every
+  delete: two thirds of an editing trace's time. The cut is read while the
+  old block is still the head now. The automerge-perf trace replays at
+  35 600 keystrokes/s in memory (12 700 before), 25 600 with `/all`
+  (11 000).
+- **`src/` is written in loops.** No array method that takes a callback
+  (`map`, `filter`, `find`, `some`, `every`, `flatMap`, `forEach`, `reduce`…)
+  and no `Array.from` is left in the published code; `pnpm lint` refuses them
+  in `src/**` (`no-restricted-properties`). Walks that ran twice run once (a
+  set's added and removed elements, a transaction's ops, positions and
+  signatures, a version's applied entries, purges and merges, a scrub's
+  segments), membership tests inside loops are `Set`s, and a few searches
+  became indexes: a list block's elements by key, a tree block's members, the
+  hydration of a run's children, the cuts and extensions a join collects, a
+  rope leaf's item index, the move list of a tree node (a binary search where
+  it was a sort). The bundles grow with it: `/all` 98.3 → 100.7 KB min+gzip,
+  `/text` 28.1 → 28.7, `/tree` 6.4 → 6.8; their budgets are raised by name.
 
 - **A tag is read at its first use.** An open read every tag's catalog and
   copy listing, so its time grew with the tags times their records; it reads
@@ -1025,10 +1906,9 @@ There is no released version section until then; everything below lands in it.
   live in `src/entries.js` (`EntryStore`); `Reference`/`Record`/`Collection`
   in `src/record.js`; `open()`'s option checks in `src/options.js`; the
   entrance checks (ids, stream names, a peer's op shape) in `src/shape.js`;
-  the hosting side of replication in `src/hosting.js` (`createUnit`), with
-  `src/protocol.js` for what both halves share. No public name, error
-  message, event, hook signature or on-disk format changed; every function
-  in the engine is now under 60 lines. The browser budget was raised
+  the hosting side of replication in `src/sync/hosting.js` (`createUnit`), with
+  `src/sync/protocol.js` for what both halves share. No public name, error
+  message, event, hook signature or on-disk format changed. The browser budget was raised
   33.5 → 35.5 KB: a class's private names minify to one letter, the property
   names of a seam shared between modules do not (+2.3 KB min+gzip).
 

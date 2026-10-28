@@ -96,9 +96,16 @@ const runPatchTests = async (t, assert, createStorage) => {
     await storage.delete(id);
     assert.deepStrictEqual(await storage.diff(id, { tag: 'v1' }), [{ action: 'delete' }]);
     await storage.set(id, { title: 'only' });
-    const reset = await storage.diff(id, { tag: 'v1' });
-    assert.deepStrictEqual(reset[0], { action: 'write', data: { title: 'only' } });
-    assert.strictEqual(reset.length, 1, 'nothing else to make again');
+    const gone = await storage.diff(id, { tag: 'v1' });
+    assert.deepStrictEqual(gone[0], { action: 'put', field: 'title', value: 'only' });
+    assert.deepStrictEqual(
+      gone.slice(1).sort((a, b) => a.field.localeCompare(b.field)),
+      ['body', 'hits', 'items', 'n', 'outline', 'tags'].map((field) => ({ action: 'unset', field })),
+      'every other field, of any kind, is unset',
+    );
+    const way = await storage.diff(id, undefined, { tag: 'v1' });
+    assert.strictEqual(await storage.restore(id, { tag: 'v1' }), way.length, 'the fields made again');
+    assert.deepStrictEqual(await storage.diff(id, { tag: 'v1' }), []);
     const purged = await storage.insert({ p: 1 });
     await storage.tag('v2');
     await storage.purge(purged);
@@ -414,14 +421,14 @@ const runPatchTests = async (t, assert, createStorage) => {
       const before = await a.get(id);
       const blocks = async (storage) => (await storage.snapshot()).records.find((r) => r.id === id).meta;
       const was = await blocks(a);
-      assert.strictEqual(Object.keys(was.seqs.body.runs).length, 5);
-      assert.ok(Object.values(was.trees.outline.moves).flat().length > 20, 'a move log worth compacting');
+      assert.strictEqual(Object.keys(was.blocks.body.runs).length, 5);
+      assert.ok(Object.values(was.blocks.outline.moves).flat().length > 20, 'a move log worth compacting');
       const ops = await a.compact(id);
       assert.strictEqual(ops, 10, 'a write, an inc, an add, a splice, six moves');
       assert.deepStrictEqual(await a.get(id), before, 'reads the same');
       const now = await blocks(a);
-      assert.strictEqual(Object.keys(now.seqs.body.runs).length, 1, 'one run');
-      assert.strictEqual(Object.values(now.trees.outline.moves).flat().length, 6, 'one move per node');
+      assert.strictEqual(Object.keys(now.blocks.body.runs).length, 1, 'one run');
+      assert.strictEqual(Object.values(now.blocks.outline.moves).flat().length, 6, 'one move per node');
       assert.strictEqual(Object.keys(now.counters.hits).length, 1, 'one slot: the sum as this node’s');
       await settle([a, b]);
       assert.deepStrictEqual(await b.get(id), before, 'the peer reads the same');
@@ -461,9 +468,9 @@ const runPatchTests = async (t, assert, createStorage) => {
       // typed at the end of the bold run (after) is bold.
       await a.splice(id, 'body', 3, 0, 'Z');
       assert.deepStrictEqual((await a.spans(id, 'body')).slice(0, 3), [
-        { text: '> ', marks: {} },
-        { text: 'hZ', marks: { bold: true } },
-        { text: 'e', marks: {} },
+        { type: 'text', text: '> ', marks: {} },
+        { type: 'text', text: 'hZ', marks: { bold: true } },
+        { type: 'text', text: 'e', marks: {} },
       ]);
       // A text longer than one run: two pushes of 600 000, compacted into two runs.
       const big = await a.insert({ title: 'big' });

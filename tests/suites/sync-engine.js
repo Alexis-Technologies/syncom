@@ -6,6 +6,7 @@
 // within one subtest (that is how the reopen case works).
 
 const { createMesh, settle, waitUntil, prng } = require('../utils/mesh.js');
+const { applyChanges, comparable } = require('../utils/changes.js');
 
 // Two nodes' clocks are independent: a write on B one tick after a write on
 // A is only "later" once the millisecond has moved on.
@@ -174,6 +175,64 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     assert.strictEqual(await b.get(first), null);
   });
 
+  await t.test(
+    'embeds and blocks merge: a slot once, its marker last-writer-wins, kept through compact, diff and restore',
+    async (t2) => {
+      const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage);
+      const a = mesh.get('A');
+      const b = mesh.get('B');
+      const E = '\uFFFC';
+      const id = await a.insert({ title: 'doc' });
+      await a.updateText(id, 'body', 'hello world');
+      await a.splitBlock(id, 'body', 0, { type: 'paragraph' });
+      await a.insertEmbed(id, 'body', 6, { type: 'image', attrs: { src: 'a.png' } });
+      await settle([a, b]);
+      assert.deepStrictEqual(await b.spans(id, 'body'), await a.spans(id, 'body'));
+      assert.deepStrictEqual(await b.block(id, 'body', 6), {
+        type: 'image',
+        parents: [],
+        attrs: { src: 'a.png' },
+        isEmbed: true,
+      });
+      const link = mesh.links.get('mem://B');
+      link.disconnect();
+      // Apart: both change the first marker, B later; A cuts the embed while B types beside it.
+      await a.updateBlock(id, 'body', 0, { type: 'heading', attrs: { level: 1 } });
+      await tick();
+      await b.updateBlock(id, 'body', 0, { type: 'heading', attrs: { level: 2 } });
+      await a.splice(id, 'body', 6, 1);
+      await b.splice(id, 'body', 7, 0, '!');
+      await link.reconnect();
+      await settle([a, b]);
+      await assertConverged([a, b]);
+      assert.strictEqual((await a.get(id)).body, `${E}hello! world`);
+      assert.deepStrictEqual(await a.block(id, 'body', 0), {
+        type: 'heading',
+        parents: [],
+        attrs: { level: 2 },
+        isEmbed: false,
+      });
+      assert.deepStrictEqual(await b.spans(id, 'body'), await a.spans(id, 'body'));
+      // A compaction on one node reads the same on the other; a restore lays the markers again everywhere.
+      const { versions } = await a.history(id);
+      // The version right after A's own marker change: level 1, the embed still there, no '!'.
+      const before = versions.filter((version) => version.type === 'assign').at(-1).eventId;
+      await a.compact(id);
+      await settle([a, b]);
+      assert.deepStrictEqual(await b.spans(id, 'body'), await a.spans(id, 'body'));
+      const back = await a.diff(id, undefined, before);
+      assert.ok(
+        back.some((patch) => patch.action === 'setAt' || patch.vals !== undefined),
+        JSON.stringify(back),
+      );
+      await a.restore(id, before);
+      await settle([a, b]);
+      await assertConverged([a, b]);
+      assert.deepStrictEqual(await b.spans(id, 'body'), await a.spans(id, 'body'));
+      assert.strictEqual((await b.block(id, 'body', 0)).attrs.level, 1);
+    },
+  );
+
   await t.test('lists and texts converge: concurrent inserts and cuts, each writer’s run whole', async (t2) => {
     const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage);
     const a = mesh.get('A');
@@ -203,7 +262,7 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
       JSON.stringify(state[id].items),
     );
     // The blocks agree too, not only the readings.
-    const blocks = async (storage) => (await storage.snapshot()).records.find((r) => r.id === id).meta.seqs;
+    const blocks = async (storage) => (await storage.snapshot()).records.find((r) => r.id === id).meta.blocks;
     assert.deepStrictEqual(await blocks(a), await blocks(b));
     // Live again: a cut on one side, typing on the other, in one spot.
     await a.splice(id, 'body', 0, 4);
@@ -240,7 +299,7 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     const leaf = (name) => ({ id: name, children: [] });
     const cyc = await assertConverged([a, b]);
     assert.deepStrictEqual(cyc[id].outline, [{ id: 'r', children: [{ id: 'y', children: [leaf('x')] }] }]);
-    const trees = async (storage) => (await storage.snapshot()).records.find((r) => r.id === id).meta.trees;
+    const trees = async (storage) => (await storage.snapshot()).records.find((r) => r.id === id).meta.blocks;
     assert.deepStrictEqual(await trees(a), await trees(b), 'the move logs agree too');
     // A removal on one side, a move into the removed subtree on the other:
     // the mover is hidden with it, and comes back with it.
@@ -275,7 +334,7 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(spansA[0].marks, { bold: true });
     assert.deepStrictEqual(
       spansA.find((s) => s.marks.em),
-      { text: 'world', marks: { em: true } },
+      { type: 'text', text: 'world', marks: { em: true } },
     );
     // A cursor taken here stays right under a peer's concurrent edits.
     await a.updateText(id, 'body', 'hello world');
@@ -352,10 +411,10 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
       await a.splice(id, 'body', 0, 0, 'hello');
       await settle([a, b]);
       const record = (await a.snapshot()).records.find((r) => r.id === id);
-      const run = Object.keys(record.meta.seqs.body.runs)[0];
+      const run = Object.keys(record.meta.blocks.body.runs)[0];
       const forged = (edit) => {
         const copy = JSON.parse(JSON.stringify(record));
-        edit(copy.meta.seqs.body);
+        edit(copy.meta.blocks.body);
         return copy;
       };
       // A run with a 300-million-slot gap would be expanded element by
@@ -401,6 +460,16 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     const mesh = await createMesh(t2, names, edges, createStorage);
     const storages = names.map((name) => mesh.get(name));
     const random = prng(20260905);
+    // A shadow of every record per node, kept by the change reports alone
+    // (EVT-1): local ops and peers' alike, through what each node applies.
+    const shadows = new Map(storages.map((storage) => [storage, new Map()]));
+    for (const storage of storages) {
+      storage.on('change', (op, via, { changes }) => {
+        if (op.type === 'advance') return;
+        const own = shadows.get(storage);
+        own.set(op.id, applyChanges(own.has(op.id) ? own.get(op.id) : null, changes));
+      });
+    }
     // r1–r3 take every kind of write, resets included; c1 is never reset, so
     // its counter stays clear of the documented counter/reset straddle.
     const ids = ['r1', 'r2', 'r3'];
@@ -421,15 +490,44 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
       const roll = random();
       try {
         if (roll < 0.12) await storage.set(id, { v: step, by: storage.nodeId.slice(0, 4) });
-        else if (roll < 0.24) await storage.update(id, { [`f${step % 3}`]: step });
-        else if (roll < 0.3) {
+        else if (roll < 0.18) await storage.update(id, { [`f${step % 3}`]: step });
+        else if (roll < 0.21) {
+          // A path under a prefix, or the prefix as a whole: both merge, by stamp.
+          if (step % 3 === 0) await storage.update(id, { profile: { n: step } });
+          else await storage.update(id, { [`profile/${step % 2 ? 'city' : 'geo/lat'}`]: step });
+        } else if (roll < 0.23) {
+          await storage.unset(id, [step % 4 === 0 ? 'profile' : `f${step % 3}`, step % 2 ? 'tags' : 'items']);
+        } else if (roll < 0.24) {
+          // A field under a list element: composed inside it, merged on its own.
+          const names = await storage.elements(id, 'items');
+          if (names.length > 0) {
+            const name = names[Math.floor(random() * names.length)];
+            if (step % 2) await storage.update(id, { [`items/${name}/note`]: step });
+            else await storage.inc(id, `items/${name}/hits`, 1);
+          }
+        } else if (roll < 0.3) {
           await storage.inc('c1', 'count', 1);
           incs++;
         } else if (roll < 0.4) await storage.add(id, 'tags', [`t${step % 4}`]);
         else if (roll < 0.48) await storage.remove(id, 'tags', [`t${step % 4}`]);
         else if (roll < 0.54) await storage.delete(id);
-        else if (roll < 0.72) await spliceAt(storage, id, 'body', letter(storage).repeat(1 + (step % 3)));
-        else if (roll < 0.8) await spliceAt(storage, id, 'items', [`${letter(storage)}${step}`]);
+        else if (roll < 0.72) {
+          // One keystroke in five is a block marker or an embed — inserted, changed or joined.
+          if (step % 5 !== 0) await spliceAt(storage, id, 'body', letter(storage).repeat(1 + (step % 3)));
+          else {
+            const body = (await storage.get(id))?.body;
+            const length = typeof body === 'string' ? body.length : 0;
+            const slots = [];
+            for (let i = 0; i < length; i++) if (body[i] === '\uFFFC') slots.push(i);
+            const at = Math.floor(random() * (length + 1));
+            if (slots.length > 0 && step % 2) {
+              const slot = slots[Math.floor(random() * slots.length)];
+              if (step % 4 === 1) await storage.joinBlock(id, 'body', slot);
+              else await storage.updateBlock(id, 'body', slot, { type: `b${step % 3}`, attrs: { step } });
+            } else if (step % 2) await storage.insertEmbed(id, 'body', at, { type: 'img', attrs: { step } });
+            else await storage.splitBlock(id, 'body', at, { type: 'p', parents: step % 3 ? ['ul'] : [] });
+          }
+        } else if (roll < 0.8) await spliceAt(storage, id, 'items', [`${letter(storage)}${step}`]);
         else if (roll < 0.88) {
           const items = (await storage.get(id))?.items ?? [];
           if (items.length === 0) await storage.push(id, 'items', [`${letter(storage)}${step}`]);
@@ -448,16 +546,25 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
       } catch (error) {
         // A record deleted or shortened elsewhere, a node moved under its
         // own subtree elsewhere: legitimate outcomes.
-        if (!/not found|out of range|takes a count|cannot go under/.test(error.message)) throw error;
+        if (!/not found|out of range|takes a count|cannot go under|holds no block marker/.test(error.message)) {
+          throw error;
+        }
       }
     }
     await settle(storages, { timeout: 10_000 });
     await assertConverged(storages);
+    // What the changes said is what the readings are, on every node.
+    for (const storage of storages) {
+      for (const [id, shadow] of shadows.get(storage)) {
+        const [a, b] = comparable(shadow, storage.getCachedData(id));
+        assert.deepStrictEqual(a, b, `${storage.nodeId.slice(0, 4)} ${id}: the shadow kept by the changes`);
+      }
+    }
     // The sequence blocks and the move logs agree too, not only what they read as.
     const blocks = async (storage) => {
       const out = {};
       for (const record of (await storage.snapshot()).records) {
-        out[record.id] = { seqs: record.meta.seqs ?? {}, trees: record.meta.trees ?? {} };
+        out[record.id] = { blocks: record.meta.blocks ?? {} };
       }
       return out;
     };
@@ -565,7 +672,7 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
       await settle([a, b, c]);
       await assertConverged([a, b, c]);
       assert.deepStrictEqual(await c.get(id), { n: 1, m: 2, hits: 1, tags: ['x'] });
-      const { verifyOp } = require('../../src/signing.js');
+      const { verifyOp } = require('../../src/signing/sign.js');
       for (const storage of [a, b, c]) {
         const entries = storage.log.since(undefined);
         assert.ok(entries.length >= 5);
@@ -689,6 +796,51 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     assert.ok(mesh.links.get('mem://B').client.rooms.has('syncom:Doc'));
   });
 
+  await t.test(
+    'counters converge across scopes: one node’s incs in two streams, the record moving between them (seeded)',
+    async (t2) => {
+      const names = ['A', 'B', 'C'];
+      const rooms = ['a', 'b'];
+      const mesh = await createMesh(
+        t2,
+        names,
+        [
+          ['A', 'B'],
+          ['B', 'C'],
+          ['C', 'A'],
+        ],
+        createStorage,
+        { sync: { scope: (id, data) => data.room ?? '*' }, scopes: { A: rooms, B: rooms, C: rooms } },
+      );
+      const storages = names.map((name) => mesh.get(name));
+      const random = prng(20261026);
+      const ids = ['k1', 'k2'];
+      for (const id of ids) await storages[0].set(id, { room: 'a' });
+      await settle(storages);
+      const counted = { k1: 0, k2: 0 };
+      let moves = 0;
+      for (let step = 0; step < 60; step++) {
+        const storage = storages[Math.floor(random() * storages.length)];
+        const id = ids[Math.floor(random() * ids.length)];
+        const roll = random();
+        if (roll < 0.2) {
+          // The record moves: to a room, or out of every one (the global scope).
+          if (roll < 0.05) await storage.unset(id, ['room']);
+          else await storage.update(id, { room: rooms[Math.floor(random() * rooms.length)] });
+          moves++;
+        } else {
+          await storage.inc(id, 'hits', 1);
+          counted[id]++;
+        }
+        if (random() < 0.3) await settle(storages);
+      }
+      await settle(storages, { timeout: 10_000 });
+      const expected = await assertConverged(storages);
+      for (const id of ids) assert.strictEqual(expected[id].hits, counted[id], `${id}: every inc counted once`);
+      assert.ok(moves > 3, 'the records moved between scopes');
+    },
+  );
+
   await t.test('a live Record on one node follows writes made on another', async (t2) => {
     const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage);
     const a = mesh.get('A');
@@ -755,6 +907,53 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     const solo = await createStorage(t2, 'solo');
     await assert.rejects(() => solo.sync.start(), /connect/);
   });
+
+  await t.test(
+    'a merge op whose meta is stamped beyond maxSkew is refused as SKEW; the clock stays below the horizon',
+    async (t2) => {
+      const a = await createStorage(t2, 'A');
+      const errors = [];
+      a.on('error', (error) => errors.push(error));
+      const id = await a.insert({ title: 'mine', hits: 0 });
+      const logged = a.log.length;
+      // Ten years ahead, in every place a meta holds a stamp: a register, a
+      // counter, a set's slot, the reset watermark. The op's own stamp is now.
+      const far = Date.now() + 10 * 365 * 86_400_000;
+      const merge = (origin, meta) => ({
+        origin,
+        seq: 1,
+        ts: Date.now(),
+        type: 'merge',
+        id,
+        data: { title: origin },
+        meta,
+      });
+      const page = [
+        merge('m1', { clock: { title: [far, 'm1'] } }),
+        merge('m2', { counters: { hits: { m2: [1, 5, far] } } }),
+        merge('m3', { sets: { tags: { '"x"': { m3: [far, 0] } } } }),
+        merge('m4', { base: [far, 'm4'] }),
+      ];
+      const result = await a.applyRemote(page);
+      assert.deepStrictEqual([result.applied, result.malformed], [0, 4]);
+      assert.deepStrictEqual(
+        errors.map((error) => error.code),
+        ['SKEW', 'SKEW', 'SKEW', 'SKEW'],
+      );
+      assert.strictEqual(a.log.length, logged, 'not logged, so not relayed');
+      assert.deepStrictEqual(Object.keys(a.vector), [a.nodeId], 'no stream moved');
+      // The next writes — to the record and to another — are stamped near now:
+      // nothing of the refused meta reached the clock.
+      const ops = [];
+      a.on('change', (op) => ops.push(op));
+      await a.update(id, { title: 'again' });
+      await a.insert({ other: true });
+      const horizon = Date.now() + 86_400_000;
+      assert.strictEqual(ops.length, 2);
+      for (const op of ops) assert.ok(op.ts <= horizon, `${op.type} stamped ${op.ts - Date.now()} ms ahead`);
+      assert.deepStrictEqual(await a.get(id), { title: 'again', hits: 0 });
+    },
+  );
 };
 
 module.exports = { runSyncEngineTests };

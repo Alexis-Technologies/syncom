@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const path = require('node:path');
 const { fileExists } = require('../src/utils.js');
-const syncom = require('..');
+const syncom = require('../src/all/all.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 
 test('Chain module', async (t) => {

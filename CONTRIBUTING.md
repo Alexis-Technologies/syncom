@@ -37,6 +37,12 @@ with `node --test --test-name-pattern 'swap'`.
 
 - **CommonJS, `'use strict'`.** No build step, no transpilation. `src/` is what
   gets published.
+- **Loops, not array callbacks, in `src/`.** No `map`/`filter`/`find`/`some`/
+  `every`/`forEach`/`reduce`/`flatMap`/`Array.from` there — `pnpm lint` fails on
+  them (`no-restricted-properties` for `src/**`). One walk does what it can, a
+  membership test in a loop is a `Set`, a data array is never spread into
+  arguments (`push(...items)` throws past ~130 000 elements), and a new array
+  is `[]` + `push` (`new Array(n)` stays holey and slower to read).
 - **Zero runtime dependencies.** Everything in `package.json` is a
   devDependency, and `scripts/size.js` fails the run if a bare import reaches
   a browser bundle. If you need a helper, write it in `src/utils.js`.
@@ -55,7 +61,7 @@ with `node --test --test-name-pattern 'swap'`.
   before writing it down.
 - **wrpc is injected, never required.** `@alexify/wrpc` is a devDependency for
   `tests/wrpc.integration.test.js` only, which skips when it is missing; nothing
-  under `src/` may `require` it. The adapter in `src/wrpc.js` duck-types the
+  under `src/` may `require` it. The adapter in `src/wrpc/wrpc.js` duck-types the
   client it is handed.
 - **A field is one kind: a register, a counter, a set, a list, a text or a
   tree.** `set`/`update` write registers, `inc` counters, `add`/`remove` sets,
@@ -66,8 +72,8 @@ with `node --test --test-name-pattern 'swap'`.
   the kinds alone, the same on the op path and in a snapshot merge. Do not add
   a path that decides a clash another way.
 - **An adapted algorithm brings its notice.** Code or a rule taken from an MIT
-  project is named in `THIRD_PARTY_NOTICES.md` — the project, the commit, the
-  files that carry it — with the upstream notice. Projects under other
+  or BSD project is named in `THIRD_PARTY_NOTICES.md` — the project, the commit,
+  the files that carry it — with the upstream notice. Projects under other
   licences (json-joy, Collabs, `fugue/fugue`) are read as specifications only;
   nothing is copied from them.
 
@@ -87,10 +93,10 @@ bundler honouring `package.json#browser` would. The sync engine is tested over
 client at the boundary (JSON across, resume from the last event id on
 reconnect), and once more over real wrpc in `tests/wrpc.integration.test.js`.
 
-`INVARIANTS.md` names every guarantee — `SYNC-n`, `OPS-n`, `LIST-n`, `SEQ-n`,
-`TREE-n`, `RLE-n`, `BOUND-n`, `LOG-n`, `VER-n`, `TAG-n`, `PATCH-n`, `UNDO-n`,
-`BRANCH-n` — with the tests that hold it, and `tests/package/invariants.test.js`
-fails when an id names no test or a named title is gone: rename a test and its
+`INVARIANTS.md` names every guarantee — an id `PREFIX-n`, its prefix from the
+prefix registry at the top of the file — with the tests that hold it, and
+`tests/package/invariants.test.js` fails when an id names no test, a named
+title is gone, a prefix is unregistered or a row is out of order: rename a test and its
 row together, and give a new guarantee an id, a test and a row. The seeded
 hazard walk in `tests/suites/sync-engine.js` — dropped and duplicated pages, a
 reopen mid-walk — is the one that must stay green whatever else moves.
@@ -106,9 +112,12 @@ files, the `scripts/size.js` rows or the docs keywords/version drift from
 
 Three jobs (`.github/workflows/ci.yml`):
 
-1. **lint** — `lint`, `format:check`, `size` (the last both smoke-tests the
-   script and puts the numbers in the log).
-2. **test** — matrix over Node 22 and 24: `test:coverage`, then `test:types`.
+1. **lint** — `lint`, `format:check`, the package checks
+   (`tests/package/*.test.js`: exports, invariants, error codes, the guides'
+   paths), `size` (the last both smoke-tests the script and puts the numbers
+   in the log).
+2. **test** — matrix over Node 22, 24 and 26: `test:coverage`, then
+   `test:types`. Every test run has a 120 s timeout per test.
 3. **docs** — `docs:build`, so a broken page or dead link fails the PR rather
    than the deploy.
 
@@ -119,12 +128,14 @@ Benchmarks are not run in CI: they measure a machine, not a change.
 `pnpm size` prints one row per `exports` entry and enforces a min+gzip budget
 on every browser entry — the main one and each subpath. The budget is a
 **ratchet, not a target**: raise it deliberately, in the same change that earns
-the bytes, and say why in a comment next to the number. The main entry's v1
-ceiling of 64 KB was passed on 2026-10-24 for the module split of the second
-review (the comment in `scripts/size.js` names it; the budget is 66 KB now);
-every raise still names its feature, and a raise of more than a kilobyte is a
-design decision (an engine subpath, an injected kind), taken in a plan, not in
-the number.
+the bytes, and say why in a comment next to the number. Since the core and
+blocks plan (2026-10-25) the main entry is the core alone (budget 52 KB, about
+44 measured) and every block a subpath with a budget of its own; `/all` is
+held to 113.5 KB, and a composite row checks that the core and every block
+bundled together weigh what `/all` weighs — nothing bundled twice. Every
+raise names its feature, and a raise of more than a kilobyte is a design
+decision (an engine subpath, an injected kind), taken in a plan, not in the
+number.
 
 ## Release checklist
 

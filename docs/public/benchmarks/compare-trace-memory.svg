@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="415" viewBox="0 0 760 415" role="img" aria-label="Replay an editing trace, in memory. The automerge-perf trace: 259,778 keystrokes of a real paper (182,315 inserts, 77,463 deletes) replayed into one text as an editor would send them, the text read back whole at the end. Nothing touches the disk. ops/s, log scale, higher is better. Not shown: TinyBase (no text that merges by position); PouchDB (no text that merges by position); RxDB (no text that merges by position); Fireproof (no text that merges by position); GUN (needs its storage adapter to answer in Node.js); OrbitDB (no text that merges by position).">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .title { font-size: 15px; font-weight: 700; fill: #1b1c1e; }
+  .subtitle, .caption { font-size: 12px; fill: #67676c; }
+  .caption { font-size: 11px; }
+  .group { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; fill: #67676c; }
+  .label { font-size: 13px; font-weight: 600; fill: #1b1c1e; }
+  .label.primary, .label.secondary { font-weight: 700; }
+  .sublabel { font-size: 11px; fill: #67676c; }
+  .value { font-size: 12px; font-weight: 600; fill: #3c3c43; font-variant-numeric: tabular-nums; }
+  .value.small { font-size: 10px; }
+  .legend { font-size: 11px; fill: #3c3c43; }
+  .tick { font-size: 11px; fill: #67676c; font-variant-numeric: tabular-nums; }
+  .grid { stroke: #e4e4e7; stroke-width: 1; }
+  .axis { stroke: #c2c2c4; stroke-width: 1; }
+  .ref { stroke: #67676c; stroke-width: 1; stroke-dasharray: 3 3; }
+  .bar { fill: #c4c6cc; }
+  .bar.primary { fill: #245a9e; }
+  .bar.secondary { fill: #5e9be6; }
+  @media (prefers-color-scheme: dark) {
+    .title, .label { fill: #dfdfd6; }
+    .subtitle, .caption, .group, .sublabel, .tick { fill: #98989f; }
+    .value, .legend { fill: #c2c2c4; }
+    .grid { stroke: #2e2e32; }
+    .axis { stroke: #48484c; }
+    .ref { stroke: #98989f; }
+    .bar { fill: #46474e; }
+    .bar.primary { fill: #8dbcf2; }
+    .bar.secondary { fill: #3d7bd0; }
+  }
+</style>
+<text class="title" x="20" y="35">Replay an editing trace, in memory</text>
+<text class="subtitle" x="20" y="56">The automerge-perf trace: 259,778 keystrokes of a real paper (182,315 inserts, 77,463 deletes) replayed into one</text>
+<text class="subtitle" x="20" y="73">text as an editor would send them, the text read back whole at the end. Nothing touches the disk. ops/s, log</text>
+<text class="subtitle" x="20" y="90">scale, higher is better. Not shown: TinyBase (no text that merges by position); PouchDB (no text that merges by</text>
+<text class="subtitle" x="20" y="107">position); RxDB (no text that merges by position); Fireproof (no text that merges by position); GUN (needs its</text>
+<text class="subtitle" x="20" y="124">storage adapter to answer in Node.js); OrbitDB (no text that merges by position).</text>
+<line class="grid" x1="276" y1="139" x2="276" y2="339"/>
+<text class="tick" x="276" y="355" text-anchor="middle">10k</text>
+<line class="grid" x1="476" y1="139" x2="476" y2="339"/>
+<text class="tick" x="476" y="355" text-anchor="middle">100k</text>
+<line class="grid" x1="676" y1="139" x2="676" y2="339"/>
+<text class="tick" x="676" y="355" text-anchor="middle">1M</text>
+<line class="axis" x1="276" y1="139" x2="276" y2="339"/>
+<g><title>Loro · LoroDoc, a LoroMap per record · v1.16.4
+480,595 ops/s
+2.08 µs per operation
+samples 480k – 482k
+JS heap after the trace 0.0 MB
+loro-crdt@1.16.4</title>
+<text class="label" x="20" y="156">Loro</text>
+<text class="sublabel" x="20" y="171">LoroDoc, a LoroMap per record · v1.16.4</text>
+<path class="bar" d="M276,152H608.355823609935A4,4 0 0 1 612.355823609935,156V162A4,4 0 0 1 608.355823609935,166H276Z"/>
+<text class="value" x="618.355823609935" y="165">481k</text>
+</g>
+<g><title>Yjs · Y.Doc, a Y.Map per record · v13.6.33
+53,264 ops/s
+18.8 µs per operation
+samples 52.9k – 53.7k
+JS heap after the trace 3.1 MB
+yjs@13.6.33</title>
+<text class="label" x="20" y="196">Yjs</text>
+<text class="sublabel" x="20" y="211">Y.Doc, a Y.Map per record · v13.6.33</text>
+<path class="bar" d="M276,192H417.2866795038053A4,4 0 0 1 421.2866795038053,196V202A4,4 0 0 1 417.2866795038053,206H276Z"/>
+<text class="value" x="427.2866795038053" y="205">53.3k</text>
+</g>
+<g><title>syncom · core + text + sync, memory() · v0.0.1
+44,168 ops/s
+22.6 µs per operation
+samples 43.8k – 44.5k
+JS heap after the trace 7.4 MB
+@alexify/syncom@0.0.1</title>
+<text class="label primary" x="20" y="236">syncom</text>
+<text class="sublabel" x="20" y="251">core + text + sync, memory() · v0.0.1</text>
+<path class="bar primary" d="M276,232H401.02195729029893A4,4 0 0 1 405.02195729029893,236V242A4,4 0 0 1 401.02195729029893,246H276Z"/>
+<text class="value" x="411.02195729029893" y="245">44.2k</text>
+</g>
+<g><title>syncom · /all: signed, chained, memory() · v0.0.1
+29,991 ops/s
+33.3 µs per operation
+samples 29.8k – 30.2k
+@alexify/syncom@0.0.1</title>
+<text class="label secondary" x="20" y="276">syncom</text>
+<text class="sublabel" x="20" y="291">/all: signed, chained, memory() · v0.0.1</text>
+<path class="bar secondary" d="M276,272H367.39924753668527A4,4 0 0 1 371.39924753668527,276V282A4,4 0 0 1 367.39924753668527,286H276Z"/>
+<text class="value" x="377.39924753668527" y="285">30k</text>
+</g>
+<g><title>Automerge · Automerge.change, Counter · v3.5.0
+18,273 ops/s
+54.7 µs per operation
+samples 18k – 18.6k
+JS heap after the trace 0.1 MB
+@automerge/automerge@3.5.0</title>
+<text class="label" x="20" y="316">Automerge</text>
+<text class="sublabel" x="20" y="331">Automerge.change, Counter · v3.5.0</text>
+<path class="bar" d="M276,312H324.3596248078171A4,4 0 0 1 328.3596248078171,316V322A4,4 0 0 1 324.3596248078171,326H276Z"/>
+<text class="value" x="334.3596248078171" y="325">18.3k</text>
+</g>
+<text class="caption" x="20" y="380">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
+<text class="caption" x="20" y="396">in a fresh process · 2026-10-27</text>
+</svg>

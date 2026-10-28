@@ -12,7 +12,8 @@
  *
  * Run: pnpm bench:compare [--only yjs,loro] [--scenarios insert,sync-disk]
  *        [--samples 5] [--sample-ms 1000] [--warmup-ms 1000] [--max-ops 5000]
- *        [--rounds 5] [--warmup-rounds 1] [--cold-runs 10] [--no-write]
+ *        [--rounds 5] [--warmup-rounds 1] [--trace-rounds 2] [--trace-warmup-rounds 1]
+ *        [--cold-runs 10] [--no-write]
  *
  * The method, also published with the results in docs/guide/benchmarks.md:
  * - every (library, scenario) pair runs in a FRESH process, in a fresh
@@ -41,6 +42,8 @@ const ROOT = path.join(__dirname, '..');
 const COMPARE = path.join(__dirname, 'compare');
 const OUT = path.join(__dirname, 'results', 'compare.json');
 const WORKER_TIMEOUT = 5 * 60 * 1000;
+// The editing trace is a quarter of a million keystrokes per round.
+const TRACE_TIMEOUT = 60 * 60 * 1000;
 
 if (!fs.existsSync(path.join(COMPARE, 'node_modules'))) {
   console.error('The libraries are not installed: run `pnpm bench:compare:install` first.');
@@ -61,6 +64,8 @@ const { values: args } = parseArgs({
     'max-ops': { type: 'string', default: '5000' },
     rounds: { type: 'string', default: '5' },
     'warmup-rounds': { type: 'string', default: '1' },
+    'trace-rounds': { type: 'string', default: '2' },
+    'trace-warmup-rounds': { type: 'string', default: '1' },
     'cold-runs': { type: 'string', default: '10' },
     'no-write': { type: 'boolean', default: false },
   },
@@ -75,6 +80,8 @@ const method = {
   maxOps: Number(args['max-ops']),
   rounds: Number(args.rounds),
   warmupRounds: Number(args['warmup-rounds']),
+  traceRounds: Number(args['trace-rounds']),
+  traceWarmupRounds: Number(args['trace-warmup-rounds']),
   coldStartRuns: Number(args['cold-runs']),
 };
 
@@ -98,10 +105,11 @@ const format = (value) => Math.round(value).toLocaleString('en-US');
 // stdout is ignored: libraries print greetings and warnings there (GUN prints
 // a line per empty key, enough to overflow any buffer), and only the tail of
 // stderr is kept for the error.
-const worker = (script, argv) =>
+const worker = (script, argv, timeout = WORKER_TIMEOUT) =>
   new Promise((resolve, reject) => {
     const out = path.join(os.tmpdir(), `syncom-compare-${randomUUID()}.json`);
-    const child = spawn(process.execPath, [path.join(COMPARE, script), ...argv], {
+    // --expose-gc: the trace scenario measures the heap a document leaves.
+    const child = spawn(process.execPath, ['--expose-gc', path.join(COMPARE, script), ...argv], {
       cwd: os.tmpdir(),
       stdio: ['ignore', 'ignore', 'pipe'],
       env: { ...process.env, SYNCOM_COMPARE_OUT: out },
@@ -110,7 +118,7 @@ const worker = (script, argv) =>
     child.stderr.on('data', (chunk) => {
       stderr = (stderr + chunk).slice(-1 << 14);
     });
-    const timer = setTimeout(() => child.kill('SIGKILL'), WORKER_TIMEOUT);
+    const timer = setTimeout(() => child.kill('SIGKILL'), timeout);
     child.on('close', (code, signal) => {
       clearTimeout(timer);
       try {
@@ -125,13 +133,13 @@ const worker = (script, argv) =>
 
 // A pair that fails is tried once more; a second failure is recorded and
 // the run goes on, so one library cannot cost the others their numbers.
-const attempt = async (script, argv) => {
+const attempt = async (script, argv, timeout) => {
   try {
-    return await worker(script, argv);
+    return await worker(script, argv, timeout);
   } catch (first) {
     console.log(`  retrying after: ${first.message.split('\n')[0]}`);
     try {
-      return await worker(script, argv);
+      return await worker(script, argv, timeout);
     } catch (error) {
       process.exitCode = 1;
       const reason = error.message.split('\n').find((line, i) => i > 0 && line.trim()) ?? 'failed';
@@ -152,7 +160,8 @@ const measureScenarios = async (adapters, scenarios, save) => {
     const failed = {};
     for (const adapter of adapters) {
       const options = { adapter: adapter.id, scenario: scenario.id, ...method };
-      const result = await attempt('worker.js', [JSON.stringify(options)]);
+      const timeout = scenario.kind === 'trace' ? TRACE_TIMEOUT : WORKER_TIMEOUT;
+      const result = await attempt('worker.js', [JSON.stringify(options)], timeout);
       if (result.failed) {
         failed[adapter.id] = result.failed;
         console.log(`  ${label(adapter, scenario.line)} ${'failed'.padStart(14)}  ${result.failed}`);
@@ -165,6 +174,7 @@ const measureScenarios = async (adapters, scenarios, save) => {
       }
       const spread = ((result.max - result.min) / result.median) * 100;
       results[adapter.id] = { median: result.median, min: result.min, max: result.max };
+      if (result.memory !== undefined) results[adapter.id].memory = result.memory;
       console.log(
         `  ${label(adapter, scenario.line)} ${format(result.median).padStart(14)} ${scenario.unit}  ±${spread.toFixed(1)}%`,
       );

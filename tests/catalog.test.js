@@ -6,12 +6,11 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { Catalog, valueOf } = require('../src/catalog.js');
-const { createMemoryFsi } = require('../src/backend.js');
-const { normalizeSchema } = require('../src/schema.js');
+const { memory } = require('../src/memory/memory.js');
+const { normalizeSchema } = require('../src/schema/define.js');
 
 const entitiesOf = (schema) => normalizeSchema(schema).entities;
-const catalogOf = (schema, fsi = createMemoryFsi()) =>
-  new Catalog({ fsi, path: 'store', entities: entitiesOf(schema) });
+const catalogOf = (schema, fsi = memory()) => new Catalog({ fsi, path: 'store', entities: entitiesOf(schema) });
 
 test('Catalog', async (t) => {
   const schema = {
@@ -151,7 +150,7 @@ test('Catalog', async (t) => {
   });
 
   await t.test(
-    'the search text: a cell on the row, handed to the injected index and replayed from the file',
+    'the search text: a cell on the row, handed to the injected index when a $text query asks, and replayed from the file',
     async () => {
       const calls = [];
       const fake = () => ({
@@ -159,7 +158,7 @@ test('Catalog', async (t) => {
         remove: (id) => void calls.push(['remove', id]),
         query: () => [{ id: 'p2', score: 2 }, { id: 'p1', score: 1 }, { id: 'nope', score: 0 }, 'junk'],
       });
-      const fsi = createMemoryFsi();
+      const fsi = memory();
       const searchable = { entities: { Post: { index: ['orgId'], search: ['title', 'tags'] }, Tag: {} } };
       const text = new Map([['Post', fake()]]);
       const catalog = new Catalog({ fsi, path: 'store', entities: entitiesOf(searchable), text });
@@ -172,6 +171,8 @@ test('Catalog', async (t) => {
       assert.strictEqual(catalog.row('p1').text, 'Hello x y', 'strings and string elements, joined');
       assert.strictEqual('text' in catalog.row('p3'), false, 'no searchable string: no cell');
       assert.strictEqual('text' in catalog.row('t1'), false);
+      assert.deepStrictEqual(calls, [], 'the index follows lazily: nothing until a $text query');
+      catalog.candidates('Post', { $text: 'w' });
       assert.deepStrictEqual(calls, [
         ['put', 'p1', 'Hello x y'],
         ['put', 'p2', 'World'],
@@ -193,12 +194,23 @@ test('Catalog', async (t) => {
       catalog.put('p2', { type: 'Post', v: 1, gone: true });
       catalog.put('p3', { type: 'Post', encrypted: true });
       catalog.put('p1', null);
+      assert.deepStrictEqual(calls, []);
+      catalog.candidates('Post', { $text: 'w' });
+      // The last word per id: p1 replaced then removed is one removal.
       assert.deepStrictEqual(calls, [
         ['remove', 'p1'],
-        ['put', 'p1', 'Again'],
         ['remove', 'p2'],
-        ['remove', 'p1'],
       ]);
+      // A put that leaves the row as it was is nothing for the index.
+      catalog.put('p4', { type: 'Post', v: 1, data: { orgId: 'o4', title: 'Same', n: 1 } });
+      catalog.candidates('Post', { $text: 'w' });
+      calls.length = 0;
+      const dirty = catalog.dirty;
+      catalog.put('p4', { type: 'Post', v: 1, data: { orgId: 'o4', title: 'Same', n: 2 } });
+      catalog.candidates('Post', { $text: 'w' });
+      assert.deepStrictEqual(calls, [], 'a field the catalog does not hold changed: the row stayed');
+      assert.strictEqual(catalog.dirty, dirty, 'nothing to save either');
+      catalog.put('p4', null);
       // The file: a sixth cell `false` and the text as the seventh; a tombstone's is `true`.
       catalog.put('p1', { type: 'Post', v: 2, data: { orgId: 'o1', title: 'Again' } });
       await catalog.save('e.9');
@@ -218,6 +230,7 @@ test('Catalog', async (t) => {
         text: new Map([['Post', { put: (id, t) => void replayed.push([id, t]), remove() {}, query: () => [] }]]),
       });
       assert.deepStrictEqual(await again.load(), { stamp: 'e.9' });
+      again.candidates('Post', { $text: 'a' });
       assert.deepStrictEqual(replayed, [['p1', 'Again']]);
       assert.strictEqual(again.row('p1').text, 'Again');
       // Other search fields make the file unusable: a rebuild.
@@ -241,12 +254,14 @@ test('Catalog', async (t) => {
       const guarded = new Catalog({ fsi, path: 'guarded', entities: entitiesOf(searchable), text: throwing, logger });
       guarded.put('p9', { type: 'Post', v: 1, data: { title: 'x' } });
       assert.strictEqual(guarded.has('p9'), true);
+      guarded.candidates('Post', { $text: 'x' });
       assert.deepStrictEqual(
         warnings.map((entry) => [entry.event, entry.id, entry.err.message]),
         [['catalog.search', 'p9', 'boom']],
       );
       const quiet = new Catalog({ fsi, path: 'quiet', entities: entitiesOf(searchable), text: throwing });
       quiet.put('p9', { type: 'Post', v: 1, data: { title: 'x' } });
+      quiet.candidates('Post', { $text: 'x' });
       assert.strictEqual(quiet.has('p9'), true, 'without a logger there is nowhere to say it');
     },
   );
@@ -276,7 +291,7 @@ test('Catalog', async (t) => {
   });
 
   await t.test('save and load: the stamp, the rows, and what makes a file unusable', async () => {
-    const fsi = createMemoryFsi();
+    const fsi = memory();
     const catalog = catalogOf(schema, fsi);
     catalog.put('a', { type: 'Post', v: 1, data: { orgId: 'o1', slug: 'a' } });
     catalog.put('e', { type: 'Tag', encrypted: true });
@@ -302,7 +317,7 @@ test('Catalog', async (t) => {
     assert.strictEqual(await other.load(), null);
     assert.strictEqual(other.size, 0);
     // Absent, unreadable, or of another shape.
-    assert.strictEqual(await catalogOf(schema, createMemoryFsi()).load(), null);
+    assert.strictEqual(await catalogOf(schema, memory()).load(), null);
     for (const text of [
       'not json',
       '{"format":1}',
@@ -326,7 +341,7 @@ test('Catalog', async (t) => {
 });
 
 test('a save takes its rows at the start; puts that land during the write stay dirty', async () => {
-  const base = createMemoryFsi();
+  const base = memory();
   let release = null;
   const fsi = {
     ...base,
@@ -355,7 +370,7 @@ test('a save takes its rows at the start; puts that land during the write stay d
 });
 
 test('a tombstone is a row that is there but not listed; all() pages over every entry', async () => {
-  const fsi = createMemoryFsi();
+  const fsi = memory();
   const { entities } = normalizeSchema({ entities: { Post: { index: ['slug'], unique: ['slug'] } } });
   const catalog = new Catalog({ fsi, path: 'store', entities });
   const woken = [];

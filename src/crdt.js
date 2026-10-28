@@ -1,5 +1,13 @@
 'use strict';
 
+// Plain-object deltas — `diff`, `merge`, `apply` of the root barrel, from
+// before the op model: a delta is what `merge` lays over a value (numbers
+// added, arrays and Sets joined). Storage converges through src/ops.js,
+// never through these. Three things in the package are called a diff: this
+// one, the versions plugin's `storage.diff(id, from, to)` (patches in the
+// write API's terms, src/patch.js) and the editor's `diffSpans`/`diffBlocks`
+// (a Quill delta between two readings of a text).
+
 // `__proto__` is never a field: a JSON-parsed delta can carry it as an own
 // key, and assigning it would replace the result's prototype instead.
 const isField = (key) => key !== '__proto__';
@@ -7,6 +15,7 @@ const isField = (key) => key !== '__proto__';
 // A collection's elements, for the set diff; anything else has none.
 const elementsOf = (value) => (Array.isArray(value) || value instanceof Set ? value : []);
 
+/** The delta from `source` to `target` that `merge(source, delta)` reads back (an array or a Set: the elements added). */
 const diff = (source, target) => {
   if (source === null || typeof source !== 'object') source = {};
   if (target === null || typeof target !== 'object') target = {};
@@ -20,10 +29,10 @@ const diff = (source, target) => {
       delta[key] = target[key];
     } else if (Array.isArray(target[key]) || target[key] instanceof Set) {
       const sourceSet = new Set(elementsOf(source[key]));
-      const targetSet = new Set(target[key]);
-      const diffSet = new Set([...targetSet].filter((x) => !sourceSet.has(x)));
-      if (diffSet.size > 0) {
-        delta[key] = Array.from(diffSet);
+      const added = [];
+      for (const x of new Set(target[key])) if (!sourceSet.has(x)) added.push(x);
+      if (added.length > 0) {
+        delta[key] = added;
       }
     } else if (typeof target[key] === 'object' && target[key] !== null) {
       const nestedDiff = diff(source[key], target[key]);
@@ -44,6 +53,7 @@ const diff = (source, target) => {
   return delta;
 };
 
+/** `source` with `delta` laid over it: replaced, removed (`undefined`), merged, joined — and numbers added. */
 const merge = (source, delta) => {
   if (!delta || typeof delta !== 'object') return source;
   if (source === null || typeof source !== 'object') return delta;
@@ -57,18 +67,20 @@ const merge = (source, delta) => {
       continue;
     }
 
+    // What the result holds under the key itself — never what its prototype does (`constructor`).
+    const held = Object.hasOwn(result, key) ? result[key] : undefined;
     if (Array.isArray(delta[key]) || delta[key] instanceof Set) {
-      const sourceSet = new Set(result[key] || []);
-      const deltaSet = new Set(Array.isArray(delta[key]) ? delta[key] : delta[key]);
-      result[key] = Array.from(new Set([...sourceSet, ...deltaSet]));
+      const union = new Set(held || []);
+      for (const x of delta[key]) union.add(x);
+      result[key] = [...union];
     } else if (typeof delta[key] === 'object' && delta[key] !== null) {
-      if (typeof result[key] === 'object' && result[key] !== null) {
-        result[key] = merge(result[key], delta[key]);
+      if (typeof held === 'object' && held !== null) {
+        result[key] = merge(held, delta[key]);
       } else {
         result[key] = delta[key];
       }
-    } else if (typeof delta[key] === 'number' && typeof result[key] === 'number') {
-      result[key] += delta[key];
+    } else if (typeof delta[key] === 'number' && typeof held === 'number') {
+      result[key] = held + delta[key];
     } else {
       result[key] = delta[key];
     }
@@ -77,6 +89,7 @@ const merge = (source, delta) => {
   return result;
 };
 
+/** `source` with a history of `write`/`delta`/`delete`/`inc`/`dec` records folded over it, in order. */
 const apply = (source, history) => {
   if (!Array.isArray(history)) return source;
   let result = { ...source };

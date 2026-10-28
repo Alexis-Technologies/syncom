@@ -6,9 +6,11 @@
   "browser": {
     "./index.js": "./browser.js",
     "./src/index.js": "./src/index.browser.js",
-    "./src/crypto.js": "./src/crypto.browser.js",
     "./src/fsi.js": "./src/fsi.browser.js",
-    "./src/utils.js": "./src/utils.browser.js"
+    "./src/utils.js": "./src/utils.browser.js",
+    "./src/crypto/digest.js": "./src/crypto/digest.browser.js",
+    "./src/signing/ed25519.js": "./src/signing/ed25519.browser.js",
+    "./src/encryption/rsa.js": "./src/encryption/rsa.browser.js"
   },
   "types": "index.d.ts",
   "exports": {
@@ -21,32 +23,116 @@
       "default": "./index.js"
     },
     "./wrpc": {
-      "types": "./wrpc.d.ts",
-      "default": "./wrpc.js"
+      "types": "./src/wrpc/wrpc.d.ts",
+      "default": "./src/wrpc/wrpc.js"
     },
     "./contracts": {
-      "types": "./contracts.d.ts",
-      "default": "./contracts.js"
+      "types": "./src/contracts/contracts.d.ts",
+      "default": "./src/contracts/contracts.js"
     },
     "./idb": {
-      "types": "./idb.d.ts",
-      "default": "./idb.js"
+      "types": "./src/idb/idb.d.ts",
+      "default": "./src/idb/idb.js"
     },
     "./search": {
-      "types": "./search.d.ts",
-      "default": "./search.js"
+      "types": "./src/search/search.d.ts",
+      "default": "./src/search/search.js"
     },
     "./order": {
-      "types": "./order.d.ts",
-      "default": "./order.js"
+      "types": "./src/order/order.d.ts",
+      "default": "./src/order/order.js"
     },
     "./undo": {
-      "types": "./undo.d.ts",
-      "default": "./undo.js"
+      "types": "./src/undo/undo.d.ts",
+      "default": "./src/undo/undo.js"
     },
     "./branch": {
-      "types": "./branch.d.ts",
-      "default": "./branch.js"
+      "types": "./src/branch/branch.d.ts",
+      "default": "./src/branch/branch.js"
+    },
+    "./presence": {
+      "types": "./src/presence/presence.d.ts",
+      "default": "./src/presence/presence.js"
+    },
+    "./inspect": {
+      "types": "./src/inspect/inspect.d.ts",
+      "default": "./src/inspect/inspect.js"
+    },
+    "./editor": {
+      "types": "./src/editor/editor.d.ts",
+      "default": "./src/editor/editor.js"
+    },
+    "./store": {
+      "types": "./src/store/store.d.ts",
+      "default": "./src/store/store.js"
+    },
+    "./prosemirror": {
+      "types": "./src/prosemirror/prosemirror.d.ts",
+      "default": "./src/prosemirror/prosemirror.js"
+    },
+    "./codemirror": {
+      "types": "./src/codemirror/codemirror.d.ts",
+      "default": "./src/codemirror/codemirror.js"
+    },
+    "./all": {
+      "types": "./src/all/all.d.ts",
+      "default": "./src/all/all.js"
+    },
+    "./text": {
+      "types": "./src/text/text.d.ts",
+      "default": "./src/text/text.js"
+    },
+    "./tree": {
+      "types": "./src/tree/tree.d.ts",
+      "default": "./src/tree/tree.js"
+    },
+    "./signing": {
+      "browser": {
+        "types": "./src/signing/signing.browser.d.ts",
+        "default": "./src/signing/signing.js"
+      },
+      "types": "./src/signing/signing.d.ts",
+      "default": "./src/signing/signing.js"
+    },
+    "./chain": {
+      "types": "./src/chain/chain.d.ts",
+      "default": "./src/chain/chain.js"
+    },
+    "./encryption": {
+      "browser": {
+        "types": "./src/encryption/encryption.browser.d.ts",
+        "default": "./src/encryption/encryption.js"
+      },
+      "types": "./src/encryption/encryption.d.ts",
+      "default": "./src/encryption/encryption.js"
+    },
+    "./memory": {
+      "types": "./src/memory/memory.d.ts",
+      "default": "./src/memory/memory.js"
+    },
+    "./layered": {
+      "types": "./src/layered/layered.d.ts",
+      "default": "./src/layered/layered.js"
+    },
+    "./sync": {
+      "types": "./src/sync/sync.d.ts",
+      "default": "./src/sync/sync.js"
+    },
+    "./schema": {
+      "types": "./src/schema/schema.d.ts",
+      "default": "./src/schema/schema.js"
+    },
+    "./telemetry": {
+      "types": "./src/telemetry/telemetry.d.ts",
+      "default": "./src/telemetry/telemetry.js"
+    },
+    "./query": {
+      "types": "./src/query/query.d.ts",
+      "default": "./src/query/query.js"
+    },
+    "./versions": {
+      "types": "./src/versions/versions.d.ts",
+      "default": "./src/versions/versions.js"
     },
     "./package.json": "./package.json"
   },
@@ -54,8 +140,8 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "node --test",
-    "test:coverage": "c8 --all --include 'src/**' --check-coverage --lines 95 --statements 95 --branches 90 --functions 95 --reporter text --reporter lcov node --test",
+    "test": "node --test --test-timeout=120000",
+    "test:coverage": "c8 --all --include 'src/**' --check-coverage --lines 95 --statements 95 --branches 90 --functions 95 --reporter text --reporter lcov node --test --test-timeout=120000",
     "test:types": "tsd",
     "bench": "node bench/run-all.js",
     "bench:compare:install": "pnpm --dir bench/compare install --ignore-workspace",
@@ -125,9 +211,39 @@
     "url": "https://github.com/Alexis-Technologies/syncom/issues"
   },
   "homepage": "https://syncomjs.vercel.app/",
+  "peerDependencies": {
+    "@codemirror/state": "^6.4.0",
+    "@codemirror/view": "^6.26.0",
+    "prosemirror-model": "^1.19.0",
+    "prosemirror-state": "^1.4.0",
+    "prosemirror-transform": "^1.7.0",
+    "prosemirror-view": "^1.30.0"
+  },
+  "peerDependenciesMeta": {
+    "@codemirror/state": {
+      "optional": true
+    },
+    "@codemirror/view": {
+      "optional": true
+    },
+    "prosemirror-model": {
+      "optional": true
+    },
+    "prosemirror-state": {
+      "optional": true
+    },
+    "prosemirror-transform": {
+      "optional": true
+    },
+    "prosemirror-view": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@alexify/metaschema": "^3.4.0",
     "@alexify/wrpc": "2.0.1",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.15",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/context-async-hooks": "^2.11.0",
     "@opentelemetry/core": "^2.11.0",
@@ -143,6 +259,12 @@
     "oxfmt": "^0.62.0",
     "oxlint": "^1.77.0",
     "pino": "^10.3.1",
+    "prosemirror-model": "^1.25.12",
+    "prosemirror-schema-basic": "^1.2.5",
+    "prosemirror-schema-list": "^1.5.1",
+    "prosemirror-state": "^1.4.4",
+    "prosemirror-transform": "^1.12.4",
+    "prosemirror-view": "^1.42.8",
     "tsd": "^0.33.0",
     "typescript": "^7.0.2",
     "vitepress": "^1.6.4",
@@ -160,20 +282,6 @@
     "index.d.ts",
     "browser.js",
     "browser.d.ts",
-    "wrpc.js",
-    "wrpc.d.ts",
-    "contracts.js",
-    "contracts.d.ts",
-    "idb.js",
-    "idb.d.ts",
-    "search.js",
-    "search.d.ts",
-    "order.js",
-    "order.d.ts",
-    "undo.js",
-    "undo.d.ts",
-    "branch.js",
-    "branch.d.ts",
     "src/",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",

@@ -21,8 +21,9 @@ npm install @alexify/syncom @alexify/wrpc
 ```js
 const { Server, defineRouter } = require('@alexify/wrpc');
 const { open } = require('@alexify/syncom');
+const { sync } = require('@alexify/syncom/sync');
 
-const storage = await open({ path: 'data' });
+const storage = await open({ path: 'data', plugins: [sync] });
 
 const router = defineRouter({
   syncom: storage.sync.unit({
@@ -46,10 +47,12 @@ until one has a session. Either open it with `'public'` and gate with
 ```js
 const { WrpcClient } = require('@alexify/wrpc');
 const { open } = require('@alexify/syncom');
+const { sync } = require('@alexify/syncom/sync');
 const { createWrpcLink } = require('@alexify/syncom/wrpc');
 
 const storage = await open({
   path: 'data',
+  plugins: [sync],
   sync: {
     connect: async (node) => createWrpcLink(await WrpcClient.connect(node.url)),
   },
@@ -75,11 +78,13 @@ The subpath has no Node.js code, so the same two imports work in a bundle:
 
 ```js
 import { open } from '@alexify/syncom';
+import { sync } from '@alexify/syncom/sync';
 import { createWrpcLink } from '@alexify/syncom/wrpc';
 import { WrpcClient } from '@alexify/wrpc';
 
 const storage = await open({
   path: 'app',
+  plugins: [sync],
   sync: { connect: async (node) => createWrpcLink(await WrpcClient.connect(node.url)) },
 });
 await storage.sync.addNode({ url: 'wss://hub.example.com/api', token });
@@ -136,8 +141,13 @@ server.cluster.disconnect({ room: 'syncom:Doc' });         // drop them
 A peer registered with `scopes: ['Doc']` joins `syncom:Doc` alone — not
 `syncom:*`, though it receives the global records too.
 
-Delivery does **not** go through rooms: a room broadcast is at-most-once and
-cannot be resumed, which is exactly what the subscription provides.
+Delivery of ops does **not** go through rooms: a room broadcast is at-most-once
+and cannot be resumed, which is exactly what the subscription provides.
+[Presence](./presence) does: the unit's inbound event `on.presence`
+(`client.sendEvent('syncom/presence', update)` on the dialing side, what the
+adapter's `send` does) is relayed as `context.server.to('syncom:<scope>')
+.except(context.client).emit('syncom/presence', update)`, and reaches a client
+as `client.api.syncom.on('presence', fn)` — the adapter's `on('syncom/presence')`.
 
 ## Why no codec
 

@@ -5,12 +5,12 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { installBrowserGlobals, requireBrowserBarrel, installMockLocks } = require('./utils/browser-env.js');
+const { installBrowserGlobals, requireBrowserAll, installMockLocks } = require('./utils/browser-env.js');
 
 test('Exclusive open (browser halves)', async (t) => {
   const env = installBrowserGlobals();
   t.after(() => env.uninstall());
-  const browser = requireBrowserBarrel();
+  const browser = requireBrowserAll();
 
   await t.test('without Web Locks: a lockfile in OPFS, held while the storage is open', async () => {
     const first = await browser.open({ path: 'locked', logger: false });

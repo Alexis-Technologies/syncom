@@ -3,8 +3,8 @@
 const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert');
-const syncom = require('..');
-const { SmartContract } = require('../contracts.js');
+const syncom = require('../src/all/all.js');
+const { SmartContract } = require('../src/contracts/contracts.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 
 test('Integration tests', async (t) => {

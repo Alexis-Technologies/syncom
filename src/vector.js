@@ -21,12 +21,72 @@ const compareClock = (a, b) => {
 
 const maxClock = (a, b) => (compareClock(a, b) >= 0 ? a : b);
 
+// The floor under a field of a record: the record's reset watermark
+// (`meta.base`), the field's own (`meta.gone[field]`, an `unset`), and —
+// for a path — the floor of every prefix above it: its unset, or the write
+// of a register there (a whole-object write of the prefix resets what was
+// under it). The newest of them is what an op on the field must be stamped
+// above to count, and what the field's state is pruned under.
+const floorOf = (meta, field) => {
+  const { gone, clock } = meta;
+  const held = (map, key) => (map && Object.hasOwn(map, key) ? map[key] : null);
+  let floor = maxClock(meta.base ?? null, held(gone, field));
+  for (let at = field.indexOf('/'); at !== -1; at = field.indexOf('/', at + 1)) {
+    const prefix = field.slice(0, at);
+    floor = maxClock(maxClock(floor, held(gone, prefix)), held(clock, prefix));
+  }
+  return floor;
+};
+
+/**
+ * How two version vectors stand to each other: -1 when `a` is behind `b`
+ * (every key of `a` at or below `b`'s, one below), 1 when ahead, 0 when
+ * equal, undefined when concurrent (each ahead somewhere). A key one side
+ * lacks reads as 0.
+ */
+const compareVectors = (a = {}, b = {}) => {
+  let ahead = false;
+  let behind = false;
+  // Every key of `a`, then the keys of `b` that `a` lacks.
+  const keysA = Object.keys(a);
+  const keysB = Object.keys(b);
+  for (let i = 0; i < keysA.length + keysB.length; i++) {
+    const key = i < keysA.length ? keysA[i] : keysB[i - keysA.length];
+    if (i >= keysA.length && Object.hasOwn(a, key)) continue;
+    const x = a[key] ?? 0;
+    const y = b[key] ?? 0;
+    if (x > y) ahead = true;
+    else if (x < y) behind = true;
+  }
+  if (ahead && behind) return undefined;
+  return ahead ? 1 : behind ? -1 : 0;
+};
+
+// A peer's vector is the peer's word: its own keys alone, a seq a safe
+// integer, never `__proto__` (it would re-prototype the result).
 const vectorMax = (a = {}, b = {}) => {
   const result = { ...a };
-  for (const origin in b) {
-    if (!(result[origin] >= b[origin])) result[origin] = b[origin];
+  const keys = Object.keys(b);
+  for (let i = 0; i < keys.length; i++) {
+    const origin = keys[i];
+    const seq = b[origin];
+    if (origin === '__proto__' || !Number.isSafeInteger(seq)) continue;
+    if (!(Object.hasOwn(result, origin) && result[origin] >= seq)) result[origin] = seq;
   }
   return result;
+};
+
+// `b` laid into `a` in place, the higher seq per key kept: what a push
+// answer's few keys do to a peer's vector, which on a hub has thousands.
+const vectorMerge = (a, b) => {
+  const keys = Object.keys(b);
+  for (let i = 0; i < keys.length; i++) {
+    const origin = keys[i];
+    const seq = b[origin];
+    if (origin === '__proto__' || !Number.isSafeInteger(seq)) continue;
+    if (!(Object.hasOwn(a, origin) && a[origin] >= seq)) a[origin] = seq;
+  }
+  return a;
 };
 
 // Sequence numbers run per ORIGIN AND SCOPE, so a peer that syncs one scope
@@ -96,7 +156,10 @@ class Clock {
 module.exports = {
   compareClock,
   maxClock,
+  floorOf,
+  compareVectors,
   vectorMax,
+  vectorMerge,
   vectorKey,
   opKey,
   keyScope,

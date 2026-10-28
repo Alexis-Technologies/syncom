@@ -1,25 +1,19 @@
 // The browser half of the package, reached through the `browser` export
 // condition (see package.json#exports and #browser).
 //
-// Everything that is platform-agnostic — CRDT, chain, storage, schema and
-// their types — is re-exported from ./index.js unchanged (smart contracts are
-// the `@alexify/syncom/contracts` subpath). What differs is the
-// crypto and OPFS layer: node:crypto is synchronous, the Web Crypto API is
-// not, so `calculateHash`, `encrypt`, `decrypt`, `sign` and `verify` return
-// promises here and are declared below rather than re-exported.
-
-import type { JSONSafe as JSONSafeValue } from './index.js';
+// Everything that is platform-agnostic — CRDT, storage, schema and their
+// types — is re-exported from ./index.js unchanged (smart contracts are the
+// `@alexify/syncom/contracts` subpath). What differs is the files layer:
+// OPFS here, node:fs there, behind the same `Fsi`. The crypto halves — Web
+// Crypto async where node:crypto is not — are the `@alexify/syncom/signing`
+// and `@alexify/syncom/encryption` subpaths', under their own browser types.
 
 export type {
   JSONSafe,
   KeyPair,
-  SigningKeyPair,
   Fsi,
   CrdtDelta,
   CrdtHistoryRecord,
-  Block,
-  ChainDataEntry,
-  BlockchainConstructor,
   SchemaEntity,
   SchemaEntities,
   Schema,
@@ -46,27 +40,27 @@ export type {
   BootstrapContext,
   StorageEvents,
   RecordEvents,
-  SyncEvents,
-  PeerView,
-  SyncUnitOptions,
-  SyncLimits,
   SharedLog,
   SharedLogEntry,
   SharedLogRead,
-  SyncProcedure,
-  SyncUnit,
   Collections,
   Reference,
   SyncomRecord,
+  SyncomRecordApi,
   SyncomCollection,
+  RecordData,
+  Shapes,
+  PathFields,
+  SchemaOutput,
+  SchemaInput,
+  MangoMatch,
   StorageDataOptions,
   WriteOptions,
   StorageEntry,
   Node,
-  NodeData,
-  SyncManagerConstructor,
   SyncOptions,
   SyncomTelemetryOptions,
+  SyncomTelemetryWriter,
   SyncomTelemetryApi,
   SyncomTracer,
   SyncomSpan,
@@ -74,6 +68,7 @@ export type {
   SyncomCounter,
   SyncomHistogram,
   SyncLink,
+  OutboundOptions,
   StorageConstructor,
   ClockStamp,
   VersionVector,
@@ -91,12 +86,19 @@ export type {
   SnapshotPage,
   ApplyRemoteResult,
   SyncomErrorCode,
-  SyncomRecordCtor,
+  TypedErrorCode,
+  SyncomRecordConstructor,
+  SyncomCollectionConstructor,
   StorageStats,
   LockOptions,
-  HostedPeer,
   Refusal,
   RefusalReason,
+  FoldLimits,
+  Plugin,
+  Plugins,
+  PluginMethods,
+  TextMethods,
+  TreeMethods,
   SplicePayload,
   AssignPayload,
   MovePayload,
@@ -106,6 +108,20 @@ export type {
   TreeBlock,
   TreeNode,
   TextSpan,
+  TextMarks,
+  BlockMarker,
+  TextBlock,
+  TextEmbeds,
+  TransactOptions,
+  Transaction,
+  Change,
+  RecordChange,
+  TransactionEvent,
+  CursorPosition,
+  DeltaOp,
+  Observer,
+  Editor,
+  VersionView,
   CursorSide,
   MarkExpand,
   Version,
@@ -119,27 +135,23 @@ export type {
 } from './index.js';
 
 export {
-  generateKeys,
-  loadKeys,
-  generateSigningKeys,
-  loadSigningKeys,
   read,
   write,
   exists,
   remove,
   list,
   isFsi,
-  createMemoryFsi,
   applyOp,
   mergeEntry,
   isAlive,
+  createPlugins,
   OpLog,
   diff,
   merge,
   apply,
-  Blockchain,
-  SyncManager,
   isSyncLink,
+  outbound,
+  compareVectors,
   Storage,
   open,
   SyncomError,
@@ -147,10 +159,3 @@ export {
   ValidationError,
   isSharedLog,
 } from './index.js';
-
-// Web Crypto: async where node:crypto is sync.
-export function calculateHash(data: JSONSafeValue): Promise<string>;
-export function encrypt(data: unknown, publicKey: string): Promise<string>;
-export function decrypt(data: string, privateKey: string): Promise<unknown>;
-export function sign(message: string, privateKey: string): Promise<string>;
-export function verify(message: string, signature: string, publicKey: string): Promise<boolean>;

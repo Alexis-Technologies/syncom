@@ -8,9 +8,10 @@ const handles = new Map();
 
 const walk = async (dirPath) => {
   const root = await navigator.storage.getDirectory();
-  const parts = dirPath.split('/').filter(Boolean);
+  const parts = dirPath.split('/');
   let dir = root;
   for (const part of parts) {
+    if (part === '') continue;
     dir = await dir.getDirectoryHandle(part, { create: true });
   }
   return dir;

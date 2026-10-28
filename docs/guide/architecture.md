@@ -8,17 +8,18 @@ Each part has a guide of its own; this page is the map between them.
 
 A `Storage` is the facade an application opens. It owns the **mutation queue**: every write runs
 inside it, one at a time. It lends its collaborators (the log, the clock, the chain, the
-records, the tags) as one `core` to the three write paths and to the two API modules behind
-its methods — `src/fields.js` for the field kinds beyond registers, `src/versions.js` for
-versions, patches and tags — and to nothing else; the facade keeps one delegate per method.
-`storage.sync` is the replication: the dialing side (`SyncManager`) and the hosting side
-(`unit()`). Everything that touches the outside world is injected: the backend (`fsi`), the
+records, the tags) as one `core` to the three write paths, to the API modules behind its
+methods — `src/fields.js` for the field kinds beyond registers, `src/patches.js` for the present's
+patches — and to the plugins' (`src/versions/api.js`, a kind's methods), and to nothing else; the
+facade keeps one delegate or stub per method.
+`storage.sync` is the replication — the `sync` plugin: the dialing side (`SyncManager`) and the
+hosting side (`unit()`). Everything that touches the outside world is injected: the backend (`fsi`), the
 transport (a link), the validator, the text index, the telemetry.
 
 ```mermaid
 flowchart TB
   app["Application"]
-  api["fields.js · versions.js<br/>splice … treeMove<br/>history · tags · patches"]
+  api["fields.js · patches.js · the plugins'<br/>splice … treeMove<br/>history · tags · patches"]
   subgraph storage["Storage — the mutation queue"]
     direction LR
     commit["commit.js<br/>a local write"]
@@ -79,8 +80,9 @@ sequenceDiagram
   Q->>C: run when the queue reaches it
   C->>C: beforeWrite hook · kind check · stamp from the clock · index resolved · applyOp
   C->>C: validator (folded into the op) · unique keys
-  C->>C: sign the op (Ed25519) — unless signatures: false
-  C->>L: append(op) — the seq is durable
+  C->>C: sign the op (Ed25519) — unless signatures: false; on the thread pool when writes queue behind
+  C->>L: append(op) — the seq reserved, the entry in flight; the queue moves on
+  L->>L: the group's file — every op appended meanwhile — written; the ticket resolves
   C->>B: addBlock(hash of the record) — unless chain: false
   C->>E: write the record file, put its catalog row
   C->>L: applied(seq)
@@ -94,10 +96,13 @@ The field's kind is checked before anything is stamped (`FIELD_KIND`), and an in
 or a range is resolved inside the queue, against the record as it is (`OUT_OF_RANGE`, `CYCLE`,
 `NOT_FOUND`). A write that changes nothing stops after `applyOp` and appends nothing; a tree
 move to where the node is stops before it. A record written with `encrypted: true` is sealed for
-this node's key and produces no op. The catalog file is saved off the queue, so a write never
-waits for it. Under `open({ defer })` steps 7 to 9 wait for a timer instead: the log is durable
+this node's key and produces no op. The mutation queue holds a write up to the append (step 6):
+from there the next write runs, building on the entry in flight, while the disk is waited for
+outside the queue; steps 7 to 12 come in log order once the op's group is on disk, and that is
+what the caller awaits. The catalog file is saved off the queue, so a write never
+waits for it. Under `open({ defer })` — 16 ms by default — steps 8 to 10 wait for a timer instead: the log is durable
 at once, the cache and the catalog read the entry meanwhile, and the writes of one record within
-the window land as one file, every record due under one block.
+the window land as one file, every record due under one block; `flush()` lands them now.
 
 ## Two nodes
 
@@ -177,9 +182,9 @@ path — nothing rewrites the log or a record file.
 
 ```mermaid
 flowchart TB
-  log[("OpLog")] --> hist["history.js<br/>the fold of a cut"]
-  entries[("EntryStore")] -- "first change after a tag" --> tags["tags.js<br/>the copies"]
-  hist --> versions["versions.js<br/>get at · history · diff<br/>applyPatches · restore · compact"]
+  log[("OpLog")] --> hist["versions/history.js<br/>the fold of a cut"]
+  entries[("EntryStore")] -- "first change after a tag" --> tags["versions/tags.js<br/>the copies"]
+  hist --> versions["versions/api.js · patches.js<br/>get at · history · diff<br/>applyPatches · restore · compact"]
   tags --> versions
   versions <--> patch["patch.js<br/>patches"]
   versions -- "rehearsed, then one turn of the queue" --> commit["commit.js<br/>a local write"]
@@ -202,7 +207,7 @@ flowchart TB
   inverse patches of every `commit` event and applies them with `applyPatches()`;
   `@alexify/syncom/branch` opens a fork through the parent's constructor — another storage
   with its own identity — and merges either way as the ops one side lacks, picked by
-  `src/outbound.js` as a push picks them, through `applyRemote()`.
+  `src/sync/outbound.js` as a push picks them, through `applyRemote()`.
 
 See [Versions and history](/guide/versions).
 
@@ -212,13 +217,13 @@ A storage is one directory, through whichever `fsi` it was given:
 
 ```
 data/
-├── node.json      this node's identity: its signing key
-├── keys/          two key pairs: RSA (encryption at rest), Ed25519 (signing ops)
+├── node.json      this node's identity: its signing key with the signing plugin, else what getId minted
+├── keys/          two key pairs when their plugins run: RSA (encryption at rest), Ed25519 (signing ops)
 ├── blockchain/    one block per write, and the tail (unless chain: false)
 ├── lock.json      while an instance holds the directory
 ├── schema.json    the schema version this directory last ran
 ├── index/         catalog.json — derived (ids, indexes, search text), rebuilt when missing
-├── data/          <id>.json per record: data, meta, the block that committed it
+├── data/          <id>.json per record: data, meta, the block that committed it; a large text's runs in pieces beside it
 ├── log/           the operation log: open files and sealed segments
 ├── tags.json      the tags taken here, once there is one
 ├── tags/          per tag: its catalog, and the record files copied before their first change
@@ -234,23 +239,29 @@ the five functions an `fsi` implements.
 | Module | Role |
 | --- | --- |
 | `storage.js` | The facade: the open sequence, the mutation queue, the public API (a delegate per method of the two API modules), the `core` it lends |
-| `fields.js`, `versions.js` | The API of the field kinds beyond registers (`inc` … `treeRemove`, `spans`, `cursor`, `index`) and the versions API (`get(id, { at })`, `history`, `diff`, `applyPatches`, `restore`, `compact`, `tag`, `untag`, `at`), over the lent core |
+| `plugin.js` | The registry one `open({ plugins })` builds: kind modules and API modules, per storage, never process-wide; `PLUGIN_MISSING` |
+| `fields.js`, `patches.js`, `versions/versions.js`, `versions/api.js` | The API of the core's kinds beyond registers (`inc`, `add`, `remove`); the present's patches (`applyPatches`, `compact`); the `@alexify/syncom/versions` plugin and its API (`get(id, { at })`, `history`, `diff`, `restore`, `tag`, `untag`, `at`), over the lent core; a plugin's methods come with the plugin |
 | `commit.js`, `apply.js`, `bootstrap.js` | The three write paths |
 | `args.js`, `shape.js`, `options.js` | The checks at the edges: the write API's arguments (shared with the patches), record ids and a peer's op shape, `open()`'s options |
 | `entries.js`, `catalog.js`, `record.js` | Record files, the bounded cache, the catalog (ids, indexes, tombstones); `Record`, `Reference` and `Collection` |
-| `log.js`, `outbound.js` | `OpLog`, the persisted operation log: append, seal, retention, scrub, pins; the ops a receiver lacks, for a push and a branch merge |
-| `ops.js`, `vector.js` | The op model (`applyOp`, the kinds' precedence), clocks and version vectors |
-| `sequence.js`, `rle.js` | Lists and texts: Fugue runs, the walk and its cached index, a movable list's registers, marks, cursors; the run-length content of a run |
-| `tree.js`, `order.js` | Trees: every node's moves and their fold; fractional indexes, in the core for a node's place and the `@alexify/syncom/order` subpath |
-| `history.js`, `tags.js`, `patch.js`, `myers.js` | A version as a fold of the log; tags as copy-on-write record files; the patch vocabulary of `diff()` and `applyPatches()`; the Myers diff behind `updateText()` and the splices of a patch |
-| `undo.js`, `branch.js` | The `@alexify/syncom/undo` and `@alexify/syncom/branch` subpaths — over the public API, no engine bundled |
-| `chain.js`, `contract.js`, `crdt.js` | The hash-linked chain; the `@alexify/syncom/contracts` subpath; `diff`/`merge`/`apply` over plain objects |
-| `schema.js`, `query.js` | Validators, versions and lenses; Mango cursors, `$text` among them |
-| `search.js` | The `@alexify/syncom/search` subpath: the trigram index behind `$text` — the core knows only its contract |
-| `signing.js`, `keys.js`, `crypto.js` | What an op's signature covers, signing and verifying it; the key pairs on disk; hashing, sealing and signing |
-| `sync.js`, `hosting.js`, `link.js`, `wrpc.js`, `protocol.js`, `scope.js` | Dialing, hosting, the link contract, the wrpc adapter, what both halves agree on, what "in scope" means |
-| `hooks.js`, `emitter.js`, `logger.js`, `telemetry.js`, `errors.js` | Hooks and events, injected logging and OpenTelemetry, `SyncomError` |
-| `fsi.js`, `fsi.browser.js`, `idb.js`, `backend.js`, `lock.js` | `node:fs`, OPFS, IndexedDB and memory backends; one instance per directory |
+| `log.js`, `sync/outbound.js` | `OpLog`, the persisted operation log: append, seal, retention, scrub, pins; the ops a receiver lacks, for a push and a branch merge |
+| `ops.js`, `vector.js` | The op model (`applyOp` over registers, counters, sets and one `blocks` slot per plugin kind; the kinds' precedence by the registry's ranks), clocks and version vectors |
+| `text/text.js`, `text/sequence.js`, `text/btree.js`, `text/pmap.js`, `text/plist.js`, `text/rle.js`, `text/myers.js` | The `@alexify/syncom/text` plugin: lists and texts — Fugue runs placed by a walk into a persistent rope (a B+-tree with two measures, path-copied per op, a text cache per node), the run records in a persistent map, a placed run's segments and children in chunked lists; a movable list's registers, marks, cursors; the run-length content of a run; the Myers diff behind `updateText()` and the splices of a patch |
+| `tree/tree.js`, `tree/moves.js`, `order/order.js` | The `@alexify/syncom/tree` plugin: every node's moves and their fold, kept by the block and handed on to the block an op makes (an older move landed by undo–do–redo, the reading path-copied); fractional indexes for a node's place and the `@alexify/syncom/order` subpath |
+| `all/all.js` | The `@alexify/syncom/all` entry: the core with every shipped plugin registered |
+| `versions/history.js`, `versions/tags.js`, `patch.js` | A version as a fold of the log; tags as copy-on-write record files (the versions plugin's); the patch vocabulary of `diff()` and `applyPatches()`, a plugin's kinds through the registry |
+| `undo/undo.js`, `branch/branch.js` | The `@alexify/syncom/undo` and `@alexify/syncom/branch` subpaths — over the public API, no engine bundled |
+| `chain/chain.js`, `contracts/contracts.js`, `crdt.js` | The hash-linked chain, a plugin (`@alexify/syncom/chain`); the `@alexify/syncom/contracts` subpath; `diff`/`merge`/`apply` over plain objects |
+| `schema/schema.js`, `schema/define.js`, `schema/lens.js`, `schema/entity.js` | The `@alexify/syncom/schema` plugin: validators, versions and lenses read once; the record as its validator sees it (the core's) |
+| `query/query.js`, `query/cursor.js` | The `@alexify/syncom/query` plugin: Mango cursors, `$text` among them |
+| `search/search.js` | The `@alexify/syncom/search` subpath: the trigram index behind `$text` — the core knows only its contract |
+| `signing/signing.js`, `signing/sign.js`, `signing/ed25519.js`, `crypto/keys.js`, `crypto/pem.js`, `header.js`, `crypto/digest.js` | The identity plugin (`@alexify/syncom/signing`); signing an op and verifying it; the Ed25519 half; the key pairs on disk and their PEM (shared with the encryption plugin); what names an op — its header, its payload's digest, its fingerprint, the core's whether a node signs or not; the core's SHA-256 (node:crypto, Web Crypto in the browser) |
+| `encryption/encryption.js`, `encryption/rsa.js` | The sealing plugin and the at-rest backend wrapper (`@alexify/syncom/encryption`); the RSA half |
+| `sync/sync.js`, `sync/manager.js`, `sync/hosting.js`, `sync/outbound.js`, `sync/link.js`, `sync/wire.js`, `sync/protocol.js`, `wrpc/wrpc.js`, `scope.js` | The sync plugin (`@alexify/syncom/sync`): dialing and hosting; the selection a push makes (the core's updates API); the link contract, the ops as they cross, the wrpc adapter, what both halves agree on, what "in scope" means |
+| `hooks.js`, `emitter.js`, `logger.js`, `telemetry/writer.js`, `telemetry/telemetry.js`, `errors.js` | Hooks and events, injected logging, the telemetry writer contract and the `@alexify/syncom/telemetry` adapter, `SyncomError` |
+| `fsi.js`, `fsi.browser.js`, `idb/idb.js`, `memory/memory.js`, `layered/layered.js`, `backend.js`, `lock.js` | `node:fs`, OPFS, IndexedDB and memory backends, the layered combinator; the contract; one instance per directory |
 
-The browser halves (`*.browser.js`) replace `fsi`, `crypto` and `utils` through the `browser`
-field of `package.json`; everything else is shared.
+The browser halves (`*.browser.js`) replace `fsi`, `utils` and `crypto/digest` in the core, `signing/ed25519` and `encryption/rsa` in their subpaths, through the `browser`
+field of `package.json`; everything else is shared. Every subpath is a folder under `src/` with
+its entry and its types beside it, and a folder is a zone: a module of its zone lives there even where the core requires it (`telemetry/writer.js`, `sync/wire.js`, `schema/entity.js`; `crypto/` is a zone with no subpath). The package root holds `index.js`, `browser.js` and their `.d.ts`
+alone (see [Entry points](/guide/entry-points)).

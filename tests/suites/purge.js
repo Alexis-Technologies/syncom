@@ -61,7 +61,7 @@ const runPurgeTests = async (t, assert, createStorage) => {
     assert.ok(entries.every((entry) => entry.scrubbed === true && bare(entry.op)));
     // The signature and the digest stay, and the header still verifies —
     // required lazily, after the wrapper primed the crypto half.
-    const { verifyOp } = require('../../src/signing.js');
+    const { verifyOp } = require('../../src/signing/sign.js');
     for (const entry of entries) {
       assert.strictEqual(typeof entry.op.sig, 'string');
       assert.strictEqual(await verifyOp(entry.op, 'require'), 'ok', `${entry.op.type} after the scrub`);
@@ -78,6 +78,12 @@ const runPurgeTests = async (t, assert, createStorage) => {
     ]);
     assert.strictEqual(await storage.get(person.id), null);
     assert.strictEqual(await holdsSecret(storage), false, 'the peer’s op was scrubbed on arrival');
+    const arrived = storage.log.since(undefined).at(-1);
+    assert.deepStrictEqual(
+      [arrived.op.origin, arrived.scrubbed, 'data' in arrived.op, ops.at(-1).data],
+      ['peer', true, false, undefined],
+      'logged and relayed as a scrub leaves it: no payload, no rewrite to come',
+    );
     assert.strictEqual(storage.vector.peer, 1, 'but counted');
     await storage.purge(person.id);
     assert.strictEqual(await storage.get(person.id), null, 'idempotent');
@@ -152,8 +158,8 @@ const runPurgeTests = async (t, assert, createStorage) => {
   );
 
   await t.test('a scrub that fails mid-way rejects the purge; the next purge finishes it', async (t2) => {
-    const { createMemoryFsi } = require('../../src/backend.js');
-    const inner = createMemoryFsi();
+    const { memory } = require('../../src/memory/memory.js');
+    const inner = memory();
     let failing = false;
     const fsi = {
       read: (dir, name) => inner.read(dir, name),

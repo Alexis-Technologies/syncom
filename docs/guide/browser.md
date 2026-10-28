@@ -8,24 +8,29 @@ configuration:
 import { open, diff, merge } from '@alexify/syncom';
 ```
 
-Under the hood the entry resolves to `browser.js`, and three modules are
-swapped for their browser twins:
+Under the hood the entry resolves to `browser.js`, and four modules are
+swapped for their browser twins — two in the core, two in the subpaths that
+carry the crypto:
 
 | Node | Browser | Backed by |
 | --- | --- | --- |
 | `src/fsi.js` | `src/fsi.browser.js` | OPFS (`navigator.storage.getDirectory()`) |
-| `src/crypto.js` | `src/crypto.browser.js` | Web Crypto (`crypto.subtle`) |
 | `src/utils.js` | `src/utils.browser.js` | `crypto.randomUUID()` — the default `getId` |
+| `src/signing/ed25519.js` | `src/signing/ed25519.browser.js` | Web Crypto (`crypto.subtle`) — `@alexify/syncom/signing` |
+| `src/encryption/rsa.js` | `src/encryption/rsa.browser.js` | Web Crypto — `@alexify/syncom/encryption` |
 
 CRDT, contracts, the chain, storage — lists, text, trees, history and tags
 among it — the operation log and sync are the same code in both halves; so
-are the `/wrpc`, `/search`, `/order`, `/undo` and `/branch` subpaths.
-`@alexify/syncom/idb` is the one that is browser-only.
+are the `/wrpc`, `/search`, `/order`, `/undo` and `/branch` subpaths. The
+core's own hash (the chain's blocks, the schema hash) is SHA-256 through Web
+Crypto on both platforms. `@alexify/syncom/idb` is the one that is
+browser-only.
 
 ## What differs
 
 **Crypto is asynchronous.** `node:crypto` hashes and encrypts synchronously;
-the Web Crypto API does not. So in the browser:
+the Web Crypto API does not. So in the browser, from `@alexify/syncom/signing`
+and `@alexify/syncom/encryption`:
 
 ```js
 await calculateHash({ a: 1 }); // Promise<string> — sync in Node.js
@@ -35,8 +40,9 @@ await sign(message, privateKey); // the Ed25519 pair that signs ops
 await verify(message, signature, nodeId);
 ```
 
-`browser.d.ts` declares these five signatures separately from `index.d.ts`
-for exactly this reason.
+Each subpath's `browser` export condition carries its own types
+(`signing.browser.d.ts`, `encryption.browser.d.ts`) that declare these five
+signatures separately for exactly this reason.
 
 The cipher is the same on both: AES-256-GCM under a key wrapped with
 RSA-OAEP (SHA-256), and the signature is Ed25519 over the same bytes. Keys,
@@ -47,7 +53,7 @@ is one node id on both.
 `navigator.storage.getDirectory()`, so `open({ path: 'data' })` creates a
 `data/` directory inside the origin's OPFS rather than on disk. It is
 per-origin and the browser may evict it. Another backend goes in through
-`open({ fsi })` — `createMemoryFsi()` for a node that must not persist, or
+`open({ fsi })` — `memory()` for a node that must not persist, or
 IndexedDB (see [Backends](./backends)).
 
 ## OPFS or IndexedDB
@@ -83,15 +89,18 @@ resumes where it left off; `storage.sync.unit()` mounted on a wrpc
 
 ## Requirements
 
-OPFS and Web Crypto, with Ed25519 among its algorithms (it signs every op) —
-available in current Chrome, Edge, Firefox and Safari. Both APIs require a
+OPFS and Web Crypto — SHA-256 for the core, Ed25519 among its algorithms
+for the `signing` plugin (it signs every op), RSA-OAEP and AES-GCM for the
+`encryption` one — available in current Chrome, Edge, Firefox and Safari. Both APIs require a
 **secure context** (HTTPS or `localhost`).
 
 ## Bundle size
 
-The browser entry is measured on every CI run with a budget that fails the
-build when exceeded — 66 KB min+gzip — and so is every subpath, on its own row
-with its own budget, so what an app imports is what it ships:
+The browser entry — the core — is measured on every CI run with a budget
+that fails the build when exceeded — 52 KB min+gzip — and so is every
+subpath, on its own row with its own budget (`/text` 34.0 KB, `/tree` 9.0 KB,
+`/all`, everything registered, 117.5 KB), so what an app imports is what it
+ships (see [Entry points](/guide/entry-points)):
 
 ```bash
 pnpm size

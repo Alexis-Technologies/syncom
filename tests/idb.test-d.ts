@@ -1,6 +1,6 @@
 import { expectAssignable, expectError, expectType } from 'tsd';
-import { createIdbFsi } from '../idb.js';
-import type { Fsi } from '../idb.js';
+import { createIdbFsi } from '../src/idb/idb.js';
+import type { Fsi } from '../src/idb/idb.js';
 import { open } from '../index.js';
 
 const fsi = createIdbFsi();

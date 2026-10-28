@@ -45,105 +45,105 @@
 <text class="tick" x="676" y="504" text-anchor="middle">1M</text>
 <line class="axis" x1="276" y1="88" x2="276" y2="488"/>
 <g><title>Yjs · Y.Doc, a Y.Map per record · v13.6.33
-234,530 ops/s
-4.26 µs per operation
-samples 226k – 237k
+230,132 ops/s
+4.35 µs per operation
+samples 160k – 232k
 yjs@13.6.33</title>
 <text class="label" x="20" y="105">Yjs</text>
 <text class="sublabel" x="20" y="120">Y.Doc, a Y.Map per record · v13.6.33</text>
-<path class="bar" d="M276,101H609.0197812296036A4,4 0 0 1 613.0197812296036,105V111A4,4 0 0 1 609.0197812296036,115H276Z"/>
-<text class="value" x="619.0197812296036" y="114">235k</text>
+<path class="bar" d="M276,101H608.1976100417272A4,4 0 0 1 612.1976100417272,105V111A4,4 0 0 1 608.1976100417272,115H276Z"/>
+<text class="value" x="618.1976100417272" y="114">230k</text>
+</g>
+<g><title>syncom · core + text + sync, memory() · v0.0.1
+45,605 ops/s
+21.9 µs per operation
+samples 42.5k – 48.8k
+@alexify/syncom@0.0.1</title>
+<text class="label primary" x="20" y="145">syncom</text>
+<text class="sublabel" x="20" y="160">core + text + sync, memory() · v0.0.1</text>
+<path class="bar primary" d="M276,141H537.9010868416956A4,4 0 0 1 541.9010868416956,145V151A4,4 0 0 1 537.9010868416956,155H276Z"/>
+<text class="value" x="547.9010868416956" y="154">45.6k</text>
 </g>
 <g><title>Loro · LoroDoc, a LoroMap per record · v1.16.4
-31,338 ops/s
-31.9 µs per operation
-samples 29.9k – 43.2k
+36,309 ops/s
+27.5 µs per operation
+samples 31.8k – 45.6k
 loro-crdt@1.16.4</title>
-<text class="label" x="20" y="145">Loro</text>
-<text class="sublabel" x="20" y="160">LoroDoc, a LoroMap per record · v1.16.4</text>
-<path class="bar" d="M276,141H521.6065161302902A4,4 0 0 1 525.6065161302902,145V151A4,4 0 0 1 521.6065161302902,155H276Z"/>
-<text class="value" x="531.6065161302902" y="154">31.3k</text>
+<text class="label" x="20" y="185">Loro</text>
+<text class="sublabel" x="20" y="200">LoroDoc, a LoroMap per record · v1.16.4</text>
+<path class="bar" d="M276,181H528.0017546579065A4,4 0 0 1 532.0017546579065,185V191A4,4 0 0 1 528.0017546579065,195H276Z"/>
+<text class="value" x="538.0017546579065" y="194">36.3k</text>
 </g>
 <g><title>TinyBase · MergeableStore · v10.0.1
-22,941 ops/s
-43.6 µs per operation
-samples 21.8k – 24.6k
+24,637 ops/s
+40.6 µs per operation
+samples 23.5k – 25.1k
 tinybase@10.0.1</title>
-<text class="label" x="20" y="185">TinyBase</text>
-<text class="sublabel" x="20" y="200">MergeableStore · v10.0.1</text>
-<path class="bar" d="M276,181H508.0610197126724A4,4 0 0 1 512.0610197126724,185V191A4,4 0 0 1 508.0610197126724,195H276Z"/>
-<text class="value" x="518.0610197126724" y="194">22.9k</text>
+<text class="label" x="20" y="225">TinyBase</text>
+<text class="sublabel" x="20" y="240">MergeableStore · v10.0.1</text>
+<path class="bar" d="M276,221H511.1583066305917A4,4 0 0 1 515.1583066305917,225V231A4,4 0 0 1 511.1583066305917,235H276Z"/>
+<text class="value" x="521.1583066305917" y="234">24.6k</text>
 </g>
 <g><title>PouchDB · pouchdb-adapter-memory · v9.0.0
-20,291 ops/s
-49.3 µs per operation
-samples 19.9k – 20.6k
+20,755 ops/s
+48.2 µs per operation
+samples 20.7k – 20.9k
 pouchdb@9.0.0</title>
-<text class="label" x="20" y="225">PouchDB</text>
-<text class="sublabel" x="20" y="240">pouchdb-adapter-memory · v9.0.0</text>
-<path class="bar" d="M276,221H502.73088705422424A4,4 0 0 1 506.73088705422424,225V231A4,4 0 0 1 502.73088705422424,235H276Z"/>
-<text class="value" x="512.7308870542242" y="234">20.3k</text>
+<text class="label" x="20" y="265">PouchDB</text>
+<text class="sublabel" x="20" y="280">pouchdb-adapter-memory · v9.0.0</text>
+<path class="bar" d="M276,261H503.7112999148412A4,4 0 0 1 507.7112999148412,265V271A4,4 0 0 1 503.7112999148412,275H276Z"/>
+<text class="value" x="513.7112999148412" y="274">20.8k</text>
 </g>
-<g><title>RxDB · memory storage · v17.6.0
-16,702 ops/s
-59.9 µs per operation
-samples 8,306 – 111k
-rxdb@17.6.0</title>
-<text class="label" x="20" y="265">RxDB</text>
-<text class="sublabel" x="20" y="280">memory storage · v17.6.0</text>
-<path class="bar" d="M276,261H494.27770916823033A4,4 0 0 1 498.27770916823033,265V271A4,4 0 0 1 494.27770916823033,275H276Z"/>
-<text class="value" x="504.27770916823033" y="274">16.7k</text>
-</g>
-<g><title>syncom · chain: false, createMemoryFsi() · v0.0.1
-16,673 ops/s
-60 µs per operation
-samples 16.3k – 16.9k
+<g><title>syncom · /all: signed, chained, memory() · v0.0.1
+14,968 ops/s
+66.8 µs per operation
+samples 14.5k – 15.3k
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="305">syncom</text>
-<text class="sublabel" x="20" y="320">chain: false, createMemoryFsi() · v0.0.1</text>
-<path class="bar secondary" d="M276,301H494.2020182741179A4,4 0 0 1 498.2020182741179,305V311A4,4 0 0 1 494.2020182741179,315H276Z"/>
-<text class="value" x="504.2020182741179" y="314">16.7k</text>
+<text class="sublabel" x="20" y="320">/all: signed, chained, memory() · v0.0.1</text>
+<path class="bar secondary" d="M276,301H489.5162298049821A4,4 0 0 1 493.5162298049821,305V311A4,4 0 0 1 489.5162298049821,315H276Z"/>
+<text class="value" x="499.5162298049821" y="314">15k</text>
 </g>
-<g><title>syncom · default, createMemoryFsi() · v0.0.1
-15,151 ops/s
-66 µs per operation
-samples 14.9k – 15.6k
-@alexify/syncom@0.0.1</title>
-<text class="label primary" x="20" y="345">syncom</text>
-<text class="sublabel" x="20" y="360">default, createMemoryFsi() · v0.0.1</text>
-<path class="bar primary" d="M276,341H490.04440905219906A4,4 0 0 1 494.04440905219906,345V351A4,4 0 0 1 490.04440905219906,355H276Z"/>
-<text class="value" x="500.04440905219906" y="354">15.2k</text>
+<g><title>RxDB · memory storage · v17.6.0
+9,490 ops/s
+105 µs per operation
+samples 8,134 – 112k
+rxdb@17.6.0</title>
+<text class="label" x="20" y="345">RxDB</text>
+<text class="sublabel" x="20" y="360">memory storage · v17.6.0</text>
+<path class="bar" d="M276,341H469.72632596991485A4,4 0 0 1 473.72632596991485,345V351A4,4 0 0 1 469.72632596991485,355H276Z"/>
+<text class="value" x="479.72632596991485" y="354">9,490</text>
 </g>
 <g><title>OrbitDB · documents, memory blockstore · v4.0.0
-1,081 ops/s
-925 µs per operation
-samples 1,077 – 1,091
+1,103 ops/s
+906 µs per operation
+samples 1,100 – 1,115
 @orbitdb/core@4.0.0</title>
 <text class="label" x="20" y="385">OrbitDB</text>
 <text class="sublabel" x="20" y="400">documents, memory blockstore · v4.0.0</text>
-<path class="bar" d="M276,381H375.3774274321564A4,4 0 0 1 379.3774274321564,385V391A4,4 0 0 1 375.3774274321564,395H276Z"/>
-<text class="value" x="385.3774274321564" y="394">1,081</text>
+<path class="bar" d="M276,381H376.2698103900286A4,4 0 0 1 380.2698103900286,385V391A4,4 0 0 1 376.2698103900286,395H276Z"/>
+<text class="value" x="386.2698103900286" y="394">1,103</text>
 </g>
 <g><title>Automerge · Automerge.change, Counter · v3.5.0
-512 ops/s
-1.95 ms per operation
-samples 400 – 746
+520 ops/s
+1.92 ms per operation
+samples 414 – 760
 @automerge/automerge@3.5.0</title>
 <text class="label" x="20" y="425">Automerge</text>
 <text class="sublabel" x="20" y="440">Automerge.change, Counter · v3.5.0</text>
-<path class="bar" d="M276,421H342.901411437976A4,4 0 0 1 346.901411437976,425V431A4,4 0 0 1 342.901411437976,435H276Z"/>
-<text class="value" x="352.901411437976" y="434">512</text>
+<path class="bar" d="M276,421H343.6323404290948A4,4 0 0 1 347.6323404290948,425V431A4,4 0 0 1 343.6323404290948,435H276Z"/>
+<text class="value" x="353.6323404290948" y="434">520</text>
 </g>
 <g><title>Fireproof · memory:// store · v0.24.19
-310 ops/s
-3.23 ms per operation
-samples 290 – 405
+331 ops/s
+3.03 ms per operation
+samples 285 – 443
 @fireproof/core@0.24.19</title>
 <text class="label" x="20" y="465">Fireproof</text>
 <text class="sublabel" x="20" y="480">memory:// store · v0.24.19</text>
-<path class="bar" d="M276,461H321.1041754483801A4,4 0 0 1 325.1041754483801,465V471A4,4 0 0 1 321.1041754483801,475H276Z"/>
-<text class="value" x="331.1041754483801" y="474">310</text>
+<path class="bar" d="M276,461H323.92169765296376A4,4 0 0 1 327.92169765296376,465V471A4,4 0 0 1 323.92169765296376,475H276Z"/>
+<text class="value" x="333.92169765296376" y="474">331</text>
 </g>
 <text class="caption" x="20" y="529">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
-<text class="caption" x="20" y="545">in a fresh process · 2026-10-24</text>
+<text class="caption" x="20" y="545">in a fresh process · 2026-10-27</text>
 </svg>

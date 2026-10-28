@@ -20,7 +20,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { bench } = require('./support/harness.js');
-const { Blockchain } = require('../src/chain.js');
+const { Blockchain } = require('../src/chain/chain.js');
 
 const makeTemp = () => fs.mkdtemp(path.join(os.tmpdir(), 'syncom-bench-chain-'));
 

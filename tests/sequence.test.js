@@ -6,7 +6,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const S = require('../src/sequence.js');
+const S = require('../src/text/sequence.js');
 
 // A few nodes over one field, each holding its own block; ops are
 // `{ ts, origin, payload }` and stamps come from one monotonic clock.
@@ -124,8 +124,8 @@ test('sequence engine', async (t) => {
     remove(a, 1, 4);
     assert.strictEqual(read(a), 'xllo');
     const idx = index(a);
-    assert.strictEqual(idx.total, 8, 'tombstones stay in the walk');
-    assert.strictEqual(idx.length, 4);
+    assert.strictEqual(S.totalOf(idx), 8, 'tombstones stay in the walk');
+    assert.strictEqual(S.lengthOf(idx), 4);
     insert(a, 4, '!');
     assert.strictEqual(read(a), 'xllo!');
     assert.strictEqual(S.elemAt(idx, 0), S.elemAt(index(a), 0));
@@ -145,6 +145,79 @@ test('sequence engine', async (t) => {
     assert.deepStrictEqual(read(a), [{ id: 1 }, 3]);
     insert(a, 0, [0]);
     assert.deepStrictEqual(read(a), [0, { id: 1 }, 3]);
+  });
+
+  await t.test("a splice carries the markers of its embed slots; an assign lands on a text's slot", () => {
+    const E = S.EMBED;
+    const p = { type: 'p', parents: [], attrs: {}, isEmbed: false };
+    const img = { type: 'img', parents: [], attrs: { src: 'a' }, isEmbed: true };
+    const a = node('A');
+    // A new run with two slots, each marker at its offset.
+    const first = {
+      ts: tick(),
+      origin: 'A',
+      payload: {
+        at: S.HEAD,
+        content: `${E}ab${E}c`,
+        vals: [
+          [0, p],
+          [3, img],
+        ],
+      },
+    };
+    apply(a, first);
+    const R = S.runKey(first.ts, 'A');
+    assert.strictEqual(read(a), `${E}ab${E}c`);
+    assert.deepStrictEqual(S.valueAt(index(a), 0), p);
+    assert.deepStrictEqual(S.valueAt(index(a), 3), img);
+    assert.strictEqual(S.valueAt(index(a), 1), 'a', 'a character reads as itself');
+    assert.strictEqual(S.heldAt(index(a), 0), E, 'the slot holds the character under its marker');
+    assert.deepStrictEqual(a.seq.vals, {
+      [S.elemKey(R, 0)]: [first.ts, 'A', p],
+      [S.elemKey(R, 3)]: [first.ts, 'A', img],
+    });
+    // The writer's run grown by a slot: the marker lands at the grown offset.
+    const more = { ts: tick(), origin: 'A', payload: { run: R, from: 5, content: `d${E}`, vals: [[1, p]] } };
+    apply(a, more);
+    assert.strictEqual(read(a), `${E}ab${E}cd${E}`);
+    assert.deepStrictEqual(S.valueAt(index(a), 6), p);
+    assert.strictEqual(a.seq.vals[S.elemKey(R, 6)][0], more.ts);
+    // A slot without a marker reads as the character; an assign gives it one, last writer wins.
+    const bare = { ts: tick(), origin: 'A', payload: { run: R, from: 7, content: E } };
+    apply(a, bare);
+    assert.strictEqual(S.valueAt(index(a), 7), E);
+    const slot = S.elemAt(index(a), 7);
+    const t1 = tick();
+    const t2 = tick();
+    const byA = S.applyAssign(a.seq, [t2, 'A'], { elem: slot, value: p });
+    const byB = S.applyAssign(byA.seq, [t1, 'B'], { elem: slot, value: img });
+    assert.strictEqual(byA.changed, true);
+    assert.strictEqual(byB.changed, false, 'the older assign loses');
+    const other = S.applyAssign(S.applyAssign(a.seq, [t1, 'B'], { elem: slot, value: img }).seq, [t2, 'A'], {
+      elem: slot,
+      value: p,
+    });
+    assert.deepStrictEqual(other.seq, byA.seq, 'the same whatever the order');
+    assert.deepStrictEqual(S.valueAt(S.buildIndex(other.seq), 7), p);
+    // Through JSON and a join the markers stay; a cut takes the slot and prunes nothing of the others.
+    const hydrated = S.normalizeSeq(JSON.parse(JSON.stringify(byA.seq)), null, 4096);
+    assert.deepStrictEqual(hydrated.vals, byA.seq.vals);
+    const joined = S.join(a.seq, byA.seq);
+    assert.deepStrictEqual(S.valueAt(S.buildIndex(joined), 7), p);
+    a.seq = byA.seq;
+    remove(a, 0, 1);
+    assert.strictEqual(read(a), `ab${E}cd${E}${E}`);
+    assert.deepStrictEqual(S.valueAt(index(a), 2), img);
+    // Malformed: vals without content, not a list, an offset past the content, a non-JSON marker.
+    for (const vals of [[[0, p]], 'x', [[9, p]], [[0, undefined]], [[-1, p]], [[0]], [0]]) {
+      const payload = vals === 'x' ? { at: S.HEAD, content: E, vals } : { at: S.HEAD, content: E, vals };
+      if (vals[0]?.[0] === 0 && vals[0]?.[1] === p && vals.length === 1) {
+        const { reason } = S.applySplice(a.seq, [tick(), 'C'], { cut: [[R, 1, 1]], content: '', vals });
+        assert.strictEqual(reason, 'malformed', 'vals ride on an insertion alone');
+        continue;
+      }
+      assert.strictEqual(S.applySplice(a.seq, [tick(), 'C'], payload).reason, 'malformed', JSON.stringify(vals));
+    }
   });
 
   await t.test('a list moves and assigns: a position and a value register per element', () => {
@@ -250,10 +323,14 @@ test('sequence engine', async (t) => {
     ]) {
       assert.strictEqual(S.applyMove(a.seq, [tick(), 'A'], bad).reason, 'malformed', JSON.stringify(bad));
     }
+    // An assign lands on a text too (an embed slot's marker); a move does not.
     const text = node('T');
     const t0 = insert(text, 0, 'ab');
+    const slot = S.elemKey(S.runKey(t0.ts, 'T'), 0);
+    assert.strictEqual(S.applyAssign(text.seq, [tick(), 'T'], { elem: slot, value: 'x' }).changed, true);
     assert.strictEqual(
-      S.applyAssign(text.seq, [tick(), 'T'], { elem: S.elemKey(S.runKey(t0.ts, 'T'), 0), value: 'x' }).reason,
+      S.applyMove(text.seq, [tick(), 'T'], { elem: slot, cut: [S.runKey(t0.ts, 'T'), 0, 1], at: '^', value: 'x' })
+        .reason,
       'malformed',
     );
     // prune drops registers below the base with their runs.
@@ -813,102 +890,64 @@ test('sequence engine', async (t) => {
     assert.strictEqual(read(b), 'ab');
   });
 
-  await t.test(
-    'typing at the end of a run extends the held index: the same index as a walk, or null and a walk',
-    () => {
-      const same = (a, b) => {
-        assert.deepStrictEqual([a.kind, a.length, a.total], [b.kind, b.length, b.total]);
-        for (const name of ['ordRun', 'ordOff', 'visRun', 'visOff', 'ordAt', 'visAt', 'shown']) {
-          assert.deepStrictEqual(Array.from(a[name]), Array.from(b[name]), name);
-        }
-        assert.deepStrictEqual(a.visElem, b.visElem);
-        const runs = (x) => x.runs.map((r) => [r.key, r.len, r.items, r.start]);
-        assert.deepStrictEqual(runs(a), runs(b));
-        assert.deepStrictEqual([...a.byKey.keys()], [...b.byKey.keys()]);
-        assert.deepStrictEqual(
-          a.root.map((r) => r.key),
-          b.root.map((r) => r.key),
-        );
-        assert.deepStrictEqual(S.render(a), S.render(b));
-      };
-      const a = node('A');
-      const first = insert(a, 0, 'ab');
-      const run = S.runKey(first.ts, 'A');
-      let idx = index(a);
-      S.render(idx); // the reading is kept, and carried over
-      for (const ch of 'cdefg') {
-        const r = apply(a, { ts: tick(), origin: 'A', payload: { run, from: idx.length, content: ch } });
-        assert.deepStrictEqual(r.extended, { run, from: idx.length, content: ch });
-        const ext = S.extendIndex(idx, a.seq, r.extended);
-        assert.notStrictEqual(ext, null);
-        const walked = S.buildIndex(a.seq);
-        same(ext, walked);
-        assert.strictEqual(ext.rendered, S.render(walked));
-        idx = ext;
-      }
-      assert.strictEqual(read(a), 'abcdefg');
-      // The extended run's parse is registered: the next prune and slot count find it.
-      const b2 = apply(a, { ts: tick(), origin: 'A', payload: { run, from: 7, content: 'h' } });
-      assert.deepStrictEqual(b2.extended, { run, from: 7, content: 'h' });
-      // A list carries its elements, not its reading (a value register may name a new one).
-      const l = node('L', 'l');
-      const li = insert(l, 0, [1, 2]);
-      const lrun = S.runKey(li.ts, 'L');
-      const lidx = index(l);
-      const lr = apply(l, { ts: tick(), origin: 'L', payload: { run: lrun, from: 2, content: [3, { x: 4 }] } });
-      const lext = S.extendIndex(lidx, l.seq, lr.extended);
-      assert.strictEqual(lext.rendered, undefined, 'read again, not carried over');
-      same(lext, S.buildIndex(l.seq));
-      assert.deepStrictEqual(S.render(lext), [1, 2, 3, { x: 4 }]);
-      // Not an extension at all: a cut rides along, an extension waits, a waiting one settles.
-      const b = node('B');
-      const bf = insert(b, 0, 'xyz');
-      const brun = S.runKey(bf.ts, 'B');
-      const withCut = apply(b, {
-        ts: tick(),
-        origin: 'B',
-        payload: { run: brun, from: 3, content: 'w', cut: [[brun, 0, 1]] },
-      });
-      assert.strictEqual(withCut.extended, null);
-      const ahead = apply(b, { ts: tick(), origin: 'B', payload: { run: brun, from: 6, content: 'late' } });
-      assert.strictEqual(ahead.extended, null, 'an extension ahead of the run waits');
-      const fill = apply(b, { ts: tick(), origin: 'B', payload: { run: brun, from: 4, content: 'vv' } });
-      assert.strictEqual(fill.extended, null, 'the waiting extension settled: more than appended');
-      assert.strictEqual(read(b), 'yzwvvlate');
-      // An extension the index cannot take in place: another run after this one
-      // in key order, a run waiting for its anchor, a position register for a
-      // new element — null, and the caller walks.
-      const c = node('C');
-      const cf = insert(c, 0, 'ab');
-      const crun = S.runKey(cf.ts, 'C');
-      apply(c, { ts: tick(), origin: 'D', payload: { at: `>${S.elemKey(crun, 1)}`, content: 'Q' } });
-      const cidx = index(c);
-      const cr = apply(c, { ts: tick(), origin: 'C', payload: { run: crun, from: 2, content: 'c' } });
-      assert.strictEqual(S.extendIndex(cidx, c.seq, cr.extended), null, 'not the last run, not the last slot');
-      assert.strictEqual(read(c), 'abcQ');
-      const p = node('P');
-      const pf = insert(p, 0, 'ab');
-      const prun = S.runKey(pf.ts, 'P');
-      apply(p, { ts: tick(), origin: 'Z', payload: { at: '<5:0:Q', content: 'w' } });
-      const pidx = index(p);
-      const pr = apply(p, { ts: tick(), origin: 'P', payload: { run: prun, from: 2, content: 'c' } });
-      assert.strictEqual(S.extendIndex(pidx, p.seq, pr.extended), null, 'a run waits for its anchor');
-      const m = node('M', 'l');
-      const mf = insert(m, 0, [1, 2]);
-      const mrun = S.runKey(mf.ts, 'M');
-      const moved = S.applyMove(m.seq, [tick(), 'N'], {
-        elem: S.elemKey(mrun, 2),
-        cut: [mrun, 0, 1],
-        at: '^',
-        value: 9,
-      });
-      m.seq = moved.seq;
-      const midx = index(m);
-      const mr = apply(m, { ts: tick(), origin: 'M', payload: { run: mrun, from: 2, content: [3] } });
-      assert.strictEqual(S.extendIndex(midx, m.seq, mr.extended), null, 'a position register names the new element');
-      assert.deepStrictEqual(read(m), [2, 9], 'the moved-ahead element shows where its register says');
-    },
-  );
+  await t.test('typing at the end of a run grows it in place; what is more than an extension lands as it reads', () => {
+    const a = node('A');
+    const first = insert(a, 0, 'ab');
+    const run = S.runKey(first.ts, 'A');
+    const rebuilds = S.stats().rebuilds;
+    let held = a.seq;
+    for (const ch of 'cdefg') {
+      const r = apply(a, { ts: tick(), origin: 'A', payload: { run, from: S.lengthOf(index(a)), content: ch } });
+      assert.strictEqual(r.changed, true);
+      assert.notStrictEqual(a.seq, held, 'an op leaves a new block');
+      held = a.seq;
+    }
+    assert.strictEqual(read(a), 'abcdefg');
+    assert.strictEqual(Object.keys(a.seq.runs).length, 1, 'one run grew');
+    assert.deepStrictEqual(a.seq.runs[run], ['^', ['abcdefg']]);
+    assert.strictEqual(S.stats().rebuilds, rebuilds, 'the head is extended, never rebuilt');
+    // A list carries its elements: a value register may name a new one.
+    const l = node('L', 'l');
+    const li = insert(l, 0, [1, 2]);
+    const lrun = S.runKey(li.ts, 'L');
+    apply(l, { ts: tick(), origin: 'L', payload: { run: lrun, from: 2, content: [3, { x: 4 }] } });
+    assert.deepStrictEqual(read(l), [1, 2, 3, { x: 4 }]);
+    // Not a bare extension: a cut rides along, an extension waits, a waiting one settles.
+    const b = node('B');
+    const bf = insert(b, 0, 'xyz');
+    const brun = S.runKey(bf.ts, 'B');
+    apply(b, { ts: tick(), origin: 'B', payload: { run: brun, from: 3, content: 'w', cut: [[brun, 0, 1]] } });
+    assert.strictEqual(read(b), 'yzw');
+    const ahead = apply(b, { ts: tick(), origin: 'B', payload: { run: brun, from: 6, content: 'late' } });
+    assert.strictEqual(ahead.changed, true, 'an extension ahead of the run waits');
+    assert.deepStrictEqual(b.seq.ext, { [brun]: [[6, 'late']] });
+    apply(b, { ts: tick(), origin: 'B', payload: { run: brun, from: 4, content: 'vv' } });
+    assert.strictEqual(b.seq.ext, undefined, 'the waiting extension settled');
+    assert.strictEqual(read(b), 'yzwvvlate');
+    // A right child at the run's end sorts after the continuation that grows past it.
+    const c = node('C');
+    const cf = insert(c, 0, 'ab');
+    const crun = S.runKey(cf.ts, 'C');
+    apply(c, { ts: tick(), origin: 'D', payload: { at: `>${S.elemKey(crun, 1)}`, content: 'Q' } });
+    apply(c, { ts: tick(), origin: 'C', payload: { run: crun, from: 2, content: 'c' } });
+    assert.strictEqual(read(c), 'abcQ');
+    // A run waiting for its anchor stays out while the run it is not under grows.
+    const p = node('P');
+    const pf = insert(p, 0, 'ab');
+    const prun = S.runKey(pf.ts, 'P');
+    apply(p, { ts: tick(), origin: 'Z', payload: { at: '<5:0:Q', content: 'w' } });
+    apply(p, { ts: tick(), origin: 'P', payload: { run: prun, from: 2, content: 'c' } });
+    assert.strictEqual(read(p), 'abc');
+    assert.strictEqual(S.pendingCount(p.seq, index(p)), 1);
+    // A position register names an element the extension brings.
+    const m = node('M', 'l');
+    const mf = insert(m, 0, [1, 2]);
+    const mrun = S.runKey(mf.ts, 'M');
+    const moved = S.applyMove(m.seq, [tick(), 'N'], { elem: S.elemKey(mrun, 2), cut: [mrun, 0, 1], at: '^', value: 9 });
+    m.seq = moved.seq;
+    apply(m, { ts: tick(), origin: 'M', payload: { run: mrun, from: 2, content: [3] } });
+    assert.deepStrictEqual(read(m), [2, 9], 'the moved-ahead element shows where its register says');
+  });
 
   await t.test('spans by a sweep read as a per-character tally would, under random overlapping marks', () => {
     const text = node('T');
@@ -945,8 +984,8 @@ test('sequence engine', async (t) => {
     }
     marks.sort((p, q) => (p.key < q.key ? -1 : p.key > q.key ? 1 : p.ts - q.ts));
     const styles = [];
-    for (let i = 0; i < idx.length; i++) {
-      const ord = idx.ordAt[idx.runs[idx.visRun[i]].start + idx.visOff[i]];
+    for (let i = 0; i < S.lengthOf(idx); i++) {
+      const ord = S.anchorOrdinal(idx, `<${S.elemAt(idx, i)}`, null);
       let style = null;
       const stacks = {};
       for (const m of marks) {
@@ -966,7 +1005,7 @@ test('sequence engine', async (t) => {
     }
     const tally = [];
     const rendered = S.render(idx);
-    for (let i = 0; i < idx.length; i++) {
+    for (let i = 0; i < S.lengthOf(idx); i++) {
       const last = tally[tally.length - 1];
       if (last && JSON.stringify(last.marks) === JSON.stringify(styles[i] ?? {})) last.text += rendered[i];
       else tally.push({ text: rendered[i], marks: styles[i] ?? {} });
@@ -1002,4 +1041,57 @@ test('sequence engine', async (t) => {
     assert.deepStrictEqual(S.join(run([off]), ab), ab);
     assert.deepStrictEqual(S.spans(S.buildIndex(ab), ab), [{ text: 'abc', marks: {} }], 'and off is off');
   });
+});
+
+// styleAt (one index, O(marks × log n)) reads what spans() reads at every index.
+test('styleAt reads the style spans() shows at every index, marks, stacks and unmarks included', async () => {
+  const all = require('../src/all/all.js');
+  const { memory } = require('../src/memory/memory.js');
+  const { floorOf } = require('../src/vector.js');
+  const { SOURCE } = require('../src/symbols.js');
+  for (let seed = 1; seed <= 20; seed++) {
+    let x = seed;
+    const random = () => (x = (Math.imul(x, 1664525) + 1013904223) >>> 0) / 2 ** 32;
+    const storage = await all.open({ path: `/style-${seed}`, fsi: memory(), logger: false, defer: 0 });
+    const id = await storage.insert({});
+    await storage.splice(id, 'body', 0, 0, 'hello world, a text to style');
+    for (let i = 0; i < 40; i++) {
+      const length = (await storage.get(id)).body.length;
+      const a = Math.floor(random() * length);
+      const b = Math.min(length, a + 1 + Math.floor(random() * 6));
+      const roll = random();
+      if (roll < 0.3) await storage.splice(id, 'body', Math.floor(random() * (length + 1)), 0, 'xy');
+      else if (roll < 0.4 && length > 3) await storage.splice(id, 'body', a, Math.min(2, length - a));
+      else if (roll < 0.65) {
+        const expand = ['none', 'after', 'before', 'both'][Math.floor(random() * 4)];
+        await storage.mark(id, 'body', a, b, random() < 0.5 ? 'bold' : 'em', random() < 0.8 ? true : 'x', { expand });
+      } else if (roll < 0.75) await storage.mark(id, 'body', a, b, 'comment', { n: i }, { many: true });
+      else await storage.unmark(id, 'body', a, b, random() < 0.5 ? 'bold' : 'em');
+    }
+    const entry = await storage[SOURCE].entry(id);
+    const block = S.indexOf(entry, 'body');
+    const base = floorOf(entry.meta, 'body');
+    let index = 0;
+    for (const span of S.spans(block, block, base)) {
+      for (let k = 0; k < span.text.length; k++, index++) {
+        assert.deepStrictEqual(S.styleAt(block, index, base) ?? {}, span.marks, `seed ${seed}, index ${index}`);
+      }
+    }
+    assert.strictEqual(S.styleAt(block, index, base), null, 'past the end');
+    await storage.close();
+  }
+});
+
+test('normalizeRle takes a list run of 200 000 items in one segment', () => {
+  const items = new Array(200_000).fill(7);
+  const out = S.normalizeRle('l', [[1], items]);
+  assert.strictEqual(out.length, 1);
+  assert.deepStrictEqual(out[0], [1].concat(items));
+});
+
+test('rleAppend extends a list run by 200 000 items', () => {
+  const items = new Array(200_000).fill(7);
+  const out = S.rleAppend('l', [[1]], items);
+  assert.strictEqual(out.length, 1);
+  assert.deepStrictEqual(out[0], [1].concat(items));
 });

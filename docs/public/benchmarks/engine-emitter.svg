@@ -40,52 +40,52 @@
 <text class="tick" x="676" y="327" text-anchor="middle">100M</text>
 <line class="axis" x1="202" y1="71" x2="202" y2="311"/>
 <g><title>emit awaited · 0 listeners
-15,752,588 ops/s
-63.5 ns per operation</title>
+15,626,221 ops/s
+64 ns per operation</title>
 <text class="label primary" x="20" y="88">emit awaited</text>
 <text class="sublabel" x="20" y="103">0 listeners</text>
-<path class="bar primary" d="M202,84H481.7724037197992A4,4 0 0 1 485.7724037197992,88V94A4,4 0 0 1 481.7724037197992,98H202Z"/>
-<text class="value" x="491.7724037197992" y="97">15.8M</text>
+<path class="bar primary" d="M202,84H480.94338904096605A4,4 0 0 1 484.94338904096605,88V94A4,4 0 0 1 480.94338904096605,98H202Z"/>
+<text class="value" x="490.94338904096605" y="97">15.6M</text>
 </g>
 <g><title>emit awaited · 1 sync listener
-3,823,928 ops/s
-262 ns per operation</title>
+3,725,975 ops/s
+268 ns per operation</title>
 <text class="label primary" x="20" y="128">emit awaited</text>
 <text class="sublabel" x="20" y="143">1 sync listener</text>
-<path class="bar primary" d="M202,124H336.0548004249351A4,4 0 0 1 340.0548004249351,128V134A4,4 0 0 1 336.0548004249351,138H202Z"/>
-<text class="value" x="346.0548004249351" y="137">3.82M</text>
+<path class="bar primary" d="M202,124H333.3838649753019A4,4 0 0 1 337.3838649753019,128V134A4,4 0 0 1 333.3838649753019,138H202Z"/>
+<text class="value" x="343.3838649753019" y="137">3.73M</text>
 </g>
 <g><title>emit awaited · 1 listener, (data, delta)
-3,825,533 ops/s
+3,832,564 ops/s
 261 ns per operation</title>
 <text class="label primary" x="20" y="168">emit awaited</text>
 <text class="sublabel" x="20" y="183">1 listener, (data, delta)</text>
-<path class="bar primary" d="M202,164H336.0979927776834A4,4 0 0 1 340.0979927776834,168V174A4,4 0 0 1 336.0979927776834,178H202Z"/>
-<text class="value" x="346.0979927776834" y="177">3.83M</text>
+<path class="bar primary" d="M202,164H336.2869915616827A4,4 0 0 1 340.2869915616827,168V174A4,4 0 0 1 336.2869915616827,178H202Z"/>
+<text class="value" x="346.2869915616827" y="177">3.83M</text>
 </g>
 <g><title>emit awaited · 1 async listener
-3,554,343 ops/s
-281 ns per operation</title>
+3,453,688 ops/s
+290 ns per operation</title>
 <text class="label primary" x="20" y="208">emit awaited</text>
 <text class="sublabel" x="20" y="223">1 async listener</text>
-<path class="bar primary" d="M202,204H328.52996254432884A4,4 0 0 1 332.52996254432884,208V214A4,4 0 0 1 328.52996254432884,218H202Z"/>
-<text class="value" x="338.52996254432884" y="217">3.55M</text>
+<path class="bar primary" d="M202,204H325.5730950830711A4,4 0 0 1 329.5730950830711,208V214A4,4 0 0 1 325.5730950830711,218H202Z"/>
+<text class="value" x="335.5730950830711" y="217">3.45M</text>
 </g>
 <g><title>emit awaited · 2 sync listeners
-3,253,767 ops/s
-307 ns per operation</title>
+3,211,679 ops/s
+311 ns per operation</title>
 <text class="label primary" x="20" y="248">emit awaited</text>
 <text class="sublabel" x="20" y="263">2 sync listeners</text>
-<path class="bar primary" d="M202,244H319.4355886944169A4,4 0 0 1 323.4355886944169,248V254A4,4 0 0 1 319.4355886944169,258H202Z"/>
-<text class="value" x="329.4355886944169" y="257">3.25M</text>
+<path class="bar primary" d="M202,244H318.0955152914743A4,4 0 0 1 322.0955152914743,248V254A4,4 0 0 1 318.0955152914743,258H202Z"/>
+<text class="value" x="328.0955152914743" y="257">3.21M</text>
 </g>
 <g><title>emit fire-and-forget · 1 sync listener
-4,661,204 ops/s
-215 ns per operation</title>
+4,742,342 ops/s
+211 ns per operation</title>
 <text class="label primary" x="20" y="288">emit fire-and-forget</text>
 <text class="sublabel" x="20" y="303">1 sync listener</text>
-<path class="bar primary" d="M202,284H356.43405218157625A4,4 0 0 1 360.43405218157625,288V294A4,4 0 0 1 356.43405218157625,298H202Z"/>
-<text class="value" x="366.43405218157625" y="297">4.66M</text>
+<path class="bar primary" d="M202,284H358.2103103009623A4,4 0 0 1 362.2103103009623,288V294A4,4 0 0 1 358.2103103009623,298H202Z"/>
+<text class="value" x="368.2103103009623" y="297">4.74M</text>
 </g>
-<text class="caption" x="20" y="352">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-24</text>
+<text class="caption" x="20" y="352">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-27</text>
 </svg>

@@ -1,44 +1,21 @@
-export type JSONSafe =
-  | string
-  | number
-  | boolean
-  | null
-  | { readonly [key: string]: JSONSafe }
-  | readonly JSONSafe[];
+export type JSONSafe = string | number | boolean | null | { readonly [key: string]: JSONSafe } | readonly JSONSafe[];
 
 export interface KeyPair {
   readonly publicKey: string;
   readonly privateKey: string;
 }
 
-export function generateKeys(): Promise<KeyPair>;
-export function encrypt(data: unknown, publicKey: string): string;
-export function decrypt(data: string, privateKey: string): unknown;
-export function loadKeys(basePath: string, options?: { fsi?: Fsi }): Promise<KeyPair>;
-
-/** The Ed25519 pair that signs a node's ops; `id` is the raw public key, base64url — the node id. */
-export interface SigningKeyPair extends KeyPair {
-  readonly id: string;
-}
-
-export function generateSigningKeys(): Promise<SigningKeyPair>;
-/** `sign-public.pem` and `sign-private.pem` under `basePath`: read, or made and written. */
-export function loadSigningKeys(basePath: string, options?: { fsi?: Fsi }): Promise<SigningKeyPair>;
-/** Signs `message` (UTF-8) with a PEM Ed25519 private key: 64 bytes, base64url. */
-export function sign(message: string, privateKey: string): string;
-/**
- * Whether `signature` is `publicKey`'s — a node id, the raw key base64url —
- * over `message`; `false`, never a throw, for a malformed key or signature.
- */
-export function verify(message: string, signature: string, publicKey: string): boolean;
+// The key functions — generateKeys/encrypt/decrypt/loadKeys, the signing
+// pair, sign/verify — are the `@alexify/syncom/encryption` and
+// `@alexify/syncom/signing` subpaths'; the core keeps the PEM pair shape.
 
 // ---------------------------------------------------------------------------
 // Backends (src/backend.js, src/fsi.js, src/fsi.browser.js)
 
 /**
  * The storage backend: five functions over "a directory and a file name".
- * `node:fs` and OPFS are the defaults; `@alexify/syncom/idb` and
- * `createMemoryFsi()` are two more; anything with these functions fits
+ * `node:fs` and OPFS are the defaults; `@alexify/syncom/idb`, `@alexify/syncom/memory`
+ * and `@alexify/syncom/layered` are more; anything with these functions fits
  * `open({ fsi })`.
  */
 export interface Fsi {
@@ -57,13 +34,14 @@ export interface Fsi {
   sync?(dir: string, filename: string): Promise<void>;
   /** Exclusive create — rejects with `code: 'EEXIST'` when the file is there; what the directory lock uses when present. */
   create?(dir: string, filename: string, content: string): Promise<void>;
+  /** At the end of the file, made when absent; what the op log's journal writes with when present (a file per group without it). */
+  append?(dir: string, filename: string, content: string): Promise<void>;
 }
 
 /** Whether `value` has the five functions of the backend contract. */
 export function isFsi(value: unknown): value is Fsi;
 
 /** A backend in memory — shared by every storage opened over it, gone with the process. */
-export function createMemoryFsi(): Fsi & { readonly size: number; dump(): Record<string, string> };
 
 // The platform's own backend, as functions.
 export function read(dir: string, filename: string): Promise<string>;
@@ -85,6 +63,7 @@ export type SyncOpType =
   | 'write'
   | 'set'
   | 'inc'
+  | 'unset'
   | 'add'
   | 'remove'
   | 'splice'
@@ -113,12 +92,15 @@ export interface SplicePayload {
   run?: string;
   from?: number;
   content: string | readonly unknown[];
+  /** The markers of the embed slots (U+FFFC) the content holds, each at its offset. */
+  vals?: readonly (readonly [offset: number, marker: unknown])[];
 }
 
-/** What an `assign` carries: a list element by name and its new value. */
+/** What an `assign` carries: a list element (or a text's embed slot, `k: 't'`) by name and its new value. */
 export interface AssignPayload {
   elem: string;
   value: unknown;
+  k?: 't';
 }
 
 /**
@@ -161,19 +143,21 @@ export interface TreePayload {
   fi: string;
 }
 
-/** A node of a tree field as it reads: its id and its children, in order. */
+/** A node of a tree field as it reads: its id, its children in order, and its data — the fields under `<field>/<id>/…` — when it has some. */
 export interface TreeNode {
   id: string;
   children: TreeNode[];
+  data?: Record<string, unknown>;
 }
 
 /**
- * A tree field's block (src/tree.js): per node the moves made of it, each
+ * A tree field's block (src/tree/moves.js): per node the moves made of it, each
  * `[ts, origin, parent, fi]`, in stamp order. The field reads as the fold of
  * every move in stamp order, a move that would put a node under itself
  * skipped (Kleppmann et al., 2021).
  */
 export interface TreeBlock {
+  k: 'tree';
   /** The newest stamp the block holds. */
   ts: number;
   moves: { [node: string]: readonly (readonly [ts: number, origin: string, parent: string | null, fi: string])[] };
@@ -182,14 +166,61 @@ export interface TreeBlock {
 /** Which side of its slot a cursor keeps to. */
 export type CursorSide = 'before' | 'after';
 
-/** A run of equal style in a text: `marks` per name, a `many` name listing every mark. */
-export interface TextSpan {
-  text: string;
-  marks: { [name: string]: unknown | readonly { id: string; value: unknown }[] };
+/** Where a cursor is now and which side it keeps to. */
+export interface CursorPosition {
+  index: number;
+  side: CursorSide;
 }
 
 /**
- * A list or text field's block (src/sequence.js): the runs by key
+ * One op of a delta (Quill's form): `retain` moves on — with `attributes`,
+ * marks over what it retains (`null` removes one; `embed` sets the slot's
+ * marker) — `insert` splices text in, or an embed slot as `{ embed: marker }`,
+ * `delete` cuts.
+ */
+export type DeltaOp =
+  | { retain: number; attributes?: { [name: string]: unknown } }
+  | { insert: string | { embed: BlockMarker | null }; attributes?: { [name: string]: unknown } }
+  | { delete: number };
+
+/** What `observe()` calls: the record's changes of one turn, and the `transaction` event they came in. */
+export type Observer = (changes: RecordChange[], event: TransactionEvent) => void | Promise<void>;
+
+/** A text's styles over a run: per name the winning value, a `many` name listing every mark. */
+export type TextMarks = { [name: string]: unknown | readonly { id: string; value: unknown }[] };
+
+/**
+ * What a text's embed slot (U+FFFC) holds: a block marker (`isEmbed:
+ * false` — a paragraph, a heading, a list item under its `parents`), or an
+ * inline embed (`true` — an image, a mention), each with its `attrs`.
+ */
+export interface BlockMarker {
+  type: string;
+  parents: readonly string[];
+  attrs: { [name: string]: unknown };
+  isEmbed: boolean;
+}
+
+/**
+ * What `spans()` reads: a run of equal style, an embed under the marks of
+ * its place (`value` null for a slot without a marker), or a block marker.
+ */
+export type TextSpan =
+  | { type: 'text'; text: string; marks: TextMarks }
+  | { type: 'embed'; value: BlockMarker | null; marks: TextMarks }
+  | { type: 'block'; value: BlockMarker };
+
+/** A block of a text, as `blocks()` reads it: the marker's index and fields, and the spans up to the next marker; text before the first marker has `index` and `type` null. */
+export interface TextBlock {
+  index: number | null;
+  type: string | null;
+  parents: readonly string[];
+  attrs: { [name: string]: unknown };
+  spans: TextSpan[];
+}
+
+/**
+ * A list or text field's block (src/text/sequence.js): the runs by key
  * (`ts:origin`) as `[anchor, content, element?]`, with content run-length
  * encoded — present items (a string or an array) alternating with gap
  * lengths (tombstones); pending cuts and extensions; a movable list's
@@ -199,7 +230,9 @@ export interface SequenceBlock {
   k: 'l' | 't';
   /** The newest stamp the block holds. */
   ts: number;
-  runs: { [run: string]: readonly [at: string, content: readonly (string | number | readonly unknown[])[], elem?: string] };
+  runs: {
+    [run: string]: readonly [at: string, content: readonly (string | number | readonly unknown[])[], elem?: string];
+  };
   cuts?: { [run: string]: readonly (readonly [offset: number, length: number])[] };
   ext?: { [run: string]: readonly (readonly [from: number, content: string | readonly unknown[]])[] };
   pos?: { [elem: string]: readonly [ts: number, origin: string, run: string] };
@@ -239,12 +272,21 @@ export interface SyncOp {
   v?: number;
   /** Who made it — `open({ actor })` or the write's own; a claim the origin signed, not a proof of identity. Absent on `merge`/`advance`. */
   actor?: string;
-  /** The origin's Ed25519 signature over the header and `digest` (base64url); absent under `sync.signatures: false` and on ops of older peers. */
+  /** The origin's Ed25519 signature over the header and `digest` (base64url); absent under `sync.signatures: false`, without the signing plugin and on ops of older peers. */
   sig?: string;
   /** SHA-256 of the payload (`data`, `meta`, `key`, `value`, `vector`) in canonical JSON, salted with `nonce`; stays after a purge scrubbed the payload. */
   digest?: string;
   /** The digest's salt; scrubbed with the payload. */
   nonce?: string;
+  /** The message of the transaction (or patch batch) the op was made in, at most 1 024 characters; in the signed header. */
+  msg?: string;
+  /**
+   * The fingerprint (SHA-256 of the header, hex) of the op before it in its
+   * stream — `origin@scope`, or the `@~` stream of `merge`/`advance`; absent
+   * on a stream's first op and where the writer holds no op before it. In
+   * the signed header.
+   */
+  prev?: string;
 }
 
 export interface EntryMeta {
@@ -259,10 +301,8 @@ export interface EntryMeta {
    * is the greater.
    */
   sets: { [field: string]: { [elementKey: string]: { [origin: string]: readonly [number, number] } } };
-  /** A list or a text per field — see SequenceBlock. */
-  seqs: { [field: string]: SequenceBlock };
-  /** A tree per field — see TreeBlock. */
-  trees: { [field: string]: TreeBlock };
+  /** A field of a plugin's kind — a list or a text (SequenceBlock), a tree (TreeBlock) — by field; `k` names the kind, `ts` the newest stamp the block holds. */
+  blocks: { [field: string]: SequenceBlock | TreeBlock };
   /** The schema version of the last whole-record write (or of the `set` that created the entry). */
   v?: number;
   /** The stamp of a `purge`: the record is gone for good, whatever lands later. */
@@ -279,22 +319,91 @@ export interface ApplyResult {
   changed: boolean;
   delta: Record<string, unknown>;
   rejected: Refusal[];
+  /** What the reading shows of the op, in the write API's terms and the reading's indices. */
+  changes: Change[];
+}
+
+/**
+ * What the reading shows of an op — in the write API's terms and the
+ * reading's indices, as the op was applied: a register's `put`, a counter's
+ * `inc`, a set's `add`/`remove`, a list's or text's `splice` (the cuts in the
+ * indices before the op, last first, the insert in the indices after),
+ * `setAt`, `move`, a mark over the indices its anchors fall at, a tree's
+ * moves (the node, its parent, the sibling before it) and removals; a field
+ * changed another way — reset by a whole-record write, outranked by another
+ * kind, pruned under a prefix, joined from a snapshot — as a `reset` with its
+ * value, or an `unset`; a record gone as `delete` or `purge`. Applied to the
+ * reading before the op, in order, they give the reading after.
+ */
+export type Change =
+  | { action: 'put'; field: string; value: unknown }
+  | { action: 'unset'; field: string }
+  | { action: 'reset'; field: string; kind: FieldKind; value: unknown }
+  | { action: 'inc'; field: string; value: number }
+  | { action: 'add'; field: string; elements: unknown[] }
+  | { action: 'remove'; field: string; elements: unknown[] }
+  | {
+      action: 'splice';
+      field: string;
+      index: number;
+      count: number;
+      content?: string | unknown[];
+      vals?: readonly (readonly [offset: number, marker: unknown])[];
+    }
+  | { action: 'setAt'; field: string; index: number; value: unknown }
+  | { action: 'move'; field: string; from: number; to: number }
+  | {
+      action: 'mark';
+      field: string;
+      start: number;
+      end: number;
+      name: string;
+      value: unknown;
+      markId: string;
+      many?: true;
+    }
+  | { action: 'unmarkById'; field: string; markId: string; start: number; end: number; name: string }
+  | { action: 'treeMove'; field: string; node: string; parent: string | null; after: string | null }
+  | { action: 'treeRemove'; field: string; node: string }
+  | { action: 'delete' }
+  | { action: 'purge' };
+
+/** A change tagged with the record it is of. */
+export type RecordChange = Change & { id: string };
+
+/**
+ * One turn's worth of ops announced as a whole — a local write, a
+ * `transact()`, a peer's page, a joined snapshot — once durable: `local`
+ * whether the ops are this node's own, `via` the peer they came from or
+ * through, `source` and `message` the transaction's, every change tagged
+ * by its record, `ts` the last op's stamp.
+ */
+export interface TransactionEvent {
+  local: boolean;
+  via: PeerRef | null;
+  source: unknown;
+  message: string | null;
+  ops: SyncOp[];
+  changes: RecordChange[];
+  ts: number;
 }
 
 /** What a field is, once written: a register (last writer wins), a counter (`inc`), a set (`add`/`remove`), a list, a text or a tree. */
 export type FieldKind = 'register' | 'counter' | 'set' | 'list' | 'text' | 'tree';
 /**
  * Why a field of an op was refused: another kind holds the field; work past
- * a bound of a list or text field, or a counter's sum past the safe range
+ * a bound of a list or text field, a tree field's moves past `MAX_MOVES`, a
+ * counter's sum past the safe range or a record's paths past `MAX_PATHS`
  * (`'bound'`); a payload the engine does not admit (`'malformed'` — a
  * TypeError on the local path).
  */
-export type RefusalReason = FieldKind | 'bound' | 'malformed';
-/** One refused field: for `'bound'`, which bound (`detail`), the count and the limit. */
+export type RefusalReason = FieldKind | 'bound' | 'malformed' | 'kind';
+/** One refused field: for `'bound'`, which bound (`detail`), the count and the limit; for `'kind'`, the plugin the op needed (`kind`). */
 export interface Refusal {
   field: string | null;
   reason: RefusalReason;
-  detail?: 'pending' | 'run' | 'field' | 'counter';
+  kind?: string;
+  detail?: 'pending' | 'run' | 'field' | 'moves' | 'counter' | 'paths';
   count?: number;
   max?: number;
 }
@@ -310,8 +419,9 @@ export type SyncomErrorCode =
   | 'FIELD_KIND'
   | 'OUT_OF_RANGE'
   | 'CYCLE'
+  | 'SURROGATE'
+  | 'STALE'
   | 'HISTORY_GONE'
-  | 'INVALID_VERSION'
   | 'TAG_EXISTS'
   | 'TAG_NOT_FOUND'
   | 'BRANCH_EXISTS'
@@ -321,15 +431,19 @@ export type SyncomErrorCode =
   | 'DOWNGRADE'
   | 'LOCKED'
   | 'KEYS_INCOMPLETE'
+  | 'DECRYPT_FAILED'
   | 'IDENTITY_MISMATCH'
+  | 'KINDS_MISMATCH'
   | 'BAD_SIGNATURE'
   | 'UNSIGNED'
+  | 'EQUIVOCATION'
   | 'BAD_ENVELOPE'
   | 'BLOCK_NOT_FOUND'
   | 'NOT_CONTRACT'
   | 'NODE_EXISTS'
   | 'NODE_NOT_FOUND'
   | 'BAD_HELLO'
+  | 'BAD_PAGE'
   | 'HANDSHAKE_LOOP'
   | 'PAGE_FAILED'
   | 'STUCK'
@@ -346,10 +460,25 @@ export type SyncomErrorCode =
   | 'VALIDATION_FAILED';
 
 /**
+ * The codes a `TypeError` carries where the value it refuses is data or
+ * configuration rather than the calling code's mistake (`typed()`): an id,
+ * a `$type`, a version, the chain or a plugin missing, a presence state past
+ * its bounds. Never on a `SyncomError`.
+ */
+export type TypedErrorCode =
+  | 'INVALID_ID'
+  | 'TYPE_IMMUTABLE'
+  | 'INVALID_VERSION'
+  | 'NO_CHAIN'
+  | 'PLUGIN_MISSING'
+  | 'PRESENCE_SIZE';
+
+/**
  * What syncom rejects with when an operation cannot be done — as opposed to
  * a `TypeError`, which is a wrong argument, option or hook result and carries
- * no code (except `INVALID_ID`, `TYPE_IMMUTABLE`, `INVALID_VERSION` and
- * `NO_CHAIN`, whose value is data or configuration). `code` is one constant; the fields the code
+ * no code (except a `TypedErrorCode`: `INVALID_ID`, `TYPE_IMMUTABLE`,
+ * `INVALID_VERSION`, `NO_CHAIN`, `PLUGIN_MISSING`, `PRESENCE_SIZE`, whose
+ * value is data or configuration). `code` is one constant; the fields the code
  * documents (`op`, `cursor`, `rejected`…) ride on the error, `cause` is the
  * underlying one. A host's wire refusal is not one of these: it is a plain
  * `Error` with the numeric `code` the transport carries and a `reason`.
@@ -375,9 +504,13 @@ export class HookError extends SyncomError {
   readonly cause: unknown;
 }
 
-/** `limits.pendingMax` is the node's bound on a list or text field's pending work (`sync.pendingMax`). */
-export function applyOp(entry: Entry | null, op: SyncOp, limits?: { pendingMax?: number } | null): ApplyResult;
-export function mergeEntry(a: Entry | null, b: Entry | null): Entry | null;
+/** The node's bounds for a fold: `pendingMax`, a list or text field's pending work (`sync.pendingMax`), and `plugins`, the registry whose kinds the ops may be of (the core's alone when absent). */
+export interface FoldLimits {
+  pendingMax?: number;
+  plugins?: Plugins;
+}
+export function applyOp(entry: Entry | null, op: SyncOp, limits?: FoldLimits | null): ApplyResult;
+export function mergeEntry(a: Entry | null, b: Entry | null, limits?: FoldLimits | null): Entry | null;
 export function isAlive(entry: Entry | null): boolean;
 
 export interface LogEntry {
@@ -389,13 +522,15 @@ export interface LogEntry {
   held?: number;
   /** The payload was scrubbed (a purge): `data`, `meta`, `key` and `value` are gone. */
   scrubbed?: true;
+  /** The op's fingerprint — SHA-256 of its header, hex — as the append was handed it; what its stream's next op names as `prev`. */
+  fp?: string;
 }
 
 export interface OpLogOptions {
   rollAfter?: number;
   retention?: { ops?: number; days?: number };
   logger?: Logger | false;
-  telemetry?: SyncomTelemetryOptions;
+  telemetry?: SyncomTelemetryOptions | SyncomTelemetryWriter;
   fsi?: Fsi;
   /**
    * Seal only the batches the owner has marked `applied`: what Storage asks
@@ -419,7 +554,12 @@ export interface OpLog {
   formatId(seq: number): string;
   append(
     ops: readonly SyncOp[],
-    options?: { skipped?: ReadonlySet<SyncOp> | null; held?: ReadonlyMap<SyncOp, number> | null },
+    options?: {
+      skipped?: ReadonlySet<SyncOp> | null;
+      held?: ReadonlyMap<SyncOp, number> | null;
+      /** Each op's fingerprint, kept on its entry (`fp`) and by its stream and seq. */
+      fps?: ReadonlyMap<SyncOp, string> | null;
+    },
   ): Promise<LogEntry[]>;
   /** The entries held for a newer schema version, oldest first. */
   held(): LogEntry[];
@@ -439,7 +579,10 @@ export interface OpLog {
     options?: { scopes?: readonly string[] | null; limit?: number },
   ): { entries: LogEntry[]; last: number | null } | null;
   /** `read(...).entries`, or null when the position cannot be resumed. */
-  since(eventId: string | null | undefined, options?: { scopes?: readonly string[] | null; limit?: number }): LogEntry[] | null;
+  since(
+    eventId: string | null | undefined,
+    options?: { scopes?: readonly string[] | null; limit?: number },
+  ): LogEntry[] | null;
   /** Every retained entry of the record `id`, oldest first — what `Storage.repair()` rebuilds from. */
   entriesOf(id: string): LogEntry[];
   advance(vector: VersionVector): Promise<void>;
@@ -462,6 +605,12 @@ export interface OpLog {
   applied(from: number, to?: number): void;
   /** One key of the vector (`origin` or `origin@scope`), without copying the whole. */
   seqOf(key: string): number;
+  /** The fingerprint of the op at `seq` of the stream `key`, as this log holds it — retained, in flight, or the stream's head — or undefined. */
+  fingerprintOf(key: string, seq: number): string | undefined;
+  /** `[seq, fingerprint]` of the newest op of the stream `key` this log held — compacted or not, kept in the index — or undefined. */
+  headOf(key: string): [number, string] | undefined;
+  /** Heads of streams whose ops this log does not hold (a REWOUND proof's), `{ key: [seq, fingerprint] }`; an older one than held is left. */
+  adoptHeads(heads: Record<string, readonly [number, string]>): void;
   /** How many ops the log keeps at least (`retention.ops`); `Infinity` when no count bounds it. */
   readonly retainedOps: number;
   /** Sealed segments on disk. */
@@ -474,6 +623,10 @@ export interface OpLog {
    * whole from a reset stamped above it.
    */
   readonly droppedTs: number;
+  /** Files whose checksum did not match at this open. */
+  readonly corrupt: number;
+  /** Rolls that failed since the open (`log.roll.failed`); what they would have sealed stays open, durable. */
+  readonly rollFailures: number;
 }
 
 export interface OpLogConstructor {
@@ -555,6 +708,47 @@ export interface SyncomTelemetryOptions {
   includeIdentity?: boolean;
 }
 
+/**
+ * The writer the engine records through: what the telemetry plugin builds
+ * from `SyncomTelemetryOptions`, and what `open({ telemetry })` takes as it
+ * is without the plugin. `enabled` false is the frozen disabled writer, whose
+ * `withSpan` still runs its callback.
+ */
+/**
+ * A telemetry writer handed in as it is. `enabled` and `withSpan` make one;
+ * every recording method is optional — one that is missing records nothing,
+ * and one that throws is swallowed: a writer never breaks or holds up a write.
+ */
+export interface SyncomTelemetryWriter {
+  readonly enabled: boolean;
+  withSpan<T>(name: string, attributes: Record<string, unknown>, fn: (handle: unknown) => T): T;
+  recordError?(handle: unknown, error: unknown): void;
+  endSpan?(handle: unknown, attributes?: Record<string, unknown>): void;
+  recordCommit?(type: string, result: string, elapsed: number): void;
+  recordApply?(result: string, elapsed: number): void;
+  recordMalformed?(): void;
+  recordRejected?(reason: string): void;
+  recordConflict?(kind: string): void;
+  recordLimited?(reason: string): void;
+  recordLag?(ts: number): void;
+  recordReplay?(elapsed: number): void;
+  recordPush?(reason: string, result: string, count: number): void;
+  recordBootstrap?(result: string): void;
+  recordLogRoll?(sealed: number, dropped: number): void;
+  /** One group written to the log: how long it took and how many ops it held. */
+  recordAppend?(elapsed: number, ops?: number): void;
+  /** A group the log could not write. */
+  recordAppendFailure?(): void;
+  /** The deferred window landed: how long it took and how many records it wrote. */
+  recordFlush?(elapsed: number, records?: number): void;
+  recordHook?(name: string, elapsed: number): void;
+  recordLockWait?(elapsed: number): void;
+  recordRefusal?(code: number | string): void;
+  /** Presence a host or a receiver refused: `reason` (`hello`, `rate`, `malformed`, `scope`, `forged`, `unsigned`, `invalid`), how many entries. */
+  recordPresenceRefused?(reason: string, count: number): void;
+  gauges?(read: () => Record<string, number>): void;
+}
+
 export type CrdtDelta = Record<string, unknown>;
 
 export type CrdtHistoryRecord =
@@ -564,48 +758,30 @@ export type CrdtHistoryRecord =
   | { type: 'inc'; key: string; value: number }
   | { type: 'dec'; key: string; value: number };
 
+/**
+ * The plain-object delta from `source` to `target` — what `merge(source,
+ * delta)` reads back: a key added or changed with its new value, a removed
+ * one as `undefined`, nested objects as nested deltas, an array or a Set as
+ * the elements added only. Not how a storage replicates (its op model is),
+ * and not `storage.diff(id, from, to)` — the versions plugin's patches in
+ * the write API's terms — nor `diffSpans`/`diffBlocks` of
+ * `@alexify/syncom/editor`, the delta between two readings of a text.
+ */
 export function diff(source: unknown, target: unknown): CrdtDelta;
+/**
+ * `source` with `delta` laid over it: keys replaced or removed (`undefined`),
+ * nested objects merged, arrays and Sets as unions — and numbers ADDED
+ * (`merge({ hits: 10 }, { hits: 1 })` is `{ hits: 11 }`: a counter, on purpose).
+ */
 export function merge(source: unknown, delta: unknown): unknown;
-export function apply(
-  source: unknown,
-  history: readonly CrdtHistoryRecord[],
-): unknown;
+/** `source` with a history of records folded over it, in order: a `write`, a `delta`, a `delete`, an `inc`, a `dec`. */
+export function apply(source: unknown, history: readonly CrdtHistoryRecord[]): unknown;
 
-export interface Block<T = unknown> {
-  prev: string;
-  timestamp: number;
-  data: T;
-}
-
-export interface ChainDataEntry {
-  id: string;
-  hash: string;
-}
-
-export function calculateHash(data: JSONSafe): string;
-
-export interface Blockchain {
-  readonly path: string;
-  tailHash: string;
-
-  writeChain(): Promise<void>;
-  addBlock(data: unknown): Promise<string>;
-  writeBlock(block: Block): Promise<string>;
-  readBlock(hash: string): Promise<Block>;
-  validate(options?: { last?: number; from?: string }): Promise<boolean>;
-}
-
-export interface BlockchainConstructor {
-  readonly prototype: Blockchain;
-  new (basePath: string, options?: { fsi?: Fsi }): Promise<Blockchain>;
-}
-
-export const Blockchain: BlockchainConstructor;
-
-// Smart contracts live in the `@alexify/syncom/contracts` subpath (contracts.d.ts).
+// The chain — `Block`, `Blockchain`, the plugin — is the `@alexify/syncom/chain`
+// subpath (src/chain/chain.d.ts); smart contracts are `@alexify/syncom/contracts`.
 
 // ---------------------------------------------------------------------------
-// Schema (src/schema.js)
+// Schema (src/schema/)
 
 /** One problem a validator found: `path` from the record root, `code` as the library names it. */
 export interface ValidationIssue {
@@ -641,6 +817,41 @@ export class ValidationError extends SyncomError {
 export interface SchemaValidator {
   compile(schema: unknown, meta: { entity: string }): (data: unknown) => unknown | Promise<unknown>;
 }
+
+/** A record's data as the application reads and writes it: the fields under their names. The record type wherever the schema says no more. */
+export type RecordData = Record<string, unknown>;
+
+/**
+ * The record type of each entity, by name — `{ Post: Post; Author: Author }`.
+ * `Schema<Shapes>` carries it for the types alone: `open()` reads it into the
+ * type of `storage.Post`; nothing reads it at run time.
+ */
+export type Shapes = { readonly [entity: string]: object };
+
+/** The fields a typed write may name by path (`'profile/city'`) beside the record's own. */
+export type PathFields = { readonly [path: `${string}/${string}`]: unknown };
+
+/**
+ * The output type a Standard Schema declares (`~standard.types.output` — zod,
+ * valibot, arktype), what a record of that entity reads as; `RecordData` when
+ * the schema declares none.
+ */
+export type SchemaOutput<T> = T extends {
+  readonly '~standard': { readonly types?: { readonly output: infer O } | undefined };
+}
+  ? O extends object
+    ? O
+    : RecordData
+  : RecordData;
+
+/** The input type a Standard Schema declares — what `insert()` and `set()` take, defaults and aliases not yet applied; `RecordData` when it declares none. */
+export type SchemaInput<T> = T extends {
+  readonly '~standard': { readonly types?: { readonly input: infer I } | undefined };
+}
+  ? I extends object
+    ? I
+    : RecordData
+  : RecordData;
 
 /** One collection: what validates its records and what is indexed. `{}` is a bare collection. */
 export interface EntityDefinition {
@@ -689,9 +900,7 @@ export interface TextIndex {
 }
 
 export type SchemaEntity = EntityDefinition;
-export type SchemaEntities =
-  | { readonly [entityName: string]: EntityDefinition }
-  | Map<string, EntityDefinition>;
+export type SchemaEntities = { readonly [entityName: string]: EntityDefinition } | Map<string, EntityDefinition>;
 
 export interface MigrationContext {
   /** The record's `$type`, or `null` outside any collection. */
@@ -703,12 +912,18 @@ export interface MigrationContext {
 
 /** One step of the up-chain: the record (without `$type`) as it was under `from`, returned as it is under `to`. */
 export interface Migration {
-  up(data: Record<string, unknown>, context: MigrationContext): Record<string, unknown> | Promise<Record<string, unknown>>;
+  up(
+    data: Record<string, unknown>,
+    context: MigrationContext,
+  ): Record<string, unknown> | Promise<Record<string, unknown>>;
   /** Reserved. */
-  down?(data: Record<string, unknown>, context: MigrationContext): Record<string, unknown> | Promise<Record<string, unknown>>;
+  down?(
+    data: Record<string, unknown>,
+    context: MigrationContext,
+  ): Record<string, unknown> | Promise<Record<string, unknown>>;
 }
 
-export interface Schema {
+export interface Schema<T extends { readonly [K in keyof T]: object } = {}> {
   /** A positive integer; default 1. */
   version?: number;
   entities?: SchemaEntities;
@@ -735,6 +950,13 @@ export interface Schema {
    * another hash on a peer is reported as drift.
    */
   snapshot?: unknown;
+  /**
+   * Phantom: the record type of each entity, for the types alone —
+   * `const schema: Schema<{ Post: Post }> = { entities: { Post: {} } }` types
+   * `storage.Post` as a collection of `Post`. Never read at run time; an
+   * entity's Standard Schema types its records without it.
+   */
+  readonly shapes?: T;
 }
 
 /** What hello carries: a node's schema version and the hash of its snapshot (`null` without one). */
@@ -791,8 +1013,10 @@ export interface SyncOptions {
   log?: { rollAfter?: number };
   /**
    * How far ahead of this node's clock a peer's stamp may be, in
-   * milliseconds (default 24 hours; `Infinity` disables). Beyond it the op is
-   * refused as malformed rather than observed into the clock.
+   * milliseconds (default 24 hours; `Infinity` disables) — an op's own, or
+   * any a merge op's meta holds. Beyond it the op is refused as malformed
+   * rather than observed into the clock, and a stamp a record already holds
+   * beyond it is not observed by a local write either.
    */
   maxSkew?: number;
   /**
@@ -815,11 +1039,27 @@ export interface SyncOptions {
    */
   signatures?: 'verify' | 'require' | false;
   /**
+   * A host that says at hello it holds more of this node's own streams than
+   * its log does (`REWOUND`: a directory restored from an older copy, a
+   * second instance — or a host that lies). `'report'` (the default): a
+   * stream moves past the host's only on proof — the host hands the op it
+   * holds at that seq, and it is this node's own, signed by its key (the
+   * signing plugin) — else it stays, and goes to that host no more until the
+   * next hello. `'adopt'`: the host's word is taken without proof.
+   */
+  rewind?: 'report' | 'adopt';
+  /**
    * Ops queued for one peer beyond this (default 10 000) are dropped and the
    * peer is marked `behind`; the vector-based push that recovers it carries
    * what it lacks.
    */
   maxOutbox?: number;
+  /**
+   * The bytes one streamed snapshot page may carry (default 256 MiB,
+   * `Infinity` for no bound); past it — or a page without its records, or a
+   * cursor that does not move on — the bootstrap stops with `BAD_PAGE`.
+   */
+  maxPageBytes?: number;
   /** Lifecycle hooks — see SyncHooks. */
   hooks?: SyncHooks;
   /** Reserved for the broker-backed hub mode; refused in this version. See SharedLog. */
@@ -901,6 +1141,8 @@ export interface HistoryVersion {
   ts: number;
   origin: string;
   actor: string | null;
+  /** The message of the transaction the op was made in, or null. */
+  message: string | null;
   type: SyncOpType;
   /** The fields the op changed (removed ones included). */
   fields: string[];
@@ -925,12 +1167,24 @@ export interface HistoryResult {
  */
 export type Patch =
   | { action: 'put'; field: string; value: unknown }
+  | { action: 'unset'; field: string }
   | { action: 'write'; data: Record<string, unknown> }
   | { action: 'inc'; field: string; value: number }
   | { action: 'add'; field: string; elements: readonly unknown[] }
   | { action: 'remove'; field: string; elements: readonly unknown[]; own?: true }
   | { action: 'remove'; field: string; removals: readonly SetRemoval[] }
-  | { action: 'splice'; field: string; index: number; count?: number; content?: string | readonly unknown[] }
+  | {
+      action: 'splice';
+      field: string;
+      index: number;
+      count?: number;
+      content?: string | readonly unknown[];
+      /** The markers of the embed slots the content holds: `[[offset, marker]]`. */
+      vals?: readonly (readonly [offset: number, marker: BlockMarker | null])[];
+      /** A text's: the marks the inserted content reads with — one it landed inside, one that grew over it. */
+      marks?: TextMarks;
+    }
+  | { action: 'setAt'; field: string; index: number; value: unknown }
   | {
       action: 'mark';
       field: string;
@@ -955,7 +1209,16 @@ export interface CommitEvent {
   before: Record<string, unknown> | null;
   after: Record<string, unknown> | null;
   kinds: { [field: string]: FieldKind };
+  /** The log position of the first op of the transaction this op was made in — its own `seq` for a single write. */
+  txn: number;
+  /** What the reading shows of the op. */
+  changes: Change[];
+  /** The markers of a text's embed slots, by index, each side — present when a side holds any. */
+  embeds?: { before: TextEmbeds | null; after: TextEmbeds | null };
 }
+
+/** Per text field, its embed slots' markers by index. */
+export type TextEmbeds = { [field: string]: readonly (readonly [index: number, marker: BlockMarker | null])[] };
 
 /** A named version of the whole storage, kept on this node: the log position it was taken at. */
 export interface Tag {
@@ -969,13 +1232,13 @@ export interface Tag {
 }
 
 /** A collection as it was at a tag: queries over the tag's catalog, reading the records as they were. */
-export interface TagCollection {
+export interface TagCollection<R = RecordData> {
   readonly name: string;
   /** The record as it was, or `null` when it was not there or is of another collection. */
-  get(id: string): Promise<unknown | null>;
+  get(id: string): Promise<R | null>;
   /** A cursor at the tag; `watch()` on it throws — a tag does not change; `$text` is not available. */
-  select(query?: MangoQuery): Cursor;
-  count(query?: MangoQuery): Promise<number>;
+  select(query?: MangoQuery<R>): Cursor<QueryRow<R>>;
+  count(query?: MangoQuery<R>): Promise<number>;
 }
 
 /**
@@ -983,17 +1246,52 @@ export interface TagCollection {
  * first read (an open reads the newest tag's alone); a reader of a tag whose
  * catalog is gone is told `TAG_NOT_FOUND` then.
  */
+/** Who wrote a field or an element: the node, and the stamp of its write. */
+export interface Editor {
+  origin: string;
+  ts: number;
+}
+
+/**
+ * The storage at a version that is no tag — an event id, a stamp, a vector
+ * — read out of the log: what `branch(parent, { from: { at } })` pages.
+ * Exact only while the log retains what the version needs (`HISTORY_GONE`
+ * otherwise; never under `retention: 'all'`).
+ */
+export interface VersionView {
+  eventId: string;
+  vector: VersionVector;
+  ts: number;
+  /** The version as given. */
+  at: Version;
+  /** The record as it was at the version, through the lens and the read hooks; `null` when it was not there. */
+  get<R = RecordData>(id: string): Promise<R | null>;
+  has(id: string): Promise<boolean>;
+  /** Every live id at the version, sorted. */
+  list(): Promise<string[]>;
+  /** One page of the storage as it was at the version — what another storage's `mergeSnapshot` joins to stand there. */
+  snapshot(options?: {
+    cursor?: string | null;
+    limit?: number;
+    scopes?: readonly string[] | null;
+  }): Promise<SnapshotPage>;
+}
+
 export interface TagView extends Tag {
   /** The record as it was at the tag, through the lens and the read hooks (`at: { tag }`); `null` when it was not there. */
-  get(id: string): Promise<unknown>;
+  get<R = RecordData>(id: string): Promise<R | null>;
   /** Whether `id` was a live record at the tag. */
   has(id: string): Promise<boolean>;
   /** Every live id at the tag, sorted. */
   list(): Promise<string[]>;
-  /** A collection at the tag; throws for an entity the schema has not. */
-  collection(name: string): TagCollection;
+  /** A collection at the tag; throws for an entity the schema has not. `R` types its records (`collection<Post>('Post')`). */
+  collection<R = RecordData>(name: string): TagCollection<R>;
   /** One page of the storage as it was at the tag — what another storage's `mergeSnapshot` joins to stand at the tag. */
-  snapshot(options?: { cursor?: string | null; limit?: number; scopes?: readonly string[] | null }): Promise<SnapshotPage>;
+  snapshot(options?: {
+    cursor?: string | null;
+    limit?: number;
+    scopes?: readonly string[] | null;
+  }): Promise<SnapshotPage>;
 }
 
 /** What a remote op faces before it is applied here. */
@@ -1027,6 +1325,8 @@ export interface LockOptions {
 /** What `storage.stats()` answers — every number from memory, no I/O. */
 export interface StorageStats {
   closed: boolean;
+  /** The plugins this storage was opened with, by name, in registration order. */
+  plugins: string[];
   /** Writes waiting on, or running in, the mutation queue. */
   queue: number;
   cache: { size: number; max: number; pinned: number };
@@ -1040,25 +1340,45 @@ export interface StorageStats {
     segments: number;
     latestTs: number;
     droppedTs: number;
+    corrupt: number;
+    /** Rolls that failed since the open; the next append rolls again. */
+    rollFailures: number;
     /** Readers holding segments past retention: undo managers, mostly. */
     pins: number;
+    /** Whether the backend appends: the open groups are lines of a journal, else a file each. */
+    journaled: boolean;
+    /** Groups not sealed into a segment yet. */
+    open: number;
+    /** Groups not applied to the records yet: what a reopen would replay. */
+    unapplied: number;
+    /** Journal lines the open left out as torn: their append was never answered. */
+    torn: number;
+    /** Whether the open lost entries it could not read (`droppedTs` moved). */
+    lost: boolean;
+    /** Groups whose write failed since the open: their seqs taken back, their writes rejected. */
+    appendFailures: number;
   };
-  /** The tags held; `corrupt` when `tags.json` could not be read at open (no tags, `tag()` refused until it is repaired). */
-  tags: { count: number; corrupt: boolean };
+  /**
+   * The tags kept here; `null` without the `versions` plugin. `corrupt` when
+   * `tags.json` could not be read at open (no tags, `tag()` refused until it
+   * is repaired).
+   */
+  tags: { count: number; corrupt: boolean } | null;
   /** Records whose files lag the log: held after a write that failed (replayed at the next open), or deferred by `open({ defer })`. */
   held: number;
   deferred: number;
+  /** Local writes appended but not yet on disk — the queue is free from the append, the caller waits for the landing. */
+  inflight: number;
+  /**
+   * The deferred window: `window` as `open({ defer })` gave it (ms), what
+   * the last deferred landing took (`flushCost`: the next window is at least
+   * that) and the log positions waiting for it.
+   */
+  defer: { window: number; flushCost: number; positions: number };
+  /** Listeners registered through `observe()`. */
+  observers: number;
   chain: { tail: string } | null;
   lock: { mode: 'fail' | 'wait' } | null;
-}
-
-/** Hosting side: a peer with a live `changes` feed on this node. */
-export interface HostedPeer {
-  node: string;
-  /** The scopes the feed serves; `null` for every scope. */
-  scopes: string[] | null;
-  since: number;
-  cursor: string | null;
 }
 
 /** One `applyRemote` call, after its batch is durable. */
@@ -1116,10 +1436,12 @@ export interface StorageOptions<S extends Schema = Schema> {
   /** Call the backend's `sync` after every write (fsync). A backend without one logs at debug and is as durable as it is. */
   durable?: boolean;
   /**
-   * Record files may lag the log by this many ms (0, the default: never).
-   * The log is durable at once, every read sees the write, a crash replays
-   * the batch at the next open, `tag()` and `close()` flush first; the writes
-   * of one record within the window coalesce into one file and one block.
+   * Record files may lag the log by this many ms (16, a frame, by default;
+   * 0: never). The log is durable at once, every read sees the write, a
+   * crash replays the batch at the next open, `flush()`, `tag()` and
+   * `close()` land the files first; the writes of one record within the
+   * window coalesce into one file and one block. A flush that took longer
+   * than the window makes the next window as long as it took.
    */
   defer?: number;
   /**
@@ -1165,19 +1487,41 @@ export interface StorageOptions<S extends Schema = Schema> {
   /** Encrypt every record at rest by default (records then stay local). */
   encrypted?: boolean;
   /** Injected OpenTelemetry — see SyncomTelemetryOptions. */
-  telemetry?: SyncomTelemetryOptions;
+  telemetry?: SyncomTelemetryOptions | SyncomTelemetryWriter;
   /** Lifecycle hooks — see StorageHooks. */
   hooks?: StorageHooks;
+  /**
+   * The plugins this storage runs with — `text` from `@alexify/syncom/text`,
+   * `tree` from `/tree`… Registered per storage, never process-wide; a method
+   * of a plugin not given here throws `PLUGIN_MISSING` naming the subpath.
+   */
+  plugins?: readonly Plugin<any>[];
 }
 
 // The collections a schema turns into properties on the storage object:
-// `open({ schema: { entities: { Post: {} } } })` yields `storage.Post`. A
+// `open({ schema: { entities: { Post: {} } } })` yields `storage.Post`. The
+// record type of each is the schema's `Shapes` entry when it carries one,
+// else what the entity's Standard Schema declares, else `RecordData`. A
 // `Map` of entities is opaque to the type system and adds nothing.
-export type Collections<S extends Schema> = S['entities'] extends Map<string, SchemaEntity>
+type ShapesOf<S> = S extends { readonly shapes?: infer T } ? (T extends object ? T : {}) : {};
+type EntitiesOf<S extends Schema> = S['entities'] extends { readonly [entityName: string]: SchemaEntity }
+  ? S['entities']
+  : {};
+type EntityNames<S extends Schema> = (keyof ShapesOf<S> | keyof EntitiesOf<S>) & string;
+type EntitySchema<S extends Schema, K extends string> = K extends keyof EntitiesOf<S>
+  ? EntitiesOf<S>[K] extends { readonly schema: infer X }
+    ? X
+    : unknown
+  : unknown;
+type EntityOutput<S extends Schema, K extends string> = K extends keyof ShapesOf<S>
+  ? ShapesOf<S>[K]
+  : SchemaOutput<EntitySchema<S, K>>;
+type EntityInput<S extends Schema, K extends string> = K extends keyof ShapesOf<S>
+  ? ShapesOf<S>[K]
+  : SchemaInput<EntitySchema<S, K>>;
+export type Collections<S extends Schema> = [EntityNames<S>] extends [never]
   ? {}
-  : S['entities'] extends { readonly [entityName: string]: SchemaEntity }
-    ? { readonly [K in keyof S['entities'] & string]: SyncomCollection }
-    : {};
+  : { readonly [K in EntityNames<S>]: SyncomCollection<EntityOutput<S, K>, EntityInput<S, K>> };
 
 export interface StorageDataOptions {
   encrypted?: boolean;
@@ -1187,6 +1531,33 @@ export interface StorageDataOptions {
 
 export interface WriteOptions {
   actor?: string;
+}
+
+/** What a transaction (and a patch batch) takes: the actor of its ops, a `source` for their `commit` events, a `message` on every op (at most 1 024 characters, signed). */
+export interface TransactOptions extends WriteOptions {
+  source?: unknown;
+  message?: string;
+}
+
+/**
+ * The write API inside `transact()`: the storage's write methods — the
+ * plugins' included — less `purge()`, plus `get()` and `has()` reading the
+ * records as the transaction left them (through the lens, no read hooks).
+ */
+export interface Transaction extends TextMethods, TreeMethods {
+  get<R = RecordData>(id: string): Promise<R | null>;
+  has(id: string): Promise<boolean>;
+  insert(data: object, options?: WriteOptions): Promise<string>;
+  set(id: string, data: object, options?: WriteOptions): Promise<void>;
+  update(id: string, delta: object, options?: WriteOptions): Promise<void>;
+  swap(id: string, changes: object, prev: object, options?: WriteOptions): Promise<boolean>;
+  delete(id: string, options?: WriteOptions): Promise<void>;
+  unset(id: string, fields: string | readonly string[], options?: WriteOptions): Promise<void>;
+  inc(id: string, key: string, value?: number, options?: WriteOptions): Promise<void>;
+  add(id: string, key: string, elements: readonly unknown[], options?: WriteOptions): Promise<void>;
+  remove(id: string, key: string, elements: readonly unknown[], options?: WriteOptions): Promise<void>;
+  /** Never: a purge scrubs the log and is made on the storage. */
+  purge(): never;
 }
 
 export interface StorageEntry {
@@ -1215,75 +1586,6 @@ export interface Node {
   acked?: VersionVector;
 }
 
-/** One dialed peer, as `sync.peers()` reports it. */
-export interface PeerView {
-  url: string;
-  node: string | null;
-  connected: boolean;
-  subscribed: boolean;
-  cursor: string | null;
-  lastSync: number | null;
-  /** Ops waiting in the outbox, plus one while a push is in flight. */
-  pending: number;
-  /**
-   * A push to this peer failed (or its outbox overflowed `sync.maxOutbox`):
-   * what it lacks is pushed from the vector at the next sign of life on the
-   * link — a page received from it, an op to relay — or by `sync()`.
-   */
-  behind: boolean;
-  /**
-   * A page of this peer's feed failed to apply three times in a row; the
-   * subscription is closed and nothing past that page is taken until the
-   * application intervenes (`enableNode` off and on, or a bootstrap).
-   */
-  stuck: boolean;
-  /** The last failure on the way to this peer, or null. */
-  lastError: { code: string | number | null; message: string; at: number } | null;
-}
-
-export interface SyncUnitOptions {
-  /** wrpc's access level for the four procedures (default `'session'`). */
-  access?: string;
-  /**
-   * Gates a peer by whatever the transport presented, and by what hello says.
-   * The `scopes` hello carries are what the peer may then write (`push`) and
-   * read (`snapshot`, `changes`) here.
-   */
-  authorize?: (
-    context: unknown,
-    hello: {
-      node: string;
-      version?: number;
-      vector?: VersionVector;
-      scopes?: string[];
-      token?: string;
-      schema?: SchemaInfo | null;
-    },
-  ) => boolean | Promise<boolean>;
-  /** How a `changes` value is labelled with its position (wrpc's tracked shape by default). */
-  tracked?: (id: string, data: unknown) => unknown;
-  pageSize?: number;
-  pageBytes?: number;
-  /** Per-peer push limits: a page over `opsPerPush`/`bytesPerPush` is refused with 413, a peer over `opsPerSecond` with 429. */
-  limits?: SyncLimits;
-  /** Copied onto all four procedures — what a wrpc `onRequest` hook reads as `context.procedure.meta`. */
-  meta?: Record<string, unknown>;
-}
-
-export interface SyncLimits {
-  opsPerPush?: number;
-  /** The JSON length of a page's `ops`. */
-  bytesPerPush?: number;
-  /** A token bucket per peer, refilled at this rate and holding one second's worth. */
-  opsPerSecond?: number;
-}
-
-export interface SyncProcedure {
-  access: string;
-  handler: (...args: any[]) => unknown;
-  meta?: Record<string, unknown>;
-}
-
 /**
  * @experimental Reserved: the contract of a log shared by several hub
  * processes, for a hub mode after this version — structurally wrpc's
@@ -1301,109 +1603,51 @@ export interface SharedLogRead extends AsyncIterable<SharedLogEntry> {
 
 export interface SharedLog {
   name?: string;
-  append(topic: string, value: string | Uint8Array, options?: { headers?: Record<string, string>; key?: string }): Promise<string>;
-  read(topic: string, options?: { after?: string | null; from?: 'latest' | 'earliest'; signal?: AbortSignal | null }): SharedLogRead;
+  append(
+    topic: string,
+    value: string | Uint8Array,
+    options?: { headers?: Record<string, string>; key?: string },
+  ): Promise<string>;
+  read(
+    topic: string,
+    options?: { after?: string | null; from?: 'latest' | 'earliest'; signal?: AbortSignal | null },
+  ): SharedLogRead;
   parseId(text: unknown): string | null;
 }
 
 /** Whether `value` has the three functions of the shared-log contract. */
 export function isSharedLog(value: unknown): value is SharedLog;
 
-/** What a host mounts: `defineRouter({ syncom: storage.sync.unit() })`. */
-export interface SyncUnit {
-  hello: SyncProcedure;
-  push: SyncProcedure;
-  snapshot: SyncProcedure;
-  changes: SyncProcedure;
-}
-
-/** The events a SyncManager emits; listeners are contained. */
-export interface SyncEvents {
-  /** A link came up (with the host's node id and schema after hello), went down, or came back. */
-  peer: (event: { url: string; connected: boolean; node?: string; reconnected?: boolean; schema?: SchemaInfo | null }) => void;
-  /** A push went out (`pushed`) or a page came in (`received` and the apply result). */
-  sync: (event: {
-    url: string;
-    pushed?: number;
-    received?: number;
-    applied?: number;
-    skipped?: number;
-    duplicates?: number;
-    gaps?: number;
-    malformed?: number;
-    unsigned?: number;
-    forged?: number;
-    outOfScope?: number;
-  }) => void;
-  bootstrap: (event: { url: string; records: number }) => void;
-  /**
-   * Hosting side: ops of a peer this node would not take — outside the
-   * scopes its hello granted (`scope`), signed but not by their origin
-   * (`forged`), or unsigned under `sync.signatures: 'require'` (`unsigned`).
-   */
-  refused: (event: { node: string; reason: 'scope' | 'forged' | 'unsigned'; count: number }) => void;
-  /**
-   * A failure on the way to a peer; `url` names it. A page of the feed that
-   * could not be applied comes as `code: 'PAGE_FAILED'` (with `cursor`, the
-   * last position saved, and `attempt`), and is retried from that cursor;
-   * the third failure in a row is `code: 'STUCK'`. A host that answers 428
-   * to five fresh hellos in a row is `code: 'HANDSHAKE_LOOP'`. A refusal the
-   * host answered with comes as the link delivered it: a numeric `code`.
-   */
-  error: (error: Error & { url: string; code?: string | number; cursor?: string | null; attempt?: number }) => void;
-  start: () => void;
-  stop: () => void;
-  node: (event: { url: string; action: 'add' | 'remove' | 'enable' | 'disable' }) => void;
-  /** A link was accepted, before hello. */
-  connect: (event: { url: string }) => void;
-  /** Hosting side: a peer greeted this node and was authorized. */
-  hello: (event: { node: string; scopes: string[]; schema: SchemaInfo | null }) => void;
-}
-
-export interface NodeData {
-  url: string;
-  token?: string;
-  scopes?: string[];
-}
-
-export interface SyncManager {
-  readonly storage: Storage;
-  readonly started: boolean;
-  /** Ops queued for peers over every dialed peer — what the outbox gauge reads. */
-  pendingOps(): number;
-  on<E extends keyof SyncEvents>(event: E, listener: SyncEvents[E]): void;
-  once<E extends keyof SyncEvents>(event: E, listener: SyncEvents[E]): void;
-  off<E extends keyof SyncEvents>(event: E, listener?: SyncEvents[E]): void;
-  listenerCount(event: keyof SyncEvents): number;
-  listeners<E extends keyof SyncEvents>(event: E): SyncEvents[E][];
-  eventNames(): (keyof SyncEvents)[];
-  /** Resolves with the next emission's first argument. */
-  toPromise<E extends keyof SyncEvents>(event: E): Promise<Parameters<SyncEvents[E]>[0]>;
-  /** Drops every listener of `event`, or of every event. */
-  clear(event?: keyof SyncEvents): void;
-  addNode(nodeData: NodeData): Promise<void>;
-  removeNode(url: string): Promise<void>;
-  enableNode(url: string, enabled?: boolean): Promise<void>;
-  listNodes(): Node[];
-  start(): Promise<void>;
-  stop(): Promise<void>;
-  /** Pushes whatever the connected peers (or one) lack right now. */
-  sync(url?: string): Promise<Array<{ url: string; pushed: number }>>;
-  peers(): PeerView[];
-  /** Hosting side: every peer with a live `changes` feed here. */
-  hosted(): HostedPeer[];
-  unit(options?: SyncUnitOptions): SyncUnit;
-}
-
-export interface SyncManagerConstructor {
-  readonly prototype: SyncManager;
-  new (storage: Storage, options?: SyncOptions): Promise<SyncManager>;
-}
-
-export const SyncManager: SyncManagerConstructor;
-
 /** The structural check on an injected link: call/subscribe/on/off/close. */
 export function isSyncLink(value: unknown): value is SyncLink;
+
+export interface OutboundOptions {
+  /** The receiver's node id: its own ops, and the merges made from its snapshot, are left out. */
+  exclude: string;
+  /** What the receiver holds. */
+  vector: VersionVector;
+  /** The scopes to select in; `null` (default) is every scope. */
+  scopes?: string[] | null;
+  /** The sender's node id: `first` reports its own streams… */
+  own: string;
+  /** …or every origin's (a branch merge). */
+  allStreams?: boolean;
+}
+
+/**
+ * What `log` has that a receiver lacks, by its version vector — the
+ * selection a push and a branch merge make — and `first`, the first seq the
+ * log retains per stream (`origin` / `origin@scope`): a receiver behind one
+ * cannot be caught up from here. With `applyRemote()` on the other side,
+ * the updates API of a transport of the application's own, no `sync` plugin
+ * needed.
+ */
+export function outbound(log: OpLog, options: OutboundOptions): { ops: SyncOp[]; first: Record<string, number> };
+/**
+ * How two version vectors stand: -1 behind, 1 ahead, 0 equal, undefined
+ * when concurrent (each ahead somewhere); a key one side lacks reads as 0.
+ */
+export function compareVectors(a: VersionVector, b: VersionVector): -1 | 0 | 1 | undefined;
 
 /**
  * What the sync engine needs from a transport. Reconnecting, backing off and
@@ -1450,7 +1694,9 @@ export interface ApplyRemoteResult {
   /**
    * Refused before anything read them, neither logged nor relayed: not the
    * shape of an op (origin, seq, ts, type, a valid record id or an advance
-   * vector), or a stamp beyond `sync.maxSkew` ahead of this node's clock.
+   * vector, no field nested deeper than 80 levels), or a stamp beyond
+   * `sync.maxSkew` ahead of this node's clock — its own, or one its merge
+   * meta holds.
    */
   malformed: number;
   /** Refused under `sync.signatures: 'require'` for carrying no signature, or an origin that is no key; neither logged nor relayed. */
@@ -1463,14 +1709,23 @@ export interface ApplyRemoteResult {
    * node's `sync.scope` reads it; neither logged nor relayed.
    */
   outOfScope: number;
+  /**
+   * Refused as equivocation (`EQUIVOCATION`): another op than the one this
+   * node holds at its seq of its stream, or one whose `prev` is not the
+   * fingerprint of the op this node holds at the seq before it; neither
+   * logged nor relayed.
+   */
+  equivocations: number;
 }
 
 /** The events a Storage emits; listeners are contained. */
 export interface StorageEvents {
   /** Every op applied here — local (`via` null) or from a peer (`via` names it). */
-  change: (op: SyncOp, via: PeerRef | null) => void;
+  change: (op: SyncOp, via: PeerRef | null, detail: { changes: Change[] }) => void;
   /** A local op is durable: what it changed, as copies — built only when someone listens. */
   commit: (event: CommitEvent) => void;
+  /** One turn's ops durable and announced — a write, a transaction, a peer's page, a joined snapshot — with every change tagged by its record. */
+  transaction: (event: TransactionEvent) => void;
   /** The log sealed a segment (and maybe dropped old ones): `floor` is where a resume is still possible. */
   log: (event: { kind: 'roll'; sealed: number; dropped: number; floor: number; segments: number }) => void;
   /**
@@ -1479,7 +1734,10 @@ export interface StorageEvents {
    * validator (`OP_INVALID`, `entity`, `issues`), refused for a stamp
    * beyond `sync.maxSkew` (`SKEW`), or refused for its signature — once per
    * page, `op` the first refused and `count` how many (`BAD_SIGNATURE`,
-   * `UNSIGNED`).
+   * `UNSIGNED`). `EQUIVOCATION`: a writer made two ops at one seq of one
+   * stream — once per page, with the fingerprint held here and the one
+   * received (`reason: 'seq'`), or the one held at the seq before and the
+   * `prev` the op names (`'chain'`).
    */
   error: (
     error:
@@ -1491,6 +1749,17 @@ export interface StorageEvents {
           entity?: string | null;
           issues?: ValidationIssue[];
         })
+      | (SyncomError & {
+          code: 'EQUIVOCATION';
+          op: SyncOp;
+          reason: 'seq' | 'chain';
+          origin: string;
+          scope: string | null;
+          seq: number;
+          held: string;
+          received: string | null;
+          count: number;
+        })
       /** Records logged but not written — held in memory until they land (see Health). */
       | (SyncomError & { code: 'UNPERSISTED'; ids: string[] }),
   ) => void;
@@ -1500,7 +1769,14 @@ export interface StorageEvents {
    * A peer's op left a unique key shared by two records: `id` (the op's)
    * and `other`. Both are kept — the application decides which yields.
    */
-  conflict: (event: { kind: 'unique'; entity: string; fields: string[]; id: string; other: string; op: SyncOp }) => void;
+  conflict: (event: {
+    kind: 'unique';
+    entity: string;
+    fields: string[];
+    id: string;
+    other: string;
+    op: SyncOp;
+  }) => void;
   /**
    * `drift`: a peer runs this node's schema version with another snapshot
    * hash — two builds of "the same" schema that disagree. Reported after
@@ -1520,113 +1796,40 @@ export interface RecordEvents {
   update: (data: unknown, delta: unknown) => void;
 }
 
-export interface Storage {
-  /** The backend every file goes through — the adapter given to `open()` (wrapped when `durable`), or the platform's. */
-  readonly fsi: Fsi;
-  readonly schema: Schema | null;
-  /** The schema version and snapshot hash this node runs, with `previous` when `schema.json` differed; `null` without a schema. */
-  readonly schemaInfo: SchemaStatus | null;
-  readonly sync: SyncManager;
-  readonly nodeId: string;
-  /** `open({ sync: { signatures } })`: `'verify'`, `'require'` or `false`. */
-  readonly signatures: 'verify' | 'require' | false;
-  readonly path: string;
-  readonly log: OpLog;
-  readonly vector: VersionVector;
-  /** The writer built from `open({ logger })`: every level a function, `false` silenced it. */
-  readonly logger: Logger;
-  /**
-   * The telemetry writer built from `options.telemetry`. Opaque on purpose:
-   * its shape is an implementation detail.
-   * @experimental
-   */
-  readonly telemetry: unknown;
+// ---------------------------------------------------------------------------
+// Plugins (src/plugin.js)
 
-  on<E extends keyof StorageEvents>(event: E, listener: StorageEvents[E]): void;
-  once<E extends keyof StorageEvents>(event: E, listener: StorageEvents[E]): void;
-  off<E extends keyof StorageEvents>(event: E, listener?: StorageEvents[E]): void;
-  listenerCount(event: keyof StorageEvents): number;
-  listeners<E extends keyof StorageEvents>(event: E): StorageEvents[E][];
-  eventNames(): (keyof StorageEvents)[];
-  /** Resolves with the next emission's first argument. */
-  toPromise<E extends keyof StorageEvents>(event: E): Promise<Parameters<StorageEvents[E]>[0]>;
-  /** Drops every listener of `event`, or of every event. */
-  clear(event?: keyof StorageEvents): void;
+/**
+ * A plugin module, registered per storage with `open({ plugins })` — never
+ * process-wide. A kind module (`text` from `@alexify/syncom/text`, `tree`
+ * from `/tree`) brings field kinds, how their ops apply and the storage
+ * methods of its API; an API module brings methods and hooks over the core.
+ * `Api` is the methods the plugin adds to the storage: a compile-time
+ * shape, what `open()` intersects into its result.
+ */
+export interface Plugin<Api = {}> {
+  readonly name: string;
+  /** Phantom: the storage methods the plugin adds. Never read at run time. */
+  readonly api?: Api;
+}
 
-  saveData(
-    id: string,
-    data: unknown,
-    options?: StorageDataOptions,
-  ): Promise<void>;
-  loadData(id: string): Promise<unknown | null>;
-  validate(options?: { last?: number; from?: string }): Promise<boolean>;
-  validate(id: string, data: unknown, blockHash: string): Promise<boolean>;
-  insert(data: unknown, options?: StorageDataOptions): Promise<string>;
-  has(id: string): Promise<boolean>;
-  /**
-   * The record as it reads (the lens applied, the read hooks run), as a
-   * copy: editing it changes nothing. With `at`, the record at that version
-   * — folded from the log, or a tag's copy: rejects with `HISTORY_GONE`
-   * when the log cannot give it exactly, `INVALID_VERSION` for a malformed
-   * `at` or a seq this log has not reached, `TAG_NOT_FOUND`, `ENCRYPTED`
-   * for an encrypted record's history.
-   */
-  get(id: string, options?: { at?: Version }): Promise<unknown>;
-  /**
-   * The record's past as this node's log holds it, newest first — one
-   * version per op this node applied, with the record as it read after it.
-   */
-  history(id: string, options?: { limit?: number; before?: string }): Promise<HistoryResult>;
-  /**
-   * Names the storage as it is now. A tag is kept on this node — the
-   * catalog of the moment plus a copy of each record's file taken before
-   * its first change after the tag — and read through `at(name)` or
-   * `get(id, { at: { tag: name } })`. Rejects with `TAG_EXISTS`.
-   */
-  tag(name: string): Promise<Tag>;
-  /** Drops a tag; what the next older tag needs of its copies moves there. Rejects with `TAG_NOT_FOUND`. */
-  untag(name: string): Promise<void>;
-  /** The tags, oldest first. */
-  tags(): Tag[];
-  /** The storage as it was at tag `name`; throws `TAG_NOT_FOUND`. */
-  at(name: string): TagView;
-  /**
-   * The patches that turn the record as it was at `from` into how it is at
-   * `to` (the present when omitted) — raw, no read hooks; a text's marks are
-   * not diffed. Rejects as `get(id, { at })` would for either version.
-   */
-  diff(id: string, from?: Version, to?: Version): Promise<Patch[]>;
-  /** Realizes patches as ops of this node's own, in one turn of the mutation queue; resolves to how many. */
-  applyPatches(id: string, patches: readonly Patch[], options?: WriteOptions & { source?: unknown }): Promise<number>;
-  /** Makes the record read as it did at `at`, with new ops that lead back; resolves to how many. */
-  restore(id: string, at: Version, options?: WriteOptions & { source?: unknown }): Promise<number>;
-  /**
-   * Rewrites the record as the ops its reading takes today — a `write` of
-   * the registers, then one op per field of another kind (a text or a list
-   * as one run, a tree as one move per node) — so what lies under it goes by
-   * the reset rule here and on every peer, a text's marks laid again. `get()`
-   * and `spans()` read the same, but for a list, text, set or tree that reads
-   * empty, which is left out; the elements are named anew, so a cursor taken
-   * before reads null and a stacking mark has a new id.
-   * Resolves to how many ops it took; `0` for a record that is not there.
-   */
-  compact(id: string, options?: WriteOptions & { source?: unknown }): Promise<number>;
-  set(id: string, data: unknown, options?: StorageDataOptions): Promise<void>;
-  delete(id: string, options?: WriteOptions): Promise<void>;
-  /** Forgets the record for good: a `purge` op no later write revives, and a scrub of its entries from the log — here and on every peer it reaches. */
-  purge(id: string, options?: WriteOptions): Promise<void>;
-  update(id: string, delta: unknown, options?: WriteOptions): Promise<void>;
-  inc(id: string, key: string, value?: number, options?: WriteOptions): Promise<void>;
-  /**
-   * Adds `elements` to set field `key` — an observed-remove set: two nodes
-   * that add concurrently both keep theirs, and an add a remove did not
-   * observe survives it. Elements are JSON values, told apart by their text;
-   * the set reads sorted by that text. Creates the field, and the record,
-   * when absent.
-   */
-  add(id: string, key: string, elements: readonly unknown[], options?: WriteOptions): Promise<void>;
-  /** Removes from set field `key` the `elements` this node has seen added; one it never saw is left alone. */
-  remove(id: string, key: string, elements: readonly unknown[], options?: WriteOptions): Promise<void>;
+/** The registry `createPlugins()` builds — frozen, per storage: the names registered and every kind's rank in the precedence. */
+export interface Plugins {
+  readonly names: readonly string[];
+  readonly rank: { readonly [kind: string]: number };
+}
+
+/** Builds a registry from plugin modules; throws a TypeError naming what a module got wrong. */
+export function createPlugins(modules: readonly Plugin<any>[]): Plugins;
+
+type UnionToIntersection<U> = (U extends unknown ? (x: U) => void : never) extends (x: infer I) => void ? I : never;
+/** The methods the plugins of `P` add to a storage, intersected. */
+export type PluginMethods<P extends readonly Plugin<any>[]> = UnionToIntersection<
+  P[number] extends Plugin<infer A> ? A : never
+>;
+
+/** The storage methods the `text` plugin adds: lists and texts that merge by position (Fugue), marks, cursors. */
+export interface TextMethods {
   /**
    * Splices list or text field `key` at `index`: removes `count` elements
    * and inserts `content` — an array for a list, a string for a text — in
@@ -1676,8 +1879,48 @@ export interface Storage {
   ): Promise<void>;
   /** Switches one mark off by its id (what `mark()` resolved to) — the only way for a `many` mark. */
   unmarkById(id: string, key: string, markId: string, options?: WriteOptions): Promise<void>;
-  /** Text field `key` as runs of equal style; raw (no lens, no read hooks); `null` unless the field is a text. */
+  /** Text field `key` as runs of equal style, its embed slots told apart; raw (no lens, no read hooks); `null` unless the field is a text. */
   spans(id: string, key: string): Promise<TextSpan[] | null>;
+  /**
+   * What list or text field `key` reads as now, as a token (0 for no such field): given to
+   * `applyDelta({ expect, revision })` with the text read beside it, it spares comparing the text
+   * while the field is still there. The same token, the same reading; a new one may read the same.
+   */
+  revision(id: string, key: string): Promise<number>;
+  /** Inserts an inline embed — one slot (U+FFFC) holding `{ type, parents: [], attrs, isEmbed: true }` — at `index` of text field `key`. */
+  insertEmbed(
+    id: string,
+    key: string,
+    index: number,
+    embed: { type: string; attrs?: { [name: string]: unknown } },
+    options?: WriteOptions,
+  ): Promise<void>;
+  /** Starts a block at `index` of text field `key`: a block marker in one slot, the text after it up to the next marker its content. */
+  splitBlock(
+    id: string,
+    key: string,
+    index: number,
+    block: { type: string; parents?: readonly string[]; attrs?: { [name: string]: unknown } },
+    options?: WriteOptions,
+  ): Promise<void>;
+  /** Removes the block marker at `index`, joining its content to the block before; rejects with `NOT_FOUND` when the slot is no marker. */
+  joinBlock(id: string, key: string, index: number, options?: WriteOptions): Promise<void>;
+  /** Replaces the marker at `index` (last writer wins); rejects with `NOT_FOUND` when the slot is no marker. */
+  updateBlock(
+    id: string,
+    key: string,
+    index: number,
+    block: { type: string; parents?: readonly string[]; attrs?: { [name: string]: unknown }; isEmbed?: boolean },
+    options?: WriteOptions,
+  ): Promise<void>;
+  /** The marker at `index` of text field `key`; `null` when the slot is no block marker and no embed, or the field is not a text. */
+  block(id: string, key: string, index: number): Promise<BlockMarker | null>;
+  /** Text field `key` by block, in order; `null` unless the field is a text. */
+  blocks(id: string, key: string): Promise<TextBlock[] | null>;
+  /** The name of the element at `index` of list field `key` — what a path under it is spelled with (`items/<name>/body`); `null` out of range or when the field is not a list. */
+  elementAt(id: string, key: string, index: number): Promise<string | null>;
+  /** The names of the elements of list field `key`, in order; `[]` when the field is not a list. */
+  elements(id: string, key: string): Promise<string[]>;
   /**
    * A cursor into list or text field `key`: a place that survives edits
    * around it — before the element at `index`, or after the one before it.
@@ -1686,6 +1929,33 @@ export interface Storage {
   cursor(id: string, key: string, index: number, options?: { side?: CursorSide }): Promise<string | null>;
   /** Where `cursor` is now; `null` once its place is gone. */
   index(id: string, key: string, cursor: string): Promise<number | null>;
+  /** Where `cursor` is now and which side it keeps to — `{ index, side }` — or `null` once its place is gone. */
+  position(id: string, key: string, cursor: string): Promise<CursorPosition | null>;
+  /** `position()` of several cursors, in one read of the field. */
+  positions(id: string, key: string, cursors: readonly string[]): Promise<(CursorPosition | null)[]>;
+  /** Who inserted the element at `index` of list or text field `key` — the node and the stamp of its run; `null` out of range or when the field is not a list or a text. */
+  editorOf(id: string, key: string, index: number): Promise<Editor | null>;
+  /**
+   * The changes of text field `field` (every text change when not given) composed into one delta
+   * (Quill's form) over the reading before them; `null` when a change is no edit a delta can say
+   * (a reset, an unset) — read the field again then.
+   */
+  toDelta(changes: readonly Change[], field?: string): DeltaOp[] | null;
+  /**
+   * Makes `delta` the edits of text field `key`, as one transaction; resolves to how many ops it took
+   * and the field's revision after them.
+   */
+  applyDelta(
+    id: string,
+    key: string,
+    delta: readonly DeltaOp[],
+    options?: TransactOptions & {
+      /** The field's text the delta was made over: a field that reads otherwise inside the queue rejects with `STALE` before any op. */
+      expect?: string;
+      /** The revision handed back with that text (`applyDelta`, `revision()`): while the field is at it, the text is not compared. */
+      revision?: number;
+    },
+  ): Promise<{ ops: number; revision: number }>;
   /**
    * Replaces the element at `index` of list field `key`: a register per
    * element, last writer wins, following the element through a concurrent move.
@@ -1697,6 +1967,10 @@ export interface Storage {
    * the newer move's place; a move concurrent with a removal brings it back.
    */
   move(id: string, key: string, from: number, to: number, options?: WriteOptions): Promise<void>;
+}
+
+/** The storage methods the `tree` plugin adds: a movable tree per field. */
+export interface TreeMethods {
   /**
    * Puts node `node` of tree field `key` under `parent` (`null`: a root),
    * after sibling `after`, before sibling `before`, or last. Creates the
@@ -1715,6 +1989,145 @@ export interface Storage {
   ): Promise<void>;
   /** Removes node `node` of tree field `key` with everything under it — a move under the trash. */
   treeRemove(id: string, key: string, node: string, options?: WriteOptions): Promise<void>;
+}
+
+export interface Storage {
+  /** The backend every file goes through — the adapter given to `open()` (wrapped when `durable`), or the platform's. */
+  readonly fsi: Fsi;
+  readonly schema: Schema | null;
+  /** The schema version and snapshot hash this node runs, with `previous` when `schema.json` differed; `null` without a schema. */
+  readonly schemaInfo: SchemaStatus | null;
+  readonly nodeId: string;
+  /** `open({ sync: { signatures } })`: `'verify'`, `'require'` or `false`. */
+  readonly signatures: 'verify' | 'require' | false;
+  readonly path: string;
+  readonly log: OpLog;
+  readonly vector: VersionVector;
+  /** The names of the plugins this storage was opened with (`open({ plugins })`), in registration order. */
+  readonly plugins: readonly string[];
+  /** The names of the kind plugins among them — what `hello` tells a peer this node can hold. */
+  readonly kinds: string[];
+  /** The writer built from `open({ logger })`: every level a function, `false` silenced it. */
+  readonly logger: Logger;
+  /**
+   * The telemetry writer built from `options.telemetry`. Opaque on purpose:
+   * its shape is an implementation detail.
+   * @experimental
+   */
+  readonly telemetry: unknown;
+
+  on<E extends keyof StorageEvents>(event: E, listener: StorageEvents[E]): void;
+  once<E extends keyof StorageEvents>(event: E, listener: StorageEvents[E]): void;
+  off<E extends keyof StorageEvents>(event: E, listener?: StorageEvents[E]): void;
+  listenerCount(event: keyof StorageEvents): number;
+  listeners<E extends keyof StorageEvents>(event: E): StorageEvents[E][];
+  eventNames(): (keyof StorageEvents)[];
+  /** Resolves with the next emission's first argument. */
+  toPromise<E extends keyof StorageEvents>(event: E): Promise<Parameters<StorageEvents[E]>[0]>;
+  /** Drops every listener of `event`, or of every event. */
+  clear(event?: keyof StorageEvents): void;
+
+  saveData(id: string, data: unknown, options?: StorageDataOptions): Promise<void>;
+  loadData(id: string): Promise<unknown | null>;
+  validate(options?: { last?: number; from?: string }): Promise<boolean>;
+  validate(id: string, data: unknown, blockHash: string): Promise<boolean>;
+  insert(data: object, options?: StorageDataOptions): Promise<string>;
+  has(id: string): Promise<boolean>;
+  /**
+   * The record as it reads (the lens applied, the read hooks run), as a
+   * copy: editing it changes nothing. With `at`, the record at that version
+   * — folded from the log, or a tag's copy: rejects with `HISTORY_GONE`
+   * when the log cannot give it exactly, `INVALID_VERSION` for a malformed
+   * `at` or a seq this log has not reached, `TAG_NOT_FOUND`, `ENCRYPTED`
+   * for an encrypted record's history. `R` types the result —
+   * `get<Post>(id)`; a collection's `get` knows its record type.
+   */
+  get<R = RecordData>(id: string, options?: { at?: Version }): Promise<R | null>;
+  /**
+   * The record's past as this node's log holds it, newest first — one
+   * version per op this node applied, with the record as it read after it.
+   */
+  history(id: string, options?: { limit?: number; before?: string }): Promise<HistoryResult>;
+  /**
+   * Names the storage as it is now. A tag is kept on this node — the
+   * catalog of the moment plus a copy of each record's file taken before
+   * its first change after the tag — and read through `at(name)` or
+   * `get(id, { at: { tag: name } })`. Rejects with `TAG_EXISTS`.
+   */
+  tag(name: string): Promise<Tag>;
+  /** Drops a tag; what the next older tag needs of its copies moves there. Rejects with `TAG_NOT_FOUND`. */
+  untag(name: string): Promise<void>;
+  /** The tags, oldest first. */
+  tags(): Tag[];
+  /** The storage as it was at tag `name`; throws `TAG_NOT_FOUND`. */
+  at(name: string): TagView;
+  /** The storage at any version the log can still give exactly — an event id, a stamp, `{ vector }` or `{ tag }` (then a `TagView`); the `versions` plugin's. */
+  atVersion(at: Version): VersionView | TagView;
+  /**
+   * Who last wrote `field`: `{ origin, ts }` — the writer and stamp of a register's value, a counter's newest
+   * increment, a list's, text's or tree's newest run, mark or move; `null` for a set (no stamps), a field the
+   * record has not, a record that is not there. From the record's metadata, no I/O beyond the record.
+   */
+  lastEditorOf(id: string, field: string): Promise<Editor | null>;
+  /** Every node that wrote something the record still carries, sorted; `[]` for a record that is not there. */
+  editorsOf(id: string): Promise<string[]>;
+  /**
+   * The patches that turn the record as it was at `from` into how it is at
+   * `to` (the present when omitted) — raw, no read hooks; a text's marks are
+   * not diffed. Rejects as `get(id, { at })` would for either version.
+   */
+  diff(id: string, from?: Version, to?: Version): Promise<Patch[]>;
+  /** Realizes patches as ops of this node's own, as one transaction; resolves to how many. */
+  applyPatches(id: string, patches: readonly Patch[], options?: TransactOptions): Promise<number>;
+  /** Makes the record read as it did at `at`, with new ops that lead back; resolves to how many. */
+  restore(id: string, at: Version, options?: TransactOptions): Promise<number>;
+  /**
+   * Watches record `id`: `listener(changes, event)` after every turn that
+   * changed it — a local write, a transaction, a peer's page, a joined
+   * snapshot — with the record's changes of that turn; under `path`, the
+   * changes of that field, of what hangs under it and of a prefix of it,
+   * and the whole record's. Returns the function that stops watching.
+   */
+  observe(id: string, path: string | null, listener: Observer): () => void;
+  observe(id: string, listener: Observer): () => void;
+  /**
+   * Runs `fn(tx)` as one transaction: every write made through `tx` is one
+   * op, appended with the others as one group once `fn` returns — all
+   * durable or none, one chain block, each record's file written once, the
+   * `commit` events after; `tx.get()`/`tx.has()` read the records as the
+   * transaction left them. A throw from `fn` or a refused write leaves
+   * nothing appended. Resolves to what `fn` returned, once landed.
+   */
+  transact<T>(fn: (tx: Transaction) => T | Promise<T>, options?: TransactOptions): Promise<T>;
+  /**
+   * Rewrites the record as the ops its reading takes today — a `write` of
+   * the registers, then one op per field of another kind (a text or a list
+   * as one run, a tree as one move per node) — so what lies under it goes by
+   * the reset rule here and on every peer, a text's marks laid again. `get()`
+   * and `spans()` read the same, but for a list, text, set or tree that reads
+   * empty, which is left out; the elements are named anew, so a cursor taken
+   * before reads null and a stacking mark has a new id.
+   * Resolves to how many ops it took; `0` for a record that is not there.
+   */
+  compact(id: string, options?: TransactOptions): Promise<number>;
+  set(id: string, data: object, options?: StorageDataOptions): Promise<void>;
+  delete(id: string, options?: WriteOptions): Promise<void>;
+  /** Forgets the record for good: a `purge` op no later write revives, and a scrub of its entries from the log — here and on every peer it reaches. */
+  purge(id: string, options?: WriteOptions): Promise<void>;
+  update(id: string, delta: object, options?: WriteOptions): Promise<void>;
+  /** Removes fields of any kind — one name or an array; a field the record does not hold is no op. An `unset` op: a register's tombstone an older concurrent `set` loses to. */
+  unset(id: string, fields: string | readonly string[], options?: WriteOptions): Promise<void>;
+  inc(id: string, key: string, value?: number, options?: WriteOptions): Promise<void>;
+  /**
+   * Adds `elements` to set field `key` — an observed-remove set: two nodes
+   * that add concurrently both keep theirs, and an add a remove did not
+   * observe survives it. Elements are JSON values, told apart by their text;
+   * the set reads sorted by that text. Creates the field, and the record,
+   * when absent.
+   */
+  add(id: string, key: string, elements: readonly unknown[], options?: WriteOptions): Promise<void>;
+  /** Removes from set field `key` the `elements` this node has seen added; one it never saw is left alone. */
+  remove(id: string, key: string, elements: readonly unknown[], options?: WriteOptions): Promise<void>;
   /**
    * Compare-and-swap: writes `changes` only if every field of `prev` still
    * holds its value, compared inside the mutation queue — two concurrent
@@ -1750,13 +2163,16 @@ export interface Storage {
     batch?: number;
     actor?: string;
   }): Promise<{ migrated: number; counters: number; sets: number; lists: number; texts: number; trees: number }>;
-  record(id: string): Promise<Storage.StorageRecord>;
+  /** A live `Record` of `id` — `R` types its fields (`record<Post>(id)`). */
+  record<R = RecordData>(id: string): Promise<Storage.StorageRecord<R>>;
   /** The raw data of a cached entry (no lens), `null` when not cached, absent or deleted. */
-  getCachedData(id: string): unknown | null;
+  getCachedData<R = RecordData>(id: string): R | null;
   /** Whether `id` is a live record here — from the catalog, no I/O. */
   hasRecord(id: string): boolean;
   /** The node's health as an operator reads it — queue, cache, catalog, log, chain, lock. No I/O. */
   stats(): StorageStats;
+  /** Lands what waits — the writes in flight, then the deferred record files — so what was written is on disk. */
+  flush(): Promise<void>;
   /**
    * `adoptFrom`: the node id whose own `advance` ops may move this node's
    * vector — the host a subscription is read from. Absent, an `advance` is
@@ -1775,13 +2191,20 @@ export interface Storage {
     },
   ): Promise<ApplyRemoteResult>;
   adoptVector(vector: VersionVector, options?: { via?: PeerRef | null; from?: string }): Promise<SyncOp | null>;
-  snapshot(options?: { cursor?: string | null; limit?: number; scopes?: readonly string[] | null }): Promise<SnapshotPage>;
-  mergeSnapshot(records: readonly (Entry & { id: string })[], options?: { via?: PeerRef | null; from?: string }): Promise<void>;
+  snapshot(options?: {
+    cursor?: string | null;
+    limit?: number;
+    scopes?: readonly string[] | null;
+  }): Promise<SnapshotPage>;
+  mergeSnapshot(
+    records: readonly (Entry & { id: string })[],
+    options?: { via?: PeerRef | null; from?: string },
+  ): Promise<void>;
   close(): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
-// Queries (src/query.js)
+// Queries (src/query/)
 
 export interface MangoOperators {
   $eq?: unknown;
@@ -1797,22 +2220,30 @@ export interface MangoOperators {
   $options?: string;
 }
 
+/** What a field of type `V` is matched against: a value, an element (an array field holds a scalar value), or the operators. */
+export type MangoMatch<V> = V | MangoOperators | (V extends readonly (infer E)[] ? E : never);
+
 /**
  * `{ field: value }` is equality (a dotted path reaches into the record; an
  * array field holds a scalar value), `{ field: { $op } }` the operators,
- * `$and`/`$or` arrays of queries, `$not` one.
+ * `$and`/`$or` arrays of queries, `$not` one. `R` names the fields a query
+ * may test — the record's own, `id`, or any by a dotted path; `RecordData`
+ * lets every name through.
  */
-export type MangoQuery = {
-  [field: string]: unknown;
-  $and?: readonly MangoQuery[];
-  $or?: readonly MangoQuery[];
-  $not?: MangoQuery;
+export type MangoQuery<R = RecordData> = {
+  readonly [K in keyof R & string]?: MangoMatch<R[K]>;
+} & {
+  readonly [path: `${string}.${string}`]: unknown;
+  readonly id?: string | MangoOperators;
+  readonly $and?: readonly MangoQuery<R>[];
+  readonly $or?: readonly MangoQuery<R>[];
+  readonly $not?: MangoQuery<R>;
   /** Full-text search over the entity's `search` fields, top level only; rows come back best first unless ordered. */
-  $text?: string;
+  readonly $text?: string;
 };
 
 /** A row a cursor yields: the record as it reads, under its `id`. */
-export type QueryRow = Record<string, unknown> & { id: string };
+export type QueryRow<R = RecordData> = R & { id: string };
 
 export interface Cursor<T = QueryRow> {
   order(field: string): this;
@@ -1833,10 +2264,14 @@ export interface Cursor<T = QueryRow> {
 
 // A string field whose value is a known record id reads back as a Reference.
 export interface Reference {
-  record(): Promise<SyncomRecord>;
+  record<R = RecordData>(): Promise<SyncomRecord<R>>;
 }
 
-export interface SyncomRecord {
+/**
+ * The methods of a live `Record`; `SyncomRecord<R>` adds a property per
+ * field of `R`. `data()` is `null` for a record that is not there.
+ */
+export interface SyncomRecordApi<R = RecordData> {
   readonly id: string;
   on<E extends keyof RecordEvents>(event: E, listener: RecordEvents[E]): void;
   once<E extends keyof RecordEvents>(event: E, listener: RecordEvents[E]): void;
@@ -1846,16 +2281,24 @@ export interface SyncomRecord {
   eventNames(): (keyof RecordEvents)[];
   toPromise<E extends keyof RecordEvents>(event: E): Promise<Parameters<RecordEvents[E]>[0]>;
   clear(event?: keyof RecordEvents): void;
-  data(): Promise<unknown>;
-  delta(): Record<string, unknown>;
+  data(): Promise<R | null>;
+  delta(): Partial<R>;
   save(options?: WriteOptions): Promise<void>;
+  /** Removes fields; the storage-level `unset` with this record's id. */
+  unset(fields: string | readonly string[], options?: WriteOptions): Promise<void>;
   inc(key: string, value?: number, options?: WriteOptions): Promise<void>;
   /** Adds to a set field — `storage.add` with this record's id. */
   add(key: string, elements: readonly unknown[], options?: WriteOptions): Promise<void>;
   /** Removes from a set field — `storage.remove` with this record's id. */
   remove(key: string, elements: readonly unknown[], options?: WriteOptions): Promise<void>;
   /** Splices a list or text field — `storage.splice` with this record's id. */
-  splice(key: string, index: number, count?: number, content?: string | readonly unknown[], options?: WriteOptions): Promise<void>;
+  splice(
+    key: string,
+    index: number,
+    count?: number,
+    content?: string | readonly unknown[],
+    options?: WriteOptions,
+  ): Promise<void>;
   /** Appends to a list or text field — `storage.push` with this record's id. */
   push(key: string, content: string | readonly unknown[], options?: WriteOptions): Promise<void>;
   /** Makes a text field read as `text` — `storage.updateText` with this record's id. */
@@ -1870,15 +2313,61 @@ export interface SyncomRecord {
     options?: WriteOptions & { expand?: MarkExpand; many?: boolean },
   ): Promise<string | null>;
   /** Removes a style from a text field — `storage.unmark` with this record's id. */
-  unmark(key: string, start: number, end: number, name: string, options?: WriteOptions & { expand?: MarkExpand }): Promise<void>;
+  unmark(
+    key: string,
+    start: number,
+    end: number,
+    name: string,
+    options?: WriteOptions & { expand?: MarkExpand },
+  ): Promise<void>;
   /** Switches one mark off by its id — `storage.unmarkById` with this record's id. */
   unmarkById(key: string, markId: string, options?: WriteOptions): Promise<void>;
   /** The text field as runs of equal style — `storage.spans` with this record's id. */
   spans(key: string): Promise<TextSpan[] | null>;
+  /** Inserts an inline embed into a text field — `storage.insertEmbed` with this record's id. */
+  insertEmbed(
+    key: string,
+    index: number,
+    embed: { type: string; attrs?: { [name: string]: unknown } },
+    options?: WriteOptions,
+  ): Promise<void>;
+  /** Starts a block in a text field — `storage.splitBlock` with this record's id. */
+  splitBlock(
+    key: string,
+    index: number,
+    block: { type: string; parents?: readonly string[]; attrs?: { [name: string]: unknown } },
+    options?: WriteOptions,
+  ): Promise<void>;
+  /** Removes a block marker — `storage.joinBlock` with this record's id. */
+  joinBlock(key: string, index: number, options?: WriteOptions): Promise<void>;
+  /** Replaces a marker — `storage.updateBlock` with this record's id. */
+  updateBlock(
+    key: string,
+    index: number,
+    block: { type: string; parents?: readonly string[]; attrs?: { [name: string]: unknown }; isEmbed?: boolean },
+    options?: WriteOptions,
+  ): Promise<void>;
+  /** The marker at an index of a text field — `storage.block` with this record's id. */
+  block(key: string, index: number): Promise<BlockMarker | null>;
+  /** A text field by block — `storage.blocks` with this record's id. */
+  blocks(key: string): Promise<TextBlock[] | null>;
+  elementAt(key: string, index: number): Promise<string | null>;
+  elements(key: string): Promise<string[]>;
   /** A cursor into a list or text field — `storage.cursor` with this record's id. */
   cursor(key: string, index: number, options?: { side?: CursorSide }): Promise<string | null>;
   /** Where a cursor is now — `storage.index` with this record's id. */
   index(key: string, cursor: string): Promise<number | null>;
+  /** A cursor's index and side — `storage.position` with this record's id. */
+  position(key: string, cursor: string): Promise<CursorPosition | null>;
+  /** Who last wrote a field — `storage.lastEditorOf` with this record's id. */
+  lastEditorOf(field: string): Promise<Editor | null>;
+  /** Every node that wrote something this record carries — `storage.editorsOf` with this record's id. */
+  editorsOf(): Promise<string[]>;
+  /** Who inserted an element of a list or text field — `storage.editorOf` with this record's id. */
+  editorOf(key: string, index: number): Promise<Editor | null>;
+  /** Watches this record — `storage.observe` with this record's id; returns the function that stops it. */
+  observe(path: string | null, listener: Observer): () => void;
+  observe(listener: Observer): () => void;
   /** Replaces an element of a list field — `storage.setAt` with this record's id. */
   setAt(key: string, index: number, value: unknown, options?: WriteOptions): Promise<void>;
   /** Moves an element of a list field — `storage.move` with this record's id. */
@@ -1893,36 +2382,56 @@ export interface SyncomRecord {
   /** Removes a node of a tree field with its subtree — `storage.treeRemove` with this record's id. */
   treeRemove(key: string, node: string, options?: WriteOptions): Promise<void>;
   delete(options?: WriteOptions): Promise<void>;
-  // Live properties: one getter/setter per field of the loaded object.
-  [field: string]: unknown;
 }
 
-export declare class SyncomCollection {
-  constructor(storage: Storage, name: string);
+/**
+ * A live record: the methods, plus one getter/setter per field of the loaded
+ * object — typed by `R` (`record<Post>(id)`, a typed collection's
+ * `record()`), any name and `unknown` under `RecordData`. A field named
+ * like a method never shadows it; `data()` has it.
+ */
+export type SyncomRecord<R = RecordData> = SyncomRecordApi<R> & { -readonly [K in keyof R]: R[K] };
+
+/**
+ * A collection, `storage.<Entity>`. `R` is the record as it reads, `I` what
+ * a write takes — a Standard Schema's input, defaults and aliases not yet
+ * applied; both `RecordData` unless the schema says more (see `Collections`).
+ */
+export interface SyncomCollection<R = RecordData, I = R> {
   readonly name: string;
-  insert(data: unknown, options?: StorageDataOptions): Promise<SyncomRecord>;
-  get(id: string, options?: { at?: Version }): Promise<unknown | null>;
-  /** A cursor over this collection — see Cursor. */
-  select(query?: MangoQuery): Cursor;
-  count(query?: MangoQuery): Promise<number>;
+  insert(data: I, options?: StorageDataOptions): Promise<SyncomRecord<R>>;
+  get(id: string, options?: { at?: Version }): Promise<R | null>;
+  /** A cursor over this collection — see Cursor; the query names the record's fields, or any by a dotted path. */
+  select(query?: MangoQuery<R>): Cursor<QueryRow<R>>;
+  count(query?: MangoQuery<R>): Promise<number>;
   /** Replaces the record wholesale, stamped as this collection's. */
-  set(id: string, data: unknown, options?: StorageDataOptions): Promise<void>;
+  set(id: string, data: I, options?: StorageDataOptions): Promise<void>;
   delete(id: string, options?: WriteOptions): Promise<void>;
-  /** Sets the listed fields; `$type` may not be among them. */
-  update(id: string, delta: unknown, options?: WriteOptions): Promise<void>;
-  record(id: string): Promise<SyncomRecord>;
+  /** Sets the listed fields — the record's own, or any by path (`'profile/city'`); `$type` may not be among them. */
+  update(id: string, delta: Partial<I> & PathFields, options?: WriteOptions): Promise<void>;
+  unset(id: string, fields: string | readonly string[], options?: WriteOptions): Promise<void>;
+  record(id: string): Promise<SyncomRecord<R>>;
 }
 
-export declare const SyncomRecordCtor: {
+/** `Storage.Collection`: what `storage.<Entity>` is an instance of (a type, not an export of the package). */
+export interface SyncomCollectionConstructor {
+  readonly prototype: SyncomCollection;
+  new <R = RecordData, I = R>(storage: Storage, name: string): SyncomCollection<R, I>;
+}
+
+/** `Storage.Record`: what `storage.record(id)` resolves to an instance of (a type, not an export of the package). */
+export interface SyncomRecordConstructor {
   readonly prototype: SyncomRecord;
-  new (id: string, storage: Storage): Promise<SyncomRecord>;
-};
+  new <R = RecordData>(id: string, storage: Storage): Promise<SyncomRecord<R>>;
+}
 
 export interface StorageConstructor {
   readonly prototype: Storage;
-  new <S extends Schema = Schema>(options?: StorageOptions<S>): Promise<Storage & Collections<S>>;
-  Collection: typeof SyncomCollection;
-  Record: typeof SyncomRecordCtor;
+  new <S extends Schema = Schema, const P extends readonly Plugin<any>[] = []>(
+    options?: StorageOptions<S> & { plugins?: P },
+  ): Promise<Storage & Collections<S> & PluginMethods<P>>;
+  Collection: SyncomCollectionConstructor;
+  Record: SyncomRecordConstructor;
   // The default `getId` — synchronous in both halves, unlike the crypto three.
   generateId(): string;
 }
@@ -1930,8 +2439,16 @@ export interface StorageConstructor {
 export const Storage: StorageConstructor;
 
 export namespace Storage {
-  export type StorageRecord = SyncomRecord;
-  export type StorageCollection = SyncomCollection;
+  export type StorageRecord<R = RecordData> = SyncomRecord<R>;
+  export type StorageCollection<R = RecordData, I = R> = SyncomCollection<R, I>;
 }
 
-export function open<S extends Schema = Schema>(options?: StorageOptions<S>): Promise<Storage & Collections<S>>;
+/**
+ * Opens a storage. The result's type follows the options: a collection per
+ * entity of `schema` (typed by the schema's `Shapes` or the entity's
+ * Standard Schema, `RecordData` otherwise) and the methods of every plugin
+ * in `plugins`. Both are inferred — no type arguments to pass.
+ */
+export function open<S extends Schema = Schema, const P extends readonly Plugin<any>[] = []>(
+  options?: StorageOptions<S> & { plugins?: P },
+): Promise<Storage & Collections<S> & PluginMethods<P>>;

@@ -7,7 +7,7 @@ description: Apply the Alexis JavaScript style (Metarhia-derived, linted by oxli
      oxlint + oxfmt instead of ESLint + Prettier, pnpm instead of npm, 120 columns instead of 80,
      'use strict' in every src file (metaschema omits it), and comments that explain why.
      The syncom-specific rules (op model, browser halves, hooks, no runtime dependencies) live in
-     CLAUDE.md, which wins if the two ever disagree. -->
+     the CLAUDE.md notes — the root's and the nested one of the folder at hand — which win if the two ever disagree. -->
 
 # JavaScript Code Style
 
@@ -42,7 +42,7 @@ Use following conventions for JavaScript and TypeScript code.
 - Always include the `.js` extension in relative requires (`require('./ops.js')`)
 - No runtime dependencies: the only bare `require` allowed in `src/` is a `node:` built-in, and
   none at all in a file that reaches the browser bundle (put helpers in `src/utils.js`)
-- A platform split is a `*.browser.js` file (dot, not dash); see CLAUDE.md for the three edits it needs
+- A platform split is a `*.browser.js` file (dot, not dash); see src/CLAUDE.md for the three edits it needs
 
 ## Naming
 
@@ -65,8 +65,21 @@ Use following conventions for JavaScript and TypeScript code.
 - Do not mutate input parameters; avoid `arguments`
 - Keep functions small and single-purpose
 - Decompose long expressions into intermediate variables
-- Prefer explicit loops (`for`, `for..of`); index loops in hot paths; avoid `forEach` and `reduce`
-  (the code base has none); `map`, `filter` and `find` are fine for a one-shot transform off the hot path
+- Procedural loops in `src/`: no array method that takes a callback (`map`, `filter`, `find`,
+  `findIndex`, `findLast`, `findLastIndex`, `some`, `every`, `flatMap`, `forEach`, `reduce`,
+  `reduceRight`) and no `Array.from` — an indexed `for` over an array, `for..of` over a Map, a Set
+  or an iterator, `[...iterable]` for a plain copy. `oxlint` enforces it for `src/**`
+  (`no-restricted-properties`; `T.find`/`SL.find` are the rope's and the plist's own functions, and
+  an editor's `RangeSet.map`/`DecorationSet.map` carries a disable comment). Tests, benchmarks and
+  scripts may use them
+- One walk does all the work it can: never `filter(...).map(...)`, a count pass then a build pass,
+  or the same `Object.keys(o)` twice; a membership test inside a loop is a `Set` (or a `Map` for a
+  transient dictionary), built once
+- Never spread a data array into arguments — `out.push(...items)`, `Math.max(...values)`,
+  `fn(...array)`: past ~130 000 elements it throws `RangeError` (a list run may hold 1 048 576)
+- A new array is built packed: `[]` and `push`, never `new Array(n)` filled by index (V8 keeps
+  it holey for good, and every read of it pays — a list's chunks built that way cost a text
+  insert 8%); a bulk copy stays native (`slice`, `concat`) rather than an element loop
 - Use `===` and `!==`; the one loose comparison is `value == null` for "null or undefined"
   (`eqeqeq` ignores `null`)
 - Keep return types consistent

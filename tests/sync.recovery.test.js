@@ -7,7 +7,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const syncom = require('..');
+const syncom = require('../src/all/all.js');
 const { packOps } = require('../src/ops.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const { MemoryLink } = require('./utils/memory-link.js');

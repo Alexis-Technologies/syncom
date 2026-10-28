@@ -1,0 +1,21 @@
+{
+  "generatedAt": "2026-10-27T00:00:39.180Z",
+  "rows": [
+    {
+      "name": "keystroke — packed, unsigned",
+      "bytes": 272
+    },
+    {
+      "name": "keystroke — packed, signed",
+      "bytes": 431
+    },
+    {
+      "name": "keystroke — log line, signed",
+      "bytes": 490
+    },
+    {
+      "name": "keystroke — page of 500, signed (per op)",
+      "bytes": 430
+    }
+  ]
+}

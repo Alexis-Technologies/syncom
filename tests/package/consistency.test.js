@@ -7,7 +7,7 @@
 // those a red test instead.
 
 const path = require('node:path');
-const { existsSync, readFileSync } = require('node:fs');
+const { existsSync, readFileSync, readdirSync } = require('node:fs');
 const { test } = require('node:test');
 const assert = require('node:assert');
 
@@ -59,7 +59,9 @@ test('every root shim requires a file that exists', () => {
     for (const target of exportTargets(value)) {
       if (!target.endsWith('.js')) continue;
       const source = readFileSync(path.join(ROOT, target), 'utf8');
-      const match = source.match(/require\('([^']+)'\)/);
+      // A shim is one line: `module.exports = require('…')`; an entry that is
+      // a module of its own (a subpath under src/) is not one.
+      const match = source.match(/^module\.exports = require\('([^']+)'\);?$/m);
       if (!match) continue; // not a shim
       const required = path.join(ROOT, path.dirname(target), match[1]);
       assert.ok(existsSync(required), `${key} shim ${target} requires missing ${match[1]}`);
@@ -121,9 +123,22 @@ test('every exports entry point has a row in scripts/size.js', () => {
 });
 
 test('every runtime export is declared in the types', () => {
+  // A .d.ts that re-exports another whole (`export * from`) declares what
+  // that one declares.
+  const sourceOf = (types, seen = new Set()) => {
+    const file = path.join(ROOT, types);
+    if (seen.has(file)) return '';
+    seen.add(file);
+    let source = readFileSync(file, 'utf8');
+    for (const [, from] of source.matchAll(/^export \* from '([^']+)';/gm)) {
+      const target = path.relative(ROOT, path.resolve(path.dirname(file), from.replace(/\.js$/, '.d.ts')));
+      source += sourceOf(target, seen);
+    }
+    return source;
+  };
   const check = (entry, types) => {
     const runtime = Object.keys(require(path.join(ROOT, entry)));
-    const source = readFileSync(path.join(ROOT, types), 'utf8');
+    const source = sourceOf(types);
     for (const name of runtime) {
       const declared =
         new RegExp(`export (?:declare )?(?:function|const|class) ${name}\\b`).test(source) ||
@@ -134,16 +149,56 @@ test('every runtime export is declared in the types', () => {
   };
   check('index.js', 'index.d.ts');
   // The subpaths: their runtime surface is small and loads without a browser.
-  check('wrpc.js', 'wrpc.d.ts');
-  check('contracts.js', 'contracts.d.ts');
-  check('idb.js', 'idb.d.ts');
-  check('search.js', 'search.d.ts');
-  check('order.js', 'order.d.ts');
-  check('undo.js', 'undo.d.ts');
-  check('branch.js', 'branch.d.ts');
+  check('src/wrpc/wrpc.js', 'src/wrpc/wrpc.d.ts');
+  check('src/contracts/contracts.js', 'src/contracts/contracts.d.ts');
+  check('src/idb/idb.js', 'src/idb/idb.d.ts');
+  check('src/search/search.js', 'src/search/search.d.ts');
+  check('src/order/order.js', 'src/order/order.d.ts');
+  check('src/undo/undo.js', 'src/undo/undo.d.ts');
+  check('src/branch/branch.js', 'src/branch/branch.d.ts');
+  check('src/presence/presence.js', 'src/presence/presence.d.ts');
+  check('src/inspect/inspect.js', 'src/inspect/inspect.d.ts');
+  check('src/editor/editor.js', 'src/editor/editor.d.ts');
+  check('src/store/store.js', 'src/store/store.d.ts');
+  check('src/prosemirror/prosemirror.js', 'src/prosemirror/prosemirror.d.ts');
+  check('src/codemirror/codemirror.js', 'src/codemirror/codemirror.d.ts');
+  check('src/all/all.js', 'src/all/all.d.ts');
+  check('src/text/text.js', 'src/text/text.d.ts');
+  check('src/tree/tree.js', 'src/tree/tree.d.ts');
+  check('src/signing/signing.js', 'src/signing/signing.d.ts');
+  check('src/chain/chain.js', 'src/chain/chain.d.ts');
+  check('src/encryption/encryption.js', 'src/encryption/encryption.d.ts');
+  check('src/memory/memory.js', 'src/memory/memory.d.ts');
+  check('src/layered/layered.js', 'src/layered/layered.d.ts');
+  check('src/sync/sync.js', 'src/sync/sync.d.ts');
+  check('src/schema/schema.js', 'src/schema/schema.d.ts');
+  check('src/telemetry/telemetry.js', 'src/telemetry/telemetry.d.ts');
+  check('src/query/query.js', 'src/query/query.d.ts');
+  check('src/versions/versions.js', 'src/versions/versions.d.ts');
   // browser.js is only loadable under OPFS/WebCrypto globals, so compare its
   // barrel's names against the node one instead of requiring it here.
   check('index.js', 'browser.d.ts');
+});
+
+// The other way: a value a .d.ts declares at its top level (a const, a function, a class) is one the module
+// exports — a type that only reads as a value would compile an import that is undefined at run time.
+test('every value a .d.ts declares, its module exports', () => {
+  const pairs = [['index.js', 'index.d.ts']];
+  for (const name of readdirSync(path.join(ROOT, 'src'))) {
+    const types = path.join('src', name, `${name}.d.ts`);
+    if (existsSync(path.join(ROOT, types)) && existsSync(path.join(ROOT, 'src', name, `${name}.js`))) {
+      pairs.push([path.join('src', name, `${name}.js`), types]);
+    }
+  }
+  const missing = [];
+  for (const [entry, types] of pairs) {
+    const runtime = require(path.join(ROOT, entry));
+    const source = readFileSync(path.join(ROOT, types), 'utf8');
+    for (const match of source.matchAll(/^export (?:declare )?(?:const|function|class) (\w+)/gm)) {
+      if (!Object.hasOwn(runtime, match[1])) missing.push(`${types} declares ${match[1]}, ${entry} does not export it`);
+    }
+  }
+  assert.deepStrictEqual(missing, []);
 });
 
 test('every type index.d.ts exports, browser.d.ts exports too', () => {
@@ -158,4 +213,78 @@ test('every type index.d.ts exports, browser.d.ts exports too', () => {
   const browser = declared(readFileSync(path.join(ROOT, 'browser.d.ts'), 'utf8'));
   const missing = [...node].filter((name) => !browser.has(name));
   assert.deepStrictEqual(missing, [], 'a TypeScript user under the browser condition imports these from browser.d.ts');
+});
+
+// Every code src/ raises is in its union and in the API reference's table, and nothing is there that src/ does not
+// raise: a SyncomError's in `SyncomErrorCode`, a typed TypeError's in `TypedErrorCode` — each code read off the
+// first argument of `new SyncomError(…)`, a `super(…)` of a class extending it, or `typed(…)`, a conditional's
+// codes included, a call over several lines too.
+test('every error code src/ raises is in its union and in the reference table, and nothing else is', () => {
+  const fs = require('node:fs');
+  const nodePath = require('node:path');
+  const root = nodePath.join(__dirname, '..', '..');
+  const files = [];
+  const walk = (dir) => {
+    for (const name of fs.readdirSync(dir)) {
+      const full = nodePath.join(dir, name);
+      if (fs.statSync(full).isDirectory()) walk(full);
+      else if (full.endsWith('.js')) files.push(full);
+    }
+  };
+  walk(nodePath.join(root, 'src'));
+  // The text of a call's first argument: up to the first comma at depth 0.
+  const firstArgument = (text, from) => {
+    let depth = 0;
+    for (let i = from; i < text.length; i++) {
+      const c = text[i];
+      if (c === '(' || c === '[' || c === '{') depth++;
+      else if (c === ')' || c === ']' || c === '}') {
+        if (depth === 0) return text.slice(from, i);
+        depth--;
+      } else if (c === ',' && depth === 0) return text.slice(from, i);
+    }
+    return '';
+  };
+  const codesIn = (text, pattern) => {
+    const out = new Set();
+    for (const match of text.matchAll(pattern)) {
+      for (const code of firstArgument(text, match.index + match[0].length).matchAll(/'([A-Z][A-Z_]+)'/g)) {
+        out.add(code[1]);
+      }
+    }
+    return out;
+  };
+  const raised = new Set();
+  const typedCodes = new Set();
+  for (const file of files) {
+    const text = fs.readFileSync(file, 'utf8');
+    for (const code of codesIn(text, /new SyncomError\(/g)) raised.add(code);
+    if (/extends (SyncomError|HookError)/.test(text)) for (const code of codesIn(text, /\bsuper\(/g)) raised.add(code);
+    for (const code of codesIn(text, /\btyped\(/g)) typedCodes.add(code);
+  }
+  const types = fs.readFileSync(nodePath.join(root, 'index.d.ts'), 'utf8');
+  const unionOf = (name) => {
+    const at = types.indexOf(`export type ${name} =`);
+    assert.ok(at >= 0, name);
+    return new Set([...types.slice(at, types.indexOf(';', at)).matchAll(/'([A-Z_]+)'/g)].map((m) => m[1]));
+  };
+  const sorted = (set) => [...set].sort();
+  assert.deepStrictEqual(sorted(unionOf('SyncomErrorCode')), sorted(raised), 'SyncomErrorCode is what src/ raises');
+  assert.deepStrictEqual(
+    sorted(unionOf('TypedErrorCode')),
+    sorted(typedCodes),
+    'TypedErrorCode is what typed() raises',
+  );
+  const api = fs.readFileSync(nodePath.join(root, 'docs', 'reference', 'api.md'), 'utf8');
+  const section = api.slice(api.indexOf('### `SyncomError`'), api.indexOf('### `HookError`'));
+  const documented = new Set();
+  for (const line of section.split('\n')) {
+    if (!line.startsWith('| `')) continue;
+    for (const code of line.split('|')[1].matchAll(/`([A-Z][A-Z_]+)`/g)) documented.add(code[1]);
+  }
+  assert.deepStrictEqual(
+    sorted(documented),
+    sorted(new Set([...raised, ...typedCodes])),
+    'the table names every code once',
+  );
 });

@@ -31,13 +31,14 @@ const ENTRIES = [
   {
     id: 'syncom',
     name: 'syncom',
-    entry: 'open() over OPFS + the wrpc link adapter',
+    entry: 'the core over OPFS + the sync plugin + the wrpc link adapter',
     packages: ['@alexify/syncom'],
     source: `
       export { open } from '@alexify/syncom';
+      export { sync } from '@alexify/syncom/sync';
       export { createWrpcLink } from '@alexify/syncom/wrpc';
     `,
-    note: 'storage, schema, queries, the op log and the sync protocol are one entry',
+    note: 'records, counters and sets, the op log and the sync protocol; texts and schemas are plugins of their own',
   },
   {
     id: 'yjs',
@@ -138,9 +139,17 @@ const ENTRIES = [
   },
 ];
 
-// The whole package of each CRDT library and syncom's whole entry, nothing around them.
+// The whole package of each CRDT library and syncom's entries, nothing around them: the core, the core with
+// the text plugin (the pure CRDT for an editor, what Yjs' package is), and everything (`/all`).
 const CORES = [
   { id: 'syncom', name: 'syncom', entry: "export * from '@alexify/syncom'", packages: ['@alexify/syncom'] },
+  {
+    id: 'syncom-text',
+    name: 'syncom + text',
+    entry: "export * from '@alexify/syncom'; export * from '@alexify/syncom/text'",
+    packages: ['@alexify/syncom'],
+  },
+  { id: 'syncom-all', name: 'syncom/all', entry: "export * from '@alexify/syncom/all'", packages: ['@alexify/syncom'] },
   { id: 'yjs', name: 'Yjs', entry: "export * from 'yjs'", packages: ['yjs'] },
   {
     id: 'automerge',
@@ -176,6 +185,22 @@ const skipBuiltins = {
   },
 };
 
+// `@alexify/syncom` and its subpaths through the package's own `exports`, as
+// a bundler resolves them from node_modules (the browser condition first).
+const pkg = require(path.join(ROOT, 'package.json'));
+const ownPackage = {
+  name: 'syncom-exports',
+  setup(build) {
+    build.onResolve({ filter: /^@alexify\/syncom(\/.*)?$/ }, (args) => {
+      const key = `.${args.path.slice('@alexify/syncom'.length)}`;
+      const target = pkg.exports[key];
+      if (target === undefined) return { errors: [{ text: `no export ${key}` }] };
+      const file = typeof target === 'string' ? target : (target.browser?.default ?? target.default);
+      return { path: path.join(ROOT, file) };
+    });
+  },
+};
+
 const measure = async (spec) => {
   const result = await esbuild.build({
     stdin: { contents: spec.source, resolveDir: __dirname, loader: 'js' },
@@ -186,12 +211,11 @@ const measure = async (spec) => {
     platform: 'browser',
     conditions: ['browser'],
     mainFields: ['browser', 'module', 'main'],
-    alias: { '@alexify/syncom': ROOT },
     loader: { '.wasm': 'file' },
     outdir: path.join(__dirname, '.size-out'),
     write: false,
     define: { 'process.env.NODE_ENV': '"production"', global: 'globalThis' },
-    plugins: [skipBuiltins],
+    plugins: [ownPackage, skipBuiltins],
     logLevel: 'silent',
   });
   let min = 0;

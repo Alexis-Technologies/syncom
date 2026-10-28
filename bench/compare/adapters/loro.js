@@ -82,11 +82,15 @@ const wrap = (L, doc, file) => {
     close: async () => {
       if (file) await file.close();
     },
-    text: () => {
-      const text = doc.getText('text');
+    text: (name = 'text') => {
+      const text = doc.getText(name);
       return {
         insert: (index, chars) => {
           text.insert(index, chars);
+          return commit();
+        },
+        delete: (index, count) => {
+          text.delete(index, count);
           return commit();
         },
         read: () => text.toString(),
@@ -101,11 +105,12 @@ const memory = {
     const L = local('loro-crdt');
     return wrap(L, new L.LoroDoc(), null);
   },
-  text: (store) => store.text(),
+  text: (store, name) => store.text(name),
 };
 
 const disk = {
   variant: 'updates appended to a file',
+  text: (store, name) => store.text(name),
   open: async (dir) => {
     const L = local('loro-crdt');
     await fs.mkdir(dir, { recursive: true });

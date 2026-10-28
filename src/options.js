@@ -5,7 +5,7 @@
 // modules. Every message names the option the way the caller wrote it.
 
 const { isPlainObject } = require('./shape.js');
-const { PENDING_MAX } = require('./sequence.js');
+const { PENDING_MAX, createPlugins } = require('./plugin.js');
 
 const DEFAULT_CACHE = 5000;
 const DEFAULT_FLUSH_EVERY = 64;
@@ -15,6 +15,7 @@ const DEFAULT_FLUSH_EVERY = 64;
 const DEFAULT_MAX_SKEW = 86_400_000;
 
 const LOCK_KEYS = ['staleAfter', 'poll', 'timeout'];
+const LOCK_KNOWN = new Set(LOCK_KEYS);
 
 // `open({ lock })`: `'fail'` (the default), `'wait'`, `false`, or an object
 // `{ mode, staleAfter, poll, timeout }` for the lockfile's knobs. `null`
@@ -35,7 +36,7 @@ const normalizeLock = (lock) => {
     options[key] = value;
   }
   for (const key of Object.keys(rest)) {
-    if (!LOCK_KEYS.includes(key)) throw new TypeError(`open({ lock }): unknown key '${key}'`);
+    if (!LOCK_KNOWN.has(key)) throw new TypeError(`open({ lock }): unknown key '${key}'`);
   }
   return options;
 };
@@ -44,6 +45,9 @@ const positiveInteger = (value, message) => {
   if (!Number.isInteger(value) || value < 1) throw new TypeError(message);
   return value;
 };
+
+// How long a record file may lag the log by default: one frame.
+const DEFAULT_DEFER = 16;
 
 const normalizeStorageOptions = (options) => {
   // `open('./path')` would otherwise open the default directory in silence.
@@ -100,15 +104,15 @@ const normalizeStorageOptions = (options) => {
     throw new TypeError('open({ sync }): maxSkew must be a positive number of milliseconds (Infinity to disable)');
   }
   // How much pending work a list or text field takes from ops that ran ahead
-  // of what they depend on before an op is refused — see src/sequence.js.
+  // of what they depend on before an op is refused — see src/text/sequence.js.
   const pendingMax = options.sync?.pendingMax;
   if (pendingMax !== undefined && !((Number.isInteger(pendingMax) && pendingMax > 0) || pendingMax === Infinity)) {
     throw new TypeError('open({ sync }): pendingMax must be a positive integer (Infinity to disable)');
   }
-  // Record files may lag the log by this many ms (0: never): the log is
-  // durable at once and a crash replays the batch, so the writes of one
-  // record within the window coalesce into one file and one block — see
-  // Storage#deferWrite.
+  // Record files may lag the log by this many ms (0: never; 16 by default,
+  // a frame): the log is durable at once and a crash replays the batch, so
+  // the writes of one record within the window coalesce into one file and
+  // one block — see Storage#deferWrite.
   const defer = options.defer;
   if (defer !== undefined && !(Number.isInteger(defer) && defer >= 0)) {
     throw new TypeError('open({ defer }): defer must be a non-negative integer of milliseconds');
@@ -120,6 +124,18 @@ const normalizeStorageOptions = (options) => {
   if (signatures !== undefined && signatures !== 'verify' && signatures !== 'require' && signatures !== false) {
     throw new TypeError("open({ sync }): signatures must be 'verify', 'require' or false");
   }
+  // A host that says at hello it holds more of this node's own streams than
+  // its log (REWOUND): 'report' moves them past the host's only on proof —
+  // this node's own op at that seq, signed by its key — 'adopt' on the
+  // host's word. See src/sync/manager.js.
+  const rewind = options.sync?.rewind;
+  if (rewind !== undefined && rewind !== 'report' && rewind !== 'adopt') {
+    throw new TypeError("open({ sync }): rewind must be 'report' or 'adopt'");
+  }
+  // The plugins this storage runs with — the kinds beyond registers,
+  // counters and sets, and the API modules — as one registry per instance
+  // (src/plugin.js); nothing is registered process-wide.
+  const plugins = createPlugins(options.plugins ?? []);
   return {
     path: options.path || options.name || 'syncom',
     maxListeners,
@@ -138,9 +154,11 @@ const normalizeStorageOptions = (options) => {
     scope: typeof scope === 'function' ? scope : null,
     maxSkew: maxSkew ?? DEFAULT_MAX_SKEW,
     pendingMax: pendingMax ?? PENDING_MAX,
-    defer: defer ?? 0,
+    defer: defer ?? DEFAULT_DEFER,
     signatures: signatures ?? 'verify',
+    rewind: rewind ?? 'report',
+    plugins,
   };
 };
 
-module.exports = { normalizeStorageOptions };
+module.exports = { normalizeStorageOptions, DEFAULT_DEFER };

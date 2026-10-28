@@ -6,18 +6,16 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
+const { ValidationError } = require('../src/errors.js');
 const {
-  ValidationError,
   normalizeSchema,
   normalizeValidator,
-  createLens,
   deriveIdField,
   derivedIndexes,
   toIssues,
-  project,
-  unproject,
-  foldSet,
-} = require('../src/schema.js');
+} = require('../src/schema/define.js');
+const { createLens } = require('../src/schema/lens.js');
+const { project, unproject, foldSet } = require('../src/schema/entity.js');
 
 const standard = (validate) => ({ '~standard': { version: 1, vendor: 'test', validate } });
 const typeError = (message) => ({ name: 'TypeError', message });

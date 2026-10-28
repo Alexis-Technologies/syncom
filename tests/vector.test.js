@@ -5,6 +5,16 @@ const assert = require('node:assert');
 const vector = require('../src/vector.js');
 
 test('vector module', async (t) => {
+  await t.test('compareVectors: behind, ahead, equal, or concurrent', () => {
+    assert.strictEqual(vector.compareVectors({ a: 1 }, { a: 1 }), 0);
+    assert.strictEqual(vector.compareVectors({}, {}), 0);
+    assert.strictEqual(vector.compareVectors({ a: 1 }, { a: 2 }), -1);
+    assert.strictEqual(vector.compareVectors({ a: 2, b: 1 }, { a: 2 }), 1);
+    assert.strictEqual(vector.compareVectors({}, { a: 1 }), -1, 'a missing key reads as 0');
+    assert.strictEqual(vector.compareVectors({ a: 2 }, { b: 2 }), undefined, 'each ahead somewhere: concurrent');
+    assert.strictEqual(vector.compareVectors({ a: 1, b: 3 }, { a: 2, b: 2 }), undefined);
+  });
+
   await t.test('compareClock orders by ts, then origin, and treats null as oldest', () => {
     assert.strictEqual(vector.compareClock([1, 'a'], [2, 'a']), -1);
     assert.strictEqual(vector.compareClock([2, 'a'], [1, 'z']), 1);

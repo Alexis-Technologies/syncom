@@ -22,6 +22,7 @@ an op reaches a node once, whichever links carried it.
 
 ```js
 import { open } from '@alexify/syncom';
+import { sync } from '@alexify/syncom/sync';
 import { createWrpcLink } from '@alexify/syncom/wrpc';
 import { connect } from '@alexify/wrpc';
 import { WrpcPeer, wrpcSignaler, defineRouter } from '@alexify/wrpc/webrtc';
@@ -32,6 +33,7 @@ let peer = null; // made after open(): its router mounts the storage's unit
 
 const storage = await open({
   path: 'app',
+  plugins: [sync],
   sync: {
     scope: (id, data) => data.orgId ?? '*',
     // A node's url says where it is: the hub's WebSocket, or a peer id.
@@ -136,9 +138,11 @@ for (const orgId of myOrgIds) {
 ```
 
 Presence — who is editing what — is ephemeral and belongs next to the
-documents, not in them: `mesh.broadcast('presence/state', …)` in a room, or
-`context.server.to('presence:' + docId).except(context.client).emit(…)` on
-the hub.
+documents, not in them: [`@alexify/syncom/presence`](./presence) hands you
+`encode()` and `apply()`, so a room carries it as
+`mesh.broadcast('presence/state', presence.encode())` and every peer feeds
+what it hears to `presence.apply(update)`; with a hub, `storage.sync.presence(instance)`
+does the carrying over the syncom links.
 
 ## Reconnect and close
 

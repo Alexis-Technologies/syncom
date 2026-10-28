@@ -17,10 +17,11 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { bench } = require('./support/harness.js');
-const { applyOp, observedTags, packOps, unpackOps } = require('../src/ops.js');
-const { generateSigningKeys } = require('../src/crypto.js');
-const { signOp, verifyOp } = require('../src/signing.js');
-const { open } = require('../src/storage.js');
+const { observedTags, packOps, unpackOps } = require('../src/ops.js');
+const { applyOp, open } = require('../src/all/all.js');
+const { generateSigningKeys } = require('../src/signing/ed25519.js');
+const { signOp, verifyOp } = require('../src/signing/sign.js');
+const S = require('../src/text/sequence.js');
 
 const record = { name: 'Example', email: 'example@example.com', hits: 0, tags: ['a', 'b'], nested: { k: 1 } };
 
@@ -139,6 +140,33 @@ const main = async () => {
         `applyRemote — 100 adds on cached records${label}`,
         () => storage.applyRemote(pageOf('T', adder, 100, 'add')),
         { warmup: 3, measureMs: 1500, opsPerIteration: 100 },
+      );
+      // A text record from a peer: one run of 5 000 characters, then pages
+      // of splices at random places of it — each a new run anchored inside
+      // the first, the field read anew per op.
+      const texter = { seq: 0 };
+      const textId = `${chain ? 'c' : 'p'}-text`;
+      const textOp = (value) => ({
+        origin: 'X',
+        seq: ++texter.seq,
+        ts: 1_000_000 + texter.seq,
+        type: 'splice',
+        id: textId,
+        key: 'body',
+        value,
+      });
+      await storage.applyRemote([textOp({ at: S.HEAD, content: 'x'.repeat(5000) })]);
+      const firstRun = S.runKey(1_000_001, 'X');
+      let r = 0;
+      await bench(
+        `applyRemote — 500 random inserts into a 5K text${label}`,
+        () =>
+          storage.applyRemote(
+            Array.from({ length: 500 }, () =>
+              textOp({ at: `<${S.elemKey(firstRun, (r = (r * 7919 + 13) % 5000))}`, content: 'z' }),
+            ),
+          ),
+        { warmup: 3, measureMs: 1500, opsPerIteration: 500 },
       );
       await storage.close();
     }

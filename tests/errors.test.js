@@ -8,9 +8,9 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const syncom = require('..');
+const syncom = require('../src/all/all.js');
 const { typed } = require('../src/errors.js');
-const { createMemoryFsi } = require('../src/backend.js');
+const { memory } = require('../src/memory/memory.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const { MemoryLink } = require('./utils/memory-link.js');
 
@@ -164,7 +164,7 @@ test('SyncomError', async (t) => {
   });
 
   await t.test('the files: CORRUPT, BLOCK_NOT_FOUND, BAD_ENVELOPE', async (t2) => {
-    const fsi = createMemoryFsi();
+    const fsi = memory();
     const first = await syncom.open({ path: 'store', fsi, logger: false });
     await first.set('r1', { a: 1 });
     await first.close();
@@ -185,7 +185,7 @@ test('SyncomError', async (t) => {
       code: 'BAD_ENVELOPE',
       message: 'Unsupported ciphertext envelope',
     });
-    const half = createMemoryFsi();
+    const half = memory();
     await half.write('k', 'public.pem', 'x');
     await assert.rejects(() => syncom.loadKeys('k', { fsi: half }), { name: 'SyncomError', code: 'KEYS_INCOMPLETE' });
   });

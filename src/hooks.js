@@ -26,8 +26,9 @@ const normalizeHooks = (hooks, allowed, label) => {
   for (const name of allowed) result[name] = null;
   if (hooks === undefined || hooks === null) return result;
   if (typeof hooks !== 'object' || Array.isArray(hooks)) throw new TypeError(`${label}: hooks must be an object`);
+  const known = new Set(allowed);
   for (const key of Object.keys(hooks)) {
-    if (!allowed.includes(key)) throw new TypeError(`${label}: unknown hook '${key}'`);
+    if (!known.has(key)) throw new TypeError(`${label}: unknown hook '${key}'`);
     const fn = hooks[key];
     if (fn === undefined || fn === null) continue;
     if (typeof fn !== 'function') throw new TypeError(`${label}: hooks.${key} must be a function`);

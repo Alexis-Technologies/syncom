@@ -7,10 +7,11 @@
  * CommonJS report script loads it with import().
  *
  * A row's `tone` says how it is emphasized: `primary` for syncom as it opens
- * by default, `secondary` for syncom with `chain: false`, none for the rest.
+ * as a pure CRDT (core + text + sync), `secondary` for syncom signed and
+ * chained (`@alexify/syncom/all`), none for the rest.
  */
 
-const TONES = { syncom: 'primary', 'syncom-nochain': 'secondary' };
+const TONES = { syncom: 'primary', 'syncom-text': 'primary', 'syncom-secure': 'secondary', 'syncom-all': 'secondary' };
 
 const trim = (value) => String(Number(value.toPrecision(3)));
 
@@ -150,6 +151,9 @@ export const compareModel = (compare, scenarioId, scale = 'log', only = null) =>
           `${grouped(result.median)} ${scenario.unit}`,
           `${perCall(result.median)} ${PER_WHAT[scenario.unit] ?? 'per operation'}`,
           `samples ${compact(result.min)} – ${compact(result.max)}`,
+          // The JS heap the trace left, after a collection: WebAssembly memory is not in it, and a
+          // collection that freed more than the trace kept reads as nothing.
+          ...(result.memory > 0 ? [`JS heap after the trace ${(result.memory / 2 ** 20).toFixed(1)} MB`] : []),
           `${library.package}@${library.version}`,
         ],
       });
@@ -295,7 +299,7 @@ const SUBJECT_NOTES = {
   undo: 'The @alexify/syncom/undo manager: what capturing a commit costs a write, what one step back and forward costs.',
   sync: 'Replication over the in-process link (JSON across the boundary, like a wrpc client).',
   log: 'OpLog, the persisted operation log every write and every replicated op goes through.',
-  chain: 'The hash-linked chain a write appends a block to (open({ chain: false }) skips it).',
+  chain: 'The hash-linked chain a write appends a block to (the chain plugin; @alexify/syncom/all has it).',
   hash: 'The digest behind the chain and the integrity checks.',
   crdt: 'diff / merge / apply over plain objects, no I/O.',
   emitter: 'The Emitter every event leaves through.',

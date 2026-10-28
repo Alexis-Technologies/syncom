@@ -8,7 +8,17 @@
 const { settle, waitUntil } = require('../utils/mesh.js');
 const { createSigner, forge, tamper } = require('../utils/signed.js');
 
-const nothing = { applied: 0, skipped: 0, duplicates: 0, gaps: 0, malformed: 0, unsigned: 0, forged: 0, outOfScope: 0 };
+const nothing = {
+  applied: 0,
+  skipped: 0,
+  duplicates: 0,
+  gaps: 0,
+  malformed: 0,
+  unsigned: 0,
+  forged: 0,
+  outOfScope: 0,
+  equivocations: 0,
+};
 const unsignedOp = (origin, seq, id, data) => ({ origin, seq, ts: Date.now() + seq, type: 'write', id, data });
 const SIGNATURE = /^[A-Za-z0-9_-]{86}$/;
 
@@ -111,6 +121,73 @@ const runSignatureTests = async (t, assert, createStorage) => {
     const tampered = tamper(await peer.sign(unsignedOp(null, 1, 'r1', { a: 1 })));
     assert.deepStrictEqual(await storage.applyRemote([tampered]), { ...nothing, applied: 1 });
     assert.deepStrictEqual(await storage.get('r1'), { a: 1, tampered: true });
+  });
+
+  await t.test('an op nested deeper than the bound is malformed before its signature is read', async (t2) => {
+    const { MAX_JSON_DEPTH } = require('../../src/shape.js');
+    const deep = (levels) => {
+      let value = 1;
+      for (let i = 0; i < levels; i++) value = { a: value };
+      return value;
+    };
+    const verifying = await createStorage(t2, 'A');
+    const relay = await createStorage(t2, 'R', { sync: { signatures: false } });
+    for (const storage of [verifying, relay]) storage.on('error', () => {});
+    const peer = await createSigner();
+    // What a relay that does not verify once logged: thousands of levels and
+    // a signature of the right shape. Checking it overflowed the stack — a
+    // throw out of the page, PAGE_FAILED three times, the peer STUCK.
+    const probe = {
+      ...unsignedOp(peer.id, 1, 'r1', { d: deep(5800) }),
+      sig: 'S'.repeat(86),
+      digest: 'd'.repeat(64),
+      nonce: 'n'.repeat(22),
+    };
+    for (const storage of [verifying, relay]) {
+      assert.deepStrictEqual(await storage.applyRemote([probe]), { ...nothing, malformed: 1 });
+      assert.strictEqual(storage.log.length, 0, 'not logged, so not relayed');
+    }
+    // The bound leaves room for what an op and a meta wrap around a value
+    // the API takes: an op whose field nests 16 levels past it is malformed,
+    // signed or not; one at it applies.
+    const limit = MAX_JSON_DEPTH + 16;
+    const over = await peer.sign(unsignedOp(null, 1, 'r1', { d: deep(limit) }));
+    const at = await peer.sign(unsignedOp(null, 1, 'r1', { d: deep(limit - 1) }));
+    assert.deepStrictEqual(await verifying.applyRemote([over]), { ...nothing, malformed: 1 });
+    assert.deepStrictEqual(await verifying.applyRemote([at]), { ...nothing, applied: 1 });
+    // A write deeper than MAX_JSON_DEPTH is refused where it is made, so a
+    // node never logs what its peers would refuse; one at it reaches them.
+    const changes = [];
+    verifying.on('change', (op) => changes.push(op));
+    await assert.rejects(() => verifying.insert({ d: deep(MAX_JSON_DEPTH) }), {
+      name: 'TypeError',
+      message: new RegExp(`nests deeper than ${MAX_JSON_DEPTH} levels`),
+    });
+    await assert.rejects(() => verifying.update('r1', { d: deep(MAX_JSON_DEPTH) }), TypeError);
+    await assert.rejects(() => verifying.add('r1', 'tags', [deep(MAX_JSON_DEPTH)]), TypeError);
+    const id = await verifying.insert({ d: deep(MAX_JSON_DEPTH - 1) });
+    await verifying.add(id, 'tags', [deep(MAX_JSON_DEPTH - 1)]);
+    assert.strictEqual(changes.length, 2);
+    const result = await relay.applyRemote(changes);
+    assert.strictEqual(result.applied, 2);
+    assert.deepStrictEqual(await relay.get(id), await verifying.get(id));
+    // Data a hook hands back is held to what a peer takes, too.
+    const hooked = await createStorage(t2, 'H', { hooks: { beforeWrite: () => ({ d: deep(limit) }) } });
+    await assert.rejects(() => hooked.insert({ d: 1 }), { name: 'TypeError', message: /nests deeper than/ });
+    // A signature check that throws refuses its op alone, as FORGED: the
+    // page goes on, and the op is a gap in its stream until it comes again.
+    const { SIGNER } = require('../../src/symbols.js');
+    const identity = verifying[SIGNER];
+    const verify = identity.verify;
+    identity.verify = (op, mode) => {
+      if (op.seq === 2) throw new RangeError('Maximum call stack size exceeded');
+      return verify(op, mode);
+    };
+    const second = await peer.sign(unsignedOp(null, 2, 'r1', { e: 1 }));
+    const third = await peer.sign(unsignedOp(null, 3, 'r1', { e: 2 }));
+    assert.deepStrictEqual(await verifying.applyRemote([second, third]), { ...nothing, gaps: 1, forged: 1 });
+    identity.verify = verify;
+    assert.strictEqual((await verifying.applyRemote([second, third])).applied, 2);
   });
 
   await t.test('the option is checked at open()', async (t2) => {

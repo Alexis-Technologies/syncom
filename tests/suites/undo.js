@@ -7,7 +7,7 @@
 // for the stack, a purge forgetting its record.
 
 const { createMesh, settle } = require('../utils/mesh.js');
-const { createUndo } = require('../../undo.js');
+const { createUndo } = require('../../src/undo/undo.js');
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 3));
 
@@ -66,6 +66,174 @@ const runUndoTests = async (t, assert, createStorage) => {
     assert.strictEqual(undo.canUndo, false, 'stopped: nothing captured');
   });
 
+  await t.test('an undone joinBlock lays the marker again; an undone embed goes', async (t2) => {
+    const storage = await createStorage(t2, 'A');
+    const id = await storage.insert({ title: 'doc' });
+    await storage.updateText(id, 'body', 'hello world');
+    await storage.splitBlock(id, 'body', 0, { type: 'heading', attrs: { level: 2 } });
+    const undo = createUndo(storage, { mergeInterval: 0 });
+    await storage.insertEmbed(id, 'body', 6, { type: 'image', attrs: { src: 'a.png' } });
+    await tick();
+    await storage.joinBlock(id, 'body', 0);
+    assert.strictEqual((await storage.get(id)).body, 'hello\uFFFC world');
+    await undo.undo();
+    assert.strictEqual((await storage.get(id)).body, '\uFFFChello\uFFFC world');
+    assert.deepStrictEqual(await storage.block(id, 'body', 0), {
+      type: 'heading',
+      parents: [],
+      attrs: { level: 2 },
+      isEmbed: false,
+    });
+    await undo.undo();
+    assert.strictEqual((await storage.get(id)).body, '\uFFFChello world', 'the embed is gone');
+    await undo.redo();
+    assert.deepStrictEqual(await storage.block(id, 'body', 6), {
+      type: 'image',
+      parents: [],
+      attrs: { src: 'a.png' },
+      isEmbed: true,
+    });
+    // A marker changed and taken back: the old marker, by a setAt patch.
+    await tick();
+    await storage.updateBlock(id, 'body', 0, { type: 'paragraph' });
+    assert.strictEqual((await storage.block(id, 'body', 0)).type, 'paragraph');
+    await undo.undo();
+    assert.strictEqual((await storage.block(id, 'body', 0)).type, 'heading');
+    undo.stop();
+  });
+
+  await t.test(
+    'a transaction is one step; group() merges across the interval; a step’s meta travels to its redo and back',
+    async (t2) => {
+      const storage = await createStorage(t2, 'A');
+      const pops = [];
+      const undo = createUndo(storage, {
+        mergeInterval: 0,
+        onPush: ({ step }) => {
+          step.meta.pushed ??= step.id;
+        },
+        onPop: ({ direction, step }) => pops.push([direction, step.id, step.meta.pushed, step.records.length]),
+      });
+      const a = await storage.insert({ n: 0 });
+      const b = await storage.insert({ n: 0 });
+      assert.strictEqual(undo.size.undo, 2);
+      // Three writes on two records in one transaction: one step, with the transaction's source and message.
+      await storage.transact(
+        async (tx) => {
+          await tx.update(a, { n: 1 });
+          await tx.inc(a, 'hits', 1);
+          await tx.update(b, { n: 1 });
+        },
+        { source: 'editor', message: 'typed' },
+      );
+      assert.strictEqual(undo.size.undo, 3);
+      const [, , txn] = undo.steps.undo;
+      assert.deepStrictEqual(
+        [txn.records, txn.source, txn.message, typeof txn.txn],
+        [[a, b], 'editor', 'typed', 'number'],
+      );
+      assert.deepStrictEqual(await undo.undo(), { applied: 3, skipped: 0 });
+      assert.deepStrictEqual([await storage.get(a), await storage.get(b)], [{ n: 0 }, { n: 0 }]);
+      await undo.redo();
+      assert.deepStrictEqual([await storage.get(a), await storage.get(b)], [{ n: 1, hits: 1 }, { n: 1 }]);
+      // group(): one step whatever the interval, nested groups one; mark() inside splits.
+      const value = await undo.group(async () => {
+        await storage.update(a, { n: 2 });
+        await tick();
+        await undo.group(async () => storage.update(b, { n: 2 }));
+        await tick();
+        await storage.update(a, { n: 3 });
+        return 'done';
+      });
+      assert.strictEqual(value, 'done');
+      assert.strictEqual(undo.size.undo, 4);
+      assert.deepStrictEqual(undo.steps.undo[3].records, [a, b]);
+      await storage.update(a, { n: 4 });
+      assert.strictEqual(undo.size.undo, 5, 'the group is closed');
+      undo.groupStart();
+      await storage.update(b, { n: 3 });
+      await tick();
+      await storage.update(b, { n: 4 });
+      undo.mark();
+      await storage.update(b, { n: 5 });
+      undo.groupEnd();
+      undo.groupEnd();
+      assert.strictEqual(undo.size.undo, 7, 'a mark inside a group splits it');
+      await assert.rejects(() => undo.group('x'), TypeError);
+      // The meta: put on push, found on pop, carried to the redo step and back.
+      const step = undo.steps.undo[6];
+      step.meta.selection = [3, 5];
+      assert.deepStrictEqual((await undo.undo()).applied, 1);
+      assert.deepStrictEqual(pops.at(-1), ['undo', step.id, step.id, 1]);
+      assert.strictEqual(undo.steps.redo[0].meta, step.meta, 'the same object');
+      assert.deepStrictEqual(undo.steps.redo[0].meta.selection, [3, 5]);
+      await undo.redo();
+      assert.deepStrictEqual(pops.at(-1).slice(0, 1), ['redo']);
+      assert.deepStrictEqual(undo.steps.undo.at(-1).meta.selection, [3, 5]);
+      undo.stop();
+    },
+  );
+
+  await t.test(
+    'trackedSources, records and paths keep the stack to what they name; a selection kept in meta is restored through position()',
+    async (t2) => {
+      const storage = await createStorage(t2, 'A');
+      const doc = await storage.insert({ title: 'doc' });
+      const other = await storage.insert({ n: 0 });
+      await storage.updateText(doc, 'body', 'hello world');
+      // Only the editor's transactions, on the document, in its body.
+      let selection = null;
+      const undo = createUndo(storage, {
+        mergeInterval: 0,
+        trackedSources: ['editor'],
+        records: [doc],
+        paths: ['body'],
+        onPush: ({ step }) => {
+          step.meta.selection ??= selection;
+        },
+      });
+      const edit = (fn) => storage.transact(fn, { source: 'editor' });
+      await storage.update(doc, { title: 'renamed' });
+      await storage.update(other, { n: 1 });
+      await edit((tx) => tx.update(other, { n: 2 }));
+      await edit((tx) => tx.update(doc, { title: 'again' }));
+      assert.strictEqual(undo.size.undo, 0, 'another source, another record, another field');
+      selection = await storage.cursor(doc, 'body', 5);
+      await edit((tx) => tx.splice(doc, 'body', 5, 0, ' there'));
+      assert.strictEqual(undo.size.undo, 1, 'the body edit');
+      // A step's inverse keeps to the tracked fields (the title it touched too stays); the
+      // selection kept as a cursor is restored through position().
+      selection = await storage.cursor(doc, 'body', 11);
+      await edit(async (tx) => {
+        await tx.splice(doc, 'body', 0, 0, '>> ');
+        await tx.update(doc, { title: 'edited' });
+      });
+      const result = await undo.undo();
+      assert.deepStrictEqual(result, { applied: 1, skipped: 0 });
+      assert.deepStrictEqual(await storage.get(doc), { title: 'edited', body: 'hello there world' });
+      const { meta } = undo.steps.redo[0];
+      assert.strictEqual(meta.selection, selection);
+      assert.deepStrictEqual(await storage.position(doc, 'body', meta.selection), { index: 11, side: 'before' });
+      await edit((tx) => tx.delete(doc));
+      assert.strictEqual(undo.size.undo, 1, 'a delete is no field of the manager’s');
+      // A write at a prefix by someone the stack does not hold conflicts with a step under it.
+      const nested = await storage.insert({ profile: { city: 'Kyiv' } });
+      const scoped = createUndo(storage, { mergeInterval: 0, trackedSources: ['editor'], paths: ['profile/city'] });
+      await edit((tx) => tx.update(nested, { 'profile/city': 'Lviv' }));
+      await storage.update(nested, { profile: { city: 'Odesa', zip: 1 } });
+      assert.deepStrictEqual(await scoped.undo(), { applied: 0, skipped: 1 }, 'the prefix was written since');
+      assert.deepStrictEqual((await storage.get(nested)).profile, { city: 'Odesa', zip: 1 });
+      // Options are checked.
+      assert.throws(() => createUndo(storage, { paths: 'body' }), TypeError);
+      assert.throws(() => createUndo(storage, { paths: [] }), TypeError);
+      assert.throws(() => createUndo(storage, { records: 7 }), TypeError);
+      assert.throws(() => createUndo(storage, { trackedSources: 7 }), TypeError);
+      assert.throws(() => createUndo(storage, { onPush: 'x' }), TypeError);
+      undo.stop();
+      scoped.stop();
+    },
+  );
+
   await t.test('steps merge within the interval, split at mark(); a new edit clears the redo stack', async (t2) => {
     const storage = await createStorage(t2, 'A');
     const undo = createUndo(storage, { mergeInterval: 60_000 });
@@ -80,13 +248,18 @@ const runUndoTests = async (t, assert, createStorage) => {
     await storage.update(a, { n: 2 });
     await storage.inc(b, 'hits', 1);
     assert.strictEqual(undo.size.undo, 1, 'four writes, one step');
-    assert.deepStrictEqual(pushes.at(-1), { direction: 'undo', records: 2 });
+    assert.deepStrictEqual(
+      [pushes.at(-1).direction, pushes.at(-1).records, pushes.at(-1).step.records],
+      ['undo', 2, [a, b]],
+    );
     undo.mark();
     await storage.update(a, { n: 3 });
     assert.strictEqual(undo.size.undo, 2, 'a mark closes the step');
     assert.deepStrictEqual(await undo.undo(), { applied: 1, skipped: 0 });
     assert.deepStrictEqual((await storage.get(a)).n, 2);
-    assert.deepStrictEqual(pops.at(-1), { direction: 'undo', applied: 1, skipped: 0 });
+    const { step: popped, ...pop } = pops.at(-1);
+    assert.deepStrictEqual(pop, { direction: 'undo', applied: 1, skipped: 0 });
+    assert.deepStrictEqual(popped.records, [a]);
     assert.deepStrictEqual(undo.size, { undo: 1, redo: 1 });
     // The first step undoes both records at once — a and b never existed:
     // one op per record, from how the step left it to how it found it.
@@ -148,8 +321,9 @@ const runUndoTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(await undo.undo(), { applied: 2, skipped: 0 });
     assert.deepStrictEqual(await a.get(id), { title: 'B', n: 2, hits: 1 }, 'the fields back, the peer’s counter kept');
     await settle([a, b]);
-    // A set that added a field is undone only by a whole-record write: with
-    // a concurrent change the step is skipped whole, unless forced.
+    // A set that added a field is undone field by field: the field it added
+    // is unset again, and a peer's concurrent increment beside it is kept —
+    // the counter the reset dropped comes back on top of it.
     link.disconnect();
     await a.set(id, { title: 'reset', extra: 1 });
     await tick();
@@ -157,30 +331,50 @@ const runUndoTests = async (t, assert, createStorage) => {
     await link.reconnect();
     await settle([a, b]);
     assert.deepStrictEqual(await a.get(id), { title: 'reset', extra: 1, hits: 1 });
+    assert.deepStrictEqual(await undo.undo(), { applied: 4, skipped: 0 }, 'two puts, an unset, an inc');
+    assert.deepStrictEqual(await a.get(id), { title: 'B', n: 2, hits: 2 }, 'the fields back, extra gone, hits made up');
+    await settle([a, b]);
+    const onB = await b.get(id);
+    assert.deepStrictEqual([onB.title, onB.n], ['B', 2]);
+    // B's own sum straddled the reset (the documented counter/reset case): it reads one more there.
+    assert.ok(onB.hits >= 2, `hits on B: ${onB.hits}`);
+    // A delete is undone only by a whole-record write: with a concurrent
+    // change the step is skipped whole, unless forced.
+    link.disconnect();
+    await a.delete(id);
+    await tick();
+    await b.inc(id, 'hits', 1);
+    await link.reconnect();
+    await settle([a, b]);
+    assert.deepStrictEqual(await a.get(id), { hits: 1 }, 'B’s increment revived the record');
     const before = undo.size.undo;
     assert.deepStrictEqual(
       await undo.undo(),
       { applied: 0, skipped: 2 },
       'the write and the counter it would make again',
     );
-    assert.deepStrictEqual(await a.get(id), { title: 'reset', extra: 1, hits: 1 }, 'left alone');
+    assert.deepStrictEqual(await a.get(id), { hits: 1 }, 'left alone');
     assert.strictEqual(undo.size.undo, before - 1, 'the step is spent either way');
     assert.strictEqual(undo.size.redo, 0, 'nothing was done, nothing to redo');
-    await a.set(id, { title: 'again', extra: 2, fresh: true });
+    await a.delete(id);
     await settle([a, b]);
     link.disconnect();
     await b.inc(id, 'hits', 1);
     await link.reconnect();
     await settle([a, b]);
-    assert.deepStrictEqual(await a.get(id), { title: 'again', extra: 2, fresh: true, hits: 1 });
+    assert.deepStrictEqual(await a.get(id), { hits: 1 });
     assert.deepStrictEqual(
       await undo.undo({ force: true }),
       { applied: 2, skipped: 0 },
       'the write and the counter made again',
     );
-    assert.deepStrictEqual(await a.get(id), { title: 'reset', extra: 1, hits: 1 }, 'B’s increment went with the reset');
+    assert.deepStrictEqual(
+      await a.get(id),
+      { hits: 1 },
+      'B’s increment went with the reset; the counter made again as it read',
+    );
     await settle([a, b]);
-    assert.deepStrictEqual(await b.get(id), { title: 'reset', extra: 1, hits: 1 });
+    assert.deepStrictEqual(await b.get(id), { hits: 1 });
     undo.stop();
   });
 
@@ -227,7 +421,7 @@ const runUndoTests = async (t, assert, createStorage) => {
   });
 
   await t.test(
-    'a failed undo inside one record leaves its landed ops landed; the retry takes back the rest',
+    'a failed undo inside one record leaves nothing of it applied; the retry takes the record back whole',
     async (t2) => {
       let failing = false;
       const beforeWrite = (ctx) => {
@@ -239,19 +433,18 @@ const runUndoTests = async (t, assert, createStorage) => {
       const undo = createUndo(storage, { mergeInterval: 1e9 });
       await storage.inc('r', 'views', 1);
       await storage.update('r', { title: 'Final' });
-      // The step's inverse is two ops on one record: the inc lands, the hook refuses the set.
+      // The step's inverse is two ops on one record, one transaction: the
+      // hook refuses the set, so the inc before it is not written either.
       failing = true;
       await assert.rejects(() => undo.undo(), { code: 'HOOK_FAILED' });
-      assert.deepStrictEqual(await storage.get('r'), { views: 1, title: 'Final' });
-      assert.deepStrictEqual(undo.size, { undo: 1, redo: 1 });
+      assert.deepStrictEqual(await storage.get('r'), { views: 2, title: 'Final' });
+      assert.deepStrictEqual(undo.size, { undo: 1, redo: 0 }, 'the record waits on the undo stack whole');
       failing = false;
-      assert.deepStrictEqual(await undo.undo(), { applied: 1, skipped: 0 }, 'the set alone: the inc stays landed');
+      assert.deepStrictEqual(await undo.undo(), { applied: 2, skipped: 0 }, 'both ops this time');
       assert.deepStrictEqual(await storage.get('r'), { views: 1, title: 'Draft' });
-      // Redo brings it back in the two steps the undo left.
-      await undo.redo();
       await undo.redo();
       assert.deepStrictEqual(await storage.get('r'), { views: 2, title: 'Final' });
-      assert.deepStrictEqual(undo.size, { undo: 2, redo: 0 });
+      assert.deepStrictEqual(undo.size, { undo: 1, redo: 0 });
       undo.stop();
     },
   );

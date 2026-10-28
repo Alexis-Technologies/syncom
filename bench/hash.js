@@ -12,7 +12,7 @@
 'use strict';
 
 const { bench } = require('./support/harness.js');
-const { calculateHash } = require('../src/crypto.js');
+const { calculateHash } = require('../src/signing/ed25519.js');
 
 const record = (fields, valueLength) => {
   const object = {};

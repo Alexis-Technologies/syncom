@@ -1,17 +1,17 @@
 {
-  "generatedAt": "2026-10-24T19:09:32.026Z",
+  "generatedAt": "2026-10-27T00:12:23.095Z",
   "esbuild": "0.28.2",
   "libraries": [
     {
       "id": "syncom",
       "name": "syncom",
-      "entry": "open() over OPFS + the wrpc link adapter",
+      "entry": "the core over OPFS + the sync plugin + the wrpc link adapter",
       "packages": [
         "@alexify/syncom@0.0.1"
       ],
-      "min": 199647,
-      "gzip": 68221,
-      "note": "storage, schema, queries, the op log and the sync protocol are one entry"
+      "min": 185864,
+      "gzip": 63964,
+      "note": "records, counters and sets, the op log and the sync protocol; texts and schemas are plugins of their own"
     },
     {
       "id": "yjs",
@@ -126,8 +126,28 @@
       "packages": [
         "@alexify/syncom@0.0.1"
       ],
-      "min": 198395,
-      "gzip": 67767
+      "min": 151747,
+      "gzip": 52218
+    },
+    {
+      "id": "syncom-text",
+      "name": "syncom + text",
+      "entry": "export * from '@alexify/syncom'; export * from '@alexify/syncom/text'",
+      "packages": [
+        "@alexify/syncom@0.0.1"
+      ],
+      "min": 230463,
+      "gzip": 79603
+    },
+    {
+      "id": "syncom-all",
+      "name": "syncom/all",
+      "entry": "export * from '@alexify/syncom/all'",
+      "packages": [
+        "@alexify/syncom@0.0.1"
+      ],
+      "min": 334365,
+      "gzip": 115916
     },
     {
       "id": "yjs",

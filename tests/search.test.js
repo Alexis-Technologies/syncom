@@ -5,7 +5,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { createSearch, normalize, trigrams } = require('../search.js');
+const { createSearch, normalize, trigrams } = require('../src/search/search.js');
 
 const ids = (hits) => hits.map((hit) => hit.id);
 

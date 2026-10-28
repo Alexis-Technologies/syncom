@@ -3,11 +3,21 @@
 `collection.select(query)` is a cursor over a collection: build it, then
 `fetch()`, `count()`, `one()`, iterate it, or `watch()` it. The query is
 Mango-shaped, as in CouchDB and MongoDB; the cursor plans how to answer it
-from the record catalog, and reads records only when it must.
+from the record catalog, and reads records only when it must. The cursor is
+the `query` plugin — `@alexify/syncom/query`, registered by
+`@alexify/syncom/all`; the catalog and its indexes are the core's, kept
+whether or not anything queries them, and without the plugin `select()` and
+`count()` throw `PLUGIN_MISSING`. The examples on this page open the core
+with it and with `schema` (the entities a collection is).
 
 ```js
+const { open } = require('@alexify/syncom');
+const { schema } = require('@alexify/syncom/schema');
+const { query } = require('@alexify/syncom/query');
+
 const storage = await open({
   path: 'data',
+  plugins: [schema, query],
   schema: { entities: { Task: { index: ['boardId', 'status'], unique: ['key'] } } },
 });
 
@@ -110,10 +120,13 @@ subpath, so a node that never searches ships none of it:
 
 ```js
 const { open } = require('@alexify/syncom');
+const { schema } = require('@alexify/syncom/schema');
+const { query } = require('@alexify/syncom/query');
 const { createSearch } = require('@alexify/syncom/search');
 
 const storage = await open({
   path: 'data',
+  plugins: [schema, query],
   schema: { entities: { Note: { index: ['boardId'], search: ['title', 'body'] } } },
   search: createSearch(),
 });

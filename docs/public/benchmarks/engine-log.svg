@@ -34,74 +34,76 @@
 <text class="subtitle" x="20" y="56">OpLog, the persisted operation log every write and every replicated op goes through. ops/s, log scale, higher is</text>
 <text class="subtitle" x="20" y="73">better.</text>
 <line class="grid" x1="285" y1="88" x2="285" y2="368"/>
-<text class="tick" x="285" y="384" text-anchor="middle">10</text>
-<line class="grid" x1="350.16666666666663" y1="88" x2="350.16666666666663" y2="368"/>
-<text class="tick" x="350.16666666666663" y="384" text-anchor="middle">100</text>
-<line class="grid" x1="415.3333333333333" y1="88" x2="415.3333333333333" y2="368"/>
-<text class="tick" x="415.3333333333333" y="384" text-anchor="middle">1,000</text>
-<line class="grid" x1="480.5" y1="88" x2="480.5" y2="368"/>
-<text class="tick" x="480.5" y="384" text-anchor="middle">10k</text>
-<line class="grid" x1="545.6666666666666" y1="88" x2="545.6666666666666" y2="368"/>
-<text class="tick" x="545.6666666666666" y="384" text-anchor="middle">100k</text>
-<line class="grid" x1="610.8333333333334" y1="88" x2="610.8333333333334" y2="368"/>
-<text class="tick" x="610.8333333333334" y="384" text-anchor="middle">1M</text>
+<text class="tick" x="285" y="384" text-anchor="middle">1</text>
+<line class="grid" x1="340.85714285714283" y1="88" x2="340.85714285714283" y2="368"/>
+<text class="tick" x="340.85714285714283" y="384" text-anchor="middle">10</text>
+<line class="grid" x1="396.7142857142857" y1="88" x2="396.7142857142857" y2="368"/>
+<text class="tick" x="396.7142857142857" y="384" text-anchor="middle">100</text>
+<line class="grid" x1="452.57142857142856" y1="88" x2="452.57142857142856" y2="368"/>
+<text class="tick" x="452.57142857142856" y="384" text-anchor="middle">1,000</text>
+<line class="grid" x1="508.42857142857144" y1="88" x2="508.42857142857144" y2="368"/>
+<text class="tick" x="508.42857142857144" y="384" text-anchor="middle">10k</text>
+<line class="grid" x1="564.2857142857142" y1="88" x2="564.2857142857142" y2="368"/>
+<text class="tick" x="564.2857142857142" y="384" text-anchor="middle">100k</text>
+<line class="grid" x1="620.1428571428571" y1="88" x2="620.1428571428571" y2="368"/>
+<text class="tick" x="620.1428571428571" y="384" text-anchor="middle">1M</text>
 <line class="grid" x1="676" y1="88" x2="676" y2="368"/>
 <text class="tick" x="676" y="384" text-anchor="middle">10M</text>
 <line class="axis" x1="285" y1="88" x2="285" y2="368"/>
 <g><title>append · one op
-5,351 ops/s
-187 µs per operation</title>
+33,950 ops/s
+29.5 µs per operation</title>
 <text class="label primary" x="20" y="105">append</text>
 <text class="sublabel" x="20" y="120">one op</text>
-<path class="bar primary" d="M285,101H458.8030109718223A4,4 0 0 1 462.8030109718223,105V111A4,4 0 0 1 458.8030109718223,115H285Z"/>
-<text class="value" x="468.8030109718223" y="114">5,351</text>
+<path class="bar primary" d="M285,101H534.0797647770084A4,4 0 0 1 538.0797647770084,105V111A4,4 0 0 1 534.0797647770084,115H285Z"/>
+<text class="value" x="544.0797647770084" y="114">34k</text>
 </g>
 <g><title>append · batch of 100
-315,328 ops/s
-3.17 µs per operation</title>
+683,817 ops/s
+1.46 µs per operation</title>
 <text class="label primary" x="20" y="145">append</text>
 <text class="sublabel" x="20" y="160">batch of 100</text>
-<path class="bar primary" d="M285,141H574.1693586128649A4,4 0 0 1 578.1693586128649,145V151A4,4 0 0 1 574.1693586128649,155H285Z"/>
-<text class="value" x="584.1693586128649" y="154">315k</text>
+<path class="bar primary" d="M285,141H606.9230711858097A4,4 0 0 1 610.9230711858097,145V151A4,4 0 0 1 606.9230711858097,155H285Z"/>
+<text class="value" x="616.9230711858097" y="154">684k</text>
 </g>
 <g><title>since · last 500 entries
-623,608 ops/s
-1.6 µs per operation</title>
+632,336 ops/s
+1.58 µs per operation</title>
 <text class="label primary" x="20" y="185">since</text>
 <text class="sublabel" x="20" y="200">last 500 entries</text>
-<path class="bar primary" d="M285,181H593.468411011803A4,4 0 0 1 597.468411011803,185V191A4,4 0 0 1 593.468411011803,195H285Z"/>
-<text class="value" x="603.468411011803" y="194">624k</text>
+<path class="bar primary" d="M285,181H605.024375985306A4,4 0 0 1 609.024375985306,185V191A4,4 0 0 1 605.024375985306,195H285Z"/>
+<text class="value" x="615.024375985306" y="194">632k</text>
 </g>
 <g><title>since · everything (no cursor)
-1,573 ops/s
-636 µs per operation</title>
+484 ops/s
+2.07 ms per operation</title>
 <text class="label primary" x="20" y="225">since</text>
 <text class="sublabel" x="20" y="240">everything (no cursor)</text>
-<path class="bar primary" d="M285,221H424.1534884242842A4,4 0 0 1 428.1534884242842,225V231A4,4 0 0 1 424.1534884242842,235H285Z"/>
-<text class="value" x="434.1534884242842" y="234">1,573</text>
+<path class="bar primary" d="M285,221H430.9677909147093A4,4 0 0 1 434.9677909147093,225V231A4,4 0 0 1 430.9677909147093,235H285Z"/>
+<text class="value" x="440.9677909147093" y="234">484</text>
 </g>
 <g><title>since · 20 from the middle, scoped
-3,430,272 ops/s
-292 ns per operation</title>
+3,500,742 ops/s
+286 ns per operation</title>
 <text class="label primary" x="20" y="265">since</text>
 <text class="sublabel" x="20" y="280">20 from the middle, scoped</text>
-<path class="bar primary" d="M285,261H641.718911052888A4,4 0 0 1 645.718911052888,265V271A4,4 0 0 1 641.718911052888,275H285Z"/>
-<text class="value" x="651.718911052888" y="274">3.43M</text>
+<path class="bar primary" d="M285,261H646.5380858662486A4,4 0 0 1 650.5380858662486,265V271A4,4 0 0 1 646.5380858662486,275H285Z"/>
+<text class="value" x="656.5380858662486" y="274">3.5M</text>
 </g>
 <g><title>append with a roll every 8 batches
-4,989 ops/s
-200 µs per operation</title>
+9,174 ops/s
+109 µs per operation</title>
 <text class="label primary" x="20" y="312">append with a roll every 8 batches</text>
-<path class="bar primary" d="M285,301H456.82054667337A4,4 0 0 1 460.82054667337,305V311A4,4 0 0 1 456.82054667337,315H285Z"/>
-<text class="value" x="466.82054667337" y="314">4,989</text>
+<path class="bar primary" d="M285,301H502.33720938517456A4,4 0 0 1 506.33720938517456,305V311A4,4 0 0 1 502.33720938517456,315H285Z"/>
+<text class="value" x="512.3372093851746" y="314">9,174</text>
 </g>
 <g><title>reopen · index + segments + tail
-11 ops/s
-90.9 ms per operation</title>
+2 ops/s
+500 ms per operation</title>
 <text class="label primary" x="20" y="345">reopen</text>
 <text class="sublabel" x="20" y="360">index + segments + tail</text>
-<path class="bar primary" d="M285,341H285A2.6974233161443237,2.6974233161443237 0 0 1 287.6974233161443,343.6974233161443V352.3025766838557A2.6974233161443237,2.6974233161443237 0 0 1 285,355H285Z"/>
-<text class="value" x="293.6974233161443" y="354">11</text>
+<path class="bar primary" d="M285,341H297.8146754720881A4,4 0 0 1 301.8146754720881,345V351A4,4 0 0 1 297.8146754720881,355H285Z"/>
+<text class="value" x="307.8146754720881" y="354">2</text>
 </g>
-<text class="caption" x="20" y="409">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-24</text>
+<text class="caption" x="20" y="409">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-27</text>
 </svg>

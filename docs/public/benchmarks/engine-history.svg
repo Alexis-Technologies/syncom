@@ -41,44 +41,44 @@
 <text class="tick" x="676" y="304" text-anchor="middle">10k</text>
 <line class="axis" x1="271" y1="88" x2="271" y2="288"/>
 <g><title>history(id, { limit: 50 }) · a record with 2 000 ops
-1,817 ops/s
-550 µs per operation</title>
+588 ops/s
+1.7 ms per operation</title>
 <text class="label primary" x="20" y="105">history(id, { limit: 50 })</text>
 <text class="sublabel" x="20" y="120">a record with 2 000 ops</text>
-<path class="bar primary" d="M271,101H522.019372779877A4,4 0 0 1 526.019372779877,105V111A4,4 0 0 1 522.019372779877,115H271Z"/>
-<text class="value" x="532.019372779877" y="114">1,817</text>
+<path class="bar primary" d="M271,101H422.7989085304181A4,4 0 0 1 426.7989085304181,105V111A4,4 0 0 1 422.7989085304181,115H271Z"/>
+<text class="value" x="432.7989085304181" y="114">588</text>
 </g>
 <g><title>history(id, { limit: Infinity }) · every version materialized
-665 ops/s
-1.5 ms per operation</title>
+361 ops/s
+2.77 ms per operation</title>
 <text class="label primary" x="20" y="145">history(id, { limit: Infinity })</text>
 <text class="sublabel" x="20" y="160">every version materialized</text>
-<path class="bar primary" d="M271,141H433.62138317387866A4,4 0 0 1 437.62138317387866,145V151A4,4 0 0 1 433.62138317387866,155H271Z"/>
-<text class="value" x="443.62138317387866" y="154">665</text>
+<path class="bar primary" d="M271,141H379.89520838589567A4,4 0 0 1 383.89520838589567,145V151A4,4 0 0 1 379.89520838589567,155H271Z"/>
+<text class="value" x="389.89520838589567" y="154">361</text>
 </g>
 <g><title>get(id, { at: eventId }) · 1 000 ops back
-2,997 ops/s
-334 µs per operation</title>
+1,148 ops/s
+871 µs per operation</title>
 <text class="label primary" x="20" y="185">get(id, { at: eventId })</text>
 <text class="sublabel" x="20" y="200">1 000 ops back</text>
-<path class="bar primary" d="M271,181H566.029065446493A4,4 0 0 1 570.029065446493,185V191A4,4 0 0 1 566.029065446493,195H271Z"/>
-<text class="value" x="576.029065446493" y="194">2,997</text>
+<path class="bar primary" d="M271,181H481.63823233254584A4,4 0 0 1 485.63823233254584,185V191A4,4 0 0 1 481.63823233254584,195H271Z"/>
+<text class="value" x="491.63823233254584" y="194">1,148</text>
 </g>
 <g><title>get(id, { at: { vector } }) · the present, folded
-1,814 ops/s
-551 µs per operation</title>
+587 ops/s
+1.7 ms per operation</title>
 <text class="label primary" x="20" y="225">get(id, { at: { vector } })</text>
 <text class="sublabel" x="20" y="240">the present, folded</text>
-<path class="bar primary" d="M271,221H521.8740497516255A4,4 0 0 1 525.8740497516255,225V231A4,4 0 0 1 521.8740497516255,235H271Z"/>
-<text class="value" x="531.8740497516255" y="234">1,814</text>
+<path class="bar primary" d="M271,221H422.64921550264194A4,4 0 0 1 426.64921550264194,225V231A4,4 0 0 1 422.64921550264194,235H271Z"/>
+<text class="value" x="432.64921550264194" y="234">587</text>
 </g>
 <g><title>diff(id, at) · against 1 000 ops back
-2,976 ops/s
-336 µs per operation</title>
+1,125 ops/s
+889 µs per operation</title>
 <text class="label primary" x="20" y="265">diff(id, at)</text>
 <text class="sublabel" x="20" y="280">against 1 000 ops back</text>
-<path class="bar primary" d="M271,261H565.4106676919528A4,4 0 0 1 569.4106676919528,265V271A4,4 0 0 1 565.4106676919528,275H271Z"/>
-<text class="value" x="575.4106676919528" y="274">2,976</text>
+<path class="bar primary" d="M271,261H479.85838579559476A4,4 0 0 1 483.85838579559476,265V271A4,4 0 0 1 479.85838579559476,275H271Z"/>
+<text class="value" x="489.85838579559476" y="274">1,125</text>
 </g>
-<text class="caption" x="20" y="329">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-24</text>
+<text class="caption" x="20" y="329">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-27</text>
 </svg>

@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="398" viewBox="0 0 760 398" role="img" aria-label="Type anywhere in a text, on disk. Insert one character at a random position of the text (seeded). Each library's own persistence on node:fs, every write awaited. ops/s, log scale, higher is better. Not shown: TinyBase (no text that merges by position); PouchDB (no text that merges by position); RxDB (Node.js disk storages are Premium); Fireproof (no text that merges by position); GUN (no text that merges by position); OrbitDB (no text that merges by position).">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .title { font-size: 15px; font-weight: 700; fill: #1b1c1e; }
+  .subtitle, .caption { font-size: 12px; fill: #67676c; }
+  .caption { font-size: 11px; }
+  .group { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; fill: #67676c; }
+  .label { font-size: 13px; font-weight: 600; fill: #1b1c1e; }
+  .label.primary, .label.secondary { font-weight: 700; }
+  .sublabel { font-size: 11px; fill: #67676c; }
+  .value { font-size: 12px; font-weight: 600; fill: #3c3c43; font-variant-numeric: tabular-nums; }
+  .value.small { font-size: 10px; }
+  .legend { font-size: 11px; fill: #3c3c43; }
+  .tick { font-size: 11px; fill: #67676c; font-variant-numeric: tabular-nums; }
+  .grid { stroke: #e4e4e7; stroke-width: 1; }
+  .axis { stroke: #c2c2c4; stroke-width: 1; }
+  .ref { stroke: #67676c; stroke-width: 1; stroke-dasharray: 3 3; }
+  .bar { fill: #c4c6cc; }
+  .bar.primary { fill: #245a9e; }
+  .bar.secondary { fill: #5e9be6; }
+  @media (prefers-color-scheme: dark) {
+    .title, .label { fill: #dfdfd6; }
+    .subtitle, .caption, .group, .sublabel, .tick { fill: #98989f; }
+    .value, .legend { fill: #c2c2c4; }
+    .grid { stroke: #2e2e32; }
+    .axis { stroke: #48484c; }
+    .ref { stroke: #98989f; }
+    .bar { fill: #46474e; }
+    .bar.primary { fill: #8dbcf2; }
+    .bar.secondary { fill: #3d7bd0; }
+  }
+</style>
+<text class="title" x="20" y="35">Type anywhere in a text, on disk</text>
+<text class="subtitle" x="20" y="56">Insert one character at a random position of the text (seeded). Each library's own persistence on node:fs, every</text>
+<text class="subtitle" x="20" y="73">write awaited. ops/s, log scale, higher is better. Not shown: TinyBase (no text that merges by position);</text>
+<text class="subtitle" x="20" y="90">PouchDB (no text that merges by position); RxDB (Node.js disk storages are Premium); Fireproof (no text that</text>
+<text class="subtitle" x="20" y="107">merges by position); GUN (no text that merges by position); OrbitDB (no text that merges by position).</text>
+<line class="grid" x1="271" y1="122" x2="271" y2="322"/>
+<text class="tick" x="271" y="338" text-anchor="middle">1,000</text>
+<line class="grid" x1="473.5" y1="122" x2="473.5" y2="322"/>
+<text class="tick" x="473.5" y="338" text-anchor="middle">10k</text>
+<line class="grid" x1="676" y1="122" x2="676" y2="322"/>
+<text class="tick" x="676" y="338" text-anchor="middle">100k</text>
+<line class="axis" x1="271" y1="122" x2="271" y2="322"/>
+<g><title>Loro · updates appended to a file · v1.16.4
+29,768 ops/s
+33.6 µs per operation
+samples 29.1k – 32.7k
+loro-crdt@1.16.4</title>
+<text class="label" x="20" y="139">Loro</text>
+<text class="sublabel" x="20" y="154">updates appended to a file · v1.16.4</text>
+<path class="bar" d="M271,135H565.4352346677044A4,4 0 0 1 569.4352346677044,139V145A4,4 0 0 1 565.4352346677044,149H271Z"/>
+<text class="value" x="575.4352346677044" y="148">29.8k</text>
+</g>
+<g><title>Yjs · y-leveldb · v13.6.33
+14,214 ops/s
+70.4 µs per operation
+samples 11.7k – 14.5k
+yjs@13.6.33</title>
+<text class="label" x="20" y="179">Yjs</text>
+<text class="sublabel" x="20" y="194">y-leveldb · v13.6.33</text>
+<path class="bar" d="M271,175H500.42198484741425A4,4 0 0 1 504.42198484741425,179V185A4,4 0 0 1 500.42198484741425,189H271Z"/>
+<text class="value" x="510.42198484741425" y="188">14.2k</text>
+</g>
+<g><title>syncom · core + text + sync, node:fs · v0.0.1
+9,529 ops/s
+105 µs per operation
+samples 8,932 – 12.1k
+@alexify/syncom@0.0.1</title>
+<text class="label primary" x="20" y="219">syncom</text>
+<text class="sublabel" x="20" y="234">core + text + sync, node:fs · v0.0.1</text>
+<path class="bar primary" d="M271,215H465.2589213370463A4,4 0 0 1 469.2589213370463,219V225A4,4 0 0 1 465.2589213370463,229H271Z"/>
+<text class="value" x="475.2589213370463" y="228">9,529</text>
+</g>
+<g><title>syncom · /all: signed, chained, node:fs · v0.0.1
+5,494 ops/s
+182 µs per operation
+samples 5,368 – 7,009
+@alexify/syncom@0.0.1</title>
+<text class="label secondary" x="20" y="259">syncom</text>
+<text class="sublabel" x="20" y="274">/all: signed, chained, node:fs · v0.0.1</text>
+<path class="bar secondary" d="M271,255H416.83048641800235A4,4 0 0 1 420.83048641800235,259V265A4,4 0 0 1 416.83048641800235,269H271Z"/>
+<text class="value" x="426.83048641800235" y="268">5,494</text>
+</g>
+<g><title>Automerge · automerge-repo, NodeFS storage · v3.5.0
+3,220 ops/s
+311 µs per operation
+samples 3,015 – 3,274
+@automerge/automerge@3.5.0</title>
+<text class="label" x="20" y="299">Automerge</text>
+<text class="sublabel" x="20" y="314">automerge-repo, NodeFS storage · v3.5.0</text>
+<path class="bar" d="M271,295H369.83567825201595A4,4 0 0 1 373.83567825201595,299V305A4,4 0 0 1 369.83567825201595,309H271Z"/>
+<text class="value" x="379.83567825201595" y="308">3,220</text>
+</g>
+<text class="caption" x="20" y="363">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
+<text class="caption" x="20" y="379">in a fresh process · 2026-10-27</text>
+</svg>

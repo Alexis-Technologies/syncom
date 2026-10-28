@@ -6,18 +6,19 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { isFsi, checkFsi, createMemoryFsi, withSync } = require('../src/backend.js');
+const { isFsi, checkFsi, withSync } = require('../src/backend.js');
 const { runFsiTests } = require('./suites/fsi.js');
+const { memory } = require('../src/memory/memory.js');
 
-test('createMemoryFsi', async (t) => {
+test('memory()', async (t) => {
   let n = 0;
-  await runFsiTests(t, createMemoryFsi(), {
+  await runFsiTests(t, memory(), {
     getRoot: async () => `mem-${n++}`,
     joinPath: (root, ...parts) => [root, ...parts].join('/'),
   });
 
   await t.test('size and dump; content is kept as text', async () => {
-    const fsi = createMemoryFsi();
+    const fsi = memory();
     await fsi.write('a', 'x.json', '{"n":1}');
     await fsi.write('a/b', 'y.txt', 'y');
     await fsi.write('a', 'x.json', 42);
@@ -32,7 +33,7 @@ test('createMemoryFsi', async (t) => {
 
 test('isFsi and checkFsi', async (t) => {
   await t.test('the five functions, by name', () => {
-    const fsi = createMemoryFsi();
+    const fsi = memory();
     assert.strictEqual(isFsi(fsi), true);
     assert.strictEqual(isFsi(withSync({ ...fsi, sync: async () => {} })), true);
     for (const value of [null, undefined, 'fs', 42, {}, []]) assert.strictEqual(isFsi(value), false, String(value));
@@ -52,7 +53,7 @@ test('isFsi and checkFsi', async (t) => {
 test('withSync', async (t) => {
   await t.test('every write is followed by sync; the rest passes through', async () => {
     const calls = [];
-    const inner = createMemoryFsi();
+    const inner = memory();
     const spied = {
       read: (...args) => inner.read(...args),
       write: (...args) => inner.write(...args),
@@ -76,5 +77,20 @@ test('withSync', async (t) => {
       throw new Error('disk full');
     };
     await assert.rejects(() => durable.write('d', 'g', 'x'), /disk full/);
+  });
+
+  await t.test('an append is followed by sync too; a backend without append gets none', async () => {
+    const calls = [];
+    const inner = memory();
+    const durable = withSync({ ...inner, sync: async (dir, name) => void calls.push([dir, name]) });
+    await durable.append('d', 'j.jsonl', 'a\n');
+    await durable.append('d', 'j.jsonl', 'b\n');
+    assert.strictEqual(await durable.read('d', 'j.jsonl'), 'a\nb\n');
+    assert.deepStrictEqual(calls, [
+      ['d', 'j.jsonl'],
+      ['d', 'j.jsonl'],
+    ]);
+    const { append, ...withoutAppend } = inner;
+    assert.strictEqual(withSync({ ...withoutAppend, sync: async () => {} }).append, undefined);
   });
 });

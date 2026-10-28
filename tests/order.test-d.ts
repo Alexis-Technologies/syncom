@@ -1,5 +1,5 @@
 import { expectError, expectType } from 'tsd';
-import { between, spread, compare, isKey } from '../order.js';
+import { between, spread, compare, isKey } from '../src/order/order.js';
 
 expectType<string>(between());
 expectType<string>(between('V', null, { jitter: 2 }));

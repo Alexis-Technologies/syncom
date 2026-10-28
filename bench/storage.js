@@ -22,7 +22,10 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { bench } = require('./support/harness.js');
-const { open } = require('../src/storage.js');
+const { open } = require('../src/all/all.js');
+const nodeFsi = require('../src/fsi.js');
+const { memory } = require('../src/memory/memory.js');
+const { layered } = require('../src/layered/layered.js');
 
 const main = async () => {
   console.log(`Storage benchmark — Node ${process.version}\n`);
@@ -37,6 +40,17 @@ const main = async () => {
     const record = { name: 'Example', email: 'example@example.com', hits: 0 };
 
     await bench('insert — small record', () => storage.insert(record), { warmup: 20 });
+
+    // The same insert over a memory layer ahead of the disk, the disk written
+    // from the queue: what a node that answers from memory and still persists
+    // pays per write.
+    const stack = layered([memory(), nodeFsi], { write: 'back' });
+    const stacked = await open({ path: `${root}-layered`, lock: false, fsi: stack });
+    await bench('insert — small record, layered([memory(), node:fs], write: back)', () => stacked.insert(record), {
+      warmup: 20,
+    });
+    await stacked.close();
+    await stack.close();
 
     const id = await storage.insert(record);
 

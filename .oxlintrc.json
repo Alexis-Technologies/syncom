@@ -6,7 +6,7 @@
     "import"
   ],
   "categories": {
-    "correctness": "off"
+    "correctness": "error"
   },
   "env": {
     "builtin": true,
@@ -253,6 +253,77 @@
     "getter-return": "error",
     "no-setter-return": "error",
     "no-unused-private-class-members": "error",
-    "no-constant-binary-expression": "error"
-  }
+    "no-constant-binary-expression": "error",
+    "preserve-caught-error": "error",
+    "no-useless-concat": "error"
+  },
+  "overrides": [
+    {
+      "files": [
+        "src/**/*.js"
+      ],
+      "rules": {
+        "no-restricted-properties": [
+          "error",
+          {
+            "property": "map",
+            "message": "src/: a loop (procedural style; see CONTRIBUTING)"
+          },
+          {
+            "property": "filter",
+            "message": "src/: a loop (procedural style; see CONTRIBUTING)"
+          },
+          {
+            "property": "find",
+            "allowObjects": [
+              "T",
+              "SL"
+            ],
+            "message": "src/: a loop (T and SL are the rope and plist modules)"
+          },
+          {
+            "property": "findIndex",
+            "message": "src/: a loop (procedural style; see CONTRIBUTING)"
+          },
+          {
+            "property": "findLast",
+            "message": "src/: a loop (procedural style; see CONTRIBUTING)"
+          },
+          {
+            "property": "findLastIndex",
+            "message": "src/: a loop (procedural style; see CONTRIBUTING)"
+          },
+          {
+            "property": "some",
+            "message": "src/: a loop (procedural style; see CONTRIBUTING)"
+          },
+          {
+            "property": "every",
+            "message": "src/: a loop (procedural style; see CONTRIBUTING)"
+          },
+          {
+            "property": "flatMap",
+            "message": "src/: a loop (procedural style; see CONTRIBUTING)"
+          },
+          {
+            "property": "forEach",
+            "message": "src/: a loop (procedural style; see CONTRIBUTING)"
+          },
+          {
+            "property": "reduce",
+            "message": "src/: a loop (procedural style; see CONTRIBUTING)"
+          },
+          {
+            "property": "reduceRight",
+            "message": "src/: a loop (procedural style; see CONTRIBUTING)"
+          },
+          {
+            "object": "Array",
+            "property": "from",
+            "message": "src/: a loop, or [...iterable] for a copy"
+          }
+        ]
+      }
+    }
+  ]
 }

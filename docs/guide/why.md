@@ -60,26 +60,29 @@ engine also covers what an application keeps next to replication:
   nested under wrpc's spans. `stats()` and `peers()` report where every peer stands.
 - **Zero dependencies, one API for Node.js and the browser.** Nothing is installed with it.
   `node:fs` and `node:crypto` on the server, OPFS (or IndexedDB) and Web Crypto in the browser,
-  picked by the `browser` export condition. CommonJS without a build step, hand-written typings,
-  and a browser bundle of about 66 KB min+gzip that CI holds to a budget.
+  picked by the `browser` export condition. CommonJS without a build step, hand-written typings
+  that type the records from their schema, and a core of about 51 KB min+gzip, every block a
+  subpath of its own (everything together, `/all`, about 117 KB), each held to a budget in CI.
 
 The [benchmarks](/guide/benchmarks) put a number on all of this. syncom opens a store and reads
-a record in about 40 ms, the fastest cold start of the ten libraries measured, and serves a read
-from its cache at about a million a second. A write costs more than a CRDT's, because it is
-signed, logged, filed, catalogued and chained: about 15,000 a second in memory and 1,300 on
-disk, where the LevelDB-backed Yjs and PouchDB do 19,000 to 26,000. And every op a replica
-receives is verified against its origin, so an empty replica pulls about 25,000 records a second
-in memory, where Yjs and Loro pull 100,000 — `sync.signatures: false` trades that check away.
+a record in about 52 ms, the fastest cold start of the ten libraries measured, and serves a read
+from its cache at about 890,000 a second. A write is logged, filed and catalogued: about 46,000 a
+second in memory as a pure CRDT, 15,000 signed and chained (`/all`), and about 5,900 new records
+a second on disk, where the LevelDB-backed Yjs and PouchDB do 18,000 to 27,000 — a change to a
+record that is there, 18,000 to 21,000. An empty replica pulls about 82,000
+records a second in memory, behind Yjs and Loro (98,000 to 107,000); checking every op's signature
+on the way in brings that to 22,000. Typing into a text runs at 23,000 to 49,000 keystrokes a
+second in memory, ahead of Automerge.
 
 ## When something else fits better
 
-- **Document-scale text with editor plugins.** syncom's [list and text fields](/guide/lists)
-  merge by position — Fugue, with marks and cursors — but they are fields of a record, read and
-  written whole per op; a long document is a list of block records, and there are no editor
-  bindings yet. A keystroke is a write like any other: typing into a text that grows past ten
-  thousand characters runs at 400 to 1,800 keystrokes a second in memory, where Yjs, Automerge
-  and Loro type tens of thousands or more ([benchmarks](/guide/benchmarks)). They carry whole
-  documents of any size and ship bindings for ProseMirror, CodeMirror and the rest.
+- **Very long documents typed into by many at once.** syncom's [list and text fields](/guide/lists)
+  merge by position — Fugue, with marks, embeds, block markers and cursors — and bind to
+  ProseMirror and CodeMirror ([Editors](/guide/editors)), typing a little faster than Automerge.
+  Yjs types seven to twenty times faster at either end of a text and about as fast in the middle,
+  Loro thirteen to twenty times faster anywhere; Loro replays the automerge-perf editing trace in half a second, Yjs in 5
+  seconds, syncom in about 6 ([benchmarks](/guide/benchmarks)); they also ship bindings for
+  Monaco, Quill, Lexical and Tiptap.
 - **Postgres is your source of truth.** ElectricSQL, PowerSync and Zero replicate a server
   database's tables to clients and send writes through your API. syncom keeps its own records
   and has no Postgres connector.
@@ -88,8 +91,9 @@ in memory, where Yjs and Loro pull 100,000 — `sync.signatures: false` trades t
   (wrpc's sealer in the hooks, field by field, with no counter, index or query over a sealed
   field). Evolu encrypts everything it syncs; Jazz 2.0 ships encryption as adapters, not yet
   wired into its tables.
-- **Ready-made UI bindings, React Native, a managed cloud.** syncom ships none of them. RxDB,
-  TinyBase, Dexie Cloud, InstantDB and others do.
+- **React Native, a managed cloud.** syncom ships neither. RxDB, TinyBase, Dexie Cloud,
+  InstantDB and others do. (UI bindings it has: [`/store`](/guide/frameworks) for React, Svelte,
+  Vue and Solid.)
 - **A package with a track record.** syncom is a pre-release (0.0.1), not on npm yet, and its
   API may still change before the first release. The
   [Sync](/guide/sync#guarantees-and-limits) guide lists the known limits: a counter straddling a concurrent reset,

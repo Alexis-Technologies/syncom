@@ -53,7 +53,7 @@ silently never runs.
 | Hook | Runs | Return | Throw |
 | --- | --- | --- | --- |
 | `beforeWrite(ctx)` | Inside every local write, after the current record is loaded and before the op is stamped and applied — once per op, so once per hunk of `updateText()`, per patch of `applyPatches()`, `restore()` and `compact()`, per op of `migrate()`, and per record a bootstrap joins (`merge`) | A plain object replaces `data` (`write` and `set` only; a `TypeError` for anything else) | The write is refused: nothing stamped, logged or written |
-| `afterWrite(ctx, op)` | After the write is durable — `op` is the op it became, `null` for an encrypted (local) write; not called when the write changed nothing (a tree move to where the node already is) or was refused | Ignored | The call rejects, but the op stays committed and is announced |
+| `afterWrite(ctx, op)` | After the write is durable — outside the mutation queue, in log order, before the call resolves; `op` is the op it became, `null` for an encrypted (local) write; not called when the write changed nothing (a tree move to where the node already is) or was refused | Ignored | The call rejects, but the op stays committed and is announced |
 | `beforeRead({ id, at? })` | Inside `get(id)`, before the read — with `at` for a read at a version (`{ tag }` for `at(name).get(id)`), once with `{ id, history: true }` for `history()` | Ignored | The read is refused |
 | `afterRead({ id, at? }, data)` | Inside `get(id)`, after the read — with `at` for a read at a version, and per version of `history()` (its event id) | Anything but `undefined` (including `null`) replaces what the caller sees | The read rejects |
 | `beforeApply(ctx)` | Inside `applyRemote`, once per op of any kind, after the signature, duplicate, gap and scope checks and before the op is applied; not for an op held for a newer schema (`ahead: 'hold'`) or one on a record this node keeps sealed | `false` skips the op *here* (see below) | The whole batch is aborted before anything is durable |
@@ -66,7 +66,8 @@ type (`write`, `set`, `inc`, `add`, `remove`, `splice`, `assign`, `move`,
 `mark`, `tree`, `delete`, `purge`, `merge`), `data` is the whole record for a
 `write` and the delta for a `set`, `key`/`value` belong to an `inc` (the
 amount), an `add` or a `remove` (the elements), `key`/`index`/`count`/`content`
-to a `splice`, `key`/`index`/`value` to an `assign`, `key`/`index`/`to` to a
+(and `vals`, the markers of the embed slots the content holds) to a `splice`,
+`key`/`index`/`value` to an `assign`, `key`/`index`/`to` to a
 `move`, `key`/`start`/`end`/`name`/`value`/`expand`/`many` (or `off`) to a
 `mark`, `key`/`node`/`parent`/`after`/`before` to a `tree` — each the call as
 the caller made it, save that a `push()` is a `splice` with `index: null`
@@ -89,11 +90,13 @@ The order of a local write:
 
 ```
 load the record → beforeWrite → stamp → apply the op → validate → append to the log
+│ the queue moves on to the next write here; the rest follows, in log order, once the op is on disk
 → chain block → record file → afterWrite → Record 'update' → 'commit' → 'change'
 ```
 
-(under [`open({ defer })`](./storage#when-a-record-file-lags-the-log) the
-chain block and the record file wait for the flush, after the events), and of
+(under [`open({ defer })`](./storage#when-a-record-file-lags-the-log) — 16 ms
+by default — the chain block and the record file wait for the flush, after
+the events), and of
 a page from a peer:
 
 ```
@@ -135,14 +138,16 @@ same path takes an op that would leave the record invalid under this node's
 the `error` event rather than a hook — and a peer's op on a record this node
 keeps sealed (`encrypted: true`), which is logged and relayed, never applied.
 
-`applyRemote` reports it: `{ applied, skipped, duplicates, gaps, malformed, unsigned, forged, outOfScope }` —
+`applyRemote` reports it: `{ applied, skipped, duplicates, gaps, malformed, unsigned, forged, outOfScope, equivocations }` —
 `applied` counts every accepted op, skipped ones included; `applied - skipped`
 were applied here — an op older than what the record holds, or one the
 engine refused (`OP_REFUSED`: the field is held by a kind that outranks the
 op's, a bound, a payload it does not admit), leaves the record as it was and
 is logged and relayed all the same, never a gap; `malformed`, `unsigned` and
-`forged` were refused before anything read them, and `outOfScope` (a host's
-push) because the record they write is outside the pushing peer's scopes.
+`forged` were refused before anything read them, `equivocations` because they
+fork their writer's stream ([Equivocation](./sync#equivocation)), and
+`outOfScope` (a host's push) because the record they write is outside the
+pushing peer's scopes.
 
 A throwing `beforeApply` aborts the batch before anything is durable. The
 sender sees a failed push (on the dialing side its `error` event fires, with
@@ -208,9 +213,10 @@ default) on the storage and on its sync manager; one more throws.
 
 | Event | Payload | When |
 | --- | --- | --- |
-| `change` | `(op, via)` | Every op this node logs — a local write, a peer's accepted op (a skipped one included), a bootstrap's `merge` and `advance`; `via` is `null` for a local write, otherwise `{ url, node }` of the peer it came from (`url` null on the hosting side) |
-| `commit` | `({ op, seq, source, before, after, kinds })` | A local write is durable — any kind of op made through the write API, `applyPatches()` and `migrate()` included; never a peer's op, a bootstrap's `merge`, an encrypted write (it makes no op) or a write that changed nothing. `seq` is its log position, `source` the `Record` whose `save()` it was or the `source` given to `applyPatches()` (`null` otherwise), `before`/`after` the record as copies (`null` when absent or deleted), `kinds` every field's kind before and after (`register`, `counter`, `set`, `list`, `text`, `tree`) — see [The commit event](./versions#the-commit-event); built only while something listens. It fires after `afterWrite` and the `Record`'s `update`, before `change` |
-| `apply` | `({ via, peer, ops, applied, skipped, duplicates, gaps, malformed, unsigned, forged, outOfScope })` | A peer's batch is durable — `ops` are the accepted ones, skipped included |
+| `change` | `(op, via, { changes })` | Every op this node logs — a local write, a peer's accepted op (a skipped one included), a bootstrap's `merge` and `advance`; `via` is `null` for a local write, otherwise `{ url, node }` of the peer it came from (`url` null on the hosting side); `changes` what the reading shows of the op, in the write API's terms and the reading's indices (see [Changes](./versions#changes); `[]` for an `advance`, a skipped op) |
+| `commit` | `({ op, seq, source, before, after, kinds, embeds? })` | A local write is durable — any kind of op made through the write API, `transact()`, `applyPatches()` and `migrate()` included; never a peer's op, a bootstrap's `merge`, an encrypted write (it makes no op) or a write that changed nothing. `seq` is its log position, `source` the `Record` whose `save()` it was or the `source` given to `transact()`/`applyPatches()` (`null` otherwise), `before`/`after` the record as copies in the op model's terms — every [path](./storage#paths) a field of its own, not composed (`null` when absent or deleted), `kinds` every field's kind before and after (`register`, `counter`, `set`, `list`, `text`, `tree`), `embeds` the markers of a text's [embed slots](./lists#embeds-and-blocks) by index on each side, when a side holds any; `op.msg` the transaction's message — see [The commit event](./versions#the-commit-event); built only while something listens. It fires after `afterWrite` and the `Record`'s `update`, before `change`; a transaction's fire once it has landed whole, in op order |
+| `transaction` | `({ local, via, source, message, ops, changes, ts })` | One turn's ops durable and announced, after their `change` events: a local write (`ops` one), a `transact()` (its ops, `source` and `message`), a peer's page (`local` false, `via` the peer), a joined snapshot (`local` true, `via` the host) — `changes` every op's, tagged with its record `id`, `ts` the last op's stamp; built only while something listens |
+| `apply` | `({ via, peer, ops, applied, skipped, duplicates, gaps, malformed, unsigned, forged, outOfScope, equivocations })` | A peer's batch is durable — `ops` are the accepted ones, skipped included |
 | `conflict` | `({ kind: 'unique', entity, fields, id, other, op })` | A peer's op left a unique key shared by two records — see [Queries](./storage#queries) |
 | `schema` | `({ kind: 'drift', … })` / `({ kind: 'ahead', op, held })` | A peer runs this node's schema version with another snapshot hash — see [Schemas](./sync#schemas); a peer's op is from a newer version — see [Reading across versions](./storage#reading-across-versions) |
 | `error` | `(error)` with `error.code`: `error.op`, and `error.rejected` (`[{ field, reason, detail?, count?, max? }]`) or `error.entity` + `error.issues`; `error.count` for a signature; `error.ids` for `UNPERSISTED` | A peer's op the engine refused (`OP_REFUSED`) — `reason` the kind holding the field when it outranks the op's, `bound` past a [limit](./lists#costs-and-limits) (`detail`: `pending`, `run` or `field`), `malformed` for a payload it does not admit; skipped as invalid under this node's [schema](./schema#how-a-write-is-validated) (`OP_INVALID`) or because its record's file cannot be read (`OP_UNREADABLE`), stamped beyond `sync.maxSkew` (`SKEW`); a page's ops refused for their signature (`BAD_SIGNATURE`, `UNSIGNED`); logged ops whose record files could not be written (`UNPERSISTED`) |
@@ -218,7 +224,16 @@ default) on the storage and on its sync manager; one more throws.
 | `close` | — | After `close()` sealed the log |
 
 A `Record` emits `update` `(data, delta)` on a staged assignment and when the
-record changes in storage (`null` data once deleted).
+record changes in storage (`null` data once deleted) — once per transaction
+that changed it, with the delta of all its ops.
+
+To follow one record rather than every op, `observe(id, path?, listener)`
+calls the listener after every turn that changed the record — with its
+[changes](./versions#changes) of that turn and the `transaction` event they
+came in — and, under a `path`, with the changes of that field, of what hangs
+under it and of a prefix of it; a `Record` has `observe(path?, listener)`
+too. Observers stand apart from the listener count: a view per record is
+the intended scale.
 
 ### SyncManager
 
@@ -228,7 +243,7 @@ record changes in storage (`null` data once deleted).
 | `node` | `({ url, action })` | The registry changed: `'add'`, `'remove'`, `'enable'`, `'disable'` |
 | `connect` | `({ url })` | A link was accepted, before hello |
 | `peer` | `({ url, connected, node?, reconnected?, schema? })` | Hello answered (with the host's `node` id and `schema`), the link closed, or it came back |
-| `sync` | `({ url, pushed })` / `({ url, received, applied, skipped, duplicates, gaps, malformed, unsigned, forged, outOfScope })` | A push went out / a page came in |
+| `sync` | `({ url, pushed })` / `({ url, received, applied, skipped, duplicates, gaps, malformed, unsigned, forged, outOfScope, equivocations })` | A push went out / a page came in |
 | `bootstrap` | `({ url, records })` | A host's whole state was joined |
 | `error` | `(error)` with `error.url` | A failure on the way to a peer — a refused link, a failed push, a hook that threw, a page that failed (`PAGE_FAILED`, `STUCK`), a host that holds more of this node's ops than its log (`REWOUND`) or lacks ones its log no longer holds (`UNDELIVERABLE`) |
 | `hello` | `({ node, scopes, schema })` | Hosting side: a peer greeted this node and was authorized |

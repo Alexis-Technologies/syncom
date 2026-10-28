@@ -1,5 +1,7 @@
 'use strict';
 
+// Files land at once here (`defer: 0`): what these tests read of the disk is the engine's, not the window's — the window has tests of its own (storage.defer, storage.group).
+
 // The storage over an injected backend: nothing touches the disk, a reopen
 // over the same memory backend is the same node, `durable` syncs.
 
@@ -7,14 +9,15 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const syncom = require('..');
+const syncom = require('../src/all/all.js');
 const nodeFsi = require('../src/fsi.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
+const { memory } = require('../src/memory/memory.js');
 
 test('Storage over an injected fsi', async (t) => {
   await t.test('a memory backend: the whole lifecycle, nothing on disk, the same node on reopen', async () => {
-    const fsi = syncom.createMemoryFsi();
-    const storage = await syncom.open({ path: 'mem-store', fsi, logger: false });
+    const fsi = memory();
+    const storage = await syncom.open({ defer: 0, path: 'mem-store', fsi, logger: false });
     assert.strictEqual(storage.fsi, fsi);
     const id = await storage.insert({ title: 'Draft' });
     await storage.update(id, { title: 'Final' });
@@ -36,21 +39,21 @@ test('Storage over an injected fsi', async (t) => {
     assert.ok(fsi.size > 0);
     assert.ok(Object.keys(fsi.dump()).every((key) => key.startsWith('mem-store/')));
 
-    const reopened = await syncom.open({ path: 'mem-store', fsi, logger: false });
+    const reopened = await syncom.open({ defer: 0, path: 'mem-store', fsi, logger: false });
     assert.strictEqual(reopened.nodeId, nodeId);
     assert.deepStrictEqual(reopened.vector, vector);
     assert.deepStrictEqual(await reopened.get(id), { title: 'Final', hits: 1 });
     assert.strictEqual(reopened.sync.listNodes()[0].url, 'mem://peer', 'the registry is in the backend too');
     await reopened.close();
     // Another backend is another world.
-    const other = await syncom.open({ path: 'mem-store', fsi: syncom.createMemoryFsi(), logger: false });
+    const other = await syncom.open({ defer: 0, path: 'mem-store', fsi: memory(), logger: false });
     assert.notStrictEqual(other.nodeId, nodeId);
     assert.deepStrictEqual(await other.list(), []);
     await other.close();
   });
 
   await t.test('the pieces take the backend too', async () => {
-    const fsi = syncom.createMemoryFsi();
+    const fsi = memory();
     const keys = await syncom.loadKeys('k', { fsi });
     assert.deepStrictEqual(await syncom.loadKeys('k', { fsi }), keys, 'the same pair on the second load');
     const chain = await new syncom.Blockchain('c', { fsi });
@@ -66,11 +69,11 @@ test('Storage over an injected fsi', async (t) => {
   });
 
   await t.test('a backend without the contract is refused at open, by the method it lacks', async () => {
-    await assert.rejects(async () => syncom.open({ fsi: { read() {} } }), {
+    await assert.rejects(async () => syncom.open({ defer: 0, fsi: { read() {} } }), {
       name: 'TypeError',
       message: 'open({ fsi }): adapter has no write()',
     });
-    await assert.rejects(async () => syncom.open({ fsi: 'opfs' }), /adapter has no read\(\)/);
+    await assert.rejects(async () => syncom.open({ defer: 0, fsi: 'opfs' }), /adapter has no read\(\)/);
   });
 
   await t.test('durable: every write of an insert is synced on node:fs', async (t2) => {
@@ -78,7 +81,7 @@ test('Storage over an injected fsi', async (t) => {
     t2.after(() => cleanupTemp(dir));
     const synced = [];
     const spied = { ...nodeFsi, sync: (d, name) => synced.push(name) && nodeFsi.sync(d, name) };
-    const storage = await syncom.open({ path: dir, fsi: spied, durable: true, logger: false });
+    const storage = await syncom.open({ defer: 0, path: dir, fsi: spied, durable: true, logger: false });
     assert.notStrictEqual(storage.fsi, spied, 'wrapped');
     assert.strictEqual(typeof storage.fsi.sync, 'function');
     synced.length = 0;
@@ -94,8 +97,9 @@ test('Storage over an injected fsi', async (t) => {
   await t.test('durable over a backend without sync is a debug line, not an error', async () => {
     const debug = [];
     const storage = await syncom.open({
+      defer: 0,
       path: 'mem-durable',
-      fsi: syncom.createMemoryFsi(),
+      fsi: memory(),
       durable: true,
       logger: { debug: (entry) => debug.push(entry.event) },
     });
@@ -109,7 +113,7 @@ test('A backend that fails after the log append', async (t) => {
   // A memory backend whose record files can be made to fail, as a full disk
   // or a browser quota would; everything else keeps working.
   const flakyFsi = () => {
-    const fsi = syncom.createMemoryFsi();
+    const fsi = memory();
     const control = { failing: false };
     const wrapped = {
       read: (dir, name) => fsi.read(dir, name),
@@ -124,12 +128,12 @@ test('A backend that fails after the log append', async (t) => {
         return fsi.write(dir, name, content);
       },
     };
-    return { fsi: wrapped, memory: fsi, control };
+    return { fsi: wrapped, inner: fsi, control };
   };
 
   await t.test('the write stands, is read back from memory, and lands at the next open', async () => {
-    const { fsi, memory, control } = flakyFsi();
-    const storage = await syncom.open({ path: 'flaky', fsi, logger: false, cache: { max: 1 } });
+    const { fsi, inner, control } = flakyFsi();
+    const storage = await syncom.open({ defer: 0, path: 'flaky', fsi, logger: false, cache: { max: 1 } });
     const errors = [];
     storage.on('error', (error) => errors.push(error));
     const id = await storage.insert({ n: 1 });
@@ -144,18 +148,39 @@ test('A backend that fails after the log append', async (t) => {
     await storage.insert({ other: 1 });
     await storage.insert({ other: 2 });
     assert.deepStrictEqual(await storage.get(id), { n: 2 });
-    assert.strictEqual(JSON.parse(await memory.read('flaky/data', `${id}.json`)).data.n, 1, 'the file is behind');
+    assert.strictEqual(JSON.parse(await inner.read('flaky/data', `${id}.json`)).data.n, 1, 'the file is behind');
     await storage.close();
     // The batch was left unapplied: the reopen replays it onto the file.
-    const reopened = await syncom.open({ path: 'flaky', fsi, logger: false });
+    const reopened = await syncom.open({ defer: 0, path: 'flaky', fsi, logger: false });
     assert.deepStrictEqual(await reopened.get(id), { n: 2 });
-    assert.strictEqual(JSON.parse(await memory.read('flaky/data', `${id}.json`)).data.n, 2);
+    assert.strictEqual(JSON.parse(await inner.read('flaky/data', `${id}.json`)).data.n, 2);
     await reopened.close();
   });
 
+  await t.test(
+    'a batch of many records that fails is one error line: the first ids by name, and how many',
+    async () => {
+      const { fsi, control } = flakyFsi();
+      const lines = [];
+      const logger = { error: (entry) => lines.push(entry), warn() {}, info() {}, debug() {} };
+      const storage = await syncom.open({ defer: 0, path: 'flaky-many', fsi, logger });
+      storage.on('error', () => {});
+      control.failing = true;
+      const ops = [];
+      for (let i = 1; i <= 50; i++) {
+        ops.push({ origin: 'peer', seq: i, ts: Date.now(), type: 'write', id: `r${i}`, data: { i } });
+      }
+      await storage.applyRemote(ops);
+      const [line] = lines.filter((entry) => entry.event === 'storage.unpersisted');
+      assert.deepStrictEqual([line.ids.length, line.count], [32, 50]);
+      control.failing = false;
+      await storage.close();
+    },
+  );
+
   await t.test("a peer's batch whose files fail is held the same way", async () => {
     const { fsi, control } = flakyFsi();
-    const storage = await syncom.open({ path: 'flaky-peer', fsi, logger: false });
+    const storage = await syncom.open({ defer: 0, path: 'flaky-peer', fsi, logger: false });
     const errors = [];
     storage.on('error', (error) => errors.push(error));
     control.failing = true;
@@ -166,17 +191,17 @@ test('A backend that fails after the log append', async (t) => {
     assert.deepStrictEqual(await storage.get('r1'), { n: 1 });
     control.failing = false;
     await storage.close();
-    const reopened = await syncom.open({ path: 'flaky-peer', fsi, logger: false });
+    const reopened = await syncom.open({ defer: 0, path: 'flaky-peer', fsi, logger: false });
     assert.deepStrictEqual(await reopened.get('r1'), { n: 1 });
     await reopened.close();
   });
 
   await t.test('a torn record file is an INTEGRITY error, and repair(id) rebuilds it', async () => {
-    const memory = syncom.createMemoryFsi();
-    const storage = await syncom.open({ path: 'torn', fsi: memory, logger: false, cache: { max: 1 } });
+    const shared = memory();
+    const storage = await syncom.open({ defer: 0, path: 'torn', fsi: shared, logger: false, cache: { max: 1 } });
     const id = await storage.insert({ n: 1 });
     await storage.insert({ other: true });
-    await memory.write('torn/data', `${id}.json`, '{"data":{"n":');
+    await shared.write('torn/data', `${id}.json`, '{"data":{"n":');
     await assert.rejects(
       () => storage.get(id),
       (error) => {
@@ -188,10 +213,45 @@ test('A backend that fails after the log append', async (t) => {
       },
     );
     await assert.rejects(() => storage.has(id), { code: 'INTEGRITY' });
-    await memory.write('torn/data', `${id}.json`, 'null');
+    await shared.write('torn/data', `${id}.json`, 'null');
     await assert.rejects(() => storage.get(id), { code: 'INTEGRITY' });
     await storage.repair(id);
     assert.deepStrictEqual(await storage.get(id), { n: 1 });
     await storage.close();
   });
+});
+
+test('a log roll the disk refuses holds up no write: every write lands, flush answers, a reopen has them', async () => {
+  const base = memory();
+  let failing = false;
+  const fsi = {
+    ...base,
+    write: async (dir, name, text) => {
+      if (failing && name.startsWith('seg-')) throw Object.assign(new Error('no space left'), { code: 'ENOSPC' });
+      return base.write(dir, name, text);
+    },
+  };
+  const events = [];
+  const logger = { warn: (event) => events.push(event), error: (event) => events.push(event), info() {}, debug() {} };
+  const within = (promise, label) =>
+    Promise.race([
+      promise,
+      new Promise((resolve, reject) => setTimeout(() => reject(new Error(`${label}: still pending`)), 2000).unref()),
+    ]);
+  const storage = await syncom.open({ defer: 0, path: 'store', fsi, logger, sync: { log: { rollAfter: 2 } } });
+  const first = await storage.insert({ n: 1 });
+  failing = true;
+  const ids = [];
+  for (let i = 0; i < 4; i++) ids.push(await within(storage.insert({ n: i }), `insert ${i}`));
+  await within(storage.update(first, { n: 2 }), 'update');
+  await within(storage.flush(), 'flush');
+  assert.ok(storage.stats().log.rollFailures > 0, 'the failed rolls are counted');
+  assert.ok(events.some((event) => event.event === 'log.roll.failed'));
+  failing = false;
+  await within(storage.insert({ n: 9 }), 'insert after the disk came back');
+  await storage.close();
+  const reopened = await syncom.open({ defer: 0, path: 'store', fsi, logger: false });
+  assert.strictEqual((await reopened.get(first)).n, 2);
+  for (const id of ids) assert.ok(await reopened.get(id));
+  await reopened.close();
 });

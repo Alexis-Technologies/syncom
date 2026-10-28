@@ -43,29 +43,61 @@ const valueOf = (data, path) => {
 // `{ b, a }` are equal to the query's predicate, so they share a key. A
 // prototype-less copy, so a `__proto__` field stays a field.
 const canonical = (value) => {
-  if (Array.isArray(value)) return value.map(canonical);
+  if (Array.isArray(value)) {
+    const out = [];
+    for (let i = 0; i < value.length; i++) out.push(canonical(value[i]));
+    return out;
+  }
   if (!isObject(value)) return value;
   const out = Object.create(null);
   for (const key of Object.keys(value).sort()) out[key] = canonical(value[key]);
   return out;
 };
 
+// What `result` and `found` both hold, in `result`'s order (the `$text`
+// ranking rides on it); `found` itself when there is no result yet.
+const meet = (result, found) => {
+  if (result === null) return found;
+  const next = new Set();
+  for (const id of result) if (found.has(id)) next.add(id);
+  return next;
+};
+
 // Arrays and objects are keyed as values; an array is posted under each of
 // its elements too (see `post`). Unique keys compare the whole value.
 const keyOf = (value) => JSON.stringify(canonical(value));
+
+// Whether two catalog rows say the same: type, version, flags, text and every
+// indexed value.
+const sameRow = (a, b) => {
+  if (a.type !== b.type || a.v !== b.v || a.encrypted !== b.encrypted || a.gone !== b.gone || a.text !== b.text) {
+    return false;
+  }
+  const keys = Object.keys(a.fields);
+  if (keys.length !== Object.keys(b.fields).length) return false;
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    if (!Object.hasOwn(b.fields, key)) return false;
+    const x = a.fields[key];
+    const y = b.fields[key];
+    if (x !== y && (typeof x !== 'object' || typeof y !== 'object' || keyOf(x) !== keyOf(y))) return false;
+  }
+  return true;
+};
 
 // The text `$text` searches a record by: its string fields among `fields`,
 // and the string elements of its array fields, joined by a space — as the
 // record reads (the lens applied). Nothing else is a word.
 const textOf = (data, fields) => {
   const parts = [];
-  for (let i = 0; i < fields.length; i++) {
-    const value = valueOf(data, fields[i]);
+  // The strings of a value: itself, its array elements, and — four levels
+  // down, for a list's elements that carry fields — the strings of its objects.
+  const collect = (value, depth) => {
     if (typeof value === 'string') parts.push(value);
-    else if (Array.isArray(value)) {
-      for (let j = 0; j < value.length; j++) if (typeof value[j] === 'string') parts.push(value[j]);
-    }
-  }
+    else if (depth > 0 && Array.isArray(value)) for (let j = 0; j < value.length; j++) collect(value[j], depth - 1);
+    else if (depth > 0 && isObject(value)) for (const key of Object.keys(value)) collect(value[key], depth - 1);
+  };
+  for (let i = 0; i < fields.length; i++) collect(valueOf(data, fields[i]), 4);
   return parts.join(' ');
 };
 
@@ -115,6 +147,7 @@ class Catalog {
   #sorted = null;
   #sortedIds = new Map();
   #text;
+  #textPending = new Map();
   #logger;
 
   constructor({ fsi, path, entities, text = new Map(), logger = null }) {
@@ -137,16 +170,26 @@ class Catalog {
   // The row's text into the entity's text index, or out of it. Derived
   // state never fails a write — the record is durable by now — so an index
   // that throws is logged (where there is a logger) and left as it is.
+  // The text index follows the rows lazily: a put or a removal waits here,
+  // the last one per id, until a `$text` query asks — re-indexing a text on
+  // every keystroke cost the whole text each time.
   #index(id, row, kept) {
-    if (row.text === undefined) return;
-    const index = this.#text.get(row.type);
-    if (index === undefined) return;
-    try {
-      if (kept) index.put(id, row.text);
-      else index.remove(id);
-    } catch (error) {
-      this.#logger?.warn({ event: 'catalog.search', id, err: error });
+    if (row.text === undefined || !this.#text.has(row.type)) return;
+    this.#textPending.set(id, { type: row.type, text: kept ? row.text : null });
+  }
+
+  #flushText() {
+    if (this.#textPending.size === 0) return;
+    for (const [id, { type, text }] of this.#textPending) {
+      const index = this.#text.get(type);
+      try {
+        if (text === null) index.remove(id);
+        else index.put(id, text);
+      } catch (error) {
+        this.#logger?.warn({ event: 'catalog.search', id, err: error });
+      }
     }
+    this.#textPending.clear();
   }
 
   get size() {
@@ -179,6 +222,16 @@ class Catalog {
     }
   }
 
+  /** What unique key `key` (a field list) reads as in `data` — null when a field is missing. */
+  uniqueKey(data, key) {
+    const fields = {};
+    for (const field of key) {
+      const value = valueOf(data, field);
+      if (value !== undefined) fields[field] = value;
+    }
+    return this.#uniqueKey(fields, key);
+  }
+
   #uniqueKey(fields, key) {
     const parts = [];
     for (const field of key) {
@@ -199,10 +252,18 @@ class Catalog {
     const def = row.type === null ? undefined : this.#defs.get(row.type);
     if (!def) return;
     let eq = this.#eq.get(row.type);
-    if (!eq) this.#eq.set(row.type, (eq = new Map(def.fields.map((field) => [field, new Map()]))));
+    if (!eq) {
+      eq = new Map();
+      for (let i = 0; i < def.fields.length; i++) eq.set(def.fields[i], new Map());
+      this.#eq.set(row.type, eq);
+    }
     for (const field of Object.keys(row.fields)) post(eq.get(field), row.fields[field], id, add);
     let unique = this.#unique.get(row.type);
-    if (!unique) this.#unique.set(row.type, (unique = new Map(def.unique.map((key) => [key.join(','), new Map()]))));
+    if (!unique) {
+      unique = new Map();
+      for (let i = 0; i < def.unique.length; i++) unique.set(def.unique[i].join(','), new Map());
+      this.#unique.set(row.type, unique);
+    }
     for (const key of def.unique) {
       const value = this.#uniqueKey(row.fields, key);
       if (value !== null) add(unique.get(key.join(',')), value, id);
@@ -218,27 +279,36 @@ class Catalog {
   put(id, view) {
     const was = this.#rows.get(id);
     const before = was && !was.gone ? was.type : null;
-    this.#remove(id);
-    this.#dirty++;
     const gone = view !== null && view.gone === true;
     const type = view === null ? null : typeof view.type === 'string' ? view.type : null;
-    if (before !== null) this.#wake(before);
-    if (!gone && type !== null && type !== before) this.#wake(type);
-    if (view === null) return;
-    const row = { type, v: view.v ?? null, encrypted: view.encrypted === true, fields: {} };
-    if (gone) row.gone = true;
-    const def = type === null || gone ? undefined : this.#defs.get(type);
-    if (def && !row.encrypted) {
-      for (const field of def.fields) {
-        const value = valueOf(view.data, field);
-        if (value !== undefined) row.fields[field] = value;
-      }
-      if (def.search.length > 0) {
-        const text = textOf(view.data, def.search);
-        if (text.length > 0) row.text = text;
+    let row = null;
+    if (view !== null) {
+      row = { type, v: view.v ?? null, encrypted: view.encrypted === true, fields: {} };
+      if (gone) row.gone = true;
+      const def = type === null || gone ? undefined : this.#defs.get(type);
+      if (def && !row.encrypted) {
+        for (const field of def.fields) {
+          const value = valueOf(view.data, field);
+          if (value !== undefined) row.fields[field] = value;
+        }
+        if (def.search.length > 0) {
+          const text = textOf(view.data, def.search);
+          if (text.length > 0) row.text = text;
+        }
       }
     }
-    this.#insert(id, row);
+    // The row the catalog holds already: nothing to post again, nothing to
+    // sort or save — but a watcher reads more than the row, so it hears of
+    // the change (`false`: the row stayed; a covered cursor need not run).
+    if (was !== undefined && row !== null && sameRow(was, row)) {
+      if (before !== null) this.#wake(before, false);
+      return;
+    }
+    this.#remove(id);
+    this.#dirty++;
+    if (before !== null) this.#wake(before, true);
+    if (!gone && type !== null && type !== before) this.#wake(type, true);
+    if (row !== null) this.#insert(id, row);
   }
 
   /** Whether `$text` can be asked of this collection: it has search fields and an index. */
@@ -263,7 +333,11 @@ class Catalog {
     return this.#defs.get(type)?.indexed ?? new Set();
   }
 
-  /** Calls `fn` after every change to a record of `type`; returns the unsubscribe. */
+  /**
+   * Calls `fn(changed)` after every change to a record of `type` — `changed`
+   * false when the record's catalog row stayed as it was; returns the
+   * unsubscribe.
+   */
   subscribe(type, fn) {
     let fns = this.#watchers.get(type);
     if (!fns) this.#watchers.set(type, (fns = new Set()));
@@ -274,9 +348,9 @@ class Catalog {
     };
   }
 
-  #wake(type) {
+  #wake(type, changed) {
     const fns = this.#watchers.get(type);
-    if (fns) for (const fn of [...fns]) fn();
+    if (fns) for (const fn of [...fns]) fn(changed);
   }
 
   row(id) {
@@ -316,6 +390,7 @@ class Catalog {
     // `$text` seeds the candidates with the index's ranking, best first;
     // every equality then narrows that order rather than replacing it.
     const index = this.#text.get(entity);
+    if (index !== undefined && typeof query.$text === 'string') this.#flushText();
     const ranked = index !== undefined && typeof query.$text === 'string' ? this.#ranked(index, query.$text) : null;
     const eq = this.#eq.get(entity);
     if (!eq) return ranked;
@@ -331,16 +406,13 @@ class Catalog {
 
   #narrow(eq, query, seed = null) {
     let result = seed;
-    const meet = (found) => {
-      result = result === null ? found : new Set([...result].filter((id) => found.has(id)));
-    };
     for (const key of Object.keys(query)) {
       const condition = query[key];
       if (key === '$and') {
         if (!Array.isArray(condition)) continue;
         for (const sub of condition) {
           const found = isObject(sub) && !Array.isArray(sub) ? this.#narrow(eq, sub) : null;
-          if (found !== null) meet(found);
+          if (found !== null) result = meet(result, found);
         }
       } else if (key === '$or') {
         // One branch that cannot narrow is the whole collection.
@@ -355,7 +427,7 @@ class Catalog {
           }
           for (const id of found) union.add(id);
         }
-        if (!whole) meet(union);
+        if (!whole) result = meet(result, union);
       } else if (eq.has(key)) {
         let values;
         if (!isObject(condition) || Array.isArray(condition)) values = [condition];
@@ -365,7 +437,7 @@ class Catalog {
         const posting = eq.get(key);
         const found = new Set();
         for (const value of values) for (const id of posting.get(keyOf(value)) ?? []) found.add(id);
-        meet(found);
+        result = meet(result, found);
       }
       if (result !== null && result.size === 0) break;
     }
@@ -466,7 +538,8 @@ class Catalog {
       rows.push(cells);
     }
     const saved = this.#dirty;
-    await this.#fsi.write(this.#dir, FILE, JSON.stringify({ format: FORMAT, indexes: this.#indexKey, stamp, rows }));
+    const text = JSON.stringify({ format: FORMAT, indexes: this.#indexKey, stamp, rows });
+    await this.#fsi.write(this.#dir, FILE, text, { atomic: true });
     this.#dirty -= saved;
   }
 }

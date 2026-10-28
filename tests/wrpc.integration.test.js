@@ -1,15 +1,18 @@
 'use strict';
 
+// Files land at once here (`defer: 0`): what these tests read of the disk is the engine's, not the window's — the window has tests of its own (storage.defer, storage.group).
+
 // The real thing: syncom nodes hosted by wrpc Servers, dialed through
 // WrpcClients over WebSocket. Skips (never fails) when @alexify/wrpc is not
 // installed, the way wrpc's own adapter suites treat their frameworks.
 
 const test = require('node:test');
 const assert = require('node:assert');
-const syncom = require('..');
-const { createWrpcLink } = require('../wrpc.js');
+const syncom = require('../src/all/all.js');
+const { createWrpcLink } = require('../src/wrpc/wrpc.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const { settle, waitUntil } = require('./utils/mesh.js');
+const { createPresence } = require('../src/presence/presence.js');
 
 // Skip only when the module is not there; a broken one is a failure to see.
 const optional = (name) => {
@@ -29,7 +32,7 @@ const { createChannelPair } = require('./utils/fake-channel.js');
 const openTemp = async (t, options = {}) => {
   const dir = await createTemp();
   t.after(() => cleanupTemp(dir));
-  const storage = await syncom.open({ path: dir, logger: false, ...options });
+  const storage = await syncom.open({ defer: 0, path: dir, logger: false, ...options });
   t.after(() => storage.close().catch(() => {}));
   return storage;
 };
@@ -83,6 +86,39 @@ test('syncom over wrpc', { skip: wrpc ? false : '@alexify/wrpc unavailable' }, a
     assert.deepStrictEqual(peers.map((peer) => peer.node).sort(), [a.nodeId, b.nodeId].sort());
     assert.ok(peers.every((peer) => peer.subscribed));
   });
+
+  await t.test(
+    'presence over wrpc: the unit’s inbound event, relayed through the room, handed at hello',
+    async (t2) => {
+      const a = await openTemp(t2);
+      const b = await openTemp(t2, { sync: { connect: connect(), autoStart: false } });
+      const c = await openTemp(t2, { sync: { connect: connect(), autoStart: false } });
+      const hostA = await host(t2, a, { access: 'public', presence: { timeout: 2000 } });
+      const make = (storage) => {
+        const presence = createPresence(storage, { timeout: 2000 });
+        t2.after(() => presence.destroy());
+        storage.sync.presence(presence);
+        return presence;
+      };
+      const [pa, pb] = [a, b].map(make);
+      await b.sync.addNode({ url: hostA.url });
+      await b.sync.start();
+      await settle([a, b], { timeout: 10_000 });
+      await pb.set({ name: 'bob', cursor: 2 });
+      await waitUntil(() => pa.get(b.nodeId) !== undefined, { timeout: 5000 });
+      assert.deepStrictEqual(pa.get(b.nodeId), { name: 'bob', cursor: 2 });
+      // A newcomer is handed the room at hello; a state then travels to it through the room.
+      const pc = make(c);
+      await c.sync.addNode({ url: hostA.url });
+      await c.sync.start();
+      await waitUntil(() => pc.get(b.nodeId) !== undefined, { timeout: 5000 });
+      await pb.set({ name: 'bob', cursor: 3 });
+      await waitUntil(() => pc.get(b.nodeId)?.cursor === 3, { timeout: 5000 });
+      await pc.set({ name: 'cy' });
+      await waitUntil(() => pb.get(c.nodeId) !== undefined && pa.get(c.nodeId) !== undefined, { timeout: 5000 });
+      assert.strictEqual(a.log.length + b.log.length + c.log.length, 0, 'nothing of it is logged');
+    },
+  );
 
   await t.test('a server restart on the same port: wrpc reconnects, the feed resumes, offline ops flow', async (t2) => {
     const a = await openTemp(t2);

@@ -6,9 +6,9 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const syncom = require('..');
+const syncom = require('../src/all/all.js');
 const { packOps } = require('../src/ops.js');
-const { isSharedLog } = require('../src/shared-log.js');
+const { isSharedLog } = require('../src/sync/shared-log.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const { MemoryLink } = require('./utils/memory-link.js');
 const { waitUntil } = require('./utils/mesh.js');
@@ -65,6 +65,21 @@ test('Hosting limits', async (t) => {
     const other = new MemoryLink(unit);
     await other.call('syncom/hello', { node: 'other', version: 1 });
     assert.strictEqual((await other.call('syncom/push', { ops: packOps(ops('other', 1, 10)) })).applied, 10);
+  });
+
+  await t.test('a host that sets no limits still refuses a push past 10 000 ops; Infinity lifts it', async (t2) => {
+    const host = await openTemp(t2);
+    const unit = host.sync.unit({ access: 'public' });
+    const link = new MemoryLink(unit);
+    await link.call('syncom/hello', { node: 'peer', version: 1 });
+    await assert.rejects(() => link.call('syncom/push', { ops: packOps(ops('peer', 1, 10_001)) }), {
+      code: 413,
+      reason: 'OPS_PER_PUSH',
+    });
+    assert.deepStrictEqual(host.vector, {}, 'refused at the length, nothing applied');
+    const open = new MemoryLink(host.sync.unit({ access: 'public', limits: { opsPerPush: Infinity } }));
+    await open.call('syncom/hello', { node: 'wide', version: 1 });
+    assert.strictEqual((await open.call('syncom/push', { ops: packOps(ops('wide', 1, 10_001)) })).applied, 10_001);
   });
 
   await t.test('the dialer reports a refused page and recovers at the next handshake', async (t2) => {

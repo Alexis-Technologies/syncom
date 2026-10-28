@@ -18,7 +18,7 @@ const storage = await open({ path: 'data' });
 | `name` | — | Alias for `path` |
 | `fsi` | `node:fs` / OPFS | The backend — any object with `read`, `write`, `exists`, `remove`, `list` (see [Backends](../reference/api#backends)) |
 | `durable` | `false` | fsync after every write, where the backend can (`node:fs`); OPFS and memory are as durable as they are |
-| `defer` | `0` | Record files may lag the log by this many ms (a non-negative integer) — the writes of one record within the window coalesce into one file and one block, what typing into a text or a list wants ([see below](#when-a-record-file-lags-the-log)) |
+| `defer` | `16` | Record files may lag the log by this many ms (a non-negative integer; `0` lands every write at once) — the writes of one record within the window coalesce into one file and one block, what typing into a text or a list wants; `flush()` lands them now ([see below](#when-a-record-file-lags-the-log)) |
 | `lock` | `'fail'` | One instance per directory: `'fail'` rejects a second `open()` (`code: 'LOCKED'`), `'wait'` waits, `false` leaves it to you ([see below](#one-instance-per-directory)) |
 | `cache` | `{ max: 5000 }` | How many entries stay in memory; a live `Record` pins its own ([see below](#the-catalog-and-the-cache)) |
 | `integrity` | `'verify'` | `'lazy'` trusts a record file on the cold read instead of re-verifying it against its block |
@@ -82,14 +82,59 @@ kind only: a local write of another kind — `update()` or `set()` naming a
 counter, `inc()` on a set, `splice()` on a register, `treeMove()` on a list —
 throws a `SyncomError` with `code: 'FIELD_KIND'`, `field`, and `kind` the kind
 that holds it, before anything is stamped. A `set()` that leaves such a
-field out drops it, as it drops every field it does not name. From a peer the
+field out drops it, as it drops every field it does not name; `unset(id,
+fields)` removes named fields of any kind — the fields' own reset, which an
+older concurrent write of them loses to and a newer one makes them again, as
+whatever kind that write is. From a peer the
 kinds' precedence decides instead — a register outranks a counter, a counter
 a set, then a list, a text, a tree — see [Sync](./sync#registers-counters-sets-lists-and-text).
-The fields are the top-level ones: a nested object is one register, replaced
-whole by whichever write is later — two nodes that change different keys of
-it concurrently keep one side — and `update({ 'a.b': 1 })` writes a field
-named `a.b`.
+A nested object written as a value is one register, replaced whole by
+whichever write is later; a field named by a *path* — `update(id, { 'profile/city':
+'Kyiv' })` — is a field of its own under the prefix, so two nodes that write
+different children of one prefix both keep theirs (see [Paths](#paths)).
 :::
+
+### Paths
+
+A field name may be a path of stable segments joined by `/` — `profile/city`,
+`stats/views`, `profile/geo/lat` — at most 16 segments and 512 characters,
+none empty or `__proto__`; `/` is reserved for it (a dot is a plain
+character: `update({ 'a.b': 1 })` writes a field named `a.b`). Every path is
+a field like any other: a register, a counter, a set, a list, a text or a
+tree, with its own clock, merged on its own — two nodes writing different
+children of `profile` both keep theirs. A read composes the paths into
+nested objects, children laid over the register at their prefix:
+
+```js
+const id = await storage.insert({ name: 'ada', profile: { zip: 1 } });
+await storage.update(id, { 'profile/city': 'Kyiv' }); // a field of its own
+await storage.inc(id, 'stats/views', 1);              // a counter under a prefix
+await storage.get(id);
+// { name: 'ada', profile: { zip: 1, city: 'Kyiv' }, stats: { views: 1 } }
+```
+
+The rules, the same on every node whatever the order the writes arrive in:
+
+- A register written at a prefix — `update(id, { profile: { zip: 2 } })` — is
+  a reset of what hangs under it: children stamped below the write go, a
+  child written later survives and is read over the object. `unset(id,
+  'profile')` takes the subtree the same way.
+- A counter, a set, a list, a text or a tree holds its prefix alone: a write
+  under it is refused before anything is stamped (`FIELD_KIND`, with
+  `prefix` naming it), and where one lands from a peer, what hung under the
+  prefix goes.
+- A record holds at most 4 096 fields; a write that would add one past that
+  is refused (`FIELD_KIND`, `kind: 'bound'`, `detail: 'paths'`), and a
+  peer's picture of a record keeps the first 4 096 in sorted order.
+
+The ops, the log, a `snapshot()` and `getCachedData()` keep the paths
+apart; `get()`, a `Record`, a query (`'profile.city'` as a dotted path), a
+hook's `current` and a validator see them composed. A list's element and a
+tree's node can carry fields too — `items/<name>/body`, `outline/<node>/title`
+— see [Children of elements and nodes](./lists#children-of-elements-and-nodes). A `Record`'s properties
+are the composed top-level fields: `record.profile = { … }` writes the
+object whole. A migration (`migrate()`) writes the registers as they read,
+composed.
 
 `FIELD_KIND` also refuses a list or text write past a bound — a single
 insert over 1 048 576 elements, say — and then `kind` is `'bound'` and
@@ -111,6 +156,52 @@ const ok = await storage.swap(id, { hits: 2 }, { hits: 1 });
 The comparison runs inside the mutation queue, against the record as it reads
 (the lens applied, the read hooks not run), so two concurrent swaps on the same
 expectation cannot both pass. An absent record rejects.
+
+### Transactions
+
+Several writes as one: `transact(fn)` runs `fn(tx)` inside the mutation
+queue, every write made through `tx` becomes an op, and once `fn` returns
+the ops are appended together — all durable or none, one chain block, each
+record's file written once, the `commit` events after, in order. A throw
+from `fn`, or a write refused (an index out of range, a validator), leaves
+nothing appended.
+
+```js
+const id = await storage.transact(
+  async (tx) => {
+    const id = await tx.insert({ title: 'Draft', status: 'new' });
+    await tx.inc('stats', 'drafts', 1);
+    await tx.push(id, 'body', 'Once upon a time');
+    (await tx.get(id)).body; // 'Once upon a time' — tx reads what it wrote
+    return id;
+  },
+  { message: 'new draft', source: editor },
+);
+```
+
+- **`tx` is the write API** — `insert`, `set`, `update`, `swap`, `delete`,
+  `unset`, `inc`, `add`, `remove` and the plugins' methods (`splice`,
+  `mark`, `treeMove`, …) — less `purge()`, which scrubs the log and stays on
+  the storage; plus `get(id)` and `has(id)`, reading the records as the
+  transaction left them, through the lens, without the read hooks (a hook
+  that writes would wait for the queue the transaction holds). An encrypted
+  write inside is `ENCRYPTED`: it makes no op.
+- **Hooks and validators** run as each op is made, inside the turn; what they
+  see is the record as the transaction left it. A refusal — theirs, or the
+  engine's — throws out of `fn`, and nothing of the transaction is written.
+- **`message`** (at most 1 024 characters) rides on every op of the
+  transaction — in the signed header, so a peer verifies it with the op —
+  and `history()` lists it per version; **`source`** rides on the `commit`
+  events, for a listener to tell its own (an undo manager's). A transaction
+  with no op makes none and resolves to what `fn` returned.
+- **Each record once.** A live `Record` the transaction changed emits one
+  `update`, with the delta of all its ops; `commit` and `change` still fire
+  per op. The transaction holds each record it touches as its last op left
+  it — not a copy per op — unless something listens for `commit`, whose
+  events carry every op's `before` and `after` (an undo manager over a
+  transaction of thousands of ops on one large record holds them all).
+- `applyPatches()`, `restore()` and `compact()` are transactions: a restore
+  lands whole or not at all.
 
 ### Purge
 
@@ -136,8 +227,8 @@ await storage.purge(id);          // nothing of it left here
 await storage.purge(id, { actor: 'dpo' });
 ```
 
-Two limits. Scrubbing rewrites a log file in place — no backend has a
-rename — so a crash in the middle tears it, and a peer resuming through it
+Two limits. Scrubbing rewrites a log file in place — a journal line by line
+— and no backend has a rename, so a crash in the middle tears it, and a peer resuming through it
 bootstraps instead; `purge()` is idempotent, so run it again. And what a
 peer that never comes back holds is theirs.
 
@@ -246,9 +337,15 @@ the cache holds the record — every read sees the write — and the log keeps
 the batch unapplied until the file lands, so a crash in between is replayed
 onto the file at the next open:
 
-- **`open({ defer })`.** The file waits up to `defer` ms, and the writes of
-  one record within the window land as one file and one block. `tag()` and
-  `close()` flush first, and a peer's write of the record lands it whole.
+- **`open({ defer })`** — 16 ms, a frame, by default. The file waits up to
+  `defer` ms, and the writes of one record within the window land as one
+  file and one block. A flush that took longer than `defer` — a large record,
+  a slow disk — makes the next window as long as it took, so the files never
+  land back to back while the writer waits behind them. `flush()`, `tag()`
+  and `close()` land them first, and a peer's write of the record lands it
+  whole. `defer: 0` writes every file at
+  once — what a process that may be killed between a write and the next
+  frame wants, at the price of a file per op.
 - **A file write that failed** — a full disk, a quota. The write is not
   undone (it replicates from the log already); the record is held in memory
   until the next open, and the storage's `error` event fires with
@@ -261,7 +358,17 @@ const id = await storage.insert({ title: 'Notes' });
 for (const ch of 'hello') await storage.push(id, 'body', ch);
 await storage.get(id);   // { title: 'Notes', body: 'hello' } — six ops logged, no file yet
 storage.stats().deferred; // 1 — one record waiting; 0 once the window passed
+await storage.flush();    // or now: the file and its block
 ```
+
+The log itself is written in groups: a write's seq is reserved the moment
+its op is built, the mutation queue moves on to the next write at once, and
+every op appended while the previous group is being written goes to disk as
+one file with the others — what the caller awaits is the landing: the disk,
+then the file (or the deferred slot), the `afterWrite` hook and the events,
+in log order. The next write of a record builds on the one in flight before
+it; a read sees a write once it is durable. `stats().inflight` counts the
+writes between the append and the disk.
 
 ### Health
 
@@ -271,7 +378,8 @@ the storage is `closed`, how many writes wait on the mutation `queue`, the
 tombstones included, and `dirty` puts since the last save), the `tags`
 (`count`, and `corrupt` when `tags.json` could not be read at open), the
 records whose files lag the log (`held`, the deferred ones among them, and
-`deferred`), the `log` (`length`, `floor`, `next`, `epoch`, `segments`,
+`deferred`), the writes appended but not on disk yet (`inflight`), the `log`
+(`length`, `floor`, `next`, `epoch`, `segments`,
 `latestTs`, `droppedTs`, and `pins` — readers holding segments past
 retention, an undo stack mostly), the `chain`'s `tail` (or `null` under
 `chain: false`) and the `lock`'s `mode` (or `null` under `lock: false`). The
@@ -333,10 +441,15 @@ history](./versions#diff-and-restore).
 
 ### Encryption at rest
 
-Open the storage with `encrypted: true`, or pass the flag per write:
+Sealed records are the `encryption` plugin — `@alexify/syncom/encryption`,
+registered by `@alexify/syncom/all`; without it `encrypted: true` is
+`PLUGIN_MISSING`. Open the storage with `encrypted: true`, or pass the flag
+per write:
 
 ```js
-const vault = await open({ path: 'vault', encrypted: true });
+const { encryption } = require('@alexify/syncom/encryption');
+
+const vault = await open({ path: 'vault', plugins: [encryption], encrypted: true });
 await vault.insert({ ssn: '...' });                       // sealed on disk
 
 await storage.insert({ ssn: '...' }, { encrypted: true }); // one record, in a plain storage
@@ -358,6 +471,11 @@ and `compact()`, which read the log it is not in. `update()`, `set()`,
 `delete()` and `purge()` still work; they simply stay here. A record never
 changes kind: an encrypted write over a replicated record is refused
 (`ENCRYPTED`), and a plain write to an encrypted one seals it again.
+
+A sealed record protects one record from the disk; the log, the catalog and
+the other records stay plain. To encrypt the directory whole, wrap the
+backend instead — `atRest()` from the same subpath, every file under one
+key, the engine none the wiser — see [Encrypted at rest](./backends#encrypted-at-rest).
 
 ## Records
 
@@ -427,6 +545,10 @@ await storage.Post.get(post.id);    // { title: 'Hello', $type: 'Post' }
 await storage.Post.update(post.id, { title: 'Hi' });
 await storage.Post.delete(post.id);
 ```
+
+In TypeScript the collection's records are typed by the entity's Standard
+Schema or by a `Schema<{ Post: Post }>` annotation — see
+[TypeScript](./typescript).
 
 `entities` may be a plain object or a `Map`. Without a schema the storage has
 no collections and you address records by id only. An entity named like
@@ -698,7 +820,7 @@ data/
 ├── lock.json      { pid, id, since } — while an instance holds the directory (not with Web Locks)
 ├── schema.json    { version, migrated, hash } — the schema this directory last ran
 ├── index/         catalog.json — the record catalog as of a log position, search text included (derived; rebuilt when missing)
-├── data/          <id>.json per record: { data, meta, encrypted, timestamp, block }
+├── data/          <id>.json per record: { data, meta, encrypted, timestamp, block, gen? }; a list or text of 1 024 runs or more keeps its runs in <id>~<n>.json beside it, a piece of 32 each
 ├── log/           the operation log (see Sync)
 ├── tags.json      { format, tags } — the tags taken here (see Versions and history › Tags); tags.corrupt.json beside it once it could not be read
 ├── tags/          <name>/index/catalog.json and <name>/data/<id>.json — a tag's catalog and the record files copied before their first change after it; .pending/data/ while tags.json is unreadable

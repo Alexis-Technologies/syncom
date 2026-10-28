@@ -1,5 +1,11 @@
 # Lists, text and trees
 
+::: tip The kinds on this page are plugins
+Lists and texts are the `text` plugin (`@alexify/syncom/text`), trees the
+`tree` plugin (`/tree`): `open({ plugins: [text, tree] })`, or open through
+`@alexify/syncom/all`, which has both. See [Entry points](/guide/entry-points).
+:::
+
 A field can be a **list** — an array that nodes edit by position — or a
 **text** — a string they type into — or a **tree** — nodes moved under one
 another without ever forming a cycle ([Trees](#trees), below). Two nodes that insert at the same spot
@@ -125,6 +131,39 @@ await storage.move(id, 'todo', 2, 0);              // ['ship', 'write', 'test it
 - `setAt()` and `move()` are for lists; a text has neither. A `move()` to
   where the element already is (`from === to`) makes no op.
 
+## Children of elements and nodes
+
+A list's element and a tree's node can carry fields of their own, named by
+a [path](./storage#paths) through the element's name or the node's id:
+`items/<name>/body`, `outline/<node>/title`. Such a field is a field like
+any other — a register, a counter, a set, a text, a list in its turn — and
+merges on its own; a read composes it into the element (over the element's
+value, which must be an object to keep it; a scalar gives way) or into the
+node's `data`:
+
+```js
+await storage.push(id, 'items', [{ kind: 'note' }, 'plain']);
+const [first] = await storage.elements(id, 'items');     // the elements' names, in order
+await storage.push(id, `items/${first}/body`, 'hello');  // a text inside the first element
+await storage.inc(id, `items/${first}/hits`, 1);
+(await storage.get(id)).items;  // [{ kind: 'note', body: 'hello', hits: 1 }, 'plain']
+
+await storage.treeMove(id, 'outline', 'a', 'r');
+await storage.update(id, { 'outline/a/title': 'Intro' });
+(await storage.get(id)).outline; // [{ id: 'r', children: [{ id: 'a', children: [], data: { title: 'Intro' } }] }]
+```
+
+`elementAt(id, key, index)` names the element at an index and `elements(id,
+key)` all of them; an element keeps its name across moves, so a path under
+it holds. A write under an element or a node that is not there is refused
+before anything is stamped (`NOT_FOUND` with `field` the list or tree and
+`elem` the name); from a peer such a field lands and waits. A field under an
+element that was removed, or a node under the trash, is *unreachable*: not
+read, not in a diff, kept in the record until [`compact()`](./storage#compact)
+rewrites it without. A text's characters carry nothing: a path under a text
+is `FIELD_KIND`. A `setAt()` of the element's value and the children under
+it are apart: the value is one register, the children theirs.
+
 ## Rich text
 
 A text carries **marks**: a style over a range, with a name and a value.
@@ -136,11 +175,12 @@ renders:
 await storage.updateText(id, 'body', 'hello world');
 const bold = await storage.mark(id, 'body', 0, 5, 'bold', true);
 await storage.spans(id, 'body');
-// [{ text: 'hello', marks: { bold: true } }, { text: ' world', marks: {} }]
+// [{ type: 'text', text: 'hello', marks: { bold: true } }, { type: 'text', text: ' world', marks: {} }]
 
 await storage.splice(id, 'body', 5, 0, '!');   // typed at the end of the range: bold
 await storage.splice(id, 'body', 0, 0, '>');   // typed before it: not
-// [{ text: '>', marks: {} }, { text: 'hello!', marks: { bold: true } }, { text: ' world', marks: {} }]
+// [{ type: 'text', text: '>', marks: {} }, { type: 'text', text: 'hello!', marks: { bold: true } },
+//  { type: 'text', text: ' world', marks: {} }]
 
 await storage.mark(id, 'body', 8, 13, 'link', 'https://x', { expand: 'none' });
 await storage.unmark(id, 'body', 0, 7, 'bold');
@@ -166,8 +206,63 @@ await storage.unmark(id, 'body', 0, 7, 'bold');
   place of what is there, the stacked marks under it included, and a
   stacking mark newer than it starts a stack over it.
 - The field still reads as the plain string; `spans` is raw — no lens, no
-  read hooks. Blocks (paragraphs, headings) are records: a document is a
-  list of block ids, each block a record with a text field.
+  read hooks. Every span carries a `type`: `'text'` here, `'embed'` and
+  `'block'` for what the next section adds.
+
+## Embeds and blocks
+
+A document is one text. What is not a character in it — an image, a
+mention, the start of a paragraph or a heading — is an **embed slot**: one
+position holding U+FFFC, the object replacement character, whose value is a
+**marker** `{ type, parents, attrs, isEmbed }`, a register of the slot like
+a list element's value (Automerge's model). `isEmbed: false` is a **block
+marker**: it starts a block, the text after it up to the next marker is the
+block's content, `parents` the block types it nests under (a list item's
+`['ordered-list']`), `attrs` what the type needs (a heading's level). `isEmbed:
+true` is an **inline embed**, a character wide, with marks like any character.
+
+```js
+await storage.updateText(id, 'body', 'Title\nFirst paragraph.');
+await storage.splitBlock(id, 'body', 0, { type: 'heading', attrs: { level: 1 } });
+await storage.splitBlock(id, 'body', 7, { type: 'paragraph' });
+await storage.insertEmbed(id, 'body', 14, { type: 'image', attrs: { src: 'a.png' } });
+
+(await storage.get(id)).body;      // '\uFFFCTitle\n\uFFFCFirst \uFFFCparagraph.' — the slots read as the character
+await storage.block(id, 'body', 0); // { type: 'heading', parents: [], attrs: { level: 1 }, isEmbed: false }
+await storage.spans(id, 'body');
+// [{ type: 'block', value: { type: 'heading', parents: [], attrs: { level: 1 }, isEmbed: false } },
+//  { type: 'text', text: 'Title\n', marks: {} },
+//  { type: 'block', value: { type: 'paragraph', parents: [], attrs: {}, isEmbed: false } },
+//  { type: 'text', text: 'First ', marks: {} },
+//  { type: 'embed', value: { type: 'image', parents: [], attrs: { src: 'a.png' }, isEmbed: true }, marks: {} },
+//  { type: 'text', text: 'paragraph.', marks: {} }]
+await storage.blocks(id, 'body');  // per marker: { index, type, parents, attrs, spans } — the spans up to the next
+
+await storage.updateBlock(id, 'body', 7, { type: 'paragraph', parents: ['blockquote'] });
+await storage.joinBlock(id, 'body', 7); // the paragraph joins the heading's block
+```
+
+- **One tree.** A slot is an element of the text's Fugue tree like a
+  character: the merge rules, the marks, the cursors and `index()` count it,
+  and a concurrent insert beside it lands as beside any character. Its marker
+  travels with the `splice` that inserts the slot (`vals`, each at its offset
+  in the content) and changes by an `assign` — `updateBlock`, or `setAt` on a
+  text — last writer wins, as a list element's value.
+- **Through the string.** `get()` reads the slots as U+FFFC; `updateText`
+  keeps the ones its text keeps, markers and all, and refuses a text that
+  adds one (a `TypeError` — a slot enters with its marker, through
+  `insertEmbed` or `splitBlock`), as `splice()` and `push()` do. A cut takes
+  a slot like any character: `splice(id, key, index, 1)` removes an embed,
+  `joinBlock` is the same cut checked against a marker (`NOT_FOUND` for a
+  slot that holds none). A text before its first marker is a block of type
+  null in `blocks()`.
+- **Patches and versions.** `diff()` hands a splice patch its `vals`, a
+  changed marker a `setAt` patch, and `restore()`, `compact()` and an undo
+  lay the markers again with the slots; a `commit` event carries the markers
+  of each side as `embeds` beside the readings, which show the slots alone.
+- A slot a peer inserted without a marker — a hand-made op — reads as an
+  embed of value `null`; a marker of another shape than the API writes reads
+  as none.
 
 ## Cursors
 
@@ -250,12 +345,15 @@ Beresford and Gomes's (2021), the one Loro's movable tree follows:
 A `tree` op carries `{ node, parent, fi }` — the node, its parent and its
 fractional index. A `mark` op carries the two anchors, the name, the value and whether it
 stacks — or the id of a mark to switch off. An `assign` op carries `{ elem,
-value }`, a `move` op `{ elem, cut, at, value }` — the element's name, the
-slot it showed at, the anchor of its new place and its value. A `splice` op carries the cut ranges, `[run, offset, length]` per run, and
+value }` — and `k: 't'` when the element is a text's embed slot, so the op
+ranks as a text's — a `move` op `{ elem, cut, at, value }` — the element's
+name, the slot it showed at, the anchor of its new place and its value. A `splice` op carries the cut ranges, `[run, offset, length]` per run, and
 either the anchor of its new run (`at`: `^` the head, `>e` or `<e` the right
 or left child of element `e`, named `ts:offset:origin`) or the writer's own
-run to extend (`run`, `from`); `content` is the inserted string or array and,
-empty, names the kind of a call that only removes. One call is one op, signed
+run to extend (`run`, `from` — never a move's position run, which holds its
+element alone: a peer's extension of one is malformed); `content` is the inserted string or array and,
+empty, names the kind of a call that only removes; `vals`, when the content
+holds embed slots, their markers at their offsets. One call is one op, signed
 and logged like any other — an editor that types a word sends one op per
 keystroke unless it batches them (see below). A keystroke extending the
 writer's run adds its characters to the run and no key to the record's
@@ -297,20 +395,58 @@ cannot, `open({ defer: 50 })` lets a record's file lag the log by that many
 milliseconds, so the keystrokes of one burst are one file write and one chain
 block (the log is durable at once, and every read sees every write — see
 [Storage](./storage)). Indices are UTF-16 code units, as
-`String#slice` counts them; a splice that splits a surrogate pair is the
-caller's to avoid.
+`String#slice` counts them, and a surrogate pair — a character outside the
+BMP, an emoji — is never split: `splice()`, `mark()`, `unmark()` and
+`cursor()` refuse an index between its halves with `SURROGATE` (`id`,
+`field`, `index`), `updateText()` diffs by code points where one is about,
+so its edits go around it, and a string with a lone half is a `TypeError`.
+
+The other way, from the storage to the editor, every op — a peer's as much
+as a local one — reports what the reading shows of it, in the reading's
+indices (see [Changes](./versions#changes)), and `observe(id, 'body',
+listener)` hands a binding one record's changes a turn at a time:
+
+```js
+const stop = storage.observe(id, 'body', (changes) => {
+  const delta = storage.toDelta(changes, 'body');
+  if (delta === null) return editor.setContents(await storage.get(id));  // a reset: read it again
+  editor.updateContents(delta, 'silent');                                  // Quill's form
+});
+await storage.applyDelta(id, 'body', editor.getContents().ops);          // the other way: one transaction
+const caret = await storage.cursor(id, 'body', editor.getSelection().index);
+await storage.position(id, 'body', caret);                               // { index, side } after edits around it
+```
+
+`toDelta()` composes the changes into one delta — `[{ retain, attributes? },
+{ insert, attributes? }, { delete }]` — a splice as a delete and an insert
+(the insert with the marks it reads with as attributes), a mark as
+attributes over its range (`null` removes one), an embed slot as
+`{ insert: { embed: marker } }`; `applyDelta()` makes a delta the field's
+edits as one transaction, so a peer sees them land together — an insert's
+attributes are exactly its marks, a mark that would have grown over it is
+taken off it — and with
+`expect`, the text the delta was made over, refuses with `STALE` when the
+field moved under it, before any op. `@alexify/syncom/editor` does all of
+this for an editor — see [Editors](./editors). A change a
+delta cannot say — a reset, an unset — makes it `null`: read the field again.
+`position()` restores a selection from the cursors kept across edits, and
+`positions()` several at once.
 
 ## Costs and limits
 
 - A record is read and written whole on every op, and a text lives three
   times on the node: as the field's string, as the runs in the record's
   metadata, and as the ops in the log. Keep a text to what a record is for —
-  a note, a comment, a description, a block of a document — and make a long
-  document a list of block records rather than one field. A keystroke that
-  extends the newest run at the end of the field — typing on at the end of
-  what you just typed — carries the field's index and reading over instead
-  of rebuilding them; any other edit (an insert elsewhere, a cut, a peer's
-  run) rebuilds them, once per op.
+  a note, a comment, a description, a document with its block markers — and
+  split what a record is not for across records. The field itself
+  is a rope: every edit — a keystroke at the end of what you just typed, an
+  insert anywhere, a cut, a peer's run with what hangs under it — lands in
+  O(log n) and leaves the reading cached, so what an op costs the engine does
+  not grow with the text (`bench/sequence.js`: some 60 000 to 90 000
+  inserts a second into a 100 KB text of 10 000 runs, 390 000 appends). What
+  grows is around it: the record file written after the op, and the load of
+  the field from its JSON once per open (a 100 KB text of one run in under
+  a tenth of a millisecond, 10 000 runs in some 20 ms).
 - A `splice` larger than a host's `bytesPerPush` is refused for the whole
   page it rides in; a paste of megabytes belongs in several calls.
 - A move adds a position run to the record's metadata — one key, some two
@@ -318,9 +454,22 @@ caller's to avoid.
   its position register — and the old slot stays as a tombstone: a list
   reordered thousands of times carries that history until a reset.
 - A tree keeps every move of every node until a reset — some eighty bytes
-  each — and folds all of them once per op that changes the field. Keep a
-  tree to the hundreds of nodes an outline or a folder pane shows, not the
-  hundreds of thousands a file system holds.
+  each — and keeps its fold with the field: a move — a local one, a peer's
+  arriving in stamp order, each move of an outline built in one transaction
+  — is one step of the fold (its walk up from the parent, the siblings it
+  leaves and joins), and the reading is made anew only along its path, so
+  what a move costs does not grow with the tree (`bench/tree.js`: some
+  16 000 `treeMove()` calls a second through the storage at 2 000 nodes as
+  at 32 000; an outline of 8 000 nodes built in one transaction in a quarter
+  of a second). A peer's move stamped before others undoes and redoes those.
+  A field read from its JSON — a record loaded from its file, a snapshot, a
+  merge — is folded whole once: some 1 ms at 5 000 moves; at the bound 25 ms
+  under one root, 50 ms in a random tree, 100 ms in the worst shape. A field
+  holds 65 536 moves, every node's together: past them `treeMove()` and
+  `treeRemove()` reject with `FIELD_KIND`, `kind: 'bound'`,
+  `detail: 'moves'`, a peer's move is refused (`OP_REFUSED`) and a snapshot
+  block holding more is not taken — `compact(id)` (below) writes the field
+  again as one move per node.
 - [`compact(id)`](./versions#costs) is the reset that keeps what the fields
   read as: it rewrites the record as a `write` of its registers and one op
   per field of another kind — a text or a list as one run, a tree as one move per node —
@@ -331,15 +480,18 @@ caller's to avoid.
   — and fields that read empty (see [Costs](./versions#costs)).
 - A tree reads 512 levels: a node that would hang deeper is folded but not
   shown, on every node alike, and `treeMove()` refuses a move that would reach
-  there (`OUT_OF_RANGE` with `node`, `depth` and `max`). A place among
+  there (`OUT_OF_RANGE` with `node`, `depth` and `max`). The fold's cycle check
+  walks 512 ancestors up from a move's parent at most: a peer's move under a
+  node deeper than that is moot, like a move that would make a cycle, the same
+  on every node — so a chain of thousands of nodes costs an op no more than a
+  tree 512 levels deep. A place among
   siblings is a fractional index of at most 1 024 characters: after some
   thirty thousand inserts at one spot — the end of a parent's children
   included — the next `treeMove()` there is `OUT_OF_RANGE` (`reason: 'fi'`,
   `length`, `max`) — move a sibling away, or reset the field. A peer's place
   that is not a fractional index is malformed and never lands.
 - A run holds at most 1 048 576 slots and a field 4 194 304, tombstones
-  included — the index allocates per slot, so this is what a peer can make a
-  node allocate. One `splice()` inserts at most a run's worth; typing past a
+  included — the bound on what a peer can make a node hold and walk. One `splice()` inserts at most a run's worth; typing past a
   full run starts a new one and reads the same; a field at its bound takes
   nothing more until a reset — `set()` of the record, or `compact(id)`,
   which writes the field again without its tombstones. Locally

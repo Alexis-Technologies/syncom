@@ -1,5 +1,7 @@
 'use strict';
 
+// Files land at once here (`defer: 0`): what these tests read of the disk is the engine's, not the window's — the window has tests of its own (storage.defer, storage.group).
+
 // The injected OpenTelemetry writer: what enables it, what it emits, and —
 // most of the file — that nothing a hostile tracer, meter, span or
 // instrument does can break a write.
@@ -17,8 +19,9 @@ const {
 } = require('@opentelemetry/sdk-metrics');
 const { AsyncLocalStorageContextManager } = require('@opentelemetry/context-async-hooks');
 
-const syncom = require('..');
-const { createTelemetry, DISABLED, SCOPE_NAME } = require('../src/telemetry.js');
+const syncom = require('../src/all/all.js');
+const { DISABLED, SCOPE_NAME } = require('../src/telemetry/writer.js');
+const { createTelemetry } = require('../src/telemetry/telemetry.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const { createMesh, settle, waitUntil } = require('./utils/mesh.js');
 const { MemoryLink } = require('./utils/memory-link.js');
@@ -66,7 +69,7 @@ const useActiveContext = (t) => {
 const openTemp = async (t, options = {}) => {
   const dir = await createTemp();
   t.after(() => cleanupTemp(dir));
-  const storage = await syncom.open({ path: dir, logger: false, ...options });
+  const storage = await syncom.open({ defer: 0, path: dir, logger: false, ...options });
   t.after(() => storage.close().catch(() => {}));
   return { dir, storage };
 };
@@ -532,6 +535,7 @@ test('Storage telemetry', async (t) => {
       unsigned: 0,
       forged: 1,
       outOfScope: 0,
+      equivocations: 0,
     });
     const [span] = named('syncom.apply');
     assert.strictEqual(span.attributes['syncom.ops.count'], 6);
@@ -581,7 +585,7 @@ test('Storage telemetry', async (t) => {
     assert.strictEqual(errors[0].code, 'UNPERSISTED');
     failing = false;
     await first.close();
-    const second = await syncom.open({ path: dir, logger: false, fsi, telemetry: { tracer, meter } });
+    const second = await syncom.open({ defer: 0, path: dir, logger: false, fsi, telemetry: { tracer, meter } });
     t2.after(() => second.close().catch(() => {}));
     assert.deepStrictEqual(await second.get(id), { n: 1 });
     const [span] = named('syncom.replay');
@@ -626,7 +630,13 @@ test('Sync telemetry', async (t) => {
     async (t2, name, options = {}) => {
       const dir = await createTemp();
       t2.after(() => cleanupTemp(dir));
-      const storage = await syncom.open({ path: dir, logger: false, telemetry: telemetryOf(name), ...options });
+      const storage = await syncom.open({
+        defer: 0,
+        path: dir,
+        logger: false,
+        telemetry: telemetryOf(name),
+        ...options,
+      });
       t2.after(() => storage.close().catch(() => {}));
       return storage;
     };
@@ -787,7 +797,9 @@ test('OpLog telemetry', async (t) => {
     t2.after(() => cleanupTemp(dir));
     const { tracer, named } = createTracing();
     const { meter, points } = createMetrics();
-    const log = await new syncom.OpLog(dir, { telemetry: { tracer, meter }, rollAfter: 2, retention: { ops: 4 } });
+    // A log on its own takes a writer — the adapter is the plugin's.
+    const telemetry = createTelemetry({ tracer, meter });
+    const log = await new syncom.OpLog(dir, { telemetry, rollAfter: 2, retention: { ops: 4 } });
     for (let seq = 1; seq <= 8; seq++) {
       await log.append([{ origin: 'n', seq, ts: seq, type: 'write', id: 'r', data: {} }]);
     }
@@ -802,6 +814,8 @@ test('OpLog telemetry', async (t) => {
     assert.strictEqual(point(segments, { 'syncom.log.event': 'sealed' }).value, 4);
     assert.strictEqual(point(segments, { 'syncom.log.event': 'dropped' }).value, 2);
     assert.strictEqual((await points('syncom.log.append.duration'))[0].value.count, 8);
+    const groups = (await points('syncom.log.group.ops'))[0].value;
+    assert.deepStrictEqual([groups.count, groups.sum], [8, 8], 'one op a group, each its own');
   });
 
   await t.test('an empty append is neither measured nor spanned', async (t2) => {
@@ -847,6 +861,9 @@ test('What the engine adds beyond the write path', async (t) => {
     assert.strictEqual((await points('syncom.log.length'))[0].value, 2);
     assert.strictEqual((await points('syncom.queue.depth'))[0].value, 0);
     assert.strictEqual((await points('syncom.outbox.size'))[0].value, 0);
+    for (const name of ['syncom.inflight', 'syncom.deferred', 'syncom.held']) {
+      assert.strictEqual((await points(name))[0].value, 0, name);
+    }
     assertNoIdentityLabels(
       await (async () => {
         const { collect } = createMetrics();
@@ -886,7 +903,7 @@ test('What the engine adds beyond the write path', async (t) => {
     // A rebuild: the catalog file gone, the next open scans data/ under a span.
     await storage.close();
     await require('node:fs/promises').rm(require('node:path').join(dir, 'index', 'catalog.json'));
-    const second = await syncom.open({ path: dir, logger: false, telemetry: { tracer, meter } });
+    const second = await syncom.open({ defer: 0, path: dir, logger: false, telemetry: { tracer, meter } });
     t2.after(() => second.close().catch(() => {}));
     // The first open rebuilt an empty directory too; the last span is this one.
     const rebuild = named('syncom.catalog.rebuild').at(-1);
@@ -942,11 +959,85 @@ test('What the engine adds beyond the write path', async (t) => {
       throw new Error('read boom');
     });
     assert.doesNotThrow(() => observed({ observe: hostile }), 'a reader that throws is contained');
-    // The last gauge registered reads the log length.
-    createTelemetry({ meter: observing }).gauges(() => ({ log: 3, cache: 'not a number' }));
+    // The last gauge registered reads the held records.
+    createTelemetry({ meter: observing }).gauges(() => ({ held: 3, cache: 'not a number' }));
     const seen = [];
     observed({ observe: (value) => seen.push(value) });
     assert.deepStrictEqual(seen, [3]);
     observed({ observe: hostile });
+  });
+});
+
+test("containment: an application's writer that lacks a method or throws never breaks or holds up a write", async (t) => {
+  const open = (telemetry) =>
+    syncom.open({ fsi: require('../src/memory/memory.js').memory(), lock: false, defer: 0, telemetry });
+  const within = (promise, label) =>
+    Promise.race([
+      promise,
+      new Promise((resolve, reject) => setTimeout(() => reject(new Error(`${label}: still pending`)), 2000).unref()),
+    ]);
+
+  await t.test('a writer with only enabled and withSpan', async () => {
+    const storage = await open({ enabled: true, withSpan: (_name, _attributes, fn) => fn(null) });
+    t.after(() => storage.close().catch(() => {}));
+    const id = await within(storage.insert({ n: 1 }), 'insert');
+    await within(storage.update(id, { n: 2 }), 'update');
+    assert.strictEqual((await storage.get(id)).n, 2);
+  });
+
+  await t.test('a writer whose every recording method throws', async () => {
+    const thrower = () => {
+      throw new Error('writer down');
+    };
+    const writer = { enabled: true, withSpan: (_name, _attributes, fn) => fn(null) };
+    for (const name of require('../src/telemetry/writer.js').METHODS) writer[name] = thrower;
+    const storage = await open(writer);
+    t.after(() => storage.close().catch(() => {}));
+    const id = await within(storage.insert({ n: 1 }), 'insert');
+    await within(storage.flush(), 'flush');
+    assert.strictEqual((await storage.get(id)).n, 1);
+  });
+
+  await t.test('withSpan that throws, never calls, or calls twice runs the work once and returns its result', () => {
+    const { writerOf } = require('../src/telemetry/writer.js');
+    const run = (withSpan) => {
+      let runs = 0;
+      const result = writerOf({ enabled: true, withSpan }).withSpan('syncom.commit', {}, () => {
+        runs++;
+        return 'done';
+      });
+      return { runs, result };
+    };
+    const thrown = () => {
+      throw new Error('down');
+    };
+    assert.deepStrictEqual(run(thrown), { runs: 1, result: 'done' });
+    assert.deepStrictEqual(
+      run(() => 'ignored'),
+      { runs: 1, result: 'done' },
+    );
+    assert.deepStrictEqual(
+      run((_n, _a, fn) => {
+        fn(null);
+        return fn(null);
+      }),
+      { runs: 1, result: 'done' },
+    );
+    assert.deepStrictEqual(
+      run((_n, _a, fn) => {
+        fn(null);
+        throw new Error('after the work');
+      }),
+      { runs: 1, result: 'done' },
+    );
+    const failing = writerOf({ enabled: true, withSpan: (_n, _a, fn) => fn(null) });
+    assert.throws(
+      () =>
+        failing.withSpan('x', {}, () => {
+          throw new Error('the work failed');
+        }),
+      /the work failed/,
+    );
+    assert.strictEqual(writerOf(failing), failing, 'a contained writer is not wrapped twice');
   });
 });

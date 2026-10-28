@@ -29,7 +29,10 @@ test('crypto.browser module', async (t) => {
     globalThis.atob = (s) => Buffer.from(s, 'base64').toString('latin1');
   }
 
-  const cryptoBrowser = require('../src/crypto.browser.js');
+  const cryptoBrowser = {
+    ...require('../src/encryption/rsa.browser.js'),
+    ...require('../src/signing/ed25519.browser.js'),
+  };
   const fsi = require('../src/fsi.browser.js');
 
   await runCryptoKeysTests(t, assert, cryptoBrowser, {

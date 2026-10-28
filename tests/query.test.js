@@ -5,7 +5,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { compileQuery, compareRows, fieldsOf, Cursor } = require('../src/query.js');
+const { compileQuery, compareRows, fieldsOf, Cursor } = require('../src/query/cursor.js');
 
 const rows = [
   { id: 'a', n: 1, s: 'apple', b: true, tags: ['x', 'y'], meta: { kind: 'k1', rank: 2 } },
@@ -211,7 +211,7 @@ test('Cursor over a fake source', async (t) => {
 });
 
 test('query guards: a pattern the size of a document, a projection of __proto__', () => {
-  const { compileQuery, Cursor } = require('../src/query.js');
+  const { compileQuery, Cursor } = require('../src/query/cursor.js');
   assert.throws(() => compileQuery({ key: { $regex: 'a'.repeat(1001) } }), /longer than 1000/);
   assert.doesNotThrow(() => compileQuery({ key: { $regex: 'a'.repeat(1000) } }));
   const source = { logger: null, candidates: () => null, ids: () => [], row: () => null, indexed: () => new Set() };

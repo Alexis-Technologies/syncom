@@ -1,12 +1,14 @@
 'use strict';
 
+// Files land at once here (`defer: 0`): what these tests read of the disk is the engine's, not the window's — the window has tests of its own (storage.defer, storage.group).
+
 // The dialing side's edges: registry toggles, manual sync, refusals from the
 // link factory, a host that already dials us, a link that cannot stream, and
 // failures on the way out.
 
 const test = require('node:test');
 const assert = require('node:assert');
-const syncom = require('..');
+const syncom = require('../src/all/all.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const { MemoryLink } = require('./utils/memory-link.js');
 const { waitUntil, settle } = require('./utils/mesh.js');
@@ -14,7 +16,7 @@ const { waitUntil, settle } = require('./utils/mesh.js');
 const openTemp = async (t, options = {}) => {
   const dir = await createTemp();
   t.after(() => cleanupTemp(dir));
-  const storage = await syncom.open({ path: dir, logger: false, ...options });
+  const storage = await syncom.open({ defer: 0, path: dir, logger: false, ...options });
   t.after(() => storage.close().catch(() => {}));
   return storage;
 };
@@ -170,6 +172,59 @@ test('SyncManager edges', async (t) => {
     assert.strictEqual(errors[0].code, 'STREAMS_UNSUPPORTED');
   });
 
+  await t.test(
+    'a bootstrap stops with BAD_PAGE on a page without records, a cursor that does not move on, a stream past maxPageBytes',
+    async (t2) => {
+      const host = await openTemp(t2, { sync: { log: { rollAfter: 2 }, retention: { ops: 4 } } });
+      for (let i = 0; i < 8; i++) await host.insert({ i });
+      const unit = host.sync.unit({ access: 'public', pageSize: 2 });
+      const reasons = async (Link, sync = {}) => {
+        const errors = [];
+        const dialer = await openTemp(t2, { sync: { autoStart: false, connect: () => new Link(unit), ...sync } });
+        dialer.sync.on('error', (error) => errors.push(error));
+        await dialer.sync.addNode({ url: 'mem://host' });
+        await dialer.sync.start();
+        await waitUntil(() => errors.some((error) => error.code === 'BAD_PAGE'));
+        const bad = errors.find((error) => error.code === 'BAD_PAGE');
+        assert.strictEqual(bad.url, 'mem://host');
+        return bad.reason;
+      };
+      // The host's second page comes back with the cursor it was asked from: it would page for ever.
+      class Loop extends MemoryLink {
+        async call(method, args) {
+          const answer = await super.call(method, args);
+          return method === 'syncom/snapshot' && args.cursor !== null ? { ...answer, cursor: args.cursor } : answer;
+        }
+      }
+      assert.strictEqual(await reasons(Loop), 'cursor');
+      class Bare extends MemoryLink {
+        async call(method, args) {
+          const answer = await super.call(method, args);
+          if (method !== 'syncom/snapshot') return answer;
+          const { records, ...rest } = answer;
+          void records;
+          return rest;
+        }
+      }
+      assert.strictEqual(await reasons(Bare), 'shape');
+      // A streamed page that never ends.
+      class Endless extends MemoryLink {
+        async call(method, args) {
+          const answer = await super.call(method, args);
+          return method === 'syncom/snapshot'
+            ? { id: 's1', eventId: answer.eventId, vector: answer.vector, cursor: null }
+            : answer;
+        }
+
+        async *stream() {
+          for (;;) yield `${JSON.stringify({ id: 'x', data: { pad: 'p'.repeat(1000) }, meta: {} })}\n`;
+        }
+      }
+      assert.strictEqual(await reasons(Endless, { maxPageBytes: 64 * 1024 }), 'bytes');
+      await assert.rejects(() => openTemp(t2, { sync: { autoStart: false, maxPageBytes: 0 } }), TypeError);
+    },
+  );
+
   await t.test('a push that fails mid-flight is reported and recomputed from the vector', async (t2) => {
     const host = await openTemp(t2);
     const unit = host.sync.unit({ access: 'public' });
@@ -233,6 +288,7 @@ test('SyncManager edges', async (t) => {
     await waitUntil(() => dialer.sync.peers()[0]?.subscribed);
     // Break the feed from the host side: the generator throws on its next pull.
     const original = unit.changes.handler;
+    // oxlint-disable-next-line require-yield -- a feed that fails before its first page
     unit.changes.handler = async function* () {
       throw new Error('feed broke');
     };
@@ -273,12 +329,12 @@ test('a torn registry file is reported and skipped, not fatal to the open', asyn
   t.after(() => cleanupTemp(dir));
   const warnings = [];
   const logger = { warn: (entry) => warnings.push(entry), debug() {}, info() {}, error() {} };
-  const first = await syncom.open({ path: dir, logger });
+  const first = await syncom.open({ defer: 0, path: dir, logger });
   await first.sync.addNode({ url: 'mem://a' });
   await first.sync.addNode({ url: 'mem://b' });
   await first.close();
   await fs.writeFile(path.join(dir, 'remote', `${encodeURIComponent('mem://a')}.json`), '{torn');
-  const second = await syncom.open({ path: dir, logger });
+  const second = await syncom.open({ defer: 0, path: dir, logger });
   t.after(() => second.close());
   assert.deepStrictEqual(
     second.sync.listNodes().map((node) => node.url),

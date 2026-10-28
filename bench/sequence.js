@@ -1,8 +1,18 @@
 /**
  * Lists and text: the sequence engine behind the two kinds — what one
- * keystroke costs the model (a fold over a block with a run per insert), a
- * reading, a snapshot join, a diff, and the same through the storage over
- * the memory backend.
+ * keystroke costs the model (the rope under a block: an op on the newest
+ * block, as the storage applies them, one after another), a reading, a
+ * block hydrated from its JSON, a snapshot join, a diff, and the same
+ * through the storage over the memory backend. An edit at an index goes
+ * where `placeInsert`/`rangesOf` send it, as `updateText` would — a new
+ * run under the element there, or the writer's own run grown; the text is
+ * read after every op, as the storage reads it. One row applies every op
+ * to the SAME older block — a fork, which re-hints the rope once per op —
+ * the cost of editing a version that is not the head. The rows at size are
+ * where a cost per element would show: a keystroke and a mark in a text
+ * under 5 000 marks, setAt, move and push in a list of 50 000, typing into
+ * a run 200 000 long while reading inside it, the first op on a record read
+ * from its JSON.
  *
  * Run with `node bench/sequence.js` or `pnpm bench`.
  */
@@ -10,13 +20,30 @@
 'use strict';
 
 const { bench } = require('./support/harness.js');
-const S = require('../src/sequence.js');
-const { applyOp } = require('../src/ops.js');
-const { diff } = require('../src/myers.js');
-const { createMemoryFsi } = require('../src/backend.js');
-const { open } = require('../src/storage.js');
+const S = require('../src/text/sequence.js');
+const { applyOp, open } = require('../src/all/all.js');
+const { diff } = require('../src/text/myers.js');
+const { memory } = require('../src/memory/memory.js');
 
 const op = (type, ts, origin, key, value) => ({ origin, seq: ts, ts, type, id: 'r', key, value });
+
+// A seeded index: the same places every run.
+const rng = (seed) => () => {
+  seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+  return seed / 2 ** 32;
+};
+const random = rng(7);
+const indexIn = (entry) => Math.floor(random() * S.lengthOf(S.indexOf(entry, 'body')));
+// What a keystroke at `i` by `origin` sends: a splice placed by the engine.
+const insertAt = (entry, ts, origin, i, content = 'z') =>
+  applyOp(entry, op('splice', ts, origin, 'body', { ...S.placeInsert(S.indexOf(entry, 'body'), i, origin), content }))
+    .entry;
+// A character at `i` replaced by one of `origin`: a cut, then an insert there.
+const replaceAt = (entry, ts, origin, i) => {
+  const cut = S.rangesOf(S.indexOf(entry, 'body'), i, 1);
+  const next = applyOp(entry, op('splice', ts, origin, 'body', { cut, content: '' })).entry;
+  return insertAt(next, ts + 1, origin, i);
+};
 
 const main = async () => {
   console.log(`Sequence benchmark — Node ${process.version}\n`);
@@ -33,24 +60,99 @@ const main = async () => {
   }
   let ts = 5000;
   const run = S.runKey(1, 'A');
-  await bench('applyOp — append one char to a 1 000-char text (one run)', () =>
+  // Every row applies its ops to the newest entry, one after another.
+  let typed = oneRun;
+  let len = 1000;
+  await bench('applyOp — append one char to a 1 000-char text (one run)', () => {
+    typed = applyOp(typed, op('splice', ++ts, 'A', 'body', { run, from: len++, content: 'z' })).entry;
+  });
+  let inserted = oneRun;
+  await bench('applyOp — insert one char at a random index of a 1 000-char text (one run)', () => {
+    inserted = insertAt(inserted, ++ts, 'C', indexIn(inserted));
+  });
+  let replaced = oneRun;
+  await bench(
+    'applyOp — replace one char at a random index of a 1 000-char text (a cut, an insert)',
+    () => {
+      replaced = replaceAt(replaced, (ts += 2), 'C', indexIn(replaced));
+    },
+    { opsPerIteration: 2 },
+  );
+  let prepended = chain;
+  await bench('applyOp — prepend one char to a 1 000-run text', () => {
+    prepended = insertAt(prepended, ++ts, 'C', 0);
+  });
+  await bench('applyOp — append one char to an older block (a fork: the rope re-hinted)', () =>
     applyOp(oneRun, op('splice', ++ts, 'A', 'body', { run, from: 1000, content: 'z' })));
-  await bench('applyOp — insert one char into a 1 000-char text (new run)', () =>
-    applyOp(oneRun, op('splice', ++ts, 'C', 'body', { at: `<${S.elemKey(run, 500)}`, content: 'z' })));
-  await bench('applyOp — delete 10 chars from a 1 000-char text', () =>
-    applyOp(oneRun, op('splice', ++ts, 'C', 'body', { cut: [[run, 400, 10]], content: '' })));
-  await bench('applyOp — prepend one char to a 1 000-run text', () =>
-    applyOp(chain, op('splice', ++ts, 'C', 'body', { at: `<${S.elemKey(prev, 0)}`, content: 'z' })));
   await bench('applyOp — merge two pictures of a 1 000-char text', () =>
     applyOp(
       oneRun,
       op('merge', ++ts, 'M', undefined, undefined) && { ...op('merge', ts, 'M'), data: chain.data, meta: chain.meta },
     ));
-  const seq = oneRun.meta.seqs.body;
-  await bench('buildIndex + render — a 1 000-char text', () => S.render(S.buildIndex(seq)));
-  const big = applyOp(null, op('splice', 1, 'A', 'body', { at: '^', content: 'x'.repeat(100_000) })).entry.meta.seqs
+  const seqJson = JSON.stringify(oneRun.meta.blocks.body);
+  await bench('hydrate + render — a 1 000-char text from its JSON', () =>
+    S.render(S.hydrate(JSON.parse(seqJson), null)));
+  const big = applyOp(null, op('splice', 1, 'A', 'body', { at: '^', content: 'x'.repeat(100_000) })).entry.meta.blocks
     .body;
-  await bench('buildIndex + render — a 100 KB text (one run)', () => S.render(S.buildIndex(big)));
+  const bigJson = JSON.stringify(big);
+  await bench('hydrate + render — a 100 KB text (one run) from its JSON', () =>
+    S.render(S.hydrate(JSON.parse(bigJson), null)));
+  // A pasted document edited anywhere: every keystroke a new run under an
+  // element of the one big run.
+  let pasted = applyOp(null, op('splice', 1, 'A', 'body', { at: '^', content: 'x'.repeat(100_000) })).entry;
+  await bench('applyOp — insert one char at a random index of a 100 KB text (one run)', () => {
+    pasted = insertAt(pasted, ++ts, 'C', indexIn(pasted));
+  });
+  // Ten thousand runs of ten characters, each anchored after the last
+  // element of the one before — a 100 KB text as a long chain of right
+  // children, origins alternating so no run extends another. Built as a
+  // block and folded in through one merge: folding it in op by op is itself
+  // the slow path this measures. Edits land anywhere in it, at the head, and
+  // as a cut; the reading is built anew.
+  const RUNS = 10_000;
+  const chainRuns = {};
+  const anchors = [];
+  let last = null;
+  for (let i = 0; i < RUNS; i++) {
+    const key = S.runKey(10 + i, i % 2 ? 'B' : 'A');
+    chainRuns[key] = [last === null ? S.HEAD : `>${S.elemKey(last, 9)}`, ['xxxxxxxxxx']];
+    anchors.push(key);
+    last = key;
+  }
+  const longMeta = {
+    clock: {},
+    base: null,
+    deleted: null,
+    counters: {},
+    sets: {},
+    blocks: { body: { k: 't', ts: 10 + RUNS, runs: chainRuns } },
+    trees: {},
+  };
+  const longText = applyOp(null, {
+    ...op('merge', 20_000, 'M'),
+    data: { body: 'x'.repeat(RUNS * 10) },
+    meta: longMeta,
+  }).entry;
+  ts = Math.max(ts, 30_000);
+  let anywhere = longText;
+  await bench('applyOp — insert one char at a random index of a 100 KB text (10 000 runs)', () => {
+    anywhere = insertAt(anywhere, ++ts, 'C', indexIn(anywhere));
+  });
+  let front = longText;
+  await bench('applyOp — prepend one char to a 10 000-run text', () => {
+    front = insertAt(front, ++ts, 'C', 0);
+  });
+  let over = longText;
+  await bench(
+    'applyOp — replace one char at a random index of a 100 KB text (10 000 runs)',
+    () => {
+      over = replaceAt(over, (ts += 2), 'C', indexIn(over));
+    },
+    { opsPerIteration: 2 },
+  );
+  const longJson = JSON.stringify(longText.meta.blocks.body);
+  await bench('hydrate + render — a 100 KB text (10 000 runs) from its JSON', () =>
+    S.render(S.hydrate(JSON.parse(longJson), null)));
   let marked = oneRun;
   for (let i = 0; i < 50; i++) {
     const start = `<${S.elemKey(run, i * 10)}`;
@@ -60,18 +162,95 @@ const main = async () => {
       op('mark', 100 + i, 'A', 'body', { start, end, key: i % 2 ? 'bold' : 'em', value: true }),
     ).entry;
   }
-  const markedSeq = marked.meta.seqs.body;
-  await bench('spans — 1 000 chars, 50 overlapping marks', () => S.spans(S.buildIndex(markedSeq), markedSeq));
+  const markedSeq = marked.meta.blocks.body;
+  await bench('spans — 1 000 chars, 50 overlapping marks', () => S.spans(markedSeq, markedSeq));
+  // An op of the rows at size: its value, then the field (`body` unless named).
+  const edit = (type, stamp, origin, value, key = 'body') => op(type, stamp, origin, key, value);
+  // A text of 20 000 characters under 5 000 marks: a keystroke reads the
+  // style it lands in from the index of the marks, a mark goes into it.
+  let rich = applyOp(null, edit('splice', ++ts, 'A', { at: '^', content: 'x'.repeat(20_000) })).entry;
+  const richRun = S.runKey(ts, 'A');
+  for (let i = 0; i < 5000; i++) {
+    const a = Math.floor(random() * 19_000);
+    const start = `<${S.elemKey(richRun, a)}`;
+    const end = `<${S.elemKey(richRun, a + 1 + Math.floor(random() * 200))}`;
+    const key = ['bold', 'em', 'link', 'code'][i % 4];
+    rich = applyOp(rich, edit('mark', ++ts, 'A', { start, end, key, value: true })).entry;
+  }
+  await bench('applyOp — insert one char mid-text into 20 000 chars under 5 000 marks', () => {
+    const length = S.lengthOf(S.indexOf(rich, 'body'));
+    rich = insertAt(rich, ++ts, 'C', Math.floor(length / 4 + random() * (length / 2)));
+  });
+  await bench('applyOp — a mark over 20 000 chars under 5 000 marks', () => {
+    const idx = S.indexOf(rich, 'body');
+    const a = Math.floor(random() * (S.lengthOf(idx) - 10));
+    const [start, end] = S.markAnchors(idx, a, a + 5, 'after');
+    rich = applyOp(rich, edit('mark', ++ts, 'C', { start, end, key: 'em', value: true })).entry;
+  });
+  // A list of 50 000 elements, values assigned: an op reads its index off
+  // the rope and derives the reading from the one before.
+  const many = [];
+  for (let i = 0; i < 50_000; i++) many.push(i);
+  let big50 = applyOp(null, edit('splice', ++ts, 'A', { at: '^', content: many }, 'items')).entry;
+  const elementAt = (i) => S.elemAt(S.indexOf(big50, 'items'), i);
+  big50 = applyOp(big50, edit('assign', ++ts, 'A', { elem: elementAt(0), value: -1 }, 'items')).entry;
+  await bench('applyOp — setAt in a 50 000-element list', () => {
+    const elem = elementAt(Math.floor(random() * 50_000));
+    big50 = applyOp(big50, edit('assign', ++ts, 'A', { elem, value: ts }, 'items')).entry;
+  });
+  await bench('applyOp — move in a 50 000-element list', () => {
+    const idx = S.indexOf(big50, 'items');
+    const length = S.lengthOf(idx);
+    const from = Math.floor(random() * length);
+    const to = (from + 1 + Math.floor(random() * (length - 1))) % length;
+    const place = S.placeInsert(idx, to < from ? to : to + 1, 'A');
+    const at = place.at ?? `>${S.elemKey(place.run, place.from - 1)}`;
+    const value = S.valueAt(idx, from);
+    const payload = { elem: S.elemAt(idx, from), cut: S.slotAt(idx, from), at, value };
+    big50 = applyOp(big50, edit('move', ++ts, 'A', payload, 'items')).entry;
+  });
+  await bench('applyOp — push onto a 50 000-element list', () => {
+    const idx = S.indexOf(big50, 'items');
+    const place = S.placeInsert(idx, S.lengthOf(idx), 'A', 1);
+    big50 = applyOp(big50, edit('splice', ++ts, 'A', { ...place, content: [ts] }, 'items')).entry;
+  });
+  // A run typed 200 000 characters long, its middle read on each keystroke
+  // (a selection, a mark's edge): the body is held in sealed segments, so
+  // the read never copies what was typed.
+  let typedLong = oneRun;
+  for (let i = 0; i < 200_000; i++) typedLong = insertAt(typedLong, ++ts, 'D', 500 + i);
+  let typedAt = 500 + 200_000;
+  await bench('applyOp — type into a run 200 000 long, a char inside it read per keystroke', () => {
+    const idx = S.indexOf(typedLong, 'body');
+    S.heldAt(idx, 500 + Math.floor(random() * 200_000));
+    typedLong = insertAt(typedLong, ++ts, 'D', typedAt++);
+  });
+  // A record of an editing trace read from its JSON: the first op hydrates
+  // the block once, for the reading before it and the op alike.
+  let traced = oneRun;
+  for (let i = 0; i < 20_000; i++) {
+    const length = S.lengthOf(S.indexOf(traced, 'body'));
+    traced = insertAt(traced, ++ts, ['A', 'B', 'C'][i % 3], Math.floor(random() * (length + 1)), 'abc');
+  }
+  const tracedJson = JSON.stringify({ data: traced.data, meta: traced.meta });
+  await bench(
+    'applyOp — the first op on a record read from its JSON (20 000 edits)',
+    () => {
+      const loaded = JSON.parse(tracedJson);
+      insertAt(loaded, ++ts, 'E', Math.floor(S.lengthOf(S.indexOf(loaded, 'body')) / 2));
+    },
+    { warmup: 5 },
+  );
   const before = 'the quick brown fox '.repeat(50);
   const after = `${before.slice(0, 500)}X${before.slice(500)}`;
   await bench('diff — one keystroke in a 1 KB text', () => diff(before, after));
 
-  const storage = await open({ path: '/bench', fsi: createMemoryFsi(), logger: false });
+  const storage = await open({ path: '/bench', fsi: memory(), logger: false, defer: 0 });
   const id = await storage.insert({});
   await storage.updateText(id, 'body', before);
-  await bench('storage.push — one char (memory fsi)', () => storage.push(id, 'body', 'z'));
+  await bench('storage.push — one char (memory fsi, defer: 0)', () => storage.push(id, 'body', 'z'));
   let n = 0;
-  await bench('storage.updateText — one keystroke in a 1 KB text (memory fsi)', async () => {
+  await bench('storage.updateText — one keystroke in a 1 KB text (memory fsi, defer: 0)', async () => {
     const current = (await storage.get(id)).body;
     n++;
     await storage.updateText(id, 'body', `${current.slice(0, 500 + (n % 7))}Q${current.slice(500 + (n % 7))}`);
@@ -82,18 +261,30 @@ const main = async () => {
     'items',
     Array.from({ length: 100 }, (_, i) => i),
   );
-  await bench('storage.move — in a 100-element list (memory fsi)', () => storage.move(list, 'items', n++ % 100, 50));
+  await bench('storage.move — in a 100-element list (memory fsi, defer: 0)', () =>
+    storage.move(list, 'items', n++ % 100, 50));
   // The record file written whole on every keystroke, against the same
-  // keystrokes under `defer`: the file and the block wait for the window.
+  // keystrokes under the default window: the file and the block wait for it.
   const long = await storage.insert({});
   await storage.updateText(long, 'body', 'x'.repeat(10_000));
-  await bench('storage.push — one char into a 10 KB text (memory fsi)', () => storage.push(long, 'body', 'z'));
+  await bench('storage.push — one char into a 10 KB text (memory fsi, defer: 0)', () =>
+    storage.push(long, 'body', 'z'));
   await storage.close();
-  const deferred = await open({ path: '/bench-defer', fsi: createMemoryFsi(), logger: false, defer: 50 });
+  const deferred = await open({ path: '/bench-defer', fsi: memory(), logger: false });
   const lazy = await deferred.insert({});
   await deferred.updateText(lazy, 'body', 'x'.repeat(10_000));
-  await bench('storage.push — one char into a 10 KB text, defer: 50 (memory fsi)', () =>
+  await bench('storage.push — one char into a 10 KB text (memory fsi, defer: 16, the default)', () =>
     deferred.push(lazy, 'body', 'z'));
+  // An editor's stream: a thousand keystrokes sent without waiting for each.
+  await bench(
+    'storage.push — one char into a 10 KB text, pipelined by 1 000 (memory fsi)',
+    async () => {
+      const writes = [];
+      for (let i = 0; i < 1000; i++) writes.push(deferred.push(lazy, 'body', 'z'));
+      await writes[writes.length - 1];
+    },
+    { opsPerIteration: 1000, warmup: 2 },
+  );
   await deferred.close();
 };
 

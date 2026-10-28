@@ -6,7 +6,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { diff, patch } = require('../src/myers.js');
+const { diff, patch } = require('../src/text/myers.js');
 
 test('myers diff', async (t) => {
   await t.test('hunks are splices in the before string, last first', () => {
@@ -46,6 +46,25 @@ test('myers diff', async (t) => {
       const hunks = diff(a, b);
       assert.strictEqual(patch(a, hunks), b, `${JSON.stringify(a)} -> ${JSON.stringify(b)}: ${JSON.stringify(hunks)}`);
     }
+  });
+
+  await t.test('a pair is never split: the diff runs by code points where a surrogate is about', () => {
+    const halves = (s) => /[\uD800-\uDFFF]/.test(s) && !s.isWellFormed();
+    for (const [a, b] of [
+      ['a😀b', 'a😁b'],
+      ['😀😀', '😀x😀'],
+      ['x😀', '😀'],
+      ['a😀😁😂b', 'a😂😁😀b'],
+      ['hello 😀 world', 'hello world'],
+    ]) {
+      const hunks = diff(a, b);
+      assert.strictEqual(patch(a, hunks), b, `${a} -> ${b}`);
+      for (const [index, count, text] of hunks) {
+        assert.ok(!halves(a.slice(index, index + count)), `${a} -> ${b}: cut ${index}..${index + count} splits a pair`);
+        assert.ok(!halves(text), `${a} -> ${b}: inserts a lone half`);
+      }
+    }
+    assert.deepStrictEqual(diff('a😀b', 'a😁b'), [[1, 2, '😁']], 'the whole character, two units');
   });
 
   await t.test('indices are UTF-16 code units; past max edits one hunk replaces the middle', () => {

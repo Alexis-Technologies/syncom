@@ -126,8 +126,8 @@ Keep all existing links intact.
 The types are hand-written: `index.d.ts` (Node surface), `browser.d.ts` (re-exports `index.d.ts` and overrides the three async crypto functions) and `wrpc.d.ts` (the `./wrpc` subpath):
 
 1. `pnpm test:types` (tsd, `tests/*.test-d.ts`) must pass with no errors
-2. Read `src/index.js`, `src/index.browser.js` and `src/wrpc.js` and confirm every exported class, function, type and method is declared, and no private (`#`) or internal fields leak into the declarations
-3. Confirm the event maps (`StorageEvents`, `SyncEvents`, `RecordEvents`) and the hook option types match the events and hooks `src/commit.js`, `src/apply.js`, `src/bootstrap.js`, `src/storage.js` and `src/sync.js` actually emit and run
+2. Read `src/index.js`, `src/index.browser.js` and every subpath's entry (`package.json#exports`, `src/<name>/<name>.js`) and confirm every exported class, function, type and method is declared, and no private (`#`) or internal fields leak into the declarations
+3. Confirm the event maps (`StorageEvents`, `SyncEvents`, `RecordEvents`) and the hook option types match the events and hooks `src/commit.js`, `src/apply.js`, `src/bootstrap.js`, `src/storage.js` and `src/sync/manager.js` actually emit and run
 4. If the release includes API changes, update the typings and `tests/*.test-d.ts` accordingly; a `.d.ts` change and its `tsd` test land together
 
 ## Step 5: README, Docs & License Review
@@ -139,7 +139,7 @@ Scan for staleness:
 1. **README.md usage examples**: do they match the current API? Run them if in doubt; the documented outputs must be true
 2. **README.md bundle-size table**: refresh it from `pnpm size`
 3. **Badges**: do the URLs point to `@alexify/syncom` and the `Alexis-Technologies` repository?
-4. **docs/**: guide and reference pages for anything the release changed; `docs/guide/sync.md` and `docs/guide/wrpc.md` must agree with `src/sync.js` and `src/hosting.js`, and `docs/guide/hooks.md` with the hook and event surface of `src/commit.js`, `src/apply.js`, `src/bootstrap.js`, `src/storage.js` and `src/sync.js`. `pnpm docs:build` must pass (dead links fail it)
+4. **docs/**: guide and reference pages for anything the release changed; `docs/guide/sync.md` and `docs/guide/wrpc.md` must agree with `src/sync/manager.js` and `src/sync/hosting.js`, and `docs/guide/hooks.md` with the hook and event surface of `src/commit.js`, `src/apply.js`, `src/bootstrap.js`, `src/storage.js` and `src/sync/manager.js`. `pnpm docs:build` must pass (dead links fail it)
 5. **docs/public/llms.txt**: key facts (exports, Node.js version, size)
 6. **docs keywords**: the `const keywords = [...]` block in `docs/.vitepress/config.mts` mirrors `package.json#keywords` (the consistency test checks it)
 7. **SECURITY.md**: the supported-versions table, on a major release (or the first one)

@@ -7,13 +7,23 @@
 // between "logged" and "written to data/" recoverable).
 //
 // Layout under `<path>/log/`, over fsi (whole-file read/write, no rename):
-//   open/<seq>.json     one file per append batch, rewritten only by a scrub
-//                       — a torn write can only damage the newest batch,
-//                       which has not been announced to anyone yet
+//   open/<seq>-<n>.jsonl  a JOURNAL, where the backend can append: one line
+//                       per GROUP of appends — every append that came while
+//                       the line before it was being written — named by the
+//                       first seq it holds and a token unique to this open;
+//                       begun again at every roll, removed once every group
+//                       in it is sealed, rewritten only by a scrub. A torn
+//                       write can only damage its last line, whose group was
+//                       never announced to anyone
+//   open/<seq>.json     the same group as a file of its own, where the
+//                       backend cannot append
 //   seg-<from>.json     sealed segments: the open files rolled together once
 //                       enough of them accumulate
-//   index.json          { epoch, floor, next, vector, segments, droppedHeld,
-//                       latestTs, droppedTs } — a summary;
+//   corrupt/<name>      an open group file that read whole but failed its
+//                       checksum: kept aside as the evidence, its entries
+//                       lost from this node (`droppedTs`, `corrupt`)
+//   index.json          { epoch, floor, next, vector, heads, segments,
+//                       droppedHeld, latestTs, droppedTs } — a summary;
 //                       the files are the source of truth and anything the
 //                       index lacks is rebuilt from a directory listing
 //
@@ -23,16 +33,33 @@
 // coincidence. `floor` is the lowest seq still retained: below it, and for an
 // unknown epoch, `since()` answers null — "I cannot resume you, take a
 // snapshot" — never a silent gap.
+//
+// Every entry an append is handed a fingerprint for keeps it (`fp`, the
+// SHA-256 of the op's header, src/header.js), and the log knows, by stream
+// (`origin@scope`, vector.js opKey) and seq, the fingerprint of every op it
+// retains — and of the newest op of every stream it ever held, its HEAD, kept
+// in the index beside the vector, so a stream compacted away still has one.
+// Both move with the vector, at the append, and go back with it when a group
+// fails: what a writer chains its next op to (`prev`), and what a peer's op is
+// held to (src/apply.js).
 
 const defaultFsi = require('./fsi.js');
-const { formatEventId, parseEventId, vectorAdvance } = require('./vector.js');
+const { formatEventId, parseEventId, vectorAdvance, opKey } = require('./vector.js');
+const { checksum } = require('./hash.js');
 const { GLOBAL_SCOPE, inScope } = require('./scope.js');
-const { createTelemetry, traced, now } = require('./telemetry.js');
+const { writerOf, traced, now } = require('./telemetry/writer.js');
+const { SyncomError } = require('./errors.js');
+const { scrubOp } = require('./header.js');
 
 const OPEN = 'open';
+const CORRUPT = 'corrupt';
+const JOURNAL = '.jsonl';
 const INDEX = 'index.json';
 const DEFAULT_ROLL_AFTER = 64;
 const DEFAULT_RETENTION_OPS = 10_000;
+
+// SHA-256 as base64url (src/crypto/digest.js `hashOf`), as src/shape.js checks an op's `prev`.
+const FINGERPRINT = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
 
 const pad = (n) => String(n).padStart(10, '0');
 const segmentName = (from) => `seg-${pad(from)}.json`;
@@ -45,20 +72,94 @@ const parseJson = (text) => {
   }
 };
 
+// A log file: its entries and their checksum (xxHash32 of the entries'
+// JSON), so a torn or altered file is told from a whole one at open. A file
+// without one is not whole.
+const fileOf = (entries) => {
+  const text = JSON.stringify(entries);
+  return `{"entries":${text},"hash":"${checksum(text)}"}`;
+};
+// A file the listing or the index names that is not there — removed
+// between the two — reads as nothing. Any other failure to read it (EIO,
+// EMFILE, a quota) fails the open: one that went on without it could hand
+// its seqs out again, and a transient error would cost what it held.
+const isAbsent = (error) => error?.code === 'ENOENT' || error?.name === 'NotFoundError';
+const readOrNull = async (fsi, dir, name) => {
+  try {
+    return await fsi.read(dir, name);
+  } catch (error) {
+    if (isAbsent(error)) return null;
+    throw new SyncomError('CORRUPT', `The log file ${dir}/${name} cannot be read`, { cause: error, file: name });
+  }
+};
+
+// index.json as `#writeIndex` writes it, or null: an index with a field
+// missing or of another shape is no index of this log's.
+const indexOf = (index) => {
+  if (index === null || typeof index !== 'object' || Array.isArray(index)) return null;
+  if (typeof index.epoch !== 'string' || !Number.isSafeInteger(index.floor) || index.floor < 1) return null;
+  if (!isMap(index.vector) || !isMap(index.heads)) return null;
+  if (!Number.isSafeInteger(index.droppedHeld) || index.droppedHeld < 0) return null;
+  if (typeof index.latestTs !== 'number' || typeof index.droppedTs !== 'number') return null;
+  return index;
+};
+const isMap = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+
+const readFile = (text) => {
+  const parsed = text === null ? null : parseJson(text);
+  if (!parsed || !Array.isArray(parsed.entries)) return { entries: null, reason: 'malformed' };
+  if (typeof parsed.hash !== 'string' || checksum(JSON.stringify(parsed.entries)) !== parsed.hash) {
+    return { entries: null, reason: 'checksum' };
+  }
+  return { entries: parsed.entries, reason: null };
+};
+
+// Whether the ascending `seqs` hold one in [from, to].
+const anyWithin = (seqs, from, to) => {
+  let low = 0;
+  let high = seqs.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (seqs[mid] < from) low = mid + 1;
+    else high = mid;
+  }
+  return low < seqs.length && seqs[low] <= to;
+};
+
+// What the log does not replay is written whole or not at all (see src/fsi.js).
+const ATOMIC = Object.freeze({ atomic: true });
+
 class OpLog {
   #path;
   #openPath;
   #entries = [];
-  #openFiles = [];
+  // The groups the open files hold, in seq order: `{ first, last, file }`.
+  #open = [];
+  // Where the backend can append, the groups go as lines of a journal: the
+  // one being written, this open's token for its names, how many it began.
+  #journaled = false;
+  #journal = null;
+  #session = Date.now().toString(36);
+  #journals = 0;
   #segments = [];
   #next = 1;
   #latestTs = 0;
   #floor = 1;
   #epoch = null;
   #vector = {};
+  // Stream → seq → fingerprint, of every op retained (and every op reserved);
+  // stream → [seq, fingerprint] of the newest op ever held, compacted or not.
+  #prints = new Map();
+  #heads = new Map();
+  // Stream → its retained entries in log order (`entries`, the live ones
+  // from `head`): what a push picks the ops a peer lacks from — a binary
+  // search per stream for the seq it holds — without walking the log.
+  // Compaction drops a stream's first entries; a failed group never got here.
+  #streams = new Map();
   #rollAfter;
   #retention;
   #log;
+  #rollFailures = 0;
   #otel;
   #fsi;
   #droppedHeld = 0;
@@ -66,31 +167,54 @@ class OpLog {
   // could not read: what a reader of the past checks before it trusts the
   // log to be whole from some point on (see `droppedTs`).
   #droppedTs = 0;
+  // Files whose checksum did not match at open: altered or torn on disk.
+  #corrupt = 0;
   #lost = false;
+  // Journal lines left out at open as torn (their append never answered),
+  // and groups whose write failed since this open: what `stats().log` says.
+  #tornLines = 0;
+  #appendFailures = 0;
   // Entries compaction keeps whatever the retention says (see `retain`),
   // and whatever a reader pinned for the time being (see `pin`).
   #keep = null;
   #pins = new Set();
   #torn = new Set();
   #writes = Promise.resolve();
-  // Batches appended whose records may not be written yet: first seq → last
-  // seq. Only kept under `sealApplied`; a roll stops short of the oldest.
-  #pending = new Map();
+  // The group of appends being gathered (its entries, with their seqs
+  // reserved, and the promise its callers await) and whether a group is on
+  // its way to disk: appends that come while one is written join the next,
+  // which goes as one file once the first is down — group commit.
+  #group = null;
+  #flushing = false;
+  // Open files whose records may not be written yet: first seq → { first,
+  // last, left } with `left` the seqs not yet marked applied — kept in
+  // first-seq order, so the oldest is the first value. Only under
+  // `sealApplied`; a roll stops short of the oldest.
+  // The open groups not applied whole, in seq order: a sorted array read
+  // from `#pendingHead` (the groups before it are applied and dropped
+  // lazily), so `applied` finds its groups by binary search — a Map walked
+  // from its oldest group made marking a flush O(positions × groups).
+  #pending = [];
+  #pendingHead = 0;
   #sealApplied;
   // Record id → the seqs of its entries: what a scrub rewrites, found
   // without a walk over everything retained.
   #byId = new Map();
   #onRoll = null;
+  #onFail = null;
   #seen = null;
 
   constructor(basePath, options = {}) {
     this.#path = `${basePath}/log`;
     this.#openPath = `${this.#path}/${OPEN}`;
     this.#fsi = options.fsi ?? defaultFsi;
+    this.#journaled = typeof this.#fsi.append === 'function';
     this.#rollAfter = options.rollAfter ?? DEFAULT_ROLL_AFTER;
-    this.#retention = { ops: DEFAULT_RETENTION_OPS, ...options.retention };
+    // `'all'` keeps everything: the log of a node that must answer any version.
+    const retention = options.retention === 'all' ? { ops: Infinity } : options.retention;
+    this.#retention = { ops: DEFAULT_RETENTION_OPS, ...retention };
     this.#log = options.logger ?? null;
-    this.#otel = createTelemetry(options.telemetry);
+    this.#otel = writerOf(options.telemetry);
     // The storage asks for `sealApplied`: a roll then seals only the batches
     // it has marked applied (see `applied`), so an op whose record write
     // failed stays in the open files, replayed at every reopen until it
@@ -98,33 +222,35 @@ class OpLog {
     this.#sealApplied = options.sealApplied === true;
     // Told after every seal — what the storage turns into its `log` event.
     this.#onRoll = typeof options.onRoll === 'function' ? options.onRoll : null;
+    // Told the moment a group fails, with the first seq taken back — before
+    // any ticket rejects — so the owner drops what it built on those seqs.
+    this.#onFail = typeof options.onFail === 'function' ? options.onFail : null;
     return this.#init();
   }
 
   async #init() {
     const hasIndex = await this.#fsi.exists(this.#path, INDEX);
-    const index = hasIndex ? parseJson(await this.#fsi.read(this.#path, INDEX)) : null;
+    const index = hasIndex ? indexOf(parseJson(await this.#fsi.read(this.#path, INDEX))) : null;
     if (index) {
       this.#epoch = index.epoch;
-      this.#floor = index.floor ?? 1;
-      this.#vector = index.vector ?? {};
-      this.#segments = Array.isArray(index.segments) ? index.segments : [];
-      this.#droppedHeld = Number.isInteger(index.droppedHeld) ? index.droppedHeld : 0;
+      this.#floor = index.floor;
+      this.#vector = index.vector;
+      this.#takeHeads(index.heads);
+      this.#droppedHeld = index.droppedHeld;
       // Seeded from the index; what the files hold only moves it up.
-      if (typeof index.latestTs === 'number') this.#latestTs = index.latestTs;
-      // An index from before droppedTs was kept, with something already
-      // compacted: what went is unknown, so nothing retained is vouched for.
-      if (typeof index.droppedTs === 'number') this.#droppedTs = index.droppedTs;
-      else if (this.#floor > 1) this.#lost = true;
+      this.#latestTs = index.latestTs;
+      this.#droppedTs = index.droppedTs;
     } else {
       // No (readable) index: a new incarnation. Existing segments are still
       // picked up below, but their ids belong to an epoch nobody can resume.
       this.#epoch = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-      this.#segments = [];
     }
-    await this.#loadSegments(hasIndex);
+    await this.#loadSegments(index !== null);
     await this.#loadOpen();
     this.#seen = null;
+    // The files were read out of order (the journals newest first): the
+    // streams are made from the sorted entries, once.
+    for (let i = 0; i < this.#entries.length; i++) this.#stream(this.#entries[i]);
     // Entries this open could not read, or an incarnation that starts above
     // seq 1 without an index to say what it dropped: as good as compacted,
     // up to the newest stamp known.
@@ -140,63 +266,221 @@ class OpLog {
     return this;
   }
 
-  async #loadSegments(hasIndex) {
-    const known = new Set(this.#segments.map((segment) => segment.name));
+  // The sealed segments are what the directory lists (`seg-<from>.json`),
+  // each read whole: the index names none of them — it was rewritten whole
+  // at every roll, a list as long as the history under `retention: 'all'`.
+  // A segment's start not meeting the floor or the end of the one before is
+  // a file this log should hold and does not (`log.segment.missing`); one
+  // wholly below the floor was compacted, its removal cut short.
+  async #loadSegments(indexed) {
+    const segments = [];
     const names = await this.#fsi.list(this.#path);
     for (const name of names) {
-      if (!name.startsWith('seg-') || known.has(name)) continue;
-      // A segment the index does not know: rolled, then crashed before the
-      // index was rewritten. Adopt it.
+      if (!name.startsWith('seg-')) continue;
       const from = Number(name.slice(4, -5));
-      if (Number.isInteger(from)) this.#segments.push({ name, from, to: from, count: 0 });
+      if (Number.isInteger(from)) segments.push({ name, from, to: from, count: 0 });
     }
-    this.#segments.sort((a, b) => a.from - b.from);
-    for (const segment of this.#segments) {
-      const text = await this.#fsi.read(this.#path, segment.name).catch(() => null);
-      const parsed = text === null ? null : parseJson(text);
-      if (!parsed || !Array.isArray(parsed.entries)) {
-        this.#log?.warn?.({ event: 'log.segment.unreadable', segment: segment.name });
+    segments.sort((a, b) => a.from - b.from);
+    // Where the next segment should start: unknown past one that did not read.
+    let next = indexed ? this.#floor : null;
+    for (const segment of segments) {
+      const text = await readOrNull(this.#fsi, this.#path, segment.name);
+      const { entries, reason } = readFile(text);
+      if (entries === null) {
+        this.#log?.error?.({ event: 'log.segment.unreadable', segment: segment.name, reason });
         this.#lost = true;
+        if (reason === 'checksum') this.#corrupt++;
+        this.#segments.push(segment);
+        next = null;
         continue;
       }
-      this.#adopt(parsed.entries);
-      if (parsed.entries.length > 0) {
-        segment.to = parsed.entries[parsed.entries.length - 1].seq;
-        segment.count = parsed.entries.length;
+      if (entries.length > 0) {
+        segment.to = entries[entries.length - 1].seq;
+        segment.count = entries.length;
       }
+      if (indexed && segment.to < this.#floor) {
+        await this.#fsi.remove(this.#path, segment.name);
+        continue;
+      }
+      if (next !== null && segment.from > next) {
+        this.#log?.error?.({ event: 'log.segment.missing', from: next, to: segment.from - 1 });
+        this.#lost = true;
+      }
+      next = segment.to + 1;
+      this.#adopt(entries);
+      this.#segments.push(segment);
     }
-    // The floor is durable in the index; a fresh index means everything on
-    // disk is retained from its first entry.
-    if (!hasIndex && this.#entries.length > 0) this.#floor = this.#entries[0].seq;
+    // The floor is durable in the index; without one that reads (none, or
+    // one that is not this log's) everything on disk is retained from its
+    // first entry.
+    if (!indexed && this.#entries.length > 0) this.#floor = this.#entries[0].seq;
   }
 
   async #loadOpen() {
     const names = await this.#fsi.list(this.#openPath);
+    const sealedTo = this.#sealedTo;
+    // Newest first: a group whose write failed may have left its line at the
+    // end of a journal, and the group that took its seqs back went to a
+    // newer file — #adopt keeps the first copy of a seq it sees.
+    names.sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
+    // Journals a newer one shadows a line of: rewritten below.
+    const stale = new Set();
     for (const name of names) {
-      const text = await this.#fsi.read(this.#openPath, name).catch(() => null);
-      const parsed = text === null ? null : parseJson(text);
-      if (!parsed || !Array.isArray(parsed.entries)) {
-        // Torn on the way down: the batch was never announced, drop it.
-        this.#log?.warn?.({ event: 'log.open.unreadable', file: name });
+      const text = await readOrNull(this.#fsi, this.#openPath, name);
+      // Gone since the listing: nothing to read.
+      if (text === null) continue;
+      if (name.endsWith(JOURNAL)) {
+        if (this.#loadJournal(name, text, sealedTo)) stale.add(name);
+        continue;
+      }
+      const { entries, reason } = readFile(text);
+      if (entries === null) {
+        if (reason === 'checksum') {
+          // Whole once — its hash is there — and changed since: answered
+          // entries, lost here. Kept aside as the evidence, never deleted.
+          this.#log?.error?.({ event: 'log.open.unreadable', file: name, reason, kept: `${CORRUPT}/${name}` });
+          this.#corrupt++;
+          this.#lost = true;
+          await this.#fsi.write(`${this.#path}/${CORRUPT}`, name, text);
+        } else {
+          // Torn on the way down: its write never finished, so its batch was
+          // never announced — dropped.
+          this.#log?.info?.({ event: 'log.open.torn', file: name, reason });
+          this.#tornLines++;
+        }
         await this.#fsi.remove(this.#openPath, name);
         continue;
       }
-      this.#adopt(parsed.entries);
-      this.#openFiles.push(name);
-      // Nothing says these records were written: pending until the owner's
-      // replay says so.
-      if (this.#sealApplied && parsed.entries.length > 0) {
-        const seqs = parsed.entries.map((entry) => entry.seq).filter(Number.isInteger);
-        if (seqs.length > 0) this.#pending.set(Math.min(...seqs), Math.max(...seqs));
+      this.#opened(name, entries, sealedTo);
+    }
+    // The groups in seq order, like the appends that made them.
+    this.#open.sort((a, b) => a.first - b.first);
+    this.#pending.sort((a, b) => a.first - b.first);
+    // A shadowed line is a copy left behind — by a scrub or a group's
+    // failed append cut short — and may hold a payload a scrub took away:
+    // its journal goes, rewritten with the groups it still holds.
+    for (const name of stale) await this.#rewriteJournal(name, sealedTo);
+  }
+
+  // A journal written again under a new name with the groups of it still
+  // open, then removed: never rewritten in place (see #scrub).
+  async #rewriteJournal(file, sealedTo) {
+    const groups = [];
+    for (const group of this.#open) if (group.file === file) groups.push(group);
+    if (groups.length > 0) {
+      let content = '';
+      for (const group of groups) {
+        const from = Math.max(group.first, sealedTo + 1);
+        content += `${fileOf(this.#entries.slice(this.#lowerBound(from), this.#lowerBound(group.last + 1)))}\n`;
+      }
+      const copy = this.#journalName(groups[0].first);
+      await this.#fsi.write(this.#openPath, copy, content);
+      for (const group of groups) group.file = copy;
+      if (this.#journal === file) this.#journal = null;
+    }
+    await this.#fsi.remove(this.#openPath, file);
+  }
+
+  // A journal read back, line by line. Its last line may be torn — its group
+  // was never acknowledged, and its seqs were handed out again — and is left
+  // out; a line before it that does not read was acknowledged once and is
+  // lost now. A journal is never appended to by a later open.
+  // A line is a group, whole or not at all: one with a seq a newer journal
+  // holds already is shadowed — the line of a group whose append failed
+  // (its seqs went to the group after it, which may be shorter), or a copy
+  // a scrub left behind — and none of it comes back. Answers whether a line
+  // was shadowed.
+  #loadJournal(name, text, sealedTo) {
+    const lines = text.split('\n');
+    let end = lines.length;
+    while (end > 0 && lines[end - 1] === '') end--;
+    let shadowed = false;
+    for (let i = 0; i < end; i++) {
+      if (lines[i] === '') continue;
+      const { entries, reason } = readFile(lines[i]);
+      if (entries !== null) {
+        if (this.#shadowed(entries, sealedTo)) shadowed = true;
+        else this.#opened(name, entries, sealedTo);
+        continue;
+      }
+      if (reason === 'checksum') this.#corrupt++;
+      if (i === end - 1) {
+        this.#log?.info?.({ event: 'log.open.torn', file: name, reason });
+        this.#tornLines++;
+      } else {
+        this.#log?.error?.({ event: 'log.open.unreadable', file: name, reason });
+        this.#lost = true;
       }
     }
+    return shadowed;
+  }
+
+  // Whether a group read from a journal has a seq past the segments that a
+  // newer journal gave already (a seq a segment holds is a roll cut short,
+  // not a shadow).
+  #shadowed(entries, sealedTo) {
+    const seen = this.#seen;
+    if (seen === null) return false;
+    for (let i = 0; i < entries.length; i++) {
+      const seq = entries[i]?.seq;
+      if (Number.isInteger(seq) && seq > sealedTo && seen.has(seq)) return true;
+    }
+    return false;
+  }
+
+  // A group read back from an open file: adopted, kept with its file, and
+  // held until the owner's replay says its records were written — unless a
+  // segment has it already (a crash mid-roll left it in both).
+  #opened(file, entries, sealedTo) {
+    this.#adopt(entries);
+    let first = Infinity;
+    let last = -Infinity;
+    // The seqs a segment does not have yet, for the hold.
+    const unsealed = [];
+    for (const entry of entries) {
+      if (!Number.isInteger(entry.seq)) continue;
+      if (entry.seq > sealedTo) unsealed.push(entry.seq);
+      if (entry.seq < first) first = entry.seq;
+      if (entry.seq > last) last = entry.seq;
+    }
+    if (first === Infinity) return;
+    this.#open.push({ first, last, file });
+    if (this.#sealApplied) this.#hold(unsealed);
+  }
+
+  // The newest seq a segment holds, or below the floor when none does.
+  get #sealedTo() {
+    return this.#segments.length > 0 ? this.#segments[this.#segments.length - 1].to : this.#floor - 1;
+  }
+
+  // A journal's name: the first seq it holds, then this open's token and how
+  // many journals it has begun — never a name a failed group's line is in.
+  #journalName(first) {
+    return `${pad(first)}-${this.#session}${(++this.#journals).toString(36).padStart(4, '0')}${JOURNAL}`;
+  }
+
+  // An open file's seqs, waiting for their records.
+  #hold(seqs) {
+    if (seqs.length === 0) return;
+    let first = Infinity;
+    let last = -Infinity;
+    for (const seq of seqs) {
+      if (seq < first) first = seq;
+      if (seq > last) last = seq;
+    }
+    this.#pending.push({ first, last, left: new Set(seqs) });
   }
 
   // Merges loaded entries in, deduplicating by seq (a crash mid-roll leaves
   // the same batch both sealed and open) and keeping the order by seq.
   #adopt(entries) {
     // The seqs already held, built once per open rather than once per file.
-    const seen = (this.#seen ??= new Set(this.#entries.map((entry) => entry.seq)));
+    let seen = this.#seen;
+    if (seen === null) {
+      seen = new Set();
+      for (let i = 0; i < this.#entries.length; i++) seen.add(this.#entries[i].seq);
+      this.#seen = seen;
+    }
     let added = false;
     for (const entry of entries) {
       if (!entry || !Number.isInteger(entry.seq) || seen.has(entry.seq)) continue;
@@ -208,9 +492,51 @@ class OpLog {
         vectorAdvance(this.#vector, entry.op);
         this.#observe(entry.op);
         this.#indexEntry(entry);
+        if (typeof entry.fp === 'string') this.#print(entry);
       }
     }
     if (added) this.#entries.sort((a, b) => a.seq - b.seq);
+  }
+
+  // An entry's fingerprint, by its stream and seq; the stream's head moves
+  // to it when it is the newest.
+  #print(entry) {
+    const { op, fp } = entry;
+    const key = opKey(op);
+    let seqs = this.#prints.get(key);
+    if (seqs === undefined) this.#prints.set(key, (seqs = new Map()));
+    seqs.set(op.seq, fp);
+    // The head moves in place: a group keeps a copy of what it was (`append`).
+    const head = this.#heads.get(key);
+    if (head === undefined) this.#heads.set(key, [op.seq, fp]);
+    else if (head[0] <= op.seq) {
+      head[0] = op.seq;
+      head[1] = fp;
+    }
+  }
+
+  #unprint(entry) {
+    if (entry.fp === undefined || !entry.op) return;
+    const key = opKey(entry.op);
+    const seqs = this.#prints.get(key);
+    if (seqs === undefined) return;
+    seqs.delete(entry.op.seq);
+    if (seqs.size === 0) this.#prints.delete(key);
+  }
+
+  // Heads as the index or a REWOUND proof hands them — `{ key: [seq, fp] }`
+  // — own keys, a positive safe seq, a fingerprint's shape; newer than what
+  // is held.
+  #takeHeads(heads) {
+    if (heads === null || typeof heads !== 'object' || Array.isArray(heads)) return;
+    const keys = Object.keys(heads);
+    for (let i = 0; i < keys.length; i++) {
+      const head = heads[keys[i]];
+      if (!Array.isArray(head) || !Number.isSafeInteger(head[0]) || head[0] < 1) continue;
+      if (typeof head[1] !== 'string' || !FINGERPRINT.test(head[1])) continue;
+      const held = this.#heads.get(keys[i]);
+      if (held === undefined || held[0] < head[0]) this.#heads.set(keys[i], [head[0], head[1]]);
+    }
   }
 
   #indexEntry(entry) {
@@ -228,6 +554,63 @@ class OpLog {
     if (!seqs) return;
     seqs.delete(entry.seq);
     if (seqs.size === 0) this.#byId.delete(id);
+  }
+
+  // An entry joins its stream: last, as seqs run up a stream in log order —
+  // one that would not (a log fed by hand) goes where its seq sorts.
+  #stream(entry) {
+    const { op } = entry;
+    if (!op) return;
+    const key = opKey(op);
+    let stream = this.#streams.get(key);
+    if (stream === undefined) this.#streams.set(key, (stream = { entries: [], head: 0 }));
+    const list = stream.entries;
+    let at = list.length;
+    while (at > stream.head && list[at - 1].op.seq > op.seq) at--;
+    if (at === list.length) list.push(entry);
+    else list.splice(at, 0, entry);
+  }
+
+  // An entry compaction dropped leaves its stream: its first, as a rule.
+  #unstream(entry) {
+    const { op } = entry;
+    if (!op) return;
+    const key = opKey(op);
+    const stream = this.#streams.get(key);
+    if (stream === undefined) return;
+    if (stream.entries[stream.head] === entry) stream.head++;
+    else {
+      const at = stream.entries.indexOf(entry, stream.head);
+      if (at !== -1) stream.entries.splice(at, 1);
+    }
+    if (stream.head === stream.entries.length) this.#streams.delete(key);
+    else if (stream.head >= 64 && stream.head * 2 > stream.entries.length) {
+      stream.entries = stream.entries.slice(stream.head);
+      stream.head = 0;
+    }
+  }
+
+  /**
+   * Every stream the log retains an entry of, as `[key, entries, from]`:
+   * its entries in log order from index `from` on — read, never changed.
+   */
+  *streams() {
+    for (const [key, stream] of this.#streams) yield [key, stream.entries, stream.head];
+  }
+
+  /** The retained entry of stream `key` at seq `seq` (its op's), or undefined — a binary search. */
+  entryOf(key, seq) {
+    const stream = this.#streams.get(key);
+    if (stream === undefined) return undefined;
+    const list = stream.entries;
+    let low = stream.head;
+    let high = list.length;
+    while (low < high) {
+      const mid = (low + high) >>> 1;
+      if (list[mid].op.seq < seq) low = mid + 1;
+      else high = mid;
+    }
+    return low < list.length && list[low].op.seq === seq ? list[low] : undefined;
   }
 
   // The entry with `seq`, or undefined.
@@ -283,6 +666,33 @@ class OpLog {
     return this.#vector[key] ?? 0;
   }
 
+  /**
+   * The fingerprint of the op at `seq` of the stream `key` (an `opKey`), as
+   * this log holds it — retained, reserved, or the stream's head — or
+   * undefined.
+   */
+  fingerprintOf(key, seq) {
+    const fp = this.#prints.get(key)?.get(seq);
+    if (fp !== undefined) return fp;
+    const head = this.#heads.get(key);
+    return head !== undefined && head[0] === seq ? head[1] : undefined;
+  }
+
+  /** `[seq, fingerprint]` of the newest op of the stream `key` this log held, or undefined. */
+  headOf(key) {
+    const head = this.#heads.get(key);
+    return head === undefined ? undefined : [head[0], head[1]];
+  }
+
+  /**
+   * Heads of streams whose ops this log does not hold — this node's own, taken
+   * back from a host on its proof (REWOUND) — `{ key: [seq, fingerprint] }`;
+   * persisted with the next index. A head older than the one held is left.
+   */
+  adoptHeads(heads) {
+    this.#takeHeads(heads);
+  }
+
   get length() {
     return this.#entries.length;
   }
@@ -298,7 +708,39 @@ class OpLog {
    */
   applied(from, to = from) {
     if (!Number.isInteger(from) || !Number.isInteger(to)) return;
-    for (const [first, last] of this.#pending) if (first >= from && last <= to) this.#pending.delete(first);
+    const pending = this.#pending;
+    // The first group that may hold `from`: its last seq at or past it.
+    let low = this.#pendingHead;
+    let high = pending.length;
+    while (low < high) {
+      const mid = (low + high) >>> 1;
+      if (pending[mid].last < from) low = mid + 1;
+      else high = mid;
+    }
+    for (let i = low; i < pending.length; i++) {
+      const group = pending[i];
+      if (group.first > to) break;
+      if (group.left.size === 0) continue;
+      const end = Math.min(to, group.last);
+      for (let seq = Math.max(from, group.first); seq <= end; seq++) group.left.delete(seq);
+    }
+    // Applied whole at the front: dropped; the array compacted now and then.
+    let head = this.#pendingHead;
+    while (head < pending.length && pending[head].left.size === 0) head++;
+    if (head === pending.length) {
+      this.#pending = [];
+      this.#pendingHead = 0;
+    } else if (head > 1024 && head * 2 > pending.length) {
+      this.#pending = pending.slice(head);
+      this.#pendingHead = 0;
+    } else this.#pendingHead = head;
+  }
+
+  // The first seq of the oldest open file not applied whole, or Infinity.
+  get #unappliedFrom() {
+    const pending = this.#pending;
+    for (let i = this.#pendingHead; i < pending.length; i++) if (pending[i].left.size > 0) return pending[i].first;
+    return Infinity;
   }
 
   /** The id of the newest entry; resuming from it replays nothing. */
@@ -318,43 +760,199 @@ class OpLog {
   }
 
   /**
-   * Appends a batch; resolves once it is on disk. Returns the entries with
-   * their seqs, so the caller can announce them by id. Rolls the open files
-   * into a segment when enough have accumulated. Ops in `skipped` were
-   * accepted but not applied here (a beforeApply hook said no, the record
-   * failed its schema, or the op is from a newer schema version — then
-   * `held` maps it to that version): they are logged and served like any
-   * other, and flagged so a reopen's replay of the tail leaves them alone
-   * too; a held one is applied once this node runs its version.
+   * Appends a batch: the seqs are reserved at once — the vector moves, so
+   * the next op of a stream is numbered after this one before it is on
+   * disk — and the returned promise (a ticket: `ticket.entries` holds the
+   * entries with their seqs from the start) resolves once the batch is on
+   * disk, with the entries. Appends that come while a group is being
+   * written join the next group, written as one file when the first is
+   * down — a group commit — and are published (read, served, counted) in
+   * seq order, each group as its file lands. A write that fails rejects
+   * every ticket of its group and of the group gathered behind it, takes
+   * their seqs back and leaves nothing published: the next append gets the
+   * first of them again. Rolls the open files into a segment when enough
+   * have accumulated. Ops in `skipped` were accepted but not applied here
+   * (a beforeApply hook said no, the record failed its schema, or the op is
+   * from a newer schema version — then `held` maps it to that version):
+   * they are logged and served like any other, and flagged so a reopen's
+   * replay of the tail leaves them alone too; a held one is applied once
+   * this node runs its version.
    */
-  append(ops, { skipped = null, held = null } = {}) {
-    return this.#serialize(async () => {
-      if (ops.length === 0) return [];
-      const entries = [];
-      for (const op of ops) {
-        const seq = this.#next++;
-        const entry = { seq, op };
-        if (skipped?.has(op)) entry.skipped = true;
-        if (held?.has(op)) entry.held = held.get(op);
-        entries.push(entry);
+  append(ops, { skipped = null, held = null, ready = null, fps = null, scrubbed = null } = {}) {
+    const entries = [];
+    if (ops.length === 0) {
+      const ticket = Promise.resolve(entries);
+      ticket.entries = entries;
+      return ticket;
+    }
+    const group = (this.#group ??= this.#newGroup());
+    for (const op of ops) {
+      const seq = this.#next++;
+      const entry = { seq, op };
+      if (skipped?.has(op)) entry.skipped = true;
+      // Logged as a scrub leaves it (the caller took the payload): no rewrite to come.
+      if (scrubbed?.has(op)) entry.scrubbed = true;
+      if (held?.has(op)) entry.held = held.get(op);
+      const fp = fps?.get(op);
+      entries.push(entry);
+      group.entries.push(entry);
+      const stream = opKey(op);
+      if (!group.undo.has(stream)) {
+        group.undo.set(stream, Object.hasOwn(this.#vector, stream) ? this.#vector[stream] : undefined);
       }
-      const name = `${pad(entries[0].seq)}.json`;
-      const started = this.#otel.enabled ? now() : 0;
-      await this.#fsi.write(this.#openPath, name, JSON.stringify({ entries }));
-      if (started) this.#otel.recordAppend(now() - started);
+      vectorAdvance(this.#vector, op);
+      if (fp !== undefined) {
+        entry.fp = fp;
+        // The stream's head before the group, once: what a failure puts back.
+        const key = opKey(op);
+        if (!group.heads.has(key)) {
+          const head = this.#heads.get(key);
+          group.heads.set(key, head === undefined ? undefined : [head[0], head[1]]);
+        }
+        this.#print(entry);
+      }
+      this.#observe(op);
+    }
+    // What the ops still wait for before they can be written (a signature
+    // being made): the group's file waits for it.
+    if (ready !== null) group.ready.push(ready);
+    this.#schedule();
+    const ticket = group.promise.then(() => entries);
+    ticket.entries = entries;
+    return ticket;
+  }
+
+  // A group to gather appends into: what the vector and the counter were
+  // before it, and the heads of the streams it touches, for a write that
+  // fails.
+  #newGroup() {
+    const group = {
+      entries: [],
+      ready: [],
+      from: this.#next,
+      // What a failure puts back, key by key: the seq each stream the group
+      // moved held before it (undefined: none). The whole vector was copied
+      // for every group — thousands of streams on a hub, for each append.
+      undo: new Map(),
+      heads: new Map(),
+      resolve: null,
+      reject: null,
+    };
+    group.promise = new Promise((resolve, reject) => {
+      group.resolve = resolve;
+      group.reject = reject;
+    });
+    // A rejection nobody awaits yet is not unhandled: every ticket chains on it.
+    group.promise.catch(() => {});
+    return group;
+  }
+
+  // The groups go one after another, through the same lane as a scrub or a
+  // roll, until none is left to write.
+  #schedule() {
+    if (this.#flushing) return;
+    this.#flushing = true;
+    const drain = async () => {
+      try {
+        while (this.#group !== null) await this.#flushGroup();
+      } finally {
+        this.#flushing = false;
+      }
+    };
+    // `#flushGroup` settles every group it takes; what could still throw
+    // here is a bug, said out loud rather than lost.
+    this.#serialize(drain).catch((error) => this.#log?.error?.({ event: 'log.flush.failed', err: error }));
+  }
+
+  async #flushGroup() {
+    const group = this.#group;
+    this.#group = null;
+    const { entries } = group;
+    const first = entries[0].seq;
+    const last = entries[entries.length - 1].seq;
+    const started = this.#otel.enabled ? now() : 0;
+    let file;
+    try {
+      if (group.ready.length > 0) await Promise.all(group.ready);
+      if (this.#journaled) {
+        file = this.#journal ??= this.#journalName(first);
+        await this.#fsi.append(this.#openPath, file, `${fileOf(entries)}\n`);
+      } else {
+        file = `${pad(first)}.json`;
+        await this.#fsi.write(this.#openPath, file, fileOf(entries));
+      }
+    } catch (error) {
+      // What a failed append left of its line stays at the end of its
+      // journal, and its seqs go to the next group: that one begins a new
+      // journal, which a reopen reads first.
+      this.#journal = null;
+      this.#fail(group, error);
+      return;
+    }
+    // The group is on disk: from here on its callers are answered whatever
+    // happens — a throw past this point would leave them, and every write
+    // landing behind them in log order, waiting for good.
+    try {
+      if (started) this.#otel.recordAppend(now() - started, entries.length);
+      const seqs = this.#sealApplied ? [] : null;
       for (const entry of entries) {
         this.#entries.push(entry);
         this.#indexEntry(entry);
+        this.#stream(entry);
+        if (seqs !== null) seqs.push(entry.seq);
       }
-      for (const op of ops) {
-        vectorAdvance(this.#vector, op);
-        this.#observe(op);
+      this.#open.push({ first, last, file });
+      if (seqs !== null) this.#hold(seqs);
+      // A roll is what makes one append slow every `rollAfter` groups: its
+      // callers wait for it, as they did before groups. A roll that fails
+      // (the disk full as a segment is written) seals nothing: the groups
+      // stay open, durable, and the next append rolls again.
+      if (this.#open.length >= this.#rollAfter) {
+        try {
+          await this.#roll();
+        } catch (error) {
+          this.#rollFailures++;
+          this.#log?.error?.({ event: 'log.roll.failed', err: error, open: this.#open.length });
+        }
       }
-      this.#openFiles.push(name);
-      if (this.#sealApplied) this.#pending.set(entries[0].seq, entries[entries.length - 1].seq);
-      if (this.#openFiles.length >= this.#rollAfter) await this.#roll();
-      return entries;
-    });
+    } catch (error) {
+      this.#log?.error?.({ event: 'internal.error', name: 'log', err: error });
+    }
+    group.resolve();
+  }
+
+  // A group that did not reach the disk, and the one gathered behind it
+  // (its seqs follow): their callers told, the counter, the vector and the
+  // heads put back to before the first of them, so the seqs are handed out
+  // again and the next op of a stream chains to what is durable.
+  #fail(group, error) {
+    this.#appendFailures++;
+    this.#otel.recordAppendFailure();
+    this.#log?.error?.({ event: 'log.append.failed', from: group.from, ops: group.entries.length, err: error });
+    const later = this.#group;
+    this.#group = null;
+    this.#next = group.from;
+    // The later group first: the seqs and heads before the first are the ones kept.
+    for (const failed of later === null ? [group] : [later, group]) {
+      for (const [stream, seq] of failed.undo) {
+        if (seq === undefined) delete this.#vector[stream];
+        else this.#vector[stream] = seq;
+      }
+      for (const entry of failed.entries) this.#unprint(entry);
+      for (const [key, head] of failed.heads) {
+        if (head === undefined) this.#heads.delete(key);
+        else this.#heads.set(key, head);
+      }
+    }
+    if (this.#onFail !== null) {
+      try {
+        this.#onFail(error, group.from);
+      } catch (thrown) {
+        this.#log?.warn?.({ event: 'listener.error', name: 'log', err: thrown });
+      }
+    }
+    group.reject(error);
+    if (later !== null) later.reject(error);
   }
 
   // Sealing: write the segment, then the index, then remove the open files.
@@ -362,10 +960,11 @@ class OpLog {
   // `sealApplied` only the batches marked applied go; a batch is applied
   // whole, so the cut never falls inside an open file.
   async #roll() {
-    if (this.#openFiles.length === 0) return;
+    if (this.#open.length === 0) return;
     const sealedFrom = this.#segments.length > 0 ? this.#segments[this.#segments.length - 1].to + 1 : this.#floor;
-    const limit = this.#sealApplied && this.#pending.size > 0 ? Math.min(...this.#pending.keys()) - 1 : Infinity;
-    const entries = this.#entries.filter((entry) => entry.seq >= sealedFrom && entry.seq <= limit);
+    const limit = this.#sealApplied ? this.#unappliedFrom - 1 : Infinity;
+    if (limit < sealedFrom) return;
+    const entries = this.#entries.slice(this.#lowerBound(sealedFrom), this.#lowerBound(limit + 1));
     if (entries.length === 0) return;
     const otel = this.#otel;
     if (!otel.enabled) return void (await this.#seal(entries));
@@ -383,19 +982,31 @@ class OpLog {
   async #seal(entries) {
     const from = entries[0].seq;
     const name = segmentName(from);
-    await this.#fsi.write(this.#path, name, JSON.stringify({ entries }));
+    await this.#fsi.write(this.#path, name, fileOf(entries), ATOMIC);
     this.#segments.push({ name, from, to: entries[entries.length - 1].seq, count: entries.length });
+    // The index changes at a roll only where compaction dropped something:
+    // the vector, the heads and the newest stamp a reopen reads from the
+    // files, the segment among them.
     const dropped = await this.#compact();
-    await this.#writeIndex();
-    // An open file is named by its first seq and holds one batch: sealed
-    // with the segment when that seq is inside it, kept otherwise.
+    if (dropped > 0) await this.#writeIndex();
+    // A group is applied whole, so the cut never falls inside one: a group
+    // is sealed with the segment or kept, and a file goes once every group
+    // it holds is sealed. A journal is begun again at every roll, so it
+    // stays finite and does go.
     const to = entries[entries.length - 1].seq;
     const kept = [];
-    for (const file of this.#openFiles) {
-      if (Number(file.slice(0, -5)) <= to) await this.#fsi.remove(this.#openPath, file);
-      else kept.push(file);
+    const sealed = new Set();
+    const keptFiles = new Set();
+    for (const group of this.#open) {
+      if (group.last <= to) sealed.add(group.file);
+      else {
+        kept.push(group);
+        keptFiles.add(group.file);
+      }
     }
-    this.#openFiles = kept;
+    this.#open = kept;
+    this.#journal = null;
+    for (const file of sealed) if (!keptFiles.has(file)) await this.#fsi.remove(this.#openPath, file);
     if (this.#onRoll !== null) {
       try {
         this.#onRoll({ sealed: entries.length, dropped, floor: this.#floor, segments: this.#segments.length });
@@ -416,7 +1027,7 @@ class OpLog {
     while (this.#segments.length > 1) {
       const oldest = this.#segments[0];
       const overOps = ops ? this.#entries.length - oldest.count >= ops : false;
-      const lastTs = this.#entries.find((entry) => entry.seq === oldest.to)?.op?.ts ?? Infinity;
+      const lastTs = this.#entryAt(oldest.to)?.op?.ts ?? Infinity;
       const overAge = cutoff !== null && lastTs < cutoff;
       const tooMany = ops ? this.#entries.length > ops : false;
       if (!(tooMany && overOps) && !overAge) break;
@@ -427,8 +1038,10 @@ class OpLog {
         if (entry.held !== undefined) this.#droppedHeld++;
         if (typeof entry.op?.ts === 'number' && entry.op.ts > this.#droppedTs) this.#droppedTs = entry.op.ts;
         this.#unindexEntry(entry);
+        this.#unprint(entry);
+        this.#unstream(entry);
       }
-      this.#entries = this.#entries.filter((entry) => entry.seq > oldest.to);
+      this.#entries = this.#entries.slice(this.#lowerBound(oldest.to + 1));
       this.#floor = oldest.to + 1;
       await this.#fsi.remove(this.#path, oldest.name);
       dropped++;
@@ -483,17 +1096,21 @@ class OpLog {
       floor: this.#floor,
       next: this.#next,
       vector: this.#vector,
-      segments: this.#segments,
+      heads: Object.fromEntries(this.#heads),
       droppedHeld: this.#droppedHeld,
       latestTs: this.#latestTs,
       droppedTs: this.#droppedTs,
     };
-    await this.#fsi.write(this.#path, INDEX, JSON.stringify(index));
+    await this.#fsi.write(this.#path, INDEX, JSON.stringify(index), ATOMIC);
   }
 
   /** The entries held for a newer schema version, oldest first. */
   held() {
-    return this.#entries.filter((entry) => entry.held !== undefined);
+    const held = [];
+    for (let i = 0; i < this.#entries.length; i++) {
+      if (this.#entries[i].held !== undefined) held.push(this.#entries[i]);
+    }
+    return held;
   }
 
   /**
@@ -507,6 +1124,42 @@ class OpLog {
    */
   get droppedTs() {
     return this.#droppedTs;
+  }
+
+  /** Files whose checksum did not match at this open — a segment lost or an open file dropped for it. */
+  get corrupt() {
+    return this.#corrupt;
+  }
+
+  /** Rolls that failed since the open (`log.roll.failed`): the groups they would have sealed stay open and durable. */
+  get rollFailures() {
+    return this.#rollFailures;
+  }
+
+  /**
+   * What the open groups are — `{ journaled, open, unapplied, torn, lost,
+   * appendFailures }`: whether the backend appends (a journal) or each
+   * group is a file, the groups not sealed yet, those not yet applied to
+   * the records (a reopen replays them), the journal lines an open left out
+   * as torn, whether an open lost entries it could not read, and the groups
+   * whose write failed since this open.
+   */
+  get health() {
+    let unapplied = 0;
+    for (let i = this.#pendingHead; i < this.#pending.length; i++) if (this.#pending[i].left.size > 0) unapplied++;
+    return {
+      journaled: typeof this.#fsi.append === 'function',
+      open: this.#open.length,
+      unapplied,
+      torn: this.#tornLines,
+      lost: this.#lost,
+      appendFailures: this.#appendFailures,
+    };
+  }
+
+  /** Every record id the retained entries name, unsorted. */
+  ids() {
+    return [...this.#byId.keys()];
   }
 
   /** How many held entries compaction has dropped — lost for good — since the last reset. */
@@ -530,9 +1183,11 @@ class OpLog {
   advance(vector) {
     return this.#serialize(async () => {
       let moved = false;
-      for (const key in vector) {
+      const keys = Object.keys(vector);
+      for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
         const seq = vector[key];
-        if (Number.isInteger(seq) && (this.#vector[key] ?? 0) < seq) {
+        if (Number.isSafeInteger(seq) && (this.#vector[key] ?? 0) < seq) {
           this.#vector[key] = seq;
           moved = true;
         }
@@ -573,46 +1228,84 @@ class OpLog {
   }
 
   async #scrub(id) {
-    {
-      // Every entry of the id (from the index, not a walk), for the files to
-      // rewrite; the ones still holding a payload, for the count. A rewrite
-      // that failed last time left the files behind memory: the id stays
-      // marked torn, and the next scrub rewrites them whether or not
-      // anything is fresh.
-      const seqs = this.#byId.get(id) ?? new Set();
-      let fresh = 0;
-      for (const seq of seqs) {
-        const entry = this.#entryAt(seq);
-        if (!entry || entry.scrubbed) continue;
-        delete entry.op.data;
-        delete entry.op.meta;
-        delete entry.op.key;
-        delete entry.op.value;
-        delete entry.op.nonce;
+    // Every entry of the id (from the index, not a walk), for the files to
+    // rewrite; the ones still holding a payload, for the count. A rewrite
+    // that failed last time left the files behind memory: the id stays
+    // marked torn, and the next scrub rewrites them whether or not
+    // anything is fresh.
+    const seqs = this.#byId.get(id) ?? new Set();
+    const torn = this.#torn.has(id);
+    // The files to rewrite are the ones holding what this scrub takes —
+    // every file of the id only after a rewrite that failed: a file whose
+    // entries of the id were scrubbed before is as it should be, and a peer
+    // that sends op after op for a purged id must not cost a rewrite of
+    // every segment that ever held it.
+    const taken = [];
+    let fresh = 0;
+    for (const seq of seqs) {
+      const entry = this.#entryAt(seq);
+      if (!entry) continue;
+      if (!entry.scrubbed) {
+        scrubOp(entry.op);
         entry.scrubbed = true;
         fresh++;
-      }
-      if (fresh === 0 && !this.#torn.has(id)) return 0;
-      this.#torn.add(id);
-      const holds = (from, to) => [...seqs].some((seq) => seq >= from && seq <= to);
-      for (const segment of this.#segments) {
-        if (!holds(segment.from, segment.to)) continue;
-        const entries = this.#entries.filter((entry) => entry.seq >= segment.from && entry.seq <= segment.to);
-        await this.#fsi.write(this.#path, segment.name, JSON.stringify({ entries }));
-      }
-      // An open file holds the seqs from its name up to the next file's.
-      const sealedTo = this.#segments.length > 0 ? this.#segments[this.#segments.length - 1].to : this.#floor - 1;
-      const starts = this.#openFiles.map((name) => Number(name.slice(0, -5))).sort((a, b) => a - b);
-      for (let i = 0; i < starts.length; i++) {
-        const from = starts[i];
-        const to = i + 1 < starts.length ? starts[i + 1] - 1 : Infinity;
-        if (!holds(from, to)) continue;
-        const entries = this.#entries.filter((entry) => entry.seq > sealedTo && entry.seq >= from && entry.seq <= to);
-        await this.#fsi.write(this.#openPath, `${pad(from)}.json`, JSON.stringify({ entries }));
-      }
-      this.#torn.delete(id);
-      return fresh;
+        taken.push(seq);
+      } else if (torn) taken.push(seq);
     }
+    if (taken.length === 0) return 0;
+    this.#torn.add(id);
+    // The lane is this scrub's: no append or roll changes `seqs` meanwhile.
+    const sorted = taken.sort((a, b) => a - b);
+    for (const segment of this.#segments) {
+      if (!anyWithin(sorted, segment.from, segment.to)) continue;
+      const entries = this.#entries.slice(this.#lowerBound(segment.from), this.#lowerBound(segment.to + 1));
+      await this.#fsi.write(this.#path, segment.name, fileOf(entries), ATOMIC);
+    }
+    // An open file is rewritten whole: a journal a line per group it holds
+    // (a torn last line goes with the rewrite), a file of its own its group.
+    // A journal is never rewritten in place — a write cut short there would
+    // read back as a torn last line and take acknowledged groups with it
+    // (their seqs then handed out again): the copy goes under a new name,
+    // which a reopen reads first, and the old journal is removed after it.
+    // Cut short between the two, both are there and the newer shadows the
+    // older seq by seq; cut short inside the copy, its torn last line is
+    // left out and the old journal still has that group.
+    const sealedTo = this.#sealedTo;
+    const byFile = new Map();
+    for (const group of this.#open) {
+      let groups = byFile.get(group.file);
+      if (groups === undefined) byFile.set(group.file, (groups = []));
+      groups.push(group);
+    }
+    for (const [file, groups] of byFile) {
+      let touched = false;
+      for (let i = 0; !touched && i < groups.length; i++) {
+        touched = anyWithin(sorted, groups[i].first, groups[i].last);
+      }
+      if (!touched) continue;
+      const journal = file.endsWith(JOURNAL);
+      let content = '';
+      for (const group of groups) {
+        const from = Math.max(group.first, sealedTo + 1);
+        const text = fileOf(this.#entries.slice(this.#lowerBound(from), this.#lowerBound(group.last + 1)));
+        if (!journal) {
+          content = text;
+          break;
+        }
+        content += `${text}\n`;
+      }
+      if (!journal) {
+        await this.#fsi.write(this.#openPath, file, content);
+        continue;
+      }
+      const copy = this.#journalName(groups[0].first);
+      await this.#fsi.write(this.#openPath, copy, content);
+      for (const group of groups) group.file = copy;
+      if (this.#journal === file) this.#journal = null;
+      await this.#fsi.remove(this.#openPath, file);
+    }
+    this.#torn.delete(id);
+    return fresh;
   }
 
   /**
@@ -661,7 +1354,7 @@ class OpLog {
     return this.read(eventId, options)?.entries ?? null;
   }
 
-  /** Every retained entry, oldest first, without a copy — for a selection over the whole log (src/outbound.js). */
+  /** Every retained entry, oldest first, without a copy — for a selection over the whole log (src/sync/outbound.js). */
   *scan() {
     yield* this.#entries;
   }
@@ -692,8 +1385,7 @@ class OpLog {
 
   /** The unsealed tail — what a reopen replays onto the records. */
   tail() {
-    const sealedTo = this.#segments.length > 0 ? this.#segments[this.#segments.length - 1].to : this.#floor - 1;
-    return this.#entries.filter((entry) => entry.seq > sealedTo);
+    return this.#entries.slice(this.#lowerBound(this.#sealedTo + 1));
   }
 
   /** Seals what can be sealed and writes the index: a reopen after a clean close replays nothing it need not. */
@@ -705,4 +1397,13 @@ class OpLog {
   }
 }
 
-module.exports = { OpLog };
+// Whether this node applied a log entry: not skipped, or held for a schema
+// version this node has since reached (and replayed). What a replay, a
+// repair and a version of the past read the log by.
+const appliedHere = (entry, version) =>
+  !entry.skipped || (entry.held !== undefined && version !== null && entry.held <= version);
+
+module.exports = {
+  OpLog,
+  appliedHere,
+};

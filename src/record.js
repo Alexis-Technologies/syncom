@@ -7,9 +7,8 @@
 
 const { Emitter } = require('./emitter.js');
 const { notify } = require('./hooks.js');
-const { Cursor } = require('./query.js');
 const { isPlainObject } = require('./shape.js');
-const { COMMIT, REFRESH, SOURCE } = require('./symbols.js');
+const { COMMIT, REFRESH, SOURCE, CURSOR } = require('./symbols.js');
 const { SyncomError } = require('./errors.js');
 
 class Reference {
@@ -53,9 +52,43 @@ class Record extends Emitter {
     this.#defineProperties();
   }
 
+  // A field's value as the Record holds it: a copy, a string naming a record
+  // made a Reference.
+  #own(value) {
+    if (typeof value === 'string') return this.#storage.hasRecord(value) ? new Reference(value, this.#storage) : value;
+    if (!value || typeof value !== 'object') return value;
+    const copy = JSON.parse(JSON.stringify(value));
+    this.#convertToReferences(copy);
+    return copy;
+  }
+
+  // The fields a write changed laid over what the Record holds, from the
+  // reading — never the whole record copied again (a 400 KB text made every
+  // keystroke cost the record). False when the delta cannot say it: a path
+  // (`profile/city` is a field of `profile`'s), or nothing to lay it on.
+  #patch(data, delta) {
+    if (this.#data === null || !isPlainObject(delta)) return false;
+    const keys = Object.keys(delta);
+    for (let i = 0; i < keys.length; i++) if (keys[i].includes('/')) return false;
+    let added = false;
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      if (!Object.hasOwn(data, key)) {
+        delete this.#data[key];
+        continue;
+      }
+      if (!Object.hasOwn(this.#data, key)) added = true;
+      this.#data[key] = this.#own(data[key]);
+    }
+    if (added) this.#defineProperties();
+    return true;
+  }
+
   #convertToReferences(data) {
     if (!data || typeof data !== 'object') return;
-    for (const key in data) {
+    const keys = Object.keys(data);
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
       const value = data[key];
       if (typeof value === 'string') {
         if (this.#storage.hasRecord(value)) {
@@ -75,7 +108,9 @@ class Record extends Emitter {
   }
 
   #defineProperties() {
-    for (const key in this.#data) {
+    const keys = Object.keys(this.#data);
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
       if (key === 'id') continue;
       if (key in this) {
         // An accessor from an earlier adopt reads #data live. A field named
@@ -109,15 +144,16 @@ class Record extends Emitter {
   // its own save landing. The view is rebuilt from the authoritative data,
   // unsaved local edits are laid back on top (they are still pending), and
   // listeners hear about it unless the record itself caused the change.
-  [REFRESH](data, delta, source) {
+  [REFRESH](data, delta, source, plain = false) {
     if (data === null) {
       this.#data = null;
       this.#changes = {};
       if (source !== this) notify(this, this.#storage.logger, 'update', null, delta);
       return;
     }
-    this.#adopt(data);
-    for (const key in this.#changes) this.#data[key] = this.#changes[key];
+    if (!plain || !this.#patch(data, delta)) this.#adopt(data);
+    const pending = Object.keys(this.#changes);
+    for (let i = 0; i < pending.length; i++) this.#data[pending[i]] = this.#changes[pending[i]];
     if (source !== this) notify(this, this.#storage.logger, 'update', this.#data, delta);
   }
 
@@ -149,6 +185,11 @@ class Record extends Emitter {
   /** Removes from a set field; the storage-level `remove` with this record's id. */
   async remove(key, elements, options = {}) {
     await this.#storage.remove(this.#id, key, elements, options);
+  }
+
+  /** Removes fields; the storage-level `unset` with this record's id. */
+  async unset(fields, options = {}) {
+    await this.#storage.unset(this.#id, fields, options);
   }
 
   /** Splices a list or text field; the storage-level `splice` with this record's id. */
@@ -186,7 +227,47 @@ class Record extends Emitter {
     return this.#storage.spans(this.#id, key);
   }
 
+  /** Inserts an embed into a text field; the storage-level `insertEmbed` with this record's id. */
+  async insertEmbed(key, index, embed, options = {}) {
+    await this.#storage.insertEmbed(this.#id, key, index, embed, options);
+  }
+
+  /** Inserts a block marker into a text field; the storage-level `splitBlock` with this record's id. */
+  async splitBlock(key, index, block, options = {}) {
+    await this.#storage.splitBlock(this.#id, key, index, block, options);
+  }
+
+  /** Removes a block marker; the storage-level `joinBlock` with this record's id. */
+  async joinBlock(key, index, options = {}) {
+    await this.#storage.joinBlock(this.#id, key, index, options);
+  }
+
+  /** Replaces a block marker; the storage-level `updateBlock` with this record's id. */
+  async updateBlock(key, index, block, options = {}) {
+    await this.#storage.updateBlock(this.#id, key, index, block, options);
+  }
+
+  /** The marker at an index of a text field; the storage-level `block` with this record's id. */
+  async block(key, index) {
+    return this.#storage.block(this.#id, key, index);
+  }
+
+  /** A text field as its blocks; the storage-level `blocks` with this record's id. */
+  async blocks(key) {
+    return this.#storage.blocks(this.#id, key);
+  }
+
   /** A cursor into a list or text field; the storage-level `cursor` with this record's id. */
+  /** The name of a list element; the storage-level `elementAt` with this record's id. */
+  async elementAt(key, index) {
+    return this.#storage.elementAt(this.#id, key, index);
+  }
+
+  /** The names of a list's elements; the storage-level `elements` with this record's id. */
+  async elements(key) {
+    return this.#storage.elements(this.#id, key);
+  }
+
   async cursor(key, index, options = {}) {
     return this.#storage.cursor(this.#id, key, index, options);
   }
@@ -194,6 +275,31 @@ class Record extends Emitter {
   /** Where a cursor is now; the storage-level `index` with this record's id. */
   async index(key, cursor) {
     return this.#storage.index(this.#id, key, cursor);
+  }
+
+  /** Who last wrote a field; the storage-level `lastEditorOf` with this record's id. */
+  lastEditorOf(field) {
+    return this.#storage.lastEditorOf(this.#id, field);
+  }
+
+  /** Every node that wrote something this record carries; the storage-level `editorsOf`. */
+  editorsOf() {
+    return this.#storage.editorsOf(this.#id);
+  }
+
+  /** Who inserted an element of a list or text field; the storage-level `editorOf`. */
+  async editorOf(key, index) {
+    return this.#storage.editorOf(this.#id, key, index);
+  }
+
+  /** A cursor's index and side; the storage-level `position` with this record's id. */
+  async position(key, cursor) {
+    return this.#storage.position(this.#id, key, cursor);
+  }
+
+  /** Watches this record; the storage-level `observe` with this record's id. Returns the function that stops it. */
+  observe(path, listener) {
+    return this.#storage.observe(this.#id, path, listener);
   }
 
   /** Replaces an element of a list field; the storage-level `setAt` with this record's id. */
@@ -261,9 +367,9 @@ class Collection {
     return this.#storage.get(id, options);
   }
 
-  /** A cursor over this collection: `select(query).order(f).limit(n).fetch()`. */
+  /** A cursor over this collection: `select(query).order(f).limit(n).fetch()` — the query plugin's. */
   select(query) {
-    return new Cursor(this.#storage[SOURCE], this.#name, query);
+    return this.#storage[CURSOR](this.#name, query);
   }
 
   /** How many records of this collection match `query`. */
@@ -288,6 +394,11 @@ class Collection {
     }
     this.#mine(id);
     return this.#storage.update(id, delta, options);
+  }
+
+  async unset(id, fields, options = {}) {
+    this.#mine(id);
+    return this.#storage.unset(id, fields, options);
   }
 
   async record(id) {
