@@ -86,6 +86,8 @@ export default withMermaid({
     cleanUrls: true,
     lastUpdated: true,
     sitemap: { hostname },
+    // docs/CLAUDE.md holds the rules for agents who edit these pages; it is not a page of the site.
+    srcExclude: ['**/CLAUDE.md'],
 
     head: [
       ['link', { rel: 'icon', type: 'image/svg+xml', href: `${base}logo-mark.svg` }],
