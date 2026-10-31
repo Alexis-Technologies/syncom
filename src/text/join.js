@@ -10,6 +10,7 @@ const { rleMerge } = require('./rle.js');
 const {
   STATE,
   asBlock,
+  counters,
   pendingCount,
   sameBase,
   hydrate,
@@ -37,8 +38,10 @@ const normalizeSeq = (raw, base = null, pendingMax = PENDING_MAX) => {
 };
 
 // The reset rule: drops what is stamped below `base`. Null when nothing is left; the block itself when
-// the base takes nothing — O(1) by the oldest stamp the block holds; a rebuild under the new base
-// otherwise. (The base is written on the state the block shares, as v1 does: it changes no reading.)
+// the base takes nothing — O(1) by the oldest stamp the block holds and the oldest anchor a surviving
+// run still hangs from (one below the base already is a root's, folded into neither); a rebuild under
+// the new base otherwise, counted (`stats().rebuilds`). (The base is written on the state the block
+// shares, as v1 does: it changes no reading.)
 const prune = (given, base) => {
   if (base === null) return given;
   const seq = asBlock(given, STATE.has(given) ? STATE.get(given).base : base);
@@ -50,6 +53,7 @@ const prune = (given, base) => {
     if (!sameBase(st.base, base)) st.base = base;
     return seq;
   }
+  counters.rebuilds++;
   const plain = plainOf(seq);
   const out = { k: plain.k, ts: 0, runs: {} };
   let runs = 0;

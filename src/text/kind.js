@@ -63,7 +63,7 @@ const apply = (entry, field, held, op, stamp, limits) => {
   // JSON, and both the op and the change report read the engine's state —
   // the hydration the reading before the op made (resolve), not another.
   const before = held === undefined ? undefined : S.asBlock(held, base);
-  const block = before ?? S.createSeq(codeOf(kindOfOp(op)));
+  const block = before ?? S.createSeq(codeOf(kindOfOp(op)), base);
   // A splice's cuts read from the block before it, while that block is still
   // the head of its lineage: read after the splice, the old block is a fork
   // — the rope re-hinted whole, O(n), for every delete (two thirds of an

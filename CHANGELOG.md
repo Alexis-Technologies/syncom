@@ -1092,6 +1092,12 @@ and one `commit` event, not one per call.
   (BOUND-1). On the way, a run waiting for its anchor is hung under the anchor's run as soon as
   that run is here — placed or still waiting itself, as a hydration hangs it — where it stayed
   counted as waiting until the parent was placed.
+- **One run anchored below a reset made every later op rebuild the block.** A hydration folded the
+  anchor of every run into the stamp `prune` reads, a root's anchor below the base among them, so the
+  block never passed the O(1) test again: every keystroke after the reset rebuilt the block from its
+  JSON — a fresh lineage, every piece written again. An anchor below the base is a root's and folds
+  into nothing; a block is rebuilt once per base, and `stats().rebuilds`, never incremented before,
+  counts each rebuild (SEQ-12).
 - **A peer's splice whose cut was shaped otherwise stopped its page.** A cut of `[null]`, `[5]` or
   `[[null, 0, 1]]` threw out of `applyOp` before the engine could refuse it, so `applyRemote()`
   failed the whole page and the peer's stream stalled there on every retry. It is refused as

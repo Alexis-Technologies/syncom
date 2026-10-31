@@ -1829,6 +1829,37 @@ test('ops: a keystroke grows the rope in place', async (t) => {
   });
 });
 
+test('ops: a run anchored below the base survives a reset at one rebuild, not one per keystroke after it', () => {
+  const S = require('../src/text/sequence.js');
+  const splice = (ts, origin, seq, value) => op('splice', ts, origin, { seq, key: 'body', value });
+  let entry = applyOp(null, splice(1, 'A', 1, { at: '^', content: 'hello' })).entry;
+  // The field is unset at 5: the block is rebuilt under the new floor, once, and nothing of it is left.
+  const start = S.stats();
+  entry = applyOp(entry, { origin: 'U', seq: 1, ts: 5, type: 'unset', id: 'r', value: ['body'] }).entry;
+  assert.strictEqual(entry.data.body, undefined);
+  assert.strictEqual(S.stats().rebuilds - start.rebuilds, 1, 'the reset rebuilds the block once');
+  // B, who saw the text, types after its last letter at 10: a run anchored below the floor, a root.
+  const reset = S.stats();
+  entry = applyOp(entry, splice(10, 'B', 1, { at: '>1:4:A', content: 'X' })).entry;
+  assert.strictEqual(entry.data.body, 'X');
+  assert.strictEqual(S.stats().rebuilds - reset.rebuilds, 0, 'a root under the floor rebuilds nothing');
+  // A types ten keystrokes: the block is pruned in O(1) each time — nothing rebuilt, nothing hydrated.
+  const before = S.stats();
+  entry = applyOp(entry, splice(11, 'A', 2, { at: '^', content: 'a' })).entry;
+  for (let i = 0; i < 9; i++) {
+    entry = applyOp(entry, splice(12 + i, 'A', 3 + i, { run: '11:A', from: 1 + i, content: 'bcdefghij'[i] })).entry;
+  }
+  assert.strictEqual(entry.data.body, 'abcdefghijX');
+  const after = S.stats();
+  assert.strictEqual(after.rebuilds - before.rebuilds, 0, 'nothing rebuilt after the reset');
+  assert.strictEqual(after.hydrations - before.hydrations, 0, 'nothing hydrated after the reset');
+  // A reset above everything rebuilds once more, and the block read back from its JSON reads the same.
+  const again = S.stats();
+  entry = applyOp(entry, { origin: 'U', seq: 2, ts: 30, type: 'unset', id: 'r', value: ['body'] }).entry;
+  assert.strictEqual(S.stats().rebuilds - again.rebuilds, 1);
+  assert.strictEqual(entry.data.body, undefined);
+});
+
 test('ops: unset is a field’s own reset', async (t) => {
   const { applyOp, mergeEntry, isAlive, kindsOf, packOps, unpackOps } = require('../src/ops.js');
   const S = require('../src/text/sequence.js');

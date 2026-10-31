@@ -129,8 +129,10 @@ field)` — for every extension while a handle is open, and a writer whose readi
   `placeRun`; a run under a parent not here yet is attached to it, `attachChild`, and walked when
   the parent lands); a stretch of a run with no child at it is emitted piece by piece
   (`emitPieces`), never slot by slot. `prune` is O(1) through `oldest`/`oldestAnchor` and rebuilds
-  from JSON only under a base it has not seen (and, as v1 did, while a run anchored below the base
-  survives). `latestClock(meta, true)` is the trusted path for an entry this node holds — a peer's
+  from JSON only under a base that takes something — a run, or the anchor a surviving run still hangs
+  from; an anchor below the base already is a root's and folds into neither (`hydrate`, `applySplice`,
+  `applyMove`), so a block rebuilt once under a base prunes in O(1) under it from then on
+  (`stats().rebuilds` counts every rebuild: a test says it did not happen). `latestClock(meta, true)` is the trusted path for an entry this node holds — a peer's
   raw meta takes the untrusted one, which normalizes first.
 - **Every bound is read before anything is written, on the op path and the snapshot path alike.** `MAX_RUN`
   (src/text/rle.js: a run's slots — what a run holds plus an extension's end, parked ahead or not),

@@ -121,9 +121,11 @@ class Child {
 // ---- the block ------------------------------------------------------------------------------------
 
 // What the engine did that costs more than the path an op copies — counted so a test can say it did
-// not happen: hydrations, indexes of the marks made whole and the anchors they read, lists read whole
-// and their names listed, full segments sealed (`rebuilds` stays 0: no version is forked here, a
-// frozen one reads from a walk of its own — ./rope.js `walks`).
+// not happen: a version rebuilt from its JSON under another base (`prune` taking something, a block
+// asked for under a base it was not built under — ./join.js, `asBlock`), hydrations (every build
+// from JSON, the rebuilds among them), indexes of the marks made whole and the anchors they read,
+// lists read whole and their names listed, full segments sealed. A version is never forked here: a
+// frozen one reads from a walk of its own (./rope.js `walks`).
 const counters = {
   rebuilds: 0,
   hydrations: 0,
@@ -416,8 +418,8 @@ const pieceText = (st, at) => {
   return JSON.stringify(out);
 };
 
-/** An empty block of a kind. */
-const createSeq = (kind) => hydrate({ k: kind, ts: 0, runs: {} }, null);
+/** An empty block of a kind, under `base` — the field's floor, so the first op on it rebuilds nothing. */
+const createSeq = (kind, base = null) => hydrate({ k: kind, ts: 0, runs: {} }, base);
 
 // ---- normalizing a peer's block ---------------------------------------------------------------------
 
@@ -883,11 +885,13 @@ const hydrate = (seq, base) => {
       continue;
     }
     const e = run.aId;
-    oldestAnchor = olderOf(oldestAnchor, e.ts, e.origin);
     if (belowBase(e.ts, e.origin, base)) {
+      // A root under this base: its anchor fell already, and falls no further — not an anchor a later
+      // base could take, so `prune` stays O(1) under this one.
       roots.push(run);
       continue;
     }
+    oldestAnchor = olderOf(oldestAnchor, e.ts, e.origin);
     const parent = records.get(e);
     if (parent === undefined || run.aOff >= parent.len) {
       const list = waiting.get(e);
@@ -1031,6 +1035,7 @@ const asBlock = (seq, base = null) => {
     return block;
   }
   if (st.base !== base && (base !== null || st.base !== null) && !sameBase(st.base, base)) {
+    counters.rebuilds++;
     return hydrate(plainOf(seq), base);
   }
   return seq;

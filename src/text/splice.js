@@ -765,7 +765,10 @@ const applySplice = (given, stamp, payload, base = null, pendingMax = PENDING_MA
     d.slots += record.len;
     d.ts = Math.max(d.ts, ts);
     d.oldest = minStamp(d.oldest, [ts, origin]);
-    if (anchor.elem !== null) d.oldestAnchor = minStamp(d.oldestAnchor, [anchor.elem.ts, anchor.elem.origin]);
+    // An anchor below the base is a root's: it falls no further, so it is no anchor the next base takes.
+    if (anchor.elem !== null && !belowBase(anchor.elem.ts, anchor.elem.origin, base)) {
+      d.oldestAnchor = minStamp(d.oldestAnchor, [anchor.elem.ts, anchor.elem.origin]);
+    }
     layRun(d, record, where);
     arrivedSlots(d, key, 0, record.len);
     // The markers after the slots: registers of slots that are here.
@@ -877,7 +880,10 @@ const applyMove = (given, stamp, payload, base = null, pendingMax = PENDING_MAX)
     d.slots += 1;
     d.ts = Math.max(d.ts, ts);
     d.oldest = minStamp(d.oldest, [ts, origin]);
-    if (anchor.elem !== null) d.oldestAnchor = minStamp(d.oldestAnchor, [anchor.elem.ts, anchor.elem.origin]);
+    // An anchor below the base is a root's: it falls no further, so it is no anchor the next base takes.
+    if (anchor.elem !== null && !belowBase(anchor.elem.ts, anchor.elem.origin, base)) {
+      d.oldestAnchor = minStamp(d.oldestAnchor, [anchor.elem.ts, anchor.elem.origin]);
+    }
     // The register first, so the new run's slot shows or hides as it should.
     if (moving) moveRegister(d, elem, ts, origin, key);
     if (where === ROOTED || where === PLACED) {
