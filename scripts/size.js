@@ -143,7 +143,8 @@ const ENTRIES = [
   // 53.8 with a field read when it is read (src/lazy.js). 54, raised by name.
   // 54.2 with keystrokes made at once grown into the op before them (coalesced, log.lastGathered). 54.5,
   // raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 54.5 },
+  // 54.6 with what a text handle stands on (core.editing, core.on, a transaction's commitResolved). 55, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 55 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -295,7 +296,8 @@ const ENTRIES = [
   // 119.3 with the log's lines and segments of them (a CRC-32 checked before the parse, positional entries, a
   // segment the journaled lines and a trailer). 120, raised by name.
   // 120.3 with a list read when it is read and keystrokes coalesced. 121, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 121 },
+  // 122.6 with the synchronous text handle. 123, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 123 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -316,7 +318,8 @@ const ENTRIES = [
   // 33.4 with the plugin in four modules beside text.js. 33.5, raised by name.
   // 33.6 with revision() and applyDelta's revision. 34, raised by name.
   // 34.1 with a list's reading made when it is read (deriveLater; 2026-10-31). 34.5, raised by name.
-  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 34.5 },
+  // 36.8 with the synchronous text handle (src/text/handle.js, openText) and keystrokes coalesced. 37, raised by name.
+  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 37 },
   // The tree kind alone, with the fractional indexes a place is made of and
   // the argument checks it shares with the core (5.1 measured).
   // 5.5 with the field-name check unset shares with it (src/args.js).
@@ -411,7 +414,8 @@ const ENTRIES = [
     // 35.5 (over by a few bytes) with a write made at once. 36, raised by name.
     // 36.1 with the log's lines and segments of them. 36.5, raised by name.
     // 36.8 with a list read when it is read and keystrokes coalesced. 37, raised by name.
-    budget: 37,
+    // 37.0 (over by bytes) with what a text handle stands on. 37.5, raised by name.
+    budget: 37.5,
   },
 ];
 

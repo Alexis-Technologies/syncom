@@ -452,6 +452,7 @@ export type SyncomErrorCode =
   | 'UNPERSISTED'
   | 'REWOUND'
   | 'UNDELIVERABLE'
+  | 'UNLOGGED'
   | 'SKEW'
   | 'OP_UNREADABLE'
   | 'OP_REFUSED'
@@ -1829,6 +1830,67 @@ export type PluginMethods<P extends readonly Plugin<any>[]> = UnionToIntersectio
 >;
 
 /** The storage methods the `text` plugin adds: lists and texts that merge by position (Fugue), marks, cursors. */
+/** What `openText()` takes. */
+export interface TextHandleOptions {
+  /** How long edits wait before they are logged, in ms: the storage's `defer` by default, 0 for the end of the turn. */
+  window?: number;
+  /** Who the edits say made them. */
+  actor?: string;
+  /** What their `commit` and `transaction` events carry as `source`: a value of the handle's own by default. */
+  source?: unknown;
+}
+
+/** What a handle's observer hears with a delta. */
+export interface TextHandleEvent {
+  /** The handle's own edit, made just now. */
+  local: boolean;
+  /** The field is to be read again (`toString()`): no delta says the change — a reset, edits that could not be logged. */
+  reset?: true;
+  source: unknown;
+}
+
+/**
+ * A synchronous editor's handle on one text field (`openText()`): edits are
+ * made and read at once over the handle's reading — the field as announced,
+ * with what was typed here on top — and logged a window later as one
+ * transaction, keystrokes that continue each other as one op. Another
+ * writer's ops reach it as deltas in its indices.
+ */
+export interface TextHandle {
+  readonly id: string;
+  readonly field: string;
+  /** The field as the handle reads it. */
+  toString(): string;
+  readonly length: number;
+  slice(start?: number, end?: number): string;
+  /** Edits wait for the log. */
+  readonly pending: boolean;
+  /** Settles once every edit made so far is logged and landed; rejects with `UNLOGGED` when it could not be. */
+  readonly flushed: Promise<void>;
+  /** Inserts `text` at `index`, styled with `attributes` (a name to a value; null takes a style off). */
+  insert(index: number, text: string, attributes?: Record<string, unknown>): void;
+  delete(index: number, count: number): void;
+  /** Styles `[index, index + count)`; a null value takes a style off. */
+  format(index: number, count: number, attributes: Record<string, unknown>): void;
+  /** Makes `delta` the field's edits, at once (text and marks; an embed goes through the storage). */
+  applyDelta(delta: readonly DeltaOp[]): void;
+  /** `listener(delta, event)` after every change of the field the handle reads; returns the function that stops it. */
+  observe(listener: (delta: DeltaOp[] | null, event: TextHandleEvent) => void): () => void;
+  /** Logs every edit made so far, as one transaction. */
+  flush(): Promise<void>;
+  /** Logs what waits, then stops following the field. */
+  close(): Promise<void>;
+  /** `error`: a flush that could not be logged (`UNLOGGED`). */
+  on(event: 'error', listener: (error: SyncomError) => void): void;
+  off(event: 'error', listener: (error: SyncomError) => void): void;
+}
+
+/** What the text plugin adds to a storage beyond its writes: the editor's handle, never inside a transaction. */
+export interface TextHandleMethods {
+  /** A synchronous handle on text field `key` of record `id` (the record made by its first edit's flush when absent). */
+  openText(id: string, key: string, options?: TextHandleOptions): Promise<TextHandle>;
+}
+
 export interface TextMethods {
   /**
    * Splices list or text field `key` at `index`: removes `count` elements

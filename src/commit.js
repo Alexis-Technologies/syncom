@@ -866,7 +866,7 @@ const tracedPrepare = async (core, type, id, payload, options) => {
 
 const transact = async (core, fn, { actor, source = null, message } = {}) => {
   const msg = messageArg(message);
-  const prepared = [];
+  const items = [];
   const touched = new Map();
   const reserved = new Map();
   // Per record: the index of its newest op here, and its ops' deltas laid
@@ -905,10 +905,53 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
     const { op } = made;
     if (op === null || op === undefined || op === MISMATCH) return op;
     const was = lastOf.get(id);
-    if (was !== undefined) release(prepared[was]);
-    lastOf.set(id, prepared.length);
+    if (was !== undefined) release(items[was]);
+    lastOf.set(id, items.length);
     deltas.set(id, assignData(deltas.get(id) ?? {}, made.delta));
-    prepared.push(made);
+    items.push(made);
+    touched.set(id, made.entry);
+    reserved.set(opKey(op), op.seq);
+    return op;
+  };
+  // An op made outside the queue, over another reading of its record — an
+  // editor's handle's (src/text/handle.js), resolved and stamped as it was
+  // typed: it takes its stream and seq here, is validated over the record as
+  // the transaction has it, and goes with the rest. Null for one that
+  // changes nothing (a keystroke a peer's reset made moot).
+  tx.commitResolved = async (op) => {
+    const { id, type } = op;
+    const current = await tx.current(id);
+    if (current?.encrypted === true) {
+      throw new SyncomError('ENCRYPTED', `Record ${id} is encrypted: an encrypted write stays outside a transaction`);
+    }
+    if (msg !== undefined) op.msg = msg;
+    assignScope(tx, op, () => scopeData(type, {}, current));
+    const ctx =
+      core.hooks.beforeWrite !== null || core.hooks.afterWrite !== null
+        ? {
+            type,
+            id,
+            key: op.key,
+            value: op.value,
+            current: null,
+            encrypted: false,
+            source,
+            via: null,
+            from: null,
+            v: core.version,
+            actor: op.actor ?? null,
+          }
+        : null;
+    // beforeWrite may refuse a keystroke as it would a call; it replaces no data here.
+    if (core.hooks.beforeWrite !== null) await core.hook('beforeWrite', ctx);
+    const applied = await validateLocal(tx, op, current, null, ctx);
+    if (applied === null) return null;
+    const made = prepared(tx, op, applied, current, ctx, source, null);
+    const was = lastOf.get(id);
+    if (was !== undefined) release(items[was]);
+    lastOf.set(id, items.length);
+    deltas.set(id, assignData(deltas.get(id) ?? {}, made.delta));
+    items.push(made);
     touched.set(id, made.entry);
     reserved.set(opKey(op), op.seq);
     return op;
@@ -922,10 +965,10 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
   // the one this transaction holds.)
   tx.transact = async (inner) => ({ result: await inner(tx), done: null, ops: 0 });
   const result = await fn(tx);
-  if (prepared.length === 0) return { result, done: null, ops: 0 };
-  const count = prepared.length;
+  if (items.length === 0) return { result, done: null, ops: 0 };
+  const count = items.length;
   const ops = [];
-  for (let i = 0; i < count; i++) ops.push(prepared[i].op);
+  for (let i = 0; i < count; i++) ops.push(items[i].op);
   // Chained in order once every op is final — an op names the one made
   // before it in its stream, here or in the log — then signed: on the thread
   // pool when there are several, or writes queued behind; alone and
@@ -963,16 +1006,16 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
     const listening = core.listening('transaction');
     const changes = [];
     for (let i = 0; i < count; i++) {
-      const { op, entry, ctx, before, previous } = prepared[i];
+      const { op, entry, ctx, before, previous } = items[i];
       const last = lastOf.get(op.id) === i;
       const committed = { seq: positions[i], before, previous, txn: positions[0] };
       const delta = last ? deltas.get(op.id) : null;
-      await announce(core, op, entry, delta, ctx, source, null, committed, prepared[i].changes, last);
-      if (listening) tagged(op, prepared[i].changes, changes);
+      await announce(core, op, entry, delta, ctx, source, null, committed, items[i].changes, last);
+      if (listening) tagged(op, items[i].changes, changes);
     }
     transacted(core, { local: true, via: null, source, message: msg ?? null, ops, changes });
   });
-  return { result, done, ops: prepared.length };
+  return { result, done, ops: items.length };
 };
 
 // The span starts when the write RUNS, not when it was queued: waiting on
@@ -1022,4 +1065,4 @@ const commit = (core, type, id, payload, options = {}) => {
   return tracedCommit(core, type, id, payload, options);
 };
 
-module.exports = { commit, commitAtOnce, transact, rehearse, link, MISMATCH };
+module.exports = { commit, commitAtOnce, transact, rehearse, link, prepareOp, applyLocal, MISMATCH };

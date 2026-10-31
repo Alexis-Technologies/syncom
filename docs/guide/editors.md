@@ -19,6 +19,46 @@ await binding.flush(); // every edit reported so far has landed
 binding.stop();
 ```
 
+## A text handle
+
+When the editor is yours to drive — a keystroke handler, a test, a
+benchmark — `storage.openText(id, key)` (the `text` plugin's) is a handle
+that edits at once, with no promise per keystroke:
+
+```js
+const handle = await storage.openText(id, 'body');
+handle.insert(0, 'Hello');
+handle.insert(5, ' world', { bold: true });
+handle.toString(); // 'Hello world' — at once
+handle.observe((delta, { local, reset }) => {
+  // a peer's change as a delta in the handle's indices; `reset`: read the field again
+});
+await handle.flushed; // logged: the two keystrokes one op, the mark another
+await handle.close();
+```
+
+- **What it reads.** The field as the storage announced it, with what was
+  typed here on top. An edit is resolved and stamped over that reading and
+  applied to it at once; one the field refuses (`OUT_OF_RANGE`, a lone
+  surrogate) throws and changes nothing.
+- **When it is logged.** A window later (`window`, the storage's `defer` by
+  default; 0 for the end of the turn), as one transaction: keystrokes that
+  continue each other — typed on at the end of their run, or a chain of cuts
+  — are one op. Until then nothing reaches a file, `get()` or a peer;
+  `flushed` settles once every edit so far is logged and landed, and the
+  storage's `flush()`, `tag()` and `close()` flush open handles first.
+- **Another writer's edits** — a peer's, or a write through the storage —
+  reach the handle once they are announced, as a delta in its indices
+  (`local: false`). A write through the storage to the same field resolves
+  its indices against the storage's reading, not the handle's: flush first to
+  write by the handle's.
+- **A flush that cannot be logged** — the append failed, a hook or a
+  validator refused — drops what was not logged: `flushed` rejects with
+  `UNLOGGED` (the handle's `error` event too), the handle reads the field as
+  announced again, and its observers hear `reset`.
+- `format(index, count, attributes)` styles a range and `applyDelta(delta)`
+  takes text and marks; an embed goes through `storage.insertEmbed()`.
+
 ## The adapter
 
 ```ts

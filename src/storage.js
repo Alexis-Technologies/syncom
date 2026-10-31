@@ -14,7 +14,7 @@ const { sha256, hashOf } = require('./crypto/digest.js');
 const { OpLog, appliedHere } = require('./log.js');
 const { EntryStore } = require('./entries.js');
 const { Record, Collection } = require('./record.js');
-const { commit, commitAtOnce, transact, MISMATCH } = require('./commit.js');
+const { commit, commitAtOnce, transact, prepareOp, applyLocal, MISMATCH } = require('./commit.js');
 const F = require('./fields.js');
 const P = require('./patches.js');
 const B = require('./blame.js');
@@ -129,6 +129,9 @@ class Storage extends Emitter {
   // Landing steps queued and not yet done: while there is one, a write
   // lands behind it, through the chain — never at once, ahead of it.
   #slowSteps = 0;
+  // The editors' handles open on this storage (src/text/handle.js): flushed
+  // before a flush(), a tag() and a close() — what they hold is not logged yet.
+  #edits = new Set();
   // Whether a write may be made at once (#fastCommit): set at open, once the
   // plugins have set up — nothing asynchronous on the write path.
   #fastIssue = false;
@@ -410,6 +413,24 @@ class Storage extends Emitter {
       // notify), and whether anything listens — a commit event is built only then.
       emit: (event, ...args) => notify(this, this.#logger, event, ...args),
       listening: (event) => this.listenerCount(event) > 0,
+      // A listener of the storage's events, for a plugin that follows them (an
+      // editor's handle): answers the function that takes it off.
+      on: (event, listener) => {
+        this.on(event, listener);
+        return () => this.off(event, listener);
+      },
+      // What an editor's handle (src/text/handle.js) makes its edits with,
+      // outside the queue, over a reading of its own: an op made and stamped
+      // over an entry (`makeOp`), applied as a local write would be — a
+      // refusal thrown (`applyLocal`) — or as an op from elsewhere is
+      // (`applyTo`); and the open handles, which flush(), tag() and close()
+      // flush first.
+      editing: Object.freeze({
+        handles: this.#edits,
+        makeOp: (type, id, payload, current, who) => prepareOp(this.#core, type, id, payload, current, who, null),
+        applyLocal: (op, current) => applyLocal(this.#core, op, current),
+        applyTo: (entry, op) => applyOp(entry, op, this.#limits),
+      }),
       logger: this.#logger,
       otel: this.#otel,
       log: this.#log,
@@ -1337,7 +1358,13 @@ class Storage extends Emitter {
   }
 
   async tag(name) {
+    await this.#flushEdits();
     return this.#api('tag')(this.#core, name);
+  }
+
+  // Every open handle's edits logged (src/text/handle.js); a failure rejects.
+  async #flushEdits() {
+    for (const handle of this.#edits) await handle.flush();
   }
 
   async untag(name) {
@@ -1860,6 +1887,7 @@ class Storage extends Emitter {
    */
   async flush() {
     if (this.#closed) return;
+    await this.#flushEdits();
     await this.#drained();
     await this.#run(() => this.#flushDeferred());
   }
@@ -1867,6 +1895,12 @@ class Storage extends Emitter {
   /** Stops replication and seals the log. Further writes are refused — from the moment close() is called. */
   async close() {
     if (this.#closed) return;
+    // What an editor's handle holds goes to the log while writes are taken.
+    try {
+      await this.#flushEdits();
+    } catch (error) {
+      this.#logger.warn({ event: 'edits.unlogged', err: error });
+    }
     // Refused from here on: a write that landed while the links were
     // closing would be announced to nobody, after the final catalog save.
     // What was queued before this call still runs, ahead of the seal.

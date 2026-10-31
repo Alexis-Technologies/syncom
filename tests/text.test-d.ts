@@ -9,10 +9,12 @@ import type {
   TextBlock,
   CursorPosition,
   DeltaOp,
+  TextHandle,
+  TextHandleMethods,
 } from '../src/text/text.js';
 import { open } from '../index.js';
 
-expectType<Plugin<TextMethods>>(text);
+expectType<Plugin<TextMethods & TextHandleMethods>>(text);
 const storage = await open({ plugins: [text] });
 expectType<Promise<void>>(storage.splice('id', 'body', 0, 0, 'hi'));
 expectType<Promise<TextSpan[] | null>>(storage.spans('id', 'body'));
@@ -40,3 +42,16 @@ expectType<Promise<{ ops: number; revision: number }>>(
 expectType<Promise<number>>(storage.revision('id', 'body'));
 expectType<Promise<string>>(storage.insert({}));
 expectAssignable<SequenceBlock>({ k: 'l', ts: 0, runs: {} });
+
+const handle = await storage.openText('id', 'body', { window: 0, actor: 'ada' });
+expectType<TextHandle>(handle);
+expectType<void>(handle.insert(0, 'hi', { bold: true }));
+expectType<void>(handle.delete(0, 1));
+expectType<void>(handle.format(0, 1, { bold: null }));
+expectType<void>(handle.applyDelta([{ insert: 'x' }]));
+expectType<string>(handle.toString());
+expectType<number>(handle.length);
+expectType<boolean>(handle.pending);
+expectType<Promise<void>>(handle.flushed);
+expectType<() => void>(handle.observe((delta, event) => void [delta, event.local, event.reset]));
+expectType<Promise<void>>(handle.flush());

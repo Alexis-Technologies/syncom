@@ -13,6 +13,9 @@ src/text/diffs.js         the kinds' patches: the diff of two readings as splice
 src/text/methods.js       the storage methods of the kinds (splice, push, updateText, mark, spans, cursors, blocks, setAt, move…)
                           over the lent core
 src/text/deltas.js        toDelta and applyDelta: a turn's changes as a Quill delta, a delta as one transaction (src/text/quill.js)
+src/text/handle.js        openText, TextHandle — a synchronous editor's handle: edits made over its overlay (the field as announced,
+                          its edits on top) through the lent `core.editing`, coalesced, logged as one transaction a window later
+                          (`tx.commitResolved`); the base follows the `transaction` events
 src/text/quill.js         Quill-form deltas and their algebra, once — compose, transform, transformIndex (quill-delta's rules): the
                           plugin's toDelta and the editor binding (src/editor/editor.js) both stand on it — no requires
 src/text/rle.js           run-length content: a run's pieces and gaps, cut, append, merge, the canonical form under MAX_RUN —
