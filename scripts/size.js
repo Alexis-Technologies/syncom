@@ -148,7 +148,9 @@ const ENTRIES = [
   // 56.1 with the handles followed through one listener of the storage's, every handle flushed before a flush(), a
   // tag(), a close(), a compaction, a restore or a patch, a hook's context for an edit made elsewhere, and a write
   // that adds a `$type` kept off the fast path (review №4, E2). 56.5, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 56.5 },
+  // 56.5 (over by bytes) with the writes counted by path (`stats().commits`, `syncom.path`), the handles' flushes
+  // recorded, a peer's `actor` and `from` bounded, and one close (review №4, E3–E6). 57, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 57 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check

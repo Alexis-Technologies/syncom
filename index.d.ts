@@ -727,7 +727,8 @@ export interface SyncomTelemetryWriter {
   withSpan<T>(name: string, attributes: Record<string, unknown>, fn: (handle: unknown) => T): T;
   recordError?(handle: unknown, error: unknown): void;
   endSpan?(handle: unknown, attributes?: Record<string, unknown>): void;
-  recordCommit?(type: string, result: string, elapsed: number): void;
+  /** One local write: its op type, `applied` / `noop` / `encrypted` / `error` / `coalesced`, and `path` — `queue`, or `fast` for one made at once. */
+  recordCommit?(type: string, result: string, elapsed: number, path?: string): void;
   recordApply?(result: string, elapsed: number): void;
   recordMalformed?(): void;
   recordRejected?(reason: string): void;
@@ -749,6 +750,8 @@ export interface SyncomTelemetryWriter {
   recordRefusal?(code: number | string): void;
   /** Presence a host or a receiver refused: `reason` (`hello`, `rate`, `malformed`, `scope`, `forged`, `unsigned`, `invalid`), how many entries. */
   recordPresenceRefused?(reason: string, count: number): void;
+  /** A text handle's flush (`openText()`): `ok`, `unlogged` (nothing appended, the edits dropped) or `error` (appended, a step after failed). */
+  recordHandleFlush?(result: string): void;
   gauges?(read: () => Record<string, number>): void;
 }
 

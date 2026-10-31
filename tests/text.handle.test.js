@@ -648,3 +648,37 @@ test('a handle on a record deleted since reads empty and an edit writes it again
   await second.close();
   await storage.close();
 });
+
+test('stats() counts the handles open, those with edits waiting and the reservations; a flush is recorded by result', async () => {
+  const results = [];
+  const telemetry = {
+    enabled: true,
+    withSpan: (_name, _attributes, fn) => fn(null),
+    recordHandleFlush: (result) => results.push(result),
+  };
+  let refuse = false;
+  const hooks = {
+    beforeWrite: (ctx) => {
+      if (refuse && ctx.type === 'splice') throw new Error('not now');
+    },
+  };
+  const storage = await openMemory('/stats', memory(), { telemetry, hooks });
+  const id = await storage.insert({ title: 'doc' });
+  await storage.push(id, 'body', 'base');
+  const one = await storage.openText(id, 'body', { window: 60_000 });
+  const two = await storage.openText(id, 'body', { window: 60_000 });
+  one.insert(4, '!');
+  const open = storage.stats().handles;
+  assert.deepStrictEqual([open.open, open.pending, open.extents >= 1], [2, 1, true]);
+  await one.flush();
+  assert.deepStrictEqual(results, ['ok']);
+  refuse = true;
+  two.on('error', () => {});
+  two.insert(5, '?');
+  await assert.rejects(two.flush(), { code: 'UNLOGGED' });
+  assert.deepStrictEqual(results, ['ok', 'unlogged']);
+  await one.close();
+  await two.close();
+  assert.deepStrictEqual(storage.stats().handles, { open: 0, pending: 0, extents: 0 });
+  await storage.close();
+});

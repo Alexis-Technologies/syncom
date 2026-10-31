@@ -708,7 +708,7 @@ const NOOP = () => {};
  * — to the op with `answer`, else to nothing; a throw is a rejection with
  * nothing appended.
  */
-const commitAtOnce = (core, type, id, payload, options, current, answer) => {
+const commitAtOnce = (core, type, id, payload, options, current, answer, tally) => {
   const { source = null, via = null, from = null, actor, message } = options;
   const msg = messageArg(message);
   payload = copyPayload(payload);
@@ -718,12 +718,21 @@ const commitAtOnce = (core, type, id, payload, options, current, answer) => {
   const applied = applyLocal(core, op, current);
   if (applied === null) return Promise.resolve(answer ? null : undefined);
   const made = prepared(core, op, applied, current, null, source, via);
+  // Counted (`stats().commits`, `syncom.commits` with `syncom.path: 'fast'`): no span — a span costs the
+  // promises this path exists to spare — a count and a duration, from here to its landing.
+  tally.fast++;
+  const { otel } = core;
+  made.started = otel.enabled ? now() : 0;
   // A keystroke that continues the one before it in the group still
   // gathering is that op, grown (the plugin's `coalesce`): no op of its own.
   const into = coalesced(core, op, made, current);
   // A promise of the call's own (never the group's, whose rejection is handled already): a write nobody awaits
   // that fails is an unhandled rejection, as one through the queue is.
-  if (into !== null) return answer ? into.done.then(() => into.op) : into.done.then(NOOP);
+  if (into !== null) {
+    tally.coalesced++;
+    if (otel.enabled) otel.recordCommit(type, 'coalesced', 0, 'fast');
+    return answer ? into.done.then(() => into.op) : into.done.then(NOOP);
+  }
   // The chain at once: `hashText` is at once on both platforms.
   const key = opKey(op);
   const prev = core.fingerprintOf(key, op.seq - 1);
@@ -801,6 +810,7 @@ const landNow = (core, made, position) => {
     core.settled(op.id, position);
   }
   core.saveCatalog();
+  if (core.otel.enabled) core.otel.recordCommit(op.type, 'applied', now() - made.started, 'fast');
   try {
     announce(core, op, entry, delta, null, source, via, { seq: position, before, previous, txn: position }, changes);
   } finally {
@@ -892,10 +902,10 @@ const tracedPrepare = async (core, type, id, payload, options) => {
         'syncom.scope': op && op !== MISMATCH ? (op.scope ?? GLOBAL_SCOPE) : undefined,
       }),
     );
-    otel.recordCommit(type, commitResult(made.op), now() - started);
+    otel.recordCommit(type, commitResult(made.op), now() - started, 'queue');
     return made;
   } catch (error) {
-    otel.recordCommit(type, 'error', now() - started);
+    otel.recordCommit(type, 'error', now() - started, 'queue');
     throw error;
   }
 };
@@ -1118,18 +1128,18 @@ const tracedCommit = async (core, type, id, payload, options) => {
       'syncom.scope': op ? (op.scope ?? GLOBAL_SCOPE) : undefined,
     }));
   } catch (error) {
-    otel.recordCommit(type, 'error', now() - started);
+    otel.recordCommit(type, 'error', now() - started, 'queue');
     throw error;
   }
   const result = commitResult(out.op);
   if (out.done === null) {
-    otel.recordCommit(type, result, now() - started);
+    otel.recordCommit(type, result, now() - started, 'queue');
     return out;
   }
   const done = out.done.then(
-    () => otel.recordCommit(type, result, now() - started),
+    () => otel.recordCommit(type, result, now() - started, 'queue'),
     (error) => {
-      otel.recordCommit(type, 'error', now() - started);
+      otel.recordCommit(type, 'error', now() - started, 'queue');
       throw error;
     },
   );

@@ -143,6 +143,11 @@ class Storage extends Emitter {
   // of the records it touched alone.
   #followers = new Map();
   #following = null;
+  // The run offsets reserved while a handle is open, per field (src/text/kind.js extendsRun).
+  #extents = new Map();
+  // How the local writes went: made at once (src/commit.js commitAtOnce), through the queue, or
+  // folded into the write before them (coalesced) — `stats().commits`.
+  #commits = { fast: 0, queued: 0, coalesced: 0 };
   // The one close, once called: a second call waits for it, never seals twice.
   #closing = null;
   // Whether a write may be made at once (#fastCommit): set at open, once the
@@ -386,7 +391,6 @@ class Storage extends Emitter {
       this.#hooks.beforeWrite === null &&
       this.#hooks.afterWrite === null &&
       this.#core.sign === null &&
-      !this.#otel.enabled &&
       typeof this.#actor !== 'function' &&
       this.#defer > 0 &&
       this.#lens === null;
@@ -442,8 +446,8 @@ class Storage extends Emitter {
         // A handle's listener of the record's turns (the `transaction` event); answers what takes it off.
         follow: (id, listener) => this.#follow(id, listener),
         // While a handle is open: the next offset of each run of this node's
-        // a writer extended, reserved (src/text/kind.js extendsRun).
-        extents: new Map(),
+        // a writer extended, reserved per field (src/text/kind.js extendsRun).
+        extents: this.#extents,
         makeOp: (type, id, payload, current, who) => prepareOp(this.#core, type, id, payload, current, who, null),
         applyLocal: (op, current) => applyLocal(this.#core, op, current),
         applyTo: (entry, op) => applyOp(entry, op, this.#limits),
@@ -945,6 +949,11 @@ class Storage extends Emitter {
       held: this.#entries.heldIds().size,
       deferred: this.#window.size,
       inflight: this.#inflightCount,
+      // The local writes so far: made at once, through the queue, folded into the one before (LOG-9, LOG-11).
+      commits: { fast: this.#commits.fast, queued: this.#commits.queued, coalesced: this.#commits.coalesced },
+      // The text handles open (src/text/handle.js): how many, how many hold edits not logged yet, and the
+      // run offsets reserved for them over every field.
+      handles: this.#handleStats(),
       // The window `open({ defer })` gave, what the last deferred landing
       // took (the next window is at least that), and the positions waiting.
       defer: { window: this.#defer, flushCost: this.#window.cost, positions: this.#window.positions },
@@ -1241,6 +1250,7 @@ class Storage extends Emitter {
   }
 
   async #queuedCommit(type, id, payload, options) {
+    this.#commits.queued++;
     const { op, done } = await this.#run(() => commit(this.#core, type, id, payload, options));
     // The queue is free once the op is appended; the caller waits for the
     // landing — the disk, the file, the hooks, the listeners.
@@ -1273,7 +1283,7 @@ class Storage extends Emitter {
     }
     this.#queued++;
     try {
-      return commitAtOnce(this.#core, type, id, payload, options, current, answer);
+      return commitAtOnce(this.#core, type, id, payload, options, current, answer, this.#commits);
     } catch (error) {
       return Promise.reject(error);
     } finally {
@@ -1392,6 +1402,14 @@ class Storage extends Emitter {
     const flushed = this.#flushEditsOf(id);
     if (flushed !== null) await flushed;
     return P.compact(this.#core, id, options);
+  }
+
+  #handleStats() {
+    let pending = 0;
+    for (const handle of this.#edits) if (handle.pending) pending++;
+    let extents = 0;
+    for (const runs of this.#extents.values()) extents += runs.size;
+    return { open: this.#edits.size, pending, extents };
   }
 
   // The handles open on `id` flushed, or null where there is none.

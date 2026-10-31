@@ -41,6 +41,15 @@ There is no released version section until then; everything below lands in it.
 - **`bench/compare` measures a text typed through a handle** (`syncom-edit`), and `bench/write.js`
   the layers of one write (`--detail`, `--profile`, another checkout under `SYNCOM_BENCH_ROOT`).
 
+- **What the write path does is measured.** `stats()` adds `commits: { fast, queued, coalesced }` — the
+  local writes made at once, through the queue, and folded into the write before them — and
+  `handles: { open, pending, extents }` for the text handles. `syncom.commits` carries
+  `syncom.path` (`queue` / `fast`) and the result `coalesced`; `syncom.handle.flushes` counts a
+  handle's flushes by result (`ok` / `unlogged` / `error`); the writer contract gains
+  `recordHandleFlush`. Telemetry no longer turns the fast path off: a write made at once is
+  counted and timed, never spanned. `stats().log.corrupt` counts every log file that did not read
+  whole at open, a segment cut short as much as a checksum that did not match, and a journal's
+  last line altered is corrupt, not torn.
 - **What the log and the deferred window do is measured.** New metrics:
   `syncom.log.group.ops` (ops per group the log wrote),
   `syncom.log.append.failures`, `syncom.defer.flush.duration`, and the gauges

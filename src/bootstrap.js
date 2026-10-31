@@ -149,7 +149,7 @@ const mergeOne = async (batch, record) => {
     }
   }
   if (!changed) {
-    if (otel.enabled) otel.recordCommit('merge', 'noop', now() - started);
+    if (otel.enabled) otel.recordCommit('merge', 'noop', now() - started, 'queue');
     return;
   }
   op.seq = ++batch.seq;
@@ -214,7 +214,7 @@ const mergeBatch = async (core, records, via, from) => {
       core.refresh(op.id, isAlive(entry) ? entry.data : null, batch.deltas.get(op.id), null, entry);
       core.emit('change', op, via, { changes: own });
       for (const change of own) changes.push({ id: op.id, ...change });
-      if (core.otel.enabled) core.otel.recordCommit('merge', 'applied', now() - started);
+      if (core.otel.enabled) core.otel.recordCommit('merge', 'applied', now() - started, 'queue');
     }
   }
   if (core.listening('transaction')) {

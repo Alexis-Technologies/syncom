@@ -223,3 +223,39 @@ test('a write made at once whose group does not reach the disk is taken back who
     ['zy'],
   );
 });
+
+test('the fast path is counted and stays on with telemetry: stats().commits, and syncom.commits by path', async (t) => {
+  const recorded = [];
+  const telemetry = {
+    enabled: true,
+    withSpan: (_name, _attributes, fn) => fn(null),
+    recordCommit: (type, result, _elapsed, path) => recorded.push([type, result, path]),
+  };
+  const storage = await openMemory(t, { telemetry });
+  const id = await storage.insert({ title: 'doc' });
+  await storage.push(id, 'body', 'ab');
+  assert.ok(recorded.some(([type, result, path]) => type === 'write' && result === 'applied' && path === 'queue'));
+  recorded.length = 0;
+  const before = storage.stats().commits;
+  const next = storage.log.next;
+  // Two keystrokes sent without waiting: made at once, the second folded into the first.
+  const first = storage.splice(id, 'body', 2, 0, 'c');
+  const second = storage.splice(id, 'body', 3, 0, 'd');
+  assert.strictEqual(storage.log.next, next + 1, 'made at once, with telemetry on');
+  await first;
+  await second;
+  await storage.inc(id, 'hits', 1);
+  const after = storage.stats().commits;
+  assert.deepStrictEqual(
+    [after.fast - before.fast, after.coalesced - before.coalesced, after.queued - before.queued],
+    [3, 1, 0],
+    JSON.stringify([before, after]),
+  );
+  assert.ok(before.queued >= 1, 'the insert of a record not held here went through the queue');
+  const fast = recorded.filter(([, , path]) => path === 'fast');
+  assert.deepStrictEqual(fast, [
+    ['splice', 'coalesced', 'fast'],
+    ['splice', 'applied', 'fast'],
+    ['inc', 'applied', 'fast'],
+  ]);
+});

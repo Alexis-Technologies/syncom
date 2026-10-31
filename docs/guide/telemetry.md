@@ -77,7 +77,7 @@ wrpc's spans around the actual calls.
 
 | Span | When | Attributes |
 | --- | --- | --- |
-| `syncom.commit` | one local write — of any op type, a list, text or tree op as much as a `set` — from the moment it runs to after the `change` listeners; inside a transaction, the op built, applied and validated (the append and the landing are the transaction's) | `syncom.op.type`, `syncom.record.id`†, `syncom.result` (`applied` / `noop` / `encrypted`), `syncom.scope` |
+| `syncom.commit` | one local write through the queue (a write made at once has no span: counted, see below) — of any op type, a list, text or tree op as much as a `set` — from the moment it runs to after the `change` listeners; inside a transaction, the op built, applied and validated (the append and the landing are the transaction's) | `syncom.op.type`, `syncom.record.id`†, `syncom.result` (`applied` / `noop` / `encrypted`), `syncom.scope` |
 | `syncom.apply` | one batch of a peer's ops | `syncom.ops.count`, `syncom.ops.applied`, `syncom.ops.skipped`, `syncom.ops.duplicates`, `syncom.ops.gaps`, `syncom.ops.malformed`, `syncom.ops.unsigned`, `syncom.ops.forged`, `syncom.ops.out_of_scope`, `syncom.ops.equivocations` |
 | `syncom.replay` | the unsealed log tail replayed at open | `syncom.ops.count`, `syncom.records` |
 | `syncom.push` | one push to a peer, all its pages | `syncom.push.reason` (`handshake` / `manual` / `relay` / `recover` — a peer that fell behind, caught up from the vector), `syncom.ops.count`, `syncom.pages`, `syncom.peer.url`†, `syncom.peer.node`† |
@@ -105,7 +105,11 @@ counted (below), the batch's span stays green.
 
 A `merge` — one per snapshot record during a bootstrap — is counted but not
 spanned, or a bootstrap of ten thousand records would open ten thousand
-spans under one `syncom.bootstrap`.
+spans under one `syncom.bootstrap`. A write made at once (the fast path:
+an idle queue, nothing asynchronous configured) opens no span either — a
+span costs the promises that path exists to spare — and is counted in
+`syncom.commits` with `syncom.path: 'fast'`, its duration to the landing
+in `syncom.write.duration`; telemetry does not turn the fast path off.
 
 ## Metrics
 
@@ -114,7 +118,7 @@ appears on one.
 
 | Metric | Instrument | Unit | Labels |
 | --- | --- | --- | --- |
-| `syncom.commits` | Counter | `{op}` | `syncom.op.type`, `syncom.result` (`applied` / `noop` / `encrypted` / `error`) |
+| `syncom.commits` | Counter | `{op}` | `syncom.op.type`, `syncom.result` (`applied` / `noop` / `encrypted` / `error` / `coalesced` — folded into the write before it), `syncom.path` (`queue` / `fast` — made at once, outside the queue: counted, with its duration in `syncom.write.duration`, never spanned) |
 | `syncom.write.duration` | Histogram | `ms` | `syncom.path` (`commit` / `apply` / `replay`) |
 | `syncom.ops.received` | Counter | `{op}` | `syncom.outcome` (`applied` / `skipped` — accepted but not applied here: a hook, the schema, an unreadable record / `duplicate` / `gap` / `malformed` — the last includes a stamp beyond `maxSkew` / `refused` — a signature that does not check, or none under `'require'`, or on a host a record outside the pushing peer's scopes) |
 | `syncom.ops.rejected` | Counter | `{op}` | `syncom.reason` (`register` / `counter` / `set` / `list` / `text` / `tree` — the kind that holds the field and outranks the op's / `kind` — a field of a kind this node runs no plugin for, counted per op, reported once per page / `bound` — past a list's or a text's limit / `malformed` — a payload the engine does not admit / `validation` / `scope` / `unreadable` / `forged` / `unsigned` / `equivocation` — another op than the one held at its seq / `chain` — a `prev` that is not the fingerprint held at the seq before it) |
@@ -132,6 +136,7 @@ appears on one.
 | `syncom.lock.wait` | Histogram | `ms` | — (what `open()` spent taking the directory lock) |
 | `syncom.hello.refused` | Counter | `{call}` | `syncom.code` (`400` / `403` / `409` / `428`) — calls a hosted unit refused before the handler |
 | `syncom.presence.refused` | Counter | `{entry}` | `syncom.reason` — on a host (`hello` / `rate` / `malformed` / `scope` / `forged` / `unsigned`: an update refused whole, never relayed) and on a receiver (`forged` / `unsigned` / `invalid` — malformed, past the bounds, not the sender's own, the room full: entries refused) |
+| `syncom.handle.flushes` | Counter | `{flush}` | `syncom.result` (`ok` / `unlogged` — nothing appended, the edits dropped / `error` — appended, a step after failed) — a text handle's flush (`openText()`) |
 | `syncom.outbox.size` | Observable gauge | `{op}` | — (ops queued for peers, over every dialed peer) |
 | `syncom.queue.depth` | Observable gauge | `{op}` | — (writes waiting on, or in, the mutation queue) |
 | `syncom.cache.size` | Observable gauge | `{entry}` | — |

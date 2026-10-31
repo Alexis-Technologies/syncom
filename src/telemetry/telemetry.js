@@ -181,6 +181,7 @@ const createTelemetry = (telemetry) => {
   let lockWait = null;
   let refused = null;
   let presenceRefused = null;
+  let handleFlushes = null;
   let gauges = null;
 
   if (hasMethod(meter, 'createCounter') && hasMethod(meter, 'createHistogram')) {
@@ -259,6 +260,10 @@ const createTelemetry = (telemetry) => {
         description:
           'Presence a host or a receiver refused, by reason: hello, rate, malformed, scope, forged, unsigned, invalid',
       });
+      handleFlushes = meter.createCounter('syncom.handle.flushes', {
+        unit: '{flush}',
+        description: 'Text handle flushes (openText), by result: ok, unlogged, error',
+      });
       // Observable: read when the SDK collects, through the callbacks
       // `gauges(read)` registers. Optional — a meter without the factory
       // keeps the counters and histograms.
@@ -329,9 +334,11 @@ const createTelemetry = (telemetry) => {
       endSpanHandle(handle, attributes, includeIdentity);
     },
 
-    recordCommit(type, result, elapsed) {
-      add(commits, 1, { 'syncom.op.type': type, 'syncom.result': result });
-      record(writeDuration, elapsed, PATH_COMMIT);
+    // `path`: through the queue, or made at once (src/commit.js commitAtOnce — counted, never spanned); a
+    // write folded into the one before it (`coalesced`) has no duration of its own.
+    recordCommit(type, result, elapsed, path = 'queue') {
+      add(commits, 1, { 'syncom.op.type': type, 'syncom.result': result, 'syncom.path': path });
+      if (result !== 'coalesced') record(writeDuration, elapsed, PATH_COMMIT);
     },
 
     recordApply(result, elapsed) {
@@ -414,6 +421,10 @@ const createTelemetry = (telemetry) => {
 
     recordPresenceRefused(reason, count) {
       add(presenceRefused, count, { 'syncom.reason': reason });
+    },
+
+    recordHandleFlush(result) {
+      add(handleFlushes, 1, { 'syncom.result': result });
     },
 
     /**

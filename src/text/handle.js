@@ -264,6 +264,7 @@ class TextHandle extends Emitter {
     const flushing = this.#flushing.then(run, run).then(
       () => {
         this.#unsettled--;
+        core.otel.recordHandleFlush('ok');
         waiting?.resolve();
       },
       (error) => {
@@ -271,6 +272,7 @@ class TextHandle extends Emitter {
         // Logged, and a step after the append failed (an afterWrite hook): the
         // edits stand, their turn comes, the error is the caller's. Cancelled:
         // dropped with the flush before it, which said so.
+        core.otel.recordHandleFlush(landing.logged ? 'error' : 'unlogged');
         const unlogged = landing.logged || landing.cancelled ? error : this.#unlogged(landing, error);
         waiting?.reject(unlogged);
         throw unlogged;

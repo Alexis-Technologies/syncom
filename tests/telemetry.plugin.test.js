@@ -86,8 +86,10 @@ test('telemetry as a plugin', async (t) => {
     const id = await storage.insert({ a: 1 });
     await storage.update(id, { a: 2 });
     const commits = tracer.spans.filter((span) => span.name === 'syncom.commit');
-    assert.strictEqual(commits.length, 2);
+    // The insert alone: the update was made at once — counted (`stats().commits`, `syncom.commits`), never spanned.
+    assert.strictEqual(commits.length, 1);
     assert.ok(commits.every((span) => span.ended));
+    assert.deepStrictEqual(storage.stats().commits, { fast: 1, queued: 1, coalesced: 0 });
     // An empty bag, or an api with neither trace nor metrics: the disabled writer, no refusal.
     const quiet = await core.open({ path: 'quiet', fsi, logger: false, plugins: [telemetry], telemetry: {} });
     t2.after(() => quiet.close().catch(() => {}));

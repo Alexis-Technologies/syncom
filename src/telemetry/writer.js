@@ -63,6 +63,7 @@ const DISABLED = Object.freeze({
   recordLockWait: noop,
   recordRefusal: noop,
   recordPresenceRefused: noop,
+  recordHandleFlush: noop,
   gauges: noop,
 });
 
@@ -90,6 +91,7 @@ const METHODS = Object.freeze([
   'recordLockWait',
   'recordRefusal',
   'recordPresenceRefused',
+  'recordHandleFlush',
   'gauges',
 ]);
 
@@ -106,9 +108,10 @@ const contained = (writer) => {
 const containMethod = (given, name) => {
   const method = given[name];
   if (typeof method !== 'function') return noop;
-  return (a, b, c) => {
+  // Four arguments: the widest method's (`recordCommit(type, result, elapsed, path)`).
+  return (a, b, c, d) => {
     try {
-      return method.call(given, a, b, c);
+      return method.call(given, a, b, c, d);
     } catch {
       // A writer that throws records nothing; the write goes on.
       return undefined;

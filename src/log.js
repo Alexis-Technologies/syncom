@@ -400,9 +400,10 @@ class OpLog {
       const text = await readOrNull(this.#fsi, this.#path, segment.name);
       const { entries, reason } = readSegment(text);
       if (entries === null) {
+        // Not read whole, whichever way — a checksum that did not match, a file cut short: counted as corrupt.
         this.#log?.error?.({ event: 'log.segment.unreadable', segment: segment.name, reason });
         this.#lost = true;
-        if (reason === 'checksum') this.#corrupt++;
+        this.#corrupt++;
         this.#segments.push(segment);
         next = null;
         continue;
@@ -513,13 +514,15 @@ class OpLog {
         else this.#opened(name, entries, sealedTo, lines[i]);
         continue;
       }
-      if (reason === 'checksum') this.#corrupt++;
-      if (i === end - 1) {
+      // A last line cut short is a write a crash cut: torn, expected, left out. A line altered (its checksum
+      // does not match) or one cut short inside is a loss: corrupt, said out loud.
+      if (reason === 'malformed' && i === end - 1) {
         this.#log?.info?.({ event: 'log.open.torn', file: name, reason });
         this.#tornLines++;
       } else {
         this.#log?.error?.({ event: 'log.open.unreadable', file: name, reason });
         this.#lost = true;
+        this.#corrupt++;
       }
     }
     return shadowed;
