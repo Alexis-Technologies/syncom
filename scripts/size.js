@@ -322,7 +322,10 @@ const ENTRIES = [
   // (E1, the engine agent) the engine's bounds read before anything is written (a parked extension against MAX_RUN and MAX_FIELD, a cut's
   // (E1, the engine agent) ranges against MAX_CUTS and merged for the report) and its pending work counted as it comes (2026-10-31).
   // (E1, the engine agent) 129.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 131 },
+  // 131.1 with the engine's bounds (E1, above) and the write path's, the handle's and the log's fixes (E2–E9) in one
+  // bundle. 131.5, raised by name — M-3/M-6 (the folds written once, the two B+-trees sharing their node code) are
+  // what should give some of it back.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 131.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -355,7 +358,10 @@ const ENTRIES = [
   // (E1, the engine agent) folded (prepends). 42.5, raised by name. 42.5 with the bounds read before anything is written (a parked
   // (E1, the engine agent) extension against MAX_RUN and MAX_FIELD, a cut's ranges against MAX_CUTS and merged for the report) and the
   // (E1, the engine agent) pending work counted as it comes (2026-10-31). 43, raised by name.
-  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 43 },
+  // 43.3 with the engine's bounds (E1: a parked extension against MAX_RUN and MAX_FIELD, a zero-slot run left out, a
+  // cut's ranges against MAX_CUTS and merged for the report, the pending work counted as it comes, a block rebuilt
+  // once per base, MAX_MARKS) beside the handle's fixes (E2) in one bundle. 43.5, raised by name.
+  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 43.5 },
   // The tree kind alone, with the fractional indexes a place is made of and
   // the argument checks it shares with the core (5.1 measured).
   // 5.5 with the field-name check unset shares with it (src/args.js).

@@ -525,8 +525,10 @@ a snapshot buys nothing an op could not:
 | How deep what a local write takes nests | 64 levels (`MAX_JSON_DEPTH`): the 16 between leave room for what an op and a meta wrap around a value | `TypeError` |
 | A seq taken for a node's own stream from a host (`REWOUND`) | 2⁵³ − 1 − 2³² | not taken |
 | A counter's sum per stream | ±2⁵³ − 1 | `OP_REFUSED` `detail: 'counter'` |
-| A run's length | 2²⁰ elements | `OP_REFUSED` `detail: 'run'` |
+| A run's length | 2²⁰ elements (`MAX_RUN`) — an extension parked ahead of its run counted against it where it arrives, and against the field's slots while it waits | `OP_REFUSED` `detail: 'run'`; a snapshot's parked extension past it left out |
 | Pending ops per block | `sync.pendingMax`, 4 096 | `OP_REFUSED` `detail: 'pending'` |
+| A splice's cut ranges | 65 536 (`MAX_CUTS`); overlapping ranges of one run read as one for the change report | `OP_REFUSED` `detail: 'cuts'` |
+| A text's marks | 65 536 (`MAX_MARKS`) | `OP_REFUSED` `detail: 'marks'`; a snapshot block past it is not taken |
 | A tree's depth read, a fractional index | 512 levels, 1 024 characters | the deeper levels unread; `malformed` |
 | The fold's walk up from a move's parent (`MAX_WALK`) | 512 ancestors | the move is moot, like one that would make a cycle — the same on every node |
 | A tree field's moves (`MAX_MOVES`), every node's together | 65 536 | `OP_REFUSED` `detail: 'moves'`; a snapshot block past it is not taken; a join keeps the oldest in the fold's order |

@@ -505,7 +505,12 @@ delta cannot say — a reset, an unset — makes it `null`: read the field again
   nothing more until a reset — `set()` of the record, or `compact(id)`,
   which writes the field again without its tombstones. Locally
   a call past a bound rejects with `FIELD_KIND`, `kind: 'bound'`, `detail`
-  (`'run'`, `'field'` or `'pending'`), `count` and `max`.
+  (`'run'`, `'field'`, `'pending'`, `'cuts'` or `'marks'`), `count` and `max`.
+  A splice cuts at most 65 536 ranges (`MAX_CUTS`; overlapping ranges of one
+  run read as one for the change report), a text holds at most 65 536 marks
+  (`MAX_MARKS`), and an extension that arrives ahead of its run — parked until
+  the run reaches it — counts against `MAX_RUN` and the field's slots where it
+  arrives, never only where it lands.
 - Pending work — a run whose anchor has not arrived, a cut or an extension
   of a run not here, a register for an element not here, a mark switched off
   before it arrived — is bounded per field by `sync.pendingMax` (4 096;

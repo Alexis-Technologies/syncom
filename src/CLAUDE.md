@@ -261,8 +261,11 @@ fi }` — what is the op's own origin's named short (a run by its stamp, an elem
   about, so `updateText` never makes one; the tree plugin's `resolve` reads
   the fold the block keeps and hands back `null` for a move to where the node is, and
   `commitLocal` returns before `applyOp` on it). `sync.pendingMax`
-  (`PENDING_MAX`), `MAX_RUN` (`src/text/rle.js`), `MAX_FIELD`, `MAX_FI`, `MAX_DEPTH`,
-  `MAX_MOVES` (a tree field's moves; a join keeps the oldest) and `MAX_COUNT` bound
+  (`PENDING_MAX`), `MAX_RUN` (`src/text/rle.js`; a parked extension counted against it and
+  against `MAX_FIELD` before it is kept), `MAX_FIELD`, `MAX_CUTS` and `MAX_MARKS` (`src/text/keys.js`:
+  a splice's ranges, a text's marks), `MAX_FI`, `MAX_DEPTH`,
+  `MAX_MOVES` (a tree field's moves; a join keeps the oldest), `MAX_COUNT` and `MAX_ACTOR`
+  (`src/shape.js`: an op's `actor` and `from`, in the header every node hashes) bound
   what a peer can make a node hold or read — and `MAX_WALK` what a fold walks: a
   move under a parent deeper than it is moot, like a cycle — on the op path
   and in `normalizeMeta` alike — a snapshot buys nothing an op could not. The
@@ -309,7 +312,8 @@ fi }` — what is the op's own origin's named short (a run by its stamp, an elem
   arguments were checked, so this is a bug — and from a peer it is
   `OP_REFUSED{reason:'malformed'}`, counted in `syncom.ops.rejected`, the op
   still logged and relayed as a no-op (a dirk, never a gap). A `bound`
-  refusal carries `detail` (`pending`/`run`/`field`/`counter`), `count` and `max`.
+  refusal carries `detail` (`pending`/`run`/`field`/`cuts`/`marks`/`moves`/`counter`/`paths`), `count`
+  and `max`.
 - **Ops from one origin apply in seq order; seqs run per origin AND scope**
   (`origin@scope` vector keys), and ops born from a snapshot (`merge`,
   `advance`) run in their own `origin@~` stream. `applyRemote` skips
