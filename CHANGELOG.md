@@ -20,8 +20,13 @@ There is no released version section until then; everything below lands in it.
   `length`, `slice()` and `spans()` read it; `observe()` hears every other writer's change as a
   delta in the handle's indices. The edits are logged a window later (the storage's `defer`) as
   one transaction, keystrokes that continue each other as one op; a flush that cannot be logged
-  rejects `flushed` with the new `UNLOGGED` and drops what was not logged. Several writers of one
-  node over one text — handles and the storage — never grow one run from two readings.
+  rejects `flushed` with the new `UNLOGGED` and drops what was not logged — its edits, the flushes
+  taken behind it and what was typed since — and the storage logs `handle.unlogged`; a step that
+  fails after the append (an `afterWrite` hook) leaves the edits logged. The storage's `flush()`,
+  `tag()` and `close()` flush every open handle, one that cannot be logged stopping none of the
+  others. Handles follow the storage's turns through one listener (as many handles as the
+  application opens), and a field's run reservations go with its last handle. Several writers of
+  one node over one text — handles and the storage — never grow one run from two readings.
 - **Keystrokes fold into one op.** Sent without waiting (made at once, outside the queue), typed
   through a transaction or through a handle, keystrokes that continue each other — typed on at
   the end of their run, or a chain of cuts — are logged as one op; a signing node folds those of a

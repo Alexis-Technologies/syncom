@@ -65,11 +65,15 @@ attrs, isEmbed }` an entry of the block's `vals` (as a list element's
 - **While a handle is open, a run grows from one reading at a time.** A handle and the storage
   are writers of one origin, each over its own reading, and the engine takes an extension at an
   offset the run holds as a duplicate — dropped. So `resolveSplice` (src/text/kind.js `extendsRun`)
-  reserves a run's next offset in `core.editing.extents` for every extension while a handle is
-  open, and a writer whose reading is behind it anchors a run of its own after the run's last
-  element (HANDLE-4); the last handle closed clears the map, a rehearsal reserves nothing. A new
+  reserves a run's next offset in `core.editing.extents` — a map per field, under `extentKey(id,
+field)` — for every extension while a handle is open, and a writer whose reading is behind it
+  anchors a run of its own after the run's last element (HANDLE-4); a field's map goes with the
+  field's last handle, the last handle of all clears them, a rehearsal reserves nothing. A new
   local writer of a text resolves through `resolveSplice` with the storage's core, or loses
-  characters.
+  characters. A handle follows the record's turns through `core.editing.follow(id, listener)` —
+  ONE `transaction` listener of the storage's, by record id (src/storage.js `#follow`) — never
+  through `core.on`: a handle counts against no listener cap, and a turn reaches the handles of
+  the records it touched alone (HANDLE-6).
 - **A piece is written again when one of its runs reads otherwise, and only then.** A block of
   `PIECES_MIN` runs or more goes to its file in pieces of `PIECE_RUNS` runs by their numbers in the
   lineage (src/text/state.js `piecesOf`), each keyed by a token an op replaces where it changes a run's
@@ -84,8 +88,13 @@ attrs, isEmbed }` an entry of the block's `vals` (as a list element's
   the next keystroke continues it (`coalesce`, typed on) or comes right before its first element
   (`prepends`, a word typed backward — its elements numbered again, the op applied again over the
   reading it was made over, at most `PREPEND_MAX` slots); never once the flush has taken it, never
-  after another writer's turn reached the overlay, and the run's reserved next offset moves with it
-  (HANDLE-5).
+  after another writer's turn reached the overlay — told by `made.heard`, the turns heard when the
+  edit was made, never by the entry (a keystroke typed on sets `made.entry` to the overlay, which
+  holds the turn) — and the run's reserved next offset moves with it (HANDLE-5). A flush that
+  cannot be logged cancels the flushes taken behind it before they log anything (their edits may
+  anchor in the dropped batch) and rejects whoever waits for `flushed`; one that fails AFTER the
+  append (an afterWrite hook) is logged — the handle keeps the edits and rethrows that error
+  (HANDLE-3).
 - **An op's own references are short; the engine reads full names alone.** `resolve` (src/text/kind.js)
   names what is the op's own origin's without it — `run`, a cut's run and a mark's `off` by the stamp (a
   number), an element as `ts:offset`, an anchor `<ts:offset`/`>ts:offset` — and `fullRefs` lays

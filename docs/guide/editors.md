@@ -56,9 +56,16 @@ await handle.close();
   its indices against the storage's reading, not the handle's: flush first to
   write by the handle's.
 - **A flush that cannot be logged** — the append failed, a hook or a
-  validator refused — drops what was not logged: `flushed` rejects with
-  `UNLOGGED` (the handle's `error` event too), the handle reads the field as
-  announced again, and its observers hear `reset`.
+  validator refused — drops what was not logged: its edits, the flushes taken
+  behind it (they may anchor in what was dropped) and what was typed since.
+  `flushed` rejects with `UNLOGGED` (the handle's `error` event too), the
+  handle reads the field as announced again, its observers hear `reset`, and
+  the storage logs `handle.unlogged`. A step that fails after the append (an
+  `afterWrite` hook) is that error, not `UNLOGGED`: the edits are logged and
+  kept. The storage's `flush()`, `tag()` and `close()` flush every open
+  handle; one whose edits cannot be logged stops none of the others — the
+  first two reject with one `UNLOGGED` (`handles`, `edits`), `close()` closes
+  and logs `edits.unlogged`. Once `close()` is called, an edit is `CLOSED`.
 - `format(index, count, attributes)` styles a range (an `embed` attribute
   sets every embed slot's marker), `insertEmbed(index, marker)` inserts a slot,
   and `applyDelta(delta)` is `storage.applyDelta()`'s, at once: marks, embeds

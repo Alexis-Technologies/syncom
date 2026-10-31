@@ -26,7 +26,7 @@ const { spliceArgs, markArgs, jsonValue, fieldName, EMBED } = require('../args.j
 const { isRecordId, invalidId, isPlainObject, asJson } = require('../shape.js');
 const { floorOf } = require('../vector.js');
 const S = require('./sequence.js');
-const { coalesce, prepends, render, blockOf, marksAt, markerArgs } = require('./kind.js');
+const { coalesce, prepends, render, blockOf, marksAt, markerArgs, extentKey } = require('./kind.js');
 const { toDelta } = require('./deltas.js');
 const { typedSpans } = require('./methods.js');
 const { assignData } = require('../lazy.js');
@@ -35,6 +35,7 @@ const { assignData } = require('../lazy.js');
 const PENDING_MAX = 1024;
 
 const RESOLVED = Promise.resolve();
+const NOOP = () => {};
 
 class TextHandle extends Emitter {
   #core;
@@ -52,9 +53,10 @@ class TextHandle extends Emitter {
   #flushing = RESOLVED;
   // Flushes taken and not settled yet: their edits still wait for the log.
   #unsettled = 0;
-  // Per flush whose event has not come yet, in order: its ops, the overlay
-  // as it was taken (the base and every edit up to it) and how many other
-  // writers' turns the handle had heard by then.
+  // Per flush taken and not heard yet, in order: its ops, the overlay as it
+  // was taken (the base and every edit up to it), how many other writers'
+  // turns the handle had heard by then, and where it stands — started,
+  // logged, or cancelled behind a flush that could not be logged.
   #landings = [];
   #heardTurns = 0;
   #timer = null;
@@ -73,7 +75,8 @@ class TextHandle extends Emitter {
     this.#window = window;
     this.#base = base;
     this.#overlay = base;
-    this.#off = core.on('transaction', (event) => this.#heard(event));
+    // One listener of the storage's `transaction` events serves every handle (core.editing.follow).
+    this.#off = core.editing.follow(id, (event) => this.#heard(event));
     core.editing.handles.add(this);
   }
 
@@ -107,7 +110,8 @@ class TextHandle extends Emitter {
 
   /** Settles once every edit made so far is logged and landed; rejects with UNLOGGED when it could not be. */
   get flushed() {
-    if (this.#pending.length === 0) return this.#flushing;
+    // Nothing waiting: the flush in flight, if one is — it rejects when its edits could not be logged.
+    if (this.#pending.length === 0) return this.#unsettled > 0 ? this.#flushing : RESOLVED;
     if (this.#waiting === null) {
       const waiting = { promise: null, resolve: null, reject: null };
       waiting.promise = new Promise((resolve, reject) => {
@@ -200,7 +204,7 @@ class TextHandle extends Emitter {
       clearTimeout(this.#timer);
       this.#timer = null;
     }
-    if (this.#pending.length === 0) return this.#flushing;
+    if (this.#pending.length === 0) return this.#unsettled > 0 ? this.#flushing : RESOLVED;
     const batch = this.#pending;
     const made = this.#made;
     const waiting = this.#waiting;
@@ -209,15 +213,28 @@ class TextHandle extends Emitter {
     this.#waiting = null;
     const core = this.#core;
     this.#unsettled++;
-    const landing = { ops: new Set(batch), overlay: this.#overlay, heard: this.#heardTurns };
+    const landing = {
+      ops: new Set(batch),
+      batch,
+      overlay: this.#overlay,
+      heard: this.#heardTurns,
+      started: false,
+      logged: false,
+      cancelled: false,
+      error: null,
+    };
     this.#landings.push(landing);
     const run = async () => {
+      landing.started = true;
+      // Taken behind a flush that could not be logged: its edits may anchor in what was dropped.
+      if (landing.cancelled) throw landing.error;
       const { done } = await core.transact(
         async (tx) => {
           for (let i = 0; i < batch.length; i++) await tx.commitResolved(batch[i], made[i]);
         },
         { source: this.#source },
       );
+      landing.logged = true;
       // Nothing logged (every edit moot): no turn comes for it.
       if (done === null) this.#landings.splice(this.#landings.indexOf(landing), 1);
       else await done;
@@ -229,26 +246,37 @@ class TextHandle extends Emitter {
       },
       (error) => {
         this.#unsettled--;
-        const unlogged = this.#unlogged(batch, error);
+        // Logged, and a step after the append failed (an afterWrite hook): the
+        // edits stand, their turn comes, the error is the caller's. Cancelled:
+        // dropped with the flush before it, which said so.
+        const unlogged = landing.logged || landing.cancelled ? error : this.#unlogged(landing, error);
         waiting?.reject(unlogged);
         throw unlogged;
       },
     );
-    this.#flushing = flushing.catch(() => {});
+    // Kept as it is — `flushed` hands it out while it is in flight — and never unhandled.
+    this.#flushing = flushing;
+    flushing.catch(NOOP);
     return flushing;
   }
 
   /** Logs what waits, then stops following the field. */
   async close() {
     if (this.#closed) return;
+    // Refused from here on: an edit made while the flush is out would be logged with nothing reserved.
+    this.#closed = true;
     try {
       await this.flush();
     } finally {
-      this.#closed = true;
       this.#off();
       const { editing } = this.#core;
       editing.handles.delete(this);
-      // The storage the one writer again: nothing to reserve against.
+      // The field's last handle gone: nothing to reserve its runs against; the last handle of all: nothing at all.
+      let others = false;
+      for (const handle of editing.handles) {
+        if (handle.id === this.id && handle.field === this.field) others = true;
+      }
+      if (!others) editing.extents.delete(extentKey(this.id, this.field));
       if (editing.handles.size === 0) editing.extents.clear();
       this.#observers.clear();
     }
@@ -278,7 +306,10 @@ class TextHandle extends Emitter {
       for (let i = 0; i < applied.changes.length; i++) made.changes.push(applied.changes[i]);
     } else {
       this.#pending.push(op);
-      this.#made.push({ from, entry: applied.entry, delta: applied.delta, changes: applied.changes.slice() });
+      // `heard`: how many other writers' turns the handle had taken when the edit was made — what tells a
+      // prepend (HANDLE-5) that none came since, whatever the overlay holds.
+      const heard = this.#heardTurns;
+      this.#made.push({ from, entry: applied.entry, delta: applied.delta, changes: applied.changes.slice(), heard });
     }
     this.#tell(applied.changes, true);
     if (this.#pending.length >= PENDING_MAX) void this.flush().catch(() => {});
@@ -294,7 +325,10 @@ class TextHandle extends Emitter {
     if (at < 0) return false;
     const last = this.#pending[at];
     const made = this.#made[at];
-    if (last.key !== op.key || made.entry !== this.#overlay) return false;
+    // Never once another writer's turn reached the overlay: the edit grown would be laid over the reading
+    // before that turn, and the turn lost (a keystroke typed on sets `made.entry` to the overlay, so the
+    // entry alone cannot tell).
+    if (last.key !== op.key || made.heard !== this.#heardTurns || made.entry !== this.#overlay) return false;
     const grown = prepends(last, op);
     if (grown === null) return false;
     const was = last.value;
@@ -317,8 +351,9 @@ class TextHandle extends Emitter {
     made.changes = applied.changes.slice();
     // The run's next offset, where a writer reserved it, moves by what came before (HANDLE-4).
     const run = S.runKey(last.ts, last.origin);
-    const end = editing.extents.get(run);
-    if (end !== undefined) editing.extents.set(run, end + op.value.content.length);
+    const runs = editing.extents.get(extentKey(this.id, this.field));
+    const end = runs === undefined ? undefined : runs.get(run);
+    if (end !== undefined) runs.set(run, end + op.value.content.length);
     this.#tell([{ ...change, content: op.value.content }], true);
     this.#arm();
     return true;
@@ -427,25 +462,40 @@ class TextHandle extends Emitter {
     }
   }
 
-  // A flush that did not land: what was not logged is gone — the batch and
-  // what was typed on top of it, which may anchor in it — the overlay is the
-  // field as announced again, and the observers read it again.
-  #unlogged(batch, cause) {
-    const edits = batch.length + this.#pending.length;
-    this.#pending = [];
-    this.#made = [];
-    this.#overlay = this.#base;
-    // A flush behind it may still log what it took: its turn reaches the
-    // handle as another writer's would, laid on the base and the overlay both.
-    this.#landings = [];
-    this.#tellReset(this.#source);
+  // A flush that logged nothing: what was not logged is gone — its batch,
+  // the flushes taken behind it (cancelled before they log anything: their
+  // edits may anchor in the batch) and what still waits — the overlay is the
+  // field as announced again, whoever waits for `flushed` is told, the
+  // observers read the field again, and the warning is written whether or
+  // not anything listens.
+  #unlogged(landing, cause) {
+    let edits = landing.batch.length + this.#pending.length;
+    const cancelled = [];
+    for (let i = 0; i < this.#landings.length; i++) {
+      const later = this.#landings[i];
+      if (later === landing || later.started) continue;
+      later.cancelled = true;
+      edits += later.batch.length;
+      cancelled.push(later);
+    }
     const error = new SyncomError('UNLOGGED', `Edits of ${this.field} of ${this.id} could not be logged`, {
       id: this.id,
       field: this.field,
       edits,
       cause,
     });
-    if (this.listenerCount('error') > 0) this.emit('error', error).catch(() => {});
+    for (let i = 0; i < cancelled.length; i++) cancelled[i].error = error;
+    this.#pending = [];
+    this.#made = [];
+    this.#overlay = this.#base;
+    this.#landings = [];
+    if (this.#waiting !== null) {
+      this.#waiting.reject(error);
+      this.#waiting = null;
+    }
+    this.#tellReset(this.#source);
+    this.#core.logger.warn({ event: 'handle.unlogged', id: this.id, field: this.field, edits, err: cause });
+    if (this.listenerCount('error') > 0) this.emit('error', error).catch(NOOP);
     return error;
   }
 }

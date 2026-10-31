@@ -303,7 +303,9 @@ const ENTRIES = [
   // raised by name. 128.3 with the v2 sequence engine (a copy-on-write rope, the id index, the hash tries, names
   // interned per lineage; v1's persistent tree, map and lists gone). 128.5, raised by name. 128.7 with a large
   // block's pieces by run number and a word typed backward folded by a handle. 129, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 129 },
+  // 129.3 with the handles followed through one listener of the storage's, a flush cancelled behind one that could
+  // not be logged, and every handle flushed at a flush(), a tag() and a close() (review №4, E2). 129.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 129.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).

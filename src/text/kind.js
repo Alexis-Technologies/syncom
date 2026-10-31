@@ -467,12 +467,18 @@ const wholeCharacters = (id, key, idx, ...indexes) => {
 // behind it (another writer grew the run meanwhile) begins a run of its own
 // after it (HANDLE-4). Without a handle the storage is the one writer: nothing
 // is reserved, and the last handle closed clears what was (src/text/handle.js).
-const extendsRun = (core, run, from, length) => {
+// The reservations are kept per field — `extents` maps `extentKey(id, field)` to the field's runs and their
+// next offsets — and dropped with the field's last handle, so they never outgrow the fields being edited.
+const extentKey = (id, field) => `${id}\u0000${field}`;
+const extendsRun = (core, id, field, run, from, length) => {
   const editing = core.editing;
   if (editing === undefined || editing === null || editing.handles.size === 0) return true;
-  const end = editing.extents.get(run);
+  const key = extentKey(id, field);
+  let runs = editing.extents.get(key);
+  if (runs === undefined) editing.extents.set(key, (runs = new Map()));
+  const end = runs.get(run);
   if (end !== undefined && end !== from) return false;
-  editing.extents.set(run, from + length);
+  runs.set(run, from + length);
   return true;
 };
 
@@ -500,7 +506,7 @@ const resolveSplice = (core, id, payload, current) => {
     // the run's last element where another writer of this node grew it meanwhile.
     if (place === null) value.at = S.HEAD;
     else if (place.run === undefined) value.at = ownElem(place.at, origin);
-    else if (extendsRun(core, place.run, place.from, fill.length)) {
+    else if (extendsRun(core, id, key, place.run, place.from, fill.length)) {
       Object.assign(value, { run: ownRun(place.run, origin), from: place.from });
     } else value.at = ownElem(`>${S.elemKey(place.run, place.from - 1)}`, origin);
   }
@@ -660,6 +666,7 @@ module.exports = {
   coalesce,
   prepends,
   PREPEND_MAX,
+  extentKey,
   members,
   holds,
   pick,

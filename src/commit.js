@@ -810,11 +810,15 @@ const commitLocal = async (core, type, id, payload, options) => {
   const issued = await issue(core, op, entry);
   const done = core.landing(async () => {
     const seq = await land(core, op, entry, issued);
-    await announce(core, op, entry, delta, ctx, source, via, { seq, before, previous, txn: seq }, changes);
-    const message = op.msg ?? null;
-    // Built only while something listens (`transacted` says nothing otherwise).
-    if (core.listening('transaction')) {
-      transacted(core, { local: true, via, source, message, ops: [op], changes: tagged(op, changes) });
+    try {
+      await announce(core, op, entry, delta, ctx, source, via, { seq, before, previous, txn: seq }, changes);
+    } finally {
+      // Committed whatever an afterWrite hook did: its turn is announced — built
+      // only while something listens (`transacted` says nothing otherwise).
+      if (core.listening('transaction')) {
+        const message = op.msg ?? null;
+        transacted(core, { local: true, via, source, message, ops: [op], changes: tagged(op, changes) });
+      }
     }
   });
   return outcome(op, done);
@@ -1058,15 +1062,24 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
     // The transaction event's changes, built only while something listens.
     const listening = core.listening('transaction');
     const changes = [];
+    // Every op is announced whatever an afterWrite hook did to one of them —
+    // all are committed — and the turn after them; the first failure is the
+    // caller's, once.
+    let failed = null;
     for (let i = 0; i < count; i++) {
       const { op, entry, ctx, before, previous } = items[i];
       const last = lastOf.get(op.id) === i;
       const committed = { seq: positions[i], before, previous, txn: positions[0] };
       const delta = last ? deltas.get(op.id) : null;
-      await announce(core, op, entry, delta, ctx, source, null, committed, items[i].changes, last);
+      try {
+        await announce(core, op, entry, delta, ctx, source, null, committed, items[i].changes, last);
+      } catch (error) {
+        failed ??= error;
+      }
       if (listening) tagged(op, items[i].changes, changes);
     }
     transacted(core, { local: true, via: null, source, message: msg ?? null, ops, changes });
+    if (failed !== null) throw failed;
   });
   return { result, done, ops: items.length };
 };

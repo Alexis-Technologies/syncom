@@ -201,9 +201,14 @@ const mergeBatch = async (core, records, via, from) => {
   if (batch.purged) for (const id of batch.purged) await core.scrub(id);
   core.saveCatalog();
   const changes = [];
+  // Every merge is announced whatever an afterWrite hook did to one of them —
+  // all are durable — and the turn after them; the first failure is thrown once.
+  let failed = null;
   for (const { ctx, op, started, changes: own } of batch.pending) {
     try {
       await core.hook('afterWrite', ctx, op);
+    } catch (error) {
+      failed ??= error;
     } finally {
       const entry = batch.touched.get(op.id);
       core.refresh(op.id, isAlive(entry) ? entry.data : null, batch.deltas.get(op.id), null, entry);
@@ -217,6 +222,7 @@ const mergeBatch = async (core, records, via, from) => {
     const event = { local: true, via, source: null, message: null, ops: batch.ops, changes, ts };
     core.emit('transaction', event);
   }
+  if (failed !== null) throw failed;
 };
 
 // The highest seq this node takes for a stream of its own from a host

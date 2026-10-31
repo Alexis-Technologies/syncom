@@ -128,6 +128,12 @@ class Storage extends Emitter {
   // The editors' handles open on this storage (src/text/handle.js): flushed
   // before a flush(), a tag() and a close() — what they hold is not logged yet.
   #edits = new Set();
+  // What the handles follow the `transaction` event with, by record id, under
+  // ONE listener of the storage's (as src/observe.js does for observe()): a
+  // handle never counts against maxListeners, and a turn reaches the handles
+  // of the records it touched alone.
+  #followers = new Map();
+  #following = null;
   // Whether a write may be made at once (#fastCommit): set at open, once the
   // plugins have set up — nothing asynchronous on the write path.
   #fastIssue = false;
@@ -422,6 +428,8 @@ class Storage extends Emitter {
       // flush first.
       editing: Object.freeze({
         handles: this.#edits,
+        // A handle's listener of the record's turns (the `transaction` event); answers what takes it off.
+        follow: (id, listener) => this.#follow(id, listener),
         // While a handle is open: the next offset of each run of this node's
         // a writer extended, reserved (src/text/kind.js extendsRun).
         extents: new Map(),
@@ -1363,9 +1371,66 @@ class Storage extends Emitter {
     return this.#api('tag')(this.#core, name);
   }
 
-  // Every open handle's edits logged (src/text/handle.js); a failure rejects.
+  // Every open handle's edits logged (src/text/handle.js), every handle tried
+  // whatever another's flush did; one UNLOGGED for them all, naming how many
+  // handles and edits were not logged, with the first cause.
   async #flushEdits() {
-    for (const handle of this.#edits) await handle.flush();
+    let handles = 0;
+    let edits = 0;
+    let cause = null;
+    for (const handle of this.#edits) {
+      try {
+        await handle.flush();
+      } catch (error) {
+        handles++;
+        edits += typeof error?.edits === 'number' ? error.edits : 0;
+        cause ??= error;
+      }
+    }
+    if (cause === null) return;
+    const message = `Edits of ${handles} text handle${handles === 1 ? '' : 's'} could not be logged`;
+    throw new SyncomError('UNLOGGED', message, { handles, edits, cause });
+  }
+
+  // A handle's listener of the `transaction` event, kept by record id; the
+  // storage's one listener is attached with the first and taken off with the
+  // last. A turn is handed to each listener of a record it touched, once.
+  #follow(id, listener) {
+    let listeners = this.#followers.get(id);
+    if (listeners === undefined) this.#followers.set(id, (listeners = new Set()));
+    listeners.add(listener);
+    if (this.#following === null) {
+      this.#following = (event) => this.#followed(event);
+      this.on('transaction', this.#following);
+    }
+    return () => {
+      const current = this.#followers.get(id);
+      if (current === undefined) return;
+      current.delete(listener);
+      if (current.size === 0) this.#followers.delete(id);
+      if (this.#followers.size === 0 && this.#following !== null) {
+        this.off('transaction', this.#following);
+        this.#following = null;
+      }
+    };
+  }
+
+  #followed(event) {
+    const { ops } = event;
+    let told = null;
+    for (let i = 0; i < ops.length; i++) {
+      const listeners = this.#followers.get(ops[i].id);
+      if (listeners === undefined) continue;
+      for (const listener of listeners) {
+        if (told !== null && told.has(listener)) continue;
+        (told ??= new Set()).add(listener);
+        try {
+          listener(event);
+        } catch (error) {
+          this.#logger.warn({ event: 'listener.error', name: 'handle', err: error });
+        }
+      }
+    }
   }
 
   async untag(name) {
@@ -1900,7 +1965,7 @@ class Storage extends Emitter {
     try {
       await this.#flushEdits();
     } catch (error) {
-      this.#logger.warn({ event: 'edits.unlogged', err: error });
+      this.#logger.warn({ event: 'edits.unlogged', handles: error.handles, edits: error.edits, err: error });
     }
     // Refused from here on: a write that landed while the links were
     // closing would be announced to nobody, after the final catalog save.
