@@ -508,12 +508,14 @@ const applyOne = async (batch, op) => {
 const persist = async (batch) => {
   const { core, accepted, touched } = batch;
   if (accepted.length === 0) return;
-  const entries = await core.log.append(accepted, {
+  const ticket = core.log.enqueue(accepted, {
     skipped: batch.skipped,
     held: batch.held,
     fps: batch.fps,
     scrubbed: batch.stripped ?? null,
   });
+  await ticket.done;
+  const { entries } = ticket;
   const first = entries[0].seq;
   const last = entries[entries.length - 1].seq;
   if (batch.adopted) await core.log.advance(batch.adopted);

@@ -778,6 +778,35 @@ test('a group commit: appends issued together land as one file, in order; a fail
       }
     }
   }
+
+  await t.test(
+    'enqueue: the seqs at once, onDurable in append order once the group is durable, before done; never on a failure',
+    async () => {
+      const dir = await createTemp();
+      try {
+        let failing = false;
+        const flaky = {
+          ...nodeFsi,
+          append: (...args) => (failing ? Promise.reject(new Error('disk full')) : nodeFsi.append(...args)),
+        };
+        const log = await new OpLog(dir, { rollAfter: 100, fsi: flaky });
+        const heard = [];
+        const first = log.enqueue([op('A', 1)], { onDurable: () => heard.push(['first', log.length]) });
+        const second = log.enqueue([op('A', 2)], { onDurable: () => heard.push(['second', log.length]) });
+        assert.deepStrictEqual([first.entries[0].seq, second.entries[0].seq], [1, 2], 'the seqs are reserved at once');
+        assert.strictEqual(first.done, second.done, 'one group, one promise for both');
+        await first.done.then(() => heard.push(['done']));
+        assert.deepStrictEqual(heard, [['first', 2], ['second', 2], ['done']], 'published, then told, then settled');
+        failing = true;
+        const failed = log.enqueue([op('A', 3)], { onDurable: () => heard.push(['failed']) });
+        await assert.rejects(failed.done, /disk full/);
+        assert.strictEqual(heard.length, 3, 'a group that never reached the disk tells nobody it did');
+        assert.strictEqual(log.next, 3, 'and its seq is handed out again');
+      } finally {
+        await cleanupTemp(dir);
+      }
+    },
+  );
 });
 
 test('a journal: a line per group, a torn last line left out, a failed line shadowed by the group that took its seqs', async (t) => {

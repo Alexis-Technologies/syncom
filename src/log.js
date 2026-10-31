@@ -129,6 +129,8 @@ const anyWithin = (seqs, from, to) => {
 // What the log does not replay is written whole or not at all (see src/fsi.js).
 const ATOMIC = Object.freeze({ atomic: true });
 
+const DONE = Promise.resolve();
+
 class OpLog {
   #path;
   #openPath;
@@ -778,22 +780,36 @@ class OpLog {
    * replay of the tail leaves them alone too; a held one is applied once
    * this node runs its version.
    */
-  append(ops, { skipped = null, held = null, ready = null, fps = null, scrubbed = null } = {}) {
+  append(ops, options) {
+    const { entries, done } = this.enqueue(ops, options);
+    const ticket = done.then(() => entries);
+    ticket.entries = entries;
+    return ticket;
+  }
+
+  /**
+   * What `append` does, for the storage's write paths: `{ entries, done }` —
+   * the entries, their seqs reserved, and `done`, the group's promise,
+   * settled once the group is on disk (or failed) and shared by every append
+   * in it, so an append makes no promise of its own. `onDurable` runs once
+   * the group is durable, before `done` settles, in append order.
+   */
+  enqueue(ops, { skipped = null, held = null, ready = null, fps = null, scrubbed = null, onDurable = null } = {}) {
     const entries = [];
-    if (ops.length === 0) {
-      const ticket = Promise.resolve(entries);
-      ticket.entries = entries;
-      return ticket;
-    }
+    if (ops.length === 0) return { entries, done: DONE };
     const group = (this.#group ??= this.#newGroup());
-    for (const op of ops) {
+    // The fingerprints by op: an array beside `ops` (what `link` hands back),
+    // or a map (a peer's page, of which some ops are taken).
+    const byIndex = Array.isArray(fps);
+    for (let i = 0; i < ops.length; i++) {
+      const op = ops[i];
       const seq = this.#next++;
       const entry = { seq, op };
       if (skipped?.has(op)) entry.skipped = true;
       // Logged as a scrub leaves it (the caller took the payload): no rewrite to come.
       if (scrubbed?.has(op)) entry.scrubbed = true;
       if (held?.has(op)) entry.held = held.get(op);
-      const fp = fps?.get(op);
+      const fp = fps === null ? undefined : byIndex ? fps[i] : fps.get(op);
       entries.push(entry);
       group.entries.push(entry);
       const stream = opKey(op);
@@ -816,10 +832,11 @@ class OpLog {
     // What the ops still wait for before they can be written (a signature
     // being made): the group's file waits for it.
     if (ready !== null) group.ready.push(ready);
+    // What runs once the group is durable, before its callers hear it: in
+    // append order, the roll the group triggered done.
+    if (onDurable !== null) (group.durable ??= []).push(onDurable);
     this.#schedule();
-    const ticket = group.promise.then(() => entries);
-    ticket.entries = entries;
-    return ticket;
+    return { entries, done: group.promise };
   }
 
   // A group to gather appends into: what the vector and the counter were
@@ -835,6 +852,7 @@ class OpLog {
       // for every group — thousands of streams on a hub, for each append.
       undo: new Map(),
       heads: new Map(),
+      durable: null,
       resolve: null,
       reject: null,
     };
@@ -917,6 +935,16 @@ class OpLog {
       }
     } catch (error) {
       this.#log?.error?.({ event: 'internal.error', name: 'log', err: error });
+    }
+    // A callback that throws is a bug of its caller's: said, and the rest run.
+    if (group.durable !== null) {
+      for (let i = 0; i < group.durable.length; i++) {
+        try {
+          group.durable[i]();
+        } catch (error) {
+          this.#log?.error?.({ event: 'internal.error', name: 'log', err: error });
+        }
+      }
     }
     group.resolve();
   }

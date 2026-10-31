@@ -394,7 +394,9 @@ const ENTRIES = [
     // 33.8 with the review's write-path fixes it bundles (a transaction's records held once, sets shared
     // between versions, an op on a purged record stripped). 34.5, raised by name.
     // 34.8 with the log's stream index and the segments read from the listing; 2026-10-27. 35, raised by name.
-    budget: 35,
+    // 35.1 with the write path's pieces at once and the log's enqueue (a group's promise shared, its callbacks
+    // once durable; 2026-10-31). 35.5, raised by name.
+    budget: 35.5,
   },
 ];
 

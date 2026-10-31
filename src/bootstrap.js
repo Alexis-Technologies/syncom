@@ -191,7 +191,9 @@ const mergeBatch = async (core, records, via, from) => {
   // sign over.
   const fps = await link(batch.ops, core.fingerprintOf, core.sign !== null);
   if (core.sign !== null) for (const op of batch.ops) await core.sign(op);
-  const entries = await core.log.append(batch.ops, { fps });
+  const ticket = core.log.enqueue(batch.ops, { fps });
+  await ticket.done;
+  const { entries } = ticket;
   const first = entries[0].seq;
   const last = entries[entries.length - 1].seq;
   if (await core.persist(batch.touched, first, last)) core.log.applied(first, last);
@@ -260,7 +262,9 @@ const adopt = async (core, vector, { via = null, from = null, own = false, proof
   op.seq = Math.max(known[key] ?? 0, news[key] ?? 0) + 1;
   const fps = await link([op], core.fingerprintOf, core.sign !== null);
   if (core.sign !== null) await core.sign(op);
-  const [{ seq }] = await core.log.append([op], { fps });
+  const ticket = core.log.enqueue([op], { fps });
+  await ticket.done;
+  const [{ seq }] = ticket.entries;
   await core.log.advance(news);
   core.log.applied(seq);
   core.emit('change', op, via);

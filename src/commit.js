@@ -328,23 +328,24 @@ const validateLocal = async (core, op, current, visible, ctx) => {
  * header, and so the fingerprint, covers the payload — src/header.js), and
  * is fingerprinted. Before the op is signed and appended, at every place
  * that mints one: here, a transaction, a bootstrap's merges and advance
- * (src/bootstrap.js). Returns op → fingerprint, what the log keeps.
+ * (src/bootstrap.js). Returns the fingerprints beside `ops`, what the log keeps.
  */
 const link = async (ops, held, signs) => {
-  const fps = new Map();
+  const fps = [];
+  // The newest op of each stream in `ops` so far: kept only for several.
   let last = null;
   for (let i = 0; i < ops.length; i++) {
     const op = ops[i];
     const key = opKey(op);
-    const before = last?.get(key);
+    const before = last === null ? undefined : last.get(key);
     const prev = before !== undefined && before[0] === op.seq - 1 ? before[1] : held(key, op.seq - 1);
     if (prev !== undefined) op.prev = prev;
     if (signs) await digest(op);
     // A string in Node.js, a promise in the browser: awaited only there.
     let fp = fingerprintOf(op);
     if (typeof fp !== 'string') fp = await fp;
-    fps.set(op, fp);
-    (last ??= new Map()).set(key, [op.seq, fp]);
+    fps.push(fp);
+    if (ops.length > 1) (last ??= new Map()).set(key, [op.seq, fp]);
   }
   return fps;
 };
@@ -365,7 +366,7 @@ const issue = async (core, op, entry) => {
     if (core.pipelined()) ready = core.sign(op, true);
     else await core.sign(op, false);
   }
-  const ticket = core.log.append([op], { ready, fps });
+  const ticket = core.log.enqueue([op], { ready, fps });
   const position = ticket.entries[0].seq;
   core.inflight(op.id, entry, position);
   return { ticket, position };
@@ -378,7 +379,7 @@ const issue = async (core, op, entry) => {
 // in-flight entry already — and the write fails with it.
 const land = async (core, op, entry, { ticket, position }) => {
   const { id } = op;
-  await ticket;
+  await ticket.done;
   // Logged: the write is durable from here and replicates from the log.
   // Under `open({ defer })` the file and the block wait for the flush
   // (Storage#deferWrite): held in memory, the batch unapplied until then.
@@ -809,13 +810,13 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
   let ready = null;
   if (signing !== null) ready = Promise.all(signing);
   else if (core.sign !== null) await core.sign(ops[0], false);
-  const ticket = core.log.append(ops, { ready, fps });
+  const ticket = core.log.enqueue(ops, { ready, fps });
   const positions = [];
   for (let i = 0; i < count; i++) positions.push(ticket.entries[i].seq);
   // A record in flight is its newest entry, at its newest position.
   for (const [id, last] of lastOf) core.inflight(id, touched.get(id), positions[last]);
   const done = core.landing(async () => {
-    await ticket;
+    await ticket.done;
     const from = positions[0];
     const to = positions[positions.length - 1];
     if (core.defer > 0) {
