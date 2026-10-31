@@ -289,7 +289,9 @@ const ENTRIES = [
   // 117.6 with the write path's first pieces at once (events dispatched, a cheap prepare, a hold and an announce
   // without a promise; 2026-10-31). 118.5, raised by name: room for the fast path, measured again at its end.
   // 118.6 with a write made at once (the fast path itself). 119, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 119 },
+  // 119.3 with the log's lines and segments of them (a CRC-32 checked before the parse, positional entries, a
+  // segment the journaled lines and a trailer). 120, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 120 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -402,7 +404,8 @@ const ENTRIES = [
     // 35.1 with the write path's pieces at once and the log's enqueue (a group's promise shared, its callbacks
     // once durable; 2026-10-31). 35.5, raised by name.
     // 35.5 (over by a few bytes) with a write made at once. 36, raised by name.
-    budget: 36,
+    // 36.1 with the log's lines and segments of them. 36.5, raised by name.
+    budget: 36.5,
   },
 ];
 

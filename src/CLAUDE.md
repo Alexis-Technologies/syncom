@@ -399,7 +399,10 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   the entries positional (`[seq, fp, header, payload, rest?, flags?]` — the header the
   text `link` fingerprinted, handed to `log.enqueue` as `headers`; `opOf` in src/header.js
   reads an op back) and `c` the CRC-32 (src/crc32.js) of their text, last, checked BEFORE
-  they are parsed; a mismatch is
+  they are parsed. A segment (`segmentOf`/`readSegment`) is the lines its groups were
+  journaled as — each open group keeps its `line` until sealed, and a scrub or a rewritten
+  journal writes it again first (`#lineOf`, LOG-10) — and a trailer `{"lines","to","c"}`, read
+  whole or not at all; a mismatch is
   `log.segment.unreadable`/`log.open.unreadable` with `reason: 'checksum'`,
   counted in `corrupt`, never read in part — an open group file so is moved to `log/corrupt/`,
   never deleted; a read that fails other than ENOENT fails the open (`readOrNull`, `CORRUPT`). A file without a hash is not

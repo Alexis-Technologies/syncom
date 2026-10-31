@@ -234,7 +234,7 @@ write, no rename):
 | --- | --- |
 | `open/<seq>-<token>.jsonl` | A journal, where the backend has `append`: one log file per line, a line per group of appends; named by its first seq (ten digits zero-padded) and a token unique to the open and the journal; begun again at every roll and after a failed append, removed once every group in it is sealed, rewritten only by a scrub |
 | `open/<seq>.json` | A group in a file of its own, where the backend has no `append`; named by its first seq |
-| `seg-<from>.json` | A sealed segment: the open groups rolled together once 64 of them accumulate (`log.rollAfter`) |
+| `seg-<from>.json` | A sealed segment: the open groups rolled together once 64 of them accumulate (`log.rollAfter`) — their lines as they were journaled, one per line, then a trailer `{"lines":<n>,"to":<last seq>,"c":"<crc32>"}`, `c` the CRC-32 of the lines' checksums one after another |
 | `index.json` | `{ epoch, floor, next, vector, heads, droppedHeld, latestTs, droppedTs }` — what the files cannot say: the epoch, the floor, and the vector, heads and stamps of what compaction dropped; written where compaction dropped something and at a close, not at every roll. The segments are what the directory lists, each read whole; one whose start does not meet the floor or the end of the one before is a file gone (`log.segment.missing`), one wholly below the floor was compacted and is removed |
 
 Every log file is `{"e":[…],"c":"<crc32>"}` — the entries as a JSON array
@@ -250,6 +250,12 @@ that reads as JSON without its checksum is not whole: unreadable, as one
 that fails it. A file that is there and cannot be read at all — an I/O
 error, not a missing file — fails `open()` with `CORRUPT`: an open that went
 on without it could hand its seqs out again.
+
+A segment is read whole or not at all: every line checks on its own, and
+the trailer holds as many lines as there are, the last seq of the last one
+and the checksum of their checksums — a line altered, gone or moved, or the
+trailer gone, makes the segment unreadable (`reason: 'checksum'`). A segment
+a scrub rewrites is its entries as one line and a trailer.
 
 A journal is read line by line, each line a log file of its own. Its last
 line is the one a crash can tear — its group was never acknowledged — and is
