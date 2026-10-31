@@ -22,6 +22,11 @@ const MAX_FIELD = 1 << 22;
 // coalescing of cuts (src/text/kind.js) has a bound of its own on an op's
 // growth, much lower; this one is the engine's.
 const MAX_CUTS = 1 << 16;
+// A text holds at most MAX_MARKS marks, the placeholders of marks switched
+// off before they arrived among them (those PENDING_MAX bounds first): one
+// more is refused, a peer's block holding more is dropped. A mark switched
+// off, or filling its placeholder, adds none.
+const MAX_MARKS = 1 << 16;
 
 // Keys: a run is `ts:origin` (the op that created it), an element
 // `ts:offset:origin` — the offset in the middle so two indexOf calls parse
@@ -114,6 +119,7 @@ const below = (key, base) => {
 module.exports = {
   MAX_FIELD,
   MAX_CUTS,
+  MAX_MARKS,
   isOrigin,
   runKey,
   elemKey,

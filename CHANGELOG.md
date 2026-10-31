@@ -1098,6 +1098,16 @@ and one `commit` event, not one per call.
   JSON — a fresh lineage, every piece written again. An anchor below the base is a root's and folds
   into nothing; a block is rebuilt once per base, and `stats().rebuilds`, never incremented before,
   counts each rebuild (SEQ-12).
+- **A splice's markers were lost when its extension waited.** An extension `{ run, from }` parked
+  ahead of its run's length kept its content in `ext` and nothing of its `vals`: the embed slots landed
+  bare when the gap was filled, and two nodes that saw the extension and its filler in different orders
+  disagreed on the markers. The markers are registers of the slots the extension will lay — their names
+  are known — so they wait in `vals`, travel in a snapshot and land with the slots (LIST-6).
+- **A move was not bounded by the field.** Its one-slot position run was added past `MAX_FIELD`; a
+  move on a full field is a bound refusal (`detail: 'field'`) like an insert (RLE-1).
+- **The marks of a text were unbounded.** A text holds at most `MAX_MARKS` (65 536) marks: one more is
+  refused as `bound` (`detail: 'marks'`) — a mark switched off, or one filling its placeholder, adds
+  none — and a peer's block holding more is not taken (BOUND-6).
 - **A peer's splice whose cut was shaped otherwise stopped its page.** A cut of `[null]`, `[5]` or
   `[[null, 0, 1]]` threw out of `applyOp` before the engine could refuse it, so `applyRemote()`
   failed the whole page and the peer's stream stalled there on every retry. It is refused as

@@ -212,6 +212,46 @@ test('a splice’s markers and an assign to its slot settle by stamp, whichever 
   );
 });
 
+test('a splice’s markers ride on an extension parked ahead of its run: landed when it settles, the same in either order', () => {
+  const EMBED = '￼';
+  const marker = { type: 'image', parents: [], attrs: { src: 'a' }, isEmbed: true };
+  const first = op('splice', 1, 'A', { at: '^', content: 'ab' });
+  const fill = op('splice', 2, 'A', { run: '1:A', from: 2, content: 'cd' });
+  const marked = op('splice', 3, 'A', { run: '1:A', from: 4, content: `${EMBED}e`, vals: [[0, marker]] });
+  const inOrder = applyOp(applyOp(applyOp(null, first).entry, fill).entry, marked).entry;
+  // The marked extension before its filler: parked, its marker a register of the slot it will lay.
+  const parked = applyOp(applyOp(null, first).entry, marked).entry;
+  const block = parked.meta.blocks.body;
+  assert.deepStrictEqual(block.ext, { '1:A': [[4, `${EMBED}e`]] });
+  assert.deepStrictEqual(block.vals, { '1:4:A': [3, 'A', marker] });
+  assert.strictEqual(S.pendingCount(S.indexOf(parked, 'body')), 2, 'the extension and its marker wait');
+  const settled = applyOp(parked, fill).entry;
+  for (const entry of [inOrder, settled]) {
+    assert.strictEqual(entry.data.body, `abcd${EMBED}e`);
+    assert.deepStrictEqual(S.valueAt(S.indexOf(entry, 'body'), 4), marker);
+    assert.strictEqual(S.pendingCount(S.indexOf(entry, 'body')), 0);
+  }
+  assert.deepStrictEqual(
+    JSON.parse(JSON.stringify(settled.meta.blocks.body)),
+    JSON.parse(JSON.stringify(inOrder.meta.blocks.body)),
+  );
+  // A node joining from the parked snapshot reads the marker once the gap is filled there too.
+  const json = JSON.parse(JSON.stringify(block));
+  const meta = { blocks: { body: json } };
+  const joined = applyOp(null, {
+    origin: 'H',
+    seq: 1,
+    ts: 20,
+    type: 'merge',
+    id: 'r',
+    data: { body: 'ab' },
+    meta,
+  }).entry;
+  const after = applyOp(joined, fill).entry;
+  assert.strictEqual(after.data.body, `abcd${EMBED}e`);
+  assert.deepStrictEqual(S.valueAt(S.indexOf(after, 'body'), 4), marker);
+});
+
 test('a move’s position run holds its element alone: typed after, the element keeps one place; grown by a peer, malformed', () => {
   let entry = applyOp(null, op('splice', 1, 'A', { at: '^', content: [1, 2, 3] }, 'items')).entry;
   // A moves the first element to the end, then pushes after it.

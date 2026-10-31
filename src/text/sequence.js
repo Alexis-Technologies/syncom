@@ -141,6 +141,7 @@ const { MAX_RUN, rleLength, rleAppend, rleCut, rleMerge, normalizeRle } = requir
 const {
   MAX_FIELD,
   MAX_CUTS,
+  MAX_MARKS,
   HEAD,
   END,
   runKey,
@@ -201,6 +202,7 @@ module.exports = {
   MAX_RUN,
   MAX_FIELD,
   MAX_CUTS,
+  MAX_MARKS,
   HEAD,
   END,
   runKey,

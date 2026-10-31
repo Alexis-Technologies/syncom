@@ -13,6 +13,7 @@ const {
   END,
   HEAD,
   MAX_FIELD,
+  MAX_MARKS,
   byOrigin,
   elemKey,
   isElemKey,
@@ -519,6 +520,8 @@ const normalizeJson = (raw) => {
       if (!Number.isInteger(m[4]) || m[4] < 0 || m[4] > 3) continue;
       marks[key] = [m[0], m[1], m[2], m[3], m[4]];
       n++;
+      // More marks than a text holds: a block no peer could have built through ops.
+      if (n > MAX_MARKS) return null;
     }
     if (n > 0) seq.marks = marks;
   }

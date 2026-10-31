@@ -798,6 +798,40 @@ test('sequence engine', async (t) => {
     },
   );
 
+  await t.test('a move is bounded by the field: its position run is one slot more, refused at MAX_FIELD', () => {
+    const runs = {};
+    for (let i = 1; i <= 4; i++) runs[`${i}:A`] = ['^', [S.MAX_RUN]];
+    const full = S.normalizeSeq({ k: 'l', ts: 4, runs });
+    const payload = { elem: '1:0:A', cut: ['1:A', 0, 1], at: S.HEAD, value: 1 };
+    const moved = S.applyMove(full, [tick(), 'B'], payload);
+    assert.deepStrictEqual(
+      [moved.changed, moved.reason, moved.detail, moved.count, moved.max],
+      [false, 'bound', 'field', S.MAX_FIELD + 1, S.MAX_FIELD],
+    );
+    runs['4:A'] = ['^', [S.MAX_RUN - 1]];
+    const room = S.normalizeSeq({ k: 'l', ts: 4, runs });
+    assert.strictEqual(S.applyMove(room, [tick(), 'B'], payload).changed, true, 'one slot of room: taken');
+  });
+
+  await t.test(
+    'a text holds at most MAX_MARKS marks: one more is a bound refusal, a block past it is not taken',
+    () => {
+      const marks = {};
+      for (let i = 1; i <= S.MAX_MARKS; i++) marks[`${i}:M`] = ['^', '$', 'b', true, 0];
+      const runs = { '1:A': ['^', ['ab']] };
+      const full = S.normalizeSeq({ k: 't', ts: S.MAX_MARKS, runs, marks });
+      assert.strictEqual(Object.keys(full.marks).length, S.MAX_MARKS, 'at the bound, taken');
+      const more = S.applyMark(full, [S.MAX_MARKS + 1, 'M'], { start: S.HEAD, end: S.END, key: 'b', value: true });
+      assert.deepStrictEqual(
+        [more.changed, more.reason, more.detail, more.count, more.max],
+        [false, 'bound', 'marks', S.MAX_MARKS, S.MAX_MARKS],
+      );
+      assert.strictEqual(S.applyMark(full, [S.MAX_MARKS + 2, 'B'], { off: '1:M' }).changed, true, 'off adds none');
+      marks[`${S.MAX_MARKS + 1}:M`] = ['^', '$', 'b', true, 0];
+      assert.strictEqual(S.normalizeSeq({ k: 't', ts: S.MAX_MARKS + 1, runs, marks }), null, 'one more: not taken');
+    },
+  );
+
   await t.test(
     'a waiting extension is bounded as a landed one: never past MAX_RUN, counted toward MAX_FIELD, on both paths',
     () => {

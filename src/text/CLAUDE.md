@@ -23,7 +23,8 @@ src/text/rle.js           run-length content: a run's pieces and gaps, cut, appe
 src/text/sequence.js      the sequence engine behind the list and text kinds: its design (the header) and its public names, over the
                           modules below — the one file the rest of syncom requires of the engine
 src/text/keys.js          the engine's names: run and element keys, anchors, the checks a peer's block is read through, the refusals
-                          an op reports, a mark's flags, the bounds beside MAX_RUN (MAX_FIELD, MAX_CUTS) — requires vector.js only
+                          an op reports, a mark's flags, the bounds beside MAX_RUN (MAX_FIELD, MAX_CUTS, MAX_MARKS) — requires
+                          vector.js only
 src/text/state.js         a block's state (a private field the plain object is stamped with), the names a lineage interns (Doc,
                           RunId), run records, a plain block's JSON made whole and hydrated into the rope (indexOf: once per
                           plain block), drafts, every reading — elements, values, positions, cursors, what waits
@@ -138,11 +139,14 @@ field)` — for every extension while a handle is open, and a writer whose readi
   (src/text/rle.js: a run's slots — what a run holds plus an extension's end, parked ahead or not),
   `MAX_FIELD` (a field's slots, what waits in `ext` counted), `MAX_CUTS` (the ranges one splice cuts — a
   range per stretch of a run `rangesOf` lays, so a delete across more runs than that is refused: in
-  parts, or after `compact()`) and `PENDING_MAX` (src/plugin.js) are checked in `applySplice`,
-  `applyMove` and `applyMark` — a `bound` refusal with `detail` (`'run'`, `'field'`, `'cuts'`,
-  `'pending'`), `count` and `max`, before the block is frozen — and in `normalizeJson` for a peer's
-  block, which leaves out what an op would have been refused for (a run or an extension past MAX_RUN, a
-  run of no slots) and drops the block whole past a field bound. The coalescing of cuts
+  parts, or after `compact()`), `MAX_MARKS` (the marks a text holds, placeholders among them; a mark
+  switched off or filling its placeholder adds none) and `PENDING_MAX` (src/plugin.js) are checked in
+  `applySplice`, `applyMove` (its position run is one slot of the field) and `applyMark` — a `bound`
+  refusal with `detail` (`'run'`, `'field'`, `'cuts'`, `'marks'`, `'pending'`), `count` and `max`, before
+  the block is frozen — and in `normalizeJson` for a peer's block, which leaves out what an op would have
+  been refused for (a run or an extension past MAX_RUN, a run of no slots) and drops the block whole past
+  a field bound or the marks bound. A splice's markers are registers of its slots whether the slots land
+  or wait: on a parked extension they wait in `vals` under their names and land with the slots. The coalescing of cuts
   (`COALESCE_CUTS` in src/text/kind.js) bounds how far one op grows, not what the engine takes. A
   splice's change report says what was cut: the ranges of one run merged, a duplicate once
   (`cutSpansOf`), never one change per range named.

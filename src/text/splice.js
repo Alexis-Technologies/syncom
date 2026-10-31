@@ -600,6 +600,21 @@ const counter = (seq) => {
   return () => (n === -1 ? (n = pendingCount(seq)) : n);
 };
 
+// How many of a splice's markers would be registers of slots not here (the run, or the extension, waits):
+// pending work, counted before anything is written.
+const freshVals = (st, vals, key, start) => {
+  if (vals === undefined) return 0;
+  let fresh = 0;
+  const seen = new Set();
+  for (let i = 0; i < vals.length; i++) {
+    const elem = elemKey(key, start + vals[i][0]);
+    if (seen.has(elem)) continue;
+    seen.add(elem);
+    if (C.get(st.vals, elem) === undefined) fresh++;
+  }
+  return fresh;
+};
+
 // A new run's place: a root, under a placed parent, under one here but not placed, or waiting.
 const ROOTED = 0;
 const PLACED = 1;
@@ -702,17 +717,7 @@ const applySplice = (given, stamp, payload, base = null, pendingMax = PENDING_MA
         const rooted = e === null || belowBase(e.ts, e.origin, base);
         if (!rooted && !(parent !== undefined && e.offset < parent.len)) {
           // The values riding on the run are registers of slots not here: they wait too.
-          let fresh = 0;
-          if (vals !== undefined) {
-            const seen = new Set();
-            for (let i = 0; i < vals.length; i++) {
-              const elem = elemKey(key, vals[i][0]);
-              if (seen.has(elem)) continue;
-              seen.add(elem);
-              if (C.get(st.vals, elem) === undefined) fresh++;
-            }
-          }
-          const n = count() + waits + fresh;
+          const n = count() + waits + freshVals(st, vals, key, 0);
           if (n >= pendingMax) return refused(seq, 'pending', n, pendingMax);
         }
         insert = 1;
@@ -733,7 +738,8 @@ const applySplice = (given, stamp, payload, base = null, pendingMax = PENDING_MA
           changed = true;
         } else if (from > len) {
           if (belowBase(target.id.ts, target.id.origin, base)) return unchanged(seq);
-          const n = count() + waits;
+          // The extension waits, and its markers with it: registers of slots not here.
+          const n = count() + waits + freshVals(st, vals, run, from);
           if (n >= pendingMax) return refused(seq, 'pending', n, pendingMax);
           const held = (seq.ext && own(seq.ext, run)) || NONE;
           let known = false;
@@ -793,6 +799,10 @@ const applySplice = (given, stamp, payload, base = null, pendingMax = PENDING_MA
     d.ext = { ...(d.ext ?? {}), [run]: list };
     d.extSlots += content.length;
     d.oldest = minStamp(d.oldest, stampOfKey(run));
+    // The markers are registers of the slots the extension will lay (their names are known: the run,
+    // `from` and each offset), so they wait in `vals` — in the JSON, in a snapshot — and land with the
+    // slots, whichever order the extension and its gap's filler arrive in.
+    assignVals(run, from);
   }
   return { seq: finish(d), changed: true, reason: null };
 };
@@ -862,6 +872,9 @@ const applyMove = (given, stamp, payload, base = null, pendingMax = PENDING_MAX)
   let changed = cuts.changed;
   const fresh = runOf(st, key) === undefined;
   if (fresh) {
+    // The position run is one slot more of the field.
+    const slots = st.slots + st.extSlots + 1;
+    if (slots > MAX_FIELD) return refused(seq, 'field', slots, MAX_FIELD);
     const e = anchor.elem;
     const parent = e === null ? undefined : runOf(st, e.run);
     const rooted = e === null || belowBase(e.ts, e.origin, base);

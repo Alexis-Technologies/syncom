@@ -11,6 +11,7 @@ const C = require('./cow.js');
 const {
   END,
   HEAD,
+  MAX_MARKS,
   isJson,
   isPlaceholder,
   minStamp,
@@ -91,6 +92,8 @@ const applyMark = (given, stamp, payload, base = null, pendingMax = PENDING_MAX)
   const id = runKey(ts, origin);
   const held = C.get(st.marks, id);
   if (held !== undefined && !isPlaceholder(held)) return unchanged(seq);
+  // A new mark is one more of the text's: bounded; one filling its placeholder adds none.
+  if (held === undefined && st.marks.size >= MAX_MARKS) return refused(seq, 'marks', st.marks.size, MAX_MARKS);
   const d = draft(seq);
   const mark = [start, end, key, value, (many ? MANY : 0) | (held === undefined ? 0 : OFF)];
   d.marks = C.set(d.marks, id, mark, d.owner);
