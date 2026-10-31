@@ -97,3 +97,66 @@ test('two nodes typing in bursts at once converge, each keystroke logged as part
   assert.strictEqual((await b.get(id)).body, left, 'one text on both nodes');
   assert.ok(a.log.next < keystrokes, `fewer ops than keystrokes logged (${a.log.next} for ${keystrokes})`);
 });
+
+test('keystrokes typed through a transaction are one op while they continue each other; a signing node folds them too', async (t) => {
+  const fsi = memory();
+  const storage = await openMemory('/txn', fsi);
+  const id = await storage.insert({ title: 'doc' });
+  await storage.push(id, 'body', 'start ');
+  const commits = [];
+  const turns = [];
+  storage.on('commit', (event) => commits.push([event.op.type, event.changes.length]));
+  storage.on('transaction', (event) => turns.push(event.ops.length));
+  let next = storage.log.next;
+  await storage.transact(async (tx) => {
+    for (let i = 0; i < 30; i++) await tx.splice(id, 'body', 6 + i, 0, 'x');
+    for (let i = 0; i < 5; i++) await tx.splice(id, 'body', 35 - i, 1, '');
+    await tx.splice(id, 'body', 0, 0, '>');
+  });
+  assert.strictEqual(storage.log.next - next, 3, 'thirty typed on, five cut back, one elsewhere: three ops');
+  assert.deepStrictEqual(
+    commits,
+    [
+      ['splice', 30],
+      ['splice', 5],
+      ['splice', 1],
+    ],
+    'a commit per op, every change',
+  );
+  assert.deepStrictEqual(turns, [3], 'one turn');
+  const expected = `>start ${'x'.repeat(25)}`;
+  assert.strictEqual((await storage.get(id)).body, expected);
+  // An afterWrite hook sees every op as it was made: none is folded.
+  await storage.close();
+  let after = 0;
+  const hooked = await openMemory('/txn', fsi, { hooks: { afterWrite: () => void after++ } });
+  next = hooked.log.next;
+  await hooked.transact(async (tx) => {
+    for (let i = 0; i < 4; i++) await tx.splice(id, 'body', 1 + i, 0, 'y');
+  });
+  assert.deepStrictEqual([hooked.log.next - next, after], [4, 4]);
+  assert.strictEqual((await hooked.get(id)).body, `>yyyystart ${'x'.repeat(25)}`);
+  await hooked.close();
+  // Signed after the transaction's last op: a signing node folds, and a peer that requires signatures takes it.
+  const { open: openAll } = require('../src/all/all.js');
+  const createStorage = (t2, name, options) => {
+    const sync = { ...options.sync, signatures: 'require' };
+    const opened = openAll({ path: `/${name}`, fsi: memory(), logger: false, lock: false, ...options, sync });
+    t2.after(async () => (await opened).close().catch(() => {}));
+    return opened;
+  };
+  const mesh = await createMesh(t, ['A', 'B'], [['A', 'B']], createStorage);
+  const a = mesh.get('A');
+  const b = mesh.get('B');
+  const doc = await a.insert({ title: 'signed' });
+  next = a.log.next;
+  const signed = [];
+  a.on('change', (op) => signed.push(typeof op.sig === 'string'));
+  await a.transact(async (tx) => {
+    for (let i = 0; i < 20; i++) await tx.splice(doc, 'body', i, 0, 'z');
+  });
+  assert.strictEqual(a.log.next - next, 1);
+  assert.deepStrictEqual(signed, [true], 'one op, signed as it is logged');
+  await settle([a, b]);
+  assert.strictEqual((await b.get(doc)).body, 'z'.repeat(20));
+});

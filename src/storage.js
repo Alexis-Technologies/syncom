@@ -1319,7 +1319,10 @@ class Storage extends Emitter {
 
   /** Whether `id` is a live record here — answered from the catalog, no I/O. */
   hasRecord(id) {
-    return this.#catalog.has(id) || this.#live(id) !== undefined;
+    // A string that is no id never is one: a live Record asks this of every
+    // string field it holds, and a long text hashed into two maps cost the
+    // text on every keystroke.
+    return isRecordId(id) && (this.#catalog.has(id) || this.#live(id) !== undefined);
   }
 
   // The raw read, as a copy: what `get` returns before its hooks, what

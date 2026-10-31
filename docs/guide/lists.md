@@ -358,8 +358,10 @@ is named without its origin, which the op's header carries already: a run by
 its stamp (a number), an element as `ts:offset` — `run: 1792831354856`,
 `at: '<1792831354856:3'` — and every node reads it under the op's origin, so
 a short name never names another writer's run. One call is one op, signed
-and logged like any other — an editor that types a word sends one op per
-keystroke unless it batches them (see below). A keystroke extending the
+and logged like any other — except where keystrokes continue each other
+(typed on at the end of their run, or a chain of cuts): sent without waiting,
+typed through a transaction or through a [text handle](./editors#a-text-handle),
+they are one op. A keystroke extending the
 writer's run adds its characters to the run and no key to the record's
 metadata; a new run adds one key, a little over a hundred bytes.
 

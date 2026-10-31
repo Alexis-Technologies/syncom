@@ -452,7 +452,10 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   `applyPatches`/`restore`/`compact` run) is the first path over a core
   whose `current` and `seqOf` see the ops made before — `prepare` per op,
   ONE `log.append` of them all, one `core.land` (a chain block, the files),
-  the announces after; a throw from `fn` leaves nothing appended. An op its
+  the announces after; a throw from `fn` leaves nothing appended. An op that continues the one made
+  just before it — of its record, stream, field, actor and message — is that op, grown, where the
+  kind's `coalesce` says so and no `afterWrite` hook is set (`grows`, TXN-3; the ops are signed after
+  `fn`, so a signing node folds too). An op its
   record's later op follows keeps its op and changes alone (`release`): the entry only while a
   `commit` listener exists, the hook ctx only with an `afterWrite` hook — N copies of a large
   record were N² memory — and a record is in flight, deferred and refreshed ONCE, as its last op

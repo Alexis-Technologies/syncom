@@ -753,8 +753,7 @@ const coalesced = (core, op, made, current) => {
   if (before === null || before.entry !== current) return null;
   const a = before.op;
   if (core.log.lastGathered() !== a || a.sig !== undefined || a.digest !== undefined) return null;
-  if (a.id !== op.id || a.key !== op.key || a.seq !== op.seq - 1 || opKey(a) !== opKey(op)) return null;
-  if (a.actor !== op.actor || a.v !== op.v || a.msg !== op.msg || a.from !== op.from) return null;
+  if (!continues(a, op)) return null;
   const value = coalesce(a, op);
   if (value === null) return null;
   a.value = value;
@@ -764,6 +763,18 @@ const coalesced = (core, op, made, current) => {
   core.inflight(op.id, made.entry, before.position);
   return before;
 };
+
+// `op` is the next op of `a`'s stream on `a`'s record and field, made by
+// the same actor under the same version and message: what may be one op.
+const continues = (a, op) =>
+  a.id === op.id &&
+  a.key === op.key &&
+  a.seq === op.seq - 1 &&
+  opKey(a) === opKey(op) &&
+  a.actor === op.actor &&
+  a.v === op.v &&
+  a.msg === op.msg &&
+  a.from === op.from;
 
 // A write made at once, landed as its group is written: the deferred slot
 // (at once — no lens), the entry no longer in flight, the catalog saved, the
@@ -894,6 +905,45 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
     run: (task) => task(),
     conflicts: (id, entry) => conflictsIn(core, touched, id, entry),
   };
+  // An op made here that continues the one made just before it — of its
+  // record, the record's newest, its stream, field, actor and message — is
+  // that op, grown where the plugin's `coalesce` says the two are one
+  // (TXN-3): keystrokes typed through a transaction. The ops are signed
+  // after `fn`, so a signing node folds them too; an `afterWrite` hook sees
+  // every op as it was made, so with one none is folded. The stream's seq
+  // stays the grown op's.
+  const grows = (made) => {
+    const i = items.length - 1;
+    const { op } = made;
+    const coalesce = core.plugins.byType[op.type]?.coalesce;
+    if (i < 0 || coalesce === undefined || core.hooks.afterWrite !== null || lastOf.get(op.id) !== i) return null;
+    const before = items[i];
+    const a = before.op;
+    if (!continues(a, op)) return null;
+    const value = coalesce(a, op);
+    if (value === null) return null;
+    a.value = value;
+    before.entry = made.entry;
+    for (let k = 0; k < made.changes.length; k++) before.changes.push(made.changes[k]);
+    deltas.set(op.id, assignData(deltas.get(op.id) ?? {}, made.delta));
+    touched.set(op.id, made.entry);
+    return a;
+  };
+  // An op made here joins the transaction: grown into the one before it, or an item of its own.
+  const join = (made) => {
+    const grown = grows(made);
+    if (grown !== null) return grown;
+    const { op } = made;
+    const { id } = op;
+    const was = lastOf.get(id);
+    if (was !== undefined) release(items[was]);
+    lastOf.set(id, items.length);
+    deltas.set(id, assignData(deltas.get(id) ?? {}, made.delta));
+    items.push(made);
+    touched.set(id, made.entry);
+    reserved.set(opKey(op), op.seq);
+    return op;
+  };
   const commitIn = async (type, id, payload, options = {}) => {
     if (!isRecordId(id)) throw invalidId(id);
     if (options.encrypted === true || (await tx.current(id))?.encrypted === true) {
@@ -904,14 +954,7 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
     const made = await tracedPrepare(tx, type, id, payload, given);
     const { op } = made;
     if (op === null || op === undefined || op === MISMATCH) return op;
-    const was = lastOf.get(id);
-    if (was !== undefined) release(items[was]);
-    lastOf.set(id, items.length);
-    deltas.set(id, assignData(deltas.get(id) ?? {}, made.delta));
-    items.push(made);
-    touched.set(id, made.entry);
-    reserved.set(opKey(op), op.seq);
-    return op;
+    return join(made);
   };
   // An op made outside the queue, over another reading of its record — an
   // editor's handle's (src/text/handle.js), resolved and stamped as it was
@@ -946,15 +989,7 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
     if (core.hooks.beforeWrite !== null) await core.hook('beforeWrite', ctx);
     const applied = await validateLocal(tx, op, current, null, ctx);
     if (applied === null) return null;
-    const made = prepared(tx, op, applied, current, ctx, source, null);
-    const was = lastOf.get(id);
-    if (was !== undefined) release(items[was]);
-    lastOf.set(id, items.length);
-    deltas.set(id, assignData(deltas.get(id) ?? {}, made.delta));
-    items.push(made);
-    touched.set(id, made.entry);
-    reserved.set(opKey(op), op.seq);
-    return op;
+    return join(prepared(tx, op, applied, current, ctx, source, null));
   };
   tx.commit = commitIn;
   tx.write = (type, id, payload, options) => commitIn(type, id, payload, options).then(NOOP);

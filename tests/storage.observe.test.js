@@ -262,7 +262,8 @@ test('observe and deltas', async (t) => {
         [{ insert: 'Hi ' }, { insert: 'there', attributes: { bold: true } }, { insert: { embed: marker } }],
         { message: 'typed' },
       );
-      assert.strictEqual(made.ops, 4);
+      // 'there' typed on at the end of 'Hi ' is that op (TXN-3): the splice, the bold, the embed.
+      assert.strictEqual(made.ops, 3);
       assert.strictEqual((await openGroups(storage.fsi, '/o/log/open')) - files, 1, 'one group');
       assert.deepStrictEqual(await storage.spans(other, 'body'), [
         { type: 'text', text: 'Hi ', marks: {} },
@@ -272,7 +273,7 @@ test('observe and deltas', async (t) => {
       const { versions } = await storage.history(other);
       assert.deepStrictEqual(
         versions.map((version) => version.message),
-        ['typed', 'typed', 'typed', 'typed', null],
+        ['typed', 'typed', 'typed', null],
         'the message on every op of the delta; the insert before it has none',
       );
       assert.strictEqual(

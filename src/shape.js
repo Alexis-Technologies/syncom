@@ -22,7 +22,9 @@ const asJson = (value) => (value === undefined ? undefined : JSON.parse(JSON.str
 // enters — the local write path, a peer's op, a snapshot record — so
 // nothing below has to.
 const RECORD_ID = /^[A-Za-z0-9_@-][A-Za-z0-9._@-]{0,127}$/;
-const isRecordId = (id) => typeof id === 'string' && RECORD_ID.test(id);
+// The length first: a regular expression flattens a string built by
+// concatenation (a text's reading) before it reads its first character.
+const isRecordId = (id) => typeof id === 'string' && id.length <= 128 && RECORD_ID.test(id);
 const invalidId = (id) => {
   const shown = typeof id === 'string' ? JSON.stringify(id) : typeof id;
   return typed(

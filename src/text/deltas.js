@@ -154,6 +154,13 @@ const applyDelta = async (core, id, key, delta, { actor, message, source, expect
       }
       let at = 0;
       let ops = 0;
+      // The ops logged: an edit the transaction folded into the op before it
+      // (TXN-3) hands that op back again, and is no op of its own.
+      let last = null;
+      const count = (op) => {
+        if (op && op !== last) ops++;
+        if (op) last = op;
+      };
       // The marks the inserted run reads with after its splice — the ones it
       // landed inside, the ones that grew over it: what the delta's
       // attributes replace, a name at a time.
@@ -178,7 +185,7 @@ const applyDelta = async (core, id, key, delta, { actor, message, source, expect
             // alike are one retain, as a delta composes them.
             const marker = value === null ? null : markerArgs('applyDelta', value, value.isEmbed ?? true);
             for (let index = start; index < end; index++) {
-              ops += (await tx.commit('assign', id, { key, index, value: marker }, { actor })) ? 1 : 0;
+              count(await tx.commit('assign', id, { key, index, value: marker }, { actor }));
             }
           } else {
             // A delta says every insert's attributes itself: a mark it lays
@@ -187,19 +194,19 @@ const applyDelta = async (core, id, key, delta, { actor, message, source, expect
             markArgs('applyDelta', key, start, end, name, 'none');
             const marked = value === null ? null : jsonValue('applyDelta', value);
             const payload = { key, start, end, name, value: marked, expand: 'none' };
-            ops += (await tx.commit('mark', id, payload, { actor })) ? 1 : 0;
+            count(await tx.commit('mark', id, payload, { actor }));
           }
         }
       };
       for (const op of delta) {
         if (op.delete !== undefined) {
-          ops += (await tx.commit('splice', id, spliceArgs('applyDelta', key, at, op.delete), { actor })) ? 1 : 0;
+          count(await tx.commit('splice', id, spliceArgs('applyDelta', key, at, op.delete), { actor }));
         } else if (op.retain !== undefined) {
           if (op.attributes !== undefined) await marks(at, at + op.retain, op.attributes);
           at += op.retain;
         } else if (typeof op.insert === 'string') {
           if (op.insert.length === 0) continue;
-          ops += (await tx.commit('splice', id, spliceArgs('applyDelta', key, at, 0, op.insert), { actor })) ? 1 : 0;
+          count(await tx.commit('splice', id, spliceArgs('applyDelta', key, at, 0, op.insert), { actor }));
           await inserted(at, op.insert.length, op.attributes);
           at += op.insert.length;
         } else {
@@ -207,7 +214,7 @@ const applyDelta = async (core, id, key, delta, { actor, message, source, expect
           const marker = embed === null ? null : markerArgs('applyDelta', embed, embed.isEmbed ?? true);
           const payload = spliceArgs('applyDelta', key, at, 0, EMBED, { embeds: true });
           payload.vals = [[0, marker]];
-          ops += (await tx.commit('splice', id, payload, { actor })) ? 1 : 0;
+          count(await tx.commit('splice', id, payload, { actor }));
           await inserted(at, 1, op.attributes);
           at += 1;
         }
