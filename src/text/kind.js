@@ -436,6 +436,23 @@ const wholeCharacters = (id, key, idx, ...indexes) => {
   }
 };
 
+// While a text handle is open this node has more than one writer of a text:
+// each handle over its own reading, the storage over its own. A run is
+// extended by its origin alone, an offset after another — an extension at an
+// offset the run holds already is a duplicate, and dropped — so every
+// extension reserves the run's next offset, and a writer whose reading is
+// behind it (another writer grew the run meanwhile) begins a run of its own
+// after it (HANDLE-4). Without a handle the storage is the one writer: nothing
+// is reserved, and the last handle closed clears what was (src/text/handle.js).
+const extendsRun = (core, run, from, length) => {
+  const editing = core.editing;
+  if (editing === undefined || editing === null || editing.handles.size === 0) return true;
+  const end = editing.extents.get(run);
+  if (end !== undefined && end !== from) return false;
+  editing.extents.set(run, from + length);
+  return true;
+};
+
 const resolveSplice = (core, id, payload, current) => {
   const { key, index, count, content, vals, marker } = payload;
   const held = current ? blockOf(current, key) : undefined;
@@ -456,10 +473,13 @@ const resolveSplice = (core, id, payload, current) => {
   if (count > 0) value.cut = ownRanges(S.rangesOf(idx, at, count), origin);
   if (fill.length > 0) {
     const place = idx === null ? null : S.placeInsert(idx, at, origin, fill.length);
-    // The writer's own run grown (its stamp), or the anchor of a new one.
+    // The writer's own run grown (its stamp), or the anchor of a new one — after
+    // the run's last element where another writer of this node grew it meanwhile.
     if (place === null) value.at = S.HEAD;
-    else if (place.run !== undefined) Object.assign(value, { run: ownRun(place.run, origin), from: place.from });
-    else value.at = ownElem(place.at, origin);
+    else if (place.run === undefined) value.at = ownElem(place.at, origin);
+    else if (extendsRun(core, place.run, place.from, fill.length)) {
+      Object.assign(value, { run: ownRun(place.run, origin), from: place.from });
+    } else value.at = ownElem(`>${S.elemKey(place.run, place.from - 1)}`, origin);
   }
   // The markers of the embed slots the content holds, each at its offset.
   if (vals !== undefined && vals.length > 0) value.vals = vals;

@@ -2,10 +2,11 @@
 
 // The editor binding (src/editor/editor.js) against whichever half the
 // caller builds: an editor loaded from the field and kept the same as it
-// through local edits and a peer's, two editors on one storage racing
-// through STALE and the rebase, two editors on two nodes, a reset that
-// reloads, and the pure helpers — the diff between two readings, spans
-// and blocks, transforms, selections as tokens, a presence room's cursors.
+// through local edits and a peer's, over the text plugin's handle — two
+// editors on one storage, each over its own reading, two editors on two
+// nodes, a reset and a flush not logged that reload — and the pure helpers:
+// the diff between two readings, spans and blocks, transforms, selections as
+// tokens, a presence room's cursors.
 
 const { createMesh, settle, waitUntil, prng } = require('../utils/mesh.js');
 const { createPresence } = require('../../src/presence/presence.js');
@@ -119,63 +120,7 @@ const runEditorTests = async (t, assert, createStorage) => {
   );
 
   await t.test(
-    'a send goes with the revision the last one handed back, sparing the text compare; a peer’s edit sends the next without',
-    async (t2) => {
-      const storage = await createStorage(t2, 'A');
-      const id = await storage.insert({});
-      await storage.updateText(id, 'body', 'base');
-      // Every send's options, in order; a peer types between two of them once asked to.
-      const sent = [];
-      let peer = null;
-      const spying = new Proxy(storage, {
-        get: (target, name) => {
-          if (name === 'applyDelta') {
-            return async (...args) => {
-              sent.push(args[3]);
-              if (peer !== null) {
-                const text = peer;
-                peer = null;
-                await target.splice(id, 'body', 0, 0, text);
-              }
-              return target.applyDelta(...args);
-            };
-          }
-          const value = target[name];
-          return typeof value === 'function' ? value.bind(target) : value;
-        },
-      });
-      const editor = createEditor();
-      const binding = E.createTextBinding(spying, id, 'body', editor);
-      t2.after(() => binding.stop());
-      await binding.ready;
-      for (const letter of 'abc') {
-        editor.type(editor.text().length, letter);
-        await binding.flush();
-      }
-      assert.strictEqual(sent.length, 3);
-      for (let i = 0; i < 3; i++) assert.ok(Number.isSafeInteger(sent[i].revision), `send ${i} with a revision`);
-      assert.notStrictEqual(sent[1].revision, sent[2].revision, 'each the revision its predecessor left');
-      // A peer's edit lands before the next send's turn: the revision it carries is stale, the text
-      // is compared (STALE), the delta rebased and sent again without one, then with one again.
-      peer = '>';
-      editor.type(editor.text().length, 'd');
-      await binding.flush();
-      await waitUntil(() => editor.text() === '>baseabcd');
-      editor.type(editor.text().length, 'e');
-      await binding.flush();
-      assert.strictEqual((await storage.get(id)).body, '>baseabcde');
-      const after = sent.slice(3);
-      assert.ok(
-        after.some((options) => options.revision === undefined),
-        'a send after the peer’s edit compares the text',
-      );
-      assert.ok(Number.isSafeInteger(after[after.length - 1].revision), 'and the one after it has a revision again');
-      assert.strictEqual(binding.shadow, '>baseabcde');
-    },
-  );
-
-  await t.test(
-    'two editors on one storage converge: an edit landing while another is in flight leaves the first STALE, rebased and sent again, nothing lost',
+    'two editors on one storage converge: each edits its own reading at once, both reach the field, nothing lost',
     async (t2) => {
       const storage = await createStorage(t2, 'A');
       const id = await storage.insert({});
@@ -187,13 +132,13 @@ const runEditorTests = async (t, assert, createStorage) => {
       t2.after(() => ba.stop());
       t2.after(() => bb.stop());
       await Promise.all([ba.ready, bb.ready]);
-      // Both type at once: a's lands first, b's is refused as STALE, rebased over a's and lands after it.
+      // Both type at one spot at once, each over its own reading: both words land whole, in the engine's order.
       a.type(0, 'abc');
       b.type(0, 'xyz');
       await Promise.all([ba.flush(), bb.flush()]);
-      await waitUntil(() => a.text() === 'abcxyz' && b.text() === 'abcxyz');
-      assert.strictEqual((await storage.get(id)).body, 'abcxyz');
-      assert.deepStrictEqual([ba.shadow, bb.shadow], ['abcxyz', 'abcxyz']);
+      await waitUntil(async () => a.text() === b.text() && a.text() === (await storage.get(id)).body);
+      assert.ok(['abcxyz', 'xyzabc'].includes(a.text()), a.text());
+      assert.deepStrictEqual([ba.shadow, bb.shadow], [a.text(), a.text()]);
       // A storm from both, interleaved without a wait, converges on the field.
       for (const seed of [1, 2, 3]) {
         const random = prng(seed);
@@ -266,60 +211,50 @@ const runEditorTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual([resets[1], editor.text(), binding.shadow], ['', '', '']);
   });
 
-  await t.test(
-    'a send that keeps failing reloads the editor later each time and stops after five in a row, a STALE no event explains alike',
-    async (t2) => {
-      const storage = await createStorage(t2, 'A');
-      const id = await storage.insert({});
-      await storage.updateText(id, 'body', 'base');
-      for (const failure of [
-        () => new TypeError('a delta the field refuses'),
-        () => Object.assign(new Error('changed under the delta'), { code: 'STALE' }),
-      ]) {
-        // The storage as the binding sees it, but a send never lands.
-        const failing = new Proxy(storage, {
-          get: (target, name) => {
-            if (name === 'applyDelta') return async () => Promise.reject(failure());
-            const value = target[name];
-            return typeof value === 'function' ? value.bind(target) : value;
-          },
-        });
-        const editor = createEditor();
-        const errors = [];
-        const resets = [];
-        const stops = [];
-        const binding = E.createTextBinding(failing, id, 'body', editor, {
-          onError: (error) => errors.push(error.code ?? error.name),
-          onStop: (reason) => stops.push(reason?.code ?? reason?.name ?? null),
-          // An editor that types again after every reload — what makes a failure repeat.
-          onReset: () => {
-            resets.push(editor.text());
-            editor.type(0, 'x');
-          },
-        });
-        t2.after(() => binding.stop());
-        await binding.ready;
+  await t.test('a flush that keeps failing reloads the editor each time and stops after five in a row', async (t2) => {
+    // Every write to the field refused, as a hook might.
+    const hooks = {
+      beforeWrite: (ctx) => {
+        if (ctx.type === 'splice') throw new Error('not now');
+      },
+    };
+    const storage = await createStorage(t2, 'A', { hooks });
+    const id = await storage.insert({});
+    await storage.set(id, { title: 'x' });
+    const editor = createEditor();
+    const errors = [];
+    const resets = [];
+    const stops = [];
+    const binding = E.createTextBinding(storage, id, 'body', editor, {
+      onError: (error) => errors.push(error.code ?? error.name),
+      onStop: (reason) => stops.push(reason?.code ?? reason?.name ?? null),
+      // An editor that types again after every reload — what makes a failure repeat.
+      onReset: () => {
+        resets.push(editor.text());
         editor.type(0, 'x');
-        await waitUntil(() => errors.length === 5, { timeout: 3000 });
-        await binding.flush();
-        assert.deepStrictEqual(resets, ['base', 'base', 'base', 'base'], 'a reload between them, the edit dropped');
-        assert.strictEqual(editor.text(), 'xbase', 'typed after the last reload, never sent');
-        assert.strictEqual((await storage.get(id)).body, 'base');
-        assert.strictEqual(binding.stopped, true);
-        assert.deepStrictEqual(stops, [errors[4]], 'onStop hears the last failure, once');
-        editor.type(0, 'y');
-        // A stopped binding answers flush() at once, whatever was typed after it.
-        await Promise.race([
-          binding.flush(),
-          new Promise((resolve, reject) => setTimeout(() => reject(new Error('flush hangs')), 200)),
-        ]);
-        assert.strictEqual(binding.pending, false);
-        await new Promise((resolve) => setTimeout(resolve, 400));
-        assert.strictEqual(errors.length, 5, 'nothing after the stop');
-      }
-    },
-  );
-
+      },
+    });
+    t2.after(() => binding.stop());
+    await binding.ready;
+    editor.type(0, 'x');
+    await waitUntil(() => errors.length === 5, { timeout: 3000 });
+    await binding.flush();
+    assert.deepStrictEqual(errors, ['UNLOGGED', 'UNLOGGED', 'UNLOGGED', 'UNLOGGED', 'UNLOGGED']);
+    assert.deepStrictEqual(resets, ['', '', '', '', ''], 'a reload after each, what was typed dropped');
+    assert.strictEqual(editor.text(), 'x', 'typed after the last reload, never logged');
+    assert.strictEqual((await storage.get(id)).body, undefined);
+    assert.strictEqual(binding.stopped, true);
+    assert.deepStrictEqual(stops, ['UNLOGGED'], 'onStop hears the last failure, once');
+    editor.type(0, 'y');
+    // A stopped binding answers flush() at once, whatever was typed after it.
+    await Promise.race([
+      binding.flush(),
+      new Promise((resolve, reject) => setTimeout(() => reject(new Error('flush hangs')), 200)),
+    ]);
+    assert.strictEqual(binding.pending, false);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.strictEqual(errors.length, 5, 'nothing after the stop');
+  });
   await t.test(
     'an editor that throws on a peer’s change is loaded from the field again, never left apart',
     async (t2) => {
@@ -374,126 +309,62 @@ const runEditorTests = async (t, assert, createStorage) => {
     await binding.flush();
   });
 
-  await t.test(
-    'a peer’s change made of the same characters, landing while a delta is in flight, reloads the editor rather than leave it apart',
-    async (t2) => {
-      const storage = await createStorage(t2, 'A');
-      const id = await storage.insert({});
-      await storage.updateText(id, 'body', 'abcdef');
-      // Between the send and the delta's turn, another writer cuts the 'c' and types a 'c' again: the text
-      // the delta expects is there, and the delta lands by index over the new letter.
-      let first = true;
-      const racing = new Proxy(storage, {
-        get: (target, name) => {
-          if (name === 'applyDelta') {
-            return async (...args) => {
-              if (first) {
-                first = false;
-                await target.splice(id, 'body', 2, 1, 'c');
-                await tick();
-              }
-              return target.applyDelta(...args);
-            };
-          }
-          const value = target[name];
-          return typeof value === 'function' ? value.bind(target) : value;
-        },
-      });
-      const editor = createEditor();
-      const resets = [];
-      const binding = E.createTextBinding(racing, id, 'body', editor, { onReset: () => resets.push(editor.text()) });
-      t2.after(() => binding.stop());
-      await binding.ready;
-      editor.erase(2, 1);
-      await waitUntil(() => resets.length === 1);
-      await binding.flush();
-      const field = (await storage.get(id)).body;
-      assert.strictEqual(field, 'abdef', 'the delta cut the letter at its index');
-      assert.deepStrictEqual([editor.text(), binding.shadow], [field, field], 'read again from the field');
-    },
-  );
-
-  await t.test('what is typed while the field is read again goes with the contents it replaces', async (t2) => {
+  await t.test('what is typed before the field is read is over contents the load replaces: dropped', async (t2) => {
     const storage = await createStorage(t2, 'A');
     const id = await storage.insert({});
     await storage.updateText(id, 'body', 'before');
-    // The read of the field waits for a gate, so an edit lands while it is in progress.
-    let gate = Promise.resolve();
-    let open = () => {};
-    const slow = new Proxy(storage, {
-      get: (target, name) => {
-        if (name === 'transact') {
-          return async (...args) => {
-            await gate;
-            return target.transact(...args);
-          };
-        }
-        const value = target[name];
-        return typeof value === 'function' ? value.bind(target) : value;
-      },
-    });
     const editor = createEditor();
-    const resets = [];
-    const binding = E.createTextBinding(slow, id, 'body', editor, { onReset: () => resets.push(editor.text()) });
+    const binding = E.createTextBinding(storage, id, 'body', editor);
     t2.after(() => binding.stop());
-    await binding.ready;
-    gate = new Promise((resolve) => (open = resolve));
-    await storage.set(id, { title: 'reset' });
-    await tick();
     editor.type(0, 'lost ');
-    open();
-    await waitUntil(() => resets.length === 1);
+    await binding.ready;
     await binding.flush();
-    assert.deepStrictEqual([editor.text(), (await storage.get(id)).body], ['', undefined], 'dropped, never sent');
-    await storage.updateText(id, 'body', 'after');
-    await waitUntil(() => editor.text() === 'after');
-    editor.type(5, '!');
+    assert.deepStrictEqual(
+      [editor.text(), (await storage.get(id)).body],
+      ['before', 'before'],
+      'dropped, never logged',
+    );
+    editor.type(6, '!');
     await binding.flush();
-    assert.deepStrictEqual([editor.text(), (await storage.get(id)).body], ['after!', 'after!']);
+    assert.deepStrictEqual([editor.text(), (await storage.get(id)).body], ['before!', 'before!']);
   });
-
-  await t.test('a send that failed holds what follows until the editor is read again', async (t2) => {
-    const storage = await createStorage(t2, 'A');
+  await t.test('a flush that failed drops what was typed on top of it and reads the editor again', async (t2) => {
+    let refuse = false;
+    const hooks = {
+      beforeWrite: (ctx) => {
+        if (refuse && ctx.type === 'splice') {
+          refuse = false;
+          throw new Error('not now');
+        }
+      },
+    };
+    const storage = await createStorage(t2, 'A', { hooks });
     const id = await storage.insert({});
     await storage.updateText(id, 'body', 'base');
-    let refuse = true;
-    const flaky = new Proxy(storage, {
-      get: (target, name) => {
-        if (name === 'applyDelta') {
-          return async (...args) => {
-            if (refuse) {
-              refuse = false;
-              throw new TypeError('a delta the field refuses');
-            }
-            return target.applyDelta(...args);
-          };
-        }
-        const value = target[name];
-        return typeof value === 'function' ? value.bind(target) : value;
-      },
-    });
+    refuse = true;
     const editor = createEditor();
     const errors = [];
     const resets = [];
-    const binding = E.createTextBinding(flaky, id, 'body', editor, {
-      onError: (error) => errors.push(error.message),
+    const binding = E.createTextBinding(storage, id, 'body', editor, {
+      onError: (error) => errors.push(error.code),
       onReset: () => resets.push(editor.text()),
     });
     t2.after(() => binding.stop());
     await binding.ready;
     editor.type(0, 'x');
-    await waitUntil(() => errors.length === 1);
-    // Typed before the reload: it was sent over the delta the failure dropped, and the reload never came.
+    const flushing = binding.flush();
+    // Typed while the flush is out: over the edit it drops, so it goes with it.
     editor.type(0, 'y');
-    assert.strictEqual(binding.pending, true, 'held for the reload');
+    assert.strictEqual(binding.pending, true);
+    await flushing;
     await waitUntil(() => resets.length === 1);
+    assert.deepStrictEqual(errors, ['UNLOGGED']);
     await binding.flush();
     assert.deepStrictEqual([editor.text(), (await storage.get(id)).body], ['base', 'base']);
     editor.type(4, '!');
     await binding.flush();
     assert.deepStrictEqual([editor.text(), (await storage.get(id)).body], ['base!', 'base!']);
   });
-
   await t.test(
     'diffSpans and diffBlocks give the delta between two readings; spans, blocks and deltas round-trip; transforms agree with the storage’s order',
     async (t2) => {

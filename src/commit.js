@@ -567,11 +567,13 @@ const copyPayload = (payload) => {
 const rehearse = async (core, id, ops) => {
   let current = await core.current(id);
   if (current?.encrypted) return;
+  const scratch = { ...core, editing: null };
   for (const [type, given] of ops) {
     const payload = copyPayload(given);
     const visible = current && isAlive(current) ? compose(current, core.plugins) : null;
     if (type === 'write' || type === 'set') payload.data = sameType(type, id, payload.data, visible);
-    const op = prepareOp(core, type, id, payload, current, null, null);
+    // A rehearsal reserves nothing a writer would (`editing`: src/text/kind.js extendsRun).
+    const op = prepareOp(scratch, type, id, payload, current, null, null);
     // A plugin's op that resolved to nothing (a tree move to where the node is): nothing to write.
     if (op.value === null) continue;
     if (type === 'unset' && op.value.length === 0) continue;

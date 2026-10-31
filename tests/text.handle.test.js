@@ -131,3 +131,72 @@ test('a flush that cannot be logged drops what was not logged: UNLOGGED, the rea
   await handle.close();
   await storage.close();
 });
+
+test('a handle’s applyDelta is the storage’s: embeds, their markers and marks, an insert plain unless it says', async () => {
+  const storage = await openMemory('/delta');
+  const a = await storage.insert({ title: 'a' });
+  const b = await storage.insert({ title: 'b' });
+  const paragraph = { type: 'paragraph', parents: [], attrs: {}, isEmbed: false };
+  const steps = [
+    [
+      { insert: 'Hi ' },
+      { insert: 'there', attributes: { bold: true } },
+      { insert: { embed: paragraph } },
+      { insert: { embed: { type: 'img', attrs: { src: 'x' } } }, attributes: { em: true } },
+      { insert: 'end' },
+    ],
+    // Typed inside the bold word with no attributes: plain, as a delta says it.
+    [{ retain: 5 }, { insert: '!' }],
+    [{ retain: 9 }, { retain: 1, attributes: { embed: { type: 'heading', attrs: { level: 2 } } } }],
+    [{ retain: 1 }, { delete: 2 }, { retain: 2, attributes: { bold: null } }],
+  ];
+  const handle = await storage.openText(b, 'body', { window: 60_000 });
+  for (const delta of steps) {
+    await storage.applyDelta(a, 'body', delta);
+    handle.applyDelta(delta);
+  }
+  const expected = await storage.spans(a, 'body');
+  assert.deepStrictEqual(handle.spans(), expected, 'the handle reads as the storage would');
+  assert.deepStrictEqual(
+    expected.slice(0, 2),
+    [
+      { type: 'text', text: 'Hth!', marks: {} },
+      { type: 'text', text: 'ere', marks: { bold: true } },
+    ],
+    'the letter typed inside the bold word plain',
+  );
+  await handle.flush();
+  assert.deepStrictEqual(await storage.spans(b, 'body'), expected, 'and is logged so');
+  assert.throws(() => handle.applyDelta([{ insert: 7 }]), TypeError);
+  await handle.close();
+  await storage.close();
+});
+
+test('several writers of one node on one text never grow one run from two readings: nothing typed is lost', async () => {
+  const storage = await openMemory('/writers');
+  const id = await storage.insert({ title: 'doc' });
+  await storage.push(id, 'body', 'start');
+  const one = await storage.openText(id, 'body', { window: 60_000 });
+  const two = await storage.openText(id, 'body', { window: 60_000 });
+  // Each types at the end of the same run, over its own reading, and the storage too.
+  one.insert(5, 'abc');
+  two.insert(5, 'xyz');
+  const direct = storage.splice(id, 'body', 5, 0, '123');
+  one.insert(8, 'de');
+  two.insert(8, 'uv');
+  await direct;
+  await one.flush();
+  await two.flush();
+  const text = (await storage.get(id)).body;
+  for (const word of ['abcde', 'xyzuv', '123']) assert.ok(text.includes(word), `${word} whole in ${text}`);
+  assert.strictEqual(text.length, 'start'.length + 13, 'every character');
+  assert.deepStrictEqual([one.toString(), two.toString()], [text, text], 'each handle reads the field');
+  await one.close();
+  await two.close();
+  // The last handle closed, the storage is the one writer: it grows its runs again.
+  const next = storage.log.next;
+  await storage.splice(id, 'body', text.length, 0, '!');
+  await storage.splice(id, 'body', text.length + 1, 0, '?');
+  assert.strictEqual(storage.log.next - next, 2);
+  await storage.close();
+});

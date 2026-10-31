@@ -392,6 +392,7 @@ const move = (core, id, key, from, to, options) => {
 
 module.exports = {
   editorOf,
+  typedSpans,
   splice,
   push,
   updateText,

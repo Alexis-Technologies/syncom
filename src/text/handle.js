@@ -22,12 +22,13 @@
 
 const { Emitter } = require('../emitter.js');
 const { SyncomError } = require('../errors.js');
-const { spliceArgs, markArgs, jsonValue, fieldName } = require('../args.js');
+const { spliceArgs, markArgs, jsonValue, fieldName, EMBED } = require('../args.js');
 const { isRecordId, invalidId, isPlainObject, asJson } = require('../shape.js');
 const { floorOf } = require('../vector.js');
 const S = require('./sequence.js');
-const { coalesce, render, blockOf, marksAt } = require('./kind.js');
+const { coalesce, render, blockOf, marksAt, markerArgs } = require('./kind.js');
 const { toDelta } = require('./deltas.js');
+const { typedSpans } = require('./methods.js');
 
 // What a handle holds at most before it flushes whatever the window says.
 const PENDING_MAX = 1024;
@@ -43,6 +44,8 @@ class TextHandle extends Emitter {
   #overlay;
   #pending = [];
   #flushing = RESOLVED;
+  // Flushes taken and not settled yet: their edits still wait for the log.
+  #unsettled = 0;
   #timer = null;
   #waiting = null;
   #observers = new Set();
@@ -78,9 +81,17 @@ class TextHandle extends Emitter {
     return this.toString().slice(start, end);
   }
 
-  /** Whether edits wait for the log. */
+  /** The field as runs of equal style, as `storage.spans()` reads it: the handle's reading. */
+  spans() {
+    const entry = this.#overlay;
+    const seq = entry === null || entry.encrypted ? undefined : blockOf(entry, this.field);
+    if (seq === undefined || seq.k !== 't' || !this.#core.alive(entry)) return [];
+    return typedSpans({ entry, seq, base: floorOf(entry.meta, this.field) }, this.field);
+  }
+
+  /** Whether edits wait for the log: made and not flushed yet, or in a flush not settled. */
   get pending() {
-    return this.#pending.length > 0;
+    return this.#pending.length > 0 || this.#unsettled > 0;
   }
 
   /** Settles once every edit made so far is logged and landed; rejects with UNLOGGED when it could not be. */
@@ -112,16 +123,32 @@ class TextHandle extends Emitter {
     this.#edit('splice', spliceArgs('delete', this.field, index, count));
   }
 
-  /** Marks `[index, index + count)` with `attributes`; a null value takes the style off. */
+  /** Inserts an embed slot at `index` holding `marker` (`{ type, parents?, attrs?, isEmbed? }`; an embed unless it says). */
+  insertEmbed(index, marker, attributes) {
+    const value = marker === null ? null : markerArgs('insertEmbed', marker, marker.isEmbed ?? true);
+    const payload = spliceArgs('insertEmbed', this.field, index, 0, EMBED, { embeds: true });
+    payload.vals = [[0, value]];
+    this.#edit('splice', payload);
+    if (attributes !== undefined) this.#styled(index, 1, attributes);
+  }
+
+  /**
+   * Marks `[index, index + count)` with `attributes`; a null value takes the
+   * style off, and `embed` sets the marker of every embed slot there.
+   */
   format(index, count, attributes) {
     if (!Number.isInteger(count) || count < 0) throw new TypeError('format() takes a count');
     if (!isPlainObject(attributes)) throw new TypeError('format() takes attributes');
-    for (const name of Object.keys(attributes)) this.#mark(index, index + count, name, attributes[name]);
+    for (const name of Object.keys(attributes)) {
+      if (name === 'embed') this.#embed(index, index + count, attributes.embed);
+      else this.#mark(index, index + count, name, attributes[name]);
+    }
   }
 
   /**
    * Makes `delta` (Quill's form: retain, insert, delete — attributes as
-   * marks) the edits of the field, at once.
+   * marks, `{ insert: { embed } }` an embed slot, an `embed` attribute its
+   * marker) the edits of the field, at once — as `storage.applyDelta()` does.
    */
   applyDelta(delta) {
     if (!Array.isArray(delta)) throw new TypeError('applyDelta() takes a delta');
@@ -133,9 +160,13 @@ class TextHandle extends Emitter {
         if (op.attributes !== undefined) this.format(at, op.retain, op.attributes);
         at += op.retain;
       } else if (typeof op.insert === 'string') {
-        this.insert(at, op.insert, op.attributes);
+        // A delta says every insert's attributes itself: none is plain, never a mark it landed inside.
+        this.insert(at, op.insert, op.attributes ?? {});
         at += op.insert.length;
-      } else throw new TypeError('applyDelta() on a handle takes text: an embed goes through storage.insertEmbed()');
+      } else if (isPlainObject(op.insert) && op.insert.embed !== undefined) {
+        this.insertEmbed(at, op.insert.embed, op.attributes ?? {});
+        at += 1;
+      } else throw new TypeError('applyDelta() takes a delta');
     }
   }
 
@@ -164,6 +195,7 @@ class TextHandle extends Emitter {
     this.#pending = [];
     this.#waiting = null;
     const core = this.#core;
+    this.#unsettled++;
     const run = async () => {
       const { done } = await core.transact(
         async (tx) => {
@@ -174,8 +206,12 @@ class TextHandle extends Emitter {
       if (done !== null) await done;
     };
     const flushing = this.#flushing.then(run, run).then(
-      () => waiting?.resolve(),
+      () => {
+        this.#unsettled--;
+        waiting?.resolve();
+      },
       (error) => {
+        this.#unsettled--;
         const unlogged = this.#unlogged(batch, error);
         waiting?.reject(unlogged);
         throw unlogged;
@@ -193,7 +229,10 @@ class TextHandle extends Emitter {
     } finally {
       this.#closed = true;
       this.#off();
-      this.#core.editing.handles.delete(this);
+      const { editing } = this.#core;
+      editing.handles.delete(this);
+      // The storage the one writer again: nothing to reserve against.
+      if (editing.handles.size === 0) editing.extents.clear();
       this.#observers.clear();
     }
   }
@@ -226,12 +265,19 @@ class TextHandle extends Emitter {
     const idx = S.indexOf(entry, this.field);
     const have = idx === null ? {} : marksAt(idx, start, floorOf(entry.meta, this.field));
     const want = { ...attributes };
-    for (const name of Object.keys(have)) if (want[name] === undefined) want[name] = null;
+    for (const name of Object.keys(have)) if (want[name] === undefined && name !== 'embed') want[name] = null;
     for (const name of Object.keys(want)) {
-      if (JSON.stringify(have[name] ?? null) !== JSON.stringify(want[name])) {
+      if (name === 'embed') this.#embed(start, start + length, want.embed);
+      else if (JSON.stringify(have[name] ?? null) !== JSON.stringify(want[name])) {
         this.#mark(start, start + length, name, want[name]);
       }
     }
+  }
+
+  // The marker of every embed slot of [start, end): a setAt each.
+  #embed(start, end, value) {
+    const marker = value === null ? null : markerArgs('format', value, value.isEmbed ?? true);
+    for (let index = start; index < end; index++) this.#edit('assign', { key: this.field, index, value: marker });
   }
 
   #mark(start, end, name, value) {

@@ -42,13 +42,14 @@ declare const somePlugin: syncom.Plugin<{ fly(): Promise<void> }>;
 const flown = await syncom.open({ plugins: [somePlugin] });
 expectType<Promise<void>>(flown.fly());
 expectType<Promise<void>>(flown.splice('id', 'body', 0, 0, 'x'));
+expectType<Promise<syncom.TextHandle>>(flown.openText('id', 'body'));
 
 // The plugins and the registry-bound folds.
-expectType<syncom.Plugin<syncom.TextMethods>>(syncom.text);
+expectType<syncom.Plugin<syncom.TextMethods & syncom.TextHandleMethods>>(syncom.text);
 expectType<syncom.Plugin<syncom.TreeMethods>>(syncom.tree);
 expectType<
   readonly [
-    syncom.Plugin<syncom.TextMethods>,
+    syncom.Plugin<syncom.TextMethods & syncom.TextHandleMethods>,
     syncom.Plugin<syncom.TreeMethods>,
     syncom.Plugin,
     syncom.Plugin,

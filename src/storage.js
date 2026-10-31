@@ -422,6 +422,9 @@ class Storage extends Emitter {
       // flush first.
       editing: Object.freeze({
         handles: this.#edits,
+        // While a handle is open: the next offset of each run of this node's
+        // a writer extended, reserved (src/text/kind.js extendsRun).
+        extents: new Map(),
         makeOp: (type, id, payload, current, who) => prepareOp(this.#core, type, id, payload, current, who, null),
         applyLocal: (op, current) => applyLocal(this.#core, op, current),
         applyTo: (entry, op) => applyOp(entry, op, this.#limits),

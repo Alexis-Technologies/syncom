@@ -321,8 +321,9 @@ const ENTRIES = [
   // 33.6 with revision() and applyDelta's revision. 34, raised by name.
   // 34.1 with a list's reading made when it is read (deriveLater; 2026-10-31). 34.5, raised by name.
   // 36.8 with the synchronous text handle (src/text/handle.js, openText) and keystrokes coalesced; 37.4 with an op's
-  // own references short (src/text/kind.js fullRefs). 37.5, raised by name.
-  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 37.5 },
+  // own references short (src/text/kind.js fullRefs). 37.5, raised by name. 37.7 with the handle's embeds and spans
+  // and a run's next offset reserved while a handle is open (extendsRun). 38, raised by name.
+  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 38 },
   // The tree kind alone, with the fractional indexes a place is made of and
   // the argument checks it shares with the core (5.1 measured).
   // 5.5 with the field-name check unset shares with it (src/args.js).

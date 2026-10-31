@@ -41,6 +41,7 @@ declare const blocks: TextBlock[];
 expectType<'￼'>(EMBED);
 const binding = createTextBinding(storage, 'id', 'body', adapter, {
   source: 'editor',
+  window: 0,
   onReset: () => {},
   onError: (e) => e.message,
   onStop: (reason) => expectType<Error | null>(reason),

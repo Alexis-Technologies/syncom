@@ -1,35 +1,30 @@
 # src/editor/CLAUDE.md — The editor binding
 
-One delta at a time with `expect`, the rebase, what the adapters share and never do. The rules of the core — the op model, the write paths, own keys, the log — are in [src/CLAUDE.md](../CLAUDE.md); what holds for the whole repository is in [CLAUDE.md](../../CLAUDE.md).
+The binding over a text handle, what the adapters share and never do. The rules of the core — the op model, the write paths, own keys, the log — are in [src/CLAUDE.md](../CLAUDE.md); what holds for the whole repository is in [CLAUDE.md](../../CLAUDE.md).
 
 ## Layout
 
 ```
-src/editor/editor.js      the @alexify/syncom/editor subpath — the editor-agnostic binding (shadow, one delta in
-                          flight, STALE and the rebase), delta compose/transform, diffSpans/diffBlocks, spans↔blocks,
-                          selections as tokens, presence cursors, what an adapter shares (createFit, undoSteps,
-                          failureReporter); requires text/myers.js, text/quill.js and vector.js only
+src/editor/editor.js      the @alexify/syncom/editor subpath — the editor-agnostic binding (over a text handle,
+                          `openText`: edits at once, others' changes as deltas, reloads), delta compose/transform,
+                          diffSpans/diffBlocks, spans↔blocks, selections as tokens, presence cursors, what an adapter
+                          shares (createFit, undoSteps, failureReporter); requires text/myers.js and text/quill.js only
 ```
 
 ## Rules
 
-- **An editor binding sends one delta at a time, with `expect`.** `applyDelta(id, key,
-delta, { expect, revision })` compares the field's text inside the queue and refuses `STALE` before
-  any op — unless the field is still at `revision`, a token per engine block that the last
-  answer (or `revision()` at the load) handed back for that text: the binding sends it only while
-  its shadow has not moved since (`version`, `revisionAt`), and holds the next send until the
-  answer is in (`holding`: the own event comes a few microtasks before it), or typing alone would
-  compare the whole text on every send; `src/editor/editor.js` keeps a shadow of the field, rebases a refused delta over
-  the peer's (`transform`, the peer's insert first at a tie — the storage's order) and
-  sends it again, and rebases a peer's delta over what the editor holds beyond the shadow
-  before handing it over. A binding or adapter that resolves an editor's indices against
-  the storage without `expect` races a peer's edit; a nested `transact` (a plugin method
-  inside a transaction) runs within the enclosing one. `expect` compares text alone: a peer's
-  change made of the characters it replaced passes it, and the delta lands by index over the new
-  ones — so a binding that rebased its delta in flight (`rebased`) reads its own event against
-  the rebased delta and reloads where they differ. A send that failed holds every later send until
-  its reload (`reloading`), and `load()` drops `pending` before `setContents`: what was typed
-  over the old contents is never sent over the new.
+- **An editor binding stands on a text handle.** `createTextBinding` opens `storage.openText(id, path,
+{ source, window })` (src/text/handle.js) and loads the editor from its `spans()`; the handle's
+  reading is what the editor shows, so an edit the adapter reports goes to `handle.applyDelta` at
+  once — resolved and stamped over that reading, never STALE, never rebased — and every other
+  writer's change comes from `handle.observe` as a delta in the editor's indices (`local` ones are the
+  editor's own). A `reset` from the handle (a change no delta says, a flush not logged) reloads the
+  editor from `handle.spans()`; an editor that throws on a change, or a delta the handle refuses,
+  the same; `MAX_FAILURES` in a row stop the binding, which closes its handle (logging what waits)
+  and hears nothing after. Never answer a change with an edit, and never write the field through
+  the storage while the handle holds edits — its indices are the storage's reading, not the
+  editor's. A storage's `applyDelta(…, { expect, revision })` (EDIT-4) is for a caller without a
+  handle: a whole document's delta made over a reading it holds.
 - **An editor adapter injects its editor and fits the field to its schema.** `/prosemirror`
   (and `/codemirror`) take the editor's modules as an argument and require nothing of them
   — the packages are devDependencies for skip-guarded tests and optional peerDependencies for

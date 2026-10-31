@@ -15,7 +15,7 @@ src/text/methods.js       the storage methods of the kinds (splice, push, update
 src/text/deltas.js        toDelta and applyDelta: a turn's changes as a Quill delta, a delta as one transaction (src/text/quill.js)
 src/text/handle.js        openText, TextHandle — a synchronous editor's handle: edits made over its overlay (the field as announced,
                           its edits on top) through the lent `core.editing`, coalesced, logged as one transaction a window later
-                          (`tx.commitResolved`); the base follows the `transaction` events
+                          (`tx.commitResolved`); the base follows the `transaction` events; what the editor binding stands on
 src/text/quill.js         Quill-form deltas and their algebra, once — compose, transform, transformIndex (quill-delta's rules): the
                           plugin's toDelta and the editor binding (src/editor/editor.js) both stand on it — no requires
 src/text/rle.js           run-length content: a run's pieces and gaps, cut, append, merge, the canonical form under MAX_RUN —
@@ -58,6 +58,14 @@ attrs, isEmbed }` an entry of the block's `vals` (as a list element's
   splice patch gets `vals`, a changed marker a `setAt` patch (b-side index,
   after the splices). Never diff a text without the context where a slot may
   be: the inverse would lay a bare slot.
+- **While a handle is open, a run grows from one reading at a time.** A handle and the storage
+  are writers of one origin, each over its own reading, and the engine takes an extension at an
+  offset the run holds as a duplicate — dropped. So `resolveSplice` (src/text/kind.js `extendsRun`)
+  reserves a run's next offset in `core.editing.extents` for every extension while a handle is
+  open, and a writer whose reading is behind it anchors a run of its own after the run's last
+  element (HANDLE-4); the last handle closed clears the map, a rehearsal reserves nothing. A new
+  local writer of a text resolves through `resolveSplice` with the storage's core, or loses
+  characters.
 - **An op's own references are short; the engine reads full names alone.** `resolve` (src/text/kind.js)
   names what is the op's own origin's without it — `run`, a cut's run and a mark's `off` by the stamp (a
   number), an element as `ts:offset`, an anchor `<ts:offset`/`>ts:offset` — and `fullRefs` lays

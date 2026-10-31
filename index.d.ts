@@ -1865,16 +1865,24 @@ export interface TextHandle {
   toString(): string;
   readonly length: number;
   slice(start?: number, end?: number): string;
-  /** Edits wait for the log. */
+  /** The field as runs of equal style, as `spans()` reads it: the handle's reading. */
+  spans(): TextSpan[];
+  /** Edits wait for the log: made and not flushed, or in a flush not settled yet. */
   readonly pending: boolean;
   /** Settles once every edit made so far is logged and landed; rejects with `UNLOGGED` when it could not be. */
   readonly flushed: Promise<void>;
   /** Inserts `text` at `index`, styled with `attributes` (a name to a value; null takes a style off). */
   insert(index: number, text: string, attributes?: Record<string, unknown>): void;
+  /** Inserts an embed slot holding `marker` at `index` — an inline embed unless `isEmbed` says otherwise. */
+  insertEmbed(
+    index: number,
+    marker: { type: string; parents?: readonly string[]; attrs?: { [name: string]: unknown }; isEmbed?: boolean } | null,
+    attributes?: Record<string, unknown>,
+  ): void;
   delete(index: number, count: number): void;
-  /** Styles `[index, index + count)`; a null value takes a style off. */
+  /** Styles `[index, index + count)`; a null value takes a style off, `embed` sets every embed slot's marker. */
   format(index: number, count: number, attributes: Record<string, unknown>): void;
-  /** Makes `delta` the field's edits, at once (text and marks; an embed goes through the storage). */
+  /** Makes `delta` the field's edits, at once — as `applyDelta()` does: marks, embeds and their markers; an insert is styled as it says. */
   applyDelta(delta: readonly DeltaOp[]): void;
   /** `listener(delta, event)` after every change of the field the handle reads; returns the function that stops it. */
   observe(listener: (delta: DeltaOp[] | null, event: TextHandleEvent) => void): () => void;
