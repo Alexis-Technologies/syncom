@@ -25,9 +25,13 @@ src/text/sequence.js      the sequence engine behind the list and text kinds: it
 src/text/keys.js          the engine's names: run and element keys, anchors, the checks a peer's block is read through, the refusals
                           an op reports, a mark's flags, the bounds beside MAX_RUN (MAX_FIELD, MAX_CUTS, MAX_MARKS) — requires
                           vector.js only
-src/text/state.js         a block's state (a private field the plain object is stamped with), the names a lineage interns (Doc,
-                          RunId), run records, a plain block's JSON made whole and hydrated into the rope (indexOf: once per
-                          plain block), drafts, every reading — elements, values, positions, cursors, what waits
+src/text/names.js         the names a lineage interns (Doc, RunId), the run records (Run) and the children at an offset (Child),
+                          the owners of copy-on-write nodes, SPAN (the room a run takes in the id index) — no requires
+src/text/normalize.js     a peer's plain block checked into the canonical shape under the bounds (normalizeJson), the newest
+                          stamp a plain block holds — plain JSON in and out, no rope — requires keys.js and rle.js only
+src/text/state.js         a block's state (a private field the plain object is stamped with), the block face and its views, a
+                          plain block hydrated into the rope (indexOf: once per plain block), the walk, drafts and writes,
+                          pieces, every reading — elements, values, positions, cursors, what waits
 src/text/splice.js        what an op does, every bound and refusal read before anything is written: a run placed with what hangs
                           under it, cuts and extensions, pending ops, a splice; the pos/vals registers — assign and move
 src/text/marks.js         marks: the anchors of a range, a mark applied or switched off, the index of the marks in force (styleAt)

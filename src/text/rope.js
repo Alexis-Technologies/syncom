@@ -545,14 +545,12 @@ const shapeOf = (root) => {
 };
 
 module.exports = {
-  MAX,
   Span,
   fromSpans,
   locate,
   spanAt,
   first,
   next,
-  spansOf,
   text,
   positionOf,
   before,
@@ -560,7 +558,9 @@ module.exports = {
   insertBefore,
   insertAfter,
   replace,
-  rehint,
   stats,
+  // For the tests alone.
+  MAX,
+  spansOf,
   shapeOf,
 };

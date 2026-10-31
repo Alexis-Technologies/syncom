@@ -8,20 +8,13 @@ const { compareClock, floorOf } = require('../vector.js');
 const R = require('./rope.js');
 const I = require('./ids.js');
 const C = require('./cow.js');
-const { MAX_RUN, isText, present, isGap, rleLength, segLength, normalizeRle } = require('./rle.js');
+const { MAX_RUN, isText, rleLength, segLength } = require('./rle.js');
 const {
   END,
   HEAD,
-  MAX_FIELD,
-  MAX_MARKS,
   byOrigin,
   elemKey,
-  isElemKey,
-  isJson,
-  isOrigin,
   isPlaceholder,
-  isRunKey,
-  isStamp,
   keysOf,
   minStamp,
   olderOf,
@@ -35,89 +28,10 @@ const { Span } = R;
 
 // ---- names ------------------------------------------------------------------------------------------
 
-// A run's name, parsed once where it enters and shared by every version of the lineage: its number
-// within the lineage (`n`), its stamp, its origin, its key as the JSON spells it.
-class RunId {
-  constructor(n, ts, origin, key) {
-    this.n = n;
-    this.ts = ts;
-    this.origin = origin;
-    this.key = key;
-  }
-}
-// The names a lineage of versions interned — a hydration, a join, a prune that rebuilds start one;
-// every op and fork after shares it. Only grows.
-class Doc {
-  constructor() {
-    this.byKey = new Map();
-    this.count = 0;
-  }
-}
-const intern = (doc, key, ts, origin) => {
-  let id = doc.byKey.get(key);
-  if (id === undefined) {
-    id = new RunId(doc.count++, ts, origin, key);
-    doc.byKey.set(key, id);
-  }
-  return id;
-};
-
-// A run's record and its spans in the id index (./ids.js): the record at offset -1, a span at its own.
-// SPAN is the room a run takes there: a run holds MAX_RUN slots at most (./rle.js; `applySplice`,
-// `settleRun` and `normalizeJson` hold every path to it), so SPAN must stay above MAX_RUN — it is twice
-// it, and tests/sequence.test.js holds the two apart. A run past SPAN would write over the next run's
-// keys.
-const SPAN = 2097152;
-const keyOf = (n, off) => n * SPAN + off + 1;
-
-// The owners: one per op, one per hydration (./cow.js).
-let owners = 0;
-const nextOwner = () => ++owners;
-
-// A run's record, one per version that changed it: where it hangs (`side` of slot `aOff` of run `aId`,
-// none for the head), the element a position run names (`elem`), its length, its content while it
-// waits out of the walk (`rle`), its fences once placed, its children by offset on each side (`L`, `R`:
-// ./cow.js lists of `Child`), how many right children sort after its continuation (`tails`), its JSON
-// tuple once made (`tuple`), and the spans a walk is laying (`segs`, the walk's own).
-class Run {
-  constructor(id, at, side, aId, aOff, elem, len, owner) {
-    this.id = id;
-    this.at = at;
-    this.side = side;
-    this.aId = aId;
-    this.aOff = aOff;
-    this.elem = elem;
-    this.len = len;
-    this.placed = false;
-    this.rle = null;
-    this.open = null;
-    this.close = null;
-    this.L = null;
-    this.R = null;
-    this.tails = 0;
-    this.owner = owner;
-    this.tuple = null;
-    this.segs = null;
-  }
-}
-const copyRun = (run, owner) => {
-  const r = new Run(run.id, run.at, run.side, run.aId, run.aOff, run.elem, run.len, owner);
-  r.placed = run.placed;
-  r.rle = run.rle;
-  r.open = run.open;
-  r.close = run.close;
-  r.L = run.L;
-  r.R = run.R;
-  r.tails = run.tails;
-  return r;
-};
-// The runs hung at one offset of a run, sorted by origin then stamp.
-class Child {
-  constructor(off, ids) {
-    this.off = off;
-    this.ids = ids;
-  }
-}
+// The names a lineage interns, the run records, the children at an offset, the owners and SPAN: ./names.js.
+const { RunId, Doc, intern, SPAN, keyOf, nextOwner, Run, copyRun, Child } = require('./names.js');
+// A peer's plain block checked into the canonical shape, and the newest stamp a plain block holds: ./normalize.js.
+const { normalizeJson, stampsMax } = require('./normalize.js');
 
 // ---- the block ------------------------------------------------------------------------------------
 
@@ -421,128 +335,6 @@ const pieceText = (st, at) => {
 
 /** An empty block of a kind, under `base` — the field's floor, so the first op on it rebuilds nothing. */
 const createSeq = (kind, base = null) => hydrate({ k: kind, ts: 0, runs: {} }, base);
-
-// ---- normalizing a peer's block ---------------------------------------------------------------------
-
-// A peer's block (or any plain one), checked into the canonical plain shape: every key of a known form,
-// every run a canonical RLE of the block's kind anchored at an element older than itself, every anchor
-// and register well-formed, the whole within MAX_FIELD slots. Anything else is dropped; a block with
-// nothing left, or past the field bound, is null.
-const normalizeJson = (raw) => {
-  if (!raw || typeof raw !== 'object') return null;
-  const kind = raw.k === 't' || raw.k === 'l' ? raw.k : null;
-  if (kind === null) return null;
-  const seq = { k: kind, ts: 0, runs: {} };
-  let slots = 0;
-  let runs = 0;
-  const runKeys = keysOf(raw.runs);
-  for (let i = 0; i < runKeys.length; i++) {
-    const key = runKeys[i];
-    const run = raw.runs[key];
-    const made = parseRun(key);
-    if (made === null || !Array.isArray(run) || run.length < 2 || run.length > 3) continue;
-    const anchor = parseAnchor(run[0]);
-    if (anchor === null || run[0] === END || (anchor.elem !== null && anchor.elem.ts >= made.ts)) continue;
-    const content = normalizeRle(kind, run[1]);
-    // A run is the elements one splice inserted: one of no slots is nobody's (and has no last span).
-    if (content === null || rleLength(content) === 0) continue;
-    if (run.length === 3 && (kind !== 'l' || !isElemKey(run[2]) || rleLength(content) !== 1)) continue;
-    slots += rleLength(content);
-    if (slots > MAX_FIELD) return null;
-    seq.runs[key] = run.length === 3 ? [run[0], content, run[2]] : [run[0], content];
-    runs++;
-  }
-  const cutKeys = keysOf(raw.cuts);
-  for (let k = 0; k < cutKeys.length; k++) {
-    const key = cutKeys[k];
-    const given = raw.cuts[key];
-    if (!isRunKey(key) || !Array.isArray(given)) continue;
-    const list = [];
-    for (let i = 0; i < given.length; i++) {
-      const r = given[i];
-      if (Array.isArray(r) && r.length === 2 && Number.isInteger(r[0]) && r[0] >= 0 && isGap(r[1])) {
-        list.push([r[0], r[1]]);
-      }
-    }
-    if (list.length > 0) (seq.cuts ??= {})[key] = list;
-  }
-  const extKeys = keysOf(raw.ext);
-  for (let k = 0; k < extKeys.length; k++) {
-    const key = extKeys[k];
-    if (!isRunKey(key) || !Array.isArray(raw.ext[key])) continue;
-    const list = [];
-    const items = raw.ext[key];
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      if (!Array.isArray(item) || item.length !== 2 || !Number.isInteger(item[0]) || item[0] < 0) continue;
-      const content = present(kind, item[1]) && item[1].length > 0 ? (isText(kind) ? item[1] : item[1].slice()) : null;
-      // An extension that would take its run past MAX_RUN never lands: left out, as the op would be refused.
-      if (content === null || item[0] + content.length > MAX_RUN) continue;
-      slots += content.length;
-      if (slots > MAX_FIELD) return null;
-      list.push([item[0], content]);
-    }
-    if (list.length > 0) (seq.ext ??= {})[key] = list;
-  }
-  const register = (raw2, check) => {
-    const out = {};
-    let n = 0;
-    const keys = keysOf(raw2);
-    for (let i = 0; i < keys.length; i++) {
-      const key = keys[i];
-      const v = raw2[key];
-      if (isElemKey(key) && Array.isArray(v) && v.length === 3 && isStamp(v[0]) && isOrigin(v[1]) && check(v[2])) {
-        out[key] = [v[0], v[1], v[2]];
-        n++;
-      }
-    }
-    return n > 0 ? out : null;
-  };
-  if (kind === 'l') {
-    const pos = register(raw.pos, isRunKey);
-    if (pos) seq.pos = pos;
-  }
-  const vals = register(raw.vals, isJson);
-  if (vals) seq.vals = vals;
-  if (kind === 't') {
-    const marks = {};
-    let n = 0;
-    const markKeys = keysOf(raw.marks);
-    for (let i = 0; i < markKeys.length; i++) {
-      const key = markKeys[i];
-      const m = raw.marks[key];
-      const made = parseRun(key);
-      if (made === null || !Array.isArray(m) || m.length !== 5) continue;
-      const from = parseAnchor(m[0]);
-      const to = parseAnchor(m[1]);
-      if (from === null || to === null || typeof m[2] !== 'string' || !isJson(m[3])) continue;
-      if ((from.elem !== null && from.elem.ts >= made.ts) || (to.elem !== null && to.elem.ts >= made.ts)) continue;
-      if (!Number.isInteger(m[4]) || m[4] < 0 || m[4] > 3) continue;
-      marks[key] = [m[0], m[1], m[2], m[3], m[4]];
-      n++;
-      // More marks than a text holds: a block no peer could have built through ops.
-      if (n > MAX_MARKS) return null;
-    }
-    if (n > 0) seq.marks = marks;
-  }
-  const empty = runs === 0 && !seq.cuts && !seq.ext && !seq.marks && !seq.pos && !seq.vals;
-  if (empty) return null;
-  return seq;
-};
-
-// The newest stamp a plain block holds — its runs, registers and marks.
-const stampsMax = (seq) => {
-  let ts = 0;
-  const runKeys = Object.keys(seq.runs);
-  for (let i = 0; i < runKeys.length; i++) ts = Math.max(ts, parseRun(runKeys[i]).ts);
-  for (const map of ['pos', 'vals']) {
-    const keys = keysOf(seq[map]);
-    for (let i = 0; i < keys.length; i++) ts = Math.max(ts, seq[map][keys[i]][0]);
-  }
-  const markKeys = keysOf(seq.marks);
-  for (let i = 0; i < markKeys.length; i++) ts = Math.max(ts, parseRun(markKeys[i]).ts);
-  return ts;
-};
 
 // ---- the rope: hydration ----------------------------------------------------------------------------
 
@@ -1561,8 +1353,6 @@ module.exports = {
   SPAN,
   keyOf,
   intern,
-  copyRun,
-  createBlock,
   plainOf,
   createSeq,
   normalizeJson,

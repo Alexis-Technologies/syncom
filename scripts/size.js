@@ -325,7 +325,9 @@ const ENTRIES = [
   // 131.1 with the engine's bounds (E1, above) and the write path's, the handle's and the log's fixes (E2–E9) in one
   // bundle. 131.5, raised by name — M-3/M-6 (the folds written once, the two B+-trees sharing their node code) are
   // what should give some of it back.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 131.5 },
+  // 131.5 (over by bytes) with state.js split where its seams are clean — the names (src/text/names.js) and a peer's
+  // block normalized (src/text/normalize.js), names across modules unminified (review №4, M-4). 132, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 132 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).

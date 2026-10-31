@@ -255,4 +255,4 @@ const sizeOf = (root) => {
   return n;
 };
 
-module.exports = { MAX, EMPTY, get, floor, set, wasAdded, remove, fromSorted, seek, next, sizeOf };
+module.exports = { EMPTY, get, floor, set, wasAdded, remove, fromSorted, seek, next, MAX, sizeOf }; // MAX, sizeOf: for the tests alone

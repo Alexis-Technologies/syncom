@@ -391,23 +391,22 @@ const splice = (list, c, i, remove, entries) => {
 };
 
 module.exports = {
-  fnv,
-  hashOf,
-  Pair,
   EMPTY,
   get,
-  has,
   set,
   remove,
   pairs,
-  walkOrderOf,
-  CHUNK,
-  List,
   EMPTY_LIST,
   listOf,
-  entriesOf,
-  last,
   floorEntry,
   at,
   splice,
+  // For the tests alone.
+  fnv,
+  hashOf,
+  has,
+  walkOrderOf,
+  CHUNK,
+  entriesOf,
+  last,
 };
