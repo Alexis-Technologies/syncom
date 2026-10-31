@@ -98,20 +98,48 @@ const apply = (entry, field, held, op, stamp, limits) => {
 
 // The stretches of the reading a splice's cut ranges cover in `held`, last
 // first: a cut range of a run is as many stretches as others inserted
-// inside it.
+// inside it. The ranges of one run are merged first — a peer's cut may name
+// a stretch twice, or ranges that overlap — so the report says what was
+// cut, once. A cut past MAX_CUTS is the engine's to refuse: nothing read.
 const cutSpansOf = (held, cut) => {
-  if (!Array.isArray(cut)) return null;
+  if (!Array.isArray(cut) || cut.length > S.MAX_CUTS) return null;
   const cuts = [];
-  for (let i = 0; i < cut.length; i++) {
-    // A peer's range of another shape is the engine's to refuse (malformed), never a throw here.
-    const range = cut[i];
-    if (!Array.isArray(range) || typeof range[0] !== 'string') continue;
-    const spans = S.spansOf(held, range[0], range[1], range[2]);
+  const ranges = mergedRanges(cut);
+  for (let i = 0; i < ranges.length; i++) {
+    const spans = S.spansOf(held, ranges[i][0], ranges[i][1], ranges[i][2]);
     if (spans !== null) for (let k = 0; k < spans.length; k++) cuts.push(spans[k]);
   }
   cuts.sort((x, y) => y.index - x.index);
   return cuts;
 };
+
+// The ranges of a cut by run, each run's in offset order and merged where
+// they overlap (two that only meet stay two stretches: a chain of cuts
+// coalesced into one op reports each). A peer's range of another shape is
+// left out: the engine refuses the op as malformed, never a throw here.
+const mergedRanges = (cut) => {
+  const byRun = new Map();
+  for (let i = 0; i < cut.length; i++) {
+    const range = cut[i];
+    if (!Array.isArray(range) || typeof range[0] !== 'string') continue;
+    if (typeof range[1] !== 'number' || typeof range[2] !== 'number') continue;
+    const list = byRun.get(range[0]);
+    if (list === undefined) byRun.set(range[0], [range]);
+    else list.push(range);
+  }
+  const out = [];
+  for (const list of byRun.values()) {
+    if (list.length > 1) list.sort(byOffset);
+    let last = null;
+    for (let i = 0; i < list.length; i++) {
+      const [key, offset, length] = list[i];
+      if (last !== null && offset < last[1] + last[2]) last[2] = Math.max(last[2], offset + length - last[1]);
+      else out.push((last = [key, offset, length]));
+    }
+  }
+  return out;
+};
+const byOffset = (x, y) => x[1] - y[1];
 
 // The marks over the character at `index` of a block: what an insert's run
 // reads as — it lands whole, inside or outside each mark, so one style.
@@ -263,9 +291,11 @@ const revisionOf = (entry, field) => {
 // and `b` only cut and every run `b` cuts is older than `a` (an honest
 // cutter: `a`'s stamp must still be above them). Never an insert and a cut
 // of it, never `b` with markers, never a list (its content would be copied
-// whole again by every keystroke), and at most MAX_CUTS ranges. The two are
-// of one stream: their own references name one origin, compact or in full.
-const MAX_CUTS = 256;
+// whole again by every keystroke), and at most COALESCE_CUTS ranges — a bound
+// on how far one op grows (each fold copies the ranges again), far below the
+// engine's MAX_CUTS on a cut. The two are of one stream: their own references
+// name one origin, compact or in full.
+const COALESCE_CUTS = 256;
 const coalesce = (a, b) => {
   if (a.type !== 'splice' || b.type !== 'splice') return null;
   const x = a.value;
@@ -279,7 +309,7 @@ const coalesce = (a, b) => {
     return { ...x, content: x.content + y.content };
   }
   if (x.content.length > 0 || x.cut === undefined || y.cut === undefined) return null;
-  if (x.cut.length + y.cut.length > MAX_CUTS) return null;
+  if (x.cut.length + y.cut.length > COALESCE_CUTS) return null;
   for (let i = 0; i < y.cut.length; i++) {
     const ref = y.cut[i][0];
     const ts = typeof ref === 'number' ? ref : (S.parseRun(ref)?.ts ?? Infinity);

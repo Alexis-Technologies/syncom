@@ -14,6 +14,7 @@ const { MAX_RUN, isText, present, isGap, rleAppend, rleCut, sameRle } = require(
 const {
   END,
   MAX_FIELD,
+  MAX_CUTS,
   byOrigin,
   elemKey,
   isElemKey,
@@ -637,6 +638,8 @@ const applySplice = (given, stamp, payload, base = null, pendingMax = PENDING_MA
   if (content === undefined || !present(seq.k, content)) return malformed(seq);
   const inserting = content.length > 0;
   if (cut !== undefined && !Array.isArray(cut)) return malformed(seq);
+  // The ranges bounded before one of them is read: a peer's cut costs what its length says.
+  if (cut !== undefined && cut.length > MAX_CUTS) return refused(seq, 'cuts', cut.length, MAX_CUTS);
   if (!inserting && (cut === undefined || cut.length === 0)) return malformed(seq);
   if (!inserting && (at !== undefined || run !== undefined)) return malformed(seq);
   if (inserting && (at === undefined) === (run === undefined)) return malformed(seq);

@@ -15,6 +15,13 @@ const { compareClock } = require('../vector.js');
 // MAX_RUN, src/text/rle.js's): a gap is the one thing a peer could make expensive
 // for nothing. A field at MAX_FIELD takes nothing more until a reset.
 const MAX_FIELD = 1 << 22;
+// One splice cuts at most MAX_CUTS ranges — a range per stretch of a run
+// `rangesOf` lays, so a delete across more runs than that is refused (in
+// parts, or after `compact()`, it goes). Read before any range is, so a
+// peer's cut costs what its length says and never more than this. The
+// coalescing of cuts (src/text/kind.js) has a bound of its own on an op's
+// growth, much lower; this one is the engine's.
+const MAX_CUTS = 1 << 16;
 
 // Keys: a run is `ts:origin` (the op that created it), an element
 // `ts:offset:origin` — the offset in the middle so two indexOf calls parse
@@ -106,6 +113,7 @@ const below = (key, base) => {
 
 module.exports = {
   MAX_FIELD,
+  MAX_CUTS,
   isOrigin,
   runKey,
   elemKey,

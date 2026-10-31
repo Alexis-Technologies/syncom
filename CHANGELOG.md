@@ -1077,6 +1077,12 @@ and one `commit` event, not one per call.
   carrying `['>1:4:A', []]` was taken, and the first `{ run, from: 0 }` on that run reached for a last
   span it did not have — a `TypeError` out of `applyOp`, so the peer's page failed on every retry. Such
   a run is left out where a peer's block is normalized, and an extension of one is malformed (OPS-12).
+- **A peer's cut was unbounded, and a range named twice was reported twice.** The ranges of a splice's
+  `cut` were read one by one before the engine saw the op — two thousand copies of one range made two
+  thousand changes — and `[[r, 0, 5], [r, 0, 5], [r, 2, 5]]` on `hello world` cut seven characters and
+  reported fifteen. A cut of more than `MAX_CUTS` (65 536) ranges is refused as `bound` (`detail:
+  'cuts'`) before any range is read, and the change report merges the ranges of one run: what was cut,
+  once (BOUND-5). The coalescing of cuts keeps its own, lower bound on how far one op grows.
 - **A peer's splice whose cut was shaped otherwise stopped its page.** A cut of `[null]`, `[5]` or
   `[[null, 0, 1]]` threw out of `applyOp` before the engine could refuse it, so `applyRemote()`
   failed the whole page and the peer's stream stalled there on every retry. It is refused as

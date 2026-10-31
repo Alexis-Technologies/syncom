@@ -1554,6 +1554,63 @@ test('ops: a peer’s block of any shape merges without a throw, and every op af
   }
 });
 
+test('ops: a splice’s cut is bounded and its report says what was cut: duplicates once, past MAX_CUTS refused', () => {
+  const S = require('../src/text/sequence.js');
+  const splice = (ts, origin, seq, value) => op('splice', ts, origin, { seq, key: 'body', value });
+  const base = applyOp(null, splice(1, 'A', 1, { at: '^', content: 'hello world' })).entry;
+  // Duplicate and overlapping ranges: seven characters go, and the report says seven, once.
+  const ranges = [
+    ['1:A', 0, 5],
+    ['1:A', 0, 5],
+    ['1:A', 2, 5],
+  ];
+  const twice = applyOp(base, splice(2, 'B', 1, { cut: ranges, content: '' }));
+  assert.strictEqual(twice.entry.data.body, 'orld');
+  assert.deepStrictEqual(twice.changes, [{ action: 'splice', index: 0, count: 7, field: 'body' }]);
+  // Two thousand copies of one range: one change, the five characters once.
+  const copies = [];
+  for (let i = 0; i < 2000; i++) copies.push(['1:A', 0, 5]);
+  const many = applyOp(base, splice(3, 'B', 1, { cut: copies, content: '' }));
+  assert.strictEqual(many.entry.data.body, ' world');
+  assert.deepStrictEqual(many.changes, [{ action: 'splice', index: 0, count: 5, field: 'body' }]);
+  // Past MAX_CUTS: a bound refusal before any range is read; the field as it was. At the bound, taken.
+  const over = [];
+  for (let i = 0; i <= S.MAX_CUTS; i++) over.push(['1:A', 0, 5]);
+  const refused = applyOp(base, splice(4, 'B', 1, { cut: over, content: '' }));
+  const bound = { field: 'body', reason: 'bound', detail: 'cuts', count: S.MAX_CUTS + 1, max: S.MAX_CUTS };
+  assert.deepStrictEqual([refused.changed, refused.rejected, refused.changes], [false, [bound], []]);
+  assert.strictEqual(refused.entry.data.body, 'hello world');
+  const at = applyOp(base, splice(5, 'B', 1, { cut: over.slice(1), content: '' }));
+  assert.deepStrictEqual([at.changed, at.entry.data.body], [true, ' world']);
+  // Overlapping ranges of two runs, one inserted inside the other: each run's merged, each stretch of
+  // the reading once, in the indices before, last first.
+  let entry = base;
+  entry = applyOp(entry, splice(6, 'C', 1, { at: '<1:5:A', content: 'XY' })).entry;
+  assert.strictEqual(entry.data.body, 'helloXY world');
+  const mixed = [
+    ['1:A', 3, 2],
+    ['6:C', 0, 2],
+    ['1:A', 4, 3],
+    ['6:C', 1, 1],
+  ];
+  const across = applyOp(entry, splice(7, 'B', 2, { cut: mixed, content: '' }));
+  assert.strictEqual(across.entry.data.body, 'helorld');
+  assert.deepStrictEqual(across.changes, [
+    { action: 'splice', index: 7, count: 2, field: 'body' },
+    { action: 'splice', index: 5, count: 2, field: 'body' },
+    { action: 'splice', index: 3, count: 2, field: 'body' },
+  ]);
+  // Two ranges that only meet stay two changes: a chain of cuts coalesced into one op reports each.
+  const chain = [
+    ['1:A', 4, 1],
+    ['1:A', 3, 1],
+  ];
+  assert.deepStrictEqual(applyOp(base, splice(8, 'B', 1, { cut: chain, content: '' })).changes, [
+    { action: 'splice', index: 4, count: 1, field: 'body' },
+    { action: 'splice', index: 3, count: 1, field: 'body' },
+  ]);
+});
+
 test('ops: an extension parked past MAX_RUN is refused as bound; what landed reads the same from its snapshot', () => {
   const S = require('../src/text/sequence.js');
   const splice = (ts, origin, seq, value) => op('splice', ts, origin, { seq, key: 'body', value });

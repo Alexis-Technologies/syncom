@@ -140,6 +140,7 @@ const { PENDING_MAX } = require('../plugin.js');
 const { MAX_RUN, rleLength, rleAppend, rleCut, rleMerge, normalizeRle } = require('./rle.js');
 const {
   MAX_FIELD,
+  MAX_CUTS,
   HEAD,
   END,
   runKey,
@@ -199,6 +200,7 @@ module.exports = {
   indexOf,
   MAX_RUN,
   MAX_FIELD,
+  MAX_CUTS,
   HEAD,
   END,
   runKey,
