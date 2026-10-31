@@ -17,7 +17,7 @@
 // seq before it follows another branch: both are equivocation, refused at
 // src/apply.js `admit`.
 
-const { hashOf } = require('./crypto/digest.js');
+const { hashOf, hashText } = require('./crypto/digest.js');
 const { canonical } = require('./shape.js');
 
 const HEADER_VERSION = 1;
@@ -54,11 +54,52 @@ const headerOf = (op) => [
   op.prev ?? null,
 ];
 
-const signedMessage = (op) => JSON.stringify(headerOf(op));
+// The header as JSON text: what a signature covers, what the fingerprint
+// hashes, and what a log line holds of the op (src/log.js) — made once.
+const headerText = (op) => JSON.stringify(headerOf(op));
+const signedMessage = headerText;
 
 // SHA-256 as hex — a string in Node.js, a promise in the browser: await it.
 const digestOf = (nonce, payload) => hashOf(`${nonce}\n${canonical(payload)}`);
-const fingerprintOf = (op) => hashOf(headerOf(op));
+const fingerprintOf = (op) => hashText(headerText(op));
+
+// The header's fields after its version, in its order: what `opOf` reads back.
+const FIELDS = ['origin', 'seq', 'ts', 'type', 'id', 'scope', 'from', 'v', 'actor', 'digest', 'msg', 'prev'];
+const KNOWN = new Set([...FIELDS, ...PAYLOAD]);
+
+// What of an op is in neither its header nor its payload — the signature,
+// the nonce — or null.
+const restOf = (op) => {
+  let rest = null;
+  for (const key of Object.keys(op)) {
+    if (KNOWN.has(key)) continue;
+    (rest ??= {})[key] = op[key];
+  }
+  return rest;
+};
+
+// An op made whole from a header, a payload and the rest, as a log line
+// holds them (src/log.js): null when the header is not one of this
+// version. A field absent from the op is null in the header, and absent
+// again here.
+const opOf = (header, payload, rest) => {
+  if (!Array.isArray(header) || header[0] !== HEADER_VERSION || header.length !== FIELDS.length + 1) return null;
+  const op = {};
+  for (let i = 0; i < FIELDS.length; i++) {
+    const value = header[i + 1];
+    if (value !== null) op[FIELDS[i]] = value;
+  }
+  if (payload !== null && typeof payload === 'object') {
+    for (let i = 0; i < PAYLOAD.length; i++) {
+      const name = PAYLOAD[i];
+      if (payload[name] !== undefined) op[name] = payload[name];
+    }
+  }
+  if (rest !== null && typeof rest === 'object') {
+    for (const key of Object.keys(rest)) if (key !== '__proto__') op[key] = rest[key];
+  }
+  return op;
+};
 
 // What a scrub takes from an op, in place: its payload and the nonce that
 // salted its digest. The header, the digest and the signature stay — a
@@ -82,4 +123,16 @@ const digest = async (op) => {
   op.digest = await digestOf(op.nonce, payload);
 };
 
-module.exports = { HEADER_VERSION, payloadOf, headerOf, signedMessage, digestOf, fingerprintOf, digest, scrubOp };
+module.exports = {
+  HEADER_VERSION,
+  payloadOf,
+  headerOf,
+  headerText,
+  restOf,
+  opOf,
+  signedMessage,
+  digestOf,
+  fingerprintOf,
+  digest,
+  scrubOp,
+};

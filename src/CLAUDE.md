@@ -32,7 +32,9 @@ src/crypto/keys.js        loadKeyPair — the on-disk key pairs (RSA for sealing
 src/crypto/pem.js         base64/PEM helpers over btoa/atob for the browser crypto halves of signing and encryption — no requires
 src/scope.js              GLOBAL_SCOPE, inScope, opInScope — the one definition of "in scope" — no requires
 src/blame.js              lastEditorOf, editorsOf — who wrote what, from a record's meta (registers' clocks, counters' sums, sets' slots, the plugins' `editors` hook); never the log
-src/hash.js               xxHash32 in pure JS — the checksum every log file carries (`{ entries, hash }`); a checksum, never a signature — no requires
+src/hash.js               xxHash32 in pure JS — what `anonymize` hashes a string by (src/inspect/inspect.js); a checksum, never a signature — no requires
+src/crc32.js              CRC-32 of a string's UTF-8, 8 hex digits — the checksum every log file carries; zlib's in Node.js, the table of
+                          src/crc32.browser.js where it is absent and in the browser (package.json#browser)
 src/header.js             what names an op, the core's: the header (v1, `prev` last), payloadOf, the salted digest every node mints
                           (`digest`), the fingerprint (SHA-256 of the header) — requires digest.js and shape.js only (the signing subpath
                           ships it); `link` in src/commit.js sets an op's `prev` from the op before it in its stream
@@ -393,8 +395,11 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   stream stays, `REWOUND` says `adopted: {}` and `peer.rewound` keeps it from
   that host until the next hello. Never adopt a host's word on own keys.
 - **A log file is whole or it is nothing.** `fileOf`/`readFile` in src/log.js
-  are the ONLY writer and reader of a log file's text: `{ entries, hash }`,
-  the hash xxHash32 (src/hash.js) of the entries' JSON; a mismatch is
+  are the ONLY writer and reader of a log file's text: `{"e":[…],"c":"…"}`,
+  the entries positional (`[seq, fp, header, payload, rest?, flags?]` — the header the
+  text `link` fingerprinted, handed to `log.enqueue` as `headers`; `opOf` in src/header.js
+  reads an op back) and `c` the CRC-32 (src/crc32.js) of their text, last, checked BEFORE
+  they are parsed; a mismatch is
   `log.segment.unreadable`/`log.open.unreadable` with `reason: 'checksum'`,
   counted in `corrupt`, never read in part — an open group file so is moved to `log/corrupt/`,
   never deleted; a read that fails other than ENOENT fails the open (`readOrNull`, `CORRUPT`). A file without a hash is not

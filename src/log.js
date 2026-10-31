@@ -45,11 +45,11 @@
 
 const defaultFsi = require('./fsi.js');
 const { formatEventId, parseEventId, vectorAdvance, opKey } = require('./vector.js');
-const { checksum } = require('./hash.js');
+const { crc32 } = require('./crc32.js');
 const { GLOBAL_SCOPE, inScope } = require('./scope.js');
 const { writerOf, traced, now } = require('./telemetry/writer.js');
 const { SyncomError } = require('./errors.js');
-const { scrubOp } = require('./header.js');
+const { scrubOp, payloadOf, headerText, restOf, opOf } = require('./header.js');
 
 const OPEN = 'open';
 const CORRUPT = 'corrupt';
@@ -72,13 +72,61 @@ const parseJson = (text) => {
   }
 };
 
-// A log file: its entries and their checksum (xxHash32 of the entries'
-// JSON), so a torn or altered file is told from a whole one at open. A file
-// without one is not whole.
-const fileOf = (entries) => {
-  const text = JSON.stringify(entries);
-  return `{"entries":${text},"hash":"${checksum(text)}"}`;
+// An entry as a log file holds it: `[seq, fp, header, payload, rest,
+// flags]` — the op's header as src/header.js writes it (the text its
+// fingerprint hashed: handed in where the writer has it, made here where it
+// has not), its payload, the rest of the op (a signature, a nonce) and the
+// entry's flags (`skipped`, `held`, `scrubbed`), the last two left out when
+// there is nothing in them. An absent fingerprint is null.
+const entryText = (entry, header) => {
+  const { op } = entry;
+  const payload = payloadOf(op);
+  const rest = restOf(op);
+  let flags = null;
+  if (entry.skipped === true) (flags ??= {}).skipped = true;
+  if (entry.held !== undefined) (flags ??= {}).held = entry.held;
+  if (entry.scrubbed === true) (flags ??= {}).scrubbed = true;
+  const fp = entry.fp === undefined ? 'null' : JSON.stringify(entry.fp);
+  let text = `[${entry.seq},${fp},${header ?? headerText(op)},${payload === null ? 'null' : JSON.stringify(payload)}`;
+  if (rest !== null || flags !== null) text += `,${rest === null ? 'null' : JSON.stringify(rest)}`;
+  if (flags !== null) text += `,${JSON.stringify(flags)}`;
+  return `${text}]`;
 };
+
+// An entry read back, or null for a value of another shape.
+const entryOf = (value) => {
+  if (!Array.isArray(value) || value.length < 4 || value.length > 6 || !Number.isSafeInteger(value[0])) return null;
+  const op = opOf(value[2], value[3], value[4] ?? null);
+  if (op === null) return null;
+  const entry = { seq: value[0], op };
+  if (typeof value[1] === 'string') entry.fp = value[1];
+  const flags = value[5];
+  if (flags !== undefined && flags !== null) {
+    if (flags.skipped === true) entry.skipped = true;
+    if (flags.held !== undefined) entry.held = flags.held;
+    if (flags.scrubbed === true) entry.scrubbed = true;
+  }
+  return entry;
+};
+
+// A log file — a journal line, an open group's file, a segment — is its
+// entries and the CRC-32 of their text: `{"e":[…],"c":"<8 hex>"}`, the
+// checksum last, at a place known from the end, so it is checked BEFORE the
+// entries are parsed. A torn or altered file is told from a whole one at
+// open; a file without its checksum is not whole. `headers` (beside
+// `entries`) are the header texts a writer made already.
+const fileOf = (entries, headers = null) => {
+  let text = '[';
+  for (let i = 0; i < entries.length; i++) {
+    if (i > 0) text += ',';
+    text += entryText(entries[i], headers === null ? undefined : headers[i]);
+  }
+  text += ']';
+  return `{"e":${text},"c":"${crc32(text)}"}`;
+};
+const FILE_HEAD = '{"e":';
+// `,"c":"` + 8 hex digits + `"}`.
+const FILE_TAIL = 16;
 // A file the listing or the index names that is not there — removed
 // between the two — reads as nothing. Any other failure to read it (EIO,
 // EMFILE, a quota) fails the open: one that went on without it could hand
@@ -105,13 +153,29 @@ const indexOf = (index) => {
 };
 const isMap = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 
+const MALFORMED = Object.freeze({ entries: null, reason: 'malformed' });
+const ALTERED = Object.freeze({ entries: null, reason: 'checksum' });
+// A text that is not a whole file: torn on the way down when it does not
+// read as JSON, altered (a file without its checksum is not whole) when it
+// does.
+const unwhole = (text) => (typeof text === 'string' && parseJson(text) !== null ? ALTERED : MALFORMED);
 const readFile = (text) => {
-  const parsed = text === null ? null : parseJson(text);
-  if (!parsed || !Array.isArray(parsed.entries)) return { entries: null, reason: 'malformed' };
-  if (typeof parsed.hash !== 'string' || checksum(JSON.stringify(parsed.entries)) !== parsed.hash) {
-    return { entries: null, reason: 'checksum' };
+  if (typeof text !== 'string' || text.length < FILE_HEAD.length + FILE_TAIL || !text.startsWith(FILE_HEAD)) {
+    return unwhole(text);
   }
-  return { entries: parsed.entries, reason: null };
+  const tail = text.length - FILE_TAIL;
+  if (!text.startsWith(',"c":"', tail) || !text.endsWith('"}')) return unwhole(text);
+  const body = text.slice(FILE_HEAD.length, tail);
+  if (crc32(body) !== text.slice(tail + 6, tail + 14)) return ALTERED;
+  const parsed = parseJson(body);
+  if (!Array.isArray(parsed)) return MALFORMED;
+  const entries = [];
+  for (let i = 0; i < parsed.length; i++) {
+    const entry = entryOf(parsed[i]);
+    if (entry === null) return MALFORMED;
+    entries.push(entry);
+  }
+  return { entries, reason: null };
 };
 
 // Whether the ascending `seqs` hold one in [from, to].
@@ -794,7 +858,10 @@ class OpLog {
    * in it, so an append makes no promise of its own. `onDurable` runs once
    * the group is durable, before `done` settles, in append order.
    */
-  enqueue(ops, { skipped = null, held = null, ready = null, fps = null, scrubbed = null, onDurable = null } = {}) {
+  enqueue(
+    ops,
+    { skipped = null, held = null, ready = null, fps = null, headers = null, scrubbed = null, onDurable = null } = {},
+  ) {
     const entries = [];
     if (ops.length === 0) return { entries, done: DONE };
     const group = (this.#group ??= this.#newGroup());
@@ -812,6 +879,14 @@ class OpLog {
       const fp = fps === null ? undefined : byIndex ? fps[i] : fps.get(op);
       entries.push(entry);
       group.entries.push(entry);
+      // The header texts a writer made (`link`): the group's line takes them as they are.
+      if (headers !== null) {
+        if (group.headers === null) {
+          group.headers = [];
+          for (let k = 0; k < group.entries.length - 1; k++) group.headers.push(undefined);
+        }
+        group.headers.push(headers[i]);
+      } else if (group.headers !== null) group.headers.push(undefined);
       const stream = opKey(op);
       if (!group.undo.has(stream)) {
         group.undo.set(stream, Object.hasOwn(this.#vector, stream) ? this.#vector[stream] : undefined);
@@ -852,6 +927,8 @@ class OpLog {
       // for every group — thousands of streams on a hub, for each append.
       undo: new Map(),
       heads: new Map(),
+      // Beside `entries`, where an append handed its header texts in; null where none did.
+      headers: null,
       durable: null,
       resolve: null,
       reject: null,
@@ -894,10 +971,10 @@ class OpLog {
       if (group.ready.length > 0) await Promise.all(group.ready);
       if (this.#journaled) {
         file = this.#journal ??= this.#journalName(first);
-        await this.#fsi.append(this.#openPath, file, `${fileOf(entries)}\n`);
+        await this.#fsi.append(this.#openPath, file, `${fileOf(entries, group.headers)}\n`);
       } else {
         file = `${pad(first)}.json`;
-        await this.#fsi.write(this.#openPath, file, fileOf(entries));
+        await this.#fsi.write(this.#openPath, file, fileOf(entries, group.headers));
       }
     } catch (error) {
       // What a failed append left of its line stays at the end of its
@@ -1434,4 +1511,7 @@ const appliedHere = (entry, version) =>
 module.exports = {
   OpLog,
   appliedHere,
+  // A log file's text, written and read: for the tests that alter one.
+  fileOf,
+  readFile,
 };

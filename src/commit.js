@@ -12,7 +12,8 @@
 const { applyOp, isAlive, latestHeld, observedTags, kindOf, kindsOf } = require('./ops.js');
 const { missing } = require('./plugin.js');
 const { opKey } = require('./vector.js');
-const { digest, fingerprintOf } = require('./header.js');
+const { digest, headerText } = require('./header.js');
+const { hashText } = require('./crypto/digest.js');
 const { ValidationError } = require('./errors.js');
 const { project, unproject, foldSet } = require('./schema/entity.js');
 const { fieldName } = require('./args.js');
@@ -340,6 +341,7 @@ const applyLocal = (core, op, current) => {
  */
 const link = async (ops, held, signs) => {
   const fps = [];
+  const headers = [];
   // The newest op of each stream in `ops` so far: kept only for several.
   let last = null;
   for (let i = 0; i < ops.length; i++) {
@@ -349,13 +351,16 @@ const link = async (ops, held, signs) => {
     const prev = before !== undefined && before[0] === op.seq - 1 ? before[1] : held(key, op.seq - 1);
     if (prev !== undefined) op.prev = prev;
     if (signs) await digest(op);
+    // The header text once: what the fingerprint hashes and the log line holds.
+    const header = headerText(op);
     // A string in Node.js, a promise in the browser: awaited only there.
-    let fp = fingerprintOf(op);
+    let fp = hashText(header);
     if (typeof fp !== 'string') fp = await fp;
     fps.push(fp);
+    headers.push(header);
     if (ops.length > 1) (last ??= new Map()).set(key, [op.seq, fp]);
   }
-  return fps;
+  return { fps, headers };
 };
 
 // Inside the queue: chained, signed, then appended — the seq reserved, the
@@ -366,7 +371,7 @@ const link = async (ops, held, signs) => {
 // receive is what must verify. The queue is free from here: the disk is
 // waited for outside it.
 const issue = async (core, op, entry) => {
-  const fps = await link([op], core.fingerprintOf, core.sign !== null);
+  const { fps, headers } = await link([op], core.fingerprintOf, core.sign !== null);
   // Alone, the op is signed here; with writes queued behind it, on the
   // thread pool while the queue moves on — the group's file waits for it.
   let ready = null;
@@ -374,7 +379,7 @@ const issue = async (core, op, entry) => {
     if (core.pipelined()) ready = core.sign(op, true);
     else await core.sign(op, false);
   }
-  const ticket = core.log.enqueue([op], { ready, fps });
+  const ticket = core.log.enqueue([op], { ready, fps, headers });
   const position = ticket.entries[0].seq;
   core.inflight(op.id, entry, position);
   return { ticket, position };
@@ -704,8 +709,10 @@ const commitAtOnce = (core, type, id, payload, options, current, answer) => {
   const key = opKey(op);
   const prev = core.fingerprintOf(key, op.seq - 1);
   if (prev !== undefined) op.prev = prev;
+  const header = headerText(op);
   let position = 0;
-  const ticket = core.log.enqueue([op], { fps: [fingerprintOf(op)], onDurable: () => landNow(core, made, position) });
+  const onDurable = () => landNow(core, made, position);
+  const ticket = core.log.enqueue([op], { fps: [hashText(header)], headers: [header], onDurable });
   position = ticket.entries[0].seq;
   core.inflight(id, made.entry, position);
   core.landed(ticket.done);
@@ -879,13 +886,13 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
   // before it in its stream, here or in the log — then signed: on the thread
   // pool when there are several, or writes queued behind; alone and
   // unhurried, here.
-  const fps = await link(ops, core.fingerprintOf, core.sign !== null);
+  const { fps, headers } = await link(ops, core.fingerprintOf, core.sign !== null);
   const signing = core.sign !== null && (count > 1 || core.pipelined()) ? [] : null;
   if (signing !== null) for (let i = 0; i < count; i++) signing.push(core.sign(ops[i], true));
   let ready = null;
   if (signing !== null) ready = Promise.all(signing);
   else if (core.sign !== null) await core.sign(ops[0], false);
-  const ticket = core.log.enqueue(ops, { ready, fps });
+  const ticket = core.log.enqueue(ops, { ready, fps, headers });
   const positions = [];
   for (let i = 0; i < count; i++) positions.push(ticket.entries[i].seq);
   // A record in flight is its newest entry, at its newest position.

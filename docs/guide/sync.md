@@ -235,7 +235,7 @@ log/
 │                             appended while the group before was written); begun again at every roll, removed
 │                             once its groups are sealed, rewritten only by a scrub
 ├── open/<seq>.json           a group in a file of its own, where the backend has no `append` (OPFS, IndexedDB, atRest)
-├── seg-<from>.json           sealed segments, rolled from open/ every `rollAfter` groups: { entries, hash }
+├── seg-<from>.json           sealed segments, rolled from open/ every `rollAfter` groups: {"e":[…],"c":"<crc32>"}
 └── index.json                { epoch, floor, next, vector, heads, segments, droppedHeld, latestTs, droppedTs }
 ```
 
@@ -253,11 +253,12 @@ segments such a reader needs, like `retain` does for the sync manager, until
 the function it returns is called.
 
 Every log file — a sealed segment, an open group, a journal's line —
-carries `hash`, the xxHash32 of its entries' JSON (`src/hash.js`, pure JS,
-no key: a checksum, not a signature): a file torn on the way down or altered
-on disk does not match at open and is treated as unreadable — a segment lost
-and counted in `droppedTs`, an open file or a journal's torn last line
-dropped — and `stats().log.corrupt` counts them.
+carries `c`, the CRC-32 of its entries' text (`src/crc32.js`: zlib's in
+Node.js, a table in the browser; no key: a checksum, not a signature),
+checked before the entries are parsed: a file torn on the way down or
+altered on disk does not match at open and is treated as unreadable — a
+segment lost and counted in `droppedTs`, an open file or a journal's torn
+last line dropped — and `stats().log.corrupt` counts them.
 
 The log has two cursors, for two different questions.
 

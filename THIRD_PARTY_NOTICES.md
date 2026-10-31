@@ -162,8 +162,8 @@ replaces another of its key and goes only by its own id — follow Peritext's
 
 Repository: https://github.com/Cyan4973/xxHash — `doc/xxhash_spec.md` (the
 XXH32 algorithm, read as a specification; no code was copied). `src/hash.js`
-implements XXH32 from it, in JavaScript, for the checksum every log file
-carries. xxHash's code is BSD-2-Clause; its notice, kept here as the
+implements XXH32 from it, in JavaScript, for the hash `anonymize` makes of a
+string (src/inspect/inspect.js). xxHash's code is BSD-2-Clause; its notice, kept here as the
 algorithm's author asks:
 
 > Copyright (c) 2012-2021 Yann Collet

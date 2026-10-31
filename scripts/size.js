@@ -138,7 +138,9 @@ const ENTRIES = [
   // stays: a raise names its feature here.
   // 52.8 with a write made at once (Storage#fastCommit, src/commit.js commitAtOnce, the log's enqueue, events
   // dispatched; 2026-10-31). 53, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 53 },
+  // 53.1 with the log's lines: positional entries, the header text made once, a CRC-32 checked before the
+  // parse (src/crc32.browser.js). 53.5, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 53.5 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check

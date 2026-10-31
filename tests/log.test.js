@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { OpLog } = require('../src/log.js');
+const { OpLog, fileOf, readFile } = require('../src/log.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const { openGroups, withoutAppend } = require('./utils/groups.js');
 const nodeFsi = require('../src/fsi.js');
@@ -161,14 +161,14 @@ test('OpLog', async (t) => {
         await log.close();
         const logDir = path.join(dir, 'log');
         const [segment] = (await fs.readdir(logDir)).filter((name) => name.startsWith('seg-')).sort();
-        const sealed = JSON.parse(await fs.readFile(path.join(logDir, segment), 'utf8'));
-        assert.match(sealed.hash, /^[0-9a-f]{8}$/, 'every file carries its checksum');
-        // Altered on disk: the hash no longer matches, the segment is lost;
-        // an open batch with a wrong hash is dropped.
-        sealed.entries[0].op.data.n = 99;
-        await fs.writeFile(path.join(logDir, segment), JSON.stringify(sealed));
-        const batch = { entries: [{ seq: 6, op: op('A', 6) }], hash: '00000000' };
-        await fs.writeFile(path.join(logDir, 'open', '0000000006.json'), JSON.stringify(batch));
+        const sealed = await fs.readFile(path.join(logDir, segment), 'utf8');
+        assert.match(sealed, /,"c":"[0-9a-f]{8}"\}$/, 'every file carries its checksum, last');
+        // Altered on disk: the checksum no longer matches, the segment is lost;
+        // an open batch with a wrong checksum is dropped.
+        assert.ok(sealed.includes('"data":{"v":1}'));
+        await fs.writeFile(path.join(logDir, segment), sealed.replace('"data":{"v":1}', '"data":{"v":99}'));
+        const batch = fileOf([{ seq: 6, op: op('A', 6) }]).replace(/"c":"[0-9a-f]{8}"/, '"c":"00000000"');
+        await fs.writeFile(path.join(logDir, 'open', '0000000006.json'), batch);
         const reopened = await new OpLog(dir, { rollAfter: 2, logger });
         assert.deepStrictEqual(
           warnings.map((entry) => [entry.event, entry.reason]),
@@ -186,20 +186,17 @@ test('OpLog', async (t) => {
         // The altered open batch was answered once: kept under corrupt/, out of open/.
         assert.deepStrictEqual(await fs.readdir(path.join(logDir, 'corrupt')), ['0000000006.json']);
         assert.ok(!(await fs.readdir(path.join(logDir, 'open'))).includes('0000000006.json'));
-        assert.deepStrictEqual(
-          JSON.parse(await fs.readFile(path.join(logDir, 'corrupt', '0000000006.json'), 'utf8')),
-          batch,
-        );
+        assert.strictEqual(await fs.readFile(path.join(logDir, 'corrupt', '0000000006.json'), 'utf8'), batch);
         assert.strictEqual(reopened.droppedTs, 5, 'an unreadable segment: the newest stamp held, as for a torn one');
         await reopened.close();
-        // A file without a hash is not whole: unreadable like an altered one.
+        // A file without a checksum is not whole: unreadable like an altered one.
         const [last] = (await fs.readdir(logDir))
           .filter((name) => name.startsWith('seg-'))
           .sort()
           .slice(-1);
-        const text = JSON.parse(await fs.readFile(path.join(logDir, last), 'utf8'));
-        delete text.hash;
-        await fs.writeFile(path.join(logDir, last), JSON.stringify(text));
+        const text = await fs.readFile(path.join(logDir, last), 'utf8');
+        assert.strictEqual(readFile(text).reason, null, 'whole before it is altered');
+        await fs.writeFile(path.join(logDir, last), text.replace(/,"c":"[0-9a-f]{8}"\}$/, '}'));
         const hashless = await new OpLog(dir, { rollAfter: 2, logger });
         assert.deepStrictEqual(
           hashless.since(hashless.formatId(0)).map((entry) => entry.seq),
@@ -316,10 +313,10 @@ test('OpLog', async (t) => {
       const logDir = path.join(dir, 'log');
       // Crash mid-roll: the sealed batch is still in open/ too.
       const segment = (await fs.readdir(logDir)).find((name) => name.startsWith('seg-'));
-      const sealed = JSON.parse(await fs.readFile(path.join(logDir, segment), 'utf8'));
-      await fs.writeFile(path.join(logDir, 'open', '0000000001.json'), JSON.stringify(sealed));
+      const sealed = await fs.readFile(path.join(logDir, segment), 'utf8');
+      await fs.writeFile(path.join(logDir, 'open', '0000000001.json'), sealed);
       // Crash mid-append: a torn file for a batch nobody was told about.
-      await fs.writeFile(path.join(logDir, 'open', '0000000009.json'), '{"entries":[{"seq":9,');
+      await fs.writeFile(path.join(logDir, 'open', '0000000009.json'), '{"e":[[9,null,');
 
       const reopened = await new OpLog(dir, { rollAfter: 3, logger });
       assert.strictEqual(reopened.epoch, epoch);
@@ -832,7 +829,7 @@ test('a journal: a line per group, a torn last line left out, a failed line shad
       await log.append([op('A', 3)]);
       const [journal] = await lines(dir);
       // A crash in the middle of the next append: half a line at the end.
-      await fs.appendFile(journal, '{"entries":[{"seq":4,"op":');
+      await fs.appendFile(journal, '{"e":[[4,null,[1,');
       const torn = await new OpLog(dir, { rollAfter: 100, sealApplied: true, logger });
       assert.deepStrictEqual(
         torn.since(undefined).map((entry) => entry.seq),
@@ -1120,9 +1117,7 @@ test('a segment wholly below the floor is a compaction cut short: removed at ope
   const floor = log.floor;
   assert.ok(floor > 1);
   // The file of seqs before the floor comes back (a removal the crash cut short).
-  const { checksum } = require('../src/hash.js');
-  const entries = JSON.stringify([{ seq: 1, op: op('A', 1) }]);
-  await fsi.write('/l/log', 'seg-0000000001.json', `{"entries":${entries},"hash":"${checksum(entries)}"}`);
+  await fsi.write('/l/log', 'seg-0000000001.json', fileOf([{ seq: 1, op: op('A', 1) }]));
   const reopened = await new OpLog('/l', { fsi, rollAfter: 1, retention: { ops: 2 }, logger: false });
   assert.strictEqual(reopened.floor, floor);
   assert.ok(!(await fsi.list('/l/log')).includes('seg-0000000001.json'));

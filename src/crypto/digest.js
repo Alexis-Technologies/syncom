@@ -14,6 +14,9 @@
 const crypto = require('node:crypto');
 
 const hashOf = (data) => crypto.hash('sha256', JSON.stringify(data), 'base64url');
+// The same of a JSON text the caller has made already (an op's header,
+// src/header.js headerText): `hashText(JSON.stringify(x)) === hashOf(x)`.
+const hashText = (text) => crypto.hash('sha256', text, 'base64url');
 const sha256 = async (data) => crypto.hash('sha256', JSON.stringify(data), 'hex');
 
-module.exports = { sha256, hashOf };
+module.exports = { sha256, hashOf, hashText };

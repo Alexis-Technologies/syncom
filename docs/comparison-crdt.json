@@ -1282,8 +1282,8 @@
         },
         "format": {
           "mark": "",
-          "text": "JSON: `{ entries, hash }` log files of keyed `{ seq, op, fp }`; 19-slot arrays on the wire",
-          "source": "src/log.js:54 (fileOf); src/ops.js (packOps); docs/reference/wire.md"
+          "text": "JSON: `{\"e\", \"c\"}` log lines of positional `[seq, fp, header, payload]` entries, CRC-32 checked; 19-slot arrays on the wire",
+          "source": "src/log.js (fileOf); src/sync/wire.js (packOps); docs/reference/wire.md"
         },
         "spec": {
           "mark": "✅",
@@ -1387,8 +1387,8 @@
         },
         "checksums": {
           "mark": "✅",
-          "text": "every log file carries an xxHash32 of its entries; a signed SHA-256 digest per op with `/signing`",
-          "source": "src/log.js:54 (fileOf); src/hash.js:85 (checksum); src/signing/sign.js"
+          "text": "every log file carries a CRC-32 of its entries, checked before they are parsed; a signed SHA-256 digest per op with `/signing`",
+          "source": "src/log.js (fileOf, readFile); src/crc32.js; src/signing/sign.js"
         },
         "malformed": {
           "mark": "✅",

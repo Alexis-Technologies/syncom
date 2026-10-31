@@ -237,18 +237,19 @@ write, no rename):
 | `seg-<from>.json` | A sealed segment: the open groups rolled together once 64 of them accumulate (`log.rollAfter`) |
 | `index.json` | `{ epoch, floor, next, vector, heads, droppedHeld, latestTs, droppedTs }` — what the files cannot say: the epoch, the floor, and the vector, heads and stamps of what compaction dropped; written where compaction dropped something and at a close, not at every roll. The segments are what the directory lists, each read whole; one whose start does not meet the floor or the end of the one before is a file gone (`log.segment.missing`), one wholly below the floor was compacted and is removed |
 
-Every log file is `{ "entries": [...], "hash": "<xxh32>" }` — the
-entries' JSON and its xxHash32 as eight hex characters, computed over the
-same text. A file whose hash does not match is unreadable at open
+Every log file is `{"e":[…],"c":"<crc32>"}` — the entries as a JSON array
+and the CRC-32 (IEEE, zlib's) of that array's text as eight lowercase hex
+characters, last, so it is checked before the entries are parsed. A file
+whose checksum does not match is unreadable at open
 (`log.segment.unreadable`, `reason: 'checksum'`, counted in
 `stats().log.corrupt`, its entries lost — `droppedTs`); an open group file
 that fails its checksum was whole once, so it is moved to `log/corrupt/`
 as the evidence, never deleted; one that does not parse was torn by its
 own write, never acknowledged, and is dropped (`log.open.torn`). A file
-without a hash is not whole: unreadable, as one that fails it. A file that is
-there and cannot be read at all — an I/O error, not a missing file — fails
-`open()` with `CORRUPT`: an open that went on without it could hand its
-seqs out again.
+that reads as JSON without its checksum is not whole: unreadable, as one
+that fails it. A file that is there and cannot be read at all — an I/O
+error, not a missing file — fails `open()` with `CORRUPT`: an open that went
+on without it could hand its seqs out again.
 
 A journal is read line by line, each line a log file of its own. Its last
 line is the one a crash can tear — its group was never acknowledged — and is
@@ -260,15 +261,22 @@ seqs back, and the group that took them went to a newer journal. A later open
 never appends to an older journal.
 
 ```json
-{"entries":[{"seq":2,"op":{"origin":"VLH7Ywu…","seq":2,"ts":1793087684846,"type":"set","id":"p1","v":1,"data":{"title":"Final"},"prev":"SmNVKTkH…","nonce":"1258f80d-…","digest":"CY61ahM3…","sig":"hEvgr7g…"},"fp":"3GmlODml…"}],"hash":"9722285a"}
+{"e":[[2,"9RVv-fuAXZzHa1Pb8qvUNpa1JCBq7OPS8oRQZStR6Uk",[1,"SpxoiDvaETq5phZnW8xiqFUuHuE02PEwU7zVbyZlTRg",2,1793444749744,"set","p1",null,null,null,null,"qqIkTnQuk3S5qeXhLcc2wSgl7PsP5B3y1-aLzm1K8SI",null,"9_aH1aS-vwzSwjXB-g57rcERIjDHzxAEPU6zzY_jJBg"],{"data":{"title":"Final"}},{"nonce":"a5bb053f-fa0c-4155-bc45-d81e1834958c","sig":"2EjzE9cMqvxyZwbyjyh9-7xr6TV9yTuOvvKAt38Dly6YOpx-2R1tqR9rvUM2ZdGSe6lT-6CAEX1RRF4fMCokDQ"}]],"c":"3e6ee2cb"}
 ```
 
-An entry is `{ seq, op, fp }` — `fp` the op's [fingerprint](#the-per-stream-chain),
-taken when it was logged — plus `skipped: true` for a peer's op a
-`beforeApply` hook or a validator declined (accepted into the log, never
-applied here, so a reopen does not apply it either), `held: <version>` for
-an op of a newer schema version kept for the node that runs it, and
-`scrubbed: true` once a purge took its payload. An entry without `fp` is
+An entry is `[seq, fp, header, payload, rest?, flags?]` — `fp` the op's
+[fingerprint](#the-per-stream-chain), taken when it was logged (null when
+none was); `header` the op's [signed header](#the-signed-header), the very
+text its fingerprint hashed (a field the op lacks is null there and absent
+again once read); `payload` its `data`, `meta`, `key`, `value` and `vector`
+(null for none); `rest` what else the op carries — its `sig` and `nonce` —
+and `flags` the entry's: `skipped: true` for a peer's op a `beforeApply`
+hook or a validator declined (accepted into the log, never applied here, so
+a reopen does not apply it either), `held: <version>` for an op of a newer
+schema version kept for the node that runs it, and `scrubbed: true` once a
+purge took its payload. The last two are left out when empty (`rest` is null
+where only `flags` are there). Read back, an entry is `{ seq, op, fp }` and
+its flags again. An entry without `fp` is
 read; its op is then nothing a chain is held to. The index after a clean
 close, with the sixteen ops sealed into one segment — `heads` the stream's
 newest op and its fingerprint, kept once the op itself is compacted away:

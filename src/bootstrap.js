@@ -189,9 +189,9 @@ const mergeBatch = async (core, records, via, from) => {
   // applyOp, and the link and the signature cover it. The joiner signs the
   // host's state as its own — a snapshot record carries no provenance to
   // sign over.
-  const fps = await link(batch.ops, core.fingerprintOf, core.sign !== null);
+  const { fps, headers } = await link(batch.ops, core.fingerprintOf, core.sign !== null);
   if (core.sign !== null) for (const op of batch.ops) await core.sign(op);
-  const ticket = core.log.enqueue(batch.ops, { fps });
+  const ticket = core.log.enqueue(batch.ops, { fps, headers });
   await ticket.done;
   const { entries } = ticket;
   const first = entries[0].seq;
@@ -260,9 +260,9 @@ const adopt = async (core, vector, { via = null, from = null, own = false, proof
   // seqs below are the host's already.
   const key = opKey(op);
   op.seq = Math.max(known[key] ?? 0, news[key] ?? 0) + 1;
-  const fps = await link([op], core.fingerprintOf, core.sign !== null);
+  const { fps, headers } = await link([op], core.fingerprintOf, core.sign !== null);
   if (core.sign !== null) await core.sign(op);
-  const ticket = core.log.enqueue([op], { fps });
+  const ticket = core.log.enqueue([op], { fps, headers });
   await ticket.done;
   const [{ seq }] = ticket.entries;
   await core.log.advance(news);
