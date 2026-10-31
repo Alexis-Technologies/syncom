@@ -80,5 +80,5 @@
 <path class="bar primary" d="M271,261H479.85838579559476A4,4 0 0 1 483.85838579559476,265V271A4,4 0 0 1 479.85838579559476,275H271Z"/>
 <text class="value" x="489.85838579559476" y="274">1,125</text>
 </g>
-<text class="caption" x="20" y="329">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-27</text>
+<text class="caption" x="20" y="329">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-31</text>
 </svg>

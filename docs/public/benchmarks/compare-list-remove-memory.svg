@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="495" viewBox="0 0 760 495" role="img" aria-label="Remove from a list, in memory. Remove the element at a random index, then push one, so the list keeps its length: one op is both. Nothing touches the disk. ops/s, log scale, higher is better. Not shown: TinyBase (no list that merges by position); PouchDB (no list that merges by position); RxDB (no list that merges by position); Fireproof (no list that merges by position); GUN (needs its storage adapter to answer in Node.js); OrbitDB (no list that merges by position).">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .title { font-size: 15px; font-weight: 700; fill: #1b1c1e; }
+  .subtitle, .caption { font-size: 12px; fill: #67676c; }
+  .caption { font-size: 11px; }
+  .group { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; fill: #67676c; }
+  .label { font-size: 13px; font-weight: 600; fill: #1b1c1e; }
+  .label.primary, .label.secondary { font-weight: 700; }
+  .sublabel { font-size: 11px; fill: #67676c; }
+  .value { font-size: 12px; font-weight: 600; fill: #3c3c43; font-variant-numeric: tabular-nums; }
+  .value.small { font-size: 10px; }
+  .legend { font-size: 11px; fill: #3c3c43; }
+  .tick { font-size: 11px; fill: #67676c; font-variant-numeric: tabular-nums; }
+  .grid { stroke: #e4e4e7; stroke-width: 1; }
+  .axis { stroke: #c2c2c4; stroke-width: 1; }
+  .ref { stroke: #67676c; stroke-width: 1; stroke-dasharray: 3 3; }
+  .bar { fill: #c4c6cc; }
+  .bar.primary { fill: #245a9e; }
+  .bar.secondary { fill: #5e9be6; }
+  @media (prefers-color-scheme: dark) {
+    .title, .label { fill: #dfdfd6; }
+    .subtitle, .caption, .group, .sublabel, .tick { fill: #98989f; }
+    .value, .legend { fill: #c2c2c4; }
+    .grid { stroke: #2e2e32; }
+    .axis { stroke: #48484c; }
+    .ref { stroke: #98989f; }
+    .bar { fill: #46474e; }
+    .bar.primary { fill: #8dbcf2; }
+    .bar.secondary { fill: #3d7bd0; }
+  }
+</style>
+<text class="title" x="20" y="35">Remove from a list, in memory</text>
+<text class="subtitle" x="20" y="56">Remove the element at a random index, then push one, so the list keeps its length: one op is both. Nothing</text>
+<text class="subtitle" x="20" y="73">touches the disk. ops/s, log scale, higher is better. Not shown: TinyBase (no list that merges by position);</text>
+<text class="subtitle" x="20" y="90">PouchDB (no list that merges by position); RxDB (no list that merges by position); Fireproof (no list that</text>
+<text class="subtitle" x="20" y="107">merges by position); GUN (needs its storage adapter to answer in Node.js); OrbitDB (no list that merges by</text>
+<text class="subtitle" x="20" y="124">position).</text>
+<line class="grid" x1="372" y1="139" x2="372" y2="419"/>
+<text class="tick" x="372" y="435" text-anchor="middle">1,000</text>
+<line class="grid" x1="473.3333333333333" y1="139" x2="473.3333333333333" y2="419"/>
+<text class="tick" x="473.3333333333333" y="435" text-anchor="middle">10k</text>
+<line class="grid" x1="574.6666666666666" y1="139" x2="574.6666666666666" y2="419"/>
+<text class="tick" x="574.6666666666666" y="435" text-anchor="middle">100k</text>
+<line class="grid" x1="676" y1="139" x2="676" y2="419"/>
+<text class="tick" x="676" y="435" text-anchor="middle">1M</text>
+<line class="axis" x1="372" y1="139" x2="372" y2="419"/>
+<g><title>Loro · LoroDoc, a LoroMap per record · v1.16.4
+238,319 ops/s
+4.2 µs per operation
+samples 230k – 240k
+loro-crdt@1.16.4</title>
+<text class="label" x="20" y="156">Loro</text>
+<text class="sublabel" x="20" y="171">LoroDoc, a LoroMap per record · v1.16.4</text>
+<path class="bar" d="M372,152H608.8853988279066A4,4 0 0 1 612.8853988279066,156V162A4,4 0 0 1 608.8853988279066,166H372Z"/>
+<text class="value" x="618.8853988279066" y="165">238k</text>
+</g>
+<g><title>Loro · LoroDoc, every commit exported (subscribeLocalUpdates) · v1.16.4
+50,261 ops/s
+19.9 µs per operation
+samples 50k – 50.7k
+loro-crdt@1.16.4</title>
+<text class="label" x="20" y="196">Loro</text>
+<text class="sublabel" x="20" y="211">LoroDoc, every commit exported (subscribeLocalUpdates) ·…</text>
+<path class="bar" d="M372,192H540.3915498643806A4,4 0 0 1 544.3915498643806,196V202A4,4 0 0 1 540.3915498643806,206H372Z"/>
+<text class="value" x="550.3915498643806" y="205">50.3k</text>
+</g>
+<g><title>syncom · core + text + sync, memory() · v0.0.1
+11,918 ops/s
+83.9 µs per operation
+samples 11k – 12.3k
+@alexify/syncom@0.0.1</title>
+<text class="label primary" x="20" y="236">syncom</text>
+<text class="sublabel" x="20" y="251">core + text + sync, memory() · v0.0.1</text>
+<path class="bar primary" d="M372,232H477.0534303024116A4,4 0 0 1 481.0534303024116,236V242A4,4 0 0 1 477.0534303024116,246H372Z"/>
+<text class="value" x="487.0534303024116" y="245">11.9k</text>
+</g>
+<g><title>syncom · /all: signed, chained, memory() · v0.0.1
+6,558 ops/s
+152 µs per operation
+samples 6,428 – 6,625
+@alexify/syncom@0.0.1</title>
+<text class="label secondary" x="20" y="276">syncom</text>
+<text class="sublabel" x="20" y="291">/all: signed, chained, memory() · v0.0.1</text>
+<path class="bar secondary" d="M372,272H450.7680426094417A4,4 0 0 1 454.7680426094417,276V282A4,4 0 0 1 450.7680426094417,286H372Z"/>
+<text class="value" x="460.7680426094417" y="285">6,558</text>
+</g>
+<g><title>Yjs · Y.Doc, a Y.Map per record · v13.6.33
+2,411 ops/s
+415 µs per operation
+samples 1,898 – 3,724
+yjs@13.6.33</title>
+<text class="label" x="20" y="316">Yjs</text>
+<text class="sublabel" x="20" y="331">Y.Doc, a Y.Map per record · v13.6.33</text>
+<path class="bar" d="M372,312H406.7384182395939A4,4 0 0 1 410.7384182395939,316V322A4,4 0 0 1 406.7384182395939,326H372Z"/>
+<text class="value" x="416.7384182395939" y="325">2,411</text>
+</g>
+<g><title>Yjs · Y.Doc, every update encoded (an update listener) · v13.6.33
+2,317 ops/s
+432 µs per operation
+samples 1,789 – 3,587
+yjs@13.6.33</title>
+<text class="label" x="20" y="356">Yjs</text>
+<text class="sublabel" x="20" y="371">Y.Doc, every update encoded (an update listener) · v13.6…</text>
+<path class="bar" d="M372,352H404.9739667932686A4,4 0 0 1 408.9739667932686,356V362A4,4 0 0 1 404.9739667932686,366H372Z"/>
+<text class="value" x="414.9739667932686" y="365">2,317</text>
+</g>
+<g><title>Automerge · Automerge.change, Counter · v3.5.0
+1,529 ops/s
+654 µs per operation
+samples 1,357 – 1,917
+@automerge/automerge@3.5.0</title>
+<text class="label" x="20" y="396">Automerge</text>
+<text class="sublabel" x="20" y="411">Automerge.change, Counter · v3.5.0</text>
+<path class="bar" d="M372,392H386.68352072324564A4,4 0 0 1 390.68352072324564,396V402A4,4 0 0 1 386.68352072324564,406H372Z"/>
+<text class="value" x="396.68352072324564" y="405">1,529</text>
+</g>
+<text class="caption" x="20" y="460">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
+<text class="caption" x="20" y="476">in a fresh process · 2026-10-31</text>
+</svg>

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-27T00:30:34.960Z",
+  "generatedAt": "2026-10-31T10:27:16.228Z",
   "machine": {
     "cpu": "Apple M3 Max",
     "cores": 16,
@@ -636,142 +636,207 @@
     {
       "subject": "sequence",
       "name": "applyOp — append one char to a 1 000-char text (one run)",
-      "opsPerSec": 389968
+      "opsPerSec": 371503
     },
     {
       "subject": "sequence",
       "name": "applyOp — insert one char at a random index of a 1 000-char text (one run)",
-      "opsPerSec": 92584
+      "opsPerSec": 87906
     },
     {
       "subject": "sequence",
       "name": "applyOp — replace one char at a random index of a 1 000-char text (a cut, an insert)",
-      "opsPerSec": 115447
+      "opsPerSec": 110295
     },
     {
       "subject": "sequence",
       "name": "applyOp — prepend one char to a 1 000-run text",
-      "opsPerSec": 122760
+      "opsPerSec": 113145
     },
     {
       "subject": "sequence",
       "name": "applyOp — append one char to an older block (a fork: the rope re-hinted)",
-      "opsPerSec": 278533
+      "opsPerSec": 276995
     },
     {
       "subject": "sequence",
       "name": "applyOp — merge two pictures of a 1 000-char text",
-      "opsPerSec": 175
+      "opsPerSec": 224
     },
     {
       "subject": "sequence",
       "name": "hydrate + render — a 1 000-char text from its JSON",
-      "opsPerSec": 301594
+      "opsPerSec": 259333
     },
     {
       "subject": "sequence",
       "name": "hydrate + render — a 100 KB text (one run) from its JSON",
-      "opsPerSec": 12335
+      "opsPerSec": 14066
     },
     {
       "subject": "sequence",
       "name": "applyOp — insert one char at a random index of a 100 KB text (one run)",
-      "opsPerSec": 60453
+      "opsPerSec": 53580
     },
     {
       "subject": "sequence",
       "name": "applyOp — insert one char at a random index of a 100 KB text (10 000 runs)",
-      "opsPerSec": 59629
+      "opsPerSec": 67238
     },
     {
       "subject": "sequence",
       "name": "applyOp — prepend one char to a 10 000-run text",
-      "opsPerSec": 120054
+      "opsPerSec": 99676
     },
     {
       "subject": "sequence",
       "name": "applyOp — replace one char at a random index of a 100 KB text (10 000 runs)",
-      "opsPerSec": 93243
+      "opsPerSec": 84183
     },
     {
       "subject": "sequence",
       "name": "hydrate + render — a 100 KB text (10 000 runs) from its JSON",
-      "opsPerSec": 57
+      "opsPerSec": 50
     },
     {
       "subject": "sequence",
       "name": "spans — 1 000 chars, 50 overlapping marks",
-      "opsPerSec": 6723
+      "opsPerSec": 6868
     },
     {
       "subject": "sequence",
       "name": "applyOp — insert one char mid-text into 20 000 chars under 5 000 marks",
-      "opsPerSec": 42192
+      "opsPerSec": 40950
     },
     {
       "subject": "sequence",
       "name": "applyOp — a mark over 20 000 chars under 5 000 marks",
-      "opsPerSec": 1341
+      "opsPerSec": 1398
     },
     {
       "subject": "sequence",
       "name": "applyOp — setAt in a 50 000-element list",
-      "opsPerSec": 2035
+      "opsPerSec": 4556
     },
     {
       "subject": "sequence",
       "name": "applyOp — move in a 50 000-element list",
-      "opsPerSec": 3969
+      "opsPerSec": 2678
     },
     {
       "subject": "sequence",
       "name": "applyOp — push onto a 50 000-element list",
-      "opsPerSec": 1980
+      "opsPerSec": 4916
+    },
+    {
+      "subject": "sequence",
+      "name": "applyOp — insert at a random index of a 50 000-element list",
+      "opsPerSec": 3425
     },
     {
       "subject": "sequence",
       "name": "applyOp — type into a run 200 000 long, a char inside it read per keystroke",
-      "opsPerSec": 233303
+      "opsPerSec": 246268
     },
     {
       "subject": "sequence",
       "name": "applyOp — the first op on a record read from its JSON (20 000 edits)",
-      "opsPerSec": 19
+      "opsPerSec": 13
     },
     {
       "subject": "sequence",
       "name": "diff — one keystroke in a 1 KB text",
-      "opsPerSec": 284071
+      "opsPerSec": 250673
+    },
+    {
+      "subject": "sequence",
+      "name": "applyOp — the B4 editing trace, every version kept (259 778 edits)",
+      "opsPerSec": 122323
+    },
+    {
+      "subject": "sequence",
+      "name": "applyOp — the B4 trace's ops applied by a replica that starts empty",
+      "opsPerSec": 154684
     },
     {
       "subject": "sequence",
       "name": "storage.push — one char (memory fsi, defer: 0)",
-      "opsPerSec": 9911
+      "opsPerSec": 9918
     },
     {
       "subject": "sequence",
       "name": "storage.updateText — one keystroke in a 1 KB text (memory fsi, defer: 0)",
-      "opsPerSec": 5333
+      "opsPerSec": 5349
     },
     {
       "subject": "sequence",
       "name": "storage.move — in a 100-element list (memory fsi, defer: 0)",
-      "opsPerSec": 1099
+      "opsPerSec": 2297
     },
     {
       "subject": "sequence",
       "name": "storage.push — one char into a 10 KB text (memory fsi, defer: 0)",
-      "opsPerSec": 8209
+      "opsPerSec": 8350
     },
     {
       "subject": "sequence",
       "name": "storage.push — one char into a 10 KB text (memory fsi, defer: 16, the default)",
-      "opsPerSec": 16892
+      "opsPerSec": 17188
     },
     {
       "subject": "sequence",
       "name": "storage.push — one char into a 10 KB text, pipelined by 1 000 (memory fsi)",
-      "opsPerSec": 27263
+      "opsPerSec": 27244
+    },
+    {
+      "subject": "write",
+      "name": "inc — a counter, awaited, memory()",
+      "opsPerSec": 90168
+    },
+    {
+      "subject": "write",
+      "name": "update — one field, awaited, memory()",
+      "opsPerSec": 82352
+    },
+    {
+      "subject": "write",
+      "name": "splice — a keystroke at the end of a text, awaited, memory()",
+      "opsPerSec": 60796
+    },
+    {
+      "subject": "write",
+      "name": "splice — a keystroke at the start of a text, awaited, memory()",
+      "opsPerSec": 40691
+    },
+    {
+      "subject": "write",
+      "name": "splice — a keystroke anywhere in a text (seeded), awaited, memory()",
+      "opsPerSec": 35868
+    },
+    {
+      "subject": "write",
+      "name": "splice — keystrokes at the end, pipelined by 1,024, memory()",
+      "opsPerSec": 62365
+    },
+    {
+      "subject": "write",
+      "name": "transact — 64 keystrokes at the end as one transaction, memory()",
+      "opsPerSec": 87147
+    },
+    {
+      "subject": "write",
+      "name": "push — one element onto a list of 10,000, awaited, memory()",
+      "opsPerSec": 19243
+    },
+    {
+      "subject": "write",
+      "name": "inc — a counter, awaited, node:fs",
+      "opsPerSec": 36172
+    },
+    {
+      "subject": "write",
+      "name": "splice — a keystroke at the end of a text, awaited, node:fs",
+      "opsPerSec": 29532
     }
   ]
 }

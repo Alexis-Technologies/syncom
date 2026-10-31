@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="760" height="358" viewBox="0 0 760 358" role="img" aria-label="Increment a counter, in memory. Add 1 to a counter that converges when replicas increment it concurrently. Nothing touches the disk. ops/s, log scale, higher is better. Not shown: Yjs (no counter that converges); TinyBase (no counter that converges); PouchDB (no counter that converges); RxDB (no counter that converges); Fireproof (no counter that converges); GUN (needs its storage adapter to answer in Node.js); OrbitDB (no counter that converges).">
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="398" viewBox="0 0 760 398" role="img" aria-label="Increment a counter, in memory. Add 1 to a counter that converges when replicas increment it concurrently. Nothing touches the disk. ops/s, log scale, higher is better. Not shown: Yjs (no counter that converges); TinyBase (no counter that converges); PouchDB (no counter that converges); RxDB (no counter that converges); Fireproof (no counter that converges); GUN (needs its storage adapter to answer in Node.js); OrbitDB (no counter that converges).">
 <style>
   text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
   .title { font-size: 15px; font-weight: 700; fill: #1b1c1e; }
@@ -35,15 +35,15 @@
 <text class="subtitle" x="20" y="73">scale, higher is better. Not shown: Yjs (no counter that converges); TinyBase (no counter that converges);</text>
 <text class="subtitle" x="20" y="90">PouchDB (no counter that converges); RxDB (no counter that converges); Fireproof (no counter that converges);</text>
 <text class="subtitle" x="20" y="107">GUN (needs its storage adapter to answer in Node.js); OrbitDB (no counter that converges).</text>
-<line class="grid" x1="276" y1="122" x2="276" y2="282"/>
-<text class="tick" x="276" y="298" text-anchor="middle">1,000</text>
-<line class="grid" x1="409.3333333333333" y1="122" x2="409.3333333333333" y2="282"/>
-<text class="tick" x="409.3333333333333" y="298" text-anchor="middle">10k</text>
-<line class="grid" x1="542.6666666666666" y1="122" x2="542.6666666666666" y2="282"/>
-<text class="tick" x="542.6666666666666" y="298" text-anchor="middle">100k</text>
-<line class="grid" x1="676" y1="122" x2="676" y2="282"/>
-<text class="tick" x="676" y="298" text-anchor="middle">1M</text>
-<line class="axis" x1="276" y1="122" x2="276" y2="282"/>
+<line class="grid" x1="372" y1="122" x2="372" y2="322"/>
+<text class="tick" x="372" y="338" text-anchor="middle">1,000</text>
+<line class="grid" x1="473.3333333333333" y1="122" x2="473.3333333333333" y2="322"/>
+<text class="tick" x="473.3333333333333" y="338" text-anchor="middle">10k</text>
+<line class="grid" x1="574.6666666666666" y1="122" x2="574.6666666666666" y2="322"/>
+<text class="tick" x="574.6666666666666" y="338" text-anchor="middle">100k</text>
+<line class="grid" x1="676" y1="122" x2="676" y2="322"/>
+<text class="tick" x="676" y="338" text-anchor="middle">1M</text>
+<line class="axis" x1="372" y1="122" x2="372" y2="322"/>
 <g><title>Loro · LoroDoc, a LoroMap per record · v1.16.4
 352,250 ops/s
 2.84 µs per operation
@@ -51,39 +51,49 @@ samples 252k – 361k
 loro-crdt@1.16.4</title>
 <text class="label" x="20" y="139">Loro</text>
 <text class="sublabel" x="20" y="154">LoroDoc, a LoroMap per record · v1.16.4</text>
-<path class="bar" d="M276,135H611.5801033329813A4,4 0 0 1 615.5801033329813,139V145A4,4 0 0 1 611.5801033329813,149H276Z"/>
-<text class="value" x="621.5801033329813" y="148">352k</text>
+<path class="bar" d="M372,135H626.0808785330657A4,4 0 0 1 630.0808785330657,139V145A4,4 0 0 1 626.0808785330657,149H372Z"/>
+<text class="value" x="636.0808785330657" y="148">352k</text>
+</g>
+<g><title>Loro · LoroDoc, every commit exported (subscribeLocalUpdates) · v1.16.4
+104,970 ops/s
+9.53 µs per operation
+samples 77.7k – 107k
+loro-crdt@1.16.4</title>
+<text class="label" x="20" y="179">Loro</text>
+<text class="sublabel" x="20" y="194">LoroDoc, every commit exported (subscribeLocalUpdates) ·…</text>
+<path class="bar" d="M372,175H572.8010676002444A4,4 0 0 1 576.8010676002444,179V185A4,4 0 0 1 572.8010676002444,189H372Z"/>
+<text class="value" x="582.8010676002444" y="188">105k</text>
 </g>
 <g><title>syncom · core + text + sync, memory() · v0.0.1
 82,000 ops/s
 12.2 µs per operation
 samples 63k – 104k
 @alexify/syncom@0.0.1</title>
-<text class="label primary" x="20" y="179">syncom</text>
-<text class="sublabel" x="20" y="194">core + text + sync, memory() · v0.0.1</text>
-<path class="bar primary" d="M276,175H527.1748300761642A4,4 0 0 1 531.1748300761642,179V185A4,4 0 0 1 527.1748300761642,189H276Z"/>
-<text class="value" x="537.1748300761642" y="188">82k</text>
+<text class="label primary" x="20" y="219">syncom</text>
+<text class="sublabel" x="20" y="234">core + text + sync, memory() · v0.0.1</text>
+<path class="bar primary" d="M372,215H561.9328708578848A4,4 0 0 1 565.9328708578848,219V225A4,4 0 0 1 561.9328708578848,229H372Z"/>
+<text class="value" x="571.9328708578848" y="228">82k</text>
 </g>
 <g><title>syncom · /all: signed, chained, memory() · v0.0.1
 18,659 ops/s
 53.6 µs per operation
 samples 18.1k – 19.8k
 @alexify/syncom@0.0.1</title>
-<text class="label secondary" x="20" y="219">syncom</text>
-<text class="sublabel" x="20" y="234">/all: signed, chained, memory() · v0.0.1</text>
-<path class="bar secondary" d="M276,215H441.4512757731857A4,4 0 0 1 445.4512757731857,219V225A4,4 0 0 1 441.4512757731857,229H276Z"/>
-<text class="value" x="451.4512757731857" y="228">18.7k</text>
+<text class="label secondary" x="20" y="259">syncom</text>
+<text class="sublabel" x="20" y="274">/all: signed, chained, memory() · v0.0.1</text>
+<path class="bar secondary" d="M372,255H496.78296958762115A4,4 0 0 1 500.78296958762115,259V265A4,4 0 0 1 496.78296958762115,269H372Z"/>
+<text class="value" x="506.78296958762115" y="268">18.7k</text>
 </g>
 <g><title>Automerge · Automerge.change, Counter · v3.5.0
 1,953 ops/s
 512 µs per operation
 samples 1,931 – 1,956
 @automerge/automerge@3.5.0</title>
-<text class="label" x="20" y="259">Automerge</text>
-<text class="sublabel" x="20" y="274">Automerge.change, Counter · v3.5.0</text>
-<path class="bar" d="M276,255H310.7532973151426A4,4 0 0 1 314.7532973151426,259V265A4,4 0 0 1 310.7532973151426,269H276Z"/>
-<text class="value" x="320.7532973151426" y="268">1,953</text>
+<text class="label" x="20" y="299">Automerge</text>
+<text class="sublabel" x="20" y="314">Automerge.change, Counter · v3.5.0</text>
+<path class="bar" d="M372,295H397.4525059595084A4,4 0 0 1 401.4525059595084,299V305A4,4 0 0 1 397.4525059595084,309H372Z"/>
+<text class="value" x="407.4525059595084" y="308">1,953</text>
 </g>
-<text class="caption" x="20" y="323">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
-<text class="caption" x="20" y="339">in a fresh process · 2026-10-27</text>
+<text class="caption" x="20" y="363">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
+<text class="caption" x="20" y="379">in a fresh process · 2026-10-31</text>
 </svg>

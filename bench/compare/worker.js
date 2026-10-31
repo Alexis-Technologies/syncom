@@ -16,12 +16,20 @@ const { writeFileSync } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { getAdapter } = require('./adapters/index.js');
-const { getScenario, SEED, BULK, recordOf } = require('./scenarios.js');
+const { getScenario, SEED, BULK, LIST, recordOf } = require('./scenarios.js');
 const { measureOps, measureRounds } = require('./measure.js');
 const { loadTrace } = require('./trace.js');
 
 const FIELDS = ['title', 'done', 'priority', 'owner', 'hits'];
 const TEXT_KINDS = new Set(['append', 'prepend', 'random']);
+const LIST_KINDS = new Set(['list-push', 'list-insert', 'list-remove', 'list-set', 'list-move']);
+
+// What a line lacks for a kind, known before anything is opened or seeded.
+const lacking = (kind, line) => {
+  if ((TEXT_KINDS.has(kind) || kind === 'trace') && !line.text) return 'no text that merges by position';
+  if (LIST_KINDS.has(kind) && !line.list) return 'no list that merges by position';
+  return null;
+};
 
 // A seeded generator, so every library types at the same random places.
 const lcg = (seed) => {
@@ -71,6 +79,61 @@ const expectRecord = async (adapter, scenario, store, id, expected, what) => {
   if (!same(actual, expected)) {
     fail(adapter, scenario, `${what}: expected ${JSON.stringify(fieldsOf(expected))}, got ${JSON.stringify(actual)}`);
   }
+};
+
+// A list of LIST numbers, checked to do what the scenario says — an element
+// pushed, inserted, removed, set, moved reads back where it should — then
+// edited one element at a time. Indices are seeded, the same for every library.
+const measureList = async (adapter, scenario, line, store, method) => {
+  const { kind } = scenario;
+  const initial = [];
+  for (let i = 0; i < LIST; i++) initial.push(i);
+  const list = await line.list(store, initial, kind);
+  if (kind === 'list-set' && !list.set) return { unsupported: 'no element of its own to set' };
+  if (kind === 'list-move' && !list.move) return { unsupported: 'no move' };
+  const expect = async (index, value, what) => {
+    const read = await settle(list.read());
+    if (read[index] !== value) {
+      fail(adapter, scenario, `${what}: index ${index} reads ${read[index]}, expected ${value}`);
+    }
+    return read;
+  };
+  const read = await expect(LIST - 1, LIST - 1, 'a seeded list');
+  if (read.length !== LIST) fail(adapter, scenario, `a seeded list reads ${read.length} elements, expected ${LIST}`);
+  await settle(list.push(-1));
+  await expect(LIST, -1, 'a pushed element');
+  await settle(list.insert(1, -2));
+  await expect(1, -2, 'an inserted element');
+  await settle(list.remove(1));
+  await expect(1, 1, 'an element after a removal');
+  if (list.set) {
+    await settle(list.set(2, -3));
+    await expect(2, -3, 'a set element');
+  }
+  if (list.move) {
+    const before = await settle(list.read());
+    await settle(list.move(0, 3));
+    await expect(3, before[0], 'a moved element');
+  }
+  let length = LIST + 1;
+  const random = lcg(LIST);
+  const index = (n) => Math.floor(random() * n);
+  if (kind === 'list-push') return measureOps((i) => list.push(i), method);
+  if (kind === 'list-insert') {
+    return measureOps((i) => {
+      const wait = list.insert(index(length + 1), i);
+      length++;
+      return wait;
+    }, method);
+  }
+  if (kind === 'list-remove') {
+    return measureOps((i) => {
+      const wait = list.remove(index(length));
+      return wait && typeof wait.then === 'function' ? wait.then(() => list.push(i)) : list.push(i);
+    }, method);
+  }
+  if (kind === 'list-set') return measureOps((i) => list.set(index(length), i), method);
+  return measureOps(() => list.move(index(length), index(length)), method);
 };
 
 const measureKind = async (adapter, scenario, line, store, ids, dir, method) => {
@@ -137,6 +200,7 @@ const measureKind = async (adapter, scenario, line, store, ids, dir, method) => 
       return wait;
     }, method);
   }
+  if (LIST_KINDS.has(kind)) return measureList(adapter, scenario, line, store, method);
   if (kind === 'trace') {
     if (!line.text) return { unsupported: 'no text that merges by position' };
     const { edits, finalText } = await loadTrace();
@@ -207,6 +271,11 @@ const main = async () => {
   const line = adapter.lines[scenario.line];
   if (!line) {
     answer({ unsupported: adapter.unsupported?.[scenario.line] ?? 'no such storage' });
+    return;
+  }
+  const lacks = lacking(scenario.kind, line);
+  if (lacks) {
+    answer({ unsupported: lacks });
     return;
   }
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), `syncom-compare-${adapter.id}-`));

@@ -11,6 +11,14 @@
  * update (`subscribeLocalUpdates`) and every imported one is appended to a
  * file, length-prefixed, and the write waits for the append. Opening reads
  * the file back with `importBatch`.
+ *
+ * A list is a `LoroList` (push, insert, delete); the set and move scenarios
+ * take a `LoroMovableList`, the list Loro's documentation gives for both.
+ *
+ * `loro-updates`: the memory document with `subscribeLocalUpdates`, so every
+ * commit is exported as the update a peer or a persistence would receive —
+ * the work syncom's memory line does for every write (its log). Loro encodes
+ * nothing at a commit unless something subscribes.
  */
 
 const fs = require('node:fs/promises');
@@ -35,12 +43,14 @@ const frames = (buffer) => {
   return out;
 };
 
-// `file` is null in memory, else a FileHandle opened for appending.
-const wrap = (L, doc, file) => {
+// `file` is null in memory, else a FileHandle opened for appending;
+// `onUpdate` takes every committed local update when given (the encoded line).
+const wrap = (L, doc, file, onUpdate = null) => {
   const todos = doc.getMap('todos');
   let next = 0;
   let pending = null;
   if (file) doc.subscribeLocalUpdates((bytes) => (pending = file.appendFile(frame(bytes))));
+  else if (onUpdate) doc.subscribeLocalUpdates(onUpdate);
   const commit = () => {
     doc.commit();
     const wait = pending;
@@ -82,6 +92,38 @@ const wrap = (L, doc, file) => {
     close: async () => {
       if (file) await file.close();
     },
+    list: async (initial, movable) => {
+      const list = movable ? doc.getMovableList('movable') : doc.getList('list');
+      for (const value of initial) list.push(value);
+      await commit();
+      return {
+        push: (value) => {
+          list.push(value);
+          return commit();
+        },
+        insert: (index, value) => {
+          list.insert(index, value);
+          return commit();
+        },
+        remove: (index) => {
+          list.delete(index, 1);
+          return commit();
+        },
+        set: movable
+          ? (index, value) => {
+              list.set(index, value);
+              return commit();
+            }
+          : null,
+        move: movable
+          ? (from, to) => {
+              list.move(from, to);
+              return commit();
+            }
+          : null,
+        read: () => list.toJSON(),
+      };
+    },
     text: (name = 'text') => {
       const text = doc.getText(name);
       return {
@@ -99,6 +141,8 @@ const wrap = (L, doc, file) => {
   };
 };
 
+const movableFor = (kind) => kind === 'list-set' || kind === 'list-move';
+
 const memory = {
   variant: 'LoroDoc, a LoroMap per record',
   open: async () => {
@@ -106,11 +150,29 @@ const memory = {
     return wrap(L, new L.LoroDoc(), null);
   },
   text: (store, name) => store.text(name),
+  list: (store, initial, kind) => store.list(initial, movableFor(kind)),
+};
+
+// Every commit exported and kept count of, nothing stored.
+const encoded = {
+  variant: 'LoroDoc, every commit exported (subscribeLocalUpdates)',
+  open: async () => {
+    const L = local('loro-crdt');
+    let bytes = 0;
+    const store = wrap(L, new L.LoroDoc(), null, (update) => {
+      bytes += update.length;
+    });
+    store.encodedBytes = () => bytes;
+    return store;
+  },
+  text: (store, name) => store.text(name),
+  list: (store, initial, kind) => store.list(initial, movableFor(kind)),
 };
 
 const disk = {
   variant: 'updates appended to a file',
   text: (store, name) => store.text(name),
+  list: (store, initial, kind) => store.list(initial, movableFor(kind)),
   open: async (dir) => {
     const L = local('loro-crdt');
     await fs.mkdir(dir, { recursive: true });
@@ -129,12 +191,22 @@ const replicate = async (source, replica) => {
 };
 
 module.exports = {
-  id: 'loro',
-  name: 'Loro',
-  package: 'loro-crdt',
-  url: 'https://github.com/loro-dev/loro',
-  lines: {
-    memory: { ...memory, openReplica: (dir) => memory.open(dir), replicate },
-    disk: { ...disk, openReplica: (dir) => disk.open(dir), replicate },
+  plain: {
+    id: 'loro',
+    name: 'Loro',
+    package: 'loro-crdt',
+    url: 'https://github.com/loro-dev/loro',
+    lines: {
+      memory: { ...memory, openReplica: (dir) => memory.open(dir), replicate },
+      disk: { ...disk, openReplica: (dir) => disk.open(dir), replicate },
+    },
+  },
+  encoded: {
+    id: 'loro-updates',
+    name: 'Loro',
+    package: 'loro-crdt',
+    url: 'https://github.com/loro-dev/loro',
+    lines: { memory: { ...encoded, openReplica: (dir) => encoded.open(dir), replicate } },
+    unsupported: { disk: 'memory only — on disk the Loro row appends every update already' },
   },
 };

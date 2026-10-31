@@ -17,7 +17,8 @@
  * without `hits` and reads back with `hits: 0` until the counter exists.
  * There is no batch write, so a batch is the inserts issued at once (the
  * mutation queue runs them in order). A text is a field of a record, typed
- * into with splice(). A replica dials the source over
+ * into with splice(); a list is a field of a record too, edited with push(),
+ * splice(), setAt() and move(). A replica dials the source over
  * tests/utils/memory-link.js — the in-process link the engine tests run on:
  * JSON across the boundary, like a wrpc client, no socket — and catches up
  * from the source's op log.
@@ -76,6 +77,20 @@ const variant = (build, memory) => {
         insert: (index, chars) => store.storage.splice(id, 'body', index, 0, chars),
         delete: (index, count) => store.storage.splice(id, 'body', index, count, ''),
         read: async () => (await store.storage.get(id)).body ?? '',
+      };
+    },
+    // A list is a field of a record: one record, its elements pushed in one call.
+    list: async (store, initial) => {
+      const { storage } = store;
+      const id = await storage.insert({ kind: 'list' });
+      await storage.push(id, 'items', initial);
+      return {
+        push: (value) => storage.push(id, 'items', [value]),
+        insert: (index, value) => storage.splice(id, 'items', index, 0, [value]),
+        remove: (index) => storage.splice(id, 'items', index, 1, []),
+        set: (index, value) => storage.setAt(id, 'items', index, value),
+        move: (from, to) => storage.move(id, 'items', from, to),
+        read: async () => (await storage.get(id)).items ?? [],
       };
     },
     openReplica: async (dir, source) => {

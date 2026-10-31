@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="760" height="375" viewBox="0 0 760 375" role="img" aria-label="Increment a counter, on disk. Add 1 to a counter that converges when replicas increment it concurrently. Each library's own persistence on node:fs, every write awaited. ops/s, log scale, higher is better. Not shown: Yjs (no counter that converges); TinyBase (no counter that converges); PouchDB (no counter that converges); RxDB (Node.js disk storages are Premium); Fireproof (no counter that converges); GUN (no counter that converges); OrbitDB (no counter that converges).">
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="392" viewBox="0 0 760 392" role="img" aria-label="Increment a counter, on disk. Add 1 to a counter that converges when replicas increment it concurrently. Each library's own persistence on node:fs, every write awaited. ops/s, log scale, higher is better. Not shown: Yjs (no counter that converges); Yjs (memory only — on disk the Yjs row stores every update already); Loro (memory only — on disk the Loro row appends every update already); TinyBase (no counter that converges); PouchDB (no counter that converges); RxDB (Node.js disk storages are Premium); Fireproof (no counter that converges); GUN (no counter that converges); OrbitDB (no counter that converges).">
 <style>
   text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
   .title { font-size: 15px; font-weight: 700; fill: #1b1c1e; }
@@ -33,56 +33,57 @@
 <text class="title" x="20" y="35">Increment a counter, on disk</text>
 <text class="subtitle" x="20" y="56">Add 1 to a counter that converges when replicas increment it concurrently. Each library's own persistence on</text>
 <text class="subtitle" x="20" y="73">node:fs, every write awaited. ops/s, log scale, higher is better. Not shown: Yjs (no counter that converges);</text>
-<text class="subtitle" x="20" y="90">TinyBase (no counter that converges); PouchDB (no counter that converges); RxDB (Node.js disk storages are</text>
-<text class="subtitle" x="20" y="107">Premium); Fireproof (no counter that converges); GUN (no counter that converges); OrbitDB (no counter that</text>
-<text class="subtitle" x="20" y="124">converges).</text>
-<line class="grid" x1="271" y1="139" x2="271" y2="299"/>
-<text class="tick" x="271" y="315" text-anchor="middle">1,000</text>
-<line class="grid" x1="473.5" y1="139" x2="473.5" y2="299"/>
-<text class="tick" x="473.5" y="315" text-anchor="middle">10k</text>
-<line class="grid" x1="676" y1="139" x2="676" y2="299"/>
-<text class="tick" x="676" y="315" text-anchor="middle">100k</text>
-<line class="axis" x1="271" y1="139" x2="271" y2="299"/>
+<text class="subtitle" x="20" y="90">Yjs (memory only — on disk the Yjs row stores every update already); Loro (memory only — on disk the Loro row</text>
+<text class="subtitle" x="20" y="107">appends every update already); TinyBase (no counter that converges); PouchDB (no counter that converges); RxDB</text>
+<text class="subtitle" x="20" y="124">(Node.js disk storages are Premium); Fireproof (no counter that converges); GUN (no counter that converges);</text>
+<text class="subtitle" x="20" y="141">OrbitDB (no counter that converges).</text>
+<line class="grid" x1="271" y1="156" x2="271" y2="316"/>
+<text class="tick" x="271" y="332" text-anchor="middle">1,000</text>
+<line class="grid" x1="473.5" y1="156" x2="473.5" y2="316"/>
+<text class="tick" x="473.5" y="332" text-anchor="middle">10k</text>
+<line class="grid" x1="676" y1="156" x2="676" y2="316"/>
+<text class="tick" x="676" y="332" text-anchor="middle">100k</text>
+<line class="axis" x1="271" y1="156" x2="271" y2="316"/>
 <g><title>Loro · updates appended to a file · v1.16.4
 40,755 ops/s
 24.5 µs per operation
 samples 40.1k – 42.2k
 loro-crdt@1.16.4</title>
-<text class="label" x="20" y="156">Loro</text>
-<text class="sublabel" x="20" y="171">updates appended to a file · v1.16.4</text>
-<path class="bar" d="M271,152H593.0608514908956A4,4 0 0 1 597.0608514908956,156V162A4,4 0 0 1 593.0608514908956,166H271Z"/>
-<text class="value" x="603.0608514908956" y="165">40.8k</text>
+<text class="label" x="20" y="173">Loro</text>
+<text class="sublabel" x="20" y="188">updates appended to a file · v1.16.4</text>
+<path class="bar" d="M271,169H593.0608514908956A4,4 0 0 1 597.0608514908956,173V179A4,4 0 0 1 593.0608514908956,183H271Z"/>
+<text class="value" x="603.0608514908956" y="182">40.8k</text>
 </g>
 <g><title>syncom · core + text + sync, node:fs · v0.0.1
 21,398 ops/s
 46.7 µs per operation
 samples 13.6k – 22.3k
 @alexify/syncom@0.0.1</title>
-<text class="label primary" x="20" y="196">syncom</text>
-<text class="sublabel" x="20" y="211">core + text + sync, node:fs · v0.0.1</text>
-<path class="bar primary" d="M271,192H536.4006318346627A4,4 0 0 1 540.4006318346627,196V202A4,4 0 0 1 536.4006318346627,206H271Z"/>
-<text class="value" x="546.4006318346627" y="205">21.4k</text>
+<text class="label primary" x="20" y="213">syncom</text>
+<text class="sublabel" x="20" y="228">core + text + sync, node:fs · v0.0.1</text>
+<path class="bar primary" d="M271,209H536.4006318346627A4,4 0 0 1 540.4006318346627,213V219A4,4 0 0 1 536.4006318346627,223H271Z"/>
+<text class="value" x="546.4006318346627" y="222">21.4k</text>
 </g>
 <g><title>syncom · /all: signed, chained, node:fs · v0.0.1
 7,081 ops/s
 141 µs per operation
 samples 6,799 – 7,263
 @alexify/syncom@0.0.1</title>
-<text class="label secondary" x="20" y="236">syncom</text>
-<text class="sublabel" x="20" y="251">/all: signed, chained, node:fs · v0.0.1</text>
-<path class="bar secondary" d="M271,232H439.14937986212936A4,4 0 0 1 443.14937986212936,236V242A4,4 0 0 1 439.14937986212936,246H271Z"/>
-<text class="value" x="449.14937986212936" y="245">7,081</text>
+<text class="label secondary" x="20" y="253">syncom</text>
+<text class="sublabel" x="20" y="268">/all: signed, chained, node:fs · v0.0.1</text>
+<path class="bar secondary" d="M271,249H439.14937986212936A4,4 0 0 1 443.14937986212936,253V259A4,4 0 0 1 439.14937986212936,263H271Z"/>
+<text class="value" x="449.14937986212936" y="262">7,081</text>
 </g>
 <g><title>Automerge · automerge-repo, NodeFS storage · v3.5.0
 1,193 ops/s
 838 µs per operation
 samples 1,188 – 1,237
 @automerge/automerge@3.5.0</title>
-<text class="label" x="20" y="276">Automerge</text>
-<text class="sublabel" x="20" y="291">automerge-repo, NodeFS storage · v3.5.0</text>
-<path class="bar" d="M271,272H282.52609490125894A4,4 0 0 1 286.52609490125894,276V282A4,4 0 0 1 282.52609490125894,286H271Z"/>
-<text class="value" x="292.52609490125894" y="285">1,193</text>
+<text class="label" x="20" y="293">Automerge</text>
+<text class="sublabel" x="20" y="308">automerge-repo, NodeFS storage · v3.5.0</text>
+<path class="bar" d="M271,289H282.52609490125894A4,4 0 0 1 286.52609490125894,293V299A4,4 0 0 1 282.52609490125894,303H271Z"/>
+<text class="value" x="292.52609490125894" y="302">1,193</text>
 </g>
-<text class="caption" x="20" y="340">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
-<text class="caption" x="20" y="356">in a fresh process · 2026-10-27</text>
+<text class="caption" x="20" y="357">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
+<text class="caption" x="20" y="373">in a fresh process · 2026-10-31</text>
 </svg>

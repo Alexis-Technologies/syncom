@@ -24,6 +24,13 @@
  * - trace:   replay the automerge-perf editing trace (bench/compare/trace.js)
  *            into one text; a round is the whole trace, the rate is
  *            keystrokes per second
+ * - list-push, list-insert, list-remove, list-set, list-move: one edit of a
+ *            list of LIST numbers that merges by position — push one, insert
+ *            one anywhere (seeded), remove one anywhere (and push one, so the
+ *            list keeps its length), give one a new value, move one; only the
+ *            libraries with such a list take part (syncom's list field,
+ *            Y.Array, Automerge's list, LoroList — LoroMovableList for set
+ *            and move), and set and move only where the list has them
  *
  * Each runs on two lines:
  *
@@ -41,6 +48,7 @@
 
 const SEED = 1_000;
 const BULK = 1_000;
+const LIST = 10_000;
 
 const recordOf = (i) => ({ title: `Task ${i}`, done: false, priority: i % 5, owner: 'ada', hits: 0 });
 
@@ -120,6 +128,41 @@ const KINDS = [
     type: 'rounds',
     lines: ['memory'],
   },
+  {
+    id: 'list-push',
+    title: 'Push onto a list',
+    description: `Add one element at the end of a list of ${LIST.toLocaleString('en-US')} that merges by position.`,
+    unit: 'ops/s',
+    type: 'ops',
+  },
+  {
+    id: 'list-insert',
+    title: 'Insert into a list',
+    description: 'Insert one element at a random index of the list (seeded).',
+    unit: 'ops/s',
+    type: 'ops',
+  },
+  {
+    id: 'list-remove',
+    title: 'Remove from a list',
+    description: 'Remove the element at a random index, then push one, so the list keeps its length: one op is both.',
+    unit: 'ops/s',
+    type: 'ops',
+  },
+  {
+    id: 'list-set',
+    title: 'Set a list element',
+    description: 'Give the element at a random index a new value — an element of its own, not a delete and an insert.',
+    unit: 'ops/s',
+    type: 'ops',
+  },
+  {
+    id: 'list-move',
+    title: 'Move a list element',
+    description: 'Move the element at a random index to another random index — the element itself, merged once.',
+    unit: 'ops/s',
+    type: 'ops',
+  },
 ];
 
 const LINES = [
@@ -155,4 +198,4 @@ const getScenario = (id) => {
   return scenario;
 };
 
-module.exports = { SCENARIOS, KINDS, LINES, SEED, BULK, recordOf, getScenario };
+module.exports = { SCENARIOS, KINDS, LINES, SEED, BULK, LIST, recordOf, getScenario };

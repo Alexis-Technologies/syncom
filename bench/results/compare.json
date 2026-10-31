@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-27T00:32:59.091Z",
+  "generatedAt": "2026-10-31T10:25:28.501Z",
   "machine": {
     "cpu": "Apple M3 Max",
     "cores": 16,
@@ -16,7 +16,7 @@
     "warmupRounds": 1,
     "traceRounds": 2,
     "traceWarmupRounds": 1,
-    "coldStartRuns": 10
+    "coldStartRuns": 0
   },
   "libraries": [
     {
@@ -53,6 +53,16 @@
       }
     },
     {
+      "id": "yjs-updates",
+      "name": "Yjs",
+      "package": "yjs",
+      "version": "13.6.33",
+      "url": "https://github.com/yjs/yjs",
+      "lines": {
+        "memory": "Y.Doc, every update encoded (an update listener)"
+      }
+    },
+    {
       "id": "automerge",
       "name": "Automerge",
       "package": "@automerge/automerge",
@@ -72,6 +82,16 @@
       "lines": {
         "memory": "LoroDoc, a LoroMap per record",
         "disk": "updates appended to a file"
+      }
+    },
+    {
+      "id": "loro-updates",
+      "name": "Loro",
+      "package": "loro-crdt",
+      "version": "1.16.4",
+      "url": "https://github.com/loro-dev/loro",
+      "lines": {
+        "memory": "LoroDoc, every commit exported (subscribeLocalUpdates)"
       }
     },
     {
@@ -199,6 +219,16 @@
           "median": 14967.949114370105,
           "min": 14454.506679920642,
           "max": 15278.931540644548
+        },
+        "yjs-updates": {
+          "median": 121640.80136579779,
+          "min": 114528.12587319188,
+          "max": 123405.96923096474
+        },
+        "loro-updates": {
+          "median": 13449.136360421768,
+          "min": 11779.246500478355,
+          "max": 22449.542528286103
         }
       },
       "unsupported": {
@@ -268,7 +298,9 @@
         }
       },
       "unsupported": {
-        "rxdb": "Node.js disk storages are Premium"
+        "rxdb": "Node.js disk storages are Premium",
+        "yjs-updates": "memory only — on disk the Yjs row stores every update already",
+        "loro-updates": "memory only — on disk the Loro row appends every update already"
       },
       "failed": {}
     },
@@ -331,6 +363,16 @@
           "median": 18691.512989349078,
           "min": 18181.86506687234,
           "max": 19728.294669966097
+        },
+        "yjs-updates": {
+          "median": 218974.98368379765,
+          "min": 217609.98028088437,
+          "max": 224557.51574014834
+        },
+        "loro-updates": {
+          "median": 104822.0164366884,
+          "min": 97612.08612827447,
+          "max": 106378.93437971098
         }
       },
       "unsupported": {
@@ -400,7 +442,9 @@
         }
       },
       "unsupported": {
-        "rxdb": "Node.js disk storages are Premium"
+        "rxdb": "Node.js disk storages are Premium",
+        "yjs-updates": "memory only — on disk the Yjs row stores every update already",
+        "loro-updates": "memory only — on disk the Loro row appends every update already"
       },
       "failed": {}
     },
@@ -463,6 +507,16 @@
           "median": 897999.4519046368,
           "min": 894925.7534986474,
           "max": 906211.3308718137
+        },
+        "yjs-updates": {
+          "median": 3673680.9817047613,
+          "min": 3577420.6761989743,
+          "max": 3709163.8805678654
+        },
+        "loro-updates": {
+          "median": 305694.4548100642,
+          "min": 289749.8172557736,
+          "max": 311319.7986690531
         }
       },
       "unsupported": {
@@ -532,7 +586,9 @@
         }
       },
       "unsupported": {
-        "rxdb": "Node.js disk storages are Premium"
+        "rxdb": "Node.js disk storages are Premium",
+        "yjs-updates": "memory only — on disk the Yjs row stores every update already",
+        "loro-updates": "memory only — on disk the Loro row appends every update already"
       },
       "failed": {}
     },
@@ -565,6 +621,11 @@
           "median": 18658.83689243173,
           "min": 18054.148862576676,
           "max": 19776.840383363582
+        },
+        "loro-updates": {
+          "median": 104969.50932242569,
+          "min": 77650.72340624109,
+          "max": 107149.18140987461
         }
       },
       "unsupported": {
@@ -574,7 +635,8 @@
         "rxdb": "no counter that converges",
         "fireproof": "no counter that converges",
         "gun": "needs its storage adapter to answer in Node.js",
-        "orbitdb": "no counter that converges"
+        "orbitdb": "no counter that converges",
+        "yjs-updates": "no counter that converges"
       },
       "failed": {}
     },
@@ -616,7 +678,9 @@
         "rxdb": "Node.js disk storages are Premium",
         "fireproof": "no counter that converges",
         "gun": "no counter that converges",
-        "orbitdb": "no counter that converges"
+        "orbitdb": "no counter that converges",
+        "yjs-updates": "memory only — on disk the Yjs row stores every update already",
+        "loro-updates": "memory only — on disk the Loro row appends every update already"
       },
       "failed": {}
     },
@@ -679,6 +743,16 @@
           "median": 24391.18564016751,
           "min": 24066.205940011307,
           "max": 35534.5506878156
+        },
+        "yjs-updates": {
+          "median": 174095.98050682107,
+          "min": 94053.4693973524,
+          "max": 198198.06249502042
+        },
+        "loro-updates": {
+          "median": 64212.50331737852,
+          "min": 56229.92415988978,
+          "max": 67333.64683879302
         }
       },
       "unsupported": {
@@ -748,7 +822,9 @@
         }
       },
       "unsupported": {
-        "rxdb": "Node.js disk storages are Premium"
+        "rxdb": "Node.js disk storages are Premium",
+        "yjs-updates": "memory only — on disk the Yjs row stores every update already",
+        "loro-updates": "memory only — on disk the Loro row appends every update already"
       },
       "failed": {}
     },
@@ -806,6 +882,16 @@
           "median": 21974.158389733657,
           "min": 20772.49459151752,
           "max": 23202.68627708215
+        },
+        "yjs-updates": {
+          "median": 84716.74363747597,
+          "min": 74607.15045374946,
+          "max": 94790.09917414133
+        },
+        "loro-updates": {
+          "median": 108046.30562129273,
+          "min": 100110.12113324652,
+          "max": 112514.41590953828
         }
       },
       "unsupported": {
@@ -868,7 +954,9 @@
       "unsupported": {
         "rxdb": "Node.js disk storages are Premium",
         "fireproof": "syncs through a cloud or self-hosted gateway only",
-        "gun": "syncs over its WebSocket/WebRTC mesh only"
+        "gun": "syncs over its WebSocket/WebRTC mesh only",
+        "yjs-updates": "memory only — on disk the Yjs row stores every update already",
+        "loro-updates": "memory only — on disk the Loro row appends every update already"
       },
       "failed": {}
     },
@@ -906,6 +994,16 @@
           "median": 15527.892349900156,
           "min": 15031.558549406545,
           "max": 17105.934816704575
+        },
+        "yjs-updates": {
+          "median": 32443.023357609447,
+          "min": 29740.564871524573,
+          "max": 34797.07222413489
+        },
+        "loro-updates": {
+          "median": 102926.06726981406,
+          "min": 102259.37081562595,
+          "max": 103965.61553861081
         }
       },
       "unsupported": {
@@ -960,7 +1058,9 @@
         "rxdb": "Node.js disk storages are Premium",
         "fireproof": "no text that merges by position",
         "gun": "no text that merges by position",
-        "orbitdb": "no text that merges by position"
+        "orbitdb": "no text that merges by position",
+        "yjs-updates": "memory only — on disk the Yjs row stores every update already",
+        "loro-updates": "memory only — on disk the Loro row appends every update already"
       },
       "failed": {}
     },
@@ -998,6 +1098,16 @@
           "median": 13533.09776056077,
           "min": 9897.969325118404,
           "max": 15407.940455569638
+        },
+        "yjs-updates": {
+          "median": 255556.32582322357,
+          "min": 251243.25335804967,
+          "max": 272982.4182261255
+        },
+        "loro-updates": {
+          "median": 104135.8647610555,
+          "min": 103733.01283600437,
+          "max": 104904.9891148465
         }
       },
       "unsupported": {
@@ -1052,7 +1162,9 @@
         "rxdb": "Node.js disk storages are Premium",
         "fireproof": "no text that merges by position",
         "gun": "no text that merges by position",
-        "orbitdb": "no text that merges by position"
+        "orbitdb": "no text that merges by position",
+        "yjs-updates": "memory only — on disk the Yjs row stores every update already",
+        "loro-updates": "memory only — on disk the Loro row appends every update already"
       },
       "failed": {}
     },
@@ -1090,6 +1202,16 @@
           "median": 12814.310693610552,
           "min": 11572.274411497856,
           "max": 14430.07595518496
+        },
+        "yjs-updates": {
+          "median": 28234.52229951204,
+          "min": 24648.91029350049,
+          "max": 29588.38098893179
+        },
+        "loro-updates": {
+          "median": 93007.08044346723,
+          "min": 91780.66458283585,
+          "max": 93364.69180019728
         }
       },
       "unsupported": {
@@ -1144,7 +1266,9 @@
         "rxdb": "Node.js disk storages are Premium",
         "fireproof": "no text that merges by position",
         "gun": "no text that merges by position",
-        "orbitdb": "no text that merges by position"
+        "orbitdb": "no text that merges by position",
+        "yjs-updates": "memory only — on disk the Yjs row stores every update already",
+        "loro-updates": "memory only — on disk the Loro row appends every update already"
       },
       "failed": {}
     },
@@ -1187,6 +1311,18 @@
           "min": 29764.032894801552,
           "max": 30218.6978490617,
           "memory": -9973464
+        },
+        "yjs-updates": {
+          "median": 46983.43473956798,
+          "min": 46763.22925784698,
+          "max": 47203.64022128898,
+          "memory": 3012392
+        },
+        "loro-updates": {
+          "median": 101958.72375748516,
+          "min": 101565.91766929984,
+          "max": 102351.52984567049,
+          "memory": 6216
         }
       },
       "unsupported": {
@@ -1196,6 +1332,494 @@
         "fireproof": "no text that merges by position",
         "gun": "needs its storage adapter to answer in Node.js",
         "orbitdb": "no text that merges by position"
+      },
+      "failed": {}
+    },
+    {
+      "id": "list-push-memory",
+      "kind": "list-push",
+      "kindTitle": "Push onto a list",
+      "line": "memory",
+      "lineTitle": "In memory",
+      "title": "Push onto a list, in memory",
+      "description": "Add one element at the end of a list of 10,000 that merges by position. Nothing touches the disk.",
+      "unit": "ops/s",
+      "results": {
+        "syncom": {
+          "median": 11406.774591739544,
+          "min": 9144.815356001794,
+          "max": 14218.458341096233
+        },
+        "syncom-secure": {
+          "median": 8155.004989655815,
+          "min": 7343.526226191764,
+          "max": 9627.94572346661
+        },
+        "yjs": {
+          "median": 15645.761117334425,
+          "min": 13822.790505830731,
+          "max": 18657.595253157946
+        },
+        "automerge": {
+          "median": 2329.117457911869,
+          "min": 2009.8729866149695,
+          "max": 3119.0605140206926
+        },
+        "loro": {
+          "median": 533701.0867384133,
+          "min": 532501.3000520016,
+          "max": 537482.8690457686
+        },
+        "yjs-updates": {
+          "median": 12678.525280962464,
+          "min": 12044.848716848699,
+          "max": 18101.644043488224
+        },
+        "loro-updates": {
+          "median": 103073.85776687252,
+          "min": 102119.21510091137,
+          "max": 104575.71107608019
+        }
+      },
+      "unsupported": {
+        "tinybase": "no list that merges by position",
+        "pouchdb": "no list that merges by position",
+        "rxdb": "no list that merges by position",
+        "fireproof": "no list that merges by position",
+        "gun": "needs its storage adapter to answer in Node.js",
+        "orbitdb": "no list that merges by position"
+      },
+      "failed": {}
+    },
+    {
+      "id": "list-push-disk",
+      "kind": "list-push",
+      "kindTitle": "Push onto a list",
+      "line": "disk",
+      "lineTitle": "On disk",
+      "title": "Push onto a list, on disk",
+      "description": "Add one element at the end of a list of 10,000 that merges by position. Each library's own persistence on node:fs, every write awaited.",
+      "unit": "ops/s",
+      "results": {
+        "syncom": {
+          "median": 8417.602096306673,
+          "min": 6965.7259811410995,
+          "max": 10331.346758704587
+        },
+        "syncom-secure": {
+          "median": 6030.821885226826,
+          "min": 5189.515109079359,
+          "max": 6663.59612642274
+        },
+        "yjs": {
+          "median": 11451.623904042663,
+          "min": 9529.927542387848,
+          "max": 12660.848349121874
+        },
+        "automerge": {
+          "median": 1490.1874983574357,
+          "min": 1308.6790084666209,
+          "max": 1716.9379836120804
+        },
+        "loro": {
+          "median": 45104.17125490017,
+          "min": 44363.671911450394,
+          "max": 45458.08113826742
+        }
+      },
+      "unsupported": {
+        "tinybase": "no list that merges by position",
+        "pouchdb": "no list that merges by position",
+        "rxdb": "Node.js disk storages are Premium",
+        "fireproof": "no list that merges by position",
+        "gun": "no list that merges by position",
+        "orbitdb": "no list that merges by position",
+        "yjs-updates": "memory only — on disk the Yjs row stores every update already",
+        "loro-updates": "memory only — on disk the Loro row appends every update already"
+      },
+      "failed": {}
+    },
+    {
+      "id": "list-insert-memory",
+      "kind": "list-insert",
+      "kindTitle": "Insert into a list",
+      "line": "memory",
+      "lineTitle": "In memory",
+      "title": "Insert into a list, in memory",
+      "description": "Insert one element at a random index of the list (seeded). Nothing touches the disk.",
+      "unit": "ops/s",
+      "results": {
+        "syncom": {
+          "median": 6449.08678586342,
+          "min": 6049.168272262185,
+          "max": 9066.675349751906
+        },
+        "syncom-secure": {
+          "median": 5622.866922011358,
+          "min": 4758.874657970605,
+          "max": 7896.061547787787
+        },
+        "yjs": {
+          "median": 27085.543732361206,
+          "min": 26134.586313633357,
+          "max": 28717.113849521345
+        },
+        "automerge": {
+          "median": 5964.714156200925,
+          "min": 4948.726592974683,
+          "max": 7174.908517041844
+        },
+        "loro": {
+          "median": 450142.8840993126,
+          "min": 449083.8076342412,
+          "max": 455661.70233476267
+        },
+        "yjs-updates": {
+          "median": 25202.723142118837,
+          "min": 24258.774882884365,
+          "max": 27166.737073249387
+        },
+        "loro-updates": {
+          "median": 103859.80873192601,
+          "min": 102017.13127581646,
+          "max": 105927.19525412213
+        }
+      },
+      "unsupported": {
+        "tinybase": "no list that merges by position",
+        "pouchdb": "no list that merges by position",
+        "rxdb": "no list that merges by position",
+        "fireproof": "no list that merges by position",
+        "gun": "needs its storage adapter to answer in Node.js",
+        "orbitdb": "no list that merges by position"
+      },
+      "failed": {}
+    },
+    {
+      "id": "list-insert-disk",
+      "kind": "list-insert",
+      "kindTitle": "Insert into a list",
+      "line": "disk",
+      "lineTitle": "On disk",
+      "title": "Insert into a list, on disk",
+      "description": "Insert one element at a random index of the list (seeded). Each library's own persistence on node:fs, every write awaited.",
+      "unit": "ops/s",
+      "results": {
+        "syncom": {
+          "median": 3998.0181464226557,
+          "min": 2870.106982320927,
+          "max": 5064.856270859172
+        },
+        "syncom-secure": {
+          "median": 3379.3279753006177,
+          "min": 2735.0082176450774,
+          "max": 4076.9458837938537
+        },
+        "yjs": {
+          "median": 12678.352830025762,
+          "min": 12285.321180046543,
+          "max": 13053.106120348608
+        },
+        "automerge": {
+          "median": 2451.10667191785,
+          "min": 2189.475028295584,
+          "max": 2545.3710567753183
+        },
+        "loro": {
+          "median": 44613.9181500653,
+          "min": 44300.20531086339,
+          "max": 45013.49200973997
+        }
+      },
+      "unsupported": {
+        "tinybase": "no list that merges by position",
+        "pouchdb": "no list that merges by position",
+        "rxdb": "Node.js disk storages are Premium",
+        "fireproof": "no list that merges by position",
+        "gun": "no list that merges by position",
+        "orbitdb": "no list that merges by position",
+        "yjs-updates": "memory only — on disk the Yjs row stores every update already",
+        "loro-updates": "memory only — on disk the Loro row appends every update already"
+      },
+      "failed": {}
+    },
+    {
+      "id": "list-remove-memory",
+      "kind": "list-remove",
+      "kindTitle": "Remove from a list",
+      "line": "memory",
+      "lineTitle": "In memory",
+      "title": "Remove from a list, in memory",
+      "description": "Remove the element at a random index, then push one, so the list keeps its length: one op is both. Nothing touches the disk.",
+      "unit": "ops/s",
+      "results": {
+        "syncom": {
+          "median": 11917.50018821629,
+          "min": 10992.186893600718,
+          "max": 12285.985098443858
+        },
+        "syncom-secure": {
+          "median": 6558.2790882287345,
+          "min": 6427.700571162229,
+          "max": 6624.728701302149
+        },
+        "yjs": {
+          "median": 2411.4986442756904,
+          "min": 1897.620648089339,
+          "max": 3724.2138750144554
+        },
+        "automerge": {
+          "median": 1528.8921444932814,
+          "min": 1356.7984644233848,
+          "max": 1917.1895611472812
+        },
+        "loro": {
+          "median": 238318.93040660955,
+          "min": 230089.68530741453,
+          "max": 240106.6223469877
+        },
+        "yjs-updates": {
+          "median": 2316.7259980591457,
+          "min": 1788.9651690747735,
+          "max": 3587.050853158669
+        },
+        "loro-updates": {
+          "median": 50261.14753892044,
+          "min": 50044.29752397512,
+          "max": 50674.15815879826
+        }
+      },
+      "unsupported": {
+        "tinybase": "no list that merges by position",
+        "pouchdb": "no list that merges by position",
+        "rxdb": "no list that merges by position",
+        "fireproof": "no list that merges by position",
+        "gun": "needs its storage adapter to answer in Node.js",
+        "orbitdb": "no list that merges by position"
+      },
+      "failed": {}
+    },
+    {
+      "id": "list-remove-disk",
+      "kind": "list-remove",
+      "kindTitle": "Remove from a list",
+      "line": "disk",
+      "lineTitle": "On disk",
+      "title": "Remove from a list, on disk",
+      "description": "Remove the element at a random index, then push one, so the list keeps its length: one op is both. Each library's own persistence on node:fs, every write awaited.",
+      "unit": "ops/s",
+      "results": {
+        "syncom": {
+          "median": 7420.800933436859,
+          "min": 7164.323048970558,
+          "max": 7662.30449717182
+        },
+        "syncom-secure": {
+          "median": 4187.661582600426,
+          "min": 4043.7690408464828,
+          "max": 4244.5993670588905
+        },
+        "yjs": {
+          "median": 2192.6961291936564,
+          "min": 1803.7083015599749,
+          "max": 3130.7459570888454
+        },
+        "automerge": {
+          "median": 903.5684331271281,
+          "min": 837.2744665092416,
+          "max": 986.7931923842348
+        },
+        "loro": {
+          "median": 21692.46799314805,
+          "min": 21538.443284418434,
+          "max": 21797.61946067013
+        }
+      },
+      "unsupported": {
+        "tinybase": "no list that merges by position",
+        "pouchdb": "no list that merges by position",
+        "rxdb": "Node.js disk storages are Premium",
+        "fireproof": "no list that merges by position",
+        "gun": "no list that merges by position",
+        "orbitdb": "no list that merges by position",
+        "yjs-updates": "memory only — on disk the Yjs row stores every update already",
+        "loro-updates": "memory only — on disk the Loro row appends every update already"
+      },
+      "failed": {}
+    },
+    {
+      "id": "list-set-memory",
+      "kind": "list-set",
+      "kindTitle": "Set a list element",
+      "line": "memory",
+      "lineTitle": "In memory",
+      "title": "Set a list element, in memory",
+      "description": "Give the element at a random index a new value — an element of its own, not a delete and an insert. Nothing touches the disk.",
+      "unit": "ops/s",
+      "results": {
+        "syncom": {
+          "median": 28537.97876746939,
+          "min": 26837.254694213243,
+          "max": 31552.13484007081
+        },
+        "syncom-secure": {
+          "median": 13156.185436981908,
+          "min": 12712.974538896691,
+          "max": 14547.321366922031
+        },
+        "automerge": {
+          "median": 1941.1906913607465,
+          "min": 1682.4624541210287,
+          "max": 2573.921879822279
+        },
+        "loro": {
+          "median": 476833.5273573842,
+          "min": 457213.0209714111,
+          "max": 483510.6461465773
+        },
+        "loro-updates": {
+          "median": 110790.12847526898,
+          "min": 105897.13840985119,
+          "max": 111385.16353637962
+        }
+      },
+      "unsupported": {
+        "yjs": "no element of its own to set",
+        "tinybase": "no list that merges by position",
+        "pouchdb": "no list that merges by position",
+        "rxdb": "no list that merges by position",
+        "fireproof": "no list that merges by position",
+        "gun": "needs its storage adapter to answer in Node.js",
+        "orbitdb": "no list that merges by position",
+        "yjs-updates": "no element of its own to set"
+      },
+      "failed": {}
+    },
+    {
+      "id": "list-set-disk",
+      "kind": "list-set",
+      "kindTitle": "Set a list element",
+      "line": "disk",
+      "lineTitle": "On disk",
+      "title": "Set a list element, on disk",
+      "description": "Give the element at a random index a new value — an element of its own, not a delete and an insert. Each library's own persistence on node:fs, every write awaited.",
+      "unit": "ops/s",
+      "results": {
+        "syncom": {
+          "median": 12842.952563304369,
+          "min": 12608.51226122251,
+          "max": 13180.734540948952
+        },
+        "syncom-secure": {
+          "median": 7186.131281402643,
+          "min": 7068.882433165294,
+          "max": 7544.2456519427005
+        },
+        "automerge": {
+          "median": 1476.3090428542341,
+          "min": 1270.070973023758,
+          "max": 1702.531723160675
+        },
+        "loro": {
+          "median": 45411.36983715499,
+          "min": 44989.320308612645,
+          "max": 45768.33510034678
+        }
+      },
+      "unsupported": {
+        "yjs": "no element of its own to set",
+        "tinybase": "no list that merges by position",
+        "pouchdb": "no list that merges by position",
+        "rxdb": "Node.js disk storages are Premium",
+        "fireproof": "no list that merges by position",
+        "gun": "no list that merges by position",
+        "orbitdb": "no list that merges by position",
+        "yjs-updates": "memory only — on disk the Yjs row stores every update already",
+        "loro-updates": "memory only — on disk the Loro row appends every update already"
+      },
+      "failed": {}
+    },
+    {
+      "id": "list-move-memory",
+      "kind": "list-move",
+      "kindTitle": "Move a list element",
+      "line": "memory",
+      "lineTitle": "In memory",
+      "title": "Move a list element, in memory",
+      "description": "Move the element at a random index to another random index — the element itself, merged once. Nothing touches the disk.",
+      "unit": "ops/s",
+      "results": {
+        "syncom": {
+          "median": 12613.657467944708,
+          "min": 10804.117106206228,
+          "max": 14147.708298265188
+        },
+        "syncom-secure": {
+          "median": 8118.836106685138,
+          "min": 6698.880651530555,
+          "max": 9054.582558151087
+        },
+        "loro": {
+          "median": 350342.774062443,
+          "min": 348334.416460861,
+          "max": 351736.71529813664
+        },
+        "loro-updates": {
+          "median": 94523.45098984636,
+          "min": 90906.95199989111,
+          "max": 95852.3045019574
+        }
+      },
+      "unsupported": {
+        "yjs": "no move",
+        "automerge": "no move",
+        "tinybase": "no list that merges by position",
+        "pouchdb": "no list that merges by position",
+        "rxdb": "no list that merges by position",
+        "fireproof": "no list that merges by position",
+        "gun": "needs its storage adapter to answer in Node.js",
+        "orbitdb": "no list that merges by position",
+        "yjs-updates": "no move"
+      },
+      "failed": {}
+    },
+    {
+      "id": "list-move-disk",
+      "kind": "list-move",
+      "kindTitle": "Move a list element",
+      "line": "disk",
+      "lineTitle": "On disk",
+      "title": "Move a list element, on disk",
+      "description": "Move the element at a random index to another random index — the element itself, merged once. Each library's own persistence on node:fs, every write awaited.",
+      "unit": "ops/s",
+      "results": {
+        "syncom": {
+          "median": 5279.726158372474,
+          "min": 5062.273426757371,
+          "max": 5686.564849778629
+        },
+        "syncom-secure": {
+          "median": 3661.2058800285895,
+          "min": 3048.9067803084563,
+          "max": 3995.2511446082412
+        },
+        "loro": {
+          "median": 42226.58087982621,
+          "min": 29806.358620577466,
+          "max": 42886.935433272
+        }
+      },
+      "unsupported": {
+        "yjs": "no move",
+        "automerge": "no move",
+        "tinybase": "no list that merges by position",
+        "pouchdb": "no list that merges by position",
+        "rxdb": "Node.js disk storages are Premium",
+        "fireproof": "no list that merges by position",
+        "gun": "no list that merges by position",
+        "orbitdb": "no list that merges by position",
+        "yjs-updates": "memory only — on disk the Yjs row stores every update already",
+        "loro-updates": "memory only — on disk the Loro row appends every update already"
       },
       "failed": {}
     }

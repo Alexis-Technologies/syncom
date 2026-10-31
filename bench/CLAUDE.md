@@ -5,7 +5,9 @@ The comparison's own package, the generated charts. what holds for the whole rep
 ## Layout
 
 ```
-bench/                    one file per subject + support/harness.js; run-all.js skips compare.js and report.js
+bench/                    one file per subject + support/ (harness.js; profile.js, a CPU profile by src/ file and function;
+                          machine.js); run-all.js skips compare.js and report.js; write.js measures another checkout
+                          under SYNCOM_BENCH_ROOT (an A/B) and prints `--detail` (promises, bytes) and `--profile <row>`
 bench/compare/            the cross-library comparison: its OWN package.json (the alternatives, never syncom's
                           devDependencies), adapters/ (one per library), worker.js, size.js
 bench/report/             model.mjs (what every chart shows) + svg.mjs (README images); bench/report.js writes both

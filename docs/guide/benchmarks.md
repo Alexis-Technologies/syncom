@@ -34,35 +34,37 @@ spread of the samples and the exact version.
 
 **In memory**
 
-| Library | Insert a record<br><sub>ops/s</sub> | Update a field<br><sub>ops/s</sub> | Read a record<br><sub>ops/s</sub> | Increment a counter<br><sub>ops/s</sub> | Insert 1,000 at once<br><sub>records/s</sub> | Replicate a store<br><sub>records/s</sub> | Type at the end of a text<br><sub>ops/s</sub> | Type at the start of a text<br><sub>ops/s</sub> | Type anywhere in a text<br><sub>ops/s</sub> | Replay an editing trace<br><sub>ops/s</sub> |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| **syncom**<br><sub>core + text + sync, memory() · v0.0.1</sub> | 45,600 | 79,100 | 887,000 | 82,000 | 42,700 | 82,200 | 49,100 | 23,300 | 25,900 | 44,200 |
-| **syncom**<br><sub>/all: signed, chained, memory() · v0.0.1</sub> | 15,000 | 18,700 | 898,000 | 18,700 | 24,400 | 22,000 | 15,500 | 13,500 | 12,800 | 30,000 |
-| Yjs<br><sub>Y.Doc, a Y.Map per record · v13.6.33</sub> | 230,000 | 393,000 | 3,780,000 | — | 277,000 | 98,300 | 366,000 | 531,000 | 31,700 | 53,300 |
-| Automerge<br><sub>Automerge.change, Counter · v3.5.0</sub> | 520 | 2,000 | 10,400,000 | 1,950 | 9,200 | 21,500 | 24,800 | 22,300 | 21,900 | 18,300 |
-| Loro<br><sub>LoroDoc, a LoroMap per record · v1.16.4</sub> | 36,300 | 355,000 | 311,000 | 352,000 | 84,600 | 107,000 | 635,000 | 452,000 | 343,000 | 481,000 |
-| TinyBase<br><sub>MergeableStore · v10.0.1</sub> | 24,600 | 111,000 | 1,440,000 | — | 24,700 | 11,600 | — | — | — | — |
-| PouchDB<br><sub>pouchdb-adapter-memory · v9.0.0</sub> | 20,800 | 7,980 | 31,600 | — | 77,000 | 18,700 | — | — | — | — |
-| RxDB<br><sub>memory storage · v17.6.0</sub> | 9,490 | 53,500 | 282,000 | — | 2,390,000 | 61,400 | — | — | — | — |
-| Fireproof<br><sub>memory:// store · v0.24.19</sub> | 331 | 400 | 727 | — | 22,700 | — | — | — | — | — |
-| OrbitDB<br><sub>documents, memory blockstore · v4.0.0</sub> | 1,100 | 30.3 | 84.2 | — | 1,090 | 224 | — | — | — | — |
+| Library | Insert a record<br><sub>ops/s</sub> | Update a field<br><sub>ops/s</sub> | Read a record<br><sub>ops/s</sub> | Increment a counter<br><sub>ops/s</sub> | Insert 1,000 at once<br><sub>records/s</sub> | Replicate a store<br><sub>records/s</sub> | Type at the end of a text<br><sub>ops/s</sub> | Type at the start of a text<br><sub>ops/s</sub> | Type anywhere in a text<br><sub>ops/s</sub> | Replay an editing trace<br><sub>ops/s</sub> | Push onto a list<br><sub>ops/s</sub> | Insert into a list<br><sub>ops/s</sub> | Remove from a list<br><sub>ops/s</sub> | Set a list element<br><sub>ops/s</sub> | Move a list element<br><sub>ops/s</sub> |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **syncom**<br><sub>core + text + sync, memory() · v0.0.1</sub> | 45,600 | 79,100 | 887,000 | 82,000 | 42,700 | 82,200 | 49,100 | 23,300 | 25,900 | 44,200 | 11,400 | 6,450 | 11,900 | 28,500 | 12,600 |
+| **syncom**<br><sub>/all: signed, chained, memory() · v0.0.1</sub> | 15,000 | 18,700 | 898,000 | 18,700 | 24,400 | 22,000 | 15,500 | 13,500 | 12,800 | 30,000 | 8,160 | 5,620 | 6,560 | 13,200 | 8,120 |
+| Yjs<br><sub>Y.Doc, a Y.Map per record · v13.6.33</sub> | 230,000 | 393,000 | 3,780,000 | — | 277,000 | 98,300 | 366,000 | 531,000 | 31,700 | 53,300 | 15,600 | 27,100 | 2,410 | — | — |
+| Yjs<br><sub>Y.Doc, every update encoded (an update listener) · v13.6.33</sub> | 122,000 | 219,000 | 3,670,000 | — | 174,000 | 84,700 | 32,400 | 256,000 | 28,200 | 47,000 | 12,700 | 25,200 | 2,320 | — | — |
+| Automerge<br><sub>Automerge.change, Counter · v3.5.0</sub> | 520 | 2,000 | 10,400,000 | 1,950 | 9,200 | 21,500 | 24,800 | 22,300 | 21,900 | 18,300 | 2,330 | 5,960 | 1,530 | 1,940 | — |
+| Loro<br><sub>LoroDoc, a LoroMap per record · v1.16.4</sub> | 36,300 | 355,000 | 311,000 | 352,000 | 84,600 | 107,000 | 635,000 | 452,000 | 343,000 | 481,000 | 534,000 | 450,000 | 238,000 | 477,000 | 350,000 |
+| Loro<br><sub>LoroDoc, every commit exported (subscribeLocalUpdates) · v1.16.4</sub> | 13,400 | 105,000 | 306,000 | 105,000 | 64,200 | 108,000 | 103,000 | 104,000 | 93,000 | 102,000 | 103,000 | 104,000 | 50,300 | 111,000 | 94,500 |
+| TinyBase<br><sub>MergeableStore · v10.0.1</sub> | 24,600 | 111,000 | 1,440,000 | — | 24,700 | 11,600 | — | — | — | — | — | — | — | — | — |
+| PouchDB<br><sub>pouchdb-adapter-memory · v9.0.0</sub> | 20,800 | 7,980 | 31,600 | — | 77,000 | 18,700 | — | — | — | — | — | — | — | — | — |
+| RxDB<br><sub>memory storage · v17.6.0</sub> | 9,490 | 53,500 | 282,000 | — | 2,390,000 | 61,400 | — | — | — | — | — | — | — | — | — |
+| Fireproof<br><sub>memory:// store · v0.24.19</sub> | 331 | 400 | 727 | — | 22,700 | — | — | — | — | — | — | — | — | — | — |
+| OrbitDB<br><sub>documents, memory blockstore · v4.0.0</sub> | 1,100 | 30.3 | 84.2 | — | 1,090 | 224 | — | — | — | — | — | — | — | — | — |
 
 **On disk**
 
-| Library | Insert a record<br><sub>ops/s</sub> | Update a field<br><sub>ops/s</sub> | Read a record<br><sub>ops/s</sub> | Increment a counter<br><sub>ops/s</sub> | Insert 1,000 at once<br><sub>records/s</sub> | Replicate a store<br><sub>records/s</sub> | Type at the end of a text<br><sub>ops/s</sub> | Type at the start of a text<br><sub>ops/s</sub> | Type anywhere in a text<br><sub>ops/s</sub> |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| **syncom**<br><sub>core + text + sync, node:fs · v0.0.1</sub> | 5,870 | 17,900 | 894,000 | 21,400 | 6,980 | 7,270 | 28,400 | 11,100 | 9,530 |
-| **syncom**<br><sub>/all: signed, chained, node:fs · v0.0.1</sub> | 4,790 | 6,460 | 887,000 | 7,080 | 6,960 | 5,770 | 12,400 | 5,610 | 5,490 |
-| Yjs<br><sub>y-leveldb · v13.6.33</sub> | 18,100 | 22,400 | 3,760,000 | — | 156,000 | 52,400 | 15,500 | 23,900 | 14,200 |
-| Automerge<br><sub>automerge-repo, NodeFS storage · v3.5.0</sub> | 485 | 1,230 | 10,400,000 | 1,190 | 7,560 | 3,070 | 3,400 | 3,320 | 3,220 |
-| Loro<br><sub>updates appended to a file · v1.16.4</sub> | 20,300 | 41,500 | 301,000 | 40,800 | 67,500 | 106,000 | 30,000 | 45,700 | 29,800 |
-| TinyBase<br><sub>MergeableStore, file persister · v10.0.1</sub> | 175 | 303 | 1,420,000 | — | 15,200 | 10,900 | — | — | — |
-| PouchDB<br><sub>LevelDB (Node default) · v9.0.0</sub> | 26,800 | 8,690 | 42,800 | — | 69,300 | 16,700 | — | — | — |
-| Fireproof<br><sub>file:// store · v0.24.19</sub> | 308 | 317 | 720 | — | 21,400 | — | — | — | — |
-| GUN<br><sub>RAD on node:fs · v0.2020.1241</sub> | 3.61 | 3.73 | 758 | — | 2,040 | — | — | — | — |
-| OrbitDB<br><sub>documents, LevelDB · v4.0.0</sub> | 899 | 16.4 | 84.5 | — | 868 | 191 | — | — | — |
+| Library | Insert a record<br><sub>ops/s</sub> | Update a field<br><sub>ops/s</sub> | Read a record<br><sub>ops/s</sub> | Increment a counter<br><sub>ops/s</sub> | Insert 1,000 at once<br><sub>records/s</sub> | Replicate a store<br><sub>records/s</sub> | Type at the end of a text<br><sub>ops/s</sub> | Type at the start of a text<br><sub>ops/s</sub> | Type anywhere in a text<br><sub>ops/s</sub> | Push onto a list<br><sub>ops/s</sub> | Insert into a list<br><sub>ops/s</sub> | Remove from a list<br><sub>ops/s</sub> | Set a list element<br><sub>ops/s</sub> | Move a list element<br><sub>ops/s</sub> |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **syncom**<br><sub>core + text + sync, node:fs · v0.0.1</sub> | 5,870 | 17,900 | 894,000 | 21,400 | 6,980 | 7,270 | 28,400 | 11,100 | 9,530 | 8,420 | 4,000 | 7,420 | 12,800 | 5,280 |
+| **syncom**<br><sub>/all: signed, chained, node:fs · v0.0.1</sub> | 4,790 | 6,460 | 887,000 | 7,080 | 6,960 | 5,770 | 12,400 | 5,610 | 5,490 | 6,030 | 3,380 | 4,190 | 7,190 | 3,660 |
+| Yjs<br><sub>y-leveldb · v13.6.33</sub> | 18,100 | 22,400 | 3,760,000 | — | 156,000 | 52,400 | 15,500 | 23,900 | 14,200 | 11,500 | 12,700 | 2,190 | — | — |
+| Automerge<br><sub>automerge-repo, NodeFS storage · v3.5.0</sub> | 485 | 1,230 | 10,400,000 | 1,190 | 7,560 | 3,070 | 3,400 | 3,320 | 3,220 | 1,490 | 2,450 | 904 | 1,480 | — |
+| Loro<br><sub>updates appended to a file · v1.16.4</sub> | 20,300 | 41,500 | 301,000 | 40,800 | 67,500 | 106,000 | 30,000 | 45,700 | 29,800 | 45,100 | 44,600 | 21,700 | 45,400 | 42,200 |
+| TinyBase<br><sub>MergeableStore, file persister · v10.0.1</sub> | 175 | 303 | 1,420,000 | — | 15,200 | 10,900 | — | — | — | — | — | — | — | — |
+| PouchDB<br><sub>LevelDB (Node default) · v9.0.0</sub> | 26,800 | 8,690 | 42,800 | — | 69,300 | 16,700 | — | — | — | — | — | — | — | — |
+| Fireproof<br><sub>file:// store · v0.24.19</sub> | 308 | 317 | 720 | — | 21,400 | — | — | — | — | — | — | — | — | — |
+| GUN<br><sub>RAD on node:fs · v0.2020.1241</sub> | 3.61 | 3.73 | 758 | — | 2,040 | — | — | — | — | — | — | — | — | — |
+| OrbitDB<br><sub>documents, LevelDB · v4.0.0</sub> | 899 | 16.4 | 84.5 | — | 868 | 191 | — | — | — | — | — | — | — | — |
 
-_Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library in a fresh process · 2026-10-27. Medians, rounded to three significant figures; — where the library has no such operation, no such storage, or no in-process sync, failed where it did not finish twice (the chart above says why)._
+_Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library in a fresh process · 2026-10-31. Medians, rounded to three significant figures; — where the library has no such operation, no such storage, or no in-process sync, failed where it did not finish twice (the chart above says why)._
 
 <!-- bench:compare:end -->
 
@@ -144,6 +146,28 @@ second; the JS heap the trace leaves is about 8 MB for syncom and 3 MB for Yjs (
 Loro's live in WebAssembly memory, which that number does not count). The trace is downloaded at
 bench time, not redistributed (CC-BY-4.0).
 
+**With every change encoded.** Yjs encodes an update only while something listens to the
+document, and Loro exports nothing at a commit unless something subscribes — while a syncom
+write in memory is still an op appended to its log. Two more rows, in memory only, run the same
+documents with that work done, as a provider or a persistence would: Yjs with an `update`
+listener, Loro with `subscribeLocalUpdates`. Loro then types about 100,000 characters a second
+wherever it types and replays the trace at 102,000 keystrokes a second; Yjs types 28,000 to
+256,000 and replays the trace at 47,000.
+
+### Lists against the CRDT libraries
+
+Five scenarios edit a list of 10,000 numbers: push one, insert one at a random index, remove one
+at a random index (and push one, so the list keeps its length — one op is both), give one a new
+value, move one. Only the libraries with a list that merges by position take part — syncom's
+list field, `Y.Array`, Automerge's list, `LoroList` (`LoroMovableList` for set and move, the
+list Loro's documentation gives for both); `Y.Array` has no element of its own to set and no
+move, Automerge's list no move. In memory the pure build makes 6,400 to 28,500 edits a second
+(5,600 to 13,200 secure) — a list op still copies the list's reading whole, as the
+50,000-element rows of syncom's own benchmarks below show — Yjs 2,400 to 27,000, Automerge
+1,500 to 6,000 and Loro 238,000 to 534,000 (about 100,000 with every commit exported). On disk
+syncom makes 4,000 to 12,800, Yjs 2,200 to 12,700, Automerge 900 to 2,500 and Loro 21,700 to
+45,400.
+
 ### Method
 
 - **A fresh process for every pair.** Every (library, scenario) pair runs in its own process
@@ -173,6 +197,10 @@ bench time, not redistributed (CC-BY-4.0).
   has no in-process transport, so its two nodes talk libp2p over TCP on 127.0.0.1. Fireproof
   syncs only through a cloud or a gateway, and GUN only over its WebSocket or WebRTC mesh, so
   neither takes part in that scenario.
+- **Two rows encode every change.** `Yjs · every update encoded` and `Loro · every commit
+  exported` are the memory documents with an `update` listener and `subscribeLocalUpdates`:
+  the work an application that persists or syncs the document has done for every write. They
+  run in memory only — on disk the Yjs and Loro rows store every update already.
 - **The libraries are installed on their own.** They live in `bench/compare/package.json`,
   which `pnpm bench:compare:install` installs, so none of them is a dependency of syncom.
 
@@ -274,6 +302,24 @@ records them.
 </details>
 
 <details>
+<summary>Write path — 10 rows</summary>
+
+| Benchmark | ops/s | per operation |
+| --- | ---: | ---: |
+| inc — a counter, awaited, memory() | 90,168 | 11.1 µs |
+| update — one field, awaited, memory() | 82,352 | 12.1 µs |
+| splice — a keystroke at the end of a text, awaited, memory() | 60,796 | 16.4 µs |
+| splice — a keystroke at the start of a text, awaited, memory() | 40,691 | 24.6 µs |
+| splice — a keystroke anywhere in a text (seeded), awaited, memory() | 35,868 | 27.9 µs |
+| splice — keystrokes at the end, pipelined by 1,024, memory() | 62,365 | 16 µs |
+| transact — 64 keystrokes at the end as one transaction, memory() | 87,147 | 11.5 µs |
+| push — one element onto a list of 10,000, awaited, memory() | 19,243 | 52 µs |
+| inc — a counter, awaited, node:fs | 36,172 | 27.6 µs |
+| splice — a keystroke at the end of a text, awaited, node:fs | 29,532 | 33.9 µs |
+
+</details>
+
+<details>
 <summary>Search — 9 rows</summary>
 
 | Benchmark | ops/s | per operation |
@@ -322,38 +368,41 @@ records them.
 </details>
 
 <details>
-<summary>Lists and text — 28 rows</summary>
+<summary>Lists and text — 31 rows</summary>
 
 | Benchmark | ops/s | per operation |
 | --- | ---: | ---: |
-| applyOp — append one char to a 1 000-char text (one run) | 389,968 | 2.56 µs |
-| applyOp — insert one char at a random index of a 1 000-char text (one run) | 92,584 | 10.8 µs |
-| applyOp — replace one char at a random index of a 1 000-char text (a cut, an insert) | 115,447 | 8.66 µs |
-| applyOp — prepend one char to a 1 000-run text | 122,760 | 8.15 µs |
-| applyOp — append one char to an older block (a fork: the rope re-hinted) | 278,533 | 3.59 µs |
-| applyOp — merge two pictures of a 1 000-char text | 175 | 5.71 ms |
-| hydrate + render — a 1 000-char text from its JSON | 301,594 | 3.32 µs |
-| hydrate + render — a 100 KB text (one run) from its JSON | 12,335 | 81.1 µs |
-| applyOp — insert one char at a random index of a 100 KB text (one run) | 60,453 | 16.5 µs |
-| applyOp — insert one char at a random index of a 100 KB text (10 000 runs) | 59,629 | 16.8 µs |
-| applyOp — prepend one char to a 10 000-run text | 120,054 | 8.33 µs |
-| applyOp — replace one char at a random index of a 100 KB text (10 000 runs) | 93,243 | 10.7 µs |
-| hydrate + render — a 100 KB text (10 000 runs) from its JSON | 57 | 17.5 ms |
-| spans — 1 000 chars, 50 overlapping marks | 6,723 | 149 µs |
-| applyOp — insert one char mid-text into 20 000 chars under 5 000 marks | 42,192 | 23.7 µs |
-| applyOp — a mark over 20 000 chars under 5 000 marks | 1,341 | 746 µs |
-| applyOp — setAt in a 50 000-element list | 2,035 | 491 µs |
-| applyOp — move in a 50 000-element list | 3,969 | 252 µs |
-| applyOp — push onto a 50 000-element list | 1,980 | 505 µs |
-| applyOp — type into a run 200 000 long, a char inside it read per keystroke | 233,303 | 4.29 µs |
-| applyOp — the first op on a record read from its JSON (20 000 edits) | 19 | 52.6 ms |
-| diff — one keystroke in a 1 KB text | 284,071 | 3.52 µs |
-| storage.push — one char (memory fsi, defer: 0) | 9,911 | 101 µs |
-| storage.updateText — one keystroke in a 1 KB text (memory fsi, defer: 0) | 5,333 | 188 µs |
-| storage.move — in a 100-element list (memory fsi, defer: 0) | 1,099 | 910 µs |
-| storage.push — one char into a 10 KB text (memory fsi, defer: 0) | 8,209 | 122 µs |
-| storage.push — one char into a 10 KB text (memory fsi, defer: 16, the default) | 16,892 | 59.2 µs |
-| storage.push — one char into a 10 KB text, pipelined by 1 000 (memory fsi) | 27,263 | 36.7 µs |
+| applyOp — append one char to a 1 000-char text (one run) | 371,503 | 2.69 µs |
+| applyOp — insert one char at a random index of a 1 000-char text (one run) | 87,906 | 11.4 µs |
+| applyOp — replace one char at a random index of a 1 000-char text (a cut, an insert) | 110,295 | 9.07 µs |
+| applyOp — prepend one char to a 1 000-run text | 113,145 | 8.84 µs |
+| applyOp — append one char to an older block (a fork: the rope re-hinted) | 276,995 | 3.61 µs |
+| applyOp — merge two pictures of a 1 000-char text | 224 | 4.46 ms |
+| hydrate + render — a 1 000-char text from its JSON | 259,333 | 3.86 µs |
+| hydrate + render — a 100 KB text (one run) from its JSON | 14,066 | 71.1 µs |
+| applyOp — insert one char at a random index of a 100 KB text (one run) | 53,580 | 18.7 µs |
+| applyOp — insert one char at a random index of a 100 KB text (10 000 runs) | 67,238 | 14.9 µs |
+| applyOp — prepend one char to a 10 000-run text | 99,676 | 10 µs |
+| applyOp — replace one char at a random index of a 100 KB text (10 000 runs) | 84,183 | 11.9 µs |
+| hydrate + render — a 100 KB text (10 000 runs) from its JSON | 50 | 20 ms |
+| spans — 1 000 chars, 50 overlapping marks | 6,868 | 146 µs |
+| applyOp — insert one char mid-text into 20 000 chars under 5 000 marks | 40,950 | 24.4 µs |
+| applyOp — a mark over 20 000 chars under 5 000 marks | 1,398 | 715 µs |
+| applyOp — setAt in a 50 000-element list | 4,556 | 219 µs |
+| applyOp — move in a 50 000-element list | 2,678 | 373 µs |
+| applyOp — push onto a 50 000-element list | 4,916 | 203 µs |
+| applyOp — insert at a random index of a 50 000-element list | 3,425 | 292 µs |
+| applyOp — type into a run 200 000 long, a char inside it read per keystroke | 246,268 | 4.06 µs |
+| applyOp — the first op on a record read from its JSON (20 000 edits) | 13 | 76.9 ms |
+| diff — one keystroke in a 1 KB text | 250,673 | 3.99 µs |
+| applyOp — the B4 editing trace, every version kept (259 778 edits) | 122,323 | 8.18 µs |
+| applyOp — the B4 trace's ops applied by a replica that starts empty | 154,684 | 6.46 µs |
+| storage.push — one char (memory fsi, defer: 0) | 9,918 | 101 µs |
+| storage.updateText — one keystroke in a 1 KB text (memory fsi, defer: 0) | 5,349 | 187 µs |
+| storage.move — in a 100-element list (memory fsi, defer: 0) | 2,297 | 435 µs |
+| storage.push — one char into a 10 KB text (memory fsi, defer: 0) | 8,350 | 120 µs |
+| storage.push — one char into a 10 KB text (memory fsi, defer: 16, the default) | 17,188 | 58.2 µs |
+| storage.push — one char into a 10 KB text, pipelined by 1 000 (memory fsi) | 27,244 | 36.7 µs |
 
 </details>
 
@@ -506,7 +555,7 @@ records them.
 
 </details>
 
-_pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-27._
+_pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-31._
 
 <!-- bench:engine:end -->
 

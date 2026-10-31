@@ -12,7 +12,11 @@
  * where a cost per element would show: a keystroke and a mark in a text
  * under 5 000 marks, setAt, move and push in a list of 50 000, typing into
  * a run 200 000 long while reading inside it, the first op on a record read
- * from its JSON.
+ * from its JSON. The automerge-paper editing trace (B4, the one bench/compare
+ * replays through the storage) runs through `applyOp` alone, twice: as the
+ * storage folds it — a version per keystroke — and as a second replica
+ * applies the ops the first one made; skipped until bench/compare has
+ * downloaded the trace.
  *
  * Run with `node bench/sequence.js` or `pnpm bench`.
  */
@@ -24,6 +28,8 @@ const S = require('../src/text/sequence.js');
 const { applyOp, open } = require('../src/all/all.js');
 const { diff } = require('../src/text/myers.js');
 const { memory } = require('../src/memory/memory.js');
+const fs = require('node:fs');
+const { FILE: TRACE, loadTrace } = require('./compare/trace.js');
 
 const op = (type, ts, origin, key, value) => ({ origin, seq: ts, ts, type, id: 'r', key, value });
 
@@ -214,6 +220,11 @@ const main = async () => {
     const place = S.placeInsert(idx, S.lengthOf(idx), 'A', 1);
     big50 = applyOp(big50, edit('splice', ++ts, 'A', { ...place, content: [ts] }, 'items')).entry;
   });
+  await bench('applyOp — insert at a random index of a 50 000-element list', () => {
+    const idx = S.indexOf(big50, 'items');
+    const place = S.placeInsert(idx, Math.floor(random() * (S.lengthOf(idx) + 1)), 'A', 1);
+    big50 = applyOp(big50, edit('splice', ++ts, 'A', { ...place, content: [ts] }, 'items')).entry;
+  });
   // A run typed 200 000 characters long, its middle read on each keystroke
   // (a selection, a mark's edge): the body is held in sealed segments, so
   // the read never copies what was typed.
@@ -244,6 +255,51 @@ const main = async () => {
   const before = 'the quick brown fox '.repeat(50);
   const after = `${before.slice(0, 500)}X${before.slice(500)}`;
   await bench('diff — one keystroke in a 1 KB text', () => diff(before, after));
+
+  // B4: every edit a cut and an insert placed where updateText would place
+  // them, applied to the newest entry — a version per keystroke, as the
+  // storage keeps them; then the ops the first replay made, applied in their
+  // order by a replica that starts empty, as a peer's page lands.
+  if (fs.existsSync(TRACE)) {
+    const { edits, finalText } = await loadTrace();
+    let made = [];
+    const replay = () => {
+      const ops = [];
+      let entry = null;
+      let stamp = 0;
+      for (let i = 0; i < edits.length; i++) {
+        const e = edits[i];
+        if (e[1] > 0) {
+          const cut = S.rangesOf(S.indexOf(entry, 'body'), e[0], e[1]);
+          const next = op('splice', ++stamp, 'A', 'body', { cut, content: '' });
+          ops.push(next);
+          entry = applyOp(entry, next).entry;
+        }
+        if (e.length > 2) {
+          const content = e.length === 3 ? e[2] : e.slice(2).join('');
+          const where = entry === null ? { at: S.HEAD } : S.placeInsert(S.indexOf(entry, 'body'), e[0], 'A');
+          const next = op('splice', ++stamp, 'A', 'body', { ...where, content });
+          ops.push(next);
+          entry = applyOp(entry, next).entry;
+        }
+      }
+      if (S.render(S.indexOf(entry, 'body')) !== finalText) throw new Error('the B4 trace replays to another text');
+      made = ops;
+    };
+    const opts = { warmup: 1, measureMs: 1, opsPerIteration: edits.length };
+    await bench('applyOp — the B4 editing trace, every version kept (259 778 edits)', replay, opts);
+    await bench(
+      "applyOp — the B4 trace's ops applied by a replica that starts empty",
+      () => {
+        let entry = null;
+        for (let i = 0; i < made.length; i++) entry = applyOp(entry, made[i]).entry;
+        if (S.render(S.indexOf(entry, 'body')) !== finalText) throw new Error('the replica reads another text');
+      },
+      { ...opts, opsPerIteration: made.length },
+    );
+  } else {
+    console.log('(the B4 rows are skipped: run `pnpm bench:compare --scenarios trace` once to download the trace)');
+  }
 
   const storage = await open({ path: '/bench', fsi: memory(), logger: false, defer: 0 });
   const id = await storage.insert({});
