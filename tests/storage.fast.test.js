@@ -176,3 +176,50 @@ test('a write that adds a $type to an untyped record is validated: never made at
   await storage.update('r', { $type: 'Post', title: 'ok' });
   assert.strictEqual((await storage.get('r')).title, 'ok');
 });
+
+test('a write made at once whose group does not reach the disk is taken back whole: nothing in flight, the seq and the chain start over', async (t) => {
+  const inner = memory();
+  let failing = false;
+  // The log's open files fail, as a journal's append or a file per group.
+  const fsi = {
+    ...inner,
+    write: (dir, name, body) =>
+      failing && dir.endsWith('/log/open') ? Promise.reject(new Error('disk full')) : inner.write(dir, name, body),
+    append: (dir, name, body) =>
+      failing && dir.endsWith('/log/open') ? Promise.reject(new Error('disk full')) : inner.append(dir, name, body),
+  };
+  const storage = await open({ path: '/failing', fsi, logger: false, lock: false, plugins: [text] });
+  t.after(() => storage.close().catch(() => {}));
+  const id = await storage.insert({ n: 1 });
+  await storage.push(id, 'body', 'ab');
+  const seq = storage.log.next;
+  const heard = [];
+  storage.on('change', (op) => heard.push(op));
+  failing = true;
+  const a = storage.inc(id, 'hits', 1);
+  const b = storage.splice(id, 'body', 2, 0, 'c');
+  assert.strictEqual(storage.log.next, seq + 2, 'the seqs are taken at once');
+  assert.ok(storage.stats().inflight > 0, 'the writes are in flight');
+  await assert.rejects(a, /disk full/);
+  await assert.rejects(b, /disk full/);
+  failing = false;
+  assert.strictEqual(storage.stats().inflight, 0, 'nothing in flight');
+  assert.strictEqual(storage.log.next, seq, 'the seqs were taken back');
+  assert.deepStrictEqual(heard, [], 'nothing announced');
+  assert.deepStrictEqual(await storage.get(id), { n: 1, body: 'ab' }, 'nothing of them was read');
+  // The next writes build on what is durable — the seq, and the chain's `prev`, of before the failure — and a
+  // keystroke sent without waiting right after grows the one before it, never the failed op.
+  const z = storage.splice(id, 'body', 2, 0, 'z');
+  const y = storage.splice(id, 'body', 3, 0, 'y');
+  await z;
+  await y;
+  assert.strictEqual(heard.length, 1, 'typed on: the two keystrokes one op');
+  assert.strictEqual(heard[0].seq, seq);
+  assert.strictEqual(heard[0].prev, storage.log.fingerprintOf(heard[0].origin, seq - 1));
+  assert.strictEqual(storage.log.next, seq + 1);
+  assert.deepStrictEqual(await storage.get(id), { n: 1, body: 'abzy' });
+  assert.deepStrictEqual(
+    heard.map((op) => op.value.content),
+    ['zy'],
+  );
+});

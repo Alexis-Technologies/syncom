@@ -134,6 +134,8 @@ class Storage extends Emitter {
   // of the records it touched alone.
   #followers = new Map();
   #following = null;
+  // The one close, once called: a second call waits for it, never seals twice.
+  #closing = null;
   // Whether a write may be made at once (#fastCommit): set at open, once the
   // plugins have set up — nothing asynchronous on the write path.
   #fastIssue = false;
@@ -1999,8 +2001,17 @@ class Storage extends Emitter {
     await this.#run(() => this.#flushDeferred());
   }
 
-  /** Stops replication and seals the log. Further writes are refused — from the moment close() is called. */
-  async close() {
+  /**
+   * Stops replication and seals the log: the open text handles' edits are
+   * logged first, then further writes are refused. Called again — while it
+   * runs or after — it is the same close.
+   */
+  close() {
+    if (this.#closing === null) this.#closing = this.#close();
+    return this.#closing;
+  }
+
+  async #close() {
     if (this.#closed) return;
     // What an editor's handle holds goes to the log while writes are taken.
     try {

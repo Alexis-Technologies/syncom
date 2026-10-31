@@ -1033,6 +1033,13 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **A write made at once, and `close()`.** A fire-and-forget write made at once (`inc()`, `splice()`,
+  `update()`… not awaited) whose group failed raised no `unhandledRejection`, unlike the same call
+  through the queue: the call has a promise of its own. A write made at once that could not be
+  announced as its group landed left its record in flight for good and its turn unannounced: the
+  entry is settled whatever the slot did, and the `transaction` event leaves whatever a refresh did.
+  `close()` called twice in one tick sealed the log twice and emitted `close` twice: a second call is
+  the same close.
 - **A peer's splice whose cut was shaped otherwise stopped its page.** A cut of `[null]`, `[5]` or
   `[[null, 0, 1]]` threw out of `applyOp` before the engine could refuse it, so `applyRemote()`
   failed the whole page and the peer's stream stalled there on every retry. It is refused as

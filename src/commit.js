@@ -721,7 +721,9 @@ const commitAtOnce = (core, type, id, payload, options, current, answer) => {
   // A keystroke that continues the one before it in the group still
   // gathering is that op, grown (the plugin's `coalesce`): no op of its own.
   const into = coalesced(core, op, made, current);
-  if (into !== null) return answer ? into.done.then(() => into.op) : into.done;
+  // A promise of the call's own (never the group's, whose rejection is handled already): a write nobody awaits
+  // that fails is an unhandled rejection, as one through the queue is.
+  if (into !== null) return answer ? into.done.then(() => into.op) : into.done.then(NOOP);
   // The chain at once: `hashText` is at once on both platforms.
   const key = opKey(op);
   const prev = core.fingerprintOf(key, op.seq - 1);
@@ -736,9 +738,8 @@ const commitAtOnce = (core, type, id, payload, options, current, answer) => {
   made.position = position;
   made.done = ticket.done;
   lastOf(core).made = made;
-  // The group's promise settles once its writes have landed: what a write
-  // that answers nothing resolves with.
-  return answer ? ticket.done.then(() => op) : ticket.done;
+  // The group's promise settles once its writes have landed: what the call resolves after.
+  return answer ? ticket.done.then(() => op) : ticket.done.then(NOOP);
 };
 
 // The write made at once last, per storage (by its log): what the next
@@ -793,12 +794,20 @@ const continues = (a, op) =>
 // announce (no afterWrite hook) — what `land` and `announce` do, in order.
 const landNow = (core, made, position) => {
   const { op, entry, delta, changes, source, via, before, previous } = made;
-  core.deferred(op.id, entry, position);
-  core.settled(op.id, position);
+  try {
+    core.deferred(op.id, entry, position);
+  } finally {
+    // In flight no more whatever the slot did: the next write builds on the cache, never on a phantom.
+    core.settled(op.id, position);
+  }
   core.saveCatalog();
-  announce(core, op, entry, delta, null, source, via, { seq: position, before, previous, txn: position }, changes);
-  if (core.listening('transaction')) {
-    transacted(core, { local: true, via, source, message: op.msg ?? null, ops: [op], changes: tagged(op, changes) });
+  try {
+    announce(core, op, entry, delta, null, source, via, { seq: position, before, previous, txn: position }, changes);
+  } finally {
+    // Durable whatever a refresh did: the turn is announced (src/log.js says a throw here out loud).
+    if (core.listening('transaction')) {
+      transacted(core, { local: true, via, source, message: op.msg ?? null, ops: [op], changes: tagged(op, changes) });
+    }
   }
 };
 

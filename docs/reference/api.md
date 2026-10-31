@@ -130,7 +130,7 @@ naming the subpath; `@alexify/syncom/all` has both.
 | `mergeSnapshot(records, { via, from }?)` | `Promise<void>` | Joins a page (as `merge` ops of this node) |
 | `adoptVector(vector, { via, from }?)` | `Promise<SyncOp \| null>` | Records what a joined snapshot covers (an `advance` op); the keys of this node's own streams, and a seq that is no positive safe integer, are left out |
 | `observe(id, path?, listener)` | `() => void` | Watches record `id`: `listener(changes, event)` after every turn that changed it — a local write, a transaction, a peer's page, a joined snapshot — with the record's [changes](../guide/versions#changes) of that turn, tagged by `id`, and the `transaction` event they came in; under `path` (a field or a [path](../guide/storage#paths)), the changes of that field, of what hangs under it and of a prefix of it (a reset above), and the whole record's (a delete, a purge). A listener is contained like an event listener; a throw or a rejection is logged (`listener.error`). Returns the function that stops watching |
-| `close()` | `Promise<void>` | Stops sync, lands what is in flight and the deferred files, and seals the log; further writes are refused (`CLOSED`) |
+| `close()` | `Promise<void>` | Logs what the open text handles hold (`edits.unlogged` where some could not be), then stops sync, lands what is in flight and the deferred files, and seals the log; further writes are refused (`CLOSED`). Called again, while it runs or after, it is the same close |
 
 Properties: `fsi` (the backend given to `open()`, wrapped when `durable`, or
 the platform's), `schema`, `schemaInfo` (`{ version, hash, previous, held }`,
