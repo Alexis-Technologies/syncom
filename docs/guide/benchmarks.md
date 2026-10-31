@@ -36,9 +36,9 @@ spread of the samples and the exact version.
 
 | Library | Insert a record<br><sub>ops/s</sub> | Update a field<br><sub>ops/s</sub> | Read a record<br><sub>ops/s</sub> | Increment a counter<br><sub>ops/s</sub> | Insert 1,000 at once<br><sub>records/s</sub> | Replicate a store<br><sub>records/s</sub> | Type at the end of a text<br><sub>ops/s</sub> | Type at the start of a text<br><sub>ops/s</sub> | Type anywhere in a text<br><sub>ops/s</sub> | Replay an editing trace<br><sub>ops/s</sub> | Push onto a list<br><sub>ops/s</sub> | Insert into a list<br><sub>ops/s</sub> | Remove from a list<br><sub>ops/s</sub> | Set a list element<br><sub>ops/s</sub> | Move a list element<br><sub>ops/s</sub> |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| **syncom**<br><sub>core + text + sync, memory() · v0.0.1</sub> | 42,800 | 106,000 | 848,000 | 109,000 | 40,600 | 73,400 | 73,800 | 30,100 | 33,400 | 160,000 | 38,300 | 18,900 | 22,300 | 43,000 | 15,400 |
-| **syncom**<br><sub>core + text + sync, typed through openText(), memory() · v0.0.1</sub> | — | — | — | — | — | — | 289,000 | 72,500 | 43,400 | 168,000 | — | — | — | — | — |
-| **syncom**<br><sub>/all: signed, chained, memory() · v0.0.1</sub> | 15,400 | 19,200 | 821,000 | 19,400 | 25,100 | 22,000 | 17,600 | 14,100 | 14,200 | 34,700 | 15,200 | 11,700 | 7,450 | 15,300 | 9,710 |
+| **syncom**<br><sub>core + text + sync, memory() · v0.0.1</sub> | 42,800 | 106,000 | 848,000 | 109,000 | 40,600 | 73,400 | 74,200 | 47,500 | 37,900 | 158,000 | 42,100 | 25,400 | 22,500 | 48,300 | 19,900 |
+| **syncom**<br><sub>core + text + sync, typed through openText(), memory() · v0.0.1</sub> | — | — | — | — | — | — | 322,000 | 93,900 | 39,800 | 170,000 | — | — | — | — | — |
+| **syncom**<br><sub>/all: signed, chained, memory() · v0.0.1</sub> | 15,400 | 19,200 | 821,000 | 19,400 | 25,100 | 22,000 | 17,900 | 15,500 | 13,400 | 38,000 | 15,900 | 13,200 | 7,870 | 15,800 | 11,000 |
 | Yjs<br><sub>Y.Doc, a Y.Map per record · v13.6.33</sub> | 204,000 | 354,000 | 3,770,000 | — | 217,000 | 99,800 | 342,000 | 461,000 | 27,700 | 52,000 | 15,100 | 26,000 | 2,200 | — | — |
 | Yjs<br><sub>Y.Doc, every update encoded (an update listener) · v13.6.33</sub> | 111,000 | 211,000 | 3,540,000 | — | 145,000 | 82,000 | 31,600 | 251,000 | 26,400 | 46,000 | 15,400 | 25,700 | 2,270 | — | — |
 | Automerge<br><sub>Automerge.change, Counter · v3.5.0</sub> | 497 | 1,880 | 9,860,000 | 1,830 | 8,500 | 21,100 | 23,400 | 21,500 | 20,600 | 17,300 | 2,280 | 5,480 | 1,470 | 1,900 | — |
@@ -54,9 +54,9 @@ spread of the samples and the exact version.
 
 | Library | Insert a record<br><sub>ops/s</sub> | Update a field<br><sub>ops/s</sub> | Read a record<br><sub>ops/s</sub> | Increment a counter<br><sub>ops/s</sub> | Insert 1,000 at once<br><sub>records/s</sub> | Replicate a store<br><sub>records/s</sub> | Type at the end of a text<br><sub>ops/s</sub> | Type at the start of a text<br><sub>ops/s</sub> | Type anywhere in a text<br><sub>ops/s</sub> | Push onto a list<br><sub>ops/s</sub> | Insert into a list<br><sub>ops/s</sub> | Remove from a list<br><sub>ops/s</sub> | Set a list element<br><sub>ops/s</sub> | Move a list element<br><sub>ops/s</sub> |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| **syncom**<br><sub>core + text + sync, node:fs · v0.0.1</sub> | 5,410 | 22,100 | 885,000 | 22,700 | 6,310 | 6,540 | 30,900 | 13,200 | 11,700 | 15,000 | 10,100 | 9,220 | 12,900 | 7,480 |
-| **syncom**<br><sub>core + text + sync, typed through openText(), node:fs · v0.0.1</sub> | — | — | — | — | — | — | 277,000 | 34,500 | 33,200 | — | — | — | — | — |
-| **syncom**<br><sub>/all: signed, chained, node:fs · v0.0.1</sub> | 4,300 | 7,000 | 878,000 | 7,420 | 6,350 | 5,360 | 12,100 | 5,750 | 5,430 | 6,970 | 5,290 | 4,400 | 6,100 | 4,430 |
+| **syncom**<br><sub>core + text + sync, node:fs · v0.0.1</sub> | 5,410 | 22,100 | 885,000 | 22,700 | 6,310 | 6,540 | 30,400 | 24,500 | 20,700 | 16,600 | 10,900 | 10,600 | 14,300 | 8,560 |
+| **syncom**<br><sub>core + text + sync, typed through openText(), node:fs · v0.0.1</sub> | — | — | — | — | — | — | 262,000 | 93,200 | 40,700 | — | — | — | — | — |
+| **syncom**<br><sub>/all: signed, chained, node:fs · v0.0.1</sub> | 4,300 | 7,000 | 878,000 | 7,420 | 6,350 | 5,360 | 12,000 | 10,600 | 9,620 | 7,480 | 5,700 | 4,640 | 6,280 | 4,650 |
 | Yjs<br><sub>y-leveldb · v13.6.33</sub> | 17,900 | 20,400 | 3,780,000 | — | 133,000 | 49,300 | 19,400 | 20,600 | 12,300 | 10,500 | 12,000 | 2,070 | — | — |
 | Automerge<br><sub>automerge-repo, NodeFS storage · v3.5.0</sub> | 459 | 1,130 | 10,100,000 | 1,140 | 7,110 | 2,960 | 2,870 | 2,990 | 2,880 | 1,510 | 2,210 | 850 | 1,350 | — |
 | Loro<br><sub>updates appended to a file · v1.16.4</sub> | 19,800 | 39,200 | 291,000 | 39,800 | 63,400 | 95,000 | 39,500 | 40,800 | 40,100 | 42,300 | 41,000 | 20,100 | 42,200 | 39,200 |
@@ -128,31 +128,21 @@ start (every insert anchors into the same spot) and anywhere (seeded). Only the 
 text that merges by position take part — syncom's text field, `Y.Text`, Automerge's text,
 `LoroText`; the databases and the stores show "—". A syncom keystroke awaited is an op appended
 to the log, its text a copy-on-write rope (O(log n) per keystroke), the record file written once
-per deferred window. In memory the pure build types about 74,000 characters a second at the end,
-30,000 at the start and 33,000 at random — ahead of Automerge (21,000 to 23,000), ahead of Yjs at
-random (28,000) — where Yjs types 342,000 to 461,000 at either end and Loro 294,000 to 609,000;
-the secure build, signing every keystroke, types 14,000 to 18,000.
+per deferred window. In memory the pure build types about 74,000 characters a second at the end, 48,000 at the start and 38,000 at random — ahead of Automerge (21,000 to 23,000), ahead of Yjs at random (28,000) — where Yjs types 342,000 to 461,000 at either end and Loro 294,000 to 609,000; the secure build, signing every keystroke, types 13,000 to 18,000.
 
 **Typed through a handle** (`syncom · typed through openText()`), what an editor binding does:
 each keystroke is made at once over the handle's reading, and the edits are logged a window
-later as one transaction, keystrokes that continue each other as one op — the row awaits the
-handle's flush every 1,024 keystrokes, so the log's cost is in its rate. It types about 289,000
-characters a second at the end in memory (Yjs 342,000, Loro 609,000), 73,000 at the start and
-43,000 at random; on disk 277,000 at the end — the fastest durable keystroke here, seven times
-Loro's append (40,000) and fourteen times y-leveldb (19,000) — and 33,000 to 35,000 elsewhere.
+later as one transaction, keystrokes that continue each other — a word typed backward too — as one op; the row awaits the handle's flush every 1,024 keystrokes, so the log's cost is in its rate. It types about 322,000 characters a second at the end in memory (Yjs 342,000, Loro 609,000), 94,000 at the start and 40,000 at random; on disk 262,000 at the end — the fastest durable keystroke here, six times Loro's append (40,000) and fourteen times y-leveldb (19,000) — 93,000 at the start and 41,000 at random.
 
 **On disk** is the durable line: every keystroke awaited until the library reports it stored —
 y-leveldb's `storeUpdate`, Loro's update appended to a file, automerge-repo's flush, syncom's log
-append. syncom types 31,000 characters a second at the end and 12,000 to 13,000 elsewhere (a
-keystroke elsewhere is a new run of the record's metadata, written with the file once per
-window; 5,400 to 12,000 secure), Automerge about 2,900, Yjs 12,000 to 21,000 and Loro about
+append. syncom types 30,000 characters a second at the end and 21,000 to 25,000 elsewhere (a keystroke elsewhere is a new run, written with the newest piece of the record's file once per window; 9,600 to 12,000 secure), Automerge about 2,900, Yjs 12,000 to 21,000 and Loro about
 40,000.
 
 The editing-trace benchmark the CRDT libraries publish (automerge-perf: 259,778 keystrokes of a
 real paper, 182,315 inserts and 77,463 deletes) runs as the `trace` scenario: the whole trace
 replayed into one text as an editor sends it — one keystroke after another, not waiting for
-each — and the text read back whole at the end. The pure build replays it in 1.6 seconds
-(160,000 keystrokes a second; 168,000 through a handle; 7.5 seconds secure), Yjs in 5,
+each — and the text read back whole at the end. The pure build replays it in 1.6 seconds (158,000 keystrokes a second; 170,000 through a handle; 6.8 seconds secure), Yjs in 5,
 Automerge in 15 and Loro in half a second. The JS heap the trace leaves is about 23 MB for
 syncom — the engine's text is 8 MB of it, the rest the trace's log held in memory (its entries,
 and the files of the `memory()` backend) — and 4 MB for Yjs (Automerge's and Loro's live in
@@ -174,11 +164,10 @@ at a random index (and push one, so the list keeps its length — one op is both
 value, move one. Only the libraries with a list that merges by position take part — syncom's
 list field, `Y.Array`, Automerge's list, `LoroList` (`LoroMovableList` for set and move, the
 list Loro's documentation gives for both); `Y.Array` has no element of its own to set and no
-move, Automerge's list no move. In memory the pure build makes 15,000 to 43,000 edits a second
-(7,500 to 15,000 secure) — a list op costs O(log n), its reading made when it is read, as the
+move, Automerge's list no move. In memory the pure build makes 20,000 to 48,000 edits a second (7,900 to 16,000 secure) — a list op costs O(log n), its reading made when it is read, as the
 50,000-element rows of syncom's own benchmarks below show — ahead of Yjs at push and remove
 (Yjs 2,200 to 26,000), Automerge 1,500 to 5,500 and Loro 230,000 to 520,000 (49,000 to 107,000
-with every commit exported). On disk syncom makes 7,500 to 15,000, Yjs 2,100 to 12,000,
+with every commit exported). On disk syncom makes 8,600 to 17,000, Yjs 2,100 to 12,000,
 Automerge 850 to 2,200 and Loro 20,000 to 42,000.
 
 ### Method

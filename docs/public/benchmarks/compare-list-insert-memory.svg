@@ -86,24 +86,24 @@ yjs@13.6.33</title>
 <text class="value" x="520.9193998607129" y="285">25.7k</text>
 </g>
 <g><title>syncom · core + text + sync, memory() · v0.0.1
-18,898 ops/s
-52.9 µs per operation
-samples 18.1k – 36.3k
+25,397 ops/s
+39.4 µs per operation
+samples 22.8k – 38.2k
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="316">syncom</text>
 <text class="sublabel" x="20" y="331">core + text + sync, memory() · v0.0.1</text>
-<path class="bar primary" d="M372,312H497.34307991939534A4,4 0 0 1 501.34307991939534,316V322A4,4 0 0 1 497.34307991939534,326H372Z"/>
-<text class="value" x="507.34307991939534" y="325">18.9k</text>
+<path class="bar primary" d="M372,312H510.3516728335958A4,4 0 0 1 514.3516728335958,316V322A4,4 0 0 1 510.3516728335958,326H372Z"/>
+<text class="value" x="520.3516728335958" y="325">25.4k</text>
 </g>
 <g><title>syncom · /all: signed, chained, memory() · v0.0.1
-11,657 ops/s
-85.8 µs per operation
-samples 10.8k – 13.9k
+13,212 ops/s
+75.7 µs per operation
+samples 11.7k – 14.1k
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="356">syncom</text>
 <text class="sublabel" x="20" y="371">/all: signed, chained, memory() · v0.0.1</text>
-<path class="bar secondary" d="M372,352H476.0817117652124A4,4 0 0 1 480.0817117652124,356V362A4,4 0 0 1 476.0817117652124,366H372Z"/>
-<text class="value" x="486.0817117652124" y="365">11.7k</text>
+<path class="bar secondary" d="M372,352H481.59215539028907A4,4 0 0 1 485.59215539028907,356V362A4,4 0 0 1 481.59215539028907,366H372Z"/>
+<text class="value" x="491.59215539028907" y="365">13.2k</text>
 </g>
 <g><title>Automerge · Automerge.change, Counter · v3.5.0
 5,478 ops/s

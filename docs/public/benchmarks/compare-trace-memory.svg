@@ -55,26 +55,26 @@ loro-crdt@1.16.4</title>
 <text class="value" x="632.3292312822645" y="165">471k</text>
 </g>
 <g><title>syncom · core + text + sync, typed through openText(), memory() · v0.0.1
-167,503 ops/s
-5.97 µs per operation
-samples 166k – 169k
+169,958 ops/s
+5.88 µs per operation
+samples 169k – 171k
 JS heap after the trace 22.4 MB
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="196">syncom</text>
 <text class="sublabel" x="20" y="211">core + text + sync, typed through openText(), memory() ·…</text>
-<path class="bar primary" d="M372,192H554.0512646539169A4,4 0 0 1 558.0512646539169,196V202A4,4 0 0 1 554.0512646539169,206H372Z"/>
-<text class="value" x="564.0512646539169" y="205">168k</text>
+<path class="bar primary" d="M372,192H555.0117786633253A4,4 0 0 1 559.0117786633253,196V202A4,4 0 0 1 555.0117786633253,206H372Z"/>
+<text class="value" x="565.0117786633253" y="205">170k</text>
 </g>
 <g><title>syncom · core + text + sync, memory() · v0.0.1
-160,251 ops/s
-6.24 µs per operation
-samples 157k – 163k
+158,071 ops/s
+6.33 µs per operation
+samples 157k – 159k
 JS heap after the trace 21.8 MB
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="236">syncom</text>
 <text class="sublabel" x="20" y="251">core + text + sync, memory() · v0.0.1</text>
-<path class="bar primary" d="M372,232H551.1298647301073A4,4 0 0 1 555.1298647301073,236V242A4,4 0 0 1 551.1298647301073,246H372Z"/>
-<text class="value" x="561.1298647301073" y="245">160k</text>
+<path class="bar primary" d="M372,232H550.2256039355341A4,4 0 0 1 554.2256039355341,236V242A4,4 0 0 1 550.2256039355341,246H372Z"/>
+<text class="value" x="560.2256039355341" y="245">158k</text>
 </g>
 <g><title>Loro · LoroDoc, every commit exported (subscribeLocalUpdates) · v1.16.4
 97,822 ops/s
@@ -110,14 +110,14 @@ yjs@13.6.33</title>
 <text class="value" x="478.74296767918383" y="365">46k</text>
 </g>
 <g><title>syncom · /all: signed, chained, memory() · v0.0.1
-34,694 ops/s
-28.8 µs per operation
-samples 34.5k – 34.9k
+38,045 ops/s
+26.3 µs per operation
+samples 37.8k – 38.3k
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="396">syncom</text>
 <text class="sublabel" x="20" y="411">/all: signed, chained, memory() · v0.0.1</text>
-<path class="bar secondary" d="M372,392H450.1195326294818A4,4 0 0 1 454.1195326294818,396V402A4,4 0 0 1 450.1195326294818,406H372Z"/>
-<text class="value" x="460.1195326294818" y="405">34.7k</text>
+<path class="bar secondary" d="M372,392H456.2060314776889A4,4 0 0 1 460.2060314776889,396V402A4,4 0 0 1 456.2060314776889,406H372Z"/>
+<text class="value" x="466.2060314776889" y="405">38k</text>
 </g>
 <g><title>Automerge · Automerge.change, Counter · v3.5.0
 17,297 ops/s

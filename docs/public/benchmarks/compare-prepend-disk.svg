@@ -44,55 +44,55 @@
 <line class="grid" x1="676" y1="156" x2="676" y2="396"/>
 <text class="tick" x="676" y="412" text-anchor="middle">100k</text>
 <line class="axis" x1="372" y1="156" x2="372" y2="396"/>
+<g><title>syncom · core + text + sync, typed through openText(), node:fs · v0.0.1
+93,222 ops/s
+10.7 µs per operation
+samples 92.5k – 98.7k
+@alexify/syncom@0.0.1</title>
+<text class="label primary" x="20" y="173">syncom</text>
+<text class="sublabel" x="20" y="188">core + text + sync, typed through openText(), node:fs ·…</text>
+<path class="bar primary" d="M372,169H667.3666194110325A4,4 0 0 1 671.3666194110325,173V179A4,4 0 0 1 667.3666194110325,183H372Z"/>
+<text class="value" x="677.3666194110325" y="182">93.2k</text>
+</g>
 <g><title>Loro · updates appended to a file · v1.16.4
 40,791 ops/s
 24.5 µs per operation
 samples 40.6k – 42.3k
 loro-crdt@1.16.4</title>
-<text class="label" x="20" y="173">Loro</text>
-<text class="sublabel" x="20" y="188">updates appended to a file · v1.16.4</text>
-<path class="bar" d="M372,169H612.8064443466106A4,4 0 0 1 616.8064443466106,173V179A4,4 0 0 1 612.8064443466106,183H372Z"/>
-<text class="value" x="622.8064443466106" y="182">40.8k</text>
+<text class="label" x="20" y="213">Loro</text>
+<text class="sublabel" x="20" y="228">updates appended to a file · v1.16.4</text>
+<path class="bar" d="M372,209H612.8064443466106A4,4 0 0 1 616.8064443466106,213V219A4,4 0 0 1 612.8064443466106,223H372Z"/>
+<text class="value" x="622.8064443466106" y="222">40.8k</text>
 </g>
-<g><title>syncom · core + text + sync, typed through openText(), node:fs · v0.0.1
-34,546 ops/s
-28.9 µs per operation
-samples 23.3k – 79.1k
+<g><title>syncom · core + text + sync, node:fs · v0.0.1
+24,529 ops/s
+40.8 µs per operation
+samples 23.8k – 25.1k
 @alexify/syncom@0.0.1</title>
-<text class="label primary" x="20" y="213">syncom</text>
-<text class="sublabel" x="20" y="228">core + text + sync, typed through openText(), node:fs ·…</text>
-<path class="bar primary" d="M372,209H601.835770173117A4,4 0 0 1 605.835770173117,213V219A4,4 0 0 1 601.835770173117,223H372Z"/>
-<text class="value" x="611.835770173117" y="222">34.5k</text>
+<text class="label primary" x="20" y="253">syncom</text>
+<text class="sublabel" x="20" y="268">core + text + sync, node:fs · v0.0.1</text>
+<path class="bar primary" d="M372,249H579.2302277193085A4,4 0 0 1 583.2302277193085,253V259A4,4 0 0 1 579.2302277193085,263H372Z"/>
+<text class="value" x="589.2302277193085" y="262">24.5k</text>
 </g>
 <g><title>Yjs · y-leveldb · v13.6.33
 20,635 ops/s
 48.5 µs per operation
 samples 18.9k – 21.5k
 yjs@13.6.33</title>
-<text class="label" x="20" y="253">Yjs</text>
-<text class="sublabel" x="20" y="268">y-leveldb · v13.6.33</text>
-<path class="bar" d="M372,249H567.8207516329081A4,4 0 0 1 571.8207516329081,253V259A4,4 0 0 1 567.8207516329081,263H372Z"/>
-<text class="value" x="577.8207516329081" y="262">20.6k</text>
-</g>
-<g><title>syncom · core + text + sync, node:fs · v0.0.1
-13,176 ops/s
-75.9 µs per operation
-samples 12.2k – 14.8k
-@alexify/syncom@0.0.1</title>
-<text class="label primary" x="20" y="293">syncom</text>
-<text class="sublabel" x="20" y="308">core + text + sync, node:fs · v0.0.1</text>
-<path class="bar primary" d="M372,289H538.2050156880132A4,4 0 0 1 542.2050156880132,293V299A4,4 0 0 1 538.2050156880132,303H372Z"/>
-<text class="value" x="548.2050156880132" y="302">13.2k</text>
+<text class="label" x="20" y="293">Yjs</text>
+<text class="sublabel" x="20" y="308">y-leveldb · v13.6.33</text>
+<path class="bar" d="M372,289H567.8207516329081A4,4 0 0 1 571.8207516329081,293V299A4,4 0 0 1 567.8207516329081,303H372Z"/>
+<text class="value" x="577.8207516329081" y="302">20.6k</text>
 </g>
 <g><title>syncom · /all: signed, chained, node:fs · v0.0.1
-5,751 ops/s
-174 µs per operation
-samples 5,570 – 6,074
+10,608 ops/s
+94.3 µs per operation
+samples 10.3k – 10.7k
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="333">syncom</text>
 <text class="sublabel" x="20" y="348">/all: signed, chained, node:fs · v0.0.1</text>
-<path class="bar secondary" d="M372,329H483.48064916069507A4,4 0 0 1 487.48064916069507,333V339A4,4 0 0 1 483.48064916069507,343H372Z"/>
-<text class="value" x="493.48064916069507" y="342">5,751</text>
+<path class="bar secondary" d="M372,329H523.8966891648635A4,4 0 0 1 527.8966891648635,333V339A4,4 0 0 1 523.8966891648635,343H372Z"/>
+<text class="value" x="533.8966891648635" y="342">10.6k</text>
 </g>
 <g><title>Automerge · automerge-repo, NodeFS storage · v3.5.0
 2,992 ops/s

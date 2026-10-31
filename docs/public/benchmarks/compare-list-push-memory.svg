@@ -66,34 +66,34 @@ loro-crdt@1.16.4</title>
 <text class="value" x="581.4900399373694" y="205">102k</text>
 </g>
 <g><title>syncom · core + text + sync, memory() · v0.0.1
-38,300 ops/s
-26.1 µs per operation
-samples 33.9k – 49.1k
+42,080 ops/s
+23.8 µs per operation
+samples 35.2k – 57.3k
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="236">syncom</text>
 <text class="sublabel" x="20" y="251">core + text + sync, memory() · v0.0.1</text>
-<path class="bar primary" d="M372,232H528.4307417648142A4,4 0 0 1 532.4307417648142,236V242A4,4 0 0 1 528.4307417648142,246H372Z"/>
-<text class="value" x="538.4307417648142" y="245">38.3k</text>
+<path class="bar primary" d="M372,232H532.5731816699971A4,4 0 0 1 536.5731816699971,236V242A4,4 0 0 1 532.5731816699971,246H372Z"/>
+<text class="value" x="542.5731816699971" y="245">42.1k</text>
+</g>
+<g><title>syncom · /all: signed, chained, memory() · v0.0.1
+15,947 ops/s
+62.7 µs per operation
+samples 14.7k – 16.9k
+@alexify/syncom@0.0.1</title>
+<text class="label secondary" x="20" y="276">syncom</text>
+<text class="sublabel" x="20" y="291">/all: signed, chained, memory() · v0.0.1</text>
+<path class="bar secondary" d="M372,272H489.87203641095977A4,4 0 0 1 493.87203641095977,276V282A4,4 0 0 1 489.87203641095977,286H372Z"/>
+<text class="value" x="499.87203641095977" y="285">15.9k</text>
 </g>
 <g><title>Yjs · Y.Doc, every update encoded (an update listener) · v13.6.33
 15,411 ops/s
 64.9 µs per operation
 samples 13.1k – 18.2k
 yjs@13.6.33</title>
-<text class="label" x="20" y="276">Yjs</text>
-<text class="sublabel" x="20" y="291">Y.Doc, every update encoded (an update listener) · v13.6…</text>
-<path class="bar" d="M372,272H488.3681469545689A4,4 0 0 1 492.3681469545689,276V282A4,4 0 0 1 488.3681469545689,286H372Z"/>
-<text class="value" x="498.3681469545689" y="285">15.4k</text>
-</g>
-<g><title>syncom · /all: signed, chained, memory() · v0.0.1
-15,153 ops/s
-66 µs per operation
-samples 14.2k – 16.6k
-@alexify/syncom@0.0.1</title>
-<text class="label secondary" x="20" y="316">syncom</text>
-<text class="sublabel" x="20" y="331">/all: signed, chained, memory() · v0.0.1</text>
-<path class="bar secondary" d="M372,312H487.6235162256424A4,4 0 0 1 491.6235162256424,316V322A4,4 0 0 1 487.6235162256424,326H372Z"/>
-<text class="value" x="497.6235162256424" y="325">15.2k</text>
+<text class="label" x="20" y="316">Yjs</text>
+<text class="sublabel" x="20" y="331">Y.Doc, every update encoded (an update listener) · v13.6…</text>
+<path class="bar" d="M372,312H488.3681469545689A4,4 0 0 1 492.3681469545689,316V322A4,4 0 0 1 488.3681469545689,326H372Z"/>
+<text class="value" x="498.3681469545689" y="325">15.4k</text>
 </g>
 <g><title>Yjs · Y.Doc, a Y.Map per record · v13.6.33
 15,096 ops/s

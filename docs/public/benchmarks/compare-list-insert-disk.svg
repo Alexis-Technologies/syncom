@@ -65,24 +65,24 @@ yjs@13.6.33</title>
 <text class="value" x="495.7371476289274" y="222">12k</text>
 </g>
 <g><title>syncom · core + text + sync, node:fs · v0.0.1
-10,110 ops/s
-98.9 µs per operation
-samples 9,406 – 12.1k
+10,881 ops/s
+91.9 µs per operation
+samples 9,527 – 11.5k
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="253">syncom</text>
 <text class="sublabel" x="20" y="268">core + text + sync, node:fs · v0.0.1</text>
-<path class="bar primary" d="M271,249H470.4618129894252A4,4 0 0 1 474.4618129894252,253V259A4,4 0 0 1 470.4618129894252,263H271Z"/>
-<text class="value" x="480.4618129894252" y="262">10.1k</text>
+<path class="bar primary" d="M271,249H476.92809941054645A4,4 0 0 1 480.92809941054645,253V259A4,4 0 0 1 476.92809941054645,263H271Z"/>
+<text class="value" x="486.92809941054645" y="262">10.9k</text>
 </g>
 <g><title>syncom · /all: signed, chained, node:fs · v0.0.1
-5,288 ops/s
-189 µs per operation
-samples 5,106 – 5,723
+5,700 ops/s
+175 µs per operation
+samples 5,609 – 6,591
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="293">syncom</text>
 <text class="sublabel" x="20" y="308">/all: signed, chained, node:fs · v0.0.1</text>
-<path class="bar secondary" d="M271,289H413.4641731931932A4,4 0 0 1 417.4641731931932,293V299A4,4 0 0 1 413.4641731931932,303H271Z"/>
-<text class="value" x="423.4641731931932" y="302">5,288</text>
+<path class="bar secondary" d="M271,289H420.0608608334974A4,4 0 0 1 424.0608608334974,293V299A4,4 0 0 1 420.0608608334974,303H271Z"/>
+<text class="value" x="430.0608608334974" y="302">5,700</text>
 </g>
 <g><title>Automerge · automerge-repo, NodeFS storage · v3.5.0
 2,214 ops/s

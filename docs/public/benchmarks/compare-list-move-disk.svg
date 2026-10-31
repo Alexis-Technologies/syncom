@@ -56,24 +56,24 @@ loro-crdt@1.16.4</title>
 <text class="value" x="599.5988743336494" y="199">39.2k</text>
 </g>
 <g><title>syncom · core + text + sync, node:fs · v0.0.1
-7,483 ops/s
-134 µs per operation
-samples 7,192 – 8,456
+8,559 ops/s
+117 µs per operation
+samples 7,966 – 9,036
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="230">syncom</text>
 <text class="sublabel" x="20" y="245">core + text + sync, node:fs · v0.0.1</text>
-<path class="bar primary" d="M271,226H444.0017550266176A4,4 0 0 1 448.0017550266176,230V236A4,4 0 0 1 444.0017550266176,240H271Z"/>
-<text class="value" x="454.0017550266176" y="239">7,483</text>
+<path class="bar primary" d="M271,226H455.8141043839305A4,4 0 0 1 459.8141043839305,230V236A4,4 0 0 1 455.8141043839305,240H271Z"/>
+<text class="value" x="465.8141043839305" y="239">8,559</text>
 </g>
 <g><title>syncom · /all: signed, chained, node:fs · v0.0.1
-4,431 ops/s
-226 µs per operation
-samples 4,192 – 4,630
+4,653 ops/s
+215 µs per operation
+samples 4,356 – 5,220
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="270">syncom</text>
 <text class="sublabel" x="20" y="285">/all: signed, chained, node:fs · v0.0.1</text>
-<path class="bar secondary" d="M271,266H397.906773417473A4,4 0 0 1 401.906773417473,270V276A4,4 0 0 1 397.906773417473,280H271Z"/>
-<text class="value" x="407.906773417473" y="279">4,431</text>
+<path class="bar secondary" d="M271,266H402.22131760982734A4,4 0 0 1 406.22131760982734,270V276A4,4 0 0 1 402.22131760982734,280H271Z"/>
+<text class="value" x="412.22131760982734" y="279">4,653</text>
 </g>
 <text class="caption" x="20" y="334">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
 <text class="caption" x="20" y="350">in a fresh process · 2026-10-31</text>

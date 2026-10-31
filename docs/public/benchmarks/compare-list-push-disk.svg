@@ -55,14 +55,14 @@ loro-crdt@1.16.4</title>
 <text class="value" x="606.4278839718315" y="182">42.3k</text>
 </g>
 <g><title>syncom · core + text + sync, node:fs · v0.0.1
-14,997 ops/s
-66.7 µs per operation
-samples 13.7k – 15.6k
+16,631 ops/s
+60.1 µs per operation
+samples 13.9k – 18.3k
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="213">syncom</text>
 <text class="sublabel" x="20" y="228">core + text + sync, node:fs · v0.0.1</text>
-<path class="bar primary" d="M271,209H505.14315440510416A4,4 0 0 1 509.14315440510416,213V219A4,4 0 0 1 505.14315440510416,223H271Z"/>
-<text class="value" x="515.1431544051042" y="222">15k</text>
+<path class="bar primary" d="M271,209H514.2349963151097A4,4 0 0 1 518.2349963151097,213V219A4,4 0 0 1 514.2349963151097,223H271Z"/>
+<text class="value" x="524.2349963151097" y="222">16.6k</text>
 </g>
 <g><title>Yjs · y-leveldb · v13.6.33
 10,515 ops/s
@@ -75,14 +75,14 @@ yjs@13.6.33</title>
 <text class="value" x="483.9128171009922" y="262">10.5k</text>
 </g>
 <g><title>syncom · /all: signed, chained, node:fs · v0.0.1
-6,968 ops/s
-144 µs per operation
-samples 6,740 – 8,139
+7,484 ops/s
+134 µs per operation
+samples 6,877 – 8,616
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="293">syncom</text>
 <text class="sublabel" x="20" y="308">/all: signed, chained, node:fs · v0.0.1</text>
-<path class="bar secondary" d="M271,289H437.72989413194125A4,4 0 0 1 441.72989413194125,293V299A4,4 0 0 1 437.72989413194125,303H271Z"/>
-<text class="value" x="447.72989413194125" y="302">6,968</text>
+<path class="bar secondary" d="M271,289H444.01107702607624A4,4 0 0 1 448.01107702607624,293V299A4,4 0 0 1 444.01107702607624,303H271Z"/>
+<text class="value" x="454.01107702607624" y="302">7,484</text>
 </g>
 <g><title>Automerge · automerge-repo, NodeFS storage · v3.5.0
 1,508 ops/s

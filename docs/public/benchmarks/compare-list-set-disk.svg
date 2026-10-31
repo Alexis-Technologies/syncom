@@ -56,24 +56,24 @@ loro-crdt@1.16.4</title>
 <text class="value" x="606.074307366335" y="199">42.2k</text>
 </g>
 <g><title>syncom · core + text + sync, node:fs · v0.0.1
-12,899 ops/s
-77.5 µs per operation
-samples 11.9k – 13.8k
+14,260 ops/s
+70.1 µs per operation
+samples 13.3k – 15.4k
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="230">syncom</text>
 <text class="sublabel" x="20" y="245">core + text + sync, node:fs · v0.0.1</text>
-<path class="bar primary" d="M271,226H491.8894058751704A4,4 0 0 1 495.8894058751704,230V236A4,4 0 0 1 491.8894058751704,240H271Z"/>
-<text class="value" x="501.8894058751704" y="239">12.9k</text>
+<path class="bar primary" d="M271,226H500.71001039407815A4,4 0 0 1 504.71001039407815,230V236A4,4 0 0 1 500.71001039407815,240H271Z"/>
+<text class="value" x="510.71001039407815" y="239">14.3k</text>
 </g>
 <g><title>syncom · /all: signed, chained, node:fs · v0.0.1
-6,104 ops/s
-164 µs per operation
-samples 5,875 – 6,213
+6,278 ops/s
+159 µs per operation
+samples 6,097 – 7,041
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="270">syncom</text>
 <text class="sublabel" x="20" y="285">/all: signed, chained, node:fs · v0.0.1</text>
-<path class="bar secondary" d="M271,266H426.0863814186682A4,4 0 0 1 430.0863814186682,270V276A4,4 0 0 1 426.0863814186682,280H271Z"/>
-<text class="value" x="436.0863814186682" y="279">6,104</text>
+<path class="bar secondary" d="M271,266H428.5601411640413A4,4 0 0 1 432.5601411640413,270V276A4,4 0 0 1 428.5601411640413,280H271Z"/>
+<text class="value" x="438.5601411640413" y="279">6,278</text>
 </g>
 <g><title>Automerge · automerge-repo, NodeFS storage · v3.5.0
 1,351 ops/s

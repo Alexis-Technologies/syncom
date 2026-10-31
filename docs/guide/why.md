@@ -71,10 +71,7 @@ from its cache at 850,000 to 890,000 a second. A write is logged, filed and cata
 records a second on disk, where the LevelDB-backed Yjs and PouchDB do 18,000 to 23,000 — a change
 to a record that is there, about 22,000. An empty replica pulls about 73,000 records a second in
 memory, behind Yjs and Loro (about 100,000); checking every op's signature on the way in brings
-that to 22,000. Typing into a text, every keystroke awaited, runs at 30,000 to 74,000 keystrokes
-a second in memory, ahead of Automerge; through an editor's handle it types 289,000 a second at
-the end — 277,000 on disk, the fastest durable keystroke measured — and the automerge-perf
-editing trace replays at 160,000 a second, three times Yjs.
+that to 22,000. Typing into a text, every keystroke awaited, runs at 38,000 to 74,000 keystrokes a second in memory, ahead of Automerge; through an editor's handle it types 322,000 a second at the end — 262,000 on disk, the fastest durable keystroke measured — and the automerge-perf editing trace replays at 158,000 a second, three times Yjs.
 
 ## When something else fits better
 

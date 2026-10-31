@@ -59,14 +59,11 @@ compares all four, row by row, from their source code: 141 rows in seven section
   appended to the log; the text is a copy-on-write rope, O(log n) per keystroke, and the record file
   is written once per deferred window. In memory the pure build (the core with `text` and `sync`,
   no signatures, no chain), every keystroke awaited, types about 74 000 characters a second at the
-  end, 30 000 at the start and 33 000 at random, where Automerge types 21 000 to 23 000, Yjs
+  end, 48 000 at the start and 38 000 at random, where Automerge types 21 000 to 23 000, Yjs
   342 000 to 461 000 at either end and 28 000 at random, and Loro 294 000 to 609 000; signing
-  every keystroke (`/all`) brings syncom to 14 000 to 18 000. Through an editor's handle
+  every keystroke (`/all`) brings syncom to 13 000 to 18 000. Through an editor's handle
   (`openText()`, what the bindings stand on: keystrokes made at once, logged a window later as one
-  transaction) it types 289 000 a second at the end — 277 000 on disk, where Yjs's y-leveldb does
-  19 000 and Loro's append 40 000. The automerge-perf editing trace (259 778 keystrokes) replays in
-  1.6 seconds (7.5 signed), Yjs in 5, Automerge in 15, Loro in half a second. Typing at the start
-  or at random — a new run every keystroke — is where Yjs and Loro stay ten times ahead.
+  transaction, a word typed backward one op) it types 322 000 a second at the end and 94 000 at the start — 262 000 and 93 000 on disk, where Yjs's y-leveldb does 19 000 to 21 000 and Loro's append 40 000. The automerge-perf editing trace (259 778 keystrokes) replays in 1.6 seconds (6.8 signed), Yjs in 5, Automerge in 15, Loro in half a second. Typing at the start through a handle is where Yjs and Loro stay five times ahead, and at random — a new run every keystroke — Loro eight times; Yjs, there, types 28 000.
 - **Size depends on what is counted.** Yjs ships 28 KB min+gzip, all of it. Automerge and Loro
   ship about 1.1 MB each, almost all of it WebAssembly. syncom's core is 56 KB and the core with
   the `text` plugin 92 KB — the core carries the storage and the op log, which the three do not;
@@ -761,11 +758,11 @@ cloned commits.
 
 A syncom keystroke is an op: stamped, appended to the log, applied to the text's rope in
 O(log n), and the record file written once per deferred window — in the secure build signed too.
-The pure build types in Automerge's range; Yjs and Loro stay one to two orders of magnitude
-ahead, Loro most of all. The keystroke that extends the writer's own run at the end is the
-cheapest (about 36 000 a second); one at the start or at random places a new run (about 20 000).
-On disk, every keystroke awaited until it is stored, syncom types 8 500 to 21 000 a second,
-Automerge about 3 300, Yjs 15 000 to 24 000 and Loro 41 000 to 47 000 (the `disk` line of the
+The pure build types two to three times Automerge's rate; Yjs and Loro stay ahead, five to ten
+times at the end, Loro most of all. The keystroke that extends the writer's own run at the end is
+the cheapest (about 74 000 a second); one at the start or at random places a new run (38 000 to
+48 000). On disk, every keystroke awaited until it is stored, syncom types 21 000 to 30 000 a
+second, Automerge about 2 900, Yjs 12 000 to 21 000 and Loro about 40 000 (the `disk` line of the
 same chart on [Benchmarks](/guide/benchmarks)).
 
 <BenchFigure chart="cores" :only="['syncom', 'syncom-text', 'syncom-all', 'yjs', 'automerge', 'loro']" />

@@ -37,11 +37,9 @@
 <text class="subtitle" x="20" y="107">that merges by position); RxDB (no list that merges by position); Fireproof (no list that merges by position);</text>
 <text class="subtitle" x="20" y="124">GUN (needs its storage adapter to answer in Node.js); OrbitDB (no list that merges by position).</text>
 <line class="grid" x1="372" y1="139" x2="372" y2="299"/>
-<text class="tick" x="372" y="315" text-anchor="middle">1,000</text>
-<line class="grid" x1="473.3333333333333" y1="139" x2="473.3333333333333" y2="299"/>
-<text class="tick" x="473.3333333333333" y="315" text-anchor="middle">10k</text>
-<line class="grid" x1="574.6666666666666" y1="139" x2="574.6666666666666" y2="299"/>
-<text class="tick" x="574.6666666666666" y="315" text-anchor="middle">100k</text>
+<text class="tick" x="372" y="315" text-anchor="middle">10k</text>
+<line class="grid" x1="524" y1="139" x2="524" y2="299"/>
+<text class="tick" x="524" y="315" text-anchor="middle">100k</text>
 <line class="grid" x1="676" y1="139" x2="676" y2="299"/>
 <text class="tick" x="676" y="315" text-anchor="middle">1M</text>
 <line class="axis" x1="372" y1="139" x2="372" y2="299"/>
@@ -52,8 +50,8 @@ samples 329k – 332k
 loro-crdt@1.16.4</title>
 <text class="label" x="20" y="156">Loro</text>
 <text class="sublabel" x="20" y="171">LoroDoc, a LoroMap per record · v1.16.4</text>
-<path class="bar" d="M372,152H623.2400552813522A4,4 0 0 1 627.2400552813522,156V162A4,4 0 0 1 623.2400552813522,166H372Z"/>
-<text class="value" x="633.2400552813522" y="165">330k</text>
+<path class="bar" d="M372,152H598.8600829220281A4,4 0 0 1 602.8600829220281,156V162A4,4 0 0 1 598.8600829220281,166H372Z"/>
+<text class="value" x="608.8600829220281" y="165">330k</text>
 </g>
 <g><title>Loro · LoroDoc, every commit exported (subscribeLocalUpdates) · v1.16.4
 91,330 ops/s
@@ -62,28 +60,28 @@ samples 88.2k – 92.3k
 loro-crdt@1.16.4</title>
 <text class="label" x="20" y="196">Loro</text>
 <text class="sublabel" x="20" y="211">LoroDoc, every commit exported (subscribeLocalUpdates) ·…</text>
-<path class="bar" d="M372,192H566.675406187278A4,4 0 0 1 570.675406187278,196V202A4,4 0 0 1 566.675406187278,206H372Z"/>
-<text class="value" x="576.675406187278" y="205">91.3k</text>
+<path class="bar" d="M372,192H514.0131092809169A4,4 0 0 1 518.0131092809169,196V202A4,4 0 0 1 514.0131092809169,206H372Z"/>
+<text class="value" x="524.0131092809169" y="205">91.3k</text>
 </g>
 <g><title>syncom · core + text + sync, memory() · v0.0.1
-15,383 ops/s
-65 µs per operation
-samples 13.1k – 23.3k
+19,944 ops/s
+50.1 µs per operation
+samples 17.3k – 24.9k
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="236">syncom</text>
 <text class="sublabel" x="20" y="251">core + text + sync, memory() · v0.0.1</text>
-<path class="bar primary" d="M372,232H488.28649639068425A4,4 0 0 1 492.28649639068425,236V242A4,4 0 0 1 488.28649639068425,246H372Z"/>
-<text class="value" x="498.28649639068425" y="245">15.4k</text>
+<path class="bar primary" d="M372,232H413.57123605695637A4,4 0 0 1 417.57123605695637,236V242A4,4 0 0 1 413.57123605695637,246H372Z"/>
+<text class="value" x="423.57123605695637" y="245">19.9k</text>
 </g>
 <g><title>syncom · /all: signed, chained, memory() · v0.0.1
-9,711 ops/s
-103 µs per operation
-samples 9,228 – 11.2k
+11,013 ops/s
+90.8 µs per operation
+samples 10.1k – 12.1k
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="276">syncom</text>
 <text class="sublabel" x="20" y="291">/all: signed, chained, memory() · v0.0.1</text>
-<path class="bar secondary" d="M372,272H468.04453945935086A4,4 0 0 1 472.04453945935086,276V282A4,4 0 0 1 468.04453945935086,286H372Z"/>
-<text class="value" x="478.04453945935086" y="285">9,711</text>
+<path class="bar secondary" d="M372,272H374.36711247392157A4,4 0 0 1 378.36711247392157,276V282A4,4 0 0 1 374.36711247392157,286H372Z"/>
+<text class="value" x="384.36711247392157" y="285">11k</text>
 </g>
 <text class="caption" x="20" y="340">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
 <text class="caption" x="20" y="356">in a fresh process · 2026-10-31</text>

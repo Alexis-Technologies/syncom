@@ -753,8 +753,7 @@ Dexie, min+gzip.
   one by one and an MIT license for everything, Node.js disk persistence included, are
   requirements.
 - **Neither** for a very long document that many people type into at once. syncom's text fields
-  type 30,000 to 74,000 keystrokes a second in memory awaited one by one and 289,000 through an
-  editor's handle, and bind to ProseMirror and CodeMirror, where Yjs and Loro type at hundreds of
+  type 38,000 to 74,000 keystrokes a second in memory awaited one by one and 322,000 through an editor's handle, and bind to ProseMirror and CodeMirror, where Yjs and Loro type at hundreds of
   thousands wherever the cursor is. They are built for
   that, and can hold the documents beside either one, which keeps the records around them;
   [Compared with CRDT libraries](/guide/vs-crdt) sets syncom against them.

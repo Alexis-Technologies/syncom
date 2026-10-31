@@ -296,9 +296,9 @@ timed. The method and the interactive charts are on the
 
 | Library | Insert a record<br><sub>ops/s</sub> | Update a field<br><sub>ops/s</sub> | Read a record<br><sub>ops/s</sub> | Increment a counter<br><sub>ops/s</sub> | Insert 1,000 at once<br><sub>records/s</sub> | Replicate a store<br><sub>records/s</sub> | Type at the end of a text<br><sub>ops/s</sub> | Type at the start of a text<br><sub>ops/s</sub> | Type anywhere in a text<br><sub>ops/s</sub> | Replay an editing trace<br><sub>ops/s</sub> | Push onto a list<br><sub>ops/s</sub> | Insert into a list<br><sub>ops/s</sub> | Remove from a list<br><sub>ops/s</sub> | Set a list element<br><sub>ops/s</sub> | Move a list element<br><sub>ops/s</sub> |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| **syncom**<br><sub>core + text + sync, memory() · v0.0.1</sub> | 42,800 | 106,000 | 848,000 | 109,000 | 40,600 | 73,400 | 73,800 | 30,100 | 33,400 | 160,000 | 38,300 | 18,900 | 22,300 | 43,000 | 15,400 |
-| **syncom**<br><sub>core + text + sync, typed through openText(), memory() · v0.0.1</sub> | — | — | — | — | — | — | 289,000 | 72,500 | 43,400 | 168,000 | — | — | — | — | — |
-| **syncom**<br><sub>/all: signed, chained, memory() · v0.0.1</sub> | 15,400 | 19,200 | 821,000 | 19,400 | 25,100 | 22,000 | 17,600 | 14,100 | 14,200 | 34,700 | 15,200 | 11,700 | 7,450 | 15,300 | 9,710 |
+| **syncom**<br><sub>core + text + sync, memory() · v0.0.1</sub> | 42,800 | 106,000 | 848,000 | 109,000 | 40,600 | 73,400 | 74,200 | 47,500 | 37,900 | 158,000 | 42,100 | 25,400 | 22,500 | 48,300 | 19,900 |
+| **syncom**<br><sub>core + text + sync, typed through openText(), memory() · v0.0.1</sub> | — | — | — | — | — | — | 322,000 | 93,900 | 39,800 | 170,000 | — | — | — | — | — |
+| **syncom**<br><sub>/all: signed, chained, memory() · v0.0.1</sub> | 15,400 | 19,200 | 821,000 | 19,400 | 25,100 | 22,000 | 17,900 | 15,500 | 13,400 | 38,000 | 15,900 | 13,200 | 7,870 | 15,800 | 11,000 |
 | Yjs<br><sub>Y.Doc, a Y.Map per record · v13.6.33</sub> | 204,000 | 354,000 | 3,770,000 | — | 217,000 | 99,800 | 342,000 | 461,000 | 27,700 | 52,000 | 15,100 | 26,000 | 2,200 | — | — |
 | Yjs<br><sub>Y.Doc, every update encoded (an update listener) · v13.6.33</sub> | 111,000 | 211,000 | 3,540,000 | — | 145,000 | 82,000 | 31,600 | 251,000 | 26,400 | 46,000 | 15,400 | 25,700 | 2,270 | — | — |
 | Automerge<br><sub>Automerge.change, Counter · v3.5.0</sub> | 497 | 1,880 | 9,860,000 | 1,830 | 8,500 | 21,100 | 23,400 | 21,500 | 20,600 | 17,300 | 2,280 | 5,480 | 1,470 | 1,900 | — |
@@ -314,9 +314,9 @@ timed. The method and the interactive charts are on the
 
 | Library | Insert a record<br><sub>ops/s</sub> | Update a field<br><sub>ops/s</sub> | Read a record<br><sub>ops/s</sub> | Increment a counter<br><sub>ops/s</sub> | Insert 1,000 at once<br><sub>records/s</sub> | Replicate a store<br><sub>records/s</sub> | Type at the end of a text<br><sub>ops/s</sub> | Type at the start of a text<br><sub>ops/s</sub> | Type anywhere in a text<br><sub>ops/s</sub> | Push onto a list<br><sub>ops/s</sub> | Insert into a list<br><sub>ops/s</sub> | Remove from a list<br><sub>ops/s</sub> | Set a list element<br><sub>ops/s</sub> | Move a list element<br><sub>ops/s</sub> |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| **syncom**<br><sub>core + text + sync, node:fs · v0.0.1</sub> | 5,410 | 22,100 | 885,000 | 22,700 | 6,310 | 6,540 | 30,900 | 13,200 | 11,700 | 15,000 | 10,100 | 9,220 | 12,900 | 7,480 |
-| **syncom**<br><sub>core + text + sync, typed through openText(), node:fs · v0.0.1</sub> | — | — | — | — | — | — | 277,000 | 34,500 | 33,200 | — | — | — | — | — |
-| **syncom**<br><sub>/all: signed, chained, node:fs · v0.0.1</sub> | 4,300 | 7,000 | 878,000 | 7,420 | 6,350 | 5,360 | 12,100 | 5,750 | 5,430 | 6,970 | 5,290 | 4,400 | 6,100 | 4,430 |
+| **syncom**<br><sub>core + text + sync, node:fs · v0.0.1</sub> | 5,410 | 22,100 | 885,000 | 22,700 | 6,310 | 6,540 | 30,400 | 24,500 | 20,700 | 16,600 | 10,900 | 10,600 | 14,300 | 8,560 |
+| **syncom**<br><sub>core + text + sync, typed through openText(), node:fs · v0.0.1</sub> | — | — | — | — | — | — | 262,000 | 93,200 | 40,700 | — | — | — | — | — |
+| **syncom**<br><sub>/all: signed, chained, node:fs · v0.0.1</sub> | 4,300 | 7,000 | 878,000 | 7,420 | 6,350 | 5,360 | 12,000 | 10,600 | 9,620 | 7,480 | 5,700 | 4,640 | 6,280 | 4,650 |
 | Yjs<br><sub>y-leveldb · v13.6.33</sub> | 17,900 | 20,400 | 3,780,000 | — | 133,000 | 49,300 | 19,400 | 20,600 | 12,300 | 10,500 | 12,000 | 2,070 | — | — |
 | Automerge<br><sub>automerge-repo, NodeFS storage · v3.5.0</sub> | 459 | 1,130 | 10,100,000 | 1,140 | 7,110 | 2,960 | 2,870 | 2,990 | 2,880 | 1,510 | 2,210 | 850 | 1,350 | — |
 | Loro<br><sub>updates appended to a file · v1.16.4</sub> | 19,800 | 39,200 | 291,000 | 39,800 | 63,400 | 95,000 | 39,500 | 40,800 | 40,100 | 42,300 | 41,000 | 20,100 | 42,200 | 39,200 |

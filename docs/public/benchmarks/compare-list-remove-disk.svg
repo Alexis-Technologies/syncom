@@ -58,24 +58,24 @@ loro-crdt@1.16.4</title>
 <text class="value" x="588.0055914796795" y="199">20.1k</text>
 </g>
 <g><title>syncom · core + text + sync, node:fs · v0.0.1
-9,223 ops/s
-108 µs per operation
-samples 8,992 – 9,823
+10,606 ops/s
+94.3 µs per operation
+samples 10.5k – 11k
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="230">syncom</text>
 <text class="sublabel" x="20" y="245">core + text + sync, node:fs · v0.0.1</text>
-<path class="bar primary" d="M271,226H532.2575872825377A4,4 0 0 1 536.2575872825377,230V236A4,4 0 0 1 532.2575872825377,240H271Z"/>
-<text class="value" x="542.2575872825377" y="239">9,223</text>
+<path class="bar primary" d="M271,226H540.4485421091721A4,4 0 0 1 544.4485421091721,230V236A4,4 0 0 1 540.4485421091721,240H271Z"/>
+<text class="value" x="550.4485421091721" y="239">10.6k</text>
 </g>
 <g><title>syncom · /all: signed, chained, node:fs · v0.0.1
-4,397 ops/s
-227 µs per operation
-samples 4,190 – 4,524
+4,643 ops/s
+215 µs per operation
+samples 4,158 – 4,890
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="270">syncom</text>
 <text class="sublabel" x="20" y="285">/all: signed, chained, node:fs · v0.0.1</text>
-<path class="bar secondary" d="M271,266H488.8299137619679A4,4 0 0 1 492.8299137619679,270V276A4,4 0 0 1 488.8299137619679,280H271Z"/>
-<text class="value" x="498.8299137619679" y="279">4,397</text>
+<path class="bar secondary" d="M271,266H492.0142263487684A4,4 0 0 1 496.0142263487684,270V276A4,4 0 0 1 492.0142263487684,280H271Z"/>
+<text class="value" x="502.0142263487684" y="279">4,643</text>
 </g>
 <g><title>Yjs · y-leveldb · v13.6.33
 2,072 ops/s

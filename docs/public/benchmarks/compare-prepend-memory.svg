@@ -83,24 +83,24 @@ loro-crdt@1.16.4</title>
 <text class="value" x="528.3748634792305" y="268">97.6k</text>
 </g>
 <g><title>syncom · core + text + sync, typed through openText(), memory() · v0.0.1
-72,540 ops/s
-13.8 µs per operation
-samples 28k – 81.9k
+93,932 ops/s
+10.6 µs per operation
+samples 92.6k – 98.7k
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="299">syncom</text>
 <text class="sublabel" x="20" y="314">core + text + sync, typed through openText(), memory() ·…</text>
-<path class="bar primary" d="M372,295H498.8082333724507A4,4 0 0 1 502.8082333724507,299V305A4,4 0 0 1 498.8082333724507,309H372Z"/>
-<text class="value" x="508.8082333724507" y="308">72.5k</text>
+<path class="bar primary" d="M372,295H515.8678949172174A4,4 0 0 1 519.8678949172174,299V305A4,4 0 0 1 515.8678949172174,309H372Z"/>
+<text class="value" x="525.8678949172174" y="308">93.9k</text>
 </g>
 <g><title>syncom · core + text + sync, memory() · v0.0.1
-30,117 ops/s
-33.2 µs per operation
-samples 27.4k – 54.4k
+47,507 ops/s
+21 µs per operation
+samples 46k – 55.8k
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="339">syncom</text>
 <text class="sublabel" x="20" y="354">core + text + sync, memory() · v0.0.1</text>
-<path class="bar primary" d="M372,335H440.78010105519456A4,4 0 0 1 444.78010105519456,339V345A4,4 0 0 1 440.78010105519456,349H372Z"/>
-<text class="value" x="450.78010105519456" y="348">30.1k</text>
+<path class="bar primary" d="M372,335H470.8666073824269A4,4 0 0 1 474.8666073824269,339V345A4,4 0 0 1 470.8666073824269,349H372Z"/>
+<text class="value" x="480.8666073824269" y="348">47.5k</text>
 </g>
 <g><title>Automerge · Automerge.change, Counter · v3.5.0
 21,530 ops/s
@@ -113,14 +113,14 @@ samples 21.1k – 21.8k
 <text class="value" x="428.6229821991772" y="388">21.5k</text>
 </g>
 <g><title>syncom · /all: signed, chained, memory() · v0.0.1
-14,140 ops/s
-70.7 µs per operation
-samples 12.6k – 16.2k
+15,475 ops/s
+64.6 µs per operation
+samples 14.7k – 16.3k
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="419">syncom</text>
 <text class="sublabel" x="20" y="434">/all: signed, chained, memory() · v0.0.1</text>
-<path class="bar secondary" d="M372,415H390.86882002886057A4,4 0 0 1 394.86882002886057,419V425A4,4 0 0 1 390.86882002886057,429H372Z"/>
-<text class="value" x="400.86882002886057" y="428">14.1k</text>
+<path class="bar secondary" d="M372,415H396.82540790528174A4,4 0 0 1 400.82540790528174,419V425A4,4 0 0 1 396.82540790528174,429H372Z"/>
+<text class="value" x="406.82540790528174" y="428">15.5k</text>
 </g>
 <text class="caption" x="20" y="483">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
 <text class="caption" x="20" y="499">in a fresh process · 2026-10-31</text>

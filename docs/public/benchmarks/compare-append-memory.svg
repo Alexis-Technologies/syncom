@@ -63,14 +63,14 @@ yjs@13.6.33</title>
 <text class="value" x="611.1890016103487" y="188">342k</text>
 </g>
 <g><title>syncom · core + text + sync, typed through openText(), memory() · v0.0.1
-288,730 ops/s
-3.46 µs per operation
-samples 232k – 313k
+321,767 ops/s
+3.11 µs per operation
+samples 246k – 335k
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="219">syncom</text>
 <text class="sublabel" x="20" y="234">core + text + sync, typed through openText(), memory() ·…</text>
-<path class="bar primary" d="M372,215H589.9947910552174A4,4 0 0 1 593.9947910552174,219V225A4,4 0 0 1 589.9947910552174,229H372Z"/>
-<text class="value" x="599.9947910552174" y="228">289k</text>
+<path class="bar primary" d="M372,215H597.1463296928948A4,4 0 0 1 601.1463296928948,219V225A4,4 0 0 1 597.1463296928948,229H372Z"/>
+<text class="value" x="607.1463296928948" y="228">322k</text>
 </g>
 <g><title>Loro · LoroDoc, every commit exported (subscribeLocalUpdates) · v1.16.4
 106,515 ops/s
@@ -83,14 +83,14 @@ loro-crdt@1.16.4</title>
 <text class="value" x="534.1665746325369" y="268">107k</text>
 </g>
 <g><title>syncom · core + text + sync, memory() · v0.0.1
-73,787 ops/s
-13.6 µs per operation
-samples 71.1k – 80.7k
+74,205 ops/s
+13.5 µs per operation
+samples 68.2k – 78.5k
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="299">syncom</text>
 <text class="sublabel" x="20" y="314">core + text + sync, memory() · v0.0.1</text>
-<path class="bar primary" d="M372,295H499.93292388065623A4,4 0 0 1 503.93292388065623,299V305A4,4 0 0 1 499.93292388065623,309H372Z"/>
-<text class="value" x="509.93292388065623" y="308">73.8k</text>
+<path class="bar primary" d="M372,295H500.3059750126368A4,4 0 0 1 504.3059750126368,299V305A4,4 0 0 1 500.3059750126368,309H372Z"/>
+<text class="value" x="510.3059750126368" y="308">74.2k</text>
 </g>
 <g><title>Yjs · Y.Doc, every update encoded (an update listener) · v13.6.33
 31,603 ops/s
@@ -113,14 +113,14 @@ samples 23.3k – 23.8k
 <text class="value" x="434.2424142111948" y="388">23.4k</text>
 </g>
 <g><title>syncom · /all: signed, chained, memory() · v0.0.1
-17,618 ops/s
-56.8 µs per operation
-samples 17.1k – 18.4k
+17,857 ops/s
+56 µs per operation
+samples 17.5k – 18.7k
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="419">syncom</text>
 <text class="sublabel" x="20" y="434">/all: signed, chained, memory() · v0.0.1</text>
-<path class="bar secondary" d="M372,415H405.3870722680598A4,4 0 0 1 409.3870722680598,419V425A4,4 0 0 1 405.3870722680598,429H372Z"/>
-<text class="value" x="415.3870722680598" y="428">17.6k</text>
+<path class="bar secondary" d="M372,415H406.27380638599635A4,4 0 0 1 410.27380638599635,419V425A4,4 0 0 1 406.27380638599635,429H372Z"/>
+<text class="value" x="416.27380638599635" y="428">17.9k</text>
 </g>
 <text class="caption" x="20" y="483">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
 <text class="caption" x="20" y="499">in a fresh process · 2026-10-31</text>

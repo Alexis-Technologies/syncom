@@ -66,24 +66,24 @@ loro-crdt@1.16.4</title>
 <text class="value" x="583.8126444755868" y="205">107k</text>
 </g>
 <g><title>syncom · core + text + sync, memory() · v0.0.1
-43,031 ops/s
-23.2 µs per operation
-samples 37.2k – 52.4k
+48,327 ops/s
+20.7 µs per operation
+samples 32k – 58.2k
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="236">syncom</text>
 <text class="sublabel" x="20" y="251">core + text + sync, memory() · v0.0.1</text>
-<path class="bar primary" d="M372,232H533.5561608643102A4,4 0 0 1 537.5561608643102,236V242A4,4 0 0 1 533.5561608643102,246H372Z"/>
-<text class="value" x="543.5561608643102" y="245">43k</text>
+<path class="bar primary" d="M372,232H538.6647664760385A4,4 0 0 1 542.6647664760385,236V242A4,4 0 0 1 538.6647664760385,246H372Z"/>
+<text class="value" x="548.6647664760385" y="245">48.3k</text>
 </g>
 <g><title>syncom · /all: signed, chained, memory() · v0.0.1
-15,277 ops/s
-65.5 µs per operation
-samples 14.9k – 17k
+15,835 ops/s
+63.2 µs per operation
+samples 15.4k – 17.1k
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="276">syncom</text>
 <text class="sublabel" x="20" y="291">/all: signed, chained, memory() · v0.0.1</text>
-<path class="bar secondary" d="M372,272H487.9838352434529A4,4 0 0 1 491.9838352434529,276V282A4,4 0 0 1 487.9838352434529,286H372Z"/>
-<text class="value" x="497.9838352434529" y="285">15.3k</text>
+<path class="bar secondary" d="M372,272H489.56006226871585A4,4 0 0 1 493.56006226871585,276V282A4,4 0 0 1 489.56006226871585,286H372Z"/>
+<text class="value" x="499.56006226871585" y="285">15.8k</text>
 </g>
 <g><title>Automerge · Automerge.change, Counter · v3.5.0
 1,898 ops/s

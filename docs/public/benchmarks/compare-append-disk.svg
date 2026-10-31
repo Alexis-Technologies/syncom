@@ -47,14 +47,14 @@
 <text class="tick" x="676" y="412" text-anchor="middle">1M</text>
 <line class="axis" x1="372" y1="156" x2="372" y2="396"/>
 <g><title>syncom · core + text + sync, typed through openText(), node:fs · v0.0.1
-277,434 ops/s
-3.6 µs per operation
-samples 261k – 320k
+261,819 ops/s
+3.82 µs per operation
+samples 194k – 320k
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="173">syncom</text>
 <text class="sublabel" x="20" y="188">core + text + sync, typed through openText(), node:fs ·…</text>
-<path class="bar primary" d="M372,169H615.5735748448603A4,4 0 0 1 619.5735748448603,173V179A4,4 0 0 1 615.5735748448603,183H372Z"/>
-<text class="value" x="625.5735748448603" y="182">277k</text>
+<path class="bar primary" d="M372,169H613.0241875375118A4,4 0 0 1 617.0241875375118,173V179A4,4 0 0 1 613.0241875375118,183H372Z"/>
+<text class="value" x="623.0241875375118" y="182">262k</text>
 </g>
 <g><title>Loro · updates appended to a file · v1.16.4
 39,503 ops/s
@@ -67,14 +67,14 @@ loro-crdt@1.16.4</title>
 <text class="value" x="539.7917693126348" y="222">39.5k</text>
 </g>
 <g><title>syncom · core + text + sync, node:fs · v0.0.1
-30,897 ops/s
-32.4 µs per operation
-samples 28.3k – 31.7k
+30,429 ops/s
+32.9 µs per operation
+samples 26.7k – 31.4k
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="253">syncom</text>
 <text class="sublabel" x="20" y="268">core + text + sync, node:fs · v0.0.1</text>
-<path class="bar primary" d="M372,249H518.9788448252267A4,4 0 0 1 522.9788448252267,253V259A4,4 0 0 1 518.9788448252267,263H372Z"/>
-<text class="value" x="528.9788448252267" y="262">30.9k</text>
+<path class="bar primary" d="M372,249H518.3067492700513A4,4 0 0 1 522.3067492700513,253V259A4,4 0 0 1 518.3067492700513,263H372Z"/>
+<text class="value" x="528.3067492700513" y="262">30.4k</text>
 </g>
 <g><title>Yjs · y-leveldb · v13.6.33
 19,357 ops/s
@@ -87,14 +87,14 @@ yjs@13.6.33</title>
 <text class="value" x="508.3993532637762" y="302">19.4k</text>
 </g>
 <g><title>syncom · /all: signed, chained, node:fs · v0.0.1
-12,149 ops/s
-82.3 µs per operation
-samples 11.5k – 12.2k
+12,042 ops/s
+83 µs per operation
+samples 11.9k – 12.4k
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="333">syncom</text>
 <text class="sublabel" x="20" y="348">/all: signed, chained, node:fs · v0.0.1</text>
-<path class="bar secondary" d="M372,329H477.9004391949576A4,4 0 0 1 481.9004391949576,333V339A4,4 0 0 1 477.9004391949576,343H372Z"/>
-<text class="value" x="487.9004391949576" y="342">12.1k</text>
+<path class="bar secondary" d="M372,329H477.5110409493356A4,4 0 0 1 481.5110409493356,333V339A4,4 0 0 1 477.5110409493356,343H372Z"/>
+<text class="value" x="487.5110409493356" y="342">12k</text>
 </g>
 <g><title>Automerge · automerge-repo, NodeFS storage · v3.5.0
 2,869 ops/s
