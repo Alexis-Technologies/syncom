@@ -58,6 +58,12 @@ attrs, isEmbed }` an entry of the block's `vals` (as a list element's
   splice patch gets `vals`, a changed marker a `setAt` patch (b-side index,
   after the splices). Never diff a text without the context where a slot may
   be: the inverse would lay a bare slot.
+- **An op's own references are short; the engine reads full names alone.** `resolve` (src/text/kind.js)
+  names what is the op's own origin's without it — `run`, a cut's run and a mark's `off` by the stamp (a
+  number), an element as `ts:offset`, an anchor `<ts:offset`/`>ts:offset` — and `fullRefs` lays
+  `op.origin` back in `apply`, before the engine, copying only what it changes; a short name is never
+  another origin's (LIST-7). `coalesce` compares both forms. A new reader of an op's payload goes through
+  `fullRefs`, never `S.parseRun` on the raw value.
 - **A block IS the index, and it is never mutated in place.** A block of
   `src/text/sequence.js` is a plain object — `k`, `ts`, the maps, and `runs`
   as a getter that serializes the rope in walk order once per version — whose

@@ -57,7 +57,8 @@ const normalize = (raw, base, limits) => S.normalizeSeq(raw, base, limits.pendin
 // if it had never landed, whichever side of the reset it arrived on.
 const apply = (entry, field, held, op, stamp, limits) => {
   const base = floorOf(entry.meta, field);
-  const payload = op.value;
+  // The op's own references named in full again: the engine reads full names alone.
+  const payload = fullRefs(op.type, op.value, op.origin);
   // The engine's block, hydrated once: a block read from a file is plain
   // JSON, and both the op and the change report read the engine's state —
   // the hydration the reading before the op made (resolve), not another.
@@ -67,8 +68,8 @@ const apply = (entry, field, held, op, stamp, limits) => {
   // the head of its lineage: read after the splice, the old block is a fork
   // — the rope re-hinted whole, O(n), for every delete (two thirds of an
   // editing trace's time went there). A move's index before it, the same way.
-  const cuts = op.type === 'splice' && before !== undefined ? cutSpansOf(before, op.value.cut) : null;
-  const from = op.type === 'move' && before !== undefined ? S.indexOfElem(before, op.value?.elem) : -1;
+  const cuts = op.type === 'splice' && before !== undefined ? cutSpansOf(before, payload?.cut) : null;
+  const from = op.type === 'move' && before !== undefined ? S.indexOfElem(before, payload?.elem) : -1;
   const { pendingMax } = limits;
   const result =
     op.type === 'splice'
@@ -85,7 +86,7 @@ const apply = (entry, field, held, op, stamp, limits) => {
   if (!result.changed) return out;
   out.block = S.prune(result.seq, base);
   // What the reading shows of the op, in its indices — none when the field went.
-  if (out.block !== null) out.change = changeOf(op, stamp, before, out.block, base, cuts, from);
+  if (out.block !== null) out.change = changeOf(op.type, payload, stamp, before, out.block, base, cuts, from);
   // A list's reading from the one before and the change, not made whole
   // again (a text's is the rope's own cache) — when it is read, and only
   // where the reading before was made: when nothing was reset.
@@ -120,10 +121,9 @@ const marksAt = (block, index, base) => S.styleAt(block, index, base) ?? {};
 // `setAt`; a move by its index before and after; a mark over the indices
 // its anchors fall at. What the reading does not show — a slot born dead,
 // an element not placed here — is no change.
-const changeOf = (op, stamp, held, block, base = null, cuts = null, from = -1) => {
-  const payload = op.value;
+const changeOf = (type, payload, stamp, held, block, base = null, cuts = null, from = -1) => {
   const [ts, origin] = stamp;
-  if (op.type === 'splice') {
+  if (type === 'splice') {
     const out = [];
     // The cut stretches (read before the splice — `cutSpansOf`): one splice
     // each, in the indices before, last first.
@@ -171,12 +171,12 @@ const changeOf = (op, stamp, held, block, base = null, cuts = null, from = -1) =
     }
     return out;
   }
-  if (op.type === 'assign') {
+  if (type === 'assign') {
     // Where the element shows, O(log n): its slot's place in the rope.
     const index = S.indexOfElem(block, payload.elem);
     return index < 0 ? [] : [{ action: 'setAt', index, value: payload.value }];
   }
-  if (op.type === 'move') {
+  if (type === 'move') {
     // Before (read from the block before the op, while it was the head) and
     // after; a move shows its element with the value its slot carries, so a
     // value that differs from the one shown before is a `setAt` too (a move
@@ -260,7 +260,8 @@ const revisionOf = (entry, field) => {
 // and `b` only cut and every run `b` cuts is older than `a` (an honest
 // cutter: `a`'s stamp must still be above them). Never an insert and a cut
 // of it, never `b` with markers, never a list (its content would be copied
-// whole again by every keystroke), and at most MAX_CUTS ranges.
+// whole again by every keystroke), and at most MAX_CUTS ranges. The two are
+// of one stream: their own references name one origin, compact or in full.
 const MAX_CUTS = 256;
 const coalesce = (a, b) => {
   if (a.type !== 'splice' || b.type !== 'splice') return null;
@@ -269,14 +270,111 @@ const coalesce = (a, b) => {
   if (typeof x.content !== 'string' || typeof y.content !== 'string' || y.vals !== undefined) return null;
   if (y.content.length > 0) {
     if (y.cut !== undefined || y.run === undefined || x.content.length === 0) return null;
-    const run = x.run !== undefined ? x.run : x.at !== undefined ? S.runKey(a.ts, a.origin) : null;
-    if (run !== y.run || (x.run !== undefined ? x.from : 0) + x.content.length !== y.from) return null;
+    const run = x.run !== undefined ? stampOf(x.run, a.origin) : x.at !== undefined ? a.ts : -1;
+    if (run === -1 || run !== stampOf(y.run, b.origin)) return null;
+    if ((x.run !== undefined ? x.from : 0) + x.content.length !== y.from) return null;
     return { ...x, content: x.content + y.content };
   }
   if (x.content.length > 0 || x.cut === undefined || y.cut === undefined) return null;
   if (x.cut.length + y.cut.length > MAX_CUTS) return null;
-  for (let i = 0; i < y.cut.length; i++) if (!(S.parseRun(y.cut[i][0]).ts < a.ts)) return null;
+  for (let i = 0; i < y.cut.length; i++) {
+    const ref = y.cut[i][0];
+    const ts = typeof ref === 'number' ? ref : (S.parseRun(ref)?.ts ?? Infinity);
+    if (!(ts < a.ts)) return null;
+  }
   return { content: '', cut: x.cut.concat(y.cut) };
+};
+
+// ---------------------------------------------------------------------------
+// Own references. What an op names of its own origin's — the run it extends
+// (only ever its own), a run it cuts, the element it sets or moves, the
+// anchor of its new run, a mark it switches off — travels without the
+// origin the header carries already: a run as its stamp, a number; an
+// element as `ts:off` (one colon — a full name has two, whatever the origin
+// holds), an anchor as `<ts:off` or `>ts:off`. `resolve` writes them so;
+// `fullRefs` lays the op's origin back where an op enters the engine (`apply`)
+// and hands any other value on as it is, for the engine to refuse. A compact
+// reference can only ever name the op's own origin's.
+const ownRun = (key, origin) => {
+  if (typeof key !== 'string') return key;
+  const colon = key.indexOf(':');
+  const own = colon > 0 && key.length === colon + 1 + origin.length && key.endsWith(origin);
+  return own ? Number(key.slice(0, colon)) : key;
+};
+// An element `ts:off:origin`, or an anchor `<ts:off:origin`: the first two
+// colons are the stamp's and the offset's.
+const ownElem = (key, origin) => {
+  if (typeof key !== 'string') return key;
+  const first = key.indexOf(':');
+  const second = first === -1 ? -1 : key.indexOf(':', first + 1);
+  const own = second > 0 && key.length === second + 1 + origin.length && key.endsWith(origin);
+  return own ? key.slice(0, second) : key;
+};
+const ownRanges = (ranges, origin) => {
+  for (let i = 0; i < ranges.length; i++) ranges[i][0] = ownRun(ranges[i][0], origin);
+  return ranges;
+};
+
+// The stamp of a reference to a run of `origin`'s, -1 for another's.
+const stampOf = (ref, origin) => {
+  if (typeof ref === 'number') return ref;
+  const run = S.parseRun(ref);
+  return run !== null && run.origin === origin ? run.ts : -1;
+};
+const isShort = (ref) => {
+  if (typeof ref !== 'string') return false;
+  const first = ref.indexOf(':');
+  return first !== -1 && ref.indexOf(':', first + 1) === -1;
+};
+const fullRun = (ref, origin) => (typeof ref === 'number' ? `${ref}:${origin}` : ref);
+const fullElem = (ref, origin) => (isShort(ref) ? `${ref}:${origin}` : ref);
+const fullAnchor = (token, origin) =>
+  typeof token === 'string' && (token[0] === '<' || token[0] === '>') && isShort(token) ? `${token}:${origin}` : token;
+// A cut range `[run, offset, length]` (anything else as it is): copied only when its run is compact.
+const fullRange = (range, origin) => {
+  if (!Array.isArray(range) || typeof range[0] !== 'number') return range;
+  const copy = range.slice();
+  copy[0] = `${range[0]}:${origin}`;
+  return copy;
+};
+const fullRanges = (ranges, origin) => {
+  if (!Array.isArray(ranges)) return ranges;
+  let out = ranges;
+  for (let i = 0; i < ranges.length; i++) {
+    const range = fullRange(ranges[i], origin);
+    if (range === ranges[i]) continue;
+    if (out === ranges) out = ranges.slice();
+    out[i] = range;
+  }
+  return out;
+};
+
+// An op's value with its own references in full: the value itself when it holds none.
+const fullRefs = (type, value, origin) => {
+  if (value === null || typeof value !== 'object' || typeof origin !== 'string') return value;
+  let out = value;
+  const put = (name, next) => {
+    if (next === value[name]) return;
+    if (out === value) out = { ...value };
+    out[name] = next;
+  };
+  if (type === 'splice') {
+    if (value.run !== undefined) put('run', fullRun(value.run, origin));
+    if (value.at !== undefined) put('at', fullAnchor(value.at, origin));
+    if (value.cut !== undefined) put('cut', fullRanges(value.cut, origin));
+  } else if (type === 'assign') {
+    put('elem', fullElem(value.elem, origin));
+  } else if (type === 'move') {
+    put('elem', fullElem(value.elem, origin));
+    put('cut', fullRange(value.cut, origin));
+    put('at', fullAnchor(value.at, origin));
+  } else if (value.off !== undefined) {
+    put('off', fullRun(value.off, origin));
+  } else {
+    put('start', fullAnchor(value.start, origin));
+    put('end', fullAnchor(value.end, origin));
+  }
+  return out;
 };
 
 const NESTS = Object.freeze({ list: true, text: false });
@@ -354,9 +452,14 @@ const resolveSplice = (core, id, payload, current) => {
   // joinBlock(): the one slot it cuts holds a block marker, or there is none to join.
   if (marker === true && !(held?.k === 't' && S.heldAt(idx, at) === EMBED)) throw noMarker(id, key, at);
   const value = { content: fill };
-  if (count > 0) value.cut = S.rangesOf(idx, at, count);
+  const origin = core.nodeId;
+  if (count > 0) value.cut = ownRanges(S.rangesOf(idx, at, count), origin);
   if (fill.length > 0) {
-    Object.assign(value, idx === null ? { at: S.HEAD } : S.placeInsert(idx, at, core.nodeId, fill.length));
+    const place = idx === null ? null : S.placeInsert(idx, at, origin, fill.length);
+    // The writer's own run grown (its stamp), or the anchor of a new one.
+    if (place === null) value.at = S.HEAD;
+    else if (place.run !== undefined) Object.assign(value, { run: ownRun(place.run, origin), from: place.from });
+    else value.at = ownElem(place.at, origin);
   }
   // The markers of the embed slots the content holds, each at its offset.
   if (vals !== undefined && vals.length > 0) value.vals = vals;
@@ -386,10 +489,11 @@ const elementAt = (core, id, key, index, current) => {
 const resolveAssign = (core, id, payload, current) => {
   const { key, index, value } = payload;
   const held = current ? blockOf(current, key) : undefined;
-  const { idx, elem } = elementAt(core, id, key, index, current);
+  const found = elementAt(core, id, key, index, current);
+  const elem = ownElem(found.elem, core.nodeId);
   if (held?.k !== 't') return { elem, value };
   // A text: the slot is an embed slot, and what it takes is a marker (or none); the op names the kind.
-  if (S.heldAt(idx, index) !== EMBED) throw noMarker(id, key, index);
+  if (S.heldAt(found.idx, index) !== EMBED) throw noMarker(id, key, index);
   return { elem, value: value === null ? null : markerArgs('setAt', value), k: 't' };
 };
 
@@ -403,9 +507,12 @@ const resolveMove = (core, id, payload, current) => {
     const message = `Index ${to} is out of range for field ${key} of record ${id} (length ${length})`;
     throw new SyncomError('OUT_OF_RANGE', message, { id, field: key, index: to, count: 0, length });
   }
-  const place = S.placeInsert(idx, to < from ? to : to + 1, core.nodeId);
-  const at = place.at ?? `>${S.elemKey(place.run, place.from - 1)}`;
-  return { elem, cut: S.slotAt(idx, from), at, value: S.valueAt(idx, from) };
+  const origin = core.nodeId;
+  const place = S.placeInsert(idx, to < from ? to : to + 1, origin);
+  const at = ownElem(place.at ?? `>${S.elemKey(place.run, place.from - 1)}`, origin);
+  const cut = S.slotAt(idx, from);
+  cut[0] = ownRun(cut[0], origin);
+  return { elem: ownElem(elem, origin), cut, at, value: S.valueAt(idx, from) };
 };
 
 // A mark names a visible range and an expand rule; what travels is the pair
@@ -413,7 +520,7 @@ const resolveMove = (core, id, payload, current) => {
 // markAnchors), or the id of the mark to switch off.
 const resolveMark = (core, id, payload, current) => {
   const { key, off } = payload;
-  if (off !== undefined) return { off };
+  if (off !== undefined) return { off: ownRun(off, core.nodeId) };
   const { start, end, name, value, expand, many } = payload;
   const held = current ? blockOf(current, key) : undefined;
   const idx = held === undefined ? null : S.indexOf(current, key);
@@ -424,7 +531,7 @@ const resolveMark = (core, id, payload, current) => {
   }
   wholeCharacters(id, key, idx, start, end);
   const [from, to] = idx === null ? [S.HEAD, S.END] : S.markAnchors(idx, start, end, expand);
-  const out = { start: from, end: to, key: name, value };
+  const out = { start: ownElem(from, core.nodeId), end: ownElem(to, core.nodeId), key: name, value };
   if (many) out.many = true;
   return out;
 };

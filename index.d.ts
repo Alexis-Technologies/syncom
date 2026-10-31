@@ -84,12 +84,14 @@ export type SetRemoval = readonly [element: unknown, tags: { readonly [origin: s
  * either the anchor of a new run (`at`: `^` the head, `>e`/`<e` the right or
  * left child of element `e`) or the run of the writer to extend (`run`,
  * `from`). `content` names the kind — a string for a text, an array for a
- * list — and is empty when the op only cuts.
+ * list — and is empty when the op only cuts. What is the op's own origin's
+ * is named without it: a run (`ts:origin`) by its stamp, a number; an
+ * element (`ts:offset:origin`) as `ts:offset`.
  */
 export interface SplicePayload {
-  cut?: readonly (readonly [run: string, offset: number, length: number])[];
+  cut?: readonly (readonly [run: string | number, offset: number, length: number])[];
   at?: string;
-  run?: string;
+  run?: string | number;
   from?: number;
   content: string | readonly unknown[];
   /** The markers of the embed slots (U+FFFC) the content holds, each at its offset. */
@@ -109,7 +111,7 @@ export interface AssignPayload {
  */
 export interface MovePayload {
   elem: string;
-  cut: readonly [run: string, offset: number, length: 1];
+  cut: readonly [run: string | number, offset: number, length: 1];
   at: string;
   value: unknown;
 }
@@ -129,7 +131,7 @@ export interface MarkPayload {
   key?: string;
   value?: unknown;
   many?: true;
-  off?: string;
+  off?: string | number;
 }
 
 /**

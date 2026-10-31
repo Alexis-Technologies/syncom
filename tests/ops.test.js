@@ -1025,6 +1025,57 @@ test('ops: a peer-shaped meta reaches nothing it should not', async (t) => {
     assert.deepStrictEqual(applyOp(marked, op('purge', 99, 'P')).entry.meta.blocks, {});
   });
 
+  await t.test(
+    'an op names its own origin’s runs and elements without the origin; a short name is never another’s',
+    () => {
+      // The same nine ops of A's, with what is A's own named in full and short:
+      // a run by its stamp, an element `ts:offset`, an anchor `<ts:offset`.
+      const both = (full, short) => [full, short];
+      const pairs = [
+        both({ at: '<10:3:A', content: 'l' }, { at: '<10:3', content: 'l' }),
+        both({ run: '10:A', from: 4, content: '!' }, { run: 10, from: 4, content: '!' }),
+        both({ cut: [['10:A', 0, 1]], content: '' }, { cut: [[10, 0, 1]], content: '' }),
+        both(
+          { start: '<11:0:A', end: '>10:4:A', key: 'bold', value: true },
+          { start: '<11:0', end: '>10:4', key: 'bold', value: true },
+        ),
+        both({ off: '14:A' }, { off: 14 }),
+        both({ at: '^', content: [1, 2, 3] }, { at: '^', content: [1, 2, 3] }),
+        both({ elem: '16:1:A', value: 'two' }, { elem: '16:1', value: 'two' }),
+        both(
+          { elem: '16:0:A', cut: ['16:A', 0, 1], at: '>16:2:A', value: 1 },
+          { elem: '16:0', cut: [16, 0, 1], at: '>16:2', value: 1 },
+        ),
+      ];
+      const types = ['splice', 'splice', 'splice', 'mark', 'mark', 'splice', 'assign', 'move'];
+      const keys = ['body', 'body', 'body', 'body', 'body', 'items', 'items', 'items'];
+      const ops = (side) => {
+        const out = [op('splice', 10, 'A', { seq: 1, key: 'body', value: { at: '^', content: 'helo' } })];
+        for (let i = 0; i < pairs.length; i++) {
+          out.push(op(types[i], 11 + i, 'A', { seq: 2 + i, key: keys[i], value: pairs[i][side] }));
+        }
+        return out;
+      };
+      const full = replay(ops(0));
+      const short = replay(ops(1));
+      assert.deepStrictEqual(full.data, { body: 'ello!', items: ['two', 3, 1] });
+      assert.deepStrictEqual(short.meta, full.meta, 'one block, whichever names the op used');
+      assert.deepStrictEqual(short.data, full.data);
+      // A short name is the op's own origin's: B's run 10 is B's, never A's —
+      // which B could not extend, named in full.
+      const byB = (value) => applyOp(full, op('splice', 30, 'B', { seq: 1, key: 'body', value }));
+      assert.deepStrictEqual(byB({ run: '10:A', from: 5, content: 'x' }).rejected, [
+        { field: 'body', reason: 'malformed' },
+      ]);
+      assert.deepStrictEqual(byB({ run: 10, from: 5, content: 'x' }), byB({ run: '10:B', from: 5, content: 'x' }));
+      // What is no name stays none: the engine refuses it as it would in full.
+      assert.deepStrictEqual(byB({ run: 1.5, from: 5, content: 'x' }).rejected, [
+        { field: 'body', reason: 'malformed' },
+      ]);
+      assert.deepStrictEqual(byB({ at: '<10', content: 'x' }).rejected, [{ field: 'body', reason: 'malformed' }]);
+    },
+  );
+
   await t.test('mergeEntry joins two sequence histories like replaying both; kinds keep their precedence', () => {
     const splice = (ts, origin, seq, key, value) => op('splice', ts, origin, { seq, key, value });
     const a1 = splice(10, 'A', 1, 'body', { at: '^', content: 'ab' });

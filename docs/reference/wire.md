@@ -61,7 +61,7 @@ engine does not admit changes nothing, is reported as `OP_REFUSED` with
 | `inc` | `i` | `key`, `value` | A finite number to add to the counter |
 | `add` | `+` | `key`, `value` | `unknown[]` — the elements to add to the set |
 | `remove` | `-` | `key`, `value` | `[element, { origin: addStamp }][]` — each element with the add stamps this node had seen for it |
-| `splice` | `/` | `key`, `value` | `{ cut?, at \| run + from, content, vals? }` — `run + from` extends the writer's own run, never a move's position run (malformed); see [What travels](../guide/lists#what-travels) |
+| `splice` | `/` | `key`, `value` | `{ cut?, at \| run + from, content, vals? }` — `run + from` extends the writer's own run (its stamp), never a move's position run (malformed); see [What travels](../guide/lists#what-travels) |
 | `assign` | `=` | `key`, `value` | `{ elem, value, k? }` — `k: 't'` when the element is a text's embed slot |
 | `move` | `^` | `key`, `value` | `{ elem, cut, at, value }` |
 | `mark` | `*` | `key`, `value` | `{ start, end, key, value, many? }` or `{ off }` |
@@ -73,8 +73,9 @@ engine does not admit changes nothing, is reported as `OP_REFUSED` with
 
 The codes are the protocol's, not a plugin's: a node without the text or
 tree plugin still reads, logs and relays a `/` or a `~`. One op of each,
-as the log keeps them (the `write` and the `purge` of `p2` are scrubbed —
-the payload and the nonce gone, the header and its signature kept):
+as it reads back from the log as `{ seq, op, fp }` — the file holds it
+positional, see [The log](#the-log). The `write` and the `purge` of `p2` are
+scrubbed: the payload and the nonce gone, the header and its signature kept.
 
 ```json
 {"seq":1,"op":{"origin":"VLH7Ywu…","seq":1,"ts":1793087684840,"type":"write","id":"p1","v":1,"data":{"$type":"Post","title":"Draft","note":"tmp"},"nonce":"55b902dd-…","digest":"pNpYxfs6…","sig":"YE3frhE…"},"fp":"SmNVKTkH…"}
@@ -85,9 +86,9 @@ the payload and the nonce gone, the header and its signature kept):
 {"seq":6,"op":{"origin":"VLH7Ywu…","seq":6,"ts":1793087684858,"type":"remove","id":"p1","v":1,"key":"tags","value":[["bug",{"VLH7Ywu…":1793087684855}]],"prev":"q49yF0IJ…","nonce":"6556dcfe-…","digest":"SjDF-Rzq…","sig":"WXfaw6w…"},"fp":"9z2V-22e…"}
 {"seq":7,"op":{"origin":"VLH7Ywu…","seq":7,"ts":1793087684861,"type":"splice","id":"p1","v":1,"key":"body","value":{"content":"hello","at":"^"},"prev":"9z2V-22e…","nonce":"0438623a-…","digest":"e8xPy71S…","sig":"fldcPee…"},"fp":"HEbXDRV7…"}
 {"seq":8,"op":{"origin":"VLH7Ywu…","seq":8,"ts":1793087684866,"type":"splice","id":"p1","v":1,"key":"items","value":{"content":[1,2],"at":"^"},"prev":"HEbXDRV7…","nonce":"be90dd02-…","digest":"rRDJp_Dt…","sig":"IUE0qCZ…"},"fp":"guFO1EOS…"}
-{"seq":9,"op":{"origin":"VLH7Ywu…","seq":9,"ts":1793087684869,"type":"assign","id":"p1","v":1,"key":"items","value":{"elem":"1793087684866:0:VLH7Ywu…","value":9},"prev":"guFO1EOS…","nonce":"94a8f651-…","digest":"lpwSpgyW…","sig":"LUGj4mI…"},"fp":"chF-Ks1c…"}
-{"seq":10,"op":{"origin":"VLH7Ywu…","seq":10,"ts":1793087684872,"type":"move","id":"p1","v":1,"key":"items","value":{"elem":"1793087684866:0:VLH7Ywu…","cut":["1793087684866:VLH7Ywu…",0,1],"at":">1793087684866:1:VLH7Ywu…","value":9},"prev":"chF-Ks1c…","nonce":"a7e7a486-…","digest":"pn6qODgP…","sig":"3n9P52d…"},"fp":"MqBO8DgA…"}
-{"seq":11,"op":{"origin":"VLH7Ywu…","seq":11,"ts":1793087684876,"type":"mark","id":"p1","v":1,"key":"body","value":{"start":"<1793087684861:0:VLH7Ywu…","end":"$","key":"bold","value":true},"prev":"MqBO8DgA…","nonce":"13602c95-…","digest":"aU9shwrn…","sig":"Njs14Zx…"},"fp":"HhhOhsgk…"}
+{"seq":9,"op":{"origin":"VLH7Ywu…","seq":9,"ts":1793087684869,"type":"assign","id":"p1","v":1,"key":"items","value":{"elem":"1793087684866:0","value":9},"prev":"guFO1EOS…","nonce":"94a8f651-…","digest":"lpwSpgyW…","sig":"LUGj4mI…"},"fp":"chF-Ks1c…"}
+{"seq":10,"op":{"origin":"VLH7Ywu…","seq":10,"ts":1793087684872,"type":"move","id":"p1","v":1,"key":"items","value":{"elem":"1793087684866:0","cut":[1793087684866,0,1],"at":">1793087684866:1","value":9},"prev":"chF-Ks1c…","nonce":"a7e7a486-…","digest":"pn6qODgP…","sig":"3n9P52d…"},"fp":"MqBO8DgA…"}
+{"seq":11,"op":{"origin":"VLH7Ywu…","seq":11,"ts":1793087684876,"type":"mark","id":"p1","v":1,"key":"body","value":{"start":"<1793087684861:0","end":"$","key":"bold","value":true},"prev":"MqBO8DgA…","nonce":"13602c95-…","digest":"aU9shwrn…","sig":"Njs14Zx…"},"fp":"HhhOhsgk…"}
 {"seq":12,"op":{"origin":"VLH7Ywu…","seq":12,"ts":1793087684879,"type":"tree","id":"p1","v":1,"key":"outline","value":{"node":"n1","parent":null,"fi":"V"},"prev":"HhhOhsgk…","nonce":"a70b7608-…","digest":"jII5zyZ1…","sig":"DqM2boN…"},"fp":"7vowLgJ6…"}
 {"seq":13,"op":{"origin":"VLH7Ywu…","seq":13,"ts":1793087684884,"type":"set","id":"p1","v":1,"actor":"ada","data":{"n":1},"msg":"one more","prev":"7vowLgJ6…","nonce":"7b4cf045-…","digest":"Y-MlFI9f…","sig":"YG0eHAr…"},"fp":"PjeIYmkg…"}
 {"seq":14,"op":{"origin":"VLH7Ywu…","seq":14,"ts":1793087684887,"type":"delete","id":"p1","v":1,"prev":"PjeIYmkg…","sig":"yUCV5eu…"},"fp":"ATQP-EcP…"}
@@ -102,7 +103,13 @@ after the scrub — see [The per-stream chain](#the-per-stream-chain).
 An element's name is `ts:offset:origin` — the run it was inserted in and
 its offset there — and a run's `ts:origin`; an anchor is `^` (the head),
 `$` (the end, in a mark), `>e` or `<e` (the right or left child of element
-`e`); a cut is `[run, offset, length]`. A `remove`'s add stamp is the `ts`
+`e`); a cut is `[run, offset, length]`. What is the op's own origin's is
+named without it, the header carrying it already: a run by its stamp, a
+number (`run`, a cut's run, a mark's `off`), an element as `ts:offset` (one
+colon; a full name has two, whatever the origin holds) — `<ts:offset` and
+`>ts:offset` as anchors. A reader lays the op's `origin` back before the
+engine reads it, so a short name never names another origin's run; a full
+name of the op's own is read alike. A `remove`'s add stamp is the `ts`
 of the `add` this node had seen, per origin.
 
 ### Packed: the nineteen slots

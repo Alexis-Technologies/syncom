@@ -353,7 +353,11 @@ or left child of element `e`, named `ts:offset:origin`) or the writer's own
 run to extend (`run`, `from` — never a move's position run, which holds its
 element alone: a peer's extension of one is malformed); `content` is the inserted string or array and,
 empty, names the kind of a call that only removes; `vals`, when the content
-holds embed slots, their markers at their offsets. One call is one op, signed
+holds embed slots, their markers at their offsets. What is the writer's own
+is named without its origin, which the op's header carries already: a run by
+its stamp (a number), an element as `ts:offset` — `run: 1792831354856`,
+`at: '<1792831354856:3'` — and every node reads it under the op's origin, so
+a short name never names another writer's run. One call is one op, signed
 and logged like any other — an editor that types a word sends one op per
 keystroke unless it batches them (see below). A keystroke extending the
 writer's run adds its characters to the run and no key to the record's
@@ -365,9 +369,9 @@ The first example of this page, with a listener attached before it:
 storage.on('change', (op) => {
   if (op.type === 'splice') console.log(op.key, op.value);
   // body { content: 'helo', at: '^' }
-  // body { content: 'l', at: '<1792831354856:3:3oyEvh7q…' }
-  // body { content: ' world', run: '1792831354856:3oyEvh7q…', from: 4 }
-  // body { content: '', cut: [['1792831354856:3oyEvh7q…', 4, 6]] }
+  // body { content: 'l', at: '<1792831354856:3' }
+  // body { content: ' world', run: 1792831354856, from: 4 }
+  // body { content: '', cut: [[1792831354856, 4, 6]] }
 });
 ```
 

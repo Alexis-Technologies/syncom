@@ -296,8 +296,9 @@ const ENTRIES = [
   // 119.3 with the log's lines and segments of them (a CRC-32 checked before the parse, positional entries, a
   // segment the journaled lines and a trailer). 120, raised by name.
   // 120.3 with a list read when it is read and keystrokes coalesced. 121, raised by name.
-  // 122.6 with the synchronous text handle. 123, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 123 },
+  // 122.6 with the synchronous text handle; 123.2 with an op's own references short (src/text/kind.js fullRefs).
+  // 123.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 123.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -318,8 +319,9 @@ const ENTRIES = [
   // 33.4 with the plugin in four modules beside text.js. 33.5, raised by name.
   // 33.6 with revision() and applyDelta's revision. 34, raised by name.
   // 34.1 with a list's reading made when it is read (deriveLater; 2026-10-31). 34.5, raised by name.
-  // 36.8 with the synchronous text handle (src/text/handle.js, openText) and keystrokes coalesced. 37, raised by name.
-  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 37 },
+  // 36.8 with the synchronous text handle (src/text/handle.js, openText) and keystrokes coalesced; 37.4 with an op's
+  // own references short (src/text/kind.js fullRefs). 37.5, raised by name.
+  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 37.5 },
   // The tree kind alone, with the fractional indexes a place is made of and
   // the argument checks it shares with the core (5.1 measured).
   // 5.5 with the field-name check unset shares with it (src/args.js).

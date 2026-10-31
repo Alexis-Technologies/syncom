@@ -186,6 +186,17 @@ expectAssignable<syncom.SyncOp>({
   value: { elem: '1:0:a', value: 1 },
 });
 expectAssignable<syncom.MovePayload>({ elem: '1:0:a', cut: ['1:a', 0, 1], at: '^', value: 1 });
+// The op's own origin's, named short: a run by its stamp, an element `ts:offset`.
+expectAssignable<syncom.MovePayload>({ elem: '1:0', cut: [1, 0, 1], at: '>1:2', value: 1 });
+expectAssignable<syncom.SplicePayload>({ run: 1, from: 4, content: '!' });
+expectAssignable<syncom.SplicePayload>({
+  cut: [
+    [1, 0, 1],
+    ['2:b', 0, 3],
+  ],
+  content: '',
+});
+expectAssignable<syncom.MarkPayload>({ off: 7 });
 expectType<syncom.SequenceBlock | syncom.TreeBlock>(entry.meta.blocks.body);
 expectAssignable<syncom.SequenceBlock>({ k: 't', ts: 1, runs: {} });
 expectType<Promise<void>>(record.treeMove('outline', 'n1', null, { before: 'n2' }));

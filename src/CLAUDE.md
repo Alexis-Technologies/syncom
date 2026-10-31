@@ -248,7 +248,8 @@ elem }` while a peer's lands unreachable — not composed, not in a diff
 run/from, content }` (`content` naming the kind even when empty), `assign`
   `=` `{ elem, value, k? }` (`k: 't'` on a text's embed slot), `move` `^` `{ elem, cut, at, value }`, `mark` `*`
   `{ start, end, key, value, many? } | { off }`, `tree` `~` `{ node, parent,
-fi }`. An index, a sibling or a range is resolved in `prepareOp` INSIDE the
+fi }` — what is the op's own origin's named short (a run by its stamp, an element `ts:offset`;
+  src/text/kind.js `fullRefs` lays the origin back where an op enters the engine). An index, a sibling or a range is resolved in `prepareOp` INSIDE the
   queue (`resolveSplice`/`resolveMove`/`resolveMark`/`resolveTree` in
   `src/commit.js`: `OUT_OF_RANGE`, `CYCLE`, `NOT_FOUND`, and `SURROGATE` for an
   index of a text between the halves of a pair — `wholeCharacters` in

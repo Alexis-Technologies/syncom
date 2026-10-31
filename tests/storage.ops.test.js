@@ -216,15 +216,17 @@ test('Storage replication model', async (t) => {
     await storage.splice(id, 'body', 5, 6);
     assert.deepStrictEqual(await storage.get(id), { name: 'Ada', body: 'hello' });
     // What travels: a run anchored at the head, one anchored inside it, an
-    // extension of this node's own run, and a cut naming its ranges.
+    // extension of this node's own run, and a cut naming its ranges — what is
+    // the op's own origin's named without it: a run by its stamp, an element
+    // `ts:offset`.
     assert.deepStrictEqual(
       ops.map((op) => op.type),
       ['write', 'splice', 'splice', 'splice', 'splice'],
     );
     const [, first, inside, appended, cut] = ops;
-    const run = `${first.ts}:${storage.nodeId}`;
+    const run = first.ts;
     assert.deepStrictEqual(first.value, { at: '^', content: 'helo' });
-    assert.deepStrictEqual(inside.value, { at: `<${first.ts}:3:${storage.nodeId}`, content: 'l' });
+    assert.deepStrictEqual(inside.value, { at: `<${first.ts}:3`, content: 'l' });
     assert.deepStrictEqual(appended.value, { run, from: 4, content: ' world' });
     assert.deepStrictEqual(cut.value, { cut: [[run, 4, 6]], content: '' });
     assert.strictEqual(cut.key, 'body');
@@ -762,20 +764,17 @@ test('Storage replication model', async (t) => {
       ['write', 'splice', 'assign', 'move', 'move'],
       'a move to the same place is nothing',
     );
-    const run = `${ops[1].ts}:${storage.nodeId}`;
-    assert.deepStrictEqual(ops[2].value, { elem: `${ops[1].ts}:1:${storage.nodeId}`, value: 'B' });
+    // This node's own elements and runs, named without its origin (`ts:offset`, a stamp).
+    const run = ops[1].ts;
+    assert.deepStrictEqual(ops[2].value, { elem: `${ops[1].ts}:1`, value: 'B' });
     assert.deepStrictEqual(ops[3].value, {
-      elem: `${ops[1].ts}:0:${storage.nodeId}`,
+      elem: `${ops[1].ts}:0`,
       cut: [run, 0, 1],
-      at: `>${ops[1].ts}:2:${storage.nodeId}`,
+      at: `>${ops[1].ts}:2`,
       value: 'a',
     });
     assert.strictEqual(ops[4].value.elem, ops[3].value.elem, 'the element keeps its name across moves');
-    assert.deepStrictEqual(
-      ops[4].value.cut,
-      [`${ops[3].ts}:${storage.nodeId}`, 0, 1],
-      'the slot it showed at was its position run',
-    );
+    assert.deepStrictEqual(ops[4].value.cut, [ops[3].ts, 0, 1], 'the slot it showed at was its position run');
     // The value follows the element: set after a move, read at the new place.
     await storage.setAt(id, 'items', 0, 'A');
     assert.deepStrictEqual((await storage.get(id)).items, ['A', 'B', 'c']);
