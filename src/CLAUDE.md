@@ -327,7 +327,20 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   log order; unique keys are checked against the in-flight entries too
   (`#conflicts`); `applyPatches`/`updateText` await their landings before
   returning — and before rethrowing. `commit()` returns `{ op, done }`;
-  `storage[COMMIT]` awaits `done`. `close()`, `flush()` and `tag()` drain the
+  `storage[COMMIT]` awaits `done`. A write is made AT ONCE, outside the queue
+  (`Storage#fastCommit` → `commitAtOnce` in src/commit.js, LOG-9), where a turn of the queue
+  of its own would change nothing: the storage set up with nothing asynchronous on the write
+  path (`#fastIssue`: no beforeWrite/afterWrite hook, no signing, no telemetry, no actor
+  function, no lens, `defer > 0`, a hash Node.js makes at once), the queue idle, no hook
+  running, no landing step pending (`#slowSteps`), the record live and held here (in flight or
+  cached — `#currentNow`), its entity without a validator or unique keys, nothing encrypted or
+  expected; anything else goes through the queue. It shares `opOf`/`applyLocal`/`prepared` with
+  `prepare`, chains at once and appends with `log.enqueue(…, { onDurable })`: the landing
+  (`landNow` — the deferred slot, `settled`, the announce) runs as its group is written, before
+  the group's promise settles, and `core.landed(done)` makes every landing step after it wait
+  for that group. The method delegates (`splice`, `push`, `setAt`, `move`, `inc`, `add`,
+  `remove`, `unset`, `update`) have no async frame: an argument they refuse is a rejection,
+  never a throw. `close()`, `flush()` and `tag()` drain the
   landings first; `stats().inflight` counts them. The log resolves a group
   only after the roll its file triggered (`#roll` is O(1) when nothing can
   be sealed: `#unappliedFrom`, the oldest open group not applied whole).

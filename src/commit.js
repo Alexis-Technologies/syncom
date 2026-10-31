@@ -296,9 +296,9 @@ const assertUnique = async (core, id, entry) => {
 // changes nothing.
 const validateLocal = async (core, op, current, visible, ctx) => {
   const { id, type } = op;
-  let { entry, changed, delta, rejected, changes } = applyOp(current, op, core.limits);
-  refuse(core, id, rejected);
-  if (!changed) return null;
+  const applied = applyLocal(core, op, current);
+  if (applied === null) return null;
+  let { entry, delta, changes } = applied;
   const def = core.definitionOf(entry.data);
   if (def?.validator && VALIDATED.has(type)) {
     // Through the lens: a record of an older version is validated as it
@@ -309,14 +309,22 @@ const validateLocal = async (core, op, current, visible, ctx) => {
       if (type === 'write') op.data = validated;
       else op.data = foldSet(op.data, validated, visible ? project(def, id, await core.view(id, current)) : {});
       if (ctx !== null) ctx.data = op.data;
-      ({ entry, changed, delta, rejected, changes } = applyOp(current, op, core.limits));
-      refuse(core, id, rejected);
-      if (!changed) return null;
+      const again = applyLocal(core, op, current);
+      if (again === null) return null;
+      ({ entry, delta, changes } = again);
     }
   }
   // Unique keys are the entity's: a record of none has none to check.
   if (VALIDATED.has(type) && def?.unique?.length > 0) await assertUnique(core, id, entry);
   return { entry, delta, changes };
+};
+
+// The op applied to the record as it is: `{ entry, delta, changes }`, null
+// for an op that changes nothing; a refusal throws.
+const applyLocal = (core, op, current) => {
+  const { entry, changed, delta, rejected, changes } = applyOp(current, op, core.limits);
+  refuse(core, op.id, rejected);
+  return changed ? { entry, delta, changes } : null;
 };
 
 /**
@@ -621,7 +629,18 @@ const prepare = async (core, type, id, payload, options) => {
     : null;
   if (beforeWrite !== null) payload = await replaced(core, type, payload, ctx);
   if (sealed) return { op: await commitSealed(core, type, id, payload, current, ctx, source), sealed: true };
-  if (whole) {
+  const op = opOf(core, type, id, payload, current, visible, who, from, msg, ctx);
+  if (op === null) return { op: null };
+  const applied = await validateLocal(core, op, current, visible, ctx);
+  if (applied === null) return { op: null };
+  return prepared(core, op, applied, current, ctx, source, via);
+};
+
+// The op a local write makes, before it is applied: a write's or a set's
+// keys checked and its `$type` kept, the op stamped, scoped and resolved —
+// null when it writes nothing.
+const opOf = (core, type, id, payload, current, visible, who, from, msg, ctx) => {
+  if (type === 'write' || type === 'set') {
     // Every key a field name or a path of them: a key that is neither would
     // be left out of the op without a word.
     for (const key of Object.keys(payload.data ?? {})) fieldName(type === 'write' ? 'set' : 'update', key);
@@ -633,25 +652,80 @@ const prepare = async (core, type, id, payload, options) => {
   if (msg !== undefined) op.msg = msg;
   // A plugin's op that resolved to nothing — a tree move to where the node
   // already is — writes nothing.
-  if (op.value === null && core.plugins.byType[type] !== undefined) return { op: null };
+  if (op.value === null && core.plugins.byType[type] !== undefined) return null;
   // An unset of nothing the record holds writes nothing.
-  if (type === 'unset' && op.value.length === 0) return { op: null };
-  const applied = await validateLocal(core, op, current, visible, ctx);
-  if (applied === null) return { op: null };
+  if (type === 'unset' && op.value.length === 0) return null;
+  return op;
+};
+
+// What `prepare` hands on once the op is applied (and validated).
+const prepared = (core, op, applied, current, ctx, source, via) => {
   // The data a beforeWrite hook or a validator handed back, as the op
   // carries it: never deeper than a peer takes.
   if (op.data !== undefined && !nestsWithin(op.data, MAX_WIRE_DEPTH)) {
-    throw new TypeError(`Record ${id}: its data nests deeper than ${MAX_WIRE_DEPTH} levels`);
+    throw new TypeError(`Record ${op.id}: its data nests deeper than ${MAX_WIRE_DEPTH} levels`);
   }
   // The validator may have filled the field the scope reads (a default):
   // the stream is the one of the record as it is written.
-  if (type === 'write' || type === 'set') assignScope(core, op, () => applied.entry.data);
+  if (op.type === 'write' || op.type === 'set') assignScope(core, op, () => applied.entry.data);
   const previous = current && !current.encrypted ? current : null;
   // The commit event's `before` is the record in the op model's terms — the
   // paths apart, as the entry holds them — what an undo takes a step back by.
   const before = previous !== null && isAlive(previous) ? previous.data : null;
   const { entry, delta, changes } = applied;
   return { op, entry, delta, changes, ctx, source, via, before, previous };
+};
+
+const NOOP = () => {};
+
+/**
+ * A local write made at once, outside the mutation queue — what the storage
+ * runs on an idle queue for a live record it holds, with nothing
+ * asynchronous configured: no hook, no signature, no validator or unique
+ * key, no telemetry, no lens, the record files deferred (Storage#fastCommit
+ * decides). The op is made and applied over `current`, chained, appended and
+ * made the record's in-flight state before this returns; it lands and is
+ * announced as its group is written (the log's `onDurable`), and the
+ * landings behind it wait for that (`core.landed`). Resolves once announced
+ * — to the op with `answer`, else to nothing; a throw is a rejection with
+ * nothing appended.
+ */
+const commitAtOnce = (core, type, id, payload, options, current, answer) => {
+  const { source = null, via = null, from = null, actor, message } = options;
+  const msg = messageArg(message);
+  payload = copyPayload(payload);
+  const visible = (type === 'write' || type === 'set') && isAlive(current) ? compose(current, core.plugins) : null;
+  const op = opOf(core, type, id, payload, current, visible, core.actorOf(actor), from, msg, null);
+  if (op === null) return Promise.resolve(answer ? null : undefined);
+  const applied = applyLocal(core, op, current);
+  if (applied === null) return Promise.resolve(answer ? null : undefined);
+  const made = prepared(core, op, applied, current, null, source, via);
+  // The chain at once: Node.js hashes synchronously (the fast path's condition).
+  const key = opKey(op);
+  const prev = core.fingerprintOf(key, op.seq - 1);
+  if (prev !== undefined) op.prev = prev;
+  let position = 0;
+  const ticket = core.log.enqueue([op], { fps: [fingerprintOf(op)], onDurable: () => landNow(core, made, position) });
+  position = ticket.entries[0].seq;
+  core.inflight(id, made.entry, position);
+  core.landed(ticket.done);
+  // The group's promise settles once its writes have landed: what a write
+  // that answers nothing resolves with.
+  return answer ? ticket.done.then(() => op) : ticket.done;
+};
+
+// A write made at once, landed as its group is written: the deferred slot
+// (at once — no lens), the entry no longer in flight, the catalog saved, the
+// announce (no afterWrite hook) — what `land` and `announce` do, in order.
+const landNow = (core, made, position) => {
+  const { op, entry, delta, changes, source, via, before, previous } = made;
+  core.deferred(op.id, entry, position);
+  core.settled(op.id, position);
+  core.saveCatalog();
+  announce(core, op, entry, delta, null, source, via, { seq: position, before, previous, txn: position }, changes);
+  if (core.listening('transaction')) {
+    transacted(core, { local: true, via, source, message: op.msg ?? null, ops: [op], changes: tagged(op, changes) });
+  }
 };
 
 const commitLocal = async (core, type, id, payload, options) => {
@@ -789,6 +863,7 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
     return op;
   };
   tx.commit = commitIn;
+  tx.write = (type, id, payload, options) => commitIn(type, id, payload, options).then(NOOP);
   tx.commitNow = async (type, id, payload, options) => outcome(await commitIn(type, id, payload, options));
   // A plugin method that transacts (`applyDelta`), called inside a
   // transaction, runs within it: one append, the outer's actor, source and
@@ -896,4 +971,4 @@ const commit = (core, type, id, payload, options = {}) => {
   return tracedCommit(core, type, id, payload, options);
 };
 
-module.exports = { commit, transact, rehearse, link, MISMATCH };
+module.exports = { commit, commitAtOnce, transact, rehearse, link, MISMATCH };

@@ -10,11 +10,11 @@
 // both over the same lent core: this file keeps a delegate per method.
 
 const { Emitter, generateUUID, createLogger } = require('./utils.js');
-const { sha256 } = require('./crypto/digest.js');
+const { sha256, hashOf } = require('./crypto/digest.js');
 const { OpLog, appliedHere } = require('./log.js');
 const { EntryStore } = require('./entries.js');
 const { Record, Collection } = require('./record.js');
-const { commit, transact, MISMATCH } = require('./commit.js');
+const { commit, commitAtOnce, transact, MISMATCH } = require('./commit.js');
 const F = require('./fields.js');
 const P = require('./patches.js');
 const B = require('./blame.js');
@@ -54,6 +54,12 @@ const STORAGE_HOOKS = ['beforeWrite', 'afterWrite', 'beforeRead', 'afterRead', '
 // The ops that leave a record's whole state behind them — where a repair
 // can start replaying from. A purge counts even scrubbed; the others not.
 const WHOLE = new Set(['write', 'merge', 'delete']);
+
+const NOOP = () => {};
+// An op is fingerprinted at once in Node.js (node:crypto) and through a
+// promise in the browser (Web Crypto): the write path is made at once only
+// where the hash is.
+const HASHES_AT_ONCE = typeof hashOf(null) === 'string';
 
 class Storage extends Emitter {
   #path;
@@ -120,6 +126,12 @@ class Storage extends Emitter {
   #inflight = new Map();
   #inflightCount = 0;
   #landings = Promise.resolve();
+  // Landing steps queued and not yet done: while there is one, a write
+  // lands behind it, through the chain — never at once, ahead of it.
+  #slowSteps = 0;
+  // Whether a write may be made at once (#fastCommit): set at open, once the
+  // plugins have set up — nothing asynchronous on the write path.
+  #fastIssue = false;
   #signatures;
   #encrypted;
   #hooks;
@@ -354,6 +366,15 @@ class Storage extends Emitter {
     await this.#loadCatalog();
     if (this.#tags !== null) await this.#tags.load();
     this.#core = this.#lend();
+    this.#fastIssue =
+      HASHES_AT_ONCE &&
+      this.#hooks.beforeWrite === null &&
+      this.#hooks.afterWrite === null &&
+      this.#core.sign === null &&
+      !this.#otel.enabled &&
+      typeof this.#actor !== 'function' &&
+      this.#defer > 0 &&
+      this.#lens === null;
     await this.#replayTail();
     await this.#replayHeld();
     // The API plugins that need the open log — the sync manager — come
@@ -414,7 +435,7 @@ class Storage extends Emitter {
       inflight: (id, entry, position) => this.#takeOff(id, entry, position),
       settled: (id, position) => this.#settle(id, position),
       landing: (step) => this.#landing(step),
-      drain: () => this.#landings,
+      drain: () => this.#drained(),
       // A stream's last seq in the log, the fingerprint the log holds at a
       // seq of it (what an op of this node's chains to), and a batch landed
       // from inside a landing step (a transaction's: the chain block, the
@@ -461,6 +482,14 @@ class Storage extends Emitter {
       entities: this.#entities,
       run: (task) => this.#run(task),
       commit: (type, id, payload, options) => this[COMMIT](type, id, payload, options),
+      // The same commit for a method that answers nothing: resolves once the
+      // write is announced, to undefined.
+      write: (type, id, payload, options) => this.#write(type, id, payload, options),
+      // A write made at once (src/commit.js commitAtOnce): the landings that
+      // come after it wait for its group, which lands it.
+      landed: (done) => {
+        this.#landings = done;
+      },
       // The same write from INSIDE a task of the queue (`core.run`), where
       // `commit` would wait for itself; and whether an entry is live.
       commitNow: (type, id, payload, options) => commit(this.#core, type, id, payload, options),
@@ -913,6 +942,14 @@ class Storage extends Emitter {
     return this.#entries.load(id);
   }
 
+  // The same, where it is known at once: undefined when only the file knows
+  // (an entry not cached, a record never written here).
+  #currentNow(id) {
+    const stack = this.#inflight.get(id);
+    if (stack !== undefined && stack.length > 0) return stack[stack.length - 1].entry;
+    return this.#entries.peek(id);
+  }
+
   #takeOff(id, entry, position) {
     let stack = this.#inflight.get(id);
     if (stack === undefined) this.#inflight.set(id, (stack = []));
@@ -946,9 +983,20 @@ class Storage extends Emitter {
 
   // The landings go one after another, in log order, outside the queue; a
   // failed one fails its own write alone.
+  // The chain may end in a write made at once (`core.landed`): its group's
+  // promise, which rejects when the group failed — a step runs after it
+  // either way, and a reader that waits for the landings waits for this.
+  #drained() {
+    return this.#landings.then(NOOP, NOOP);
+  }
+
   #landing(step) {
+    this.#slowSteps++;
     const done = this.#landings.then(step, step);
-    this.#landings = done.catch(() => {});
+    const settled = () => {
+      this.#slowSteps--;
+    };
+    this.#landings = done.then(settled, settled);
     return done;
   }
 
@@ -1133,13 +1181,51 @@ class Storage extends Emitter {
   // ---------------------------------------------------------------------
   // The one local write path — src/commit.js, inside the queue.
 
-  async [COMMIT](type, id, payload, options = {}) {
-    if (!isRecordId(id)) throw invalidId(id);
+  [COMMIT](type, id, payload, options = {}) {
+    if (!isRecordId(id)) return Promise.reject(invalidId(id));
+    return this.#fastCommit(type, id, payload, options, true) ?? this.#queuedCommit(type, id, payload, options);
+  }
+
+  // A write whose caller takes no answer (the methods that resolve to
+  // nothing): the commit, resolving to undefined.
+  #write(type, id, payload, options = {}) {
+    if (!isRecordId(id)) return Promise.reject(invalidId(id));
+    return (
+      this.#fastCommit(type, id, payload, options, false) ?? this.#queuedCommit(type, id, payload, options).then(NOOP)
+    );
+  }
+
+  async #queuedCommit(type, id, payload, options) {
     const { op, done } = await this.#run(() => commit(this.#core, type, id, payload, options));
     // The queue is free once the op is appended; the caller waits for the
     // landing — the disk, the file, the hooks, the listeners.
     if (done !== null) await done;
     return op;
+  }
+
+  // A write made at once (src/commit.js commitAtOnce) — or null, and the
+  // queue takes it. At once is what a queue turn of its own would be: the
+  // queue idle and no hook running, so nothing interleaves (the op is
+  // appended before this returns); no landing step pending, so it never
+  // lands ahead of one; the record live and held here, of an entity with no
+  // validator and no unique key; nothing encrypted, nothing expected.
+  #fastCommit(type, id, payload, options, answer) {
+    if (!this.#fastIssue || this.#queued !== 0 || this.#inHook !== 0 || this.#slowSteps !== 0 || this.#closed) {
+      return null;
+    }
+    if (options.encrypted === true || (options.expect !== undefined && options.expect !== null)) return null;
+    const current = this.#currentNow(id);
+    if (current === undefined || current === null || current.encrypted || !isAlive(current)) return null;
+    const def = this.#definitionOf(current.data);
+    if (def !== undefined && def !== null && (def.validator || def.unique.length > 0)) return null;
+    this.#queued++;
+    try {
+      return commitAtOnce(this.#core, type, id, payload, options, current, answer);
+    } catch (error) {
+      return Promise.reject(error);
+    } finally {
+      this.#queued--;
+    }
   }
 
   // ---------------------------------------------------------------------
@@ -1307,7 +1393,18 @@ class Storage extends Emitter {
     this.#records.delete(id);
   }
 
-  async update(id, delta, { actor } = {}) {
+  update(id, delta, options) {
+    // A record held here and live is there: no file to ask.
+    if (isRecordId(id) && isPlainObject(delta)) {
+      const current = this.#currentNow(id);
+      if (current !== undefined && current !== null && (current.encrypted || isAlive(current))) {
+        return this.#write('set', id, { data: delta }, { actor: options?.actor });
+      }
+    }
+    return this.#update(id, delta, options?.actor);
+  }
+
+  async #update(id, delta, actor) {
     if (!isRecordId(id)) throw invalidId(id);
     if (!(await this.has(id))) throw new SyncomError('NOT_FOUND', `Record ${id} not found`, { id });
     if (!isPlainObject(delta)) throw new TypeError('update() takes a plain object');
@@ -1360,28 +1457,55 @@ class Storage extends Emitter {
   }
 
   inc(id, key, value, options) {
-    return F.inc(this.#core, id, key, value, options);
+    try {
+      return F.inc(this.#core, id, key, value, options);
+    } catch (error) {
+      return Promise.reject(error);
+    }
   }
 
   add(id, key, elements, options) {
-    return F.add(this.#core, id, key, elements, options);
+    try {
+      return F.add(this.#core, id, key, elements, options);
+    } catch (error) {
+      return Promise.reject(error);
+    }
   }
 
   remove(id, key, elements, options) {
-    return F.remove(this.#core, id, key, elements, options);
+    try {
+      return F.remove(this.#core, id, key, elements, options);
+    } catch (error) {
+      return Promise.reject(error);
+    }
   }
 
   /** Removes fields of any kind from a record — one name or an array; a field it does not hold is no op. */
   unset(id, fields, options) {
-    return F.unset(this.#core, id, fields, options);
+    try {
+      return F.unset(this.#core, id, fields, options);
+    } catch (error) {
+      return Promise.reject(error);
+    }
   }
 
-  async splice(id, key, index, count, content, options) {
-    return this.#api('splice')(this.#core, id, key, index, count, content, options);
+  // The hot writes call their method at once, without an async frame of
+  // their own: a refusal of the arguments — or PLUGIN_MISSING — is a
+  // rejection all the same.
+  splice(id, key, index, count, content, options) {
+    try {
+      return this.#api('splice')(this.#core, id, key, index, count, content, options);
+    } catch (error) {
+      return Promise.reject(error);
+    }
   }
 
-  async push(id, key, content, options) {
-    return this.#api('push')(this.#core, id, key, content, options);
+  push(id, key, content, options) {
+    try {
+      return this.#api('push')(this.#core, id, key, content, options);
+    } catch (error) {
+      return Promise.reject(error);
+    }
   }
 
   async updateText(id, key, text, options) {
@@ -1464,12 +1588,20 @@ class Storage extends Emitter {
     return this.#api('index')(this.#core, id, key, cursor);
   }
 
-  async setAt(id, key, index, value, options) {
-    return this.#api('setAt')(this.#core, id, key, index, value, options);
+  setAt(id, key, index, value, options) {
+    try {
+      return this.#api('setAt')(this.#core, id, key, index, value, options);
+    } catch (error) {
+      return Promise.reject(error);
+    }
   }
 
-  async move(id, key, from, to, options) {
-    return this.#api('move')(this.#core, id, key, from, to, options);
+  move(id, key, from, to, options) {
+    try {
+      return this.#api('move')(this.#core, id, key, from, to, options);
+    } catch (error) {
+      return Promise.reject(error);
+    }
   }
 
   async treeMove(id, key, node, parent, options) {
@@ -1586,7 +1718,14 @@ class Storage extends Emitter {
     const methods = this.#txMethods;
     for (let i = 0; i < methods.length; i++) {
       const method = methods[i][1];
-      api[methods[i][0]] = (...args) => method(tx, ...args);
+      // A method that refuses its arguments throws: a rejection, as from the storage.
+      api[methods[i][0]] = (...args) => {
+        try {
+          return method(tx, ...args);
+        } catch (error) {
+          return Promise.reject(error);
+        }
+      };
     }
     const current = async (id) => {
       if (!isRecordId(id)) throw invalidId(id);
@@ -1713,7 +1852,7 @@ class Storage extends Emitter {
    */
   async flush() {
     if (this.#closed) return;
-    await this.#landings;
+    await this.#drained();
     await this.#run(() => this.#flushDeferred());
   }
 
@@ -1727,7 +1866,7 @@ class Storage extends Emitter {
     if (this.#sync !== null) await this.#sync.stop();
     const seal = async () => {
       // What is in flight lands first.
-      await this.#landings;
+      await this.#drained();
       await this.#flushDeferred();
       await this.#catalogSave;
       await this.#catalog.save(this.#log.lastEventId);

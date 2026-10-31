@@ -142,6 +142,14 @@ class EntryStore {
     }
   }
 
+  // A cached entry, known at once (touched as a load touches it); undefined
+  // when only the file can tell.
+  peek(id) {
+    const cached = this.#cache.get(id);
+    if (cached !== undefined) this.remember(id, cached);
+    return cached;
+  }
+
   async load(id) {
     if (!isRecordId(id)) return null;
     const cached = this.#cache.get(id);

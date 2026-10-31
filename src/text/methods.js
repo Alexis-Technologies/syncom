@@ -32,6 +32,11 @@ const editorOf = async (core, id, key, index) => {
 // each hunk through the local write path. The readers (`spans`, `cursor`,
 // `index`) read the record raw: no lens, no hooks.
 
+// The writes below return the commit's promise as it is (`core.write`, no
+// async frame of their own): an argument they refuse is a throw, which the
+// storage's delegate hands back as a rejection.
+const RESOLVED = Promise.resolve();
+
 /**
  * Splices list or text field `key` at `index`: removes `count` elements
  * and inserts `content` — an array for a list, a string for a text — in
@@ -41,14 +46,12 @@ const editorOf = async (core, id, key, index) => {
  * anchors into it. Creates the field, and the record, when absent;
  * rejects with `OUT_OF_RANGE` past the field's length.
  */
-const splice = async (core, id, key, index, count = 0, content, { actor } = {}) => {
-  await core.commit('splice', id, spliceArgs('splice', key, index, count, content), { actor });
-};
+const splice = (core, id, key, index, count = 0, content, options) =>
+  core.write('splice', id, spliceArgs('splice', key, index, count, content), { actor: options?.actor });
 
 /** Appends `content` to list or text field `key` — a `splice` at the end. */
-const push = async (core, id, key, content, { actor } = {}) => {
-  await core.commit('splice', id, spliceArgs('push', key, null, 0, content), { actor });
-};
+const push = (core, id, key, content, options) =>
+  core.write('splice', id, spliceArgs('push', key, null, 0, content), { actor: options?.actor });
 
 /**
  * Makes text field `key` read as `text`: the field is diffed against it
@@ -365,11 +368,11 @@ const positions = async (core, id, key, cursors) => {
  * the embed slot at `index` (`{ type, parents, attrs, isEmbed }`, or null);
  * rejects with `NOT_FOUND` for a slot that is no embed.
  */
-const setAt = async (core, id, key, index, value, { actor } = {}) => {
+const setAt = (core, id, key, index, value, options) => {
   fieldName('setAt', key);
   if (!Number.isInteger(index) || index < 0) throw new TypeError('setAt() takes a non-negative integer index');
   jsonValue('setAt', value);
-  await core.commit('assign', id, { key, index, value }, { actor });
+  return core.write('assign', id, { key, index, value }, { actor: options?.actor });
 };
 
 /**
@@ -378,13 +381,13 @@ const setAt = async (core, id, key, index, value, { actor } = {}) => {
  * it once, at the newer move's place; a move concurrent with a removal of
  * the element brings it back.
  */
-const move = async (core, id, key, from, to, { actor } = {}) => {
+const move = (core, id, key, from, to, options) => {
   fieldName('move', key);
   if (!Number.isInteger(from) || from < 0 || !Number.isInteger(to) || to < 0) {
     throw new TypeError('move() takes non-negative integer indices');
   }
-  if (from === to) return;
-  await core.commit('move', id, { key, index: from, to }, { actor });
+  if (from === to) return RESOLVED;
+  return core.write('move', id, { key, index: from, to }, { actor: options?.actor });
 };
 
 module.exports = {

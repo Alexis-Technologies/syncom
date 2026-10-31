@@ -136,7 +136,9 @@ const ENTRIES = [
   // plugins too — the core keeps the hooks and SHA-256 through Web Crypto
   // (src/crypto/digest.js) — and came down to 52 KB (51.4 measured). The rule
   // stays: a raise names its feature here.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 52 },
+  // 52.8 with a write made at once (Storage#fastCommit, src/commit.js commitAtOnce, the log's enqueue, events
+  // dispatched; 2026-10-31). 53, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 53 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -284,7 +286,8 @@ const ENTRIES = [
   // 117.1 with a large block written in pieces (src/entries.js, the text plugin's `pieces`). 117.5, raised by name.
   // 117.6 with the write path's first pieces at once (events dispatched, a cheap prepare, a hold and an announce
   // without a promise; 2026-10-31). 118.5, raised by name: room for the fast path, measured again at its end.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 118.5 },
+  // 118.6 with a write made at once (the fast path itself). 119, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 119 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -396,7 +399,8 @@ const ENTRIES = [
     // 34.8 with the log's stream index and the segments read from the listing; 2026-10-27. 35, raised by name.
     // 35.1 with the write path's pieces at once and the log's enqueue (a group's promise shared, its callbacks
     // once durable; 2026-10-31). 35.5, raised by name.
-    budget: 35.5,
+    // 35.5 (over by a few bytes) with a write made at once. 36, raised by name.
+    budget: 36,
   },
 ];
 

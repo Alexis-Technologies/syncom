@@ -39,6 +39,7 @@ const MEMBERS = [
   'invalid',
   'kindOf',
   'land',
+  'landed',
   'landing',
   'limits',
   'listening',
@@ -68,6 +69,7 @@ const MEMBERS = [
   'verify',
   'version',
   'view',
+  'write',
 ];
 
 test('the core a storage lends is frozen and has the members this list names, no more', async (t) => {
