@@ -588,11 +588,17 @@ class Storage extends Emitter {
   // What a record reads as: itself when it is of this node's version (or
   // newer, or there is no schema), the lens of it otherwise, computed once
   // per cached entry. Replication (`snapshot`, `applyOp`) reads the raw data.
-  async #view(id, entry) {
+  // A value at once — a promise only where a lens runs (a record of an older
+  // version): every caller awaits it or hands it on from an async function.
+  #view(id, entry) {
     // The paths composed into nested objects, once per cached entry (the
     // data itself when it holds none); the lens over that.
     const composed = (entry.composed ??= compose(entry, this.#plugins));
     if (this.#lens === null || (entry.meta.v ?? 1) >= this.#version) return composed;
+    return entry.view ?? this.#lensed(id, entry, composed);
+  }
+
+  async #lensed(id, entry, composed) {
     return (entry.view ??= await this.#lens(id, composed, entry.meta.v ?? 1));
   }
 

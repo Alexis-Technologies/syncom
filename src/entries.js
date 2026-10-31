@@ -25,6 +25,8 @@ const { isRecordId, isPlainObject } = require('./shape.js');
 const { isAlive } = require('./ops.js');
 const { SyncomError } = require('./errors.js');
 
+const isThenable = (value) => value !== null && typeof value === 'object' && typeof value.then === 'function';
+
 // How many of the oldest cached entries one write looks at for one to evict.
 const EVICT_SCAN = 64;
 
@@ -292,20 +294,32 @@ class EntryStore {
     else this.#parts.delete(id);
   }
 
-  // The catalog's view of an entry: what `put` takes. Derived state never
-  // fails a write: a lens that throws (a migration returning no object)
-  // indexes the raw data here and throws on the read, where it is reported.
-  async row(id, entry) {
+  // The catalog's view of an entry: what `put` takes — at once, a promise
+  // only where a lens runs. Derived state never fails a write: a lens that
+  // throws (a migration returning no object) indexes the raw data here and
+  // throws on the read, where it is reported.
+  row(id, entry) {
     if (entry === null) return null;
     if (entry.encrypted) return { type: entry.data?.$type, v: null, encrypted: true };
     if (!isAlive(entry)) return { type: entry.data?.$type, v: entry.meta.v ?? null, gone: true };
-    let data = entry.data;
+    let data;
     try {
-      data = await this.#view(id, entry);
+      data = this.#view(id, entry);
     } catch (error) {
-      this.#logger.warn({ event: 'catalog.lens', id, err: error });
+      return this.#unlensed(id, entry, error);
+    }
+    if (isThenable(data)) {
+      return data.then(
+        (view) => ({ type: entry.data.$type, v: entry.meta.v ?? null, data: view }),
+        (error) => this.#unlensed(id, entry, error),
+      );
     }
     return { type: entry.data.$type, v: entry.meta.v ?? null, data };
+  }
+
+  #unlensed(id, entry, error) {
+    this.#logger.warn({ event: 'catalog.lens', id, err: error });
+    return { type: entry.data.$type, v: entry.meta.v ?? null, data: entry.data };
   }
 
   // Puts what the record `id` is now; a record that fails its integrity
@@ -344,11 +358,15 @@ class EntryStore {
   // written: the cache and the catalog hold what the log says, so reads see
   // the write; the file catches up when a later write of it lands, or when
   // the next open replays the log.
-  async hold(id, entry) {
+  // At once — a promise only where the row waits for a lens.
+  hold(id, entry) {
     const cached = { data: entry.data, meta: entry.meta, encrypted: false, block: null };
     this.#held.add(id);
     this.remember(id, cached);
-    this.#catalog.put(id, await this.row(id, cached));
+    const row = this.row(id, cached);
+    if (isThenable(row)) return row.then((value) => void this.#catalog.put(id, value));
+    this.#catalog.put(id, row);
+    return undefined;
   }
 
   // An entry sealed for this node's key: `record` is the ciphertext the

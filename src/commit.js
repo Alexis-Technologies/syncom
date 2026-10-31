@@ -415,19 +415,32 @@ const land = async (core, op, entry, { ticket, position }) => {
 // follows — the live Record is refreshed once, by the last (`transact`).
 // `entry` null: an op that kept nothing of the record (no `commit` listener
 // when it was made) — no commit event for it.
-const announce = async (core, op, entry, delta, ctx, source, via, committed = null, changes = [], refresh = true) => {
-  try {
-    if (core.hooks.afterWrite !== null) await core.hook('afterWrite', ctx, op);
-  } finally {
-    if (refresh) core.refresh(op.id, isAlive(entry) ? entry.data : null, delta, source, entry);
-    // What an undo manager keeps of a local commit: the record before and
-    // after, as copies, and every field's kind — built only for a listener.
-    if (committed !== null && entry !== null && core.listening('commit')) {
-      const event = commitEvent(core, op, entry, isAlive(entry), committed, source, changes);
-      core.emit('commit', event);
-    }
-    core.emit('change', op, via, { changes });
+// Done at once without an afterWrite hook — a promise only with one.
+const announce = (core, op, entry, delta, ctx, source, via, committed = null, changes = [], refresh = true) => {
+  if (core.hooks.afterWrite === null) {
+    announced(core, op, entry, delta, source, via, committed, changes, refresh);
+    return undefined;
   }
+  return afterWritten(core, op, entry, delta, ctx, source, via, committed, changes, refresh);
+};
+
+const afterWritten = async (core, op, entry, delta, ctx, source, via, committed, changes, refresh) => {
+  try {
+    await core.hook('afterWrite', ctx, op);
+  } finally {
+    announced(core, op, entry, delta, source, via, committed, changes, refresh);
+  }
+};
+
+const announced = (core, op, entry, delta, source, via, committed, changes, refresh) => {
+  if (refresh) core.refresh(op.id, isAlive(entry) ? entry.data : null, delta, source, entry);
+  // What an undo manager keeps of a local commit: the record before and
+  // after, as copies, and every field's kind — built only for a listener.
+  if (committed !== null && entry !== null && core.listening('commit')) {
+    const event = commitEvent(core, op, entry, isAlive(entry), committed, source, changes);
+    core.emit('commit', event);
+  }
+  core.emit('change', op, via, { changes });
 };
 
 // The `commit` event: `before` and `after` are copies of the record and

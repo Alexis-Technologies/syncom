@@ -51,9 +51,21 @@ class DeferredWindow {
     return this.#cost;
   }
 
-  /** A local write of `id` waits for the window: `positions` the op's, or a transaction's ops of the record. */
-  async write(id, entry, positions) {
-    await this.#host.hold(id, entry);
+  /**
+   * A local write of `id` waits for the window: `positions` the op's, or a
+   * transaction's ops of the record. Done at once — a promise only where the
+   * host's hold waits (a lens over the catalog row).
+   */
+  write(id, entry, positions) {
+    const held = this.#host.hold(id, entry);
+    if (held !== null && typeof held === 'object' && typeof held.then === 'function') {
+      return held.then(() => this.#enter(id, entry, positions));
+    }
+    this.#enter(id, entry, positions);
+    return undefined;
+  }
+
+  #enter(id, entry, positions) {
     let slot = this.#slots.get(id);
     if (slot === undefined) this.#slots.set(id, (slot = { entry, positions: [] }));
     else slot.entry = entry;
