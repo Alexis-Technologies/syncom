@@ -357,7 +357,8 @@ class EntryStore {
     const held = this.#held.has(id) ? this.#cache.get(id) : undefined;
     const indexed = held !== undefined && held.data === entry.data && held.meta === entry.meta;
     this.#held.delete(id);
-    const cached = { data: entry.data, meta: entry.meta, encrypted: false, block: blockHash };
+    // The composed view rides along: it reads data and meta alone, and both are the same objects here.
+    const cached = { data: entry.data, meta: entry.meta, encrypted: false, block: blockHash, composed: entry.composed };
     this.remember(id, cached);
     if (!indexed) this.#catalog.put(id, await this.row(id, cached));
   }
@@ -368,7 +369,7 @@ class EntryStore {
   // the next open replays the log.
   // At once — a promise only where the row waits for a lens.
   hold(id, entry) {
-    const cached = { data: entry.data, meta: entry.meta, encrypted: false, block: null };
+    const cached = { data: entry.data, meta: entry.meta, encrypted: false, block: null, composed: entry.composed };
     this.#held.add(id);
     this.remember(id, cached);
     const row = this.row(id, cached);
