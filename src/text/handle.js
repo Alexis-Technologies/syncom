@@ -23,11 +23,11 @@
 const { Emitter } = require('../emitter.js');
 const { SyncomError } = require('../errors.js');
 const { spliceArgs, markArgs, jsonValue, fieldName, EMBED } = require('../args.js');
-const { isRecordId, invalidId, isPlainObject, asJson } = require('../shape.js');
+const { isRecordId, invalidId, isPlainObject, asJson, deepEqual } = require('../shape.js');
 const { floorOf } = require('../vector.js');
 const S = require('./sequence.js');
 const { coalesce, prepends, render, blockOf, marksAt, markerArgs, extentKey } = require('./kind.js');
-const { toDelta } = require('./deltas.js');
+const { toDelta, isDeltaOp } = require('./deltas.js');
 const { typedSpans } = require('./methods.js');
 const { assignData } = require('../lazy.js');
 
@@ -36,6 +36,7 @@ const PENDING_MAX = 1024;
 
 const RESOLVED = Promise.resolve();
 const NOOP = () => {};
+const NONE = Object.freeze([]);
 
 class TextHandle extends Emitter {
   #core;
@@ -80,10 +81,11 @@ class TextHandle extends Emitter {
     core.editing.handles.add(this);
   }
 
-  /** The field as the handle reads it: the storage's, with every edit made here on top. */
+  /** The field as the handle reads it: the storage's, with every edit made here on top; empty once the record is gone. */
   toString() {
-    const text =
-      this.#overlay !== null && blockOf(this.#overlay, this.field) !== undefined ? this.#overlay.data[this.field] : '';
+    const entry = this.#overlay;
+    if (entry === null || !this.#core.alive(entry) || blockOf(entry, this.field) === undefined) return '';
+    const text = entry.data[this.field];
     return typeof text === 'string' ? text : '';
   }
 
@@ -166,10 +168,30 @@ class TextHandle extends Emitter {
    * marker) the edits of the field, at once — as `storage.applyDelta()` does.
    */
   applyDelta(delta) {
-    if (!Array.isArray(delta)) throw new TypeError('applyDelta() takes a delta');
+    const shape = 'applyDelta() takes a delta: [{ retain, attributes? } | { insert, attributes? } | { delete }]';
+    if (!Array.isArray(delta)) throw new TypeError(shape);
+    // Checked whole before anything is made — its shape, its markers, and that it fits the text — so a delta
+    // refused leaves nothing of itself behind, as the storage's applyDelta() does.
+    let end = 0;
+    for (let i = 0; i < delta.length; i++) {
+      const op = delta[i];
+      if (!isDeltaOp(op)) throw new TypeError(shape);
+      if (op.retain !== undefined) {
+        if (op.attributes !== undefined && !isPlainObject(op.attributes)) throw new TypeError(shape);
+        end += op.retain;
+      } else if (op.delete !== undefined) end += op.delete;
+      else if (isPlainObject(op.insert)) {
+        const marker = op.insert.embed;
+        if (marker !== null) markerArgs('applyDelta', marker, marker.isEmbed ?? true);
+      }
+    }
+    const length = this.length;
+    if (end > length) {
+      const message = `Index ${end} is out of range for field ${this.field} of record ${this.id} (length ${length})`;
+      throw new SyncomError('OUT_OF_RANGE', message, { id: this.id, field: this.field, index: end, count: 0, length });
+    }
     let at = 0;
     for (const op of delta) {
-      if (!isPlainObject(op)) throw new TypeError('applyDelta() takes a delta');
       if (op.delete !== undefined) this.delete(at, op.delete);
       else if (op.retain !== undefined) {
         if (op.attributes !== undefined) this.format(at, op.retain, op.attributes);
@@ -178,10 +200,10 @@ class TextHandle extends Emitter {
         // A delta says every insert's attributes itself: none is plain, never a mark it landed inside.
         this.insert(at, op.insert, op.attributes ?? {});
         at += op.insert.length;
-      } else if (isPlainObject(op.insert) && op.insert.embed !== undefined) {
+      } else {
         this.insertEmbed(at, op.insert.embed, op.attributes ?? {});
         at += 1;
-      } else throw new TypeError('applyDelta() takes a delta');
+      }
     }
   }
 
@@ -293,7 +315,13 @@ class TextHandle extends Emitter {
     const op = editing.makeOp(type, this.id, payload, from, this.#actor);
     if (op.value === null || this.#prepended(op)) return;
     const applied = editing.applyLocal(op, from);
-    if (applied === null) return;
+    if (applied === null) {
+      // Nothing to edit: the record is gone (a delete or a purge heard) — said, never a keystroke that vanishes.
+      if (from !== null && !this.#core.alive(from)) {
+        throw new SyncomError('NOT_FOUND', `Record ${this.id} is gone: nothing to edit`, { id: this.id });
+      }
+      return;
+    }
     this.#overlay = applied.entry;
     const at = this.#pending.length - 1;
     const last = at >= 0 ? this.#pending[at] : null;
@@ -303,7 +331,7 @@ class TextHandle extends Emitter {
       const made = this.#made[at];
       made.entry = applied.entry;
       made.delta = assignData(made.delta ?? {}, applied.delta);
-      for (let i = 0; i < applied.changes.length; i++) made.changes.push(applied.changes[i]);
+      for (let i = 0; i < applied.changes.length; i++) pushChange(made.changes, applied.changes[i]);
     } else {
       this.#pending.push(op);
       // `heard`: how many other writers' turns the handle had taken when the edit was made — what tells a
@@ -369,9 +397,7 @@ class TextHandle extends Emitter {
     for (const name of Object.keys(have)) if (want[name] === undefined && name !== 'embed') want[name] = null;
     for (const name of Object.keys(want)) {
       if (name === 'embed') this.#embed(start, start + length, want.embed);
-      else if (JSON.stringify(have[name] ?? null) !== JSON.stringify(want[name])) {
-        this.#mark(start, start + length, name, want[name]);
-      }
+      else if (!deepEqual(have[name] ?? null, want[name])) this.#mark(start, start + length, name, want[name]);
     }
   }
 
@@ -409,6 +435,16 @@ class TextHandle extends Emitter {
   // other one on the overlay too, its changes told in the handle's indices.
   #heard(event) {
     const { editing } = this.#core;
+    // The record made again from the log (`repair(id)`): the handle reads it as
+    // the storage does, and what was typed over the old reading is dropped.
+    if (event.repaired !== undefined) {
+      if (event.repaired !== this.id) return;
+      this.#heardTurns++;
+      this.#base = event.entry;
+      this.#overlay = event.entry;
+      this.#unlogged(null, new Error(`Record ${this.id} was made again from the log (repair)`));
+      return;
+    }
     // The turn of the oldest flush still out — its ops are that flush's
     // (grown, or fewer: a moot one is not logged). The base it leaves is the
     // overlay the flush was taken from where no other writer's turn came in
@@ -421,27 +457,29 @@ class TextHandle extends Emitter {
       return;
     }
     const changes = [];
-    let reset = false;
     let touched = false;
     for (const op of event.ops) {
       if (op.id !== this.id) continue;
       touched = true;
-      this.#base = editing.applyTo(this.#base, op).entry;
-      const applied = editing.applyTo(this.#overlay, op);
+      // Nothing of the handle's on top: the base and the overlay are one reading, the op applied once.
+      const idle = this.#overlay === this.#base;
+      const onBase = editing.applyTo(this.#base, op);
+      this.#base = onBase.entry;
+      const applied = idle ? onBase : editing.applyTo(this.#overlay, op);
+      if (idle) this.#overlay = this.#base;
       if (!applied.changed) continue;
-      this.#overlay = applied.entry;
+      if (!idle) this.#overlay = applied.entry;
       for (const change of applied.changes) {
         if (change.field !== this.field && change.action !== 'delete' && change.action !== 'purge') continue;
         changes.push(change);
       }
     }
     if (touched) this.#heardTurns++;
-    if (changes.length === 0) return;
-    if (toDelta(this.#core, changes, this.field) === null) reset = true;
-    if (reset) this.#tellReset(event.source);
-    else this.#tell(changes, false, event.source);
+    if (changes.length === 0 || this.#observers.size === 0) return;
+    this.#tell(changes, false, event.source);
   }
 
+  // The changes as a delta in the handle's indices, told once; what no delta says is a reset.
   #tell(changes, local, source = this.#source) {
     if (this.#observers.size === 0) return;
     const delta = toDelta(this.#core, changes, this.field);
@@ -469,10 +507,12 @@ class TextHandle extends Emitter {
   // observers read the field again, and the warning is written whether or
   // not anything listens.
   #unlogged(landing, cause) {
-    let edits = landing.batch.length + this.#pending.length;
+    // No landing: the record was made again from the log (a repair) — what waits is dropped, the flushes out stand.
+    let edits = (landing === null ? 0 : landing.batch.length) + this.#pending.length;
     const cancelled = [];
-    for (let i = 0; i < this.#landings.length; i++) {
-      const later = this.#landings[i];
+    const landings = landing === null ? NONE : this.#landings;
+    for (let i = 0; i < landings.length; i++) {
+      const later = landings[i];
       if (later === landing || later.started) continue;
       later.cancelled = true;
       edits += later.batch.length;
@@ -488,7 +528,7 @@ class TextHandle extends Emitter {
     this.#pending = [];
     this.#made = [];
     this.#overlay = this.#base;
-    this.#landings = [];
+    if (landing !== null) this.#landings = [];
     if (this.#waiting !== null) {
       this.#waiting.reject(error);
       this.#waiting = null;
@@ -536,6 +576,28 @@ const openText = async (core, id, key, { window, actor, source } = {}) => {
     actor: who,
     source: source ?? Symbol('syncom.handle'),
   });
+};
+
+// `change` onto `changes`: an insert that continues the one reported last is
+// that change, grown — N keystrokes typed on are one change, as they are one
+// op — never the last change edited in place (the observers were handed it).
+const pushChange = (changes, change) => {
+  const at = changes.length - 1;
+  const last = at >= 0 ? changes[at] : null;
+  if (
+    last !== null &&
+    last.action === 'splice' &&
+    change.action === 'splice' &&
+    last.count === 0 &&
+    change.count === 0 &&
+    typeof last.content === 'string' &&
+    typeof change.content === 'string' &&
+    last.index + last.content.length === change.index
+  ) {
+    changes[at] = { ...last, content: last.content + change.content };
+    return;
+  }
+  changes.push(change);
 };
 
 // The one insert of `content` a grown edit reads as, or null for anything else.

@@ -228,6 +228,7 @@ const applyDelta = async (core, id, key, delta, { actor, message, source, expect
 };
 
 module.exports = {
+  isDeltaOp,
   toDelta,
   applyDelta,
 };

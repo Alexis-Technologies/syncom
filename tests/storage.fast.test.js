@@ -159,3 +159,20 @@ test('a seeded workload made at once reads, logs and announces as the same workl
   assert.strictEqual(atOnce.logged, queued.logged, 'the same number of ops logged');
   assert.deepStrictEqual(atOnce.changes, queued.changes, 'every change announced the same, in the same order');
 });
+
+test('a write that adds a $type to an untyped record is validated: never made at once past the entity it joins', async (t) => {
+  const { schema } = require('../src/schema/schema.js');
+  const validator = (data) => {
+    if (typeof data.title !== 'string') throw new Error('title must be a string');
+    return data;
+  };
+  const storage = await openMemory(t, {
+    plugins: [text, schema],
+    schema: { entities: { Post: { schema: validator } } },
+  });
+  await storage.set('r', { note: 'plain' });
+  await assert.rejects(storage.update('r', { $type: 'Post', title: 7 }), { code: 'VALIDATION_FAILED' });
+  assert.deepStrictEqual(await storage.get('r'), { note: 'plain' });
+  await storage.update('r', { $type: 'Post', title: 'ok' });
+  assert.strictEqual((await storage.get('r')).title, 'ok');
+});

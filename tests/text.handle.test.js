@@ -526,3 +526,125 @@ test('a field’s reservations go with its last handle: the storage grows the fi
   assert.strictEqual((await storage.get(id)).notes, 'no');
   await storage.close();
 });
+
+test('compact() logs what an open handle holds first: nothing typed is stamped below the reset and dropped', async () => {
+  const storage = await openMemory('/compact');
+  const id = await storage.insert({ title: 'doc' });
+  await storage.push(id, 'body', 'base');
+  const handle = await storage.openText(id, 'body', { window: 60_000 });
+  handle.insert(4, ' typed');
+  const ops = await storage.compact(id);
+  assert.ok(ops >= 2, `a reset and the text: ${ops}`);
+  assert.strictEqual(handle.pending, false, 'flushed before the compaction');
+  assert.strictEqual((await storage.get(id)).body, 'base typed');
+  assert.strictEqual(handle.toString(), 'base typed');
+  handle.insert(10, '!');
+  await handle.flush();
+  assert.strictEqual((await storage.get(id)).body, 'base typed!', 'the handle edits on over the compacted text');
+  await handle.close();
+  await storage.close();
+});
+
+test('a hook sees a handle’s edit resolved: the record as it reads, a splice’s content, no index of a reading that may have moved', async () => {
+  const seen = [];
+  const hooks = {
+    beforeWrite: (ctx) => {
+      if (ctx.type === 'splice') seen.push(ctx);
+    },
+  };
+  const storage = await openMemory('/ctx', memory(), { hooks });
+  const id = await storage.insert({ title: 'doc' });
+  await storage.push(id, 'body', 'base');
+  const handle = await storage.openText(id, 'body', { window: 60_000 });
+  handle.insert(4, ' typed');
+  handle.insert(10, '!');
+  await handle.flush();
+  const ctx = seen[seen.length - 1];
+  assert.strictEqual(ctx.resolved, true);
+  assert.strictEqual(ctx.key, 'body');
+  assert.strictEqual(ctx.content, ' typed!', 'the keystrokes typed on, one op');
+  assert.deepStrictEqual(ctx.current, { title: 'doc', body: 'base' });
+  assert.strictEqual(ctx.index, undefined);
+  assert.strictEqual(typeof ctx.value, 'object');
+  assert.strictEqual(seen[0].resolved, undefined, 'a call through the storage is as documented');
+  await handle.close();
+  await storage.close();
+});
+
+test('keystrokes typed on are one change as they are one op: the commit event carries the content whole', async () => {
+  const storage = await openMemory('/changes');
+  const id = await storage.insert({ title: 'doc' });
+  const handle = await storage.openText(id, 'body', { window: 60_000 });
+  const events = [];
+  storage.on('commit', (event) => events.push(event.changes));
+  for (const ch of 'hello world') handle.insert(handle.length, ch);
+  await handle.flush();
+  const changes = events[events.length - 1];
+  assert.strictEqual(changes.length, 1, JSON.stringify(changes));
+  assert.strictEqual(changes[0].content, 'hello world');
+  await handle.close();
+  await storage.close();
+});
+
+test('a handle’s applyDelta is checked whole first: a delta refused leaves nothing of itself behind', async () => {
+  const storage = await openMemory('/atomic');
+  const id = await storage.insert({ title: 'doc' });
+  const handle = await storage.openText(id, 'body', { window: 60_000 });
+  handle.insert(0, 'abc');
+  assert.throws(() => handle.applyDelta([{ insert: 'X' }, { retain: 99 }]), { code: 'OUT_OF_RANGE' });
+  assert.throws(() => handle.applyDelta([{ insert: 'X' }, { retain: 0 }]), TypeError);
+  assert.throws(() => handle.applyDelta([{ insert: 'X' }, { insert: { embed: { type: 7 } } }]), TypeError);
+  assert.strictEqual(handle.toString(), 'abc', 'nothing of a refused delta');
+  handle.applyDelta([{ retain: 3 }, { insert: 'd', attributes: { bold: true } }]);
+  assert.strictEqual(handle.toString(), 'abcd');
+  await handle.flush();
+  await handle.close();
+  await storage.close();
+});
+
+test('a handle on a record deleted since reads empty and an edit writes it again; one purged refuses an edit as NOT_FOUND; one repaired from the log reads the record again', async () => {
+  const storage = await openMemory('/gone');
+  const id = await storage.insert({ title: 'doc' });
+  await storage.push(id, 'body', 'text');
+  const handle = await storage.openText(id, 'body', { window: 60_000 });
+  const heard = [];
+  handle.observe((delta, event) => heard.push(event.reset === true ? 'reset' : delta));
+  await storage.delete(id);
+  assert.strictEqual(handle.toString(), '');
+  assert.deepStrictEqual(handle.spans(), []);
+  assert.strictEqual(heard[heard.length - 1], 'reset');
+  // An edit of a deleted record writes it again, as a write through the storage does.
+  handle.insert(0, 'x');
+  assert.strictEqual(handle.toString(), 'x');
+  await handle.flush();
+  assert.strictEqual((await storage.get(id)).body, 'x');
+  await handle.close();
+  // A purged record takes nothing: an edit is refused, never a keystroke that vanishes.
+  const purged = await storage.insert({ title: 'purged' });
+  await storage.push(purged, 'body', 'text');
+  const onPurged = await storage.openText(purged, 'body', { window: 60_000 });
+  await storage.purge(purged);
+  assert.strictEqual(onPurged.toString(), '');
+  assert.throws(() => onPurged.insert(0, 'x'), { code: 'NOT_FOUND' });
+  await onPurged.close();
+  // Made again from the log: the handle reads the record as it is now, what it held unflushed is dropped and said.
+  const other = await storage.insert({ title: 'other' });
+  await storage.push(other, 'body', 'kept');
+  const second = await storage.openText(other, 'body', { window: 60_000 });
+  const errors = [];
+  second.on('error', (error) => errors.push(error.code));
+  const told = [];
+  second.observe((delta, event) => told.push(event.reset === true ? 'reset' : delta));
+  second.insert(4, ' typed');
+  const repaired = await storage.repair(other);
+  assert.ok(repaired.ops >= 1);
+  assert.strictEqual(second.toString(), 'kept');
+  assert.strictEqual(second.pending, false);
+  assert.strictEqual(told[told.length - 1], 'reset');
+  assert.deepStrictEqual(errors, ['UNLOGGED']);
+  second.insert(4, '!');
+  await second.flush();
+  assert.strictEqual((await storage.get(other)).body, 'kept!');
+  await second.close();
+  await storage.close();
+});

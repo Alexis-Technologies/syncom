@@ -988,22 +988,29 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
     }
     if (msg !== undefined) op.msg = msg;
     assignScope(tx, op, () => scopeData(type, {}, current));
-    const ctx =
-      core.hooks.beforeWrite !== null || core.hooks.afterWrite !== null
-        ? {
-            type,
-            id,
-            key: op.key,
-            value: op.value,
-            current: null,
-            encrypted: false,
-            source,
-            via: null,
-            from: null,
-            v: core.version,
-            actor: op.actor ?? null,
-          }
-        : null;
+    // The hooks' context for an edit made elsewhere, already resolved: the
+    // record as it reads now, the op's payload as it travels (`value`), a
+    // splice's `content`; no `index`/`count` — the edit was made over the
+    // handle's reading, which may have moved (`resolved: true` says so).
+    let ctx = null;
+    if (core.hooks.beforeWrite !== null || core.hooks.afterWrite !== null) {
+      const visible = current !== null && isAlive(current) ? compose(current, core.plugins) : null;
+      ctx = {
+        type,
+        id,
+        key: op.key,
+        value: op.value,
+        resolved: true,
+        current: visible,
+        encrypted: false,
+        source,
+        via: null,
+        from: null,
+        v: core.version,
+        actor: op.actor ?? null,
+      };
+      if (type === 'splice' && typeof op.value?.content === 'string') ctx.content = op.value.content;
+    }
     // beforeWrite may refuse a keystroke as it would a call; it replaces no data here.
     if (core.hooks.beforeWrite !== null) await core.hook('beforeWrite', ctx);
     const applied =

@@ -24,9 +24,14 @@ There is no released version section until then; everything below lands in it.
   taken behind it and what was typed since — and the storage logs `handle.unlogged`; a step that
   fails after the append (an `afterWrite` hook) leaves the edits logged. The storage's `flush()`,
   `tag()` and `close()` flush every open handle, one that cannot be logged stopping none of the
-  others. Handles follow the storage's turns through one listener (as many handles as the
-  application opens), and a field's run reservations go with its last handle. Several writers of
-  one node over one text — handles and the storage — never grow one run from two readings.
+  others, as do `compact()`, `restore()` and `applyPatches()` of the record. Handles follow the
+  storage's turns through one listener (as many handles as the application opens), and a field's
+  run reservations go with its last handle. A hook sees a handle's edit resolved (`ctx.resolved`,
+  `content`, `current`); `applyDelta` is checked whole before anything is made; keystrokes typed on
+  are one change as they are one op; a handle on a deleted record reads empty (an edit writes it
+  again, as the storage's would) and one on a purged record refuses an edit as `NOT_FOUND`;
+  `repair(id)` resets the handles on the record. Several writers of one node over
+  one text — handles and the storage — never grow one run from two readings.
 - **Keystrokes fold into one op.** Sent without waiting (made at once, outside the queue), typed
   through a transaction or through a handle, keystrokes that continue each other — typed on at
   the end of their run, or a chain of cuts — are logged as one op; a signing node folds those of a

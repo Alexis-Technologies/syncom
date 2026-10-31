@@ -145,7 +145,10 @@ const ENTRIES = [
   // raised by name.
   // 54.6 with what a text handle stands on (core.editing, core.on, a transaction's commitResolved). 55, raised by name.
   // 55.5 with SHA-256 in JavaScript (src/crypto/sha256.js), so the browser makes a write at once. 56, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 56 },
+  // 56.1 with the handles followed through one listener of the storage's, every handle flushed before a flush(), a
+  // tag(), a close(), a compaction, a restore or a patch, a hook's context for an edit made elsewhere, and a write
+  // that adds a `$type` kept off the fast path (review №4, E2). 56.5, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 56.5 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -305,7 +308,9 @@ const ENTRIES = [
   // block's pieces by run number and a word typed backward folded by a handle. 129, raised by name.
   // 129.3 with the handles followed through one listener of the storage's, a flush cancelled behind one that could
   // not be logged, and every handle flushed at a flush(), a tag() and a close() (review №4, E2). 129.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 129.5 },
+  // 129.8 with a handle's delta checked whole first, its keystrokes one change, a hook's context for its edits, the
+  // handles reset by a repair, and a write that adds a `$type` kept off the fast path. 130, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 130 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -333,7 +338,9 @@ const ENTRIES = [
   // cow.js and the state that stands on them, in place of v1's btree.js, pmap.js, plist.js). 42, raised by name.
   // 42.1 with the pieces by run number (tokens per piece, the quiet writes) and a handle's word typed backward
   // folded (prepends). 42.5, raised by name.
-  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 42.5 },
+  // 42.7 with a handle's flushes cancelled behind one that could not be logged, a prepend held to the turns heard, a
+  // delta checked whole first, keystrokes one change, the reservations per field (review №4, E2). 43, raised by name.
+  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 43 },
   // The tree kind alone, with the fractional indexes a place is made of and
   // the argument checks it shares with the core (5.1 measured).
   // 5.5 with the field-name check unset shares with it (src/args.js).

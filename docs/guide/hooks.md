@@ -74,7 +74,12 @@ the caller made it, save that a `push()` is a `splice` with `index: null`
 (the end), an `unmark()` a `mark` with `value: null` and the reversed expand
 rule, an `unmarkById()` a `mark` with `off`, a `treeRemove()` a `tree` with
 `parent: '$trash'`, and a `remove` from `applyPatches()` carries `removals`
-or `own` as the patch did.
+or `own` as the patch did. An edit made through a text handle (`openText()`)
+reaches the hooks at its flush, already resolved over the handle's reading:
+its `ctx` says `resolved: true`, carries `key`, `current` and — for a
+`splice` — `content` as above, has no `index`/`count` (the handle's reading
+may have moved since), and `value` is the op's payload as it travels (the run
+it extends, the cuts, the content).
 `meta` is the joined metadata of a `merge`. `current` is the
 record as it is now (`null` when absent or deleted — read it, do not change
 it), `encrypted` says whether the write is sealed for this node, `source` is

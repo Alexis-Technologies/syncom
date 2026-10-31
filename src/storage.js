@@ -1251,8 +1251,16 @@ class Storage extends Emitter {
     if (options.encrypted === true || (options.expect !== undefined && options.expect !== null)) return null;
     const current = this.#currentNow(id);
     if (current === undefined || current === null || current.encrypted || !isAlive(current)) return null;
+    // The entity the record is of — and the one the write makes it (a `$type` a
+    // set or a write adds; a schema sets the lens, so this is never reached
+    // with one, but the queue is what validates and it is not left to that).
     const def = this.#definitionOf(current.data);
     if (def !== undefined && def !== null && (def.validator || def.unique.length > 0)) return null;
+    const data = payload?.data;
+    if (data !== null && typeof data === 'object' && typeof data.$type === 'string') {
+      const after = this.#entities.get(data.$type);
+      if (after !== undefined && after !== null && (after.validator || after.unique.length > 0)) return null;
+    }
     this.#queued++;
     try {
       return commitAtOnce(this.#core, type, id, payload, options, current, answer);
@@ -1354,16 +1362,33 @@ class Storage extends Emitter {
     return this.#api('diff')(this.#core, id, from, to);
   }
 
-  applyPatches(id, patches, options) {
+  // A patch, a restore and a compaction write the record as it reads: what an
+  // open handle on it holds is logged first, or it would be stamped below the
+  // reset and dropped unsaid (src/text/handle.js). Without a handle on the
+  // record the call takes its turn of the queue at once, as it always did.
+  async applyPatches(id, patches, options) {
+    const flushed = this.#flushEditsOf(id);
+    if (flushed !== null) await flushed;
     return P.applyPatches(this.#core, id, patches, options);
   }
 
   async restore(id, at, options) {
+    const flushed = this.#flushEditsOf(id);
+    if (flushed !== null) await flushed;
     return this.#api('restore')(this.#core, id, at, options);
   }
 
-  compact(id, options) {
+  async compact(id, options) {
+    const flushed = this.#flushEditsOf(id);
+    if (flushed !== null) await flushed;
     return P.compact(this.#core, id, options);
+  }
+
+  // The handles open on `id` flushed, or null where there is none.
+  #flushEditsOf(id) {
+    let any = false;
+    for (const handle of this.#edits) if (handle.id === id) any = true;
+    return any ? this.#flushEdits(id) : null;
   }
 
   async tag(name) {
@@ -1374,11 +1399,12 @@ class Storage extends Emitter {
   // Every open handle's edits logged (src/text/handle.js), every handle tried
   // whatever another's flush did; one UNLOGGED for them all, naming how many
   // handles and edits were not logged, with the first cause.
-  async #flushEdits() {
+  async #flushEdits(id = null) {
     let handles = 0;
     let edits = 0;
     let cause = null;
     for (const handle of this.#edits) {
+      if (id !== null && handle.id !== id) continue;
       try {
         await handle.flush();
       } catch (error) {
@@ -1417,6 +1443,19 @@ class Storage extends Emitter {
 
   #followed(event) {
     const { ops } = event;
+    // A record made again from the log (`repair`): its followers alone, with the entry it reads as now.
+    if (event.repaired !== undefined) {
+      const listeners = this.#followers.get(event.repaired);
+      if (listeners === undefined) return;
+      for (const listener of listeners) {
+        try {
+          listener(event);
+        } catch (error) {
+          this.#logger.warn({ event: 'listener.error', name: 'handle', err: error });
+        }
+      }
+      return;
+    }
     let told = null;
     for (let i = 0; i < ops.length; i++) {
       const listeners = this.#followers.get(ops[i].id);
@@ -1757,6 +1796,8 @@ class Storage extends Emitter {
     const alive = isAlive(entry);
     this.#logger.info({ event: 'record.repaired', id, ops, alive });
     this.#emitUpdate(id, alive ? entry.data : null, alive ? { ...entry.data } : {}, null, entry);
+    // The handles open on the record read it as it is now (src/text/handle.js).
+    if (this.#following !== null) this.#followed({ ops: [], repaired: id, entry });
     return { ops, alive };
   }
 
