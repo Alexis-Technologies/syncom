@@ -200,3 +200,25 @@ test('several writers of one node on one text never grow one run from two readin
   assert.strictEqual(storage.log.next - next, 2);
   await storage.close();
 });
+
+test('a handle logs its edits a window after them: a timer of the storage’s defer, a throwing observer contained', async () => {
+  const warnings = [];
+  const logger = { warn: (entry) => warnings.push(entry.event), error: () => {}, info: () => {}, debug: () => {} };
+  const storage = await openMemory('/window', memory(), { defer: 5, logger });
+  const id = await storage.insert({ title: 'doc' });
+  await assert.rejects(storage.openText(id, 'body', { window: -1 }), TypeError);
+  const handle = await storage.openText(id, 'body');
+  handle.observe(() => {
+    throw new Error('an observer that throws');
+  });
+  const next = storage.log.next;
+  handle.insert(0, 'a');
+  handle.insert(1, 'b');
+  assert.strictEqual(storage.log.next, next, 'nothing logged at once');
+  await handle.flushed;
+  assert.strictEqual(storage.log.next - next, 1, 'the window’s two keystrokes, one op, logged by the timer');
+  assert.strictEqual((await storage.get(id)).body, 'ab');
+  assert.ok(warnings.includes('listener.error'), 'the observer’s throw is a warning, not the edit’s');
+  await handle.close();
+  await storage.close();
+});

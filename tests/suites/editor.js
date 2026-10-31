@@ -309,6 +309,27 @@ const runEditorTests = async (t, assert, createStorage) => {
     await binding.flush();
   });
 
+  await t.test('an edit the handle refuses — an editor apart from it — reads the editor again', async (t2) => {
+    const storage = await createStorage(t2, 'A');
+    const id = await storage.insert({});
+    await storage.updateText(id, 'body', 'base');
+    const editor = createEditor();
+    const errors = [];
+    const resets = [];
+    const binding = E.createTextBinding(storage, id, 'body', editor, {
+      onError: (error) => errors.push(error.code),
+      onReset: () => resets.push(editor.text()),
+    });
+    t2.after(() => binding.stop());
+    await binding.ready;
+    // An editor that reports an edit past its end: the handle refuses it, and the editor is read again.
+    editor.edit([{ retain: 10 }, { insert: 'x' }]);
+    assert.deepStrictEqual([errors, resets], [['OUT_OF_RANGE'], ['base']]);
+    editor.type(4, '!');
+    await binding.flush();
+    assert.deepStrictEqual([editor.text(), (await storage.get(id)).body], ['base!', 'base!']);
+  });
+
   await t.test('what is typed before the field is read is over contents the load replaces: dropped', async (t2) => {
     const storage = await createStorage(t2, 'A');
     const id = await storage.insert({});

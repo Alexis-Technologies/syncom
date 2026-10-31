@@ -46,6 +46,11 @@ class TextHandle extends Emitter {
   #flushing = RESOLVED;
   // Flushes taken and not settled yet: their edits still wait for the log.
   #unsettled = 0;
+  // Per flush whose event has not come yet, in order: its ops, the overlay
+  // as it was taken (the base and every edit up to it) and how many other
+  // writers' turns the handle had heard by then.
+  #landings = [];
+  #heardTurns = 0;
   #timer = null;
   #waiting = null;
   #observers = new Set();
@@ -196,6 +201,8 @@ class TextHandle extends Emitter {
     this.#waiting = null;
     const core = this.#core;
     this.#unsettled++;
+    const landing = { ops: new Set(batch), overlay: this.#overlay, heard: this.#heardTurns };
+    this.#landings.push(landing);
     const run = async () => {
       const { done } = await core.transact(
         async (tx) => {
@@ -203,7 +210,9 @@ class TextHandle extends Emitter {
         },
         { source: this.#source },
       );
-      if (done !== null) await done;
+      // Nothing logged (every edit moot): no turn comes for it.
+      if (done === null) this.#landings.splice(this.#landings.indexOf(landing), 1);
+      else await done;
     };
     const flushing = this.#flushing.then(run, run).then(
       () => {
@@ -307,14 +316,25 @@ class TextHandle extends Emitter {
   // handle's own flushed ones there alone, the overlay has them — and every
   // other one on the overlay too, its changes told in the handle's indices.
   #heard(event) {
-    const own = event.source === this.#source;
     const { editing } = this.#core;
+    // The turn of the oldest flush still out — its ops are that flush's
+    // (grown, or fewer: a moot one is not logged). The base it leaves is the
+    // overlay the flush was taken from where no other writer's turn came in
+    // between: ops commute, and an op again changes nothing.
+    const landing = this.#landings.length > 0 ? this.#landings[0] : null;
+    if (landing !== null && event.ops.length > 0 && landing.ops.has(event.ops[0])) {
+      this.#landings.shift();
+      if (landing.heard === this.#heardTurns) this.#base = landing.overlay;
+      else for (const op of event.ops) this.#base = editing.applyTo(this.#base, op).entry;
+      return;
+    }
     const changes = [];
     let reset = false;
+    let touched = false;
     for (const op of event.ops) {
       if (op.id !== this.id) continue;
+      touched = true;
       this.#base = editing.applyTo(this.#base, op).entry;
-      if (own) continue;
       const applied = editing.applyTo(this.#overlay, op);
       if (!applied.changed) continue;
       this.#overlay = applied.entry;
@@ -323,6 +343,7 @@ class TextHandle extends Emitter {
         changes.push(change);
       }
     }
+    if (touched) this.#heardTurns++;
     if (changes.length === 0) return;
     if (toDelta(this.#core, changes, this.field) === null) reset = true;
     if (reset) this.#tellReset(event.source);
@@ -356,6 +377,9 @@ class TextHandle extends Emitter {
     const edits = batch.length + this.#pending.length;
     this.#pending = [];
     this.#overlay = this.#base;
+    // A flush behind it may still log what it took: its turn reaches the
+    // handle as another writer's would, laid on the base and the overlay both.
+    this.#landings = [];
     this.#tellReset(this.#source);
     const error = new SyncomError('UNLOGGED', `Edits of ${this.field} of ${this.id} could not be logged`, {
       id: this.id,

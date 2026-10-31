@@ -7,6 +7,8 @@ const loro = require('./loro.js');
 
 const ADAPTERS = [
   syncom.pure,
+  // The pure build's text typed through a handle: what an editor binding does.
+  syncom.edit,
   syncom.secure,
   yjs.plain,
   // Yjs and Loro with every change encoded, as their persistence and sync

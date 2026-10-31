@@ -11,7 +11,13 @@
  * chained (`@alexify/syncom/all`), none for the rest.
  */
 
-const TONES = { syncom: 'primary', 'syncom-text': 'primary', 'syncom-secure': 'secondary', 'syncom-all': 'secondary' };
+const TONES = {
+  syncom: 'primary',
+  'syncom-text': 'primary',
+  'syncom-edit': 'primary',
+  'syncom-secure': 'secondary',
+  'syncom-all': 'secondary',
+};
 
 const trim = (value) => String(Number(value.toPrecision(3)));
 

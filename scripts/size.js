@@ -299,7 +299,9 @@ const ENTRIES = [
   // 120.3 with a list read when it is read and keystrokes coalesced. 121, raised by name.
   // 122.6 with the synchronous text handle; 123.2 with an op's own references short (src/text/kind.js fullRefs).
   // 123.5, raised by name. 124.1 with SHA-256 in JavaScript (src/crypto/sha256.js), so the browser makes a write at once. 124.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 124.5 },
+  // 124.6 with the editor binding on a handle (the handle's embeds and spans, a run's offsets reserved). 125,
+  // raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 125 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
