@@ -12,7 +12,8 @@
 const { assignData } = require('./lazy.js');
 const { applyOp, isAlive, latestClock, settleMeta } = require('./ops.js');
 const { keyScope, opKey } = require('./vector.js');
-const { fingerprintOf, scrubOp } = require('./header.js');
+const { headerText, scrubOp } = require('./header.js');
+const { hashText } = require('./crypto/digest.js');
 const { inScope } = require('./scope.js');
 const { traced, now } = require('./telemetry/writer.js');
 const { isPlainObject, VALIDATED, wellFormed, VERDICT } = require('./shape.js');
@@ -58,6 +59,7 @@ const openBatch = (core, { via = null, scopes = null, peer = null, adoptFrom = n
     // was copied whole for every page.
     vector: {},
     fps: new Map(),
+    headers: new Map(),
     prints: null,
     now: at,
     horizon: at + core.maxSkew,
@@ -95,12 +97,13 @@ const verdictOf = async (core, op, signatures) => {
   }
 };
 
-// An op's fingerprint (src/header.js) — a string in Node.js, a promise in
-// the browser — or null when it cannot be taken: a value JSON cannot read,
-// as malformed as a shape that does not check.
-const printOf = (op) => {
+// An op's header text (src/header.js) — what its fingerprint hashes and what
+// its log line holds, made once here and handed to the log with the op — or
+// null when it cannot be made: a value JSON cannot read, as malformed as a
+// shape that does not check.
+const headerOf = (op) => {
   try {
-    return fingerprintOf(op);
+    return headerText(op);
   } catch {
     return null;
   }
@@ -120,6 +123,7 @@ const checkPage = async (batch, ops) => {
   const verifying = signatures !== false && core.verify !== null;
   const verdicts = [];
   const fps = [];
+  const headers = [];
   const pending = [];
   for (let start = 0; start < ops.length; start += VERIFY_CHUNK) {
     pending.length = 0;
@@ -127,16 +131,19 @@ const checkPage = async (batch, ops) => {
       const op = ops[i];
       verdicts.push(OK);
       fps.push(null);
+      headers.push(null);
       if (!wellFormed(op)) continue;
-      const fp = printOf(op);
-      if (fp === null || typeof fp === 'string') fps[i] = fp;
-      else pending.push(fp.then((value) => void (fps[i] = value)).catch(() => {}));
+      const header = headerOf(op);
+      if (header === null) continue;
+      // The fingerprint at once on both platforms (LOG-12); the header kept for the log line.
+      headers[i] = header;
+      fps[i] = hashText(header);
       if (!verifying || (op.sig === undefined && signatures !== 'require')) continue;
       pending.push(verdictOf(core, op, signatures).then((verdict) => void (verdicts[i] = verdict)));
     }
     if (pending.length > 0) await Promise.all(pending);
   }
-  return { verdicts, fps };
+  return { verdicts, fps, headers };
 };
 
 // Refused before admission: counted per op (the metric), remembered once
@@ -509,10 +516,14 @@ const applyOne = async (batch, op) => {
 const persist = async (batch) => {
   const { core, accepted, touched } = batch;
   if (accepted.length === 0) return;
+  // The header texts made in checkPage, one per accepted op: the log line takes them as they are.
+  const headers = [];
+  for (let i = 0; i < accepted.length; i++) headers.push(batch.headers.get(accepted[i]));
   const ticket = core.log.enqueue(accepted, {
     skipped: batch.skipped,
     held: batch.held,
     fps: batch.fps,
+    headers,
     scrubbed: batch.stripped ?? null,
   });
   await ticket.done;
@@ -557,14 +568,16 @@ const announce = async (batch, result) => {
 
 const applyRemote = async (core, ops, options) => {
   const batch = openBatch(core, options);
-  const { verdicts, fps } = await checkPage(batch, ops);
+  const { verdicts, fps, headers } = await checkPage(batch, ops);
   for (let i = 0; i < ops.length; i++) {
     const op = ops[i];
     if (verdicts[i] !== OK) {
       refuseSignature(batch, op, verdicts[i]);
       continue;
     }
-    if (admit(batch, op, fps[i])) await applyOne(batch, op);
+    if (!admit(batch, op, fps[i])) continue;
+    batch.headers.set(op, headers[i]);
+    await applyOne(batch, op);
   }
   reportSignatures(batch);
   reportEquivocations(batch);

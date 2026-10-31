@@ -1276,3 +1276,35 @@ test('rleAppend extends a list run by 200 000 items', () => {
   assert.strictEqual(out.length, 1);
   assert.deepStrictEqual(out[0], [1].concat(items));
 });
+
+test('a join is the same on both nodes whatever a forged snapshot differs in under one key: a run’s anchor, a mark, a register at one stamp, an extension at one offset', () => {
+  const base = {
+    k: 't',
+    ts: 5,
+    runs: { '1:A': ['^', ['hello']], '3:B': ['>1:4:A', ['!']] },
+    marks: { '4:A': ['<1:0:A', '>1:4:A', 'bold', true, 0] },
+    ext: { '1:A': [[5, 'x']] },
+    vals: { '1:0:A': [2, 'A', { v: 1 }] },
+  };
+  const forged = JSON.parse(JSON.stringify(base));
+  forged.runs['3:B'][0] = '>1:2:A';
+  forged.marks['4:A'][1] = '>1:2:A';
+  forged.ext['1:A'][0][1] = 'y';
+  forged.vals['1:0:A'][2] = { v: 0 };
+  const plain = (block) => JSON.parse(JSON.stringify(block));
+  const ab = plain(S.join(base, forged));
+  const ba = plain(S.join(forged, base));
+  assert.deepStrictEqual(ab, ba, 'the join commutes');
+  assert.strictEqual(ab.runs['3:B'][0], '>1:2:A', 'the lesser anchor');
+  assert.strictEqual(ab.marks['4:A'][1], '>1:2:A', 'the lesser range');
+  assert.deepStrictEqual(ab.vals['1:0:A'][2], { v: 0 }, 'the lesser value at one stamp');
+  assert.ok(
+    ab.runs['1:A'][1].join('').includes('x') && !ab.runs['1:A'][1].join('').includes('y'),
+    'the lesser extension',
+  );
+  // Two honest pictures (one a step behind) join as before.
+  const behind = JSON.parse(JSON.stringify(base));
+  delete behind.marks;
+  delete behind.ext;
+  assert.deepStrictEqual(plain(S.join(base, behind)), plain(S.join(behind, base)));
+});

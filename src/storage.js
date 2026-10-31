@@ -813,8 +813,8 @@ class Storage extends Emitter {
     const mine = [];
     for (const key of def.unique) mine.push(this.#catalog.uniqueKey(view, key));
     for (const [other, stack] of this.#inflight) {
-      if (other === id || stack.length === 0) continue;
-      const held = stack[stack.length - 1].entry;
+      if (other === id || stack.items.length === stack.head) continue;
+      const held = stack.items[stack.items.length - 1].entry;
       if (held.data.$type !== entry.data.$type || !isAlive(held)) continue;
       const theirs = await this.#view(other, held);
       for (let k = 0; k < def.unique.length; k++) {
@@ -983,9 +983,13 @@ class Storage extends Emitter {
 
   // The record as a write path reads it: the entry its newest in-flight op
   // leaves it as, else what the cache or the file holds.
+  // A record's ops in flight: `{ items, head }` — the entries at `items[head..]`,
+  // oldest first. They land in log order, so a settle takes the head in O(1)
+  // (the array compacted once the head passes half of it); N writes to one
+  // record that cannot fold were N splices from the bottom, O(N²).
   #current(id) {
     const stack = this.#inflight.get(id);
-    if (stack !== undefined && stack.length > 0) return stack[stack.length - 1].entry;
+    if (stack !== undefined && stack.items.length > stack.head) return stack.items[stack.items.length - 1].entry;
     return this.#entries.load(id);
   }
 
@@ -993,7 +997,7 @@ class Storage extends Emitter {
   // (an entry not cached, a record never written here).
   #currentNow(id) {
     const stack = this.#inflight.get(id);
-    if (stack !== undefined && stack.length > 0) return stack[stack.length - 1].entry;
+    if (stack !== undefined && stack.items.length > stack.head) return stack.items[stack.items.length - 1].entry;
     return this.#entries.peek(id);
   }
 
@@ -1002,13 +1006,14 @@ class Storage extends Emitter {
   // after it, src/commit.js coalesced).
   #takeOff(id, entry, position) {
     let stack = this.#inflight.get(id);
-    if (stack === undefined) this.#inflight.set(id, (stack = []));
-    const top = stack.length > 0 ? stack[stack.length - 1] : null;
+    if (stack === undefined) this.#inflight.set(id, (stack = { items: [], head: 0 }));
+    const { items } = stack;
+    const top = items.length > stack.head ? items[items.length - 1] : null;
     if (top !== null && top.position === position) {
       top.entry = entry;
       return;
     }
-    stack.push({ entry, position });
+    items.push({ entry, position });
     this.#inflightCount++;
   }
 
@@ -1016,23 +1021,31 @@ class Storage extends Emitter {
   #settle(id, position) {
     const stack = this.#inflight.get(id);
     if (stack === undefined) return;
-    let i = 0;
-    while (i < stack.length && stack[i].position !== position) i++;
-    if (i === stack.length) return;
-    stack.splice(i, 1);
+    const { items } = stack;
+    let i = stack.head;
+    while (i < items.length && items[i].position !== position) i++;
+    if (i === items.length) return;
+    if (i === stack.head) {
+      stack.head++;
+      if (stack.head > 64 && stack.head * 2 > items.length) {
+        stack.items = items.slice(stack.head);
+        stack.head = 0;
+      }
+    } else items.splice(i, 1);
     this.#inflightCount--;
-    if (stack.length === 0) this.#inflight.delete(id);
+    if (stack.items.length === stack.head) this.#inflight.delete(id);
   }
 
   // A group of appends failed: every in-flight entry at or past `from` was
   // built on seqs taken back, and goes before any ticket rejects.
   #takenBack(from) {
     for (const [id, stack] of this.#inflight) {
-      while (stack.length > 0 && stack[stack.length - 1].position >= from) {
-        stack.pop();
+      const { items } = stack;
+      while (items.length > stack.head && items[items.length - 1].position >= from) {
+        items.pop();
         this.#inflightCount--;
       }
-      if (stack.length === 0) this.#inflight.delete(id);
+      if (items.length === stack.head) this.#inflight.delete(id);
     }
   }
 

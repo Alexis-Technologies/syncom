@@ -361,7 +361,9 @@ const ENTRIES = [
   // 43.3 with the engine's bounds (E1: a parked extension against MAX_RUN and MAX_FIELD, a zero-slot run left out, a
   // cut's ranges against MAX_CUTS and merged for the report, the pending work counted as it comes, a block rebuilt
   // once per base, MAX_MARKS) beside the handle's fixes (E2) in one bundle. 43.5, raised by name.
-  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 43.5 },
+  // 43.5 (over by bytes) with a join that is the same on every node whatever a forged picture differs in under one
+  // key (the lesser text wins; SEQ-13). 44, raised by name.
+  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 44 },
   // The tree kind alone, with the fractional indexes a place is made of and
   // the argument checks it shares with the core (5.1 measured).
   // 5.5 with the field-name check unset shares with it (src/args.js).

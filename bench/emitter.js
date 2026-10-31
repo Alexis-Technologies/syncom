@@ -49,6 +49,20 @@ const main = async () => {
     await bench('emit awaited — 1 listener, (data, delta)', () => emitter.emit('update', data, delta));
   }
   {
+    // What every event of the storage leaves through (src/hooks.js notify): no promise unless a listener makes one.
+    const emitter = new Emitter();
+    emitter.on('update', sync);
+    const onError = () => {};
+    let i = 0;
+    await bench(
+      'dispatch — 1 sync listener, contained, no promise',
+      () => {
+        for (let k = 0; k < BATCH; k++) emitter.dispatch('update', [i++], onError);
+      },
+      { opsPerIteration: BATCH },
+    );
+  }
+  {
     const emitter = new Emitter();
     emitter.on('update', async (value) => {
       sink += value;

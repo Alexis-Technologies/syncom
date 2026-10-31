@@ -81,7 +81,12 @@ const prune = (given, base) => {
 };
 
 // Two nodes' pictures of one field joined: the union of runs (one run's two pictures merged), cuts,
-// extensions and marks, the registers by stamp.
+// extensions and marks, the registers by stamp. Two honest pictures never differ under one key but by
+// what each has seen; where a forged one does — a run's anchor, a mark's range, a register at one
+// stamp, an extension at one offset — the lesser text wins, so the join is the same on every node and
+// a snapshot cannot part two nodes for good.
+const lesser = (x, y) => (x === undefined ? y : y === undefined ? x : x <= y ? x : y);
+const lesserJson = (x, y) => JSON.stringify(x) < JSON.stringify(y);
 const join = (givenA, givenB) => {
   const a = plainOf(asBlock(givenA));
   const b = plainOf(asBlock(givenB));
@@ -96,8 +101,9 @@ const join = (givenA, givenB) => {
     else {
       const theirs = b.runs[key];
       const content = rleMerge(a.k, mine[1], theirs[1]);
-      out.runs[key] =
-        mine.length === 3 || theirs.length === 3 ? [mine[0], content, mine[2] ?? theirs[2]] : [mine[0], content];
+      const anchor = lesser(mine[0], theirs[0]);
+      const elem = mine.length === 3 || theirs.length === 3 ? lesser(mine[2], theirs[2]) : undefined;
+      out.runs[key] = elem === undefined ? [anchor, content] : [anchor, content, elem];
     }
   }
   const rangesHeld = new Map();
@@ -124,18 +130,21 @@ const join = (givenA, givenB) => {
     const extKeys = keysOf(side.ext);
     for (let e = 0; e < extKeys.length; e++) {
       const key = extKeys[e];
+      // Where an extension sits at an offset already held: by offset, the lesser content.
       let froms = fromsHeld.get(key);
       if (froms === undefined) {
-        froms = new Set();
+        froms = new Map();
         fromsHeld.set(key, froms);
         (out.ext ??= {})[key] = [];
       }
       const list = out.ext[key];
       const items = side.ext[key];
       for (let i = 0; i < items.length; i++) {
-        if (froms.has(items[i][0])) continue;
-        froms.add(items[i][0]);
-        list.push(items[i]);
+        const at = froms.get(items[i][0]);
+        if (at === undefined) {
+          froms.set(items[i][0], list.length);
+          list.push(items[i]);
+        } else if (lesserJson(items[i][1], list[at][1])) list[at] = items[i];
       }
     }
     for (const map of ['pos', 'vals']) {
@@ -144,7 +153,9 @@ const join = (givenA, givenB) => {
         const key = keys[i];
         const theirs = side[map][key];
         const mine = out[map] && own(out[map], key);
-        const fresher = mine === undefined || compareClock([theirs[0], theirs[1]], [mine[0], mine[1]]) > 0;
+        // By stamp; two values at one stamp (forged): the lesser.
+        const order = mine === undefined ? 1 : compareClock([theirs[0], theirs[1]], [mine[0], mine[1]]);
+        const fresher = order > 0 || (order === 0 && lesserJson(theirs[2], mine[2]));
         if (fresher) (out[map] ??= {})[key] = theirs;
       }
     }
@@ -153,11 +164,18 @@ const join = (givenA, givenB) => {
       const key = markKeys[i];
       const theirs = side.marks[key];
       const mine = out.marks && own(out.marks, key);
-      if (mine === undefined) (out.marks ??= {})[key] = theirs;
-      else if (theirs[4] !== mine[4] || isPlaceholder(mine) !== isPlaceholder(theirs)) {
-        const filled = isPlaceholder(mine) ? theirs : mine;
-        out.marks[key] = [filled[0], filled[1], filled[2], filled[3], mine[4] | theirs[4]];
+      if (mine === undefined) {
+        (out.marks ??= {})[key] = theirs;
+        continue;
       }
+      // A placeholder yields to the mark it stands for; two marks under one key (forged): the lesser.
+      const minePlaceholder = isPlaceholder(mine);
+      let filled = minePlaceholder ? theirs : mine;
+      if (!minePlaceholder && !isPlaceholder(theirs) && lesserJson(theirs.slice(0, 4), mine.slice(0, 4))) {
+        filled = theirs;
+      }
+      const flags = mine[4] | theirs[4];
+      if (filled !== mine || flags !== mine[4]) out.marks[key] = [filled[0], filled[1], filled[2], filled[3], flags];
     }
   }
   // Pending cuts and extensions that the union can take, taken.
