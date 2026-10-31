@@ -122,7 +122,7 @@ const commitSealed = async (core, type, id, payload, current, ctx, source) => {
   if (data === null) await unseal(core, id);
   else await seal(core, id, data);
   try {
-    await core.hook('afterWrite', ctx, null);
+    if (core.hooks.afterWrite !== null) await core.hook('afterWrite', ctx, null);
   } finally {
     core.refresh(id, data, data === null ? {} : { ...data }, source);
   }
@@ -184,16 +184,16 @@ const TAKES = {
 // a string a text, an array a list — and one that only removes takes the
 // field's).
 const takesOf = (type, payload, plugins) => plugins.byType[type]?.takes(type, payload) ?? TAKES[type];
-const kindClash = (type, payload, current, plugins) => {
-  const takes = takesOf(type, payload, plugins);
-  if (!current || current.encrypted) return [];
-  const fields = type === 'write' || type === 'set' ? Object.keys(payload.data ?? {}) : [payload.key];
-  const rejected = [];
-  for (const field of fields) {
-    if (typeof field !== 'string') continue;
-    // A prefix a counter, a set or a text holds refuses every op under it;
-    // under a list or a tree the next segment must name a member that is
-    // there (NOT_FOUND otherwise, raised by the caller from `member`).
+// Nothing refused — shared, never pushed to: the common answer allocates nothing.
+const NONE = Object.freeze([]);
+// One field's refusals pushed onto `rejected` (made when the first one is): a
+// prefix a counter, a set or a text holds refuses every op under it; under a
+// list or a tree the next segment must name a member that is there
+// (NOT_FOUND otherwise, raised by the caller from `member`). A field with no
+// `/` has no prefix to read.
+const fieldClash = (field, takes, current, plugins, rejected) => {
+  if (typeof field !== 'string') return rejected;
+  if (field.includes('/')) {
     let member = null;
     for (const prefix of ancestorsOf(field)) {
       if (member !== null) {
@@ -205,17 +205,25 @@ const kindClash = (type, payload, current, plugins) => {
       const mod = plugins.byName[above];
       if (mod?.nests?.[above] === true) {
         member = field.slice(prefix.length + 1).split('/')[0];
-        if (!mod.holds(current, prefix, member)) rejected.push({ field, reason: 'member', prefix, member });
+        if (!mod.holds(current, prefix, member)) (rejected ??= []).push({ field, reason: 'member', prefix, member });
         continue;
       }
-      rejected.push({ field, reason: above, prefix });
+      (rejected ??= []).push({ field, reason: above, prefix });
       break;
     }
-    if (takes === undefined) continue;
-    const kind = kindOf(current, field, plugins);
-    if (kind !== undefined && !takes.includes(kind)) rejected.push({ field, reason: kind });
   }
+  if (takes === undefined) return rejected;
+  const kind = kindOf(current, field, plugins);
+  if (kind !== undefined && !takes.includes(kind)) (rejected ??= []).push({ field, reason: kind });
   return rejected;
+};
+const kindClash = (type, payload, current, plugins) => {
+  const takes = takesOf(type, payload, plugins);
+  if (!current || current.encrypted) return NONE;
+  if (type !== 'write' && type !== 'set') return fieldClash(payload.key, takes, current, plugins, null) ?? NONE;
+  let rejected = null;
+  for (const field of Object.keys(payload.data ?? {})) rejected = fieldClash(field, takes, current, plugins, rejected);
+  return rejected ?? NONE;
 };
 
 const prepareOp = (core, type, id, payload, current, who, from) => {
@@ -300,13 +308,14 @@ const validateLocal = async (core, op, current, visible, ctx) => {
       const validated = unproject(def, output, entry.data.$type);
       if (type === 'write') op.data = validated;
       else op.data = foldSet(op.data, validated, visible ? project(def, id, await core.view(id, current)) : {});
-      ctx.data = op.data;
+      if (ctx !== null) ctx.data = op.data;
       ({ entry, changed, delta, rejected, changes } = applyOp(current, op, core.limits));
       refuse(core, id, rejected);
       if (!changed) return null;
     }
   }
-  if (VALIDATED.has(type)) await assertUnique(core, id, entry);
+  // Unique keys are the entity's: a record of none has none to check.
+  if (VALIDATED.has(type) && def?.unique?.length > 0) await assertUnique(core, id, entry);
   return { entry, delta, changes };
 };
 
@@ -408,7 +417,7 @@ const land = async (core, op, entry, { ticket, position }) => {
 // when it was made) — no commit event for it.
 const announce = async (core, op, entry, delta, ctx, source, via, committed = null, changes = [], refresh = true) => {
   try {
-    await core.hook('afterWrite', ctx, op);
+    if (core.hooks.afterWrite !== null) await core.hook('afterWrite', ctx, op);
   } finally {
     if (refresh) core.refresh(op.id, isAlive(entry) ? entry.data : null, delta, source, entry);
     // What an undo manager keeps of a local commit: the record before and
@@ -506,17 +515,22 @@ const shallow = (payload) => {
 
 // The payload taken as JSON — a copy, like the disk and the peers hold it —
 // before anything keeps a reference to it: the data, a value, a content, the
-// tags a remove names.
+// tags a remove names. A string is its own copy (a text's content, a
+// primitive value): only an object is copied, into one new payload.
+const isObject = (value) => value !== null && typeof value === 'object';
 const copyPayload = (payload) => {
   shallow(payload);
-  if (payload.data !== undefined) payload = { ...payload, data: asJson(payload.data) };
-  if (payload.value !== undefined && typeof payload.value === 'object') {
-    payload = { ...payload, value: asJson(payload.value) };
+  const { data, value, content, removals, vals } = payload;
+  if (data === undefined && !isObject(value) && !isObject(content) && removals === undefined && vals === undefined) {
+    return payload;
   }
-  if (payload.content !== undefined) payload = { ...payload, content: asJson(payload.content) };
-  if (payload.removals !== undefined) payload = { ...payload, removals: asJson(payload.removals) };
-  if (payload.vals !== undefined) payload = { ...payload, vals: asJson(payload.vals) };
-  return payload;
+  const copy = { ...payload };
+  if (data !== undefined) copy.data = asJson(data);
+  if (isObject(value)) copy.value = asJson(value);
+  if (isObject(content)) copy.content = asJson(content);
+  if (removals !== undefined) copy.removals = asJson(removals);
+  if (vals !== undefined) copy.vals = asJson(vals);
+  return copy;
 };
 
 // Every op of a batch resolved and applied over a scratch record, in order,
@@ -575,30 +589,31 @@ const prepare = async (core, type, id, payload, options) => {
   // Sealed: this write is encrypted, or the record already is. An
   // encrypted record has no op log — writes to it stay local.
   const sealed = encrypted || current?.encrypted === true;
+  // The hook context — what beforeWrite and afterWrite are handed — is made
+  // only where one of them is set; null otherwise.
+  const { beforeWrite, afterWrite } = core.hooks;
+  const hooked = beforeWrite !== null || afterWrite !== null;
+  const whole = type === 'write' || type === 'set';
   // The record as the application reads it — its paths composed — for the
-  // hooks and the commit event; the op model keeps the paths apart.
-  const visible = current && (current.encrypted || isAlive(current)) ? compose(current, core.plugins) : null;
-  const who = await core.actorOf(actor);
-  const ctx = {
-    type,
-    id,
-    ...payload,
-    current: visible,
-    encrypted: sealed,
-    source,
-    via,
-    from,
-    v: core.version,
-    actor: who,
-  };
-  payload = await replaced(core, type, payload, ctx);
+  // hooks, a write's `$type` and a set's validator; the op model keeps the
+  // paths apart.
+  const visible =
+    (hooked || whole) && current && (current.encrypted || isAlive(current)) ? compose(current, core.plugins) : null;
+  // An actor function is awaited; a given actor, or none, is read at once.
+  let who = core.actorOf(actor);
+  if (who !== null && typeof who === 'object') who = await who;
+  const ctx = hooked
+    ? { type, id, ...payload, current: visible, encrypted: sealed, source, via, from, v: core.version, actor: who }
+    : null;
+  if (beforeWrite !== null) payload = await replaced(core, type, payload, ctx);
   if (sealed) return { op: await commitSealed(core, type, id, payload, current, ctx, source), sealed: true };
-  if (type === 'write' || type === 'set') {
+  if (whole) {
     // Every key a field name or a path of them: a key that is neither would
     // be left out of the op without a word.
     for (const key of Object.keys(payload.data ?? {})) fieldName(type === 'write' ? 'set' : 'update', key);
-    ctx.data = sameType(type, id, payload.data, visible);
-    payload = { ...payload, data: ctx.data };
+    const data = sameType(type, id, payload.data, visible);
+    if (ctx !== null) ctx.data = data;
+    payload = { ...payload, data };
   }
   const op = prepareOp(core, type, id, payload, current, who, from);
   if (msg !== undefined) op.msg = msg;

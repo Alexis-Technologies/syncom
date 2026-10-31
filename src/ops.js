@@ -90,7 +90,7 @@ const { compareClock, maxClock, floorOf, opKey } = require('./vector.js');
 const { deepEqual, OP_TYPES, asJson, isPlainObject, own } = require('./shape.js');
 // The wire's packing is src/sync/wire.js's; re-exported for the readers of this module.
 const { packOps, unpackOps } = require('./sync/wire.js');
-const { limitsOf, HOME } = require('./plugin.js');
+const { limitsOf, HOME, EMPTY: NO_PLUGINS } = require('./plugin.js');
 const { isPath, ancestorsOf, under, MAX_PATHS } = require('./paths.js');
 
 const createEntry = () => ({
@@ -1314,7 +1314,7 @@ const kindOf = (entry, field, plugins = null) => {
   if (isCounter(meta, field)) return 'counter';
   if (isSet(meta, field)) return 'set';
   const block = own(blocksOf(meta), field);
-  if (block !== undefined) return kindOfBlock(limitsOf(plugins === null ? null : { plugins }).plugins, block);
+  if (block !== undefined) return kindOfBlock(plugins ?? NO_PLUGINS, block);
   return own(entry.data, field) !== undefined || own(meta.clock, field) !== undefined ? 'register' : undefined;
 };
 

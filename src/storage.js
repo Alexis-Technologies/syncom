@@ -1059,8 +1059,16 @@ class Storage extends Emitter {
 
   // The actor of one write: the call's own, else the storage's (asked when
   // it is a function), else none. A string on the op, never in the record.
-  async #actorOf(given) {
-    const actor = given !== undefined ? given : typeof this.#actor === 'function' ? await this.#actor() : this.#actor;
+  // Who a write says made it: the given actor, else the configured one — a
+  // string or null at once, a promise only where the actor is a function.
+  #actorOf(given) {
+    if (given === undefined && typeof this.#actor === 'function') return this.#awaitActor();
+    const actor = given !== undefined ? given : this.#actor;
+    return actor === null || actor === undefined ? null : String(actor);
+  }
+
+  async #awaitActor() {
+    const actor = await this.#actor();
     return actor === null || actor === undefined ? null : String(actor);
   }
 
