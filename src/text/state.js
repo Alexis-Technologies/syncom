@@ -62,6 +62,10 @@ const intern = (doc, key, ts, origin) => {
 };
 
 // A run's record and its spans in the id index (./ids.js): the record at offset -1, a span at its own.
+// SPAN is the room a run takes there: a run holds MAX_RUN slots at most (./rle.js; `applySplice`,
+// `settleRun` and `normalizeJson` hold every path to it), so SPAN must stay above MAX_RUN — it is twice
+// it, and tests/sequence.test.js holds the two apart. A run past SPAN would write over the next run's
+// keys.
 const SPAN = 2097152;
 const keyOf = (n, off) => n * SPAN + off + 1;
 
@@ -148,6 +152,8 @@ class State {
     this.pending = C.EMPTY;
     this.pendingRuns = 0;
     this.slots = 0;
+    // The slots of the extensions that wait in `ext`: counted toward MAX_FIELD with the runs'.
+    this.extSlots = 0;
     this.oldest = null;
     this.oldestAnchor = null;
     this.ts = 0;
@@ -462,7 +468,11 @@ const normalizeJson = (raw) => {
       const item = items[i];
       if (!Array.isArray(item) || item.length !== 2 || !Number.isInteger(item[0]) || item[0] < 0) continue;
       const content = present(kind, item[1]) && item[1].length > 0 ? (isText(kind) ? item[1] : item[1].slice()) : null;
-      if (content !== null) list.push([item[0], content]);
+      // An extension that would take its run past MAX_RUN never lands: left out, as the op would be refused.
+      if (content === null || item[0] + content.length > MAX_RUN) continue;
+      slots += content.length;
+      if (slots > MAX_FIELD) return null;
+      list.push([item[0], content]);
     }
     if (list.length > 0) (seq.ext ??= {})[key] = list;
   }
@@ -919,6 +929,12 @@ const hydrate = (seq, base) => {
     const keys = keysOf(seq[map]);
     for (let i = 0; i < keys.length; i++) oldest = minStamp(oldest, [seq[map][keys[i]][0], seq[map][keys[i]][1]]);
   }
+  let extSlots = 0;
+  const extKeys = keysOf(seq.ext);
+  for (let i = 0; i < extKeys.length; i++) {
+    const items = seq.ext[extKeys[i]];
+    for (let k = 0; k < items.length; k++) extSlots += items[k][1].length;
+  }
   // The walk of every root and what hangs under it, the records placed in place.
   const w = new Walk(null, null, kind, pos, records, true, owner);
   const rootIds = [];
@@ -953,6 +969,7 @@ const hydrate = (seq, base) => {
   st.pending = pending;
   st.pendingRuns = pendingRuns;
   st.slots = slots;
+  st.extSlots = extSlots;
   st.oldest = oldest;
   st.oldestAnchor = oldestAnchor;
   st.ts = seq.ts;
@@ -1024,6 +1041,7 @@ const draft = (block) => {
   d.pending = st.pending;
   d.pendingRuns = st.pendingRuns;
   d.slots = st.slots;
+  d.extSlots = st.extSlots;
   d.oldest = st.oldest;
   d.oldestAnchor = st.oldestAnchor;
   d.ts = block.ts;

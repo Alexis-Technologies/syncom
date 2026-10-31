@@ -799,6 +799,58 @@ test('sequence engine', async (t) => {
   );
 
   await t.test(
+    'a waiting extension is bounded as a landed one: never past MAX_RUN, counted toward MAX_FIELD, on both paths',
+    () => {
+      // The id index gives every run SPAN keys: a run must stay under it, so MAX_RUN stays under SPAN.
+      assert.ok(S.SPAN >= 2 * S.MAX_RUN, 'SPAN leaves a run of MAX_RUN slots its room');
+      const a = node('A');
+      const first = insert(a, 0, 'p');
+      const run = S.runKey(first.ts, 'A');
+      // Parked far ahead, the extension would take the run past MAX_RUN when it lands: refused as it arrives.
+      const far = apply(a, { ts: tick(), origin: 'A', payload: { run, from: S.MAX_RUN - 1, content: 'xy' } });
+      assert.deepStrictEqual([far.reason, far.detail, far.count, far.max], ['bound', 'run', S.MAX_RUN + 1, S.MAX_RUN]);
+      assert.strictEqual(a.seq.ext, undefined, 'nothing parked');
+      // One within the bound waits, and its slots count toward the field's: a field two slots short of
+      // MAX_FIELD with one waiting takes one more, not two.
+      const runs = {};
+      for (let i = 1; i <= 3; i++) runs[`${i}:A`] = ['^', [S.MAX_RUN]];
+      runs['4:A'] = ['^', [S.MAX_RUN - 3, 'a']];
+      const b = node('B');
+      b.seq = { k: 't', ts: 4, runs };
+      const parked = apply(b, { ts: tick(), origin: 'A', payload: { run: '4:A', from: S.MAX_RUN - 1, content: 'z' } });
+      assert.strictEqual(parked.changed, true, 'an extension ahead of its run waits');
+      assert.deepStrictEqual(b.seq.ext, { '4:A': [[S.MAX_RUN - 1, 'z']] });
+      const two = apply(b, { ts: tick(), origin: 'B', payload: { at: '^', content: 'xy' } });
+      assert.deepStrictEqual([two.reason, two.detail, two.count], ['bound', 'field', S.MAX_FIELD + 1]);
+      assert.strictEqual(apply(b, { ts: tick(), origin: 'B', payload: { at: '^', content: 'x' } }).changed, true);
+      assert.strictEqual(S.pendingCount(b.seq), 1, 'the parked extension is pending work');
+      // The snapshot path reads the same bounds: an extension past MAX_RUN is left out, a waiting one's
+      // slots count toward MAX_FIELD.
+      const json = {
+        k: 't',
+        ts: 1,
+        runs: { '1:A': ['^', ['p']] },
+        ext: {
+          '1:A': [
+            [S.MAX_RUN - 1, 'xy'],
+            [3, 'ok'],
+          ],
+        },
+      };
+      assert.deepStrictEqual(S.normalizeSeq(json).ext, { '1:A': [[3, 'ok']] });
+      const ext = {
+        '4:A': [
+          [S.MAX_RUN - 2, 'x'],
+          [S.MAX_RUN - 1, 'y'],
+        ],
+      };
+      assert.ok(S.normalizeSeq({ k: 't', ts: 4, runs, ext }) !== null, 'at the bound, taken');
+      const over = { k: 't', ts: 5, runs: { ...runs, '5:B': ['^', ['b']] }, ext };
+      assert.strictEqual(S.normalizeSeq(over), null, 'one slot past it, with what waits counted: not taken');
+    },
+  );
+
+  await t.test(
     'the snapshot path is bounded like the op path: pending work past it, self-anchored runs, typed-off origins',
     () => {
       // 4 097 pending cuts of runs not here: a block no peer could have built through ops.

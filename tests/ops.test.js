@@ -1426,6 +1426,134 @@ test('ops: a sequence op of the wrong shape is malformed, never a throw: a peer�
   await storage.close();
 });
 
+test('ops: an extension parked past MAX_RUN is refused as bound; what landed reads the same from its snapshot', () => {
+  const S = require('../src/text/sequence.js');
+  const splice = (ts, origin, seq, value) => op('splice', ts, origin, { seq, key: 'body', value });
+  let entry = applyOp(null, splice(1, 'A', 1, { at: '^', content: 'hello' })).entry;
+  entry = applyOp(entry, splice(5, 'P', 1, { at: '>1:4:A', content: 'p' })).entry;
+  entry = applyOp(entry, splice(6, 'Q', 1, { at: '>1:3:A', content: 'Q' })).entry;
+  assert.strictEqual(entry.data.body, 'hellopQ');
+  // P parks two extensions of its one-slot run far ahead, then fills the gap: landed, the run would hold
+  // three times MAX_RUN. Each parked one is refused where it arrives; the filler lands, at MAX_RUN exactly.
+  const big = 'x'.repeat(S.MAX_RUN - 1);
+  const far = applyOp(entry, splice(7, 'P', 2, { run: '5:P', from: S.MAX_RUN, content: big }));
+  const bound = (count) => [{ field: 'body', reason: 'bound', detail: 'run', count, max: S.MAX_RUN }];
+  assert.deepStrictEqual([far.changed, far.rejected], [false, bound(2 * S.MAX_RUN - 1)]);
+  const farther = applyOp(far.entry, splice(8, 'P', 3, { run: '5:P', from: 2 * S.MAX_RUN - 1, content: big }));
+  assert.deepStrictEqual(farther.rejected, bound(3 * S.MAX_RUN - 2));
+  const filled = applyOp(farther.entry, splice(9, 'P', 4, { run: '5:P', from: 1, content: big }));
+  assert.deepStrictEqual(filled.rejected, []);
+  entry = filled.entry;
+  assert.strictEqual(entry.data.body.length, 6 + S.MAX_RUN);
+  assert.ok(entry.data.body.endsWith('xQ'), 'Q still reads after P’s run');
+  const block = entry.meta.blocks.body;
+  assert.strictEqual(S.rleLength(block.runs['5:P'][1]), S.MAX_RUN);
+  assert.strictEqual(block.ext, undefined, 'nothing parked');
+  // The block's own JSON reads back whole — every run kept — and a node joining from the snapshot reads
+  // the same text over the same block.
+  const json = JSON.parse(JSON.stringify(block));
+  assert.deepStrictEqual(Object.keys(S.normalizeSeq(json).runs).sort(), ['1:A', '5:P', '6:Q']);
+  const meta = { blocks: { body: json } };
+  const joined = applyOp(null, op('merge', 20, 'H', { seq: 1, data: { body: entry.data.body }, meta })).entry;
+  assert.strictEqual(joined.data.body, entry.data.body);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(joined.meta.blocks.body)), json);
+});
+
+test('ops: waiting extensions settle alike in every order of arrival, and no node holds a run past MAX_RUN (seeded)', () => {
+  const S = require('../src/text/sequence.js');
+  const rng = (seed) => () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 2 ** 32;
+  };
+  const splice = (ts, origin, seq, value) => op('splice', ts, origin, { seq, key: 'body', value });
+  // The pending work of a block, recounted from its JSON: runs whose anchor is not here, cuts and
+  // extensions waiting, registers of elements not here, marks switched off before they arrived.
+  const recount = (block) => {
+    const json = JSON.parse(JSON.stringify(block));
+    const held = (elem) => {
+      const e = S.parseElem(elem);
+      const run = json.runs[e.run];
+      return run !== undefined && e.offset < S.rleLength(run[1]);
+    };
+    let n = 0;
+    for (const key of Object.keys(json.runs)) {
+      const { elem } = S.parseAnchor(json.runs[key][0]);
+      if (elem !== null && !held(S.elemKey(elem.run, elem.offset))) n++;
+    }
+    for (const map of ['cuts', 'ext']) for (const key of Object.keys(json[map] ?? {})) n += json[map][key].length;
+    for (const map of ['pos', 'vals']) for (const key of Object.keys(json[map] ?? {})) if (!held(key)) n++;
+    for (const key of Object.keys(json.marks ?? {})) if (S.isPlaceholder(json.marks[key])) n++;
+    return n;
+  };
+  for (let round = 0; round < 24; round++) {
+    const random = rng(1000 + round);
+    const pick = (n) => Math.floor(random() * n);
+    const seqs = { P: 0, Q: 0, R: 0 };
+    const ops = [];
+    let ts = 0;
+    const next = (origin, value) => ops.push(splice(++ts, origin, ++seqs[origin], value));
+    // P types its run on in bursts; shuffled, a burst arrives before the one it continues and waits for it.
+    next('P', { at: '^', content: 'p' });
+    const run = '1:P';
+    let len = 1;
+    for (let i = 0; i < 8; i++) {
+      const content = 'abcdefgh'[i].repeat(1 + pick(3));
+      next('P', { run, from: len, content });
+      len += content.length;
+    }
+    // Parked past MAX_RUN: refused on every node; parked within it and never filled: waits on every node.
+    next('P', { run, from: S.MAX_RUN - 1, content: 'xy' });
+    next('P', { run, from: S.MAX_RUN - 2, content: 'xy' });
+    // Q anchors on P's elements — some not here yet when its op arrives; R cuts P's run, some ranges past
+    // its end at the time, one past its end for good.
+    for (let i = 0; i < 4; i++) next('Q', { at: `>${S.elemKey(run, pick(len))}`, content: 'Q' });
+    for (let i = 0; i < 4; i++) next('R', { cut: [[run, pick(len + 2), 1 + pick(3)]], content: '' });
+    const results = [];
+    for (let k = 0; k < 4; k++) {
+      // Every order but one a mesh never delivers: an extension before the run it grows (an origin's
+      // ops arrive in seq order, so the run comes first; an extension ahead of its run's LENGTH waits).
+      const order = ops.slice();
+      for (let i = order.length - 1; i > 0; i--) {
+        const j = pick(i + 1);
+        [order[i], order[j]] = [order[j], order[i]];
+      }
+      const made = order.indexOf(ops[0]);
+      const first = order.findIndex((item) => item.origin === 'P');
+      [order[made], order[first]] = [order[first], order[made]];
+      let entry = null;
+      let refused = 0;
+      for (const item of order) {
+        const result = applyOp(entry, item);
+        entry = result.entry;
+        if (result.rejected.length > 0) refused++;
+        const block = entry.meta.blocks?.body;
+        if (block === undefined) continue;
+        for (const key of Object.keys(block.runs)) {
+          assert.ok(S.rleLength(block.runs[key][1]) <= S.MAX_RUN, `round ${round}: run ${key} within MAX_RUN`);
+        }
+        for (const key of Object.keys(block.ext ?? {})) {
+          for (const [from, content] of block.ext[key]) {
+            assert.ok(from + content.length <= S.MAX_RUN, `round ${round}: a parked extension within MAX_RUN`);
+          }
+        }
+      }
+      assert.strictEqual(refused, 1, `round ${round}: the one past MAX_RUN refused, nothing else`);
+      const block = entry.meta.blocks.body;
+      assert.strictEqual(S.pendingCount(block), recount(block), `round ${round}: the pending count is the recount`);
+      const json = JSON.parse(JSON.stringify(block));
+      assert.strictEqual(S.render(S.normalizeSeq(json)), entry.data.body, `round ${round}: the snapshot reads alike`);
+      // The ranges still waiting for the run to grow are kept in the order they arrived: compared as a set.
+      for (const key of Object.keys(json.cuts ?? {})) json.cuts[key].sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+      results.push({ body: entry.data.body, json });
+    }
+    for (const r of results) {
+      assert.strictEqual(r.body, results[0].body, `round ${round}: every order reads alike`);
+      assert.deepStrictEqual(r.json, results[0].json, `round ${round}: every order holds one block`);
+    }
+    assert.strictEqual(S.rleLength(results[0].json.runs[run][1]), len, `round ${round}: every burst landed`);
+  }
+});
+
 test('ops: the bound on pending work is the node’s', async (t) => {
   await t.test('a merge takes a block by the node’s bound, as an op would be', () => {
     // A block holding three pending cuts of runs not here.

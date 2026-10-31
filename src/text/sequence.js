@@ -188,6 +188,7 @@ const {
   PIECES_MIN,
   PIECE_RUNS,
   piecesOf,
+  SPAN,
 } = require('./state.js');
 const { applySplice, applyAssign, applyMove } = require('./splice.js');
 const { markOf, applyMark, markAnchors, marksIn, spans, styleAt, newerRanges, REVERSED } = require('./marks.js');
@@ -262,4 +263,5 @@ module.exports = {
   PIECES_MIN,
   PIECE_RUNS,
   piecesOf,
+  SPAN,
 };

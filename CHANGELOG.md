@@ -1064,6 +1064,15 @@ and one `commit` event, not one per call.
   entry is settled whatever the slot did, and the `transaction` event leaves whatever a refresh did.
   `close()` called twice in one tick sealed the log twice and emitted `close` twice: a second call is
   the same close.
+- **A peer could grow a run past `MAX_RUN` through parked extensions, and replicas diverged.** An
+  extension `{ run, from }` ahead of its run's length waited in `ext` with no bound on `from`, landed
+  with no check when the run reached it, and cost nothing against the field while it waited: a one-slot
+  run came to read as three million characters, its spans written over the next run's keys in the id
+  index, the block's own JSON came back without the run (`normalizeSeq` dropped it as past `MAX_RUN`),
+  and a node joining from the snapshot read five characters where the holder read millions. An
+  extension that would end past `MAX_RUN` is refused as `bound` (`detail: 'run'`) where it arrives,
+  left out of a peer's block, dropped rather than landed should one ever settle past the bound, and
+  what waits in `ext` counts toward `MAX_FIELD` as landed slots do (SEQ-11).
 - **A peer's splice whose cut was shaped otherwise stopped its page.** A cut of `[null]`, `[5]` or
   `[[null, 0, 1]]` threw out of `applyOp` before the engine could refuse it, so `applyRemote()`
   failed the whole page and the peer's stream stalled there on every retry. It is refused as

@@ -407,13 +407,15 @@ const settleRun = (d, id) => {
     if (!list) break;
     const run = runById(d, id);
     const len = run.len;
-    // The extension that continues the run, and what lies past it still — none for a position run.
+    // The extension that continues the run, and what lies past it still; the rest — behind the run, a
+    // second one at one offset, any of a position run's — is dropped, its slots counted no more.
     let hit;
     const rest = [];
-    for (let i = 0; i < list.length && run.elem === null; i++) {
+    for (let i = 0; i < list.length; i++) {
       const from = list[i][0];
-      if (from === len) hit ??= list[i];
-      else if (from > len) rest.push(list[i]);
+      if (run.elem === null && from === len && hit === undefined) hit = list[i];
+      else if (run.elem === null && from > len) rest.push(list[i]);
+      else d.extSlots -= list[i][1].length;
     }
     d.ext = { ...d.ext };
     if (rest.length > 0) d.ext[key] = rest;
@@ -422,14 +424,17 @@ const settleRun = (d, id) => {
       if (Object.keys(d.ext).length === 0) d.ext = null;
     }
     if (hit === undefined) break;
-    const { placed } = run;
-    if (placed) extendRun(d, id, hit[1]);
+    const content = hit[1];
+    d.extSlots -= content.length;
+    // A run never grows past MAX_RUN: an extension that would take it there is dropped, never landed.
+    if (len + content.length > MAX_RUN) continue;
+    if (run.placed) extendRun(d, id, content);
     else {
       const w = writableRun(d, id);
-      w.rle = rleAppend(d.kind, w.rle, hit[1]);
-      w.len = len + hit[1].length;
+      w.rle = rleAppend(d.kind, w.rle, content);
+      w.len = len + content.length;
+      d.slots += content.length;
     }
-    d.slots += placed ? 0 : hit[1].length;
   }
   const cuts = d.cuts && own(d.cuts, key);
   if (cuts) {
@@ -667,7 +672,8 @@ const applySplice = (given, stamp, payload, base = null, pendingMax = PENDING_MA
   let where = ROOTED;
   if (inserting) {
     if (content.length > MAX_RUN) return refused(seq, 'run', content.length, MAX_RUN);
-    const slots = st.slots + content.length;
+    // The field's slots, what waits in `ext` among them: a parked extension costs what a landed one does.
+    const slots = st.slots + st.extSlots + content.length;
     if (slots > MAX_FIELD) return refused(seq, 'field', slots, MAX_FIELD);
     const waits = cuts === null ? 0 : cuts.ranges.length;
     if (at !== undefined) {
@@ -695,6 +701,8 @@ const applySplice = (given, stamp, payload, base = null, pendingMax = PENDING_MA
         changed = true;
       }
     } else {
+      // Where the extension ends, waiting or not: never past MAX_RUN, whatever the run holds today.
+      if (from + content.length > MAX_RUN) return refused(seq, 'run', from + content.length, MAX_RUN);
       target = runOf(st, run);
       if (target !== undefined && target.elem !== null) return malformed(seq);
       if (target !== undefined) {
@@ -756,6 +764,7 @@ const applySplice = (given, stamp, payload, base = null, pendingMax = PENDING_MA
     const list = held.slice();
     list.push([from, isText(d.kind) ? content : content.slice()]);
     d.ext = { ...(d.ext ?? {}), [run]: list };
+    d.extSlots += content.length;
     d.oldest = minStamp(d.oldest, stampOfKey(run));
   }
   return { seq: finish(d), changed: true, reason: null };
