@@ -9,6 +9,7 @@
 // the log, the clock, the chain, the entries, the hook runner and the
 // lensed readers — see Storage#open.
 
+const { assignData } = require('./lazy.js');
 const { applyOp, isAlive, latestHeld, observedTags, kindOf, kindsOf } = require('./ops.js');
 const { missing } = require('./plugin.js');
 const { opKey } = require('./vector.js');
@@ -863,7 +864,7 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
     const was = lastOf.get(id);
     if (was !== undefined) release(prepared[was]);
     lastOf.set(id, prepared.length);
-    deltas.set(id, Object.assign(deltas.get(id) ?? {}, made.delta));
+    deltas.set(id, assignData(deltas.get(id) ?? {}, made.delta));
     prepared.push(made);
     touched.set(id, made.entry);
     reserved.set(opKey(op), op.seq);

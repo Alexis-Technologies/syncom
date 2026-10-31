@@ -9,6 +9,7 @@
 // state covers. `core` is what Storage lends its write paths — see
 // Storage#open.
 
+const { assignData } = require('./lazy.js');
 const { applyOp, isAlive, latestClock, latestHeld, settleMeta } = require('./ops.js');
 const { opKey } = require('./vector.js');
 const { fingerprintOf } = require('./header.js');
@@ -160,7 +161,7 @@ const mergeOne = async (batch, record) => {
   // The batch's own object, joined in place (a path is never `__proto__`).
   let joined = batch.deltas.get(id);
   if (joined === undefined) batch.deltas.set(id, (joined = {}));
-  Object.assign(joined, delta);
+  assignData(joined, delta);
   batch.pending.push({ ctx, op, started, changes });
 };
 

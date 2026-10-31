@@ -140,7 +140,8 @@ const ENTRIES = [
   // dispatched; 2026-10-31). 53, raised by name.
   // 53.1 with the log's lines: positional entries, the header text made once, a CRC-32 checked before the
   // parse (src/crc32.browser.js). 53.5, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 53.5 },
+  // 53.8 with a field read when it is read (src/lazy.js). 54, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 54 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -311,7 +312,8 @@ const ENTRIES = [
   // 32.8 with the engine in five modules (the names that cross a module are not minified). 33, raised by name.
   // 33.4 with the plugin in four modules beside text.js. 33.5, raised by name.
   // 33.6 with revision() and applyDelta's revision. 34, raised by name.
-  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 34 },
+  // 34.1 with a list's reading made when it is read (deriveLater; 2026-10-31). 34.5, raised by name.
+  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 34.5 },
   // The tree kind alone, with the fractional indexes a place is made of and
   // the argument checks it shares with the core (5.1 measured).
   // 5.5 with the field-name check unset shares with it (src/args.js).

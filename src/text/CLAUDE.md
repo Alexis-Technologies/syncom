@@ -67,7 +67,9 @@ attrs, isEmbed }` an entry of the block's `vals` (as a list element's
 field)` hydrates plain JSON once (a WeakMap keyed by the plain block, under the field's floor:
   the reading before an op and the op share it) and hands an engine block back as it is. A
   marks index (anchors in walk order) rides in the engine state across every op that leaves the
-  marks; a body grows by `SEG_MAX` slots at most; a list's reading is derived from the one before. Hints — an item's leaf, a node's parent — are right
+  marks; a body grows by `SEG_MAX` slots at most; a list's reading is made when it is read
+  (`lazy: { list: true }` → src/lazy.js), derived from the one before where that one was read
+  (`deriveLater`: one reading kept, never a chain of versions), else whole. Hints — an item's leaf, a node's parent — are right
   for the HEAD of a lineage only: an edit, a position or a neighbour asked of
   an older block forks it into a lineage of its own (`ensureHead`,
   `stats().rebuilds`) and the tree re-hints itself once (`T.stats().rehints`);

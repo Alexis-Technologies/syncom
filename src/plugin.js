@@ -21,6 +21,8 @@
 //       join(a, b)                          → two blocks of one code, joined
 //       prune(block, base)                  → the block above a reset, or null
 //       render(entry, field, block, hint)   → what data[field] reads as
+//       lazy                                → { kind: true } for a kind whose reading is made when it is read
+//                                             (src/lazy.js) — a list's, a copy of the whole; optional
 //       resolve(core, id, type, payload, current)
 //                                           → the op's value, inside the queue (null: nothing to write)
 //       diff(field, kind, from, to, context)

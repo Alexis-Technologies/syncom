@@ -767,6 +767,7 @@ const hydrate = (seq, base) => {
     marksIndex: null,
     views: null,
     rendered: null,
+    derivedFrom: null,
     elems: null,
     elemIndex: null,
     json: null,
@@ -929,6 +930,12 @@ const assignedRuns = (st) => {
 const render = (block) => {
   const st = STATE.get(block);
   if (st.rendered !== null) return st.rendered;
+  if (st.derivedFrom !== null) {
+    const { before, changes } = st.derivedFrom;
+    st.derivedFrom = null;
+    derive(before, block, changes);
+    if (st.rendered !== null) return st.rendered;
+  }
   let out;
   if (isText(st.kind)) out = T.text(st.root);
   else {
@@ -984,6 +991,16 @@ const derive = (before, block, changes) => {
     } else return;
   }
   if (out.length === st.root.v) st.rendered = out;
+};
+
+// A list's reading to be derived when it is read (`render`): kept only where
+// the reading before was made, so a block holds one reading of the one
+// before it, never a chain of versions.
+const deriveLater = (before, block, changes) => {
+  const st = STATE.get(block);
+  if (isText(st.kind) || st.rendered !== null || !Array.isArray(changes)) return;
+  if (STATE.get(before).rendered === null) return;
+  st.derivedFrom = { before, changes };
 };
 
 // The names of the visible elements in order — a list's members, as the
@@ -1311,6 +1328,7 @@ module.exports = {
   valuesAt,
   render,
   derive,
+  deriveLater,
   elems,
   indexOfElem,
   hasElem,

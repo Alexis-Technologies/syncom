@@ -101,6 +101,7 @@ const finish = (d) => {
     marksIndex: d.marksIndex,
     views: null,
     rendered: null,
+    derivedFrom: null,
     elems: null,
     elemIndex: null,
     json: null,

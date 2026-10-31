@@ -47,6 +47,8 @@ src/order/order.js        the @alexify/syncom/order subpath — fractional index
                           strings, for ordering records — no requires; the tree plugin uses it for a node's place
 src/patch.js              patches — the one vocabulary of diff()/applyPatches()/restore(): diffViews by kind, realize() to an op — requires shape.js, args.js, paths.js, plugin.js only
 src/symbols.js            COMMIT / REFRESH / SOURCE — the module-private seams between Storage and what it hands out — no requires
+src/lazy.js               lazyField, putLazy, copyData, assignData — a field read when it is read (a list's, `mod.lazy`): an accessor
+                          the data and the delta share, copied as it is — no requires
 src/options.js            normalizeStorageOptions — open()'s plain options checked and defaulted (lock, cache, chain, skew…)
 src/lock.js               exclusive open: Web Locks or lock.json, stale by pid or age — requires errors.js only
 src/catalog.js            the record catalog: live ids, collections, indexed values; index/catalog.json — no requires

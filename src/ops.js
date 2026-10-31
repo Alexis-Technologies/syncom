@@ -90,6 +90,7 @@ const { compareClock, maxClock, floorOf, opKey } = require('./vector.js');
 const { deepEqual, OP_TYPES, asJson, isPlainObject, own } = require('./shape.js');
 // The wire's packing is src/sync/wire.js's; re-exported for the readers of this module.
 const { packOps, unpackOps } = require('./sync/wire.js');
+const { lazyField, putLazy, copyData } = require('./lazy.js');
 const { limitsOf, HOME, EMPTY: NO_PLUGINS } = require('./plugin.js');
 const { isPath, ancestorsOf, under, MAX_PATHS } = require('./paths.js');
 
@@ -175,7 +176,7 @@ const cloneEntry = (entry) => {
   // file is hydrated once through the plugin's own cache, keyed by the plain
   // block (src/text/sequence.js), and the copy that outlived it held the
   // parsed JSON and an old index for as long as the record lived.
-  return { data: { ...entry.data }, meta };
+  return { data: copyData(entry.data), meta };
 };
 
 // What one stream's running sum may reach, either way: past it a float
@@ -919,10 +920,20 @@ const applyBlock = (entry, op, stamp, delta, rejected, mod, limits, changes) => 
     for (const change of result.change) changes.push({ ...change, field });
     changes.covered.add(field);
   }
-  meta.blocks[field] = result.block;
+  const { block } = result;
+  meta.blocks[field] = block;
   // Pending work is news to persist even when the field reads the same.
-  entry.data[field] = mod.render(entry, field, result.block, result.hint ?? null);
-  delta[field] = entry.data[field];
+  const hint = result.hint ?? null;
+  if (mod.lazy?.[kind] === true) {
+    // Made when it is read (src/lazy.js): one per version, shared by the data
+    // and the delta — never on the op path.
+    const reading = lazyField(entry.data, field, () => mod.render(entry, field, block, hint));
+    putLazy(entry.data, field, reading);
+    putLazy(delta, field, reading);
+  } else {
+    entry.data[field] = mod.render(entry, field, block, hint);
+    delta[field] = entry.data[field];
+  }
   // A block holds its prefix alone — unless its members carry fields.
   if (!nests(limits.plugins, kind)) dropUnder(entry, field, delta, limits.plugins);
 };

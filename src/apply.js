@@ -9,6 +9,7 @@
 // boundary: nothing below `admit` reads a field it did not check. `core` is
 // what Storage lends its write paths — see Storage#open.
 
+const { assignData } = require('./lazy.js');
 const { applyOp, isAlive, latestClock, settleMeta } = require('./ops.js');
 const { keyScope, opKey } = require('./vector.js');
 const { fingerprintOf, scrubOp } = require('./header.js');
@@ -499,7 +500,7 @@ const applyOne = async (batch, op) => {
   // The batch's own object, joined in place (a path is never `__proto__`).
   let joined = batch.deltas.get(op.id);
   if (joined === undefined) batch.deltas.set(op.id, (joined = {}));
-  Object.assign(joined, delta);
+  assignData(joined, delta);
   batch.changes.set(op, changes);
 };
 

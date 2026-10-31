@@ -87,9 +87,10 @@ const apply = (entry, field, held, op, stamp, limits) => {
   // What the reading shows of the op, in its indices — none when the field went.
   if (out.block !== null) out.change = changeOf(op, stamp, before, out.block, base, cuts, from);
   // A list's reading from the one before and the change, not made whole
-  // again (a text's is the rope's own cache): when nothing was reset.
+  // again (a text's is the rope's own cache) — when it is read, and only
+  // where the reading before was made: when nothing was reset.
   if (out.change !== undefined && before !== undefined && out.block === result.seq) {
-    S.derive(before, out.block, out.change);
+    S.deriveLater(before, out.block, out.change);
   }
   return out;
 };
@@ -223,7 +224,9 @@ const changeOf = (op, stamp, held, block, base = null, cuts = null, from = -1) =
   return out;
 };
 
-const render = (entry, field) => S.render(S.indexOf(entry, field));
+// The block the op made, as it is (src/ops.js renders it when it is read):
+// never the entry's newest, which a later op may have moved past.
+const render = (entry, field, block) => S.render(block ?? S.indexOf(entry, field));
 
 // A large block as its file holds it: the runs in pieces (src/entries.js).
 const pieces = (block) => S.piecesOf(block);
@@ -250,6 +253,9 @@ const revisionOf = (entry, field) => {
 // the list read with each element's children laid over its value (a plain
 // object spread, anything else giving way).
 const NESTS = Object.freeze({ list: true, text: false });
+// A list's reading is a new array of every element, made when it is read
+// (src/lazy.js); a text's is the rope's cache, cheaper made at once.
+const LAZY = Object.freeze({ list: true, text: false });
 const members = (entry, field) => {
   const block = blockOf(entry, field);
   return block === undefined || block.k !== 'l' ? [] : S.elems(S.indexOf(entry, field));
@@ -473,6 +479,7 @@ module.exports = {
   pieces,
   revisionOf,
   NESTS,
+  LAZY,
   members,
   holds,
   pick,
