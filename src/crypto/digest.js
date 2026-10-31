@@ -6,10 +6,11 @@
 // src/header.js — base64url, 43 characters: an op carries two of them, and
 // every log line its own). The Node.js half, over node:crypto's one-shot
 // hash; the browser half (./digest.browser.js, through package.json#browser)
-// answers through Web Crypto. `sha256` is async on both; `hashOf` is at once
-// here and a promise in the browser — shared code awaits it — since an op is
-// named on the write path, where a hop to the thread pool per op would cost
-// more than the hash.
+// hashes in JavaScript (./sha256.js) and through Web Crypto. `sha256` is
+// async on both; `hashText` is at once on both — an op is named on the write
+// path, which is made at once (LOG-9), and a hop to a thread pool per op
+// would cost more than the hash; `hashOf` is at once here and a promise in
+// the browser for a text past 64 KiB — shared code awaits it.
 
 const crypto = require('node:crypto');
 

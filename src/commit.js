@@ -354,9 +354,7 @@ const link = async (ops, held, signs) => {
     if (signs) await digest(op);
     // The header text once: what the fingerprint hashes and the log line holds.
     const header = headerText(op);
-    // A string in Node.js, a promise in the browser: awaited only there.
-    let fp = hashText(header);
-    if (typeof fp !== 'string') fp = await fp;
+    const fp = hashText(header);
     fps.push(fp);
     headers.push(header);
     if (ops.length > 1) (last ??= new Map()).set(key, [op.seq, fp]);
@@ -710,7 +708,7 @@ const commitAtOnce = (core, type, id, payload, options, current, answer) => {
   // gathering is that op, grown (the plugin's `coalesce`): no op of its own.
   const into = coalesced(core, op, made, current);
   if (into !== null) return answer ? into.done.then(() => into.op) : into.done;
-  // The chain at once: Node.js hashes synchronously (the fast path's condition).
+  // The chain at once: `hashText` is at once on both platforms.
   const key = opKey(op);
   const prev = core.fingerprintOf(key, op.seq - 1);
   if (prev !== undefined) op.prev = prev;

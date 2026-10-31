@@ -10,7 +10,7 @@
 // both over the same lent core: this file keeps a delegate per method.
 
 const { Emitter, generateUUID, createLogger } = require('./utils.js');
-const { sha256, hashOf } = require('./crypto/digest.js');
+const { sha256 } = require('./crypto/digest.js');
 const { OpLog, appliedHere } = require('./log.js');
 const { EntryStore } = require('./entries.js');
 const { Record, Collection } = require('./record.js');
@@ -56,10 +56,6 @@ const STORAGE_HOOKS = ['beforeWrite', 'afterWrite', 'beforeRead', 'afterRead', '
 const WHOLE = new Set(['write', 'merge', 'delete']);
 
 const NOOP = () => {};
-// An op is fingerprinted at once in Node.js (node:crypto) and through a
-// promise in the browser (Web Crypto): the write path is made at once only
-// where the hash is.
-const HASHES_AT_ONCE = typeof hashOf(null) === 'string';
 
 class Storage extends Emitter {
   #path;
@@ -370,7 +366,6 @@ class Storage extends Emitter {
     if (this.#tags !== null) await this.#tags.load();
     this.#core = this.#lend();
     this.#fastIssue =
-      HASHES_AT_ONCE &&
       this.#hooks.beforeWrite === null &&
       this.#hooks.afterWrite === null &&
       this.#core.sign === null &&

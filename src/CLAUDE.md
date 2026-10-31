@@ -25,8 +25,10 @@ src/layered/layered.js    @alexify/syncom/layered — layered([top, …, bottom]
 src/emitter.js            the Emitter both halves extend — no requires
 src/logger.js             createLogger, the duck-typed logger writer — no requires
 src/crypto/digest.js      sha256, hashOf — SHA-256 of a value's JSON as hex: the chain's, the schema hash's, an op's digest and fingerprint;
-                          node:crypto here, Web Crypto in src/crypto/digest.browser.js; `sha256` async on both, `hashOf` at once in Node.js and a
-                          promise in the browser (the write path names every op with it)
+                          node:crypto here, src/crypto/digest.browser.js in the browser; `sha256` async on both, `hashText` (what the write
+                          path names every op by) at once on both, `hashOf` at once but a promise in the browser past 64 KiB
+src/crypto/sha256.js      sha256Now — SHA-256 in JavaScript, at once: the browser half's `hashText` (Web Crypto answers with a promise only)
+                          — no requires
 src/crypto/keys.js        loadKeyPair — the on-disk key pairs (RSA for sealing, Ed25519 for signing), generator injected by each crypto
                           half; the signing and encryption subpaths share it — requires errors.js only
 src/crypto/pem.js         base64/PEM helpers over btoa/atob for the browser crypto halves of signing and encryption — no requires
@@ -336,7 +338,7 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   (`Storage#fastCommit` → `commitAtOnce` in src/commit.js, LOG-9), where a turn of the queue
   of its own would change nothing: the storage set up with nothing asynchronous on the write
   path (`#fastIssue`: no beforeWrite/afterWrite hook, no signing, no telemetry, no actor
-  function, no lens, `defer > 0`, a hash Node.js makes at once), the queue idle, no hook
+  function, no lens, `defer > 0`), the queue idle, no hook
   running, no landing step pending (`#slowSteps`), the record live and held here (in flight or
   cached — `#currentNow`), its entity without a validator or unique keys, nothing encrypted or
   expected; anything else goes through the queue. It shares `opOf`/`applyLocal`/`prepared` with

@@ -59,7 +59,7 @@ const headerOf = (op) => [
 const headerText = (op) => JSON.stringify(headerOf(op));
 const signedMessage = headerText;
 
-// SHA-256 as hex — a string in Node.js, a promise in the browser: await it.
+// SHA-256 as base64url — a string, or a promise for a payload past 64 KiB in the browser: await it.
 const digestOf = (nonce, payload) => hashOf(`${nonce}\n${canonical(payload)}`);
 const fingerprintOf = (op) => hashText(headerText(op));
 

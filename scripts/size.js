@@ -144,7 +144,8 @@ const ENTRIES = [
   // 54.2 with keystrokes made at once grown into the op before them (coalesced, log.lastGathered). 54.5,
   // raised by name.
   // 54.6 with what a text handle stands on (core.editing, core.on, a transaction's commitResolved). 55, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 55 },
+  // 55.5 with SHA-256 in JavaScript (src/crypto/sha256.js), so the browser makes a write at once. 56, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 56 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -297,8 +298,8 @@ const ENTRIES = [
   // segment the journaled lines and a trailer). 120, raised by name.
   // 120.3 with a list read when it is read and keystrokes coalesced. 121, raised by name.
   // 122.6 with the synchronous text handle; 123.2 with an op's own references short (src/text/kind.js fullRefs).
-  // 123.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 123.5 },
+  // 123.5, raised by name. 124.1 with SHA-256 in JavaScript (src/crypto/sha256.js), so the browser makes a write at once. 124.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 124.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -338,15 +339,17 @@ const ENTRIES = [
   // adds to the core is the difference `/all` shows).
   // Signed ops: the Ed25519 half, the canonical form and the verdict.
   // 4.5 with src/ in procedural loops (no array callbacks — a loop is longer than a callback; 2026-10-26) (a hex table in the browser half).
-  // 5.1 with the keys no one holds refused (the points of small order, a y past the prime).
+  // 5.1 with the keys no one holds refused (the points of small order, a y past the prime). 5.7 with the op's
+  // header hashed in JavaScript (src/crypto/sha256.js, through src/header.js). 6, raised by name.
   {
     label: 'signing — browser (@alexify/syncom/signing)',
     entry: 'src/signing/signing.js',
     platform: 'browser',
-    budget: 5.5,
+    budget: 6,
   },
-  // The chain: the blocks, SHA-256 through Web Crypto, the plugin.
-  { label: 'chain — browser (@alexify/syncom/chain)', entry: 'src/chain/chain.js', platform: 'browser', budget: 2.5 },
+  // The chain: the blocks, SHA-256 through Web Crypto, the plugin. 2.9 with the digest module's SHA-256 in JavaScript,
+  // which the chain does not call (a browser split of its own was not worth 0.4 KB). 3, raised by name.
+  { label: 'chain — browser (@alexify/syncom/chain)', entry: 'src/chain/chain.js', platform: 'browser', budget: 3 },
   // Sealed records (the RSA half) and the at-rest wrapper (AES-GCM, PBKDF2).
   {
     label: 'encryption — browser (@alexify/syncom/encryption)',
@@ -417,7 +420,8 @@ const ENTRIES = [
     // 36.1 with the log's lines and segments of them. 36.5, raised by name.
     // 36.8 with a list read when it is read and keystrokes coalesced. 37, raised by name.
     // 37.0 (over by bytes) with what a text handle stands on. 37.5, raised by name.
-    budget: 37.5,
+    // 37.9 with SHA-256 in JavaScript (src/crypto/sha256.js), so the browser makes a write at once. 38, raised by name.
+    budget: 38,
   },
 ];
 
