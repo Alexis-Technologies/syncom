@@ -168,12 +168,19 @@ class MarksIndex {
     this.byKey = byKey;
     this.waits = waits;
     this.next = next;
-    this.opens = [];
+    // The opening anchors in order (`opens`, with where each opens, `A`) and a max segment tree over
+    // where each closes (`tree`, its leaves from `size` on, -1 past the last): built once, by the first
+    // read — a mark op makes an index of its own (its sorted anchors) and reads none, so a run of mark
+    // ops never builds a tree per op (O(m) each).
+    this.opens = null;
     this.A = null;
     this.tree = null;
     this.size = 1;
-    // The opening anchors in order (`opens`, with where each opens, `A`) and a max segment tree over
-    // where each closes (`tree`, its leaves from `size` on, -1 past the last).
+  }
+
+  built() {
+    if (this.opens !== null) return this;
+    const { ends, next } = this;
     const closeAt = new Int32Array(next);
     for (let i = 0; i < ends.length; i++) if (!ends[i].open) closeAt[ends[i].m.n] = i;
     const count = ends.length >> 1;
@@ -181,16 +188,19 @@ class MarksIndex {
     while (size < count) size <<= 1;
     const tree = new Int32Array(2 * size).fill(-1);
     const A = new Int32Array(count);
+    const opens = [];
     for (let i = 0; i < ends.length; i++) {
       if (!ends[i].open) continue;
-      A[this.opens.length] = i;
-      tree[size + this.opens.length] = closeAt[ends[i].m.n];
-      this.opens.push(ends[i].m);
+      A[opens.length] = i;
+      tree[size + opens.length] = closeAt[ends[i].m.n];
+      opens.push(ends[i].m);
     }
     for (let i = size - 1; i >= 1; i--) tree[i] = Math.max(tree[2 * i], tree[2 * i + 1]);
+    this.opens = opens;
     this.A = A;
     this.tree = tree;
     this.size = size;
+    return this;
   }
 }
 
@@ -307,7 +317,7 @@ const marksIndexOf = (st, base) => {
 
 // The marks in force at the slot of ordinal `ordinal`: opened at or below it, closed past it.
 const marksOver = (st, index, ordinal) => {
-  const { ends, opens, A, tree, size } = index;
+  const { ends, opens, A, tree, size } = index.built();
   const p = insertionOf(st, ends, 2 * ordinal + 1);
   let count = 0;
   let top = opens.length;

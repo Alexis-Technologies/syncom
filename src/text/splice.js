@@ -594,6 +594,18 @@ const setVal = (d, elem, ts, origin, value) => {
   d.vals = C.set(d.vals, elem, [ts, origin, value], d.owner);
 };
 
+// The markers of a splice's embed slots laid as value registers of the slots `start` on of `runKeyOf` —
+// a register like any other, last writer wins: an assign to one of these slots that came first keeps its
+// value when it is the newer, whichever arrived first. A function of the module, not a closure per splice.
+const assignVals = (d, vals, stamp, runKeyOf, start) => {
+  if (vals === undefined || vals.length === 0) return;
+  const [ts, origin] = stamp;
+  for (let i = 0; i < vals.length; i++) {
+    const elem = elemKey(runKeyOf, start + vals[i][0]);
+    if (newer(d.vals, elem, stamp)) setVal(d, elem, ts, origin, vals[i][1]);
+  }
+};
+
 // The pending work of a block, counted once, when a bound first asks.
 const counter = (seq) => {
   let n = -1;
@@ -756,15 +768,6 @@ const applySplice = (given, stamp, payload, base = null, pendingMax = PENDING_MA
   // Written: the block frozen, a draft of it.
   const d = draft(seq);
   if (cut !== undefined) layCuts(d, seq.k, cut, base);
-  // A register like any other, last writer wins: an assign to one of these slots that came first keeps
-  // its value when it is the newer, whichever arrived first.
-  const assignVals = (runKeyOf, start) => {
-    if (vals === undefined || vals.length === 0) return;
-    for (let i = 0; i < vals.length; i++) {
-      const elem = elemKey(runKeyOf, start + vals[i][0]);
-      if (newer(d.vals, elem, stamp)) setVal(d, elem, ts, origin, vals[i][1]);
-    }
-  };
   if (insert === 1) {
     const record = recordOf(d.doc, key, [at, isText(seq.k) ? [content] : [content.slice()]], d.owner, anchor);
     where = placeOf(d, record.aId, record.aOff, base);
@@ -778,7 +781,7 @@ const applySplice = (given, stamp, payload, base = null, pendingMax = PENDING_MA
     layRun(d, record, where);
     arrivedSlots(d, key, 0, record.len);
     // The markers after the slots: registers of slots that are here.
-    assignVals(key, 0);
+    assignVals(d, vals, stamp, key, 0);
   } else if (insert === 2) {
     const { id } = target;
     if (target.placed) extendRun(d, id, content);
@@ -791,7 +794,7 @@ const applySplice = (given, stamp, payload, base = null, pendingMax = PENDING_MA
       settleChildren(d, id, target.len);
       settleRun(d, id);
     }
-    assignVals(run, from);
+    assignVals(d, vals, stamp, run, from);
   } else if (insert === 3) {
     const held = (d.ext && own(d.ext, run)) || NONE;
     const list = held.slice();
@@ -802,7 +805,7 @@ const applySplice = (given, stamp, payload, base = null, pendingMax = PENDING_MA
     // The markers are registers of the slots the extension will lay (their names are known: the run,
     // `from` and each offset), so they wait in `vals` — in the JSON, in a snapshot — and land with the
     // slots, whichever order the extension and its gap's filler arrive in.
-    assignVals(run, from);
+    assignVals(d, vals, stamp, run, from);
   }
   return { seq: finish(d), changed: true, reason: null };
 };

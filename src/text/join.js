@@ -40,8 +40,7 @@ const normalizeSeq = (raw, base = null, pendingMax = PENDING_MAX) => {
 // The reset rule: drops what is stamped below `base`. Null when nothing is left; the block itself when
 // the base takes nothing — O(1) by the oldest stamp the block holds and the oldest anchor a surviving
 // run still hangs from (one below the base already is a root's, folded into neither); a rebuild under
-// the new base otherwise, counted (`stats().rebuilds`). (The base is written on the state the block
-// shares, as v1 does: it changes no reading.)
+// the new base otherwise, counted (`stats().rebuilds`).
 const prune = (given, base) => {
   if (base === null) return given;
   const seq = asBlock(given, STATE.has(given) ? STATE.get(given).base : base);
@@ -50,8 +49,12 @@ const prune = (given, base) => {
     (st.oldest === null || compareClock(st.oldest, base) >= 0) &&
     (st.oldestAnchor === null || compareClock(st.oldestAnchor, base) >= 0);
   if (untouched) {
-    if (!sameBase(st.base, base)) st.base = base;
-    return seq;
+    if (sameBase(st.base, base)) return seq;
+    // The floor moved and takes nothing: a version of its own under it, every node shared (O(1)) — never
+    // the base written on a version another holder still reads under its own floor (it would rebuild).
+    const d = draft(seq);
+    d.base = base;
+    return finish(d);
   }
   counters.rebuilds++;
   const plain = plainOf(seq);
@@ -87,9 +90,21 @@ const prune = (given, base) => {
 // a snapshot cannot part two nodes for good.
 const lesser = (x, y) => (x === undefined ? y : y === undefined ? x : x <= y ? x : y);
 const lesserJson = (x, y) => JSON.stringify(x) < JSON.stringify(y);
+// A picture as canonical plain JSON: a block of this engine serialized, plain JSON (a snapshot's)
+// normalized — never hydrated into a rope only to be serialized again.
+const plainOfAny = (given) => {
+  if (STATE.has(given)) return plainOf(given);
+  const plain = normalizeJson(given);
+  if (plain === null) {
+    const kind = given !== null && typeof given === 'object' && given.k === 'l' ? 'l' : 't';
+    return { k: kind, ts: 0, runs: {} };
+  }
+  plain.ts = Number.isSafeInteger(given.ts) ? given.ts : stampsMax(plain);
+  return plain;
+};
 const join = (givenA, givenB) => {
-  const a = plainOf(asBlock(givenA));
-  const b = plainOf(asBlock(givenB));
+  const a = plainOfAny(givenA);
+  const b = plainOfAny(givenB);
   const out = { k: a.k, ts: Math.max(a.ts, b.ts), runs: {} };
   const aKeys = Object.keys(a.runs);
   for (let i = 0; i < aKeys.length; i++) out.runs[aKeys[i]] = a.runs[aKeys[i]];

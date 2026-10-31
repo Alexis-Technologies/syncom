@@ -84,7 +84,11 @@ field)` — for every extension while a handle is open, and a writer whose readi
   hides until the log is sealed: `tests/storage.pieces.test.js` reads the files, not the storage. A
   draft takes its tokens from the first op of a lineage in pieces, never from the first write (a
   handle's keystrokes run ahead of the window), and `placeInsert` grows a run of the newest piece
-  alone, so a keystroke anywhere writes that piece (SEQ-10).
+  alone, so a keystroke anywhere writes that piece (SEQ-10). The tokens are the hydration's (fresh
+  after a reopen or an eviction), so the first edit after one writes every piece once — by choice: a
+  token from the piece's text would cost the same serialization of every piece, in CPU instead of
+  I/O, and the head piece (the registers, the marks, what waits) is written at every write of the
+  block in any case.
 - **A handle's op is rewritten only before its flush.** The handle grows its last pending op where
   the next keystroke continues it (`coalesce`, typed on) or comes right before its first element
   (`prepends`, a word typed backward — its elements numbered again, the op applied again over the
@@ -132,7 +136,12 @@ field)` — for every extension while a handle is open, and a writer whose readi
   (`emitPieces`), never slot by slot. `prune` is O(1) through `oldest`/`oldestAnchor` and rebuilds
   from JSON only under a base that takes something — a run, or the anchor a surviving run still hangs
   from; an anchor below the base already is a root's and folds into neither (`hydrate`, `applySplice`,
-  `applyMove`), so a block rebuilt once under a base prunes in O(1) under it from then on
+  `applyMove`), so a block rebuilt once under a base prunes in O(1) under it from then on; a floor
+  that moved and takes nothing makes a version of its own under it (`draft`/`finish`, every node
+  shared) — never the base written on a version another holder reads under its own floor. The marks
+  index sorts its anchors per mark op and builds its tree (`MarksIndex#built`) by the first read
+  alone, so a run of mark ops costs no O(m) tree each. `join` reads a snapshot's plain block through
+  `normalizeJson`, never hydrated only to be serialized again
   (`stats().rebuilds` counts every rebuild: a test says it did not happen). `latestClock(meta, true)` is the trusted path for an entry this node holds — a peer's
   raw meta takes the untrusted one, which normalizes first.
 - **Every bound is read before anything is written, on the op path and the snapshot path alike.** `MAX_RUN`

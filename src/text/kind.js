@@ -403,29 +403,32 @@ const fullRanges = (ranges, origin) => {
 };
 
 // An op's value with its own references in full: the value itself when it holds none.
+// `out` with `name` set to `next` where that differs from `value`'s: a copy of `value` the first time it changes
+// (a function of the module, not a closure per op).
+const put = (out, value, name, next) => {
+  if (next === value[name]) return out;
+  const copy = out === value ? { ...value } : out;
+  copy[name] = next;
+  return copy;
+};
 const fullRefs = (type, value, origin) => {
   if (value === null || typeof value !== 'object' || typeof origin !== 'string') return value;
   let out = value;
-  const put = (name, next) => {
-    if (next === value[name]) return;
-    if (out === value) out = { ...value };
-    out[name] = next;
-  };
   if (type === 'splice') {
-    if (value.run !== undefined) put('run', fullRun(value.run, origin));
-    if (value.at !== undefined) put('at', fullAnchor(value.at, origin));
-    if (value.cut !== undefined) put('cut', fullRanges(value.cut, origin));
+    if (value.run !== undefined) out = put(out, value, 'run', fullRun(value.run, origin));
+    if (value.at !== undefined) out = put(out, value, 'at', fullAnchor(value.at, origin));
+    if (value.cut !== undefined) out = put(out, value, 'cut', fullRanges(value.cut, origin));
   } else if (type === 'assign') {
-    put('elem', fullElem(value.elem, origin));
+    out = put(out, value, 'elem', fullElem(value.elem, origin));
   } else if (type === 'move') {
-    put('elem', fullElem(value.elem, origin));
-    put('cut', fullRange(value.cut, origin));
-    put('at', fullAnchor(value.at, origin));
+    out = put(out, value, 'elem', fullElem(value.elem, origin));
+    out = put(out, value, 'cut', fullRange(value.cut, origin));
+    out = put(out, value, 'at', fullAnchor(value.at, origin));
   } else if (value.off !== undefined) {
-    put('off', fullRun(value.off, origin));
+    out = put(out, value, 'off', fullRun(value.off, origin));
   } else {
-    put('start', fullAnchor(value.start, origin));
-    put('end', fullAnchor(value.end, origin));
+    out = put(out, value, 'start', fullAnchor(value.start, origin));
+    out = put(out, value, 'end', fullAnchor(value.end, origin));
   }
   return out;
 };

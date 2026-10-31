@@ -50,6 +50,14 @@ and one `commit` event, not one per call.
 - **`bench/compare` measures a text typed through a handle** (`syncom-edit`), and `bench/write.js`
   the layers of one write (`--detail`, `--profile`, another checkout under `SYNCOM_BENCH_ROOT`).
 
+- **A mark op costs its anchors, not a tree.** The index of the marks in force built its segment tree
+  (O(m)) at every mark op; it sorts the anchors per op and builds the tree by the first read alone —
+  a mark over 20 000 characters under 5 000 marks goes from 4 000 to 7 400 a second, the rest of the
+  engine's rows unchanged (A/B against the commit before, two samples each). `join` reads a snapshot's
+  block through `normalizeJson` instead of hydrating it into a rope only to serialize it again, and a
+  floor that moved and takes nothing gives `prune` a version of its own, never the base written on a
+  version another holder reads under its own floor. A splice's markers and an op's own references
+  are laid by functions of their modules, not a closure per op.
 - **What the write path does is measured.** `stats()` adds `commits: { fast, queued, coalesced }` — the
   local writes made at once, through the queue, and folded into the write before them — and
   `handles: { open, pending, extents }` for the text handles. `syncom.commits` carries
