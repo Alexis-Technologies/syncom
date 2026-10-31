@@ -42,44 +42,44 @@
 <text class="tick" x="676" y="287" text-anchor="middle">10M</text>
 <line class="axis" x1="202" y1="71" x2="202" y2="271"/>
 <g><title>calculateHash · empty genesis block
-1,219,096 ops/s
-820 ns per operation</title>
+1,161,912 ops/s
+861 ns per operation</title>
 <text class="label primary" x="20" y="88">calculateHash</text>
 <text class="sublabel" x="20" y="103">empty genesis block</text>
-<path class="bar primary" d="M202,84H527.5939891951095A4,4 0 0 1 531.5939891951095,88V94A4,4 0 0 1 527.5939891951095,98H202Z"/>
-<text class="value" x="537.5939891951095" y="97">1.22M</text>
+<path class="bar primary" d="M202,84H524.2973714519121A4,4 0 0 1 528.2973714519121,88V94A4,4 0 0 1 524.2973714519121,98H202Z"/>
+<text class="value" x="534.2973714519121" y="97">1.16M</text>
 </g>
 <g><title>calculateHash · small record (5 x 16 B)
-1,085,931 ops/s
-921 ns per operation</title>
+1,016,407 ops/s
+984 ns per operation</title>
 <text class="label primary" x="20" y="128">calculateHash</text>
 <text class="sublabel" x="20" y="143">small record (5 x 16 B)</text>
-<path class="bar primary" d="M202,124H519.6567525107027A4,4 0 0 1 523.6567525107027,128V134A4,4 0 0 1 519.6567525107027,138H202Z"/>
-<text class="value" x="529.6567525107027" y="137">1.09M</text>
+<path class="bar primary" d="M202,124H515.116688285544A4,4 0 0 1 519.116688285544,128V134A4,4 0 0 1 515.116688285544,138H202Z"/>
+<text class="value" x="525.116688285544" y="137">1.02M</text>
 </g>
 <g><title>calculateHash · medium record (50 x 64 B)
-139,518 ops/s
-7.17 µs per operation</title>
+134,446 ops/s
+7.44 µs per operation</title>
 <text class="label primary" x="20" y="168">calculateHash</text>
 <text class="sublabel" x="20" y="183">medium record (50 x 64 B)</text>
-<path class="bar primary" d="M202,164H378.85157823477346A4,4 0 0 1 382.85157823477346,168V174A4,4 0 0 1 378.85157823477346,178H202Z"/>
-<text class="value" x="388.85157823477346" y="177">140k</text>
+<path class="bar primary" d="M202,164H376.3105659473763A4,4 0 0 1 380.3105659473763,168V174A4,4 0 0 1 376.3105659473763,178H202Z"/>
+<text class="value" x="386.3105659473763" y="177">134k</text>
 </g>
 <g><title>calculateHash · large record (200 x 256 B)
-14,795 ops/s
-67.6 µs per operation</title>
+14,382 ops/s
+69.5 µs per operation</title>
 <text class="label primary" x="20" y="208">calculateHash</text>
 <text class="sublabel" x="20" y="223">large record (200 x 256 B)</text>
-<path class="bar primary" d="M202,204H224.87816518047097A4,4 0 0 1 228.87816518047097,208V214A4,4 0 0 1 224.87816518047097,218H202Z"/>
-<text class="value" x="234.87816518047097" y="217">14.8k</text>
+<path class="bar primary" d="M202,204H222.93544693793302A4,4 0 0 1 226.93544693793302,208V214A4,4 0 0 1 222.93544693793302,218H202Z"/>
+<text class="value" x="232.93544693793302" y="217">14.4k</text>
 </g>
 <g><title>calculateHash · deeply nested record
-656,992 ops/s
-1.52 µs per operation</title>
+622,842 ops/s
+1.61 µs per operation</title>
 <text class="label primary" x="20" y="248">calculateHash</text>
 <text class="sublabel" x="20" y="263">deeply nested record</text>
-<path class="bar primary" d="M202,244H485.17449284772505A4,4 0 0 1 489.17449284772505,248V254A4,4 0 0 1 485.17449284772505,258H202Z"/>
-<text class="value" x="495.17449284772505" y="257">657k</text>
+<path class="bar primary" d="M202,244H481.5117067132845A4,4 0 0 1 485.5117067132845,248V254A4,4 0 0 1 481.5117067132845,258H202Z"/>
+<text class="value" x="491.5117067132845" y="257">623k</text>
 </g>
 <text class="caption" x="20" y="312">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-31</text>
 </svg>

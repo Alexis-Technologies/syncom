@@ -43,28 +43,28 @@
 <text class="tick" x="676" y="224" text-anchor="middle">100k</text>
 <line class="axis" x1="206" y1="88" x2="206" y2="208"/>
 <g><title>update · no undo manager
-12,888 ops/s
-77.6 µs per operation</title>
+13,189 ops/s
+75.8 µs per operation</title>
 <text class="label primary" x="20" y="105">update</text>
 <text class="sublabel" x="20" y="120">no undo manager</text>
-<path class="bar primary" d="M206,101H532.5957326277486A4,4 0 0 1 536.5957326277486,105V111A4,4 0 0 1 532.5957326277486,115H206Z"/>
-<text class="value" x="542.5957326277486" y="114">12.9k</text>
+<path class="bar primary" d="M206,101H534.1665260269415A4,4 0 0 1 538.1665260269415,105V111A4,4 0 0 1 534.1665260269415,115H206Z"/>
+<text class="value" x="544.1665260269415" y="114">13.2k</text>
 </g>
 <g><title>update · captured by the undo manager
-13,029 ops/s
-76.8 µs per operation</title>
+12,492 ops/s
+80.1 µs per operation</title>
 <text class="label primary" x="20" y="145">update</text>
 <text class="sublabel" x="20" y="160">captured by the undo manager</text>
-<path class="bar primary" d="M206,141H533.3360698394964A4,4 0 0 1 537.3360698394964,145V151A4,4 0 0 1 533.3360698394964,155H206Z"/>
-<text class="value" x="543.3360698394964" y="154">13k</text>
+<path class="bar primary" d="M206,141H530.4723428374452A4,4 0 0 1 534.4723428374452,145V151A4,4 0 0 1 530.4723428374452,155H206Z"/>
+<text class="value" x="540.4723428374452" y="154">12.5k</text>
 </g>
 <g><title>undo + redo · one step of four kinds
-811 ops/s
-1.23 ms per operation</title>
+756 ops/s
+1.32 ms per operation</title>
 <text class="label primary" x="20" y="185">undo + redo</text>
 <text class="sublabel" x="20" y="200">one step of four kinds</text>
-<path class="bar primary" d="M206,181H344.41326715974776A4,4 0 0 1 348.41326715974776,185V191A4,4 0 0 1 344.41326715974776,195H206Z"/>
-<text class="value" x="354.41326715974776" y="194">811</text>
+<path class="bar primary" d="M206,181H339.635081295189A4,4 0 0 1 343.635081295189,185V191A4,4 0 0 1 339.635081295189,195H206Z"/>
+<text class="value" x="349.635081295189" y="194">756</text>
 </g>
 <text class="caption" x="20" y="249">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-31</text>
 </svg>

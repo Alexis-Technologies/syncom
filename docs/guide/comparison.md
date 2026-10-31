@@ -50,8 +50,10 @@ rows on [Compared with CRDT libraries](/guide/vs-crdt).
 - **Unique keys across replicas.** Only syncom and InstantDB enforce a unique key. syncom
   checks it on every write and reports a clash between two peers as a `conflict` event. In the
   others the key is per device, or it is checked only where the server writes to Postgres.
-- **Where syncom is behind.** Its text types at Automerge's speed, not at Yjs's or Loro's, so a
-  very long document that many people type into at once is theirs. End-to-end encryption is a
+- **Where syncom is behind.** Its text replays a real editing trace three times as fast as Yjs,
+  but typing at the start or at random — a new run every keystroke — stays about ten times behind
+  Yjs and Loro, and Loro is ahead everywhere, so a very long document that many people type into
+  at once is better theirs. End-to-end encryption is a
   recipe, field by field (Evolu encrypts everything it syncs; Jazz 2.0 ships encryption adapters,
   not yet wired into its tables). There is no React Native target, and it is not yet on npm.
 - **Some are no longer moving, or are moving away.** PouchDB has not published since June 2024,

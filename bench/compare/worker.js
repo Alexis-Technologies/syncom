@@ -26,6 +26,7 @@ const LIST_KINDS = new Set(['list-push', 'list-insert', 'list-remove', 'list-set
 
 // What a line lacks for a kind, known before anything is opened or seeded.
 const lacking = (kind, line) => {
+  if (line.only !== undefined && !line.only.kinds.includes(kind)) return line.only.why;
   if ((TEXT_KINDS.has(kind) || kind === 'trace') && !line.text) return 'no text that merges by position';
   if (LIST_KINDS.has(kind) && !line.list) return 'no list that merges by position';
   return null;

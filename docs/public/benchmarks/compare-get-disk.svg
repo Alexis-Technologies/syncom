@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="760" height="598" viewBox="0 0 760 598" role="img" aria-label="Read a record, on disk. Read one record by id, as a plain object. Each library's own persistence on node:fs, every write awaited. ops/s, log scale, higher is better. Not shown: Yjs (memory only — on disk the Yjs row stores every update already); Loro (memory only — on disk the Loro row appends every update already); RxDB (Node.js disk storages are Premium).">
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="598" viewBox="0 0 760 598" role="img" aria-label="Read a record, on disk. Read one record by id, as a plain object. Each library's own persistence on node:fs, every write awaited. ops/s, log scale, higher is better. Not shown: syncom (the pure build: only its text is typed through openText()); Yjs (memory only — on disk the Yjs row stores every update already); Loro (memory only — on disk the Loro row appends every update already); RxDB (Node.js disk storages are Premium).">
 <style>
   text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
   .title { font-size: 15px; font-weight: 700; fill: #1b1c1e; }
@@ -32,9 +32,9 @@
 </style>
 <text class="title" x="20" y="35">Read a record, on disk</text>
 <text class="subtitle" x="20" y="56">Read one record by id, as a plain object. Each library's own persistence on node:fs, every write awaited. ops/s,</text>
-<text class="subtitle" x="20" y="73">log scale, higher is better. Not shown: Yjs (memory only — on disk the Yjs row stores every update already);</text>
-<text class="subtitle" x="20" y="90">Loro (memory only — on disk the Loro row appends every update already); RxDB (Node.js disk storages are</text>
-<text class="subtitle" x="20" y="107">Premium).</text>
+<text class="subtitle" x="20" y="73">log scale, higher is better. Not shown: syncom (the pure build: only its text is typed through openText()); Yjs</text>
+<text class="subtitle" x="20" y="90">(memory only — on disk the Yjs row stores every update already); Loro (memory only — on disk the Loro row</text>
+<text class="subtitle" x="20" y="107">appends every update already); RxDB (Node.js disk storages are Premium).</text>
 <line class="grid" x1="276" y1="122" x2="276" y2="522"/>
 <text class="tick" x="276" y="538" text-anchor="middle">10</text>
 <line class="grid" x1="333.1428571428571" y1="122" x2="333.1428571428571" y2="522"/>
@@ -53,104 +53,104 @@
 <text class="tick" x="676" y="538" text-anchor="middle">100M</text>
 <line class="axis" x1="276" y1="122" x2="276" y2="522"/>
 <g><title>Automerge · automerge-repo, NodeFS storage · v3.5.0
-10,387,160 ops/s
-96.3 ns per operation
-samples 10.3M – 10.4M
+10,097,997 ops/s
+99 ns per operation
+samples 9.81M – 10.6M
 @automerge/automerge@3.5.0</title>
 <text class="label" x="20" y="139">Automerge</text>
 <text class="sublabel" x="20" y="154">automerge-repo, NodeFS storage · v3.5.0</text>
-<path class="bar" d="M276,135H615.7998185812879A4,4 0 0 1 619.7998185812879,139V145A4,4 0 0 1 615.7998185812879,149H276Z"/>
-<text class="value" x="625.7998185812879" y="148">10.4M</text>
+<path class="bar" d="M276,135H615.0991562184838A4,4 0 0 1 619.0991562184838,139V145A4,4 0 0 1 615.0991562184838,149H276Z"/>
+<text class="value" x="625.0991562184838" y="148">10.1M</text>
 </g>
 <g><title>Yjs · y-leveldb · v13.6.33
-3,757,798 ops/s
-266 ns per operation
-samples 3.62M – 3.77M
+3,777,145 ops/s
+265 ns per operation
+samples 3.63M – 3.83M
 yjs@13.6.33</title>
 <text class="label" x="20" y="179">Yjs</text>
 <text class="sublabel" x="20" y="194">y-leveldb · v13.6.33</text>
-<path class="bar" d="M276,175H590.5676257158391A4,4 0 0 1 594.5676257158391,179V185A4,4 0 0 1 590.5676257158391,189H276Z"/>
-<text class="value" x="600.5676257158391" y="188">3.76M</text>
+<path class="bar" d="M276,175H590.695064613353A4,4 0 0 1 594.695064613353,179V185A4,4 0 0 1 590.695064613353,189H276Z"/>
+<text class="value" x="600.695064613353" y="188">3.78M</text>
 </g>
 <g><title>TinyBase · MergeableStore, file persister · v10.0.1
-1,416,035 ops/s
-706 ns per operation
-samples 1.4M – 1.42M
+1,326,425 ops/s
+754 ns per operation
+samples 1.31M – 1.38M
 tinybase@10.0.1</title>
 <text class="label" x="20" y="219">TinyBase</text>
 <text class="sublabel" x="20" y="234">MergeableStore, file persister · v10.0.1</text>
-<path class="bar" d="M276,215H566.3470924849019A4,4 0 0 1 570.3470924849019,219V225A4,4 0 0 1 566.3470924849019,229H276Z"/>
-<text class="value" x="576.3470924849019" y="228">1.42M</text>
+<path class="bar" d="M276,215H564.7247232173761A4,4 0 0 1 568.7247232173761,219V225A4,4 0 0 1 564.7247232173761,229H276Z"/>
+<text class="value" x="574.7247232173761" y="228">1.33M</text>
 </g>
 <g><title>syncom · core + text + sync, node:fs · v0.0.1
-894,136 ops/s
-1.12 µs per operation
-samples 892k – 896k
+884,856 ops/s
+1.13 µs per operation
+samples 851k – 889k
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="259">syncom</text>
 <text class="sublabel" x="20" y="274">core + text + sync, node:fs · v0.0.1</text>
-<path class="bar primary" d="M276,255H554.9373507402125A4,4 0 0 1 558.9373507402125,259V265A4,4 0 0 1 554.9373507402125,269H276Z"/>
-<text class="value" x="564.9373507402125" y="268">894k</text>
+<path class="bar primary" d="M276,255H554.6784438391412A4,4 0 0 1 558.6784438391412,259V265A4,4 0 0 1 554.6784438391412,269H276Z"/>
+<text class="value" x="564.6784438391412" y="268">885k</text>
 </g>
 <g><title>syncom · /all: signed, chained, node:fs · v0.0.1
-887,108 ops/s
-1.13 µs per operation
+878,475 ops/s
+1.14 µs per operation
 samples 874k – 889k
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="299">syncom</text>
 <text class="sublabel" x="20" y="314">/all: signed, chained, node:fs · v0.0.1</text>
-<path class="bar secondary" d="M276,295H554.7415175999693A4,4 0 0 1 558.7415175999693,299V305A4,4 0 0 1 554.7415175999693,309H276Z"/>
-<text class="value" x="564.7415175999693" y="308">887k</text>
+<path class="bar secondary" d="M276,295H554.4988262870522A4,4 0 0 1 558.4988262870522,299V305A4,4 0 0 1 554.4988262870522,309H276Z"/>
+<text class="value" x="564.4988262870522" y="308">878k</text>
 </g>
 <g><title>Loro · updates appended to a file · v1.16.4
-300,583 ops/s
-3.33 µs per operation
-samples 190k – 314k
+290,830 ops/s
+3.44 µs per operation
+samples 252k – 311k
 loro-crdt@1.16.4</title>
 <text class="label" x="20" y="339">Loro</text>
 <text class="sublabel" x="20" y="354">updates appended to a file · v1.16.4</text>
-<path class="bar" d="M276,335H527.88367969665A4,4 0 0 1 531.88367969665,339V345A4,4 0 0 1 527.88367969665,349H276Z"/>
-<text class="value" x="537.88367969665" y="348">301k</text>
+<path class="bar" d="M276,335H527.0651218768121A4,4 0 0 1 531.0651218768121,339V345A4,4 0 0 1 527.0651218768121,349H276Z"/>
+<text class="value" x="537.0651218768121" y="348">291k</text>
 </g>
 <g><title>PouchDB · LevelDB (Node default) · v9.0.0
-42,775 ops/s
-23.4 µs per operation
-samples 30.1k – 43.4k
+38,569 ops/s
+25.9 µs per operation
+samples 37.6k – 38.9k
 pouchdb@9.0.0</title>
 <text class="label" x="20" y="379">PouchDB</text>
 <text class="sublabel" x="20" y="394">LevelDB (Node default) · v9.0.0</text>
-<path class="bar" d="M276,375H479.49650485946745A4,4 0 0 1 483.49650485946745,379V385A4,4 0 0 1 479.49650485946745,389H276Z"/>
-<text class="value" x="489.49650485946745" y="388">42.8k</text>
+<path class="bar" d="M276,375H476.9278827305504A4,4 0 0 1 480.9278827305504,379V385A4,4 0 0 1 476.9278827305504,389H276Z"/>
+<text class="value" x="486.9278827305504" y="388">38.6k</text>
 </g>
 <g><title>GUN · RAD on node:fs · v0.2020.1241
-758 ops/s
-1.32 ms per operation
-samples 617 – 801
+811 ops/s
+1.23 ms per operation
+samples 686 – 833
 gun@0.2020.1241</title>
 <text class="label" x="20" y="419">GUN</text>
 <text class="sublabel" x="20" y="434">RAD on node:fs · v0.2020.1241</text>
-<path class="bar" d="M276,415H379.39754883309195A4,4 0 0 1 383.39754883309195,419V425A4,4 0 0 1 379.39754883309195,429H276Z"/>
-<text class="value" x="389.39754883309195" y="428">758</text>
+<path class="bar" d="M276,415H381.0812760619092A4,4 0 0 1 385.0812760619092,419V425A4,4 0 0 1 381.0812760619092,429H276Z"/>
+<text class="value" x="391.0812760619092" y="428">811</text>
 </g>
 <g><title>Fireproof · file:// store · v0.24.19
-720 ops/s
-1.39 ms per operation
-samples 718 – 724
+686 ops/s
+1.46 ms per operation
+samples 683 – 699
 @fireproof/core@0.24.19</title>
 <text class="label" x="20" y="459">Fireproof</text>
 <text class="sublabel" x="20" y="474">file:// store · v0.24.19</text>
-<path class="bar" d="M276,455H378.1223013086791A4,4 0 0 1 382.1223013086791,459V465A4,4 0 0 1 378.1223013086791,469H276Z"/>
-<text class="value" x="388.1223013086791" y="468">720</text>
+<path class="bar" d="M276,455H376.94225235899836A4,4 0 0 1 380.94225235899836,459V465A4,4 0 0 1 376.94225235899836,469H276Z"/>
+<text class="value" x="386.94225235899836" y="468">686</text>
 </g>
 <g><title>OrbitDB · documents, LevelDB · v4.0.0
-84.5 ops/s
-11.8 ms per operation
-samples 70 – 115
+75.7 ops/s
+13.2 ms per operation
+samples 64.6 – 101
 @orbitdb/core@4.0.0</title>
 <text class="label" x="20" y="499">OrbitDB</text>
 <text class="sublabel" x="20" y="514">documents, LevelDB · v4.0.0</text>
-<path class="bar" d="M276,495H324.9686027011571A4,4 0 0 1 328.9686027011571,499V505A4,4 0 0 1 324.9686027011571,509H276Z"/>
-<text class="value" x="334.9686027011571" y="508">84.5</text>
+<path class="bar" d="M276,495H322.244353238803A4,4 0 0 1 326.244353238803,499V505A4,4 0 0 1 322.244353238803,509H276Z"/>
+<text class="value" x="332.244353238803" y="508">75.7</text>
 </g>
 <text class="caption" x="20" y="563">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
 <text class="caption" x="20" y="579">in a fresh process · 2026-10-31</text>

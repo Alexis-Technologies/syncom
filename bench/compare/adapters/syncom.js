@@ -154,17 +154,26 @@ const variant = (build, memory, handle = false) => {
 
 const ownVersion = () => require(path.join(ROOT, 'package.json')).version;
 
-const adapter = (id, build, label, handle = false) => ({
-  id,
-  name: 'syncom',
-  package: '@alexify/syncom',
-  version: ownVersion,
-  url: 'https://github.com/Alexis-Technologies/syncom',
-  lines: {
-    memory: { ...variant(build, true, handle), variant: `${label}, memory()` },
-    disk: { ...variant(build, false, handle), variant: `${label}, node:fs` },
-  },
-});
+// The handle row is the pure build but for its text: everything else would measure the same twice.
+const TEXT_ONLY = {
+  kinds: ['append', 'prepend', 'random', 'trace'],
+  why: 'the pure build: only its text is typed through openText()',
+};
+
+const adapter = (id, build, label, handle = false) => {
+  const only = handle ? { only: TEXT_ONLY } : {};
+  return {
+    id,
+    name: 'syncom',
+    package: '@alexify/syncom',
+    version: ownVersion,
+    url: 'https://github.com/Alexis-Technologies/syncom',
+    lines: {
+      memory: { ...variant(build, true, handle), ...only, variant: `${label}, memory()` },
+      disk: { ...variant(build, false, handle), ...only, variant: `${label}, node:fs` },
+    },
+  };
+};
 
 module.exports = {
   pure: adapter('syncom', 'pure', 'core + text + sync'),

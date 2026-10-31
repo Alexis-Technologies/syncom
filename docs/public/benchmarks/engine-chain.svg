@@ -45,60 +45,60 @@
 <text class="tick" x="676" y="384" text-anchor="middle">100k</text>
 <line class="axis" x1="202" y1="88" x2="202" y2="368"/>
 <g><title>addBlock · small payload
-2,706 ops/s
-370 µs per operation</title>
+2,804 ops/s
+357 µs per operation</title>
 <text class="label primary" x="20" y="105">addBlock</text>
 <text class="sublabel" x="20" y="120">small payload</text>
-<path class="bar primary" d="M202,101H486.2308433830001A4,4 0 0 1 490.2308433830001,105V111A4,4 0 0 1 486.2308433830001,115H202Z"/>
-<text class="value" x="496.2308433830001" y="114">2,706</text>
+<path class="bar primary" d="M202,101H488.06169410141257A4,4 0 0 1 492.06169410141257,105V111A4,4 0 0 1 488.06169410141257,115H202Z"/>
+<text class="value" x="498.06169410141257" y="114">2,804</text>
 </g>
 <g><title>addBlock · 4 KB payload
-2,498 ops/s
-400 µs per operation</title>
+2,603 ops/s
+384 µs per operation</title>
 <text class="label primary" x="20" y="145">addBlock</text>
 <text class="sublabel" x="20" y="160">4 KB payload</text>
-<path class="bar primary" d="M202,141H482.1147034335168A4,4 0 0 1 486.1147034335168,145V151A4,4 0 0 1 482.1147034335168,155H202Z"/>
-<text class="value" x="492.1147034335168" y="154">2,498</text>
+<path class="bar primary" d="M202,141H484.2336889209444A4,4 0 0 1 488.2336889209444,145V151A4,4 0 0 1 484.2336889209444,155H202Z"/>
+<text class="value" x="494.2336889209444" y="154">2,603</text>
 </g>
 <g><title>readBlock · single block
-12,973 ops/s
-77.1 µs per operation</title>
+12,384 ops/s
+80.7 µs per operation</title>
 <text class="label primary" x="20" y="185">readBlock</text>
 <text class="sublabel" x="20" y="200">single block</text>
-<path class="bar primary" d="M202,181H566.8952895434068A4,4 0 0 1 570.8952895434068,185V191A4,4 0 0 1 566.8952895434068,195H202Z"/>
-<text class="value" x="576.8952895434068" y="194">13k</text>
+<path class="bar primary" d="M202,181H564.5040217856499A4,4 0 0 1 568.5040217856499,185V191A4,4 0 0 1 564.5040217856499,195H202Z"/>
+<text class="value" x="574.5040217856499" y="194">12.4k</text>
 </g>
 <g><title>validate · last 1 block
-11,303 ops/s
-88.5 µs per operation</title>
+10,605 ops/s
+94.3 µs per operation</title>
 <text class="label primary" x="20" y="225">validate</text>
 <text class="sublabel" x="20" y="240">last 1 block</text>
-<path class="bar primary" d="M202,221H559.803456720703A4,4 0 0 1 563.803456720703,225V231A4,4 0 0 1 559.803456720703,235H202Z"/>
-<text class="value" x="569.803456720703" y="234">11.3k</text>
+<path class="bar primary" d="M202,221H556.5230147330308A4,4 0 0 1 560.5230147330308,225V231A4,4 0 0 1 556.5230147330308,235H202Z"/>
+<text class="value" x="566.5230147330308" y="234">10.6k</text>
 </g>
 <g><title>validate · last 10 blocks
-1,136 ops/s
-880 µs per operation</title>
+1,052 ops/s
+951 µs per operation</title>
 <text class="label primary" x="20" y="265">validate</text>
 <text class="sublabel" x="20" y="280">last 10 blocks</text>
-<path class="bar primary" d="M202,261H441.5623322679375A4,4 0 0 1 445.5623322679375,265V271A4,4 0 0 1 441.5623322679375,275H202Z"/>
-<text class="value" x="451.5623322679375" y="274">1,136</text>
+<path class="bar primary" d="M202,261H437.6088651683998A4,4 0 0 1 441.6088651683998,265V271A4,4 0 0 1 437.6088651683998,275H202Z"/>
+<text class="value" x="447.6088651683998" y="274">1,052</text>
 </g>
 <g><title>validate · last 100 blocks
-114 ops/s
-8.77 ms per operation</title>
+111 ops/s
+9.01 ms per operation</title>
 <text class="label primary" x="20" y="305">validate</text>
 <text class="sublabel" x="20" y="320">last 100 blocks</text>
-<path class="bar primary" d="M202,301H323.243224883372A4,4 0 0 1 327.243224883372,305V311A4,4 0 0 1 323.243224883372,315H202Z"/>
-<text class="value" x="333.243224883372" y="314">114</text>
+<path class="bar primary" d="M202,301H321.8707729862189A4,4 0 0 1 325.8707729862189,305V311A4,4 0 0 1 321.8707729862189,315H202Z"/>
+<text class="value" x="331.8707729862189" y="314">111</text>
 </g>
 <g><title>validate · full 200-block chain
-56 ops/s
-17.9 ms per operation</title>
+54 ops/s
+18.5 ms per operation</title>
 <text class="label primary" x="20" y="345">validate</text>
 <text class="sublabel" x="20" y="360">full 200-block chain</text>
-<path class="bar primary" d="M202,341H286.66028120023475A4,4 0 0 1 290.66028120023475,345V351A4,4 0 0 1 286.66028120023475,355H202Z"/>
-<text class="value" x="296.66028120023475" y="354">56</text>
+<path class="bar primary" d="M202,341H284.78866053902175A4,4 0 0 1 288.78866053902175,345V351A4,4 0 0 1 284.78866053902175,355H202Z"/>
+<text class="value" x="294.78866053902175" y="354">54</text>
 </g>
 <text class="caption" x="20" y="409">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-31</text>
 </svg>

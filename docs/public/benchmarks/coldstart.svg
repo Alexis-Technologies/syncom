@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="760" height="548" viewBox="0 0 760 548" role="img" aria-label="Cold start. Load the library, open a store of 1,000 records on disk, read one: a fresh process, median of 0 runs. Lower is better.">
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="588" viewBox="0 0 760 588" role="img" aria-label="Cold start. Load the library, open a store of 1,000 records on disk, read one: a fresh process, median of 10 runs. Lower is better.">
 <style>
   text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
   .title { font-size: 15px; font-weight: 700; fill: #1b1c1e; }
@@ -31,106 +31,117 @@
   }
 </style>
 <text class="title" x="20" y="35">Cold start</text>
-<text class="subtitle" x="20" y="56">Load the library, open a store of 1,000 records on disk, read one: a fresh process, median of 0 runs. Lower is</text>
+<text class="subtitle" x="20" y="56">Load the library, open a store of 1,000 records on disk, read one: a fresh process, median of 10 runs. Lower is</text>
 <text class="subtitle" x="20" y="73">better.</text>
-<line class="grid" x1="276" y1="88" x2="276" y2="488"/>
-<text class="tick" x="276" y="504" text-anchor="middle">0 ms</text>
-<line class="grid" x1="409.3333333333333" y1="88" x2="409.3333333333333" y2="488"/>
-<text class="tick" x="409.3333333333333" y="504" text-anchor="middle">200 ms</text>
-<line class="grid" x1="542.6666666666666" y1="88" x2="542.6666666666666" y2="488"/>
-<text class="tick" x="542.6666666666666" y="504" text-anchor="middle">400 ms</text>
-<line class="grid" x1="676" y1="88" x2="676" y2="488"/>
-<text class="tick" x="676" y="504" text-anchor="middle">600 ms</text>
-<line class="axis" x1="276" y1="88" x2="276" y2="488"/>
-<g><title>syncom · core + text + sync, node:fs · v0.0.1
-52.4 ms in total
-load and open 52.0 ms · first read 0.5 ms
+<line class="grid" x1="372" y1="88" x2="372" y2="528"/>
+<text class="tick" x="372" y="544" text-anchor="middle">0 ms</text>
+<line class="grid" x1="448" y1="88" x2="448" y2="528"/>
+<text class="tick" x="448" y="544" text-anchor="middle">200 ms</text>
+<line class="grid" x1="524" y1="88" x2="524" y2="528"/>
+<text class="tick" x="524" y="544" text-anchor="middle">400 ms</text>
+<line class="grid" x1="600" y1="88" x2="600" y2="528"/>
+<text class="tick" x="600" y="544" text-anchor="middle">600 ms</text>
+<line class="grid" x1="676" y1="88" x2="676" y2="528"/>
+<text class="tick" x="676" y="544" text-anchor="middle">800 ms</text>
+<line class="axis" x1="372" y1="88" x2="372" y2="528"/>
+<g><title>syncom · core + text + sync, typed through openText(), node:fs · v0.0.1
+57.1 ms in total
+load and open 56.5 ms · first read 0.5 ms
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="105">syncom</text>
-<text class="sublabel" x="20" y="120">core + text + sync, node:fs · v0.0.1</text>
-<path class="bar primary" d="M276,101H306.955514A4,4 0 0 1 310.955514,105V111A4,4 0 0 1 306.955514,115H276Z"/>
-<text class="value" x="316.955514" y="114">52 ms</text>
+<text class="sublabel" x="20" y="120">core + text + sync, typed through openText(), node:fs ·…</text>
+<path class="bar primary" d="M372,101H389.69629798A4,4 0 0 1 393.69629798,105V111A4,4 0 0 1 389.69629798,115H372Z"/>
+<text class="value" x="399.69629798" y="114">57 ms</text>
 </g>
-<g><title>Loro · updates appended to a file · v1.16.4
-58.0 ms in total
-load and open 57.3 ms · first read 0.7 ms
-loro-crdt@1.16.4</title>
-<text class="label" x="20" y="145">Loro</text>
-<text class="sublabel" x="20" y="160">updates appended to a file · v1.16.4</text>
-<path class="bar" d="M276,141H310.661375A4,4 0 0 1 314.661375,145V151A4,4 0 0 1 310.661375,155H276Z"/>
-<text class="value" x="320.661375" y="154">58 ms</text>
+<g><title>syncom · core + text + sync, node:fs · v0.0.1
+57.5 ms in total
+load and open 56.8 ms · first read 0.6 ms
+@alexify/syncom@0.0.1</title>
+<text class="label primary" x="20" y="145">syncom</text>
+<text class="sublabel" x="20" y="160">core + text + sync, node:fs · v0.0.1</text>
+<path class="bar primary" d="M372,141H389.84417327A4,4 0 0 1 393.84417327,145V151A4,4 0 0 1 389.84417327,155H372Z"/>
+<text class="value" x="399.84417327" y="154">57 ms</text>
 </g>
 <g><title>TinyBase · MergeableStore, file persister · v10.0.1
-58.6 ms in total
-load and open 58.6 ms · first read 0.1 ms
+62.1 ms in total
+load and open 62.0 ms · first read 0.1 ms
 tinybase@10.0.1</title>
 <text class="label" x="20" y="185">TinyBase</text>
 <text class="sublabel" x="20" y="200">MergeableStore, file persister · v10.0.1</text>
-<path class="bar" d="M276,181H311.0905416666667A4,4 0 0 1 315.0905416666667,185V191A4,4 0 0 1 311.0905416666667,195H276Z"/>
-<text class="value" x="321.0905416666667" y="194">59 ms</text>
+<path class="bar" d="M372,181H391.58384519A4,4 0 0 1 395.58384519,185V191A4,4 0 0 1 391.58384519,195H372Z"/>
+<text class="value" x="401.58384519" y="194">62 ms</text>
+</g>
+<g><title>Loro · updates appended to a file · v1.16.4
+63.0 ms in total
+load and open 62.2 ms · first read 0.7 ms
+loro-crdt@1.16.4</title>
+<text class="label" x="20" y="225">Loro</text>
+<text class="sublabel" x="20" y="240">updates appended to a file · v1.16.4</text>
+<path class="bar" d="M372,221H391.94577125A4,4 0 0 1 395.94577125,225V231A4,4 0 0 1 391.94577125,235H372Z"/>
+<text class="value" x="401.94577125" y="234">63 ms</text>
 </g>
 <g><title>syncom · /all: signed, chained, node:fs · v0.0.1
-63.0 ms in total
-load and open 61.6 ms · first read 1.4 ms
+65.4 ms in total
+load and open 63.9 ms · first read 1.5 ms
 @alexify/syncom@0.0.1</title>
-<text class="label secondary" x="20" y="225">syncom</text>
-<text class="sublabel" x="20" y="240">/all: signed, chained, node:fs · v0.0.1</text>
-<path class="bar secondary" d="M276,221H314.026875A4,4 0 0 1 318.026875,225V231A4,4 0 0 1 314.026875,235H276Z"/>
-<text class="value" x="324.026875" y="234">63 ms</text>
+<text class="label secondary" x="20" y="265">syncom</text>
+<text class="sublabel" x="20" y="280">/all: signed, chained, node:fs · v0.0.1</text>
+<path class="bar secondary" d="M372,261H392.84001404A4,4 0 0 1 396.84001404,265V271A4,4 0 0 1 392.84001404,275H372Z"/>
+<text class="value" x="402.84001404" y="274">65 ms</text>
 </g>
 <g><title>Yjs · y-leveldb · v13.6.33
-88.7 ms in total
-load and open 88.6 ms · first read 0.1 ms
+94.9 ms in total
+load and open 94.8 ms · first read 0.1 ms
 yjs@13.6.33</title>
-<text class="label" x="20" y="265">Yjs</text>
-<text class="sublabel" x="20" y="280">y-leveldb · v13.6.33</text>
-<path class="bar" d="M276,261H331.13855566666666A4,4 0 0 1 335.13855566666666,265V271A4,4 0 0 1 331.13855566666666,275H276Z"/>
-<text class="value" x="341.13855566666666" y="274">89 ms</text>
+<text class="label" x="20" y="305">Yjs</text>
+<text class="sublabel" x="20" y="320">y-leveldb · v13.6.33</text>
+<path class="bar" d="M372,301H404.05277702A4,4 0 0 1 408.05277702,305V311A4,4 0 0 1 404.05277702,315H372Z"/>
+<text class="value" x="414.05277702" y="314">95 ms</text>
 </g>
 <g><title>PouchDB · LevelDB (Node default) · v9.0.0
-95.4 ms in total
-load and open 92.2 ms · first read 3.2 ms
+101.9 ms in total
+load and open 98.6 ms · first read 3.4 ms
 pouchdb@9.0.0</title>
-<text class="label" x="20" y="305">PouchDB</text>
-<text class="sublabel" x="20" y="320">LevelDB (Node default) · v9.0.0</text>
-<path class="bar" d="M276,301H335.594764A4,4 0 0 1 339.594764,305V311A4,4 0 0 1 335.594764,315H276Z"/>
-<text class="value" x="345.594764" y="314">95 ms</text>
+<text class="label" x="20" y="345">PouchDB</text>
+<text class="sublabel" x="20" y="360">LevelDB (Node default) · v9.0.0</text>
+<path class="bar" d="M372,341H406.73987577A4,4 0 0 1 410.73987577,345V351A4,4 0 0 1 406.73987577,355H372Z"/>
+<text class="value" x="416.73987577" y="354">102 ms</text>
 </g>
 <g><title>GUN · RAD on node:fs · v0.2020.1241
-99.6 ms in total
-load and open 69.9 ms · first read 29.6 ms
+106.3 ms in total
+load and open 74.7 ms · first read 31.2 ms
 gun@0.2020.1241</title>
-<text class="label" x="20" y="345">GUN</text>
-<text class="sublabel" x="20" y="360">RAD on node:fs · v0.2020.1241</text>
-<path class="bar" d="M276,341H338.37527766666665A4,4 0 0 1 342.37527766666665,345V351A4,4 0 0 1 338.37527766666665,355H276Z"/>
-<text class="value" x="348.37527766666665" y="354">100 ms</text>
+<text class="label" x="20" y="385">GUN</text>
+<text class="sublabel" x="20" y="400">RAD on node:fs · v0.2020.1241</text>
+<path class="bar" d="M372,381H408.39270192A4,4 0 0 1 412.39270192,385V391A4,4 0 0 1 408.39270192,395H372Z"/>
+<text class="value" x="418.39270192" y="394">106 ms</text>
 </g>
 <g><title>Automerge · automerge-repo, NodeFS storage · v3.5.0
-188.2 ms in total
-load and open 188.2 ms · first read 0.0 ms
+202.7 ms in total
+load and open 202.7 ms · first read 0.0 ms
 @automerge/automerge@3.5.0</title>
-<text class="label" x="20" y="385">Automerge</text>
-<text class="sublabel" x="20" y="400">automerge-repo, NodeFS storage · v3.5.0</text>
-<path class="bar" d="M276,381H397.476264A4,4 0 0 1 401.476264,385V391A4,4 0 0 1 397.476264,395H276Z"/>
-<text class="value" x="407.476264" y="394">188 ms</text>
+<text class="label" x="20" y="425">Automerge</text>
+<text class="sublabel" x="20" y="440">automerge-repo, NodeFS storage · v3.5.0</text>
+<path class="bar" d="M372,421H445.02833548A4,4 0 0 1 449.02833548,425V431A4,4 0 0 1 445.02833548,435H372Z"/>
+<text class="value" x="455.02833548" y="434">203 ms</text>
 </g>
 <g><title>Fireproof · file:// store · v0.24.19
-257.0 ms in total
-load and open 168.5 ms · first read 88.1 ms
+276.4 ms in total
+load and open 180.9 ms · first read 95.4 ms
 @fireproof/core@0.24.19</title>
-<text class="label" x="20" y="425">Fireproof</text>
-<text class="sublabel" x="20" y="440">file:// store · v0.24.19</text>
-<path class="bar" d="M276,421H443.3475136666667A4,4 0 0 1 447.3475136666667,425V431A4,4 0 0 1 443.3475136666667,435H276Z"/>
-<text class="value" x="453.3475136666667" y="434">257 ms</text>
+<text class="label" x="20" y="465">Fireproof</text>
+<text class="sublabel" x="20" y="480">file:// store · v0.24.19</text>
+<path class="bar" d="M372,461H473.04391452A4,4 0 0 1 477.04391452,465V471A4,4 0 0 1 473.04391452,475H372Z"/>
+<text class="value" x="483.04391452" y="474">276 ms</text>
 </g>
 <g><title>OrbitDB · documents, LevelDB · v4.0.0
-598.9 ms in total
-load and open 555.6 ms · first read 42.9 ms
+648.8 ms in total
+load and open 599.4 ms · first read 49.4 ms
 @orbitdb/core@4.0.0</title>
-<text class="label" x="20" y="465">OrbitDB</text>
-<text class="sublabel" x="20" y="480">documents, LevelDB · v4.0.0</text>
-<path class="bar" d="M276,461H671.265778A4,4 0 0 1 675.265778,465V471A4,4 0 0 1 671.265778,475H276Z"/>
-<text class="value" x="681.265778" y="474">599 ms</text>
+<text class="label" x="20" y="505">OrbitDB</text>
+<text class="sublabel" x="20" y="520">documents, LevelDB · v4.0.0</text>
+<path class="bar" d="M372,501H614.53750029A4,4 0 0 1 618.53750029,505V511A4,4 0 0 1 614.53750029,515H372Z"/>
+<text class="value" x="624.53750029" y="514">649 ms</text>
 </g>
-<text class="caption" x="20" y="529">Apple M3 Max · 16 cores · Node v24.14.1</text>
+<text class="caption" x="20" y="569">Apple M3 Max · 16 cores · Node v24.14.1</text>
 </svg>

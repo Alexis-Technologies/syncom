@@ -51,51 +51,51 @@
 <text class="tick" x="676" y="384" text-anchor="middle">10M</text>
 <line class="axis" x1="285" y1="88" x2="285" y2="368"/>
 <g><title>append · one op
-33,950 ops/s
-29.5 µs per operation</title>
+39,483 ops/s
+25.3 µs per operation</title>
 <text class="label primary" x="20" y="105">append</text>
 <text class="sublabel" x="20" y="120">one op</text>
-<path class="bar primary" d="M285,101H534.0797647770084A4,4 0 0 1 538.0797647770084,105V111A4,4 0 0 1 534.0797647770084,115H285Z"/>
-<text class="value" x="544.0797647770084" y="114">34k</text>
+<path class="bar primary" d="M285,101H537.74233803473A4,4 0 0 1 541.74233803473,105V111A4,4 0 0 1 537.74233803473,115H285Z"/>
+<text class="value" x="547.74233803473" y="114">39.5k</text>
 </g>
 <g><title>append · batch of 100
-683,817 ops/s
-1.46 µs per operation</title>
+731,306 ops/s
+1.37 µs per operation</title>
 <text class="label primary" x="20" y="145">append</text>
 <text class="sublabel" x="20" y="160">batch of 100</text>
-<path class="bar primary" d="M285,141H606.9230711858097A4,4 0 0 1 610.9230711858097,145V151A4,4 0 0 1 606.9230711858097,155H285Z"/>
-<text class="value" x="616.9230711858097" y="154">684k</text>
+<path class="bar primary" d="M285,141H608.5518232019554A4,4 0 0 1 612.5518232019554,145V151A4,4 0 0 1 608.5518232019554,155H285Z"/>
+<text class="value" x="618.5518232019554" y="154">731k</text>
 </g>
 <g><title>since · last 500 entries
-632,336 ops/s
-1.58 µs per operation</title>
+611,433 ops/s
+1.64 µs per operation</title>
 <text class="label primary" x="20" y="185">since</text>
 <text class="sublabel" x="20" y="200">last 500 entries</text>
-<path class="bar primary" d="M285,181H605.024375985306A4,4 0 0 1 609.024375985306,185V191A4,4 0 0 1 605.024375985306,195H285Z"/>
-<text class="value" x="615.024375985306" y="194">632k</text>
+<path class="bar primary" d="M285,181H604.2089157085934A4,4 0 0 1 608.2089157085934,185V191A4,4 0 0 1 604.2089157085934,195H285Z"/>
+<text class="value" x="614.2089157085934" y="194">611k</text>
 </g>
 <g><title>since · everything (no cursor)
-484 ops/s
-2.07 ms per operation</title>
+349 ops/s
+2.87 ms per operation</title>
 <text class="label primary" x="20" y="225">since</text>
 <text class="sublabel" x="20" y="240">everything (no cursor)</text>
-<path class="bar primary" d="M285,221H430.9677909147093A4,4 0 0 1 434.9677909147093,225V231A4,4 0 0 1 430.9677909147093,235H285Z"/>
-<text class="value" x="440.9677909147093" y="234">484</text>
+<path class="bar primary" d="M285,221H423.0349631344342A4,4 0 0 1 427.0349631344342,225V231A4,4 0 0 1 423.0349631344342,235H285Z"/>
+<text class="value" x="433.0349631344342" y="234">349</text>
 </g>
 <g><title>since · 20 from the middle, scoped
-3,500,742 ops/s
-286 ns per operation</title>
+3,340,879 ops/s
+299 ns per operation</title>
 <text class="label primary" x="20" y="265">since</text>
 <text class="sublabel" x="20" y="280">20 from the middle, scoped</text>
-<path class="bar primary" d="M285,261H646.5380858662486A4,4 0 0 1 650.5380858662486,265V271A4,4 0 0 1 646.5380858662486,275H285Z"/>
-<text class="value" x="656.5380858662486" y="274">3.5M</text>
+<path class="bar primary" d="M285,261H645.4042217051576A4,4 0 0 1 649.4042217051576,265V271A4,4 0 0 1 645.4042217051576,275H285Z"/>
+<text class="value" x="655.4042217051576" y="274">3.34M</text>
 </g>
 <g><title>append with a roll every 8 batches
-9,174 ops/s
-109 µs per operation</title>
+15,361 ops/s
+65.1 µs per operation</title>
 <text class="label primary" x="20" y="312">append with a roll every 8 batches</text>
-<path class="bar primary" d="M285,301H502.33720938517456A4,4 0 0 1 506.33720938517456,305V311A4,4 0 0 1 502.33720938517456,315H285Z"/>
-<text class="value" x="512.3372093851746" y="314">9,174</text>
+<path class="bar primary" d="M285,301H514.8414314656844A4,4 0 0 1 518.8414314656844,305V311A4,4 0 0 1 514.8414314656844,315H285Z"/>
+<text class="value" x="524.8414314656844" y="314">15.4k</text>
 </g>
 <g><title>reopen · index + segments + tail
 2 ops/s

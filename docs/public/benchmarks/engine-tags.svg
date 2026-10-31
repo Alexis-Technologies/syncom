@@ -43,44 +43,44 @@
 <text class="tick" x="676" y="304" text-anchor="middle">1M</text>
 <line class="axis" x1="371" y1="88" x2="371" y2="288"/>
 <g><title>tag() + untag() · over 1 000 records (memory fsi)
-2,900 ops/s
-345 µs per operation</title>
+2,822 ops/s
+354 µs per operation</title>
 <text class="label primary" x="20" y="105">tag() + untag()</text>
 <text class="sublabel" x="20" y="120">over 1 000 records (memory fsi)</text>
-<path class="bar primary" d="M371,101H414.0104631197272A4,4 0 0 1 418.0104631197272,105V111A4,4 0 0 1 414.0104631197272,115H371Z"/>
-<text class="value" x="424.0104631197272" y="114">2,900</text>
+<path class="bar primary" d="M371,101H412.80662929086344A4,4 0 0 1 416.80662929086344,105V111A4,4 0 0 1 412.80662929086344,115H371Z"/>
+<text class="value" x="422.80662929086344" y="114">2,822</text>
 </g>
 <g><title>update · under a tag; the first write of a record copies its file
-18,687 ops/s
-53.5 µs per operation</title>
+19,937 ops/s
+50.2 µs per operation</title>
 <text class="label primary" x="20" y="145">update</text>
 <text class="sublabel" x="20" y="160">under a tag; the first write of a record copies its file</text>
-<path class="bar primary" d="M371,141H496.2731912020367A4,4 0 0 1 500.2731912020367,145V151A4,4 0 0 1 496.2731912020367,155H371Z"/>
-<text class="value" x="506.2731912020367" y="154">18.7k</text>
+<path class="bar primary" d="M371,141H499.132080568147A4,4 0 0 1 503.132080568147,145V151A4,4 0 0 1 499.132080568147,155H371Z"/>
+<text class="value" x="509.132080568147" y="154">19.9k</text>
 </g>
 <g><title>at(tag).get · a record copied at the tag
-2,431 ops/s
-411 µs per operation</title>
+2,407 ops/s
+415 µs per operation</title>
 <text class="label primary" x="20" y="185">at(tag).get</text>
 <text class="sublabel" x="20" y="200">a record copied at the tag</text>
-<path class="bar primary" d="M371,181H406.2214708157391A4,4 0 0 1 410.2214708157391,185V191A4,4 0 0 1 406.2214708157391,195H371Z"/>
-<text class="value" x="416.2214708157391" y="194">2,431</text>
+<path class="bar primary" d="M371,181H405.7834025112947A4,4 0 0 1 409.7834025112947,185V191A4,4 0 0 1 405.7834025112947,195H371Z"/>
+<text class="value" x="415.7834025112947" y="194">2,407</text>
 </g>
 <g><title>get(id, { at: { tag } }) · through the read hooks
-2,461 ops/s
-406 µs per operation</title>
+2,413 ops/s
+414 µs per operation</title>
 <text class="label primary" x="20" y="225">get(id, { at: { tag } })</text>
 <text class="sublabel" x="20" y="240">through the read hooks</text>
-<path class="bar primary" d="M371,221H406.7630140597849A4,4 0 0 1 410.7630140597849,225V231A4,4 0 0 1 406.7630140597849,235H371Z"/>
-<text class="value" x="416.7630140597849" y="234">2,461</text>
+<path class="bar primary" d="M371,221H405.8933277273932A4,4 0 0 1 409.8933277273932,225V231A4,4 0 0 1 405.8933277273932,235H371Z"/>
+<text class="value" x="415.8933277273932" y="234">2,413</text>
 </g>
 <g><title>at(tag).list · the tag’s catalog, 1 000 ids
-799,036 ops/s
-1.25 µs per operation</title>
+714,314 ops/s
+1.4 µs per operation</title>
 <text class="label primary" x="20" y="265">at(tag).list</text>
 <text class="sublabel" x="20" y="280">the tag’s catalog, 1 000 ids</text>
-<path class="bar primary" d="M371,261H662.0942452360914A4,4 0 0 1 666.0942452360914,265V271A4,4 0 0 1 662.0942452360914,275H371Z"/>
-<text class="value" x="672.0942452360914" y="274">799k</text>
+<path class="bar primary" d="M371,261H657.1453981410111A4,4 0 0 1 661.1453981410111,265V271A4,4 0 0 1 657.1453981410111,275H371Z"/>
+<text class="value" x="667.1453981410111" y="274">714k</text>
 </g>
 <text class="caption" x="20" y="329">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-31</text>
 </svg>

@@ -45,68 +45,68 @@
 <text class="tick" x="676" y="464" text-anchor="middle">100k</text>
 <line class="axis" x1="282" y1="88" x2="282" y2="448"/>
 <g><title>index.put · a 43-word record
-18,107 ops/s
-55.2 µs per operation</title>
+15,437 ops/s
+64.8 µs per operation</title>
 <text class="label primary" x="20" y="105">index.put</text>
 <text class="sublabel" x="20" y="120">a 43-word record</text>
-<path class="bar primary" d="M282,101H598.8978804067287A4,4 0 0 1 602.8978804067287,105V111A4,4 0 0 1 598.8978804067287,115H282Z"/>
-<text class="value" x="608.8978804067287" y="114">18.1k</text>
+<path class="bar primary" d="M282,101H592.0734460595538A4,4 0 0 1 596.0734460595538,105V111A4,4 0 0 1 592.0734460595538,115H282Z"/>
+<text class="value" x="602.0734460595538" y="114">15.4k</text>
 </g>
 <g><title>index.query · one word over 2000
-1,762 ops/s
-568 µs per operation</title>
+1,728 ops/s
+579 µs per operation</title>
 <text class="label primary" x="20" y="145">index.query</text>
 <text class="sublabel" x="20" y="160">one word over 2000</text>
-<path class="bar primary" d="M282,141H499.23158155148883A4,4 0 0 1 503.23158155148883,145V151A4,4 0 0 1 499.23158155148883,155H282Z"/>
-<text class="value" x="509.23158155148883" y="154">1,762</text>
+<path class="bar primary" d="M282,141H498.3980582070731A4,4 0 0 1 502.3980582070731,145V151A4,4 0 0 1 498.3980582070731,155H282Z"/>
+<text class="value" x="508.3980582070731" y="154">1,728</text>
 </g>
 <g><title>index.query · two words over 2000
-1,472 ops/s
-679 µs per operation</title>
+1,451 ops/s
+689 µs per operation</title>
 <text class="label primary" x="20" y="185">index.query</text>
 <text class="sublabel" x="20" y="200">two words over 2000</text>
-<path class="bar primary" d="M282,181H491.53891928514577A4,4 0 0 1 495.53891928514577,185V191A4,4 0 0 1 491.53891928514577,195H282Z"/>
-<text class="value" x="501.53891928514577" y="194">1,472</text>
+<path class="bar primary" d="M282,181H490.92424012511697A4,4 0 0 1 494.92424012511697,185V191A4,4 0 0 1 490.92424012511697,195H282Z"/>
+<text class="value" x="500.92424012511697" y="194">1,451</text>
 </g>
 <g><title>index.query · a typo over 2000
-7,961 ops/s
-126 µs per operation</title>
+7,689 ops/s
+130 µs per operation</title>
 <text class="label primary" x="20" y="225">index.query</text>
 <text class="sublabel" x="20" y="240">a typo over 2000</text>
-<path class="bar primary" d="M282,221H563.7453109560338A4,4 0 0 1 567.7453109560338,225V231A4,4 0 0 1 563.7453109560338,235H282Z"/>
-<text class="value" x="573.7453109560338" y="234">7,961</text>
+<path class="bar primary" d="M282,221H562.2581812990347A4,4 0 0 1 566.2581812990347,225V231A4,4 0 0 1 562.2581812990347,235H282Z"/>
+<text class="value" x="572.2581812990347" y="234">7,689</text>
 </g>
 <g><title>insert · 2 search fields (43 words)
-3,914 ops/s
-255 µs per operation</title>
+4,096 ops/s
+244 µs per operation</title>
 <text class="label primary" x="20" y="265">insert</text>
 <text class="sublabel" x="20" y="280">2 search fields (43 words)</text>
-<path class="bar primary" d="M282,261H533.3731509002153A4,4 0 0 1 537.3731509002153,265V271A4,4 0 0 1 533.3731509002153,275H282Z"/>
-<text class="value" x="543.3731509002153" y="274">3,914</text>
+<path class="bar primary" d="M282,261H535.3174548748257A4,4 0 0 1 539.3174548748257,265V271A4,4 0 0 1 535.3174548748257,275H282Z"/>
+<text class="value" x="545.3174548748257" y="274">4,096</text>
 </g>
 <g><title>select · $text one word over 2000, limit 20
-1,457 ops/s
-686 µs per operation</title>
+1,421 ops/s
+704 µs per operation</title>
 <text class="label primary" x="20" y="305">select</text>
 <text class="sublabel" x="20" y="320">$text one word over 2000, limit 20</text>
-<path class="bar primary" d="M282,301H491.10076584934404A4,4 0 0 1 495.10076584934404,305V311A4,4 0 0 1 491.10076584934404,315H282Z"/>
-<text class="value" x="501.10076584934404" y="314">1,457</text>
+<path class="bar primary" d="M282,301H490.0305166758558A4,4 0 0 1 494.0305166758558,305V311A4,4 0 0 1 490.0305166758558,315H282Z"/>
+<text class="value" x="500.0305166758558" y="314">1,421</text>
 </g>
 <g><title>select · $text + eq narrowing over 2000
-1,211 ops/s
-826 µs per operation</title>
+1,173 ops/s
+853 µs per operation</title>
 <text class="label primary" x="20" y="345">select</text>
 <text class="sublabel" x="20" y="360">$text + eq narrowing over 2000</text>
-<path class="bar primary" d="M282,341H483.18969809959066A4,4 0 0 1 487.18969809959066,345V351A4,4 0 0 1 483.18969809959066,355H282Z"/>
-<text class="value" x="493.18969809959066" y="354">1,211</text>
+<path class="bar primary" d="M282,341H481.82585419337966A4,4 0 0 1 485.82585419337966,345V351A4,4 0 0 1 481.82585419337966,355H282Z"/>
+<text class="value" x="491.82585419337966" y="354">1,173</text>
 </g>
 <g><title>count · $text over 2000
-1,237 ops/s
-808 µs per operation</title>
+1,196 ops/s
+836 µs per operation</title>
 <text class="label primary" x="20" y="385">count</text>
 <text class="sublabel" x="20" y="400">$text over 2000</text>
-<path class="bar primary" d="M282,381H484.0984154134684A4,4 0 0 1 488.0984154134684,385V391A4,4 0 0 1 484.0984154134684,395H282Z"/>
-<text class="value" x="494.0984154134684" y="394">1,237</text>
+<path class="bar primary" d="M282,381H482.65652119576066A4,4 0 0 1 486.65652119576066,385V391A4,4 0 0 1 482.65652119576066,395H282Z"/>
+<text class="value" x="492.65652119576066" y="394">1,196</text>
 </g>
 <g><title>open · catalog reloaded with text (2000 records)
 83 ops/s

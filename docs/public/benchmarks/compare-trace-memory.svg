@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="760" height="495" viewBox="0 0 760 495" role="img" aria-label="Replay an editing trace, in memory. The automerge-perf trace: 259,778 keystrokes of a real paper (182,315 inserts, 77,463 deletes) replayed into one text as an editor would send them, the text read back whole at the end. Nothing touches the disk. ops/s, log scale, higher is better. Not shown: TinyBase (no text that merges by position); PouchDB (no text that merges by position); RxDB (no text that merges by position); Fireproof (no text that merges by position); GUN (needs its storage adapter to answer in Node.js); OrbitDB (no text that merges by position).">
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="535" viewBox="0 0 760 535" role="img" aria-label="Replay an editing trace, in memory. The automerge-perf trace: 259,778 keystrokes of a real paper (182,315 inserts, 77,463 deletes) replayed into one text as an editor would send them, the text read back whole at the end. Nothing touches the disk. ops/s, log scale, higher is better. Not shown: TinyBase (no text that merges by position); PouchDB (no text that merges by position); RxDB (no text that merges by position); Fireproof (no text that merges by position); GUN (needs its storage adapter to answer in Node.js); OrbitDB (no text that merges by position).">
 <style>
   text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
   .title { font-size: 15px; font-weight: 700; fill: #1b1c1e; }
@@ -36,89 +36,100 @@
 <text class="subtitle" x="20" y="90">scale, higher is better. Not shown: TinyBase (no text that merges by position); PouchDB (no text that merges by</text>
 <text class="subtitle" x="20" y="107">position); RxDB (no text that merges by position); Fireproof (no text that merges by position); GUN (needs its</text>
 <text class="subtitle" x="20" y="124">storage adapter to answer in Node.js); OrbitDB (no text that merges by position).</text>
-<line class="grid" x1="372" y1="139" x2="372" y2="419"/>
-<text class="tick" x="372" y="435" text-anchor="middle">10k</text>
-<line class="grid" x1="524" y1="139" x2="524" y2="419"/>
-<text class="tick" x="524" y="435" text-anchor="middle">100k</text>
-<line class="grid" x1="676" y1="139" x2="676" y2="419"/>
-<text class="tick" x="676" y="435" text-anchor="middle">1M</text>
-<line class="axis" x1="372" y1="139" x2="372" y2="419"/>
+<line class="grid" x1="372" y1="139" x2="372" y2="459"/>
+<text class="tick" x="372" y="475" text-anchor="middle">10k</text>
+<line class="grid" x1="524" y1="139" x2="524" y2="459"/>
+<text class="tick" x="524" y="475" text-anchor="middle">100k</text>
+<line class="grid" x1="676" y1="139" x2="676" y2="459"/>
+<text class="tick" x="676" y="475" text-anchor="middle">1M</text>
+<line class="axis" x1="372" y1="139" x2="372" y2="459"/>
 <g><title>Loro · LoroDoc, a LoroMap per record · v1.16.4
-480,595 ops/s
-2.08 µs per operation
-samples 480k – 482k
+471,214 ops/s
+2.12 µs per operation
+samples 471k – 471k
 JS heap after the trace 0.0 MB
 loro-crdt@1.16.4</title>
 <text class="label" x="20" y="156">Loro</text>
 <text class="sublabel" x="20" y="171">LoroDoc, a LoroMap per record · v1.16.4</text>
-<path class="bar" d="M372,152H623.6304259435506A4,4 0 0 1 627.6304259435506,156V162A4,4 0 0 1 623.6304259435506,166H372Z"/>
-<text class="value" x="633.6304259435506" y="165">481k</text>
+<path class="bar" d="M372,152H622.3292312822645A4,4 0 0 1 626.3292312822645,156V162A4,4 0 0 1 622.3292312822645,166H372Z"/>
+<text class="value" x="632.3292312822645" y="165">471k</text>
 </g>
-<g><title>Loro · LoroDoc, every commit exported (subscribeLocalUpdates) · v1.16.4
-101,959 ops/s
-9.81 µs per operation
-samples 102k – 102k
-JS heap after the trace 0.0 MB
-loro-crdt@1.16.4</title>
-<text class="label" x="20" y="196">Loro</text>
-<text class="sublabel" x="20" y="211">LoroDoc, every commit exported (subscribeLocalUpdates) ·…</text>
-<path class="bar" d="M372,192H521.280507380322A4,4 0 0 1 525.280507380322,196V202A4,4 0 0 1 521.280507380322,206H372Z"/>
-<text class="value" x="531.280507380322" y="205">102k</text>
-</g>
-<g><title>Yjs · Y.Doc, a Y.Map per record · v13.6.33
-53,264 ops/s
-18.8 µs per operation
-samples 52.9k – 53.7k
-JS heap after the trace 3.1 MB
-yjs@13.6.33</title>
-<text class="label" x="20" y="236">Yjs</text>
-<text class="sublabel" x="20" y="251">Y.Doc, a Y.Map per record · v13.6.33</text>
-<path class="bar" d="M372,232H478.41787642289205A4,4 0 0 1 482.41787642289205,236V242A4,4 0 0 1 478.41787642289205,246H372Z"/>
-<text class="value" x="488.41787642289205" y="245">53.3k</text>
-</g>
-<g><title>Yjs · Y.Doc, every update encoded (an update listener) · v13.6.33
-46,983 ops/s
-21.3 µs per operation
-samples 46.8k – 47.2k
-JS heap after the trace 2.9 MB
-yjs@13.6.33</title>
-<text class="label" x="20" y="276">Yjs</text>
-<text class="sublabel" x="20" y="291">Y.Doc, every update encoded (an update listener) · v13.6…</text>
-<path class="bar" d="M372,272H470.135603952318A4,4 0 0 1 474.135603952318,276V282A4,4 0 0 1 470.135603952318,286H372Z"/>
-<text class="value" x="480.135603952318" y="285">47k</text>
+<g><title>syncom · core + text + sync, typed through openText(), memory() · v0.0.1
+167,503 ops/s
+5.97 µs per operation
+samples 166k – 169k
+JS heap after the trace 22.4 MB
+@alexify/syncom@0.0.1</title>
+<text class="label primary" x="20" y="196">syncom</text>
+<text class="sublabel" x="20" y="211">core + text + sync, typed through openText(), memory() ·…</text>
+<path class="bar primary" d="M372,192H554.0512646539169A4,4 0 0 1 558.0512646539169,196V202A4,4 0 0 1 554.0512646539169,206H372Z"/>
+<text class="value" x="564.0512646539169" y="205">168k</text>
 </g>
 <g><title>syncom · core + text + sync, memory() · v0.0.1
-44,168 ops/s
-22.6 µs per operation
-samples 43.8k – 44.5k
-JS heap after the trace 7.4 MB
+160,251 ops/s
+6.24 µs per operation
+samples 157k – 163k
+JS heap after the trace 21.8 MB
 @alexify/syncom@0.0.1</title>
-<text class="label primary" x="20" y="316">syncom</text>
-<text class="sublabel" x="20" y="331">core + text + sync, memory() · v0.0.1</text>
-<path class="bar primary" d="M372,312H466.0566875406272A4,4 0 0 1 470.0566875406272,316V322A4,4 0 0 1 466.0566875406272,326H372Z"/>
-<text class="value" x="476.0566875406272" y="325">44.2k</text>
+<text class="label primary" x="20" y="236">syncom</text>
+<text class="sublabel" x="20" y="251">core + text + sync, memory() · v0.0.1</text>
+<path class="bar primary" d="M372,232H551.1298647301073A4,4 0 0 1 555.1298647301073,236V242A4,4 0 0 1 551.1298647301073,246H372Z"/>
+<text class="value" x="561.1298647301073" y="245">160k</text>
+</g>
+<g><title>Loro · LoroDoc, every commit exported (subscribeLocalUpdates) · v1.16.4
+97,822 ops/s
+10.2 µs per operation
+samples 97.5k – 98.1k
+JS heap after the trace 0.0 MB
+loro-crdt@1.16.4</title>
+<text class="label" x="20" y="276">Loro</text>
+<text class="sublabel" x="20" y="291">LoroDoc, every commit exported (subscribeLocalUpdates) ·…</text>
+<path class="bar" d="M372,272H518.5464431421052A4,4 0 0 1 522.5464431421052,276V282A4,4 0 0 1 518.5464431421052,286H372Z"/>
+<text class="value" x="528.5464431421052" y="285">97.8k</text>
+</g>
+<g><title>Yjs · Y.Doc, a Y.Map per record · v13.6.33
+51,953 ops/s
+19.2 µs per operation
+samples 51.7k – 52.2k
+JS heap after the trace 3.4 MB
+yjs@13.6.33</title>
+<text class="label" x="20" y="316">Yjs</text>
+<text class="sublabel" x="20" y="331">Y.Doc, a Y.Map per record · v13.6.33</text>
+<path class="bar" d="M372,312H476.77314508288765A4,4 0 0 1 480.77314508288765,316V322A4,4 0 0 1 476.77314508288765,326H372Z"/>
+<text class="value" x="486.77314508288765" y="325">52k</text>
+</g>
+<g><title>Yjs · Y.Doc, every update encoded (an update listener) · v13.6.33
+46,003 ops/s
+21.7 µs per operation
+samples 45.8k – 46.2k
+JS heap after the trace 2.9 MB
+yjs@13.6.33</title>
+<text class="label" x="20" y="356">Yjs</text>
+<text class="sublabel" x="20" y="371">Y.Doc, every update encoded (an update listener) · v13.6…</text>
+<path class="bar" d="M372,352H468.74296767918383A4,4 0 0 1 472.74296767918383,356V362A4,4 0 0 1 468.74296767918383,366H372Z"/>
+<text class="value" x="478.74296767918383" y="365">46k</text>
 </g>
 <g><title>syncom · /all: signed, chained, memory() · v0.0.1
-29,991 ops/s
-33.3 µs per operation
-samples 29.8k – 30.2k
+34,694 ops/s
+28.8 µs per operation
+samples 34.5k – 34.9k
 @alexify/syncom@0.0.1</title>
-<text class="label secondary" x="20" y="356">syncom</text>
-<text class="sublabel" x="20" y="371">/all: signed, chained, memory() · v0.0.1</text>
-<path class="bar secondary" d="M372,352H440.50342812788085A4,4 0 0 1 444.50342812788085,356V362A4,4 0 0 1 440.50342812788085,366H372Z"/>
-<text class="value" x="450.50342812788085" y="365">30k</text>
+<text class="label secondary" x="20" y="396">syncom</text>
+<text class="sublabel" x="20" y="411">/all: signed, chained, memory() · v0.0.1</text>
+<path class="bar secondary" d="M372,392H450.1195326294818A4,4 0 0 1 454.1195326294818,396V402A4,4 0 0 1 450.1195326294818,406H372Z"/>
+<text class="value" x="460.1195326294818" y="405">34.7k</text>
 </g>
 <g><title>Automerge · Automerge.change, Counter · v3.5.0
-18,273 ops/s
-54.7 µs per operation
-samples 18k – 18.6k
+17,297 ops/s
+57.8 µs per operation
+samples 16.8k – 17.8k
 JS heap after the trace 0.1 MB
 @automerge/automerge@3.5.0</title>
-<text class="label" x="20" y="396">Automerge</text>
-<text class="sublabel" x="20" y="411">Automerge.change, Counter · v3.5.0</text>
-<path class="bar" d="M372,392H407.79331485394096A4,4 0 0 1 411.79331485394096,396V402A4,4 0 0 1 407.79331485394096,406H372Z"/>
-<text class="value" x="417.79331485394096" y="405">18.3k</text>
+<text class="label" x="20" y="436">Automerge</text>
+<text class="sublabel" x="20" y="451">Automerge.change, Counter · v3.5.0</text>
+<path class="bar" d="M372,432H404.1706729683466A4,4 0 0 1 408.1706729683466,436V442A4,4 0 0 1 404.1706729683466,446H372Z"/>
+<text class="value" x="414.1706729683466" y="445">17.3k</text>
 </g>
-<text class="caption" x="20" y="460">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
-<text class="caption" x="20" y="476">in a fresh process · 2026-10-31</text>
+<text class="caption" x="20" y="500">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
+<text class="caption" x="20" y="516">in a fresh process · 2026-10-31</text>
 </svg>

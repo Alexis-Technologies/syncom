@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="760" height="392" viewBox="0 0 760 392" role="img" aria-label="Increment a counter, on disk. Add 1 to a counter that converges when replicas increment it concurrently. Each library's own persistence on node:fs, every write awaited. ops/s, log scale, higher is better. Not shown: Yjs (no counter that converges); Yjs (memory only — on disk the Yjs row stores every update already); Loro (memory only — on disk the Loro row appends every update already); TinyBase (no counter that converges); PouchDB (no counter that converges); RxDB (Node.js disk storages are Premium); Fireproof (no counter that converges); GUN (no counter that converges); OrbitDB (no counter that converges).">
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="392" viewBox="0 0 760 392" role="img" aria-label="Increment a counter, on disk. Add 1 to a counter that converges when replicas increment it concurrently. Each library's own persistence on node:fs, every write awaited. ops/s, log scale, higher is better. Not shown: syncom (the pure build: only its text is typed through openText()); Yjs (no counter that converges); Yjs (memory only — on disk the Yjs row stores every update already); Loro (memory only — on disk the Loro row appends every update already); TinyBase (no counter that converges); PouchDB (no counter that converges); RxDB (Node.js disk storages are Premium); Fireproof (no counter that converges); GUN (no counter that converges); OrbitDB (no counter that converges).">
 <style>
   text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
   .title { font-size: 15px; font-weight: 700; fill: #1b1c1e; }
@@ -32,11 +32,11 @@
 </style>
 <text class="title" x="20" y="35">Increment a counter, on disk</text>
 <text class="subtitle" x="20" y="56">Add 1 to a counter that converges when replicas increment it concurrently. Each library's own persistence on</text>
-<text class="subtitle" x="20" y="73">node:fs, every write awaited. ops/s, log scale, higher is better. Not shown: Yjs (no counter that converges);</text>
-<text class="subtitle" x="20" y="90">Yjs (memory only — on disk the Yjs row stores every update already); Loro (memory only — on disk the Loro row</text>
-<text class="subtitle" x="20" y="107">appends every update already); TinyBase (no counter that converges); PouchDB (no counter that converges); RxDB</text>
-<text class="subtitle" x="20" y="124">(Node.js disk storages are Premium); Fireproof (no counter that converges); GUN (no counter that converges);</text>
-<text class="subtitle" x="20" y="141">OrbitDB (no counter that converges).</text>
+<text class="subtitle" x="20" y="73">node:fs, every write awaited. ops/s, log scale, higher is better. Not shown: syncom (the pure build: only its</text>
+<text class="subtitle" x="20" y="90">text is typed through openText()); Yjs (no counter that converges); Yjs (memory only — on disk the Yjs row</text>
+<text class="subtitle" x="20" y="107">stores every update already); Loro (memory only — on disk the Loro row appends every update already); TinyBase</text>
+<text class="subtitle" x="20" y="124">(no counter that converges); PouchDB (no counter that converges); RxDB (Node.js disk storages are Premium);</text>
+<text class="subtitle" x="20" y="141">Fireproof (no counter that converges); GUN (no counter that converges); OrbitDB (no counter that converges).</text>
 <line class="grid" x1="271" y1="156" x2="271" y2="316"/>
 <text class="tick" x="271" y="332" text-anchor="middle">1,000</text>
 <line class="grid" x1="473.5" y1="156" x2="473.5" y2="316"/>
@@ -45,44 +45,44 @@
 <text class="tick" x="676" y="332" text-anchor="middle">100k</text>
 <line class="axis" x1="271" y1="156" x2="271" y2="316"/>
 <g><title>Loro · updates appended to a file · v1.16.4
-40,755 ops/s
-24.5 µs per operation
-samples 40.1k – 42.2k
+39,772 ops/s
+25.1 µs per operation
+samples 39.2k – 40k
 loro-crdt@1.16.4</title>
 <text class="label" x="20" y="173">Loro</text>
 <text class="sublabel" x="20" y="188">updates appended to a file · v1.16.4</text>
-<path class="bar" d="M271,169H593.0608514908956A4,4 0 0 1 597.0608514908956,173V179A4,4 0 0 1 593.0608514908956,183H271Z"/>
-<text class="value" x="603.0608514908956" y="182">40.8k</text>
+<path class="bar" d="M271,169H590.9149993678084A4,4 0 0 1 594.9149993678084,173V179A4,4 0 0 1 590.9149993678084,183H271Z"/>
+<text class="value" x="600.9149993678084" y="182">39.8k</text>
 </g>
 <g><title>syncom · core + text + sync, node:fs · v0.0.1
-21,398 ops/s
-46.7 µs per operation
-samples 13.6k – 22.3k
+22,704 ops/s
+44 µs per operation
+samples 15.6k – 23.8k
 @alexify/syncom@0.0.1</title>
 <text class="label primary" x="20" y="213">syncom</text>
 <text class="sublabel" x="20" y="228">core + text + sync, node:fs · v0.0.1</text>
-<path class="bar primary" d="M271,209H536.4006318346627A4,4 0 0 1 540.4006318346627,213V219A4,4 0 0 1 536.4006318346627,223H271Z"/>
-<text class="value" x="546.4006318346627" y="222">21.4k</text>
+<path class="bar primary" d="M271,209H541.6094748853495A4,4 0 0 1 545.6094748853495,213V219A4,4 0 0 1 541.6094748853495,223H271Z"/>
+<text class="value" x="551.6094748853495" y="222">22.7k</text>
 </g>
 <g><title>syncom · /all: signed, chained, node:fs · v0.0.1
-7,081 ops/s
-141 µs per operation
-samples 6,799 – 7,263
+7,415 ops/s
+135 µs per operation
+samples 6,661 – 8,239
 @alexify/syncom@0.0.1</title>
 <text class="label secondary" x="20" y="253">syncom</text>
 <text class="sublabel" x="20" y="268">/all: signed, chained, node:fs · v0.0.1</text>
-<path class="bar secondary" d="M271,249H439.14937986212936A4,4 0 0 1 443.14937986212936,253V259A4,4 0 0 1 439.14937986212936,263H271Z"/>
-<text class="value" x="449.14937986212936" y="262">7,081</text>
+<path class="bar secondary" d="M271,249H443.1980617031479A4,4 0 0 1 447.1980617031479,253V259A4,4 0 0 1 443.1980617031479,263H271Z"/>
+<text class="value" x="453.1980617031479" y="262">7,415</text>
 </g>
 <g><title>Automerge · automerge-repo, NodeFS storage · v3.5.0
-1,193 ops/s
-838 µs per operation
-samples 1,188 – 1,237
+1,138 ops/s
+879 µs per operation
+samples 969 – 1,146
 @automerge/automerge@3.5.0</title>
 <text class="label" x="20" y="293">Automerge</text>
 <text class="sublabel" x="20" y="308">automerge-repo, NodeFS storage · v3.5.0</text>
-<path class="bar" d="M271,289H282.52609490125894A4,4 0 0 1 286.52609490125894,293V299A4,4 0 0 1 282.52609490125894,303H271Z"/>
-<text class="value" x="292.52609490125894" y="302">1,193</text>
+<path class="bar" d="M271,289H278.3817884856209A4,4 0 0 1 282.3817884856209,293V299A4,4 0 0 1 278.3817884856209,303H271Z"/>
+<text class="value" x="288.3817884856209" y="302">1,138</text>
 </g>
 <text class="caption" x="20" y="357">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
 <text class="caption" x="20" y="373">in a fresh process · 2026-10-31</text>

@@ -35,88 +35,90 @@
 <text class="subtitle" x="20" y="73">push; pipelined and as a transaction. ops/s, log scale, higher is better.</text>
 <line class="grid" x1="372" y1="88" x2="372" y2="488"/>
 <text class="tick" x="372" y="504" text-anchor="middle">10k</text>
+<line class="grid" x1="524" y1="88" x2="524" y2="488"/>
+<text class="tick" x="524" y="504" text-anchor="middle">100k</text>
 <line class="grid" x1="676" y1="88" x2="676" y2="488"/>
-<text class="tick" x="676" y="504" text-anchor="middle">100k</text>
+<text class="tick" x="676" y="504" text-anchor="middle">1M</text>
 <line class="axis" x1="372" y1="88" x2="372" y2="488"/>
 <g><title>inc · a counter, awaited, memory()
-90,168 ops/s
-11.1 µs per operation</title>
+148,244 ops/s
+6.75 µs per operation</title>
 <text class="label primary" x="20" y="105">inc</text>
 <text class="sublabel" x="20" y="120">a counter, awaited, memory()</text>
-<path class="bar primary" d="M372,101H658.3359407795972A4,4 0 0 1 662.3359407795972,105V111A4,4 0 0 1 658.3359407795972,115H372Z"/>
-<text class="value" x="668.3359407795972" y="114">90.2k</text>
+<path class="bar primary" d="M372,101H545.9885229754012A4,4 0 0 1 549.9885229754012,105V111A4,4 0 0 1 545.9885229754012,115H372Z"/>
+<text class="value" x="555.9885229754012" y="114">148k</text>
 </g>
 <g><title>update · one field, awaited, memory()
-82,352 ops/s
-12.1 µs per operation</title>
+130,148 ops/s
+7.68 µs per operation</title>
 <text class="label primary" x="20" y="145">update</text>
 <text class="sublabel" x="20" y="160">one field, awaited, memory()</text>
-<path class="bar primary" d="M372,141H646.3649418754526A4,4 0 0 1 650.3649418754526,145V151A4,4 0 0 1 646.3649418754526,155H372Z"/>
-<text class="value" x="656.3649418754526" y="154">82.4k</text>
+<path class="bar primary" d="M372,141H537.3944997934159A4,4 0 0 1 541.3944997934159,145V151A4,4 0 0 1 537.3944997934159,155H372Z"/>
+<text class="value" x="547.3944997934159" y="154">130k</text>
 </g>
 <g><title>splice · a keystroke at the end of a text, awaited, memory()
-60,796 ops/s
-16.4 µs per operation</title>
+109,419 ops/s
+9.14 µs per operation</title>
 <text class="label primary" x="20" y="185">splice</text>
 <text class="sublabel" x="20" y="200">a keystroke at the end of a text, awaited, memory()</text>
-<path class="bar primary" d="M372,181H606.2980019235407A4,4 0 0 1 610.2980019235407,185V191A4,4 0 0 1 606.2980019235407,195H372Z"/>
-<text class="value" x="616.2980019235407" y="194">60.8k</text>
+<path class="bar primary" d="M372,181H525.9420966873116A4,4 0 0 1 529.9420966873116,185V191A4,4 0 0 1 525.9420966873116,195H372Z"/>
+<text class="value" x="535.9420966873116" y="194">109k</text>
 </g>
 <g><title>splice · a keystroke at the start of a text, awaited, memory()
-40,691 ops/s
-24.6 µs per operation</title>
+49,304 ops/s
+20.3 µs per operation</title>
 <text class="label primary" x="20" y="225">splice</text>
 <text class="sublabel" x="20" y="240">a keystroke at the start of a text, awaited, memory()</text>
-<path class="bar primary" d="M372,221H553.2875023430761A4,4 0 0 1 557.2875023430761,225V231A4,4 0 0 1 553.2875023430761,235H372Z"/>
-<text class="value" x="563.2875023430761" y="234">40.7k</text>
+<path class="bar primary" d="M372,221H473.3180875178381A4,4 0 0 1 477.3180875178381,225V231A4,4 0 0 1 473.3180875178381,235H372Z"/>
+<text class="value" x="483.3180875178381" y="234">49.3k</text>
 </g>
 <g><title>splice · a keystroke anywhere in a text (seeded), awaited, memory()
-35,868 ops/s
-27.9 µs per operation</title>
+48,268 ops/s
+20.7 µs per operation</title>
 <text class="label primary" x="20" y="265">splice</text>
 <text class="sublabel" x="20" y="280">a keystroke anywhere in a text (seeded), awaited, memory…</text>
-<path class="bar primary" d="M372,261H536.6309769704192A4,4 0 0 1 540.6309769704192,265V271A4,4 0 0 1 536.6309769704192,275H372Z"/>
-<text class="value" x="546.6309769704192" y="274">35.9k</text>
+<path class="bar primary" d="M372,261H471.9162142172566A4,4 0 0 1 475.9162142172566,265V271A4,4 0 0 1 471.9162142172566,275H372Z"/>
+<text class="value" x="481.9162142172566" y="274">48.3k</text>
 </g>
 <g><title>splice · keystrokes at the end, pipelined by 1,024, memory()
-62,365 ops/s
-16 µs per operation</title>
+285,046 ops/s
+3.51 µs per operation</title>
 <text class="label primary" x="20" y="305">splice</text>
 <text class="sublabel" x="20" y="320">keystrokes at the end, pipelined by 1,024, memory()</text>
-<path class="bar primary" d="M372,301H609.662041710639A4,4 0 0 1 613.662041710639,305V311A4,4 0 0 1 609.662041710639,315H372Z"/>
-<text class="value" x="619.662041710639" y="314">62.4k</text>
+<path class="bar primary" d="M372,301H589.1470725528231A4,4 0 0 1 593.1470725528231,305V311A4,4 0 0 1 589.1470725528231,315H372Z"/>
+<text class="value" x="599.1470725528231" y="314">285k</text>
 </g>
 <g><title>transact · 64 keystrokes at the end as one transaction, memory()
-87,147 ops/s
-11.5 µs per operation</title>
+228,698 ops/s
+4.37 µs per operation</title>
 <text class="label primary" x="20" y="345">transact</text>
 <text class="sublabel" x="20" y="360">64 keystrokes at the end as one transaction, memory()</text>
-<path class="bar primary" d="M372,341H653.836742152946A4,4 0 0 1 657.836742152946,345V351A4,4 0 0 1 653.836742152946,355H372Z"/>
-<text class="value" x="663.836742152946" y="354">87.1k</text>
+<path class="bar primary" d="M372,341H574.6078797307646A4,4 0 0 1 578.6078797307646,345V351A4,4 0 0 1 574.6078797307646,355H372Z"/>
+<text class="value" x="584.6078797307646" y="354">229k</text>
 </g>
 <g><title>push · one element onto a list of 10,000, awaited, memory()
-19,243 ops/s
-52 µs per operation</title>
+61,973 ops/s
+16.1 µs per operation</title>
 <text class="label primary" x="20" y="385">push</text>
 <text class="sublabel" x="20" y="400">one element onto a list of 10,000, awaited, memory()</text>
-<path class="bar primary" d="M372,381H454.41892507674856A4,4 0 0 1 458.41892507674856,385V391A4,4 0 0 1 454.41892507674856,395H372Z"/>
-<text class="value" x="464.41892507674856" y="394">19.2k</text>
+<path class="bar primary" d="M372,381H488.4147830495798A4,4 0 0 1 492.4147830495798,385V391A4,4 0 0 1 488.4147830495798,395H372Z"/>
+<text class="value" x="498.4147830495798" y="394">62k</text>
 </g>
 <g><title>inc · a counter, awaited, node:fs
-36,172 ops/s
-27.6 µs per operation</title>
+40,980 ops/s
+24.4 µs per operation</title>
 <text class="label primary" x="20" y="425">inc</text>
 <text class="sublabel" x="20" y="440">a counter, awaited, node:fs</text>
-<path class="bar primary" d="M372,421H537.7452467394237A4,4 0 0 1 541.7452467394237,425V431A4,4 0 0 1 537.7452467394237,435H372Z"/>
-<text class="value" x="547.7452467394237" y="434">36.2k</text>
+<path class="bar primary" d="M372,421H461.1109370179068A4,4 0 0 1 465.1109370179068,425V431A4,4 0 0 1 461.1109370179068,435H372Z"/>
+<text class="value" x="471.1109370179068" y="434">41k</text>
 </g>
 <g><title>splice · a keystroke at the end of a text, awaited, node:fs
-29,532 ops/s
-33.9 µs per operation</title>
+36,348 ops/s
+27.5 µs per operation</title>
 <text class="label primary" x="20" y="465">splice</text>
 <text class="sublabel" x="20" y="480">a keystroke at the end of a text, awaited, node:fs</text>
-<path class="bar primary" d="M372,461H510.9690293641298A4,4 0 0 1 514.9690293641298,465V471A4,4 0 0 1 510.9690293641298,475H372Z"/>
-<text class="value" x="520.9690293641298" y="474">29.5k</text>
+<path class="bar primary" d="M372,461H453.1930389458331A4,4 0 0 1 457.1930389458331,465V471A4,4 0 0 1 453.1930389458331,475H372Z"/>
+<text class="value" x="463.1930389458331" y="474">36.3k</text>
 </g>
 <text class="caption" x="20" y="529">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-10-31</text>
 </svg>

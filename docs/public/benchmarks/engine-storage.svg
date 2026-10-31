@@ -51,155 +51,155 @@
 <text class="tick" x="676" y="944" text-anchor="middle">100M</text>
 <line class="axis" x1="372" y1="88" x2="372" y2="928"/>
 <g><title>insert · small record
-4,674 ops/s
-214 µs per operation</title>
+4,636 ops/s
+216 µs per operation</title>
 <text class="label primary" x="20" y="105">insert</text>
 <text class="sublabel" x="20" y="120">small record</text>
-<path class="bar primary" d="M372,101H483.9407667498696A4,4 0 0 1 487.9407667498696,105V111A4,4 0 0 1 483.9407667498696,115H372Z"/>
-<text class="value" x="493.9407667498696" y="114">4,674</text>
+<path class="bar primary" d="M372,101H483.7868002709477A4,4 0 0 1 487.7868002709477,105V111A4,4 0 0 1 483.7868002709477,115H372Z"/>
+<text class="value" x="493.7868002709477" y="114">4,636</text>
 </g>
 <g><title>insert · small record, layered([memory(), node:fs], write: back)
-4,468 ops/s
-224 µs per operation</title>
+4,423 ops/s
+226 µs per operation</title>
 <text class="label primary" x="20" y="145">insert</text>
 <text class="sublabel" x="20" y="160">small record, layered([memory(), node:fs], write: back)</text>
-<path class="bar primary" d="M372,141H483.0906288558351A4,4 0 0 1 487.0906288558351,145V151A4,4 0 0 1 483.0906288558351,155H372Z"/>
-<text class="value" x="493.0906288558351" y="154">4,468</text>
+<path class="bar primary" d="M372,141H482.8997070811942A4,4 0 0 1 486.8997070811942,145V151A4,4 0 0 1 482.8997070811942,155H372Z"/>
+<text class="value" x="492.8997070811942" y="154">4,423</text>
 </g>
 <g><title>get · cached
-51,559 ops/s
-19.4 µs per operation</title>
+52,167 ops/s
+19.2 µs per operation</title>
 <text class="label primary" x="20" y="185">get</text>
 <text class="sublabel" x="20" y="200">cached</text>
-<path class="bar primary" d="M372,181H529.2200805135958A4,4 0 0 1 533.2200805135958,185V191A4,4 0 0 1 529.2200805135958,195H372Z"/>
-<text class="value" x="539.2200805135958" y="194">51.6k</text>
+<path class="bar primary" d="M372,181H529.4411917297657A4,4 0 0 1 533.4411917297657,185V191A4,4 0 0 1 529.4411917297657,195H372Z"/>
+<text class="value" x="539.4411917297657" y="194">52.2k</text>
 </g>
 <g><title>get · cold (re-verifies the block)
-50 ops/s
-20 ms per operation</title>
+51 ops/s
+19.6 ms per operation</title>
 <text class="label primary" x="20" y="225">get</text>
 <text class="sublabel" x="20" y="240">cold (re-verifies the block)</text>
-<path class="bar primary" d="M372,221H398.3552687597357A4,4 0 0 1 402.3552687597357,225V231A4,4 0 0 1 398.3552687597357,235H372Z"/>
-<text class="value" x="408.3552687597357" y="234">50</text>
+<path class="bar primary" d="M372,221H398.7287619333961A4,4 0 0 1 402.7287619333961,225V231A4,4 0 0 1 398.7287619333961,235H372Z"/>
+<text class="value" x="408.7287619333961" y="234">51</text>
 </g>
 <g><title>update · one field
-8,034 ops/s
-124 µs per operation</title>
+8,162 ops/s
+123 µs per operation</title>
 <text class="label primary" x="20" y="265">update</text>
 <text class="sublabel" x="20" y="280">one field</text>
-<path class="bar primary" d="M372,261H494.1570393611826A4,4 0 0 1 498.1570393611826,265V271A4,4 0 0 1 494.1570393611826,275H372Z"/>
-<text class="value" x="504.1570393611826" y="274">8,034</text>
+<path class="bar primary" d="M372,261H494.45516621327494A4,4 0 0 1 498.45516621327494,265V271A4,4 0 0 1 494.45516621327494,275H372Z"/>
+<text class="value" x="504.45516621327494" y="274">8,162</text>
 </g>
 <g><title>history · 50 versions
-9,673 ops/s
-103 µs per operation</title>
+11,476 ops/s
+87.1 µs per operation</title>
 <text class="label primary" x="20" y="305">history</text>
 <text class="sublabel" x="20" y="320">50 versions</text>
-<path class="bar primary" d="M372,301H497.65865729758525A4,4 0 0 1 501.65865729758525,305V311A4,4 0 0 1 497.65865729758525,315H372Z"/>
-<text class="value" x="507.65865729758525" y="314">9,673</text>
+<path class="bar primary" d="M372,301H500.8823320043549A4,4 0 0 1 504.8823320043549,305V311A4,4 0 0 1 500.8823320043549,315H372Z"/>
+<text class="value" x="510.8823320043549" y="314">11.5k</text>
 </g>
 <g><title>tag
-466 ops/s
-2.15 ms per operation</title>
+438 ops/s
+2.28 ms per operation</title>
 <text class="label primary" x="20" y="352">tag</text>
-<path class="bar primary" d="M372,341H440.45561695339427A4,4 0 0 1 444.45561695339427,345V351A4,4 0 0 1 440.45561695339427,355H372Z"/>
-<text class="value" x="450.45561695339427" y="354">466</text>
+<path class="bar primary" d="M372,341H439.28687565617804A4,4 0 0 1 443.28687565617804,345V351A4,4 0 0 1 439.28687565617804,355H372Z"/>
+<text class="value" x="449.28687565617804" y="354">438</text>
 </g>
 <g><title>get · at a tag (a copy)
-4,921 ops/s
-203 µs per operation</title>
+6,681 ops/s
+150 µs per operation</title>
 <text class="label primary" x="20" y="385">get</text>
 <text class="sublabel" x="20" y="400">at a tag (a copy)</text>
-<path class="bar primary" d="M372,381H484.9120318529086A4,4 0 0 1 488.9120318529086,385V391A4,4 0 0 1 484.9120318529086,395H372Z"/>
-<text class="value" x="494.9120318529086" y="394">4,921</text>
+<path class="bar primary" d="M372,381H490.67882963044644A4,4 0 0 1 494.67882963044644,385V391A4,4 0 0 1 490.67882963044644,395H372Z"/>
+<text class="value" x="500.67882963044644" y="394">6,681</text>
 </g>
 <g><title>get · at an event id (25 ops back)
-10,166 ops/s
-98.4 µs per operation</title>
+12,262 ops/s
+81.6 µs per operation</title>
 <text class="label primary" x="20" y="425">get</text>
 <text class="sublabel" x="20" y="440">at an event id (25 ops back)</text>
-<path class="bar primary" d="M372,421H498.59623314735313A4,4 0 0 1 502.59623314735313,425V431A4,4 0 0 1 498.59623314735313,435H372Z"/>
-<text class="value" x="508.59623314735313" y="434">10.2k</text>
+<path class="bar primary" d="M372,421H502.13180554064706A4,4 0 0 1 506.13180554064706,425V431A4,4 0 0 1 502.13180554064706,435H372Z"/>
+<text class="value" x="512.1318055406471" y="434">12.3k</text>
 </g>
 <g><title>set · whole record
-9,646 ops/s
-104 µs per operation</title>
+9,945 ops/s
+101 µs per operation</title>
 <text class="label primary" x="20" y="465">set</text>
 <text class="sublabel" x="20" y="480">whole record</text>
-<path class="bar primary" d="M372,461H497.60593804372894A4,4 0 0 1 501.60593804372894,465V471A4,4 0 0 1 497.60593804372894,475H372Z"/>
-<text class="value" x="507.60593804372894" y="474">9,646</text>
+<path class="bar primary" d="M372,461H498.18169362685404A4,4 0 0 1 502.18169362685404,465V471A4,4 0 0 1 498.18169362685404,475H372Z"/>
+<text class="value" x="508.18169362685404" y="474">9,945</text>
 </g>
 <g><title>swap · match (writes)
-10,201 ops/s
-98 µs per operation</title>
+9,586 ops/s
+104 µs per operation</title>
 <text class="label primary" x="20" y="505">swap</text>
 <text class="sublabel" x="20" y="520">match (writes)</text>
-<path class="bar primary" d="M372,501H498.66105646569235A4,4 0 0 1 502.66105646569235,505V511A4,4 0 0 1 498.66105646569235,515H372Z"/>
-<text class="value" x="508.66105646569235" y="514">10.2k</text>
+<path class="bar primary" d="M372,501H497.4882538707648A4,4 0 0 1 501.4882538707648,505V511A4,4 0 0 1 497.4882538707648,515H372Z"/>
+<text class="value" x="507.4882538707648" y="514">9,586</text>
 </g>
 <g><title>swap · mismatch (reads only)
-48,938 ops/s
-20.4 µs per operation</title>
+53,956 ops/s
+18.5 µs per operation</title>
 <text class="label primary" x="20" y="545">swap</text>
 <text class="sublabel" x="20" y="560">mismatch (reads only)</text>
-<path class="bar primary" d="M372,541H528.2360642644418A4,4 0 0 1 532.2360642644418,545V551A4,4 0 0 1 528.2360642644418,555H372Z"/>
-<text class="value" x="538.2360642644418" y="554">48.9k</text>
+<path class="bar primary" d="M372,541H530.0771546833275A4,4 0 0 1 534.0771546833275,545V551A4,4 0 0 1 530.0771546833275,555H372Z"/>
+<text class="value" x="540.0771546833275" y="554">54k</text>
 </g>
 <g><title>has · existing id
-51,515 ops/s
-19.4 µs per operation</title>
+48,726 ops/s
+20.5 µs per operation</title>
 <text class="label primary" x="20" y="585">has</text>
 <text class="sublabel" x="20" y="600">existing id</text>
-<path class="bar primary" d="M372,581H529.2039780093123A4,4 0 0 1 533.2039780093123,585V591A4,4 0 0 1 529.2039780093123,595H372Z"/>
-<text class="value" x="539.2039780093123" y="594">51.5k</text>
+<path class="bar primary" d="M372,581H528.1541816150914A4,4 0 0 1 532.1541816150914,585V591A4,4 0 0 1 528.1541816150914,595H372Z"/>
+<text class="value" x="538.1541816150914" y="594">48.7k</text>
 </g>
 <g><title>record · cached Record instance
-8,968,880 ops/s
-111 ns per operation</title>
+8,837,568 ops/s
+113 ns per operation</title>
 <text class="label primary" x="20" y="625">record</text>
 <text class="sublabel" x="20" y="640">cached Record instance</text>
-<path class="bar primary" d="M372,621H626.5189166948658A4,4 0 0 1 630.5189166948658,625V631A4,4 0 0 1 626.5189166948658,635H372Z"/>
-<text class="value" x="636.5189166948658" y="634">8.97M</text>
+<path class="bar primary" d="M372,621H626.2407373732906A4,4 0 0 1 630.2407373732906,625V631A4,4 0 0 1 626.2407373732906,635H372Z"/>
+<text class="value" x="636.2407373732906" y="634">8.84M</text>
 </g>
 <g><title>list · 2000 ids (catalog)
-11,851,685 ops/s
-84.4 ns per operation</title>
+10,130,859 ops/s
+98.7 ns per operation</title>
 <text class="label primary" x="20" y="665">list</text>
 <text class="sublabel" x="20" y="680">2000 ids (catalog)</text>
-<path class="bar primary" d="M372,661H631.7755929171467A4,4 0 0 1 635.7755929171467,665V671A4,4 0 0 1 631.7755929171467,675H372Z"/>
-<text class="value" x="641.7755929171467" y="674">11.9M</text>
+<path class="bar primary" d="M372,661H628.8166380523417A4,4 0 0 1 632.8166380523417,665V671A4,4 0 0 1 628.8166380523417,675H372Z"/>
+<text class="value" x="638.8166380523417" y="674">10.1M</text>
 </g>
 <g><title>hasRecord · 2000 ids (catalog)
-14,733,213 ops/s
-67.9 ns per operation</title>
+6,443,327 ops/s
+155 ns per operation</title>
 <text class="label primary" x="20" y="705">hasRecord</text>
 <text class="sublabel" x="20" y="720">2000 ids (catalog)</text>
-<path class="bar primary" d="M372,701H635.8803471621347A4,4 0 0 1 639.8803471621347,705V711A4,4 0 0 1 635.8803471621347,715H372Z"/>
-<text class="value" x="645.8803471621347" y="714">14.7M</text>
+<path class="bar primary" d="M372,701H620.2813560597492A4,4 0 0 1 624.2813560597492,705V711A4,4 0 0 1 620.2813560597492,715H372Z"/>
+<text class="value" x="630.2813560597492" y="714">6.44M</text>
 </g>
 <g><title>select · covered eq over 2000
-21,915 ops/s
-45.6 µs per operation</title>
+21,223 ops/s
+47.1 µs per operation</title>
 <text class="label primary" x="20" y="745">select</text>
 <text class="sublabel" x="20" y="760">covered eq over 2000</text>
-<path class="bar primary" d="M372,741H513.0836297709934A4,4 0 0 1 517.0836297709934,745V751A4,4 0 0 1 513.0836297709934,755H372Z"/>
-<text class="value" x="523.0836297709934" y="754">21.9k</text>
+<path class="bar primary" d="M372,741H512.4784656166864A4,4 0 0 1 516.4784656166864,745V751A4,4 0 0 1 512.4784656166864,755H372Z"/>
+<text class="value" x="522.4784656166864" y="754">21.2k</text>
 </g>
 <g><title>select · eq + order + limit over 2000
-11,589 ops/s
-86.3 µs per operation</title>
+11,819 ops/s
+84.6 µs per operation</title>
 <text class="label primary" x="20" y="785">select</text>
 <text class="sublabel" x="20" y="800">eq + order + limit over 2000</text>
-<path class="bar primary" d="M372,781H501.0671389586861A4,4 0 0 1 505.0671389586861,785V791A4,4 0 0 1 501.0671389586861,795H372Z"/>
-<text class="value" x="511.0671389586861" y="794">11.6k</text>
+<path class="bar primary" d="M372,781H501.4377918178973A4,4 0 0 1 505.4377918178973,785V791A4,4 0 0 1 501.4377918178973,795H372Z"/>
+<text class="value" x="511.4377918178973" y="794">11.8k</text>
 </g>
 <g><title>select · uncovered filter over 2000
-1,009 ops/s
-991 µs per operation</title>
+1,075 ops/s
+930 µs per operation</title>
 <text class="label primary" x="20" y="825">select</text>
 <text class="sublabel" x="20" y="840">uncovered filter over 2000</text>
-<path class="bar primary" d="M372,821H455.026130648003A4,4 0 0 1 459.026130648003,825V831A4,4 0 0 1 455.026130648003,835H372Z"/>
-<text class="value" x="465.026130648003" y="834">1,009</text>
+<path class="bar primary" d="M372,821H456.22116759035623A4,4 0 0 1 460.22116759035623,825V831A4,4 0 0 1 456.22116759035623,835H372Z"/>
+<text class="value" x="466.22116759035623" y="834">1,075</text>
 </g>
 <g><title>open · catalog caught up from the log (2000 records)
 25 ops/s

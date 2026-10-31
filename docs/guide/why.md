@@ -61,18 +61,20 @@ engine also covers what an application keeps next to replication:
 - **Zero dependencies, one API for Node.js and the browser.** Nothing is installed with it.
   `node:fs` and `node:crypto` on the server, OPFS (or IndexedDB) and Web Crypto in the browser,
   picked by the `browser` export condition. CommonJS without a build step, hand-written typings
-  that type the records from their schema, and a core of about 51 KB min+gzip, every block a
-  subpath of its own (everything together, `/all`, about 117 KB), each held to a budget in CI.
+  that type the records from their schema, and a core of about 56 KB min+gzip, every block a
+  subpath of its own (everything together, `/all`, about 129 KB), each held to a budget in CI.
 
 The [benchmarks](/guide/benchmarks) put a number on all of this. syncom opens a store and reads
-a record in about 52 ms, the fastest cold start of the ten libraries measured, and serves a read
-from its cache at about 890,000 a second. A write is logged, filed and catalogued: about 46,000 a
-second in memory as a pure CRDT, 15,000 signed and chained (`/all`), and about 5,900 new records
-a second on disk, where the LevelDB-backed Yjs and PouchDB do 18,000 to 27,000 — a change to a
-record that is there, 18,000 to 21,000. An empty replica pulls about 82,000
-records a second in memory, behind Yjs and Loro (98,000 to 107,000); checking every op's signature
-on the way in brings that to 22,000. Typing into a text runs at 23,000 to 49,000 keystrokes a
-second in memory, ahead of Automerge.
+a record in about 57 ms, the fastest cold start of the ten libraries measured, and serves a read
+from its cache at 850,000 to 890,000 a second. A write is logged, filed and catalogued: about
+43,000 a second in memory as a pure CRDT, 15,000 signed and chained (`/all`), and about 5,400 new
+records a second on disk, where the LevelDB-backed Yjs and PouchDB do 18,000 to 23,000 — a change
+to a record that is there, about 22,000. An empty replica pulls about 73,000 records a second in
+memory, behind Yjs and Loro (about 100,000); checking every op's signature on the way in brings
+that to 22,000. Typing into a text, every keystroke awaited, runs at 30,000 to 74,000 keystrokes
+a second in memory, ahead of Automerge; through an editor's handle it types 289,000 a second at
+the end — 277,000 on disk, the fastest durable keystroke measured — and the automerge-perf
+editing trace replays at 160,000 a second, three times Yjs.
 
 ## When something else fits better
 
