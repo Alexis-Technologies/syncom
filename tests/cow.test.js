@@ -50,13 +50,13 @@ const check = (root, spans, where) => {
       const cursor = R.locate(root, false, at + k);
       assert.strictEqual(cursor.span, it, `${where}: locate s ${at + k}`);
       assert.deepStrictEqual([cursor.s, cursor.v], before, `${where}: position at s ${at + k}`);
-      if (it.vis) assert.strictEqual(R.find(root, true, before[1] + k).span, it, `${where}: find v ${before[1] + k}`);
+      if (it.vis) assert.strictEqual(R.spanAt(root, true, before[1] + k).span, it, `${where}: find v ${before[1] + k}`);
     }
     at += it.len;
     before = [before[0] + it.len, before[1] + (it.vis ? it.len : 0)];
   }
   assert.strictEqual(R.locate(root, false, s), null, `${where}: past the end`);
-  assert.strictEqual(R.find(root, true, v), null, `${where}: past the visible end`);
+  assert.strictEqual(R.spanAt(root, true, v), null, `${where}: past the visible end`);
   // Every node within its bounds, its measures its kids'.
   const walk = (node, top) => {
     assert.ok(node.kids.length <= R.MAX, `${where}: a node within MAX`);
@@ -417,7 +417,11 @@ test('the chunked sorted list', async (t) => {
     same(C.entriesOf(list), entries, `${where}: entries`);
     assert.strictEqual(C.last(list), entries[entries.length - 1], `${where}: last`);
     for (const chunk of list.chunks) assert.ok(chunk.length > 0 && chunk.length <= C.CHUNK, `${where}: chunk sizes`);
-    assert.strictEqual(C.find(list, entries.length === 0 ? 0 : entries[0].off - 1), null, `${where}: before the first`);
+    assert.strictEqual(
+      C.floorEntry(list, entries.length === 0 ? 0 : entries[0].off - 1),
+      null,
+      `${where}: before the first`,
+    );
     const predecessor = (key) => {
       let at = null;
       for (const held of entries) if (held.off <= key) at = held;
@@ -425,13 +429,13 @@ test('the chunked sorted list', async (t) => {
     };
     for (let i = 0; i < entries.length; i++) {
       const { off } = entries[i];
-      const found = C.find(list, off);
+      const found = C.floorEntry(list, off);
       assert.strictEqual(found.entry, entries[i], `${where}: find ${off}`);
       assert.strictEqual(list.chunks[found.c][found.i], found.entry, `${where}: position of ${off}`);
       assert.strictEqual(C.at(list, off), entries[i], `${where}: at ${off}`);
       for (const key of [off + 0.25, off - 0.25]) {
         const expected = predecessor(key);
-        assert.strictEqual(C.find(list, key)?.entry ?? null, expected, `${where}: find ${key}`);
+        assert.strictEqual(C.floorEntry(list, key)?.entry ?? null, expected, `${where}: find ${key}`);
         assert.strictEqual(C.at(list, key), expected?.off === key ? expected : undefined, `${where}: at ${key}`);
       }
     }
@@ -464,14 +468,14 @@ test('the chunked sorted list', async (t) => {
           fresh.sort((x, y) => x.off - y.off);
           if (i < 0) list = C.splice(list, 0, 0, 0, fresh);
           else {
-            const found = C.find(list, entries[i].off);
+            const found = C.floorEntry(list, entries[i].off);
             list = C.splice(list, found.c, found.i + 1, 0, fresh);
           }
           entries = [...entries.slice(0, i + 1), ...fresh, ...entries.slice(i + 1)];
         } else {
           const i = pick(random, entries.length);
           const count = i + 1 < entries.length && random() < 0.5 ? 2 : 1;
-          const found = C.find(list, entries[i].off);
+          const found = C.floorEntry(list, entries[i].off);
           const pieces = [];
           if (random() < 0.7) pieces.push({ ...entries[i], id: made++ });
           if (count === 2 && random() < 0.5) pieces.push({ ...entries[i + 1], id: made++ });

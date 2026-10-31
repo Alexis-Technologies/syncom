@@ -36,12 +36,21 @@ src/text/marks.js         marks: the anchors of a range, a mark applied or switc
 src/text/join.js          a block as a snapshot carries it: a peer's block normalized under the bounds, prune (the reset rule), join
 src/text/v2/              the engine to come (E2), written beside the one above and held to it, op by op and reading by
                           reading, by tests/sequence.differential.test.js; nothing requires it until the switch
+src/text/v2/sequence.js   its design (the header: names interned once, copy-on-write by owner, an op read before it is
+                          written, hints checked) and the same names as src/text/sequence.js
+src/text/v2/state.js      a block's state (a private field the plain object is stamped with), the names a lineage interns,
+                          run records, hydration, drafts, every reading
+src/text/v2/splice.js     what an op does, every bound and refusal read before anything is written: a run placed, cuts and
+                          extensions, pending ops, a splice; assign and move
+src/text/v2/marks.js      marks and their index, as v1's
+src/text/v2/join.js       normalizeSeq, prune, join — through plain JSON, as v1's
 src/text/v2/cow.js        copy-on-write by owner: a hash trie (registers, marks, what waits) walked in the order the v1
                           map walked, a sorted list in chunks (a run's children) — no requires
 src/text/v2/ids.js        the id index: a copy-on-write B+-tree from (run, offset) as one number to a run's record and its
                           spans, searched from the root down — no requires
 src/text/v2/rope.js       the rope: a copy-on-write B+-tree of spans and fences with two measures, deltas up the parents,
-                          hints checked as they are climbed, a frozen version's places from a walk of its own — no requires
+                          hints by handle checked as they are climbed, a frozen version's places from a walk of its own — no
+                          requires
 ```
 
 ## Rules

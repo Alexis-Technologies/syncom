@@ -298,7 +298,7 @@ const last = (list) => {
   return chunk[chunk.length - 1];
 };
 
-// Where `find` found an entry: its chunk and its place in it (one per call: read at once).
+// Where `floorEntry` found an entry: its chunk and its place in it (one per call: read at once).
 class Found {
   constructor() {
     this.c = 0;
@@ -312,7 +312,7 @@ const FOUND = new Found();
  * The last entry whose `off` is at or before `key` — `FOUND` with its chunk and place — or null when
  * every entry is past `key`, or none is held. The answer is read before the next call.
  */
-const find = (list, key) => {
+const floorEntry = (list, key) => {
   const { chunks } = list;
   if (chunks.length === 0 || chunks[0][0].off > key) return null;
   let lo = 0;
@@ -338,7 +338,7 @@ const find = (list, key) => {
 
 /** The entry whose `off` is `key`, or undefined. */
 const at = (list, key) => {
-  const found = find(list, key);
+  const found = floorEntry(list, key);
   return found !== null && found.entry.off === key ? found.entry : undefined;
 };
 
@@ -407,7 +407,7 @@ module.exports = {
   listOf,
   entriesOf,
   last,
-  find,
+  floorEntry,
   at,
   splice,
 };

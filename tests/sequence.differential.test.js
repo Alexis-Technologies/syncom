@@ -23,11 +23,11 @@ const load = (dir) => {
   return require(path.join(dir, 'sequence.js'));
 };
 const ORACLE = load(path.join(__dirname, 'utils', 'engine-v1'));
-const ENGINE = load(path.join(__dirname, 'utils', 'engine-v1'));
+const ENGINE = load(path.join(__dirname, '..', 'src', 'text', 'v2'));
 
 const SEEDS = Number(process.env.DIFF_SEEDS ?? 200);
 const OPS = Number(process.env.DIFF_OPS ?? 240);
-const EMBED = '￼';
+const EMBED = '\uFFFC';
 
 const rng = (seed) => {
   let state = Math.imul(seed ^ 0x9e3779b9, 0x85ebca6b) >>> 0;
@@ -222,6 +222,7 @@ const readAll = (S, block, probe) => {
     try {
       out.push([name, fn()]);
     } catch (error) {
+      if (process.env.DIFF_STACKS) console.log(name, error.stack);
       out.push([name, `throws ${error.constructor.name}`]);
     }
   };
@@ -334,8 +335,10 @@ const listOf = (rnd) => {
 // A run key older than `ts` that nobody holds — what a hostile or a far peer's op names.
 const phantomRun = (rnd, ts) => `${1 + Math.floor(rnd() * Math.max(1, ts - 1))}:Q${Math.floor(rnd() * 2)}`;
 
-// A local op of `origin` over the oracle's block of a replica (null when there is nothing to do).
-const localOp = (S, kind, held, base, origin, ts, rnd, known) => {
+// A local op of `origin` over the oracle's block of a replica: an insert at the origin's cursor (typing
+// on — its run grown, or a race with another origin typing at the same spot, `cursor.spot`), anywhere,
+// a cut, an assign, a move, a mark, or one of `hostileOp`'s.
+const localOp = (S, kind, held, base, origin, ts, rnd, known, cursor = { at: 0, spot: { at: 0 } }) => {
   const idx = held === undefined ? null : S.asBlock(held, base);
   const length = idx === null ? 0 : S.lengthOf(idx);
   const pick = (n) => Math.floor(rnd() * n);
@@ -347,13 +350,16 @@ const localOp = (S, kind, held, base, origin, ts, rnd, known) => {
     if (count > 0) value.cut = S.rangesOf(idx, at, count);
     Object.assign(value, idx === null ? { at: S.HEAD } : S.placeInsert(idx, at, origin, made.content.length));
     if (made.vals.length > 0) value.vals = made.vals;
+    cursor.at = at + made.content.length;
     return { type: 'splice', value };
   };
-  if (length === 0 || roll < 0.32) return insert(length === 0 ? 0 : pick(length + 1), 0);
-  if (roll < 0.42) {
-    // Typing on at the end of what this origin typed last: its run grown.
-    return insert(rnd() < 0.5 ? length : pick(length + 1), 0);
+  if (length === 0 || roll < 0.2) {
+    const at = length === 0 ? 0 : pick(length + 1);
+    cursor.spot.at = at;
+    return insert(at, 0);
   }
+  if (roll < 0.36) return insert(Math.min(cursor.at, length), 0);
+  if (roll < 0.42) return insert(Math.min(rnd() < 0.5 ? cursor.spot.at : length, length), 0);
   if (roll < 0.58) {
     const at = pick(length);
     const count = 1 + pick(Math.min(4, length - at));
@@ -505,12 +511,14 @@ const runSeed = (seed, ops) => {
   let clock = 0;
   // Each origin's stream, in the order it made its ops.
   const streams = new Map(origins.map((o) => [o, []]));
+  const spot = { at: 0 };
   const replicas = origins.map((origin) => ({
     origin,
     a: undefined,
     b: undefined,
     base: null,
     history: [],
+    cursor: { at: 0, spot },
     delivered: new Map(origins.map((o) => [o, new Set()])),
   }));
   const known = [];
@@ -545,16 +553,19 @@ const runSeed = (seed, ops) => {
     const r = replicas[pick(replicas.length)];
     const roll = rnd();
     if (roll < 0.39) {
-      // A local op, logged in its origin's stream.
-      const ts = ++clock;
-      const value = localOp(ORACLE, kind, r.a, r.base, r.origin, ts, rnd, known);
-      const op = { ...value, ts, origin: r.origin };
-      remember(r);
-      [r.a, r.b] = applyBoth(r, op, 'local');
-      streams.get(r.origin).push(op);
-      r.delivered.get(r.origin).add(streams.get(r.origin).length - 1);
-      if (op.type === 'splice' && op.value?.at !== undefined) known.push(`${ts}:${r.origin}`);
-      compareHeld(r, 'local');
+      // Local ops, logged in their origin's stream: one, or a burst of them before anything arrives.
+      const burst = rnd() < 0.3 ? 2 + pick(5) : 1;
+      for (let b = 0; b < burst; b++) {
+        const ts = ++clock;
+        const value = localOp(ORACLE, kind, r.a, r.base, r.origin, ts, rnd, known, r.cursor);
+        const op = { ...value, ts, origin: r.origin };
+        remember(r);
+        [r.a, r.b] = applyBoth(r, op, 'local');
+        streams.get(r.origin).push(op);
+        r.delivered.get(r.origin).add(streams.get(r.origin).length - 1);
+        if (op.type === 'splice' && op.value?.at !== undefined) known.push(`${ts}:${r.origin}`);
+        if (b === burst - 1 || rnd() < 0.3) compareHeld(r, 'local');
+      }
     } else if (roll < 0.77) {
       // A peer's op: the next of its stream, now and then one ahead of it, or one seen already.
       const others = origins.filter((o) => o !== r.origin);
@@ -635,8 +646,10 @@ const runSeed = (seed, ops) => {
       if (rnd() < 0.5) {
         // The fork read, then dropped: the head goes on.
         if (fa !== undefined) {
-          const probe = probeOf(ORACLE, ORACLE.asBlock(fa, r.base), rnd, origins, r.base);
-          sameReadings(readAll(ORACLE, fa, probe), readAll(ENGINE, fb, probe), `${where()}: a fork`);
+          const ia = ORACLE.asBlock(fa, r.base);
+          const ib = ENGINE.asBlock(fb, r.base);
+          const probe = probeOf(ORACLE, ia, rnd, origins, r.base);
+          sameReadings(readAll(ORACLE, ia, probe), readAll(ENGINE, ib, probe), `${where()}: a fork`);
         }
         clock--;
       } else {
@@ -656,8 +669,10 @@ const runSeed = (seed, ops) => {
   return { kind, steps: ops };
 };
 
-// Long typing: sessions of one origin typing at a cursor, a keystroke an op, past SEG_MAX in one run, with
-// deletes behind the cursor and another origin's sessions between — a deep rope, sealed segments.
+// Long typing: sessions of one origin typing at a cursor, a keystroke an op, past SEG_MAX in one run (the
+// first session past two of them), with deletes behind the cursor, another origin's sessions between and
+// now and then a long paste — a deep rope, sealed spans; and older versions of it read (their places
+// from a walk of their own) and forked by an op.
 const runLong = (seed, kind, ops) => {
   const rnd = rng(seed);
   const pick = (n) => Math.floor(rnd() * n);
@@ -669,6 +684,22 @@ const runLong = (seed, kind, ops) => {
   let cursor = 0;
   let left = 0;
   let deletes = 0;
+  const versions = [];
+  const keystroke = (idx, at) => {
+    if (at > 0 && rnd() < deletes) {
+      const count = 1 + pick(Math.min(at, rnd() < 0.2 ? 30 : 2));
+      return { cut: ORACLE.rangesOf(idx, at - count, count), content: kind === 't' ? '' : [], moved: -count };
+    }
+    const paste = rnd() < 0.002;
+    let content;
+    if (kind === 't') content = paste ? 'p'.repeat(2500) : 'abcdefgh'[pick(8)];
+    else {
+      content = [pick(1000)];
+      if (paste) for (let i = 0; i < 2500; i++) content.push(i);
+    }
+    const place = idx === null ? { at: ORACLE.HEAD } : ORACLE.placeInsert(idx, at, origin, content.length);
+    return { ...place, content, moved: content.length };
+  };
   for (let step = 0; step < ops; step++) {
     const where = `long seed ${seed} (${kind}) step ${step}`;
     const idx = a === undefined ? null : ORACLE.asBlock(a, null);
@@ -676,23 +707,14 @@ const runLong = (seed, kind, ops) => {
     if (left === 0) {
       origin = origins[pick(origins.length)];
       cursor = pick(length + 1);
-      const long = rnd() < 0.3;
-      left = long ? 2200 + pick(1200) : 1 + pick(60);
+      const long = step === 0 || rnd() < 0.3;
+      left = step === 0 ? 4500 : long ? 2200 + pick(1200) : 1 + pick(60);
       deletes = long ? 0.001 : 0.1;
     }
     left--;
     cursor = Math.min(cursor, length);
-    let value;
-    if (cursor > 0 && rnd() < deletes) {
-      const count = 1 + pick(Math.min(cursor, rnd() < 0.2 ? 30 : 2));
-      cursor -= count;
-      value = { cut: ORACLE.rangesOf(idx, cursor, count), content: kind === 't' ? '' : [] };
-    } else {
-      const content = kind === 't' ? 'abcdefgh'[pick(8)] : [pick(1000)];
-      const place = idx === null ? { at: ORACLE.HEAD } : ORACLE.placeInsert(idx, cursor, origin, 1);
-      value = { ...place, content };
-      cursor++;
-    }
+    const { moved, ...value } = keystroke(idx, cursor);
+    cursor += moved;
     const op = { type: 'splice', ts: ++clock, origin, value };
     const x = applyKind(ORACLE, a, op, null, 4096);
     const y = applyKind(ENGINE, b, op, null, 4096);
@@ -700,6 +722,10 @@ const runLong = (seed, kind, ops) => {
     assert.deepStrictEqual(y.change, x.change, `${where}: the change`);
     a = x.held;
     b = y.held;
+    if (step % 50 === 0) {
+      versions.push([a, b]);
+      if (versions.length > 8) versions.shift();
+    }
     if (step % 97 === 0 || step === ops - 1) {
       const probe = probeOf(ORACLE, a, rnd, origins, null);
       sameReadings(readAll(ORACLE, a, probe), readAll(ENGINE, b, probe), where);
@@ -711,15 +737,39 @@ const runLong = (seed, kind, ops) => {
         );
       }
     }
+    if (step % 401 === 200 && versions.length > 1) {
+      // An older version read, then forked by an op that is dropped: the head goes on.
+      const [oa, ob] = versions[pick(versions.length - 1)];
+      const probe = probeOf(ORACLE, oa, rnd, origins, null);
+      sameReadings(readAll(ORACLE, oa, probe), readAll(ENGINE, ob, probe), `${where}: an older version`);
+      const { moved, ...forked } = keystroke(oa, pick(ORACLE.lengthOf(oa) + 1));
+      const fork = { type: 'splice', ts: clock + 1, origin, value: forked };
+      const fx = applyKind(ORACLE, oa, fork, null, 4096);
+      const fy = applyKind(ENGINE, ob, fork, null, 4096);
+      assert.deepStrictEqual(fy.summary, fx.summary, `${where}: a fork's result (${moved})`);
+      assert.deepStrictEqual(fy.change, fx.change, `${where}: a fork's change`);
+      const after = probeOf(ORACLE, fx.held, rnd, origins, null);
+      sameReadings(readAll(ORACLE, fx.held, after), readAll(ENGINE, fy.held, after), `${where}: a fork`);
+      sameReadings(readAll(ORACLE, a, probe), readAll(ENGINE, b, probe), `${where}: the head after a fork`);
+    }
   }
   return ORACLE.lengthOf(a);
 };
 
 test('the sequence engine reads and writes as the v1 oracle', async (t) => {
-  await t.test('seeded workloads over three or four origins: every op, every reading', () => {
-    let steps = 0;
-    for (let seed = 1; seed <= SEEDS; seed++) steps += runSeed(seed, OPS).steps;
-    assert.ok(steps >= SEEDS * OPS);
+  // The seeds in four parts, each a test of its own (a timeout each, under coverage too).
+  const first = Number(process.env.DIFF_FIRST ?? 1);
+  const part = Math.ceil((SEEDS - first + 1) / 4);
+  let steps = 0;
+  for (let from = first; from <= SEEDS; from += part) {
+    const to = Math.min(SEEDS, from + part - 1);
+    await t.test(`seeded workloads over three or four origins, seeds ${from}–${to}: every op, every reading`, () => {
+      for (let seed = from; seed <= to; seed++) steps += runSeed(seed, OPS).steps;
+    });
+  }
+
+  await t.test('the seeded workloads reach every path they are meant to', () => {
+    assert.ok(steps >= (SEEDS - first + 1) * OPS);
     if (process.env.DIFF_TALLY) {
       const lines = [];
       for (const [what, n] of [...reached].sort()) lines.push(`${what}: ${n}`);
@@ -761,7 +811,207 @@ test('the sequence engine reads and writes as the v1 oracle', async (t) => {
     ]) {
       assert.ok(runLong(seed, kind, 9000) > 3000);
     }
-    assert.ok(ORACLE.stats().seals > 0, 'a text segment sealed');
+    assert.ok(ENGINE.stats().seals > 1, 'text spans sealed, one joined to the one before');
+  });
+
+  await t.test("Fugue's corners in every arrival order: tails, waiting runs and extensions, moves", () => {
+    // Every order of `ops` (each origin's in its own order unless `free`), on both engines from nothing:
+    // the result and the block after every op, every reading at the end.
+    const orders = (ops, free) => {
+      const out = [];
+      const walk = (left, made) => {
+        if (left.length === 0) {
+          out.push(made);
+          return;
+        }
+        for (let i = 0; i < left.length; i++) {
+          const op = left[i];
+          if (!free && left.some((o, j) => j < i && o.origin === op.origin)) continue;
+          walk([...left.slice(0, i), ...left.slice(i + 1)], [...made, op]);
+        }
+      };
+      walk(ops, []);
+      return out;
+    };
+    const every = (name, kind, ops, free = false) => {
+      let n = 0;
+      for (const order of orders(ops, free)) {
+        let a;
+        let b;
+        for (const op of order) {
+          const x = applyKind(ORACLE, a, op, null, 8);
+          const y = applyKind(ENGINE, b, op, null, 8);
+          const where = `${name}: ${order.map((o) => o.ts).join(',')} at ${op.ts}`;
+          assert.deepStrictEqual(y.summary, x.summary, `${where}: the result`);
+          assert.deepStrictEqual(y.change, x.change, `${where}: the change`);
+          assert.strictEqual(JSON.stringify(y.held), JSON.stringify(x.held), `${where}: the block`);
+          a = x.held;
+          b = y.held;
+        }
+        if (a !== undefined) {
+          const probe = probeOf(ORACLE, a, rng(n), ['A', 'B', 'C'], null);
+          sameReadings(readAll(ORACLE, a, probe), readAll(ENGINE, b, probe), `${name}: ${order.map((o) => o.ts)}`);
+        }
+        n++;
+      }
+      return n;
+    };
+    const op = (ts, origin, type, value) => ({ ts, origin, type, value });
+    // Right children of a run's slots made while each was its end, the run grown after them: children
+    // that sort after the continuation (tails) and one placed after the whole continuation, before them.
+    assert.ok(
+      every('tails', 't', [
+        op(1, 'A', 'splice', { at: '^', content: 'a' }),
+        op(2, 'B', 'splice', { at: '>1:0:A', content: 'X' }),
+        op(3, 'A', 'splice', { run: '1:A', from: 1, content: 'b' }),
+        op(4, 'C', 'splice', { at: '>1:1:A', content: 'Y' }),
+        op(5, 'A', 'splice', { run: '1:A', from: 2, content: 'cd' }),
+        op(6, 'B', 'splice', { at: '>1:1:A', content: 'Z' }),
+      ]) > 50,
+    );
+    // The same with the parent sorting after its children, and left children of slots in the middle.
+    every('tails before', 't', [
+      op(1, 'M', 'splice', { at: '^', content: 'ab' }),
+      op(2, 'B', 'splice', { at: '>1:1:M', content: 'X' }),
+      op(3, 'M', 'splice', { run: '1:M', from: 2, content: 'cd' }),
+      op(4, 'Z', 'splice', { at: '>1:1:M', content: 'Y' }),
+      op(5, 'C', 'splice', { at: '<1:2:M', content: 'W' }),
+      op(6, 'M', 'splice', { cut: [['1:M', 1, 2]], content: '' }),
+    ]);
+    // A run that waits for its anchor, grown and cut while it waits — its extensions in any order, one
+    // ahead of the other.
+    every(
+      'waiting',
+      't',
+      [
+        op(1, 'A', 'splice', { at: '^', content: 'ab' }),
+        op(2, 'Q', 'splice', { at: '>1:1:A', content: 'q' }),
+        op(3, 'Q', 'splice', { run: '2:Q', from: 1, content: 'rs' }),
+        op(4, 'Q', 'splice', { run: '2:Q', from: 3, content: 't' }),
+        op(5, 'B', 'splice', { cut: [['2:Q', 1, 2]], content: '' }),
+      ],
+      true,
+    );
+    // A list's element moved twice at once, assigned, its slot cut, a run under a position run.
+    every('moves', 'l', [
+      op(1, 'A', 'splice', { at: '^', content: [1, 2, 3] }),
+      op(2, 'B', 'move', { elem: '1:1:A', cut: ['1:A', 1, 1], at: '^', value: 2 }),
+      op(3, 'C', 'move', { elem: '1:1:A', cut: ['1:A', 1, 1], at: '>1:2:A', value: 2 }),
+      op(4, 'A', 'assign', { elem: '1:1:A', value: 'two' }),
+      op(5, 'C', 'splice', { at: '>3:0:C', content: [9] }),
+      op(6, 'B', 'splice', { cut: [['2:B', 0, 1]], content: [] }),
+    ]);
+    // What a peer could send: a position run here without its register, a move onto it; one range
+    // twice, an embed's offset twice, a position run extended.
+    for (const [S, rows] of [
+      [ORACLE, []],
+      [ENGINE, []],
+    ]) {
+      const raw = { k: 'l', ts: 9, runs: { '1:B': ['^', [[1, 2]]], '9:A': ['^', [[5]], '1:0:B'] } };
+      const block = S.normalizeSeq(raw, null, 8);
+      const moved = S.applyMove(block, [9, 'A'], { elem: '1:0:B', cut: ['1:B', 0, 1], at: '^', value: 5 });
+      rows.push(JSON.stringify(moved.seq), S.render(moved.seq));
+      const twice = S.applySplice(
+        block,
+        [10, 'A'],
+        {
+          cut: [
+            ['3:Q', 0, 1],
+            ['3:Q', 0, 1],
+          ],
+          content: [],
+        },
+        null,
+        8,
+      );
+      rows.push(JSON.stringify(twice.seq), S.pendingCount(twice.seq));
+      const text = S.normalizeSeq({ k: 't', ts: 1, runs: { '1:A': ['^', ['ab']] } }, null, 8);
+      const vals = {
+        at: '>7:0:Q',
+        content: '\uFFFC\uFFFC',
+        vals: [
+          [0, { t: 1 }],
+          [0, { t: 2 }],
+          [1, null],
+        ],
+      };
+      for (const max of [2, 3, 4]) {
+        const r = S.applySplice(text, [11, 'A'], vals, null, max);
+        rows.push([r.changed, r.reason, r.count, JSON.stringify(r.seq)]);
+      }
+      const ext = S.applySplice(block, [12, 'A'], { run: '9:A', from: 1, content: [3] }, null, 8);
+      rows.push([ext.changed, ext.reason]);
+      if (S === ENGINE) assert.deepStrictEqual(rows, ORACLE.rows);
+      else ORACLE.rows = rows;
+    }
+    delete ORACLE.rows;
+  });
+
+  await t.test('a large block in pieces, a block read through an entry, the counters', () => {
+    for (const kind of ['t', 'l']) {
+      const rnd = rng(kind === 't' ? 7 : 8);
+      const pick = (n) => Math.floor(rnd() * n);
+      // Inserts at random places by three origins: a run each, past PIECES_MIN.
+      let a = ORACLE.createSeq(kind);
+      let b = ENGINE.createSeq(kind);
+      let ts = 0;
+      const step = (value, origin) => {
+        const x = ORACLE.applySplice(a, [++ts, origin], value);
+        const y = ENGINE.applySplice(b, [ts, origin], value);
+        if (ts % 64 === 0) assert.strictEqual(JSON.stringify(y.seq), JSON.stringify(x.seq), `${kind} step ${ts}`);
+        a = x.seq;
+        b = y.seq;
+      };
+      while (Object.keys(a.runs).length < ORACLE.PIECES_MIN + 100) {
+        const origin = ['A', 'B', 'C'][pick(3)];
+        const at = pick(ORACLE.lengthOf(a) + 1);
+        const content = kind === 't' ? 'xy' : [1, 2];
+        step({ ...(ts === 0 ? { at: ORACLE.HEAD } : ORACLE.placeInsert(a, at, origin, 2)), content }, origin);
+      }
+      // The pieces of two versions and of the JSON: alike, and a piece whose runs changed is a new piece.
+      const piecesOf = (S, block) => {
+        const made = S.piecesOf(block);
+        return { head: JSON.stringify(made.head), slots: made.slots.map((x) => (x === null ? null : x.text())) };
+      };
+      const before = [ORACLE.piecesOf(a), ENGINE.piecesOf(b)];
+      assert.deepStrictEqual(piecesOf(ENGINE, b), piecesOf(ORACLE, a), `${kind}: the pieces`);
+      const plain = JSON.parse(JSON.stringify(a));
+      assert.deepStrictEqual(piecesOf(ENGINE, plain), piecesOf(ORACLE, plain), `${kind}: the pieces of the JSON`);
+      for (let i = 0; i < 5; i++) {
+        const origin = ['A', 'B'][i % 2];
+        const at = pick(ORACLE.lengthOf(a));
+        step({ cut: ORACLE.rangesOf(a, at, 1), content: kind === 't' ? '' : [] }, origin);
+        step({ ...ORACLE.placeInsert(a, at, origin, 1), content: kind === 't' ? 'z' : [3] }, origin);
+      }
+      const after = [ORACLE.piecesOf(a), ENGINE.piecesOf(b)];
+      assert.deepStrictEqual(piecesOf(ENGINE, b), piecesOf(ORACLE, a), `${kind}: the pieces after`);
+      for (let e = 0; e < 2; e++) {
+        for (let i = 0; i < 32; i++) {
+          const was = before[e].slots[i];
+          const now = after[e].slots[i];
+          if (was === null || now === null || was.key !== now.key) continue;
+          assert.strictEqual(now.text(), was.text(), `${kind} engine ${e}: piece ${i} kept its key, so its runs`);
+        }
+      }
+      // Read through an entry: the block itself, or its JSON hydrated under the field's floor.
+      for (const [S, block] of [
+        [ORACLE, a],
+        [ENGINE, b],
+      ]) {
+        assert.strictEqual(S.indexOf({ meta: { blocks: { body: block } } }, 'body'), block);
+        assert.strictEqual(S.indexOf({ meta: { blocks: {} } }, 'body'), null);
+        assert.strictEqual(S.indexOf({ meta: {} }, 'body'), null);
+      }
+      const entry = { meta: { base: [3, 'B'], blocks: { body: JSON.parse(JSON.stringify(a)) } } };
+      const viaA = ORACLE.indexOf(entry, 'body');
+      const viaB = ENGINE.indexOf(entry, 'body');
+      assert.strictEqual(JSON.stringify(viaB), JSON.stringify(viaA), `${kind}: an entry's block under its floor`);
+      assert.strictEqual(ENGINE.indexOf(entry, 'body'), viaB, 'hydrated once');
+      assert.strictEqual(ENGINE.render(viaB).length, ORACLE.render(viaA).length);
+    }
+    for (const name of ['hydrations', 'markIndexes', 'anchorReads', 'listRenders', 'elemLists', 'seals', 'rehints']) {
+      assert.strictEqual(typeof ENGINE.stats()[name], 'number', name);
+    }
   });
 
   await t.test('the bounds: a run, a field and what waits, refused after the cuts before them', () => {
@@ -795,8 +1045,8 @@ test('the sequence engine reads and writes as the v1 oracle', async (t) => {
         1,
       ],
       ['pend', [16, 'A'], { cut: cut('7:Q', 0, 1), at: '>8:0:Q', content: 'w' }, null, 2],
-      ['pend', [17, 'A'], { cut: cut('1:A', 0, 1), at: '>8:0:Q', content: 'w￼', vals: [[1, { t: 1 }]] }, null, 3],
-      ['pend', [18, 'A'], { cut: cut('1:A', 0, 1), at: '>8:0:Q', content: 'w￼', vals: [[1, 7]] }, null, 2],
+      ['pend', [17, 'A'], { cut: cut('1:A', 0, 1), at: '>8:0:Q', content: 'w\uFFFC', vals: [[1, { t: 1 }]] }, null, 3],
+      ['pend', [18, 'A'], { cut: cut('1:A', 0, 1), at: '>8:0:Q', content: 'w\uFFFC', vals: [[1, 7]] }, null, 2],
       ['pend', [19, 'A'], { cut: cut('1:A', 1, 9), run: '1:A', from: 7, content: 'w' }, null, 2],
       ['pend', [20, 'A'], { cut: cut('1:A', 1, 9), run: '1:A', from: 3, content: 'w' }, null, 3],
       // An extension ahead of a run the floor dropped: nothing, the cut before it dropped too.

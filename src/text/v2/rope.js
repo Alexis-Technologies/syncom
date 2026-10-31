@@ -8,12 +8,15 @@
 // in O(log n), and a span's place is read from below through the HINTS — a span's leaf, a node's parent.
 //
 // A node carries the OWNER that made it (./cow.js): a tree is written through a holder — `{ root,
-// owner, frozen, walked }`, the state of a block — and a write makes the path from the
-// span to the root the holder's first, copying each node of it that is not (the copy rewrites the hints
-// of what it holds), then edits the leaf in place and hands the change of the measures up the parents
-// as a delta. So a version handed out never changes, and an op copies each node it touches once.
+// owner, frozen, walked }`, the state of a block — and a write makes the path from the span to the root
+// the holder's first, copying each node of it that is not, then edits the leaf in place and hands the
+// change of the measures up the parents as a delta. So a version handed out never changes, and an op
+// copies each node it touches once.
 //
-// The hints are right for the version written last. A reading from below checks them as it climbs —
+// A hint names a HANDLE, not a node: a node and its copies share one, which names the copy written
+// last. A copy moves the handle and leaves what it holds alone — one write where re-pointing every span
+// of a leaf or child of a node was 32, each an old object made to point at a young one (the collector's
+// remembered set, the most of what an op cost it). The hints are right for the version written last. A reading from below checks them as it climbs —
 // each node one of its parent's children, the top the holder's root — and where they do not hold, a
 // version still written to (a head) sets them again for its tree, once (`rehints`); a frozen version
 // reads its places from one walk of its own, kept (`walked`), and never writes a hint. A reading from
@@ -23,6 +26,7 @@
 
 const MAX = 32;
 
+// A span of a run's slots, or a fence; `leaf` the handle of the leaf that holds it.
 class Span {
   constructor(run, off, len, vis, body, fence, owner) {
     this.run = run;
@@ -31,19 +35,28 @@ class Span {
     this.vis = vis;
     this.body = body;
     this.fence = fence;
-    this.node = null;
+    this.leaf = null;
     this.owner = owner;
   }
 }
 
-// A node of the tree: a leaf's `kids` are spans, an inner node's are nodes.
+// What the hints name: a node across its copies — the one written last.
+class Handle {
+  constructor(node) {
+    this.node = node;
+  }
+}
+
+// A node of the tree: a leaf's `kids` are spans, an inner node's are nodes; `handle` its own (its copies'
+// too), `up` its parent's.
 class Node {
-  constructor(leaf, kids, owner) {
+  constructor(leaf, kids, owner, handle) {
     this.leaf = leaf;
     this.kids = kids;
     this.s = 0;
     this.v = 0;
-    this.parent = null;
+    this.handle = handle ?? new Handle(this);
+    this.up = null;
     this.owner = owner;
     this.text = null;
   }
@@ -57,18 +70,19 @@ const counters = { rehints: 0, walks: 0 };
 const adopt = (node) => {
   let s = 0;
   let v = 0;
-  const { kids } = node;
+  const { kids, handle } = node;
+  handle.node = node;
   if (node.leaf) {
     for (let i = 0; i < kids.length; i++) {
       const span = kids[i];
-      span.node = node;
+      span.leaf = handle;
       s += span.len;
       v += span.vis ? span.len : 0;
     }
   } else {
     for (let i = 0; i < kids.length; i++) {
       const child = kids[i];
-      child.parent = node;
+      child.up = handle;
       s += child.s;
       v += child.v;
     }
@@ -84,13 +98,13 @@ const nodesOf = (list, leaf, owner) => {
   const count = Math.ceil(list.length / MAX);
   const size = Math.ceil(list.length / count);
   const out = [];
-  for (let i = 0; i < list.length; i += size) out.push(adopt(new Node(leaf, list.slice(i, i + size), owner)));
+  for (let i = 0; i < list.length; i += size) out.push(adopt(new Node(leaf, list.slice(i, i + size), owner, null)));
   return out;
 };
 
 /** The tree of `spans`, in order, made `owner`'s: bottom-up, O(n). No spans is an empty leaf. */
 const fromSpans = (spans, owner) => {
-  if (spans.length === 0) return adopt(new Node(true, [], owner));
+  if (spans.length === 0) return adopt(new Node(true, [], owner, null));
   let level = nodesOf(spans, true, owner);
   while (level.length > 1) level = nodesOf(level, false, owner);
   return level[0];
@@ -153,7 +167,7 @@ const locate = (root, visible, at) => {
   return null;
 };
 
-// What `find` found: the span and the measures before it (one per call: read at once).
+// What `spanAt` found: the span and the measures before it (one per call: read at once).
 class Place {
   constructor() {
     this.span = null;
@@ -164,7 +178,7 @@ class Place {
 const PLACE = new Place();
 
 /** The span covering unit `at` with the measures before it — `PLACE`, read before the next call — or null. */
-const find = (root, visible, at) => {
+const spanAt = (root, visible, at) => {
   if (at < 0 || at >= (visible ? root.v : root.s)) return null;
   let node = root;
   let s = 0;
@@ -287,15 +301,15 @@ const AT = [];
 // The levels from `span` to `root` through the hints, filled into PATH/AT; -1 where they do not lead
 // there.
 const climb = (root, span) => {
-  let node = span.node;
-  if (node === null) return -1;
+  if (span.leaf === null) return -1;
+  let node = span.leaf.node;
   let i = node.kids.indexOf(span);
   if (i === -1) return -1;
   let depth = 0;
   PATH[0] = node;
   AT[0] = i;
-  while (node.parent !== null) {
-    const parent = node.parent;
+  while (node.up !== null) {
+    const parent = node.up.node;
     i = parent.kids.indexOf(node);
     if (i === -1) return -1;
     depth++;
@@ -309,15 +323,16 @@ const climb = (root, span) => {
 // Every hint of the tree set again: the parents, the leaves of the spans.
 const rehint = (root) => {
   counters.rehints++;
-  root.parent = null;
+  root.up = null;
   const stack = [root];
   while (stack.length > 0) {
     const node = stack.pop();
-    const { kids } = node;
-    if (node.leaf) for (let i = 0; i < kids.length; i++) kids[i].node = node;
+    const { kids, handle } = node;
+    handle.node = node;
+    if (node.leaf) for (let i = 0; i < kids.length; i++) kids[i].leaf = handle;
     else {
       for (let i = 0; i < kids.length; i++) {
-        kids[i].parent = node;
+        kids[i].up = handle;
         stack.push(kids[i]);
       }
     }
@@ -411,15 +426,13 @@ const after = (holder, span) => {
 
 // ---- writing --------------------------------------------------------------------------------------
 
-// A node made `owner`'s: itself when it is, else a copy holding what it holds, the hints of that told.
+// A copy of a node, `owner`'s, holding what it holds: the handle moved to it.
 const copyOf = (node, owner) => {
-  const copy = new Node(node.leaf, node.kids.slice(), owner);
+  const copy = new Node(node.leaf, node.kids.slice(), owner, node.handle);
   copy.s = node.s;
   copy.v = node.v;
-  copy.parent = node.parent;
-  const { kids } = copy;
-  if (copy.leaf) for (let i = 0; i < kids.length; i++) kids[i].node = copy;
-  else for (let i = 0; i < kids.length; i++) kids[i].parent = copy;
+  copy.up = node.up;
+  node.handle.node = copy;
   return copy;
 };
 
@@ -429,7 +442,6 @@ const own = (holder, levels) => {
   let top = PATH[levels - 1];
   if (top.owner !== owner) {
     top = copyOf(top, owner);
-    top.parent = null;
     holder.root = top;
     PATH[levels - 1] = top;
   }
@@ -437,9 +449,7 @@ const own = (holder, levels) => {
     const node = PATH[k];
     if (node.owner === owner) continue;
     const copy = copyOf(node, owner);
-    const parent = PATH[k + 1];
-    parent.kids[AT[k + 1]] = copy;
-    copy.parent = parent;
+    PATH[k + 1].kids[AT[k + 1]] = copy;
     PATH[k] = copy;
   }
 };
@@ -472,21 +482,20 @@ const fix = (holder, levels) => {
       adopt(node);
       pieces[0] = node;
       if (k === levels - 1) {
-        holder.root = adopt(new Node(false, pieces, owner));
-        holder.root.parent = null;
+        holder.root = adopt(new Node(false, pieces, owner, null));
         return;
       }
       const parent = PATH[k + 1];
       const rest = pieces.slice(1);
       spliceIn(parent.kids, AT[k + 1] + 1, 0, rest);
-      for (let i = 0; i < rest.length; i++) rest[i].parent = parent;
+      for (let i = 0; i < rest.length; i++) rest[i].up = parent.handle;
       continue;
     }
     if (n === 0 && k < levels - 1) {
       spliceIn(PATH[k + 1].kids, AT[k + 1], 1, []);
       continue;
     }
-    if (n === 0 && !node.leaf) holder.root = adopt(new Node(true, [], owner));
+    if (n === 0 && !node.leaf) holder.root = adopt(new Node(true, [], owner, null));
     return;
   }
 };
@@ -504,7 +513,7 @@ const edit = (holder, span, shift, remove, items) => {
     dv -= visibleOf(leaf.kids[i]);
   }
   for (let i = 0; i < items.length; i++) {
-    items[i].node = leaf;
+    items[i].leaf = leaf.handle;
     ds += items[i].len;
     dv += visibleOf(items[i]);
   }
@@ -540,7 +549,7 @@ module.exports = {
   Span,
   fromSpans,
   locate,
-  find,
+  spanAt,
   first,
   next,
   spansOf,
