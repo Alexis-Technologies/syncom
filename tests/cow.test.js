@@ -1,15 +1,15 @@
 'use strict';
 
 // The v2 engine's copy-on-write structures against plain arrays and Maps: the rope with its two measures
-// and its hints (src/text/v2/rope.js), the id index (src/text/v2/ids.js), the hash trie and the chunked
-// list (src/text/v2/cow.js) — every operation checked against what it stands for, each op written under
+// and its hints (src/text/rope.js), the id index (src/text/ids.js), the hash trie and the chunked
+// list (src/text/cow.js) — every operation checked against what it stands for, each op written under
 // an owner of its own, versions kept and read back after later edits, untouched.
 
 const test = require('node:test');
 const assert = require('node:assert');
-const R = require('../src/text/v2/rope.js');
-const I = require('../src/text/v2/ids.js');
-const C = require('../src/text/v2/cow.js');
+const R = require('../src/text/rope.js');
+const I = require('../src/text/ids.js');
+const C = require('../src/text/cow.js');
 
 const rng = (seed) => () => {
   seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;

@@ -1,39 +1,44 @@
 'use strict';
 
-// A block as a snapshot carries it (src/text/sequence.js holds its design): a
-// peer's block normalized under the bounds, the reset rule (prune) and the
-// join of two blocks.
+// A block as a snapshot carries it, in the v2 engine (./sequence.js holds its design): a peer's block
+// normalized under the bounds, the reset rule (prune) and the join of two blocks — through plain JSON
+// and a hydration, as v1.
 
 const { compareClock } = require('../vector.js');
 const { PENDING_MAX } = require('../plugin.js');
 const { rleMerge } = require('./rle.js');
-const { STATE, asBlock, pendingCount, sameBase, hydrate, normalizeJson, plainOf, stampsMax } = require('./state.js');
+const {
+  STATE,
+  asBlock,
+  pendingCount,
+  sameBase,
+  hydrate,
+  normalizeJson,
+  plainOf,
+  stampsMax,
+  draft,
+  finish,
+} = require('./state.js');
 const { isPlaceholder, keysOf, own, below } = require('./keys.js');
-const { draft, finish, settleRun } = require('./splice.js');
+const { settleRun } = require('./splice.js');
 
 /**
- * A peer's block, rebuilt into the trusted shape and the rope under `base`
- * (the entry's reset watermark, which decides what an orphan run is), within
- * MAX_FIELD slots and `pendingMax` pending items (the node's
- * `sync.pendingMax`, PENDING_MAX by default). Anything malformed is dropped;
- * a block with nothing left, or past a bound, is null.
+ * A peer's block, rebuilt into the trusted shape and the rope under `base`, within MAX_FIELD slots and
+ * `pendingMax` pending items. Anything malformed is dropped; a block with nothing left, or past a bound,
+ * is null.
  */
 const normalizeSeq = (raw, base = null, pendingMax = PENDING_MAX) => {
   const seq = normalizeJson(raw);
   if (seq === null) return null;
   seq.ts = stampsMax(seq);
   const block = hydrate(seq, base);
-  // The same bound the op path keeps: a block a peer could not have built
-  // through ops is not taken as state either.
   if (pendingCount(block) > pendingMax) return null;
   return block;
 };
 
-// ---- resets and joins --------------------------------------------------------
-
-// The reset rule: drops what is stamped below `base`. Null when nothing is
-// left; the block itself when the base takes nothing — O(1) by the oldest
-// stamp the block holds; a rebuild under the new base otherwise.
+// The reset rule: drops what is stamped below `base`. Null when nothing is left; the block itself when
+// the base takes nothing — O(1) by the oldest stamp the block holds; a rebuild under the new base
+// otherwise. (The base is written on the state the block shares, as v1 does: it changes no reading.)
 const prune = (given, base) => {
   if (base === null) return given;
   const seq = asBlock(given, STATE.has(given) ? STATE.get(given).base : base);
@@ -48,18 +53,21 @@ const prune = (given, base) => {
   const plain = plainOf(seq);
   const out = { k: plain.k, ts: 0, runs: {} };
   let runs = 0;
-  for (const key of Object.keys(plain.runs)) {
-    if (below(key, base)) continue;
-    out.runs[key] = plain.runs[key];
+  const runKeys = Object.keys(plain.runs);
+  for (let i = 0; i < runKeys.length; i++) {
+    if (below(runKeys[i], base)) continue;
+    out.runs[runKeys[i]] = plain.runs[runKeys[i]];
     runs++;
   }
   for (const map of ['cuts', 'ext', 'marks']) {
-    for (const key of keysOf(plain[map])) if (!below(key, base)) (out[map] ??= {})[key] = plain[map][key];
+    const keys = keysOf(plain[map]);
+    for (let i = 0; i < keys.length; i++) if (!below(keys[i], base)) (out[map] ??= {})[keys[i]] = plain[map][keys[i]];
   }
   for (const map of ['pos', 'vals']) {
-    for (const key of keysOf(plain[map])) {
-      const [ts, origin] = plain[map][key];
-      if (compareClock([ts, origin], base) >= 0) (out[map] ??= {})[key] = plain[map][key];
+    const keys = keysOf(plain[map]);
+    for (let i = 0; i < keys.length; i++) {
+      const [ts, origin] = plain[map][keys[i]];
+      if (compareClock([ts, origin], base) >= 0) (out[map] ??= {})[keys[i]] = plain[map][keys[i]];
     }
   }
   const empty = runs === 0 && !out.cuts && !out.ext && !out.marks && !out.pos && !out.vals;
@@ -68,14 +76,17 @@ const prune = (given, base) => {
   return hydrate(out, base);
 };
 
-// Two nodes' pictures of one field joined: the union of runs (one run's two
-// pictures merged), cuts, extensions and marks, the registers by stamp.
+// Two nodes' pictures of one field joined: the union of runs (one run's two pictures merged), cuts,
+// extensions and marks, the registers by stamp.
 const join = (givenA, givenB) => {
   const a = plainOf(asBlock(givenA));
   const b = plainOf(asBlock(givenB));
   const out = { k: a.k, ts: Math.max(a.ts, b.ts), runs: {} };
-  for (const key of Object.keys(a.runs)) out.runs[key] = a.runs[key];
-  for (const key of Object.keys(b.runs)) {
+  const aKeys = Object.keys(a.runs);
+  for (let i = 0; i < aKeys.length; i++) out.runs[aKeys[i]] = a.runs[aKeys[i]];
+  const bKeys = Object.keys(b.runs);
+  for (let i = 0; i < bKeys.length; i++) {
+    const key = bKeys[i];
     const mine = own(out.runs, key);
     if (mine === undefined) out.runs[key] = b.runs[key];
     else {
@@ -85,12 +96,12 @@ const join = (givenA, givenB) => {
         mine.length === 3 || theirs.length === 3 ? [mine[0], content, mine[2] ?? theirs[2]] : [mine[0], content];
     }
   }
-  // The union's lists are its own: per run key, the ranges and the
-  // extension offsets it holds already.
   const rangesHeld = new Map();
   const fromsHeld = new Map();
   for (const side of [a, b]) {
-    for (const key of keysOf(side.cuts)) {
+    const cutKeys = keysOf(side.cuts);
+    for (let c = 0; c < cutKeys.length; c++) {
+      const key = cutKeys[c];
       let held = rangesHeld.get(key);
       if (held === undefined) {
         held = new Set();
@@ -106,7 +117,9 @@ const join = (givenA, givenB) => {
         else out.cuts[key].push([o, n]);
       }
     }
-    for (const key of keysOf(side.ext)) {
+    const extKeys = keysOf(side.ext);
+    for (let e = 0; e < extKeys.length; e++) {
+      const key = extKeys[e];
       let froms = fromsHeld.get(key);
       if (froms === undefined) {
         froms = new Set();
@@ -122,29 +135,32 @@ const join = (givenA, givenB) => {
       }
     }
     for (const map of ['pos', 'vals']) {
-      for (const key of keysOf(side[map])) {
+      const keys = keysOf(side[map]);
+      for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
         const theirs = side[map][key];
         const mine = out[map] && own(out[map], key);
         const fresher = mine === undefined || compareClock([theirs[0], theirs[1]], [mine[0], mine[1]]) > 0;
         if (fresher) (out[map] ??= {})[key] = theirs;
       }
     }
-    for (const key of keysOf(side.marks)) {
+    const markKeys = keysOf(side.marks);
+    for (let i = 0; i < markKeys.length; i++) {
+      const key = markKeys[i];
       const theirs = side.marks[key];
       const mine = out.marks && own(out.marks, key);
       if (mine === undefined) (out.marks ??= {})[key] = theirs;
       else if (theirs[4] !== mine[4] || isPlaceholder(mine) !== isPlaceholder(theirs)) {
-        // The filled-in mark over its placeholder, the flags of both.
         const filled = isPlaceholder(mine) ? theirs : mine;
         out.marks[key] = [filled[0], filled[1], filled[2], filled[3], mine[4] | theirs[4]];
       }
     }
   }
-  // Pending cuts and extensions that the union can take, taken: what
-  // `settle` did on the plain block, on the plain union.
+  // Pending cuts and extensions that the union can take, taken.
   const joined = hydrate(out, null);
   const d = draft(joined);
-  for (const key of Object.keys(out.runs)) settleRun(d, key);
+  const runKeys = Object.keys(out.runs);
+  for (let i = 0; i < runKeys.length; i++) settleRun(d, d.doc.byKey.get(runKeys[i]));
   return finish(d);
 };
 

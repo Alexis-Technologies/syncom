@@ -204,7 +204,7 @@ rows on [Compared with CRDT libraries](/guide/vs-crdt).
 28. Adding, removing or renaming a column invalidates every shape on that table, so clients get <code>409</code>/<code>must-refetch</code>, drop their local copy and re-sync from scratch.
 29. <code>Documents.get(key)</code> also walks the oplog from the head, so reads cost O(log length).
 30. Two clients can commit events that collide; a materializer that then fails rolls back that event, which the docs say will 'typically halt' the system.
-31. A text is a field of a record — a persistent rope, O(log n) per keystroke — and a document for an editor is one text with block markers, bound through <code>/prosemirror</code> or <code>/codemirror</code>.
+31. A text is a field of a record — a copy-on-write rope, O(log n) per keystroke — and a document for an editor is one text with block markers, bound through <code>/prosemirror</code> or <code>/codemirror</code>.
 32. <code>add([x])</code>/<code>remove([x])</code> merge across sync but return a sorted array, so element order is not kept.
 33. A counter that one node resets while another increments it does not converge to the intuitive value; see Guarantees and limits in the Sync guide.
 34. A number in a <code>Y.Map</code> is a register: of two concurrent increments, one is lost.

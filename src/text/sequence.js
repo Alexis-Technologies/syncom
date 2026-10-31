@@ -5,11 +5,12 @@
 // field join. The block Storage keeps in a record's meta (`meta.blocks[field]`)
 // reads as plain JSON — `{ k, ts, runs, cuts, ext, pos, vals, marks }` — and
 // serializes as such, but is a ROPE underneath: the walk of the Fugue tree
-// kept as a persistent B+-tree of segments (./btree.js), the run records, the
-// registers and the marks in persistent maps (./pmap.js), so a keystroke, a
-// cut, an assign, a move, a mark, a cursor and a reading are O(log n) and
-// never walk the field or copy a map again. No requires beyond ../vector.js,
-// ../plugin.js, ./rle.js and those three.
+// kept as a copy-on-write B+-tree of segments (./rope.js), the runs found by
+// name in an id index (./ids.js), the registers, the marks and what waits in
+// hash tries (./cow.js), so a keystroke, a cut, an assign, a move, a mark, a
+// cursor and a reading are O(log n) and never walk the field or copy a map
+// again. No requires beyond ../vector.js, ../plugin.js, ./rle.js, ./keys.js
+// and those.
 //
 // The ordering rule is Fugue (Weidner & Kleppmann, "The Art of the Fugue",
 // 2023; reference: fugue-simple, MIT): every element has one place in a
@@ -32,23 +33,37 @@
 // close of a run's subtree, so where a child goes is always "before this
 // fence" or "after that segment", found by identity. The tree measures
 // slots and visible slots, so a visible index locates its segment in
-// O(log n), and the hints (./btree.js) give a segment's position the same
-// way for the HEAD version — the newest block of a lineage, the one an op
-// lands on; a block that is no longer the head and is asked a position or
-// an edit is rebuilt from its JSON first (`rebuilds` counts them). The
-// tree, the run map and the block are copied by path: an op leaves a new
-// block and shares what it did not touch, and an older block reads as it
-// was. The JSON of a block (`runs`) is made from the rope when asked and
-// kept for that version; its key order is the walk's. A body grows by
-// SEG_MAX slots at most: a run typed long is what was typed, sealed flat,
-// and the end being typed (`sealText`), a list's run segments of SEG_MAX;
-// the JSON joins them, one RLE a run. The registers and the marks (`pos`, `vals`, `marks`) are the
-// engine's maps too, the plain objects the block shows made from them when
-// read; the marks in force are also indexed in walk order (the index of the
-// marks, below), so the style at a character is read from O(log m) of
-// their anchors. A list's reading is derived from the one before and what
-// the op changed (`derive`); a block read from a file is hydrated once per
-// plain block (`HYDRATED`).
+// O(log n); the id index finds a run's record and its spans by (run,
+// offset). NAMES ONCE: a run's key (`ts:origin`) is parsed where it enters
+// and interned per lineage (`Doc`, a hydration's, shared by every op and
+// fork after it) as a `RunId` — its number, stamp, origin and key; keys are
+// printed only for what the JSON, a cursor or a register spells.
+//
+// COPY-ON-WRITE. Every node carries the owner that made it. An op reads
+// first what it will do and every bound it meets — a refusal and its
+// count, an op that changes nothing — before anything is written, then
+// FREEZES the block it starts from (O(1)) and writes a draft under a new
+// owner: each node it touches copied once, edited in place after, the
+// measures handed up the parents as deltas. A version handed out never
+// changes, so an older block reads as it was. HINTS — a span's leaf and a
+// node's parent, by a handle a node shares with its copies, so a copy moves
+// one pointer — are right for the version written last: a climb checks each
+// step, a head sets them again once when they fail, a frozen version reads
+// its places from one walk of its own (`walks`) and writes none.
+//
+// The block's face is a plain object — `k`, `ts`, `runs` made when read (its
+// key order the walk's), `cuts`, `ext`, the registers and the marks made
+// when read — and its state a private field it is stamped with: no
+// property, so it reads, serializes and compares as plain JSON. A body
+// grows by SEG_MAX slots at most: a run typed long is what was typed, sealed
+// flat, and the end being typed, a list's run segments of SEG_MAX; the JSON
+// joins them, one RLE a run. The marks in force are also indexed in walk
+// order (the index of the marks, below), so the style at a character is
+// read from O(log m) of their anchors. A list's reading is derived from the
+// one before and what the op changed (`deriveLater`, when it is read); a
+// block read from a file is hydrated once per plain block. A large block's
+// pieces are the 32 buckets of the run keys' FNV-1a hash, a token per bucket
+// a write to it replaces.
 //
 // Content is run-length encoded, list-positions style: `["ab", 3, "c"]`
 // alternates present items (a string of a text, an array of a list) with
@@ -116,7 +131,8 @@
 // names: ./keys.js the names (keys, anchors, refusals), ./state.js the block
 // and every reading of it, ./splice.js what an op does (and the registers),
 // ./marks.js the marks and their index, ./join.js a block as a snapshot
-// carries it (normalized, pruned, joined).
+// carries it (normalized, pruned, joined); ./rope.js, ./ids.js and ./cow.js
+// the structures they stand on.
 
 const { PENDING_MAX } = require('../plugin.js');
 const { MAX_RUN, rleLength, rleAppend, rleCut, rleMerge, normalizeRle } = require('./rle.js');

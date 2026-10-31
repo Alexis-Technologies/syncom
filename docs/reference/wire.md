@@ -345,7 +345,7 @@ A list or text block of 1 024 runs or more (`PIECES_MIN`) is written in
 **pieces**: its `runs` leave the record file for files beside it,
 `<id>~<n>.json`, each the runs of one of the 32 children of the run map's
 root — the first five bits of a run key's FNV-1a hash
-(`src/text/pmap.js`) — and the block names them in their place, a slot
+(`src/text/state.js`) — and the block names them in their place, a slot
 each, `null` where none:
 
 ```json

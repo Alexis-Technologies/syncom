@@ -20,37 +20,24 @@ src/text/quill.js         Quill-form deltas and their algebra, once — compose,
                           plugin's toDelta and the editor binding (src/editor/editor.js) both stand on it — no requires
 src/text/rle.js           run-length content: a run's pieces and gaps, cut, append, merge, the canonical form under MAX_RUN —
                           no requires; sequence.js is the caller and re-exports what the tests read
-src/text/btree.js         the rope: a persistent B+-tree over a block's segments and fences with two measures (slots, visible),
-                          path copying, hints tagged by lineage, a text cache per node — no requires
-src/text/pmap.js          a persistent hash map (HAMT): the run records of a block, one changed per keystroke — no requires
-src/text/plist.js         a persistent sorted list in chunks: a placed run's segments, the children at its offsets — no requires
 src/text/sequence.js      the sequence engine behind the list and text kinds: its design (the header) and its public names, over the
-                          five modules below — the one file the rest of syncom requires of the engine
+                          modules below — the one file the rest of syncom requires of the engine
 src/text/keys.js          the engine's names: run and element keys, anchors, the checks a peer's block is read through, the refusals
                           an op reports, a mark's flags — requires vector.js only
-src/text/state.js         a block's engine state (the WeakMap beside the plain object), a plain block's JSON made whole and hydrated
-                          into the rope (indexOf: once per plain block), every reading — elements, values, positions, cursors, what waits
-src/text/splice.js        what an op does: the draft, a run placed with what hangs under it (walkSubtree, placeRun), cuts and
-                          extensions, pending ops, a splice; the pos/vals registers — assign and move
+src/text/state.js         a block's state (a private field the plain object is stamped with), the names a lineage interns (Doc,
+                          RunId), run records, a plain block's JSON made whole and hydrated into the rope (indexOf: once per
+                          plain block), drafts, every reading — elements, values, positions, cursors, what waits
+src/text/splice.js        what an op does, every bound and refusal read before anything is written: a run placed with what hangs
+                          under it, cuts and extensions, pending ops, a splice; the pos/vals registers — assign and move
 src/text/marks.js         marks: the anchors of a range, a mark applied or switched off, the index of the marks in force (styleAt)
 src/text/join.js          a block as a snapshot carries it: a peer's block normalized under the bounds, prune (the reset rule), join
-src/text/v2/              the engine to come (E2), written beside the one above and held to it, op by op and reading by
-                          reading, by tests/sequence.differential.test.js; nothing requires it until the switch
-src/text/v2/sequence.js   its design (the header: names interned once, copy-on-write by owner, an op read before it is
-                          written, hints checked) and the same names as src/text/sequence.js
-src/text/v2/state.js      a block's state (a private field the plain object is stamped with), the names a lineage interns,
-                          run records, hydration, drafts, every reading
-src/text/v2/splice.js     what an op does, every bound and refusal read before anything is written: a run placed, cuts and
-                          extensions, pending ops, a splice; assign and move
-src/text/v2/marks.js      marks and their index, as v1's
-src/text/v2/join.js       normalizeSeq, prune, join — through plain JSON, as v1's
-src/text/v2/cow.js        copy-on-write by owner: a hash trie (registers, marks, what waits) walked in the order the v1
-                          map walked, a sorted list in chunks (a run's children) — no requires
-src/text/v2/ids.js        the id index: a copy-on-write B+-tree from (run, offset) as one number to a run's record and its
-                          spans, searched from the root down — no requires
-src/text/v2/rope.js       the rope: a copy-on-write B+-tree of spans and fences with two measures, deltas up the parents,
-                          hints by handle checked as they are climbed, a frozen version's places from a walk of its own — no
-                          requires
+src/text/rope.js          the rope: a copy-on-write B+-tree of spans and fences with two measures (slots, visible), deltas up the
+                          parents, hints by handle checked as they are climbed, a frozen version's places from a walk of its own
+                          — no requires
+src/text/ids.js           the id index: a copy-on-write B+-tree from (run, offset) as one number to a run's record and its spans,
+                          searched from the root down — no requires
+src/text/cow.js           copy-on-write by owner: a hash trie (registers, marks, what waits) walked in a stable key order, a sorted
+                          list in chunks (a run's children) — no requires
 ```
 
 ## Rules
@@ -89,39 +76,42 @@ attrs, isEmbed }` an entry of the block's `vals` (as a list element's
   `op.origin` back in `apply`, before the engine, copying only what it changes; a short name is never
   another origin's (LIST-7). `coalesce` compares both forms. A new reader of an op's payload goes through
   `fullRefs`, never `S.parseRun` on the raw value.
-- **A block IS the index, and it is never mutated in place.** A block of
-  `src/text/sequence.js` is a plain object — `k`, `ts`, the maps, and `runs`
-  as a getter that serializes the rope in walk order once per version — whose
-  engine state is in a WeakMap of src/text/state.js (the engine's modules alone read it): the rope (`src/text/btree.js`),
-  the run records (`src/text/pmap.js`; a placed record's segments and the
-  children at its offsets in `src/text/plist.js`), what waits, the counts the
-  bounds read. Nothing else is on the object (`lengthOf`, `totalOf`, `render`
-  are the engine's). Every op goes through `draft`/`finish`: a new block, the
-  structures path-copied, the block before reading as it did; `indexOf(entry,
-field)` hydrates plain JSON once (a WeakMap keyed by the plain block, under the field's floor:
-  the reading before an op and the op share it) and hands an engine block back as it is. A
-  marks index (anchors in walk order) rides in the engine state across every op that leaves the
-  marks; a body grows by `SEG_MAX` slots at most; a list's reading is made when it is read
-  (`lazy: { list: true }` → src/lazy.js), derived from the one before where that one was read
-  (`deriveLater`: one reading kept, never a chain of versions), else whole. Hints — an item's leaf, a node's parent — are right
-  for the HEAD of a lineage only: an edit, a position or a neighbour asked of
-  an older block forks it into a lineage of its own (`ensureHead`,
-  `stats().rebuilds`) and the tree re-hints itself once (`T.stats().rehints`);
-  a top-down reading never reads a hint. A text's reading is the rope's
-  cache per node (`T.text`): after one op it costs the path the op copied,
-  never the text. A run is placed whole with what hangs under it
-  (`walkSubtree`, `placeRun`; a run under a parent not here yet is attached
-  to it, `attachChild`, and walked when the parent lands); a stretch of a run
-  with no child at it is emitted piece by piece (`emitPieces`), never slot by
-  slot. `prune` is O(1) through `oldest`/`oldestAnchor` and rebuilds from
-  JSON only under a base it has not seen. `latestClock(meta, true)` is the
-  trusted path for an entry this node holds — a peer's raw meta takes the
-  untrusted one, which normalizes first.
+- **A block IS the index, and a version handed out never changes.** A block of
+  `src/text/sequence.js` is a plain object — `k`, `ts`, `cuts`, `ext`, and `runs`, the registers and
+  the marks made when read (`runs` in walk order, once per version) — whose engine state is a private
+  field of src/text/state.js the object is stamped with (`STATE`: no property, so it reads,
+  serializes and compares as plain JSON; the engine's modules alone read it): the rope
+  (`src/text/rope.js`), the id index from (run, offset) to a run's record and spans
+  (`src/text/ids.js`), the registers, the marks and what waits in hash tries (`src/text/cow.js`), the
+  names its lineage interned (`Doc`, `RunId`: a key parsed once), the counts the bounds read. Every
+  op reads first what it will do and every bound it meets — a refusal and its count, an op that
+  changes nothing — and only then freezes the block it starts from (O(1)) and writes a draft under
+  a new owner (`draft`/`finish`): each node it touches copied once, edited in place after, the
+  measures handed up as deltas — the block before reads as it did. A node written in place belongs
+  to the draft's owner alone: never edit a node of another owner, never keep a draft past
+  `finish`, and freeze a block before anything else may write over it. `indexOf(entry, field)`
+  hydrates plain JSON once (keyed by the plain block, under the field's floor: the reading before
+  an op and the op share it) and hands an engine block back as it is. A marks index (anchors in
+  walk order) rides in the state across every op that leaves the marks; a body grows by `SEG_MAX`
+  slots at most; a list's reading is made when it is read (`lazy: { list: true }` → src/lazy.js),
+  derived from the one before where that one was read (`deriveLater`: one reading kept, never a
+  chain of versions), else whole. Hints — a span's leaf, a node's parent, by a handle a node shares
+  with its copies — are right for the version written last: a climb checks each step, a head sets
+  them again once when they fail (`stats().rehints`), a frozen version reads its places from one
+  walk of its own (`stats().walks`) and writes none; a top-down reading never reads a hint. A
+  text's reading is the rope's cache per node (`R.text`): after one op it costs the path the op
+  copied, never the text. A run is placed whole with what hangs under it (`walkSubtree`,
+  `placeRun`; a run under a parent not here yet is attached to it, `attachChild`, and walked when
+  the parent lands); a stretch of a run with no child at it is emitted piece by piece
+  (`emitPieces`), never slot by slot. `prune` is O(1) through `oldest`/`oldestAnchor` and rebuilds
+  from JSON only under a base it has not seen (and, as v1 did, while a run anchored below the base
+  survives). `latestClock(meta, true)` is the trusted path for an entry this node holds — a peer's
+  raw meta takes the untrusted one, which normalizes first.
 - **Nothing on an op's path reads the whole text or walks the whole cache.** A change report,
   a check or a resolve reads the rope: `S.spansOf`/`S.spanOf` for a run's stretches, `S.styleAt`
   for the marks at one index, `S.heldAt` for a unit — never `S.render(...)` sliced or `S.spans`
   (a fresh reading is a V8 rope, and a slice or a `charCodeAt` flattens it), and the rope's
-  leaves concatenate their bodies, never `join` (src/text/btree.js `textOf`). `EntryStore.remember`
+  leaves concatenate their bodies, never `join` (src/text/rope.js `textOf`). `EntryStore.remember`
   looks at `EVICT_SCAN` of the oldest entries at most, and the deferred window lands by count as
   well as by time (`DEFER_RECORDS`, `DEFER_POSITIONS`): an await loop over `memory()` never lets
   a timer fire. Each of these was once O(n) per op and took a typing rate from tens of thousands

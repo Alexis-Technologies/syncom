@@ -124,7 +124,7 @@ Three of the scenarios type into a text: one character at the end (the common ke
 start (every insert anchors into the same spot) and anywhere (seeded). Only the libraries with a
 text that merges by position take part — syncom's text field, `Y.Text`, Automerge's text,
 `LoroText`; the databases and the stores show "—". A syncom keystroke is an op appended to the
-log, its text a persistent rope (O(log n) per keystroke), the record file written once per
+log, its text a copy-on-write rope (O(log n) per keystroke), the record file written once per
 deferred window. In memory the pure build types about 49,000 characters a second at the end,
 23,000 at the start and 26,000 at random — ahead of Automerge (22,000 to 25,000) — where Yjs
 types 32,000 to 531,000 and Loro 343,000 to 635,000; the secure build, signing every keystroke,

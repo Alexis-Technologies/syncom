@@ -23,7 +23,7 @@ const load = (dir) => {
   return require(path.join(dir, 'sequence.js'));
 };
 const ORACLE = load(path.join(__dirname, 'utils', 'engine-v1'));
-const ENGINE = load(path.join(__dirname, '..', 'src', 'text', 'v2'));
+const ENGINE = load(path.join(__dirname, '..', 'src', 'text'));
 
 const SEEDS = Number(process.env.DIFF_SEEDS ?? 200);
 const OPS = Number(process.env.DIFF_OPS ?? 240);

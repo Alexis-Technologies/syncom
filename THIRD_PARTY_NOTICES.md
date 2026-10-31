@@ -96,14 +96,14 @@ fractional index then by stamp, a move that would make a cycle is kept and
 skipped — over the algorithm of Kleppmann, Mulligan, Beresford and Gomes, "A
 highly-available move operation for replicated trees" (2021); the fold itself
 — kept per block, a move older than others landed by the paper's undo–do–redo —
-is written for syncom's stamped move log and shares no code with Loro's. The rope under a block — `src/text/btree.js`, read by
+is written for syncom's stamped move log and shares no code with Loro's. The rope under a block — `src/text/rope.js`, read by
 `src/text/state.js` — follows the rules of `loro-js/src/runtime/ordered-index.ts`
 and `sequence-index.ts`: a tree whose nodes carry the measures of what hangs
 under them (here slots and visible slots), found by descending the measures
 and positioned by climbing the hints an item keeps to its node and a node to
 its parent, spans of a sequence as its leaves. The structure is syncom's — a
-persistent B+-tree, path-copied per op, its hints tagged by lineage — and
-shares no code with Loro's treap.
+copy-on-write B+-tree by owner, its hints by a handle a node shares with its
+copies and checked as they are climbed — and shares no code with Loro's treap.
 
 > MIT License
 >

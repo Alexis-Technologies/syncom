@@ -300,10 +300,11 @@ const ENTRIES = [
   // 122.6 with the synchronous text handle; 123.2 with an op's own references short (src/text/kind.js fullRefs).
   // 123.5, raised by name. 124.1 with SHA-256 in JavaScript (src/crypto/sha256.js), so the browser makes a write at once. 124.5, raised by name.
   // 124.6 with the editor binding on a handle (the handle's embeds and spans, a run's offsets reserved). 125,
-  // raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 125 },
+  // raised by name. 128.3 with the v2 sequence engine (a copy-on-write rope, the id index, the hash tries, names
+  // interned per lineage; v1's persistent tree, map and lists gone). 128.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 128.5 },
   // The list and text kinds alone: the sequence engine over its rope
-  // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
+  // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
   // 22.1 with the surrogate rule (the code-point diff, the refused indexes).
   // 22.6 with the field-path check every method takes (src/paths.js).
@@ -325,8 +326,9 @@ const ENTRIES = [
   // 36.8 with the synchronous text handle (src/text/handle.js, openText) and keystrokes coalesced; 37.4 with an op's
   // own references short (src/text/kind.js fullRefs). 37.5, raised by name. 37.7 with the handle's embeds and spans
   // and a run's next offset reserved while a handle is open (extendsRun). 38, raised by name. 38.2 with what a handle's
-  // edit made carried to its flush. 38.5, raised by name.
-  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 38.5 },
+  // edit made carried to its flush. 38.5, raised by name. 41.6 with the v2 sequence engine (src/text/rope.js, ids.js,
+  // cow.js and the state that stands on them, in place of v1's btree.js, pmap.js, plist.js). 42, raised by name.
+  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 42 },
   // The tree kind alone, with the fractional indexes a place is made of and
   // the argument checks it shares with the core (5.1 measured).
   // 5.5 with the field-name check unset shares with it (src/args.js).
