@@ -141,7 +141,9 @@ const ENTRIES = [
   // 53.1 with the log's lines: positional entries, the header text made once, a CRC-32 checked before the
   // parse (src/crc32.browser.js). 53.5, raised by name.
   // 53.8 with a field read when it is read (src/lazy.js). 54, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 54 },
+  // 54.2 with keystrokes made at once grown into the op before them (coalesced, log.lastGathered). 54.5,
+  // raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 54.5 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -292,7 +294,8 @@ const ENTRIES = [
   // 118.6 with a write made at once (the fast path itself). 119, raised by name.
   // 119.3 with the log's lines and segments of them (a CRC-32 checked before the parse, positional entries, a
   // segment the journaled lines and a trailer). 120, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 120 },
+  // 120.3 with a list read when it is read and keystrokes coalesced. 121, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 121 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -407,7 +410,8 @@ const ENTRIES = [
     // once durable; 2026-10-31). 35.5, raised by name.
     // 35.5 (over by a few bytes) with a write made at once. 36, raised by name.
     // 36.1 with the log's lines and segments of them. 36.5, raised by name.
-    budget: 36.5,
+    // 36.8 with a list read when it is read and keystrokes coalesced. 37, raised by name.
+    budget: 37,
   },
 ];
 

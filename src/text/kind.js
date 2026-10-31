@@ -252,6 +252,33 @@ const revisionOf = (entry, field) => {
 // whether one shows, `pick` the composed element the name reads as, `nest`
 // the list read with each element's children laid over its value (a plain
 // object spread, anything else giving way).
+// Two splices of one stream on a text as one op — what a run of keystrokes
+// sent without waiting is logged as (src/commit.js commitAtOnce): `a`'s
+// value made to do what `a` then `b` do, under `a`'s stamp, or null. Two
+// shapes only, both of which the engine reads alike as one op or two: `b`
+// extends at its end the run `a` typed into (its content appended), or `a`
+// and `b` only cut and every run `b` cuts is older than `a` (an honest
+// cutter: `a`'s stamp must still be above them). Never an insert and a cut
+// of it, never `b` with markers, never a list (its content would be copied
+// whole again by every keystroke), and at most MAX_CUTS ranges.
+const MAX_CUTS = 256;
+const coalesce = (a, b) => {
+  if (a.type !== 'splice' || b.type !== 'splice') return null;
+  const x = a.value;
+  const y = b.value;
+  if (typeof x.content !== 'string' || typeof y.content !== 'string' || y.vals !== undefined) return null;
+  if (y.content.length > 0) {
+    if (y.cut !== undefined || y.run === undefined || x.content.length === 0) return null;
+    const run = x.run !== undefined ? x.run : x.at !== undefined ? S.runKey(a.ts, a.origin) : null;
+    if (run !== y.run || (x.run !== undefined ? x.from : 0) + x.content.length !== y.from) return null;
+    return { ...x, content: x.content + y.content };
+  }
+  if (x.content.length > 0 || x.cut === undefined || y.cut === undefined) return null;
+  if (x.cut.length + y.cut.length > MAX_CUTS) return null;
+  for (let i = 0; i < y.cut.length; i++) if (!(S.parseRun(y.cut[i][0]).ts < a.ts)) return null;
+  return { content: '', cut: x.cut.concat(y.cut) };
+};
+
 const NESTS = Object.freeze({ list: true, text: false });
 // A list's reading is a new array of every element, made when it is read
 // (src/lazy.js); a text's is the rope's cache, cheaper made at once.
@@ -480,6 +507,7 @@ module.exports = {
   revisionOf,
   NESTS,
   LAZY,
+  coalesce,
   members,
   holds,
   pick,

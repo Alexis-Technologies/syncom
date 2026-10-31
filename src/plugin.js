@@ -23,6 +23,8 @@
 //       render(entry, field, block, hint)   → what data[field] reads as
 //       lazy                                → { kind: true } for a kind whose reading is made when it is read
 //                                             (src/lazy.js) — a list's, a copy of the whole; optional
+//       coalesce(a, b)                      → the value of one op that does what op `a` then op `b` of its
+//                                             stream do — `a`'s stamp and header kept — or null; optional
 //       resolve(core, id, type, payload, current)
 //                                           → the op's value, inside the queue (null: nothing to write)
 //       diff(field, kind, from, to, context)

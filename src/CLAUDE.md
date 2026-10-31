@@ -342,7 +342,12 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   `prepare`, chains at once and appends with `log.enqueue(…, { onDurable })`: the landing
   (`landNow` — the deferred slot, `settled`, the announce) runs as its group is written, before
   the group's promise settles, and `core.landed(done)` makes every landing step after it wait
-  for that group. The method delegates (`splice`, `push`, `setAt`, `move`, `inc`, `add`,
+  for that group. A keystroke made at once that continues the one before it — the last op of the
+  group still gathering (`log.lastGathered()`), of its record and stream, unsigned, the same field,
+  actor, version and message — is folded into it (`coalesced`, the plugin's `coalesce`: a text typed
+  on at its run's end, or a chain of cuts; LOG-11): the first op's header stays, its value grows, its
+  landing takes the newer entry (`core.inflight` at the same position replaces it), the deltas
+  and the changes of both. The method delegates (`splice`, `push`, `setAt`, `move`, `inc`, `add`,
   `remove`, `unset`, `update`) have no async frame: an argument they refuse is a rejection,
   never a throw. `close()`, `flush()` and `tag()` drain the
   landings first; `stats().inflight` counts them. The log resolves a group

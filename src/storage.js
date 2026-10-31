@@ -950,9 +950,17 @@ class Storage extends Emitter {
     return this.#entries.peek(id);
   }
 
+  // A record's entry in flight at `position`: on the stack, or — the newest
+  // there at that position already — in its place (a write grown by the one
+  // after it, src/commit.js coalesced).
   #takeOff(id, entry, position) {
     let stack = this.#inflight.get(id);
     if (stack === undefined) this.#inflight.set(id, (stack = []));
+    const top = stack.length > 0 ? stack[stack.length - 1] : null;
+    if (top !== null && top.position === position) {
+      top.entry = entry;
+      return;
+    }
     stack.push({ entry, position });
     this.#inflightCount++;
   }

@@ -706,6 +706,10 @@ const commitAtOnce = (core, type, id, payload, options, current, answer) => {
   const applied = applyLocal(core, op, current);
   if (applied === null) return Promise.resolve(answer ? null : undefined);
   const made = prepared(core, op, applied, current, null, source, via);
+  // A keystroke that continues the one before it in the group still
+  // gathering is that op, grown (the plugin's `coalesce`): no op of its own.
+  const into = coalesced(core, op, made, current);
+  if (into !== null) return answer ? into.done.then(() => into.op) : into.done;
   // The chain at once: Node.js hashes synchronously (the fast path's condition).
   const key = opKey(op);
   const prev = core.fingerprintOf(key, op.seq - 1);
@@ -717,9 +721,48 @@ const commitAtOnce = (core, type, id, payload, options, current, answer) => {
   position = ticket.entries[0].seq;
   core.inflight(id, made.entry, position);
   core.landed(ticket.done);
+  made.position = position;
+  made.done = ticket.done;
+  lastOf(core).made = made;
   // The group's promise settles once its writes have landed: what a write
   // that answers nothing resolves with.
   return answer ? ticket.done.then(() => op) : ticket.done;
+};
+
+// The write made at once last, per storage (by its log): what the next
+// one may grow instead of making an op of its own.
+const LAST = new WeakMap();
+const lastOf = (core) => {
+  let last = LAST.get(core.log);
+  if (last === undefined) LAST.set(core.log, (last = { made: null }));
+  return last;
+};
+
+// `op`, just made over `current`, folded into the write made at once before
+// it — the last op of the group still gathering, the newest of its record and
+// of its stream, unsigned, of the same field, actor, version and message —
+// where the plugin's `coalesce` says the two are one: that op's value grows,
+// its header (so its fingerprint and the next op's `prev`) stays, and its
+// landing takes the newer entry, the deltas laid one over the other and the
+// changes of both, in order. Answers the made write it grew, or null.
+const coalesced = (core, op, made, current) => {
+  const coalesce = core.plugins.byType[op.type]?.coalesce;
+  if (coalesce === undefined) return null;
+  const last = lastOf(core);
+  const before = last.made;
+  if (before === null || before.entry !== current) return null;
+  const a = before.op;
+  if (core.log.lastGathered() !== a || a.sig !== undefined || a.digest !== undefined) return null;
+  if (a.id !== op.id || a.key !== op.key || a.seq !== op.seq - 1 || opKey(a) !== opKey(op)) return null;
+  if (a.actor !== op.actor || a.v !== op.v || a.msg !== op.msg || a.from !== op.from) return null;
+  const value = coalesce(a, op);
+  if (value === null) return null;
+  a.value = value;
+  before.entry = made.entry;
+  before.delta = assignData(before.delta ?? {}, made.delta);
+  for (let i = 0; i < made.changes.length; i++) before.changes.push(made.changes[i]);
+  core.inflight(op.id, made.entry, before.position);
+  return before;
 };
 
 // A write made at once, landed as its group is written: the deferred slot

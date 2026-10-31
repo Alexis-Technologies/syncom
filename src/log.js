@@ -964,6 +964,21 @@ class OpLog {
     return { entries, done: group.promise };
   }
 
+  /**
+   * The op the gathering group ends with — a group not on its way to the
+   * disk yet, whose ops may still change: what a write made at once may
+   * extend (src/commit.js, a plugin's `coalesce`) — or null when nothing
+   * gathers or the last entry is flagged. An op is never changed once its
+   * group has started writing.
+   */
+  lastGathered() {
+    const group = this.#group;
+    if (group === null) return null;
+    const last = group.entries[group.entries.length - 1];
+    if (last === undefined || last.skipped || last.scrubbed || last.held !== undefined) return null;
+    return last.op;
+  }
+
   // A group to gather appends into: what the vector and the counter were
   // before it, and the heads of the streams it touches, for a write that
   // fails.
