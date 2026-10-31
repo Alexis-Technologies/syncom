@@ -26,7 +26,7 @@ const { spliceArgs, markArgs, jsonValue, fieldName, EMBED } = require('../args.j
 const { isRecordId, invalidId, isPlainObject, asJson } = require('../shape.js');
 const { floorOf } = require('../vector.js');
 const S = require('./sequence.js');
-const { coalesce, render, blockOf, marksAt, markerArgs } = require('./kind.js');
+const { coalesce, prepends, render, blockOf, marksAt, markerArgs } = require('./kind.js');
 const { toDelta } = require('./deltas.js');
 const { typedSpans } = require('./methods.js');
 const { assignData } = require('../lazy.js');
@@ -263,7 +263,7 @@ class TextHandle extends Emitter {
     const { editing } = this.#core;
     const from = this.#overlay;
     const op = editing.makeOp(type, this.id, payload, from, this.#actor);
-    if (op.value === null) return;
+    if (op.value === null || this.#prepended(op)) return;
     const applied = editing.applyLocal(op, from);
     if (applied === null) return;
     this.#overlay = applied.entry;
@@ -283,6 +283,45 @@ class TextHandle extends Emitter {
     this.#tell(applied.changes, true);
     if (this.#pending.length >= PENDING_MAX) void this.flush().catch(() => {});
     else this.#arm();
+  }
+
+  // A keystroke typed right before what the last edit inserted — a word
+  // typed backward — is that edit, its content grown at the start (the kind's
+  // `prepends`), applied again over the reading it was made over: nothing has
+  // read its elements, it is not flushed. The observers are told the keystroke.
+  #prepended(op) {
+    const at = this.#pending.length - 1;
+    if (at < 0) return false;
+    const last = this.#pending[at];
+    const made = this.#made[at];
+    if (last.key !== op.key || made.entry !== this.#overlay) return false;
+    const grown = prepends(last, op);
+    if (grown === null) return false;
+    const was = last.value;
+    last.value = grown;
+    const { editing } = this.#core;
+    let applied = null;
+    try {
+      applied = editing.applyLocal(last, made.from);
+    } catch {
+      applied = null;
+    }
+    const change = applied === null ? null : soleInsert(applied.changes, grown.content);
+    if (change === null) {
+      last.value = was;
+      return false;
+    }
+    this.#overlay = applied.entry;
+    made.entry = applied.entry;
+    made.delta = applied.delta;
+    made.changes = applied.changes.slice();
+    // The run's next offset, where a writer reserved it, moves by what came before (HANDLE-4).
+    const run = S.runKey(last.ts, last.origin);
+    const end = editing.extents.get(run);
+    if (end !== undefined) editing.extents.set(run, end + op.value.content.length);
+    this.#tell([{ ...change, content: op.value.content }], true);
+    this.#arm();
+    return true;
   }
 
   // The marks an inserted run reads with — the ones it landed in, the ones
@@ -447,6 +486,13 @@ const openText = async (core, id, key, { window, actor, source } = {}) => {
     actor: who,
     source: source ?? Symbol('syncom.handle'),
   });
+};
+
+// The one insert of `content` a grown edit reads as, or null for anything else.
+const soleInsert = (changes, content) => {
+  if (changes.length !== 1) return null;
+  const change = changes[0];
+  return change.action === 'splice' && change.count === 0 && change.content === content ? change : null;
 };
 
 // For the tests: the field as it reads, rendered from an entry.

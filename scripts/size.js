@@ -301,8 +301,9 @@ const ENTRIES = [
   // 123.5, raised by name. 124.1 with SHA-256 in JavaScript (src/crypto/sha256.js), so the browser makes a write at once. 124.5, raised by name.
   // 124.6 with the editor binding on a handle (the handle's embeds and spans, a run's offsets reserved). 125,
   // raised by name. 128.3 with the v2 sequence engine (a copy-on-write rope, the id index, the hash tries, names
-  // interned per lineage; v1's persistent tree, map and lists gone). 128.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 128.5 },
+  // interned per lineage; v1's persistent tree, map and lists gone). 128.5, raised by name. 128.7 with a large
+  // block's pieces by run number and a word typed backward folded by a handle. 129, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 129 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -328,7 +329,9 @@ const ENTRIES = [
   // and a run's next offset reserved while a handle is open (extendsRun). 38, raised by name. 38.2 with what a handle's
   // edit made carried to its flush. 38.5, raised by name. 41.6 with the v2 sequence engine (src/text/rope.js, ids.js,
   // cow.js and the state that stands on them, in place of v1's btree.js, pmap.js, plist.js). 42, raised by name.
-  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 42 },
+  // 42.1 with the pieces by run number (tokens per piece, the quiet writes) and a handle's word typed backward
+  // folded (prepends). 42.5, raised by name.
+  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 42.5 },
   // The tree kind alone, with the fractional indexes a place is made of and
   // the argument checks it shares with the core (5.1 measured).
   // 5.5 with the field-name check unset shares with it (src/args.js).

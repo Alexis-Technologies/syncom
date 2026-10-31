@@ -12,9 +12,9 @@
 //
 // A record file holding a large block holds its runs in PIECES: files
 // `<id>~<n>.json` beside it, `n` counting up per record (`gen` in the
-// record file), named in the block (`parts`, 32 slots, null where none).
-// A write makes the file of a piece whose object is new (the kind
-// plugin's `pieces`: one a keystroke, of 32), then the record file, then
+// record file), named in the block (`parts`, a slot a piece, null where
+// none). A write makes the file of a piece whose object is new (the kind
+// plugin's `pieces`: the newest one a keystroke), then the record file, then
 // removes the pieces it no longer names — so a crash leaves the old file
 // whole, or the new one. A crash before the record file leaves new pieces
 // no file names, written over as `n` reaches them again; one after it, old

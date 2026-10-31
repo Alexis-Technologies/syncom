@@ -42,7 +42,6 @@ class RunId {
     this.ts = ts;
     this.origin = origin;
     this.key = key;
-    this.hash = -1;
   }
 }
 // The names a lineage of versions interned — a hydration, a join, a prune that rebuilds start one;
@@ -60,11 +59,6 @@ const intern = (doc, key, ts, origin) => {
     doc.byKey.set(key, id);
   }
   return id;
-};
-/** The FNV-1a hash of a run's key — what a block's pieces are bucketed by — made once. */
-const hashOfId = (id) => {
-  if (id.hash === -1) id.hash = C.fnv(id.key);
-  return id.hash;
 };
 
 // A run's record and its spans in the id index (./ids.js): the record at offset -1, a span at its own.
@@ -164,7 +158,6 @@ class State {
     this.marks = C.EMPTY;
     this.marksIndex = null;
     this.tokens = null;
-    this.ownTokens = false;
     this.views = null;
     this.rendered = null;
     this.derivedFrom = null;
@@ -330,30 +323,43 @@ const byIdKey = (a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
 
 // ---- a block in pieces ------------------------------------------------------------------------------
 
-// A block of PIECES_MIN runs or more is written in pieces (src/entries.js): its runs by the first five
-// bits of their keys' hash, a piece a bucket, the rest of the block whole beside them (`head`). A
-// piece's `key` is its bucket's TOKEN: an op that writes a run of a bucket gives the bucket a new one,
-// so the file of every other bucket stays. A piece lists its runs as the v1 map walked them.
+// A block of PIECES_MIN runs or more is written in pieces (src/entries.js): its runs by their numbers in
+// the lineage, PIECE_RUNS a piece, the rest of the block whole beside them (`head`). A run is numbered
+// as it is first named, so what an op makes lands in the newest piece, wherever it is typed. A piece's
+// `key` is its TOKEN: an op that changes the JSON of a run of the piece — makes it, grows it, cuts it —
+// gives the piece a new one, so the file of every other piece stays. What the JSON leaves out (a run's
+// children, its spans split where they read alike) is written quietly and keeps the token.
 const PIECES_MIN = 1024;
+const PIECE_RUNS = 512;
 class Token {
   constructor(owner) {
     this.owner = owner;
   }
 }
-// The bucket of run `id` written by draft `d`: a new token, once per op.
+const pieceOf = (id) => Math.floor(id.n / PIECE_RUNS);
+// Whether run `id` is of the newest piece of its lineage: the runs a local insert grows.
+const isNew = (st, id) => pieceOf(id) === Math.floor((st.doc.count - 1) / PIECE_RUNS);
+// The piece of run `id` written by draft `d`: a new token, once per op.
 const touchToken = (d, id) => {
   if (d.tokens === null) return;
-  if (!d.ownTokens) {
-    d.tokens = d.tokens.slice();
-    d.ownTokens = true;
-  }
-  const b = hashOfId(id) & 31;
-  if (d.tokens[b].owner !== d.owner) d.tokens[b] = new Token(d.owner);
+  const at = pieceOf(id);
+  const held = C.get(d.tokens, at);
+  if (held === undefined || held.owner !== d.owner) d.tokens = C.set(d.tokens, at, new Token(d.owner), d.owner);
 };
-const byWalk = (a, b) => {
-  const x = C.walkOrderOf(hashOfId(a.id));
-  const y = C.walkOrderOf(hashOfId(b.id));
-  return x - y || byKey(a, b);
+// A token for every piece a version holds a run of: what its first write in pieces names.
+const tokensOf = (st) => {
+  const owner = nextOwner();
+  let tokens = C.EMPTY;
+  let last = -1;
+  const cursor = I.seek(st.ids, -1);
+  for (let value = cursor.value; value !== undefined; I.next(cursor), value = cursor.value) {
+    if (!(value instanceof Run)) continue;
+    const at = pieceOf(value.id);
+    if (at === last) continue;
+    tokens = C.set(tokens, at, new Token(owner), owner);
+    last = at;
+  }
+  return tokens;
 };
 const piecesOf = (block) => {
   const st = STATE.get(block);
@@ -364,38 +370,39 @@ const piecesOf = (block) => {
   if (st === undefined) {
     const keys = keysOf(block.runs);
     if (keys.length < PIECES_MIN) return null;
-    const groups = [];
-    for (let i = 0; i < 32; i++) groups.push(null);
-    for (let i = 0; i < keys.length; i++) {
-      const at = C.fnv(keys[i]) & 31;
-      if (groups[at] === null) groups[at] = {};
-      groups[at][keys[i]] = block.runs[keys[i]];
-    }
-    for (let i = 0; i < 32; i++) {
-      const group = groups[i];
-      slots.push(group === null ? null : { key: group, text: () => JSON.stringify(group) });
+    for (let from = 0; from < keys.length; from += PIECE_RUNS) {
+      const group = {};
+      const to = Math.min(keys.length, from + PIECE_RUNS);
+      for (let i = from; i < to; i++) group[keys[i]] = block.runs[keys[i]];
+      slots.push({ key: group, text: () => JSON.stringify(group) });
     }
     return { head, slots };
   }
   if (st.runCount < PIECES_MIN) return null;
-  if (st.tokens === null) {
-    st.tokens = [];
-    for (let i = 0; i < 32; i++) st.tokens.push(new Token(st.owner));
+  if (st.tokens === null) st.tokens = tokensOf(st);
+  const count = Math.ceil(st.doc.count / PIECE_RUNS);
+  let filled = 0;
+  for (let at = 0; at < count; at++) {
+    const token = C.get(st.tokens, at);
+    if (token === undefined) slots.push(null);
+    else {
+      slots.push({ key: token, text: () => pieceText(st, at) });
+      filled = slots.length;
+    }
   }
-  const groups = [];
-  for (let i = 0; i < 32; i++) groups.push([]);
-  const records = recordsOf(st);
-  for (let i = 0; i < records.length; i++) groups[hashOfId(records[i].id) & 31].push(records[i]);
-  for (let i = 0; i < 32; i++) {
-    const group = groups[i];
-    slots.push(group.length === 0 ? null : { key: st.tokens[i], text: () => pieceText(st, group) });
-  }
+  slots.length = filled;
   return { head, slots };
 };
-const pieceText = (st, group) => {
-  group.sort(byWalk);
+// The runs of piece `at`, in the order of their numbers.
+const pieceText = (st, at) => {
   const out = {};
-  for (let i = 0; i < group.length; i++) out[group[i].id.key] = tupleOf(st, group[i], true);
+  const end = (at + 1) * PIECE_RUNS;
+  const cursor = I.seek(st.ids, at * PIECE_RUNS * SPAN);
+  for (let value = cursor.value; value !== undefined; I.next(cursor), value = cursor.value) {
+    if (!(value instanceof Run)) continue;
+    if (value.id.n >= end) break;
+    out[value.id.key] = tupleOf(st, value, true);
+  }
   return JSON.stringify(out);
 };
 
@@ -1028,6 +1035,9 @@ const draft = (block) => {
   // The index of the marks holds across an op that leaves them: the order of the slots their anchors
   // name never changes.
   d.marksIndex = st.marksIndex;
+  // A block in pieces has its tokens from the first op of its lineage on, never from its first write:
+  // an op made before that write would start the line again, and every write after it whole.
+  if (st.tokens === null && st.runCount >= PIECES_MIN) st.tokens = tokensOf(st);
   d.tokens = st.tokens;
   return d;
 };
@@ -1050,18 +1060,27 @@ const setRun = (d, run) => {
   touchToken(d, run.id);
   return run;
 };
-// The record of run `id`, the draft's own to change: copied (and set) unless it is.
-const writableRun = (d, id) => {
+// The record of run `id`, the draft's own to change: copied (and set) unless it is. `quiet` where its
+// JSON stays as it was — its children, its place, its spans split — so its tuple and its piece's token
+// stay too.
+const writableRun = (d, id, quiet = false) => {
   const run = runById(d, id);
   if (run.owner === d.owner) {
-    run.tuple = null;
+    if (!quiet) {
+      run.tuple = null;
+      touchToken(d, id);
+    }
     return run;
   }
-  return setRun(d, copyRun(run, d.owner));
+  const copy = copyRun(run, d.owner);
+  if (!quiet) return setRun(d, copy);
+  copy.tuple = run.tuple;
+  d.ids = I.set(d.ids, id.n * SPAN, copy, d.owner);
+  return copy;
 };
 // The spans of run `id` in the id index: `added` set, `removed` taken where none of `added` stands at
-// its offset; the record touched, as its JSON changed.
-const setSpans = (d, id, removed, added) => {
+// its offset; the record touched, as its JSON changed — unless `quiet`: the same slots, split.
+const setSpans = (d, id, removed, added, quiet = false) => {
   const { owner } = d;
   for (let i = 0; i < added.length; i++) d.ids = I.set(d.ids, keyOf(id.n, added[i].off), added[i], owner);
   for (let i = 0; i < removed.length; i++) {
@@ -1070,7 +1089,7 @@ const setSpans = (d, id, removed, added) => {
     for (let k = 0; k < added.length && !kept; k++) kept = added[k].off === off;
     if (!kept) d.ids = I.remove(d.ids, keyOf(id.n, off), owner);
   }
-  writableRun(d, id);
+  writableRun(d, id, quiet);
 };
 
 // ---- the rope: reading ------------------------------------------------------------------------------
@@ -1282,7 +1301,9 @@ const elemAtSlot = (st, s) => {
 };
 
 // Where a local insertion of `len` elements at visible index `i` goes: the anchor of a new run, or the
-// run of this origin to extend. Null when `i` is out of range. Fugue's rule, read off the rope.
+// run of this origin to extend — one of the newest piece (`isNew`): an older run is left as it is (a
+// new run hangs after it), so what an op makes stays in the newest piece of a block written in pieces.
+// Null when `i` is out of range. Fugue's rule, read off the rope.
 const placeInsert = (block, i, origin, len = 1) => {
   const st = STATE.get(block);
   const length = st.root.v;
@@ -1295,7 +1316,9 @@ const placeInsert = (block, i, origin, len = 1) => {
   const r = runById(st, span.run);
   const off = span.off + k;
   if (childrenAt(r.R, off) === undefined && off + 1 >= r.len) {
-    if (r.id.origin === origin && r.elem === null && r.len + len <= MAX_RUN) return { run: r.id.key, from: r.len };
+    if (r.id.origin === origin && r.elem === null && r.len + len <= MAX_RUN && isNew(st, r.id)) {
+      return { run: r.id.key, from: r.len };
+    }
     return { at: `>${elemKey(r.id.key, off)}` };
   }
   return { at: `<${elemAtSlot(st, s + k + 1)}` };
@@ -1549,5 +1572,6 @@ module.exports = {
   stats,
   segmentsIn,
   PIECES_MIN,
+  PIECE_RUNS,
   piecesOf,
 };

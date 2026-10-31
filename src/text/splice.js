@@ -112,7 +112,7 @@ const withinSegment = (d, seg, k, items) => {
   for (let i = 0; i < items.length; i++) all.push(items[i]);
   all.push(b);
   R.replace(d, seg, all);
-  setSpans(d, seg.run, [seg], [a, b]);
+  setSpans(d, seg.run, [seg], [a, b], true);
 };
 
 // The spans a walk laid for a placed copy, indexed; the copy's content kept in them alone.
@@ -141,7 +141,7 @@ const placeRun = (d, run) => {
     else R.insertAfter(d, runById(d, roots[j - 1]).close, items);
     insertAt(roots, j, run.id);
   } else {
-    const parent = writableRun(d, run.aId);
+    const parent = writableRun(d, run.aId, true);
     const off = run.aOff;
     if (run.side === 'L') {
       const siblings = childrenAt(parent.L, off) ?? NONE;
@@ -235,7 +235,7 @@ const firstTailChild = (d, parent, offset) => {
 
 // A run whose anchor is a run that is here but not placed yet: hung under it, walked when it is placed.
 const attachChild = (d, run) => {
-  const parent = writableRun(d, run.aId);
+  const parent = writableRun(d, run.aId, true);
   if (run.side === 'L') parent.L = withChild(parent.L, run.aOff, run.id);
   else parent.R = withChild(parent.R, run.aOff, run.id);
 };

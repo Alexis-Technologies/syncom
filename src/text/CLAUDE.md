@@ -70,6 +70,22 @@ attrs, isEmbed }` an entry of the block's `vals` (as a list element's
   element (HANDLE-4); the last handle closed clears the map, a rehearsal reserves nothing. A new
   local writer of a text resolves through `resolveSplice` with the storage's core, or loses
   characters.
+- **A piece is written again when one of its runs reads otherwise, and only then.** A block of
+  `PIECES_MIN` runs or more goes to its file in pieces of `PIECE_RUNS` runs by their numbers in the
+  lineage (src/text/state.js `piecesOf`), each keyed by a token an op replaces where it changes a run's
+  JSON: `setRun`, `writableRun` and `setSpans` touch it; their `quiet` form is for what the JSON leaves
+  out — a parent's children (`placeRun`, `attachChild`), a span split around a child (`withinSegment`)
+  — and carries the tuple. A content change written quietly leaves a stale piece the log's replay
+  hides until the log is sealed: `tests/storage.pieces.test.js` reads the files, not the storage. A
+  draft takes its tokens from the first op of a lineage in pieces, never from the first write (a
+  handle's keystrokes run ahead of the window), and `placeInsert` grows a run of the newest piece
+  alone, so a keystroke anywhere writes that piece (SEQ-10).
+- **A handle's op is rewritten only before its flush.** The handle grows its last pending op where
+  the next keystroke continues it (`coalesce`, typed on) or comes right before its first element
+  (`prepends`, a word typed backward — its elements numbered again, the op applied again over the
+  reading it was made over, at most `PREPEND_MAX` slots); never once the flush has taken it, never
+  after another writer's turn reached the overlay, and the run's reserved next offset moves with it
+  (HANDLE-5).
 - **An op's own references are short; the engine reads full names alone.** `resolve` (src/text/kind.js)
   names what is the op's own origin's without it — `run`, a cut's run and a mark's `off` by the stamp (a
   number), an element as `ts:offset`, an anchor `<ts:offset`/`>ts:offset` — and `fullRefs` lays

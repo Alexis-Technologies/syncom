@@ -288,6 +288,26 @@ const coalesce = (a, b) => {
   return { content: '', cut: x.cut.concat(y.cut) };
 };
 
+// A splice of a text typed right before the first element of the new run `a`
+// made — the next keystroke of a word typed backward, a prepend — as `a`
+// with its content grown at the start, or null. Its elements are numbered
+// again (what `a` made shifts by `b`'s length), so only an op no one has
+// seen can be grown so: one an editor's handle has not flushed
+// (src/text/handle.js), applied again over the reading it was made over.
+// `a` and `b` only insert, no markers, of one origin, at most PREPEND_MAX
+// slots together (each keystroke lays the whole run again).
+const PREPEND_MAX = 256;
+const prepends = (a, b) => {
+  if (a.type !== 'splice' || b.type !== 'splice' || a.origin !== b.origin) return null;
+  const x = a.value;
+  const y = b.value;
+  if (typeof x.content !== 'string' || typeof y.content !== 'string' || x.at === undefined) return null;
+  if (x.cut !== undefined || x.vals !== undefined || y.cut !== undefined || y.vals !== undefined) return null;
+  if (y.content.length === 0 || x.content.length + y.content.length > PREPEND_MAX) return null;
+  if (y.at !== `<${a.ts}:0` && y.at !== `<${a.ts}:0:${a.origin}`) return null;
+  return { ...x, content: y.content + x.content };
+};
+
 // ---------------------------------------------------------------------------
 // Own references. What an op names of its own origin's — the run it extends
 // (only ever its own), a run it cuts, the element it sets or moves, the
@@ -638,6 +658,8 @@ module.exports = {
   NESTS,
   LAZY,
   coalesce,
+  prepends,
+  PREPEND_MAX,
   members,
   holds,
   pick,

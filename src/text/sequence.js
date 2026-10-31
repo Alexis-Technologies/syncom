@@ -62,8 +62,10 @@
 // read from O(log m) of their anchors. A list's reading is derived from the
 // one before and what the op changed (`deriveLater`, when it is read); a
 // block read from a file is hydrated once per plain block. A large block's
-// pieces are the 32 buckets of the run keys' FNV-1a hash, a token per bucket
-// a write to it replaces.
+// pieces are its runs by the numbers the lineage gave them, PIECE_RUNS a
+// piece, a token per piece an op that changes one of its runs' JSON
+// replaces; a local insert grows a run of the newest piece alone, so a
+// keystroke anywhere changes the newest piece and no other.
 //
 // Content is run-length encoded, list-positions style: `["ab", 3, "c"]`
 // alternates present items (a string of a text, an array of a list) with
@@ -184,6 +186,7 @@ const {
   SEG_MAX,
   segmentsIn,
   PIECES_MIN,
+  PIECE_RUNS,
   piecesOf,
 } = require('./state.js');
 const { applySplice, applyAssign, applyMove } = require('./splice.js');
@@ -257,5 +260,6 @@ module.exports = {
   SEG_MAX,
   segmentsIn,
   PIECES_MIN,
+  PIECE_RUNS,
   piecesOf,
 };

@@ -12,6 +12,7 @@ const { text } = require('../src/text/text.js');
 const { sync } = require('../src/sync/sync.js');
 const { memory } = require('../src/memory/memory.js');
 const { createMesh, settle } = require('./utils/mesh.js');
+const { PREPEND_MAX } = require('../src/text/kind.js');
 
 const openMemory = (path, fsi = memory(), options = {}) =>
   open({ path, fsi, logger: false, lock: false, plugins: [text, sync], ...options });
@@ -199,6 +200,58 @@ test('several writers of one node on one text never grow one run from two readin
   await storage.splice(id, 'body', text.length + 1, 0, '?');
   assert.strictEqual(storage.log.next - next, 2);
   await storage.close();
+});
+
+test('a word typed backward through a handle is one op: each keystroke grows the edit before it at its start', async () => {
+  const fsi = memory();
+  const storage = await openMemory('/backward', fsi);
+  const id = await storage.insert({ title: 'doc' });
+  const handle = await storage.openText(id, 'body', { window: 60_000 });
+  const heard = [];
+  handle.observe((delta) => heard.push(delta));
+  const logged = [];
+  storage.on('change', (op) => logged.push(op.value));
+  let next = storage.log.next;
+  for (const ch of 'olleh') handle.insert(0, ch);
+  assert.strictEqual(handle.toString(), 'hello');
+  assert.deepStrictEqual(heard, [
+    [{ insert: 'o' }],
+    [{ insert: 'l' }],
+    [{ insert: 'l' }],
+    [{ insert: 'e' }],
+    [{ insert: 'h' }],
+  ]);
+  await handle.flush();
+  assert.strictEqual(storage.log.next - next, 1, 'one op');
+  assert.deepStrictEqual(logged, [{ content: 'hello', at: '^' }]);
+  assert.strictEqual((await storage.get(id)).body, 'hello');
+  // Backward inside the text, after the edit before it typed on: one op, the run's next offset with it.
+  next = storage.log.next;
+  handle.insert(2, 'a');
+  handle.insert(3, 'b');
+  handle.insert(2, 'z');
+  handle.insert(5, 'c');
+  assert.strictEqual(handle.toString(), 'hezabcllo');
+  await handle.flush();
+  assert.strictEqual(storage.log.next - next, 1, 'typed on, backward, typed on: one op');
+  // Another writer's turn between two keystrokes: the second an op of its own.
+  next = storage.log.next;
+  handle.insert(0, '2');
+  await storage.update(id, { title: 'renamed' });
+  handle.insert(0, '1');
+  // At most PREPEND_MAX slots an op.
+  for (let i = 0; i < PREPEND_MAX + 10; i++) handle.insert(0, '.');
+  await handle.flush();
+  // The update; `2` alone; `1` and the dots typed before it, PREPEND_MAX slots an op (3 ops had `2` grown).
+  assert.strictEqual(storage.log.next - next, 1 + 1 + 2);
+  const text = (await storage.get(id)).body;
+  assert.strictEqual(text, `${'.'.repeat(PREPEND_MAX + 10)}12hezabcllo`);
+  assert.strictEqual(handle.toString(), text);
+  await handle.close();
+  await storage.close();
+  const reopened = await openMemory('/backward', fsi);
+  assert.strictEqual((await reopened.get(id)).body, text);
+  await reopened.close();
 });
 
 test('a handle logs its edits a window after them: a timer of the storage’s defer, a throwing observer contained', async () => {

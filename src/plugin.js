@@ -35,9 +35,9 @@
 //       realize(action, patch, method)      → [type, payload] for one of its patch actions
 //       migrate(kind, key, value)           → [[type, payload]…] that lay the field again
 //       compact(entry, field, kind)         → the patches a compaction lays after recreate
-//       pieces(block)                       → `{ head, slots }` — a large block as its file holds it: 32
-//                                             slots of `{ key, text() }` or null, `key` the same object while the
-//                                             piece is (src/entries.js); null to keep the block whole; optional
+//       pieces(block)                       → `{ head, slots }` — a large block as its file holds it: slots of
+//                                             `{ key, text() }` or null, `key` the same object while the piece
+//                                             is (src/entries.js); null to keep the block whole; optional
 //       values(entry, field)                → what the field holds beside its reading (a text's embed
 //                                             markers by index), for the commit event; optional
 //       methods                             → { name: (core, id, …args) }, the storage's methods

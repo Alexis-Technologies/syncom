@@ -361,9 +361,12 @@ a short name never names another writer's run. One call is one op, signed
 and logged like any other — except where keystrokes continue each other
 (typed on at the end of their run, or a chain of cuts): sent without waiting,
 typed through a transaction or through a [text handle](./editors#a-text-handle),
-they are one op. A keystroke extending the
-writer's run adds its characters to the run and no key to the record's
-metadata; a new run adds one key, a little over a hundred bytes.
+they are one op; a handle folds a word typed backward too. A keystroke
+extending the writer's run adds its characters to the run and no key to the
+record's metadata; a new run adds one key, a little over a hundred bytes. A
+run grows while it is of its field's newest piece (the runs named last, 512
+at most): typing on after one's own older text begins a run there, so a large
+text's file, written a piece at a time, changes its newest piece a keystroke.
 
 The first example of this page, with a listener attached before it:
 

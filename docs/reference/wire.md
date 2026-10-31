@@ -343,18 +343,19 @@ merge:
 
 A list or text block of 1 024 runs or more (`PIECES_MIN`) is written in
 **pieces**: its `runs` leave the record file for files beside it,
-`<id>~<n>.json`, each the runs of one of the 32 children of the run map's
-root — the first five bits of a run key's FNV-1a hash
-(`src/text/state.js`) — and the block names them in their place, a slot
-each, `null` where none:
+`<id>~<n>.json`, each 512 runs (`PIECE_RUNS`) by the order this node first
+named them (`src/text/state.js`) — the oldest first, what an op makes in the
+newest — and the block names them in their order, a slot each, `null` where
+none:
 
 ```json
-"body":{"k":"t","ts":1793090489785,"parts":[null,"p1~3.json","p1~17.json",…,"p1~9.json"]}
+"body":{"k":"t","ts":1793090489785,"parts":["p1~3.json","p1~17.json",null,"p1~9.json"]}
 ```
 
 and the record file carries `"gen"`, the counter `n` runs on. A write
-makes the file of a piece whose child is new — a keystroke path-copies
-one child, so one piece of 32 — then the record file, then removes the
+makes the file of a piece one of whose runs reads otherwise — made, grown
+or cut; a local insert grows a run of the newest piece alone, so a
+keystroke anywhere is the newest piece — then the record file, then removes the
 pieces it no longer names: a crash leaves the old record file whole with
 its pieces, or the new one with its. New pieces a crash left unnamed are
 written over as `n` reaches them again; old ones it left after the record

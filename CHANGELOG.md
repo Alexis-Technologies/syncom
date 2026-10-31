@@ -25,7 +25,9 @@ There is no released version section until then; everything below lands in it.
 - **Keystrokes fold into one op.** Sent without waiting (made at once, outside the queue), typed
   through a transaction or through a handle, keystrokes that continue each other — typed on at
   the end of their run, or a chain of cuts — are logged as one op; a signing node folds those of a
-  transaction too.
+  transaction too. A handle folds a word typed backward as well (each keystroke right before the
+  one typed last, 256 characters an op): typing at the start of a text through a handle, 60 000
+  keystrokes are 236 ops, not 60 000, and 135 000 keystrokes a second, not 48 000.
 - **`bench/compare` measures a text typed through a handle** (`syncom-edit`), and `bench/write.js`
   the layers of one write (`--detail`, `--profile`, another checkout under `SYNCOM_BENCH_ROOT`).
 
@@ -1704,10 +1706,12 @@ There is no released version section until then; everything below lands in it.
   root of `src/` holds the core alone. No export, entry point or bundle
   changed.
 - **A large text is written in pieces, not whole at every flush.** A list
-  or text block of 1 024 runs or more keeps its runs in up to 32 files
-  beside the record file (`<id>~<n>.json`), by the first level of the run
-  map; a flush writes the piece a keystroke changed, the record file, and
-  removes what it no longer names. A text of 25 000 inserts: a keystroke
+  or text block of 1 024 runs or more keeps its runs in files of 512 beside
+  the record file (`<id>~<n>.json`), by the order the node first named them;
+  a flush writes the pieces whose runs read otherwise, the record file, and
+  removes what it no longer names. A local insert grows a run of the newest
+  piece alone, so a keystroke anywhere — at the start, in the middle — writes
+  that piece and no other, through a handle too. A text of 25 000 inserts: a keystroke
   under `defer: 0` 33.2 ms and 3 MB written → 1.35 ms and 242 KB (8 000:
   9.1 → 0.7 ms); under the default window, at 8 000, 231 → 146 µs and
   9.7 → 0.9 KB. A read assembles the block

@@ -44,8 +44,10 @@ await handle.close();
   surrogate) throws and changes nothing.
 - **When it is logged.** A window later (`window`, the storage's `defer` by
   default; 0 for the end of the turn), as one transaction: keystrokes that
-  continue each other — typed on at the end of their run, or a chain of cuts
-  — are one op. Until then nothing reaches a file, `get()` or a peer;
+  continue each other — typed on at the end of their run, a chain of cuts,
+  or a word typed backward (each keystroke right before the one typed last,
+  256 characters an op at most) — are one op. Until then nothing reaches a
+  file, `get()` or a peer;
   `flushed` settles once every edit so far is logged and landed, and the
   storage's `flush()`, `tag()` and `close()` flush open handles first.
 - **Another writer's edits** — a peer's, or a write through the storage —
