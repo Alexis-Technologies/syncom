@@ -106,6 +106,52 @@ const runEmitterTests = async (t, assert, Emitter) => {
     assert.strictEqual(emitter.listenerCount('nothing'), 0);
   });
 
+  await t.test('dispatch calls every listener at once and hands each failure to onError', async () => {
+    const emitter = new Emitter();
+    const seen = [];
+    const failures = [];
+    emitter.on('x', (a, b) => void seen.push(['first', a, b]));
+    emitter.on('x', () => {
+      throw new Error('thrown');
+    });
+    emitter.on('x', async () => {
+      throw new Error('rejected');
+    });
+    emitter.once('x', (a) => void seen.push(['once', a]));
+    emitter.dispatch('x', [1, 2], (error) => void failures.push(error.message));
+    // Called before dispatch returns, in order; the rejection lands a tick later.
+    assert.deepStrictEqual(seen, [
+      ['first', 1, 2],
+      ['once', 1],
+    ]);
+    assert.deepStrictEqual(failures, ['thrown']);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepStrictEqual(failures, ['thrown', 'rejected']);
+    assert.strictEqual(emitter.listenerCount('x'), 3, 'the once listener left after its call');
+    emitter.dispatch('nobody', [], () => assert.fail('no listener, no call'));
+  });
+
+  await t.test('a listener added or taken off during an emit counts from the next one', async () => {
+    const emitter = new Emitter();
+    const seen = [];
+    const late = () => void seen.push('late');
+    const second = () => void seen.push('second');
+    let changed = false;
+    emitter.on('x', () => {
+      seen.push('first');
+      if (changed) return;
+      changed = true;
+      emitter.off('x', second);
+      emitter.on('x', late);
+    });
+    emitter.on('x', second);
+    emitter.dispatch('x', [], assert.fail);
+    assert.deepStrictEqual(seen, ['first', 'second']);
+    seen.length = 0;
+    await emitter.emit('x');
+    assert.deepStrictEqual(seen, ['first', 'late']);
+  });
+
   await t.test('toPromise resolves on the next emit', async () => {
     const emitter = new Emitter();
     const promise = emitter.toPromise('ready');
