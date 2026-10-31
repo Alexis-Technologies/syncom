@@ -103,7 +103,10 @@ const cutSpansOf = (held, cut) => {
   if (!Array.isArray(cut)) return null;
   const cuts = [];
   for (let i = 0; i < cut.length; i++) {
-    const spans = S.spansOf(held, cut[i][0], cut[i][1], cut[i][2]);
+    // A peer's range of another shape is the engine's to refuse (malformed), never a throw here.
+    const range = cut[i];
+    if (!Array.isArray(range) || typeof range[0] !== 'string') continue;
+    const spans = S.spansOf(held, range[0], range[1], range[2]);
     if (spans !== null) for (let k = 0; k < spans.length; k++) cuts.push(spans[k]);
   }
   cuts.sort((x, y) => y.index - x.index);

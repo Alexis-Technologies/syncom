@@ -1370,6 +1370,62 @@ test('ops: a payload the engine does not admit is reported, never silent', async
   });
 });
 
+test('ops: a sequence op of the wrong shape is malformed, never a throw: a peer’s page goes on past it', async () => {
+  const text = applyOp(
+    null,
+    op('splice', 10, 'A', { seq: 1, key: 'body', value: { at: '^', content: 'hello' } }),
+  ).entry;
+  const cases = [
+    { cut: [null], content: '' },
+    { cut: [5], content: '' },
+    { cut: [[null, 0, 1]], content: '' },
+    { cut: [[{}, 0, 1]], content: '' },
+    { cut: 'x', content: '' },
+    { at: '<10', content: 'x' },
+    { run: 1.5, from: 5, content: 'x' },
+  ];
+  for (const value of cases) {
+    const { changed, rejected, entry } = applyOp(text, op('splice', 20, 'B', { seq: 1, key: 'body', value }));
+    assert.deepStrictEqual(
+      [changed, rejected],
+      [false, [{ field: 'body', reason: 'malformed' }]],
+      JSON.stringify(value),
+    );
+    assert.deepStrictEqual(entry.data, { body: 'hello' });
+  }
+  // Through a peer's page: the malformed op is refused and the page goes on.
+  const { open } = require('../src/all/all.js');
+  const { memory } = require('../src/memory/memory.js');
+  const storage = await open({
+    path: '/malformed',
+    fsi: memory(),
+    logger: false,
+    lock: false,
+    sync: { signatures: false },
+  });
+  const id = await storage.insert({ title: 'doc' });
+  await storage.push(id, 'body', 'hello');
+  const refused = [];
+  storage.on('error', (error) => refused.push(error.code));
+  const page = [
+    {
+      origin: 'peer',
+      seq: 1,
+      ts: Date.now(),
+      type: 'splice',
+      id,
+      v: 1,
+      key: 'body',
+      value: { cut: [null], content: '' },
+    },
+    { origin: 'peer', seq: 2, ts: Date.now() + 1, type: 'set', id, v: 1, data: { title: 'after' } },
+  ];
+  await storage.applyRemote(page);
+  assert.deepStrictEqual(await storage.get(id), { title: 'after', body: 'hello' });
+  assert.strictEqual(storage.vector.peer, 2, 'both taken: the refused op is a no-op, never a gap');
+  await storage.close();
+});
+
 test('ops: the bound on pending work is the node’s', async (t) => {
   await t.test('a merge takes a block by the node’s bound, as an op would be', () => {
     // A block holding three pending cuts of runs not here.
