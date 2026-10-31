@@ -37,6 +37,7 @@ const {
   NONE,
   Walk,
   arrived,
+  arrivedSlots,
   asBlock,
   belowBase,
   childrenAt,
@@ -241,7 +242,8 @@ const attachChild = (d, run) => {
   else parent.R = withChild(parent.R, run.aOff, run.id);
 };
 
-// The runs waiting for `id` whose anchor is now here (offsets from `from` on): placed, each with its own.
+// The runs waiting for `id` whose anchor is now here (offsets from `from` on): placed, each with its own
+// — or, while `id` itself waits out of the walk, hung under it as a hydration would, to be walked with it.
 const settleChildren = (d, id, from) => {
   const list = C.get(d.pending, id.n);
   if (list === undefined) return;
@@ -256,7 +258,10 @@ const settleChildren = (d, id, from) => {
   if (place.length === 0) return;
   d.pending = rest.length > 0 ? C.set(d.pending, id.n, rest, d.owner) : C.remove(d.pending, id.n, d.owner);
   d.pendingRuns -= place.length;
-  for (let i = 0; i < place.length; i++) placeRun(d, place[i]);
+  for (let i = 0; i < place.length; i++) {
+    if (run.placed) placeRun(d, place[i]);
+    else attachChild(d, place[i]);
+  }
 };
 
 // A run's own content grown at its end by `content` (a keystroke's extension): its last span grown when
@@ -304,6 +309,7 @@ const extendRun = (d, id, content) => {
   run.len = from + content.length;
   run.tails += tails;
   arrived(d, id);
+  arrivedSlots(d, id.key, from, run.len);
   d.slots += content.length;
   settleChildren(d, id, from);
   settleRun(d, id);
@@ -435,6 +441,8 @@ const settleRun = (d, id) => {
       w.rle = rleAppend(d.kind, w.rle, content);
       w.len = len + content.length;
       d.slots += content.length;
+      arrivedSlots(d, key, len, w.len);
+      settleChildren(d, id, len);
     }
   }
   const cuts = d.cuts && own(d.cuts, key);
@@ -580,6 +588,11 @@ const newer = (map, key, stamp) => {
   const held = C.get(map, key);
   return held === undefined || compareClock([held[0], held[1]], stamp) < 0;
 };
+// A value register written: a new one of an element not here is pending work, counted as it comes.
+const setVal = (d, elem, ts, origin, value) => {
+  if (C.get(d.vals, elem) === undefined && !holdsElem(d, elem)) d.pendingRegs++;
+  d.vals = C.set(d.vals, elem, [ts, origin, value], d.owner);
+};
 
 // The pending work of a block, counted once, when a bound first asks.
 const counter = (seq) => {
@@ -615,6 +628,8 @@ const layRun = (d, record, where) => {
     d.pending = C.set(d.pending, record.aId.n, next, d.owner);
     d.pendingRuns++;
   }
+  // What waited for the run hangs under it now, out of the walk with it.
+  settleChildren(d, record.id, 0);
   settleRun(d, record.id);
 };
 
@@ -741,20 +756,21 @@ const applySplice = (given, stamp, payload, base = null, pendingMax = PENDING_MA
     if (vals === undefined || vals.length === 0) return;
     for (let i = 0; i < vals.length; i++) {
       const elem = elemKey(runKeyOf, start + vals[i][0]);
-      if (newer(d.vals, elem, stamp)) d.vals = C.set(d.vals, elem, [ts, origin, vals[i][1]], d.owner);
+      if (newer(d.vals, elem, stamp)) setVal(d, elem, ts, origin, vals[i][1]);
     }
   };
   if (insert === 1) {
     const record = recordOf(d.doc, key, [at, isText(seq.k) ? [content] : [content.slice()]], d.owner, anchor);
-    assignVals(key, 0);
     where = placeOf(d, record.aId, record.aOff, base);
     d.slots += record.len;
     d.ts = Math.max(d.ts, ts);
     d.oldest = minStamp(d.oldest, [ts, origin]);
     if (anchor.elem !== null) d.oldestAnchor = minStamp(d.oldestAnchor, [anchor.elem.ts, anchor.elem.origin]);
     layRun(d, record, where);
+    arrivedSlots(d, key, 0, record.len);
+    // The markers after the slots: registers of slots that are here.
+    assignVals(key, 0);
   } else if (insert === 2) {
-    assignVals(run, from);
     const { id } = target;
     if (target.placed) extendRun(d, id, content);
     else {
@@ -762,8 +778,11 @@ const applySplice = (given, stamp, payload, base = null, pendingMax = PENDING_MA
       w.rle = rleAppend(d.kind, w.rle, content);
       w.len = target.len + content.length;
       d.slots += content.length;
+      arrivedSlots(d, run, target.len, w.len);
+      settleChildren(d, id, target.len);
       settleRun(d, id);
     }
+    assignVals(run, from);
   } else if (insert === 3) {
     const held = (d.ext && own(d.ext, run)) || NONE;
     const list = held.slice();
@@ -790,7 +809,7 @@ const applyAssign = (given, stamp, payload, base = null, pendingMax = PENDING_MA
     if (n >= pendingMax) return refused(seq, 'pending', n, pendingMax);
   }
   const d = draft(seq);
-  d.vals = C.set(d.vals, elem, [stamp[0], stamp[1], value], d.owner);
+  setVal(d, elem, stamp[0], stamp[1], value);
   d.ts = Math.max(d.ts, stamp[0]);
   d.oldest = minStamp(d.oldest, stamp);
   return { seq: finish(d), changed: true, reason: null };
@@ -865,6 +884,7 @@ const applyMove = (given, stamp, payload, base = null, pendingMax = PENDING_MAX)
       setRun(d, record);
       placeRun(d, record);
     } else layRun(d, record, where);
+    arrivedSlots(d, key, 0, 1);
   } else if (moving) {
     moveRegister(d, elem, ts, origin, key);
     const r = runOf(d, key);
@@ -877,6 +897,8 @@ const applyMove = (given, stamp, payload, base = null, pendingMax = PENDING_MAX)
 const moveRegister = (d, elem, ts, origin, key) => {
   const was = slotShowing(d, elem);
   const off = was === null ? 0 : offsetShowing(d, elem);
+  // A new register of an element not here is pending work, counted as it comes.
+  if (C.get(d.pos, elem) === undefined && !holdsElem(d, elem)) d.pendingRegs++;
   d.pos = C.set(d.pos, elem, [ts, origin, key], d.owner);
   if (was !== null && was.placed) setShown(d, was.id, off, false);
 };

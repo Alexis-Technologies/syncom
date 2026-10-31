@@ -73,7 +73,9 @@ const applyMark = (given, stamp, payload, base = null, pendingMax = PENDING_MAX)
     const d = draft(seq);
     const flagged = held === undefined ? PLACEHOLDER.slice() : [held[0], held[1], held[2], held[3], held[4] | OFF];
     d.marks = C.set(d.marks, payload.off, flagged, d.owner);
-    if (held !== undefined) d.marksIndex = withoutMark(d.marksIndex, payload.off);
+    // A placeholder is pending work, counted as it comes; a mark here leaves the index.
+    if (held === undefined) d.pendingMarks++;
+    else d.marksIndex = withoutMark(d.marksIndex, payload.off);
     d.ts = Math.max(d.ts, named.ts);
     d.oldest = minStamp(d.oldest, [named.ts, named.origin]);
     return { seq: finish(d), changed: true, reason: null };
@@ -92,7 +94,9 @@ const applyMark = (given, stamp, payload, base = null, pendingMax = PENDING_MAX)
   const d = draft(seq);
   const mark = [start, end, key, value, (many ? MANY : 0) | (held === undefined ? 0 : OFF)];
   d.marks = C.set(d.marks, id, mark, d.owner);
+  // A mark that fills its placeholder settles that pending work; a new one in force joins the index.
   if (held === undefined) d.marksIndex = withMark(d, d.marksIndex, id, mark, base);
+  else d.pendingMarks--;
   d.ts = Math.max(d.ts, ts);
   d.oldest = minStamp(d.oldest, [ts, origin]);
   return { seq: finish(d), changed: true, reason: null };

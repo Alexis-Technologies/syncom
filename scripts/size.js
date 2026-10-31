@@ -318,6 +318,10 @@ const ENTRIES = [
   // 130.5 (over by bytes) with a failed append's line taken out of its journal, the index's counter kept, the
   // evidence copies scrubbed by a purge, a once listener added during an emit kept, and the writes counted by
   // path (review №4, E6, E9). 131, raised by name.
+  // (E1, the engine agent) block's pieces by run number and a word typed backward folded by a handle. 129, raised by name. 129.1 with
+  // (E1, the engine agent) the engine's bounds read before anything is written (a parked extension against MAX_RUN and MAX_FIELD, a cut's
+  // (E1, the engine agent) ranges against MAX_CUTS and merged for the report) and its pending work counted as it comes (2026-10-31).
+  // (E1, the engine agent) 129.5, raised by name.
   { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 131 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
@@ -348,6 +352,9 @@ const ENTRIES = [
   // folded (prepends). 42.5, raised by name.
   // 42.7 with a handle's flushes cancelled behind one that could not be logged, a prepend held to the turns heard, a
   // delta checked whole first, keystrokes one change, the reservations per field (review №4, E2). 43, raised by name.
+  // (E1, the engine agent) folded (prepends). 42.5, raised by name. 42.5 with the bounds read before anything is written (a parked
+  // (E1, the engine agent) extension against MAX_RUN and MAX_FIELD, a cut's ranges against MAX_CUTS and merged for the report) and the
+  // (E1, the engine agent) pending work counted as it comes (2026-10-31). 43, raised by name.
   { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 43 },
   // The tree kind alone, with the fractional indexes a place is made of and
   // the argument checks it shares with the core (5.1 measured).

@@ -1083,6 +1083,15 @@ and one `commit` event, not one per call.
   reported fifteen. A cut of more than `MAX_CUTS` (65 536) ranges is refused as `bound` (`detail:
   'cuts'`) before any range is read, and the change report merges the ranges of one run: what was cut,
   once (BOUND-5). The coalescing of cuts keeps its own, lower bound on how far one op grows.
+- **Counting a block's pending work walked every register and mark.** An op whose element or anchor
+  was not here yet — a peer's `setAt` ahead of the splice it names, a cut of a run still on its way —
+  read the bound on pending work by walking every `pos` and `vals` register and every mark of the
+  block, parsing each: 55 ms an op on a list of 200 000 assigned values, refused or not. The
+  registers of elements not here and the marks switched off before they arrived are counted as they
+  come and go (a slot that arrives settles the registers that named it), so the count is a sum
+  (BOUND-1). On the way, a run waiting for its anchor is hung under the anchor's run as soon as
+  that run is here — placed or still waiting itself, as a hydration hangs it — where it stayed
+  counted as waiting until the parent was placed.
 - **A peer's splice whose cut was shaped otherwise stopped its page.** A cut of `[null]`, `[5]` or
   `[[null, 0, 1]]` threw out of `applyOp` before the engine could refuse it, so `applyRemote()`
   failed the whole page and the peer's stream stalled there on every retry. It is refused as

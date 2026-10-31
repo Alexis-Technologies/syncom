@@ -942,6 +942,82 @@ test('sequence engine', async (t) => {
     },
   );
 
+  await t.test(
+    'the pending count is kept as work comes and goes, never walked: it is the recount after every op (seeded)',
+    () => {
+      // What waits, recounted from the block's JSON: runs whose anchor is not here, cuts and extensions
+      // waiting, registers of elements not here, marks switched off before they arrived.
+      const recount = (block) => {
+        const json = JSON.parse(JSON.stringify(block));
+        const held = (elem) => {
+          const e = S.parseElem(elem);
+          const run = json.runs[e.run];
+          return run !== undefined && e.offset < S.rleLength(run[1]);
+        };
+        let n = 0;
+        for (const key of Object.keys(json.runs)) {
+          const { elem } = S.parseAnchor(json.runs[key][0]);
+          if (elem !== null && !held(S.elemKey(elem.run, elem.offset))) n++;
+        }
+        for (const map of ['cuts', 'ext']) for (const key of Object.keys(json[map] ?? {})) n += json[map][key].length;
+        for (const map of ['pos', 'vals']) for (const key of Object.keys(json[map] ?? {})) if (!held(key)) n++;
+        for (const key of Object.keys(json.marks ?? {})) if (S.isPlaceholder(json.marks[key])) n++;
+        return n;
+      };
+      const rng = (seed) => () => {
+        seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+        return seed / 2 ** 32;
+      };
+      for (let round = 0; round < 16; round++) {
+        const random = rng(500 + round);
+        const pick = (n) => Math.floor(random() * n);
+        const kind = round % 2 === 0 ? 't' : 'l';
+        const items = (n) => (kind === 't' ? 'x'.repeat(n) : Array.from({ length: n }, (_, i) => i));
+        // Six runs by stamp, two origins; registers, marks and cuts name their elements before and after
+        // they arrive, and a run may be anchored at an element of an older run not here yet.
+        const names = [];
+        for (let i = 1; i <= 6; i++) names.push(`${i}:${i % 2 ? 'P' : 'Q'}`);
+        let seq = S.createSeq(kind);
+        let ts = 100;
+        const step = (result) => {
+          if (result.changed) seq = result.seq;
+        };
+        for (let i = 0; i < 48; i++) {
+          const key = names[pick(6)];
+          const made = S.parseRun(key);
+          const r = random();
+          if (r < 0.3) {
+            if (seq.runs[key] !== undefined) {
+              const from = S.rleLength(seq.runs[key][1]);
+              step(S.applySplice(seq, [++ts, made.origin], { run: key, from, content: items(1 + pick(3)) }));
+            } else {
+              const older = made.ts > 1 ? names[pick(made.ts - 1)] : null;
+              const at = older === null || random() < 0.3 ? S.HEAD : `>${S.elemKey(older, pick(4))}`;
+              step(S.applySplice(seq, [made.ts, made.origin], { at, content: items(1 + pick(3)) }));
+            }
+          } else if (r < 0.5) {
+            step(S.applyAssign(seq, [++ts, 'B'], { elem: S.elemKey(key, pick(5)), value: i }));
+          } else if (r < 0.65 && kind === 'l') {
+            const payload = { elem: S.elemKey(key, pick(5)), cut: [key, pick(5), 1], at: S.HEAD, value: i };
+            step(S.applyMove(seq, [++ts, 'B'], payload));
+          } else if (r < 0.8 && kind === 't') {
+            const mark = 50 + pick(4);
+            if (random() < 0.5) step(S.applyMark(seq, [++ts, 'B'], { off: `${mark}:M` }));
+            else step(S.applyMark(seq, [mark, 'M'], { start: S.HEAD, end: S.END, key: 'b', value: true }));
+          } else {
+            const content = kind === 't' ? '' : [];
+            step(S.applySplice(seq, [++ts, 'C'], { cut: [[key, pick(6), 1 + pick(3)]], content }));
+          }
+          assert.strictEqual(S.pendingCount(seq), recount(seq), `round ${round}, op ${i}`);
+        }
+        const joined = S.join(seq, seq);
+        assert.strictEqual(S.pendingCount(joined), recount(joined), `round ${round}: joined`);
+        const hydrated = S.hydrate(JSON.parse(JSON.stringify(seq)), null);
+        assert.strictEqual(S.pendingCount(hydrated), recount(seq), `round ${round}: hydrated`);
+      }
+    },
+  );
+
   await t.test('join and a repeated cut are idempotent: a pending cut is waited for once', () => {
     const a = node('A');
     const waiting = { ts: tick(), origin: 'B', payload: { cut: [['2:Z', 0, 1]], content: '' } };

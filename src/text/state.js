@@ -151,6 +151,10 @@ class State {
     this.ownRoots = false;
     this.pending = C.EMPTY;
     this.pendingRuns = 0;
+    // Registers (`pos`, `vals`) of elements not here, and marks switched off before they arrived: counted
+    // as they come and go, so the pending work a bound reads is never walked.
+    this.pendingRegs = 0;
+    this.pendingMarks = 0;
     this.slots = 0;
     // The slots of the extensions that wait in `ext`: counted toward MAX_FIELD with the runs'.
     this.extSlots = 0;
@@ -979,6 +983,16 @@ const hydrate = (seq, base) => {
   st.pos = pos;
   st.vals = mapOf(seq.vals, owner);
   st.marks = mapOf(seq.marks, owner);
+  let pendingRegs = 0;
+  for (const map of ['pos', 'vals']) {
+    const keys = keysOf(seq[map]);
+    for (let i = 0; i < keys.length; i++) if (!holdsElem(st, keys[i])) pendingRegs++;
+  }
+  let pendingMarks = 0;
+  const markKeys = keysOf(seq.marks);
+  for (let i = 0; i < markKeys.length; i++) if (isPlaceholder(seq.marks[markKeys[i]])) pendingMarks++;
+  st.pendingRegs = pendingRegs;
+  st.pendingMarks = pendingMarks;
   return createBlock(st);
 };
 const byRecordOrigin = (a, b) => byOrigin(a.id, b.id);
@@ -1041,6 +1055,8 @@ const draft = (block) => {
   d.roots = st.roots;
   d.pending = st.pending;
   d.pendingRuns = st.pendingRuns;
+  d.pendingRegs = st.pendingRegs;
+  d.pendingMarks = st.pendingMarks;
   d.slots = st.slots;
   d.extSlots = st.extSlots;
   d.oldest = st.oldest;
@@ -1465,24 +1481,30 @@ const anchorOrdinal = (block, token, base = null) => {
 };
 
 // What waits in a block: runs out of the walk, cuts and extensions of runs not here, registers of
-// elements no run holds, marks switched off before they arrived.
+// elements no run holds, marks switched off before they arrived — the runs, the registers and the marks
+// counted as they came (never walked here), the cuts and the extensions by their lists.
 const pendingCount = (block) => {
   const st = STATE.get(block);
   return waiting(st, block.cuts, block.ext);
 };
 const waiting = (st, cuts, ext) => {
-  let n = st.pendingRuns;
+  let n = st.pendingRuns + st.pendingRegs + st.pendingMarks;
   const cutKeys = keysOf(cuts);
   for (let i = 0; i < cutKeys.length; i++) n += cuts[cutKeys[i]].length;
   const extKeys = keysOf(ext);
   for (let i = 0; i < extKeys.length; i++) n += ext[extKeys[i]].length;
-  const pos = C.pairs(st.pos);
-  for (let i = 0; i < pos.length; i++) if (!holdsElem(st, pos[i].key)) n++;
-  const vals = C.pairs(st.vals);
-  for (let i = 0; i < vals.length; i++) if (!holdsElem(st, vals[i].key)) n++;
-  const marks = C.pairs(st.marks);
-  for (let i = 0; i < marks.length; i++) if (isPlaceholder(marks[i].value)) n++;
   return n;
+};
+
+// Slots [from, to) of run `key` are here now — the run made, or grown: a register of one of them waits
+// no more. Probed slot by slot only while a register waits; an op pays for every slot it lays anyway.
+const arrivedSlots = (d, key, from, to) => {
+  if (d.pendingRegs === 0) return;
+  for (let off = from; off < to; off++) {
+    const elem = elemKey(key, off);
+    if (C.get(d.pos, elem) !== undefined) d.pendingRegs--;
+    if (C.get(d.vals, elem) !== undefined) d.pendingRegs--;
+  }
 };
 
 // The index a run's arrival (placed, or grown) leaves: none when an anchor waited for it.
@@ -1586,6 +1608,7 @@ module.exports = {
   anchorOrdinal,
   pendingCount,
   waiting,
+  arrivedSlots,
   arrived,
   indexOf,
   stats,
