@@ -1,7 +1,7 @@
 'use strict';
 
 // The v2 engine's state of a block (./sequence.js holds its design): the names a lineage interns, the
-// run records and the spans, the plain object and the WeakMap beside it, a plain block's JSON made whole
+// run records and the spans, the plain object and the private field it is stamped with, a plain block's JSON made whole
 // and hydrated into the rope, and every reading of it — elements, values, positions, cursors, what waits.
 
 const { compareClock, floorOf } = require('../vector.js');

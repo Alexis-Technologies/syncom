@@ -13,7 +13,7 @@
 //   a block's registers and marks serialize in. An integer is its own hash. A removal leaves the nodes
 //   above as they are: a map that took keys away walks in an order of its history (what waits only).
 // - A sorted list in chunks (`List`): entries with a numeric `off`, ascending, in chunks of at most
-//   CHUNK; a change copies the chunk it lands in and the list of chunks, O(√n), the rest shared.
+//   CHUNK; a change copies the chunk it lands in and the list of chunks, O(n / CHUNK), the rest shared.
 
 const BITS = 5;
 const MASK = 31;
@@ -252,7 +252,7 @@ const pairs = (map) => {
 /**
  * Where a string key falls in the walk of a trie of strings below its first five bits: the next 25
  * bits of its hash, five at a time, the first the highest — the order the keys of one child of the root
- * walk in (keys equal there walk by key). What a block's pieces are serialized in (src/entries.js).
+ * walk in (keys equal there walk by key).
  */
 const walkOrderOf = (hash) => {
   let out = 0;

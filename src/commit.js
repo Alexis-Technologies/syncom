@@ -406,7 +406,7 @@ const land = async (core, op, entry, { ticket, position }) => {
   await ticket.done;
   // Logged: the write is durable from here and replicates from the log.
   // Under `open({ defer })` the file and the block wait for the flush
-  // (Storage#deferWrite): held in memory, the batch unapplied until then.
+  // (the DeferredWindow (src/defer.js)): held in memory, the batch unapplied until then.
   if (core.defer > 0) {
     await core.deferred(id, entry, position);
     core.settled(id, position);
@@ -775,15 +775,26 @@ const coalesced = (core, op, made, current) => {
   if (before === null || before.entry !== current) return null;
   const a = before.op;
   if (core.log.lastGathered() !== a || a.sig !== undefined || a.digest !== undefined) return null;
-  if (!continues(a, op)) return null;
-  const value = coalesce(a, op);
-  if (value === null) return null;
-  a.value = value;
-  before.entry = made.entry;
+  if (!grown(before, op, made, coalesce)) return null;
   before.delta = assignData(before.delta ?? {}, made.delta);
-  for (let i = 0; i < made.changes.length; i++) before.changes.push(made.changes[i]);
   core.inflight(op.id, made.entry, before.position);
   return before;
+};
+
+// `op` grown into `before` — the made write of the op before it — where the
+// two continue each other and the plugin's `coalesce` says they are one: the
+// earlier op's value grows, `before` takes the newer entry and the changes of
+// both, in order. What a write made at once and a transaction fold alike
+// (LOG-11, TXN-3); answers whether it did.
+const grown = (before, op, made, coalesce) => {
+  const a = before.op;
+  if (!continues(a, op)) return false;
+  const value = coalesce(a, op);
+  if (value === null) return false;
+  a.value = value;
+  before.entry = made.entry;
+  for (let i = 0; i < made.changes.length; i++) before.changes.push(made.changes[i]);
+  return true;
 };
 
 // `op` is the next op of `a`'s stream on `a`'s record and field, made by
@@ -803,6 +814,10 @@ const continues = (a, op) =>
 // announce (no afterWrite hook) — what `land` and `announce` do, in order.
 const landNow = (core, made, position) => {
   const { op, entry, delta, changes, source, via, before, previous } = made;
+  // Landed: nothing grows into it any more (its group is written), so what the next write at once
+  // compared against is let go of — two versions of a record were pinned until the next write.
+  const last = lastOf(core);
+  if (last.made === made) last.made = null;
   try {
     core.deferred(op.id, entry, position);
   } finally {
@@ -822,10 +837,10 @@ const landNow = (core, made, position) => {
 };
 
 const commitLocal = async (core, type, id, payload, options) => {
-  const prepared = await prepare(core, type, id, payload, options);
-  const { op } = prepared;
-  if (op === null || op === undefined || op === MISMATCH || prepared.sealed === true) return outcome(op);
-  const { entry, delta, changes, ctx, source, via, before, previous } = prepared;
+  const made = await prepare(core, type, id, payload, options);
+  const { op } = made;
+  if (op === null || op === undefined || op === MISMATCH || made.sealed === true) return outcome(op);
+  const { entry, delta, changes, ctx, source, via, before, previous } = made;
   const issued = await issue(core, op, entry);
   const done = core.landing(async () => {
     const seq = await land(core, op, entry, issued);
@@ -917,7 +932,7 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
   const reserved = new Map();
   // Per record: the index of its newest op here, and its ops' deltas laid
   // one over the other — what the live Record is refreshed by, once.
-  const lastOf = new Map();
+  const newestOf = new Map();
   const deltas = new Map();
   // An op a later op of its record follows keeps its op and its changes
   // until the landing; the record it left only for a `commit` listener, its
@@ -951,18 +966,12 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
     const i = items.length - 1;
     const { op } = made;
     const coalesce = core.plugins.byType[op.type]?.coalesce;
-    if (i < 0 || coalesce === undefined || core.hooks.afterWrite !== null || lastOf.get(op.id) !== i) return null;
+    if (i < 0 || coalesce === undefined || core.hooks.afterWrite !== null || newestOf.get(op.id) !== i) return null;
     const before = items[i];
-    const a = before.op;
-    if (!continues(a, op)) return null;
-    const value = coalesce(a, op);
-    if (value === null) return null;
-    a.value = value;
-    before.entry = made.entry;
-    for (let k = 0; k < made.changes.length; k++) before.changes.push(made.changes[k]);
+    if (!grown(before, op, made, coalesce)) return null;
     deltas.set(op.id, assignData(deltas.get(op.id) ?? {}, made.delta));
     touched.set(op.id, made.entry);
-    return a;
+    return before.op;
   };
   // An op made here joins the transaction: grown into the one before it, or an item of its own.
   const join = (made) => {
@@ -970,9 +979,9 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
     if (grown !== null) return grown;
     const { op } = made;
     const { id } = op;
-    const was = lastOf.get(id);
+    const was = newestOf.get(id);
     if (was !== undefined) release(items[was]);
-    lastOf.set(id, items.length);
+    newestOf.set(id, items.length);
     deltas.set(id, assignData(deltas.get(id) ?? {}, made.delta));
     items.push(made);
     touched.set(id, made.entry);
@@ -1066,7 +1075,7 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
   const positions = [];
   for (let i = 0; i < count; i++) positions.push(ticket.entries[i].seq);
   // A record in flight is its newest entry, at its newest position.
-  for (const [id, last] of lastOf) core.inflight(id, touched.get(id), positions[last]);
+  for (const [id, last] of newestOf) core.inflight(id, touched.get(id), positions[last]);
   const done = core.landing(async () => {
     await ticket.done;
     const from = positions[0];
@@ -1083,7 +1092,7 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
       // One append: the positions run from `from` to `to` without a gap.
       core.log.applied(from, to);
     }
-    for (const [id, last] of lastOf) core.settled(id, positions[last]);
+    for (const [id, last] of newestOf) core.settled(id, positions[last]);
     core.saveCatalog();
     // The transaction event's changes, built only while something listens.
     const listening = core.listening('transaction');
@@ -1094,7 +1103,7 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
     let failed = null;
     for (let i = 0; i < count; i++) {
       const { op, entry, ctx, before, previous } = items[i];
-      const last = lastOf.get(op.id) === i;
+      const last = newestOf.get(op.id) === i;
       const committed = { seq: positions[i], before, previous, txn: positions[0] };
       const delta = last ? deltas.get(op.id) : null;
       try {
@@ -1147,7 +1156,8 @@ const tracedCommit = async (core, type, id, payload, options) => {
 };
 
 /**
- * One local write, run inside the mutation queue: `{ op, done }` — the op
+ * One local write, run inside the mutation queue (the storage makes one at
+ * once instead where a turn of its own would change nothing: `commitAtOnce`): `{ op, done }` — the op
  * (null, undefined or MISMATCH when nothing was appended) and the landing
  * to await for it to be durable, written and announced (null when there
  * is none).

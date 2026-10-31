@@ -112,7 +112,7 @@ const normalizeStorageOptions = (options) => {
   // Record files may lag the log by this many ms (0: never; 16 by default,
   // a frame): the log is durable at once and a crash replays the batch, so
   // the writes of one record within the window coalesce into one file and
-  // one block — see Storage#deferWrite.
+  // one block — see the DeferredWindow (src/defer.js).
   const defer = options.defer;
   if (defer !== undefined && !(Number.isInteger(defer) && defer >= 0)) {
     throw new TypeError('open({ defer }): defer must be a non-negative integer of milliseconds');

@@ -138,7 +138,8 @@ class Emitter {
   listeners(eventName) {
     if (!eventName) throw new Error('Expected eventName');
     const event = this.#events.get(eventName);
-    return event ? event.on : [];
+    // A copy: the list handed out is the one an emit walks without copying.
+    return event ? event.on.slice() : [];
   }
 
   listenerCount(eventName) {

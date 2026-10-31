@@ -1055,7 +1055,8 @@ class Storage extends Emitter {
     return done;
   }
 
-  // Every mutation passes through one queue: the chain's tail pointer, the
+  // Every mutation passes through one queue — or is made at once on an idle
+  // queue (#fastCommit), which is a turn of its own: the chain's tail pointer, the
   // log's seq counter and a record's entry are all read-then-written, and two
   // interleaved writers would race all three.
   #run(task) {
