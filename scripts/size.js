@@ -324,8 +324,9 @@ const ENTRIES = [
   // 34.1 with a list's reading made when it is read (deriveLater; 2026-10-31). 34.5, raised by name.
   // 36.8 with the synchronous text handle (src/text/handle.js, openText) and keystrokes coalesced; 37.4 with an op's
   // own references short (src/text/kind.js fullRefs). 37.5, raised by name. 37.7 with the handle's embeds and spans
-  // and a run's next offset reserved while a handle is open (extendsRun). 38, raised by name.
-  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 38 },
+  // and a run's next offset reserved while a handle is open (extendsRun). 38, raised by name. 38.2 with what a handle's
+  // edit made carried to its flush. 38.5, raised by name.
+  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 38.5 },
   // The tree kind alone, with the fractional indexes a place is made of and
   // the argument checks it shares with the core (5.1 measured).
   // 5.5 with the field-name check unset shares with it (src/args.js).
@@ -424,7 +425,8 @@ const ENTRIES = [
     // 36.8 with a list read when it is read and keystrokes coalesced. 37, raised by name.
     // 37.0 (over by bytes) with what a text handle stands on. 37.5, raised by name.
     // 37.9 with SHA-256 in JavaScript (src/crypto/sha256.js), so the browser makes a write at once. 38, raised by name.
-    budget: 38,
+    // 38.0 (over by bytes) with a handle's flush taking what its edits made. 38.5, raised by name.
+    budget: 38.5,
   },
 ];
 

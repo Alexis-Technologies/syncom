@@ -321,6 +321,18 @@ const validateLocal = async (core, op, current, visible, ctx) => {
   return { entry, delta, changes };
 };
 
+// One reading of a record: the same object, or the same data and meta — the
+// cache holds an entry's data and meta in an object of its own (EntryStore.hold).
+const sameEntry = (a, b) =>
+  a === b || (a !== null && b !== null && !a.encrypted && !b.encrypted && a.data === b.data && a.meta === b.meta);
+
+// Whether a write of `type` to `entry` is checked beyond the op: a validator, unique keys.
+const validates = (core, entry, type) => {
+  if (!VALIDATED.has(type) || entry === null || entry.encrypted) return false;
+  const def = core.definitionOf(entry.data);
+  return Boolean(def?.validator) || def?.unique?.length > 0;
+};
+
 // The op applied to the record as it is: `{ entry, delta, changes }`, null
 // for an op that changes nothing; a refusal throws.
 const applyLocal = (core, op, current) => {
@@ -960,8 +972,11 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
   // editor's handle's (src/text/handle.js), resolved and stamped as it was
   // typed: it takes its stream and seq here, is validated over the record as
   // the transaction has it, and goes with the rest. Null for one that
-  // changes nothing (a keystroke a peer's reset made moot).
-  tx.commitResolved = async (op) => {
+  // changes nothing (a keystroke a peer's reset made moot). `made` is what
+  // the op made where it was typed — `{ from, entry, delta, changes }`: where
+  // the transaction reads the record as that very `from` and nothing
+  // validates the record, it is what applying the op again would make.
+  tx.commitResolved = async (op, made) => {
     const { id, type } = op;
     const current = await tx.current(id);
     if (current?.encrypted === true) {
@@ -987,7 +1002,10 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
         : null;
     // beforeWrite may refuse a keystroke as it would a call; it replaces no data here.
     if (core.hooks.beforeWrite !== null) await core.hook('beforeWrite', ctx);
-    const applied = await validateLocal(tx, op, current, null, ctx);
+    const applied =
+      made !== undefined && sameEntry(made.from, current) && !validates(core, made.entry, type)
+        ? made
+        : await validateLocal(tx, op, current, null, ctx);
     if (applied === null) return null;
     return join(prepared(tx, op, applied, current, ctx, source, null));
   };

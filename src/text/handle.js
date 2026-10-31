@@ -29,6 +29,7 @@ const S = require('./sequence.js');
 const { coalesce, render, blockOf, marksAt, markerArgs } = require('./kind.js');
 const { toDelta } = require('./deltas.js');
 const { typedSpans } = require('./methods.js');
+const { assignData } = require('../lazy.js');
 
 // What a handle holds at most before it flushes whatever the window says.
 const PENDING_MAX = 1024;
@@ -43,6 +44,11 @@ class TextHandle extends Emitter {
   #base;
   #overlay;
   #pending = [];
+  // Beside each pending op, what it made: the reading it was applied over
+  // (`from`), the one it left, its delta and changes — what the flush hands
+  // the transaction, which then applies it again only where its reading of
+  // the record is another (src/commit.js commitResolved).
+  #made = [];
   #flushing = RESOLVED;
   // Flushes taken and not settled yet: their edits still wait for the log.
   #unsettled = 0;
@@ -196,8 +202,10 @@ class TextHandle extends Emitter {
     }
     if (this.#pending.length === 0) return this.#flushing;
     const batch = this.#pending;
+    const made = this.#made;
     const waiting = this.#waiting;
     this.#pending = [];
+    this.#made = [];
     this.#waiting = null;
     const core = this.#core;
     this.#unsettled++;
@@ -206,7 +214,7 @@ class TextHandle extends Emitter {
     const run = async () => {
       const { done } = await core.transact(
         async (tx) => {
-          for (let i = 0; i < batch.length; i++) await tx.commitResolved(batch[i]);
+          for (let i = 0; i < batch.length; i++) await tx.commitResolved(batch[i], made[i]);
         },
         { source: this.#source },
       );
@@ -253,15 +261,25 @@ class TextHandle extends Emitter {
   #edit(type, payload) {
     if (this.#closed) throw new SyncomError('CLOSED', `The handle on ${this.field} of ${this.id} is closed`);
     const { editing } = this.#core;
-    const op = editing.makeOp(type, this.id, payload, this.#overlay, this.#actor);
+    const from = this.#overlay;
+    const op = editing.makeOp(type, this.id, payload, from, this.#actor);
     if (op.value === null) return;
-    const applied = editing.applyLocal(op, this.#overlay);
+    const applied = editing.applyLocal(op, from);
     if (applied === null) return;
     this.#overlay = applied.entry;
-    const last = this.#pending.length > 0 ? this.#pending[this.#pending.length - 1] : null;
+    const at = this.#pending.length - 1;
+    const last = at >= 0 ? this.#pending[at] : null;
     const grown = last === null || last.key !== op.key ? null : coalesce(last, op);
-    if (grown !== null) last.value = grown;
-    else this.#pending.push(op);
+    if (grown !== null) {
+      last.value = grown;
+      const made = this.#made[at];
+      made.entry = applied.entry;
+      made.delta = assignData(made.delta ?? {}, applied.delta);
+      for (let i = 0; i < applied.changes.length; i++) made.changes.push(applied.changes[i]);
+    } else {
+      this.#pending.push(op);
+      this.#made.push({ from, entry: applied.entry, delta: applied.delta, changes: applied.changes.slice() });
+    }
     this.#tell(applied.changes, true);
     if (this.#pending.length >= PENDING_MAX) void this.flush().catch(() => {});
     else this.#arm();
@@ -376,6 +394,7 @@ class TextHandle extends Emitter {
   #unlogged(batch, cause) {
     const edits = batch.length + this.#pending.length;
     this.#pending = [];
+    this.#made = [];
     this.#overlay = this.#base;
     // A flush behind it may still log what it took: its turn reaches the
     // handle as another writer's would, laid on the base and the overlay both.

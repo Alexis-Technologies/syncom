@@ -222,3 +222,29 @@ test('a handle logs its edits a window after them: a timer of the storage’s de
   await handle.close();
   await storage.close();
 });
+
+test('a handle’s edits of a validated record are validated as the flush logs them: one refused, nothing logged', async () => {
+  const { schema } = require('../src/schema/schema.js');
+  // A note's body is at most ten characters.
+  const Note = (value) => {
+    if (value.body === undefined || value.body.length <= 10) return true;
+    Note.errors = [{ instancePath: '/body', message: 'too long', keyword: 'maxLength' }];
+    return false;
+  };
+  const storage = await openMemory('/validated', memory(), {
+    plugins: [text, sync, schema],
+    schema: { entities: { Note: { schema: Note } } },
+  });
+  const note = await storage.Note.insert({ title: 'n' });
+  const handle = await storage.openText(note.id, 'body', { window: 60_000 });
+  handle.insert(0, 'short');
+  await handle.flush();
+  assert.strictEqual((await storage.get(note.id)).body, 'short', 'validated, and logged');
+  const next = storage.log.next;
+  handle.insert(5, ' and far too long');
+  await assert.rejects(handle.flush(), (error) => error.code === 'UNLOGGED' && error.cause.name === 'ValidationError');
+  assert.strictEqual(storage.log.next, next, 'nothing logged');
+  assert.strictEqual(handle.toString(), 'short');
+  await handle.close();
+  await storage.close();
+});
