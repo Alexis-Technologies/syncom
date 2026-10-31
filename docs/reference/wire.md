@@ -519,6 +519,7 @@ a snapshot buys nothing an op could not:
 | Field path | 16 segments, 512 characters, no empty segment, no `__proto__` | refused |
 | Fields per record | 4 096 paths; the first in sorted order stay | `OP_REFUSED` `detail: 'paths'` |
 | `msg` | 1 024 characters | `malformed` |
+| `actor`, `from` | 256 characters each (`MAX_ACTOR`; a value of another shape by its JSON): claims taken as they are, but in the header every node hashes | `malformed`; locally a `TypeError` |
 | Stamp ahead of the receiver | `sync.maxSkew`, 24 hours — an op's `ts`, every stamp a `merge`'s `meta` holds | `SKEW` |
 | How deep a field of an op, or a snapshot record's `data` or `meta`, nests | 80 levels (`MAX_WIRE_DEPTH`; every object or array on the deepest path a level) | `malformed`; a snapshot record left out |
 | How deep what a local write takes nests | 64 levels (`MAX_JSON_DEPTH`): the 16 between leave room for what an op and a meta wrap around a value | `TypeError` |

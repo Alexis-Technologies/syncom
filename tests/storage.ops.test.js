@@ -1975,3 +1975,21 @@ test('children of list elements and tree nodes: composed, reachable, named', asy
     // A query reaches the strings of a list's elements for $text — through the composed view.
   });
 });
+
+test('a peer’s actor or from past MAX_ACTOR is malformed: never hashed, logged or relayed; a local one is a TypeError', async (t) => {
+  const { MAX_ACTOR } = require('../src/shape.js');
+  const { storage } = await openTemp(t);
+  const long = 'a'.repeat(MAX_ACTOR + 1);
+  const ok = remoteOp('peer', 1, 'write', 'r1', { data: { a: 1 }, actor: 'a'.repeat(MAX_ACTOR) });
+  const badActor = remoteOp('peer', 2, 'set', 'r1', { data: { b: 2 }, actor: long });
+  const badFrom = remoteOp('peer', 2, 'set', 'r1', { data: { b: 2 }, from: long });
+  const next = storage.log.next;
+  const result = await storage.applyRemote([ok, badActor, badFrom], { via: 'L' });
+  assert.strictEqual(result.applied, 1, 'an actor at the bound is taken');
+  assert.strictEqual(result.malformed, 2, 'one past it, as actor or as from, is malformed');
+  assert.strictEqual(storage.log.next, next + 1, 'the malformed ones were not logged');
+  assert.deepStrictEqual(await storage.get('r1'), { a: 1 });
+  await assert.rejects(storage.set('local', { n: 1 }, { actor: long }), TypeError);
+  await storage.set('local', { n: 1 }, { actor: 'a'.repeat(MAX_ACTOR) });
+  assert.deepStrictEqual(await storage.get('local'), { n: 1 });
+});

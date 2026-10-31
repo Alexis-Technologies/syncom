@@ -23,7 +23,10 @@ for (let n = 2, found = 0; found < 64; n++) {
 const W = new Int32Array(64);
 const V = new Int32Array(8);
 const encoder = new TextEncoder();
-let buffer = new Uint8Array(1024);
+// Grown to the text in hand and let go of past BUFFER_MAX, once hashed: a text of megabytes pins no megabytes.
+const BUFFER = 1024;
+const BUFFER_MAX = 1 << 20;
+let buffer = new Uint8Array(BUFFER);
 
 // The text as UTF-8 at the head of the buffer, padded to whole blocks: where the blocks end.
 const padded = (text) => {
@@ -99,6 +102,7 @@ const sha256Now = (text) => {
   }
   const out = new Uint8Array(32);
   for (let i = 0; i < 32; i++) out[i] = V[i >> 2] >>> (24 - (i & 3) * 8);
+  if (buffer.length > BUFFER_MAX) buffer = new Uint8Array(BUFFER);
   return out;
 };
 

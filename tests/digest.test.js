@@ -42,3 +42,29 @@ test('an op is named by the same SHA-256 on both platforms, the browser’s at o
   assert.strictEqual(await pending, node.hashOf(large));
   assert.strictEqual(await browser.sha256(small), await node.sha256(small));
 });
+
+test('a log line’s CRC-32 is the same from zlib and from the table, ASCII or not, and a line of megabytes pins no megabytes', () => {
+  const node = require('../src/crc32.js');
+  const table = require('../src/crc32.browser.js');
+  // The check value of the standard, and the texts the digest test hashes.
+  assert.strictEqual(table.crc32('123456789'), 'cbf43926');
+  assert.strictEqual(node.crc32('123456789'), 'cbf43926');
+  const random = prng(11);
+  const texts = ['', 'a', '{"e":[]}', 'é', '😀', 'a\ud800b', '\udc00', 'x'.repeat(3000)];
+  for (let k = 0; k < 200; k++) {
+    let text = '';
+    const length = Math.floor(random() * 300);
+    for (let i = 0; i < length; i++) {
+      const pick = random();
+      text += String.fromCharCode(pick < 0.8 ? 32 + Math.floor(random() * 95) : Math.floor(random() * 0xffff));
+    }
+    texts.push(text);
+  }
+  for (const text of texts) assert.strictEqual(table.crc32(text), node.crc32(text), JSON.stringify(text.slice(0, 20)));
+  // Past a megabyte the scratch buffers are let go of; the next text reads the same.
+  const large = 'y'.repeat(2 * 1024 * 1024);
+  assert.strictEqual(table.crc32(large), node.crc32(large));
+  assert.strictEqual(table.crc32('after'), node.crc32('after'));
+  assert.deepStrictEqual(Buffer.from(sha256Now(large)), crypto.hash('sha256', large, 'buffer'));
+  assert.deepStrictEqual(Buffer.from(sha256Now('after')), crypto.hash('sha256', 'after', 'buffer'));
+});

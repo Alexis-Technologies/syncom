@@ -925,6 +925,12 @@ There is no released version section until then; everything below lands in it.
 
 ### Security
 
+- **A peer’s `actor` and `from` are bounded.** Both are claims, carried as they are — and in the header
+  every node hashes, in the browser at once on the main thread, so a peer chose how much a node hashed
+  and how large a buffer it kept. An op whose `actor` or `from` is past 256 characters (`MAX_ACTOR`) is
+  `malformed`; a local actor past it is a `TypeError`. The browser halves’ scratch buffers (the CRC-32
+  table’s, SHA-256’s) are let go of past a megabyte, and a log file or a segment that fails its
+  checksum, or is no segment at all, is told by its shape alone — nothing of it is parsed.
 - **A host could keep a bootstrapping node paging for ever.** The dialing
   side took the host's snapshot cursor as it came — one that did not move
   on was asked again and again — and read a streamed page to its end,

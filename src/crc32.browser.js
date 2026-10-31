@@ -18,8 +18,11 @@ const tableOf = () => {
 };
 
 const encoder = new TextEncoder();
-// Grown to the largest text seen: a UTF-16 unit is at most three UTF-8 bytes.
-let scratch = new Uint8Array(1024);
+// Grown to the text in hand (a UTF-16 unit is at most three UTF-8 bytes) and
+// let go of past SCRATCH_MAX: a line of megabytes, once, pins no megabytes.
+const SCRATCH = 1024;
+const SCRATCH_MAX = 1 << 20;
+let scratch = new Uint8Array(SCRATCH);
 
 const crc32 = (text) => {
   TABLE ??= tableOf();
@@ -27,6 +30,7 @@ const crc32 = (text) => {
   const { written } = encoder.encodeInto(text, scratch);
   let c = -1;
   for (let i = 0; i < written; i++) c = TABLE[(c ^ scratch[i]) & 0xff] ^ (c >>> 8);
+  if (scratch.length > SCRATCH_MAX) scratch = new Uint8Array(SCRATCH);
   return ((c ^ -1) >>> 0).toString(16).padStart(8, '0');
 };
 

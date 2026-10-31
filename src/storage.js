@@ -31,7 +31,7 @@ const { Catalog, isTextIndex } = require('./catalog.js');
 const { DISABLED, isWriter, writerOf, traced, now } = require('./telemetry/writer.js');
 const { GLOBAL_SCOPE } = require('./scope.js');
 const { normalizeStorageOptions } = require('./options.js');
-const { isPlainObject, isRecordId, invalidId, isStreamName, VALIDATED } = require('./shape.js');
+const { isPlainObject, isRecordId, invalidId, isStreamName, VALIDATED, MAX_ACTOR } = require('./shape.js');
 const { Observers } = require('./observe.js');
 const { DeferredWindow } = require('./defer.js');
 const { fieldName } = require('./args.js');
@@ -50,6 +50,15 @@ const NO_SCHEMA = Object.freeze({ version: 1, entities: new Map(), snapshot: und
 // The hooks a storage accepts (`open({ hooks })`). Writes and reads run
 // their hooks inside this storage; the apply pair runs per peer batch.
 const STORAGE_HOOKS = ['beforeWrite', 'afterWrite', 'beforeRead', 'afterRead', 'beforeApply', 'afterApply'];
+
+// Who an op says made it: a string of MAX_ACTOR characters at most (it rides in the signed header
+// every node hashes; a peer's past the bound is malformed), null for nobody.
+const actorName = (actor) => {
+  if (actor === null || actor === undefined) return null;
+  const name = String(actor);
+  if (name.length > MAX_ACTOR) throw new TypeError(`actor must be at most ${MAX_ACTOR} characters`);
+  return name;
+};
 
 // The ops that leave a record's whole state behind them — where a repair
 // can start replaying from. A purge counts even scrubbed; the others not.
@@ -1155,12 +1164,11 @@ class Storage extends Emitter {
   #actorOf(given) {
     if (given === undefined && typeof this.#actor === 'function') return this.#awaitActor();
     const actor = given !== undefined ? given : this.#actor;
-    return actor === null || actor === undefined ? null : String(actor);
+    return actorName(actor);
   }
 
   async #awaitActor() {
-    const actor = await this.#actor();
-    return actor === null || actor === undefined ? null : String(actor);
+    return actorName(await this.#actor());
   }
 
   // One chain block per applied batch: `records` maps every touched id to

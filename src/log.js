@@ -155,10 +155,14 @@ const isMap = (value) => value !== null && typeof value === 'object' && !Array.i
 
 const MALFORMED = Object.freeze({ entries: null, reason: 'malformed' });
 const ALTERED = Object.freeze({ entries: null, reason: 'checksum' });
-// A text that is not a whole file: torn on the way down when it does not
-// read as JSON, altered (a file without its checksum is not whole) when it
-// does.
-const unwhole = (text) => (typeof text === 'string' && parseJson(text) !== null ? ALTERED : MALFORMED);
+// A text that is not a whole file: altered when it is shaped like one — a
+// JSON object, braces at both ends (a file without its checksum is not whole)
+// — torn on the way down otherwise. Told by the shape alone: nothing of a
+// text that failed its check is parsed.
+const unwhole = (text) =>
+  typeof text === 'string' && text.length > 1 && text[0] === '{' && text[text.length - 1] === '}' ? ALTERED : MALFORMED;
+// A segment's trailer is `{"lines":<n>,"to":<seq>,"c":"<8 hex>"}`: short. A last line longer is no trailer.
+const TRAILER_MAX = 96;
 const readFile = (text) => {
   if (typeof text !== 'string' || text.length < FILE_HEAD.length + FILE_TAIL || !text.startsWith(FILE_HEAD)) {
     return unwhole(text);
@@ -199,10 +203,14 @@ const segmentOf = (lines, to) => {
 const readSegment = (text) => {
   if (typeof text !== 'string') return MALFORMED;
   const cut = text.lastIndexOf('\n');
+  // One line alone is no segment (told by its shape); a last line too long to be a trailer is a segment
+  // whose trailer is gone — altered. Nothing of either is parsed.
+  if (cut === -1) return unwhole(text);
+  if (text.length - cut - 1 > TRAILER_MAX) return ALTERED;
   const trailer = parseJson(text.slice(cut + 1));
   if (trailer === null) return MALFORMED;
   const { lines: count, to, c } = trailer;
-  if (cut === -1 || !Number.isSafeInteger(count) || !Number.isSafeInteger(to) || typeof c !== 'string') return ALTERED;
+  if (!Number.isSafeInteger(count) || !Number.isSafeInteger(to) || typeof c !== 'string') return ALTERED;
   const lines = text.slice(0, cut).split('\n');
   if (lines.length !== count) return ALTERED;
   let sums = '';

@@ -310,7 +310,10 @@ const ENTRIES = [
   // not be logged, and every handle flushed at a flush(), a tag() and a close() (review №4, E2). 129.5, raised by name.
   // 129.8 with a handle's delta checked whole first, its keystrokes one change, a hook's context for its edits, the
   // handles reset by a repair, and a write that adds a `$type` kept off the fast path. 130, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 130 },
+  // 130.0 (over by bytes) with a peer's `actor` and `from` bounded (MAX_ACTOR), a write made at once with a promise
+  // of its own and its entry settled whatever the slot did, one close, the browser halves' buffers let go of past a
+  // megabyte, and a log file told altered or torn by its shape (review №4, E3–E4). 130.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 130.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -408,7 +411,9 @@ const ENTRIES = [
     // 4.6 with the canonical JSON in shape.js.
     // 5.9 with migrate(), check() and schema.json moved out of the core (the
     // main entry 50.8 → 50.1; 2026-10-27). 6, raised by name.
-    budget: 6,
+    // 6.0 (over by bytes) with a peer's `actor` and `from` bounded in shape.js (MAX_ACTOR; review №4, E4). 6.5,
+    // raised by name.
+    budget: 6.5,
   },
   // The OpenTelemetry adapter: the tracer and meter resolved, the instruments, the gauges.
   {
