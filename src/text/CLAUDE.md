@@ -34,6 +34,14 @@ src/text/splice.js        what an op does: the draft, a run placed with what han
                           extensions, pending ops, a splice; the pos/vals registers — assign and move
 src/text/marks.js         marks: the anchors of a range, a mark applied or switched off, the index of the marks in force (styleAt)
 src/text/join.js          a block as a snapshot carries it: a peer's block normalized under the bounds, prune (the reset rule), join
+src/text/v2/              the engine to come (E2), written beside the one above and held to it, op by op and reading by
+                          reading, by tests/sequence.differential.test.js; nothing requires it until the switch
+src/text/v2/cow.js        copy-on-write by owner: a hash trie (registers, marks, what waits) walked in the order the v1
+                          map walked, a sorted list in chunks (a run's children) — no requires
+src/text/v2/ids.js        the id index: a copy-on-write B+-tree from (run, offset) as one number to a run's record and its
+                          spans, searched from the root down — no requires
+src/text/v2/rope.js       the rope: a copy-on-write B+-tree of spans and fences with two measures, deltas up the parents,
+                          hints checked as they are climbed, a frozen version's places from a walk of its own — no requires
 ```
 
 ## Rules
