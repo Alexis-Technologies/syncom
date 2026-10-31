@@ -40,6 +40,6 @@ src/editor/editor.js      the @alexify/syncom/editor subpath — the editor-agno
   a delete, so an index beside a break stays beside it — a Myers diff pairs it with another
   `\n`), and a peer's delta over a held fit lands as the field's text read again
   (`state.toText`, then the diff), never transformed over the fit: both would insert the `\n`. A send
-  that fails other than STALE reloads the editor after a growing pause and the binding stops
-  after `MAX_FAILURES` in a row: never retry in a microtask loop (it starved the event loop
-  for hours once).
+  that fails other than STALE reloads the editor from the handle's reading at once and the
+  binding stops after `MAX_FAILURES` in a row: never retry in a microtask loop (it starved the
+  event loop for hours once).

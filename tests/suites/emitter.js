@@ -3,6 +3,30 @@
 // Shared by tests/utils.test.js and tests/utils.browser.test.js — the Emitter
 // is byte-identical in both halves, so the contract is asserted once.
 const runEmitterTests = async (t, assert, Emitter) => {
+  await t.test('a once listener added during an emit is not swept by it: it fires on the next emit', async () => {
+    const emitter = new Emitter();
+    const calls = [];
+    emitter.once('tick', () => {
+      calls.push('first');
+      emitter.once('tick', () => calls.push('second'));
+    });
+    await emitter.emit('tick');
+    assert.deepStrictEqual(calls, ['first']);
+    await emitter.emit('tick');
+    assert.deepStrictEqual(calls, ['first', 'second']);
+    assert.strictEqual(emitter.listenerCount('tick'), 0);
+    // The contained emit the same way.
+    const other = new Emitter();
+    const seen = [];
+    other.once('tock', () => {
+      seen.push(1);
+      other.once('tock', () => seen.push(2));
+    });
+    other.dispatch('tock', [], () => {});
+    other.dispatch('tock', [], () => {});
+    assert.deepStrictEqual(seen, [1, 2]);
+  });
+
   await t.test('emit forwards every argument to every listener', async () => {
     const emitter = new Emitter();
     const seen = [];

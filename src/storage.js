@@ -1818,7 +1818,10 @@ class Storage extends Emitter {
       ({ entry } = applyOp(entry, entries[i].op, this.#limits));
     }
     this.#entries.forget(id);
-    await this.#persistBatch(new Map([[id, entry]]), entries[start].seq, entries[entries.length - 1].seq);
+    // Through the landing chain, like every file write: never beside a deferred flush of the same record.
+    const from = entries[start].seq;
+    const to = entries[entries.length - 1].seq;
+    await this.#landing(() => this.#persistBatch(new Map([[id, entry]]), from, to));
     this.#flushCatalog();
     const ops = entries.length - start;
     const alive = isAlive(entry);

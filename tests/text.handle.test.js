@@ -11,7 +11,7 @@ const { open } = require('../src/index.js');
 const { text } = require('../src/text/text.js');
 const { sync } = require('../src/sync/sync.js');
 const { memory } = require('../src/memory/memory.js');
-const { createMesh, settle } = require('./utils/mesh.js');
+const { createMesh, settle, prng } = require('./utils/mesh.js');
 const { PREPEND_MAX } = require('../src/text/kind.js');
 
 const openMemory = (path, fsi = memory(), options = {}) =>
@@ -681,4 +681,52 @@ test('stats() counts the handles open, those with edits waiting and the reservat
   await two.close();
   assert.deepStrictEqual(storage.stats().handles, { open: 0, pending: 0, extents: 0 });
   await storage.close();
+});
+
+test('a handle, the storage and a peer edit one text at random: the nodes and the handle read alike (seeded)', async (t) => {
+  const { SOURCE } = require('../src/symbols.js');
+  for (const seed of [1, 2, 3, 5, 8, 13]) {
+    const random = prng(seed);
+    const createStorage = (t2, name, options) => {
+      const storage = openMemory(`/mix-${seed}-${name}`, memory(), { ...options, defer: 4 });
+      t2.after(async () => (await storage).close().catch(() => {}));
+      return storage;
+    };
+    const mesh = await createMesh(t, ['A', 'B'], [['A', 'B']], createStorage);
+    const a = mesh.get('A');
+    const b = mesh.get('B');
+    const id = await a.insert({ title: 'doc' });
+    await a.push(id, 'body', 'base');
+    await settle([a, b]);
+    const handle = await a.openText(id, 'body', { window: 3 });
+    for (let step = 0; step < 50; step++) {
+      const pick = random();
+      const length = handle.length;
+      if (pick < 0.45) {
+        handle.insert(Math.floor(random() * (length + 1)), String.fromCharCode(97 + Math.floor(random() * 26)));
+      } else if (pick < 0.6) {
+        if (length > 0) handle.delete(Math.floor(random() * length), 1);
+      } else if (pick < 0.8) {
+        const text = (await a.get(id)).body;
+        await a.splice(id, 'body', Math.floor(random() * (text.length + 1)), 0, 'S');
+      } else {
+        const text = (await b.get(id)).body;
+        await b.splice(id, 'body', Math.floor(random() * (text.length + 1)), 0, 'P');
+      }
+      if (random() < 0.25) await new Promise((resolve) => setTimeout(resolve, 4));
+    }
+    await handle.flush();
+    await settle([a, b]);
+    const text = (await a.get(id)).body;
+    assert.strictEqual((await b.get(id)).body, text, `seed ${seed}: the nodes agree`);
+    assert.strictEqual(handle.toString(), text, `seed ${seed}: the handle reads the field`);
+    const blockA = (await a[SOURCE].entry(id)).meta.blocks.body;
+    const blockB = (await b[SOURCE].entry(id)).meta.blocks.body;
+    assert.deepStrictEqual(
+      JSON.parse(JSON.stringify(blockA)),
+      JSON.parse(JSON.stringify(blockB)),
+      `seed ${seed}: the blocks agree`,
+    );
+    await handle.close();
+  }
 });

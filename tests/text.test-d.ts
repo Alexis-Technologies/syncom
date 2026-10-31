@@ -57,3 +57,8 @@ expectType<boolean>(handle.pending);
 expectType<Promise<void>>(handle.flushed);
 expectType<() => void>(handle.observe((delta, event) => void [delta, event.local, event.reset]));
 expectType<Promise<void>>(handle.flush());
+expectType<Promise<void>>(handle.close());
+expectType<string>(handle.slice(0, 1));
+expectType<string>(handle.id);
+expectType<string>(handle.field);
+expectType<() => void>(handle.observe((delta, event) => void [delta, event.source]));

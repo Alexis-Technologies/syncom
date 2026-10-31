@@ -5,7 +5,9 @@ other MIT- and BSD-licensed projects, read at the commits named below; this
 file keeps their notices, as those licenses ask, and says which syncom files
 carry the adaptation. Nothing was copied from json-joy (AGPL-3.0), Collabs or the
 `fugue/` directory of the Fugue repository (Apache-2.0): those were read as
-specifications only. The `automerge-perf` editing trace (CC-BY-4.0,
+specifications only — `src/text/ids.js` takes its design (a B+-tree from a run's
+id and offset to the run's record and its spans) from json-joy's `AbstractRga`
+ids tree, read so, with no code copied. The `automerge-perf` editing trace (CC-BY-4.0,
 https://github.com/automerge/automerge-perf) is not redistributed: `pnpm
 bench:compare` downloads it at bench time into a git-ignored cache
 (bench/compare/trace.js) and replays it in the `trace` scenario.

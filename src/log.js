@@ -360,6 +360,10 @@ class OpLog {
     }
     await this.#loadSegments(index !== null);
     await this.#loadOpen();
+    // A position handed out is never handed out again in its epoch: where the
+    // newest file did not read, the counter the index kept is the floor of
+    // the next — a peer that resumes from an id of this epoch gets no reused seq.
+    if (index !== null && Number.isSafeInteger(index.next) && index.next > this.#next) this.#next = index.next;
     this.#seen = null;
     // The files were read out of order (the journals newest first): the
     // streams are made from the sorted entries, once.
@@ -1055,11 +1059,21 @@ class OpLog {
         await this.#fsi.write(this.#openPath, file, line);
       }
     } catch (error) {
-      // What a failed append left of its line stays at the end of its
-      // journal, and its seqs go to the next group: that one begins a new
-      // journal, which a reopen reads first.
+      // Its seqs go to the next group, which begins a new journal that a
+      // reopen reads first. What the failed append left of its line — the
+      // whole line, where the write went down and the sync did not — is taken
+      // out of its journal here (written again without it, in this lane), so
+      // a reopen with nothing after it never brings the group back; where the
+      // rewrite fails too, a later group's line shadows it.
       this.#journal = null;
       this.#fail(group, error);
+      if (this.#journaled && file !== undefined) {
+        try {
+          await this.#rewriteJournal(file, this.#sealedTo);
+        } catch (thrown) {
+          this.#log?.warn?.({ event: 'log.journal.unrewritten', file, err: thrown });
+        }
+      }
       return;
     }
     // The group is on disk: from here on its callers are answered whatever
@@ -1503,6 +1517,25 @@ class OpLog {
       for (const group of groups) group.file = copy;
       if (this.#journal === file) this.#journal = null;
       await this.#fsi.remove(this.#openPath, file);
+    }
+    // The evidence copies under corrupt/ (an open file that failed its
+    // checksum at an open) do not read, so no payload can be stripped from
+    // one: a copy that names the id goes whole — a purge outranks evidence.
+    const corruptPath = `${this.#path}/${CORRUPT}`;
+    let kept = null;
+    try {
+      kept = await this.#fsi.list(corruptPath);
+    } catch {
+      kept = null;
+    }
+    if (kept !== null) {
+      const needle = `"${id}"`;
+      for (const name of kept) {
+        const text = await readOrNull(this.#fsi, corruptPath, name);
+        if (typeof text !== 'string' || !text.includes(needle)) continue;
+        await this.#fsi.remove(corruptPath, name);
+        this.#log?.info?.({ event: 'log.corrupt.scrubbed', file: name, id });
+      }
     }
     this.#torn.delete(id);
     return fresh;

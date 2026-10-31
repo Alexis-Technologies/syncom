@@ -315,7 +315,10 @@ const ENTRIES = [
   // 130.0 (over by bytes) with a peer's `actor` and `from` bounded (MAX_ACTOR), a write made at once with a promise
   // of its own and its entry settled whatever the slot did, one close, the browser halves' buffers let go of past a
   // megabyte, and a log file told altered or torn by its shape (review №4, E3–E4). 130.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 130.5 },
+  // 130.5 (over by bytes) with a failed append's line taken out of its journal, the index's counter kept, the
+  // evidence copies scrubbed by a purge, a once listener added during an emit kept, and the writes counted by
+  // path (review №4, E6, E9). 131, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 131 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -447,7 +450,9 @@ const ENTRIES = [
     // 37.0 (over by bytes) with what a text handle stands on. 37.5, raised by name.
     // 37.9 with SHA-256 in JavaScript (src/crypto/sha256.js), so the browser makes a write at once. 38, raised by name.
     // 38.0 (over by bytes) with a handle's flush taking what its edits made. 38.5, raised by name.
-    budget: 38.5,
+    // 38.5 (over by bytes) with the log's failed line taken out, the index's counter kept, the evidence copies
+    // scrubbed, the writes counted by path and one close (review №4, E3–E9). 39, raised by name.
+    budget: 39,
   },
 ];
 

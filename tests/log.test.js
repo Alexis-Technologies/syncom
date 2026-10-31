@@ -1178,3 +1178,68 @@ test('a group scrubbed before its roll is sealed as the scrub left it: no segmen
   assert.strictEqual(first.op.data, undefined);
   await log.close();
 });
+
+test('a failed append whose line went down whole does not come back: the journal is written again without it', async () => {
+  const { memory } = require('../src/memory/memory.js');
+  const inner = memory();
+  let failSync = false;
+  // The line reaches the disk, the sync after it does not: `durable` over a disk that fails late.
+  const fsi = {
+    ...inner,
+    append: async (dir, name, text) => {
+      await inner.append(dir, name, text);
+      if (failSync) {
+        failSync = false;
+        throw new Error('sync failed');
+      }
+    },
+  };
+  const log = await new OpLog('/j', { fsi, rollAfter: 100, logger: false });
+  await log.append([op('A', 1)]);
+  failSync = true;
+  await assert.rejects(log.append([op('A', 2, { data: { secret: 'S3CRET' } })]), /sync failed/);
+  assert.strictEqual(log.next, 2, 'the seq taken back');
+  await log.close();
+  const reopened = await new OpLog('/j', { fsi, rollAfter: 100, logger: false });
+  assert.deepStrictEqual(
+    reopened.since(reopened.formatId(0)).map((entry) => entry.seq),
+    [1],
+    'the failed group is gone from the disk',
+  );
+  assert.strictEqual(reopened.next, 2);
+  for (const name of await fsi.list('/j/log/open')) {
+    assert.ok(!(await fsi.read('/j/log/open', name)).includes('S3CRET'), 'nothing of the failed line on disk');
+  }
+  await reopened.close();
+});
+
+test('a position handed out is never handed out again in its epoch: the index keeps the counter where the newest file did not read', async () => {
+  const { memory } = require('../src/memory/memory.js');
+  const fsi = memory();
+  const log = await new OpLog('/n', { fsi, rollAfter: 100, logger: false });
+  await log.append([op('A', 1), op('A', 2), op('A', 3)]);
+  await log.close();
+  // The journal is gone (a disk that lost it), and its entries with it; the index says what was handed out.
+  for (const name of await fsi.list('/n/log/open')) await fsi.remove('/n/log/open', name);
+  const reopened = await new OpLog('/n', { fsi, rollAfter: 100, logger: false });
+  assert.strictEqual(reopened.next, 4, 'from the index, not from what read');
+  const [entry] = await reopened.append([op('A', 4)]);
+  assert.strictEqual(entry.seq, 4);
+  await reopened.close();
+});
+
+test('a purge scrubs the evidence copies under corrupt/ too: a copy that names the id is removed whole', async () => {
+  const { memory } = require('../src/memory/memory.js');
+  const fsi = memory();
+  const log = await new OpLog('/c', { fsi, rollAfter: 100, logger: false });
+  await log.append([op('A', 1, { id: 'gone', data: { secret: 'S3CRET' } })]);
+  await fsi.write(
+    '/c/log/corrupt',
+    'old.json',
+    '{"e":[[7,"fp",["gone"],{"data":{"secret":"S3CRET"}}]],"c":"00000000"}',
+  );
+  await fsi.write('/c/log/corrupt', 'other.json', '{"e":[[8,"fp",["kept"],{}]],"c":"00000000"}');
+  assert.strictEqual(await log.scrub('gone'), 1);
+  assert.deepStrictEqual(await fsi.list('/c/log/corrupt'), ['other.json']);
+  await log.close();
+});

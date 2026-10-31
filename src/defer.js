@@ -100,6 +100,8 @@ class DeferredWindow {
     if (slot === undefined) return;
     for (let i = 0; i < slot.positions.length; i++) if (!(slot.positions[i] <= toSeq)) return;
     this.#slots.delete(id);
+    // Its positions wait no more: the count the overflow flush reads goes down with them.
+    this.#positions -= slot.positions.length;
     for (const position of slot.positions) this.#host.applied(position);
   }
 

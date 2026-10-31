@@ -109,20 +109,20 @@ const { open } = require('@alexify/syncom/all'); // every plugin: text, tree, si
 
 | Entry | min+gzip | Entry | min+gzip |
 | --- | ---: | --- | ---: |
-| the core | 51.4 KB | `/all` | 117.1 KB |
-| `/text` | 33.9 KB | `/tree` | 8.6 KB |
-| `/sync` | 16.5 KB | `/versions` | 34.8 KB |
-| `/signing` | 4.6 KB | `/chain` | 2.1 KB |
+| the core | 56.7 KB | `/all` | 117.1 KB |
+| `/text` | 42.8 KB | `/tree` | 8.6 KB |
+| `/sync` | 16.6 KB | `/versions` | 34.8 KB |
+| `/signing` | 5.7 KB | `/chain` | 2.1 KB |
 | `/encryption` | 3.6 KB | `/schema` | 5.9 KB |
 | `/query` | 6.4 KB | `/telemetry` | 3.3 KB |
-| `/undo` | 8.6 KB | `/branch` | 4.6 KB |
-| `/presence` | 4.3 KB | `/inspect` | 5.0 KB |
-| `/editor` | 6.0 KB | `/store` | 1.0 KB |
-| `/prosemirror` | 9.1 KB | `/codemirror` | 7.8 KB |
+| `/undo` | 8.7 KB | `/branch` | 4.6 KB |
+| `/presence` | 4.4 KB | `/inspect` | 5.0 KB |
+| `/editor` | 4.6 KB | `/store` | 1.0 KB |
+| `/prosemirror` | 7.8 KB | `/codemirror` | 7.8 KB |
 | `/memory` | 0.5 KB | `/layered` | 1.5 KB |
 
 A block measured alone carries the core modules it stands on, so the rows do
 not add up: in an app bundle those are counted once, and the script checks
 it — the core and every block bundled together weigh what `/all` weighs,
 within a rounding. The editor adapters carry the generic binding under them
-(`/editor`, 6 KB), and neither bundles its editor.
+(`/editor`, 4.6 KB), and neither bundles its editor.

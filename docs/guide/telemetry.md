@@ -265,6 +265,8 @@ alert to key on:
 | warn | `listener.error`, `watch.error`, `schema.drift` | an event listener or a watcher threw; two builds of one schema version |
 | warn | `handle.unlogged` | a text handle's flush (`openText()`) could not be logged — the append failed, a hook or a validator refused — and its edits were dropped (`id`, `field`, `edits`); written whether or not anything listens to the handle |
 | warn | `edits.unlogged` | `close()` flushed every open text handle and some could not be logged (`handles`, `edits`); the storage closes all the same |
+| warn | `log.journal.unrewritten` | a group's append failed and the journal could not be written again without what the failed append left of its line (`file`); a reopen reads the line only where no later group shadows it |
+| info | `log.corrupt.scrubbed` | a purge removed an evidence copy under `log/corrupt/` that named the id (`file`, `id`): the copy does not read, so nothing could be stripped from it |
 | warn | `editor.binding` | an editor binding (`@alexify/syncom/editor`) failed to send a delta or to reload, or its editor refused a peer's change, and has no `onError`; it reloads the editor from the field (five in a row stop it: `onStop`) |
 | warn | `editor.cursors`, `editor.undo` | an editor adapter (ProseMirror, CodeMirror) failed to show the room's cursors or publish its selection, or an undo/redo command failed, and has no `onError` |
 | warn | `editor.unfit` | the ProseMirror schema cannot hold what the field does (a mark, a node): the document leaves it out and the next edit sends that to every peer; once per binding, without `onUnfit` |

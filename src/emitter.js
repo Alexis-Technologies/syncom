@@ -38,7 +38,7 @@ class Emitter {
     const listeners = event.on;
     const promises = [];
     for (let i = 0; i < listeners.length; i++) promises.push(invoke(listeners[i], args));
-    if (event.once.size > 0) this.#dropOnce(eventName, event);
+    if (event.once.size > 0) this.#dropOnce(eventName, event, listeners);
     return Promise.all(promises).then(() => undefined);
   }
 
@@ -61,18 +61,24 @@ class Emitter {
         onError(error);
       }
     }
-    if (event.once.size > 0) this.#dropOnce(eventName, event);
+    if (event.once.size > 0) this.#dropOnce(eventName, event, listeners);
   }
 
-  // The `once` listeners leave after the emit that called them.
-  #dropOnce(eventName, event) {
+  // The `once` listeners the emit CALLED leave; one added during it (by a
+  // listener: `toPromise` inside a `change` listener) was not called and
+  // stays for the next emit.
+  #dropOnce(eventName, event, called) {
     const remaining = [];
     for (let i = 0; i < event.on.length; i++) {
       const listener = event.on[i];
-      if (!event.once.has(listener)) remaining.push(listener);
+      if (event.once.has(listener) && called.includes(listener)) {
+        event.once.delete(listener);
+        continue;
+      }
+      remaining.push(listener);
     }
     if (remaining.length === 0) this.#events.delete(eventName);
-    else this.#events.set(eventName, { on: remaining, once: new Set() });
+    else event.on = remaining;
   }
 
   // Checked before the listener is kept: one the cap refuses is not left

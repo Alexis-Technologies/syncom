@@ -1834,7 +1834,6 @@ export type PluginMethods<P extends readonly Plugin<any>[]> = UnionToIntersectio
   P[number] extends Plugin<infer A> ? A : never
 >;
 
-/** The storage methods the `text` plugin adds: lists and texts that merge by position (Fugue), marks, cursors. */
 /** What `openText()` takes. */
 export interface TextHandleOptions {
   /** How long edits wait before they are logged, in ms: the storage's `defer` by default, 0 for the end of the turn. */
@@ -1904,6 +1903,7 @@ export interface TextHandleMethods {
   openText(id: string, key: string, options?: TextHandleOptions): Promise<TextHandle>;
 }
 
+/** The storage methods the `text` plugin adds: lists and texts that merge by position (Fugue), marks, cursors. */
 export interface TextMethods {
   /**
    * Splices list or text field `key` at `index`: removes `count` elements

@@ -12,6 +12,15 @@ what it is meant to. `package.json` carries `0.0.1`, a development placeholder,
 not the version of the first release — that is chosen when the release is cut.
 There is no released version section until then; everything below lands in it.
 
+**Upgrading a checkout from before the performance branch** (nothing is published, so no
+reader of the older shapes was kept): a log directory written before it does not read — its
+files have no per-line checksum, so each is told `checksum` and kept under `log/corrupt/`, its
+unsealed tail is not replayed, and the node begins a new epoch; a node built from `main` refuses
+this branch's ops as `malformed` (the short own references of a splice, a cut or a mark) with no
+refusal at `hello`, since `PROTOCOL` stays 1 until the first publication. Keystrokes made at once
+or typed through a transaction or a handle that continue each other are one op, so one `change`
+and one `commit` event, not one per call.
+
 ### Added
 
 - **A synchronous editor's handle on a text: `storage.openText(id, key, { window, actor, source })`**

@@ -65,7 +65,8 @@ src/patches.js           reading, applyPatches, compact — the present and its 
 src/entries.js            EntryStore — record files under data/ (a large block's runs in pieces beside them: `<id>~<n>.json`),
                           the bounded cache, the catalog row each change leaves
 src/record.js             Reference, Record, Collection — what the application holds; public API + the symbols only
-src/commit.js             the one local write path: prepare → validate → issue (in the queue) → land → announce (outside it, in log order) (`storage[COMMIT]`)
+src/commit.js             the one local write path: prepare → validate → issue (in the queue) → land → announce (outside it, in log order) (`storage[COMMIT]`);
+                          `commitAtOnce`, the same write made at once on an idle queue (LOG-9), and `transact`
 src/apply.js              a peer's batch: admit → apply one by one → persist → announce (`storage.applyRemote`)
 src/bootstrap.js          snapshot pages out, merge pages in, adoptVector — the bootstrap write path
 src/errors.js             SyncomError, ValidationError, typed() — no requires
@@ -113,7 +114,7 @@ options, settings, logger }`, run after the replay — hands back `sync` (the Sy
   never silently downgraded. A new api plugin adds a hook name here and a line in
   `docs/reference/api.md` Plugins; it never reaches the storage's state except through `ctx`
   and the hooks.
-- **Browser halves are `*.browser.js`** (dot, not dash): `fsi`, `utils` and `crypto/digest` in the core,
+- **Browser halves are `*.browser.js`** (dot, not dash): `fsi`, `utils`, `crc32` and `crypto/digest` in the core,
   `signing/ed25519` and `encryption/rsa` in their subpaths. Everything else (storage, log, ops,
   sync, chain, wrpc adapter, and the require-free `emitter`, `logger`, `scope`, `crypto/keys`,
   `crypto/pem`) is shared; the two `utils` halves only re-export `Emitter`/`createLogger`
@@ -423,7 +424,8 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   line: `open/<pad(first)>-<session><counter>.jsonl` — a name no failed
   group's line is in, begun again at every roll (`#seal`) and after a failed
   append (`#flushGroup`), removed once none of its groups is open. `#open`
-  holds the groups `{ first, last, file }`, never the files. `#loadOpen`
+  holds the groups `{ first, last, file, line }` — each with the line it was journaled as, until it is
+  sealed (LOG-10) — never the files. `#loadOpen`
   reads the names NEWEST FIRST and `#adopt` keeps the first copy of a seq —
   that is what shadows the line of a group whose append failed after it
   landed (its seqs went to a newer journal); a torn LAST line is left out
@@ -446,7 +448,8 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   null). There are exactly three write paths — `src/commit.js` (a local op,
   through `[COMMIT]`), `src/apply.js` (a peer's page, through `applyRemote`),
   `src/bootstrap.js` (a snapshot page, through `mergeSnapshot`) — all inside
-  `#run`, all over the `core` Storage lends them (`#lend`: frozen, its members listed by
+  `#run` (or, a local op alone, made at once on an idle queue where a turn of its own would
+  change nothing: `commitAtOnce`, LOG-9), all over the `core` Storage lends them (`#lend`: frozen, its members listed by
   `tests/package/core-surface.test.js` — a new one changes that list on purpose), all ending in
   `#persistBatch` or `EntryStore.write`. Do not add a fourth, and do not
   reach the storage's state from a path module except through `core`. A
