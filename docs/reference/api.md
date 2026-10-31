@@ -158,6 +158,10 @@ the operation (see [Hooks and events](../guide/hooks#events)):
 | `log` | `({ kind: 'roll', sealed, dropped, floor, segments })` | The log sealed a segment and maybe dropped old ones; `floor` is where a resume is still possible |
 | `close` | — | After `close()` sealed the log |
 
+What the storage writes to its logger — every `event:` name, its level and its fields — is the
+table under [Telemetry → Log events](../guide/telemetry#log-events); the events above are what a
+listener hears, those lines what an operator reads.
+
 Hooks (`open({ hooks })`): `beforeWrite`, `afterWrite`, `beforeRead`,
 `afterRead`, `beforeApply`, `afterApply` — see
 [Hooks and events](../guide/hooks).

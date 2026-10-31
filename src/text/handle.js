@@ -30,6 +30,7 @@ const { coalesce, prepends, render, blockOf, marksAt, markerArgs, extentKey } = 
 const { toDelta, isDeltaOp } = require('./deltas.js');
 const { typedSpans } = require('./methods.js');
 const { assignData } = require('../lazy.js');
+const { ENTRIES } = require('../symbols.js');
 
 // What a handle holds at most before it flushes whatever the window says.
 const PENDING_MAX = 1024;
@@ -451,32 +452,48 @@ class TextHandle extends Emitter {
     // (grown, or fewer: a moot one is not logged). The base it leaves is the
     // overlay the flush was taken from where no other writer's turn came in
     // between: ops commute, and an op again changes nothing.
+    // The record as the turn left it, the storage's own reading: the base takes it as it is — an op
+    // applied here again would only make the same version over (every write path hands it on, ENTRIES).
+    const left = event[ENTRIES] === undefined ? undefined : event[ENTRIES].get(this.id);
     const landing = this.#landings.length > 0 ? this.#landings[0] : null;
     if (landing !== null && event.ops.length > 0 && landing.ops.has(event.ops[0])) {
       this.#landings.shift();
-      if (landing.heard === this.#heardTurns) this.#base = landing.overlay;
+      if (left !== undefined) this.#base = left;
+      else if (landing.heard === this.#heardTurns) this.#base = landing.overlay;
       else for (const op of event.ops) this.#base = editing.applyTo(this.#base, op).entry;
       return;
     }
-    const changes = [];
     let touched = false;
-    for (const op of event.ops) {
-      if (op.id !== this.id) continue;
-      touched = true;
-      // Nothing of the handle's on top: the base and the overlay are one reading, the op applied once.
-      const idle = this.#overlay === this.#base;
-      const onBase = editing.applyTo(this.#base, op);
-      this.#base = onBase.entry;
-      const applied = idle ? onBase : editing.applyTo(this.#overlay, op);
-      if (idle) this.#overlay = this.#base;
-      if (!applied.changed) continue;
-      if (!idle) this.#overlay = applied.entry;
-      for (const change of applied.changes) {
+    for (const op of event.ops) if (op.id === this.id) touched = true;
+    if (!touched) return;
+    this.#heardTurns++;
+    // Nothing of the handle's on top: the overlay is the base, the storage's reading taken as it is, and
+    // the changes are the turn's own (tagged by record), in the storage's indices — the handle's too.
+    const idle = this.#overlay === this.#base;
+    const changes = [];
+    if (idle && left !== undefined) {
+      this.#base = left;
+      this.#overlay = left;
+      for (const change of event.changes) {
+        if (change.id !== this.id) continue;
         if (change.field !== this.field && change.action !== 'delete' && change.action !== 'purge') continue;
         changes.push(change);
       }
+    } else {
+      for (const op of event.ops) {
+        if (op.id !== this.id) continue;
+        if (left === undefined) this.#base = editing.applyTo(this.#base, op).entry;
+        // Edits on top: the op laid over them, its changes in the handle's indices.
+        const applied = editing.applyTo(this.#overlay, op);
+        if (!applied.changed) continue;
+        this.#overlay = applied.entry;
+        for (const change of applied.changes) {
+          if (change.field !== this.field && change.action !== 'delete' && change.action !== 'purge') continue;
+          changes.push(change);
+        }
+      }
+      if (left !== undefined) this.#base = left;
     }
-    if (touched) this.#heardTurns++;
     if (changes.length === 0 || this.#observers.size === 0) return;
     this.#tell(changes, false, event.source);
   }

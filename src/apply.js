@@ -14,6 +14,7 @@ const { applyOp, isAlive, latestClock, settleMeta } = require('./ops.js');
 const { keyScope, opKey } = require('./vector.js');
 const { headerText, scrubOp } = require('./header.js');
 const { hashText } = require('./crypto/digest.js');
+const { ENTRIES } = require('./symbols.js');
 const { inScope } = require('./scope.js');
 const { traced, now } = require('./telemetry/writer.js');
 const { isPlainObject, VALIDATED, wellFormed, VERDICT } = require('./shape.js');
@@ -561,6 +562,7 @@ const announce = async (batch, result) => {
     if (accepted.length > 0 && core.listening('transaction')) {
       const ts = accepted[accepted.length - 1].ts;
       const event = { local: false, via, source: null, message: null, ops: accepted, changes, ts };
+      event[ENTRIES] = batch.touched;
       core.emit('transaction', event);
     }
   }

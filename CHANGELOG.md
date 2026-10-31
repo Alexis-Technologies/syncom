@@ -1065,6 +1065,16 @@ and one `commit` event, not one per call.
 
 ### Fixed
 
+- **A delete a field survives reported the record gone.** A concurrent write stamped above a delete
+  that landed first keeps the record alive — the reading shows the survivor and the fields that went
+  — but the `change` and `transaction` events said `delete`, so a view kept by the changes (an editor's
+  handle, `observe()`) lost the record while the storage held it. The report now says what the reading
+  shows: the fields that went, `unset` each; `delete` only when nothing survives (EVT-5). The seeded
+  mesh fuzz lays and lifts marks and runs a text of `PIECES_MIN` runs now, which is what found it.
+- **A text handle's base is the storage's reading.** Every turn hands its handles the entries it left
+  the records as, so a handle with nothing of its own on top applies no op again — a peer typing 20
+  characters cost 59 re-hints of the rope with a handle open, none now; with an edit on top, the edit
+  alone is laid over.
 - **A write made at once, and `close()`.** A fire-and-forget write made at once (`inc()`, `splice()`,
   `update()`… not awaited) whose group failed raised no `unhandledRejection`, unlike the same call
   through the queue: the call has a promise of its own. A write made at once that could not be

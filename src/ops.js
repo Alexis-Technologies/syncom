@@ -1033,6 +1033,10 @@ const applyOp = (previous, op, limits = null) => {
       meta.base = stamp;
       meta.deleted = stamp;
       applyBase(entry, delta, plugins);
+      // A field stamped above the tombstone survives it and keeps the record alive (a concurrent
+      // write landed first): the reading shows the survivor and the fields that went — reported so
+      // (`unset` each, from the delta), never as a record gone (EVT-5).
+      if (isAlive(entry)) return outcome(true);
       changes.push({ action: 'delete' });
       return outcome(true, true);
     }

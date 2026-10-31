@@ -266,7 +266,7 @@ const next = (cursor) => {
 };
 
 /** Every span in order, as one array. */
-const spansOf = (root) => {
+const allSpans = (root) => {
   const out = [];
   const cursor = first(root);
   if (cursor === null) return out;
@@ -561,6 +561,6 @@ module.exports = {
   stats,
   // For the tests alone.
   MAX,
-  spansOf,
+  allSpans,
   shapeOf,
 };

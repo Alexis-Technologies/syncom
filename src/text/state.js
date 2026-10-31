@@ -386,7 +386,7 @@ const pieceAt = (starts, off) => {
   return lo;
 };
 
-// A body grows by SEG_MAX slots at most (v1's rule, kept: a text typed long is what was typed, sealed
+// A body grows by SEG_MAX slots at most (the rule since the first engine: a text typed long is what was typed, sealed
 // flat, and the end being typed; a list's spans of SEG_MAX).
 const SEG_MAX = 2048;
 
@@ -597,7 +597,7 @@ const openFrame = (w, id) => {
   const r = enter(w, id);
   return new Frame(r, 0, true, eventsOf(r), startsOf(r.rle, 0));
 };
-// The walk of run `top` and the runs hung under it, as spans in order (v1's walk, frame by frame: a
+// The walk of run `top` and the runs hung under it, as spans in order (the first engine's walk, frame by frame: a
 // run's continuation steps the frame in place when it is the only right child, else it is a frame of
 // its own; a run's close falls when the frame it was entered by pops).
 const walkSubtree = (w, top) => {

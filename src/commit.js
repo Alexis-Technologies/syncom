@@ -20,6 +20,7 @@ const { project, unproject, foldSet } = require('./schema/entity.js');
 const { fieldName } = require('./args.js');
 const { traced, now } = require('./telemetry/writer.js');
 const { GLOBAL_SCOPE } = require('./scope.js');
+const { ENTRIES } = require('./symbols.js');
 const { isPlainObject, asJson, VALIDATED, MAX_MESSAGE, isRecordId, invalidId } = require('./shape.js');
 const { nestsWithin, MAX_JSON_DEPTH, MAX_WIRE_DEPTH } = require('./shape.js');
 const { ancestorsOf } = require('./paths.js');
@@ -512,10 +513,13 @@ const commitEvent = (core, op, entry, alive, committed, source, changes) => {
 // One turn's worth of ops announced as a whole — a local write, a
 // transaction, a peer's page, a joined snapshot — with every change tagged
 // by its record: what a view updates itself by, once.
-const transacted = (core, { local, via, source, message, ops, changes }) => {
+const transacted = (core, { local, via, source, message, ops, changes, entries }) => {
   if (ops.length === 0 || !core.listening('transaction')) return;
   const ts = ops[ops.length - 1].ts;
-  core.emit('transaction', { local, via, source, message, ops, changes, ts });
+  const event = { local, via, source, message, ops, changes, ts };
+  // The records as the turn left them, for a handle's base (off the public surface: a symbol).
+  event[ENTRIES] = entries;
+  core.emit('transaction', event);
 };
 
 // The changes of an op tagged with its record, for a transaction event:
@@ -617,6 +621,11 @@ const messageArg = (message) => {
 // commitResult; `sealed` for an encrypted write, which is on disk already),
 // else the op with the entry it leaves, the delta, the hook context and
 // what the commit event needs.
+// The record as the application reads it — its paths composed — where a write needs it (`when`: a hook,
+// a whole-record write's `$type`, a set's validator); null otherwise, or where there is no record.
+const visibleOf = (core, current, when) =>
+  when && current && (current.encrypted || isAlive(current)) ? compose(current, core.plugins) : null;
+
 const prepare = async (core, type, id, payload, options) => {
   const { source = null, via = null, from = null, encrypted = false, actor, expect = null, message } = options;
   const msg = messageArg(message);
@@ -637,8 +646,7 @@ const prepare = async (core, type, id, payload, options) => {
   // The record as the application reads it — its paths composed — for the
   // hooks, a write's `$type` and a set's validator; the op model keeps the
   // paths apart.
-  const visible =
-    (hooked || whole) && current && (current.encrypted || isAlive(current)) ? compose(current, core.plugins) : null;
+  const visible = visibleOf(core, current, hooked || whole);
   // An actor function is awaited; a given actor, or none, is read at once.
   let who = core.actorOf(actor);
   if (who !== null && typeof who === 'object') who = await who;
@@ -712,7 +720,7 @@ const commitAtOnce = (core, type, id, payload, options, current, answer, tally) 
   const { source = null, via = null, from = null, actor, message } = options;
   const msg = messageArg(message);
   payload = copyPayload(payload);
-  const visible = (type === 'write' || type === 'set') && isAlive(current) ? compose(current, core.plugins) : null;
+  const visible = visibleOf(core, current, type === 'write' || type === 'set');
   const op = opOf(core, type, id, payload, current, visible, core.actorOf(actor), from, msg, null);
   if (op === null) return Promise.resolve(answer ? null : undefined);
   const applied = applyLocal(core, op, current);
@@ -831,7 +839,9 @@ const landNow = (core, made, position) => {
   } finally {
     // Durable whatever a refresh did: the turn is announced (src/log.js says a throw here out loud).
     if (core.listening('transaction')) {
-      transacted(core, { local: true, via, source, message: op.msg ?? null, ops: [op], changes: tagged(op, changes) });
+      const entries = new Map([[op.id, entry]]);
+      const message = op.msg ?? null;
+      transacted(core, { local: true, via, source, message, ops: [op], changes: tagged(op, changes), entries });
     }
   }
 };
@@ -851,7 +861,8 @@ const commitLocal = async (core, type, id, payload, options) => {
       // only while something listens (`transacted` says nothing otherwise).
       if (core.listening('transaction')) {
         const message = op.msg ?? null;
-        transacted(core, { local: true, via, source, message, ops: [op], changes: tagged(op, changes) });
+        const entries = new Map([[op.id, entry]]);
+        transacted(core, { local: true, via, source, message, ops: [op], changes: tagged(op, changes), entries });
       }
     }
   });
@@ -1113,7 +1124,7 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
       }
       if (listening) tagged(op, items[i].changes, changes);
     }
-    transacted(core, { local: true, via: null, source, message: msg ?? null, ops, changes });
+    transacted(core, { local: true, via: null, source, message: msg ?? null, ops, changes, entries: touched });
     if (failed !== null) throw failed;
   });
   return { result, done, ops: items.length };

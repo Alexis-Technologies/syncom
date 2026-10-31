@@ -9,7 +9,7 @@
 // - A hash array mapped trie (`get`, `set`, `remove`, `pairs`) over string or integer keys: 32-way
 //   bitmap nodes over 5 bits of a 32-bit hash at a time, keys that share 30 bits in a bucket at the
 //   bottom sorted by key. A string's hash is FNV-1a over its UTF-16 units and the shape the same as the
-//   v1 engine's map — so `pairs` walks a map of strings in the order that map walked its keys, the order
+//   first engine's map had — so `pairs` walks a map of strings in the order that map walked its keys, the order
 //   a block's registers and marks serialize in. An integer is its own hash. A removal leaves the nodes
 //   above as they are: a map that took keys away walks in an order of its history (what waits only).
 // - A sorted list in chunks (`List`): entries with a numeric `off`, ascending, in chunks of at most

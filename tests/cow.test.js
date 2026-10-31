@@ -32,7 +32,7 @@ const same = (seen, spans, where) => {
 
 // What the tree says read from the root down, against the array it should equal.
 const check = (root, spans, where) => {
-  same(R.spansOf(root), spans, `${where}: walk`);
+  same(R.allSpans(root), spans, `${where}: walk`);
   let s = 0;
   let v = 0;
   let text = '';
@@ -147,7 +147,7 @@ test('the copy-on-write rope with two measures', async (t) => {
       // Every older version reads as it was: from the root down, and its places from a walk of its own.
       for (const [i, [old, was]] of versions.entries()) {
         if (i % 4 === 0) check(old.root, was, `seed ${seed} version ${i}`);
-        else same(R.spansOf(old.root), was, `seed ${seed} version ${i}: walk`);
+        else same(R.allSpans(old.root), was, `seed ${seed} version ${i}: walk`);
         if (old.frozen) checkPlaces(old, was, `seed ${seed} version ${i} frozen`, false);
       }
       // Emptied span by span: no leaf left empty for a walk to land on.

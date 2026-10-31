@@ -512,8 +512,22 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
         else if (roll < 0.48) await storage.remove(id, 'tags', [`t${step % 4}`]);
         else if (roll < 0.54) await storage.delete(id);
         else if (roll < 0.72) {
-          // One keystroke in five is a block marker or an embed — inserted, changed or joined.
-          if (step % 5 !== 0) await spliceAt(storage, id, 'body', letter(storage).repeat(1 + (step % 3)));
+          // One keystroke in seven is a mark laid or taken off over a random range; one in five a block
+          // marker or an embed — inserted, changed or joined.
+          if (step % 7 === 3) {
+            const body = (await storage.get(id))?.body;
+            const length = typeof body === 'string' ? body.length : 0;
+            if (length > 0) {
+              const start = Math.floor(random() * length);
+              const end = start + 1 + Math.floor(random() * (length - start));
+              if (step % 3 === 0) await storage.unmark(id, 'body', start, end, `m${step % 2}`);
+              else {
+                const expand = step % 4 ? 'after' : 'none';
+
+                await storage.mark(id, 'body', start, end, `m${step % 2}`, step, { expand });
+              }
+            }
+          } else if (step % 5 !== 0) await spliceAt(storage, id, 'body', letter(storage).repeat(1 + (step % 3)));
           else {
             const body = (await storage.get(id))?.body;
             const length = typeof body === 'string' ? body.length : 0;
@@ -578,6 +592,32 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
       }
       assert.strictEqual((await storage.history(ids[0])).exact, true);
     }
+  });
+
+  await t.test('a text of PIECES_MIN runs and more converges across a mesh and reads whole (seeded)', async (t2) => {
+    const { PIECES_MIN } = require('../../src/text/sequence.js');
+    const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage);
+    const a = mesh.get('A');
+    const b = mesh.get('B');
+    const id = await a.insert({ title: 'big' });
+    // Every keystroke at the start is a run of its own: a block written in pieces (SEQ-10).
+    for (let i = 0; i < PIECES_MIN + 100; i++) await a.splice(id, 'body', 0, 0, String.fromCharCode(97 + (i % 26)));
+    await settle([a, b], { timeout: 20_000 });
+    const random = prng(1031);
+    for (let step = 0; step < 40; step++) {
+      const storage = step % 2 ? a : b;
+      const text = (await storage.get(id)).body;
+      const at = Math.floor(random() * (text.length + 1));
+      if (random() < 0.7) await storage.splice(id, 'body', at, 0, 'Z');
+      else if (at < text.length) await storage.splice(id, 'body', at, 1);
+    }
+    await settle([a, b], { timeout: 20_000 });
+    await assertConverged([a, b]);
+    const records = (await a.snapshot()).records;
+    let runs = 0;
+    for (const record of records) if (record.id === id) runs = Object.keys(record.meta.blocks.body.runs).length;
+    assert.ok(runs >= PIECES_MIN, `${runs} runs: in pieces`);
+    assert.strictEqual((await b.get(id)).body, (await a.get(id)).body);
   });
 
   await t.test(

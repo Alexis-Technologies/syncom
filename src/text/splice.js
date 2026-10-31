@@ -529,7 +529,7 @@ const layCuts = (d, kind, cut, base) => {
 };
 
 // What a splice's cuts will do, read and not written: whether anything changes, the ranges that will
-// wait, and the first that would pass `pendingMax` — v1's refusal, its count the pending work with the
+// wait, and the first that would pass `pendingMax` — the refusal as the first engine made it, its count the pending work with the
 // ranges before it counted (`count`: the block's, made once when asked).
 class CutPlan {
   constructor() {
@@ -540,7 +540,7 @@ class CutPlan {
 }
 const planCuts = (seq, st, cut, base, pendingMax, count) => {
   const plan = new CutPlan();
-  // A run not here yet whose content a range before cut (still unplaced, cut again): v1 reads the draft.
+  // A run not here yet whose content a range before cut (still unplaced, cut again): read from the draft.
   const after = new Map();
   for (let c = 0; c < cut.length; c++) {
     const [key, offset, length] = cut[c];

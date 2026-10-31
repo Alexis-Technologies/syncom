@@ -51,6 +51,16 @@ const NO_SCHEMA = Object.freeze({ version: 1, entities: new Map(), snapshot: und
 // their hooks inside this storage; the apply pair runs per peer batch.
 const STORAGE_HOOKS = ['beforeWrite', 'afterWrite', 'beforeRead', 'afterRead', 'beforeApply', 'afterApply'];
 
+// A method's refusal of its arguments is a rejection, never a throw (the method delegates have no async
+// frame): what the write API's methods wrap their call in.
+const attempt = (fn) => {
+  try {
+    return fn();
+  } catch (error) {
+    return Promise.reject(error);
+  }
+};
+
 // Who an op says made it: a string of MAX_ACTOR characters at most (it rides in the signed header
 // every node hashes; a peer's past the bound is malformed), null for nobody.
 const actorName = (actor) => {
@@ -988,17 +998,20 @@ class Storage extends Emitter {
   // (the array compacted once the head passes half of it); N writes to one
   // record that cannot fold were N splices from the bottom, O(N²).
   #current(id) {
-    const stack = this.#inflight.get(id);
-    if (stack !== undefined && stack.items.length > stack.head) return stack.items[stack.items.length - 1].entry;
-    return this.#entries.load(id);
+    return this.#inflightTop(id) ?? this.#entries.load(id);
   }
 
   // The same, where it is known at once: undefined when only the file knows
   // (an entry not cached, a record never written here).
   #currentNow(id) {
+    return this.#inflightTop(id) ?? this.#entries.peek(id);
+  }
+
+  // The entry a record's newest op in flight leaves it as, or undefined.
+  #inflightTop(id) {
     const stack = this.#inflight.get(id);
-    if (stack !== undefined && stack.items.length > stack.head) return stack.items[stack.items.length - 1].entry;
-    return this.#entries.peek(id);
+    if (stack === undefined || stack.items.length === stack.head) return undefined;
+    return stack.items[stack.items.length - 1].entry;
   }
 
   // A record's entry in flight at `position`: on the stack, or — the newest
@@ -1639,55 +1652,31 @@ class Storage extends Emitter {
   }
 
   inc(id, key, value, options) {
-    try {
-      return F.inc(this.#core, id, key, value, options);
-    } catch (error) {
-      return Promise.reject(error);
-    }
+    return attempt(() => F.inc(this.#core, id, key, value, options));
   }
 
   add(id, key, elements, options) {
-    try {
-      return F.add(this.#core, id, key, elements, options);
-    } catch (error) {
-      return Promise.reject(error);
-    }
+    return attempt(() => F.add(this.#core, id, key, elements, options));
   }
 
   remove(id, key, elements, options) {
-    try {
-      return F.remove(this.#core, id, key, elements, options);
-    } catch (error) {
-      return Promise.reject(error);
-    }
+    return attempt(() => F.remove(this.#core, id, key, elements, options));
   }
 
   /** Removes fields of any kind from a record — one name or an array; a field it does not hold is no op. */
   unset(id, fields, options) {
-    try {
-      return F.unset(this.#core, id, fields, options);
-    } catch (error) {
-      return Promise.reject(error);
-    }
+    return attempt(() => F.unset(this.#core, id, fields, options));
   }
 
   // The hot writes call their method at once, without an async frame of
   // their own: a refusal of the arguments — or PLUGIN_MISSING — is a
   // rejection all the same.
   splice(id, key, index, count, content, options) {
-    try {
-      return this.#api('splice')(this.#core, id, key, index, count, content, options);
-    } catch (error) {
-      return Promise.reject(error);
-    }
+    return attempt(() => this.#api('splice')(this.#core, id, key, index, count, content, options));
   }
 
   push(id, key, content, options) {
-    try {
-      return this.#api('push')(this.#core, id, key, content, options);
-    } catch (error) {
-      return Promise.reject(error);
-    }
+    return attempt(() => this.#api('push')(this.#core, id, key, content, options));
   }
 
   async updateText(id, key, text, options) {
@@ -1771,19 +1760,11 @@ class Storage extends Emitter {
   }
 
   setAt(id, key, index, value, options) {
-    try {
-      return this.#api('setAt')(this.#core, id, key, index, value, options);
-    } catch (error) {
-      return Promise.reject(error);
-    }
+    return attempt(() => this.#api('setAt')(this.#core, id, key, index, value, options));
   }
 
   move(id, key, from, to, options) {
-    try {
-      return this.#api('move')(this.#core, id, key, from, to, options);
-    } catch (error) {
-      return Promise.reject(error);
-    }
+    return attempt(() => this.#api('move')(this.#core, id, key, from, to, options));
   }
 
   async treeMove(id, key, node, parent, options) {
@@ -1907,11 +1888,7 @@ class Storage extends Emitter {
       const method = methods[i][1];
       // A method that refuses its arguments throws: a rejection, as from the storage.
       api[methods[i][0]] = (...args) => {
-        try {
-          return method(tx, ...args);
-        } catch (error) {
-          return Promise.reject(error);
-        }
+        return attempt(() => method(tx, ...args));
       };
     }
     const current = async (id) => {

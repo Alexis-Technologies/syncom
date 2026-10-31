@@ -2160,3 +2160,23 @@ test('a set reads after every add and remove as its live elements read whole, in
     assert.ok(held >= walked && held <= ts, `the newest ts after op ${i}: ${held} vs ${walked}`);
   }
 });
+
+test('a delete that a field survives reports the fields that went, not a record gone: the reading shows the survivor', () => {
+  // A writes v, then types into body at a later stamp; B's delete, stamped between the two, lands after both:
+  // body is above the tombstone and keeps the record alive, v below it goes.
+  let entry = applyOp(null, op('write', 1, 'A', { data: { v: 1 } })).entry;
+  entry = applyOp(entry, op('splice', 5, 'A', { seq: 2, key: 'body', value: { at: '^', content: 'kept' } })).entry;
+  const survived = applyOp(entry, op('delete', 3, 'B', { seq: 1 }));
+  assert.strictEqual(isAlive(survived.entry), true, 'alive by the field above the tombstone');
+  assert.deepStrictEqual(survived.entry.data, { body: 'kept' });
+  assert.deepStrictEqual(
+    survived.changes,
+    [{ action: 'unset', field: 'v' }],
+    'what the reading shows: v gone, body kept',
+  );
+  // Nothing above the tombstone: the record is gone, and the report says so.
+  const plain = applyOp(null, op('write', 1, 'A', { data: { v: 1 } })).entry;
+  const gone = applyOp(plain, op('delete', 3, 'B', { seq: 1 }));
+  assert.strictEqual(isAlive(gone.entry), false);
+  assert.deepStrictEqual(gone.changes, [{ action: 'delete' }]);
+});

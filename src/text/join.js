@@ -2,7 +2,7 @@
 
 // A block as a snapshot carries it, in the v2 engine (./sequence.js holds its design): a peer's block
 // normalized under the bounds, the reset rule (prune) and the join of two blocks — through plain JSON
-// and a hydration, as v1.
+// and a hydration, as the first engine did.
 
 const { compareClock } = require('../vector.js');
 const { PENDING_MAX } = require('../plugin.js');

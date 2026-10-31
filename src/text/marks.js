@@ -2,7 +2,8 @@
 
 // Marks over a text in the v2 engine (./sequence.js holds its design): the anchors of a range, a mark
 // applied or switched off, and the index of the marks in force that a keystroke reads — the style at one
-// character in O(log n). The rule and the index are v1's (its header says them), over the v2 rope.
+// character in O(log n). The rule (Peritext's anchors, first wins on a key) and the index below are the
+// first engine's, kept over the v2 rope.
 
 const { compareClock } = require('../vector.js');
 const { PENDING_MAX } = require('../plugin.js');
@@ -112,7 +113,7 @@ const markOf = (block, id) => (typeof id === 'string' ? C.get(STATE.get(block).m
 //
 // The anchors of the marks in force sorted in walk order (an anchor at ordinal o is 2o + 1 before a slot
 // and 2o after one; the head 0, the end 2·total + 1), a max segment tree over the opening anchors, the
-// marks of each key in stamp order — v1's index (its header says how it is kept and read).
+// marks of each key in stamp order: how it is kept and read is written here, at each piece.
 
 class End {
   constructor(m, open, run, offset, after) {
