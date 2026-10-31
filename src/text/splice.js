@@ -704,7 +704,9 @@ const applySplice = (given, stamp, payload, base = null, pendingMax = PENDING_MA
       // Where the extension ends, waiting or not: never past MAX_RUN, whatever the run holds today.
       if (from + content.length > MAX_RUN) return refused(seq, 'run', from + content.length, MAX_RUN);
       target = runOf(st, run);
-      if (target !== undefined && target.elem !== null) return malformed(seq);
+      // Neither a position run nor a run of no slots (none enters a block; hydrated by hand, it has no
+      // last span to grow) is extended.
+      if (target !== undefined && (target.elem !== null || target.len === 0)) return malformed(seq);
       if (target !== undefined) {
         const len = target.len;
         if (len + content.length > MAX_RUN) return refused(seq, 'run', len + content.length, MAX_RUN);

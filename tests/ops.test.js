@@ -1426,6 +1426,134 @@ test('ops: a sequence op of the wrong shape is malformed, never a throw: a peer�
   await storage.close();
 });
 
+test('ops: a zero-slot run in a peer’s block is left out, and typing on after the merge never throws', () => {
+  const splice = (ts, origin, seq, value) => op('splice', ts, origin, { seq, key: 'body', value });
+  const entry = applyOp(null, splice(1, 'A', 1, { at: '^', content: 'hello' })).entry;
+  const meta = { blocks: { body: { k: 't', ts: 5, runs: { '1:A': ['^', ['hello']], '5:P': ['>1:4:A', []] } } } };
+  const merged = applyOp(entry, op('merge', 10, 'H', { seq: 1, data: { body: 'hello' }, meta }));
+  assert.deepStrictEqual(Object.keys(merged.entry.meta.blocks.body.runs), ['1:A']);
+  // P grows the run that was left out: nothing to grow, nothing thrown — and A types on.
+  const grown = applyOp(merged.entry, splice(6, 'P', 2, { run: '5:P', from: 0, content: 'x' }));
+  assert.deepStrictEqual([grown.changed, grown.entry.data.body], [false, 'hello']);
+  const typed = applyOp(grown.entry, splice(7, 'A', 2, { run: '1:A', from: 5, content: '!' }));
+  assert.strictEqual(typed.entry.data.body, 'hello!');
+});
+
+test('ops: a peer’s block of any shape merges without a throw, and every op after it lands or is refused (seeded)', () => {
+  const S = require('../src/text/sequence.js');
+  const rng = (seed) => () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 2 ** 32;
+  };
+  const ORIGINS = ['A', 'B', 'Z'];
+  for (let round = 0; round < 80; round++) {
+    const random = rng(7000 + round);
+    const pick = (n) => Math.floor(random() * n);
+    const kind = random() < 0.6 ? 't' : 'l';
+    const field = kind === 't' ? 'body' : 'items';
+    const stamp = () => 1 + pick(12);
+    const origin = () => ORIGINS[pick(ORIGINS.length)];
+    const runKey = () => `${stamp()}:${origin()}`;
+    const elem = () => `${stamp()}:${pick(6)}:${origin()}`;
+    // At the head, at an element of the run the node holds already, at the end or junk (both dropped),
+    // or at an element a stamp may or may not make older than the run.
+    const anchor = () => {
+      const r = random();
+      if (r < 0.25) return '^';
+      if (r < 0.4) return `${random() < 0.5 ? '<' : '>'}1:${pick(5)}:A`;
+      if (r < 0.5) return '$';
+      if (r < 0.6) return 'junk';
+      return `${random() < 0.5 ? '<' : '>'}${elem()}`;
+    };
+    const items = (n) => (kind === 't' ? 'x'.repeat(n) : Array.from({ length: n }, (_, i) => i));
+    const content = () => {
+      const r = random();
+      if (r < 0.15) return [];
+      if (r < 0.25) return [items(2), 0];
+      if (r < 0.33) return [S.MAX_RUN + 1];
+      if (r < 0.43) return [1 + pick(3)];
+      if (r < 0.5) return [kind === 't' ? [1] : 'oops'];
+      return [items(1 + pick(4))];
+    };
+    const runs = {};
+    const count = pick(6);
+    for (let i = 0; i < count; i++) {
+      const tuple = [anchor(), content()];
+      if (random() < 0.25) tuple.push(random() < 0.7 ? elem() : 7);
+      runs[random() < 0.1 ? 'bad key' : runKey()] = tuple;
+    }
+    const block = { k: random() < 0.05 ? 'x' : kind, ts: pick(20), runs };
+    if (random() < 0.6) {
+      block.cuts = {};
+      for (let i = 0; i < pick(4); i++) block.cuts[runKey()] = [[pick(5), 1 + pick(3)], [2 ** 40, 1], 'junk', [-1, 2]];
+    }
+    if (random() < 0.6) {
+      block.ext = {};
+      for (let i = 0; i < pick(4); i++) {
+        block.ext[runKey()] = [
+          [pick(5), items(2)],
+          [S.MAX_RUN, items(1)],
+          [2 ** 52, items(1)],
+          [0, []],
+          [1, 7],
+        ];
+      }
+    }
+    if (random() < 0.6) {
+      block.vals = {};
+      for (let i = 0; i < pick(4); i++) block.vals[random() < 0.1 ? 'junk' : elem()] = [stamp(), origin(), { v: i }];
+    }
+    if (kind === 'l' && random() < 0.6) {
+      block.pos = {};
+      for (let i = 0; i < pick(4); i++) block.pos[elem()] = [stamp(), origin(), random() < 0.8 ? runKey() : 'junk'];
+    }
+    if (kind === 't' && random() < 0.6) {
+      block.marks = {};
+      for (let i = 0; i < pick(4); i++) block.marks[runKey()] = [anchor(), anchor(), 'b', true, pick(5)];
+      if (random() < 0.5) block.marks[runKey()] = ['^', '^', '', null, 2];
+    }
+    const first = kind === 't' ? 'hello' : [1, 2, 3];
+    const held = applyOp(null, op('splice', 1, 'A', { seq: 1, key: field, value: { at: '^', content: first } })).entry;
+    for (const base of [null, held]) {
+      const merge = op('merge', 30, 'H', {
+        seq: 1,
+        data: { [field]: kind === 't' ? 'x' : [] },
+        meta: { blocks: { [field]: block } },
+      });
+      let entry = base;
+      const step = (item) => {
+        const result = applyOp(entry, item);
+        entry = result.entry;
+        const seq = entry.meta.blocks?.[field];
+        if (seq !== undefined) assert.deepStrictEqual(entry.data[field], S.render(S.indexOf(entry, field)));
+        return result;
+      };
+      assert.doesNotThrow(() => step(merge), `round ${round}: the merge`);
+      let ts = 40;
+      const keys = Object.keys(runs);
+      keys.push('9:A');
+      for (const key of keys) {
+        const made = S.parseRun(key) ?? { ts: 9, origin: 'A' };
+        const own = (type, value) => op(type, ++ts, made.origin, { seq: ts, key: field, value });
+        const other = (type, value) => op(type, ++ts, 'Q', { seq: ts, key: field, value });
+        const ops = [
+          own('splice', { run: key, from: random() < 0.5 ? 0 : pick(3), content: items(1) }),
+          other('splice', { at: `>${S.elemKey(key, pick(3))}`, content: items(2) }),
+          other('splice', { cut: [[key, 0, 2]], content: kind === 't' ? '' : [] }),
+        ];
+        if (kind === 'l') {
+          ops.push(other('assign', { elem: S.elemKey(key, pick(3)), value: 1 }));
+          ops.push(other('move', { elem: S.elemKey(key, pick(3)), cut: [key, 0, 1], at: '^', value: 1 }));
+        } else {
+          ops.push(other('mark', { start: '^', end: '$', key: 'b', value: true }));
+          ops.push(other('mark', { off: key }));
+        }
+        for (const item of ops) assert.doesNotThrow(() => step(item), `round ${round}: ${JSON.stringify(item.value)}`);
+      }
+    }
+  }
+});
+
 test('ops: an extension parked past MAX_RUN is refused as bound; what landed reads the same from its snapshot', () => {
   const S = require('../src/text/sequence.js');
   const splice = (ts, origin, seq, value) => op('splice', ts, origin, { seq, key: 'body', value });

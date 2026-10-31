@@ -851,6 +851,25 @@ test('sequence engine', async (t) => {
   );
 
   await t.test(
+    'a run of no slots never enters a block; hydrated by hand, extending it is malformed, never a throw',
+    () => {
+      const runs = { '1:A': ['^', ['hello']], '5:P': ['>1:4:A', []] };
+      const normalized = S.normalizeSeq({ k: 't', ts: 5, runs });
+      assert.deepStrictEqual(Object.keys(normalized.runs), ['1:A'], 'the empty run is left out');
+      assert.strictEqual(S.render(normalized), 'hello');
+      // The engine's own guard, for a block built past the door.
+      const byHand = S.hydrate({ k: 't', ts: 5, runs }, null);
+      assert.strictEqual(S.render(byHand), 'hello');
+      const grown = S.applySplice(byHand, [6, 'P'], { run: '5:P', from: 0, content: 'x' });
+      assert.deepStrictEqual([grown.changed, grown.reason], [false, 'malformed']);
+      const typed = S.applySplice(byHand, [7, 'A'], { run: '1:A', from: 5, content: '!' });
+      assert.strictEqual(S.render(typed.seq), 'hello!');
+      const empty = S.hydrate({ k: 't', ts: 5, runs: { '5:P': ['^', []] } }, null);
+      assert.deepStrictEqual(S.placeInsert(empty, 0, 'A'), { at: S.HEAD }, 'a walk of no slots anchors at the head');
+    },
+  );
+
+  await t.test(
     'the snapshot path is bounded like the op path: pending work past it, self-anchored runs, typed-off origins',
     () => {
       // 4 097 pending cuts of runs not here: a block no peer could have built through ops.

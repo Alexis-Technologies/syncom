@@ -1073,6 +1073,10 @@ and one `commit` event, not one per call.
   extension that would end past `MAX_RUN` is refused as `bound` (`detail: 'run'`) where it arrives,
   left out of a peer's block, dropped rather than landed should one ever settle past the bound, and
   what waits in `ext` counts toward `MAX_FIELD` as landed slots do (SEQ-11).
+- **A run of no slots in a peer's snapshot threw out of `applyOp` on the next extension.** A block
+  carrying `['>1:4:A', []]` was taken, and the first `{ run, from: 0 }` on that run reached for a last
+  span it did not have — a `TypeError` out of `applyOp`, so the peer's page failed on every retry. Such
+  a run is left out where a peer's block is normalized, and an extension of one is malformed (OPS-12).
 - **A peer's splice whose cut was shaped otherwise stopped its page.** A cut of `[null]`, `[5]` or
   `[[null, 0, 1]]` threw out of `applyOp` before the engine could refuse it, so `applyRemote()`
   failed the whole page and the peer's stream stalled there on every retry. It is refused as

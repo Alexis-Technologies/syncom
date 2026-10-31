@@ -437,7 +437,8 @@ const normalizeJson = (raw) => {
     const anchor = parseAnchor(run[0]);
     if (anchor === null || run[0] === END || (anchor.elem !== null && anchor.elem.ts >= made.ts)) continue;
     const content = normalizeRle(kind, run[1]);
-    if (content === null) continue;
+    // A run is the elements one splice inserted: one of no slots is nobody's (and has no last span).
+    if (content === null || rleLength(content) === 0) continue;
     if (run.length === 3 && (kind !== 'l' || !isElemKey(run[2]) || rleLength(content) !== 1)) continue;
     slots += rleLength(content);
     if (slots > MAX_FIELD) return null;
@@ -1326,7 +1327,7 @@ const placeInsert = (block, i, origin, len = 1) => {
   const st = STATE.get(block);
   const length = st.root.v;
   if (!Number.isInteger(i) || i < 0 || i > length) return null;
-  if (i === 0) return st.roots.length === 0 ? { at: HEAD } : { at: `<${elemAtSlot(st, 0)}` };
+  if (i === 0) return st.root.s === 0 ? { at: HEAD } : { at: `<${elemAtSlot(st, 0)}` };
   const found = R.spanAt(st.root, true, i - 1);
   const { span } = found;
   const k = i - 1 - found.v;
