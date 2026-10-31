@@ -14,6 +14,21 @@ There is no released version section until then; everything below lands in it.
 
 ### Added
 
+- **A synchronous editor's handle on a text: `storage.openText(id, key, { window, actor, source })`**
+  (the `text` plugin's). `insert`, `insertEmbed`, `delete`, `format` and `applyDelta` edit at once
+  over the handle's reading — the field as announced, its edits on top — and `toString()`,
+  `length`, `slice()` and `spans()` read it; `observe()` hears every other writer's change as a
+  delta in the handle's indices. The edits are logged a window later (the storage's `defer`) as
+  one transaction, keystrokes that continue each other as one op; a flush that cannot be logged
+  rejects `flushed` with the new `UNLOGGED` and drops what was not logged. Several writers of one
+  node over one text — handles and the storage — never grow one run from two readings.
+- **Keystrokes fold into one op.** Sent without waiting (made at once, outside the queue), typed
+  through a transaction or through a handle, keystrokes that continue each other — typed on at
+  the end of their run, or a chain of cuts — are logged as one op; a signing node folds those of a
+  transaction too.
+- **`bench/compare` measures a text typed through a handle** (`syncom-edit`), and `bench/write.js`
+  the layers of one write (`--detail`, `--profile`, another checkout under `SYNCOM_BENCH_ROOT`).
+
 - **What the log and the deferred window do is measured.** New metrics:
   `syncom.log.group.ops` (ops per group the log wrote),
   `syncom.log.append.failures`, `syncom.defer.flush.duration`, and the gauges
@@ -1006,6 +1021,15 @@ There is no released version section until then; everything below lands in it.
 
 ### Fixed
 
+- **A peer's splice whose cut was shaped otherwise stopped its page.** A cut of `[null]`, `[5]` or
+  `[[null, 0, 1]]` threw out of `applyOp` before the engine could refuse it, so `applyRemote()`
+  failed the whole page and the peer's stream stalled there on every retry. It is refused as
+  malformed now, a no-op in the log, and the page goes on.
+- **Two writers of one node lost characters growing one run.** Two handles on one text, or a
+  handle and the storage, could extend one run at one offset from two readings; the engine took
+  the second extension for a duplicate and dropped it.
+- **The `/all` storage's type lacked `openText()`.**
+
 - **An unreadable `index.json` vouched for the whole log.** With no index
   the floor is the first seq on disk; with one that did not read it stayed
   at 1, so a log compacted past seq 1 claimed to hold what it had dropped
@@ -1652,6 +1676,24 @@ There is no released version section until then; everything below lands in it.
 
 ### Changed
 
+- **The sequence engine is new: a copy-on-write rope.** Lists and texts stand on a copy-on-write
+  B+-tree with two measures (`src/text/rope.js`), an id index from (run, offset) to a run
+  (`src/text/ids.js`) and hash tries for the registers and the marks (`src/text/cow.js`); a run's
+  name is parsed once per lineage, an op reads every bound before it writes and copies each node
+  it touches once. The blocks, their JSON, every reading and every refusal are the old engine's,
+  op for op. The B4 editing trace through `applyOp` runs at 273 000 edits a second with every
+  version kept; a list op is O(log n) — setAt in a 50 000-element list 2 000 → 154 000 a second —
+  its reading made when it is read. The text plugin is 3.4 KB larger.
+- **A write is made at once where nothing asynchronous is set up** — no write hook, signature,
+  validator, unique key, telemetry, actor function or lens, the record files deferred: appended
+  before the call returns, landed and announced as its group is written (74 promises a keystroke
+  became about 9). The browser makes it too: an op's header is hashed in JavaScript, at once.
+- **The editor binding stands on a text handle.** `createTextBinding` no longer sends one delta at
+  a time with `expect`, nor rebases a STALE one: the editor's edits are made at once over the
+  handle's reading, and every other writer's change reaches the editor as a delta in its
+  indices. The adapters are unchanged; a binding takes `window`.
+- **`applyDelta()` counts the ops logged**, a keystroke folded into the one before it none.
+
 - **A folder of `src/` is a zone, not only a subpath.** A module lives in the
   folder of what it is about even where the core requires it: the telemetry
   writer contract is `src/telemetry/writer.js`; the wire shape, the protocol
@@ -1913,6 +1955,12 @@ There is no released version section until then; everything below lands in it.
   names of a seam shared between modules do not (+2.3 KB min+gzip).
 
 ### Changed (breaking)
+
+- **The log's files and an op's payload changed shape** (nothing is published, `PROTOCOL` stays
+  1): a log file is `{"e":[[seq, fp, header, payload, rest?, flags?]],"c":"<crc32>"}`, its CRC-32
+  checked before it is parsed, and a segment is the lines its groups were journaled as and a
+  trailer; an op names what is its own origin's without the origin — a run by its stamp, an
+  element as `ts:offset`.
 
 - A record id is `[A-Za-z0-9_@-][A-Za-z0-9._@-]{0,127}`; every writer rejects
   anything else (`code: 'INVALID_ID'`), `get()`/`has()` answer absent, and a
