@@ -126,10 +126,13 @@ const until = async (check, what, timeout = 3000) => {
 };
 
 // Every document of every collection, by `_id`: what a comparison before and after reads.
-const dump = async (database) => {
+// Every document of the database at `path`, by collection — the lease document included: what a fence test
+// compares, and nothing of another path's (over the driver one database serves every test of the file).
+const dump = async (database, path) => {
   const out = [];
-  for (const name of ['kv', 'records', 'pieces', 'copies', 'log', 'meta', 'locks']) {
-    const docs = await database.collection(name).find({}).toArray();
+  for (const name of ['kv', 'records', 'pieces', 'copies', 'log', 'meta', 'catalog', 'locks']) {
+    const filter = name === 'locks' ? { _id: path } : { p: path };
+    const docs = await database.collection(name).find(filter).toArray();
     docs.sort((a, b) => (a._id < b._id ? -1 : a._id > b._id ? 1 : 0));
     out.push([name, docs]);
   }
@@ -168,7 +171,7 @@ const fenceHolds = async (client, name, path, transactions) => {
   await old.log.append([{ seq: 1, op: { type: 'write', id: 'r', n: 1 } }], null, { first: 1, last: 1, onFail() {} });
   await old.log.saveIndex({ floor: 1, n: 1 });
   await old.log.seal([{ seq: 1 }], 1, 1);
-  for (const [collection, docs] of await dump(database)) {
+  for (const [collection, docs] of await dump(database, path)) {
     if (collection !== 'locks') for (const doc of docs) assert.strictEqual(doc.gen, 1, `${collection} ${doc._id}`);
   }
   await takeOver(database, path);
@@ -179,7 +182,7 @@ const fenceHolds = async (client, name, path, transactions) => {
   await next.log.append([{ seq: 1, op: { type: 'write', id: 'r', n: 2 } }], null, { first: 1, last: 1, onFail() {} });
   await next.log.saveIndex({ floor: 1, n: 2 });
   await next.log.seal([{ seq: 1 }], 1, 1);
-  const before = await dump(database);
+  const before = await dump(database, path);
   for (const [collection, docs] of before) {
     if (collection !== 'locks') for (const doc of docs) assert.strictEqual(doc.gen, 2, `${collection} ${doc._id}`);
   }
@@ -213,7 +216,7 @@ const fenceHolds = async (client, name, path, transactions) => {
   }
   await lease.release();
   assert.deepStrictEqual(
-    await dump(database),
+    await dump(database, path),
     before,
     'no document of the newer lease was written over, removed or sealed',
   );
@@ -246,7 +249,7 @@ const lostLeaseWritesNothing = async (client, name, path) => {
   assert.strictEqual((await b.get(x)).title, 'deferred', 'the log held x: the new holder replayed it');
   await b.update(r, { title: 'second' });
   await b.close();
-  const before = await dump(database);
+  const before = await dump(database, path);
   assert.strictEqual(docIn(before, 'records', JSON.stringify([path, r])).gen, 2);
   assert.strictEqual(docIn(before, 'records', JSON.stringify([path, x])).gen, 2);
   assert.strictEqual(docIn(before, 'meta', JSON.stringify([path, 'index'])).gen, 2);
@@ -255,7 +258,7 @@ const lostLeaseWritesNothing = async (client, name, path) => {
   assert.strictEqual(errors.length, 2);
   assert.strictEqual(errors[1].code, 'UNPERSISTED');
   assert.deepStrictEqual(errors[1].ids, [x]);
-  assert.deepStrictEqual(await dump(database), before, 'the old holder’s close wrote nothing');
+  assert.deepStrictEqual(await dump(database, path), before, 'the old holder’s close wrote nothing');
 };
 
 test('MongoDB engine (the driver in memory)', async (t) => {
