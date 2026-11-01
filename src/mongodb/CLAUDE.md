@@ -31,8 +31,25 @@ src/mongodb/mongodb.js    @alexify/syncom/mongodb — mongoEngine({ client, db, 
   documents. Under `transactions: true` the set is one session transaction and `atomicBatch` holds;
   that needs the client (sessions are its) and a replica set. `kv.create` is the one `insertOne`: the unique
   `_id` refuses a key held (E11000 → `EEXIST`).
+- **The lease is the server's clock and a generation; every document carries the generation (the fence).**
+  `lock()` makes the lease document with `insertOne` (its expiry on the client's clock for the one round trip
+  until `updateOne` sets it to `$$NOW + staleAfter` — the only time the client's clock is trusted), takes a
+  lapsed one through `findOneAndUpdate({ $expr: { $lt: ['$expires', '$$NOW'] } })` with a pipeline that counts
+  `gen` one up, renews with `{ _id, owner, gen }` on `$$NOW`, and a release leaves the document lapsed
+  (`expires: new Date(0)`) so the count goes on; `remove(path)` deletes it. No `Date.now()` reaches a filter or
+  a stored expiry. A handle writes with the generation of the lease it holds; one that never locked — opened
+  with `lock: false`, or `copyEngine`'s target — writes with the generation the lease document held at its
+  open, 0 where none ever did. Every put is
+  `updateOne({ _id, gen: { $not: { $gt: gen } } }, { $set: { …, gen } }, { upsert: true })`
+  and every `deleteOne`/`deleteMany` carries the same filter: a document of a newer lease does not match, the
+  upsert tries an insert, the `_id` collides, E11000 stops the ordered bulk and the statement — the write set,
+  the log group, a seal, the index, a kv or copies put — fails as `LEASE_LOST` (`fenced`; `kv.create`'s E11000
+  stays `EEXIST`). Under `transactions: true` the lease (`{ _id, owner, gen }`) is read inside the transaction
+  first, absent → `LEASE_LOST` before anything is written. The driver is 6 or later (`findOneAndUpdate` answers
+  the document; `taken?.value ?? taken` reads an older one defensively).
 - **A change stream tells writers apart by token.** Every record and log document carries `w`, the writer's
-  token; `db.changes` hears `records` and `log` through `watch` and drops what carries its own. A deletion
-  carries no document, so the ids this instance removed are remembered (`deleted`) and dropped once. One
-  message per document, never per set: a follower re-reads what it hears. `changes: false` for a standalone
-  server, where `watch` would fail.
+  token — one per `open(path)`, so two handles of one engine tell each other apart; `db.changes` hears
+  `records` and `log` through `watch` and drops what carries its own. A deletion carries no document, so the
+  ids this instance removed are remembered (`deleted`, once the write landed, only while a subscription is
+  live) and dropped once. One message per document, never per set: a follower re-reads what it hears.
+  `changes: false` for a standalone server, where `watch` would fail.

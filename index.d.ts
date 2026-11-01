@@ -95,15 +95,27 @@ export interface EngineWriteSet {
   };
 }
 
+/**
+ * A lease held on a database: `release()` lets it go; `gen` its generation where the engine counts them
+ * (MongoDB: one up at every takeover — every document the holder writes carries it, and none of an older lease
+ * is ever written over a newer one's).
+ */
+export interface EngineLease {
+  release(): Promise<void>;
+  readonly gen?: number;
+}
+
 /** A database as an engine opens it: a set of stores over one `path`. */
 export interface EngineDb {
   readonly path: string;
   readonly capabilities: EngineCapabilities;
   /**
-   * The engine's own lease on the database, where `capabilities.lock` is `'native'`: held while renewed,
-   * `LOCKED` while another instance holds it; `onLost` hears once when it goes to another instance.
+   * The engine's own lease on the database, where `capabilities.lock` is `'native'`: held while renewed on the
+   * server's clock, `LOCKED` while another instance holds it; `onLost` hears once when it goes to another
+   * instance. A write set, a log group, a seal, the index or a kv put of a lease another instance took since
+   * rejects with `LEASE_LOST`.
    */
-  lock?(options: LockOptions & { onLost?: (error: Error) => void }): Promise<{ release(): Promise<void> }>;
+  lock?(options: LockOptions & { onLost?: (error: Error) => void }): Promise<EngineLease>;
   /**
    * The catalog's rows kept by a native engine — as they are (memory, IndexedDB) or a row at a time (SQLite: `changed`
    * the ids put since the last save, `null` a row removed; `whole` when the store holds none of this catalog's rows and

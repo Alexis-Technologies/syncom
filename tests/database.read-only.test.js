@@ -163,7 +163,7 @@ test('the lease an engine holds a database by (MongoDB)', async (t) => {
       await client
         .db('leased')
         .collection('locks')
-        .insertOne({ _id: 'app', owner: 'gone', expires: Date.now() - 1 });
+        .updateOne({ _id: 'app' }, { $set: { owner: 'gone', expires: new Date(Date.now() - 1) } });
       const b = await createDatabase({ ...base, path: 'app', engine });
       await b.insert({ n: 1 });
       // `wait` outlasts a holder that lets go.
@@ -172,6 +172,55 @@ test('the lease an engine holds a database by (MongoDB)', async (t) => {
       await b.close();
       const c = await waiting;
       assert.deepStrictEqual(await c.list().then((ids) => ids.length), 1);
+      await c.close();
+    },
+  );
+
+  await t.test(
+    'the lease is on the server’s clock: a client a minute ahead or behind takes no live lease; a lapsed one is taken when the server says so, the generation one up',
+    async () => {
+      const client = createFakeMongo();
+      const engine = mongoEngine({ client, name: 'clock' });
+      const locks = client.db('clock').collection('locks');
+      const a = await createDatabase({ ...base, path: 'app', engine, lock: { staleAfter: 200 } });
+      const first = await locks.findOne({ _id: 'app' });
+      assert.strictEqual(first.gen, 1);
+      assert.ok(first.expires instanceof Date, 'the expiry is a Date, set on the server’s clock');
+      // A client whose clock is off: `Date.now` stands for it (the fake's server clock is its own).
+      const skewed = async (ms, fn) => {
+        const now = Date.now;
+        Date.now = () => now() + ms;
+        try {
+          return await fn();
+        } finally {
+          Date.now = now;
+        }
+      };
+      for (const ms of [60_000, -60_000]) {
+        await skewed(ms, () =>
+          assert.rejects(() => createDatabase({ ...base, path: 'app', engine }), { code: 'LOCKED', path: 'app' }),
+        );
+      }
+      const still = await locks.findOne({ _id: 'app' });
+      assert.deepStrictEqual([still.owner, still.gen], [first.owner, 1], 'a skewed client took nothing');
+      const errors = [];
+      a.on('error', (error) => errors.push(error.code));
+      // The server's clock moves past the lease, whatever any client's says: the next opener takes it.
+      client.advance(201);
+      const b = await createDatabase({ ...base, path: 'app', engine });
+      const second = await locks.findOne({ _id: 'app' });
+      assert.strictEqual(second.gen, 2);
+      assert.notStrictEqual(second.owner, first.owner);
+      await settle(150);
+      assert.deepStrictEqual(errors, ['LEASE_LOST'], 'the old holder’s renewal found the lease another’s');
+      await b.close();
+      await a.close();
+      // A release leaves the document, lapsed: the next lease is a newer generation still.
+      const released = await locks.findOne({ _id: 'app' });
+      assert.strictEqual(released.gen, 2);
+      assert.ok(released.expires.getTime() < Date.now());
+      const c = await createDatabase({ ...base, path: 'app', engine });
+      assert.strictEqual((await locks.findOne({ _id: 'app' })).gen, 3);
       await c.close();
     },
   );

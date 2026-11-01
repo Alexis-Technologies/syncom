@@ -104,6 +104,8 @@ class OpLog {
   #byId = new Map();
   #onRoll = null;
   #onFail = null;
+  // Set by `readOnly()`: the medium refuses, close() writes nothing.
+  #frozen = false;
 
   constructor(basePath, options = {}) {
     this.#log = options.logger ?? null;
@@ -1098,9 +1100,21 @@ class OpLog {
     return this.#entries.slice(this.#lowerBound(this.#sealedTo + 1));
   }
 
+  /**
+   * From here on the log writes nothing: `store` — a medium that refuses, a
+   * follower's — takes the medium's place, so a group fails through it and a
+   * seal, a drop, the index and a scrub are nothing, and `close()` seals and
+   * indexes nothing. What a writer whose lease was lost does.
+   */
+  readOnly(store) {
+    this.#store = store;
+    this.#frozen = true;
+  }
+
   /** Seals what can be sealed and writes the index: a reopen after a clean close replays nothing it need not. */
   close() {
     return this.#serialize(async () => {
+      if (this.#frozen) return;
       await this.#roll();
       await this.#writeIndex();
     });

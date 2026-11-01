@@ -4,16 +4,24 @@
 // with databases of collections, `findOne`/`find(...).toArray()` with
 // projections, sorts and limits, `insertOne` (E11000 on a key held),
 // `bulkWrite` (replaceOne upsert, insertOne, deleteOne, deleteMany,
-// updateOne), `deleteMany`, `updateOne`, `findOneAndUpdate`, `createIndex`,
-// `countDocuments`, `drop`, sessions whose `withTransaction` undoes what the
-// callback wrote when it throws, and change streams (`watch`) that hear
-// every write once it is committed. Filters: equality, `$gt/$gte/$lt/$lte`,
-// `$in/$nin`, `$ne`, `$exists`, `$or`, `$and`. What it lacks, it throws on,
-// so a test never passes on a method the real driver would not have.
+// updateOne — an upsert whose filter misses a held `_id` is E11000 too),
+// `deleteMany`, `updateOne`, `findOneAndUpdate` (an update document, or a
+// pipeline of `$set` stages over `$field`, `$$NOW`, `$add`, `$ifNull`),
+// `createIndex`, `countDocuments`, `drop`, sessions whose `withTransaction`
+// undoes what the callback wrote when it throws, and change streams
+// (`watch`) that hear every write once it is committed. Filters: equality,
+// `$gt/$gte/$lt/$lte`, `$in/$nin`, `$ne`, `$exists`, `$not`, `$or`, `$and`,
+// `$expr` (`$lt`/`$gt`/`$lte`/`$gte`/`$eq` over Dates and numbers). The
+// server's clock (`$$NOW`) is the client's `advance(ms)` past the real one —
+// never `Date.now`, which a test may skew to stand for a client's clock.
+// What it lacks, it throws on, so a test never passes on a method the real
+// driver would not have.
 
 const { EventEmitter } = require('node:events');
 
 const clone = (value) => structuredClone(value);
+// The real clock, taken before any test replaces `Date.now`.
+const realNow = Date.now;
 
 const compare = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
@@ -29,7 +37,51 @@ const valueAt = (doc, path) => {
   return value;
 };
 
-const OPERATORS = new Set(['$gt', '$gte', '$lt', '$lte', '$in', '$nin', '$ne', '$exists', '$eq']);
+const OPERATORS = new Set(['$gt', '$gte', '$lt', '$lte', '$in', '$nin', '$ne', '$exists', '$eq', '$not']);
+
+// A Date and a number compare as instants in `$expr`; anything else as it is.
+const instant = (value) => (value instanceof Date ? value.getTime() : value);
+
+// An aggregation expression over `doc`: a field path, `$$NOW`, a literal, or one operator.
+const evaluate = (expr, doc, clock) => {
+  if (typeof expr === 'string') {
+    if (expr === '$$NOW') return clock();
+    if (expr.startsWith('$$')) throw new Error(`fake-mongo: variable ${expr} is not supported`);
+    return expr.startsWith('$') ? valueAt(doc, expr.slice(1)) : expr;
+  }
+  if (Array.isArray(expr)) return expr.map((item) => evaluate(item, doc, clock));
+  if (expr === null || typeof expr !== 'object' || expr instanceof Date) return expr;
+  const keys = Object.keys(expr);
+  if (keys.length !== 1 || !keys[0].startsWith('$')) return clone(expr);
+  const [op] = keys;
+  const args = evaluate(expr[op], doc, clock);
+  switch (op) {
+    case '$add': {
+      let sum = 0;
+      let date = false;
+      for (const arg of args) {
+        if (arg instanceof Date) date = true;
+        sum += instant(arg);
+      }
+      return date ? new Date(sum) : sum;
+    }
+    case '$ifNull':
+      for (const arg of args) if (arg !== null && arg !== undefined) return arg;
+      return null;
+    case '$lt':
+      return instant(args[0]) < instant(args[1]);
+    case '$lte':
+      return instant(args[0]) <= instant(args[1]);
+    case '$gt':
+      return instant(args[0]) > instant(args[1]);
+    case '$gte':
+      return instant(args[0]) >= instant(args[1]);
+    case '$eq':
+      return instant(args[0]) === instant(args[1]);
+    default:
+      throw new Error(`fake-mongo: expression ${op} is not supported`);
+  }
+};
 
 const matchesCondition = (value, condition) => {
   if (condition !== null && typeof condition === 'object' && !Array.isArray(condition)) {
@@ -65,6 +117,9 @@ const matchesCondition = (value, condition) => {
           case '$exists':
             if ((value !== undefined) !== Boolean(expected)) return false;
             break;
+          case '$not':
+            if (matchesCondition(value, expected)) return false;
+            break;
           default:
             throw new Error(`fake-mongo: operator ${key} is not supported`);
         }
@@ -75,12 +130,14 @@ const matchesCondition = (value, condition) => {
   return same(value, condition);
 };
 
-const matches = (doc, filter) => {
+const matches = (doc, filter, clock = () => new Date()) => {
   for (const [key, condition] of Object.entries(filter)) {
     if (key === '$or') {
-      if (!condition.some((branch) => matches(doc, branch))) return false;
+      if (!condition.some((branch) => matches(doc, branch, clock))) return false;
     } else if (key === '$and') {
-      if (!condition.every((branch) => matches(doc, branch))) return false;
+      if (!condition.every((branch) => matches(doc, branch, clock))) return false;
+    } else if (key === '$expr') {
+      if (!evaluate(condition, doc, clock)) return false;
     } else if (key.startsWith('$')) {
       throw new Error(`fake-mongo: filter ${key} is not supported`);
     } else if (!matchesCondition(valueAt(doc, key), condition)) return false;
@@ -108,8 +165,23 @@ const duplicate = (_id) =>
     code: 11000,
   });
 
-// The fields `update` sets: `$set` (and `$setOnInsert` at an upsert's insert).
-const applyUpdate = (doc, update, inserting) => {
+// The fields `update` sets: `$set` (and `$setOnInsert` at an upsert's insert),
+// `$unset`, `$inc` — or a pipeline, a `$set` stage per element, each field an
+// expression over the document as the stage finds it.
+const applyUpdate = (doc, update, inserting, clock) => {
+  if (Array.isArray(update)) {
+    let next = { ...doc };
+    for (const stage of update) {
+      const keys = Object.keys(stage);
+      if (keys.length !== 1 || keys[0] !== '$set') {
+        throw new Error(`fake-mongo: pipeline stage ${keys[0]} is not supported`);
+      }
+      const staged = { ...next };
+      for (const [key, expr] of Object.entries(stage.$set)) staged[key] = evaluate(expr, next, clock);
+      next = staged;
+    }
+    return next;
+  }
   const next = { ...doc };
   for (const [op, fields] of Object.entries(update)) {
     if (op === '$set' || (op === '$setOnInsert' && inserting)) Object.assign(next, clone(fields));
@@ -138,8 +210,11 @@ class FakeCollection {
   docs = new Map();
   watchers = new Set();
   #name;
-  constructor(name) {
+  // The server's clock: what `$$NOW` reads.
+  #clock;
+  constructor(name, clock = () => new Date()) {
     this.#name = name;
+    this.#clock = clock;
   }
   get collectionName() {
     return this.#name;
@@ -169,7 +244,7 @@ class FakeCollection {
 
   #all(filter) {
     const found = [];
-    for (const doc of this.docs.values()) if (matches(doc, filter)) found.push(doc);
+    for (const doc of this.docs.values()) if (matches(doc, filter, this.#clock)) found.push(doc);
     return found;
   }
 
@@ -256,13 +331,13 @@ class FakeCollection {
       for (const [key, value] of Object.entries(filter)) {
         if (!key.startsWith('$') && !isCondition(value)) seed[key] = value;
       }
-      const doc = applyUpdate(seed, update, true);
+      const doc = applyUpdate(seed, update, true, this.#clock);
       if (doc._id === undefined) doc._id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
       if (this.docs.has(doc._id)) throw duplicate(doc._id);
       this.#change(doc._id, doc, options.session);
       return { matchedCount: 0, modifiedCount: 0, upsertedCount: 1, upsertedId: doc._id };
     }
-    const doc = applyUpdate(found[0], update, false);
+    const doc = applyUpdate(found[0], update, false, this.#clock);
     this.#change(doc._id, doc, options.session);
     return { matchedCount: 1, modifiedCount: 1, upsertedCount: 0 };
   }
@@ -370,13 +445,15 @@ class FakeSession {
 
 class FakeDb {
   #collections = new Map();
+  #clock;
   databaseName;
-  constructor(name) {
+  constructor(name, clock = () => new Date()) {
     this.databaseName = name;
+    this.#clock = clock;
   }
   collection(name) {
     let collection = this.#collections.get(name);
-    if (collection === undefined) this.#collections.set(name, (collection = new FakeCollection(name)));
+    if (collection === undefined) this.#collections.set(name, (collection = new FakeCollection(name, this.#clock)));
     return collection;
   }
   async dropDatabase() {
@@ -391,11 +468,17 @@ class FakeDb {
 
 class FakeMongoClient {
   #dbs = new Map();
+  // How far the server's clock is past the real one — what `advance(ms)` moves.
+  #skew = 0;
   closed = false;
   db(name = 'test') {
     let db = this.#dbs.get(name);
-    if (db === undefined) this.#dbs.set(name, (db = new FakeDb(name)));
+    if (db === undefined) this.#dbs.set(name, (db = new FakeDb(name, () => new Date(realNow() + this.#skew))));
     return db;
+  }
+  /** Moves the server's clock (`$$NOW`) forward by `ms`, the client's untouched. */
+  advance(ms) {
+    this.#skew += ms;
   }
   startSession() {
     return new FakeSession();

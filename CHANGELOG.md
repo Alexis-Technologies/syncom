@@ -84,9 +84,16 @@ and one `commit` event, not one per call.
   is one bulk write. Another process hears every record and log document through a change stream
   (`db.changes`), this instance's own told apart by the writer's token on each document; `changes: false` on
   a standalone server. `engine.destroy()` drops the database; nothing is connected or closed here. The database
-  is held by a lease (`capabilities.lock: 'native'`, `db.lock()`): one document per path, renewed every third of
-  `lock.staleAfter` (30 s by default), a lapsed one taken over; a writer whose lease goes to another instance
-  hears `error` `LEASE_LOST` once and is read-only from then on (`READ_ONLY` on every write).
+  is held by a lease (`capabilities.lock: 'native'`, `db.lock()`): one document per path on the server's clock
+  (`$$NOW`, never the client's), renewed every third of `lock.staleAfter` (30 s by default), a lapsed one taken
+  over with its generation `gen` one up. Every document a holder writes carries that generation and every put,
+  removal and log group is fenced to its generation or older, so a writer whose lease another instance took
+  cannot write over anything the new holder wrote (`LEASE_LOST` from the engine; under `transactions: true` the
+  lease is checked inside the transaction first): it hears `error` `LEASE_LOST` once, is read-only from then on
+  (`READ_ONLY` on every write) and writes nothing more — not at its close, where what it had logged but not landed
+  is held as `UNPERSISTED`. A log group whose write failed after it landed (the acknowledgement lost) is wiped
+  by the next group and left out by a reopen, never replayed. The driver is 6.0 or later; `engine.remove(path)`
+  takes the lease document too.
 - **An engine over a message port, and a database moved between engines: `@alexify/syncom/engines`.**
   `serveEngine(engine, port)` answers the engine contract over a `MessagePort` (a worker thread, a
   SharedWorker, Electron's main process); `remoteEngine(port, { name, capabilities })` and

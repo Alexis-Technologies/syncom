@@ -117,6 +117,146 @@ const bulkWrites = async (fn, { failing = null } = {}) => {
 };
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+const until = async (check, what, timeout = 3000) => {
+  const started = Date.now();
+  while (!check()) {
+    if (Date.now() - started > timeout) throw new Error(`timed out waiting for ${what}`);
+    await settle();
+  }
+};
+
+// Every document of every collection, by `_id`: what a comparison before and after reads.
+const dump = async (database) => {
+  const out = [];
+  for (const name of ['kv', 'records', 'pieces', 'copies', 'log', 'meta', 'locks']) {
+    const docs = await database.collection(name).find({}).toArray();
+    docs.sort((a, b) => (a._id < b._id ? -1 : a._id > b._id ? 1 : 0));
+    out.push([name, docs]);
+  }
+  return out;
+};
+const docIn = (dumped, collection, _id) => {
+  for (const [name, docs] of dumped) if (name === collection) for (const doc of docs) if (doc._id === _id) return doc;
+  return null;
+};
+
+// Another instance finding the lease lapsed and taking it — what `lock()` does, by hand.
+const takeOver = (database, path) =>
+  database
+    .collection('locks')
+    .findOneAndUpdate({ _id: path }, [
+      { $set: { owner: 'other', gen: { $add: [{ $ifNull: ['$gen', 0] }, 1] }, expires: { $add: ['$$NOW', 60_000] } } },
+    ]);
+
+// S-2: the fence — every document a handle writes carries its lease's
+// generation, and none of a newer lease is written over, removed or sealed
+// by an older one; the same over the fake and the driver, with and without
+// transactions.
+const fenceHolds = async (client, name, path, transactions) => {
+  const database = client.db(name);
+  const engine = mongoEngine({ client, name, transactions });
+  const old = await engine.open(path);
+  const lost = [];
+  const lease = await old.lock({ staleAfter: 60, onLost: (error) => lost.push(error) });
+  assert.strictEqual(lease.gen, 1);
+  const set = (n) => ({
+    records: [{ id: 'r', stored: stored({ n }), pieces: { put: [['r~1.json', `{"n":${n}}`]] } }],
+    kv: { put: [['', 'node.json', `{"n":${n}}`, undefined]] },
+    copies: { put: [['v1', 'r', `{"n":${n}}`]] },
+  });
+  await old.write(set(1));
+  await old.log.append([{ seq: 1, op: { type: 'write', id: 'r', n: 1 } }], null, { first: 1, last: 1, onFail() {} });
+  await old.log.saveIndex({ floor: 1, n: 1 });
+  await old.log.seal([{ seq: 1 }], 1, 1);
+  for (const [collection, docs] of await dump(database)) {
+    if (collection !== 'locks') for (const doc of docs) assert.strictEqual(doc.gen, 1, `${collection} ${doc._id}`);
+  }
+  await takeOver(database, path);
+  await until(() => lost.length === 1, 'the lease lost');
+  // A handle opened now writes as the generation the lease document holds — the new holder's.
+  const next = await engine.open(path);
+  await next.write(set(2));
+  await next.log.append([{ seq: 1, op: { type: 'write', id: 'r', n: 2 } }], null, { first: 1, last: 1, onFail() {} });
+  await next.log.saveIndex({ floor: 1, n: 2 });
+  await next.log.seal([{ seq: 1 }], 1, 1);
+  const before = await dump(database);
+  for (const [collection, docs] of before) {
+    if (collection !== 'locks') for (const doc of docs) assert.strictEqual(doc.gen, 2, `${collection} ${doc._id}`);
+  }
+  // The old generation over the new one's documents: every statement refused, nothing moved.
+  const refused = { code: 'LEASE_LOST', path };
+  await assert.rejects(() => old.write(set('stale')), refused);
+  await assert.rejects(() => old.kv.put('', 'node.json', '{"n":"stale"}'), refused);
+  await assert.rejects(() => old.copies.put('v1', 'r', '{"n":"stale"}'), refused);
+  const failures = [];
+  const appended = await old.log.append([{ seq: 1, op: { type: 'write', id: 'r', n: 'stale' } }], null, {
+    first: 1,
+    last: 1,
+    onFail: (error) => failures.push(error),
+  });
+  assert.deepStrictEqual([appended, failures.length, failures[0]?.code], [false, 1, 'LEASE_LOST']);
+  await assert.rejects(() => old.log.saveIndex({ floor: 1, n: 'stale' }), refused);
+  await assert.rejects(() => old.log.seal([{ seq: 1 }], 1, 1), refused);
+  if (transactions) {
+    // The lease is checked first, inside the transaction: nothing of an old generation lands, a removal or a document nobody newer wrote included.
+    await assert.rejects(() => old.write({ remove: ['r'], kv: { remove: [['', 'node.json']] } }), refused);
+    await assert.rejects(() => old.copies.drop('v1'), refused);
+    await assert.rejects(() => old.write({ records: [{ id: 'fresh', stored: stored({}) }] }), refused);
+  } else {
+    // The fence is per document: a removal of a newer document is nothing, and where nothing newer sits the old generation lands.
+    await old.write({ remove: ['r'], kv: { remove: [['', 'node.json']] } });
+    await old.copies.drop('v1');
+    await old.write({ records: [{ id: 'fresh', stored: stored({}) }] });
+    const fresh = JSON.stringify([path, 'fresh']);
+    assert.strictEqual((await database.collection('records').findOne({ _id: fresh })).gen, 1);
+    await database.collection('records').deleteOne({ _id: fresh });
+  }
+  await lease.release();
+  assert.deepStrictEqual(
+    await dump(database),
+    before,
+    'no document of the newer lease was written over, removed or sealed',
+  );
+  assert.strictEqual(
+    (await database.collection('locks').findOne({ _id: path })).owner,
+    'other',
+    'a release lets go of nothing another holds',
+  );
+};
+
+// S-2, the database: a writer whose lease was lost writes nothing more — not at its close either.
+const lostLeaseWritesNothing = async (client, name, path) => {
+  const database = client.db(name);
+  const engine = mongoEngine({ client, name });
+  const options = { path, engine, logger: false, lock: { staleAfter: 60 } };
+  const a = await createDatabase({ ...options, defer: 1000 });
+  const errors = [];
+  a.on('error', (error) => errors.push(error));
+  const r = await a.insert({ title: 'first' });
+  await a.flush();
+  // Logged; its file waits in the deferred window.
+  const x = await a.insert({ title: 'deferred' });
+  assert.strictEqual(a.stats().deferred, 1);
+  await takeOver(database, path);
+  await until(() => errors.length === 1, 'LEASE_LOST');
+  assert.strictEqual(errors[0].code, 'LEASE_LOST');
+  assert.strictEqual(a.readOnly, true);
+  // The new holder — a database that never locks writes as the generation the lease document holds — replays the tail and writes on.
+  const b = await createDatabase({ ...options, lock: false, defer: 0 });
+  assert.strictEqual((await b.get(x)).title, 'deferred', 'the log held x: the new holder replayed it');
+  await b.update(r, { title: 'second' });
+  await b.close();
+  const before = await dump(database);
+  assert.strictEqual(docIn(before, 'records', JSON.stringify([path, r])).gen, 2);
+  assert.strictEqual(docIn(before, 'records', JSON.stringify([path, x])).gen, 2);
+  assert.strictEqual(docIn(before, 'meta', JSON.stringify([path, 'index'])).gen, 2);
+  // The old holder closes: no roll, no index, no catalog, the deferred window held as UNPERSISTED — nothing written.
+  await a.close();
+  assert.strictEqual(errors.length, 2);
+  assert.strictEqual(errors[1].code, 'UNPERSISTED');
+  assert.deepStrictEqual(errors[1].ids, [x]);
+  assert.deepStrictEqual(await dump(database), before, 'the old holder’s close wrote nothing');
+};
 
 test('MongoDB engine (the driver in memory)', async (t) => {
   await t.test('the contract, in order', async (t2) => {
@@ -217,6 +357,21 @@ test('MongoDB engine (the driver in memory)', async (t) => {
     'a log group whose write failed after it landed is wiped, never replayed: the seqs it left are the next group’s',
     async () => {
       await failedGroupIsNoGroup(createFakeMongo().db('r16'), '/app');
+    },
+  );
+
+  await t.test(
+    'a lease taken by another instance fences the old holder: every statement over a newer document is LEASE_LOST, in order and in transactions',
+    async () => {
+      await fenceHolds(createFakeMongo(), 'fence', '/app', false);
+      await fenceHolds(createFakeMongo(), 'fence', '/app', true);
+    },
+  );
+
+  await t.test(
+    'a writer whose lease was lost writes nothing more, not at its close: the deferred window is UNPERSISTED',
+    async () => {
+      await lostLeaseWritesNothing(createFakeMongo(), 'lost', '/app');
     },
   );
 
@@ -335,6 +490,15 @@ test('MongoDB engine (the driver)', { skip: url ? false : 'MONGODB_URL unset' },
       await failedGroupIsNoGroup(client.db(name), '/r16');
     },
   );
+
+  await t.test('a lease taken by another instance fences the old holder (the driver)', async () => {
+    await fenceHolds(client, name, '/fence-ordered', false);
+    await fenceHolds(client, name, '/fence-transactions', true);
+  });
+
+  await t.test('a writer whose lease was lost writes nothing more, not at its close (the driver)', async () => {
+    await lostLeaseWritesNothing(client, name, '/lost');
+  });
 
   await t.test(
     'a database over the driver: writes, pieces, tags, the chain, a reopen; a follower hears it',

@@ -160,9 +160,12 @@ const ENTRIES = [
   // identity, the tags and the chain; `createDatabase({ engine })` (engines plan, E1.3). 60, raised by name.
   // 60.6 with a follower (`readOnly`: src/readonly.js, the change stream heard) and an engine's lease (`db.lock`,
   // LEASE_LOST; engines plan, E5). 61, raised by name.
+  // 61.0 with a follower refused over an engine that is not shared and from hosting, and a lost lease fenced
+  // locally — the stores and the log's medium swapped for the read-only ones, every landing after it held
+  // (review №5, E2: R-4, G-2, S-2). 62, raised by name.
   // 62.1 with the keys of the contract checked where they become a file name or a filter (src/engine.js isKvKey,
-  // checkWriteSet; review №5 S-3/S-5) — a seam's property names do not minify. 62.5, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 62.5 },
+  // checkWriteSet; review №5 S-3/S-5) — a seam's property names do not minify; both together 63. 63.5, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 63.5 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check

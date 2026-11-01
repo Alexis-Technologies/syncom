@@ -14,6 +14,7 @@ export type {
   Fsi,
   Engine,
   EngineDb,
+  EngineLease,
   EngineCapabilities,
   EngineWriteSet,
   EngineWriteRecord,

@@ -687,7 +687,8 @@ class Database extends Emitter {
   }
 
   // The error a write meets on a read-only database: a follower's, or a
-  // writer's whose lease was lost (its ops in flight land; nothing new starts).
+  // writer's whose lease was lost (nothing of it is written any more: what
+  // was logged but not landed is held as UNPERSISTED).
   #refused(what) {
     const why = this.#leaseLost ? 'its lease was lost' : 'it was opened with readOnly: true';
     return new SyncomError('READ_ONLY', `Storage at ${this.#path} is read-only (${why}): ${what} refused`, {
@@ -703,6 +704,13 @@ class Database extends Emitter {
     if (this.#closed || this.#leaseLost) return;
     this.#leaseLost = true;
     this.#readOnly = true;
+    // Nothing of this instance reaches the engine from here on: the stores
+    // refuse as a follower's do, the log's medium with them (a group fails,
+    // a seal, a drop and the index are nothing, close() seals nothing), and
+    // every landing — in flight or deferred — is held, UNPERSISTED. The
+    // engine's own fence refuses what is already on its way.
+    this.#db = readOnlyDb(this.#db, (what) => this.#refused(what));
+    this.#log?.readOnly(this.#db.log);
     this.#logger.error({ event: 'storage.lease.lost', path: this.#path, err: cause });
     const message = `Storage at ${this.#path} lost its lease: read-only from here on`;
     notify(this, this.#logger, 'error', new SyncomError('LEASE_LOST', message, { path: this.#path, cause }));
@@ -1348,6 +1356,9 @@ class Database extends Emitter {
   // onto the files at the next open. Reported, never thrown.
   async #land(touched, fromSeq, toSeq) {
     try {
+      // After a lost lease nothing of this instance is written: what was
+      // logged stays in the log for the next holder's replay, held here.
+      if (this.#leaseLost) throw this.#refused('a landing');
       await this.#persistBatch(touched, fromSeq, toSeq);
     } catch (error) {
       await this.#unpersisted(touched, error);

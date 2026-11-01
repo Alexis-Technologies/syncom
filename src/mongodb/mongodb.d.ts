@@ -18,7 +18,10 @@ export interface MongoLikeDb {
   dropDatabase(): Promise<unknown>;
 }
 
-/** What the engine asks of the client: a database by name, a session. The driver's `MongoClient` fits. */
+/**
+ * What the engine asks of the client: a database by name, a session. The driver's `MongoClient` fits — 6.0 or
+ * later, whose `findOneAndUpdate` answers the document (the lease is taken through it).
+ */
 export interface MongoLikeClient {
   db(name?: string): MongoLikeDb;
   startSession?(): MongoLikeSession;

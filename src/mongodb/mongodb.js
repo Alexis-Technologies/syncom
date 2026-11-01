@@ -13,17 +13,21 @@
 // was lost left behind — and `load` leaves out a newest group short of its
 // documents (never acknowledged: its seqs were taken back); another process hears
 // every write through a change stream (`db.changes`, a replica set too),
-// its own writes told apart by the writer's token on each document. Nothing
+// its own writes told apart by the writer's token on each document. One
+// instance holds a database by a lease on the server's clock, and every
+// document a handle writes carries the lease's generation (`gen`): a put or
+// a removal never reaches a document of a newer lease (the fence). Nothing
 // here opens or closes a connection: the client is the caller's. Requires
 // engine.js and errors.js only.
 //
 //   collection  _id (the key as JSON)   fields beside it
-//   kv          [p, ns, key]            p, ns, key, v — the small named texts (node.json, schema.json, the keys, the lock…)
-//   records     [p, id]                 p, id, t, w — the record's JSON as the engine was handed it, the writer's token
-//   pieces      [p, id, name]           p, id, name, t — the runs of a large block
-//   copies      [p, tag, id]            p, tag, id, t — a tag's copies of records
-//   log         [p, seq]                p, seq, first, last, e, w — an entry of the op log (JSON), the first and last seq of its group
-//   meta        [p, key]                p, key, v — the log's index and sealed segments
+//   kv          [p, ns, key]            p, ns, key, v, gen — the small named texts (node.json, schema.json, the keys, the lock…)
+//   records     [p, id]                 p, id, t, w, gen — the record's JSON as the engine was handed it, the writer's token
+//   pieces      [p, id, name]           p, id, name, t, gen — the runs of a large block
+//   copies      [p, tag, id]            p, tag, id, t, gen — a tag's copies of records
+//   log         [p, seq]                p, seq, first, last, e, w, gen — an entry of the op log (JSON), the first and last seq of its group
+//   meta        [p, key]                p, key, v, gen — the log's index and sealed segments
+//   locks       p                       owner, gen, expires — the lease: its holder's token, its generation, when it lapses (a Date, the server's)
 //
 // A point read is `findOne({ _id })`; a range is the flat fields over an
 // index (`{ p, id: { $gt } }` sorted by `id` over `{ p: 1, id: 1 }`).
@@ -32,7 +36,7 @@ const { capabilitiesOf } = require('../engine.js');
 const { SyncomError } = require('../errors.js');
 
 const COLLECTIONS = ['kv', 'records', 'pieces', 'copies', 'log', 'meta'];
-// A lease per database path: `{ _id: path, owner, expires }`, renewed by its holder, taken once it lapsed.
+// A lease per database path: `{ _id: path, owner, gen, expires }`, renewed by its holder, taken once it lapsed.
 const LOCKS = 'locks';
 const DEFAULT_LEASE = 30_000;
 const INDEXES = {
@@ -44,6 +48,8 @@ const INDEXES = {
   meta: { p: 1, key: 1 },
 };
 const DUPLICATE = 11000;
+// A duplicate key as the driver reports it: the code on the error, or on the first write error of a bulk.
+const isDuplicate = (error) => error?.code === DUPLICATE || error?.writeErrors?.[0]?.code === DUPLICATE;
 
 const locked = (path, why = 'is leased by another instance') =>
   new SyncomError('LOCKED', `Storage at ${path} ${why}`, { path });
@@ -78,9 +84,6 @@ const partsOf = (_id) => {
   }
 };
 
-const put = (_id, doc) => ({ replaceOne: { filter: { _id }, replacement: doc, upsert: true } });
-const del = (_id) => ({ deleteOne: { filter: { _id } } });
-
 const sorted = (docs, field) => {
   const out = [];
   for (let i = 0; i < docs.length; i++) out.push(docs[i][field]);
@@ -91,11 +94,12 @@ const token = () => `${Date.now().toString(36)}${Math.random().toString(36).slic
 
 /**
  * `mongoEngine({ client, db, name, transactions, changes })` — the engine over
- * MongoDB: `client` is the driver's `MongoClient` (connected), `name` the
- * database every path lives in (`'syncom'`); `db` a `Db` in place of the two.
- * `transactions: true` lands a write set in one session transaction (a replica
- * set; `atomicBatch`); `changes: false` says the deployment has no change
- * streams (a standalone server). `destroy()` drops the database.
+ * MongoDB: `client` is the driver's `MongoClient` (connected; the driver 6 or
+ * later), `name` the database every path lives in (`'syncom'`); `db` a `Db`
+ * in place of the two. `transactions: true` lands a write set in one session
+ * transaction (a replica set; `atomicBatch`); `changes: false` says the
+ * deployment has no change streams (a standalone server). `destroy()` drops
+ * the database.
  */
 const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions = false, changes = true } = {}) => {
   if (db === null && (client === null || typeof client?.db !== 'function')) {
@@ -113,7 +117,6 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
     lock: 'native',
     shared: true,
   });
-  const writer = token();
   const c = {};
   for (let i = 0; i < COLLECTIONS.length; i++) c[COLLECTIONS[i]] = database.collection(COLLECTIONS[i]);
   const locks = database.collection(LOCKS);
@@ -158,22 +161,61 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
     return collection.find(filter, options).toArray();
   };
 
-  const openDb = (p) => {
+  const openDb = async (p) => {
+    await ensure();
+    // The fence: every document this handle writes carries `gen`, the
+    // generation of the lease — the one `lock()` takes, until then the one
+    // the lease document holds (a handle that never locks writes as the
+    // current holder's generation; 0 where nothing ever held the path) —
+    // and no put or removal of this handle's matches a document of a newer
+    // one: the upsert then tries an insert, the `_id` collides, and the
+    // statement — the ordered bulk, the write set, the log's group — fails
+    // as LEASE_LOST. Under transactions the lease is checked first, inside
+    // the transaction, where the handle holds one.
+    let gen = (await locks.findOne({ _id: p }, { projection: { _id: 0, gen: 1 } }))?.gen ?? 0;
+    let owner = null;
+    // The writer's token on every record and log document — one per handle, so two handles of one engine tell each other apart.
+    const writer = token();
+    const fence = () => ({ gen: { $not: { $gt: gen } } });
+    const put = (_id, doc) => ({
+      updateOne: { filter: { _id, ...fence() }, update: { $set: { ...doc, gen } }, upsert: true },
+    });
+    const del = (_id) => ({ deleteOne: { filter: { _id, ...fence() } } });
+    const leaseLost = (cause) =>
+      new SyncomError('LEASE_LOST', `Storage at ${p}: a newer lease holds the document, the write was refused`, {
+        path: p,
+        cause,
+      });
+    // Every statement of this handle: under the fence, in a transaction where asked.
+    const fenced = async (fn) => {
+      try {
+        return await within(async (session) => {
+          if (session !== undefined && owner !== null) {
+            const held = await locks.findOne({ _id: p, owner, gen }, { session, projection: { _id: 1 } });
+            if (held === null) throw leaseLost(null);
+          }
+          return fn(session);
+        });
+      } catch (error) {
+        throw isDuplicate(error) ? leaseLost(error) : error;
+      }
+    };
+
     const kv = {
       get: async (ns, key) => (await one(c.kv, keyOf([p, ns, key]), { _id: 0, v: 1 }))?.v ?? null,
       has: async (ns, key) => (await one(c.kv, keyOf([p, ns, key]), { _id: 1 })) !== null,
       list: async (ns) => sorted(await many(c.kv, { p, ns }, { projection: { _id: 0, key: 1 } }), 'key'),
       put: (ns, key, value) =>
-        within((session) => bulk(c.kv, [put(keyOf([p, ns, key]), { p, ns, key, v: String(value) })], session)),
-      remove: (ns, key) => within((session) => bulk(c.kv, [del(keyOf([p, ns, key]))], session)),
+        fenced((session) => bulk(c.kv, [put(keyOf([p, ns, key]), { p, ns, key, v: String(value) })], session)),
+      remove: (ns, key) => fenced((session) => bulk(c.kv, [del(keyOf([p, ns, key]))], session)),
       // The exclusive create the lock prefers: an insert, refused on the key's unique `_id`.
       create: async (ns, key, value) => {
         await ensure();
         const _id = keyOf([p, ns, key]);
         try {
-          await c.kv.insertOne({ _id, p, ns, key, v: String(value) });
+          await c.kv.insertOne({ _id, p, ns, key, v: String(value), gen });
         } catch (error) {
-          throw error?.code === DUPLICATE ? exists(`${ns}/${key}`) : error;
+          throw isDuplicate(error) ? exists(`${ns}/${key}`) : error;
         }
       },
     };
@@ -212,7 +254,7 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
 
     const pieces = {
       get: async (id, name) => (await one(c.pieces, keyOf([p, id, name]), { _id: 0, t: 1 }))?.t ?? null,
-      remove: (id, name) => within((session) => bulk(c.pieces, [del(keyOf([p, id, name]))], session)),
+      remove: (id, name) => fenced((session) => bulk(c.pieces, [del(keyOf([p, id, name]))], session)),
     };
 
     const copies = {
@@ -220,9 +262,9 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
       has: async (tag, id) => (await one(c.copies, keyOf([p, tag, id]), { _id: 1 })) !== null,
       ids: async (tag) => sorted(await many(c.copies, { p, tag }, { projection: { _id: 0, id: 1 } }), 'id'),
       put: (tag, id, text) =>
-        within((session) => bulk(c.copies, [put(keyOf([p, tag, id]), { p, tag, id, t: text })], session)),
-      remove: (tag, id) => within((session) => bulk(c.copies, [del(keyOf([p, tag, id]))], session)),
-      drop: (tag) => within((session) => bulk(c.copies, [{ deleteMany: { filter: { p, tag } } }], session)),
+        fenced((session) => bulk(c.copies, [put(keyOf([p, tag, id]), { p, tag, id, t: text })], session)),
+      remove: (tag, id) => fenced((session) => bulk(c.copies, [del(keyOf([p, tag, id]))], session)),
+      drop: (tag) => fenced((session) => bulk(c.copies, [{ deleteMany: { filter: { p, tag, ...fence() } } }], session)),
     };
 
     const meta = async (key) => {
@@ -253,7 +295,7 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
       // now. Nothing acknowledged sits there (a seq is handed out once per
       // epoch), so the wipe is the group's first statement, and a best effort
       // after a failure, before the next open could read the leftovers.
-      const from = (first) => ({ p, seq: { $gte: first } });
+      const from = (first) => ({ p, seq: { $gte: first }, ...fence() });
       const wipeFrom = (first) => ({ deleteMany: { filter: from(first) } });
       return {
         journaled: false,
@@ -329,7 +371,7 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
           const ops = [wipeFrom(first)];
           for (let i = 0; i < entries.length; i++) ops.push(row(entries[i], group));
           try {
-            await within((session) => bulk(c.log, ops, session));
+            await fenced((session) => bulk(c.log, ops, session));
           } catch (error) {
             try {
               await c.log.deleteMany(from(first));
@@ -345,7 +387,7 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
         },
         async seal(entries, from, to) {
           segments.push({ from, to, count: entries.length });
-          await within((session) => bulk(c.meta, [metaPut('segments', segments)], session));
+          await fenced((session) => bulk(c.meta, [metaPut('segments', segments)], session));
         },
         async sealed(to) {
           const kept = [];
@@ -355,17 +397,17 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
         async drop(segment) {
           if (segments[0] !== segment) throw new TypeError('drop(segment): the oldest segment goes first');
           segments.shift();
-          await within(async (session) => {
+          await fenced(async (session) => {
             await bulk(
               c.log,
-              [{ deleteMany: { filter: { p, seq: { $gte: segment.from, $lte: segment.to } } } }],
+              [{ deleteMany: { filter: { p, seq: { $gte: segment.from, $lte: segment.to }, ...fence() } } }],
               session,
             );
             await bulk(c.meta, [metaPut('segments', segments)], session);
           });
           for (let seq = segment.from; seq <= segment.to; seq++) groupOf.delete(seq);
         },
-        saveIndex: (index) => within((session) => bulk(c.meta, [metaPut('index', index)], session)),
+        saveIndex: (index) => fenced((session) => bulk(c.meta, [metaPut('index', index)], session)),
         // The documents at `seqs` written again as the entries are now (a scrub stripped them).
         async scrub(seqs, { entriesBetween }) {
           const ops = [];
@@ -373,14 +415,17 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
             const held = entriesBetween(seqs[i], seqs[i]);
             if (held.length === 1) ops.push(row(held[0], groupOf.get(seqs[i]) ?? { first: seqs[i], last: seqs[i] }));
           }
-          if (ops.length > 0) await within((session) => bulk(c.log, ops, session));
+          if (ops.length > 0) await fenced((session) => bulk(c.log, ops, session));
         },
       };
     })();
 
     // The records this instance removed, to tell their deletions apart from
-    // another instance's (a deletion carries no document, so no token).
+    // another instance's (a deletion carries no document, so no token): kept
+    // only while a subscription of this handle is live, added once the
+    // write landed.
     const deleted = new Set();
+    let listening = 0;
 
     // One write set: a bulk write per collection, kv puts first and kv
     // removals last, the pieces a record makes before it and the ones it
@@ -389,6 +434,7 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
       const kvPuts = [];
       const made = [];
       const recordOps = [];
+      const removedKeys = [];
       const dropped = [];
       const copied = [];
       const kvDrops = [];
@@ -419,8 +465,9 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
       const removed = batch.remove;
       if (removed !== undefined) {
         for (let i = 0; i < removed.length; i++) {
-          recordOps.push(del(keyOf([p, removed[i]])));
-          deleted.add(keyOf([p, removed[i]]));
+          const key = keyOf([p, removed[i]]);
+          recordOps.push(del(key));
+          removedKeys.push(key);
         }
       }
       const copiesPut = batch.copies?.put;
@@ -437,7 +484,7 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
       if (kvPuts.length + made.length + recordOps.length + dropped.length + copied.length + kvDrops.length === 0) {
         return;
       }
-      await within(async (session) => {
+      await fenced(async (session) => {
         await bulk(c.kv, kvPuts, session);
         await bulk(c.pieces, made, session);
         await bulk(c.records, recordOps, session);
@@ -445,6 +492,7 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
         await bulk(c.copies, copied, session);
         await bulk(c.kv, kvDrops, session);
       });
+      if (listening > 0) for (let i = 0; i < removedKeys.length; i++) deleted.add(removedKeys[i]);
     };
 
     // What another instance over the same database wrote — `{ records: [id] }`
@@ -463,15 +511,51 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
       const streams = [c.records.watch([], options), c.log.watch([], options)];
       streams[0].on('change', (event) => hear(event, 'records'));
       streams[1].on('change', (event) => hear(event, 'log'));
+      listening++;
       return () => {
         for (let i = 0; i < streams.length; i++) streams[i].close();
+        if (--listening === 0) deleted.clear();
       };
     };
 
+    // The lease document made or taken, on the server's clock: `{ gen }` once
+    // it is this instance's, null while another holds it.
+    const take = async (mine, staleAfter) => {
+      try {
+        // A path never leased: the document is made with an expiry on this
+        // clock — the one round trip the client's clock is trusted for — and
+        // set on the server's at once.
+        await locks.insertOne({ _id: p, owner: mine, gen: 1, expires: new Date(Date.now() + staleAfter) });
+        await locks.updateOne({ _id: p, owner: mine }, [{ $set: { expires: { $add: ['$$NOW', staleAfter] } } }]);
+        return { gen: 1 };
+      } catch (error) {
+        if (!isDuplicate(error)) throw error;
+      }
+      // Leased before: taken once the server says it lapsed, the generation one up.
+      const taken = await locks.findOneAndUpdate(
+        { _id: p, $expr: { $lt: ['$expires', '$$NOW'] } },
+        [
+          {
+            $set: {
+              owner: mine,
+              gen: { $add: [{ $ifNull: ['$gen', 0] }, 1] },
+              expires: { $add: ['$$NOW', staleAfter] },
+            },
+          },
+        ],
+        { returnDocument: 'after', includeResultMetadata: false },
+      );
+      // The document (the driver 6 or later); `{ value }` around it on an older one.
+      const doc = taken?.value ?? taken;
+      return doc !== null && doc !== undefined && doc.owner === mine ? { gen: doc.gen } : null;
+    };
+
     // The lease: one document per path, this instance's while it renews it
-    // every third of `staleAfter`; a lapsed one is taken over, a live one is
-    // LOCKED (at once, or after `timeout` under 'wait'); lost — taken by
-    // another instance, or a renewal that failed — `onLost` hears once.
+    // every third of `staleAfter` on the server's clock; a lapsed one is
+    // taken over, a live one is LOCKED (at once, or after `timeout` under
+    // 'wait'); lost — taken by another instance, or a renewal that failed —
+    // `onLost` hears once. The generation taken is what this handle writes
+    // with from here on.
     const lock = async ({
       mode = 'fail',
       staleAfter = DEFAULT_LEASE,
@@ -480,37 +564,32 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
       onLost = null,
     }) => {
       await ensure();
-      const owner = token();
+      const mine = token();
       const deadline = Number.isFinite(timeout) ? Date.now() + timeout : Infinity;
+      let held = null;
       for (;;) {
-        const now = Date.now();
-        try {
-          await locks.insertOne({ _id: p, owner, expires: now + staleAfter });
-          break;
-        } catch (error) {
-          if (error?.code !== DUPLICATE) throw error;
-        }
-        const taken = await locks.findOneAndUpdate(
-          { _id: p, expires: { $lt: now } },
-          { $set: { owner, expires: now + staleAfter } },
-          { returnDocument: 'after' },
-        );
-        if (taken !== null && taken.owner === owner) break;
+        held = await take(mine, staleAfter);
+        if (held !== null) break;
         if (mode === 'fail') throw locked(p);
         if (Date.now() >= deadline) throw locked(p, `is still leased after ${timeout} ms`);
         await sleep(poll);
       }
-      let held = true;
+      const generation = held.gen;
+      owner = mine;
+      gen = generation;
+      let holding = true;
       let timer = null;
       const lost = (error) => {
-        if (!held) return;
-        held = false;
+        if (!holding) return;
+        holding = false;
         clearInterval(timer);
         if (onLost !== null) onLost(error);
       };
       const renew = async () => {
         try {
-          const result = await locks.updateOne({ _id: p, owner }, { $set: { expires: Date.now() + staleAfter } });
+          const result = await locks.updateOne({ _id: p, owner: mine, gen: generation }, [
+            { $set: { expires: { $add: ['$$NOW', staleAfter] } } },
+          ]);
           if (result.matchedCount === 0) lost(new Error(`the lease on ${p} was taken by another instance`));
         } catch (error) {
           lost(error);
@@ -519,11 +598,13 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
       timer = setInterval(renew, Math.max(10, Math.floor(staleAfter / 3)));
       timer.unref?.();
       return {
+        gen: generation,
         async release() {
-          if (!held) return;
-          held = false;
+          if (!holding) return;
+          holding = false;
           clearInterval(timer);
-          await locks.deleteOne({ _id: p, owner });
+          // The document stays, lapsed: the generation counts on from it, so a later holder is a newer one.
+          await locks.updateOne({ _id: p, owner: mine, gen: generation }, { $set: { expires: new Date(0) } });
         },
       };
     };
@@ -538,13 +619,17 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
     capabilities,
     /** The MongoDB database every path lives in. */
     database,
-    open: async (path) => openDb(path),
-    /** Every document of the database at `path`, in every collection — in one transaction where the engine has them. */
+    open: (path) => openDb(path),
+    /**
+     * Every document of the database at `path`, in every collection, its lease document too — in one transaction
+     * where the engine has them. The engine's, not a handle's: no fence (the database is closed, by the contract).
+     */
     remove: (path) =>
       within(async (session) => {
         for (let i = 0; i < COLLECTIONS.length; i++) {
           await bulk(c[COLLECTIONS[i]], [{ deleteMany: { filter: { p: path } } }], session);
         }
+        await locks.deleteOne({ _id: path }, session === undefined ? {} : { session });
       }),
     /** Nothing to close: the client is the caller's. */
     close: async () => {},
