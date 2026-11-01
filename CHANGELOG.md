@@ -1165,6 +1165,11 @@ and one `commit` event, not one per call.
 
 ### Fixed
 
+- **A record read as gone while a block of it stood.** `isAlive` compared a block's stamp — a ms alone, no origin — with the
+  tombstone's and called the tie older, while the prune (by `(ts, origin)`, the op model's order) had kept the block's
+  op stamped in that very ms by an origin above the tombstone's: the delete was reported as the record gone, the block
+  stayed, and the next op revived what the change reports said was gone — the seeded mesh test's shadow of a tree
+  field, missing under load, once in a few full runs. The tie counts as newer in `isAlive` as it does in the prune.
 - **One read a record, not a round trip a piece; the follower and the rebuild read a page at a time; the engine
   measured.** A cold read of a record in pieces made a call per piece, a catalog rebuild and a follower's catch-up read
   one record at a time, and nothing measured the engine (review №5, P-3, P-4, P-13, O-4): `pieces.getMany(id, names)`
