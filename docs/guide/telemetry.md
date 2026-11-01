@@ -77,7 +77,7 @@ wrpc's spans around the actual calls.
 
 | Span | When | Attributes |
 | --- | --- | --- |
-| `syncom.commit` | one local write — of any op type, a list, text or tree op as much as a `set` — from the moment it runs to after the `change` listeners; inside a transaction, the op built, applied and validated (the append and the landing are the transaction's) | `syncom.op.type`, `syncom.record.id`†, `syncom.result` (`applied` / `noop` / `encrypted`), `syncom.scope` |
+| `syncom.commit` | one local write through the queue (a write made at once has no span: counted, see below) — of any op type, a list, text or tree op as much as a `set` — from the moment it runs to after the `change` listeners; inside a transaction, the op built, applied and validated (the append and the landing are the transaction's) | `syncom.op.type`, `syncom.record.id`†, `syncom.result` (`applied` / `noop` / `encrypted`), `syncom.scope` |
 | `syncom.apply` | one batch of a peer's ops | `syncom.ops.count`, `syncom.ops.applied`, `syncom.ops.skipped`, `syncom.ops.duplicates`, `syncom.ops.gaps`, `syncom.ops.malformed`, `syncom.ops.unsigned`, `syncom.ops.forged`, `syncom.ops.out_of_scope`, `syncom.ops.equivocations` |
 | `syncom.replay` | the unsealed log tail replayed at open | `syncom.ops.count`, `syncom.records` |
 | `syncom.push` | one push to a peer, all its pages | `syncom.push.reason` (`handshake` / `manual` / `relay` / `recover` — a peer that fell behind, caught up from the vector), `syncom.ops.count`, `syncom.pages`, `syncom.peer.url`†, `syncom.peer.node`† |
@@ -105,7 +105,11 @@ counted (below), the batch's span stays green.
 
 A `merge` — one per snapshot record during a bootstrap — is counted but not
 spanned, or a bootstrap of ten thousand records would open ten thousand
-spans under one `syncom.bootstrap`.
+spans under one `syncom.bootstrap`. A write made at once (the fast path:
+an idle queue, nothing asynchronous configured) opens no span either — a
+span costs the promises that path exists to spare — and is counted in
+`syncom.commits` with `syncom.path: 'fast'`, its duration to the landing
+in `syncom.write.duration`; telemetry does not turn the fast path off.
 
 ## Metrics
 
@@ -114,7 +118,7 @@ appears on one.
 
 | Metric | Instrument | Unit | Labels |
 | --- | --- | --- | --- |
-| `syncom.commits` | Counter | `{op}` | `syncom.op.type`, `syncom.result` (`applied` / `noop` / `encrypted` / `error`) |
+| `syncom.commits` | Counter | `{op}` | `syncom.op.type`, `syncom.result` (`applied` / `noop` / `encrypted` / `error` / `coalesced` — folded into the write before it), `syncom.path` (`queue` / `fast` — made at once, outside the queue: counted, with its duration in `syncom.write.duration`, never spanned) |
 | `syncom.write.duration` | Histogram | `ms` | `syncom.path` (`commit` / `apply` / `replay`) |
 | `syncom.ops.received` | Counter | `{op}` | `syncom.outcome` (`applied` / `skipped` — accepted but not applied here: a hook, the schema, an unreadable record / `duplicate` / `gap` / `malformed` — the last includes a stamp beyond `maxSkew` / `refused` — a signature that does not check, or none under `'require'`, or on a host a record outside the pushing peer's scopes) |
 | `syncom.ops.rejected` | Counter | `{op}` | `syncom.reason` (`register` / `counter` / `set` / `list` / `text` / `tree` — the kind that holds the field and outranks the op's / `kind` — a field of a kind this node runs no plugin for, counted per op, reported once per page / `bound` — past a list's or a text's limit / `malformed` — a payload the engine does not admit / `validation` / `scope` / `unreadable` / `forged` / `unsigned` / `equivocation` — another op than the one held at its seq / `chain` — a `prev` that is not the fingerprint held at the seq before it) |
@@ -132,6 +136,7 @@ appears on one.
 | `syncom.lock.wait` | Histogram | `ms` | — (what `open()` spent taking the directory lock) |
 | `syncom.hello.refused` | Counter | `{call}` | `syncom.code` (`400` / `403` / `409` / `428`) — calls a hosted unit refused before the handler |
 | `syncom.presence.refused` | Counter | `{entry}` | `syncom.reason` — on a host (`hello` / `rate` / `malformed` / `scope` / `forged` / `unsigned`: an update refused whole, never relayed) and on a receiver (`forged` / `unsigned` / `invalid` — malformed, past the bounds, not the sender's own, the room full: entries refused) |
+| `syncom.handle.flushes` | Counter | `{flush}` | `syncom.result` (`ok` / `unlogged` — nothing appended, the edits dropped / `error` — appended, a step after failed) — a text handle's flush (`openText()`) |
 | `syncom.outbox.size` | Observable gauge | `{op}` | — (ops queued for peers, over every dialed peer) |
 | `syncom.queue.depth` | Observable gauge | `{op}` | — (writes waiting on, or in, the mutation queue) |
 | `syncom.cache.size` | Observable gauge | `{entry}` | — |
@@ -242,7 +247,7 @@ alert to key on:
 | --- | --- | --- |
 | error | `log.append.failed` | a group could not be written (`from`, `ops`): its seqs are taken back and its writes, with the group gathered behind it, reject; counted in `stats().log.appendFailures` |
 | error | `log.roll.failed` | sealing the log failed (a segment or the index not written — the disk full); nothing was lost: the groups stay open and durable, the next append rolls again, and `stats().log.rollFailures` counts it |
-| error | `log.flush.failed`, `internal.error` | a bug: the log's write lane or its bookkeeping after an append threw; the writes it held are answered all the same |
+| error | `log.flush.failed`, `internal.error` | a bug: the log's write lane or its bookkeeping after an append threw, or a write made at once could not be announced as its group landed (`name: 'log'`); the writes it held are answered all the same |
 | warn | `sync.op.malformed`, `sync.op.skew` | a peer's op refused before it was read; the latter also an `error` event (`SKEW`) — its own stamp, or one its merge meta holds, beyond `sync.maxSkew` |
 | warn | `clock.skew.ignored` | a record holds a stamp beyond `sync.maxSkew` (taken under `maxSkew: Infinity`, or before merge metas were checked): not observed into the clock, so a write to the record stamps below it and loses the fields it holds; once per record (`id`, `ts`, `ahead`) |
 | warn | `sync.op.forged`, `sync.op.unsigned` | a page with ops refused for their signature, once per page with the count; also an `error` event (`BAD_SIGNATURE`, `UNSIGNED`) |
@@ -258,6 +263,10 @@ alert to key on:
 | warn | `storage.piece.unremoved` | a piece of a large record (`<id>~<n>.json`) its file no longer names could not be removed (`id`, `name`): left on disk, written over when the record's counter reaches it again |
 | warn | `catalog.skipped`, `catalog.lens`, `catalog.save`, `catalog.search`, `snapshot.skipped` (`reason: 'scope'` when the scope function threw on the record), `replay.skipped`, `record.shadowed`, `record.refresh` | derived state could not follow a record (`catalog.search`: the injected text index threw); a field shadowing a method; a live `Record` not refreshed after a change, a read hook having thrown |
 | warn | `listener.error`, `watch.error`, `schema.drift` | an event listener or a watcher threw; two builds of one schema version |
+| warn | `handle.unlogged` | a text handle's flush (`openText()`) could not be logged — the append failed, a hook or a validator refused — and its edits were dropped (`id`, `field`, `edits`); written whether or not anything listens to the handle |
+| warn | `edits.unlogged` | `close()` flushed every open text handle and some could not be logged (`handles`, `edits`); the storage closes all the same |
+| warn | `log.journal.unrewritten` | a group's append failed and the journal could not be written again without what the failed append left of its line (`file`); a reopen reads the line only where no later group shadows it |
+| info | `log.corrupt.scrubbed` | a purge removed an evidence copy under `log/corrupt/` that named the id (`file`, `id`): the copy does not read, so nothing could be stripped from it |
 | warn | `editor.binding` | an editor binding (`@alexify/syncom/editor`) failed to send a delta or to reload, or its editor refused a peer's change, and has no `onError`; it reloads the editor from the field (five in a row stop it: `onStop`) |
 | warn | `editor.cursors`, `editor.undo` | an editor adapter (ProseMirror, CodeMirror) failed to show the room's cursors or publish its selection, or an undo/redo command failed, and has no `onError` |
 | warn | `editor.unfit` | the ProseMirror schema cannot hold what the field does (a mark, a node): the document leaves it out and the next edit sends that to every peer; once per binding, without `onUnfit` |

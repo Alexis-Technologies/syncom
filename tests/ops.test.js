@@ -1025,6 +1025,57 @@ test('ops: a peer-shaped meta reaches nothing it should not', async (t) => {
     assert.deepStrictEqual(applyOp(marked, op('purge', 99, 'P')).entry.meta.blocks, {});
   });
 
+  await t.test(
+    'an op names its own origin’s runs and elements without the origin; a short name is never another’s',
+    () => {
+      // The same nine ops of A's, with what is A's own named in full and short:
+      // a run by its stamp, an element `ts:offset`, an anchor `<ts:offset`.
+      const both = (full, short) => [full, short];
+      const pairs = [
+        both({ at: '<10:3:A', content: 'l' }, { at: '<10:3', content: 'l' }),
+        both({ run: '10:A', from: 4, content: '!' }, { run: 10, from: 4, content: '!' }),
+        both({ cut: [['10:A', 0, 1]], content: '' }, { cut: [[10, 0, 1]], content: '' }),
+        both(
+          { start: '<11:0:A', end: '>10:4:A', key: 'bold', value: true },
+          { start: '<11:0', end: '>10:4', key: 'bold', value: true },
+        ),
+        both({ off: '14:A' }, { off: 14 }),
+        both({ at: '^', content: [1, 2, 3] }, { at: '^', content: [1, 2, 3] }),
+        both({ elem: '16:1:A', value: 'two' }, { elem: '16:1', value: 'two' }),
+        both(
+          { elem: '16:0:A', cut: ['16:A', 0, 1], at: '>16:2:A', value: 1 },
+          { elem: '16:0', cut: [16, 0, 1], at: '>16:2', value: 1 },
+        ),
+      ];
+      const types = ['splice', 'splice', 'splice', 'mark', 'mark', 'splice', 'assign', 'move'];
+      const keys = ['body', 'body', 'body', 'body', 'body', 'items', 'items', 'items'];
+      const ops = (side) => {
+        const out = [op('splice', 10, 'A', { seq: 1, key: 'body', value: { at: '^', content: 'helo' } })];
+        for (let i = 0; i < pairs.length; i++) {
+          out.push(op(types[i], 11 + i, 'A', { seq: 2 + i, key: keys[i], value: pairs[i][side] }));
+        }
+        return out;
+      };
+      const full = replay(ops(0));
+      const short = replay(ops(1));
+      assert.deepStrictEqual(full.data, { body: 'ello!', items: ['two', 3, 1] });
+      assert.deepStrictEqual(short.meta, full.meta, 'one block, whichever names the op used');
+      assert.deepStrictEqual(short.data, full.data);
+      // A short name is the op's own origin's: B's run 10 is B's, never A's —
+      // which B could not extend, named in full.
+      const byB = (value) => applyOp(full, op('splice', 30, 'B', { seq: 1, key: 'body', value }));
+      assert.deepStrictEqual(byB({ run: '10:A', from: 5, content: 'x' }).rejected, [
+        { field: 'body', reason: 'malformed' },
+      ]);
+      assert.deepStrictEqual(byB({ run: 10, from: 5, content: 'x' }), byB({ run: '10:B', from: 5, content: 'x' }));
+      // What is no name stays none: the engine refuses it as it would in full.
+      assert.deepStrictEqual(byB({ run: 1.5, from: 5, content: 'x' }).rejected, [
+        { field: 'body', reason: 'malformed' },
+      ]);
+      assert.deepStrictEqual(byB({ at: '<10', content: 'x' }).rejected, [{ field: 'body', reason: 'malformed' }]);
+    },
+  );
+
   await t.test('mergeEntry joins two sequence histories like replaying both; kinds keep their precedence', () => {
     const splice = (ts, origin, seq, key, value) => op('splice', ts, origin, { seq, key, value });
     const a1 = splice(10, 'A', 1, 'body', { at: '^', content: 'ab' });
@@ -1319,6 +1370,375 @@ test('ops: a payload the engine does not admit is reported, never silent', async
   });
 });
 
+test('ops: a sequence op of the wrong shape is malformed, never a throw: a peer’s page goes on past it', async () => {
+  const text = applyOp(
+    null,
+    op('splice', 10, 'A', { seq: 1, key: 'body', value: { at: '^', content: 'hello' } }),
+  ).entry;
+  const cases = [
+    { cut: [null], content: '' },
+    { cut: [5], content: '' },
+    { cut: [[null, 0, 1]], content: '' },
+    { cut: [[{}, 0, 1]], content: '' },
+    { cut: 'x', content: '' },
+    { at: '<10', content: 'x' },
+    { run: 1.5, from: 5, content: 'x' },
+  ];
+  for (const value of cases) {
+    const { changed, rejected, entry } = applyOp(text, op('splice', 20, 'B', { seq: 1, key: 'body', value }));
+    assert.deepStrictEqual(
+      [changed, rejected],
+      [false, [{ field: 'body', reason: 'malformed' }]],
+      JSON.stringify(value),
+    );
+    assert.deepStrictEqual(entry.data, { body: 'hello' });
+  }
+  // Through a peer's page: the malformed op is refused and the page goes on.
+  const { open } = require('../src/all/all.js');
+  const { memory } = require('../src/memory/memory.js');
+  const storage = await open({
+    path: '/malformed',
+    fsi: memory(),
+    logger: false,
+    lock: false,
+    sync: { signatures: false },
+  });
+  const id = await storage.insert({ title: 'doc' });
+  await storage.push(id, 'body', 'hello');
+  const refused = [];
+  storage.on('error', (error) => refused.push(error.code));
+  const page = [
+    {
+      origin: 'peer',
+      seq: 1,
+      ts: Date.now(),
+      type: 'splice',
+      id,
+      v: 1,
+      key: 'body',
+      value: { cut: [null], content: '' },
+    },
+    { origin: 'peer', seq: 2, ts: Date.now() + 1, type: 'set', id, v: 1, data: { title: 'after' } },
+  ];
+  await storage.applyRemote(page);
+  assert.deepStrictEqual(await storage.get(id), { title: 'after', body: 'hello' });
+  assert.strictEqual(storage.vector.peer, 2, 'both taken: the refused op is a no-op, never a gap');
+  await storage.close();
+});
+
+test('ops: a zero-slot run in a peer’s block is left out, and typing on after the merge never throws', () => {
+  const splice = (ts, origin, seq, value) => op('splice', ts, origin, { seq, key: 'body', value });
+  const entry = applyOp(null, splice(1, 'A', 1, { at: '^', content: 'hello' })).entry;
+  const meta = { blocks: { body: { k: 't', ts: 5, runs: { '1:A': ['^', ['hello']], '5:P': ['>1:4:A', []] } } } };
+  const merged = applyOp(entry, op('merge', 10, 'H', { seq: 1, data: { body: 'hello' }, meta }));
+  assert.deepStrictEqual(Object.keys(merged.entry.meta.blocks.body.runs), ['1:A']);
+  // P grows the run that was left out: nothing to grow, nothing thrown — and A types on.
+  const grown = applyOp(merged.entry, splice(6, 'P', 2, { run: '5:P', from: 0, content: 'x' }));
+  assert.deepStrictEqual([grown.changed, grown.entry.data.body], [false, 'hello']);
+  const typed = applyOp(grown.entry, splice(7, 'A', 2, { run: '1:A', from: 5, content: '!' }));
+  assert.strictEqual(typed.entry.data.body, 'hello!');
+});
+
+test('ops: a peer’s block of any shape merges without a throw, and every op after it lands or is refused (seeded)', () => {
+  const S = require('../src/text/sequence.js');
+  const rng = (seed) => () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 2 ** 32;
+  };
+  const ORIGINS = ['A', 'B', 'Z'];
+  for (let round = 0; round < 80; round++) {
+    const random = rng(7000 + round);
+    const pick = (n) => Math.floor(random() * n);
+    const kind = random() < 0.6 ? 't' : 'l';
+    const field = kind === 't' ? 'body' : 'items';
+    const stamp = () => 1 + pick(12);
+    const origin = () => ORIGINS[pick(ORIGINS.length)];
+    const runKey = () => `${stamp()}:${origin()}`;
+    const elem = () => `${stamp()}:${pick(6)}:${origin()}`;
+    // At the head, at an element of the run the node holds already, at the end or junk (both dropped),
+    // or at an element a stamp may or may not make older than the run.
+    const anchor = () => {
+      const r = random();
+      if (r < 0.25) return '^';
+      if (r < 0.4) return `${random() < 0.5 ? '<' : '>'}1:${pick(5)}:A`;
+      if (r < 0.5) return '$';
+      if (r < 0.6) return 'junk';
+      return `${random() < 0.5 ? '<' : '>'}${elem()}`;
+    };
+    const items = (n) => (kind === 't' ? 'x'.repeat(n) : Array.from({ length: n }, (_, i) => i));
+    const content = () => {
+      const r = random();
+      if (r < 0.15) return [];
+      if (r < 0.25) return [items(2), 0];
+      if (r < 0.33) return [S.MAX_RUN + 1];
+      if (r < 0.43) return [1 + pick(3)];
+      if (r < 0.5) return [kind === 't' ? [1] : 'oops'];
+      return [items(1 + pick(4))];
+    };
+    const runs = {};
+    const count = pick(6);
+    for (let i = 0; i < count; i++) {
+      const tuple = [anchor(), content()];
+      if (random() < 0.25) tuple.push(random() < 0.7 ? elem() : 7);
+      runs[random() < 0.1 ? 'bad key' : runKey()] = tuple;
+    }
+    const block = { k: random() < 0.05 ? 'x' : kind, ts: pick(20), runs };
+    if (random() < 0.6) {
+      block.cuts = {};
+      for (let i = 0; i < pick(4); i++) block.cuts[runKey()] = [[pick(5), 1 + pick(3)], [2 ** 40, 1], 'junk', [-1, 2]];
+    }
+    if (random() < 0.6) {
+      block.ext = {};
+      for (let i = 0; i < pick(4); i++) {
+        block.ext[runKey()] = [
+          [pick(5), items(2)],
+          [S.MAX_RUN, items(1)],
+          [2 ** 52, items(1)],
+          [0, []],
+          [1, 7],
+        ];
+      }
+    }
+    if (random() < 0.6) {
+      block.vals = {};
+      for (let i = 0; i < pick(4); i++) block.vals[random() < 0.1 ? 'junk' : elem()] = [stamp(), origin(), { v: i }];
+    }
+    if (kind === 'l' && random() < 0.6) {
+      block.pos = {};
+      for (let i = 0; i < pick(4); i++) block.pos[elem()] = [stamp(), origin(), random() < 0.8 ? runKey() : 'junk'];
+    }
+    if (kind === 't' && random() < 0.6) {
+      block.marks = {};
+      for (let i = 0; i < pick(4); i++) block.marks[runKey()] = [anchor(), anchor(), 'b', true, pick(5)];
+      if (random() < 0.5) block.marks[runKey()] = ['^', '^', '', null, 2];
+    }
+    const first = kind === 't' ? 'hello' : [1, 2, 3];
+    const held = applyOp(null, op('splice', 1, 'A', { seq: 1, key: field, value: { at: '^', content: first } })).entry;
+    for (const base of [null, held]) {
+      const merge = op('merge', 30, 'H', {
+        seq: 1,
+        data: { [field]: kind === 't' ? 'x' : [] },
+        meta: { blocks: { [field]: block } },
+      });
+      let entry = base;
+      const step = (item) => {
+        const result = applyOp(entry, item);
+        entry = result.entry;
+        const seq = entry.meta.blocks?.[field];
+        if (seq !== undefined) assert.deepStrictEqual(entry.data[field], S.render(S.indexOf(entry, field)));
+        return result;
+      };
+      assert.doesNotThrow(() => step(merge), `round ${round}: the merge`);
+      let ts = 40;
+      const keys = Object.keys(runs);
+      keys.push('9:A');
+      for (const key of keys) {
+        const made = S.parseRun(key) ?? { ts: 9, origin: 'A' };
+        const own = (type, value) => op(type, ++ts, made.origin, { seq: ts, key: field, value });
+        const other = (type, value) => op(type, ++ts, 'Q', { seq: ts, key: field, value });
+        const ops = [
+          own('splice', { run: key, from: random() < 0.5 ? 0 : pick(3), content: items(1) }),
+          other('splice', { at: `>${S.elemKey(key, pick(3))}`, content: items(2) }),
+          other('splice', { cut: [[key, 0, 2]], content: kind === 't' ? '' : [] }),
+        ];
+        if (kind === 'l') {
+          ops.push(other('assign', { elem: S.elemKey(key, pick(3)), value: 1 }));
+          ops.push(other('move', { elem: S.elemKey(key, pick(3)), cut: [key, 0, 1], at: '^', value: 1 }));
+        } else {
+          ops.push(other('mark', { start: '^', end: '$', key: 'b', value: true }));
+          ops.push(other('mark', { off: key }));
+        }
+        for (const item of ops) assert.doesNotThrow(() => step(item), `round ${round}: ${JSON.stringify(item.value)}`);
+      }
+    }
+  }
+});
+
+test('ops: a splice’s cut is bounded and its report says what was cut: duplicates once, past MAX_CUTS refused', () => {
+  const S = require('../src/text/sequence.js');
+  const splice = (ts, origin, seq, value) => op('splice', ts, origin, { seq, key: 'body', value });
+  const base = applyOp(null, splice(1, 'A', 1, { at: '^', content: 'hello world' })).entry;
+  // Duplicate and overlapping ranges: seven characters go, and the report says seven, once.
+  const ranges = [
+    ['1:A', 0, 5],
+    ['1:A', 0, 5],
+    ['1:A', 2, 5],
+  ];
+  const twice = applyOp(base, splice(2, 'B', 1, { cut: ranges, content: '' }));
+  assert.strictEqual(twice.entry.data.body, 'orld');
+  assert.deepStrictEqual(twice.changes, [{ action: 'splice', index: 0, count: 7, field: 'body' }]);
+  // Two thousand copies of one range: one change, the five characters once.
+  const copies = [];
+  for (let i = 0; i < 2000; i++) copies.push(['1:A', 0, 5]);
+  const many = applyOp(base, splice(3, 'B', 1, { cut: copies, content: '' }));
+  assert.strictEqual(many.entry.data.body, ' world');
+  assert.deepStrictEqual(many.changes, [{ action: 'splice', index: 0, count: 5, field: 'body' }]);
+  // Past MAX_CUTS: a bound refusal before any range is read; the field as it was. At the bound, taken.
+  const over = [];
+  for (let i = 0; i <= S.MAX_CUTS; i++) over.push(['1:A', 0, 5]);
+  const refused = applyOp(base, splice(4, 'B', 1, { cut: over, content: '' }));
+  const bound = { field: 'body', reason: 'bound', detail: 'cuts', count: S.MAX_CUTS + 1, max: S.MAX_CUTS };
+  assert.deepStrictEqual([refused.changed, refused.rejected, refused.changes], [false, [bound], []]);
+  assert.strictEqual(refused.entry.data.body, 'hello world');
+  const at = applyOp(base, splice(5, 'B', 1, { cut: over.slice(1), content: '' }));
+  assert.deepStrictEqual([at.changed, at.entry.data.body], [true, ' world']);
+  // Overlapping ranges of two runs, one inserted inside the other: each run's merged, each stretch of
+  // the reading once, in the indices before, last first.
+  let entry = base;
+  entry = applyOp(entry, splice(6, 'C', 1, { at: '<1:5:A', content: 'XY' })).entry;
+  assert.strictEqual(entry.data.body, 'helloXY world');
+  const mixed = [
+    ['1:A', 3, 2],
+    ['6:C', 0, 2],
+    ['1:A', 4, 3],
+    ['6:C', 1, 1],
+  ];
+  const across = applyOp(entry, splice(7, 'B', 2, { cut: mixed, content: '' }));
+  assert.strictEqual(across.entry.data.body, 'helorld');
+  assert.deepStrictEqual(across.changes, [
+    { action: 'splice', index: 7, count: 2, field: 'body' },
+    { action: 'splice', index: 5, count: 2, field: 'body' },
+    { action: 'splice', index: 3, count: 2, field: 'body' },
+  ]);
+  // Two ranges that only meet stay two changes: a chain of cuts coalesced into one op reports each.
+  const chain = [
+    ['1:A', 4, 1],
+    ['1:A', 3, 1],
+  ];
+  assert.deepStrictEqual(applyOp(base, splice(8, 'B', 1, { cut: chain, content: '' })).changes, [
+    { action: 'splice', index: 4, count: 1, field: 'body' },
+    { action: 'splice', index: 3, count: 1, field: 'body' },
+  ]);
+});
+
+test('ops: an extension parked past MAX_RUN is refused as bound; what landed reads the same from its snapshot', () => {
+  const S = require('../src/text/sequence.js');
+  const splice = (ts, origin, seq, value) => op('splice', ts, origin, { seq, key: 'body', value });
+  let entry = applyOp(null, splice(1, 'A', 1, { at: '^', content: 'hello' })).entry;
+  entry = applyOp(entry, splice(5, 'P', 1, { at: '>1:4:A', content: 'p' })).entry;
+  entry = applyOp(entry, splice(6, 'Q', 1, { at: '>1:3:A', content: 'Q' })).entry;
+  assert.strictEqual(entry.data.body, 'hellopQ');
+  // P parks two extensions of its one-slot run far ahead, then fills the gap: landed, the run would hold
+  // three times MAX_RUN. Each parked one is refused where it arrives; the filler lands, at MAX_RUN exactly.
+  const big = 'x'.repeat(S.MAX_RUN - 1);
+  const far = applyOp(entry, splice(7, 'P', 2, { run: '5:P', from: S.MAX_RUN, content: big }));
+  const bound = (count) => [{ field: 'body', reason: 'bound', detail: 'run', count, max: S.MAX_RUN }];
+  assert.deepStrictEqual([far.changed, far.rejected], [false, bound(2 * S.MAX_RUN - 1)]);
+  const farther = applyOp(far.entry, splice(8, 'P', 3, { run: '5:P', from: 2 * S.MAX_RUN - 1, content: big }));
+  assert.deepStrictEqual(farther.rejected, bound(3 * S.MAX_RUN - 2));
+  const filled = applyOp(farther.entry, splice(9, 'P', 4, { run: '5:P', from: 1, content: big }));
+  assert.deepStrictEqual(filled.rejected, []);
+  entry = filled.entry;
+  assert.strictEqual(entry.data.body.length, 6 + S.MAX_RUN);
+  assert.ok(entry.data.body.endsWith('xQ'), 'Q still reads after P’s run');
+  const block = entry.meta.blocks.body;
+  assert.strictEqual(S.rleLength(block.runs['5:P'][1]), S.MAX_RUN);
+  assert.strictEqual(block.ext, undefined, 'nothing parked');
+  // The block's own JSON reads back whole — every run kept — and a node joining from the snapshot reads
+  // the same text over the same block.
+  const json = JSON.parse(JSON.stringify(block));
+  assert.deepStrictEqual(Object.keys(S.normalizeSeq(json).runs).sort(), ['1:A', '5:P', '6:Q']);
+  const meta = { blocks: { body: json } };
+  const joined = applyOp(null, op('merge', 20, 'H', { seq: 1, data: { body: entry.data.body }, meta })).entry;
+  assert.strictEqual(joined.data.body, entry.data.body);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(joined.meta.blocks.body)), json);
+});
+
+test('ops: waiting extensions settle alike in every order of arrival, and no node holds a run past MAX_RUN (seeded)', () => {
+  const S = require('../src/text/sequence.js');
+  const rng = (seed) => () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 2 ** 32;
+  };
+  const splice = (ts, origin, seq, value) => op('splice', ts, origin, { seq, key: 'body', value });
+  // The pending work of a block, recounted from its JSON: runs whose anchor is not here, cuts and
+  // extensions waiting, registers of elements not here, marks switched off before they arrived.
+  const recount = (block) => {
+    const json = JSON.parse(JSON.stringify(block));
+    const held = (elem) => {
+      const e = S.parseElem(elem);
+      const run = json.runs[e.run];
+      return run !== undefined && e.offset < S.rleLength(run[1]);
+    };
+    let n = 0;
+    for (const key of Object.keys(json.runs)) {
+      const { elem } = S.parseAnchor(json.runs[key][0]);
+      if (elem !== null && !held(S.elemKey(elem.run, elem.offset))) n++;
+    }
+    for (const map of ['cuts', 'ext']) for (const key of Object.keys(json[map] ?? {})) n += json[map][key].length;
+    for (const map of ['pos', 'vals']) for (const key of Object.keys(json[map] ?? {})) if (!held(key)) n++;
+    for (const key of Object.keys(json.marks ?? {})) if (S.isPlaceholder(json.marks[key])) n++;
+    return n;
+  };
+  for (let round = 0; round < 24; round++) {
+    const random = rng(1000 + round);
+    const pick = (n) => Math.floor(random() * n);
+    const seqs = { P: 0, Q: 0, R: 0 };
+    const ops = [];
+    let ts = 0;
+    const next = (origin, value) => ops.push(splice(++ts, origin, ++seqs[origin], value));
+    // P types its run on in bursts; shuffled, a burst arrives before the one it continues and waits for it.
+    next('P', { at: '^', content: 'p' });
+    const run = '1:P';
+    let len = 1;
+    for (let i = 0; i < 8; i++) {
+      const content = 'abcdefgh'[i].repeat(1 + pick(3));
+      next('P', { run, from: len, content });
+      len += content.length;
+    }
+    // Parked past MAX_RUN: refused on every node; parked within it and never filled: waits on every node.
+    next('P', { run, from: S.MAX_RUN - 1, content: 'xy' });
+    next('P', { run, from: S.MAX_RUN - 2, content: 'xy' });
+    // Q anchors on P's elements — some not here yet when its op arrives; R cuts P's run, some ranges past
+    // its end at the time, one past its end for good.
+    for (let i = 0; i < 4; i++) next('Q', { at: `>${S.elemKey(run, pick(len))}`, content: 'Q' });
+    for (let i = 0; i < 4; i++) next('R', { cut: [[run, pick(len + 2), 1 + pick(3)]], content: '' });
+    const results = [];
+    for (let k = 0; k < 4; k++) {
+      // Every order but one a mesh never delivers: an extension before the run it grows (an origin's
+      // ops arrive in seq order, so the run comes first; an extension ahead of its run's LENGTH waits).
+      const order = ops.slice();
+      for (let i = order.length - 1; i > 0; i--) {
+        const j = pick(i + 1);
+        [order[i], order[j]] = [order[j], order[i]];
+      }
+      const made = order.indexOf(ops[0]);
+      const first = order.findIndex((item) => item.origin === 'P');
+      [order[made], order[first]] = [order[first], order[made]];
+      let entry = null;
+      let refused = 0;
+      for (const item of order) {
+        const result = applyOp(entry, item);
+        entry = result.entry;
+        if (result.rejected.length > 0) refused++;
+        const block = entry.meta.blocks?.body;
+        if (block === undefined) continue;
+        for (const key of Object.keys(block.runs)) {
+          assert.ok(S.rleLength(block.runs[key][1]) <= S.MAX_RUN, `round ${round}: run ${key} within MAX_RUN`);
+        }
+        for (const key of Object.keys(block.ext ?? {})) {
+          for (const [from, content] of block.ext[key]) {
+            assert.ok(from + content.length <= S.MAX_RUN, `round ${round}: a parked extension within MAX_RUN`);
+          }
+        }
+      }
+      assert.strictEqual(refused, 1, `round ${round}: the one past MAX_RUN refused, nothing else`);
+      const block = entry.meta.blocks.body;
+      assert.strictEqual(S.pendingCount(block), recount(block), `round ${round}: the pending count is the recount`);
+      const json = JSON.parse(JSON.stringify(block));
+      assert.strictEqual(S.render(S.normalizeSeq(json)), entry.data.body, `round ${round}: the snapshot reads alike`);
+      // The ranges still waiting for the run to grow are kept in the order they arrived: compared as a set.
+      for (const key of Object.keys(json.cuts ?? {})) json.cuts[key].sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+      results.push({ body: entry.data.body, json });
+    }
+    for (const r of results) {
+      assert.strictEqual(r.body, results[0].body, `round ${round}: every order reads alike`);
+      assert.deepStrictEqual(r.json, results[0].json, `round ${round}: every order holds one block`);
+    }
+    assert.strictEqual(S.rleLength(results[0].json.runs[run][1]), len, `round ${round}: every burst landed`);
+  }
+});
+
 test('ops: the bound on pending work is the node’s', async (t) => {
   await t.test('a merge takes a block by the node’s bound, as an op would be', () => {
     // A block holding three pending cuts of runs not here.
@@ -1407,6 +1827,37 @@ test('ops: a keystroke grows the rope in place', async (t) => {
     assert.strictEqual(more.data.body, 'new!');
     assert.strictEqual(S.render(more.meta.blocks.body), 'new!');
   });
+});
+
+test('ops: a run anchored below the base survives a reset at one rebuild, not one per keystroke after it', () => {
+  const S = require('../src/text/sequence.js');
+  const splice = (ts, origin, seq, value) => op('splice', ts, origin, { seq, key: 'body', value });
+  let entry = applyOp(null, splice(1, 'A', 1, { at: '^', content: 'hello' })).entry;
+  // The field is unset at 5: the block is rebuilt under the new floor, once, and nothing of it is left.
+  const start = S.stats();
+  entry = applyOp(entry, { origin: 'U', seq: 1, ts: 5, type: 'unset', id: 'r', value: ['body'] }).entry;
+  assert.strictEqual(entry.data.body, undefined);
+  assert.strictEqual(S.stats().rebuilds - start.rebuilds, 1, 'the reset rebuilds the block once');
+  // B, who saw the text, types after its last letter at 10: a run anchored below the floor, a root.
+  const reset = S.stats();
+  entry = applyOp(entry, splice(10, 'B', 1, { at: '>1:4:A', content: 'X' })).entry;
+  assert.strictEqual(entry.data.body, 'X');
+  assert.strictEqual(S.stats().rebuilds - reset.rebuilds, 0, 'a root under the floor rebuilds nothing');
+  // A types ten keystrokes: the block is pruned in O(1) each time — nothing rebuilt, nothing hydrated.
+  const before = S.stats();
+  entry = applyOp(entry, splice(11, 'A', 2, { at: '^', content: 'a' })).entry;
+  for (let i = 0; i < 9; i++) {
+    entry = applyOp(entry, splice(12 + i, 'A', 3 + i, { run: '11:A', from: 1 + i, content: 'bcdefghij'[i] })).entry;
+  }
+  assert.strictEqual(entry.data.body, 'abcdefghijX');
+  const after = S.stats();
+  assert.strictEqual(after.rebuilds - before.rebuilds, 0, 'nothing rebuilt after the reset');
+  assert.strictEqual(after.hydrations - before.hydrations, 0, 'nothing hydrated after the reset');
+  // A reset above everything rebuilds once more, and the block read back from its JSON reads the same.
+  const again = S.stats();
+  entry = applyOp(entry, { origin: 'U', seq: 2, ts: 30, type: 'unset', id: 'r', value: ['body'] }).entry;
+  assert.strictEqual(S.stats().rebuilds - again.rebuilds, 1);
+  assert.strictEqual(entry.data.body, undefined);
 });
 
 test('ops: unset is a field’s own reset', async (t) => {
@@ -1708,4 +2159,24 @@ test('a set reads after every add and remove as its live elements read whole, in
     const walked = latestClock(entry.meta, true)?.[0] ?? 0;
     assert.ok(held >= walked && held <= ts, `the newest ts after op ${i}: ${held} vs ${walked}`);
   }
+});
+
+test('a delete that a field survives reports the fields that went, not a record gone: the reading shows the survivor', () => {
+  // A writes v, then types into body at a later stamp; B's delete, stamped between the two, lands after both:
+  // body is above the tombstone and keeps the record alive, v below it goes.
+  let entry = applyOp(null, op('write', 1, 'A', { data: { v: 1 } })).entry;
+  entry = applyOp(entry, op('splice', 5, 'A', { seq: 2, key: 'body', value: { at: '^', content: 'kept' } })).entry;
+  const survived = applyOp(entry, op('delete', 3, 'B', { seq: 1 }));
+  assert.strictEqual(isAlive(survived.entry), true, 'alive by the field above the tombstone');
+  assert.deepStrictEqual(survived.entry.data, { body: 'kept' });
+  assert.deepStrictEqual(
+    survived.changes,
+    [{ action: 'unset', field: 'v' }],
+    'what the reading shows: v gone, body kept',
+  );
+  // Nothing above the tombstone: the record is gone, and the report says so.
+  const plain = applyOp(null, op('write', 1, 'A', { data: { v: 1 } })).entry;
+  const gone = applyOp(plain, op('delete', 3, 'B', { seq: 1 }));
+  assert.strictEqual(isAlive(gone.entry), false);
+  assert.deepStrictEqual(gone.changes, [{ action: 'delete' }]);
 });

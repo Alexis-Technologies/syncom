@@ -27,27 +27,25 @@ const { sealed, reading, applyPatches } = require('../patches.js');
 // The record at a tag, as an entry: its file as it was — the tag's copy,
 // or the file as it is when nothing changed it since — parsed; `null`
 // when it was not there.
-const entryAt = async (core, name, id, again = false) => {
+const entryAt = async (core, name, id) => {
   if (!isRecordId(id)) return null;
-  let { exists, raw } = await core.tags.readAt(name, id);
+  const { exists, raw } = await core.tags.readAt(name, id);
   if (!exists) return null;
+  if (raw !== null) return core.entries.parse(id, raw);
   // No copy: nothing landed on the file since the tag. A record held since
   // (a write whose file failed, or one deferred) reads as the file, which
-  // is still the tag's state; any other reads as it is.
-  if (raw === null && core.entries.held(id)) {
-    raw = await core.entries.file(id);
-    try {
-      return await core.entries.parse(id, raw);
-    } catch (error) {
-      // A landing was writing the file as it was read (a record file is not
-      // written atomically — the log mends a crash): once the landings in
-      // flight are down, the tag has its copy, or the file is whole.
-      if (again || error?.code !== 'INTEGRITY') throw error;
-      await core.landing(() => undefined);
-      return entryAt(core, name, id, true);
-    }
-  }
-  return raw === null ? core.entries.load(id) : core.entries.parse(id, raw);
+  // is still the tag's state — but a landing may be laying it now, the
+  // tag's copy first and the new file after: read inside a landing step,
+  // where none runs, the copy looked for again.
+  if (core.entries.held(id)) return core.landing(() => entryLanded(core, name, id));
+  return core.entries.load(id);
+};
+
+const entryLanded = async (core, name, id) => {
+  const { exists, raw } = await core.tags.readAt(name, id);
+  if (!exists) return null;
+  if (raw !== null) return core.entries.parse(id, raw);
+  return core.entries.held(id) ? core.entries.parse(id, await core.entries.file(id)) : core.entries.load(id);
 };
 
 // The retained entries of `id` this node applied, oldest first, and the

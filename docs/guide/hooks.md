@@ -74,7 +74,12 @@ the caller made it, save that a `push()` is a `splice` with `index: null`
 (the end), an `unmark()` a `mark` with `value: null` and the reversed expand
 rule, an `unmarkById()` a `mark` with `off`, a `treeRemove()` a `tree` with
 `parent: '$trash'`, and a `remove` from `applyPatches()` carries `removals`
-or `own` as the patch did.
+or `own` as the patch did. An edit made through a text handle (`openText()`)
+reaches the hooks at its flush, already resolved over the handle's reading:
+its `ctx` says `resolved: true`, carries `key`, `current` and — for a
+`splice` — `content` as above, has no `index`/`count` (the handle's reading
+may have moved since), and `value` is the op's payload as it travels (the run
+it extends, the cuts, the content).
 `meta` is the joined metadata of a `merge`. `current` is the
 record as it is now (`null` when absent or deleted — read it, do not change
 it), `encrypted` says whether the write is sealed for this node, `source` is
@@ -213,7 +218,7 @@ default) on the storage and on its sync manager; one more throws.
 
 | Event | Payload | When |
 | --- | --- | --- |
-| `change` | `(op, via, { changes })` | Every op this node logs — a local write, a peer's accepted op (a skipped one included), a bootstrap's `merge` and `advance`; `via` is `null` for a local write, otherwise `{ url, node }` of the peer it came from (`url` null on the hosting side); `changes` what the reading shows of the op, in the write API's terms and the reading's indices (see [Changes](./versions#changes); `[]` for an `advance`, a skipped op) |
+| `change` | `(op, via, { changes })` | Every op this node logs — a local write, a peer's accepted op (a skipped one included), a bootstrap's `merge` and `advance`; keystrokes sent without waiting, or typed through a transaction, that continue each other are one op (typed on at the end of their run, or a chain of cuts), announced once with the changes of each in order; `via` is `null` for a local write, otherwise `{ url, node }` of the peer it came from (`url` null on the hosting side); `changes` what the reading shows of the op, in the write API's terms and the reading's indices (see [Changes](./versions#changes); `[]` for an `advance`, a skipped op) |
 | `commit` | `({ op, seq, source, before, after, kinds, embeds? })` | A local write is durable — any kind of op made through the write API, `transact()`, `applyPatches()` and `migrate()` included; never a peer's op, a bootstrap's `merge`, an encrypted write (it makes no op) or a write that changed nothing. `seq` is its log position, `source` the `Record` whose `save()` it was or the `source` given to `transact()`/`applyPatches()` (`null` otherwise), `before`/`after` the record as copies in the op model's terms — every [path](./storage#paths) a field of its own, not composed (`null` when absent or deleted), `kinds` every field's kind before and after (`register`, `counter`, `set`, `list`, `text`, `tree`), `embeds` the markers of a text's [embed slots](./lists#embeds-and-blocks) by index on each side, when a side holds any; `op.msg` the transaction's message — see [The commit event](./versions#the-commit-event); built only while something listens. It fires after `afterWrite` and the `Record`'s `update`, before `change`; a transaction's fire once it has landed whole, in op order |
 | `transaction` | `({ local, via, source, message, ops, changes, ts })` | One turn's ops durable and announced, after their `change` events: a local write (`ops` one), a `transact()` (its ops, `source` and `message`), a peer's page (`local` false, `via` the peer), a joined snapshot (`local` true, `via` the host) — `changes` every op's, tagged with its record `id`, `ts` the last op's stamp; built only while something listens |
 | `apply` | `({ via, peer, ops, applied, skipped, duplicates, gaps, malformed, unsigned, forged, outOfScope, equivocations })` | A peer's batch is durable — `ops` are the accepted ones, skipped included |

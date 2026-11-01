@@ -49,16 +49,17 @@ const runHook = async (hooks, name, ...args) => {
   }
 };
 
-// The one way an event leaves the engine. Listeners run at once (the
-// Emitter invokes them synchronously) but are never awaited, so a slow
-// listener does not hold the mutation queue and one that writes back to the
-// storage queues behind the write it heard about instead of deadlocking it.
-// A rejection is contained: logged as a warning (it is the application's
-// bug, and the application should see it), never surfaced to the caller.
-// The count check is what keeps an unhandled `error` from throwing.
+// The one way an event leaves the engine. Listeners run at once, in order
+// (Emitter#dispatch), and are never awaited, so a slow listener does not hold
+// the mutation queue and one that writes back to the storage queues behind
+// the write it heard about instead of deadlocking it. A throw or a rejection
+// is contained: logged as a warning, once per listener that failed (it is the
+// application's bug, and the application should see it), never surfaced to
+// the caller. The count check is what keeps an unhandled `error` from
+// throwing; no promise is made for a listener that returns none.
 const notify = (emitter, logger, event, ...args) => {
   if (emitter.listenerCount(event) === 0) return;
-  emitter.emit(event, ...args).catch((err) => {
+  emitter.dispatch(event, args, (err) => {
     logger.warn({ event: 'listener.error', name: event, err });
   });
 };

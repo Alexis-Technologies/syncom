@@ -15,7 +15,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { bench } = require('./support/harness.js');
-const { OpLog } = require('../src/log.js');
+const { OpLog, fileOf, segmentOf, readSegment } = require('../src/log.js');
 
 const op = (seq) => ({ origin: 'bench', seq, ts: seq, type: 'set', id: `r${seq % 100}`, data: { v: seq } });
 
@@ -43,6 +43,18 @@ const main = async () => {
     const cursor = log.formatId(Math.max(1, log.next - 500));
     await bench('since — last 500 entries', () => log.since(cursor));
     await bench('since — everything (no cursor)', () => log.since(undefined), { measureMs: 500 });
+    {
+      // A sealed segment of 64 lines of 16 ops read back: every line's CRC-32 checked before it is parsed.
+      const lines = [];
+      let at = 0;
+      for (let g = 0; g < 64; g++) {
+        const entries = [];
+        for (let i = 0; i < 16; i++) entries.push({ seq: ++at, op: op(at), fp: 'f'.repeat(43) });
+        lines.push(fileOf(entries));
+      }
+      const segment = segmentOf(lines, at);
+      await bench('readSegment — 64 lines of 16 ops, checksums before the parse', () => readSegment(segment));
+    }
     await bench('since — 20 from the middle, scoped', () =>
       log.since(log.formatId(1000), { scopes: ['x'], limit: 20 }));
 

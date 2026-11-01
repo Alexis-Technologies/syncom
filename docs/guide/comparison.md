@@ -50,8 +50,10 @@ rows on [Compared with CRDT libraries](/guide/vs-crdt).
 - **Unique keys across replicas.** Only syncom and InstantDB enforce a unique key. syncom
   checks it on every write and reports a clash between two peers as a `conflict` event. In the
   others the key is per device, or it is checked only where the server writes to Postgres.
-- **Where syncom is behind.** Its text types at Automerge's speed, not at Yjs's or Loro's, so a
-  very long document that many people type into at once is theirs. End-to-end encryption is a
+- **Where syncom is behind.** Its text replays a real editing trace three times as fast as Yjs,
+  but typing at the start or at random — a new run every keystroke — stays about ten times behind
+  Yjs and Loro, and Loro is ahead everywhere, so a very long document that many people type into
+  at once is better theirs. End-to-end encryption is a
   recipe, field by field (Evolu encrypts everything it syncs; Jazz 2.0 ships encryption adapters,
   not yet wired into its tables). There is no React Native target, and it is not yet on npm.
 - **Some are no longer moving, or are moving away.** PouchDB has not published since June 2024,
@@ -204,7 +206,7 @@ rows on [Compared with CRDT libraries](/guide/vs-crdt).
 28. Adding, removing or renaming a column invalidates every shape on that table, so clients get <code>409</code>/<code>must-refetch</code>, drop their local copy and re-sync from scratch.
 29. <code>Documents.get(key)</code> also walks the oplog from the head, so reads cost O(log length).
 30. Two clients can commit events that collide; a materializer that then fails rolls back that event, which the docs say will 'typically halt' the system.
-31. A text is a field of a record — a persistent rope, O(log n) per keystroke — and a document for an editor is one text with block markers, bound through <code>/prosemirror</code> or <code>/codemirror</code>.
+31. A text is a field of a record — a copy-on-write rope, O(log n) per keystroke — and a document for an editor is one text with block markers, bound through <code>/prosemirror</code> or <code>/codemirror</code>.
 32. <code>add([x])</code>/<code>remove([x])</code> merge across sync but return a sorted array, so element order is not kept.
 33. A counter that one node resets while another increments it does not converge to the intuitive value; see Guarantees and limits in the Sync guide.
 34. A number in a <code>Y.Map</code> is a register: of two concurrent increments, one is lost.

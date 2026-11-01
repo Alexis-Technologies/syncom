@@ -21,6 +21,10 @@
 //       join(a, b)                          → two blocks of one code, joined
 //       prune(block, base)                  → the block above a reset, or null
 //       render(entry, field, block, hint)   → what data[field] reads as
+//       lazy                                → { kind: true } for a kind whose reading is made when it is read
+//                                             (src/lazy.js) — a list's, a copy of the whole; optional
+//       coalesce(a, b)                      → the value of one op that does what op `a` then op `b` of its
+//                                             stream do — `a`'s stamp and header kept — or null; optional
 //       resolve(core, id, type, payload, current)
 //                                           → the op's value, inside the queue (null: nothing to write)
 //       diff(field, kind, from, to, context)
@@ -31,9 +35,9 @@
 //       realize(action, patch, method)      → [type, payload] for one of its patch actions
 //       migrate(kind, key, value)           → [[type, payload]…] that lay the field again
 //       compact(entry, field, kind)         → the patches a compaction lays after recreate
-//       pieces(block)                       → `{ head, slots }` — a large block as its file holds it: 32
-//                                             slots of `{ key, text() }` or null, `key` the same object while the
-//                                             piece is (src/entries.js); null to keep the block whole; optional
+//       pieces(block)                       → `{ head, slots }` — a large block as its file holds it: slots of
+//                                             `{ key, text() }` or null, `key` the same object while the piece
+//                                             is (src/entries.js); null to keep the block whole; optional
 //       values(entry, field)                → what the field holds beside its reading (a text's embed
 //                                             markers by index), for the commit event; optional
 //       methods                             → { name: (core, id, …args) }, the storage's methods

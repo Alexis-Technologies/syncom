@@ -798,6 +798,111 @@ test('sequence engine', async (t) => {
     },
   );
 
+  await t.test('a move is bounded by the field: its position run is one slot more, refused at MAX_FIELD', () => {
+    const runs = {};
+    for (let i = 1; i <= 4; i++) runs[`${i}:A`] = ['^', [S.MAX_RUN]];
+    const full = S.normalizeSeq({ k: 'l', ts: 4, runs });
+    const payload = { elem: '1:0:A', cut: ['1:A', 0, 1], at: S.HEAD, value: 1 };
+    const moved = S.applyMove(full, [tick(), 'B'], payload);
+    assert.deepStrictEqual(
+      [moved.changed, moved.reason, moved.detail, moved.count, moved.max],
+      [false, 'bound', 'field', S.MAX_FIELD + 1, S.MAX_FIELD],
+    );
+    runs['4:A'] = ['^', [S.MAX_RUN - 1]];
+    const room = S.normalizeSeq({ k: 'l', ts: 4, runs });
+    assert.strictEqual(S.applyMove(room, [tick(), 'B'], payload).changed, true, 'one slot of room: taken');
+  });
+
+  await t.test(
+    'a text holds at most MAX_MARKS marks: one more is a bound refusal, a block past it is not taken',
+    () => {
+      const marks = {};
+      for (let i = 1; i <= S.MAX_MARKS; i++) marks[`${i}:M`] = ['^', '$', 'b', true, 0];
+      const runs = { '1:A': ['^', ['ab']] };
+      const full = S.normalizeSeq({ k: 't', ts: S.MAX_MARKS, runs, marks });
+      assert.strictEqual(Object.keys(full.marks).length, S.MAX_MARKS, 'at the bound, taken');
+      const more = S.applyMark(full, [S.MAX_MARKS + 1, 'M'], { start: S.HEAD, end: S.END, key: 'b', value: true });
+      assert.deepStrictEqual(
+        [more.changed, more.reason, more.detail, more.count, more.max],
+        [false, 'bound', 'marks', S.MAX_MARKS, S.MAX_MARKS],
+      );
+      assert.strictEqual(S.applyMark(full, [S.MAX_MARKS + 2, 'B'], { off: '1:M' }).changed, true, 'off adds none');
+      marks[`${S.MAX_MARKS + 1}:M`] = ['^', '$', 'b', true, 0];
+      assert.strictEqual(S.normalizeSeq({ k: 't', ts: S.MAX_MARKS + 1, runs, marks }), null, 'one more: not taken');
+    },
+  );
+
+  await t.test(
+    'a waiting extension is bounded as a landed one: never past MAX_RUN, counted toward MAX_FIELD, on both paths',
+    () => {
+      // The id index gives every run SPAN keys: a run must stay under it, so MAX_RUN stays under SPAN.
+      assert.ok(S.SPAN >= 2 * S.MAX_RUN, 'SPAN leaves a run of MAX_RUN slots its room');
+      const a = node('A');
+      const first = insert(a, 0, 'p');
+      const run = S.runKey(first.ts, 'A');
+      // Parked far ahead, the extension would take the run past MAX_RUN when it lands: refused as it arrives.
+      const far = apply(a, { ts: tick(), origin: 'A', payload: { run, from: S.MAX_RUN - 1, content: 'xy' } });
+      assert.deepStrictEqual([far.reason, far.detail, far.count, far.max], ['bound', 'run', S.MAX_RUN + 1, S.MAX_RUN]);
+      assert.strictEqual(a.seq.ext, undefined, 'nothing parked');
+      // One within the bound waits, and its slots count toward the field's: a field two slots short of
+      // MAX_FIELD with one waiting takes one more, not two.
+      const runs = {};
+      for (let i = 1; i <= 3; i++) runs[`${i}:A`] = ['^', [S.MAX_RUN]];
+      runs['4:A'] = ['^', [S.MAX_RUN - 3, 'a']];
+      const b = node('B');
+      b.seq = { k: 't', ts: 4, runs };
+      const parked = apply(b, { ts: tick(), origin: 'A', payload: { run: '4:A', from: S.MAX_RUN - 1, content: 'z' } });
+      assert.strictEqual(parked.changed, true, 'an extension ahead of its run waits');
+      assert.deepStrictEqual(b.seq.ext, { '4:A': [[S.MAX_RUN - 1, 'z']] });
+      const two = apply(b, { ts: tick(), origin: 'B', payload: { at: '^', content: 'xy' } });
+      assert.deepStrictEqual([two.reason, two.detail, two.count], ['bound', 'field', S.MAX_FIELD + 1]);
+      assert.strictEqual(apply(b, { ts: tick(), origin: 'B', payload: { at: '^', content: 'x' } }).changed, true);
+      assert.strictEqual(S.pendingCount(b.seq), 1, 'the parked extension is pending work');
+      // The snapshot path reads the same bounds: an extension past MAX_RUN is left out, a waiting one's
+      // slots count toward MAX_FIELD.
+      const json = {
+        k: 't',
+        ts: 1,
+        runs: { '1:A': ['^', ['p']] },
+        ext: {
+          '1:A': [
+            [S.MAX_RUN - 1, 'xy'],
+            [3, 'ok'],
+          ],
+        },
+      };
+      assert.deepStrictEqual(S.normalizeSeq(json).ext, { '1:A': [[3, 'ok']] });
+      const ext = {
+        '4:A': [
+          [S.MAX_RUN - 2, 'x'],
+          [S.MAX_RUN - 1, 'y'],
+        ],
+      };
+      assert.ok(S.normalizeSeq({ k: 't', ts: 4, runs, ext }) !== null, 'at the bound, taken');
+      const over = { k: 't', ts: 5, runs: { ...runs, '5:B': ['^', ['b']] }, ext };
+      assert.strictEqual(S.normalizeSeq(over), null, 'one slot past it, with what waits counted: not taken');
+    },
+  );
+
+  await t.test(
+    'a run of no slots never enters a block; hydrated by hand, extending it is malformed, never a throw',
+    () => {
+      const runs = { '1:A': ['^', ['hello']], '5:P': ['>1:4:A', []] };
+      const normalized = S.normalizeSeq({ k: 't', ts: 5, runs });
+      assert.deepStrictEqual(Object.keys(normalized.runs), ['1:A'], 'the empty run is left out');
+      assert.strictEqual(S.render(normalized), 'hello');
+      // The engine's own guard, for a block built past the door.
+      const byHand = S.hydrate({ k: 't', ts: 5, runs }, null);
+      assert.strictEqual(S.render(byHand), 'hello');
+      const grown = S.applySplice(byHand, [6, 'P'], { run: '5:P', from: 0, content: 'x' });
+      assert.deepStrictEqual([grown.changed, grown.reason], [false, 'malformed']);
+      const typed = S.applySplice(byHand, [7, 'A'], { run: '1:A', from: 5, content: '!' });
+      assert.strictEqual(S.render(typed.seq), 'hello!');
+      const empty = S.hydrate({ k: 't', ts: 5, runs: { '5:P': ['^', []] } }, null);
+      assert.deepStrictEqual(S.placeInsert(empty, 0, 'A'), { at: S.HEAD }, 'a walk of no slots anchors at the head');
+    },
+  );
+
   await t.test(
     'the snapshot path is bounded like the op path: pending work past it, self-anchored runs, typed-off origins',
     () => {
@@ -868,6 +973,82 @@ test('sequence engine', async (t) => {
       assert.deepStrictEqual([second.changed, second.reason], [false, 'bound']);
       assert.strictEqual(off('50:B', 1).changed, false, 'off twice is nothing, not a refusal');
       assert.strictEqual(S.pendingCount(text.seq, index(text)), 1);
+    },
+  );
+
+  await t.test(
+    'the pending count is kept as work comes and goes, never walked: it is the recount after every op (seeded)',
+    () => {
+      // What waits, recounted from the block's JSON: runs whose anchor is not here, cuts and extensions
+      // waiting, registers of elements not here, marks switched off before they arrived.
+      const recount = (block) => {
+        const json = JSON.parse(JSON.stringify(block));
+        const held = (elem) => {
+          const e = S.parseElem(elem);
+          const run = json.runs[e.run];
+          return run !== undefined && e.offset < S.rleLength(run[1]);
+        };
+        let n = 0;
+        for (const key of Object.keys(json.runs)) {
+          const { elem } = S.parseAnchor(json.runs[key][0]);
+          if (elem !== null && !held(S.elemKey(elem.run, elem.offset))) n++;
+        }
+        for (const map of ['cuts', 'ext']) for (const key of Object.keys(json[map] ?? {})) n += json[map][key].length;
+        for (const map of ['pos', 'vals']) for (const key of Object.keys(json[map] ?? {})) if (!held(key)) n++;
+        for (const key of Object.keys(json.marks ?? {})) if (S.isPlaceholder(json.marks[key])) n++;
+        return n;
+      };
+      const rng = (seed) => () => {
+        seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+        return seed / 2 ** 32;
+      };
+      for (let round = 0; round < 16; round++) {
+        const random = rng(500 + round);
+        const pick = (n) => Math.floor(random() * n);
+        const kind = round % 2 === 0 ? 't' : 'l';
+        const items = (n) => (kind === 't' ? 'x'.repeat(n) : Array.from({ length: n }, (_, i) => i));
+        // Six runs by stamp, two origins; registers, marks and cuts name their elements before and after
+        // they arrive, and a run may be anchored at an element of an older run not here yet.
+        const names = [];
+        for (let i = 1; i <= 6; i++) names.push(`${i}:${i % 2 ? 'P' : 'Q'}`);
+        let seq = S.createSeq(kind);
+        let ts = 100;
+        const step = (result) => {
+          if (result.changed) seq = result.seq;
+        };
+        for (let i = 0; i < 48; i++) {
+          const key = names[pick(6)];
+          const made = S.parseRun(key);
+          const r = random();
+          if (r < 0.3) {
+            if (seq.runs[key] !== undefined) {
+              const from = S.rleLength(seq.runs[key][1]);
+              step(S.applySplice(seq, [++ts, made.origin], { run: key, from, content: items(1 + pick(3)) }));
+            } else {
+              const older = made.ts > 1 ? names[pick(made.ts - 1)] : null;
+              const at = older === null || random() < 0.3 ? S.HEAD : `>${S.elemKey(older, pick(4))}`;
+              step(S.applySplice(seq, [made.ts, made.origin], { at, content: items(1 + pick(3)) }));
+            }
+          } else if (r < 0.5) {
+            step(S.applyAssign(seq, [++ts, 'B'], { elem: S.elemKey(key, pick(5)), value: i }));
+          } else if (r < 0.65 && kind === 'l') {
+            const payload = { elem: S.elemKey(key, pick(5)), cut: [key, pick(5), 1], at: S.HEAD, value: i };
+            step(S.applyMove(seq, [++ts, 'B'], payload));
+          } else if (r < 0.8 && kind === 't') {
+            const mark = 50 + pick(4);
+            if (random() < 0.5) step(S.applyMark(seq, [++ts, 'B'], { off: `${mark}:M` }));
+            else step(S.applyMark(seq, [mark, 'M'], { start: S.HEAD, end: S.END, key: 'b', value: true }));
+          } else {
+            const content = kind === 't' ? '' : [];
+            step(S.applySplice(seq, [++ts, 'C'], { cut: [[key, pick(6), 1 + pick(3)]], content }));
+          }
+          assert.strictEqual(S.pendingCount(seq), recount(seq), `round ${round}, op ${i}`);
+        }
+        const joined = S.join(seq, seq);
+        assert.strictEqual(S.pendingCount(joined), recount(joined), `round ${round}: joined`);
+        const hydrated = S.hydrate(JSON.parse(JSON.stringify(seq)), null);
+        assert.strictEqual(S.pendingCount(hydrated), recount(seq), `round ${round}: hydrated`);
+      }
     },
   );
 
@@ -1094,4 +1275,36 @@ test('rleAppend extends a list run by 200 000 items', () => {
   const out = S.rleAppend('l', [[1]], items);
   assert.strictEqual(out.length, 1);
   assert.deepStrictEqual(out[0], [1].concat(items));
+});
+
+test('a join is the same on both nodes whatever a forged snapshot differs in under one key: a run’s anchor, a mark, a register at one stamp, an extension at one offset', () => {
+  const base = {
+    k: 't',
+    ts: 5,
+    runs: { '1:A': ['^', ['hello']], '3:B': ['>1:4:A', ['!']] },
+    marks: { '4:A': ['<1:0:A', '>1:4:A', 'bold', true, 0] },
+    ext: { '1:A': [[5, 'x']] },
+    vals: { '1:0:A': [2, 'A', { v: 1 }] },
+  };
+  const forged = JSON.parse(JSON.stringify(base));
+  forged.runs['3:B'][0] = '>1:2:A';
+  forged.marks['4:A'][1] = '>1:2:A';
+  forged.ext['1:A'][0][1] = 'y';
+  forged.vals['1:0:A'][2] = { v: 0 };
+  const plain = (block) => JSON.parse(JSON.stringify(block));
+  const ab = plain(S.join(base, forged));
+  const ba = plain(S.join(forged, base));
+  assert.deepStrictEqual(ab, ba, 'the join commutes');
+  assert.strictEqual(ab.runs['3:B'][0], '>1:2:A', 'the lesser anchor');
+  assert.strictEqual(ab.marks['4:A'][1], '>1:2:A', 'the lesser range');
+  assert.deepStrictEqual(ab.vals['1:0:A'][2], { v: 0 }, 'the lesser value at one stamp');
+  assert.ok(
+    ab.runs['1:A'][1].join('').includes('x') && !ab.runs['1:A'][1].join('').includes('y'),
+    'the lesser extension',
+  );
+  // Two honest pictures (one a step behind) join as before.
+  const behind = JSON.parse(JSON.stringify(base));
+  delete behind.marks;
+  delete behind.ext;
+  assert.deepStrictEqual(plain(S.join(base, behind)), plain(S.join(behind, base)));
 });

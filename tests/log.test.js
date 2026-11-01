@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { OpLog } = require('../src/log.js');
+const { OpLog, fileOf, segmentOf, readSegment } = require('../src/log.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const { openGroups, withoutAppend } = require('./utils/groups.js');
 const nodeFsi = require('../src/fsi.js');
@@ -161,14 +161,14 @@ test('OpLog', async (t) => {
         await log.close();
         const logDir = path.join(dir, 'log');
         const [segment] = (await fs.readdir(logDir)).filter((name) => name.startsWith('seg-')).sort();
-        const sealed = JSON.parse(await fs.readFile(path.join(logDir, segment), 'utf8'));
-        assert.match(sealed.hash, /^[0-9a-f]{8}$/, 'every file carries its checksum');
-        // Altered on disk: the hash no longer matches, the segment is lost;
-        // an open batch with a wrong hash is dropped.
-        sealed.entries[0].op.data.n = 99;
-        await fs.writeFile(path.join(logDir, segment), JSON.stringify(sealed));
-        const batch = { entries: [{ seq: 6, op: op('A', 6) }], hash: '00000000' };
-        await fs.writeFile(path.join(logDir, 'open', '0000000006.json'), JSON.stringify(batch));
+        const sealed = await fs.readFile(path.join(logDir, segment), 'utf8');
+        assert.match(sealed, /,"c":"[0-9a-f]{8}"\}$/, 'every file carries its checksum, last');
+        // Altered on disk: the checksum no longer matches, the segment is lost;
+        // an open batch with a wrong checksum is dropped.
+        assert.ok(sealed.includes('"data":{"v":1}'));
+        await fs.writeFile(path.join(logDir, segment), sealed.replace('"data":{"v":1}', '"data":{"v":99}'));
+        const batch = fileOf([{ seq: 6, op: op('A', 6) }]).replace(/"c":"[0-9a-f]{8}"/, '"c":"00000000"');
+        await fs.writeFile(path.join(logDir, 'open', '0000000006.json'), batch);
         const reopened = await new OpLog(dir, { rollAfter: 2, logger });
         assert.deepStrictEqual(
           warnings.map((entry) => [entry.event, entry.reason]),
@@ -186,20 +186,17 @@ test('OpLog', async (t) => {
         // The altered open batch was answered once: kept under corrupt/, out of open/.
         assert.deepStrictEqual(await fs.readdir(path.join(logDir, 'corrupt')), ['0000000006.json']);
         assert.ok(!(await fs.readdir(path.join(logDir, 'open'))).includes('0000000006.json'));
-        assert.deepStrictEqual(
-          JSON.parse(await fs.readFile(path.join(logDir, 'corrupt', '0000000006.json'), 'utf8')),
-          batch,
-        );
+        assert.strictEqual(await fs.readFile(path.join(logDir, 'corrupt', '0000000006.json'), 'utf8'), batch);
         assert.strictEqual(reopened.droppedTs, 5, 'an unreadable segment: the newest stamp held, as for a torn one');
         await reopened.close();
-        // A file without a hash is not whole: unreadable like an altered one.
+        // A file without a checksum is not whole: unreadable like an altered one.
         const [last] = (await fs.readdir(logDir))
           .filter((name) => name.startsWith('seg-'))
           .sort()
           .slice(-1);
-        const text = JSON.parse(await fs.readFile(path.join(logDir, last), 'utf8'));
-        delete text.hash;
-        await fs.writeFile(path.join(logDir, last), JSON.stringify(text));
+        const text = await fs.readFile(path.join(logDir, last), 'utf8');
+        assert.strictEqual(readSegment(text).reason, null, 'whole before it is altered');
+        await fs.writeFile(path.join(logDir, last), text.replace(/,"c":"[0-9a-f]{8}"\}$/, '}'));
         const hashless = await new OpLog(dir, { rollAfter: 2, logger });
         assert.deepStrictEqual(
           hashless.since(hashless.formatId(0)).map((entry) => entry.seq),
@@ -316,10 +313,11 @@ test('OpLog', async (t) => {
       const logDir = path.join(dir, 'log');
       // Crash mid-roll: the sealed batch is still in open/ too.
       const segment = (await fs.readdir(logDir)).find((name) => name.startsWith('seg-'));
-      const sealed = JSON.parse(await fs.readFile(path.join(logDir, segment), 'utf8'));
-      await fs.writeFile(path.join(logDir, 'open', '0000000001.json'), JSON.stringify(sealed));
+      // The segment's first line is the first group, as its open file held it.
+      const sealed = await fs.readFile(path.join(logDir, segment), 'utf8');
+      await fs.writeFile(path.join(logDir, 'open', '0000000001.json'), sealed.split('\n')[0]);
       // Crash mid-append: a torn file for a batch nobody was told about.
-      await fs.writeFile(path.join(logDir, 'open', '0000000009.json'), '{"entries":[{"seq":9,');
+      await fs.writeFile(path.join(logDir, 'open', '0000000009.json'), '{"e":[[9,null,');
 
       const reopened = await new OpLog(dir, { rollAfter: 3, logger });
       assert.strictEqual(reopened.epoch, epoch);
@@ -778,6 +776,35 @@ test('a group commit: appends issued together land as one file, in order; a fail
       }
     }
   }
+
+  await t.test(
+    'enqueue: the seqs at once, onDurable in append order once the group is durable, before done; never on a failure',
+    async () => {
+      const dir = await createTemp();
+      try {
+        let failing = false;
+        const flaky = {
+          ...nodeFsi,
+          append: (...args) => (failing ? Promise.reject(new Error('disk full')) : nodeFsi.append(...args)),
+        };
+        const log = await new OpLog(dir, { rollAfter: 100, fsi: flaky });
+        const heard = [];
+        const first = log.enqueue([op('A', 1)], { onDurable: () => heard.push(['first', log.length]) });
+        const second = log.enqueue([op('A', 2)], { onDurable: () => heard.push(['second', log.length]) });
+        assert.deepStrictEqual([first.entries[0].seq, second.entries[0].seq], [1, 2], 'the seqs are reserved at once');
+        assert.strictEqual(first.done, second.done, 'one group, one promise for both');
+        await first.done.then(() => heard.push(['done']));
+        assert.deepStrictEqual(heard, [['first', 2], ['second', 2], ['done']], 'published, then told, then settled');
+        failing = true;
+        const failed = log.enqueue([op('A', 3)], { onDurable: () => heard.push(['failed']) });
+        await assert.rejects(failed.done, /disk full/);
+        assert.strictEqual(heard.length, 3, 'a group that never reached the disk tells nobody it did');
+        assert.strictEqual(log.next, 3, 'and its seq is handed out again');
+      } finally {
+        await cleanupTemp(dir);
+      }
+    },
+  );
 });
 
 test('a journal: a line per group, a torn last line left out, a failed line shadowed by the group that took its seqs', async (t) => {
@@ -803,7 +830,7 @@ test('a journal: a line per group, a torn last line left out, a failed line shad
       await log.append([op('A', 3)]);
       const [journal] = await lines(dir);
       // A crash in the middle of the next append: half a line at the end.
-      await fs.appendFile(journal, '{"entries":[{"seq":4,"op":');
+      await fs.appendFile(journal, '{"e":[[4,null,[1,');
       const torn = await new OpLog(dir, { rollAfter: 100, sealApplied: true, logger });
       assert.deepStrictEqual(
         torn.since(undefined).map((entry) => entry.seq),
@@ -1091,9 +1118,7 @@ test('a segment wholly below the floor is a compaction cut short: removed at ope
   const floor = log.floor;
   assert.ok(floor > 1);
   // The file of seqs before the floor comes back (a removal the crash cut short).
-  const { checksum } = require('../src/hash.js');
-  const entries = JSON.stringify([{ seq: 1, op: op('A', 1) }]);
-  await fsi.write('/l/log', 'seg-0000000001.json', `{"entries":${entries},"hash":"${checksum(entries)}"}`);
+  await fsi.write('/l/log', 'seg-0000000001.json', segmentOf([fileOf([{ seq: 1, op: op('A', 1) }])], 1));
   const reopened = await new OpLog('/l', { fsi, rollAfter: 1, retention: { ops: 2 }, logger: false });
   assert.strictEqual(reopened.floor, floor);
   assert.ok(!(await fsi.list('/l/log')).includes('seg-0000000001.json'));
@@ -1101,4 +1126,120 @@ test('a segment wholly below the floor is a compaction cut short: removed at ope
   assert.strictEqual(reopened.since(reopened.formatId(0)), null, 'below the floor: a bootstrap, as before');
   assert.strictEqual(reopened.droppedTs, log.droppedTs, 'nothing lost');
   await reopened.close();
+});
+
+test('a segment is the lines its groups were journaled as, and a trailer: a line altered, gone or moved is told, whole', async () => {
+  const { memory } = require('../src/memory/memory.js');
+  const fsi = memory();
+  const log = await new OpLog('/s', { fsi, rollAfter: 3, logger: false });
+  await log.append([op('A', 1)]);
+  await log.append([op('A', 2), op('A', 3)]);
+  const [journal] = await fsi.list('/s/log/open');
+  const journaled = (await fsi.read('/s/log/open', journal)).trim().split('\n');
+  // The third group rolls the three into a segment.
+  await log.append([op('B', 1)]);
+  const [segment] = (await fsi.list('/s/log')).filter((name) => name.startsWith('seg-'));
+  const text = await fsi.read('/s/log', segment);
+  const lines = text.split('\n');
+  assert.deepStrictEqual(lines.slice(0, 2), journaled, 'the journaled lines, as they were — nothing stringified again');
+  assert.match(lines[3], /^\{"lines":3,"to":4,"c":"[0-9a-f]{8}"\}$/, 'and a trailer');
+  assert.deepStrictEqual(
+    readSegment(text).entries.map((entry) => entry.seq),
+    [1, 2, 3, 4],
+  );
+  await log.close();
+  // A line gone, two lines moved, the trailer gone: each is a segment unreadable whole.
+  const forged = [
+    [lines[0], lines[2], lines[3]],
+    [lines[1], lines[0], lines[2], lines[3]],
+    [lines[0], lines[1], lines[2]],
+  ];
+  for (const variant of forged) assert.strictEqual(readSegment(variant.join('\n')).reason, 'checksum');
+  await fsi.write('/s/log', segment, [lines[1], lines[0], lines[2], lines[3]].join('\n'));
+  const reopened = await new OpLog('/s', { fsi, rollAfter: 3, logger: false });
+  assert.strictEqual(reopened.corrupt, 1, 'counted');
+  assert.deepStrictEqual(reopened.since(reopened.formatId(0)), [], 'and none of it read');
+  await reopened.close();
+});
+
+test('a group scrubbed before its roll is sealed as the scrub left it: no segment carries a payload a purge took', async () => {
+  const { memory } = require('../src/memory/memory.js');
+  const fsi = memory();
+  const log = await new OpLog('/p', { fsi, rollAfter: 100, logger: false });
+  await log.append([op('A', 1, { id: 'gone', data: { secret: 'S3CRET' } })]);
+  await log.append([op('A', 2)]);
+  assert.strictEqual(await log.scrub('gone'), 1);
+  await log.flush();
+  const [segment] = (await fsi.list('/p/log')).filter((name) => name.startsWith('seg-'));
+  const text = await fsi.read('/p/log', segment);
+  assert.ok(!text.includes('S3CRET'), 'the line the segment seals is the one the scrub wrote');
+  const [first] = readSegment(text).entries;
+  assert.strictEqual(first.scrubbed, true);
+  assert.strictEqual(first.op.data, undefined);
+  await log.close();
+});
+
+test('a failed append whose line went down whole does not come back: the journal is written again without it', async () => {
+  const { memory } = require('../src/memory/memory.js');
+  const inner = memory();
+  let failSync = false;
+  // The line reaches the disk, the sync after it does not: `durable` over a disk that fails late.
+  const fsi = {
+    ...inner,
+    append: async (dir, name, text) => {
+      await inner.append(dir, name, text);
+      if (failSync) {
+        failSync = false;
+        throw new Error('sync failed');
+      }
+    },
+  };
+  const log = await new OpLog('/j', { fsi, rollAfter: 100, logger: false });
+  await log.append([op('A', 1)]);
+  failSync = true;
+  await assert.rejects(log.append([op('A', 2, { data: { secret: 'S3CRET' } })]), /sync failed/);
+  assert.strictEqual(log.next, 2, 'the seq taken back');
+  await log.close();
+  const reopened = await new OpLog('/j', { fsi, rollAfter: 100, logger: false });
+  assert.deepStrictEqual(
+    reopened.since(reopened.formatId(0)).map((entry) => entry.seq),
+    [1],
+    'the failed group is gone from the disk',
+  );
+  assert.strictEqual(reopened.next, 2);
+  for (const name of await fsi.list('/j/log/open')) {
+    assert.ok(!(await fsi.read('/j/log/open', name)).includes('S3CRET'), 'nothing of the failed line on disk');
+  }
+  await reopened.close();
+});
+
+test('a position handed out is never handed out again in its epoch: the index keeps the counter where the newest file did not read', async () => {
+  const { memory } = require('../src/memory/memory.js');
+  const fsi = memory();
+  const log = await new OpLog('/n', { fsi, rollAfter: 100, logger: false });
+  await log.append([op('A', 1), op('A', 2), op('A', 3)]);
+  await log.close();
+  // The journal is gone (a disk that lost it), and its entries with it; the index says what was handed out.
+  for (const name of await fsi.list('/n/log/open')) await fsi.remove('/n/log/open', name);
+  const reopened = await new OpLog('/n', { fsi, rollAfter: 100, logger: false });
+  assert.strictEqual(reopened.next, 4, 'from the index, not from what read');
+  const [entry] = await reopened.append([op('A', 4)]);
+  assert.strictEqual(entry.seq, 4);
+  await reopened.close();
+});
+
+test('a purge scrubs the evidence copies under corrupt/ too: a copy that names the id is removed whole', async () => {
+  const { memory } = require('../src/memory/memory.js');
+  const fsi = memory();
+  const log = await new OpLog('/c', { fsi, rollAfter: 100, logger: false });
+  await log.append([op('A', 1, { id: 'gone', data: { secret: 'S3CRET' } })]);
+  await fsi.write(
+    '/c/log/corrupt',
+    'old.json',
+    '{"e":[[7,"fp",["gone"],{"data":{"secret":"S3CRET"}}]],"c":"00000000"}',
+  );
+  await fsi.write('/c/log/corrupt', 'other.json', '{"e":[[8,"fp",["kept"],{}]],"c":"00000000"}');
+  assert.strictEqual(await log.scrub('gone'), 1);
+  assert.deepStrictEqual(await fsi.list('/c/log/corrupt'), ['other.json']);
+  await log.close();
 });

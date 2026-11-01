@@ -2,13 +2,21 @@
 
 /** Every library in the comparison, in the order the tables list them. */
 const syncom = require('./syncom.js');
+const yjs = require('./yjs.js');
+const loro = require('./loro.js');
 
 const ADAPTERS = [
   syncom.pure,
+  // The pure build's text typed through a handle: what an editor binding does.
+  syncom.edit,
   syncom.secure,
-  require('./yjs.js'),
+  yjs.plain,
+  // Yjs and Loro with every change encoded, as their persistence and sync
+  // encode it: the same work syncom's memory line does for each write.
+  yjs.encoded,
   require('./automerge.js'),
-  require('./loro.js'),
+  loro.plain,
+  loro.encoded,
   require('./tinybase.js'),
   require('./pouchdb.js'),
   require('./rxdb.js'),

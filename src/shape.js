@@ -22,7 +22,9 @@ const asJson = (value) => (value === undefined ? undefined : JSON.parse(JSON.str
 // enters — the local write path, a peer's op, a snapshot record — so
 // nothing below has to.
 const RECORD_ID = /^[A-Za-z0-9_@-][A-Za-z0-9._@-]{0,127}$/;
-const isRecordId = (id) => typeof id === 'string' && RECORD_ID.test(id);
+// The length first: a regular expression flattens a string built by
+// concatenation (a text's reading) before it reads its first character.
+const isRecordId = (id) => typeof id === 'string' && id.length <= 128 && RECORD_ID.test(id);
 const invalidId = (id) => {
   const shown = typeof id === 'string' ? JSON.stringify(id) : typeof id;
   return typed(
@@ -135,9 +137,25 @@ const nestsWithin = (value, max) => {
 // is one level more). Payloads (`data`, `meta`, `key`, `value`, `vector`)
 // are otherwise the business of applyOp and normalizeMeta, which take
 // garbage as a no-op; `actor` and `from` are claims, carried as they are.
+// `actor` and `from` are claims, carried as they are — but bounded: both are
+// in the header every node hashes (in the browser at once, on the main
+// thread), and a peer chooses their size.
+const MAX_ACTOR = 256;
+// Whatever a peer puts there is taken as it is — a claim, not a check — within the bound: a text by its
+// length, a value of another shape by its JSON (nothing is read into it either way).
+const isClaim = (value) => {
+  if (value === undefined || value === null) return true;
+  const type = typeof value;
+  if (type === 'string') return value.length <= MAX_ACTOR;
+  if (type === 'number' || type === 'boolean') return true;
+  return type === 'object' && JSON.stringify(value).length <= MAX_ACTOR;
+};
+
 const wellFormed = (op) =>
   isPlainObject(op) &&
   isStreamName(op.origin) &&
+  isClaim(op.actor) &&
+  isClaim(op.from) &&
   Number.isSafeInteger(op.seq) &&
   op.seq > 0 &&
   Number.isSafeInteger(op.ts) &&
@@ -207,6 +225,7 @@ const VERDICT = Object.freeze({ OK: 'ok', UNSIGNED: 'unsigned', FORGED: 'forged'
 module.exports = {
   VERDICT,
   MAX_MESSAGE,
+  MAX_ACTOR,
   MAX_JSON_DEPTH,
   MAX_WIRE_DEPTH,
   nestsWithin,

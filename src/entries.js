@@ -12,9 +12,9 @@
 //
 // A record file holding a large block holds its runs in PIECES: files
 // `<id>~<n>.json` beside it, `n` counting up per record (`gen` in the
-// record file), named in the block (`parts`, 32 slots, null where none).
-// A write makes the file of a piece whose object is new (the kind
-// plugin's `pieces`: one a keystroke, of 32), then the record file, then
+// record file), named in the block (`parts`, a slot a piece, null where
+// none). A write makes the file of a piece whose object is new (the kind
+// plugin's `pieces`: the newest one a keystroke), then the record file, then
 // removes the pieces it no longer names — so a crash leaves the old file
 // whole, or the new one. A crash before the record file leaves new pieces
 // no file names, written over as `n` reaches them again; one after it, old
@@ -24,6 +24,8 @@
 const { isRecordId, isPlainObject } = require('./shape.js');
 const { isAlive } = require('./ops.js');
 const { SyncomError } = require('./errors.js');
+
+const isThenable = (value) => value !== null && typeof value === 'object' && typeof value.then === 'function';
 
 // How many of the oldest cached entries one write looks at for one to evict.
 const EVICT_SCAN = 64;
@@ -138,6 +140,14 @@ class EntryStore {
       if (this.#pinned(key) || this.#held.has(key)) continue;
       this.#cache.delete(key);
     }
+  }
+
+  // A cached entry, known at once (touched as a load touches it); undefined
+  // when only the file can tell.
+  peek(id) {
+    const cached = this.#cache.get(id);
+    if (cached !== undefined) this.remember(id, cached);
+    return cached;
   }
 
   async load(id) {
@@ -292,20 +302,32 @@ class EntryStore {
     else this.#parts.delete(id);
   }
 
-  // The catalog's view of an entry: what `put` takes. Derived state never
-  // fails a write: a lens that throws (a migration returning no object)
-  // indexes the raw data here and throws on the read, where it is reported.
-  async row(id, entry) {
+  // The catalog's view of an entry: what `put` takes — at once, a promise
+  // only where a lens runs. Derived state never fails a write: a lens that
+  // throws (a migration returning no object) indexes the raw data here and
+  // throws on the read, where it is reported.
+  row(id, entry) {
     if (entry === null) return null;
     if (entry.encrypted) return { type: entry.data?.$type, v: null, encrypted: true };
     if (!isAlive(entry)) return { type: entry.data?.$type, v: entry.meta.v ?? null, gone: true };
-    let data = entry.data;
+    let data;
     try {
-      data = await this.#view(id, entry);
+      data = this.#view(id, entry);
     } catch (error) {
-      this.#logger.warn({ event: 'catalog.lens', id, err: error });
+      return this.#unlensed(id, entry, error);
+    }
+    if (isThenable(data)) {
+      return data.then(
+        (view) => ({ type: entry.data.$type, v: entry.meta.v ?? null, data: view }),
+        (error) => this.#unlensed(id, entry, error),
+      );
     }
     return { type: entry.data.$type, v: entry.meta.v ?? null, data };
+  }
+
+  #unlensed(id, entry, error) {
+    this.#logger.warn({ event: 'catalog.lens', id, err: error });
+    return { type: entry.data.$type, v: entry.meta.v ?? null, data: entry.data };
   }
 
   // Puts what the record `id` is now; a record that fails its integrity
@@ -335,7 +357,8 @@ class EntryStore {
     const held = this.#held.has(id) ? this.#cache.get(id) : undefined;
     const indexed = held !== undefined && held.data === entry.data && held.meta === entry.meta;
     this.#held.delete(id);
-    const cached = { data: entry.data, meta: entry.meta, encrypted: false, block: blockHash };
+    // The composed view rides along: it reads data and meta alone, and both are the same objects here.
+    const cached = { data: entry.data, meta: entry.meta, encrypted: false, block: blockHash, composed: entry.composed };
     this.remember(id, cached);
     if (!indexed) this.#catalog.put(id, await this.row(id, cached));
   }
@@ -344,11 +367,15 @@ class EntryStore {
   // written: the cache and the catalog hold what the log says, so reads see
   // the write; the file catches up when a later write of it lands, or when
   // the next open replays the log.
-  async hold(id, entry) {
-    const cached = { data: entry.data, meta: entry.meta, encrypted: false, block: null };
+  // At once — a promise only where the row waits for a lens.
+  hold(id, entry) {
+    const cached = { data: entry.data, meta: entry.meta, encrypted: false, block: null, composed: entry.composed };
     this.#held.add(id);
     this.remember(id, cached);
-    this.#catalog.put(id, await this.row(id, cached));
+    const row = this.row(id, cached);
+    if (isThenable(row)) return row.then((value) => void this.#catalog.put(id, value));
+    this.#catalog.put(id, row);
+    return undefined;
   }
 
   // An entry sealed for this node's key: `record` is the ciphertext the

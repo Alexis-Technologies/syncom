@@ -11,7 +11,13 @@
  * chained (`@alexify/syncom/all`), none for the rest.
  */
 
-const TONES = { syncom: 'primary', 'syncom-text': 'primary', 'syncom-secure': 'secondary', 'syncom-all': 'secondary' };
+const TONES = {
+  syncom: 'primary',
+  'syncom-text': 'primary',
+  'syncom-edit': 'primary',
+  'syncom-secure': 'secondary',
+  'syncom-all': 'secondary',
+};
 
 const trim = (value) => String(Number(value.toPrecision(3)));
 
@@ -271,6 +277,7 @@ export const coreSizeModel = (size, only = null) => {
 /** The scripts of `pnpm bench`, in the order the toggle lists them. */
 export const ENGINE_SUBJECTS = [
   { id: 'storage', title: 'Storage' },
+  { id: 'write', title: 'Write path' },
   { id: 'search', title: 'Search' },
   { id: 'apply', title: 'Apply' },
   { id: 'sequence', title: 'Lists and text' },
@@ -288,6 +295,8 @@ export const ENGINE_SUBJECTS = [
 
 const SUBJECT_NOTES = {
   storage: 'The public API end to end on node:fs: a write is an op appended to the log, a record file and a block.',
+  write:
+    'One awaited write through the pure build (core + text + sync, defer 16): a counter, a field, a keystroke, a push; pipelined and as a transaction.',
   search: 'The @alexify/syncom/search trigram index: a put per write, $text answered from the catalog in rank order.',
   apply: "A peer's page once it has arrived: admit, fold, append, write, announce. The applyRemote rows count ops.",
   sequence:

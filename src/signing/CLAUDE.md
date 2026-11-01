@@ -21,7 +21,7 @@ src/signing/sign.js       canonical form, signOp, verifyOp — what a signature 
   a callback, on libuv's thread pool — and it is not on the subpath's surface: `signing.js`
   leaves it out by name, and `src/signing/sign.js` is its only caller. In the browser it is
   `verify` itself. The core's own hash, `sha256` in `src/crypto/digest.js`, is async on both;
-  `hashOf` beside it is the write path's, at once in Node.js and a promise in the browser.
+  `hashText` beside it is the write path's, at once on both (src/crypto/sha256.js in the browser).
   The barrels spell every export out — a required module spread whole, the
   rest by name, never a spread of a local — because that is the shape Node's
   cjs-module-lexer reads for an ESM importer (`tests/package/esm.test.js`).

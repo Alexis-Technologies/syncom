@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="432" viewBox="0 0 760 432" role="img" aria-label="Push onto a list, on disk. Add one element at the end of a list of 10,000 that merges by position. Each library's own persistence on node:fs, every write awaited. ops/s, log scale, higher is better. Not shown: syncom (the pure build: only its text is typed through openText()); Yjs (memory only — on disk the Yjs row stores every update already); Loro (memory only — on disk the Loro row appends every update already); TinyBase (no list that merges by position); PouchDB (no list that merges by position); RxDB (Node.js disk storages are Premium); Fireproof (no list that merges by position); GUN (no list that merges by position); OrbitDB (no list that merges by position).">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .title { font-size: 15px; font-weight: 700; fill: #1b1c1e; }
+  .subtitle, .caption { font-size: 12px; fill: #67676c; }
+  .caption { font-size: 11px; }
+  .group { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; fill: #67676c; }
+  .label { font-size: 13px; font-weight: 600; fill: #1b1c1e; }
+  .label.primary, .label.secondary { font-weight: 700; }
+  .sublabel { font-size: 11px; fill: #67676c; }
+  .value { font-size: 12px; font-weight: 600; fill: #3c3c43; font-variant-numeric: tabular-nums; }
+  .value.small { font-size: 10px; }
+  .legend { font-size: 11px; fill: #3c3c43; }
+  .tick { font-size: 11px; fill: #67676c; font-variant-numeric: tabular-nums; }
+  .grid { stroke: #e4e4e7; stroke-width: 1; }
+  .axis { stroke: #c2c2c4; stroke-width: 1; }
+  .ref { stroke: #67676c; stroke-width: 1; stroke-dasharray: 3 3; }
+  .bar { fill: #c4c6cc; }
+  .bar.primary { fill: #245a9e; }
+  .bar.secondary { fill: #5e9be6; }
+  @media (prefers-color-scheme: dark) {
+    .title, .label { fill: #dfdfd6; }
+    .subtitle, .caption, .group, .sublabel, .tick { fill: #98989f; }
+    .value, .legend { fill: #c2c2c4; }
+    .grid { stroke: #2e2e32; }
+    .axis { stroke: #48484c; }
+    .ref { stroke: #98989f; }
+    .bar { fill: #46474e; }
+    .bar.primary { fill: #8dbcf2; }
+    .bar.secondary { fill: #3d7bd0; }
+  }
+</style>
+<text class="title" x="20" y="35">Push onto a list, on disk</text>
+<text class="subtitle" x="20" y="56">Add one element at the end of a list of 10,000 that merges by position. Each library's own persistence on</text>
+<text class="subtitle" x="20" y="73">node:fs, every write awaited. ops/s, log scale, higher is better. Not shown: syncom (the pure build: only its</text>
+<text class="subtitle" x="20" y="90">text is typed through openText()); Yjs (memory only — on disk the Yjs row stores every update already); Loro</text>
+<text class="subtitle" x="20" y="107">(memory only — on disk the Loro row appends every update already); TinyBase (no list that merges by position);</text>
+<text class="subtitle" x="20" y="124">PouchDB (no list that merges by position); RxDB (Node.js disk storages are Premium); Fireproof (no list that</text>
+<text class="subtitle" x="20" y="141">merges by position); GUN (no list that merges by position); OrbitDB (no list that merges by position).</text>
+<line class="grid" x1="271" y1="156" x2="271" y2="356"/>
+<text class="tick" x="271" y="372" text-anchor="middle">1,000</text>
+<line class="grid" x1="473.5" y1="156" x2="473.5" y2="356"/>
+<text class="tick" x="473.5" y="372" text-anchor="middle">10k</text>
+<line class="grid" x1="676" y1="156" x2="676" y2="356"/>
+<text class="tick" x="676" y="372" text-anchor="middle">100k</text>
+<line class="axis" x1="271" y1="156" x2="271" y2="356"/>
+<g><title>Loro · updates appended to a file · v1.16.4
+42,345 ops/s
+23.6 µs per operation
+samples 40.4k – 43k
+loro-crdt@1.16.4</title>
+<text class="label" x="20" y="173">Loro</text>
+<text class="sublabel" x="20" y="188">updates appended to a file · v1.16.4</text>
+<path class="bar" d="M271,169H596.4278839718315A4,4 0 0 1 600.4278839718315,173V179A4,4 0 0 1 596.4278839718315,183H271Z"/>
+<text class="value" x="606.4278839718315" y="182">42.3k</text>
+</g>
+<g><title>syncom · core + text + sync, node:fs · v0.0.1
+16,631 ops/s
+60.1 µs per operation
+samples 13.9k – 18.3k
+@alexify/syncom@0.0.1</title>
+<text class="label primary" x="20" y="213">syncom</text>
+<text class="sublabel" x="20" y="228">core + text + sync, node:fs · v0.0.1</text>
+<path class="bar primary" d="M271,209H514.2349963151097A4,4 0 0 1 518.2349963151097,213V219A4,4 0 0 1 514.2349963151097,223H271Z"/>
+<text class="value" x="524.2349963151097" y="222">16.6k</text>
+</g>
+<g><title>Yjs · y-leveldb · v13.6.33
+10,515 ops/s
+95.1 µs per operation
+samples 9,855 – 12.6k
+yjs@13.6.33</title>
+<text class="label" x="20" y="253">Yjs</text>
+<text class="sublabel" x="20" y="268">y-leveldb · v13.6.33</text>
+<path class="bar" d="M271,249H473.9128171009922A4,4 0 0 1 477.9128171009922,253V259A4,4 0 0 1 473.9128171009922,263H271Z"/>
+<text class="value" x="483.9128171009922" y="262">10.5k</text>
+</g>
+<g><title>syncom · /all: signed, chained, node:fs · v0.0.1
+7,484 ops/s
+134 µs per operation
+samples 6,877 – 8,616
+@alexify/syncom@0.0.1</title>
+<text class="label secondary" x="20" y="293">syncom</text>
+<text class="sublabel" x="20" y="308">/all: signed, chained, node:fs · v0.0.1</text>
+<path class="bar secondary" d="M271,289H444.01107702607624A4,4 0 0 1 448.01107702607624,293V299A4,4 0 0 1 444.01107702607624,303H271Z"/>
+<text class="value" x="454.01107702607624" y="302">7,484</text>
+</g>
+<g><title>Automerge · automerge-repo, NodeFS storage · v3.5.0
+1,508 ops/s
+663 µs per operation
+samples 1,399 – 1,625
+@automerge/automerge@3.5.0</title>
+<text class="label" x="20" y="333">Automerge</text>
+<text class="sublabel" x="20" y="348">automerge-repo, NodeFS storage · v3.5.0</text>
+<path class="bar" d="M271,329H303.1048230853688A4,4 0 0 1 307.1048230853688,333V339A4,4 0 0 1 303.1048230853688,343H271Z"/>
+<text class="value" x="313.1048230853688" y="342">1,508</text>
+</g>
+<text class="caption" x="20" y="397">Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 rounds for a batch or a replication), each library</text>
+<text class="caption" x="20" y="413">in a fresh process · 2026-10-31</text>
+</svg>

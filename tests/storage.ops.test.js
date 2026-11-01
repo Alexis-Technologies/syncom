@@ -216,15 +216,17 @@ test('Storage replication model', async (t) => {
     await storage.splice(id, 'body', 5, 6);
     assert.deepStrictEqual(await storage.get(id), { name: 'Ada', body: 'hello' });
     // What travels: a run anchored at the head, one anchored inside it, an
-    // extension of this node's own run, and a cut naming its ranges.
+    // extension of this node's own run, and a cut naming its ranges — what is
+    // the op's own origin's named without it: a run by its stamp, an element
+    // `ts:offset`.
     assert.deepStrictEqual(
       ops.map((op) => op.type),
       ['write', 'splice', 'splice', 'splice', 'splice'],
     );
     const [, first, inside, appended, cut] = ops;
-    const run = `${first.ts}:${storage.nodeId}`;
+    const run = first.ts;
     assert.deepStrictEqual(first.value, { at: '^', content: 'helo' });
-    assert.deepStrictEqual(inside.value, { at: `<${first.ts}:3:${storage.nodeId}`, content: 'l' });
+    assert.deepStrictEqual(inside.value, { at: `<${first.ts}:3`, content: 'l' });
     assert.deepStrictEqual(appended.value, { run, from: 4, content: ' world' });
     assert.deepStrictEqual(cut.value, { cut: [[run, 4, 6]], content: '' });
     assert.strictEqual(cut.key, 'body');
@@ -762,20 +764,17 @@ test('Storage replication model', async (t) => {
       ['write', 'splice', 'assign', 'move', 'move'],
       'a move to the same place is nothing',
     );
-    const run = `${ops[1].ts}:${storage.nodeId}`;
-    assert.deepStrictEqual(ops[2].value, { elem: `${ops[1].ts}:1:${storage.nodeId}`, value: 'B' });
+    // This node's own elements and runs, named without its origin (`ts:offset`, a stamp).
+    const run = ops[1].ts;
+    assert.deepStrictEqual(ops[2].value, { elem: `${ops[1].ts}:1`, value: 'B' });
     assert.deepStrictEqual(ops[3].value, {
-      elem: `${ops[1].ts}:0:${storage.nodeId}`,
+      elem: `${ops[1].ts}:0`,
       cut: [run, 0, 1],
-      at: `>${ops[1].ts}:2:${storage.nodeId}`,
+      at: `>${ops[1].ts}:2`,
       value: 'a',
     });
     assert.strictEqual(ops[4].value.elem, ops[3].value.elem, 'the element keeps its name across moves');
-    assert.deepStrictEqual(
-      ops[4].value.cut,
-      [`${ops[3].ts}:${storage.nodeId}`, 0, 1],
-      'the slot it showed at was its position run',
-    );
+    assert.deepStrictEqual(ops[4].value.cut, [ops[3].ts, 0, 1], 'the slot it showed at was its position run');
     // The value follows the element: set after a move, read at the new place.
     await storage.setAt(id, 'items', 0, 'A');
     assert.deepStrictEqual((await storage.get(id)).items, ['A', 'B', 'c']);
@@ -1975,4 +1974,22 @@ test('children of list elements and tree nodes: composed, reachable, named', asy
     assert.deepStrictEqual((await storage.get(id)).outline, [{ id: 'r', children: [], data: { title: 'Root' } }]);
     // A query reaches the strings of a list's elements for $text — through the composed view.
   });
+});
+
+test('a peer’s actor or from past MAX_ACTOR is malformed: never hashed, logged or relayed; a local one is a TypeError', async (t) => {
+  const { MAX_ACTOR } = require('../src/shape.js');
+  const { storage } = await openTemp(t);
+  const long = 'a'.repeat(MAX_ACTOR + 1);
+  const ok = remoteOp('peer', 1, 'write', 'r1', { data: { a: 1 }, actor: 'a'.repeat(MAX_ACTOR) });
+  const badActor = remoteOp('peer', 2, 'set', 'r1', { data: { b: 2 }, actor: long });
+  const badFrom = remoteOp('peer', 2, 'set', 'r1', { data: { b: 2 }, from: long });
+  const next = storage.log.next;
+  const result = await storage.applyRemote([ok, badActor, badFrom], { via: 'L' });
+  assert.strictEqual(result.applied, 1, 'an actor at the bound is taken');
+  assert.strictEqual(result.malformed, 2, 'one past it, as actor or as from, is malformed');
+  assert.strictEqual(storage.log.next, next + 1, 'the malformed ones were not logged');
+  assert.deepStrictEqual(await storage.get('r1'), { a: 1 });
+  await assert.rejects(storage.set('local', { n: 1 }, { actor: long }), TypeError);
+  await storage.set('local', { n: 1 }, { actor: 'a'.repeat(MAX_ACTOR) });
+  assert.deepStrictEqual(await storage.get('local'), { n: 1 });
 });

@@ -16,8 +16,8 @@ const createSigner = async () => {
   const made = new Map();
   const sign = async (op) => {
     const signed = { ...op, origin: keys.id };
-    const fps = await link([signed], (key, seq) => made.get(`${seq} ${key}`), true);
-    made.set(`${signed.seq} ${opKey(signed)}`, fps.get(signed));
+    const { fps } = await link([signed], (key, seq) => made.get(`${seq} ${key}`), true);
+    made.set(`${signed.seq} ${opKey(signed)}`, fps[0]);
     return signOp(signed, keys.privateKey);
   };
   return { id: keys.id, sign };

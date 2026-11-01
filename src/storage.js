@@ -14,7 +14,7 @@ const { sha256 } = require('./crypto/digest.js');
 const { OpLog, appliedHere } = require('./log.js');
 const { EntryStore } = require('./entries.js');
 const { Record, Collection } = require('./record.js');
-const { commit, transact, MISMATCH } = require('./commit.js');
+const { commit, commitAtOnce, transact, prepareOp, applyLocal, MISMATCH } = require('./commit.js');
 const F = require('./fields.js');
 const P = require('./patches.js');
 const B = require('./blame.js');
@@ -31,7 +31,7 @@ const { Catalog, isTextIndex } = require('./catalog.js');
 const { DISABLED, isWriter, writerOf, traced, now } = require('./telemetry/writer.js');
 const { GLOBAL_SCOPE } = require('./scope.js');
 const { normalizeStorageOptions } = require('./options.js');
-const { isPlainObject, isRecordId, invalidId, isStreamName, VALIDATED } = require('./shape.js');
+const { isPlainObject, isRecordId, invalidId, isStreamName, VALIDATED, MAX_ACTOR } = require('./shape.js');
 const { Observers } = require('./observe.js');
 const { DeferredWindow } = require('./defer.js');
 const { fieldName } = require('./args.js');
@@ -51,9 +51,30 @@ const NO_SCHEMA = Object.freeze({ version: 1, entities: new Map(), snapshot: und
 // their hooks inside this storage; the apply pair runs per peer batch.
 const STORAGE_HOOKS = ['beforeWrite', 'afterWrite', 'beforeRead', 'afterRead', 'beforeApply', 'afterApply'];
 
+// A method's refusal of its arguments is a rejection, never a throw (the method delegates have no async
+// frame): what the write API's methods wrap their call in.
+const attempt = (fn) => {
+  try {
+    return fn();
+  } catch (error) {
+    return Promise.reject(error);
+  }
+};
+
+// Who an op says made it: a string of MAX_ACTOR characters at most (it rides in the signed header
+// every node hashes; a peer's past the bound is malformed), null for nobody.
+const actorName = (actor) => {
+  if (actor === null || actor === undefined) return null;
+  const name = String(actor);
+  if (name.length > MAX_ACTOR) throw new TypeError(`actor must be at most ${MAX_ACTOR} characters`);
+  return name;
+};
+
 // The ops that leave a record's whole state behind them — where a repair
 // can start replaying from. A purge counts even scrubbed; the others not.
 const WHOLE = new Set(['write', 'merge', 'delete']);
+
+const NOOP = () => {};
 
 class Storage extends Emitter {
   #path;
@@ -120,6 +141,28 @@ class Storage extends Emitter {
   #inflight = new Map();
   #inflightCount = 0;
   #landings = Promise.resolve();
+  // Landing steps queued and not yet done: while there is one, a write
+  // lands behind it, through the chain — never at once, ahead of it.
+  #slowSteps = 0;
+  // The editors' handles open on this storage (src/text/handle.js): flushed
+  // before a flush(), a tag() and a close() — what they hold is not logged yet.
+  #edits = new Set();
+  // What the handles follow the `transaction` event with, by record id, under
+  // ONE listener of the storage's (as src/observe.js does for observe()): a
+  // handle never counts against maxListeners, and a turn reaches the handles
+  // of the records it touched alone.
+  #followers = new Map();
+  #following = null;
+  // The run offsets reserved while a handle is open, per field (src/text/kind.js extendsRun).
+  #extents = new Map();
+  // How the local writes went: made at once (src/commit.js commitAtOnce), through the queue, or
+  // folded into the write before them (coalesced) — `stats().commits`.
+  #commits = { fast: 0, queued: 0, coalesced: 0 };
+  // The one close, once called: a second call waits for it, never seals twice.
+  #closing = null;
+  // Whether a write may be made at once (#fastCommit): set at open, once the
+  // plugins have set up — nothing asynchronous on the write path.
+  #fastIssue = false;
   #signatures;
   #encrypted;
   #hooks;
@@ -354,6 +397,13 @@ class Storage extends Emitter {
     await this.#loadCatalog();
     if (this.#tags !== null) await this.#tags.load();
     this.#core = this.#lend();
+    this.#fastIssue =
+      this.#hooks.beforeWrite === null &&
+      this.#hooks.afterWrite === null &&
+      this.#core.sign === null &&
+      typeof this.#actor !== 'function' &&
+      this.#defer > 0 &&
+      this.#lens === null;
     await this.#replayTail();
     await this.#replayHeld();
     // The API plugins that need the open log — the sync manager — come
@@ -389,6 +439,29 @@ class Storage extends Emitter {
       // notify), and whether anything listens — a commit event is built only then.
       emit: (event, ...args) => notify(this, this.#logger, event, ...args),
       listening: (event) => this.listenerCount(event) > 0,
+      // A listener of the storage's events, for a plugin that follows them (an
+      // editor's handle): answers the function that takes it off.
+      on: (event, listener) => {
+        this.on(event, listener);
+        return () => this.off(event, listener);
+      },
+      // What an editor's handle (src/text/handle.js) makes its edits with,
+      // outside the queue, over a reading of its own: an op made and stamped
+      // over an entry (`makeOp`), applied as a local write would be — a
+      // refusal thrown (`applyLocal`) — or as an op from elsewhere is
+      // (`applyTo`); and the open handles, which flush(), tag() and close()
+      // flush first.
+      editing: Object.freeze({
+        handles: this.#edits,
+        // A handle's listener of the record's turns (the `transaction` event); answers what takes it off.
+        follow: (id, listener) => this.#follow(id, listener),
+        // While a handle is open: the next offset of each run of this node's
+        // a writer extended, reserved per field (src/text/kind.js extendsRun).
+        extents: this.#extents,
+        makeOp: (type, id, payload, current, who) => prepareOp(this.#core, type, id, payload, current, who, null),
+        applyLocal: (op, current) => applyLocal(this.#core, op, current),
+        applyTo: (entry, op) => applyOp(entry, op, this.#limits),
+      }),
       logger: this.#logger,
       otel: this.#otel,
       log: this.#log,
@@ -414,7 +487,7 @@ class Storage extends Emitter {
       inflight: (id, entry, position) => this.#takeOff(id, entry, position),
       settled: (id, position) => this.#settle(id, position),
       landing: (step) => this.#landing(step),
-      drain: () => this.#landings,
+      drain: () => this.#drained(),
       // A stream's last seq in the log, the fingerprint the log holds at a
       // seq of it (what an op of this node's chains to), and a batch landed
       // from inside a landing step (a transaction's: the chain block, the
@@ -461,6 +534,14 @@ class Storage extends Emitter {
       entities: this.#entities,
       run: (task) => this.#run(task),
       commit: (type, id, payload, options) => this[COMMIT](type, id, payload, options),
+      // The same commit for a method that answers nothing: resolves once the
+      // write is announced, to undefined.
+      write: (type, id, payload, options) => this.#write(type, id, payload, options),
+      // A write made at once (src/commit.js commitAtOnce): the landings that
+      // come after it wait for its group, which lands it.
+      landed: (done) => {
+        this.#landings = done;
+      },
       // The same write from INSIDE a task of the queue (`core.run`), where
       // `commit` would wait for itself; and whether an entry is live.
       commitNow: (type, id, payload, options) => commit(this.#core, type, id, payload, options),
@@ -588,11 +669,17 @@ class Storage extends Emitter {
   // What a record reads as: itself when it is of this node's version (or
   // newer, or there is no schema), the lens of it otherwise, computed once
   // per cached entry. Replication (`snapshot`, `applyOp`) reads the raw data.
-  async #view(id, entry) {
+  // A value at once — a promise only where a lens runs (a record of an older
+  // version): every caller awaits it or hands it on from an async function.
+  #view(id, entry) {
     // The paths composed into nested objects, once per cached entry (the
     // data itself when it holds none); the lens over that.
     const composed = (entry.composed ??= compose(entry, this.#plugins));
     if (this.#lens === null || (entry.meta.v ?? 1) >= this.#version) return composed;
+    return entry.view ?? this.#lensed(id, entry, composed);
+  }
+
+  async #lensed(id, entry, composed) {
     return (entry.view ??= await this.#lens(id, composed, entry.meta.v ?? 1));
   }
 
@@ -736,8 +823,8 @@ class Storage extends Emitter {
     const mine = [];
     for (const key of def.unique) mine.push(this.#catalog.uniqueKey(view, key));
     for (const [other, stack] of this.#inflight) {
-      if (other === id || stack.length === 0) continue;
-      const held = stack[stack.length - 1].entry;
+      if (other === id || stack.items.length === stack.head) continue;
+      const held = stack.items[stack.items.length - 1].entry;
       if (held.data.$type !== entry.data.$type || !isAlive(held)) continue;
       const theirs = await this.#view(other, held);
       for (let k = 0; k < def.unique.length; k++) {
@@ -872,6 +959,11 @@ class Storage extends Emitter {
       held: this.#entries.heldIds().size,
       deferred: this.#window.size,
       inflight: this.#inflightCount,
+      // The local writes so far: made at once, through the queue, folded into the one before (LOG-9, LOG-11).
+      commits: { fast: this.#commits.fast, queued: this.#commits.queued, coalesced: this.#commits.coalesced },
+      // The text handles open (src/text/handle.js): how many, how many hold edits not logged yet, and the
+      // run offsets reserved for them over every field.
+      handles: this.#handleStats(),
       // The window `open({ defer })` gave, what the last deferred landing
       // took (the next window is at least that), and the positions waiting.
       defer: { window: this.#defer, flushCost: this.#window.cost, positions: this.#window.positions },
@@ -901,16 +993,40 @@ class Storage extends Emitter {
 
   // The record as a write path reads it: the entry its newest in-flight op
   // leaves it as, else what the cache or the file holds.
+  // A record's ops in flight: `{ items, head }` — the entries at `items[head..]`,
+  // oldest first. They land in log order, so a settle takes the head in O(1)
+  // (the array compacted once the head passes half of it); N writes to one
+  // record that cannot fold were N splices from the bottom, O(N²).
   #current(id) {
-    const stack = this.#inflight.get(id);
-    if (stack !== undefined && stack.length > 0) return stack[stack.length - 1].entry;
-    return this.#entries.load(id);
+    return this.#inflightTop(id) ?? this.#entries.load(id);
   }
 
+  // The same, where it is known at once: undefined when only the file knows
+  // (an entry not cached, a record never written here).
+  #currentNow(id) {
+    return this.#inflightTop(id) ?? this.#entries.peek(id);
+  }
+
+  // The entry a record's newest op in flight leaves it as, or undefined.
+  #inflightTop(id) {
+    const stack = this.#inflight.get(id);
+    if (stack === undefined || stack.items.length === stack.head) return undefined;
+    return stack.items[stack.items.length - 1].entry;
+  }
+
+  // A record's entry in flight at `position`: on the stack, or — the newest
+  // there at that position already — in its place (a write grown by the one
+  // after it, src/commit.js coalesced).
   #takeOff(id, entry, position) {
     let stack = this.#inflight.get(id);
-    if (stack === undefined) this.#inflight.set(id, (stack = []));
-    stack.push({ entry, position });
+    if (stack === undefined) this.#inflight.set(id, (stack = { items: [], head: 0 }));
+    const { items } = stack;
+    const top = items.length > stack.head ? items[items.length - 1] : null;
+    if (top !== null && top.position === position) {
+      top.entry = entry;
+      return;
+    }
+    items.push({ entry, position });
     this.#inflightCount++;
   }
 
@@ -918,35 +1034,55 @@ class Storage extends Emitter {
   #settle(id, position) {
     const stack = this.#inflight.get(id);
     if (stack === undefined) return;
-    let i = 0;
-    while (i < stack.length && stack[i].position !== position) i++;
-    if (i === stack.length) return;
-    stack.splice(i, 1);
+    const { items } = stack;
+    let i = stack.head;
+    while (i < items.length && items[i].position !== position) i++;
+    if (i === items.length) return;
+    if (i === stack.head) {
+      stack.head++;
+      if (stack.head > 64 && stack.head * 2 > items.length) {
+        stack.items = items.slice(stack.head);
+        stack.head = 0;
+      }
+    } else items.splice(i, 1);
     this.#inflightCount--;
-    if (stack.length === 0) this.#inflight.delete(id);
+    if (stack.items.length === stack.head) this.#inflight.delete(id);
   }
 
   // A group of appends failed: every in-flight entry at or past `from` was
   // built on seqs taken back, and goes before any ticket rejects.
   #takenBack(from) {
     for (const [id, stack] of this.#inflight) {
-      while (stack.length > 0 && stack[stack.length - 1].position >= from) {
-        stack.pop();
+      const { items } = stack;
+      while (items.length > stack.head && items[items.length - 1].position >= from) {
+        items.pop();
         this.#inflightCount--;
       }
-      if (stack.length === 0) this.#inflight.delete(id);
+      if (items.length === stack.head) this.#inflight.delete(id);
     }
   }
 
   // The landings go one after another, in log order, outside the queue; a
   // failed one fails its own write alone.
+  // The chain may end in a write made at once (`core.landed`): its group's
+  // promise, which rejects when the group failed — a step runs after it
+  // either way, and a reader that waits for the landings waits for this.
+  #drained() {
+    return this.#landings.then(NOOP, NOOP);
+  }
+
   #landing(step) {
+    this.#slowSteps++;
     const done = this.#landings.then(step, step);
-    this.#landings = done.catch(() => {});
+    const settled = () => {
+      this.#slowSteps--;
+    };
+    this.#landings = done.then(settled, settled);
     return done;
   }
 
-  // Every mutation passes through one queue: the chain's tail pointer, the
+  // Every mutation passes through one queue — or is made at once on an idle
+  // queue (#fastCommit), which is a turn of its own: the chain's tail pointer, the
   // log's seq counter and a record's entry are all read-then-written, and two
   // interleaved writers would race all three.
   #run(task) {
@@ -1059,9 +1195,16 @@ class Storage extends Emitter {
 
   // The actor of one write: the call's own, else the storage's (asked when
   // it is a function), else none. A string on the op, never in the record.
-  async #actorOf(given) {
-    const actor = given !== undefined ? given : typeof this.#actor === 'function' ? await this.#actor() : this.#actor;
-    return actor === null || actor === undefined ? null : String(actor);
+  // Who a write says made it: the given actor, else the configured one — a
+  // string or null at once, a promise only where the actor is a function.
+  #actorOf(given) {
+    if (given === undefined && typeof this.#actor === 'function') return this.#awaitActor();
+    const actor = given !== undefined ? given : this.#actor;
+    return actorName(actor);
+  }
+
+  async #awaitActor() {
+    return actorName(await this.#actor());
   }
 
   // One chain block per applied batch: `records` maps every touched id to
@@ -1119,13 +1262,60 @@ class Storage extends Emitter {
   // ---------------------------------------------------------------------
   // The one local write path — src/commit.js, inside the queue.
 
-  async [COMMIT](type, id, payload, options = {}) {
-    if (!isRecordId(id)) throw invalidId(id);
+  [COMMIT](type, id, payload, options = {}) {
+    if (!isRecordId(id)) return Promise.reject(invalidId(id));
+    return this.#fastCommit(type, id, payload, options, true) ?? this.#queuedCommit(type, id, payload, options);
+  }
+
+  // A write whose caller takes no answer (the methods that resolve to
+  // nothing): the commit, resolving to undefined.
+  #write(type, id, payload, options = {}) {
+    if (!isRecordId(id)) return Promise.reject(invalidId(id));
+    return (
+      this.#fastCommit(type, id, payload, options, false) ?? this.#queuedCommit(type, id, payload, options).then(NOOP)
+    );
+  }
+
+  async #queuedCommit(type, id, payload, options) {
+    this.#commits.queued++;
     const { op, done } = await this.#run(() => commit(this.#core, type, id, payload, options));
     // The queue is free once the op is appended; the caller waits for the
     // landing — the disk, the file, the hooks, the listeners.
     if (done !== null) await done;
     return op;
+  }
+
+  // A write made at once (src/commit.js commitAtOnce) — or null, and the
+  // queue takes it. At once is what a queue turn of its own would be: the
+  // queue idle and no hook running, so nothing interleaves (the op is
+  // appended before this returns); no landing step pending, so it never
+  // lands ahead of one; the record live and held here, of an entity with no
+  // validator and no unique key; nothing encrypted, nothing expected.
+  #fastCommit(type, id, payload, options, answer) {
+    if (!this.#fastIssue || this.#queued !== 0 || this.#inHook !== 0 || this.#slowSteps !== 0 || this.#closed) {
+      return null;
+    }
+    if (options.encrypted === true || (options.expect !== undefined && options.expect !== null)) return null;
+    const current = this.#currentNow(id);
+    if (current === undefined || current === null || current.encrypted || !isAlive(current)) return null;
+    // The entity the record is of — and the one the write makes it (a `$type` a
+    // set or a write adds; a schema sets the lens, so this is never reached
+    // with one, but the queue is what validates and it is not left to that).
+    const def = this.#definitionOf(current.data);
+    if (def !== undefined && def !== null && (def.validator || def.unique.length > 0)) return null;
+    const data = payload?.data;
+    if (data !== null && typeof data === 'object' && typeof data.$type === 'string') {
+      const after = this.#entities.get(data.$type);
+      if (after !== undefined && after !== null && (after.validator || after.unique.length > 0)) return null;
+    }
+    this.#queued++;
+    try {
+      return commitAtOnce(this.#core, type, id, payload, options, current, answer, this.#commits);
+    } catch (error) {
+      return Promise.reject(error);
+    } finally {
+      this.#queued--;
+    }
   }
 
   // ---------------------------------------------------------------------
@@ -1190,7 +1380,10 @@ class Storage extends Emitter {
 
   /** Whether `id` is a live record here — answered from the catalog, no I/O. */
   hasRecord(id) {
-    return this.#catalog.has(id) || this.#live(id) !== undefined;
+    // A string that is no id never is one: a live Record asks this of every
+    // string field it holds, and a long text hashed into two maps cost the
+    // text on every keystroke.
+    return isRecordId(id) && (this.#catalog.has(id) || this.#live(id) !== undefined);
   }
 
   // The raw read, as a copy: what `get` returns before its hooks, what
@@ -1216,20 +1409,122 @@ class Storage extends Emitter {
     return this.#api('diff')(this.#core, id, from, to);
   }
 
-  applyPatches(id, patches, options) {
+  // A patch, a restore and a compaction write the record as it reads: what an
+  // open handle on it holds is logged first, or it would be stamped below the
+  // reset and dropped unsaid (src/text/handle.js). Without a handle on the
+  // record the call takes its turn of the queue at once, as it always did.
+  async applyPatches(id, patches, options) {
+    const flushed = this.#flushEditsOf(id);
+    if (flushed !== null) await flushed;
     return P.applyPatches(this.#core, id, patches, options);
   }
 
   async restore(id, at, options) {
+    const flushed = this.#flushEditsOf(id);
+    if (flushed !== null) await flushed;
     return this.#api('restore')(this.#core, id, at, options);
   }
 
-  compact(id, options) {
+  async compact(id, options) {
+    const flushed = this.#flushEditsOf(id);
+    if (flushed !== null) await flushed;
     return P.compact(this.#core, id, options);
   }
 
+  #handleStats() {
+    let pending = 0;
+    for (const handle of this.#edits) if (handle.pending) pending++;
+    let extents = 0;
+    for (const runs of this.#extents.values()) extents += runs.size;
+    return { open: this.#edits.size, pending, extents };
+  }
+
+  // The handles open on `id` flushed, or null where there is none.
+  #flushEditsOf(id) {
+    let any = false;
+    for (const handle of this.#edits) if (handle.id === id) any = true;
+    return any ? this.#flushEdits(id) : null;
+  }
+
   async tag(name) {
+    await this.#flushEdits();
     return this.#api('tag')(this.#core, name);
+  }
+
+  // Every open handle's edits logged (src/text/handle.js), every handle tried
+  // whatever another's flush did; one UNLOGGED for them all, naming how many
+  // handles and edits were not logged, with the first cause.
+  async #flushEdits(id = null) {
+    let handles = 0;
+    let edits = 0;
+    let cause = null;
+    for (const handle of this.#edits) {
+      if (id !== null && handle.id !== id) continue;
+      try {
+        await handle.flush();
+      } catch (error) {
+        handles++;
+        edits += typeof error?.edits === 'number' ? error.edits : 0;
+        cause ??= error;
+      }
+    }
+    if (cause === null) return;
+    const message = `Edits of ${handles} text handle${handles === 1 ? '' : 's'} could not be logged`;
+    throw new SyncomError('UNLOGGED', message, { handles, edits, cause });
+  }
+
+  // A handle's listener of the `transaction` event, kept by record id; the
+  // storage's one listener is attached with the first and taken off with the
+  // last. A turn is handed to each listener of a record it touched, once.
+  #follow(id, listener) {
+    let listeners = this.#followers.get(id);
+    if (listeners === undefined) this.#followers.set(id, (listeners = new Set()));
+    listeners.add(listener);
+    if (this.#following === null) {
+      this.#following = (event) => this.#followed(event);
+      this.on('transaction', this.#following);
+    }
+    return () => {
+      const current = this.#followers.get(id);
+      if (current === undefined) return;
+      current.delete(listener);
+      if (current.size === 0) this.#followers.delete(id);
+      if (this.#followers.size === 0 && this.#following !== null) {
+        this.off('transaction', this.#following);
+        this.#following = null;
+      }
+    };
+  }
+
+  #followed(event) {
+    const { ops } = event;
+    // A record made again from the log (`repair`): its followers alone, with the entry it reads as now.
+    if (event.repaired !== undefined) {
+      const listeners = this.#followers.get(event.repaired);
+      if (listeners === undefined) return;
+      for (const listener of listeners) {
+        try {
+          listener(event);
+        } catch (error) {
+          this.#logger.warn({ event: 'listener.error', name: 'handle', err: error });
+        }
+      }
+      return;
+    }
+    let told = null;
+    for (let i = 0; i < ops.length; i++) {
+      const listeners = this.#followers.get(ops[i].id);
+      if (listeners === undefined) continue;
+      for (const listener of listeners) {
+        if (told !== null && told.has(listener)) continue;
+        (told ??= new Set()).add(listener);
+        try {
+          listener(event);
+        } catch (error) {
+          this.#logger.warn({ event: 'listener.error', name: 'handle', err: error });
+        }
+      }
+    }
   }
 
   async untag(name) {
@@ -1293,7 +1588,18 @@ class Storage extends Emitter {
     this.#records.delete(id);
   }
 
-  async update(id, delta, { actor } = {}) {
+  update(id, delta, options) {
+    // A record held here and live is there: no file to ask.
+    if (isRecordId(id) && isPlainObject(delta)) {
+      const current = this.#currentNow(id);
+      if (current !== undefined && current !== null && (current.encrypted || isAlive(current))) {
+        return this.#write('set', id, { data: delta }, { actor: options?.actor });
+      }
+    }
+    return this.#update(id, delta, options?.actor);
+  }
+
+  async #update(id, delta, actor) {
     if (!isRecordId(id)) throw invalidId(id);
     if (!(await this.has(id))) throw new SyncomError('NOT_FOUND', `Record ${id} not found`, { id });
     if (!isPlainObject(delta)) throw new TypeError('update() takes a plain object');
@@ -1346,28 +1652,31 @@ class Storage extends Emitter {
   }
 
   inc(id, key, value, options) {
-    return F.inc(this.#core, id, key, value, options);
+    return attempt(() => F.inc(this.#core, id, key, value, options));
   }
 
   add(id, key, elements, options) {
-    return F.add(this.#core, id, key, elements, options);
+    return attempt(() => F.add(this.#core, id, key, elements, options));
   }
 
   remove(id, key, elements, options) {
-    return F.remove(this.#core, id, key, elements, options);
+    return attempt(() => F.remove(this.#core, id, key, elements, options));
   }
 
   /** Removes fields of any kind from a record — one name or an array; a field it does not hold is no op. */
   unset(id, fields, options) {
-    return F.unset(this.#core, id, fields, options);
+    return attempt(() => F.unset(this.#core, id, fields, options));
   }
 
-  async splice(id, key, index, count, content, options) {
-    return this.#api('splice')(this.#core, id, key, index, count, content, options);
+  // The hot writes call their method at once, without an async frame of
+  // their own: a refusal of the arguments — or PLUGIN_MISSING — is a
+  // rejection all the same.
+  splice(id, key, index, count, content, options) {
+    return attempt(() => this.#api('splice')(this.#core, id, key, index, count, content, options));
   }
 
-  async push(id, key, content, options) {
-    return this.#api('push')(this.#core, id, key, content, options);
+  push(id, key, content, options) {
+    return attempt(() => this.#api('push')(this.#core, id, key, content, options));
   }
 
   async updateText(id, key, text, options) {
@@ -1450,12 +1759,12 @@ class Storage extends Emitter {
     return this.#api('index')(this.#core, id, key, cursor);
   }
 
-  async setAt(id, key, index, value, options) {
-    return this.#api('setAt')(this.#core, id, key, index, value, options);
+  setAt(id, key, index, value, options) {
+    return attempt(() => this.#api('setAt')(this.#core, id, key, index, value, options));
   }
 
-  async move(id, key, from, to, options) {
-    return this.#api('move')(this.#core, id, key, from, to, options);
+  move(id, key, from, to, options) {
+    return attempt(() => this.#api('move')(this.#core, id, key, from, to, options));
   }
 
   async treeMove(id, key, node, parent, options) {
@@ -1504,12 +1813,17 @@ class Storage extends Emitter {
       ({ entry } = applyOp(entry, entries[i].op, this.#limits));
     }
     this.#entries.forget(id);
-    await this.#persistBatch(new Map([[id, entry]]), entries[start].seq, entries[entries.length - 1].seq);
+    // Through the landing chain, like every file write: never beside a deferred flush of the same record.
+    const from = entries[start].seq;
+    const to = entries[entries.length - 1].seq;
+    await this.#landing(() => this.#persistBatch(new Map([[id, entry]]), from, to));
     this.#flushCatalog();
     const ops = entries.length - start;
     const alive = isAlive(entry);
     this.#logger.info({ event: 'record.repaired', id, ops, alive });
     this.#emitUpdate(id, alive ? entry.data : null, alive ? { ...entry.data } : {}, null, entry);
+    // The handles open on the record read it as it is now (src/text/handle.js).
+    if (this.#following !== null) this.#followed({ ops: [], repaired: id, entry });
     return { ops, alive };
   }
 
@@ -1572,7 +1886,10 @@ class Storage extends Emitter {
     const methods = this.#txMethods;
     for (let i = 0; i < methods.length; i++) {
       const method = methods[i][1];
-      api[methods[i][0]] = (...args) => method(tx, ...args);
+      // A method that refuses its arguments throws: a rejection, as from the storage.
+      api[methods[i][0]] = (...args) => {
+        return attempt(() => method(tx, ...args));
+      };
     }
     const current = async (id) => {
       if (!isRecordId(id)) throw invalidId(id);
@@ -1699,13 +2016,29 @@ class Storage extends Emitter {
    */
   async flush() {
     if (this.#closed) return;
-    await this.#landings;
+    await this.#flushEdits();
+    await this.#drained();
     await this.#run(() => this.#flushDeferred());
   }
 
-  /** Stops replication and seals the log. Further writes are refused — from the moment close() is called. */
-  async close() {
+  /**
+   * Stops replication and seals the log: the open text handles' edits are
+   * logged first, then further writes are refused. Called again — while it
+   * runs or after — it is the same close.
+   */
+  close() {
+    if (this.#closing === null) this.#closing = this.#close();
+    return this.#closing;
+  }
+
+  async #close() {
     if (this.#closed) return;
+    // What an editor's handle holds goes to the log while writes are taken.
+    try {
+      await this.#flushEdits();
+    } catch (error) {
+      this.#logger.warn({ event: 'edits.unlogged', handles: error.handles, edits: error.edits, err: error });
+    }
     // Refused from here on: a write that landed while the links were
     // closing would be announced to nobody, after the final catalog save.
     // What was queued before this call still runs, ahead of the seal.
@@ -1713,7 +2046,7 @@ class Storage extends Emitter {
     if (this.#sync !== null) await this.#sync.stop();
     const seal = async () => {
       // What is in flight lands first.
-      await this.#landings;
+      await this.#drained();
       await this.#flushDeferred();
       await this.#catalogSave;
       await this.#catalog.save(this.#log.lastEventId);

@@ -12,8 +12,61 @@ what it is meant to. `package.json` carries `0.0.1`, a development placeholder,
 not the version of the first release — that is chosen when the release is cut.
 There is no released version section until then; everything below lands in it.
 
+**Upgrading a checkout from before the performance branch** (nothing is published, so no
+reader of the older shapes was kept): a log directory written before it does not read — its
+files have no per-line checksum, so each is told `checksum` and kept under `log/corrupt/`, its
+unsealed tail is not replayed, and the node begins a new epoch; a node built from `main` refuses
+this branch's ops as `malformed` (the short own references of a splice, a cut or a mark) with no
+refusal at `hello`, since `PROTOCOL` stays 1 until the first publication. Keystrokes made at once
+or typed through a transaction or a handle that continue each other are one op, so one `change`
+and one `commit` event, not one per call.
+
 ### Added
 
+- **A synchronous editor's handle on a text: `storage.openText(id, key, { window, actor, source })`**
+  (the `text` plugin's). `insert`, `insertEmbed`, `delete`, `format` and `applyDelta` edit at once
+  over the handle's reading — the field as announced, its edits on top — and `toString()`,
+  `length`, `slice()` and `spans()` read it; `observe()` hears every other writer's change as a
+  delta in the handle's indices. The edits are logged a window later (the storage's `defer`) as
+  one transaction, keystrokes that continue each other as one op; a flush that cannot be logged
+  rejects `flushed` with the new `UNLOGGED` and drops what was not logged — its edits, the flushes
+  taken behind it and what was typed since — and the storage logs `handle.unlogged`; a step that
+  fails after the append (an `afterWrite` hook) leaves the edits logged. The storage's `flush()`,
+  `tag()` and `close()` flush every open handle, one that cannot be logged stopping none of the
+  others, as do `compact()`, `restore()` and `applyPatches()` of the record. Handles follow the
+  storage's turns through one listener (as many handles as the application opens), and a field's
+  run reservations go with its last handle. A hook sees a handle's edit resolved (`ctx.resolved`,
+  `content`, `current`); `applyDelta` is checked whole before anything is made; keystrokes typed on
+  are one change as they are one op; a handle on a deleted record reads empty (an edit writes it
+  again, as the storage's would) and one on a purged record refuses an edit as `NOT_FOUND`;
+  `repair(id)` resets the handles on the record. Several writers of one node over
+  one text — handles and the storage — never grow one run from two readings.
+- **Keystrokes fold into one op.** Sent without waiting (made at once, outside the queue), typed
+  through a transaction or through a handle, keystrokes that continue each other — typed on at
+  the end of their run, or a chain of cuts — are logged as one op; a signing node folds those of a
+  transaction too. A handle folds a word typed backward as well (each keystroke right before the
+  one typed last, 256 characters an op): typing at the start of a text through a handle, 60 000
+  keystrokes are 236 ops, not 60 000, and 135 000 keystrokes a second, not 48 000.
+- **`bench/compare` measures a text typed through a handle** (`syncom-edit`), and `bench/write.js`
+  the layers of one write (`--detail`, `--profile`, another checkout under `SYNCOM_BENCH_ROOT`).
+
+- **A mark op costs its anchors, not a tree.** The index of the marks in force built its segment tree
+  (O(m)) at every mark op; it sorts the anchors per op and builds the tree by the first read alone —
+  a mark over 20 000 characters under 5 000 marks goes from 4 000 to 7 400 a second, the rest of the
+  engine's rows unchanged (A/B against the commit before, two samples each). `join` reads a snapshot's
+  block through `normalizeJson` instead of hydrating it into a rope only to serialize it again, and a
+  floor that moved and takes nothing gives `prune` a version of its own, never the base written on a
+  version another holder reads under its own floor. A splice's markers and an op's own references
+  are laid by functions of their modules, not a closure per op.
+- **What the write path does is measured.** `stats()` adds `commits: { fast, queued, coalesced }` — the
+  local writes made at once, through the queue, and folded into the write before them — and
+  `handles: { open, pending, extents }` for the text handles. `syncom.commits` carries
+  `syncom.path` (`queue` / `fast`) and the result `coalesced`; `syncom.handle.flushes` counts a
+  handle's flushes by result (`ok` / `unlogged` / `error`); the writer contract gains
+  `recordHandleFlush`. Telemetry no longer turns the fast path off: a write made at once is
+  counted and timed, never spanned. `stats().log.corrupt` counts every log file that did not read
+  whole at open, a segment cut short as much as a checksum that did not match, and a journal's
+  last line altered is corrupt, not torn.
 - **What the log and the deferred window do is measured.** New metrics:
   `syncom.log.group.ops` (ops per group the log wrote),
   `syncom.log.append.failures`, `syncom.defer.flush.duration`, and the gauges
@@ -898,6 +951,12 @@ There is no released version section until then; everything below lands in it.
 
 ### Security
 
+- **A peer’s `actor` and `from` are bounded.** Both are claims, carried as they are — and in the header
+  every node hashes, in the browser at once on the main thread, so a peer chose how much a node hashed
+  and how large a buffer it kept. An op whose `actor` or `from` is past 256 characters (`MAX_ACTOR`) is
+  `malformed`; a local actor past it is a `TypeError`. The browser halves’ scratch buffers (the CRC-32
+  table’s, SHA-256’s) are let go of past a megabyte, and a log file or a segment that fails its
+  checksum, or is no segment at all, is told by its shape alone — nothing of it is parsed.
 - **A host could keep a bootstrapping node paging for ever.** The dialing
   side took the host's snapshot cursor as it came — one that did not move
   on was asked again and again — and read a streamed page to its end,
@@ -1005,6 +1064,82 @@ There is no released version section until then; everything below lands in it.
   `on`) no longer shadows the method (`record.shadowed` is logged once).
 
 ### Fixed
+
+- **A tag read as the window laid its record could read the record as it is now.** A record changed
+  since the tag and not yet on its file reads as the file — still the tag's state — but a deferred
+  flush may be laying it at that moment, the tag's copy first and the new file after; a read of the
+  file that came back after the new one was written handed the tag the present, so `diff()` against
+  the tag was empty and `restore()` wrote nothing. That read is made inside a landing step now, where
+  no flush runs, and looks for the copy again first.
+- **A delete a field survives reported the record gone.** A concurrent write stamped above a delete
+  that landed first keeps the record alive — the reading shows the survivor and the fields that went
+  — but the `change` and `transaction` events said `delete`, so a view kept by the changes (an editor's
+  handle, `observe()`) lost the record while the storage held it. The report now says what the reading
+  shows: the fields that went, `unset` each; `delete` only when nothing survives (EVT-5). The seeded
+  mesh fuzz lays and lifts marks and runs a text of `PIECES_MIN` runs now, which is what found it.
+- **A text handle's base is the storage's reading.** Every turn hands its handles the entries it left
+  the records as, so a handle with nothing of its own on top applies no op again — a peer typing 20
+  characters cost 59 re-hints of the rope with a handle open, none now; with an edit on top, the edit
+  alone is laid over.
+- **A write made at once, and `close()`.** A fire-and-forget write made at once (`inc()`, `splice()`,
+  `update()`… not awaited) whose group failed raised no `unhandledRejection`, unlike the same call
+  through the queue: the call has a promise of its own. A write made at once that could not be
+  announced as its group landed left its record in flight for good and its turn unannounced: the
+  entry is settled whatever the slot did, and the `transaction` event leaves whatever a refresh did.
+  `close()` called twice in one tick sealed the log twice and emitted `close` twice: a second call is
+  the same close.
+- **A peer could grow a run past `MAX_RUN` through parked extensions, and replicas diverged.** An
+  extension `{ run, from }` ahead of its run's length waited in `ext` with no bound on `from`, landed
+  with no check when the run reached it, and cost nothing against the field while it waited: a one-slot
+  run came to read as three million characters, its spans written over the next run's keys in the id
+  index, the block's own JSON came back without the run (`normalizeSeq` dropped it as past `MAX_RUN`),
+  and a node joining from the snapshot read five characters where the holder read millions. An
+  extension that would end past `MAX_RUN` is refused as `bound` (`detail: 'run'`) where it arrives,
+  left out of a peer's block, dropped rather than landed should one ever settle past the bound, and
+  what waits in `ext` counts toward `MAX_FIELD` as landed slots do (SEQ-11).
+- **A run of no slots in a peer's snapshot threw out of `applyOp` on the next extension.** A block
+  carrying `['>1:4:A', []]` was taken, and the first `{ run, from: 0 }` on that run reached for a last
+  span it did not have — a `TypeError` out of `applyOp`, so the peer's page failed on every retry. Such
+  a run is left out where a peer's block is normalized, and an extension of one is malformed (OPS-12).
+- **A peer's cut was unbounded, and a range named twice was reported twice.** The ranges of a splice's
+  `cut` were read one by one before the engine saw the op — two thousand copies of one range made two
+  thousand changes — and `[[r, 0, 5], [r, 0, 5], [r, 2, 5]]` on `hello world` cut seven characters and
+  reported fifteen. A cut of more than `MAX_CUTS` (65 536) ranges is refused as `bound` (`detail:
+  'cuts'`) before any range is read, and the change report merges the ranges of one run: what was cut,
+  once (BOUND-5). The coalescing of cuts keeps its own, lower bound on how far one op grows.
+- **Counting a block's pending work walked every register and mark.** An op whose element or anchor
+  was not here yet — a peer's `setAt` ahead of the splice it names, a cut of a run still on its way —
+  read the bound on pending work by walking every `pos` and `vals` register and every mark of the
+  block, parsing each: 55 ms an op on a list of 200 000 assigned values, refused or not. The
+  registers of elements not here and the marks switched off before they arrived are counted as they
+  come and go (a slot that arrives settles the registers that named it), so the count is a sum
+  (BOUND-1). On the way, a run waiting for its anchor is hung under the anchor's run as soon as
+  that run is here — placed or still waiting itself, as a hydration hangs it — where it stayed
+  counted as waiting until the parent was placed.
+- **One run anchored below a reset made every later op rebuild the block.** A hydration folded the
+  anchor of every run into the stamp `prune` reads, a root's anchor below the base among them, so the
+  block never passed the O(1) test again: every keystroke after the reset rebuilt the block from its
+  JSON — a fresh lineage, every piece written again. An anchor below the base is a root's and folds
+  into nothing; a block is rebuilt once per base, and `stats().rebuilds`, never incremented before,
+  counts each rebuild (SEQ-12).
+- **A splice's markers were lost when its extension waited.** An extension `{ run, from }` parked
+  ahead of its run's length kept its content in `ext` and nothing of its `vals`: the embed slots landed
+  bare when the gap was filled, and two nodes that saw the extension and its filler in different orders
+  disagreed on the markers. The markers are registers of the slots the extension will lay — their names
+  are known — so they wait in `vals`, travel in a snapshot and land with the slots (LIST-6).
+- **A move was not bounded by the field.** Its one-slot position run was added past `MAX_FIELD`; a
+  move on a full field is a bound refusal (`detail: 'field'`) like an insert (RLE-1).
+- **The marks of a text were unbounded.** A text holds at most `MAX_MARKS` (65 536) marks: one more is
+  refused as `bound` (`detail: 'marks'`) — a mark switched off, or one filling its placeholder, adds
+  none — and a peer's block holding more is not taken (BOUND-6).
+- **A peer's splice whose cut was shaped otherwise stopped its page.** A cut of `[null]`, `[5]` or
+  `[[null, 0, 1]]` threw out of `applyOp` before the engine could refuse it, so `applyRemote()`
+  failed the whole page and the peer's stream stalled there on every retry. It is refused as
+  malformed now, a no-op in the log, and the page goes on.
+- **Two writers of one node lost characters growing one run.** Two handles on one text, or a
+  handle and the storage, could extend one run at one offset from two readings; the engine took
+  the second extension for a duplicate and dropped it.
+- **The `/all` storage's type lacked `openText()`.**
 
 - **An unreadable `index.json` vouched for the whole log.** With no index
   the floor is the first seq on disk; with one that did not read it stayed
@@ -1652,6 +1787,24 @@ There is no released version section until then; everything below lands in it.
 
 ### Changed
 
+- **The sequence engine is new: a copy-on-write rope.** Lists and texts stand on a copy-on-write
+  B+-tree with two measures (`src/text/rope.js`), an id index from (run, offset) to a run
+  (`src/text/ids.js`) and hash tries for the registers and the marks (`src/text/cow.js`); a run's
+  name is parsed once per lineage, an op reads every bound before it writes and copies each node
+  it touches once. The blocks, their JSON, every reading and every refusal are the old engine's,
+  op for op. The B4 editing trace through `applyOp` runs at 273 000 edits a second with every
+  version kept; a list op is O(log n) — setAt in a 50 000-element list 2 000 → 154 000 a second —
+  its reading made when it is read. The text plugin is 3.4 KB larger.
+- **A write is made at once where nothing asynchronous is set up** — no write hook, signature,
+  validator, unique key, telemetry, actor function or lens, the record files deferred: appended
+  before the call returns, landed and announced as its group is written (74 promises a keystroke
+  became about 9). The browser makes it too: an op's header is hashed in JavaScript, at once.
+- **The editor binding stands on a text handle.** `createTextBinding` no longer sends one delta at
+  a time with `expect`, nor rebases a STALE one: the editor's edits are made at once over the
+  handle's reading, and every other writer's change reaches the editor as a delta in its
+  indices. The adapters are unchanged; a binding takes `window`.
+- **`applyDelta()` counts the ops logged**, a keystroke folded into the one before it none.
+
 - **A folder of `src/` is a zone, not only a subpath.** A module lives in the
   folder of what it is about even where the core requires it: the telemetry
   writer contract is `src/telemetry/writer.js`; the wire shape, the protocol
@@ -1662,10 +1815,12 @@ There is no released version section until then; everything below lands in it.
   root of `src/` holds the core alone. No export, entry point or bundle
   changed.
 - **A large text is written in pieces, not whole at every flush.** A list
-  or text block of 1 024 runs or more keeps its runs in up to 32 files
-  beside the record file (`<id>~<n>.json`), by the first level of the run
-  map; a flush writes the piece a keystroke changed, the record file, and
-  removes what it no longer names. A text of 25 000 inserts: a keystroke
+  or text block of 1 024 runs or more keeps its runs in files of 512 beside
+  the record file (`<id>~<n>.json`), by the order the node first named them;
+  a flush writes the pieces whose runs read otherwise, the record file, and
+  removes what it no longer names. A local insert grows a run of the newest
+  piece alone, so a keystroke anywhere — at the start, in the middle — writes
+  that piece and no other, through a handle too. A text of 25 000 inserts: a keystroke
   under `defer: 0` 33.2 ms and 3 MB written → 1.35 ms and 242 KB (8 000:
   9.1 → 0.7 ms); under the default window, at 8 000, 231 → 146 µs and
   9.7 → 0.9 KB. A read assembles the block
@@ -1913,6 +2068,12 @@ There is no released version section until then; everything below lands in it.
   names of a seam shared between modules do not (+2.3 KB min+gzip).
 
 ### Changed (breaking)
+
+- **The log's files and an op's payload changed shape** (nothing is published, `PROTOCOL` stays
+  1): a log file is `{"e":[[seq, fp, header, payload, rest?, flags?]],"c":"<crc32>"}`, its CRC-32
+  checked before it is parsed, and a segment is the lines its groups were journaled as and a
+  trailer; an op names what is its own origin's without the origin — a run by its stamp, an
+  element as `ts:offset`.
 
 - A record id is `[A-Za-z0-9_@-][A-Za-z0-9._@-]{0,127}`; every writer rejects
   anything else (`code: 'INVALID_ID'`), `get()`/`has()` answer absent, and a

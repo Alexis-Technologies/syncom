@@ -4,36 +4,26 @@
 // adapter builds on. An editor holds its own document; syncom holds the
 // field. The binding keeps the two the same through deltas — Quill's form,
 // `[{ retain, attributes? }, { insert, attributes? }, { delete }]`, an embed
-// slot as `{ insert: { embed: marker } }`:
+// slot as `{ insert: { embed: marker } }` — over the text plugin's handle on
+// the field (`storage.openText`, src/text/handle.js), whose reading is what
+// the editor shows:
 //
 //   editor → field   the adapter reports a local edit as a delta; the
-//                    binding composes it into `pending` and sends one delta
-//                    at a time through `applyDelta` with `expect`, the
-//                    field's text the delta was made over, and `revision`,
-//                    what the last answer handed back for it — a field
-//                    still there is not compared at all. A delta the
-//                    field moved under — a peer's edit landed first — is
-//                    refused as STALE before any op; the binding rebases it
-//                    over the peer's delta as that reaches the editor, and
-//                    sends it again.
-//   field → editor   `observe(id, path)` hands the field's changes a turn
-//                    at a time, `toDelta` composes them into one delta over
-//                    the field as it read before (the shadow). The delta of
-//                    the binding's own commit moves the shadow on and frees
-//                    the next send; a peer's is rebased over what the editor
-//                    holds beyond the shadow (`inflight`, then `pending`)
-//                    and handed to the adapter, which applies it without
-//                    reporting it back.
+//                    binding applies it to the handle at once — resolved
+//                    and stamped over the handle's reading, which is the
+//                    editor's, so nothing is ever STALE — and the handle
+//                    logs the edits a window later as one transaction,
+//                    keystrokes that continue each other as one op.
+//   field → editor   every other writer's change reaches the handle once, as
+//                    a delta in the handle's indices — the editor's — and
+//                    the binding hands it to the adapter, which applies it
+//                    without reporting it back.
 //
-// The shadow is the field's text as the storage reads it (U+FFFC for an
-// embed slot) after every change the binding has processed; the editor
-// holds shadow ∘ inflight ∘ pending. A rebase is the operational transform
-// of two deltas from one base (`transform`): applying both ends the same
-// whichever came first, with the peer's insert first at a tie — the order
-// the storage holds them in. A change no delta can say (a reset, an unset,
-// the record gone) reloads the editor from the field and drops what was
-// not sent (`onReset`). The load reads the field and the vector in one
-// turn of the queue; an event of ops the vector covers is in the load.
+// A change no delta can say (a reset, an unset, the record gone) and a flush
+// that could not be logged (UNLOGGED: what was not logged is dropped) reload
+// the editor from the handle's reading (`onReset`); an editor that throws on
+// a change, or a delta the handle refuses, the same. Failures in a row stop
+// the binding at MAX_FAILURES.
 //
 // The rest is pure: `diffSpans`/`diffBlocks`, the delta between two
 // readings of a text — markers and marks included — for an editor that
@@ -42,12 +32,11 @@
 // the edits around them, and a presence room's cursors resolved to
 // indices. For an adapter: `createFit` (what its document differs from the
 // field by), `undoSteps` (its undo commands), `failureReporter`.
-// Requires the text plugin's Myers diff, the vector keys and src/text/quill.js only.
+// Requires the text plugin's Myers diff and src/text/quill.js only.
 // The delta algebra is src/text/quill.js's (quill-delta's rules, BSD-3-Clause;
 // THIRD_PARTY_NOTICES.md); what is exported here checks what it is handed.
 
 const { diff: myers } = require('../text/myers.js');
-const { opKey } = require('../vector.js');
 const D = require('../text/quill.js');
 const { push, chop } = D;
 
@@ -55,9 +44,10 @@ const { push, chop } = D;
 const same = (a, b) => a === b || JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
 const EMBED = '￼';
-// A send that fails other than STALE reloads the editor, later each time;
-// this many in a row and the binding stops (`onError` hears why).
+// A failure — a flush not logged, an editor or a handle that refused — reloads
+// the editor; this many in a row and the binding stops (`onError` hears why).
 const MAX_FAILURES = 5;
+const NOOP = () => {};
 
 // ---------------------------------------------------------------------------
 // Deltas
@@ -334,29 +324,18 @@ const presenceCursors = async (presence, storage, id, path, { key = 'cursor' } =
 // ---------------------------------------------------------------------------
 // The binding
 
-const textOf = (spans) => {
-  if (spans === null) return '';
-  let text = '';
-  for (let i = 0; i < spans.length; i++) text += spans[i].type === 'text' ? spans[i].text : EMBED;
-  return text;
-};
-
-// Whether every op of a turn is within the vector: the load holds it.
-const covered = (event, vector) => {
-  const { ops } = event;
-  for (let i = 0; i < ops.length; i++) if (!((vector[opKey(ops[i])] ?? 0) >= ops[i].seq)) return false;
-  return true;
-};
-
 /**
- * Binds an editor, through `adapter`, to text field `path` of record `id`:
- * the editor's edits reach the field as one transaction each, the field's
- * changes reach the editor as deltas. `source` tells the binding's commits
- * apart in events; `onReset` hears a reload (a reset, the record gone: what
- * was not sent is dropped), `onError` a failure that reloaded it.
+ * Binds an editor, through `adapter`, to text field `path` of record `id`,
+ * over the text plugin's handle on it: the editor's edits are made at once
+ * and logged a window later (`window`, the storage's `defer` by default) as
+ * one transaction; every other writer's change reaches the editor as a
+ * delta in its indices. `source` tells the binding's commits apart in
+ * events; `onReset` hears a reload (a reset, the record gone, a flush not
+ * logged: what was not logged is dropped), `onError` a failure, `onStop`
+ * the stop.
  */
 const createTextBinding = (storage, id, path, adapter, options = {}) => {
-  if (!storage || typeof storage.observe !== 'function' || typeof storage.applyDelta !== 'function') {
+  if (!storage || typeof storage.openText !== 'function') {
     throw new TypeError('createTextBinding() takes a storage with the text plugin');
   }
   if (typeof id !== 'string' || typeof path !== 'string') {
@@ -370,251 +349,65 @@ const createTextBinding = (storage, id, path, adapter, options = {}) => {
   ) {
     throw new TypeError('createTextBinding() takes an adapter: setContents, updateContents, onChange');
   }
-  const { source = Symbol('editor'), onError = null, onReset = null, onStop = null } = options;
-  let shadow = '';
-  let inflight = null;
-  let pending = [];
-  let loaded = false;
-  let buffered = [];
+  const { source = Symbol('editor'), window, onError = null, onReset = null, onStop = null } = options;
+  let handle = null;
   let stopped = false;
-  let stale = false;
-  let epoch = 0;
-  // The number of the delta in flight: a remote event rebases `inflight`
-  // into a new array, so the send's callbacks know their delta by this.
-  let flight = 0;
   let failures = 0;
-  let scheduled = false;
-  // A reload is due (a send failed): nothing goes out until it is done — a
-  // send in between would build on the delta the failure dropped.
-  let reloading = false;
-  // A peer's change came in while the delta in flight was unanswered, and
-  // the delta was rebased over it.
-  let rebased = false;
-  // The shadow's version — moved by every change it takes — and the field's
-  // revision when the shadow was at `revisionAt`: sent beside `expect` while
-  // the two still match, it spares the storage comparing the text. A peer's
-  // change leaves it behind; the next send compares and hands a new one back.
-  let version = 0;
-  let revision = 0;
-  let revisionAt = -1;
-  // The shadow's version the event of the delta in flight left it at: the
-  // send's answer — the revision after it, a few microtasks behind the
-  // event — is kept for it while nothing moved the shadow since, and the
-  // next send waits for that answer (`holding`) so it can go with it.
-  let answered = -1;
-  let holding = false;
-  const waiting = [];
-
-  const idle = () => inflight === null && pending.length === 0 && !stale && !reloading;
-  const settle = () => {
-    if (!idle()) return;
-    for (const resolve of waiting.splice(0)) resolve();
-  };
+  let stopObserve = NOOP;
   const fail = (error) => {
     if (onError !== null) onError(error);
     else storage.logger?.warn?.({ event: 'editor.binding', id, field: path, err: error });
   };
-
-  const send = () => {
-    if (stopped || !loaded || inflight !== null || holding || stale || reloading || pending.length === 0) return;
-    const mine = ++flight;
-    const since = epoch;
-    inflight = pending;
-    pending = [];
-    rebased = false;
-    const known = revisionAt === version ? revision : undefined;
-    const sentAt = version;
-    storage.applyDelta(id, path, inflight, { source, expect: shadow, revision: known }).then(
-      (result) => {
-        if (mine !== flight) return;
-        if (holding) {
-          // Its event is in: the shadow is the field after the delta, unless
-          // a peer's change moved it since.
-          holding = false;
-          if (answered === version) {
-            revision = result.revision;
-            revisionAt = version;
-          }
-          send();
-          return;
-        }
-        // No op made (a mark already there): no event comes to free the slot,
-        // and the field is where the shadow is.
-        if (inflight === null || result.ops !== 0) return;
-        if (sentAt === version) {
-          revision = result.revision;
-          revisionAt = version;
-        }
-        inflight = null;
-        settle();
-        send();
-      },
-      (error) => {
-        if (mine !== flight) return;
-        if (holding) {
-          holding = false;
-          return void send();
-        }
-        if (inflight === null) return;
-        if (error && error.code === 'STALE') {
-          // A peer's delta reached the field first. Its event rebases
-          // `inflight`; once it is here (it may be already), send again.
-          if (epoch !== since) return void resend();
-          stale = true;
-          // Every landing announced and still no event: the shadow is not
-          // the field's. Reload rather than wait for an event that will not come.
-          void Promise.resolve(storage.flush?.()).then(() => {
-            if (stale && mine === flight && epoch === since && !stopped) broken(error);
-          });
-          return;
-        }
-        broken(error);
-      },
-    );
-  };
-  // A send that failed: reload — after a pause that grows, so a failure that
-  // repeats never holds the event loop — and stop after MAX_FAILURES in a row.
+  // A failure in a row more: the editor read again from the handle, or the binding stopped.
   const broken = (error) => {
-    inflight = null;
-    holding = false;
-    stale = false;
     failures++;
     fail(error);
     if (failures >= MAX_FAILURES) return void halt(error);
-    reloading = true;
-    const mine = ++flight;
-    setTimeout(
-      () => {
-        if (mine === flight && !stopped) void reload();
-      },
-      2 ** failures * 10,
-    );
+    reload();
   };
-  const resend = () => {
-    stale = false;
-    pending = compose(inflight, pending);
-    inflight = null;
-    send();
-  };
-  const schedule = () => {
-    if (scheduled) return;
-    scheduled = true;
-    queueMicrotask(() => {
-      scheduled = false;
-      send();
-    });
-  };
-
-  const load = async () => {
-    const {
-      spans,
-      vector,
-      revision: read,
-    } = await storage.transact(async (tx) => ({
-      spans: await tx.spans(id, path),
-      revision: await tx.revision(id, path),
-      vector: { ...storage.vector },
-    }));
-    if (stopped) return;
-    shadow = textOf(spans);
-    version++;
-    revision = read;
-    revisionAt = version;
-    // What was typed into the editor while the field was read is over the
-    // contents the field replaces: it goes with them, never sent over these.
-    pending = [];
-    adapter.setContents(spansToDelta(spans ?? []));
-    loaded = true;
-    const events = buffered;
-    buffered = [];
-    for (const [changes, event] of events) if (!covered(event, vector)) handle(changes, event);
-    send();
-  };
-  const reload = async () => {
-    loaded = false;
-    flight++;
-    inflight = null;
-    holding = false;
-    pending = [];
-    stale = false;
-    reloading = false;
+  const reload = () => {
     try {
-      await load();
+      adapter.setContents(spansToDelta(handle.spans()));
     } catch (error) {
-      // The editor would not take the field (setContents threw), or the
-      // field would not read: a failure like a send's — another try after a
-      // pause, and a stop after MAX_FAILURES in a row.
+      // The editor would not take the field: a failure like any other.
       return void broken(error);
     }
     if (onReset !== null) onReset();
-    settle();
   };
-
-  const handle = (changes, event) => {
-    const delta = storage.toDelta(changes, path);
-    if (delta === null) return void reload();
-    const before = shadow;
-    shadow = applyToText(shadow, delta);
-    version++;
-    if (event.source === source) {
-      // `expect` compares text: a peer's change made of the characters it
-      // replaced — a letter cut and typed again — passes it, and the delta
-      // lands by index over the new ones, not as it was rebased over the
-      // peer's. What landed says so; the editor is read again.
-      if (rebased && inflight !== null && applyToText(before, inflight) !== shadow) return void reload();
-      failures = 0;
-      answered = version;
-      holding = true;
-      inflight = null;
-      settle();
-      send();
-      return;
+  // Every change the handle hears but the editor's own: a delta in the
+  // editor's indices, or a reset — the field read again.
+  const heard = (delta, event) => {
+    if (stopped || event.local) return;
+    if (event.reset === true) return void reload();
+    try {
+      adapter.updateContents(delta);
+    } catch (error) {
+      // The editor did not take the change: it is loaded from the handle again.
+      broken(error);
     }
-    epoch++;
-    let remote = delta;
-    if (inflight !== null) {
-      const next = transform(inflight, remote, false);
-      inflight = transform(remote, inflight, true);
-      remote = next;
-      rebased = true;
-    }
-    if (pending.length > 0) {
-      const next = transform(pending, remote, false);
-      pending = transform(remote, pending, true);
-      remote = next;
-    }
-    if (remote.length > 0) {
-      try {
-        adapter.updateContents(remote);
-      } catch (error) {
-        // The editor did not take the peer's change: the shadow did, so the
-        // two part ways — the editor is loaded from the field again.
-        fail(error);
-        return void reload();
-      }
-    }
-    if (stale) resend();
   };
-
-  const stopObserve = storage.observe(id, path, (changes, event) => {
-    if (stopped) return;
-    if (loaded) handle(changes, event);
-    else buffered.push([changes, event]);
-  });
   const unsubscribe = adapter.onChange((delta) => {
-    if (stopped) return;
+    // Typed before the field was read: over contents the load replaces.
+    if (stopped || handle === null) return;
     checkDelta('onChange', delta);
-    pending = compose(pending, delta);
-    if (pending.length > 0) schedule();
+    try {
+      handle.applyDelta(delta);
+    } catch (error) {
+      // The handle refused what the editor shows: the two part ways — read again.
+      return void broken(error);
+    }
+    // After a failure, the next flush that is logged ends the run of them.
+    if (failures > 0) handle.flushed.then(() => void (failures = 0), NOOP);
   });
   // Stopped — by `stop()`, or after MAX_FAILURES in a row (`reason` the last
-  // failure): nothing more is sent or taken, and `flush()` answers at once.
+  // failure): nothing more is taken; what the editor typed is logged as the
+  // handle closes.
   const halt = (reason = null) => {
     if (stopped) return;
     stopped = true;
     stopObserve();
     unsubscribe();
-    for (const resolve of waiting.splice(0)) resolve();
+    if (handle !== null) void handle.close().catch(NOOP);
     if (onStop !== null) {
       try {
         onStop(reason);
@@ -623,9 +416,22 @@ const createTextBinding = (storage, id, path, adapter, options = {}) => {
       }
     }
   };
-  // A first load that fails stops the binding: nothing would ever be taken
-  // from the editor, and the field's events would only pile up.
-  const ready = load().catch((error) => {
+  // A first load that fails stops the binding: nothing would ever be taken from the editor.
+  const ready = (async () => {
+    const opened = await storage.openText(id, path, { source, window });
+    if (stopped) return void (await opened.close().catch(NOOP));
+    handle = opened;
+    stopObserve = handle.observe(heard);
+    // A flush not logged: the handle reads the field as announced and tells a reset (`heard`).
+    handle.on('error', (error) => {
+      // A stopped binding hears nothing more — the close's own flush included.
+      if (stopped) return;
+      failures++;
+      fail(error);
+      if (failures >= MAX_FAILURES) halt(error);
+    });
+    adapter.setContents(spansToDelta(handle.spans()));
+  })().catch((error) => {
     fail(error);
     halt(error);
     throw error;
@@ -636,21 +442,20 @@ const createTextBinding = (storage, id, path, adapter, options = {}) => {
     field: path,
     source,
     ready,
+    /** The field as the editor holds it: the handle's reading. */
     get shadow() {
-      return shadow;
+      return handle === null ? '' : handle.toString();
     },
+    /** Whether edits wait for the log. */
     get pending() {
-      return !stopped && !idle();
+      return !stopped && handle !== null && handle.pending;
     },
-    /** Whether the binding stopped — `stop()`, or failures in a row; what was not sent stays unsent. */
+    /** Whether the binding stopped — `stop()`, or failures in a row. */
     get stopped() {
       return stopped;
     },
-    flush: () =>
-      new Promise((resolve) => {
-        if (stopped || idle()) resolve();
-        else waiting.push(resolve);
-      }),
+    /** Settles once what the editor typed so far is logged (or could not be). */
+    flush: () => (stopped || handle === null ? Promise.resolve() : handle.flush().catch(NOOP)),
     stop: () => halt(),
   });
 };

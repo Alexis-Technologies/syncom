@@ -21,5 +21,8 @@ const CURSOR = Symbol('syncom.cursor');
 const PLUGINS = Symbol('syncom.plugins');
 const SIGNER = Symbol('syncom.signer');
 const REWIND = Symbol('syncom.rewind');
+// On a `transaction` event, the entries the turn left its records as (a Map by id), for a text handle
+// (src/text/handle.js) to take the storage's reading instead of applying every op again.
+const ENTRIES = Symbol('syncom.entries');
 
-module.exports = { COMMIT, REFRESH, SOURCE, CURSOR, PLUGINS, SIGNER, REWIND };
+module.exports = { COMMIT, REFRESH, SOURCE, CURSOR, PLUGINS, SIGNER, REWIND, ENTRIES };

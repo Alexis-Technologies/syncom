@@ -25,14 +25,18 @@ src/layered/layered.js    @alexify/syncom/layered — layered([top, …, bottom]
 src/emitter.js            the Emitter both halves extend — no requires
 src/logger.js             createLogger, the duck-typed logger writer — no requires
 src/crypto/digest.js      sha256, hashOf — SHA-256 of a value's JSON as hex: the chain's, the schema hash's, an op's digest and fingerprint;
-                          node:crypto here, Web Crypto in src/crypto/digest.browser.js; `sha256` async on both, `hashOf` at once in Node.js and a
-                          promise in the browser (the write path names every op with it)
+                          node:crypto here, src/crypto/digest.browser.js in the browser; `sha256` async on both, `hashText` (what the write
+                          path names every op by) at once on both, `hashOf` at once but a promise in the browser past 64 KiB
+src/crypto/sha256.js      sha256Now — SHA-256 in JavaScript, at once: the browser half's `hashText` (Web Crypto answers with a promise only)
+                          — no requires
 src/crypto/keys.js        loadKeyPair — the on-disk key pairs (RSA for sealing, Ed25519 for signing), generator injected by each crypto
                           half; the signing and encryption subpaths share it — requires errors.js only
 src/crypto/pem.js         base64/PEM helpers over btoa/atob for the browser crypto halves of signing and encryption — no requires
 src/scope.js              GLOBAL_SCOPE, inScope, opInScope — the one definition of "in scope" — no requires
 src/blame.js              lastEditorOf, editorsOf — who wrote what, from a record's meta (registers' clocks, counters' sums, sets' slots, the plugins' `editors` hook); never the log
-src/hash.js               xxHash32 in pure JS — the checksum every log file carries (`{ entries, hash }`); a checksum, never a signature — no requires
+src/hash.js               xxHash32 in pure JS — what `anonymize` hashes a string by (src/inspect/inspect.js); a checksum, never a signature — no requires
+src/crc32.js              CRC-32 of a string's UTF-8, 8 hex digits — the checksum every log file carries; zlib's in Node.js, the table of
+                          src/crc32.browser.js where it is absent and in the browser (package.json#browser)
 src/header.js             what names an op, the core's: the header (v1, `prev` last), payloadOf, the salted digest every node mints
                           (`digest`), the fingerprint (SHA-256 of the header) — requires digest.js and shape.js only (the signing subpath
                           ships it); `link` in src/commit.js sets an op's `prev` from the op before it in its stream
@@ -45,6 +49,8 @@ src/order/order.js        the @alexify/syncom/order subpath — fractional index
                           strings, for ordering records — no requires; the tree plugin uses it for a node's place
 src/patch.js              patches — the one vocabulary of diff()/applyPatches()/restore(): diffViews by kind, realize() to an op — requires shape.js, args.js, paths.js, plugin.js only
 src/symbols.js            COMMIT / REFRESH / SOURCE — the module-private seams between Storage and what it hands out — no requires
+src/lazy.js               lazyField, putLazy, copyData, assignData — a field read when it is read (a list's, `mod.lazy`): an accessor
+                          the data and the delta share, copied as it is — no requires
 src/options.js            normalizeStorageOptions — open()'s plain options checked and defaulted (lock, cache, chain, skew…)
 src/lock.js               exclusive open: Web Locks or lock.json, stale by pid or age — requires errors.js only
 src/catalog.js            the record catalog: live ids, collections, indexed values; index/catalog.json — no requires
@@ -59,7 +65,8 @@ src/patches.js           reading, applyPatches, compact — the present and its 
 src/entries.js            EntryStore — record files under data/ (a large block's runs in pieces beside them: `<id>~<n>.json`),
                           the bounded cache, the catalog row each change leaves
 src/record.js             Reference, Record, Collection — what the application holds; public API + the symbols only
-src/commit.js             the one local write path: prepare → validate → issue (in the queue) → land → announce (outside it, in log order) (`storage[COMMIT]`)
+src/commit.js             the one local write path: prepare → validate → issue (in the queue) → land → announce (outside it, in log order) (`storage[COMMIT]`);
+                          `commitAtOnce`, the same write made at once on an idle queue (LOG-9), and `transact`
 src/apply.js              a peer's batch: admit → apply one by one → persist → announce (`storage.applyRemote`)
 src/bootstrap.js          snapshot pages out, merge pages in, adoptVector — the bootstrap write path
 src/errors.js             SyncomError, ValidationError, typed() — no requires
@@ -107,7 +114,7 @@ options, settings, logger }`, run after the replay — hands back `sync` (the Sy
   never silently downgraded. A new api plugin adds a hook name here and a line in
   `docs/reference/api.md` Plugins; it never reaches the storage's state except through `ctx`
   and the hooks.
-- **Browser halves are `*.browser.js`** (dot, not dash): `fsi`, `utils` and `crypto/digest` in the core,
+- **Browser halves are `*.browser.js`** (dot, not dash): `fsi`, `utils`, `crc32` and `crypto/digest` in the core,
   `signing/ed25519` and `encryption/rsa` in their subpaths. Everything else (storage, log, ops,
   sync, chain, wrpc adapter, and the require-free `emitter`, `logger`, `scope`, `crypto/keys`,
   `crypto/pem`) is shared; the two `utils` halves only re-export `Emitter`/`createLogger`
@@ -244,7 +251,8 @@ elem }` while a peer's lands unreachable — not composed, not in a diff
 run/from, content }` (`content` naming the kind even when empty), `assign`
   `=` `{ elem, value, k? }` (`k: 't'` on a text's embed slot), `move` `^` `{ elem, cut, at, value }`, `mark` `*`
   `{ start, end, key, value, many? } | { off }`, `tree` `~` `{ node, parent,
-fi }`. An index, a sibling or a range is resolved in `prepareOp` INSIDE the
+fi }` — what is the op's own origin's named short (a run by its stamp, an element `ts:offset`;
+  src/text/kind.js `fullRefs` lays the origin back where an op enters the engine). An index, a sibling or a range is resolved in `prepareOp` INSIDE the
   queue (`resolveSplice`/`resolveMove`/`resolveMark`/`resolveTree` in
   `src/commit.js`: `OUT_OF_RANGE`, `CYCLE`, `NOT_FOUND`, and `SURROGATE` for an
   index of a text between the halves of a pair — `wholeCharacters` in
@@ -253,8 +261,11 @@ fi }`. An index, a sibling or a range is resolved in `prepareOp` INSIDE the
   about, so `updateText` never makes one; the tree plugin's `resolve` reads
   the fold the block keeps and hands back `null` for a move to where the node is, and
   `commitLocal` returns before `applyOp` on it). `sync.pendingMax`
-  (`PENDING_MAX`), `MAX_RUN` (`src/text/rle.js`), `MAX_FIELD`, `MAX_FI`, `MAX_DEPTH`,
-  `MAX_MOVES` (a tree field's moves; a join keeps the oldest) and `MAX_COUNT` bound
+  (`PENDING_MAX`), `MAX_RUN` (`src/text/rle.js`; a parked extension counted against it and
+  against `MAX_FIELD` before it is kept), `MAX_FIELD`, `MAX_CUTS` and `MAX_MARKS` (`src/text/keys.js`:
+  a splice's ranges, a text's marks), `MAX_FI`, `MAX_DEPTH`,
+  `MAX_MOVES` (a tree field's moves; a join keeps the oldest), `MAX_COUNT` and `MAX_ACTOR`
+  (`src/shape.js`: an op's `actor` and `from`, in the header every node hashes) bound
   what a peer can make a node hold or read — and `MAX_WALK` what a fold walks: a
   move under a parent deeper than it is moot, like a cycle — on the op path
   and in `normalizeMeta` alike — a snapshot buys nothing an op could not. The
@@ -301,7 +312,8 @@ fi }`. An index, a sibling or a range is resolved in `prepareOp` INSIDE the
   arguments were checked, so this is a bug — and from a peer it is
   `OP_REFUSED{reason:'malformed'}`, counted in `syncom.ops.rejected`, the op
   still logged and relayed as a no-op (a dirk, never a gap). A `bound`
-  refusal carries `detail` (`pending`/`run`/`field`/`counter`), `count` and `max`.
+  refusal carries `detail` (`pending`/`run`/`field`/`cuts`/`marks`/`moves`/`counter`/`paths`), `count`
+  and `max`.
 - **Ops from one origin apply in seq order; seqs run per origin AND scope**
   (`origin@scope` vector keys), and ops born from a snapshot (`merge`,
   `advance`) run in their own `origin@~` stream. `applyRemote` skips
@@ -327,7 +339,25 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   log order; unique keys are checked against the in-flight entries too
   (`#conflicts`); `applyPatches`/`updateText` await their landings before
   returning — and before rethrowing. `commit()` returns `{ op, done }`;
-  `storage[COMMIT]` awaits `done`. `close()`, `flush()` and `tag()` drain the
+  `storage[COMMIT]` awaits `done`. A write is made AT ONCE, outside the queue
+  (`Storage#fastCommit` → `commitAtOnce` in src/commit.js, LOG-9), where a turn of the queue
+  of its own would change nothing: the storage set up with nothing asynchronous on the write
+  path (`#fastIssue`: no beforeWrite/afterWrite hook, no signing, no telemetry, no actor
+  function, no lens, `defer > 0`), the queue idle, no hook
+  running, no landing step pending (`#slowSteps`), the record live and held here (in flight or
+  cached — `#currentNow`), its entity without a validator or unique keys, nothing encrypted or
+  expected; anything else goes through the queue. It shares `opOf`/`applyLocal`/`prepared` with
+  `prepare`, chains at once and appends with `log.enqueue(…, { onDurable })`: the landing
+  (`landNow` — the deferred slot, `settled`, the announce) runs as its group is written, before
+  the group's promise settles, and `core.landed(done)` makes every landing step after it wait
+  for that group. A keystroke made at once that continues the one before it — the last op of the
+  group still gathering (`log.lastGathered()`), of its record and stream, unsigned, the same field,
+  actor, version and message — is folded into it (`coalesced`, the plugin's `coalesce`: a text typed
+  on at its run's end, or a chain of cuts; LOG-11): the first op's header stays, its value grows, its
+  landing takes the newer entry (`core.inflight` at the same position replaces it), the deltas
+  and the changes of both. The method delegates (`splice`, `push`, `setAt`, `move`, `inc`, `add`,
+  `remove`, `unset`, `update`) have no async frame: an argument they refuse is a rejection,
+  never a throw. `close()`, `flush()` and `tag()` drain the
   landings first; `stats().inflight` counts them. The log resolves a group
   only after the roll its file triggered (`#roll` is O(1) when nothing can
   be sealed: `#unappliedFrom`, the oldest open group not applied whole).
@@ -380,8 +410,14 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   stream stays, `REWOUND` says `adopted: {}` and `peer.rewound` keeps it from
   that host until the next hello. Never adopt a host's word on own keys.
 - **A log file is whole or it is nothing.** `fileOf`/`readFile` in src/log.js
-  are the ONLY writer and reader of a log file's text: `{ entries, hash }`,
-  the hash xxHash32 (src/hash.js) of the entries' JSON; a mismatch is
+  are the ONLY writer and reader of a log file's text: `{"e":[…],"c":"…"}`,
+  the entries positional (`[seq, fp, header, payload, rest?, flags?]` — the header the
+  text `link` fingerprinted, handed to `log.enqueue` as `headers`; `opOf` in src/header.js
+  reads an op back) and `c` the CRC-32 (src/crc32.js) of their text, last, checked BEFORE
+  they are parsed. A segment (`segmentOf`/`readSegment`) is the lines its groups were
+  journaled as — each open group keeps its `line` until sealed, and a scrub or a rewritten
+  journal writes it again first (`#lineOf`, LOG-10) — and a trailer `{"lines","to","c"}`, read
+  whole or not at all; a mismatch is
   `log.segment.unreadable`/`log.open.unreadable` with `reason: 'checksum'`,
   counted in `corrupt`, never read in part — an open group file so is moved to `log/corrupt/`,
   never deleted; a read that fails other than ENOENT fails the open (`readOrNull`, `CORRUPT`). A file without a hash is not
@@ -392,7 +428,8 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   line: `open/<pad(first)>-<session><counter>.jsonl` — a name no failed
   group's line is in, begun again at every roll (`#seal`) and after a failed
   append (`#flushGroup`), removed once none of its groups is open. `#open`
-  holds the groups `{ first, last, file }`, never the files. `#loadOpen`
+  holds the groups `{ first, last, file, line }` — each with the line it was journaled as, until it is
+  sealed (LOG-10) — never the files. `#loadOpen`
   reads the names NEWEST FIRST and `#adopt` keeps the first copy of a seq —
   that is what shadows the line of a group whose append failed after it
   landed (its seqs went to a newer journal); a torn LAST line is left out
@@ -415,7 +452,8 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   null). There are exactly three write paths — `src/commit.js` (a local op,
   through `[COMMIT]`), `src/apply.js` (a peer's page, through `applyRemote`),
   `src/bootstrap.js` (a snapshot page, through `mergeSnapshot`) — all inside
-  `#run`, all over the `core` Storage lends them (`#lend`: frozen, its members listed by
+  `#run` (or, a local op alone, made at once on an idle queue where a turn of its own would
+  change nothing: `commitAtOnce`, LOG-9), all over the `core` Storage lends them (`#lend`: frozen, its members listed by
   `tests/package/core-surface.test.js` — a new one changes that list on purpose), all ending in
   `#persistBatch` or `EntryStore.write`. Do not add a fourth, and do not
   reach the storage's state from a path module except through `core`. A
@@ -423,7 +461,10 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   `applyPatches`/`restore`/`compact` run) is the first path over a core
   whose `current` and `seqOf` see the ops made before — `prepare` per op,
   ONE `log.append` of them all, one `core.land` (a chain block, the files),
-  the announces after; a throw from `fn` leaves nothing appended. An op its
+  the announces after; a throw from `fn` leaves nothing appended. An op that continues the one made
+  just before it — of its record, stream, field, actor and message — is that op, grown, where the
+  kind's `coalesce` says so and no `afterWrite` hook is set (`grows`, TXN-3; the ops are signed after
+  `fn`, so a signing node folds too). An op its
   record's later op follows keeps its op and changes alone (`release`): the entry only while a
   `commit` listener exists, the hook ctx only with an `afterWrite` hook — N copies of a large
   record were N² memory — and a record is in flight, deferred and refreshed ONCE, as its last op

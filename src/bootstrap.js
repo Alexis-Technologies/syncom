@@ -9,7 +9,9 @@
 // state covers. `core` is what Storage lends its write paths — see
 // Storage#open.
 
+const { assignData } = require('./lazy.js');
 const { applyOp, isAlive, latestClock, latestHeld, settleMeta } = require('./ops.js');
+const { ENTRIES } = require('./symbols.js');
 const { opKey } = require('./vector.js');
 const { fingerprintOf } = require('./header.js');
 const { link } = require('./commit.js');
@@ -148,7 +150,7 @@ const mergeOne = async (batch, record) => {
     }
   }
   if (!changed) {
-    if (otel.enabled) otel.recordCommit('merge', 'noop', now() - started);
+    if (otel.enabled) otel.recordCommit('merge', 'noop', now() - started, 'queue');
     return;
   }
   op.seq = ++batch.seq;
@@ -160,7 +162,7 @@ const mergeOne = async (batch, record) => {
   // The batch's own object, joined in place (a path is never `__proto__`).
   let joined = batch.deltas.get(id);
   if (joined === undefined) batch.deltas.set(id, (joined = {}));
-  Object.assign(joined, delta);
+  assignData(joined, delta);
   batch.pending.push({ ctx, op, started, changes });
 };
 
@@ -189,31 +191,40 @@ const mergeBatch = async (core, records, via, from) => {
   // applyOp, and the link and the signature cover it. The joiner signs the
   // host's state as its own — a snapshot record carries no provenance to
   // sign over.
-  const fps = await link(batch.ops, core.fingerprintOf, core.sign !== null);
+  const { fps, headers } = await link(batch.ops, core.fingerprintOf, core.sign !== null);
   if (core.sign !== null) for (const op of batch.ops) await core.sign(op);
-  const entries = await core.log.append(batch.ops, { fps });
+  const ticket = core.log.enqueue(batch.ops, { fps, headers });
+  await ticket.done;
+  const { entries } = ticket;
   const first = entries[0].seq;
   const last = entries[entries.length - 1].seq;
   if (await core.persist(batch.touched, first, last)) core.log.applied(first, last);
   if (batch.purged) for (const id of batch.purged) await core.scrub(id);
   core.saveCatalog();
   const changes = [];
+  // Every merge is announced whatever an afterWrite hook did to one of them —
+  // all are durable — and the turn after them; the first failure is thrown once.
+  let failed = null;
   for (const { ctx, op, started, changes: own } of batch.pending) {
     try {
       await core.hook('afterWrite', ctx, op);
+    } catch (error) {
+      failed ??= error;
     } finally {
       const entry = batch.touched.get(op.id);
       core.refresh(op.id, isAlive(entry) ? entry.data : null, batch.deltas.get(op.id), null, entry);
       core.emit('change', op, via, { changes: own });
       for (const change of own) changes.push({ id: op.id, ...change });
-      if (core.otel.enabled) core.otel.recordCommit('merge', 'applied', now() - started);
+      if (core.otel.enabled) core.otel.recordCommit('merge', 'applied', now() - started, 'queue');
     }
   }
   if (core.listening('transaction')) {
     const ts = batch.ops[batch.ops.length - 1].ts;
     const event = { local: true, via, source: null, message: null, ops: batch.ops, changes, ts };
+    event[ENTRIES] = batch.touched;
     core.emit('transaction', event);
   }
+  if (failed !== null) throw failed;
 };
 
 // The highest seq this node takes for a stream of its own from a host
@@ -258,9 +269,11 @@ const adopt = async (core, vector, { via = null, from = null, own = false, proof
   // seqs below are the host's already.
   const key = opKey(op);
   op.seq = Math.max(known[key] ?? 0, news[key] ?? 0) + 1;
-  const fps = await link([op], core.fingerprintOf, core.sign !== null);
+  const { fps, headers } = await link([op], core.fingerprintOf, core.sign !== null);
   if (core.sign !== null) await core.sign(op);
-  const [{ seq }] = await core.log.append([op], { fps });
+  const ticket = core.log.enqueue([op], { fps, headers });
+  await ticket.done;
+  const [{ seq }] = ticket.entries;
   await core.log.advance(news);
   core.log.applied(seq);
   core.emit('change', op, via);

@@ -48,6 +48,8 @@ const {
   render,
   pieces,
   NESTS,
+  LAZY,
+  coalesce,
   members,
   holds,
   pick,
@@ -79,6 +81,7 @@ const {
   editorOf,
 } = require('./methods.js');
 const { toDelta, applyDelta } = require('./deltas.js');
+const { openText } = require('./handle.js');
 
 /** The list and text kinds: register with `open({ plugins: [text] })`. */
 const text = Object.freeze({
@@ -105,6 +108,8 @@ const text = Object.freeze({
   values,
   editors,
   nests: NESTS,
+  lazy: LAZY,
+  coalesce,
   members,
   holds,
   pick,
@@ -135,6 +140,7 @@ const text = Object.freeze({
     toDelta,
     applyDelta,
     editorOf,
+    openText,
   }),
 });
 

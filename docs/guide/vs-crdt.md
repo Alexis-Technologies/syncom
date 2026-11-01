@@ -55,19 +55,19 @@ compares all four, row by row, from their source code: 141 rows in seven section
   (`/inspect`), not a window. The editor bindings (ProseMirror, CodeMirror, any editor through an
   adapter), the UI stores, presence, deltas, per-path events, transactions, undo scopes, forks at
   any version and blame are all built in now, each a subpath.
-- **Speed is still the largest gap, past Automerge now.** A syncom keystroke is an op
-  appended to the log; the text is a persistent rope, O(log n) per keystroke, and the record file
+- **Speed: past Automerge and Yjs on a real trace, behind Loro.** A syncom keystroke is an op
+  appended to the log; the text is a copy-on-write rope, O(log n) per keystroke, and the record file
   is written once per deferred window. In memory the pure build (the core with `text` and `sync`,
-  no signatures, no chain) types about 49 000 characters a second at the end, 23 000 at the start
-  and 26 000 at random, where Automerge types 22 000 to 25 000, Yjs 32 000 to 531 000 and Loro
-  343 000 to 635 000; signing every keystroke (`/all`) brings syncom to 13 000 to 16 000. The
-  automerge-perf editing trace (259 778 keystrokes) replays in about 6 seconds (9 signed),
-  Automerge in 14, Yjs in 5, Loro in half a second. A document of a few hundred pages typed
-  into by many people at once is still better held by Yjs or Loro.
+  no signatures, no chain), every keystroke awaited, types about 74 000 characters a second at the
+  end, 48 000 at the start and 38 000 at random, where Automerge types 21 000 to 23 000, Yjs
+  342 000 to 461 000 at either end and 28 000 at random, and Loro 294 000 to 609 000; signing
+  every keystroke (`/all`) brings syncom to 13 000 to 18 000. Through an editor's handle
+  (`openText()`, what the bindings stand on: keystrokes made at once, logged a window later as one
+  transaction, a word typed backward one op) it types 322 000 a second at the end and 94 000 at the start — 262 000 and 93 000 on disk, where Yjs's y-leveldb does 19 000 to 21 000 and Loro's append 40 000. The automerge-perf editing trace (259 778 keystrokes) replays in 1.6 seconds (6.8 signed), Yjs in 5, Automerge in 15, Loro in half a second. Typing at the start through a handle is where Yjs and Loro stay five times ahead, and at random — a new run every keystroke — Loro eight times; Yjs, there, types 28 000.
 - **Size depends on what is counted.** Yjs ships 28 KB min+gzip, all of it. Automerge and Loro
-  ship about 1.1 MB each, almost all of it WebAssembly. syncom's core is 51 KB and the core with
-  the `text` plugin 78 KB — the core carries the storage and the op log, which the three do not;
-  everything, with the sync protocol, queries, versions and signatures, is 117 KB.
+  ship about 1.1 MB each, almost all of it WebAssembly. syncom's core is 56 KB and the core with
+  the `text` plugin 92 KB — the core carries the storage and the op log, which the three do not;
+  everything, with the sync protocol, queries, versions and signatures, is 129 KB.
 - **History is kept four ways.** Automerge keeps every change forever, in a graph of SHA-256
   hashes, and never drops any. Loro keeps every change too, until you export a shallow snapshot.
   Yjs keeps the current state and the ids of what was deleted, not the changes; reading the past
@@ -268,7 +268,7 @@ The closest counterpart of each building block, in each library. The Yjs column 
 <tr><td>Set a whole new string (diff)</td><td>✅ <code>updateText(id, key, text)</code>: Myers over UTF-16, one splice per hunk<sup>120</sup></td><td>❌ no set-whole-string API<sup>121</sup></td><td>✅ <code>updateText(doc, path, s)</code>: Myers diff over grapheme clusters<sup>122</sup></td><td>✅ <code>text.update(s)</code> (Myers diff) and <code>updateByLine(s)</code>; <code>timeoutMs</code> option<sup>123</sup></td></tr>
 <tr><td>Delta format</td><td>✅ <code>toDelta(changes)</code> and <code>applyDelta(id, key, delta)</code>: Quill's form, embeds and marks included</td><td>✅ lib0 deltas in and out: <code>toDelta()</code>, <code>applyDelta()</code>, <code>event.delta</code><sup>124</sup></td><td>❌ no Quill deltas; <code>spans()</code>/<code>updateSpans()</code> and patches instead</td><td>✅ <code>toDelta()</code>, <code>applyDelta()</code>, <code>sliceDelta()</code>; text events are deltas</td></tr>
 <tr><td>Embeds in text</td><td>✅ <code>insertEmbed(id, key, index, { type, attrs })</code>: a slot (U+FFFC) whose marker is a register, marked like a character</td><td>✅ JSON objects or nodes inside text</td><td>✅ block markers (inline maps); <code>isEmbed: true</code> schema convention for images</td><td>❌ strings only; a delta insert must be text</td></tr>
-<tr><td>Long documents</td><td>a persistent rope, O(log n) per keystroke; the B4 trace (260k edits) in about 6 s, 8 MB of JS heap after it</td><td>one item per typed run; B4 (105k chars): 160 KB doc, 3.2 MB heap<sup>125</sup></td><td>every keystroke kept; a 260k-edit trace saves to 129 KB, loads in 0.13 s<sup>126</sup></td><td>B-tree text, O(log n) edits; 260k-op trace: 231 KB, 6 ms parse<sup>127</sup></td></tr>
+<tr><td>Long documents</td><td>a copy-on-write rope, O(log n) per keystroke; the B4 trace (260k edits) in 1.6 s, 23 MB of JS heap after it (its log held in memory included)</td><td>one item per typed run; B4 (105k chars): 160 KB doc, 3.2 MB heap<sup>125</sup></td><td>every keystroke kept; a 260k-edit trace saves to 129 KB, loads in 0.13 s<sup>126</sup></td><td>B-tree text, O(log n) edits; 260k-op trace: 231 KB, 6 ms parse<sup>127</sup></td></tr>
 <tr class="sc-matrix-group"><td colspan="5"><strong>Rich text</strong></td></tr>
 <tr><td>Formatting marks</td><td>✅ <code>mark()</code>, <code>unmark()</code>, <code>unmarkById()</code>, <code>spans()</code>: ranges between two anchors</td><td>✅ <code>format(index, length, { key: value })</code>; <code>insert</code> takes formats<sup>128</sup></td><td>✅ <code>mark(doc, path, {start, end, expand}, name, value)</code>, <code>unmark</code>, <code>marks</code>, <code>marksAt</code><sup>129</sup></td><td>✅ <code>text.mark({ start, end }, key, value)</code>, <code>unmark(range, key)</code><sup>130</sup></td></tr>
 <tr><td>Typing at a mark's edge</td><td>✅ per mark call: <code>expand: 'after' | 'before' | 'both' | 'none'</code><sup>131</sup></td><td>⚠️ none: an insert carries only the formats it names<sup>132</sup></td><td>✅ per mark call: <code>before</code>, <code>after</code>, <code>both</code>, <code>none</code>; default <code>after</code><sup>133</sup></td><td>✅ per key via <code>configTextStyle</code>: before, after, both or none</td></tr>
@@ -389,7 +389,7 @@ The closest counterpart of each building block, in each library. The Yjs column 
 </thead>
 <tbody>
 <tr class="sc-matrix-group"><td colspan="5"><strong>Encoding</strong></td></tr>
-<tr><td>Encoding of changes</td><td>JSON: <code>{ entries, hash }</code> log files of keyed <code>{ seq, op, fp }</code>; 19-slot arrays on the wire</td><td>binary updates: V1 (default) and V2 (columnar, RLE per field)</td><td>binary columnar chunks: document, change, DEFLATE-compressed change, bundle<sup>226</sup></td><td>binary FastSnapshot and FastUpdates (modes 3, 4); JSON updates</td></tr>
+<tr><td>Encoding of changes</td><td>JSON: <code>{"e", "c"}</code> log lines of positional <code>[seq, fp, header, payload]</code> entries, CRC-32 checked; 19-slot arrays on the wire</td><td>binary updates: V1 (default) and V2 (columnar, RLE per field)</td><td>binary columnar chunks: document, change, DEFLATE-compressed change, bundle<sup>226</sup></td><td>binary FastSnapshot and FastUpdates (modes 3, 4); JSON updates</td></tr>
 <tr><td>Format specification</td><td>✅ <code>docs/reference/wire.md</code>: the 19 slots, codes, payloads, signed header, files, procedures, bounds</td><td>❌ no written spec; the code defines the format<sup>227</sup></td><td>✅ published binary format spec on automerge.org (not in the clones)</td><td>✅ <code>docs/encoding.md</code>, a normative spec, plus JSON, LZ4 and xxHash docs</td></tr>
 <tr><td>Snapshot of the whole state</td><td>✅ <code>snapshot()</code> pages records with their merge meta; <code>mergeSnapshot()</code> joins them<sup>228</sup></td><td>✅ <code>encodeStateAsUpdate(doc)</code>: all items and tombstones<sup>229</sup></td><td>✅ <code>save(doc)</code>: compressed doc with full history; no history-less save<sup>230</sup></td><td>✅ <code>export({ mode: "snapshot" })</code> with history; <code>"shallow-snapshot"</code> with little</td></tr>
 <tr><td>Changes since a version</td><td>✅ a push sends ops past the host's vector; <code>changes</code> resumes from an event id<sup>231</sup></td><td>✅ <code>encodeStateAsUpdate(doc, stateVector)</code> sends what that peer lacks<sup>232</sup></td><td>✅ <code>saveSince(doc, heads)</code>, <code>getChangesSince(doc, heads)</code>, <code>saveIncremental()</code></td><td>✅ <code>export({ mode: "update", from: vv })</code></td></tr>
@@ -430,7 +430,7 @@ The closest counterpart of each building block, in each library. The Yjs column 
 <tr class="sc-matrix-group"><td colspan="5"><strong>Integrity</strong></td></tr>
 <tr><td>Hash-linked history</td><td>⚠️ with <code>/chain</code>, a per-node hash-linked chain of applied writes, checked on cold reads</td><td>❌ ids are client and clock; no content hashes</td><td>✅ SHA-256 change hashes; deps link them; heads checked on load</td><td>❌ no; ops are named by peer and counter<sup>266</sup></td></tr>
 <tr><td>Signed changes</td><td>✅ with <code>/signing</code> (in <code>/all</code>): Ed25519 per op, the node id is the key, verified on receipt</td><td>❌ no signatures</td><td>❌ no signatures on changes in the core<sup>267</sup></td><td>❌ no</td></tr>
-<tr><td>Checksums on encoded data</td><td>✅ every log file carries an xxHash32 of its entries; a signed SHA-256 digest per op with <code>/signing</code></td><td>❌ no checksum in either format</td><td>✅ each chunk carries a 4-byte SHA-256-prefix checksum, checked on load</td><td>✅ xxHash32 over every blob, plus one per SSTable block</td></tr>
+<tr><td>Checksums on encoded data</td><td>✅ every log file carries a CRC-32 of its entries, checked before they are parsed; a signed SHA-256 digest per op with <code>/signing</code></td><td>❌ no checksum in either format</td><td>✅ each chunk carries a 4-byte SHA-256-prefix checksum, checked on load</td><td>✅ xxHash32 over every blob, plus one per SSTable block</td></tr>
 <tr><td>A malformed update</td><td>✅ dropped and counted, never thrown: not logged, not relayed (a gap)<sup>268</sup></td><td>⚠️ throws a plain <code>Error</code>; parts decoded before the failure stay applied<sup>269</sup></td><td>⚠️ undecodable bytes throw, nothing applied; nonsense ops panic and broke the doc<sup>270</sup></td><td>✅ throws; the import rolls back and the doc is unchanged<sup>271</sup></td></tr>
 <tr><td>Limits against a hostile peer</td><td>✅ pending work, run and field slots, tree depth and index, counter range, skew, push limits<sup>272</sup></td><td>❌ no limits on size, depth or pending data<sup>273</sup></td><td>⚠️ 1 GB cap per decoded item, leb128 overflow checks; no queue or size caps<sup>274</sup></td><td>⚠️ decode caps (positions &lt; 2^30, value depth 128); no size or pending caps<sup>275</sup></td></tr>
 <tr><td>Validation of a peer's change</td><td>✅ the entity validator and <code>beforeApply</code> run on every peer's op</td><td>❌ none; peers are assumed trusted</td><td>❌ none in the core; Keyhive's server policy (alpha) checks edit access only</td><td>❌ no schema or rule checks; structural checks only</td></tr>
@@ -758,11 +758,11 @@ cloned commits.
 
 A syncom keystroke is an op: stamped, appended to the log, applied to the text's rope in
 O(log n), and the record file written once per deferred window — in the secure build signed too.
-The pure build types in Automerge's range; Yjs and Loro stay one to two orders of magnitude
-ahead, Loro most of all. The keystroke that extends the writer's own run at the end is the
-cheapest (about 36 000 a second); one at the start or at random places a new run (about 20 000).
-On disk, every keystroke awaited until it is stored, syncom types 8 500 to 21 000 a second,
-Automerge about 3 300, Yjs 15 000 to 24 000 and Loro 41 000 to 47 000 (the `disk` line of the
+The pure build types two to three times Automerge's rate; Yjs and Loro stay ahead, five to ten
+times at the end, Loro most of all. The keystroke that extends the writer's own run at the end is
+the cheapest (about 74 000 a second); one at the start or at random places a new run (38 000 to
+48 000). On disk, every keystroke awaited until it is stored, syncom types 21 000 to 30 000 a
+second, Automerge about 2 900, Yjs 12 000 to 21 000 and Loro about 40 000 (the `disk` line of the
 same chart on [Benchmarks](/guide/benchmarks)).
 
 <BenchFigure chart="cores" :only="['syncom', 'syncom-text', 'syncom-all', 'yjs', 'automerge', 'loro']" />
@@ -787,6 +787,7 @@ WebAssembly module of 3.2 to 3.5 MB (about 1.1 MB gzipped); Yjs and syncom are p
   they receive: a peer's op is signed and validated, scopes decide what each peer gets, limits
   stop a hostile peer, `purge()` erases a payload everywhere, and tags, branches and undo work
   over the whole storage. Its lists, texts and trees merge like Loro's, with embeds, block
-  markers, deltas and ProseMirror and CodeMirror bindings, typing at Automerge's speed.
+  markers, deltas and ProseMirror and CodeMirror bindings, typing past Automerge and Yjs on a
+  real editing trace.
 - **Together.** One of the three can hold the long documents many people type into at once, and
   syncom the records around them: who owns a document, its title, its tags, who may read it.

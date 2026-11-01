@@ -318,7 +318,7 @@
           "mark": "✅",
           "text": "text fields: `splice()`/`updateText()` merge by position (Fugue); marks with expand rules, stacking comments, cursors",
           "source": "src/text/sequence.js; src/ops.js; docs/guide/lists.md",
-          "note": "A text is a field of a record — a persistent rope, O(log n) per keystroke — and a document for an editor is one text with block markers, bound through `/prosemirror` or `/codemirror`."
+          "note": "A text is a field of a record — a copy-on-write rope, O(log n) per keystroke — and a document for an editor is one text with block markers, bound through `/prosemirror` or `/codemirror`."
         },
         "lists": {
           "mark": "✅",

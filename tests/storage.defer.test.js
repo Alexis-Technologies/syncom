@@ -214,3 +214,11 @@ test('open({ defer }): record files lag the log by the window, never the reads',
     assert.throws(() => syncom.open({ path: dir, logger: false, defer: '50' }), TypeError);
   });
 });
+
+test('a slot a peer’s page settles leaves the count of waiting positions: the overflow flush reads what waits', async (t) => {
+  const { storage } = await openTemp(t, { defer: 60_000 });
+  const id = await storage.insert({ n: 1 });
+  assert.strictEqual(storage.stats().defer.positions, 1);
+  await storage.applyRemote([{ origin: 'peer', seq: 1, ts: Date.now() + 1, type: 'set', id, data: { m: 1 } }]);
+  assert.deepStrictEqual([storage.stats().deferred, storage.stats().defer.positions], [0, 0]);
+});

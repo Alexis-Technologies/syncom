@@ -353,11 +353,20 @@ or left child of element `e`, named `ts:offset:origin`) or the writer's own
 run to extend (`run`, `from` — never a move's position run, which holds its
 element alone: a peer's extension of one is malformed); `content` is the inserted string or array and,
 empty, names the kind of a call that only removes; `vals`, when the content
-holds embed slots, their markers at their offsets. One call is one op, signed
-and logged like any other — an editor that types a word sends one op per
-keystroke unless it batches them (see below). A keystroke extending the
-writer's run adds its characters to the run and no key to the record's
-metadata; a new run adds one key, a little over a hundred bytes.
+holds embed slots, their markers at their offsets. What is the writer's own
+is named without its origin, which the op's header carries already: a run by
+its stamp (a number), an element as `ts:offset` — `run: 1792831354856`,
+`at: '<1792831354856:3'` — and every node reads it under the op's origin, so
+a short name never names another writer's run. One call is one op, signed
+and logged like any other — except where keystrokes continue each other
+(typed on at the end of their run, or a chain of cuts): sent without waiting,
+typed through a transaction or through a [text handle](./editors#a-text-handle),
+they are one op; a handle folds a word typed backward too. A keystroke
+extending the writer's run adds its characters to the run and no key to the
+record's metadata; a new run adds one key, a little over a hundred bytes. A
+run grows while it is of its field's newest piece (the runs named last, 512
+at most): typing on after one's own older text begins a run there, so a large
+text's file, written a piece at a time, changes its newest piece a keystroke.
 
 The first example of this page, with a listener attached before it:
 
@@ -365,9 +374,9 @@ The first example of this page, with a listener attached before it:
 storage.on('change', (op) => {
   if (op.type === 'splice') console.log(op.key, op.value);
   // body { content: 'helo', at: '^' }
-  // body { content: 'l', at: '<1792831354856:3:3oyEvh7q…' }
-  // body { content: ' world', run: '1792831354856:3oyEvh7q…', from: 4 }
-  // body { content: '', cut: [['1792831354856:3oyEvh7q…', 4, 6]] }
+  // body { content: 'l', at: '<1792831354856:3' }
+  // body { content: ' world', run: 1792831354856, from: 4 }
+  // body { content: '', cut: [[1792831354856, 4, 6]] }
 });
 ```
 
@@ -496,7 +505,12 @@ delta cannot say — a reset, an unset — makes it `null`: read the field again
   nothing more until a reset — `set()` of the record, or `compact(id)`,
   which writes the field again without its tombstones. Locally
   a call past a bound rejects with `FIELD_KIND`, `kind: 'bound'`, `detail`
-  (`'run'`, `'field'` or `'pending'`), `count` and `max`.
+  (`'run'`, `'field'`, `'pending'`, `'cuts'` or `'marks'`), `count` and `max`.
+  A splice cuts at most 65 536 ranges (`MAX_CUTS`; overlapping ranges of one
+  run read as one for the change report), a text holds at most 65 536 marks
+  (`MAX_MARKS`), and an extension that arrives ahead of its run — parked until
+  the run reaches it — counts against `MAX_RUN` and the field's slots where it
+  arrives, never only where it lands.
 - Pending work — a run whose anchor has not arrived, a cut or an extension
   of a run not here, a register for an element not here, a mark switched off
   before it arrived — is bounded per field by `sync.pendingMax` (4 096;

@@ -10,6 +10,14 @@
  *
  * On disk: y-leveldb, the official LevelDB persistence — every update the
  * document emits is stored with `storeUpdate`, and the write waits for it.
+ *
+ * A list is a `Y.Array`: push, insert and delete; it has no element of its
+ * own to set and no move, so those two scenarios leave it out.
+ *
+ * `yjs-updates`: the memory document with an `update` listener, so every
+ * transaction is encoded as the update a provider or a persistence would
+ * send — the work syncom's memory line does for every write (its log). Yjs
+ * encodes only while something listens, so the plain memory row skips it.
  */
 
 const { createRequire } = require('node:module');
@@ -59,6 +67,16 @@ const wrap = (Y, doc, persist, close) => {
     },
     flush,
     close,
+    list: async (initial, name = 'list') => {
+      const array = doc.getArray(name);
+      await write(() => array.push(initial));
+      return {
+        push: (value) => write(() => array.push([value])),
+        insert: (index, value) => write(() => array.insert(index, [value])),
+        remove: (index) => write(() => array.delete(index, 1)),
+        read: () => array.toArray(),
+      };
+    },
     text: (name = 'text') => {
       const text = doc.getText(name);
       return {
@@ -77,11 +95,36 @@ const memory = {
     return wrap(Y, new Y.Doc(), null, async () => {});
   },
   text: (store, name) => store.text(name),
+  list: (store, initial) => store.list(initial),
+};
+
+// Every update encoded and kept count of, nothing stored: the listener is
+// what makes Yjs encode.
+const encoded = {
+  variant: 'Y.Doc, every update encoded (an update listener)',
+  open: async () => {
+    const Y = local('yjs');
+    let bytes = 0;
+    const store = wrap(
+      Y,
+      new Y.Doc(),
+      (update) => {
+        bytes += update.length;
+        return null;
+      },
+      async () => {},
+    );
+    store.encodedBytes = () => bytes;
+    return store;
+  },
+  text: (store, name) => store.text(name),
+  list: (store, initial) => store.list(initial),
 };
 
 const disk = {
   variant: 'y-leveldb',
   text: (store, name) => store.text(name),
+  list: (store, initial) => store.list(initial),
   open: async (dir) => {
     const Y = local('yjs');
     const { LeveldbPersistence } = local('y-leveldb');
@@ -109,12 +152,22 @@ const replicate = async (source, replica) => {
 };
 
 module.exports = {
-  id: 'yjs',
-  name: 'Yjs',
-  package: 'yjs',
-  url: 'https://github.com/yjs/yjs',
-  lines: {
-    memory: { ...memory, openReplica: (dir) => memory.open(dir), replicate },
-    disk: { ...disk, openReplica: (dir) => disk.open(dir), replicate },
+  plain: {
+    id: 'yjs',
+    name: 'Yjs',
+    package: 'yjs',
+    url: 'https://github.com/yjs/yjs',
+    lines: {
+      memory: { ...memory, openReplica: (dir) => memory.open(dir), replicate },
+      disk: { ...disk, openReplica: (dir) => disk.open(dir), replicate },
+    },
+  },
+  encoded: {
+    id: 'yjs-updates',
+    name: 'Yjs',
+    package: 'yjs',
+    url: 'https://github.com/yjs/yjs',
+    lines: { memory: { ...encoded, openReplica: (dir) => encoded.open(dir), replicate } },
+    unsupported: { disk: 'memory only — on disk the Yjs row stores every update already' },
   },
 };

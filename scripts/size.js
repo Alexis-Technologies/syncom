@@ -136,7 +136,21 @@ const ENTRIES = [
   // plugins too — the core keeps the hooks and SHA-256 through Web Crypto
   // (src/crypto/digest.js) — and came down to 52 KB (51.4 measured). The rule
   // stays: a raise names its feature here.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 52 },
+  // 52.8 with a write made at once (Storage#fastCommit, src/commit.js commitAtOnce, the log's enqueue, events
+  // dispatched; 2026-10-31). 53, raised by name.
+  // 53.1 with the log's lines: positional entries, the header text made once, a CRC-32 checked before the
+  // parse (src/crc32.browser.js). 53.5, raised by name.
+  // 53.8 with a field read when it is read (src/lazy.js). 54, raised by name.
+  // 54.2 with keystrokes made at once grown into the op before them (coalesced, log.lastGathered). 54.5,
+  // raised by name.
+  // 54.6 with what a text handle stands on (core.editing, core.on, a transaction's commitResolved). 55, raised by name.
+  // 55.5 with SHA-256 in JavaScript (src/crypto/sha256.js), so the browser makes a write at once. 56, raised by name.
+  // 56.1 with the handles followed through one listener of the storage's, every handle flushed before a flush(), a
+  // tag(), a close(), a compaction, a restore or a patch, a hook's context for an edit made elsewhere, and a write
+  // that adds a `$type` kept off the fast path (review №4, E2). 56.5, raised by name.
+  // 56.5 (over by bytes) with the writes counted by path (`stats().commits`, `syncom.path`), the handles' flushes
+  // recorded, a peer's `actor` and `from` bounded, and one close (review №4, E3–E6). 57, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 57 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -282,9 +296,40 @@ const ENTRIES = [
   // 115.3 with the text plugin in four modules beside it (src/text/{kind,diffs,methods,deltas}.js). 115.5, raised by name.
   // 115.5 with a field's revision (applyDelta's fast path past `expect`, the binding's send). 116, raised by name.
   // 117.1 with a large block written in pieces (src/entries.js, the text plugin's `pieces`). 117.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 117.5 },
+  // 117.6 with the write path's first pieces at once (events dispatched, a cheap prepare, a hold and an announce
+  // without a promise; 2026-10-31). 118.5, raised by name: room for the fast path, measured again at its end.
+  // 118.6 with a write made at once (the fast path itself). 119, raised by name.
+  // 119.3 with the log's lines and segments of them (a CRC-32 checked before the parse, positional entries, a
+  // segment the journaled lines and a trailer). 120, raised by name.
+  // 120.3 with a list read when it is read and keystrokes coalesced. 121, raised by name.
+  // 122.6 with the synchronous text handle; 123.2 with an op's own references short (src/text/kind.js fullRefs).
+  // 123.5, raised by name. 124.1 with SHA-256 in JavaScript (src/crypto/sha256.js), so the browser makes a write at once. 124.5, raised by name.
+  // 124.6 with the editor binding on a handle (the handle's embeds and spans, a run's offsets reserved). 125,
+  // raised by name. 128.3 with the v2 sequence engine (a copy-on-write rope, the id index, the hash tries, names
+  // interned per lineage; v1's persistent tree, map and lists gone). 128.5, raised by name. 128.7 with a large
+  // block's pieces by run number and a word typed backward folded by a handle. 129, raised by name.
+  // 129.3 with the handles followed through one listener of the storage's, a flush cancelled behind one that could
+  // not be logged, and every handle flushed at a flush(), a tag() and a close() (review №4, E2). 129.5, raised by name.
+  // 129.8 with a handle's delta checked whole first, its keystrokes one change, a hook's context for its edits, the
+  // handles reset by a repair, and a write that adds a `$type` kept off the fast path. 130, raised by name.
+  // 130.0 (over by bytes) with a peer's `actor` and `from` bounded (MAX_ACTOR), a write made at once with a promise
+  // of its own and its entry settled whatever the slot did, one close, the browser halves' buffers let go of past a
+  // megabyte, and a log file told altered or torn by its shape (review №4, E3–E4). 130.5, raised by name.
+  // 130.5 (over by bytes) with a failed append's line taken out of its journal, the index's counter kept, the
+  // evidence copies scrubbed by a purge, a once listener added during an emit kept, and the writes counted by
+  // path (review №4, E6, E9). 131, raised by name.
+  // (E1, the engine agent) block's pieces by run number and a word typed backward folded by a handle. 129, raised by name. 129.1 with
+  // (E1, the engine agent) the engine's bounds read before anything is written (a parked extension against MAX_RUN and MAX_FIELD, a cut's
+  // (E1, the engine agent) ranges against MAX_CUTS and merged for the report) and its pending work counted as it comes (2026-10-31).
+  // (E1, the engine agent) 129.5, raised by name.
+  // 131.1 with the engine's bounds (E1, above) and the write path's, the handle's and the log's fixes (E2–E9) in one
+  // bundle. 131.5, raised by name — M-3/M-6 (the folds written once, the two B+-trees sharing their node code) are
+  // what should give some of it back.
+  // 131.5 (over by bytes) with state.js split where its seams are clean — the names (src/text/names.js) and a peer's
+  // block normalized (src/text/normalize.js), names across modules unminified (review №4, M-4). 132, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 132 },
   // The list and text kinds alone: the sequence engine over its rope
-  // (src/text/btree.js, pmap.js, plist.js), its patches and its methods;
+  // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
   // 22.1 with the surrogate rule (the code-point diff, the refused indexes).
   // 22.6 with the field-path check every method takes (src/paths.js).
@@ -302,7 +347,25 @@ const ENTRIES = [
   // 32.8 with the engine in five modules (the names that cross a module are not minified). 33, raised by name.
   // 33.4 with the plugin in four modules beside text.js. 33.5, raised by name.
   // 33.6 with revision() and applyDelta's revision. 34, raised by name.
-  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 34 },
+  // 34.1 with a list's reading made when it is read (deriveLater; 2026-10-31). 34.5, raised by name.
+  // 36.8 with the synchronous text handle (src/text/handle.js, openText) and keystrokes coalesced; 37.4 with an op's
+  // own references short (src/text/kind.js fullRefs). 37.5, raised by name. 37.7 with the handle's embeds and spans
+  // and a run's next offset reserved while a handle is open (extendsRun). 38, raised by name. 38.2 with what a handle's
+  // edit made carried to its flush. 38.5, raised by name. 41.6 with the v2 sequence engine (src/text/rope.js, ids.js,
+  // cow.js and the state that stands on them, in place of v1's btree.js, pmap.js, plist.js). 42, raised by name.
+  // 42.1 with the pieces by run number (tokens per piece, the quiet writes) and a handle's word typed backward
+  // folded (prepends). 42.5, raised by name.
+  // 42.7 with a handle's flushes cancelled behind one that could not be logged, a prepend held to the turns heard, a
+  // delta checked whole first, keystrokes one change, the reservations per field (review №4, E2). 43, raised by name.
+  // (E1, the engine agent) folded (prepends). 42.5, raised by name. 42.5 with the bounds read before anything is written (a parked
+  // (E1, the engine agent) extension against MAX_RUN and MAX_FIELD, a cut's ranges against MAX_CUTS and merged for the report) and the
+  // (E1, the engine agent) pending work counted as it comes (2026-10-31). 43, raised by name.
+  // 43.3 with the engine's bounds (E1: a parked extension against MAX_RUN and MAX_FIELD, a zero-slot run left out, a
+  // cut's ranges against MAX_CUTS and merged for the report, the pending work counted as it comes, a block rebuilt
+  // once per base, MAX_MARKS) beside the handle's fixes (E2) in one bundle. 43.5, raised by name.
+  // 43.5 (over by bytes) with a join that is the same on every node whatever a forged picture differs in under one
+  // key (the lesser text wins; SEQ-13). 44, raised by name.
+  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 44 },
   // The tree kind alone, with the fractional indexes a place is made of and
   // the argument checks it shares with the core (5.1 measured).
   // 5.5 with the field-name check unset shares with it (src/args.js).
@@ -319,15 +382,17 @@ const ENTRIES = [
   // adds to the core is the difference `/all` shows).
   // Signed ops: the Ed25519 half, the canonical form and the verdict.
   // 4.5 with src/ in procedural loops (no array callbacks — a loop is longer than a callback; 2026-10-26) (a hex table in the browser half).
-  // 5.1 with the keys no one holds refused (the points of small order, a y past the prime).
+  // 5.1 with the keys no one holds refused (the points of small order, a y past the prime). 5.7 with the op's
+  // header hashed in JavaScript (src/crypto/sha256.js, through src/header.js). 6, raised by name.
   {
     label: 'signing — browser (@alexify/syncom/signing)',
     entry: 'src/signing/signing.js',
     platform: 'browser',
-    budget: 5.5,
+    budget: 6,
   },
-  // The chain: the blocks, SHA-256 through Web Crypto, the plugin.
-  { label: 'chain — browser (@alexify/syncom/chain)', entry: 'src/chain/chain.js', platform: 'browser', budget: 2.5 },
+  // The chain: the blocks, SHA-256 through Web Crypto, the plugin. 2.9 with the digest module's SHA-256 in JavaScript,
+  // which the chain does not call (a browser split of its own was not worth 0.4 KB). 3, raised by name.
+  { label: 'chain — browser (@alexify/syncom/chain)', entry: 'src/chain/chain.js', platform: 'browser', budget: 3 },
   // Sealed records (the RSA half) and the at-rest wrapper (AES-GCM, PBKDF2).
   {
     label: 'encryption — browser (@alexify/syncom/encryption)',
@@ -368,7 +433,9 @@ const ENTRIES = [
     // 4.6 with the canonical JSON in shape.js.
     // 5.9 with migrate(), check() and schema.json moved out of the core (the
     // main entry 50.8 → 50.1; 2026-10-27). 6, raised by name.
-    budget: 6,
+    // 6.0 (over by bytes) with a peer's `actor` and `from` bounded in shape.js (MAX_ACTOR; review №4, E4). 6.5,
+    // raised by name.
+    budget: 6.5,
   },
   // The OpenTelemetry adapter: the tracer and meter resolved, the instruments, the gauges.
   {
@@ -392,7 +459,17 @@ const ENTRIES = [
     // 33.8 with the review's write-path fixes it bundles (a transaction's records held once, sets shared
     // between versions, an op on a purged record stripped). 34.5, raised by name.
     // 34.8 with the log's stream index and the segments read from the listing; 2026-10-27. 35, raised by name.
-    budget: 35,
+    // 35.1 with the write path's pieces at once and the log's enqueue (a group's promise shared, its callbacks
+    // once durable; 2026-10-31). 35.5, raised by name.
+    // 35.5 (over by a few bytes) with a write made at once. 36, raised by name.
+    // 36.1 with the log's lines and segments of them. 36.5, raised by name.
+    // 36.8 with a list read when it is read and keystrokes coalesced. 37, raised by name.
+    // 37.0 (over by bytes) with what a text handle stands on. 37.5, raised by name.
+    // 37.9 with SHA-256 in JavaScript (src/crypto/sha256.js), so the browser makes a write at once. 38, raised by name.
+    // 38.0 (over by bytes) with a handle's flush taking what its edits made. 38.5, raised by name.
+    // 38.5 (over by bytes) with the log's failed line taken out, the index's counter kept, the evidence copies
+    // scrubbed, the writes counted by path and one close (review №4, E3–E9). 39, raised by name.
+    budget: 39,
   },
 ];
 

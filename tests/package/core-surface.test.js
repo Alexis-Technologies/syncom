@@ -26,6 +26,7 @@ const MEMBERS = [
   'deferred',
   'definitionOf',
   'drain',
+  'editing',
   'emit',
   'entities',
   'entries',
@@ -39,6 +40,7 @@ const MEMBERS = [
   'invalid',
   'kindOf',
   'land',
+  'landed',
   'landing',
   'limits',
   'listening',
@@ -47,6 +49,7 @@ const MEMBERS = [
   'maxSkew',
   'nodeId',
   'observe',
+  'on',
   'otel',
   'persist',
   'pipelined',
@@ -68,6 +71,7 @@ const MEMBERS = [
   'verify',
   'version',
   'view',
+  'write',
 ];
 
 test('the core a storage lends is frozen and has the members this list names, no more', async (t) => {

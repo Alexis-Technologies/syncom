@@ -14,6 +14,7 @@ import type {
   Plugin,
   PluginMethods,
   TextMethods,
+  TextHandleMethods,
   TreeMethods,
   Entry,
   SyncOp,
@@ -35,7 +36,7 @@ export * from '../query/query.js';
 export * from '../versions/versions.js';
 
 /** The storage with every shipped plugin registered: the core's API and the text and tree methods. */
-export interface Storage extends CoreStorage, TextMethods, TreeMethods, SyncApi {}
+export interface Storage extends CoreStorage, TextMethods, TextHandleMethods, TreeMethods, SyncApi {}
 
 export interface StorageConstructor extends Omit<CoreStorageConstructor, 'prototype' | 'new'> {
   readonly prototype: Storage;
@@ -55,7 +56,7 @@ export declare function applyOp(entry: Entry | null, op: SyncOp, limits?: FoldLi
 /** The join of two entries under the shipped plugins' registry. */
 export declare function mergeEntry(a: Entry | null, b: Entry | null, limits?: FoldLimits | null): Entry | null;
 
-export declare const text: Plugin<TextMethods>;
+export declare const text: Plugin<TextMethods & TextHandleMethods>;
 export declare const tree: Plugin<TreeMethods>;
 export declare const sync: Plugin<SyncApi>;
 export declare const schema: Plugin;
@@ -64,7 +65,7 @@ export declare const query: Plugin;
 export declare const versions: Plugin;
 /** The plugins the package ships, in registration order. */
 export declare const PLUGINS: readonly [
-  Plugin<TextMethods>,
+  Plugin<TextMethods & TextHandleMethods>,
   Plugin<TreeMethods>,
   Plugin,
   Plugin,

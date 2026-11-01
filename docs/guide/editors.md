@@ -1,11 +1,12 @@
 # Editors
 
 An editor holds its own document; syncom holds the field. `@alexify/syncom/editor`
-keeps the two the same: the editor's edits reach the field as one
-transaction each, a peer's edits reach the editor as deltas, and an edit the
-field moved under is refused and sent again rebased, so nothing is lost and
-nothing lands twice. It is the binding every editor adapter builds on, and
-it asks three functions of the editor.
+keeps the two the same over a [text handle](#a-text-handle) on the field: the
+editor's edits are made at once over the handle's reading — which is what the
+editor shows — and logged a window later, keystrokes that continue each other
+as one op; every other writer's edits reach the editor as deltas in its
+indices. Nothing is lost and nothing lands twice. It is the binding every
+editor adapter builds on, and it asks three functions of the editor.
 
 ```js
 const { open } = require('@alexify/syncom/all');
@@ -15,9 +16,66 @@ const storage = await open({ path: 'data' });
 const binding = createTextBinding(storage, id, 'body', adapter);
 await binding.ready; // the editor holds the field
 // … type …
-await binding.flush(); // every edit reported so far has landed
+await binding.flush(); // every edit reported so far is logged
 binding.stop();
 ```
+
+## A text handle
+
+When the editor is yours to drive — a keystroke handler, a test, a
+benchmark — `storage.openText(id, key)` (the `text` plugin's) is a handle
+that edits at once, with no promise per keystroke:
+
+```js
+const handle = await storage.openText(id, 'body');
+handle.insert(0, 'Hello');
+handle.insert(5, ' world', { bold: true });
+handle.toString(); // 'Hello world' — at once
+handle.observe((delta, { local, reset }) => {
+  // a peer's change as a delta in the handle's indices; `reset`: read the field again
+});
+await handle.flushed; // logged: the two keystrokes one op, the mark another
+await handle.close();
+```
+
+- **What it reads.** The field as the storage announced it, with what was
+  typed here on top. An edit is resolved and stamped over that reading and
+  applied to it at once; one the field refuses (`OUT_OF_RANGE`, a lone
+  surrogate) throws and changes nothing.
+- **When it is logged.** A window later (`window`, the storage's `defer` by
+  default; 0 for the end of the turn), as one transaction: keystrokes that
+  continue each other — typed on at the end of their run, a chain of cuts,
+  or a word typed backward (each keystroke right before the one typed last,
+  256 characters an op at most) — are one op. Until then nothing reaches a
+  file, `get()` or a peer;
+  `flushed` settles once every edit so far is logged and landed, and the
+  storage's `flush()`, `tag()` and `close()` flush open handles first.
+- **Another writer's edits** — a peer's, or a write through the storage —
+  reach the handle once they are announced, as a delta in its indices
+  (`local: false`). A write through the storage to the same field resolves
+  its indices against the storage's reading, not the handle's: flush first to
+  write by the handle's.
+- **A flush that cannot be logged** — the append failed, a hook or a
+  validator refused — drops what was not logged: its edits, the flushes taken
+  behind it (they may anchor in what was dropped) and what was typed since.
+  `flushed` rejects with `UNLOGGED` (the handle's `error` event too), the
+  handle reads the field as announced again, its observers hear `reset`, and
+  the storage logs `handle.unlogged`. A step that fails after the append (an
+  `afterWrite` hook) is that error, not `UNLOGGED`: the edits are logged and
+  kept. The storage's `flush()`, `tag()` and `close()` flush every open
+  handle; one whose edits cannot be logged stops none of the others — the
+  first two reject with one `UNLOGGED` (`handles`, `edits`), `close()` closes
+  and logs `edits.unlogged`. Once `close()` is called, an edit is `CLOSED`.
+- `format(index, count, attributes)` styles a range (an `embed` attribute
+  sets every embed slot's marker), `insertEmbed(index, marker)` inserts a slot,
+  and `applyDelta(delta)` is `storage.applyDelta()`'s, at once: marks, embeds
+  and their markers, an insert styled exactly as it says. `spans()` reads the
+  handle's reading as `storage.spans()` would.
+- **Several writers of one node** — handles, and the storage itself — each
+  over its own reading, never grow one run from two readings: while a handle
+  is open every extension of a run reserves its next offset, and a writer
+  whose reading is behind it begins a run of its own. Nothing typed by any of
+  them is lost.
 
 ## The adapter
 
@@ -55,55 +113,41 @@ holds a document of blocks hands over the whole document and lets
 
 ## What the binding does
 
-The binding keeps a **shadow**: the field's text as the storage reads it
-(U+FFFC for an embed slot) after every change it has processed. The editor
-holds the shadow plus its own edits not yet landed — one delta **in
-flight**, and what was typed since, **pending**.
+The binding opens a handle on the field (`storage.openText(id, path, {
+source, window })`) and loads the editor from its reading. The handle's
+reading is the field as announced with the editor's edits not logged yet on
+top — exactly what the editor shows, so the two never part.
 
-- **Editor → field.** An edit reported is composed into `pending`; one
-  delta at a time goes to `applyDelta(id, path, delta, { expect, revision })` with
-  `expect` the shadow it was made over — one transaction, one log append,
-  `source` the binding's. Its own `transaction` event moves the shadow on;
-  the answer — `{ ops, revision }` — frees the next send, which goes with
-  that revision while nothing else moved the shadow: a field still at it is
-  not compared with `expect`, so typing alone costs no read of the text,
-  however long.
-- **Field → editor.** `observe(id, path)` hands the field's changes a turn
-  at a time — a local write, a peer's page, a joined snapshot — and
-  `toDelta` composes them into one delta over the shadow. A peer's delta is
-  rebased over what the editor holds beyond the shadow (the in-flight
-  delta, then the pending one) and handed to `updateContents`; the editor
-  never sees it in the shadow's indices.
-- **The race.** A peer's edit may land in the field between the shadow the
-  binding read and the delta it sent. Inside the mutation queue,
-  `applyDelta` compares the field's text with `expect` — the revision the
-  send carries is one the field moved past — and refuses with `STALE`
-  before any op; the binding has rebased the refused delta over the
-  peer's by the time that delta reached the editor — the peer's insert first
-  where both inserted at one index, the order the storage holds them in —
-  and sends it again. Two editors on one storage, or on two nodes, converge
-  on the field whatever the interleaving. `expect` compares text: a peer's
-  change made of the characters it replaced (a letter cut and typed again)
-  passes it, and the delta lands by index over the new characters. The
-  binding reads what landed against the delta as it rebased it, and where
-  they differ it reloads the editor rather than leave it apart from the
-  field.
+- **Editor → field.** An edit reported is applied to the handle at once
+  (`handle.applyDelta`): resolved and stamped over the handle's reading, so it
+  is never refused as stale and never rebased. The handle logs the edits a
+  window later — `window`, the storage's `defer` by default — as one
+  transaction with the binding's `source`, keystrokes that continue each
+  other as one op.
+- **Field → editor.** Every other writer's change — a peer's page, a write
+  through the storage, another editor's handle — reaches the handle once it is
+  announced, as a delta in the handle's indices, which are the editor's; the
+  binding hands it to `updateContents`. Two editors on one storage, or on two
+  nodes, converge on the field whatever the interleaving: concurrent inserts
+  at one spot land each whole, in the engine's order.
 - **A reset.** A change no delta can say — the record written whole, the
   field unset, the record deleted or purged — reloads the editor from the
-  field and drops what was not sent; `onReset` hears it. What is typed
-  while the field is being read again goes with the contents it replaces.
-- **A failure.** A send that fails other than `STALE` reloads the editor
-  after a pause that grows with each failure in a row, and nothing is sent
-  until it has; after five in a row the binding stops (`onError` hears
-  each).
+  handle's reading; `onReset` hears it. What is typed before the field is
+  first read is over contents the load replaces, and is dropped.
+- **A failure.** A flush that cannot be logged (`UNLOGGED`: the append
+  failed, a hook or a validator refused) drops what was not logged and
+  reloads the editor; an editor that throws on a change is loaded again the
+  same way. After five failures in a row the binding stops (`onError` hears
+  each, `onStop` the last); `stop()` logs what was typed and stops.
 
-`binding.pending` says whether an edit is on its way, `binding.shadow` what
-the field reads as, `flush()` resolves once every edit reported so far has
-landed. An insert's attributes are exactly its marks: a mark that would
-have grown over text typed at its end is taken off that text, and a splice
-change reports the marks its content reads with, so both sides agree
-without reading the field. A `many` mark (several of one name over a range)
-is not a delta's: it reads as a list in `spans()` and is left as it is.
+`binding.pending` says whether edits wait for the log, `binding.shadow` what
+the editor holds (the handle's reading), `flush()` resolves once every edit
+reported so far is logged. An insert's attributes are exactly its marks: a
+mark that would have grown over text typed at its end is taken off that
+text, and a splice change reports the marks its content reads with, so both
+sides agree without reading the field. A `many` mark (several of one name
+over a range) is not a delta's: it reads as a list in `spans()` and is left
+as it is.
 
 ## Whole documents
 
@@ -117,11 +161,12 @@ it:
 const { spansToBlocks, blocksToSpans, diffBlocks, spansToDelta } = require('@alexify/syncom/editor');
 
 const before = await storage.blocks(id, 'body'); // [{ index, type, parents, attrs, spans }]
+const text = (await storage.get(id)).body; // what the delta is made over
 const after = structuredClone(before);
 after[0].attrs = { level: 2 }; // the heading's level
 after[1].spans = [{ type: 'text', text: 'First paragraph.', marks: {} }];
 const delta = diffBlocks(before, after); // cuts and inserts, markers changed, marks changed
-await storage.applyDelta(id, 'body', delta, { expect: binding.shadow });
+await storage.applyDelta(id, 'body', delta, { expect: text }); // { ops: 5, revision }
 ```
 
 `diffSpans(before, after)` is the same over typed spans; `spansToDelta()`
@@ -222,7 +267,7 @@ await cm.attach(editor).ready;
 ```
 
 A CodeMirror document is the field's text as it is. An edit's ChangeSet
-leaves as a delta of exact splices (`deltaOfChanges`), one transaction each;
+leaves as a delta of exact splices (`deltaOfChanges`), made at once on the binding's handle;
 a peer's delta lands as a ChangeSet (`changesOfDelta`), annotated so it is
 not sent back and kept out of any history, and the selection maps through
 it as through any change. Marks are not CodeMirror's and are left alone; an
@@ -295,8 +340,8 @@ adapter of another editor:
   when first asked.
 - `undoSteps(manager, () => binding, report)` turns an undo manager of
   `@alexify/syncom/undo` into commands: `steps.undo(run)` answers whether
-  there is a step and, with `run`, takes it once the binding's edits have
-  landed; a failure goes to `report`.
+  there is a step and, with `run`, takes it once the binding's edits are
+  logged; a failure goes to `report`.
 - `failureReporter(storage, id, path)(event, onError)` is a failure of the
   adapter's own work handed to `onError`, or logged as a warn `event`.
 
@@ -309,10 +354,10 @@ adapter of another editor:
   where they are typing, a cut or inline content inside one textblock
   (a keystroke in 5 000 paragraphs: 0.06 ms); a split, a join, a mark or a
   node set is a diff of the two documents, linear again.
-- A reset drops what was not sent. An editor that must keep it reads
-  `binding.shadow` in `onReset` and decides.
-- `applyDelta` makes one op per insert, cut and mark; a delta of many
-  pieces is many ops in one transaction, signed and logged like any other.
-  Batch keystrokes where you can.
+- A reset, and a flush that could not be logged, drop what was not logged.
+- `applyDelta` makes one op per insert, cut and mark — keystrokes that
+  continue each other one op; a delta of many pieces is many ops in one
+  transaction, signed and logged like any other. The binding's edits are
+  logged a window at a time, so a burst of typing is a transaction.
 - The record's other fields, and a record's `delete`, are the storage's as
   ever — the binding touches one field.

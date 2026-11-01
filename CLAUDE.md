@@ -18,7 +18,7 @@ if two ever seem to disagree; fix the one that is wrong.
 | [src/tree/CLAUDE.md](./src/tree/CLAUDE.md) | The tree kind: the movable tree and its kept fold |
 | [src/sync/CLAUDE.md](./src/sync/CLAUDE.md) | Replication: the dialing side and the host: scopes, the feed's cursor, failed pages, reconnects, the registry |
 | [src/versions/CLAUDE.md](./src/versions/CLAUDE.md) | Versions and tags: the past folded out of the log, tags copy-on-write, patches |
-| [src/editor/CLAUDE.md](./src/editor/CLAUDE.md) | The editor binding: one delta at a time with `expect`, the rebase, what the adapters share and never do |
+| [src/editor/CLAUDE.md](./src/editor/CLAUDE.md) | The editor binding: over a text handle, what the adapters share and never do |
 | [src/prosemirror/CLAUDE.md](./src/prosemirror/CLAUDE.md) | The ProseMirror adapter: the document as one text with block markers |
 | [src/codemirror/CLAUDE.md](./src/codemirror/CLAUDE.md) | The CodeMirror adapter: a ChangeSet as a delta, line breaks fitted |
 | [src/undo/CLAUDE.md](./src/undo/CLAUDE.md) | Undo: the stack of inverse patches over the commit event |

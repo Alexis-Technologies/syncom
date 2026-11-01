@@ -15,6 +15,9 @@
  * before the call returns. A replica is a second repository on a
  * MessageChannel to the first, the repo's own sync, flushed when every record
  * has arrived.
+ *
+ * A list is an Automerge list: push, splice and an assignment by index (an
+ * element of its own); it has no move, so that scenario leaves it out.
  */
 
 const fs = require('node:fs/promises');
@@ -49,6 +52,21 @@ const wrap = (A, state) => {
       return ids;
     },
     close: () => state.close(),
+    list: async (initial, name = 'list') => {
+      await state.change((doc) => {
+        doc[name] = initial.slice();
+      });
+      return {
+        push: (value) => state.change((doc) => doc[name].push(value)),
+        insert: (index, value) => state.change((doc) => doc[name].splice(index, 0, value)),
+        remove: (index) => state.change((doc) => doc[name].splice(index, 1)),
+        set: (index, value) =>
+          state.change((doc) => {
+            doc[name][index] = value;
+          }),
+        read: () => state.doc()[name],
+      };
+    },
     text: async (name = 'text') => {
       await state.change((doc) => {
         doc[name] = '';
@@ -81,6 +99,7 @@ const memory = {
     return wrap(A, memoryState(A));
   },
   text: (store, name) => store.text(name),
+  list: (store, initial) => store.list(initial),
   openReplica: async () => {
     const A = local('@automerge/automerge');
     return wrap(A, memoryState(A, A.init()));
@@ -147,6 +166,7 @@ const repoAutomerge = async () => import(local.resolve('@automerge/automerge-rep
 const disk = {
   variant: 'automerge-repo, NodeFS storage',
   text: (store, name) => store.text(name),
+  list: (store, initial) => store.list(initial),
   open: async (dir) => wrap(await repoAutomerge(), await repoState(dir)),
   openReplica: async (dir, source) => {
     const { MessageChannelNetworkAdapter } = await import(

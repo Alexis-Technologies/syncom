@@ -283,7 +283,10 @@ const runHistoryTests = async (t, assert, createStorage) => {
     const storage = await createStorage(t2, 'A', { defer: 0, sync: { log: { rollAfter: 1 }, retention: { ops: 4 } } });
     const id = await storage.insert({ n: 0 });
     await storage.inc(id, 'hits', 10);
-    await tick();
+    // Two stamps apart by more than one: a timer under load can fire before its time (libuv times it
+    // from a loop time already behind), so wait for the clock itself.
+    const first = (await storage.history(id)).versions[0].ts;
+    while (Date.now() <= first + 2) await tick();
     await storage.inc(id, 'hits', 1);
     const newest = (await storage.history(id)).versions[0].ts;
     // A peer's whole-record write stamped below the newest increment lands

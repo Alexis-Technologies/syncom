@@ -13,24 +13,36 @@ src/text/diffs.js         the kinds' patches: the diff of two readings as splice
 src/text/methods.js       the storage methods of the kinds (splice, push, updateText, mark, spans, cursors, blocks, setAt, move…)
                           over the lent core
 src/text/deltas.js        toDelta and applyDelta: a turn's changes as a Quill delta, a delta as one transaction (src/text/quill.js)
+src/text/handle.js        openText, TextHandle — a synchronous editor's handle: edits made over its overlay (the field as announced,
+                          its edits on top) through the lent `core.editing`, coalesced, logged as one transaction a window later
+                          (`tx.commitResolved`); the base follows the `transaction` events; what the editor binding stands on
 src/text/quill.js         Quill-form deltas and their algebra, once — compose, transform, transformIndex (quill-delta's rules): the
                           plugin's toDelta and the editor binding (src/editor/editor.js) both stand on it — no requires
 src/text/rle.js           run-length content: a run's pieces and gaps, cut, append, merge, the canonical form under MAX_RUN —
                           no requires; sequence.js is the caller and re-exports what the tests read
-src/text/btree.js         the rope: a persistent B+-tree over a block's segments and fences with two measures (slots, visible),
-                          path copying, hints tagged by lineage, a text cache per node — no requires
-src/text/pmap.js          a persistent hash map (HAMT): the run records of a block, one changed per keystroke — no requires
-src/text/plist.js         a persistent sorted list in chunks: a placed run's segments, the children at its offsets — no requires
 src/text/sequence.js      the sequence engine behind the list and text kinds: its design (the header) and its public names, over the
-                          five modules below — the one file the rest of syncom requires of the engine
+                          modules below — the one file the rest of syncom requires of the engine
 src/text/keys.js          the engine's names: run and element keys, anchors, the checks a peer's block is read through, the refusals
-                          an op reports, a mark's flags — requires vector.js only
-src/text/state.js         a block's engine state (the WeakMap beside the plain object), a plain block's JSON made whole and hydrated
-                          into the rope (indexOf: once per plain block), every reading — elements, values, positions, cursors, what waits
-src/text/splice.js        what an op does: the draft, a run placed with what hangs under it (walkSubtree, placeRun), cuts and
-                          extensions, pending ops, a splice; the pos/vals registers — assign and move
+                          an op reports, a mark's flags, the bounds beside MAX_RUN (MAX_FIELD, MAX_CUTS, MAX_MARKS) — requires
+                          vector.js only
+src/text/names.js         the names a lineage interns (Doc, RunId), the run records (Run) and the children at an offset (Child),
+                          the owners of copy-on-write nodes, SPAN (the room a run takes in the id index) — no requires
+src/text/normalize.js     a peer's plain block checked into the canonical shape under the bounds (normalizeJson), the newest
+                          stamp a plain block holds — plain JSON in and out, no rope — requires keys.js and rle.js only
+src/text/state.js         a block's state (a private field the plain object is stamped with), the block face and its views, a
+                          plain block hydrated into the rope (indexOf: once per plain block), the walk, drafts and writes,
+                          pieces, every reading — elements, values, positions, cursors, what waits
+src/text/splice.js        what an op does, every bound and refusal read before anything is written: a run placed with what hangs
+                          under it, cuts and extensions, pending ops, a splice; the pos/vals registers — assign and move
 src/text/marks.js         marks: the anchors of a range, a mark applied or switched off, the index of the marks in force (styleAt)
 src/text/join.js          a block as a snapshot carries it: a peer's block normalized under the bounds, prune (the reset rule), join
+src/text/rope.js          the rope: a copy-on-write B+-tree of spans and fences with two measures (slots, visible), deltas up the
+                          parents, hints by handle checked as they are climbed, a frozen version's places from a walk of its own
+                          — no requires
+src/text/ids.js           the id index: a copy-on-write B+-tree from (run, offset) as one number to a run's record and its spans,
+                          searched from the root down — no requires
+src/text/cow.js           copy-on-write by owner: a hash trie (registers, marks, what waits) walked in a stable key order, a sorted
+                          list in chunks (a run's children) — no requires
 ```
 
 ## Rules
@@ -55,37 +67,107 @@ attrs, isEmbed }` an entry of the block's `vals` (as a list element's
   splice patch gets `vals`, a changed marker a `setAt` patch (b-side index,
   after the splices). Never diff a text without the context where a slot may
   be: the inverse would lay a bare slot.
-- **A block IS the index, and it is never mutated in place.** A block of
-  `src/text/sequence.js` is a plain object — `k`, `ts`, the maps, and `runs`
-  as a getter that serializes the rope in walk order once per version — whose
-  engine state is in a WeakMap of src/text/state.js (the engine's modules alone read it): the rope (`src/text/btree.js`),
-  the run records (`src/text/pmap.js`; a placed record's segments and the
-  children at its offsets in `src/text/plist.js`), what waits, the counts the
-  bounds read. Nothing else is on the object (`lengthOf`, `totalOf`, `render`
-  are the engine's). Every op goes through `draft`/`finish`: a new block, the
-  structures path-copied, the block before reading as it did; `indexOf(entry,
-field)` hydrates plain JSON once (a WeakMap keyed by the plain block, under the field's floor:
-  the reading before an op and the op share it) and hands an engine block back as it is. A
-  marks index (anchors in walk order) rides in the engine state across every op that leaves the
-  marks; a body grows by `SEG_MAX` slots at most; a list's reading is derived from the one before. Hints — an item's leaf, a node's parent — are right
-  for the HEAD of a lineage only: an edit, a position or a neighbour asked of
-  an older block forks it into a lineage of its own (`ensureHead`,
-  `stats().rebuilds`) and the tree re-hints itself once (`T.stats().rehints`);
-  a top-down reading never reads a hint. A text's reading is the rope's
-  cache per node (`T.text`): after one op it costs the path the op copied,
-  never the text. A run is placed whole with what hangs under it
-  (`walkSubtree`, `placeRun`; a run under a parent not here yet is attached
-  to it, `attachChild`, and walked when the parent lands); a stretch of a run
-  with no child at it is emitted piece by piece (`emitPieces`), never slot by
-  slot. `prune` is O(1) through `oldest`/`oldestAnchor` and rebuilds from
-  JSON only under a base it has not seen. `latestClock(meta, true)` is the
-  trusted path for an entry this node holds — a peer's raw meta takes the
-  untrusted one, which normalizes first.
+- **While a handle is open, a run grows from one reading at a time.** A handle and the storage
+  are writers of one origin, each over its own reading, and the engine takes an extension at an
+  offset the run holds as a duplicate — dropped. So `resolveSplice` (src/text/kind.js `extendsRun`)
+  reserves a run's next offset in `core.editing.extents` — a map per field, under `extentKey(id,
+field)` — for every extension while a handle is open, and a writer whose reading is behind it
+  anchors a run of its own after the run's last element (HANDLE-4); a field's map goes with the
+  field's last handle, the last handle of all clears them, a rehearsal reserves nothing. A new
+  local writer of a text resolves through `resolveSplice` with the storage's core, or loses
+  characters. A handle follows the record's turns through `core.editing.follow(id, listener)` —
+  ONE `transaction` listener of the storage's, by record id (src/storage.js `#follow`) — never
+  through `core.on`: a handle counts against no listener cap, and a turn reaches the handles of
+  the records it touched alone (HANDLE-6).
+- **A piece is written again when one of its runs reads otherwise, and only then.** A block of
+  `PIECES_MIN` runs or more goes to its file in pieces of `PIECE_RUNS` runs by their numbers in the
+  lineage (src/text/state.js `piecesOf`), each keyed by a token an op replaces where it changes a run's
+  JSON: `setRun`, `writableRun` and `setSpans` touch it; their `quiet` form is for what the JSON leaves
+  out — a parent's children (`placeRun`, `attachChild`), a span split around a child (`withinSegment`)
+  — and carries the tuple. A content change written quietly leaves a stale piece the log's replay
+  hides until the log is sealed: `tests/storage.pieces.test.js` reads the files, not the storage. A
+  draft takes its tokens from the first op of a lineage in pieces, never from the first write (a
+  handle's keystrokes run ahead of the window), and `placeInsert` grows a run of the newest piece
+  alone, so a keystroke anywhere writes that piece (SEQ-10). The tokens are the hydration's (fresh
+  after a reopen or an eviction), so the first edit after one writes every piece once — by choice: a
+  token from the piece's text would cost the same serialization of every piece, in CPU instead of
+  I/O, and the head piece (the registers, the marks, what waits) is written at every write of the
+  block in any case.
+- **A handle's op is rewritten only before its flush.** The handle grows its last pending op where
+  the next keystroke continues it (`coalesce`, typed on) or comes right before its first element
+  (`prepends`, a word typed backward — its elements numbered again, the op applied again over the
+  reading it was made over, at most `PREPEND_MAX` slots); never once the flush has taken it, never
+  after another writer's turn reached the overlay — told by `made.heard`, the turns heard when the
+  edit was made, never by the entry (a keystroke typed on sets `made.entry` to the overlay, which
+  holds the turn) — and the run's reserved next offset moves with it (HANDLE-5). A flush that
+  cannot be logged cancels the flushes taken behind it before they log anything (their edits may
+  anchor in the dropped batch) and rejects whoever waits for `flushed`; one that fails AFTER the
+  append (an afterWrite hook) is logged — the handle keeps the edits and rethrows that error
+  (HANDLE-3).
+- **An op's own references are short; the engine reads full names alone.** `resolve` (src/text/kind.js)
+  names what is the op's own origin's without it — `run`, a cut's run and a mark's `off` by the stamp (a
+  number), an element as `ts:offset`, an anchor `<ts:offset`/`>ts:offset` — and `fullRefs` lays
+  `op.origin` back in `apply`, before the engine, copying only what it changes; a short name is never
+  another origin's (LIST-7). `coalesce` compares both forms. A new reader of an op's payload goes through
+  `fullRefs`, never `S.parseRun` on the raw value.
+- **A block IS the index, and a version handed out never changes.** A block of
+  `src/text/sequence.js` is a plain object — `k`, `ts`, `cuts`, `ext`, and `runs`, the registers and
+  the marks made when read (`runs` in walk order, once per version) — whose engine state is a private
+  field of src/text/state.js the object is stamped with (`STATE`: no property, so it reads,
+  serializes and compares as plain JSON; the engine's modules alone read it): the rope
+  (`src/text/rope.js`), the id index from (run, offset) to a run's record and spans
+  (`src/text/ids.js`), the registers, the marks and what waits in hash tries (`src/text/cow.js`), the
+  names its lineage interned (`Doc`, `RunId`: a key parsed once), the counts the bounds read. Every
+  op reads first what it will do and every bound it meets — a refusal and its count, an op that
+  changes nothing — and only then freezes the block it starts from (O(1)) and writes a draft under
+  a new owner (`draft`/`finish`): each node it touches copied once, edited in place after, the
+  measures handed up as deltas — the block before reads as it did. A node written in place belongs
+  to the draft's owner alone: never edit a node of another owner, never keep a draft past
+  `finish`, and freeze a block before anything else may write over it. `indexOf(entry, field)`
+  hydrates plain JSON once (keyed by the plain block, under the field's floor: the reading before
+  an op and the op share it) and hands an engine block back as it is. A marks index (anchors in
+  walk order) rides in the state across every op that leaves the marks; a body grows by `SEG_MAX`
+  slots at most; a list's reading is made when it is read (`lazy: { list: true }` → src/lazy.js),
+  derived from the one before where that one was read (`deriveLater`: one reading kept, never a
+  chain of versions), else whole. Hints — a span's leaf, a node's parent, by a handle a node shares
+  with its copies — are right for the version written last: a climb checks each step, a head sets
+  them again once when they fail (`stats().rehints`), a frozen version reads its places from one
+  walk of its own (`stats().walks`) and writes none; a top-down reading never reads a hint. A
+  text's reading is the rope's cache per node (`R.text`): after one op it costs the path the op
+  copied, never the text. A run is placed whole with what hangs under it (`walkSubtree`,
+  `placeRun`; a run under a parent not here yet is attached to it, `attachChild`, and walked when
+  the parent lands); a stretch of a run with no child at it is emitted piece by piece
+  (`emitPieces`), never slot by slot. `prune` is O(1) through `oldest`/`oldestAnchor` and rebuilds
+  from JSON only under a base that takes something — a run, or the anchor a surviving run still hangs
+  from; an anchor below the base already is a root's and folds into neither (`hydrate`, `applySplice`,
+  `applyMove`), so a block rebuilt once under a base prunes in O(1) under it from then on; a floor
+  that moved and takes nothing makes a version of its own under it (`draft`/`finish`, every node
+  shared) — never the base written on a version another holder reads under its own floor. The marks
+  index sorts its anchors per mark op and builds its tree (`MarksIndex#built`) by the first read
+  alone, so a run of mark ops costs no O(m) tree each. `join` reads a snapshot's plain block through
+  `normalizeJson`, never hydrated only to be serialized again
+  (`stats().rebuilds` counts every rebuild: a test says it did not happen). `latestClock(meta, true)` is the trusted path for an entry this node holds — a peer's
+  raw meta takes the untrusted one, which normalizes first.
+- **Every bound is read before anything is written, on the op path and the snapshot path alike.** `MAX_RUN`
+  (src/text/rle.js: a run's slots — what a run holds plus an extension's end, parked ahead or not),
+  `MAX_FIELD` (a field's slots, what waits in `ext` counted), `MAX_CUTS` (the ranges one splice cuts — a
+  range per stretch of a run `rangesOf` lays, so a delete across more runs than that is refused: in
+  parts, or after `compact()`), `MAX_MARKS` (the marks a text holds, placeholders among them; a mark
+  switched off or filling its placeholder adds none) and `PENDING_MAX` (src/plugin.js) are checked in
+  `applySplice`, `applyMove` (its position run is one slot of the field) and `applyMark` — a `bound`
+  refusal with `detail` (`'run'`, `'field'`, `'cuts'`, `'marks'`, `'pending'`), `count` and `max`, before
+  the block is frozen — and in `normalizeJson` for a peer's block, which leaves out what an op would have
+  been refused for (a run or an extension past MAX_RUN, a run of no slots) and drops the block whole past
+  a field bound or the marks bound. A splice's markers are registers of its slots whether the slots land
+  or wait: on a parked extension they wait in `vals` under their names and land with the slots. The coalescing of cuts
+  (`COALESCE_CUTS` in src/text/kind.js) bounds how far one op grows, not what the engine takes. A
+  splice's change report says what was cut: the ranges of one run merged, a duplicate once
+  (`cutSpansOf`), never one change per range named.
 - **Nothing on an op's path reads the whole text or walks the whole cache.** A change report,
   a check or a resolve reads the rope: `S.spansOf`/`S.spanOf` for a run's stretches, `S.styleAt`
   for the marks at one index, `S.heldAt` for a unit — never `S.render(...)` sliced or `S.spans`
   (a fresh reading is a V8 rope, and a slice or a `charCodeAt` flattens it), and the rope's
-  leaves concatenate their bodies, never `join` (src/text/btree.js `textOf`). `EntryStore.remember`
+  leaves concatenate their bodies, never `join` (src/text/rope.js `textOf`). `EntryStore.remember`
   looks at `EVICT_SCAN` of the oldest entries at most, and the deferred window lands by count as
   well as by time (`DEFER_RECORDS`, `DEFER_POSITIONS`): an await loop over `memory()` never lets
   a timer fire. Each of these was once O(n) per op and took a typing rate from tens of thousands

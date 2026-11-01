@@ -4,13 +4,13 @@
 // delta between two readings, selections as cursor tokens, a presence
 // room's cursors. The storage it takes runs the text plugin.
 
-import type { Storage, TextMethods, DeltaOp, TextSpan, TextBlock } from '../../index.js';
+import type { Storage, TextMethods, TextHandleMethods, DeltaOp, TextSpan, TextBlock } from '../../index.js';
 import type { Presence } from '../presence/presence.js';
 
 export type { DeltaOp, TextSpan, TextBlock };
 
 /** A storage with the text plugin's methods — what the binding and the selection helpers take. */
-export type TextStorage = Storage & TextMethods;
+export type TextStorage = Storage & TextMethods & TextHandleMethods;
 
 /** U+FFFC, the character an embed slot reads as. */
 export declare const EMBED: '￼';
@@ -106,13 +106,15 @@ export interface EditorAdapter {
 export interface TextBindingOptions {
   /** Tells the binding's commits apart in the storage's events; a fresh symbol by default. */
   source?: unknown;
-  /** A reload — a reset, an unset, the record gone: what was not sent is dropped. */
+  /** How long the editor's edits wait before they are logged, in ms: the storage's `defer` by default, 0 for the end of the turn. */
+  window?: number;
+  /** A reload — a reset, an unset, the record gone, a flush not logged (`UNLOGGED`): what was not logged is dropped. */
   onReset?: () => void;
   /** A failure that reloaded the editor; logged at warn without one. */
   onError?: (error: Error) => void;
   /**
    * The binding stopped: `stop()` (`null`), five failures in a row, or a
-   * first load that failed (the last failure). Nothing more is sent or taken.
+   * first load that failed (the last failure). Nothing more is taken.
    */
   onStop?: (reason: Error | null) => void;
 }
@@ -123,23 +125,22 @@ export interface TextBinding {
   readonly source: unknown;
   /** Resolves once the editor holds the field. */
   readonly ready: Promise<void>;
-  /** The field's text as the storage reads it, after every change the binding processed. */
+  /** The field's text as the editor holds it: its handle's reading. */
   readonly shadow: string;
-  /** Whether an edit is on its way to the field. */
+  /** Whether edits wait for the log. */
   readonly pending: boolean;
-  /** Whether the binding stopped; what was not sent then stays unsent. */
+  /** Whether the binding stopped; what the editor typed before is logged as its handle closes. */
   readonly stopped: boolean;
-  /** Resolves once every edit reported so far has landed — or at once when the binding stopped (see `stopped`). */
+  /** Resolves once every edit reported so far is logged (or could not be) — or at once when the binding stopped. */
   flush(): Promise<void>;
   stop(): void;
 }
 
 /**
- * Binds an editor, through `adapter`, to text field `path` of record `id`:
- * the editor's edits reach the field as one transaction each — refused as
- * `STALE` and rebased when a peer's edit landed first — and the field's
- * changes reach the editor as deltas, rebased over what it holds beyond
- * the field.
+ * Binds an editor, through `adapter`, to text field `path` of record `id`
+ * over a text handle (`openText()`): the editor's edits are made at once over
+ * the handle's reading and logged a window later as one transaction, and
+ * every other writer's change reaches the editor as a delta in its indices.
  */
 export declare function createTextBinding(
   storage: TextStorage,

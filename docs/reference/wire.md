@@ -61,7 +61,7 @@ engine does not admit changes nothing, is reported as `OP_REFUSED` with
 | `inc` | `i` | `key`, `value` | A finite number to add to the counter |
 | `add` | `+` | `key`, `value` | `unknown[]` — the elements to add to the set |
 | `remove` | `-` | `key`, `value` | `[element, { origin: addStamp }][]` — each element with the add stamps this node had seen for it |
-| `splice` | `/` | `key`, `value` | `{ cut?, at \| run + from, content, vals? }` — `run + from` extends the writer's own run, never a move's position run (malformed); see [What travels](../guide/lists#what-travels) |
+| `splice` | `/` | `key`, `value` | `{ cut?, at \| run + from, content, vals? }` — `run + from` extends the writer's own run (its stamp), never a move's position run (malformed); see [What travels](../guide/lists#what-travels) |
 | `assign` | `=` | `key`, `value` | `{ elem, value, k? }` — `k: 't'` when the element is a text's embed slot |
 | `move` | `^` | `key`, `value` | `{ elem, cut, at, value }` |
 | `mark` | `*` | `key`, `value` | `{ start, end, key, value, many? }` or `{ off }` |
@@ -73,8 +73,9 @@ engine does not admit changes nothing, is reported as `OP_REFUSED` with
 
 The codes are the protocol's, not a plugin's: a node without the text or
 tree plugin still reads, logs and relays a `/` or a `~`. One op of each,
-as the log keeps them (the `write` and the `purge` of `p2` are scrubbed —
-the payload and the nonce gone, the header and its signature kept):
+as it reads back from the log as `{ seq, op, fp }` — the file holds it
+positional, see [The log](#the-log). The `write` and the `purge` of `p2` are
+scrubbed: the payload and the nonce gone, the header and its signature kept.
 
 ```json
 {"seq":1,"op":{"origin":"VLH7Ywu…","seq":1,"ts":1793087684840,"type":"write","id":"p1","v":1,"data":{"$type":"Post","title":"Draft","note":"tmp"},"nonce":"55b902dd-…","digest":"pNpYxfs6…","sig":"YE3frhE…"},"fp":"SmNVKTkH…"}
@@ -85,9 +86,9 @@ the payload and the nonce gone, the header and its signature kept):
 {"seq":6,"op":{"origin":"VLH7Ywu…","seq":6,"ts":1793087684858,"type":"remove","id":"p1","v":1,"key":"tags","value":[["bug",{"VLH7Ywu…":1793087684855}]],"prev":"q49yF0IJ…","nonce":"6556dcfe-…","digest":"SjDF-Rzq…","sig":"WXfaw6w…"},"fp":"9z2V-22e…"}
 {"seq":7,"op":{"origin":"VLH7Ywu…","seq":7,"ts":1793087684861,"type":"splice","id":"p1","v":1,"key":"body","value":{"content":"hello","at":"^"},"prev":"9z2V-22e…","nonce":"0438623a-…","digest":"e8xPy71S…","sig":"fldcPee…"},"fp":"HEbXDRV7…"}
 {"seq":8,"op":{"origin":"VLH7Ywu…","seq":8,"ts":1793087684866,"type":"splice","id":"p1","v":1,"key":"items","value":{"content":[1,2],"at":"^"},"prev":"HEbXDRV7…","nonce":"be90dd02-…","digest":"rRDJp_Dt…","sig":"IUE0qCZ…"},"fp":"guFO1EOS…"}
-{"seq":9,"op":{"origin":"VLH7Ywu…","seq":9,"ts":1793087684869,"type":"assign","id":"p1","v":1,"key":"items","value":{"elem":"1793087684866:0:VLH7Ywu…","value":9},"prev":"guFO1EOS…","nonce":"94a8f651-…","digest":"lpwSpgyW…","sig":"LUGj4mI…"},"fp":"chF-Ks1c…"}
-{"seq":10,"op":{"origin":"VLH7Ywu…","seq":10,"ts":1793087684872,"type":"move","id":"p1","v":1,"key":"items","value":{"elem":"1793087684866:0:VLH7Ywu…","cut":["1793087684866:VLH7Ywu…",0,1],"at":">1793087684866:1:VLH7Ywu…","value":9},"prev":"chF-Ks1c…","nonce":"a7e7a486-…","digest":"pn6qODgP…","sig":"3n9P52d…"},"fp":"MqBO8DgA…"}
-{"seq":11,"op":{"origin":"VLH7Ywu…","seq":11,"ts":1793087684876,"type":"mark","id":"p1","v":1,"key":"body","value":{"start":"<1793087684861:0:VLH7Ywu…","end":"$","key":"bold","value":true},"prev":"MqBO8DgA…","nonce":"13602c95-…","digest":"aU9shwrn…","sig":"Njs14Zx…"},"fp":"HhhOhsgk…"}
+{"seq":9,"op":{"origin":"VLH7Ywu…","seq":9,"ts":1793087684869,"type":"assign","id":"p1","v":1,"key":"items","value":{"elem":"1793087684866:0","value":9},"prev":"guFO1EOS…","nonce":"94a8f651-…","digest":"lpwSpgyW…","sig":"LUGj4mI…"},"fp":"chF-Ks1c…"}
+{"seq":10,"op":{"origin":"VLH7Ywu…","seq":10,"ts":1793087684872,"type":"move","id":"p1","v":1,"key":"items","value":{"elem":"1793087684866:0","cut":[1793087684866,0,1],"at":">1793087684866:1","value":9},"prev":"chF-Ks1c…","nonce":"a7e7a486-…","digest":"pn6qODgP…","sig":"3n9P52d…"},"fp":"MqBO8DgA…"}
+{"seq":11,"op":{"origin":"VLH7Ywu…","seq":11,"ts":1793087684876,"type":"mark","id":"p1","v":1,"key":"body","value":{"start":"<1793087684861:0","end":"$","key":"bold","value":true},"prev":"MqBO8DgA…","nonce":"13602c95-…","digest":"aU9shwrn…","sig":"Njs14Zx…"},"fp":"HhhOhsgk…"}
 {"seq":12,"op":{"origin":"VLH7Ywu…","seq":12,"ts":1793087684879,"type":"tree","id":"p1","v":1,"key":"outline","value":{"node":"n1","parent":null,"fi":"V"},"prev":"HhhOhsgk…","nonce":"a70b7608-…","digest":"jII5zyZ1…","sig":"DqM2boN…"},"fp":"7vowLgJ6…"}
 {"seq":13,"op":{"origin":"VLH7Ywu…","seq":13,"ts":1793087684884,"type":"set","id":"p1","v":1,"actor":"ada","data":{"n":1},"msg":"one more","prev":"7vowLgJ6…","nonce":"7b4cf045-…","digest":"Y-MlFI9f…","sig":"YG0eHAr…"},"fp":"PjeIYmkg…"}
 {"seq":14,"op":{"origin":"VLH7Ywu…","seq":14,"ts":1793087684887,"type":"delete","id":"p1","v":1,"prev":"PjeIYmkg…","sig":"yUCV5eu…"},"fp":"ATQP-EcP…"}
@@ -102,7 +103,13 @@ after the scrub — see [The per-stream chain](#the-per-stream-chain).
 An element's name is `ts:offset:origin` — the run it was inserted in and
 its offset there — and a run's `ts:origin`; an anchor is `^` (the head),
 `$` (the end, in a mark), `>e` or `<e` (the right or left child of element
-`e`); a cut is `[run, offset, length]`. A `remove`'s add stamp is the `ts`
+`e`); a cut is `[run, offset, length]`. What is the op's own origin's is
+named without it, the header carrying it already: a run by its stamp, a
+number (`run`, a cut's run, a mark's `off`), an element as `ts:offset` (one
+colon; a full name has two, whatever the origin holds) — `<ts:offset` and
+`>ts:offset` as anchors. A reader lays the op's `origin` back before the
+engine reads it, so a short name never names another origin's run; a full
+name of the op's own is read alike. A `remove`'s add stamp is the `ts`
 of the `add` this node had seen, per origin.
 
 ### Packed: the nineteen slots
@@ -234,21 +241,28 @@ write, no rename):
 | --- | --- |
 | `open/<seq>-<token>.jsonl` | A journal, where the backend has `append`: one log file per line, a line per group of appends; named by its first seq (ten digits zero-padded) and a token unique to the open and the journal; begun again at every roll and after a failed append, removed once every group in it is sealed, rewritten only by a scrub |
 | `open/<seq>.json` | A group in a file of its own, where the backend has no `append`; named by its first seq |
-| `seg-<from>.json` | A sealed segment: the open groups rolled together once 64 of them accumulate (`log.rollAfter`) |
+| `seg-<from>.json` | A sealed segment: the open groups rolled together once 64 of them accumulate (`log.rollAfter`) — their lines as they were journaled, one per line, then a trailer `{"lines":<n>,"to":<last seq>,"c":"<crc32>"}`, `c` the CRC-32 of the lines' checksums one after another |
 | `index.json` | `{ epoch, floor, next, vector, heads, droppedHeld, latestTs, droppedTs }` — what the files cannot say: the epoch, the floor, and the vector, heads and stamps of what compaction dropped; written where compaction dropped something and at a close, not at every roll. The segments are what the directory lists, each read whole; one whose start does not meet the floor or the end of the one before is a file gone (`log.segment.missing`), one wholly below the floor was compacted and is removed |
 
-Every log file is `{ "entries": [...], "hash": "<xxh32>" }` — the
-entries' JSON and its xxHash32 as eight hex characters, computed over the
-same text. A file whose hash does not match is unreadable at open
+Every log file is `{"e":[…],"c":"<crc32>"}` — the entries as a JSON array
+and the CRC-32 (IEEE, zlib's) of that array's text as eight lowercase hex
+characters, last, so it is checked before the entries are parsed. A file
+whose checksum does not match is unreadable at open
 (`log.segment.unreadable`, `reason: 'checksum'`, counted in
 `stats().log.corrupt`, its entries lost — `droppedTs`); an open group file
 that fails its checksum was whole once, so it is moved to `log/corrupt/`
 as the evidence, never deleted; one that does not parse was torn by its
 own write, never acknowledged, and is dropped (`log.open.torn`). A file
-without a hash is not whole: unreadable, as one that fails it. A file that is
-there and cannot be read at all — an I/O error, not a missing file — fails
-`open()` with `CORRUPT`: an open that went on without it could hand its
-seqs out again.
+that reads as JSON without its checksum is not whole: unreadable, as one
+that fails it. A file that is there and cannot be read at all — an I/O
+error, not a missing file — fails `open()` with `CORRUPT`: an open that went
+on without it could hand its seqs out again.
+
+A segment is read whole or not at all: every line checks on its own, and
+the trailer holds as many lines as there are, the last seq of the last one
+and the checksum of their checksums — a line altered, gone or moved, or the
+trailer gone, makes the segment unreadable (`reason: 'checksum'`). A segment
+a scrub rewrites is its entries as one line and a trailer.
 
 A journal is read line by line, each line a log file of its own. Its last
 line is the one a crash can tear — its group was never acknowledged — and is
@@ -260,15 +274,22 @@ seqs back, and the group that took them went to a newer journal. A later open
 never appends to an older journal.
 
 ```json
-{"entries":[{"seq":2,"op":{"origin":"VLH7Ywu…","seq":2,"ts":1793087684846,"type":"set","id":"p1","v":1,"data":{"title":"Final"},"prev":"SmNVKTkH…","nonce":"1258f80d-…","digest":"CY61ahM3…","sig":"hEvgr7g…"},"fp":"3GmlODml…"}],"hash":"9722285a"}
+{"e":[[2,"9RVv-fuAXZzHa1Pb8qvUNpa1JCBq7OPS8oRQZStR6Uk",[1,"SpxoiDvaETq5phZnW8xiqFUuHuE02PEwU7zVbyZlTRg",2,1793444749744,"set","p1",null,null,null,null,"qqIkTnQuk3S5qeXhLcc2wSgl7PsP5B3y1-aLzm1K8SI",null,"9_aH1aS-vwzSwjXB-g57rcERIjDHzxAEPU6zzY_jJBg"],{"data":{"title":"Final"}},{"nonce":"a5bb053f-fa0c-4155-bc45-d81e1834958c","sig":"2EjzE9cMqvxyZwbyjyh9-7xr6TV9yTuOvvKAt38Dly6YOpx-2R1tqR9rvUM2ZdGSe6lT-6CAEX1RRF4fMCokDQ"}]],"c":"3e6ee2cb"}
 ```
 
-An entry is `{ seq, op, fp }` — `fp` the op's [fingerprint](#the-per-stream-chain),
-taken when it was logged — plus `skipped: true` for a peer's op a
-`beforeApply` hook or a validator declined (accepted into the log, never
-applied here, so a reopen does not apply it either), `held: <version>` for
-an op of a newer schema version kept for the node that runs it, and
-`scrubbed: true` once a purge took its payload. An entry without `fp` is
+An entry is `[seq, fp, header, payload, rest?, flags?]` — `fp` the op's
+[fingerprint](#the-per-stream-chain), taken when it was logged (null when
+none was); `header` the op's [signed header](#the-signed-header), the very
+text its fingerprint hashed (a field the op lacks is null there and absent
+again once read); `payload` its `data`, `meta`, `key`, `value` and `vector`
+(null for none); `rest` what else the op carries — its `sig` and `nonce` —
+and `flags` the entry's: `skipped: true` for a peer's op a `beforeApply`
+hook or a validator declined (accepted into the log, never applied here, so
+a reopen does not apply it either), `held: <version>` for an op of a newer
+schema version kept for the node that runs it, and `scrubbed: true` once a
+purge took its payload. The last two are left out when empty (`rest` is null
+where only `flags` are there). Read back, an entry is `{ seq, op, fp }` and
+its flags again. An entry without `fp` is
 read; its op is then nothing a chain is held to. The index after a clean
 close, with the sixteen ops sealed into one segment — `heads` the stream's
 newest op and its fingerprint, kept once the op itself is compacted away:
@@ -322,18 +343,19 @@ merge:
 
 A list or text block of 1 024 runs or more (`PIECES_MIN`) is written in
 **pieces**: its `runs` leave the record file for files beside it,
-`<id>~<n>.json`, each the runs of one of the 32 children of the run map's
-root — the first five bits of a run key's FNV-1a hash
-(`src/text/pmap.js`) — and the block names them in their place, a slot
-each, `null` where none:
+`<id>~<n>.json`, each 512 runs (`PIECE_RUNS`) by the order this node first
+named them (`src/text/state.js`) — the oldest first, what an op makes in the
+newest — and the block names them in their order, a slot each, `null` where
+none:
 
 ```json
-"body":{"k":"t","ts":1793090489785,"parts":[null,"p1~3.json","p1~17.json",…,"p1~9.json"]}
+"body":{"k":"t","ts":1793090489785,"parts":["p1~3.json","p1~17.json",null,"p1~9.json"]}
 ```
 
 and the record file carries `"gen"`, the counter `n` runs on. A write
-makes the file of a piece whose child is new — a keystroke path-copies
-one child, so one piece of 32 — then the record file, then removes the
+makes the file of a piece one of whose runs reads otherwise — made, grown
+or cut; a local insert grows a run of the newest piece alone, so a
+keystroke anywhere is the newest piece — then the record file, then removes the
 pieces it no longer names: a crash leaves the old record file whole with
 its pieces, or the new one with its. New pieces a crash left unnamed are
 written over as `n` reaches them again; old ones it left after the record
@@ -497,13 +519,16 @@ a snapshot buys nothing an op could not:
 | Field path | 16 segments, 512 characters, no empty segment, no `__proto__` | refused |
 | Fields per record | 4 096 paths; the first in sorted order stay | `OP_REFUSED` `detail: 'paths'` |
 | `msg` | 1 024 characters | `malformed` |
+| `actor`, `from` | 256 characters each (`MAX_ACTOR`; a value of another shape by its JSON): claims taken as they are, but in the header every node hashes | `malformed`; locally a `TypeError` |
 | Stamp ahead of the receiver | `sync.maxSkew`, 24 hours — an op's `ts`, every stamp a `merge`'s `meta` holds | `SKEW` |
 | How deep a field of an op, or a snapshot record's `data` or `meta`, nests | 80 levels (`MAX_WIRE_DEPTH`; every object or array on the deepest path a level) | `malformed`; a snapshot record left out |
 | How deep what a local write takes nests | 64 levels (`MAX_JSON_DEPTH`): the 16 between leave room for what an op and a meta wrap around a value | `TypeError` |
 | A seq taken for a node's own stream from a host (`REWOUND`) | 2⁵³ − 1 − 2³² | not taken |
 | A counter's sum per stream | ±2⁵³ − 1 | `OP_REFUSED` `detail: 'counter'` |
-| A run's length | 2²⁰ elements | `OP_REFUSED` `detail: 'run'` |
+| A run's length | 2²⁰ elements (`MAX_RUN`) — an extension parked ahead of its run counted against it where it arrives, and against the field's slots while it waits | `OP_REFUSED` `detail: 'run'`; a snapshot's parked extension past it left out |
 | Pending ops per block | `sync.pendingMax`, 4 096 | `OP_REFUSED` `detail: 'pending'` |
+| A splice's cut ranges | 65 536 (`MAX_CUTS`); overlapping ranges of one run read as one for the change report | `OP_REFUSED` `detail: 'cuts'` |
+| A text's marks | 65 536 (`MAX_MARKS`) | `OP_REFUSED` `detail: 'marks'`; a snapshot block past it is not taken |
 | A tree's depth read, a fractional index | 512 levels, 1 024 characters | the deeper levels unread; `malformed` |
 | The fold's walk up from a move's parent (`MAX_WALK`) | 512 ancestors | the move is moot, like one that would make a cycle — the same on every node |
 | A tree field's moves (`MAX_MOVES`), every node's together | 65 536 | `OP_REFUSED` `detail: 'moves'`; a snapshot block past it is not taken; a join keeps the oldest in the fold's order |

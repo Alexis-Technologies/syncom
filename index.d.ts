@@ -84,12 +84,14 @@ export type SetRemoval = readonly [element: unknown, tags: { readonly [origin: s
  * either the anchor of a new run (`at`: `^` the head, `>e`/`<e` the right or
  * left child of element `e`) or the run of the writer to extend (`run`,
  * `from`). `content` names the kind — a string for a text, an array for a
- * list — and is empty when the op only cuts.
+ * list — and is empty when the op only cuts. What is the op's own origin's
+ * is named without it: a run (`ts:origin`) by its stamp, a number; an
+ * element (`ts:offset:origin`) as `ts:offset`.
  */
 export interface SplicePayload {
-  cut?: readonly (readonly [run: string, offset: number, length: number])[];
+  cut?: readonly (readonly [run: string | number, offset: number, length: number])[];
   at?: string;
-  run?: string;
+  run?: string | number;
   from?: number;
   content: string | readonly unknown[];
   /** The markers of the embed slots (U+FFFC) the content holds, each at its offset. */
@@ -109,7 +111,7 @@ export interface AssignPayload {
  */
 export interface MovePayload {
   elem: string;
-  cut: readonly [run: string, offset: number, length: 1];
+  cut: readonly [run: string | number, offset: number, length: 1];
   at: string;
   value: unknown;
 }
@@ -129,7 +131,7 @@ export interface MarkPayload {
   key?: string;
   value?: unknown;
   many?: true;
-  off?: string;
+  off?: string | number;
 }
 
 /**
@@ -452,6 +454,7 @@ export type SyncomErrorCode =
   | 'UNPERSISTED'
   | 'REWOUND'
   | 'UNDELIVERABLE'
+  | 'UNLOGGED'
   | 'SKEW'
   | 'OP_UNREADABLE'
   | 'OP_REFUSED'
@@ -724,7 +727,8 @@ export interface SyncomTelemetryWriter {
   withSpan<T>(name: string, attributes: Record<string, unknown>, fn: (handle: unknown) => T): T;
   recordError?(handle: unknown, error: unknown): void;
   endSpan?(handle: unknown, attributes?: Record<string, unknown>): void;
-  recordCommit?(type: string, result: string, elapsed: number): void;
+  /** One local write: its op type, `applied` / `noop` / `encrypted` / `error` / `coalesced`, and `path` — `queue`, or `fast` for one made at once. */
+  recordCommit?(type: string, result: string, elapsed: number, path?: string): void;
   recordApply?(result: string, elapsed: number): void;
   recordMalformed?(): void;
   recordRejected?(reason: string): void;
@@ -746,6 +750,8 @@ export interface SyncomTelemetryWriter {
   recordRefusal?(code: number | string): void;
   /** Presence a host or a receiver refused: `reason` (`hello`, `rate`, `malformed`, `scope`, `forged`, `unsigned`, `invalid`), how many entries. */
   recordPresenceRefused?(reason: string, count: number): void;
+  /** A text handle's flush (`openText()`): `ok`, `unlogged` (nothing appended, the edits dropped) or `error` (appended, a step after failed). */
+  recordHandleFlush?(result: string): void;
   gauges?(read: () => Record<string, number>): void;
 }
 
@@ -1827,6 +1833,75 @@ type UnionToIntersection<U> = (U extends unknown ? (x: U) => void : never) exten
 export type PluginMethods<P extends readonly Plugin<any>[]> = UnionToIntersection<
   P[number] extends Plugin<infer A> ? A : never
 >;
+
+/** What `openText()` takes. */
+export interface TextHandleOptions {
+  /** How long edits wait before they are logged, in ms: the storage's `defer` by default, 0 for the end of the turn. */
+  window?: number;
+  /** Who the edits say made them. */
+  actor?: string;
+  /** What their `commit` and `transaction` events carry as `source`: a value of the handle's own by default. */
+  source?: unknown;
+}
+
+/** What a handle's observer hears with a delta. */
+export interface TextHandleEvent {
+  /** The handle's own edit, made just now. */
+  local: boolean;
+  /** The field is to be read again (`toString()`): no delta says the change — a reset, edits that could not be logged. */
+  reset?: true;
+  source: unknown;
+}
+
+/**
+ * A synchronous editor's handle on one text field (`openText()`): edits are
+ * made and read at once over the handle's reading — the field as announced,
+ * with what was typed here on top — and logged a window later as one
+ * transaction, keystrokes that continue each other as one op. Another
+ * writer's ops reach it as deltas in its indices.
+ */
+export interface TextHandle {
+  readonly id: string;
+  readonly field: string;
+  /** The field as the handle reads it. */
+  toString(): string;
+  readonly length: number;
+  slice(start?: number, end?: number): string;
+  /** The field as runs of equal style, as `spans()` reads it: the handle's reading. */
+  spans(): TextSpan[];
+  /** Edits wait for the log: made and not flushed, or in a flush not settled yet. */
+  readonly pending: boolean;
+  /** Settles once every edit made so far is logged and landed; rejects with `UNLOGGED` when it could not be. */
+  readonly flushed: Promise<void>;
+  /** Inserts `text` at `index`, styled with `attributes` (a name to a value; null takes a style off). */
+  insert(index: number, text: string, attributes?: Record<string, unknown>): void;
+  /** Inserts an embed slot holding `marker` at `index` — an inline embed unless `isEmbed` says otherwise. */
+  insertEmbed(
+    index: number,
+    marker: { type: string; parents?: readonly string[]; attrs?: { [name: string]: unknown }; isEmbed?: boolean } | null,
+    attributes?: Record<string, unknown>,
+  ): void;
+  delete(index: number, count: number): void;
+  /** Styles `[index, index + count)`; a null value takes a style off, `embed` sets every embed slot's marker. */
+  format(index: number, count: number, attributes: Record<string, unknown>): void;
+  /** Makes `delta` the field's edits, at once — as `applyDelta()` does: marks, embeds and their markers; an insert is styled as it says. */
+  applyDelta(delta: readonly DeltaOp[]): void;
+  /** `listener(delta, event)` after every change of the field the handle reads; returns the function that stops it. */
+  observe(listener: (delta: DeltaOp[] | null, event: TextHandleEvent) => void): () => void;
+  /** Logs every edit made so far, as one transaction. */
+  flush(): Promise<void>;
+  /** Logs what waits, then stops following the field. */
+  close(): Promise<void>;
+  /** `error`: a flush that could not be logged (`UNLOGGED`). */
+  on(event: 'error', listener: (error: SyncomError) => void): void;
+  off(event: 'error', listener: (error: SyncomError) => void): void;
+}
+
+/** What the text plugin adds to a storage beyond its writes: the editor's handle, never inside a transaction. */
+export interface TextHandleMethods {
+  /** A synchronous handle on text field `key` of record `id` (the record made by its first edit's flush when absent). */
+  openText(id: string, key: string, options?: TextHandleOptions): Promise<TextHandle>;
+}
 
 /** The storage methods the `text` plugin adds: lists and texts that merge by position (Fugue), marks, cursors. */
 export interface TextMethods {
