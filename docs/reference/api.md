@@ -674,9 +674,11 @@ server, OPFS in the browser — as those five functions, and:
 | `new OpLog(base, { fsi \| store })`, `loadKeys(base, { fsi \| kv })` (`/encryption`), `loadSigningKeys(base, { fsi \| kv })` (`/signing`), `new Blockchain(base, { fsi \| kv })` (`/chain`) | The pieces take the backend too — or a store of an engine's database: the log's `store` (`db.log`), a `kv` (the `keys` and `blockchain` namespaces) |
 | `atRest(fsi, options)` (`/encryption`) | A wrapper: every file through it is ciphertext under one key — see [Encryption](#encryption-subpath) |
 
-`@alexify/syncom/idb` is the IndexedDB backend: `createIdbFsi({ name, store,
+`@alexify/syncom/idb` is IndexedDB as a backend and as an engine: `createIdbFsi({ name, store,
 indexedDB }?)` returns an fsi over one object store, with a `close()` of its
-own (see [Browser](../guide/browser)).
+own; `idbEngine({ name, indexedDB, IDBKeyRange, durability, channel }?)` the engine over
+six object stores (`IdbEngine`: `close()`, `destroy()`), one transaction per write set, a
+`BroadcastChannel` for another tab's writes (see [Browser](../guide/browser)).
 
 ## Plugins
 

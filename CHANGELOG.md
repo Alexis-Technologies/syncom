@@ -56,6 +56,12 @@ and one `commit` event, not one per call.
   through it — a mesh in one process, a path per node — and a path outlives its instance until
   `engine.remove(path)`, so a reopen reads what the last instance wrote. `EntryStore` copies a meta at
   its first block in pieces instead of changing the stored object in place, since a native engine shares it.
+- **The engine over IndexedDB: `idbEngine()`** (`@alexify/syncom/idb`, beside `createIdbFsi()`). Six object
+  stores keyed by the database's path — `kv`, `records` (the object as handed), `pieces`, `copies`, `log`
+  (a row per entry), `meta` (the log's index and segments, the catalog's rows) — a write set in ONE
+  readwrite transaction, a log group in one, key ranges for every listing, another tab's writes heard
+  through a `BroadcastChannel` (`db.changes`); `engine.close()`, `engine.destroy()`. A database's write costs
+  two transactions where the file store spent one per file and rewrote the catalog whole.
 - **A synchronous editor's handle on a text: `storage.openText(id, key, { window, actor, source })`**
   (the `text` plugin's). `insert`, `insertEmbed`, `delete`, `format` and `applyDelta` edit at once
   over the handle's reading — the field as announced, its edits on top — and `toString()`,

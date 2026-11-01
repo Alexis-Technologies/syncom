@@ -46,6 +46,7 @@ A transaction of many records is one write set, a single write one.
 | Engine | Where | How |
 | --- | --- | --- |
 | `filesEngine(fsi)` | Anywhere | What `createDatabase({ fsi })` builds, and the default over the platform's backend: a directory, today's layout |
+| `idbEngine({ name, indexedDB, IDBKeyRange, durability, channel })` (`@alexify/syncom/idb`) | The browser | The engine over IndexedDB: six object stores keyed by the database's path (`kv`, `records`, `pieces`, `copies`, `log`, `meta`), a record as the object it was handed, one readwrite transaction per write set and per log group, key ranges for listings, a `BroadcastChannel` another tab's writes are heard through (`db.changes`). Where `createIdbFsi` spent a transaction per file and rewrote the catalog whole, this spends two per write. `engine.close()` closes the connection, `engine.destroy()` deletes the IndexedDB database — see [Browser](./browser#opfs-or-indexeddb) |
 | `memoryEngine()` (`@alexify/syncom/memory`) | Anywhere | The engine in memory: a record kept as the object it was handed (no JSON text), the log as rows (nothing written, nothing read back), the catalog's rows as they are; one engine object is shared by every database that opens through it, and a path outlives its instance until `engine.remove(path)` — a reopen reads what the last instance wrote. Nothing survives the process. What a test, a mesh in one process or a benchmark wants over `memory()` |
 
 ```js

@@ -8,7 +8,11 @@
 // One object store, `files`, keyed by `[dir, name]`, with an index on `dir`:
 // a directory listing is one `getAllKeys(dir)` on the index, and every other
 // call is one request on the store. A write resolves on the transaction's
-// `complete`, which is when IndexedDB considers it durable.
+// `complete`, which is when IndexedDB considers it durable. `idbEngine()`
+// (./engine.js) is the engine over object stores — what a database should
+// open through where it can.
+
+const { idbEngine } = require('./engine.js');
 
 const NOT_FOUND = 'NotFoundError';
 
@@ -108,4 +112,4 @@ const createIdbFsi = ({ name = 'syncom', store = 'files', indexedDB = globalThis
   };
 };
 
-module.exports = { createIdbFsi };
+module.exports = { createIdbFsi, idbEngine };

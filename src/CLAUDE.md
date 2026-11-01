@@ -14,7 +14,6 @@ src/chain/chain.js        @alexify/syncom/chain — the chain plugin and Blockch
 src/plugin.js             createPlugins — the registry one createDatabase() builds: kind modules (ranks, block codes, op types, apply/join/prune/render/
                           resolve/diff/realize/migrate/compact/methods) and API modules; PLUGIN_MISSING; PENDING_MAX — requires shape.js, errors.js
 src/contracts/contracts.js the @alexify/syncom/contracts subpath — never back in the barrel
-src/idb/idb.js            the @alexify/syncom/idb subpath — the IndexedDB backend, browser-only
 src/store/store.js        the @alexify/syncom/store subpath — toStore/fromEvents: one store object for Svelte's contract and
                           React's useSyncExternalStore over a cursor, a Record, get(), a presence or an emitter — no requires
 src/inspect/inspect.js    the @alexify/syncom/inspect subpath — a record's anatomy (through the [SOURCE] seam's raw `entry`) and anonymize; requires compose, shape, symbols, hash only
