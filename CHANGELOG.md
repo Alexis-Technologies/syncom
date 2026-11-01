@@ -1065,6 +1065,12 @@ and one `commit` event, not one per call.
 
 ### Fixed
 
+- **A tag read as the window laid its record could read the record as it is now.** A record changed
+  since the tag and not yet on its file reads as the file — still the tag's state — but a deferred
+  flush may be laying it at that moment, the tag's copy first and the new file after; a read of the
+  file that came back after the new one was written handed the tag the present, so `diff()` against
+  the tag was empty and `restore()` wrote nothing. That read is made inside a landing step now, where
+  no flush runs, and looks for the copy again first.
 - **A delete a field survives reported the record gone.** A concurrent write stamped above a delete
   that landed first keeps the record alive — the reading shows the survivor and the fields that went
   — but the `change` and `transaction` events said `delete`, so a view kept by the changes (an editor's
