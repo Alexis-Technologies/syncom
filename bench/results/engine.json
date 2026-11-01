@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-01T19:05:16.216Z",
+  "generatedAt": "2026-11-01T21:51:03.984Z",
   "machine": {
     "cpu": "Apple M3 Max",
     "cores": 16,
@@ -841,122 +841,102 @@
     {
       "subject": "engines",
       "name": "insert — files (node:fs)",
-      "opsPerSec": 3413
+      "opsPerSec": 7434
     },
     {
       "subject": "engines",
       "name": "update — one field — files (node:fs)",
-      "opsPerSec": 8977
+      "opsPerSec": 13307
     },
     {
       "subject": "engines",
       "name": "get — cached — files (node:fs)",
-      "opsPerSec": 112277
+      "opsPerSec": 51850
     },
     {
       "subject": "engines",
       "name": "transact — 1000 inserts — files (node:fs)",
-      "opsPerSec": 4985
+      "opsPerSec": 8804
     },
     {
       "subject": "engines",
       "name": "open — 10,000 records — files (node:fs)",
-      "opsPerSec": 31
+      "opsPerSec": 40
     },
     {
       "subject": "engines",
       "name": "insert — memory",
-      "opsPerSec": 18649
+      "opsPerSec": 68247
     },
     {
       "subject": "engines",
       "name": "update — one field — memory",
-      "opsPerSec": 11101
+      "opsPerSec": 17195
     },
     {
       "subject": "engines",
       "name": "get — cached — memory",
-      "opsPerSec": 51538
+      "opsPerSec": 53557
     },
     {
       "subject": "engines",
       "name": "transact — 1000 inserts — memory",
-      "opsPerSec": 40850
+      "opsPerSec": 70784
     },
     {
       "subject": "engines",
       "name": "open — 10,000 records — memory",
-      "opsPerSec": 206
+      "opsPerSec": 214
     },
     {
       "subject": "engines",
       "name": "insert — sqlite (a file)",
-      "opsPerSec": 9238
+      "opsPerSec": 15185
     },
     {
       "subject": "engines",
       "name": "update — one field — sqlite (a file)",
-      "opsPerSec": 8565
+      "opsPerSec": 13859
     },
     {
       "subject": "engines",
       "name": "get — cached — sqlite (a file)",
-      "opsPerSec": 54549
+      "opsPerSec": 50249
     },
     {
       "subject": "engines",
       "name": "transact — 1000 inserts — sqlite (a file)",
-      "opsPerSec": 13747
+      "opsPerSec": 15825
     },
     {
       "subject": "engines",
       "name": "open — 10,000 records — sqlite (a file)",
-      "opsPerSec": 29
+      "opsPerSec": 30
     },
     {
       "subject": "engines",
       "name": "insert — idb (fake-indexeddb)",
-      "opsPerSec": 4571
+      "opsPerSec": 7438
     },
     {
       "subject": "engines",
       "name": "update — one field — idb (fake-indexeddb)",
-      "opsPerSec": 6488
+      "opsPerSec": 10652
     },
     {
       "subject": "engines",
       "name": "get — cached — idb (fake-indexeddb)",
-      "opsPerSec": 51639
+      "opsPerSec": 50614
     },
     {
       "subject": "engines",
       "name": "transact — 1000 inserts — idb (fake-indexeddb)",
-      "opsPerSec": 5253
+      "opsPerSec": 6707
     },
     {
       "subject": "engines",
       "name": "open — 10,000 records — idb (fake-indexeddb)",
-      "opsPerSec": 14
-    },
-    {
-      "subject": "engines",
-      "name": "insert — mongodb (the driver in memory)",
-      "opsPerSec": 1897
-    },
-    {
-      "subject": "engines",
-      "name": "update — one field — mongodb (the driver in memory)",
-      "opsPerSec": 1430
-    },
-    {
-      "subject": "engines",
-      "name": "get — cached — mongodb (the driver in memory)",
-      "opsPerSec": 202634
-    },
-    {
-      "subject": "engines",
-      "name": "transact — 1000 inserts — mongodb (the driver in memory)",
-      "opsPerSec": 316
+      "opsPerSec": 15
     }
   ]
 }

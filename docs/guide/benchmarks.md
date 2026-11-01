@@ -263,7 +263,9 @@ loads is counted with the JavaScript, gzipped too.
 ## syncom's own benchmarks
 
 `pnpm bench` runs one script per subject in `bench/`: the storage API end to end, the same
-database over every engine (node:fs, memory, SQLite, IndexedDB, MongoDB — `bench/engines.js`), a peer's
+database over every engine (node:fs, memory, SQLite, IndexedDB — and MongoDB over the driver where `MONGODB_URL`
+names a replica set, never over the fake driver of the tests; signatures off, so the rows measure the medium —
+`bench/engines.js`), a peer's
 page as it is applied, replication over the in-process link, full-text search, the op log, the
 chain, hashing, the CRDT helpers, the emitter, and the list and text engine — a keystroke, a
 reading, a hydration, and the same at a size where a cost per element would show: a text under
@@ -324,34 +326,30 @@ records them.
 </details>
 
 <details>
-<summary>Engines — 24 rows</summary>
+<summary>Engines — 20 rows</summary>
 
 | Benchmark | ops/s | per operation |
 | --- | ---: | ---: |
-| insert — files (node:fs) | 3,413 | 293 µs |
-| update — one field — files (node:fs) | 8,977 | 111 µs |
-| get — cached — files (node:fs) | 112,277 | 8.91 µs |
-| transact — 1000 inserts — files (node:fs) | 4,985 | 201 µs |
-| open — 10,000 records — files (node:fs) | 31 | 32.3 ms |
-| insert — memory | 18,649 | 53.6 µs |
-| update — one field — memory | 11,101 | 90.1 µs |
-| get — cached — memory | 51,538 | 19.4 µs |
-| transact — 1000 inserts — memory | 40,850 | 24.5 µs |
-| open — 10,000 records — memory | 206 | 4.85 ms |
-| insert — sqlite (a file) | 9,238 | 108 µs |
-| update — one field — sqlite (a file) | 8,565 | 117 µs |
-| get — cached — sqlite (a file) | 54,549 | 18.3 µs |
-| transact — 1000 inserts — sqlite (a file) | 13,747 | 72.7 µs |
-| open — 10,000 records — sqlite (a file) | 29 | 34.5 ms |
-| insert — idb (fake-indexeddb) | 4,571 | 219 µs |
-| update — one field — idb (fake-indexeddb) | 6,488 | 154 µs |
-| get — cached — idb (fake-indexeddb) | 51,639 | 19.4 µs |
-| transact — 1000 inserts — idb (fake-indexeddb) | 5,253 | 190 µs |
-| open — 10,000 records — idb (fake-indexeddb) | 14 | 71.4 ms |
-| insert — mongodb (the driver in memory) | 1,897 | 527 µs |
-| update — one field — mongodb (the driver in memory) | 1,430 | 699 µs |
-| get — cached — mongodb (the driver in memory) | 202,634 | 4.94 µs |
-| transact — 1000 inserts — mongodb (the driver in memory) | 316 | 3.16 ms |
+| insert — files (node:fs) | 7,434 | 135 µs |
+| update — one field — files (node:fs) | 13,307 | 75.1 µs |
+| get — cached — files (node:fs) | 51,850 | 19.3 µs |
+| transact — 1000 inserts — files (node:fs) | 8,804 | 114 µs |
+| open — 10,000 records — files (node:fs) | 40 | 25 ms |
+| insert — memory | 68,247 | 14.7 µs |
+| update — one field — memory | 17,195 | 58.2 µs |
+| get — cached — memory | 53,557 | 18.7 µs |
+| transact — 1000 inserts — memory | 70,784 | 14.1 µs |
+| open — 10,000 records — memory | 214 | 4.67 ms |
+| insert — sqlite (a file) | 15,185 | 65.9 µs |
+| update — one field — sqlite (a file) | 13,859 | 72.2 µs |
+| get — cached — sqlite (a file) | 50,249 | 19.9 µs |
+| transact — 1000 inserts — sqlite (a file) | 15,825 | 63.2 µs |
+| open — 10,000 records — sqlite (a file) | 30 | 33.3 ms |
+| insert — idb (fake-indexeddb) | 7,438 | 134 µs |
+| update — one field — idb (fake-indexeddb) | 10,652 | 93.9 µs |
+| get — cached — idb (fake-indexeddb) | 50,614 | 19.8 µs |
+| transact — 1000 inserts — idb (fake-indexeddb) | 6,707 | 149 µs |
+| open — 10,000 records — idb (fake-indexeddb) | 15 | 66.7 ms |
 
 </details>
 
