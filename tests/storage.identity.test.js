@@ -21,7 +21,7 @@ test('Storage identity', async (t) => {
     async (t2) => {
       const dir = await createTemp();
       t2.after(() => cleanupTemp(dir));
-      const storage = await syncom.open({ path: dir, logger: false });
+      const storage = await syncom.createDatabase({ path: dir, logger: false });
       const { nodeId } = storage;
       assert.match(nodeId, KEY_ID);
       assert.strictEqual(nodeId, (await loadSigningKeys(path.join(dir, 'keys'))).id);
@@ -34,7 +34,7 @@ test('Storage identity', async (t) => {
       }
       const id = await storage.insert({ a: 1 });
       await storage.close();
-      const reopened = await syncom.open({ path: dir, logger: false });
+      const reopened = await syncom.createDatabase({ path: dir, logger: false });
       assert.strictEqual(reopened.nodeId, nodeId);
       assert.deepStrictEqual(reopened.vector, { [nodeId]: 1 });
       assert.deepStrictEqual(await reopened.get(id), { a: 1 });
@@ -46,8 +46,8 @@ test('Storage identity', async (t) => {
     const a = await createTemp();
     const b = await createTemp();
     t2.after(() => Promise.all([cleanupTemp(a), cleanupTemp(b)]));
-    const first = await syncom.open({ path: a, logger: false });
-    const second = await syncom.open({ path: b, logger: false });
+    const first = await syncom.createDatabase({ path: a, logger: false });
+    const second = await syncom.createDatabase({ path: b, logger: false });
     assert.notStrictEqual(first.nodeId, second.nodeId);
     await first.close();
     await second.close();
@@ -59,7 +59,7 @@ test('Storage identity', async (t) => {
     await fs.writeFile(path.join(dir, 'node.json'), JSON.stringify({ id: 'legacy-uuid-1234' }));
     const warnings = [];
     const logger = { ...quiet, warn: (entry) => warnings.push(entry) };
-    const storage = await syncom.open({ path: dir, logger });
+    const storage = await syncom.createDatabase({ path: dir, logger });
     assert.match(storage.nodeId, KEY_ID);
     assert.deepStrictEqual(
       warnings.map((entry) => [entry.event, entry.from, entry.to]),
@@ -71,7 +71,7 @@ test('Storage identity', async (t) => {
     });
     await storage.close();
     // Once: a reopen is quiet.
-    const again = await syncom.open({ path: dir, logger });
+    const again = await syncom.createDatabase({ path: dir, logger });
     assert.strictEqual(warnings.length, 1);
     assert.strictEqual(again.nodeId, storage.nodeId);
     await again.close();
@@ -80,12 +80,12 @@ test('Storage identity', async (t) => {
   await t.test('node.json naming another signing key is refused: IDENTITY_MISMATCH', async (t2) => {
     const dir = await createTemp();
     t2.after(() => cleanupTemp(dir));
-    const first = await syncom.open({ path: dir, logger: false });
+    const first = await syncom.createDatabase({ path: dir, logger: false });
     const { nodeId } = first;
     await first.close();
     const other = await generateSigningKeys();
     await fs.writeFile(path.join(dir, 'node.json'), JSON.stringify({ id: other.id }));
-    await assert.rejects(() => syncom.open({ path: dir, logger: false }), {
+    await assert.rejects(() => syncom.createDatabase({ path: dir, logger: false }), {
       name: 'SyncomError',
       code: 'IDENTITY_MISMATCH',
       id: other.id,
@@ -94,7 +94,7 @@ test('Storage identity', async (t) => {
     });
     // The failed open released the lock; the file put right, the node is back.
     await fs.writeFile(path.join(dir, 'node.json'), JSON.stringify({ id: nodeId }));
-    const back = await syncom.open({ path: dir, logger: false });
+    const back = await syncom.createDatabase({ path: dir, logger: false });
     assert.strictEqual(back.nodeId, nodeId);
     await back.close();
   });

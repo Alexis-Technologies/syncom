@@ -12,14 +12,14 @@ const { createMesh, settle, waitUntil } = require('./utils/mesh.js');
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const open = async (t, name, options = {}) => {
-  const storage = await syncom.open({ path: `/${name}`, fsi: memory(), logger: false, ...options });
+const createDatabase = async (t, name, options = {}) => {
+  const storage = await syncom.createDatabase({ path: `/${name}`, fsi: memory(), logger: false, ...options });
   t.after(() => storage.close().catch(() => {}));
   return storage;
 };
 
 test('presence refuses a stamp far ahead and a state nested past the bound, without a throw', async (t) => {
-  const storage = await open(t, 'bounds');
+  const storage = await createDatabase(t, 'bounds');
   const presence = createPresence(storage, { timeout: 1000 });
   t.after(() => presence.destroy());
   let deep = { leaf: 1 };
@@ -50,7 +50,7 @@ test('a refused update is heard: the instance’s refused event, the counter, a 
   };
   const warned = [];
   const logger = { warn: (entry) => warned.push(entry), info() {}, debug() {}, error() {} };
-  const storage = await open(t, 'refused', { telemetry, logger, sync: { autoStart: false } });
+  const storage = await createDatabase(t, 'refused', { telemetry, logger, sync: { autoStart: false } });
   const presence = createPresence(storage, { timeout: 1000 });
   t.after(() => presence.destroy());
   storage.sync.presence(presence);
@@ -84,9 +84,9 @@ test('presence', async (t) => {
   await t.test(
     'presence: a state is set, renewed, expired and left; the newest by clock wins; a forged or unsigned state is refused; nothing is logged',
     async (t2) => {
-      const a = await open(t2, 'a');
-      const b = await open(t2, 'b');
-      const strict = await open(t2, 'strict', { sync: { signatures: 'require' } });
+      const a = await createDatabase(t2, 'a');
+      const b = await createDatabase(t2, 'b');
+      const strict = await createDatabase(t2, 'strict', { sync: { signatures: 'require' } });
       const pa = createPresence(a, { timeout: 300 });
       const pb = createPresence(b, { timeout: 300 });
       t2.after(() => pa.destroy());
@@ -196,7 +196,8 @@ test('presence', async (t) => {
         recordPresenceRefused: (reason, count) => counted.push([reason, count]),
         recordRefusal: (code) => hellos.push(code),
       };
-      const createStorage = (t3, name, options) => open(t3, name, name === 'H' ? { ...options, telemetry } : options);
+      const createStorage = (t3, name, options) =>
+        createDatabase(t3, name, name === 'H' ? { ...options, telemetry } : options);
       const mesh = await createMesh(
         t2,
         ['H', 'A', 'B'],
@@ -231,7 +232,7 @@ test('presence', async (t) => {
       await waitUntil(() => pa.get(b.nodeId) !== undefined);
       assert.deepStrictEqual(pa.nodes().sort(), [a.nodeId, b.nodeId].sort());
       // A newcomer is handed the room at hello; a leave reaches everyone.
-      const c = await open(t2, 'C', { sync: { connect: mesh.connect, autoStart: false } });
+      const c = await createDatabase(t2, 'C', { sync: { connect: mesh.connect, autoStart: false } });
       await c.sync.addNode({ url: 'mem://H' });
       const pc = make(c);
       await c.sync.start();

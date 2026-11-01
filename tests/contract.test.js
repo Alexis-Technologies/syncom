@@ -12,7 +12,7 @@ test('Contract module', async (t) => {
   await t.test('DataReader get reads storage', async () => {
     const tempDir = await createTemp();
     try {
-      const storage = await syncom.open({ path: tempDir });
+      const storage = await syncom.createDatabase({ path: tempDir });
       const reader = new DataReader(storage);
 
       assert.strictEqual(await reader.get('missing'), null);
@@ -27,7 +27,7 @@ test('Contract module', async (t) => {
   await t.test('SmartContract execute method', async () => {
     const tempDir = await createTemp();
     try {
-      const storage = await syncom.open({ path: tempDir });
+      const storage = await syncom.createDatabase({ path: tempDir });
       const chainPath = path.join(tempDir, 'blockchain');
       const blockchain = await new syncom.Blockchain(chainPath);
       const context = { storage, chain: blockchain };
@@ -56,7 +56,7 @@ test('Contract module', async (t) => {
   await t.test('SmartContract execute method with error', async () => {
     const tempDir = await createTemp();
     try {
-      const storage = await syncom.open({ path: tempDir });
+      const storage = await syncom.createDatabase({ path: tempDir });
       const chainPath = path.join(tempDir, 'blockchain');
       const blockchain = await new syncom.Blockchain(chainPath);
       const context = { storage, chain: blockchain };
@@ -90,7 +90,7 @@ test('Contract module', async (t) => {
   await t.test('SmartContract save and load static methods', async () => {
     const tempDir = await createTemp();
     try {
-      const storage = await syncom.open({ path: tempDir });
+      const storage = await syncom.createDatabase({ path: tempDir });
       const chainPath = path.join(tempDir, 'blockchain');
       const blockchain = await new syncom.Blockchain(chainPath);
       const context = { storage, chain: blockchain };
@@ -120,7 +120,7 @@ test('Contract module', async (t) => {
   await t.test('SmartContract.load rejects non-contract block', async () => {
     const tempDir = await createTemp();
     try {
-      const storage = await syncom.open({ path: tempDir });
+      const storage = await syncom.createDatabase({ path: tempDir });
       const chainPath = path.join(tempDir, 'extra-chain');
       const blockchain = await new Blockchain(chainPath);
       const context = { storage, chain: blockchain };

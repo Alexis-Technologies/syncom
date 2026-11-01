@@ -11,10 +11,10 @@
 // active context. syncom itself never carries trace context: ops are durable
 // and traces are not, and wrpc already puts W3C context on every packet.
 //
-// The `telemetry` plugin builds the writer from `open({ telemetry })` —
+// The `telemetry` plugin builds the writer from `createDatabase({ telemetry })` —
 // `{ api }` or `{ tracer, meter }` — and hands it to the core, which records
 // through the contract of src/telemetry/writer.js (DISABLED, `traced`). Without the
-// plugin `open({ telemetry: { api } })` is PLUGIN_MISSING; a writer given as
+// plugin `createDatabase({ telemetry: { api } })` is PLUGIN_MISSING; a writer given as
 // it is the core takes without the plugin. Every recording path is
 // contained — a tracer, meter, span or instrument that throws must never
 // break a write.
@@ -249,7 +249,7 @@ const createTelemetry = (telemetry) => {
       });
       lockWait = meter.createHistogram('syncom.lock.wait', {
         unit: 'ms',
-        description: 'Time open() spent taking the directory lock',
+        description: 'Time createDatabase() spent taking the directory lock',
       });
       refused = meter.createCounter('syncom.hello.refused', {
         unit: '{call}',
@@ -448,7 +448,7 @@ const createTelemetry = (telemetry) => {
   });
 };
 
-/** The plugin: the writer built from `open({ telemetry })`, handed to the core. */
+/** The plugin: the writer built from `createDatabase({ telemetry })`, handed to the core. */
 const telemetry = Object.freeze({
   name: 'telemetry',
   setup({ options }) {

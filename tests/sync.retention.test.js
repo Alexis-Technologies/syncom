@@ -26,7 +26,7 @@ const tempDir = async (t) => {
 };
 
 const openAt = async (t, dir, options = {}) => {
-  const storage = await syncom.open({ path: dir, logger: false, ...options });
+  const storage = await syncom.createDatabase({ path: dir, logger: false, ...options });
   t.after(() => storage.close().catch(() => {}));
   return storage;
 };
@@ -166,18 +166,18 @@ test('A node restored from an older copy of its directory', async (t) => {
   // the node says REWOUND and leaves its stream where its log has it — unless
   // the application opens it with `sync.rewind: 'adopt'`.
   await t.test('without signing, REWOUND is reported and nothing moves; rewind: adopt moves it', async (t2) => {
-    const open = async (dir, options = {}) => {
-      const storage = await core.open({ path: dir, logger: false, defer: 0, plugins: [sync], ...options });
+    const createDatabase = async (dir, options = {}) => {
+      const storage = await core.createDatabase({ path: dir, logger: false, defer: 0, plugins: [sync], ...options });
       t2.after(() => storage.close().catch(() => {}));
       return storage;
     };
-    const host = await open(await tempDir(t2));
+    const host = await createDatabase(await tempDir(t2));
     const dir = await tempDir(t2);
     const backup = await tempDir(t2);
     const options = (rewind) => ({
       sync: { autoStart: false, rewind, connect: () => new MemoryLink(host.sync.unit({ access: 'public' })) },
     });
-    let node = await open(dir, options());
+    let node = await createDatabase(dir, options());
     await node.sync.addNode({ url: 'mem://host' });
     await node.sync.start();
     await waitUntil(() => node.sync.peers()[0]?.subscribed);
@@ -185,7 +185,7 @@ test('A node restored from an older copy of its directory', async (t) => {
     await node.sync.sync();
     await node.close();
     await fs.cp(dir, backup, { recursive: true });
-    node = await open(dir, options());
+    node = await createDatabase(dir, options());
     await node.sync.start();
     await waitUntil(() => node.sync.peers()[0]?.subscribed);
     const lost = await node.insert({ n: 'after the backup' });
@@ -195,7 +195,7 @@ test('A node restored from an older copy of its directory', async (t) => {
     await node.close();
     await fs.rm(dir, { recursive: true, force: true });
     await fs.cp(backup, dir, { recursive: true });
-    node = await open(dir, options());
+    node = await createDatabase(dir, options());
     assert.strictEqual(node.vector[own], 1);
     const errors = [];
     node.sync.on('error', (error) => errors.push(error));
@@ -210,7 +210,7 @@ test('A node restored from an older copy of its directory', async (t) => {
     assert.strictEqual(await node.get(lost), null);
     await node.close();
     // Told to take the host's word: the stream moves, the lost state comes back.
-    node = await open(dir, options('adopt'));
+    node = await createDatabase(dir, options('adopt'));
     const adopted = [];
     node.sync.on('error', (error) => adopted.push(error));
     node.sync.on('bootstrap', (event) => bootstraps.push(event));
@@ -223,9 +223,9 @@ test('A node restored from an older copy of its directory', async (t) => {
 
   await t.test('sync.rewind is checked at open()', async () => {
     const fsi = memory();
-    await assert.rejects(async () => core.open({ path: 'x', fsi, logger: false, sync: { rewind: 'yes' } }), {
+    await assert.rejects(async () => core.createDatabase({ path: 'x', fsi, logger: false, sync: { rewind: 'yes' } }), {
       name: 'TypeError',
-      message: "open({ sync }): rewind must be 'report' or 'adopt'",
+      message: "createDatabase({ sync }): rewind must be 'report' or 'adopt'",
     });
   });
 });

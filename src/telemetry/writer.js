@@ -6,7 +6,7 @@
 // writer from the `@opentelemetry/api` module or pre-built tracer/meter
 // instances is the telemetry plugin's (src/telemetry/telemetry.js,
 // @alexify/syncom/telemetry); the core takes a writer given to
-// `open({ telemetry })` (duck-typed: `enabled` and `withSpan`) through
+// `createDatabase({ telemetry })` (duck-typed: `enabled` and `withSpan`) through
 // `writerOf`, which contains it: a method it lacks records nothing, a method
 // that throws is swallowed — a writer must never break a write, or hang one
 // (a write path that threw after its append once left every write behind it

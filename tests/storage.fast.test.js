@@ -9,12 +9,19 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { open } = require('../src/index.js');
+const { createDatabase } = require('../src/index.js');
 const { text } = require('../src/text/text.js');
 const { memory } = require('../src/memory/memory.js');
 
 const openMemory = async (t, options = {}) => {
-  const storage = await open({ path: '/fast', fsi: memory(), logger: false, lock: false, plugins: [text], ...options });
+  const storage = await createDatabase({
+    path: '/fast',
+    fsi: memory(),
+    logger: false,
+    lock: false,
+    plugins: [text],
+    ...options,
+  });
   t.after(() => storage.close().catch(() => {}));
   return storage;
 };
@@ -64,7 +71,7 @@ test('a write behind an unfinished landing goes through the queue and lands afte
       return base.write(dir, name, content);
     },
   };
-  const storage = await open({ path: '/gated', fsi, logger: false, lock: false, plugins: [text], defer: 5 });
+  const storage = await createDatabase({ path: '/gated', fsi, logger: false, lock: false, plugins: [text], defer: 5 });
   t.after(() => storage.close().catch(() => {}));
   const id = await storage.insert({ title: 'doc' });
   let release = null;
@@ -95,7 +102,7 @@ test('a write behind an unfinished landing goes through the queue and lands afte
 test('flush() and close() wait for the writes made at once', async () => {
   const fsi = memory();
   const options = { path: '/kept', fsi, logger: false, lock: false, plugins: [text] };
-  let storage = await open(options);
+  let storage = await createDatabase(options);
   const id = await storage.insert({ title: 'doc' });
   await storage.update(id, { title: 'kept' });
   // Not awaited: the calls return at once, their landings follow.
@@ -106,7 +113,7 @@ test('flush() and close() wait for the writes made at once', async () => {
   assert.deepStrictEqual(await storage.get(id), { title: 'kept', hits: 3, body: 'abc' });
   storage.push(id, 'body', 'd');
   await storage.close();
-  storage = await open(options);
+  storage = await createDatabase(options);
   assert.deepStrictEqual(await storage.get(id), { title: 'kept', hits: 3, body: 'abcd' }, 'what was written reopens');
   await storage.close();
 });
@@ -114,7 +121,14 @@ test('flush() and close() wait for the writes made at once', async () => {
 test('a seeded workload made at once reads, logs and announces as the same workload through the queue', async () => {
   // An afterWrite hook keeps every write in the queue: the same ops, the other path.
   const run = async (hooks) => {
-    const storage = await open({ path: '/same', fsi: memory(), logger: false, lock: false, plugins: [text], hooks });
+    const storage = await createDatabase({
+      path: '/same',
+      fsi: memory(),
+      logger: false,
+      lock: false,
+      plugins: [text],
+      hooks,
+    });
     const changes = [];
     storage.on('change', (op, via, { changes: of }) => changes.push(JSON.stringify(of)));
     const id = await storage.insert({ title: 'doc', done: false });
@@ -188,7 +202,7 @@ test('a write made at once whose group does not reach the disk is taken back who
     append: (dir, name, body) =>
       failing && dir.endsWith('/log/open') ? Promise.reject(new Error('disk full')) : inner.append(dir, name, body),
   };
-  const storage = await open({ path: '/failing', fsi, logger: false, lock: false, plugins: [text] });
+  const storage = await createDatabase({ path: '/failing', fsi, logger: false, lock: false, plugins: [text] });
   t.after(() => storage.close().catch(() => {}));
   const id = await storage.insert({ n: 1 });
   await storage.push(id, 'body', 'ab');

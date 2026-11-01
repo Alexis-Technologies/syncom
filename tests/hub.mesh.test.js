@@ -18,7 +18,7 @@ test('Hub mesh', async (t) => {
       dirs.set(key, await createTemp());
       t2.after(() => cleanupTemp(dirs.get(key)));
     }
-    const storage = await syncom.open({ path: dirs.get(key), logger: false, ...options });
+    const storage = await syncom.createDatabase({ path: dirs.get(key), logger: false, ...options });
     t2.after(() => storage.close().catch(() => {}));
     return storage;
   };

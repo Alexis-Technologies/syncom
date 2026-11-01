@@ -17,7 +17,7 @@ test('Storage on the browser halves', async (t) => {
 
   await t.test('the shared modules see the browser crypto and fsi', async () => {
     assert.ok(browser.calculateHash({ a: 1 }) instanceof Promise);
-    const storage = await browser.open({ defer: 0, path: 'store-basic' });
+    const storage = await browser.createDatabase({ defer: 0, path: 'store-basic' });
     const id = await storage.insert({ title: 'Draft', hits: 0 });
     assert.deepStrictEqual(await storage.get(id), { title: 'Draft', hits: 0 });
     assert.strictEqual(await storage.validate(), true);
@@ -26,7 +26,7 @@ test('Storage on the browser halves', async (t) => {
   });
 
   await t.test('the node id is the signing key here too, derived by Web Crypto', async () => {
-    const storage = await browser.open({ defer: 0, path: 'store-identity' });
+    const storage = await browser.createDatabase({ defer: 0, path: 'store-identity' });
     assert.match(storage.nodeId, /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/);
     assert.strictEqual(storage.nodeId, (await browser.loadSigningKeys('store-identity/keys')).id);
     assert.deepStrictEqual(JSON.parse(await browser.read('store-identity', 'node.json')), {
@@ -34,13 +34,13 @@ test('Storage on the browser halves', async (t) => {
       plugins: ['text', 'tree'],
     });
     await storage.close();
-    const reopened = await browser.open({ defer: 0, path: 'store-identity' });
+    const reopened = await browser.createDatabase({ defer: 0, path: 'store-identity' });
     assert.strictEqual(reopened.nodeId, storage.nodeId);
     await reopened.close();
   });
 
   await t.test('encryption at rest awaits the async Web Crypto', async () => {
-    const storage = await browser.open({ defer: 0, path: 'store-encrypted' });
+    const storage = await browser.createDatabase({ defer: 0, path: 'store-encrypted' });
     const secret = { ssn: '123-45-6789' };
     await storage.saveData('s1', secret, { encrypted: true });
 
@@ -52,7 +52,7 @@ test('Storage on the browser halves', async (t) => {
 
     // A cold read (fresh Storage, empty cache) decrypts it back.
     await storage.close();
-    const reopened = await browser.open({ defer: 0, path: 'store-encrypted' });
+    const reopened = await browser.createDatabase({ defer: 0, path: 'store-encrypted' });
     assert.deepStrictEqual(await reopened.get('s1'), secret);
   });
 });
@@ -66,7 +66,7 @@ test('Storage telemetry on the browser halves', async (t) => {
   await t.test('a commit is spanned with nothing but the injected tracer', async () => {
     const exporter = new InMemorySpanExporter();
     const provider = new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] });
-    const storage = await browser.open({
+    const storage = await browser.createDatabase({
       defer: 0,
       path: 'store-telemetry',
       telemetry: { tracer: provider.getTracer('t') },

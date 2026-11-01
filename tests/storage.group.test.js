@@ -11,8 +11,8 @@ const assert = require('node:assert');
 const syncom = require('../src/all/all.js');
 const { memory } = require('../src/memory/memory.js');
 
-const open = async (t, options = {}) => {
-  const storage = await syncom.open({ path: '/group', fsi: memory(), logger: false, ...options });
+const createDatabase = async (t, options = {}) => {
+  const storage = await syncom.createDatabase({ path: '/group', fsi: memory(), logger: false, ...options });
   t.after(() => storage.close().catch(() => {}));
   return storage;
 };
@@ -45,7 +45,7 @@ const gated = (inner) => {
 
 test('a group commit on the storage', async (t) => {
   await t.test('writes queued behind one another land as one log file each group, in order', async (t2) => {
-    const storage = await open(t2, { defer: 0 });
+    const storage = await createDatabase(t2, { defer: 0 });
     const id = await storage.insert({ n: 0 });
     const files = () => storage.log.length;
     const before = files();
@@ -71,7 +71,7 @@ test('a group commit on the storage', async (t) => {
     'the queue is free at the append: the next write builds on the one in flight, a read waits for the disk',
     async (t2) => {
       const backend = gated(memory());
-      const storage = await syncom.open({ path: '/g', fsi: backend.fsi, logger: false, defer: 0 });
+      const storage = await syncom.createDatabase({ path: '/g', fsi: backend.fsi, logger: false, defer: 0 });
       t2.after(() => {
         backend.release();
         return storage.close().catch(() => {});
@@ -105,7 +105,7 @@ test('a group commit on the storage', async (t) => {
         append: (dir, name, text) =>
           failing && dir.endsWith('/log/open') ? Promise.reject(new Error('disk full')) : inner.append(dir, name, text),
       };
-      const storage = await syncom.open({ path: '/f', fsi, logger: false, defer: 0 });
+      const storage = await syncom.createDatabase({ path: '/f', fsi, logger: false, defer: 0 });
       t2.after(() => storage.close().catch(() => {}));
       const id = await storage.insert({ n: 1 });
       const seq = storage.log.next;
@@ -126,7 +126,7 @@ test('a group commit on the storage', async (t) => {
 
   await t.test('two writes in flight cannot share a unique key', async (t2) => {
     const backend = gated(memory());
-    const storage = await syncom.open({
+    const storage = await syncom.createDatabase({
       path: '/u',
       fsi: backend.fsi,
       logger: false,
@@ -152,7 +152,7 @@ test('a group commit on the storage', async (t) => {
     async (t2) => {
       const backend = gated(memory());
       const seen = [];
-      const storage = await syncom.open({
+      const storage = await syncom.createDatabase({
         path: '/e',
         fsi: backend.fsi,
         logger: false,
@@ -183,7 +183,7 @@ test('a group commit on the storage', async (t) => {
   );
 
   await t.test('flush() lands what waits: the writes in flight, then the deferred files', async (t2) => {
-    const storage = await open(t2, { defer: 10_000 });
+    const storage = await createDatabase(t2, { defer: 10_000 });
     const id = await storage.insert({ n: 1 });
     await storage.update(id, { n: 2 });
     assert.strictEqual(storage.stats().deferred, 1);

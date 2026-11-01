@@ -1394,9 +1394,9 @@ test('ops: a sequence op of the wrong shape is malformed, never a throw: a peerâ
     assert.deepStrictEqual(entry.data, { body: 'hello' });
   }
   // Through a peer's page: the malformed op is refused and the page goes on.
-  const { open } = require('../src/all/all.js');
+  const { createDatabase } = require('../src/all/all.js');
   const { memory } = require('../src/memory/memory.js');
-  const storage = await open({
+  const storage = await createDatabase({
     path: '/malformed',
     fsi: memory(),
     logger: false,

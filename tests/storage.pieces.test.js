@@ -6,7 +6,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { open } = require('../src/all/all.js');
+const { createDatabase } = require('../src/all/all.js');
 const { memory } = require('../src/memory/memory.js');
 const S = require('../src/text/sequence.js');
 const { SOURCE } = require('../src/symbols.js');
@@ -27,7 +27,7 @@ const piecesOf = async (fsi, id) => (await fsi.list('/p/data')).filter((name) =>
 test('a large text is written in pieces: one a keystroke, the rest kept; read whole, copied whole', async () => {
   const fsi = memory();
   const options = { path: '/p', fsi, logger: false, defer: 0 };
-  let storage = await open({ ...options });
+  let storage = await createDatabase({ ...options });
   const id = await storage.insert({});
   await grow(storage, id, S.PIECES_MIN * 2);
   const file = JSON.parse(await fsi.read('/p/data', `${id}.json`));
@@ -68,7 +68,7 @@ test('a large text is written in pieces: one a keystroke, the rest kept; read wh
   assert.strictEqual((await storage.at('t1').get(id)).body, text.slice(1), 'the tag reads as it was');
   await storage.close();
   // Reopened: the block read whole from its pieces, the next edit as cheap.
-  storage = await open({ ...options });
+  storage = await createDatabase({ ...options });
   assert.strictEqual((await storage.get(id)).body, text);
   await storage.splice(id, 'body', 0, 1, '');
   assert.strictEqual((await storage.get(id)).body, text.slice(1));
@@ -76,20 +76,20 @@ test('a large text is written in pieces: one a keystroke, the rest kept; read wh
   assert.deepStrictEqual(await storage.list(), [id]);
   await storage.close();
   await fsi.remove('/p/index', 'catalog.json');
-  storage = await open({ ...options });
+  storage = await createDatabase({ ...options });
   assert.deepStrictEqual(await storage.list(), [id]);
   await storage.close();
   // A piece gone: the record is unreadable, never read in part.
   const [gone] = await piecesOf(fsi, id);
   await fsi.remove('/p/data', gone);
-  storage = await open({ ...options });
+  storage = await createDatabase({ ...options });
   await assert.rejects(() => storage.get(id), { code: 'INTEGRITY' });
   await storage.close();
 });
 
 test('a purge takes the pieces with the payload: no file of the record’s runs is left', async () => {
   const fsi = memory();
-  const storage = await open({ path: '/p', fsi, logger: false, defer: 0 });
+  const storage = await createDatabase({ path: '/p', fsi, logger: false, defer: 0 });
   const id = await storage.insert({});
   await grow(storage, id, S.PIECES_MIN * 2);
   assert.ok((await piecesOf(fsi, id)).length > 0);
@@ -107,7 +107,7 @@ const prepended = async (storage, id, head, runs) => {
 
 test('a text typed anywhere rewrites its newest piece alone, through a handle too: a run grows while it is new, an old one is left', async () => {
   const fsi = memory();
-  const storage = await open({ path: '/p', fsi, logger: false, defer: 0 });
+  const storage = await createDatabase({ path: '/p', fsi, logger: false, defer: 0 });
   const id = await storage.insert({});
   // `abc` the first run, then more than PIECE_RUNS runs before it.
   await prepended(storage, id, 'abc', S.PIECE_RUNS * 3);
@@ -151,7 +151,7 @@ test('a text typed anywhere rewrites its newest piece alone, through a handle to
   const text = (await storage.get(id)).body;
   await storage.close();
   // Reopened under a window: the handle's keystrokes made ahead of the write of the block they follow.
-  const reopened = await open({ path: '/p', fsi, logger: false, defer: 5 });
+  const reopened = await createDatabase({ path: '/p', fsi, logger: false, defer: 5 });
   assert.strictEqual((await reopened.get(id)).body, text, 'read back whole');
   const ahead = await reopened.openText(id, 'body', { window: 60_000 });
   const typed = () => {
@@ -216,7 +216,7 @@ test('a text in pieces is on disk as it was written after any edit: inserts, cut
   for (const defer of [0, 16]) {
     const fsi = memory();
     const options = { path: '/f', fsi, logger: false, defer };
-    let storage = await open(options);
+    let storage = await createDatabase(options);
     const id = await storage.insert({});
     await prepended(storage, id, 'start', S.PIECES_MIN + 50);
     let seed = 3 + defer;
@@ -261,7 +261,7 @@ test('a text in pieces is on disk as it was written after any edit: inserts, cut
       await same(`round ${round}, defer ${defer}`);
       const after = (await storage.get(id)).body;
       await storage.close();
-      storage = await open(options);
+      storage = await createDatabase(options);
       assert.strictEqual((await storage.get(id)).body, after, `round ${round}, defer ${defer}: read back`);
     }
     await storage.close();

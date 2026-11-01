@@ -14,30 +14,30 @@ const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const openTemp = async (t, options = {}) => {
   const dir = await createTemp();
   t.after(() => cleanupTemp(dir));
-  return { dir, open: (more = {}) => syncom.open({ path: dir, logger: false, ...options, ...more }) };
+  return { dir, open: (more = {}) => syncom.createDatabase({ path: dir, logger: false, ...options, ...more }) };
 };
 
 test('Exclusive open (lockfile)', async (t) => {
   await t.test('a second instance is refused with LOCKED; close() frees the directory', async (t2) => {
-    const { dir, open } = await openTemp(t2);
-    const first = await open();
+    const { dir, open: createDatabase } = await openTemp(t2);
+    const first = await createDatabase();
     const lock = JSON.parse(await fs.readFile(path.join(dir, LOCK_FILE), 'utf8'));
     assert.strictEqual(lock.pid, process.pid);
     assert.strictEqual(typeof lock.id, 'string');
     assert.strictEqual(typeof lock.since, 'number');
-    await assert.rejects(() => open(), { code: 'LOCKED', message: /is locked by another instance/ });
-    await assert.rejects(() => open({ lock: 'fail' }), { code: 'LOCKED' });
+    await assert.rejects(() => createDatabase(), { code: 'LOCKED', message: /is locked by another instance/ });
+    await assert.rejects(() => createDatabase({ lock: 'fail' }), { code: 'LOCKED' });
     await first.close();
     await assert.rejects(() => fs.stat(path.join(dir, LOCK_FILE)), { code: 'ENOENT' });
-    const second = await open();
+    const second = await createDatabase();
     await second.close();
   });
 
   await t.test("'wait' resolves once the holder closes; false does not look", async (t2) => {
-    const { open } = await openTemp(t2);
-    const first = await open();
+    const { open: createDatabase } = await openTemp(t2);
+    const first = await createDatabase();
     let resolved = false;
-    const waiting = open({ lock: 'wait' }).then((storage) => {
+    const waiting = createDatabase({ lock: 'wait' }).then((storage) => {
       resolved = true;
       return storage;
     });
@@ -46,35 +46,35 @@ test('Exclusive open (lockfile)', async (t) => {
     await first.close();
     const second = await waiting;
     assert.strictEqual(resolved, true);
-    const third = await open({ lock: false });
+    const third = await createDatabase({ lock: false });
     await second.close();
     await third.close();
   });
 
   await t.test('a stale lockfile is taken over: a dead pid, or an old one with no pid', async (t2) => {
-    const { dir, open } = await openTemp(t2);
+    const { dir, open: createDatabase } = await openTemp(t2);
     await fs.writeFile(path.join(dir, LOCK_FILE), JSON.stringify({ pid: 2 ** 31 - 1, id: 'gone', since: Date.now() }));
-    const takenOver = await open();
+    const takenOver = await createDatabase();
     assert.notStrictEqual(JSON.parse(await fs.readFile(path.join(dir, LOCK_FILE), 'utf8')).id, 'gone');
     await takenOver.close();
     await fs.writeFile(path.join(dir, LOCK_FILE), JSON.stringify({ id: 'old', since: Date.now() - 3_600_000 }));
-    const aged = await open();
+    const aged = await createDatabase();
     await aged.close();
     await fs.writeFile(path.join(dir, LOCK_FILE), JSON.stringify({ id: 'fresh', since: Date.now() }));
-    await assert.rejects(() => open(), { code: 'LOCKED' }, 'no pid and recent: held');
+    await assert.rejects(() => createDatabase(), { code: 'LOCKED' }, 'no pid and recent: held');
     await fs.writeFile(path.join(dir, LOCK_FILE), 'not json');
-    const corrupt = await open();
+    const corrupt = await createDatabase();
     await corrupt.close();
     await fs.writeFile(path.join(dir, LOCK_FILE), JSON.stringify({ pid: process.pid, id: 'mine', since: Date.now() }));
-    await assert.rejects(() => open(), { code: 'LOCKED' }, 'a live pid is held, whatever its age');
+    await assert.rejects(() => createDatabase(), { code: 'LOCKED' }, 'a live pid is held, whatever its age');
     // pid 1 is alive and (almost always) not ours to signal: EPERM means alive.
     await fs.writeFile(path.join(dir, LOCK_FILE), JSON.stringify({ pid: 1, id: 'init', since: 0 }));
-    await assert.rejects(() => open(), { code: 'LOCKED' });
+    await assert.rejects(() => createDatabase(), { code: 'LOCKED' });
   });
 
   await t.test('a lock that is not ours is left alone on close; a failed open releases ours', async (t2) => {
-    const { dir, open } = await openTemp(t2);
-    const storage = await open();
+    const { dir, open: createDatabase } = await openTemp(t2);
+    const storage = await createDatabase();
     await fs.writeFile(path.join(dir, LOCK_FILE), JSON.stringify({ id: 'theirs', since: Date.now() }));
     await storage.close();
     assert.strictEqual(JSON.parse(await fs.readFile(path.join(dir, LOCK_FILE), 'utf8')).id, 'theirs');
@@ -88,18 +88,18 @@ test('Exclusive open (lockfile)', async (t) => {
         return fsi.read(d, name);
       },
     };
-    await open().then((s) => s.close());
-    await assert.rejects(() => open({ fsi: failing }), /unreadable/);
+    await createDatabase().then((s) => s.close());
+    await assert.rejects(() => createDatabase({ fsi: failing }), /unreadable/);
     await assert.rejects(() => fs.stat(path.join(dir, LOCK_FILE)), { code: 'ENOENT' });
-    const again = await open();
+    const again = await createDatabase();
     await again.close();
   });
 
   await t.test('the option is checked; two racing openers of a stale lock settle on one', async (t2) => {
-    const { dir, open } = await openTemp(t2);
-    await assert.rejects(async () => open({ lock: 'maybe' }), {
+    const { dir, open: createDatabase } = await openTemp(t2);
+    await assert.rejects(async () => createDatabase({ lock: 'maybe' }), {
       name: 'TypeError',
-      message: "open({ lock }): lock must be 'fail', 'wait', false or an object",
+      message: "createDatabase({ lock }): lock must be 'fail', 'wait', false or an object",
     });
     const fsi = require('../src/fsi.js');
     const results = await Promise.allSettled([
@@ -148,9 +148,9 @@ test('Exclusive open: the knobs, the race, the timeout', async (t) => {
   });
 
   await t.test('open({ lock }) takes an object: mode, staleAfter, poll, timeout', async (t2) => {
-    const { dir, open } = await openTemp(t2);
-    const first = await open({ lock: { mode: 'fail' } });
-    await assert.rejects(() => open({ lock: { mode: 'wait', poll: 10, timeout: 50 } }), {
+    const { dir, open: createDatabase } = await openTemp(t2);
+    const first = await createDatabase({ lock: { mode: 'fail' } });
+    await assert.rejects(() => createDatabase({ lock: { mode: 'wait', poll: 10, timeout: 50 } }), {
       code: 'LOCKED',
       message: /still locked/,
     });
@@ -158,11 +158,11 @@ test('Exclusive open: the knobs, the race, the timeout', async (t) => {
     await first.close();
     // A stale lock by age: staleAfter tunable, pid absent.
     await fs.writeFile(path.join(dir, LOCK_FILE), JSON.stringify({ id: 'old', since: Date.now() - 5_000 }));
-    await assert.rejects(() => open({ lock: { staleAfter: 60_000 } }), { code: 'LOCKED' });
-    const over = await open({ lock: { staleAfter: 1_000 } });
+    await assert.rejects(() => createDatabase({ lock: { staleAfter: 60_000 } }), { code: 'LOCKED' });
+    const over = await createDatabase({ lock: { staleAfter: 1_000 } });
     await over.close();
     for (const lock of [{ mode: 'maybe' }, { poll: -1 }, { timeout: 'soon' }, { nope: 1 }, 'later', 1]) {
-      assert.throws(() => syncom.open({ path: dir, logger: false, lock }), TypeError, JSON.stringify(lock));
+      assert.throws(() => syncom.createDatabase({ path: dir, logger: false, lock }), TypeError, JSON.stringify(lock));
     }
   });
 });

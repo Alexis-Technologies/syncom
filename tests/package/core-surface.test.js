@@ -7,7 +7,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { open } = require('../../src/index.js');
+const { createDatabase } = require('../../src/index.js');
 const { memory } = require('../../src/memory/memory.js');
 
 const MEMBERS = [
@@ -77,7 +77,7 @@ const MEMBERS = [
 test('the core a storage lends is frozen and has the members this list names, no more', async (t) => {
   let lent = null;
   const spy = { name: 'spy', setup: () => ({}), methods: { peek: async (core) => void (lent = core) } };
-  const storage = await open({ fsi: memory(), lock: false, logger: false, plugins: [spy] });
+  const storage = await createDatabase({ fsi: memory(), lock: false, logger: false, plugins: [spy] });
   t.after(() => storage.close());
   await storage.peek();
   assert.ok(Object.isFrozen(lent));

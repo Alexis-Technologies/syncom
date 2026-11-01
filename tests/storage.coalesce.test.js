@@ -8,14 +8,14 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { open } = require('../src/index.js');
+const { createDatabase } = require('../src/index.js');
 const { text } = require('../src/text/text.js');
 const { sync } = require('../src/sync/sync.js');
 const { memory } = require('../src/memory/memory.js');
 const { createMesh, settle, prng } = require('./utils/mesh.js');
 
 const openMemory = (path, fsi = memory(), options = {}) =>
-  open({ path, fsi, logger: false, lock: false, plugins: [text, sync], ...options });
+  createDatabase({ path, fsi, logger: false, lock: false, plugins: [text, sync], ...options });
 
 test('keystrokes sent without waiting are one op while they continue each other: typed on, or cut back', async () => {
   const fsi = memory();
@@ -138,7 +138,7 @@ test('keystrokes typed through a transaction are one op while they continue each
   assert.strictEqual((await hooked.get(id)).body, `>yyyystart ${'x'.repeat(25)}`);
   await hooked.close();
   // Signed after the transaction's last op: a signing node folds, and a peer that requires signatures takes it.
-  const { open: openAll } = require('../src/all/all.js');
+  const { createDatabase: openAll } = require('../src/all/all.js');
   const createStorage = (t2, name, options) => {
     const sync = { ...options.sync, signatures: 'require' };
     const opened = openAll({ path: `/${name}`, fsi: memory(), logger: false, lock: false, ...options, sync });

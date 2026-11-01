@@ -20,8 +20,8 @@ const FINGERPRINT = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
 // A fingerprint of the right shape that names no op.
 const STRANGER = `${'f'.repeat(42)}A`;
 
-const open = async (t, options = {}, build = syncom) => {
-  const storage = await build.open({ path: '/x', fsi: memory(), logger: false, defer: 0, ...options });
+const createDatabase = async (t, options = {}, build = syncom) => {
+  const storage = await build.createDatabase({ path: '/x', fsi: memory(), logger: false, defer: 0, ...options });
   t.after(() => storage.close().catch(() => {}));
   return storage;
 };
@@ -40,11 +40,14 @@ const cloneOf = async (fsi) => {
 // backup, a second instance — each copy minting the same seqs for its own ops.
 const forked = async (t, build = syncom, prepare = null) => {
   const fsi = memory();
-  const first = await open(t, { fsi, path: '/m' }, build);
+  const first = await createDatabase(t, { fsi, path: '/m' }, build);
   if (prepare !== null) await prepare(first);
   await first.close();
   const twin = await cloneOf(fsi);
-  return [await open(t, { fsi, path: '/m' }, build), await open(t, { fsi: twin, path: '/m' }, build)];
+  return [
+    await createDatabase(t, { fsi, path: '/m' }, build),
+    await createDatabase(t, { fsi: twin, path: '/m' }, build),
+  ];
 };
 
 // Ops as a peer receives them: packed, through JSON, unpacked.
@@ -82,7 +85,7 @@ test('Equivocation: two ops of one stream at one seq', async (t) => {
           ['H2', 'H1'],
         ],
         async (t3, name, options) => {
-          const storage = await open(t3, { path: `/${name}`, ...options });
+          const storage = await createDatabase(t3, { path: `/${name}`, ...options });
           errors.set(name, errorsOf(storage));
           const result = await storage.applyRemote([name === 'H1' ? x : y]);
           assert.strictEqual(result.applied, 1);
@@ -138,7 +141,7 @@ test('Equivocation: two ops of one stream at one seq', async (t) => {
       const y = opOf(m2, origin, 1);
       assert.deepStrictEqual([x.sig, x.digest], [undefined, undefined], 'unsigned, no digest');
       assert.notStrictEqual(x.ts, y.ts);
-      const host = await open(t2, { path: '/h' }, core);
+      const host = await createDatabase(t2, { path: '/h' }, core);
       const errors = errorsOf(host);
       assert.strictEqual((await host.applyRemote([x])).applied, 1);
       const result = await host.applyRemote([y]);
@@ -175,8 +178,8 @@ test('The per-stream hash chain', async (t) => {
       assert.strictEqual(x1.prev, undefined);
       assert.strictEqual(x2.prev, entryOf(m1, origin, 1).fp);
       assert.strictEqual(y2.prev, entryOf(m2, origin, 1).fp);
-      const h1 = await open(t2, { path: '/h1' });
-      const h2 = await open(t2, { path: '/h2' });
+      const h1 = await createDatabase(t2, { path: '/h1' });
+      const h2 = await createDatabase(t2, { path: '/h2' });
       const errors1 = errorsOf(h1);
       const errors2 = errorsOf(h2);
       assert.strictEqual((await h1.applyRemote([x1])).applied, 1);
@@ -202,7 +205,7 @@ test('The per-stream hash chain', async (t) => {
       assert.strictEqual(errors1.find((error) => error.code === 'EQUIVOCATION').received, y2.prev);
       // A fresh node holds neither: it takes the first op it is handed and
       // holds the chain to it from there, inside one page too.
-      const h3 = await open(t2, { path: '/h3' });
+      const h3 = await createDatabase(t2, { path: '/h3' });
       const page = await h3.applyRemote([y1, x2, y2]);
       assert.deepStrictEqual([page.applied, page.equivocations], [2, 1]);
       assert.deepStrictEqual(await h3.get('doc'), { title: 'y2' });
@@ -218,7 +221,7 @@ test('The per-stream hash chain', async (t) => {
       await m2.set('doc', { title: 'y1' });
       await m1.set('doc', { title: 'x2' });
       const x2 = opOf(m1, origin, 2);
-      const host = await open(t2, { path: '/h' });
+      const host = await createDatabase(t2, { path: '/h' });
       assert.strictEqual((await host.applyRemote([opOf(m2, origin, 1)])).applied, 1);
       const held = entryOf(host, origin, 1).fp;
       // Relabelled to pass the chain here: the signature no longer verifies.
@@ -258,8 +261,8 @@ test('The per-stream hash chain', async (t) => {
     const tight = { sync: { log: { rollAfter: 1 }, retention: { ops: 1 } } };
     const mine = memory();
     const theirs = memory();
-    let writer = await open(t2, { fsi: mine, path: '/w', ...tight });
-    let reader = await open(t2, { fsi: theirs, path: '/r', ...tight });
+    let writer = await createDatabase(t2, { fsi: mine, path: '/w', ...tight });
+    let reader = await createDatabase(t2, { fsi: theirs, path: '/r', ...tight });
     const key = writer.nodeId;
     for (let n = 1; n <= 6; n++) {
       await writer.set('doc', { n });
@@ -276,8 +279,8 @@ test('The per-stream hash chain', async (t) => {
     await reader.close();
     const index = JSON.parse(await mine.read('/w/log', 'index.json'));
     assert.deepStrictEqual(index.heads[key], [6, fp], 'persisted beside the vector');
-    writer = await open(t2, { fsi: mine, path: '/w', ...tight });
-    reader = await open(t2, { fsi: theirs, path: '/r', ...tight });
+    writer = await createDatabase(t2, { fsi: mine, path: '/w', ...tight });
+    reader = await createDatabase(t2, { fsi: theirs, path: '/r', ...tight });
     assert.deepStrictEqual(writer.log.headOf(key), [6, fp]);
     assert.deepStrictEqual(reader.log.headOf(key), [6, fp]);
     await writer.set('doc', { n: 7 });
@@ -301,7 +304,7 @@ test('The per-stream hash chain', async (t) => {
       append: (dir, name, text) =>
         failing && dir.endsWith('/log/open') ? Promise.reject(new Error('disk full')) : inner.append(dir, name, text),
     };
-    const storage = await open(t2, { fsi, path: '/f' });
+    const storage = await createDatabase(t2, { fsi, path: '/f' });
     const key = storage.nodeId;
     await storage.set('doc', { n: 1 });
     const first = entryOf(storage, key, 1).fp;

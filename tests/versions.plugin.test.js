@@ -17,7 +17,7 @@ test('versions as a plugin', async (t) => {
     'without the plugin the past is PLUGIN_MISSING, the present and its patches are the core',
     async (t2) => {
       const fsi = memory();
-      const storage = await core.open({ path: 'plain', fsi, logger: false });
+      const storage = await core.createDatabase({ path: 'plain', fsi, logger: false });
       t2.after(() => storage.close().catch(() => {}));
       const id = await storage.insert({ n: 1 });
       await storage.update(id, { n: 2 });
@@ -45,19 +45,19 @@ test('versions as a plugin', async (t) => {
 
   await t.test('a directory that holds tags is refused without the plugin, and reads them with it', async (t2) => {
     const fsi = memory();
-    const tagged = await core.open({ path: 'tagged', fsi, logger: false, plugins: [versions] });
+    const tagged = await core.createDatabase({ path: 'tagged', fsi, logger: false, plugins: [versions] });
     const id = await tagged.insert({ n: 1 });
     await tagged.tag('v1');
     await tagged.update(id, { n: 2 });
     assert.deepStrictEqual(await tagged.get(id, { at: { tag: 'v1' } }), { n: 1 });
     await tagged.close();
-    await assert.rejects(() => core.open({ path: 'tagged', fsi, logger: false }), {
+    await assert.rejects(() => core.createDatabase({ path: 'tagged', fsi, logger: false }), {
       name: 'TypeError',
       code: 'PLUGIN_MISSING',
       message:
-        "a storage with tags needs the versions plugin: open({ plugins: [versions] }) from '@alexify/syncom/versions'",
+        "a storage with tags needs the versions plugin: createDatabase({ plugins: [versions] }) from '@alexify/syncom/versions'",
     });
-    const again = await core.open({ path: 'tagged', fsi, logger: false, plugins: [versions] });
+    const again = await core.createDatabase({ path: 'tagged', fsi, logger: false, plugins: [versions] });
     t2.after(() => again.close().catch(() => {}));
     assert.deepStrictEqual(
       again.tags().map((tag) => tag.name),
@@ -68,14 +68,14 @@ test('versions as a plugin', async (t) => {
     await again.untag('v1');
     await again.close();
     // No tag left: the core alone opens it again.
-    const plain = await core.open({ path: 'tagged', fsi, logger: false });
+    const plain = await core.createDatabase({ path: 'tagged', fsi, logger: false });
     t2.after(() => plain.close().catch(() => {}));
     assert.deepStrictEqual(await plain.get(id), { n: 2 });
   });
 
   await t.test('with the plugin the lean core reads the past, diffs it and restores it', async (t2) => {
     const fsi = memory();
-    const storage = await core.open({ path: 'past', fsi, logger: false, plugins: [versions] });
+    const storage = await core.createDatabase({ path: 'past', fsi, logger: false, plugins: [versions] });
     t2.after(() => storage.close().catch(() => {}));
     assert.deepStrictEqual([storage.plugins, storage.kinds], [['versions'], []]);
     const id = await storage.insert({ title: 'Draft' });

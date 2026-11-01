@@ -44,8 +44,8 @@ const viewOf = (schema, plugins) => ({
   },
 });
 
-const open = async (t, name, options = {}) => {
-  const storage = await syncom.open({ path: `/${name}`, fsi: memory(), logger: false, defer: 0, ...options });
+const createDatabase = async (t, name, options = {}) => {
+  const storage = await syncom.createDatabase({ path: `/${name}`, fsi: memory(), logger: false, defer: 0, ...options });
   t.after(() => storage.close().catch(() => {}));
   return storage;
 };
@@ -154,7 +154,7 @@ test('ProseMirror', { skip }, async (t) => {
     'typing, a cut and inline content pasted inside a textblock are sent from the steps, and land as the diff would',
     async (t2) => {
       const schema = schemaOf();
-      const storage = await open(t2, 'steps');
+      const storage = await createDatabase(t2, 'steps');
       const id = await storage.insert({ title: 'doc' });
       const editor = PM.createProseMirror(storage, id, 'body', pm);
       const view = viewOf(schema, [editor.plugin]);
@@ -202,7 +202,7 @@ test('ProseMirror', { skip }, async (t) => {
     'two editors on two nodes stay the same as the field through typing, Enter, marks and lists',
     async (t2) => {
       const schema = schemaOf();
-      const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], open);
+      const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createDatabase);
       const [sa, sb] = ['A', 'B'].map((name) => mesh.get(name));
       const id = await sa.insert({ title: 'doc' });
       await settle([sa, sb]);
@@ -261,7 +261,7 @@ test('ProseMirror', { skip }, async (t) => {
           ['B', 'C'],
           ['A', 'C'],
         ],
-        open,
+        createDatabase,
       );
       const [sa, sb, sc] = ['A', 'B', 'C'].map((name) => mesh.get(name));
       const id = await sc.insert({ title: 'doc' });
@@ -305,7 +305,7 @@ test('ProseMirror', { skip }, async (t) => {
     'a field the schema cannot hold reads as the schema has it, says so, and fits with the editor’s next edit',
     async (t2) => {
       const schema = schemaOf();
-      const storage = await open(t2, 'fit');
+      const storage = await createDatabase(t2, 'fit');
       const id = await storage.insert({});
       await storage.updateText(id, 'body', 'plain text, no block');
       const unfit = [];
@@ -345,7 +345,7 @@ test('ProseMirror', { skip }, async (t) => {
     'undo and redo are the storage’s commands; a presence room’s cursors are decorations and this editor’s selection is published',
     async (t2) => {
       const schema = schemaOf();
-      const storage = await open(t2, 'undo');
+      const storage = await createDatabase(t2, 'undo');
       const id = await storage.insert({});
       const pmb = PM.createProseMirror(storage, id, 'body', pm);
       const manager = createUndo(storage, { trackedSources: [pmb.source], records: [id], mergeInterval: 0 });

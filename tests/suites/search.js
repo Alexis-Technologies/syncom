@@ -1,7 +1,7 @@
 'use strict';
 
 // Full-text search through the storage, against whichever half the caller
-// builds: the seam (`schema.entities[name].search`, `open({ search })`,
+// builds: the seam (`schema.entities[name].search`, `createDatabase({ search })`,
 // `$text`) over the @alexify/syncom/search index. `createStorage(t, name,
 // options)` gives the same directory for the same name within one subtest;
 // the memory backend is wrapped to count reads, so "no I/O" is a number.
@@ -37,11 +37,11 @@ const runSearchTests = async (t, assert, createStorage) => {
     async (t2) => {
       await assert.rejects(() => createStorage(t2, 'none', { schema }), {
         name: 'TypeError',
-        message: /open\(\{ search \}\): entity Post declares search fields/,
+        message: /createDatabase\(\{ search \}\): entity Post declares search fields/,
       });
       await assert.rejects(() => createStorage(t2, 'bad', { schema, search: 'yes' }), {
         name: 'TypeError',
-        message: /open\(\{ search \}\): search must be a function/,
+        message: /createDatabase\(\{ search \}\): search must be a function/,
       });
       await assert.rejects(() => createStorage(t2, 'shape', { schema, search: () => ({}) }), {
         name: 'TypeError',

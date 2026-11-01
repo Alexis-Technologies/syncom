@@ -179,7 +179,7 @@ const runCatalogTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(storage.getCachedData(ids[0]), { i: 0 }, 'back in after a read');
     assert.strictEqual(storage.getCachedData(ids[2]), null, 'the oldest went instead');
     assert.strictEqual(storage.hasRecord(ids[2]), true, 'evicted is not gone');
-    const pinned = await storage.record(ids[1]);
+    const pinned = await storage.document(ids[1]);
     for (let i = 5; i < 12; i++) ids.push(await storage.insert({ i }));
     assert.deepStrictEqual(storage.getCachedData(ids[1]), { i: 1 }, 'pinned by its Record');
     assert.strictEqual(pinned.i, 1);
@@ -187,9 +187,9 @@ const runCatalogTests = async (t, assert, createStorage) => {
     assert.strictEqual(storage.getCachedData('nope'), null);
     // A string field naming an evicted record is still a reference.
     const referrer = await storage.insert({ to: ids[2] });
-    const record = await storage.record(referrer);
+    const record = await storage.document(referrer);
     assert.strictEqual(typeof record.to.record, 'function');
-    assert.strictEqual((await record.to.record()).i, 2);
+    assert.strictEqual((await record.to.document()).i, 2);
     await assert.rejects(() => createStorage(t2, 'B', { cache: { max: 0 } }), /cache.max must be a positive integer/);
     await assert.rejects(() => createStorage(t2, 'B', { catalog: { flushEvery: 'often' } }), /flushEvery must be/);
   });
@@ -237,7 +237,7 @@ const runCatalogTests = async (t, assert, createStorage) => {
       const again = await createStorage(t2, 'A', { fsi, logger: false });
       await assert.rejects(() => again.get(id), { code: 'INTEGRITY' });
       const seen = [];
-      const record = await again.record(gone);
+      const record = await again.document(gone);
       record.on('update', (data) => seen.push(data));
       assert.deepStrictEqual(await again.repair(id), { ops: 3, alive: true }, 'write, set, inc');
       assert.deepStrictEqual(await again.get(id), expected, 'what the log says the record is');

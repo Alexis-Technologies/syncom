@@ -25,7 +25,7 @@ test('Schema (lean core, plugins by hand)', async (t) => {
     const key = `${t2.name}:${name}`;
     if (!paths.has(key)) paths.set(key, `schema-${n++}-${name}`);
     const plugins = [schema, text, tree, sync, chain, encryption];
-    const storage = await core.open({ path: paths.get(key), fsi, logger: false, plugins, ...options });
+    const storage = await core.createDatabase({ path: paths.get(key), fsi, logger: false, plugins, ...options });
     t2.after(() => storage.close().catch(() => {}));
     return storage;
   });

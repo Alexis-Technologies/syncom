@@ -398,7 +398,7 @@ const issue = async (core, op, entry) => {
 };
 
 // Outside the queue, in log order: once the op is on disk, the chain block
-// and the record file (or the deferred slot, under `open({ defer })`), the
+// and the record file (or the deferred slot, under `createDatabase({ defer })`), the
 // log told the batch landed, the entry no longer in flight. A group that
 // did not reach the disk rejects the ticket — the storage has dropped the
 // in-flight entry already — and the write fails with it.
@@ -406,7 +406,7 @@ const land = async (core, op, entry, { ticket, position }) => {
   const { id } = op;
   await ticket.done;
   // Logged: the write is durable from here and replicates from the log.
-  // Under `open({ defer })` the file and the block wait for the flush
+  // Under `createDatabase({ defer })` the file and the block wait for the flush
   // (the DeferredWindow (src/defer.js)): held in memory, the batch unapplied until then.
   if (core.defer > 0) {
     await core.deferred(id, entry, position);

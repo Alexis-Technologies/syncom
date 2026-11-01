@@ -8,7 +8,7 @@
 // into patches and realize them — and the storage methods the plugin adds
 // (splice, push, updateText, mark, unmark, unmarkById, spans, cursor, index,
 // setAt, move, insertEmbed, splitBlock, joinBlock, updateBlock, block,
-// blocks). Registered per instance with `open({ plugins: [text] })`;
+// blocks). Registered per instance with `createDatabase({ plugins: [text] })`;
 // src/plugin.js names the contract.
 //
 // A text's embeds and blocks (Automerge's model): a slot holding U+FFFC,
@@ -83,7 +83,7 @@ const {
 const { toDelta, applyDelta } = require('./deltas.js');
 const { openText } = require('./handle.js');
 
-/** The list and text kinds: register with `open({ plugins: [text] })`. */
+/** The list and text kinds: register with `createDatabase({ plugins: [text] })`. */
 const text = Object.freeze({
   name: 'text',
   kinds: KINDS,

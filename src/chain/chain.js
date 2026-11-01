@@ -6,7 +6,7 @@
 // against its block on a cold read (`integrity: 'verify'`); `validate()`
 // walks the chain. Blocks are SHA-256 of their JSON (../digest.js:
 // node:crypto, Web Crypto in the browser); each node's chain is its own audit, not
-// shared. `open({ chain: false })` keeps the plugin registered and the
+// shared. `createDatabase({ chain: false })` keeps the plugin registered and the
 // chain off — a hub that only replicates has nothing to audit and saves two
 // file writes per batch.
 
@@ -97,7 +97,7 @@ class Blockchain {
   }
 }
 
-/** The chain plugin: `open({ plugins: [chain] })`; `chain: false` keeps it off. */
+/** The chain plugin: `createDatabase({ plugins: [chain] })`; `chain: false` keeps it off. */
 const chain = Object.freeze({
   name: 'chain',
   async setup({ fsi, path, settings }) {

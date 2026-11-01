@@ -1,6 +1,6 @@
 'use strict';
 
-// Plugins: what `open({ plugins })` registers on ONE storage — never on the
+// Plugins: what `createDatabase({ plugins })` registers on ONE storage — never on the
 // process. The core keeps records with registers, counters and sets, the log,
 // the three write paths and the sync of ops; everything else is a plugin
 // module that the core calls through this registry. Two kinds of module,
@@ -120,7 +120,9 @@ const HOME = Object.freeze({
 /** The refusal of a call, an op type or a patch action whose plugin is not registered here. */
 const missing = (what, home = HOME[what.endsWith('()') ? what.slice(0, -2) : what] ?? null) => {
   const where =
-    home === null ? 'a plugin' : `the ${home} plugin: open({ plugins: [${home}] }) from '@alexify/syncom/${home}'`;
+    home === null
+      ? 'a plugin'
+      : `the ${home} plugin: createDatabase({ plugins: [${home}] }) from '@alexify/syncom/${home}'`;
   return typed('PLUGIN_MISSING', `${what} needs ${where}`);
 };
 
@@ -140,7 +142,7 @@ const refuse = (where, message) => {
  * the blocks by code, the op types and patch actions by module, every
  * method by name. Frozen; a TypeError names what a module got wrong.
  */
-const createPlugins = (modules, where = 'open({ plugins })') => {
+const createPlugins = (modules, where = 'createDatabase({ plugins })') => {
   if (!Array.isArray(modules)) refuse(where, 'plugins must be an array of plugin modules');
   const rank = { ...CORE_RANK };
   const byName = {};

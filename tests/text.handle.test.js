@@ -7,7 +7,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { open } = require('../src/index.js');
+const { createDatabase } = require('../src/index.js');
 const { text } = require('../src/text/text.js');
 const { sync } = require('../src/sync/sync.js');
 const { memory } = require('../src/memory/memory.js');
@@ -15,7 +15,7 @@ const { createMesh, settle, prng } = require('./utils/mesh.js');
 const { PREPEND_MAX } = require('../src/text/kind.js');
 
 const openMemory = (path, fsi = memory(), options = {}) =>
-  open({ path, fsi, logger: false, lock: false, plugins: [text, sync], ...options });
+  createDatabase({ path, fsi, logger: false, lock: false, plugins: [text, sync], ...options });
 
 test('a handle’s edit applies to its reading at once, or throws and changes nothing; logged as one op when flushed', async () => {
   const fsi = memory();

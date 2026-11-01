@@ -8,7 +8,7 @@
 // read the field, to resolve a local call's parent and sibling into a place
 // inside the queue, to diff two readings into moves — and the storage
 // methods the plugin adds (treeMove, treeRemove). Registered per instance
-// with `open({ plugins: [tree] })`; src/plugin.js names the contract.
+// with `createDatabase({ plugins: [tree] })`; src/plugin.js names the contract.
 
 const T = require('./moves.js');
 const { between } = require('../order/order.js');
@@ -291,7 +291,7 @@ const treeRemove = async (core, id, key, node, { actor } = {}) => {
   await core.commit('tree', id, { key, node, parent: T.TRASH }, { actor });
 };
 
-/** The tree kind: register with `open({ plugins: [tree] })`. */
+/** The tree kind: register with `createDatabase({ plugins: [tree] })`. */
 const tree = Object.freeze({
   name: 'tree',
   kinds: KINDS,

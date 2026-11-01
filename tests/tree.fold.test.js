@@ -394,10 +394,10 @@ test('the kept fold reads as the full fold, op by op', async (t) => {
 });
 
 test('a tree through the storage folds a local move, a peer’s page and an outline in one step a move', async () => {
-  const { open } = require('../src/all/all.js');
+  const { createDatabase } = require('../src/all/all.js');
   const { memory } = require('../src/memory/memory.js');
-  const storage = await open({ path: '/fold', fsi: memory(), logger: false });
-  const peer = await open({ path: '/peer', fsi: memory(), logger: false });
+  const storage = await createDatabase({ path: '/fold', fsi: memory(), logger: false });
+  const peer = await createDatabase({ path: '/peer', fsi: memory(), logger: false });
   try {
     const id = await storage.insert({ title: 't' });
     await storage.treeMove(id, 'outline', 'root');

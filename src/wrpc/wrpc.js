@@ -8,7 +8,7 @@
 //
 //   const { WrpcClient } = require('@alexify/wrpc');
 //   const { createWrpcLink } = require('@alexify/syncom/wrpc');
-//   const storage = await open({
+//   const storage = await createDatabase({
 //     path: 'data',
 //     sync: { connect: async (node) => createWrpcLink(await WrpcClient.connect(node.url)) },
 //   });

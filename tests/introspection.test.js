@@ -16,7 +16,7 @@ const { waitUntil, settle } = require('./utils/mesh.js');
 const openTemp = async (t, options = {}) => {
   const dir = await createTemp();
   t.after(() => cleanupTemp(dir));
-  const storage = await syncom.open({ defer: 0, path: dir, logger: false, ...options });
+  const storage = await syncom.createDatabase({ defer: 0, path: dir, logger: false, ...options });
   t.after(() => storage.close().catch(() => {}));
   return storage;
 };
@@ -26,7 +26,7 @@ test('storage.stats() reads the node without I/O', async (t) => {
   const ids = [];
   for (let i = 0; i < 3; i++) ids.push(await storage.insert({ i }));
   await storage.delete(ids[2]);
-  const pinned = await storage.record(ids[0]);
+  const pinned = await storage.document(ids[0]);
   const stats = storage.stats();
   assert.strictEqual(stats.closed, false);
   assert.strictEqual(stats.queue, 0);

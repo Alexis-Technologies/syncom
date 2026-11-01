@@ -40,9 +40,9 @@ test('isFsi and checkFsi', async (t) => {
     for (const name of ['read', 'write', 'exists', 'remove', 'list']) {
       const broken = { read() {}, write() {}, exists() {}, remove() {}, list() {}, [name]: 'nope' };
       assert.strictEqual(isFsi(broken), false);
-      assert.throws(() => checkFsi(broken, 'open({ fsi })'), {
+      assert.throws(() => checkFsi(broken, 'createDatabase({ fsi })'), {
         name: 'TypeError',
-        message: `open({ fsi }): adapter has no ${name}()`,
+        message: `createDatabase({ fsi }): adapter has no ${name}()`,
       });
     }
     assert.throws(() => checkFsi(null, 'Blockchain'), { message: 'Blockchain: adapter has no read()' });

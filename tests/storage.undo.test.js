@@ -18,7 +18,7 @@ test('Undo (node)', async (t) => {
       dirs.set(key, dir);
       t2.after(() => cleanupTemp(dir));
     }
-    const storage = await syncom.open({ defer: 0, path: dir, logger: false, ...options });
+    const storage = await syncom.createDatabase({ defer: 0, path: dir, logger: false, ...options });
     t2.after(() => storage.close().catch(() => {}));
     return storage;
   });
@@ -27,7 +27,7 @@ test('Undo (node)', async (t) => {
 test('a commit event read late still says the record as that commit left it, in copies', async () => {
   const { memory } = require('../src/memory/memory.js');
   const syncomAll = require('../src/all/all.js');
-  const storage = await syncomAll.open({ fsi: memory(), lock: false, defer: 0, logger: false });
+  const storage = await syncomAll.createDatabase({ fsi: memory(), lock: false, defer: 0, logger: false });
   const events = [];
   storage.on('commit', (event) => void events.push(event));
   const id = await storage.insert({ title: 'a', tags: [] });

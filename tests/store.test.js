@@ -12,8 +12,8 @@ const { createPresence } = require('../src/presence/presence.js');
 const { toStore, fromEvents } = require('../src/store/store.js');
 const { waitUntil } = require('./utils/mesh.js');
 
-const open = async (t, options = {}) => {
-  const storage = await syncom.open({
+const createDatabase = async (t, options = {}) => {
+  const storage = await syncom.createDatabase({
     path: '/s',
     fsi: memory(),
     logger: false,
@@ -44,7 +44,7 @@ test('stores', async (t) => {
   await t.test(
     'a store keeps Svelte’s contract and React’s: a value at once and on every change, a stable snapshot, the source watched from the first subscriber to the last',
     async (t2) => {
-      const storage = await open(t2);
+      const storage = await createDatabase(t2);
       await storage.Task.insert({ title: 'a', done: false });
       const cursor = storage.Task.select({ done: false }).order('title');
       const store = toStore(cursor);
@@ -94,10 +94,10 @@ test('stores', async (t) => {
   );
 
   await t.test('a live Record, a record through get() or a field of it, a presence room, any emitter', async (t2) => {
-    const storage = await open(t2);
+    const storage = await createDatabase(t2);
     const id = await storage.insert({ title: 'a', profile: { city: 'Lviv' } });
     // A live Record: its data, a new copy per change; null once deleted.
-    const record = await storage.record(id);
+    const record = await storage.document(id);
     const recordStore = toStore(record);
     const records = [];
     const stopRecord = recordStore.subscribe((data) => records.push(data));
@@ -150,7 +150,7 @@ test('stores', async (t) => {
   await t.test(
     'a failing source keeps the last value, reports the error and clears it with the next value',
     async (t2) => {
-      const storage = await open(t2);
+      const storage = await createDatabase(t2);
       const errors = [];
       let fail = true;
       const store = fromEvents(

@@ -10,7 +10,7 @@ test('Signatures (node)', async (t) => {
   await runSignatureTests(t, assert, async (t2, name, options = {}) => {
     const dir = await createTemp();
     t2.after(() => cleanupTemp(dir));
-    const storage = await syncom.open({ path: dir, logger: false, ...options });
+    const storage = await syncom.createDatabase({ path: dir, logger: false, ...options });
     t2.after(() => storage.close().catch(() => {}));
     return storage;
   });

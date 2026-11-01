@@ -2,8 +2,8 @@
 
 // Everything in one import (@alexify/syncom/all): the core with every plugin
 // the package ships registered — the lists, the texts and the trees — the
-// way the package worked before it was taken apart into blocks. `open()`
-// here is `open()` of the core with those plugins ahead of the caller's
+// way the package worked before it was taken apart into blocks. `createDatabase()`
+// here is `createDatabase()` of the core with those plugins ahead of the caller's
 // (a plugin given twice is given once); `applyOp` and `mergeEntry` fold
 // under the same registry. The exports are spelled out — the core spread
 // whole, the rest by name — the shape cjs-module-lexer reads for an ESM

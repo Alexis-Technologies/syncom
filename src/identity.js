@@ -50,7 +50,7 @@ const loadIdentity = async ({ fsi, path, keyId, kinds, getId, logger }) => {
       const name = ran[i];
       if (typeof name !== 'string') continue;
       if (!known.has(name)) {
-        const message = `${NODE_FILE} says this storage runs with the ${name} plugin: open({ plugins }) with it from '@alexify/syncom/${name}'`;
+        const message = `${NODE_FILE} says this storage runs with the ${name} plugin: createDatabase({ plugins }) with it from '@alexify/syncom/${name}'`;
         throw typed('PLUGIN_MISSING', message);
       }
       count++;
@@ -71,7 +71,9 @@ const loadIdentity = async ({ fsi, path, keyId, kinds, getId, logger }) => {
   } else {
     const minted = await getId();
     if (!isStreamName(minted)) {
-      throw new TypeError(`open({ getId }): ${JSON.stringify(minted)} cannot be a node id (a short name without '@')`);
+      throw new TypeError(
+        `createDatabase({ getId }): ${JSON.stringify(minted)} cannot be a node id (a short name without '@')`,
+      );
     }
     nodeId = minted;
   }

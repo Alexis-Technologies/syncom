@@ -19,7 +19,7 @@ const { SyncomError, HookError, ValidationError } = syncom;
 const openTemp = async (t, options = {}) => {
   const dir = await createTemp();
   t.after(() => cleanupTemp(dir));
-  const storage = await syncom.open({ path: dir, logger: false, ...options });
+  const storage = await syncom.createDatabase({ path: dir, logger: false, ...options });
   t.after(() => storage.close().catch(() => {}));
   return storage;
 };
@@ -165,12 +165,12 @@ test('SyncomError', async (t) => {
 
   await t.test('the files: CORRUPT, BLOCK_NOT_FOUND, BAD_ENVELOPE', async (t2) => {
     const fsi = memory();
-    const first = await syncom.open({ path: 'store', fsi, logger: false });
+    const first = await syncom.createDatabase({ path: 'store', fsi, logger: false });
     await first.set('r1', { a: 1 });
     await first.close();
     await fsi.write('store', 'node.json', '{not json');
     await assert.rejects(
-      () => syncom.open({ path: 'store', fsi, logger: false }),
+      () => syncom.createDatabase({ path: 'store', fsi, logger: false }),
       (error) => {
         assert.strictEqual(error.code, 'CORRUPT');
         assert.ok(error instanceof SyncomError);

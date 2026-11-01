@@ -50,7 +50,7 @@ const DEFAULT_MAX_PAGE_BYTES = 256 * 1024 * 1024;
 const RECOVER_BACKOFF = 1000;
 const MAX_RECOVER_BACKOFF = 60_000;
 
-// The hooks a manager accepts (`open({ sync: { hooks } })`). There is no
+// The hooks a manager accepts (`createDatabase({ sync: { hooks } })`). There is no
 // hook on what leaves for a peer: seqs run contiguously per origin and
 // scope, so an op withheld from one peer is a gap that stops every later
 // op of that stream at it — per-peer visibility is what scopes are for.

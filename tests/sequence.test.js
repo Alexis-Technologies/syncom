@@ -1233,7 +1233,7 @@ test('styleAt reads the style spans() shows at every index, marks, stacks and un
   for (let seed = 1; seed <= 20; seed++) {
     let x = seed;
     const random = () => (x = (Math.imul(x, 1664525) + 1013904223) >>> 0) / 2 ** 32;
-    const storage = await all.open({ path: `/style-${seed}`, fsi: memory(), logger: false, defer: 0 });
+    const storage = await all.createDatabase({ path: `/style-${seed}`, fsi: memory(), logger: false, defer: 0 });
     const id = await storage.insert({});
     await storage.splice(id, 'body', 0, 0, 'hello world, a text to style');
     for (let i = 0; i < 40; i++) {

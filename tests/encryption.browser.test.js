@@ -15,7 +15,7 @@ test('encryption (browser)', async (t) => {
   const browser = requireBrowserAll();
   const opfs = require('../src/fsi.browser.js');
   const fsi = browser.atRest(opfs, { key: new Uint8Array(32).fill(3) });
-  const storage = await browser.open({ path: 'enc-store', fsi, logger: false });
+  const storage = await browser.createDatabase({ path: 'enc-store', fsi, logger: false });
   const id = await storage.insert({ title: 'Secret' });
   const sealed = await storage.insert({ title: 'Sealed' }, { encrypted: true });
   assert.deepStrictEqual(await storage.get(id), { title: 'Secret' });
@@ -31,7 +31,7 @@ test('encryption (browser)', async (t) => {
     const text = await opfs.read(dir, file);
     assert.ok(text.startsWith('enc1:') && !text.includes('Secret') && !text.includes('BEGIN'), `${dir}/${file}`);
   }
-  const again = await browser.open({ path: 'enc-store', fsi, logger: false });
+  const again = await browser.createDatabase({ path: 'enc-store', fsi, logger: false });
   assert.deepStrictEqual(await again.get(id), { title: 'Secret' });
   assert.deepStrictEqual(await again.get(sealed), { title: 'Sealed' });
   assert.strictEqual(again.nodeId, storage.nodeId);

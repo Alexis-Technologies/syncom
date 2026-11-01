@@ -9,7 +9,7 @@
 // defaults (src/fsi.js, src/fsi.browser.js); `@alexify/syncom/idb`,
 // `@alexify/syncom/memory` (tests, SSR, benchmarks) and the `layered()`
 // combinator of `@alexify/syncom/layered` are subpaths. An adapter may add
-// `sync(dir, name)` — fsync — which `open({ durable: true })` calls after
+// `sync(dir, name)` — fsync — which `createDatabase({ durable: true })` calls after
 // every write, `create(dir, name, content)` — exclusive — which the lock
 // prefers, and `append(dir, name, content)` — at the end of the file, made
 // when absent — which the log's journal prefers to a file per group.

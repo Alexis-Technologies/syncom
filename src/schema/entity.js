@@ -29,7 +29,7 @@ const project = (def, id, data) => {
 // (a Date from a decoder) is what the cache, the disk and the peers all see.
 const unproject = (def, output, type) => {
   if (!isObject(output)) {
-    throw new TypeError(`open({ schema }): entity ${def.name}: the validator must return an object`);
+    throw new TypeError(`createDatabase({ schema }): entity ${def.name}: the validator must return an object`);
   }
   const plain = {};
   for (const key of Object.keys(output)) if (key !== '$type' && key !== def.idField) plain[key] = output[key];

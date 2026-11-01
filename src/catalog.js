@@ -15,7 +15,7 @@
 //
 // A searchable entity (`search: [...]` fields) keeps the joined text of
 // those fields on its row too, and hands it to an injected text index
-// (`open({ search })`, the TextIndex contract) on every put — the index is
+// (`createDatabase({ search })`, the TextIndex contract) on every put — the index is
 // rebuilt from the rows at load and never persists anything of its own.
 // `$text` in a query then seeds the candidates with the index's ranking.
 
@@ -101,7 +101,7 @@ const textOf = (data, fields) => {
   return parts.join(' ');
 };
 
-// The TextIndex contract — what `open({ search })` must hand back for an
+// The TextIndex contract — what `createDatabase({ search })` must hand back for an
 // entity: put(id, text), remove(id), query(text) → [{ id, score }] best first.
 const isTextIndex = (value) =>
   isObject(value) &&

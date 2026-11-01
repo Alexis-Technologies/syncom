@@ -20,7 +20,7 @@ test('Tags (node)', async (t) => {
       dirs.set(key, dir);
       t2.after(() => cleanupTemp(dir));
     }
-    const storage = await syncom.open({ defer: 0, path: dir, logger: false, ...options });
+    const storage = await syncom.createDatabase({ defer: 0, path: dir, logger: false, ...options });
     t2.after(() => storage.close().catch(() => {}));
     return storage;
   });
@@ -46,7 +46,7 @@ test('a tag read while the window lays the record reads as the tag: the copy fir
       if (gate !== null && dir === '/tags-race/data' && name === gate.name) gate.wrote();
     },
   };
-  const storage = await syncom.open({ path: '/tags-race', fsi, logger: false, defer: 1000 });
+  const storage = await syncom.createDatabase({ path: '/tags-race', fsi, logger: false, defer: 1000 });
   try {
     const id = await storage.insert({ title: 'a' });
     await storage.tag('v1');

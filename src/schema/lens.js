@@ -29,7 +29,9 @@ const createLens = ({ version, entities, migrations, lens }, logger) => {
         const migration = step instanceof Map ? (entity === null ? undefined : step.get(entity)) : step;
         if (!migration) continue;
         out = await migration.up(out, { entity, id, from: to - 1, to });
-        if (!isObject(out)) throw new TypeError(`open({ schema }): migrations[${to}] must return an object (${id})`);
+        if (!isObject(out)) {
+          throw new TypeError(`createDatabase({ schema }): migrations[${to}] must return an object (${id})`);
+        }
       }
     }
     const def = entity === null ? undefined : entities.get(entity);

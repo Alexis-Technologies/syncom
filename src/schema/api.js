@@ -77,7 +77,7 @@ const entityNames = (entities) => {
  * event loop.
  */
 const migrate = async (core, { entities = null, batch = 100, actor } = {}) => {
-  if (core.version === null) throw new TypeError('migrate() needs open({ schema })');
+  if (core.version === null) throw new TypeError('migrate() needs createDatabase({ schema })');
   const names = entityNames(entities);
   if (names === undefined) throw new TypeError('migrate({ entities }) takes an array of entity names');
   if (!Number.isInteger(batch) || batch < 1) throw new TypeError('migrate({ batch }) takes a positive integer');

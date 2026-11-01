@@ -1,6 +1,6 @@
 'use strict';
 
-// The deferred window of `open({ defer })`: a local write's entry is held —
+// The deferred window of `createDatabase({ defer })`: a local write's entry is held —
 // the cache and the catalog read it, the file and the chain block wait — in
 // a slot per record with the log positions it covers, and the slots land
 // together after `window` ms, as a step of the storage's landings (after

@@ -108,7 +108,7 @@ const keyOf = async ({ key, password, salt, iterations }) => {
 
 /**
  * A backend whose every file is encrypted at rest under one key — give it
- * to `open({ fsi })`. `key` is 32 bytes (or a CryptoKey), or `password` and
+ * to `createDatabase({ fsi })`. `key` is 32 bytes (or a CryptoKey), or `password` and
  * `salt` derive one (PBKDF2-SHA-256, `iterations` 600 000 by default).
  */
 const atRest = (fsi, options = {}) => {

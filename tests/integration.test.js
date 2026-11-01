@@ -11,7 +11,7 @@ test('Integration tests', async (t) => {
   await t.test('Full workflow: keys -> storage -> contract -> chain', async () => {
     const tempDir = await createTemp();
     try {
-      const storage = await syncom.open({ path: tempDir });
+      const storage = await syncom.createDatabase({ path: tempDir });
       const chainPath = path.join(tempDir, 'blockchain');
       const blockchain = await new syncom.Blockchain(chainPath);
 

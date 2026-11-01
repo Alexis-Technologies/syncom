@@ -15,7 +15,7 @@ test('a write is made at once over the browser halves too', async (t) => {
   const { memory } = require('../src/memory/memory.js');
   const fsi = memory();
   const options = { path: '/fast', fsi, logger: false, lock: false, sync: { signatures: false } };
-  const storage = await browser.open(options);
+  const storage = await browser.createDatabase(options);
   const id = await storage.insert({ title: 'doc' });
   await storage.push(id, 'body', 'a');
   const next = storage.log.next;
@@ -24,7 +24,7 @@ test('a write is made at once over the browser halves too', async (t) => {
   await typed;
   assert.strictEqual((await storage.get(id)).body, 'ab');
   await storage.close();
-  const reopened = await browser.open(options);
+  const reopened = await browser.createDatabase(options);
   assert.strictEqual((await reopened.get(id)).body, 'ab', 'the fingerprints read back');
   await reopened.close();
 });

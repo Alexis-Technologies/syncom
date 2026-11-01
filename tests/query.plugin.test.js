@@ -17,27 +17,39 @@ test('query as a plugin', async (t) => {
   await t.test('without the plugin select() and count() are PLUGIN_MISSING; the catalog still indexes', async (t2) => {
     const fsi = memory();
     const definition = { entities: { Post: { index: ['title'] } } };
-    const storage = await core.open({ path: 'typed', fsi, logger: false, plugins: [schema], schema: definition });
+    const storage = await core.createDatabase({
+      path: 'typed',
+      fsi,
+      logger: false,
+      plugins: [schema],
+      schema: definition,
+    });
     t2.after(() => storage.close().catch(() => {}));
     await storage.Post.insert({ title: 'a' });
     assert.throws(() => storage.Post.select({ title: 'a' }), {
       name: 'TypeError',
       code: 'PLUGIN_MISSING',
-      message: "select() needs the query plugin: open({ plugins: [query] }) from '@alexify/syncom/query'",
+      message: "select() needs the query plugin: createDatabase({ plugins: [query] }) from '@alexify/syncom/query'",
     });
     assert.throws(() => storage.Post.count(), { code: 'PLUGIN_MISSING' });
     assert.strictEqual((await storage.list()).length, 1);
     assert.strictEqual((await storage.stats()).catalog.entries, 1);
     await storage.close();
     // The plugin arriving reads what the catalog indexed all along.
-    const again = await core.open({ path: 'typed', fsi, logger: false, plugins: [schema, query], schema: definition });
+    const again = await core.createDatabase({
+      path: 'typed',
+      fsi,
+      logger: false,
+      plugins: [schema, query],
+      schema: definition,
+    });
     t2.after(() => again.close().catch(() => {}));
     assert.strictEqual(await again.Post.count({ title: 'a' }), 1);
   });
 
   await t.test('with the plugin the lean core answers a query from the catalog, and watches it', async (t2) => {
     const fsi = memory();
-    const storage = await core.open({
+    const storage = await core.createDatabase({
       path: 'q',
       fsi,
       logger: false,

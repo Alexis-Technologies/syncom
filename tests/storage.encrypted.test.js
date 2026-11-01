@@ -14,7 +14,7 @@ test('encrypted storage', async (t) => {
   await t.test('every write path encrypts, reads decrypt, nothing becomes an op', async (t2) => {
     const dir = await createTemp();
     t2.after(() => cleanupTemp(dir));
-    const storage = await syncom.open({
+    const storage = await syncom.createDatabase({
       path: dir,
       logger: false,
       encrypted: true,
@@ -31,7 +31,7 @@ test('encrypted storage', async (t) => {
 
     await storage.update(id, { title: 'Still secret' });
     await storage.set(id, { title: 'Replaced' });
-    const record = await storage.record(id);
+    const record = await storage.document(id);
     const updates = [];
     record.on('update', (data, delta) => updates.push(delta));
     record.title = 'Via record';
@@ -57,7 +57,7 @@ test('encrypted storage', async (t) => {
 
     // A cold reopen decrypts with the stored key pair.
     await storage.close();
-    const reopened = await syncom.open({ path: dir, logger: false, encrypted: true });
+    const reopened = await syncom.createDatabase({ path: dir, logger: false, encrypted: true });
     assert.deepStrictEqual(await reopened.get(note.id), { text: 'n', $type: 'Note' });
     await reopened.close();
   });
@@ -65,7 +65,7 @@ test('encrypted storage', async (t) => {
   await t.test('per-call overrides go both ways, and a record never changes kind', async (t2) => {
     const dir = await createTemp();
     t2.after(() => cleanupTemp(dir));
-    const storage = await syncom.open({ path: dir, logger: false, encrypted: true });
+    const storage = await syncom.createDatabase({ path: dir, logger: false, encrypted: true });
     const ops = [];
     storage.on('change', (op) => ops.push(op));
     const shared = await storage.insert({ shared: true }, { encrypted: false });
@@ -75,7 +75,7 @@ test('encrypted storage', async (t) => {
       message: /replicated and cannot become encrypted/,
     });
 
-    const plain = await syncom.open({ path: await createTemp(), logger: false });
+    const plain = await syncom.createDatabase({ path: await createTemp(), logger: false });
     const local = await plain.insert({ local: true }, { encrypted: true });
     assert.deepStrictEqual(await plain.get(local), { local: true });
     assert.strictEqual(plain.log.length, 0);
@@ -88,7 +88,7 @@ test('encrypted storage', async (t) => {
   await t.test("a peer's op on a record sealed here is skipped: logged and relayed, never applied", async (t2) => {
     const dir = await createTemp();
     t2.after(() => cleanupTemp(dir));
-    const storage = await syncom.open({ path: dir, logger: false, encrypted: true });
+    const storage = await syncom.createDatabase({ path: dir, logger: false, encrypted: true });
     const id = await storage.insert({ secret: 'mine' });
     const op = { origin: 'peer', seq: 1, ts: Date.now() + 1, type: 'set', id, data: { secret: 'theirs' } };
     const result = await storage.applyRemote([op]);
@@ -99,7 +99,7 @@ test('encrypted storage', async (t) => {
     assert.strictEqual(entry.skipped, true, 'flagged, so no replay or fold applies it');
     assert.strictEqual(storage.vector.peer, 1, 'the vector moved');
     await storage.close();
-    const reopened = await syncom.open({ path: dir, logger: false, encrypted: true });
+    const reopened = await syncom.createDatabase({ path: dir, logger: false, encrypted: true });
     assert.deepStrictEqual(await reopened.get(id), { secret: 'mine' }, 'the replay leaves the sealed record alone');
     await reopened.close();
   });

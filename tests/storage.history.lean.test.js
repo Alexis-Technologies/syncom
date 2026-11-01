@@ -29,7 +29,14 @@ test('History (lean core, plugins by hand)', async (t) => {
     const key = `${t2.name}:${name}`;
     if (!paths.has(key)) paths.set(key, `history-${n++}-${name}`);
     const plugins = [versions, text, tree, sync, encryption, chain, schema, query];
-    const storage = await core.open({ defer: 0, path: paths.get(key), fsi, logger: false, plugins, ...options });
+    const storage = await core.createDatabase({
+      defer: 0,
+      path: paths.get(key),
+      fsi,
+      logger: false,
+      plugins,
+      ...options,
+    });
     t2.after(() => storage.close().catch(() => {}));
     return storage;
   });

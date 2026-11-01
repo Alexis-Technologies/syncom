@@ -1,6 +1,6 @@
 'use strict';
 
-// The sync of ops as a plugin (@alexify/syncom/sync): `open({ plugins: [sync] })`
+// The sync of ops as a plugin (@alexify/syncom/sync): `createDatabase({ plugins: [sync] })`
 // gives the storage its `sync` — the SyncManager (./manager.js): the dialing
 // side, which pushes what a peer lacks and subscribes to its feed, and
 // `unit()`, the hosting side (./hosting.js) a wrpc server mounts. The

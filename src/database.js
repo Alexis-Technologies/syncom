@@ -48,7 +48,7 @@ const { loadIdentity } = require('./identity.js');
 // What a storage without the schema plugin runs with: no entities, version 1.
 const NO_SCHEMA = Object.freeze({ version: 1, entities: new Map(), snapshot: undefined, ahead: 'apply', view: null });
 
-// The hooks a storage accepts (`open({ hooks })`). Writes and reads run
+// The hooks a storage accepts (`createDatabase({ hooks })`). Writes and reads run
 // their hooks inside this storage; the apply pair runs per peer batch.
 const STORAGE_HOOKS = ['beforeWrite', 'afterWrite', 'beforeRead', 'afterRead', 'beforeApply', 'afterApply'];
 
@@ -131,7 +131,7 @@ class Database extends Emitter {
   // What a transaction's `tx` carries (#transaction): `[name, method]`, the
   // field methods and the plugins' — a plugin's in place of a field's.
   #txMethods = [];
-  // Local writes whose record files wait (`open({ defer })`, src/defer.js).
+  // Local writes whose record files wait (`createDatabase({ defer })`, src/defer.js).
   #defer = 0;
   #window = null;
   // Local writes appended but not yet on disk: id → the entries the record's
@@ -229,22 +229,24 @@ class Database extends Emitter {
   // functions when injected. `durable` wraps every write with the
   // adapter's fsync, where it has one.
   #backend(options, durable) {
-    const fsi = checkFsi(options.fsi === undefined ? defaultFsi : options.fsi, 'open({ fsi })');
+    const fsi = checkFsi(options.fsi === undefined ? defaultFsi : options.fsi, 'createDatabase({ fsi })');
     if (!durable) return fsi;
     if (typeof fsi.sync === 'function') return withSync(fsi);
     this.#logger.debug({ event: 'durable.noop' });
     return fsi;
   }
 
-  // The schema is the plugin's to read (`open({ schema, validator })` into
+  // The schema is the plugin's to read (`createDatabase({ schema, validator })` into
   // the entity definitions the write path consults: validators, id fields,
   // indexes) and the core's to apply; without the plugin a schema or a
   // validator given is refused here, naming it, and records are untyped.
   #defineSchema(options, search) {
     const given = this.#schemaHook;
     if (given === null) {
-      if (options.schema !== undefined && options.schema !== null) throw missing('open({ schema })', 'schema');
-      if (options.validator !== undefined) throw missing('open({ validator })', 'schema');
+      if (options.schema !== undefined && options.schema !== null) {
+        throw missing('createDatabase({ schema })', 'schema');
+      }
+      if (options.validator !== undefined) throw missing('createDatabase({ validator })', 'schema');
     }
     const schema = given?.given ?? null;
     const normalized = given ?? NO_SCHEMA;
@@ -253,7 +255,9 @@ class Database extends Emitter {
     // chain — would replace it or break the open. Refused before anything
     // is opened.
     for (const name of normalized.entities.keys()) {
-      if (name in this) throw new TypeError(`open({ schema }): entity name '${name}' is taken by the storage itself`);
+      if (name in this) {
+        throw new TypeError(`createDatabase({ schema }): entity name '${name}' is taken by the storage itself`);
+      }
     }
     this.#entities = normalized.entities;
     this.#schema = schema;
@@ -264,12 +268,14 @@ class Database extends Emitter {
     for (const def of normalized.entities.values()) {
       if (def.search.length === 0) continue;
       if (search === null) {
-        const hint = 'give open() an index — createSearch() from @alexify/syncom/search';
-        throw new TypeError(`open({ search }): entity ${def.name} declares search fields; ${hint}`);
+        const hint = 'give createDatabase() an index — createSearch() from @alexify/syncom/search';
+        throw new TypeError(`createDatabase({ search }): entity ${def.name} declares search fields; ${hint}`);
       }
       const index = search(def.name);
       if (!isTextIndex(index)) {
-        throw new TypeError(`open({ search }): the index for ${def.name} must have put(), remove() and query()`);
+        throw new TypeError(
+          `createDatabase({ search }): the index for ${def.name} must have put(), remove() and query()`,
+        );
       }
       text.set(def.name, index);
     }
@@ -286,7 +292,7 @@ class Database extends Emitter {
     const retention = options.sync?.retention;
     const retained = retention === 'all' ? Infinity : retention?.ops;
     if (this.#ahead === 'hold' && retained !== undefined && retained > 0 && retained < 1000) {
-      throw new TypeError("open({ schema }): ahead 'hold' needs sync.retention.ops of 1000 or more, or 0");
+      throw new TypeError("createDatabase({ schema }): ahead 'hold' needs sync.retention.ops of 1000 or more, or 0");
     }
   }
 
@@ -348,14 +354,14 @@ class Database extends Emitter {
     const given = this.#options.telemetry;
     if (!adapted && given && typeof given === 'object') {
       if (isWriter(given)) this.#otel = writerOf(given);
-      else throw missing('open({ telemetry })', 'telemetry');
+      else throw missing('createDatabase({ telemetry })', 'telemetry');
     }
     if (this.#lockWait > 0 && this.#otel.enabled) this.#otel.recordLockWait(this.#lockWait);
     if (this.#signatures === 'require' && this.#identity === null) {
       throw missing("sync.signatures 'require'", 'signing');
     }
-    if (this.#options.chain === true && this.#chain === null) throw missing('open({ chain: true })', 'chain');
-    if (this.#encrypted && this.#seal === null) throw missing('open({ encrypted: true })', 'encryption');
+    if (this.#options.chain === true && this.#chain === null) throw missing('createDatabase({ chain: true })', 'chain');
+    if (this.#encrypted && this.#seal === null) throw missing('createDatabase({ encrypted: true })', 'encryption');
     this.#defineSchema(this.#options, this.#settings.search);
     this.#installMethods();
     // A directory with tags needs the plugin that keeps their copies: opened
@@ -772,7 +778,7 @@ class Database extends Emitter {
     return this.#schema;
   }
 
-  /** The backend every file of this storage goes through — the adapter given to `open()`, or the platform's. */
+  /** The backend every file of this storage goes through — the adapter given to `createDatabase()`, or the platform's. */
   get fsi() {
     return this.#fsi;
   }
@@ -876,12 +882,12 @@ class Database extends Emitter {
     return this.#nodeId;
   }
 
-  /** `'verify'`, `'require'` or `false` — `open({ sync: { signatures } })`. */
+  /** `'verify'`, `'require'` or `false` — `createDatabase({ sync: { signatures } })`. */
   get signatures() {
     return this.#signatures;
   }
 
-  /** The names of the plugins this storage was opened with (`open({ plugins })`). */
+  /** The names of the plugins this storage was opened with (`createDatabase({ plugins })`). */
   get plugins() {
     return this.#plugins.names;
   }
@@ -955,7 +961,7 @@ class Database extends Emitter {
       cache: { size: this.#entries.size, max: this.#cacheMax, pinned },
       catalog: { entries: this.#catalog.size, dirty: this.#catalog.dirty },
       tags: this.#tags === null ? null : { count: this.#tags.size, corrupt: this.#tags.corrupt },
-      // Records whose files lag the log: deferred by `open({ defer })`, or
+      // Records whose files lag the log: deferred by `createDatabase({ defer })`, or
       // held after a write that failed (replayed at the next open).
       held: this.#entries.heldIds().size,
       deferred: this.#window.size,
@@ -965,7 +971,7 @@ class Database extends Emitter {
       // The text handles open (src/text/handle.js): how many, how many hold edits not logged yet, and the
       // run offsets reserved for them over every field.
       handles: this.#handleStats(),
-      // The window `open({ defer })` gave, what the last deferred landing
+      // The window `createDatabase({ defer })` gave, what the last deferred landing
       // took (the next window is at least that), and the positions waiting.
       defer: { window: this.#defer, flushCost: this.#window.cost, positions: this.#window.positions },
       observers,
@@ -1338,8 +1344,8 @@ class Database extends Emitter {
     const isChainValidation = typeof idOrOptions !== 'string' && !data && !blockHash;
     if (this.#chain === null) {
       const why = this.#plugins.names.includes('chain')
-        ? 'open({ chain: false })'
-        : "the chain plugin is not registered (open({ plugins: [chain] }) from '@alexify/syncom/chain')";
+        ? 'createDatabase({ chain: false })'
+        : "the chain plugin is not registered (createDatabase({ plugins: [chain] }) from '@alexify/syncom/chain')";
       throw typed('NO_CHAIN', `${why}: this storage keeps no chain to validate against`);
     }
     if (isChainValidation) {
@@ -1367,7 +1373,7 @@ class Database extends Emitter {
     const id = await this.#getId();
     if (!isRecordId(id)) {
       const error = invalidId(id);
-      error.message = `open({ getId }): ${error.message}`;
+      error.message = `createDatabase({ getId }): ${error.message}`;
       throw error;
     }
     await this.saveData(id, data, options);
@@ -1623,7 +1629,7 @@ class Database extends Emitter {
       // A stub of the facade reaches the registry already.
       if (Object.hasOwn(HOME, name) && name in this) continue;
       if (name in this || name === 'then') {
-        throw new TypeError(`open(): a plugin's method ${name}() is a member of the storage already`);
+        throw new TypeError(`createDatabase(): a plugin's method ${name}() is a member of the storage already`);
       }
       const method = methods[name];
       Object.defineProperty(this, name, {
@@ -1905,7 +1911,7 @@ class Database extends Emitter {
       const id = await this.#getId();
       if (!isRecordId(id)) {
         const error = invalidId(id);
-        error.message = `open({ getId }): ${error.message}`;
+        error.message = `createDatabase({ getId }): ${error.message}`;
         throw error;
       }
       await tx.commit('write', id, { data }, { actor: options.actor });
@@ -2017,7 +2023,7 @@ class Database extends Emitter {
 
   /**
    * Lands what waits: the writes in flight (their disk, their files), then
-   * the record files deferred under `open({ defer })` — one block, every
+   * the record files deferred under `createDatabase({ defer })` — one block, every
    * file — so what was written is on disk when this resolves. `close()` and
    * `tag()` do the same first.
    */

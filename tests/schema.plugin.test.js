@@ -1,7 +1,7 @@
 'use strict';
 
 // The schema as a block: without `@alexify/syncom/schema` a schema or a
-// validator given to open() is refused, records are untyped and migrate()
+// validator given to createDatabase() is refused, records are untyped and migrate()
 // and check() are PLUGIN_MISSING; with it on the lean core the definitions
 // are read once and the core applies them.
 
@@ -20,19 +20,23 @@ const validator = (data) => {
 test('schema as a plugin', async (t) => {
   await t.test('without the plugin a schema or a validator is PLUGIN_MISSING, records are untyped', async (t2) => {
     const fsi = memory();
-    await assert.rejects(() => core.open({ path: 'typed', fsi, logger: false, schema: { entities: { Post: {} } } }), {
-      name: 'TypeError',
-      code: 'PLUGIN_MISSING',
-      message: "open({ schema }) needs the schema plugin: open({ plugins: [schema] }) from '@alexify/syncom/schema'",
-    });
     await assert.rejects(
-      () => core.open({ path: 'compiled', fsi, logger: false, validator: { compile: () => () => true } }),
+      () => core.createDatabase({ path: 'typed', fsi, logger: false, schema: { entities: { Post: {} } } }),
       {
+        name: 'TypeError',
         code: 'PLUGIN_MISSING',
-        message: /open\(\{ validator \}\) needs the schema plugin/,
+        message:
+          "createDatabase({ schema }) needs the schema plugin: createDatabase({ plugins: [schema] }) from '@alexify/syncom/schema'",
       },
     );
-    const plain = await core.open({ path: 'plain', fsi, logger: false });
+    await assert.rejects(
+      () => core.createDatabase({ path: 'compiled', fsi, logger: false, validator: { compile: () => () => true } }),
+      {
+        code: 'PLUGIN_MISSING',
+        message: /createDatabase\(\{ validator \}\) needs the schema plugin/,
+      },
+    );
+    const plain = await core.createDatabase({ path: 'plain', fsi, logger: false });
     t2.after(() => plain.close().catch(() => {}));
     assert.strictEqual(plain.schema, null);
     assert.strictEqual(plain.schemaInfo, null);
@@ -69,7 +73,7 @@ test('schema as a plugin', async (t) => {
           migrations: { 2: { Post: { up: (data) => ({ ...data, title: data.title ?? data.name }) } } },
         },
       };
-      const storage = await core.open(options);
+      const storage = await core.createDatabase(options);
       t2.after(() => storage.close().catch(() => {}));
       assert.deepStrictEqual([storage.plugins, storage.kinds], [['schema', 'query'], []]);
       assert.deepStrictEqual(storage.schemaInfo, { version: 2, hash: null, previous: null, held: null });
