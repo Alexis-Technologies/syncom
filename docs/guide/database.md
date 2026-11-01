@@ -21,7 +21,7 @@ const storage = await createDatabase({ path: 'data' });
 | `durable` | `false` | fsync after every write, where the backend can (`node:fs`); OPFS and memory are as durable as they are |
 | `defer` | `16` | Record files may lag the log by this many ms (a non-negative integer; `0` lands every write at once) — the writes of one record within the window coalesce into one file and one block, what typing into a text or a list wants; `flush()` lands them now ([see below](#when-a-record-file-lags-the-log)) |
 | `lock` | `'fail'` | One instance per directory: `'fail'` rejects a second `createDatabase()` (`code: 'LOCKED'`), `'wait'` waits, `false` leaves it to you ([see below](#one-instance-per-directory)) |
-| `readOnly` | `false` | A follower: reads what another instance writes through the same engine (`engine`) and writes nothing — no lock, no replay, no catalog save; every write rejects with `code: 'READ_ONLY'`, `sync.connect` is a `TypeError`. Over an engine with a change stream (IndexedDB, MongoDB) a record the writer lands is read again, a live `Document` of it refreshed, its watchers woken |
+| `readOnly` | `false` | A follower: reads what another instance writes through the same engine (`engine`) and writes nothing — no lock, no replay, no catalog save; every write rejects with `code: 'READ_ONLY'`. Only an engine several instances may open at once takes one (`capabilities.shared`: memory, IndexedDB, MongoDB); the files engine and SQLite refuse it with a `TypeError`. Its log and vector are as of its open: it neither dials (`sync.connect` is a `TypeError`) nor hosts (`sync.unit()` rejects with `READ_ONLY`, `reason: 'hosting'`) until the shared log lands. Over an engine with a change stream (IndexedDB, MongoDB) a record the writer lands is read again, a live `Document` of it refreshed, its watchers woken |
 | `cache` | `{ max: 5000 }` | How many entries stay in memory; a live `Document` pins its own ([see below](#the-catalog-and-the-cache)) |
 | `integrity` | `'verify'` | `'lazy'` trusts a record file on the cold read instead of re-verifying it against its block |
 | `chain` | `true` | `false` keeps no [chain](./chain#through-storage) — a hub that only replicates has nothing to audit; two file writes less per record, reads lazy, `validate()` rejects with `code: 'NO_CHAIN'` |
@@ -298,9 +298,17 @@ const b = await createDatabase({ path: 'data', lock: false }); // yours to coord
 
 Two browser tabs are two instances: with the default `'fail'` the second tab
 sees `LOCKED` and must work through the first (a SharedWorker that owns the
-storage, say), or wait for it with `lock: 'wait'`. There is no read-only
-open: `lock: false` gives a second instance that writes too (its catalog,
-and the log it seals on close), which is yours to coordinate. `close()` releases the lock; a crash releases it
+storage, say), or wait for it with `lock: 'wait'`. A second instance that
+only reads is a **follower**, `createDatabase({ readOnly: true })` — over an
+engine several instances may open at once (`capabilities.shared`: the
+memory, IndexedDB and MongoDB engines), never over a directory or SQLite,
+where the second open is refused with a `TypeError` (the files engine's
+journal is the writer's to tidy, and a reader would load a group it is
+still writing). A follower holds no lock, writes nothing, hears what the
+writer lands through the engine's change stream, and its log and vector are
+as of its open: it neither dials nor hosts until the shared log lands.
+`lock: false` gives a second instance that writes too (its catalog, and the
+log it seals on close), which is yours to coordinate. `close()` releases the lock; a crash releases it
 in the browser and leaves a stale file elsewhere, which the next open takes
 over. The lock is per machine — on a shared network filesystem, coordinate
 yourself and pass `lock: false`.

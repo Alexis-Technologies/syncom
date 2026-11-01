@@ -1113,6 +1113,17 @@ class SyncManager extends Emitter {
    * src/sync/hosting.js from what both halves share.
    */
   unit(options = {}) {
+    // A follower's log and vector are as of its open (the shared log is to
+    // come): a feed served from it would never move, so it hosts no more than
+    // it dials. A writer whose lease was lost is the same from then on.
+    if (this.#storage.readOnly) {
+      const { path } = this.#storage;
+      throw new SyncomError('READ_ONLY', `Storage at ${path} is read-only: it does not host`, {
+        path,
+        lease: this.#storage.stats().lock !== null,
+        reason: 'hosting',
+      });
+    }
     return createUnit(this, options, {
       storage: this.#storage,
       otel: this.#otel,

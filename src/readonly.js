@@ -28,7 +28,8 @@ const readOnlyDb = (db, refuse) => {
     drop: no('copies.drop'),
   };
   const log = {
-    load: () => db.log.load(),
+    // Told it is a follower's load: a medium that tidies as it loads (the files journal) leaves the writer's files alone.
+    load: () => db.log.load({ readOnly: true }),
     async append(_entries, _headers, { onFail }) {
       onFail(refuse('log.append'));
       return false;

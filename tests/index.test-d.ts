@@ -572,6 +572,7 @@ expectType<void>(log.retain(null));
 expectError(log.retain(true));
 expectType<number>(storage.stats().cache.pinned);
 expectType<boolean>(storage.stats().readOnly);
+expectType<boolean>(storage.readOnly);
 declare const engineDb: syncom.EngineDb;
 expectType<(() => void) | undefined>(engineDb.changes?.subscribe((message) => message.records));
 expectType<Promise<{ release(): Promise<void> }> | undefined>(engineDb.lock?.({ mode: 'wait', onLost: () => {} }));

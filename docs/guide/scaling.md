@@ -126,9 +126,12 @@ wrpc's `WrpcClientProxy` holds one WebSocket, and every tab's
 `connect(url, { worker })` goes through it — but the storage is not: a
 proxied connection does not stop two storages from minting the same
 sequence number. For v1, one tab owns the storage and syncs: the others
-wait for the lock (`lock: 'wait'`) or route reads and writes to it through a
-`BroadcastChannel` — there is no read-only open. A storage served from a
-worker to its tabs is the follow-up.
+wait for the lock (`lock: 'wait'`), route reads and writes to it through a
+`BroadcastChannel`, or read beside it as a follower (`readOnly: true` over
+the IndexedDB engine, which hears the owner's writes) — a follower's log
+and vector are as of its open, and it neither dials nor hosts until the
+shared log lands. A storage served from a worker to its tabs is the
+follow-up.
 
 ## End-to-end encryption
 

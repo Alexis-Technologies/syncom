@@ -12,7 +12,7 @@
 const { capabilitiesOf, unreadableRecord, eexist } = require('../engine.js');
 const { SyncomError } = require('../errors.js');
 
-const CAPABILITIES = capabilitiesOf({ atomicBatch: true, exclusiveCreate: true, indexes: true });
+const CAPABILITIES = capabilitiesOf({ atomicBatch: true, exclusiveCreate: true, indexes: true, shared: true });
 
 // A record handed in as text that is no record: kept as the text, read as
 // INTEGRITY — what a torn file reads as under the files engine.

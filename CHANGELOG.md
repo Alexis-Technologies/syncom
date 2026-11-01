@@ -103,10 +103,13 @@ and one `commit` event, not one per call.
   engine nothing of it (`DECRYPT_FAILED` either way). The files engine is wrapped at its backend.
 - **A follower: `createDatabase({ readOnly: true })`.** Reads what another instance writes through the same
   engine and writes nothing — no lock, no replay of the log's tail, no catalog save, not even the log's index;
-  every write, `applyRemote()`, `mergeSnapshot()`, `transact()`, `tag()` and `repair()` reject with `READ_ONLY`,
-  `sync.connect` is a `TypeError` (a follower reads and serves). Over an engine with a change stream (IndexedDB
-  across tabs, MongoDB across processes) a record the writer lands is read again, a live `Document` of it
-  refreshed and its watchers woken. `stats().readOnly`.
+  every write, `applyRemote()`, `mergeSnapshot()`, `transact()`, `tag()` and `repair()` reject with `READ_ONLY`.
+  Only an engine several instances may open at once takes a follower (`capabilities.shared`: memory, IndexedDB,
+  MongoDB); the files engine and SQLite refuse one with a `TypeError`. A follower's log and vector are as of its
+  open: it reads; it neither dials (`sync.connect` is a `TypeError`) nor hosts (`sync.unit()` is `READ_ONLY`,
+  `reason: 'hosting'`) until the shared log lands. Over an engine with a change stream (IndexedDB across tabs,
+  MongoDB across processes) a record the writer lands is read again, a live `Document` of it refreshed and its
+  watchers woken. `stats().readOnly`, `storage.readOnly`.
 - **A synchronous editor's handle on a text: `storage.openText(id, key, { window, actor, source })`**
   (the `text` plugin's). `insert`, `insertEmbed`, `delete`, `format` and `applyDelta` edit at once
   over the handle's reading — the field as announced, its edits on top — and `toString()`,

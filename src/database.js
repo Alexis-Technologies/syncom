@@ -323,6 +323,16 @@ class Database extends Emitter {
   }
 
   async #init() {
+    // A follower opens beside the writer: only an engine whose databases
+    // several instances may open at once (`shared` — memory, IndexedDB,
+    // MongoDB) serves one. The files engine's journal and SQLite's connection
+    // are one instance's: a second reader there would load a group the
+    // writer is still writing.
+    if (this.#readOnly && this.#engine.capabilities.shared !== true) {
+      throw new TypeError(
+        `createDatabase({ readOnly }): the ${this.#engine.name} engine is not shared — one instance per database`,
+      );
+    }
     // The engine's database: every store the open reads and writes through.
     const opened = await this.#engine.open(this.#path, { logger: this.#logger, durable: this.#settings.durable });
     const db = checkEngineDb(opened, 'createDatabase({ engine })');
@@ -1049,6 +1059,11 @@ class Database extends Emitter {
   /** The highest per-origin seq applied here — what a peer compares against. */
   get vector() {
     return this.#log.vector;
+  }
+
+  /** Whether every write is refused: opened with `readOnly: true` (a follower), or a writer whose lease was lost. */
+  get readOnly() {
+    return this.#readOnly;
   }
 
   /**

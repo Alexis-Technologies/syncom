@@ -87,6 +87,7 @@ const idbEngine = ({
     exclusiveCreate: true,
     indexes: true,
     changeStream: broadcasts,
+    shared: true,
   });
   const token = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
   let opening = null;

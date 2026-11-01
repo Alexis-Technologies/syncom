@@ -8,8 +8,14 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { createDatabase, memoryEngine } = require('../src/all/all.js');
+// node:sqlite is experimental: Node says so once per process at the require, which this test is not about.
+process.removeAllListeners('warning');
+process.on('warning', (warning) => {
+  if (warning.name !== 'ExperimentalWarning') console.error(warning.stack);
+});
+const { createDatabase, memoryEngine, memory, filesEngine } = require('../src/all/all.js');
 const { mongoEngine } = require('../src/mongodb/mongodb.js');
+const { sqliteEngine } = require('../src/sqlite/sqlite.js');
 const { createFakeMongo } = require('./utils/fake-mongo.js');
 
 const settle = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -57,6 +63,51 @@ test('a read-only database', async (t) => {
       await again.close();
     },
   );
+
+  await t.test(
+    'a follower is refused over an engine that is not shared: the files engine and SQLite, a TypeError naming the engine',
+    async () => {
+      const files = filesEngine(memory());
+      assert.strictEqual(files.capabilities.shared, false);
+      assert.strictEqual(sqliteEngine().capabilities.shared, false);
+      assert.strictEqual(memoryEngine().capabilities.shared, true);
+      assert.strictEqual(mongoEngine({ client: createFakeMongo() }).capabilities.shared, true);
+      const writer = await createDatabase({ ...base, path: 'app', engine: files });
+      await writer.insert({ title: 'Draft' });
+      await assert.rejects(() => createDatabase({ ...base, path: 'app', engine: files, readOnly: true }), {
+        name: 'TypeError',
+        message: /the files engine is not shared/,
+      });
+      await writer.close();
+      const sqlite = sqliteEngine();
+      await assert.rejects(() => createDatabase({ ...base, path: 'app', engine: sqlite, readOnly: true }), {
+        name: 'TypeError',
+        message: /the sqlite engine is not shared/,
+      });
+      await sqlite.close();
+      // The writer's files are as it left them: the refusal came before the engine opened anything.
+      const again = await createDatabase({ ...base, path: 'app', engine: files });
+      assert.strictEqual((await again.list()).length, 1);
+      await again.close();
+    },
+  );
+
+  await t.test('a follower neither dials nor hosts: sync.unit() is READ_ONLY with reason hosting', async () => {
+    const engine = memoryEngine();
+    const writer = await createDatabase({ ...base, path: 'app', engine });
+    const follower = await createDatabase({ ...base, path: 'app', engine, readOnly: true });
+    assert.strictEqual(follower.readOnly, true);
+    assert.strictEqual(writer.readOnly, false);
+    assert.throws(() => follower.sync.unit({ access: 'public' }), {
+      code: 'READ_ONLY',
+      path: 'app',
+      lease: false,
+      reason: 'hosting',
+    });
+    assert.strictEqual(typeof writer.sync.unit({ access: 'public' }), 'object', 'the writer hosts');
+    await follower.close();
+    await writer.close();
+  });
 
   await t.test('a follower hears what the writer lands through the engine’s change stream', async () => {
     const client = createFakeMongo();

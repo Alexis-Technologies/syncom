@@ -1614,9 +1614,12 @@ export interface StorageOptions<S extends Schema = Schema> {
   lock?: 'fail' | 'wait' | false | LockOptions;
   /**
    * A follower: reads what another instance writes through the same engine and writes nothing — no lock, no
-   * replay, no catalog save; every write rejects with `READ_ONLY`, `sync.connect` is a `TypeError`. Where the
-   * engine has a change stream (IndexedDB, MongoDB) a record the writer lands is read again, its live
-   * `Document` refreshed and its watchers woken.
+   * replay, no catalog save; every write rejects with `READ_ONLY`. Only an engine several instances may open at
+   * once takes one (`capabilities.shared`: memory, IndexedDB, MongoDB) — the files engine and SQLite refuse it
+   * with a `TypeError`. Its log and vector are as of its open: it neither dials (`sync.connect` is a `TypeError`)
+   * nor hosts (`sync.unit()` is `READ_ONLY`, `reason: 'hosting'`) until the shared log lands. Where the engine has
+   * a change stream (IndexedDB, MongoDB) a record the writer lands is read again, its live `Document` refreshed
+   * and its watchers woken.
    */
   readOnly?: boolean;
   /** The listener cap of the storage and its sync manager (default 100); exceeding it throws. */
@@ -2247,6 +2250,8 @@ export interface Database {
   readonly path: string;
   readonly log: OpLog;
   readonly vector: VersionVector;
+  /** Whether every write is refused: opened with `readOnly: true` (a follower), or a writer whose lease was lost. */
+  readonly readOnly: boolean;
   /** The names of the plugins this storage was opened with (`open({ plugins })`), in registration order. */
   readonly plugins: readonly string[];
   /** The names of the kind plugins among them — what `hello` tells a peer this node can hold. */

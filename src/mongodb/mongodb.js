@@ -108,6 +108,7 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
     exclusiveCreate: true,
     changeStream: changes,
     lock: 'native',
+    shared: true,
   });
   const writer = token();
   const c = {};

@@ -139,7 +139,8 @@ the platform's), `schema`, `schemaInfo` (`{ version, hash, previous, held }`,
 `null` without a schema — see [Schema versions](../guide/database#schema-versions)),
 `sync`, `nodeId` (this node's Ed25519 public key, base64url — what its ops are
 verified against), `signatures` (`'verify'`, `'require'` or `false`), `path`,
-`log`, `vector`, `logger` (the writer built from
+`log`, `vector`, `readOnly` (opened with `readOnly: true`, or a writer whose
+lease was lost: every write is `READ_ONLY`), `logger` (the writer built from
 `createDatabase({ logger })` — `debug`/`info`/`warn`/`error`), `telemetry` (the writer
 the engine records through — the `telemetry` plugin's from `{ api }` or
 `{ tracer, meter }`, one given contained — a missing or throwing method records nothing —, or the disabled one).
@@ -322,7 +323,7 @@ carries no code, except `INVALID_ID`, `TYPE_IMMUTABLE`, `INVALID_VERSION`,
 | `CORRUPT` | `createDatabase()` when `node.json`, `schema.json` or `.blockchain.json` cannot be read, or a log file that is there fails to read (an I/O error, its `cause`; `file`); `tag()` while `tags.json` cannot be read — the open went on without tags, kept the file as `tags.corrupt.json` and keeps the copies the tags would need under `tags/.pending/` until the file is repaired; `branchInfo()` and `drop()` (`@alexify/syncom/branch`) when `branch.json` cannot be read or is no branch file | `cause`; `file` from `tag()` |
 | `DOWNGRADE` | `createDatabase()` with `ahead: 'hold'` and a schema version below the one the directory ran | — |
 | `LOCKED` | `createDatabase()` while another instance holds the directory — at once under `lock: 'fail'`, after `lock.timeout` ms under `'wait'`; over an engine with a lease of its own (MongoDB), while another instance holds the lease | `path` |
-| `READ_ONLY` | any write, `applyRemote()`, `mergeSnapshot()`, `transact()`, `tag()`, `repair()` on a database opened with `readOnly: true`, or on a writer whose lease was lost (`lease: true`) | `path`, `lease` |
+| `READ_ONLY` | any write, `applyRemote()`, `mergeSnapshot()`, `transact()`, `tag()`, `repair()` on a database opened with `readOnly: true`, or on a writer whose lease was lost (`lease: true`); `sync.unit()` on either (`reason: 'hosting'`): a follower's log and vector are as of its open, so it hosts no feed until the shared log lands | `path`, `lease`; `reason` from `sync.unit()` |
 | `TARGET_NOT_EMPTY` | `copyEngine()` (`@alexify/syncom/engines`) when the target engine already holds a database at `path` (`node.json`, or a record) | `path` |
 | `ENGINE_UNREACHABLE` | `remoteEngine()`/`connectEngine()` (`/syncom/engines`): the served side is gone — its port closed or its worker exited (`reason: 'closed'`), or a call waited past `timeout` ms (`reason: 'timeout'`, `ms`) — every call waiting fails so, and every call after | `reason`, `ms` |
 | `LEASE_LOST` | the storage's `error` event: the engine's lease on the database went to another instance (not renewed in time, or taken) — the database is read-only from here on; what was in flight lands | `path`, `cause` |
