@@ -260,7 +260,7 @@
         },
         "node": {
           "mark": "✅",
-          "text": "≥22, `node:fs`",
+          "text": "≥24, `node:fs`",
           "source": "package.json engines; src/fsi.js"
         },
         "browser": {

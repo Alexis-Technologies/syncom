@@ -2,7 +2,7 @@
 
 // The SQLite engine (@alexify/syncom/sqlite `sqliteEngine()`): the engine
 // contract of src/engine.js over one SQLite database — `node:sqlite` by
-// default (Node 22.5+; experimental, so Node prints a warning at the require,
+// default (Node 24+, where it needs no flag; experimental, so Node prints a warning at the require,
 // which the engine does not silence: `node --no-warnings=ExperimentalWarning`,
 // or give a driver), or any driver whose database has `exec(sql)` and
 // `prepare(sql)` → `{ run, get, all }` (better-sqlite3, expo-sqlite,

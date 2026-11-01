@@ -23,6 +23,9 @@ and one `commit` event, not one per call.
 
 ### Changed
 
+- **Node 24 or later.** `node:sqlite` needs no flag there (22.13/23.4 unflagged it; the engines' tests run it), so
+  `engines.node` says `>=24` and CI runs on 24 and 26 (review №5, G-6). The guide page `/guide/storage` became
+  `/guide/database` on the rename: the links that still pointed at it (llms.txt, a versions API comment) follow.
 - **The names are RxDB's: `createDatabase()`, `Database`, `Collection`, `Document`.** A storage is a
   database — a directory, a node, a log — and a live record a document, so the classes say so:
   `createDatabase(options)` opens one (`src/database.js`), `db.document(id)` and `collection.document(id)`

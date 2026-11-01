@@ -363,7 +363,8 @@ const ENTRIES = [
   // 137.0 with the follower and the lease (engines plan, E5). 137.5, raised by name.
   // 138.7 with atRest over an engine (src/encryption/at-rest-engine.js; engines plan, E6). 139, raised by name.
   // 139.9 with the keys of the contract checked in the core (review №5 E1, see the main entry). 140.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 140.5 },
+  // 140.6 with the catalog's delta, the at-rest place and base64 in chunks (review №5 E4). 141, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 141 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -433,14 +434,16 @@ const ENTRIES = [
   // 3.6 with the contract's keys (src/engine.js isKvKey, KV_NAMESPACES; review №5 E1). 3.75, raised by name.
   { label: 'chain — browser (@alexify/syncom/chain)', entry: 'src/chain/chain.js', platform: 'browser', budget: 3.75 },
   // Sealed records (the RSA half) and the at-rest wrapper (AES-GCM, PBKDF2).
+  // 4.1 with the key pair read through a store (engines plan, E1.3). 4.5, raised by name.
+  // 5.7 with atRest over an engine (src/encryption/at-rest-engine.js: every store's value sealed, the log's entries and
+  // index; engines plan, E6). 6, raised by name.
+  // 6.2 with the place bound to the database too (the path in the additional data; review №5 S-6) and base64 made in
+  // chunks (P-7). 6.5, raised by name.
   {
-    // 5.7 with atRest over an engine (src/encryption/at-rest-engine.js: every store's value sealed, the log's entries and
-    // index; engines plan, E6). 6, raised by name.
     label: 'encryption — browser (@alexify/syncom/encryption)',
     entry: 'src/encryption/encryption.js',
     platform: 'browser',
-    // 4.1 with the key pair read through a store (engines plan, E1.3). 4.5, raised by name.
-    budget: 6,
+    budget: 6.5,
   },
   // The backends as blocks: the Map in memory; the multi-level cache over
   // several (with the contract check it shares with the core).

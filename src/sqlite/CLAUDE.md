@@ -32,7 +32,9 @@ src/sqlite/sqlite.js      @alexify/syncom/sqlite — sqliteEngine({ file, databa
   `json_each(ids)` (never a spread of the ids into parameters); `ids` a range over the primary key (`id > ?`, ids are
   ASCII, so SQLite's byte order is JavaScript's); a listing of keys or copies is sorted here.
 - **The file is the engine's, the path a row's first key.** Every table starts with `p`, so one file serves many
-  databases (a mesh in one process over `:memory:`), and `remove(path)` is one `DELETE … WHERE p = ?` per table in one
+  databases (a mesh in one process over `:memory:`) — on ONE lane: a hub with many databases on one connection
+  serializes every statement of every database behind every write set, so a database that must not wait on the
+  others gets an engine (a connection, a file) of its own — and `remove(path)` is one `DELETE … WHERE p = ?` per table in one
   transaction. `close()` closes a connection the engine opened and the next call opens the file again (a `:memory:`
   database starts over); a `database` given is never closed and keeps its settings — no pragma of the engine's reaches
   it but `durable`. `destroy()` deletes the file with its `-wal`/`-shm`. `durable: true` on any database sets `PRAGMA

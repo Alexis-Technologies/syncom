@@ -116,7 +116,7 @@ Three jobs (`.github/workflows/ci.yml`):
    (`tests/package/*.test.js`: exports, invariants, error codes, the guides'
    paths), `size` (the last both smoke-tests the script and puts the numbers
    in the log).
-2. **test** — matrix over Node 22, 24 and 26: `test:coverage`, then
+2. **test** — matrix over Node 24 and 26: `test:coverage`, then
    `test:types`. Every test run has a 120 s timeout per test.
 3. **docs** — `docs:build`, so a broken page or dead link fails the PR rather
    than the deploy.

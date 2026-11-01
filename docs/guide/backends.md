@@ -152,9 +152,12 @@ done, open the database through the new engine only, and remove it from the old
 one (`from.remove(path)`) or never open it there again.
 
 ```js
+const { createDatabase, filesEngine } = require('@alexify/syncom');
+const fsi = require('@alexify/syncom/fsi');                 // or the backend the database was opened with
 const { copyEngine } = require('@alexify/syncom/engines');
 const { sqliteEngine } = require('@alexify/syncom/sqlite');
 
+const db = await createDatabase({ path: 'app', fsi });   // the database as it is today
 const files = filesEngine(fsi);                           // where the database is
 const sqlite = sqliteEngine({ file: 'app.sqlite' });      // where it goes
 await db.close();

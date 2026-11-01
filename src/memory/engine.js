@@ -138,6 +138,8 @@ const logStore = () => {
 const openDb = (path) => {
   const spaces = new Map();
   const records = new Map();
+  // The record ids sorted, until a write set changes them.
+  let sortedIds = null;
   const pieces = new Map();
   const copies = new Map();
   let catalog = null;
@@ -193,10 +195,20 @@ const openDb = (path) => {
       }
       return found;
     },
+    // The ids sorted once per change, not per page: a copy pages a large database by the last id.
     async ids({ after = null, limit = Infinity } = {}) {
-      const all = sorted(records.keys());
+      const all = (sortedIds ??= sorted(records.keys()));
+      let low = 0;
+      if (after !== null) {
+        let high = all.length;
+        while (low < high) {
+          const mid = (low + high) >>> 1;
+          if (all[mid] <= after) low = mid + 1;
+          else high = mid;
+        }
+      }
       const out = [];
-      for (let i = 0; i < all.length && out.length < limit; i++) if (after === null || all[i] > after) out.push(all[i]);
+      for (let i = low; i < all.length && out.length < limit; i++) out.push(all[i]);
       return out;
     },
   };
@@ -249,6 +261,7 @@ const openDb = (path) => {
   // One write set, applied with nothing awaited in between: whole, or — a
   // write set that throws before it is applied — nothing.
   const write = async (batch) => {
+    if (batch.records !== undefined || batch.remove !== undefined) sortedIds = null;
     const puts = batch.kv?.put;
     if (puts !== undefined) for (let i = 0; i < puts.length; i++) space(puts[i][0]).set(puts[i][1], String(puts[i][2]));
     const rows = batch.records;

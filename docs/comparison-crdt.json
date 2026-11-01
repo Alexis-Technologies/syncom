@@ -1450,7 +1450,7 @@
         },
         "tests": {
           "mark": "",
-          "text": "1,228 `node:test` tests, 30 `tsd` files; CI on Node 22, 24",
+          "text": "1,849 `node:test` tests, 34 `tsd` files; CI on Node 24, 26",
           "source": "tests/; .github/workflows"
         }
       }

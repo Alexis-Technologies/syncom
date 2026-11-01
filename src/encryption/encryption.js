@@ -53,10 +53,29 @@ const IV_BYTES = 12;
 const DEFAULT_ITERATIONS = 600_000;
 const subtle = () => globalThis.crypto.subtle;
 
+// Base64 of bytes, three at a time into four letters, a chunk of text per
+// 3 KB joined at the end: a string per byte was a heap of them for a record.
+const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+const B64_CHUNK = 3072;
 const toBase64 = (bytes) => {
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary);
+  const out = [];
+  let chunk = '';
+  let i = 0;
+  for (; i + 2 < bytes.length; i += 3) {
+    const n = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
+    chunk += B64[n >> 18] + B64[(n >> 12) & 63] + B64[(n >> 6) & 63] + B64[n & 63];
+    if (chunk.length === (B64_CHUNK / 3) * 4) {
+      out.push(chunk);
+      chunk = '';
+    }
+  }
+  if (i < bytes.length) {
+    const second = i + 1 < bytes.length;
+    const n = (bytes[i] << 16) | ((second ? bytes[i + 1] : 0) << 8);
+    chunk += B64[n >> 18] + B64[(n >> 12) & 63] + (second ? B64[(n >> 6) & 63] : '=') + '=';
+  }
+  out.push(chunk);
+  return out.join('');
 };
 const fromBase64 = (text) => {
   const binary = atob(text);

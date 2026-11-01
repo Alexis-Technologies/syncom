@@ -182,7 +182,7 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr><td>Browser bundle with sync</td><td>53.6 KB min+gzip: the core, the sync plugin and the wrpc link adapter</td><td>90.1 KB min+gzip with Dexie and <code>replicateRxCollection</code></td></tr>
 <tr><td>Size budget in CI</td><td>✅ <code>pnpm size</code> fails CI when any entry passes its budget (the core 52 KB, <code>/all</code> 98 KB, each subpath its own)</td><td>⚠️ CI prints a webpack build size; no limit in 17.6.0</td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Runtimes</strong></td></tr>
-<tr><td>Node.js</td><td>✅ ≥22; persists with <code>node:fs</code>; CI on Node 22 and 24</td><td>⚠️ ≥20; free disk persistence only via MongoDB or FoundationDB servers, or the capped SQLite trial<sup>4</sup></td></tr>
+<tr><td>Node.js</td><td>✅ ≥24; persists with <code>node:fs</code>; CI on Node 24 and 26</td><td>⚠️ ≥20; free disk persistence only via MongoDB or FoundationDB servers, or the capped SQLite trial<sup>4</sup></td></tr>
 <tr><td>Deno</td><td>❌ not tested; <code>engines</code> names Node.js only</td><td>✅ <code>rxdb/plugins/storage-denokv</code>; CI runs the Dexie and DenoKV suites on Deno 2.6.5</td></tr>
 <tr><td>Bun</td><td>❌ not tested</td><td>⚠️ CI runs the memory-storage suite on Bun 1.4.2; no Bun-specific storage</td></tr>
 <tr><td>Browser persistence</td><td>✅ OPFS (default), IndexedDB (<code>/idb</code>), memory</td><td>✅ free: Dexie (IndexedDB), localStorage, memory; native IndexedDB and OPFS Premium (Pro)</td></tr>
@@ -598,7 +598,7 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr class="sc-matrix-group"><td colspan="3"><strong>Developer tooling</strong></td></tr>
 <tr><td>Development mode</td><td>— no separate mode: argument checks and full error messages always on</td><td>✅ <code>rxdb/plugins/dev-mode</code>: readable errors, deep-freeze, schema and query checks<sup>70</sup></td></tr>
 <tr><td>Test helpers</td><td>⚠️ <code>memory()</code> for in-memory stores; contract suites stay in the repo</td><td>✅ memory storage; <code>rxdb/plugins/test-utils</code> (fixtures, replication test suite); <code>using</code> closes databases<sup>71</sup></td></tr>
-<tr><td>Own test suite and CI</td><td>722 <code>node:test</code> tests; coverage gate 95/95/90/95; CI on Node 22 and 24, Linux</td><td>74 test files per storage; Linux, Windows, browsers, Bun, Deno, 11 example apps; no coverage gate</td></tr>
+<tr><td>Own test suite and CI</td><td>1,849 <code>node:test</code> tests; coverage gate 95/95/90/95; CI on Node 24 and 26, Linux</td><td>74 test files per storage; Linux, Windows, browsers, Bun, Deno, 11 example apps; no coverage gate</td></tr>
 <tr><td>Documentation</td><td>21 pages, about 41,500 words, with an API reference</td><td>271 pages, about 463,000 words: 98 articles, 46 landing pages</td></tr>
 <tr><td>Example apps</td><td>⚠️ two Node.js scripts (<code>examples/main.js</code>, <code>domain.js</code>), linted but not run</td><td>✅ 13 example apps; 11 run in CI: Angular, React, React Native, Electron, Tauri, Vue, Svelte…</td></tr>
 </tbody>

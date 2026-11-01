@@ -41,11 +41,22 @@ const unreadable = (id, cause) =>
 const dirOf = (path, ns) => (ns === '' ? path : `${path}/${ns}`);
 
 // The tag names a database holds, read from tags.json (null when unreadable).
+// A file's text, or null where there is none: one read, not an `exists` and a read.
+const readOrNull = async (fsi, dir, name) => {
+  try {
+    return await fsi.read(dir, name);
+  } catch (error) {
+    if (isAbsent(error)) return null;
+    throw error;
+  }
+};
+
 const tagNames = async (fsi, path) => {
-  if (!(await fsi.exists(path, TAGS_FILE))) return [];
+  const text = await readOrNull(fsi, path, TAGS_FILE);
+  if (text === null) return [];
   let parsed;
   try {
-    parsed = JSON.parse(await fsi.read(path, TAGS_FILE));
+    parsed = JSON.parse(text);
   } catch {
     return null;
   }
@@ -84,11 +95,7 @@ const openDb = (fsi, path, capabilities, logger) => {
     return dirOf(path, ns);
   };
   const kv = {
-    async get(ns, key) {
-      const dir = where(ns, key);
-      if (!(await fsi.exists(dir, key))) return null;
-      return fsi.read(dir, key);
-    },
+    get: async (ns, key) => readOrNull(fsi, where(ns, key), key),
     has: async (ns, key) => fsi.exists(where(ns, key), key),
     async list(ns) {
       if (!isKvNamespace(ns)) throw new TypeError(`filesEngine: ${JSON.stringify(ns)} is not a namespace`);
@@ -118,8 +125,7 @@ const openDb = (fsi, path, capabilities, logger) => {
     },
     /** The record's text as the medium holds it, or null. */
     async raw(id) {
-      if (!(await fsi.exists(data, recordFile(id)))) return null;
-      return fsi.read(data, recordFile(id));
+      return readOrNull(fsi, data, recordFile(id));
     },
     has: (id) => fsi.exists(data, recordFile(id)),
     async getMany(ids) {
@@ -155,9 +161,7 @@ const openDb = (fsi, path, capabilities, logger) => {
   const pieces = {
     /** A piece's text by the name the record's meta holds (`<id>~<n>.json`), or null. */
     async get(id, name) {
-      named(name, 'piece');
-      if (!(await fsi.exists(data, name))) return null;
-      return fsi.read(data, name);
+      return readOrNull(fsi, data, named(name, 'piece'));
     },
     /** A piece its record no longer names, removed — after the record's file (src/entries.js). */
     remove: async (id, name) => fsi.remove(data, named(name, 'piece')),
@@ -165,9 +169,7 @@ const openDb = (fsi, path, capabilities, logger) => {
 
   const copies = {
     async get(tag, id) {
-      const dir = copiesDir(tag);
-      if (!(await fsi.exists(dir, recordFile(id)))) return null;
-      return fsi.read(dir, recordFile(id));
+      return readOrNull(fsi, copiesDir(tag), recordFile(id));
     },
     has: async (tag, id) => fsi.exists(copiesDir(tag), recordFile(id)),
     /** The ids a tag holds copies of, in id order. */

@@ -1571,7 +1571,7 @@
         },
         "node": {
           "mark": "✅",
-          "text": "≥22; persists with `node:fs`; CI on Node 22 and 24",
+          "text": "≥24; persists with `node:fs`; CI on Node 24 and 26",
           "source": "package.json:134-136; src/fsi.js; .github/workflows/ci.yml:33-34"
         },
         "deno": {
@@ -3017,7 +3017,7 @@
         },
         "ci": {
           "mark": "",
-          "text": "722 `node:test` tests; coverage gate 95/95/90/95; CI on Node 22 and 24, Linux",
+          "text": "1,849 `node:test` tests; coverage gate 95/95/90/95; CI on Node 24 and 26, Linux",
           "source": "pnpm test (2026-10-23: 722 tests, 721 pass, 1 skipped); package.json scripts.test:coverage; .github/workflows/ci.yml",
           "detail": "Browser halves run under Node with an OPFS mock and fake-indexeddb; no real browser in CI."
         },
