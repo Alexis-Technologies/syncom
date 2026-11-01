@@ -80,7 +80,16 @@ and one `commit` event, not one per call.
   otherwise, every put an upsert so a set that failed midway is landed again whole by the replay; a log group
   is one bulk write. Another process hears every record and log document through a change stream
   (`db.changes`), this instance's own told apart by the writer's token on each document; `changes: false` on
-  a standalone server. `engine.destroy()` drops the database; nothing is connected or closed here.
+  a standalone server. `engine.destroy()` drops the database; nothing is connected or closed here. The database
+  is held by a lease (`capabilities.lock: 'native'`, `db.lock()`): one document per path, renewed every third of
+  `lock.staleAfter` (30 s by default), a lapsed one taken over; a writer whose lease goes to another instance
+  hears `error` `LEASE_LOST` once and is read-only from then on (`READ_ONLY` on every write).
+- **A follower: `createDatabase({ readOnly: true })`.** Reads what another instance writes through the same
+  engine and writes nothing — no lock, no replay of the log's tail, no catalog save, not even the log's index;
+  every write, `applyRemote()`, `mergeSnapshot()`, `transact()`, `tag()` and `repair()` reject with `READ_ONLY`,
+  `sync.connect` is a `TypeError` (a follower reads and serves). Over an engine with a change stream (IndexedDB
+  across tabs, MongoDB across processes) a record the writer lands is read again, a live `Document` of it
+  refreshed and its watchers woken. `stats().readOnly`.
 - **A synchronous editor's handle on a text: `storage.openText(id, key, { window, actor, source })`**
   (the `text` plugin's). `insert`, `insertEmbed`, `delete`, `format` and `applyDelta` edit at once
   over the handle's reading — the field as announced, its edits on top — and `toString()`,

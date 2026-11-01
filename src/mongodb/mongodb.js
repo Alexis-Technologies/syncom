@@ -29,6 +29,9 @@ const { capabilitiesOf } = require('../engine.js');
 const { SyncomError } = require('../errors.js');
 
 const COLLECTIONS = ['kv', 'records', 'pieces', 'copies', 'log', 'meta'];
+// A lease per database path: `{ _id: path, owner, expires }`, renewed by its holder, taken once it lapsed.
+const LOCKS = 'locks';
+const DEFAULT_LEASE = 30_000;
 const INDEXES = {
   kv: { p: 1, ns: 1, key: 1 },
   records: { p: 1, id: 1 },
@@ -38,6 +41,10 @@ const INDEXES = {
   meta: { p: 1, key: 1 },
 };
 const DUPLICATE = 11000;
+
+const locked = (path, why = 'is leased by another instance') =>
+  new SyncomError('LOCKED', `Storage at ${path} ${why}`, { path });
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const exists = (key) => Object.assign(new Error(`EEXIST: key already exists, ${key}`), { code: 'EEXIST' });
 const unreadable = (id) =>
@@ -96,10 +103,16 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
   }
   const database = db ?? client.db(name);
   if (typeof database?.collection !== 'function') throw new TypeError('mongoEngine: the database has no collection()');
-  const capabilities = capabilitiesOf({ atomicBatch: transactions, exclusiveCreate: true, changeStream: changes });
+  const capabilities = capabilitiesOf({
+    atomicBatch: transactions,
+    exclusiveCreate: true,
+    changeStream: changes,
+    lock: 'native',
+  });
   const writer = token();
   const c = {};
   for (let i = 0; i < COLLECTIONS.length; i++) c[COLLECTIONS[i]] = database.collection(COLLECTIONS[i]);
+  const locks = database.collection(LOCKS);
   let indexed = null;
 
   // The indexes behind every range, made once per engine (idempotent on the server).
@@ -408,7 +421,67 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
       };
     };
 
-    const engineDb = { path: p, capabilities, kv, records, pieces, copies, log, write, close: async () => {} };
+    // The lease: one document per path, this instance's while it renews it
+    // every third of `staleAfter`; a lapsed one is taken over, a live one is
+    // LOCKED (at once, or after `timeout` under 'wait'); lost — taken by
+    // another instance, or a renewal that failed — `onLost` hears once.
+    const lock = async ({
+      mode = 'fail',
+      staleAfter = DEFAULT_LEASE,
+      poll = 100,
+      timeout = Infinity,
+      onLost = null,
+    }) => {
+      await ensure();
+      const owner = token();
+      const deadline = Number.isFinite(timeout) ? Date.now() + timeout : Infinity;
+      for (;;) {
+        const now = Date.now();
+        try {
+          await locks.insertOne({ _id: p, owner, expires: now + staleAfter });
+          break;
+        } catch (error) {
+          if (error?.code !== DUPLICATE) throw error;
+        }
+        const taken = await locks.findOneAndUpdate(
+          { _id: p, expires: { $lt: now } },
+          { $set: { owner, expires: now + staleAfter } },
+          { returnDocument: 'after' },
+        );
+        if (taken !== null && taken.owner === owner) break;
+        if (mode === 'fail') throw locked(p);
+        if (Date.now() >= deadline) throw locked(p, `is still leased after ${timeout} ms`);
+        await sleep(poll);
+      }
+      let held = true;
+      let timer = null;
+      const lost = (error) => {
+        if (!held) return;
+        held = false;
+        clearInterval(timer);
+        if (onLost !== null) onLost(error);
+      };
+      const renew = async () => {
+        try {
+          const result = await locks.updateOne({ _id: p, owner }, { $set: { expires: Date.now() + staleAfter } });
+          if (result.matchedCount === 0) lost(new Error(`the lease on ${p} was taken by another instance`));
+        } catch (error) {
+          lost(error);
+        }
+      };
+      timer = setInterval(renew, Math.max(10, Math.floor(staleAfter / 3)));
+      timer.unref?.();
+      return {
+        async release() {
+          if (!held) return;
+          held = false;
+          clearInterval(timer);
+          await locks.deleteOne({ _id: p, owner });
+        },
+      };
+    };
+
+    const engineDb = { path: p, capabilities, kv, records, pieces, copies, log, write, lock, close: async () => {} };
     if (changes) engineDb.changes = { subscribe };
     return Object.freeze(engineDb);
   };

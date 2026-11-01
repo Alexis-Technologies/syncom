@@ -128,4 +128,12 @@ const fsiNamespace = (fsi, dir) => {
   return store;
 };
 
-module.exports = { CAPABILITIES, isEngine, checkEngine, checkEngineDb, capabilitiesOf, kvNamespace, fsiNamespace };
+module.exports = {
+  CAPABILITIES,
+  isEngine,
+  checkEngine,
+  checkEngineDb,
+  capabilitiesOf,
+  kvNamespace,
+  fsiNamespace,
+};

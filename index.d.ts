@@ -96,6 +96,23 @@ export interface EngineWriteSet {
 export interface EngineDb {
   readonly path: string;
   readonly capabilities: EngineCapabilities;
+  /**
+   * The engine's own lease on the database, where `capabilities.lock` is `'native'`: held while renewed,
+   * `LOCKED` while another instance holds it; `onLost` hears once when it goes to another instance.
+   */
+  lock?(options: LockOptions & { onLost?: (error: Error) => void }): Promise<{ release(): Promise<void> }>;
+  /** The catalog's rows kept as they are by a native engine (memory, IndexedDB); the core saves to `kv` otherwise. */
+  readonly catalog?: {
+    load(): Promise<{ indexes: unknown; stamp: unknown; rows: unknown } | null>;
+    save(indexes: unknown, stamp: unknown, rows: unknown): Promise<void>;
+  };
+  /**
+   * What another instance wrote over the same database, where `capabilities.changeStream` — `{ records: ids }` or
+   * `{ log: [first, last] }` per message, never this instance's own; what a follower (`readOnly`) hears.
+   */
+  readonly changes?: {
+    subscribe(listener: (message: { p: string; records?: string[]; log?: [number, number] }) => void): () => void;
+  };
   /** The files engine's backend; absent on a native engine. */
   readonly fsi?: Fsi;
   /** Small named texts beside the records, by namespace (`''` the root) and key. */
@@ -545,6 +562,8 @@ export type SyncomErrorCode =
   | 'CORRUPT'
   | 'DOWNGRADE'
   | 'LOCKED'
+  | 'READ_ONLY'
+  | 'LEASE_LOST'
   | 'KEYS_INCOMPLETE'
   | 'DECRYPT_FAILED'
   | 'IDENTITY_MISMATCH'
@@ -1433,7 +1452,7 @@ export interface PeerRef {
 /** The lockfile's knobs: `open({ lock: { mode, staleAfter, poll, timeout } })`. */
 export interface LockOptions {
   mode?: 'fail' | 'wait';
-  /** A lockfile whose process cannot be checked is stale after this many ms (default 30 minutes). */
+  /** A lockfile whose process cannot be checked is stale after this many ms (default 30 minutes); an engine's lease (MongoDB) lapses after it unless renewed (default 30 s). */
   staleAfter?: number;
   /** How often `'wait'` looks again, in ms (default 100). */
   poll?: number;
@@ -1444,6 +1463,8 @@ export interface LockOptions {
 /** What `storage.stats()` answers — every number from memory, no I/O. */
 export interface StorageStats {
   closed: boolean;
+  /** Opened with `readOnly: true`, or a writer whose lease was lost. */
+  readOnly: boolean;
   /** The plugins this storage was opened with, by name, in registration order. */
   plugins: string[];
   /** Writes waiting on, or running in, the mutation queue. */
@@ -1575,6 +1596,13 @@ export interface StorageOptions<S extends Schema = Schema> {
    * `lock.json` with the pid otherwise (stale when its process is gone).
    */
   lock?: 'fail' | 'wait' | false | LockOptions;
+  /**
+   * A follower: reads what another instance writes through the same engine and writes nothing — no lock, no
+   * replay, no catalog save; every write rejects with `READ_ONLY`, `sync.connect` is a `TypeError`. Where the
+   * engine has a change stream (IndexedDB, MongoDB) a record the writer lands is read again, its live
+   * `Document` refreshed and its watchers woken.
+   */
+  readOnly?: boolean;
   /** The listener cap of the storage and its sync manager (default 100); exceeding it throws. */
   maxListeners?: number;
   /** The in-memory entry cache: the last `max` records read or written (default 5000); a live Record pins its own. */

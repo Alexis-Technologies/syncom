@@ -37,7 +37,7 @@ export interface MongoEngineOptions {
   changes?: boolean;
 }
 
-/** The engine over MongoDB: six collections keyed by the database's path, a bulk write per collection per write set. */
+/** The engine over MongoDB: six collections keyed by the database's path, a bulk write per collection per write set, a lease per path (`capabilities.lock: 'native'`). */
 export interface MongoEngine extends Engine {
   readonly name: 'mongodb';
   /** The MongoDB database every path lives in. */

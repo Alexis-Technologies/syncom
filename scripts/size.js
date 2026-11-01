@@ -158,7 +158,9 @@ const ENTRIES = [
   // engines plan, E1.2). 59.5, raised by name.
   // 59.7 with the database opened through its engine: the stores behind EntryStore, the catalog, the lock, the
   // identity, the tags and the chain; `createDatabase({ engine })` (engines plan, E1.3). 60, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 60 },
+  // 60.6 with a follower (`readOnly`: src/readonly.js, the change stream heard) and an engine's lease (`db.lock`,
+  // LEASE_LOST; engines plan, E5). 61, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 61 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -345,7 +347,8 @@ const ENTRIES = [
   // 133.4 with the engine contract and the files engine in the core (engines plan, E1). 133.5, raised by name.
   // 134.1 with the log's store seam (engines plan, E1.2). 134.5, raised by name.
   // 136.1 with the engine in memory (src/memory/engine.js; engines plan, E2). 136.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 136.5 },
+  // 137.0 with the follower and the lease (engines plan, E5). 137.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 137.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).

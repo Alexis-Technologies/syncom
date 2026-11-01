@@ -19,6 +19,7 @@ src/store/store.js        the @alexify/syncom/store subpath — toStore/fromEven
 src/inspect/inspect.js    the @alexify/syncom/inspect subpath — a record's anatomy (through the [SOURCE] seam's raw `entry`) and anonymize; requires compose, shape, symbols, hash only
 src/backend.js            the fsi contract (isFsi/checkFsi; sync, create and append optional), withSync — no requires
 src/engine.js             the engine contract (isEngine/checkEngine/checkEngineDb, capabilitiesOf, kvNamespace/fsiNamespace) — no requires
+src/readonly.js           readOnlyDb — an engine's database that refuses every write: what `createDatabase({ readOnly })` opens over — no requires
 src/layered/layered.js    @alexify/syncom/layered — layered([top, …, bottom], { write, fill, queue }): one fsi over several, a multi-level
                           cache; 'back' drains its queue before any lower layer is consulted; create is exclusive across layers
 src/emitter.js            the Emitter both halves extend — no requires
@@ -532,15 +533,14 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   bug the lock exists for. `acquireLock` prefers `fsi.create` (exclusive) and
   falls back to write-then-read-back; `createDatabase({ lock: { ... } })` is the object
   form (`normalizeLock`).
-- **The engine is injected.** `createDatabase({ engine })` is the medium of every byte (src/engine.js:
-  stores `kv`, `records`, `pieces`, `copies`, `log`, `write(batch)`); `createDatabase({ fsi })` is
-  `filesEngine(fsi)`, the platform's fsi the default. `#init` opens the engine BEFORE the lock (a key of
-  the root namespace); `#open` hands plugins `ctx.db` beside `ctx.fsi` (`null` under a native engine),
-  the log its `store`, `EntryStore` the database, a catalog a `kvNamespace`; the registry and a branch
-  reach it through `storage[DB]`. A new `fsi.`/`engine.` call on a module-level default is a bug. A
-  batch of records is ONE write set (`EntryStore.writeMany`), atomic where the engine has transactions —
-  the chain's block and tail ride in it as kv puts (`chain.block(data)` → `{ hash, puts }`, then
-  `chain.committed(hash)`): `addBlock` is for a chain of its own, never the storage's write paths.
+- **The engine is injected.** `createDatabase({ engine })` is the medium of every byte (src/engine.js: stores `kv`, `records`,
+  `pieces`, `copies`, `log`, `write(batch)`); `createDatabase({ fsi })` is `filesEngine(fsi)`. `#init` opens the engine BEFORE
+  the lock — a key of the root namespace, or the engine's own lease where `capabilities.lock` is `'native'` (lost, the
+  database is read-only: `LEASE_LOST` once, `READ_ONLY` after); `#open` hands plugins `ctx.db` beside `ctx.fsi` (`null` under
+  a native engine), the log its `store`, `EntryStore` the database, a catalog a `kvNamespace`; the registry and a branch
+  reach it through `storage[DB]`. A new `fsi.`/`engine.` call on a module-level default is a bug. A batch of records is
+  ONE write set (`EntryStore.writeMany`), atomic where the engine has transactions — the chain's block and tail ride in
+  it as kv puts (`chain.block(data)` → `{ hash, puts }`, then `chain.committed(hash)`); `addBlock` is for a chain of its own.
 - **Hooks run inside the operation; events never do.** `src/hooks.js` (it
   requires errors.js only — it ships to the browser) is the whole mechanism. Database hooks
   go through `#hook()` inside the mutation queue, and `#run` refuses a write

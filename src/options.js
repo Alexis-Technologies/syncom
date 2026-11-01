@@ -63,6 +63,10 @@ const normalizeStorageOptions = (options) => {
     throw new TypeError('createDatabase({ maxListeners }): maxListeners must be a positive integer');
   }
   const lock = normalizeLock(options.lock);
+  // A follower: reads what another instance writes through the same engine, writes nothing, holds no lock.
+  if (options.readOnly !== undefined && typeof options.readOnly !== 'boolean') {
+    throw new TypeError('createDatabase({ readOnly }): readOnly must be a boolean');
+  }
   // The cache keeps the last `cache.max` entries read or written (a live
   // Record pins its own); `integrity: 'lazy'` trusts a record file on the
   // cold read instead of re-verifying it against its block.
@@ -149,6 +153,7 @@ const normalizeStorageOptions = (options) => {
     maxListeners,
     durable: options.durable === true,
     lock,
+    readOnly: options.readOnly === true,
     cacheMax,
     chained,
     verify: chained && integrity === 'verify',
