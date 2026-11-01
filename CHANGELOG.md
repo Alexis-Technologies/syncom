@@ -64,6 +64,13 @@ and one `commit` event, not one per call.
   two transactions where the file store spent one per file and rewrote the catalog whole — with the chain
   on too: `Blockchain.block(data)` hands the block and its tail back as the kv puts of the landing's write
   set, `committed(hash)` moves the tail once they are down (`addBlock` writes at once, for a chain of its own).
+- **The engine over SQLite: `sqliteEngine()`** (`@alexify/syncom/sqlite`, Node only). Six tables keyed by the
+  database's path in one file, `:memory:` by default — `kv`, `records` (the JSON text), `pieces`, `copies`, `log` (a
+  row per entry), `meta` — through `node:sqlite`, required inside the factory (experimental in Node: a warning at the
+  require, which the engine does not silence), or a driver with `exec` and `prepare` → `{ run, get, all }` whose answers
+  may be promises (better-sqlite3, expo-sqlite). A write set is one transaction, a log group one, every statement goes
+  through one lane; WAL for a file, `synchronous = FULL` once a database opens `durable`; `engine.close()`,
+  `engine.destroy()`.
 - **A synchronous editor's handle on a text: `storage.openText(id, key, { window, actor, source })`**
   (the `text` plugin's). `insert`, `insertEmbed`, `delete`, `format` and `applyDelta` edit at once
   over the handle's reading — the field as announced, its edits on top — and `toString()`,

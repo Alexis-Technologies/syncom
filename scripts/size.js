@@ -178,6 +178,9 @@ const ENTRIES = [
   // 2 was the file store alone. The engine over object stores (src/idb/engine.js: six stores, key ranges, one transaction per
   // write set, the log's rows, a BroadcastChannel; engines plan, E3). 6, raised by name.
   { label: 'idb backend — browser (@alexify/syncom/idb)', entry: 'src/idb/idb.js', platform: 'browser', budget: 6 },
+  // The engine over SQLite (src/sqlite/sqlite.js): node:sqlite required inside the factory, so a node-only row with no
+  // browser budget (engines plan, E4).
+  { label: 'sqlite engine — node (@alexify/syncom/sqlite)', entry: 'src/sqlite/sqlite.js', platform: 'node' },
   // The trigram text index behind `$text`: platform-neutral, off the main
   // entry so a node that never searches pays nothing for it.
   { label: 'search — browser (@alexify/syncom/search)', entry: 'src/search/search.js', platform: 'browser', budget: 2 },

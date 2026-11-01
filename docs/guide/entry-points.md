@@ -30,8 +30,9 @@ same process may run with others.
 | `@alexify/syncom/editor`, `/prosemirror`, `/codemirror` | an editor bound to a text field: the generic binding and its deltas, and adapters for ProseMirror and CodeMirror 6 (their modules injected) | functions over a storage |
 | `@alexify/syncom/store` | a query, a record or a presence as one store — Svelte's contract and React's `useSyncExternalStore` | `toStore(source)` |
 | `@alexify/syncom/inspect` | a record's anatomy, raw, and an anonymized copy for a bug report | functions over a storage |
-| `@alexify/syncom/memory`, `/layered` | `memory()`, the backend in memory; `layered([top, …, bottom])`, one backend over several as a multi-level cache | `createDatabase({ fsi })` |
-| `@alexify/syncom/search`, `/idb`, `/wrpc`, `/contracts` | the text index behind `$text`, the IndexedDB backend, the wrpc link adapter, smart contracts | injected: `createDatabase({ search })`, `createDatabase({ fsi })`, `sync.connect` |
+| `@alexify/syncom/memory`, `/layered` | `memory()`, the backend in memory, and `memoryEngine()`, the engine in memory; `layered([top, …, bottom])`, one backend over several as a multi-level cache | `createDatabase({ fsi })`, `createDatabase({ engine })` |
+| `@alexify/syncom/sqlite` | `sqliteEngine()`, the engine over SQLite — `node:sqlite` or a driver; Node only | `createDatabase({ engine })` |
+| `@alexify/syncom/search`, `/idb`, `/wrpc`, `/contracts` | the text index behind `$text`, IndexedDB as a backend (`createIdbFsi`) and as an engine (`idbEngine`), the wrpc link adapter, smart contracts | injected: `createDatabase({ search })`, `createDatabase({ fsi })` or `({ engine })`, `sync.connect` |
 
 ## Who imports what
 

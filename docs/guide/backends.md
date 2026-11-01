@@ -47,6 +47,7 @@ A transaction of many records is one write set, a single write one.
 | --- | --- | --- |
 | `filesEngine(fsi)` | Anywhere | What `createDatabase({ fsi })` builds, and the default over the platform's backend: a directory, today's layout |
 | `idbEngine({ name, indexedDB, IDBKeyRange, durability, channel })` (`@alexify/syncom/idb`) | The browser | The engine over IndexedDB: six object stores keyed by the database's path (`kv`, `records`, `pieces`, `copies`, `log`, `meta`), a record as the object it was handed, one readwrite transaction per write set and per log group, key ranges for listings, a `BroadcastChannel` another tab's writes are heard through (`db.changes`). Where `createIdbFsi` spent a transaction per file and rewrote the catalog whole, this spends two per write. `engine.close()` closes the connection, `engine.destroy()` deletes the IndexedDB database — see [Browser](./browser#opfs-or-indexeddb) |
+| `sqliteEngine({ file, database, driver, durable })` (`@alexify/syncom/sqlite`) | Node.js — or anywhere SQLite runs, through a driver | The engine over SQLite: six tables keyed by the database's path (`kv`, `records`, `pieces`, `copies`, `log`, `meta`) in one file, `:memory:` by default, through `node:sqlite` (Node 22.5+; experimental, so Node warns once at the require — `node --no-warnings=ExperimentalWarning` quiets it) or any driver with `exec(sql)` and `prepare(sql)` → `{ run, get, all }` (better-sqlite3, expo-sqlite; answers may be promises). One transaction per write set and per log group, every statement through one lane; WAL for a file, `synchronous = FULL` once a database opens `durable`. `engine.close()` closes the connection (the file stays), `engine.destroy()` deletes the file |
 | `memoryEngine()` (`@alexify/syncom/memory`) | Anywhere | The engine in memory: a record kept as the object it was handed (no JSON text), the log as rows (nothing written, nothing read back), the catalog's rows as they are; one engine object is shared by every database that opens through it, and a path outlives its instance until `engine.remove(path)` — a reopen reads what the last instance wrote. Nothing survives the process. What a test, a mesh in one process or a benchmark wants over `memory()` |
 
 ```js
@@ -59,6 +60,17 @@ const b = await createDatabase({ path: 'b', engine });
 await a.close();
 const again = await createDatabase({ path: 'a', engine });  // what `a` wrote, log and tags included
 await engine.remove('a');                                   // gone for good
+```
+
+```js
+const { createDatabase } = require('@alexify/syncom');
+const { sqliteEngine } = require('@alexify/syncom/sqlite');
+
+const engine = sqliteEngine({ file: 'app.sqlite' });       // one file, every database opened through it
+const db = await createDatabase({ path: 'app', engine });
+await db.insert({ title: 'In SQLite' });
+await db.close();
+await engine.close();                                       // the connection; the file stays
 ```
 
 Every engine is held to the same contract as a test — `tests/suites/engine.js`,

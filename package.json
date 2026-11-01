@@ -35,6 +35,10 @@
       "types": "./src/idb/idb.d.ts",
       "default": "./src/idb/idb.js"
     },
+    "./sqlite": {
+      "types": "./src/sqlite/sqlite.d.ts",
+      "default": "./src/sqlite/sqlite.js"
+    },
     "./search": {
       "types": "./src/search/search.d.ts",
       "default": "./src/search/search.js"
@@ -203,6 +207,7 @@
     "nodejs",
     "browser",
     "indexeddb",
+    "sqlite",
     "opentelemetry",
     "observability"
   ],

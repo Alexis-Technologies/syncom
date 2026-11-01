@@ -10,7 +10,8 @@ registered — the API as one import (see [Entry points](../guide/entry-points))
 The other subpaths: the
 wrpc adapter, [`@alexify/syncom/wrpc`](#wrpc-adapter), the smart contracts,
 [`@alexify/syncom/contracts`](#contracts-subpath), the IndexedDB backend,
-[`@alexify/syncom/idb`](#backends) (`createIdbFsi`), the text index,
+[`@alexify/syncom/idb`](#backends) (`createIdbFsi`, `idbEngine`), the SQLite engine,
+[`@alexify/syncom/sqlite`](#backends) (`sqliteEngine`, Node only), the text index,
 [`@alexify/syncom/search`](#search-subpath) (`createSearch`), fractional indexes,
 [`@alexify/syncom/order`](#order-subpath), the undo stack,
 [`@alexify/syncom/undo`](#undo-subpath) (`createUndo`), and branches,
@@ -672,6 +673,7 @@ server, OPFS in the browser — as those five functions, and:
 | `isFsi(value)` | Whether `value` has the five functions |
 | `memory()` (`@alexify/syncom/memory`) | A backend in memory: `size`, `dump()`, the exclusive `create`; two storages opened over one share it |
 | `memoryEngine()` (`@alexify/syncom/memory`) | The engine in memory (`MemoryEngine`): records as the objects given, the log as rows, the catalog's rows as they are; `paths`; a path outlives its instance until `remove(path)` — see [Engines](../guide/backends#engines) |
+| `sqliteEngine({ file, database, driver, durable }?)` (`@alexify/syncom/sqlite`) | The engine over SQLite (`SqliteEngine`: `file`, `close()`, `destroy()`), Node only: six tables keyed by the database's path in one file (`:memory:` by default), `node:sqlite` required inside the factory or a driver with `exec` and `prepare` → `{ run, get, all }` (`SqliteDriver`, `SqliteDatabase`, `SqliteStatement`; answers may be promises); one transaction per write set and per log group — see [Engines](../guide/backends#engines) |
 | `layered(layers, { write, fill, queue }?)` (`@alexify/syncom/layered`) | One backend over several: a read is the first hit top down, filled upward; a write lands on every layer in order — `'through'` (default) or `'back'` from a queue the top answers ahead of; `flush()`, `close()`, `pending`, `layers`; `create` is exclusive across the layers — see [Backends](../guide/backends#layers) |
 | `new OpLog(base, { fsi \| store })`, `loadKeys(base, { fsi \| kv })` (`/encryption`), `loadSigningKeys(base, { fsi \| kv })` (`/signing`), `new Blockchain(base, { fsi \| kv })` (`/chain`) | The pieces take the backend too — or a store of an engine's database: the log's `store` (`db.log`), a `kv` (the `keys` and `blockchain` namespaces) |
 | `atRest(fsi, options)` (`/encryption`) | A wrapper: every file through it is ciphertext under one key — see [Encryption](#encryption-subpath) |
