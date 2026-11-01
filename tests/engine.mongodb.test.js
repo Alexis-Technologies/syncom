@@ -376,7 +376,7 @@ test('MongoDB engine (the driver in memory)', async (t) => {
   );
 
   await t.test(
-    'another instance over the same database hears a record and a log document, never its own; a removal once',
+    'another instance over the same database hears a record document, never its own; a removal once; the stream’s end as an error',
     async () => {
       const client = createFakeMongo();
       const a = mongoEngine({ client, name: 'shared' });
@@ -398,7 +398,6 @@ test('MongoDB engine (the driver in memory)', async (t) => {
       await settle();
       assert.deepStrictEqual(heard, [
         { p: '/p', records: ['r'] },
-        { p: '/p', log: [1, 1] },
         { p: '/p', records: ['r'] },
       ]);
       assert.deepStrictEqual(own, [], 'an instance never hears itself, its removals included');
@@ -406,7 +405,35 @@ test('MongoDB engine (the driver in memory)', async (t) => {
       stopOwn();
       await dbB.write({ records: [{ id: 's', stored: stored({}) }] });
       await settle();
-      assert.strictEqual(heard.length, 3, 'unsubscribed');
+      assert.strictEqual(heard.length, 2, 'unsubscribed');
+      // The stream watches `records` of this path alone, without the record's text; an update is looked up.
+      const records = client.db('shared').collection('records');
+      const raw = [];
+      const stream = records.watch([{ $match: { 'fullDocument.p': '/p' } }, { $project: { 'fullDocument.t': 0 } }], {
+        fullDocument: 'updateLookup',
+      });
+      stream.on('change', (event) => raw.push(event));
+      await dbA.write({ records: [{ id: 'u', stored: stored({ n: 1 }) }] });
+      await dbA.write({ records: [{ id: 'u', stored: stored({ n: 2 }) }] });
+      await settle();
+      assert.deepStrictEqual(
+        raw.map((event) => [event.operationType, event.fullDocument.id, 't' in event.fullDocument]),
+        [
+          ['insert', 'u', false],
+          ['update', 'u', false],
+        ],
+      );
+      await stream.close();
+      // The stream's end — an error — reaches the subscriber once as `{ error }`, and the subscription is over.
+      const ended = [];
+      dbB.changes.subscribe((message) => ended.push(message));
+      records.breakStreams(new Error('the resume token is gone'));
+      await settle();
+      await dbA.write({ records: [{ id: 'after', stored: stored({}) }] });
+      await settle();
+      assert.strictEqual(ended.length, 1);
+      assert.strictEqual(ended[0].p, '/p');
+      assert.match(ended[0].error.message, /resume token/);
     },
   );
 
@@ -528,8 +555,8 @@ test('MongoDB engine (the driver)', { skip: url ? false : 'MONGODB_URL unset' },
         'the follower heard the record',
       );
       assert.ok(
-        heard.some((message) => message.log !== undefined),
-        'and the log',
+        heard.every((message) => message.log === undefined && message.error === undefined),
+        'the records alone, and no error',
       );
     },
   );

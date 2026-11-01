@@ -12,7 +12,8 @@
 // document at or past its first seq — what a group whose acknowledgement
 // was lost left behind — and `load` leaves out a newest group short of its
 // documents (never acknowledged: its seqs were taken back); another process hears
-// every write through a change stream (`db.changes`, a replica set too),
+// every record document through a change stream (`db.changes`, a replica
+// set too) matched to its path on the server and without the record's text,
 // its own writes told apart by the writer's token on each document. One
 // instance holds a database by a lease on the server's clock, and every
 // document a handle writes carries the lease's generation (`gen`): a put or
@@ -496,25 +497,58 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
     };
 
     // What another instance over the same database wrote — `{ records: [id] }`
-    // or `{ log: [seq, seq] }` per document, this instance's own left out —
-    // through a change stream on `records` and on `log`.
+    // per document, this instance's own left out — through a change stream
+    // on `records`, matched to this path on the server (`fullDocument.p`; a
+    // deletion carries no document, so by the key's prefix) and without the
+    // record's text: one message per document, never per set, and a
+    // follower re-reads what it hears. An update carries its document only
+    // looked up (`updateLookup`: every put is an upsert). The stream's end —
+    // an error, a close — reaches the listener once as `{ error }`, and the
+    // subscription is over: the follower subscribes again and reads whole.
+    // The `log` collection is not watched: a follower's log is as of its
+    // open until the shared log.
     const subscribe = (listener) => {
-      const hear = (event, key) => {
+      // `["<p>",` — what every key of this path's records begins with.
+      const prefix = `${keyOf([p]).slice(0, -1)},`.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const pipeline = [
+        {
+          $match: {
+            $or: [{ 'fullDocument.p': p }, { operationType: 'delete', 'documentKey._id': { $regex: `^${prefix}` } }],
+          },
+        },
+        { $project: { 'fullDocument.t': 0 } },
+      ];
+      const stream = c.records.watch(pipeline, { fullDocument: 'updateLookup' });
+      let stopped = false;
+      const over = () => {
+        if (stopped) return false;
+        stopped = true;
+        if (--listening === 0) deleted.clear();
+        return true;
+      };
+      const ended = (error) => {
+        if (!over()) return;
+        try {
+          stream.close()?.catch?.(() => {});
+        } catch {
+          // Closed already.
+        }
+        listener({ p, error });
+      };
+      stream.on('change', (event) => {
         const parts = partsOf(event.documentKey?._id);
         if (parts === null || parts[0] !== p || parts.length !== 2) return;
         if (event.operationType === 'delete') {
           if (deleted.delete(event.documentKey._id)) return;
         } else if (event.fullDocument?.w === writer) return;
-        listener(key === 'records' ? { p, records: [parts[1]] } : { p, log: [parts[1], parts[1]] });
-      };
-      const options = { fullDocument: 'updateLookup' };
-      const streams = [c.records.watch([], options), c.log.watch([], options)];
-      streams[0].on('change', (event) => hear(event, 'records'));
-      streams[1].on('change', (event) => hear(event, 'log'));
+        listener({ p, records: [parts[1]] });
+      });
+      stream.on('error', (error) => ended(error));
+      stream.on('close', () => ended(new Error(`the change stream on ${p} closed`)));
+      stream.on('end', () => ended(new Error(`the change stream on ${p} ended`)));
       listening++;
       return () => {
-        for (let i = 0; i < streams.length; i++) streams[i].close();
-        if (--listening === 0) deleted.clear();
+        if (over()) stream.close()?.catch?.(() => {});
       };
     };
 

@@ -47,9 +47,15 @@ src/mongodb/mongodb.js    @alexify/syncom/mongodb — mongoEngine({ client, db, 
   stays `EEXIST`). Under `transactions: true` the lease (`{ _id, owner, gen }`) is read inside the transaction
   first, absent → `LEASE_LOST` before anything is written. The driver is 6 or later (`findOneAndUpdate` answers
   the document; `taken?.value ?? taken` reads an older one defensively).
-- **A change stream tells writers apart by token.** Every record and log document carries `w`, the writer's
-  token — one per `open(path)`, so two handles of one engine tell each other apart; `db.changes` hears
-  `records` and `log` through `watch` and drops what carries its own. A deletion carries no document, so the
-  ids this instance removed are remembered (`deleted`, once the write landed, only while a subscription is
-  live) and dropped once. One message per document, never per set: a follower re-reads what it hears.
-  `changes: false` for a standalone server, where `watch` would fail.
+- **A change stream is one path's records, matched on the server, and its end is heard.** `db.changes`
+  watches `records` alone (the `log` collection is not watched: a follower's log is as of its open until the
+  shared log) with a pipeline — `$match` on `fullDocument.p`, or for a deletion (no document) on the key's
+  JSON prefix `["<p>",` by `$regex`, then `$project` without `fullDocument.t` — under `fullDocument:
+'updateLookup'`, because every put is an upsert and an update event carries no document otherwise. Every
+  record and log document carries `w`, the writer's token — one per `open(path)`, so two handles of one engine
+  tell each other apart — and what carries its own is dropped. A deletion carries no document, so the ids this
+  instance removed are remembered (`deleted`, once the write landed, only while a subscription is live) and
+  dropped once. One message per document, never per set: a follower re-reads what it hears. The stream's
+  `error`, `close` and `end` are listened to (an unheard `error` would crash the process): the listener hears
+  `{ error }` once and the subscription is over — the follower subscribes again and reads every record again
+  (`FOLLOW_LOST`). `changes: false` for a standalone server, where `watch` would fail.

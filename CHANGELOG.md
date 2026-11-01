@@ -119,7 +119,10 @@ and one `commit` event, not one per call.
   open: it reads; it neither dials (`sync.connect` is a `TypeError`) nor hosts (`sync.unit()` is `READ_ONLY`,
   `reason: 'hosting'`) until the shared log lands. Over an engine with a change stream (IndexedDB across tabs,
   MongoDB across processes) a record the writer lands is read again, a live `Document` of it refreshed and its
-  watchers woken. `stats().readOnly`, `storage.readOnly`.
+  watchers woken — subscribed before the load, so nothing landed while the follower opens is missed; a stream
+  that ends (an error, a close) is `error` `FOLLOW_LOST` once, the follower subscribes again and reads every
+  record again. The MongoDB stream is matched to the database's path on the server and carries no record text;
+  the `log` collection is not watched. `stats().readOnly`, `storage.readOnly`.
 - **A synchronous editor's handle on a text: `storage.openText(id, key, { window, actor, source })`**
   (the `text` plugin's). `insert`, `insertEmbed`, `delete`, `format` and `applyDelta` edit at once
   over the handle's reading — the field as announced, its edits on top — and `toString()`,

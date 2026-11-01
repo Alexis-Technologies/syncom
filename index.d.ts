@@ -138,11 +138,15 @@ export interface EngineDb {
     ): Promise<void>;
   };
   /**
-   * What another instance wrote over the same database, where `capabilities.changeStream` — `{ records: ids }` or
-   * `{ log: [first, last] }` per message, never this instance's own; what a follower (`readOnly`) hears.
+   * What another instance wrote over the same database, where `capabilities.changeStream` — `{ records: ids }`
+   * per message (IndexedDB: `{ log: [first, last] }` for a log group too), never this instance's own; what a
+   * follower (`readOnly`) hears. `{ error }` once when the stream ends — an error, a close — and the subscription
+   * with it: the follower subscribes again and reads every record again (`FOLLOW_LOST`).
    */
   readonly changes?: {
-    subscribe(listener: (message: { p: string; records?: string[]; log?: [number, number] }) => void): () => void;
+    subscribe(
+      listener: (message: { p: string; records?: string[]; log?: [number, number]; error?: Error }) => void,
+    ): () => void;
   };
   /** The files engine's backend; absent on a native engine. */
   readonly fsi?: Fsi;
@@ -598,6 +602,7 @@ export type SyncomErrorCode =
   | 'LOCKED'
   | 'READ_ONLY'
   | 'LEASE_LOST'
+  | 'FOLLOW_LOST'
   | 'TARGET_NOT_EMPTY'
   | 'ENGINE_UNREACHABLE'
   | 'KEYS_INCOMPLETE'
@@ -1961,7 +1966,11 @@ export interface StorageEvents {
           count: number;
         })
       /** Records logged but not written — held in memory until they land (see Health). */
-      | (SyncomError & { code: 'UNPERSISTED'; ids: string[] }),
+      | (SyncomError & { code: 'UNPERSISTED'; ids: string[] })
+      /** The engine's lease went to another instance: read-only from here on. */
+      | (SyncomError & { code: 'LEASE_LOST'; path: string; cause?: unknown })
+      /** A follower's change stream ended: subscribed again, every record read again. */
+      | (SyncomError & { code: 'FOLLOW_LOST'; path: string; cause?: unknown }),
   ) => void;
   /** A peer's batch is durable. */
   apply: (batch: ApplyBatchContext) => void;

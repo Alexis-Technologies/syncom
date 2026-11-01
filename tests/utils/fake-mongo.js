@@ -9,9 +9,12 @@
 // pipeline of `$set` stages over `$field`, `$$NOW`, `$add`, `$ifNull`),
 // `createIndex`, `countDocuments`, `drop`, sessions whose `withTransaction`
 // undoes what the callback wrote when it throws, and change streams
-// (`watch`) that hear every write once it is committed. Filters: equality,
-// `$gt/$gte/$lt/$lte`, `$in/$nin`, `$ne`, `$exists`, `$not`, `$or`, `$and`,
-// `$expr` (`$lt`/`$gt`/`$lte`/`$gte`/`$eq` over Dates and numbers). The
+// (`watch(pipeline, { fullDocument })`: a `$match` over the event and a
+// `$project` of exclusions; an insert, a replace, an update — its document
+// only under `updateLookup` — and a delete) that hear every write once it is
+// committed, and err on `breakStreams(error)`. Filters: equality,
+// `$gt/$gte/$lt/$lte`, `$in/$nin`, `$ne`, `$exists`, `$not`, `$regex`, `$or`,
+// `$and`, `$expr` (`$lt`/`$gt`/`$lte`/`$gte`/`$eq` over Dates and numbers). The
 // server's clock (`$$NOW`) is the client's `advance(ms)` past the real one —
 // never `Date.now`, which a test may skew to stand for a client's clock.
 // What it lacks, it throws on, so a test never passes on a method the real
@@ -37,7 +40,18 @@ const valueAt = (doc, path) => {
   return value;
 };
 
-const OPERATORS = new Set(['$gt', '$gte', '$lt', '$lte', '$in', '$nin', '$ne', '$exists', '$eq', '$not']);
+const OPERATORS = new Set(['$gt', '$gte', '$lt', '$lte', '$in', '$nin', '$ne', '$exists', '$eq', '$not', '$regex']);
+
+// The field at a dotted `path` of `doc` removed, where its parent is there.
+const exclude = (doc, path) => {
+  const parts = path.split('.');
+  let parent = doc;
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (parent === null || typeof parent !== 'object') return;
+    parent = parent[parts[i]];
+  }
+  if (parent !== null && typeof parent === 'object') delete parent[parts[parts.length - 1]];
+};
 
 // A Date and a number compare as instants in `$expr`; anything else as it is.
 const instant = (value) => (value instanceof Date ? value.getTime() : value);
@@ -120,6 +134,9 @@ const matchesCondition = (value, condition) => {
           case '$not':
             if (matchesCondition(value, expected)) return false;
             break;
+          case '$regex':
+            if (!(typeof value === 'string' && new RegExp(expected).test(value))) return false;
+            break;
           default:
             throw new Error(`fake-mongo: operator ${key} is not supported`);
         }
@@ -195,10 +212,27 @@ const applyUpdate = (doc, update, inserting, clock) => {
 
 class FakeChangeStream extends EventEmitter {
   #collection;
-  constructor(collection) {
+  #filter;
+  #excluded;
+  #lookup;
+  #clock;
+  constructor(collection, { filter, excluded, lookup, clock }) {
     super();
     this.#collection = collection;
+    this.#filter = filter;
+    this.#excluded = excluded;
+    this.#lookup = lookup;
+    this.#clock = clock;
     collection.watchers.add(this);
+  }
+  // An event as the pipeline shapes it: an update carries its document only
+  // looked up, the `$match` is over the event, the `$project` takes fields off it.
+  deliver(event) {
+    const shaped = clone(event);
+    if (shaped.operationType === 'update' && !this.#lookup) delete shaped.fullDocument;
+    if (this.#filter !== null && !matches(shaped, this.#filter, this.#clock)) return;
+    for (const path of this.#excluded) exclude(shaped, path);
+    this.emit('change', shaped);
   }
   async close() {
     this.#collection.watchers.delete(this);
@@ -221,8 +255,9 @@ class FakeCollection {
   }
 
   // Every change goes through here: the session's undo log first, the
-  // watchers (after the transaction commits, or at once) after.
-  #change(_id, next, session) {
+  // watchers (after the transaction commits, or at once) after. `how` is
+  // what a change to a held document is: a `replace` or an `update`.
+  #change(_id, next, session, how = 'replace') {
     const before = this.docs.get(_id);
     if (session?.inTransaction) session.undo.push([this, _id, before]);
     if (next === undefined) this.docs.delete(_id);
@@ -231,7 +266,7 @@ class FakeCollection {
       next === undefined
         ? { operationType: 'delete', documentKey: { _id } }
         : {
-            operationType: before === undefined ? 'insert' : 'replace',
+            operationType: before === undefined ? 'insert' : how,
             documentKey: { _id },
             fullDocument: clone(next),
           };
@@ -239,7 +274,11 @@ class FakeCollection {
     else this.publish(event);
   }
   publish(event) {
-    for (const watcher of this.watchers) setImmediate(() => watcher.emit('change', clone(event)));
+    for (const watcher of this.watchers) setImmediate(() => watcher.deliver(event));
+  }
+  /** Every change stream on this collection errs, as one does when its resume token is gone or the deployment changed. */
+  breakStreams(error) {
+    for (const watcher of this.watchers) watcher.emit('error', error);
   }
 
   #all(filter) {
@@ -338,7 +377,7 @@ class FakeCollection {
       return { matchedCount: 0, modifiedCount: 0, upsertedCount: 1, upsertedId: doc._id };
     }
     const doc = applyUpdate(found[0], update, false, this.#clock);
-    this.#change(doc._id, doc, options.session);
+    this.#change(doc._id, doc, options.session, 'update');
     return { matchedCount: 1, modifiedCount: 1, upsertedCount: 0 };
   }
 
@@ -398,8 +437,22 @@ class FakeCollection {
       .join('_');
   }
 
-  watch() {
-    return new FakeChangeStream(this);
+  watch(pipeline = [], options = {}) {
+    let filter = null;
+    const excluded = [];
+    for (const stage of pipeline) {
+      const keys = Object.keys(stage);
+      if (keys.length !== 1) throw new Error('fake-mongo: a pipeline stage is one operator');
+      if (keys[0] === '$match') filter = stage.$match;
+      else if (keys[0] === '$project') {
+        for (const [path, on] of Object.entries(stage.$project)) {
+          if (on !== 0) throw new Error(`fake-mongo: $project ${path}: exclusions only`);
+          excluded.push(path);
+        }
+      } else throw new Error(`fake-mongo: change stream stage ${keys[0]} is not supported`);
+    }
+    const lookup = options.fullDocument === 'updateLookup';
+    return new FakeChangeStream(this, { filter, excluded, lookup, clock: this.#clock });
   }
 
   async drop() {

@@ -117,9 +117,13 @@ class Database extends Emitter {
   // A follower (`readOnly: true`), or a writer whose lease was lost: every write is READ_ONLY.
   #readOnly = false;
   #leaseLost = false;
-  // What another instance wrote, heard through the engine's change stream (a follower).
+  // What another instance wrote, heard through the engine's change stream (a
+  // follower): read one message after another; what came before the
+  // collections were up waits.
   #heard = Promise.resolve();
   #unhear = null;
+  #hearing = false;
+  #heardEarly = [];
   #schema = null;
   #entities = null;
   #version = null;
@@ -346,6 +350,11 @@ class Database extends Emitter {
     // this one is about to. `lock: false` is for a caller that coordinates.
     const lock = this.#readOnly ? null : this.#lockOptions;
     try {
+      // A follower hears what the writer lands from before it loads anything:
+      // a record landed between the load and the subscription would be
+      // missed for good. What comes while the open runs waits for the
+      // collections (`#heardEarly`).
+      if (this.#readOnly && db.changes !== undefined) this.#subscribeChanges();
       if (lock !== null) {
         // Recorded once the writer is set up (a plugin's, after the lock).
         const started = now();
@@ -361,6 +370,7 @@ class Database extends Emitter {
       }
       await this.#open();
     } catch (error) {
+      this.#unhear?.();
       await this.#lock?.release();
       await this.#db.close();
       throw error;
@@ -488,9 +498,13 @@ class Database extends Emitter {
       if (hooks.sync) this.#sync = hooks.sync;
     }
     this.#initCollections();
-    // A follower hears what the writer lands through the engine's change stream.
-    if (this.#readOnly && db.changes !== undefined) {
-      this.#unhear = db.changes.subscribe((message) => this.#hearChange(message));
+    // A follower's collections are up: what the change stream brought while
+    // the open ran is read now, in order, and what comes next as it comes.
+    if (this.#unhear !== null) {
+      this.#hearing = true;
+      const early = this.#heardEarly;
+      this.#heardEarly = [];
+      for (let i = 0; i < early.length; i++) this.#hearChange(early[i]);
     }
     // What the observable gauges sample, when a meter was given.
     this.#otel.gauges(() => ({
@@ -732,27 +746,90 @@ class Database extends Emitter {
     notify(this, this.#logger, 'lease', { state, path: this.#path });
   }
 
+  // The engine's change stream, subscribed: what it brings goes to #hearChange.
+  #subscribeChanges() {
+    this.#unhear = this.#db.changes.subscribe((message) => this.#hearChange(message));
+  }
+
   // A record another instance wrote, heard through the engine's change
   // stream: read again, its catalog row and a live Document with it. In
-  // order, one at a time; the log's news is the writer's to apply.
+  // order, one at a time; the log's news is the writer's to apply. The
+  // stream's end (`{ error }`) is a loss: subscribed again, read again whole.
   #hearChange(message) {
-    if (this.#closed || !Array.isArray(message?.records)) return;
+    if (this.#closed || message === null || typeof message !== 'object') return;
+    if (!this.#hearing) return void this.#heardEarly.push(message);
+    if (message.error !== undefined) return void this.#followLost(message.error);
+    if (!Array.isArray(message.records)) return;
     const ids = message.records;
     this.#heard = this.#heard.then(async () => {
       for (let i = 0; i < ids.length; i++) {
-        const id = ids[i];
         if (this.#closed) return;
-        try {
-          this.#entries.forget(id);
-          await this.#entries.index(id);
-          const entry = this.#entries.peek(id) ?? null;
-          const alive = entry !== null && isAlive(entry);
-          this.#emitUpdate(id, alive ? entry.data : null, alive ? { ...entry.data } : {}, null, entry);
-        } catch (error) {
-          this.#logger.warn({ event: 'follow.failed', id, err: error });
-        }
+        await this.#reread(ids[i]);
       }
     });
+  }
+
+  // One record as the engine holds it now: the cache dropped, the row made
+  // again (a record gone loses it), a live Document refreshed.
+  async #reread(id) {
+    try {
+      this.#entries.forget(id);
+      await this.#entries.index(id);
+      const entry = this.#entries.peek(id) ?? null;
+      const alive = entry !== null && isAlive(entry);
+      this.#emitUpdate(id, alive ? entry.data : null, alive ? { ...entry.data } : {}, null, entry);
+    } catch (error) {
+      this.#logger.warn({ event: 'follow.failed', id, err: error });
+    }
+  }
+
+  // The change stream ended — an error, a close — and what the writer landed
+  // meanwhile was not heard: the application is told once (FOLLOW_LOST),
+  // the stream is subscribed again FIRST (so nothing landed from here on is
+  // missed), and every record is read again, after what was heard before.
+  #followLost(cause) {
+    if (this.#closed) return;
+    this.#unhear?.();
+    this.#unhear = null;
+    this.#logger.warn({ event: 'follow.lost', path: this.#path, err: cause });
+    const message = `Storage at ${this.#path} lost the writer's change stream: every record is read again`;
+    notify(this, this.#logger, 'error', new SyncomError('FOLLOW_LOST', message, { path: this.#path, cause }));
+    try {
+      this.#subscribeChanges();
+    } catch (error) {
+      // No stream to be had: the follower reads as of this catch-up.
+      this.#logger.warn({ event: 'follow.lost', path: this.#path, err: error });
+    }
+    this.#heard = this.#heard.then(() => this.#catchUp());
+  }
+
+  // Every record read again, a page of ids at a time — the loop a catalog
+  // rebuild runs — and the row of every record gone meanwhile taken.
+  async #catchUp() {
+    const page = 500;
+    const seen = new Set();
+    let after = null;
+    for (;;) {
+      if (this.#closed) return;
+      let ids;
+      try {
+        ids = await this.#db.records.ids({ after, limit: page });
+      } catch (error) {
+        this.#logger.warn({ event: 'follow.failed', id: null, err: error });
+        return;
+      }
+      for (let i = 0; i < ids.length; i++) {
+        seen.add(ids[i]);
+        await this.#reread(ids[i]);
+      }
+      if (ids.length < page) break;
+      after = ids[ids.length - 1];
+    }
+    // The catalog's ids are shared: taken before any row goes.
+    const held = this.#catalog.all();
+    const gone = [];
+    for (let i = 0; i < held.length; i++) if (!seen.has(held[i])) gone.push(held[i]);
+    for (let i = 0; i < gone.length; i++) await this.#reread(gone[i]);
   }
 
   // The Record the application holds for `id`, if it still does.

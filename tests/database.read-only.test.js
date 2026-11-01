@@ -142,6 +142,86 @@ test('a read-only database', async (t) => {
     await follower.close();
     await writer.close();
   });
+
+  await t.test('a follower hears a record landed while it was opening: subscribed before the load', async () => {
+    const client = createFakeMongo();
+    const engine = mongoEngine({ client, name: 'gap' });
+    // The writer's catalog is saved (its close), so the follower resumes it from its log rather than rebuild.
+    const first = await createDatabase({ ...base, path: 'app', engine });
+    const early = await first.insert({ title: 'Early', $type: 'Note' });
+    await first.close();
+    const writer = await createDatabase({ ...base, path: 'app', engine });
+    // The writer lands a record the moment the follower has loaded the log: the
+    // follower's log lacks it, its saved catalog too — the change stream alone tells.
+    const logs = client.db('gap').collection('log');
+    const find = logs.find.bind(logs);
+    let late = null;
+    let armed = true;
+    logs.find = (...args) => {
+      const cursor = find(...args);
+      if (!armed) return cursor;
+      armed = false;
+      const toArray = cursor.toArray;
+      cursor.toArray = async () => {
+        const docs = await toArray();
+        late = await writer.insert({ title: 'Late', $type: 'Note' });
+        return docs;
+      };
+      return cursor;
+    };
+    const follower = await createDatabase({ ...base, path: 'app', engine, readOnly: true });
+    logs.find = find;
+    assert.ok(late !== null, 'landed during the open');
+    await settle();
+    assert.strictEqual(follower.hasRecord(early), true);
+    assert.strictEqual(follower.hasRecord(late), true, 'heard from before the load');
+    assert.strictEqual((await follower.get(late)).title, 'Late');
+    assert.deepStrictEqual((await follower.list()).sort(), [early, late].sort());
+    await follower.close();
+    await writer.close();
+  });
+
+  await t.test(
+    'a follower whose change stream ends hears FOLLOW_LOST once, reads every record again and follows on',
+    async () => {
+      const client = createFakeMongo();
+      const engine = mongoEngine({ client, name: 'broken' });
+      const writer = await createDatabase({ ...base, path: 'app', engine });
+      const kept = await writer.insert({ title: 'Kept', $type: 'Note' });
+      const gone = await writer.insert({ title: 'Gone', $type: 'Note' });
+      const follower = await createDatabase({ ...base, path: 'app', engine, readOnly: true });
+      const errors = [];
+      follower.on('error', (error) => errors.push(error));
+      const live = await follower.document(kept);
+      const records = client.db('broken').collection('records');
+      // The stream falls silent (a deployment that changed under it) while the writer goes on, then errs.
+      const [stream] = records.watchers;
+      records.watchers.delete(stream);
+      await writer.update(kept, { title: 'Changed' });
+      const added = await writer.insert({ title: 'Added', $type: 'Note' });
+      await writer.delete(gone);
+      await settle();
+      assert.strictEqual(live.title, 'Kept', 'deaf: nothing heard');
+      assert.strictEqual(follower.hasRecord(added), false);
+      stream.emit('error', new Error('the resume token is gone'));
+      await settle(60);
+      assert.strictEqual(errors.length, 1, 'told once');
+      assert.deepStrictEqual([errors[0].code, errors[0].path], ['FOLLOW_LOST', 'app']);
+      assert.match(errors[0].cause.message, /resume token/);
+      assert.strictEqual(live.title, 'Changed', 'read again: the live Document refreshed');
+      assert.strictEqual(follower.hasRecord(added), true);
+      assert.strictEqual(follower.hasRecord(gone), false, 'a record removed meanwhile lost its row');
+      assert.strictEqual(await follower.get(gone), null);
+      assert.deepStrictEqual((await follower.list()).sort(), [kept, added].sort());
+      // Subscribed again: what the writer lands from here on is heard.
+      const more = await writer.insert({ title: 'More', $type: 'Note' });
+      await settle();
+      assert.strictEqual(follower.hasRecord(more), true, 'follows on');
+      assert.strictEqual(errors.length, 1);
+      await follower.close();
+      await writer.close();
+    },
+  );
 });
 
 test('the lease an engine holds a database by (MongoDB)', async (t) => {

@@ -454,6 +454,7 @@ storage.once('apply', (batch) => {
 });
 storage.on('error', (error) => {
   if (error.code === 'UNPERSISTED') return void expectType<string[]>(error.ids);
+  if (error.code === 'LEASE_LOST' || error.code === 'FOLLOW_LOST') return void expectType<string>(error.path);
   if (error.code === 'EQUIVOCATION') {
     expectType<'seq' | 'chain'>(error.reason);
     expectType<string>(error.held);
@@ -524,6 +525,7 @@ expectError(storage.applyRemote([], { bound: 'Doc' }));
 storage.on('error', (error) => {
   expectAssignable<SyncomError>(error);
   if (error.code === 'UNPERSISTED' || error.code === 'EQUIVOCATION') return;
+  if (error.code === 'LEASE_LOST' || error.code === 'FOLLOW_LOST') return;
   expectType<'OP_REFUSED' | 'OP_INVALID' | 'OP_UNREADABLE' | 'SKEW' | 'BAD_SIGNATURE' | 'UNSIGNED'>(error.code);
   expectType<string>(error.op.origin);
 });
@@ -590,6 +592,8 @@ storage.on('lease', (event) => {
 });
 expectAssignable<syncom.SyncomErrorCode>('READ_ONLY');
 expectAssignable<syncom.SyncomErrorCode>('LEASE_LOST');
+expectAssignable<syncom.SyncomErrorCode>('FOLLOW_LOST');
+engineDb.changes?.subscribe((message) => expectType<Error | undefined>(message.error));
 expectType<{ tail: string } | null>(storage.stats().chain);
 expectType<{ count: number; corrupt: boolean } | null>(storage.stats().tags);
 expectType<number>(storage.stats().deferred);
@@ -768,6 +772,7 @@ expectType<syncom.ApplyResult>(syncom.applyOp(null, {} as syncom.SyncOp, { pendi
 declare const typedStorage: syncom.Storage;
 typedStorage.on('error', (error) => {
   if (error.code === 'UNPERSISTED') expectType<string[]>(error.ids);
+  else if (error.code === 'LEASE_LOST' || error.code === 'FOLLOW_LOST') expectType<string>(error.path);
   else expectType<syncom.SyncOp>(error.op);
 });
 declare const removal: syncom.WriteContext;
