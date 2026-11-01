@@ -139,6 +139,7 @@ const post = (map, value, id, fn) => {
 
 class Catalog {
   #store;
+  #rowStore;
   #defs = new Map();
   #indexKey;
   #rows = new Map();
@@ -153,9 +154,12 @@ class Catalog {
   #textPending = new Map();
   #logger;
 
-  constructor({ store = null, fsi = null, path = null, entities, text = new Map(), logger = null }) {
-    // A store given, else the `index` directory of an fsi at `path` (what a test hands in).
-    this.#store = store ?? fsiNamespace(fsi, `${path}/index`);
+  constructor({ store = null, rows = null, fsi = null, path = null, entities, text = new Map(), logger = null }) {
+    // A text store given (a kv namespace), a rows store (a native engine's:
+    // `load()` → `{ indexes, stamp, rows }` | null, `save(indexes, stamp, rows)`,
+    // the rows kept as they are), else the `index` directory of an fsi at `path`.
+    this.#rowStore = rows;
+    this.#store = store ?? (rows === null ? fsiNamespace(fsi, `${path}/index`) : null);
     this.#text = text;
     this.#logger = logger;
     const shape = [];
@@ -493,6 +497,7 @@ class Catalog {
   // `strict: false` reuses a catalog saved under other indexes — a tag's,
   // where the rows say what existed and the indexes are those of its day.
   async load({ strict = true } = {}) {
+    if (this.#rowStore !== null) return this.#loadRows(strict);
     const text = await this.#store.get(FILE);
     if (text === null) return null;
     let parsed = null;
@@ -533,7 +538,27 @@ class Catalog {
    * are taken before the first await, so a save may run while puts go on:
    * what lands during the write stays dirty for the next one.
    */
+  // The rows a native engine kept, taken as they are: no text to parse.
+  async #loadRows(strict) {
+    const saved = await this.#rowStore.load();
+    if (saved === null || (strict && saved.indexes !== this.#indexKey) || typeof saved.stamp !== 'string') return null;
+    const rows = saved.rows;
+    for (let i = 0; i < rows.length; i++) {
+      const [id, row] = rows[i];
+      this.#remove(id);
+      this.#insert(id, row);
+    }
+    this.#dirty = 0;
+    return { stamp: saved.stamp };
+  }
+
   async save(stamp) {
+    if (this.#rowStore !== null) {
+      const saved = this.#dirty;
+      await this.#rowStore.save(this.#indexKey, stamp, this.rows());
+      this.#dirty -= saved;
+      return;
+    }
     const rows = [];
     for (const [id, row] of this.#rows) {
       const cells = [id, row.type, row.v, row.encrypted, row.fields];

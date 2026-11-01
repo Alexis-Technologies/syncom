@@ -16,7 +16,7 @@ const { tree } = require('../tree/tree.js');
 const { signing } = require('../signing/signing.js');
 const { chain } = require('../chain/chain.js');
 const { encryption } = require('../encryption/encryption.js');
-const { memory } = require('../memory/memory.js');
+const { memory, memoryEngine } = require('../memory/memory.js');
 const { layered } = require('../layered/layered.js');
 const { sync } = require('../sync/sync.js');
 const { schema } = require('../schema/schema.js');
@@ -61,6 +61,7 @@ module.exports = {
   ...require('../encryption/encryption.js'),
   ...require('../sync/sync.js'),
   memory,
+  memoryEngine,
   layered,
   Database,
   createDatabase,

@@ -295,12 +295,10 @@ class Database extends Emitter {
       text.set(def.name, index);
     }
     const { logger } = this;
-    this.#catalog = new Catalog({
-      store: kvNamespace(this.#db.kv, 'index'),
-      entities: normalized.entities,
-      text,
-      logger,
-    });
+    // Persisted through the engine's catalog store where it has one (a native
+    // engine keeps the rows as they are), else as catalog.json in the `index` namespace.
+    const where = this.#db.catalog ? { rows: this.#db.catalog } : { store: kvNamespace(this.#db.kv, 'index') };
+    this.#catalog = new Catalog({ ...where, entities: normalized.entities, text, logger });
     // A node with a schema stamps its version on every op it makes; one
     // without stamps nothing, and nothing in hello says what it runs.
     if (schema === null) return;

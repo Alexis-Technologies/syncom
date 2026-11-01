@@ -337,7 +337,8 @@ const ENTRIES = [
   // block normalized (src/text/normalize.js), names across modules unminified (review №4, M-4). 132, raised by name.
   // 133.4 with the engine contract and the files engine in the core (engines plan, E1). 133.5, raised by name.
   // 134.1 with the log's store seam (engines plan, E1.2). 134.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 134.5 },
+  // 136.1 with the engine in memory (src/memory/engine.js; engines plan, E2). 136.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 136.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -419,7 +420,9 @@ const ENTRIES = [
     label: 'memory — browser (@alexify/syncom/memory)',
     entry: 'src/memory/memory.js',
     platform: 'browser',
-    budget: 0.75,
+    // 0.75 was the Map behind five functions. The engine in memory (src/memory/engine.js: the stores, the log's rows,
+    // the catalog's rows kept as they are; engines plan, E2). 3 (2.9 measured), raised by name.
+    budget: 3,
   },
   {
     label: 'layered — browser (@alexify/syncom/layered)',

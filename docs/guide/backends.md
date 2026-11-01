@@ -41,6 +41,25 @@ nothing else: a file system has no transactions, so the log append stays the
 commit point and a landing that fails is `UNPERSISTED`, as it always was.
 A transaction of many records is one write set, a single write one.
 
+### What ships
+
+| Engine | Where | How |
+| --- | --- | --- |
+| `filesEngine(fsi)` | Anywhere | What `createDatabase({ fsi })` builds, and the default over the platform's backend: a directory, today's layout |
+| `memoryEngine()` (`@alexify/syncom/memory`) | Anywhere | The engine in memory: a record kept as the object it was handed (no JSON text), the log as rows (nothing written, nothing read back), the catalog's rows as they are; one engine object is shared by every database that opens through it, and a path outlives its instance until `engine.remove(path)` — a reopen reads what the last instance wrote. Nothing survives the process. What a test, a mesh in one process or a benchmark wants over `memory()` |
+
+```js
+const { createDatabase } = require('@alexify/syncom');
+const { memoryEngine } = require('@alexify/syncom/memory');
+
+const engine = memoryEngine();
+const a = await createDatabase({ path: 'a', engine });      // two databases, one engine, a path each
+const b = await createDatabase({ path: 'b', engine });
+await a.close();
+const again = await createDatabase({ path: 'a', engine });  // what `a` wrote, log and tags included
+await engine.remove('a');                                   // gone for good
+```
+
 Every engine is held to the same contract as a test — `tests/suites/engine.js`,
 run over the files engine on every backend that ships. An engine of your own
 passes it or it is not one. An engine and a backend together

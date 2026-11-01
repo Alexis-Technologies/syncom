@@ -50,6 +50,12 @@ and one `commit` event, not one per call.
   `new OpLog(path, { store })`), and `loadKeys(ns, { kv })`, `loadSigningKeys(ns, { kv })`,
   `new Blockchain(path, { kv })` take a kv beside an fsi. A plugin's `setup(ctx)` and `open(ctx)`
   carry `db`. See [Engines](https://syncomjs.vercel.app/guide/backends#engines).
+- **The engine in memory: `memoryEngine()`** (`@alexify/syncom/memory`, beside `memory()`). A record is
+  kept as the object it was handed, the op log as rows, the catalog's rows as they are: nothing is
+  stringified or parsed on the way in or out. One engine object serves every database that opens
+  through it — a mesh in one process, a path per node — and a path outlives its instance until
+  `engine.remove(path)`, so a reopen reads what the last instance wrote. `EntryStore` copies a meta at
+  its first block in pieces instead of changing the stored object in place, since a native engine shares it.
 - **A synchronous editor's handle on a text: `storage.openText(id, key, { window, actor, source })`**
   (the `text` plugin's). `insert`, `insertEmbed`, `delete`, `format` and `applyDelta` edit at once
   over the handle's reading — the field as announced, its edits on top — and `toString()`,

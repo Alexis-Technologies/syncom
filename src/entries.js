@@ -88,9 +88,9 @@ class EntryStore {
       return text;
     }
     if (!isPlainObject(stored) || stored.encrypted) return text;
-    await this.#assemble(id, stored.meta, undefined, false);
-    delete stored.gen;
-    return JSON.stringify(stored);
+    const whole = { ...stored, meta: await this.#assemble(id, stored.meta, undefined, false) };
+    delete whole.gen;
+    return JSON.stringify(whole);
   }
 
   /** Whether `id` is held: logged, in the cache, its file behind. */
@@ -196,11 +196,14 @@ class EntryStore {
   }
 
   // A block in pieces made whole: each named piece read and its runs laid
-  // into one map — `meta` was just parsed, so it is changed in place. With
-  // `track`, the record's pieces are what its file names now.
-  async #assemble(id, meta, gen, track) {
-    const blocks = meta?.blocks;
-    if (!isPlainObject(blocks)) return meta;
+  // into one map. The stored record is the engine's — a native engine hands
+  // out the object it holds — so the meta is copied at its first block in
+  // pieces, never changed in place. With `track`, the record's pieces are
+  // what its file names now.
+  async #assemble(id, stored, gen, track) {
+    const blocks = stored?.blocks;
+    if (!isPlainObject(blocks)) return stored;
+    let meta = stored;
     let names = null;
     for (const field of Object.keys(blocks)) {
       const held = blocks[field];
@@ -229,7 +232,8 @@ class EntryStore {
       const keys = Object.keys(held);
       for (let k = 0; k < keys.length; k++) if (keys[k] !== 'parts') plain[keys[k]] = held[keys[k]];
       plain.runs = runs;
-      blocks[field] = plain;
+      if (meta === stored) meta = { ...stored, blocks: { ...blocks } };
+      meta.blocks[field] = plain;
       this.#plain.set(plain, held.parts);
     }
     if (track && (names !== null || Number.isSafeInteger(gen))) {
