@@ -84,6 +84,11 @@ and one `commit` event, not one per call.
   is held by a lease (`capabilities.lock: 'native'`, `db.lock()`): one document per path, renewed every third of
   `lock.staleAfter` (30 s by default), a lapsed one taken over; a writer whose lease goes to another instance
   hears `error` `LEASE_LOST` once and is read-only from then on (`READ_ONLY` on every write).
+- **An engine encrypted at rest: `atRest(engine, options)`** (`@alexify/syncom/encryption`, beside `atRest(fsi)`).
+  The same key over an engine's stores: every record (as one text), piece, copy, kv text, log entry and the
+  log's index a ciphertext bound to its place (`data/<id>.json`, `log/<seq>`…), the keys and the index's `floor`
+  in the clear; `capabilities.indexes` off. A database over it reads nothing from the plain engine and the plain
+  engine nothing of it (`DECRYPT_FAILED` either way). The files engine is wrapped at its backend.
 - **A follower: `createDatabase({ readOnly: true })`.** Reads what another instance writes through the same
   engine and writes nothing — no lock, no replay of the log's tail, no catalog save, not even the log's index;
   every write, `applyRemote()`, `mergeSnapshot()`, `transact()`, `tag()` and `repair()` reject with `READ_ONLY`,

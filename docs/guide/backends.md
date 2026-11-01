@@ -226,7 +226,20 @@ const storage = await createDatabase({ path: 'data', fsi: atRest(fsi, { key }) }
 // or a password: the key is derived by PBKDF2-SHA-256 under a salt the
 // application keeps (8 characters or more), 600 000 rounds by default
 const vault = await createDatabase({ path: 'data', fsi: atRest(fsi, { password, salt }) });
+
+// an engine the same way: every record, piece, copy, kv text and log entry a ciphertext in the engine's stores
+const { memoryEngine } = require('@alexify/syncom/memory');
+const sealed = await createDatabase({ path: 'data', engine: atRest(memoryEngine(), { key }) });
 ```
+
+Over an engine (memory, IndexedDB, SQLite, MongoDB) the wrapper seals every
+value the stores hold — a record as one text, its pieces, a tag's copies, the
+kv texts, each entry of the op log and the log's index — and leaves the keys
+in the clear: an id, a seq, a tag's name, a kv key, the index's `floor`. The
+engine keeps no index of its own over ciphertext (`capabilities.indexes` is
+false; the core's catalog is saved sealed, as kv). The files engine is wrapped
+at its backend — `filesEngine(atRest(fsi, options))` — since its journal reads
+the ops it writes.
 
 Each ciphertext is bound to its file name (the additional data of
 AES-GCM): a file copied over another one of the store — one record's over
