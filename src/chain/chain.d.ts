@@ -8,7 +8,7 @@
 // `Blockchain` is the chain on its own, for an audit tool or the contracts
 // subpath.
 
-import type { Plugin, Fsi } from '../../index.js';
+import type { Plugin, Fsi, EngineDb } from '../../index.js';
 
 export type { Plugin, Fsi };
 
@@ -29,6 +29,11 @@ export interface Blockchain {
 
   writeChain(): Promise<void>;
   addBlock(data: unknown): Promise<string>;
+  /** The next block as the kv puts of a write set (the block, the tail) and its hash; `committed(hash)` once they are down. */
+  block(
+    data: unknown,
+  ): Promise<{ hash: string; puts: Array<[ns: string, key: string, value: string, options?: { atomic?: boolean }]> }>;
+  committed(hash: string): void;
   writeBlock(block: Block): Promise<string>;
   readBlock(hash: string): Promise<Block>;
   validate(options?: { last?: number; from?: string }): Promise<boolean>;
@@ -36,7 +41,7 @@ export interface Blockchain {
 
 export interface BlockchainConstructor {
   readonly prototype: Blockchain;
-  new (basePath: string, options?: { fsi?: Fsi }): Promise<Blockchain>;
+  new (basePath: string, options?: { fsi?: Fsi; kv?: EngineDb['kv'] }): Promise<Blockchain>;
 }
 
 export declare const Blockchain: BlockchainConstructor;

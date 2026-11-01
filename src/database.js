@@ -1292,17 +1292,19 @@ class Database extends Emitter {
   }
 
   async #persistBatch(touched, fromSeq, toSeq) {
-    let blockHash = null;
     if (this.#chain) {
       const records = {};
       for (const [id, entry] of touched) records[id] = await sha256(entry.data);
       const from = this.#log.formatId(fromSeq);
       const to = this.#log.formatId(toSeq);
-      blockHash = await this.#chain.addBlock({ records, from, to });
+      const block = await this.#chain.block({ records, from, to });
+      // One write set for the batch — the block, its tail and the records: atomic where the engine has transactions.
+      await this.#entries.writeMany(touched, block.hash, { put: block.puts });
+      this.#chain.committed(block.hash);
+      return block.hash;
     }
-    // One write set for the batch: atomic where the engine has transactions, in order otherwise.
-    await this.#entries.writeMany(touched, blockHash);
-    return blockHash;
+    await this.#entries.writeMany(touched, null);
+    return null;
   }
 
   // ---------------------------------------------------------------------

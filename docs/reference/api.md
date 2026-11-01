@@ -461,11 +461,13 @@ Blocks are SHA-256 of their JSON through Web Crypto on both platforms.
 
 ### `Blockchain`
 
-`await new Blockchain(basePath, { fsi }?)` — the chain on its own.
+`await new Blockchain(basePath, { fsi }?)` — the chain on its own (`{ kv }` opens it over an engine's kv store, as the plugin does).
 
 | Method | Returns |
 | --- | --- |
-| `addBlock(data)` | `Promise<string>` — the new tail hash |
+| `addBlock(data)` | `Promise<string>` — the new tail hash, written at once |
+| `block(data)` | `Promise<{ hash, puts }>` — the next block and its tail as the kv puts of a write set; the storage lands them with the records they name, then `committed(hash)` |
+| `committed(hash)` | `void` — the tail moves here once the puts are down |
 | `readBlock(hash)` | `Promise<Block>` — throws if unknown |
 | `writeBlock(block)` | `Promise<string>` |
 | `writeChain()` | `Promise<void>` — persists the tail pointer |

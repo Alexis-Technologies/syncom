@@ -538,7 +538,9 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   the root namespace); `#open` hands plugins `ctx.db` beside `ctx.fsi` (`null` under a native engine),
   the log its `store`, `EntryStore` the database, a catalog a `kvNamespace`; the registry and a branch
   reach it through `storage[DB]`. A new `fsi.`/`engine.` call on a module-level default is a bug. A
-  batch of records is ONE write set (`EntryStore.writeMany`), atomic where the engine has transactions.
+  batch of records is ONE write set (`EntryStore.writeMany`), atomic where the engine has transactions —
+  the chain's block and tail ride in it as kv puts (`chain.block(data)` → `{ hash, puts }`, then
+  `chain.committed(hash)`): `addBlock` is for a chain of its own, never the storage's write paths.
 - **Hooks run inside the operation; events never do.** `src/hooks.js` (it
   requires errors.js only — it ships to the browser) is the whole mechanism. Database hooks
   go through `#hook()` inside the mutation queue, and `#run` refuses a write

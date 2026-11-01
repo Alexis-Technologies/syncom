@@ -104,8 +104,11 @@ const replaced = async (core, type, payload, ctx) => {
 const seal = async (core, id, data) => {
   if (core.seal === null) throw missing('an encrypted record', 'encryption');
   const record = await core.seal.encrypt(data);
-  const blockHash = core.chain ? await core.chain.addBlock({ id, hash: await core.hash(record) }) : null;
-  await core.entries.writeSealed(id, record, data, blockHash);
+  if (core.chain) {
+    const block = await core.chain.block({ id, hash: await core.hash(record) });
+    await core.entries.writeSealed(id, record, data, block.hash, { put: block.puts });
+    core.chain.committed(block.hash);
+  } else await core.entries.writeSealed(id, record, data, null);
   core.saveCatalog();
 };
 
@@ -418,12 +421,13 @@ const land = async (core, op, entry, { ticket, position }) => {
   // batch unapplied (the next open replays it) and is reported — the write
   // itself stands.
   try {
-    let blockHash = null;
     if (core.chain) {
       const hash = await core.hash(entry.data);
-      blockHash = await core.chain.addBlock({ id, hash, from: core.log.formatId(position) });
-    }
-    await core.entries.write(id, entry, blockHash);
+      // The block, its tail and the record in one write set (one transaction where the engine has them).
+      const block = await core.chain.block({ id, hash, from: core.log.formatId(position) });
+      await core.entries.write(id, entry, block.hash, { put: block.puts });
+      core.chain.committed(block.hash);
+    } else await core.entries.write(id, entry, null);
     core.log.applied(position);
   } catch (error) {
     await core.unpersisted(new Map([[id, entry]]), error);

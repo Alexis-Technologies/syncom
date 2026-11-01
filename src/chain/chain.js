@@ -65,6 +65,28 @@ class Blockchain {
     return hash;
   }
 
+  /**
+   * The next block for `data` as the kv puts of a write set — the block
+   * under its hash and the tail naming it, in the `blockchain` namespace —
+   * so an engine lands them with the records they name, in one transaction
+   * where it has them; `committed(hash)` moves the tail here once they are
+   * down. The chain the storage keeps is written this way; `addBlock` writes
+   * at once, for a chain of its own.
+   */
+  async block(data) {
+    const block = { prev: this.tailHash, timestamp: Date.now(), data };
+    const hash = await sha256(block);
+    const puts = [
+      [NAMESPACE, `${hash}.json`, JSON.stringify(block), undefined],
+      [NAMESPACE, BLOCKCHAIN, JSON.stringify({ tailHash: hash }), { atomic: true }],
+    ];
+    return { hash, puts };
+  }
+
+  committed(hash) {
+    this.tailHash = hash;
+  }
+
   async writeBlock(block) {
     const hash = await sha256(block);
     await this.#store.put(`${hash}.json`, JSON.stringify(block));

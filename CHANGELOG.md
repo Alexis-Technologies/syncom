@@ -61,7 +61,9 @@ and one `commit` event, not one per call.
   (a row per entry), `meta` (the log's index and segments, the catalog's rows) — a write set in ONE
   readwrite transaction, a log group in one, key ranges for every listing, another tab's writes heard
   through a `BroadcastChannel` (`db.changes`); `engine.close()`, `engine.destroy()`. A database's write costs
-  two transactions where the file store spent one per file and rewrote the catalog whole.
+  two transactions where the file store spent one per file and rewrote the catalog whole — with the chain
+  on too: `Blockchain.block(data)` hands the block and its tail back as the kv puts of the landing's write
+  set, `committed(hash)` moves the tail once they are down (`addBlock` writes at once, for a chain of its own).
 - **A synchronous editor's handle on a text: `storage.openText(id, key, { window, actor, source })`**
   (the `text` plugin's). `insert`, `insertEmbed`, `delete`, `format` and `applyDelta` edit at once
   over the handle's reading — the field as announced, its edits on top — and `toString()`,

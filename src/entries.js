@@ -356,8 +356,8 @@ class EntryStore {
   // A replicated entry: the file, the cache, the catalog row — unless the
   // row is right already (the entry held by `hold` landing on its file: the
   // catalog read it then, and a watcher must not hear of it twice).
-  async write(id, entry, blockHash) {
-    await this.writeMany(new Map([[id, entry]]), blockHash);
+  async write(id, entry, blockHash, kv = null) {
+    await this.writeMany(new Map([[id, entry]]), blockHash, kv);
   }
 
   /**
@@ -368,7 +368,7 @@ class EntryStore {
    * row is right already (the entry held by `hold` landing on its file: the
    * catalog read it then, and a watcher must not hear of it twice).
    */
-  async writeMany(touched, blockHash) {
+  async writeMany(touched, blockHash, kv = null) {
     const rows = [];
     const after = [];
     for (const [id, entry] of touched) {
@@ -379,7 +379,8 @@ class EntryStore {
       rows.push({ id, stored, pieces: writes.length > 0 ? { put: writes } : undefined });
       after.push([id, entry, kept, gen]);
     }
-    await this.#db.write({ records: rows });
+    // The kv puts — a chain block and its tail — land with the records they name.
+    await this.#db.write(kv === null ? { records: rows } : { records: rows, kv });
     for (let i = 0; i < after.length; i++) {
       const [id, entry, kept, gen] = after[i];
       await this.#drop(id, kept, gen);
@@ -416,10 +417,11 @@ class EntryStore {
 
   // An entry sealed for this node's key: `record` is the ciphertext the
   // file holds, `data` what the cache (and so a read) holds.
-  async writeSealed(id, record, data, blockHash) {
+  async writeSealed(id, record, data, blockHash, kv = null) {
     await this.#changing(id);
     const stored = { data: record, meta: null, encrypted: true, timestamp: Date.now(), block: blockHash };
-    await this.#db.write({ records: [{ id, stored }] });
+    const rows = [{ id, stored }];
+    await this.#db.write(kv === null ? { records: rows } : { records: rows, kv });
     await this.#drop(id, new Set(), 0);
     this.remember(id, { data, meta: null, encrypted: true, block: blockHash });
     this.#catalog.put(id, { type: data?.$type, v: null, encrypted: true });

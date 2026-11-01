@@ -87,6 +87,13 @@ test('IndexedDB engine', async (t) => {
       );
       assert.strictEqual(perTransaction, 2, 'fifty records: the same two');
       await database.close();
+      // With the chain on, the block and its tail ride in the landing's write set: still two.
+      const chained = await createDatabase({ path: '/chained', engine, logger: false, defer: 0, lock: false });
+      await chained.insert({ title: 'warm' });
+      const withChain = await transactions(() => chained.insert({ title: 'x' }));
+      assert.strictEqual(withChain, 2, 'the chain block and its tail ride in the landing');
+      assert.strictEqual(await chained.validate(), true);
+      await chained.close();
       await engine.close();
     },
   );

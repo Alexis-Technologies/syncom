@@ -83,8 +83,8 @@ sequenceDiagram
   C->>C: sign the op (Ed25519) — unless signatures: false; on the thread pool when writes queue behind
   C->>L: append(op) — the seq reserved, the entry in flight; the queue moves on
   L->>L: the group's file — every op appended meanwhile — written; the ticket resolves
-  C->>B: addBlock(hash of the record) — unless chain: false
-  C->>E: write the record file, put its catalog row
+  C->>B: block(hash of the record) — unless chain: false
+  C->>E: one write set — the block and its tail, the record, its catalog row
   C->>L: applied(seq)
   C->>C: afterWrite hook · refresh live Records · commit event
   C-->>S: change(op)
