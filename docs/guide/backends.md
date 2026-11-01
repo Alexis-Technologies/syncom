@@ -313,7 +313,9 @@ the ops it writes.
 Each ciphertext is bound to its file name (the additional data of
 AES-GCM): a file copied over another one of the store — one record's over
 another's — does not decrypt. The directory is not bound, so a store moved
-elsewhere opens. What the wrapper does not hide or prevent: the names of the
+elsewhere opens; under an engine (`atRest(engine)`) the database's path is bound
+too, so a ciphertext moved to the same place in another database of the engine
+— one key serves every path — does not open. What the wrapper does not hide or prevent: the names of the
 files (record ids, tag names, the log's seqs) and their sizes, and an older
 copy of a file put back in its place — that is a backup restored, as far as
 the key can tell.

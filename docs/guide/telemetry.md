@@ -271,6 +271,7 @@ alert to key on:
 | warn | `log.segment.unscrubbed` | a purge reached a sealed segment that does not read whole (`file`, `id`, `reason`), so it was not written again: the payload stays in it until the segment is compacted away |
 | warn | `log.row.unreadable` | a row of the log in a native engine (SQLite) did not parse at open (`seq`): counted in `corrupt`, left out, `lost` — what the log holds is less than it held |
 | warn | `log.meta.unreadable` | the log's index or segments row in a native engine (SQLite) did not parse at open (`key`): read as none — the log replays from what its rows hold |
+| warn | `catalog.row.unreadable` | a row of the catalog table in a native engine (SQLite) did not parse at open (`id`): the catalog is read as none and rebuilt from the records, every row replaced |
 | info | `log.corrupt.scrubbed` | a purge removed an evidence copy under `log/corrupt/` that named the id (`file`, `id`): the copy does not read, so nothing could be stripped from it |
 | warn | `editor.binding` | an editor binding (`@alexify/syncom/editor`) failed to send a delta or to reload, or its editor refused a peer's change, and has no `onError`; it reloads the editor from the field (five in a row stop it: `onStop`) |
 | warn | `editor.cursors`, `editor.undo` | an editor adapter (ProseMirror, CodeMirror) failed to show the room's cursors or publish its selection, or an undo/redo command failed, and has no `onError` |

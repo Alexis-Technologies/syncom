@@ -5,8 +5,10 @@
 // text (node.json, the lock, the keys, the catalog), every entry of the op
 // log and the log's index — under the one key of src/encryption/encryption.js
 // (AES-256-GCM, `enc1:`), bound to its place the way a file is bound to its
-// name: `data/<id>.json`, `data/<piece>`, `tags/<tag>/data/<id>.json`,
-// `<ns>/<key>`, `log/<seq>`, `log/index.json`. The keys stay in the clear
+// name — and to its database: `<path.length>:<path>/` then `data/<id>.json`,
+// `data/<piece>`, `tags/<tag>/data/<id>.json`, `<ns>/<key>`, `log/<seq>`,
+// `log/index.json` — so a ciphertext opens nowhere else, not at the same
+// place in another database of the engine. The keys stay in the clear
 // — an id, a seq, a tag's name, a kv key — and so does the log index's
 // `floor`, which the medium reads to tell a sealed seq from an open one; a
 // native engine keeps no index of its own over it (`indexes: false` — the
@@ -18,8 +20,6 @@
 
 const { checkEngine, capabilitiesOf } = require('../engine.js');
 const { SyncomError } = require('../errors.js');
-
-const INDEX = 'log/index.json';
 
 const unreadable = (id) =>
   new SyncomError('INTEGRITY', `Storage record ${id} is unreadable`, { id, cause: null, reason: 'unreadable' });
@@ -36,11 +36,20 @@ const parsed = (id, text) => {
   return value;
 };
 
-const recordKey = (id) => `data/${id}.json`;
-const pieceKey = (name) => `data/${name}`;
-const copyKey = (tag, id) => `tags/${tag}/data/${id}.json`;
-const kvKey = (ns, key) => (ns === '' ? key : `${ns}/${key}`);
-const logKey = (seq) => `log/${seq}`;
+// A value's place: the database's path, length-prefixed, then the file the
+// files engine would keep it in — so a ciphertext opens at its place in its
+// database and nowhere else, not at the same place in another database.
+const placeOf = (path) => {
+  const at = `${path.length}:${path}/`;
+  return {
+    record: (id) => `${at}data/${id}.json`,
+    piece: (name) => `${at}data/${name}`,
+    copy: (tag, id) => `${at}tags/${tag}/data/${id}.json`,
+    kv: (ns, key) => (ns === '' ? `${at}${key}` : `${at}${ns}/${key}`),
+    log: (seq) => `${at}log/${seq}`,
+    index: `${at}log/index.json`,
+  };
+};
 
 /**
  * An engine whose every value is encrypted at rest under one key —
@@ -56,6 +65,14 @@ const atRestEngine = (engine, cipher) => {
   const capabilities = capabilitiesOf({ ...inner.capabilities, indexes: false });
 
   const openDb = (db) => {
+    const {
+      record: recordKey,
+      piece: pieceKey,
+      copy: copyKey,
+      kv: kvKey,
+      log: logKey,
+      index: INDEX,
+    } = placeOf(db.path);
     const kv = {
       get: async (ns, key) => {
         const text = await db.kv.get(ns, key);

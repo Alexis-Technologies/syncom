@@ -148,6 +148,10 @@ class Catalog {
   #unique = new Map();
   #watchers = new Map();
   #dirty = 0;
+  // The rows put since the last save, by id (null: removed), and whether the
+  // rows store holds this catalog's rows already — what a row store writes.
+  #changed = new Map();
+  #loaded = false;
   #sorted = null;
   #sortedIds = new Map();
   #text;
@@ -156,8 +160,10 @@ class Catalog {
 
   constructor({ store = null, rows = null, fsi = null, path = null, entities, text = new Map(), logger = null }) {
     // A text store given (a kv namespace), a rows store (a native engine's:
-    // `load()` → `{ indexes, stamp, rows }` | null, `save(indexes, stamp, rows)`,
-    // the rows kept as they are), else the `index` directory of an fsi at `path`.
+    // `load()` → `{ indexes, stamp, rows }` | null, `save(indexes, stamp, { all,
+    // changed, whole })` — the rows kept as they are, or a row at a time: `all()`
+    // every row, `changed` the ids put since the last save, `whole` when the
+    // store holds none of this catalog's rows), else the `index` directory of an fsi at `path`.
     this.#rowStore = rows;
     this.#store = store ?? (rows === null ? fsiNamespace(fsi, `${path}/index`) : null);
     this.#text = text;
@@ -313,6 +319,7 @@ class Catalog {
     }
     this.#remove(id);
     this.#dirty++;
+    this.#changed.set(id, row);
     if (before !== null) this.#wake(before, true);
     if (!gone && type !== null && type !== before) this.#wake(type, true);
     if (row !== null) this.#insert(id, row);
@@ -487,10 +494,12 @@ class Catalog {
 
   /** Takes rows as `rows()` hands them out — a copy of another catalog, under the same definitions. */
   adopt(rows) {
+    this.#loaded = false;
     for (const [id, row] of rows) {
       this.#remove(id);
       this.#insert(id, row);
       this.#dirty++;
+      this.#changed.set(id, row);
     }
   }
 
@@ -549,13 +558,24 @@ class Catalog {
       this.#insert(id, row);
     }
     this.#dirty = 0;
+    this.#changed.clear();
+    this.#loaded = true;
     return { stamp: saved.stamp };
   }
 
   async save(stamp) {
     if (this.#rowStore !== null) {
       const saved = this.#dirty;
-      await this.#rowStore.save(this.#indexKey, stamp, this.rows());
+      const changed = this.#changed;
+      this.#changed = new Map();
+      try {
+        await this.#rowStore.save(this.#indexKey, stamp, { all: () => this.rows(), changed, whole: !this.#loaded });
+      } catch (error) {
+        // What this save carried is still to save: back under what changed since.
+        for (const [id, row] of changed) if (!this.#changed.has(id)) this.#changed.set(id, row);
+        throw error;
+      }
+      this.#loaded = true;
       this.#dirty -= saved;
       return;
     }

@@ -264,6 +264,44 @@ test('SQLite engine', async (t) => {
     },
   );
 
+  await t.test(
+    'the catalog is rows of its own table: a save writes what changed, a reopen reads them, other indexes replace them',
+    async () => {
+      const database = new DatabaseSync(':memory:');
+      const engine = sqliteEngine({ database });
+      const schema = { entities: { Note: { index: ['kind'] } } };
+      const options = { path: 'cat', engine, logger: false, defer: 0, lock: false, chain: false, schema };
+      const count = () => database.prepare("SELECT count(*) AS n FROM catalog WHERE p = 'cat'").get().n;
+      const rowOf = (id) =>
+        JSON.parse(database.prepare("SELECT row FROM catalog WHERE p = 'cat' AND id = ?").get(id).row);
+      const db = await createDatabase(options);
+      const ids = [];
+      for (let i = 0; i < 5; i++) ids.push(await db.insert({ $type: 'Note', kind: i % 2 ? 'a' : 'b' }));
+      await db.close();
+      assert.strictEqual(count(), 5, 'a row a record');
+      assert.strictEqual(rowOf(ids[1]).fields.kind, 'a');
+      const again = await createDatabase(options);
+      assert.strictEqual((await again.Note.select({ kind: 'a' }).fetch()).length, 2, 'read from the rows, not rebuilt');
+      await again.update(ids[1], { kind: 'b' });
+      await again.delete(ids[0]);
+      await again.close();
+      assert.strictEqual(rowOf(ids[1]).fields.kind, 'b', 'the row that changed was written');
+      assert.strictEqual(rowOf(ids[0]).gone, true, 'a tombstone is a row flagged gone');
+      assert.strictEqual(count(), 5);
+      const other = { ...options, schema: { entities: { Note: { index: ['kind', 'title'] } } } };
+      const rebuilt = await createDatabase(other);
+      await rebuilt.insert({ $type: 'Note', kind: 'c', title: 't' });
+      await rebuilt.close();
+      assert.strictEqual(count(), 6, 'other indexes: every row replaced, none left over');
+      assert.deepStrictEqual(
+        JSON.parse(database.prepare("SELECT value FROM meta WHERE p = 'cat' AND key = 'catalog'").get().value)
+          .indexes !== undefined,
+        true,
+      );
+      database.close();
+    },
+  );
+
   await t.test('a connection given is used as it is, set durable on request, and never closed', async () => {
     const database = new DatabaseSync(':memory:');
     database.exec('PRAGMA synchronous = NORMAL');

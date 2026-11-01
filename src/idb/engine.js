@@ -84,7 +84,12 @@ const idbEngine = ({
   }
   if (!KeyRange || typeof KeyRange.bound !== 'function') throw new TypeError('idbEngine: no IDBKeyRange — pass one');
   const broadcasts = typeof Channel === 'function';
-  const capabilities = capabilitiesOf({ atomicBatch: true, exclusiveCreate: true, changeStream: broadcasts });
+  const capabilities = capabilitiesOf({
+    atomicBatch: true,
+    exclusiveCreate: true,
+    indexes: true,
+    changeStream: broadcasts,
+  });
   const token = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
   let opening = null;
   let bus = null;
@@ -264,11 +269,11 @@ const idbEngine = ({
     const catalog = {
       load: () =>
         transaction(['meta'], 'readonly', async ({ meta: s }) => (await request(s.get([p, 'catalog'])))?.value ?? null),
-      save: (indexes, stamp, rows) =>
+      save: (indexes, stamp, { all }) =>
         transaction(
           ['meta'],
           'readwrite',
-          ({ meta: s }) => void s.put({ p, key: 'catalog', value: { indexes, stamp, rows } }),
+          ({ meta: s }) => void s.put({ p, key: 'catalog', value: { indexes, stamp, rows: all() } }),
         ),
     };
 

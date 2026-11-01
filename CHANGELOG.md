@@ -1146,6 +1146,17 @@ and one `commit` event, not one per call.
 
 ### Fixed
 
+- **The catalog was one document on SQLite and MongoDB; an at-rest ciphertext opened in any database of the engine.**
+  Without a rows store of the engine's, the catalog went to `kv` as ONE text — on MongoDB one document, past 16 MiB
+  every save fails and every open rebuilds; on SQLite one row rewritten whole every few thousand changes (review №5,
+  SC-1/SC-2). SQLite keeps the catalog as a row per record in a `catalog` table now: `Catalog` tracks the ids put since
+  the last save and a native rows store takes `{ all, changed, whole }` — a save writes what changed (memory and
+  IndexedDB keep the rows as they were; `capabilities.indexes` says so on all three). `atRest(engine)` sealed a value
+  to its place alone (`data/<id>.json`), under one key for every path — a ciphertext copied to the same place in
+  another database of the engine opened there (S-6); the database's path is in the additional data now (the at-rest
+  format over an engine changes; nothing is published). What the place does not bind is the version: an older
+  ciphertext of the same place opens — the chain tells a record rolled back, nothing tells a kv text or a log entry
+  (S-4, documented).
 - **A landing was more than its write set; a failed COMMIT wedged SQLite; a throw inside an IndexedDB write set kept
   half of it.** The pieces a text left behind were removed one call at a time after the write set, and a tag's copy of
   the record put one call before it — neither atomic with the set, two extra transactions per landing on a native

@@ -17,9 +17,13 @@ src/encryption/at-rest-engine.js  atRestEngine(engine, cipher): the engine contr
 - **Encrypted records are local.** `{ encrypted: true }` seals a record for
   this node's key; it produces no op and is excluded from snapshots. Do not
   route an encrypted entry through `applyOp`.
-- **At rest, a value is bound to its place.** `atRest` seals with the place as AES-GCM's additional data — a file's
-  name, or under an engine `data/<id>.json`, `data/<piece>`, `tags/<tag>/data/<id>.json`, `<ns>/<key>`, `log/<seq>`,
-  `log/index.json` — so a ciphertext copied over another's place does not open. The keys (an id, a seq, a tag, a kv
+- **At rest, a value is bound to its place — and, under an engine, to its database.** `atRest` seals with the place
+  as AES-GCM's additional data — a file's name, or under an engine the database's path, length-prefixed
+  (`<n>:<path>/`), then `data/<id>.json`, `data/<piece>`, `tags/<tag>/data/<id>.json`, `<ns>/<key>`, `log/<seq>`,
+  `log/index.json` — so a ciphertext copied over another's place, or to the same place in another database of the
+  engine (one key serves every path), does not open. What the place does not bind is the VERSION: an older
+  ciphertext of the same place opens — the chain (`validate()`) tells a record rolled back, nothing tells a kv text
+  or a log entry; say so where at-rest is promised. The keys (an id, a seq, a tag, a kv
   key) and the log index's `floor` stay in the clear: a medium tells a sealed seq from an open one by the floor. The
   engine wrapper writes a record as `text` and reads it through `raw` (a medium keeps a text that is no JSON as it
   is); the files engine is never wrapped this way — its journal reads the ops it writes — but at its backend.

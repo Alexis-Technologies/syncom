@@ -108,6 +108,30 @@ test('an engine encrypted at rest', async (t) => {
     },
   );
 
+  await t.test('a ciphertext moved to the same place in another database does not open', async () => {
+    const inner = memoryEngine();
+    const engine = atRest(inner, { key: KEY });
+    const base = { engine, logger: false, defer: 0, lock: false };
+    const a = await createDatabase({ ...base, path: 'tenant-a' });
+    const id = await a.insert({ owner: 'a', balance: 100 });
+    await a.close();
+    const b = await createDatabase({ ...base, path: 'tenant-b' });
+    await b.insert({ owner: 'b' });
+    await b.close();
+    // The record's ciphertext of tenant-a over the same id in tenant-b: bound to its database, it does not open there.
+    const rawA = await inner.open('tenant-a');
+    const rawB = await inner.open('tenant-b');
+    await rawB.write({ records: [{ id, text: await rawA.records.raw(id) }] });
+    const wrappedB = await engine.open('tenant-b');
+    await assert.rejects(wrappedB.records.get(id), { code: 'DECRYPT_FAILED' });
+    const wrappedA = await engine.open('tenant-a');
+    assert.deepStrictEqual((await wrappedA.records.get(id)).data, { owner: 'a', balance: 100 });
+    await wrappedA.close();
+    await wrappedB.close();
+    await rawA.close();
+    await rawB.close();
+  });
+
   await t.test('a scrub rewrites the sealed entries; a reopen replays the unsealed tail', async () => {
     const inner = memoryEngine();
     const engine = atRest(inner, { key: KEY });

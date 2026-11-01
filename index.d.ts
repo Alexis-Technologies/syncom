@@ -86,10 +86,15 @@ export interface EngineWriteSet {
   records?: readonly EngineWriteRecord[];
   remove?: readonly string[];
   kv?: {
-    put?: ReadonlyArray<readonly [ns: string, key: string, value: string, options?: { atomic?: boolean; mode?: number }]>;
+    put?: ReadonlyArray<
+      readonly [ns: string, key: string, value: string, options?: { atomic?: boolean; mode?: number }]
+    >;
     remove?: ReadonlyArray<readonly [ns: string, key: string]>;
   };
-  copies?: { put?: ReadonlyArray<readonly [tag: string, id: string, text: string]>; remove?: ReadonlyArray<readonly [tag: string, id: string]> };
+  copies?: {
+    put?: ReadonlyArray<readonly [tag: string, id: string, text: string]>;
+    remove?: ReadonlyArray<readonly [tag: string, id: string]>;
+  };
 }
 
 /** A database as an engine opens it: a set of stores over one `path`. */
@@ -101,10 +106,18 @@ export interface EngineDb {
    * `LOCKED` while another instance holds it; `onLost` hears once when it goes to another instance.
    */
   lock?(options: LockOptions & { onLost?: (error: Error) => void }): Promise<{ release(): Promise<void> }>;
-  /** The catalog's rows kept as they are by a native engine (memory, IndexedDB); the core saves to `kv` otherwise. */
+  /**
+   * The catalog's rows kept by a native engine — as they are (memory, IndexedDB) or a row at a time (SQLite: `changed`
+   * the ids put since the last save, `null` a row removed; `whole` when the store holds none of this catalog's rows and
+   * `all()` is every row); the core saves to `kv` otherwise.
+   */
   readonly catalog?: {
     load(): Promise<{ indexes: unknown; stamp: unknown; rows: unknown } | null>;
-    save(indexes: unknown, stamp: unknown, rows: unknown): Promise<void>;
+    save(
+      indexes: unknown,
+      stamp: unknown,
+      rows: { all(): Array<[string, unknown]>; changed: Map<string, unknown>; whole: boolean },
+    ): Promise<void>;
   };
   /**
    * What another instance wrote over the same database, where `capabilities.changeStream` — `{ records: ids }` or
@@ -137,7 +150,10 @@ export interface EngineDb {
     ids(options?: { after?: string | null; limit?: number }): Promise<string[]>;
   };
   /** The runs of a large block beside its record, by the name the record's meta holds. */
-  readonly pieces: { get(id: string, name: string): Promise<string | null>; remove(id: string, name: string): Promise<void> };
+  readonly pieces: {
+    get(id: string, name: string): Promise<string | null>;
+    remove(id: string, name: string): Promise<void>;
+  };
   /** A tag's copies of records, by tag and id. */
   readonly copies: {
     get(tag: string, id: string): Promise<string | null>;
@@ -2026,7 +2042,12 @@ export interface TextHandle {
   /** Inserts an embed slot holding `marker` at `index` — an inline embed unless `isEmbed` says otherwise. */
   insertEmbed(
     index: number,
-    marker: { type: string; parents?: readonly string[]; attrs?: { [name: string]: unknown }; isEmbed?: boolean } | null,
+    marker: {
+      type: string;
+      parents?: readonly string[];
+      attrs?: { [name: string]: unknown };
+      isEmbed?: boolean;
+    } | null,
     attributes?: Record<string, unknown>,
   ): void;
   delete(index: number, count: number): void;

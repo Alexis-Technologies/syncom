@@ -20,13 +20,14 @@
 //   pieces   (p, id, name)      text — the runs of a large block, by the name the record's meta holds
 //   copies   (p, tag, id)       text — a tag's copies of records
 //   log      (p, seq)           first, entry — an entry of the op log (JSON) and the first seq of its group
-//   meta     (p, key)           value — the log's index and sealed segments
+//   meta     (p, key)           value — the log's index and sealed segments, the catalog's indexes and stamp
+//   catalog  (p, id)            row — the catalog's row of a record (JSON), a row at a time
 
 const { capabilitiesOf } = require('../engine.js');
 const { SyncomError } = require('../errors.js');
 
 const MEMORY = ':memory:';
-const TABLES = ['kv', 'records', 'pieces', 'copies', 'log', 'meta'];
+const TABLES = ['kv', 'records', 'pieces', 'copies', 'log', 'meta', 'catalog'];
 const SCHEMA = [
   'CREATE TABLE IF NOT EXISTS kv (p TEXT NOT NULL, ns TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (p, ns, key)) WITHOUT ROWID',
   'CREATE TABLE IF NOT EXISTS records (p TEXT NOT NULL, id TEXT NOT NULL, text TEXT NOT NULL, PRIMARY KEY (p, id)) WITHOUT ROWID',
@@ -34,6 +35,7 @@ const SCHEMA = [
   'CREATE TABLE IF NOT EXISTS copies (p TEXT NOT NULL, tag TEXT NOT NULL, id TEXT NOT NULL, text TEXT NOT NULL, PRIMARY KEY (p, tag, id)) WITHOUT ROWID',
   'CREATE TABLE IF NOT EXISTS log (p TEXT NOT NULL, seq INTEGER NOT NULL, first INTEGER NOT NULL, entry TEXT NOT NULL, PRIMARY KEY (p, seq)) WITHOUT ROWID',
   'CREATE TABLE IF NOT EXISTS meta (p TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (p, key)) WITHOUT ROWID',
+  'CREATE TABLE IF NOT EXISTS catalog (p TEXT NOT NULL, id TEXT NOT NULL, row TEXT NOT NULL, PRIMARY KEY (p, id)) WITHOUT ROWID',
 ];
 const SQL = {
   kvGet: 'SELECT value FROM kv WHERE p = ? AND ns = ? AND key = ?',
@@ -59,6 +61,10 @@ const SQL = {
   logDrop: 'DELETE FROM log WHERE p = ? AND seq >= ? AND seq <= ?',
   metaGet: 'SELECT value FROM meta WHERE p = ? AND key = ?',
   metaPut: 'INSERT OR REPLACE INTO meta (p, key, value) VALUES (?, ?, ?)',
+  catalogAll: 'SELECT id, row FROM catalog WHERE p = ?',
+  catalogPut: 'INSERT OR REPLACE INTO catalog (p, id, row) VALUES (?, ?, ?)',
+  catalogRemove: 'DELETE FROM catalog WHERE p = ? AND id = ?',
+  catalogDrop: 'DELETE FROM catalog WHERE p = ?',
 };
 const BEGIN = 'BEGIN IMMEDIATE';
 const COMMIT = 'COMMIT';
@@ -101,7 +107,7 @@ const pragmas = (file, full) => {
 const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable = false } = {}) => {
   if (typeof file !== 'string' || file.length === 0) throw new TypeError('sqliteEngine: file is a path or ":memory:"');
   if (driver !== null && typeof driver?.open !== 'function') throw new TypeError('sqliteEngine: driver has no open()');
-  const capabilities = capabilitiesOf({ atomicBatch: true, exclusiveCreate: true });
+  const capabilities = capabilitiesOf({ atomicBatch: true, exclusiveCreate: true, indexes: true });
   let connection = null;
   let opening = null;
   let statements = new Map();
@@ -448,7 +454,59 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
       });
     };
 
-    return Object.freeze({ path: p, capabilities, kv, records, pieces, copies, log, write, close: async () => {} });
+    // The catalog's rows, a row of the catalog table each — a save writes the rows
+    // that changed and the indexes and stamp into meta, so a catalog grows no
+    // document and no text: nothing here is ever the whole catalog at once.
+    const catalog = {
+      load: () =>
+        read(async (tx) => {
+          const head = await meta(tx, 'catalog');
+          if (head === null || typeof head !== 'object') return null;
+          const rows = await tx.all(SQL.catalogAll, [p]);
+          const out = [];
+          for (let i = 0; i < rows.length; i++) {
+            let row;
+            try {
+              row = JSON.parse(rows[i].row);
+            } catch (error) {
+              // A row that does not read: no catalog — the core rebuilds it from the records, and this save replaces every row.
+              logger?.warn?.({ event: 'catalog.row.unreadable', id: rows[i].id, err: error });
+              return null;
+            }
+            out.push([rows[i].id, row]);
+          }
+          return { indexes: head.indexes, stamp: head.stamp, rows: out };
+        }),
+      save: (indexes, stamp, { all, changed, whole }) =>
+        transaction(async (tx) => {
+          if (whole) {
+            await tx.run(SQL.catalogDrop, [p]);
+            const rows = all();
+            for (let i = 0; i < rows.length; i++) {
+              await tx.run(SQL.catalogPut, [p, rows[i][0], JSON.stringify(rows[i][1])]);
+            }
+          } else {
+            for (const [id, row] of changed) {
+              if (row === null) await tx.run(SQL.catalogRemove, [p, id]);
+              else await tx.run(SQL.catalogPut, [p, id, JSON.stringify(row)]);
+            }
+          }
+          await tx.run(SQL.metaPut, [p, 'catalog', JSON.stringify({ indexes, stamp })]);
+        }),
+    };
+
+    return Object.freeze({
+      path: p,
+      capabilities,
+      kv,
+      records,
+      pieces,
+      copies,
+      log,
+      catalog,
+      write,
+      close: async () => {},
+    });
   };
 
   return Object.freeze({

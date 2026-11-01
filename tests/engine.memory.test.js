@@ -14,19 +14,22 @@ const vroot = async () => `/mem-${++n}`;
 test('memory engine', async (t) => {
   await runEngineTests(t, { create: memoryEngine, root: vroot });
 
-  await t.test('capabilities: atomic write sets, exclusive create, no indexes; paths lists the databases', async () => {
-    const engine = memoryEngine();
-    assert.strictEqual(engine.name, 'memory');
-    assert.strictEqual(engine.capabilities.atomicBatch, true);
-    assert.strictEqual(engine.capabilities.exclusiveCreate, true);
-    assert.strictEqual(engine.capabilities.indexes, false);
-    assert.deepStrictEqual(engine.paths, []);
-    await engine.open('b');
-    await engine.open('a');
-    assert.deepStrictEqual(engine.paths, ['a', 'b']);
-    await engine.remove('b');
-    assert.deepStrictEqual(engine.paths, ['a']);
-  });
+  await t.test(
+    'capabilities: atomic write sets, exclusive create, the catalog’s rows; paths lists the databases',
+    async () => {
+      const engine = memoryEngine();
+      assert.strictEqual(engine.name, 'memory');
+      assert.strictEqual(engine.capabilities.atomicBatch, true);
+      assert.strictEqual(engine.capabilities.exclusiveCreate, true);
+      assert.strictEqual(engine.capabilities.indexes, true, 'the catalog’s rows are the engine’s');
+      assert.deepStrictEqual(engine.paths, []);
+      await engine.open('b');
+      await engine.open('a');
+      assert.deepStrictEqual(engine.paths, ['a', 'b']);
+      await engine.remove('b');
+      assert.deepStrictEqual(engine.paths, ['a']);
+    },
+  );
 
   await t.test('a record is kept as the object it was handed; raw() stringifies on demand', async () => {
     const db = await memoryEngine().open('objects');

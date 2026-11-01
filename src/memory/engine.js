@@ -12,7 +12,7 @@
 const { capabilitiesOf } = require('../engine.js');
 const { SyncomError } = require('../errors.js');
 
-const CAPABILITIES = capabilitiesOf({ atomicBatch: true, exclusiveCreate: true, indexes: false });
+const CAPABILITIES = capabilitiesOf({ atomicBatch: true, exclusiveCreate: true, indexes: true });
 
 const exists = (key) => Object.assign(new Error(`EEXIST: key already exists, ${key}`), { code: 'EEXIST' });
 
@@ -242,8 +242,8 @@ const openDb = (path) => {
     async load() {
       return catalog;
     },
-    async save(indexes, stamp, rows) {
-      catalog = { indexes, stamp, rows };
+    async save(indexes, stamp, { all }) {
+      catalog = { indexes, stamp, rows: all() };
     },
   };
   // One write set, applied with nothing awaited in between: whole, or — a
