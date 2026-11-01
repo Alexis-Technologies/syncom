@@ -213,7 +213,8 @@ See [Versions and history](/guide/versions).
 
 ## On disk
 
-A storage is one directory, through whichever `fsi` it was given:
+A database stores every byte through its engine (`createDatabase({ engine })`, [Engines](/guide/backends#engines)).
+Under the files engine — the default, over whichever `fsi` it was given — it is one directory:
 
 ```
 data/

@@ -76,6 +76,8 @@ export interface EngineWriteRecord {
   id: string;
   stored?: StoredRecord;
   text?: string;
+  /** The catalog's row of the record as this write leaves it — for an engine with indexes of its own; absent when the row did not change. */
+  row?: { type: string | undefined; v: number | null; encrypted?: boolean; gone?: boolean; data?: unknown };
   pieces?: { put?: ReadonlyArray<readonly [name: string, text: string]>; remove?: readonly string[] };
 }
 

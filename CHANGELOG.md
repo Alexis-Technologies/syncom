@@ -36,6 +36,20 @@ and one `commit` event, not one per call.
 
 ### Added
 
+- **Storage engines: `createDatabase({ engine })`.** Every byte a database persists goes through
+  its engine — a factory of databases, each a set of stores: `kv` by namespace and key (`node.json`,
+  `schema.json`, `tags.json`, the keys, the lock, the chain's blocks, the registry, a catalog),
+  `records` by id with `raw`, `getMany` and `ids` in id order, `pieces`, a tag's `copies`, `log`
+  (the op log's medium) and `write(batch)` — one write set per batch of records, atomic where the
+  medium has transactions. `filesEngine(fsi)` (`src/files/`) is the engine every backend becomes,
+  today's layout byte for byte; `createDatabase({ fsi })` builds it, so nothing on disk changes.
+  `isEngine`, `storage.engine`, `storage.fsi` (`null` under a native engine); `capabilities` say what a
+  medium can do; `tests/suites/engine.js` is the contract as a test, run over every backend that
+  ships. The log's medium is a store too (`src/files/journal.js`: the journals, segments, `corrupt/`
+  and `index.json` behind `load`/`append`/`seal`/`sealed`/`segments`/`drop`/`saveIndex`/`scrub`;
+  `new OpLog(path, { store })`), and `loadKeys(ns, { kv })`, `loadSigningKeys(ns, { kv })`,
+  `new Blockchain(path, { kv })` take a kv beside an fsi. A plugin's `setup(ctx)` and `open(ctx)`
+  carry `db`. See [Engines](https://syncomjs.vercel.app/guide/backends#engines).
 - **A synchronous editor's handle on a text: `storage.openText(id, key, { window, actor, source })`**
   (the `text` plugin's). `insert`, `insertEmbed`, `delete`, `format` and `applyDelta` edit at once
   over the handle's reading — the field as announced, its edits on top — and `toString()`,

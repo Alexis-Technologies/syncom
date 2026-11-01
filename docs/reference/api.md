@@ -634,7 +634,22 @@ without the plugin (duck-typed: `enabled`, `withSpan`); nothing usable is the
 frozen disabled writer, whose `withSpan` still runs its callback. Without the
 plugin an api or a tracer given to `createDatabase()` is `PLUGIN_MISSING`.
 
-## Backends
+## Engines and backends
+
+An **engine** (`Engine`) is a factory of databases: `name`, `capabilities`
+(`EngineCapabilities`: `atomicBatch`, `indexes`, `changeStream`,
+`exclusiveCreate`, `lock`, `shared`, `blobs`, `append`), `open(path, { logger,
+durable }?)` → `EngineDb` and `remove(path)`. An `EngineDb` is a set of stores —
+`kv` (`get/has/list/put/remove`, `create?` by namespace and key), `records`
+(`get/raw/has/getMany/ids`), `pieces` (`get/remove`), `copies`
+(`get/has/ids/put/remove/drop`), `log` (the op log's medium), `write(batch)` one
+write set (`EngineWriteSet`: records with their `row` and pieces, kv puts and
+removals, copies) and `close()`. `isEngine(value)` is the contract check;
+`filesEngine(fsi)` the engine every backend becomes — what `createDatabase({ fsi })`
+builds, today's layout byte for byte. `createDatabase({ engine })` opens through an
+engine; with `fsi` as well it is a `TypeError`. `storage.engine` is the engine,
+`storage.fsi` the files engine's backend (`null` under a native engine). The
+contract as a test is `tests/suites/engine.js`.
 
 A backend — an **fsi** — is five functions over "a directory and a file name":
 `read(dir, file)` → `Promise<string>`, `write(dir, file, content, options?)`
@@ -649,13 +664,13 @@ server, OPFS in the browser — as those five functions, and:
 
 | Export | Notes |
 | --- | --- |
-| `createDatabase({ fsi })` | Any object with the five functions; the storage, its log, chain, keys and registry all go through it. `storage.fsi` is what was given (wrapped when `durable`) |
+| `createDatabase({ fsi })` | Any object with the five functions, as `filesEngine(fsi)`; the storage, its log, chain, keys and registry all go through it. `storage.fsi` is what was given (wrapped when `durable`) |
 | `createDatabase({ durable: true })` | Every write is followed by the backend's `sync`; a backend without one (OPFS, memory) logs `durable.noop` at debug |
 | `create(dir, file, content)` *(optional)* | Exclusive create (`EEXIST` when the file is there) — `node:fs` and the memory backend have it; the directory lock uses it to make a race deterministic |
 | `isFsi(value)` | Whether `value` has the five functions |
 | `memory()` (`@alexify/syncom/memory`) | A backend in memory: `size`, `dump()`, the exclusive `create`; two storages opened over one share it |
 | `layered(layers, { write, fill, queue }?)` (`@alexify/syncom/layered`) | One backend over several: a read is the first hit top down, filled upward; a write lands on every layer in order — `'through'` (default) or `'back'` from a queue the top answers ahead of; `flush()`, `close()`, `pending`, `layers`; `create` is exclusive across the layers — see [Backends](../guide/backends#layers) |
-| `new OpLog(base, { fsi })`, `loadKeys(base, { fsi })` (`/encryption`), `loadSigningKeys(base, { fsi })` (`/signing`), `new Blockchain(base, { fsi })` (`/chain`) | The pieces take the backend too |
+| `new OpLog(base, { fsi \| store })`, `loadKeys(base, { fsi \| kv })` (`/encryption`), `loadSigningKeys(base, { fsi \| kv })` (`/signing`), `new Blockchain(base, { fsi \| kv })` (`/chain`) | The pieces take the backend too — or a store of an engine's database: the log's `store` (`db.log`), a `kv` (the `keys` and `blockchain` namespaces) |
 | `atRest(fsi, options)` (`/encryption`) | A wrapper: every file through it is ciphertext under one key — see [Encryption](#encryption-subpath) |
 
 `@alexify/syncom/idb` is the IndexedDB backend: `createIdbFsi({ name, store,
@@ -685,8 +700,11 @@ host that lacks one of its own (`KINDS_MISMATCH`).
 A plugin that is not a kind sets the core up before the log opens — the
 identity (`signing`), the sealing of records (`encryption`), the chain
 (`chain`), the definitions of `schema`, the writer of `telemetry`, the
-cursor of `query`, the tags of `versions` — or once it is open (the manager
-of `sync`), and what the options ask for and no plugin provides is refused at
+cursor of `query`, the tags of `versions` — through `setup(ctx)`, where `ctx`
+carries `db` (the engine's database: its `kv` namespaces, `copies`), `fsi`
+(the files engine's backend, `null` under a native engine), `path`, `logger`,
+`options`, `settings`, `storage`, `hash` and `catalogOf(name)` — or once it is
+open (the manager of `sync`, whose `open(ctx)` has `db` too), and what the options ask for and no plugin provides is refused at
 `createDatabase()` the same way: `sync.signatures: 'require'` without `signing`,
 `chain: true` without `chain`, `encrypted: true` without `encryption` (and a
 per-call `{ encrypted: true }` at the call), `schema` or `validator` without

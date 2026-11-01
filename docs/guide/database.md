@@ -16,7 +16,8 @@ const storage = await createDatabase({ path: 'data' });
 | --- | --- | --- |
 | `path` | `'syncom'` | Directory (or OPFS path) holding keys, chain, data and peers |
 | `name` | — | Alias for `path` |
-| `fsi` | `node:fs` / OPFS | The backend — any object with `read`, `write`, `exists`, `remove`, `list` (see [Backends](../reference/api#backends)) |
+| `engine` | the files engine over `fsi` | The storage engine every byte goes through — `isEngine`; `filesEngine(fsi)` is what `fsi` builds; an engine and a backend together are a `TypeError` (see [Engines](./backends#engines)) |
+| `fsi` | `node:fs` / OPFS | The backend of the files engine — any object with `read`, `write`, `exists`, `remove`, `list` (see [Backends](../reference/api#backends)) |
 | `durable` | `false` | fsync after every write, where the backend can (`node:fs`); OPFS and memory are as durable as they are |
 | `defer` | `16` | Record files may lag the log by this many ms (a non-negative integer; `0` lands every write at once) — the writes of one record within the window coalesce into one file and one block, what typing into a text or a list wants; `flush()` lands them now ([see below](#when-a-record-file-lags-the-log)) |
 | `lock` | `'fail'` | One instance per directory: `'fail'` rejects a second `createDatabase()` (`code: 'LOCKED'`), `'wait'` waits, `false` leaves it to you ([see below](#one-instance-per-directory)) |

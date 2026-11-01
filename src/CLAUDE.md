@@ -19,8 +19,7 @@ src/store/store.js        the @alexify/syncom/store subpath — toStore/fromEven
                           React's useSyncExternalStore over a cursor, a Record, get(), a presence or an emitter — no requires
 src/inspect/inspect.js    the @alexify/syncom/inspect subpath — a record's anatomy (through the [SOURCE] seam's raw `entry`) and anonymize; requires compose, shape, symbols, hash only
 src/backend.js            the fsi contract (isFsi/checkFsi; sync, create and append optional), withSync — no requires
-src/engine.js             the engine contract (isEngine/checkEngine/checkEngineDb, capabilitiesOf, kvNamespace/fsiNamespace): a factory of
-                          databases, each a set of stores — kv, records, pieces, copies, log, write(batch) — no requires
+src/engine.js             the engine contract (isEngine/checkEngine/checkEngineDb, capabilitiesOf, kvNamespace/fsiNamespace) — no requires
 src/memory/memory.js      @alexify/syncom/memory — memory(), the backend in memory (a Map; size, dump, the exclusive create, append) — no requires
 src/layered/layered.js    @alexify/syncom/layered — layered([top, …, bottom], { write, fill, queue }): one fsi over several, a multi-level
                           cache; 'back' drains its queue before any lower layer is consulted; create is exclusive across layers
@@ -55,8 +54,7 @@ src/lazy.js               lazyField, putLazy, copyData, assignData — a field r
                           the data and the delta share, copied as it is — no requires
 src/options.js            normalizeStorageOptions — createDatabase()'s plain options checked and defaulted (lock, cache, chain, skew…)
 src/lock.js               exclusive open: Web Locks or the root namespace's lock.json, stale by pid or age — requires errors.js, engine.js only
-src/catalog.js            the record catalog: live ids, collections, indexed values; catalog.json in the `index` namespace (a tag's in
-                          its own) through a store — requires engine.js only
+src/catalog.js            the record catalog: live ids, collections, indexed values; catalog.json through a kv store — requires engine.js only
 src/database.js           Database — the facade: open sequence, the mutation queue, the public API, the `core` it lends;
                           `createDatabase()` (and the pre-rename aliases `Database`, `open`)
 src/defer.js              DeferredWindow — `createDatabase({ defer })`'s slots, timer and landing step — no requires
@@ -77,8 +75,7 @@ src/bootstrap.js          snapshot pages out, merge pages in, adoptVector — th
 src/errors.js             SyncomError, ValidationError, typed() — no requires
 src/ops.js                the record-level model: applyOp / mergeEntry / isAlive
 src/vector.js             clocks, version vectors, event ids
-src/log.js                OpLog — the persisted operation log over a store (the files engine's journal by default): seqs
-                          reserved at append, a group written durable at a time, the medium's files the store's
+src/log.js                OpLog — the persisted operation log over a store (the files journal by default): seqs reserved at append
 src/                      ships as-is — no build step, CommonJS, 'use strict'
 ```
 
@@ -537,10 +534,13 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   bug the lock exists for. `acquireLock` prefers `fsi.create` (exclusive) and
   falls back to write-then-read-back; `createDatabase({ lock: { ... } })` is the object
   form (`normalizeLock`).
-- **fsi is injected.** `createDatabase({ fsi })` reaches storage, log, chain, keys and
-  the registry as `this.#fsi` (or the `fsi` parameter of `loadKeys`); the
-  module-level `require('./fsi.js')` is only the default. A new `fsi.` call
-  on the module object is a bug — it bypasses the adapter the caller gave.
+- **The engine is injected.** `createDatabase({ engine })` is the medium of every byte (src/engine.js:
+  stores `kv`, `records`, `pieces`, `copies`, `log`, `write(batch)`); `createDatabase({ fsi })` is
+  `filesEngine(fsi)`, the platform's fsi the default. `#init` opens the engine BEFORE the lock (a key of
+  the root namespace); `#open` hands plugins `ctx.db` beside `ctx.fsi` (`null` under a native engine),
+  the log its `store`, `EntryStore` the database, a catalog a `kvNamespace`; the registry and a branch
+  reach it through `storage[DB]`. A new `fsi.`/`engine.` call on a module-level default is a bug. A
+  batch of records is ONE write set (`EntryStore.writeMany`), atomic where the engine has transactions.
 - **Hooks run inside the operation; events never do.** `src/hooks.js` (it
   requires errors.js only — it ships to the browser) is the whole mechanism. Database hooks
   go through `#hook()` inside the mutation queue, and `#run` refuses a write

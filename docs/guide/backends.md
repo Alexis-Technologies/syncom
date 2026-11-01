@@ -1,9 +1,58 @@
-# Backends
+# Engines and backends
 
-Everything a storage persists — records, the operation log, the chain, the
-keys, the peer registry, the catalog, the tags — goes through one small contract: an
-**fsi**, five functions over "a directory and a file name". The platform's
-own is the default; any other goes in through `createDatabase({ fsi })`.
+Everything a database persists — records, the operation log, the chain, the
+keys, the peer registry, the catalog, the tags — goes through its **engine**:
+a factory of databases, each a set of stores. `createDatabase({ engine })` takes
+one; without it the database opens through the **files engine** over a
+backend — an **fsi**, five functions over "a directory and a file name" — the
+platform's own by default, any other through `createDatabase({ fsi })`.
+
+## Engines
+
+```js
+const { createDatabase, filesEngine, isEngine } = require('@alexify/syncom');
+const { memory } = require('@alexify/syncom/memory');
+
+const engine = filesEngine(memory());                 // what createDatabase({ fsi: memory() }) builds
+const db = await createDatabase({ path: 'app', engine });
+db.engine === engine;                                  // the engine given
+db.fsi;                                                // the files engine's backend; null under a native engine
+isEngine(engine);                                      // true
+```
+
+An engine has a `name`, `capabilities`, `open(path, { logger, durable })` and
+`remove(path)` — every store of the database at `path`, gone. The database it
+opens is a set of stores:
+
+| Store | What it holds |
+| --- | --- |
+| `kv` | Small named texts by namespace (`''` the root) and key: `node.json`, `schema.json`, `tags.json`, `branch.json`, `lock.json`, the keys (`keys/`), the chain's blocks (`blockchain/`), the registry (`remote/`), a catalog (`index/`, a tag's `tags/<name>/index/`) — `get`, `has`, `list`, `put`, `remove`, and `create` (exclusive) where the medium can |
+| `records` | The records by id — `get(id)` the stored record as the engine holds it, `raw(id)` its text, `has`, `getMany`, `ids({ after, limit })` in id order, tombstones included |
+| `pieces` | The runs of a large text or list beside its record, by the name the record's meta holds |
+| `copies` | A tag's copies of records, by tag and id |
+| `log` | The op log's medium — what the log writes its groups, segments and index through (the files engine's journal) |
+| `write(batch)` | One write set: records (each with the pieces it makes and its catalog row), kv puts and removals, copies — whole or not at all where `capabilities.atomicBatch`, in order otherwise |
+
+`capabilities` says what the medium can do — `atomicBatch`, `indexes`,
+`changeStream`, `exclusiveCreate`, `lock`, `shared`, `blobs`, `append` — and
+the database asks nothing a medium lacks. The files engine declares what its
+backend has (`exclusiveCreate` with `create`, `append` with `append`) and
+nothing else: a file system has no transactions, so the log append stays the
+commit point and a landing that fails is `UNPERSISTED`, as it always was.
+A transaction of many records is one write set, a single write one.
+
+Every engine is held to the same contract as a test — `tests/suites/engine.js`,
+run over the files engine on every backend that ships. An engine of your own
+passes it or it is not one. An engine and a backend together
+(`createDatabase({ engine, fsi })`) is a `TypeError`: the files engine is how a
+backend becomes an engine.
+
+## Backends
+
+Under the files engine a kv namespace is a directory under the path and a key
+a file in it, a record `data/<id>.json`, its pieces `data/<id>~<n>.json`, a
+tag's copies `tags/<tag>/data/<id>.json`, the log its journals and segments
+under `log/`: the layout every database had before the engines, byte for byte.
 
 | Function | Meaning |
 | --- | --- |
@@ -17,8 +66,8 @@ own is the default; any other goes in through `createDatabase({ fsi })`.
 | `append(dir, name, content)` *(optional)* | Adds `content` at the end of the file, making the file and the directory when absent; what the op log writes with when present — a line per group of ops into one journal, not a file per group (`node:fs` and the memory backend have it) |
 
 `isFsi(value)` tells whether an object has the five. The check runs at
-`createDatabase()`, naming the method that is missing, and the storage never closes a
-backend it was handed — two storages may share one.
+`createDatabase()`, naming the method that is missing, and the database never closes a
+backend it was handed — two databases may share one (`filesEngine(fsi)` is one engine over it).
 
 ## What ships
 

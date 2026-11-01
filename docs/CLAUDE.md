@@ -25,8 +25,8 @@ event surface of `src/commit.js`, `src/apply.js`, `src/bootstrap.js`,
 `src/database.js` and `src/sync/manager.js`, `docs/guide/schema.md` with
 `src/schema/` (metaschema is the first-class example there; zod/ajv/JSON
 Schema are the alternatives), `docs/guide/query.md` with `src/query/cursor.js` and
-`src/catalog.js`, `docs/guide/backends.md` with `src/backend.js`, `src/lock.js`
-and the two `fsi` halves. The browser-only WebRTC recipes in
+`src/catalog.js`, `docs/guide/backends.md` with `src/engine.js`, `src/files/files.js`, `src/backend.js`,
+`src/lock.js` and the two `fsi` halves. The browser-only WebRTC recipes in
 `docs/guide/webrtc.md` follow wrpc's documented API and the raw-channel
 integration tests; they cannot be run here.
 
