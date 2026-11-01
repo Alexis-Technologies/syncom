@@ -8,7 +8,10 @@
 // touches — inside one session transaction under `transactions: true` (a
 // replica set), in order otherwise, where a set that fails midway is landed
 // again by the replay (every put is an upsert, so the second landing is the
-// first); a group of the op log is one bulk write; another process hears
+// first); a group of the op log is one bulk write that first wipes every
+// document at or past its first seq — what a group whose acknowledgement
+// was lost left behind — and `load` leaves out a newest group short of its
+// documents (never acknowledged: its seqs were taken back); another process hears
 // every write through a change stream (`db.changes`, a replica set too),
 // its own writes told apart by the writer's token on each document. Nothing
 // here opens or closes a connection: the client is the caller's. Requires
@@ -19,7 +22,7 @@
 //   records     [p, id]                 p, id, t, w — the record's JSON as the engine was handed it, the writer's token
 //   pieces      [p, id, name]           p, id, name, t — the runs of a large block
 //   copies      [p, tag, id]            p, tag, id, t — a tag's copies of records
-//   log         [p, seq]                p, seq, first, e, w — an entry of the op log (JSON), the first seq of its group
+//   log         [p, seq]                p, seq, first, last, e, w — an entry of the op log (JSON), the first and last seq of its group
 //   meta        [p, key]                p, key, v — the log's index and sealed segments
 //
 // A point read is `findOne({ _id })`; a range is the flat fields over an
@@ -228,32 +231,64 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
     };
     const metaPut = (key, value) => put(keyOf([p, key]), { p, key, v: JSON.stringify(value) });
 
-    // The op log's medium: a document per entry with the first seq of its
-    // group, the index and the sealed segments in the meta collection.
+    // The op log's medium: a document per entry with the first and last seq
+    // of its group, the index and the sealed segments in the meta collection.
     const log = (() => {
       let groups = [];
       let segments = [];
-      const firstOf = new Map();
+      // Seq → its group (`{ first, last }`, one object per group): what a scrub writes a document again with.
+      const groupOf = new Map();
       const sealedTo = () => (segments.length > 0 ? segments[segments.length - 1].to : null);
-      const row = (entry, first) =>
-        put(keyOf([p, entry.seq]), { p, seq: entry.seq, first, e: JSON.stringify(entry), w: writer });
+      const row = (entry, group) =>
+        put(keyOf([p, entry.seq]), {
+          p,
+          seq: entry.seq,
+          first: group.first,
+          last: group.last,
+          e: JSON.stringify(entry),
+          w: writer,
+        });
+      // Every document at or past `first`: what a group whose write failed
+      // after it landed left — its seqs were taken back and are this group's
+      // now. Nothing acknowledged sits there (a seq is handed out once per
+      // epoch), so the wipe is the group's first statement, and a best effort
+      // after a failure, before the next open could read the leftovers.
+      const from = (first) => ({ p, seq: { $gte: first } });
+      const wipeFrom = (first) => ({ deleteMany: { filter: from(first) } });
       return {
         journaled: false,
         async load() {
           const index = await meta('index');
           const saved = await meta('segments');
           segments = Array.isArray(saved) ? saved : [];
-          const docs = await many(c.log, { p }, { projection: { _id: 0, seq: 1, first: 1, e: 1 }, sort: { seq: 1 } });
-          const entries = [];
+          const docs = await many(
+            c.log,
+            { p },
+            { projection: { _id: 0, seq: 1, first: 1, last: 1, e: 1 }, sort: { seq: 1 } },
+          );
           const byFirst = new Map();
+          let newest = null;
           for (let i = 0; i < docs.length; i++) {
             const { seq, first } = docs[i];
-            entries.push(JSON.parse(docs[i].e));
-            firstOf.set(seq, first);
+            const last = typeof docs[i].last === 'number' ? docs[i].last : seq;
             let group = byFirst.get(first);
-            if (group === undefined) byFirst.set(first, (group = { first, last: seq, seqs: [] }));
+            if (group === undefined) byFirst.set(first, (group = { first, last, docs: [] }));
+            if (last > group.last) group.last = last;
             if (seq > group.last) group.last = seq;
-            group.seqs.push(seq);
+            group.docs.push(docs[i]);
+            if (newest === null || first > newest.first) newest = group;
+          }
+          // The newest group short of its documents was never acknowledged:
+          // its seqs were taken back and handed out again, and what it left
+          // is the next group's to wipe — nothing of it is a group.
+          if (newest !== null && newest.docs.length < newest.last - newest.first + 1) byFirst.delete(newest.first);
+          const entries = [];
+          for (const group of byFirst.values()) {
+            const held = { first: group.first, last: group.last };
+            for (let i = 0; i < group.docs.length; i++) {
+              entries.push(JSON.parse(group.docs[i].e));
+              groupOf.set(group.docs[i].seq, held);
+            }
           }
           const floor = index !== null ? index.floor : entries.length > 0 ? entries[0].seq : 1;
           const sealed = sealedTo() ?? floor - 1;
@@ -263,7 +298,9 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
             if (group.last <= sealed) continue;
             groups.push({ first: group.first, last: group.last });
             const unsealed = [];
-            for (let i = 0; i < group.seqs.length; i++) if (group.seqs[i] > sealed) unsealed.push(group.seqs[i]);
+            for (let i = 0; i < group.docs.length; i++) {
+              if (group.docs[i].seq > sealed) unsealed.push(group.docs[i].seq);
+            }
             open.push({ first: group.first, last: group.last, unsealed });
           }
           return { index, hasIndex: index !== null, entries, groups: open, floor, lost: false };
@@ -283,18 +320,27 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
         get health() {
           return { journaled: false, open: groups.length, torn: 0, lost: false };
         },
-        // One bulk write of upserts: a group whose write failed midway is written again whole.
+        // One ordered bulk write: the wipe from `first`, then an upsert per
+        // entry. A write that failed — midway, or after it landed with the
+        // acknowledgement lost — leaves what the wipe takes before the next
+        // group writes the seqs again; a best effort takes it at once too.
         async append(entries, _headers, { first, last, onFail }) {
-          const ops = [];
-          for (let i = 0; i < entries.length; i++) ops.push(row(entries[i], first));
+          const group = { first, last };
+          const ops = [wipeFrom(first)];
+          for (let i = 0; i < entries.length; i++) ops.push(row(entries[i], group));
           try {
             await within((session) => bulk(c.log, ops, session));
           } catch (error) {
+            try {
+              await c.log.deleteMany(from(first));
+            } catch {
+              // The next group wipes it; a reopen before that leaves a group short of its documents out.
+            }
             onFail(error);
             return false;
           }
-          for (let i = 0; i < entries.length; i++) firstOf.set(entries[i].seq, first);
-          groups.push({ first, last });
+          for (let i = 0; i < entries.length; i++) groupOf.set(entries[i].seq, group);
+          groups.push(group);
           return true;
         },
         async seal(entries, from, to) {
@@ -317,7 +363,7 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
             );
             await bulk(c.meta, [metaPut('segments', segments)], session);
           });
-          for (let seq = segment.from; seq <= segment.to; seq++) firstOf.delete(seq);
+          for (let seq = segment.from; seq <= segment.to; seq++) groupOf.delete(seq);
         },
         saveIndex: (index) => within((session) => bulk(c.meta, [metaPut('index', index)], session)),
         // The documents at `seqs` written again as the entries are now (a scrub stripped them).
@@ -325,7 +371,7 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
           const ops = [];
           for (let i = 0; i < seqs.length; i++) {
             const held = entriesBetween(seqs[i], seqs[i]);
-            if (held.length === 1) ops.push(row(held[0], firstOf.get(seqs[i]) ?? seqs[i]));
+            if (held.length === 1) ops.push(row(held[0], groupOf.get(seqs[i]) ?? { first: seqs[i], last: seqs[i] }));
           }
           if (ops.length > 0) await within((session) => bulk(c.log, ops, session));
         },

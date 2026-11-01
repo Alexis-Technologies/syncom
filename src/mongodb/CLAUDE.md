@@ -22,9 +22,13 @@ src/mongodb/mongodb.js    @alexify/syncom/mongodb — mongoEngine({ client, db, 
   collection is added to the fake first.
 - **Every put is an upsert; a set is ordered.** Without `transactions` a write set is a bulk write per collection
   in the files engine's order — kv puts, the pieces a record makes, the records (and the removals), the pieces it
-  drops, the copies, kv removals — so a failure midway leaves what the replay lands again whole, and the log's
-  group is written the same way (a failed group's seqs are taken back and reused, so the second write of a seq
-  must be the first). Under `transactions: true` the set is one session transaction and `atomicBatch` holds;
+  drops, the copies, kv removals — so a failure midway leaves what the replay lands again whole. The log's group
+  is one ordered bulk write too, but a failed group's seqs are taken back and reused, and the failed write may
+  have landed — whole or in part, its acknowledgement lost — so a group that failed after it landed is not a
+  group: every document carries its group's `first` and `last`, every group's bulk write begins by wiping every
+  document at or past its first seq (nothing acknowledged sits there: a seq is handed out once per epoch), the
+  catch of a failed append wipes them as a best effort, and `load` leaves out a newest group short of its
+  documents. Under `transactions: true` the set is one session transaction and `atomicBatch` holds;
   that needs the client (sessions are its) and a replica set. `kv.create` is the one `insertOne`: the unique
   `_id` refuses a key held (E11000 → `EEXIST`).
 - **A change stream tells writers apart by token.** Every record and log document carries `w`, the writer's

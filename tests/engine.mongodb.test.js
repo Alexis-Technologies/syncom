@@ -8,10 +8,92 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { createDatabase } = require('../src/all/all.js');
+const { createDatabase, memoryEngine } = require('../src/all/all.js');
+const { outbound } = require('../index.js');
 const { mongoEngine } = require('../src/mongodb/mongodb.js');
 const { createFakeMongo, FakeCollection } = require('./utils/fake-mongo.js');
 const { runEngineTests, stored } = require('./suites/engine.js');
+
+// A database whose `log` collection, once `arm()`ed, lands the next bulk
+// write and then reports it failed — the acknowledgement lost on the way
+// back; the driver's Db and the fake's alike.
+const ackLostOnce = (database) => {
+  let armed = false;
+  const db = {
+    collection(name) {
+      const collection = database.collection(name);
+      if (name !== 'log') return collection;
+      return new Proxy(collection, {
+        get(target, key) {
+          if (key !== 'bulkWrite') {
+            const member = target[key];
+            return typeof member === 'function' ? member.bind(target) : member;
+          }
+          return async (...args) => {
+            const result = await target.bulkWrite(...args);
+            if (!armed) return result;
+            armed = false;
+            throw new Error('the acknowledgement was lost after the group landed');
+          };
+        },
+      });
+    },
+    dropDatabase: () => database.dropDatabase(),
+  };
+  return {
+    db,
+    arm: () => {
+      armed = true;
+    },
+  };
+};
+
+// R-16: a group that failed after it landed is not a group — the same over the fake and the driver.
+const failedGroupIsNoGroup = async (database, path) => {
+  const lossy = ackLostOnce(database);
+  const engine = mongoEngine({ db: lossy.db });
+  const options = { path, engine, logger: false, defer: 0, lock: false, chain: false };
+  const db = await createDatabase(options);
+  const a = await db.insert({ n: 'a' });
+  lossy.arm();
+  await assert.rejects(
+    () =>
+      db.transact(async (tx) => {
+        await tx.insert({ n: 'p1' });
+        await tx.insert({ n: 'p2' });
+        await tx.insert({ n: 'p3' });
+      }),
+    { message: /acknowledgement was lost/ },
+  );
+  assert.strictEqual(db.stats().log.appendFailures, 1);
+  const b = await db.insert({ n: 'b' });
+  await db.close();
+  const again = await createDatabase(options);
+  const values = [];
+  for (const id of await again.list()) values.push((await again.get(id)).n);
+  assert.deepStrictEqual(values.sort(), ['a', 'b'], 'nothing of the rejected transaction came back');
+  assert.deepStrictEqual((await again.list()).sort(), [a, b].sort());
+  const docs = await database
+    .collection('log')
+    .find({ p: path }, { sort: { seq: 1 } })
+    .toArray();
+  const seqs = [];
+  for (const doc of docs) seqs.push([doc.seq, doc.first, doc.last]);
+  assert.deepStrictEqual(seqs, [
+    [1, 1, 1],
+    [2, 2, 2],
+  ]);
+  // The stream chains whole: a peer takes every op.
+  const peer = await createDatabase({ path: 'peer', engine: memoryEngine(), logger: false, defer: 0, lock: false });
+  const errors = [];
+  peer.on('error', (error) => errors.push(error.code));
+  const toPeer = outbound(again.log, { exclude: peer.nodeId, vector: peer.vector, own: again.nodeId });
+  const result = await peer.applyRemote(toPeer.ops);
+  assert.deepStrictEqual([result.applied, result.equivocations, errors], [toPeer.ops.length, 0, []]);
+  assert.deepStrictEqual((await peer.list()).sort(), [a, b].sort());
+  await again.close();
+  await peer.close();
+};
 
 let n = 0;
 const vroot = async () => `/mongo-${++n}`;
@@ -132,6 +214,13 @@ test('MongoDB engine (the driver in memory)', async (t) => {
   });
 
   await t.test(
+    'a log group whose write failed after it landed is wiped, never replayed: the seqs it left are the next group’s',
+    async () => {
+      await failedGroupIsNoGroup(createFakeMongo().db('r16'), '/app');
+    },
+  );
+
+  await t.test(
     'another instance over the same database hears a record and a log document, never its own; a removal once',
     async () => {
       const client = createFakeMongo();
@@ -239,6 +328,13 @@ test('MongoDB engine (the driver)', { skip: url ? false : 'MONGODB_URL unset' },
     await client.close();
   });
   await runEngineTests(t, { create: () => mongoEngine({ client, name, transactions: true }), root: vroot });
+
+  await t.test(
+    'a log group whose write failed after it landed is wiped, never replayed: the seqs it left are the next group’s (the driver)',
+    async () => {
+      await failedGroupIsNoGroup(client.db(name), '/r16');
+    },
+  );
 
   await t.test(
     'a database over the driver: writes, pieces, tags, the chain, a reopen; a follower hears it',
