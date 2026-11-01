@@ -129,11 +129,20 @@ const atRestEngine = (engine, cipher) => {
 
     // An entry of the log as the medium holds it: its seq in the clear, the rest one ciphertext.
     const sealEntry = async (entry) => ({ seq: entry.seq, e: await seal(logKey(entry.seq), JSON.stringify(entry)) });
-    const sealAll = async (entries) => {
+    // The cipher a chunk at a time: a seal or an open is a hop to the crypto thread, and one by one a log of ten
+    // thousand entries opened in ten thousand hops; all at once would hold every ciphertext and plaintext together.
+    const CHUNK = 64;
+    const eachChunk = async (items, fn) => {
       const out = [];
-      for (let i = 0; i < entries.length; i++) out.push(await sealEntry(entries[i]));
+      for (let from = 0; from < items.length; from += CHUNK) {
+        const pending = [];
+        for (let i = from; i < items.length && i < from + CHUNK; i++) pending.push(fn(items[i]));
+        const settled = await Promise.all(pending);
+        for (let i = 0; i < settled.length; i++) out.push(settled[i]);
+      }
       return out;
     };
+    const sealAll = (entries) => eachChunk(entries, sealEntry);
     // A row decrypted that is no JSON: the medium is corrupt at that seq — never a bare SyntaxError out of an open.
     const corrupt = (what, cause) =>
       new SyncomError('CORRUPT', `The log's ${what} does not read once decrypted`, { cause, file: what });
@@ -166,8 +175,7 @@ const atRestEngine = (engine, cipher) => {
       },
       async load() {
         const loaded = await db.log.load();
-        const entries = [];
-        for (let i = 0; i < loaded.entries.length; i++) entries.push(await openEntry(loaded.entries[i]));
+        const entries = await eachChunk(loaded.entries, openEntry);
         const index = loaded.index === null ? null : parsedJson(INDEX, await open(INDEX, loaded.index.e));
         return { ...loaded, entries, index, floor: index !== null ? index.floor : loaded.floor };
       },
@@ -176,8 +184,12 @@ const atRestEngine = (engine, cipher) => {
       async append(entries, _headers, { first, last, sealedTo, onFail }) {
         return db.log.append(await sealAll(entries), null, { first, last, sealedTo, onFail });
       },
+      // A native medium seals a range by its count alone — the rows are there already — so the entries go as
+      // their seqs, sealed by nobody again (a medium that reads them would be a file medium, which is not wrapped).
       async seal(entries, from, to) {
-        await db.log.seal(await sealAll(entries), from, to);
+        const stubs = [];
+        for (let i = 0; i < entries.length; i++) stubs.push({ seq: entries[i].seq });
+        await db.log.seal(stubs, from, to);
       },
       sealed: (to) => db.log.sealed(to),
       drop: (segment) => db.log.drop(segment),

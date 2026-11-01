@@ -22,6 +22,8 @@ const DATA = 'data';
 const TAGS = 'tags';
 const TAGS_FILE = 'tags.json';
 const RECORD = '.json';
+// Records of a write set written side by side, this many at a time (a file system's parallelism, bounded).
+const WRITES_AT_ONCE = 8;
 
 // The directories a database writes under its path, besides a tag's two;
 // `remove(path)` empties them (fsi lists files, not directories, and no
@@ -206,15 +208,21 @@ const openDb = (fsi, path, capabilities, logger) => {
         await fsi.write(copiesDir(copied[i][0]), recordFile(copied[i][1]), copied[i][2]);
       }
     }
+    // Each record in its own crash order — the pieces it makes, its file, the pieces it drops — and the records
+    // a few at a time: the order between two records carries nothing, and a file system writes them side by side.
     const rows = batch.records;
     if (rows !== undefined) {
-      for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
+      const landRecord = async (row) => {
         const made = row.pieces?.put;
         if (made !== undefined) for (let k = 0; k < made.length; k++) await fsi.write(data, made[k][0], made[k][1]);
         await fsi.write(data, recordFile(row.id), typeof row.text === 'string' ? row.text : JSON.stringify(row.stored));
         const dropped = row.pieces?.remove;
         if (dropped !== undefined) for (let k = 0; k < dropped.length; k++) await fsi.remove(data, dropped[k]);
+      };
+      for (let from = 0; from < rows.length; from += WRITES_AT_ONCE) {
+        const pending = [];
+        for (let i = from; i < rows.length && i < from + WRITES_AT_ONCE; i++) pending.push(landRecord(rows[i]));
+        await Promise.all(pending);
       }
     }
     const removed = batch.remove;

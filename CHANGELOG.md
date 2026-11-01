@@ -1149,6 +1149,11 @@ and one `commit` event, not one per call.
 
 ### Fixed
 
+- **At rest, the log was sealed twice and opened one entry at a time; the files engine wrote a set one record at a
+  time.** `atRest(engine)` encrypted every entry again at every roll, though a native medium seals a range by its
+  count alone, and opened ten thousand entries in ten thousand hops to the crypto thread (review №5, P-6): the roll
+  sends the seqs, a seal or an open runs a chunk at a time. The files engine landed the records of a write set one
+  after another (P-8): eight at a time now, each in its own crash order.
 - **The aliases' types, the engines benchmark, the engines' shared errors.** `DatabaseOptions` — the new name — carried the
   `@deprecated` tag meant for `StorageOptions`, and no alias said when it goes (review №5, M-8): every alias is
   `@deprecated … removed in 1.0`, and the store subpath types take a `Document`. `bench/engines.js` measured Ed25519
