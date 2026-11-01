@@ -91,9 +91,12 @@ and one `commit` event, not one per call.
   cannot write over anything the new holder wrote (`LEASE_LOST` from the engine; under `transactions: true` the
   lease is checked inside the transaction first): it hears `error` `LEASE_LOST` once, is read-only from then on
   (`READ_ONLY` on every write) and writes nothing more — not at its close, where what it had logged but not landed
-  is held as `UNPERSISTED`. A log group whose write failed after it landed (the acknowledgement lost) is wiped
-  by the next group and left out by a reopen, never replayed. The driver is 6.0 or later; `engine.remove(path)`
-  takes the lease document too.
+  is held as `UNPERSISTED`. A renewal that fails is tried again every `lock.poll` ms while two thirds of
+  `staleAfter` are left, then given up; the `lease` event tells of every renewal (`renewed`), the first failure
+  of a run (`late`, the log event `storage.lease.late`) and the loss (`lost`), and `stats().lock` is
+  `{ kind: 'kv' | 'native', mode, expiresAt, lost }`. A log group whose write failed after it landed (the
+  acknowledgement lost) is wiped by the next group and left out by a reopen, never replayed. The driver is 6.0
+  or later; `engine.remove(path)` takes the lease document too.
 - **An engine over a message port, and a database moved between engines: `@alexify/syncom/engines`.**
   `serveEngine(engine, port)` answers the engine contract over a `MessagePort` (a worker thread, a
   SharedWorker, Electron's main process); `remoteEngine(port, { name, capabilities })` and

@@ -111,6 +111,9 @@ class Database extends Emitter {
   #db = null;
   #lock = null;
   #lockOptions;
+  // How the database is held: through a lock key, or the engine's own lease — and the lease's renewals heard.
+  #lockKind = 'kv';
+  #unleash = null;
   // A follower (`readOnly: true`), or a writer whose lease was lost: every write is READ_ONLY.
   #readOnly = false;
   #leaseLost = false;
@@ -347,10 +350,13 @@ class Database extends Emitter {
         // Recorded once the writer is set up (a plugin's, after the lock).
         const started = now();
         // The engine's own lease where it has one (MongoDB), the lock key of the root namespace otherwise.
-        this.#lock =
-          db.capabilities.lock === 'native' && typeof db.lock === 'function'
-            ? await db.lock({ ...lock, onLost: (error) => this.#lostLease(error) })
-            : await acquireLock({ store: kvNamespace(db.kv, ''), path: this.#path, ...lock });
+        const native = db.capabilities.lock === 'native' && typeof db.lock === 'function';
+        this.#lock = native
+          ? await db.lock({ ...lock, onLost: (error) => this.#lostLease(error) })
+          : await acquireLock({ store: kvNamespace(db.kv, ''), path: this.#path, ...lock });
+        this.#lockKind = native ? 'native' : 'kv';
+        // A lease that tells of its renewals (an engine's own; one served over a port does not): the `lease` events.
+        this.#unleash = this.#lock.subscribe?.((event) => this.#leaseState(event)) ?? null;
         this.#lockWait = now() - started;
       }
       await this.#open();
@@ -714,6 +720,16 @@ class Database extends Emitter {
     this.#logger.error({ event: 'storage.lease.lost', path: this.#path, err: cause });
     const message = `Storage at ${this.#path} lost its lease: read-only from here on`;
     notify(this, this.#logger, 'error', new SyncomError('LEASE_LOST', message, { path: this.#path, cause }));
+    notify(this, this.#logger, 'lease', { state: 'lost', path: this.#path });
+  }
+
+  // The lease's life, as the engine tells it: every renewal, and the first
+  // failed one of a run (`late`: retried until a third of `staleAfter` is
+  // left, then lost) — the `lease` event, contained like every event.
+  #leaseState({ state, error }) {
+    if (this.#closed || this.#leaseLost) return;
+    if (state === 'late') this.#logger.warn({ event: 'storage.lease.late', path: this.#path, err: error });
+    notify(this, this.#logger, 'lease', { state, path: this.#path });
   }
 
   // A record another instance wrote, heard through the engine's change
@@ -1125,7 +1141,16 @@ class Database extends Emitter {
         appendFailures: health.appendFailures,
       },
       chain: this.#chain ? { tail: this.#chain.tailHash } : null,
-      lock: this.#lock ? { mode: this.#lockOptions.mode } : null,
+      // How the database is held: the lock key or the engine's lease, when the lease lapses unless renewed
+      // (`null` for a lock key, or once lost) and whether it was lost.
+      lock: this.#lock
+        ? {
+            kind: this.#lockKind,
+            mode: this.#lockOptions.mode,
+            expiresAt: this.#lock.expiresAt ?? null,
+            lost: this.#leaseLost,
+          }
+        : null,
       readOnly: this.#readOnly,
     };
   }
@@ -2211,6 +2236,7 @@ class Database extends Emitter {
     await done;
     this.#unhear?.();
     await this.#heard;
+    this.#unleash?.();
     await this.#lock?.release();
     await this.#db.close();
     notify(this, this.#logger, 'close');

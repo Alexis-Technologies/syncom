@@ -33,6 +33,7 @@ test('a read-only database', async (t) => {
       const follower = await createDatabase({ ...base, path: 'app', engine, readOnly: true });
       assert.strictEqual(follower.stats().readOnly, true);
       assert.strictEqual(follower.stats().lock, null, 'no lock of its own: the writer holds the database');
+      assert.deepStrictEqual(writer.stats().lock, { kind: 'kv', mode: 'fail', expiresAt: null, lost: false });
       assert.strictEqual(follower.nodeId, writer.nodeId, 'the same node: it is the same database');
       assert.strictEqual((await follower.get(id)).title, 'Draft');
       assert.strictEqual((await follower.get(id)).body.length, 2000);
@@ -150,7 +151,9 @@ test('the lease an engine holds a database by (MongoDB)', async (t) => {
       const client = createFakeMongo();
       const engine = mongoEngine({ client, name: 'leased' });
       const a = await createDatabase({ ...base, path: 'app', engine, lock: { staleAfter: 200 } });
-      assert.deepStrictEqual(a.stats().lock, { mode: 'fail' });
+      const { lock } = a.stats();
+      assert.deepStrictEqual([lock.kind, lock.mode, lock.lost], ['native', 'fail', false]);
+      assert.ok(lock.expiresAt > Date.now() && lock.expiresAt <= Date.now() + 200, 'when the lease lapses');
       await assert.rejects(() => createDatabase({ ...base, path: 'app', engine }), { code: 'LOCKED', path: 'app' });
       await assert.rejects(
         () => createDatabase({ ...base, path: 'app', engine, lock: { mode: 'wait', timeout: 60 } }),
@@ -226,13 +229,55 @@ test('the lease an engine holds a database by (MongoDB)', async (t) => {
   );
 
   await t.test(
+    'a renewal that fails is tried again every poll while two thirds of staleAfter are left: late once, then renewed; past that, lost',
+    async () => {
+      const client = createFakeMongo();
+      const engine = mongoEngine({ client, name: 'late' });
+      const locks = client.db('late').collection('locks');
+      const a = await createDatabase({ ...base, path: 'app', engine, lock: { staleAfter: 300, poll: 10 } });
+      const states = [];
+      const errors = [];
+      a.on('lease', (event) => states.push(event.state));
+      a.on('error', (error) => errors.push(error.code));
+      // The network blinks: two renewals in a row fail, the third lands.
+      const original = locks.updateOne.bind(locks);
+      let failing = 2;
+      locks.updateOne = async (...args) => {
+        if (failing > 0) {
+          failing--;
+          throw new Error('the connection blinked');
+        }
+        return original(...args);
+      };
+      await settle(180);
+      assert.deepStrictEqual(states.slice(0, 2), ['late', 'renewed'], 'late once for the run, then renewed');
+      assert.ok(!states.includes('lost'));
+      assert.deepStrictEqual(errors, []);
+      assert.strictEqual(a.readOnly, false);
+      assert.strictEqual(a.stats().lock.lost, false);
+      await a.insert({ n: 1 });
+      // A renewal that keeps failing is given up a third of staleAfter before the lease lapses.
+      failing = Infinity;
+      await settle(320);
+      assert.strictEqual(states[states.length - 1], 'lost');
+      assert.deepStrictEqual(errors, ['LEASE_LOST']);
+      assert.strictEqual(a.stats().lock.lost, true);
+      assert.strictEqual(a.stats().lock.expiresAt, null);
+      locks.updateOne = original;
+      await a.close();
+    },
+  );
+
+  await t.test(
     'a lease taken by another instance makes its holder read-only: LEASE_LOST once, READ_ONLY after',
     async () => {
       const client = createFakeMongo();
       const engine = mongoEngine({ client, name: 'lost' });
       const a = await createDatabase({ ...base, path: 'app', engine, lock: { staleAfter: 60 } });
       const errors = [];
+      const states = [];
       a.on('error', (error) => errors.push(error));
+      a.on('lease', (event) => states.push(event.state));
       const id = await a.insert({ n: 1 });
       // Another instance took the lease (as one does when it finds the lease lapsed).
       await client
@@ -243,7 +288,9 @@ test('the lease an engine holds a database by (MongoDB)', async (t) => {
       assert.strictEqual(errors.length, 1, 'heard once');
       assert.strictEqual(errors[0].code, 'LEASE_LOST');
       assert.strictEqual(errors[0].path, 'app');
+      assert.deepStrictEqual(states, ['lost'], 'the lease event, once');
       assert.strictEqual(a.stats().readOnly, true);
+      assert.deepStrictEqual(a.stats().lock, { kind: 'native', mode: 'fail', expiresAt: null, lost: true });
       await assert.rejects(() => a.insert({ n: 2 }), { code: 'READ_ONLY', lease: true });
       await assert.rejects(() => a.update(id, { n: 2 }), { code: 'READ_ONLY' });
       assert.deepStrictEqual(await a.get(id), { n: 1 }, 'reads go on');

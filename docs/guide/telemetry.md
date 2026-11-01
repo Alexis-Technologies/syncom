@@ -260,6 +260,7 @@ alert to key on:
 | error | `log.segment.missing` | the sealed segments on disk skip seqs — `from` to `to` — that the floor or the segment before says the log holds: a file gone; what it held is gone from this node (counted in `droppedTs`) |
 | warn | `log.epoch.new` (when a log was there) | the log changed epoch |
 | info | `log.open.torn` | a journal's last line did not read: its append was never acknowledged, so nothing that was answered is lost |
+| warn | `storage.lease.late` | a renewal of the engine's lease on the database (MongoDB) failed (`path`, `err`): tried again every `lock.poll` ms while two thirds of `lock.staleAfter` are left since the last that landed, then `storage.lease.lost`; once per run of failures, also a `lease` event (`late`) |
 | error | `storage.lease.lost` | the engine's lease on the database (MongoDB) went to another instance — not renewed in time, or taken (`path`, `err`): the database is read-only from here on; also an `error` event (`LEASE_LOST`) |
 | error | `storage.unpersisted` | logged ops whose record files could not be written, held in memory until the next open (`ids`, the first 32, and `count`); also an `error` event (`UNPERSISTED`) |
 | warn | `storage.piece.unremoved` | a piece of a large record (`<id>~<n>.json`) its file no longer names could not be removed (`id`, `name`): left on disk, written over when the record's counter reaches it again |

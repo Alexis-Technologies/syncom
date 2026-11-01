@@ -553,9 +553,12 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
     // The lease: one document per path, this instance's while it renews it
     // every third of `staleAfter` on the server's clock; a lapsed one is
     // taken over, a live one is LOCKED (at once, or after `timeout` under
-    // 'wait'); lost — taken by another instance, or a renewal that failed —
-    // `onLost` hears once. The generation taken is what this handle writes
-    // with from here on.
+    // 'wait'). A renewal that fails is tried again every `poll` ms while two
+    // thirds of `staleAfter` are left since the last one that landed, then
+    // given up as lost; lost — taken by another instance, or given up —
+    // `onLost` hears once, and `lease.subscribe` hears every renewal and the
+    // first failure of a run (`late`). The generation taken is what this
+    // handle writes with from here on.
     const lock = async ({
       mode = 'fail',
       staleAfter = DEFAULT_LEASE,
@@ -579,30 +582,64 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
       gen = generation;
       let holding = true;
       let timer = null;
+      let retry = null;
+      let renewing = false;
+      let late = false;
+      // When the last renewal landed, on this clock: what `expiresAt` and the retries count from.
+      let lastRenewed = Date.now();
+      // The third kept back: a renewal that keeps failing is given up while the lease is still live.
+      const margin = Math.floor(staleAfter / 3);
+      const listeners = new Set();
+      const tell = (event) => {
+        for (const listener of listeners) listener(event);
+      };
       const lost = (error) => {
         if (!holding) return;
         holding = false;
         clearInterval(timer);
+        if (retry !== null) clearTimeout(retry);
         if (onLost !== null) onLost(error);
       };
       const renew = async () => {
+        if (!holding || renewing) return;
+        renewing = true;
         try {
           const result = await locks.updateOne({ _id: p, owner: mine, gen: generation }, [
             { $set: { expires: { $add: ['$$NOW', staleAfter] } } },
           ]);
-          if (result.matchedCount === 0) lost(new Error(`the lease on ${p} was taken by another instance`));
+          if (result.matchedCount === 0) return void lost(new Error(`the lease on ${p} was taken by another instance`));
+          lastRenewed = Date.now();
+          late = false;
+          tell({ state: 'renewed' });
         } catch (error) {
-          lost(error);
+          if (Date.now() >= lastRenewed + staleAfter - margin) return void lost(error);
+          if (!late) {
+            late = true;
+            tell({ state: 'late', error });
+          }
+          retry = setTimeout(renew, poll);
+          retry.unref?.();
+        } finally {
+          renewing = false;
         }
       };
-      timer = setInterval(renew, Math.max(10, Math.floor(staleAfter / 3)));
+      timer = setInterval(renew, Math.max(10, margin));
       timer.unref?.();
       return {
         gen: generation,
+        /** When the lease lapses unless renewed, on this clock; null once it is let go or lost. */
+        get expiresAt() {
+          return holding ? lastRenewed + staleAfter : null;
+        },
+        subscribe(listener) {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
         async release() {
           if (!holding) return;
           holding = false;
           clearInterval(timer);
+          if (retry !== null) clearTimeout(retry);
           // The document stays, lapsed: the generation counts on from it, so a later holder is a newer one.
           await locks.updateOne({ _id: p, owner: mine, gen: generation }, { $set: { expires: new Date(0) } });
         },

@@ -39,7 +39,7 @@ test('storage.stats() reads the node without I/O', async (t) => {
   assert.ok(stats.log.segments >= 1, 'rollAfter 2: something was sealed');
   assert.ok(stats.log.latestTs > 0);
   assert.strictEqual(typeof stats.chain.tail, 'string');
-  assert.deepStrictEqual(stats.lock, { mode: 'fail' });
+  assert.deepStrictEqual(stats.lock, { kind: 'kv', mode: 'fail', expiresAt: null, lost: false });
   assert.strictEqual(pinned.i, 0);
   const bare = await openTemp(t, { chain: false, lock: false });
   assert.strictEqual(bare.stats().chain, null);

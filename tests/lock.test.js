@@ -154,7 +154,7 @@ test('Exclusive open: the knobs, the race, the timeout', async (t) => {
       code: 'LOCKED',
       message: /still locked/,
     });
-    assert.deepStrictEqual(first.stats().lock, { mode: 'fail' });
+    assert.deepStrictEqual(first.stats().lock, { kind: 'kv', mode: 'fail', expiresAt: null, lost: false });
     await first.close();
     // A stale lock by age: staleAfter tunable, pid absent.
     await fs.writeFile(path.join(dir, LOCK_FILE), JSON.stringify({ id: 'old', since: Date.now() - 5_000 }));

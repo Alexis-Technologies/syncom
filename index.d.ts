@@ -103,6 +103,14 @@ export interface EngineWriteSet {
 export interface EngineLease {
   release(): Promise<void>;
   readonly gen?: number;
+  /** When the lease lapses unless renewed, on this clock; `null` once let go or lost. Absent where the engine does not say. */
+  readonly expiresAt?: number | null;
+  /**
+   * The lease's life, where the engine tells it: every renewal (`renewed`), and the first failed one of a run
+   * (`late`, with the error — retried every `poll` ms while two thirds of `staleAfter` are left, then lost
+   * through `onLost`). Returns the unsubscribe. A lease served over a port has none.
+   */
+  subscribe?(listener: (event: { state: 'renewed' | 'late'; error?: Error }) => void): () => void;
 }
 
 /** A database as an engine opens it: a set of stores over one `path`. */
@@ -1482,7 +1490,7 @@ export interface LockOptions {
   mode?: 'fail' | 'wait';
   /** A lockfile whose process cannot be checked is stale after this many ms (default 30 minutes); an engine's lease (MongoDB) lapses after it unless renewed (default 30 s). */
   staleAfter?: number;
-  /** How often `'wait'` looks again, in ms (default 100). */
+  /** How often `'wait'` looks again, in ms (default 100); how often a failed renewal of an engine's lease is tried again. */
   poll?: number;
   /** How long `'wait'` waits before `LOCKED`, in ms (default forever). */
   timeout?: number;
@@ -1546,7 +1554,11 @@ export interface StorageStats {
   /** Listeners registered through `observe()`. */
   observers: number;
   chain: { tail: string } | null;
-  lock: { mode: 'fail' | 'wait' } | null;
+  /**
+   * How the database is held — through a lock key or the engine's own lease — when the lease lapses unless
+   * renewed (`null` for a lock key, or once lost) and whether it was lost; `null` for a follower or `lock: false`.
+   */
+  lock: { kind: 'kv' | 'native'; mode: 'fail' | 'wait'; expiresAt: number | null; lost: boolean } | null;
 }
 
 /** One `applyRemote` call, after its batch is durable. */
@@ -1911,6 +1923,11 @@ export interface StorageEvents {
   transaction: (event: TransactionEvent) => void;
   /** The log sealed a segment (and maybe dropped old ones): `floor` is where a resume is still possible. */
   log: (event: { kind: 'roll'; sealed: number; dropped: number; floor: number; segments: number }) => void;
+  /**
+   * The engine's lease on the database (MongoDB): renewed; a renewal failed and is being retried (`late`, once
+   * per run of failures); gone to another instance or given up (`lost` — with the `error` event `LEASE_LOST`).
+   */
+  lease: (event: { state: 'renewed' | 'late' | 'lost'; path: string }) => void;
   /**
    * A peer's op refused by the field-kind rule (`OP_REFUSED`,
    * `rejected`), skipped because the record would not pass its entity's

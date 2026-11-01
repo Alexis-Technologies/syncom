@@ -578,7 +578,16 @@ expectType<(() => void) | undefined>(engineDb.changes?.subscribe((message) => me
 expectType<Promise<syncom.EngineLease> | undefined>(engineDb.lock?.({ mode: 'wait', onLost: () => {} }));
 declare const lease: syncom.EngineLease;
 expectType<number | undefined>(lease.gen);
+expectType<number | null | undefined>(lease.expiresAt);
+expectType<(() => void) | undefined>(lease.subscribe?.((event) => expectType<'renewed' | 'late'>(event.state)));
 expectType<Promise<void>>(lease.release());
+expectType<{ kind: 'kv' | 'native'; mode: 'fail' | 'wait'; expiresAt: number | null; lost: boolean } | null>(
+  storage.stats().lock,
+);
+storage.on('lease', (event) => {
+  expectType<'renewed' | 'late' | 'lost'>(event.state);
+  expectType<string>(event.path);
+});
 expectAssignable<syncom.SyncomErrorCode>('READ_ONLY');
 expectAssignable<syncom.SyncomErrorCode>('LEASE_LOST');
 expectType<{ tail: string } | null>(storage.stats().chain);
