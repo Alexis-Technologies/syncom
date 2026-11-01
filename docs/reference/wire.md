@@ -306,6 +306,29 @@ refused. The log keeps at least `sync.retention.ops` ops (10 000; `'all'`
 keeps everything) and drops whole segments from the front past that, while
 its own unacknowledged ops and the segments a reader pins stay.
 
+## In an engine
+
+A native engine keeps what the files above hold in its own stores, every key beginning with the database's path `p`,
+so one medium serves many databases and `engine.remove(path)` is a range delete. The record is the file's object
+(IndexedDB: the structured clone; SQLite and MongoDB: its JSON text), a log entry the `{ seq, op, fp, … }` object the
+log holds (a text where the medium stores texts), the log's `index.json` a value of `meta`, the sealed segments a list
+`[{ from, to, count }]` beside it — no journals, no trailers, no checksums: the medium's transaction is the unit that is
+whole or nothing.
+
+| Store | IndexedDB (`idbEngine`) | SQLite (`sqliteEngine`) | MongoDB (`mongoEngine`) |
+| --- | --- | --- | --- |
+| `kv` | `[p, ns, key]` → `{ value }` | `kv (p, ns, key, value)` | `kv { _id: JSON [p, ns, key], p, ns, key, v }` |
+| `records` | `[p, id]` → `{ stored }` (or `{ text }`) | `records (p, id, text)` | `records { _id: JSON [p, id], p, id, t, w }` |
+| `pieces` | `[p, id, name]` → `{ text }` | `pieces (p, id, name, text)` | `pieces { _id: JSON [p, id, name], p, id, name, t }` |
+| `copies` | `[p, tag, id]` → `{ text }` | `copies (p, tag, id, text)` | `copies { _id: JSON [p, tag, id], p, tag, id, t }` |
+| `log` | `[p, seq]` → `{ entry, first }` | `log (p, seq, first, entry)` | `log { _id: JSON [p, seq], p, seq, first, e, w }` |
+| `meta` | `[p, key]` → `{ value }` (`index`, `segments`, `catalog`) | `meta (p, key, value)` (`index`, `segments`) | `meta { _id: JSON [p, key], p, key, v }` (`index`, `segments`); `locks { _id: p, owner, expires }` |
+
+`first` is the first seq of the entry's group — what a reopen rebuilds the open groups from; `w` the writer's token
+(MongoDB), what tells a change stream another instance's writes from this one's. Under `atRest(engine)` every value
+above is `enc1:` ciphertext bound to its place (`data/<id>.json`, `log/<seq>`, `log/index.json`…), the keys and the
+index's `floor` in the clear. These layouts are unpublished and free to change until the first release.
+
 ## The record file
 
 `<path>/data/<id>.json`, written after the append (or within `defer`

@@ -235,6 +235,14 @@ data/
 [Database](/guide/database#on-disk) explains each file, and [Backends](/guide/backends) explains
 the five functions an `fsi` implements.
 
+A native engine keeps the same six stores in its own structures, every key prefixed by the
+database's path so one medium serves many databases: object stores in IndexedDB (`idbEngine`),
+tables in one SQLite file (`sqliteEngine`), collections in one MongoDB database (`mongoEngine`),
+Maps in memory (`memoryEngine`) — `kv` for the small texts above, `records`, `pieces`, `copies`,
+the `log` a row per entry, `meta` for the log's index. A write set is one transaction there, and a
+write costs two: the log's group and the landing. [The wire reference](/reference/wire#in-an-engine)
+names every key.
+
 ## The modules
 
 | Module | Role |

@@ -1,0 +1,242 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="1108" viewBox="0 0 760 1108" role="img" aria-label="Engines: syncom's own benchmarks. The same database over every engine: the files engine on node:fs, memory, SQLite, IndexedDB (fake-indexeddb under Node), MongoDB (the driver in memory) — the chain off. ops/s, log scale, higher is better.">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .title { font-size: 15px; font-weight: 700; fill: #1b1c1e; }
+  .subtitle, .caption { font-size: 12px; fill: #67676c; }
+  .caption { font-size: 11px; }
+  .group { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; fill: #67676c; }
+  .label { font-size: 13px; font-weight: 600; fill: #1b1c1e; }
+  .label.primary, .label.secondary { font-weight: 700; }
+  .sublabel { font-size: 11px; fill: #67676c; }
+  .value { font-size: 12px; font-weight: 600; fill: #3c3c43; font-variant-numeric: tabular-nums; }
+  .value.small { font-size: 10px; }
+  .legend { font-size: 11px; fill: #3c3c43; }
+  .tick { font-size: 11px; fill: #67676c; font-variant-numeric: tabular-nums; }
+  .grid { stroke: #e4e4e7; stroke-width: 1; }
+  .axis { stroke: #c2c2c4; stroke-width: 1; }
+  .ref { stroke: #67676c; stroke-width: 1; stroke-dasharray: 3 3; }
+  .bar { fill: #c4c6cc; }
+  .bar.primary { fill: #245a9e; }
+  .bar.secondary { fill: #5e9be6; }
+  @media (prefers-color-scheme: dark) {
+    .title, .label { fill: #dfdfd6; }
+    .subtitle, .caption, .group, .sublabel, .tick { fill: #98989f; }
+    .value, .legend { fill: #c2c2c4; }
+    .grid { stroke: #2e2e32; }
+    .axis { stroke: #48484c; }
+    .ref { stroke: #98989f; }
+    .bar { fill: #46474e; }
+    .bar.primary { fill: #8dbcf2; }
+    .bar.secondary { fill: #3d7bd0; }
+  }
+</style>
+<text class="title" x="20" y="35">Engines: syncom's own benchmarks</text>
+<text class="subtitle" x="20" y="56">The same database over every engine: the files engine on node:fs, memory, SQLite, IndexedDB (fake-indexeddb</text>
+<text class="subtitle" x="20" y="73">under Node), MongoDB (the driver in memory) — the chain off. ops/s, log scale, higher is better.</text>
+<line class="grid" x1="306" y1="88" x2="306" y2="1048"/>
+<text class="tick" x="306" y="1064" text-anchor="middle">10</text>
+<line class="grid" x1="380" y1="88" x2="380" y2="1048"/>
+<text class="tick" x="380" y="1064" text-anchor="middle">100</text>
+<line class="grid" x1="454" y1="88" x2="454" y2="1048"/>
+<text class="tick" x="454" y="1064" text-anchor="middle">1,000</text>
+<line class="grid" x1="528" y1="88" x2="528" y2="1048"/>
+<text class="tick" x="528" y="1064" text-anchor="middle">10k</text>
+<line class="grid" x1="602" y1="88" x2="602" y2="1048"/>
+<text class="tick" x="602" y="1064" text-anchor="middle">100k</text>
+<line class="grid" x1="676" y1="88" x2="676" y2="1048"/>
+<text class="tick" x="676" y="1064" text-anchor="middle">1M</text>
+<line class="axis" x1="306" y1="88" x2="306" y2="1048"/>
+<g><title>insert · files (node:fs)
+3,413 ops/s
+293 µs per operation</title>
+<text class="label primary" x="20" y="105">insert</text>
+<text class="sublabel" x="20" y="120">files (node:fs)</text>
+<path class="bar primary" d="M306,101H489.4520853326193A4,4 0 0 1 493.4520853326193,105V111A4,4 0 0 1 489.4520853326193,115H306Z"/>
+<text class="value" x="499.4520853326193" y="114">3,413</text>
+</g>
+<g><title>update · one field — files (node:fs)
+8,977 ops/s
+111 µs per operation</title>
+<text class="label primary" x="20" y="145">update</text>
+<text class="sublabel" x="20" y="160">one field — files (node:fs)</text>
+<path class="bar primary" d="M306,141H520.5317106635749A4,4 0 0 1 524.5317106635749,145V151A4,4 0 0 1 520.5317106635749,155H306Z"/>
+<text class="value" x="530.5317106635749" y="154">8,977</text>
+</g>
+<g><title>get · cached — files (node:fs)
+112,277 ops/s
+8.91 µs per operation</title>
+<text class="label primary" x="20" y="185">get</text>
+<text class="sublabel" x="20" y="200">cached — files (node:fs)</text>
+<path class="bar primary" d="M306,181H601.7215191947582A4,4 0 0 1 605.7215191947582,185V191A4,4 0 0 1 601.7215191947582,195H306Z"/>
+<text class="value" x="611.7215191947582" y="194">112k</text>
+</g>
+<g><title>transact · 1000 inserts — files (node:fs)
+4,985 ops/s
+201 µs per operation</title>
+<text class="label primary" x="20" y="225">transact</text>
+<text class="sublabel" x="20" y="240">1000 inserts — files (node:fs)</text>
+<path class="bar primary" d="M306,221H501.6272220359279A4,4 0 0 1 505.6272220359279,225V231A4,4 0 0 1 501.6272220359279,235H306Z"/>
+<text class="value" x="511.6272220359279" y="234">4,985</text>
+</g>
+<g><title>open · 10,000 records — files (node:fs)
+31 ops/s
+32.3 ms per operation</title>
+<text class="label primary" x="20" y="265">open</text>
+<text class="sublabel" x="20" y="280">10,000 records — files (node:fs)</text>
+<path class="bar primary" d="M306,261H338.36076534373615A4,4 0 0 1 342.36076534373615,265V271A4,4 0 0 1 338.36076534373615,275H306Z"/>
+<text class="value" x="348.36076534373615" y="274">31</text>
+</g>
+<g><title>insert · memory
+18,649 ops/s
+53.6 µs per operation</title>
+<text class="label primary" x="20" y="305">insert</text>
+<text class="sublabel" x="20" y="320">memory</text>
+<path class="bar primary" d="M306,301H544.0285106225209A4,4 0 0 1 548.0285106225209,305V311A4,4 0 0 1 544.0285106225209,315H306Z"/>
+<text class="value" x="554.0285106225209" y="314">18.6k</text>
+</g>
+<g><title>update · one field — memory
+11,101 ops/s
+90.1 µs per operation</title>
+<text class="label primary" x="20" y="345">update</text>
+<text class="sublabel" x="20" y="360">one field — memory</text>
+<path class="bar primary" d="M306,341H527.3567955963478A4,4 0 0 1 531.3567955963478,345V351A4,4 0 0 1 527.3567955963478,355H306Z"/>
+<text class="value" x="537.3567955963478" y="354">11.1k</text>
+</g>
+<g><title>get · cached — memory
+51,538 ops/s
+19.4 µs per operation</title>
+<text class="label primary" x="20" y="385">get</text>
+<text class="sublabel" x="20" y="400">cached — memory</text>
+<path class="bar primary" d="M306,381H576.6974395267472A4,4 0 0 1 580.6974395267472,385V391A4,4 0 0 1 576.6974395267472,395H306Z"/>
+<text class="value" x="586.6974395267472" y="394">51.5k</text>
+</g>
+<g><title>transact · 1000 inserts — memory
+40,850 ops/s
+24.5 µs per operation</title>
+<text class="label primary" x="20" y="425">transact</text>
+<text class="sublabel" x="20" y="440">1000 inserts — memory</text>
+<path class="bar primary" d="M306,421H569.2282125042641A4,4 0 0 1 573.2282125042641,425V431A4,4 0 0 1 569.2282125042641,435H306Z"/>
+<text class="value" x="579.2282125042641" y="434">40.9k</text>
+</g>
+<g><title>open · 10,000 records — memory
+206 ops/s
+4.85 ms per operation</title>
+<text class="label primary" x="20" y="465">open</text>
+<text class="sublabel" x="20" y="480">10,000 records — memory</text>
+<path class="bar primary" d="M306,461H399.22617430731736A4,4 0 0 1 403.22617430731736,465V471A4,4 0 0 1 399.22617430731736,475H306Z"/>
+<text class="value" x="409.22617430731736" y="474">206</text>
+</g>
+<g><title>insert · sqlite (a file)
+9,238 ops/s
+108 µs per operation</title>
+<text class="label primary" x="20" y="505">insert</text>
+<text class="sublabel" x="20" y="520">sqlite (a file)</text>
+<path class="bar primary" d="M306,501H521.4527688853791A4,4 0 0 1 525.4527688853791,505V511A4,4 0 0 1 521.4527688853791,515H306Z"/>
+<text class="value" x="531.4527688853791" y="514">9,238</text>
+</g>
+<g><title>update · one field — sqlite (a file)
+8,565 ops/s
+117 µs per operation</title>
+<text class="label primary" x="20" y="545">update</text>
+<text class="sublabel" x="20" y="560">one field — sqlite (a file)</text>
+<path class="bar primary" d="M306,541H519.0218251803132A4,4 0 0 1 523.0218251803132,545V551A4,4 0 0 1 519.0218251803132,555H306Z"/>
+<text class="value" x="529.0218251803132" y="554">8,565</text>
+</g>
+<g><title>get · cached — sqlite (a file)
+54,549 ops/s
+18.3 µs per operation</title>
+<text class="label primary" x="20" y="585">get</text>
+<text class="sublabel" x="20" y="600">cached — sqlite (a file)</text>
+<path class="bar primary" d="M306,581H578.5222227152508A4,4 0 0 1 582.5222227152508,585V591A4,4 0 0 1 578.5222227152508,595H306Z"/>
+<text class="value" x="588.5222227152508" y="594">54.5k</text>
+</g>
+<g><title>transact · 1000 inserts — sqlite (a file)
+13,747 ops/s
+72.7 µs per operation</title>
+<text class="label primary" x="20" y="625">transact</text>
+<text class="sublabel" x="20" y="640">1000 inserts — sqlite (a file)</text>
+<path class="bar primary" d="M306,621H534.227387017444A4,4 0 0 1 538.227387017444,625V631A4,4 0 0 1 534.227387017444,635H306Z"/>
+<text class="value" x="544.227387017444" y="634">13.7k</text>
+</g>
+<g><title>open · 10,000 records — sqlite (a file)
+29 ops/s
+34.5 ms per operation</title>
+<text class="label primary" x="20" y="665">open</text>
+<text class="sublabel" x="20" y="680">10,000 records — sqlite (a file)</text>
+<path class="bar primary" d="M306,661H336.21745184452277A4,4 0 0 1 340.21745184452277,665V671A4,4 0 0 1 336.21745184452277,675H306Z"/>
+<text class="value" x="346.21745184452277" y="674">29</text>
+</g>
+<g><title>insert · idb (fake-indexeddb)
+4,571 ops/s
+219 µs per operation</title>
+<text class="label primary" x="20" y="705">insert</text>
+<text class="sublabel" x="20" y="720">idb (fake-indexeddb)</text>
+<path class="bar primary" d="M306,701H498.84083037541046A4,4 0 0 1 502.84083037541046,705V711A4,4 0 0 1 498.84083037541046,715H306Z"/>
+<text class="value" x="508.84083037541046" y="714">4,571</text>
+</g>
+<g><title>update · one field — idb (fake-indexeddb)
+6,488 ops/s
+154 µs per operation</title>
+<text class="label primary" x="20" y="745">update</text>
+<text class="sublabel" x="20" y="760">one field — idb (fake-indexeddb)</text>
+<path class="bar primary" d="M306,741H510.0962022490294A4,4 0 0 1 514.0962022490294,745V751A4,4 0 0 1 510.0962022490294,755H306Z"/>
+<text class="value" x="520.0962022490294" y="754">6,488</text>
+</g>
+<g><title>get · cached — idb (fake-indexeddb)
+51,639 ops/s
+19.4 µs per operation</title>
+<text class="label primary" x="20" y="785">get</text>
+<text class="sublabel" x="20" y="800">cached — idb (fake-indexeddb)</text>
+<path class="bar primary" d="M306,781H576.7603589369751A4,4 0 0 1 580.7603589369751,785V791A4,4 0 0 1 576.7603589369751,795H306Z"/>
+<text class="value" x="586.7603589369751" y="794">51.6k</text>
+</g>
+<g><title>transact · 1000 inserts — idb (fake-indexeddb)
+5,253 ops/s
+190 µs per operation</title>
+<text class="label primary" x="20" y="825">transact</text>
+<text class="sublabel" x="20" y="840">1000 inserts — idb (fake-indexeddb)</text>
+<path class="bar primary" d="M306,821H503.3101476594301A4,4 0 0 1 507.3101476594301,825V831A4,4 0 0 1 503.3101476594301,835H306Z"/>
+<text class="value" x="513.3101476594301" y="834">5,253</text>
+</g>
+<g><title>open · 10,000 records — idb (fake-indexeddb)
+14 ops/s
+71.4 ms per operation</title>
+<text class="label primary" x="20" y="865">open</text>
+<text class="sublabel" x="20" y="880">10,000 records — idb (fake-indexeddb)</text>
+<path class="bar primary" d="M306,861H312.8134746401896A4,4 0 0 1 316.8134746401896,865V871A4,4 0 0 1 312.8134746401896,875H306Z"/>
+<text class="value" x="322.8134746401896" y="874">14</text>
+</g>
+<g><title>insert · mongodb (the driver in memory)
+1,897 ops/s
+527 µs per operation</title>
+<text class="label primary" x="20" y="905">insert</text>
+<text class="sublabel" x="20" y="920">mongodb (the driver in memory)</text>
+<path class="bar primary" d="M306,901H470.57698248576105A4,4 0 0 1 474.57698248576105,905V911A4,4 0 0 1 470.57698248576105,915H306Z"/>
+<text class="value" x="480.57698248576105" y="914">1,897</text>
+</g>
+<g><title>update · one field — mongodb (the driver in memory)
+1,430 ops/s
+699 µs per operation</title>
+<text class="label primary" x="20" y="945">update</text>
+<text class="sublabel" x="20" y="960">one field — mongodb (the driver in memory)</text>
+<path class="bar primary" d="M306,941H461.4948667724146A4,4 0 0 1 465.4948667724146,945V951A4,4 0 0 1 461.4948667724146,955H306Z"/>
+<text class="value" x="471.4948667724146" y="954">1,430</text>
+</g>
+<g><title>get · cached — mongodb (the driver in memory)
+202,634 ops/s
+4.94 µs per operation</title>
+<text class="label primary" x="20" y="985">get</text>
+<text class="sublabel" x="20" y="1000">cached — mongodb (the driver in memory)</text>
+<path class="bar primary" d="M306,981H620.6967114948301A4,4 0 0 1 624.6967114948301,985V991A4,4 0 0 1 620.6967114948301,995H306Z"/>
+<text class="value" x="630.6967114948301" y="994">203k</text>
+</g>
+<g><title>transact · 1000 inserts — mongodb (the driver in memory)
+316 ops/s
+3.16 ms per operation</title>
+<text class="label primary" x="20" y="1025">transact</text>
+<text class="sublabel" x="20" y="1040">1000 inserts — mongodb (the driver in memory)</text>
+<path class="bar primary" d="M306,1021H412.9768441137619A4,4 0 0 1 416.9768441137619,1025V1031A4,4 0 0 1 412.9768441137619,1035H306Z"/>
+<text class="value" x="422.9768441137619" y="1034">316</text>
+</g>
+<text class="caption" x="20" y="1089">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-11-01</text>
+</svg>

@@ -25,22 +25,24 @@ other libraries, and [Benchmarks](/guide/benchmarks) measures them on the same s
 
 ## What the table shows
 
-- **RxDB is the broader toolkit.** It has storages for every JavaScript runtime, replication
-  plugins for nine backends and handlers that sync with one you already run, a richer
-  write API (bulk writes, `modify()`, Mongo update operators, update by query), sorted compound
-  indexes, live queries that update without re-running (EventReduce), attachments, local
-  documents, storage migration, backups, several tabs on one database, and packages for Vue,
-  Angular and signals. In 45 rows RxDB has something where syncom has nothing; the rows are not
-  equal in weight, so read the sections that matter to you.
+- **RxDB is the broader toolkit.** It has storages for more runtimes (Deno KV, FoundationDB,
+  localStorage), replication plugins for nine backends and handlers that sync with one you already
+  run, a richer write API (bulk writes, `modify()`, Mongo update operators, update by query), sorted
+  compound indexes, live queries that update without re-running (EventReduce), attachments, local
+  documents, backups, several tabs writing one database, and packages for Vue, Angular and signals.
+  In 38 rows RxDB has something where syncom has nothing; the rows are not equal in weight, so read
+  the sections that matter to you.
 - **syncom is the stricter replicator.** Every write is an operation that merges field by field
   on every node, with no plugin to turn on: concurrent edits to different fields both stay,
   counters add up, sets keep every concurrent add. Every op is signed by the key that is the
   node's id, a hash-linked chain re-checks what is read, `repair(id)` rebuilds a record from the
   log, and `purge()` erases a payload on every replica it reaches. Any node hosts, a browser
-  included; the host limits, validates and reports. In 22 rows syncom has something where RxDB has
-  nothing: signatures, a tamper-evident log, collaborative text, multi-record transactions, unique
-  keys, multi-entry and combined indexes, projection, text search inside a query, OpenTelemetry,
-  stats among them.
+  included; the host limits, validates and reports. Its storage engines — memory, IndexedDB, SQLite
+  and MongoDB in the MIT package, every one over the same contract, a database moved between them
+  with `copyEngine()`, an engine served from a worker — are where RxDB sells its premium storages.
+  In 22 rows syncom has something where RxDB has nothing: signatures, a tamper-evident log,
+  collaborative text, multi-record transactions, unique keys, multi-entry and combined indexes,
+  projection, text search inside a query, OpenTelemetry, stats among them.
 - **Several RxDB guarantees depend on a switch.** Without a `validate-*` storage wrapper,
   production RxDB stores documents with wrong types, unknown fields and missing required fields.
   `final` fields, frozen documents and the checks on queries and ids run only in dev-mode, and
@@ -185,7 +187,7 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr><td>Bun</td><td>❌ not tested</td><td>⚠️ CI runs the memory-storage suite on Bun 1.4.2; no Bun-specific storage</td></tr>
 <tr><td>Browser persistence</td><td>✅ OPFS (default), IndexedDB (<code>/idb</code>), memory</td><td>✅ free: Dexie (IndexedDB), localStorage, memory; native IndexedDB and OPFS Premium (Pro)</td></tr>
 <tr><td>Browser requirements</td><td>secure context, OPFS, Web Crypto with Ed25519 and RSA-OAEP</td><td><code>crypto.subtle</code> (secure context) or your own <code>hashFunction</code>; some bundlers need a <code>global</code> shim</td></tr>
-<tr><td>Web Worker and SharedWorker</td><td>🔜 a storage served from a worker to its tabs is the planned follow-up</td><td>⚠️ Worker and SharedWorker storages are Premium (Pro Plus); the free core runs inside a worker</td></tr>
+<tr><td>Web Worker and SharedWorker</td><td>⚠️ the engine runs in a worker (<code>serveEngine</code> there, <code>connectEngine(worker)</code> in the main thread: the I/O off the main thread, tested under worker_threads); a database shared by several tabs through a SharedWorker leader is the planned <code>/shared</code></td><td>⚠️ Worker and SharedWorker storages are Premium (Pro Plus); the free core runs inside a worker</td></tr>
 <tr><td>React Native</td><td>❌ not a target: no React Native backend or Web Crypto shim</td><td>⚠️ Premium SQLite or Expo Filesystem storage; the free SQLite trial is capped<sup>5</sup></td></tr>
 <tr><td>Expo</td><td>❌ not a target</td><td>⚠️ Expo Filesystem storage is Premium (Pro); free: expo-sqlite through the SQLite trial</td></tr>
 <tr><td>Capacitor and Ionic</td><td>❌ not tested; a Capacitor <code>fsi</code> adapter is yours to write</td><td>⚠️ Premium SQLite via <code>@capacitor-community/sqlite</code>; free: localStorage or Dexie in the WebView</td></tr>
@@ -193,7 +195,7 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr><td>Tauri</td><td>❌ not documented or tested</td><td>⚠️ SQLite storage with <code>getSQLiteBasicsTauri()</code>: Premium, or the capped free trial</td></tr>
 <tr><td>Flutter</td><td>❌ none</td><td>⚠️ <code>rxdb/plugins/flutter</code> runs RxDB in QuickJS; its recipe needs the removed LokiJS storage<sup>6</sup></td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Tabs and instances</strong></td></tr>
-<tr><td>Several tabs on one database</td><td>⚠️ one tab per storage: <code>createDatabase()</code> holds a Web Lock, a second tab gets <code>LOCKED</code><sup>7</sup></td><td>✅ <code>multiInstance: true</code> (default): every tab opens it; changes cross over BroadcastChannel</td></tr>
+<tr><td>Several tabs on one database</td><td>⚠️ one tab writes: <code>createDatabase()</code> holds a Web Lock (a lease on MongoDB); another tab opens the same database <code>readOnly: true</code> and reads what the writer lands, hearing it through the engine's change stream (IndexedDB, MongoDB); a leader that takes the others' writes is the planned <code>/shared</code><sup>7</sup></td><td>✅ <code>multiInstance: true</code> (default): every tab opens it; changes cross over BroadcastChannel</td></tr>
 <tr><td>Leader election</td><td>⚠️ no election API; <code>lock: 'wait'</code> hands the storage to the next tab</td><td>✅ <code>rxdb/plugins/leader-election</code>: <code>waitForLeadership()</code>, <code>isLeader()</code>; Web Locks when available</td></tr>
 </tbody>
 </table>
@@ -214,23 +216,23 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 </thead>
 <tbody>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Backends</strong></td></tr>
-<tr><td>Storage contract</td><td>✅ <code>fsi</code>: five file functions — <code>read</code>, <code>write</code>, <code>exists</code>, <code>remove</code>, <code>list</code></td><td>✅ <code>RxStorage</code> → <code>RxStorageInstance</code>: <code>bulkWrite</code>, Mango <code>query</code>, <code>count</code>, <code>changeStream</code>, <code>cleanup</code>…</td></tr>
-<tr><td>Writing your own backend</td><td>✅ five functions; <code>tests/suites/fsi.js</code> is the contract as a test</td><td>✅ implement <code>RxStorageInstance</code>; the storage suite runs from a clone of the repo</td></tr>
-<tr><td>In-memory</td><td>✅ <code>memory()</code>: a <code>Map</code> of files; Node and browser</td><td>✅ <code>storage-memory</code> (free): plain objects, binary-search indexes; Node and browser</td></tr>
-<tr><td>IndexedDB</td><td>✅ <code>@alexify/syncom/idb</code> <code>createIdbFsi()</code>: each file a row keyed <code>[dir, name]</code></td><td>✅ <code>storage-dexie</code> (free, Dexie.js); native <code>storage-indexeddb</code> is Premium (Pro)<sup>8</sup></td></tr>
+<tr><td>Storage contract</td><td>✅ an engine: a factory of databases, each a set of stores — <code>kv</code> by namespace and key, <code>records</code> by id with their <code>pieces</code>, a tag's <code>copies</code>, the op log's medium, <code>write(batch)</code> one write set — with <code>capabilities</code>; the five-function <code>fsi</code> is the files engine's backend (<code>filesEngine(fsi)</code>)</td><td>✅ <code>RxStorage</code> → <code>RxStorageInstance</code>: <code>bulkWrite</code>, Mango <code>query</code>, <code>count</code>, <code>changeStream</code>, <code>cleanup</code>…</td></tr>
+<tr><td>Writing your own backend</td><td>✅ an engine (<code>tests/suites/engine.js</code> is the contract as a test, run over every engine that ships) or an <code>fsi</code> of five functions (<code>tests/suites/fsi.js</code>)</td><td>✅ implement <code>RxStorageInstance</code>; the storage suite runs from a clone of the repo</td></tr>
+<tr><td>In-memory</td><td>✅ <code>memoryEngine()</code>: records as the objects handed in, the log as rows, nothing stringified; <code>memory()</code>, a <code>Map</code> of files, for the files engine; Node and browser</td><td>✅ <code>storage-memory</code> (free): plain objects, binary-search indexes; Node and browser</td></tr>
+<tr><td>IndexedDB</td><td>✅ <code>idbEngine()</code>: six object stores keyed by the database's path, one readwrite transaction per write set and per log group, key ranges for listings, a <code>BroadcastChannel</code> for another tab; <code>createIdbFsi()</code>, a file store, beside it</td><td>✅ <code>storage-dexie</code> (free, Dexie.js); native <code>storage-indexeddb</code> is Premium (Pro)<sup>8</sup></td></tr>
 <tr><td>OPFS</td><td>✅ the default browser backend; async <code>createWritable()</code>, main thread or worker</td><td>⚠️ Premium (Pro) <code>storage-opfs</code>: in a worker (sync handles) or <code>getRxStorageOPFSMainThread()</code></td></tr>
-<tr><td>localStorage</td><td>❌ none shipped; an <code>fsi</code> over it would be five functions</td><td>✅ <code>storage-localstorage</code> (free): a key per document, a JSON array per index; browser</td></tr>
+<tr><td>localStorage</td><td>⚠️ none shipped; an engine (or an <code>fsi</code> of five functions) over it would do</td><td>✅ <code>storage-localstorage</code> (free): a key per document, a JSON array per index; browser</td></tr>
 <tr><td>Node.js filesystem</td><td>✅ the default under Node: <code>node:fs/promises</code>, plain JSON files</td><td>⚠️ Premium (Pro) <code>storage-filesystem-node</code>; Node and Electron</td></tr>
-<tr><td>SQLite</td><td>❌ none</td><td>⚠️ Premium (Pro) <code>storage-sqlite</code>; the free <code>getRxStorageSQLiteTrial()</code> is capped<sup>9</sup></td></tr>
+<tr><td>SQLite</td><td>✅ <code>sqliteEngine()</code> over <code>node:sqlite</code> or any driver with <code>exec</code>/<code>prepare</code> (better-sqlite3, expo-sqlite): six tables in one file, one transaction per write set and per log group, WAL; MIT, no row limit</td><td>⚠️ Premium (Pro) <code>storage-sqlite</code>; the free <code>getRxStorageSQLiteTrial()</code> is capped<sup>9</sup></td></tr>
 <tr><td>Expo / React Native files</td><td>❌ none; not a target, an <code>fsi</code> is injectable</td><td>⚠️ Premium (Pro) <code>storage-filesystem-expo</code>, beta since 17.0.0; needs <code>expo-opfs</code></td></tr>
-<tr><td>MongoDB as storage</td><td>❌ none</td><td>✅ <code>storage-mongodb</code> (free), Node; no attachments<sup>10</sup></td></tr>
-<tr><td>FoundationDB</td><td>❌ none</td><td>✅ <code>storage-foundationdb</code> (free), Node with the native client; one process per cluster</td></tr>
-<tr><td>Deno KV</td><td>❌ none</td><td>✅ <code>storage-denokv</code> (free), Deno only<sup>11</sup></td></tr>
+<tr><td>MongoDB as storage</td><td>✅ <code>mongoEngine({ client })</code>, the driver injected: six collections keyed by the database's path, a bulk write per collection per write set (one session transaction on a replica set), change streams for followers, a lease per database</td><td>✅ <code>storage-mongodb</code> (free), Node; no attachments<sup>10</sup></td></tr>
+<tr><td>FoundationDB</td><td>⚠️ none shipped; the engine contract (<code>src/engine.js</code>, six stores and a write set) is what one would implement — <code>tests/suites/engine.js</code> is the test</td><td>✅ <code>storage-foundationdb</code> (free), Node with the native client; one process per cluster</td></tr>
+<tr><td>Deno KV</td><td>⚠️ none shipped; the same engine contract</td><td>✅ <code>storage-denokv</code> (free), Deno only<sup>11</sup></td></tr>
 <tr><td>LokiJS / PouchDB storages</td><td>— no legacy backends</td><td>❌ removed: PouchDB in 14.0.0; LokiJS and memory-synced in 16.0.0<sup>12</sup></td></tr>
 <tr><td>Free-tier limits on storage</td><td>✅ none: every backend is in the MIT package</td><td>⚠️ SQLite trial capped; Dexie prints a Premium notice; no trial of other Premium storages</td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Wrappers and offloading</strong></td></tr>
-<tr><td>Stacking storage wrappers</td><td>✅ an <code>fsi</code> wraps an <code>fsi</code>: <code>atRest()</code> (AES-256-GCM), <code>layered()</code> (memory over disk), <code>durable</code> (fsync); document transforms are hooks</td><td>✅ <code>wrapRxStorageInstance</code>: validation, key compression, encryption, attachment compression stack</td></tr>
-<tr><td>Remote storage (IPC, WebSocket)</td><td>❌ none; a peer replicates a copy instead</td><td>✅ <code>storage-remote</code> over any message channel; <code>storage-remote-websocket</code>; Electron IPC</td></tr>
+<tr><td>Stacking storage wrappers</td><td>✅ an engine wraps an engine: <code>atRest(engine)</code> (every value AES-256-GCM, bound to its place), <code>remoteEngine()</code> (over a port); an <code>fsi</code> wraps an <code>fsi</code>: <code>atRest(fsi)</code>, <code>layered()</code></td><td>✅ <code>wrapRxStorageInstance</code>: validation, key compression, encryption, attachment compression stack</td></tr>
+<tr><td>Remote storage (IPC, WebSocket)</td><td>✅ <code>serveEngine(engine, port)</code> / <code>connectEngine(port)</code> (<code>@alexify/syncom/engines</code>): the engine answered over a <code>MessagePort</code> — a worker thread, a SharedWorker, Electron's main process — every call a message; the database stays where it is opened</td><td>✅ <code>storage-remote</code> over any message channel; <code>storage-remote-websocket</code>; Electron IPC</td></tr>
 <tr><td>Sharding</td><td>❌ none</td><td>⚠️ Premium (Pro Plus) <code>storage-sharding</code>; schema <code>sharding: { shards, mode }</code></td></tr>
 <tr><td>In-memory layer over a disk store</td><td>✅ <code>layered([memory(), fsi], { write: 'through' | 'back' })</code>: memory read first, the disk under it</td><td>⚠️ Premium (Pro Plus) <code>storage-memory-mapped</code>; memory-synced removed in 16<sup>13</sup></td></tr>
 <tr><td>What opening loads</td><td>the catalog (every id, indexed values) and the retained log, into memory</td><td>lazy per collection; Premium (Pro Plus) meta optimizer keeps internal metadata in localStorage</td></tr>
@@ -241,16 +243,16 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr><td>Integrity check and repair</td><td>✅ cold reads re-verified against the chain, torn files too (<code>INTEGRITY</code>); <code>repair(id)</code> replays the log<sup>16</sup></td><td>❌ none; attachment digests serve change detection only</td></tr>
 <tr><td>Quota and eviction handling</td><td>❌ none; past the log append a failed record file is held in memory and reported (<code>UNPERSISTED</code>)</td><td>❌ none in the core; the storage's <code>QuotaExceededError</code> reaches the caller</td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Data on disk</strong></td></tr>
-<tr><td>On-disk format</td><td>✅ plain JSON files: <code>data/&lt;id&gt;.json</code>, log batches, chain blocks, keys</td><td>⚠️ per storage: JSON documents with <code>_rev</code>, <code>_meta</code> (Dexie, localStorage, SQLite, MongoDB); Premium formats undocumented</td></tr>
-<tr><td>Files written per change</td><td>one log line per group of appends (a journal, where the backend appends; a file per group where it does not); the record file and its chain block once per deferred window (16 ms)</td><td>one document row per write, plus the storage's index entries</td></tr>
+<tr><td>On-disk format</td><td>✅ the files engine: plain JSON files (<code>data/&lt;id&gt;.json</code>, log journals and segments, chain blocks, keys); a native engine: its own stores keyed by the database's path — object stores, tables, collections — the record as JSON, the log a row per entry</td><td>⚠️ per storage: JSON documents with <code>_rev</code>, <code>_meta</code> (Dexie, localStorage, SQLite, MongoDB); Premium formats undocumented</td></tr>
+<tr><td>Files written per change</td><td>the files engine: one log line per group of appends and one record file per changed record (a chain block and its tail as kv puts of the same write set); a native engine: two transactions per write — the log group and the landing — however many records the batch holds</td><td>one document row per write, plus the storage's index entries</td></tr>
 <tr><td>Compression</td><td>❌ none</td><td>✅ <code>key-compression</code> wrapper (schema-derived short keys); <code>attachments-compression</code> (gzip/deflate)</td></tr>
 <tr><td>In-memory document cache</td><td>✅ <code>cache: { max: 5000 }</code> entries; a live <code>Document</code> pins its own (WeakRef)</td><td>✅ <code>DocumentCache</code> per collection: RxDocuments by revision, held by WeakRef</td></tr>
 <tr><td>Attachments / binary data</td><td>❌ none: JSON records only, no binary type</td><td>✅ <code>attachments</code> plugin: Blobs per document, <code>putAttachment()</code>, <code>getData()</code><sup>17</sup></td></tr>
 <tr><td>Local (non-replicated) documents</td><td>⚠️ only encrypted records stay local; no plain local documents</td><td>✅ <code>local-documents</code>: <code>insertLocal()</code>, <code>getLocal$()</code>; not replicated, no schema</td></tr>
 <tr><td>Tombstone cleanup</td><td>❌ none: a tombstone keeps its file (data emptied) and catalog row</td><td>✅ <code>cleanup</code> plugin: purges tombstones after 31 days, once replications are in sync</td></tr>
-<tr><td>Delete a whole database</td><td>❌ no API; remove the directory yourself</td><td>✅ <code>db.remove()</code>, <code>removeRxDatabase(name, storage)</code>, <code>collection.remove()</code></td></tr>
+<tr><td>Delete a whole database</td><td>✅ <code>engine.remove(path)</code>: every store of the database at <code>path</code>, gone; <code>engine.destroy()</code> drops the whole IndexedDB database, SQLite file or MongoDB database</td><td>✅ <code>db.remove()</code>, <code>removeRxDatabase(name, storage)</code>, <code>collection.remove()</code></td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Moving data</strong></td></tr>
-<tr><td>Migrate between backends</td><td>❌ no tool; the same JSON files on every backend</td><td>✅ <code>migrateStorage()</code> (free): moves live documents batch by batch into a new database<sup>18</sup></td></tr>
+<tr><td>Migrate between backends</td><td>✅ <code>copyEngine(from, to, { path })</code> (<code>@alexify/syncom/engines</code>): records with their pieces, a tag's copies, every kv text and the op log with its index — the node opens on the new engine as itself and no peer bootstraps</td><td>✅ <code>migrateStorage()</code> (free): moves live documents batch by batch into a new database<sup>18</sup></td></tr>
 <tr><td>Backup to files</td><td>❌ no API; the Node directory is plain JSON, copy it closed<sup>19</sup></td><td>⚠️ <code>backup</code> plugin: Node only, one-time or live, a <code>document.json</code> per document; no restore</td></tr>
 <tr><td>JSON export / import</td><td>⚠️ <code>snapshot()</code> pages out records with meta, tombstones too; <code>mergeSnapshot()</code> joins them</td><td>✅ <code>json-dump</code>: <code>exportJSON()</code> / <code>importJSON()</code>, schema-hash checked, attachments optional<sup>20</sup></td></tr>
 </tbody>
@@ -390,7 +392,7 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr><td>Compound indexes</td><td>⚠️ only for <code>unique</code> keys; queries intersect single-field postings</td><td>✅ any index is a field list; <code>_deleted</code> and the primary key are added</td></tr>
 <tr><td>Array (multi-entry) indexes</td><td>✅ an indexed array is posted under each element</td><td>❌ refused in dev-mode (<code>SC36</code>); an RxPipeline into a mapping collection instead<sup>35</sup></td></tr>
 <tr><td>Indexable values</td><td>✅ any JSON value, keyed canonically (object keys in any order)</td><td>⚠️ strings with <code>maxLength</code>, numbers with <code>minimum</code>/<code>maximum</code>/<code>multipleOf</code>, required booleans</td></tr>
-<tr><td>Where indexes live</td><td>in memory (the catalog), saved to <code>index/catalog.json</code>, caught up from the log at open</td><td>in the storage: IndexedDB indexes on Dexie (disk), sorted arrays on memory</td></tr>
+<tr><td>Where indexes live</td><td>in memory (the catalog) on every engine, saved as kv (<code>index/catalog.json</code>) or as the engine's rows (memory, IndexedDB), caught up from the log on open</td><td>in the storage: IndexedDB indexes on Dexie (disk), sorted arrays on memory</td></tr>
 <tr><td>Adding or changing an index</td><td>✅ edit <code>index</code>; the catalog rebuilds once at the next open</td><td>⚠️ a schema change: bump <code>version</code> and migrate, or <code>addCollections()</code> throws DB6</td></tr>
 <tr><td>Query planner</td><td>✅ indexed equalities narrow the candidates before any record is read</td><td>✅ rates one key range per index, takes the best; <code>index</code> forces one</td></tr>
 <tr><td>Several indexes in one query</td><td>✅ postings intersect over <code>$and</code>, union over an <code>$or</code> whose branches are all indexed</td><td>❌ one index per query; an <code>$or</code> scans a whole index</td></tr>
@@ -505,7 +507,7 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr><td>HTTP framework adapters</td><td>✅ any wrpc host (MIT): its own <code>Server</code>, <code>uws</code>, <code>fastify</code>, <code>express</code></td><td>⚠️ Express free (SSPL); Fastify and Koa are Premium (Pro Plus)</td></tr>
 <tr><td>What the server serves</td><td><code>hello</code>, <code>push</code>, <code>snapshot</code>, <code>changes</code> (a resumable subscription)</td><td>per collection <code>pull</code>, <code>push</code>, <code>pullStream</code> (SSE); REST <code>query</code>, <code>get</code>, <code>set</code>, <code>delete</code></td></tr>
 <tr><td>Queries for thin clients</td><td>❌ none: a client replicates its scopes and queries locally</td><td>✅ RxServer REST endpoint and <code>client-rest</code>; live results over SSE</td></tr>
-<tr><td>Server-side storage</td><td>a full syncom node: its own log and records over its <code>fsi</code></td><td>any RxStorage of the server's RxDatabase: memory, MongoDB, FoundationDB…</td></tr>
+<tr><td>Server-side storage</td><td>a full syncom node over any engine: node:fs, SQLite (<code>sqliteEngine</code>) or MongoDB (<code>mongoEngine</code>, one writer by lease, read-only followers over change streams)</td><td>any RxStorage of the server's RxDatabase: memory, MongoDB, FoundationDB…</td></tr>
 </tbody>
 </table>
 
@@ -525,7 +527,7 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 </thead>
 <tbody>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Encryption</strong></td></tr>
-<tr><td>Encryption at rest</td><td>✅ <code>atRest(fsi, { key | password })</code>: every file AES-256-GCM, and the records sync as ever; per record <code>encrypted: true</code> stays local</td><td>⚠️ per field (schema <code>encrypted: [...]</code>): free <code>encryption-crypto-js</code>; WebCrypto is Premium (Pro)</td></tr>
+<tr><td>Encryption at rest</td><td>✅ <code>atRest(fsi | engine, { key | password })</code>: every file of a backend, or every value of an engine's stores (records, pieces, copies, kv, the log's entries and index), AES-256-GCM under one key, bound to its place; and the record-level <code>{ encrypted: true }</code></td><td>⚠️ per field (schema <code>encrypted: [...]</code>): free <code>encryption-crypto-js</code>; WebCrypto is Premium (Pro)</td></tr>
 <tr><td>What is encrypted</td><td>the record's whole data; its id, collection and timestamps stay readable</td><td>the listed fields only; primary key, other fields, <code>_meta</code>, <code>_rev</code> stay plain</td></tr>
 <tr><td>Cipher and integrity</td><td>✅ AES-256-GCM with a fresh key per record, wrapped by RSA-OAEP-256</td><td>⚠️ free: AES-256-CBC, MD5 key derivation, no MAC; AES-GCM selectable in Premium<sup>48</sup></td></tr>
 <tr><td>Key kept off the disk</td><td>⚠️ the at-rest key or password is the caller's, never written; the RSA pair that seals a record is a file in <code>keys/</code></td><td>⚠️ <code>password</code> given at <code>createRxDatabase</code>, kept in memory; an unsalted SHA-256 of it is stored<sup>49</sup></td></tr>

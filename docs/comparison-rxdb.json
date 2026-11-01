@@ -1596,10 +1596,9 @@
           "detail": "docs/guide/browser.md names OPFS and Web Crypto but not Ed25519 specifically; which browser versions expose Ed25519 in Web Crypto was not checked here. OPFS writes use `createWritable()`."
         },
         "worker": {
-          "mark": "🔜",
-          "text": "a storage served from a worker to its tabs is the planned follow-up",
-          "source": "docs/guide/scaling.md#several-tabs",
-          "detail": "The browser half has no `window` dependency (src/lock.js:87 treats `self` as a browser), but running inside a worker is not tested. wrpc's `WrpcClientProxy` can already share one connection from a SharedWorker."
+          "mark": "⚠️",
+          "text": "the engine runs in a worker (`serveEngine` there, `connectEngine(worker)` in the main thread: the I/O off the main thread, tested under worker_threads); a database shared by several tabs through a SharedWorker leader is the planned `/shared`",
+          "source": "src/engines/remote.js; tests/engines.remote.test.js; docs/guide/backends.md#an-engine-in-a-worker"
         },
         "reactNative": {
           "mark": "❌",
@@ -1634,10 +1633,9 @@
         },
         "multiTab": {
           "mark": "⚠️",
-          "text": "one tab per storage: `createDatabase()` holds a Web Lock, a second tab gets `LOCKED`",
-          "source": "src/lock.js:58-95; docs/guide/scaling.md#several-tabs; docs/guide/database.md#one-instance-per-directory",
-          "note": "There are no cross-tab change events and no read-only open: the other tabs wait for the lock (`lock: 'wait'`) or route reads and writes to the owner through a `BroadcastChannel`.",
-          "detail": "Two storages over one directory would mint the same sequence numbers, which is why the lock exists (src/lock.js:4-9)."
+          "text": "one tab writes: `createDatabase()` holds a Web Lock (a lease on MongoDB); another tab opens the same database `readOnly: true` and reads what the writer lands, hearing it through the engine's change stream (IndexedDB, MongoDB); a leader that takes the others' writes is the planned `/shared`",
+          "source": "src/lock.js; src/database.js (readOnly, #hearChange); src/idb/engine.js (changes)",
+          "note": "There are no cross-tab change events and no read-only open: the other tabs wait for the lock (`lock: 'wait'`) or route reads and writes to the owner through a `BroadcastChannel`."
         },
         "leader": {
           "mark": "⚠️",
@@ -1646,27 +1644,23 @@
         },
         "storageContract": {
           "mark": "✅",
-          "text": "`fsi`: five file functions — `read`, `write`, `exists`, `remove`, `list`",
-          "source": "src/backend.js:7-31; index.d.ts:37-60; docs/guide/backends.md",
-          "detail": "Optional `sync` (fsync, used by `durable: true`) and `create` (exclusive create, used by the lock). Everything above bytes — records, log, chain, catalog, indexes, queries — is the engine's and identical on every backend."
+          "text": "an engine: a factory of databases, each a set of stores — `kv` by namespace and key, `records` by id with their `pieces`, a tag's `copies`, the op log's medium, `write(batch)` one write set — with `capabilities`; the five-function `fsi` is the files engine's backend (`filesEngine(fsi)`)",
+          "source": "src/engine.js; src/files/files.js; index.d.ts (Engine, EngineDb, EngineCapabilities)"
         },
         "customBackend": {
           "mark": "✅",
-          "text": "five functions; `tests/suites/fsi.js` is the contract as a test",
-          "source": "docs/guide/backends.md#your-own; tests/suites/fsi.js; src/backend.js:35-82 (the memory adapter, ~45 lines)",
-          "detail": "The contract suite lives in the repository, not in the npm package (`files` excludes tests/). An adapter must make `write` whole-file and visible to the next `read`, and `list` return file names, sorted."
+          "text": "an engine (`tests/suites/engine.js` is the contract as a test, run over every engine that ships) or an `fsi` of five functions (`tests/suites/fsi.js`)",
+          "source": "tests/suites/engine.js; tests/suites/fsi.js; docs/guide/backends.md#engines"
         },
         "memoryBackend": {
           "mark": "✅",
-          "text": "`memory()`: a `Map` of files; Node and browser",
-          "source": "src/backend.js:35-82; docs/guide/backends.md#the-four-that-ship",
-          "detail": "Files are kept as JSON strings, so reads still parse; two storages over one memory fsi with different paths form a mesh in one process (how the sync-engine suite runs)."
+          "text": "`memoryEngine()`: records as the objects handed in, the log as rows, nothing stringified; `memory()`, a `Map` of files, for the files engine; Node and browser",
+          "source": "src/memory/engine.js; src/memory/memory.js"
         },
         "indexeddb": {
           "mark": "✅",
-          "text": "`@alexify/syncom/idb` `createIdbFsi()`: each file a row keyed `[dir, name]`",
-          "source": "src/idb/idb.js; docs/guide/browser.md#opfs-or-indexeddb",
-          "detail": "One IndexedDB transaction per file write, resolved on `complete`; `durable: true` is a no-op there."
+          "text": "`idbEngine()`: six object stores keyed by the database's path, one readwrite transaction per write set and per log group, key ranges for listings, a `BroadcastChannel` for another tab; `createIdbFsi()`, a file store, beside it",
+          "source": "src/idb/engine.js; src/idb/idb.js; tests/engine.idb.test.js"
         },
         "opfs": {
           "mark": "✅",
@@ -1675,9 +1669,9 @@
           "detail": "One file per record, per chain block and per log batch, written through the async API, not sync access handles. RxDB's own storage article notes that one file per document is the slow way to write to OPFS (https://rxdb.info/articles/localstorage-indexeddb-cookies-opfs-sqlite-wasm.html)."
         },
         "localStorage": {
-          "mark": "❌",
-          "text": "none shipped; an `fsi` over it would be five functions",
-          "source": "docs/guide/backends.md#the-four-that-ship"
+          "mark": "⚠️",
+          "text": "none shipped; an engine (or an `fsi` of five functions) over it would do",
+          "source": "src/engine.js; src/backend.js"
         },
         "nodeFs": {
           "mark": "✅",
@@ -1685,9 +1679,9 @@
           "source": "src/fsi.js; docs/guide/backends.md#the-four-that-ship"
         },
         "sqlite": {
-          "mark": "❌",
-          "text": "none",
-          "source": "src/ (no SQLite adapter)"
+          "mark": "✅",
+          "text": "`sqliteEngine()` over `node:sqlite` or any driver with `exec`/`prepare` (better-sqlite3, expo-sqlite): six tables in one file, one transaction per write set and per log group, WAL; MIT, no row limit",
+          "source": "src/sqlite/sqlite.js; tests/engine.sqlite.test.js"
         },
         "expoFs": {
           "mark": "❌",
@@ -1695,19 +1689,19 @@
           "source": "docs/guide/backends.md#your-own"
         },
         "mongodbStorage": {
-          "mark": "❌",
-          "text": "none",
-          "source": "src/"
+          "mark": "✅",
+          "text": "`mongoEngine({ client })`, the driver injected: six collections keyed by the database's path, a bulk write per collection per write set (one session transaction on a replica set), change streams for followers, a lease per database",
+          "source": "src/mongodb/mongodb.js; tests/engine.mongodb.test.js (the driver in memory; MONGODB_URL for the real one)"
         },
         "foundationdb": {
-          "mark": "❌",
-          "text": "none",
-          "source": "src/"
+          "mark": "⚠️",
+          "text": "none shipped; the engine contract (`src/engine.js`, six stores and a write set) is what one would implement — `tests/suites/engine.js` is the test",
+          "source": "src/engine.js; tests/suites/engine.js"
         },
         "denokv": {
-          "mark": "❌",
-          "text": "none",
-          "source": "src/"
+          "mark": "⚠️",
+          "text": "none shipped; the same engine contract",
+          "source": "src/engine.js; tests/suites/engine.js"
         },
         "legacyStorages": {
           "mark": "—",
@@ -1721,13 +1715,13 @@
         },
         "storageWrappers": {
           "mark": "✅",
-          "text": "an `fsi` wraps an `fsi`: `atRest()` (AES-256-GCM), `layered()` (memory over disk), `durable` (fsync); document transforms are hooks",
-          "source": "src/encryption/encryption.js (atRest); src/layered/layered.js; src/backend.js (withSync); docs/guide/backends.md"
+          "text": "an engine wraps an engine: `atRest(engine)` (every value AES-256-GCM, bound to its place), `remoteEngine()` (over a port); an `fsi` wraps an `fsi`: `atRest(fsi)`, `layered()`",
+          "source": "src/encryption/at-rest-engine.js; src/engines/remote.js; src/layered/layered.js"
         },
         "remoteStorage": {
-          "mark": "❌",
-          "text": "none; a peer replicates a copy instead",
-          "source": "src/sync/manager.js; docs/guide/sync.md"
+          "mark": "✅",
+          "text": "`serveEngine(engine, port)` / `connectEngine(port)` (`@alexify/syncom/engines`): the engine answered over a `MessagePort` — a worker thread, a SharedWorker, Electron's main process — every call a message; the database stays where it is opened",
+          "source": "src/engines/remote.js; tests/engines.remote.test.js"
         },
         "sharding": {
           "mark": "❌",
@@ -1780,13 +1774,13 @@
         },
         "onDiskFormat": {
           "mark": "✅",
-          "text": "plain JSON files: `data/<id>.json`, log batches, chain blocks, keys",
-          "source": "docs/guide/database.md#on-disk; docs/guide/architecture.md#on-disk"
+          "text": "the files engine: plain JSON files (`data/<id>.json`, log journals and segments, chain blocks, keys); a native engine: its own stores keyed by the database's path — object stores, tables, collections — the record as JSON, the log a row per entry",
+          "source": "src/files/files.js; src/idb/engine.js; src/sqlite/sqlite.js; src/mongodb/mongodb.js; docs/reference/wire.md#in-an-engine"
         },
         "writeFootprint": {
           "mark": "",
-          "text": "one log line per group of appends (a journal, where the backend appends; a file per group where it does not); the record file and its chain block once per deferred window (16 ms)",
-          "source": "src/log.js (group commit, the journal); src/database.js (#deferWrite); docs/guide/backends.md"
+          "text": "the files engine: one log line per group of appends and one record file per changed record (a chain block and its tail as kv puts of the same write set); a native engine: two transactions per write — the log group and the landing — however many records the batch holds",
+          "source": "src/files/files.js; src/entries.js (writeMany); tests/engine.idb.test.js; tests/engine.sqlite.test.js"
         },
         "compression": {
           "mark": "❌",
@@ -1815,15 +1809,14 @@
           "detail": "Checked: a deleted record's file is `{ data: {}, meta: { deleted } }`, a purged one adds `purged`. The op log is bounded by retention; tombstone files and chain blocks are not."
         },
         "deleteDatabase": {
-          "mark": "❌",
-          "text": "no API; remove the directory yourself",
-          "source": "src/database.js; src/backend.js (no directory removal in the contract)"
+          "mark": "✅",
+          "text": "`engine.remove(path)`: every store of the database at `path`, gone; `engine.destroy()` drops the whole IndexedDB database, SQLite file or MongoDB database",
+          "source": "src/engine.js; src/idb/engine.js; src/sqlite/sqlite.js; src/mongodb/mongodb.js"
         },
         "storageMigration": {
-          "mark": "❌",
-          "text": "no tool; the same JSON files on every backend",
-          "source": "docs/guide/backends.md",
-          "detail": "Copying every file from one fsi to another opens fine (checked memory to memory), but `list` names files only, so a copier must know the directory layout."
+          "mark": "✅",
+          "text": "`copyEngine(from, to, { path })` (`@alexify/syncom/engines`): records with their pieces, a tag's copies, every kv text and the op log with its index — the node opens on the new engine as itself and no peer bootstraps",
+          "source": "src/engines/copy.js; tests/engines.copy.test.js"
         },
         "backup": {
           "mark": "❌",
@@ -2311,9 +2304,8 @@
         },
         "indexStorage": {
           "mark": "",
-          "text": "in memory (the catalog), saved to `index/catalog.json`, caught up from the log at open",
-          "source": "src/catalog.js:1-20; src/database.js:312-342; docs/guide/database.md#the-catalog-and-the-cache",
-          "detail": "Every live id, its indexed values and its search text must fit in memory; a first open, a stamp the log cannot resume from, or other indexes rebuild it from one scan of data/."
+          "text": "in memory (the catalog) on every engine, saved as kv (`index/catalog.json`) or as the engine's rows (memory, IndexedDB), caught up from the log on open",
+          "source": "src/catalog.js; src/database.js (#loadCatalog); src/memory/engine.js (catalog)"
         },
         "indexChange": {
           "mark": "✅",
@@ -2769,13 +2761,13 @@
         },
         "serverStorage": {
           "mark": "",
-          "text": "a full syncom node: its own log and records over its `fsi`",
-          "source": "docs/guide/scaling.md#hubs"
+          "text": "a full syncom node over any engine: node:fs, SQLite (`sqliteEngine`) or MongoDB (`mongoEngine`, one writer by lease, read-only followers over change streams)",
+          "source": "src/sqlite/sqlite.js; src/mongodb/mongodb.js; docs/guide/backends.md#engines"
         },
         "atRest": {
           "mark": "✅",
-          "text": "`atRest(fsi, { key | password })`: every file AES-256-GCM, and the records sync as ever; per record `encrypted: true` stays local",
-          "source": "src/encryption/encryption.js; docs/guide/backends.md"
+          "text": "`atRest(fsi | engine, { key | password })`: every file of a backend, or every value of an engine's stores (records, pieces, copies, kv, the log's entries and index), AES-256-GCM under one key, bound to its place; and the record-level `{ encrypted: true }`",
+          "source": "src/encryption/encryption.js; src/encryption/at-rest-engine.js"
         },
         "encScope": {
           "mark": "",
