@@ -139,6 +139,8 @@ class Database extends Emitter {
   #lockWait = 0;
   // The engine's write sets: how many, how many failed, the time they took (ms) — `stats().engine`.
   #engineStats = { writes: 0, failures: 0, ms: 0 };
+  // A follower's: the records heard through the change stream, the re-reads that failed, the catch-ups run.
+  #followStats = { heard: 0, failed: 0, caughtUp: 0 };
   #options;
   #nodeId = null;
   #clock = new Clock();
@@ -774,6 +776,7 @@ class Database extends Emitter {
     if (message.error !== undefined) return void this.#followLost(message.error);
     if (!Array.isArray(message.records)) return;
     const ids = message.records;
+    this.#followStats.heard += ids.length;
     this.#heard = this.#heard.then(async () => {
       // The records heard, read in one call; one by one where the engine cannot (a record gone reads as null).
       let found = null;
@@ -799,6 +802,7 @@ class Database extends Emitter {
       const alive = entry !== null && isAlive(entry);
       this.#emitUpdate(id, alive ? entry.data : null, alive ? { ...entry.data } : {}, null, entry);
     } catch (error) {
+      this.#followStats.failed++;
       this.#logger.warn({ event: 'follow.failed', id, err: error });
     }
   }
@@ -852,6 +856,7 @@ class Database extends Emitter {
     const gone = [];
     for (let i = 0; i < held.length; i++) if (!seen.has(held[i])) gone.push(held[i]);
     for (let i = 0; i < gone.length; i++) await this.#reread(gone[i]);
+    this.#followStats.caughtUp++;
   }
 
   // The Record the application holds for `id`, if it still does.
@@ -1251,6 +1256,8 @@ class Database extends Emitter {
           }
         : null,
       readOnly: this.#readOnly,
+      // A follower's count of what it heard; null on a writer.
+      follow: this.#readOnly ? { ...this.#followStats } : null,
       // The engine and what its write sets cost so far.
       engine: {
         name: this.#engine.name,

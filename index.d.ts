@@ -1509,6 +1509,8 @@ export interface StorageStats {
   closed: boolean;
   /** Opened with `readOnly: true`, or a writer whose lease was lost. */
   readOnly: boolean;
+  /** A follower's count of what it heard through the engine's change stream: records heard, re-reads that failed, catch-ups run (`null` on a writer). */
+  follow: { heard: number; failed: number; caughtUp: number } | null;
   /** The plugins this storage was opened with, by name, in registration order. */
   plugins: string[];
   /** Writes waiting on, or running in, the mutation queue. */

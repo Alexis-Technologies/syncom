@@ -594,7 +594,14 @@ const remoteEngine = (port, { name, capabilities, timeout = 0 } = {}) => {
         onFail(unpackError(result.error ?? { message: 'the group was not written' }));
         return false;
       },
-      seal: (entries, from, to) => logCall('seal', [entries, from, to]),
+      // A native store seals a range by its count — the rows are there — so the entries go as their seqs; the files
+      // journal reads the lines it holds and needs an entry only for a line it lacks, so a served files engine gets them whole.
+      seal(entries, from, to) {
+        if (name === 'files') return logCall('seal', [entries, from, to]);
+        const seqs = [];
+        for (let i = 0; i < entries.length; i++) seqs.push({ seq: entries[i].seq });
+        return logCall('seal', [seqs, from, to]);
+      },
       sealed: (to) => logCall('sealed', [to]),
       drop: (segment) => logCall('drop', [{ from: segment.from, to: segment.to }]),
       saveIndex: (index) => logCall('saveIndex', [index]),

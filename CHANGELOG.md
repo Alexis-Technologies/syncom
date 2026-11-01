@@ -1165,6 +1165,13 @@ and one `commit` event, not one per call.
 
 ### Fixed
 
+- **A copy reads a page at a time; a roll over the port sends seqs, not entries; a follower counts what it hears.**
+  `copyEngine` read every record and every piece one call at a time (review №5, P-15): a page goes through
+  `records.getMany` and a record's pieces through `pieces.getMany`, a record the medium holds that is no record
+  copied as its text. The proxy over a port sent every entry of a roll to the served store, which seals a range by
+  its count unless it is the files journal (P-14): the seqs alone cross for a native store. `stats().follow` counts a
+  follower's records heard, re-reads failed and catch-ups run (O-6). The chain guide says why blocks are never
+  pruned and what a checkpoint block would change (SC-8).
 - **One renewal timer per MongoDB engine; the op log builds no journal of its own.** A hub with many databases on one
   MongoDB engine renewed each lease on a timer of its own, a round trip a lease a tick (review №5, SC-9): every lease
   the engine holds is renewed in ONE bulk write a tick, at the shortest margin among them, and a tick that lands short

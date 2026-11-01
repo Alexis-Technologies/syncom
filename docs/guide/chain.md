@@ -108,3 +108,17 @@ block recorded rejects with `code: 'INTEGRITY'` and
 `Database record <id> is invalid` rather than returning the modified data;
 `repair(id)` rebuilds it from the log. `createDatabase({ integrity: 'lazy' })` skips the
 check on a cold read.
+
+## Retention
+
+A block is a kv text per landing (the `blockchain` namespace), and none is ever
+pruned: `validate()` walks the chain from its genesis, so a block taken away
+would leave the records above it unverifiable. On the files engine that is a
+file per landing; on SQLite and MongoDB a row or a document each — a database
+written for years holds as many blocks as landings. What would bound it is a
+checkpoint block — a block that carries the hashes of every live record at a
+point and lets the blocks below it go, `validate()` starting from the newest
+checkpoint — tied to the log's retention, which already decides how far back a
+peer may resume. That is a format change (a block kind, a `validate()` that
+knows it) and is not in this version: until then, a hub that only replicates
+runs with `chain: false`, as the guide above says.

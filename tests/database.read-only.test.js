@@ -141,6 +141,9 @@ test('a read-only database', async (t) => {
     stop();
     await follower.close();
     await writer.close();
+    assert.ok(follower.stats().follow.heard >= 1, `heard: ${JSON.stringify(follower.stats().follow)}`);
+    assert.strictEqual(follower.stats().follow.failed, 0);
+    assert.strictEqual(writer.stats().follow, null, 'a writer follows nothing');
   });
 
   await t.test('a follower hears a record landed while it was opening: subscribed before the load', async () => {

@@ -125,23 +125,39 @@ const copyEngine = async (from, to, { path, batch = 500 } = {}) => {
     for (;;) {
       const ids = await source.records.ids({ after, limit: batch });
       if (ids.length === 0) break;
+      // The page's records in one read; a record the medium holds that is no record (INTEGRITY) goes as its text, as
+      // it is — a copy carries what it finds — read one by one then.
+      let found = null;
+      try {
+        found = await source.records.getMany(ids);
+      } catch (error) {
+        if (error?.code !== 'INTEGRITY') throw error;
+      }
       const rows = [];
       for (let i = 0; i < ids.length; i++) {
-        const text = await source.records.raw(ids[i]);
-        if (text === null) continue;
+        let row;
         let stored = null;
-        try {
-          stored = JSON.parse(text);
-        } catch {
-          stored = null;
+        if (found !== null) {
+          stored = found.get(ids[i]) ?? null;
+          if (stored === null) continue;
+          row = { id: ids[i], stored };
+        } else {
+          const text = await source.records.raw(ids[i]);
+          if (text === null) continue;
+          try {
+            stored = JSON.parse(text);
+          } catch {
+            stored = null;
+          }
+          row = { id: ids[i], text };
         }
-        const row = { id: ids[i], text };
         const names = piecesOf(stored);
         if (names.length > 0) {
+          const pieces = await source.pieces.getMany(ids[i], names);
           const made = [];
           for (let k = 0; k < names.length; k++) {
-            const piece = await source.pieces.get(ids[i], names[k]);
-            if (piece !== null) made.push([names[k], piece]);
+            const piece = pieces.get(names[k]);
+            if (piece !== undefined) made.push([names[k], piece]);
           }
           row.pieces = { put: made };
           counts.pieces += made.length;

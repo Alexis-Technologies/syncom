@@ -371,8 +371,8 @@ const ENTRIES = [
   // follower refused from hosting (review №5, E2: S-2, R-7, O-2, G-2). 140, raised by name.
   // 139.9 with the keys of the contract checked in the core (review №5 E1, see the main entry). 140.5, raised by name.
   // 140.6 with the catalog's delta, the at-rest place and base64 in chunks (review №5 E4); both branches together
-  // 141.4. 142, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 142 },
+  // 141.4. 142, raised by name. 142.0 with a follower's counts (stats().follow; review №5 O-6). 142.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 142.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).

@@ -252,6 +252,27 @@ test('a copy out of a files engine: order, failure, the keys', async (t) => {
     assert.ok(sets[sets.length - 2].includes('private.pem'), `the keys just before it: ${sets.join(' / ')}`);
   });
 
+  await t.test('a record the medium holds that is no record is copied as its text, the rest as records', async () => {
+    const fsi = memory();
+    const from = filesEngine(fsi);
+    const source = await from.open('torn', { logger: null });
+    await source.write({
+      records: [
+        { id: 'a', stored: stored({ a: 1 }) },
+        { id: 'torn', text: '{"data":' },
+      ],
+    });
+    await source.close();
+    const to = memoryEngine();
+    const copied = await copyEngine(from, to, { path: 'torn', batch: 10 });
+    assert.strictEqual(copied.records, 2);
+    const target = await to.open('torn', { logger: null });
+    assert.deepStrictEqual((await target.records.get('a')).data, { a: 1 });
+    assert.strictEqual(await target.records.raw('torn'), '{"data":', 'carried as it was found');
+    await assert.rejects(target.records.get('torn'), { code: 'INTEGRITY' });
+    await target.close();
+  });
+
   await t.test('the private keys keep their mode on a files target', async () => {
     // One path on both engines: the source lives under the target's directory name.
     const dir = await createTemp();

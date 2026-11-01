@@ -574,6 +574,7 @@ expectType<void>(log.retain(null));
 expectError(log.retain(true));
 expectType<number>(storage.stats().cache.pinned);
 expectType<string>(storage.stats().engine.name);
+expectType<{ heard: number; failed: number; caughtUp: number } | null>(storage.stats().follow);
 expectType<number>(storage.stats().engine.writes);
 expectType<boolean>(storage.stats().engine.capabilities.atomicBatch);
 expectType<boolean>(storage.stats().readOnly);
