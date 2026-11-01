@@ -15,8 +15,8 @@
 // error }`, `log` the log store's getters after a log call (the OpLog reads
 // them at once, so the proxy keeps the last answer); `{ id, h, subscribe:
 // true }` → events `{ event: id, message }` until `{ id, h, unsubscribe }`;
-// `{ id, h, lock: options }` → `{ id, ok: lockId }`, `{ lost: lockId, error }`
-// once when the lease goes. A callback never crosses: `onFail` is `ok: false`
+// `{ id, h, lock: options }` → `{ id, ok: { id: lockId, gen, expiresAt } }`, `{ lost: lockId, error }`
+// once when the lease goes, `{ leaseEvent: lockId, lease: event }` as the lease lives. A callback never crosses: `onFail` is `ok: false`
 // with the error beside it, `entriesBetween` the entries it would answer —
 // the scrubbed ones alone — sent along.
 //
@@ -134,7 +134,15 @@ const CHECKS = Object.freeze({
       }
     },
   }),
-  pieces: Object.freeze({ get: pieceName, remove: pieceName }),
+  pieces: Object.freeze({
+    get: pieceName,
+    getMany: (id, names) => {
+      recordId(id);
+      list(names, 'names');
+      for (let i = 0; i < names.length; i++) key(names[i], 'piece');
+    },
+    remove: pieceName,
+  }),
   copies: Object.freeze({
     get: copyKey,
     has: copyKey,
@@ -262,6 +270,7 @@ const serveEngine = (engine, port, { allow = null } = {}) => {
   const handles = new Map();
   const subscriptions = new Map();
   const locks = new Map();
+  const leases = new Map();
   const opened = new Set();
   let next = 1;
   let stopped = false;
@@ -310,11 +319,21 @@ const serveEngine = (engine, port, { allow = null } = {}) => {
         onLost: (error) => send({ lost: lockId, error: packError(error) }),
       });
       locks.set(lockId, held);
-      return lockId;
+      // The lease's life, where the engine tells it: every event over the port, its error packed.
+      if (typeof held.subscribe === 'function') {
+        const stop = held.subscribe((event) => {
+          const packed = event.error === undefined ? event : { ...event, error: packError(event.error) };
+          send({ leaseEvent: lockId, lease: packed });
+        });
+        leases.set(lockId, stop);
+      }
+      return { id: lockId, gen: held.gen, expiresAt: held.expiresAt ?? null };
     }
     if (message.release !== undefined) {
       const held = locks.get(message.release);
       locks.delete(message.release);
+      leases.get(message.release)?.();
+      leases.delete(message.release);
       await held?.release();
       return true;
     }
@@ -408,6 +427,8 @@ const serveEngine = (engine, port, { allow = null } = {}) => {
     unclose();
     for (const unsubscribe of subscriptions.values()) unsubscribe();
     subscriptions.clear();
+    for (const stop of leases.values()) stop();
+    leases.clear();
     for (const held of locks.values()) await held.release();
     locks.clear();
     for (const db of handles.values()) await db.close();
@@ -438,6 +459,7 @@ const remoteEngine = (port, { name, capabilities, timeout = 0 } = {}) => {
   const pending = new Map();
   const listeners = new Map();
   const losses = new Map();
+  const leaseListeners = new Map();
   let next = 1;
   let dead = null;
   let calls = 0;
@@ -464,6 +486,12 @@ const remoteEngine = (port, { name, capabilities, timeout = 0 } = {}) => {
     if (message === null || typeof message !== 'object') return;
     if (message.event !== undefined) return void listeners.get(message.event)?.(message.message);
     if (message.lost !== undefined) return void losses.get(message.lost)?.(unpackError(message.error));
+    if (message.leaseEvent !== undefined) {
+      const listener = leaseListeners.get(message.leaseEvent);
+      if (listener === undefined) return;
+      const event = message.lease;
+      return void listener(event.error === undefined ? event : { ...event, error: unpackError(event.error) });
+    }
     const waiting = settle(message.id);
     if (waiting === undefined) return;
     if (message.error !== undefined) {
@@ -520,7 +548,11 @@ const remoteEngine = (port, { name, capabilities, timeout = 0 } = {}) => {
       getMany: async (ids) => new Map(await value({ h, store: 'records', method: 'getMany', args: [ids] })),
       ids: method('records', 'ids'),
     };
-    const pieces = { get: method('pieces', 'get'), remove: method('pieces', 'remove') };
+    const pieces = {
+      get: method('pieces', 'get'),
+      getMany: async (id, names) => new Map(await value({ h, store: 'pieces', method: 'getMany', args: [id, names] })),
+      remove: method('pieces', 'remove'),
+    };
     const copies = {
       get: method('copies', 'get'),
       has: method('copies', 'has'),
@@ -611,11 +643,19 @@ const remoteEngine = (port, { name, capabilities, timeout = 0 } = {}) => {
     }
     if (capabilities.lock === 'native') {
       db.lock = async ({ onLost = null, ...options }) => {
-        const lockId = await value({ h, lock: options });
+        const { id: lockId, gen, expiresAt } = await value({ h, lock: options });
         if (onLost !== null) losses.set(lockId, onLost);
         return {
+          gen,
+          // The served side's estimate, on its clock.
+          expiresAt,
+          subscribe(listener) {
+            leaseListeners.set(lockId, listener);
+            return () => void leaseListeners.delete(lockId);
+          },
           async release() {
             losses.delete(lockId);
+            leaseListeners.delete(lockId);
             await value({ h, release: lockId });
           },
         };

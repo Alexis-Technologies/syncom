@@ -333,15 +333,21 @@ test('MongoDB engine (the driver in memory)', async (t) => {
     };
     const ordered = await fresh().open('/p');
     await ordered.kv.put('', 'kept.json', '1');
-    await assert.rejects(() => bulkWrites(() => ordered.write(set), { failing: 'copies' }), { message: /refused/ });
-    assert.deepStrictEqual((await ordered.records.get('r')).data, { n: 1 }, 'what came before the failure landed');
-    assert.strictEqual(await ordered.pieces.get('r', 'r~1.json'), '{}');
+    // The order is the files engine's: kv puts, a tag's copies, the pieces a record makes, the records, the pieces
+    // it drops, kv removals — a failure at the records leaves the copy and the pieces, never a changed record alone.
+    await assert.rejects(() => bulkWrites(() => ordered.write(set), { failing: 'records' }), { message: /refused/ });
+    assert.strictEqual(await ordered.records.get('r'), null, 'the record did not land');
+    assert.strictEqual(await ordered.pieces.get('r', 'r~1.json'), '{}', 'the pieces it makes came before it');
     assert.strictEqual(await ordered.kv.get('', 'new.json'), '2');
+    assert.strictEqual(await ordered.copies.get('v1', 'r'), '{}', 'the tag’s copy came before the record');
     assert.strictEqual(await ordered.kv.get('', 'kept.json'), '1', 'the kv removals come last: not yet');
-    assert.strictEqual(await ordered.copies.get('v1', 'r'), null);
     await ordered.write(set);
-    assert.strictEqual(await ordered.kv.get('', 'kept.json'), null, 'landed again whole: the same set, idempotent');
-    assert.strictEqual(await ordered.copies.get('v1', 'r'), '{}');
+    assert.deepStrictEqual(
+      (await ordered.records.get('r')).data,
+      { n: 1 },
+      'landed again whole: the same set, idempotent',
+    );
+    assert.strictEqual(await ordered.kv.get('', 'kept.json'), null);
     const atomic = await fresh({ transactions: true }).open('/p');
     await atomic.kv.put('', 'kept.json', '1');
     await assert.rejects(() => bulkWrites(() => atomic.write(set), { failing: 'copies' }), { message: /refused/ });
@@ -501,6 +507,76 @@ test('MongoDB engine (the driver in memory)', async (t) => {
 });
 
 const url = process.env.MONGODB_URL;
+test('MongoDB engine (the driver in memory): the catalog and what does not read', async (t) => {
+  await t.test(
+    'the catalog is a document a record: a save writes what changed, a reopen reads them, other indexes replace them',
+    async () => {
+      const client = createFakeMongo();
+      const engine = mongoEngine({ client, changes: false });
+      const schema = { entities: { Note: { index: ['kind'] } } };
+      const options = { path: 'cat', engine, logger: false, defer: 0, lock: false, chain: false, schema };
+      const rows = async () => client.db('syncom').collection('catalog').find({ p: 'cat' }).toArray();
+      const db = await createDatabase(options);
+      const ids = [];
+      for (let i = 0; i < 5; i++) ids.push(await db.insert({ $type: 'Note', kind: i % 2 ? 'a' : 'b' }));
+      await db.close();
+      assert.strictEqual((await rows()).length, 5, 'a document a record');
+      const again = await createDatabase(options);
+      assert.strictEqual(
+        (await again.Note.select({ kind: 'a' }).fetch()).length,
+        2,
+        'read from the documents, not rebuilt',
+      );
+      await again.update(ids[1], { kind: 'b' });
+      await again.delete(ids[0]);
+      await again.close();
+      const after = await rows();
+      assert.strictEqual(
+        JSON.parse(after.find((doc) => doc.id === ids[1]).row).fields.kind,
+        'b',
+        'the row that changed was written',
+      );
+      assert.strictEqual(
+        JSON.parse(after.find((doc) => doc.id === ids[0]).row).gone,
+        true,
+        'a tombstone is a row flagged gone',
+      );
+      const other = { ...options, schema: { entities: { Note: { index: ['kind', 'title'] } } } };
+      const rebuilt = await createDatabase(other);
+      await rebuilt.insert({ $type: 'Note', kind: 'c', title: 't' });
+      await rebuilt.close();
+      assert.strictEqual((await rows()).length, 6, 'other indexes: every document replaced, none left over');
+    },
+  );
+
+  await t.test(
+    'a log document that does not parse is counted corrupt and left out; a meta document that does not is none',
+    async () => {
+      const client = createFakeMongo();
+      const engine = mongoEngine({ client, changes: false });
+      const options = { path: 'rows', engine, logger: false, defer: 0, lock: false, chain: false };
+      const db = await createDatabase(options);
+      const ids = [];
+      for (let i = 0; i < 3; i++) ids.push(await db.insert({ n: i }));
+      await db.close();
+      const log = client.db('syncom').collection('log');
+      await log.updateOne({ p: 'rows', seq: 2 }, { $set: { e: 'garbage' } });
+      await client
+        .db('syncom')
+        .collection('meta')
+        .updateOne({ p: 'rows', key: 'index' }, { $set: { v: '{not json' } });
+      const warned = [];
+      const logger = { warn: (event) => warned.push(event.event), info() {}, error() {}, debug() {} };
+      const again = await createDatabase({ ...options, logger });
+      const { corrupt, lost } = again.stats().log;
+      assert.deepStrictEqual([corrupt, lost], [1, true]);
+      assert.ok(warned.includes('log.row.unreadable') && warned.includes('log.meta.unreadable'), warned.join(','));
+      for (const id of ids) assert.ok(await again.get(id), 'the records are on their documents still');
+      await again.close();
+    },
+  );
+});
+
 test('MongoDB engine (the driver)', { skip: url ? false : 'MONGODB_URL unset' }, async (t) => {
   const { MongoClient } = require('mongodb');
   const client = await new MongoClient(url).connect();

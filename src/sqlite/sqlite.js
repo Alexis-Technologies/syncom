@@ -49,6 +49,7 @@ const SQL = {
   recordPut: 'INSERT OR REPLACE INTO records (p, id, text) VALUES (?, ?, ?)',
   recordRemove: 'DELETE FROM records WHERE p = ? AND id = ?',
   pieceGet: 'SELECT text FROM pieces WHERE p = ? AND id = ? AND name = ?',
+  pieceAll: 'SELECT name, text FROM pieces WHERE p = ? AND id = ?',
   piecePut: 'INSERT OR REPLACE INTO pieces (p, id, name, text) VALUES (?, ?, ?, ?)',
   pieceRemove: 'DELETE FROM pieces WHERE p = ? AND id = ? AND name = ?',
   copyGet: 'SELECT text FROM copies WHERE p = ? AND tag = ? AND id = ?',
@@ -255,6 +256,14 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
       get: async (id, name) => {
         const row = await get(SQL.pieceGet, [p, id, name]);
         return none(row) ? null : row.text;
+      },
+      // Every piece of the record in one statement over the key's prefix, the ones named kept.
+      getMany: async (id, names) => {
+        const rows = await all(SQL.pieceAll, [p, id]);
+        const wanted = new Set(names);
+        const found = new Map();
+        for (let i = 0; i < rows.length; i++) if (wanted.has(rows[i].name)) found.set(rows[i].name, rows[i].text);
+        return found;
       },
       remove: (id, name) => run(SQL.pieceRemove, [p, id, name]),
     };

@@ -165,7 +165,9 @@ const ENTRIES = [
   // (review №5, E2: R-4, G-2, S-2). 62, raised by name.
   // 62.1 with the keys of the contract checked where they become a file name or a filter (src/engine.js isKvKey,
   // checkWriteSet; review №5 S-3/S-5) — a seam's property names do not minify; both together 63. 63.5, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 63.5 },
+  // 63.5 with one read a record (pieces.getMany, a page of records at a time) and the engine measured (stats().engine;
+  // review №5 P-3/P-4/O-4). 64, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 64 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -194,12 +196,12 @@ const ENTRIES = [
   // platform-neutral, measured as a browser entry (engines plan, E6–E7). 9.1 with the served side checking every
   // call against the contract (a table of stores, methods and their arguments), the port's death and a timeout heard
   // (ENGINE_UNREACHABLE, stats()), and a copy that lands the identity last and takes a failure away (review №5 E1).
-  // 9.5, raised by name.
+  // 9.5, raised by name. 9.7 with a lease's life crossing the port (gen, expiresAt, its events; review №5 O-2). 10, raised by name.
   {
     label: 'engines — browser (@alexify/syncom/engines)',
     entry: 'src/engines/engines.js',
     platform: 'browser',
-    budget: 9.5,
+    budget: 10,
   },
   // The trigram text index behind `$text`: platform-neutral, off the main
   // entry so a node that never searches pays nothing for it.

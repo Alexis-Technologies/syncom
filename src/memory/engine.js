@@ -213,6 +213,13 @@ const openDb = (path) => {
     async get(id, name) {
       return pieces.get(id)?.get(name) ?? null;
     },
+    async getMany(id, names) {
+      const held = pieces.get(id);
+      const found = new Map();
+      if (held === undefined) return found;
+      for (let i = 0; i < names.length; i++) if (held.has(names[i])) found.set(names[i], held.get(names[i]));
+      return found;
+    },
     async remove(id, name) {
       const held = pieces.get(id);
       if (held === undefined) return;

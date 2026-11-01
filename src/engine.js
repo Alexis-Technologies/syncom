@@ -17,7 +17,7 @@
 //            holds it (`{ data, meta, encrypted, timestamp, block, gen? }`),
 //            `raw(id)` its text, `getMany`, `has`, `ids({ after, limit })` in id
 //            order
-//   pieces   the runs of a large block beside its record, `(id, n)` → text
+//   pieces   the runs of a large block beside its record, `(id, n)` → text; `getMany(id, names)` → Map, one call
 //   copies   a tag's copies of records, `(tag, id)` → text
 //   log      the op log's medium (src/log.js owns the log itself)
 //   write    one write set — records (each with the pieces it makes and drops),
@@ -165,7 +165,7 @@ const checkKvKey = (ns, key, label) => {
 // there is one), and a key `create` found held (EEXIST, as an fsi says it).
 // No requires here: the error class is the caller's (src/errors.js).
 const unreadableRecord = (SyncomError, id, cause = null) =>
-  new SyncomError('INTEGRITY', `Storage record ${id} is unreadable`, { id, cause, reason: 'unreadable' });
+  new SyncomError('INTEGRITY', `Record ${id} is unreadable`, { id, cause, reason: 'unreadable' });
 const eexist = (key) => Object.assign(new Error(`EEXIST: key already exists, ${key}`), { code: 'EEXIST' });
 
 module.exports = {

@@ -236,6 +236,15 @@ const idbEngine = ({
           'readonly',
           async ({ pieces: s }) => (await request(s.get([p, id, name])))?.text ?? null,
         ),
+      // Every piece of the record in one range, the ones named kept.
+      getMany: (id, names) =>
+        transaction(['pieces'], 'readonly', async ({ pieces: s }) => {
+          const rows = await request(s.getAll(under([p, id])));
+          const wanted = new Set(names);
+          const found = new Map();
+          for (let i = 0; i < rows.length; i++) if (wanted.has(rows[i].name)) found.set(rows[i].name, rows[i].text);
+          return found;
+        }),
       remove: (id, name) => transaction(['pieces'], 'readwrite', ({ pieces: s }) => void s.delete([p, id, name])),
     };
 

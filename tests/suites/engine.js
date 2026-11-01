@@ -172,6 +172,27 @@ const runEngineTests = async (t, { create, root, afterEach = null }) => {
     }
   });
 
+  await t.test('pieces.getMany answers the pieces named in one call, the absent left out', async () => {
+    const { db, done } = await open();
+    try {
+      const made = [];
+      for (let i = 1; i <= 5; i++) made.push([`r~${i}.json`, `{"n":${i}}`]);
+      await db.write({ records: [{ id: 'r', stored: stored({ n: 1 }), pieces: { put: made } }] });
+      const found = await db.pieces.getMany('r', ['r~2.json', 'r~5.json', 'r~9.json']);
+      assert.deepStrictEqual(
+        [...found],
+        [
+          ['r~2.json', '{"n":2}'],
+          ['r~5.json', '{"n":5}'],
+        ],
+      );
+      assert.deepStrictEqual([...(await db.pieces.getMany('r', []))], []);
+      assert.deepStrictEqual([...(await db.pieces.getMany('none', ['none~1.json']))], []);
+    } finally {
+      await done();
+    }
+  });
+
   await t.test('copies: a tag’s copies by id, listed in id order, dropped whole', async () => {
     const { db, done } = await open();
     try {

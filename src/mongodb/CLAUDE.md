@@ -6,7 +6,7 @@ The engine over MongoDB, Node only, the driver injected. The engine contract and
 
 ```
 src/mongodb/mongodb.js    @alexify/syncom/mongodb — mongoEngine({ client, db, name, transactions, changes }): the engine over one
-                          MongoDB database — kv, records (JSON text), pieces, copies, log (a document per entry with its group's
+                          MongoDB database — kv, records (JSON text), pieces, copies, catalog (a document per record's row), log (a document per entry with its group's
                           first seq), meta; `_id` the key as JSON, the key's fields flat beside it over an index per collection;
                           a bulk write per collection per write set, in a session transaction under `transactions: true`; change
                           streams as `db.changes` — requires engine.js, errors.js only
@@ -21,8 +21,12 @@ src/mongodb/mongodb.js    @alexify/syncom/mongodb — mongoEngine({ client, db, 
   it throws on a method it lacks, so a test never passes on one the real driver would not have. A new call on a
   collection is added to the fake first.
 - **Every put is an upsert; a set is ordered.** Without `transactions` a write set is a bulk write per collection
-  in the files engine's order — kv puts, the pieces a record makes, the records (and the removals), the pieces it
-  drops, the copies, kv removals — so a failure midway leaves what the replay lands again whole. The log's group
+  in the files engine's order — kv puts, the tags' copies, the pieces a record makes, the records (and the
+  removals), the pieces it drops, kv removals — so a failure midway leaves what the replay lands again whole, and
+  never a changed record without the copy the tag keeps of it. A log or meta document that does not parse at open is
+  counted `corrupt` and left out (`log.row.unreadable`, `log.meta.unreadable`); the segments list in memory moves once
+  the medium has it. The catalog is a document a record (`row`, its JSON): a save writes the rows that changed, never
+  the catalog as one document, which 16 MiB would end. The log's group
   is one ordered bulk write too, but a failed group's seqs are taken back and reused, and the failed write may
   have landed — whole or in part, its acknowledgement lost — so a group that failed after it landed is not a
   group: every document carries its group's `first` and `last`, every group's bulk write begins by wiping every

@@ -25,6 +25,7 @@
 const { isRecordId, isPlainObject } = require('./shape.js');
 const { isAlive } = require('./ops.js');
 const { SyncomError } = require('./errors.js');
+const { now } = require('./telemetry/writer.js');
 
 const isThenable = (value) => value !== null && typeof value === 'object' && typeof value.then === 'function';
 
@@ -47,6 +48,7 @@ class EntryStore {
   #held = new Set();
 
   #before;
+  #measure;
   #plugins;
   // Per record in pieces: the counter of its piece files and the names its
   // file holds now — what a write keeps or removes.
@@ -62,7 +64,19 @@ class EntryStore {
   // against its chain block, or is null; `view(id, entry)` is the lensed
   // read the catalog indexes; `before(id, file)` runs ahead of every change
   // of a record's file with `file()` the file as it is (the tags' copy).
-  constructor({ db, max, logger, catalog, pinned, verify, decrypt, view, before = null, plugins = null }) {
+  constructor({
+    db,
+    max,
+    logger,
+    catalog,
+    pinned,
+    verify,
+    decrypt,
+    view,
+    before = null,
+    plugins = null,
+    measure = null,
+  }) {
     this.#db = db;
     this.#max = max;
     this.#logger = logger;
@@ -73,6 +87,20 @@ class EntryStore {
     this.#view = view;
     this.#before = before;
     this.#plugins = plugins;
+    this.#measure = measure;
+  }
+
+  // One write set of the engine, its time told (`measure(ms, ok)`): what `stats().engine` and the engine's histogram count.
+  async #write(batch) {
+    if (this.#measure === null) return void (await this.#db.write(batch));
+    const started = now();
+    try {
+      await this.#db.write(batch);
+    } catch (error) {
+      this.#measure(now() - started, false);
+      throw error;
+    }
+    this.#measure(now() - started, true);
   }
 
   /** The record's file as it is — its text — or null when there is none. */
@@ -153,14 +181,17 @@ class EntryStore {
     return cached;
   }
 
-  async load(id) {
+  async load(id, stored = undefined) {
     if (!isRecordId(id)) return null;
-    const cached = this.#cache.get(id);
-    if (cached !== undefined) {
-      this.remember(id, cached);
-      return cached;
+    // `stored` given — read by a page's `getMany` — is taken as the record; the cache is asked otherwise.
+    if (stored === undefined) {
+      const cached = this.#cache.get(id);
+      if (cached !== undefined) {
+        this.remember(id, cached);
+        return cached;
+      }
+      stored = await this.#db.records.get(id);
     }
-    const stored = await this.#db.records.get(id);
     if (stored === null) return null;
     const entry = await this.#fromStored(id, stored);
     this.remember(id, entry);
@@ -182,7 +213,7 @@ class EntryStore {
       cause = error;
     }
     if (stored === null || typeof stored !== 'object' || Array.isArray(stored)) {
-      throw new SyncomError('INTEGRITY', `Storage record ${id} is unreadable`, { id, cause });
+      throw new SyncomError('INTEGRITY', `Record ${id} is unreadable`, { id, cause });
     }
     return this.#fromStored(id, stored);
   }
@@ -193,7 +224,7 @@ class EntryStore {
     const { data, meta, encrypted, block } = stored;
     if (this.#verify !== null) {
       const isValid = await this.#verify(id, data, block);
-      if (!isValid) throw new SyncomError('INTEGRITY', `Storage record ${id} is invalid`, { id });
+      if (!isValid) throw new SyncomError('INTEGRITY', `Record ${id} is invalid`, { id });
     }
     if (encrypted) return { data: await this.#decrypt(data), meta: null, encrypted: true, block };
     return { data, meta: await this.#assemble(id, meta, stored.gen, true), encrypted: false, block };
@@ -209,6 +240,21 @@ class EntryStore {
     if (!isPlainObject(blocks)) return stored;
     let meta = stored;
     let names = null;
+    // Every piece the blocks name, read in ONE call of the engine: a round trip a piece was the cold read's cost.
+    const wanted = [];
+    for (const field of Object.keys(blocks)) {
+      const held = blocks[field];
+      if (!isPlainObject(held) || !Array.isArray(held.parts)) continue;
+      for (let i = 0; i < held.parts.length; i++) {
+        const name = held.parts[i];
+        if (name === null) continue;
+        if (typeof name !== 'string' || !name.startsWith(`${id}~`) || !name.endsWith('.json')) {
+          throw new SyncomError('INTEGRITY', `Record ${id} names a piece not its own`, { id });
+        }
+        wanted.push(name);
+      }
+    }
+    const texts = wanted.length > 0 ? await this.#db.pieces.getMany(id, wanted) : new Map();
     for (const field of Object.keys(blocks)) {
       const held = blocks[field];
       if (!isPlainObject(held) || !Array.isArray(held.parts)) continue;
@@ -216,18 +262,15 @@ class EntryStore {
       for (let i = 0; i < held.parts.length; i++) {
         const name = held.parts[i];
         if (name === null) continue;
-        if (typeof name !== 'string' || !name.startsWith(`${id}~`) || !name.endsWith('.json')) {
-          throw new SyncomError('INTEGRITY', `Storage record ${id} names a piece not its own`, { id });
-        }
         let piece;
         try {
-          const text = await this.#db.pieces.get(id, name);
+          const text = texts.get(name) ?? null;
           if (text === null) throw new SyncomError('INTEGRITY', `piece ${name} is missing`, { id });
           piece = JSON.parse(text);
         } catch (cause) {
-          throw new SyncomError('INTEGRITY', `Storage record ${id} is unreadable: its piece ${name}`, { id, cause });
+          throw new SyncomError('INTEGRITY', `Record ${id} is unreadable: its piece ${name}`, { id, cause });
         }
-        if (!isPlainObject(piece)) throw new SyncomError('INTEGRITY', `Storage record ${id}: piece ${name}`, { id });
+        if (!isPlainObject(piece)) throw new SyncomError('INTEGRITY', `Record ${id}: piece ${name}`, { id });
         const keys = Object.keys(piece);
         for (let k = 0; k < keys.length; k++) if (keys[k] !== '__proto__') runs[keys[k]] = piece[keys[k]];
         (names ??= new Set()).add(name);
@@ -359,10 +402,10 @@ class EntryStore {
 
   // Puts what the record `id` is now; a record that fails its integrity
   // check is left out, like a replay leaves it alone.
-  async index(id) {
+  async index(id, stored = undefined) {
     let entry;
     try {
-      entry = await this.load(id);
+      entry = await this.load(id, stored);
     } catch (error) {
       this.#logger.warn({ event: 'catalog.skipped', id, err: error });
       return;
@@ -413,7 +456,7 @@ class EntryStore {
     const batch = { records: rows };
     if (kv !== null) batch.kv = kv;
     if (copies.length > 0) batch.copies = { put: copies };
-    await this.#db.write(batch);
+    await this.#write(batch);
     for (let i = 0; i < marks.length; i++) marks[i]();
     for (let i = 0; i < after.length; i++) {
       const [id, entry, kept, gen] = after[i];
@@ -457,7 +500,7 @@ class EntryStore {
     const batch = { records: [{ id, stored }] };
     if (kv !== null) batch.kv = kv;
     if (keeping !== null) batch.copies = { put: [keeping.copy] };
-    await this.#db.write(batch);
+    await this.#write(batch);
     keeping?.done();
     await this.#drop(id, new Set(), 0);
     this.remember(id, { data, meta: null, encrypted: true, block: blockHash });
@@ -469,7 +512,7 @@ class EntryStore {
     const keeping = await this.#changing(id);
     const batch = { remove: [id] };
     if (keeping !== null) batch.copies = { put: [keeping.copy] };
-    await this.#db.write(batch);
+    await this.#write(batch);
     keeping?.done();
     await this.#drop(id, new Set(), 0);
     this.#cache.delete(id);

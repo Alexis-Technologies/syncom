@@ -137,6 +137,8 @@ class Database extends Emitter {
   #logger;
   #otel;
   #lockWait = 0;
+  // The engine's write sets: how many, how many failed, the time they took (ms) — `stats().engine`.
+  #engineStats = { writes: 0, failures: 0, ms: 0 };
   #options;
   #nodeId = null;
   #clock = new Clock();
@@ -472,6 +474,7 @@ class Database extends Emitter {
       view: (id, entry) => this.#view(id, entry),
       before: this.#tags === null ? null : (id, file) => this.#tags.copyBefore(id, file),
       plugins: this.#plugins,
+      measure: (ms, ok) => this.#engineWrote(ms, ok),
     });
     await this.#loadIdentity();
     await this.#loadSchema();
@@ -662,10 +665,20 @@ class Database extends Emitter {
       const reason = saved === null ? 'no catalog' : 'stamp not resumable';
       this.#logger.debug({ event: 'catalog.rebuild', reason });
       const rebuild = async () => {
+        // A page of ids and ONE read of the page's records, not a read a record.
         let count = 0;
-        for (const id of await this.#db.records.ids()) {
-          await this.#entries.index(id);
-          count++;
+        const page = 500;
+        let after = null;
+        for (;;) {
+          const ids = await this.#db.records.ids({ after, limit: page });
+          if (ids.length === 0) break;
+          const found = await this.#db.records.getMany(ids);
+          for (let i = 0; i < ids.length; i++) {
+            await this.#entries.index(ids[i], found.get(ids[i]) ?? null);
+            count++;
+          }
+          if (ids.length < page) break;
+          after = ids[ids.length - 1];
         }
         if (!this.#readOnly) await this.#catalog.save(this.#log.lastEventId);
         return count;
@@ -711,7 +724,7 @@ class Database extends Emitter {
   // was logged but not landed is held as UNPERSISTED).
   #refused(what) {
     const why = this.#leaseLost ? 'its lease was lost' : 'it was opened with readOnly: true';
-    return new SyncomError('READ_ONLY', `Storage at ${this.#path} is read-only (${why}): ${what} refused`, {
+    return new SyncomError('READ_ONLY', `Database at ${this.#path} is read-only (${why}): ${what} refused`, {
       path: this.#path,
       lease: this.#leaseLost,
     });
@@ -732,7 +745,7 @@ class Database extends Emitter {
     this.#db = readOnlyDb(this.#db, (what) => this.#refused(what));
     this.#log?.readOnly(this.#db.log);
     this.#logger.error({ event: 'storage.lease.lost', path: this.#path, err: cause });
-    const message = `Storage at ${this.#path} lost its lease: read-only from here on`;
+    const message = `Database at ${this.#path} lost its lease: read-only from here on`;
     notify(this, this.#logger, 'error', new SyncomError('LEASE_LOST', message, { path: this.#path, cause }));
     notify(this, this.#logger, 'lease', { state: 'lost', path: this.#path });
   }
@@ -762,19 +775,26 @@ class Database extends Emitter {
     if (!Array.isArray(message.records)) return;
     const ids = message.records;
     this.#heard = this.#heard.then(async () => {
+      // The records heard, read in one call; one by one where the engine cannot (a record gone reads as null).
+      let found = null;
+      try {
+        found = await this.#db.records.getMany(ids);
+      } catch (error) {
+        this.#logger.warn({ event: 'follow.failed', id: null, err: error });
+      }
       for (let i = 0; i < ids.length; i++) {
         if (this.#closed) return;
-        await this.#reread(ids[i]);
+        await this.#reread(ids[i], found === null ? undefined : (found.get(ids[i]) ?? null));
       }
     });
   }
 
   // One record as the engine holds it now: the cache dropped, the row made
   // again (a record gone loses it), a live Document refreshed.
-  async #reread(id) {
+  async #reread(id, stored = undefined) {
     try {
       this.#entries.forget(id);
-      await this.#entries.index(id);
+      await this.#entries.index(id, stored);
       const entry = this.#entries.peek(id) ?? null;
       const alive = entry !== null && isAlive(entry);
       this.#emitUpdate(id, alive ? entry.data : null, alive ? { ...entry.data } : {}, null, entry);
@@ -792,7 +812,7 @@ class Database extends Emitter {
     this.#unhear?.();
     this.#unhear = null;
     this.#logger.warn({ event: 'follow.lost', path: this.#path, err: cause });
-    const message = `Storage at ${this.#path} lost the writer's change stream: every record is read again`;
+    const message = `Database at ${this.#path} lost the writer's change stream: every record is read again`;
     notify(this, this.#logger, 'error', new SyncomError('FOLLOW_LOST', message, { path: this.#path, cause }));
     try {
       this.#subscribeChanges();
@@ -812,15 +832,17 @@ class Database extends Emitter {
     for (;;) {
       if (this.#closed) return;
       let ids;
+      let found;
       try {
         ids = await this.#db.records.ids({ after, limit: page });
+        found = await this.#db.records.getMany(ids);
       } catch (error) {
         this.#logger.warn({ event: 'follow.failed', id: null, err: error });
         return;
       }
       for (let i = 0; i < ids.length; i++) {
         seen.add(ids[i]);
-        await this.#reread(ids[i]);
+        await this.#reread(ids[i], found.get(ids[i]) ?? null);
       }
       if (ids.length < page) break;
       after = ids[ids.length - 1];
@@ -1229,7 +1251,24 @@ class Database extends Emitter {
           }
         : null,
       readOnly: this.#readOnly,
+      // The engine and what its write sets cost so far.
+      engine: {
+        name: this.#engine.name,
+        capabilities: this.#engine.capabilities,
+        writes: this.#engineStats.writes,
+        failures: this.#engineStats.failures,
+        ms: Math.round(this.#engineStats.ms),
+      },
     };
+  }
+
+  // One write set of the engine done, in `ms`, or failed: counted, and told to the meter where there is one.
+  #engineWrote(ms, ok) {
+    const stats = this.#engineStats;
+    stats.writes++;
+    if (!ok) stats.failures++;
+    stats.ms += ms;
+    if (this.#otel.enabled) this.#otel.recordEngineWrite(this.#engine.name, ms, ok);
   }
 
   // The record as a write path reads it: the entry its newest in-flight op

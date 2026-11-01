@@ -164,6 +164,15 @@ const openDb = (fsi, path, capabilities, logger) => {
     async get(id, name) {
       return readOrNull(fsi, data, named(name, 'piece'));
     },
+    /** The pieces named, by name — the absent left out. */
+    async getMany(id, names) {
+      const found = new Map();
+      for (let i = 0; i < names.length; i++) {
+        const text = await readOrNull(fsi, data, named(names[i], 'piece'));
+        if (text !== null) found.set(names[i], text);
+      }
+      return found;
+    },
     /** A piece its record no longer names, removed — after the record's file (src/entries.js). */
     remove: async (id, name) => fsi.remove(data, named(name, 'piece')),
   };

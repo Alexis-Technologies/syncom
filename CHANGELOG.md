@@ -1165,6 +1165,16 @@ and one `commit` event, not one per call.
 
 ### Fixed
 
+- **One read a record, not a round trip a piece; the follower and the rebuild read a page at a time; the engine
+  measured.** A cold read of a record in pieces made a call per piece, a catalog rebuild and a follower's catch-up read
+  one record at a time, and nothing measured the engine (review №5, P-3, P-4, P-13, O-4): `pieces.getMany(id, names)`
+  is in the contract (every engine, the proxy, at rest, the follower) and the cold read makes one call; the rebuild,
+  the catch-up and what a follower hears go a page of ids and one `records.getMany` at a time; `syncom.engine.write`
+  (a histogram by engine) and `stats().engine` count every write set. On MongoDB the tags' copies land before the
+  records (the files engine's crash order; R-11), the segments list moves once the medium has it (R-21), a log or
+  meta document that does not parse is counted `corrupt` instead of a bare SyntaxError out of the open (R-14), and
+  the catalog is a document a record in a `catalog` collection, saved as it changes — never one document (SC-1).
+  A lease's life (gen, expiresAt, its events) crosses the port. The errors say `Database` and `Record`, not `Storage` (M-8).
 - **At rest, the log was sealed twice and opened one entry at a time; the files engine wrote a set one record at a
   time.** `atRest(engine)` encrypted every entry again at every roll, though a native medium seals a range by its
   count alone, and opened ten thousand entries in ten thousand hops to the crypto thread (review №5, P-6): the roll

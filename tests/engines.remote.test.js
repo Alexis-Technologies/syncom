@@ -431,6 +431,27 @@ test('an engine over a message port', async (t) => {
     },
   );
 
+  await t.test('a lease’s life crosses the port: gen, expiresAt and its events', async () => {
+    const inner = mongoEngine({ client: createFakeMongo(), changes: false });
+    const { server, engine } = served(inner);
+    const db = await engine.open('/leased', {});
+    const lease = await db.lock({ mode: 'fail', staleAfter: 90, poll: 10 });
+    try {
+      assert.strictEqual(typeof lease.gen, 'number');
+      assert.strictEqual(typeof lease.expiresAt, 'number', 'the served side’s estimate');
+      const heard = [];
+      const stop = lease.subscribe((event) => heard.push(event.state));
+      await settle(120);
+      assert.ok(heard.includes('renewed'), `renewals heard over the port: ${heard.join(',')}`);
+      stop();
+    } finally {
+      await lease.release();
+      await db.close();
+      await engine.close();
+      await server.close();
+    }
+  });
+
   await t.test('an answer that does not clone crosses as an error', async () => {
     const inner = memoryEngine();
     const odd = {

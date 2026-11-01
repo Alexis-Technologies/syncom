@@ -18,7 +18,11 @@ const readOnlyDb = (db, refuse) => {
     remove: no('kv.remove'),
   };
   if (typeof db.kv.create === 'function') kv.create = no('kv.create');
-  const pieces = { get: (id, name) => db.pieces.get(id, name), remove: no('pieces.remove') };
+  const pieces = {
+    get: (id, name) => db.pieces.get(id, name),
+    getMany: (id, names) => db.pieces.getMany(id, names),
+    remove: no('pieces.remove'),
+  };
   const copies = {
     get: (tag, id) => db.copies.get(tag, id),
     has: (tag, id) => db.copies.has(tag, id),

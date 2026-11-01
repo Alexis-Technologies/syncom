@@ -28,8 +28,7 @@ src/logger.js             createLogger, the duck-typed logger writer — no requ
 src/crypto/digest.js      sha256, hashOf — SHA-256 of a value's JSON as hex: the chain's, the schema hash's, an op's digest and fingerprint;
                           node:crypto here, src/crypto/digest.browser.js in the browser; `sha256` async on both, `hashText` (what the write
                           path names every op by) at once on both, `hashOf` at once but a promise in the browser past 64 KiB
-src/crypto/sha256.js      sha256Now — SHA-256 in JavaScript, at once: the browser half's `hashText` (Web Crypto answers with a promise only)
-                          — no requires
+src/crypto/sha256.js      sha256Now — SHA-256 in JavaScript, at once: the browser half's `hashText` (Web Crypto answers with a promise only) — no requires
 src/crypto/keys.js        loadKeyPair — the on-disk key pairs (RSA for sealing, Ed25519 for signing), generator injected by each crypto half; the signing and encryption subpaths share it; KEY_FILE_MODE — requires errors.js only
 src/crypto/pem.js         base64/PEM helpers over btoa/atob for the browser crypto halves of signing and encryption — no requires
 src/scope.js              GLOBAL_SCOPE, inScope, opInScope — the one definition of "in scope" — no requires
@@ -540,7 +539,8 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   a native engine), the log its `store`, `EntryStore` the database, a catalog a `kvNamespace`; the registry and a branch
   reach it through `storage[DB]`. A new `fsi.`/`engine.` call on a module-level default is a bug. A batch of records is
   ONE write set (`EntryStore.writeMany`), atomic where the engine has transactions — the chain's block and tail ride in
-  it as kv puts, the pieces a record drops with its row, the tags' copies ahead of the records (`chain.block(data)` → `{ hash, puts }`, then `chain.committed(hash)`); `addBlock` is for a chain of its own.
+  it as kv puts, the pieces a record drops with its row, the tags' copies ahead of the records; a lost lease swaps the stores and the log's medium for the read-only ones
+  (`OpLog.readOnly`) and every landing after it is held; a follower opens only over a `shared` engine and neither dials nor hosts (`chain.block(data)` → `{ hash, puts }`, then `chain.committed(hash)`); `addBlock` is for a chain of its own.
 - **Hooks run inside the operation; events never do.** `src/hooks.js` (it
   requires errors.js only — it ships to the browser) is the whole mechanism. Database hooks
   go through `#hook()` inside the mutation queue, and `#run` refuses a write

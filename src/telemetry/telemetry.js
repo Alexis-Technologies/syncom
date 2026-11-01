@@ -179,6 +179,7 @@ const createTelemetry = (telemetry) => {
   let flushDuration = null;
   let hookDuration = null;
   let lockWait = null;
+  let engineWrite = null;
   let refused = null;
   let presenceRefused = null;
   let handleFlushes = null;
@@ -251,6 +252,10 @@ const createTelemetry = (telemetry) => {
         unit: 'ms',
         description: 'Time createDatabase() spent taking the directory lock',
       });
+      engineWrite = meter.createHistogram('syncom.engine.write', {
+        unit: 'ms',
+        description: 'A write set of the engine, from the call to its return, by engine',
+      });
       refused = meter.createCounter('syncom.hello.refused', {
         unit: '{call}',
         description: 'Calls a hosted unit refused before the handler, by code (400, 403, 409, 428)',
@@ -293,6 +298,7 @@ const createTelemetry = (telemetry) => {
       flushDuration = null;
       hookDuration = null;
       lockWait = null;
+      engineWrite = null;
       refused = null;
       gauges = null;
     }
@@ -413,6 +419,10 @@ const createTelemetry = (telemetry) => {
 
     recordLockWait(elapsed) {
       record(lockWait, elapsed);
+    },
+
+    recordEngineWrite(name, elapsed, ok) {
+      record(engineWrite, elapsed, { 'syncom.engine': name, 'syncom.ok': ok });
     },
 
     recordRefusal(code) {

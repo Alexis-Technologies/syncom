@@ -112,6 +112,12 @@ const atRestEngine = (engine, cipher) => {
         const text = await db.pieces.get(id, name);
         return text === null ? null : open(pieceKey(name), text);
       },
+      getMany: async (id, names) => {
+        const sealed = await db.pieces.getMany(id, names);
+        const found = new Map();
+        for (const [name, text] of sealed) found.set(name, await open(pieceKey(name), text));
+        return found;
+      },
       remove: (id, name) => db.pieces.remove(id, name),
     };
 

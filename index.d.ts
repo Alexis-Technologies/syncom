@@ -108,7 +108,8 @@ export interface EngineLease {
   /**
    * The lease's life, where the engine tells it: every renewal (`renewed`), and the first failed one of a run
    * (`late`, with the error — retried every `poll` ms while two thirds of `staleAfter` are left, then lost
-   * through `onLost`). Returns the unsubscribe. A lease served over a port has none.
+   * through `onLost`). Returns the unsubscribe. Over a port the events cross as they happen; `expiresAt` is then the
+   * served side's, on its clock.
    */
   subscribe?(listener: (event: { state: 'renewed' | 'late'; error?: Error }) => void): () => void;
 }
@@ -174,6 +175,8 @@ export interface EngineDb {
   /** The runs of a large block beside its record, by the name the record's meta holds. */
   readonly pieces: {
     get(id: string, name: string): Promise<string | null>;
+    /** The pieces named, by name, in one call — the absent left out. */
+    getMany(id: string, names: readonly string[]): Promise<Map<string, string>>;
     remove(id: string, name: string): Promise<void>;
   };
   /** A tag's copies of records, by tag and id. */
@@ -1564,6 +1567,8 @@ export interface StorageStats {
    * renewed (`null` for a lock key, or once lost) and whether it was lost; `null` for a follower or `lock: false`.
    */
   lock: { kind: 'kv' | 'native'; mode: 'fail' | 'wait'; expiresAt: number | null; lost: boolean } | null;
+  /** The engine the database stores through, and what its write sets cost so far: how many, how many failed, their time in ms. */
+  engine: { name: string; capabilities: EngineCapabilities; writes: number; failures: number; ms: number };
 }
 
 /** One `applyRemote` call, after its batch is durable. */

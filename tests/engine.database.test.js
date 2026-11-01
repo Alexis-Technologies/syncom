@@ -123,6 +123,22 @@ test('a database over an engine', async (t) => {
     },
   );
 
+  await t.test('stats().engine names the engine and counts its write sets, the failed ones too', async () => {
+    const { engine, calls } = counting(filesEngine(memory()));
+    const db = await createDatabase({ path: 'stats', engine, logger: false, defer: 0, lock: false, chain: false });
+    const before = db.stats().engine;
+    assert.strictEqual(before.name, engine.name);
+    assert.strictEqual(before.capabilities, engine.capabilities);
+    await db.insert({ n: 1 });
+    await db.insert({ n: 2 });
+    const after = db.stats().engine;
+    assert.strictEqual(after.writes - before.writes, 2, 'a write set an insert');
+    assert.strictEqual(after.writes, calls.writes, 'what the engine saw');
+    assert.strictEqual(after.failures, 0);
+    assert.ok(after.ms >= 0);
+    await db.close();
+  });
+
   await t.test('a branch opens on the parent’s engine and drop() removes it through the engine', async () => {
     const fsi = memory();
     const parent = await createDatabase({ path: 'p', engine: filesEngine(fsi), logger: false, defer: 0, lock: false });

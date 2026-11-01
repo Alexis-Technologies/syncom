@@ -33,10 +33,10 @@
 // A point read is `findOne({ _id })`; a range is the flat fields over an
 // index (`{ p, id: { $gt } }` sorted by `id` over `{ p: 1, id: 1 }`).
 
-const { capabilitiesOf } = require('../engine.js');
+const { capabilitiesOf, unreadableRecord, eexist } = require('../engine.js');
 const { SyncomError } = require('../errors.js');
 
-const COLLECTIONS = ['kv', 'records', 'pieces', 'copies', 'log', 'meta'];
+const COLLECTIONS = ['kv', 'records', 'pieces', 'copies', 'log', 'meta', 'catalog'];
 // A lease per database path: `{ _id: path, owner, gen, expires }`, renewed by its holder, taken once it lapsed.
 const LOCKS = 'locks';
 const DEFAULT_LEASE = 30_000;
@@ -47,18 +47,17 @@ const INDEXES = {
   copies: { p: 1, tag: 1, id: 1 },
   log: { p: 1, seq: 1 },
   meta: { p: 1, key: 1 },
+  catalog: { p: 1, id: 1 },
 };
 const DUPLICATE = 11000;
 // A duplicate key as the driver reports it: the code on the error, or on the first write error of a bulk.
 const isDuplicate = (error) => error?.code === DUPLICATE || error?.writeErrors?.[0]?.code === DUPLICATE;
 
 const locked = (path, why = 'is leased by another instance') =>
-  new SyncomError('LOCKED', `Storage at ${path} ${why}`, { path });
+  new SyncomError('LOCKED', `Database at ${path} ${why}`, { path });
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const exists = (key) => Object.assign(new Error(`EEXIST: key already exists, ${key}`), { code: 'EEXIST' });
-const unreadable = (id) =>
-  new SyncomError('INTEGRITY', `Storage record ${id} is unreadable`, { id, cause: null, reason: 'unreadable' });
+const unreadable = (id, cause = null) => unreadableRecord(SyncomError, id, cause);
 
 // A record's text read back: the object it parses to, or INTEGRITY.
 const parsed = (id, text) => {
@@ -114,6 +113,7 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
   const capabilities = capabilitiesOf({
     atomicBatch: transactions,
     exclusiveCreate: true,
+    indexes: true,
     changeStream: changes,
     lock: 'native',
     shared: true,
@@ -162,7 +162,7 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
     return collection.find(filter, options).toArray();
   };
 
-  const openDb = async (p) => {
+  const openDb = async (p, logger) => {
     await ensure();
     // The fence: every document this handle writes carries `gen`, the
     // generation of the lease — the one `lock()` takes, until then the one
@@ -183,7 +183,7 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
     });
     const del = (_id) => ({ deleteOne: { filter: { _id, ...fence() } } });
     const leaseLost = (cause) =>
-      new SyncomError('LEASE_LOST', `Storage at ${p}: a newer lease holds the document, the write was refused`, {
+      new SyncomError('LEASE_LOST', `Database at ${p}: a newer lease holds the document, the write was refused`, {
         path: p,
         cause,
       });
@@ -216,7 +216,7 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
         try {
           await c.kv.insertOne({ _id, p, ns, key, v: String(value), gen });
         } catch (error) {
-          throw isDuplicate(error) ? exists(`${ns}/${key}`) : error;
+          throw isDuplicate(error) ? eexist(`${ns}/${key}`) : error;
         }
       },
     };
@@ -255,6 +255,14 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
 
     const pieces = {
       get: async (id, name) => (await one(c.pieces, keyOf([p, id, name]), { _id: 0, t: 1 }))?.t ?? null,
+      // Every piece of the record in one query over `{ p, id }`, the ones named kept.
+      getMany: async (id, names) => {
+        const docs = await many(c.pieces, { p, id }, { projection: { _id: 0, name: 1, t: 1 } });
+        const wanted = new Set(names);
+        const found = new Map();
+        for (let i = 0; i < docs.length; i++) if (wanted.has(docs[i].name)) found.set(docs[i].name, docs[i].t);
+        return found;
+      },
       remove: (id, name) => fenced((session) => bulk(c.pieces, [del(keyOf([p, id, name]))], session)),
     };
 
@@ -270,7 +278,14 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
 
     const meta = async (key) => {
       const doc = await one(c.meta, keyOf([p, key]), { _id: 0, v: 1 });
-      return doc === null ? null : JSON.parse(doc.v);
+      if (doc === null) return null;
+      try {
+        return JSON.parse(doc.v);
+      } catch (error) {
+        // A meta document that does not read is none: an index that is no index, no segments — said out loud.
+        logger?.warn?.({ event: 'log.meta.unreadable', key, err: error });
+        return null;
+      }
     };
     const metaPut = (key, value) => put(keyOf([p, key]), { p, key, v: JSON.stringify(value) });
 
@@ -279,6 +294,9 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
     const log = (() => {
       let groups = [];
       let segments = [];
+      // Documents that did not read at open: counted, left out — the log holds less than it held.
+      let corrupt = 0;
+      let lost = false;
       // Seq → its group (`{ first, last }`, one object per group): what a scrub writes a document again with.
       const groupOf = new Map();
       const sealedTo = () => (segments.length > 0 ? segments[segments.length - 1].to : null);
@@ -329,7 +347,17 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
           for (const group of byFirst.values()) {
             const held = { first: group.first, last: group.last };
             for (let i = 0; i < group.docs.length; i++) {
-              entries.push(JSON.parse(group.docs[i].e));
+              let entry;
+              try {
+                entry = JSON.parse(group.docs[i].e);
+              } catch (error) {
+                // A document that does not read: counted, said out loud, left out — the log holds less than it held.
+                corrupt++;
+                lost = true;
+                logger?.warn?.({ event: 'log.row.unreadable', seq: group.docs[i].seq, err: error });
+                continue;
+              }
+              entries.push(entry);
               groupOf.set(group.docs[i].seq, held);
             }
           }
@@ -358,10 +386,10 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
           return segments;
         },
         get corrupt() {
-          return 0;
+          return corrupt;
         },
         get health() {
-          return { journaled: false, open: groups.length, torn: 0, lost: false };
+          return { journaled: false, open: groups.length, torn: 0, lost };
         },
         // One ordered bulk write: the wipe from `first`, then an upsert per
         // entry. A write that failed — midway, or after it landed with the
@@ -386,9 +414,11 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
           groups.push(group);
           return true;
         },
+        // The list in memory moves once the medium has it: a seal or a drop that fails leaves it as it was.
         async seal(entries, from, to) {
-          segments.push({ from, to, count: entries.length });
-          await fenced((session) => bulk(c.meta, [metaPut('segments', segments)], session));
+          const next = segments.concat([{ from, to, count: entries.length }]);
+          await fenced((session) => bulk(c.meta, [metaPut('segments', next)], session));
+          segments = next;
         },
         async sealed(to) {
           const kept = [];
@@ -397,15 +427,16 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
         },
         async drop(segment) {
           if (segments[0] !== segment) throw new TypeError('drop(segment): the oldest segment goes first');
-          segments.shift();
+          const rest = segments.slice(1);
           await fenced(async (session) => {
             await bulk(
               c.log,
               [{ deleteMany: { filter: { p, seq: { $gte: segment.from, $lte: segment.to }, ...fence() } } }],
               session,
             );
-            await bulk(c.meta, [metaPut('segments', segments)], session);
+            await bulk(c.meta, [metaPut('segments', rest)], session);
           });
+          segments = rest;
           for (let seq = segment.from; seq <= segment.to; seq++) groupOf.delete(seq);
         },
         saveIndex: (index) => fenced((session) => bulk(c.meta, [metaPut('index', index)], session)),
@@ -486,11 +517,14 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
         return;
       }
       await fenced(async (session) => {
+        // The tags' copies before the records they keep the past of (a crash between leaves a copy, never a
+        // changed record without one — the files engine's order), the pieces a record makes before it, the ones
+        // it drops after.
         await bulk(c.kv, kvPuts, session);
+        await bulk(c.copies, copied, session);
         await bulk(c.pieces, made, session);
         await bulk(c.records, recordOps, session);
         await bulk(c.pieces, dropped, session);
-        await bulk(c.copies, copied, session);
         await bulk(c.kv, kvDrops, session);
       });
       if (listening > 0) for (let i = 0; i < removedKeys.length; i++) deleted.add(removedKeys[i]);
@@ -680,7 +714,58 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
       };
     };
 
-    const engineDb = { path: p, capabilities, kv, records, pieces, copies, log, write, lock, close: async () => {} };
+    // The catalog's rows, a document of the `catalog` collection per record (`row`, its JSON): a save writes
+    // the rows that changed — never the catalog as one document, which 16 MiB would end.
+    const catalog = {
+      async load() {
+        const head = await meta('catalog');
+        if (head === null || typeof head !== 'object') return null;
+        const docs = await many(c.catalog, { p }, { projection: { _id: 0, id: 1, row: 1 } });
+        const rows = [];
+        for (let i = 0; i < docs.length; i++) {
+          let row;
+          try {
+            row = JSON.parse(docs[i].row);
+          } catch (error) {
+            // A row that does not read: no catalog — the core rebuilds it from the records, and that save replaces every row.
+            logger?.warn?.({ event: 'catalog.row.unreadable', id: docs[i].id, err: error });
+            return null;
+          }
+          rows.push([docs[i].id, row]);
+        }
+        return { indexes: head.indexes, stamp: head.stamp, rows };
+      },
+      save: (indexes, stamp, { all, changed, whole }) =>
+        fenced(async (session) => {
+          const ops = [];
+          if (whole) {
+            ops.push({ deleteMany: { filter: { p, ...fence() } } });
+            const rows = all();
+            for (let i = 0; i < rows.length; i++) {
+              ops.push(put(keyOf([p, rows[i][0]]), { p, id: rows[i][0], row: JSON.stringify(rows[i][1]) }));
+            }
+          } else {
+            for (const [id, row] of changed) {
+              ops.push(row === null ? del(keyOf([p, id])) : put(keyOf([p, id]), { p, id, row: JSON.stringify(row) }));
+            }
+          }
+          await bulk(c.catalog, ops, session);
+          await bulk(c.meta, [metaPut('catalog', { indexes, stamp })], session);
+        }),
+    };
+    const engineDb = {
+      path: p,
+      capabilities,
+      kv,
+      records,
+      pieces,
+      copies,
+      log,
+      catalog,
+      write,
+      lock,
+      close: async () => {},
+    };
     if (changes) engineDb.changes = { subscribe };
     return Object.freeze(engineDb);
   };
@@ -690,7 +775,7 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
     capabilities,
     /** The MongoDB database every path lives in. */
     database,
-    open: (path) => openDb(path),
+    open: (path, { logger = null } = {}) => openDb(path, logger),
     /**
      * Every document of the database at `path`, in every collection, its lease document too — in one transaction
      * where the engine has them. The engine's, not a handle's: no fence (the database is closed, by the contract).
