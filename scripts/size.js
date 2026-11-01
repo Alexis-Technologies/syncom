@@ -160,7 +160,9 @@ const ENTRIES = [
   // identity, the tags and the chain; `createDatabase({ engine })` (engines plan, E1.3). 60, raised by name.
   // 60.6 with a follower (`readOnly`: src/readonly.js, the change stream heard) and an engine's lease (`db.lock`,
   // LEASE_LOST; engines plan, E5). 61, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 61 },
+  // 62.1 with the keys of the contract checked where they become a file name or a filter (src/engine.js isKvKey,
+  // checkWriteSet; review №5 S-3/S-5) — a seam's property names do not minify. 62.5, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 62.5 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -186,12 +188,15 @@ const ENTRIES = [
   // The engine over MongoDB (src/mongodb/mongodb.js): the driver injected, node-only, no browser budget (engines plan, E5).
   { label: 'mongodb engine — node (@alexify/syncom/mongodb)', entry: 'src/mongodb/mongodb.js', platform: 'node' },
   // An engine over a message port (serveEngine/remoteEngine/connectEngine) and a copy between engines (copyEngine):
-  // platform-neutral, measured as a browser entry (engines plan, E6–E7).
+  // platform-neutral, measured as a browser entry (engines plan, E6–E7). 9.1 with the served side checking every
+  // call against the contract (a table of stores, methods and their arguments), the port's death and a timeout heard
+  // (ENGINE_UNREACHABLE, stats()), and a copy that lands the identity last and takes a failure away (review №5 E1).
+  // 9.5, raised by name.
   {
     label: 'engines — browser (@alexify/syncom/engines)',
     entry: 'src/engines/engines.js',
     platform: 'browser',
-    budget: 6,
+    budget: 9.5,
   },
   // The trigram text index behind `$text`: platform-neutral, off the main
   // entry so a node that never searches pays nothing for it.
@@ -357,7 +362,8 @@ const ENTRIES = [
   // 136.1 with the engine in memory (src/memory/engine.js; engines plan, E2). 136.5, raised by name.
   // 137.0 with the follower and the lease (engines plan, E5). 137.5, raised by name.
   // 138.7 with atRest over an engine (src/encryption/at-rest-engine.js; engines plan, E6). 139, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 139 },
+  // 139.9 with the keys of the contract checked in the core (review №5 E1, see the main entry). 140.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 140.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -424,7 +430,8 @@ const ENTRIES = [
   // The chain: the blocks, SHA-256 through Web Crypto, the plugin. 2.9 with the digest module's SHA-256 in JavaScript,
   // which the chain does not call (a browser split of its own was not worth 0.4 KB). 3, raised by name.
   // 3.4 with the blocks in a store — the database's `blockchain` namespace, or a directory (engines plan, E1.3). 3.5, raised by name.
-  { label: 'chain — browser (@alexify/syncom/chain)', entry: 'src/chain/chain.js', platform: 'browser', budget: 3.5 },
+  // 3.6 with the contract's keys (src/engine.js isKvKey, KV_NAMESPACES; review №5 E1). 3.75, raised by name.
+  { label: 'chain — browser (@alexify/syncom/chain)', entry: 'src/chain/chain.js', platform: 'browser', budget: 3.75 },
   // Sealed records (the RSA half) and the at-rest wrapper (AES-GCM, PBKDF2).
   {
     // 5.7 with atRest over an engine (src/encryption/at-rest-engine.js: every store's value sealed, the log's entries and
@@ -443,7 +450,9 @@ const ENTRIES = [
     platform: 'browser',
     // 0.75 was the Map behind five functions. The engine in memory (src/memory/engine.js: the stores, the log's rows,
     // the catalog's rows kept as they are; engines plan, E2). 3 (2.9 measured), raised by name.
-    budget: 3,
+    // 3.2 with the contract's keys (src/engine.js isKvKey, KV_NAMESPACES) and a scrub that swaps a wrapper's copies
+    // (review №5 E1). 3.25, raised by name.
+    budget: 3.25,
   },
   {
     label: 'layered — browser (@alexify/syncom/layered)',

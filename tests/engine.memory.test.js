@@ -88,3 +88,30 @@ test('memory engine', async (t) => {
     },
   );
 });
+
+// The log in memory under a wrapper that keeps copies of its entries (atRest
+// seals them, a port clones them): a scrub must reach the copies.
+test('memory engine: the log under a wrapper', async (t) => {
+  await t.test('a scrub replaces the entry at each seq with what the log hands back', async () => {
+    const engine = memoryEngine();
+    const db = await engine.open('scrub', { logger: null });
+    const entry = (seq, secret) => ({
+      seq,
+      fp: null,
+      op: { type: 'write', id: 'r', origin: 'n', seq, ts: seq, value: { secret } },
+    });
+    const held = [entry(1, 'a'), entry(2, 'b'), entry(3, 'c')];
+    const fail = (error) => {
+      throw error;
+    };
+    await db.log.append(held, null, { first: 1, last: 3, sealedTo: 0, onFail: fail, entriesBetween: () => [] });
+    const stripped = { ...entry(2, null), scrubbed: true };
+    const entriesBetween = (from, to) => (from <= 2 && to >= 2 ? [stripped] : []);
+    await db.log.scrub([2], { id: 'r', sealedTo: 0, entriesBetween });
+    const { entries } = await db.log.load();
+    assert.strictEqual(entries[1], stripped, 'the copy a wrapper kept is swapped for what the log holds now');
+    assert.strictEqual(entries[0], held[0]);
+    assert.strictEqual(entries[2], held[2]);
+    await db.close();
+  });
+});

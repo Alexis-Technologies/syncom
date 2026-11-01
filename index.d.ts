@@ -565,6 +565,7 @@ export type SyncomErrorCode =
   | 'READ_ONLY'
   | 'LEASE_LOST'
   | 'TARGET_NOT_EMPTY'
+  | 'ENGINE_UNREACHABLE'
   | 'KEYS_INCOMPLETE'
   | 'DECRYPT_FAILED'
   | 'IDENTITY_MISMATCH'

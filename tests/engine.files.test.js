@@ -82,3 +82,61 @@ test('files engine over atRest(memory())', async (t) => {
 test('files engine over layered([memory(), memory()])', async (t) => {
   await runEngineTests(t, { create: () => filesEngine(layered([memory(), memory()])), root: vroot });
 });
+
+// What the files engine alone must get right: a name is a file, so the order
+// is the ids' (not the backend's listing) and a name stays inside the directory.
+test('files engine: names that become files', async (t) => {
+  const stored = (data) => ({
+    data,
+    meta: { clock: {}, base: 0, deleted: 0 },
+    encrypted: false,
+    timestamp: 1,
+    block: null,
+  });
+
+  await t.test('ids and a tag’s copies come in id order whatever order the backend lists in', async () => {
+    const base = memory();
+    const fsi = {
+      ...base,
+      async list(dir) {
+        return (await base.list(dir)).reverse();
+      },
+    };
+    const db = await filesEngine(fsi).open('/order', { logger: null });
+    const ids = ['a', 'a-b', 'b', 'a.b', 'Z', 'z', 'a_1'];
+    const rows = [];
+    for (const id of ids) rows.push({ id, stored: stored({ id }) });
+    await db.write({ records: rows });
+    const sorted = ids.slice().sort();
+    assert.deepStrictEqual(await db.records.ids(), sorted);
+    const paged = [];
+    let after = null;
+    for (;;) {
+      const page = await db.records.ids({ after, limit: 2 });
+      if (page.length === 0) break;
+      for (const id of page) paged.push(id);
+      after = page[page.length - 1];
+    }
+    assert.deepStrictEqual(paged, sorted, 'paging by the last id skips none');
+    for (const id of ids) await db.copies.put('v1', id, '{}');
+    assert.deepStrictEqual(await db.copies.ids('v1'), sorted);
+    await db.close();
+  });
+
+  await t.test('a name that would leave the directory is refused before it reaches the backend', async () => {
+    const db = await filesEngine(memory()).open('/names', { logger: null });
+    await assert.rejects(() => db.kv.get('..', 'x'), TypeError);
+    await assert.rejects(() => db.kv.put('', '../x', 'v'), TypeError);
+    await assert.rejects(() => db.kv.put('', 'a/b', 'v'), TypeError);
+    await assert.rejects(() => db.kv.list('a\\b'), TypeError);
+    await assert.rejects(() => db.kv.has('', ''), TypeError);
+    await assert.rejects(() => db.pieces.get('id', '../x'), TypeError);
+    await assert.rejects(() => db.copies.get('../t', 'id'), TypeError);
+    await assert.rejects(() => db.write({ kv: { put: [['', 'a/b', 'v', undefined]] } }), TypeError);
+    await assert.rejects(() => db.write({ records: [{ id: '../x', text: '{}' }] }), TypeError);
+    await assert.rejects(() => db.write({ copies: { put: [['..', 'r', '{}']] } }), TypeError);
+    await db.kv.put('tags/v1/index', 'catalog.json', '{}');
+    assert.strictEqual(await db.kv.get('tags/v1/index', 'catalog.json'), '{}', 'a namespace is a path of keys');
+    await db.close();
+  });
+});

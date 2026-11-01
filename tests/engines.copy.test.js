@@ -14,6 +14,10 @@ const { idbEngine } = require('../src/idb/idb.js');
 const { copyEngine } = require('../src/engines/engines.js');
 const { createMesh } = require('./utils/mesh.js');
 const { settle } = require('./utils/mesh.js');
+const { createTemp, cleanupTemp } = require('./utils/temp.js');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const nodeFsi = require('../src/fsi.js');
 
 process.removeAllListeners('warning');
 process.on('warning', (warning) => {
@@ -153,5 +157,126 @@ test('a database copied between engines', async (t) => {
     assert.strictEqual((await b.list()).length, 11, 'B followed from its cursor');
     assert.deepStrictEqual(bootstraps, [], 'no bootstrap: the same epoch, the same seqs');
     await moved.close();
+  });
+});
+
+// What a copy must get right whatever the engines: every id whatever order the
+// source lists in, nothing left behind by a copy that failed, the identity
+// last, the keys' mode kept.
+test('a copy out of a files engine: order, failure, the keys', async (t) => {
+  const stored = (data) => ({
+    data,
+    meta: { clock: {}, base: 0, deleted: 0 },
+    encrypted: false,
+    timestamp: 1,
+    block: null,
+  });
+
+  await t.test(
+    '1 500 records out of a files engine whose backend lists backwards: none skipped, in id order',
+    async () => {
+      const base = memory();
+      const fsi = {
+        ...base,
+        async list(dir) {
+          return (await base.list(dir)).reverse();
+        },
+      };
+      const from = filesEngine(fsi);
+      const source = await from.open('app', { logger: null });
+      const ids = [];
+      for (let i = 0; i < 500; i++) {
+        const k = `k${String(i).padStart(3, '0')}`;
+        ids.push(k, `${k}-x`, `${k}.y`);
+      }
+      for (let i = 0; i < ids.length; i += 300) {
+        const rows = [];
+        for (const id of ids.slice(i, i + 300)) rows.push({ id, stored: stored({ id }) });
+        await source.write({ records: rows });
+      }
+      await source.close();
+      const to = memoryEngine();
+      const copied = await copyEngine(from, to, { path: 'app', batch: 200 });
+      assert.strictEqual(copied.records, 1500);
+      const target = await to.open('app', { logger: null });
+      const got = await target.records.ids();
+      assert.strictEqual(got.length, 1500);
+      assert.deepStrictEqual(got, ids.slice().sort());
+      await target.close();
+    },
+  );
+
+  await t.test('a copy that fails midway leaves the target empty; the identity lands last', async () => {
+    const from = memoryEngine();
+    const source = await from.open('app', { logger: null });
+    await source.write({
+      kv: {
+        put: [
+          ['', 'node.json', '{"id":"n"}', undefined],
+          ['keys', 'private.pem', 'secret', undefined],
+          ['index', 'catalog.json', '{}', undefined],
+        ],
+      },
+      records: [
+        { id: 'a', stored: stored({ a: 1 }) },
+        { id: 'b', stored: stored({ b: 1 }) },
+      ],
+    });
+    await source.close();
+    const inner = memoryEngine();
+    const sets = [];
+    let failAt = Infinity;
+    const to = {
+      ...inner,
+      open: async (path, options) => {
+        const db = await inner.open(path, options);
+        return {
+          ...db,
+          write: async (batch) => {
+            const keys = batch.kv ? batch.kv.put.map((put) => put[1]).join('|') : '';
+            sets.push(`${Object.keys(batch).join(',')}:${keys}`);
+            if (sets.length === failAt) throw new Error('disk full');
+            return db.write(batch);
+          },
+        };
+      },
+    };
+    failAt = 2;
+    await assert.rejects(copyEngine(from, to, { path: 'app', batch: 1 }), /disk full/);
+    const after = await inner.open('app', { logger: null });
+    assert.strictEqual(await after.kv.has('', 'node.json'), false, 'no identity on a target the copy left');
+    assert.deepStrictEqual(await after.records.ids(), [], 'no record either');
+    await after.close();
+    sets.length = 0;
+    failAt = Infinity;
+    const copied = await copyEngine(from, to, { path: 'app', batch: 1 });
+    assert.strictEqual(copied.records, 2);
+    assert.ok(sets[sets.length - 1].includes('node.json'), `the identity is the last write set: ${sets.join(' / ')}`);
+    assert.ok(sets[sets.length - 2].includes('private.pem'), `the keys just before it: ${sets.join(' / ')}`);
+  });
+
+  await t.test('the private keys keep their mode on a files target', async () => {
+    // One path on both engines: the source lives under the target's directory name.
+    const dir = await createTemp();
+    const from = memoryEngine();
+    const source = await from.open(dir, { logger: null });
+    await source.write({
+      kv: {
+        put: [
+          ['', 'node.json', '{"id":"n"}', undefined],
+          ['keys', 'private.pem', 'secret', undefined],
+          ['keys', 'public.pem', 'open', undefined],
+        ],
+      },
+    });
+    await source.close();
+    try {
+      await copyEngine(from, filesEngine(nodeFsi), { path: dir });
+      const { mode } = await fs.stat(path.join(dir, 'keys', 'private.pem'));
+      assert.strictEqual(mode & 0o777, 0o600);
+      assert.strictEqual((await fs.readFile(path.join(dir, 'node.json'), 'utf8')).length > 0, true);
+    } finally {
+      await cleanupTemp(dir);
+    }
   });
 });

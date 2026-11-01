@@ -19,6 +19,7 @@ src/store/store.js        the @alexify/syncom/store subpath — toStore/fromEven
 src/inspect/inspect.js    the @alexify/syncom/inspect subpath — a record's anatomy (through the [SOURCE] seam's raw `entry`) and anonymize; requires compose, shape, symbols, hash only
 src/backend.js            the fsi contract (isFsi/checkFsi; sync, create and append optional), withSync — no requires
 src/engine.js             the engine contract (isEngine/checkEngine/checkEngineDb, capabilitiesOf, kvNamespace/fsiNamespace) — no requires
+src/write-set.js          checkWriteSet — a write set as the contract shapes it: every name a key, every id admitted — requires engine.js only
 src/readonly.js           readOnlyDb — an engine's database that refuses every write: what `createDatabase({ readOnly })` opens over — no requires
 src/layered/layered.js    @alexify/syncom/layered — layered([top, …, bottom], { write, fill, queue }): one fsi over several, a multi-level
                           cache; 'back' drains its queue before any lower layer is consulted; create is exclusive across layers
@@ -29,8 +30,7 @@ src/crypto/digest.js      sha256, hashOf — SHA-256 of a value's JSON as hex: t
                           path names every op by) at once on both, `hashOf` at once but a promise in the browser past 64 KiB
 src/crypto/sha256.js      sha256Now — SHA-256 in JavaScript, at once: the browser half's `hashText` (Web Crypto answers with a promise only)
                           — no requires
-src/crypto/keys.js        loadKeyPair — the on-disk key pairs (RSA for sealing, Ed25519 for signing), generator injected by each crypto
-                          half; the signing and encryption subpaths share it — requires errors.js only
+src/crypto/keys.js        loadKeyPair — the on-disk key pairs (RSA for sealing, Ed25519 for signing), generator injected by each crypto half; the signing and encryption subpaths share it; KEY_FILE_MODE — requires errors.js only
 src/crypto/pem.js         base64/PEM helpers over btoa/atob for the browser crypto halves of signing and encryption — no requires
 src/scope.js              GLOBAL_SCOPE, inScope, opInScope — the one definition of "in scope" — no requires
 src/blame.js              lastEditorOf, editorsOf — who wrote what, from a record's meta (registers' clocks, counters' sums, sets' slots, the plugins' `editors` hook); never the log
@@ -411,8 +411,8 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   key (`storage[SIGNER]`) — or under `sync.rewind: 'adopt'`; unproven, the
   stream stays, `REWOUND` says `adopted: {}` and `peer.rewound` keeps it from
   that host until the next hello. Never adopt a host's word on own keys.
-- **A log file is whole or it is nothing.** `fileOf`/`readFile` in src/log.js
-  are the ONLY writer and reader of a log file's text: `{"e":[…],"c":"…"}`,
+- **A log file is whole or it is nothing.** `fileOf`/`readFile` in src/files/journal.js
+  (src/log.js re-exports them) are the ONLY writer and reader of a log file's text: `{"e":[…],"c":"…"}`,
   the entries positional (`[seq, fp, header, payload, rest?, flags?]` — the header the
   text `link` fingerprinted, handed to `log.enqueue` as `headers`; `opOf` in src/header.js
   reads an op back) and `c` the CRC-32 (src/crc32.js) of their text, last, checked BEFORE
@@ -436,8 +436,8 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   that is what shadows the line of a group whose append failed after it
   landed (its seqs went to a newer journal); a torn LAST line is left out
   (`log.open.torn`), a line inside that does not read is `#lost`; a later
-  open never appends to an older journal. `#scrub` rewrites a journal whole,
-  a line per group it holds. A wrapper that cannot append a file in place
+  open never appends to an older journal. `scrub` rewrites a segment or a journal whole — from the file's
+  own entries with the scrubbed ones swapped where the log answers less (a proxy; src/files/CLAUDE.md) — never short. A wrapper that cannot append a file in place
   (`atRest`: one ciphertext per file) must not pass `append` through.
 - **Data crosses the boundary as JSON copies.** `src/commit.js` copies
   `payload.data` and `src/bootstrap.js` a record's `data`/`meta` (`asJson`)

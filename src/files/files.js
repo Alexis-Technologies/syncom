@@ -1,6 +1,6 @@
 'use strict';
 
-// The files engine (@alexify/syncom/files): the engine contract of
+// The files engine (`filesEngine(fsi)`, a root export): the engine contract of
 // src/engine.js over an fsi — "a directory and a file name" — which is what
 // every database was until the engines. Nothing on disk changes: a kv
 // namespace is a directory under the path and a key a file in it, a record
@@ -12,7 +12,8 @@
 // shape.js, errors.js and journal.js only.
 
 const { checkFsi } = require('../backend.js');
-const { capabilitiesOf } = require('../engine.js');
+const { capabilitiesOf, KV_NAMESPACES, checkKvKey, isKvKey, isKvNamespace } = require('../engine.js');
+const { checkWriteSet } = require('../write-set.js');
 const { isRecordId } = require('../shape.js');
 const { SyncomError } = require('../errors.js');
 const { createJournalStore } = require('./journal.js');
@@ -25,18 +26,13 @@ const RECORD = '.json';
 // The directories a database writes under its path, besides a tag's two;
 // `remove(path)` empties them (fsi lists files, not directories, and no
 // backend has rmdir, so the empty directories stay).
-const DIRS = [
-  '',
-  'keys',
-  'blockchain',
-  'index',
-  'data',
-  'log',
-  'log/open',
-  'log/corrupt',
-  'remote',
-  'tags/.pending/data',
-];
+const DIRS = KV_NAMESPACES.concat(['data', 'log', 'log/open', 'log/corrupt', 'tags/.pending/data']);
+
+// A name that becomes a file's: checked before it reaches the backend (src/engine.js isKvKey).
+const named = (value, what) => {
+  if (!isKvKey(value)) throw new TypeError(`filesEngine: ${JSON.stringify(value)} is not a ${what}`);
+  return value;
+};
 
 const unreadable = (id, cause) =>
   new SyncomError('INTEGRITY', `Storage record ${id} is unreadable`, { id, cause, reason: 'unreadable' });
@@ -77,21 +73,31 @@ const openDb = (fsi, path, capabilities, logger) => {
   const data = `${path}/${DATA}`;
   // The op log's medium: the journals and segments under log/ (src/log.js owns the log).
   const log = createJournalStore(fsi, `${path}/log`, { logger });
-  const copiesDir = (tag) => `${path}/${TAGS}/${tag}/${DATA}`;
+  const copiesDir = (tag) => `${path}/${TAGS}/${named(tag, 'tag')}/${DATA}`;
   const recordFile = (id) => `${id}${RECORD}`;
 
+  // A namespace and a key become a directory and a file: checked first.
+  const where = (ns, key) => {
+    checkKvKey(ns, key, 'filesEngine');
+    return dirOf(path, ns);
+  };
   const kv = {
     async get(ns, key) {
-      const dir = dirOf(path, ns);
+      const dir = where(ns, key);
       if (!(await fsi.exists(dir, key))) return null;
       return fsi.read(dir, key);
     },
-    has: (ns, key) => fsi.exists(dirOf(path, ns), key),
-    list: (ns) => fsi.list(dirOf(path, ns)),
-    put: (ns, key, value, options) => fsi.write(dirOf(path, ns), key, value, options),
-    remove: (ns, key) => fsi.remove(dirOf(path, ns), key),
+    has: async (ns, key) => fsi.exists(where(ns, key), key),
+    async list(ns) {
+      if (!isKvNamespace(ns)) throw new TypeError(`filesEngine: ${JSON.stringify(ns)} is not a namespace`);
+      return fsi.list(dirOf(path, ns));
+    },
+    put: async (ns, key, value, options) => fsi.write(where(ns, key), key, value, options),
+    remove: async (ns, key) => fsi.remove(where(ns, key), key),
   };
-  if (typeof fsi.create === 'function') kv.create = (ns, key, value) => fsi.create(dirOf(path, ns), key, value);
+  if (typeof fsi.create === 'function') {
+    kv.create = async (ns, key, value) => fsi.create(where(ns, key), key, value);
+  }
 
   const records = {
     /** The stored record — `{ data, meta, encrypted, timestamp, block, gen? }` — or null; a file that does not parse is INTEGRITY. */
@@ -124,15 +130,21 @@ const openDb = (fsi, path, capabilities, logger) => {
     },
     /** Every record id the medium holds — tombstones included — in id order, after `after`, at most `limit`. */
     async ids({ after = null, limit = Infinity } = {}) {
+      // The backend lists in its own order (a hash on ext4, `a-b.json` before
+      // `a.json` by name): every id first, sorted, then the page.
       const names = await fsi.list(data);
-      const ids = [];
-      for (let i = 0; i < names.length && ids.length < limit; i++) {
+      const all = [];
+      for (let i = 0; i < names.length; i++) {
         const name = names[i];
         if (!name.endsWith(RECORD)) continue;
         const id = name.slice(0, -RECORD.length);
         // A record's file, never one of its pieces (`<id>~<n>.json`).
-        if (!isRecordId(id) || (after !== null && id <= after)) continue;
-        ids.push(id);
+        if (isRecordId(id)) all.push(id);
+      }
+      all.sort();
+      const ids = [];
+      for (let i = 0; i < all.length && ids.length < limit; i++) {
+        if (after === null || all[i] > after) ids.push(all[i]);
       }
       return ids;
     },
@@ -141,11 +153,12 @@ const openDb = (fsi, path, capabilities, logger) => {
   const pieces = {
     /** A piece's text by the name the record's meta holds (`<id>~<n>.json`), or null. */
     async get(id, name) {
+      named(name, 'piece');
       if (!(await fsi.exists(data, name))) return null;
       return fsi.read(data, name);
     },
     /** A piece its record no longer names, removed — after the record's file (src/entries.js). */
-    remove: (id, name) => fsi.remove(data, name),
+    remove: async (id, name) => fsi.remove(data, named(name, 'piece')),
   };
 
   const copies = {
@@ -154,7 +167,7 @@ const openDb = (fsi, path, capabilities, logger) => {
       if (!(await fsi.exists(dir, recordFile(id)))) return null;
       return fsi.read(dir, recordFile(id));
     },
-    has: (tag, id) => fsi.exists(copiesDir(tag), recordFile(id)),
+    has: async (tag, id) => fsi.exists(copiesDir(tag), recordFile(id)),
     /** The ids a tag holds copies of, in id order. */
     async ids(tag) {
       const names = await fsi.list(copiesDir(tag));
@@ -162,12 +175,12 @@ const openDb = (fsi, path, capabilities, logger) => {
       for (let i = 0; i < names.length; i++) {
         if (names[i].endsWith(RECORD)) ids.push(names[i].slice(0, -RECORD.length));
       }
-      return ids;
+      return ids.sort();
     },
-    put: (tag, id, text) => fsi.write(copiesDir(tag), recordFile(id), text),
-    remove: (tag, id) => fsi.remove(copiesDir(tag), recordFile(id)),
+    put: async (tag, id, text) => fsi.write(copiesDir(tag), recordFile(id), text),
+    remove: async (tag, id) => fsi.remove(copiesDir(tag), recordFile(id)),
     /** Every copy of the tag removed. */
-    drop: (tag) => emptyDir(fsi, copiesDir(tag)),
+    drop: async (tag) => emptyDir(fsi, copiesDir(tag)),
   };
 
   // One write set, in the order a crash is safest in: the kv puts first (a
@@ -175,6 +188,7 @@ const openDb = (fsi, path, capabilities, logger) => {
   // it makes, its file, the pieces it drops — then the copies and the kv
   // removals. Not atomic: a file system has no transactions.
   const write = async (batch) => {
+    checkWriteSet(batch, isRecordId, 'filesEngine');
     const puts = batch.kv?.put;
     if (puts !== undefined) {
       for (let i = 0; i < puts.length; i++) {

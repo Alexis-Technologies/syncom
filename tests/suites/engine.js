@@ -238,6 +238,36 @@ const runEngineTests = async (t, { create, root, afterEach = null }) => {
     }
   });
 
+  await t.test('ids page in id order: none skipped, none twice', async () => {
+    const { db, done } = await open();
+    try {
+      // Ids a listing by file name would misorder (`a-b.json` before `a.json`).
+      const ids = [];
+      for (let i = 0; i < 400; i++) {
+        const k = `p${String(i).padStart(3, '0')}`;
+        ids.push(k, `${k}-x`, `${k}.y`);
+      }
+      for (let i = 0; i < ids.length; i += 300) {
+        const rows = [];
+        for (let k = i; k < Math.min(i + 300, ids.length); k++) rows.push({ id: ids[k], stored: stored({ n: k }) });
+        await db.write({ records: rows });
+      }
+      const sorted = ids.slice().sort();
+      assert.deepStrictEqual(await db.records.ids(), sorted);
+      const paged = [];
+      let after = null;
+      for (;;) {
+        const page = await db.records.ids({ after, limit: 250 });
+        if (page.length === 0) break;
+        for (const id of page) paged.push(id);
+        after = page[page.length - 1];
+      }
+      assert.deepStrictEqual(paged, sorted);
+    } finally {
+      await done();
+    }
+  });
+
   await t.test(
     'two databases of one engine never share a record; remove(path) takes one and leaves the other',
     async () => {

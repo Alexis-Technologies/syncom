@@ -1,6 +1,6 @@
 import { expectAssignable, expectType } from 'tsd';
 import { serveEngine, remoteEngine, connectEngine, copyEngine } from '../src/engines/engines.js';
-import type { EnginePort, CopyEngineResult, Engine } from '../src/engines/engines.js';
+import type { EnginePort, CopyEngineResult, Engine, RemoteEngineStats } from '../src/engines/engines.js';
 import { memoryEngine } from '../src/memory/memory.js';
 import { createDatabase } from '../index.js';
 
@@ -17,3 +17,11 @@ expectAssignable<Engine>(connected);
 const copied = await copyEngine(memoryEngine(), memoryEngine(), { path: 'app', batch: 100 });
 expectType<CopyEngineResult>(copied);
 expectType<number>(copied.records);
+const guarded = serveEngine(memoryEngine(), port, { allow: ['app'] });
+expectType<Promise<void>>(guarded.close());
+const timed = remoteEngine(port, { name: 'memory', capabilities: memoryEngine().capabilities, timeout: 5000 });
+expectType<RemoteEngineStats>(timed.stats());
+expectType<number>(timed.stats().inflight);
+expectType<boolean>(timed.stats().closed);
+const asked = await connectEngine(port, { timeout: 1000 });
+expectType<RemoteEngineStats>(asked.stats());

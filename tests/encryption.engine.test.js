@@ -129,8 +129,13 @@ test('an engine encrypted at rest', async (t) => {
     await db.close();
     const plain = await inner.open('log');
     for (const entry of (await plain.log.load()).entries) {
-      assert.ok(!entry.e.includes('s11'), 'the purged payload is gone');
+      assert.ok(typeof entry.e === 'string' && entry.e.startsWith('enc1:'), 'the medium holds ciphertext');
     }
+    // The copies the wrapper sealed were swapped at the scrub: decrypted, the purged payload is gone.
+    const opened = await engine.open('log');
+    const text = JSON.stringify((await opened.log.load()).entries);
+    assert.ok(text.includes('"s10"') && !text.includes('"s11"'), 'the purged payload is gone once decrypted');
+    await opened.close();
     const again = await createDatabase(options);
     const reopened = again.stats().log;
     assert.deepStrictEqual([reopened.floor, reopened.next, reopened.length], [floor, next, length]);

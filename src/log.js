@@ -779,8 +779,10 @@ class OpLog {
     const { ops, days } = this.#retention;
     const cutoff = days ? Date.now() - days * 86_400_000 : null;
     let dropped = 0;
-    const segments = this.#store.segments;
-    while (segments.length > 1) {
+    // The store's list, read again after every drop: a proxy's is a copy, replaced by each answer.
+    for (;;) {
+      const segments = this.#store.segments;
+      if (segments.length <= 1) break;
       const oldest = segments[0];
       const overOps = ops ? this.#entries.length - oldest.count >= ops : false;
       const lastTs = this.#entryAt(oldest.to)?.op?.ts ?? Infinity;

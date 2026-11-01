@@ -118,11 +118,22 @@ const engine = await connectEngine(worker);               // asks the worker wha
 const db = await createDatabase({ path: 'app', engine });
 ```
 
-`remoteEngine(port, { name, capabilities })` is the same without the question,
-where the main thread knows what it started. An error crosses with its code
-(`EEXIST`, `INTEGRITY`, `LOCKED`…), a change stream and the loss of a lease
-are pushed back, and a group the served store cannot write fails the append
-here, as it would in-process.
+`remoteEngine(port, { name, capabilities, timeout })` is the same without the
+question, where the main thread knows what it started. An error crosses with
+its code (`EEXIST`, `INTEGRITY`, `LOCKED`…), a change stream and the loss of a
+lease are pushed back, and a group the served store cannot write fails the
+append here, as it would in-process.
+
+The served side trusts the port as it trusts the process, no further: a call
+names a store and a method of the contract and nothing else, every key, id,
+tag and path is checked before a store sees it, and `remove(path)` takes only
+what that port opened — `serveEngine(engine, port, { allow: ['app'] })` lists
+the paths a less trusted side (a renderer) may open and remove at all. A port
+that closes or a worker that exits fails every call waiting and every call
+after with `code: 'ENGINE_UNREACHABLE'` (`reason: 'closed'`), and the served
+side lets go of what the port held — its leases, subscriptions, databases; a
+call that waits longer than `timeout` ms fails the same (`reason: 'timeout'`).
+`engine.stats()` is `{ inflight, oldestMs, calls, failures, closed }`.
 
 ### Moving a database between engines
 
@@ -132,8 +143,13 @@ every kv text (`node.json`, the keys, the chain, the catalog, the registry),
 the op log with its index — so the node opens on the new engine as itself:
 the same identity, epoch, vector and heads, and a peer resumes its cursor
 without a bootstrap. Both databases must be closed (the copy holds them as
-`createDatabase()` would), and a target that already holds a database at the
-path is `TARGET_NOT_EMPTY`.
+`createDatabase()` would; a lease lost on the way fails it with `LEASE_LOST`),
+and a target that already holds a database at the path is `TARGET_NOT_EMPTY`.
+The identity — the keys, then `node.json` — lands last, so a copy cut short is
+no node of that name, and a copy that fails removes what it wrote from the
+target. Two copies of one node are two writers of one stream: once the copy is
+done, open the database through the new engine only, and remove it from the old
+one (`from.remove(path)`) or never open it there again.
 
 ```js
 const { copyEngine } = require('@alexify/syncom/engines');

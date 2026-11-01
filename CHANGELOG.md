@@ -1146,6 +1146,24 @@ and one `commit` event, not one per call.
 
 ### Fixed
 
+- **A served files engine lost log entries to a purge and to a failed append; a copy skipped records; the served side
+  answered any call.** Over `serveEngine(filesEngine(…))` a purge rewrote every segment and journal the purged
+  record touched from the scrubbed entries alone — the rest of each file was gone, the segment read as altered — and a
+  failed append rewrote the journal's other groups as empty lines (review №5, R-1/R-2). The journal now rebuilds nothing
+  from less than it held: a file's own entries with the scrubbed ones swapped, where the log answers less than the whole
+  range (`log.journal.unrewritten`, `log.segment.unscrubbed` where neither is whole). The files engine listed ids in the
+  backend's order (a hash on ext4, `a-b.json` before `a.json` by name), so `copyEngine` paging by the last id skipped
+  records (R-3): ids and a tag's copies are sorted first. The memory engine's `scrub` was a no-op, so under `atRest` or a
+  port — which keep copies — a purged payload stayed in the log (R-17). Compaction over the port read the proxy's
+  segments once and dropped a dropped segment again (R-9). `serveEngine` trusted every message — any store or method
+  (`fsi`, `lock`, an inherited `valueOf`), a path to remove, a key with `..`, an object where MongoDB reads a filter
+  (S-3): every call is checked against the contract (`isKvKey`, `isRecordId`, `checkWriteSet` in src/engine.js — the
+  files engine checks the same before a name becomes a file), `remove(path)` takes what the port opened or `allow` lists,
+  an answer that does not clone crosses as an error, a file system's `path`/`syscall`/`errno` never cross. A port that
+  closes or a worker that exits, and a call past `remoteEngine(port, { timeout })`, fail every call waiting and after as
+  `ENGINE_UNREACHABLE` (`reason`), the served side lets go of what the port held, and `engine.stats()` counts the calls
+  (R-8). `copyEngine` lands the identity last, takes a failed copy away (`to.remove(path)`), fails `LEASE_LOST` when the
+  lease goes, pages the sealed log by `batch`, and keeps the private keys' mode (`KEY_FILE_MODE`; R-18, S-7, R-13).
 - **A tag read as the window laid its record could read the record as it is now.** A record changed
   since the tag and not yet on its file reads as the file — still the tag's state — but a deferred
   flush may be laying it at that moment, the tag's copy first and the new file after; a read of the

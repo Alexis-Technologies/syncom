@@ -128,12 +128,48 @@ const fsiNamespace = (fsi, dir) => {
   return store;
 };
 
+// The kv namespaces a database writes besides a tag's (`tags/<tag>/index`):
+// the one list `copyEngine` copies and the files engine sweeps — a plugin
+// that writes a namespace of its own adds it here.
+const KV_NAMESPACES = Object.freeze(['', 'keys', 'blockchain', 'index', 'remote']);
+
+// A kv key, a tag's name, a piece's name: a text that names one thing and
+// nothing else — no separator, no `.`/`..`, no control character, 255 at
+// most — since the files engine makes a file of it and a served engine
+// (src/engines/remote.js) takes it from the other side of a port. A
+// namespace is a path of such keys (`tags/<tag>/index`), or `''` for the root.
+const KEY_MAX = 255;
+const isKvKey = (value) => {
+  if (typeof value !== 'string' || value.length === 0 || value.length > KEY_MAX) return false;
+  if (value === '.' || value === '..') return false;
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f || code === 0x2f || code === 0x5c) return false;
+  }
+  return true;
+};
+const isKvNamespace = (value) => {
+  if (value === '') return true;
+  if (typeof value !== 'string') return false;
+  const parts = value.split('/');
+  for (let i = 0; i < parts.length; i++) if (!isKvKey(parts[i])) return false;
+  return true;
+};
+const checkKvKey = (ns, key, label) => {
+  if (!isKvNamespace(ns)) throw new TypeError(`${label}: ${JSON.stringify(ns)} is not a namespace`);
+  if (!isKvKey(key)) throw new TypeError(`${label}: ${JSON.stringify(key)} is not a key`);
+};
+
 module.exports = {
   CAPABILITIES,
+  KV_NAMESPACES,
   isEngine,
   checkEngine,
   checkEngineDb,
   capabilitiesOf,
   kvNamespace,
   fsiNamespace,
+  isKvKey,
+  isKvNamespace,
+  checkKvKey,
 };

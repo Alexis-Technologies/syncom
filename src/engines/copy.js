@@ -5,25 +5,31 @@
 // log with its index — the node's identity, epoch, vector and heads — so the
 // node opens on the new engine as itself and no peer bootstraps from it. Over
 // CLOSED databases: both are held for the copy (the lock the database would
-// take), and a target that holds anything is refused (TARGET_NOT_EMPTY). The
-// log's sealed entries go as one segment; the open groups as they were.
-// Requires engine.js, errors.js and lock.js only.
+// take; a lease lost on the way fails it), and a target that holds anything
+// is refused (TARGET_NOT_EMPTY). The identity — node.json, the keys — lands
+// LAST, so a copy cut short is no node of that name, and a copy that fails
+// takes what it wrote away again. The log's sealed entries go as one
+// segment, `batch` entries a group; the open groups as they were. Requires
+// engine.js, errors.js, lock.js and crypto/keys.js (the keys' file mode) only.
 
-const { checkEngine, checkEngineDb, kvNamespace } = require('../engine.js');
+const { checkEngine, checkEngineDb, kvNamespace, KV_NAMESPACES } = require('../engine.js');
+const { KEY_FILE_MODE } = require('../crypto/keys.js');
 const { SyncomError } = require('../errors.js');
 const { acquireLock, LOCK_FILE } = require('./../lock.js');
 
-// The kv namespaces a database writes besides a tag's (`tags/<name>/index`).
-const NAMESPACES = ['', 'keys', 'blockchain', 'index', 'remote'];
+const NODE_FILE = 'node.json';
+const KEYS = 'keys';
 const TAGS_FILE = 'tags.json';
 const PENDING = '.pending';
 
 const empty = (path) =>
   new SyncomError('TARGET_NOT_EMPTY', `copyEngine(): the target holds a database at ${path}`, { path });
+const lost = (path, cause) =>
+  new SyncomError('LEASE_LOST', `copyEngine(): the lease on ${path} was lost during the copy`, { path, cause });
 
 // The database held the way createDatabase() holds it: the engine's lease, or the lock key.
-const hold = async (db, path) => {
-  if (db.capabilities.lock === 'native' && typeof db.lock === 'function') return db.lock({ mode: 'fail' });
+const hold = async (db, path, onLost) => {
+  if (db.capabilities.lock === 'native' && typeof db.lock === 'function') return db.lock({ mode: 'fail', onLost });
   return acquireLock({ store: kvNamespace(db.kv, ''), path, mode: 'fail' });
 };
 
@@ -56,10 +62,24 @@ const piecesOf = (stored) => {
   return names;
 };
 
+// The kv texts of `ns`, as puts: the lock key is the holder's, the identity is kept for last.
+const kvPuts = async (source, ns, { identity }) => {
+  const puts = [];
+  const keys = await source.kv.list(ns);
+  for (let k = 0; k < keys.length; k++) {
+    const key = keys[k];
+    if (ns === '' && (key === LOCK_FILE || (key === NODE_FILE) !== identity)) continue;
+    const value = await source.kv.get(ns, key);
+    if (value === null) continue;
+    puts.push([ns, key, value, ns === KEYS ? { mode: KEY_FILE_MODE } : undefined]);
+  }
+  return puts;
+};
+
 /**
  * `copyEngine(from, to, { path, batch })` — the database at `path` copied
- * from one engine to another, `batch` records per write set (500). Answers
- * what was copied: `{ records, pieces, copies, kv, entries }`.
+ * from one engine to another, `batch` records (or log entries) per write set
+ * (500). Answers what was copied: `{ records, pieces, copies, kv, entries }`.
  */
 const copyEngine = async (from, to, { path, batch = 500 } = {}) => {
   checkEngine(from, 'copyEngine(from)');
@@ -70,28 +90,36 @@ const copyEngine = async (from, to, { path, batch = 500 } = {}) => {
   const target = checkEngineDb(await to.open(path, {}), 'copyEngine(to)');
   const held = [];
   const counts = { records: 0, pieces: 0, copies: 0, kv: 0, entries: 0 };
+  // A lease that goes while the copy runs: the next write set fails, nothing lands over another holder's.
+  let gone = null;
+  const onLost = (cause) => {
+    gone ??= cause;
+  };
+  const check = () => {
+    if (gone !== null) throw lost(path, gone);
+  };
+  const write = async (set) => {
+    check();
+    await target.write(set);
+  };
+  let written = false;
   try {
-    held.push(await hold(source, path));
-    held.push(await hold(target, path));
-    if ((await target.kv.has('', 'node.json')) || (await target.records.ids({ limit: 1 })).length > 0) {
+    held.push(await hold(source, path, onLost));
+    held.push(await hold(target, path, onLost));
+    if ((await target.kv.has('', NODE_FILE)) || (await target.records.ids({ limit: 1 })).length > 0) {
       throw empty(path);
     }
-    // The kv texts, namespace by namespace: the lock key is the holder's, not copied.
+    written = true;
+    // The kv texts, namespace by namespace — the identity (node.json, the keys) last of all.
     const tags = await tagNames(source);
-    const namespaces = NAMESPACES.slice();
+    const namespaces = [];
+    for (let i = 0; i < KV_NAMESPACES.length; i++) if (KV_NAMESPACES[i] !== KEYS) namespaces.push(KV_NAMESPACES[i]);
     for (let i = 0; i < tags.length; i++) namespaces.push(`tags/${tags[i]}/index`);
-    const puts = [];
     for (let i = 0; i < namespaces.length; i++) {
-      const ns = namespaces[i];
-      const keys = await source.kv.list(ns);
-      for (let k = 0; k < keys.length; k++) {
-        if (ns === '' && keys[k] === LOCK_FILE) continue;
-        const value = await source.kv.get(ns, keys[k]);
-        if (value !== null) puts.push([ns, keys[k], value, undefined]);
-      }
+      const puts = await kvPuts(source, namespaces[i], { identity: false });
+      if (puts.length > 0) await write({ kv: { put: puts } });
+      counts.kv += puts.length;
     }
-    if (puts.length > 0) await target.write({ kv: { put: puts } });
-    counts.kv = puts.length;
     // The records with their pieces, `batch` per write set, in id order.
     let after = null;
     for (;;) {
@@ -120,7 +148,7 @@ const copyEngine = async (from, to, { path, batch = 500 } = {}) => {
         }
         rows.push(row);
       }
-      await target.write({ records: rows });
+      await write({ records: rows });
       counts.records += rows.length;
       after = ids[ids.length - 1];
     }
@@ -134,10 +162,10 @@ const copyEngine = async (from, to, { path, batch = 500 } = {}) => {
         const text = await source.copies.get(tagged[i], ids[k]);
         if (text !== null) copied.push([tagged[i], ids[k], text]);
       }
-      if (copied.length > 0) await target.write({ copies: { put: copied } });
+      if (copied.length > 0) await write({ copies: { put: copied } });
       counts.copies += copied.length;
     }
-    // The log: the sealed entries as one segment, the open groups as they were, the index last.
+    // The log: the sealed entries as one segment (a group of `batch` at a time), the open groups as they were, the index last.
     const loaded = await source.log.load();
     const { index, entries, groups } = loaded;
     const sealedTo = source.log.sealedTo ?? loaded.floor - 1;
@@ -156,31 +184,45 @@ const copyEngine = async (from, to, { path, batch = 500 } = {}) => {
     const fail = (error) => {
       throw error;
     };
+    const append = async (page, sealedBelow) => {
+      check();
+      const options = {
+        first: page[0].seq,
+        last: page[page.length - 1].seq,
+        sealedTo: sealedBelow,
+        onFail: fail,
+        entriesBetween: () => [],
+      };
+      await target.log.append(page, null, options);
+    };
     if (sealed.length > 0) {
       const first = sealed[0].seq;
       const last = sealed[sealed.length - 1].seq;
-      await target.log.append(sealed, null, {
-        first,
-        last,
-        sealedTo: first - 1,
-        onFail: fail,
-        entriesBetween: () => [],
-      });
+      for (let i = 0; i < sealed.length; i += batch) await append(sealed.slice(i, i + batch), first - 1);
+      check();
       await target.log.seal(sealed, first, last);
       await target.log.sealed(last);
     }
     for (const group of open.values()) {
-      if (group.entries.length === 0) continue;
-      const options = { first: group.first, last: group.last, sealedTo, onFail: fail, entriesBetween: () => [] };
-      await target.log.append(group.entries, null, options);
+      if (group.entries.length > 0) await append(group.entries, sealedTo);
     }
+    check();
     if (index !== null) await target.log.saveIndex(index);
     counts.entries = entries.length;
+    // The identity last: the keys, then node.json — a node of that name only once it is whole.
+    const keys = await kvPuts(source, KEYS, { identity: false });
+    if (keys.length > 0) await write({ kv: { put: keys } });
+    const identity = await kvPuts(source, '', { identity: true });
+    if (identity.length > 0) await write({ kv: { put: identity } });
+    counts.kv += keys.length + identity.length;
+    written = false;
     return counts;
   } finally {
     for (let i = held.length - 1; i >= 0; i--) await held[i].release();
     await source.close();
     await target.close();
+    // A copy that failed takes what it wrote away: the target was empty, and a retry finds it so.
+    if (written) await to.remove(path);
   }
 };
 

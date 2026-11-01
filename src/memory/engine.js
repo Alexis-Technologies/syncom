@@ -115,8 +115,23 @@ const logStore = () => {
     async saveIndex(next) {
       index = frozenCopy(next);
     },
-    // The entries are the log's own objects: a scrub stripped them already.
-    async scrub() {},
+    // The entries are the log's own objects, stripped by the scrub already —
+    // unless a wrapper keeps copies (atRest seals them, a port clones them):
+    // the entry at each seq is swapped for what it is now.
+    async scrub(seqs, { entriesBetween }) {
+      for (let i = 0; i < seqs.length; i++) {
+        const held = entriesBetween(seqs[i], seqs[i]);
+        if (held.length !== 1) continue;
+        let low = 0;
+        let high = entries.length;
+        while (low < high) {
+          const mid = (low + high) >>> 1;
+          if (entries[mid].seq < seqs[i]) low = mid + 1;
+          else high = mid;
+        }
+        if (low < entries.length && entries[low].seq === seqs[i]) entries[low] = held[0];
+      }
+    },
   };
 };
 

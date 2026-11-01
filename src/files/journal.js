@@ -256,31 +256,77 @@ const createJournalStore = (fsi, path, { logger = null } = {}) => {
   // many journals it has begun — never a name a failed group's line is in.
   const journalName = (first) => `${pad(first)}-${session}${(++journals).toString(36).padStart(4, '0')}${JOURNAL}`;
 
+  // The entries at `seqs` as they are now — a scrub took their payloads — by
+  // seq: what a store is handed for certain. The log answers a whole range
+  // where it holds one; a proxy (src/engines/remote.js) sends the scrubbed
+  // entries alone, so a file is never rebuilt from less than it held.
+  const replacementsOf = (seqs, entriesBetween) => {
+    const bySeq = new Map();
+    for (let i = 0; i < seqs.length; i++) {
+      const held = entriesBetween(seqs[i], seqs[i]);
+      if (held.length === 1) bySeq.set(seqs[i], held[0]);
+    }
+    return bySeq;
+  };
+  const NOTHING = new Map();
+
   // A group's line written again — what a scrub or a rewritten journal
   // holds of it — and kept as the group's: the line a segment seals is never
   // one a purge took a payload out of. A group a segment holds in part keeps
-  // no line (its segment is made from the entries).
-  const lineOf = (group, sealed, entriesBetween) => {
+  // no line (its segment is made from the entries). The entries come from the
+  // log where it answers the whole range, else from the line itself with
+  // the scrubbed ones swapped; null where neither is whole — nothing of the
+  // group is written then.
+  const lineOf = (group, sealed, entriesBetween, replacements) => {
     const from = Math.max(group.first, sealed + 1);
-    const line = fileOf(entriesBetween(from, group.last));
+    const expected = group.last - from + 1;
+    const full = entriesBetween(from, group.last);
+    if (full.length === expected) {
+      const line = fileOf(full);
+      group.line = from === group.first ? line : null;
+      return line;
+    }
+    if (group.line === null) return null;
+    const read = readFile(group.line);
+    if (read.entries === null) return null;
+    const kept = [];
+    let touched = false;
+    for (let i = 0; i < read.entries.length; i++) {
+      const entry = read.entries[i];
+      if (entry.seq < from) continue;
+      const next = replacements.get(entry.seq);
+      if (next !== undefined) touched = true;
+      kept.push(next ?? entry);
+    }
+    if (kept.length !== expected) return null;
+    const line = !touched && from === group.first ? group.line : fileOf(kept);
     group.line = from === group.first ? line : null;
     return line;
   };
 
   // A journal written again under a new name with the groups of it still
-  // open, then removed: never rewritten in place (see `scrub`).
-  const rewriteJournal = async (file, sealed, entriesBetween) => {
+  // open, then removed: never rewritten in place (see `scrub`). A group
+  // whose line cannot be made whole keeps the journal as it is, said out loud.
+  const rewriteJournal = async (file, sealed, entriesBetween, replacements = NOTHING) => {
     const held = [];
     for (let i = 0; i < groups.length; i++) if (groups[i].file === file) held.push(groups[i]);
     if (held.length > 0) {
       let content = '';
-      for (let i = 0; i < held.length; i++) content += `${lineOf(held[i], sealed, entriesBetween)}\n`;
+      for (let i = 0; i < held.length; i++) {
+        const line = lineOf(held[i], sealed, entriesBetween, replacements);
+        if (line === null) {
+          logger?.warn?.({ event: 'log.journal.unrewritten', file, first: held[i].first, reason: 'partial' });
+          return false;
+        }
+        content += `${line}\n`;
+      }
       const copy = journalName(held[0].first);
       await fsi.write(openPath, copy, content);
       for (let i = 0; i < held.length; i++) held[i].file = copy;
       if (journal === file) journal = null;
     }
     await fsi.remove(openPath, file);
+    return true;
   };
 
   // The lines a segment of `entries` (seqs `from`..`to`) is made of: the
@@ -608,10 +654,23 @@ const createJournalStore = (fsi, path, { logger = null } = {}) => {
      * that name `id` removed whole — a purge outranks evidence.
      */
     async scrub(seqs, { id, sealedTo: sealed, entriesBetween }) {
+      const replacements = replacementsOf(seqs, entriesBetween);
       for (let i = 0; i < segments.length; i++) {
         const segment = segments[i];
         if (!anyWithin(seqs, segment.from, segment.to)) continue;
-        const entries = entriesBetween(segment.from, segment.to);
+        let entries = entriesBetween(segment.from, segment.to);
+        if (entries.length !== segment.count) {
+          // Handed the scrubbed entries alone: the segment's own, read back, with those swapped.
+          const read = readSegment(await readOrNull(fsi, path, segment.name));
+          if (read.entries === null) {
+            logger?.warn?.({ event: 'log.segment.unscrubbed', file: segment.name, id, reason: read.reason });
+            continue;
+          }
+          entries = [];
+          for (let k = 0; k < read.entries.length; k++) {
+            entries.push(replacements.get(read.entries[k].seq) ?? read.entries[k]);
+          }
+        }
         await fsi.write(path, segment.name, segmentOf([fileOf(entries)], segment.to), ATOMIC);
       }
       const byFile = new Map();
@@ -625,25 +684,16 @@ const createJournalStore = (fsi, path, { logger = null } = {}) => {
         let touched = false;
         for (let i = 0; !touched && i < held.length; i++) touched = anyWithin(seqs, held[i].first, held[i].last);
         if (!touched) continue;
-        const isJournal = file.endsWith(JOURNAL);
-        let content = '';
-        for (let i = 0; i < held.length; i++) {
-          const text = lineOf(held[i], sealed, entriesBetween);
-          if (!isJournal) {
-            content = text;
-            break;
-          }
-          content += `${text}\n`;
-        }
-        if (!isJournal) {
-          await fsi.write(openPath, file, content);
+        if (file.endsWith(JOURNAL)) {
+          await rewriteJournal(file, sealed, entriesBetween, replacements);
           continue;
         }
-        const copy = journalName(held[0].first);
-        await fsi.write(openPath, copy, content);
-        for (let i = 0; i < held.length; i++) held[i].file = copy;
-        if (journal === file) journal = null;
-        await fsi.remove(openPath, file);
+        const text = lineOf(held[0], sealed, entriesBetween, replacements);
+        if (text === null) {
+          logger?.warn?.({ event: 'log.journal.unrewritten', file, first: held[0].first, reason: 'partial' });
+          continue;
+        }
+        await fsi.write(openPath, file, text);
       }
       let kept = null;
       try {

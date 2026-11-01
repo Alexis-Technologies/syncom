@@ -10,6 +10,9 @@
 
 const { SyncomError } = require('../errors.js');
 
+// The mode a private key file is written with — owner-only where the store has permissions — kept by a copy (src/engines/copy.js).
+const KEY_FILE_MODE = 0o600;
+
 const KEY_FILES = { public: 'public.pem', private: 'private.pem' };
 const SIGNING_FILES = { public: 'sign-public.pem', private: 'sign-private.pem' };
 
@@ -31,8 +34,8 @@ const loadKeyPair = async (store, where, generateKeys, files = KEY_FILES) => {
   const keys = await generateKeys();
   await store.put(files.public, keys.publicKey);
   // Owner-only where the store has permissions; a hint elsewhere.
-  await store.put(files.private, keys.privateKey, { mode: 0o600 });
+  await store.put(files.private, keys.privateKey, { mode: KEY_FILE_MODE });
   return { publicKey: keys.publicKey, privateKey: keys.privateKey };
 };
 
-module.exports = { loadKeyPair, KEY_FILES, SIGNING_FILES };
+module.exports = { loadKeyPair, KEY_FILES, SIGNING_FILES, KEY_FILE_MODE };
