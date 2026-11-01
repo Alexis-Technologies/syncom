@@ -1,6 +1,7 @@
 'use strict';
 
-// A storage's entries: the record files under `data/`, the bounded cache in
+// A storage's entries: the records in the engine's `records` store (the files
+// engine: `data/<id>.json`), the bounded cache in
 // front of them, and the catalog row each change leaves behind. An entry is
 // `{ data, meta, encrypted, block }` — `meta` is the replication bookkeeping
 // (see ops.js); an encrypted entry has none, it is stored as ciphertext for
@@ -31,8 +32,7 @@ const isThenable = (value) => value !== null && typeof value === 'object' && typ
 const EVICT_SCAN = 64;
 
 class EntryStore {
-  #fsi;
-  #dir;
+  #db;
   #cache = new Map();
   #max;
   #logger;
@@ -62,9 +62,8 @@ class EntryStore {
   // against its chain block, or is null; `view(id, entry)` is the lensed
   // read the catalog indexes; `before(id, file)` runs ahead of every change
   // of a record's file with `file()` the file as it is (the tags' copy).
-  constructor({ fsi, path, max, logger, catalog, pinned, verify, decrypt, view, before = null, plugins = null }) {
-    this.#fsi = fsi;
-    this.#dir = `${path}/data`;
+  constructor({ db, max, logger, catalog, pinned, verify, decrypt, view, before = null, plugins = null }) {
+    this.#db = db;
     this.#max = max;
     this.#logger = logger;
     this.#catalog = catalog;
@@ -78,8 +77,8 @@ class EntryStore {
 
   /** The record's file as it is — its text — or null when there is none. */
   async file(id) {
-    if (!(await this.#fsi.exists(this.#dir, `${id}.json`))) return null;
-    const text = await this.#fsi.read(this.#dir, `${id}.json`);
+    const text = await this.#db.records.raw(id);
+    if (text === null) return null;
     // A record in pieces is handed whole: a copy of it stands alone.
     if (!text.includes('"parts":')) return text;
     let stored = null;
@@ -157,10 +156,9 @@ class EntryStore {
       this.remember(id, cached);
       return cached;
     }
-    const exists = await this.#fsi.exists(this.#dir, `${id}.json`);
-    if (!exists) return null;
-    const raw = await this.#fsi.read(this.#dir, `${id}.json`);
-    const entry = await this.parse(id, raw);
+    const stored = await this.#db.records.get(id);
+    if (stored === null) return null;
+    const entry = await this.#fromStored(id, stored);
     this.remember(id, entry);
     return entry;
   }
@@ -182,6 +180,12 @@ class EntryStore {
     if (stored === null || typeof stored !== 'object' || Array.isArray(stored)) {
       throw new SyncomError('INTEGRITY', `Storage record ${id} is unreadable`, { id, cause });
     }
+    return this.#fromStored(id, stored);
+  }
+
+  // A stored record (the engine's, parsed) as an entry: checked against its
+  // chain block, decrypted when sealed, its pieces made whole.
+  async #fromStored(id, stored) {
     const { data, meta, encrypted, block } = stored;
     if (this.#verify !== null) {
       const isValid = await this.#verify(id, data, block);
@@ -210,7 +214,9 @@ class EntryStore {
         }
         let piece;
         try {
-          piece = JSON.parse(await this.#fsi.read(this.#dir, name));
+          const text = await this.#db.pieces.get(id, name);
+          if (text === null) throw new SyncomError('INTEGRITY', `piece ${name} is missing`, { id });
+          piece = JSON.parse(text);
         } catch (cause) {
           throw new SyncomError('INTEGRITY', `Storage record ${id} is unreadable: its piece ${name}`, { id, cause });
         }
@@ -292,7 +298,7 @@ class EntryStore {
       for (const name of known.names) {
         if (kept.has(name)) continue;
         try {
-          await this.#fsi.remove(this.#dir, name);
+          await this.#db.pieces.remove(id, name);
         } catch (err) {
           this.#logger.warn({ event: 'storage.piece.unremoved', id, name, err });
         }
@@ -347,20 +353,46 @@ class EntryStore {
   // row is right already (the entry held by `hold` landing on its file: the
   // catalog read it then, and a watcher must not hear of it twice).
   async write(id, entry, blockHash) {
-    await this.#changing(id);
-    const { meta, writes, kept, gen } = this.#split(id, entry.meta);
-    for (let i = 0; i < writes.length; i++) await this.#fsi.write(this.#dir, writes[i][0], writes[i][1]);
-    const stored = { data: entry.data, meta, encrypted: false, timestamp: Date.now(), block: blockHash };
-    if (gen > 0) stored.gen = gen;
-    await this.#fsi.write(this.#dir, `${id}.json`, JSON.stringify(stored));
-    await this.#drop(id, kept, gen);
-    const held = this.#held.has(id) ? this.#cache.get(id) : undefined;
-    const indexed = held !== undefined && held.data === entry.data && held.meta === entry.meta;
-    this.#held.delete(id);
-    // The composed view rides along: it reads data and meta alone, and both are the same objects here.
-    const cached = { data: entry.data, meta: entry.meta, encrypted: false, block: blockHash, composed: entry.composed };
-    this.remember(id, cached);
-    if (!indexed) this.#catalog.put(id, await this.row(id, cached));
+    await this.writeMany(new Map([[id, entry]]), blockHash);
+  }
+
+  /**
+   * A batch of replicated entries landed as ONE write set of the engine
+   * (atomic where the engine has transactions): each record's new pieces and
+   * its stored form, in id order as given; then, per record, the pieces its
+   * file no longer names dropped, the cache and the catalog row — unless the
+   * row is right already (the entry held by `hold` landing on its file: the
+   * catalog read it then, and a watcher must not hear of it twice).
+   */
+  async writeMany(touched, blockHash) {
+    const rows = [];
+    const after = [];
+    for (const [id, entry] of touched) {
+      await this.#changing(id);
+      const { meta, writes, kept, gen } = this.#split(id, entry.meta);
+      const stored = { data: entry.data, meta, encrypted: false, timestamp: Date.now(), block: blockHash };
+      if (gen > 0) stored.gen = gen;
+      rows.push({ id, stored, pieces: writes.length > 0 ? { put: writes } : undefined });
+      after.push([id, entry, kept, gen]);
+    }
+    await this.#db.write({ records: rows });
+    for (let i = 0; i < after.length; i++) {
+      const [id, entry, kept, gen] = after[i];
+      await this.#drop(id, kept, gen);
+      const held = this.#held.has(id) ? this.#cache.get(id) : undefined;
+      const indexed = held !== undefined && held.data === entry.data && held.meta === entry.meta;
+      this.#held.delete(id);
+      // The composed view rides along: it reads data and meta alone, and both are the same objects here.
+      const cached = {
+        data: entry.data,
+        meta: entry.meta,
+        encrypted: false,
+        block: blockHash,
+        composed: entry.composed,
+      };
+      this.remember(id, cached);
+      if (!indexed) this.#catalog.put(id, await this.row(id, cached));
+    }
   }
 
   // An entry whose op is logged but whose file (or chain block) could not be
@@ -383,7 +415,7 @@ class EntryStore {
   async writeSealed(id, record, data, blockHash) {
     await this.#changing(id);
     const stored = { data: record, meta: null, encrypted: true, timestamp: Date.now(), block: blockHash };
-    await this.#fsi.write(this.#dir, `${id}.json`, JSON.stringify(stored));
+    await this.#db.write({ records: [{ id, stored }] });
     await this.#drop(id, new Set(), 0);
     this.remember(id, { data, meta: null, encrypted: true, block: blockHash });
     this.#catalog.put(id, { type: data?.$type, v: null, encrypted: true });
@@ -392,7 +424,7 @@ class EntryStore {
   // A sealed entry removed: an encrypted record has no op, so no tombstone.
   async remove(id) {
     await this.#changing(id);
-    await this.#fsi.remove(this.#dir, `${id}.json`);
+    await this.#db.write({ remove: [id] });
     await this.#drop(id, new Set(), 0);
     this.#cache.delete(id);
     this.#catalog.put(id, null);

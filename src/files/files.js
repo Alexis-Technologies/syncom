@@ -98,11 +98,15 @@ const openDb = (fsi, path, capabilities, logger) => {
     async get(id) {
       const text = await records.raw(id);
       if (text === null) return null;
+      let stored = null;
       try {
-        return JSON.parse(text);
+        stored = JSON.parse(text);
       } catch (cause) {
         throw unreadable(id, cause);
       }
+      // A file that parses to anything but an object is as unreadable as one that does not parse.
+      if (stored === null || typeof stored !== 'object' || Array.isArray(stored)) throw unreadable(id, null);
+      return stored;
     },
     /** The record's text as the medium holds it, or null. */
     async raw(id) {
@@ -140,6 +144,8 @@ const openDb = (fsi, path, capabilities, logger) => {
       if (!(await fsi.exists(data, name))) return null;
       return fsi.read(data, name);
     },
+    /** A piece its record no longer names, removed — after the record's file (src/entries.js). */
+    remove: (id, name) => fsi.remove(data, name),
   };
 
   const copies = {

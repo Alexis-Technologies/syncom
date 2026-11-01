@@ -6,6 +6,7 @@
 
 const defaultFsi = require('../fsi.browser.js');
 const { loadKeyPair } = require('../crypto/keys.js');
+const { kvNamespace, fsiNamespace } = require('../engine.js');
 const { SyncomError } = require('../errors.js');
 const { PUBLIC_KEY_HEADER, PUBLIC_KEY_FOOTER, PRIVATE_KEY_HEADER, PRIVATE_KEY_FOOTER } = require('../crypto/pem.js');
 const { toBase64, fromBase64, toPem, cleanPem } = require('../crypto/pem.js');
@@ -89,6 +90,7 @@ const decrypt = async (text, privateKey) => {
   return JSON.parse(new TextDecoder().decode(plain));
 };
 
-const loadKeys = async (basePath = 'keys', { fsi = defaultFsi } = {}) => loadKeyPair(basePath, fsi, generateKeys);
+const loadKeys = async (basePath = 'keys', { fsi = defaultFsi, kv = null } = {}) =>
+  loadKeyPair(kv === null ? fsiNamespace(fsi, basePath) : kvNamespace(kv, basePath), basePath, generateKeys);
 
 module.exports = { generateKeys, encrypt, decrypt, loadKeys };

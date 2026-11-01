@@ -32,7 +32,7 @@ const { createUnit } = require('./hosting.js');
 const { NodeRegistry } = require('./registry.js');
 const { SyncomError } = require('../errors.js');
 const { wellFormed, VERDICT } = require('../shape.js');
-const { SIGNER, REWIND } = require('../symbols.js');
+const { SIGNER, REWIND, DB } = require('../symbols.js');
 
 // A page that fails this many times in a row leaves its peer `stuck`.
 const MAX_PAGE_RETRIES = 3;
@@ -118,7 +118,7 @@ class SyncManager extends Emitter {
       throw new TypeError('sync.sharedLog is reserved: the shared-log hub mode is not in this version');
     }
     // The registry lives where the storage does: over its backend.
-    this.#registry = new NodeRegistry(storage.fsi, storage.path, storage.logger);
+    this.#registry = new NodeRegistry(storage[DB].kv, storage.logger);
     return this.#init();
   }
 

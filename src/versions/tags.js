@@ -10,10 +10,10 @@
 // lands in the newest tag only: had the record changed between two tags, the
 // older one took its copy when it was the newest. Tags do not replicate.
 //
-// Layout under `<path>/`:
-//   tags.json                      { format: 1, tags: [{ name, eventId, seq, ts, vector, createdAt }] }, oldest first
-//   tags/<name>/index/catalog.json the catalog as of the tag (src/catalog.js), stamp = eventId
-//   tags/<name>/data/<id>.json     a record's file as it was at the tag, copied before its first change
+// Layout, in the engine's stores (the files engine: under `<path>/`):
+//   tags.json                      { format: 1, tags: [{ name, eventId, seq, ts, vector, createdAt }] }, oldest first — kv, root
+//   tags/<name>/index/catalog.json the catalog as of the tag (src/catalog.js), stamp = eventId — a kv namespace of its own
+//   tags/<name>/data/<id>.json     a record's file as it was at the tag, copied before its first change — `copies`, by tag
 //
 // An open reads tags.json and the newest tag — the one the write path
 // copies into; an older tag's catalog, and the ids of its copies, are read
@@ -62,9 +62,7 @@ const info = ({ name, eventId, seq, ts, vector, createdAt }) => ({
 const notFound = (name, rest = '') => new SyncomError('TAG_NOT_FOUND', `Tag ${name} not found${rest}`, { tag: name });
 
 class Tags {
-  #fsi;
-  #dir;
-  #path;
+  #db;
   #logger;
   #catalogOf;
   #tags = [];
@@ -75,12 +73,13 @@ class Tags {
   #corrupt = false;
   #pending = new Set();
 
-  // `catalogOf(path)` builds a Catalog rooted at `path` — one per tag, under
-  // the storage's own entity definitions.
-  constructor({ fsi, path, logger, catalogOf }) {
-    this.#fsi = fsi;
-    this.#path = path;
-    this.#dir = `${path}/tags`;
+  // `catalogOf(name)` builds a Catalog over the tag's own namespace
+  // (`tags/<name>/index`) — one per tag, under the storage's own entity
+  // definitions; `db` is the engine's database: tags.json and the corrupt
+  // copy in its root kv namespace, the copies in its `copies` store (the
+  // tag's name; `.pending` while tags.json is unreadable).
+  constructor({ db, logger, catalogOf }) {
+    this.#db = db;
     this.#logger = logger;
     this.#catalogOf = catalogOf;
   }
@@ -92,10 +91,6 @@ class Tags {
   /** Whether tags.json could not be read at open: no tags, `take()` refused until it is repaired. */
   get corrupt() {
     return this.#corrupt;
-  }
-
-  get #pendingDir() {
-    return `${this.#dir}/${PENDING}/data`;
   }
 
   /** The tags, oldest first — copies. */
@@ -119,18 +114,6 @@ class Tags {
     return tag;
   }
 
-  #data(tag) {
-    return `${this.#dir}/${tag.name}/data`;
-  }
-
-  async #names(dir) {
-    try {
-      return await this.#fsi.list(dir);
-    } catch {
-      return [];
-    }
-  }
-
   // Reads tags.json, and the newest tag (its catalog and copies: the write
   // path copies into it, and the pending copies go to it). A tags.json that
   // cannot be read does not stop the open: the tags are auxiliary (the
@@ -138,12 +121,10 @@ class Tags {
   // listed back from the disk — fsi lists files, not directories — so the
   // file is kept aside for a repair by hand, and nothing here overwrites it.
   async load() {
-    const exists = await this.#fsi.exists(this.#path, FILE);
+    const text = await this.#db.kv.get('', FILE);
     let parsed = null;
-    if (exists) {
-      let text = null;
+    if (text !== null) {
       try {
-        text = await this.#fsi.read(this.#path, FILE);
         parsed = JSON.parse(text);
       } catch (error) {
         return this.#unreadable(text, error);
@@ -187,7 +168,7 @@ class Tags {
   }
 
   async #loadCatalog(tag) {
-    const catalog = this.#catalogOf(`${this.#dir}/${tag.name}`);
+    const catalog = this.#catalogOf(tag.name);
     if ((await catalog.load({ strict: false })) === null) {
       // Dropped as an untag drops: what the older tag needs of its copies
       // moves there (it was the newest then, and reads the write path from
@@ -216,11 +197,10 @@ class Tags {
   // have one — so it moves there. Reads `older` when it was not yet.
   async #moveDown(tag, older) {
     const [copied, catalog, held] = await Promise.all([this.#copies(tag), this.#catalog(older), this.#copies(older)]);
-    const from = this.#data(tag);
     for (const id of copied) {
       const row = catalog.row(id);
       if (row === null || row.gone || held.has(id)) continue;
-      await this.#fsi.write(this.#data(older), `${id}.json`, await this.#fsi.read(from, `${id}.json`));
+      await this.#db.copies.put(older.name, id, await this.#db.copies.get(tag.name, id));
       held.add(id);
     }
   }
@@ -233,9 +213,7 @@ class Tags {
 
   async #loadCopies(tag) {
     const copied = new Set();
-    for (const file of await this.#names(this.#data(tag))) {
-      if (file.endsWith('.json')) copied.add(file.slice(0, -5));
-    }
+    for (const id of await this.#db.copies.ids(tag.name)) copied.add(id);
     tag.copied = copied;
     return copied;
   }
@@ -256,10 +234,8 @@ class Tags {
     const event = { event: 'tags.unreadable', file: FILE, kept: CORRUPT_FILE };
     if (cause !== null) event.err = cause;
     this.#logger?.error?.(event);
-    if (text !== null) await this.#fsi.write(this.#path, CORRUPT_FILE, text);
-    for (const name of await this.#names(this.#pendingDir)) {
-      if (name.endsWith('.json')) this.#pending.add(name.slice(0, -5));
-    }
+    if (text !== null) await this.#db.kv.put('', CORRUPT_FILE, text);
+    for (const id of await this.#db.copies.ids(PENDING)) this.#pending.add(id);
   }
 
   // Copies kept aside while tags.json was unreadable: each goes to the
@@ -267,17 +243,15 @@ class Tags {
   // the state before the record's first change after the tag, as
   // copyBefore would have kept it — and goes away otherwise.
   async #adoptPending() {
-    const names = await this.#names(this.#pendingDir);
+    const ids = await this.#db.copies.ids(PENDING);
     const newest = this.#tags[this.#tags.length - 1];
-    for (const name of names) {
-      if (!name.endsWith('.json')) continue;
-      const id = name.slice(0, -5);
+    for (const id of ids) {
       const row = newest === undefined ? null : newest.catalog.row(id);
       if (row !== null && !row.gone && !newest.copied.has(id)) {
-        await this.#fsi.write(this.#data(newest), name, await this.#fsi.read(this.#pendingDir, name));
+        await this.#db.copies.put(newest.name, id, await this.#db.copies.get(PENDING, id));
         newest.copied.add(id);
       }
-      await this.#fsi.remove(this.#pendingDir, name);
+      await this.#db.copies.remove(PENDING, id);
     }
   }
 
@@ -287,21 +261,20 @@ class Tags {
     if (this.#pending.has(id)) return;
     const text = await file();
     if (text === null) return;
-    await this.#fsi.write(this.#pendingDir, `${id}.json`, text);
+    await this.#db.copies.put(PENDING, id, text);
     this.#pending.add(id);
   }
 
   async #save() {
     const text = JSON.stringify({ format: FORMAT, tags: this.list() });
-    await this.#fsi.write(this.#path, FILE, text, { atomic: true });
+    await this.#db.kv.put('', FILE, text, { atomic: true });
   }
 
-  // Every file of a tag directory; the directories stay (fsi has no rmdir).
+  // Every copy and every file of a tag's catalog namespace; the directories stay (fsi has no rmdir).
   async #erase(name) {
-    const data = `${this.#dir}/${name}/data`;
-    for (const file of await this.#names(data)) await this.#fsi.remove(data, file);
-    const index = `${this.#dir}/${name}/index`;
-    for (const file of await this.#names(index)) await this.#fsi.remove(index, file);
+    await this.#db.copies.drop(name);
+    const index = `tags/${name}/index`;
+    for (const file of await this.#db.kv.list(index)) await this.#db.kv.remove(index, file);
   }
 
   /**
@@ -326,7 +299,7 @@ class Tags {
       ts,
       vector: { ...vector },
       createdAt: Date.now(),
-      catalog: this.#catalogOf(`${this.#dir}/${name}`),
+      catalog: this.#catalogOf(name),
       copied: new Set(),
       loading: null,
       listing: null,
@@ -379,7 +352,7 @@ class Tags {
     if (row === null || row.gone) return;
     const text = await file();
     if (text === null) return;
-    await this.#fsi.write(this.#data(tag), `${id}.json`, text);
+    await this.#db.copies.put(tag.name, id, text);
     copied.add(id);
   }
 
@@ -408,7 +381,7 @@ class Tags {
     for (let i = this.#tags.indexOf(tag); i < this.#tags.length; i++) {
       const holder = this.#tags[i];
       const copied = await this.#copies(holder);
-      if (copied.has(id)) return { exists: true, raw: await this.#fsi.read(this.#data(holder), `${id}.json`) };
+      if (copied.has(id)) return { exists: true, raw: await this.#db.copies.get(holder.name, id) };
     }
     return { exists: true, raw: null };
   }
@@ -419,7 +392,7 @@ class Tags {
    */
   async scrub(id) {
     if (this.#pending.has(id)) {
-      await this.#fsi.remove(this.#pendingDir, `${id}.json`);
+      await this.#db.copies.remove(PENDING, id);
       this.#pending.delete(id);
     }
     for (const tag of [...this.#tags]) {
@@ -433,7 +406,7 @@ class Tags {
         continue;
       }
       if (copied.has(id)) {
-        await this.#fsi.remove(this.#data(tag), `${id}.json`);
+        await this.#db.copies.remove(tag.name, id);
         copied.delete(id);
       }
       if (catalog.row(id) !== null) {

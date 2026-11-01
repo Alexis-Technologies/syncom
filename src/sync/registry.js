@@ -7,32 +7,31 @@
 // never fatal to the open. Writes are coalesced AND serialized per node: a
 // save that comes while one is pending shares it, one that comes while a
 // write is in flight runs after it — two writes to one file interleaving is
-// how a reopen read half a JSON document. No requires.
+// how a reopen read half a JSON document. The files are the `remote`
+// namespace of the database's kv. No requires.
 
 const REMOTE = 'remote';
 
 const fileName = (url) => `${encodeURIComponent(url)}.json`;
 
 class NodeRegistry {
-  #fsi;
-  #path;
+  #kv;
   #logger;
   #saving = new Map();
 
-  constructor(fsi, storagePath, logger) {
-    this.#fsi = fsi;
-    this.#path = `${storagePath}/${REMOTE}`;
+  constructor(kv, logger) {
+    this.#kv = kv;
     this.#logger = logger;
   }
 
   /** Every node the directory names, by url. */
   async load() {
     const nodes = new Map();
-    for (const file of await this.#fsi.list(this.#path)) {
+    for (const file of await this.#kv.list(REMOTE)) {
       if (!file.endsWith('.json')) continue;
       let node = null;
       try {
-        node = JSON.parse(await this.#fsi.read(this.#path, file));
+        node = JSON.parse(await this.#kv.get(REMOTE, file));
       } catch (error) {
         this.#logger.warn({ event: 'sync.node.unreadable', file, err: error });
         continue;
@@ -44,12 +43,12 @@ class NodeRegistry {
 
   /** Writes a node's file at once (a new node). */
   write(node) {
-    return this.#fsi.write(this.#path, fileName(node.url), JSON.stringify(node), { atomic: true });
+    return this.#kv.put(REMOTE, fileName(node.url), JSON.stringify(node), { atomic: true });
   }
 
   /** Removes a node's file. */
   remove(url) {
-    return this.#fsi.remove(this.#path, fileName(url));
+    return this.#kv.remove(REMOTE, fileName(url));
   }
 
   /**

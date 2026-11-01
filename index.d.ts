@@ -118,7 +118,7 @@ export interface EngineDb {
     ids(options?: { after?: string | null; limit?: number }): Promise<string[]>;
   };
   /** The runs of a large block beside its record, by the name the record's meta holds. */
-  readonly pieces: { get(id: string, name: string): Promise<string | null> };
+  readonly pieces: { get(id: string, name: string): Promise<string | null>; remove(id: string, name: string): Promise<void> };
   /** A tag's copies of records, by tag and id. */
   readonly copies: {
     get(tag: string, id: string): Promise<string | null>;
@@ -140,7 +140,7 @@ export interface Engine {
   readonly capabilities: EngineCapabilities;
   /** The files engine's backend; absent on a native engine. */
   readonly fsi?: Fsi;
-  open(path: string, options?: { logger?: unknown }): Promise<EngineDb>;
+  open(path: string, options?: { logger?: unknown; durable?: boolean }): Promise<EngineDb>;
   /** Every store of the database at `path`, gone. */
   remove(path: string): Promise<void>;
   close?(): Promise<void>;
@@ -1550,6 +1550,11 @@ export interface StorageOptions<S extends Schema = Schema> {
   name?: string;
   /** The backend; the platform's (`node:fs`, OPFS) when absent. */
   fsi?: Fsi;
+  /**
+   * The storage engine the database stores its bytes through — the files engine over `fsi` (or the
+   * platform's backend) when none is given; `engine` and `fsi` together are a `TypeError`.
+   */
+  engine?: Engine;
   /** Call the backend's `sync` after every write (fsync). A backend without one logs at debug and is as durable as it is. */
   durable?: boolean;
   /**
@@ -2178,8 +2183,10 @@ export interface TreeMethods {
 }
 
 export interface Database {
-  /** The backend every file goes through — the adapter given to `createDatabase()` (wrapped when `durable`), or the platform's. */
-  readonly fsi: Fsi;
+  /** The files engine's backend — the adapter given to `createDatabase()` (wrapped when `durable`), or the platform's; `null` under a native engine. */
+  readonly fsi: Fsi | null;
+  /** The engine this database stores its bytes through — the one given, or the files engine over the backend. */
+  readonly engine: Engine;
   readonly schema: Schema | null;
   /** The schema version and snapshot hash this node runs, with `previous` when `schema.json` differed; `null` without a schema. */
   readonly schemaInfo: SchemaStatus | null;

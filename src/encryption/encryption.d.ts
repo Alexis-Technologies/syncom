@@ -9,7 +9,7 @@
 // `DECRYPT_FAILED`. Under the browser condition `encrypt` and `decrypt`
 // return promises (encryption.browser.d.ts).
 
-import type { Plugin, Fsi, KeyPair } from '../../index.js';
+import type { Plugin, Fsi, KeyPair, EngineDb } from '../../index.js';
 
 export type { Plugin, Fsi, KeyPair };
 
@@ -36,4 +36,4 @@ export declare function generateKeys(): Promise<KeyPair>;
 export declare function encrypt(data: unknown, publicKey: string): string;
 export declare function decrypt(data: string, privateKey: string): unknown;
 /** `public.pem` and `private.pem` under `basePath`: read, or made and written. */
-export declare function loadKeys(basePath: string, options?: { fsi?: Fsi }): Promise<KeyPair>;
+export declare function loadKeys(basePath?: string, options?: { fsi?: Fsi; kv?: EngineDb['kv'] }): Promise<KeyPair>;

@@ -16,8 +16,8 @@ const api = require('./api.js');
 
 const versions = Object.freeze({
   name: 'versions',
-  setup({ fsi, path, logger, catalogOf }) {
-    return { versions: { tags: new Tags({ fsi, path, logger, catalogOf }) } };
+  setup({ db, logger, catalogOf }) {
+    return { versions: { tags: new Tags({ db, logger, catalogOf }) } };
   },
   methods: {
     getAt: api.getAt,

@@ -96,4 +96,36 @@ const checkEngineDb = (db, label) => {
 /** The capabilities of an engine with the defaults filled in. */
 const capabilitiesOf = (given) => Object.freeze({ ...CAPABILITIES, ...given });
 
-module.exports = { CAPABILITIES, isEngine, checkEngine, checkEngineDb, capabilitiesOf };
+// One namespace of a kv as a store of its own — `has/get/put/remove/list`,
+// `create` where the kv has it: what the lock, the identity, the keys, the
+// chain, the schema's version file, the registry and a catalog speak.
+const kvNamespace = (kv, ns) => {
+  const store = {
+    has: (key) => kv.has(ns, key),
+    get: (key) => kv.get(ns, key),
+    put: (key, value, options) => kv.put(ns, key, value, options),
+    remove: (key) => kv.remove(ns, key),
+    list: () => kv.list(ns),
+  };
+  if (typeof kv.create === 'function') store.create = (key, value) => kv.create(ns, key, value);
+  return store;
+};
+
+// A directory of an fsi as the same store: for what still takes an fsi — a
+// `Blockchain` of its own, `loadKeys(path, { fsi })`, the lock in a test.
+const fsiNamespace = (fsi, dir) => {
+  const store = {
+    has: (key) => fsi.exists(dir, key),
+    async get(key) {
+      if (!(await fsi.exists(dir, key))) return null;
+      return fsi.read(dir, key);
+    },
+    put: (key, value, options) => fsi.write(dir, key, value, options),
+    remove: (key) => fsi.remove(dir, key),
+    list: () => fsi.list(dir),
+  };
+  if (typeof fsi.create === 'function') store.create = (key, value) => fsi.create(dir, key, value);
+  return store;
+};
+
+module.exports = { CAPABILITIES, isEngine, checkEngine, checkEngineDb, capabilitiesOf, kvNamespace, fsiNamespace };

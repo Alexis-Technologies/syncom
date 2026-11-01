@@ -19,8 +19,8 @@ src/store/store.js        the @alexify/syncom/store subpath — toStore/fromEven
                           React's useSyncExternalStore over a cursor, a Record, get(), a presence or an emitter — no requires
 src/inspect/inspect.js    the @alexify/syncom/inspect subpath — a record's anatomy (through the [SOURCE] seam's raw `entry`) and anonymize; requires compose, shape, symbols, hash only
 src/backend.js            the fsi contract (isFsi/checkFsi; sync, create and append optional), withSync — no requires
-src/engine.js             the engine contract (isEngine/checkEngine/checkEngineDb, CAPABILITIES, capabilitiesOf): a factory of databases,
-                          each a set of stores — kv, records, pieces, copies, log, write(batch) — no requires
+src/engine.js             the engine contract (isEngine/checkEngine/checkEngineDb, capabilitiesOf, kvNamespace/fsiNamespace): a factory of
+                          databases, each a set of stores — kv, records, pieces, copies, log, write(batch) — no requires
 src/memory/memory.js      @alexify/syncom/memory — memory(), the backend in memory (a Map; size, dump, the exclusive create, append) — no requires
 src/layered/layered.js    @alexify/syncom/layered — layered([top, …, bottom], { write, fill, queue }): one fsi over several, a multi-level
                           cache; 'back' drains its queue before any lower layer is consulted; create is exclusive across layers
@@ -54,8 +54,9 @@ src/symbols.js            COMMIT / REFRESH / SOURCE — the module-private seams
 src/lazy.js               lazyField, putLazy, copyData, assignData — a field read when it is read (a list's, `mod.lazy`): an accessor
                           the data and the delta share, copied as it is — no requires
 src/options.js            normalizeStorageOptions — createDatabase()'s plain options checked and defaulted (lock, cache, chain, skew…)
-src/lock.js               exclusive open: Web Locks or lock.json, stale by pid or age — requires errors.js only
-src/catalog.js            the record catalog: live ids, collections, indexed values; index/catalog.json — no requires
+src/lock.js               exclusive open: Web Locks or the root namespace's lock.json, stale by pid or age — requires errors.js, engine.js only
+src/catalog.js            the record catalog: live ids, collections, indexed values; catalog.json in the `index` namespace (a tag's in
+                          its own) through a store — requires engine.js only
 src/database.js           Database — the facade: open sequence, the mutation queue, the public API, the `core` it lends;
                           `createDatabase()` (and the pre-rename aliases `Database`, `open`)
 src/defer.js              DeferredWindow — `createDatabase({ defer })`'s slots, timer and landing step — no requires

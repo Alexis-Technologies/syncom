@@ -27,6 +27,8 @@ const { notify, runHook, normalizeHooks } = require('./hooks.js');
 const { project } = require('./schema/entity.js');
 const defaultFsi = require('./fsi.js');
 const { checkFsi, withSync } = require('./backend.js');
+const { checkEngine, checkEngineDb, kvNamespace } = require('./engine.js');
+const { filesEngine } = require('./files/files.js');
 const { acquireLock } = require('./lock.js');
 const { Catalog, isTextIndex } = require('./catalog.js');
 const { DISABLED, isWriter, writerOf, traced, now } = require('./telemetry/writer.js');
@@ -40,7 +42,7 @@ const { compose, composeData } = require('./compose.js');
 
 // The ids a `storage.unpersisted` line names; past them it says how many.
 const UNPERSISTED_NAMED = 32;
-const { COMMIT, REFRESH, SOURCE, PLUGINS, CURSOR, SIGNER, REWIND } = require('./symbols.js');
+const { COMMIT, REFRESH, SOURCE, PLUGINS, CURSOR, SIGNER, REWIND, DB } = require('./symbols.js');
 const { missing, HOME } = require('./plugin.js');
 const { SyncomError, typed } = require('./errors.js');
 const { loadIdentity } = require('./identity.js');
@@ -103,7 +105,9 @@ class Database extends Emitter {
   #catalog = null;
   #catalogSave = null;
   #flushEvery;
-  #fsi;
+  // The engine the database stores its bytes through, and its database of stores (src/engine.js).
+  #engine;
+  #db = null;
   #lock = null;
   #lockOptions;
   #schema = null;
@@ -220,14 +224,25 @@ class Database extends Emitter {
     });
     this.#logger = createLogger(options.logger);
     this.#otel = DISABLED;
-    this.#fsi = this.#backend(options, settings.durable);
+    this.#engine = this.#engineOf(options, settings.durable);
     this.#hooks = normalizeHooks(options.hooks, STORAGE_HOOKS, 'Storage');
     return this.#init();
   }
 
-  // The backend: node:fs or OPFS by default, anything with the five
-  // functions when injected. `durable` wraps every write with the
-  // adapter's fsync, where it has one.
+  // The engine: the one given, or the files engine over the backend —
+  // node:fs or OPFS by default, anything with the five functions when
+  // injected (`durable` wraps every write with the adapter's fsync, where it
+  // has one). An engine and a backend together make no sense: refused.
+  #engineOf(options, durable) {
+    if (options.engine !== undefined) {
+      if (options.fsi !== undefined) {
+        throw new TypeError('createDatabase({ engine, fsi }): an engine or a backend, not both');
+      }
+      return checkEngine(options.engine, 'createDatabase({ engine })');
+    }
+    return filesEngine(this.#backend(options, durable));
+  }
+
   #backend(options, durable) {
     const fsi = checkFsi(options.fsi === undefined ? defaultFsi : options.fsi, 'createDatabase({ fsi })');
     if (!durable) return fsi;
@@ -280,7 +295,12 @@ class Database extends Emitter {
       text.set(def.name, index);
     }
     const { logger } = this;
-    this.#catalog = new Catalog({ fsi: this.#fsi, path: this.#path, entities: normalized.entities, text, logger });
+    this.#catalog = new Catalog({
+      store: kvNamespace(this.#db.kv, 'index'),
+      entities: normalized.entities,
+      text,
+      logger,
+    });
     // A node with a schema stamps its version on every op it makes; one
     // without stamps nothing, and nothing in hello says what it runs.
     if (schema === null) return;
@@ -297,32 +317,39 @@ class Database extends Emitter {
   }
 
   async #init() {
+    // The engine's database: every store the open reads and writes through.
+    const opened = await this.#engine.open(this.#path, { logger: this.#logger, durable: this.#settings.durable });
+    this.#db = checkEngineDb(opened, 'createDatabase({ engine })');
     // One instance per directory, first: a second one would mint the seqs
     // this one is about to. `lock: false` is for a caller that coordinates.
     const lock = this.#lockOptions;
-    if (lock !== null) {
-      // Recorded once the writer is set up (a plugin's, after the lock).
-      const started = now();
-      this.#lock = await acquireLock({ fsi: this.#fsi, path: this.#path, ...lock });
-      this.#lockWait = now() - started;
-    }
     try {
+      if (lock !== null) {
+        // Recorded once the writer is set up (a plugin's, after the lock).
+        const started = now();
+        this.#lock = await acquireLock({ store: kvNamespace(this.#db.kv, ''), path: this.#path, ...lock });
+        this.#lockWait = now() - started;
+      }
       await this.#open();
     } catch (error) {
       await this.#lock?.release();
+      await this.#db.close();
       throw error;
     }
     return this;
   }
 
   async #open() {
-    const fsi = this.#fsi;
+    const db = this.#db;
+    // The backend behind the files engine, for what still speaks fsi; null under a native engine.
+    const fsi = db.fsi ?? null;
     // The API plugins set up before the log opens — the identity (signing),
     // the sealing of records (encryption), the chain — each handing back the
     // hooks the core takes; what the options ask for and no plugin provides
-    // is refused here, naming the subpath.
+    // is refused here, naming the subpath. They reach the stores through `db`.
     const ctx = {
       fsi,
+      db,
       path: this.#path,
       logger: this.#logger,
       options: this.#options,
@@ -331,9 +358,14 @@ class Database extends Emitter {
       // SHA-256 of a value's JSON (src/crypto/digest.js), the core's: a plugin
       // hashes with it rather than bundle a digest of its own.
       hash: sha256,
-      // A catalog of a tag (the versions plugin's): the entities are read when
-      // it is made, after the schema is defined.
-      catalogOf: (path) => new Catalog({ fsi, path, entities: this.#entities, logger: this.#logger }),
+      // A catalog of a tag (the versions plugin's), over the tag's own kv
+      // namespace: the entities are read when it is made, after the schema is defined.
+      catalogOf: (name) =>
+        new Catalog({
+          store: kvNamespace(db.kv, `tags/${name}/index`),
+          entities: this.#entities,
+          logger: this.#logger,
+        }),
     };
     let adapted = false;
     for (const mod of this.#plugins.apis) {
@@ -372,7 +404,8 @@ class Database extends Emitter {
       retention: this.#options.sync?.retention,
       logger: this.#logger,
       telemetry: this.#otel,
-      fsi,
+      // The log's medium: the engine's (the files engine's journal under log/).
+      store: db.log,
       // A roll seals only what the write paths marked applied — see
       // OpLog.applied: the tail a reopen replays must hold every batch whose
       // records may not have been written.
@@ -387,8 +420,7 @@ class Database extends Emitter {
     // logged is below what it will stamp next, whatever the wall clock says.
     this.#clock.observe(this.#log.latestTs);
     this.#entries = new EntryStore({
-      fsi,
-      path: this.#path,
+      db,
       max: this.#cacheMax,
       logger: this.#logger,
       catalog: this.#catalog,
@@ -415,7 +447,7 @@ class Database extends Emitter {
     await this.#replayHeld();
     // The API plugins that need the open log — the sync manager — come
     // after the replay, and hand back what the facade exposes.
-    const opened = { storage: this, options: this.#options, settings: this.#settings, logger: this.#logger };
+    const opened = { storage: this, db, options: this.#options, settings: this.#settings, logger: this.#logger };
     for (const mod of this.#plugins.apis) {
       const hooks = (await mod.open?.(opened)) ?? {};
       if (hooks.sync) this.#sync = hooks.sync;
@@ -578,10 +610,8 @@ class Database extends Emitter {
       this.#logger.debug({ event: 'catalog.rebuild', reason });
       const rebuild = async () => {
         let count = 0;
-        for (const name of await this.#fsi.list(`${this.#path}/data`)) {
-          // A record's file, never one of its pieces (`<id>~<n>.json`).
-          if (!name.endsWith('.json') || !isRecordId(name.slice(0, -5))) continue;
-          await this.#entries.index(name.slice(0, -5));
+        for (const id of await this.#db.records.ids()) {
+          await this.#entries.index(id);
           count++;
         }
         await this.#catalog.save(this.#log.lastEventId);
@@ -698,8 +728,7 @@ class Database extends Emitter {
   // Which node this directory is (src/identity.js: the signing key, node.json, or getId).
   async #loadIdentity() {
     this.#nodeId = await loadIdentity({
-      fsi: this.#fsi,
-      path: this.#path,
+      store: kvNamespace(this.#db.kv, ''),
       keyId: this.#identity?.id ?? null,
       kinds: this.kinds,
       getId: this.#getId,
@@ -780,7 +809,18 @@ class Database extends Emitter {
 
   /** The backend every file of this storage goes through — the adapter given to `createDatabase()`, or the platform's. */
   get fsi() {
-    return this.#fsi;
+    return this.#db.fsi ?? null;
+  }
+
+  /** The engine this database stores its bytes through — the one given, or the files engine over the backend. */
+  get engine() {
+    return this.#engine;
+  }
+
+  // The engine's database of stores: what a subpath that keeps side files
+  // (the sync registry, a branch) reaches, never the application.
+  get [DB]() {
+    return this.#db;
   }
 
   // The cursor over a source seam (this storage's by default; a tag's for a
@@ -1262,7 +1302,8 @@ class Database extends Emitter {
       const to = this.#log.formatId(toSeq);
       blockHash = await this.#chain.addBlock({ records, from, to });
     }
-    for (const [id, entry] of touched) await this.#entries.write(id, entry, blockHash);
+    // One write set for the batch: atomic where the engine has transactions, in order otherwise.
+    await this.#entries.writeMany(touched, blockHash);
     return blockHash;
   }
 
@@ -1649,9 +1690,10 @@ class Database extends Emitter {
 
   // Whether the directory holds tags (tags.json with a tag, or unreadable).
   async #hasTags() {
-    if (!(await this.#fsi.exists(this.#path, 'tags.json'))) return false;
+    const text = await this.#db.kv.get('', 'tags.json');
+    if (text === null) return false;
     try {
-      const parsed = JSON.parse(await this.#fsi.read(this.#path, 'tags.json'));
+      const parsed = JSON.parse(text);
       return !Array.isArray(parsed?.tags) || parsed.tags.length > 0;
     } catch {
       return true;
@@ -2069,6 +2111,7 @@ class Database extends Emitter {
     this.#queue = done.catch(() => {});
     await done;
     await this.#lock?.release();
+    await this.#db.close();
     notify(this, this.#logger, 'close');
   }
 }

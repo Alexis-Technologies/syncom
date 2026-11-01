@@ -10,6 +10,7 @@
 const crypto = require('node:crypto');
 const defaultFsi = require('../fsi.js');
 const { loadKeyPair } = require('../crypto/keys.js');
+const { kvNamespace, fsiNamespace } = require('../engine.js');
 const { SyncomError } = require('../errors.js');
 
 const ALG = 'RSA-OAEP-256+A256GCM';
@@ -58,6 +59,7 @@ const decrypt = (text, privateKey) => {
   return JSON.parse(plain.toString());
 };
 
-const loadKeys = async (basePath, { fsi = defaultFsi } = {}) => loadKeyPair(basePath, fsi, generateKeys);
+const loadKeys = async (basePath = 'keys', { fsi = defaultFsi, kv = null } = {}) =>
+  loadKeyPair(kv === null ? fsiNamespace(fsi, basePath) : kvNamespace(kv, basePath), basePath, generateKeys);
 
 module.exports = { generateKeys, encrypt, decrypt, loadKeys };

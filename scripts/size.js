@@ -156,7 +156,9 @@ const ENTRIES = [
   // through — a seam's property names do not minify (engines plan, E1). 59, raised by name.
   // 59.3 with the log's medium behind a store (src/files/journal.js: load, append, seal, sealed, drop, saveIndex, scrub;
   // engines plan, E1.2). 59.5, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 59.5 },
+  // 59.7 with the database opened through its engine: the stores behind EntryStore, the catalog, the lock, the
+  // identity, the tags and the chain; `createDatabase({ engine })` (engines plan, E1.3). 60, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 60 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -396,17 +398,20 @@ const ENTRIES = [
     label: 'signing — browser (@alexify/syncom/signing)',
     entry: 'src/signing/signing.js',
     platform: 'browser',
-    budget: 6,
+    // 6.3 with the key pair read through a store (src/engine.js kvNamespace/fsiNamespace; engines plan, E1.3). 6.5, raised by name.
+    budget: 6.5,
   },
   // The chain: the blocks, SHA-256 through Web Crypto, the plugin. 2.9 with the digest module's SHA-256 in JavaScript,
   // which the chain does not call (a browser split of its own was not worth 0.4 KB). 3, raised by name.
-  { label: 'chain — browser (@alexify/syncom/chain)', entry: 'src/chain/chain.js', platform: 'browser', budget: 3 },
+  // 3.4 with the blocks in a store — the database's `blockchain` namespace, or a directory (engines plan, E1.3). 3.5, raised by name.
+  { label: 'chain — browser (@alexify/syncom/chain)', entry: 'src/chain/chain.js', platform: 'browser', budget: 3.5 },
   // Sealed records (the RSA half) and the at-rest wrapper (AES-GCM, PBKDF2).
   {
     label: 'encryption — browser (@alexify/syncom/encryption)',
     entry: 'src/encryption/encryption.js',
     platform: 'browser',
-    budget: 4,
+    // 4.1 with the key pair read through a store (engines plan, E1.3). 4.5, raised by name.
+    budget: 4.5,
   },
   // The backends as blocks: the Map in memory; the multi-level cache over
   // several (with the contract check it shares with the core).
@@ -455,7 +460,8 @@ const ENTRIES = [
   // Queries: the predicate, the planner and the cursor, measured ALONE with
   // the catalog's value keys it shares with the core.
   // 6.0 with src/ in procedural loops (no array callbacks — a loop is longer than a callback; 2026-10-26).
-  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 6.5 },
+  // 7.0 with the catalog persisted through a store (src/engine.js kvNamespace/fsiNamespace; engines plan, E1.3). 7.5, raised by name.
+  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 7.5 },
   // Versions: the fold of the log, the tags, the view at a tag — measured
   // ALONE with the write path, the snapshot pages and the patches it shares
   // with the core.

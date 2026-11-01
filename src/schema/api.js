@@ -19,13 +19,14 @@ const SCHEMA_FILE = 'schema.json';
 // deterministic, a hand-written one is as stable as its author keeps it.
 // A downgrade under `ahead: 'hold'` is refused: its own records are of the
 // version it ran. Resolves to `{ hash, previous }`.
-const loadVersion = async ({ fsi, path, logger, hash: sha256 }, { version, snapshot, ahead }) => {
+const loadVersion = async ({ db, logger, hash: sha256 }, { version, snapshot, ahead }) => {
   const hash = snapshot === undefined ? null : await sha256(snapshot);
   let stored = null;
-  if (await fsi.exists(path, SCHEMA_FILE)) {
+  const text = await db.kv.get('', SCHEMA_FILE);
+  if (text !== null) {
     let raw;
     try {
-      raw = JSON.parse(await fsi.read(path, SCHEMA_FILE));
+      raw = JSON.parse(text);
     } catch (error) {
       const message = `${SCHEMA_FILE} is unreadable (${error.message}); restore it or remove the directory`;
       throw new SyncomError('CORRUPT', message, { cause: error });
@@ -50,7 +51,7 @@ const loadVersion = async ({ fsi, path, logger, hash: sha256 }, { version, snaps
   // `migrated`: when this version first ran here — kept across a snapshot
   // change of the same version.
   const migrated = stored?.version === version && Number.isInteger(stored.migrated) ? stored.migrated : Date.now();
-  await fsi.write(path, SCHEMA_FILE, JSON.stringify({ version, migrated, hash }), { atomic: true });
+  await db.kv.put('', SCHEMA_FILE, JSON.stringify({ version, migrated, hash }), { atomic: true });
   return { hash, previous };
 };
 

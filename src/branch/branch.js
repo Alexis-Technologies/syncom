@@ -16,7 +16,7 @@ const { outbound, unreachable } = require('../sync/outbound.js');
 const { asJson } = require('../shape.js');
 const { DEFAULT_PAGE_SIZE } = require('../sync/protocol.js');
 const { SyncomError } = require('../errors.js');
-const { PLUGINS } = require('../symbols.js');
+const { PLUGINS, DB } = require('../symbols.js');
 
 const FILE = 'branch.json';
 const FORMAT = 1;
@@ -92,24 +92,35 @@ const branch = async (parent, { path, from = null, ...options } = {}) => {
   if (from !== null && (typeof from !== 'object' || (typeof from.tag !== 'string' && from.at === undefined))) {
     throw new TypeError('branch(): from is { tag } or { at }');
   }
-  const fsi = options.fsi ?? parent.fsi;
-  if (await fsi.exists(path, FILE)) throw new SyncomError('BRANCH_EXISTS', `${path} holds a branch already`, { path });
-  // A branch opens in a directory of its own: one that holds files already
-  // — another storage, say — is not taken over and merged into.
+  // Where the branch stores its bytes: the engine given, the parent's, or the
+  // files engine over a backend given — the parent's engine by default.
+  const { fsi, engine: given, ...rest } = options;
+  const engine = given ?? (fsi === undefined ? parent.engine : null);
+  // A branch opens in a directory of its own: one that holds a branch, or
+  // files already — another storage, say — is not taken over and merged into.
+  const probe = engine === null ? null : await engine.open(path, { logger: null });
+  const taken = probe === null ? await fsi.exists(path, FILE) : await probe.kv.has('', FILE);
+  if (taken) {
+    await probe?.close();
+    throw new SyncomError('BRANCH_EXISTS', `${path} holds a branch already`, { path });
+  }
   let present = [];
   try {
-    present = await fsi.list(path);
+    present = probe === null ? await fsi.list(path) : await probe.kv.list('');
+    if (present.length === 0 && probe !== null) present = await probe.records.ids({ limit: 1 });
   } catch {
     present = [];
   }
+  await probe?.close();
   if (present.length > 0) {
     const message = `${path} holds files already; a branch opens in a new directory`;
     throw new SyncomError('BRANCH_EXISTS', message, { path });
   }
-  const sync = { ...options.sync, retention: { ...options.sync?.retention, ops: 0 }, autoStart: false };
+  const sync = { ...rest.sync, retention: { ...rest.sync?.retention, ops: 0 }, autoStart: false };
   const Storage = parent.constructor;
-  const plugins = options.plugins ?? parent[PLUGINS].modules;
-  const child = await new Storage({ ...options, fsi, path, sync, plugins });
+  const plugins = rest.plugins ?? parent[PLUGINS].modules;
+  const where = engine === null ? { fsi } : { engine };
+  const child = await new Storage({ ...rest, ...where, path, sync, plugins });
   const origin = parent.nodeId;
   let forkedAt;
   try {
@@ -136,7 +147,7 @@ const branch = async (parent, { path, from = null, ...options } = {}) => {
       };
     }
     const info = { format: FORMAT, parent: origin, forkedAt, createdAt: Date.now() };
-    await fsi.write(path, FILE, JSON.stringify(info), { atomic: true });
+    await child[DB].kv.put('', FILE, JSON.stringify(info), { atomic: true });
   } catch (error) {
     // Nothing half-made stays: a retry opens a new identity, not this one.
     await sweep(child).catch(() => {});
@@ -148,10 +159,11 @@ const branch = async (parent, { path, from = null, ...options } = {}) => {
 /** `{ parent, forkedAt, createdAt }` of a storage opened on a branch's directory, or null for one that is no branch. */
 const branchInfo = async (storage) => {
   if (!isStorage(storage) || typeof storage.path !== 'string') throw new TypeError('branchInfo() takes a storage');
-  if (!(await storage.fsi.exists(storage.path, FILE))) return null;
+  const text = await storage[DB].kv.get('', FILE);
+  if (text === null) return null;
   let parsed = null;
   try {
-    parsed = JSON.parse(await storage.fsi.read(storage.path, FILE));
+    parsed = JSON.parse(text);
   } catch (error) {
     throw new SyncomError('CORRUPT', `${FILE} is unreadable`, { cause: error });
   }
@@ -162,42 +174,15 @@ const branchInfo = async (storage) => {
   return { parent, forkedAt, createdAt };
 };
 
-// The directories a storage writes under its path; fsi lists files, not
-// directories, so the tags' are named from the storage before it closes.
-const DIRS = ['', 'keys', 'blockchain', 'index', 'data', 'log', 'log/open', 'remote', 'tags/.pending/data'];
-
-// The tags a storage holds — none without the versions plugin, which keeps
-// them (a branch opened without it has no tags of its own to sweep).
-const tagsOf = (storage) => {
-  try {
-    return storage.tags();
-  } catch {
-    return [];
-  }
-};
-
-// Closes a storage and removes its files — every file of the known layout,
-// the tags' included. The empty directories stay: no backend has rmdir.
-// `branch.json` goes last: a sweep cut short leaves a directory `drop()`
-// still takes, to finish it.
+// Closes a storage and removes its files — every store of the engine's
+// database at its path, the tags' included (the engine knows its layout;
+// the files engine empties every directory, `branch.json` last, so a sweep
+// cut short leaves a directory `drop()` still takes). Closed first —
+// whatever else fails — so its lock goes with it.
 const sweep = async (storage) => {
-  const { fsi, path } = storage;
-  const dirs = [...DIRS];
-  const tags = tagsOf(storage);
-  for (let i = 0; i < tags.length; i++) dirs.push(`tags/${tags[i].name}/data`, `tags/${tags[i].name}/index`);
-  // Closed first — whatever else fails — so its lock goes with it.
+  const { engine, path } = storage;
   await storage.close();
-  for (const dir of dirs) {
-    const full = dir === '' ? path : `${path}/${dir}`;
-    let names = [];
-    try {
-      names = await fsi.list(full);
-    } catch {
-      continue;
-    }
-    for (const name of names) if (dir !== '' || name !== FILE) await fsi.remove(full, name);
-  }
-  if (await fsi.exists(path, FILE)) await fsi.remove(path, FILE);
+  await engine.remove(path);
 };
 
 /**

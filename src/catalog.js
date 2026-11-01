@@ -1,11 +1,15 @@
 'use strict';
 
+const { fsiNamespace } = require('./engine.js');
+
 // The record catalog: every live record's id, collection and indexed field
 // values, in memory, so `list()`, `hasRecord()` and a query by an indexed
 // field cost no I/O. It is derived state — rebuilt from `data/` when it is
 // missing or stale — and persisted as `<path>/index/catalog.json` stamped
 // with the log position it reflects, so a reopen catches up from the log
-// instead of scanning. No requires: this file ships to the browser.
+// instead of scanning. Persisted through a store — one kv namespace
+// (src/engine.js): `index` for the live catalog, `tags/<name>/index` for a
+// tag's. Requires engine.js only: this file ships to the browser.
 //
 // Rows hold the indexed field values only (the record itself stays in the
 // cache or on disk); an encrypted record is a row with no fields, so it is
@@ -134,8 +138,7 @@ const post = (map, value, id, fn) => {
 };
 
 class Catalog {
-  #fsi;
-  #dir;
+  #store;
   #defs = new Map();
   #indexKey;
   #rows = new Map();
@@ -150,9 +153,9 @@ class Catalog {
   #textPending = new Map();
   #logger;
 
-  constructor({ fsi, path, entities, text = new Map(), logger = null }) {
-    this.#fsi = fsi;
-    this.#dir = `${path}/index`;
+  constructor({ store = null, fsi = null, path = null, entities, text = new Map(), logger = null }) {
+    // A store given, else the `index` directory of an fsi at `path` (what a test hands in).
+    this.#store = store ?? fsiNamespace(fsi, `${path}/index`);
     this.#text = text;
     this.#logger = logger;
     const shape = [];
@@ -490,10 +493,11 @@ class Catalog {
   // `strict: false` reuses a catalog saved under other indexes — a tag's,
   // where the rows say what existed and the indexes are those of its day.
   async load({ strict = true } = {}) {
-    if (!(await this.#fsi.exists(this.#dir, FILE))) return null;
+    const text = await this.#store.get(FILE);
+    if (text === null) return null;
     let parsed = null;
     try {
-      parsed = JSON.parse(await this.#fsi.read(this.#dir, FILE));
+      parsed = JSON.parse(text);
     } catch {
       return null;
     }
@@ -539,7 +543,7 @@ class Catalog {
     }
     const saved = this.#dirty;
     const text = JSON.stringify({ format: FORMAT, indexes: this.#indexKey, stamp, rows });
-    await this.#fsi.write(this.#dir, FILE, text, { atomic: true });
+    await this.#store.put(FILE, text, { atomic: true });
     this.#dirty -= saved;
   }
 }

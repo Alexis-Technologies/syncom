@@ -27,8 +27,8 @@ const { SyncomError } = require('../errors.js');
 
 const encryption = Object.freeze({
   name: 'encryption',
-  async setup({ fsi, path }) {
-    const keys = await loadKeys(`${path}/keys`, { fsi });
+  async setup({ db }) {
+    const keys = await loadKeys('keys', { kv: db.kv });
     return {
       seal: {
         encrypt: (data) => encrypt(data, keys.publicKey),

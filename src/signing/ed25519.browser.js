@@ -6,6 +6,7 @@
 
 const defaultFsi = require('../fsi.browser.js');
 const { loadKeyPair, SIGNING_FILES } = require('../crypto/keys.js');
+const { kvNamespace, fsiNamespace } = require('../engine.js');
 const { PUBLIC_KEY_HEADER, PUBLIC_KEY_FOOTER, PRIVATE_KEY_HEADER, PRIVATE_KEY_FOOTER } = require('../crypto/pem.js');
 const { toBase64Url, fromBase64, toPem, cleanPem } = require('../crypto/pem.js');
 
@@ -89,8 +90,9 @@ const verify = async (message, signature, publicKey) => {
 // the public one (./ed25519.js has its own, on the thread pool).
 const verifyAsync = verify;
 
-const loadSigningKeys = async (basePath = 'keys', { fsi = defaultFsi } = {}) => {
-  const keys = await loadKeyPair(basePath, fsi, generateSigningKeys, SIGNING_FILES);
+const loadSigningKeys = async (basePath = 'keys', { fsi = defaultFsi, kv = null } = {}) => {
+  const store = kv === null ? fsiNamespace(fsi, basePath) : kvNamespace(kv, basePath);
+  const keys = await loadKeyPair(store, basePath, generateSigningKeys, SIGNING_FILES);
   return { publicKey: keys.publicKey, privateKey: keys.privateKey, id: signingId(keys.publicKey) };
 };
 

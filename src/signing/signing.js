@@ -18,8 +18,8 @@ const { signOp, verifyOp, isHeldKey } = require('./sign.js');
 
 const signing = Object.freeze({
   name: 'signing',
-  async setup({ fsi, path }) {
-    const keys = await loadSigningKeys(`${path}/keys`, { fsi });
+  async setup({ db }) {
+    const keys = await loadSigningKeys('keys', { kv: db.kv });
     return {
       identity: {
         id: keys.id,

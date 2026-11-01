@@ -44,7 +44,7 @@ expectError(syncom.open({ lock: true }));
 expectAssignable<StorageOptions>({ cache: { max: 100 }, integrity: 'lazy', catalog: { flushEvery: 10 } });
 expectError(syncom.open({ integrity: 'trust' }));
 expectError(syncom.open({ cache: { max: 'many' } }));
-expectType<Fsi>(storage.fsi);
+expectType<Fsi | null>(storage.fsi);
 expectType<Promise<syncom.OpLog>>(new syncom.OpLog('base', { fsi: memory() }));
 
 // fsi
@@ -887,4 +887,8 @@ storage.record<Post>('id').then((record) => {
   expectType<Promise<string[]>>(db.records.ids({ after: 'a', limit: 10 }));
   expectAssignable<syncom.EngineWriteSet>({ records: [{ id: 'a', text: '{}' }], kv: { put: [['', 'k', 'v']] } });
   expectError(engine.open(42));
+  const viaEngine = await syncom.createDatabase({ engine });
+  expectType<syncom.Engine>(viaEngine.engine);
+  expectType<Fsi | null>(viaEngine.fsi);
+  expectError(syncom.createDatabase({ engine: {} }));
 }
