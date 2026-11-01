@@ -6,7 +6,7 @@ Each part has a guide of its own; this page is the map between them.
 
 ## The big picture
 
-A `Storage` is the facade an application opens. It owns the **mutation queue**: every write runs
+A `Database` is the facade an application opens. It owns the **mutation queue**: every write runs
 inside it, one at a time. It lends its collaborators (the log, the clock, the chain, the
 records, the tags) as one `core` to the three write paths, to the API modules behind its
 methods — `src/fields.js` for the field kinds beyond registers, `src/patches.js` for the present's
@@ -20,7 +20,7 @@ transport (a link), the validator, the text index, the telemetry.
 flowchart TB
   app["Application"]
   api["fields.js · patches.js · the plugins'<br/>splice … treeMove<br/>history · tags · patches"]
-  subgraph storage["Storage — the mutation queue"]
+  subgraph storage["Database — the mutation queue"]
     direction LR
     commit["commit.js<br/>a local write"]
     apply["apply.js<br/>a peer's batch"]
@@ -100,7 +100,7 @@ this node's key and produces no op. The mutation queue holds a write up to the a
 from there the next write runs, building on the entry in flight, while the disk is waited for
 outside the queue; steps 7 to 12 come in log order once the op's group is on disk, and that is
 what the caller awaits. The catalog file is saved off the queue, so a write never
-waits for it. Under `open({ defer })` — 16 ms by default — steps 8 to 10 wait for a timer instead: the log is durable
+waits for it. Under `createDatabase({ defer })` — 16 ms by default — steps 8 to 10 wait for a timer instead: the log is durable
 at once, the cache and the catalog read the entry meanwhile, and the writes of one record within
 the window land as one file, every record due under one block; `flush()` lands them now.
 
@@ -231,7 +231,7 @@ data/
 └── remote/        one file per registered sync node
 ```
 
-[Storage](/guide/storage#on-disk) explains each file, and [Backends](/guide/backends) explains
+[Database](/guide/database#on-disk) explains each file, and [Backends](/guide/backends) explains
 the five functions an `fsi` implements.
 
 ## The modules
@@ -239,11 +239,11 @@ the five functions an `fsi` implements.
 | Module | Role |
 | --- | --- |
 | `storage.js` | The facade: the open sequence, the mutation queue, the public API (a delegate per method of the two API modules), the `core` it lends |
-| `plugin.js` | The registry one `open({ plugins })` builds: kind modules and API modules, per storage, never process-wide; `PLUGIN_MISSING` |
+| `plugin.js` | The registry one `createDatabase({ plugins })` builds: kind modules and API modules, per storage, never process-wide; `PLUGIN_MISSING` |
 | `fields.js`, `patches.js`, `versions/versions.js`, `versions/api.js` | The API of the core's kinds beyond registers (`inc`, `add`, `remove`); the present's patches (`applyPatches`, `compact`); the `@alexify/syncom/versions` plugin and its API (`get(id, { at })`, `history`, `diff`, `restore`, `tag`, `untag`, `at`), over the lent core; a plugin's methods come with the plugin |
 | `commit.js`, `apply.js`, `bootstrap.js` | The three write paths |
-| `args.js`, `shape.js`, `options.js` | The checks at the edges: the write API's arguments (shared with the patches), record ids and a peer's op shape, `open()`'s options |
-| `entries.js`, `catalog.js`, `record.js` | Record files, the bounded cache, the catalog (ids, indexes, tombstones); `Record`, `Reference` and `Collection` |
+| `args.js`, `shape.js`, `options.js` | The checks at the edges: the write API's arguments (shared with the patches), record ids and a peer's op shape, `createDatabase()`'s options |
+| `entries.js`, `catalog.js`, `record.js` | Record files, the bounded cache, the catalog (ids, indexes, tombstones); `Document`, `Reference` and `Collection` |
 | `log.js`, `sync/outbound.js` | `OpLog`, the persisted operation log: append, seal, retention, scrub, pins; the ops a receiver lacks, for a push and a branch merge |
 | `ops.js`, `vector.js` | The op model (`applyOp` over registers, counters, sets and one `blocks` slot per plugin kind; the kinds' precedence by the registry's ranks), clocks and version vectors |
 | `text/text.js`, `text/sequence.js`, `text/rope.js`, `text/ids.js`, `text/cow.js`, `text/rle.js`, `text/myers.js` | The `@alexify/syncom/text` plugin: lists and texts — Fugue runs placed by a walk into a copy-on-write rope (a B+-tree with two measures and a text cache per node; an op freezes the version it starts from and copies each node it touches once), the runs found by name in an id index, the registers, the marks and what waits in hash tries; a movable list's registers, marks, cursors; the run-length content of a run; the Myers diff behind `updateText()` and the splices of a patch |

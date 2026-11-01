@@ -35,7 +35,7 @@ await presence.delete();                                    // leaves: null for 
   (`'*'`, the global one, by default): a host relays them to the peers of
   that scope. One instance per scope a node takes part in.
 - **Nothing of it is written** — not to the log, not to the chain, not to a
-  record. A `Record` never sees it; history never shows it.
+  record. A `Document` never sees it; history never shows it.
 
 ## Over the hub
 
@@ -57,7 +57,7 @@ own; one that takes part registers one like any node.
 // the host
 const router = defineRouter({ syncom: storage.sync.unit({ access: 'public', presence: { rate: 20 } }) });
 // a peer, over wrpc: the adapter maps `send` to client.sendEvent and the unit's events
-const storage = await open({ plugins: [sync, signing], sync: { connect: (node) => createWrpcLink(client) } });
+const storage = await createDatabase({ plugins: [sync, signing], sync: { connect: (node) => createWrpcLink(client) } });
 ```
 
 A link of the application's own carries it with the optional `send(event,

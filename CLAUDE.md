@@ -104,7 +104,7 @@ and the whole suite with `node --test --test-timeout=120000` (never a run withou
 - **`tests/package/consistency.test.js` guards the metadata.** If it goes red
   after you add an entry point, update `exports`, `files`, the `browser` map,
   `scripts/size.js` `ENTRIES` and the docs keywords — the test is right.
-- **Constructors that return promises.** `Storage`, `Blockchain` and
+- **Constructors that return promises.** `Database`, `Blockchain` and
   `SyncManager` all `return this.#init()` from the constructor, so they are
   used as `await new Blockchain(path)`. The types model this; keep it that way.
 

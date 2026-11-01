@@ -1526,7 +1526,7 @@
         "collectionLimit": {
           "mark": "✅",
           "text": "none",
-          "source": "src/schema/define.js (no cap); scratch check: open() with 40 entities over memory()"
+          "source": "src/schema/define.js (no cap); scratch check: createDatabase() with 40 entities over memory()"
         },
         "phoneHome": {
           "mark": "",
@@ -1634,15 +1634,15 @@
         },
         "multiTab": {
           "mark": "⚠️",
-          "text": "one tab per storage: `open()` holds a Web Lock, a second tab gets `LOCKED`",
-          "source": "src/lock.js:58-95; docs/guide/scaling.md#several-tabs; docs/guide/storage.md#one-instance-per-directory",
+          "text": "one tab per storage: `createDatabase()` holds a Web Lock, a second tab gets `LOCKED`",
+          "source": "src/lock.js:58-95; docs/guide/scaling.md#several-tabs; docs/guide/database.md#one-instance-per-directory",
           "note": "There are no cross-tab change events and no read-only open: the other tabs wait for the lock (`lock: 'wait'`) or route reads and writes to the owner through a `BroadcastChannel`.",
           "detail": "Two storages over one directory would mint the same sequence numbers, which is why the lock exists (src/lock.js:4-9)."
         },
         "leader": {
           "mark": "⚠️",
           "text": "no election API; `lock: 'wait'` hands the storage to the next tab",
-          "source": "src/lock.js:58-70; docs/guide/storage.md#one-instance-per-directory"
+          "source": "src/lock.js:58-70; docs/guide/database.md#one-instance-per-directory"
         },
         "storageContract": {
           "mark": "✅",
@@ -1762,7 +1762,7 @@
           "mark": "✅",
           "text": "Web Locks or `lock.json` (pid); `'fail'` → `LOCKED`, `'wait'`, `false`",
           "note": "Two browser tabs are two instances: the second sees `LOCKED`, so one tab or a worker must own the storage.",
-          "source": "src/lock.js:83-131; docs/guide/storage.md#one-instance-per-directory",
+          "source": "src/lock.js:83-131; docs/guide/database.md#one-instance-per-directory",
           "detail": "A lockfile is stale when its pid is gone, or after 30 minutes when that cannot be told; per machine only."
         },
         "integrityRepair": {
@@ -1781,7 +1781,7 @@
         "onDiskFormat": {
           "mark": "✅",
           "text": "plain JSON files: `data/<id>.json`, log batches, chain blocks, keys",
-          "source": "docs/guide/storage.md#on-disk; docs/guide/architecture.md#on-disk"
+          "source": "docs/guide/database.md#on-disk; docs/guide/architecture.md#on-disk"
         },
         "writeFootprint": {
           "mark": "",
@@ -1795,23 +1795,23 @@
         },
         "docCache": {
           "mark": "✅",
-          "text": "`cache: { max: 5000 }` entries; a live `Record` pins its own (WeakRef)",
-          "source": "src/entries.js:62-73; src/options.js:9,53-58; docs/guide/storage.md#the-catalog-and-the-cache"
+          "text": "`cache: { max: 5000 }` entries; a live `Document` pins its own (WeakRef)",
+          "source": "src/entries.js:62-73; src/options.js:9,53-58; docs/guide/database.md#the-catalog-and-the-cache"
         },
         "attachments": {
           "mark": "❌",
           "text": "none: JSON records only, no binary type",
-          "source": "src/shape.js; docs/guide/storage.md"
+          "source": "src/shape.js; docs/guide/database.md"
         },
         "localDocs": {
           "mark": "⚠️",
           "text": "only encrypted records stay local; no plain local documents",
-          "source": "docs/guide/storage.md#encryption-at-rest"
+          "source": "docs/guide/database.md#encryption-at-rest"
         },
         "tombstoneCleanup": {
           "mark": "❌",
           "text": "none: a tombstone keeps its file (data emptied) and catalog row",
-          "source": "src/catalog.js:12-14; docs/guide/storage.md#on-disk",
+          "source": "src/catalog.js:12-14; docs/guide/database.md#on-disk",
           "detail": "Checked: a deleted record's file is `{ data: {}, meta: { deleted } }`, a purged one adds `purged`. The op log is bounded by retention; tombstone files and chain blocks are not."
         },
         "deleteDatabase": {
@@ -1840,29 +1840,29 @@
         "model": {
           "mark": "",
           "text": "JSON records addressed by id; collections optional (`$type`)",
-          "source": "docs/guide/storage.md#collections; src/document.js:160-215",
+          "source": "docs/guide/database.md#collections; src/document.js:160-215",
           "detail": "`Collection.get(id)` is `storage.get(id)` with no `$type` filter: `storage.Post.get(authorId)` returned the Author record (checked by running)."
         },
         "schemaless": {
           "mark": "✅",
           "text": "no schema needed; `{}` is a bare collection",
-          "source": "docs/guide/storage.md#collections; src/schema/define.js"
+          "source": "docs/guide/database.md#collections; src/schema/define.js"
         },
         "collectionNames": {
           "mark": "✅",
-          "text": "any non-empty string the storage does not answer to (`get`, `close`… refused at `open()`)",
+          "text": "any non-empty string the storage does not answer to (`get`, `close`… refused at `createDatabase()`)",
           "source": "src/database.js (#defineSchema); tests/storage.test.js"
         },
         "fieldNames": {
           "mark": "✅",
           "text": "any JSON key; `__proto__` ignored, `$type` reserved",
           "source": "src/ops.js:151-152; src/commit.js:31-38; src/document.js:76-90",
-          "detail": "A field named like a `Record` member (`save`, `data`, `delete`) stays in the data but is not a property of the live Record (warned as `record.shadowed`)."
+          "detail": "A field named like a `Document` member (`save`, `data`, `delete`) stays in the data but is not a property of the live Record (warned as `record.shadowed`)."
         },
         "primaryKey": {
           "mark": "✅",
           "text": "the record id, outside the data; the validator sees it under `idField`",
-          "source": "src/schema/define.js; docs/guide/storage.md#validation",
+          "source": "src/schema/define.js; docs/guide/database.md#validation",
           "detail": "An `id` passed inside the data is not the record id: with a validator it is dropped from what is written, without one it is stored as a plain field (checked by running). Choose the id with `set(id, data)`."
         },
         "compositeKey": {
@@ -1873,17 +1873,17 @@
         "idGeneration": {
           "mark": "✅",
           "text": "`getId`: UUID by default; sync or async generator of your own",
-          "source": "src/database.js:118-120,861-871; docs/guide/storage.md#custom-identifiers"
+          "source": "src/database.js:118-120,861-871; docs/guide/database.md#custom-identifiers"
         },
         "idRules": {
           "mark": "✅",
           "text": "`[A-Za-z0-9_@-][A-Za-z0-9._@-]{0,127}`, checked on every write and peer op",
-          "source": "src/shape.js:21-30; docs/guide/storage.md#custom-identifiers"
+          "source": "src/shape.js:21-30; docs/guide/database.md#custom-identifiers"
         },
         "immutableFields": {
           "mark": "⚠️",
           "text": "only `$type` (the collection) and the id",
-          "source": "src/commit.js:26-38; docs/guide/storage.md#collections"
+          "source": "src/commit.js:26-38; docs/guide/database.md#collections"
         },
         "schemaFormat": {
           "mark": "✅",
@@ -1899,7 +1899,7 @@
         "validationDefault": {
           "mark": "✅",
           "text": "on for every entity with a `schema`; `validate: false` opts out",
-          "source": "src/commit.js:153-202; docs/guide/storage.md#validation",
+          "source": "src/commit.js:153-202; docs/guide/database.md#validation",
           "detail": "A record written without `$type` (outside any collection) has no validator: `storage.set(id, …)` bypasses a collection's schema (checked by running)."
         },
         "validatorOutput": {
@@ -1925,12 +1925,12 @@
         "required": {
           "mark": "✅",
           "text": "as the validator declares them",
-          "source": "docs/guide/storage.md#validation"
+          "source": "docs/guide/database.md#validation"
         },
         "nested": {
           "mark": "✅",
           "text": "a nested object is one register; a field by path (`profile/city`) merges on its own, each of any kind",
-          "source": "src/paths.js; src/compose.js; docs/guide/storage.md#paths"
+          "source": "src/paths.js; src/compose.js; docs/guide/database.md#paths"
         },
         "schemaVersion": {
           "mark": "✅",
@@ -1977,7 +1977,7 @@
         "unsetField": {
           "mark": "✅",
           "text": "`unset(id, fields)`: an `unset` op, a tombstone an older concurrent `set` loses to",
-          "source": "src/database.js (unset); docs/guide/storage.md"
+          "source": "src/database.js (unset); docs/guide/database.md"
         },
         "modifyFn": {
           "mark": "❌",
@@ -2008,7 +2008,7 @@
         "transactions": {
           "mark": "✅",
           "text": "`transact(fn)`: several writes over several records, one log append, all or none",
-          "source": "src/commit.js (transact); docs/guide/storage.md#transactions"
+          "source": "src/commit.js (transact); docs/guide/database.md#transactions"
         },
         "changeAndDelete": {
           "mark": "❌",
@@ -2070,7 +2070,7 @@
         "deltaHelpers": {
           "mark": "✅",
           "text": "`diff`, `merge`, `apply`: pure functions; numbers add, arrays union",
-          "note": "Storage does not replicate through them, and `merge({ hits: 10 }, diff({ hits: 10 }, { hits: 3 }))` is 13: a delta is not a plain patch.",
+          "note": "Database does not replicate through them, and `merge({ hits: 10 }, diff({ hits: 10 }, { hits: 3 }))` is 13: a delta is not a plain patch.",
           "source": "src/crdt.js; docs/guide/crdt.md"
         },
         "meta": {
@@ -2086,12 +2086,12 @@
         },
         "documentObjects": {
           "mark": "✅",
-          "text": "`record(id)`: one live, editable `Record` per id, refreshed on any change",
-          "source": "src/document.js:28-158; src/database.js:1005-1013; docs/guide/storage.md#records"
+          "text": "`document(id)`: one live, editable `Document` per id, refreshed on any change",
+          "source": "src/document.js:28-158; src/database.js:1005-1013; docs/guide/database.md#records"
         },
         "identity": {
           "mark": "✅",
-          "text": "one `Record` per id while referenced (WeakRef); `get()` returns new copies",
+          "text": "one `Document` per id while referenced (WeakRef); `get()` returns new copies",
           "source": "src/database.js:141-145,370-376"
         },
         "returnedData": {
@@ -2107,9 +2107,9 @@
         },
         "relations": {
           "mark": "⚠️",
-          "text": "a `Record` turns any string equal to a known id into a `Reference`",
+          "text": "a `Document` turns any string equal to a known id into a `Reference`",
           "note": "Nothing declares the relation, so an unrelated string that matches an id becomes a `Reference` too (checked by running).",
-          "source": "src/document.js:14-27,55-70; docs/guide/storage.md#references"
+          "source": "src/document.js:14-27,55-70; docs/guide/database.md#references"
         },
         "rxState": {
           "mark": "❌",
@@ -2242,7 +2242,7 @@
         },
         "findById": {
           "mark": "✅",
-          "text": "`get(id)` (a copy), `record(id)` (a live Record); `hasRecord(id)`; a collection's `get` only its own",
+          "text": "`get(id)` (a copy), `document(id)` (a live Document); `hasRecord(id)`; a collection's `get` only its own",
           "source": "src/database.js:879-899; src/document.js:179-181,210-212"
         },
         "findByIds": {
@@ -2274,7 +2274,7 @@
         },
         "joins": {
           "mark": "❌",
-          "text": "a cursor reads one collection; `Reference.record()` follows one id",
+          "text": "a cursor reads one collection; `Reference.document()` follows one id",
           "source": "src/document.js:184-186; index.d.ts:1314-1316"
         },
         "encryptedFields": {
@@ -2312,7 +2312,7 @@
         "indexStorage": {
           "mark": "",
           "text": "in memory (the catalog), saved to `index/catalog.json`, caught up from the log at open",
-          "source": "src/catalog.js:1-20; src/database.js:312-342; docs/guide/storage.md#the-catalog-and-the-cache",
+          "source": "src/catalog.js:1-20; src/database.js:312-342; docs/guide/database.md#the-catalog-and-the-cache",
           "detail": "Every live id, its indexed values and its search text must fit in memory; a first open, a stamp the log cannot resume from, or other indexes rebuild it from one scan of data/."
         },
         "indexChange": {
@@ -2349,7 +2349,7 @@
         "queryCache": {
           "mark": "❌",
           "text": "none; each `fetch()` re-runs, records come from the bounded entry cache",
-          "source": "src/query/cursor.js; docs/guide/storage.md#the-catalog-and-the-cache"
+          "source": "src/query/cursor.js; docs/guide/database.md#the-catalog-and-the-cache"
         },
         "unique": {
           "mark": "✅",
@@ -2403,7 +2403,7 @@
         },
         "documentObservable": {
           "mark": "✅",
-          "text": "a live `Record` emits `update (data, delta)`, `null` once deleted",
+          "text": "a live `Document` emits `update (data, delta)`, `null` once deleted",
           "source": "src/document.js:99-120; index.d.ts:1139-1142"
         },
         "reactivityPrimitive": {
@@ -2497,7 +2497,7 @@
           "mark": "⚠️",
           "text": "hubs dial each other; a client stays on one hub's log",
           "source": "docs/guide/scaling.md#hubs; tests/hub.mesh.test.js",
-          "detail": "A client moved to another hub bootstraps from it. A log shared by hub processes on a broker is reserved: `open({ sync: { sharedLog } })` throws in this version (src/sync.js:98-101)."
+          "detail": "A client moved to another hub bootstraps from it. A log shared by hub processes on a broker is reserved: `createDatabase({ sync: { sharedLog } })` throws in this version (src/sync.js:98-101)."
         },
         "webrtc": {
           "mark": "✅",
@@ -2711,7 +2711,7 @@
         "replAttachments": {
           "mark": "❌",
           "text": "none: records are JSON, with no binary type",
-          "source": "docs/guide/storage.md"
+          "source": "docs/guide/database.md"
         },
         "lifecycle": {
           "mark": "✅",
@@ -2797,7 +2797,7 @@
         "keyRotation": {
           "mark": "❌",
           "text": "no rotation API; a replaced key pair cannot open sealed records",
-          "source": "src/crypto/keys.js:20-37; docs/guide/storage.md#encryption-at-rest"
+          "source": "src/crypto/keys.js:20-37; docs/guide/database.md#encryption-at-rest"
         },
         "encAttachments": {
           "mark": "—",
@@ -2884,14 +2884,14 @@
           "mark": "✅",
           "text": "`purge(id)`: a `purge` op that wins at any stamp, then a scrub of the op log",
           "note": "The chain keeps an unsalted SHA-256 of every version this node wrote or applied, so whoever holds the directory can confirm a guessed record; until the next catalog save, `index/catalog.json` may still hold its indexed fields.",
-          "source": "src/database.js:921-925; src/log.js:485; src/ops.js:427-458; docs/guide/storage.md#purge",
+          "source": "src/database.js:921-925; src/log.js:485; src/ops.js:427-458; docs/guide/database.md#purge",
           "detail": "A scrub rewrites log files in place: a crash mid-scrub tears the file, and `purge()` is idempotent. The scrubbed op keeps origin, seq, stamp, `actor`, `sig` and the salted digest."
         },
         "purgeReplicas": {
           "mark": "✅",
           "text": "the purge op replicates; every peer that takes it scrubs its own log",
           "note": "A peer that never comes back keeps what it had.",
-          "source": "src/apply.js:276-278,299; docs/guide/storage.md#purge"
+          "source": "src/apply.js:276-278,299; docs/guide/database.md#purge"
         },
         "history": {
           "mark": "✅",
@@ -2926,7 +2926,7 @@
           "mark": "✅",
           "text": "`beforeWrite` replaces data or refuses, `afterWrite`; one function per name",
           "source": "src/hooks.js:21-49; src/commit.js:62-72,195-207; docs/guide/hooks.md#storage-hooks",
-          "detail": "Run inside the mutation queue for every local write (`write`, `set`, `inc`, `add`, `remove`, `delete`, `purge`, `merge`); a write issued from a hook is refused (`IN_HOOK`); an unknown hook name is a `TypeError` at `open()`."
+          "detail": "Run inside the mutation queue for every local write (`write`, `set`, `inc`, `add`, `remove`, `delete`, `purge`, `merge`); a write issued from a hook is refused (`IN_HOOK`); an unknown hook name is a `TypeError` at `createDatabase()`."
         },
         "replHooks": {
           "mark": "✅",
@@ -2953,7 +2953,7 @@
         },
         "plugins": {
           "mark": "✅",
-          "text": "`open({ plugins })`, per instance, nothing global: the kinds (`/text`, `/tree`) and the blocks (`/signing`, `/chain`, `/sync`, `/schema`, `/query`, …); a missing one is `PLUGIN_MISSING`",
+          "text": "`createDatabase({ plugins })`, per instance, nothing global: the kinds (`/text`, `/tree`) and the blocks (`/signing`, `/chain`, `/sync`, `/schema`, `/query`, …); a missing one is `PLUGIN_MISSING`",
           "source": "src/plugin.js (createPlugins); docs/guide/entry-points.md"
         },
         "errors": {
@@ -2963,7 +2963,7 @@
         },
         "logging": {
           "mark": "✅",
-          "text": "`open({ logger })`: a Console, a pino-shaped logger or `false`; named events",
+          "text": "`createDatabase({ logger })`: a Console, a pino-shaped logger or `false`; named events",
           "source": "src/logger.js:9-14; docs/guide/telemetry.md#log-events"
         },
         "otel": {
@@ -2974,7 +2974,7 @@
         "stats": {
           "mark": "✅",
           "text": "`stats()`, `peers()`, `hosted()`, observable gauges",
-          "source": "src/database.js:713-735; docs/guide/storage.md#health"
+          "source": "src/database.js:713-735; docs/guide/database.md#health"
         },
         "diagPII": {
           "mark": "✅",
@@ -3085,7 +3085,7 @@
         "importFromOtherDbs": {
           "mark": "❌",
           "text": "no importer and no JSON import; write records with `insert()`",
-          "source": "index.d.ts:1185; docs/guide/storage.md"
+          "source": "index.d.ts:1185; docs/guide/database.md"
         },
         "benchmarks": {
           "mark": "✅",
@@ -3309,7 +3309,7 @@
           "text": "`storage-dexie` (free, Dexie.js); native `storage-indexeddb` is Premium (Pro)",
           "note": "The free Dexie storage prints a console warning advertising Premium once per process, when a database is created, unless the Premium package's `setPremiumFlag()` is called; it also refuses indexes on fields that are not required (`DXE1`).",
           "source": "rxdb@17.6.0 src/plugins/storage-dexie/rx-storage-instance-dexie.ts:83-100; src/plugins/storage-dexie/rx-storage-dexie.ts:44; https://rxdb.info/rx-storage-dexie.html; https://rxdb.info/rx-storage-indexeddb.html; https://rxdb.info/premium/",
-          "detail": "Browser; in Node only through fake-indexeddb (in memory). The Dexie page says Premium IndexedDB stores attachments as binary instead of base64, but in 17.6.0 the Dexie storage also stores attachment Blobs (rx-storage-instance-dexie.ts:185-201). Premium IndexedDB's batched cursor, custom index strings, WAL-like mode and Storage Buckets support are from the docs (closed source, not checked)."
+          "detail": "Browser; in Node only through fake-indexeddb (in memory). The Dexie page says Premium IndexedDB stores attachments as binary instead of base64, but in 17.6.0 the Dexie storage also stores attachment Blobs (rx-storage-instance-dexie.ts:185-201). Premium IndexedDB's batched cursor, custom index strings, WAL-like mode and Database Buckets support are from the docs (closed source, not checked)."
         },
         "opfs": {
           "mark": "⚠️",
@@ -3428,7 +3428,7 @@
           "mark": "❌",
           "text": "none in the core; the storage's `QuotaExceededError` reaches the caller",
           "source": "rxdb@17.6.0 src (no QuotaExceeded handling); https://rxdb.info/articles/indexeddb-max-storage-limit.html; https://rxdb.info/rx-storage-indexeddb.html",
-          "detail": "The IndexedDB-limits article tells the app to catch QuotaExceededError and call navigator.storage.persist(); compression plugins reduce size; Premium IndexedDB accepts Storage Buckets."
+          "detail": "The IndexedDB-limits article tells the app to catch QuotaExceededError and call navigator.storage.persist(); compression plugins reduce size; Premium IndexedDB accepts Database Buckets."
         },
         "onDiskFormat": {
           "mark": "⚠️",

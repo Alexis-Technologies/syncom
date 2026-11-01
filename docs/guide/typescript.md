@@ -2,7 +2,7 @@
 
 The package ships hand-written types (`index.d.ts`, `browser.d.ts`, one
 `.d.ts` beside every subpath), checked by `tsd` against every signature
-this page shows. A storage is typed by what `open()` is given: a collection
+this page shows. A storage is typed by what `createDatabase()` is given: a collection
 per entity of the `schema`, the methods of every plugin in `plugins` — both
 inferred, no type arguments to pass. The records of a collection are typed
 by the schema too, two ways.
@@ -16,11 +16,11 @@ reads as, what it accepts is what a write takes.
 
 ```ts
 import { z } from 'zod';
-import { open } from '@alexify/syncom/all';
+import { createDatabase } from '@alexify/syncom/all';
 
 const Post = z.object({ title: z.string(), likes: z.number().default(0), tags: z.array(z.string()).default([]) });
 
-const storage = await open({ path: 'data', schema: { entities: { Post: { schema: Post, index: ['title'] } } } });
+const storage = await createDatabase({ path: 'data', schema: { entities: { Post: { schema: Post, index: ['title'] } } } });
 
 const post = await storage.Post.get(id); // { title: string; likes: number; tags: string[] } | null
 await storage.Post.insert({ title: 'Hello' }); // likes and tags have defaults: the input type
@@ -28,7 +28,7 @@ await storage.Post.update(id, { likes: 2 }); // Partial of the input
 await storage.Post.update(id, { title: 5 }); // error: title is a string
 const rows = await storage.Post.select({ likes: { $gt: 1 }, tags: 'news' }).order('title').fetch();
 rows[0].likes; // number — a row is the record under its id
-const record = await storage.Post.record(id);
+const record = await storage.Post.document(id);
 record.title; // string — one property per field
 ```
 
@@ -45,7 +45,7 @@ annotation; `shapes` is a phantom property the types alone read — nothing
 reads it at run time.
 
 ```ts
-import { open, type Schema } from '@alexify/syncom/all';
+import { createDatabase, type Schema } from '@alexify/syncom/all';
 
 interface Post {
   title: string;
@@ -56,7 +56,7 @@ interface Author {
 }
 
 const schema: Schema<{ Post: Post; Author: Author }> = { entities: { Post: { index: ['title'] }, Author: {} } };
-const storage = await open({ path: 'data', schema });
+const storage = await createDatabase({ path: 'data', schema });
 
 storage.Post; // SyncomCollection<Post>
 await storage.Author.get(id); // Author | null
@@ -71,11 +71,11 @@ refused where the schema is annotated.
 | Member | Type |
 | --- | --- |
 | `get(id, { at }?)` | `Promise<R \| null>` |
-| `insert(data)` | `data: I`; resolves to `SyncomRecord<R>` |
+| `insert(data)` | `data: I`; resolves to `SyncomDocument<R>` |
 | `set(id, data)` | `data: I` |
 | `update(id, delta)` | `delta: Partial<I> & PathFields` — the record's own fields, or any by path (`'profile/city'`) |
 | `select(query?)`, `count(query?)` | `MangoQuery<R>`: the record's fields, `id`, or any dotted path; a cursor of `QueryRow<R>` (`R & { id }`) |
-| `record(id)` | `SyncomRecord<R>`: the methods plus one property per field of `R`; `data()` is `R \| null`, `delta()` a `Partial<R>` |
+| `document(id)` | `SyncomDocument<R>`: the methods plus one property per field of `R`; `data()` is `R \| null`, `delta()` a `Partial<R>` |
 
 `R` is the record as it reads, `I` what a write takes — the same type
 unless a Standard Schema tells them apart. `MangoQuery<R>` matches a field
@@ -92,7 +92,7 @@ as an argument, or from the annotation of what they are assigned to.
 ```ts
 const post = await storage.get<Post>(id); // Post | null
 const same: Post | null = await storage.get(id);
-const record = await storage.record<Post>(id); // SyncomRecord<Post>
+const record = await storage.record<Post>(id); // SyncomDocument<Post>
 record.likes = 3;
 await record.save();
 storage.getCachedData<Post>(id); // Post | null, no I/O
@@ -106,7 +106,7 @@ nothing beyond that, as the collection's writes do under `RecordData`.
 
 ## Live records
 
-`SyncomRecord<R>` is the record's methods and one getter/setter per field
+`SyncomDocument<R>` is the record's methods and one getter/setter per field
 of `R` — a field named like a method (`data`, `save`, `index`, `block`…)
 is never a property; `data()` has it. A string field holding a known record
 id reads as a `Reference` at run time, whatever the type says. Under

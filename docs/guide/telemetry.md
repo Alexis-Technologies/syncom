@@ -13,24 +13,24 @@ and that is the point of the design, see
 
 The adapter that turns an OpenTelemetry api or tracer into what the engine
 records through is the `telemetry` plugin — `@alexify/syncom/telemetry`,
-registered by `@alexify/syncom/all`; without it `open({ telemetry: { api } })`
+registered by `@alexify/syncom/all`; without it `createDatabase({ telemetry: { api } })`
 is `PLUGIN_MISSING`, and a node that never traces ships none of the adapter.
 
 ```js
 const otelApi = require('@opentelemetry/api');
-const { open } = require('@alexify/syncom');
+const { createDatabase } = require('@alexify/syncom');
 const { telemetry } = require('@alexify/syncom/telemetry');
 
 // The api module: syncom derives its own tracer and meter, so spans carry
 // the `@alexify/syncom` instrumentation scope.
-const storage = await open({ path: 'data', plugins: [telemetry], telemetry: { api: otelApi } });
+const storage = await createDatabase({ path: 'data', plugins: [telemetry], telemetry: { api: otelApi } });
 
 // Or pre-built instances — either alone is fine.
-const traced = await open({ path: 'data', plugins: [telemetry], telemetry: { tracer, meter } });
+const traced = await createDatabase({ path: 'data', plugins: [telemetry], telemetry: { tracer, meter } });
 ```
 
 The core itself records through a **writer** — `enabled` and `withSpan`,
-duck-typed — and takes one given to `open({ telemetry })`, plugin or not,
+duck-typed — and takes one given to `createDatabase({ telemetry })`, plugin or not,
 contained: a recording method it lacks records nothing, one that throws is
 swallowed, and `withSpan` runs the work exactly once whatever the writer does
 around it — a writer never breaks or holds up a write. `createTelemetry({ api })`
@@ -133,7 +133,7 @@ appears on one.
 | `syncom.log.append.failures` | Counter | `{group}` | — (groups the log could not write — their seqs taken back, their writes rejected; also `log.append.failed`) |
 | `syncom.defer.flush.duration` | Histogram | `ms` | — (landing the deferred window: the records' files and one chain block; the next window is at least as long) |
 | `syncom.hook.duration` | Histogram | `ms` | `syncom.hook` (`beforeWrite` / `afterWrite` / `beforeApply` / `afterApply` — the hooks that run in the mutation queue; read and sync hooks are not timed) |
-| `syncom.lock.wait` | Histogram | `ms` | — (what `open()` spent taking the directory lock) |
+| `syncom.lock.wait` | Histogram | `ms` | — (what `createDatabase()` spent taking the directory lock) |
 | `syncom.hello.refused` | Counter | `{call}` | `syncom.code` (`400` / `403` / `409` / `428`) — calls a hosted unit refused before the handler |
 | `syncom.presence.refused` | Counter | `{entry}` | `syncom.reason` — on a host (`hello` / `rate` / `malformed` / `scope` / `forged` / `unsigned`: an update refused whole, never relayed) and on a receiver (`forged` / `unsigned` / `invalid` — malformed, past the bounds, not the sender's own, the room full: entries refused) |
 | `syncom.handle.flushes` | Counter | `{flush}` | `syncom.result` (`ok` / `unlogged` — nothing appended, the edits dropped / `error` — appended, a step after failed) — a text handle's flush (`openText()`) |
@@ -194,7 +194,7 @@ syncom.commit            (node A)
 ```js
 const otelApi = require('@opentelemetry/api');
 const { Server, WrpcClient, defineRouter } = require('@alexify/wrpc');
-const { open } = require('@alexify/syncom');
+const { createDatabase } = require('@alexify/syncom');
 const { sync } = require('@alexify/syncom/sync');
 const { createWrpcLink } = require('@alexify/syncom/wrpc');
 
@@ -202,12 +202,12 @@ const { telemetry: otel } = require('@alexify/syncom/telemetry');
 const telemetry = { api: otelApi };
 
 // the host
-const hub = await open({ path: 'hub', plugins: [sync, otel], telemetry });
+const hub = await createDatabase({ path: 'hub', plugins: [sync, otel], telemetry });
 const router = defineRouter({ syncom: hub.sync.unit({ access: 'public' }) });
 await new Server({ router, host: '0.0.0.0', port: 8000, protocol: 'http', telemetry }).listen();
 
 // a node
-const node = await open({
+const node = await createDatabase({
   path: 'node',
   plugins: [sync, otel],
   telemetry,
@@ -232,7 +232,7 @@ client spans are there.
 ## Timing
 
 `syncom.commit` and `syncom.apply` start when the write **runs**, not when it
-was queued: `Storage` serialises writes, and time spent waiting on an earlier
+was queued: `Database` serialises writes, and time spent waiting on an earlier
 write is the caller's contention, not this write's cost. They end after the
 `change` listeners have run, because that is what the caller awaits — a slow
 listener shows up in `syncom.write.duration`, and it should.
@@ -261,7 +261,7 @@ alert to key on:
 | info | `log.open.torn` | a journal's last line did not read: its append was never acknowledged, so nothing that was answered is lost |
 | error | `storage.unpersisted` | logged ops whose record files could not be written, held in memory until the next open (`ids`, the first 32, and `count`); also an `error` event (`UNPERSISTED`) |
 | warn | `storage.piece.unremoved` | a piece of a large record (`<id>~<n>.json`) its file no longer names could not be removed (`id`, `name`): left on disk, written over when the record's counter reaches it again |
-| warn | `catalog.skipped`, `catalog.lens`, `catalog.save`, `catalog.search`, `snapshot.skipped` (`reason: 'scope'` when the scope function threw on the record), `replay.skipped`, `record.shadowed`, `record.refresh` | derived state could not follow a record (`catalog.search`: the injected text index threw); a field shadowing a method; a live `Record` not refreshed after a change, a read hook having thrown |
+| warn | `catalog.skipped`, `catalog.lens`, `catalog.save`, `catalog.search`, `snapshot.skipped` (`reason: 'scope'` when the scope function threw on the record), `replay.skipped`, `record.shadowed`, `record.refresh` | derived state could not follow a record (`catalog.search`: the injected text index threw); a field shadowing a method; a live `Document` not refreshed after a change, a read hook having thrown |
 | warn | `listener.error`, `watch.error`, `schema.drift` | an event listener or a watcher threw; two builds of one schema version |
 | warn | `handle.unlogged` | a text handle's flush (`openText()`) could not be logged — the append failed, a hook or a validator refused — and its edits were dropped (`id`, `field`, `edits`); written whether or not anything listens to the handle |
 | warn | `edits.unlogged` | `close()` flushed every open text handle and some could not be logged (`handles`, `edits`); the storage closes all the same |

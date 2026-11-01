@@ -255,7 +255,7 @@ as the evidence, never deleted; one that does not parse was torn by its
 own write, never acknowledged, and is dropped (`log.open.torn`). A file
 that reads as JSON without its checksum is not whole: unreadable, as one
 that fails it. A file that is there and cannot be read at all — an I/O
-error, not a missing file — fails `open()` with `CORRUPT`: an open that went
+error, not a missing file — fails `createDatabase()` with `CORRUPT`: an open that went
 on without it could hand its seqs out again.
 
 A segment is read whole or not at all: every line checks on its own, and

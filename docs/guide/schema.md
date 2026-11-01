@@ -8,7 +8,7 @@ contract, not a library: anything that implements
 validator function, or any object a `validator` you inject can compile.
 Nothing is installed alongside it. The schema is the `schema` plugin —
 `@alexify/syncom/schema`, registered by `@alexify/syncom/all`; the core alone
-refuses `open({ schema })` and `open({ validator })` with `PLUGIN_MISSING`,
+refuses `createDatabase({ schema })` and `createDatabase({ validator })` with `PLUGIN_MISSING`,
 and its records are untyped. The examples on this page open the core with it.
 In TypeScript a Standard Schema's `~standard.types` type the collection's
 records, and `Schema<Shapes>` types them for any other validator — see
@@ -24,7 +24,7 @@ and `unique: true` fields, the id key by the kind's own convention, and the
 snapshot for versioning.
 
 ```js
-const { open } = require('@alexify/syncom');
+const { createDatabase } = require('@alexify/syncom');
 const { schema } = require('@alexify/syncom/schema');
 const { Model } = require('@alexify/metaschema');
 
@@ -46,7 +46,7 @@ const model = new Model(
   ]),
 );
 
-const storage = await open({
+const storage = await createDatabase({
   plugins: [schema],
   path: 'data',
   schema: {
@@ -98,13 +98,13 @@ The entity's `schema` may be:
 - **a function** — an ajv-compiled validator (`false` and `fn.errors`), or
   any function that throws on a bad value and returns the value, or
   nothing, on a good one;
-- **a plain object** with `open({ validator })` — a JSON Schema or TypeBox
+- **a plain object** with `createDatabase({ validator })` — a JSON Schema or TypeBox
   object: `validator.compile(schema, { entity })` returns the function above.
   An Ajv instance fits as it is.
 
 ```js
 const ajv = new Ajv();
-const storage = await open({
+const storage = await createDatabase({
   path: 'data',
   validator: ajv,                                    // compile(schema) → a validator
   schema: {
@@ -176,7 +176,7 @@ went from a v1 with `title` to the v2 with `name: { aliases: ['title'] }` and
 `'desc?': { default: '' }`:
 
 ```js
-const upgraded = await open({ path: 'data', schema: { version: 2, snapshot: model.toJSON(), entities } });
+const upgraded = await createDatabase({ path: 'data', schema: { version: 2, snapshot: model.toJSON(), entities } });
 
 upgraded.schemaInfo.previous;      // { version: 1, hash: '…' } — this directory ran v1
 await upgraded.get(legacy);        // { name: 'Old', slug: 'old', orgId: 'org1', desc: '', $type: 'Project' }
@@ -186,7 +186,7 @@ upgraded.getCachedData(legacy);    // { title: 'Old', slug: 'old', orgId: 'org1'
 What an alias cannot express is a migration:
 
 ```js
-const storage = await open({
+const storage = await createDatabase({
   path: 'data',
   schema: {
     version: 2,
@@ -206,7 +206,7 @@ validator. `lens: 'migrations'` or `'validate'` picks one step (the default
 `migrations`).
 
 The lens applies everywhere a record is read as a record — `get()`,
-`swap()`, the [query layer](./query), a `Record` as it loads and as it
+`swap()`, the [query layer](./query), a `Document` as it loads and as it
 follows a change — and to what a write is validated against;
 `snapshot()`, `getCachedData()` and replication stay raw.
 
@@ -257,17 +257,17 @@ compatibility(diff(previousModel, model)); // 'full' | 'backward' | 'forward' | 
 
 | Option | Where | Meaning |
 | --- | --- | --- |
-| `schema.version` | `open({ schema })` | A positive integer, default 1; on every op as `v` |
-| `schema.snapshot` | `open({ schema })` | Any JSON describing the schema (`model.toJSON()`); hashed, in hello |
-| `schema.entities[name]` | `open({ schema })` | `{ schema?, idField?, validate?, index?, unique?, fields?, search? }`; `{}` is a bare collection |
-| `schema.entities[name].search` | `open({ schema })` | Field paths `$text` searches; explicit for every validator, never read off a schema; needs `open({ search })` — see [Full-text search](./query#full-text-search) |
-| `schema.migrations` | `open({ schema })` | `{ [toVersion]: { up } \| { [entity]: { up } } }` |
-| `schema.ahead` | `open({ schema })` | `'apply'` (default) or `'hold'` |
-| `schema.lens` | `open({ schema })` | `'both'` (default), `'migrations'`, `'validate'` |
-| `validator` | `open({ validator })` | `{ compile(schema, { entity }) }` for plain-object schemas |
+| `schema.version` | `createDatabase({ schema })` | A positive integer, default 1; on every op as `v` |
+| `schema.snapshot` | `createDatabase({ schema })` | Any JSON describing the schema (`model.toJSON()`); hashed, in hello |
+| `schema.entities[name]` | `createDatabase({ schema })` | `{ schema?, idField?, validate?, index?, unique?, fields?, search? }`; `{}` is a bare collection |
+| `schema.entities[name].search` | `createDatabase({ schema })` | Field paths `$text` searches; explicit for every validator, never read off a schema; needs `createDatabase({ search })` — see [Full-text search](./query#full-text-search) |
+| `schema.migrations` | `createDatabase({ schema })` | `{ [toVersion]: { up } \| { [entity]: { up } } }` |
+| `schema.ahead` | `createDatabase({ schema })` | `'apply'` (default) or `'hold'` |
+| `schema.lens` | `createDatabase({ schema })` | `'both'` (default), `'migrations'`, `'validate'` |
+| `validator` | `createDatabase({ validator })` | `{ compile(schema, { entity }) }` for plain-object schemas |
 | `storage.check(entity, data)` | — | The validator's value, nothing written |
 | `storage.schemaInfo` | — | `{ version, hash, previous, held }` |
 | `storage.migrate(options?)` | — | `{ migrated, counters, sets, lists, texts, trees }` — how many records, then how many fields of each kind made again |
 
-See [Storage](./storage#collections) for `$type` and the collection
+See [Database](./database#collections) for `$type` and the collection
 methods, and [Sync](./sync#schemas) for what hello carries.

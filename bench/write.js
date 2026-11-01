@@ -31,7 +31,7 @@ const { bench } = require('./support/harness.js');
 const { profile, print } = require('./support/profile.js');
 
 const ROOT = process.env.SYNCOM_BENCH_ROOT ? path.resolve(process.env.SYNCOM_BENCH_ROOT) : path.join(__dirname, '..');
-const { open } = require(path.join(ROOT, 'index.js'));
+const { createDatabase } = require(path.join(ROOT, 'index.js'));
 const { text } = require(path.join(ROOT, 'src', 'text', 'text.js'));
 const { sync } = require(path.join(ROOT, 'src', 'sync', 'sync.js'));
 const { memory } = require(path.join(ROOT, 'src', 'memory', 'memory.js'));
@@ -54,12 +54,18 @@ const dirs = [];
 const storageOn = async (line) => {
   if (line === 'memory') {
     const fsi = memory();
-    const storage = await open({ path: '/bench/write', fsi, logger: false, lock: false, plugins: [text, sync] });
+    const storage = await createDatabase({
+      path: '/bench/write',
+      fsi,
+      logger: false,
+      lock: false,
+      plugins: [text, sync],
+    });
     return { storage, fsi };
   }
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'syncom-bench-write-'));
   dirs.push(dir);
-  const storage = await open({ path: dir, logger: false, lock: false, plugins: [text, sync] });
+  const storage = await createDatabase({ path: dir, logger: false, lock: false, plugins: [text, sync] });
   return { storage, fsi: null };
 };
 

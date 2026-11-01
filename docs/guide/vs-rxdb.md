@@ -110,25 +110,25 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 
 | RxDB | syncom |
 | --- | --- |
-| `createRxDatabase({ name, storage })` | `open({ path, fsi })` |
+| `createRxDatabase({ name, storage })` | `createDatabase({ path, fsi })` |
 | `RxStorage` (Dexie, memory, Premium OPFS…) | an `fsi`: five file functions (`node:fs`, OPFS, IndexedDB, memory) |
-| `addCollections({ todos: { schema } })` | `open({ schema: { entities: { Todo: { schema } } } })` → `storage.Todo` |
+| `addCollections({ todos: { schema } })` | `createDatabase({ schema: { entities: { Todo: { schema } } } })` → `storage.Todo` |
 | `primaryKey` field of the document | the record id, outside the data (`getId`, or `set(id, data)`) |
 | `validate-ajv` storage wrapper | an entity `schema` (Standard Schema, a function, or `validator.compile()`), on by default |
 | `version` + `migrationStrategies`, per collection | `schema.version` + `schema.migrations`, per storage: a lens on read, `migrate()` to rewrite |
-| `RxDocument` | a live `Record` (`storage.record(id)`) or a JSON copy (`get(id)`) |
+| `RxDocument` | a live `Document` (`storage.document(id)`) or a JSON copy (`get(id)`) |
 | `insert()` / `upsert()` | `insert()` (id generated) / `set(id, data)` |
-| `patch()` / `incrementalPatch()` | `update(id, delta)`, or a `Record`'s fields and `save()` |
+| `patch()` / `incrementalPatch()` | `update(id, delta)`, or a `Document`'s fields and `save()` |
 | a stale `_rev` throws 409 | `swap(id, changes, prev)`, compared inside the write queue |
 | `$inc` (merges only with the `crdt` plugin) | `inc(id, field, n)`, merges always |
 | `$addToSet` / `$pullAll` | `add()` / `remove()`: an observed-remove set |
 | `remove()` → `_deleted`, then the `cleanup` plugin | `delete()` → a tombstone; `purge(id)` erases the payload from the log |
 | `collection.find(query).exec()` | `collection.select(query).fetch()` |
-| `findOne(id)` | `get(id)` / `record(id)` |
+| `findOne(id)` | `get(id)` / `document(id)` |
 | `sort`, `skip`, `limit` | `order()` / `desc()`, `offset()`, `limit()` |
 | schema `indexes` | entity `index`, and `unique` |
 | `query.$` | `cursor.watch(listener)` |
-| `doc.$` / `collection.$` | a `Record`'s `update` event / the storage's `change` event |
+| `doc.$` / `collection.$` | a `Document`'s `update` event / the storage's `change` event |
 | Premium full-text search (FlexSearch) | `$text` with `createSearch()` from `@alexify/syncom/search` |
 | `preInsert` / `preSave` / `preRemove` hooks | `beforeWrite(ctx)` |
 | `postInsert` / `postSave` / `postRemove` hooks | `afterWrite(ctx, op)` |
@@ -193,7 +193,7 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr><td>Tauri</td><td>❌ not documented or tested</td><td>⚠️ SQLite storage with <code>getSQLiteBasicsTauri()</code>: Premium, or the capped free trial</td></tr>
 <tr><td>Flutter</td><td>❌ none</td><td>⚠️ <code>rxdb/plugins/flutter</code> runs RxDB in QuickJS; its recipe needs the removed LokiJS storage<sup>6</sup></td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Tabs and instances</strong></td></tr>
-<tr><td>Several tabs on one database</td><td>⚠️ one tab per storage: <code>open()</code> holds a Web Lock, a second tab gets <code>LOCKED</code><sup>7</sup></td><td>✅ <code>multiInstance: true</code> (default): every tab opens it; changes cross over BroadcastChannel</td></tr>
+<tr><td>Several tabs on one database</td><td>⚠️ one tab per storage: <code>createDatabase()</code> holds a Web Lock, a second tab gets <code>LOCKED</code><sup>7</sup></td><td>✅ <code>multiInstance: true</code> (default): every tab opens it; changes cross over BroadcastChannel</td></tr>
 <tr><td>Leader election</td><td>⚠️ no election API; <code>lock: 'wait'</code> hands the storage to the next tab</td><td>✅ <code>rxdb/plugins/leader-election</code>: <code>waitForLeadership()</code>, <code>isLeader()</code>; Web Locks when available</td></tr>
 </tbody>
 </table>
@@ -244,7 +244,7 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr><td>On-disk format</td><td>✅ plain JSON files: <code>data/&lt;id&gt;.json</code>, log batches, chain blocks, keys</td><td>⚠️ per storage: JSON documents with <code>_rev</code>, <code>_meta</code> (Dexie, localStorage, SQLite, MongoDB); Premium formats undocumented</td></tr>
 <tr><td>Files written per change</td><td>one log line per group of appends (a journal, where the backend appends; a file per group where it does not); the record file and its chain block once per deferred window (16 ms)</td><td>one document row per write, plus the storage's index entries</td></tr>
 <tr><td>Compression</td><td>❌ none</td><td>✅ <code>key-compression</code> wrapper (schema-derived short keys); <code>attachments-compression</code> (gzip/deflate)</td></tr>
-<tr><td>In-memory document cache</td><td>✅ <code>cache: { max: 5000 }</code> entries; a live <code>Record</code> pins its own (WeakRef)</td><td>✅ <code>DocumentCache</code> per collection: RxDocuments by revision, held by WeakRef</td></tr>
+<tr><td>In-memory document cache</td><td>✅ <code>cache: { max: 5000 }</code> entries; a live <code>Document</code> pins its own (WeakRef)</td><td>✅ <code>DocumentCache</code> per collection: RxDocuments by revision, held by WeakRef</td></tr>
 <tr><td>Attachments / binary data</td><td>❌ none: JSON records only, no binary type</td><td>✅ <code>attachments</code> plugin: Blobs per document, <code>putAttachment()</code>, <code>getData()</code><sup>17</sup></td></tr>
 <tr><td>Local (non-replicated) documents</td><td>⚠️ only encrypted records stay local; no plain local documents</td><td>✅ <code>local-documents</code>: <code>insertLocal()</code>, <code>getLocal$()</code>; not replicated, no schema</td></tr>
 <tr><td>Tombstone cleanup</td><td>❌ none: a tombstone keeps its file (data emptied) and catalog row</td><td>✅ <code>cleanup</code> plugin: purges tombstones after 31 days, once replications are in sync</td></tr>
@@ -274,7 +274,7 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr class="sc-matrix-group"><td colspan="3"><strong>Documents and collections</strong></td></tr>
 <tr><td>Data model</td><td>JSON records addressed by id; collections optional (<code>$type</code>)</td><td>JSON documents; every collection has a JSON Schema</td></tr>
 <tr><td>Records without a schema</td><td>✅ no schema needed; <code>{}</code> is a bare collection</td><td>⚠️ schema required; an open <code>type: 'object'</code> sub-field, RxState or local docs</td></tr>
-<tr><td>Collection names</td><td>✅ any non-empty string the storage does not answer to (<code>get</code>, <code>close</code>… refused at <code>open()</code>)</td><td>✅ never shadows database members; regex checked in dev-mode</td></tr>
+<tr><td>Collection names</td><td>✅ any non-empty string the storage does not answer to (<code>get</code>, <code>close</code>… refused at <code>createDatabase()</code>)</td><td>✅ never shadows database members; regex checked in dev-mode</td></tr>
 <tr><td>Field names</td><td>✅ any JSON key; <code>__proto__</code> ignored, <code>$type</code> reserved</td><td>⚠️ letters, digits, <code>_</code>; no leading <code>_</code>; no RxDocument member names</td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Identity</strong></td></tr>
 <tr><td>Primary key</td><td>✅ the record id, outside the data; the validator sees it under <code>idField</code></td><td>✅ a top-level string field named by <code>primaryKey</code> (<code>_id</code> allowed)</td></tr>
@@ -326,12 +326,12 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr class="sc-matrix-group"><td colspan="3"><strong>Revisions, deletes and document objects</strong></td></tr>
 <tr><td>Per-record metadata</td><td><code>meta</code>: per-field <code>[ts, origin]</code>, reset stamp, tombstone, counters, sets, <code>v</code></td><td><code>_rev</code> (height-token, local), <code>_meta.lwt</code>, <code>_deleted</code>, <code>_attachments</code></td></tr>
 <tr><td>Delete</td><td>✅ tombstone with empty data; a newer write revives the record</td><td>✅ <code>_deleted: true</code> with the full data until <code>cleanup</code>; re-insert revives</td></tr>
-<tr><td>Document objects</td><td>✅ <code>record(id)</code>: one live, editable <code>Record</code> per id, refreshed on any change</td><td>✅ <code>RxDocument</code>: read-only snapshot per revision; <code>getLatest()</code>, <code>$</code></td></tr>
-<tr><td>Same object for the same record</td><td>✅ one <code>Record</code> per id while referenced (WeakRef); <code>get()</code> returns new copies</td><td>✅ one <code>RxDocument</code> per revision while referenced (WeakRef cache)</td></tr>
+<tr><td>Document objects</td><td>✅ <code>document(id)</code>: one live, editable <code>Document</code> per id, refreshed on any change</td><td>✅ <code>RxDocument</code>: read-only snapshot per revision; <code>getLatest()</code>, <code>$</code></td></tr>
+<tr><td>Same object for the same record</td><td>✅ one <code>Document</code> per id while referenced (WeakRef); <code>get()</code> returns new copies</td><td>✅ one <code>RxDocument</code> per revision while referenced (WeakRef cache)</td></tr>
 <tr><td>Editing returned data</td><td>✅ JSON copies in and out; editing them changes nothing</td><td>⚠️ deep-frozen in dev-mode only; production <code>toJSON()</code> shares nested objects<sup>29</sup></td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Relations and higher-level APIs</strong></td></tr>
 <tr><td>ORM methods</td><td>❌ none</td><td>✅ <code>statics</code>, <code>methods</code>, <code>attachments</code> per collection</td></tr>
-<tr><td>References between records</td><td>⚠️ a <code>Record</code> turns any string equal to a known id into a <code>Reference</code><sup>30</sup></td><td>✅ schema <code>ref</code> with <code>populate()</code> or the <code>field_</code> getter; one or many</td></tr>
+<tr><td>References between records</td><td>⚠️ a <code>Document</code> turns any string equal to a known id into a <code>Reference</code><sup>30</sup></td><td>✅ schema <code>ref</code> with <code>populate()</code> or the <code>field_</code> getter; one or many</td></tr>
 <tr><td>Persistent app state</td><td>❌ none</td><td>✅ <code>state</code> plugin (RxState): schemaless JSON, modifier writes, replicable</td></tr>
 <tr><td>Derived collections</td><td>❌ none; <code>afterWrite</code>, <code>change</code> and <code>watch()</code> are not checkpointed</td><td>✅ <code>pipeline</code> plugin: leader-run handler, checkpointed, blocks the destination</td></tr>
 <tr><td>Stored procedures</td><td>⚠️ <code>@alexify/syncom/contracts</code>: arrow functions stored in the chain, run by <code>new Function</code><sup>31</sup></td><td>❌ none</td></tr>
@@ -376,13 +376,13 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr><td>Skip and limit</td><td>✅ <code>offset(n)</code>, <code>limit(n)</code>; an unordered cursor stops reading at enough matches</td><td>✅ <code>skip</code>, <code>limit</code>; <code>findOne()</code> refuses a <code>limit</code> (QU6)</td></tr>
 <tr><td>Streaming cursor / keyset paging</td><td>❌ <code>for await</code> yields an already fetched array; keyset paging by hand</td><td>❌ <code>exec()</code> returns the whole page; keyset paging by hand (<code>$gt</code> on the sort key)</td></tr>
 <tr><td>Count queries</td><td>✅ <code>count(query)</code> for any query; from the catalog alone when every field is indexed</td><td>⚠️ a selector no index satisfies throws <code>QU14</code> on Dexie (every storage in dev-mode) unless <code>allowSlowCount: true</code></td></tr>
-<tr><td>Find by id</td><td>✅ <code>get(id)</code> (a copy), <code>record(id)</code> (a live Record); <code>hasRecord(id)</code>; a collection's <code>get</code> only its own</td><td>✅ <code>findOne(id)</code>: document cache first, then <code>findDocumentsById()</code></td></tr>
+<tr><td>Find by id</td><td>✅ <code>get(id)</code> (a copy), <code>document(id)</code> (a live Document); <code>hasRecord(id)</code>; a collection's <code>get</code> only its own</td><td>✅ <code>findOne(id)</code>: document cache first, then <code>findDocumentsById()</code></td></tr>
 <tr><td>Find many by id</td><td>❌ no batch get; <code>select({ id: { $in } })</code> reads the whole collection</td><td>✅ <code>findByIds(ids)</code> → <code>Map</code>, observable like any query</td></tr>
 <tr><td>First match</td><td>✅ <code>cursor.one()</code> → the row or <code>null</code></td><td>✅ <code>findOne(query)</code>; <code>exec(true)</code> throws when nothing matches</td></tr>
 <tr><td>Projection (select fields)</td><td>✅ <code>projection(fields)</code>; answered from the catalog when they are indexed</td><td>❌ always whole documents, by design; a <code>fields</code> key is QU11 in dev-mode</td></tr>
 <tr><td>What a query returns</td><td>plain JSON copies <code>{ id, ...data }</code>, the lens applied; new objects per <code>fetch()</code></td><td><code>RxDocument</code> instances, one per revision, shared across queries</td></tr>
 <tr><td>Aggregation and group-by</td><td>❌ none; compute over <code>fetch()</code> rows</td><td>❌ none, by design</td></tr>
-<tr><td>Joins and cross-collection queries</td><td>❌ a cursor reads one collection; <code>Reference.record()</code> follows one id</td><td>❌ one collection per query; <code>populate()</code> follows one ref</td></tr>
+<tr><td>Joins and cross-collection queries</td><td>❌ a cursor reads one collection; <code>Reference.document()</code> follows one id</td><td>❌ one collection per query; <code>populate()</code> follows one ref</td></tr>
 <tr><td>Query on encrypted data</td><td>❌ an <code>{ encrypted: true }</code> record is listed, never a query row</td><td>❌ encrypted fields cannot be queried; an <code>$eq</code> on one silently matches nothing</td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Indexes and planning</strong></td></tr>
 <tr><td>Secondary indexes</td><td>✅ entity <code>index: ['field', …]</code>, or read off a metaschema schema</td><td>✅ schema <code>indexes: ['f', ['a', 'b']]</code></td></tr>
@@ -409,7 +409,7 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr><td>Emits only when the result changed</td><td>❌ the listener runs after any change to the collection, same rows or not</td><td>✅ an unchanged result is not emitted</td></tr>
 <tr><td>Live count</td><td>❌ no; <code>watch()</code> hands rows (<code>rows.length</code>)</td><td>✅ <code>count().$</code>, adjusted from each change event without a re-count</td></tr>
 <tr><td>Collection change stream</td><td>⚠️ storage-wide <code>change</code> event <code>(op, via)</code>; no per-collection stream</td><td>✅ <code>collection.$</code>, <code>insert$</code>, <code>update$</code>, <code>remove$</code>; <code>database.$</code></td></tr>
-<tr><td>Document observable</td><td>✅ a live <code>Record</code> emits <code>update (data, delta)</code>, <code>null</code> once deleted</td><td>✅ <code>doc.$</code>, <code>doc.get$(path)</code> / <code>doc.field$</code>, <code>doc.deleted$</code></td></tr>
+<tr><td>Document observable</td><td>✅ a live <code>Document</code> emits <code>update (data, delta)</code>, <code>null</code> once deleted</td><td>✅ <code>doc.$</code>, <code>doc.get$(path)</code> / <code>doc.field$</code>, <code>doc.deleted$</code></td></tr>
 <tr><td>Reactivity primitive</td><td>✅ a store (<code>/store</code>): <code>subscribe</code> with Svelte's contract, <code>getSnapshot</code> stable for React</td><td>✅ RxJS observables (<code>$</code>); a <code>reactivity</code> factory turns them into signals or refs (<code>$$</code>)</td></tr>
 <tr><td>Peer writes in live results</td><td>✅ a peer's ops and snapshot pages wake <code>watch()</code>; a batch is one run</td><td>✅ replicated writes go through the collection's event stream, so <code>$</code> updates</td></tr>
 </tbody>
@@ -580,9 +580,9 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr><td>Read hooks</td><td>⚠️ <code>beforeRead</code> / <code>afterRead</code> wrap <code>get()</code>; queries and snapshots read raw<sup>67</sup></td><td>❌ none; <code>postCreate</code> runs when a document object is built</td></tr>
 <tr><td>Refusal and error events</td><td>✅ <code>error</code> with a code per refused peer op; <code>conflict</code>; host <code>refused</code>, <code>hello</code></td><td>✅ replication <code>error$</code> (<code>RC_PULL</code>, <code>RC_PUSH</code>), <code>conflict$</code>; rejected local writes throw</td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Extensibility and operations</strong></td></tr>
-<tr><td>Plugin system</td><td>✅ <code>open({ plugins })</code>, per instance, nothing global: the kinds (<code>/text</code>, <code>/tree</code>) and the blocks (<code>/signing</code>, <code>/chain</code>, <code>/sync</code>, <code>/schema</code>, <code>/query</code>, …); a missing one is <code>PLUGIN_MISSING</code></td><td>✅ <code>addRxPlugin()</code>: prototypes, overwritables and 24 plugin hooks<sup>68</sup></td></tr>
+<tr><td>Plugin system</td><td>✅ <code>createDatabase({ plugins })</code>, per instance, nothing global: the kinds (<code>/text</code>, <code>/tree</code>) and the blocks (<code>/signing</code>, <code>/chain</code>, <code>/sync</code>, <code>/schema</code>, <code>/query</code>, …); a missing one is <code>PLUGIN_MISSING</code></td><td>✅ <code>addRxPlugin()</code>: prototypes, overwritables and 24 plugin hooks<sup>68</sup></td></tr>
 <tr><td>Typed errors</td><td>✅ <code>SyncomError.code</code>: 44 codes, plus 3 on <code>TypeError</code>s; full messages</td><td>✅ <code>RxError.code</code>: 215 codes; the message text only with <code>dev-mode</code></td></tr>
-<tr><td>Logging</td><td>✅ <code>open({ logger })</code>: a Console, a pino-shaped logger or <code>false</code>; named events</td><td>⚠️ Premium <code>logger</code> storage wrapper (Pro Plus); the core logs nothing</td></tr>
+<tr><td>Logging</td><td>✅ <code>createDatabase({ logger })</code>: a Console, a pino-shaped logger or <code>false</code>; named events</td><td>⚠️ Premium <code>logger</code> storage wrapper (Pro Plus); the core logs nothing</td></tr>
 <tr><td>OpenTelemetry</td><td>✅ spans and metrics through an injected API; no OpenTelemetry dependency</td><td>❌ none</td></tr>
 <tr><td>Health and stats</td><td>✅ <code>stats()</code>, <code>peers()</code>, <code>hosted()</code>, observable gauges</td><td>❌ no stats API; replication states have <code>active$</code> and <code>awaitInSync()</code></td></tr>
 <tr><td>Personal data in diagnostics</td><td>✅ no id, origin, scope or key as a metric label; <code>includeIdentity: false</code> for spans</td><td>⚠️ error messages embed their parameters: documents, pushed rows, password hashes<sup>69</sup></td></tr>
@@ -667,7 +667,7 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 25. A counter that one node resets while another increments it does not converge to the intuitive value; see Guarantees and limits in the Sync guide.
 26. The document grows with every write: 200 <code>$inc</code> left 201 op rows, about 18 KB (checked by running), and every replica stores and transfers them.
 27. Checked by running: <code>upsert()</code> over a CRDT document reset its op list to one entry, <code>incrementalUpsert()</code> dropped the CRDT field, and with the <code>update</code> plugin added after <code>crdt</code>, <code>update()</code> wrote outside the ops. Dev-mode stops the last two, not <code>upsert()</code>.
-28. Storage does not replicate through them, and <code>merge({ hits: 10 }, diff({ hits: 10 }, { hits: 3 }))</code> is 13: a delta is not a plain patch.
+28. Database does not replicate through them, and <code>merge({ hits: 10 }, diff({ hits: 10 }, { hits: 3 }))</code> is 13: a delta is not a plain patch.
 29. Checked by running without dev-mode: editing <code>toJSON().nested</code> changed the cached document (and the memory storage's copy), though the docs call <code>toJSON()</code> immutable.
 30. Nothing declares the relation, so an unrelated string that matches an id becomes a <code>Reference</code> too (checked by running).
 31. Load contracts only from a chain you control; the parser takes a single arrow function, and the result is written with <code>saveData()</code>.

@@ -49,7 +49,7 @@ src/versions/api.js      the versions API — get(id, { at }), history, diff/res
   refuses (`UNPERSISTED`) while a record is held — its file is behind the
   cache and a copy from memory would carry no block to verify; a record held
   since the tag reads as its file, still the tag's state. An unreadable
-  `tags.json` never fails `open()` (`tags.corrupt.json`, `stats().tags`,
+  `tags.json` never fails `createDatabase()` (`tags.corrupt.json`, `stats().tags`,
   `take()` refuses `CORRUPT`, the copies wait under `tags/.pending/data/` for
   the next good open); never rebuild `tags.json` from the disk — fsi lists
   files, not directories. Every purge path goes through `core.scrub` (log +

@@ -67,7 +67,7 @@ delta produced by `diff` is **not** interchangeable with a plain object patch
 when numeric fields are involved. `diff({ hits: 10 }, { hits: 3 })` yields
 `{ hits: 3 }`, and merging that gives `13`.
 
-For absolute numeric values, write them through `Storage.set` rather than
+For absolute numeric values, write them through `Database.set` rather than
 routing them through `merge`.
 :::
 
@@ -82,7 +82,7 @@ or whose `type` is unrecognised, are skipped.
 | --- | --- |
 | `write` | replaces the state with `record.data` — a full record write; a bare `write` without data copies the state forward |
 | `delta` | `merge(state, record.data)` |
-| `delete` | sets `record.key` to `undefined` — the key stays on the object and is gone from its JSON; without a `key` (Storage's `{ type: 'delete', id }`) the record is gone and the state becomes `{}` |
+| `delete` | sets `record.key` to `undefined` — the key stays on the object and is gone from its JSON; without a `key` (Database's `{ type: 'delete', id }`) the record is gone and the state becomes `{}` |
 | `inc` | adds `record.value` to `record.key` |
 | `dec` | subtracts `record.value` from `record.key` |
 
@@ -97,7 +97,7 @@ apply({ hits: 0 }, [
 
 ## Where storage uses them
 
-Storage does **not** replicate through `merge`. Its writes are typed
+Database does **not** replicate through `merge`. Its writes are typed
 operations — `write`, `set`, `inc`, `add`, `remove`, `splice`, `assign`,
 `move`, `mark`, `tree`, `delete`, `purge` — applied with last-writer-wins
 registers, per-origin counters, observed-remove sets, sequences for lists and

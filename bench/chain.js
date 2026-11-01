@@ -1,6 +1,6 @@
 /**
  * `Blockchain` — the integrity log every write goes through. `addBlock` is on
- * the write path of every `Storage.saveData`, and it costs one hash plus TWO
+ * the write path of every `Database.saveData`, and it costs one hash plus TWO
  * file writes (the block, then the rewritten tail pointer), so it is
  * filesystem-bound rather than crypto-bound.
  *

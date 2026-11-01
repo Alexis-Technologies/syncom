@@ -21,7 +21,7 @@ an op reaches a node once, whichever links carried it.
 ## The shape
 
 ```js
-import { open } from '@alexify/syncom';
+import { createDatabase } from '@alexify/syncom';
 import { sync } from '@alexify/syncom/sync';
 import { createWrpcLink } from '@alexify/syncom/wrpc';
 import { connect } from '@alexify/wrpc';
@@ -29,9 +29,9 @@ import { WrpcPeer, wrpcSignaler, defineRouter } from '@alexify/wrpc/webrtc';
 
 const HUB = 'wss://hub.example.com/api';
 const client = await connect(HUB, { headers: { authorization: `Bearer ${token}` } });
-let peer = null; // made after open(): its router mounts the storage's unit
+let peer = null; // made after createDatabase(): its router mounts the storage's unit
 
-const storage = await open({
+const storage = await createDatabase({
   path: 'app',
   plugins: [sync],
   sync: {

@@ -14,7 +14,7 @@ way they reach any peer, and a client of hub 2 receives them from there.
 
 ```js
 // every hub process: a full node, the same schema and snapshot
-const hub = await open({ path: '/var/lib/syncom', schema, sync: { connect } });
+const hub = await createDatabase({ path: '/var/lib/syncom', schema, sync: { connect } });
 await hub.sync.addNode({ url: 'wss://hub-2.internal/api', scopes: ['*'] });
 defineRouter({ syncom: hub.sync.unit({ access: 'session', authorize, limits, meta }) });
 ```
@@ -34,7 +34,7 @@ Kafka), every hub appending what it accepts and serving `changes` from the
 stream, so a client resumes on any hub. The contract is reserved as
 `SharedLog` (`append`, `read`, `parseId` — the shape of wrpc's
 `BrokerLog`, so a broker's `.log` fits with no adapter; `isSharedLog()`
-checks it) and `open({ sync: { sharedLog } })` is refused until that mode
+checks it) and `createDatabase({ sync: { sharedLog } })` is refused until that mode
 exists.
 
 ## Scopes as buckets
@@ -119,8 +119,8 @@ same updates travel over the mesh.
 
 ## Several tabs
 
-Two tabs are two instances, and `open()` is exclusive per directory
-([why](./storage#one-instance-per-directory)): the second tab sees
+Two tabs are two instances, and `createDatabase()` is exclusive per directory
+([why](./database#one-instance-per-directory)): the second tab sees
 `code: 'LOCKED'`. The connection is easy to share — a SharedWorker running
 wrpc's `WrpcClientProxy` holds one WebSocket, and every tab's
 `connect(url, { worker })` goes through it — but the storage is not: a

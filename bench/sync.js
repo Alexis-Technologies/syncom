@@ -17,7 +17,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { bench } = require('./support/harness.js');
-const { open } = require('../src/all/all.js');
+const { createDatabase } = require('../src/all/all.js');
 const { MemoryLink } = require('../tests/utils/memory-link.js');
 const { PROTOCOL } = require('../src/sync/protocol.js');
 
@@ -29,7 +29,7 @@ const createNodes = async (root, names, options = {}) => {
   const connect = (node) => new MemoryLink(units.get(node.url.slice('mem://'.length)));
   const nodes = new Map();
   for (const name of names) {
-    const storage = await open({
+    const storage = await createDatabase({
       path: path.join(root, name),
       logger: false,
       ...options,
@@ -102,7 +102,7 @@ const main = async () => {
       async () => {
         const dir = path.join(root, `joiner-${++joins}`);
         const connect = () => new MemoryLink(units.get('H'));
-        const joiner = await open({ path: dir, logger: false, sync: { connect, autoStart: false } });
+        const joiner = await createDatabase({ path: dir, logger: false, sync: { connect, autoStart: false } });
         const done = new Promise((resolve) => joiner.sync.once('bootstrap', resolve));
         await joiner.sync.addNode({ url: 'mem://H' });
         await joiner.sync.start();
@@ -116,7 +116,7 @@ const main = async () => {
     // The live feed under scopes: a subscriber of scope `a` while the host
     // appends ops of scope `b` only — every append wakes the feed, which
     // moves its cursor past the op and sends nothing.
-    const scoped = await open({
+    const scoped = await createDatabase({
       path: path.join(root, 'scoped'),
       logger: false,
       sync: { autoStart: false, scope: (id, data) => data.scope ?? '*' },

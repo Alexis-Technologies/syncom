@@ -24,13 +24,13 @@ runtime dependencies.
 ```js
 'use strict';
 
-const { open } = require('@alexify/syncom');
+const { createDatabase } = require('@alexify/syncom');
 
 const main = async () => {
-  const storage = await open({ path: 'data' });
+  const storage = await createDatabase({ path: 'data' });
 
   const id = await storage.insert({ name: 'Ada' });
-  const record = await storage.record(id);
+  const record = await storage.document(id);
 
   record.on('update', (data, delta) => console.log('changed', delta));
 
@@ -120,10 +120,10 @@ with every plugin registered (see
 ## Quick Start
 
 ```js
-const { open, diff, merge } = require('@alexify/syncom');
+const { createDatabase, diff, merge } = require('@alexify/syncom');
 
 // A schema turns entity names into collections.
-const storage = await open({
+const storage = await createDatabase({
   path: 'data',
   schema: { entities: { Post: {}, Author: {} } },
 });
@@ -156,14 +156,14 @@ the manager is the `sync` plugin (`@alexify/syncom/sync`), registered by
 // the hub
 const { Server, defineRouter } = require('@alexify/wrpc');
 const { sync } = require('@alexify/syncom/sync');
-const storage = await open({ path: 'hub', plugins: [sync] });
+const storage = await createDatabase({ path: 'hub', plugins: [sync] });
 const router = defineRouter({ syncom: storage.sync.unit({ access: 'public' }) });
 await new Server({ router, host: '0.0.0.0', port: 8000, protocol: 'http' }).listen();
 
 // a node — a server, a CLI, a browser tab
 const { WrpcClient } = require('@alexify/wrpc');
 const { createWrpcLink } = require('@alexify/syncom/wrpc');
-const storage = await open({
+const storage = await createDatabase({
   path: 'data',
   plugins: [sync],
   sync: { connect: async (node) => createWrpcLink(await WrpcClient.connect(node.url)) },
@@ -178,15 +178,15 @@ nodes converges.
 
 | Area | What you get |
 | --- | --- |
-| **Storage** | Records with live properties and per-record deltas, schema-driven collections, compare-and-swap writes, transactions (`transact()`: several writes appended as one, all or none, with a signed message), encryption at rest (AES-256-GCM under an RSA-wrapped key), `purge()` for the right to be forgotten, `repair(id)` from the log |
+| **Database** | Records with live properties and per-record deltas, schema-driven collections, compare-and-swap writes, transactions (`transact()`: several writes appended as one, all or none, with a signed message), encryption at rest (AES-256-GCM under an RSA-wrapped key), `purge()` for the right to be forgotten, `repair(id)` from the log |
 | **Field kinds** | A field is a register, a counter (`inc()`), a set (`add()`/`remove()`), a list or a text (`splice()`, `push()`, `updateText()`; `setAt()`/`move()` on a list), or a tree (`treeMove()`/`treeRemove()`). A text carries marks (`mark()`, `unmark()`, `unmarkById()`, `spans()`) and embeds and block markers (`insertEmbed()`, `splitBlock()`, `joinBlock()`, `updateBlock()`, `block()`, `blocks()`), and `cursor()`/`index()` name a place that survives edits; `@alexify/syncom/order` mints fractional indexes for ordering records. See [Lists, text and trees](https://syncomjs.vercel.app/guide/lists) |
 | **Schema** | A metaschema model, any Standard Schema (zod, valibot, arktype), ajv or a compiled JSON Schema validates every write before it is stamped — locally and again on the hub. Versions ride on ops; an older record reads through a lens (migrations, then the validator's aliases and defaults); `migrate()` rewrites it. See [Schema and validation](https://syncomjs.vercel.app/guide/schema) |
 | **TypeScript** | Hand-written, `tsd`-tested types; a storage typed by its options — a collection per entity, the methods of its plugins — and records typed from the entity's Standard Schema (`SchemaOutput`/`SchemaInput`) or a `Schema<Shapes>` annotation: `storage.Post.get(id)` is `Post \| null`, a query names the record's fields, a live record has a property per field. See [TypeScript](https://syncomjs.vercel.app/guide/typescript) |
 | **Editors** | `@alexify/syncom/codemirror` binds CodeMirror 6 (a ChangeSet as exact splices, undo through the storage, cursors as decorations); `@alexify/syncom/prosemirror` binds ProseMirror (its modules injected): the document as one text with block markers, a peer's edit as one replace step, undo through the storage, a presence room's cursors as decorations. `@alexify/syncom/editor` binds any editor to a text field through three functions of an adapter: edits leave as one transaction each, a peer's land as deltas rebased over what the editor holds, a delta the field moved under is refused (`STALE`) and sent again rebased; `diffBlocks()` for an editor that hands over a whole document; selections as cursor tokens, a presence room's cursors resolved. See [Editors](https://syncomjs.vercel.app/guide/editors) |
 | **Frameworks** | `@alexify/syncom/store`: a query, a live record, a record through `get()`, a presence room or any emitter as one store object — Svelte's store contract and React's `useSyncExternalStore` read it as it is, Vue and Solid wrap it in a line; no framework imported. See [Frameworks](https://syncomjs.vercel.app/guide/frameworks) |
 | **Queries** | `select({ orgId, status: { $in } }).order('name').limit(20).fetch()` over an in-memory record catalog: indexed queries with no I/O, unique keys, `watch()` for live views. See [Queries](https://syncomjs.vercel.app/guide/query) |
-| **Full-text search** | `select({ $text: 'quick fox' })`: fuzzy, typo-tolerant, TF-IDF ranked trigram search over an entity's `search` fields, best first, narrowed by any equality — the index is `@alexify/syncom/search` (under 1 KB), injected at `open({ search })`. See [Full-text search](https://syncomjs.vercel.app/guide/query#full-text-search) |
-| **Backends** | node:fs, OPFS, IndexedDB (`@alexify/syncom/idb`) or memory — five functions injected at `open({ fsi })`; `durable: true` for fsync, one instance per directory. See [Backends](https://syncomjs.vercel.app/guide/backends) |
+| **Full-text search** | `select({ $text: 'quick fox' })`: fuzzy, typo-tolerant, TF-IDF ranked trigram search over an entity's `search` fields, best first, narrowed by any equality — the index is `@alexify/syncom/search` (under 1 KB), injected at `createDatabase({ search })`. See [Full-text search](https://syncomjs.vercel.app/guide/query#full-text-search) |
+| **Backends** | node:fs, OPFS, IndexedDB (`@alexify/syncom/idb`) or memory — five functions injected at `createDatabase({ fsi })`; `durable: true` for fsync, one instance per directory. See [Backends](https://syncomjs.vercel.app/guide/backends) |
 | **Replication** | Every write is an op in a persisted log; peers exchange ops over an injected link, resume from where they stopped, and bootstrap from a streamed snapshot when they cannot; scopes for partial replication; presence (`@alexify/syncom/presence`: who is here and what they edit, relayed by a host's rooms, signed, never logged) |
 | **Versions** | `history(id)` and `get(id, { at })` by event id, stamp or vector, folded from the log; tags of the whole storage (`tag()`, `at(name)`); `diff()`, `restore()`, `applyPatches()` and `compact(id)`, every way back new ops that merge; an undo stack (`@alexify/syncom/undo`) and branches that merge back (`@alexify/syncom/branch`). See [Versions and history](https://syncomjs.vercel.app/guide/versions) |
 | **Convergence** | Last-writer-wins registers, per-origin counters, observed-remove sets, lists and text that merge by position (Fugue — each writer's run whole), trees whose concurrent moves never form a cycle, tombstones with revival — any order, any number of times, same result. A field two nodes make as different kinds at once ends as the same kind everywhere, by a fixed precedence; what a peer can make a node hold is bounded. See [Sync](https://syncomjs.vercel.app/guide/sync#registers-counters-sets-lists-and-text) |
@@ -196,8 +196,8 @@ nodes converges.
 | **CRDT** | `diff` / `merge` / `apply` over plain objects — nested maps merge recursively, arrays are grow-only sets, numbers add so counters converge |
 | **Contracts** | `@alexify/syncom/contracts`: store a procedure in the chain by hash, load it anywhere, run it against a read-only view of storage; failures are recorded as blocks. A subpath, so the package root never runs a block's code |
 | **Portability** | One API over `node:fs` + `node:crypto` on the server and OPFS + Web Crypto in the browser, chosen by the `browser` export condition |
-| **Hooks and events** | `open({ hooks })` runs your code inside a write, a read or a peer's batch — validate, stamp, redact, skip — and rejects with a typed `HookError` when it throws; `on()` events (`change`, `commit`, `apply`, `peer`, `sync`, …) observe everything and can never break it. See [Hooks and events](https://syncomjs.vercel.app/guide/hooks) |
-| **Observability** | Injected OpenTelemetry (`open({ telemetry })`): spans for local writes, applied batches, pushes, bootstraps, log rolls, tags, history reads and patches, plus outcome and lag metrics — nested under wrpc's spans, which carry the trace across the wire. `stats()` reports the queue, the cache, the log, the tags and the files that lag the log. See [OpenTelemetry](https://syncomjs.vercel.app/guide/telemetry); `@alexify/syncom/inspect` lays a record out raw and anonymizes a dump for a bug report |
+| **Hooks and events** | `createDatabase({ hooks })` runs your code inside a write, a read or a peer's batch — validate, stamp, redact, skip — and rejects with a typed `HookError` when it throws; `on()` events (`change`, `commit`, `apply`, `peer`, `sync`, …) observe everything and can never break it. See [Hooks and events](https://syncomjs.vercel.app/guide/hooks) |
+| **Observability** | Injected OpenTelemetry (`createDatabase({ telemetry })`): spans for local writes, applied batches, pushes, bootstraps, log rolls, tags, history reads and patches, plus outcome and lag metrics — nested under wrpc's spans, which carry the trace across the wire. `stats()` reports the queue, the cache, the log, the tags and the files that lag the log. See [OpenTelemetry](https://syncomjs.vercel.app/guide/telemetry); `@alexify/syncom/inspect` lays a record out raw and anonymizes a dump for a bug report |
 | **Scaling** | Hubs that dial each other, scopes as buckets, per-peer push limits, a reserved shared-log contract for the broker-backed hub. See [Scaling](https://syncomjs.vercel.app/guide/scaling) |
 | **Dependencies** | None. wrpc, metaschema and fake-indexeddb are devDependencies for the integration tests; everything is injected at runtime |
 
@@ -366,7 +366,7 @@ _Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 roun
 <!-- bench:engine:start -->
 <!-- generated by `pnpm bench:report` from bench/results — edit the results, not this block -->
 
-<img src="https://syncomjs.vercel.app/benchmarks/engine-storage.svg" alt="Storage: syncom's own benchmarks: The public API end to end on node:fs: a write is an op appended to the log, a record file and a block. ops/s, log scale, higher is better." width="760" />
+<img src="https://syncomjs.vercel.app/benchmarks/engine-storage.svg" alt="Database: syncom's own benchmarks: The public API end to end on node:fs: a write is an op appended to the log, a record file and a block. ops/s, log scale, higher is better." width="760" />
 
 <!-- bench:engine:end -->
 
@@ -376,12 +376,12 @@ The `browser` export condition selects `browser.js` automatically — no bundler
 configuration needed.
 
 ```js
-import { open, diff, merge } from '@alexify/syncom';
+import { createDatabase, diff, merge } from '@alexify/syncom';
 ```
 
 Crypto is asynchronous there (`calculateHash`, `encrypt`, `decrypt`, `sign` and
 `verify` return promises), and storage lives in the origin-private filesystem — or in
-IndexedDB through `open({ fsi: createIdbFsi() })` from `@alexify/syncom/idb`. `browser.d.ts`
+IndexedDB through `createDatabase({ fsi: createIdbFsi() })` from `@alexify/syncom/idb`. `browser.d.ts`
 declares those signatures separately. A browser node dials the mesh through
 `@alexify/syncom/wrpc` like any other, and hosts for its peers over WebRTC.
 See [Browser](https://syncomjs.vercel.app/guide/browser).
@@ -403,7 +403,7 @@ staying local, no proof of key possession at `hello` — are on the
   [Benchmarks](https://syncomjs.vercel.app/guide/benchmarks) ·
   [Architecture](https://syncomjs.vercel.app/guide/architecture)
 - [Getting started](https://syncomjs.vercel.app/guide/getting-started)
-- [Storage](https://syncomjs.vercel.app/guide/storage) ·
+- [Database](https://syncomjs.vercel.app/guide/database) ·
   [Schema and validation](https://syncomjs.vercel.app/guide/schema) ·
   [Queries](https://syncomjs.vercel.app/guide/query) ·
   [Lists, text and trees](https://syncomjs.vercel.app/guide/lists) ·

@@ -11,11 +11,11 @@
 
 const { bench } = require('./support/harness.js');
 const { memory } = require('../src/memory/memory.js');
-const { open } = require('../src/all/all.js');
+const { createDatabase } = require('../src/all/all.js');
 
 const main = async () => {
   console.log(`Tags benchmark — Node ${process.version}\n`);
-  const storage = await open({ path: '/bench', fsi: memory(), logger: false });
+  const storage = await createDatabase({ path: '/bench', fsi: memory(), logger: false });
   const ids = [];
   for (let i = 0; i < 1000; i++) ids.push(await storage.insert({ n: i, group: i % 10 }));
   let k = 0;

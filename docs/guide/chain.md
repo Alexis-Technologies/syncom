@@ -23,7 +23,7 @@ const chain = await new Blockchain('data/blockchain');
 ::: tip The constructor returns a promise
 `Blockchain` initialises asynchronously — it reads or writes the genesis block
 before it is usable — so it is always `await new Blockchain(...)`. The same is
-true of `Storage` and `SyncManager`. The types model this.
+true of `Database` and `SyncManager`. The types model this.
 :::
 
 ```js
@@ -61,19 +61,19 @@ The chain is the `chain` plugin — `@alexify/syncom/chain`, registered by
 `@alexify/syncom/all`:
 
 ```js
-const { open } = require('@alexify/syncom');
+const { createDatabase } = require('@alexify/syncom');
 const { chain } = require('@alexify/syncom/chain');
 
-const storage = await open({ path: 'data', plugins: [chain] });
+const storage = await createDatabase({ path: 'data', plugins: [chain] });
 ```
 
-With it `Storage` keeps its own chain, under `<path>/blockchain/`, and adds a
+With it `Database` keeps its own chain, under `<path>/blockchain/`, and adds a
 block for every write it applies. A local write commits `{ id, hash, from }` — the
 record, the hash of its data, and its position in the [log](./sync#the-log);
 an encrypted record's write, which has no op, commits `{ id, hash }`. A batch
 commits one block `{ records: { [id]: hash }, from, to }` for every record it
 touched: a page of ops applied from a peer, a snapshot page, the tail a
-reopen replays, a `repair(id)`, and the local writes `open({ defer })` held
+reopen replays, a `repair(id)`, and the local writes `createDatabase({ defer })` held
 back. `validate(id, data, block)` accepts both shapes. A [tag](./versions#tags)'s
 copy of a record file keeps the block it named, and is checked like the file.
 
@@ -83,12 +83,12 @@ expected, and it is not a consensus mechanism.
 
 The chain grows by one block file per local write and one per batch applied
 from a peer, and it is never compacted — the log is, the chain is the audit.
-A node that only replicates, a hub, has nothing to audit: `open({ chain:
+A node that only replicates, a hub, has nothing to audit: `createDatabase({ chain:
 false })` keeps none, saves two file writes per record, reads records without
 re-verifying them (`integrity` is lazy, there is no block to check against),
 and `validate()` rejects with `code: 'NO_CHAIN'`. A storage opened without
 the plugin is the same, and its `NO_CHAIN` names the subpath; asking for the
-chain in so many words — `open({ chain: true })` — without the plugin is
+chain in so many words — `createDatabase({ chain: true })` — without the plugin is
 `PLUGIN_MISSING`.
 
 ```js
@@ -105,6 +105,6 @@ await storage.validate(id, entry.data, entry.block); // true if intact
 This is exactly what `loadData` does on every read from the file (a cached
 record is not read again) — a record whose bytes no longer hash to what its
 block recorded rejects with `code: 'INTEGRITY'` and
-`Storage record <id> is invalid` rather than returning the modified data;
-`repair(id)` rebuilds it from the log. `open({ integrity: 'lazy' })` skips the
+`Database record <id> is invalid` rather than returning the modified data;
+`repair(id)` rebuilds it from the log. `createDatabase({ integrity: 'lazy' })` skips the
 check on a cold read.

@@ -3,7 +3,7 @@
 Everything a storage persists — records, the operation log, the chain, the
 keys, the peer registry, the catalog, the tags — goes through one small contract: an
 **fsi**, five functions over "a directory and a file name". The platform's
-own is the default; any other goes in through `open({ fsi })`.
+own is the default; any other goes in through `createDatabase({ fsi })`.
 
 | Function | Meaning |
 | --- | --- |
@@ -17,7 +17,7 @@ own is the default; any other goes in through `open({ fsi })`.
 | `append(dir, name, content)` *(optional)* | Adds `content` at the end of the file, making the file and the directory when absent; what the op log writes with when present — a line per group of ops into one journal, not a file per group (`node:fs` and the memory backend have it) |
 
 `isFsi(value)` tells whether an object has the five. The check runs at
-`open()`, naming the method that is missing, and the storage never closes a
+`createDatabase()`, naming the method that is missing, and the storage never closes a
 backend it was handed — two storages may share one.
 
 ## What ships
@@ -32,11 +32,11 @@ backend it was handed — two storages may share one.
 | `@alexify/syncom/encryption` | Anywhere | `atRest(fsi, options)` — every file through it encrypted; see [Encrypted at rest](#encrypted-at-rest) |
 
 ```js
-const { open } = require('@alexify/syncom');
+const { createDatabase } = require('@alexify/syncom');
 const { memory } = require('@alexify/syncom/memory');
 
 const fsi = memory();
-const storage = await open({ path: 'app', fsi });     // nothing touches the disk
+const storage = await createDatabase({ path: 'app', fsi });     // nothing touches the disk
 await storage.insert({ a: 1 });
 fsi.size;                                              // 6 files: lock, node.json, log, data, catalog
 Object.keys(fsi.dump());                               // ['app/lock.json', 'app/log/index.json', 'app/node.json', …]
@@ -47,11 +47,11 @@ wants; two storages opened over one of it with different `path`s are a
 mesh in one process, which is how the sync-engine suite runs.
 
 ```js
-import { open } from '@alexify/syncom';
+import { createDatabase } from '@alexify/syncom';
 import { createIdbFsi } from '@alexify/syncom/idb';
 
 const idb = createIdbFsi({ name: 'app' });
-const storage = await open({ path: 'data', fsi: idb });
+const storage = await createDatabase({ path: 'data', fsi: idb });
 // …
 await storage.close();
 await idb.close();                                     // the backend's own
@@ -64,13 +64,13 @@ memory layer over the disk, the disk over a remote store — that reads as a
 multi-level cache and writes to every layer in list order:
 
 ```js
-const { open } = require('@alexify/syncom');
+const { createDatabase } = require('@alexify/syncom');
 const { memory } = require('@alexify/syncom/memory');
 const { layered } = require('@alexify/syncom/layered');
 const disk = require('@alexify/syncom'); // read, write, exists, remove, list: the platform's own
 
 const fsi = layered([memory(), disk], { write: 'back' });
-const storage = await open({ path: 'data', fsi });
+const storage = await createDatabase({ path: 'data', fsi });
 // … every read is answered from memory once seen; every write lands in
 // memory first and on the disk from the queue
 await storage.close();
@@ -122,15 +122,15 @@ directory opens over the wrapper with the key and over the bare backend not
 at all.
 
 ```js
-const { open } = require('@alexify/syncom');
+const { createDatabase } = require('@alexify/syncom');
 const { atRest } = require('@alexify/syncom/encryption');
 
 // a key the application holds: 32 bytes, or a Web Crypto AES-GCM CryptoKey
-const storage = await open({ path: 'data', fsi: atRest(fsi, { key }) });
+const storage = await createDatabase({ path: 'data', fsi: atRest(fsi, { key }) });
 
 // or a password: the key is derived by PBKDF2-SHA-256 under a salt the
 // application keeps (8 characters or more), 600 000 rounds by default
-const vault = await open({ path: 'data', fsi: atRest(fsi, { password, salt }) });
+const vault = await createDatabase({ path: 'data', fsi: atRest(fsi, { password, salt }) });
 ```
 
 Each ciphertext is bound to its file name (the additional data of
@@ -144,7 +144,7 @@ the key can tell.
 The key is never written. A file that is not the key's is refused as
 `DECRYPT_FAILED` with a `reason` — `'key'` (another key, or a torn
 ciphertext), `'plain'` (a file that was never encrypted), `'torn'` (not
-base64) — and the first such file fails `open()`. `exists`, `remove`, `list`,
+base64) — and the first such file fails `createDatabase()`. `exists`, `remove`, `list`,
 `sync` and `create` pass through, so a lock and a `durable` open work as they
 do on the bare backend. There is no `append` — a file is one ciphertext — so
 the log under the wrapper writes a sealed file per group. The wrapper
@@ -170,7 +170,7 @@ but the count of files.
 
 ## Durability
 
-Files are written with the platform's default durability. `open({ durable:
+Files are written with the platform's default durability. `createDatabase({ durable:
 true })` follows every write with the backend's `sync`; on `node:fs` that is
 an fsync per file — the log batch, the chain block, the record — and the
 price is the write latency of the disk; an `append` is followed by `sync`
@@ -181,7 +181,7 @@ and a torn open file — or a journal's torn last line — is dropped before
 anyone was told of it. A record file torn the same way reads as `INTEGRITY`
 until `repair(id)` rebuilds it.
 
-`open({ defer: ms })` trades the record files' timing for fewer writes: a local
+`createDatabase({ defer: ms })` trades the record files' timing for fewer writes: a local
 write's record file and chain block wait up to `ms` (one timer for all of
 them), so the writes of one record within the window land as one file, and
 everything due lands under one block; a flush that took longer than `ms` (a
@@ -203,9 +203,9 @@ open replays it onto the files.
 
 ## One instance per directory
 
-`open()` holds the directory — the Web Locks API in a browser, a `lock.json`
-with the pid elsewhere — and a second `open()` of it rejects with
+`createDatabase()` holds the directory — the Web Locks API in a browser, a `lock.json`
+with the pid elsewhere — and a second `createDatabase()` of it rejects with
 `code: 'LOCKED'`; `lock: 'wait'` waits, `lock: false` leaves the
 coordination to you. See
-[One instance per directory](./storage#one-instance-per-directory) for why,
+[One instance per directory](./database#one-instance-per-directory) for why,
 and for what two browser tabs should do.

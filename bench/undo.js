@@ -14,14 +14,14 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { bench } = require('./support/harness.js');
-const { open } = require('../src/all/all.js');
+const { createDatabase } = require('../src/all/all.js');
 const { createUndo } = require('../src/undo/undo.js');
 
 const main = async () => {
   console.log(`Undo benchmark — Node ${process.version}\n`);
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'syncom-bench-undo-'));
   try {
-    const storage = await open({ path: root, lock: false });
+    const storage = await createDatabase({ path: root, lock: false });
     const id = await storage.insert({ title: 'a', n: 0 });
     await storage.inc(id, 'hits', 1);
     await storage.add(id, 'tags', ['x']);

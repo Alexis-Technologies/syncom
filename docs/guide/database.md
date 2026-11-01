@@ -1,15 +1,15 @@
-# Storage
+# Database
 
-`Storage` is the entry point. `open(options)` returns a promise — key
+`Database` is the entry point. `createDatabase(options)` returns a promise — key
 generation and chain initialisation happen before it resolves. It takes an
-options object and nothing else: `open('./data')` is a `TypeError`, as is
-any option of the wrong shape, thrown by `open()` itself before anything is
+options object and nothing else: `createDatabase('./data')` is a `TypeError`, as is
+any option of the wrong shape, thrown by `createDatabase()` itself before anything is
 opened.
 
 ```js
-const { open } = require('@alexify/syncom');
+const { createDatabase } = require('@alexify/syncom');
 
-const storage = await open({ path: 'data' });
+const storage = await createDatabase({ path: 'data' });
 ```
 
 | Option | Default | Meaning |
@@ -19,8 +19,8 @@ const storage = await open({ path: 'data' });
 | `fsi` | `node:fs` / OPFS | The backend — any object with `read`, `write`, `exists`, `remove`, `list` (see [Backends](../reference/api#backends)) |
 | `durable` | `false` | fsync after every write, where the backend can (`node:fs`); OPFS and memory are as durable as they are |
 | `defer` | `16` | Record files may lag the log by this many ms (a non-negative integer; `0` lands every write at once) — the writes of one record within the window coalesce into one file and one block, what typing into a text or a list wants; `flush()` lands them now ([see below](#when-a-record-file-lags-the-log)) |
-| `lock` | `'fail'` | One instance per directory: `'fail'` rejects a second `open()` (`code: 'LOCKED'`), `'wait'` waits, `false` leaves it to you ([see below](#one-instance-per-directory)) |
-| `cache` | `{ max: 5000 }` | How many entries stay in memory; a live `Record` pins its own ([see below](#the-catalog-and-the-cache)) |
+| `lock` | `'fail'` | One instance per directory: `'fail'` rejects a second `createDatabase()` (`code: 'LOCKED'`), `'wait'` waits, `false` leaves it to you ([see below](#one-instance-per-directory)) |
+| `cache` | `{ max: 5000 }` | How many entries stay in memory; a live `Document` pins its own ([see below](#the-catalog-and-the-cache)) |
 | `integrity` | `'verify'` | `'lazy'` trusts a record file on the cold read instead of re-verifying it against its block |
 | `chain` | `true` | `false` keeps no [chain](./chain#through-storage) — a hub that only replicates has nothing to audit; two file writes less per record, reads lazy, `validate()` rejects with `code: 'NO_CHAIN'` |
 | `catalog` | `{ flushEvery: 64 }` | The fewest changes between two saves of the record catalog; a large catalog is saved every sixteenth of its size, never more than half the log's retention apart, and the log catches up the rest |
@@ -65,7 +65,7 @@ await storage.close();                    // stop replication, seal the log
 Every write among these is an **operation**: applied here, written to the
 [log](./sync#the-log), announced as a `change` event, and replicated to peers
 when a transport is configured. Every one of them — and every op from a peer —
-also emits an `update` event on any live `Record` for that id. The rest of
+also emits an `update` event on any live `Document` for that id. The rest of
 the list, text and tree API — `updateText()`, `setAt()`, `move()`, `mark()`,
 `spans()`, `cursor()`, `treeRemove()` — is in [Lists, text and trees](./lists).
 
@@ -128,10 +128,10 @@ The rules, the same on every node whatever the order the writes arrive in:
   peer's picture of a record keeps the first 4 096 in sorted order.
 
 The ops, the log, a `snapshot()` and `getCachedData()` keep the paths
-apart; `get()`, a `Record`, a query (`'profile.city'` as a dotted path), a
+apart; `get()`, a `Document`, a query (`'profile.city'` as a dotted path), a
 hook's `current` and a validator see them composed. A list's element and a
 tree's node can carry fields too — `items/<name>/body`, `outline/<node>/title`
-— see [Children of elements and nodes](./lists#children-of-elements-and-nodes). A `Record`'s properties
+— see [Children of elements and nodes](./lists#children-of-elements-and-nodes). A `Document`'s properties
 are the composed top-level fields: `record.profile = { … }` writes the
 object whole. A migration (`migrate()`) writes the registers as they read,
 composed.
@@ -199,7 +199,7 @@ const id = await storage.transact(
   are logged as one op, signed once on a signing node (the ops are signed
   after `fn`); its `commit` event carries the changes of every keystroke.
   Under an `afterWrite` hook every write is logged as it was made.
-- **Each record once.** A live `Record` the transaction changed emits one
+- **Each record once.** A live `Document` the transaction changed emits one
   `update`, with the delta of all its ops; `commit` and `change` still fire
   per logged op. The transaction holds each record it touches as its last op left
   it — not a copy per op — unless something listens for `commit`, whose
@@ -225,7 +225,7 @@ anything else about that id afterwards, or that learns of the purge from a
 snapshot it bootstraps from. The chain keeps hashes only. A
 purged record is listed nowhere and reads as `null`, at a tag too; a read at
 a version before the purge rejects with `HISTORY_GONE` (`reason:
-'scrubbed'`), and a `Record` of it reads `null`.
+'scrubbed'`), and a `Document` of it reads `null`.
 
 ```js
 await storage.purge(id);          // nothing of it left here
@@ -246,7 +246,7 @@ to install and supply:
 ```js
 const { ulid } = require('ulid');
 
-const storage = await open({ path: 'data', getId: () => ulid() });
+const storage = await createDatabase({ path: 'data', getId: () => ulid() });
 const id = await storage.insert({ title: 'Draft' });
 // 01ARZ3NDEKTSV4RRFFQ69G5FAV — lexicographically sortable by creation time
 ```
@@ -255,11 +255,11 @@ The generator takes no arguments and may be asynchronous — `insert()` awaits
 it either way:
 
 ```js
-await open({ path: 'data', getId: async () => (await fetch('/next-id')).text() });
+await createDatabase({ path: 'data', getId: async () => (await fetch('/next-id')).text() });
 ```
 
-`Storage.generateId()` is the default generator, should you want to fall back to
-it. A `getId` that is not a function is refused at `open()`.
+`Database.generateId()` is the default generator, should you want to fall back to
+it. A `getId` that is not a function is refused at `createDatabase()`.
 
 **Ids are file names.** A record is written to `data/${id}.json`, on every
 platform, so an id is letters, digits, `.`, `_`, `-` and `@`, not starting
@@ -270,7 +270,7 @@ the other writers, and from a peer — whose op is then counted as `malformed`
 and never logged. `get()` and `has()` answer `null` and `false` for such an id.
 
 One thing the engine does not check for you: **ids are matched against string
-fields.** A `Record` turns any string field whose value is a known id into a
+fields.** A `Document` turns any string field whose value is a known id into a
 [reference](#references). Short, guessable ids raise the odds of an accidental
 match; UUIDs, ULIDs and CUID2s do not.
 
@@ -278,7 +278,7 @@ match; UUIDs, ULIDs and CUID2s do not.
 
 Two storages over one directory would both read the log's vector and both
 mint the next sequence number — the same number for two different ops, which
-every peer drops as a duplicate. So `open()` holds the directory: through the
+every peer drops as a duplicate. So `createDatabase()` holds the directory: through the
 Web Locks API in the browser (released when the tab dies), through
 `<path>/lock.json` with the process id elsewhere (stale once that process is
 gone, or after 30 minutes when there is no way to tell). On a backend with
@@ -288,10 +288,10 @@ object: `lock: { mode: 'wait', timeout: 5000, poll: 50, staleAfter: 60_000 }`
 — `timeout` turns a `'wait'` that never ends into `LOCKED`.
 
 ```js
-const a = await open({ path: 'data' });
-await open({ path: 'data' });                   // Error, code 'LOCKED'
-await open({ path: 'data', lock: 'wait' });     // resolves once `a` closes
-const b = await open({ path: 'data', lock: false }); // yours to coordinate
+const a = await createDatabase({ path: 'data' });
+await createDatabase({ path: 'data' });                   // Error, code 'LOCKED'
+await createDatabase({ path: 'data', lock: 'wait' });     // resolves once `a` closes
+const b = await createDatabase({ path: 'data', lock: false }); // yours to coordinate
 ```
 
 Two browser tabs are two instances: with the default `'fail'` the second tab
@@ -323,9 +323,9 @@ catalog is rebuilt from one scan of `data/`. It is derived state: delete the
 file and the next open rebuilds it.
 
 The **cache** holds the last `cache.max` entries read or written, evicting
-the oldest; a record with a live `Record` is never evicted. What leaves the
+the oldest; a record with a live `Document` is never evicted. What leaves the
 storage leaves as a **copy**, as JSON — the value `get()` returns, a cursor's
-rows, a `Record`'s data — and what comes in (`set()`, `update()`) is copied the
+rows, a `Document`'s data — and what comes in (`set()`, `update()`) is copied the
 same way, so editing an object on either side of the call changes nothing in
 the cache, the log or the next write's base. `getCachedData()` and `snapshot()`
 hand out the raw objects, for callers that know not to touch them. A cold read re-verifies the record against the chain block
@@ -342,7 +342,7 @@ the cache holds the record — every read sees the write — and the log keeps
 the batch unapplied until the file lands, so a crash in between is replayed
 onto the file at the next open:
 
-- **`open({ defer })`** — 16 ms, a frame, by default. The file waits up to
+- **`createDatabase({ defer })`** — 16 ms, a frame, by default. The file waits up to
   `defer` ms, and the writes of one record within the window land as one
   file and one block. A flush that took longer than `defer` — a large record,
   a slow disk — makes the next window as long as it took, so the files never
@@ -358,7 +358,7 @@ onto the file at the next open:
   while such a record is held.
 
 ```js
-const storage = await open({ path: 'data', defer: 50 });
+const storage = await createDatabase({ path: 'data', defer: 50 });
 const id = await storage.insert({ title: 'Notes' });
 for (const ch of 'hello') await storage.push(id, 'body', ch);
 await storage.get(id);   // { title: 'Notes', body: 'hello' } — six ops logged, no file yet
@@ -454,7 +454,7 @@ per write:
 ```js
 const { encryption } = require('@alexify/syncom/encryption');
 
-const vault = await open({ path: 'vault', plugins: [encryption], encrypted: true });
+const vault = await createDatabase({ path: 'vault', plugins: [encryption], encrypted: true });
 await vault.insert({ ssn: '...' });                       // sealed on disk
 
 await storage.insert({ ssn: '...' }, { encrypted: true }); // one record, in a plain storage
@@ -484,12 +484,12 @@ key, the engine none the wiser — see [Encrypted at rest](./backends#encrypted-
 
 ## Records
 
-`storage.record(id)` returns a live `Record`. It is cached per id, so two
+`storage.document(id)` returns a live `Document`. It is cached per id, so two
 calls for the same record return the same object — and therefore the same
 event listeners.
 
 ```js
-const record = await storage.record(id);
+const record = await storage.document(id);
 
 record.on('update', (data, delta) => {
   console.log(delta); // { title: 'Final' }
@@ -526,11 +526,11 @@ hook in play, the change reaches it once the write is done, in order.
 
 When a stored string happens to be the id of another record that storage
 already knows about, reading it back gives you a `Reference` rather than the
-raw string. `reference.record()` resolves it:
+raw string. `reference.document()` resolves it:
 
 ```js
-const post = await storage.record(postId);
-const author = await post.author.record();
+const post = await storage.document(postId);
+const author = await post.author.document();
 ```
 
 ## Collections
@@ -539,7 +539,7 @@ Pass a `schema` and every entity name becomes a collection on the storage
 object. Records inserted through a collection carry a `$type` field naming it.
 
 ```js
-const storage = await open({
+const storage = await createDatabase({
   path: 'data',
   schema: { entities: { Post: {}, Author: {} } },
 });
@@ -558,10 +558,10 @@ Schema or by a `Schema<{ Post: Post }>` annotation — see
 `entities` may be a plain object or a `Map`. Without a schema the storage has
 no collections and you address records by id only. An entity named like
 something the storage already answers to (`get`, `close`, `log`, `sync`…)
-would replace it, so `open()` refuses it with a `TypeError`.
+would replace it, so `createDatabase()` refuses it with a `TypeError`.
 
 A collection answers for its own records: `get(id)` of a record of another
-collection is `null`, and `update()`, `delete()` and `record()` reject with
+collection is `null`, and `update()`, `delete()` and `document()` reject with
 `code: 'NOT_FOUND'` — the storage's own methods address any record.
 
 An entity definition is `{ schema?, idField?, validate?, index?, unique?, fields?, search? }`;
@@ -570,7 +570,7 @@ An entity definition is `{ schema?, idField?, validate?, index?, unique?, fields
 `unique` — explicit, or read off a metaschema schema's `indexes` and
 `unique: true` fields — are what [queries](#queries) key on, `search` names
 the fields `$text` searches, and `fields` is free-form notes kept as given. Anything else is a `TypeError` at
-`open()`: a definition with a typo is a validation that silently never runs.
+`createDatabase()`: a definition with a typo is a validation that silently never runs.
 
 `$type` is the record's collection and never changes. `storage.set()` without
 it keeps it, `Collection.set()` stamps its own, a write that would change it
@@ -597,7 +597,7 @@ entity's [search fields](./query#full-text-search). A malformed query is a
 `TypeError` at `select()`.
 
 ```js
-const storage = await open({
+const storage = await createDatabase({
   path: 'data',
   schema: { entities: { Project: { index: ['orgId'], unique: ['slug', ['orgId', 'name']] } } },
 });
@@ -653,7 +653,7 @@ Three shapes are understood, and the package requires none of them:
 - a **function** — an ajv-compiled validator (`false` plus `fn.errors`), or any
   function that throws on a bad value and returns the value (or nothing) on a
   good one;
-- a **plain object** compiled through `open({ validator })` — a JSON Schema or
+- a **plain object** compiled through `createDatabase({ validator })` — a JSON Schema or
   TypeBox object handed to `validator.compile(schema, { entity })`; an Ajv
   instance fits as it is.
 
@@ -676,7 +676,7 @@ const model = new Model(
   ]),
 );
 
-const storage = await open({
+const storage = await createDatabase({
   path: 'data',
   schema: { entities: { Project: { schema: model.entities.get('Project') } } },
 });
@@ -737,7 +737,7 @@ schema — metaschema's `model.toJSON()`, whose key order is deterministic —
 and is hashed:
 
 ```js
-const storage = await open({
+const storage = await createDatabase({
   path: 'data',
   schema: { version: 2, snapshot: model.toJSON(), entities: { /* … */ } },
 });
@@ -773,7 +773,7 @@ computed once per cached entry — in two steps:
 (refused together with `migrations`).
 
 ```js
-const storage = await open({
+const storage = await createDatabase({
   path: 'data',
   schema: {
     version: 2,
@@ -787,7 +787,7 @@ await storage.get(oldPost); // { name: 'Hello', $type: 'Post' } — on disk it i
 
 Writes go through the lens too: `update()` validates the record as it reads,
 and carries only the keys that changed. `get()`, `swap()`, a cursor and a
-`Record` as it loads read the view; `snapshot()` and `getCachedData()` read
+`Document` as it loads read the view; `snapshot()` and `getCachedData()` read
 the raw data, and so does replication — a peer on the older version sees the
 record exactly as it was written.
 

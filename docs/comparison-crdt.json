@@ -740,9 +740,9 @@
         },
         "apiStyle": {
           "mark": "",
-          "text": "async methods by record id; live `Record` objects stage edits and `save()`",
+          "text": "async methods by record id; live `Document` objects stage edits and `save()`",
           "note": "Every read and write returns a promise; a write resolves once its op is in the log.",
-          "source": "index.d.ts:1521-1741; docs/guide/storage.md:280-312"
+          "source": "index.d.ts:1521-1741; docs/guide/database.md:280-312"
         },
         "unit": {
           "mark": "",
@@ -753,7 +753,7 @@
         "manyDocs": {
           "mark": "✅",
           "text": "a storage holds records by id, in collections, with queries",
-          "source": "index.d.ts:1529-1541; index.d.ts:1862-1876; docs/guide/storage.md:324-371"
+          "source": "index.d.ts:1529-1541; index.d.ts:1862-1876; docs/guide/database.md:324-371"
         },
         "kinds": {
           "mark": "",
@@ -763,7 +763,7 @@
         "nesting": {
           "mark": "✅",
           "text": "fields by path (`profile/city`), each of any kind; a list element or a tree node holds fields under its id",
-          "source": "src/paths.js:29 (isPath), :17 (MAX_PATHS 4096); src/compose.js:81; docs/guide/storage.md#paths; docs/guide/lists.md#children-of-elements-and-nodes"
+          "source": "src/paths.js:29 (isPath), :17 (MAX_PATHS 4096); src/compose.js:81; docs/guide/database.md#paths; docs/guide/lists.md#children-of-elements-and-nodes"
         },
         "roots": {
           "mark": "",
@@ -781,7 +781,7 @@
           "mark": "",
           "text": "one register: replaced whole, the newer writer wins",
           "note": "Two nodes changing different keys of one nested object at once keep one side (probe confirmed); `update({ 'a.b': 1 })` writes a field named `a.b`.",
-          "source": "docs/guide/sync.md:614-618; docs/guide/storage.md:72-77; src/ops.js:458-480"
+          "source": "docs/guide/sync.md:614-618; docs/guide/database.md:72-77; src/ops.js:458-480"
         },
         "kindClash": {
           "mark": "",
@@ -808,7 +808,7 @@
         },
         "author": {
           "mark": "✅",
-          "text": "`actor` on every op (`open({ actor })` or per write), signed and replicated",
+          "text": "`actor` on every op (`createDatabase({ actor })` or per write), signed and replicated",
           "note": "A claim the origin signs, not a proof of who the user is.",
           "source": "src/signing/signing.d.ts; src/signing/sign.js; docs/guide/sync.md#signatures"
         },
@@ -843,7 +843,7 @@
         },
         "map": {
           "mark": "✅",
-          "text": "a record: `insert`, `get`, `update`, `set`, `delete`, a live `Record`",
+          "text": "a record: `insert`, `get`, `update`, `set`, `delete`, a live `Document`",
           "source": "index.d.ts:1529-1580; index.d.ts:1715"
         },
         "lww": {
@@ -859,7 +859,7 @@
         "deleteKey": {
           "mark": "✅",
           "text": "`unset(id, fields)`: an `unset` op, a tombstone an older concurrent `set` loses to",
-          "source": "src/database.js:1489 (unset); src/ops.js (unset); docs/guide/storage.md"
+          "source": "src/database.js:1489 (unset); src/ops.js (unset); docs/guide/database.md"
         },
         "clear": {
           "mark": "✅",
@@ -1092,12 +1092,12 @@
         "txn": {
           "mark": "✅",
           "text": "`transact(fn)`: several writes, several records, one log append, all or none",
-          "source": "src/commit.js:601 (transact); src/database.js:1655; docs/guide/storage.md#transactions"
+          "source": "src/commit.js:601 (transact); src/database.js:1655; docs/guide/database.md#transactions"
         },
         "autoCommit": {
           "mark": "",
           "text": "every call: durable once its op is appended to the log",
-          "note": "`open({ defer })` lets record files lag; the log is written at once.",
+          "note": "`createDatabase({ defer })` lets record files lag; the log is written at once.",
           "source": "src/commit.js:1-10; index.d.ts:1100-1106; docs/guide/sync.md:602-610"
         },
         "commitMeta": {
@@ -1114,7 +1114,7 @@
         "multiDoc": {
           "mark": "✅",
           "text": "`transact(fn)` writes several records as one append, all or none",
-          "source": "src/commit.js:601 (transact); docs/guide/storage.md#transactions"
+          "source": "src/commit.js:601 (transact); docs/guide/database.md#transactions"
         },
         "preCommit": {
           "mark": "✅",
@@ -1220,7 +1220,7 @@
           "mark": "✅",
           "text": "`purge(id)` scrubs the payload from the log here and on every peer it reaches",
           "note": "A purge wins at any stamp; signatures and digests stay so the headers still verify, and the tags drop their copies. Per record, not per field; a peer that never comes back keeps what it had.",
-          "source": "src/log.js:556-620; src/apply.js:320-345; docs/guide/storage.md:93-117; INVARIANTS.md:22"
+          "source": "src/log.js:556-620; src/apply.js:320-345; docs/guide/database.md:93-117; INVARIANTS.md:22"
         },
         "fork": {
           "mark": "✅",
@@ -1410,7 +1410,7 @@
         "e2ee": {
           "mark": "❌",
           "text": "no; an encrypted record stays local and does not sync",
-          "source": "docs/guide/storage.md:255-279"
+          "source": "docs/guide/database.md:255-279"
         },
         "fuzz": {
           "mark": "✅",
@@ -3454,7 +3454,7 @@
           "mark": "",
           "text": "UTF-16 by default; `insertUtf8`/`deleteUtf8` and `convertPos` for code points and UTF-8",
           "source": "loro/crates/loro-internal/Cargo.toml:91-92; loro/crates/loro-wasm/src/lib.rs:3075-3124; loro/crates/loro-wasm/src/lib.rs:6483; loro-docs/pages/docs/tutorial/cursor.mdx:21",
-          "detail": "TextPosType = 'unicode' | 'utf16' | 'utf8'. Cursor offsets are UTF-16 in JS. Storage is UTF-8."
+          "detail": "TextPosType = 'unicode' | 'utf16' | 'utf8'. Cursor offsets are UTF-16 in JS. Database is UTF-8."
         },
         "surrogates": {
           "mark": "✅",

@@ -5,7 +5,7 @@ bundler that honours `package.json#exports` and `#browser` picks it up with no
 configuration:
 
 ```js
-import { open, diff, merge } from '@alexify/syncom';
+import { createDatabase, diff, merge } from '@alexify/syncom';
 ```
 
 Under the hood the entry resolves to `browser.js`, and four modules are
@@ -49,11 +49,11 @@ RSA-OAEP (SHA-256), and the signature is Ed25519 over the same bytes. Keys,
 ciphertext and signatures move between the platforms: a signing pair on disk
 is one node id on both.
 
-**Storage is origin-private.** `fsi.browser.js` resolves paths against
-`navigator.storage.getDirectory()`, so `open({ path: 'data' })` creates a
+**Database is origin-private.** `fsi.browser.js` resolves paths against
+`navigator.storage.getDirectory()`, so `createDatabase({ path: 'data' })` creates a
 `data/` directory inside the origin's OPFS rather than on disk. It is
 per-origin and the browser may evict it. Another backend goes in through
-`open({ fsi })` — `memory()` for a node that must not persist, or
+`createDatabase({ fsi })` — `memory()` for a node that must not persist, or
 IndexedDB (see [Backends](./backends)).
 
 ## OPFS or IndexedDB
@@ -63,11 +63,11 @@ it, a profile that evicts it, an app that already lives in IndexedDB — the
 `@alexify/syncom/idb` subpath is the same contract over IndexedDB:
 
 ```js
-import { open } from '@alexify/syncom';
+import { createDatabase } from '@alexify/syncom';
 import { createIdbFsi } from '@alexify/syncom/idb';
 
 const fsi = createIdbFsi({ name: 'app' }); // one database, one store `files`
-const storage = await open({ path: 'data', fsi });
+const storage = await createDatabase({ path: 'data', fsi });
 // …
 await storage.close();
 await fsi.close();

@@ -4,7 +4,7 @@ Everything below is exported from the package root — the core: records with
 registers, counters and sets, the log, the write paths, queries, versions and
 sync — except the subpaths. The kinds beyond those are plugins:
 [`@alexify/syncom/text`](#text-subpath) (lists and texts) and
-[`@alexify/syncom/tree`](#tree-subpath), registered with `open({ plugins })`;
+[`@alexify/syncom/tree`](#tree-subpath), registered with `createDatabase({ plugins })`;
 [`@alexify/syncom/all`](#all-subpath) is the core with every shipped plugin
 registered — the API as one import (see [Entry points](../guide/entry-points)).
 The other subpaths: the
@@ -22,36 +22,36 @@ differ.
 const syncom = require('@alexify/syncom');
 ```
 
-## Storage
+## Database
 
-### `open(options?)`
+### `createDatabase(options?)`
 
-Returns `Promise<Storage>` — typed by the options: a collection per entity
+Returns `Promise<Database>` — typed by the options: a collection per entity
 of `schema`, its records typed by the entity's Standard Schema or by
 `Schema<Shapes>` (see [TypeScript](../guide/typescript)), and the methods of
-every plugin in `plugins`, all inferred. Takes an options object only — `open('./dir')` is a
+every plugin in `plugins`, all inferred. Takes an options object only — `createDatabase('./dir')` is a
 `TypeError`. Options: `path` (default `'syncom'`), `name`
 (alias for `path`), `fsi`, `durable` and `defer` (see [Backends](#backends) and
-[the storage guide](../guide/storage)), `lock`
+[the storage guide](../guide/database)), `lock`
 (`'fail'` | `'wait'` | `false`, or `{ mode, staleAfter, poll, timeout }` — see
-[One instance per directory](../guide/storage#one-instance-per-directory)),
+[One instance per directory](../guide/database#one-instance-per-directory)),
 `maxListeners` (the listener cap of the storage and its sync manager, default
 100), `cache`, `integrity` and `catalog` (see
-[The catalog and the cache](../guide/storage#the-catalog-and-the-cache)),
+[The catalog and the cache](../guide/database#the-catalog-and-the-cache)),
 `chain` (`false` keeps no [chain](../guide/chain#through-storage)),
 `actor` (see [Operations](../guide/sync#operations)), `schema` and `validator` (see
-[Collections](../guide/storage#collections)), `search` (the text index behind
+[Collections](../guide/database#collections)), `search` (the text index behind
 `$text`, see [Full-text search](../guide/query#full-text-search)), `getId` (must mint a
-[valid id](../guide/storage#custom-identifiers)), `logger`, `encrypted`,
+[valid id](../guide/database#custom-identifiers)), `logger`, `encrypted`,
 `sync` (see [Sync options](../guide/sync#options)), `telemetry` (see
 [OpenTelemetry](../guide/telemetry)), `hooks` (see
 [Hooks and events](../guide/hooks)), `plugins` (the plugins this storage runs
 with — `text`, `tree`, `signing`, `chain`, `encryption` from their subpaths;
 see [Plugins](#plugins)).
 
-### `Storage`
+### `Database`
 
-`await new Storage(options)` — `open()` is the shorthand. Extends `Emitter`.
+`await new Database(options)` — `createDatabase()` is the shorthand. Extends `Emitter`.
 The list, text and tree methods below (`splice` … `treeRemove`, `spans`,
 `cursor`, `index`) are the `text` and `tree` plugins' — on a storage opened
 without the plugin they reject with a `TypeError` `code: 'PLUGIN_MISSING'`
@@ -59,7 +59,7 @@ naming the subpath; `@alexify/syncom/all` has both.
 
 | Method | Returns | Notes |
 | --- | --- | --- |
-| `insert(data, options?)` | `Promise<string>` | Generates an id via `getId` (a UUID by default) and writes; rejects with `code: 'INVALID_ID'` when the generator mints one that is not a [valid id](../guide/storage#custom-identifiers) |
+| `insert(data, options?)` | `Promise<string>` | Generates an id via `getId` (a UUID by default) and writes; rejects with `code: 'INVALID_ID'` when the generator mints one that is not a [valid id](../guide/database#custom-identifiers) |
 | `get(id, { at }?)` | `Promise<R \| null>` (`get<Post>(id)`; `RecordData` by default) | `null` when absent or deleted; verifies against the chain; a copy — editing it changes nothing. With `at` (the `versions` plugin's) — an event id, a stamp (a number or a `Date`), `{ vector }` or `{ tag }` — the record at that version, folded from the log, or a tag's copy (see [Versions and history](../guide/versions)); rejects with `HISTORY_GONE` when the log cannot give it exactly, `INVALID_VERSION` for a malformed `at` or a seq not reached, `TAG_NOT_FOUND` for a tag this node has not, `ENCRYPTED` for an encrypted record (at a tag one reads as its data) |
 | `tag(name)` | `Promise<Tag>` | Names the storage as it is now — `{ name, eventId, seq, ts, vector, createdAt }`, kept on this node as the catalog of the moment plus a copy of each record's file taken before its first change after the tag (see [Tags](../guide/versions#tags)); `name` is of the record-id form (a `TypeError` otherwise); deferred files land first. Rejects with `TAG_EXISTS`, `UNPERSISTED` while a record's file lags the log after a failed write, `CORRUPT` while `tags.json` is unreadable; the `versions` plugin's (`PLUGIN_MISSING` without it) |
 | `untag(name)` | `Promise<void>` | Drops a tag; the copies the next older tag needs move there; rejects with `TAG_NOT_FOUND`; the `versions` plugin's (`PLUGIN_MISSING` without it) |
@@ -67,7 +67,7 @@ naming the subpath; `@alexify/syncom/all` has both.
 | `at(name)` | `TagView` | The storage at a tag: its fields plus `get(id)` (the record as it was, through the lens and the read hooks with `at: { tag }`; `null` when it was not there), `has(id)` and `list()` (every live id then; promises — the tag's catalog is read at the view's first read), `collection(entity)` (`name`, `select()`, `count()`, `get()` as it was — `watch()` throws, no `$text`; an entity the schema has not is a `TypeError`) and `snapshot(options)` (pages like `snapshot()`, at the tag's position); throws `TAG_NOT_FOUND`; the `versions` plugin's (`PLUGIN_MISSING` without it) |
 | `atVersion(at)` | `VersionView \| TagView` | The storage at any version the log can still give exactly — an event id, a stamp, `{ vector }` (or `{ tag }`: the tag's view): `eventId`, `vector` (the ops within it, per stream), `ts`, `get(id)`, `has(id)`, `list()` and `snapshot(options)` — the pages another storage joins to stand there, what `branch(parent, { from: { at } })` forks from; a record compacted past the version, or a stream cut by compaction with nothing of it inside, is `HISTORY_GONE` (never under `retention: 'all'`); the `versions` plugin's |
 | `diff(id, from?, to?)` | `Promise<Patch[]>` | The patches that turn the record at `from` into the record at `to` (the present when omitted), per field by kind — see [Diff and restore](../guide/versions#diff-and-restore); raw, through the lens, no read hooks; a text's marks are not diffed; rejects as `get(id, { at })` would, `ENCRYPTED` for an encrypted record; the `versions` plugin's (`PLUGIN_MISSING` without it) |
-| `applyPatches(id, patches, { actor, source, message }?)` | `Promise<number>` | Realizes patches as ops of this node's own, as one [transaction](../guide/storage#transactions) (`put`, `unset`, `write`, `inc`, `add`, `remove` with `elements` — `own: true` for this node's adds alone — or exact `removals`, `splice` (with `vals`), `setAt`, `mark`, `treeMove`, `treeRemove`, `delete`, `purge`); `source` rides on the `commit` events, `message` on every op; resolves to how many ops. A patch is checked as the method of its name checks its arguments — the wrong shape is a `TypeError` with nothing minted — and every patch is first resolved and applied over a scratch record, so an index out of range, a kind clash, a cycle or a type change refuses the whole batch with nothing written; a hook or a validator that throws on a later op leaves nothing written either |
+| `applyPatches(id, patches, { actor, source, message }?)` | `Promise<number>` | Realizes patches as ops of this node's own, as one [transaction](../guide/database#transactions) (`put`, `unset`, `write`, `inc`, `add`, `remove` with `elements` — `own: true` for this node's adds alone — or exact `removals`, `splice` (with `vals`), `setAt`, `mark`, `treeMove`, `treeRemove`, `delete`, `purge`); `source` rides on the `commit` events, `message` on every op; resolves to how many ops. A patch is checked as the method of its name checks its arguments — the wrong shape is a `TypeError` with nothing minted — and every patch is first resolved and applied over a scratch record, so an index out of range, a kind clash, a cycle or a type change refuses the whole batch with nothing written; a hook or a validator that throws on a later op leaves nothing written either |
 | `transact(fn, { actor, source, message }?)` | `Promise<T>` | Runs `fn(tx)` as one transaction: every write made through `tx` — the write API less `purge()`, the plugins' methods included, plus `get(id)`/`has(id)` reading the records as the transaction left them (through the lens, without the read hooks) — is one op, prepared in one turn of the mutation queue with the hooks, the validator and the unique keys of each, and appended with the others as one group once `fn` returns: all durable or none, one chain block, each record's file written once, the `commit` events after, in order. `message` (at most 1 024 characters) rides on every op — signed, logged, relayed, listed by `history()` — and `source` on their `commit` events. A throw from `fn`, or a write refused (`OUT_OF_RANGE`, `FIELD_KIND`, a validator…), leaves nothing appended and rejects with the error; an encrypted write inside is `ENCRYPTED`, `tx.purge()` a `TypeError`. Resolves to what `fn` returned once the transaction has landed |
 | `restore(id, at, { actor, source, message }?)` | `Promise<number>` | Makes the record read as it did at `at` (required) with new ops that lead back — `diff(id, undefined, at)` applied; rejects as `diff()` would; lands whole or not at all (see `applyPatches`); the `versions` plugin's (`PLUGIN_MISSING` without it) |
 | `compact(id, { actor, source, message }?)` | `Promise<number>` | Rewrites the record as the ops its reading takes today — a `write` of the registers, then one op per field of another kind: an `inc`, an `add`, one `splice` (a text or a list becomes one run), one `tree` move per node — so what lies under it goes by the reset rule here and on every peer, and `get()` and `spans()` read the same: a text's marks are laid again in the order they were made, with their expand rules, and a list or text over 1 048 576 elements is made again in several runs. It names every element anew, so the cursors into its lists and texts read `null` after, and a stacking mark has a new id; a list, text, set or tree that reads empty is left out. A peer's op stamped before the rewrite and arriving after it is dropped, as with any whole-record write. Resolves to how many ops; `0` for a record that is not there; `ENCRYPTED` for an encrypted one |
@@ -77,10 +77,10 @@ naming the subpath; `@alexify/syncom/all` has both.
 | `has(id)` | `Promise<boolean>` | `false` for a tombstone |
 | `list()` | `Promise<string[]>` | Every live id, sorted — from the catalog, no I/O |
 | `check(entity, data)` | `Promise<unknown>` | Runs the entity's validator as a write would and returns its value; rejects with `ValidationError`; writes nothing. The `schema` plugin's: `PLUGIN_MISSING` without it, as is `migrate()` |
-| `migrate({ entities, batch = 100, actor }?)` | `Promise<{ migrated, counters, sets, lists, texts, trees }>` | Rewrites records of an older schema version through the lens — a `write` of the view, then the counters and the sets added back, a list or a text as one run, a tree as one move per node (an empty one is dropped); idempotent; `actor` rides on the ops it writes; a `TypeError` without `open({ schema })` (see [Reading across versions](../guide/storage#reading-across-versions)) |
+| `migrate({ entities, batch = 100, actor }?)` | `Promise<{ migrated, counters, sets, lists, texts, trees }>` | Rewrites records of an older schema version through the lens — a `write` of the view, then the counters and the sets added back, a list or a text as one run, a tree as one move per node (an empty one is dropped); idempotent; `actor` rides on the ops it writes; a `TypeError` without `createDatabase({ schema })` (see [Reading across versions](../guide/database#reading-across-versions)) |
 | `set(id, data, options?)` | `Promise<void>` | Replaces the record (a `write` op); keeps `$type` — data naming another is a `TypeError` with `code: 'TYPE_IMMUTABLE'`; rejects with `FIELD_KIND` for a field held by another kind than a register. Every writer rejects an invalid id with `TypeError` `code: 'INVALID_ID'` |
-| `update(id, delta, { actor }?)` | `Promise<void>` | Sets the listed fields (a `set` op) — a key may be a path (`'profile/city'`, see [Paths](../guide/storage#paths)); rejects with `NOT_FOUND` when absent, `FIELD_KIND` on a counter, set, list, text or tree field, or under a prefix one holds |
-| `unset(id, fields, { actor }?)` | `Promise<void>` | Removes fields of any kind — one name or an array of them (an `unset` op: the fields' own reset, which an older concurrent write of them loses to and a newer one makes them again); a field the record does not hold is no op, so an absent record is too; also on a collection and a `Record` |
+| `update(id, delta, { actor }?)` | `Promise<void>` | Sets the listed fields (a `set` op) — a key may be a path (`'profile/city'`, see [Paths](../guide/database#paths)); rejects with `NOT_FOUND` when absent, `FIELD_KIND` on a counter, set, list, text or tree field, or under a prefix one holds |
+| `unset(id, fields, { actor }?)` | `Promise<void>` | Removes fields of any kind — one name or an array of them (an `unset` op: the fields' own reset, which an older concurrent write of them loses to and a newer one makes them again); a field the record does not hold is no op, so an absent record is too; also on a collection and a `Document` |
 | `inc(id, key, value = 1, { actor }?)` | `Promise<void>` | Adds to a counter field (an `inc` op); `FIELD_KIND` on a field of any other kind |
 | `add(id, key, elements, { actor }?)` | `Promise<void>` | Adds JSON values to a set field (an `add` op); creates the field and the record when absent; `FIELD_KIND` on a field of any other kind |
 | `remove(id, key, elements, { actor }?)` | `Promise<void>` | Removes from a set field the elements this node has seen added (a `remove` op; none seen: no op); `FIELD_KIND` on a field of any other kind |
@@ -110,38 +110,38 @@ naming the subpath; `@alexify/syncom/all` has both.
 | `position(id, key, cursor)` | `Promise<{ index, side } \| null>` | Where a cursor is now and which side it keeps to (`'before'`, `'after'`) — what a selection is restored from; `null` once its place is gone; the `text` plugin's |
 | `positions(id, key, cursors)` | `Promise<({ index, side } \| null)[]>` | `position()` of several cursors in one read of the field; the `text` plugin's |
 | `toDelta(changes, field?)` | `DeltaOp[] \| null` | The [changes](../guide/versions#changes) of text field `field` (every text change when not given) composed into one delta in Quill's form — `[{ retain, attributes? }, { insert, attributes? }, { delete }]` — over the reading before them: a splice's cut and insert, a mark as attributes over its range (`null` removes), an embed slot as `{ insert: { embed: marker } }`, a marker changed as `{ retain: 1, attributes: { embed } }`; `null` when a change is no edit a delta can say (a reset, an unset): read the field again then; the `text` plugin's |
-| `applyDelta(id, key, delta, { actor, message, expect, revision }?)` | `Promise<{ ops, revision }>` | Makes `delta` the edits of text field `key`, as one [transaction](../guide/storage#transactions): a `retain` moves on (with `attributes`, a mark — or an unmark, for a null — over what it retains; `{ embed }` sets the slot's marker), an `insert` splices text in (`{ embed: marker }` a slot with it) and marks it with its attributes, a `delete` cuts; every mark it lays has `expand: 'none'` — a delta says each insert's attributes itself; resolves to how many ops it took and the field's revision after them; `expect` is the field's text the delta was made over (another reading inside the mutation queue is `STALE`, before any op), and `revision` — what this call or `revision()` handed back with that text — spares comparing it while the field is still at that revision; a delta of the wrong shape is a `TypeError` with nothing written; the `text` plugin's |
+| `applyDelta(id, key, delta, { actor, message, expect, revision }?)` | `Promise<{ ops, revision }>` | Makes `delta` the edits of text field `key`, as one [transaction](../guide/database#transactions): a `retain` moves on (with `attributes`, a mark — or an unmark, for a null — over what it retains; `{ embed }` sets the slot's marker), an `insert` splices text in (`{ embed: marker }` a slot with it) and marks it with its attributes, a `delete` cuts; every mark it lays has `expand: 'none'` — a delta says each insert's attributes itself; resolves to how many ops it took and the field's revision after them; `expect` is the field's text the delta was made over (another reading inside the mutation queue is `STALE`, before any op), and `revision` — what this call or `revision()` handed back with that text — spares comparing it while the field is still at that revision; a delta of the wrong shape is a `TypeError` with nothing written; the `text` plugin's |
 | `openText(id, key, { window, actor, source }?)` | `Promise<TextHandle>` | A synchronous editor's [handle](../guide/editors#a-text-handle) on text field `key`: `insert(index, text, attributes?)`, `insertEmbed(index, marker, attributes?)`, `delete(index, count)`, `format(index, count, attributes)` and `applyDelta(delta)` (`applyDelta()`'s, embeds and markers included, checked whole first: a delta refused leaves nothing of itself) edit at once over the handle's reading (the field as announced, its edits on top) or throw and change nothing (`NOT_FOUND` once the record is purged; an edit of one deleted since writes it again, as a write through the storage does); `toString()`, `length`, `slice()`, `spans()` read it (empty once the record is gone); several writers of one node never grow one run from two readings; `pending`, `flushed`, `flush()`; `observe(listener)` hears every change as a delta in the handle's indices (`{ local, reset?, source }`); `close()` (an edit after it is `CLOSED`). The edits are logged `window` ms later (the storage's `defer` by default, 0 for the end of the turn) as one transaction, keystrokes that continue each other as one op and one change; a flush that cannot be logged rejects `flushed` with `UNLOGGED`; a hook sees an edit resolved (`ctx.resolved`, see [Hooks](../guide/hooks)). The storage's `flush()`, `tag()`, `close()`, and `compact()`, `restore()` and `applyPatches()` of the record, log what a handle holds first; `repair(id)` drops what a handle on the record holds unflushed (`UNLOGGED`) and it reads the record again. The `text` plugin's; never inside a transaction |
 | `swap(id, changes, prev, { actor }?)` | `Promise<boolean>` | CAS, compared inside the mutation queue — `false`, and no write, on mismatch; rejects with `NOT_FOUND` when absent |
-| `repair(id)` | `Promise<{ ops, alive }>` | Rebuilds a record whose file fails its integrity check from the log's entries of it (see [Repair](../guide/storage#repair)); rejects with `code: 'UNRECOVERABLE'` when the log holds no whole-record op for it |
+| `repair(id)` | `Promise<{ ops, alive }>` | Rebuilds a record whose file fails its integrity check from the log's entries of it (see [Repair](../guide/database#repair)); rejects with `code: 'UNRECOVERABLE'` when the log holds no whole-record op for it |
 | `delete(id, { actor }?)` | `Promise<void>` | Leaves a tombstone |
-| `purge(id, { actor }?)` | `Promise<void>` | Forgets the record for good: a `purge` op and a scrub of its log entries, here and on every peer (see [Purge](../guide/storage#purge)) |
-| `record(id)` | `Promise<Record>` | Cached per id |
+| `purge(id, { actor }?)` | `Promise<void>` | Forgets the record for good: a `purge` op and a scrub of its log entries, here and on every peer (see [Purge](../guide/database#purge)) |
+| `document(id)` | `Promise<Record>` | Cached per id |
 | `saveData(id, data, options?)` | `Promise<void>` | `{ encrypted: true }` seals the record for this node only; `{ actor }` names the writer |
 | `loadData(id)` | `Promise<unknown>` | Alias of `get()`; throws if the record no longer matches its block |
-| `validate(options?)` | `Promise<boolean>` | `{ last, from }`; no argument walks the whole chain; rejects with `code: 'NO_CHAIN'` under `open({ chain: false })` or without the `chain` plugin (the message says which) |
+| `validate(options?)` | `Promise<boolean>` | `{ last, from }`; no argument walks the whole chain; rejects with `code: 'NO_CHAIN'` under `createDatabase({ chain: false })` or without the `chain` plugin (the message says which) |
 | `validate(id, data, blockHash)` | `Promise<boolean>` | One record against its block |
 | `getCachedData(id)` | `unknown \| null` | Synchronous cache peek, raw (no lens) |
 | `hasRecord(id)` | `boolean` | Whether the id is a live record — from the catalog, no I/O |
-| `stats()` | `{ closed, plugins, queue, cache: { size, max, pinned }, catalog: { entries, dirty }, tags: { count, corrupt }, held, deferred, inflight, commits: { fast, queued, coalesced }, handles: { open, pending, extents }, defer: { window, flushCost, positions }, observers, log: { length, floor, next, epoch, segments, latestTs, droppedTs, corrupt, rollFailures, pins, journaled, open, unapplied, torn, lost, appendFailures }, chain: { tail } \| null, lock: { mode } \| null }` | The node's health, from memory — no I/O; `plugins` by name; `defer` the deferred window, what its last landing took and the positions waiting; `observers` the `observe()` listeners; `tags.corrupt` while `tags.json` could not be read; `commits` the local writes so far — made at once (the fast path), through the queue, folded into the write before them (`coalesced`); `handles` the text handles open (`openText()`), how many hold edits not logged yet, and the run offsets reserved for them over every field; `log.corrupt` the log files that did not read whole at this open — a checksum that did not match, a segment or a line cut short (a segment lost, an open file kept under `log/corrupt/`); `log.open`/`log.unapplied` the groups not sealed / not applied to the records yet (a reopen replays those), `log.torn` the journal lines this open left out as torn, `log.lost` whether it lost entries it could not read, `log.appendFailures` the groups whose write failed since; `log.rollFailures` the rolls that failed since the open — what they would have sealed stays open, durable, and the next append rolls again; `held` records whose files lag the log — after a failed write, or waiting under `open({ defer })` — and `deferred` the latter alone; `inflight` local writes appended but not on disk yet; `log.pins` readers holding segments past retention |
-| `flush()` | `Promise<void>` | Lands what waits: the writes in flight, then the record files deferred under `open({ defer })` — one block, every file — so what was written is on disk when it resolves |
+| `stats()` | `{ closed, plugins, queue, cache: { size, max, pinned }, catalog: { entries, dirty }, tags: { count, corrupt }, held, deferred, inflight, commits: { fast, queued, coalesced }, handles: { open, pending, extents }, defer: { window, flushCost, positions }, observers, log: { length, floor, next, epoch, segments, latestTs, droppedTs, corrupt, rollFailures, pins, journaled, open, unapplied, torn, lost, appendFailures }, chain: { tail } \| null, lock: { mode } \| null }` | The node's health, from memory — no I/O; `plugins` by name; `defer` the deferred window, what its last landing took and the positions waiting; `observers` the `observe()` listeners; `tags.corrupt` while `tags.json` could not be read; `commits` the local writes so far — made at once (the fast path), through the queue, folded into the write before them (`coalesced`); `handles` the text handles open (`openText()`), how many hold edits not logged yet, and the run offsets reserved for them over every field; `log.corrupt` the log files that did not read whole at this open — a checksum that did not match, a segment or a line cut short (a segment lost, an open file kept under `log/corrupt/`); `log.open`/`log.unapplied` the groups not sealed / not applied to the records yet (a reopen replays those), `log.torn` the journal lines this open left out as torn, `log.lost` whether it lost entries it could not read, `log.appendFailures` the groups whose write failed since; `log.rollFailures` the rolls that failed since the open — what they would have sealed stays open, durable, and the next append rolls again; `held` records whose files lag the log — after a failed write, or waiting under `createDatabase({ defer })` — and `deferred` the latter alone; `inflight` local writes appended but not on disk yet; `log.pins` readers holding segments past retention |
+| `flush()` | `Promise<void>` | Lands what waits: the writes in flight, then the record files deferred under `createDatabase({ defer })` — one block, every file — so what was written is on disk when it resolves |
 | `applyRemote(ops, { via, scopes, peer, adoptFrom, bound }?)` | `Promise<{ applied, skipped, duplicates, gaps, malformed, unsigned, forged, outOfScope, equivocations }>` | Applies a peer's ops, in order per origin; `peer` is `{ url, node }` for the hooks; `malformed` ops (shape, id, a field nested deeper than 80 levels, a stamp beyond `sync.maxSkew` — the op's own or one its merge meta holds) and ops refused for their signature (`forged`; `unsigned` under `sync.signatures: 'require'`) are counted and dropped; so are `equivocations` — another op than the one this node holds at its seq of its stream, or one whose `prev` is not the fingerprint held at the seq before it (see [Equivocation](../guide/sync#equivocation)); an `advance` is adopted only when its origin is `adoptFrom`; under `bound` (a host's push passes the peer's granted scopes) an op whose record is outside them, before or after it, is counted `outOfScope` and dropped |
 | `snapshot({ cursor, limit, scopes }?)` | `Promise<{ records, cursor, eventId, vector }>` | One page of state, tombstones included |
 | `mergeSnapshot(records, { via, from }?)` | `Promise<void>` | Joins a page (as `merge` ops of this node) |
 | `adoptVector(vector, { via, from }?)` | `Promise<SyncOp \| null>` | Records what a joined snapshot covers (an `advance` op); the keys of this node's own streams, and a seq that is no positive safe integer, are left out |
-| `observe(id, path?, listener)` | `() => void` | Watches record `id`: `listener(changes, event)` after every turn that changed it — a local write, a transaction, a peer's page, a joined snapshot — with the record's [changes](../guide/versions#changes) of that turn, tagged by `id`, and the `transaction` event they came in; under `path` (a field or a [path](../guide/storage#paths)), the changes of that field, of what hangs under it and of a prefix of it (a reset above), and the whole record's (a delete, a purge). A listener is contained like an event listener; a throw or a rejection is logged (`listener.error`). Returns the function that stops watching |
+| `observe(id, path?, listener)` | `() => void` | Watches record `id`: `listener(changes, event)` after every turn that changed it — a local write, a transaction, a peer's page, a joined snapshot — with the record's [changes](../guide/versions#changes) of that turn, tagged by `id`, and the `transaction` event they came in; under `path` (a field or a [path](../guide/database#paths)), the changes of that field, of what hangs under it and of a prefix of it (a reset above), and the whole record's (a delete, a purge). A listener is contained like an event listener; a throw or a rejection is logged (`listener.error`). Returns the function that stops watching |
 | `close()` | `Promise<void>` | Logs what the open text handles hold (`edits.unlogged` where some could not be), then stops sync, lands what is in flight and the deferred files, and seals the log; further writes are refused (`CLOSED`). Called again, while it runs or after, it is the same close |
 
-Properties: `fsi` (the backend given to `open()`, wrapped when `durable`, or
+Properties: `fsi` (the backend given to `createDatabase()`, wrapped when `durable`, or
 the platform's), `schema`, `schemaInfo` (`{ version, hash, previous, held }`,
-`null` without a schema — see [Schema versions](../guide/storage#schema-versions)),
+`null` without a schema — see [Schema versions](../guide/database#schema-versions)),
 `sync`, `nodeId` (this node's Ed25519 public key, base64url — what its ops are
 verified against), `signatures` (`'verify'`, `'require'` or `false`), `path`,
 `log`, `vector`, `logger` (the writer built from
-`open({ logger })` — `debug`/`info`/`warn`/`error`), `telemetry` (the writer
+`createDatabase({ logger })` — `debug`/`info`/`warn`/`error`), `telemetry` (the writer
 the engine records through — the `telemetry` plugin's from `{ api }` or
 `{ tracer, meter }`, one given contained — a missing or throwing method records nothing —, or the disabled one).
-Statics: `Storage.Collection`, `Storage.Record`, `Storage.generateId()` — the
+Statics: `Database.Collection`, `Database.Document`, `Database.generateId()` — the
 default `getId`, synchronous in both halves.
 
 Events — listeners are contained, a throwing one is logged and never fails
@@ -162,11 +162,11 @@ What the storage writes to its logger — every `event:` name, its level and its
 table under [Telemetry → Log events](../guide/telemetry#log-events); the events above are what a
 listener hears, those lines what an operator reads.
 
-Hooks (`open({ hooks })`): `beforeWrite`, `afterWrite`, `beforeRead`,
+Hooks (`createDatabase({ hooks })`): `beforeWrite`, `afterWrite`, `beforeRead`,
 `afterRead`, `beforeApply`, `afterApply` — see
 [Hooks and events](../guide/hooks).
 
-### `Record`
+### `Document`
 
 Extends `Emitter`. Emits `update` with `(data, delta)` — on a staged
 assignment, and when the record changes in storage (`null` data once deleted).
@@ -183,30 +183,30 @@ assignment, and when the record changes in storage (`null` data once deleted).
 `observe(path?, listener)`, `lastEditorOf(field)`, `editorsOf()`, `editorOf(key, index)`,
 `treeMove(key, node, parent?, { after, before, actor }?)`, `treeRemove(key, node, { actor }?)`,
 `delete({ actor }?)`, plus a
-live property per field of the loaded object. `SyncomRecord<R>` types
+live property per field of the loaded object. `SyncomDocument<R>` types
 `data()` as `R | null`, `delta()` as `Partial<R>` and the live properties by
-`R` — a typed collection's `record()` and `storage.record<R>(id)` give it;
+`R` — a typed collection's `document()` and `storage.record<R>(id)` give it;
 `RecordData` otherwise (see [TypeScript](../guide/typescript)).
 
 ### `Collection`
 
 Created per schema entity and exposed as `storage.<EntityName>`; a name the
 storage already answers to (`get`, `close`, `log`, `sync`…) is refused at
-`open()` with a `TypeError`.
+`createDatabase()` with a `TypeError`.
 
 `SyncomCollection<R, I>` — `R` the record as it reads, `I` what a write
 takes; both from the entity's Standard Schema or the schema's `Shapes`,
 `RecordData` otherwise (see [TypeScript](../guide/typescript)).
-`name`, `insert(data, options?)` (resolves to the new record's `Record`),
+`name`, `insert(data, options?)` (resolves to the new record's `Document`),
 `get(id, { at }?)` (null for a record of another collection),
 `set(id, data, options?)` (stamped as the collection's),
 `update(id, delta, { actor }?)` (refuses a delta naming `$type`),
-`delete(id, { actor }?)`, `record(id)` — `update`, `delete` and `record`
+`delete(id, { actor }?)`, `document(id)` — `update`, `delete` and `record`
 reject with `NOT_FOUND` for a record of another collection —
 `select(query?)` → a cursor, `count(query?)` (the `query` plugin's:
 `PLUGIN_MISSING` without it).
 Writes through a collection with a `schema` are validated — see
-[Validation](../guide/storage#validation); `unique` keys are refused with a
+[Validation](../guide/database#validation); `unique` keys are refused with a
 `ValidationError` whose issue has `code: 'unique'` and `conflict`.
 
 #### `Cursor`
@@ -237,12 +237,12 @@ signed header, the log and record files, the procedures — are in
 const { sync, SyncManager, isSyncLink } = require('@alexify/syncom/sync');
 ```
 
-`sync` is the plugin: `open({ plugins: [sync] })` gives the storage its
+`sync` is the plugin: `createDatabase({ plugins: [sync] })` gives the storage its
 manager at `storage.sync`, built once the log is open; without it
 `storage.sync` is `PLUGIN_MISSING`, and a transport of the application's own
 carries ops with the core's `outbound()` and `applyRemote()` (see
 [Without the plugin](../guide/sync#without-the-plugin)). The options
-(`open({ sync })`), the hooks, the link contract and the apply path are the
+(`createDatabase({ sync })`), the hooks, the link contract and the apply path are the
 core's.
 
 ### `SyncManager`
@@ -285,7 +285,7 @@ ops that fork their writer's stream (see [Equivocation](../guide/sync#equivocati
 The dialer's `error`
 event also carries `'REWOUND'` and `'UNDELIVERABLE'` (see the codes below).
 
-Hooks (`open({ sync: { hooks } })`): `beforeConnect`, `beforeBootstrap` — see
+Hooks (`createDatabase({ sync: { hooks } })`): `beforeConnect`, `beforeBootstrap` — see
 [Hooks and events](../guide/hooks#sync-hooks).
 
 ### `SyncomError`
@@ -304,7 +304,7 @@ carries no code, except `INVALID_ID`, `TYPE_IMMUTABLE`, `INVALID_VERSION`,
 | --- | --- | --- |
 | `CLOSED` | any write, `applyPatches()`, `tag()`/`untag()`, `repair()`, `applyRemote()`, `mergeSnapshot()` or `adoptVector()` after `close()`; a text handle's edit (`openText()`) once its `close()` was called | — |
 | `IN_HOOK` | a write issued from inside a write or apply hook (the `cause` of the `HookError` the operation rejects with) | — |
-| `NOT_FOUND` | a write under a list element or a tree node that is not there (`items/<name>/body` with no element `name`: `id`, `field` the list or tree, `elem` the name); `update()`, `swap()` on a record that is absent, deleted or purged; a collection's `update()`, `delete()`, `record()` on a record of another collection; `treeMove()` with an `after`/`before` sibling not under the parent; `joinBlock()`, `updateBlock()`, `setAt()` on a text at a slot that is no block marker and no embed | none from `update()`/`swap()`; `id`, `entity` (the collection's) from a collection; `id`, `field`, `node` (the sibling) for a tree; `id`, `field`, `index` for a text's slot |
+| `NOT_FOUND` | a write under a list element or a tree node that is not there (`items/<name>/body` with no element `name`: `id`, `field` the list or tree, `elem` the name); `update()`, `swap()` on a record that is absent, deleted or purged; a collection's `update()`, `delete()`, `document()` on a record of another collection; `treeMove()` with an `after`/`before` sibling not under the parent; `joinBlock()`, `updateBlock()`, `setAt()` on a text at a slot that is no block marker and no embed | none from `update()`/`swap()`; `id`, `entity` (the collection's) from a collection; `id`, `field`, `node` (the sibling) for a tree; `id`, `field`, `index` for a text's slot |
 | `FIELD_KIND` | `openText()` on a field that is not a text, `update()`/`set()` on a counter, set, list, text or tree field, `inc()` on a register, set, list, text or tree field, `add()`/`remove()` on a register, counter, list, text or tree field, `splice()`/`push()`/`updateText()` on a register, counter, set or tree field (and a string on a list, an array on a text), `move()` on anything but a list, `setAt()` on anything but a list or a text, `mark()`/`unmark()`/`unmarkById()`/`insertEmbed()`/`splitBlock()`/`joinBlock()`/`updateBlock()` on anything but a text, `treeMove()`/`treeRemove()` on anything but a tree — the patches of `applyPatches()` alike; a list or text op past a bound of the field — pending work (`sync.pendingMax`, 4 096), a run (1 048 576 slots), the field as a whole (4 194 304 slots; see [Costs and limits](../guide/lists#costs-and-limits)) a splice whose cut names more than 65 536 ranges (one per run a deleted stretch crosses: delete in parts, or `compact()` first) or a `mark()` on a text that holds 65 536 marks already (a `move()` counts its position run against the field); a `treeMove()`/`treeRemove()` on a tree field that holds 65 536 moves already; an `inc()` that would take this node's sum of the counter past ±`Number.MAX_SAFE_INTEGER` | `field`, `kind` (`'register'`, `'counter'`, `'set'`, `'list'`, `'text'`, `'tree'` — or `'bound'`, with `detail` (`'pending'`, `'run'`, `'field'`, `'cuts'`, `'marks'`, `'moves'`, `'counter'` or `'paths'`), `count` and `max`); `prefix` when the field lies under a prefix a counter, a set, a list, a text or a tree holds |
 | `OUT_OF_RANGE` | `splice()` past the length of a list or text field — the index, or the index plus the count; `setAt()`/`move()` at an index the list has not; `mark()`/`unmark()` over a range the text has not; `treeMove()` to a place that would read below the 512 levels a tree shows, or between neighbours with no room left for another fractional index | `id`, `field`, `index`, `count`, `length`; for a tree `node` and `depth`, `max`, or `reason: 'fi'`, `length`, `max` |
 | `STALE` | `applyDelta()` with `expect` on a text field that reads otherwise inside the mutation queue — a peer's edit landed between the reading the delta was made over and the delta; nothing written | `id`, `field` |
@@ -317,16 +317,16 @@ carries no code, except `INVALID_ID`, `TYPE_IMMUTABLE`, `INVALID_VERSION`,
 | `BRANCH_EXISTS` | `branch()` (`@alexify/syncom/branch`) at a path that holds a `branch.json`, or any file — another storage, say — already: a branch opens in a new directory | `path` |
 | `ENCRYPTED` | `openText()` on an encrypted record; any op beyond a whole-record write — `inc()`, `add()`, `remove()`, `splice()`, `push()`, `updateText()`, `setAt()`, `move()`, `mark()`, `unmark()`, `unmarkById()`, `insertEmbed()`, `splitBlock()`, `joinBlock()`, `updateBlock()`, `treeMove()`, `treeRemove()` — on an encrypted record; `get(id, { at })` (not at a tag), `history()`, `diff()`, `restore()`, `compact()` of one: it has no past in the log; `{ encrypted: true }` on a replicated record | — |
 | `INTEGRITY` | a read (`get()`, `has()`, a cursor) or a write (it loads the record first) of a record whose file fails its chain block check, under `integrity: 'verify'`, or cannot be parsed at all (a file torn by a crash; `repair(id)` rebuilds it) | `id`, `cause` (the parse error) |
-| `CORRUPT` | `open()` when `node.json`, `schema.json` or `.blockchain.json` cannot be read, or a log file that is there fails to read (an I/O error, its `cause`; `file`); `tag()` while `tags.json` cannot be read — the open went on without tags, kept the file as `tags.corrupt.json` and keeps the copies the tags would need under `tags/.pending/` until the file is repaired; `branchInfo()` and `drop()` (`@alexify/syncom/branch`) when `branch.json` cannot be read or is no branch file | `cause`; `file` from `tag()` |
-| `DOWNGRADE` | `open()` with `ahead: 'hold'` and a schema version below the one the directory ran | — |
-| `LOCKED` | `open()` while another instance holds the directory — at once under `lock: 'fail'`, after `lock.timeout` ms under `'wait'` | `path` |
-| `KEYS_INCOMPLETE` | `open()` with the `encryption` or `signing` plugin, `loadKeys()` (`@alexify/syncom/encryption`), `loadSigningKeys()` (`@alexify/syncom/signing`) when one file of a pair (RSA or signing) is missing | — |
-| `IDENTITY_MISMATCH` | `open()` with the `signing` plugin when `node.json` names another signing key than `keys/sign-public.pem` — a key pair replaced or restored under a signed identity | `id` (what `node.json` names), `key` (the pair on disk) |
+| `CORRUPT` | `createDatabase()` when `node.json`, `schema.json` or `.blockchain.json` cannot be read, or a log file that is there fails to read (an I/O error, its `cause`; `file`); `tag()` while `tags.json` cannot be read — the open went on without tags, kept the file as `tags.corrupt.json` and keeps the copies the tags would need under `tags/.pending/` until the file is repaired; `branchInfo()` and `drop()` (`@alexify/syncom/branch`) when `branch.json` cannot be read or is no branch file | `cause`; `file` from `tag()` |
+| `DOWNGRADE` | `createDatabase()` with `ahead: 'hold'` and a schema version below the one the directory ran | — |
+| `LOCKED` | `createDatabase()` while another instance holds the directory — at once under `lock: 'fail'`, after `lock.timeout` ms under `'wait'` | `path` |
+| `KEYS_INCOMPLETE` | `createDatabase()` with the `encryption` or `signing` plugin, `loadKeys()` (`@alexify/syncom/encryption`), `loadSigningKeys()` (`@alexify/syncom/signing`) when one file of a pair (RSA or signing) is missing | — |
+| `IDENTITY_MISMATCH` | `createDatabase()` with the `signing` plugin when `node.json` names another signing key than `keys/sign-public.pem` — a key pair replaced or restored under a signed identity | `id` (what `node.json` names), `key` (the pair on disk) |
 | `BAD_SIGNATURE` | the storage's `error` event, once per page: a peer's op whose signature does not verify against its origin, or whose payload its digest does not match (`sync.signatures` `'verify'` or `'require'`) | `op` (the first refused), `count` |
 | `UNSIGNED` | the storage's `error` event, once per page, under `sync.signatures: 'require'`: a peer's op with no signature, or whose origin is no signing key | `op`, `count` |
 | `EQUIVOCATION` | the storage's `error` event, once per page: a writer made two ops at one seq of one stream — a directory restored from an older copy, a second instance under one identity, a key holder that lies. `reason` `'seq'`: a peer's op at a seq this node holds another op at; `'chain'`: the next op of a stream whose `prev` is not the fingerprint of the op this node holds at the seq before it (or names none, signed). Refused like a forged op — not logged, not relayed, a gap for its stream — and counted `equivocations` (see [Equivocation](../guide/sync#equivocation)) | `op` (the first refused), `origin`, `scope` (`null` for the global one), `seq`, `held` (the fingerprint this node holds — at the op's seq, or at the one before it), `received` (the op's fingerprint, or the `prev` it names; `null` for none), `count` |
 | `BAD_ENVELOPE` | `decrypt()` (`@alexify/syncom/encryption`) of a ciphertext this version does not read | — |
-| `DECRYPT_FAILED` | a read through `atRest()` (`@alexify/syncom/encryption`) of a file that is not the key's: `reason` `'key'` (another key, or a torn ciphertext), `'plain'` (not encrypted), `'torn'` (not base64); through a storage the first such file fails `open()` — as `CORRUPT` with this as its `cause` when it is `node.json`, as is otherwise | `path`, `reason`, `cause` |
+| `DECRYPT_FAILED` | a read through `atRest()` (`@alexify/syncom/encryption`) of a file that is not the key's: `reason` `'key'` (another key, or a torn ciphertext), `'plain'` (not encrypted), `'torn'` (not base64); through a storage the first such file fails `createDatabase()` — as `CORRUPT` with this as its `cause` when it is `node.json`, as is otherwise | `path`, `reason`, `cause` |
 | `BLOCK_NOT_FOUND` | `Blockchain.readBlock()` (`@alexify/syncom/chain`), `SmartContract.load()` | `hash` |
 | `NOT_CONTRACT` | `SmartContract.load()` of a block that is not a contract | `hash` |
 | `NODE_EXISTS` | `addNode()` of a registered url | `url` |
@@ -342,11 +342,11 @@ carries no code, except `INVALID_ID`, `TYPE_IMMUTABLE`, `INVALID_VERSION`,
 | `UNDELIVERABLE` | the sync `error` event, once per hello: the host lacks ops of this node's own that its log no longer retains (written before any node was registered, and compacted since); they are not sent | `url`, `missing` (key → `{ host, retained }`) |
 | `UNLOGGED` | a text handle's flush (`openText()`): its edits could not be logged — the append failed, or a hook or a validator refused one; the handle drops what was not logged (the batch, the flushes taken behind it, what still waits) and reads the field as announced again, its observers told to read it again (`reset`), `flushed` rejects with it (the handle's `error` event too) and `handle.unlogged` is logged. The storage's `flush()` and `tag()` flush every open handle and reject with one `UNLOGGED` for all that could not be (`close()` logs `edits.unlogged` instead and closes). A step that fails after the append — an `afterWrite` hook — is that error, not `UNLOGGED`: the edits are logged and the handle keeps them | `id`, `field`, `edits` (how many were dropped), `cause`; from the storage: `handles`, `edits`, `cause` |
 | `KINDS_MISMATCH` | the sync `error` event, when a bootstrap would start: the host's `hello` named fewer kinds than this node runs with (a text node joining a core-only host), so its snapshot would lack those fields and the adopted vector would hide the ops behind them; nothing is joined, the feed is left to resume | `url`, `node`, `missing` (the kind names) |
-| `SKEW`, `OP_UNREADABLE`, `OP_REFUSED`, `OP_INVALID` | the storage `error` event — see [`Storage`](#storage) | `op`, plus `rejected` / `entity` + `issues`; `cause` for `OP_UNREADABLE` |
-| `INVALID_ID` | every writer, `repair()`, `diff()`, `applyPatches()`, `compact()`, `spans()`, `cursor()`, `index()` given an id that is not a [valid id](../guide/storage#custom-identifiers) — and `insert()` when `getId` mints one (a `TypeError`); `get()`, `has()` and `history()` answer as for an absent record | — |
+| `SKEW`, `OP_UNREADABLE`, `OP_REFUSED`, `OP_INVALID` | the storage `error` event — see [`Database`](#storage) | `op`, plus `rejected` / `entity` + `issues`; `cause` for `OP_UNREADABLE` |
+| `INVALID_ID` | every writer, `repair()`, `diff()`, `applyPatches()`, `compact()`, `spans()`, `cursor()`, `index()` given an id that is not a [valid id](../guide/database#custom-identifiers) — and `insert()` when `getId` mints one (a `TypeError`); `get()`, `has()` and `history()` answer as for an absent record | — |
 | `TYPE_IMMUTABLE` | a local `set()`, `update()`, `swap()`, `record.save()` or patch whose data names another `$type` than the record's (a `TypeError`) | — |
-| `NO_CHAIN` | `validate()` under `open({ chain: false })` or without the `chain` plugin (a `TypeError`; the message says which) | — |
-| `PLUGIN_MISSING` | a method, a patch action or a local op of a kind the storage was not opened with — `splice()` without the `text` plugin — and `open()` of a directory that ran with a kind the call lacks; `open()` asking for what no registered plugin provides — `sync.signatures: 'require'` without `signing`, `chain: true` without `chain`, `encrypted: true` without `encryption` — and a per-call `{ encrypted: true }` without it (a `TypeError`; the message names the subpath) | — |
+| `NO_CHAIN` | `validate()` under `createDatabase({ chain: false })` or without the `chain` plugin (a `TypeError`; the message says which) | — |
+| `PLUGIN_MISSING` | a method, a patch action or a local op of a kind the storage was not opened with — `splice()` without the `text` plugin — and `createDatabase()` of a directory that ran with a kind the call lacks; `createDatabase()` asking for what no registered plugin provides — `sync.signatures: 'require'` without `signing`, `chain: true` without `chain`, `encrypted: true` without `encryption` — and a per-call `{ encrypted: true }` without it (a `TypeError`; the message names the subpath) | — |
 | `PRESENCE_SIZE` | a presence `set()` whose state is past its bounds — 16 KiB, 64 keys, 8 deep (a `TypeError`) | — |
 | `HOOK_FAILED` | a `HookError` | `hook`, `cause` |
 | `VALIDATION_FAILED` | a `ValidationError` | `entity`, `issues`, `cause` |
@@ -389,7 +389,7 @@ own, no `sync` plugin needed (see [Without the plugin](../guide/sync#without-the
 
 Structural check for the reserved `SharedLog` contract (`append`, `read`,
 `parseId` — the shape of wrpc's `BrokerLog`): what a broker-backed hub mode
-will take after this version. `open({ sync: { sharedLog } })` is refused.
+will take after this version. `createDatabase({ sync: { sharedLog } })` is refused.
 
 ## Operation log and model
 
@@ -451,12 +451,12 @@ versions plugin's [patches](#versions-subpath) — nor the editor's
 const { chain, Blockchain } = require('@alexify/syncom/chain');
 ```
 
-`chain` is the plugin: `open({ plugins: [chain] })` writes a block per applied
+`chain` is the plugin: `createDatabase({ plugins: [chain] })` writes a block per applied
 batch, checks a record file against its block on a cold read and gives
 `validate()` something to walk (see [Blockchain log](../guide/chain)); without
 it no block is written, `stats().chain` is `null` and `validate()` rejects
-with `NO_CHAIN` naming the plugin, `open({ chain: true })` is `PLUGIN_MISSING`.
-`open({ chain: false })` keeps the plugin registered and the chain off.
+with `NO_CHAIN` naming the plugin, `createDatabase({ chain: true })` is `PLUGIN_MISSING`.
+`createDatabase({ chain: false })` keeps the plugin registered and the chain off.
 Blocks are SHA-256 of their JSON through Web Crypto on both platforms.
 
 ### `Blockchain`
@@ -502,13 +502,13 @@ storage access a contract has.
 const { signing, calculateHash, generateSigningKeys, loadSigningKeys, sign, verify } = require('@alexify/syncom/signing');
 ```
 
-`signing` is the plugin: `open({ plugins: [signing] })` makes the node id its
+`signing` is the plugin: `createDatabase({ plugins: [signing] })` makes the node id its
 Ed25519 public key (`keys/sign-public.pem`, made at the first open), signs
 every op the node makes and verifies a peer's against its origin under
 `sync.signatures` (see [Signatures](../guide/sync#signatures)). Without it
 the node id is what `getId` mints (a UUID by default), nothing is signed and
 nothing is checked — the semantics of an unsigned op under `'verify'`, now for
-every op — and `sync.signatures: 'require'` is `PLUGIN_MISSING` at `open()`.
+every op — and `sync.signatures: 'require'` is `PLUGIN_MISSING` at `createDatabase()`.
 A directory that ran with the plugin keeps the key as its id without it; one
 born without it is rekeyed once, with an `identity.rekeyed` warning, when the
 plugin arrives.
@@ -539,8 +539,8 @@ const { encryption, atRest, generateKeys, loadKeys, encrypt, decrypt } = require
 
 `encryption` is the plugin behind `{ encrypted: true }` — a record sealed for
 this node's RSA pair (`keys/public.pem`, `keys/private.pem`), written outside
-the op log, never replicated (see [Encryption at rest](../guide/storage#encryption-at-rest));
-without it `open({ encrypted: true })` and a per-call `{ encrypted: true }` are
+the op log, never replicated (see [Encryption at rest](../guide/database#encryption-at-rest));
+without it `createDatabase({ encrypted: true })` and a per-call `{ encrypted: true }` are
 `PLUGIN_MISSING`.
 
 `atRest(fsi, { key | password, salt, iterations })` wraps a backend so that
@@ -552,7 +552,7 @@ bytes (a `Uint8Array`) or a Web Crypto AES-GCM `CryptoKey`; `password` with a
 `salt` of 8 characters or more derives one by PBKDF2-SHA-256 (`iterations`
 600 000 by default, 1 000 at least). The key is never written. A file that
 is not the key's is `DECRYPT_FAILED` (`reason` `'key'`, `'plain'`, `'torn'`);
-through a storage the first such file fails `open()`. The options are
+through a storage the first such file fails `createDatabase()`. The options are
 checked when the wrapper is made (a `TypeError`). See
 [Backends](../guide/backends#encrypted-at-rest).
 
@@ -576,14 +576,14 @@ exists, and rejecting with `code: 'KEYS_INCOMPLETE'` when only one does.
 const { schema, ValidationError } = require('@alexify/syncom/schema');
 ```
 
-`schema` is the plugin: `open({ plugins: [schema], schema, validator })` reads
+`schema` is the plugin: `createDatabase({ plugins: [schema], schema, validator })` reads
 the entity definitions once — the validators adapted (Standard Schema, a
 function, what `validator.compile` gives), the id fields, the indexes and
 search fields, the migrations and the lens — and the core applies them:
 collections on the storage, validation on the write path, the catalog's
 indexes, `schemaInfo` for hello, `migrate()` and `check()` (see
-[Schema and validation](../guide/schema)). Without the plugin `open({ schema })`
-and `open({ validator })` are `PLUGIN_MISSING`, as are `migrate()` and
+[Schema and validation](../guide/schema)). Without the plugin `createDatabase({ schema })`
+and `createDatabase({ validator })` are `PLUGIN_MISSING`, as are `migrate()` and
 `check()`, and records are untyped — `$type` a field like any other.
 `ValidationError` is the root's, re-exported, and so are the types a schema
 carries for TypeScript: `Shapes`, `SchemaOutput<S>`, `SchemaInput<S>`,
@@ -595,10 +595,10 @@ carries for TypeScript: `Shapes`, `SchemaOutput<S>`, `SchemaInput<S>`,
 const { query } = require('@alexify/syncom/query');
 ```
 
-`query` is the plugin: `open({ plugins: [query] })` gives every collection
+`query` is the plugin: `createDatabase({ plugins: [query] })` gives every collection
 its `select(query)` cursor, `count(query)` and `watch()`, and a view at a tag
 its `select()`/`count()` (see [Queries](../guide/query)). The catalog, its
-indexes and the text index behind `$text` (`open({ search })`) are the
+indexes and the text index behind `$text` (`createDatabase({ search })`) are the
 core's, kept whether or not anything queries them; without the plugin
 `select()` and `count()` throw `PLUGIN_MISSING`.
 
@@ -608,7 +608,7 @@ core's, kept whether or not anything queries them; without the plugin
 const { versions } = require('@alexify/syncom/versions');
 ```
 
-`versions` is the plugin: `open({ plugins: [versions] })` gives the storage
+`versions` is the plugin: `createDatabase({ plugins: [versions] })` gives the storage
 its past — `get(id, { at })` and `history()` folded from the log, `diff()`
 between two versions and `restore()` the way back — and the tags (`tag`,
 `untag`, `tags`, `at`), named versions kept on this node, copy-on-write at
@@ -616,7 +616,7 @@ the record-file seam (see [Versions and history](../guide/versions)). The
 present and its patches — `applyPatches()`, `compact()` — are the core's,
 and so is the `commit` event the undo subpath stands on. Without the plugin
 those methods throw `PLUGIN_MISSING`, `stats().tags` is `null`, and a
-directory that holds tags is refused at `open()`: its copies would not be
+directory that holds tags is refused at `createDatabase()`: its copies would not be
 kept.
 
 ## Telemetry (subpath)
@@ -625,14 +625,14 @@ kept.
 const { telemetry, createTelemetry } = require('@alexify/syncom/telemetry');
 ```
 
-`telemetry` is the plugin: `open({ plugins: [telemetry], telemetry })` adapts
+`telemetry` is the plugin: `createDatabase({ plugins: [telemetry], telemetry })` adapts
 `{ api }` (the `@opentelemetry/api` module) or `{ tracer, meter }` into the
 writer the engine records through (see [OpenTelemetry](../guide/telemetry)).
 `createTelemetry(options)` builds that writer by hand — for an `OpLog` opened
-on its own, or to give `open({ telemetry })` as it is, which the core takes
+on its own, or to give `createDatabase({ telemetry })` as it is, which the core takes
 without the plugin (duck-typed: `enabled`, `withSpan`); nothing usable is the
 frozen disabled writer, whose `withSpan` still runs its callback. Without the
-plugin an api or a tracer given to `open()` is `PLUGIN_MISSING`.
+plugin an api or a tracer given to `createDatabase()` is `PLUGIN_MISSING`.
 
 ## Backends
 
@@ -649,8 +649,8 @@ server, OPFS in the browser — as those five functions, and:
 
 | Export | Notes |
 | --- | --- |
-| `open({ fsi })` | Any object with the five functions; the storage, its log, chain, keys and registry all go through it. `storage.fsi` is what was given (wrapped when `durable`) |
-| `open({ durable: true })` | Every write is followed by the backend's `sync`; a backend without one (OPFS, memory) logs `durable.noop` at debug |
+| `createDatabase({ fsi })` | Any object with the five functions; the storage, its log, chain, keys and registry all go through it. `storage.fsi` is what was given (wrapped when `durable`) |
+| `createDatabase({ durable: true })` | Every write is followed by the backend's `sync`; a backend without one (OPFS, memory) logs `durable.noop` at debug |
 | `create(dir, file, content)` *(optional)* | Exclusive create (`EEXIST` when the file is there) — `node:fs` and the memory backend have it; the directory lock uses it to make a race deterministic |
 | `isFsi(value)` | Whether `value` has the five functions |
 | `memory()` (`@alexify/syncom/memory`) | A backend in memory: `size`, `dump()`, the exclusive `create`; two storages opened over one share it |
@@ -666,7 +666,7 @@ own (see [Browser](../guide/browser)).
 
 ### `createPlugins(modules)`
 
-The registry one `open({ plugins })` builds, frozen: `names`, `rank` (every
+The registry one `createDatabase({ plugins })` builds, frozen: `names`, `rank` (every
 kind's place in the precedence — register 0, counter 1, set 2, then the
 plugins' kinds) and what the core calls per module. A module that gets
 something wrong — a rank below 3 or taken, a block code or an op type claimed
@@ -687,7 +687,7 @@ identity (`signing`), the sealing of records (`encryption`), the chain
 (`chain`), the definitions of `schema`, the writer of `telemetry`, the
 cursor of `query`, the tags of `versions` — or once it is open (the manager
 of `sync`), and what the options ask for and no plugin provides is refused at
-`open()` the same way: `sync.signatures: 'require'` without `signing`,
+`createDatabase()` the same way: `sync.signatures: 'require'` without `signing`,
 `chain: true` without `chain`, `encrypted: true` without `encryption` (and a
 per-call `{ encrypted: true }` at the call), `schema` or `validator` without
 `schema`, an OpenTelemetry api or tracer without `telemetry`, a directory
@@ -698,19 +698,19 @@ that holds tags without `versions`. Without them the node id is what
 
 A plugin's `methods` (`{ name: (core, …args) }`) are the storage's: the
 shipped ones through the facade's own methods, an application's plugin's
-installed at `open()` — `storage.greet(id, word)` calls `greet(core, id,
+installed at `createDatabase()` — `storage.greet(id, word)` calls `greet(core, id,
 word)` — and a transaction's alike (`tx.greet(…)`, inside it). A method named
-like a member of the storage, or `then`, is a `TypeError` at `open()`.
+like a member of the storage, or `then`, is a `TypeError` at `createDatabase()`.
 
 ## All (subpath)
 
 ```js
-const { open, Storage, applyOp, mergeEntry, text, tree, signing, chain, encryption, sync, schema, telemetry, query, versions, PLUGINS } = require('@alexify/syncom/all');
+const { createDatabase, Database, applyOp, mergeEntry, text, tree, signing, chain, encryption, sync, schema, telemetry, query, versions, PLUGINS } = require('@alexify/syncom/all');
 ```
 
 Everything the root and the `/signing`, `/chain`, `/encryption`, `/memory`,
 `/layered`, `/sync`, `/schema`, `/telemetry`, `/query` and `/versions`
-subpaths export, plus `open()`/`Storage` with every shipped plugin registered
+subpaths export, plus `createDatabase()`/`Database` with every shipped plugin registered
 ahead of the caller's (`text`, `tree`, `signing`, `chain`, `encryption`,
 `sync`, `schema`, `telemetry`, `query`, `versions`; a plugin given twice is
 given once), `applyOp`/`mergeEntry` folding under the same
@@ -722,7 +722,7 @@ examples open.
 
 ```js
 const { text } = require('@alexify/syncom/text');
-const storage = await open({ plugins: [text] });
+const storage = await createDatabase({ plugins: [text] });
 ```
 
 The `list` and `text` kinds: the sequence engine (Fugue runs, run-length
@@ -736,7 +736,7 @@ its too.
 
 ```js
 const { tree } = require('@alexify/syncom/tree');
-const storage = await open({ plugins: [tree] });
+const storage = await createDatabase({ plugins: [tree] });
 ```
 
 The `tree` kind: a movable tree per field and `treeMove`, `treeRemove`; the
@@ -775,7 +775,7 @@ vocabulary, Myers and Emitter are the core's. `UndoManager` is the class
 
 | Member | Notes |
 | --- | --- |
-| `createUndo(storage, { mergeInterval = 500, limit = 100, scope, exclude, actor, trackedSources, records, paths, onPush, onPop }?)` | `UndoManager` — commits within `mergeInterval` ms of a step's first make one step (a [transaction](../guide/storage#transactions)'s commits one whatever the interval), `limit` steps are kept, `scope` keeps to one scope's ops (`'*'` the global one), `exclude(op)` leaves ops out, `actor` is who the undo's ops say made them; `trackedSources` keeps to commits whose `source` (a transaction's, a `Record`'s save) is one of them, `records` to these ids (or a predicate on the id), `paths` to these fields and what hangs under them (a step's inverse keeps to them; a whole-record change is then not tracked); `onPush`/`onPop` are the `push`/`pop` listeners; holds the log from its oldest step (`log.pins`); stops itself on `close()`; a wrong option is a `TypeError` |
+| `createUndo(storage, { mergeInterval = 500, limit = 100, scope, exclude, actor, trackedSources, records, paths, onPush, onPop }?)` | `UndoManager` — commits within `mergeInterval` ms of a step's first make one step (a [transaction](../guide/database#transactions)'s commits one whatever the interval), `limit` steps are kept, `scope` keeps to one scope's ops (`'*'` the global one), `exclude(op)` leaves ops out, `actor` is who the undo's ops say made them; `trackedSources` keeps to commits whose `source` (a transaction's, a `Document`'s save) is one of them, `records` to these ids (or a predicate on the id), `paths` to these fields and what hangs under them (a step's inverse keeps to them; a whole-record change is then not tracked); `onPush`/`onPop` are the `push`/`pop` listeners; holds the log from its oldest step (`log.pins`); stops itself on `close()`; a wrong option is a `TypeError` |
 | `undo({ force }?)`, `redo({ force }?)` | `Promise<{ applied, skipped }>` — the newest step taken back (done again) as new ops; a field anyone else changed since is left alone and counted in `skipped`, a whole-record step with such a conflict is skipped whole, unless `force` |
 | `canUndo`, `canRedo`, `size` | `boolean`, `boolean`, `{ undo, redo }` |
 | `mark()` | Closes the current step: the next commit starts a new one |
@@ -850,7 +850,7 @@ builds on. See [Editors](../guide/editors).
 | Member | Notes |
 | --- | --- |
 | `toStore(cursor, options?)` | A query's rows, as `watch()` gives them; `undefined` until the first fetch |
-| `toStore(record, options?)` | A live `Record`'s data — a copy per change; `null` once deleted |
+| `toStore(record, options?)` | A live `Document`'s data — a copy per change; `null` once deleted |
 | `toStore(presence, options?)` | A presence room's states, a `Map` by node |
 | `toStore(storage, id, { path }?)` | The record as `get()` reads it — or the field at `path` (`'profile/city'`) — read again after every turn that changed it; the newest read wins |
 | `fromEvents(emitter, events, read, options?)` | `read()` (a value or a promise of one) at the start and after each of `events` — the sync manager's `peers()` on `peer` and `sync`, say |
@@ -869,7 +869,7 @@ through the parent's own constructor, so it bundles no engine.
 
 | Function | Returns | Notes |
 | --- | --- | --- |
-| `branch(parent, { path, from?: { tag } \| { at }, ...options })` | `Promise<Storage>` | A storage at `path` — a new identity — standing at the parent's state, or at the tag; opened with `options` (`fsi` the parent's unless given; `sync` gets `retention: { ops: 0 }` and `autoStart: false`); writes `branch.json`; rejects with `BRANCH_EXISTS` for a path that holds a `branch.json` or any other file (another storage is never taken over), `TAG_NOT_FOUND` for a tag the parent has not, `HISTORY_GONE` for a `from.at` version its log no longer gives exactly (`branchInfo().forkedAt.at` keeps the version as given); a fork that fails leaves nothing behind |
+| `branch(parent, { path, from?: { tag } \| { at }, ...options })` | `Promise<Database>` | A storage at `path` — a new identity — standing at the parent's state, or at the tag; opened with `options` (`fsi` the parent's unless given; `sync` gets `retention: { ops: 0 }` and `autoStart: false`); writes `branch.json`; rejects with `BRANCH_EXISTS` for a path that holds a `branch.json` or any other file (another storage is never taken over), `TAG_NOT_FOUND` for a tag the parent has not, `HISTORY_GONE` for a `from.at` version its log no longer gives exactly (`branchInfo().forkedAt.at` keeps the version as given); a fork that fails leaves nothing behind |
 | `merge(source, { into })` | `Promise<{ ops, pages, joined }>` | Hands `into` the ops it lacks through `applyRemote`, in pages — of every stream the source holds; `joined: true` when the source's log no longer held what `into` needs of any of them (a third node's included) and its state was joined instead, never a gap. Either way round; a storage into itself is a `TypeError` |
 | `branchInfo(storage)` | `Promise<BranchInfo \| null>` | `{ parent, forkedAt: { eventId, vector, ts, tag }, createdAt }` from the directory's `branch.json`, or `null`; rejects with `CORRUPT` when the file cannot be read |
 | `drop(storage)` | `Promise<void>` | Closes the branch and removes its files (the directories stay); a storage with no `branch.json` is refused with a `TypeError`, an unreadable one with `CORRUPT` — this is the one call that deletes data, and it takes only what `branch()` made |
@@ -882,7 +882,7 @@ const { createSearch, normalize, trigrams } = require('@alexify/syncom/search');
 
 | Export | Notes |
 | --- | --- |
-| `createSearch({ minOverlap }?)` | For `open({ search })`: a function that makes a fresh trigram index per searchable entity. `minOverlap` (0 to 1, default 0.3) is the share of a query's distinct trigrams a record must hold to match; anything else is a `TypeError` |
+| `createSearch({ minOverlap }?)` | For `createDatabase({ search })`: a function that makes a fresh trigram index per searchable entity. `minOverlap` (0 to 1, default 0.3) is the share of a query's distinct trigrams a record must hold to match; anything else is a `TypeError` |
 | `normalize(text)` | What the index sees: decomposed, combining marks stripped, lower case, letters and digits only, one space between words |
 | `trigrams(text)` | The per-word, space-padded trigrams of the normalized text |
 
