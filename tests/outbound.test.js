@@ -6,7 +6,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { OpLog } = require('../src/log.js');
+const { openLog } = require('./utils/log.js');
 const { memory } = require('../src/memory/memory.js');
 const { outbound } = require('../src/sync/outbound.js');
 const { opInScope } = require('../src/scope.js');
@@ -30,7 +30,7 @@ const walked = (log, { exclude, vector, scopes = null, own, allStreams = false }
 test('outbound() picks by stream what the walk over the whole log picked, in log order', async () => {
   for (const seed of [1, 2, 3, 4, 5]) {
     const random = prng(seed);
-    const log = await new OpLog('/l', { fsi: memory(), rollAfter: 8, retention: { ops: 120 }, logger: false });
+    const log = await openLog('/l', { fsi: memory(), rollAfter: 8, retention: { ops: 120 }, logger: false });
     const origins = ['me', 'peer', 'third'];
     const scopes = [undefined, 'a', 'b'];
     const seqs = new Map();

@@ -28,12 +28,11 @@
 // fails: what a writer chains its next op to (`prev`), and what a peer's op is
 // held to (src/apply.js).
 
-const defaultFsi = require('./fsi.js');
 const { formatEventId, parseEventId, vectorAdvance, opKey } = require('./vector.js');
 const { GLOBAL_SCOPE, inScope } = require('./scope.js');
 const { writerOf, traced, now } = require('./telemetry/writer.js');
 const { scrubOp } = require('./header.js');
-const { createJournalStore, fileOf, readFile, segmentOf, readSegment } = require('./files/journal.js');
+const { fileOf, readFile, segmentOf, readSegment } = require('./files/journal.js');
 
 const DEFAULT_ROLL_AFTER = 64;
 const DEFAULT_RETENTION_OPS = 10_000;
@@ -109,10 +108,12 @@ class OpLog {
 
   constructor(basePath, options = {}) {
     this.#log = options.logger ?? null;
-    // The medium handed in (a database's engine), else the files engine's
-    // journal over the fsi given or the platform's, under `<basePath>/log`.
-    this.#store =
-      options.store ?? createJournalStore(options.fsi ?? defaultFsi, `${basePath}/log`, { logger: this.#log });
+    // The medium: an engine's log store (src/engine.js `db.log` — the files
+    // engine's journal, a native engine's rows). The log builds none itself.
+    if (typeof options.store !== 'object' || options.store === null) {
+      throw new TypeError('OpLog: store — the log store of an engine (src/engine.js)');
+    }
+    this.#store = options.store;
     this.#rollAfter = options.rollAfter ?? DEFAULT_ROLL_AFTER;
     // `'all'` keeps everything: the log of a node that must answer any version.
     const retention = options.retention === 'all' ? { ops: Infinity } : options.retention;

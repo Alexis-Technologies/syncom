@@ -73,7 +73,7 @@ src/bootstrap.js          snapshot pages out, merge pages in, adoptVector — th
 src/errors.js             SyncomError, ValidationError, typed() — no requires
 src/ops.js                the record-level model: applyOp / mergeEntry / isAlive
 src/vector.js             clocks, version vectors, event ids
-src/log.js                OpLog — the persisted operation log over a store (the files journal by default): seqs reserved at append
+src/log.js                OpLog — the persisted operation log over the store an engine hands it (a journal, rows; it builds none): seqs reserved at append
 src/                      ships as-is — no build step, CommonJS, 'use strict'
 ```
 

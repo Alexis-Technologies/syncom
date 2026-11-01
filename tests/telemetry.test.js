@@ -8,6 +8,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert');
+const { openLog } = require('./utils/log.js');
 
 const otelApi = require('@opentelemetry/api');
 const { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } = require('@opentelemetry/sdk-trace-base');
@@ -805,7 +806,7 @@ test('OpLog telemetry', async (t) => {
     const { meter, points } = createMetrics();
     // A log on its own takes a writer — the adapter is the plugin's.
     const telemetry = createTelemetry({ tracer, meter });
-    const log = await new syncom.OpLog(dir, { telemetry, rollAfter: 2, retention: { ops: 4 } });
+    const log = await openLog(dir, { telemetry, rollAfter: 2, retention: { ops: 4 } });
     for (let seq = 1; seq <= 8; seq++) {
       await log.append([{ origin: 'n', seq, ts: seq, type: 'write', id: 'r', data: {} }]);
     }
@@ -829,7 +830,7 @@ test('OpLog telemetry', async (t) => {
     t2.after(() => cleanupTemp(dir));
     const { tracer, spans } = createTracing();
     const { meter, collect } = createMetrics();
-    const log = await new syncom.OpLog(dir, { telemetry: { tracer, meter } });
+    const log = await openLog(dir, { telemetry: { tracer, meter } });
     assert.deepStrictEqual(await log.append([]), []);
     await log.close();
     assert.strictEqual(spans().length, 0);

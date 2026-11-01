@@ -6,6 +6,7 @@
 // over the same memory backend is the same node, `durable` syncs.
 
 const test = require('node:test');
+const { openLog } = require('./utils/log.js');
 const assert = require('node:assert');
 const fs = require('node:fs/promises');
 const path = require('node:path');
@@ -59,7 +60,7 @@ test('Storage over an injected fsi', async (t) => {
     const chain = await new syncom.Blockchain('c', { fsi });
     await chain.addBlock({ n: 1 });
     assert.strictEqual(await chain.validate(), true);
-    const log = await new syncom.OpLog('l', { fsi });
+    const log = await openLog('l', { fsi });
     await log.append([{ origin: 'A', seq: 1, ts: 1, type: 'set', id: 'r', data: {} }]);
     await log.close();
     assert.deepStrictEqual(await fsi.list('l/log/open'), [], 'a close seals the open files');
