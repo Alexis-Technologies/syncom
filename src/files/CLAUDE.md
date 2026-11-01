@@ -8,8 +8,11 @@ The engine every fsi becomes: today's layout, byte for byte. The engine contract
 src/files/files.js        @alexify/syncom/files — filesEngine(fsi): a kv namespace is a directory under the path and a key a file in it,
                           a record data/<id>.json, its pieces data/<id>~<n>.json, a tag's copies tags/<tag>/data/<id>.json; write(batch)
                           lands the kv puts, then each record (its new pieces, its file, the pieces it drops), then the copies and the kv
-                          removals — not atomic; remove(path) is the sweep a branch drops with — requires backend.js, engine.js, shape.js,
-                          errors.js only
+                          removals — not atomic; remove(path) is the sweep a branch drops with; db.log is the journal store below —
+                          requires backend.js, engine.js, shape.js, errors.js, journal.js only
+src/files/journal.js      createJournalStore(fsi, path): the op log's medium — open groups as journal lines (or a file each), sealed
+                          segments with a trailer, corrupt/, index.json; load/append/seal/sealed/segments/drop/saveIndex/scrub; the
+                          file format (fileOf/readFile/segmentOf/readSegment) lives here — requires crc32.js, header.js, errors.js only
 ```
 
 ## Rules

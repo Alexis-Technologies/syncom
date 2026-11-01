@@ -128,6 +128,8 @@ export interface EngineDb {
     remove(tag: string, id: string): Promise<void>;
     drop(tag: string): Promise<void>;
   };
+  /** The op log's medium — what `OpLog` writes its groups, segments and index through; its shape is the store's (src/files/journal.js). */
+  readonly log: object;
   write(batch: EngineWriteSet): Promise<void>;
   close(): Promise<void>;
 }

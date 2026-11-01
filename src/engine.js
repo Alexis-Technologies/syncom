@@ -30,7 +30,7 @@
 // the core asks nothing a medium lacks.
 
 const METHODS = ['open', 'remove'];
-const STORES = ['kv', 'records', 'pieces', 'copies', 'write', 'close'];
+const STORES = ['kv', 'records', 'pieces', 'copies', 'log', 'write', 'close'];
 
 /** The capabilities every engine declares; an engine spreads its own over these. */
 const CAPABILITIES = Object.freeze({

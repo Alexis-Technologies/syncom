@@ -40,6 +40,12 @@ const runEngineTests = async (t, { create, root, afterEach = null }) => {
     const { db, path, done } = await open();
     assert.strictEqual(db.path, path);
     assert.deepStrictEqual(db.capabilities, engine.capabilities);
+    // The op log's medium: what src/log.js writes its groups, segments and index through.
+    for (const name of ['load', 'append', 'seal', 'sealed', 'drop', 'saveIndex', 'scrub']) {
+      assert.strictEqual(typeof db.log[name], 'function', `log.${name}`);
+    }
+    assert.strictEqual(typeof db.log.journaled, 'boolean');
+    assert.ok(Array.isArray(db.log.segments));
     await done();
   });
 

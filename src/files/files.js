@@ -6,15 +6,16 @@
 // namespace is a directory under the path and a key a file in it, a record
 // is `data/<id>.json`, its pieces `data/<id>~<n>.json`, a tag's copies
 // `tags/<tag>/data/<id>.json`; the op log keeps its journals and segments
-// under `log/`. `createDatabase({ fsi })` opens through
+// under `log/` (src/files/journal.js). `createDatabase({ fsi })` opens through
 // this engine, so node:fs, OPFS, the IndexedDB file store, memory, `layered`
 // and `atRest` keep working as they are. Requires backend.js, engine.js,
-// shape.js and errors.js only.
+// shape.js, errors.js and journal.js only.
 
 const { checkFsi } = require('../backend.js');
 const { capabilitiesOf } = require('../engine.js');
 const { isRecordId } = require('../shape.js');
 const { SyncomError } = require('../errors.js');
+const { createJournalStore } = require('./journal.js');
 
 const DATA = 'data';
 const TAGS = 'tags';
@@ -72,8 +73,10 @@ const emptyDir = async (fsi, dir, keep = null) => {
   for (let i = 0; i < names.length; i++) if (names[i] !== keep) await fsi.remove(dir, names[i]);
 };
 
-const openDb = (fsi, path, capabilities) => {
+const openDb = (fsi, path, capabilities, logger) => {
   const data = `${path}/${DATA}`;
+  // The op log's medium: the journals and segments under log/ (src/log.js owns the log).
+  const log = createJournalStore(fsi, `${path}/log`, { logger });
   const copiesDir = (tag) => `${path}/${TAGS}/${tag}/${DATA}`;
   const recordFile = (id) => `${id}${RECORD}`;
 
@@ -206,6 +209,7 @@ const openDb = (fsi, path, capabilities) => {
     records,
     pieces,
     copies,
+    log,
     write,
     // The database never closes a backend it was handed: two databases may share one.
     close: async () => {},
@@ -229,7 +233,7 @@ const filesEngine = (fsi) => {
     name: 'files',
     capabilities,
     fsi,
-    open: async (path) => openDb(fsi, path, capabilities),
+    open: async (path, { logger = null } = {}) => openDb(fsi, path, capabilities, logger),
     async remove(path) {
       const dirs = [];
       for (let i = 0; i < DIRS.length; i++) dirs.push(DIRS[i]);

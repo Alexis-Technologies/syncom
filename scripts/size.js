@@ -154,7 +154,9 @@ const ENTRIES = [
   // names kept as aliases until 1.0 (engines plan, E0). 57.5, raised by name.
   // 58.6 with the engine contract (src/engine.js) and the files engine (src/files/files.js) the core opens every fsi
   // through — a seam's property names do not minify (engines plan, E1). 59, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 59 },
+  // 59.3 with the log's medium behind a store (src/files/journal.js: load, append, seal, sealed, drop, saveIndex, scrub;
+  // engines plan, E1.2). 59.5, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 59.5 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -332,7 +334,8 @@ const ENTRIES = [
   // 131.5 (over by bytes) with state.js split where its seams are clean — the names (src/text/names.js) and a peer's
   // block normalized (src/text/normalize.js), names across modules unminified (review №4, M-4). 132, raised by name.
   // 133.4 with the engine contract and the files engine in the core (engines plan, E1). 133.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 133.5 },
+  // 134.1 with the log's store seam (engines plan, E1.2). 134.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 134.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -474,7 +477,8 @@ const ENTRIES = [
     // 38.0 (over by bytes) with a handle's flush taking what its edits made. 38.5, raised by name.
     // 38.5 (over by bytes) with the log's failed line taken out, the index's counter kept, the evidence copies
     // scrubbed, the writes counted by path and one close (review №4, E3–E9). 39, raised by name.
-    budget: 39,
+    // 39.5 with the log's store seam the versions plugin bundles with the log (engines plan, E1.2). 40, raised by name.
+    budget: 40,
   },
 ];
 
