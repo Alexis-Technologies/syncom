@@ -185,6 +185,14 @@ const ENTRIES = [
   { label: 'sqlite engine — node (@alexify/syncom/sqlite)', entry: 'src/sqlite/sqlite.js', platform: 'node' },
   // The engine over MongoDB (src/mongodb/mongodb.js): the driver injected, node-only, no browser budget (engines plan, E5).
   { label: 'mongodb engine — node (@alexify/syncom/mongodb)', entry: 'src/mongodb/mongodb.js', platform: 'node' },
+  // An engine over a message port (serveEngine/remoteEngine/connectEngine) and a copy between engines (copyEngine):
+  // platform-neutral, measured as a browser entry (engines plan, E6–E7).
+  {
+    label: 'engines — browser (@alexify/syncom/engines)',
+    entry: 'src/engines/engines.js',
+    platform: 'browser',
+    budget: 6,
+  },
   // The trigram text index behind `$text`: platform-neutral, off the main
   // entry so a node that never searches pays nothing for it.
   { label: 'search — browser (@alexify/syncom/search)', entry: 'src/search/search.js', platform: 'browser', budget: 2 },

@@ -84,6 +84,15 @@ and one `commit` event, not one per call.
   is held by a lease (`capabilities.lock: 'native'`, `db.lock()`): one document per path, renewed every third of
   `lock.staleAfter` (30 s by default), a lapsed one taken over; a writer whose lease goes to another instance
   hears `error` `LEASE_LOST` once and is read-only from then on (`READ_ONLY` on every write).
+- **An engine over a message port, and a database moved between engines: `@alexify/syncom/engines`.**
+  `serveEngine(engine, port)` answers the engine contract over a `MessagePort` (a worker thread, a
+  SharedWorker, Electron's main process); `remoteEngine(port, { name, capabilities })` and
+  `connectEngine(port)` are the engine on the other side — every call a message, an error back with its
+  code, a change stream and a lease's loss pushed, a failed append failing its group here. The database stays
+  where it is opened; only its bytes cross. `copyEngine(from, to, { path, batch })` copies a database between
+  engines — records with their pieces, a tag's copies, every kv text, the op log with its index — so the node
+  opens on the new engine as itself (identity, epoch, vector, heads) and no peer bootstraps; both databases
+  closed and held for the copy, the target empty (`TARGET_NOT_EMPTY`).
 - **An engine encrypted at rest: `atRest(engine, options)`** (`@alexify/syncom/encryption`, beside `atRest(fsi)`).
   The same key over an engine's stores: every record (as one text), piece, copy, kv text, log entry and the
   log's index a ciphertext bound to its place (`data/<id>.json`, `log/<seq>`…), the keys and the index's `floor`

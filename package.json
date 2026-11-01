@@ -43,6 +43,10 @@
       "types": "./src/mongodb/mongodb.d.ts",
       "default": "./src/mongodb/mongodb.js"
     },
+    "./engines": {
+      "types": "./src/engines/engines.d.ts",
+      "default": "./src/engines/engines.js"
+    },
     "./search": {
       "types": "./src/search/search.d.ts",
       "default": "./src/search/search.js"

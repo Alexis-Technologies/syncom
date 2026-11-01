@@ -31,6 +31,7 @@ same process may run with others.
 | `@alexify/syncom/store` | a query, a record or a presence as one store — Svelte's contract and React's `useSyncExternalStore` | `toStore(source)` |
 | `@alexify/syncom/inspect` | a record's anatomy, raw, and an anonymized copy for a bug report | functions over a storage |
 | `@alexify/syncom/memory`, `/layered` | `memory()`, the backend in memory, and `memoryEngine()`, the engine in memory; `layered([top, …, bottom])`, one backend over several as a multi-level cache | `createDatabase({ fsi })`, `createDatabase({ engine })` |
+| `@alexify/syncom/engines` | `serveEngine`/`remoteEngine`/`connectEngine`, an engine over a message port (a worker); `copyEngine`, a database moved between engines | functions over engines |
 | `@alexify/syncom/sqlite`, `/mongodb` | `sqliteEngine()`, the engine over SQLite — `node:sqlite` or a driver; `mongoEngine()`, the engine over MongoDB — the driver's client injected; Node only | `createDatabase({ engine })` |
 | `@alexify/syncom/search`, `/idb`, `/wrpc`, `/contracts` | the text index behind `$text`, IndexedDB as a backend (`createIdbFsi`) and as an engine (`idbEngine`), the wrpc link adapter, smart contracts | injected: `createDatabase({ search })`, `createDatabase({ fsi })` or `({ engine })`, `sync.connect` |
 

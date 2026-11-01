@@ -93,6 +93,59 @@ passes it or it is not one. An engine and a backend together
 (`createDatabase({ engine, fsi })`) is a `TypeError`: the files engine is how a
 backend becomes an engine.
 
+### An engine in a worker
+
+`serveEngine(engine, port)` from `@alexify/syncom/engines` answers the engine
+contract over a message port — a worker thread, a SharedWorker, Electron's
+main process — and `connectEngine(port)` is that engine on the other side:
+every call one message and its answer, so the I/O runs off the thread the
+database lives on. The database stays where it is opened (its seqs are minted
+there); only its bytes cross the port.
+
+```js
+// worker.js
+const { parentPort } = require('node:worker_threads');
+const { memoryEngine } = require('@alexify/syncom/memory');
+const { serveEngine } = require('@alexify/syncom/engines');
+serveEngine(memoryEngine(), parentPort);
+
+// main.js
+const { Worker } = require('node:worker_threads');
+const { createDatabase } = require('@alexify/syncom');
+const { connectEngine } = require('@alexify/syncom/engines');
+const worker = new Worker('./worker.js');
+const engine = await connectEngine(worker);               // asks the worker what it serves
+const db = await createDatabase({ path: 'app', engine });
+```
+
+`remoteEngine(port, { name, capabilities })` is the same without the question,
+where the main thread knows what it started. An error crosses with its code
+(`EEXIST`, `INTEGRITY`, `LOCKED`…), a change stream and the loss of a lease
+are pushed back, and a group the served store cannot write fails the append
+here, as it would in-process.
+
+### Moving a database between engines
+
+`copyEngine(from, to, { path, batch })` copies the database at `path` from
+one engine to another — every record with its pieces, every tag's copies,
+every kv text (`node.json`, the keys, the chain, the catalog, the registry),
+the op log with its index — so the node opens on the new engine as itself:
+the same identity, epoch, vector and heads, and a peer resumes its cursor
+without a bootstrap. Both databases must be closed (the copy holds them as
+`createDatabase()` would), and a target that already holds a database at the
+path is `TARGET_NOT_EMPTY`.
+
+```js
+const { copyEngine } = require('@alexify/syncom/engines');
+const { sqliteEngine } = require('@alexify/syncom/sqlite');
+
+const files = filesEngine(fsi);                           // where the database is
+const sqlite = sqliteEngine({ file: 'app.sqlite' });      // where it goes
+await db.close();
+const copied = await copyEngine(files, sqlite, { path: 'app' }); // { records, pieces, copies, kv, entries }
+const moved = await createDatabase({ path: 'app', engine: sqlite });
+```
+
 ## Backends
 
 Under the files engine a kv namespace is a directory under the path and a key
