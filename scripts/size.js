@@ -150,7 +150,9 @@ const ENTRIES = [
   // that adds a `$type` kept off the fast path (review №4, E2). 56.5, raised by name.
   // 56.5 (over by bytes) with the writes counted by path (`stats().commits`, `syncom.path`), the handles' flushes
   // recorded, a peer's `actor` and `from` bounded, and one close (review №4, E3–E6). 57, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 57 },
+  // 57.1 with the rename to Database / Collection / Document (`createDatabase`, `document()`) and the pre-rename
+  // names kept as aliases until 1.0 (engines plan, E0). 57.5, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 57.5 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check

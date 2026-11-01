@@ -9,7 +9,7 @@
 // `applyRemote` the way a peer's push lands (src/sync/outbound.js picks them,
 // as a push does). A source that compacted past what the other holds is
 // joined as state instead — its snapshot pages, then its vector adopted.
-// Nothing here requires storage.js: a branch is opened through the
+// Nothing here requires database.js: a branch is opened through the
 // parent's own constructor, so this subpath bundles no engine.
 
 const { outbound, unreachable } = require('../sync/outbound.js');

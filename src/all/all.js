@@ -40,7 +40,7 @@ const withAll = (given = []) => {
   return plugins;
 };
 
-class Storage extends core.Storage {
+class Database extends core.Database {
   constructor(options = {}) {
     super(
       options === null || typeof options !== 'object' ? options : { ...options, plugins: withAll(options.plugins) },
@@ -48,7 +48,8 @@ class Storage extends core.Storage {
   }
 }
 
-const open = (options) => new Storage(options);
+const createDatabase = (options) => new Database(options);
+const open = createDatabase;
 const applyOp = (entry, op, limits = null) =>
   core.applyOp(entry, op, { ...limits, plugins: limits?.plugins ?? registry });
 const mergeEntry = (a, b, limits = null) => core.mergeEntry(a, b, { ...limits, plugins: limits?.plugins ?? registry });
@@ -61,7 +62,9 @@ module.exports = {
   ...require('../sync/sync.js'),
   memory,
   layered,
-  Storage,
+  Database,
+  createDatabase,
+  Storage: Database,
   open,
   applyOp,
   mergeEntry,

@@ -1,11 +1,11 @@
 'use strict';
 
-// The engine's front: a Storage opens a directory (through an injected
+// The engine's front: a Database opens a directory (through an injected
 // backend), owns the mutation queue every write runs in, and lends its
 // collaborators to the three write paths — the local one in src/commit.js,
 // a peer's batch in src/apply.js, a bootstrap page in src/bootstrap.js.
 // Records live in src/entries.js, what the application holds in
-// src/record.js, the options in src/options.js. The API of the field kinds
+// src/document.js and src/collection.js, the options in src/options.js. The API of the field kinds
 // beyond registers is src/fields.js and the versions API src/versions/api.js,
 // both over the same lent core: this file keeps a delegate per method.
 
@@ -13,7 +13,8 @@ const { Emitter, generateUUID, createLogger } = require('./utils.js');
 const { sha256 } = require('./crypto/digest.js');
 const { OpLog, appliedHere } = require('./log.js');
 const { EntryStore } = require('./entries.js');
-const { Record, Collection } = require('./record.js');
+const { Document } = require('./document.js');
+const { Collection } = require('./collection.js');
 const { commit, commitAtOnce, transact, prepareOp, applyLocal, MISMATCH } = require('./commit.js');
 const F = require('./fields.js');
 const P = require('./patches.js');
@@ -76,7 +77,7 @@ const WHOLE = new Set(['write', 'merge', 'delete']);
 
 const NOOP = () => {};
 
-class Storage extends Emitter {
+class Database extends Emitter {
   #path;
   #identity = null;
   #seal = null;
@@ -188,7 +189,7 @@ class Storage extends Emitter {
     this.#cacheMax = settings.cacheMax;
     this.#verify = settings.verify;
     this.#flushEvery = settings.flushEvery;
-    this.#getId = settings.getId ?? Storage.generateId;
+    this.#getId = settings.getId ?? Database.generateId;
     this.#actor = settings.actor;
     this.#encrypted = settings.encrypted;
     this.#scopeOf = settings.scope ?? (() => GLOBAL_SCOPE);
@@ -1934,14 +1935,20 @@ class Storage extends Emitter {
     return Object.freeze(api);
   }
 
-  async record(id) {
-    let record = this.#live(id);
-    if (record === undefined) {
-      record = await new Record(id, this);
-      this.#records.set(id, new WeakRef(record));
-      this.#reaper.register(record, id);
+  /** The live Document of `id`: one object per id while the application holds it. */
+  async document(id) {
+    let document = this.#live(id);
+    if (document === undefined) {
+      document = await new Document(id, this);
+      this.#records.set(id, new WeakRef(document));
+      this.#reaper.register(document, id);
     }
-    return record;
+    return document;
+  }
+
+  /** @deprecated `document()` — the name before the rename. */
+  record(id) {
+    return this.document(id);
   }
 
   getCachedData(id) {
@@ -2060,9 +2067,13 @@ class Storage extends Emitter {
   }
 }
 
-Storage.Collection = Collection;
-Storage.Record = Record;
+Database.Collection = Collection;
+Database.Document = Document;
+// The names before the rename (2026-11): `Storage`, `Record`, `open()` stay
+// as aliases until 1.0; the docs say `Database`, `Document`, `createDatabase()`.
+Database.Record = Document;
 
-const open = (options) => new Storage(options);
+const createDatabase = (options) => new Database(options);
+const open = createDatabase;
 
-module.exports = { Storage, open };
+module.exports = { Database, createDatabase, Storage: Database, open };

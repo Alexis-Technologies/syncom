@@ -2066,8 +2066,8 @@ export interface TreeMethods {
   treeRemove(id: string, key: string, node: string, options?: WriteOptions): Promise<void>;
 }
 
-export interface Storage {
-  /** The backend every file goes through — the adapter given to `open()` (wrapped when `durable`), or the platform's. */
+export interface Database {
+  /** The backend every file goes through — the adapter given to `createDatabase()` (wrapped when `durable`), or the platform's. */
   readonly fsi: Fsi;
   readonly schema: Schema | null;
   /** The schema version and snapshot hash this node runs, with `previous` when `schema.json` differed; `null` without a schema. */
@@ -2238,8 +2238,10 @@ export interface Storage {
     batch?: number;
     actor?: string;
   }): Promise<{ migrated: number; counters: number; sets: number; lists: number; texts: number; trees: number }>;
-  /** A live `Record` of `id` — `R` types its fields (`record<Post>(id)`). */
-  record<R = RecordData>(id: string): Promise<Storage.StorageRecord<R>>;
+  /** A live `Document` of `id` — `R` types its fields (`document<Post>(id)`). */
+  document<R = RecordData>(id: string): Promise<SyncomDocument<R>>;
+  /** @deprecated `document()` — the name before the rename. */
+  record<R = RecordData>(id: string): Promise<SyncomDocument<R>>;
   /** The raw data of a cached entry (no lens), `null` when not cached, absent or deleted. */
   getCachedData<R = RecordData>(id: string): R | null;
   /** Whether `id` is a live record here — from the catalog, no I/O. */
@@ -2339,14 +2341,17 @@ export interface Cursor<T = QueryRow> {
 
 // A string field whose value is a known record id reads back as a Reference.
 export interface Reference {
-  record<R = RecordData>(): Promise<SyncomRecord<R>>;
+  /** The live Document the reference names. */
+  document<R = RecordData>(): Promise<SyncomDocument<R>>;
+  /** @deprecated `document()` — the name before the rename. */
+  record<R = RecordData>(): Promise<SyncomDocument<R>>;
 }
 
 /**
- * The methods of a live `Record`; `SyncomRecord<R>` adds a property per
+ * The methods of a live `Document`; `SyncomDocument<R>` adds a property per
  * field of `R`. `data()` is `null` for a record that is not there.
  */
-export interface SyncomRecordApi<R = RecordData> {
+export interface SyncomDocumentApi<R = RecordData> {
   readonly id: string;
   on<E extends keyof RecordEvents>(event: E, listener: RecordEvents[E]): void;
   once<E extends keyof RecordEvents>(event: E, listener: RecordEvents[E]): void;
@@ -2465,7 +2470,17 @@ export interface SyncomRecordApi<R = RecordData> {
  * `record()`), any name and `unknown` under `RecordData`. A field named
  * like a method never shadows it; `data()` has it.
  */
-export type SyncomRecord<R = RecordData> = SyncomRecordApi<R> & { -readonly [K in keyof R]: R[K] };
+export type SyncomDocument<R = RecordData> = SyncomDocumentApi<R> & { -readonly [K in keyof R]: R[K] };
+/**
+ * `Document<R>`: the live document, by its RxDB-style name. Importing it shadows
+ * the DOM's `Document` inside that module — `SyncomDocument` is the same type
+ * under a name that does not.
+ */
+export type Document<R = RecordData> = SyncomDocument<R>;
+/** @deprecated `SyncomDocumentApi` — the name before the rename. */
+export type SyncomRecordApi<R = RecordData> = SyncomDocumentApi<R>;
+/** @deprecated `SyncomDocument` — the name before the rename. */
+export type SyncomRecord<R = RecordData> = SyncomDocument<R>;
 
 /**
  * A collection, `storage.<Entity>`. `R` is the record as it reads, `I` what
@@ -2485,45 +2500,74 @@ export interface SyncomCollection<R = RecordData, I = R> {
   /** Sets the listed fields — the record's own, or any by path (`'profile/city'`); `$type` may not be among them. */
   update(id: string, delta: Partial<I> & PathFields, options?: WriteOptions): Promise<void>;
   unset(id: string, fields: string | readonly string[], options?: WriteOptions): Promise<void>;
-  record(id: string): Promise<SyncomRecord<R>>;
+  /** The live Document of `id` — of this collection, or `NOT_FOUND`. */
+  document(id: string): Promise<SyncomDocument<R>>;
+  /** @deprecated `document()` — the name before the rename. */
+  record(id: string): Promise<SyncomDocument<R>>;
 }
+/** `Collection<R, I>`: a collection, by its RxDB-style name. */
+export type Collection<R = RecordData, I = R> = SyncomCollection<R, I>;
 
-/** `Storage.Collection`: what `storage.<Entity>` is an instance of (a type, not an export of the package). */
+/** `Database.Collection`: what `db.<Entity>` is an instance of (a type, not an export of the package). */
 export interface SyncomCollectionConstructor {
   readonly prototype: SyncomCollection;
-  new <R = RecordData, I = R>(storage: Storage, name: string): SyncomCollection<R, I>;
+  new <R = RecordData, I = R>(database: Database, name: string): SyncomCollection<R, I>;
 }
 
-/** `Storage.Record`: what `storage.record(id)` resolves to an instance of (a type, not an export of the package). */
-export interface SyncomRecordConstructor {
-  readonly prototype: SyncomRecord;
-  new <R = RecordData>(id: string, storage: Storage): Promise<SyncomRecord<R>>;
+/** `Database.Document`: what `db.document(id)` resolves to an instance of (a type, not an export of the package). */
+export interface SyncomDocumentConstructor {
+  readonly prototype: SyncomDocument;
+  new <R = RecordData>(id: string, database: Database): Promise<SyncomDocument<R>>;
 }
+/** @deprecated `SyncomDocumentConstructor` — the name before the rename. */
+export type SyncomRecordConstructor = SyncomDocumentConstructor;
 
-export interface StorageConstructor {
-  readonly prototype: Storage;
+export interface DatabaseConstructor {
+  readonly prototype: Database;
   new <S extends Schema = Schema, const P extends readonly Plugin<any>[] = []>(
     options?: StorageOptions<S> & { plugins?: P },
-  ): Promise<Storage & Collections<S> & PluginMethods<P>>;
+  ): Promise<Database & Collections<S> & PluginMethods<P>>;
   Collection: SyncomCollectionConstructor;
-  Record: SyncomRecordConstructor;
+  Document: SyncomDocumentConstructor;
+  /** @deprecated `Document` — the name before the rename. */
+  Record: SyncomDocumentConstructor;
   // The default `getId` — synchronous in both halves, unlike the crypto three.
   generateId(): string;
 }
+/** @deprecated `DatabaseConstructor` — the name before the rename. */
+export type StorageConstructor = DatabaseConstructor;
 
-export const Storage: StorageConstructor;
+export const Database: DatabaseConstructor;
 
+export namespace Database {
+  export type DatabaseDocument<R = RecordData> = SyncomDocument<R>;
+  export type DatabaseCollection<R = RecordData, I = R> = SyncomCollection<R, I>;
+}
+
+/** @deprecated `Database` — the name before the rename (the class and the type). */
+export const Storage: DatabaseConstructor;
+/** @deprecated `Database` — the name before the rename. */
+export type Storage = Database;
 export namespace Storage {
-  export type StorageRecord<R = RecordData> = SyncomRecord<R>;
+  /** @deprecated `SyncomDocument`. */
+  export type StorageRecord<R = RecordData> = SyncomDocument<R>;
+  /** @deprecated `SyncomCollection`. */
   export type StorageCollection<R = RecordData, I = R> = SyncomCollection<R, I>;
 }
 
+/** @deprecated `DatabaseOptions` is the same type under the new name; `StorageOptions` stays valid. */
+export type DatabaseOptions<S extends Schema = Schema> = StorageOptions<S>;
+
 /**
- * Opens a storage. The result's type follows the options: a collection per
+ * Opens a database. The result's type follows the options: a collection per
  * entity of `schema` (typed by the schema's `Shapes` or the entity's
  * Standard Schema, `RecordData` otherwise) and the methods of every plugin
  * in `plugins`. Both are inferred — no type arguments to pass.
  */
+export function createDatabase<S extends Schema = Schema, const P extends readonly Plugin<any>[] = []>(
+  options?: StorageOptions<S> & { plugins?: P },
+): Promise<Database & Collections<S> & PluginMethods<P>>;
+/** @deprecated `createDatabase()` — the name before the rename. */
 export function open<S extends Schema = Schema, const P extends readonly Plugin<any>[] = []>(
   options?: StorageOptions<S> & { plugins?: P },
-): Promise<Storage & Collections<S> & PluginMethods<P>>;
+): Promise<Database & Collections<S> & PluginMethods<P>>;

@@ -1,14 +1,14 @@
 'use strict';
 
 // The browser twin of ./index.js: it names the browser variant of every split
-// module directly. The requires NESTED inside storage.js / sync.js / log.js
+// module directly. The requires NESTED inside database.js / sync.js / log.js
 // (./fsi.js, ./utils.js) are redirected by
 // package.json#browser, so a bundler that ignores that field would still pull
 // the Node halves in.
 // The exports are spelled out — required modules spread whole, the rest by
 // name — never a spread of a local: that is the shape Node.js reads a
 // CommonJS module's names from when ESM imports it (cjs-module-lexer), so
-// `import { open } from '@alexify/syncom'` works outside a bundler too.
+// `import { createDatabase } from '@alexify/syncom'` works outside a bundler too.
 //
 // `verifyAsync` is the engine's (src/signing/ed25519.js), not the API's: it is left
 // out by name, and the root keeps one `verify`, synchronous in Node.js and a
@@ -33,7 +33,7 @@ module.exports = {
   remove,
   list,
   isFsi,
-  ...require('./storage.js'),
+  ...require('./database.js'),
   OpLog,
   applyOp,
   mergeEntry,

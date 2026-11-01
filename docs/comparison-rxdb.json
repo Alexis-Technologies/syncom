@@ -1742,20 +1742,20 @@
         "openCost": {
           "mark": "",
           "text": "the catalog (every id, indexed values) and the retained log, into memory",
-          "source": "src/storage.js:224-263,317-345; src/log.js:33,92-131",
+          "source": "src/database.js:224-263,317-345; src/log.js:33,92-131",
           "detail": "A missing or unresumable catalog is rebuilt by reading every file in data/. The log keeps 10,000 ops by default."
         },
         "durability": {
           "mark": "✅",
           "text": "log batch first, then the record; `durable: true` fsyncs each file (node:fs)",
           "note": "Files are rewritten in place, with no temp file and rename: on node:fs a crash mid-write can tear a record file, which then fails to parse until `repair(id)`.",
-          "source": "src/fsi.js:16-31,64-73; src/storage.js:155-161; docs/guide/backends.md#durability",
+          "source": "src/fsi.js:16-31,64-73; src/database.js:155-161; docs/guide/backends.md#durability",
           "detail": "`durable` fsyncs the file, not its directory. OPFS writables apply on close(); IndexedDB writes resolve on transaction complete. Without `durable`, the order in which the log file and the record file reach the disk is the OS's."
         },
         "crashRecovery": {
           "mark": "✅",
           "text": "replays the log's unsealed tail; a torn newest batch is dropped",
-          "source": "src/storage.js:538-590; src/log.js:154-173,270-283,613",
+          "source": "src/database.js:538-590; src/log.js:154-173,270-283,613",
           "detail": "Checked with scratch scripts on the memory fsi: a record file missing after its log append is rebuilt on reopen; a torn newest log batch is dropped with a `log.open.unreadable` warning. A batch whose record write failed stays unsealed and is replayed at every open until it lands."
         },
         "exclusiveOpen": {
@@ -1769,13 +1769,13 @@
           "mark": "✅",
           "text": "cold reads re-verified against the chain, torn files too (`INTEGRITY`); `repair(id)` replays the log",
           "note": "`repair(id)` rebuilds a record while the log keeps a whole-record op for it; otherwise it is `UNRECOVERABLE`, and a peer's snapshot is the way back.",
-          "source": "src/entries.js (load); src/storage.js (repair); tests/storage.fsi.test.js",
+          "source": "src/entries.js (load); src/database.js (repair); tests/storage.fsi.test.js",
           "detail": "`integrity: 'lazy'` or `chain: false` turn the per-read check off. `repair` needs a whole-record op still in the log, otherwise `UNRECOVERABLE`."
         },
         "quotas": {
           "mark": "❌",
           "text": "none; past the log append a failed record file is held in memory and reported (`UNPERSISTED`)",
-          "source": "src/storage.js (#land, #unpersisted); src/commit.js (persistLocal); tests/storage.fsi.test.js",
+          "source": "src/database.js (#land, #unpersisted); src/commit.js (persistLocal); tests/storage.fsi.test.js",
           "detail": "No `navigator.storage.persist()` request; the docs note the browser may evict OPFS."
         },
         "onDiskFormat": {
@@ -1786,7 +1786,7 @@
         "writeFootprint": {
           "mark": "",
           "text": "one log line per group of appends (a journal, where the backend appends; a file per group where it does not); the record file and its chain block once per deferred window (16 ms)",
-          "source": "src/log.js (group commit, the journal); src/storage.js (#deferWrite); docs/guide/backends.md"
+          "source": "src/log.js (group commit, the journal); src/database.js (#deferWrite); docs/guide/backends.md"
         },
         "compression": {
           "mark": "❌",
@@ -1817,7 +1817,7 @@
         "deleteDatabase": {
           "mark": "❌",
           "text": "no API; remove the directory yourself",
-          "source": "src/storage.js; src/backend.js (no directory removal in the contract)"
+          "source": "src/database.js; src/backend.js (no directory removal in the contract)"
         },
         "storageMigration": {
           "mark": "❌",
@@ -1840,7 +1840,7 @@
         "model": {
           "mark": "",
           "text": "JSON records addressed by id; collections optional (`$type`)",
-          "source": "docs/guide/storage.md#collections; src/record.js:160-215",
+          "source": "docs/guide/storage.md#collections; src/document.js:160-215",
           "detail": "`Collection.get(id)` is `storage.get(id)` with no `$type` filter: `storage.Post.get(authorId)` returned the Author record (checked by running)."
         },
         "schemaless": {
@@ -1851,12 +1851,12 @@
         "collectionNames": {
           "mark": "✅",
           "text": "any non-empty string the storage does not answer to (`get`, `close`… refused at `open()`)",
-          "source": "src/storage.js (#defineSchema); tests/storage.test.js"
+          "source": "src/database.js (#defineSchema); tests/storage.test.js"
         },
         "fieldNames": {
           "mark": "✅",
           "text": "any JSON key; `__proto__` ignored, `$type` reserved",
-          "source": "src/ops.js:151-152; src/commit.js:31-38; src/record.js:76-90",
+          "source": "src/ops.js:151-152; src/commit.js:31-38; src/document.js:76-90",
           "detail": "A field named like a `Record` member (`save`, `data`, `delete`) stays in the data but is not a property of the live Record (warned as `record.shadowed`)."
         },
         "primaryKey": {
@@ -1873,7 +1873,7 @@
         "idGeneration": {
           "mark": "✅",
           "text": "`getId`: UUID by default; sync or async generator of your own",
-          "source": "src/storage.js:118-120,861-871; docs/guide/storage.md#custom-identifiers"
+          "source": "src/database.js:118-120,861-871; docs/guide/storage.md#custom-identifiers"
         },
         "idRules": {
           "mark": "✅",
@@ -1910,7 +1910,7 @@
         "checkOnly": {
           "mark": "✅",
           "text": "`storage.check(entity, data)` returns the validated value",
-          "source": "src/storage.js:661-669; docs/guide/schema.md#the-reference"
+          "source": "src/database.js:661-669; docs/guide/schema.md#the-reference"
         },
         "tsInference": {
           "mark": "✅",
@@ -1940,13 +1940,13 @@
         "migration": {
           "mark": "✅",
           "text": "lens on read (migrations, then the validator); `migrate()` rewrites, idempotent",
-          "source": "src/schema/define.js; src/storage.js:453-505; docs/guide/schema.md#rewriting-migrate",
+          "source": "src/schema/define.js; src/database.js:453-505; docs/guide/schema.md#rewriting-migrate",
           "detail": "`migrate()` re-adds counters and sets after the whole-record write (checked by running: `{ migrated: 1, counters: 1 }`, then `{ migrated: 0 }`)."
         },
         "readOld": {
           "mark": "✅",
           "text": "read through the lens; writes allowed",
-          "source": "docs/guide/schema.md#reading-an-older-record-the-lens; src/storage.js:453-464"
+          "source": "docs/guide/schema.md#reading-an-older-record-the-lens; src/database.js:453-464"
         },
         "peerVersions": {
           "mark": "✅",
@@ -1961,7 +1961,7 @@
         "upsert": {
           "mark": "✅",
           "text": "`set(id, data)` replaces the record wholesale; `Collection.set()`",
-          "source": "src/storage.js:906-909; src/record.js:194-197",
+          "source": "src/database.js:906-909; src/document.js:194-197",
           "detail": "A whole-record write resets the record's counters and sets (docs/guide/sync.md#whole-record-writes-and-deletes)."
         },
         "insertIfAbsent": {
@@ -1972,12 +1972,12 @@
         "patch": {
           "mark": "✅",
           "text": "`update(id, delta)`; `record.field = v` then `save()`",
-          "source": "src/storage.js:927-931; src/record.js:131-136"
+          "source": "src/database.js:927-931; src/document.js:131-136"
         },
         "unsetField": {
           "mark": "✅",
           "text": "`unset(id, fields)`: an `unset` op, a tombstone an older concurrent `set` loses to",
-          "source": "src/storage.js (unset); docs/guide/storage.md"
+          "source": "src/database.js (unset); docs/guide/storage.md"
         },
         "modifyFn": {
           "mark": "❌",
@@ -1997,13 +1997,13 @@
         "cas": {
           "mark": "✅",
           "text": "`swap(id, changes, prev)` compares field values inside the write queue",
-          "source": "src/storage.js:993-1003; src/commit.js:53-61",
+          "source": "src/database.js:993-1003; src/commit.js:53-61",
           "detail": "Local only: a peer's concurrent write is merged, not refused."
         },
         "localConflicts": {
           "mark": "✅",
           "text": "one mutation queue; no local conflict errors",
-          "source": "src/storage.js:738-762; src/commit.js:209-245"
+          "source": "src/database.js:738-762; src/commit.js:209-245"
         },
         "transactions": {
           "mark": "✅",
@@ -2013,7 +2013,7 @@
         "changeAndDelete": {
           "mark": "❌",
           "text": "`delete()` carries no data; two ops",
-          "source": "src/storage.js:911-914"
+          "source": "src/database.js:911-914"
         },
         "counters": {
           "mark": "✅",
@@ -2065,7 +2065,7 @@
         "conditionalOps": {
           "mark": "❌",
           "text": "none that replicate; `swap()` is a local check",
-          "source": "src/storage.js:993-1003"
+          "source": "src/database.js:993-1003"
         },
         "deltaHelpers": {
           "mark": "✅",
@@ -2087,29 +2087,29 @@
         "documentObjects": {
           "mark": "✅",
           "text": "`record(id)`: one live, editable `Record` per id, refreshed on any change",
-          "source": "src/record.js:28-158; src/storage.js:1005-1013; docs/guide/storage.md#records"
+          "source": "src/document.js:28-158; src/database.js:1005-1013; docs/guide/storage.md#records"
         },
         "identity": {
           "mark": "✅",
           "text": "one `Record` per id while referenced (WeakRef); `get()` returns new copies",
-          "source": "src/storage.js:141-145,370-376"
+          "source": "src/database.js:141-145,370-376"
         },
         "returnedData": {
           "mark": "✅",
           "text": "JSON copies in and out; editing them changes nothing",
-          "source": "src/shape.js:9-14; src/storage.js:883-892",
+          "source": "src/shape.js:9-14; src/database.js:883-892",
           "detail": "`getCachedData()` and `snapshot()` hand out the raw objects on purpose."
         },
         "orm": {
           "mark": "❌",
           "text": "none",
-          "source": "src/record.js"
+          "source": "src/document.js"
         },
         "relations": {
           "mark": "⚠️",
           "text": "a `Record` turns any string equal to a known id into a `Reference`",
           "note": "Nothing declares the relation, so an unrelated string that matches an id becomes a `Reference` too (checked by running).",
-          "source": "src/record.js:14-27,55-70; docs/guide/storage.md#references"
+          "source": "src/document.js:14-27,55-70; docs/guide/storage.md#references"
         },
         "rxState": {
           "mark": "❌",
@@ -2237,13 +2237,13 @@
         "count": {
           "mark": "✅",
           "text": "`count(query)` for any query; from the catalog alone when every field is indexed",
-          "source": "src/query/cursor.js; src/record.js:189-191",
+          "source": "src/query/cursor.js; src/document.js:189-191",
           "detail": "Verified: an indexed range count read 0 records; any other count reads the candidates. `limit`/`offset` are ignored."
         },
         "findById": {
           "mark": "✅",
           "text": "`get(id)` (a copy), `record(id)` (a live Record); `hasRecord(id)`; a collection's `get` only its own",
-          "source": "src/storage.js:879-899; src/record.js:179-181,210-212"
+          "source": "src/database.js:879-899; src/document.js:179-181,210-212"
         },
         "findByIds": {
           "mark": "❌",
@@ -2275,7 +2275,7 @@
         "joins": {
           "mark": "❌",
           "text": "a cursor reads one collection; `Reference.record()` follows one id",
-          "source": "src/record.js:184-186; index.d.ts:1314-1316"
+          "source": "src/document.js:184-186; index.d.ts:1314-1316"
         },
         "encryptedFields": {
           "mark": "❌",
@@ -2312,7 +2312,7 @@
         "indexStorage": {
           "mark": "",
           "text": "in memory (the catalog), saved to `index/catalog.json`, caught up from the log at open",
-          "source": "src/catalog.js:1-20; src/storage.js:312-342; docs/guide/storage.md#the-catalog-and-the-cache",
+          "source": "src/catalog.js:1-20; src/database.js:312-342; docs/guide/storage.md#the-catalog-and-the-cache",
           "detail": "Every live id, its indexed values and its search text must fit in memory; a first open, a stamp the log cannot resume from, or other indexes rebuild it from one scan of data/."
         },
         "indexChange": {
@@ -2404,7 +2404,7 @@
         "documentObservable": {
           "mark": "✅",
           "text": "a live `Record` emits `update (data, delta)`, `null` once deleted",
-          "source": "src/record.js:99-120; index.d.ts:1139-1142"
+          "source": "src/document.js:99-120; index.d.ts:1139-1142"
         },
         "reactivityPrimitive": {
           "mark": "✅",
@@ -2830,13 +2830,13 @@
         "nodeIdentity": {
           "mark": "✅",
           "text": "the node id is its Ed25519 public key; a swapped key is `IDENTITY_MISMATCH`",
-          "source": "src/storage.js:515-536; src/shape.js:40-45; src/signing/ed25519.js"
+          "source": "src/database.js:515-536; src/shape.js:40-45; src/signing/ed25519.js"
         },
         "tamper": {
           "mark": "✅",
           "text": "hash-linked chain of what this node applied, unsigned (optional)",
           "note": "Whoever can write the directory can rebuild it: a read checks a record against the block its file names, not that the block is on the chain, so a planted block passes and `validate()` still answers true (checked). The ops in the log are what is signed.",
-          "source": "src/chain/chain.js (the plugin); src/storage.js:833-866; src/entries.js:86-89; docs/guide/chain.md",
+          "source": "src/chain/chain.js (the plugin); src/database.js:833-866; src/entries.js:86-89; docs/guide/chain.md",
           "detail": "Script: change a record's data, write a block `{ prev: '0', data: { id, hash } }` under its own hash, point the record at it: `get()` returns the forged data. `chain: false` keeps no chain."
         },
         "authn": {
@@ -2884,7 +2884,7 @@
           "mark": "✅",
           "text": "`purge(id)`: a `purge` op that wins at any stamp, then a scrub of the op log",
           "note": "The chain keeps an unsalted SHA-256 of every version this node wrote or applied, so whoever holds the directory can confirm a guessed record; until the next catalog save, `index/catalog.json` may still hold its indexed fields.",
-          "source": "src/storage.js:921-925; src/log.js:485; src/ops.js:427-458; docs/guide/storage.md#purge",
+          "source": "src/database.js:921-925; src/log.js:485; src/ops.js:427-458; docs/guide/storage.md#purge",
           "detail": "A scrub rewrites log files in place: a crash mid-scrub tears the file, and `purge()` is idempotent. The scrubbed op keeps origin, seq, stamp, `actor`, `sig` and the salted digest."
         },
         "purgeReplicas": {
@@ -2943,7 +2943,7 @@
           "mark": "⚠️",
           "text": "`beforeRead` / `afterRead` wrap `get()`; queries and snapshots read raw",
           "note": "An `afterRead` redaction does not reach `select()` rows, so it is not a read access control.",
-          "source": "src/storage.js:887-898; docs/guide/hooks.md#reads-stay-raw-where-it-matters"
+          "source": "src/database.js:887-898; docs/guide/hooks.md#reads-stay-raw-where-it-matters"
         },
         "errorEvents": {
           "mark": "✅",
@@ -2974,7 +2974,7 @@
         "stats": {
           "mark": "✅",
           "text": "`stats()`, `peers()`, `hosted()`, observable gauges",
-          "source": "src/storage.js:713-735; docs/guide/storage.md#health"
+          "source": "src/database.js:713-735; docs/guide/storage.md#health"
         },
         "diagPII": {
           "mark": "✅",

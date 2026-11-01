@@ -853,3 +853,24 @@ storage.record<Post>('id').then((record) => {
   record.likes = 3;
   expectType<Promise<void>>(record.save());
 });
+
+// The rename (2026-11): Database / Collection / Document, with the old names as aliases.
+{
+  const db = await syncom.createDatabase({ fsi: memory() });
+  expectType<syncom.DatabaseConstructor>(syncom.Database);
+  expectType<syncom.DatabaseConstructor>(syncom.Storage);
+  expectAssignable<syncom.Database>(db);
+  expectAssignable<Storage>(db);
+  expectType<Promise<syncom.SyncomDocument<RecordData>>>(db.document('id'));
+  expectType<Promise<syncom.Document<{ title: string }>>>(db.document<{ title: string }>('id'));
+  expectType<Promise<SyncomRecord<RecordData>>>(db.record('id'));
+  const doc = await db.document<{ title: string }>('id');
+  expectType<string>(doc.title);
+  expectAssignable<syncom.DatabaseOptions>({ fsi: memory() });
+  const typed = await syncom.createDatabase({ schema: { entities: { Post: {} } } });
+  expectAssignable<syncom.Collection>(typed.Post);
+  expectType<Promise<syncom.SyncomDocument<RecordData>>>(typed.Post.document('id'));
+  expectType<Promise<syncom.SyncomDocument<RecordData>>>(typed.Post.record('id'));
+  const legacy = await syncom.open({ fsi: memory() });
+  expectAssignable<syncom.Database>(legacy);
+}

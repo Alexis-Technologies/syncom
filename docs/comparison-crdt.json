@@ -798,7 +798,7 @@
         "replicaId": {
           "mark": "",
           "text": "`nodeId`: with `/signing`, the Ed25519 public key (43 base64url characters); without it, what `getId` mints",
-          "source": "src/signing/signing.js; src/storage.js (#loadIdentity); docs/guide/sync.md#signatures"
+          "source": "src/signing/signing.js; src/database.js (#loadIdentity); docs/guide/sync.md#signatures"
         },
         "idReuse": {
           "mark": "⚠️",
@@ -859,7 +859,7 @@
         "deleteKey": {
           "mark": "✅",
           "text": "`unset(id, fields)`: an `unset` op, a tombstone an older concurrent `set` loses to",
-          "source": "src/storage.js:1489 (unset); src/ops.js (unset); docs/guide/storage.md"
+          "source": "src/database.js:1489 (unset); src/ops.js (unset); docs/guide/storage.md"
         },
         "clear": {
           "mark": "✅",
@@ -1092,7 +1092,7 @@
         "txn": {
           "mark": "✅",
           "text": "`transact(fn)`: several writes, several records, one log append, all or none",
-          "source": "src/commit.js:601 (transact); src/storage.js:1655; docs/guide/storage.md#transactions"
+          "source": "src/commit.js:601 (transact); src/database.js:1655; docs/guide/storage.md#transactions"
         },
         "autoCommit": {
           "mark": "",
@@ -1157,7 +1157,7 @@
         "pathSub": {
           "mark": "✅",
           "text": "`observe(id, path, listener)`: the changes of a field, of what hangs under it and of a prefix of it",
-          "source": "src/storage.js:1674 (observe); docs/guide/hooks.md; docs/guide/lists.md#binding-an-editor"
+          "source": "src/database.js:1674 (observe); docs/guide/hooks.md; docs/guide/lists.md#binding-an-editor"
         },
         "eventTiming": {
           "mark": "",

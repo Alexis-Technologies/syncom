@@ -54,7 +54,8 @@ src/lazy.js               lazyField, putLazy, copyData, assignData — a field r
 src/options.js            normalizeStorageOptions — open()'s plain options checked and defaulted (lock, cache, chain, skew…)
 src/lock.js               exclusive open: Web Locks or lock.json, stale by pid or age — requires errors.js only
 src/catalog.js            the record catalog: live ids, collections, indexed values; index/catalog.json — no requires
-src/storage.js            Storage — the facade: open sequence, the mutation queue, the public API, the `core` it lends
+src/database.js           Database — the facade: open sequence, the mutation queue, the public API, the `core` it lends;
+                          `createDatabase()` (and the pre-rename aliases `Storage`, `open`)
 src/defer.js              DeferredWindow — `open({ defer })`'s slots, timer and landing step — no requires
 src/identity.js           loadIdentity — which node a directory is (the signing key, node.json, getId) — requires errors.js, shape.js only
 src/observe.js            Observers — `observe()`'s registry over the `transaction` event — requires paths.js only
@@ -64,7 +65,8 @@ src/patches.js           reading, applyPatches, compact — the present and its 
                           applyPatches); appliedHere lives in log.js
 src/entries.js            EntryStore — record files under data/ (a large block's runs in pieces beside them: `<id>~<n>.json`),
                           the bounded cache, the catalog row each change leaves
-src/record.js             Reference, Record, Collection — what the application holds; public API + the symbols only
+src/document.js           Reference, Document — what the application holds of one record; public API + the symbols only
+src/collection.js         Collection — an entity's records, `db.<Entity>`; public API + SOURCE/CURSOR only
 src/commit.js             the one local write path: prepare → validate → issue (in the queue) → land → announce (outside it, in log order) (`storage[COMMIT]`);
                           `commitAtOnce`, the same write made at once on an idle queue (LOG-9), and `transact`
 src/apply.js              a peer's batch: admit → apply one by one → persist → announce (`storage.applyRemote`)

@@ -5,7 +5,7 @@ A fork opened through the parent's constructor, a merge as a push. The rules of 
 ## Layout
 
 ```
-src/branch/branch.js      the @alexify/syncom/branch subpath — fork a storage, merge either way; never requires storage.js
+src/branch/branch.js      the @alexify/syncom/branch subpath — fork a storage, merge either way; never requires database.js
 ```
 
 ## Rules

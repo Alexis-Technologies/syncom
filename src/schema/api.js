@@ -3,7 +3,7 @@
 // What the schema plugin does over the core beyond the definitions: the
 // version file a directory remembers (`loadVersion`, at setup), and the
 // storage's methods — `migrate()` and `check()` — over the `core` Storage
-// lends (src/storage.js #lend). The core applies the definitions; nothing
+// lends (src/database.js #lend). The core applies the definitions; nothing
 // here reaches the storage's state but through `core`.
 
 const { SyncomError } = require('../errors.js');

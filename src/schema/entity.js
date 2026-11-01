@@ -6,7 +6,7 @@
 // validators adapted, the id field derived, the indexes read off a schema —
 // are the plugin's (src/schema/define.js); the core only applies them. The
 // core's side of the schema, so it lives with the schema: commit.js and
-// storage.js require it without the plugin, the lens with it. Requires
+// database.js require it without the plugin, the lens with it. Requires
 // shape.js and paths.js only: it ships to the browser.
 
 const { deepEqual } = require('../shape.js');

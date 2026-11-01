@@ -99,3 +99,10 @@ const tasks = await syncom.open({ schema: shaped });
 expectType<Promise<Task | null>>(tasks.Task.get('id'));
 expectType<Promise<syncom.SyncomRecord<Task>>>(tasks.Task.insert({ title: 'x', done: false }));
 expectType<Promise<void>>(tasks.splice('id', 'body', 0, 0, 'hi'));
+
+// The rename: the bundle's Database carries every plugin's methods under the new name too.
+{
+  const db = await syncom.createDatabase({ path: 'x' });
+  expectType<Promise<syncom.TextHandle>>(db.openText('id', 'body'));
+  expectType<syncom.DatabaseConstructor>(syncom.Database);
+}
