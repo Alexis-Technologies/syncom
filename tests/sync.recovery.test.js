@@ -89,7 +89,8 @@ test('A failed push leaves the peer behind, and the next sign of life catches it
     const second = await dialer.insert({ n: 2 });
     await waitUntil(async () => (await host.get(second)) !== null);
     assert.deepStrictEqual(await host.get(first), { n: 1 }, 'the dropped op travelled with the recovery');
-    assert.strictEqual(dialer.sync.peers()[0].behind, false);
+    // The host holds the ops before its answer is back: `behind` clears with the answer.
+    await waitUntil(() => !dialer.sync.peers()[0].behind);
     assert.strictEqual(errors.length, 1);
     // A manual sync() is a recovery too, and clears the flag.
     control.failNext = true;
