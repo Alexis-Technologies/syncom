@@ -258,11 +258,10 @@ class Tags {
   // While tags.json is unreadable: the file as it is, kept aside once per
   // record, for the newest tag of a repaired file.
   async #keepAside(id, file) {
-    if (this.#pending.has(id)) return;
+    if (this.#pending.has(id)) return null;
     const text = await file();
-    if (text === null) return;
-    await this.#db.copies.put(PENDING, id, text);
-    this.#pending.add(id);
+    if (text === null) return null;
+    return { copy: [PENDING, id, text], done: () => void this.#pending.add(id) };
   }
 
   async #save() {
@@ -336,24 +335,27 @@ class Tags {
   /**
    * Before a record's file changes: when the newest tag has no copy of it
    * yet and the record existed at the tag, the file as it is — `file()`,
-   * null when there is none — goes into the tag first. A record held since
-   * the tag (a write whose file failed) still has the tag's state on disk:
-   * nothing landed on the file after the tag, or the copy would be here.
+   * null when there is none — goes into the tag, in the write set that
+   * changes the file, ahead of it: `{ copy: [tag, id, text], done }`, and
+   * `done()` marks the copy once the set is down (a set that fails leaves
+   * the record unchanged and the copy still to make); null when there is
+   * nothing to keep. A record held since the tag (a write whose file
+   * failed) still has the tag's state on disk: nothing landed on the file
+   * after the tag, or the copy would be here.
    */
   async copyBefore(id, file) {
     if (this.#corrupt) return this.#keepAside(id, file);
     const tag = this.#tags[this.#tags.length - 1];
-    if (tag === undefined) return;
+    if (tag === undefined) return null;
     // The newest tag is read at open, at take() and at the drop that made
     // it the newest: these resolve at once.
     const [catalog, copied] = await Promise.all([this.#catalog(tag), this.#copies(tag)]);
-    if (copied.has(id)) return;
+    if (copied.has(id)) return null;
     const row = catalog.row(id);
-    if (row === null || row.gone) return;
+    if (row === null || row.gone) return null;
     const text = await file();
-    if (text === null) return;
-    await this.#db.copies.put(tag.name, id, text);
-    copied.add(id);
+    if (text === null) return null;
+    return { copy: [tag.name, id, text], done: () => void copied.add(id) };
   }
 
   /** Whether `id` was a live record at the tag — encrypted ones included. After `ensure(name)`. */

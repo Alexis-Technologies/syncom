@@ -715,4 +715,4 @@ const createJournalStore = (fsi, path, { logger = null } = {}) => {
   });
 };
 
-module.exports = { createJournalStore, fileOf, readFile, segmentOf, readSegment, indexOf, pad };
+module.exports = { createJournalStore, fileOf, readFile, segmentOf, readSegment, indexOf, pad, isAbsent };

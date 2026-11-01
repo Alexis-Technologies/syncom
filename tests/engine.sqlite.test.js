@@ -211,11 +211,65 @@ test('SQLite engine', async (t) => {
     },
   );
 
+  await t.test(
+    'a COMMIT that fails is rolled back: nothing of the set lands, the connection serves the next',
+    async () => {
+      let commits = 0;
+      const driver = {
+        open(file) {
+          const conn = new DatabaseSync(file);
+          return {
+            exec(sql) {
+              if (sql === 'COMMIT' && ++commits === 1) throw new Error('SQLITE_FULL: database or disk is full');
+              return conn.exec(sql);
+            },
+            prepare: (sql) => conn.prepare(sql),
+            close: () => conn.close(),
+          };
+        },
+      };
+      const engine = sqliteEngine({ driver });
+      const db = await engine.open('/commit', { logger: null });
+      await assert.rejects(db.write({ records: [{ id: 'a', stored: stored({ a: 1 }) }] }), /SQLITE_FULL/);
+      assert.strictEqual(await db.records.has('a'), false, 'rolled back whole');
+      await db.write({ records: [{ id: 'b', stored: stored({ b: 1 }) }] });
+      assert.deepStrictEqual((await db.records.get('b')).data, { b: 1 }, 'the next set lands');
+      assert.strictEqual(await db.records.has('a'), false);
+      await db.close();
+      await engine.close();
+    },
+  );
+
+  await t.test(
+    'a log row that does not parse is counted corrupt and left out; a meta row that does not is none',
+    async () => {
+      const database = new DatabaseSync(':memory:');
+      const engine = sqliteEngine({ database });
+      const options = { path: 'rows', engine, logger: false, defer: 0, lock: false, chain: false };
+      const db = await createDatabase(options);
+      const ids = [];
+      for (let i = 0; i < 3; i++) ids.push(await db.insert({ n: i }));
+      await db.close();
+      database.exec("UPDATE log SET entry = 'garbage' WHERE seq = 2");
+      database.exec("UPDATE meta SET value = '{not json' WHERE key = 'index'");
+      const warned = [];
+      const logger = { warn: (event) => warned.push(event.event), info() {}, error() {}, debug() {} };
+      const again = await createDatabase({ ...options, logger });
+      const { corrupt, lost } = again.stats().log;
+      assert.deepStrictEqual([corrupt, lost], [1, true]);
+      assert.ok(warned.includes('log.row.unreadable') && warned.includes('log.meta.unreadable'), warned.join(','));
+      for (const id of ids) assert.ok(await again.get(id), 'the records are on their rows still');
+      await again.close();
+      database.close();
+    },
+  );
+
   await t.test('a connection given is used as it is, set durable on request, and never closed', async () => {
     const database = new DatabaseSync(':memory:');
+    database.exec('PRAGMA synchronous = NORMAL');
     const engine = sqliteEngine({ database });
     const db = await createDatabase({ path: 'd', engine, logger: false, defer: 0, lock: false, chain: false });
-    assert.strictEqual(database.prepare('PRAGMA synchronous').get().synchronous, 1, 'NORMAL');
+    assert.strictEqual(database.prepare('PRAGMA synchronous').get().synchronous, 1, 'kept as the caller set it');
     await db.insert({ n: 1 });
     await db.close();
     const durable = await createDatabase({ path: 'd', engine, logger: false, defer: 0, lock: false, durable: true });

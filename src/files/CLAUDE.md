@@ -21,8 +21,9 @@ src/files/journal.js      createJournalStore(fsi, path): the op log's medium —
   was before the engines: the fixture tests that alter files by hand (`tests/log.test.js`, `tests/storage.pieces.test.js`,
   `tests/suites/tags.js`) are the proof. A new store or key of the contract maps onto a directory and a file here, never onto
   a new format.
-- **The order of a write set is the crash order.** The kv puts first (a chain block before the records it names), then per
-  record the pieces it makes, its file, the pieces it drops (src/entries.js says why), then the copies, then the kv
+- **The order of a write set is the crash order.** The kv puts first (a chain block before the records it names), then the
+  tags' copies (a record as it was, before its file changes: a crash between leaves a copy, never a changed record
+  without one), then per record the pieces it makes, its file, the pieces it drops (src/entries.js says why), then the kv
   removals. A files write set is never atomic (`capabilities.atomicBatch` false): the log append stays the commit point and
   a failed landing is `UNPERSISTED`, as it always was.
 - **A name is a file: checked first, sorted after.** A namespace, a key, a tag, a piece's name reach the backend only as

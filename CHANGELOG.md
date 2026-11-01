@@ -1146,6 +1146,20 @@ and one `commit` event, not one per call.
 
 ### Fixed
 
+- **A landing was more than its write set; a failed COMMIT wedged SQLite; a throw inside an IndexedDB write set kept
+  half of it.** The pieces a text left behind were removed one call at a time after the write set, and a tag's copy of
+  the record put one call before it — neither atomic with the set, two extra transactions per landing on a native
+  engine, and every engine's `pieces.remove` in a row was dead code (review №5, R-10/R-11). Both ride in the ONE write
+  set now: the copies ahead of the records (the files engine writes them first — a crash between leaves a copy, never a
+  changed record without one), the pieces a record drops with its row; `Tags.copyBefore` answers `{ copy, done }` and
+  the copy is marked once the set is down. SQLite's `COMMIT` ran outside the try: one that failed (BUSY, FULL, I/O)
+  left the transaction open and every set after failed (R-5) — rolled back now; `log.load` reads outside a transaction
+  (it took the write lock to read), a connection the caller gave keeps its pragmas (R-22), a log row that does not parse
+  is counted `corrupt` and left out instead of a bare `SyntaxError` out of the open (`log.row.unreadable`,
+  `log.meta.unreadable`; R-14), the segments list moves once the medium has it (R-21). IndexedDB aborts a write set a
+  request threw in (R-20). The files engine's `remove(path)` fails rather than answering done over a directory it could
+  not list (R-23). `atRest` raises `CORRUPT` for a decrypted row that is no JSON. `INTEGRITY` carries `reason` and the
+  parse error as `cause` (G-5).
 - **A served files engine lost log entries to a purge and to a failed append; a copy skipped records; the served side
   answered any call.** Over `serveEngine(filesEngine(…))` a purge rewrote every segment and journal the purged
   record touched from the scrubbed entries alone — the rest of each file was gone, the segment read as altered — and a

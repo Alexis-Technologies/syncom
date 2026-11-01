@@ -140,3 +140,24 @@ test('files engine: names that become files', async (t) => {
     await db.close();
   });
 });
+
+test('files engine: remove(path) says what it could not sweep', async (t) => {
+  await t.test('remove(path) fails rather than leaving files behind when a directory cannot be listed', async () => {
+    const base = memory();
+    const fsi = {
+      ...base,
+      async list(dir) {
+        if (dir === '/sweep/data') throw Object.assign(new Error('EIO: i/o error'), { code: 'EIO' });
+        return base.list(dir);
+      },
+    };
+    const engine = filesEngine(fsi);
+    const db = await engine.open('/sweep', { logger: null });
+    await db.kv.put('', 'node.json', '{}');
+    await db.close();
+    await assert.rejects(engine.remove('/sweep'), { code: 'EIO' });
+    const gone = await filesEngine(base).open('/missing', { logger: null });
+    await gone.close();
+    await filesEngine(base).remove('/missing');
+  });
+});

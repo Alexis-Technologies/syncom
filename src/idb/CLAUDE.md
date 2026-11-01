@@ -22,8 +22,9 @@ src/idb/engine.js         idbEngine({ name, indexedDB, IDBKeyRange, durability, 
   listing is `getAllKeys` over `[...prefix]`..`[...prefix, []]` (a shorter array sorts before any it is a prefix of; an
   array component sorts after every string and number, so `[]` is the ceiling). A write set is one readwrite transaction
   over the stores it touches, every request queued before the first `await` (IndexedDB auto-commits a transaction the
-  loop leaves idle), committed explicitly where `commit()` exists; the log's group is one transaction over `log`. Booleans
-  never reach a key (none of the keys holds one).
+  loop leaves idle), committed explicitly where `commit()` exists — and aborted where a request throws (a value no
+  structured clone takes), so the requests queued before it go with it; the log's group is one transaction over `log`.
+  The segments list in memory moves once the medium has it. Booleans never reach a key (none of the keys holds one).
 - **Objects, not texts.** A record is the structured clone of the object the write set handed in, read back as an
   object; `raw(id)` stringifies on demand; a text that is no record is kept as `{ text }` and reads as `INTEGRITY`.
   The log's entries are clones too (a scrub puts the stripped entries again — `scrub`), and the catalog's rows are one

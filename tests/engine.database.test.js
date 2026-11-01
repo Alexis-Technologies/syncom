@@ -10,10 +10,12 @@ const assert = require('node:assert');
 const { createDatabase, filesEngine, isEngine } = require('../src/all/all.js');
 const { memory } = require('../src/memory/memory.js');
 const { branch, drop } = require('../src/branch/branch.js');
+const { PIECES_MIN } = require('../src/text/sequence.js');
 
 // An engine whose write sets are counted: what a batch costs the medium.
 const counting = (inner) => {
-  const calls = { writes: 0, records: 0 };
+  // `dropped` and `copied` ride in write sets; `besides` counts a piece removed or a copy put outside one.
+  const calls = { writes: 0, records: 0, dropped: 0, copied: 0, besides: 0 };
   const engine = {
     name: `${inner.name}+counting`,
     capabilities: inner.capabilities,
@@ -22,9 +24,25 @@ const counting = (inner) => {
       const db = await inner.open(path, options);
       return {
         ...db,
+        pieces: {
+          ...db.pieces,
+          remove(id, name) {
+            calls.besides++;
+            return db.pieces.remove(id, name);
+          },
+        },
+        copies: {
+          ...db.copies,
+          put(tag, id, text) {
+            calls.besides++;
+            return db.copies.put(tag, id, text);
+          },
+        },
         write(batch) {
           calls.writes++;
           calls.records += batch.records?.length ?? 0;
+          for (const row of batch.records ?? []) calls.dropped += row.pieces?.remove?.length ?? 0;
+          calls.copied += batch.copies?.put?.length ?? 0;
           return db.write(batch);
         },
       };
@@ -82,6 +100,28 @@ test('a database over an engine', async (t) => {
     assert.strictEqual((await db.list()).length, 26);
     await db.close();
   });
+
+  await t.test(
+    'the pieces a record drops and the tags’ copies ride in the landing’s write set, nothing beside it',
+    async () => {
+      const { engine, calls } = counting(filesEngine(memory()));
+      const db = await createDatabase({ path: 'set', engine, logger: false, defer: 0, lock: false, chain: false });
+      const id = await db.insert({ title: 'A' });
+      // A text of more runs than fit the record file: its pieces ride beside it (src/text/sequence.js PIECES_MIN).
+      for (let i = 0; i < PIECES_MIN + 10; i++) await db.splice(id, 'body', 0, 0, String.fromCharCode(97 + (i % 26)));
+      await db.tag('v1');
+      const before = { ...calls };
+      await db.update(id, { title: 'B' });
+      assert.strictEqual(calls.writes, before.writes + 1, 'one write set for the update');
+      assert.strictEqual(calls.copied, before.copied + 1, 'the tag’s copy rode in it');
+      for (let i = 0; i < 20; i++) await db.splice(id, 'body', 0, 0, 'Z');
+      assert.ok(calls.dropped > before.dropped, 'the pieces the text left behind rode in a write set');
+      assert.strictEqual(calls.besides, 0, 'no copy put and no piece removed beside a write set');
+      assert.strictEqual((await db.at('v1').get(id)).title, 'A', 'the tag reads the record as it was');
+      assert.strictEqual((await db.get(id)).body.length, PIECES_MIN + 30);
+      await db.close();
+    },
+  );
 
   await t.test('a branch opens on the parent’s engine and drop() removes it through the engine', async () => {
     const fsi = memory();

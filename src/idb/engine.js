@@ -48,7 +48,7 @@ const completion = (tx) =>
   new Promise((resolve, reject) => {
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error ?? new Error('transaction aborted'));
+    tx.onabort = (event) => reject(tx.error ?? event?.target?.error ?? new Error('transaction aborted'));
   });
 
 const exists = (key) => Object.assign(new Error(`EEXIST: key already exists, ${key}`), { code: 'EEXIST' });
@@ -125,7 +125,18 @@ const idbEngine = ({
     completed.catch(() => {});
     const stores = {};
     for (let i = 0; i < names.length; i++) stores[names[i]] = tx.objectStore(names[i]);
-    const value = await fn(stores, tx);
+    let value;
+    try {
+      value = await fn(stores, tx);
+    } catch (error) {
+      // A request that threw (a value no structured clone takes): the requests queued before it go with it.
+      try {
+        tx.abort();
+      } catch {
+        // Aborted already by the request itself.
+      }
+      throw error;
+    }
     if (mode === 'readwrite' && typeof tx.commit === 'function') tx.commit();
     await completed;
     return value;
@@ -268,7 +279,7 @@ const idbEngine = ({
       let segments = [];
       const firstOf = new Map();
       const sealedTo = () => (segments.length > 0 ? segments[segments.length - 1].to : null);
-      const saveSegments = (s) => s.put({ p, key: 'segments', value: segments.slice() });
+      const saveSegments = (s, list) => s.put({ p, key: 'segments', value: list.slice() });
       return {
         journaled: false,
         async load() {
@@ -336,9 +347,11 @@ const idbEngine = ({
           post({ p, log: [first, last] });
           return true;
         },
+        // The list in memory moves once the medium has it: a seal or a drop that fails leaves it as it was.
         async seal(entries, from, to) {
-          segments.push({ from, to, count: entries.length });
-          await transaction(['meta'], 'readwrite', ({ meta: m }) => void saveSegments(m));
+          const next = segments.concat([{ from, to, count: entries.length }]);
+          await transaction(['meta'], 'readwrite', ({ meta: m }) => void saveSegments(m, next));
+          segments = next;
         },
         async sealed(to) {
           const kept = [];
@@ -347,11 +360,12 @@ const idbEngine = ({
         },
         async drop(segment) {
           if (segments[0] !== segment) throw new TypeError('drop(segment): the oldest segment goes first');
-          segments.shift();
+          const rest = segments.slice(1);
           await transaction(['log', 'meta'], 'readwrite', ({ log: l, meta: m }) => {
             l.delete(KeyRange.bound([p, segment.from], [p, segment.to]));
-            saveSegments(m);
+            saveSegments(m, rest);
           });
+          segments = rest;
           for (let seq = segment.from; seq <= segment.to; seq++) firstOf.delete(seq);
         },
         saveIndex: (index) =>

@@ -192,3 +192,34 @@ test('IndexedDB engine', async (t) => {
     },
   );
 });
+
+// A write set is one transaction: a request that throws inside it takes the requests before it with it.
+test('IndexedDB engine: a write set that throws', async (t) => {
+  await t.test('a request that throws inside a write set aborts it: nothing of the set lands', async () => {
+    const engine = fresh();
+    const db = await engine.open('/abort', { logger: null });
+    const odd = {
+      data: { fn: () => 1 },
+      meta: { clock: {}, base: 0, deleted: 0 },
+      encrypted: false,
+      timestamp: 1,
+      block: null,
+    };
+    await assert.rejects(
+      db.write({
+        kv: { put: [['', 'k', 'v', undefined]] },
+        records: [
+          { id: 'a', stored: stored({ a: 1 }) },
+          { id: 'b', stored: odd },
+        ],
+      }),
+      /clone/i,
+    );
+    assert.strictEqual(await db.records.has('a'), false, 'the record before the throw went with the transaction');
+    assert.strictEqual(await db.kv.get('', 'k'), null, 'the kv put too');
+    await db.write({ records: [{ id: 'c', stored: stored({ c: 1 }) }] });
+    assert.strictEqual(await db.records.has('c'), true, 'the next set lands');
+    await db.close();
+    await engine.close();
+  });
+});

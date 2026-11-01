@@ -66,16 +66,16 @@ const ROLLBACK = 'ROLLBACK';
 
 const noop = () => {};
 const exists = (key) => Object.assign(new Error(`EEXIST: key already exists, ${key}`), { code: 'EEXIST' });
-const unreadable = (id) =>
-  new SyncomError('INTEGRITY', `Storage record ${id} is unreadable`, { id, cause: null, reason: 'unreadable' });
+const unreadable = (id, cause = null) =>
+  new SyncomError('INTEGRITY', `Storage record ${id} is unreadable`, { id, cause, reason: 'unreadable' });
 
 // A record's text read back: the object it parses to, or INTEGRITY.
 const parsed = (id, text) => {
   let value;
   try {
     value = JSON.parse(text);
-  } catch {
-    throw unreadable(id);
+  } catch (error) {
+    throw unreadable(id, error);
   }
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw unreadable(id);
   return value;
@@ -123,7 +123,8 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
         if (typeof conn?.exec !== 'function' || typeof conn.prepare !== 'function') {
           throw new TypeError('sqliteEngine: the database has no exec() and prepare()');
         }
-        const setup = pragmas(file, full);
+        // A connection the caller gave keeps its settings: only `durable` reaches it.
+        const setup = database !== null ? (full ? ['PRAGMA synchronous = FULL'] : []) : pragmas(file, full);
         for (let i = 0; i < setup.length; i++) await conn.exec(setup[i]);
         for (let i = 0; i < SCHEMA.length; i++) await conn.exec(SCHEMA[i]);
         statements = new Map();
@@ -161,8 +162,11 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
     serial(async () => {
       await (await statement(sql)).run(...params);
     });
-  // One transaction: `fn(tx)` runs its statements through `tx`, whole or not at all.
-  const transaction = (fn) =>
+  // `fn(tx)` runs its statements through `tx` on the lane: in one transaction,
+  // whole or not at all — a COMMIT that fails (BUSY, FULL, an I/O error) is
+  // rolled back too, or the connection would hold an open transaction for
+  // good — or, a read, outside one.
+  const over = (fn, atomic) =>
     serial(async () => {
       const conn = await connect();
       const tx = {
@@ -170,10 +174,12 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
         get: async (sql, params) => (await statement(sql)).get(...params),
         all: async (sql, params) => (await statement(sql)).all(...params),
       };
+      if (!atomic) return fn(tx);
       await conn.exec(BEGIN);
       let value;
       try {
         value = await fn(tx);
+        await conn.exec(COMMIT);
       } catch (error) {
         try {
           await conn.exec(ROLLBACK);
@@ -182,9 +188,10 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
         }
         throw error;
       }
-      await conn.exec(COMMIT);
       return value;
     });
+  const transaction = (fn) => over(fn, true);
+  const read = (fn) => over(fn, false);
 
   const names = (rows, column) => {
     const out = [];
@@ -192,7 +199,7 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
     return out.sort();
   };
 
-  const openDb = (p) => {
+  const openDb = (p, logger) => {
     const kv = {
       get: async (ns, key) => {
         const row = await get(SQL.kvGet, [p, ns, key]);
@@ -262,7 +269,14 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
 
     const meta = async (tx, key) => {
       const row = await tx.get(SQL.metaGet, [p, key]);
-      return none(row) ? null : JSON.parse(row.value);
+      if (none(row)) return null;
+      try {
+        return JSON.parse(row.value);
+      } catch (error) {
+        // A meta row that does not read is none: an index that is no index, no segments — said out loud.
+        logger?.warn?.({ event: 'log.meta.unreadable', key, err: error });
+        return null;
+      }
     };
 
     // The op log's medium: a row per entry with the first seq of its group,
@@ -270,13 +284,17 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
     const log = (() => {
       let groups = [];
       let segments = [];
+      // Rows that did not read at open: counted, left out — the log holds less than it held.
+      let corrupt = 0;
+      let lost = false;
       const firstOf = new Map();
       const sealedTo = () => (segments.length > 0 ? segments[segments.length - 1].to : null);
-      const saveSegments = (tx) => tx.run(SQL.metaPut, [p, 'segments', JSON.stringify(segments)]);
+      const saveSegments = (tx, list) => tx.run(SQL.metaPut, [p, 'segments', JSON.stringify(list)]);
       return {
         journaled: false,
+        // A read outside a transaction: nothing else runs on the lane between its statements.
         load: () =>
-          transaction(async (tx) => {
+          read(async (tx) => {
             const index = await meta(tx, 'index');
             const saved = await meta(tx, 'segments');
             segments = Array.isArray(saved) ? saved : [];
@@ -285,7 +303,16 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
             const byFirst = new Map();
             for (let i = 0; i < rows.length; i++) {
               const { seq, first } = rows[i];
-              entries.push(JSON.parse(rows[i].entry));
+              let entry;
+              try {
+                entry = JSON.parse(rows[i].entry);
+              } catch (error) {
+                corrupt++;
+                lost = true;
+                logger?.warn?.({ event: 'log.row.unreadable', seq, err: error });
+                continue;
+              }
+              entries.push(entry);
               firstOf.set(seq, first);
               let group = byFirst.get(first);
               if (group === undefined) byFirst.set(first, (group = { first, last: seq, seqs: [] }));
@@ -315,10 +342,10 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
           return segments;
         },
         get corrupt() {
-          return 0;
+          return corrupt;
         },
         get health() {
-          return { journaled: false, open: groups.length, torn: 0, lost: false };
+          return { journaled: false, open: groups.length, torn: 0, lost };
         },
         async append(entries, _headers, { first, last, onFail }) {
           try {
@@ -335,9 +362,11 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
           groups.push({ first, last });
           return true;
         },
+        // The list in memory moves once the medium has it: a seal or a drop that fails leaves it as it was.
         async seal(entries, from, to) {
-          segments.push({ from, to, count: entries.length });
-          await transaction(saveSegments);
+          const next = segments.concat([{ from, to, count: entries.length }]);
+          await transaction((tx) => saveSegments(tx, next));
+          segments = next;
         },
         async sealed(to) {
           const kept = [];
@@ -346,11 +375,12 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
         },
         async drop(segment) {
           if (segments[0] !== segment) throw new TypeError('drop(segment): the oldest segment goes first');
-          segments.shift();
+          const rest = segments.slice(1);
           await transaction(async (tx) => {
             await tx.run(SQL.logDrop, [p, segment.from, segment.to]);
-            await saveSegments(tx);
+            await saveSegments(tx, rest);
           });
+          segments = rest;
           for (let seq = segment.from; seq <= segment.to; seq++) firstOf.delete(seq);
         },
         saveIndex: (index) => run(SQL.metaPut, [p, 'index', JSON.stringify(index)]),
@@ -426,13 +456,13 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
     capabilities,
     /** The file every database opened through the engine lives in. */
     file,
-    async open(path, { durable: wanted = false } = {}) {
+    async open(path, { durable: wanted = false, logger = null } = {}) {
       // `durable: true` on any database makes every write of the connection wait for the disk.
       if (wanted && !full) {
         full = true;
         if (connection !== null) await serial(() => connection.exec('PRAGMA synchronous = FULL'));
       }
-      return openDb(path);
+      return openDb(path, logger);
     },
     /** Every row of the database at `path`, in every table, in one transaction. */
     remove: (path) =>

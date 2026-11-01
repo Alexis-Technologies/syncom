@@ -16,7 +16,7 @@ const { capabilitiesOf, KV_NAMESPACES, checkKvKey, isKvKey, isKvNamespace } = re
 const { checkWriteSet } = require('../write-set.js');
 const { isRecordId } = require('../shape.js');
 const { SyncomError } = require('../errors.js');
-const { createJournalStore } = require('./journal.js');
+const { createJournalStore, isAbsent } = require('./journal.js');
 
 const DATA = 'data';
 const TAGS = 'tags';
@@ -63,8 +63,10 @@ const emptyDir = async (fsi, dir, keep = null) => {
   let names = [];
   try {
     names = await fsi.list(dir);
-  } catch {
-    return;
+  } catch (error) {
+    // A directory that is not there holds nothing; any other failure to list it is a sweep cut short, said so.
+    if (isAbsent(error)) return;
+    throw error;
   }
   for (let i = 0; i < names.length; i++) if (names[i] !== keep) await fsi.remove(dir, names[i]);
 };
@@ -196,6 +198,13 @@ const openDb = (fsi, path, capabilities, logger) => {
         await fsi.write(dirOf(path, ns), key, value, options);
       }
     }
+    // A tag's copies before the records they keep the past of: a crash between leaves a copy, never a record without one.
+    const copied = batch.copies?.put;
+    if (copied !== undefined) {
+      for (let i = 0; i < copied.length; i++) {
+        await fsi.write(copiesDir(copied[i][0]), recordFile(copied[i][1]), copied[i][2]);
+      }
+    }
     const rows = batch.records;
     if (rows !== undefined) {
       for (let i = 0; i < rows.length; i++) {
@@ -209,11 +218,9 @@ const openDb = (fsi, path, capabilities, logger) => {
     }
     const removed = batch.remove;
     if (removed !== undefined) for (let i = 0; i < removed.length; i++) await fsi.remove(data, recordFile(removed[i]));
-    const copied = batch.copies?.put;
-    if (copied !== undefined) {
-      for (let i = 0; i < copied.length; i++) {
-        await fsi.write(copiesDir(copied[i][0]), recordFile(copied[i][1]), copied[i][2]);
-      }
+    const uncopied = batch.copies?.remove;
+    if (uncopied !== undefined) {
+      for (let i = 0; i < uncopied.length; i++) await fsi.remove(copiesDir(uncopied[i][0]), recordFile(uncopied[i][1]));
     }
     const removals = batch.kv?.remove;
     if (removals !== undefined) {

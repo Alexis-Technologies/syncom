@@ -103,8 +103,12 @@ class EntryStore {
     return new Set(this.#held);
   }
 
-  async #changing(id) {
-    if (this.#before !== null) await this.#before(id, () => this.file(id));
+  // What the newest tag keeps of the record before its file changes —
+  // `{ copy: [tag, id, text], done }` or null: the copy rides in the write
+  // set, ahead of the record, and `done()` marks it once the set is down.
+  #changing(id) {
+    if (this.#before === null) return null;
+    return this.#before(id, () => this.file(id));
   }
 
   get size() {
@@ -292,10 +296,24 @@ class EntryStore {
       if (out === meta) out = { ...meta, blocks: { ...blocks } };
       out.blocks[field] = { ...head, parts: names };
     }
-    return { meta: out, writes, kept, gen };
+    // The pieces the record named and names no more: dropped in the write set, after its file.
+    const dropped = [];
+    if (known !== undefined) {
+      for (const name of known.names) {
+        if (!kept.has(name)) dropped.push(name);
+      }
+    }
+    return { meta: out, writes, dropped, kept, gen };
   }
 
-  // The pieces of `id` its file no longer names, removed — after the file.
+  // The pieces a record holds now, remembered — none, forgotten.
+  #parted(id, kept, gen) {
+    if (gen > 0) this.#parts.set(id, { gen, names: kept });
+    else this.#parts.delete(id);
+  }
+
+  // The pieces of `id` its file no longer names, removed — after the file;
+  // a sealed or a removed record's (a write set carries a record's own).
   async #drop(id, kept, gen) {
     const known = this.#parts.get(id);
     if (known !== undefined) {
@@ -308,8 +326,7 @@ class EntryStore {
         }
       }
     }
-    if (gen > 0) this.#parts.set(id, { gen, names: kept });
-    else this.#parts.delete(id);
+    this.#parted(id, kept, gen);
   }
 
   // The catalog's view of an entry: what `put` takes — at once, a promise
@@ -371,19 +388,36 @@ class EntryStore {
   async writeMany(touched, blockHash, kv = null) {
     const rows = [];
     const after = [];
+    const copies = [];
+    const marks = [];
     for (const [id, entry] of touched) {
-      await this.#changing(id);
-      const { meta, writes, kept, gen } = this.#split(id, entry.meta);
+      const keeping = await this.#changing(id);
+      if (keeping !== null) {
+        copies.push(keeping.copy);
+        marks.push(keeping.done);
+      }
+      const { meta, writes, dropped, kept, gen } = this.#split(id, entry.meta);
       const stored = { data: entry.data, meta, encrypted: false, timestamp: Date.now(), block: blockHash };
       if (gen > 0) stored.gen = gen;
-      rows.push({ id, stored, pieces: writes.length > 0 ? { put: writes } : undefined });
+      const row = { id, stored };
+      if (writes.length > 0 || dropped.length > 0) {
+        row.pieces = {};
+        if (writes.length > 0) row.pieces.put = writes;
+        if (dropped.length > 0) row.pieces.remove = dropped;
+      }
+      rows.push(row);
       after.push([id, entry, kept, gen]);
     }
-    // The kv puts — a chain block and its tail — land with the records they name.
-    await this.#db.write(kv === null ? { records: rows } : { records: rows, kv });
+    // ONE write set: the kv puts — a chain block and its tail — the tags' copies of the records as they were,
+    // the records with the pieces they make and drop. Atomic where the engine has transactions.
+    const batch = { records: rows };
+    if (kv !== null) batch.kv = kv;
+    if (copies.length > 0) batch.copies = { put: copies };
+    await this.#db.write(batch);
+    for (let i = 0; i < marks.length; i++) marks[i]();
     for (let i = 0; i < after.length; i++) {
       const [id, entry, kept, gen] = after[i];
-      await this.#drop(id, kept, gen);
+      this.#parted(id, kept, gen);
       const held = this.#held.has(id) ? this.#cache.get(id) : undefined;
       const indexed = held !== undefined && held.data === entry.data && held.meta === entry.meta;
       this.#held.delete(id);
@@ -418,10 +452,13 @@ class EntryStore {
   // An entry sealed for this node's key: `record` is the ciphertext the
   // file holds, `data` what the cache (and so a read) holds.
   async writeSealed(id, record, data, blockHash, kv = null) {
-    await this.#changing(id);
+    const keeping = await this.#changing(id);
     const stored = { data: record, meta: null, encrypted: true, timestamp: Date.now(), block: blockHash };
-    const rows = [{ id, stored }];
-    await this.#db.write(kv === null ? { records: rows } : { records: rows, kv });
+    const batch = { records: [{ id, stored }] };
+    if (kv !== null) batch.kv = kv;
+    if (keeping !== null) batch.copies = { put: [keeping.copy] };
+    await this.#db.write(batch);
+    keeping?.done();
     await this.#drop(id, new Set(), 0);
     this.remember(id, { data, meta: null, encrypted: true, block: blockHash });
     this.#catalog.put(id, { type: data?.$type, v: null, encrypted: true });
@@ -429,8 +466,11 @@ class EntryStore {
 
   // A sealed entry removed: an encrypted record has no op, so no tombstone.
   async remove(id) {
-    await this.#changing(id);
-    await this.#db.write({ remove: [id] });
+    const keeping = await this.#changing(id);
+    const batch = { remove: [id] };
+    if (keeping !== null) batch.copies = { put: [keeping.copy] };
+    await this.#db.write(batch);
+    keeping?.done();
     await this.#drop(id, new Set(), 0);
     this.#cache.delete(id);
     this.#catalog.put(id, null);

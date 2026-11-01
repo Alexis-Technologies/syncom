@@ -118,7 +118,17 @@ const atRestEngine = (engine, cipher) => {
       for (let i = 0; i < entries.length; i++) out.push(await sealEntry(entries[i]));
       return out;
     };
-    const openEntry = async (row) => JSON.parse(await open(logKey(row.seq), row.e));
+    // A row decrypted that is no JSON: the medium is corrupt at that seq — never a bare SyntaxError out of an open.
+    const corrupt = (what, cause) =>
+      new SyncomError('CORRUPT', `The log's ${what} does not read once decrypted`, { cause, file: what });
+    const parsedJson = (what, text) => {
+      try {
+        return JSON.parse(text);
+      } catch (error) {
+        throw corrupt(what, error);
+      }
+    };
+    const openEntry = async (row) => parsedJson(logKey(row.seq), await open(logKey(row.seq), row.e));
     const log = {
       get journaled() {
         return db.log.journaled;
@@ -142,7 +152,7 @@ const atRestEngine = (engine, cipher) => {
         const loaded = await db.log.load();
         const entries = [];
         for (let i = 0; i < loaded.entries.length; i++) entries.push(await openEntry(loaded.entries[i]));
-        const index = loaded.index === null ? null : JSON.parse(await open(INDEX, loaded.index.e));
+        const index = loaded.index === null ? null : parsedJson(INDEX, await open(INDEX, loaded.index.e));
         return { ...loaded, entries, index, floor: index !== null ? index.floor : loaded.floor };
       },
       // The medium takes what it can write; the entries it may ask for again (a
