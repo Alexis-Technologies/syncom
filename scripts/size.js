@@ -152,7 +152,9 @@ const ENTRIES = [
   // recorded, a peer's `actor` and `from` bounded, and one close (review №4, E3–E6). 57, raised by name.
   // 57.1 with the rename to Database / Collection / Document (`createDatabase`, `document()`) and the pre-rename
   // names kept as aliases until 1.0 (engines plan, E0). 57.5, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 57.5 },
+  // 58.6 with the engine contract (src/engine.js) and the files engine (src/files/files.js) the core opens every fsi
+  // through — a seam's property names do not minify (engines plan, E1). 59, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 59 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -329,7 +331,8 @@ const ENTRIES = [
   // what should give some of it back.
   // 131.5 (over by bytes) with state.js split where its seams are clean — the names (src/text/names.js) and a peer's
   // block normalized (src/text/normalize.js), names across modules unminified (review №4, M-4). 132, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 132 },
+  // 133.4 with the engine contract and the files engine in the core (engines plan, E1). 133.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 133.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).

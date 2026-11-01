@@ -19,6 +19,8 @@ src/store/store.js        the @alexify/syncom/store subpath — toStore/fromEven
                           React's useSyncExternalStore over a cursor, a Record, get(), a presence or an emitter — no requires
 src/inspect/inspect.js    the @alexify/syncom/inspect subpath — a record's anatomy (through the [SOURCE] seam's raw `entry`) and anonymize; requires compose, shape, symbols, hash only
 src/backend.js            the fsi contract (isFsi/checkFsi; sync, create and append optional), withSync — no requires
+src/engine.js             the engine contract (isEngine/checkEngine/checkEngineDb, CAPABILITIES, capabilitiesOf): a factory of databases,
+                          each a set of stores — kv, records, pieces, copies, log, write(batch) — no requires
 src/memory/memory.js      @alexify/syncom/memory — memory(), the backend in memory (a Map; size, dump, the exclusive create, append) — no requires
 src/layered/layered.js    @alexify/syncom/layered — layered([top, …, bottom], { write, fill, queue }): one fsi over several, a multi-level
                           cache; 'back' drains its queue before any lower layer is consulted; create is exclusive across layers

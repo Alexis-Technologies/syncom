@@ -15,6 +15,8 @@
 // promise in the browser.
 const { read, write, exists, remove, list } = require('./fsi.browser.js');
 const { isFsi } = require('./backend.js');
+const { isEngine } = require('./engine.js');
+const { filesEngine } = require('./files/files.js');
 const { applyOp, mergeEntry, isAlive } = require('./ops.js');
 const { HookError } = require('./hooks.js');
 const { isSharedLog } = require('./sync/shared-log.js');
@@ -33,6 +35,8 @@ module.exports = {
   remove,
   list,
   isFsi,
+  isEngine,
+  filesEngine,
   ...require('./database.js'),
   OpLog,
   applyOp,

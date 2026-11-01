@@ -874,3 +874,17 @@ storage.record<Post>('id').then((record) => {
   const legacy = await syncom.open({ fsi: memory() });
   expectAssignable<syncom.Database>(legacy);
 }
+
+// The engine contract: an fsi becomes the files engine.
+{
+  const engine: syncom.Engine = syncom.filesEngine(memory());
+  expectType<boolean>(syncom.isEngine(engine));
+  expectType<string>(engine.name);
+  expectType<boolean>(engine.capabilities.atomicBatch);
+  const db: syncom.EngineDb = await engine.open('app');
+  expectType<Promise<string | null>>(db.kv.get('', 'node.json'));
+  expectType<Promise<syncom.StoredRecord | null>>(db.records.get('id'));
+  expectType<Promise<string[]>>(db.records.ids({ after: 'a', limit: 10 }));
+  expectAssignable<syncom.EngineWriteSet>({ records: [{ id: 'a', text: '{}' }], kv: { put: [['', 'k', 'v']] } });
+  expectError(engine.open(42));
+}

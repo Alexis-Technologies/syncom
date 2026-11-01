@@ -41,6 +41,115 @@ export interface Fsi {
 /** Whether `value` has the five functions of the backend contract. */
 export function isFsi(value: unknown): value is Fsi;
 
+/** What a storage engine's medium can do; `createDatabase()` asks nothing a medium lacks. */
+export interface EngineCapabilities {
+  /** Every write set lands whole or not at all. */
+  readonly atomicBatch: boolean;
+  /** The engine keeps the record indexes (a native catalog). */
+  readonly indexes: boolean;
+  /** Another instance over the same database hears its writes. */
+  readonly changeStream: boolean;
+  /** `kv.create` makes a key exclusively (EEXIST when it is there). */
+  readonly exclusiveCreate: boolean;
+  /** How one instance holds a database: through a lock key, or the engine's own lease. */
+  readonly lock: 'kv' | 'native';
+  /** Several instances may open one database at once (read-only followers). */
+  readonly shared: boolean;
+  /** A blob store for attachments. */
+  readonly blobs: boolean;
+  /** The log's medium appends a line to a journal (a file per group otherwise). */
+  readonly append: boolean;
+}
+
+/** A record as an engine stores it: what the record file holds. */
+export interface StoredRecord {
+  data: unknown;
+  meta: Entry['meta'] | null;
+  encrypted: boolean;
+  timestamp: number;
+  block: string | null;
+  gen?: number;
+}
+
+/** One record of a write set: its stored form (or its text as given), the pieces it makes and drops. */
+export interface EngineWriteRecord {
+  id: string;
+  stored?: StoredRecord;
+  text?: string;
+  pieces?: { put?: ReadonlyArray<readonly [name: string, text: string]>; remove?: readonly string[] };
+}
+
+/** A write set: landed whole where `capabilities.atomicBatch`, in order otherwise — kv puts, records, removals, copies, kv removals. */
+export interface EngineWriteSet {
+  records?: readonly EngineWriteRecord[];
+  remove?: readonly string[];
+  kv?: {
+    put?: ReadonlyArray<readonly [ns: string, key: string, value: string, options?: { atomic?: boolean; mode?: number }]>;
+    remove?: ReadonlyArray<readonly [ns: string, key: string]>;
+  };
+  copies?: { put?: ReadonlyArray<readonly [tag: string, id: string, text: string]>; remove?: ReadonlyArray<readonly [tag: string, id: string]> };
+}
+
+/** A database as an engine opens it: a set of stores over one `path`. */
+export interface EngineDb {
+  readonly path: string;
+  readonly capabilities: EngineCapabilities;
+  /** The files engine's backend; absent on a native engine. */
+  readonly fsi?: Fsi;
+  /** Small named texts beside the records, by namespace (`''` the root) and key. */
+  readonly kv: {
+    get(ns: string, key: string): Promise<string | null>;
+    has(ns: string, key: string): Promise<boolean>;
+    /** The keys of a namespace, sorted; an absent namespace is empty. */
+    list(ns: string): Promise<string[]>;
+    put(ns: string, key: string, value: string, options?: { atomic?: boolean; mode?: number }): Promise<void>;
+    remove(ns: string, key: string): Promise<void>;
+    /** Exclusive — rejects with `code: 'EEXIST'` when the key is there; present when `capabilities.exclusiveCreate`. */
+    create?(ns: string, key: string, value: string): Promise<void>;
+  };
+  readonly records: {
+    /** The stored record, or null; one that does not parse rejects with `INTEGRITY` (`reason: 'unreadable'`). */
+    get(id: string): Promise<StoredRecord | null>;
+    /** The record's text as the medium holds it, or null. */
+    raw(id: string): Promise<string | null>;
+    has(id: string): Promise<boolean>;
+    getMany(ids: readonly string[]): Promise<Map<string, StoredRecord>>;
+    /** Every record id the medium holds — tombstones included — in id order, after `after`, at most `limit`. */
+    ids(options?: { after?: string | null; limit?: number }): Promise<string[]>;
+  };
+  /** The runs of a large block beside its record, by the name the record's meta holds. */
+  readonly pieces: { get(id: string, name: string): Promise<string | null> };
+  /** A tag's copies of records, by tag and id. */
+  readonly copies: {
+    get(tag: string, id: string): Promise<string | null>;
+    has(tag: string, id: string): Promise<boolean>;
+    ids(tag: string): Promise<string[]>;
+    put(tag: string, id: string, text: string): Promise<void>;
+    remove(tag: string, id: string): Promise<void>;
+    drop(tag: string): Promise<void>;
+  };
+  write(batch: EngineWriteSet): Promise<void>;
+  close(): Promise<void>;
+}
+
+/** A storage engine: a factory of databases, one object shared by every database that opens through it. */
+export interface Engine {
+  readonly name: string;
+  readonly capabilities: EngineCapabilities;
+  /** The files engine's backend; absent on a native engine. */
+  readonly fsi?: Fsi;
+  open(path: string, options?: { logger?: unknown }): Promise<EngineDb>;
+  /** Every store of the database at `path`, gone. */
+  remove(path: string): Promise<void>;
+  close?(): Promise<void>;
+}
+
+/** Whether `value` is an engine: `open()`, `remove()`, a `name` and `capabilities`. */
+export function isEngine(value: unknown): value is Engine;
+
+/** The engine every fsi becomes: today's layout byte for byte; `createDatabase({ fsi })` opens through it. */
+export function filesEngine(fsi: Fsi): Engine;
+
 /** A backend in memory — shared by every storage opened over it, gone with the process. */
 
 // The platform's own backend, as functions.
