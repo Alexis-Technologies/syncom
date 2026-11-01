@@ -15,8 +15,8 @@
 //            medium can make a key exclusively (the lock prefers it)
 //   records  the records by id: `get(id)` the stored record as the engine
 //            holds it (`{ data, meta, encrypted, timestamp, block, gen? }`),
-//            `raw(id)` its text, `getMany`, `has`, `count`, `ids({ after,
-//            limit })` in id order
+//            `raw(id)` its text, `getMany`, `has`, `ids({ after, limit })` in id
+//            order
 //   pieces   the runs of a large block beside its record, `(id, n)` → text
 //   copies   a tag's copies of records, `(tag, id)` → text
 //   log      the op log's medium (src/log.js owns the log itself)
@@ -160,6 +160,14 @@ const checkKvKey = (ns, key, label) => {
   if (!isKvKey(key)) throw new TypeError(`${label}: ${JSON.stringify(key)} is not a key`);
 };
 
+// What every engine answers the same: a record the medium holds that is no
+// record (INTEGRITY, `reason: 'unreadable'`, the parse error as `cause` where
+// there is one), and a key `create` found held (EEXIST, as an fsi says it).
+// No requires here: the error class is the caller's (src/errors.js).
+const unreadableRecord = (SyncomError, id, cause = null) =>
+  new SyncomError('INTEGRITY', `Storage record ${id} is unreadable`, { id, cause, reason: 'unreadable' });
+const eexist = (key) => Object.assign(new Error(`EEXIST: key already exists, ${key}`), { code: 'EEXIST' });
+
 module.exports = {
   CAPABILITIES,
   KV_NAMESPACES,
@@ -172,4 +180,6 @@ module.exports = {
   isKvKey,
   isKvNamespace,
   checkKvKey,
+  unreadableRecord,
+  eexist,
 };

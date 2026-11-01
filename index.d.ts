@@ -76,8 +76,6 @@ export interface EngineWriteRecord {
   id: string;
   stored?: StoredRecord;
   text?: string;
-  /** The catalog's row of the record as this write leaves it — for an engine with indexes of its own; absent when the row did not change. */
-  row?: { type: string | undefined; v: number | null; encrypted?: boolean; gone?: boolean; data?: unknown };
   pieces?: { put?: ReadonlyArray<readonly [name: string, text: string]>; remove?: readonly string[] };
 }
 
@@ -1264,7 +1262,7 @@ export interface WriteContext {
   /** Sealed for this node: the write is encrypted, or the record already is. */
   encrypted: boolean;
   /** The Record whose `save()` this is, or `null`. */
-  source: SyncomRecord | null;
+  source: SyncomDocument | null;
   /** The link a `merge` came in on; `null` for a local write. */
   via: PeerRef | null;
   /** The peer a `merge` came from; `null` for a local write. */
@@ -2411,7 +2409,7 @@ export interface Database {
   }): Promise<{ migrated: number; counters: number; sets: number; lists: number; texts: number; trees: number }>;
   /** A live `Document` of `id` — `R` types its fields (`document<Post>(id)`). */
   document<R = RecordData>(id: string): Promise<SyncomDocument<R>>;
-  /** @deprecated `document()` — the name before the rename. */
+  /** @deprecated `document()` — the name before the rename; removed in 1.0. */
   record<R = RecordData>(id: string): Promise<SyncomDocument<R>>;
   /** The raw data of a cached entry (no lens), `null` when not cached, absent or deleted. */
   getCachedData<R = RecordData>(id: string): R | null;
@@ -2514,7 +2512,7 @@ export interface Cursor<T = QueryRow> {
 export interface Reference {
   /** The live Document the reference names. */
   document<R = RecordData>(): Promise<SyncomDocument<R>>;
-  /** @deprecated `document()` — the name before the rename. */
+  /** @deprecated `document()` — the name before the rename; removed in 1.0. */
   record<R = RecordData>(): Promise<SyncomDocument<R>>;
 }
 
@@ -2648,9 +2646,9 @@ export type SyncomDocument<R = RecordData> = SyncomDocumentApi<R> & { -readonly 
  * under a name that does not.
  */
 export type Document<R = RecordData> = SyncomDocument<R>;
-/** @deprecated `SyncomDocumentApi` — the name before the rename. */
+/** @deprecated `SyncomDocumentApi` — the name before the rename; removed in 1.0. */
 export type SyncomRecordApi<R = RecordData> = SyncomDocumentApi<R>;
-/** @deprecated `SyncomDocument` — the name before the rename. */
+/** @deprecated `SyncomDocument` — the name before the rename; removed in 1.0. */
 export type SyncomRecord<R = RecordData> = SyncomDocument<R>;
 
 /**
@@ -2673,7 +2671,7 @@ export interface SyncomCollection<R = RecordData, I = R> {
   unset(id: string, fields: string | readonly string[], options?: WriteOptions): Promise<void>;
   /** The live Document of `id` — of this collection, or `NOT_FOUND`. */
   document(id: string): Promise<SyncomDocument<R>>;
-  /** @deprecated `document()` — the name before the rename. */
+  /** @deprecated `document()` — the name before the rename; removed in 1.0. */
   record(id: string): Promise<SyncomDocument<R>>;
 }
 /** `Collection<R, I>`: a collection, by its RxDB-style name. */
@@ -2690,7 +2688,7 @@ export interface SyncomDocumentConstructor {
   readonly prototype: SyncomDocument;
   new <R = RecordData>(id: string, database: Database): Promise<SyncomDocument<R>>;
 }
-/** @deprecated `SyncomDocumentConstructor` — the name before the rename. */
+/** @deprecated `SyncomDocumentConstructor` — the name before the rename; removed in 1.0. */
 export type SyncomRecordConstructor = SyncomDocumentConstructor;
 
 export interface DatabaseConstructor {
@@ -2700,12 +2698,12 @@ export interface DatabaseConstructor {
   ): Promise<Database & Collections<S> & PluginMethods<P>>;
   Collection: SyncomCollectionConstructor;
   Document: SyncomDocumentConstructor;
-  /** @deprecated `Document` — the name before the rename. */
+  /** @deprecated `Document` — the name before the rename; removed in 1.0. */
   Record: SyncomDocumentConstructor;
   // The default `getId` — synchronous in both halves, unlike the crypto three.
   generateId(): string;
 }
-/** @deprecated `DatabaseConstructor` — the name before the rename. */
+/** @deprecated `DatabaseConstructor` — the name before the rename; removed in 1.0. */
 export type StorageConstructor = DatabaseConstructor;
 
 export const Database: DatabaseConstructor;
@@ -2715,18 +2713,18 @@ export namespace Database {
   export type DatabaseCollection<R = RecordData, I = R> = SyncomCollection<R, I>;
 }
 
-/** @deprecated `Database` — the name before the rename (the class and the type). */
+/** @deprecated `Database` — the name before the rename (the class and the type); removed in 1.0. */
 export const Storage: DatabaseConstructor;
-/** @deprecated `Database` — the name before the rename. */
+/** @deprecated `Database` — the name before the rename; removed in 1.0. */
 export type Storage = Database;
 export namespace Storage {
-  /** @deprecated `SyncomDocument`. */
+  /** @deprecated `SyncomDocument` — the name before the rename; removed in 1.0. */
   export type StorageRecord<R = RecordData> = SyncomDocument<R>;
-  /** @deprecated `SyncomCollection`. */
+  /** @deprecated `SyncomCollection` — the name before the rename; removed in 1.0. */
   export type StorageCollection<R = RecordData, I = R> = SyncomCollection<R, I>;
 }
 
-/** @deprecated `DatabaseOptions` is the same type under the new name; `StorageOptions` stays valid. */
+/** The options of `createDatabase()` under the new name (`StorageOptions` keeps its name). */
 export type DatabaseOptions<S extends Schema = Schema> = StorageOptions<S>;
 
 /**
@@ -2738,7 +2736,7 @@ export type DatabaseOptions<S extends Schema = Schema> = StorageOptions<S>;
 export function createDatabase<S extends Schema = Schema, const P extends readonly Plugin<any>[] = []>(
   options?: StorageOptions<S> & { plugins?: P },
 ): Promise<Database & Collections<S> & PluginMethods<P>>;
-/** @deprecated `createDatabase()` — the name before the rename. */
+/** @deprecated `createDatabase()` — the name before the rename; removed in 1.0. */
 export function open<S extends Schema = Schema, const P extends readonly Plugin<any>[] = []>(
   options?: StorageOptions<S> & { plugins?: P },
 ): Promise<Database & Collections<S> & PluginMethods<P>>;

@@ -1,8 +1,9 @@
 /**
  * The storage engines side by side — the same database over the files engine
  * on node:fs, the engine in memory, SQLite (a file), IndexedDB (fake-indexeddb,
- * the object stores under Node) and MongoDB (the driver in memory of
- * tests/utils/fake-mongo.js: the protocol's round trips, not a server's):
+ * the object stores under Node) and, with `MONGODB_URL` set (a replica set),
+ * MongoDB over the driver — never over the fake driver of tests, which scans
+ * its collections and would measure itself:
  *
  * - `insert` awaited one by one, the full write path: an append, a landing;
  * - `transact — 1000 inserts`: one log group and one write set of a thousand;
@@ -12,8 +13,9 @@
  * - `round trips per write`: how many transactions, statements or bulk writes
  *   the medium takes per awaited insert — printed, not timed.
  *
- * The chain is off (`chain: false`), as a hub that only replicates runs; the
- * files engine on node:fs is today's default, the number to beat.
+ * The chain is off (`chain: false`), as a hub that only replicates runs, and so
+ * are signatures (`/all` registers signing; the rows measure the medium, not
+ * Ed25519); the files engine on node:fs is today's default, the number to beat.
  *
  * Run with `node bench/engines.js` or `pnpm bench engines`.
  */
@@ -28,12 +30,8 @@ const { createDatabase, memoryEngine } = require('../src/all/all.js');
 const { IDBFactory, IDBKeyRange, IDBDatabase } = require('fake-indexeddb');
 const { idbEngine } = require('../src/idb/idb.js');
 const { mongoEngine } = require('../src/mongodb/mongodb.js');
-const { createFakeMongo, FakeCollection } = require('../tests/utils/fake-mongo.js');
 
-process.removeAllListeners('warning');
-process.on('warning', (warning) => {
-  if (warning.name !== 'ExperimentalWarning') console.error(warning.stack);
-});
+require('../tests/utils/quiet-sqlite.js');
 const { sqliteEngine } = require('../src/sqlite/sqlite.js');
 
 const record = { name: 'Example', email: 'example@example.com', hits: 0, kind: 'a' };
@@ -42,7 +40,7 @@ const SEED = 10_000;
 // A counter of the medium's round trips: the SQLite driver's transactions, IndexedDB's readwrite transactions, the
 // fake driver's bulk writes.
 const counting = () => {
-  const counts = { sqlite: 0, idb: 0, mongodb: 0 };
+  const counts = { sqlite: 0, idb: 0 };
   const { DatabaseSync } = require('node:sqlite');
   const sqliteDriver = {
     open(file) {
@@ -62,11 +60,6 @@ const counting = () => {
     if (args[1] === 'readwrite') counts.idb++;
     return originalTransaction.apply(this, args);
   };
-  const originalBulk = FakeCollection.prototype.bulkWrite;
-  FakeCollection.prototype.bulkWrite = function (...args) {
-    counts.mongodb++;
-    return originalBulk.apply(this, args);
-  };
   return { counts, sqliteDriver };
 };
 
@@ -74,10 +67,13 @@ const main = async () => {
   console.log(`Engines benchmark — Node ${process.version}\n`);
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'syncom-bench-engines-'));
   const { counts, sqliteDriver } = counting();
+  // The engine alone: no chain, no signatures (`/all` registers signing, and `'verify'` would sign every op with
+  // Ed25519 and keep the write made at once off — the rows would measure the signature, not the medium).
+  const plain = { lock: false, chain: false, logger: false, sync: { signatures: false } };
   const engines = [
     {
       label: 'files (node:fs)',
-      open: (name) => createDatabase({ path: path.join(root, name), lock: false, chain: false, logger: false }),
+      open: (name) => createDatabase({ path: path.join(root, name), ...plain }),
     },
     { label: 'memory', engine: memoryEngine() },
     {
@@ -90,18 +86,25 @@ const main = async () => {
       engine: idbEngine({ indexedDB: new IDBFactory(), IDBKeyRange, channel: null }),
       count: 'idb',
     },
-    // The fake driver scans its collections (a Map, no index): a cold open over 10k records would measure it, not the engine.
-    {
-      label: 'mongodb (the driver in memory)',
-      engine: mongoEngine({ client: createFakeMongo(), transactions: true }),
-      count: 'mongodb',
-      seed: false,
-    },
   ];
+  // MongoDB over the real driver alone (`MONGODB_URL`, a replica set): the fake driver scans its collections (a
+  // Map, no index), so a row over it measures the fake, not the engine — it is not measured.
+  const url = process.env.MONGODB_URL;
+  if (url) {
+    const { MongoClient } = require('mongodb');
+    const client = new MongoClient(url);
+    await client.connect();
+    engines.push({
+      label: 'mongodb (the driver)',
+      engine: mongoEngine({ client, name: `syncom_bench_${process.pid}`, transactions: true }),
+      client,
+    });
+  } else {
+    console.log('mongodb: not measured — set MONGODB_URL (a replica set) to measure the engine over the driver\n');
+  }
   try {
     for (const { label, engine, open, count, seed = true } of engines) {
-      const opened = (name) =>
-        open ? open(name) : createDatabase({ path: name, engine, lock: false, chain: false, logger: false });
+      const opened = (name) => (open ? open(name) : createDatabase({ path: name, engine, ...plain }));
       const db = await opened('bench');
       await bench(`insert — ${label}`, () => db.insert(record), { warmup: 50 });
       const id = await db.insert(record);
@@ -145,6 +148,11 @@ const main = async () => {
       console.log();
     }
   } finally {
+    for (const { engine, client } of engines) {
+      if (client === undefined) continue;
+      await engine.destroy();
+      await client.close();
+    }
     for (const { engine } of engines) await engine?.close?.();
     await fs.rm(root, { recursive: true, force: true });
   }

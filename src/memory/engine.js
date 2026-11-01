@@ -9,12 +9,10 @@
 // reopen reads what the last instance wrote. Nothing survives the process.
 // Requires engine.js and errors.js only.
 
-const { capabilitiesOf } = require('../engine.js');
+const { capabilitiesOf, unreadableRecord, eexist } = require('../engine.js');
 const { SyncomError } = require('../errors.js');
 
 const CAPABILITIES = capabilitiesOf({ atomicBatch: true, exclusiveCreate: true, indexes: true });
-
-const exists = (key) => Object.assign(new Error(`EEXIST: key already exists, ${key}`), { code: 'EEXIST' });
 
 // A record handed in as text that is no record: kept as the text, read as
 // INTEGRITY — what a torn file reads as under the files engine.
@@ -23,8 +21,7 @@ class Torn {
     this.text = text;
   }
 }
-const unreadable = (id) =>
-  new SyncomError('INTEGRITY', `Storage record ${id} is unreadable`, { id, cause: null, reason: 'unreadable' });
+const unreadable = (id) => unreadableRecord(SyncomError, id);
 // A record given as text: the object it parses to, or the text kept aside.
 const parsed = (text) => {
   let value;
@@ -167,7 +164,7 @@ const openDb = (path) => {
     },
     async create(ns, key, value) {
       const keys = space(ns);
-      if (keys.has(key)) throw exists(`${ns}/${key}`);
+      if (keys.has(key)) throw eexist(`${ns}/${key}`);
       keys.set(key, String(value));
     },
   };

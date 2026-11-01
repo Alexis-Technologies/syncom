@@ -1149,6 +1149,14 @@ and one `commit` event, not one per call.
 
 ### Fixed
 
+- **The aliases' types, the engines benchmark, the engines' shared errors.** `DatabaseOptions` — the new name — carried the
+  `@deprecated` tag meant for `StorageOptions`, and no alias said when it goes (review №5, M-8): every alias is
+  `@deprecated … removed in 1.0`, and the store subpath types take a `Document`. `bench/engines.js` measured Ed25519
+  signing (every op signed under `/all`, the write made at once off) and the fake MongoDB driver (a scan per
+  operation; G-3): the rows run with signatures off, and MongoDB is measured over the driver alone, under
+  `MONGODB_URL`. The engines' `INTEGRITY` and `EEXIST` errors are made in one place (src/engine.js `unreadableRecord`,
+  `eexist`; M-4), the SQLite tests silence `node:sqlite`'s warning through one helper, and src/CLAUDE.md names the
+  journal's members where they are now (G-9); the keys-and-order guarantees are a row of their own, ENG-2 (G-4), and the convergence suite runs over a served files engine and over SQLite at rest too (G-8).
 - **The catalog was one document on SQLite and MongoDB; an at-rest ciphertext opened in any database of the engine.**
   Without a rows store of the engine's, the catalog went to `kv` as ONE text — on MongoDB one document, past 16 MiB
   every save fails and every open rebuilds; on SQLite one row rewritten whole every few thousand changes (review №5,

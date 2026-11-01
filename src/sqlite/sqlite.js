@@ -23,7 +23,7 @@
 //   meta     (p, key)           value — the log's index and sealed segments, the catalog's indexes and stamp
 //   catalog  (p, id)            row — the catalog's row of a record (JSON), a row at a time
 
-const { capabilitiesOf } = require('../engine.js');
+const { capabilitiesOf, unreadableRecord, eexist } = require('../engine.js');
 const { SyncomError } = require('../errors.js');
 
 const MEMORY = ':memory:';
@@ -71,9 +71,7 @@ const COMMIT = 'COMMIT';
 const ROLLBACK = 'ROLLBACK';
 
 const noop = () => {};
-const exists = (key) => Object.assign(new Error(`EEXIST: key already exists, ${key}`), { code: 'EEXIST' });
-const unreadable = (id, cause = null) =>
-  new SyncomError('INTEGRITY', `Storage record ${id} is unreadable`, { id, cause, reason: 'unreadable' });
+const unreadable = (id, cause = null) => unreadableRecord(SyncomError, id, cause);
 
 // A record's text read back: the object it parses to, or INTEGRITY.
 const parsed = (id, text) => {
@@ -218,7 +216,7 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
       // The exclusive create the lock prefers: the key read and made in one transaction.
       create: (ns, key, value) =>
         transaction(async (tx) => {
-          if (!none(await tx.get(SQL.kvGet, [p, ns, key]))) throw exists(`${ns}/${key}`);
+          if (!none(await tx.get(SQL.kvGet, [p, ns, key]))) throw eexist(`${ns}/${key}`);
           await tx.run(SQL.kvInsert, [p, ns, key, String(value)]);
         }),
     };

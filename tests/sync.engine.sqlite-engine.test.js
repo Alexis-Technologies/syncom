@@ -8,11 +8,7 @@ const assert = require('node:assert');
 const syncom = require('../src/all/all.js');
 const { runSyncEngineTests } = require('./suites/sync-engine.js');
 
-// node:sqlite is experimental: Node says so once per process at the require, which this test is not about.
-process.removeAllListeners('warning');
-process.on('warning', (warning) => {
-  if (warning.name !== 'ExperimentalWarning') console.error(warning.stack);
-});
+require('./utils/quiet-sqlite.js');
 const { sqliteEngine } = require('../src/sqlite/sqlite.js');
 
 test('Sync engine (SQLite engine)', async (t) => {

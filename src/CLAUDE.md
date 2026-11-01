@@ -101,7 +101,7 @@ src/                      ships as-is — no build step, CommonJS, 'use strict'
   (`tests/*.lean.test.js`) — and `scripts/size.js` checks that the core and every block bundled
   together weigh what `/all` weighs (nothing bundled twice).
 - **The security blocks are api plugins over one seam.** A plugin that is not a kind has
-  `setup(ctx)` — `{ fsi, path, logger, options, settings, storage, hash, catalogOf }`, run in `#open` before the
+  `setup(ctx)` — `{ fsi, db, path, logger, options, settings, storage, hash, catalogOf }`, run in `#open` before the
   log opens, in registration order — and hands back hooks the core takes: `identity` (`{ id,
 sign, verify, signMessage }`, the signing plugin), `seal` (`{ encrypt, decrypt }`, the
   encryption plugin), `chain` (a Blockchain, the chain plugin) — and `open(ctx)` — `{ storage,
@@ -418,7 +418,7 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   reads an op back) and `c` the CRC-32 (src/crc32.js) of their text, last, checked BEFORE
   they are parsed. A segment (`segmentOf`/`readSegment`) is the lines its groups were
   journaled as — each open group keeps its `line` until sealed, and a scrub or a rewritten
-  journal writes it again first (`#lineOf`, LOG-10) — and a trailer `{"lines","to","c"}`, read
+  journal writes it again first (`lineOf` in journal.js, LOG-10) — and a trailer `{"lines","to","c"}`, read
   whole or not at all; a mismatch is
   `log.segment.unreadable`/`log.open.unreadable` with `reason: 'checksum'`,
   counted in `corrupt`, never read in part — an open group file so is moved to `log/corrupt/`,
@@ -429,10 +429,10 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   Where the fsi has `append` the open groups are a JOURNAL, a log file per
   line: `open/<pad(first)>-<session><counter>.jsonl` — a name no failed
   group's line is in, begun again at every roll (`#seal`) and after a failed
-  append (`#flushGroup`), removed once none of its groups is open. `#open`
+  append (`append` in journal.js), removed once none of its groups is open. The journal's `groups`
   holds the groups `{ first, last, file, line }` — each with the line it was journaled as, until it is
-  sealed (LOG-10) — never the files. `#loadOpen`
-  reads the names NEWEST FIRST and `#adopt` keeps the first copy of a seq —
+  sealed (LOG-10) — never the files. `load`
+  reads the names NEWEST FIRST and `adopt` keeps the first copy of a seq —
   that is what shadows the line of a group whose append failed after it
   landed (its seqs went to a newer journal); a torn LAST line is left out
   (`log.open.torn`), a line inside that does not read is `#lost`; a later

@@ -12,11 +12,7 @@ const path = require('node:path');
 const { createDatabase } = require('../src/all/all.js');
 const { runEngineTests, stored } = require('./suites/engine.js');
 
-// node:sqlite is experimental: Node says so once per process at the require, which this test is not about.
-process.removeAllListeners('warning');
-process.on('warning', (warning) => {
-  if (warning.name !== 'ExperimentalWarning') console.error(warning.stack);
-});
+require('./utils/quiet-sqlite.js');
 const { DatabaseSync } = require('node:sqlite');
 const { sqliteEngine } = require('../src/sqlite/sqlite.js');
 

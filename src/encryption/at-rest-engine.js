@@ -18,11 +18,10 @@
 // writes, so it is the backend that is wrapped there — `filesEngine(atRest(fsi))`.
 // Requires engine.js and errors.js only; the cipher is handed in.
 
-const { checkEngine, capabilitiesOf } = require('../engine.js');
+const { checkEngine, capabilitiesOf, unreadableRecord } = require('../engine.js');
 const { SyncomError } = require('../errors.js');
 
-const unreadable = (id) =>
-  new SyncomError('INTEGRITY', `Storage record ${id} is unreadable`, { id, cause: null, reason: 'unreadable' });
+const unreadable = (id) => unreadableRecord(SyncomError, id);
 
 // A record's text, decrypted: the object it parses to, or INTEGRITY.
 const parsed = (id, text) => {

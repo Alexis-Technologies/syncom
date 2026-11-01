@@ -12,7 +12,7 @@
 // shape.js, errors.js and journal.js only.
 
 const { checkFsi } = require('../backend.js');
-const { capabilitiesOf, KV_NAMESPACES, checkKvKey, isKvKey, isKvNamespace } = require('../engine.js');
+const { capabilitiesOf, KV_NAMESPACES, checkKvKey, isKvKey, isKvNamespace, unreadableRecord } = require('../engine.js');
 const { checkWriteSet } = require('../write-set.js');
 const { isRecordId } = require('../shape.js');
 const { SyncomError } = require('../errors.js');
@@ -34,8 +34,7 @@ const named = (value, what) => {
   return value;
 };
 
-const unreadable = (id, cause) =>
-  new SyncomError('INTEGRITY', `Storage record ${id} is unreadable`, { id, cause, reason: 'unreadable' });
+const unreadable = (id, cause) => unreadableRecord(SyncomError, id, cause);
 
 // A directory under `path`: the path itself for the root namespace.
 const dirOf = (path, ns) => (ns === '' ? path : `${path}/${ns}`);

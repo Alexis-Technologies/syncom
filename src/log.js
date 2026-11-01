@@ -722,7 +722,7 @@ class OpLog {
   }
 
   // Sealing: write the segment, then the index, then remove the open files.
-  // Any crash in between leaves duplicates, which #adopt tolerates. Under
+  // Any crash in between leaves duplicates, which the journal's `adopt` tolerates. Under
   // `sealApplied` only the batches marked applied go; a batch is applied
   // whole, so the cut never falls inside an open file.
   async #roll() {

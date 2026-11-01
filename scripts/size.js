@@ -426,7 +426,8 @@ const ENTRIES = [
     entry: 'src/signing/signing.js',
     platform: 'browser',
     // 6.3 with the key pair read through a store (src/engine.js kvNamespace/fsiNamespace; engines plan, E1.3). 6.5, raised by name.
-    budget: 6.5,
+    // 6.6 with the engines' shared errors beside the contract (src/engine.js unreadableRecord, eexist; review №5 M-4). 6.75, raised by name.
+    budget: 6.75,
   },
   // The chain: the blocks, SHA-256 through Web Crypto, the plugin. 2.9 with the digest module's SHA-256 in JavaScript,
   // which the chain does not call (a browser split of its own was not worth 0.4 KB). 3, raised by name.
@@ -455,7 +456,8 @@ const ENTRIES = [
     // the catalog's rows kept as they are; engines plan, E2). 3 (2.9 measured), raised by name.
     // 3.2 with the contract's keys (src/engine.js isKvKey, KV_NAMESPACES) and a scrub that swaps a wrapper's copies
     // (review №5 E1). 3.25, raised by name.
-    budget: 3.25,
+    // 3.3 with the engines' shared errors beside the contract (review №5 M-4). 3.5, raised by name.
+    budget: 3.5,
   },
   {
     label: 'layered — browser (@alexify/syncom/layered)',

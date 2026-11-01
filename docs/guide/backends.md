@@ -31,7 +31,7 @@ opens is a set of stores:
 | `pieces` | The runs of a large text or list beside its record, by the name the record's meta holds |
 | `copies` | A tag's copies of records, by tag and id |
 | `log` | The op log's medium — what the log writes its groups, segments and index through (the files engine's journal) |
-| `write(batch)` | One write set: records (each with the pieces it makes and its catalog row), kv puts and removals, copies — whole or not at all where `capabilities.atomicBatch`, in order otherwise |
+| `write(batch)` | One write set: a tag's copies of the records as they were, records (each with the pieces it makes and drops), kv puts and removals — whole or not at all where `capabilities.atomicBatch`, in order otherwise |
 
 `capabilities` says what the medium can do — `atomicBatch`, `indexes`,
 `changeStream`, `exclusiveCreate`, `lock`, `shared`, `blobs`, `append` — and

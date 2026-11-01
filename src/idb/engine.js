@@ -24,7 +24,7 @@
 // BroadcastChannel named after the engine (`db.changes`), where the platform
 // has one. The lock stays the database's (Web Locks in a browser).
 
-const { capabilitiesOf } = require('../engine.js');
+const { capabilitiesOf, unreadableRecord, eexist } = require('../engine.js');
 const { SyncomError } = require('../errors.js');
 
 const STORES = ['kv', 'records', 'pieces', 'copies', 'log', 'meta'];
@@ -51,9 +51,7 @@ const completion = (tx) =>
     tx.onabort = (event) => reject(tx.error ?? event?.target?.error ?? new Error('transaction aborted'));
   });
 
-const exists = (key) => Object.assign(new Error(`EEXIST: key already exists, ${key}`), { code: 'EEXIST' });
-const unreadable = (id) =>
-  new SyncomError('INTEGRITY', `Storage record ${id} is unreadable`, { id, cause: null, reason: 'unreadable' });
+const unreadable = (id) => unreadableRecord(SyncomError, id);
 
 // A record given as text: the object it parses to, or the text kept aside (read as INTEGRITY).
 const parsed = (text) => {
@@ -184,7 +182,7 @@ const idbEngine = ({
           try {
             await request(s.add({ p, ns, key, value: String(value) }));
           } catch (error) {
-            throw error?.name === 'ConstraintError' ? exists(`${ns}/${key}`) : error;
+            throw error?.name === 'ConstraintError' ? eexist(`${ns}/${key}`) : error;
           }
         }),
     };

@@ -19,10 +19,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const nodeFsi = require('../src/fsi.js');
 
-process.removeAllListeners('warning');
-process.on('warning', (warning) => {
-  if (warning.name !== 'ExperimentalWarning') console.error(warning.stack);
-});
+require('./utils/quiet-sqlite.js');
 const { sqliteEngine } = require('../src/sqlite/sqlite.js');
 const { PIECES_MIN } = require('../src/text/sequence.js');
 
