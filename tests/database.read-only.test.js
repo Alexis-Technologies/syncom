@@ -309,6 +309,61 @@ test('the lease an engine holds a database by (MongoDB)', async (t) => {
   );
 
   await t.test(
+    'one renewal timer per engine: every lease it holds renewed in one bulk write a tick; a lease taken over is lost alone',
+    async () => {
+      const client = createFakeMongo();
+      const engine = mongoEngine({ client, name: 'many' });
+      const locks = client.db('many').collection('locks');
+      const lock = { staleAfter: 90, poll: 10 };
+      const a = await createDatabase({ ...base, path: 'one', engine, lock });
+      const b = await createDatabase({ ...base, path: 'two', engine, lock });
+      const states = { one: [], two: [] };
+      a.on('lease', (event) => states.one.push(event.state));
+      b.on('lease', (event) => states.two.push(event.state));
+      // The fake's bulk write runs its operations through `updateOne`: a single renewal is one made outside a bulk.
+      const calls = { bulk: 0, single: 0 };
+      let inBulk = false;
+      const bulk = locks.bulkWrite.bind(locks);
+      const single = locks.updateOne.bind(locks);
+      locks.bulkWrite = async (...args) => {
+        calls.bulk++;
+        inBulk = true;
+        try {
+          return await bulk(...args);
+        } finally {
+          inBulk = false;
+        }
+      };
+      locks.updateOne = (...args) => {
+        if (!inBulk) calls.single++;
+        return single(...args);
+      };
+      await settle(120);
+      assert.ok(calls.bulk >= 2, `the leases renewed together: ${calls.bulk} bulk writes`);
+      assert.strictEqual(calls.single, 0, 'no renewal of its own while the tick lands whole');
+      assert.ok(states.one.includes('renewed') && states.two.includes('renewed'));
+      // Another instance takes the second: the tick lands short, each lease renews on its own, and only the taken one is lost.
+      await locks.updateOne({ _id: 'two' }, { $set: { owner: 'elsewhere', gen: 2 } });
+      await settle(120);
+      assert.strictEqual(states.two[states.two.length - 1], 'lost');
+      assert.strictEqual(b.stats().lock.lost, true);
+      assert.ok(!states.one.includes('lost'));
+      assert.strictEqual(a.stats().lock.lost, false);
+      await a.insert({ n: 1 });
+      await b.close();
+      // The one lease left renews on its own; the timer goes with the last release.
+      const before = calls.single;
+      await settle(60);
+      assert.ok(calls.single > before, 'a single lease renews with its own statement');
+      await a.close();
+      await settle(60);
+      const after = calls.single + calls.bulk;
+      await settle(60);
+      assert.strictEqual(calls.single + calls.bulk, after, 'nothing renews once every lease is let go');
+    },
+  );
+
+  await t.test(
     'a renewal that fails is tried again every poll while two thirds of staleAfter are left: late once, then renewed; past that, lost',
     async () => {
       const client = createFakeMongo();

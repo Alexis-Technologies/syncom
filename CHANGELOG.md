@@ -1165,6 +1165,13 @@ and one `commit` event, not one per call.
 
 ### Fixed
 
+- **One renewal timer per MongoDB engine; the op log builds no journal of its own.** A hub with many databases on one
+  MongoDB engine renewed each lease on a timer of its own, a round trip a lease a tick (review №5, SC-9): every lease
+  the engine holds is renewed in ONE bulk write a tick, at the shortest margin among them, and a tick that lands short
+  — a lease taken over — hands each lease its own renewal, so only the lease taken is lost and the per-lease retry
+  (`late`, then lost) stays as it was. `new OpLog(path, { store })` takes the store an engine hands it and builds no
+  files journal by default (M-6): the core no longer requires `src/fsi.js` or the files engine's module; the tests
+  that open a log on their own do so through `tests/utils/log.js`.
 - **A record read as gone while a block of it stood.** `isAlive` compared a block's stamp — a ms alone, no origin — with the
   tombstone's and called the tie older, while the prune (by `(ts, origin)`, the op model's order) had kept the block's
   op stamped in that very ms by an origin above the tombstone's: the delete was reported as the record gone, the block

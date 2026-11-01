@@ -123,6 +123,54 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
   const locks = database.collection(LOCKS);
   let indexed = null;
 
+  // One renewal timer per engine: every lease this engine holds — by its
+  // holder's token: a lease lost and not yet noticed and the next one on the
+  // same path are two — is renewed in ONE (ordered) bulk write a tick, at the
+  // shortest margin among them; a hub with many databases on one engine
+  // spent a timer and a round trip per lease.
+  // A tick that lands short (a lease taken over) or fails hands every lease
+  // its own renewal, which tells the lost one from the rest and keeps the
+  // per-lease retry (`late`, then lost) as it is; a single lease renews on
+  // its own, the same path.
+  const leases = new Map();
+  let ticker = null;
+  let ticking = 0;
+  const tick = async () => {
+    const ready = [];
+    for (const lease of leases.values()) if (lease.ready()) ready.push(lease);
+    if (ready.length === 0) return;
+    if (ready.length === 1) return void ready[0].renew();
+    const ops = [];
+    for (let i = 0; i < ready.length; i++) {
+      const { p, owner, gen, staleAfter } = ready[i];
+      ops.push({
+        updateOne: { filter: { _id: p, owner, gen }, update: [{ $set: { expires: { $add: ['$$NOW', staleAfter] } } }] },
+      });
+    }
+    try {
+      const result = await locks.bulkWrite(ops);
+      if (result.matchedCount === ops.length) {
+        for (let i = 0; i < ready.length; i++) ready[i].renewed();
+        return;
+      }
+    } catch {
+      // Each lease's own renewal says which failed, and keeps its own count of the run.
+    }
+    for (let i = 0; i < ready.length; i++) ready[i].renew();
+  };
+  const arm = () => {
+    let least = Infinity;
+    for (const lease of leases.values()) if (lease.margin < least) least = lease.margin;
+    const interval = leases.size === 0 ? 0 : Math.max(10, least);
+    if (interval === ticking) return;
+    if (ticker !== null) clearInterval(ticker);
+    ticker = null;
+    ticking = interval;
+    if (interval === 0) return;
+    ticker = setInterval(tick, interval);
+    ticker.unref?.();
+  };
+
   // The indexes behind every range, made once per engine (idempotent on the server).
   const ensure = () => {
     indexed ??= (async () => {
@@ -649,7 +697,6 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
       owner = mine;
       gen = generation;
       let holding = true;
-      let timer = null;
       let retry = null;
       let renewing = false;
       let late = false;
@@ -664,9 +711,15 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
       const lost = (error) => {
         if (!holding) return;
         holding = false;
-        clearInterval(timer);
+        leases.delete(mine);
+        arm();
         if (retry !== null) clearTimeout(retry);
         if (onLost !== null) onLost(error);
+      };
+      const renewed = () => {
+        lastRenewed = Date.now();
+        late = false;
+        tell({ state: 'renewed' });
       };
       const renew = async () => {
         if (!holding || renewing) return;
@@ -676,9 +729,7 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
             { $set: { expires: { $add: ['$$NOW', staleAfter] } } },
           ]);
           if (result.matchedCount === 0) return void lost(new Error(`the lease on ${p} was taken by another instance`));
-          lastRenewed = Date.now();
-          late = false;
-          tell({ state: 'renewed' });
+          renewed();
         } catch (error) {
           if (Date.now() >= lastRenewed + staleAfter - margin) return void lost(error);
           if (!late) {
@@ -691,8 +742,17 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
           renewing = false;
         }
       };
-      timer = setInterval(renew, Math.max(10, margin));
-      timer.unref?.();
+      leases.set(mine, {
+        p,
+        owner: mine,
+        gen: generation,
+        staleAfter,
+        margin,
+        ready: () => holding && !renewing,
+        renewed,
+        renew,
+      });
+      arm();
       return {
         gen: generation,
         /** When the lease lapses unless renewed, on this clock; null once it is let go or lost. */
@@ -706,7 +766,8 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
         async release() {
           if (!holding) return;
           holding = false;
-          clearInterval(timer);
+          leases.delete(mine);
+          arm();
           if (retry !== null) clearTimeout(retry);
           // The document stays, lapsed: the generation counts on from it, so a later holder is a newer one.
           await locks.updateOne({ _id: p, owner: mine, gen: generation }, { $set: { expires: new Date(0) } });

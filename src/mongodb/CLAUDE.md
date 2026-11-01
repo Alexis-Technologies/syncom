@@ -50,7 +50,10 @@ src/mongodb/mongodb.js    @alexify/syncom/mongodb — mongoEngine({ client, db, 
   the log group, a seal, the index, a kv or copies put — fails as `LEASE_LOST` (`fenced`; `kv.create`'s E11000
   stays `EEXIST`). Under `transactions: true` the lease (`{ _id, owner, gen }`) is read inside the transaction
   first, absent → `LEASE_LOST` before anything is written. The driver is 6 or later (`findOneAndUpdate` answers
-  the document; `taken?.value ?? taken` reads an older one defensively).
+  the document; `taken?.value ?? taken` reads an older one defensively). Every lease the engine holds is renewed on
+  ONE timer, in one bulk write a tick at the shortest margin among them (keyed by the holder's token: a lease lost and
+  not yet noticed and the next on the same path are two); a tick that lands short or fails hands each lease its own
+  renewal, which tells the lost one from the rest and keeps its retry (`late`, then lost) as it is.
 - **A change stream is one path's records, matched on the server, and its end is heard.** `db.changes`
   watches `records` alone (the `log` collection is not watched: a follower's log is as of its open until the
   shared log) with a pipeline — `$match` on `fullDocument.p`, or for a deletion (no document) on the key's
