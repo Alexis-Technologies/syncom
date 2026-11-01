@@ -27,7 +27,7 @@ event surface of `src/commit.js`, `src/apply.js`, `src/bootstrap.js`,
 Schema are the alternatives), `docs/guide/query.md` with `src/query/cursor.js` and
 `src/catalog.js`, `docs/guide/backends.md` with `src/engine.js`, `src/files/files.js`, `src/backend.js`,
 `src/lock.js`, the two `fsi` halves and the engines (`src/memory/engine.js`, `src/idb/engine.js`,
-`src/sqlite/sqlite.js`). The browser-only WebRTC recipes in
+`src/sqlite/sqlite.js`, `src/mongodb/mongodb.js`). The browser-only WebRTC recipes in
 `docs/guide/webrtc.md` follow wrpc's documented API and the raw-channel
 integration tests; they cannot be run here.
 

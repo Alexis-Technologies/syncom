@@ -43,7 +43,15 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # The MongoDB engine's test over the real driver (tests/engine.mongodb.test.js) runs when MONGODB_URL is
+      # set; change streams and transactions need a replica set, so the service is one of one member.
+      - uses: supercharge/mongodb-github-action@1.12.0
+        with:
+          mongodb-version: '7.0'
+          mongodb-replica-set: rs0
       - run: pnpm test:coverage
+        env:
+          MONGODB_URL: mongodb://localhost:27017/?replicaSet=rs0
       - run: pnpm test:types
 
   # Node 22 only: the docs build exercises VitePress, not the package runtime,

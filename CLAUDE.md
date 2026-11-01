@@ -18,6 +18,7 @@ if two ever seem to disagree; fix the one that is wrong.
 | [src/memory/CLAUDE.md](./src/memory/CLAUDE.md) | The backend and the engine in memory: objects, not texts; a path outlives its instance |
 | [src/idb/CLAUDE.md](./src/idb/CLAUDE.md) | IndexedDB: the file store and the engine over object stores — a key range, a transaction per write set |
 | [src/sqlite/CLAUDE.md](./src/sqlite/CLAUDE.md) | SQLite: the engine over one file, node:sqlite or a driver — one lane, a transaction per write set |
+| [src/mongodb/CLAUDE.md](./src/mongodb/CLAUDE.md) | MongoDB: the engine over the driver injected — upserts in order or one transaction, change streams by token |
 | [src/text/CLAUDE.md](./src/text/CLAUDE.md) | The list and text kinds: the sequence engine and its rope, embeds, marks, what an op may never read whole |
 | [src/tree/CLAUDE.md](./src/tree/CLAUDE.md) | The tree kind: the movable tree and its kept fold |
 | [src/sync/CLAUDE.md](./src/sync/CLAUDE.md) | Replication: the dialing side and the host: scopes, the feed's cursor, failed pages, reconnects, the registry |

@@ -71,6 +71,16 @@ and one `commit` event, not one per call.
   may be promises (better-sqlite3, expo-sqlite). A write set is one transaction, a log group one, every statement goes
   through one lane; WAL for a file, `synchronous = FULL` once a database opens `durable`; `engine.close()`,
   `engine.destroy()`.
+- **The engine over MongoDB: `mongoEngine()`** (`@alexify/syncom/mongodb`, Node only, the driver's client
+  injected — `mongodb` is a devDependency for one test under `MONGODB_URL`, `tests/utils/fake-mongo.js` the
+  driver every other test runs over). Six collections keyed by the database's path in one MongoDB database —
+  `kv`, `records` (the JSON text), `pieces`, `copies`, `log` (a document per entry), `meta` — a document's `_id`
+  its key as JSON, the key's fields flat beside it over an index per collection. A write set is a bulk write per
+  collection: one session transaction under `transactions: true` (a replica set; `atomicBatch`), in order
+  otherwise, every put an upsert so a set that failed midway is landed again whole by the replay; a log group
+  is one bulk write. Another process hears every record and log document through a change stream
+  (`db.changes`), this instance's own told apart by the writer's token on each document; `changes: false` on
+  a standalone server. `engine.destroy()` drops the database; nothing is connected or closed here.
 - **A synchronous editor's handle on a text: `storage.openText(id, key, { window, actor, source })`**
   (the `text` plugin's). `insert`, `insertEmbed`, `delete`, `format` and `applyDelta` edit at once
   over the handle's reading — the field as announced, its edits on top — and `toString()`,

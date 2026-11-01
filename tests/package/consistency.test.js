@@ -153,6 +153,7 @@ test('every runtime export is declared in the types', () => {
   check('src/contracts/contracts.js', 'src/contracts/contracts.d.ts');
   check('src/idb/idb.js', 'src/idb/idb.d.ts');
   check('src/sqlite/sqlite.js', 'src/sqlite/sqlite.d.ts');
+  check('src/mongodb/mongodb.js', 'src/mongodb/mongodb.d.ts');
   check('src/search/search.js', 'src/search/search.d.ts');
   check('src/order/order.js', 'src/order/order.d.ts');
   check('src/undo/undo.js', 'src/undo/undo.d.ts');

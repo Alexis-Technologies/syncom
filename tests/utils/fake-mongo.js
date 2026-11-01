@@ -1,0 +1,414 @@
+'use strict';
+
+// A MongoDB driver in memory, as much of it as the engine speaks: a client
+// with databases of collections, `findOne`/`find(...).toArray()` with
+// projections, sorts and limits, `insertOne` (E11000 on a key held),
+// `bulkWrite` (replaceOne upsert, insertOne, deleteOne, deleteMany,
+// updateOne), `deleteMany`, `updateOne`, `findOneAndUpdate`, `createIndex`,
+// `countDocuments`, `drop`, sessions whose `withTransaction` undoes what the
+// callback wrote when it throws, and change streams (`watch`) that hear
+// every write once it is committed. Filters: equality, `$gt/$gte/$lt/$lte`,
+// `$in/$nin`, `$ne`, `$exists`, `$or`, `$and`. What it lacks, it throws on,
+// so a test never passes on a method the real driver would not have.
+
+const { EventEmitter } = require('node:events');
+
+const clone = (value) => structuredClone(value);
+
+const compare = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+const valueAt = (doc, path) => {
+  let value = doc;
+  const parts = path.split('.');
+  for (let i = 0; i < parts.length; i++) {
+    if (value === null || typeof value !== 'object') return undefined;
+    value = value[parts[i]];
+  }
+  return value;
+};
+
+const OPERATORS = new Set(['$gt', '$gte', '$lt', '$lte', '$in', '$nin', '$ne', '$exists', '$eq']);
+
+const matchesCondition = (value, condition) => {
+  if (condition !== null && typeof condition === 'object' && !Array.isArray(condition)) {
+    const keys = Object.keys(condition);
+    if (keys.length > 0 && keys.every((key) => OPERATORS.has(key))) {
+      for (const key of keys) {
+        const expected = condition[key];
+        switch (key) {
+          case '$gt':
+            if (!(value !== undefined && compare(value, expected) > 0)) return false;
+            break;
+          case '$gte':
+            if (!(value !== undefined && compare(value, expected) >= 0)) return false;
+            break;
+          case '$lt':
+            if (!(value !== undefined && compare(value, expected) < 0)) return false;
+            break;
+          case '$lte':
+            if (!(value !== undefined && compare(value, expected) <= 0)) return false;
+            break;
+          case '$in':
+            if (!expected.some((item) => same(item, value))) return false;
+            break;
+          case '$nin':
+            if (expected.some((item) => same(item, value))) return false;
+            break;
+          case '$ne':
+            if (same(value, expected)) return false;
+            break;
+          case '$eq':
+            if (!same(value, expected)) return false;
+            break;
+          case '$exists':
+            if ((value !== undefined) !== Boolean(expected)) return false;
+            break;
+          default:
+            throw new Error(`fake-mongo: operator ${key} is not supported`);
+        }
+      }
+      return true;
+    }
+  }
+  return same(value, condition);
+};
+
+const matches = (doc, filter) => {
+  for (const [key, condition] of Object.entries(filter)) {
+    if (key === '$or') {
+      if (!condition.some((branch) => matches(doc, branch))) return false;
+    } else if (key === '$and') {
+      if (!condition.every((branch) => matches(doc, branch))) return false;
+    } else if (key.startsWith('$')) {
+      throw new Error(`fake-mongo: filter ${key} is not supported`);
+    } else if (!matchesCondition(valueAt(doc, key), condition)) return false;
+  }
+  return true;
+};
+
+const project = (doc, projection) => {
+  if (projection === undefined || projection === null) return clone(doc);
+  const out = {};
+  let includes = false;
+  for (const [key, on] of Object.entries(projection)) if (on && key !== '_id') includes = true;
+  if (includes) {
+    if (projection._id !== 0) out._id = doc._id;
+    for (const [key, on] of Object.entries(projection)) if (on && key in doc) out[key] = clone(doc[key]);
+    return out;
+  }
+  const copy = clone(doc);
+  for (const [key, on] of Object.entries(projection)) if (!on) delete copy[key];
+  return copy;
+};
+
+const duplicate = (_id) =>
+  Object.assign(new Error(`E11000 duplicate key error collection: fake index: _id_ dup key: { _id: "${_id}" }`), {
+    code: 11000,
+  });
+
+// The fields `update` sets: `$set` (and `$setOnInsert` at an upsert's insert).
+const applyUpdate = (doc, update, inserting) => {
+  const next = { ...doc };
+  for (const [op, fields] of Object.entries(update)) {
+    if (op === '$set' || (op === '$setOnInsert' && inserting)) Object.assign(next, clone(fields));
+    else if (op === '$setOnInsert') continue;
+    else if (op === '$unset') for (const key of Object.keys(fields)) delete next[key];
+    else if (op === '$inc') for (const [key, by] of Object.entries(fields)) next[key] = (next[key] ?? 0) + by;
+    else throw new Error(`fake-mongo: update ${op} is not supported`);
+  }
+  return next;
+};
+
+class FakeChangeStream extends EventEmitter {
+  #collection;
+  constructor(collection) {
+    super();
+    this.#collection = collection;
+    collection.watchers.add(this);
+  }
+  async close() {
+    this.#collection.watchers.delete(this);
+    this.emit('close');
+  }
+}
+
+class FakeCollection {
+  docs = new Map();
+  watchers = new Set();
+  #name;
+  constructor(name) {
+    this.#name = name;
+  }
+  get collectionName() {
+    return this.#name;
+  }
+
+  // Every change goes through here: the session's undo log first, the
+  // watchers (after the transaction commits, or at once) after.
+  #change(_id, next, session) {
+    const before = this.docs.get(_id);
+    if (session?.inTransaction) session.undo.push([this, _id, before]);
+    if (next === undefined) this.docs.delete(_id);
+    else this.docs.set(_id, next);
+    const event =
+      next === undefined
+        ? { operationType: 'delete', documentKey: { _id } }
+        : {
+            operationType: before === undefined ? 'insert' : 'replace',
+            documentKey: { _id },
+            fullDocument: clone(next),
+          };
+    if (session?.inTransaction) session.events.push([this, event]);
+    else this.publish(event);
+  }
+  publish(event) {
+    for (const watcher of this.watchers) setImmediate(() => watcher.emit('change', clone(event)));
+  }
+
+  #all(filter) {
+    const found = [];
+    for (const doc of this.docs.values()) if (matches(doc, filter)) found.push(doc);
+    return found;
+  }
+
+  async findOne(filter, options = {}) {
+    const docs = this.#all(filter);
+    return docs.length === 0 ? null : project(docs[0], options.projection);
+  }
+
+  find(filter, options = {}) {
+    let { sort, limit, projection } = options;
+    const run = () => {
+      let docs = this.#all(filter);
+      if (sort !== undefined) {
+        const entries = Object.entries(sort);
+        docs.sort((a, b) => {
+          for (const [field, direction] of entries) {
+            const order = compare(valueAt(a, field), valueAt(b, field));
+            if (order !== 0) return direction < 0 ? -order : order;
+          }
+          return 0;
+        });
+      }
+      if (limit !== undefined && limit > 0) docs = docs.slice(0, limit);
+      return docs.map((doc) => project(doc, projection));
+    };
+    const cursor = {
+      sort(by) {
+        sort = by;
+        return cursor;
+      },
+      limit(n) {
+        limit = n;
+        return cursor;
+      },
+      project(by) {
+        projection = by;
+        return cursor;
+      },
+      toArray: async () => run(),
+      async *[Symbol.asyncIterator]() {
+        yield* run();
+      },
+    };
+    return cursor;
+  }
+
+  async countDocuments(filter = {}) {
+    return this.#all(filter).length;
+  }
+
+  async insertOne(doc, options = {}) {
+    const copy = clone(doc);
+    if (copy._id === undefined) copy._id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+    if (this.docs.has(copy._id)) throw duplicate(copy._id);
+    this.#change(copy._id, copy, options.session);
+    return { acknowledged: true, insertedId: copy._id };
+  }
+
+  async insertMany(docs, options = {}) {
+    for (const doc of docs) await this.insertOne(doc, options);
+    return { acknowledged: true, insertedCount: docs.length };
+  }
+
+  async replaceOne(filter, replacement, options = {}) {
+    const found = this.#all(filter);
+    if (found.length === 0) {
+      if (!options.upsert) return { matchedCount: 0, modifiedCount: 0, upsertedCount: 0 };
+      const doc = clone(replacement);
+      if (doc._id === undefined) doc._id = filter._id;
+      if (this.docs.has(doc._id)) throw duplicate(doc._id);
+      this.#change(doc._id, doc, options.session);
+      return { matchedCount: 0, modifiedCount: 0, upsertedCount: 1, upsertedId: doc._id };
+    }
+    const doc = { ...clone(replacement), _id: found[0]._id };
+    this.#change(doc._id, doc, options.session);
+    return { matchedCount: 1, modifiedCount: 1, upsertedCount: 0 };
+  }
+
+  async updateOne(filter, update, options = {}) {
+    const found = this.#all(filter);
+    if (found.length === 0) {
+      if (!options.upsert) return { matchedCount: 0, modifiedCount: 0, upsertedCount: 0 };
+      const seed = {};
+      for (const [key, value] of Object.entries(filter)) {
+        if (!key.startsWith('$') && !isCondition(value)) seed[key] = value;
+      }
+      const doc = applyUpdate(seed, update, true);
+      if (doc._id === undefined) doc._id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+      if (this.docs.has(doc._id)) throw duplicate(doc._id);
+      this.#change(doc._id, doc, options.session);
+      return { matchedCount: 0, modifiedCount: 0, upsertedCount: 1, upsertedId: doc._id };
+    }
+    const doc = applyUpdate(found[0], update, false);
+    this.#change(doc._id, doc, options.session);
+    return { matchedCount: 1, modifiedCount: 1, upsertedCount: 0 };
+  }
+
+  async findOneAndUpdate(filter, update, options = {}) {
+    const found = this.#all(filter);
+    const before = found.length === 0 ? null : clone(found[0]);
+    const result = await this.updateOne(filter, update, options);
+    if (found.length === 0 && result.upsertedCount === 0) return null;
+    const _id = found.length === 0 ? result.upsertedId : found[0]._id;
+    return options.returnDocument === 'after' ? clone(this.docs.get(_id)) : before;
+  }
+
+  async deleteOne(filter, options = {}) {
+    const found = this.#all(filter);
+    if (found.length === 0) return { deletedCount: 0 };
+    this.#change(found[0]._id, undefined, options.session);
+    return { deletedCount: 1 };
+  }
+
+  async deleteMany(filter, options = {}) {
+    const found = this.#all(filter);
+    for (const doc of found) this.#change(doc._id, undefined, options.session);
+    return { deletedCount: found.length };
+  }
+
+  async bulkWrite(operations, options = {}) {
+    if (!options.ordered && options.ordered !== undefined) throw new Error('fake-mongo: ordered bulk writes only');
+    const result = { insertedCount: 0, matchedCount: 0, modifiedCount: 0, deletedCount: 0, upsertedCount: 0 };
+    for (const operation of operations) {
+      const [kind] = Object.keys(operation);
+      const op = operation[kind];
+      if (kind === 'replaceOne') {
+        const r = await this.replaceOne(op.filter, op.replacement, { upsert: op.upsert, session: options.session });
+        result.matchedCount += r.matchedCount;
+        result.modifiedCount += r.modifiedCount;
+        result.upsertedCount += r.upsertedCount;
+      } else if (kind === 'insertOne') {
+        await this.insertOne(op.document, { session: options.session });
+        result.insertedCount++;
+      } else if (kind === 'deleteOne') {
+        result.deletedCount += (await this.deleteOne(op.filter, { session: options.session })).deletedCount;
+      } else if (kind === 'deleteMany') {
+        result.deletedCount += (await this.deleteMany(op.filter, { session: options.session })).deletedCount;
+      } else if (kind === 'updateOne') {
+        const r = await this.updateOne(op.filter, op.update, { upsert: op.upsert, session: options.session });
+        result.matchedCount += r.matchedCount;
+        result.modifiedCount += r.modifiedCount;
+        result.upsertedCount += r.upsertedCount;
+      } else throw new Error(`fake-mongo: bulk operation ${kind} is not supported`);
+    }
+    return result;
+  }
+
+  async createIndex(keys) {
+    return Object.entries(keys)
+      .map(([field, direction]) => `${field}_${direction}`)
+      .join('_');
+  }
+
+  watch() {
+    return new FakeChangeStream(this);
+  }
+
+  async drop() {
+    for (const _id of [...this.docs.keys()]) this.#change(_id, undefined, undefined);
+    return true;
+  }
+}
+
+const isCondition = (value) =>
+  value !== null &&
+  typeof value === 'object' &&
+  !Array.isArray(value) &&
+  Object.keys(value).some((key) => OPERATORS.has(key));
+
+class FakeSession {
+  inTransaction = false;
+  undo = [];
+  events = [];
+  async withTransaction(fn) {
+    this.inTransaction = true;
+    this.undo = [];
+    this.events = [];
+    try {
+      const value = await fn(this);
+      this.inTransaction = false;
+      for (const [collection, event] of this.events) collection.publish(event);
+      return value;
+    } catch (error) {
+      this.inTransaction = false;
+      for (let i = this.undo.length - 1; i >= 0; i--) {
+        const [collection, _id, before] = this.undo[i];
+        if (before === undefined) collection.docs.delete(_id);
+        else collection.docs.set(_id, before);
+      }
+      throw error;
+    } finally {
+      this.undo = [];
+      this.events = [];
+    }
+  }
+  async endSession() {}
+}
+
+class FakeDb {
+  #collections = new Map();
+  databaseName;
+  constructor(name) {
+    this.databaseName = name;
+  }
+  collection(name) {
+    let collection = this.#collections.get(name);
+    if (collection === undefined) this.#collections.set(name, (collection = new FakeCollection(name)));
+    return collection;
+  }
+  async dropDatabase() {
+    for (const collection of this.#collections.values()) await collection.drop();
+    this.#collections.clear();
+    return true;
+  }
+  async listCollections() {
+    return [...this.#collections.keys()];
+  }
+}
+
+class FakeMongoClient {
+  #dbs = new Map();
+  closed = false;
+  db(name = 'test') {
+    let db = this.#dbs.get(name);
+    if (db === undefined) this.#dbs.set(name, (db = new FakeDb(name)));
+    return db;
+  }
+  startSession() {
+    return new FakeSession();
+  }
+  async connect() {
+    return this;
+  }
+  async close() {
+    this.closed = true;
+  }
+}
+
+/** A fresh in-memory MongoDB client. */
+const createFakeMongo = () => new FakeMongoClient();
+
+module.exports = { createFakeMongo, FakeMongoClient, FakeDb, FakeCollection, matches };

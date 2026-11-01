@@ -181,6 +181,8 @@ const ENTRIES = [
   // The engine over SQLite (src/sqlite/sqlite.js): node:sqlite required inside the factory, so a node-only row with no
   // browser budget (engines plan, E4).
   { label: 'sqlite engine — node (@alexify/syncom/sqlite)', entry: 'src/sqlite/sqlite.js', platform: 'node' },
+  // The engine over MongoDB (src/mongodb/mongodb.js): the driver injected, node-only, no browser budget (engines plan, E5).
+  { label: 'mongodb engine — node (@alexify/syncom/mongodb)', entry: 'src/mongodb/mongodb.js', platform: 'node' },
   // The trigram text index behind `$text`: platform-neutral, off the main
   // entry so a node that never searches pays nothing for it.
   { label: 'search — browser (@alexify/syncom/search)', entry: 'src/search/search.js', platform: 'browser', budget: 2 },

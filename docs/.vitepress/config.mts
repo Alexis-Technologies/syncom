@@ -52,6 +52,7 @@ const keywords = [
   'browser',
   'indexeddb',
   'sqlite',
+  'mongodb',
   'opentelemetry',
   'observability',
 ].join(', ');
