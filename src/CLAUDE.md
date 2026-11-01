@@ -430,7 +430,7 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   group's line is in, begun again at every roll (`#seal`) and after a failed
   append (`append` in journal.js), removed once none of its groups is open. The journal's `groups`
   holds the groups `{ first, last, file, line }` — each with the line it was journaled as, until it is
-  sealed (LOG-10) — never the files. `load`
+  sealed (LOG-10) — never the files. `load` (`loadSegments`, then `loadOpen`)
   reads the names NEWEST FIRST and `adopt` keeps the first copy of a seq —
   that is what shadows the line of a group whose append failed after it
   landed (its seqs went to a newer journal); a torn LAST line is left out

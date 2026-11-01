@@ -349,29 +349,31 @@ const createJournalStore = (fsi, path, { logger = null } = {}) => {
 
   // ---- the open: segments, then the open files, newest first -----------
 
-  const load = async () => {
-    const hasIndex = await fsi.exists(path, INDEX);
-    const index = hasIndex ? indexOf(parseJson(await fsi.read(path, INDEX))) : null;
-    const indexed = index !== null;
-    let floor = indexed ? index.floor : 1;
-    const entries = [];
-    const seen = new Set();
-    // Merges loaded entries in, deduplicating by seq (a crash mid-roll leaves
-    // the same batch both sealed and open; a group whose append failed may
-    // have left its line, shadowed by the group that took its seqs).
-    const adopt = (read) => {
+  // What a load gathers: the entries merged in, deduplicated by seq (a crash
+  // mid-roll leaves the same batch both sealed and open; a group whose
+  // append failed may have left its line, shadowed by the group that took
+  // its seqs), the floor as the index or the first entry says, the seq
+  // sealed up to.
+  const gathering = (indexed, floor) => {
+    const state = { indexed, floor, sealed: 0, entries: [], seen: new Set(), adopt: null };
+    state.adopt = (read) => {
       for (let i = 0; i < read.length; i++) {
         const entry = read[i];
-        if (!entry || !Number.isInteger(entry.seq) || seen.has(entry.seq)) continue;
-        seen.add(entry.seq);
-        entries.push(entry);
+        if (!entry || !Number.isInteger(entry.seq) || state.seen.has(entry.seq)) continue;
+        state.seen.add(entry.seq);
+        state.entries.push(entry);
       }
     };
-    // The sealed segments are what the directory lists (`seg-<from>.json`),
-    // each read whole: the index names none of them. A segment's start not
-    // meeting the floor or the end of the one before is a file this log
-    // should hold and does not (`log.segment.missing`); one wholly below the
-    // floor was compacted, its removal cut short.
+    return state;
+  };
+
+  // The sealed segments are what the directory lists (`seg-<from>.json`),
+  // each read whole: the index names none of them. A segment's start not
+  // meeting the floor or the end of the one before is a file this log
+  // should hold and does not (`log.segment.missing`); one wholly below the
+  // floor was compacted, its removal cut short.
+  const loadSegments = async (state) => {
+    const { indexed, adopt } = state;
     const listed = [];
     const names = await fsi.list(path);
     for (let i = 0; i < names.length; i++) {
@@ -382,7 +384,7 @@ const createJournalStore = (fsi, path, { logger = null } = {}) => {
     }
     listed.sort((a, b) => a.from - b.from);
     // Where the next segment should start: unknown past one that did not read.
-    let next = indexed ? floor : null;
+    let next = indexed ? state.floor : null;
     for (let i = 0; i < listed.length; i++) {
       const segment = listed[i];
       const text = await readOrNull(fsi, path, segment.name);
@@ -400,7 +402,7 @@ const createJournalStore = (fsi, path, { logger = null } = {}) => {
         segment.to = read.entries[read.entries.length - 1].seq;
         segment.count = read.entries.length;
       }
-      if (indexed && segment.to < floor) {
+      if (indexed && segment.to < state.floor) {
         await fsi.remove(path, segment.name);
         continue;
       }
@@ -412,13 +414,14 @@ const createJournalStore = (fsi, path, { logger = null } = {}) => {
       adopt(read.entries);
       segments.push(segment);
     }
-    // The floor is durable in the index; without one that reads (none, or
-    // one that is not this log's) everything on disk is retained from its
-    // first entry.
-    entries.sort((a, b) => a.seq - b.seq);
-    if (!indexed && entries.length > 0) floor = entries[0].seq;
-    const sealed = sealedTo() ?? floor - 1;
+  };
 
+  // The open files, newest first: a group whose write failed may have left
+  // its line at the end of a journal, and the group that took its seqs back
+  // went to a newer file — `adopt` keeps the first copy of a seq it sees.
+  // Answers the journals a newer one shadows a line of.
+  const loadOpen = async (state) => {
+    const { seen, adopt } = state;
     // A group read back from an open file: adopted and kept with its file;
     // the seqs a segment does not have yet are the owner's to hold until its
     // records are written.
@@ -430,14 +433,14 @@ const createJournalStore = (fsi, path, { logger = null } = {}) => {
       for (let i = 0; i < read.length; i++) {
         const seq = read[i].seq;
         if (!Number.isInteger(seq)) continue;
-        if (seq > sealed) unsealed.push(seq);
+        if (seq > state.sealed) unsealed.push(seq);
         if (seq < first) first = seq;
         if (seq > last) last = seq;
       }
       if (first === Infinity) return;
       // Its line, for the segment that seals it — where the line is the group's
       // and none of it is sealed already (a roll a crash cut short).
-      const whole = first > sealed && last - first + 1 === read.length;
+      const whole = first > state.sealed && last - first + 1 === read.length;
       groups.push({ first, last, file, line: whole ? line : null, unsealed });
     };
     // Whether a group read from a journal has a seq past the segments that a
@@ -446,7 +449,7 @@ const createJournalStore = (fsi, path, { logger = null } = {}) => {
     const shadowed = (read) => {
       for (let i = 0; i < read.length; i++) {
         const seq = read[i]?.seq;
-        if (Number.isInteger(seq) && seq > sealed && seen.has(seq)) return true;
+        if (Number.isInteger(seq) && seq > state.sealed && seen.has(seq)) return true;
       }
       return false;
     };
@@ -483,11 +486,7 @@ const createJournalStore = (fsi, path, { logger = null } = {}) => {
     };
 
     const open = await fsi.list(openPath);
-    // Newest first: a group whose write failed may have left its line at the
-    // end of a journal, and the group that took its seqs back went to a
-    // newer file — `adopt` keeps the first copy of a seq it sees.
     open.sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
-    // Journals a newer one shadows a line of: rewritten below.
     const stale = new Set();
     for (let i = 0; i < open.length; i++) {
       const name = open[i];
@@ -523,29 +522,48 @@ const createJournalStore = (fsi, path, { logger = null } = {}) => {
       }
       opened(name, read.entries, text);
     }
+    return stale;
+  };
+
+  // A shadowed line is a copy left behind — by a scrub or a group's failed
+  // append cut short — and may hold a payload a scrub took away: its journal
+  // goes, rewritten with the groups it still holds, from the entries loaded.
+  const rewriteStale = async (state, stale) => {
+    const { entries } = state;
+    const entriesBetween = (from, to) => {
+      const slice = [];
+      for (let i = 0; i < entries.length; i++) {
+        if (entries[i].seq < from) continue;
+        if (entries[i].seq > to) break;
+        slice.push(entries[i]);
+      }
+      return slice;
+    };
+    for (const name of stale) await rewriteJournal(name, state.sealed, entriesBetween);
+  };
+
+  const load = async () => {
+    const hasIndex = await fsi.exists(path, INDEX);
+    const index = hasIndex ? indexOf(parseJson(await fsi.read(path, INDEX))) : null;
+    const indexed = index !== null;
+    const state = gathering(indexed, indexed ? index.floor : 1);
+    await loadSegments(state);
+    // The floor is durable in the index; without one that reads (none, or
+    // one that is not this log's) everything on disk is retained from its
+    // first entry.
+    state.entries.sort((a, b) => a.seq - b.seq);
+    if (!indexed && state.entries.length > 0) state.floor = state.entries[0].seq;
+    state.sealed = sealedTo() ?? state.floor - 1;
+    const stale = await loadOpen(state);
     // The groups in seq order, like the appends that made them; the entries too.
     groups.sort(byFirst);
-    entries.sort((a, b) => a.seq - b.seq);
-    // A shadowed line is a copy left behind — by a scrub or a group's
-    // failed append cut short — and may hold a payload a scrub took away:
-    // its journal goes, rewritten with the groups it still holds.
-    if (stale.size > 0) {
-      const entriesBetween = (from, to) => {
-        const slice = [];
-        for (let i = 0; i < entries.length; i++) {
-          if (entries[i].seq < from) continue;
-          if (entries[i].seq > to) break;
-          slice.push(entries[i]);
-        }
-        return slice;
-      };
-      for (const name of stale) await rewriteJournal(name, sealed, entriesBetween);
-    }
+    state.entries.sort((a, b) => a.seq - b.seq);
+    if (stale.size > 0) await rewriteStale(state, stale);
     const held = [];
     for (let i = 0; i < groups.length; i++) {
       held.push({ first: groups[i].first, last: groups[i].last, unsealed: groups[i].unsealed });
     }
-    return { index, hasIndex, entries, groups: held, floor, lost };
+    return { index, hasIndex, entries: state.entries, groups: held, floor: state.floor, lost };
   };
 
   return Object.freeze({

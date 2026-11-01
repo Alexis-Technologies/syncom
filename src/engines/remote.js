@@ -287,31 +287,35 @@ const serveEngine = (engine, port, { allow = null } = {}) => {
     return path;
   };
 
-  const call = async (message) => {
-    if (message.hello === true) return { name: inner.name, capabilities: inner.capabilities };
-    if (message.open !== undefined) {
+  // What a message asks of the engine itself, by its shape.
+  const engineCalls = {
+    hello: async () => ({ name: inner.name, capabilities: inner.capabilities }),
+    async open(message) {
       const path = permitted(message.open, false);
       const db = checkEngineDb(await inner.open(path, { durable: message.options?.durable === true }), 'serveEngine()');
       const handle = next++;
       handles.set(handle, db);
       opened.add(path);
       return handle;
-    }
-    if (message.remove !== undefined) return void (await inner.remove(permitted(message.remove, true)));
-    const db = handles.get(message.h);
-    if (db === undefined) throw refused(`no database ${message.h} (closed?)`);
-    if (message.subscribe === true) {
+    },
+    remove: async (message) => void (await inner.remove(permitted(message.remove, true))),
+  };
+  // What a message asks of a database opened over this port, by its shape — a store's method otherwise.
+  const DATABASE_KINDS = ['subscribe', 'unsubscribe', 'lock', 'release', 'close'];
+  const databaseCalls = {
+    subscribe(message, db) {
+      if (message.subscribe !== true) throw refused('subscribe is true');
       if (db.changes === undefined) throw refused('the engine has no change stream');
       const stop = db.changes.subscribe((data) => send({ event: message.id, message: data }));
       subscriptions.set(message.id, stop);
       return true;
-    }
-    if (message.unsubscribe !== undefined) {
+    },
+    unsubscribe(message) {
       subscriptions.get(message.unsubscribe)?.();
       subscriptions.delete(message.unsubscribe);
       return true;
-    }
-    if (message.lock !== undefined) {
+    },
+    async lock(message, db) {
       if (typeof db.lock !== 'function') throw refused('the engine has no lease');
       const lockId = next++;
       const held = await db.lock({
@@ -328,19 +332,60 @@ const serveEngine = (engine, port, { allow = null } = {}) => {
         leases.set(lockId, stop);
       }
       return { id: lockId, gen: held.gen, expiresAt: held.expiresAt ?? null };
-    }
-    if (message.release !== undefined) {
+    },
+    async release(message) {
       const held = locks.get(message.release);
       locks.delete(message.release);
       leases.get(message.release)?.();
       leases.delete(message.release);
       await held?.release();
       return true;
-    }
-    if (message.close === true) {
+    },
+    async close(message, db) {
+      if (message.close !== true) throw refused('close is true');
       handles.delete(message.h);
-      return void (await db.close());
-    }
+      await db.close();
+    },
+  };
+  // The log store's calls that carry a callback's answer along instead of the callback.
+  const logCalls = {
+    async append(log, args) {
+      const [entries, headers, options] = args;
+      let failure = null;
+      const landed = await log.append(entries, headers, {
+        ...options,
+        onFail: (error) => {
+          failure = packError(error);
+        },
+        // The journal reuses the lines it holds; nothing of a group is ever rebuilt from less than it held.
+        entriesBetween: () => [],
+      });
+      return landed ? { landed: true } : { landed: false, error: failure };
+    },
+    async drop(log, args) {
+      // The proxy's segment is a copy: the store's own is found by its range.
+      const segments = log.segments;
+      let own = null;
+      for (let i = 0; i < segments.length; i++) {
+        if (segments[i].from === args[0].from && segments[i].to === args[0].to) own = segments[i];
+      }
+      if (own === null) throw new TypeError('drop(segment): no such segment');
+      await log.drop(own);
+    },
+    async scrub(log, args) {
+      const [seqs, options, entries] = args;
+      const held = new Map();
+      for (let i = 0; i < entries.length; i++) held.set(entries[i].seq, entries[i]);
+      const entriesBetween = (from, to) => {
+        const out = [];
+        for (let seq = from; seq <= to; seq++) if (held.has(seq)) out.push(held.get(seq));
+        return out;
+      };
+      await log.scrub(seqs, { ...options, entriesBetween });
+    },
+  };
+  // A store's method: named by the contract, its arguments checked, called.
+  const callStore = async (message, db) => {
     const { store, method } = message;
     const args = list(message.args, 'args');
     if (args.length > ARGS_MAX) throw refused('too many arguments');
@@ -350,47 +395,22 @@ const serveEngine = (engine, port, { allow = null } = {}) => {
       throw refused(`no ${store}.${method}`);
     }
     checks[method](...args);
-    if (store === 'log') {
-      const log = db.log;
-      if (method === 'append') {
-        const [entries, headers, options] = args;
-        let failure = null;
-        const landed = await log.append(entries, headers, {
-          ...options,
-          onFail: (error) => {
-            failure = packError(error);
-          },
-          // The journal reuses the lines it holds; nothing of a group is ever rebuilt from less than it held.
-          entriesBetween: () => [],
-        });
-        return landed ? { landed: true } : { landed: false, error: failure };
-      }
-      if (method === 'drop') {
-        // The proxy's segment is a copy: the store's own is found by its range.
-        const segments = log.segments;
-        let own = null;
-        for (let i = 0; i < segments.length; i++) {
-          if (segments[i].from === args[0].from && segments[i].to === args[0].to) own = segments[i];
-        }
-        if (own === null) throw new TypeError('drop(segment): no such segment');
-        return void (await log.drop(own));
-      }
-      if (method === 'scrub') {
-        const [seqs, options, entries] = args;
-        const held = new Map();
-        for (let i = 0; i < entries.length; i++) held.set(entries[i].seq, entries[i]);
-        const entriesBetween = (from, to) => {
-          const out = [];
-          for (let seq = from; seq <= to; seq++) if (held.has(seq)) out.push(held.get(seq));
-          return out;
-        };
-        return void (await log.scrub(seqs, { ...options, entriesBetween }));
-      }
-      return log[method](...args);
-    }
+    if (store === 'log' && Object.hasOwn(logCalls, method)) return logCalls[method](db.log, args);
     const target = db[store];
     if (typeof target?.[method] !== 'function') throw refused(`the engine has no ${store}.${method}`);
     return target[method](...args);
+  };
+  const call = async (message) => {
+    if (message.hello === true) return engineCalls.hello();
+    if (message.open !== undefined) return engineCalls.open(message);
+    if (message.remove !== undefined) return engineCalls.remove(message);
+    const db = handles.get(message.h);
+    if (db === undefined) throw refused(`no database ${message.h} (closed?)`);
+    for (let i = 0; i < DATABASE_KINDS.length; i++) {
+      const kind = DATABASE_KINDS[i];
+      if (message[kind] !== undefined) return databaseCalls[kind](message, db);
+    }
+    return callStore(message, db);
   };
 
   const onMessage = async (message) => {
