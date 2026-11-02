@@ -226,6 +226,12 @@ class Collection {
     return this.#storage.unset(id, fields, options);
   }
 
+  /** Changes the record by a function, inside the queue — the database's `modify()` for a record of this collection. */
+  async modify(id, fn, options = {}) {
+    this.#mine(id);
+    return this.#storage.modify(id, fn, options);
+  }
+
   /** The live Document of `id` — of this collection, or `NOT_FOUND`. */
   async document(id) {
     this.#mine(id);

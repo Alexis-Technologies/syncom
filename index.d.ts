@@ -1769,6 +1769,8 @@ export interface Transaction extends TextMethods, TreeMethods {
   update(id: string, delta: object, options?: WriteOptions): Promise<void>;
   swap(id: string, changes: object, prev: object, options?: WriteOptions): Promise<boolean>;
   delete(id: string, options?: WriteOptions): Promise<void>;
+  /** The record changed by a function, over what the transaction left it — the database's `modify()` within it. */
+  modify<R = RecordData>(id: string, fn: ModifyFn<R>, options?: WriteOptions): Promise<R | null>;
   unset(id: string, fields: string | readonly string[], options?: WriteOptions): Promise<void>;
   inc(id: string, key: string, value?: number, options?: WriteOptions): Promise<void>;
   add(id: string, key: string, elements: readonly unknown[], options?: WriteOptions): Promise<void>;
@@ -2444,6 +2446,13 @@ export interface Database {
    */
   swap(id: string, changes: object, prev: object, options?: WriteOptions): Promise<boolean>;
   /**
+   * Changes record `id` by a function: `fn(copy)` runs inside the mutation queue over a copy of the
+   * record as it reads, and what it leaves — what it returns, or the copy when it returns nothing — is
+   * written as the ops that take the record there (a field changed, a field gone; `null` deletes), as one
+   * transaction. Two calls on one record compose. Resolves to the record as it reads after, or null.
+   */
+  modify<R = RecordData>(id: string, fn: ModifyFn<R>, options?: TransactOptions): Promise<R | null>;
+  /**
    * Rebuilds the record from what the log holds of it — a file that fails
    * its integrity check, or is torn: the retained entries replayed from the
    * first whole-record op (`write`, `merge`, `delete`, `purge`), written with
@@ -2732,6 +2741,14 @@ export type SyncomRecord<R = RecordData> = SyncomDocument<R>;
  * a write takes — a Standard Schema's input, defaults and aliases not yet
  * applied; both `RecordData` unless the schema says more (see `Collections`).
  */
+/**
+ * What `modify(id, fn)` runs over a copy of the record as it reads, inside the queue: what it returns —
+ * or the copy, when it returns nothing — is the record after; `null` deletes it.
+ */
+export type ModifyFn<R = RecordData> = (
+  record: R,
+) => NoInfer<R> | null | undefined | void | Promise<NoInfer<R> | null | undefined | void>;
+
 /** What a bulk write resolves to: the ids written, and a verdict per refused row — the row stays out, the rest go on. */
 export interface BulkResult<I = RecordData> {
   success: string[];
@@ -2755,6 +2772,8 @@ export interface SyncomCollection<R = RecordData, I = R> {
   bulkUpsert(rows: readonly I[], options?: TransactOptions): Promise<BulkResult<I>>;
   /** Every id deleted, as ONE transaction with a verdict per row: an absent or foreign one is `NOT_FOUND`. */
   bulkRemove(ids: readonly string[], options?: TransactOptions): Promise<BulkResult<string>>;
+  /** Changes the record by a function inside the queue — the database's `modify()`; `NOT_FOUND` for a record of another collection. */
+  modify(id: string, fn: ModifyFn<R>, options?: TransactOptions): Promise<R | null>;
   get(id: string, options?: { at?: Version }): Promise<R | null>;
   /** A cursor over this collection — see Cursor; the query names the record's fields, or any by a dotted path. */
   select(query?: MangoQuery<R>): Cursor<QueryRow<R>>;

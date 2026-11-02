@@ -933,6 +933,13 @@ storage.record<Post>('id').then((record) => {
   expectError(db.Tag.bulkRemove([1]));
   expectAssignable<syncom.EntityDefinition>({ id: { fields: ['a'] } });
   expectError<syncom.EntityDefinition>({ id: { fields: 'a' } });
+  expectType<Promise<RecordData | null>>(db.Tag.modify('t1', (doc) => doc));
+  expectType<Promise<RecordData | null>>(db.modify('t1', () => null));
+  expectType<Promise<RecordData | null>>(db.modify('t1', async () => undefined, { message: 'm' }));
+  await db.transact(async (tx) => {
+    expectType<Promise<{ n: number } | null>>(tx.modify<{ n: number }>('t1', (doc) => void (doc.n += 1)));
+  });
+  expectError(db.modify('t1', 'nope'));
   const code: syncom.SyncomErrorCode = 'EXISTS';
   const inTx: syncom.SyncomErrorCode = 'IN_TRANSACTION';
   expectType<'EXISTS'>(code);

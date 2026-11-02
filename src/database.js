@@ -36,6 +36,7 @@ const { DISABLED, isWriter, writerOf, traced, now } = require('./telemetry/write
 const { GLOBAL_SCOPE } = require('./scope.js');
 const { normalizeStorageOptions } = require('./options.js');
 const { isPlainObject, isRecordId, invalidId, isStreamName, VALIDATED, MAX_ACTOR } = require('./shape.js');
+const { asJson, deepEqual } = require('./shape.js');
 const { Observers } = require('./observe.js');
 const { DeferredWindow } = require('./defer.js');
 const { fieldName } = require('./args.js');
@@ -85,6 +86,38 @@ const NOOP = () => {};
 const insertNamed = async (tx, id, data, options) => {
   if (await tx.has(id)) throw new SyncomError('EXISTS', `Record ${id} exists already`, { id });
   await tx.set(id, data, { actor: options.actor });
+};
+
+// `modify(id, fn)` inside a transaction: `fn` over a copy of the record as it
+// reads, inside the queue — nothing lands between the reading and the ops —
+// and what it leaves (what it returns, or the copy when it returns nothing)
+// written as the ops that take the record there: a field changed is a `set`
+// of a register (another kind refuses it, FIELD_KIND), a field gone an
+// `unset`, `null` a delete. Resolves to the record as it reads after, or
+// null; no record is NOT_FOUND.
+const modifyIn = async (tx, id, fn, options) => {
+  const before = await tx.get(id);
+  if (before === null) throw new SyncomError('NOT_FOUND', `Record ${id} not found`, { id });
+  const copy = asJson(before);
+  let after = await fn(copy);
+  if (after === undefined) after = copy;
+  if (after === null) {
+    await tx.delete(id, options);
+    return null;
+  }
+  if (!isPlainObject(after)) throw new TypeError('modify() must return an object, null or undefined');
+  const delta = {};
+  let changed = 0;
+  const gone = [];
+  for (const key of Object.keys(after)) {
+    if (Object.hasOwn(before, key) && deepEqual(before[key], after[key])) continue;
+    delta[key] = after[key];
+    changed++;
+  }
+  for (const key of Object.keys(before)) if (!Object.hasOwn(after, key)) gone.push(key);
+  if (gone.length > 0) await tx.unset(id, gone, options);
+  if (changed > 0) await tx.update(id, delta, options);
+  return changed > 0 || gone.length > 0 ? tx.get(id) : before;
 };
 
 class Database extends Emitter {
@@ -2028,6 +2061,21 @@ class Database extends Emitter {
     return this.#update(id, delta, options?.actor);
   }
 
+  /**
+   * Changes record `id` by a function: `fn(copy)` runs inside the mutation
+   * queue over a copy of the record as it reads, and what it leaves — what
+   * it returns, or the copy when it returns nothing — is written as the ops
+   * that take the record there (a field changed, a field gone; `null`
+   * deletes). Two `modify()` calls on one record compose: each reads what
+   * the one before it left. A write through the database from inside `fn`
+   * is IN_TRANSACTION. Resolves to the record as it reads after, or null.
+   */
+  modify(id, fn, options = {}) {
+    if (typeof fn !== 'function') return Promise.reject(new TypeError('modify() takes a function'));
+    const { actor, message, source } = options;
+    return this.transact((tx) => modifyIn(tx, id, fn, { actor }), { actor, message, source });
+  }
+
   async #update(id, delta, actor) {
     if (!isRecordId(id)) throw invalidId(id);
     if (!(await this.has(id))) throw new SyncomError('NOT_FOUND', `Record ${id} not found`, { id });
@@ -2368,6 +2416,10 @@ class Database extends Emitter {
     api.delete = async (id, options = {}) => {
       await tx.commit('delete', id, {}, { actor: options.actor });
       this.#records.delete(id);
+    };
+    api.modify = (id, fn, options = {}) => {
+      if (typeof fn !== 'function') throw new TypeError('modify() takes a function');
+      return modifyIn(api, id, fn, { actor: options.actor });
     };
     api.purge = () => {
       throw new TypeError('purge() is not transactional: it scrubs the log; call it on the storage');

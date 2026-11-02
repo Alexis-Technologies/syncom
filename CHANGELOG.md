@@ -56,8 +56,15 @@ and one `commit` event, not one per call.
   `bulkUpsert(rows)`, `bulkRemove(ids)` are ONE transaction with a verdict per row — `{ success, error:
   [{ index, id, data, error }] }`: a row refused on its own account (its validator, a unique key, its
   id, its collection) stays out and the rest land; a batch that cannot reach the disk lands nothing.
-- **`IN_TRANSACTION`.** A write made through the database from inside `transact()`'s function — which
-  holds the mutation queue the write would wait for — is refused at once, where it used to deadlock.
+- **`modify(id, fn)`** — on the database, a collection and `tx`: `fn(copy)` runs inside the mutation queue
+  over a copy of the record as it reads, and what it leaves (what it returns, or the copy when it returns
+  nothing) is written as the ops that take the record there — a field changed a `set`, a field gone an
+  `unset`, `null` a delete — as one transaction. Two calls on one record compose, each reading what the
+  one before it left: no lost update, no conflict to retry. A field of another kind than a register
+  changed by the function is `FIELD_KIND`.
+- **`IN_TRANSACTION`.** A write made through the database from inside `transact()`'s or `modify()`'s
+  function — which holds the mutation queue the write would wait for — is refused at once, where it used
+  to deadlock.
 - **Storage engines: `createDatabase({ engine })`.** Every byte a database persists goes through
   its engine — a factory of databases, each a set of stores: `kv` by namespace and key (`node.json`,
   `schema.json`, `tags.json`, the keys, the lock, the chain's blocks, the registry, a catalog),

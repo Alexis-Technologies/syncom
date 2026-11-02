@@ -170,6 +170,53 @@ const runCollectionTests = async (t, assert, createStorage) => {
     },
   );
 
+  await t.test(
+    'modify(fn) runs fn over the record inside the queue and writes the difference: two in parallel compose, a counter field is FIELD_KIND, null deletes',
+    async (t2) => {
+      const db = await createStorage(t2, 'A', { fsi: memory(), schema: { entities: { Post: {} } } });
+      const id = (await db.Post.insert({ n: 1, tags: ['a'], old: true, nested: { a: 1 } })).id;
+      await db.inc(id, 'hits', 1);
+      const changes = [];
+      db.on('change', (op) => changes.push(op.type));
+      // Two at once, each reading what the one before it left: no lost update, nothing to retry.
+      const [, second] = await Promise.all([
+        db.modify(id, (doc) => void (doc.n += 1)),
+        db.Post.modify(id, async (doc) => {
+          doc.n += 1;
+          delete doc.old;
+          doc.nested = { a: 1 };
+          return doc;
+        }),
+      ]);
+      assert.deepStrictEqual(second, { n: 3, tags: ['a'], nested: { a: 1 }, $type: 'Post', hits: 1 });
+      assert.deepStrictEqual(await db.get(id), second);
+      // The difference alone: a set of what changed, an unset of what went; a field left as it was is no op.
+      assert.deepStrictEqual(changes, ['set', 'unset', 'set']);
+      assert.deepStrictEqual(await db.modify(id, () => undefined), second, 'nothing changed: nothing written');
+      assert.strictEqual(changes.length, 3);
+      // A field of another kind is written through its own method, never by a function.
+      assert.strictEqual(await code(db.modify(id, (doc) => void (doc.hits = 9))), 'FIELD_KIND');
+      assert.strictEqual((await db.get(id)).hits, 1);
+      // What a function may return; a write through the database from inside it; a foreign record.
+      assert.strictEqual(await code(db.modify(id, () => 5)), 'TypeError');
+      assert.strictEqual(await code(db.modify(id, () => db.update(id, { x: 1 }))), 'IN_TRANSACTION');
+      assert.strictEqual(await code(db.modify(id, 'nope')), 'TypeError');
+      const other = await db.insert({ $type: 'Other' });
+      assert.strictEqual(await code(db.Post.modify(other, () => {})), 'NOT_FOUND');
+      // Inside a transaction, over what the transaction left.
+      const z = await db.transact(async (tx) => {
+        await tx.update(id, { z: 1 });
+        await tx.modify(id, (doc) => void (doc.z += 1));
+        return (await tx.get(id)).z;
+      });
+      assert.strictEqual(z, 2);
+      assert.strictEqual((await db.get(id)).z, 2);
+      assert.strictEqual(await db.modify(id, () => null), null);
+      assert.strictEqual(await db.get(id), null);
+      assert.strictEqual(await code(db.modify(id, () => {})), 'NOT_FOUND');
+    },
+  );
+
   await t.test('a write through the database from inside transact() is IN_TRANSACTION, not a deadlock', async (t2) => {
     const db = await createStorage(t2, 'A', { fsi: memory(), schema: { entities: { Post: {} } } });
     const id = (await db.Post.insert({ n: 1 })).id;

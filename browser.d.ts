@@ -61,6 +61,7 @@ export type {
   DatabaseOptions,
   SyncomCollection,
   BulkResult,
+  ModifyFn,
   RecordData,
   Shapes,
   PathFields,
