@@ -11,13 +11,17 @@
 // log holds since the checkpoint are replayed first (their ids, no changes
 // — a replay reads the records), and where the log cannot resume from it
 // (compacted past, another epoch, no checkpoint), every record of the
-// source is handed over once (`rebuilt`). A handler that throws stops the
-// pipeline BEFORE the turn: the checkpoint stays, the database's `error`
-// event carries PIPELINE_FAILED, and `start()` hands the turn over again —
-// a turn is never skipped. A handler's write to the source is another turn
-// and is handed over again: derive into another collection. Reads of the
-// target are never held up. Requires symbols.js, engine.js, errors.js and
-// hooks.js only.
+// source is handed over once (`rebuilt`) — a replay or a rebuild PAGE ids
+// per batch, one transaction each, the checkpoint written after the last
+// page. A handler that throws stops the pipeline BEFORE the turn: the
+// checkpoint stays, the database's `error` event carries PIPELINE_FAILED,
+// and `start()` hands the turn over again — a turn is never skipped. A turn
+// that comes while another is handled joins the one waiting (the ids each
+// once, the changes in order, the newer position), up to PAGE ids: the
+// queue holds one live batch, however slow the handler. A handler's write
+// to the source is another turn and is handed over again: derive into
+// another collection. Reads of the target are never held up. Requires
+// symbols.js, engine.js, errors.js and hooks.js only.
 
 const { SOURCE, DB } = require('../symbols.js');
 const { kvNamespace } = require('../engine.js');
@@ -27,6 +31,8 @@ const { notify } = require('../hooks.js');
 const NAMESPACE = 'pipeline';
 // How many of the handler's errors are kept (the newest).
 const MAX_ERRORS = 20;
+// How many records a replay or a rebuild hands over per batch, and past how many ids a waiting batch takes no more turns.
+const PAGE = 500;
 
 const isDatabase = (value) =>
   value !== null && typeof value === 'object' && typeof value.transact === 'function' && typeof value.on === 'function';
@@ -64,9 +70,11 @@ const createPipeline = (db, { name, source, handler, leader = true } = {}) => {
     while (waiters.length > 0) waiters.pop()();
   };
 
-  // One batch handled: the handler inside a transaction, the checkpoint after it landed.
-  const handle = async (batch) => {
+  // One batch handled: the handler inside a transaction, the checkpoint after it landed — not after a page of a
+  // replay or a rebuild before the last: a position reached only once every page is.
+  const handle = async ({ batch, final }) => {
     await db.transact((tx) => handler(batch, tx));
+    if (!final) return;
     checkpoint = batch.eventId;
     await store.put(name, JSON.stringify({ eventId: checkpoint }), { atomic: true });
   };
@@ -83,9 +91,10 @@ const createPipeline = (db, { name, source, handler, leader = true } = {}) => {
     for (;;) {
       // `stopped` moves under `stop()` and a failure, between two batches.
       if (queue.length === 0 || stopped) break;
-      const batch = queue.shift();
+      const item = queue.shift();
+      const { batch } = item;
       try {
-        await handle(batch);
+        await handle(item);
       } catch (cause) {
         // A failed turn stops the pipeline BEFORE it: the checkpoint stays, and `start()` hands the turn over
         // again — never skipped, never moved past.
@@ -107,9 +116,30 @@ const createPipeline = (db, { name, source, handler, leader = true } = {}) => {
     settle();
   };
 
-  const push = (batch) => {
-    queue.push(batch);
+  // A batch queued; a live turn joins the live batch waiting ahead of it while that one holds under a page of ids.
+  const push = (batch, final = true) => {
+    const last = queue.length > 0 ? queue[queue.length - 1].batch : null;
+    if (last !== null && !batch.replay && !last.replay && last.ids.length < PAGE) {
+      const seen = new Set(last.ids);
+      for (let i = 0; i < batch.ids.length; i++) {
+        if (seen.has(batch.ids[i])) continue;
+        seen.add(batch.ids[i]);
+        last.ids.push(batch.ids[i]);
+      }
+      for (let i = 0; i < batch.changes.length; i++) last.changes.push(batch.changes[i]);
+      last.eventId = batch.eventId;
+      return;
+    }
+    queue.push({ batch, final });
     if (running === null) running = drain();
+  };
+
+  // The ids of a replay or a rebuild, PAGE per batch, the checkpoint after the last.
+  const paged = (ids, rebuilt, eventId) => {
+    for (let at = 0; at < ids.length; at += PAGE) {
+      const page = ids.slice(at, at + PAGE);
+      push({ ids: page, changes: null, replay: true, rebuilt, eventId }, at + PAGE >= ids.length);
+    }
   };
 
   // Of a turn, the records of the source that changed, each once.
@@ -130,12 +160,10 @@ const createPipeline = (db, { name, source, handler, leader = true } = {}) => {
     return { ids, changes: own };
   };
 
-  // Where the log cannot resume from the checkpoint: every record of the source, once.
+  // Where the log cannot resume from the checkpoint: every record of the source, once, a page at a time.
   const rebuild = () => {
     rebuilt = true;
-    const ids = seam.ids(source).slice();
-    if (ids.length === 0) return;
-    push({ ids, changes: null, replay: true, rebuilt: true, eventId: db.log.lastEventId });
+    paged(seam.ids(source), true, db.log.lastEventId);
   };
 
   // The turns since the checkpoint, from the log: the ids of the source's records they touched.
@@ -152,7 +180,7 @@ const createPipeline = (db, { name, source, handler, leader = true } = {}) => {
       seen.add(op.id);
       ids.push(op.id);
     }
-    if (ids.length > 0) push({ ids, changes: null, replay: true, rebuilt: false, eventId: last });
+    if (ids.length > 0) paged(ids, false, last);
     else if (last !== checkpoint) checkpoint = last;
   };
 
@@ -178,6 +206,7 @@ const createPipeline = (db, { name, source, handler, leader = true } = {}) => {
     async start() {
       if (!stopped) return;
       stopped = false;
+      rebuilt = false;
       const text = await store.get(name);
       if (text !== null) {
         try {

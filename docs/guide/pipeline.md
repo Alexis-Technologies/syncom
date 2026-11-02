@@ -30,8 +30,14 @@ After the handler's transaction landed, the turn's `eventId` is written to the `
 under the pipeline's name. `start()` reads it back: the turns the log holds since it are replayed first
 (their ids, `replay: true`, `changes: null` — a replay reads the records), then the live turns follow.
 Where the log cannot resume from the checkpoint — compacted past it, another epoch, or no checkpoint
-yet — every record of the source is handed over once (`rebuilt: true`). A crash between the
-transaction and the checkpoint hands the turn over again; nothing is skipped.
+yet — every record of the source is handed over once (`rebuilt: true`). A replay or a rebuild hands
+500 records over per batch, one transaction each, and writes the checkpoint after the last page — a
+failure in the middle starts it over at the next `start()`. A crash between the transaction and the
+checkpoint hands the turn over again; nothing is skipped.
+
+A turn that comes while another is handled joins the one waiting behind it — the ids each once, every
+change in order, the newer position — up to 500 ids, so however slow the handler, one live batch waits at
+a time and a burst of writes is one turn of the handler.
 
 A handler that throws stops the pipeline before the turn: the error is kept (`pipeline.errors`, the newest twenty),
 the database's `error` event carries `PIPELINE_FAILED` (`name`, `eventId`, `cause`), the log line `pipeline.failed`

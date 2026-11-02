@@ -132,6 +132,99 @@ test('pipelines', async (t) => {
     assert.throws(() => createPipeline(db, { name: 'bad name', source: 'Order', handler }), TypeError);
   });
 
+  await t.test(
+    'a rebuild and a replay are handed over 500 records at a time with the checkpoint after the last page; turns that come while one is handled join as one batch',
+    async () => {
+      // The checkpoint's write (the `pipeline` namespace) held while `gate` is set: what lands meanwhile queues up.
+      const fsi = memory();
+      let gate = null;
+      const slow = {
+        read: (dir, name) => fsi.read(dir, name),
+        write: (dir, name, content, options) =>
+          gate !== null && dir.endsWith('pipeline')
+            ? gate.then(() => fsi.write(dir, name, content, options))
+            : fsi.write(dir, name, content, options),
+        append: (dir, name, content) => fsi.append(dir, name, content),
+        exists: (dir, name) => fsi.exists(dir, name),
+        remove: (dir, name) => fsi.remove(dir, name),
+        list: (dir) => fsi.list(dir),
+      };
+      const db = await syncom.createDatabase({ path: '/r', fsi: slow, defer: 0, logger: false, schema });
+      const rows = [];
+      for (let i = 0; i < 1200; i++) rows.push({ customer: `c${i % 7}`, amount: i });
+      await db.Order.bulkInsert(rows);
+      const batches = [];
+      let failAt = 1;
+      const live = [];
+      let firstLive = null;
+      const handled = new Promise((resolve) => (firstLive = resolve));
+      const pipeline = createPipeline(db, {
+        name: 'pages',
+        source: 'Order',
+        handler: async ({ ids, changes, replay, rebuilt }) => {
+          if (replay) {
+            if (batches.length === failAt) throw new Error(`page ${failAt + 1}`);
+            batches.push([ids.length, rebuilt]);
+            return;
+          }
+          live.push([ids.slice(), changes.length]);
+          if (live.length === 1) firstLive();
+        },
+      });
+      // A rebuild (no checkpoint): page 2 fails — page 1 was handled, nothing is checkpointed.
+      await pipeline.start();
+      await pipeline.awaitIdle();
+      assert.deepStrictEqual(batches, [[500, true]]);
+      assert.strictEqual(pipeline.stopped, true);
+      assert.strictEqual(pipeline.checkpoint, null, 'no page of a rebuild moves the checkpoint but the last');
+      // Started again: the rebuild from the start, every page, then the checkpoint.
+      failAt = -1;
+      batches.length = 0;
+      await pipeline.start();
+      await pipeline.awaitIdle();
+      assert.deepStrictEqual(batches, [
+        [500, true],
+        [500, true],
+        [200, true],
+      ]);
+      const after = pipeline.checkpoint;
+      assert.ok(after !== null);
+      // Live: the first turn is handled and its checkpoint held; the three turns that land meanwhile join as one
+      // batch — the ids each once, every change — handed over after it.
+      let open = null;
+      gate = new Promise((resolve) => (open = resolve));
+      const a = (await db.Order.insert({ customer: 'live', amount: 1 })).id;
+      await handled;
+      const b = (await db.Order.insert({ customer: 'live', amount: 2 })).id;
+      const c = (await db.Order.insert({ customer: 'live', amount: 3 })).id;
+      await db.Order.update(b, { amount: 20 });
+      open();
+      await pipeline.awaitIdle();
+      gate = null;
+      // A change per field written: three of an insert, one of the update.
+      assert.deepStrictEqual(live, [
+        [[a], 3],
+        [[b, c], 7],
+      ]);
+      assert.notStrictEqual(pipeline.checkpoint, after);
+      // Stopped, 600 records written: the replay hands them over in pages too.
+      pipeline.stop();
+      batches.length = 0;
+      const more = [];
+      for (let i = 0; i < 600; i++) more.push({ customer: 'later', amount: i });
+      await db.Order.bulkInsert(more);
+      await pipeline.start();
+      await pipeline.awaitIdle();
+      assert.deepStrictEqual(batches, [
+        [500, false],
+        [100, false],
+      ]);
+      assert.strictEqual(pipeline.rebuilt, false);
+      pipeline.stop();
+      await db.close();
+    },
+  );
+
   await t.test('a pipeline hears a plain delete and a purge of its source', async () => {
     const db = await syncom.createDatabase({ path: '/d', fsi: memory(), defer: 0, logger: false, schema });
     const heard = [];

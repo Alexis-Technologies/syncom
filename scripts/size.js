@@ -614,12 +614,14 @@ const ENTRIES = [
   // 6.5 measured; 7.
   { label: 'dump — browser (@alexify/syncom/dump)', entry: 'src/dump/dump.js', platform: 'browser', budget: 7 },
   // Pipelines: a handler over a collection's turns, checkpointed in the `pipeline` kv namespace (collections plan, C4.7).
+  // 3.0 with a replay and a rebuild paged, live turns joined while one is handled (review №6, E5.4; 2026-11-02). 3.25,
+  // raised by name.
   {
     label: 'pipeline — browser (@alexify/syncom/pipeline)',
     entry: 'src/pipeline/pipeline.js',
     platform: 'browser',
     // 2.8 measured; 3.
-    budget: 3,
+    budget: 3.25,
   },
   // Tombstone cleanup: a tombstone's file folded into its catalog row (collections plan, C4.5–C4.6).
   {
