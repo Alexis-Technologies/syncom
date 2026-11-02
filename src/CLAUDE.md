@@ -59,6 +59,8 @@ src/catalog.js            the record catalog: live ids, collections, indexed val
 src/sorted.js             SortedIndex — a sorted (keys, id) index over chunked sorted arrays: seek, insert, remove, build, iterate (forward, or backward by group of equal keys), ordinal; compare/rankOf, the one order of values — no requires
 src/database.js           Database — the facade: open sequence, the mutation queue, the public API, the `core` it lends;
                           `createDatabase()` (and the pre-rename aliases `Database`, `open`)
+src/writes.js             the facade's write helpers: checkOrm (an entity's methods/statics against what a Document and a Collection answer to), tombstone (a delete's payload), operate (an operator delta as the calls over a transaction's api), modifyIn (`modify(id, fn)` as the difference) — requires document.js, collection.js, operators.js, plugin.js, shape.js, errors.js only
+src/drop.js               dropDatabase(path, { engine | fsi }) — a closed database taken away under its lock; a directory holding no database refused — requires engine.js, files/files.js, backend.js, fsi.js, lock.js only
 src/defer.js              DeferredWindow — `createDatabase({ defer })`'s slots, timer and landing step — no requires
 src/identity.js           loadIdentity — which node a directory is (the signing key, node.json, getId) — requires errors.js, shape.js only
 src/observe.js            Observers — `observe()`'s registry over the `transaction` event — requires paths.js only
@@ -124,7 +126,8 @@ options, settings, logger }`, run after the replay — hands back `sync` (the Sy
   and `src/index.browser.js`. `tests/package/consistency.test.js` catches a
   missed one. To run shared code against the browser halves under Node, load
   it through `tests/utils/browser-env.js` — requiring `src/index.browser.js`
-  alone does NOT redirect the nested requires.
+  alone does NOT redirect the nested requires; a browser twin calls its `prime()` right after requiring it and before its
+  suite (a suite's mesh loads `src/utils.js`), and the priming throws if a shared module was loaded before it.
 - **A record id is checked where it enters, nowhere else.** `isRecordId` in
   `src/shape.js` (`[A-Za-z0-9_@-][A-Za-z0-9._@-]{0,127}`) guards `[COMMIT]`
   (every local writer), `insert` (what `getId` minted), `admit` in

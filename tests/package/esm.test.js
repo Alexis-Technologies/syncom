@@ -38,6 +38,11 @@ const ENTRIES = [
   'src/telemetry/telemetry.js',
   'src/query/query.js',
   'src/versions/versions.js',
+  'src/local/local.js',
+  'src/state/state.js',
+  'src/dump/dump.js',
+  'src/pipeline/pipeline.js',
+  'src/cleanup/cleanup.js',
 ];
 
 for (const entry of ENTRIES) {

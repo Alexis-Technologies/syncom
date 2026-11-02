@@ -36,8 +36,9 @@ const { DISABLED, isWriter, writerOf, traced, now } = require('./telemetry/write
 const { GLOBAL_SCOPE } = require('./scope.js');
 const { normalizeStorageOptions } = require('./options.js');
 const { isPlainObject, isRecordId, invalidId, isStreamName, VALIDATED, MAX_ACTOR } = require('./shape.js');
-const { asJson, deepEqual } = require('./shape.js');
-const { isOperators, expand } = require('./operators.js');
+const { isOperators } = require('./operators.js');
+const { checkOrm, tombstone, operate, modifyIn } = require('./writes.js');
+const { dropDatabase } = require('./drop.js');
 const { Observers } = require('./observe.js');
 const { DeferredWindow } = require('./defer.js');
 const { fieldName } = require('./args.js');
@@ -87,84 +88,6 @@ const REINDEX_PAGE = 500;
 // How many chain blocks a cold read verified are kept parsed: the records of a batch are read close together.
 const VERIFIED_BLOCKS = 8;
 
-// An entity's `methods` go on its Documents and its `statics` on its Collection: a name a
-// Document or a Collection answers to already would shadow it, so it is refused where the
-// definition is taken.
-const checkOrm = (def, label) => {
-  for (const name of Object.keys(def.methods ?? {})) {
-    if (name in Document.prototype || name === 'id') {
-      throw new TypeError(`${label}: entity ${def.name}: methods.${name} is a member of every Document already`);
-    }
-  }
-  for (const name of Object.keys(def.statics ?? {})) {
-    if (name in Collection.prototype) {
-      throw new TypeError(`${label}: entity ${def.name}: statics.${name} is a member of every Collection already`);
-    }
-  }
-};
-
-// A delete's payload: the data the tombstone carries, when given (a plain object).
-const tombstone = (data) => {
-  if (data === undefined) return {};
-  if (!isPlainObject(data)) throw new TypeError('delete() takes a plain object as data');
-  return { data };
-};
-
-// An operator delta (src/operators.js) inside a transaction: the calls it
-// expands to, decided over the record as it reads and the kind of each
-// field — both current, the queue being held — run over the transaction's
-// write API; a plugin's method the database was not opened with is
-// PLUGIN_MISSING. `$set` and the rewrites go as one `set` op, never through
-// `update()` again (a field named like an operator is a field here).
-const operate = async (api, tx, id, delta, options, view) => {
-  const entry = await tx.current(id);
-  const calls = expand(delta, view, (field) => tx.kindOf(entry, field));
-  for (let i = 0; i < calls.length; i++) {
-    const call = calls[i];
-    const method = call[0];
-    if (method === 'update') await tx.commit('set', id, { data: call[1] }, { actor: options.actor });
-    else if (method === 'unset') await api.unset(id, call[1], options);
-    else if (method === 'inc') await api.inc(id, call[1], call[2], options);
-    else if (method === 'add' || method === 'remove') await api[method](id, call[1], call[2], options);
-    else if (typeof api[method] !== 'function') throw missing(`${method}()`);
-    else if (method === 'push') await api.push(id, call[1], call[2], options);
-    else await api.splice(id, call[1], call[2], call[3], undefined, options);
-  }
-};
-
-// `modify(id, fn)` inside a transaction: `fn` over a copy of the record as it
-// reads, inside the queue — nothing lands between the reading and the ops —
-// and what it leaves (what it returns, or the copy when it returns nothing)
-// written as the ops that take the record there: a field changed is a `set`
-// of a register (another kind refuses it, FIELD_KIND), a field gone an
-// `unset`, `null` a delete. Resolves to the record as it reads after, or
-// null; no record is NOT_FOUND.
-const modifyIn = async (tx, id, fn, options) => {
-  const before = await tx.get(id);
-  if (before === null) throw new SyncomError('NOT_FOUND', `Record ${id} not found`, { id });
-  const copy = asJson(before);
-  let after = await fn(copy);
-  if (after === undefined) after = copy;
-  if (after === null) {
-    await tx.delete(id, options);
-    return null;
-  }
-  if (!isPlainObject(after)) throw new TypeError('modify() must return an object, null or undefined');
-  const delta = {};
-  let changed = 0;
-  const gone = [];
-  for (const key of Object.keys(after)) {
-    if (Object.hasOwn(before, key) && deepEqual(before[key], after[key])) continue;
-    delta[key] = after[key];
-    changed++;
-  }
-  // The collection is not the function's to change: a `$type` left out stays.
-  for (const key of Object.keys(before)) if (!Object.hasOwn(after, key) && key !== '$type') gone.push(key);
-  if (gone.length > 0) await tx.unset(id, gone, options);
-  if (changed > 0) await tx.update(id, delta, options);
-  return changed > 0 || gone.length > 0 ? tx.get(id) : before;
-};
-
 class Database extends Emitter {
   #path;
   #identity = null;
@@ -174,6 +97,8 @@ class Database extends Emitter {
   #cursor = null;
   // A Mango query as a predicate over `{ id, ...record }` — the query plugin's (`ifMatch`).
   #matches = null;
+  // The `[SOURCE]` seam, built once at the first access and frozen: its members read the database's state as it is.
+  #source = null;
   // The query plugin's `stats()`, for `stats().query`; null without the plugin.
   #queryStats = null;
   // The local documents (`db.local`) — the local plugin's.
@@ -1267,8 +1192,9 @@ class Database extends Emitter {
   // What a Cursor reads through: the catalog, and a record as it reads —
   // lensed, without the read hooks (like `snapshot` and `swap`).
   get [SOURCE]() {
+    if (this.#source !== null) return this.#source;
     const catalog = this.#catalog;
-    return {
+    this.#source = Object.freeze({
       logger: this.#logger,
       // The telemetry writer (the disabled one without the plugin): what a block counts its work through.
       otel: this.#otel,
@@ -1352,7 +1278,8 @@ class Database extends Emitter {
       // The entry as it is — data and meta, a tombstone too — for the
       // inspector (@alexify/syncom/inspect); never for a reader of data.
       entry: (id) => this.#entries.load(id),
-    };
+    });
+    return this.#source;
   }
 
   // The unique keys `entry` would collide on, as the catalog knows them.
@@ -2912,43 +2839,5 @@ Database.Record = Document;
 
 const createDatabase = (options) => new Database(options);
 const open = createDatabase;
-
-/**
- * Drops a closed database: every store of it removed from the engine — the
- * one given, or the files engine over `fsi` (the platform's by default).
- * Held while it is taken: another instance's open database is `LOCKED`,
- * never emptied under it. A path that holds nothing is nothing to do; one
- * that holds no database (no identity) is refused.
- */
-const dropDatabase = async (path, options = {}) => {
-  if (typeof path !== 'string' || path.length === 0) throw new TypeError('dropDatabase() takes a path');
-  if (options.engine !== undefined && options.fsi !== undefined) {
-    throw new TypeError('dropDatabase({ engine, fsi }): an engine or a backend, not both');
-  }
-  const engine =
-    options.engine !== undefined
-      ? checkEngine(options.engine, 'dropDatabase({ engine })')
-      : filesEngine(checkFsi(options.fsi === undefined ? defaultFsi : options.fsi, 'dropDatabase({ fsi })'));
-  const db = checkEngineDb(await engine.open(path, {}), 'dropDatabase()');
-  let lock = null;
-  try {
-    // A database's directory holds its identity (node.json): a directory without one that holds anything else is
-    // not ours to empty, and a path that holds nothing is nothing to do.
-    if (!(await db.kv.has('', 'node.json'))) {
-      const stray = (await db.kv.list('')).length > 0 || (await db.records.ids({ limit: 1 })).length > 0;
-      if (stray) throw new TypeError(`dropDatabase(): no database at ${path}`);
-      return;
-    }
-    const native = db.capabilities.lock === 'native' && typeof db.lock === 'function';
-    lock = native
-      ? await db.lock({ mode: 'fail', onLost: NOOP })
-      : await acquireLock({ store: kvNamespace(db.kv, ''), path, mode: 'fail' });
-    await engine.remove(path);
-  } finally {
-    // The lock went with the rest: its release finds nothing to let go of.
-    if (lock !== null) await lock.release().catch(NOOP);
-    await db.close();
-  }
-};
 
 module.exports = { Database, createDatabase, dropDatabase, Storage: Database, open };

@@ -85,139 +85,175 @@ const better = (op, current, value) => {
  * operators were given, `$set` and the rewrites folded into one `update`
  * last where nothing else touches the field. `view` is the record as it
  * reads (null for none), `kindAt(field)` the kind the field holds
- * (undefined for none).
+ * (undefined for none). One operator per field: a field two operators name
+ * — `$push` and `$pull` of one array, `$set` and `$inc` of one number — is
+ * refused, as MongoDB refuses a conflicting update, never two writes whose
+ * order decides.
  */
 const expand = (delta, view, kindAt) => {
   const calls = [];
   const sets = {};
   let setting = 0;
-  const set = (field, value) => {
-    sets[field] = value;
-    setting++;
-  };
-  const current = (field) => valueAt(view, field);
-  // One operator per field: a field two operators name — `$push` and `$pull` of one array, `$set` and `$inc` of one
-  // number — is refused, as MongoDB refuses a conflicting update, never two writes whose order decides.
   const named = new Map();
-  const claim = (op, field) => {
-    const by = named.get(field);
-    if (by !== undefined && by !== op) {
-      throw new TypeError(`update(): ${by} and ${op} both name ${field}: one operator per field`);
-    }
-    named.set(field, op);
+  const ctx = {
+    calls,
+    kindAt,
+    current: (field) => valueAt(view, field),
+    set: (field, value) => {
+      sets[field] = value;
+      setting++;
+    },
+    claim: (op, field) => {
+      const by = named.get(field);
+      if (by !== undefined && by !== op) {
+        throw new TypeError(`update(): ${by} and ${op} both name ${field}: one operator per field`);
+      }
+      named.set(field, op);
+    },
   };
   for (const op of Object.keys(delta)) {
-    const given = delta[op];
-    if (op === '$set') {
-      const fields = object(op, given);
-      for (const field of Object.keys(fields)) {
-        fieldName('update', field);
-        claim(op, field);
-        set(field, jsonValue('update', fields[field]));
-      }
-    } else if (op === '$unset') {
-      const names = Array.isArray(given) || typeof given === 'string' ? given : Object.keys(object(op, given));
-      const unset = fieldNames('update', names);
-      for (let i = 0; i < unset.length; i++) claim(op, unset[i]);
-      calls.push(['unset', unset]);
-    } else if (op === '$inc') {
-      const fields = object(op, given);
-      for (const field of Object.keys(fields)) {
-        fieldName('update', field);
-        claim(op, field);
-        if (!Number.isFinite(fields[field])) throw new TypeError('update(): $inc takes finite numbers');
-        calls.push(['inc', field, fields[field]]);
-      }
-    } else if (op === '$addToSet' || op === '$pull') {
-      const fields = object(op, given);
-      for (const field of Object.keys(fields)) {
-        fieldName('update', field);
-        claim(op, field);
-        const elements = elementsOf(op, fields[field], op === '$pull' ? '$in' : '$each');
-        const array = current(field);
-        if (kindAt(field) === 'register' && Array.isArray(array)) {
-          // A register's array: rewritten whole, last writer wins.
-          const next = [];
-          if (op === '$pull') {
-            const pulled = setOf(elements);
-            for (let i = 0; i < array.length; i++) if (!pulled.has(textOf(array[i]))) next.push(array[i]);
-          } else {
-            const held = setOf(array);
-            for (let i = 0; i < array.length; i++) next.push(array[i]);
-            for (let i = 0; i < elements.length; i++) {
-              const text = textOf(elements[i]);
-              if (held.has(text)) continue;
-              held.add(text);
-              next.push(elements[i]);
-            }
-          }
-          if (next.length !== array.length) set(field, next);
-        } else calls.push([op === '$pull' ? 'remove' : 'add', field, elements]);
-      }
-    } else if (op === '$push') {
-      const fields = object(op, given);
-      for (const field of Object.keys(fields)) {
-        fieldName('update', field);
-        claim(op, field);
-        const kind = kindAt(field);
-        const value = fields[field];
-        if (kind === 'text') calls.push(['push', field, jsonValue('update', value)]);
-        else {
-          const elements = elementsOf(op, value, '$each');
-          if (kind === 'list') calls.push(['push', field, elements]);
-          else if (kind === 'register' || kind === undefined) {
-            const array = current(field);
-            const next = Array.isArray(array) ? array.slice() : [];
-            for (let i = 0; i < elements.length; i++) next.push(elements[i]);
-            set(field, next);
-          } else calls.push(['push', field, elements]);
-        }
-      }
-    } else if (op === '$pop') {
-      const fields = object(op, given);
-      for (const field of Object.keys(fields)) {
-        fieldName('update', field);
-        claim(op, field);
-        const side = fields[field];
-        if (side !== 1 && side !== -1) throw new TypeError('update(): $pop takes 1 (the last) or -1 (the first)');
-        const array = current(field);
-        if (!Array.isArray(array) || array.length === 0) continue;
-        if (kindAt(field) === 'list') calls.push(['splice', field, side === 1 ? array.length - 1 : 0, 1]);
-        else set(field, side === 1 ? array.slice(0, -1) : array.slice(1));
-      }
-    } else if (op === '$min' || op === '$max') {
-      const fields = object(op, given);
-      for (const field of Object.keys(fields)) {
-        fieldName('update', field);
-        claim(op, field);
-        const value = jsonValue('update', fields[field]);
-        if (better(op, current(field), value)) set(field, value);
-      }
-    } else if (op === '$rename') {
-      const fields = object(op, given);
-      const names = [];
-      for (const field of Object.keys(fields)) {
-        fieldName('update', field);
-        claim(op, field);
-        const to = fields[field];
-        fieldName('update', to);
-        claim(op, to);
-        // A counter, a set, a list, a text or a tree is not a register renamed: what `to` would hold is the reading,
-        // not the field.
-        const kind = kindAt(field);
-        if (kind !== undefined && kind !== 'register') {
-          throw new TypeError(`update(): $rename takes a register (${field} holds a ${kind})`);
-        }
-        const value = current(field);
-        if (value === undefined) continue;
-        names.push(field);
-        set(to, value);
-      }
-      if (names.length > 0) calls.push(['unset', names]);
-    } else throw new TypeError(`update(): unknown operator ${op}`);
+    if (!Object.hasOwn(HANDLERS, op)) throw new TypeError(`update(): unknown operator ${op}`);
+    HANDLERS[op](ctx, delta[op]);
   }
   if (setting > 0) calls.push(['update', sets]);
   return calls;
 };
 
-module.exports = { OPERATORS, isOperators, expand };
+// `$addToSet`/`$pull`: `add()`/`remove()` on a set or an absent field; a register's array rewritten whole, last
+// writer wins, membership by canonical text.
+const setOp = (ctx, op, given) => {
+  const fields = object(op, given);
+  for (const field of Object.keys(fields)) {
+    fieldName('update', field);
+    ctx.claim(op, field);
+    const elements = elementsOf(op, fields[field], op === '$pull' ? '$in' : '$each');
+    const array = ctx.current(field);
+    if (ctx.kindAt(field) === 'register' && Array.isArray(array)) {
+      const next = [];
+      if (op === '$pull') {
+        const pulled = setOf(elements);
+        for (let i = 0; i < array.length; i++) if (!pulled.has(textOf(array[i]))) next.push(array[i]);
+      } else {
+        const held = setOf(array);
+        for (let i = 0; i < array.length; i++) next.push(array[i]);
+        for (let i = 0; i < elements.length; i++) {
+          const text = textOf(elements[i]);
+          if (held.has(text)) continue;
+          held.add(text);
+          next.push(elements[i]);
+        }
+      }
+      if (next.length !== array.length) ctx.set(field, next);
+    } else ctx.calls.push([op === '$pull' ? 'remove' : 'add', field, elements]);
+  }
+};
+
+// `$min`/`$max`: a set only where the comparison holds.
+const minMax = (ctx, op, given) => {
+  const fields = object(op, given);
+  for (const field of Object.keys(fields)) {
+    fieldName('update', field);
+    ctx.claim(op, field);
+    const value = jsonValue('update', fields[field]);
+    if (better(op, ctx.current(field), value)) ctx.set(field, value);
+  }
+};
+
+// Each operator as a function over the expansion's context — `{ calls, kindAt, current, set, claim }` — and what the
+// delta gives it, in the order the delta names them.
+const HANDLERS = {
+  $set(ctx, given) {
+    const fields = object('$set', given);
+    for (const field of Object.keys(fields)) {
+      fieldName('update', field);
+      ctx.claim('$set', field);
+      ctx.set(field, jsonValue('update', fields[field]));
+    }
+  },
+  $unset(ctx, given) {
+    const names = Array.isArray(given) || typeof given === 'string' ? given : Object.keys(object('$unset', given));
+    const unset = fieldNames('update', names);
+    for (let i = 0; i < unset.length; i++) ctx.claim('$unset', unset[i]);
+    ctx.calls.push(['unset', unset]);
+  },
+  $inc(ctx, given) {
+    const fields = object('$inc', given);
+    for (const field of Object.keys(fields)) {
+      fieldName('update', field);
+      ctx.claim('$inc', field);
+      if (!Number.isFinite(fields[field])) throw new TypeError('update(): $inc takes finite numbers');
+      ctx.calls.push(['inc', field, fields[field]]);
+    }
+  },
+  $addToSet(ctx, given) {
+    setOp(ctx, '$addToSet', given);
+  },
+  $pull(ctx, given) {
+    setOp(ctx, '$pull', given);
+  },
+  // `$push`: `push()` on a list or a text (a string); a register's array, or an absent field, rewritten as an array.
+  $push(ctx, given) {
+    const fields = object('$push', given);
+    for (const field of Object.keys(fields)) {
+      fieldName('update', field);
+      ctx.claim('$push', field);
+      const kind = ctx.kindAt(field);
+      const value = fields[field];
+      if (kind === 'text') ctx.calls.push(['push', field, jsonValue('update', value)]);
+      else {
+        const elements = elementsOf('$push', value, '$each');
+        if (kind === 'list') ctx.calls.push(['push', field, elements]);
+        else if (kind === 'register' || kind === undefined) {
+          const array = ctx.current(field);
+          const next = Array.isArray(array) ? array.slice() : [];
+          for (let i = 0; i < elements.length; i++) next.push(elements[i]);
+          ctx.set(field, next);
+        } else ctx.calls.push(['push', field, elements]);
+      }
+    }
+  },
+  // `$pop`: a `splice()` of a list's end, a register's array rewritten without it.
+  $pop(ctx, given) {
+    const fields = object('$pop', given);
+    for (const field of Object.keys(fields)) {
+      fieldName('update', field);
+      ctx.claim('$pop', field);
+      const side = fields[field];
+      if (side !== 1 && side !== -1) throw new TypeError('update(): $pop takes 1 (the last) or -1 (the first)');
+      const array = ctx.current(field);
+      if (!Array.isArray(array) || array.length === 0) continue;
+      if (ctx.kindAt(field) === 'list') ctx.calls.push(['splice', field, side === 1 ? array.length - 1 : 0, 1]);
+      else ctx.set(field, side === 1 ? array.slice(0, -1) : array.slice(1));
+    }
+  },
+  $min(ctx, given) {
+    minMax(ctx, '$min', given);
+  },
+  $max(ctx, given) {
+    minMax(ctx, '$max', given);
+  },
+  // `$rename`: an unset and a set, of a register alone (a counter, a set, a list, a text or a tree is not a register
+  // renamed: what `to` would hold is the reading, not the field); a field that is not there renames nothing.
+  $rename(ctx, given) {
+    const fields = object('$rename', given);
+    const names = [];
+    for (const field of Object.keys(fields)) {
+      fieldName('update', field);
+      ctx.claim('$rename', field);
+      const to = fields[field];
+      fieldName('update', to);
+      ctx.claim('$rename', to);
+      const kind = ctx.kindAt(field);
+      if (kind !== undefined && kind !== 'register') {
+        throw new TypeError(`update(): $rename takes a register (${field} holds a ${kind})`);
+      }
+      const value = ctx.current(field);
+      if (value === undefined) continue;
+      names.push(field);
+      ctx.set(to, value);
+    }
+    if (names.length > 0) ctx.calls.push(['unset', names]);
+  },
+};
+
+module.exports = { isOperators, expand };

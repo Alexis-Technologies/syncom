@@ -4,7 +4,9 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { installBrowserGlobals, requireBrowserAll } = require('./utils/browser-env.js');
+const { installBrowserGlobals, requireBrowserAll, prime } = require('./utils/browser-env.js');
+// Before the suite and everything it loads: the shared modules resolve to the browser halves.
+prime();
 const { runEditorTests } = require('./suites/editor.js');
 
 test('Editor binding (browser halves)', async (t) => {

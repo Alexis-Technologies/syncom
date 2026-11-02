@@ -258,7 +258,10 @@ const runCollectionTests = async (t, assert, createStorage) => {
       assert.strictEqual((await db.get(id)).hits, 1);
       // What a function may return; a write through the database from inside it; a foreign record.
       assert.strictEqual(await code(db.modify(id, () => 5)), 'TypeError');
-      assert.strictEqual(await code(db.modify(id, () => db.update(id, { x: 1 }))), 'IN_TRANSACTION');
+      // The browser half has no async context: a write from inside the function would wait for the queue it holds.
+      if (createStorage.browser !== true) {
+        assert.strictEqual(await code(db.modify(id, () => db.update(id, { x: 1 }))), 'IN_TRANSACTION');
+      }
       assert.strictEqual(await code(db.modify(id, 'nope')), 'TypeError');
       const other = await db.insert({ $type: 'Other' });
       assert.strictEqual(await code(db.Post.modify(other, () => {})), 'NOT_FOUND');
@@ -987,34 +990,41 @@ const runCollectionTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(await db.Post.get(ids[0]), { i: 0, $type: 'Post' });
   });
 
-  await t.test('a write through the database from inside transact() is IN_TRANSACTION, not a deadlock', async (t2) => {
-    const db = await createStorage(t2, 'A', { fsi: memory(), schema: { entities: { Post: {} } } });
-    const id = (await db.Post.insert({ n: 1 })).id;
-    const seen = await db.transact(async (tx) => {
-      await tx.update(id, { n: 2 });
-      return [
-        await code(db.update(id, { n: 3 })),
-        await code(db.Post.insert({ n: 9 })),
-        await code(db.transact(() => {})),
-      ];
-    });
-    assert.deepStrictEqual(seen, ['IN_TRANSACTION', 'IN_TRANSACTION', 'IN_TRANSACTION']);
-    assert.deepStrictEqual(await db.Post.get(id), { n: 2, $type: 'Post' });
-    // After the transaction the queue is free again.
-    await db.update(id, { n: 3 });
-    assert.strictEqual((await db.Post.get(id)).n, 3);
-    // A write scheduled inside the function and made after it is not inside it: the context follows the timer, the
-    // frame it carries does not stay active.
-    let later = null;
-    await db.transact(async (tx) => {
-      await tx.update(id, { n: 4 });
-      later = new Promise((resolve) => {
-        setTimeout(() => resolve(code(db.update(id, { n: 5 }))), 15);
+  // The browser half has no async context (utils.browser.js `taskScope`): a write through the database from inside
+  // `transact()` is not told apart there and would wait for the transaction that waits for it — documented, not run.
+  const noContext = createStorage.browser === true && 'the browser half tells no write inside transact() apart';
+  await t.test(
+    'a write through the database from inside transact() is IN_TRANSACTION, not a deadlock',
+    { skip: noContext },
+    async (t2) => {
+      const db = await createStorage(t2, 'A', { fsi: memory(), schema: { entities: { Post: {} } } });
+      const id = (await db.Post.insert({ n: 1 })).id;
+      const seen = await db.transact(async (tx) => {
+        await tx.update(id, { n: 2 });
+        return [
+          await code(db.update(id, { n: 3 })),
+          await code(db.Post.insert({ n: 9 })),
+          await code(db.transact(() => {})),
+        ];
       });
-    });
-    assert.strictEqual(await later, null, 'queued, not refused');
-    assert.strictEqual((await db.Post.get(id)).n, 5);
-  });
+      assert.deepStrictEqual(seen, ['IN_TRANSACTION', 'IN_TRANSACTION', 'IN_TRANSACTION']);
+      assert.deepStrictEqual(await db.Post.get(id), { n: 2, $type: 'Post' });
+      // After the transaction the queue is free again.
+      await db.update(id, { n: 3 });
+      assert.strictEqual((await db.Post.get(id)).n, 3);
+      // A write scheduled inside the function and made after it is not inside it: the context follows the timer, the
+      // frame it carries does not stay active.
+      let later = null;
+      await db.transact(async (tx) => {
+        await tx.update(id, { n: 4 });
+        later = new Promise((resolve) => {
+          setTimeout(() => resolve(code(db.update(id, { n: 5 }))), 15);
+        });
+      });
+      assert.strictEqual(await later, null, 'queued, not refused');
+      assert.strictEqual((await db.Post.get(id)).n, 5);
+    },
+  );
 
   await t.test(
     'addCollections() defines a collection after the open and indexes the records of its type',

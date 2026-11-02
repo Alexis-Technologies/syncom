@@ -1,12 +1,16 @@
 'use strict';
 
 // A Collection: an entity's records, `db.<Entity>` — what the application
-// holds for a collection. It uses the database's public API and two of the
-// module-private symbols (SOURCE, CURSOR) — nothing below them. The Document
-// (a live view of one record) and the Reference live in src/document.js.
-// An emitter: `change` (`{ id, action }`), `insert`, `update` and `remove`
-// (`{ id }`) from the catalog's action stream — one listener of the catalog
-// per collection, taken at the first `on()`, let go of at the last `off()`.
+// holds for a collection. It writes through the database's public API and
+// the `[SOURCE]`/`[CURSOR]` seams (src/symbols.js) — the id its data names
+// through `namedId` (src/schema/entity.js), a bulk as one transaction with
+// a verdict per row — and nothing below them. The Document (a live view of
+// one record) and the Reference live in src/document.js. An emitter
+// (src/emitter.js, the events contained through src/hooks.js `notify`):
+// `change` (`{ id, action }`), `insert`, `update` and `remove` (`{ id }`)
+// from the catalog's action stream, told on a microtask after the landing —
+// one listener of the catalog per collection, taken at the first `on()`,
+// let go of with the last listener.
 
 const { Emitter } = require('./emitter.js');
 const { notify } = require('./hooks.js');
@@ -15,7 +19,7 @@ const { SOURCE, CURSOR } = require('./symbols.js');
 const { SyncomError, typed } = require('./errors.js');
 const { namedId, idReason } = require('./schema/entity.js');
 
-// How many rows a bulk write takes at once.
+// A bulk write's rows: an array of at most MAX_BATCH (one transaction).
 const list = (method, rows) => {
   if (!Array.isArray(rows)) throw new TypeError(`${method}() takes an array`);
   if (rows.length > MAX_BATCH) {
