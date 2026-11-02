@@ -824,7 +824,8 @@ class Cursor {
       // The object a row was built from: the one the record reads as, held until it changes.
       identityOf: (candidate) => candidate[VIEW] ?? candidate,
       project: (candidate) => this.#project(candidate),
-      top: () => this.#top(),
+      // A count is of every match: the window does not apply to it.
+      top: () => this.#top(needsRows ? this.#limit : Infinity),
       deliver: (rows) => this.#deliver(rows),
       onRows,
     };

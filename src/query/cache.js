@@ -12,8 +12,12 @@
 
 const MAX = 100;
 
-// A RegExp has no JSON of its own: keyed by its source and flags.
-const replacer = (key, value) => (value instanceof RegExp ? { $regex: value.source, $options: value.flags } : value);
+// A RegExp has no JSON of its own: keyed by its source and flags. An `undefined` value has none either, and
+// `{ f: undefined }` asks for a field missing where `{}` asks nothing: keyed as what it is, never dropped.
+const replacer = (key, value) => {
+  if (value === undefined) return { $undefined: true };
+  return value instanceof RegExp ? { $regex: value.source, $options: value.flags } : value;
+};
 
 // A value with its object keys sorted at every depth, as text: `{ a, b }` and `{ b, a }` are one query.
 const canonical = (value) => {

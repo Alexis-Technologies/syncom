@@ -813,6 +813,17 @@ const runCollectionTests = async (t, assert, createStorage) => {
     // After the transaction the queue is free again.
     await db.update(id, { n: 3 });
     assert.strictEqual((await db.Post.get(id)).n, 3);
+    // A write scheduled inside the function and made after it is not inside it: the context follows the timer, the
+    // frame it carries does not stay active.
+    let later = null;
+    await db.transact(async (tx) => {
+      await tx.update(id, { n: 4 });
+      later = new Promise((resolve) => {
+        setTimeout(() => resolve(code(db.update(id, { n: 5 }))), 15);
+      });
+    });
+    assert.strictEqual(await later, null, 'queued, not refused');
+    assert.strictEqual((await db.Post.get(id)).n, 5);
   });
 
   await t.test(
@@ -842,6 +853,10 @@ const runCollectionTests = async (t, assert, createStorage) => {
       // The definition is the plugin's: every key is checked, nothing of a bad batch is taken.
       assert.strictEqual(await code(db.addCollections({ Note: { index: 'title' }, Memo: {} })), 'TypeError');
       assert.deepStrictEqual(Object.keys(db.collections), ['Post', 'Tag']);
+      // A definition that needs a text index the database has not: refused before anything of the batch is taken.
+      assert.strictEqual(await code(db.addCollections({ Memo: {}, Note: { search: ['title'] } })), 'TypeError');
+      assert.deepStrictEqual(Object.keys(db.collections), ['Post', 'Tag']);
+      assert.strictEqual(await code(db.Memo?.count() ?? Promise.reject(new TypeError('no Memo'))), 'TypeError');
       assert.strictEqual(await code(db.addCollections({ Tag: {} })), 'TypeError', 'defined already');
       assert.strictEqual(await code(db.addCollections({ close: {} })), 'TypeError', 'a name of the database');
       assert.strictEqual(await code(db.addCollections([])), 'TypeError');

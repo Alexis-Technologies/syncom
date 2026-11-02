@@ -1176,11 +1176,11 @@ class Database extends Emitter {
       }
       const defined = this.#schemaHook.define(name, def, this.#entities.keys());
       checkOrm(defined, 'addCollections()');
-      added.push(defined);
+      // The text index too, before anything is taken: a definition that needs one the database has not is refused whole.
+      added.push([defined, this.#textIndexOf(defined)]);
     }
     for (let i = 0; i < added.length; i++) {
-      const def = added[i];
-      const index = this.#textIndexOf(def);
+      const [def, index] = added[i];
       this.#entities.set(def.name, def);
       this.#catalog.define(def.name, def, index);
       this[def.name] = new Collection(this, def.name);

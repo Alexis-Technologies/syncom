@@ -230,7 +230,8 @@ window (`offset + limit`) holds that many rows from the top; a row that leaves a
 to its end, runs the cursor again for the successor beyond it, as does a `$text` query, whose order is
 the index's. The listener hears only when the rows changed — an id came, went or moved, or a row reads
 as another; a write of the value a field held, or of a field the projection drops, is no change.
-`watchCount()` keeps the matching ids and moves the count by one per change, never counting again.
+`watchCount()` keeps the matching ids and moves the count by one per change, never counting again; the
+window (`limit`, `offset`) does not apply to a count.
 
 The first run is a microtask after `watch()`; a failing run, or a listener that throws, goes to
 `onError` or to the logger at warn. A cursor over `Task` never wakes for a `Tag`: the catalog's action

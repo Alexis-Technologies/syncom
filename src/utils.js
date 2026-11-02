@@ -10,11 +10,26 @@ const { createLogger } = require('./logger.js');
 // A task's async context: `run(fn)` runs `fn` inside it, `inside()` says
 // whether the caller is — what tells a write made from inside a transaction's
 // function (which would wait for the queue the function holds) from one
-// made meanwhile by anyone else. Node's AsyncLocalStorage; the browser half
-// has none and answers false.
+// made meanwhile by anyone else. The context follows every timer and promise
+// the function makes, so it carries a frame that is active only while the
+// function runs: a write scheduled inside and made after it is not inside.
+// Node's AsyncLocalStorage; the browser half has none and answers false.
 const taskScope = () => {
   const store = new AsyncLocalStorage();
-  return { run: (fn) => store.run(true, fn), inside: () => store.getStore() === true };
+  const run = async (fn, frame) => {
+    try {
+      return await fn();
+    } finally {
+      frame.active = false;
+    }
+  };
+  return {
+    run: (fn) => {
+      const frame = { active: true };
+      return store.run(frame, () => run(fn, frame));
+    },
+    inside: () => store.getStore()?.active === true,
+  };
 };
 
 const generateUUID = crypto.randomUUID;

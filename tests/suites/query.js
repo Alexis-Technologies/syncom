@@ -434,9 +434,16 @@ const runQueryTests = async (t, assert, createStorage) => {
     const covered = [];
     const stop = storage.Project.select({ orgId: 'a', n: { $gte: 5 } }).watchCount((n) => counts.push(n));
     const stopCovered = storage.Project.select({ orgId: 'a' }).watchCount((n) => covered.push(n));
+    // The window does not apply to a count: every match is counted, from the first run on.
+    const windowed = [];
+    const stopWindowed = storage.Project.select({ orgId: 'a' })
+      .order('n')
+      .limit(2)
+      .watchCount((n) => windowed.push(n));
     await tick();
     assert.deepStrictEqual(counts, [4]);
     assert.deepStrictEqual(covered, [6]);
+    assert.deepStrictEqual(windowed, [6]);
     fsi.reset();
     await storage.Project.update(ids[1], { n: 50 });
     await tick();
@@ -450,12 +457,31 @@ const runQueryTests = async (t, assert, createStorage) => {
     await tick();
     assert.deepStrictEqual(counts, [4, 5, 4, 5]);
     assert.deepStrictEqual(covered, [6, 5, 6]);
+    assert.deepStrictEqual(windowed, [6, 5, 6], 'the window aside');
     assert.strictEqual(await storage.Project.count({ orgId: 'a', n: { $gte: 5 } }), 5);
     stop();
     stopCovered();
+    stopWindowed();
     await storage.delete(ids[9]);
     await tick();
     assert.deepStrictEqual(counts, [4, 5, 4, 5], 'silent after stop');
+  });
+
+  await t.test('a cached query tells { f: undefined } from {}', async (t2) => {
+    const storage = await createStorage(t2, 'U', { fsi: memory(), schema });
+    await storage.Project.insert({ orgId: 'o', name: 'owned', slug: 'a', n: 1, owner: 'x' });
+    await storage.Project.insert({ orgId: 'o', name: 'loose', slug: 'b', n: 2 });
+    // `{}` asks nothing; `{ owner: undefined }` asks for the field missing: two keys, two results — in either order.
+    assert.strictEqual((await storage.Project.select({}).fetch()).length, 2);
+    assert.deepStrictEqual(
+      (await storage.Project.select({ owner: undefined }).fetch()).map((row) => row.name),
+      ['loose'],
+    );
+    assert.deepStrictEqual(
+      (await storage.Project.select({ orgId: 'o', owner: undefined }).fetch()).map((row) => row.name),
+      ['loose'],
+    );
+    assert.strictEqual((await storage.Project.select({ orgId: 'o' }).fetch()).length, 2);
   });
 
   await t.test(
