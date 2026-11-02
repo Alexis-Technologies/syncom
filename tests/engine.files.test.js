@@ -6,6 +6,9 @@
 // changes (its layout is the one every database had).
 
 const test = require('node:test');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const assert = require('node:assert');
 const { IDBFactory } = require('fake-indexeddb');
 const nodeFsi = require('../src/fsi.js');
@@ -160,4 +163,22 @@ test('files engine: remove(path) says what it could not sweep', async (t) => {
     await gone.close();
     await filesEngine(base).remove('/missing');
   });
+});
+
+test('remove(path) sweeps a tag’s two directories by its name alone: a name that leaves the path is ignored', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'syncom-tags-'));
+  try {
+    const dbPath = path.join(root, 'db');
+    const victim = path.join(root, 'victim');
+    await nodeFsi.write(dbPath, 'node.json', '{"id":"n"}');
+    await nodeFsi.write(dbPath, 'tags.json', JSON.stringify({ tags: [{ name: '../victim' }, { name: 'ok' }] }));
+    await nodeFsi.write(`${dbPath}/tags/ok/data`, 'r.json', '{}');
+    await nodeFsi.write(`${victim}/data`, 'r.json', '{}');
+    await filesEngine(nodeFsi).remove(dbPath);
+    assert.strictEqual(await nodeFsi.exists(`${victim}/data`, 'r.json'), true, 'a neighbour is not swept');
+    assert.strictEqual(await nodeFsi.exists(`${dbPath}/tags/ok/data`, 'r.json'), false, 'the tag named is');
+    assert.strictEqual(await nodeFsi.exists(dbPath, 'node.json'), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

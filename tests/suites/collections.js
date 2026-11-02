@@ -695,6 +695,12 @@ const runCollectionTests = async (t, assert, createStorage) => {
       await dropDatabase(path, { fsi });
       assert.strictEqual(Object.keys(fsi.dump()).filter((key) => key.startsWith(`${path}/`)).length, 0);
       await dropDatabase(path, { fsi });
+      // A directory that holds no database — a stray file, or records with no identity — is not ours to empty.
+      await fsi.write('/stray', 'thesis.docx', 'x');
+      await assert.rejects(dropDatabase('/stray', { fsi }), /no database at/);
+      assert.strictEqual(await fsi.exists('/stray', 'thesis.docx'), true, 'left as it was');
+      await fsi.write('/loose/data', 'x.json', '{}');
+      await assert.rejects(dropDatabase('/loose', { fsi }), /no database at/);
       await assert.rejects(dropDatabase('', { fsi }), TypeError);
       await assert.rejects(dropDatabase(path, { fsi, engine: db.engine }), TypeError);
     },

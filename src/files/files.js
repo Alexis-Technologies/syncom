@@ -65,7 +65,9 @@ const tagNames = async (fsi, path) => {
   const tags = parsed !== null && typeof parsed === 'object' && Array.isArray(parsed.tags) ? parsed.tags : [];
   for (let i = 0; i < tags.length; i++) {
     const tag = tags[i];
-    if (tag !== null && typeof tag === 'object' && typeof tag.name === 'string') names.push(tag.name);
+    // A name that is no kv key (a `/`, a `..`) would name a directory outside the path: not a tag's.
+    const named = tag !== null && typeof tag === 'object' && typeof tag.name === 'string' && isKvKey(tag.name);
+    if (named) names.push(tag.name);
   }
   return names;
 };

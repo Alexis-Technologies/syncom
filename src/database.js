@@ -2194,14 +2194,23 @@ class Database extends Emitter {
   }
 
   /**
-   * Drops the database: closed, then every store of it removed from the
+   * Drops the database: closed, and every store of it removed from the
    * engine — the identity, the records, the log, the tags, the chain
-   * (`engine.remove(path)`). A node opened at the path again is a new node.
-   * `dropDatabase(path, { engine })` does the same for a closed one.
+   * (`engine.remove(path)`) — under the lock, before it is let go of, so
+   * nothing opens the directory meanwhile. A follower, or a writer whose
+   * lease was lost, is refused (READ_ONLY): the database is another
+   * instance's to drop. A node opened at the path again is a new node.
+   * `dropDatabase(path, { engine })` does the same for a closed one — and is
+   * what a database closed already drops through.
    */
   async drop() {
-    await this.close();
-    await this.#engine.remove(this.#path);
+    if (this.#readOnly || this.#leaseLost) throw this.#refused('drop()');
+    if (this.#closing !== null) {
+      await this.#closing;
+      return dropDatabase(this.#path, { engine: this.#engine });
+    }
+    this.#closing = this.#close(true);
+    return this.#closing;
   }
 
   /**
@@ -2712,11 +2721,12 @@ class Database extends Emitter {
    * runs or after — it is the same close.
    */
   close() {
-    if (this.#closing === null) this.#closing = this.#close();
+    if (this.#closing === null) this.#closing = this.#close(false);
     return this.#closing;
   }
 
-  async #close() {
+  // The close; with `sweep`, the drop: every store removed under the lock before it is let go of.
+  async #close(sweep) {
     if (this.#closed) return;
     // What an editor's handle holds goes to the log while writes are taken.
     try {
@@ -2743,7 +2753,12 @@ class Database extends Emitter {
     this.#unhear?.();
     await this.#heard;
     this.#unleash?.();
-    await this.#lock?.release();
+    if (sweep) {
+      // Swept while the lock is held: nothing opens the directory meanwhile. The lock went with the rest: its
+      // release finds nothing to let go of.
+      await this.#engine.remove(this.#path);
+      await this.#lock?.release().catch(NOOP);
+    } else await this.#lock?.release();
     await this.#db.close();
     notify(this, this.#logger, 'close');
   }
@@ -2762,7 +2777,8 @@ const open = createDatabase;
  * Drops a closed database: every store of it removed from the engine — the
  * one given, or the files engine over `fsi` (the platform's by default).
  * Held while it is taken: another instance's open database is `LOCKED`,
- * never emptied under it. A path that holds nothing is nothing to do.
+ * never emptied under it. A path that holds nothing is nothing to do; one
+ * that holds no database (no identity) is refused.
  */
 const dropDatabase = async (path, options = {}) => {
   if (typeof path !== 'string' || path.length === 0) throw new TypeError('dropDatabase() takes a path');
@@ -2776,6 +2792,13 @@ const dropDatabase = async (path, options = {}) => {
   const db = checkEngineDb(await engine.open(path, {}), 'dropDatabase()');
   let lock = null;
   try {
+    // A database's directory holds its identity (node.json): a directory without one that holds anything else is
+    // not ours to empty, and a path that holds nothing is nothing to do.
+    if (!(await db.kv.has('', 'node.json'))) {
+      const stray = (await db.kv.list('')).length > 0 || (await db.records.ids({ limit: 1 })).length > 0;
+      if (stray) throw new TypeError(`dropDatabase(): no database at ${path}`);
+      return;
+    }
     const native = db.capabilities.lock === 'native' && typeof db.lock === 'function';
     lock = native
       ? await db.lock({ mode: 'fail', onLost: NOOP })
