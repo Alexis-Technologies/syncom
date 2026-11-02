@@ -10,13 +10,16 @@
 // collection's prefix. Values are JSON; a key is a kv key (no `/`). The
 // changes of one key go one at a time (`set(key, fn)` reads the value the
 // write before it left), an observer that throws is contained, a document
-// that does not parse is CORRUPT. `observe` is this instance's: another
-// instance over one engine hears nothing (a local document is one node's).
-// Requires engine.js, errors.js and hooks.js only: it ships to the browser.
+// that does not parse is CORRUPT, and a write after `close()` or a lost
+// lease is refused as the queue refuses one (CLOSED, READ_ONLY). `observe`
+// is this instance's: another instance over one engine hears nothing (a
+// local document is one node's). Requires engine.js, errors.js, hooks.js
+// and symbols.js only: it ships to the browser.
 
 const { kvNamespace, isKvKey } = require('../engine.js');
 const { SyncomError } = require('../errors.js');
 const { notify } = require('../hooks.js');
+const { SOURCE } = require('../symbols.js');
 
 const NAMESPACE = 'local';
 
@@ -42,15 +45,19 @@ class LocalStore {
   #watchers;
   // The change in flight per key: the next one waits for it.
   #lanes;
+  // What refuses a write once the database is closed or read-only.
+  #guard;
 
   // `store` the kv namespace, `prefix` what a collection's store puts before
   // every key (`''` the database's), `told(key, value)` the database's
-  // event; the watchers and the lanes are shared by every scope.
-  constructor(store, prefix, told, logger, watchers = new Map(), lanes = new Map()) {
+  // event, `guard(what)` the database's refusal of a write; the watchers and
+  // the lanes are shared by every scope.
+  constructor(store, prefix, told, logger, guard, watchers = new Map(), lanes = new Map()) {
     this.#store = store;
     this.#prefix = prefix;
     this.#told = told;
     this.#logger = logger;
+    this.#guard = guard;
     this.#watchers = watchers;
     this.#lanes = lanes;
   }
@@ -109,6 +116,7 @@ class LocalStore {
    * value as JSON holds it.
    */
   async set(key, value) {
+    this.#guard('a local write');
     const full = this.#full('set', key);
     return this.#serial(full, async () => {
       const current = typeof value === 'function' ? await this.#read(full) : undefined;
@@ -130,6 +138,7 @@ class LocalStore {
 
   /** Removes `key`; nothing to remove is nothing. */
   async delete(key) {
+    this.#guard('a local write');
     const full = this.#full('delete', key);
     return this.#serial(full, async () => {
       if (!(await this.#store.has(full))) return;
@@ -165,7 +174,7 @@ class LocalStore {
   scoped(prefix) {
     if (!isKvKey(prefix)) throw new TypeError('scoped() takes a prefix: a kv key');
     const full = `${this.#prefix}${prefix}.`;
-    return new LocalStore(this.#store, full, this.#told, this.#logger, this.#watchers, this.#lanes);
+    return new LocalStore(this.#store, full, this.#told, this.#logger, this.#guard, this.#watchers, this.#lanes);
   }
 }
 
@@ -175,7 +184,13 @@ const local = Object.freeze({
   setup({ db, storage, logger }) {
     const store = kvNamespace(db.kv, NAMESPACE);
     const told = (key, value) => notify(storage, logger, 'local', { key, value });
-    return { local: new LocalStore(store, '', told, logger) };
+    // The database's refusal of a write (closed, read-only), taken from its seam at the first write.
+    let refuse = null;
+    const guard = (what) => {
+      refuse ??= storage[SOURCE].guard;
+      refuse(what);
+    };
+    return { local: new LocalStore(store, '', told, logger, guard) };
   },
 });
 

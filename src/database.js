@@ -1280,7 +1280,19 @@ class Database extends Emitter {
       posting: (entity, field, values) => catalog.posting(entity, field, values),
       // Every plan a cursor makes, told to the advisors; `advise(fn)` adds one and answers what takes it off.
       planned: (entity, plan) => {
-        for (const fn of this.#advisors) fn(entity, plan);
+        for (const fn of this.#advisors) {
+          try {
+            fn(entity, plan);
+          } catch (err) {
+            // An advisor is a listener: its throw is its own, never the cursor's.
+            this.#logger.warn({ event: 'listener.error', name: 'advise', err });
+          }
+        }
+      },
+      // A plugin's own write (a local document) refused as the queue would refuse a write: closed, or read-only.
+      guard: (what) => {
+        if (this.#closed) throw new SyncomError('CLOSED', 'Storage is closed');
+        if (this.#readOnly || this.#leaseLost) throw this.#refused(what);
       },
       advise: (fn) => {
         this.#advisors.add(fn);

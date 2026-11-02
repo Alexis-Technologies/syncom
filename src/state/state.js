@@ -143,9 +143,13 @@ const createState = (db, name, { local = false } = {}) => {
       if (typeof path === 'function' && listener === undefined) [path, listener] = [null, path];
       if (typeof listener !== 'function') throw new TypeError('observe() takes a listener');
       const at = pathArg('observe', path);
-      // What the listener hears: the value at the path, read after the change.
+      // What the listener hears: the value at the path, read after the change; a read that fails or a listener
+      // that throws is contained, as every listener is.
       return inner.observe(at, () => {
-        inner.get(at).then(listener, () => {});
+        inner
+          .get(at)
+          .then(listener)
+          .catch((err) => db.logger.warn({ event: 'listener.error', name: 'observe', err }));
       });
     },
   };

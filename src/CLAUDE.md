@@ -557,7 +557,10 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   scopes are the per-peer filter). Only the hooks that run inside the
   mutation queue go through `#hook` (`core.hook`) and its `#inHook` guard;
   `beforeRead`/`afterRead` call `runHook` directly — a write from a read hook
-  queues. Every event leaves through `notify()` (a path module's through `core.emit`, which is it):
+  queues. A collection's events (`Collection#hear`, fed by `Catalog.subscribe` inside the landing) are queued
+  there and told on a microtask after it — the row in the catalog, the landing never held by a listener. A
+  plugin's own write (a local document) asks the seam's `guard(what)` first: CLOSED, or READ_ONLY as `#run` refuses
+  one. Every event leaves through `notify()` (a path module's through `core.emit`, which is it):
   never `await this.emit(...)`, never emit `error` any other way (the Emitter
   throws on an unheard `error`, and that throw used to fail a push before the
   vector moved). A remote op a `beforeApply` skipped is still appended, with

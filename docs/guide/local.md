@@ -44,6 +44,9 @@ db.on('local', ({ key, value }) => console.log(key, value));
 Another instance over one engine hears nothing: a local document is one node's. A follower
 (`readOnly: true`) cannot write one.
 
+A write after `close()` is refused with `CLOSED`, and after a lost lease with `READ_ONLY` — as a write
+through the queue would be; the engine the database let go of is never written behind its back.
+
 ## What it is not
 
 A local document is kept across a reopen and swept by `drop()`, and `copyEngine()` carries the `local`

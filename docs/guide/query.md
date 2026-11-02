@@ -54,7 +54,8 @@ for await (const row of storage.Task.select({ boardId: 'b1' }).order('key').limi
 A malformed query — an unknown operator, `$in` without an array, an invalid
 regex, a `$text` that is not a string, is over 1000 characters or sits inside
 `$and`/`$or`/`$not`, a `$text` on a collection with no search fields — is a
-`TypeError` at `select()`, not at `fetch()`.
+`TypeError` at `select()`, not at `fetch()`. A query nests 32 levels at most (`$and`, `$or`, `$nor`, `$not`, `$elemMatch` within one
+another): deeper is a `TypeError`.
 
 ## The cursor
 
@@ -246,7 +247,7 @@ may tell a row that moved by its identity — what it receives is the run's: rea
 populated result is read whole every time).
 
 The first run is a microtask after `watch()`; a failing run, or a listener that throws, goes to
-`onError` or to the logger at warn. A cursor over `Task` never wakes for a `Tag`: the catalog's action
+`onError` or to the logger at warn — and an `onError` that throws goes to the logger too. A cursor over `Task` never wakes for a `Tag`: the catalog's action
 stream is per collection, and a change that left a covered cursor's rows as they were wakes nothing.
 Every `watch()` of one query shares one run (see [the query cache](#the-query-cache)); `toStore()` of
 `@alexify/syncom/store` is a store over `watch()`.

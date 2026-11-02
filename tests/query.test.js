@@ -79,6 +79,17 @@ test('compileQuery', async (t) => {
   });
 
   await t.test('a malformed query is a TypeError at compile time', () => {
+    // A query nests 32 levels at most: deeper is a TypeError, never a RangeError.
+    const nest = (depth) => {
+      let query = { n: 1 };
+      for (let i = 0; i < depth; i++) query = { $and: [query] };
+      return query;
+    };
+    assert.deepStrictEqual(ids(nest(30)), ['a']);
+    assert.throws(() => compileQuery(nest(40)), /nests deeper than 32 levels/);
+    let elem = { n: 1 };
+    for (let i = 0; i < 40; i++) elem = { tags: { $elemMatch: elem } };
+    assert.throws(() => compileQuery(elem), /nests deeper than 32 levels/);
     const bad = (query, pattern) => assert.throws(() => compileQuery(query), { name: 'TypeError', message: pattern });
     bad('n', /takes a query object/);
     bad([], /takes a query object/);

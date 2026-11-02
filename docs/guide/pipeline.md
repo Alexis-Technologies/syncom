@@ -44,7 +44,8 @@ the database's `error` event carries `PIPELINE_FAILED` (`name`, `eventId`, `caus
 says so, the checkpoint stays, and nothing is handed over until `start()` — which hands the failed turn over again.
 A turn is handled at least once and never skipped; a handler is written to be idempotent for that reason. `stopped`
 says whether the pipeline follows nothing now; `idle()` whether anything is queued or running; `awaitIdle()` resolves
-once nothing is; `stop()` stops following (what is queued waits for the next start).
+once nothing is; `stop()` stops following (what is queued waits for the next start). A checkpoint that does not parse is logged
+(`pipeline.checkpoint.unreadable`) and every record of the source is handed over again.
 
 ## What to derive into
 

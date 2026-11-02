@@ -496,6 +496,11 @@ any whole-record write; an encrypted record rejects with `ENCRYPTED`. It is
 `applyPatches()` over the record's own reading — see [Versions and
 history](./versions#diff-and-restore).
 
+One operator per field: two that name one field — `$addToSet` and `$pop` of one array, `$set` and `$inc` of
+one number, a `$rename` into a field another operator names — are a `TypeError`, as MongoDB refuses a
+conflicting update; never two writes whose order decides. `$rename` takes a register: a counter, a set, a
+list, a text or a tree is a `TypeError`.
+
 ### Encryption at rest
 
 Sealed records are the `encryption` plugin — `@alexify/syncom/encryption`,
@@ -682,7 +687,9 @@ await storage.Post.bulkRemove(ids);
 A bulk write is one [transaction](#transactions): every record that could be written is, as one
 group of ops, and the ones refused — an id taken, a validator, a unique key, a record of another
 collection — are listed with their index, each with the error the single write would have thrown. One
-transaction takes 10 000 rows at most: a larger batch is a `TypeError` before anything lands — page it.
+transaction takes 10 000 rows at most: a larger batch is a `TypeError` before anything lands — page it. An
+`afterWrite` hook that fails after the rows landed does not fail the call: the verdicts come back, and the
+failure goes to the database's `error` event (`hook.failed` in the log).
 A collection's `remove({ purge })` deletes (or, purged, scrubs from the log — every file holding a page's
 ids rewritten once) every record of the collection as it was when the call began, 500 at a time; it takes
 `{ purge, actor }` and nothing else (`remove({ status: 'old' })` is a `TypeError`): the matches of a query

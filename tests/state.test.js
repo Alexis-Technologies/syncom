@@ -108,6 +108,17 @@ test('app state', async (t) => {
     await tick();
     assert.deepStrictEqual(seen, [{ a: { c: 2 }, n: 3, x: 'y' }, { whole: true }]);
     stop();
+    // A listener that throws is contained: the state goes on, the next listener hears.
+    const stopBad = state.observe(() => {
+      throw new Error('boom');
+    });
+    const heard = [];
+    const stopGood = state.observe('q', (value) => heard.push(value));
+    await state.set('q', 1);
+    await tick();
+    assert.deepStrictEqual(heard, [1]);
+    stopBad();
+    stopGood();
     await state.delete();
     assert.strictEqual(await db.local.get('state.prefs'), null);
     assert.deepStrictEqual(await state.get(), {});

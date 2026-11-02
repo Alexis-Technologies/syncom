@@ -225,6 +225,29 @@ test('pipelines', async (t) => {
     },
   );
 
+  await t.test('an unreadable checkpoint is said so and rebuilt from, never a position', async () => {
+    const fsi = memory();
+    const warned = [];
+    const logger = { warn: (entry) => warned.push([entry.event, entry.name]), info() {}, debug() {}, error() {} };
+    const db = await syncom.createDatabase({ path: '/u', fsi, defer: 0, logger, schema });
+    await db.Order.insert({ customer: 'x', amount: 1 });
+    const seen = [];
+    const first = createPipeline(db, { name: 'totals', source: 'Order', handler: ({ ids }) => seen.push(ids.length) });
+    await first.start();
+    await first.awaitIdle();
+    first.stop();
+    assert.ok(first.checkpoint !== null);
+    await fsi.write('/u/pipeline', 'totals', '{nope');
+    const again = createPipeline(db, { name: 'totals', source: 'Order', handler: ({ ids }) => seen.push(ids.length) });
+    await again.start();
+    await again.awaitIdle();
+    assert.strictEqual(again.rebuilt, true);
+    assert.deepStrictEqual(warned, [['pipeline.checkpoint.unreadable', 'totals']]);
+    assert.deepStrictEqual(seen, [1, 1]);
+    again.stop();
+    await db.close();
+  });
+
   await t.test('a pipeline hears a plain delete and a purge of its source', async () => {
     const db = await syncom.createDatabase({ path: '/d', fsi: memory(), defer: 0, logger: false, schema });
     const heard = [];

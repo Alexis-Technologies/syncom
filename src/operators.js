@@ -96,21 +96,35 @@ const expand = (delta, view, kindAt) => {
     setting++;
   };
   const current = (field) => valueAt(view, field);
+  // One operator per field: a field two operators name — `$push` and `$pull` of one array, `$set` and `$inc` of one
+  // number — is refused, as MongoDB refuses a conflicting update, never two writes whose order decides.
+  const named = new Map();
+  const claim = (op, field) => {
+    const by = named.get(field);
+    if (by !== undefined && by !== op) {
+      throw new TypeError(`update(): ${by} and ${op} both name ${field}: one operator per field`);
+    }
+    named.set(field, op);
+  };
   for (const op of Object.keys(delta)) {
     const given = delta[op];
     if (op === '$set') {
       const fields = object(op, given);
       for (const field of Object.keys(fields)) {
         fieldName('update', field);
+        claim(op, field);
         set(field, jsonValue('update', fields[field]));
       }
     } else if (op === '$unset') {
       const names = Array.isArray(given) || typeof given === 'string' ? given : Object.keys(object(op, given));
-      calls.push(['unset', fieldNames('update', names)]);
+      const unset = fieldNames('update', names);
+      for (let i = 0; i < unset.length; i++) claim(op, unset[i]);
+      calls.push(['unset', unset]);
     } else if (op === '$inc') {
       const fields = object(op, given);
       for (const field of Object.keys(fields)) {
         fieldName('update', field);
+        claim(op, field);
         if (!Number.isFinite(fields[field])) throw new TypeError('update(): $inc takes finite numbers');
         calls.push(['inc', field, fields[field]]);
       }
@@ -118,6 +132,7 @@ const expand = (delta, view, kindAt) => {
       const fields = object(op, given);
       for (const field of Object.keys(fields)) {
         fieldName('update', field);
+        claim(op, field);
         const elements = elementsOf(op, fields[field], op === '$pull' ? '$in' : '$each');
         const array = current(field);
         if (kindAt(field) === 'register' && Array.isArray(array)) {
@@ -143,6 +158,7 @@ const expand = (delta, view, kindAt) => {
       const fields = object(op, given);
       for (const field of Object.keys(fields)) {
         fieldName('update', field);
+        claim(op, field);
         const kind = kindAt(field);
         const value = fields[field];
         if (kind === 'text') calls.push(['push', field, jsonValue('update', value)]);
@@ -161,6 +177,7 @@ const expand = (delta, view, kindAt) => {
       const fields = object(op, given);
       for (const field of Object.keys(fields)) {
         fieldName('update', field);
+        claim(op, field);
         const side = fields[field];
         if (side !== 1 && side !== -1) throw new TypeError('update(): $pop takes 1 (the last) or -1 (the first)');
         const array = current(field);
@@ -172,6 +189,7 @@ const expand = (delta, view, kindAt) => {
       const fields = object(op, given);
       for (const field of Object.keys(fields)) {
         fieldName('update', field);
+        claim(op, field);
         const value = jsonValue('update', fields[field]);
         if (better(op, current(field), value)) set(field, value);
       }
@@ -180,8 +198,16 @@ const expand = (delta, view, kindAt) => {
       const names = [];
       for (const field of Object.keys(fields)) {
         fieldName('update', field);
+        claim(op, field);
         const to = fields[field];
         fieldName('update', to);
+        claim(op, to);
+        // A counter, a set, a list, a text or a tree is not a register renamed: what `to` would hold is the reading,
+        // not the field.
+        const kind = kindAt(field);
+        if (kind !== undefined && kind !== 'register') {
+          throw new TypeError(`update(): $rename takes a register (${field} holds a ${kind})`);
+        }
         const value = current(field);
         if (value === undefined) continue;
         names.push(field);

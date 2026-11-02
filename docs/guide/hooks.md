@@ -233,6 +233,12 @@ A `Document` emits `update` `(data, delta)` on a staged assignment and when the
 record changes in storage (`null` data once deleted) — once per transaction
 that changed it, with the delta of all its ops.
 
+A collection (`db.Post`) emits what the catalog decides of its records — `change` (`{ id, action }`)
+and `insert`, `update`, `remove` (`{ id }`), once per landing of a record of its own — on a microtask
+after the landing: the row is in the catalog by then, a listener never holds the write, and the write
+resolves after its listeners ran. The catalog's subscription is taken at the first `on()` and let go of
+with the last listener (an `off()`, a `once()` that fired).
+
 To follow one record rather than every op, `observe(id, path?, listener)`
 calls the listener after every turn that changed the record — with its
 [changes](./versions#changes) of that turn and the `transaction` event they

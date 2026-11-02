@@ -18,6 +18,9 @@ src/query/cache.js        QueryCache, keyOf — a result by its key with the cat
 
 ## Rules
 
+- **A query is checked at compile time, and bounded.** `compileQuery` refuses an unknown operator, a malformed one, a
+  `$regex` or `$text` past 1000 characters and a query nested past `MAX_QUERY_DEPTH` (32) levels — `$and`/`$or`/
+  `$nor`/`$not`/`$elemMatch` within one another — as a TypeError, never a RangeError from the recursion.
 - **A cursor reads through `storage[SOURCE]`, not through `get()`.** The
   seam hands it the catalog and a lensed, hook-free `load(id)` — like
   `snapshot()` and `swap()`; the cursor itself is the query plugin's
@@ -52,7 +55,9 @@ plan)` reads the entries between two binary searches, forward or backward; where
   `subscribe(type, fn(changed, id, action))`: the record that changed is read once (`rowOf`), matched
   and placed; a full window that lost a row, a row moved to the end of a full window, or a `$text`
   query runs the cursor again (`top()`); it emits only when an id came, went or moved, or a row's view
-  (`row[VIEW]`, the object it was built from) is another — and delivers a row that stayed as the copy it delivered
+  (`row[VIEW]`, the object it was built from) is another; a failure goes to `onError` or the logger, and an `onError`
+  that throws to the logger too (`#fail`), as does an advisor that throws (the seam's `planned`, `listener.error`)
+  — and delivers a row that stayed as the copy it delivered
   before (`#delivered`, by id and the row object; `deliverOne` of the spec, none where something is populated), so a
   change is one copy. `nearest()` streams the rows into a `Nearest` sink (`#matching(…, into)`): `k` rows held,
   `MAX_NEAREST`/`MAX_VECTOR` bound what it takes. The plugin keeps one `QueryCache`

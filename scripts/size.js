@@ -194,7 +194,9 @@ const ENTRIES = [
   // 74, raised by name.
   // 74.2 with the unique keys in flight kept in a map, a purge's ids scrubbed together, remove() over the ids as the
   // call began (review №6, E5.1, E5.5; 2026-11-02). 74.5, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 74.5 },
+  // 74.7 with the collection's events on a microtask, the unique keys in maps, one operator per field, a query's depth
+  // bound (review №6, E6; 2026-11-02). 75, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 75 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -421,7 +423,8 @@ const ENTRIES = [
   // 2026-11-02). 160, raised by name.
   // 160.2 with the query cache per collection and the live delivery (review №6, E5.2–E5.3). 160.5, raised by name.
   // 160.5 with a purge's ids scrubbed together through the log and the tags (review №6, E5.5). 161, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 161 },
+  // 161.3 with the events, the guards and the bounds of E6 (review №6, E6). 161.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 161.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -610,7 +613,9 @@ const ENTRIES = [
   // contained event it shares with the core (collections plan, C4.1). 2.3 measured; 2.5.
   // 2.5 with the changes of a key one at a time (`set(key, fn)`), a contained observer and CORRUPT (review №6, E3b). 2.75,
   // raised by name.
-  { label: 'local — browser (@alexify/syncom/local)', entry: 'src/local/local.js', platform: 'browser', budget: 2.75 },
+  // 2.8 with a write after close() or a lost lease refused through the seam's guard (review №6, E6; 2026-11-02). 3,
+  // raised by name.
+  { label: 'local — browser (@alexify/syncom/local)', entry: 'src/local/local.js', platform: 'browser', budget: 3 },
   // Persistent app state by name and path, over a record or a local document — measured with the paths and the
   // shapes it shares with the core (collections plan, C4.2). 2.9 measured; 3.
   { label: 'state — browser (@alexify/syncom/state)', entry: 'src/state/state.js', platform: 'browser', budget: 3 },

@@ -51,8 +51,9 @@ const ownVerdict = (error) => error instanceof TypeError || ROW_CODES.has(error?
 class Collection extends Emitter {
   #storage;
   #name;
-  // The catalog's subscription while anything listens, and what takes it off.
+  // The catalog's subscription while anything listens, and what takes it off; the changes heard and not yet told.
   #unsubscribe = null;
+  #queued = [];
 
   constructor(storage, name) {
     super();
@@ -76,12 +77,23 @@ class Collection extends Emitter {
     return this.#storage.local.scoped(this.#name);
   }
 
-  // What the catalog says of a record of this collection: `change` with the
-  // action, and the action's own event; contained like every event.
+  // What the catalog says of a record of this collection, heard inside the landing and told on a microtask after
+  // it — the row in place by then, the landing never held by a listener: `change` with the action, then the
+  // action's own event; contained like every event. The subscription goes once no listener is left.
   #hear(id, action) {
+    this.#queued.push(id, action);
+    if (this.#queued.length === 2) queueMicrotask(() => this.#tell());
+  }
+
+  #tell() {
+    const queued = this.#queued;
+    this.#queued = [];
     const { logger } = this.#storage;
-    notify(this, logger, 'change', { id, action });
-    notify(this, logger, action, { id });
+    for (let i = 0; i < queued.length; i += 2) {
+      notify(this, logger, 'change', { id: queued[i], action: queued[i + 1] });
+      notify(this, logger, queued[i + 1], { id: queued[i] });
+    }
+    this.#unlisten();
   }
 
   #listen() {
@@ -89,8 +101,11 @@ class Collection extends Emitter {
     this.#unsubscribe = this.#storage[SOURCE].subscribe(this.#name, (changed, id, action) => this.#hear(id, action));
   }
 
+  // Nothing listens any more — `off()` of the last, a `once()` that fired — and the catalog's subscription goes.
   #unlisten() {
-    if (this.#unsubscribe === null || this.eventNames().length > 0) return;
+    if (this.#unsubscribe === null) return;
+    const names = this.eventNames();
+    for (let i = 0; i < names.length; i++) if (this.listenerCount(names[i]) > 0) return;
     this.#unsubscribe();
     this.#unsubscribe = null;
   }
@@ -196,22 +211,31 @@ class Collection extends Emitter {
     list(method, rows);
     const success = [];
     const error = [];
-    await this.#storage.transact(
-      async (tx) => {
-        for (let i = 0; i < rows.length; i++) {
-          let id = null;
-          try {
-            id = await write(tx, rows[i]);
-          } catch (cause) {
-            if (!ownVerdict(cause)) throw cause;
-            error.push({ index: i, id: cause.code === 'EXISTS' ? cause.id : id, data: rows[i], error: cause });
-            continue;
+    try {
+      await this.#storage.transact(
+        async (tx) => {
+          for (let i = 0; i < rows.length; i++) {
+            let id = null;
+            try {
+              id = await write(tx, rows[i]);
+            } catch (cause) {
+              if (!ownVerdict(cause)) throw cause;
+              error.push({ index: i, id: cause.code === 'EXISTS' ? cause.id : id, data: rows[i], error: cause });
+              continue;
+            }
+            success.push(id);
           }
-          success.push(id);
-        }
-      },
-      { actor: options.actor, message: options.message },
-    );
+        },
+        { actor: options.actor, message: options.message },
+      );
+    } catch (cause) {
+      // An afterWrite hook failed AFTER the rows landed: the verdicts are the caller's (the writes are durable), the
+      // hook's failure the database's `error` event and a warning — never a rejection that loses which rows went.
+      if (cause?.code !== 'HOOK_FAILED' || cause.hook !== 'afterWrite') throw cause;
+      const { logger } = this.#storage;
+      logger.warn({ event: 'hook.failed', hook: 'afterWrite', method, err: cause });
+      notify(this.#storage, logger, 'error', cause);
+    }
     return { success, error };
   }
 

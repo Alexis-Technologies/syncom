@@ -211,8 +211,10 @@ const createPipeline = (db, { name, source, handler, leader = true } = {}) => {
       if (text !== null) {
         try {
           checkpoint = JSON.parse(text).eventId ?? null;
-        } catch {
+        } catch (cause) {
+          // Evidence, not a position: said so, and every record handed over again.
           checkpoint = null;
+          logger.warn({ event: 'pipeline.checkpoint.unreadable', name, err: cause });
         }
       }
       listener = (event) => {

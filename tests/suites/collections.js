@@ -292,17 +292,17 @@ const runCollectionTests = async (t, assert, createStorage) => {
         $addToSet: { set: 'y', arr: { $each: [2, 3] } },
         $pull: { tags: 'a' },
         $push: { list: 9, body: 'c', made: 5 },
-        $pop: { arr: -1 },
         $min: { n: 0 },
-        $max: { n: 0 },
+        $max: { m: 0 },
         $rename: { title: 'name' },
         $unset: ['gone'],
         $set: { z: 1 },
       });
       assert.deepStrictEqual(await db.get(id), {
         n: 0,
+        m: 0,
         tags: [],
-        arr: [2],
+        arr: [1, 2, 3],
         $type: 'Post',
         set: ['x', 'y'],
         list: [1, 2, 3, 9],
@@ -316,6 +316,16 @@ const runCollectionTests = async (t, assert, createStorage) => {
       // One turn: inc, inc, add, push, push, the rename's unset, then one set of what was rewritten
       // (`tags` is a register's array: `$pull` rewrote it) and set.
       assert.deepStrictEqual(turns, [['inc', 'inc', 'add', 'splice', 'splice', 'unset', 'set']]);
+      // Two operators naming one field are a conflict, refused whole; one at a time, each goes.
+      assert.strictEqual(await code(db.update(id, { $addToSet: { arr: 9 }, $pop: { arr: 1 } })), 'TypeError');
+      assert.deepStrictEqual((await db.get(id)).arr, [1, 2, 3]);
+      await db.Post.update(id, { $pop: { arr: -1 } });
+      assert.deepStrictEqual((await db.get(id)).arr, [2, 3]);
+      assert.strictEqual(
+        await code(db.update(id, { $rename: { hits: 'count' } })),
+        'TypeError',
+        'a counter is not renamed',
+      );
       // A kind refuses what is not its own: the whole update, nothing of it written.
       assert.strictEqual(await code(db.update(id, { $inc: { name: 1 }, $set: { k: 1 } })), 'FIELD_KIND');
       assert.strictEqual(await code(db.update(id, { $addToSet: { hits: 1 } })), 'FIELD_KIND');
@@ -733,6 +743,61 @@ const runCollectionTests = async (t, assert, createStorage) => {
       });
       await db.Post.update(id, { n: 4 });
       assert.strictEqual((await db.Post.get(id)).n, 4);
+    },
+  );
+
+  await t.test(
+    'collection events fire outside the write, after the row is in the catalog; once() and off() let the subscription go',
+    async (t2) => {
+      const db = await createStorage(t2, 'A', { fsi: memory(), schema: { entities: { Post: {} } } });
+      const seen = [];
+      db.Post.once('insert', (event) => seen.push(['once', event.id, db.hasRecord(event.id)]));
+      const a = (await db.Post.insert({ n: 1 })).id;
+      assert.deepStrictEqual(seen, [['once', a, true]], 'the row is in the catalog when the listener hears');
+      await db.Post.insert({ n: 2 });
+      assert.strictEqual(seen.length, 1, 'a once() fired is gone');
+      const heard = (event) => seen.push(['on', event.id]);
+      db.Post.on('update', heard);
+      await db.Post.update(a, { n: 3 });
+      assert.deepStrictEqual(seen.at(-1), ['on', a]);
+      db.Post.off('update', heard);
+      await db.Post.update(a, { n: 4 });
+      assert.strictEqual(seen.length, 2, 'off(event, listener) and nothing is heard');
+      // A listener that is slow holds nothing: the write resolves, the listener runs after the landing, in order.
+      const order = [];
+      db.Post.on('update', () => {
+        const until = Date.now() + 20;
+        while (Date.now() < until);
+        order.push('listener');
+      });
+      await db.Post.update(a, { n: 5 });
+      order.push('resolved');
+      assert.deepStrictEqual(order, ['listener', 'resolved']);
+    },
+  );
+
+  await t.test(
+    'a bulk write whose afterWrite hook fails after the rows landed keeps its verdicts; the failure is the error event',
+    async (t2) => {
+      const logged = [];
+      const logger = { warn: (entry) => logged.push(entry.event), info() {}, debug() {}, error() {} };
+      const db = await createStorage(t2, 'A', {
+        fsi: memory(),
+        logger,
+        schema: { entities: { Post: {} } },
+        hooks: {
+          afterWrite: (ctx) => {
+            if (ctx.id === 'b2') throw new Error('after');
+          },
+        },
+      });
+      const errors = [];
+      db.on('error', (error) => errors.push([error.code, error.hook, error.cause.message]));
+      const out = await db.Post.bulkInsert([{ id: 'b1' }, { id: 'b2' }, { id: 'b3' }]);
+      assert.deepStrictEqual(out, { success: ['b1', 'b2', 'b3'], error: [] });
+      assert.strictEqual(await db.Post.count(), 3, 'every row landed');
+      assert.deepStrictEqual(errors, [['HOOK_FAILED', 'afterWrite', 'after']]);
+      assert.ok(logged.includes('hook.failed'));
     },
   );
 

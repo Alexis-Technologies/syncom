@@ -110,6 +110,16 @@ test('local documents', async (t) => {
     assert.throws(() => b.local.scoped('a/b'), TypeError);
   });
 
+  await t.test('a local write after close() is CLOSED, as a write through the queue is', async () => {
+    const db = await syncom.createDatabase({ path: '/closed', fsi: memory(), defer: 0, logger: false });
+    await db.local.set('k', 1);
+    const scoped = db.local.scoped('Post');
+    await db.close();
+    await assert.rejects(db.local.set('k', 2), { code: 'CLOSED' });
+    await assert.rejects(db.local.delete('k'), { code: 'CLOSED' });
+    await assert.rejects(scoped.set('k', 2), { code: 'CLOSED' });
+  });
+
   await t.test('without the plugin, db.local is PLUGIN_MISSING', async (t2) => {
     const core = require('../index.js');
     const db = await core.createDatabase({ fsi: memory(), path: '/c', logger: false, defer: 0 });

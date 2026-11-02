@@ -46,7 +46,18 @@ test('update operators', async (t) => {
       ['remove', 'tags', ['a']],
       ['update', { arr: [2] }],
     ]);
-    assert.deepStrictEqual(expand({ $addToSet: { arr: 1 }, $pull: { arr: 9 } }, view, kindAt), [], 'nothing to change');
+    assert.deepStrictEqual(expand({ $addToSet: { arr: 1 } }, view, kindAt), [], 'nothing to change');
+    // One operator per field: two that name one field are refused, as MongoDB refuses a conflicting update.
+    assert.throws(() => expand({ $addToSet: { arr: 1 }, $pull: { arr: 9 } }, view, kindAt), /one operator per field/);
+    assert.throws(
+      () => expand({ $set: { hits: 1 }, $inc: { hits: 1 } }, view, kindAt),
+      /\$set and \$inc both name hits/,
+    );
+    assert.throws(
+      () => expand({ $rename: { tags: 'labels' } }, view, kindAt),
+      /\$rename takes a register \(tags holds a set\)/,
+    );
+    assert.throws(() => expand({ $rename: { arr: 'n' }, $set: { n: 1 } }, view, kindAt), /one operator per field/);
     // Object elements are held equal whatever their key order, as deepEqual holds them.
     assert.deepStrictEqual(
       expand({ $addToSet: { arr: { $each: [{ b: 2, a: 1 }] } } }, { ...view, arr: [{ a: 1, b: 2 }] }, kindAt),
@@ -68,10 +79,12 @@ test('update operators', async (t) => {
     ]);
     assert.throws(() => expand({ $pop: { list: 2 } }, view, kindAt), TypeError);
     // $min/$max write only where the comparison holds; a type apart is a TypeError.
-    assert.deepStrictEqual(expand({ $min: { n: 7, s: 'a' }, $max: { n: 7, fresh: 1 } }, view, kindAt), [
+    assert.deepStrictEqual(expand({ $min: { s: 'a' }, $max: { n: 7, fresh: 1 } }, view, kindAt), [
       ['update', { s: 'a', n: 7, fresh: 1 }],
     ]);
-    assert.deepStrictEqual(expand({ $min: { n: 5 }, $max: { n: 5 } }, view, kindAt), []);
+    assert.deepStrictEqual(expand({ $min: { n: 7 } }, view, kindAt), []);
+    assert.deepStrictEqual(expand({ $min: { n: 5 } }, view, kindAt), []);
+    assert.deepStrictEqual(expand({ $max: { n: 5 } }, view, kindAt), []);
     assert.throws(() => expand({ $min: { n: 'x' } }, view, kindAt), TypeError);
     assert.throws(() => expand({ $max: { nested: 1 } }, view, kindAt), TypeError);
     // $rename is an unset and a set; a field that is not there renames nothing; $unset takes names or an object.

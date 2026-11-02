@@ -16,6 +16,8 @@ const { DISTANCES, isVector } = require('../search/distance.js');
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 const MAX_REGEX = 1000;
 const MAX_TEXT = 1000;
+// How deep a query nests ($and/$or/$nor/$not/$elemMatch within one another): past it a TypeError, never a RangeError.
+const MAX_QUERY_DEPTH = 32;
 // How many records a loaded cursor reads at once.
 const CONCURRENCY = 16;
 // On a row, the object it was built from — the record as it reads, or its catalog row's fields —
@@ -128,11 +130,11 @@ const typeOf = (value) => {
 
 // `$elemMatch`: a query over an element — an object element matched by a
 // query of its fields, a scalar one by the operators as a field's value.
-const elemMatch = (condition) => {
+const elemMatch = (condition, depth) => {
   if (!isObject(condition)) throw new TypeError('select(): $elemMatch takes a query');
   let operators = 0;
   for (const key of Object.keys(condition)) if (key.startsWith('$')) operators++;
-  const sub = operators > 0 ? compileField('', condition) : compileQuery(condition, true);
+  const sub = operators > 0 ? compileField('', condition, depth + 1) : compileQuery(condition, true, depth + 1);
   const test = operators > 0 ? (element) => sub({ '': element }) : sub;
   return (value) => {
     if (!Array.isArray(value)) return false;
@@ -141,7 +143,8 @@ const elemMatch = (condition) => {
   };
 };
 
-const compileField = (path, condition) => {
+const compileField = (path, condition, depth = 0) => {
+  if (depth > MAX_QUERY_DEPTH) throw new TypeError(`select(): a query nests deeper than ${MAX_QUERY_DEPTH} levels`);
   if (!isObject(condition)) return (row) => matches(valueOf(row, path), condition);
   const tests = [];
   const options = typeof condition.$options === 'string' ? condition.$options : undefined;
@@ -193,7 +196,7 @@ const compileField = (path, condition) => {
         for (let i = 0; i < expected.length; i++) if (!matches(value, expected[i])) return false;
         return true;
       });
-    } else if (op === '$elemMatch') tests.push(elemMatch(expected));
+    } else if (op === '$elemMatch') tests.push(elemMatch(expected, depth));
     else if (op !== '$options') throw new TypeError(`select(): unknown operator ${op}`);
   }
   if (operators === 0) return (row) => matches(valueOf(row, path), condition);
@@ -215,7 +218,8 @@ const checkText = (value) => {
  * `$text` (at the top level only) a full-text search the catalog answers.
  * A malformed query is a TypeError here, at `select()`, not at `fetch()`.
  */
-const compileQuery = (query = {}, nested = false) => {
+const compileQuery = (query = {}, nested = false, depth = 0) => {
+  if (depth > MAX_QUERY_DEPTH) throw new TypeError(`select(): a query nests deeper than ${MAX_QUERY_DEPTH} levels`);
   if (!isObject(query)) throw new TypeError('select() takes a query object');
   const tests = [];
   for (const key of Object.keys(query)) {
@@ -223,7 +227,7 @@ const compileQuery = (query = {}, nested = false) => {
     if (key === '$and' || key === '$or' || key === '$nor') {
       if (!Array.isArray(value)) throw new TypeError(`select(): ${key} takes an array of queries`);
       const subs = [];
-      for (let i = 0; i < value.length; i++) subs.push(compileQuery(value[i], true));
+      for (let i = 0; i < value.length; i++) subs.push(compileQuery(value[i], true, depth + 1));
       if (key === '$and') tests.push(allOf(subs));
       else if (key === '$or') tests.push(anyOf(subs));
       else {
@@ -231,14 +235,14 @@ const compileQuery = (query = {}, nested = false) => {
         tests.push((row) => !any(row));
       }
     } else if (key === '$not') {
-      const sub = compileQuery(value, true);
+      const sub = compileQuery(value, true, depth + 1);
       tests.push((row) => !sub(row));
     } else if (key === '$text') {
       // Inside $and/$or/$not it could neither narrow nor keep a rank order.
       if (nested) throw new TypeError('select(): $text is only allowed at the top level of the query');
       checkText(value);
     } else if (key.startsWith('$')) throw new TypeError(`select(): unknown operator ${key}`);
-    else tests.push(compileField(key, value));
+    else tests.push(compileField(key, value, depth));
   }
   return allOf(tests);
 };

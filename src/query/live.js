@@ -281,11 +281,19 @@ class Live {
     }
   }
 
+  // A failure to the subscribers' `onError`, or to the logger; an `onError` that throws is contained the same way.
   #fail(error, only = null) {
     const entries = only === null ? [...this.#subscribers.keys()] : [only];
     for (let i = 0; i < entries.length; i++) {
-      if (entries[i].onError !== null) entries[i].onError(error);
-      else this.#logger.warn({ event: 'watch.error', entity: this.#spec.entity, err: error });
+      if (entries[i].onError === null) {
+        this.#logger.warn({ event: 'watch.error', entity: this.#spec.entity, err: error });
+        continue;
+      }
+      try {
+        entries[i].onError(error);
+      } catch (thrown) {
+        this.#logger.warn({ event: 'watch.error', entity: this.#spec.entity, err: thrown, cause: error });
+      }
     }
   }
 }

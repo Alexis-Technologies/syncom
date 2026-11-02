@@ -303,6 +303,40 @@ const runQueryTests = async (t, assert, createStorage) => {
     },
   );
 
+  await t.test(
+    "an onError that throws and an advisor that throws are contained: logged, never the caller's",
+    async (t2) => {
+      const logged = [];
+      const logger = {
+        warn: (entry) => logged.push([entry.event, entry.name ?? null, entry.err?.message]),
+        info() {},
+        debug() {},
+        error() {},
+      };
+      const storage = await createStorage(t2, 'A', { schema, logger });
+      await storage.Project.insert({ orgId: 'o', name: 'a', slug: 'a', n: 1 });
+      const bad = storage.Project.select({ orgId: 'o' }).filter(() => {
+        throw new Error('bad filter');
+      });
+      const stop = bad.watch(() => {}, {
+        onError: () => {
+          throw new Error('worse');
+        },
+      });
+      await tick();
+      stop();
+      assert.deepStrictEqual(logged, [['watch.error', null, 'worse']]);
+      logged.length = 0;
+      const { SOURCE } = require('../../src/symbols.js');
+      const off = storage[SOURCE].advise(() => {
+        throw new Error('advice');
+      });
+      assert.strictEqual((await storage.Project.select({ orgId: 'o' }).fetch()).length, 1, 'the cursor runs');
+      off();
+      assert.deepStrictEqual(logged, [['listener.error', 'advise', 'advice']]);
+    },
+  );
+
   await t.test('watch(): the rows now, again after each change of the collection, coalesced', async (t2) => {
     const storage = await createStorage(t2, 'A', { schema });
     const first = await storage.Project.insert({ orgId: 'o', name: 'a', slug: 'a', n: 1 });

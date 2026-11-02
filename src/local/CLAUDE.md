@@ -6,7 +6,7 @@ Values beside the records that never become an op. The rules of the core are in 
 
 ```
 src/local/local.js        @alexify/syncom/local — the `local` plugin: setup hands the core `db.local` (the `local` hook), a LocalStore over
-                          the `local` kv namespace; `collection.local` is `scoped(name)` — requires engine.js, errors.js, hooks.js only
+                          the `local` kv namespace; `collection.local` is `scoped(name)` — requires engine.js, errors.js, hooks.js, symbols.js only
 ```
 
 ## Rules
@@ -18,3 +18,6 @@ src/local/local.js        @alexify/syncom/local — the `local` plugin: setup ha
   time (`#serial`, a lane per key shared by every scope): `set(key, fn)` reads the value the write before it left, so
   concurrent read-modify-writes compose; an observer that throws is contained (`listener.error`); a document that
   does not parse is `CORRUPT`.
+- **A local write is refused where the queue would refuse one.** `set()`/`delete()` ask the database's `guard` (the
+  `[SOURCE]` seam, taken at the first write): CLOSED after `close()`, READ_ONLY after a lost lease or under
+  `readOnly: true` — never a write to an engine the database let go of; reads stay.
