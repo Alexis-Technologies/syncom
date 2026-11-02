@@ -28,6 +28,16 @@ lost at any rebuild: a database that ran that build's `cleanup` is best re-synce
 
 ### Changed
 
+- **Queries plan by cost over sorted indexes on chunked arrays (review №6, E4).** The catalog's sorted indexes
+  stand on `SortedIndex` (src/sorted.js — chunks of 512, the ids and the keys flat; 27 bytes an entry, against an
+  object each), a put re-keys only the indexes a changed field belongs to, a load or a collection defined after the
+  open builds them once. The planner fits every index and takes the one expected to read the fewest records
+  (`explain().estimate`; the indexed equalities it leaves `narrow` the scan before a record is read; a `$in` of a
+  few ordered values is scanned value by value), the rows are the index's only where the order's keys reach its end,
+  an unordered window over a range is the first rows by id, a page after its edge is sought in the index or by id
+  (`stream()` reads each row once, and runs once where no index sorts), a one-sided range holds its kind alone, and
+  `count()` over a sorted index entered by a prefix or a range reads no record. A plan and a cached result follow
+  `addCollections()`/`removeCollection()`; `addCollections()` indexes the records in pages inside the queue.
 - **Node 24 or later.** `node:sqlite` needs no flag there (22.13/23.4 unflagged it; the engines' tests run it), so
   `engines.node` says `>=24` and CI runs on 24 and 26 (review №5, G-6). The guide page `/guide/storage` became
   `/guide/database` on the rename: the links that still pointed at it (llms.txt, a versions API comment) follow.

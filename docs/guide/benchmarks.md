@@ -354,6 +354,21 @@ records them.
 </details>
 
 <details>
+<summary>Catalog — 7 rows</summary>
+
+| Benchmark | ops/s | per operation |
+| --- | ---: | ---: |
+| insert, then remove — a row among 100000, two sorted indexes | 312,401 | 3.2 µs |
+| put — a field changed, 100000 rows (the index that reads it re-keyed, the other kept) | 1,229,929 | 813 ns |
+| load — 100000 rows, two sorted indexes built once | 545,200 | 1.83 µs |
+| define — 100000 rows under another key (the rows bare, the indexes built once) | 962,340 | 1.04 µs |
+| scan — 20 rows by prefix, of 100000 (two seeks, the entries pulled) | 11,236,242 | 89 ns |
+| page — 100 rows after the edge of page 100, of 20000 (sought, not filtered) | 2,020,589 | 495 ns |
+| count — by a prefix and a range, of 20000 (the index's, no record read) | 362,088 | 2.76 µs |
+
+</details>
+
+<details>
 <summary>Search — 9 rows</summary>
 
 | Benchmark | ops/s | per operation |
@@ -589,7 +604,7 @@ records them.
 
 </details>
 
-_pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-11-01._
+_pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-11-02._
 
 <!-- bench:engine:end -->
 

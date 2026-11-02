@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="445" viewBox="0 0 760 445" role="img" aria-label="Catalog: syncom's own benchmarks. The record catalog in memory, 100k rows with two sorted indexes (chunked sorted arrays): a put keeps them up, a load or a definition builds them once, a scan seeks; a page sought after its edge and a count the index answers, over the memory engine. ops/s, log scale, higher is better.">
+<style>
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .title { font-size: 15px; font-weight: 700; fill: #1b1c1e; }
+  .subtitle, .caption { font-size: 12px; fill: #67676c; }
+  .caption { font-size: 11px; }
+  .group { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; fill: #67676c; }
+  .label { font-size: 13px; font-weight: 600; fill: #1b1c1e; }
+  .label.primary, .label.secondary { font-weight: 700; }
+  .sublabel { font-size: 11px; fill: #67676c; }
+  .value { font-size: 12px; font-weight: 600; fill: #3c3c43; font-variant-numeric: tabular-nums; }
+  .value.small { font-size: 10px; }
+  .legend { font-size: 11px; fill: #3c3c43; }
+  .tick { font-size: 11px; fill: #67676c; font-variant-numeric: tabular-nums; }
+  .grid { stroke: #e4e4e7; stroke-width: 1; }
+  .axis { stroke: #c2c2c4; stroke-width: 1; }
+  .ref { stroke: #67676c; stroke-width: 1; stroke-dasharray: 3 3; }
+  .bar { fill: #c4c6cc; }
+  .bar.primary { fill: #245a9e; }
+  .bar.secondary { fill: #5e9be6; }
+  @media (prefers-color-scheme: dark) {
+    .title, .label { fill: #dfdfd6; }
+    .subtitle, .caption, .group, .sublabel, .tick { fill: #98989f; }
+    .value, .legend { fill: #c2c2c4; }
+    .grid { stroke: #2e2e32; }
+    .axis { stroke: #48484c; }
+    .ref { stroke: #98989f; }
+    .bar { fill: #46474e; }
+    .bar.primary { fill: #8dbcf2; }
+    .bar.secondary { fill: #3d7bd0; }
+  }
+</style>
+<text class="title" x="20" y="35">Catalog: syncom's own benchmarks</text>
+<text class="subtitle" x="20" y="56">The record catalog in memory, 100k rows with two sorted indexes (chunked sorted arrays): a put keeps them up, a</text>
+<text class="subtitle" x="20" y="73">load or a definition builds them once, a scan seeks; a page sought after its edge and a count the index answers,</text>
+<text class="subtitle" x="20" y="90">over the memory engine. ops/s, log scale, higher is better.</text>
+<line class="grid" x1="372" y1="105" x2="372" y2="385"/>
+<text class="tick" x="372" y="401" text-anchor="middle">100k</text>
+<line class="grid" x1="473.3333333333333" y1="105" x2="473.3333333333333" y2="385"/>
+<text class="tick" x="473.3333333333333" y="401" text-anchor="middle">1M</text>
+<line class="grid" x1="574.6666666666666" y1="105" x2="574.6666666666666" y2="385"/>
+<text class="tick" x="574.6666666666666" y="401" text-anchor="middle">10M</text>
+<line class="grid" x1="676" y1="105" x2="676" y2="385"/>
+<text class="tick" x="676" y="401" text-anchor="middle">100M</text>
+<line class="axis" x1="372" y1="105" x2="372" y2="385"/>
+<g><title>insert, then remove · a row among 100000, two sorted indexes
+312,401 ops/s
+3.2 µs per operation</title>
+<text class="label primary" x="20" y="122">insert, then remove</text>
+<text class="sublabel" x="20" y="137">a row among 100000, two sorted indexes</text>
+<path class="bar primary" d="M372,118H418.1308580928776A4,4 0 0 1 422.1308580928776,122V128A4,4 0 0 1 418.1308580928776,132H372Z"/>
+<text class="value" x="428.1308580928776" y="131">312k</text>
+</g>
+<g><title>put · a field changed, 100000 rows (the index that reads it re-keyed, the other kept)
+1,229,929 ops/s
+813 ns per operation</title>
+<text class="label primary" x="20" y="162">put</text>
+<text class="sublabel" x="20" y="177">a field changed, 100000 rows (the index that reads it re…</text>
+<path class="bar primary" d="M372,158H478.44117755738944A4,4 0 0 1 482.44117755738944,162V168A4,4 0 0 1 478.44117755738944,172H372Z"/>
+<text class="value" x="488.44117755738944" y="171">1.23M</text>
+</g>
+<g><title>load · 100000 rows, two sorted indexes built once
+545,200 ops/s
+1.83 µs per operation</title>
+<text class="label primary" x="20" y="202">load</text>
+<text class="sublabel" x="20" y="217">100000 rows, two sorted indexes built once</text>
+<path class="bar primary" d="M372,198H442.63765917914714A4,4 0 0 1 446.63765917914714,202V208A4,4 0 0 1 442.63765917914714,212H372Z"/>
+<text class="value" x="452.63765917914714" y="211">545k</text>
+</g>
+<g><title>define · 100000 rows under another key (the rows bare, the indexes built once)
+962,340 ops/s
+1.04 µs per operation</title>
+<text class="label primary" x="20" y="242">define</text>
+<text class="sublabel" x="20" y="257">100000 rows under another key (the rows bare, the indexe…</text>
+<path class="bar primary" d="M372,238H467.643958494221A4,4 0 0 1 471.643958494221,242V248A4,4 0 0 1 467.643958494221,252H372Z"/>
+<text class="value" x="477.643958494221" y="251">962k</text>
+</g>
+<g><title>scan · 20 rows by prefix, of 100000 (two seeks, the entries pulled)
+11,236,242 ops/s
+89 ns per operation</title>
+<text class="label primary" x="20" y="282">scan</text>
+<text class="sublabel" x="20" y="297">20 rows by prefix, of 100000 (two seeks, the entries pul…</text>
+<path class="bar primary" d="M372,278H575.7962698682293A4,4 0 0 1 579.7962698682293,282V288A4,4 0 0 1 575.7962698682293,292H372Z"/>
+<text class="value" x="585.7962698682293" y="291">11.2M</text>
+</g>
+<g><title>page · 100 rows after the edge of page 100, of 20000 (sought, not filtered)
+2,020,589 ops/s
+495 ns per operation</title>
+<text class="label primary" x="20" y="322">page</text>
+<text class="sublabel" x="20" y="337">100 rows after the edge of page 100, of 20000 (sought, n…</text>
+<path class="bar primary" d="M372,318H500.2884357504131A4,4 0 0 1 504.2884357504131,322V328A4,4 0 0 1 500.2884357504131,332H372Z"/>
+<text class="value" x="510.2884357504131" y="331">2.02M</text>
+</g>
+<g><title>count · by a prefix and a range, of 20000 (the index's, no record read)
+362,088 ops/s
+2.76 µs per operation</title>
+<text class="label primary" x="20" y="362">count</text>
+<text class="sublabel" x="20" y="377">by a prefix and a range, of 20000 (the index's, no recor…</text>
+<path class="bar primary" d="M372,358H424.6264987146225A4,4 0 0 1 428.6264987146225,362V368A4,4 0 0 1 424.6264987146225,372H372Z"/>
+<text class="value" x="434.6264987146225" y="371">362k</text>
+</g>
+<text class="caption" x="20" y="426">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-11-02</text>
+</svg>

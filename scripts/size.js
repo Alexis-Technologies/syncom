@@ -190,7 +190,9 @@ const ENTRIES = [
   // estimated 0.6 less). 73, raised by name.
   // 73.0 with a scan that seeks a page's edge and yields lazily, a one-sided range closed at its kind's edge (review №6,
   // E4.4). 73.5, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 73.5 },
+  // 73.5 with the planner's cost model, a plan that follows the definitions, a path split once (review №6, E4.5–E4.8).
+  // 74, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 74 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check

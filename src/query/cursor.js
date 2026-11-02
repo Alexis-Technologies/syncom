@@ -345,6 +345,8 @@ class Cursor {
   #populate = null;
   // Keyset paging: the row the page starts after — its order keys and its id — or null.
   #after = null;
+  // The fields the query reads (`fieldsOf`), once per cursor: what `#covered` asks of every run.
+  #fields = null;
   // The plan (./plan.js), made once per cursor at its first run — and again where the collection's definitions
   // moved since (`addCollections()`, `removeCollection()`: another index to scan, or none).
   #planned = null;
@@ -373,6 +375,7 @@ class Cursor {
     copy.#projection = this.#projection;
     copy.#populate = this.#populate;
     copy.#after = this.#after;
+    copy.#fields = this.#fields;
     return copy;
   }
 
@@ -668,10 +671,10 @@ class Cursor {
     if (needsRows && this.#populate !== null) return false;
     if (needsRows && this.#projection === null) return false;
     const indexed = this.#source.indexed(this.#entity);
-    const fields = fieldsOf(this.#query);
-    for (const { field } of this.#order) fields.add(field);
-    if (needsRows) for (const field of this.#projection) fields.add(field);
-    for (const field of fields) if (!indexed.has(field)) return false;
+    if (this.#fields === null) this.#fields = fieldsOf(this.#query);
+    for (const field of this.#fields) if (!indexed.has(field)) return false;
+    for (const { field } of this.#order) if (!indexed.has(field)) return false;
+    if (needsRows) for (const field of this.#projection) if (!indexed.has(field)) return false;
     return true;
   }
 

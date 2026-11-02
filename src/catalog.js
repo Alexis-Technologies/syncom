@@ -37,12 +37,26 @@ const isObject = (value) => typeof value === 'object' && value !== null;
 // A value by dotted path — a key spelled with the dot first (a catalog
 // row, a projected row), the walk otherwise; `undefined` when a step is
 // missing.
+// The segments of a dotted path, split once: a predicate, a sort and an index read the same few paths over and over.
+const PARTS = new Map();
+const MAX_PARTS = 4096;
+const partsOf = (path) => {
+  let parts = PARTS.get(path);
+  if (parts === undefined) {
+    if (PARTS.size >= MAX_PARTS) PARTS.clear();
+    parts = path.split('.');
+    PARTS.set(path, parts);
+  }
+  return parts;
+};
+
 const valueOf = (data, path) => {
   if (isObject(data) && Object.hasOwn(data, path)) return data[path];
+  const parts = partsOf(path);
   let value = data;
-  for (const part of path.split('.')) {
+  for (let i = 0; i < parts.length; i++) {
     if (!isObject(value)) return undefined;
-    value = value[part];
+    value = value[parts[i]];
   }
   return value;
 };
