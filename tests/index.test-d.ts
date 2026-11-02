@@ -296,7 +296,7 @@ record.on('update', (data, delta) => {
 record.off('update');
 expectType<unknown>(record.title);
 declare const reference: Reference;
-expectType<Promise<SyncomRecord>>(reference.record());
+expectType<Promise<SyncomRecord | null>>(reference.record());
 expectType<unknown>(syncom.apply({}, [{ type: 'delete', id: 'r1' }]));
 expectType<unknown>(syncom.apply({}, [{ type: 'delete', key: 'a' }]));
 
@@ -960,6 +960,16 @@ storage.record<Post>('id').then((record) => {
   expectError(db.delete('t1', { data: 5 }));
   const change: syncom.Change = { action: 'delete', data: { why: 'x' } };
   expectAssignable<syncom.Change>(change);
+  expectAssignable<syncom.EntityDefinition>({ refs: { author: 'Author', tags: ['Tag'] } });
+  expectError<syncom.EntityDefinition>({ refs: { tags: ['Tag', 'Other'] } });
+  const doc = await db.Tag.document('t1');
+  expectType<Promise<syncom.SyncomDocument<RecordData> | null | (syncom.SyncomDocument<RecordData> | null)[]>>(
+    doc.populate('author'),
+  );
+  expectType<syncom.Cursor<syncom.QueryRow<RecordData>>>(db.Tag.select().populate(['author']));
+  const reference = null as unknown as Reference;
+  expectType<string>(reference.id);
+  expectType<Promise<syncom.SyncomDocument<RecordData> | null>>(reference.document());
   const code: syncom.SyncomErrorCode = 'EXISTS';
   const inTx: syncom.SyncomErrorCode = 'IN_TRANSACTION';
   expectType<'EXISTS'>(code);

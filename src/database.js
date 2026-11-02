@@ -1132,7 +1132,7 @@ class Database extends Emitter {
       if (name in this) {
         throw new TypeError(`addCollections(): collection name '${name}' is taken by the database itself`);
       }
-      added.push(this.#schemaHook.define(name, def));
+      added.push(this.#schemaHook.define(name, def, this.#entities.keys()));
     }
     for (let i = 0; i < added.length; i++) {
       const def = added[i];
@@ -1218,6 +1218,17 @@ class Database extends Emitter {
         const entry = await this.#entries.load(id);
         if (entry === null || entry.encrypted || !isAlive(entry)) return null;
         return this.#view(id, entry);
+      },
+      // Several records as `load` reads them, in ONE read of the engine for the ones not cached: a
+      // Map by id, null for one absent, encrypted or gone (a cursor's `populate`, `findByIds`).
+      loadMany: async (ids) => {
+        const entries = await this.#entries.loadMany(ids);
+        const out = new Map();
+        for (const [id, entry] of entries) {
+          if (entry === null || entry.encrypted || !isAlive(entry)) out.set(id, null);
+          else out.set(id, await this.#view(id, entry));
+        }
+        return out;
       },
       // The entry as it is — data and meta, a tombstone too — for the
       // inspector (@alexify/syncom/inspect); never for a reader of data.

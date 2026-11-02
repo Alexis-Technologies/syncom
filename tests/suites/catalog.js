@@ -170,7 +170,8 @@ const runCatalogTests = async (t, assert, createStorage) => {
   });
 
   await t.test('the cache is bounded; a live Record pins its entry; absent ids are not cached', async (t2) => {
-    const storage = await createStorage(t2, 'A', { cache: { max: 3 } });
+    const schema = { entities: { Link: { refs: { to: 'Link' } } } };
+    const storage = await createStorage(t2, 'A', { cache: { max: 3 }, schema });
     const ids = [];
     for (let i = 0; i < 5; i++) ids.push(await storage.insert({ i }));
     assert.strictEqual(storage.getCachedData(ids[0]), null, 'evicted');
@@ -185,8 +186,8 @@ const runCatalogTests = async (t, assert, createStorage) => {
     assert.strictEqual(pinned.i, 1);
     assert.strictEqual(await storage.get('nope'), null);
     assert.strictEqual(storage.getCachedData('nope'), null);
-    // A string field naming an evicted record is still a reference.
-    const referrer = await storage.insert({ to: ids[2] });
+    // A declared reference to an evicted record is still a reference, and reads it back in.
+    const referrer = await storage.insert({ $type: 'Link', to: ids[2] });
     const record = await storage.document(referrer);
     assert.strictEqual(typeof record.to.record, 'function');
     assert.strictEqual((await record.to.document()).i, 2);

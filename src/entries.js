@@ -199,6 +199,43 @@ class EntryStore {
   }
 
   /**
+   * Several records as `load` gives them, a Map by id (null for one that is
+   * not there): the cached ones at once, the rest in ONE read of the engine
+   * (`records.getMany`). An id that is no id reads as absent; one that
+   * fails to parse throws, as a load does.
+   */
+  async loadMany(ids) {
+    const out = new Map();
+    const wanted = [];
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i];
+      if (out.has(id)) continue;
+      if (!isRecordId(id)) {
+        out.set(id, null);
+        continue;
+      }
+      const cached = this.#cache.get(id);
+      if (cached !== undefined) {
+        this.remember(id, cached);
+        out.set(id, cached);
+      } else {
+        out.set(id, null);
+        wanted.push(id);
+      }
+    }
+    if (wanted.length === 0) return out;
+    const found = await this.#db.records.getMany(wanted);
+    for (let i = 0; i < wanted.length; i++) {
+      const stored = found.get(wanted[i]) ?? null;
+      if (stored === null) continue;
+      const entry = await this.#fromStored(wanted[i], stored);
+      this.remember(wanted[i], entry);
+      out.set(wanted[i], entry);
+    }
+    return out;
+  }
+
+  /**
    * A record file's text as an entry: checked against its chain block,
    * decrypted when sealed. A file torn by a crash, or not ours, is evidence,
    * like a failed check — never a bare SyntaxError. `repair(id)` rebuilds

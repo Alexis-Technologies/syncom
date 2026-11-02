@@ -63,6 +63,7 @@ test('normalizeSchema', async (t) => {
       unique: [],
       fields: null,
       search: [],
+      refs: null,
     });
   });
 
@@ -105,7 +106,7 @@ test('normalizeSchema', async (t) => {
     assert.throws(
       () => normalizeSchema({ entities: { Post: { uniqe: ['slug'] } } }),
       typeError(
-        "createDatabase({ schema }): entity Post: unknown key 'uniqe' (expected schema, idField, validate, index, unique, fields, search, id)",
+        "createDatabase({ schema }): entity Post: unknown key 'uniqe' (expected schema, idField, validate, index, unique, fields, search, id, refs)",
       ),
     );
     assert.throws(() => normalizeSchema({ entities: { Post: { validate: true } } }), /validate may only be false/);

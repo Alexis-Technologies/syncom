@@ -172,7 +172,9 @@ const ENTRIES = [
   // 65.2 with records named by their data (composite ids, the id field as the id, EXISTS), the bulk writes,
   // `upsert()`/`insertIfAbsent()` and IN_TRANSACTION (collections plan, C1.2–C1.3). 65.5, raised by name.
   // 66.9 with the update operators (src/operators.js, `operate`) and `ifMatch` (collections plan, C1.5). 67, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 67 },
+  // 67.0 with `delete(id, { data })` and a revival's resets; declared references, `populate()` (collections plan,
+  // C1.7–C1.8). 67.5, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 67.5 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -380,7 +382,8 @@ const ENTRIES = [
   // 142.7 with collections defined after the open (collections plan, C1.1). 143, raised by name.
   // 143.9 with named ids, the bulk writes and upserts (collections plan, C1.2–C1.3). 144.5, raised by name.
   // 145.7 with the update operators and `ifMatch` (collections plan, C1.5). 146, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 146 },
+  // 146.0 with `delete(id, { data })`, the writes by query, declared references (collections plan, C1.6–C1.8). 147, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 147 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -502,7 +505,9 @@ const ENTRIES = [
     // main entry 50.8 → 50.1; 2026-10-27). 6, raised by name.
     // 6.0 (over by bytes) with a peer's `actor` and `from` bounded in shape.js (MAX_ACTOR; review №4, E4). 6.5,
     // raised by name.
-    budget: 6.5,
+    // 6.6 with the id named by the data, a composite id and the declared references read off a schema's relations
+    // (collections plan, C1.2–C1.8). 7, raised by name.
+    budget: 7,
   },
   // The OpenTelemetry adapter: the tracer and meter resolved, the instruments, the gauges.
   {
@@ -517,7 +522,8 @@ const ENTRIES = [
   // 7.0 with the catalog persisted through a store (src/engine.js kvNamespace/fsiNamespace; engines plan, E1.3). 7.5, raised by name.
   // 7.6 with `Catalog.define` and the action stream (collections plan, C1.1). 7.8, raised by name.
   // 7.9 with the write terminals (update/modify/delete by query) and `matches` (collections plan, C1.5–C1.6). 8.2, raised by name.
-  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 8.2 },
+  // 8.3 with a page's references populated (`populate`; collections plan, C1.8). 8.5, raised by name.
+  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 8.5 },
   // Versions: the fold of the log, the tags, the view at a tag — measured
   // ALONE with the write path, the snapshot pages and the patches it shares
   // with the core.

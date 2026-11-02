@@ -30,7 +30,7 @@ const schema = Object.freeze({
     const view = given === null ? null : createLens(normalized, logger);
     const load = () => loadVersion(ctx, normalized);
     // A collection defined after the open (`addCollections`): normalized as the schema's were.
-    const define = (name, def) => defineEntity(name, def, options.validator);
+    const define = (name, def, names) => defineEntity(name, def, options.validator, names);
     return { schema: { ...normalized, given, view, load, define } };
   },
   methods: { migrate, check },

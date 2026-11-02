@@ -370,9 +370,11 @@ test('a live Record lays a write’s fields over what it holds: it reads as get(
   const { memory } = require('../src/memory/memory.js');
   const syncomAll = require('../src/all/all.js');
   const { Reference } = require('../src/document.js');
-  const storage = await syncomAll.createDatabase({ fsi: memory(), lock: false, defer: 0, logger: false });
-  const other = await storage.insert({ name: 'other' });
-  const id = await storage.insert({ title: 'a', n: 1 });
+  // `link` is a declared reference: it reads as a Reference whatever it names.
+  const schema = { entities: { Thing: { refs: { link: 'Thing' } } } };
+  const storage = await syncomAll.createDatabase({ fsi: memory(), lock: false, defer: 0, logger: false, schema });
+  const other = await storage.insert({ $type: 'Thing', name: 'other' });
+  const id = await storage.insert({ $type: 'Thing', title: 'a', n: 1 });
   const record = await storage.document(id);
   let seed = 11;
   const random = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
@@ -398,7 +400,7 @@ test('a live Record lays a write’s fields over what it holds: it reads as get(
     const read = await storage.get(id);
     const plain = JSON.parse(JSON.stringify(held, (key, value) => (value instanceof Reference ? 'ref' : value)));
     for (const key of Object.keys(read)) {
-      if (key === 'link' && read.link === other) assert.ok(held.link instanceof Reference, `step ${step}`);
+      if (key === 'link') assert.ok(held.link instanceof Reference, `step ${step}`);
       else assert.deepStrictEqual(plain[key], read[key], `step ${step}: ${key}`);
     }
     for (const key of Object.keys(plain)) assert.ok(Object.hasOwn(read, key), `step ${step}: ${key} lingers`);

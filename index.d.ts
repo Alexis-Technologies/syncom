@@ -1066,6 +1066,13 @@ export interface EntityDefinition {
    * value names the record when the data carries one (and leaves the data), else the id is minted.
    */
   id?: { readonly fields: readonly string[]; readonly separator?: string };
+  /**
+   * The references the records hold: a field naming one record of a collection (`author: 'Author'`)
+   * or many (`tags: ['Tag']`). A `Document` reads such a field as a `Reference` (an array of them),
+   * `populate()` resolves it; nothing else is ever a Reference. Read off a metaschema schema's
+   * relations (`author: 'Author'`, `{ type }`, `{ many }` naming an entity of the model) when absent.
+   */
+  refs?: { readonly [field: string]: string | readonly [string] };
   /** Free-form field notes, kept as given. */
   fields?: { readonly [name: string]: unknown };
   /**
@@ -2619,6 +2626,8 @@ export interface Cursor<T = QueryRow> {
   filter(fn: (row: T) => boolean): this;
   /** The fields each row carries (plus `id`); a dotted field comes back under its dotted name. */
   projection(fields: readonly string[]): this;
+  /** The declared references of `fields` resolved on every row — the record as `{ id, …data }`, `null` where gone, an array for many; one read per field per page. */
+  populate(fields: readonly string[]): this;
   fetch(): Promise<T[]>;
   count(): Promise<number>;
   one(): Promise<T | null>;
@@ -2644,12 +2653,14 @@ export interface DeleteOptions extends WriteOptions {
   data?: object;
 }
 
-// A string field whose value is a known record id reads back as a Reference.
+/** A declared reference (`refs`) as a Document holds it: the id, and the Document it names (its id as JSON). */
 export interface Reference {
-  /** The live Document the reference names. */
-  document<R = RecordData>(): Promise<SyncomDocument<R>>;
+  readonly id: string;
+  /** The live Document the reference names, or `null` when the record is not there. */
+  document<R = RecordData>(): Promise<SyncomDocument<R> | null>;
   /** @deprecated `document()` — the name before the rename; removed in 1.0. */
-  record<R = RecordData>(): Promise<SyncomDocument<R>>;
+  record<R = RecordData>(): Promise<SyncomDocument<R> | null>;
+  toJSON(): string;
 }
 
 /**
@@ -2669,6 +2680,8 @@ export interface SyncomDocumentApi<R = RecordData> {
   data(): Promise<R | null>;
   delta(): Partial<R>;
   save(options?: WriteOptions): Promise<void>;
+  /** The record(s) a declared reference names, as Documents: one or `null`, or an array of them (`null` where gone). */
+  populate<T = RecordData>(field: string): Promise<SyncomDocument<T> | null | (SyncomDocument<T> | null)[]>;
   /** Removes fields; the storage-level `unset` with this record's id. */
   unset(fields: string | readonly string[], options?: WriteOptions): Promise<void>;
   inc(key: string, value?: number, options?: WriteOptions): Promise<void>;

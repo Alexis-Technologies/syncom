@@ -66,6 +66,15 @@ and one `commit` event, not one per call.
   record as it reads, written as one transaction, refused whole where a kind refuses its part.
   `update(id, delta, { ifMatch: query })` writes only where the record matches the Mango query (the
   `query` plugin's), inside the queue, and resolves to whether it did.
+- **Declared references: `refs`, `populate()`.** An entity declares the records its fields name —
+  `refs: { author: 'Author', tags: ['Tag'] }`, or read off a metaschema schema's relations (`author:
+  'Author'`, `{ type }`, `{ many }` naming an entity of the model) — and a `Document` reads such a field
+  as a `Reference` (an array of them for many; `id`, `document()` → the Document or `null` where the
+  record is not there, the id as JSON), `document.populate(field)` resolves it, and a cursor's
+  `populate(fields)` lays the records (`{ id, …data }`, or `null`) into a page in one read per field.
+  Nothing else is a Reference any more: the heuristic that made one of any string equal to a known id
+  is gone (a `Document` read strings through `hasRecord()` on every refresh; an unrelated string that
+  matched an id became a Reference).
 - **Writes by query: a cursor's `update(delta)`, `modify(fn)`, `delete({ data })`.** One transaction over
   the records the cursor matched when it started (its order, offset and limit applied), each written
   inside the queue as the method says; `{ matched, written }` — a record gone meanwhile is skipped. A

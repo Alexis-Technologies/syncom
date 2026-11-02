@@ -21,7 +21,7 @@ const isObject = (value) => typeof value === 'object' && value !== null && !Arra
 const SCHEMA_KEYS = new Set(['version', 'entities', 'snapshot', 'migrations', 'ahead', 'lens']);
 const AHEAD = new Set(['apply', 'hold']);
 const LENS = new Set(['migrations', 'validate', 'both']);
-const ENTITY_KEYS = ['schema', 'idField', 'validate', 'index', 'unique', 'fields', 'search', 'id'];
+const ENTITY_KEYS = ['schema', 'idField', 'validate', 'index', 'unique', 'fields', 'search', 'id', 'refs'];
 const ENTITY_KEY = new Set(ENTITY_KEYS);
 
 const fail = (entity, text) => new TypeError(`createDatabase({ schema }): entity ${entity}: ${text}`);
@@ -257,6 +257,58 @@ const compositeId = (value, entity) => {
   return { fields, separator };
 };
 
+// The references a definition declares — `refs: { author: 'Author', tags: ['Tag'] }`: a field that
+// names one record of a collection, or many — as `{ [field]: { entity, many } }`; null for none.
+const explicitRefs = (value, entity) => {
+  if (!isObject(value)) throw fail(entity, 'refs must be an object of field: entity | [entity]');
+  const refs = {};
+  const fields = Object.keys(value);
+  for (let i = 0; i < fields.length; i++) {
+    const field = fields[i];
+    const spec = value[field];
+    const many = Array.isArray(spec);
+    const target = many ? (spec.length === 1 ? spec[0] : null) : spec;
+    if (!isField(field) || !isField(target)) throw fail(entity, `refs.${field} must name an entity, or [entity]`);
+    refs[field] = { entity: target, many };
+  }
+  return fields.length === 0 ? null : refs;
+};
+
+// What metaschema's own type names are not: a field whose type is another entity of the model is a
+// reference (`company: 'Company'`, `{ type: 'Company' }`, `{ many: 'Address' }`). Decided once the
+// entities are all known (`deriveRefs`), explicit `refs` left as they are.
+const relationsOf = (schema, names) => {
+  const map = fieldMap(schema);
+  if (map === null) return null;
+  const refs = {};
+  let found = 0;
+  const fields = Object.keys(map);
+  for (let i = 0; i < fields.length; i++) {
+    const field = fields[i];
+    const spec = map[field];
+    let target = null;
+    let many = false;
+    if (typeof spec === 'string') target = spec;
+    else if (isObject(spec)) {
+      if (typeof spec.many === 'string') {
+        target = spec.many;
+        many = true;
+      } else if (typeof spec.type === 'string') target = spec.type;
+    }
+    if (target === null || !names.has(target)) continue;
+    refs[field] = { entity: target, many };
+    found++;
+  }
+  return found === 0 ? null : refs;
+};
+
+/** The entity's references completed from its schema's relations, once every entity name is known. */
+const deriveRefs = (def, names) => {
+  if (def.refs !== null || def.schema === undefined) return def;
+  const derived = relationsOf(def.schema, names);
+  return derived === null ? def : { ...def, refs: derived };
+};
+
 const normalizeEntity = (name, def, validator) => {
   if (!isObject(def)) throw fail(name, 'must be an object');
   for (const key of Object.keys(def)) {
@@ -283,6 +335,7 @@ const normalizeEntity = (name, def, validator) => {
     unique,
     fields: fields ?? null,
     search: def.search === undefined ? [] : explicitSearch(def.search, name),
+    refs: def.refs === undefined ? null : explicitRefs(def.refs, name),
   };
 };
 
@@ -337,9 +390,11 @@ const normalizeMigrations = (migrations, version) => {
 // The entity definitions a database adds after it opened (`addCollections`):
 // each normalized as one of the schema's would be. The validator is the one
 // `createDatabase({ validator })` gave, read once at setup.
-const defineEntity = (name, def, validator) => {
+const defineEntity = (name, def, validator, names = new Set()) => {
   if (!isField(name)) throw new TypeError('addCollections(): collection names must be non-empty strings');
-  return normalizeEntity(name, def, validator === undefined ? null : validator);
+  const known = new Set(names);
+  known.add(name);
+  return deriveRefs(normalizeEntity(name, def, validator === undefined ? null : validator), known);
 };
 
 /**
@@ -391,6 +446,9 @@ const normalizeSchema = (schema, { validator } = {}) => {
       throw new TypeError('createDatabase({ schema }): entities must be an object or a Map');
     }
   }
+  // A schema's relations name entities of the model: read once every name is known.
+  const names = new Set(entities.keys());
+  for (const [name, def] of entities) entities.set(name, deriveRefs(def, names));
   return { version, entities, snapshot: schema.snapshot, migrations, ahead, lens };
 };
 

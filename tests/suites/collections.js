@@ -374,6 +374,81 @@ const runCollectionTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(changes.at(-1), { action: 'delete' });
   });
 
+  await t.test(
+    'a Reference reads only where a reference is declared, a target gone resolves to null, and populate() hands the records',
+    async (t2) => {
+      const schema = {
+        entities: {
+          Author: {},
+          Tag: {},
+          Post: { refs: { author: 'Author', tags: ['Tag'] } },
+          // Read off the schema's relations, as metaschema lays them out.
+          Memo: { schema: { fields: { author: 'Author', tags: { many: 'Tag' }, title: 'string' } }, validate: false },
+        },
+      };
+      const db = await createStorage(t2, 'A', { fsi: memory(), schema });
+      const author = await db.Author.insert({ name: 'ada' });
+      const t1 = await db.Tag.insert({ n: 't1' });
+      const t2tag = await db.Tag.insert({ n: 't2' });
+      const post = await db.Post.insert({
+        title: 'p',
+        author: author.id,
+        tags: [t1.id, t2tag.id, 'nope'],
+        plain: author.id,
+      });
+      // Declared: a Reference, whatever it names; not declared: the string, a known id or not.
+      assert.strictEqual(post.author.id, author.id);
+      assert.strictEqual(typeof post.author.document, 'function');
+      assert.strictEqual(post.tags.length, 3);
+      assert.strictEqual(post.tags[2].id, 'nope');
+      assert.strictEqual(typeof post.plain, 'string');
+      assert.deepStrictEqual(
+        JSON.parse(JSON.stringify(await post.data())).author,
+        author.id,
+        'a Reference is its id as JSON',
+      );
+      assert.strictEqual((await post.populate('author')).name, 'ada');
+      assert.deepStrictEqual(
+        (await post.populate('tags')).map((doc) => doc && doc.n),
+        ['t1', 't2', null],
+      );
+      await assert.rejects(post.populate('plain'), TypeError);
+      assert.strictEqual(await post.tags[2].document(), null, 'never there');
+      // A write through the Document keeps the field a Reference.
+      const t3 = await db.Tag.insert({ n: 't3' });
+      await db.Post.update(post.id, { tags: [t3.id] });
+      assert.strictEqual(post.tags[0].id, t3.id);
+      post.author = 'someone';
+      assert.strictEqual(post.author, 'someone', 'staged as given');
+      await post.save();
+      assert.strictEqual(post.author.id, 'someone');
+      // The target gone: null, from the Reference and from populate().
+      await db.Author.delete(author.id);
+      const again = await db.Post.insert({ title: 'q', author: author.id, tags: [] });
+      assert.strictEqual(await again.author.document(), null);
+      assert.strictEqual(await again.populate('author'), null);
+      // A cursor populates a page in one read per field: the record under its id, null where gone.
+      const rows = await db.Post.select({ title: 'p' }).populate(['tags', 'author']).fetch();
+      assert.deepStrictEqual(rows[0].tags, [{ id: t3.id, n: 't3', $type: 'Tag' }]);
+      assert.strictEqual(rows[0].author, null);
+      assert.strictEqual(rows[0].plain, author.id);
+      assert.throws(() => db.Post.select().populate(['plain']), TypeError);
+      assert.throws(() => db.Post.select().populate([]), TypeError);
+      // Derived from the schema's relations.
+      const memo = await db.Memo.insert({ author: t1.id, tags: [t1.id], title: 'm' });
+      assert.strictEqual(memo.author.id, t1.id);
+      assert.strictEqual(memo.tags[0].id, t1.id);
+      assert.strictEqual(typeof memo.title, 'string');
+      assert.deepStrictEqual((await db.Memo.select().populate(['tags']).one()).tags, [
+        { id: t1.id, n: 't1', $type: 'Tag' },
+      ]);
+      // Defined after the open, the relation names a collection that is there.
+      await db.addCollections({ Note: { schema: { fields: { post: 'Post' } }, validate: false } });
+      const note = await db.Note.insert({ post: post.id });
+      assert.strictEqual((await note.populate('post')).title, 'p');
+    },
+  );
+
   await t.test('a write through the database from inside transact() is IN_TRANSACTION, not a deadlock', async (t2) => {
     const db = await createStorage(t2, 'A', { fsi: memory(), schema: { entities: { Post: {} } } });
     const id = (await db.Post.insert({ n: 1 })).id;

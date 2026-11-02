@@ -248,6 +248,7 @@ class Cursor {
   #offset = 0;
   #filter = null;
   #projection = null;
+  #populate = null;
 
   constructor(source, entity, query = {}) {
     this.#source = source;
@@ -299,10 +300,70 @@ class Cursor {
     return this;
   }
 
+  /**
+   * The declared references (`refs`) of `fields` resolved on every row: the
+   * record the field names, as `{ id, ...data }` (null when it is not there),
+   * or an array of them where the reference is to many — one read of the
+   * targets per field per page. A field that is no declared reference is a TypeError.
+   */
+  populate(fields) {
+    let valid = Array.isArray(fields) && fields.length > 0;
+    for (let i = 0; valid && i < fields.length; i++) valid = typeof fields[i] === 'string';
+    if (!valid) throw new TypeError('populate() takes an array of field names');
+    const def = this.#source.definition?.(this.#entity) ?? null;
+    for (let i = 0; i < fields.length; i++) {
+      if (def === null || def.refs === null || !Object.hasOwn(def.refs, fields[i])) {
+        throw new TypeError(`populate(): ${fields[i]} is not a declared reference of ${this.#entity} (refs)`);
+      }
+    }
+    this.#populate = fields;
+    return this;
+  }
+
+  // The rows' references laid in: the ids every populated field names on the
+  // page, read once per field, each replaced by the record (or null).
+  async #populated(rows) {
+    const refs = this.#source.definition(this.#entity).refs;
+    for (let f = 0; f < this.#populate.length; f++) {
+      const field = this.#populate[f];
+      const { many } = refs[field];
+      const ids = [];
+      const seen = new Set();
+      const want = (value) => {
+        if (typeof value !== 'string' || seen.has(value)) return;
+        seen.add(value);
+        ids.push(value);
+      };
+      for (let i = 0; i < rows.length; i++) {
+        const value = rows[i][field];
+        if (many && Array.isArray(value)) for (let k = 0; k < value.length; k++) want(value[k]);
+        else want(value);
+      }
+      const found = await this.#source.loadMany(ids);
+      const record = (value) => {
+        if (typeof value !== 'string') return null;
+        const data = found.get(value) ?? null;
+        return data === null ? null : { id: value, ...data };
+      };
+      for (let i = 0; i < rows.length; i++) {
+        const value = rows[i][field];
+        if (!Object.hasOwn(rows[i], field)) continue;
+        if (!many) rows[i][field] = record(value);
+        else if (Array.isArray(value)) {
+          const out = [];
+          for (let k = 0; k < value.length; k++) out.push(record(value[k]));
+          rows[i][field] = out;
+        }
+      }
+    }
+    return rows;
+  }
+
   // Covered: everything the cursor reads — the query's fields, the order's,
   // the projection's — is in the catalog, and no filter asks for the record.
   #covered(needsRows) {
     if (this.#filter !== null) return false;
+    if (needsRows && this.#populate !== null) return false;
     if (needsRows && this.#projection === null) return false;
     const indexed = this.#source.indexed(this.#entity);
     const fields = fieldsOf(this.#query);
@@ -383,7 +444,7 @@ class Cursor {
     const end = Math.min(start + limit, rows.length);
     const out = [];
     for (let i = start; i < end; i++) out.push(JSON.parse(JSON.stringify(this.#project(rows[i]))));
-    return out;
+    return this.#populate === null ? out : this.#populated(out);
   }
 
   async count() {

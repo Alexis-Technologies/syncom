@@ -226,6 +226,7 @@ query searches the entity's `search` fields, best first unless ordered.
 | `limit(n)`, `offset(n)` | Applied after the sort |
 | `filter(fn)` | A predicate over the loaded row |
 | `projection(fields)` | The fields each row carries, plus `id` |
+| `populate(fields)` | The declared [references](../guide/database#references) of `fields` resolved on every row of the page: the record as `{ id, …data }` (`null` where it is not there), an array of them where the reference is to many — one read of the targets per field per page; a field that is no declared reference is a `TypeError` |
 | `fetch()` | `Promise<QueryRow<R>[]>` — `{ id, ...data }` as the record reads |
 | `count()` | `Promise<number>` |
 | `one()` | `Promise<QueryRow<R> \| null>` |
