@@ -215,7 +215,7 @@ test('Catalog', async (t) => {
       catalog.put('p1', { type: 'Post', v: 2, data: { orgId: 'o1', title: 'Again' } });
       await catalog.save('e.9');
       const file = JSON.parse(await fsi.read('store/index', 'catalog.json'));
-      assert.strictEqual(file.format, 3);
+      assert.strictEqual(file.format, 4);
       const rowsById = Object.fromEntries(file.rows.map((row) => [row[0], row]));
       assert.deepStrictEqual(rowsById.p1, ['p1', 'Post', 2, false, { orgId: 'o1' }, false, 'Again']);
       assert.deepStrictEqual(rowsById.p2, ['p2', 'Post', 1, false, {}, true]);
@@ -299,7 +299,7 @@ test('Catalog', async (t) => {
     await catalog.save('epoch.7');
     assert.strictEqual(catalog.dirty, 0);
     const file = JSON.parse(await fsi.read('store/index', 'catalog.json'));
-    assert.strictEqual(file.format, 3);
+    assert.strictEqual(file.format, 4);
     assert.strictEqual(file.stamp, 'epoch.7');
     assert.deepStrictEqual(file.rows, [
       ['a', 'Post', 1, false, { orgId: 'o1', slug: 'a' }],

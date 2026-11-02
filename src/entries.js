@@ -192,10 +192,47 @@ class EntryStore {
       }
       stored = await this.#db.records.get(id);
     }
-    if (stored === null) return null;
+    if (stored === null) return this.#folded(id);
     const entry = await this.#fromStored(id, stored);
     this.remember(id, entry);
     return entry;
+  }
+
+  // A tombstone whose file was folded into its catalog row (`fold`): the
+  // entry rebuilt from the stamps the row keeps — dead, and what every op
+  // below them is moot against — or null where the row holds none.
+  #folded(id) {
+    const row = this.#catalog.row(id);
+    if (row === null || row.folded === undefined) return null;
+    const { base, deleted, v } = row.folded;
+    const meta = { clock: {}, base, deleted, counters: {}, sets: {}, blocks: {}, gone: {} };
+    if (v !== null && v !== undefined) meta.v = v;
+    const entry = { data: {}, meta, encrypted: false, block: null };
+    this.remember(id, entry);
+    return entry;
+  }
+
+  /**
+   * Folds a tombstone's file into its catalog row (`@alexify/syncom/cleanup`):
+   * the record's file and pieces removed, the stamps that keep it dead kept
+   * on the row, from which a read rebuilds it. Only a tombstone that is not
+   * purged; answers whether it did.
+   */
+  async fold(id) {
+    const entry = await this.load(id);
+    if (entry === null || entry.encrypted || isAlive(entry) || entry.meta.purged || entry.meta.deleted === null) {
+      return false;
+    }
+    const row = this.#catalog.row(id);
+    if (row === null || !row.gone || row.folded !== undefined) return false;
+    const keeping = await this.#changing(id);
+    const batch = { remove: [id] };
+    if (keeping !== null) batch.copies = { put: [keeping.copy] };
+    await this.#write(batch);
+    keeping?.done();
+    await this.#drop(id, new Set(), 0);
+    this.#cache.delete(id);
+    return this.#catalog.fold(id, { base: entry.meta.base, deleted: entry.meta.deleted, v: entry.meta.v });
   }
 
   /**
@@ -227,7 +264,11 @@ class EntryStore {
     const found = await this.#db.records.getMany(wanted);
     for (let i = 0; i < wanted.length; i++) {
       const stored = found.get(wanted[i]) ?? null;
-      if (stored === null) continue;
+      if (stored === null) {
+        const folded = this.#folded(wanted[i]);
+        if (folded !== null) out.set(wanted[i], folded);
+        continue;
+      }
       const entry = await this.#fromStored(wanted[i], stored);
       this.remember(wanted[i], entry);
       out.set(wanted[i], entry);

@@ -163,6 +163,10 @@
       "types": "./src/pipeline/pipeline.d.ts",
       "default": "./src/pipeline/pipeline.js"
     },
+    "./cleanup": {
+      "types": "./src/cleanup/cleanup.d.ts",
+      "default": "./src/cleanup/cleanup.js"
+    },
     "./package.json": "./package.json"
   },
   "directories": {

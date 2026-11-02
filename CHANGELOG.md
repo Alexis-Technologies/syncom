@@ -66,6 +66,13 @@ and one `commit` event, not one per call.
   record as it reads, written as one transaction, refused whole where a kind refuses its part.
   `update(id, delta, { ifMatch: query })` writes only where the record matches the Mango query (the
   `query` plugin's), inside the queue, and resolves to whether it did.
+- **Tombstone cleanup: `@alexify/syncom/cleanup`.** `cleanup(db, { minimumDeletedTime, runEach, awaitSync })`
+  folds the file of an old tombstone into its catalog row (`EntryStore.fold`): the stamps that keep the
+  record dead ride on the row (the persisted catalog's format 4), a read of the id rebuilds the
+  tombstone from them, and the file and its pieces are gone — a peer's op stamped below it is still
+  moot, a revival above it writes a file again, a snapshot still hands the deletion on. With `awaitSync`
+  a tombstone this node made is folded only once every enabled registered node acknowledged its
+  delete; `run({ drop: true })` forgets the row too.
 - **Pipelines: `@alexify/syncom/pipeline`.** `createPipeline(db, { name, source, handler })` runs a handler
   over every change of a collection, once, in order, inside one transaction per turn, and keeps the turn's
   log position as its checkpoint after the transaction landed — a reopen resumes from it (the turns since

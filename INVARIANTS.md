@@ -48,6 +48,7 @@ and the rows to this order, numbered within a prefix):
 | `STATE` | app state by name and path |
 | `DUMP` | dumps: export and import, a move between engines |
 | `PIPE` | pipelines: a handler over a collection's turns, checkpointed |
+| `CLEAN` | tombstone cleanup: a folded tombstone still wins |
 
 | id | guarantee | tests |
 | --- | --- | --- |
@@ -222,3 +223,4 @@ and the rows to this order, numbered within a prefix):
 | DUMP-1 | A dump exported and imported as a merge on an empty node gives it what the source held — every record's data, every tombstone and purge — as a bootstrap would, converged; `insert` keeps the ids and makes new ops of the importing node (a tombstone deletes), and takes a dump with no meta the same way; a dump made under another schema hash is `SCHEMA_MISMATCH` unless forced. | `export then import (merge) on an empty node equals the source, record by record and tombstone by tombstone` |
 | DUMP-2 | `migrateStorage` by copy opens on the new engine as the same node — its id, its vector, every record — and writes on; by merge, a new node holds what the old one held. | `migrateStorage copies a database as the same node (its id and vector) or merges it into a new one` |
 | PIPE-1 | A pipeline hands every change of its source collection to its handler once, in order, inside one transaction per turn, and keeps the turn's log position as its checkpoint only after that transaction landed — so a reopen resumes from the checkpoint (the turns since it replayed from the log, their ids once each) and hands nothing over twice; where the log cannot resume from the checkpoint, every record of the source is handed over once (`rebuilt`); a handler that throws keeps the error and moves nothing past the turn. | `a pipeline resumes from its checkpoint after a reopen and handles every change once` |
+| CLEAN-1 | A tombstone whose file `cleanup` folded into its catalog row still wins: a peer's op stamped below it is moot, a revival above it writes a file again, a snapshot page hands the tombstone on, and a reopen reads the folded row; nothing is folded before it is `minimumDeletedTime` old and — where this node made the delete — every enabled registered node acknowledged it; `drop: true` forgets the row. | `a folded tombstone still wins over an older op and pages in a snapshot; nothing folds before every node acknowledged it` |

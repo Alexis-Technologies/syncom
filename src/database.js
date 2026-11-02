@@ -1260,6 +1260,16 @@ class Database extends Emitter {
       // Several records purged as one turn of the queue — one append, one landing — then scrubbed
       // from the log one by one: what a collection's `remove({ purge: true })` runs a page through.
       purgeMany: (ids, options) => this.#purgeMany(ids, options),
+      // Every id the catalog holds a row for — live, encrypted, a tombstone — sorted (shared: read it).
+      all: () => catalog.all(),
+      // A tombstone's file folded into its row (@alexify/syncom/cleanup): inside the queue, behind the
+      // landings, so nothing of the record is in flight meanwhile.
+      fold: (id) => this.#run(() => this.#landing(() => this.#entries.fold(id))),
+      // The log's retained entries of a record, and the registered nodes' acked vectors (the sync plugin's).
+      entriesOf: (id) => this.#log.entriesOf(id),
+      // A folded tombstone's row taken away (`cleanup({ drop: true })`): the catalog forgets the id.
+      forget: (id) => this.#run(() => void this.#catalog.put(id, null)),
+      nodes: () => (this.#sync === null ? [] : this.#sync.listNodes()),
       load: async (id) => {
         const entry = await this.#entries.load(id);
         if (entry === null || entry.encrypted || !isAlive(entry)) return null;

@@ -707,6 +707,21 @@ change of the `source` collection, once, in order — a derived collection, a co
 The `transaction` event carries `eventId`, the log position of the turn's last op, which is what a pipeline keeps.
 A handler's write to the source is another turn, handed over again: derive into another collection.
 
+## Cleanup (subpath)
+
+`@alexify/syncom/cleanup` — `cleanup(db, { minimumDeletedTime, runEach, awaitSync, leader, now }?)`: a deleted record
+keeps a tombstone (its file, with the stamps that keep it dead); a sweep folds the file of an old one into its catalog
+row — the stamps ride on the row, a read of the id rebuilds the tombstone from them, the file and its pieces are gone.
+
+| Member | Notes |
+| --- | --- |
+| `run({ drop }?)` | One sweep: every tombstone deleted `minimumDeletedTime` (31 days) ago or more — and, with `awaitSync` (true), one whose delete this node made only once every enabled registered node acknowledged it (a peer's delete is theirs to deliver) — folded; `drop: true` forgets the folded rows too (a late op then makes a new record, a peer that never saw the deletion keeps its copy). `Promise<{ folded, dropped, skipped }>` |
+| `start()`, `stop()` | A sweep every `runEach` ms (5 minutes); a failed sweep is logged (`cleanup.failed`) |
+| `stats`, `leader` | The counts over every run; kept for a shared database (the leader runs it) |
+
+A folded tombstone still wins: a peer's op stamped below it is moot, a revival above it writes a file again, a
+snapshot page hands the tombstone on; the catalog's persisted rows (format 4) carry the stamps.
+
 ## Telemetry (subpath)
 
 ```js

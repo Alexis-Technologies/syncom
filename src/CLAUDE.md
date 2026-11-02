@@ -11,13 +11,13 @@ src/<name>/<name>.js      every subpath is a folder under src/ with its entry an
 src/all/all.js            @alexify/syncom/all — the core with every shipped plugin registered (text, tree, signing, chain, encryption): the
                           API as it was before the blocks
 src/chain/chain.js        @alexify/syncom/chain — the chain plugin and Blockchain; SHA-256 through src/crypto/digest.js
-src/plugin.js             createPlugins — the registry one createDatabase() builds: kind modules (ranks, block codes, op types, apply/join/prune/render/
-                          resolve/diff/realize/migrate/compact/methods) and API modules; PLUGIN_MISSING; PENDING_MAX — requires shape.js, errors.js
+src/plugin.js             createPlugins — the registry one createDatabase() builds: kind modules (ranks, block codes, op types, apply/join/prune/render/resolve/diff/realize/migrate/compact/methods) and API modules; PLUGIN_MISSING; PENDING_MAX — requires shape.js, errors.js
 src/contracts/contracts.js the @alexify/syncom/contracts subpath — never back in the barrel
 src/local/local.js        @alexify/syncom/local — the local plugin: db.local over the `local` kv namespace, never an op (its own CLAUDE.md)
 src/state/state.js        @alexify/syncom/state — createState(db, name): app state by path over a record or a local document (its own CLAUDE.md)
 src/dump/dump.js          @alexify/syncom/dump — exportJSON/exportPages/importJSON/migrateStorage: a database as JSON and back (its own CLAUDE.md)
 src/pipeline/pipeline.js  @alexify/syncom/pipeline — createPipeline(db, { name, source, handler }): a collection's turns handled once, checkpointed (its own CLAUDE.md)
+src/cleanup/cleanup.js    @alexify/syncom/cleanup — cleanup(db, options): old, acknowledged tombstones folded into their catalog rows (its own CLAUDE.md)
 src/store/store.js        the @alexify/syncom/store subpath — toStore/fromEvents: one store object for Svelte's contract and
                           React's useSyncExternalStore over a cursor, a Record, get(), a presence or an emitter — no requires
 src/inspect/inspect.js    the @alexify/syncom/inspect subpath — a record's anatomy (through the [SOURCE] seam's raw `entry`) and anonymize; requires compose, shape, symbols, hash only

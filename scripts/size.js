@@ -177,7 +177,9 @@ const ENTRIES = [
   // 67.7 with an entity's methods and statics and the collection events (collections plan, C1.9–C1.10). 68, raised by name.
   // 68.2 with `collection.remove()`, `drop()`/`dropDatabase()` and src/layout.js (collections plan, C1.11). 68.5, raised by name.
   // 68.8 with the catalog's sorted indexes (compound keys, `scan`) and `compare` shared, an array keyed per element (collections plan, C3.1). 69.5, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 69.5 },
+  // 69.8 with folded tombstones (Catalog.fold, EntryStore.fold, the row rebuilt on a read; collections plan,
+  // C4.5) and the transaction event's eventId. 70, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 70 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -583,6 +585,13 @@ const ENTRIES = [
     platform: 'browser',
     // 2.8 measured; 3.
     budget: 3,
+  },
+  // Tombstone cleanup: a tombstone's file folded into its catalog row (collections plan, C4.5–C4.6).
+  {
+    label: 'cleanup — browser (@alexify/syncom/cleanup)',
+    entry: 'src/cleanup/cleanup.js',
+    platform: 'browser',
+    budget: 2.5,
   },
 ];
 
