@@ -2661,8 +2661,14 @@ export interface Cursor<T = QueryRow> {
   fetch(): Promise<T[]>;
   count(): Promise<number>;
   one(): Promise<T | null>;
-  /** Runs now and after every change to the collection (coalesced); returns the stop function. */
+  /**
+   * Calls `listener(rows)` now and whenever the rows change — kept as the collection changes without
+   * running the cursor again, emitted only when an id came, went or moved or a row reads as another;
+   * every `watch()` of one query shares one run. Returns the stop function.
+   */
   watch(listener: (rows: T[]) => void, options?: { onError?: (error: Error) => void }): () => void;
+  /** Calls `listener(count)` now and whenever the number of matches moves — one in or out per change, never counted again. Returns the stop function. */
+  watchCount(listener: (count: number) => void, options?: { onError?: (error: Error) => void }): () => void;
   /** Every match updated — fields or operators — as ONE transaction over the matches when it starts: `{ matched, written }`. */
   update(delta: object | UpdateOperators, options?: TransactOptions): Promise<WriteByQuery>;
   /** Every match changed by a function (see `modify()`), as ONE transaction: `{ matched, written }`. */

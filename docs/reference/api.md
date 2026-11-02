@@ -232,7 +232,8 @@ query searches the entity's `search` fields, best first unless ordered.
 | `fetch()` | `Promise<QueryRow<R>[]>` — `{ id, ...data }` as the record reads |
 | `count()` | `Promise<number>` |
 | `one()` | `Promise<QueryRow<R> \| null>` |
-| `watch(listener, { onError }?)` | Runs now and after every change to the collection; returns the stop function |
+| `watch(listener, { onError }?)` | `listener(rows)` now and whenever the rows change — the result is kept as the collection changes without running the cursor again (the record that changed is read once, matched and placed; a full window that lost a row, or a `$text` query, runs the cursor again) and emitted only when an id came, went or moved or a row reads as another; every `watch()` of one query (the same entity, query, order, window, projection, populated fields) shares one run, and a `fetch()` of it reads nothing while the run lasts. Returns the stop function |
+| `watchCount(listener, { onError }?)` | `listener(count)` now and whenever the number of matches moves — the matching ids kept, one in or out per change, never counted again. Returns the stop function |
 | `update(delta, { actor, message, source }?)` | Every match updated — fields, or the [operators](../guide/database#update-operators) — as ONE transaction over the matches when it started: `Promise<{ matched, written }>` (a record gone meanwhile is skipped). A cursor at a tag is read-only (a `TypeError`) |
 | `modify(fn, options?)` | Every match changed by `fn`, as `modify()` does, as ONE transaction: `{ matched, written }` |
 | `delete({ actor, data }?)` | Every match deleted as ONE transaction, `data` on each tombstone: `{ matched, written }` |

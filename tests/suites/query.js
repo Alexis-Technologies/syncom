@@ -53,7 +53,10 @@ const runQueryTests = async (t, assert, createStorage) => {
     await storage.Tag.insert({ orgId: 'o1', name: 'not a project' });
     const reference = all
       .filter((row) => row.orgId === 'o1')
-      .sort((a, b) => (a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : b.createdAt - a.createdAt || 0))
+      // The one order a result has: the keys, then the id.
+      .sort((a, b) =>
+        a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : b.createdAt - a.createdAt || (a.id < b.id ? -1 : 1),
+      )
       .slice(5, 15);
     const rows = await storage.Project.select({ orgId: 'o1' })
       .order('kind')
@@ -87,7 +90,7 @@ const runQueryTests = async (t, assert, createStorage) => {
     // order, which is id order — for any limit and offset, either way.
     const byKind = (desc) => (a, b) => {
       const order = a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : 0;
-      return desc ? -order : order;
+      return (desc ? -order : order) || (a.id < b.id ? -1 : 1);
     };
     const byId = [...all].sort((a, b) => (a.id < b.id ? -1 : 1));
     for (const [limit, offset, desc] of [
@@ -325,6 +328,208 @@ const runQueryTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(errors, ['boom', 'listener']);
     stopThrowing();
   });
+
+  await t.test(
+    'a live result after a change reads as a fresh run and emits only when the rows changed (seeded)',
+    async (t2) => {
+      const fsi = counting(memory());
+      const storage = await createStorage(t2, 'L', { fsi, schema, cache: { max: 1000 } });
+      let seed = 7;
+      const random = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+      const ids = [];
+      for (let i = 0; i < 30; i++) {
+        const { id } = await storage.Project.insert({
+          orgId: `o${i % 3}`,
+          name: `n${i}`,
+          slug: `s${i}`,
+          n: i,
+          k: i % 4,
+        });
+        ids.push(id);
+      }
+      // Covered and not, ordered and not, windowed and not, offset or not.
+      const cursors = [
+        storage.Project.select({ orgId: 'o1' }).order('n'),
+        storage.Project.select({ orgId: 'o1' }).order('n').limit(4),
+        storage.Project.select({ k: { $gte: 2 } })
+          .desc('n')
+          .limit(5)
+          .offset(2),
+        storage.Project.select({ orgId: 'o2', k: 1 }).projection(['orgId', 'k']),
+        storage.Project.select({}).order('k').desc('n').limit(6),
+        storage.Project.select({ n: { $lt: 20 } }),
+        storage.Project.select({ orgId: { $in: ['o0', 'o2'] } })
+          .filter((row) => row.n % 2 === 0)
+          .order('n')
+          .limit(3),
+      ];
+      const seen = cursors.map(() => []);
+      const stops = cursors.map((cursor, i) => cursor.watch((rows) => seen[i].push(rows)));
+      await tick();
+      for (let step = 0; step < 120; step++) {
+        const id = ids[Math.floor(random() * ids.length)];
+        const roll = random();
+        try {
+          if (roll < 0.3) await storage.Project.update(id, { n: Math.floor(random() * 40) });
+          else if (roll < 0.45) await storage.Project.update(id, { k: Math.floor(random() * 4) });
+          else if (roll < 0.55) await storage.Project.update(id, { orgId: `o${Math.floor(random() * 3)}` });
+          else if (roll < 0.65) await storage.Project.update(id, { note: step });
+          else if (roll < 0.8) await storage.delete(id);
+          else if (roll < 0.9) {
+            await storage.set(id, {
+              orgId: `o${step % 3}`,
+              name: `r${step}`,
+              slug: `s${id}`,
+              n: step % 40,
+              k: step % 4,
+              $type: 'Project',
+            });
+          } else {
+            const { id: made } = await storage.Project.insert({
+              orgId: `o${step % 3}`,
+              name: `m${step}`,
+              slug: `m${step}`,
+              n: step % 40,
+              k: step % 4,
+            });
+            ids.push(made);
+          }
+        } catch (error) {
+          if (error.code !== 'NOT_FOUND') throw error;
+        }
+        await tick();
+        for (let i = 0; i < cursors.length; i++) {
+          const fresh = await cursors[i].fetch();
+          assert.deepStrictEqual(seen[i].at(-1), fresh, `step ${step}, cursor ${i}`);
+        }
+      }
+      // Distinct: two emissions in a row are never the same rows.
+      for (let i = 0; i < cursors.length; i++) {
+        for (let k = 1; k < seen[i].length; k++) {
+          assert.notDeepStrictEqual(seen[i][k], seen[i][k - 1], `cursor ${i}, emission ${k}`);
+        }
+      }
+      // A change outside the result emits nothing: a record of another collection, one the query does
+      // not match — only the cursor over every record (k first, then n descending) hears the far one.
+      const before = seen.map((list) => list.length);
+      await storage.Tag.insert({ name: 'tag' });
+      await storage.Project.insert({ orgId: 'o5', name: 'far', slug: 'far', n: 99, k: 0 });
+      await tick();
+      assert.deepStrictEqual(
+        seen.map((list) => list.length),
+        before.map((n, i) => (i === 4 ? n + 1 : n)),
+      );
+      for (const stop of stops) stop();
+    },
+  );
+
+  await t.test('watchCount() moves the count by one per change, without counting again', async (t2) => {
+    const fsi = counting(memory());
+    const storage = await createStorage(t2, 'C', { fsi, schema, cache: { max: 1000 } });
+    const ids = [];
+    for (let i = 0; i < 12; i++) {
+      ids.push((await storage.Project.insert({ orgId: i % 2 ? 'a' : 'b', name: `n${i}`, slug: `s${i}`, n: i })).id);
+    }
+    const counts = [];
+    const covered = [];
+    const stop = storage.Project.select({ orgId: 'a', n: { $gte: 5 } }).watchCount((n) => counts.push(n));
+    const stopCovered = storage.Project.select({ orgId: 'a' }).watchCount((n) => covered.push(n));
+    await tick();
+    assert.deepStrictEqual(counts, [4]);
+    assert.deepStrictEqual(covered, [6]);
+    fsi.reset();
+    await storage.Project.update(ids[1], { n: 50 });
+    await tick();
+    assert.deepStrictEqual(counts, [4, 5]);
+    assert.ok(fsi.dataReads() <= 1, 'the record that changed, read once at most');
+    await storage.Project.update(ids[1], { note: 'x' });
+    await tick();
+    assert.deepStrictEqual(counts, [4, 5], 'still in: no emission');
+    await storage.delete(ids[7]);
+    await storage.Project.insert({ orgId: 'a', name: 'new', slug: 'new', n: 9 });
+    await tick();
+    assert.deepStrictEqual(counts, [4, 5, 4, 5]);
+    assert.deepStrictEqual(covered, [6, 5, 6]);
+    assert.strictEqual(await storage.Project.count({ orgId: 'a', n: { $gte: 5 } }), 5);
+    stop();
+    stopCovered();
+    await storage.delete(ids[9]);
+    await tick();
+    assert.deepStrictEqual(counts, [4, 5, 4, 5], 'silent after stop');
+  });
+
+  await t.test(
+    'equal queries share one live run, and a result the catalog has not moved since is read from the cache',
+    async (t2) => {
+      const fsi = counting(memory());
+      // Two records cached at most: a run that reads records shows as reads of data/.
+      const storage = await createStorage(t2, 'Q', { fsi, schema, cache: { max: 2 } });
+      // Through the database: a Document (a collection's insert hands one out) would pin its entry.
+      for (let i = 0; i < 10; i++) {
+        await storage.insert({ orgId: 'o', name: `n${i}`, slug: `s${i}`, n: i, $type: 'Project' });
+      }
+      const a = [];
+      const b = [];
+      const stopA = storage.Project.select({ orgId: 'o', n: { $gte: 3 } })
+        .order('n')
+        .limit(4)
+        .watch((rows) => a.push(rows.length));
+      await tick();
+      fsi.reset();
+      // The same query, built again: no run of its own — the rows as they are, at once.
+      const stopB = storage.Project.select({ n: { $gte: 3 }, orgId: 'o' })
+        .order('n')
+        .limit(4)
+        .watch((rows) => b.push(rows.length));
+      await tick();
+      assert.deepStrictEqual([a, b], [[4], [4]]);
+      assert.strictEqual(fsi.dataReads(), 0, 'shared: nothing read for the second');
+      // A fetch of the same key reads nothing while the run keeps its rows.
+      const rows = await storage.Project.select({ orgId: 'o', n: { $gte: 3 } })
+        .order('n')
+        .limit(4)
+        .fetch();
+      assert.deepStrictEqual(
+        rows.map((row) => row.n),
+        [3, 4, 5, 6],
+      );
+      assert.strictEqual(fsi.dataReads(), 0, 'from the live run');
+      await storage.Project.update(rows[0].id, { n: 30 });
+      await tick();
+      assert.deepStrictEqual(a.at(-1), 4);
+      assert.strictEqual(a.length, b.length, 'both heard it');
+      stopA();
+      await storage.Project.update(rows[1].id, { n: 31 });
+      await tick();
+      assert.strictEqual(b.length, a.length + 1, 'the run goes on for the one left');
+      stopB();
+      // Unobserved: the last rows stay in the cache while the catalog does not move.
+      fsi.reset();
+      const again = await storage.Project.select({ orgId: 'o', n: { $gte: 3 } })
+        .order('n')
+        .limit(4)
+        .fetch();
+      assert.deepStrictEqual(
+        again.map((row) => row.n),
+        [5, 6, 7, 8],
+      );
+      assert.strictEqual(fsi.dataReads(), 0, 'kept after the run stopped');
+      await storage.Project.update(again[0].id, { note: 'moved' });
+      fsi.reset();
+      const moved = await storage.Project.select({ orgId: 'o', n: { $gte: 3 } })
+        .order('n')
+        .limit(4)
+        .fetch();
+      assert.strictEqual(moved[0].note, 'moved', 'the catalog moved: read again');
+      assert.ok(fsi.dataReads() > 0, 'read again');
+      // A filter has no key: its own run every time.
+      const filtered = storage.Project.select({ orgId: 'o' }).filter((row) => row.n > 3);
+      await filtered.fetch();
+      fsi.reset();
+      await filtered.fetch();
+      assert.ok(fsi.dataReads() > 0, 'uncached');
+    },
+  );
 
   await t.test('a builder hands back a new cursor and leaves the one it was called on as it was', async (t2) => {
     const storage = await createStorage(t2, 'I', { schema });

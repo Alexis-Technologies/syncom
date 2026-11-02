@@ -1228,6 +1228,8 @@ class Database extends Emitter {
       indexed: (entity) => catalog.indexed(entity),
       searches: (entity) => catalog.searches(entity),
       subscribe: (entity, fn) => catalog.subscribe(entity, fn),
+      // What a query result is current as of: moves with every change of a record the catalog heard of.
+      generation: () => catalog.generation,
       // The entity definition of a collection (null for none): its id rule, its references, its methods.
       definition: (entity) => this.#entities.get(entity) ?? null,
       // A transaction over this database's write API: what a cursor's write terminals run (a view at a

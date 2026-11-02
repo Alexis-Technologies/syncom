@@ -13,13 +13,18 @@
 // over `{ id, ...record }` (what `ifMatch` is decided by).
 
 const { Cursor, compileQuery } = require('./cursor.js');
+const { QueryCache } = require('./cache.js');
 
 const query = Object.freeze({
   name: 'query',
   setup() {
+    // One cache per database (./cache.js): the results by key, the live run every `watch()` of a
+    // key shares. A source that does not move (a tag's, without `generation`) is read every time.
+    const cache = new QueryCache();
     return {
       query: {
-        cursor: (source, entity, criteria) => new Cursor(source, entity, criteria),
+        cursor: (source, entity, criteria) =>
+          new Cursor(source, entity, criteria, null, typeof source.generation === 'function' ? cache : null),
         matches: (criteria) => compileQuery(criteria),
       },
     };

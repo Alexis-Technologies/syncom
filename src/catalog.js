@@ -174,6 +174,8 @@ class Catalog {
   #text;
   #textPending = new Map();
   #logger;
+  // Moved by every put, a definition, an adoption, a load: what a query result is current as of.
+  #generation = 0;
 
   constructor({ store = null, rows = null, fsi = null, path = null, entities, text = new Map(), logger = null }) {
     // A text store given (a kv namespace), a rows store (a native engine's:
@@ -227,6 +229,7 @@ class Catalog {
       this.#changed.set(ids[i], rows[i]);
     }
     this.#rekey();
+    this.#generation++;
   }
 
   // The row's text into the entity's text index, or out of it. Derived
@@ -256,6 +259,11 @@ class Catalog {
 
   get size() {
     return this.#rows.size;
+  }
+
+  /** A number that moves with every change of a record the catalog heard of: what a result is current as of. */
+  get generation() {
+    return this.#generation;
   }
 
   /** Puts since the last save. */
@@ -339,6 +347,7 @@ class Catalog {
    * data }` for a live one — `data` as it reads (the lens applied).
    */
   put(id, view) {
+    this.#generation++;
     const was = this.#rows.get(id);
     const before = was && !was.gone ? was.type : null;
     const gone = view !== null && view.gone === true;
@@ -548,6 +557,7 @@ class Catalog {
   /** Takes rows as `rows()` hands them out — a copy of another catalog, under the same definitions. */
   adopt(rows) {
     this.#loaded = false;
+    this.#generation++;
     for (const [id, row] of rows) {
       this.#remove(id);
       this.#insert(id, row);
@@ -559,6 +569,7 @@ class Catalog {
   // `strict: false` reuses a catalog saved under other indexes — a tag's,
   // where the rows say what existed and the indexes are those of its day.
   async load({ strict = true } = {}) {
+    this.#generation++;
     if (this.#rowStore !== null) return this.#loadRows(strict);
     const text = await this.#store.get(FILE);
     if (text === null) return null;

@@ -7,7 +7,11 @@ The cursor over `storage[SOURCE]`. The rules of the core — the op model, the w
 ```
 src/query/query.js        @alexify/syncom/query — the query plugin: setup hands the core a cursor factory (`query` hook); select()/count()
                           on a Collection go through storage[CURSOR], PLUGIN_MISSING without it
-src/query/cursor.js       compileQuery (Mango predicate), compareRows, Cursor — reads through storage[SOURCE]
+src/query/cursor.js       compileQuery (Mango predicate), compareRows, Cursor — reads through storage[SOURCE]; requires live.js, cache.js
+                          beside the core's shape.js and catalog.js
+src/query/live.js         Live — a live query kept by event-reduce over the catalog's action stream (rows, or a count) — requires shape.js only
+src/query/cache.js        QueryCache, keyOf — a result by its key with the catalog's generation, the one live run every watch() of a
+                          key shares, an LRU of unobserved results — no requires
 ```
 
 ## Rules
@@ -26,3 +30,15 @@ src/query/cursor.js       compileQuery (Mango predicate), compareRows, Cursor �
   predicate compares them. Unique keys are checked after validation and
   the fold, before `#log.append` (local: throw) and after `applyOp` on the
   apply path (remote: `conflict` event, never a skip — both records stay).
+- **A cursor is immutable, a result has one order, a live query is kept, not run.** Every builder hands
+  back a new Cursor (`#clone`). A result is ordered by its keys then the id (`compareFully`; a `$text`
+  query without keys keeps the index's ranking), so a page has an edge and a live result places a row
+  where a run would. `watch()` and `watchCount()` are a `Live` (src/query/live.js) over the catalog's
+  `subscribe(type, fn(changed, id, action))`: the record that changed is read once (`rowOf`), matched
+  and placed; a full window that lost a row, a row moved to the end of a full window, or a `$text`
+  query runs the cursor again (`top()`); it emits only when an id came, went or moved, or a row's view
+  (`row[VIEW]`, the object it was built from) is another. The plugin keeps one `QueryCache`
+  (src/query/cache.js) per database: every `watch()` of a key (`keyOf([entity, query, order, window,
+projection, populate])`) shares one Live, whose rows are the key's result while it runs; a `fetch()`
+  of a key the catalog's `generation` has not moved since reads nothing. A `filter(fn)` has no key. A
+  tag's source has no `generation`: nothing of it is cached, and `watch()` throws there.

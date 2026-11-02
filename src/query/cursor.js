@@ -8,12 +8,23 @@
 
 const { deepEqual } = require('../shape.js');
 const { valueOf } = require('../catalog.js');
+const { Live } = require('./live.js');
+const { keyOf } = require('./cache.js');
 
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 const MAX_REGEX = 1000;
 const MAX_TEXT = 1000;
 // How many records a loaded cursor reads at once.
 const CONCURRENCY = 16;
+// On a row, the object it was built from — the record as it reads, or its catalog row's fields —
+// held until the record changes: what a live result tells a change of the row by. A symbol: a copy
+// of the row (JSON) leaves it behind.
+const VIEW = Symbol('syncom.view');
+const rowOf = (id, view) => {
+  const row = { id, ...view };
+  row[VIEW] = view;
+  return row;
+};
 
 // A total order for sorting: nothing, then booleans, numbers, strings, then
 // everything else (left where it was). Comparisons in a query are stricter —
@@ -233,6 +244,17 @@ const compareRows = (keys) => (a, b) => {
   return 0;
 };
 
+// The one order a result has: the keys, then the id — so two rows never tie, a page has an edge
+// and a live result places a row where a run would.
+const compareFully = (keys) => {
+  const byKeys = compareRows(keys);
+  return (a, b) => {
+    const order = byKeys(a, b);
+    if (order !== 0) return order;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  };
+};
+
 const count = (name, value) => {
   if (!Number.isInteger(value) || value < 0) throw new TypeError(`${name}() takes a non-negative integer`);
   return value;
@@ -303,12 +325,15 @@ class Cursor {
   #filter = null;
   #projection = null;
   #populate = null;
+  // The query cache (./cache.js) of the database, null at a tag's source.
+  #cache;
 
-  constructor(source, entity, query = {}, predicate = null) {
+  constructor(source, entity, query = {}, predicate = null, cache = null) {
     this.#source = source;
     this.#entity = entity;
     this.#query = query;
     this.#predicate = predicate ?? compileQuery(query);
+    this.#cache = cache;
     if (predicate === null && query.$text !== undefined && !source.searches(entity)) {
       throw new TypeError(`select(): $text needs search fields on ${entity} (schema.entities.${entity}.search)`);
     }
@@ -316,7 +341,7 @@ class Cursor {
 
   // A cursor like this one, to build on: the predicate is shared (compiled once), the rest copied.
   #clone() {
-    const copy = new Cursor(this.#source, this.#entity, this.#query, this.#predicate);
+    const copy = new Cursor(this.#source, this.#entity, this.#query, this.#predicate, this.#cache);
     copy.#order = this.#order.slice();
     copy.#limit = this.#limit;
     copy.#offset = this.#offset;
@@ -437,6 +462,19 @@ class Cursor {
     return rows;
   }
 
+  // The cache key of this cursor's result: what it reads and how; null with a filter (a function has
+  // no name) or without a cache (a tag's source).
+  #cacheKey() {
+    if (this.#cache === null || this.#filter !== null) return null;
+    const window = [this.#limit === Infinity ? null : this.#limit, this.#offset];
+    return keyOf([this.#entity, this.#query, this.#order, window, this.#projection, this.#populate]);
+  }
+
+  // Whether the rows come in the text index's order: a `$text` query without an order of its own.
+  #ranked() {
+    return this.#order.length === 0 && this.#query.$text !== undefined;
+  }
+
   // Covered: everything the cursor reads — the query's fields, the order's,
   // the projection's — is in the catalog, and no filter asks for the record.
   #covered(needsRows) {
@@ -466,7 +504,7 @@ class Cursor {
     const ordered = needsRows && this.#order.length > 0;
     const wanted = this.#offset + limit;
     const enough = needsRows && !ordered ? wanted : Infinity;
-    const sink = ordered && wanted !== Infinity ? new TopK(compareRows(this.#order), wanted) : new Every();
+    const sink = ordered && wanted !== Infinity ? new TopK(compareFully(this.#order), wanted) : new Every();
     const take = (candidate) => {
       if (this.#predicate(candidate) && (this.#filter === null || this.#filter(candidate))) sink.push(candidate);
     };
@@ -475,7 +513,7 @@ class Cursor {
         if (sink.size >= enough) break;
         const indexed = row(id);
         if (indexed === null || indexed.encrypted) continue;
-        take({ id, ...indexed.fields });
+        take(rowOf(id, indexed.fields));
       }
       return { rows: sink.rows, sorted: sink instanceof TopK };
     }
@@ -487,7 +525,7 @@ class Cursor {
       const pending = [];
       for (let i = 0; i < batch.length; i++) pending.push(load(batch[i]));
       const records = await Promise.all(pending);
-      for (let i = 0; i < batch.length; i++) if (records[i] !== null) take({ id: batch[i], ...records[i] });
+      for (let i = 0; i < batch.length; i++) if (records[i] !== null) take(rowOf(batch[i], records[i]));
       batch.length = 0;
     };
     for (const id of found) {
@@ -506,23 +544,42 @@ class Cursor {
     return projected;
   }
 
-  // Rows leave as copies (JSON, like everything that crosses the storage's
-  // boundary): the candidates were read raw from the cache, and a caller
-  // that edits a row must not be editing the cache.
+  // The rows from the top of the result, in its one order — the keys then
+  // the id; a `$text` query without keys in the index's ranking — as many
+  // as the window asks (`offset + limit`), raw: what a run of the cursor is.
+  async #top(limit = this.#limit) {
+    const { rows, sorted } = await this.#matching(true, limit);
+    if (!sorted && !this.#ranked()) rows.sort(compareFully(this.#order));
+    const wanted = this.#offset + limit;
+    return sorted || rows.length <= wanted ? rows : rows.slice(0, wanted);
+  }
+
+  // What leaves: copies (JSON, like everything that crosses the storage's
+  // boundary — the rows were read raw from the cache, and a caller that
+  // edits a row must not be editing the cache), projected, populated.
+  async #deliver(rows) {
+    const out = [];
+    for (let i = 0; i < rows.length; i++) out.push(JSON.parse(JSON.stringify(this.#project(rows[i]))));
+    return this.#populate === null ? out : this.#populated(out);
+  }
+
+  /** The rows, as copies: from the cache where the catalog has not moved since the key was read, else a run. */
   fetch() {
     return this.#fetch(this.#limit);
   }
 
   // `limit` is the call's own: `one()` asks for one row without leaving a
-  // limit on the cursor for the next `fetch()`.
+  // limit on the cursor for the next `fetch()` — and without the cache.
   async #fetch(limit) {
-    const { rows, sorted } = await this.#matching(true, limit);
-    if (this.#order.length > 0 && !sorted) rows.sort(compareRows(this.#order));
-    const start = this.#offset;
-    const end = Math.min(start + limit, rows.length);
-    const out = [];
-    for (let i = start; i < end; i++) out.push(JSON.parse(JSON.stringify(this.#project(rows[i]))));
-    return this.#populate === null ? out : this.#populated(out);
+    const key = limit === this.#limit ? this.#cacheKey() : null;
+    if (key !== null) {
+      const kept = this.#cache.rows(key, this.#source.generation());
+      if (kept !== null) return this.#deliver(kept.slice(this.#offset));
+    }
+    const generation = key === null ? 0 : this.#source.generation();
+    const top = await this.#top(limit);
+    if (key !== null) this.#cache.keep(key, generation, top);
+    return this.#deliver(top.slice(this.#offset));
   }
 
   async count() {
@@ -532,11 +589,9 @@ class Cursor {
   // The ids the cursor matches now, in its order and window — what a write
   // by query runs over: the rows read once, offset and limit applied.
   async #ids() {
-    const { rows, sorted } = await this.#matching(true, this.#limit);
-    if (this.#order.length > 0 && !sorted) rows.sort(compareRows(this.#order));
+    const top = await this.#top();
     const ids = [];
-    const end = Math.min(this.#offset + this.#limit, rows.length);
-    for (let i = this.#offset; i < end; i++) ids.push(rows[i].id);
+    for (let i = this.#offset; i < top.length; i++) ids.push(top[i].id);
     return ids;
   }
 
@@ -584,45 +639,88 @@ class Cursor {
     return row;
   }
 
+  // What a live run (./live.js) of this cursor is made of: how a record
+  // reads as a row (the catalog's row where covered, the record otherwise),
+  // whether it matches, where it sorts, the window, a run, the delivery.
+  #spec(needsRows, onRows) {
+    const covered = this.#covered(needsRows);
+    const { row, load } = this.#source;
+    const read = covered
+      ? (id) => {
+          const indexed = row(id);
+          return indexed === null || indexed.encrypted ? null : rowOf(id, indexed.fields);
+        }
+      : async (id) => {
+          const data = await load(id);
+          return data === null ? null : rowOf(id, data);
+        };
+    return {
+      entity: this.#entity,
+      wanted: this.#offset + this.#limit,
+      offset: this.#offset,
+      compare: compareFully(this.#order),
+      covered,
+      textual: this.#ranked(),
+      rowOf: read,
+      matches: (candidate) => this.#predicate(candidate) && (this.#filter === null || this.#filter(candidate)),
+      // The object a row was built from: the one the record reads as, held until it changes.
+      identityOf: (candidate) => candidate[VIEW] ?? candidate,
+      project: (candidate) => this.#project(candidate),
+      top: () => this.#top(),
+      deliver: (rows) => this.#deliver(rows),
+      onRows,
+    };
+  }
+
+  // A live run of this cursor, or of its count: the one the cache keeps for the key — shared by every
+  // `watch()` of the key — or this call's own where the cursor has no key.
+  #live(listener, onError, mode) {
+    if (typeof listener !== 'function') {
+      throw new TypeError(`${mode === 'count' ? 'watchCount' : 'watch'}() takes a listener`);
+    }
+    const key = this.#cacheKey();
+    if (key === null) {
+      const live = new Live(
+        this.#source,
+        this.#spec(mode === 'rows', () => {}),
+        mode,
+      );
+      return live.subscribe(listener, onError);
+    }
+    const cacheKey = mode === 'count' ? `${key}#count` : key;
+    const live = this.#cache.live(cacheKey, (entry) => {
+      // The run's rows are the key's result for as long as it runs, as of now.
+      const onRows = (rows) => {
+        entry.rows = rows;
+        entry.generation = this.#source.generation();
+      };
+      return new Live(this.#source, this.#spec(mode === 'rows', mode === 'rows' ? onRows : () => {}), mode, () =>
+        this.#cache.release(cacheKey),
+      );
+    });
+    return live.subscribe(listener, onError);
+  }
+
   /**
-   * Runs the cursor now and again after every change to the collection,
-   * coalescing the changes that land while a run is in flight; returns the
-   * stop function. A failing run goes to `onError`, or to the logger.
+   * Calls `listener(rows)` now and whenever the rows change — kept as the
+   * collection changes, without running the cursor again: the record that
+   * changed is read once, matched and placed (a full window that lost a row
+   * runs the cursor again, as does a `$text` query); emits only when an id
+   * came, went or moved, or a row reads as another. Every `watch()` of one
+   * query (the same entity, query, order, window, projection) shares one
+   * run. Returns the stop function. A failure goes to `onError`, or to the logger.
    */
   watch(listener, { onError = null } = {}) {
-    if (typeof listener !== 'function') throw new TypeError('watch() takes a listener');
-    const { logger, subscribe } = this.#source;
-    let stopped = false;
-    let running = false;
-    let dirty = false;
-    const run = async () => {
-      if (stopped) return;
-      running = true;
-      dirty = false;
-      try {
-        const rows = await this.fetch();
-        if (!stopped) listener(rows);
-      } catch (error) {
-        if (onError) onError(error);
-        else logger.warn({ event: 'watch.error', entity: this.#entity, err: error });
-      } finally {
-        running = false;
-        if (dirty && !stopped) queueMicrotask(run);
-      }
-    };
-    // A change that left the record's catalog row as it was cannot move a
-    // cursor that reads nothing else (covered); any other cursor runs again.
-    const wake = (changed) => {
-      if (dirty || (changed === false && this.#covered(true))) return;
-      dirty = true;
-      if (!running) queueMicrotask(run);
-    };
-    const unsubscribe = subscribe(this.#entity, wake);
-    queueMicrotask(run);
-    return () => {
-      stopped = true;
-      unsubscribe();
-    };
+    return this.#live(listener, onError, 'rows');
+  }
+
+  /**
+   * Calls `listener(count)` now and whenever the number of matches moves —
+   * the matching ids kept, one in or out per change, never counted again.
+   * Returns the stop function.
+   */
+  watchCount(listener, { onError = null } = {}) {
+    return this.#live(listener, onError, 'count');
   }
 
   async *[Symbol.asyncIterator]() {

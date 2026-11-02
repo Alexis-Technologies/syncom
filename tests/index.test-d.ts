@@ -993,6 +993,7 @@ storage.record<Post>('id').then((record) => {
   );
   expectType<syncom.Cursor<syncom.QueryRow<RecordData>>>(db.Tag.select().populate(['author']));
   expectType<boolean>(db.Tag.select({ n: { $mod: [2, 1] }, tags: { $all: ['a'], $size: 1 } }).matches({ n: 1 }));
+  expectType<() => void>(db.Tag.select().watchCount((count) => expectType<number>(count)));
   expectAssignable<syncom.MangoQuery>({
     $nor: [{ a: 1 }],
     v: { $type: 'null' },

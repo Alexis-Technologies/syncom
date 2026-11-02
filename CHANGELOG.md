@@ -66,6 +66,16 @@ and one `commit` event, not one per call.
   record as it reads, written as one transaction, refused whole where a kind refuses its part.
   `update(id, delta, { ifMatch: query })` writes only where the record matches the Mango query (the
   `query` plugin's), inside the queue, and resolves to whether it did.
+- **Live queries kept, not run again; `watchCount()`; the query cache.** `watch()` keeps its rows as the
+  collection changes: the record that changed is read once, matched and placed (in and matching → moved
+  to where it sorts; in and not → out; not in and matching → in; a full window that lost a row, or a
+  `$text` query, runs the cursor again) and emits only when an id came, went or moved or a row reads
+  as another object — never the same rows twice. `watchCount()` keeps the matching ids and moves the
+  count by one per change. Every `watch()` of one query shares one run; a `fetch()` of a query the
+  catalog has not moved since reads nothing (the run's rows while it runs, the last result after, up to
+  a hundred unobserved queries, the least recently used let go of first); a cursor with a `filter(fn)`
+  runs every time. A result has one order — the keys, then the id; a `$text` query without keys keeps
+  the index's ranking — so an unordered cursor hands its rows out by id.
 - **Queries: immutable cursors, `$type`/`$size`/`$mod`/`$all`/`$elemMatch`/`$nor`, `matches()`.** Every
   builder of a cursor — `order`, `desc`, `limit`, `offset`, `filter`, `projection`, `populate` — hands back
   a new cursor and leaves the one it was called on as it was, so two may be built on one. The predicate
