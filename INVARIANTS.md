@@ -46,6 +46,7 @@ and the rows to this order, numbered within a prefix):
 | `COLL` | collections: definitions at run time, bulk writes, `modify()`, the update operators, writes by query, references, the collection events |
 | `LOCAL` | local documents: never an op |
 | `STATE` | app state by name and path |
+| `DUMP` | dumps: export and import, a move between engines |
 
 | id | guarantee | tests |
 | --- | --- | --- |
@@ -217,3 +218,5 @@ and the rows to this order, numbered within a prefix):
 | COLL-8 | `collection.remove()` deletes every record of the collection as ops that replicate — tombstones, or with `purge: true` purges scrubbed from this node's log and every peer's — in pages of 500, each page one turn of the queue (an encrypted record, which has no op, on its own), and leaves the definition and the other collections as they were; `drop()`/`dropDatabase()` take every store of a database away under its lock — an open database is `LOCKED`, never emptied — and a node opened at the path again is a new node with nothing of the old. | `collection.remove() replicates as tombstones, or as purges scrubbed from every log`; `drop() and dropDatabase() take every store away; an open database is LOCKED, not emptied` |
 | LOCAL-1 | A local document (`db.local`, a collection's) is never an op: not in the log, not in the catalog, not in a snapshot page, never at a peer; it is kept across a reopen, swept by `drop()`, told by the `local` event and `observe()` in this instance alone. | `a local document is never an op: not in the log, the catalog, a snapshot, or at a peer` |
 | STATE-1 | A state over a record keeps every path as a register of its own: two nodes that write different paths of one state both keep theirs and read the same, a function set at a path runs over the value as it is inside a transaction, and a path observed is told after every change of it. | `two nodes that write different paths of one state converge; a function runs over the value as it is` |
+| DUMP-1 | A dump exported and imported as a merge on an empty node gives it what the source held — every record's data, every tombstone and purge — as a bootstrap would, converged; `insert` keeps the ids and makes new ops of the importing node (a tombstone deletes), and takes a dump with no meta the same way; a dump made under another schema hash is `SCHEMA_MISMATCH` unless forced. | `export then import (merge) on an empty node equals the source, record by record and tombstone by tombstone` |
+| DUMP-2 | `migrateStorage` by copy opens on the new engine as the same node — its id, its vector, every record — and writes on; by merge, a new node holds what the old one held. | `migrateStorage copies a database as the same node (its id and vector) or merges it into a new one` |

@@ -155,6 +155,10 @@
       "types": "./src/state/state.d.ts",
       "default": "./src/state/state.js"
     },
+    "./dump": {
+      "types": "./src/dump/dump.d.ts",
+      "default": "./src/dump/dump.js"
+    },
     "./package.json": "./package.json"
   },
   "directories": {

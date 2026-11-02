@@ -66,6 +66,14 @@ and one `commit` event, not one per call.
   record as it reads, written as one transaction, refused whole where a kind refuses its part.
   `update(id, delta, { ifMatch: query })` writes only where the record matches the Mango query (the
   `query` plugin's), inside the queue, and resolves to whether it did.
+- **Dumps: `@alexify/syncom/dump`.** `exportJSON(db)` is every record a snapshot would hand a peer — live
+  ones and tombstones, each with its meta, under the node, the schema's version and hash, the kinds and
+  the log position (`meta: false`: the live data alone); `exportPages` the same a page at a time.
+  `importJSON(db, dump, { mode })` joins it back as a `merge` (a bootstrap: one op per record, exact to
+  the source) or as an `insert` (plain writes under the same ids, new ops — a foreign `{ records: [{ id,
+  data }] }` too); a dump made under another schema hash is `SCHEMA_MISMATCH` unless forced.
+  `migrateStorage({ from, to, path })` moves a database between engines as the same node (`copyEngine`),
+  or by `merge` into a new one.
 - **Local documents: `@alexify/syncom/local`.** `createDatabase({ plugins: [local] })` hands the core
   `db.local` — `get`, `set`, `delete`, `list`, `observe`, `scoped` — JSON values kept in the `local` kv
   namespace beside the records that never become an op: not logged, not in the catalog or a snapshot,

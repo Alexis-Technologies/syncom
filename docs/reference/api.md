@@ -344,6 +344,7 @@ carries no code, except `INVALID_ID`, `TYPE_IMMUTABLE`, `INVALID_VERSION`,
 | `LOCKED` | `createDatabase()` while another instance holds the directory — at once under `lock: 'fail'`, after `lock.timeout` ms under `'wait'`; over an engine with a lease of its own (MongoDB), while another instance holds the lease | `path` |
 | `READ_ONLY` | any write, `applyRemote()`, `mergeSnapshot()`, `transact()`, `tag()`, `repair()` on a database opened with `readOnly: true`, or on a writer whose lease was lost (`lease: true`); `sync.unit()` on either (`reason: 'hosting'`): a follower's log and vector are as of its open, so it hosts no feed until the shared log lands | `path`, `lease`; `reason` from `sync.unit()` |
 | `TARGET_NOT_EMPTY` | `copyEngine()` (`@alexify/syncom/engines`) when the target engine already holds a database at `path` (`node.json`, or a record) | `path` |
+| `SCHEMA_MISMATCH` | `importJSON()` (`@alexify/syncom/dump`) of a dump made under another schema hash than this database runs, without `force` | `expected`, `given` |
 | `ENGINE_UNREACHABLE` | `remoteEngine()`/`connectEngine()` (`/syncom/engines`): the served side is gone — its port closed or its worker exited (`reason: 'closed'`), or a call waited past `timeout` ms (`reason: 'timeout'`, `ms`) — every call waiting fails so, and every call after | `reason`, `ms` |
 | `LEASE_LOST` | the storage's `error` event: the engine's lease on the database went to another instance (not renewed in time, or taken) — the database is read-only from here on and writes nothing more; what was logged but not landed is held (`UNPERSISTED`) for the next holder's replay. Also what an engine's write set, log group, seal, index, kv or copies put answers when a newer lease's document sits where it would write (MongoDB's fence) | `path`, `cause` |
 | `FOLLOW_LOST` | the storage's `error` event, on a follower (`readOnly: true`): the engine's change stream ended — an error, a close — so what the writer landed meanwhile was not heard; the follower subscribes again first and then reads every record again (a record removed meanwhile loses its row) | `path`, `cause` |
@@ -675,6 +676,21 @@ two nodes that write different paths both keep theirs, and the record replicates
 | `delete(path?)` | Removes the path (an `unset`), or the whole state |
 | `observe(path?, listener)` | `listener(value)` with the value at the path after every change of it; returns the stop |
 | `toStore(state, path?)` | A store of the value at the path, or of the whole object |
+
+## Dump (subpath)
+
+`@alexify/syncom/dump` — a database as JSON and back; a backup, an import from another database, a move between
+engines.
+
+| Member | Notes |
+| --- | --- |
+| `exportJSON(db, { collections, scopes, meta, limit }?)` | `Promise<Dump>` — `{ format: 1, node, schema: { version, hash }, kinds, eventId, vector, meta, records }`: every record a snapshot would hand a peer, live ones and tombstones, each with its meta (`meta: false`: the live records as they read, data alone); `collections` keeps to those, `scopes` to the records in them |
+| `exportPages(db, options?)` | The same a page at a time (`limit` records, 500), an async iterator |
+| `importJSON(db, dump, { mode, force, batch }?)` | `merge` (the default) joins the records with their meta as a bootstrap does — one op per record, this node's own; `insert` writes each record's data under its id as a plain write (new ops; a record whose meta holds a tombstone is deleted) and takes a foreign `{ records: [{ id, data }] }` the same way; a dump made under another schema hash rejects with `SCHEMA_MISMATCH` unless `force`. `{ mode, records }` |
+| `migrateStorage({ from, to, path, mode, batch }?)` | `copy` (the default; `from`, `to` engines): `copyEngine` — the same node on the new engine, its identity, log and vector; `merge` (`from`, `to` open databases): `from` exported and merged into `to`, a new node that holds what the old one held |
+
+A backup is `JSON.stringify(await exportJSON(db))` to a file and `importJSON(db, JSON.parse(text))` back; a live backup
+follows the `transaction` event and exports the records it names.
 
 ## Telemetry (subpath)
 

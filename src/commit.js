@@ -677,6 +677,13 @@ const opOf = (core, type, id, payload, current, visible, who, from, msg, ctx) =>
     const data = sameType(type, id, payload.data, visible);
     if (ctx !== null) ctx.data = data;
     payload = { ...payload, data };
+  } else if (type === 'delete' && payload.data !== undefined) {
+    // A tombstone that carries data keeps the record's collection: the tombstone stays the
+    // collection's (a collection's export, its events), as a reset does.
+    for (const key of Object.keys(payload.data)) fieldName('delete', key);
+    const data = sameType('write', id, payload.data, visibleOf(core, current, true));
+    if (ctx !== null) ctx.data = data;
+    payload = { ...payload, data };
   }
   const op = prepareOp(core, type, id, payload, current, who, from);
   if (msg !== undefined) op.msg = msg;

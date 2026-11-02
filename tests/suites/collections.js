@@ -308,9 +308,10 @@ const runCollectionTests = async (t, assert, createStorage) => {
       db.on('change', (op, via, { changes: own }) => changes.push(...own));
       const deleted = await db.Post.select({ org: 'b', n: { $gte: 6 } }).delete({ data: { why: 'old' } });
       assert.deepStrictEqual(deleted, { matched: 2, written: 2 });
+      // A tombstone that carries data keeps the record's collection.
       assert.deepStrictEqual(changes, [
-        { action: 'delete', data: { why: 'old' } },
-        { action: 'delete', data: { why: 'old' } },
+        { action: 'delete', data: { why: 'old', $type: 'Post' } },
+        { action: 'delete', data: { why: 'old', $type: 'Post' } },
       ]);
       assert.strictEqual(await db.Post.count(), 8);
       // One turn each, an op per record written.

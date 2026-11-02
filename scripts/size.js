@@ -572,6 +572,10 @@ const ENTRIES = [
   // Persistent app state by name and path, over a record or a local document — measured with the paths and the
   // shapes it shares with the core (collections plan, C4.2). 2.9 measured; 3.
   { label: 'state — browser (@alexify/syncom/state)', entry: 'src/state/state.js', platform: 'browser', budget: 3 },
+  // Dumps: export/import over snapshot pages, a move between engines — measured with the engines' copy it ships
+  // (collections plan, C4.3).
+  // 6.5 measured; 7.
+  { label: 'dump — browser (@alexify/syncom/dump)', entry: 'src/dump/dump.js', platform: 'browser', budget: 7 },
 ];
 
 // A browser entry has to be self-contained: no node builtins, and no packages

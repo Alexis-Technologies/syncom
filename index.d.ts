@@ -609,6 +609,7 @@ export type SyncomErrorCode =
   | 'LEASE_LOST'
   | 'FOLLOW_LOST'
   | 'TARGET_NOT_EMPTY'
+  | 'SCHEMA_MISMATCH'
   | 'ENGINE_UNREACHABLE'
   | 'KEYS_INCOMPLETE'
   | 'DECRYPT_FAILED'

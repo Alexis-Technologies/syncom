@@ -39,6 +39,7 @@ if two ever seem to disagree; fix the one that is wrong.
 | [src/encryption/CLAUDE.md](./src/encryption/CLAUDE.md) | Encryption: encrypted records are local |
 | [src/local/CLAUDE.md](./src/local/CLAUDE.md) | Local documents: never an op |
 | [src/state/CLAUDE.md](./src/state/CLAUDE.md) | App state: by name and path, a path a register |
+| [src/dump/CLAUDE.md](./src/dump/CLAUDE.md) | Dumps: a merge is a bootstrap, an insert is a write |
 | [tests/CLAUDE.md](./tests/CLAUDE.md) | Tests: the suites run twice, the mesh, coverage, INVARIANTS.md |
 | [bench/CLAUDE.md](./bench/CLAUDE.md) | Benchmarks: the comparison's own package, the generated charts |
 | [docs/CLAUDE.md](./docs/CLAUDE.md) | Documentation: examples run before they are written, the pages kept in step with the code, the matrices as data |

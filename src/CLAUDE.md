@@ -16,6 +16,7 @@ src/plugin.js             createPlugins — the registry one createDatabase() bu
 src/contracts/contracts.js the @alexify/syncom/contracts subpath — never back in the barrel
 src/local/local.js        @alexify/syncom/local — the local plugin: db.local over the `local` kv namespace, never an op (its own CLAUDE.md)
 src/state/state.js        @alexify/syncom/state — createState(db, name): app state by path over a record or a local document (its own CLAUDE.md)
+src/dump/dump.js          @alexify/syncom/dump — exportJSON/exportPages/importJSON/migrateStorage: a database as JSON and back (its own CLAUDE.md)
 src/store/store.js        the @alexify/syncom/store subpath — toStore/fromEvents: one store object for Svelte's contract and
                           React's useSyncExternalStore over a cursor, a Record, get(), a presence or an emitter — no requires
 src/inspect/inspect.js    the @alexify/syncom/inspect subpath — a record's anatomy (through the [SOURCE] seam's raw `entry`) and anonymize; requires compose, shape, symbols, hash only
@@ -51,8 +52,7 @@ src/order/order.js        the @alexify/syncom/order subpath — fractional index
                           strings, for ordering records — no requires; the tree plugin uses it for a node's place
 src/patch.js              patches — the one vocabulary of diff()/applyPatches()/restore(): diffViews by kind, realize() to an op — requires shape.js, args.js, paths.js, plugin.js only
 src/symbols.js            COMMIT / REFRESH / SOURCE — the module-private seams between Database and what it hands out — no requires
-src/lazy.js               lazyField, putLazy, copyData, assignData — a field read when it is read (a list's, `mod.lazy`): an accessor
-                          the data and the delta share, copied as it is — no requires
+src/lazy.js               lazyField, putLazy, copyData, assignData — a field read when it is read (a list's, `mod.lazy`): an accessor the data and the delta share, copied as it is — no requires
 src/options.js            normalizeStorageOptions — createDatabase()'s plain options checked and defaulted (lock, cache, chain, skew…)
 src/lock.js               exclusive open: Web Locks or the root namespace's lock.json, stale by pid or age — requires errors.js, engine.js only
 src/catalog.js            the record catalog: live ids, collections, indexed values; catalog.json through a kv store — requires engine.js only
