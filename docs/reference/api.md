@@ -62,6 +62,9 @@ naming the subpath; `@alexify/syncom/all` has both.
 | Method | Returns | Notes |
 | --- | --- | --- |
 | `insert(data, options?)` | `Promise<string>` | Generates an id via `getId` (a UUID by default) and writes; rejects with `code: 'INVALID_ID'` when the generator mints one that is not a [valid id](../guide/database#custom-identifiers) |
+| `collections` | `Readonly<Record<string, Collection>>` | The collections by name, one frozen object — another after `addCollections()`/`removeCollection()`; `db.<Name>` is the same collection |
+| `addCollections(definitions)` | `Promise<void>` | Defines collections after the open — each as an entity of `createDatabase({ schema })` would be: its validator (the `schema` plugin's), indexes, unique keys and search fields in force at once; the records of its type the catalog holds are indexed from the records, 500 a page inside the queue, behind the landings. Nothing of it is persisted: a reopen under fewer definitions rebuilds the catalog. A name the database answers to, or a definition the schema refuses, is a `TypeError` before anything is applied |
+| `removeCollection(name)` | `void` | Forgets the definition and `db.<name>`; the records stay (`collection.remove()` deletes them) |
 | `get(id, { at }?)` | `Promise<R \| null>` (`get<Post>(id)`; `RecordData` by default) | `null` when absent or deleted; verifies against the chain; a copy — editing it changes nothing. With `at` (the `versions` plugin's) — an event id, a stamp (a number or a `Date`), `{ vector }` or `{ tag }` — the record at that version, folded from the log, or a tag's copy (see [Versions and history](../guide/versions)); rejects with `HISTORY_GONE` when the log cannot give it exactly, `INVALID_VERSION` for a malformed `at` or a seq not reached, `TAG_NOT_FOUND` for a tag this node has not, `ENCRYPTED` for an encrypted record (at a tag one reads as its data) |
 | `tag(name)` | `Promise<Tag>` | Names the storage as it is now — `{ name, eventId, seq, ts, vector, createdAt }`, kept on this node as the catalog of the moment plus a copy of each record's file taken before its first change after the tag (see [Tags](../guide/versions#tags)); `name` is of the record-id form (a `TypeError` otherwise); deferred files land first. Rejects with `TAG_EXISTS`, `UNPERSISTED` while a record's file lags the log after a failed write, `CORRUPT` while `tags.json` is unreadable; the `versions` plugin's (`PLUGIN_MISSING` without it) |
 | `untag(name)` | `Promise<void>` | Drops a tag; the copies the next older tag needs move there; rejects with `TAG_NOT_FOUND`; the `versions` plugin's (`PLUGIN_MISSING` without it) |
@@ -203,15 +206,36 @@ storage already answers to (`get`, `close`, `log`, `sync`…) is refused at
 `SyncomCollection<R, I>` — `R` the record as it reads, `I` what a write
 takes; both from the entity's Standard Schema or the schema's `Shapes`,
 `RecordData` otherwise (see [TypeScript](../guide/typescript)).
-`name`, `insert(data, options?)` (resolves to the new record's `Document`),
-`get(id, { at }?)` (null for a record of another collection),
-`set(id, data, options?)` (stamped as the collection's),
-`update(id, delta, { actor }?)` (refuses a delta naming `$type`),
-`delete(id, { actor }?)`, `document(id)` — `update`, `delete` and `record`
-reject with `NOT_FOUND` for a record of another collection —
-`select(query?)` → a cursor, `count(query?)`, `distinct(field, query?)`, `countBy(field, query?)` (the `query` plugin's:
-`PLUGIN_MISSING` without it), `findByIds(ids)` (a `Map` of the live records of this collection among `ids`, one read of
-the engine for the ones not cached; to follow a set of ids, `select({ id: { $in: ids } }).watch()`).
+`name`, `local` (the collection's [local documents](../guide/local)), and:
+
+| Member | Notes |
+| --- | --- |
+| `insert(data, options?)` | A new record — under the id its data names (the entity's composite id or its id field: a live one there is `EXISTS`), else a minted one; resolves to its `Document` |
+| `upsert(data, options?)`, `insertIfAbsent(data, options?)` | Written whole under the named id, new or not; or only where no live record holds it (decided inside the queue), the `Document` either way. Data that names no id is a `TypeError` |
+| `bulkInsert(rows, options?)`, `bulkUpsert(rows, options?)`, `bulkRemove(ids, options?)` | ONE transaction with a verdict per row — `{ success: ids, error: [{ index, id, data, error }] }`: a row refused on its own account (its validator, a unique key, its id, its collection) stays out, the rest land, a batch that cannot reach the disk lands nothing; 10 000 rows at most (a `TypeError` before anything lands). An `afterWrite` hook that fails after the rows landed leaves the verdicts to the caller and goes to the `error` event |
+| `get(id, { at }?)`, `findByIds(ids)`, `document(id)` | `null` for a record of another collection; a `Map` of the live records of this collection among `ids`, one read of the engine for the ones not cached (to follow a set, `select({ id: { $in: ids } }).watch()`); the live `Document` |
+| `set(id, data, options?)` | Written whole, stamped as the collection's |
+| `update(id, delta, { actor, ifMatch }?)` | Fields, or the [update operators](../guide/database#update-operators) (one operator per field; `$rename` takes a register); a delta naming `$type` is a `TypeError`; with `ifMatch` (the `query` plugin's) written only where the record matches, inside the queue — `true`, else `false`, nothing written |
+| `modify(id, fn, options?)` | `fn` over a copy of the record inside the queue; what it leaves is written as the difference (`null` deletes) |
+| `delete(id, { actor, data }?)` | A tombstone; `data` written into the record as it dies (one op) |
+| `remove({ purge, actor }?)` | Every record of the collection as it was when the call began — tombstones, or purges scrubbed from the log — 500 a page, a page a turn of the queue; `{ removed }`. Takes `{ purge, actor }` and nothing else: `remove({ status: 'old' })` is a `TypeError`, the matches of a query go through `select(query).delete()` |
+| `select(query?)`, `count(query?)`, `distinct(field, query?)`, `countBy(field, query?)` | The `query` plugin's (`PLUGIN_MISSING` without it): a cursor, below |
+| `on(event, fn)`, `once`, `off`, `clear` | The collection's events, told on a microtask after the landing of a record of its own — `change` `({ id, action })` and `insert`, `update`, `remove` `({ id })`, `action` what the catalog decided (a record joining the collection an `insert`, one leaving it — deleted, purged, encrypted, of another collection now — a `remove`, several ops of one turn one `update`); the catalog's subscription goes with the last listener |
+| `methods` / `statics` (the definition's) | Bound, non-enumerable: `methods` on every `Document` of the collection, `statics` on the collection (`db.Post.recent()`); a static named like a collection member is a `TypeError` at the definition |
+
+`update`, `delete`, `modify` and `document` reject with `NOT_FOUND` (`entity`) for a record of another
+collection. Writes through a collection with a `schema` are validated — see
+[Validation](../guide/database#validation); `unique` keys are refused with a `ValidationError` whose issue has
+`code: 'unique'` and `conflict`.
+
+What `remove` means where — the one name, four things:
+
+| Call | Meaning |
+| --- | --- |
+| `db.remove(id, field, elements)`, `document.remove(field, elements)` | Elements out of a set field (a `remove` op) |
+| `collection.remove({ purge })` | Every record of the collection, 500 a page |
+| `collection.bulkRemove(ids)` | The ids given, one transaction with a verdict per row |
+| `db.removeCollection(name)` | The definition alone; the records stay |
 Writes through a collection with a `schema` are validated — see
 [Validation](../guide/database#validation); `unique` keys are refused with a
 `ValidationError` whose issue has `code: 'unique'` and `conflict`.
@@ -326,7 +350,7 @@ carries no code, except `INVALID_ID`, `TYPE_IMMUTABLE`, `ID_IMMUTABLE`, `INVALID
 | `IN_HOOK` | a write issued from inside a write or apply hook (the `cause` of the `HookError` the operation rejects with) | — |
 | `IN_TRANSACTION` | a write issued through the database from inside `transact()`'s or `modify()`'s function, which holds the mutation queue the write would wait for — write through `tx`, or return the record. Told by the function's async context (Node); in the browser such a write is not told from one made meanwhile and waits for the queue the function holds | — |
 | `EXISTS` | `insert()` (the database's, a collection's, `tx.insert()`, an encrypted one too) and `bulkInsert()` of a record whose data names the id of a live record — the entity's composite id, or the id field's value; decided inside the queue | `id`, `entity` |
-| `NOT_FOUND` | a write under a list element or a tree node that is not there (`items/<name>/body` with no element `name`: `id`, `field` the list or tree, `elem` the name); `update()`, `swap()` on a record that is absent, deleted or purged; a collection's `update()`, `delete()`, `document()` on a record of another collection; `treeMove()` with an `after`/`before` sibling not under the parent; `joinBlock()`, `updateBlock()`, `setAt()` on a text at a slot that is no block marker and no embed | none from `update()`/`swap()`; `id`, `entity` (the collection's) from a collection; `id`, `field`, `node` (the sibling) for a tree; `id`, `field`, `index` for a text's slot |
+| `NOT_FOUND` | a write under a list element or a tree node that is not there (`items/<name>/body` with no element `name`: `id`, `field` the list or tree, `elem` the name); `update()`, `swap()` on a record that is absent, deleted or purged; a collection's `update()`, `delete()`, `document()` on a record of another collection; `treeMove()` with an `after`/`before` sibling not under the parent; `joinBlock()`, `updateBlock()`, `setAt()` on a text at a slot that is no block marker and no embed | none from `update()`/`swap()`; `id`, `entity` (the collection's) from a collection; `id`, `field`, `node` (the sibling) for a tree; `id`, `field`, `index` for a text's slot; `entity` where a collection's method refused the record as another collection's or absent — `update`, `delete`, `modify`, `document`, `bulkRemove` |
 | `FIELD_KIND` | `openText()` on a field that is not a text, `update()`/`set()` on a counter, set, list, text or tree field, `inc()` on a register, set, list, text or tree field, `add()`/`remove()` on a register, counter, list, text or tree field, `splice()`/`push()`/`updateText()` on a register, counter, set or tree field (and a string on a list, an array on a text), `move()` on anything but a list, `setAt()` on anything but a list or a text, `mark()`/`unmark()`/`unmarkById()`/`insertEmbed()`/`splitBlock()`/`joinBlock()`/`updateBlock()` on anything but a text, `treeMove()`/`treeRemove()` on anything but a tree — the patches of `applyPatches()` alike; a list or text op past a bound of the field — pending work (`sync.pendingMax`, 4 096), a run (1 048 576 slots), the field as a whole (4 194 304 slots; see [Costs and limits](../guide/lists#costs-and-limits)) a splice whose cut names more than 65 536 ranges (one per run a deleted stretch crosses: delete in parts, or `compact()` first) or a `mark()` on a text that holds 65 536 marks already (a `move()` counts its position run against the field); a `treeMove()`/`treeRemove()` on a tree field that holds 65 536 moves already; an `inc()` that would take this node's sum of the counter past ±`Number.MAX_SAFE_INTEGER` | `field`, `kind` (`'register'`, `'counter'`, `'set'`, `'list'`, `'text'`, `'tree'` — or `'bound'`, with `detail` (`'pending'`, `'run'`, `'field'`, `'cuts'`, `'marks'`, `'moves'`, `'counter'` or `'paths'`), `count` and `max`); `prefix` when the field lies under a prefix a counter, a set, a list, a text or a tree holds |
 | `OUT_OF_RANGE` | `splice()` past the length of a list or text field — the index, or the index plus the count; `setAt()`/`move()` at an index the list has not; `mark()`/`unmark()` over a range the text has not; `treeMove()` to a place that would read below the 512 levels a tree shows, or between neighbours with no room left for another fractional index | `id`, `field`, `index`, `count`, `length`; for a tree `node` and `depth`, `max`, or `reason: 'fi'`, `length`, `max` |
 | `STALE` | `applyDelta()` with `expect` on a text field that reads otherwise inside the mutation queue — a peer's edit landed between the reading the delta was made over and the delta; nothing written | `id`, `field` |
@@ -376,7 +400,7 @@ carries no code, except `INVALID_ID`, `TYPE_IMMUTABLE`, `ID_IMMUTABLE`, `INVALID
 | `TYPE_IMMUTABLE` | a local `set()`, `update()`, `swap()`, `record.save()`, `modify()` or patch whose data names another `$type` than the record's, and an `unset()` (or `$unset`/`$rename`) of `$type` (a `TypeError`) | — |
 | `ID_IMMUTABLE` | a local `set()`, `update()` (fields or operators), `modify()`, `unset()` or patch that changes or unsets a field the record's composite id is derived from (a `TypeError`) | — |
 | `NO_CHAIN` | `validate()` under `createDatabase({ chain: false })` or without the `chain` plugin (a `TypeError`; the message says which) | — |
-| `PLUGIN_MISSING` | a method, a patch action or a local op of a kind the storage was not opened with — `splice()` without the `text` plugin — and `createDatabase()` of a directory that ran with a kind the call lacks; `createDatabase()` asking for what no registered plugin provides — `sync.signatures: 'require'` without `signing`, `chain: true` without `chain`, `encrypted: true` without `encryption` — and a per-call `{ encrypted: true }` without it (a `TypeError`; the message names the subpath) | — |
+| `PLUGIN_MISSING` | a method, a patch action or a local op of a kind the storage was not opened with — `splice()` without the `text` plugin — and `createDatabase()` of a directory that ran with a kind the call lacks; `createDatabase()` asking for what no registered plugin provides — `sync.signatures: 'require'` without `signing`, `chain: true` without `chain`, `encrypted: true` without `encryption` — and a per-call `{ encrypted: true }` without it; a collection's `select()`/`count()`, `update(id, delta, { ifMatch })` and `watch()` without `query`, `db.local` without `local`, `addCollections()` with a validator without `schema` (a `TypeError`; the message names the subpath) | — |
 | `PRESENCE_SIZE` | a presence `set()` whose state is past its bounds — 16 KiB, 64 keys, 8 deep (a `TypeError`) | — |
 | `HOOK_FAILED` | a `HookError` | `hook`, `cause` |
 | `VALIDATION_FAILED` | a `ValidationError` | `entity`, `issues`, `cause` |

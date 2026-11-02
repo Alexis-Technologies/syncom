@@ -694,7 +694,7 @@ A collection's `remove({ purge })` deletes (or, purged, scrubs from the log — 
 ids rewritten once) every record of the collection as it was when the call began, 500 at a time; it takes
 `{ purge, actor }` and nothing else (`remove({ status: 'old' })` is a `TypeError`): the matches of a query
 go through `select(query).delete()`.
-`findByIds(ids)` reads a set of records as a `Map`, one read each from the cache or the engine.
+`findByIds(ids)` reads a set of records as a `Map`: one read of the engine for the ones not cached.
 
 ### Change and delete
 
@@ -707,7 +707,7 @@ every match, and a record revived after it comes back with those fields as its o
 ### App state
 
 [`createState(storage, name)`](../reference/api#state-subpath) of `@alexify/syncom/state` is one object a
-node keeps by path — `state.get('panel.width')`, `state.set('theme', 'dark')`, `observe()` — over
+node keeps by path — `state.get('panel/width')`, `state.set('theme', 'dark')`, `observe()` — over
 a record `state.<name>` that replicates like any record, or, with `{ local: true }`, over a
 [local document](./local) this node keeps for itself.
 

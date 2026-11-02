@@ -531,6 +531,20 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   namespace (a folded tombstone's whole entry, `EntryStore.foldMany`; a fold changes no row; `#loadCatalog` rebuilds
   from both). A new way of changing a
   record's file must put too, or the catalog lies until the next rebuild.
+- **A collection is a definition over the one write path, never a path of its own.** `Collection` (src/collection.js)
+  derives the id its data names through `namedId` (src/schema/entity.js: the composite id's fields or the id field,
+  a value with the separator or not a string/number/boolean INVALID_ID with `entity`/`field`) and writes through the
+  core — `insert` as a `write` with `expect: ABSENT` (EXISTS decided inside the queue, an encrypted write too),
+  `upsert`/`set` as a `write`, the operators expanded in the queue (`operate`), `modify` as the difference, a bulk as
+  ONE `transact` with a verdict per row (`ownVerdict`: a row's own refusal is its verdict, anything else fails the
+  batch) — MAX_BATCH (10 000) rows a transaction; the fields of a composite id and `$type` are immutable
+  (`immutables` in src/commit.js). `addCollections`/`removeCollection` are `Catalog.define` (the postings, unique keys
+  and sorted indexes of the type dropped and built once; the records re-indexed in pages inside the queue behind the
+  landings) — nothing persisted, a reopen rebuilds. A write from inside a hook or a transaction's `fn` through the
+  database is IN_TRANSACTION (`taskScope`, src/utils.js: the frame inactive once `fn` settled). The `[SOURCE]` seam is
+  write-capable for the blocks — `foldMany`/`forgetMany` (cleanup), `purgeMany` (a collection's purge), `transact`
+  (a cursor's writes), `guard` (a local write) — every member a `#run` of the queue or a refusal of it; a new member
+  goes through the queue the same way.
 - **`createDatabase()` is exclusive by default (`lock: 'fail'`).** A test that opens
   the same directory twice must `close()` the first storage or pass
   `lock: false`; `bench/storage.js` does the latter. Never weaken the

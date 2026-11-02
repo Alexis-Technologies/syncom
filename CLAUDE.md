@@ -81,8 +81,9 @@ and the whole suite with `node --test --test-timeout=120000` (never a run withou
 
 - **An adapted algorithm brings its notice.** Code or a rule taken from an MIT or BSD project is named in
   `THIRD_PARTY_NOTICES.md` (project, commit, the syncom files that carry it) with the upstream notice.
-  Nothing is copied from json-joy (AGPL-3.0), Collabs or `fugue/fugue` (Apache-2.0) — those are read
-  as specifications only; the clones live in `../../open-source/local-first-alternatives/`.
+  Nothing is copied from json-joy (AGPL-3.0), Collabs or `fugue/fugue` (Apache-2.0), nor from RxDB (Apache-2.0)
+  and its event-reduce-js (MIT) — those are read as specifications only (the live query of `src/query/live.js` is
+  the event-reduce idea written anew); the clones live in `../../open-source/local-first-alternatives/`.
 - **CommonJS everywhere in `src/`.** No `import`, no `type: module`, no build.
 - **No runtime dependencies.** Helpers go in `src/utils.js`. `scripts/size.js`
   fails at resolve time on any bare import reaching a browser bundle, so a

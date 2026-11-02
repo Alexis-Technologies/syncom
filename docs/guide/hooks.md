@@ -228,6 +228,7 @@ default) on the storage and on its sync manager; one more throws.
 | `log` | `({ kind: 'roll', sealed, dropped, floor, segments })` | The op log sealed a segment, and compacted `dropped` of them — see [The log](./sync#the-log) |
 | `lease` | `({ state: 'renewed' \| 'late' \| 'lost', path })` | The engine's lease on the database (MongoDB) was renewed; a renewal failed and is being retried (`late`, once per run of failures); it went to another instance or was given up (`lost`, with the `error` event `LEASE_LOST`) — see [Engines](./backends#engines) |
 | `close` | — | After `close()` sealed the log |
+| `local` | `({ key, value })` | A [local document](./local) written (`value`) or deleted (`null`) through `db.local` or a collection's — never an op, so no `change`; the `local` plugin's |
 
 A `Document` emits `update` `(data, delta)` on a staged assignment and when the
 record changes in storage (`null` data once deleted) — once per transaction

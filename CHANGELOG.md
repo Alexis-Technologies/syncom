@@ -38,6 +38,38 @@ lost at any rebuild: a database that ran that build's `cleanup` is best re-synce
   (`stream()` reads each row once, and runs once where no index sorts), a one-sided range holds its kind alone, and
   `count()` over a sorted index entered by a prefix or a range reads no record. A plan and a cached result follow
   `addCollections()`/`removeCollection()`; `addCollections()` indexes the records in pages inside the queue.
+- **Tombstones are folded whole (review №6, E1).** `cleanup` moves an old, acknowledged tombstone — its data and its
+  whole meta — into the `tombstones` kv namespace in ONE write set with its file's removal; the catalog is derived
+  from the records and that namespace, a rebuild reads both, a fold changes no row, and a tombstone's row keeps the
+  record's collection and its `deleted` stamp (catalog format 5). A late op below the stamp stays moot on a folded
+  node as on any other; a pipeline and a dump see a plain delete's collection.
+- **Writes made safe (review №6, E2).** A write by query and `ifMatch` go by the record's id — a data field named
+  `id` names no other record; `drop()` is `READ_ONLY` on a follower or after a lost lease and sweeps under the lock;
+  `dropDatabase()` refuses a directory that holds no database; a composite id whose field holds the separator, or is
+  not a string, a number or a boolean, is `INVALID_ID` (`entity`, `field`), and the fields of a composite id are
+  immutable (`ID_IMMUTABLE`); `$type` is immutable through `unset`, `$unset`, `$rename` and `modify()`; a named
+  `insert()` with `encrypted: true` is `EXISTS` like any other (`expect: ABSENT`, inside the queue); `populate()` and a
+  `Reference` resolve a record of the declared collection alone; a `delete` change reports the data applied.
+- **Bounded, and refused out loud (review №6, E5–E6).** One transaction takes 10 000 rows of a bulk write or matches
+  of a write by query (`MAX_BATCH`, a `TypeError` before anything lands); two update operators naming one field are a
+  `TypeError`, as MongoDB refuses a conflicting update, and `$rename` takes a register; `collection.remove()` takes
+  `{ purge, actor }` and nothing else (`remove({ status: 'old' })` is a `TypeError`, not the collection gone) and pages
+  over the records as the call began; a bulk write whose `afterWrite` hook fails after the rows landed keeps its
+  verdicts (the failure is the `error` event); a purge's ids are scrubbed together (`log.scrub(ids)`: every file
+  holding them rewritten once); a transaction's unique keys and the records' in flight are checked through maps, not
+  a scan per op; the query cache is current per collection and holds 10 000 rows at most; a live run delivers a row
+  that stayed as the copy it was; `nearest()` takes `k` of at most 1000 and a vector of at most 4096 numbers; a query
+  nests 32 levels at most; a collection's events fire on a microtask after the landing and the catalog's subscription
+  goes with the last listener; a local write after `close()` is `CLOSED`; a cold read verifies its chain block parsed
+  and hashed once per batch (10 000 records read in 0.1 s, not 19); a pipeline's replay and rebuild are paged by 500
+  with the checkpoint after the last page, and live turns join while one is handled.
+- **Observable (review №6, E7).** `stats()` answers `collections`, `advisors`, `tombstones` and the query plugin's
+  `{ cache: { entries, rows }, live }`; the blocks record their work — `syncom.query.cache`, `syncom.query.live`,
+  `syncom.query.plans`, `syncom.bulk.rows`, `syncom.pipeline.turns`, `syncom.pipeline.lag`,
+  `syncom.cleanup.tombstones` and the `syncom.cleanup.sweep` span, `syncom.dump.pages`, `syncom.insert.named`; the
+  destructive operations are info lines (`database.drop`, `collection.remove`, `collection.removed`,
+  `pipeline.rebuild`); a composite id's `INVALID_ID` names its `entity` and `field`, a refused bulk row the id its
+  data named.
 - **Node 24 or later.** `node:sqlite` needs no flag there (22.13/23.4 unflagged it; the engines' tests run it), so
   `engines.node` says `>=24` and CI runs on 24 and 26 (review №5, G-6). The guide page `/guide/storage` became
   `/guide/database` on the rename: the links that still pointed at it (llms.txt, a versions API comment) follow.

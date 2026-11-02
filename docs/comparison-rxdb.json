@@ -2095,7 +2095,7 @@
         },
         "orm": {
           "mark": "✅",
-          "text": "`methods` on every `Document` (bound, non-enumerable), `statics` on the collection; attachments are their own row",
+          "text": "`methods` on every `Document` (bound, non-enumerable), `statics` on the collection (bound, non-enumerable; a name of a collection member is refused)",
           "source": "src/document.js (#defineMethods); src/collection.js; docs/guide/database.md#orm-methods-and-statics"
         },
         "relations": {

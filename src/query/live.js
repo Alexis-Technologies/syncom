@@ -3,6 +3,9 @@
 // A live query (the query plugin's): the rows a cursor matches, kept as the
 // collection changes without running the cursor again — event-reduce. The
 // catalog says which record changed (`subscribe`); the record is read once
+// (the idea is RxDB's event-reduce-js, MIT, read as a specification: nothing
+// of it is copied — the rules here are the catalog's actions and the
+// cursor's order);
 // (the cache has it: it was just written), matched, and placed: in the
 // result and matching → moved to where it sorts; in and not matching →
 // taken out; not in and matching → put where it sorts; neither → nothing.
