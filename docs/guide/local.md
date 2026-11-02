@@ -25,6 +25,13 @@ writes the key `Post.filter`, and `db.Post.local.list()` lists the keys of that 
 
 ## Following a value
 
+`set(key, fn)` writes what the function answers over the value as it is (null for none; `undefined` leaves it) —
+the changes of one key go one at a time, so counters and merges made at once compose:
+
+```js
+await Promise.all([db.local.set('opened', (n) => (n ?? 0) + 1), db.local.set('opened', (n) => (n ?? 0) + 1)]); // 2
+```
+
 `observe(key, listener)` calls the listener after every `set` and `delete` of the key in this instance
 (`null` once deleted) and returns the stop; the database emits `local` (`{ key, value }`, the full key) on
 every write. `toStore(db.local, key)` of `@alexify/syncom/store` is a store of the value, for a framework.

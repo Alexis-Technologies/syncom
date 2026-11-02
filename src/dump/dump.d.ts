@@ -3,11 +3,13 @@
 
 import type { Database, Engine, Entry, VersionVector, RecordData } from '../../index.js';
 
-/** A record of a dump: as a snapshot hands it (with its meta), or the data alone (`meta: false`). */
+/** A record of a dump: as a snapshot hands it (with its meta, and whether it reads as dead), or the data alone (`meta: false`). */
 export interface DumpRecord {
   id: string;
   data: RecordData;
   meta?: Entry['meta'];
+  /** Whether the record is dead — a tombstone, a purge — by its meta; an insert deletes it. */
+  deleted?: boolean;
 }
 
 export interface Dump {

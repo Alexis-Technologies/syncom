@@ -1275,6 +1275,8 @@ class Database extends Emitter {
       purgeMany: (ids, options) => this.#purgeMany(ids, options),
       // Every id the catalog holds a row for — live, encrypted, a tombstone — sorted (shared: read it).
       all: () => catalog.all(),
+      // Whether an entry — `{ meta }` is enough — reads as alive (the op model's `isAlive`; a dump's `deleted`).
+      alive: (entry) => isAlive(entry),
       // Whether `id` is a folded tombstone: its entry in the `tombstones` kv namespace, no record file.
       folded: (id) => this.#entries.folded(id),
       // Tombstones folded into the `tombstones` kv namespace (@alexify/syncom/cleanup), one write set: inside the

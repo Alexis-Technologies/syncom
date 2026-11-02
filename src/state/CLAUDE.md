@@ -13,4 +13,5 @@ src/state/state.js        @alexify/syncom/state — createState(db, name, { loca
 
 - **A path is a register.** Over a record, `set('a/b', v)` is `update(id, { 'a/b': v })`: two nodes writing different
   paths of one state both keep theirs, and a function (`set(path, fn)`) runs inside a transaction over the record as it
-  is. Over a local document the whole object is written at once (one node's; no merge).
+  is. Over a local document the whole object is written at once (one node's; no merge) — through the local store's
+  `set(key, fn)`, one change of the document at a time, so sets made at once compose.

@@ -79,7 +79,9 @@ const overRecord = (db, id) => ({
   observe: (path, listener) => db.observe(id, path, listener),
 });
 
-// A state over a local document: the whole object, read and written at once.
+// A state over a local document: the whole object, read and written at once
+// — through the store's `set(key, fn)`, one change of the document at a time,
+// so two sets made at once both land.
 const overLocal = (store, key) => ({
   get: async (path) => {
     const held = await store.get(key);
@@ -87,22 +89,22 @@ const overLocal = (store, key) => ({
     return held === null ? undefined : valueAt(held, path);
   },
   set: async (path, given) => {
-    const held = await store.get(key);
-    if (path === null) {
-      const value = next('set', given, held);
-      if (!isPlainObject(value)) throw new TypeError('set() of the whole state takes an object');
-      await store.set(key, value);
-      return value;
-    }
-    const value = next('set', given, held === null ? undefined : valueAt(held, path));
-    await store.set(key, laid(held, path, value));
+    let value;
+    await store.set(key, (held) => {
+      if (path === null) {
+        value = next('set', given, held);
+        if (!isPlainObject(value)) throw new TypeError('set() of the whole state takes an object');
+        return value;
+      }
+      value = next('set', given, held === null ? undefined : valueAt(held, path));
+      return laid(held, path, value);
+    });
     return value;
   },
   delete: async (path) => {
-    const held = await store.get(key);
-    if (held === null) return;
-    if (path === null) await store.delete(key);
-    else await store.set(key, laid(held, path, undefined));
+    if (path === null) return store.delete(key);
+    // Nothing held: nothing to take a path out of (`undefined` back leaves the document as it is).
+    await store.set(key, (held) => (held === null ? undefined : laid(held, path, undefined)));
   },
   observe: (path, listener) => store.observe(key, listener),
 });

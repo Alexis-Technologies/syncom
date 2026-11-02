@@ -582,7 +582,9 @@ const ENTRIES = [
   },
   // Local documents: a store over the `local` kv namespace, the plugin — measured with the kv namespace and the
   // contained event it shares with the core (collections plan, C4.1). 2.3 measured; 2.5.
-  { label: 'local — browser (@alexify/syncom/local)', entry: 'src/local/local.js', platform: 'browser', budget: 2.5 },
+  // 2.5 with the changes of a key one at a time (`set(key, fn)`), a contained observer and CORRUPT (review №6, E3b). 2.75,
+  // raised by name.
+  { label: 'local — browser (@alexify/syncom/local)', entry: 'src/local/local.js', platform: 'browser', budget: 2.75 },
   // Persistent app state by name and path, over a record or a local document — measured with the paths and the
   // shapes it shares with the core (collections plan, C4.2). 2.9 measured; 3.
   { label: 'state — browser (@alexify/syncom/state)', entry: 'src/state/state.js', platform: 'browser', budget: 3 },

@@ -15,5 +15,7 @@ src/dump/dump.js          @alexify/syncom/dump — exportPages/exportJSON (snaps
 
 - **A merge is a bootstrap, an insert is a write.** `merge` joins records with their meta through `mergeSnapshot` — one
   `merge` op per record, this node's own, exact to the source; `insert` makes new ops with new stamps and takes a dump
-  with no meta (another database's). A dump made under another schema hash is refused unless forced: a reader that
+  with no meta (another database's). A record is dead by what its meta reads as (`[SOURCE].alive`; the dump says so as
+  `deleted`): an insert deletes those alone — a record revived above its tombstone has a `deleted` stamp and is alive.
+  A dump of another `format` is refused; one made under another schema hash is refused unless forced: a reader that
   lenses records by version would otherwise read them wrong.

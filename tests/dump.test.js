@@ -34,6 +34,20 @@ test('dumps', async (t) => {
       await source.Tag.insert({ name: 't' });
       await source.delete(ids[4], { data: { why: 'gone' } });
       await source.purge(ids[5]);
+      // Revived above its tombstone: alive, with a `deleted` stamp in its meta.
+      await source.delete(ids[6]);
+      const dead = await source[SOURCE].entry(ids[6]);
+      await source.applyRemote([
+        {
+          origin: 'peer',
+          seq: 1,
+          ts: dead.meta.deleted[0] + 1,
+          type: 'set',
+          id: ids[6],
+          data: { back: true, $type: 'Post' },
+        },
+      ]);
+      assert.strictEqual((await source.get(ids[6])).back, true);
       const dump = await exportJSON(source);
       assert.strictEqual(dump.format, 1);
       assert.strictEqual(dump.node, source.nodeId);
@@ -42,6 +56,11 @@ test('dumps', async (t) => {
       assert.strictEqual(dump.eventId, source.log.lastEventId);
       assert.strictEqual(dump.records.length, 13, 'live records and tombstones, the purged one too');
       assert.ok(dump.records.every((record) => record.meta && typeof record.meta === 'object'));
+      const byId = new Map(dump.records.map((record) => [record.id, record]));
+      assert.strictEqual(byId.get(ids[4]).deleted, true, 'a tombstone');
+      assert.strictEqual(byId.get(ids[5]).deleted, true, 'a purge');
+      assert.strictEqual(byId.get(ids[6]).deleted, false, 'revived: alive');
+      assert.strictEqual(byId.get(ids[0]).deleted, false);
       // JSON through and through.
       const text = JSON.stringify(dump);
       const target = await openAt(t2, '/t');
@@ -95,6 +114,12 @@ test('dumps', async (t) => {
       await importJSON(other, dump, { mode: 'insert' });
       assert.strictEqual(await other.get(ids[4]), null, 'a tombstone deletes');
       assert.deepStrictEqual(await other.get(ids[0]), await source.get(ids[0]));
+      assert.deepStrictEqual(await other.get(ids[6]), await source.get(ids[6]), 'a revived record stays alive');
+      assert.strictEqual(await other.get(ids[5]), null, 'a purge deletes');
+      // A foreign record flagged dead deletes; a dump of another format is refused.
+      await importJSON(other, { records: [{ id: 'x2', data: {}, deleted: true }] }, { mode: 'insert' });
+      assert.strictEqual(await other.get('x2'), null);
+      await assert.rejects(importJSON(other, { ...dump, format: 2 }), /format 2/);
       // Another schema: refused, unless forced; no meta: no merge.
       const foreign = { ...dump, schema: { version: 2, hash: 'other' } };
       await assert.rejects(importJSON(target, foreign), { code: 'SCHEMA_MISMATCH', given: 'other' });

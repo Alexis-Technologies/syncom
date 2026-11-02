@@ -2940,8 +2940,10 @@ export interface LocalStore {
   readonly local: true;
   /** The value under `key`, or null. */
   get<T = unknown>(key: string): Promise<T | null>;
-  /** Writes a JSON value under `key`; resolves to it as JSON holds it. */
+  /** Writes a JSON value under `key`; resolves to it as JSON holds it. The changes of one key go one at a time. */
   set<T>(key: string, value: T): Promise<T>;
+  /** Writes what `fn` answers over the value as it is (null for none); `undefined` back leaves the document as it is. */
+  set<T>(key: string, fn: (current: T | null) => T | undefined): Promise<T | null>;
   delete(key: string): Promise<void>;
   /** The keys of this scope, sorted. */
   list(): Promise<string[]>;

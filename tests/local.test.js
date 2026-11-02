@@ -66,6 +66,29 @@ test('local documents', async (t) => {
     unsubscribe();
     await a.local.set('draft', 'silent');
     assert.deepStrictEqual(seen, ['again', null]);
+    // The changes of one key go one at a time: read-modify-writes made at once compose; a function that answers
+    // nothing leaves the document as it is.
+    const bump = (n) => (n ?? 0) + 1;
+    await Promise.all([a.local.set('n', bump), a.local.set('n', bump), a.local.set('n', bump)]);
+    assert.strictEqual(await a.local.get('n'), 3);
+    assert.strictEqual(await a.local.set('n', () => undefined), 3);
+    assert.strictEqual(await a.local.get('n'), 3);
+    // An observer that throws is contained: the others hear, the event fires, the write stands.
+    const stopThrowing = a.local.observe('n', () => {
+      throw new Error('boom');
+    });
+    const heard = [];
+    const stopHearing = a.local.observe('n', (value) => heard.push(value));
+    const before = events.length;
+    await a.local.set('n', 4);
+    assert.deepStrictEqual(heard, [4]);
+    assert.strictEqual(events.length, before + 1);
+    assert.strictEqual(await a.local.get('n'), 4);
+    stopThrowing();
+    stopHearing();
+    // A document that does not parse is CORRUPT, with its key.
+    await fsi.write('/A/local', 'bad', '{oops');
+    await assert.rejects(a.local.get('bad'), { code: 'CORRUPT', key: 'bad' });
     // Kept across a reopen; swept by drop().
     await a.close();
     const again = await syncom.createDatabase({ path: '/A', fsi, defer: 0, logger: false, schema, lock: false });
@@ -79,9 +102,10 @@ test('local documents', async (t) => {
     await assert.rejects(b.local.set('a/b', 1), TypeError);
     await assert.rejects(b.local.set('k', undefined), TypeError);
     await assert.rejects(
-      b.local.set('k', () => 1),
+      b.local.set('k', () => null),
       TypeError,
     );
+    assert.strictEqual(await b.local.set('k', () => 1), 1);
     assert.throws(() => b.local.observe('k', 'nope'), TypeError);
     assert.throws(() => b.local.scoped('a/b'), TypeError);
   });

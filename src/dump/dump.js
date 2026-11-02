@@ -14,8 +14,10 @@
 // another schema is refused (SCHEMA_MISMATCH) unless forced. `migrateStorage`
 // moves a database between engines: `copy` is `copyEngine` — the same node on
 // the new engine — `merge` an export of one open database imported into
-// another, a new node that holds what the old one held. Requires symbols.js,
-// shape.js, errors.js and the engines' copy.js only.
+// another, a new node that holds what the old one held. A record of a dump
+// says whether it is dead (`deleted`, from its meta): an insert deletes those
+// and writes the rest — a record revived above its tombstone is alive.
+// Requires symbols.js, shape.js, errors.js and the engines' copy.js only.
 
 const { SOURCE } = require('../symbols.js');
 const { isPlainObject, isRecordId } = require('../shape.js');
@@ -46,8 +48,9 @@ const collectionSet = (collections) => {
 
 /**
  * The records of `db` a page at a time, in id order: each `{ id, data,
- * meta }` as a snapshot hands it (tombstones included), or — `meta: false`
- * — `{ id, data }` of the live records as they read. `collections` keeps
+ * meta, deleted }` as a snapshot hands it (tombstones included; `deleted`
+ * whether the meta reads as dead), or — `meta: false` — `{ id, data }` of
+ * the live records as they read. `collections` keeps
  * to those (by the catalog's row), `scopes` to the records in them.
  */
 async function* exportPages(db, { collections, scopes = null, meta = true, limit = PAGE } = {}) {
@@ -65,7 +68,7 @@ async function* exportPages(db, { collections, scopes = null, meta = true, limit
         const type = source.row(record.id)?.type ?? record.data?.$type;
         if (!only.has(type)) continue;
       }
-      if (meta) records.push(record);
+      if (meta) records.push({ ...record, deleted: !source.alive(record) });
       else {
         const data = await source.load(record.id);
         if (data !== null) records.push({ id: record.id, data });
@@ -116,15 +119,19 @@ const recordsOf = (dump) => {
  * A dump into `db`: `merge` joins the records with their meta as a
  * bootstrap does (every record needs its meta: a `meta: true` dump) —
  * what the source held, tombstones included, converged; `insert` writes
- * each record's data under its id as a plain write (a record with a
- * tombstone in its meta is deleted) — new ops of this node — and takes a
- * foreign dump the same way. A dump made under another schema hash is
+ * each record's data under its id as a plain write (a dead record — by its
+ * meta, or `deleted: true` without one — is deleted; one revived above its
+ * tombstone is alive) — new ops of this node — and takes a foreign dump
+ * the same way. A dump of another format is a TypeError. A dump made under another schema hash is
  * SCHEMA_MISMATCH unless `force`. Resolves to `{ mode, records }`.
  */
 const importJSON = async (db, dump, { mode = 'merge', force = false, batch = PAGE } = {}) => {
   if (!isDatabase(db)) throw new TypeError('importJSON() takes a database');
   if (mode !== 'merge' && mode !== 'insert') throw new TypeError("importJSON(): mode is 'merge' or 'insert'");
   if (!Number.isInteger(batch) || batch < 1) throw new TypeError('importJSON(): batch must be a positive integer');
+  if (dump.format !== undefined && dump.format !== FORMAT) {
+    throw new TypeError(`importJSON(): a dump of format ${dump.format}; this build reads format ${FORMAT}`);
+  }
   const records = recordsOf(dump);
   const given = isPlainObject(dump.schema) ? dump.schema : null;
   const mine = db.schemaInfo;
@@ -138,6 +145,7 @@ const importJSON = async (db, dump, { mode = 'merge', force = false, batch = PAG
       },
     );
   }
+  const source = db[SOURCE];
   if (mode === 'merge') {
     for (let i = 0; i < records.length; i++) {
       if (!isPlainObject(records[i].meta)) {
@@ -152,7 +160,8 @@ const importJSON = async (db, dump, { mode = 'merge', force = false, batch = PAG
     await db.transact(async (tx) => {
       for (let k = 0; k < page.length; k++) {
         const { id, data, meta } = page[k];
-        if (isPlainObject(meta) && meta.deleted) await tx.delete(id);
+        const dead = isPlainObject(meta) ? !source.alive({ meta }) : page[k].deleted === true;
+        if (dead) await tx.delete(id);
         else await tx.set(id, data);
       }
     });

@@ -30,8 +30,10 @@ await importJSON(other, dump, { mode: 'insert' }); // new ops under the same ids
   record, this node's own, exact to the source — tombstones and purges included; peers that resume from
   this node's log receive them too. It needs a dump made with meta.
 - **`insert`** writes each record's data under its id as a plain write — new ops, new stamps, the
-  importing node's; a record whose meta holds a tombstone is deleted. A foreign dump —
-  `{ records: [{ id, data }] }` from any other database — imports the same way.
+  importing node's; a record that is dead by its meta (`deleted: true` on the exported record) is deleted,
+  one revived above its tombstone is written alive. A foreign dump — `{ records: [{ id, data }] }` from any
+  other database — imports the same way (`deleted: true` on a record deletes it). A dump of another `format`
+  is refused.
 
 A dump made under another schema hash than the database runs is refused with `SCHEMA_MISMATCH`
 (`expected`, `given`) unless `{ force: true }`: a reader that lenses records by version would otherwise

@@ -93,12 +93,20 @@ test('app state', async (t) => {
     assert.strictEqual(await state.get('a/c'), 2);
     assert.deepStrictEqual(await db.local.get('state.prefs'), { a: { b: 1, c: 2 } });
     assert.strictEqual(db.log.length, 0, 'no op');
+    // Sets made at once compose: one change of the document at a time.
+    const bump = (n) => (n ?? 0) + 1;
+    await Promise.all([state.set('n', bump), state.set('n', bump), state.set('x', 'y'), state.set('n', bump)]);
+    assert.strictEqual(await state.get('n'), 3);
+    assert.strictEqual(await state.get('x'), 'y');
+    // A path deleted from a state that holds nothing writes nothing.
+    await createState(db, 'none', { local: true }).delete('x');
+    assert.strictEqual(await db.local.get('state.none'), null);
     const seen = [];
     const stop = state.observe((value) => seen.push(value));
     await state.delete('a/b');
     await state.set({ whole: true });
     await tick();
-    assert.deepStrictEqual(seen, [{ a: { c: 2 } }, { whole: true }]);
+    assert.deepStrictEqual(seen, [{ a: { c: 2 }, n: 3, x: 'y' }, { whole: true }]);
     stop();
     await state.delete();
     assert.strictEqual(await db.local.get('state.prefs'), null);
