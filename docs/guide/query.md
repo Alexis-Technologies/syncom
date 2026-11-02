@@ -106,20 +106,25 @@ order, then id). A cursor is planned over them once, and `explain()` shows the p
 
 ```js
 db.Task.select({ boardId: 'b1', rank: { $gte: 10 } }).order('rank').limit(4).explain();
-// { scan: 'index', index: ['boardId', 'rank'], prefix: ['b1'],
+// { scan: 'index', index: ['boardId', 'rank'], prefix: ['b1'], in: null,
 //   range: { field: 'rank', lower: { value: 10, inclusive: true }, upper: null },
 //   desc: false, sortedByIndex: true, covered: false, residual: false,
+//   narrow: [], estimate: 4,
 //   uses: { equalities: ['boardId'], ranges: ['rank'], order: ['rank'] } }
 ```
 
 - **An index** serves a query by its longest prefix of fields the query holds an equality on
-  (`field: value`, `$eq`), then one field more for a range (`$gt`/`$gte`/`$lt`/`$lte`) or the sort. The
+  (`field: value`, `$eq`), then a `$in` of a few ordered values on the next field (`in`: one sub-scan per
+  value, in key order), then one field more for a range (`$gt`/`$gte`/`$lt`/`$lte`) or the sort. The
   scan is bounded — a binary search to each edge — and comes **sorted by the index** where the order's
-  keys are the index's next fields in one direction (`desc` scans backwards); then an ordered, limited
-  cursor reads `offset + limit` records and no more. A sort the index cannot serve reads by the prefix
-  and sorts after; the best of several indexes is the one with the longest prefix, then a range, then
-  the sort. An array-valued key is entered once per element (as the posting lists post it) and never
-  trusted for a sort;
+  keys are the index's next fields in one direction, reaching its end (`desc` scans backwards); then an
+  ordered, limited cursor reads `offset + limit` records and no more. A sort the index cannot serve reads
+  by the prefix and sorts after. Of several indexes the one expected to read the fewest records wins
+  (`estimate`: the scan's entries, no more than the narrowest posting list of the indexed equalities it
+  leaves to the catalog — those `narrow` the scan before a record is read — no more than the window where
+  sorted); a tie goes to the sorted one, then the longer prefix. An index that serves the sort alone is
+  taken only for a finite window where no indexed equality could narrow instead. An array-valued key is
+  entered once per element (as the posting lists post it) and never trusted for a sort;
 - **the posting lists** narrow a query no index serves but which holds an equality (or `$in`) on an
   indexed field, before any record is read: `{ boardId: { $in: ['b1', 'b2'] }, priority: { $gte: 2 } }`
   reads those boards' records only. The narrowing follows every `$and` branch, and an `$or` whose

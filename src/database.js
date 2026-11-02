@@ -1253,6 +1253,12 @@ class Database extends Emitter {
       indexed: (entity) => catalog.indexed(entity),
       indexes: (entity) => catalog.indexes(entity),
       scan: (entity, plan, after) => catalog.scan(entity, plan, after),
+      // The catalog's counts, for the planner: a scan's entries, a posting list's size, the collection's live rows, the
+      // posting lists' union a scan is narrowed through.
+      estimate: (entity, plan) => catalog.estimate(entity, plan),
+      cardinality: (entity, field, values) => catalog.cardinality(entity, field, values),
+      live: (entity) => catalog.live(entity),
+      posting: (entity, field, values) => catalog.posting(entity, field, values),
       // Every plan a cursor makes, told to the advisors; `advise(fn)` adds one and answers what takes it off.
       planned: (entity, plan) => {
         for (const fn of this.#advisors) fn(entity, plan);

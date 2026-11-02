@@ -731,10 +731,13 @@ const runQueryTests = async (t, assert, createStorage) => {
         index: ['boardId', 'rank'],
         prefix: ['b1'],
         range: { field: 'rank', lower: { value: 10, inclusive: true }, upper: null },
+        in: null,
         desc: false,
         sortedByIndex: true,
         covered: false,
         residual: false,
+        narrow: [],
+        estimate: 7,
         uses: { equalities: ['boardId'], ranges: ['rank'], order: ['rank'] },
       });
       fsi.reset();
@@ -782,7 +785,11 @@ const runQueryTests = async (t, assert, createStorage) => {
         storage.Task.select({ boardId: 'b0', $or: [{ done: true }, { rank: 1 }] }).explain().scan,
         'index',
       );
-      assert.strictEqual(storage.Task.select({ boardId: { $in: ['b0', 'b1'] } }).explain().scan, 'postings');
+      // A `$in` on the index's first field: the index, one sub-scan per value.
+      const listed = storage.Task.select({ boardId: { $in: ['b0', 'b1'] } }).explain();
+      assert.strictEqual(listed.scan, 'index');
+      assert.deepStrictEqual(listed.in, { field: 'boardId', values: ['b0', 'b1'] });
+      assert.strictEqual(storage.Task.select({ title: { $in: ['t1', 't2'] } }).explain().scan, 'collection');
       // A live query over the index stays a fresh run.
       const seen = [];
       const stop = cursor.watch((page) => seen.push(page));
@@ -945,6 +952,103 @@ const runQueryTests = async (t, assert, createStorage) => {
     assert.strictEqual(full.explain().sortedByIndex, true);
     const byBoth = (a, b) => (a.done !== b.done ? (a.done ? 1 : -1) : a.rank - b.rank || (a.id < b.id ? -1 : 1));
     assert.deepStrictEqual(await full.fetch(), all.slice().sort(byBoth));
+  });
+
+  await t.test(
+    'the planner picks the index by estimated rows, narrows the rest through the postings, and explain() says the estimate',
+    async (t2) => {
+      const fsi = counting(memory());
+      const schema = { entities: { Task: { index: ['status', 'owner'] } } };
+      const storage = await createStorage(t2, 'E', { fsi, schema, cache: { max: 2 } });
+      const all = [];
+      for (let i = 0; i < 300; i++) {
+        const data = { status: i < 280 ? 'open' : 'done', owner: `u${i % 30}`, n: i, $type: 'Task' };
+        all.push({ ...data, id: await storage.insert(data) });
+      }
+      // Two indexes serve the two equalities: the one expected to read fewer records wins — owner (10) over status
+      // (280) — and the other narrows through its posting list before any record is read.
+      const cursor = storage.Task.select({ status: 'open', owner: 'u1' });
+      const made = cursor.explain();
+      assert.deepStrictEqual([made.scan, made.index, made.prefix], ['index', ['owner'], ['u1']]);
+      assert.deepStrictEqual(made.narrow, [{ field: 'status', values: ['open'] }]);
+      assert.strictEqual(made.estimate, 10);
+      assert.strictEqual(made.residual, false, 'both equalities decided: the index and the narrowing');
+      fsi.reset();
+      const rows = await cursor.fetch();
+      // Unordered: by id — compared as a set of n.
+      const byN = (a, b) => a - b;
+      assert.deepStrictEqual(
+        rows.map((row) => row.n).sort(byN),
+        all
+          .filter((row) => row.status === 'open' && row.owner === 'u1')
+          .map((row) => row.n)
+          .sort(byN),
+      );
+      assert.ok(fsi.dataReads() <= 10, `the narrowed records alone (${fsi.dataReads()})`);
+      // The other way round where status is the rarer: done (20) under owner u1 (10) — still owner.
+      assert.deepStrictEqual(storage.Task.select({ status: 'done', owner: 'u1' }).explain().index, ['owner']);
+      assert.strictEqual(await storage.Task.select({ status: 'done', owner: 'u1' }).count(), 0);
+      // One equality alone: its index, the estimate its posting list's size; the collection, its size.
+      assert.strictEqual(storage.Task.select({ status: 'done' }).explain().estimate, 20);
+      assert.strictEqual(storage.Task.select({ n: 3 }).explain().estimate, 300);
+      // A narrowing that leaves nothing reads nothing.
+      fsi.reset();
+      assert.deepStrictEqual(await storage.Task.select({ status: 'gone', owner: 'u1' }).fetch(), []);
+      assert.strictEqual(fsi.dataReads(), 0);
+    },
+  );
+
+  await t.test('$in on the key after the prefix scans once per value', async (t2) => {
+    const fsi = counting(memory());
+    const compound = { entities: { Task: { index: [['board', 'rank']] } } };
+    const storage = await createStorage(t2, 'I', { fsi, schema: compound, cache: { max: 2 } });
+    const all = [];
+    for (let i = 0; i < 60; i++) {
+      const data = { board: 'b', rank: (i * 7) % 30, $type: 'Task' };
+      all.push({ ...data, id: await storage.insert(data) });
+    }
+    const byRank = (a, b) => a.rank - b.rank || (a.id < b.id ? -1 : 1);
+    const wanted = all.filter((row) => [3, 11, 7].includes(row.rank));
+    const cursor = storage.Task.select({ board: 'b', rank: { $in: [3, 11, 7] } });
+    const made = cursor.explain();
+    assert.deepStrictEqual([made.scan, made.index, made.prefix], ['index', ['board', 'rank'], ['b']]);
+    assert.deepStrictEqual(made.in, { field: 'rank', values: [3, 11, 7] });
+    assert.strictEqual(made.residual, false);
+    assert.strictEqual(made.sortedByIndex, false, 'no order: value by value is not id order');
+    assert.strictEqual(made.estimate, wanted.length);
+    // Unordered: by id; ordered by the `$in` field: the index's, value by value, a window read as far as it.
+    assert.deepStrictEqual(
+      await cursor.fetch(),
+      wanted.slice().sort((a, b) => (a.id < b.id ? -1 : 1)),
+    );
+    const ordered = cursor.order('rank');
+    assert.strictEqual(ordered.explain().sortedByIndex, true);
+    assert.deepStrictEqual(await ordered.fetch(), wanted.slice().sort(byRank));
+    fsi.reset();
+    const two = await cursor.desc('rank').limit(2).fetch();
+    assert.deepStrictEqual(
+      two.map((row) => row.rank),
+      [11, 11],
+    );
+    assert.ok(fsi.dataReads() <= 2);
+    // A page's edge falls in one value's scan: the pages visit every row once, in order.
+    const seen = [];
+    let page = await ordered.limit(2).page();
+    while (page.next !== null) {
+      seen.push(...page.rows);
+      page = await ordered.limit(2).after(page.next).page();
+    }
+    seen.push(...page.rows);
+    assert.deepStrictEqual(seen, wanted.slice().sort(byRank));
+    // The count is the index's: no record read.
+    fsi.reset();
+    assert.strictEqual(await cursor.count(), wanted.length);
+    assert.strictEqual(fsi.dataReads(), 0);
+    // Many values, or an unordered kind: the posting lists instead.
+    const many = [];
+    for (let i = 0; i < 20; i++) many.push(i);
+    assert.strictEqual(storage.Task.select({ board: 'b', rank: { $in: many } }).explain().in, null);
+    assert.strictEqual(storage.Task.select({ board: 'b', rank: { $in: [{ x: 1 }] } }).explain().in, null);
   });
 
   await t.test('a builder hands back a new cursor and leaves the one it was called on as it was', async (t2) => {

@@ -2724,6 +2724,8 @@ export interface QueryPlan {
   index: string[] | null;
   /** The equality values the index is entered by, one per field of its prefix. */
   prefix: unknown[];
+  /** A `$in` on the field after the prefix, scanned value by value (a few ordered values), or null. */
+  in: { field: string; values: unknown[] } | null;
   /** The bounds on the field after the prefix, either side open, or null. */
   range: {
     field: string;
@@ -2738,6 +2740,10 @@ export interface QueryPlan {
   covered: boolean;
   /** Whether the predicate still runs over what the scan yields. */
   residual: boolean;
+  /** The indexed equalities the index did not decide: their posting lists are tested before a record is read. */
+  narrow: { field: string; values: unknown[] }[];
+  /** How many records the plan expects to read before the predicate: the scan's entries, the narrowest posting list, the window where sorted; null where nothing says. */
+  estimate: number | null;
   /** What the query asks of its fields: an equality, a range, a sort — what an index advisor reads. */
   uses: { equalities: string[]; ranges: string[]; order: string[] };
 }

@@ -605,12 +605,20 @@ class Cursor {
   #plan() {
     if (this.#planned === null) {
       const indexes = this.#source.indexes?.(this.#entity) ?? [];
+      const source = this.#source;
+      const entity = this.#entity;
       const made = plan({
         query: this.#query,
         order: this.#order,
         indexes,
-        indexed: this.#source.indexed(this.#entity),
+        indexed: source.indexed(entity),
         covered: this.#covered(true),
+        wanted: this.#offset + this.#limit,
+        // The catalog's counts — a tag's source, which reads its catalog at first use, may have none to give yet.
+        estimate: source.estimate === undefined ? null : (candidate) => source.estimate(entity, candidate),
+        cardinality:
+          source.cardinality === undefined ? null : (field, values) => source.cardinality(entity, field, values),
+        size: source.live === undefined ? null : () => source.live(entity),
       });
       // A filter reads the record and decides for itself: nothing the index decided is final.
       if (this.#filter !== null) made.residual = true;
@@ -702,6 +710,21 @@ class Cursor {
       const start = byId && this.#after !== null ? aboveId(found, this.#after.id) : 0;
       next = pullOf(found, start);
     }
+    // The indexed equalities the index did not decide: their posting lists, tested before a record is read.
+    let narrowed = null;
+    if (scanned !== null && made.narrow.length > 0) {
+      narrowed = [];
+      for (let i = 0; i < made.narrow.length; i++) {
+        const set = this.#source.posting(this.#entity, made.narrow[i].field, made.narrow[i].values);
+        if (set.size === 0) return { rows: [], sorted: true };
+        narrowed.push(set);
+      }
+    }
+    const admits = (id) => {
+      if (narrowed === null) return true;
+      for (let i = 0; i < narrowed.length; i++) if (!narrowed[i].has(id)) return false;
+      return true;
+    };
     const sink = ordered && !byIndex && wanted !== Infinity ? new TopK(compareFully(this.#order), wanted) : new Every();
     // From after the edge of the page before, where there is one (the scan or the id seek took it already where
     // the rows come in the result's order; the check stays for a TopK).
@@ -715,6 +738,7 @@ class Cursor {
     const inOrder = sink instanceof TopK || byIndex || byId;
     if (this.#covered(needsRows)) {
       for (let id = next(); id !== null && sink.size < enough; id = next()) {
+        if (!admits(id)) continue;
         const indexed = row(id);
         if (indexed === null || indexed.encrypted) continue;
         take(rowOf(id, indexed.fields));
@@ -733,6 +757,7 @@ class Cursor {
       batch.length = 0;
     };
     for (let id = next(); id !== null && sink.size < enough; id = next()) {
+      if (!admits(id)) continue;
       batch.push(id);
       if (batch.length >= Math.min(CONCURRENCY, Math.max(1, enough - sink.size))) await read();
     }
@@ -793,7 +818,7 @@ class Cursor {
   async count() {
     if (this.#source.ready !== undefined) await this.#source.ready();
     const made = this.#plan();
-    const decided = made.scan === 'index' && !made.residual && this.#filter === null;
+    const decided = made.scan === 'index' && !made.residual && made.narrow.length === 0 && this.#filter === null;
     if (decided && (made.prefix.length > 0 || made.range !== null)) {
       const scanned = this.#source.scan(this.#entity, made, null);
       if (scanned.sorted) return scanned.estimate;

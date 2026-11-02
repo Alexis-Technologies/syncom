@@ -36,8 +36,11 @@ src/query/cache.js        QueryCache, keyOf — a result by its key with the cat
   field, or a compound key of fields — each a sorted index the catalog keeps (`Catalog#keyed`: a `SortedIndex` each — src/sorted.js, chunked sorted arrays in `compare` order then id — built
   once at load, a put re-keying only the indexes a changed field belongs to; `multi` counts the rows keyed per
   element of an array, `overflow` the rows whose array passed the cap, keyed whole and yielded by every scan)
-  beside the equality postings of every field named. `plan()` (src/query/plan.js, pure) picks the index
-  with the longest prefix of equalities, then one field more for a range or the sort; `Catalog.scan(type,
+  beside the equality postings of every field named. `plan()` (src/query/plan.js, pure) fits every index — the longest prefix of
+  equalities, a `$in` of a few ordered values on the next field (one sub-scan per value, `#scanIn`), then a range
+  or the sort — and picks the one expected to read the fewest records (`estimate`: the scan's entries, the
+  narrowest posting list it leaves to `narrow`, the window where sorted; the sort alone only for a finite window
+  with nothing to narrow); `Catalog.scan(type,
 plan)` reads the entries between two binary searches, forward or backward; where `sortedByIndex` the
   cursor reads the window and stops (`enough`), otherwise a TopK or a sort after. `compare`/`rankOf` are
   the catalog's, shared with the cursor. `explain()` is the plan as a copy. A `$text` query keeps the

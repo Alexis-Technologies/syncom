@@ -412,7 +412,8 @@ const ENTRIES = [
   // 155.5 with the writes made safe (review №6, E2). 156, raised by name.
   // 157.5 with the sorted indexes on SortedIndex (review №6, E4.2). 158, raised by name.
   // 158.1 with the lazy, seeking scan (review №6, E4.4). 158.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 158.5 },
+  // 159.2 with the planner's cost model (review №6, E4.5). 159.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 159.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -565,7 +566,9 @@ const ENTRIES = [
   // core shares it) (review №6, E4.2). 15, raised by name.
   // 15.5 with the cursor pulling a lazy scan, keyset by id over the postings and the collection, count() from the index,
   // stream() running once where no index sorts (review №6, E4.4). 15.5 — at the measure; 16, raised by name.
-  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 16 },
+  // 16.5 with the planner's cost model — estimate, cardinality, narrow, a $in scanned value by value (review №6, E4.5;
+  // the design estimated 14.5 for all of E4). 17, raised by name.
+  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 17 },
   // Versions: the fold of the log, the tags, the view at a tag — measured
   // ALONE with the write path, the snapshot pages and the patches it shares
   // with the core.

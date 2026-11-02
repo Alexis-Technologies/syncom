@@ -301,9 +301,11 @@ class Catalog {
    * scan after it where it is sorted. The rows whose array passed the cap
    * (keyed whole) come last, every scan: the predicate decides.
    */
-  scan(type, { index, prefix, range, desc }, after = null) {
+  scan(type, plan, after = null) {
+    const { index, prefix, range, desc } = plan;
     const held = this.#keyed.get(type)?.get(index.join(','));
     if (held === undefined) return { next: () => null, sorted: true, estimate: 0 };
+    if (plan.in !== undefined && plan.in !== null) return this.#scanIn(type, plan, after, held);
     const { sorted } = held;
     const k = prefix.length;
     const edges = closed(range);
@@ -353,6 +355,78 @@ class Catalog {
       }
     };
     return { next, sorted: exact, estimate };
+  }
+
+  // A `$in` on the field after the prefix: one sub-scan per value, in key order (the values descending for
+  // `desc`), concatenated. A page's edge falls in one of them — the value its first key holds — the values before
+  // it are skipped whole, the ones after come whole.
+  #scanIn(type, plan, after, held) {
+    const { index, prefix, range, desc } = plan;
+    const values = plan.in.values.slice().sort(compare);
+    if (desc) values.reverse();
+    const parts = [];
+    let estimate = 0;
+    for (let i = 0; i < values.length; i++) {
+      let edge = null;
+      if (after !== null) {
+        const order = compare(values[i], after.keys[0]);
+        if (desc ? order > 0 : order < 0) continue;
+        if (order === 0) edge = { keys: after.keys.slice(1), id: after.id };
+      }
+      const part = this.scan(type, { index, prefix: prefix.concat([values[i]]), range, desc }, edge);
+      estimate += part.estimate;
+      parts.push(part);
+    }
+    const exact = held.multi === 0 && held.overflow.size === 0;
+    const seen = exact ? null : new Set();
+    let i = 0;
+    const next = () => {
+      for (;;) {
+        if (i >= parts.length) return null;
+        const id = parts[i].next();
+        if (id === null) {
+          i++;
+          continue;
+        }
+        if (seen !== null) {
+          if (seen.has(id)) continue;
+          seen.add(id);
+        }
+        return id;
+      }
+    };
+    return { next, sorted: exact, estimate };
+  }
+
+  /** How many entries a plan's scan would walk: a bound on the rows it yields, exact where it comes sorted. */
+  estimate(type, plan) {
+    return this.scan(type, plan, null).estimate;
+  }
+
+  /** How many rows hold any of `values` under `field` — the posting lists' sizes summed; 0 where the field is not indexed. */
+  cardinality(type, field, values) {
+    const list = this.#eq.get(type)?.get(field);
+    if (list === undefined) return 0;
+    let count = 0;
+    for (let i = 0; i < values.length; i++) count += list.get(keyOf(values[i]))?.size ?? 0;
+    return count;
+  }
+
+  /** The ids holding any of `values` under `field`: a fresh Set, the posting lists' union (empty where none is indexed). */
+  posting(type, field, values) {
+    const out = new Set();
+    const list = this.#eq.get(type)?.get(field);
+    if (list === undefined) return out;
+    for (let i = 0; i < values.length; i++) {
+      const held = list.get(keyOf(values[i]));
+      if (held !== undefined) for (const id of held) out.add(id);
+    }
+    return out;
+  }
+
+  /** How many live records the collection holds. */
+  live(type) {
+    return this.#byType.get(type)?.size ?? 0;
   }
 
   // A row's entries into the type's sorted indexes, or out of them.

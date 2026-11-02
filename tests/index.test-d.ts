@@ -1006,6 +1006,8 @@ storage.record<Post>('id').then((record) => {
   expectType<string[] | null>(made.index);
   expectType<boolean>(made.sortedByIndex);
   expectType<string[]>(made.uses.equalities);
+  expectType<number | null>(made.estimate);
+  expectType<{ field: string; values: unknown[] }[]>(made.narrow);
   expectType<Promise<Map<string, RecordData>>>(db.Tag.findByIds(['a', 'b']));
   expectAssignable<syncom.EntityDefinition>({ index: ['a', ['a', 'b']] });
   expectError<syncom.EntityDefinition>({ index: [['a', 1]] });
