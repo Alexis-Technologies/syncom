@@ -648,6 +648,34 @@ those methods throw `PLUGIN_MISSING`, `stats().tags` is `null`, and a
 directory that holds tags is refused at `createDatabase()`: its copies would not be
 kept.
 
+## Local (subpath)
+
+`@alexify/syncom/local` — local documents: `createDatabase({ plugins: [local] })` hands the core `db.local`, JSON
+values kept in the `local` kv namespace beside the records that never become an op (not logged, not in the
+catalog or a snapshot, never at a peer). A key is a kv key (no `/`).
+
+| Member | Notes |
+| --- | --- |
+| `db.local` | `get(key)` → the value or null; `set(key, value)` (JSON; resolves to it); `delete(key)`; `list()` (the keys, sorted); `observe(key, listener)` → `listener(value)` after every `set`/`delete` of the key in this instance (null once deleted), returns the stop; `scoped(prefix)` → the same store under `<prefix>.`. `PLUGIN_MISSING` without the plugin |
+| `collection.local` | `db.local.scoped(name)`: keys `<name>.<key>` |
+| `local` event | On the database: `({ key, value })` after every write or removal, the full key |
+| `toStore(db.local, key)` | A store of the value (`@alexify/syncom/store`) |
+
+## State (subpath)
+
+`@alexify/syncom/state` — persistent app state: `createState(db, name, { local }?)`, one object a node keeps by
+name, read and written by path. Over the record `state.<name>` by default — every path a register of its own, so
+two nodes that write different paths both keep theirs, and the record replicates like any other — or, with
+`{ local: true }`, over the local document `state.<name>` (the `local` plugin's; this node's alone, written whole).
+
+| Member | Notes |
+| --- | --- |
+| `get(path?)` | The value at the path (`undefined` for none), or the whole object |
+| `set(path?, value \| fn)` | Writes the value at the path — or what `fn(current)` answers, run inside a transaction over the record as it is — and resolves to it; `set(object)` replaces the whole state |
+| `delete(path?)` | Removes the path (an `unset`), or the whole state |
+| `observe(path?, listener)` | `listener(value)` with the value at the path after every change of it; returns the stop |
+| `toStore(state, path?)` | A store of the value at the path, or of the whole object |
+
 ## Telemetry (subpath)
 
 ```js

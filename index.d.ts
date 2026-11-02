@@ -1988,6 +1988,8 @@ export interface ApplyRemoteResult {
 export interface StorageEvents {
   /** Every op applied here — local (`via` null) or from a peer (`via` names it). */
   change: (op: SyncOp, via: PeerRef | null, detail: { changes: Change[] }) => void;
+  /** A local document written or removed (`db.local`, a collection's): its full key and the value (null once deleted). */
+  local: (event: { key: string; value: unknown }) => void;
   /** A local op is durable: what it changed, as copies — built only when someone listens. */
   commit: (event: CommitEvent) => void;
   /** One turn's ops durable and announced — a write, a transaction, a peer's page, a joined snapshot — with every change tagged by its record. */
@@ -2518,6 +2520,8 @@ export interface Database {
   list(): Promise<string[]>;
   /** The collections by name, frozen — the same objects as `db.<Name>`; made again by `addCollections()` and `removeCollection()`. */
   readonly collections: { readonly [name: string]: SyncomCollection };
+  /** The local documents of this database — the `local` plugin's (`PLUGIN_MISSING` without it). */
+  readonly local: LocalStore;
   /**
    * Defines collections after the open — each as an entity of `createDatabase({ schema })`
    * would be, in force from here over the records of its type; nothing is persisted
@@ -2921,6 +2925,26 @@ export interface BulkResult<I = RecordData> {
   error: { index: number; id: string | null; data: I; error: Error }[];
 }
 
+/**
+ * Local documents (`db.local`, `collection.local`; the `local` plugin of `@alexify/syncom/local`): JSON
+ * values kept beside the records that never become an op — not logged, not in the catalog or a
+ * snapshot, never at a peer. A key is a kv key (no `/`); a collection's store prefixes `<name>.`.
+ */
+export interface LocalStore {
+  readonly local: true;
+  /** The value under `key`, or null. */
+  get<T = unknown>(key: string): Promise<T | null>;
+  /** Writes a JSON value under `key`; resolves to it as JSON holds it. */
+  set<T>(key: string, value: T): Promise<T>;
+  delete(key: string): Promise<void>;
+  /** The keys of this scope, sorted. */
+  list(): Promise<string[]>;
+  /** Calls `listener(value)` after every `set`/`delete` of `key` in this instance (null once deleted); returns the stop. */
+  observe(key: string, listener: (value: unknown) => void): () => void;
+  /** The same store under a prefix: keys `<prefix>.<key>`. */
+  scoped(prefix: string): LocalStore;
+}
+
 /** What a collection emits: what the catalog decided of a record of its own, once per landing. */
 export interface CollectionEvents {
   change: (event: { id: string; action: 'insert' | 'update' | 'remove' }) => void;
@@ -2933,6 +2957,8 @@ export interface CollectionEvents {
 
 export interface SyncomCollection<R = RecordData, I = R> {
   readonly name: string;
+  /** The local documents under this collection's prefix — the `local` plugin's. */
+  readonly local: LocalStore;
   on<E extends keyof CollectionEvents>(event: E, listener: CollectionEvents[E]): void;
   once<E extends keyof CollectionEvents>(event: E, listener: CollectionEvents[E]): void;
   off<E extends keyof CollectionEvents>(event: E, listener?: CollectionEvents[E]): void;

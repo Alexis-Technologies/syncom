@@ -178,6 +178,8 @@ test('every runtime export is declared in the types', () => {
   check('src/telemetry/telemetry.js', 'src/telemetry/telemetry.d.ts');
   check('src/query/query.js', 'src/query/query.d.ts');
   check('src/versions/versions.js', 'src/versions/versions.d.ts');
+  check('src/local/local.js', 'src/local/local.d.ts');
+  check('src/state/state.js', 'src/state/state.d.ts');
   // browser.js is only loadable under OPFS/WebCrypto globals, so compare its
   // barrel's names against the node one instead of requiring it here.
   check('index.js', 'browser.d.ts');

@@ -68,6 +68,7 @@ export type {
   QueryPlan,
   PageToken,
   CollectionEvents,
+  LocalStore,
   DeleteOptions,
   UpdateOptions,
   RecordData,

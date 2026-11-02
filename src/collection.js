@@ -62,6 +62,11 @@ class Collection extends Emitter {
     return this.#name;
   }
 
+  /** The local documents under this collection's prefix (`<name>.<key>`) — the `local` plugin's. */
+  get local() {
+    return this.#storage.local.scoped(this.#name);
+  }
+
   // What the catalog says of a record of this collection: `change` with the
   // action, and the action's own event; contained like every event.
   #hear(id, action) {

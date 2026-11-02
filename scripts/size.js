@@ -393,7 +393,8 @@ const ENTRIES = [
   // raised by name.
   // 151.2 with keyset paging, distinct/countBy and nearest (collections plan, C2.3). 151.5, raised by name.
   // 152.8 with compound indexes, the planner and explain() (collections plan, C3.1–C3.2). 153.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 153.5 },
+  // 153.8 with the local plugin registered (collections plan, C4.1). 154.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 154.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -565,6 +566,12 @@ const ENTRIES = [
     // 39.5 with the log's store seam the versions plugin bundles with the log (engines plan, E1.2). 40, raised by name.
     budget: 40,
   },
+  // Local documents: a store over the `local` kv namespace, the plugin — measured with the kv namespace and the
+  // contained event it shares with the core (collections plan, C4.1). 2.3 measured; 2.5.
+  { label: 'local — browser (@alexify/syncom/local)', entry: 'src/local/local.js', platform: 'browser', budget: 2.5 },
+  // Persistent app state by name and path, over a record or a local document — measured with the paths and the
+  // shapes it shares with the core (collections plan, C4.2). 2.9 measured; 3.
+  { label: 'state — browser (@alexify/syncom/state)', entry: 'src/state/state.js', platform: 'browser', budget: 3 },
 ];
 
 // A browser entry has to be self-contained: no node builtins, and no packages

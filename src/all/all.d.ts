@@ -73,6 +73,7 @@ export declare const schema: Plugin;
 export declare const telemetry: Plugin;
 export declare const query: Plugin;
 export declare const versions: Plugin;
+export declare const local: Plugin;
 /** The plugins the package ships, in registration order. */
 export declare const PLUGINS: readonly [
   Plugin<TextMethods & TextHandleMethods>,
@@ -81,6 +82,7 @@ export declare const PLUGINS: readonly [
   Plugin,
   Plugin,
   Plugin<SyncApi>,
+  Plugin,
   Plugin,
   Plugin,
   Plugin,

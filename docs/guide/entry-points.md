@@ -24,6 +24,8 @@ same process may run with others.
 | `@alexify/syncom/telemetry` | the OpenTelemetry adapter: `{ api }` or `{ tracer, meter }` into the writer the engine records through; `createTelemetry()` | `createDatabase({ plugins: [telemetry], telemetry })` |
 | `@alexify/syncom/query` | the cursor behind `select()`, `count()` and `watch()` on a collection; the catalog stays in the core | `createDatabase({ plugins: [query] })` |
 | `@alexify/syncom/versions` | the past: `get(id, { at })`, `history()`, `diff()` between versions, `restore()`, the tags; `applyPatches()` and `compact()` stay in the core | `createDatabase({ plugins: [versions] })` |
+| `@alexify/syncom/local` | local documents: `db.local` and `collection.local`, JSON values beside the records that never become an op | `createDatabase({ plugins: [local] })` |
+| `@alexify/syncom/state` | persistent app state by name and path, over a record (replicated, a path a register) or a local document | `createState(db, name)` |
 | `@alexify/syncom/all` | the core with every shipped plugin registered — the API as one import | `require('@alexify/syncom/all').open()` |
 | `@alexify/syncom/undo`, `/branch`, `/order` | the undo stack, forks and merges, fractional indexes | functions over a storage |
 | `@alexify/syncom/presence` | who is here and what they point at: a state per node, signed, relayed by a host's rooms, never logged | `createPresence(storage)`; carried by `storage.sync.presence()` |

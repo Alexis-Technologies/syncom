@@ -147,6 +147,14 @@
       "types": "./src/versions/versions.d.ts",
       "default": "./src/versions/versions.js"
     },
+    "./local": {
+      "types": "./src/local/local.d.ts",
+      "default": "./src/local/local.js"
+    },
+    "./state": {
+      "types": "./src/state/state.d.ts",
+      "default": "./src/state/state.js"
+    },
     "./package.json": "./package.json"
   },
   "directories": {

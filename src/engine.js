@@ -131,7 +131,7 @@ const fsiNamespace = (fsi, dir) => {
 // The kv namespaces a database writes besides a tag's (`tags/<tag>/index`):
 // the one list `copyEngine` copies and the files engine sweeps — a plugin
 // that writes a namespace of its own adds it here.
-const KV_NAMESPACES = Object.freeze(['', 'keys', 'blockchain', 'index', 'remote']);
+const KV_NAMESPACES = Object.freeze(['', 'keys', 'blockchain', 'index', 'remote', 'local', 'pipeline']);
 
 // A kv key, a tag's name, a piece's name: a text that names one thing and
 // nothing else — no separator, no `.`/`..`, no control character, 255 at

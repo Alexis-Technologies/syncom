@@ -66,6 +66,15 @@ and one `commit` event, not one per call.
   record as it reads, written as one transaction, refused whole where a kind refuses its part.
   `update(id, delta, { ifMatch: query })` writes only where the record matches the Mango query (the
   `query` plugin's), inside the queue, and resolves to whether it did.
+- **Local documents: `@alexify/syncom/local`.** `createDatabase({ plugins: [local] })` hands the core
+  `db.local` — `get`, `set`, `delete`, `list`, `observe`, `scoped` — JSON values kept in the `local` kv
+  namespace beside the records that never become an op: not logged, not in the catalog or a snapshot,
+  never at a peer; `collection.local` prefixes the collection's name, the database emits `local`, and
+  `toStore(db.local, key)` follows one. Registered by `/all`.
+- **App state: `@alexify/syncom/state`.** `createState(db, name)` — one object kept by name, read and
+  written by path (`get('theme')`, `set('panel/width', 320)`, `set('count', (n) => n + 1)`), over the
+  record `state.<name>`, every path a register of its own (two nodes writing different paths both keep
+  theirs), or over a local document with `{ local: true }`; `observe(path, listener)`, `toStore(state, path)`.
 - **`findByIds()`, `indexAdvisor()`.** `collection.findByIds(ids)` reads many records in one call of the
   engine — a `Map` of the live ones of the collection. `indexAdvisor(db)` (`@alexify/syncom/inspect`)
   watches every plan the cursors make and suggests the keys — the equalities, a range field, the sort —

@@ -176,6 +176,8 @@ class Database extends Emitter {
   #cursor = null;
   // A Mango query as a predicate over `{ id, ...record }` — the query plugin's (`ifMatch`).
   #matches = null;
+  // The local documents (`db.local`) — the local plugin's.
+  #local = null;
   #settings;
   #log = null;
   #entries = null;
@@ -531,6 +533,7 @@ class Database extends Emitter {
         this.#matches = hooks.query.matches ?? null;
       }
       if (hooks.versions) this.#tags = hooks.versions.tags;
+      if (hooks.local) this.#local = hooks.local;
       if (Object.hasOwn(hooks, 'telemetry')) {
         this.#otel = writerOf(hooks.telemetry);
         adapted = true;
@@ -1129,6 +1132,12 @@ class Database extends Emitter {
   /** The collections by name, frozen — the same objects as `db.<Name>`; made again by `addCollections()` and `removeCollection()`. */
   get collections() {
     return this.#collections;
+  }
+
+  /** The local documents of this database (`get`, `set`, `delete`, `list`, `observe`, `scoped`) — the `local` plugin's. */
+  get local() {
+    if (this.#local === null) throw missing('db.local', 'local');
+    return this.#local;
   }
 
   /**
