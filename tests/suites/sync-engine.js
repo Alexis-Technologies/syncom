@@ -510,7 +510,7 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
           incs++;
         } else if (roll < 0.4) await storage.add(id, 'tags', [`t${step % 4}`]);
         else if (roll < 0.48) await storage.remove(id, 'tags', [`t${step % 4}`]);
-        else if (roll < 0.54) await storage.delete(id);
+        else if (roll < 0.54) await storage.delete(id, step % 3 === 0 ? { data: { by: step } } : {});
         else if (roll < 0.72) {
           // One keystroke in seven is a mark laid or taken off over a random range; one in five a block
           // marker or an embed — inserted, changed or joined.
@@ -649,7 +649,7 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
           else if (roll < 0.75) await storage.push(id, 'body', letter(storage));
           else if (roll < 0.9) {
             await storage.treeMove(id, 'outline', `n${step % 4}`, step % 2 ? null : `n${(step + 1) % 4}`);
-          } else if (roll < 0.95) await storage.delete(id);
+          } else if (roll < 0.95) await storage.delete(id, step % 2 ? { data: { why: letter(storage) } } : {});
           else await storage.set(id, { n: step });
         } catch (error) {
           if (!/not found|cannot go under/.test(error.message)) throw error;

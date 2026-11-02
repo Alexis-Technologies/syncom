@@ -82,6 +82,13 @@ const WHOLE = new Set(['write', 'merge', 'delete']);
 
 const NOOP = () => {};
 
+// A delete's payload: the data the tombstone carries, when given (a plain object).
+const tombstone = (data) => {
+  if (data === undefined) return {};
+  if (!isPlainObject(data)) throw new TypeError('delete() takes a plain object as data');
+  return { data };
+};
+
 // A record written under the id its data names, inside a transaction: a
 // live record there already is EXISTS — decided where nothing interleaves.
 const insertNamed = async (tx, id, data, options) => {
@@ -1204,6 +1211,9 @@ class Database extends Emitter {
       subscribe: (entity, fn) => catalog.subscribe(entity, fn),
       // The entity definition of a collection (null for none): its id rule, its references, its methods.
       definition: (entity) => this.#entities.get(entity) ?? null,
+      // A transaction over this database's write API: what a cursor's write terminals run (a view at a
+      // tag reads alone: its source has none).
+      transact: (fn, options) => this.transact(fn, options),
       load: async (id) => {
         const entry = await this.#entries.load(id);
         if (entry === null || entry.encrypted || !isAlive(entry)) return null;
@@ -2069,8 +2079,13 @@ class Database extends Emitter {
     await this.saveData(id, data, options);
   }
 
-  async delete(id, { actor } = {}) {
-    await this[COMMIT]('delete', id, {}, { actor });
+  /**
+   * Leaves a tombstone; with `data`, the fields it carries lie on the
+   * tombstone — read by whoever reads it (a `change` of `action: 'delete'`
+   * with `data`, a peer's hook), never by `get()`, which answers null.
+   */
+  async delete(id, { actor, data } = {}) {
+    await this[COMMIT]('delete', id, tombstone(data), { actor });
     this.#records.delete(id);
   }
 
@@ -2476,7 +2491,7 @@ class Database extends Emitter {
       return op !== MISMATCH;
     };
     api.delete = async (id, options = {}) => {
-      await tx.commit('delete', id, {}, { actor: options.actor });
+      await tx.commit('delete', id, tombstone(options.data), { actor: options.actor });
       this.#records.delete(id);
     };
     api.modify = (id, fn, options = {}) => {

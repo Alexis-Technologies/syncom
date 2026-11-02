@@ -8,6 +8,7 @@
 // name within one subtest (reopen cases).
 
 const { memory } = require('../../src/memory/memory.js');
+const { createMesh, settle } = require('../utils/mesh.js');
 
 const code = async (promise) => {
   try {
@@ -281,6 +282,95 @@ const runCollectionTests = async (t, assert, createStorage) => {
       assert.strictEqual(await db.transact((tx) => tx.update(id, { m: 3 }, { ifMatch: { m: 1 } })), true);
     },
   );
+
+  await t.test(
+    "a cursor's update(), modify() and delete() are one transaction over the matches when it started",
+    async (t2) => {
+      const db = await createStorage(t2, 'A', { fsi: memory(), schema: { entities: { Post: { index: ['org'] } } } });
+      const ids = [];
+      for (let i = 0; i < 10; i++) ids.push((await db.Post.insert({ org: i % 2 ? 'a' : 'b', n: i })).id);
+      const turns = [];
+      db.on('transaction', (event) => turns.push(event.ops.length));
+      const updated = await db.Post.select({ org: 'a' }).update({ $inc: { hits: 1 }, $set: { seen: true } });
+      assert.deepStrictEqual(updated, { matched: 5, written: 5 });
+      assert.strictEqual(await db.Post.count({ seen: true }), 5);
+      // The window applies: the two lowest of org b, by n.
+      const modified = await db.Post.select({ org: 'b' })
+        .order('n')
+        .limit(2)
+        .modify((doc) => void (doc.top = true));
+      assert.deepStrictEqual(modified, { matched: 2, written: 2 });
+      assert.deepStrictEqual(
+        (await db.Post.select({ top: true }).order('n').fetch()).map((row) => row.n),
+        [0, 2],
+      );
+      const changes = [];
+      db.on('change', (op, via, { changes: own }) => changes.push(...own));
+      const deleted = await db.Post.select({ org: 'b', n: { $gte: 6 } }).delete({ data: { why: 'old' } });
+      assert.deepStrictEqual(deleted, { matched: 2, written: 2 });
+      assert.deepStrictEqual(changes, [
+        { action: 'delete', data: { why: 'old' } },
+        { action: 'delete', data: { why: 'old' } },
+      ]);
+      assert.strictEqual(await db.Post.count(), 8);
+      // One turn each, an op per record written.
+      assert.deepStrictEqual(turns, [10, 2, 2]);
+      // A record gone between the match and the write is skipped, and counted out of `written`.
+      const cursor = db.Post.select({ org: 'a' });
+      const [first] = await cursor.projection([]).fetch();
+      let skipped = null;
+      const hook = db.on('transaction', () => {});
+      void hook;
+      await db.transact(async (tx) => {
+        await tx.delete(first.id);
+      });
+      skipped = await cursor.update({ late: true });
+      assert.deepStrictEqual(skipped, { matched: 4, written: 4 });
+      assert.deepStrictEqual(await db.Post.select({ org: 'a' }).delete(), { matched: 4, written: 4 });
+      assert.deepStrictEqual(await db.Post.select({ org: 'a' }).update({ x: 1 }), { matched: 0, written: 0 });
+      await assert.rejects(db.Post.select().modify('nope'), TypeError);
+      // A view at a tag reads alone.
+      await db.tag('t');
+      await assert.rejects(db.at('t').collection('Post').select().update({ a: 1 }), TypeError);
+    },
+  );
+
+  await t.test('delete(id, { data }) leaves the record dead everywhere and the data on the tombstone', async (t2) => {
+    const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage, {
+      nodes: { A: { fsi: memory() }, B: { fsi: memory() } },
+    });
+    const a = mesh.get('A');
+    const b = mesh.get('B');
+    const changes = [];
+    b.on('change', (op, via, { changes: own }) => changes.push(...own));
+    const id = await a.insert({ title: 'x', n: 1 });
+    await settle([a, b]);
+    assert.deepStrictEqual(await b.get(id), { title: 'x', n: 1 });
+    await a.delete(id, { data: { by: 'admin', why: 'spam' } });
+    await settle([a, b]);
+    assert.strictEqual(await a.get(id), null);
+    assert.strictEqual(await b.get(id), null);
+    assert.strictEqual(a.hasRecord(id), false);
+    assert.strictEqual(await b.has(id), false);
+    assert.deepStrictEqual(changes.at(-1), { action: 'delete', data: { by: 'admin', why: 'spam' } });
+    // The tombstone carries it, on both — and a snapshot page hands it on.
+    const page = await b.snapshot({ limit: 10 });
+    const row = page.records.find((record) => record.id === id);
+    assert.deepStrictEqual(row.data, { by: 'admin', why: 'spam' });
+    assert.ok(row.meta.deleted !== null);
+    // A field written above the tombstone revives the record, which then reads what the tombstone
+    // carried too (a whole write would reset it, as any reset does).
+    await b.add(id, 'tags', ['t']);
+    await settle([a, b]);
+    assert.deepStrictEqual(await a.get(id), { by: 'admin', why: 'spam', tags: ['t'] });
+    assert.deepStrictEqual(await b.get(id), await a.get(id));
+    await assert.rejects(a.delete(id, { data: 5 }), TypeError);
+    // Without data: as before.
+    await a.delete(id);
+    await settle([a, b]);
+    assert.strictEqual(await b.get(id), null);
+    assert.deepStrictEqual(changes.at(-1), { action: 'delete' });
+  });
 
   await t.test('a write through the database from inside transact() is IN_TRANSACTION, not a deadlock', async (t2) => {
     const db = await createStorage(t2, 'A', { fsi: memory(), schema: { entities: { Post: {} } } });

@@ -1033,11 +1033,16 @@ const applyOp = (previous, op, limits = null) => {
       meta.base = stamp;
       meta.deleted = stamp;
       applyBase(entry, delta, plugins);
+      // The data a delete carries lies on the tombstone, at its stamp: below
+      // what keeps a record alive, so the record is as dead as without it,
+      // and there for whoever reads the tombstone (`delete(id, { data })`) —
+      // reported with the delete, never as puts of a record that is gone.
+      if (isPlainObject(op.data)) applyFields(entry, op.data, stamp, delta, rejected, plugins, null);
       // A field stamped above the tombstone survives it and keeps the record alive (a concurrent
       // write landed first): the reading shows the survivor and the fields that went — reported so
       // (`unset` each, from the delta), never as a record gone (EVT-5).
       if (isAlive(entry)) return outcome(true);
-      changes.push({ action: 'delete' });
+      changes.push(isPlainObject(op.data) ? { action: 'delete', data: asJson(op.data) } : { action: 'delete' });
       return outcome(true, true);
     }
   } else if (op.type === 'merge') {

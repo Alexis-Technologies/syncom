@@ -63,6 +63,8 @@ export type {
   BulkResult,
   ModifyFn,
   UpdateOperators,
+  WriteByQuery,
+  DeleteOptions,
   UpdateOptions,
   RecordData,
   Shapes,

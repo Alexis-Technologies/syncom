@@ -66,7 +66,7 @@ engine does not admit changes nothing, is reported as `OP_REFUSED` with
 | `move` | `^` | `key`, `value` | `{ elem, cut, at, value }` |
 | `mark` | `*` | `key`, `value` | `{ start, end, key, value, many? }` or `{ off }` |
 | `tree` | `~` | `key`, `value` | `{ node, parent, fi }` — `parent` `null` at the root, `$trash` removed; `fi` a fractional index |
-| `delete` | `d` | — | A tombstone; a newer write revives the record |
+| `delete` | `d` | `data?` | A tombstone; a newer write revives the record. `data`, when given, is a plain object whose fields lie on the tombstone at its stamp — below what keeps a record alive, so the record is as dead as without them; a reader of the tombstone (a `change`, a snapshot page) reads them |
 | `purge` | `p` | — | Wins at any stamp; every entry of the id is scrubbed |
 | `merge` | `m` | `data`, `meta`, `from` | A snapshot record joined |
 | `advance` | `a` | `vector`, `from` | Which ops the joined state covers |

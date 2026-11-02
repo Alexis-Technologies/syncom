@@ -950,7 +950,16 @@ storage.record<Post>('id').then((record) => {
   await db.transact(async (tx) => {
     expectType<Promise<boolean>>(tx.update('t1', { $max: { n: 3 } }, { ifMatch: {} }));
     expectType<Promise<void>>(tx.update('t1', { $unset: ['a'] }));
+    expectType<Promise<void>>(tx.delete('t1', { data: { why: 'x' } }));
   });
+  expectType<Promise<syncom.WriteByQuery>>(db.Tag.select({ n: 1 }).update({ $inc: { n: 1 } }));
+  expectType<Promise<syncom.WriteByQuery>>(db.Tag.select().modify((row) => row));
+  expectType<Promise<syncom.WriteByQuery>>(db.Tag.select().delete({ data: { why: 'x' } }));
+  expectType<Promise<void>>(db.delete('t1', { data: { why: 'x' } }));
+  expectType<Promise<void>>(db.Tag.delete('t1', { data: { why: 'x' }, actor: 'me' }));
+  expectError(db.delete('t1', { data: 5 }));
+  const change: syncom.Change = { action: 'delete', data: { why: 'x' } };
+  expectAssignable<syncom.Change>(change);
   const code: syncom.SyncomErrorCode = 'EXISTS';
   const inTx: syncom.SyncomErrorCode = 'IN_TRANSACTION';
   expectType<'EXISTS'>(code);

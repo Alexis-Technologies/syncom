@@ -538,7 +538,7 @@ export type Change =
   | { action: 'unmarkById'; field: string; markId: string; start: number; end: number; name: string }
   | { action: 'treeMove'; field: string; node: string; parent: string | null; after: string | null }
   | { action: 'treeRemove'; field: string; node: string }
-  | { action: 'delete' }
+  | { action: 'delete'; data?: RecordData }
   | { action: 'purge' };
 
 /** A change tagged with the record it is of. */
@@ -1796,7 +1796,7 @@ export interface Transaction extends TextMethods, TreeMethods {
   update(id: string, delta: object | UpdateOperators, options: UpdateOptions & { ifMatch: MangoQuery }): Promise<boolean>;
   update(id: string, delta: object | UpdateOperators, options?: WriteOptions): Promise<void>;
   swap(id: string, changes: object, prev: object, options?: WriteOptions): Promise<boolean>;
-  delete(id: string, options?: WriteOptions): Promise<void>;
+  delete(id: string, options?: DeleteOptions): Promise<void>;
   /** The record changed by a function, over what the transaction left it — the database's `modify()` within it. */
   modify<R = RecordData>(id: string, fn: ModifyFn<R>, options?: WriteOptions): Promise<R | null>;
   unset(id: string, fields: string | readonly string[], options?: WriteOptions): Promise<void>;
@@ -2449,7 +2449,7 @@ export interface Database {
    */
   compact(id: string, options?: TransactOptions): Promise<number>;
   set(id: string, data: object, options?: StorageDataOptions): Promise<void>;
-  delete(id: string, options?: WriteOptions): Promise<void>;
+  delete(id: string, options?: DeleteOptions): Promise<void>;
   /** Forgets the record for good: a `purge` op no later write revives, and a scrub of its entries from the log — here and on every peer it reaches. */
   purge(id: string, options?: WriteOptions): Promise<void>;
   /**
@@ -2624,7 +2624,24 @@ export interface Cursor<T = QueryRow> {
   one(): Promise<T | null>;
   /** Runs now and after every change to the collection (coalesced); returns the stop function. */
   watch(listener: (rows: T[]) => void, options?: { onError?: (error: Error) => void }): () => void;
+  /** Every match updated — fields or operators — as ONE transaction over the matches when it starts: `{ matched, written }`. */
+  update(delta: object | UpdateOperators, options?: TransactOptions): Promise<WriteByQuery>;
+  /** Every match changed by a function (see `modify()`), as ONE transaction: `{ matched, written }`. */
+  modify(fn: ModifyFn<T>, options?: TransactOptions): Promise<WriteByQuery>;
+  /** Every match deleted as ONE transaction; `data` rides on each tombstone: `{ matched, written }`. */
+  delete(options?: TransactOptions & { data?: object }): Promise<WriteByQuery>;
   [Symbol.asyncIterator](): AsyncIterator<T>;
+}
+
+/** What a write by query resolves to: the matches when it started, and how many were written (a record gone meanwhile is skipped). */
+export interface WriteByQuery {
+  matched: number;
+  written: number;
+}
+
+/** `delete()` with `data`: the fields the tombstone carries — in the `delete` change, never in `get()`. */
+export interface DeleteOptions extends WriteOptions {
+  data?: object;
 }
 
 // A string field whose value is a known record id reads back as a Reference.
@@ -2749,7 +2766,7 @@ export interface SyncomDocumentApi<R = RecordData> {
   ): Promise<void>;
   /** Removes a node of a tree field with its subtree — `storage.treeRemove` with this record's id. */
   treeRemove(key: string, node: string, options?: WriteOptions): Promise<void>;
-  delete(options?: WriteOptions): Promise<void>;
+  delete(options?: DeleteOptions): Promise<void>;
 }
 
 /**
@@ -2814,7 +2831,7 @@ export interface SyncomCollection<R = RecordData, I = R> {
   count(query?: MangoQuery<R>): Promise<number>;
   /** Replaces the record wholesale, stamped as this collection's. */
   set(id: string, data: I, options?: StorageDataOptions): Promise<void>;
-  delete(id: string, options?: WriteOptions): Promise<void>;
+  delete(id: string, options?: DeleteOptions): Promise<void>;
   /**
    * Sets the listed fields — the record's own, or any by path (`'profile/city'`); `$type` may not be
    * among them — or runs the operators (`UpdateOperators`); with `ifMatch`, only where the record

@@ -117,7 +117,7 @@ naming the subpath; `@alexify/syncom/all` has both.
 | `swap(id, changes, prev, { actor }?)` | `Promise<boolean>` | CAS, compared inside the mutation queue — `false`, and no write, on mismatch; rejects with `NOT_FOUND` when absent |
 | `modify(id, fn, { actor, message, source }?)` | `Promise<R \| null>` | Changes the record by a function: `fn(copy)` runs inside the mutation queue over a copy of the record as it reads, and what it leaves — what it returns, or the copy when it returns nothing — is written as the ops that take the record there (a field changed a `set`, a field gone an `unset`; `null` deletes), as one transaction; two calls on one record compose, each reading what the one before it left. Resolves to the record as it reads after. Rejects with `NOT_FOUND` when absent, `FIELD_KIND` for a counter, set, list, text or tree field changed by the function, `IN_TRANSACTION` for a write through the database from inside `fn`; a function returning anything but an object, `null` or nothing is a `TypeError`. On `tx` too, over what the transaction left |
 | `repair(id)` | `Promise<{ ops, alive }>` | Rebuilds a record whose file fails its integrity check from the log's entries of it (see [Repair](../guide/database#repair)); rejects with `code: 'UNRECOVERABLE'` when the log holds no whole-record op for it |
-| `delete(id, { actor }?)` | `Promise<void>` | Leaves a tombstone |
+| `delete(id, { actor, data }?)` | `Promise<void>` | Leaves a tombstone; with `data` (a plain object), its fields lie on the tombstone at its stamp — the record is as dead as without them, `get()` answers `null`, and whoever reads the tombstone reads them: the `delete` change carries `data`, a peer's `beforeApply` sees the op's, a snapshot page the tombstone's |
 | `purge(id, { actor }?)` | `Promise<void>` | Forgets the record for good: a `purge` op and a scrub of its log entries, here and on every peer (see [Purge](../guide/database#purge)) |
 | `document(id)` | `Promise<Record>` | Cached per id |
 | `saveData(id, data, options?)` | `Promise<void>` | `{ encrypted: true }` seals the record for this node only; `{ actor }` names the writer |
@@ -230,6 +230,9 @@ query searches the entity's `search` fields, best first unless ordered.
 | `count()` | `Promise<number>` |
 | `one()` | `Promise<QueryRow<R> \| null>` |
 | `watch(listener, { onError }?)` | Runs now and after every change to the collection; returns the stop function |
+| `update(delta, { actor, message, source }?)` | Every match updated — fields, or the [operators](../guide/database#update-operators) — as ONE transaction over the matches when it started: `Promise<{ matched, written }>` (a record gone meanwhile is skipped). A cursor at a tag is read-only (a `TypeError`) |
+| `modify(fn, options?)` | Every match changed by `fn`, as `modify()` does, as ONE transaction: `{ matched, written }` |
+| `delete({ actor, data }?)` | Every match deleted as ONE transaction, `data` on each tombstone: `{ matched, written }` |
 | `[Symbol.asyncIterator]` | `for await (const row of cursor)` |
 
 The shapes on the wire and on disk — the op's slots, the payloads, the

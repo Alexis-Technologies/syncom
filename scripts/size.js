@@ -516,7 +516,8 @@ const ENTRIES = [
   // 6.0 with src/ in procedural loops (no array callbacks — a loop is longer than a callback; 2026-10-26).
   // 7.0 with the catalog persisted through a store (src/engine.js kvNamespace/fsiNamespace; engines plan, E1.3). 7.5, raised by name.
   // 7.6 with `Catalog.define` and the action stream (collections plan, C1.1). 7.8, raised by name.
-  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 7.8 },
+  // 7.9 with the write terminals (update/modify/delete by query) and `matches` (collections plan, C1.5–C1.6). 8.2, raised by name.
+  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 8.2 },
   // Versions: the fold of the log, the tags, the view at a tag — measured
   // ALONE with the write path, the snapshot pages and the patches it shares
   // with the core.

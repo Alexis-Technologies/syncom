@@ -66,6 +66,15 @@ and one `commit` event, not one per call.
   record as it reads, written as one transaction, refused whole where a kind refuses its part.
   `update(id, delta, { ifMatch: query })` writes only where the record matches the Mango query (the
   `query` plugin's), inside the queue, and resolves to whether it did.
+- **Writes by query: a cursor's `update(delta)`, `modify(fn)`, `delete({ data })`.** One transaction over
+  the records the cursor matched when it started (its order, offset and limit applied), each written
+  inside the queue as the method says; `{ matched, written }` — a record gone meanwhile is skipped. A
+  cursor at a tag is read-only.
+- **`delete(id, { data })`.** The fields a delete carries lie on the tombstone at its stamp — below
+  what keeps a record alive, so the record is as dead as without them and `get()` answers `null` —
+  and whoever reads the tombstone reads them: the `delete` change carries `data`, a peer's hook sees
+  the op's, a snapshot page the tombstone's, and a revival above the tombstone builds on them. On the
+  database, a collection, a `Document`, `tx` and a cursor.
 - **`modify(id, fn)`** — on the database, a collection and `tx`: `fn(copy)` runs inside the mutation queue
   over a copy of the record as it reads, and what it leaves (what it returns, or the copy when it returns
   nothing) is written as the ops that take the record there — a field changed a `set`, a field gone an

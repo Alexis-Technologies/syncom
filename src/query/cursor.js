@@ -390,6 +390,56 @@ class Cursor {
     return (await this.#matching(false)).rows.length;
   }
 
+  // The ids the cursor matches now, in its order and window — what a write
+  // by query runs over: the rows read once, offset and limit applied.
+  async #ids() {
+    const { rows, sorted } = await this.#matching(true, this.#limit);
+    if (this.#order.length > 0 && !sorted) rows.sort(compareRows(this.#order));
+    const ids = [];
+    const end = Math.min(this.#offset + this.#limit, rows.length);
+    for (let i = this.#offset; i < end; i++) ids.push(rows[i].id);
+    return ids;
+  }
+
+  // A write over every record the cursor matches, as ONE transaction: the
+  // matches are taken when it starts, each is written as `write(tx, id)`
+  // says inside the queue — a record gone meanwhile is skipped (`written`
+  // counts the rest). A view at a tag reads alone.
+  async #write(method, options, write) {
+    const { transact } = this.#source;
+    if (typeof transact !== 'function') throw new TypeError(`${method}(): a cursor at a tag is read-only`);
+    const ids = await this.#ids();
+    let written = 0;
+    await transact(
+      async (tx) => {
+        for (let i = 0; i < ids.length; i++) {
+          if (!(await tx.has(ids[i]))) continue;
+          await write(tx, ids[i]);
+          written++;
+        }
+      },
+      { actor: options.actor, message: options.message, source: options.source },
+    );
+    return { matched: ids.length, written };
+  }
+
+  /** Every match updated — fields, or the operators — as one transaction: `{ matched, written }`. */
+  update(delta, options = {}) {
+    return this.#write('update', options, (tx, id) => tx.update(id, delta, { actor: options.actor }));
+  }
+
+  /** Every match changed by `fn` (see `modify()`), as one transaction: `{ matched, written }`. */
+  modify(fn, options = {}) {
+    if (typeof fn !== 'function') return Promise.reject(new TypeError('modify() takes a function'));
+    return this.#write('modify', options, (tx, id) => tx.modify(id, fn, { actor: options.actor }));
+  }
+
+  /** Every match deleted, as one transaction: `{ matched, written }`; `data` rides on each tombstone. */
+  delete(options = {}) {
+    const { actor, data } = options;
+    return this.#write('delete', options, (tx, id) => tx.delete(id, data === undefined ? { actor } : { actor, data }));
+  }
+
   async one() {
     const [row = null] = await this.#fetch(Math.min(this.#limit, 1));
     return row;
